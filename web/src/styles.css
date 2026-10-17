@@ -222,7 +222,7 @@ button, select, a { touch-action: manipulation; }
 
 /* ========== 底部清單面板 ========== */
 .panel {
-  display: flex; flex-direction: column; min-height: 0;
+  display: flex; flex-direction: column; min-height: 0; overflow: hidden;
   max-height: 36dvh;
   background: var(--panel); border-top: var(--border-w) solid var(--line); border-radius: 18px 18px 0 0;
   padding-bottom: env(safe-area-inset-bottom);
@@ -230,6 +230,10 @@ button, select, a { touch-action: manipulation; }
   transition: max-height 0.25s ease;
 }
 .panel.expanded { max-height: 80dvh; }
+/* 收合：只留橫條與「漂來幾個」那一行 */
+.panel.collapsed { max-height: calc(66px + env(safe-area-inset-bottom)); }
+.panel.collapsed .kw-row, .panel.collapsed .event-list, .panel.collapsed .hint { visibility: hidden; }
+.panel.collapsed .panel-head .right, .panel.collapsed #origin-label, .panel.collapsed #use-gps { display: none; }
 .panel.expanded .panel-handle span { opacity: 0.9; }
 .panel-handle { display: block; width: 100%; height: 28px; border: 0; background: transparent; cursor: grab; padding: 0; touch-action: none; }
 .panel-head { touch-action: none; }
@@ -341,7 +345,8 @@ button, select, a { touch-action: manipulation; }
   .topbar { grid-column: 1 / -1; }
   #stage { grid-column: 1; grid-row: 2; padding: 16px; }
   .panel { grid-column: 2; grid-row: 2; max-height: none; border-top: 0; border-left: var(--border-w) solid var(--line); border-radius: 0; box-shadow: none; }
-  .panel.expanded { max-height: none; }
+  .panel.expanded, .panel.collapsed { max-height: none; }
+  .panel.collapsed .kw-row, .panel.collapsed .event-list, .panel.collapsed .hint { visibility: visible; }
   .panel-handle { display: none; }
   .panel-head { padding-top: 12px; }
   .sheet { left: auto; width: 440px; right: 16px; bottom: 16px; border-radius: 16px; border: var(--border-w) solid var(--line); }

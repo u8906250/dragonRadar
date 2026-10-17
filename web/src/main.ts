@@ -721,27 +721,46 @@ function updateNotifyBtn(): void {
   notifyBtn.title = s === 'granted' ? '通知已開啟' : s === 'denied' ? '通知被封鎖，仍有音效' : '開啟聲音與通知';
 }
 
+type PanelState = 'collapsed' | 'default' | 'expanded';
+const PANEL_ORDER: PanelState[] = ['collapsed', 'default', 'expanded'];
+
 /**
- * 下方清單：抓橫條或標題列往上拉展開、往下拉恢復；輕點橫條切換。
- * 展開時，清單捲到最上面再往下滑也會收回。桌機版清單在側欄，不啟用。
+ * 下方清單三段高度：collapsed 只留橫條與摘要、default 預設、expanded 展開。
+ * 抓橫條或標題列拖拉，放開時停在最接近的一段；拉的方向明確時至少移動一段。
+ * 輕點橫條：收合 → 預設 → 展開 → 預設。展開時清單捲到頂再往下滑也會往下一段。
+ * 桌機版清單在側欄，不啟用。
  */
 function wirePanelDrag(): void {
   const handle = $('#panel-toggle');
   const head = panelEl.querySelector('.panel-head') as HTMLElement;
   const desktop = window.matchMedia('(min-width: 900px)');
-  const THRESHOLD = 40;
+  const THRESHOLD = 30;
+  let state: PanelState = 'default';
   let startY = 0;
   let startH = 0;
   let dragging = false;
   let moved = false;
 
-  const setExpanded = (on: boolean): void => {
-    panelEl.classList.toggle('expanded', on);
-  };
-  const limits = (): { min: number; max: number } => {
+  const heights = (): Record<PanelState, number> => {
     const vh = window.innerHeight;
-    return { min: vh * 0.2, max: vh * 0.85 };
+    const pad = parseFloat(getComputedStyle(panelEl).paddingBottom) || 0;
+    return {
+      collapsed: handle.offsetHeight + head.offsetHeight + pad + 4,
+      default: vh * 0.36,
+      expanded: vh * 0.8,
+    };
   };
+
+  const setState = (s: PanelState): void => {
+    state = s;
+    panelEl.classList.toggle('expanded', s === 'expanded');
+    panelEl.classList.toggle('collapsed', s === 'collapsed');
+    handle.setAttribute('aria-label', s === 'collapsed' ? '展開清單' : s === 'expanded' ? '縮小清單' : '展開或收合清單');
+  };
+  // 清單高度變了，地圖要重算尺寸（雷達是 SVG 會自己縮放）
+  panelEl.addEventListener('transitionend', (e) => {
+    if (e.propertyName === 'max-height' && view === 'map') map.invalidate();
+  });
 
   const start = (e: PointerEvent): void => {
     if (desktop.matches || (e.pointerType === 'mouse' && e.button !== 0)) return;
@@ -757,22 +776,29 @@ function wirePanelDrag(): void {
     const dy = e.clientY - startY;
     if (Math.abs(dy) > 6) moved = true;
     if (!moved) return;
-    const { min, max } = limits();
-    panelEl.style.maxHeight = `${Math.min(max, Math.max(min, startH - dy))}px`;
+    const h = heights();
+    panelEl.style.maxHeight = `${Math.min(h.expanded, Math.max(h.collapsed, startH - dy))}px`;
   };
   const end = (e: PointerEvent): void => {
     if (!dragging) return;
     dragging = false;
+    const finalH = panelEl.getBoundingClientRect().height;
     panelEl.style.transition = '';
     panelEl.style.maxHeight = '';
     const dy = e.clientY - startY;
     if (!moved) {
       // 只有輕點橫條才切換，點標題列不切換（上面有其他按鈕）
-      if (e.currentTarget === handle) setExpanded(!panelEl.classList.contains('expanded'));
+      if (e.currentTarget === handle) setState(state === 'collapsed' ? 'default' : state === 'default' ? 'expanded' : 'default');
       return;
     }
-    if (dy < -THRESHOLD) setExpanded(true);
-    else if (dy > THRESHOLD) setExpanded(false);
+    const h = heights();
+    // 停在最接近的一段；方向明確但還停在原段時，往拉的方向移一段
+    let target = PANEL_ORDER.reduce((best, s) => (Math.abs(h[s] - finalH) < Math.abs(h[best] - finalH) ? s : best), state);
+    if (target === state && Math.abs(dy) > THRESHOLD) {
+      const i = PANEL_ORDER.indexOf(state) + (dy < 0 ? 1 : -1);
+      target = PANEL_ORDER[Math.max(0, Math.min(PANEL_ORDER.length - 1, i))];
+    }
+    setState(target);
   };
   for (const el of [handle, head]) {
     el.addEventListener('pointerdown', start);
@@ -781,12 +807,12 @@ function wirePanelDrag(): void {
     el.addEventListener('pointercancel', end);
   }
 
-  // 展開時，清單已經在最上面還往下滑 → 收回
+  // 清單已經捲到最上面還往下滑 → 往下一段
   let listStartY: number | null = null;
   listEl.addEventListener(
     'touchstart',
     (e) => {
-      listStartY = panelEl.classList.contains('expanded') && listEl.scrollTop <= 0 ? e.touches[0].clientY : null;
+      listStartY = state !== 'collapsed' && listEl.scrollTop <= 0 ? e.touches[0].clientY : null;
     },
     { passive: true },
   );
@@ -796,7 +822,7 @@ function wirePanelDrag(): void {
       if (listStartY === null) return;
       const dy = e.changedTouches[0].clientY - listStartY;
       listStartY = null;
-      if (dy > 60 && listEl.scrollTop <= 0) setExpanded(false);
+      if (dy > 60 && listEl.scrollTop <= 0) setState(state === 'expanded' ? 'default' : 'collapsed');
     },
     { passive: true },
   );
