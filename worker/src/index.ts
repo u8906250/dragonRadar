@@ -2,6 +2,8 @@ import { getAccessToken, makeClient, saveAccessToken } from './client';
 import type { Env } from './env';
 import { DEFAULT_DURATION_SEC, ENDED_WORDS, MAX_FUTURE_SEC, MIN_CONFIDENCE, getEvent, getPost, ingestAll, ingestKeyword, listEvents, processBacklog, processPost, storePost, updateLifecycle, type EventRow } from './events';
 import { runModel } from './extract';
+import { ingestNews, NEWS_FEEDS } from './sources/news';
+import { syncVoyage, VOYAGE_PAGE } from './sources/voyage';
 import { addUserKeyword, listActiveKeywords, listAllKeywords, MAX_ACTIVE_KEYWORDS, normalizeKeyword, parseKeywordList, toKeywordOut, touchKeywords } from './keywords';
 import { CALLBACK_PATH, DELETE_PATH, DELETION_STATUS_PATH, UNINSTALL_PATH, deletionStatus, handleCallback, handleDelete, handleUninstall, startAuth } from './oauth';
 import { jsonResponse, nowSec, parseIsoToUnix } from './util';
@@ -84,7 +86,7 @@ async function handle(req: Request, env: Env, ctx: ExecutionContext): Promise<Re
       lng,
       radiusKm: Math.min(600, Math.max(1, radiusKm)),
       now,
-      horizonSec: Math.min(168, Math.max(1, horizonH)) * 3600,
+      horizonSec: Math.min(336, Math.max(1, horizonH)) * 3600,
       keywords,
     });
     if (keywords.length > 0) ctx.waitUntil(touchKeywords(env, keywords, now).catch((e) => console.warn('touch failed', e)));
@@ -106,6 +108,11 @@ async function handle(req: Request, env: Env, ctx: ExecutionContext): Promise<Re
         endedWords: ENDED_WORDS,
         region: '全台灣',
         kinds: { giveaway: '發放', activity: '活動' },
+        sources: {
+          threads: env.THREADS_SEARCH_STATUS === 'approved' ? 'approved' : 'review',
+          official: { name: '台北大洋流「未來航線」', url: VOYAGE_PAGE, intervalMin: 60 },
+          news: { names: [...new Set(NEWS_FEEDS.map((f) => f.name))], intervalMin: 30 },
+        },
         timezone: 'Asia/Taipei',
       },
     });
@@ -176,6 +183,13 @@ async function handleAdmin(req: Request, env: Env, _ctx: ExecutionContext, path:
     const results = [];
     for (const m of models) results.push(await runModel(env, m, body.text, postedAt, now));
     return jsonResponse({ results });
+  }
+
+  // 立刻同步官方航線與新聞
+  if (req.method === 'POST' && path === '/api/admin/sources') {
+    const voyage = await syncVoyage(env, now);
+    const news = await ingestNews(env, now);
+    return jsonResponse({ voyage, news });
   }
 
   if (req.method === 'POST' && path === '/api/admin/ingest') {
@@ -292,9 +306,13 @@ async function runScheduled(env: Env, cron: string): Promise<void> {
   const client = await makeClient(env);
   const ingest = await ingestAll(env, client, now);
   const backlog = await processBacklog(env, now);
+  // 官方航線每小時、新聞每 30 分鐘（cron 每 10 分鐘跑一次）
+  const minute = new Date(now * 1000).getUTCMinutes();
+  const voyage = minute < 10 ? await syncVoyage(env, now).catch((e) => ({ error: String(e) })) : null;
+  const news = minute % 30 < 10 ? await ingestNews(env, now).catch((e) => ({ error: String(e) })) : null;
   const lifecycle = await updateLifecycle(env, client, now);
   const purged = await purgeOldData(env, now);
-  console.log(JSON.stringify({ cron, mode: client.mode, ingest, backlog, lifecycle, purged }));
+  console.log(JSON.stringify({ cron, mode: client.mode, ingest, backlog, voyage, news, lifecycle, purged }));
 }
 
 export default {

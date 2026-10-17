@@ -181,3 +181,39 @@ describe('normalizeExtraction with reasoning output', () => {
     expect(r?.events[0].place_text).toBe('台北車站');
   });
 });
+
+import { extractArticleText, parseRss } from '../src/sources/text';
+import { parseTicketTime, taipeiMidnight } from '../src/sources/voyage';
+
+describe('parseRss', () => {
+  it('reads CDATA titles, links and dates', () => {
+    const xml = `<rss><channel><item><title><![CDATA[劉建國10/18虎尾成立總部 發洋流飄帶]]></title><link>https://news.ltn.com.tw/news/politics/breakingnews/1</link><pubDate>Sat, 17 Oct 2026 15:21:02 +0800</pubDate><description><![CDATA[<p>現場預計發送限量「洋流」飄帶</p>]]></description></item><item><title>沒有連結</title></item></channel></rss>`;
+    const items = parseRss(xml);
+    expect(items).toHaveLength(1);
+    expect(items[0].title).toContain('洋流飄帶');
+    expect(items[0].description).toBe('現場預計發送限量「洋流」飄帶');
+    expect(items[0].pubDate).toBe(Date.parse('2026-10-17T15:21:02+08:00') / 1000);
+  });
+});
+
+describe('extractArticleText', () => {
+  it('keeps article paragraphs and drops scripts and boilerplate', () => {
+    const html = `<meta property="og:description" content="劉建國明（18）日將舉辦虎尾競選總部成立大會，現場發送洋流飄帶。"><script>var x = "<p>不要我</p>";</script>
+      <p>為達最佳瀏覽效果，建議使用 Chrome 的瀏覽器。</p><p>劉建國表示，虎尾競選總部成立大會將在明天下午3點半開始舉辦。</p><p>短</p>`;
+    const t = extractArticleText(html);
+    expect(t).toContain('下午3點半');
+    expect(t).toContain('洋流飄帶');
+    expect(t).not.toContain('不要我');
+    expect(t).not.toContain('瀏覽器');
+  });
+});
+
+describe('voyage time helpers', () => {
+  it('parses the official ticket time with the stop year', () => {
+    expect(parseTicketTime('10/18（日）17:30', '2026')).toBe(Date.parse('2026-10-18T17:30:00+08:00') / 1000);
+    expect(parseTicketTime(undefined, '2026')).toBeNull();
+  });
+  it('computes Taipei midnight', () => {
+    expect(taipeiMidnight('2026-10-25')).toBe(Date.parse('2026-10-24T16:00:00Z') / 1000);
+  });
+});

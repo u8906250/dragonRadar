@@ -35,6 +35,7 @@ export interface EventRow {
   status: EventStatus;
   confidence: number | null;
   ended_reason: string | null;
+  all_day?: number;
   last_checked_at: number | null;
   created_at: number;
   updated_at: number;
@@ -53,8 +54,11 @@ export interface EventOut {
   status: 'upcoming' | 'active';
   confidence: number | null;
   keyword: string | null;
+  /** 只有日期、沒有公布時間 */
+  allDay: boolean;
   post: {
     id: string;
+    source: string;
     username: string | null;
     permalink: string | null;
     postedAt: number;
@@ -86,7 +90,7 @@ export interface NewPost {
   permalink: string | null;
   posted_at: number;
   keyword: string | null;
-  source: 'threads' | 'manual';
+  source: 'threads' | 'manual' | 'news' | 'official';
 }
 
 /** 寫入貼文，回傳是否為新貼文 */
@@ -324,7 +328,7 @@ export interface ListQuery {
   keywords?: string[];
 }
 
-type JoinedRow = EventRow & { username: string | null; permalink: string | null; text: string; posted_at: number; keyword: string | null };
+type JoinedRow = EventRow & { username: string | null; permalink: string | null; text: string; posted_at: number; keyword: string | null; source: string };
 
 export function toEventOut(r: JoinedRow, now: number): EventOut {
   return {
@@ -340,7 +344,8 @@ export function toEventOut(r: JoinedRow, now: number): EventOut {
     status: r.start_at <= now ? 'active' : 'upcoming',
     confidence: r.confidence,
     keyword: r.keyword,
-    post: { id: r.post_id, username: r.username, permalink: r.permalink, postedAt: r.posted_at, text: r.text },
+    allDay: r.all_day === 1,
+    post: { id: r.post_id, source: r.source, username: r.username, permalink: r.permalink, postedAt: r.posted_at, text: r.text },
   };
 }
 
@@ -362,7 +367,7 @@ export async function listEvents(env: Env, q: ListQuery): Promise<EventOut[]> {
     }
     conds.push(`(${ors.join(' OR ')})`);
   }
-  const sql = `SELECT e.*, p.username, p.permalink, p.text, p.posted_at, p.keyword
+  const sql = `SELECT e.*, p.username, p.permalink, p.text, p.posted_at, p.keyword, p.source
     FROM events e JOIN posts p ON p.id = e.post_id
     WHERE ${conds.join(' AND ')}
     ORDER BY e.start_at ASC LIMIT 200`;
@@ -374,7 +379,7 @@ export async function listEvents(env: Env, q: ListQuery): Promise<EventOut[]> {
 
 export async function getEvent(env: Env, id: number, now: number): Promise<EventOut | null> {
   const row = await env.DB.prepare(
-    'SELECT e.*, p.username, p.permalink, p.text, p.posted_at, p.keyword FROM events e JOIN posts p ON p.id = e.post_id WHERE e.id = ? AND e.lat IS NOT NULL',
+    'SELECT e.*, p.username, p.permalink, p.text, p.posted_at, p.keyword, p.source FROM events e JOIN posts p ON p.id = e.post_id WHERE e.id = ? AND e.lat IS NOT NULL',
   )
     .bind(id)
     .first<JoinedRow>();

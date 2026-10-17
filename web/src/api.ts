@@ -12,6 +12,8 @@ export async function fetchEvents(origin: LatLng, radiusKm: number, keywords: st
   u.searchParams.set('lng', origin.lng.toFixed(5));
   u.searchParams.set('radius_km', String(radiusKm));
   if (keywords.length > 0) u.searchParams.set('keywords', keywords.join(','));
+  // 官方行程常是幾天後的，清單列出 14 天內的，雷達只畫快開始的
+  u.searchParams.set('horizon_h', '336');
   const r = await fetch(u.toString());
   if (!r.ok) throw new Error(`API ${r.status}`);
   const j = (await r.json()) as { events: EventOut[] };

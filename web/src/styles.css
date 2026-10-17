@@ -308,6 +308,8 @@ button, select, a { touch-action: manipulation; }
   background: var(--card); font-size: 14px; line-height: 1.6; white-space: pre-wrap;
 }
 .kw-rules .example-out { margin: 6px 0 0; font-size: 13px; color: var(--muted); line-height: 1.6; }
+.pending-tag { display: inline-block; font-size: 11px; font-weight: 800; padding: 1px 7px; margin-right: 4px; border-radius: 999px; background: var(--highlight); color: var(--accent-text); }
+.source-line { font-size: 12px; margin: -4px 0 10px; }
 .legal-links { margin: 18px 0 0; font-size: 12px; color: var(--muted); }
 .legal-links a { color: var(--muted); }
 .ev-kw { display: inline-block; margin-left: 6px; font-size: 11px; font-weight: 700; color: var(--accent); }

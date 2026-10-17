@@ -128,6 +128,7 @@ const map = new MapView($('#map'), origin, {
 
 // ---- logic ----
 function phaseOf(ev: EventOut, now: number): Phase {
+  if (ev.allDay) return ev.startAt <= now && now < ev.endAt ? 'soon' : 'later';
   if (ev.startAt <= now && now < ev.endAt) return 'active';
   if (ev.startAt > now && ev.startAt - now <= SOON_SEC) return 'soon';
   return 'later';
@@ -148,11 +149,23 @@ function computeItems(now: number): Item[] {
   return dedupeEvents(events)
     .filter((ev) => ev.endAt > now)
     .map((ev) => ({ ev, distanceKm: haversineKm(me, ev), bearing: bearingDeg(me, ev), phase: phaseOf(ev, now) }))
-    .sort((a, b) => (a.phase === b.phase ? a.distanceKm - b.distanceKm : a.phase === 'active' ? -1 : b.phase === 'active' ? 1 : a.ev.startAt - b.ev.startAt));
+    // 進行中的照距離排；還沒開始的照開始時間排，同時間再照距離
+    .sort((a, b) => {
+      if (a.phase === 'active' && b.phase === 'active') return a.distanceKm - b.distanceKm;
+      if (a.phase === 'active') return -1;
+      if (b.phase === 'active') return 1;
+      return a.ev.startAt - b.ev.startAt || a.distanceKm - b.distanceKm;
+    });
 }
+
+const dateFmt = new Intl.DateTimeFormat('zh-TW', { timeZone: 'Asia/Taipei', month: 'numeric', day: 'numeric', weekday: 'short' });
 
 function timeLine(it: Item, now: number): string {
   const { ev } = it;
+  if (ev.allDay) {
+    const today = ev.startAt <= now && now < ev.endAt;
+    return `${today ? '今天' : dateFmt.format(new Date(ev.startAt * 1000))} · 時間未公布`;
+  }
   if (it.phase === 'active') {
     const left = Math.max(0, Math.round((ev.endAt - now) / 60));
     return `進行中 · 約 ${left} 分鐘後結束`;
@@ -256,10 +269,11 @@ function renderDetail(items: Item[], now: number): void {
     </div>
     <div class="sheet-body">
       <p>類型：${kindLabel(ev)}<br>${ev.item ? `發放：${esc(ev.item)}<br>` : ''}${ev.keyword ? `關鍵字：#${esc(ev.keyword)}<br>` : ''}地點：${esc(ev.placeText)}<br>時間：${fmtTime(ev.startAt)} – ${fmtTime(ev.endAt)}<br>距離：${formatKm(it.distanceKm)}，${compassLabel(it.bearing)}方 · ${esc(timeLine(it, now))}</p>
-      <blockquote>${esc(ev.post.text).slice(0, 300)}</blockquote>
+      <blockquote>${esc(ev.post.source === 'news' ? ev.post.text.split('\n')[0] : ev.post.text.slice(0, 300))}</blockquote>
+      <p class="muted source-line">來源：${esc(sourceLabel(ev))}</p>
       <div class="sheet-actions">
         <a class="btn primary" href="https://www.google.com/maps/dir/?api=1&destination=${ev.lat},${ev.lng}&travelmode=walking" target="_blank" rel="noopener">導航</a>
-        ${ev.post.permalink ? `<a class="btn" href="${esc(ev.post.permalink)}" target="_blank" rel="noopener">在 Threads 查看</a>` : ''}
+        ${ev.post.permalink ? `<a class="btn" href="${esc(ev.post.permalink)}" target="_blank" rel="noopener">${esc(sourceLinkText(ev))}</a>` : ''}
         <button type="button" class="btn" data-act="map">在地圖上看</button>
       </div>
     </div>`;
@@ -454,7 +468,7 @@ function renderKeywords(): void {
   kwTitle.textContent = canEditKeywords ? '追蹤關鍵字' : '搜尋中的關鍵字';
   kwIntro.textContent = canEditKeywords
     ? '點一下切換追蹤。雷達只顯示你追蹤的關鍵字找到的發放。'
-    : '系統會用這些關鍵字定時搜尋 Threads 的公開貼文，目前不開放修改。';
+    : '系統會用這些關鍵字定時搜尋 Threads 與新聞，再加上官方行程，目前不開放修改。';
   kwForm.hidden = !canEditKeywords;
   kwShareNote.hidden = !canEditKeywords;
   renderRules();
@@ -516,10 +530,21 @@ function renderRules(): void {
   const hours = r.defaultDurationMin % 60 === 0 ? `${r.defaultDurationMin / 60} 小時` : `${r.defaultDurationMin} 分鐘`;
   const f = followed();
   const kw = f.includes('洋流飄帶') ? '洋流飄帶' : (f[0] ?? '洋流飄帶');
+  const src = r.sources;
+  const threadsLine =
+    src?.threads === 'approved'
+      ? `<li><b>Threads</b>：每 ${r.intervalMin} 分鐘用上面的關鍵字搜尋最新的公開貼文。</li>`
+      : `<li><b>Threads</b>：<span class="pending-tag">等待 Meta 審核</span> 審核通過後，就會每 ${r.intervalMin} 分鐘用上面的關鍵字搜尋 Threads 上所有人的公開貼文。目前只搜得到測試帳號自己的貼文。</li>`;
   kwRulesEl.innerHTML = `
+    <h3>資料來源</h3>
+    <ul>
+      ${src ? `<li><b>官方行程</b>：<a href="${esc(src.official.url)}" target="_blank" rel="noopener">${esc(src.official.name)}</a>，每 ${src.official.intervalMin} 分鐘更新車掃日期、終點與加油點。沒公布時間的會標「時間未公布」。</li>
+      <li><b>新聞</b>：${src.news.names.map(esc).join('、')}的 RSS，每 ${src.news.intervalMin} 分鐘讀一次，標題或摘要有關鍵字的報導才判讀。只顯示標題與原文連結。</li>` : ''}
+      ${threadsLine}
+    </ul>
     <h3>多久找一次</h3>
     <ul>
-      <li>每 ${r.intervalMin} 分鐘用上面的關鍵字搜尋 Threads 最新的公開貼文。</li>
+      <li>Threads 每 ${r.intervalMin} 分鐘、新聞每 30 分鐘、官方行程每小時。</li>
       <li>收${esc(r.region)}的發放和活動。雷達選「雙北」看台北市加新北市，選「全台」看全台灣與離島。</li>
     </ul>
     <h3>找哪些東西</h3>
@@ -555,6 +580,18 @@ function fmtClock(totalMin: number): string {
   const h = Math.floor(totalMin / 60) % 24;
   const m = totalMin % 60;
   return `10/18 ${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
+}
+
+function sourceLabel(ev: EventOut): string {
+  if (ev.post.source === 'news') return `新聞・${ev.post.username ?? ''}`;
+  if (ev.post.source === 'official') return '台北大洋流官網「未來航線」';
+  return `Threads${ev.post.username ? `・@${ev.post.username}` : ''}`;
+}
+
+function sourceLinkText(ev: EventOut): string {
+  if (ev.post.source === 'news') return '看新聞原文';
+  if (ev.post.source === 'official') return '看官方航線';
+  return '在 Threads 查看';
 }
 
 function kindLabel(ev: EventOut): string {

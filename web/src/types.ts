@@ -13,8 +13,12 @@ export interface EventOut {
   status: 'upcoming' | 'active';
   confidence: number | null;
   keyword: string | null;
+  /** 只有日期、沒有公布時間 */
+  allDay?: boolean;
   post: {
     id: string;
+    /** threads、news、official、manual */
+    source?: string;
     username: string | null;
     permalink: string | null;
     postedAt: number;
@@ -42,6 +46,11 @@ export type { BlipStyle, SweepStyle } from './themes';
 
 export interface KeywordRules {
   kinds?: Record<EventKind, string>;
+  sources?: {
+    threads: 'review' | 'approved';
+    official: { name: string; url: string; intervalMin: number };
+    news: { names: string[]; intervalMin: number };
+  };
   intervalMin: number;
   defaultDurationMin: number;
   maxFutureDays: number;
