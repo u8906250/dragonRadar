@@ -19,6 +19,8 @@ export interface EventOut {
   endedReports?: number;
   /** 固定據點的其中一天 */
   spot?: boolean;
+  /** 只定位到鄉鎮區中心時的區域名稱，例如「雲林縣虎尾鎮」 */
+  approxArea?: string | null;
   post: {
     id: string;
     /** threads、news、official、manual、link（使用者貼的連結） */

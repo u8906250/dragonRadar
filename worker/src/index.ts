@@ -2,6 +2,7 @@ import { getAccessToken, makeClient, saveAccessToken } from './client';
 import type { Env } from './env';
 import { DEFAULT_DURATION_SEC, ENDED_WORDS, MAX_FUTURE_SEC, MIN_CONFIDENCE, SPOT_DEFAULT_DAYS, getEvent, getPost, ingestAll, ingestKeyword, listEvents, processBacklog, processPost, storePost, updateLifecycle, type EventRow } from './events';
 import { runModel } from './extract';
+import { geocode } from './geocode';
 import { ingestNews, NEWS_FEEDS } from './sources/news';
 import { syncVoyage, VOYAGE_PAGE } from './sources/voyage';
 import { apifyTrial } from './sources/apify';
@@ -259,6 +260,25 @@ async function handleAdmin(req: Request, env: Env, _ctx: ExecutionContext, path:
     ]);
     const result = await processPost(env, post, now);
     return jsonResponse({ post_id: id, reasons: result.reasons, events: result.events });
+  }
+
+  // 手動修正事件位置：{ lat, lng } 或 { query }（拿去查地圖）；approx_area 有值就標成約略位置，沒給就當作精確位置
+  const locMatch = /^\/api\/admin\/events\/(\d+)\/locate$/.exec(path);
+  if (req.method === 'POST' && locMatch) {
+    const body = await readJson<{ lat?: number; lng?: number; query?: string; approx_area?: string | null }>(req);
+    let point: { lat: number; lng: number } | null = null;
+    if (Number.isFinite(body.lat) && Number.isFinite(body.lng)) point = { lat: Number(body.lat), lng: Number(body.lng) };
+    else if (body.query?.trim()) point = await geocode(env, body.query.trim());
+    if (!point) throw new HttpError(400, '查不到這個地點，請直接給 lat、lng');
+    const id = Number(locMatch[1]);
+    await env.DB.prepare(
+      "UPDATE events SET lat = ?, lng = ?, place_query = COALESCE(?, place_query), approx_area = ?, status = CASE WHEN status = 'unlocated' THEN (CASE WHEN start_at <= ? THEN 'active' ELSE 'upcoming' END) ELSE status END, updated_at = ? WHERE id = ?",
+    )
+      .bind(point.lat, point.lng, body.query?.trim() || null, body.approx_area?.trim() || null, now, now, id)
+      .run();
+    const ev = await getEvent(env, id, now);
+    if (!ev) throw new HttpError(404, 'event not found');
+    return jsonResponse({ event: ev });
   }
 
   // 刪除一則貼文與它產生的事件（作者要求移除、或測試貼文）

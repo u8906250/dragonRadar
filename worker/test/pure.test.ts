@@ -88,7 +88,7 @@ describe('buildMessages', () => {
   });
 });
 
-import { placeCandidates } from '../src/geocode';
+import { adminArea, placeCandidates } from '../src/geocode';
 import { normalizeKeyword, parseKeywordList } from '../src/keywords';
 
 describe('normalizeKeyword', () => {
@@ -272,5 +272,16 @@ describe('spotSessions', () => {
     const s = spotSessions({ start_at: '2026-10-17T00:00:00+08:00', end_at: null, until: null }, posted, posted);
     expect(s).toHaveLength(7);
     expect(s[0]).toEqual({ start: t('2026-10-17T00:00:00+08:00'), end: t('2026-10-18T00:00:00+08:00'), allDay: true });
+  });
+});
+
+describe('adminArea', () => {
+  it('finds county plus township for approximate locations', () => {
+    expect(adminArea('雲林縣虎尾鎮', '虎尾競選總部')).toBe('雲林縣虎尾鎮');
+    expect(adminArea('台東縣 台東市服務處', null)).toBe('台東縣台東市');
+  });
+  it('does not accept a city alone', () => {
+    expect(adminArea('台北市', '民權公園')).toBeNull();
+    expect(adminArea('台北市 民權公園', null)).toBeNull();
   });
 });

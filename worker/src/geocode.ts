@@ -30,6 +30,19 @@ export function isAdminOnly(s: string): boolean {
 }
 
 /**
+ * 精確地點都查不到時的退路：縣市加鄉鎮區，例如「雲林縣虎尾鎮」「台東縣 台東市」。
+ * 只有縣市（例如「台北市」）範圍太大，不算。
+ */
+export function adminArea(...sources: Array<string | null | undefined>): string | null {
+  const re = new RegExp(`(${CITY_RE.source})\\s*([\\u4e00-\\u9fff]{1,2}[區鄉鎮市])`);
+  for (const s of sources) {
+    const m = re.exec(s ?? '');
+    if (m) return `${m[1]}${m[3]}`;
+  }
+  return null;
+}
+
+/**
  * 從 LLM 給的地點產生由精確到寬鬆的查詢候選。
  * Nominatim 常找不到「4號出口」「東三門」這種細節，所以逐步拿掉，最後退到車站或地標名稱。
  */

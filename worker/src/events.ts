@@ -1,6 +1,6 @@
 import type { Env } from './env';
 import { extractFromPost, type EventKind, type ExtractedEvent } from './extract';
-import { geocodeFirst, placeCandidates } from './geocode';
+import { adminArea, geocode, geocodeFirst, placeCandidates } from './geocode';
 import { listActiveKeywords, type KeywordRow } from './keywords';
 import { parseThreadsTimestamp, type ThreadsClient } from './threads';
 import { nowSec, parseIsoToUnix } from './util';
@@ -37,6 +37,7 @@ export interface EventRow {
   ended_reason: string | null;
   all_day?: number;
   spot?: number;
+  approx_area?: string | null;
   last_checked_at: number | null;
   created_at: number;
   updated_at: number;
@@ -61,6 +62,8 @@ export interface EventOut {
   endedReports: number;
   /** 固定據點的其中一天（同一則貼文、同一地點的每天各一筆） */
   spot: boolean;
+  /** 找不到精確地點、只定位到鄉鎮區中心時的區域名稱，例如「雲林縣虎尾鎮」 */
+  approxArea: string | null;
   post: {
     id: string;
     source: string;
@@ -182,10 +185,14 @@ async function createEvent(
   const placeText = ex.place_text ?? ex.place_query;
   if (!placeQuery || !placeText) return { event: null, reason: 'no_place' };
 
-  const point = await geocodeFirst(env, placeCandidates(placeQuery, ex.place_text));
+  let point = await geocodeFirst(env, placeCandidates(placeQuery, ex.place_text));
+  // 精確地點查不到時退到鄉鎮區中心，標成約略位置
+  const area = point ? null : adminArea(placeQuery, ex.place_text);
+  if (area) point = await geocode(env, area);
+  const approxArea = area && point ? area : null;
 
   // 同一場可能被多篇貼文找到：同類型、同地點（約 150 m 內）、開始時間差 30 分鐘內就視為重複
-  if (point) {
+  if (point && !approxArea) {
     const dup = await env.DB.prepare(
       `SELECT id FROM events WHERE status IN ('upcoming', 'active') AND kind = ?
          AND ABS(start_at - ?) <= ? AND lat BETWEEN ? AND ? AND lng BETWEEN ? AND ? LIMIT 1`,
@@ -197,8 +204,8 @@ async function createEvent(
 
   const status: EventStatus = !point ? 'unlocated' : start <= now ? 'active' : 'upcoming';
   const event = await env.DB.prepare(
-    `INSERT INTO events (post_id, kind, title, item, start_at, end_at, place_text, place_query, lat, lng, status, confidence, all_day, spot, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING *`,
+    `INSERT INTO events (post_id, kind, title, item, start_at, end_at, place_text, place_query, lat, lng, status, confidence, all_day, spot, approx_area, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING *`,
   )
     .bind(
       post.id,
@@ -215,6 +222,7 @@ async function createEvent(
       ex.confidence,
       session?.allDay ? 1 : 0,
       session ? 1 : 0,
+      approxArea,
       now,
       now,
     )
@@ -430,6 +438,7 @@ export function toEventOut(r: JoinedRow, now: number): EventOut {
     allDay: r.all_day === 1,
     endedReports: r.ended_reports ?? 0,
     spot: r.spot === 1,
+    approxArea: r.approx_area ?? null,
     post: { id: r.post_id, source: r.source, username: r.username, permalink: r.permalink, postedAt: r.posted_at, text: r.text },
   };
 }

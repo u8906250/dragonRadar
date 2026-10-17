@@ -385,3 +385,10 @@ button, select, a { touch-action: manipulation; }
 .ev.spot.phase-active .ev-time { color: var(--blip-spot); }
 .filter-row { display: flex; gap: 8px; margin: -2px 12px 10px; }
 .chip.small { min-height: 32px; padding: 4px 12px; font-size: 13px; }
+
+/* 約略位置：空心光點 */
+.radar .blip.approx .dot { fill: transparent; stroke: var(--blip); stroke-width: 2.5; stroke-dasharray: 3 2; }
+.radar .blip.approx.kind-activity .dot { stroke: var(--blip-activity); }
+.radar .blip.approx.spot .dot { stroke: var(--blip-spot); }
+.radar .blip.approx .core, .radar .blip.approx .ping { display: none; }
+.approx-note { font-size: 13px; color: var(--muted); }

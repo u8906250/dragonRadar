@@ -8,6 +8,8 @@ export interface RadarItem {
   phase: Phase;
   /** 固定據點，畫成菱形 */
   spot?: boolean;
+  /** 約略位置，畫成空心 */
+  approx?: boolean;
   label: string;
   showLabel: boolean;
   selected: boolean;
@@ -208,7 +210,7 @@ export class Radar {
       const out = ratio > 1;
       const p = polar(it.bearing - this.heading, Math.min(1, ratio) * (R - 8));
       const g = el('g', {
-        class: `blip phase-${it.phase} kind-${it.kind}${it.spot ? ' spot' : ''}${out ? ' out' : ''}${it.selected ? ' selected' : ''}`,
+        class: `blip phase-${it.phase} kind-${it.kind}${it.spot ? ' spot' : ''}${it.approx ? ' approx' : ''}${out ? ' out' : ''}${it.selected ? ' selected' : ''}`,
         transform: `translate(${p.x.toFixed(1)} ${p.y.toFixed(1)})`,
         tabindex: 0,
         role: 'button',

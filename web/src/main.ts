@@ -274,6 +274,7 @@ function render(): void {
       id: it.ev.id,
       kind: it.ev.kind,
       spot: !!it.spot,
+      approx: !!it.ev.approxArea,
       distanceKm: it.distanceKm,
       bearing: it.bearing,
       phase: it.phase,
@@ -288,11 +289,12 @@ function render(): void {
       id: it.ev.id,
       kind: it.ev.kind,
       spot: !!it.spot,
+      approx: !!it.ev.approxArea,
       lat: it.ev.lat,
       lng: it.ev.lng,
       phase: it.phase,
       title: `${tagLabel(it)}｜${it.ev.title}`,
-      subtitle: `${it.ev.placeText} · ${timeLine(it, now)}`,
+      subtitle: `${placeLine(it.ev)} · ${timeLine(it, now)}`,
       selected: it.ev.id === selectedId,
     })),
   );
@@ -353,7 +355,7 @@ function renderList(items: Item[], now: number): void {
     li.dataset.id = String(it.ev.id);
     li.innerHTML = `
       <div class="ev-title"><span class="dot"></span><span class="kind-tag">${tagLabel(it)}</span>${esc(it.ev.title)}${it.ev.item ? ` <span class="muted">· ${esc(it.ev.item)}</span>` : ''}${followed().length > 1 && it.ev.keyword ? `<span class="ev-kw">#${esc(it.ev.keyword)}</span>` : ''}</div>
-      <div class="ev-meta">${esc(it.ev.placeText)} · ${formatKm(it.distanceKm)} ${compassLabel(it.bearing)}</div>
+      <div class="ev-meta">${esc(placeLine(it.ev))} · ${it.ev.approxArea ? '約 ' : ''}${formatKm(it.distanceKm)} ${compassLabel(it.bearing)}</div>
       <div class="ev-time">${it.spot ? `${esc(spotHours(it.ev))}・` : ''}${esc(timeLine(it, now))}</div>`;
     li.addEventListener('click', () => select(it.ev.id));
     listEl.appendChild(li);
@@ -379,11 +381,11 @@ function renderDetail(items: Item[], now: number): void {
       <button type="button" class="chip" data-act="close" aria-label="關閉">關閉</button>
     </div>
     <div class="sheet-body">
-      <p>類型：${it.spot ? `固定據點（${kindLabel(ev)}）` : kindLabel(ev)}<br>${ev.item ? `發放：${esc(ev.item)}<br>` : ''}${ev.keyword ? `關鍵字：#${esc(ev.keyword)}<br>` : ''}地點：${esc(ev.placeText)}<br>時間：${it.spot ? esc(spotSchedule(it)) : `${fmtTime(ev.startAt)} – ${fmtTime(ev.endAt)}`}<br>距離：${formatKm(it.distanceKm)}，${compassLabel(it.bearing)}方 · ${esc(timeLine(it, now))}</p>
+      <p>類型：${it.spot ? `固定據點（${kindLabel(ev)}）` : kindLabel(ev)}<br>${ev.item ? `發放：${esc(ev.item)}<br>` : ''}${ev.keyword ? `關鍵字：#${esc(ev.keyword)}<br>` : ''}地點：${esc(ev.placeText)}${ev.approxArea ? `<br><span class="approx-note">約略位置：只知道在${esc(ev.approxArea)}，地圖上是${esc(ev.approxArea)}的中心點，實際地點請看原文</span>` : ''}<br>時間：${it.spot ? esc(spotSchedule(it)) : `${fmtTime(ev.startAt)} – ${fmtTime(ev.endAt)}`}<br>距離：${ev.approxArea ? '約 ' : ''}${formatKm(it.distanceKm)}，${compassLabel(it.bearing)}方 · ${esc(timeLine(it, now))}</p>
       <blockquote>${esc(ev.post.source === 'news' ? ev.post.text.split('\n')[0] : ev.post.text.slice(0, 300))}</blockquote>
       <p class="muted source-line">來源：${esc(sourceLabel(ev))}</p>
       <div class="sheet-actions">
-        <a class="btn primary" href="https://www.google.com/maps/dir/?api=1&destination=${ev.lat},${ev.lng}&travelmode=walking" target="_blank" rel="noopener">導航</a>
+        <a class="btn primary" href="https://www.google.com/maps/dir/?api=1&destination=${ev.lat},${ev.lng}&travelmode=walking" target="_blank" rel="noopener">${ev.approxArea ? '導航到約略位置' : '導航'}</a>
         ${ev.post.permalink ? `<a class="btn" href="${esc(ev.post.permalink)}" target="_blank" rel="noopener">${esc(sourceLinkText(ev))}</a>` : ''}
         <button type="button" class="btn" data-act="map">在地圖上看</button>
         ${canReportEnded(ev, now) ? `<button type="button" class="btn" data-act="ended"${endedReported.has(ev.id) ? ' disabled' : ''}>${endedReported.has(ev.id) ? '已回報' : `回報${it.spot ? '今天' : ''}${ev.kind === 'activity' ? '已結束' : '已發完'}`}</button>` : ''}
@@ -771,6 +773,7 @@ function renderRules(): void {
       <li>時間可以寫 <span class="ex">10/18 15:00</span>、<span class="ex">今天下午三點</span>、<span class="ex">明晚 7 點</span>、<span class="ex">週六 14:00–16:00</span>。「今天、明天、週六」以發文時間換算，時區是台灣時間。</li>
       <li>沒寫結束時間，或寫「發完為止」，會預設開始後 ${hours}結束。</li>
       <li>一則貼文有多個地點或時段（例如行程表、車掃停靠點），會拆成多筆。</li>
+      <li>只查得到鄉鎮區、查不到確切地點的（例如新聞只寫「虎尾競選總部」），會定位在該鄉鎮區的中心並標成「約略位置」，雷達和地圖上是空心光點，請以原文為準。只知道縣市的不會放上雷達。</li>
       <li>地點寫越具體越好，例如 <span class="ex">捷運市政府站 2號出口</span>、<span class="ex">板橋車站北一門</span>、<span class="ex">松山文創園區</span>。找不到出口時會退到車站位置。</li>
       <li>只收 ${r.maxFutureDays} 天內的發放和活動；已經結束的不會出現。</li>
       <li>新聞報導、活動回顧、徵求、詢問、線上抽獎、直播、販售都不算，系統會略過。判讀信心低於 ${Math.round(r.minConfidence * 100)}% 的也會略過。</li>
@@ -807,6 +810,11 @@ function sourceLinkText(ev: EventOut): string {
   if (ev.post.source === 'news') return '看新聞原文';
   if (ev.post.source === 'official') return '看官方航線';
   return '在 Threads 查看';
+}
+
+/** 地點文字；約略位置會註明 */
+function placeLine(ev: EventOut): string {
+  return ev.approxArea ? `${ev.placeText}（約略位置：${ev.approxArea}）` : ev.placeText;
 }
 
 function kindLabel(ev: EventOut): string {

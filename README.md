@@ -156,6 +156,7 @@ npm run deploy
 | GET | `/api/admin/events?status=` | 所有事件（含 ended、unlocated） |
 | GET | `/api/admin/posts` | 最近 100 則原始貼文與解析結果 |
 | DELETE | `/api/admin/posts/:id` | 刪除一則貼文與它的事件 |
+| POST | `/api/admin/events/:id/locate` | 手動修正位置：`{ lat, lng }` 或 `{ query }`，加 `approx_area` 標成約略位置 |
 | POST | `/api/admin/posts/:id/reprocess` | 用目前的規則重新判讀一則貼文（還沒結束的舊事件會先刪掉） |
 | POST | `/api/admin/extract` | 只判讀不存檔，可指定 models 比較 |
 | POST | `/api/admin/link-fetch` | 只讀取貼文連結的內容（確認讀得到），不判讀不存檔 |

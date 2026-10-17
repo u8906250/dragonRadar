@@ -9,6 +9,7 @@ export interface MapItem {
   lng: number;
   phase: Phase;
   spot?: boolean;
+  approx?: boolean;
   title: string;
   subtitle: string;
   selected: boolean;
@@ -154,14 +155,14 @@ export class MapView {
         this.markers.set(it.id, m);
       }
       m.setLatLng([it.lat, it.lng]);
-      m.setRadius(it.phase === 'active' ? 10 : 8);
+      m.setRadius(it.approx ? 14 : it.phase === 'active' ? 10 : 8);
       m.setStyle({
         color: it.selected ? selectedStroke : stroke,
         weight: it.selected ? 3 : 2,
         fillColor: markerColor(it.kind, it.phase, it.spot),
-        fillOpacity: it.phase === 'later' || it.phase === 'closed' ? 0.5 : 0.95,
-        // 固定據點用虛線外框，跟單次的發放、活動分開
-        dashArray: it.spot ? '3 3' : '',
+        fillOpacity: it.approx ? 0.15 : it.phase === 'later' || it.phase === 'closed' ? 0.5 : 0.95,
+        // 固定據點、約略位置用虛線外框，跟精確的單次發放、活動分開
+        dashArray: it.spot || it.approx ? '3 3' : '',
       });
       m.setPopupContent(`<strong>${escapeHtml(it.title)}</strong><br>${escapeHtml(it.subtitle)}`);
     }
