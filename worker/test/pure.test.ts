@@ -121,12 +121,18 @@ describe('placeCandidates', () => {
     expect(c[0]).toBe('台北市 捷運中山站 4號出口');
     expect(c).toContain('台北市 捷運中山站');
     expect(c).toContain('台北市 中山站');
-    expect(c.length).toBeLessThanOrEqual(5);
+    expect(c.length).toBeLessThanOrEqual(7);
   });
   it('strips gate numbers', () => {
     const c = placeCandidates('台北市 台北車站 東三門', '台北車站東三門');
     expect(c.some((x) => !x.includes('東三門') && x.includes('台北車站'))).toBe(true);
     expect(c).not.toContain('台北市 車站');
+  });
+  it('uses the station hint in parentheses and drops a guessed district', () => {
+    const c = placeCandidates('台北市中正區忠孝復興站附近', '日常生活 a day cafe(近忠孝復興站）');
+    expect(c).toContain('台北市 忠孝復興站');
+    expect(c).toContain('忠孝復興站');
+    expect(c.some((x) => x.includes('中正區忠孝復興站') && !x.includes(' '))).toBe(true);
   });
   it('keeps plain landmarks untouched', () => {
     expect(placeCandidates('台北市 松山文創園區', null)).toEqual(['台北市 松山文創園區']);

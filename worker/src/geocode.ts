@@ -40,13 +40,19 @@ export function placeCandidates(query: string, placeText?: string | null): strin
   for (const s of sources) push(s);
   for (const s of sources) push(strip(s));
   for (const s of sources) {
-    const st = /(?:捷運|台鐵|臺鐵|高鐵)?\s*([\u4e00-\u9fff]{2,8}站)/.exec(strip(s).replace(CITY_PREFIX_RE, ' '));
+    // 括號裡常是「近忠孝復興站」這種線索，所以這裡不拿掉括號內容；行政區和「近」也拿掉，只留站名
+    const bare = s
+      .replace(/[（()）]/g, ' ')
+      .replace(CITY_PREFIX_RE, ' ')
+      .replace(/[\u4e00-\u9fff]{1,2}[區鄉鎮](?=[\u4e00-\u9fff]{2,}站)/g, ' ')
+      .replace(/近|靠近|鄰近/g, ' ');
+    const st = /(?:捷運|台鐵|臺鐵|高鐵)?\s*([\u4e00-\u9fff]{2,8}站)/.exec(strip(bare));
     if (st) {
       push(`${city} ${st[1]}`);
       push(st[1]);
     }
   }
-  return out.slice(0, 5);
+  return out.slice(0, 7);
 }
 
 async function politeDelay(): Promise<void> {
@@ -77,9 +83,11 @@ async function nominatim(env: Env, q: string): Promise<GeoPoint | null> {
     console.warn(`nominatim ${res.status} for ${q}`);
     return null;
   }
-  const arr = (await res.json()) as Array<{ lat: string; lon: string; display_name?: string }>;
+  const arr = (await res.json()) as Array<{ lat: string; lon: string; display_name?: string; category?: string }>;
   const hit = arr[0];
   if (!hit) return null;
+  // 只對到行政區（例如把「中正區忠孝復興站」對到整個中正區的中心）不算找到，除非本來就只查行政區
+  if (hit.category === 'boundary' && !/[市縣區鄉鎮]$/.test(q.trim())) return null;
   const lat = Number(hit.lat);
   const lng = Number(hit.lon);
   if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
