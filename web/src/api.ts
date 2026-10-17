@@ -1,10 +1,10 @@
 import type { LatLng } from './geo';
 import type { EventOut, KeywordInfo, KeywordRules } from './types';
 
-/** 正式環境的 Worker 網址；本機開發打 localhost，VITE_API_BASE 可覆寫 */
+/** 正式環境的 Worker 網址；本機開發打 localhost，VITE_API_BASE 可覆寫（空字串視為未設定，CI 沒設變數時會傳空字串） */
 const PROD_API_BASE = 'https://dragon-radar.happybadminton.workers.dev';
 const isLocal = typeof location !== 'undefined' && /^(localhost|127\.0\.0\.1|\[::1\])$/.test(location.hostname);
-const API_BASE = ((import.meta.env.VITE_API_BASE as string | undefined) ?? (isLocal ? 'http://localhost:8787' : PROD_API_BASE)).replace(/\/$/, '');
+const API_BASE = ((import.meta.env.VITE_API_BASE as string | undefined) || (isLocal ? 'http://localhost:8787' : PROD_API_BASE)).replace(/\/$/, '');
 
 export async function fetchEvents(origin: LatLng, radiusKm: number, keywords: string[]): Promise<EventOut[]> {
   const u = new URL(`${API_BASE}/api/events`);
