@@ -327,8 +327,13 @@ function renderList(items: Item[], now: number): void {
   const outRange = items.filter((it) => it.distanceKm > scaleKm);
   // 摘要只算單次的發放和活動，固定據點另外列
   const singles = inRange.filter((it) => !it.spot);
-  const active = singles.filter((it) => it.phase === 'active').length;
-  const soon = singles.filter((it) => it.phase === 'soon').length;
+  // 沒公布幾點的（官方加油點等）今天整天都是 soon，另外算「今天（時間未公布）」，不算即將開始
+  const counts = {
+    active: singles.filter((it) => it.phase === 'active').length,
+    soon: singles.filter((it) => it.phase === 'soon' && !it.ev.allDay).length,
+    today: singles.filter((it) => it.phase === 'soon' && it.ev.allDay).length,
+    later: singles.filter((it) => it.phase === 'later').length,
+  };
   const spotsIn = inRange.length - singles.length;
   const none = followed().length === 0;
   const outText = outRange.length > 0 ? `・範圍外 ${outRange.length} 個` : '';
@@ -337,7 +342,7 @@ function renderList(items: Item[], now: number): void {
     ? '還沒追蹤關鍵字'
     : singles.length === 0
       ? `${theme.emptyText}${spotText}${outText}`
-      : `${theme.summary(active, soon, singles.length)}${spotText}${outText}`;
+      : `${theme.summary(counts)}${spotText}${outText}`;
   emptyEl.textContent = none ? (canEditKeywords ? '點下方「追蹤」選擇或新增關鍵字，雷達就會開始找發放和活動。' : '目前沒有搜尋中的關鍵字。') : `${theme.emptyText}。雷達每分鐘更新，有新的會提醒你。`;
   listEl.replaceChildren();
   emptyEl.hidden = items.length > 0;
@@ -464,7 +469,7 @@ function setOrigin(o: Origin): void {
   useGpsBtn.hidden = o.source !== 'manual';
   if (isAutoScale(scaleSetting) && scaleKmFor(scaleSetting) !== scaleKm) {
     scaleKm = scaleKmFor(scaleSetting);
-    radar.setScale(scaleKm);
+    radar.setScale(scaleKm, isAutoScale(scaleSetting));
   }
   if (moved) void refresh();
   else render();
@@ -521,7 +526,7 @@ function setScale(setting: ScaleSetting): void {
   scaleSetting = setting;
   scaleKm = scaleKmFor(setting);
   lsSet(LS_SCALE, setting);
-  radar.setScale(scaleKm);
+  radar.setScale(scaleKm, isAutoScale(scaleSetting));
   for (const b of scaleChips) {
     const on = b.dataset.scale === setting;
     b.classList.toggle('on', on);

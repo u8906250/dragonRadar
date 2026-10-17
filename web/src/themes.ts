@@ -2,6 +2,18 @@ export type SweepStyle = 'wedge' | 'ripple' | 'needle';
 export type BlipStyle = 'dot' | 'buoy' | 'x' | 'neon';
 export type SoundStyle = 'beep' | 'sonar' | 'wood' | 'synth';
 
+/** 雷達範圍內的單次發放與活動（不含固定據點） */
+export interface SummaryCounts {
+  /** 已經開始、還沒結束 */
+  active: number;
+  /** 30 分鐘內開始 */
+  soon: number;
+  /** 今天，但沒公布幾點（例如官方加油點） */
+  today: number;
+  /** 更晚才開始 */
+  later: number;
+}
+
 export interface Theme {
   id: string;
   /** 顯示名稱，也會當作頁面標題 */
@@ -16,14 +28,15 @@ export interface Theme {
   themeColor: string;
   swatch: [string, string, string];
   emptyText: string;
-  summary(active: number, soon: number, total: number): string;
+  summary(c: SummaryCounts): string;
 }
 
-function parts(active: number, soon: number, total: number, unit: string): string {
-  const seg: string[] = [];
-  if (active > 0) seg.push(`${active} ${unit}進行中`);
-  if (soon > 0) seg.push(`${soon} ${unit}即將開始`);
-  if (seg.length === 0) seg.push(`${total} ${unit}稍後開始`);
+/** 進行中一定列出（0 也列），其他有才列 */
+function parts(c: SummaryCounts, unit: string): string {
+  const seg = [`${c.active} ${unit}進行中`];
+  if (c.soon > 0) seg.push(`${c.soon} ${unit}即將開始`);
+  if (c.today > 0) seg.push(`${c.today} ${unit}今天（時間未公布）`);
+  if (c.later > 0) seg.push(`${c.later} ${unit}稍後開始`);
   return seg.join('、');
 }
 
@@ -39,7 +52,7 @@ export const THEMES: Theme[] = [
     themeColor: '#ea611d',
     swatch: ['#ea611d', '#f4efe6', '#15171c'],
     emptyText: '附近還沒漂來發放或活動',
-    summary: (a, s, t) => `漂來 ${parts(a, s, t, '個')}`,
+    summary: (c) => `漂來 ${parts(c, '個')}`,
   },
   {
     id: 'dragon',
@@ -52,7 +65,7 @@ export const THEMES: Theme[] = [
     themeColor: '#06281a',
     swatch: ['#052016', '#3cff8a', '#ffd43b'],
     emptyText: '附近沒有發放或活動',
-    summary: (a, s, t) => parts(a, s, t, '個'),
+    summary: (c) => parts(c, '個'),
   },
   {
     id: 'treasure',
@@ -65,7 +78,7 @@ export const THEMES: Theme[] = [
     themeColor: '#efe3c6',
     swatch: ['#e9dcc0', '#5b3a1e', '#b8322a'],
     emptyText: '附近沒有寶藏',
-    summary: (a, s, t) => parts(a, s, t, '處'),
+    summary: (c) => parts(c, '處'),
   },
   {
     id: 'neon',
@@ -78,7 +91,7 @@ export const THEMES: Theme[] = [
     themeColor: '#140b1f',
     swatch: ['#0b0612', '#ff3fa4', '#2ef2ff'],
     emptyText: '附近沒有攤位',
-    summary: (a, s, t) => parts(a, s, t, '攤'),
+    summary: (c) => parts(c, '攤'),
   },
 ];
 

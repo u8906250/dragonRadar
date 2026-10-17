@@ -32,6 +32,25 @@ const ROSE: Array<[string, number]> = [
   ['W', 270],
 ];
 
+/** 對數刻度的轉折點：範圍的 1/80（全台 400 km 時約 5 km）以內接近等比例，再往外越壓越密 */
+const LOG_KNEE = 80;
+const NICE_KM = [1, 2, 5, 10, 20, 50, 100, 200, 300];
+
+/** 近密遠疏刻度的參考圈：挑幾個整數公里，圈和圈之間至少隔開外圈的 18%，全部標公里數 */
+function compressedRings(scaleKm: number): Array<{ km: number; label: boolean }> {
+  const k = scaleKm / LOG_KNEE;
+  const at = (km: number): number => Math.log1p(km / k) / Math.log1p(scaleKm / k);
+  const out: Array<{ km: number; label: boolean }> = [];
+  let last = 0;
+  for (const km of NICE_KM) {
+    const r = at(km);
+    if (r < 0.15 || r > 0.85 || r - last < 0.18) continue;
+    out.push({ km, label: true });
+    last = r;
+  }
+  return out;
+}
+
 function el<K extends keyof SVGElementTagNameMap>(tag: K, attrs: Record<string, string | number> = {}): SVGElementTagNameMap[K] {
   const n = document.createElementNS(SVG_NS, tag);
   for (const [k, v] of Object.entries(attrs)) n.setAttribute(k, String(v));
@@ -53,8 +72,11 @@ export class Radar {
   private readonly svg: SVGSVGElement;
   private readonly blipLayer: SVGGElement;
   private readonly scaleLabels: SVGGElement;
+  private readonly rings: SVGGElement;
   private readonly roseLayer: SVGGElement;
   private scaleKm = 5;
+  /** 近密遠疏：距離取對數，近的拉開、遠的壓縮 */
+  private compressed = false;
   private heading = 0;
   private items: RadarItem[] = [];
   private style: RadarStyle = { sweep: 'wedge', blip: 'dot', rose: false };
@@ -77,9 +99,7 @@ export class Radar {
       <circle class="bezel" cx="${C}" cy="${C}" r="${R + 16}" />
       <circle class="face" cx="${C}" cy="${C}" r="${R}" fill="url(#rg-face)" />
       <g class="grid">
-        <circle cx="${C}" cy="${C}" r="${R * 0.25}" />
-        <circle cx="${C}" cy="${C}" r="${R * 0.5}" />
-        <circle cx="${C}" cy="${C}" r="${R * 0.75}" />
+        <g class="rings"></g>
         <circle cx="${C}" cy="${C}" r="${R}" class="outer" />
         <line x1="${C}" y1="${C - R}" x2="${C}" y2="${C + R}" />
         <line x1="${C - R}" y1="${C}" x2="${C + R}" y2="${C}" />
@@ -105,12 +125,13 @@ export class Radar {
         </g>
       </g>
       <g class="scale-labels"></g>
-      <g class="blips"></g>
       <circle class="me" cx="${C}" cy="${C}" r="5" />
+      <g class="blips"></g>
       <g class="rose"></g>
     `;
     this.blipLayer = this.svg.querySelector('.blips') as SVGGElement;
     this.scaleLabels = this.svg.querySelector('.scale-labels') as SVGGElement;
+    this.rings = this.svg.querySelector('.rings') as SVGGElement;
     this.roseLayer = this.svg.querySelector('.rose') as SVGGElement;
     for (const [letter, deg] of ROSE) {
       const t = el('text', { class: `rose-letter rose-${letter.toLowerCase()}`, 'text-anchor': 'middle', 'dominant-baseline': 'middle', 'data-deg': deg });
@@ -133,16 +154,32 @@ export class Radar {
     this.draw();
   }
 
-  setScale(km: number): void {
+  /** compressed 用在雙北、全台這種大範圍，不然附近幾公里的光點全擠在圓心 */
+  setScale(km: number, compressed = false): void {
     this.scaleKm = km;
+    this.compressed = compressed;
+    this.rings.replaceChildren();
     this.scaleLabels.replaceChildren();
-    for (const f of [0.5, 1]) {
-      const t = el('text', { x: C + 5, y: C - R * f + 13, class: 'scale-label' });
-      const v = f * km;
-      t.textContent = `${Number.isInteger(v) ? v : v.toFixed(1)} km`;
-      this.scaleLabels.appendChild(t);
+    const marks = compressed ? compressedRings(km) : [0.25, 0.5, 0.75].map((f) => ({ km: f * km, label: f === 0.5 }));
+    for (const m of marks) {
+      this.rings.appendChild(el('circle', { cx: C, cy: C, r: (this.ratio(m.km) * R).toFixed(1) }));
+      if (m.label) this.addScaleLabel(m.km);
     }
+    this.addScaleLabel(km);
     this.draw();
+  }
+
+  private addScaleLabel(km: number): void {
+    const t = el('text', { x: C + 5, y: C - this.ratio(km) * R + 13, class: 'scale-label' });
+    t.textContent = `${Number.isInteger(km) ? km : km.toFixed(1)} km`;
+    this.scaleLabels.appendChild(t);
+  }
+
+  /** 距離換成半徑比例（0 = 圓心，1 = 外圈，超出範圍會大於 1） */
+  private ratio(km: number): number {
+    if (!this.compressed) return km / this.scaleKm;
+    const k = this.scaleKm / LOG_KNEE;
+    return Math.log1p(km / k) / Math.log1p(this.scaleKm / k);
   }
 
   /** 手機朝向（0 = 北，順時針）。null 代表關閉指北針，恢復北在上 */
@@ -198,7 +235,7 @@ export class Radar {
     const labelOk = new Set<number>();
     for (const it of order) {
       if (!it.showLabel) continue;
-      const ratio = Math.min(1, it.distanceKm / this.scaleKm);
+      const ratio = Math.min(1, this.ratio(it.distanceKm));
       const p = polar(it.bearing - this.heading, ratio * (R - 8));
       const w = [...it.label].length * 12;
       if (placed.some((q) => Math.abs(q.y - p.y) < 15 && Math.abs(q.x - p.x) < (q.w + w) / 2)) continue;
@@ -206,7 +243,7 @@ export class Radar {
       labelOk.add(it.id);
     }
     for (const it of this.items) {
-      const ratio = it.distanceKm / this.scaleKm;
+      const ratio = this.ratio(it.distanceKm);
       const out = ratio > 1;
       const p = polar(it.bearing - this.heading, Math.min(1, ratio) * (R - 8));
       const g = el('g', {
