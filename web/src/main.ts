@@ -171,6 +171,7 @@ function render(): void {
   radar.render(
     visible.map((it) => ({
       id: it.ev.id,
+      kind: it.ev.kind,
       distanceKm: it.distanceKm,
       bearing: it.bearing,
       phase: it.phase,
@@ -182,10 +183,11 @@ function render(): void {
   map.render(
     items.map((it) => ({
       id: it.ev.id,
+      kind: it.ev.kind,
       lat: it.ev.lat,
       lng: it.ev.lng,
       phase: it.phase,
-      title: it.ev.title,
+      title: `${kindLabel(it.ev)}｜${it.ev.title}`,
       subtitle: `${it.ev.placeText} · ${timeLine(it, now)}`,
       selected: it.ev.id === selectedId,
     })),
@@ -206,8 +208,9 @@ function render(): void {
       /* ignore */
     }
     const msg = `${it.ev.title}｜${it.ev.placeText}｜${formatKm(it.distanceKm)} ${compassLabel(it.bearing)}`;
-    showBanner(bannerEl, `開始發放：${msg}`, 12_000);
-    systemNotify('發放開始', msg);
+    const head = it.ev.kind === 'activity' ? '活動開始' : '開始發放';
+    showBanner(bannerEl, `${head}：${msg}`, 12_000);
+    systemNotify(head, msg);
   }
   if (lastFetchAt > 0) notifiedOnce = true;
 }
@@ -217,15 +220,15 @@ function renderList(items: Item[], now: number): void {
   const soon = items.filter((it) => it.phase === 'soon').length;
   const none = followed().length === 0;
   countLabel.textContent = none ? '還沒追蹤關鍵字' : items.length === 0 ? theme.emptyText : theme.summary(active, soon, items.length);
-  emptyEl.textContent = none ? (canEditKeywords ? '點下方「追蹤」選擇或新增關鍵字，雷達就會開始找發放。' : '目前沒有搜尋中的關鍵字。') : `${theme.emptyText}。雷達每分鐘更新，有新的會提醒你。`;
+  emptyEl.textContent = none ? (canEditKeywords ? '點下方「追蹤」選擇或新增關鍵字，雷達就會開始找發放和活動。' : '目前沒有搜尋中的關鍵字。') : `${theme.emptyText}。雷達每分鐘更新，有新的會提醒你。`;
   listEl.replaceChildren();
   emptyEl.hidden = items.length > 0;
   for (const it of items) {
     const li = document.createElement('li');
-    li.className = `ev phase-${it.phase}${it.ev.id === selectedId ? ' selected' : ''}`;
+    li.className = `ev phase-${it.phase} kind-${it.ev.kind}${it.ev.id === selectedId ? ' selected' : ''}`;
     li.dataset.id = String(it.ev.id);
     li.innerHTML = `
-      <div class="ev-title"><span class="dot"></span>${esc(it.ev.title)}${it.ev.item ? ` <span class="muted">· ${esc(it.ev.item)}</span>` : ''}${followed().length > 1 && it.ev.keyword ? `<span class="ev-kw">#${esc(it.ev.keyword)}</span>` : ''}</div>
+      <div class="ev-title"><span class="dot"></span><span class="kind-tag">${kindLabel(it.ev)}</span>${esc(it.ev.title)}${it.ev.item ? ` <span class="muted">· ${esc(it.ev.item)}</span>` : ''}${followed().length > 1 && it.ev.keyword ? `<span class="ev-kw">#${esc(it.ev.keyword)}</span>` : ''}</div>
       <div class="ev-meta">${esc(it.ev.placeText)} · ${formatKm(it.distanceKm)} ${compassLabel(it.bearing)}</div>
       <div class="ev-time">${esc(timeLine(it, now))}</div>`;
     li.addEventListener('click', () => select(it.ev.id));
@@ -252,7 +255,7 @@ function renderDetail(items: Item[], now: number): void {
       <button type="button" class="chip" data-act="close" aria-label="關閉">關閉</button>
     </div>
     <div class="sheet-body">
-      <p>${ev.item ? `發放：${esc(ev.item)}<br>` : ''}${ev.keyword ? `關鍵字：#${esc(ev.keyword)}<br>` : ''}地點：${esc(ev.placeText)}<br>時間：${fmtTime(ev.startAt)} – ${fmtTime(ev.endAt)}<br>距離：${formatKm(it.distanceKm)}，${compassLabel(it.bearing)}方 · ${esc(timeLine(it, now))}</p>
+      <p>類型：${kindLabel(ev)}<br>${ev.item ? `發放：${esc(ev.item)}<br>` : ''}${ev.keyword ? `關鍵字：#${esc(ev.keyword)}<br>` : ''}地點：${esc(ev.placeText)}<br>時間：${fmtTime(ev.startAt)} – ${fmtTime(ev.endAt)}<br>距離：${formatKm(it.distanceKm)}，${compassLabel(it.bearing)}方 · ${esc(timeLine(it, now))}</p>
       <blockquote>${esc(ev.post.text).slice(0, 300)}</blockquote>
       <div class="sheet-actions">
         <a class="btn primary" href="https://www.google.com/maps/dir/?api=1&destination=${ev.lat},${ev.lng}&travelmode=walking" target="_blank" rel="noopener">導航</a>
@@ -517,16 +520,23 @@ function renderRules(): void {
     <h3>多久找一次</h3>
     <ul>
       <li>每 ${r.intervalMin} 分鐘用上面的關鍵字搜尋 Threads 最新的公開貼文。</li>
-      <li>收${esc(r.region)}的發放。雷達選「雙北」看台北市加新北市，選「全台」看全台灣與離島。</li>
+      <li>收${esc(r.region)}的發放和活動。雷達選「雙北」看台北市加新北市，選「全台」看全台灣與離島。</li>
+    </ul>
+    <h3>找哪些東西</h3>
+    <ul>
+      <li><b>發放</b>：在某時某地免費發飄帶、貼紙、文宣、飲料等，雷達上是<span class="ex">橘色</span>光點。</li>
+      <li><b>活動</b>：可以到場參加的車掃、掃街、市場開講、造勢晚會、見面會、座談等，雷達上是<span class="ex">另一個顏色</span>的光點。</li>
+      <li>活動現場也有發放東西的，算成一筆發放。</li>
     </ul>
     <h3>時間地點怎麼判讀</h3>
     <ol>
       <li>貼文要同時寫出<b>時間</b>和<b>地點</b>，缺一個就不會出現在雷達上。</li>
       <li>時間可以寫 <span class="ex">10/18 15:00</span>、<span class="ex">今天下午三點</span>、<span class="ex">明晚 7 點</span>、<span class="ex">週六 14:00–16:00</span>。「今天、明天、週六」以發文時間換算，時區是台灣時間。</li>
       <li>沒寫結束時間，或寫「發完為止」，會預設開始後 ${hours}結束。</li>
+      <li>一則貼文有多個地點或時段（例如行程表、車掃停靠點），會拆成多筆。</li>
       <li>地點寫越具體越好，例如 <span class="ex">捷運市政府站 2號出口</span>、<span class="ex">板橋車站北一門</span>、<span class="ex">松山文創園區</span>。找不到出口時會退到車站位置。</li>
-      <li>只收 ${r.maxFutureDays} 天內的發放；已經結束的不會出現。</li>
-      <li>徵求、詢問、線上抽獎、販售不算發放，系統會略過。判讀信心低於 ${Math.round(r.minConfidence * 100)}% 的也會略過。</li>
+      <li>只收 ${r.maxFutureDays} 天內的發放和活動；已經結束的不會出現。</li>
+      <li>新聞報導、活動回顧、徵求、詢問、線上抽獎、直播、販售都不算，系統會略過。判讀信心低於 ${Math.round(r.minConfidence * 100)}% 的也會略過。</li>
     </ol>
     <h3>什麼時候消失</h3>
     <ul>
@@ -535,7 +545,9 @@ function renderRules(): void {
     </ul>
     <h3>貼文範例</h3>
     <div class="example">${esc(`#${kw}\n明天 10/18 下午 3 點在捷運市政府站 2號出口發放${kw}，限量 100 份，發完為止！`)}</div>
-    <p class="example-out">會判讀成：開始 10/18 15:00、結束 ${esc(fmtClock(15 * 60 + r.defaultDurationMin))}、地點「台北市 捷運市政府站 2號出口」。</p>
+    <p class="example-out">會判讀成：發放，開始 10/18 15:00、結束 ${esc(fmtClock(15 * 60 + r.defaultDurationMin))}、地點「台北市 捷運市政府站 2號出口」。</p>
+    <div class="example">${esc(`#${kw}\n週六 10/19 晚上 7 點，大龍峒保安宮市政開講，歡迎鄉親一起來！`)}</div>
+    <p class="example-out">會判讀成：活動，開始 10/19 19:00、地點「台北市 大龍峒保安宮」。</p>
     <p class="legal-links"><a href="privacy.html" target="_blank" rel="noopener">隱私權政策</a> · <a href="terms.html" target="_blank" rel="noopener">服務條款</a> · <a href="data-deletion.html" target="_blank" rel="noopener">資料刪除</a></p>`;
 }
 
@@ -543,6 +555,10 @@ function fmtClock(totalMin: number): string {
   const h = Math.floor(totalMin / 60) % 24;
   const m = totalMin % 60;
   return `10/18 ${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
+}
+
+function kindLabel(ev: EventOut): string {
+  return ev.kind === 'activity' ? '活動' : '發放';
 }
 
 function setKwMsg(text: string, error = false): void {
@@ -615,7 +631,7 @@ function wireControls(): void {
     unlockAudio();
     const ok = await ensureNotificationPermission();
     updateNotifyBtn();
-    showBanner(bannerEl, ok ? '通知已開啟，開始發放時會提醒你' : '已開啟音效提醒；系統通知未取得權限');
+    showBanner(bannerEl, ok ? '通知已開啟，發放或活動開始時會提醒你' : '已開啟音效提醒；系統通知未取得權限');
     beep(theme.sound);
   });
   themeBtn.addEventListener('click', () => {
@@ -669,6 +685,8 @@ async function boot(): Promise<void> {
   if (openParam === 'theme') openThemeSheet(true);
   if (openParam === 'keywords') openKwSheet(true);
   if (new URLSearchParams(location.search).get('view') === 'map') switchView('map');
+  const scaleParam = new URLSearchParams(location.search).get('scale');
+  if (scaleParam && (SCALE_SETTINGS as string[]).includes(scaleParam)) setScale(scaleParam as ScaleSetting);
   window.setInterval(render, TICK_MS);
   window.setInterval(() => void refresh(), POLL_MS);
 }

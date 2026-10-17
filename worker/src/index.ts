@@ -105,6 +105,7 @@ async function handle(req: Request, env: Env, ctx: ExecutionContext): Promise<Re
         minConfidence: MIN_CONFIDENCE,
         endedWords: ENDED_WORDS,
         region: '全台灣',
+        kinds: { giveaway: '發放', activity: '活動' },
         timezone: 'Asia/Taipei',
       },
     });

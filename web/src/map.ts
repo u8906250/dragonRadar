@@ -1,10 +1,11 @@
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 import type { LatLng } from './geo';
-import type { Phase } from './types';
+import type { EventKind, Phase } from './types';
 
 export interface MapItem {
   id: number;
+  kind: EventKind;
   lat: number;
   lng: number;
   phase: Phase;
@@ -13,7 +14,17 @@ export interface MapItem {
   selected: boolean;
 }
 
-const PHASE_COLOR: Record<Phase, string> = { active: '#ffd43b', soon: '#8fd3a8', later: '#5c7a68' };
+/** 從目前主題的 CSS 變數取色，地圖標記跟雷達光點一致 */
+function cssVar(name: string, fallback: string): string {
+  const v = getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+  return v || fallback;
+}
+
+function markerColor(kind: EventKind, phase: Phase): string {
+  if (phase === 'later') return cssVar('--muted', '#888888');
+  if (phase === 'soon') return kind === 'activity' ? cssVar('--blip-activity', '#03615a') : cssVar('--blip-soon', '#ffe08a');
+  return kind === 'activity' ? cssVar('--blip-activity', '#03615a') : cssVar('--blip', '#ea611d');
+}
 
 export class MapView {
   private readonly map: L.Map;
@@ -67,7 +78,7 @@ export class MapView {
     const keep = new Set<number>();
     for (const it of items) {
       keep.add(it.id);
-      const color = PHASE_COLOR[it.phase];
+      const color = markerColor(it.kind, it.phase);
       let m = this.markers.get(it.id);
       if (!m) {
         m = L.circleMarker([it.lat, it.lng], { radius: 9, weight: 2 });
@@ -77,7 +88,7 @@ export class MapView {
         this.markers.set(it.id, m);
       }
       m.setLatLng([it.lat, it.lng]);
-      m.setStyle({ color: it.selected ? '#ffffff' : color, fillColor: color, fillOpacity: it.phase === 'active' ? 0.95 : 0.55 });
+      m.setStyle({ color: it.selected ? cssVar('--blip-selected', '#ffffff') : cssVar('--blip-stroke', color), fillColor: color, fillOpacity: it.phase === 'active' ? 0.95 : 0.55 });
       m.setPopupContent(`<strong>${escapeHtml(it.title)}</strong><br>${escapeHtml(it.subtitle)}`);
     }
     for (const [id, m] of this.markers) {

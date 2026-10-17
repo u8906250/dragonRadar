@@ -45,7 +45,7 @@ describe('normalizeExtraction', () => {
         { title: '花壇服務處發飄帶', item: '洋流飄帶', start_at: '2026-10-13T14:00:00+08:00', end_at: null, place_text: '李成濟服務處', place_query: '彰化縣花壇鄉 李成濟服務處', confidence: 0.75 },
       ],
     }) + '\n```');
-    expect(r?.is_giveaway).toBe(true);
+    expect(r?.is_event).toBe(true);
     expect(r?.events).toHaveLength(2);
     expect(r?.events[1].end_at).toBeNull();
     expect(r?.events[0].place_query).toBe('彰化縣秀水鄉 藍駿宇服務處');
@@ -58,12 +58,18 @@ describe('normalizeExtraction', () => {
   it('clamps confidence, defaults title and treats "null" strings as null', () => {
     const r = normalizeExtraction({ is_giveaway: 'true', events: [{ confidence: 7, title: '', end_at: 'null' }] });
     expect(r?.events[0].confidence).toBe(1);
-    expect(r?.events[0].title).toBe('發放活動');
+    expect(r?.events[0].title).toBe('活動');
     expect(r?.events[0].end_at).toBeNull();
   });
-  it('drops events when the post is not a giveaway', () => {
+  it('reads kind and the new is_event flag', () => {
+    const r = normalizeExtraction({ is_event: true, events: [{ kind: 'activity', title: '保安宮市政開講', start_at: '2026-10-11T19:00:00+08:00', place_text: '保安宮', confidence: 0.9 }, { title: 'x', confidence: 0.8 }] });
+    expect(r?.is_event).toBe(true);
+    expect(r?.events[0].kind).toBe('activity');
+    expect(r?.events[1].kind).toBe('giveaway');
+  });
+  it('drops events when the post is not an event', () => {
     const r = normalizeExtraction({ is_giveaway: false, events: [{ title: 'x', confidence: 0.9 }] });
-    expect(r?.is_giveaway).toBe(false);
+    expect(r?.is_event).toBe(false);
     expect(r?.events).toEqual([]);
   });
   it('rejects non-JSON', () => {
@@ -160,7 +166,7 @@ describe('responseContent', () => {
 
 describe('placeFidelity', () => {
   const text = '洋流測試：今晚 9 點在捷運市政府站 2號出口發放洋流飄帶';
-  const ev = (place: string) => ({ is_giveaway: true, events: [{ title: 't', item: null, start_at: null, end_at: null, place_text: place, place_query: null, confidence: 0.9 }] });
+  const ev = (place: string) => ({ is_event: true, events: [{ kind: 'giveaway' as const, title: 't', item: null, start_at: null, end_at: null, place_text: place, place_query: null, confidence: 0.9 }] });
   it('is high when the place comes from the post', () => {
     expect(placeFidelity(ev('捷運市政府站 2號出口'), text)).toBe(1);
   });

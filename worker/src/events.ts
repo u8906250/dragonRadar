@@ -1,5 +1,5 @@
 import type { Env } from './env';
-import { extractFromPost, type ExtractedEvent } from './extract';
+import { extractFromPost, type EventKind, type ExtractedEvent } from './extract';
 import { geocodeFirst, placeCandidates } from './geocode';
 import { listActiveKeywords, type KeywordRow } from './keywords';
 import { parseThreadsTimestamp, type ThreadsClient } from './threads';
@@ -23,6 +23,7 @@ export interface PostRow {
 export interface EventRow {
   id: number;
   post_id: string;
+  kind: EventKind;
   title: string;
   item: string | null;
   start_at: number;
@@ -41,6 +42,7 @@ export interface EventRow {
 
 export interface EventOut {
   id: number;
+  kind: EventKind;
   title: string;
   item: string | null;
   startAt: number;
@@ -126,23 +128,23 @@ async function createEvent(env: Env, post: PostRow, ex: ExtractedEvent, now: num
 
   const point = await geocodeFirst(env, placeCandidates(placeQuery, ex.place_text));
 
-  // 同一場發放可能被多篇貼文找到：同地點（約 150 m 內）、開始時間差 30 分鐘內就視為重複
+  // 同一場可能被多篇貼文找到：同類型、同地點（約 150 m 內）、開始時間差 30 分鐘內就視為重複
   if (point) {
     const dup = await env.DB.prepare(
-      `SELECT id FROM events WHERE status IN ('upcoming', 'active')
+      `SELECT id FROM events WHERE status IN ('upcoming', 'active') AND kind = ?
          AND ABS(start_at - ?) <= ? AND lat BETWEEN ? AND ? AND lng BETWEEN ? AND ? LIMIT 1`,
     )
-      .bind(start, DUP_WINDOW_SEC, point.lat - DUP_DEG, point.lat + DUP_DEG, point.lng - DUP_DEG, point.lng + DUP_DEG)
+      .bind(ex.kind, start, DUP_WINDOW_SEC, point.lat - DUP_DEG, point.lat + DUP_DEG, point.lng - DUP_DEG, point.lng + DUP_DEG)
       .first<{ id: number }>();
     if (dup) return { event: null, reason: `duplicate_of_${dup.id}` };
   }
 
   const status: EventStatus = !point ? 'unlocated' : start <= now ? 'active' : 'upcoming';
   const event = await env.DB.prepare(
-    `INSERT INTO events (post_id, title, item, start_at, end_at, place_text, place_query, lat, lng, status, confidence, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING *`,
+    `INSERT INTO events (post_id, kind, title, item, start_at, end_at, place_text, place_query, lat, lng, status, confidence, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING *`,
   )
-    .bind(post.id, ex.title, ex.item, start, end, placeText, placeQuery, point?.lat ?? null, point?.lng ?? null, status, ex.confidence, now, now)
+    .bind(post.id, ex.kind, ex.title, ex.item, start, end, placeText, placeQuery, point?.lat ?? null, point?.lng ?? null, status, ex.confidence, now, now)
     .first<EventRow>();
   return { event, reason: status };
 }
@@ -154,7 +156,7 @@ export async function processPost(env: Env, post: PostRow, now = nowSec()): Prom
 
   if (garbled) return { events: [], reasons: ['garbled'] };
   if (!extraction) return { events: [], reasons: ['extraction_failed'] };
-  if (!extraction.is_giveaway) return { events: [], reasons: ['not_giveaway'] };
+  if (!extraction.is_event) return { events: [], reasons: ['not_event'] };
   if (extraction.events.length === 0) return { events: [], reasons: ['no_events'] };
 
   const out: ProcessResult = { events: [], reasons: [] };
@@ -327,6 +329,7 @@ type JoinedRow = EventRow & { username: string | null; permalink: string | null;
 export function toEventOut(r: JoinedRow, now: number): EventOut {
   return {
     id: r.id,
+    kind: r.kind ?? 'giveaway',
     title: r.title,
     item: r.item,
     startAt: r.start_at,

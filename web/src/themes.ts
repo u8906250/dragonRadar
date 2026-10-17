@@ -38,7 +38,7 @@ export const THEMES: Theme[] = [
     sound: 'sonar',
     themeColor: '#ea611d',
     swatch: ['#ea611d', '#f4efe6', '#15171c'],
-    emptyText: '附近還沒漂來發放',
+    emptyText: '附近還沒漂來發放或活動',
     summary: (a, s, t) => `漂來 ${parts(a, s, t, '個')}`,
   },
   {
@@ -51,7 +51,7 @@ export const THEMES: Theme[] = [
     sound: 'beep',
     themeColor: '#06281a',
     swatch: ['#052016', '#3cff8a', '#ffd43b'],
-    emptyText: '附近沒有發放',
+    emptyText: '附近沒有發放或活動',
     summary: (a, s, t) => parts(a, s, t, '個'),
   },
   {

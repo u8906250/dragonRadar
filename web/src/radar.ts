@@ -1,7 +1,8 @@
-import type { BlipStyle, Phase, SweepStyle } from './types';
+import type { BlipStyle, EventKind, Phase, SweepStyle } from './types';
 
 export interface RadarItem {
   id: number;
+  kind: EventKind;
   distanceKm: number;
   bearing: number;
   phase: Phase;
@@ -200,7 +201,7 @@ export class Radar {
       const out = ratio > 1;
       const p = polar(it.bearing - this.heading, Math.min(1, ratio) * (R - 8));
       const g = el('g', {
-        class: `blip phase-${it.phase}${out ? ' out' : ''}${it.selected ? ' selected' : ''}`,
+        class: `blip phase-${it.phase} kind-${it.kind}${out ? ' out' : ''}${it.selected ? ' selected' : ''}`,
         transform: `translate(${p.x.toFixed(1)} ${p.y.toFixed(1)})`,
         tabindex: 0,
         role: 'button',

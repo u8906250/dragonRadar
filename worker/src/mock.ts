@@ -6,6 +6,8 @@ interface Sample {
   place: string;
   item: string;
   extra?: string;
+  /** 有的話用這段文字，不用發放的範本 */
+  activity?: string;
 }
 
 const SAMPLES: Sample[] = [
@@ -17,6 +19,7 @@ const SAMPLES: Sample[] = [
   { offsetMin: 30, place: '捷運南港展覽館站', item: '手搖飲' },
   { offsetMin: 50, place: '捷運公館站 1號出口', item: '明信片' },
   { offsetMin: 20, place: '松山文創園區', item: '帆布袋' },
+  { offsetMin: 10, place: '大龍峒保安宮', item: '', activity: '市政開講，歡迎鄉親一起來聊聊' },
 ];
 
 function hashStr(s: string): number {
@@ -55,7 +58,9 @@ export class MockThreadsClient implements ThreadsClient {
     const picks = [0, 1, 2, 3].map((k) => SAMPLES[(h + k * 3) % SAMPLES.length]);
     return picks.map((s, i) => {
       const start = hourStart + s.offsetMin * 60;
-      const text = `今天 ${hhmm(start)} 在${s.place}發放${s.item}${s.extra ? '，' + s.extra : ''}，來的朋友記得說暗號！#${o.q}`;
+      const text = s.activity
+        ? `今天 ${hhmm(start)} 在${s.place}舉辦${s.activity}！#${o.q}`
+        : `今天 ${hhmm(start)} 在${s.place}發放${s.item}${s.extra ? '，' + s.extra : ''}，來的朋友記得說暗號！#${o.q}`;
       return {
         id: `mock-${h.toString(36)}-${bucket}-${i}`,
         text,

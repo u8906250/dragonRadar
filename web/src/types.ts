@@ -1,5 +1,8 @@
+export type EventKind = 'giveaway' | 'activity';
+
 export interface EventOut {
   id: number;
+  kind: EventKind;
   title: string;
   item: string | null;
   startAt: number;
@@ -38,6 +41,7 @@ export interface Item {
 export type { BlipStyle, SweepStyle } from './themes';
 
 export interface KeywordRules {
+  kinds?: Record<EventKind, string>;
   intervalMin: number;
   defaultDurationMin: number;
   maxFutureDays: number;

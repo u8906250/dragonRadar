@@ -1,8 +1,11 @@
 import type { Env } from './env';
 import { formatTaipei } from './util';
 
-/** 一則貼文裡的一個發放場次（地點或時段不同就是不同場次） */
+export type EventKind = 'giveaway' | 'activity';
+
+/** 一則貼文裡的一個場次（地點或時段不同就是不同場次） */
 export interface ExtractedEvent {
+  kind: EventKind;
   title: string;
   item: string | null;
   start_at: string | null;
@@ -13,7 +16,8 @@ export interface ExtractedEvent {
 }
 
 export interface Extraction {
-  is_giveaway: boolean;
+  /** 是否宣告了可到場的實體活動或發放 */
+  is_event: boolean;
   events: ExtractedEvent[];
 }
 
@@ -22,6 +26,7 @@ const MAX_EVENTS_PER_POST = 6;
 const EVENT_SCHEMA = {
   type: 'object',
   properties: {
+    kind: { type: 'string', enum: ['giveaway', 'activity'] },
     title: { type: 'string' },
     item: { type: ['string', 'null'] },
     start_at: { type: ['string', 'null'] },
@@ -30,42 +35,47 @@ const EVENT_SCHEMA = {
     place_query: { type: ['string', 'null'] },
     confidence: { type: 'number' },
   },
-  required: ['title', 'item', 'start_at', 'end_at', 'place_text', 'place_query', 'confidence'],
+  required: ['kind', 'title', 'item', 'start_at', 'end_at', 'place_text', 'place_query', 'confidence'],
 };
 
 const SCHEMA = {
   type: 'object',
   properties: {
-    is_giveaway: { type: 'boolean' },
+    is_event: { type: 'boolean' },
     events: { type: 'array', items: EVENT_SCHEMA, maxItems: MAX_EVENTS_PER_POST },
   },
-  required: ['is_giveaway', 'events'],
+  required: ['is_event', 'events'],
 };
 
-const SYSTEM_PROMPT = `你是「洋流雷達」的資料抽取器。你會收到一則台灣 Threads 貼文，請判斷它是否在宣告「實體發放」：
-在特定時間與地點，免費發送飄帶、貼紙、文宣、周邊、飲料等給到場的人（常見於競選服務處、競選總部、車掃、市場開講）。
+const SYSTEM_PROMPT = `你是「洋流雷達」的資料抽取器。你會收到一則台灣 Threads 貼文，請判斷它是否在宣告「可以到場參加的實體活動或發放」，並抽出時間與地點。
+
+兩種類型：
+- giveaway（發放）：在特定時間地點免費發送飄帶、貼紙、文宣、周邊、飲料等給到場的人。
+- activity（活動）：在特定時間地點舉行、民眾可以到場參加的活動，例如車掃、掃街、市場開講、造勢晚會、見面會、座談、講座、遊行、快閃、志工集合。
 
 只輸出 JSON：
 {
-  "is_giveaway": 是否為實體發放公告（布林值）,
+  "is_event": 是否宣告了至少一個可到場的實體活動或發放（布林值）,
   "events": [ 每一個「地點 + 時段」一筆，最多 ${MAX_EVENTS_PER_POST} 筆 ]
 }
 
 events 每筆的欄位：
-- title: 12 字以內的短標題，例如「秀水服務處發飄帶」
-- item: 發放的物品，例如「洋流飄帶」；沒寫則 null
+- kind: "giveaway" 或 "activity"。活動現場也有發放東西時，用 "giveaway"，不要拆成兩筆
+- title: 12 字以內的短標題，例如「秀水服務處發飄帶」「保安宮市政開講」
+- item: 發放的物品，例如「洋流飄帶」；活動或沒寫則 null
 - start_at: 開始時間，ISO 8601 含時區，例如 2026-10-17T15:00:00+08:00；無法判斷則 null
 - end_at: 結束時間，同格式；沒有明確結束時間則 null
 - place_text: 貼文原文中的地點描述
-- place_query: 給地圖搜尋用的地址或地名。有門牌地址就用地址；一定要補上縣市（和鄉鎮區），例如「宜蘭縣羅東鎮光榮路218號」「台北市 捷運市政府站 2號出口」。只有「XX服務處」「競選總部」而沒有地址時，填你能確定的最具體地名；沒有則 null
+- place_query: 給地圖搜尋用的地址或地名。有門牌地址就用地址；一定要補上縣市（和鄉鎮區），例如「宜蘭縣羅東鎮光榮路218號」「台北市 大龍峒保安宮」。只有「XX服務處」「競選總部」而沒有地址時，填你能確定的最具體地名；沒有則 null
 - confidence: 這一筆 0 到 1 的信心分數
 
 規則：
 - 相對時間（今天、今晚、明天、週六、等等、下午）以「貼文發布時間」為基準換算，時區一律 +08:00。「今晚 5 點半」是發文當天 17:30。
 - 「早上 9 點到下午 5 點」這種時段，start_at 是 9:00、end_at 是 17:00。
-- 同一則貼文有多個地點或多個時段，要拆成多筆 events。
+- 同一則貼文有多個地點或多個時段（例如行程表、車掃停靠點），要拆成多筆 events。
+- 車掃、遊行等移動路線，每個有時間的停靠點各一筆；沒有停靠點就用出發地。
 - 「發完為止」「數量有限」代表沒有明確結束時間，end_at 為 null。
-- 新聞報導、心得、徵求、詢問、線上抽獎、販售、已經結束的活動回顧，is_giveaway 為 false，events 為空陣列。
+- 新聞報導、心得、活動回顧、徵求、詢問、線上抽獎、直播、線上活動、販售，is_event 為 false，events 為空陣列。
 - 只有時間沒有地點、或只有地點沒有時間，該筆 confidence 必須低於 0.5。
 - 不要編造貼文裡沒有的時間或地點，可以依上下文補上縣市。`;
 
@@ -95,9 +105,15 @@ function conf(v: unknown): number {
   return Number.isFinite(n) ? Math.min(1, Math.max(0, n)) : 0;
 }
 
+export function normalizeKind(v: unknown): EventKind {
+  const k = typeof v === 'string' ? v.trim().toLowerCase() : '';
+  return k === 'activity' || k === 'event' || k === '活動' ? 'activity' : 'giveaway';
+}
+
 function normalizeEvent(o: Record<string, unknown>): ExtractedEvent {
   return {
-    title: str(o.title) ?? '發放活動',
+    kind: normalizeKind(o.kind),
+    title: str(o.title) ?? '活動',
     item: str(o.item),
     start_at: str(o.start_at),
     end_at: str(o.end_at),
@@ -137,7 +153,9 @@ export function normalizeExtraction(raw: unknown): Extraction | null {
   const obj = parseLoose(raw);
   if (!obj || typeof obj !== 'object' || Array.isArray(obj)) return null;
   const o = obj as Record<string, unknown>;
-  const isGiveaway = o.is_giveaway === true || o.is_giveaway === 'true';
+  // 舊格式叫 is_giveaway，新格式叫 is_event
+  const flag = o.is_event ?? o.is_giveaway;
+  const isEvent = flag === true || flag === 'true';
   let events: ExtractedEvent[] = [];
   if (Array.isArray(o.events)) {
     events = o.events
@@ -147,7 +165,7 @@ export function normalizeExtraction(raw: unknown): Extraction | null {
   } else if ('start_at' in o || 'place_text' in o || 'place_query' in o) {
     events = [normalizeEvent(o)];
   }
-  return { is_giveaway: isGiveaway, events: isGiveaway ? events : [] };
+  return { is_event: isEvent, events: isEvent ? events : [] };
 }
 
 interface AiRunner {
