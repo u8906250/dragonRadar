@@ -378,7 +378,39 @@ function renderList(items: Item[], now: number): void {
   }
 }
 
+function renderChooser(items: Item[], now: number): void {
+  const list = (choosing ?? []).map((id) => items.find((x) => x.ev.id === id)).filter((x): x is Item => !!x);
+  if (list.length === 0) {
+    choosing = null;
+    detailEl.hidden = true;
+    return;
+  }
+  detailEl.hidden = false;
+  detailEl.innerHTML = `
+    <div class="sheet-head">
+      <strong>這裡有 ${list.length} 個</strong>
+      <button type="button" class="chip" data-act="close" aria-label="關閉">關閉</button>
+    </div>
+    <div class="sheet-body">
+      <p class="muted sheet-note">位置疊在一起，選一個看詳細資料。</p>
+      <ul class="report-events">${list
+        .map(
+          (it) =>
+            `<li><button type="button" data-select="${it.ev.id}"><b>${esc(tagLabel(it))}｜${esc(it.ev.title)}</b><small>${esc(placeLine(it.ev))} · ${it.ev.approxArea ? '約 ' : ''}${formatKm(it.distanceKm)} ${compassLabel(it.bearing)}</small><small>${esc(timeLine(it, now))}</small></button></li>`,
+        )
+        .join('')}</ul>
+    </div>`;
+  detailEl.querySelector('[data-act="close"]')?.addEventListener('click', () => select(null));
+  for (const b of detailEl.querySelectorAll<HTMLButtonElement>('[data-select]')) {
+    b.addEventListener('click', () => select(Number(b.dataset.select)));
+  }
+}
+
 function renderDetail(items: Item[], now: number): void {
+  if (choosing) {
+    renderChooser(items, now);
+    return;
+  }
   if (selectedId === null) {
     detailEl.hidden = true;
     return;
@@ -472,12 +504,30 @@ async function sendEnded(ev: EventOut, btn: HTMLButtonElement): Promise<void> {
   }
 }
 
-/** 雷達上疊在一起的光點，詳細資料會列出同一群的其他項目 */
+/** 雷達或地圖上疊在一起的一群，詳細資料會列出同一群的其他項目 */
 let selectedGroup: number[] = [];
+/** 點了疊在一起的一群、還沒選是哪一個 */
+let choosing: number[] | null = null;
+
+const sameGroup = (a: number[] | null, b: number[]): boolean => !!a && [...a].sort().join() === [...b].sort().join();
 
 function select(id: number | null, group: number[] = []): void {
-  // 從同一群切換到另一個時保留整群，其他情況（點清單、地圖）就清掉
-  selectedGroup = group.length > 1 ? group : id !== null && selectedGroup.includes(id) ? selectedGroup : [];
+  if (group.length > 1) {
+    // 疊在一起的先列出來讓人選；同一群再點一次就收起
+    choosing = sameGroup(choosing, group) ? null : group;
+    selectedGroup = group;
+    selectedId = null;
+    if (choosing) {
+      themeSheet.hidden = true;
+      kwSheet.hidden = true;
+      reportSheet.hidden = true;
+    }
+    render();
+    return;
+  }
+  choosing = null;
+  // 從同一群切換到另一個時保留整群，其他情況（點清單）就清掉
+  selectedGroup = id !== null && selectedGroup.includes(id) ? selectedGroup : [];
   selectedId = selectedId === id ? null : id;
   if (selectedId !== null) {
     themeSheet.hidden = true;

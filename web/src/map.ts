@@ -56,6 +56,10 @@ export class MapView {
   private originMarker: Leaflet.CircleMarker | null = null;
   private accuracyCircle: Leaflet.Circle | null = null;
   private readonly markers = new Map<number, Leaflet.CircleMarker>();
+  /** 座標一樣合成一個點時，每個項目對應到畫出來的那個標記 */
+  private readonly leaderOf = new Map<number, number>();
+  /** 畫出來的標記代表哪些項目 */
+  private readonly groupIds = new Map<number, number[]>();
   private items: MapItem[] = [];
   private origin: LatLng;
   private accuracy: number | null = null;
@@ -65,7 +69,7 @@ export class MapView {
   constructor(
     private readonly el: HTMLElement,
     origin: LatLng,
-    private readonly handlers: { onSelect: (id: number) => void; onPickOrigin: (p: LatLng) => void },
+    private readonly handlers: { onSelect: (id: number, group: number[]) => void; onPickOrigin: (p: LatLng) => void },
     base: BaseMap = 'nlsc',
   ) {
     this.origin = origin;
@@ -143,17 +147,31 @@ export class MapView {
     if (!L || !layer) return;
     const stroke = cssVar('--blip-stroke', '#15171c');
     const selectedStroke = cssVar('--blip-selected', '#ffffff');
-    const keep = new Set<number>();
+    // 座標一樣（到小數點 5 位，約 1 公尺）的合成一個點，旁邊標「+N」，點下去再選；放大地圖也分不開
+    const groups = new Map<string, MapItem[]>();
     for (const it of this.items) {
+      const k = `${it.lat.toFixed(5)},${it.lng.toFixed(5)}`;
+      const g = groups.get(k);
+      if (g) g.push(it);
+      else groups.set(k, [it]);
+    }
+    const keep = new Set<number>();
+    this.leaderOf.clear();
+    this.groupIds.clear();
+    for (const g of groups.values()) {
+      const it = g.find((x) => x.selected) ?? g.find((x) => x.phase === 'active') ?? g[0];
+      const ids = g.map((x) => x.id);
       keep.add(it.id);
       let m = this.markers.get(it.id);
       if (!m) {
+        const id = it.id;
         m = L.circleMarker([it.lat, it.lng]);
-        m.on('click', () => this.handlers.onSelect(it.id));
+        m.on('click', () => this.handlers.onSelect(id, this.groupIds.get(id) ?? [id]));
         m.bindPopup('', { closeButton: false });
         layer.addLayer(m);
         this.markers.set(it.id, m);
       }
+      this.groupIds.set(it.id, ids);
       m.setLatLng([it.lat, it.lng]);
       m.setRadius(it.approx ? 14 : it.phase === 'active' ? 10 : 8);
       m.setStyle({
@@ -164,7 +182,16 @@ export class MapView {
         // 固定據點、約略位置用虛線外框，跟精確的單次發放、活動分開
         dashArray: it.spot || it.approx ? '3 3' : '',
       });
-      m.setPopupContent(`<strong>${escapeHtml(it.title)}</strong><br>${escapeHtml(it.subtitle)}`);
+      m.setPopupContent(
+        g.length > 1
+          ? `<strong>這裡有 ${g.length} 個</strong><br>${g.map((x) => escapeHtml(x.title)).join('<br>')}`
+          : `<strong>${escapeHtml(it.title)}</strong><br>${escapeHtml(it.subtitle)}`,
+      );
+      if (g.length > 1) {
+        if (m.getTooltip()) m.setTooltipContent(`+${g.length - 1}`);
+        else m.bindTooltip(`+${g.length - 1}`, { permanent: true, direction: 'right', className: 'map-count', offset: [8, 0] });
+      } else if (m.getTooltip()) m.unbindTooltip();
+      for (const x of g) this.leaderOf.set(x.id, it.id);
     }
     for (const [id, m] of this.markers) {
       if (!keep.has(id)) {
@@ -201,7 +228,7 @@ export class MapView {
   focus(id: number): void {
     void this.ensure().then(() => {
       const it = this.items.find((x) => x.id === id);
-      const m = this.markers.get(id);
+      const m = this.markers.get(this.leaderOf.get(id) ?? id);
       if (!it || !m || !this.map) return;
       this.map.setView([it.lat, it.lng], Math.max(this.map.getZoom(), 15), { animate: true });
       m.openPopup();
