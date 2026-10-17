@@ -5,6 +5,8 @@ import { runModel } from './extract';
 import { ingestNews, NEWS_FEEDS } from './sources/news';
 import { syncVoyage, VOYAGE_PAGE } from './sources/voyage';
 import { apifyTrial } from './sources/apify';
+import { fetchThreadsPost, parseThreadsUrl, shortcodeToUnix } from './sources/link';
+import { ENDED_REPORTS_NEEDED, MAX_LINK_AGE_SEC, ReportError, ipHash, purgeReports, recheckLinks, reportEnded, submitLink } from './reports';
 import { addUserKeyword, listActiveKeywords, listAllKeywords, MAX_ACTIVE_KEYWORDS, normalizeKeyword, parseKeywordList, toKeywordOut, touchKeywords } from './keywords';
 import { CALLBACK_PATH, DELETE_PATH, DELETION_STATUS_PATH, UNINSTALL_PATH, deletionStatus, handleCallback, handleDelete, handleUninstall, startAuth } from './oauth';
 import { jsonResponse, nowSec, parseIsoToUnix } from './util';
@@ -111,6 +113,7 @@ async function handle(req: Request, env: Env, ctx: ExecutionContext): Promise<Re
         kinds: { giveaway: '發放', activity: '活動' },
         sources: {
           threads: env.THREADS_SEARCH_STATUS === 'approved' ? 'approved' : 'review',
+          link: { maxAgeDays: MAX_LINK_AGE_SEC / 86400, recheckMin: 30, endedReportsNeeded: ENDED_REPORTS_NEEDED },
           official: { name: '台北大洋流「未來航線」', url: VOYAGE_PAGE, intervalMin: 60 },
           news: { names: [...new Set(NEWS_FEEDS.map((f) => f.name))], intervalMin: 30 },
         },
@@ -140,6 +143,18 @@ async function handle(req: Request, env: Env, ctx: ExecutionContext): Promise<Re
     }
     const active = await listActiveKeywords(env, now);
     return jsonResponse({ status: r.status, keyword: toKeywordOut(r.keyword), max: MAX_ACTIVE_KEYWORDS, keywords: active.map(toKeywordOut) }, r.status === 'created' ? 201 : 200);
+  }
+
+  // 使用者貼上 Threads 貼文連結：{ url }
+  if (req.method === 'POST' && path === '/api/reports') {
+    const body = await readJson<{ url?: unknown }>(req);
+    if (typeof body.url !== 'string' || body.url.length > 2000) throw new HttpError(400, '請貼上 Threads 貼文連結');
+    return jsonResponse(await submitLink(env, body.url, await ipHash(env, req), now));
+  }
+
+  const endedMatch = /^\/api\/events\/(\d+)\/ended$/.exec(path);
+  if (req.method === 'POST' && endedMatch) {
+    return jsonResponse(await reportEnded(env, Number(endedMatch[1]), await ipHash(env, req), now));
   }
 
   const evMatch = /^\/api\/events\/(\d+)$/.exec(path);
@@ -192,6 +207,15 @@ async function handleAdmin(req: Request, env: Env, _ctx: ExecutionContext, path:
     const query = (body.query ?? '洋流').trim();
     const maxResults = Math.min(100, Math.max(1, Number(body.maxResults) || 50));
     return jsonResponse(await apifyTrial(env, query, maxResults, body.extract !== false));
+  }
+
+  // 只讀取貼文連結的內容、不判讀也不存檔，用來確認讀得到：{ url }
+  if (req.method === 'POST' && path === '/api/admin/link-fetch') {
+    const body = await readJson<{ url?: string }>(req);
+    const link = parseThreadsUrl(body.url ?? '');
+    if (!link) throw new HttpError(400, 'not a Threads post URL');
+    const postedAt = shortcodeToUnix(link.code, now);
+    return jsonResponse({ link, postedAt, fetched: await fetchThreadsPost(link.code) });
   }
 
   // 立刻同步官方航線與新聞
@@ -291,7 +315,7 @@ async function purgeOldData(env: Env, now: number): Promise<number> {
     env.DB.prepare('DELETE FROM events WHERE end_at < ?').bind(cutoff),
     env.DB.prepare('DELETE FROM posts WHERE fetched_at < ? AND id NOT IN (SELECT post_id FROM events)').bind(cutoff),
   ]);
-  return r.reduce((n, x) => n + (x.meta.changes ?? 0), 0);
+  return r.reduce((n, x) => n + (x.meta.changes ?? 0), 0) + (await purgeReports(env, cutoff));
 }
 
 async function refreshTokenJob(env: Env): Promise<void> {
@@ -320,8 +344,9 @@ async function runScheduled(env: Env, cron: string): Promise<void> {
   const voyage = minute < 10 ? await syncVoyage(env, now).catch((e) => ({ error: String(e) })) : null;
   const news = minute % 30 < 10 ? await ingestNews(env, now).catch((e) => ({ error: String(e) })) : null;
   const lifecycle = await updateLifecycle(env, client, now);
+  const links = await recheckLinks(env, now).catch((e) => ({ error: String(e) }));
   const purged = await purgeOldData(env, now);
-  console.log(JSON.stringify({ cron, mode: client.mode, ingest, backlog, voyage, news, lifecycle, purged }));
+  console.log(JSON.stringify({ cron, mode: client.mode, ingest, backlog, voyage, news, lifecycle, links, purged }));
 }
 
 export default {
@@ -335,7 +360,7 @@ export default {
       for (const [k, v] of Object.entries(cors)) out.headers.set(k, v);
       return out;
     } catch (e) {
-      const status = e instanceof HttpError ? e.status : 500;
+      const status = e instanceof HttpError || e instanceof ReportError ? e.status : 500;
       if (status === 500) console.error(e);
       return jsonResponse({ error: e instanceof Error ? e.message : String(e) }, status, cors);
     }

@@ -56,6 +56,8 @@ export interface EventOut {
   keyword: string | null;
   /** 只有日期、沒有公布時間 */
   allDay: boolean;
+  /** 有幾個人回報已發完／已結束 */
+  endedReports: number;
   post: {
     id: string;
     source: string;
@@ -90,7 +92,7 @@ export interface NewPost {
   permalink: string | null;
   posted_at: number;
   keyword: string | null;
-  source: 'threads' | 'manual' | 'news' | 'official';
+  source: 'threads' | 'manual' | 'news' | 'official' | 'link';
 }
 
 /** 寫入貼文，回傳是否為新貼文 */
@@ -220,10 +222,10 @@ export interface BacklogResult {
   errors: string[];
 }
 
-/** 重新處理之前沒成功抽取的貼文（例如 Workers AI 暫時出錯），只看最近 24 小時 */
+/** 重新處理之前沒成功抽取的貼文（例如 Workers AI 暫時出錯），只看最近 24 小時發的或收到的 */
 export async function processBacklog(env: Env, now = nowSec(), limit = 20): Promise<BacklogResult> {
-  const rows = await env.DB.prepare('SELECT * FROM posts WHERE processed_at IS NULL AND posted_at > ? ORDER BY posted_at ASC LIMIT ?')
-    .bind(now - LOOKBACK_SEC, limit)
+  const rows = await env.DB.prepare('SELECT * FROM posts WHERE processed_at IS NULL AND (posted_at > ? OR fetched_at > ?) ORDER BY posted_at ASC LIMIT ?')
+    .bind(now - LOOKBACK_SEC, now - LOOKBACK_SEC, limit)
     .all<PostRow>();
   const out: BacklogResult = { processed: 0, created: 0, errors: [] };
   for (const post of rows.results) {
@@ -328,7 +330,11 @@ export interface ListQuery {
   keywords?: string[];
 }
 
-type JoinedRow = EventRow & { username: string | null; permalink: string | null; text: string; posted_at: number; keyword: string | null; source: string };
+type JoinedRow = EventRow & { username: string | null; permalink: string | null; text: string; posted_at: number; keyword: string | null; source: string; ended_reports: number | null };
+
+const JOINED_SELECT = `SELECT e.*, p.username, p.permalink, p.text, p.posted_at, p.keyword, p.source,
+    (SELECT COUNT(*) FROM ended_reports r WHERE r.event_id = e.id) AS ended_reports
+  FROM events e JOIN posts p ON p.id = e.post_id`;
 
 export function toEventOut(r: JoinedRow, now: number): EventOut {
   return {
@@ -345,6 +351,7 @@ export function toEventOut(r: JoinedRow, now: number): EventOut {
     confidence: r.confidence,
     keyword: r.keyword,
     allDay: r.all_day === 1,
+    endedReports: r.ended_reports ?? 0,
     post: { id: r.post_id, source: r.source, username: r.username, permalink: r.permalink, postedAt: r.posted_at, text: r.text },
   };
 }
@@ -360,15 +367,15 @@ export async function listEvents(env: Env, q: ListQuery): Promise<EventOut[]> {
     binds.push(q.lat - dLat, q.lat + dLat, q.lng - dLng, q.lng + dLng);
   }
   if (q.keywords && q.keywords.length > 0) {
-    const ors: string[] = [];
+    // 使用者主動回報的貼文不一定有寫關鍵字，一律顯示
+    const ors: string[] = ["p.source = 'link'"];
     for (const k of q.keywords) {
       ors.push('p.keyword = ?', "p.text LIKE ? ESCAPE '\\'");
       binds.push(k, `%${k.replace(/[\\%_]/g, '\\$&')}%`);
     }
     conds.push(`(${ors.join(' OR ')})`);
   }
-  const sql = `SELECT e.*, p.username, p.permalink, p.text, p.posted_at, p.keyword, p.source
-    FROM events e JOIN posts p ON p.id = e.post_id
+  const sql = `${JOINED_SELECT}
     WHERE ${conds.join(' AND ')}
     ORDER BY e.start_at ASC LIMIT 200`;
   const r = await env.DB.prepare(sql)
@@ -378,9 +385,7 @@ export async function listEvents(env: Env, q: ListQuery): Promise<EventOut[]> {
 }
 
 export async function getEvent(env: Env, id: number, now: number): Promise<EventOut | null> {
-  const row = await env.DB.prepare(
-    'SELECT e.*, p.username, p.permalink, p.text, p.posted_at, p.keyword, p.source FROM events e JOIN posts p ON p.id = e.post_id WHERE e.id = ? AND e.lat IS NOT NULL',
-  )
+  const row = await env.DB.prepare(`${JOINED_SELECT} WHERE e.id = ? AND e.lat IS NOT NULL`)
     .bind(id)
     .first<JoinedRow>();
   return row ? toEventOut(row, now) : null;

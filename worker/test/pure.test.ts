@@ -3,6 +3,7 @@ import { detectEnded } from '../src/events';
 import { buildMessages, normalizeExtraction } from '../src/extract';
 import { parseThreadsTimestamp } from '../src/threads';
 import { parseIsoToUnix } from '../src/util';
+import { parseEmbedHtml, parseThreadsUrl, shortcodeToUnix } from '../src/sources/link';
 
 describe('parseThreadsTimestamp', () => {
   it('accepts Threads +0000 offsets', () => {
@@ -215,5 +216,27 @@ describe('voyage time helpers', () => {
   });
   it('computes Taipei midnight', () => {
     expect(taipeiMidnight('2026-10-25')).toBe(Date.parse('2026-10-24T16:00:00Z') / 1000);
+  });
+});
+
+describe('threads link helpers', () => {
+  it('finds the post code in pasted text', () => {
+    expect(parseThreadsUrl('快看 https://www.threads.net/@ab.c_1/post/DNG2tXiBjzN?xmt=abc 謝謝')).toEqual({ code: 'DNG2tXiBjzN', username: 'ab.c_1' });
+    expect(parseThreadsUrl('https://threads.com/t/DNG2tXiBjzN')).toEqual({ code: 'DNG2tXiBjzN', username: null });
+    expect(parseThreadsUrl('https://www.instagram.com/p/DNG2tXiBjzN/')).toBeNull();
+  });
+  it('decodes the creation time from the code', () => {
+    // 嵌入頁顯示 1:16 PM · Aug 8, 2025（美西時間）
+    expect(shortcodeToUnix('DNG2tXiBjzN')).toBe(Math.floor(Date.parse('2025-08-08T20:16:19.357Z') / 1000));
+    expect(shortcodeToUnix('AAAAAAAAAAA')).toBeNull();
+  });
+  it('reads the main post from an embed page, skipping the parent post', () => {
+    const block = (full: boolean, user: string, body: string) =>
+      `<div class="OuterContainer${full ? ' OuterContainerFull' : ''}"><div class="HeaderContainer"><a class="HeaderLink"><span>${user}</span></a></div>` +
+      `<span class="TextContentContainer"><span class="BodyTextContainer"><span>${body}</span></span></span><div class="PostDateContainer"><span class="Timestamp">1:16 PM</span></div></div>`;
+    const html = block(false, 'parent', '上一層') + block(true, 'giver', '今天 15:00<br>市政府站 <a href="#">#洋流</a> 發飄帶&amp;貼紙');
+    expect(parseEmbedHtml(html)).toEqual({ status: 'ok', username: 'giver', text: '今天 15:00\n市政府站 #洋流 發飄帶&貼紙' });
+    expect(parseEmbedHtml('<div class="OuterErrorContainer">Thread not available</div>')).toEqual({ status: 'gone' });
+    expect(parseEmbedHtml('<html>login</html>').status).toBe('error');
   });
 });
