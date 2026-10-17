@@ -1,0 +1,20 @@
+{
+  "name": "dragon-radar-worker",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "db:migrate:local": "wrangler d1 migrations apply dragon-radar --local",
+    "db:migrate:remote": "wrangler d1 migrations apply dragon-radar --remote",
+    "db:seed:local": "wrangler d1 execute dragon-radar --local --file=./scripts/seed-events.sql"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^4.20251001.0",
+    "typescript": "^5.6.0",
+    "vitest": "^4.0.0",
+    "wrangler": "^4.0.0"
+  }
+}

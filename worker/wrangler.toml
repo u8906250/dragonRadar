@@ -1,0 +1,35 @@
+name = "dragon-radar"
+main = "src/index.ts"
+compatibility_date = "2025-10-01"
+compatibility_flags = ["nodejs_compat"]
+
+[observability]
+enabled = true
+
+# 每 10 分鐘抓 Threads 並更新事件狀態；每週一 03:00 UTC 更新 Threads token
+[triggers]
+crons = ["*/10 * * * *", "0 3 * * 1"]
+
+[ai]
+binding = "AI"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "dragon-radar"
+database_id = "REPLACE_WITH_YOUR_D1_DATABASE_ID"
+migrations_dir = "migrations"
+
+[vars]
+# 允許的前端來源，逗號分隔。GitHub Pages 的網域加上本機開發
+ALLOWED_ORIGINS = "https://u8906250.github.io,http://localhost:5173"
+# "true" 時不打 Threads API，改用內建示範貼文
+MOCK_MODE = "false"
+THREADS_API_BASE = "https://graph.threads.net/v1.0"
+# Nominatim 要求識別用的 User-Agent，請改成可聯絡到你的資訊
+NOMINATIM_USER_AGENT = "dragonRadar/0.1 (https://github.com/u8906250/dragonRadar)"
+AI_MODEL = "@cf/meta/llama-3.3-70b-instruct-fp8-fast"
+DEFAULT_RADIUS_KM = "30"
+
+# Secrets（用 wrangler secret put 設定，不要寫在這裡）
+#   THREADS_ACCESS_TOKEN  Threads 長效 token
+#   ADMIN_TOKEN           /api/admin/* 的 Bearer token

@@ -1,0 +1,17 @@
+{
+  "name": "發放雷達",
+  "short_name": "發放雷達",
+  "description": "從 Threads 找出附近正在發放的活動，用雷達顯示相對位置",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#07130c",
+  "theme_color": "#06281a",
+  "lang": "zh-Hant-TW",
+  "icons": [
+    { "src": "icon-192.png", "sizes": "192x192", "type": "image/png" },
+    { "src": "icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any maskable" },
+    { "src": "icon.svg", "sizes": "any", "type": "image/svg+xml" }
+  ]
+}

@@ -1,0 +1,155 @@
+:root {
+  --bg: #07130c;
+  --panel: #0c1f14;
+  --line: #1f4a30;
+  --green: #3cff8a;
+  --green-dim: #1f8a4c;
+  --yellow: #ffd43b;
+  --text: #d8f5e3;
+  --muted: #7fa58f;
+  --chip-bg: rgba(12, 31, 20, 0.88);
+  --topbar-h: 52px;
+}
+
+* { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+[hidden] { display: none !important; }
+html, body { margin: 0; height: 100%; }
+body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: system-ui, -apple-system, 'Noto Sans TC', 'PingFang TC', 'Microsoft JhengHei', sans-serif;
+  -webkit-font-smoothing: antialiased;
+  overscroll-behavior: none;
+  touch-action: manipulation;
+}
+button, select, a { touch-action: manipulation; }
+
+/* 手機：固定高度、三列。雷達吃掉中間所有空間，清單在底部可上拉 */
+#app {
+  height: 100dvh;
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  overflow: hidden;
+}
+
+.topbar {
+  display: flex; align-items: center; justify-content: space-between; gap: 8px;
+  min-height: var(--topbar-h);
+  padding: 6px 14px 6px 16px;
+  padding-top: calc(6px + env(safe-area-inset-top));
+  border-bottom: 1px solid var(--line); background: var(--panel);
+}
+.brand { display: flex; align-items: center; gap: 8px; font-weight: 700; letter-spacing: 0.04em; white-space: nowrap; font-size: 17px; }
+.brand-dot { width: 10px; height: 10px; border-radius: 50%; background: var(--yellow); box-shadow: 0 0 8px var(--yellow); }
+.badge { font-size: 11px; padding: 2px 8px; border-radius: 999px; background: var(--green-dim); color: #fff; font-weight: 500; }
+.badge.mock { background: #8a6d1f; }
+
+.chip {
+  font: inherit; font-size: 14px; color: var(--text);
+  min-height: 40px; padding: 8px 14px; border-radius: 999px;
+  background: var(--chip-bg); border: 1px solid var(--line);
+  backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px);
+  cursor: pointer; white-space: nowrap; line-height: 1;
+}
+.chip.on { background: var(--green-dim); border-color: var(--green-dim); color: #fff; }
+.chip.primary { border-color: var(--green); color: var(--green); }
+.chips { display: flex; gap: 6px; }
+.link-btn { font: inherit; font-size: 13px; border: 0; background: transparent; color: var(--green); padding: 4px; text-decoration: underline; cursor: pointer; }
+
+#stage { position: relative; min-height: 0; padding: 8px 12px; display: grid; grid-template-rows: minmax(0, 1fr); }
+.view { width: 100%; height: 100%; min-height: 0; display: grid; place-items: center; }
+.radar { width: 100%; height: 100%; display: block; filter: drop-shadow(0 0 18px rgba(60, 255, 138, 0.15)); }
+#map-view { border-radius: 14px; overflow: hidden; border: 1px solid var(--line); }
+#map { width: 100%; height: 100%; background: #0b1a11; }
+
+.overlay { position: absolute; bottom: 16px; z-index: 5; display: flex; gap: 6px; align-items: center; }
+.overlay-bl { left: 16px; }
+.overlay-br { right: 16px; top: 12px; bottom: auto; }
+
+/* 雷達 */
+.radar .bezel { fill: #0f1a13; stroke: #2a3b30; stroke-width: 6; }
+.radar .screen { stroke: var(--green-dim); stroke-width: 2; }
+.radar .grid circle, .radar .grid line { fill: none; stroke: var(--green); stroke-opacity: 0.28; stroke-width: 1; }
+.radar .grid .outer { stroke-opacity: 0.6; }
+.radar .me { fill: var(--green); filter: drop-shadow(0 0 4px var(--green)); }
+.radar .north { fill: var(--muted); font-size: 13px; font-weight: 700; }
+.radar .north.live { fill: var(--yellow); }
+.radar .scale-label { fill: var(--muted); font-size: 11px; }
+.radar .blip { cursor: pointer; }
+.radar .blip .hit { fill: transparent; }
+.radar .blip .dot { fill: var(--yellow); stroke: #6b4e00; stroke-width: 1; }
+.radar .blip .ping { fill: none; stroke: var(--yellow); stroke-width: 2; opacity: 0; }
+.radar .blip.phase-active .ping { animation: ping 1.6s ease-out infinite; }
+.radar .blip.phase-active .dot { animation: blink 1.2s steps(2, start) infinite; }
+.radar .blip.phase-soon .dot { fill: #8fd3a8; stroke: #2c5a3c; opacity: 0.75; }
+.radar .blip.out .dot { opacity: 0.5; }
+.radar .blip .label { fill: var(--text); font-size: 12px; paint-order: stroke; stroke: #052016; stroke-width: 3px; stroke-linejoin: round; pointer-events: none; }
+.radar .blip.selected .dot { stroke: #fff; stroke-width: 2.5; }
+@keyframes ping { 0% { r: 6; opacity: 0.9; } 100% { r: 22; opacity: 0; } }
+@keyframes blink { 0% { opacity: 1; } 100% { opacity: 0.35; } }
+@media (prefers-reduced-motion: reduce) { .radar .sweep animateTransform { display: none; } .radar .blip .ping, .radar .blip .dot { animation: none !important; } }
+
+/* 底部清單面板 */
+.panel {
+  display: flex; flex-direction: column; min-height: 0;
+  max-height: 36dvh;
+  background: var(--panel); border-top: 1px solid var(--line); border-radius: 18px 18px 0 0;
+  padding-bottom: env(safe-area-inset-bottom);
+  box-shadow: 0 -6px 24px rgba(0, 0, 0, 0.35);
+  transition: max-height 0.25s ease;
+}
+.panel.expanded { max-height: 78dvh; }
+.panel-handle { display: block; width: 100%; height: 26px; border: 0; background: transparent; cursor: pointer; padding: 0; }
+.panel-handle span { display: block; width: 40px; height: 5px; margin: 0 auto; border-radius: 3px; background: #2f5a40; }
+.panel-head { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; font-size: 13px; padding: 0 16px 8px; }
+.panel-head .right { margin-left: auto; }
+.muted { color: var(--muted); }
+.hint { padding: 0 16px 16px; margin: 0; font-size: 14px; line-height: 1.5; }
+.event-list { list-style: none; margin: 0; padding: 0 12px 12px; display: grid; gap: 8px; overflow: auto; -webkit-overflow-scrolling: touch; min-height: 0; }
+.ev { padding: 12px 14px; border: 1px solid var(--line); border-radius: 12px; background: #0a1a10; cursor: pointer; min-height: 44px; }
+.ev.selected { border-color: var(--green); }
+.ev-title { font-weight: 600; display: flex; align-items: center; gap: 8px; font-size: 15px; }
+.ev-title .dot { width: 9px; height: 9px; border-radius: 50%; background: var(--muted); flex: 0 0 auto; }
+.ev.phase-active .dot { background: var(--yellow); box-shadow: 0 0 8px var(--yellow); }
+.ev.phase-soon .dot { background: #8fd3a8; }
+.ev-meta, .ev-time { font-size: 13px; color: var(--muted); margin-top: 3px; }
+.ev.phase-active .ev-time { color: var(--yellow); }
+
+/* 通知橫幅：浮在最上面，不推擠版面 */
+.banner {
+  position: fixed; left: 12px; right: 12px; z-index: 950;
+  top: calc(var(--topbar-h) + 8px + env(safe-area-inset-top));
+  padding: 12px 14px; border-radius: 12px;
+  background: #2a2a10; border: 1px solid var(--yellow); color: #fff3c4; font-size: 14px; line-height: 1.4;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
+}
+
+/* 事件詳情：底部抽屜 */
+.sheet {
+  position: fixed; left: 0; right: 0; bottom: 0; z-index: 900;
+  background: var(--panel); border-top: 1px solid var(--line); border-radius: 18px 18px 0 0;
+  padding: 10px 16px calc(16px + env(safe-area-inset-bottom)); max-height: 72dvh; overflow: auto;
+  box-shadow: 0 -8px 30px rgba(0, 0, 0, 0.55);
+}
+.sheet-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 6px; font-size: 17px; }
+.sheet-body p { margin: 0 0 10px; line-height: 1.6; font-size: 15px; }
+.sheet-body blockquote { margin: 0 0 12px; padding: 8px 12px; border-left: 3px solid var(--green-dim); color: var(--muted); font-size: 13px; white-space: pre-wrap; }
+.sheet-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.btn { font: inherit; font-size: 15px; color: var(--text); background: #0a1a10; border: 1px solid var(--line); border-radius: 10px; padding: 10px 14px; min-height: 44px; display: inline-flex; align-items: center; text-decoration: none; cursor: pointer; }
+.btn.primary { border-color: var(--green); color: var(--green); }
+
+.leaflet-container { font: inherit; }
+.leaflet-popup-content-wrapper, .leaflet-popup-tip { background: var(--panel); color: var(--text); }
+
+/* 平板與桌機：清單移到右側欄 */
+@media (min-width: 900px) {
+  #app { grid-template-columns: minmax(0, 1fr) 380px; grid-template-rows: auto minmax(0, 1fr); }
+  .topbar { grid-column: 1 / -1; }
+  #stage { grid-column: 1; grid-row: 2; padding: 16px; }
+  .panel { grid-column: 2; grid-row: 2; max-height: none; border-top: 0; border-left: 1px solid var(--line); border-radius: 0; box-shadow: none; }
+  .panel.expanded { max-height: none; }
+  .panel-handle { display: none; }
+  .panel-head { padding-top: 12px; }
+  .sheet { left: auto; width: 440px; right: 16px; bottom: 16px; border-radius: 16px; border: 1px solid var(--line); }
+  .banner { left: auto; right: 16px; width: 440px; }
+}

@@ -1,0 +1,4 @@
+# 複製成 .dev.vars 供 wrangler dev 使用
+MOCK_MODE=true
+ADMIN_TOKEN=dev-admin-token
+# THREADS_ACCESS_TOKEN=

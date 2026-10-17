@@ -1,0 +1,63 @@
+<!doctype html>
+<html lang="zh-Hant-TW">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="theme-color" content="#06281a" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="apple-mobile-web-app-title" content="發放雷達" />
+    <link rel="manifest" href="manifest.webmanifest" />
+    <link rel="icon" href="icon.svg" type="image/svg+xml" />
+    <link rel="apple-touch-icon" href="icon-192.png" />
+    <title>發放雷達</title>
+    <meta name="description" content="從 Threads 找出附近正在發放的活動，用雷達顯示相對位置" />
+  </head>
+  <body>
+    <div id="app">
+      <header class="topbar">
+        <div class="brand">
+          <span class="brand-dot"></span>
+          發放雷達
+          <span id="mode-badge" class="badge" hidden></span>
+        </div>
+        <button type="button" id="notify-btn" class="chip" title="開啟聲音與通知">通知</button>
+      </header>
+
+      <main id="stage">
+        <section id="radar-view" class="view" aria-label="雷達"></section>
+        <section id="map-view" class="view" hidden aria-label="地圖"><div id="map"></div></section>
+
+        <div class="overlay overlay-bl">
+          <div class="chips" id="scale-chips" role="radiogroup" aria-label="雷達範圍">
+            <button type="button" class="chip" data-scale="1" role="radio" aria-checked="false">1 km</button>
+            <button type="button" class="chip on" data-scale="5" role="radio" aria-checked="true">5 km</button>
+            <button type="button" class="chip" data-scale="20" role="radio" aria-checked="false">20 km</button>
+          </div>
+        </div>
+        <div class="overlay overlay-br">
+          <button type="button" id="compass-btn" class="chip" hidden title="雷達跟著手機方向轉">指北針</button>
+          <button type="button" id="pick-origin" class="chip" hidden>設定位置</button>
+          <button type="button" id="view-btn" class="chip primary">地圖</button>
+        </div>
+      </main>
+
+      <aside id="panel" class="panel">
+        <button type="button" class="panel-handle" id="panel-toggle" aria-label="展開或收合清單"><span></span></button>
+        <div class="panel-head">
+          <strong id="count-label">載入中…</strong>
+          <span id="origin-label" class="muted">定位中…</span>
+          <button type="button" id="use-gps" class="link-btn" hidden>改用 GPS</button>
+          <span id="updated-label" class="muted right"></span>
+        </div>
+        <ul id="event-list" class="event-list"></ul>
+        <p id="empty-hint" class="muted hint" hidden>目前附近沒有發放活動。雷達每分鐘更新，有新的會嗶一聲。</p>
+      </aside>
+
+      <div id="banner" class="banner" hidden></div>
+      <div id="detail" class="sheet" hidden></div>
+    </div>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>
