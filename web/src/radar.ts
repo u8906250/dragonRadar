@@ -39,12 +39,12 @@ const LINE_PX = 14;
 const NICE_KM = [1, 2, 5, 10, 20, 50, 100, 200, 300];
 
 /**
- * 近密遠疏的程度：範圍 20 km 以內照比例；45 km 以上（雙北、全台）距離取對數，
+ * 近密遠疏的程度：範圍 100 km 以內（含雙北）照比例；200 km 以上（全台）距離取對數，
  * 範圍的 1/80 以內接近等比例，再往外越壓越密。中間逐漸過渡，雙指縮放時畫面不會跳。
  */
 function logKnee(scaleKm: number): number {
-  if (scaleKm <= 20) return 0;
-  return 80 * Math.min(1, (scaleKm - 20) / 25) ** 2;
+  if (scaleKm <= 100) return 0;
+  return 80 * Math.min(1, (scaleKm - 100) / 100) ** 2;
 }
 
 /** 距離換成半徑比例（0 = 圓心，1 = 外圈，超出範圍會大於 1） */
@@ -227,7 +227,7 @@ export class Radar {
     );
   }
 
-  /** 範圍 20 km 以內照比例，更大時近密遠疏，不然附近幾公里的光點全擠在圓心 */
+  /** 範圍 100 km 以內照比例，全台時近密遠疏，不然附近幾公里的光點全擠在圓心 */
   setScale(km: number): void {
     this.scaleKm = km;
     this.rings.replaceChildren();
