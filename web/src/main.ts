@@ -19,7 +19,7 @@ const LS_SCALE = 'dr.scale';
 const LS_ORIGIN = 'dr.origin';
 const LS_THEME = 'dr.theme';
 const LS_BASE = 'dr.base';
-const BASES: BaseMap[] = ['clear', 'nlsc', 'osm'];
+const BASES: BaseMap[] = ['nlsc', 'osm'];
 const LS_KEYWORDS = 'dr.keywords';
 const KEYWORD_RE_INVALID = /[<>{}\\%_]/;
 
@@ -118,7 +118,7 @@ const kwShareNote = $('#kw-share-note');
 const locateBtn = $<HTMLButtonElement>('#locate-btn');
 const baseChipsEl = $('#base-chips');
 const baseChips = Array.from(document.querySelectorAll<HTMLButtonElement>('#base-chips [data-base]'));
-let baseMap: BaseMap = (BASES as string[]).includes(lsGet(LS_BASE) ?? '') ? (lsGet(LS_BASE) as BaseMap) : 'clear';
+let baseMap: BaseMap = (BASES as string[]).includes(lsGet(LS_BASE) ?? '') ? (lsGet(LS_BASE) as BaseMap) : 'nlsc';
 /** 最近一次 GPS 的誤差（公尺），手動或預設位置時為 null */
 let gpsAccuracy: number | null = null;
 const scaleChips = Array.from(document.querySelectorAll<HTMLButtonElement>('#scale-chips [data-scale]'));

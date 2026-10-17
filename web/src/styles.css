@@ -325,11 +325,14 @@ button, select, a { touch-action: manipulation; }
 .theme-item small { color: var(--muted); font-size: 12px; }
 .theme-item .check { margin-left: auto; font-weight: 800; color: var(--highlight); }
 
-.maplibregl-map { font: inherit; }
-.maplibregl-popup-content { background: var(--panel); color: var(--text); border: var(--border-w) solid var(--line); border-radius: 10px; padding: 8px 12px; font-size: 13px; line-height: 1.5; }
-.maplibregl-popup-tip { border-top-color: var(--panel) !important; border-bottom-color: var(--panel) !important; }
+.leaflet-container { font: inherit; }
+.leaflet-popup-content-wrapper, .leaflet-popup-tip { background: var(--panel); color: var(--text); }
+.leaflet-popup-content { margin: 8px 12px; font-size: 13px; line-height: 1.5; }
+/* 深色主題：底圖反轉成深色調，標記與定位點不受影響 */
+.map-dark .leaflet-tile-pane { filter: invert(1) hue-rotate(180deg) brightness(0.85) contrast(0.9); }
+.leaflet-bottom.leaflet-right { margin-bottom: 58px; }
 #base-chips .chip { padding: 8px 10px; font-size: 13px; }
-.maplibregl-ctrl-bottom-right { bottom: 66px; }
+
 .banner { cursor: pointer; }
 
 /* 平板與桌機：清單移到右側欄 */

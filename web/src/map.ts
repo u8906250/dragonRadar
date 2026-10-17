@@ -1,4 +1,4 @@
-import type { GeoJSONSource, Map as MlMap, MapGeoJSONFeature, Popup, StyleSpecification } from 'maplibre-gl';
+import type * as Leaflet from 'leaflet';
 import type { LatLng } from './geo';
 import type { EventKind, Phase } from './types';
 
@@ -13,25 +13,21 @@ export interface MapItem {
   selected: boolean;
 }
 
-/** 底圖：clear 向量地圖（依主題亮暗）、nlsc 台灣通用電子地圖、osm */
-export type BaseMap = 'clear' | 'nlsc' | 'osm';
+/** 底圖：nlsc 台灣通用電子地圖（國土測繪中心）、osm OpenStreetMap */
+export type BaseMap = 'nlsc' | 'osm';
 
-const NLSC_ATTR = '<a href="https://maps.nlsc.gov.tw/" target="_blank" rel="noopener">內政部國土測繪中心</a>';
-const OSM_ATTR = '&copy; <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a>';
-
-function rasterStyle(tiles: string, attribution: string, maxzoom: number): StyleSpecification {
-  return {
-    version: 8,
-    sources: { base: { type: 'raster', tiles: [tiles], tileSize: 256, maxzoom, attribution } },
-    layers: [{ id: 'base', type: 'raster', source: 'base' }],
-  };
-}
-
-function styleFor(base: BaseMap, dark: boolean): string | StyleSpecification {
-  if (base === 'nlsc') return rasterStyle('https://wmts.nlsc.gov.tw/wmts/EMAP/default/GoogleMapsCompatible/{z}/{y}/{x}', NLSC_ATTR, 19);
-  if (base === 'osm') return rasterStyle('https://tile.openstreetmap.org/{z}/{x}/{y}.png', OSM_ATTR, 19);
-  return dark ? 'https://tiles.openfreemap.org/styles/dark' : 'https://tiles.openfreemap.org/styles/liberty';
-}
+const BASES: Record<BaseMap, { url: string; attribution: string; maxNativeZoom: number }> = {
+  nlsc: {
+    url: 'https://wmts.nlsc.gov.tw/wmts/EMAP/default/GoogleMapsCompatible/{z}/{y}/{x}',
+    attribution: '<a href="https://maps.nlsc.gov.tw/" target="_blank" rel="noopener">內政部國土測繪中心</a>',
+    maxNativeZoom: 19,
+  },
+  osm: {
+    url: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+    attribution: '&copy; <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a>',
+    maxNativeZoom: 19,
+  },
+};
 
 function cssVar(name: string, fallback: string): string {
   const v = getComputedStyle(document.documentElement).getPropertyValue(name).trim();
@@ -44,53 +40,39 @@ function markerColor(kind: EventKind, phase: Phase): string {
   return phase === 'soon' ? cssVar('--blip-soon', '#ffe08a') : cssVar('--blip', '#ea611d');
 }
 
-/** 以公尺為半徑的圓（給定位誤差範圍用） */
-function circlePolygon(c: LatLng, meters: number, steps = 48): { type: 'Feature'; properties: Record<string, never>; geometry: { type: 'Polygon'; coordinates: [number, number][][] } } {
-  const coords: [number, number][] = [];
-  const dLat = meters / 111_320;
-  const dLng = meters / (111_320 * Math.cos((c.lat * Math.PI) / 180));
-  for (let i = 0; i <= steps; i++) {
-    const a = (i / steps) * Math.PI * 2;
-    coords.push([c.lng + dLng * Math.cos(a), c.lat + dLat * Math.sin(a)]);
-  }
-  return { type: 'Feature', properties: {}, geometry: { type: 'Polygon', coordinates: [coords] } };
-}
-
 const escapeHtml = (s: string): string =>
   s.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c] as string);
 
-/** 中文地名優先：繁中 > 中文 > 原名 */
-const ZH_NAME = ['coalesce', ['get', 'name:zh-Hant'], ['get', 'name:zh'], ['get', 'name:nonlatin'], ['get', 'name']];
-
-/**
- * MapLibre 向量地圖。第一次切到地圖時才載入（約 250 KB gzip），雷達畫面不受影響。
- */
+/** Leaflet 地圖，第一次切到地圖時才載入 */
 export class MapView {
-  private map: MlMap | null = null;
+  private L: typeof Leaflet | null = null;
+  private map: Leaflet.Map | null = null;
   private loading: Promise<void> | null = null;
-  private popup: Popup | null = null;
+  private tiles: Leaflet.TileLayer | null = null;
+  private layer: Leaflet.LayerGroup | null = null;
+  private originMarker: Leaflet.CircleMarker | null = null;
+  private accuracyCircle: Leaflet.Circle | null = null;
+  private readonly markers = new Map<number, Leaflet.CircleMarker>();
   private items: MapItem[] = [];
   private origin: LatLng;
   private accuracy: number | null = null;
   private pickMode = false;
   private base: BaseMap;
-  private dark = false;
-  private lib: typeof import('maplibre-gl') | null = null;
 
   constructor(
     private readonly el: HTMLElement,
     origin: LatLng,
     private readonly handlers: { onSelect: (id: number) => void; onPickOrigin: (p: LatLng) => void },
-    base: BaseMap = 'clear',
+    base: BaseMap = 'nlsc',
   ) {
     this.origin = origin;
     this.base = base;
   }
 
-  /** 地圖畫面顯示時呼叫：第一次會載入 MapLibre，之後只重算尺寸 */
+  /** 地圖畫面顯示時呼叫：第一次載入 Leaflet，之後重算尺寸 */
   invalidate(): void {
     if (this.map) {
-      this.map.resize();
+      this.map.invalidateSize();
       return;
     }
     void this.ensure();
@@ -99,153 +81,125 @@ export class MapView {
   private ensure(): Promise<void> {
     if (this.loading) return this.loading;
     this.loading = (async () => {
-      const [lib] = await Promise.all([import('maplibre-gl'), import('maplibre-gl/dist/maplibre-gl.css')]);
-      this.lib = lib;
-      const map = new lib.Map({
-        container: this.el,
-        style: styleFor(this.base, this.dark),
-        center: [this.origin.lng, this.origin.lat],
-        zoom: 14,
-        attributionControl: { compact: true },
-        // 中文字用手機內建字型繪製，清楚又不用下載字型檔
-        localIdeographFontFamily: "'PingFang TC', 'Noto Sans TC', 'Microsoft JhengHei', sans-serif",
-        pitchWithRotate: false,
-        dragRotate: false,
-      });
-      map.touchZoomRotate.disableRotation();
-      map.addControl(new lib.NavigationControl({ showCompass: false }), 'top-left');
-      map.on('style.load', () => this.installLayers());
-      // 版權標示預設收合成「i」，不要蓋住下方的底圖按鈕
-      map.once('idle', () => {
-        this.el.querySelector('.maplibregl-ctrl-attrib')?.classList.remove('maplibregl-compact-show');
-      });
-      map.on('click', (e) => {
-        const hit = map.queryRenderedFeatures(e.point, { layers: ['events-dot'] })[0] as MapGeoJSONFeature | undefined;
-        if (hit) {
-          this.handlers.onSelect(Number(hit.properties?.id));
-          return;
-        }
-        if (this.pickMode) this.handlers.onPickOrigin({ lat: e.lngLat.lat, lng: e.lngLat.lng });
-      });
-      map.on('mouseenter', 'events-dot', () => (map.getCanvas().style.cursor = 'pointer'));
-      map.on('mouseleave', 'events-dot', () => (map.getCanvas().style.cursor = this.pickMode ? 'crosshair' : ''));
+      const [mod] = await Promise.all([import('leaflet'), import('leaflet/dist/leaflet.css')]);
+      const L = ((mod as unknown as { default?: typeof Leaflet }).default ?? mod) as typeof Leaflet;
+      this.L = L;
+      const map = L.map(this.el, { zoomControl: true, attributionControl: true }).setView([this.origin.lat, this.origin.lng], 15);
+      map.attributionControl.setPrefix(false);
       this.map = map;
+      this.layer = L.layerGroup().addTo(map);
+      this.accuracyCircle = L.circle([this.origin.lat, this.origin.lng], {
+        radius: 0,
+        color: '#3b82f6',
+        weight: 1,
+        opacity: 0.5,
+        fillColor: '#3b82f6',
+        fillOpacity: 0.12,
+        interactive: false,
+      }).addTo(map);
+      this.originMarker = L.circleMarker([this.origin.lat, this.origin.lng], {
+        radius: 8,
+        color: '#ffffff',
+        weight: 3,
+        fillColor: '#3b82f6',
+        fillOpacity: 1,
+      })
+        .bindTooltip('我的位置')
+        .addTo(map);
+      map.on('click', (e: Leaflet.LeafletMouseEvent) => {
+        if (this.pickMode) this.handlers.onPickOrigin({ lat: e.latlng.lat, lng: e.latlng.lng });
+      });
+      this.applyBase();
+      this.pushOrigin();
+      this.pushItems();
+      // 地圖容器剛從 hidden 變成顯示，尺寸要再算一次
+      requestAnimationFrame(() => map.invalidateSize());
     })();
     return this.loading;
   }
 
-  /** 換底圖或換主題後，重新加上我們自己的圖層，並把地名改成中文 */
-  private installLayers(): void {
+  private applyBase(): void {
+    const L = this.L;
     const map = this.map;
-    if (!map) return;
-    if (this.base === 'clear') {
-      for (const layer of map.getStyle().layers ?? []) {
-        if (layer.type === 'symbol' && map.getLayoutProperty(layer.id, 'text-field') !== undefined) {
-          map.setLayoutProperty(layer.id, 'text-field', ZH_NAME as never);
-        }
-      }
-    }
-    map.addSource('accuracy', { type: 'geojson', data: { type: 'FeatureCollection', features: [] } });
-    map.addSource('origin', { type: 'geojson', data: { type: 'FeatureCollection', features: [] } });
-    map.addSource('events', { type: 'geojson', data: { type: 'FeatureCollection', features: [] } });
-    map.addLayer({ id: 'accuracy-fill', type: 'fill', source: 'accuracy', paint: { 'fill-color': '#3b82f6', 'fill-opacity': 0.12 } });
-    map.addLayer({ id: 'accuracy-line', type: 'line', source: 'accuracy', paint: { 'line-color': '#3b82f6', 'line-width': 1, 'line-opacity': 0.5 } });
-    map.addLayer({
-      id: 'events-dot',
-      type: 'circle',
-      source: 'events',
-      paint: {
-        'circle-radius': ['get', 'radius'],
-        'circle-color': ['get', 'color'],
-        'circle-opacity': ['get', 'opacity'],
-        'circle-stroke-color': ['get', 'stroke'],
-        'circle-stroke-width': ['get', 'strokeWidth'],
-      },
-    });
-    map.addLayer({
-      id: 'origin-dot',
-      type: 'circle',
-      source: 'origin',
-      paint: { 'circle-radius': 8, 'circle-color': '#3b82f6', 'circle-stroke-color': '#ffffff', 'circle-stroke-width': 3 },
-    });
-    this.pushOrigin();
-    this.pushItems();
+    if (!L || !map) return;
+    this.tiles?.remove();
+    const b = BASES[this.base];
+    this.tiles = L.tileLayer(b.url, { maxZoom: 20, maxNativeZoom: b.maxNativeZoom, attribution: b.attribution }).addTo(map);
   }
 
   private pushOrigin(): void {
-    const map = this.map;
-    if (!map?.getSource('origin')) return;
-    (map.getSource('origin') as GeoJSONSource).setData({
-      type: 'Feature',
-      properties: {},
-      geometry: { type: 'Point', coordinates: [this.origin.lng, this.origin.lat] },
-    });
-    (map.getSource('accuracy') as GeoJSONSource).setData(
-      this.accuracy ? circlePolygon(this.origin, this.accuracy) : { type: 'FeatureCollection', features: [] },
-    );
+    if (!this.originMarker || !this.accuracyCircle) return;
+    this.originMarker.setLatLng([this.origin.lat, this.origin.lng]);
+    this.accuracyCircle.setLatLng([this.origin.lat, this.origin.lng]);
+    this.accuracyCircle.setRadius(this.accuracy ?? 0);
   }
 
   private pushItems(): void {
-    const map = this.map;
-    if (!map?.getSource('events')) return;
-    const selectedStroke = cssVar('--blip-selected', '#ffffff');
+    const L = this.L;
+    const layer = this.layer;
+    if (!L || !layer) return;
     const stroke = cssVar('--blip-stroke', '#15171c');
-    (map.getSource('events') as GeoJSONSource).setData({
-      type: 'FeatureCollection',
-      features: this.items.map((it) => ({
-        type: 'Feature',
-        properties: {
-          id: it.id,
-          color: markerColor(it.kind, it.phase),
-          stroke: it.selected ? selectedStroke : stroke,
-          strokeWidth: it.selected ? 3 : 2,
-          radius: it.phase === 'active' ? 10 : 8,
-          opacity: it.phase === 'later' ? 0.6 : 0.95,
-        },
-        geometry: { type: 'Point', coordinates: [it.lng, it.lat] },
-      })),
-    });
+    const selectedStroke = cssVar('--blip-selected', '#ffffff');
+    const keep = new Set<number>();
+    for (const it of this.items) {
+      keep.add(it.id);
+      let m = this.markers.get(it.id);
+      if (!m) {
+        m = L.circleMarker([it.lat, it.lng]);
+        m.on('click', () => this.handlers.onSelect(it.id));
+        m.bindPopup('', { closeButton: false });
+        layer.addLayer(m);
+        this.markers.set(it.id, m);
+      }
+      m.setLatLng([it.lat, it.lng]);
+      m.setRadius(it.phase === 'active' ? 10 : 8);
+      m.setStyle({
+        color: it.selected ? selectedStroke : stroke,
+        weight: it.selected ? 3 : 2,
+        fillColor: markerColor(it.kind, it.phase),
+        fillOpacity: it.phase === 'later' ? 0.6 : 0.95,
+      });
+      m.setPopupContent(`<strong>${escapeHtml(it.title)}</strong><br>${escapeHtml(it.subtitle)}`);
+    }
+    for (const [id, m] of this.markers) {
+      if (!keep.has(id)) {
+        layer.removeLayer(m);
+        this.markers.delete(id);
+      }
+    }
   }
 
   setOrigin(p: LatLng, pan = false, accuracyM: number | null = null): void {
     this.origin = p;
     this.accuracy = accuracyM;
     this.pushOrigin();
-    if (pan) this.map?.easeTo({ center: [p.lng, p.lat], zoom: Math.max(this.map.getZoom(), 15), duration: 600 });
+    if (pan && this.map) this.map.setView([p.lat, p.lng], Math.max(this.map.getZoom(), 15), { animate: true });
   }
 
   setPickMode(on: boolean): void {
     this.pickMode = on;
-    if (this.map) this.map.getCanvas().style.cursor = on ? 'crosshair' : '';
+    if (this.map) this.map.getContainer().style.cursor = on ? 'crosshair' : '';
   }
 
   setBase(base: BaseMap): void {
     if (base === this.base) return;
     this.base = base;
-    this.map?.setStyle(styleFor(base, this.dark));
+    this.applyBase();
   }
 
-  /** 主題亮暗改變時，清晰地圖跟著換亮色或深色 */
+  /** 深色主題：用 CSS 把底圖轉成深色調（見 styles.css 的 .map-dark） */
   setDark(dark: boolean): void {
-    if (dark === this.dark) return;
-    this.dark = dark;
-    if (this.base === 'clear') this.map?.setStyle(styleFor('clear', dark));
-    else this.pushItems();
+    this.el.classList.toggle('map-dark', dark);
+    this.pushItems();
   }
 
   focus(id: number): void {
-    const it = this.items.find((x) => x.id === id);
-    if (!it) return;
     void this.ensure().then(() => {
-      const map = this.map;
-      const lib = this.lib;
-      if (!map || !lib) return;
-      map.easeTo({ center: [it.lng, it.lat], zoom: Math.max(map.getZoom(), 15), duration: 600 });
-      this.popup?.remove();
-      this.popup = new lib.Popup({ closeButton: false, offset: 14 })
-        .setLngLat([it.lng, it.lat])
-        .setHTML(`<strong>${escapeHtml(it.title)}</strong><br>${escapeHtml(it.subtitle)}`)
-        .addTo(map);
+      const it = this.items.find((x) => x.id === id);
+      const m = this.markers.get(id);
+      if (!it || !m || !this.map) return;
+      this.map.setView([it.lat, it.lng], Math.max(this.map.getZoom(), 15), { animate: true });
+      m.openPopup();
     });
   }
 
