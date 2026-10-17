@@ -32,19 +32,37 @@ const ROSE: Array<[string, number]> = [
   ['W', 270],
 ];
 
-/** 對數刻度的轉折點：範圍的 1/80（全台 400 km 時約 5 km）以內接近等比例，再往外越壓越密 */
-const LOG_KNEE = 80;
 const NICE_KM = [1, 2, 5, 10, 20, 50, 100, 200, 300];
+
+/**
+ * 近密遠疏的程度：範圍 20 km 以內照比例；45 km 以上（雙北、全台）距離取對數，
+ * 範圍的 1/80 以內接近等比例，再往外越壓越密。中間逐漸過渡，雙指縮放時畫面不會跳。
+ */
+function logKnee(scaleKm: number): number {
+  if (scaleKm <= 20) return 0;
+  return 80 * Math.min(1, (scaleKm - 20) / 25) ** 2;
+}
+
+/** 距離換成半徑比例（0 = 圓心，1 = 外圈，超出範圍會大於 1） */
+function radiusRatio(km: number, scaleKm: number): number {
+  const n = logKnee(scaleKm);
+  if (n === 0) return km / scaleKm;
+  return Math.log1p((km * n) / scaleKm) / Math.log1p(n);
+}
+
+function fmtKm(km: number): string {
+  if (km >= 10) return `${Math.round(km)} km`;
+  return `${Number.isInteger(km) ? km : km.toFixed(1)} km`;
+}
 
 /** 近密遠疏刻度的參考圈：挑幾個整數公里，圈和圈之間至少隔開外圈的 18%，全部標公里數 */
 function compressedRings(scaleKm: number): Array<{ km: number; label: boolean }> {
-  const k = scaleKm / LOG_KNEE;
-  const at = (km: number): number => Math.log1p(km / k) / Math.log1p(scaleKm / k);
+  const at = (km: number): number => radiusRatio(km, scaleKm);
   const out: Array<{ km: number; label: boolean }> = [];
   let last = 0;
   for (const km of NICE_KM) {
     const r = at(km);
-    if (r < 0.15 || r > 0.85 || r - last < 0.18) continue;
+    if (r < 0.15 || r > 0.9 || r - last < 0.18) continue;
     out.push({ km, label: true });
     last = r;
   }
@@ -75,13 +93,17 @@ export class Radar {
   private readonly rings: SVGGElement;
   private readonly roseLayer: SVGGElement;
   private scaleKm = 5;
-  /** 近密遠疏：距離取對數，近的拉開、遠的壓縮 */
-  private compressed = false;
+  private readonly pointers = new Map<number, { x: number; y: number }>();
+  private pinchDist = 0;
   private heading = 0;
   private items: RadarItem[] = [];
   private style: RadarStyle = { sweep: 'wedge', blip: 'dot', rose: false };
 
-  constructor(container: HTMLElement, onSelect: (id: number) => void) {
+  /**
+   * onZoom(factor, done)：雙指捏合或滑鼠滾輪，factor > 1 代表拉遠（範圍變大）；
+   * done = true 表示手勢結束
+   */
+  constructor(container: HTMLElement, onSelect: (id: number) => void, onZoom?: (factor: number, done: boolean) => void) {
     this.svg = el('svg', { viewBox: `0 0 ${SIZE} ${SIZE}`, class: 'radar', role: 'img', 'aria-label': '雷達畫面' });
     const wedgeEnd = polar(45, R);
     this.svg.innerHTML = `
@@ -142,6 +164,7 @@ export class Radar {
       const g = (e.target as Element).closest('.blip') as SVGGElement | null;
       if (g?.dataset.id) onSelect(Number(g.dataset.id));
     });
+    if (onZoom) this.wireZoom(onZoom);
     container.appendChild(this.svg);
     this.setStyle(this.style);
     this.setScale(this.scaleKm);
@@ -154,13 +177,53 @@ export class Radar {
     this.draw();
   }
 
-  /** compressed 用在雙北、全台這種大範圍，不然附近幾公里的光點全擠在圓心 */
-  setScale(km: number, compressed = false): void {
+  private wireZoom(onZoom: (factor: number, done: boolean) => void): void {
+    const svg = this.svg;
+    const dist = (): number => {
+      const [a, b] = [...this.pointers.values()];
+      return Math.hypot(a.x - b.x, a.y - b.y);
+    };
+    svg.addEventListener('pointerdown', (e) => {
+      this.pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+      if (this.pointers.size === 2) this.pinchDist = dist();
+    });
+    svg.addEventListener('pointermove', (e) => {
+      if (!this.pointers.has(e.pointerId)) return;
+      this.pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+      if (this.pointers.size !== 2) return;
+      const d = dist();
+      if (this.pinchDist > 0 && d > 0) onZoom(this.pinchDist / d, false);
+      this.pinchDist = d;
+    });
+    const end = (e: PointerEvent): void => {
+      if (!this.pointers.delete(e.pointerId)) return;
+      if (this.pointers.size === 1 && this.pinchDist > 0) onZoom(1, true);
+      if (this.pointers.size < 2) this.pinchDist = 0;
+    };
+    svg.addEventListener('pointerup', end);
+    svg.addEventListener('pointercancel', end);
+    svg.addEventListener('pointerleave', end);
+    // iOS Safari 的整頁縮放
+    svg.addEventListener('gesturestart', (e) => e.preventDefault());
+    let wheelTimer = 0;
+    svg.addEventListener(
+      'wheel',
+      (e) => {
+        e.preventDefault();
+        onZoom(Math.exp(Math.max(-100, Math.min(100, e.deltaY)) * 0.003), false);
+        window.clearTimeout(wheelTimer);
+        wheelTimer = window.setTimeout(() => onZoom(1, true), 250);
+      },
+      { passive: false },
+    );
+  }
+
+  /** 範圍 20 km 以內照比例，更大時近密遠疏，不然附近幾公里的光點全擠在圓心 */
+  setScale(km: number): void {
     this.scaleKm = km;
-    this.compressed = compressed;
     this.rings.replaceChildren();
     this.scaleLabels.replaceChildren();
-    const marks = compressed ? compressedRings(km) : [0.25, 0.5, 0.75].map((f) => ({ km: f * km, label: f === 0.5 }));
+    const marks = logKnee(km) > 0 ? compressedRings(km) : [0.25, 0.5, 0.75].map((f) => ({ km: f * km, label: f === 0.5 }));
     for (const m of marks) {
       this.rings.appendChild(el('circle', { cx: C, cy: C, r: (this.ratio(m.km) * R).toFixed(1) }));
       if (m.label) this.addScaleLabel(m.km);
@@ -171,15 +234,12 @@ export class Radar {
 
   private addScaleLabel(km: number): void {
     const t = el('text', { x: C + 5, y: C - this.ratio(km) * R + 13, class: 'scale-label' });
-    t.textContent = `${Number.isInteger(km) ? km : km.toFixed(1)} km`;
+    t.textContent = fmtKm(km);
     this.scaleLabels.appendChild(t);
   }
 
-  /** 距離換成半徑比例（0 = 圓心，1 = 外圈，超出範圍會大於 1） */
   private ratio(km: number): number {
-    if (!this.compressed) return km / this.scaleKm;
-    const k = this.scaleKm / LOG_KNEE;
-    return Math.log1p(km / k) / Math.log1p(this.scaleKm / k);
+    return radiusRatio(km, this.scaleKm);
   }
 
   /** 手機朝向（0 = 北，順時針）。null 代表關閉指北針，恢復北在上 */

@@ -16,6 +16,8 @@ const FETCH_RADIUS_KM = 600;
 const POLL_MS = 60_000;
 const TICK_MS = 5_000;
 const LS_SCALE = 'dr.scale';
+/** 雙指縮放後的自訂範圍（公里） */
+const LS_SCALE_KM = 'dr.scaleKm';
 const LS_ORIGIN = 'dr.origin';
 const LS_THEME = 'dr.theme';
 const LS_BASE = 'dr.base';
@@ -68,10 +70,13 @@ function loadOrigin(): Origin | null {
 // ---- state ----
 let origin: Origin = loadOrigin() ?? DEFAULT_ORIGIN;
 let events: EventOut[] = [];
-type ScaleSetting = '1' | '5' | '20' | 'region' | 'taiwan';
+type ScaleSetting = '1' | '5' | '20' | 'region' | 'taiwan' | 'custom';
+/** 下方按鈕的範圍；custom 是雙指縮放或滾輪調出來的 */
 const SCALE_SETTINGS: ScaleSetting[] = ['1', '5', '20', 'region', 'taiwan'];
 const isAutoScale = (s: ScaleSetting): boolean => s === 'region' || s === 'taiwan';
-let scaleSetting: ScaleSetting = (SCALE_SETTINGS as string[]).includes(lsGet(LS_SCALE) ?? '') ? (lsGet(LS_SCALE) as ScaleSetting) : 'region';
+const MIN_ZOOM_KM = 0.5;
+let customKm = Number(lsGet(LS_SCALE_KM)) || 10;
+let scaleSetting: ScaleSetting = ([...SCALE_SETTINGS, 'custom'] as string[]).includes(lsGet(LS_SCALE) ?? '') ? (lsGet(LS_SCALE) as ScaleSetting) : 'region';
 let scaleKm = 5;
 let view: 'radar' | 'map' = 'radar';
 let selectedId: number | null = null;
@@ -140,7 +145,7 @@ let baseMap: BaseMap = (BASES as string[]).includes(lsGet(LS_BASE) ?? '') ? (lsG
 let gpsAccuracy: number | null = null;
 const scaleChips = Array.from(document.querySelectorAll<HTMLButtonElement>('#scale-chips [data-scale]'));
 
-const radar = new Radar($('#radar-view'), select);
+const radar = new Radar($('#radar-view'), select, (factor, done) => zoomRadar(factor, done));
 const map = new MapView(
   $('#map'),
   origin,
@@ -469,7 +474,7 @@ function setOrigin(o: Origin): void {
   useGpsBtn.hidden = o.source !== 'manual';
   if (isAutoScale(scaleSetting) && scaleKmFor(scaleSetting) !== scaleKm) {
     scaleKm = scaleKmFor(scaleSetting);
-    radar.setScale(scaleKm, isAutoScale(scaleSetting));
+    radar.setScale(scaleKm);
   }
   if (moved) void refresh();
   else render();
@@ -506,6 +511,7 @@ function switchView(v: 'radar' | 'map'): void {
 }
 
 function scaleKmFor(setting: ScaleSetting): number {
+  if (setting === 'custom') return Math.min(Math.max(customKm, MIN_ZOOM_KM), taiwanRadiusKm(origin));
   if (setting === 'region') return shuangbeiRadiusKm(origin);
   if (setting === 'taiwan') return taiwanRadiusKm(origin);
   return Number(setting);
@@ -522,11 +528,44 @@ function setBase(b: BaseMap): void {
   }
 }
 
+let zoomFrame = 0;
+
+/** 雙指縮放、滾輪：連續調整範圍；放開時接近某個按鈕的範圍（差 6% 以內）就對齊那個按鈕 */
+function zoomRadar(factor: number, done: boolean): void {
+  const max = taiwanRadiusKm(origin);
+  customKm = Math.min(Math.max(scaleKm * factor, MIN_ZOOM_KM), max);
+  if (done) {
+    const near = SCALE_SETTINGS.find((st) => Math.abs(scaleKmFor(st) / customKm - 1) < 0.06);
+    if (near) {
+      setScale(near);
+      return;
+    }
+    lsSet(LS_SCALE_KM, customKm.toFixed(2));
+  }
+  if (scaleSetting !== 'custom' || done) {
+    scaleSetting = 'custom';
+    lsSet(LS_SCALE, 'custom');
+    for (const b of scaleChips) {
+      b.classList.remove('on');
+      b.setAttribute('aria-checked', 'false');
+    }
+  }
+  scaleKm = customKm;
+  radar.setScale(scaleKm);
+  // 清單、摘要跟著範圍變，一個畫面更新一次就好
+  if (!zoomFrame) {
+    zoomFrame = requestAnimationFrame(() => {
+      zoomFrame = 0;
+      render();
+    });
+  }
+}
+
 function setScale(setting: ScaleSetting): void {
   scaleSetting = setting;
   scaleKm = scaleKmFor(setting);
   lsSet(LS_SCALE, setting);
-  radar.setScale(scaleKm, isAutoScale(scaleSetting));
+  radar.setScale(scaleKm);
   for (const b of scaleChips) {
     const on = b.dataset.scale === setting;
     b.classList.toggle('on', on);
