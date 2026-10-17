@@ -36,41 +36,15 @@ const ROSE: Array<[string, number]> = [
 const GROUP_PX = 12;
 /** 標籤每行高度 */
 const LINE_PX = 14;
-const NICE_KM = [1, 2, 5, 10, 20, 50, 100, 200, 300];
 
-/**
- * 近密遠疏的程度：範圍 100 km 以內（含雙北）照比例；200 km 以上（全台）距離取對數，
- * 範圍的 1/80 以內接近等比例，再往外越壓越密。中間逐漸過渡，雙指縮放時畫面不會跳。
- */
-function logKnee(scaleKm: number): number {
-  if (scaleKm <= 100) return 0;
-  return 80 * Math.min(1, (scaleKm - 100) / 100) ** 2;
-}
-
-/** 距離換成半徑比例（0 = 圓心，1 = 外圈，超出範圍會大於 1） */
+/** 距離換成半徑比例（0 = 圓心，1 = 外圈，超出範圍會大於 1），全部照比例 */
 function radiusRatio(km: number, scaleKm: number): number {
-  const n = logKnee(scaleKm);
-  if (n === 0) return km / scaleKm;
-  return Math.log1p((km * n) / scaleKm) / Math.log1p(n);
+  return km / scaleKm;
 }
 
 function fmtKm(km: number): string {
   if (km >= 10) return `${Math.round(km)} km`;
   return `${Number.isInteger(km) ? km : km.toFixed(1)} km`;
-}
-
-/** 近密遠疏刻度的參考圈：挑幾個整數公里，圈和圈之間至少隔開外圈的 18%，全部標公里數 */
-function compressedRings(scaleKm: number): Array<{ km: number; label: boolean }> {
-  const at = (km: number): number => radiusRatio(km, scaleKm);
-  const out: Array<{ km: number; label: boolean }> = [];
-  let last = 0;
-  for (const km of NICE_KM) {
-    const r = at(km);
-    if (r < 0.15 || r > 0.9 || r - last < 0.18) continue;
-    out.push({ km, label: true });
-    last = r;
-  }
-  return out;
 }
 
 /** 靠近左右邊緣的標籤往內對齊，避免被雷達外框切掉 */
@@ -227,12 +201,12 @@ export class Radar {
     );
   }
 
-  /** 範圍 100 km 以內照比例，全台時近密遠疏，不然附近幾公里的光點全擠在圓心 */
+  /** 照比例畫：外圈是範圍，裡面三圈是 1/4、1/2、3/4 */
   setScale(km: number): void {
     this.scaleKm = km;
     this.rings.replaceChildren();
     this.scaleLabels.replaceChildren();
-    const marks = logKnee(km) > 0 ? compressedRings(km) : [0.25, 0.5, 0.75].map((f) => ({ km: f * km, label: f === 0.5 }));
+    const marks = [0.25, 0.5, 0.75].map((f) => ({ km: f * km, label: f === 0.5 }));
     for (const m of marks) {
       this.rings.appendChild(el('circle', { cx: C, cy: C, r: (this.ratio(m.km) * R).toFixed(1) }));
       if (m.label) this.addScaleLabel(m.km);
