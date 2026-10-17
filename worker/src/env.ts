@@ -13,6 +13,8 @@ export interface Env {
   ALLOW_USER_KEYWORDS?: string;
   /** Threads 關鍵字搜尋的審核狀態："review" 審核中、"approved" 已通過，只影響說明頁文字 */
   THREADS_SEARCH_STATUS?: string;
+  /** Apify API token（試用第三方 Threads 爬蟲用，只放 secret） */
+  APIFY_TOKEN?: string;
   THREADS_ACCESS_TOKEN?: string;
   /** Threads App ID（App 設定 > 基本資料裡的 Threads 應用程式編號） */
   THREADS_APP_ID?: string;

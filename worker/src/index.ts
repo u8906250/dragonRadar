@@ -4,6 +4,7 @@ import { DEFAULT_DURATION_SEC, ENDED_WORDS, MAX_FUTURE_SEC, MIN_CONFIDENCE, getE
 import { runModel } from './extract';
 import { ingestNews, NEWS_FEEDS } from './sources/news';
 import { syncVoyage, VOYAGE_PAGE } from './sources/voyage';
+import { apifyTrial } from './sources/apify';
 import { addUserKeyword, listActiveKeywords, listAllKeywords, MAX_ACTIVE_KEYWORDS, normalizeKeyword, parseKeywordList, toKeywordOut, touchKeywords } from './keywords';
 import { CALLBACK_PATH, DELETE_PATH, DELETION_STATUS_PATH, UNINSTALL_PATH, deletionStatus, handleCallback, handleDelete, handleUninstall, startAuth } from './oauth';
 import { jsonResponse, nowSec, parseIsoToUnix } from './util';
@@ -183,6 +184,14 @@ async function handleAdmin(req: Request, env: Env, _ctx: ExecutionContext, path:
     const results = [];
     for (const m of models) results.push(await runModel(env, m, body.text, postedAt, now));
     return jsonResponse({ results });
+  }
+
+  // 試用 Apify 的 Threads 爬蟲：只回傳結果與 AI 判讀，不寫入資料庫
+  if (req.method === 'POST' && path === '/api/admin/apify-trial') {
+    const body = await readJson<{ query?: string; maxResults?: number; extract?: boolean }>(req);
+    const query = (body.query ?? '洋流').trim();
+    const maxResults = Math.min(100, Math.max(1, Number(body.maxResults) || 50));
+    return jsonResponse(await apifyTrial(env, query, maxResults, body.extract !== false));
   }
 
   // 立刻同步官方航線與新聞
