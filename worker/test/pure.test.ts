@@ -147,3 +147,30 @@ describe('verifySignedRequest', () => {
     expect(await verifySignedRequest('garbage', 'secret-1')).toBeNull();
   });
 });
+
+import { placeFidelity, responseContent } from '../src/extract';
+
+describe('responseContent', () => {
+  it('reads both Workers AI and OpenAI-style shapes', () => {
+    expect(responseContent({ response: 'a' })).toBe('a');
+    expect(responseContent({ choices: [{ message: { content: 'b' } }] })).toBe('b');
+  });
+});
+
+describe('placeFidelity', () => {
+  const text = '洋流測試：今晚 9 點在捷運市政府站 2號出口發放洋流飄帶';
+  const ev = (place: string) => ({ is_giveaway: true, events: [{ title: 't', item: null, start_at: null, end_at: null, place_text: place, place_query: null, confidence: 0.9 }] });
+  it('is high when the place comes from the post', () => {
+    expect(placeFidelity(ev('捷運市政府站 2號出口'), text)).toBe(1);
+  });
+  it('is low for garbled output', () => {
+    expect(placeFidelity(ev('越車政園给行 2号 出口'), text)).toBeLessThan(0.7);
+  });
+});
+
+describe('normalizeExtraction with reasoning output', () => {
+  it('strips <think> blocks', () => {
+    const r = normalizeExtraction('<think>先找時間…</think>\n{"is_giveaway":true,"events":[{"title":"x","place_text":"台北車站","confidence":0.8}]}');
+    expect(r?.events[0].place_text).toBe('台北車站');
+  });
+});

@@ -1,6 +1,7 @@
 import { getAccessToken, makeClient, saveAccessToken } from './client';
 import type { Env } from './env';
 import { DEFAULT_DURATION_SEC, ENDED_WORDS, MAX_FUTURE_SEC, MIN_CONFIDENCE, getEvent, getPost, ingestAll, ingestKeyword, listEvents, processBacklog, processPost, storePost, updateLifecycle, type EventRow } from './events';
+import { runModel } from './extract';
 import { addUserKeyword, listActiveKeywords, listAllKeywords, MAX_ACTIVE_KEYWORDS, normalizeKeyword, parseKeywordList, toKeywordOut, touchKeywords } from './keywords';
 import { CALLBACK_PATH, DELETE_PATH, DELETION_STATUS_PATH, UNINSTALL_PATH, deletionStatus, handleCallback, handleDelete, handleUninstall, startAuth } from './oauth';
 import { jsonResponse, nowSec, parseIsoToUnix } from './util';
@@ -163,6 +164,17 @@ async function handleAdmin(req: Request, env: Env, _ctx: ExecutionContext, path:
     const result = await processPost(env, post, now);
     const extraction = (await getPost(env, id))?.extraction ?? null;
     return jsonResponse({ post_id: id, reasons: result.reasons, events: result.events, extraction: safeParse(extraction) });
+  }
+
+  // 只判讀不存檔，用來比較模型：{ text, posted_at?, models?: string[] }
+  if (req.method === 'POST' && path === '/api/admin/extract') {
+    const body = await readJson<{ text?: string; posted_at?: string | number; models?: string[] }>(req);
+    if (!body.text?.trim()) throw new HttpError(400, 'text is required');
+    const postedAt = typeof body.posted_at === 'number' ? body.posted_at : parseIsoToUnix(body.posted_at) ?? now;
+    const models = (body.models?.length ? body.models : [env.AI_MODEL, env.AI_MODEL_FALLBACK]).filter((m): m is string => !!m).slice(0, 6);
+    const results = [];
+    for (const m of models) results.push(await runModel(env, m, body.text, postedAt, now));
+    return jsonResponse({ results });
   }
 
   if (req.method === 'POST' && path === '/api/admin/ingest') {

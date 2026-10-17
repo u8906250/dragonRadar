@@ -108,7 +108,13 @@ function normalizeEvent(o: Record<string, unknown>): ExtractedEvent {
 
 function parseLoose(raw: unknown): unknown {
   if (typeof raw !== 'string') return raw;
-  const cleaned = raw.replace(/^```(?:json)?\s*/i, '').replace(/```\s*$/, '').trim();
+  // 推理型模型（Qwen3、GLM 等）可能先輸出 <think>…</think>
+  const cleaned = raw
+    .replace(/<think>[\s\S]*?<\/think>/gi, '')
+    .trim()
+    .replace(/^```(?:json)?\s*/i, '')
+    .replace(/```\s*$/, '')
+    .trim();
   try {
     return JSON.parse(cleaned);
   } catch {
@@ -147,20 +153,96 @@ interface AiRunner {
   run(model: string, inputs: unknown): Promise<unknown>;
 }
 
+/** 各模型回傳格式不同：Workers AI 舊格式是 { response }，新模型是 OpenAI 相容的 { choices } */
+export function responseContent(result: unknown): unknown {
+  if (!result || typeof result !== 'object') return result;
+  const r = result as Record<string, unknown> & { choices?: Array<{ message?: { content?: unknown } }> };
+  if ('response' in r) return r.response;
+  const c = r.choices?.[0]?.message?.content;
+  if (c !== undefined) return c;
+  if (typeof r.output_text === 'string') return r.output_text;
+  return r;
+}
+
+const HAN = /\p{Script=Han}/u;
+
+/**
+ * 判讀結果裡的地點文字，有多少漢字真的出現在原文。
+ * 模型亂碼時（例如「捷運市政府站」變成「越車政園给行」）比例會很低。
+ */
+export function placeFidelity(ex: Extraction, text: string): number {
+  let worst = 1;
+  for (const e of ex.events) {
+    const han = [...(e.place_text ?? '')].filter((c) => HAN.test(c));
+    if (han.length === 0) continue;
+    const hit = han.filter((c) => text.includes(c)).length / han.length;
+    worst = Math.min(worst, hit);
+  }
+  return worst;
+}
+
+const MIN_FIDELITY = 0.7;
+
+export interface ModelAttempt {
+  model: string;
+  ms: number;
+  extraction: Extraction | null;
+  raw: string;
+  fidelity: number;
+  ok: boolean;
+  error?: string;
+}
+
+/** 用指定模型判讀一次。先用 JSON schema，模型不支援就退回純提示 */
+export async function runModel(env: Env, model: string, text: string, postedAt: number, now: number): Promise<ModelAttempt> {
+  const ai = env.AI as unknown as AiRunner;
+  const messages = buildMessages(text, postedAt, now);
+  const t0 = Date.now();
+  let result: unknown;
+  let error: string | undefined;
+  try {
+    result = await ai.run(model, {
+      messages,
+      response_format: { type: 'json_schema', json_schema: SCHEMA },
+      max_tokens: 1200,
+      temperature: 0.1,
+    });
+  } catch (e) {
+    error = String(e);
+    try {
+      result = await ai.run(model, { messages, max_tokens: 1200, temperature: 0.1 });
+      error = undefined;
+    } catch (e2) {
+      error = `${error} / ${String(e2)}`;
+    }
+  }
+  const content = responseContent(result);
+  const raw = typeof content === 'string' ? content : JSON.stringify(content ?? null);
+  const extraction = error ? null : normalizeExtraction(content);
+  const fidelity = extraction ? placeFidelity(extraction, text) : 0;
+  return { model, ms: Date.now() - t0, extraction, raw, fidelity, ok: !!extraction && fidelity >= MIN_FIDELITY, error };
+}
+
+/** 主要模型判讀失敗或地點亂碼時，換備用模型再試 */
 export async function extractFromPost(
   env: Env,
   text: string,
   postedAt: number,
   now: number,
-): Promise<{ extraction: Extraction | null; raw: string }> {
-  const ai = env.AI as unknown as AiRunner;
-  const result = (await ai.run(env.AI_MODEL, {
-    messages: buildMessages(text, postedAt, now),
-    response_format: { type: 'json_schema', json_schema: SCHEMA },
-    max_tokens: 900,
-    temperature: 0.1,
-  })) as { response?: unknown } | null;
-  const response = result && typeof result === 'object' && 'response' in result ? result.response : result;
-  const raw = typeof response === 'string' ? response : JSON.stringify(response ?? null);
-  return { extraction: normalizeExtraction(response), raw };
+): Promise<{ extraction: Extraction | null; raw: string; model: string; garbled: boolean }> {
+  const models = [env.AI_MODEL, env.AI_MODEL_FALLBACK].filter((m, i, a): m is string => !!m && a.indexOf(m) === i);
+  let last: ModelAttempt | null = null;
+  for (const m of models) {
+    last = await runModel(env, m, text, postedAt, now);
+    if (last.ok) break;
+    console.warn(`extract with ${m} not usable: fidelity=${last.fidelity.toFixed(2)} error=${last.error ?? ''}`);
+  }
+  if (!last) return { extraction: null, raw: 'null', model: '', garbled: false };
+  const garbled = !!last.extraction && last.fidelity < MIN_FIDELITY;
+  return {
+    extraction: garbled ? null : last.extraction,
+    raw: JSON.stringify({ model: last.model, fidelity: Number(last.fidelity.toFixed(2)), response: last.raw }),
+    model: last.model,
+    garbled,
+  };
 }

@@ -149,9 +149,10 @@ async function createEvent(env: Env, post: PostRow, ex: ExtractedEvent, now: num
 
 /** 對單一貼文跑 LLM 抽取，每個地點或時段各建一個事件 */
 export async function processPost(env: Env, post: PostRow, now = nowSec()): Promise<ProcessResult> {
-  const { extraction, raw } = await extractFromPost(env, post.text, post.posted_at, now);
+  const { extraction, raw, garbled } = await extractFromPost(env, post.text, post.posted_at, now);
   await env.DB.prepare('UPDATE posts SET processed_at = ?, extraction = ? WHERE id = ?').bind(now, raw, post.id).run();
 
+  if (garbled) return { events: [], reasons: ['garbled'] };
   if (!extraction) return { events: [], reasons: ['extraction_failed'] };
   if (!extraction.is_giveaway) return { events: [], reasons: ['not_giveaway'] };
   if (extraction.events.length === 0) return { events: [], reasons: ['no_events'] };
