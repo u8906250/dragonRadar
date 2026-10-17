@@ -9,6 +9,8 @@ export const VOYAGE_PAGE = 'https://current.puma.taipei/route/';
 const UA = 'Mozilla/5.0 (compatible; CurrentRadar/1.0; +https://current-radar.pages.dev)';
 const DAY = 86400;
 const LOOKAHEAD_DAYS = 14;
+/** 車隊抵達終點（靠港）後，在雷達上保留多久 */
+export const DOCK_KEEP_SEC = 3600;
 
 type RouteStep = string | { cheer: string; addr: string };
 
@@ -47,7 +49,7 @@ function summary(stop: Stop, ticket: number | null): string {
   const lines = [
     `台北大洋流 ${stop.area ?? ''} 車掃`.trim(),
     `日期：${stop.date}`,
-    `終點：${stop.place}${ticket ? `（${new Date(ticket * 1000).toLocaleTimeString('zh-TW', { timeZone: 'Asia/Taipei', hour: '2-digit', minute: '2-digit', hour12: false })}）` : ''}`,
+    `終點：${stop.place}${ticket ? `（${new Date(ticket * 1000).toLocaleTimeString('zh-TW', { timeZone: 'Asia/Taipei', hour: '2-digit', minute: '2-digit', hour12: false })} 靠港）` : ''}`,
   ];
   if (route) lines.push(`路線：${route}`);
   if (stop.changed) lines.push(`航線變更：${stop.changed}`);
@@ -107,9 +109,12 @@ export async function syncVoyage(env: Env, now = nowSec()): Promise<VoyageResult
 
     const fleet = (stop.area ?? '').replace(/艦隊$/, '');
     const dayEnd = day + DAY - 1;
+    // 官網船票的時間是車隊抵達終點（靠港）的時間：終點從那時開始、保留 1 小時；
+    // 加油點都在終點之前經過，所以到靠港時間為止。沒公布時間就當整天。
+    const cheerEnd = ticket ?? dayEnd;
     const stmts = [
       ticket
-        ? insert(`${fleet}車掃・${stop.place}`, stop.place, `台北市 ${stop.place}`, stop.latlng?.[0] ?? null, stop.latlng?.[1] ?? null, ticket, ticket + 2 * 3600, false)
+        ? insert(`${fleet}靠港・${stop.place}`, stop.place, `台北市 ${stop.place}`, stop.latlng?.[0] ?? null, stop.latlng?.[1] ?? null, ticket, ticket + DOCK_KEEP_SEC, false)
         : insert(`${fleet}車掃・${stop.place}`, stop.place, `台北市 ${stop.place}`, stop.latlng?.[0] ?? null, stop.latlng?.[1] ?? null, day, dayEnd, true),
     ];
     for (const r of stop.route ?? []) {
@@ -117,7 +122,7 @@ export async function syncVoyage(env: Env, now = nowSec()): Promise<VoyageResult
       // OpenStreetMap 常沒有台灣門牌，查不到就退到路段（位置是大概的）
       const street = r.addr.replace(/\d+(-\d+)?號.*$/, '').replace(/\d+巷.*$/, '').trim();
       const p = await geocodeFirst(env, [`台北市 ${r.addr}`, `台北市 ${r.cheer}`, street ? `台北市 ${street}` : ''].filter(Boolean));
-      stmts.push(insert(`加油點・${r.cheer}`, `${r.cheer}（${r.addr}）`, `台北市 ${r.addr}`, p?.lat ?? null, p?.lng ?? null, day, dayEnd, true));
+      stmts.push(insert(`加油點・${r.cheer}`, `${r.cheer}（${r.addr}）`, `台北市 ${r.addr}`, p?.lat ?? null, p?.lng ?? null, day, cheerEnd, true));
     }
     await env.DB.batch(stmts);
     out.events += stmts.length;
