@@ -197,6 +197,8 @@ export interface ModelAttempt {
 export async function runModel(env: Env, model: string, text: string, postedAt: number, now: number): Promise<ModelAttempt> {
   const ai = env.AI as unknown as AiRunner;
   const messages = buildMessages(text, postedAt, now);
+  // Qwen3 預設會先長篇推理，可能把 token 用完沒有輸出；這種抽取工作不需要推理
+  if (/qwen3/i.test(model)) messages[messages.length - 1].content += '\n/no_think';
   const t0 = Date.now();
   let result: unknown;
   let error: string | undefined;

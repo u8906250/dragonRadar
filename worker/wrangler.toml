@@ -30,7 +30,9 @@ MOCK_MODE = "false"
 THREADS_API_BASE = "https://graph.threads.net/v1.0"
 # Nominatim 要求識別用的 User-Agent，請改成可聯絡到你的資訊
 NOMINATIM_USER_AGENT = "dragonRadar/0.1 (https://github.com/u8906250/dragonRadar)"
-AI_MODEL = "@cf/meta/llama-3.3-70b-instruct-fp8-fast"
+# 主要模型與備用模型（2026-10-17 用真實發放公告比較後選定：日期、縣市、多地點都正確）
+AI_MODEL = "@cf/qwen/qwen3-30b-a3b-fp8"
+AI_MODEL_FALLBACK = "@cf/mistralai/mistral-small-3.1-24b-instruct"
 DEFAULT_RADIUS_KM = "80"
 # 是否開放一般使用者新增關鍵字。等帳號綁定做好再改成 "true"
 ALLOW_USER_KEYWORDS = "false"
