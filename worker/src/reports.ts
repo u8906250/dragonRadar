@@ -4,7 +4,7 @@
  */
 import type { Env } from './env';
 import { detectEnded, getEvent, getPost, processPost, storePost, type EventOut } from './events';
-import { fetchThreadsPost, parseThreadsUrl, shortcodeToUnix } from './sources/link';
+import { fetchThreadsPost, resolveThreadsLink, shortcodeToUnix } from './sources/link';
 import { sha1Hex } from './sources/text';
 
 /** 只收這麼新的貼文，太舊的公告通常已經過期 */
@@ -85,7 +85,7 @@ async function countSince(env: Env, sql: string, binds: unknown[]): Promise<numb
 
 /** 處理使用者貼上的連結：讀貼文、AI 判讀、定位，回傳結果 */
 export async function submitLink(env: Env, input: string, ip: string, now: number): Promise<SubmitResult> {
-  const link = parseThreadsUrl(input);
+  const link = await resolveThreadsLink(input);
   if (!link) throw new ReportError(400, '找不到 Threads 貼文連結，請貼上像 https://www.threads.com/@帳號/post/... 的網址');
   const postId = `link-${link.code}`;
 

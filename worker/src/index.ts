@@ -5,7 +5,7 @@ import { runModel } from './extract';
 import { ingestNews, NEWS_FEEDS } from './sources/news';
 import { syncVoyage, VOYAGE_PAGE } from './sources/voyage';
 import { apifyTrial } from './sources/apify';
-import { fetchThreadsPost, parseThreadsUrl, shortcodeToUnix } from './sources/link';
+import { fetchThreadsPost, resolveThreadsLink, shortcodeToUnix } from './sources/link';
 import { ENDED_REPORTS_NEEDED, MAX_LINK_AGE_SEC, ReportError, ipHash, purgeReports, recheckLinks, reportEnded, submitLink } from './reports';
 import { addUserKeyword, listActiveKeywords, listAllKeywords, MAX_ACTIVE_KEYWORDS, normalizeKeyword, parseKeywordList, toKeywordOut, touchKeywords } from './keywords';
 import { CALLBACK_PATH, DELETE_PATH, DELETION_STATUS_PATH, UNINSTALL_PATH, deletionStatus, handleCallback, handleDelete, handleUninstall, startAuth } from './oauth';
@@ -212,7 +212,7 @@ async function handleAdmin(req: Request, env: Env, _ctx: ExecutionContext, path:
   // 只讀取貼文連結的內容、不判讀也不存檔，用來確認讀得到：{ url }
   if (req.method === 'POST' && path === '/api/admin/link-fetch') {
     const body = await readJson<{ url?: string }>(req);
-    const link = parseThreadsUrl(body.url ?? '');
+    const link = await resolveThreadsLink(body.url ?? '');
     if (!link) throw new HttpError(400, 'not a Threads post URL');
     const postedAt = shortcodeToUnix(link.code, now);
     return jsonResponse({ link, postedAt, fetched: await fetchThreadsPost(link.code) });

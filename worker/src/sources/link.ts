@@ -23,6 +23,26 @@ export function parseThreadsUrl(input: string): ThreadsLink | null {
   return { code: m[2], username: m[1] ?? null };
 }
 
+const SHARE_RE = /https?:\/\/(?:www\.)?threads\.(?:com|net)\/share\/([A-Za-z0-9_-]{4,40})/i;
+
+/** 連結或 Threads App「分享」產生的短網址（/share/xxx，會 302 轉到貼文） */
+export async function resolveThreadsLink(input: string): Promise<ThreadsLink | null> {
+  const direct = parseThreadsUrl(input);
+  if (direct) return direct;
+  const share = SHARE_RE.exec(input);
+  if (!share) return null;
+  try {
+    const res = await fetch(`https://www.threads.com/share/${share[1]}/`, {
+      redirect: 'manual',
+      headers: { 'user-agent': 'Mozilla/5.0 (compatible; CurrentRadar/1.0; +https://current-radar.pages.dev)' },
+    });
+    const loc = res.headers.get('location');
+    return loc ? parseThreadsUrl(loc) : null;
+  } catch {
+    return null;
+  }
+}
+
 /** 貼文代碼換算成建立時間（unix 秒），不合理就回傳 null */
 export function shortcodeToUnix(code: string, now = Math.floor(Date.now() / 1000)): number | null {
   if (!CODE_RE.test(code) || code.length > 11) return null;
