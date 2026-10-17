@@ -278,9 +278,11 @@ export default {
     const cors = corsHeaders(env, req.headers.get('origin'));
     if (req.method === 'OPTIONS') return new Response(null, { status: 204, headers: cors });
     try {
-      const res = await handle(req, env, ctx);
-      for (const [k, v] of Object.entries(cors)) res.headers.set(k, v);
-      return res;
+      // Response.redirect() 等回應的標頭是唯讀的，先複製一份再補 CORS 標頭
+      const original = await handle(req, env, ctx);
+      const out = new Response(original.body, original);
+      for (const [k, v] of Object.entries(cors)) out.headers.set(k, v);
+      return out;
     } catch (e) {
       const status = e instanceof HttpError ? e.status : 500;
       if (status === 500) console.error(e);
