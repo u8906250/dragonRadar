@@ -142,7 +142,7 @@ export interface Session {
 
 /**
  * 固定據點展開成每天一個時段：從 start_at 那天到 until（沒寫就保留 SPOT_DEFAULT_DAYS 天），
- * 每天用第一天的開放時段；沒寫幾點（00:00 開始、沒有結束）就是整天、標成時間未公布。
+ * 每天用第一天的開放時段；沒寫幾點（00:00 開始、沒有結束）就是整天。
  */
 export function spotSessions(ex: Pick<ExtractedEvent, 'start_at' | 'end_at' | 'until'>, postedAt: number, now: number): Session[] {
   const start = parseIsoToUnix(ex.start_at) ?? taipeiDayStart(postedAt);

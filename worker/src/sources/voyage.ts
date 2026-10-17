@@ -47,7 +47,7 @@ function summary(stop: Stop, ticket: number | null): string {
   const lines = [
     `台北大洋流 ${stop.area ?? ''} 車掃`.trim(),
     `日期：${stop.date}`,
-    `終點：${stop.place}${ticket ? `（${new Date(ticket * 1000).toLocaleTimeString('zh-TW', { timeZone: 'Asia/Taipei', hour: '2-digit', minute: '2-digit', hour12: false })}）` : '，時間未公布'}`,
+    `終點：${stop.place}${ticket ? `（${new Date(ticket * 1000).toLocaleTimeString('zh-TW', { timeZone: 'Asia/Taipei', hour: '2-digit', minute: '2-digit', hour12: false })}）` : ''}`,
   ];
   if (route) lines.push(`路線：${route}`);
   if (stop.changed) lines.push(`航線變更：${stop.changed}`);

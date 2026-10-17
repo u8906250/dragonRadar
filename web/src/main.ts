@@ -164,7 +164,8 @@ const map = new MapView(
 
 // ---- logic ----
 function phaseOf(ev: EventOut, now: number): Phase {
-  if (ev.allDay) return ev.startAt <= now && now < ev.endAt ? 'soon' : 'later';
+  // 沒公布幾點的就當整天，當天都算進行中
+  if (ev.allDay) return ev.startAt <= now && now < ev.endAt ? 'active' : 'later';
   if (ev.startAt <= now && now < ev.endAt) return 'active';
   if (ev.startAt > now && ev.startAt - now <= SOON_SEC) return 'soon';
   return 'later';
@@ -187,8 +188,8 @@ function spotItem(key: string, sessions: EventOut[], me: LatLng, now: number): I
   sessions.sort((a, b) => a.startAt - b.startAt);
   const ev = sessions.find((s) => s.startAt <= now && now < s.endAt) ?? sessions[0];
   const open = ev.startAt <= now && now < ev.endAt;
-  // 沒公布幾點的據點跟官方行程一樣，不算「進行中」，不會嗶
-  const phase: Phase = open ? (ev.allDay ? 'soon' : 'active') : ev.startAt - now <= SPOT_SHOW_AHEAD_SEC ? 'closed' : 'later';
+  // 沒公布幾點的據點當成整天開放，跟官方行程一樣不會嗶
+  const phase: Phase = open ? 'active' : ev.startAt - now <= SPOT_SHOW_AHEAD_SEC ? 'closed' : 'later';
   return { ev, distanceKm: haversineKm(me, ev), bearing: bearingDeg(me, ev), phase, spot: { key, sessions } };
 }
 
@@ -227,7 +228,7 @@ function dayWord(unix: number, now: number): string {
 
 /** 固定據點的開放時段，例如「每天 11:00–18:00」 */
 function spotHours(ev: EventOut): string {
-  return ev.allDay ? '每天開放・時間未公布' : `每天 ${fmtTime(ev.startAt)}–${fmtTime(ev.endAt)}`;
+  return ev.allDay ? '每天整天' : `每天 ${fmtTime(ev.startAt)}–${fmtTime(ev.endAt)}`;
 }
 
 function spotUntil(it: Item, now: number): string {
@@ -240,7 +241,7 @@ function spotLine(it: Item, now: number): string {
   const { ev } = it;
   const until = spotUntil(it, now);
   if (ev.startAt <= now && now < ev.endAt) {
-    return ev.allDay ? `今天開放・時間未公布・${until}` : `營業中・今天到 ${fmtTime(ev.endAt)}・${until}`;
+    return ev.allDay ? `開放中・${until}` : `營業中・今天到 ${fmtTime(ev.endAt)}・${until}`;
   }
   const next = ev.allDay ? `${dayWord(ev.startAt, now)}開放` : `${dayWord(ev.startAt, now)} ${fmtTime(ev.startAt)} 開始`;
   return `休息中・${next}・${until}`;
@@ -251,7 +252,7 @@ function timeLine(it: Item, now: number): string {
   const { ev } = it;
   if (ev.allDay) {
     const today = ev.startAt <= now && now < ev.endAt;
-    return `${today ? '今天' : dateFmt.format(new Date(ev.startAt * 1000))} · 時間未公布`;
+    return today ? '進行中 · 今天整天' : `${dateFmt.format(new Date(ev.startAt * 1000))} 整天`;
   }
   if (it.phase === 'active') {
     const left = Math.max(0, Math.round((ev.endAt - now) / 60));
@@ -312,7 +313,8 @@ function render(): void {
     const seenKey = it.spot ? `spot:${it.spot.key}` : `ev:${it.ev.id}`;
     if (seenActive.has(seenKey)) continue;
     seenActive.add(seenKey);
-    if (!notifiedOnce || it.distanceKm > scaleKm) continue;
+    // 整天的沒有「開始」的時間點，不然半夜 12 點會一起響
+    if (!notifiedOnce || it.distanceKm > scaleKm || it.ev.allDay) continue;
     beep(theme.sound);
     try {
       navigator.vibrate?.([120, 80, 160]);
@@ -332,11 +334,9 @@ function renderList(items: Item[], now: number): void {
   const outRange = items.filter((it) => it.distanceKm > scaleKm);
   // 摘要只算單次的發放和活動，固定據點另外列
   const singles = inRange.filter((it) => !it.spot);
-  // 沒公布幾點的（官方加油點等）今天整天都是 soon，另外算「今天（時間未公布）」，不算即將開始
   const counts = {
     active: singles.filter((it) => it.phase === 'active').length,
-    soon: singles.filter((it) => it.phase === 'soon' && !it.ev.allDay).length,
-    today: singles.filter((it) => it.phase === 'soon' && it.ev.allDay).length,
+    soon: singles.filter((it) => it.phase === 'soon').length,
     later: singles.filter((it) => it.phase === 'later').length,
   };
   const spotsIn = inRange.length - singles.length;
@@ -391,7 +391,7 @@ function renderDetail(items: Item[], now: number): void {
       <button type="button" class="chip" data-act="close" aria-label="關閉">關閉</button>
     </div>
     <div class="sheet-body">
-      <p>類型：${it.spot ? `固定據點（${kindLabel(ev)}）` : kindLabel(ev)}<br>${ev.item ? `發放：${esc(ev.item)}<br>` : ''}${ev.keyword ? `關鍵字：#${esc(ev.keyword)}<br>` : ''}地點：${esc(ev.placeText)}${ev.approxArea ? `<br><span class="approx-note">約略位置：只知道在${esc(ev.approxArea)}，地圖上是${esc(ev.approxArea)}的中心點，實際地點請看原文</span>` : ''}<br>時間：${it.spot ? esc(spotSchedule(it)) : `${fmtTime(ev.startAt)} – ${fmtTime(ev.endAt)}`}<br>距離：${ev.approxArea ? '約 ' : ''}${formatKm(it.distanceKm)}，${compassLabel(it.bearing)}方 · ${esc(timeLine(it, now))}</p>
+      <p>類型：${it.spot ? `固定據點（${kindLabel(ev)}）` : kindLabel(ev)}<br>${ev.item ? `發放：${esc(ev.item)}<br>` : ''}${ev.keyword ? `關鍵字：#${esc(ev.keyword)}<br>` : ''}地點：${esc(ev.placeText)}${ev.approxArea ? `<br><span class="approx-note">約略位置：只知道在${esc(ev.approxArea)}，地圖上是${esc(ev.approxArea)}的中心點，實際地點請看原文</span>` : ''}<br>時間：${it.spot ? esc(spotSchedule(it)) : ev.allDay ? `${dateFmt.format(new Date(ev.startAt * 1000))} 整天` : `${fmtTime(ev.startAt)} – ${fmtTime(ev.endAt)}`}<br>距離：${ev.approxArea ? '約 ' : ''}${formatKm(it.distanceKm)}，${compassLabel(it.bearing)}方 · ${esc(timeLine(it, now))}</p>
       <blockquote>${esc(ev.post.source === 'news' ? ev.post.text.split('\n')[0] : ev.post.text.slice(0, 300))}</blockquote>
       <p class="muted source-line">來源：${esc(sourceLabel(ev))}</p>
       <div class="sheet-actions">
@@ -422,7 +422,7 @@ function spotSchedule(it: Item): string {
 
 /** 官方行程以官網為準；還沒開始的也不能回報 */
 function canReportEnded(ev: EventOut, now: number): boolean {
-  return ev.post.source !== 'official' && !ev.allDay && ev.startAt <= now;
+  return ev.post.source !== 'official' && ev.startAt <= now;
 }
 
 function neededText(): string {
@@ -794,7 +794,7 @@ function renderRules(): void {
   kwRulesEl.innerHTML = `
     <h3>資料來源</h3>
     <ul>
-      ${src ? `<li><b>官方行程</b>：<a href="${esc(src.official.url)}" target="_blank" rel="noopener">${esc(src.official.name)}</a>，每 ${src.official.intervalMin} 分鐘更新車掃日期、終點與加油點。沒公布時間的會標「時間未公布」。</li>
+      ${src ? `<li><b>官方行程</b>：<a href="${esc(src.official.url)}" target="_blank" rel="noopener">${esc(src.official.name)}</a>，每 ${src.official.intervalMin} 分鐘更新車掃日期、終點與加油點。沒公布時間的當成整天，當天都算進行中。</li>
       <li><b>新聞</b>：${src.news.names.map(esc).join('、')}的 RSS，每 ${src.news.intervalMin} 分鐘讀一次，標題或摘要有關鍵字的報導才判讀。只顯示標題與原文連結。</li>` : ''}
       ${threadsLine}
       ${src?.link ? `<li><b>大家回報</b>：任何人都可以按「＋回報」貼上 Threads 貼文連結（${src.link.maxAgeDays} 天內的公開貼文），系統讀取貼文後用同樣的規則判讀。</li>` : ''}
@@ -978,7 +978,7 @@ async function submitReport(): Promise<void> {
   const head = existed && (outcome === 'added' || outcome === 'duplicate') ? '這則之前已經有人回報，已在雷達上：' : OUTCOME_TEXT[outcome];
   const list = found
     .map((ev) => {
-      const when = ev.allDay ? '時間未公布' : `${dateFmt.format(new Date(ev.startAt * 1000))} ${fmtTime(ev.startAt)}`;
+      const when = ev.allDay ? `${dateFmt.format(new Date(ev.startAt * 1000))} 整天` : `${dateFmt.format(new Date(ev.startAt * 1000))} ${fmtTime(ev.startAt)}`;
       return `<li><button type="button" data-id="${ev.id}"><b>${kindLabel(ev)}｜${esc(ev.title)}</b><small>${esc(ev.placeText)} · ${esc(when)}</small></button></li>`;
     })
     .join('');

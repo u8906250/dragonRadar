@@ -8,8 +8,6 @@ export interface SummaryCounts {
   active: number;
   /** 30 分鐘內開始 */
   soon: number;
-  /** 今天，但沒公布幾點（例如官方加油點） */
-  today: number;
   /** 更晚才開始 */
   later: number;
 }
@@ -35,7 +33,6 @@ export interface Theme {
 function parts(c: SummaryCounts, unit: string): string {
   const seg = [`${c.active} ${unit}進行中`];
   if (c.soon > 0) seg.push(`${c.soon} ${unit}即將開始`);
-  if (c.today > 0) seg.push(`${c.today} ${unit}今天（時間未公布）`);
   if (c.later > 0) seg.push(`${c.later} ${unit}稍後開始`);
   return seg.join('、');
 }
