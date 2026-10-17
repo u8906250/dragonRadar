@@ -154,6 +154,8 @@ button, select, a { touch-action: manipulation; }
 .chip.on { background: var(--chip-on-bg); border-color: var(--chip-on-border); color: var(--chip-on-text); }
 .chip.primary { background: var(--chip-primary-bg); border-color: var(--chip-primary-border); color: var(--chip-primary-text); }
 .chips { display: flex; gap: 6px; }
+#scale-chips .chip { padding: 8px 11px; }
+@media (max-width: 380px) { #scale-chips { gap: 4px; } #scale-chips .chip { padding: 8px 9px; font-size: 13px; } }
 .link-btn { font: inherit; font-size: 13px; border: 0; background: transparent; color: var(--accent); padding: 4px; text-decoration: underline; cursor: pointer; }
 
 #stage { position: relative; min-height: 0; padding: 8px 12px; display: grid; grid-template-rows: minmax(0, 1fr); }

@@ -73,7 +73,7 @@ async function handle(req: Request, env: Env, ctx: ExecutionContext): Promise<Re
     const events = await listEvents(env, {
       lat,
       lng,
-      radiusKm: Math.min(200, Math.max(1, radiusKm)),
+      radiusKm: Math.min(600, Math.max(1, radiusKm)),
       now,
       horizonSec: Math.min(168, Math.max(1, horizonH)) * 3600,
       keywords,
@@ -95,7 +95,7 @@ async function handle(req: Request, env: Env, ctx: ExecutionContext): Promise<Re
         maxFutureDays: MAX_FUTURE_SEC / 86400,
         minConfidence: MIN_CONFIDENCE,
         endedWords: ENDED_WORDS,
-        region: '台北市、新北市',
+        region: '全台灣',
         timezone: 'Asia/Taipei',
       },
     });
@@ -154,7 +154,7 @@ async function handleAdmin(req: Request, env: Env, _ctx: ExecutionContext, path:
     if (!post) throw new HttpError(500, 'post not stored');
     const result = await processPost(env, post, now);
     const extraction = (await getPost(env, id))?.extraction ?? null;
-    return jsonResponse({ post_id: id, reason: result.reason, event: result.event, extraction: safeParse(extraction) });
+    return jsonResponse({ post_id: id, reasons: result.reasons, events: result.events, extraction: safeParse(extraction) });
   }
 
   if (req.method === 'POST' && path === '/api/admin/ingest') {

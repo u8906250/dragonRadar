@@ -37,17 +37,34 @@ describe('detectEnded', () => {
 });
 
 describe('normalizeExtraction', () => {
-  it('parses fenced JSON strings', () => {
-    const r = normalizeExtraction('```json\n{"is_giveaway":true,"title":"北車發貼紙","item":"貼紙","start_at":"2025-10-17T15:00:00+08:00","end_at":null,"place_text":"台北車站東三門","place_query":"台北市 台北車站 東三門","confidence":0.9}\n```');
+  it('parses fenced JSON with multiple events', () => {
+    const r = normalizeExtraction('```json\n' + JSON.stringify({
+      is_giveaway: true,
+      events: [
+        { title: '秀水服務處發飄帶', item: '洋流飄帶', start_at: '2026-10-13T09:00:00+08:00', end_at: '2026-10-13T17:00:00+08:00', place_text: '藍駿宇服務處', place_query: '彰化縣秀水鄉 藍駿宇服務處', confidence: 0.8 },
+        { title: '花壇服務處發飄帶', item: '洋流飄帶', start_at: '2026-10-13T14:00:00+08:00', end_at: null, place_text: '李成濟服務處', place_query: '彰化縣花壇鄉 李成濟服務處', confidence: 0.75 },
+      ],
+    }) + '\n```');
     expect(r?.is_giveaway).toBe(true);
-    expect(r?.place_query).toBe('台北市 台北車站 東三門');
-    expect(r?.confidence).toBe(0.9);
+    expect(r?.events).toHaveLength(2);
+    expect(r?.events[1].end_at).toBeNull();
+    expect(r?.events[0].place_query).toBe('彰化縣秀水鄉 藍駿宇服務處');
   });
-  it('clamps confidence and defaults title', () => {
-    const r = normalizeExtraction({ is_giveaway: 'true', confidence: 7, title: '' });
-    expect(r?.is_giveaway).toBe(true);
-    expect(r?.confidence).toBe(1);
-    expect(r?.title).toBe('發放活動');
+  it('still accepts the old single-event shape', () => {
+    const r = normalizeExtraction({ is_giveaway: true, title: '北車發貼紙', start_at: '2026-10-17T15:00:00+08:00', place_text: '台北車站東三門', confidence: 0.9 });
+    expect(r?.events).toHaveLength(1);
+    expect(r?.events[0].title).toBe('北車發貼紙');
+  });
+  it('clamps confidence, defaults title and treats "null" strings as null', () => {
+    const r = normalizeExtraction({ is_giveaway: 'true', events: [{ confidence: 7, title: '', end_at: 'null' }] });
+    expect(r?.events[0].confidence).toBe(1);
+    expect(r?.events[0].title).toBe('發放活動');
+    expect(r?.events[0].end_at).toBeNull();
+  });
+  it('drops events when the post is not a giveaway', () => {
+    const r = normalizeExtraction({ is_giveaway: false, events: [{ title: 'x', confidence: 0.9 }] });
+    expect(r?.is_giveaway).toBe(false);
+    expect(r?.events).toEqual([]);
   });
   it('rejects non-JSON', () => {
     expect(normalizeExtraction('not json at all')).toBeNull();

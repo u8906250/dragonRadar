@@ -18,10 +18,10 @@ export async function fetchEvents(origin: LatLng, radiusKm: number, keywords: st
   return j.events;
 }
 
-export async function fetchHealth(): Promise<{ ok: boolean; mode: 'live' | 'mock' }> {
+export async function fetchHealth(): Promise<{ ok: boolean; mode: 'live' | 'mock' | 'unconfigured' }> {
   const r = await fetch(`${API_BASE}/api/health`);
   if (!r.ok) throw new Error(`API ${r.status}`);
-  return (await r.json()) as { ok: boolean; mode: 'live' | 'mock' };
+  return (await r.json()) as { ok: boolean; mode: 'live' | 'mock' | 'unconfigured' };
 }
 
 export async function fetchKeywords(): Promise<{ max: number; userAdd?: boolean; keywords: KeywordInfo[]; rules?: KeywordRules }> {

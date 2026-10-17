@@ -1,7 +1,7 @@
 import './styles.css';
 import { addKeyword, fetchEvents, fetchHealth, fetchKeywords } from './api';
 import { compassSupported, startCompass } from './compass';
-import { bearingDeg, compassLabel, formatKm, haversineKm, shuangbeiRadiusKm, type LatLng } from './geo';
+import { bearingDeg, compassLabel, formatKm, haversineKm, shuangbeiRadiusKm, taiwanRadiusKm, type LatLng } from './geo';
 import { MapView } from './map';
 import { beep, ensureNotificationPermission, notificationState, showBanner, systemNotify, unlockAudio } from './notify';
 import { Radar } from './radar';
@@ -10,8 +10,9 @@ import type { EventOut, Item, KeywordInfo, KeywordRules, Origin, Phase } from '.
 
 const DEFAULT_ORIGIN: Origin = { lat: 25.0478, lng: 121.517, source: 'default' }; // 台北車站
 const SOON_SEC = 30 * 60;
-/** 後端查詢半徑：要比「雙北」範圍大，才不會漏掉邊緣的發放 */
-const FETCH_RADIUS_KM = 80;
+/** 後端查詢半徑：至少 80 km，選大範圍時跟著放大，才不會漏掉邊緣的發放 */
+const MIN_FETCH_RADIUS_KM = 80;
+const fetchRadiusKm = (): number => Math.min(600, Math.max(MIN_FETCH_RADIUS_KM, Math.ceil(scaleKm * 1.1)));
 const POLL_MS = 60_000;
 const TICK_MS = 5_000;
 const LS_SCALE = 'dr.scale';
@@ -61,10 +62,12 @@ function loadOrigin(): Origin | null {
 // ---- state ----
 let origin: Origin = loadOrigin() ?? DEFAULT_ORIGIN;
 let events: EventOut[] = [];
-type ScaleSetting = '1' | '5' | '20' | 'region';
-const SCALE_SETTINGS: ScaleSetting[] = ['1', '5', '20', 'region'];
+type ScaleSetting = '1' | '5' | '20' | 'region' | 'taiwan';
+const SCALE_SETTINGS: ScaleSetting[] = ['1', '5', '20', 'region', 'taiwan'];
+const isAutoScale = (s: ScaleSetting): boolean => s === 'region' || s === 'taiwan';
 let scaleSetting: ScaleSetting = (SCALE_SETTINGS as string[]).includes(lsGet(LS_SCALE) ?? '') ? (lsGet(LS_SCALE) as ScaleSetting) : 'region';
 let scaleKm = 5;
+let lastFetchRadius = 0;
 let view: 'radar' | 'map' = 'radar';
 let selectedId: number | null = null;
 let lastFetchAt = 0;
@@ -284,8 +287,8 @@ function setOrigin(o: Origin): void {
   map.setOrigin(o, moved);
   originLabel.textContent = o.source === 'gps' ? 'GPS 定位' : o.source === 'manual' ? '手動位置' : '預設：台北車站';
   useGpsBtn.hidden = o.source !== 'manual';
-  if (scaleSetting === 'region' && scaleKmFor('region') !== scaleKm) {
-    scaleKm = scaleKmFor('region');
+  if (isAutoScale(scaleSetting) && scaleKmFor(scaleSetting) !== scaleKm) {
+    scaleKm = scaleKmFor(scaleSetting);
     radar.setScale(scaleKm);
   }
   if (moved) void refresh();
@@ -300,7 +303,8 @@ async function refresh(): Promise<void> {
     return;
   }
   try {
-    events = await fetchEvents(origin, FETCH_RADIUS_KM, kws);
+    lastFetchRadius = fetchRadiusKm();
+    events = await fetchEvents(origin, lastFetchRadius, kws);
     lastFetchAt = nowSec();
     updatedLabel.textContent = `更新 ${fmtTime(lastFetchAt)}`;
   } catch (e) {
@@ -322,14 +326,18 @@ function switchView(v: 'radar' | 'map'): void {
 }
 
 function scaleKmFor(setting: ScaleSetting): number {
-  return setting === 'region' ? shuangbeiRadiusKm(origin) : Number(setting);
+  if (setting === 'region') return shuangbeiRadiusKm(origin);
+  if (setting === 'taiwan') return taiwanRadiusKm(origin);
+  return Number(setting);
 }
 
 function setScale(setting: ScaleSetting): void {
   scaleSetting = setting;
   scaleKm = scaleKmFor(setting);
   lsSet(LS_SCALE, setting);
+  const prevFetch = lastFetchRadius;
   radar.setScale(scaleKm);
+  if (fetchRadiusKm() > prevFetch && lastFetchAt > 0) void refresh();
   for (const b of scaleChips) {
     const on = b.dataset.scale === setting;
     b.classList.toggle('on', on);
@@ -509,7 +517,7 @@ function renderRules(): void {
     <h3>多久找一次</h3>
     <ul>
       <li>每 ${r.intervalMin} 分鐘用上面的關鍵字搜尋 Threads 最新的公開貼文。</li>
-      <li>只收${esc(r.region)}的發放，雷達選「雙北」就能看到整個區域。</li>
+      <li>收${esc(r.region)}的發放。雷達選「雙北」看台北市加新北市，選「全台」看全台灣與離島。</li>
     </ul>
     <h3>時間地點怎麼判讀</h3>
     <ol>
@@ -647,8 +655,8 @@ async function boot(): Promise<void> {
   startGeolocation();
   try {
     const h = await fetchHealth();
-    modeBadge.textContent = h.mode === 'mock' ? '示範資料' : '即時';
-    modeBadge.classList.toggle('mock', h.mode === 'mock');
+    modeBadge.textContent = h.mode === 'mock' ? '示範資料' : h.mode === 'unconfigured' ? '未連線 Threads' : '即時';
+    modeBadge.classList.toggle('mock', h.mode !== 'live');
     modeBadge.hidden = false;
   } catch {
     modeBadge.textContent = '離線';

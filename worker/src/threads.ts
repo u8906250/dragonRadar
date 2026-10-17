@@ -18,7 +18,7 @@ export interface KeywordSearchOptions {
 }
 
 export interface ThreadsClient {
-  readonly mode: 'live' | 'mock';
+  readonly mode: 'live' | 'mock' | 'unconfigured';
   keywordSearch(opts: KeywordSearchOptions): Promise<ThreadsPost[]>;
   replies(postId: string): Promise<ThreadsPost[]>;
   refreshToken(): Promise<{ access_token: string; expires_in: number } | null>;

@@ -1,5 +1,5 @@
 import type { Env } from './env';
-import { extractFromPost } from './extract';
+import { extractFromPost, type ExtractedEvent } from './extract';
 import { geocodeFirst, placeCandidates } from './geocode';
 import { listActiveKeywords, type KeywordRow } from './keywords';
 import { parseThreadsTimestamp, type ThreadsClient } from './threads';
@@ -102,33 +102,31 @@ export async function getPost(env: Env, id: string): Promise<PostRow | null> {
 }
 
 export interface ProcessResult {
-  event: EventRow | null;
-  reason: string;
+  /** 這則貼文建立的事件（一則貼文可以有多個地點或時段） */
+  events: EventRow[];
+  /** 每一筆的處理結果，例如 active、upcoming、no_place、duplicate_of_3 */
+  reasons: string[];
 }
 
-/** 對單一貼文跑 LLM 抽取與地點查詢，成功就建立事件 */
-export async function processPost(env: Env, post: PostRow, now = nowSec()): Promise<ProcessResult> {
-  const { extraction, raw } = await extractFromPost(env, post.text, post.posted_at, now);
-  await env.DB.prepare('UPDATE posts SET processed_at = ?, extraction = ? WHERE id = ?').bind(now, raw, post.id).run();
+/** 建立的事件裡有幾個找得到位置 */
+export const locatedCount = (r: ProcessResult): number => r.events.filter((e) => e.status !== 'unlocated').length;
 
-  if (!extraction) return { event: null, reason: 'extraction_failed' };
-  if (!extraction.is_giveaway) return { event: null, reason: 'not_giveaway' };
-  if (extraction.confidence < MIN_CONFIDENCE) return { event: null, reason: 'low_confidence' };
-
-  const start = parseIsoToUnix(extraction.start_at);
+async function createEvent(env: Env, post: PostRow, ex: ExtractedEvent, now: number): Promise<{ event: EventRow | null; reason: string }> {
+  if (ex.confidence < MIN_CONFIDENCE) return { event: null, reason: 'low_confidence' };
+  const start = parseIsoToUnix(ex.start_at);
   if (start === null) return { event: null, reason: 'no_start_time' };
-  let end = parseIsoToUnix(extraction.end_at) ?? start + DEFAULT_DURATION_SEC;
+  let end = parseIsoToUnix(ex.end_at) ?? start + DEFAULT_DURATION_SEC;
   if (end <= start) end = start + DEFAULT_DURATION_SEC;
   if (end <= now) return { event: null, reason: 'already_over' };
   if (start > now + MAX_FUTURE_SEC) return { event: null, reason: 'too_far_in_future' };
 
-  const placeQuery = extraction.place_query ?? extraction.place_text;
-  const placeText = extraction.place_text ?? extraction.place_query;
+  const placeQuery = ex.place_query ?? ex.place_text;
+  const placeText = ex.place_text ?? ex.place_query;
   if (!placeQuery || !placeText) return { event: null, reason: 'no_place' };
 
-  const point = await geocodeFirst(env, placeCandidates(placeQuery, extraction.place_text));
+  const point = await geocodeFirst(env, placeCandidates(placeQuery, ex.place_text));
 
-  // 同一場發放可能被多個關鍵字或多篇貼文找到：同地點（約 150 m 內）、開始時間差 30 分鐘內就視為重複
+  // 同一場發放可能被多篇貼文找到：同地點（約 150 m 內）、開始時間差 30 分鐘內就視為重複
   if (point) {
     const dup = await env.DB.prepare(
       `SELECT id FROM events WHERE status IN ('upcoming', 'active')
@@ -144,23 +142,27 @@ export async function processPost(env: Env, post: PostRow, now = nowSec()): Prom
     `INSERT INTO events (post_id, title, item, start_at, end_at, place_text, place_query, lat, lng, status, confidence, created_at, updated_at)
      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING *`,
   )
-    .bind(
-      post.id,
-      extraction.title,
-      extraction.item,
-      start,
-      end,
-      placeText,
-      placeQuery,
-      point?.lat ?? null,
-      point?.lng ?? null,
-      status,
-      extraction.confidence,
-      now,
-      now,
-    )
+    .bind(post.id, ex.title, ex.item, start, end, placeText, placeQuery, point?.lat ?? null, point?.lng ?? null, status, ex.confidence, now, now)
     .first<EventRow>();
   return { event, reason: status };
+}
+
+/** 對單一貼文跑 LLM 抽取，每個地點或時段各建一個事件 */
+export async function processPost(env: Env, post: PostRow, now = nowSec()): Promise<ProcessResult> {
+  const { extraction, raw } = await extractFromPost(env, post.text, post.posted_at, now);
+  await env.DB.prepare('UPDATE posts SET processed_at = ?, extraction = ? WHERE id = ?').bind(now, raw, post.id).run();
+
+  if (!extraction) return { events: [], reasons: ['extraction_failed'] };
+  if (!extraction.is_giveaway) return { events: [], reasons: ['not_giveaway'] };
+  if (extraction.events.length === 0) return { events: [], reasons: ['no_events'] };
+
+  const out: ProcessResult = { events: [], reasons: [] };
+  for (const ex of extraction.events) {
+    const r = await createEvent(env, post, ex, now);
+    if (r.event) out.events.push(r.event);
+    out.reasons.push(r.reason);
+  }
+  return out;
 }
 
 export interface IngestResult {
@@ -194,7 +196,7 @@ export async function ingestKeyword(env: Env, client: ThreadsClient, kw: Keyword
     if (!row) continue;
     try {
       const r = await processPost(env, row, now);
-      if (r.event && r.event.status !== 'unlocated') result.created++;
+      result.created += locatedCount(r);
     } catch (e) {
       result.errors.push(`${p.id}: ${String(e)}`);
     }
@@ -221,7 +223,7 @@ export async function processBacklog(env: Env, now = nowSec(), limit = 20): Prom
     try {
       const r = await processPost(env, post, now);
       out.processed++;
-      if (r.event && r.event.status !== 'unlocated') out.created++;
+      out.created += locatedCount(r);
     } catch (e) {
       out.errors.push(`${post.id}: ${String(e)}`);
     }

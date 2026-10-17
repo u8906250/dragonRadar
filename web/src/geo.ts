@@ -48,8 +48,31 @@ export const SHUANGBEI_EXTREMES: LatLng[] = [
   { lat: 25.17, lng: 121.41 }, // 八里
 ];
 
-/** 從目前位置看，要多大的半徑才能涵蓋整個雙北，進位到 5 km，最少 20 km */
+/** 台灣本島、澎湖、金門、馬祖最外圍的點 */
+export const TAIWAN_EXTREMES: LatLng[] = [
+  { lat: 25.299, lng: 121.537 }, // 富貴角
+  { lat: 25.019, lng: 122.007 }, // 三貂角
+  { lat: 21.897, lng: 120.858 }, // 鵝鑾鼻
+  { lat: 22.04, lng: 121.55 }, // 蘭嶼
+  { lat: 22.66, lng: 121.49 }, // 綠島
+  { lat: 23.2, lng: 119.43 }, // 澎湖 七美
+  { lat: 23.73, lng: 119.6 }, // 澎湖 北端
+  { lat: 24.43, lng: 118.24 }, // 金門 西端
+  { lat: 26.38, lng: 120.49 }, // 馬祖 東引
+];
+
+/** 從目前位置看，要多大的半徑才能涵蓋所有邊界點，進位到 step，最少 min */
+export function regionRadiusKm(from: LatLng, points: LatLng[], step: number, min: number): number {
+  const far = Math.max(...points.map((p) => haversineKm(from, p)));
+  return Math.max(min, Math.ceil(far / step) * step);
+}
+
+/** 涵蓋整個雙北的半徑，進位到 5 km，最少 20 km */
 export function shuangbeiRadiusKm(from: LatLng): number {
-  const far = Math.max(...SHUANGBEI_EXTREMES.map((p) => haversineKm(from, p)));
-  return Math.max(20, Math.ceil(far / 5) * 5);
+  return regionRadiusKm(from, SHUANGBEI_EXTREMES, 5, 20);
+}
+
+/** 涵蓋全台灣（含離島）的半徑，進位到 50 km，最少 200 km */
+export function taiwanRadiusKm(from: LatLng): number {
+  return regionRadiusKm(from, TAIWAN_EXTREMES, 50, 200);
 }
