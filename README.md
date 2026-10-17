@@ -37,6 +37,12 @@ worker/   Cloudflare Worker（API、排程、資料庫）
 
 新增主題：在 `web/src/themes.ts` 加一筆設定，並在 `web/src/styles.css` 加一組 `:root[data-theme='...']` 變數。
 
+## 關鍵字
+
+- 預設搜尋「洋流飄帶」與「洋流漂帶」，由管理員用 `/api/admin/keywords` 新增或停用（管理員新增的會固定搜尋）。
+- 一般使用者目前只能看到搜尋中的關鍵字，不能修改。等帳號綁定做好，把 `wrangler.toml` 的 `ALLOW_USER_KEYWORDS` 改成 `"true"` 就會開放：
+  使用者可選擇追蹤哪些關鍵字、新增新的關鍵字；同時最多搜尋 10 個，使用者新增的 7 天沒人追蹤會自動停止。
+
 ## 手機介面
 
 - 以手機直式為主：雷達占滿中間，底部是可上拉的清單面板，桌機則把清單放右側欄。
@@ -116,13 +122,15 @@ npm run deploy
 | 方法 | 路徑 | 說明 |
 |---|---|---|
 | GET | `/api/health` | `{ ok, mode: 'live' \| 'mock', time }` |
-| GET | `/api/events?lat=&lng=&radius_km=&horizon_h=` | 附近、未結束、`horizon_h` 小時內會開始的事件 |
+| GET | `/api/events?lat=&lng=&radius_km=&horizon_h=&keywords=` | 附近、未結束、`horizon_h` 小時內會開始的事件，可用逗號分隔的關鍵字篩選 |
 | GET | `/api/events/:id` | 單一事件 |
+| GET | `/api/keywords` | 搜尋中的關鍵字、上限、是否開放使用者新增 |
+| POST | `/api/keywords` | 使用者新增關鍵字（`ALLOW_USER_KEYWORDS` 為 true 才開放） |
 | POST | `/api/admin/posts` | 手動塞貼文並立即解析 |
 | POST | `/api/admin/ingest` | 立刻跑一次抓取與狀態更新 |
 | GET | `/api/admin/events?status=` | 所有事件（含 ended、unlocated） |
 | GET | `/api/admin/posts` | 最近 100 則原始貼文與解析結果 |
-| GET/POST/DELETE | `/api/admin/keywords[/:id]` | 關鍵字管理 |
+| GET/POST/DELETE | `/api/admin/keywords[/:id]` | 關鍵字管理（新增的會固定搜尋） |
 | GET/POST | `/api/admin/token` | 查看／更新 Threads token |
 
 admin 路徑需要 `Authorization: Bearer <ADMIN_TOKEN>`。

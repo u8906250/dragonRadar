@@ -159,10 +159,11 @@ button, select, a { touch-action: manipulation; }
 #stage { position: relative; min-height: 0; padding: 8px 12px; display: grid; grid-template-rows: minmax(0, 1fr); }
 .view { width: 100%; height: 100%; min-height: 0; display: grid; place-items: center; }
 .radar { width: 100%; height: 100%; display: block; filter: var(--glow); }
-#map-view { border-radius: 14px; overflow: hidden; border: var(--border-w) solid var(--line); }
+/* Leaflet 圖層 z-index 到 1000，用 isolation 把它關在自己的堆疊層裡，浮動按鈕才不會被蓋掉 */
+#map-view { position: relative; isolation: isolate; z-index: 0; border-radius: 14px; overflow: hidden; border: var(--border-w) solid var(--line); }
 #map { width: 100%; height: 100%; background: var(--panel); }
 
-.overlay { position: absolute; z-index: 5; display: flex; gap: 6px; align-items: center; }
+.overlay { position: absolute; z-index: 20; display: flex; gap: 6px; align-items: center; }
 .overlay-bl { left: 16px; bottom: 16px; }
 .overlay-tr { right: 16px; top: 12px; }
 
@@ -258,6 +259,33 @@ button, select, a { touch-action: manipulation; }
 .sheet-actions { display: flex; flex-wrap: wrap; gap: 8px; }
 .btn { font: inherit; font-size: 15px; font-weight: 600; color: var(--text); background: var(--card); border: var(--border-w) solid var(--line); border-radius: var(--radius); box-shadow: var(--chip-shadow); padding: 10px 16px; min-height: 44px; display: inline-flex; align-items: center; text-decoration: none; cursor: pointer; }
 .btn.primary { background: var(--accent); color: var(--accent-text); border-color: var(--accent); }
+
+.kw-row {
+  display: flex; align-items: center; gap: 8px; width: calc(100% - 24px); margin: 0 12px 10px;
+  padding: 8px 12px; min-height: 44px; font: inherit; font-size: 13px; text-align: left; color: var(--text);
+  background: var(--card); border: var(--border-w) solid var(--line); border-radius: var(--card-radius); box-shadow: var(--card-shadow); cursor: pointer;
+}
+.kw-row.readonly { cursor: default; box-shadow: none; }
+.kw-row.readonly:active { transform: none; }
+.kw-label { color: var(--muted); flex: 0 0 auto; }
+.kw-tags { flex: 1; min-width: 0; display: flex; gap: 6px; overflow: hidden; white-space: nowrap; }
+.kw-tag { padding: 3px 9px; border-radius: 999px; background: var(--chip-on-bg); color: var(--chip-on-text); font-weight: 700; font-size: 12px; }
+.kw-tag.more { background: transparent; color: var(--muted); padding-left: 0; }
+.kw-edit { flex: 0 0 auto; font-weight: 700; color: var(--accent); }
+.sheet-note { margin: 0 0 10px; font-size: 13px; line-height: 1.5; }
+.sheet-note.small { font-size: 12px; margin-top: 12px; }
+.kw-list { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 14px; }
+.kw-chip { position: relative; }
+.kw-chip.on::before { content: '✓ '; }
+.kw-chip .pin { font-size: 11px; opacity: 0.7; margin-left: 4px; font-weight: 500; }
+.kw-form { display: flex; gap: 8px; }
+.kw-form input {
+  flex: 1; min-width: 0; font: inherit; font-size: 16px; color: var(--text); background: var(--card);
+  border: var(--border-w) solid var(--line); border-radius: var(--card-radius); padding: 10px 12px; min-height: 44px;
+}
+.kw-form input:focus { outline: 2px solid var(--highlight); outline-offset: 1px; }
+.kw-msg-error { color: var(--highlight); }
+.ev-kw { display: inline-block; margin-left: 6px; font-size: 11px; font-weight: 700; color: var(--accent); }
 
 .theme-list { list-style: none; margin: 0; padding: 0; display: grid; grid-auto-rows: max-content; gap: 8px; }
 .theme-item { width: 100%; display: flex; align-items: center; gap: 12px; text-align: left; font: inherit; color: var(--text); background: var(--card); border: var(--border-w) solid var(--line); border-radius: var(--card-radius); box-shadow: var(--card-shadow); padding: 10px 12px; cursor: pointer; min-height: 56px; }

@@ -9,6 +9,7 @@ export interface EventOut {
   lng: number;
   status: 'upcoming' | 'active';
   confidence: number | null;
+  keyword: string | null;
   post: {
     id: string;
     username: string | null;
@@ -35,3 +36,8 @@ export interface Item {
 }
 
 export type { BlipStyle, SweepStyle } from './themes';
+
+export interface KeywordInfo {
+  term: string;
+  pinned: boolean;
+}

@@ -30,6 +30,8 @@ THREADS_API_BASE = "https://graph.threads.net/v1.0"
 NOMINATIM_USER_AGENT = "dragonRadar/0.1 (https://github.com/u8906250/dragonRadar)"
 AI_MODEL = "@cf/meta/llama-3.3-70b-instruct-fp8-fast"
 DEFAULT_RADIUS_KM = "30"
+# 是否開放一般使用者新增關鍵字。等帳號綁定做好再改成 "true"
+ALLOW_USER_KEYWORDS = "false"
 
 # Secrets（用 wrangler secret put 設定，不要寫在這裡）
 #   THREADS_ACCESS_TOKEN  Threads 長效 token

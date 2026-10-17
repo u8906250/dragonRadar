@@ -1,12 +1,12 @@
 import './styles.css';
-import { fetchEvents, fetchHealth } from './api';
+import { addKeyword, fetchEvents, fetchHealth, fetchKeywords } from './api';
 import { compassSupported, startCompass } from './compass';
 import { bearingDeg, compassLabel, formatKm, haversineKm, type LatLng } from './geo';
 import { MapView } from './map';
 import { beep, ensureNotificationPermission, notificationState, showBanner, systemNotify, unlockAudio } from './notify';
 import { Radar } from './radar';
 import { DEFAULT_THEME_ID, getTheme, THEMES, type Theme } from './themes';
-import type { EventOut, Item, Origin, Phase } from './types';
+import type { EventOut, Item, KeywordInfo, Origin, Phase } from './types';
 
 const DEFAULT_ORIGIN: Origin = { lat: 25.0478, lng: 121.517, source: 'default' }; // 台北車站
 const SOON_SEC = 30 * 60;
@@ -16,6 +16,8 @@ const TICK_MS = 5_000;
 const LS_SCALE = 'dr.scale';
 const LS_ORIGIN = 'dr.origin';
 const LS_THEME = 'dr.theme';
+const LS_KEYWORDS = 'dr.keywords';
+const KEYWORD_RE_INVALID = /[<>{}\\%_]/;
 
 const $ = <T extends HTMLElement>(sel: string): T => {
   const n = document.querySelector<T>(sel);
@@ -64,6 +66,10 @@ let selectedId: number | null = null;
 let lastFetchAt = 0;
 let notifiedOnce = false;
 let stopCompass: (() => void) | null = null;
+let available: KeywordInfo[] = [];
+/** 後端開放使用者自訂關鍵字時才顯示編輯功能 */
+let canEditKeywords = false;
+let savedFollowed: string[] | null = loadFollowed();
 let theme: Theme = getTheme(new URLSearchParams(location.search).get('theme') ?? lsGet(LS_THEME) ?? DEFAULT_THEME_ID);
 const seenActive = new Set<number>();
 
@@ -86,6 +92,15 @@ const themeBtn = $<HTMLButtonElement>('#theme-btn');
 const themeSheet = $('#theme-sheet');
 const themeList = $<HTMLUListElement>('#theme-list');
 const brandText = $('#brand-text');
+const kwBtn = $<HTMLButtonElement>('#kw-btn');
+const kwSummary = $('#kw-summary');
+const kwSheet = $('#kw-sheet');
+const kwList = $('#kw-list');
+const kwForm = $<HTMLFormElement>('#kw-form');
+const kwInput = $<HTMLInputElement>('#kw-input');
+const kwAddBtn = $<HTMLButtonElement>('#kw-add');
+const kwMsg = $('#kw-msg');
+const kwMaxEl = $('#kw-max');
 const scaleChips = Array.from(document.querySelectorAll<HTMLButtonElement>('#scale-chips [data-scale]'));
 
 const radar = new Radar($('#radar-view'), select);
@@ -178,7 +193,9 @@ function render(): void {
 function renderList(items: Item[], now: number): void {
   const active = items.filter((it) => it.phase === 'active').length;
   const soon = items.filter((it) => it.phase === 'soon').length;
-  countLabel.textContent = items.length === 0 ? theme.emptyText : theme.summary(active, soon, items.length);
+  const none = followed().length === 0;
+  countLabel.textContent = none ? '還沒追蹤關鍵字' : items.length === 0 ? theme.emptyText : theme.summary(active, soon, items.length);
+  emptyEl.textContent = none ? (canEditKeywords ? '點下方「追蹤」選擇或新增關鍵字，雷達就會開始找發放。' : '目前沒有搜尋中的關鍵字。') : `${theme.emptyText}。雷達每分鐘更新，有新的會提醒你。`;
   listEl.replaceChildren();
   emptyEl.hidden = items.length > 0;
   for (const it of items) {
@@ -186,7 +203,7 @@ function renderList(items: Item[], now: number): void {
     li.className = `ev phase-${it.phase}${it.ev.id === selectedId ? ' selected' : ''}`;
     li.dataset.id = String(it.ev.id);
     li.innerHTML = `
-      <div class="ev-title"><span class="dot"></span>${esc(it.ev.title)}${it.ev.item ? ` <span class="muted">· ${esc(it.ev.item)}</span>` : ''}</div>
+      <div class="ev-title"><span class="dot"></span>${esc(it.ev.title)}${it.ev.item ? ` <span class="muted">· ${esc(it.ev.item)}</span>` : ''}${followed().length > 1 && it.ev.keyword ? `<span class="ev-kw">#${esc(it.ev.keyword)}</span>` : ''}</div>
       <div class="ev-meta">${esc(it.ev.placeText)} · ${formatKm(it.distanceKm)} ${compassLabel(it.bearing)}</div>
       <div class="ev-time">${esc(timeLine(it, now))}</div>`;
     li.addEventListener('click', () => select(it.ev.id));
@@ -213,7 +230,7 @@ function renderDetail(items: Item[], now: number): void {
       <button type="button" class="chip" data-act="close" aria-label="關閉">關閉</button>
     </div>
     <div class="sheet-body">
-      <p>${ev.item ? `發放：${esc(ev.item)}<br>` : ''}地點：${esc(ev.placeText)}<br>時間：${fmtTime(ev.startAt)} – ${fmtTime(ev.endAt)}<br>距離：${formatKm(it.distanceKm)}，${compassLabel(it.bearing)}方 · ${esc(timeLine(it, now))}</p>
+      <p>${ev.item ? `發放：${esc(ev.item)}<br>` : ''}${ev.keyword ? `關鍵字：#${esc(ev.keyword)}<br>` : ''}地點：${esc(ev.placeText)}<br>時間：${fmtTime(ev.startAt)} – ${fmtTime(ev.endAt)}<br>距離：${formatKm(it.distanceKm)}，${compassLabel(it.bearing)}方 · ${esc(timeLine(it, now))}</p>
       <blockquote>${esc(ev.post.text).slice(0, 300)}</blockquote>
       <div class="sheet-actions">
         <a class="btn primary" href="https://www.google.com/maps/dir/?api=1&destination=${ev.lat},${ev.lng}&travelmode=walking" target="_blank" rel="noopener">導航</a>
@@ -230,7 +247,10 @@ function renderDetail(items: Item[], now: number): void {
 
 function select(id: number | null): void {
   selectedId = selectedId === id ? null : id;
-  if (selectedId !== null) themeSheet.hidden = true;
+  if (selectedId !== null) {
+    themeSheet.hidden = true;
+    kwSheet.hidden = true;
+  }
   render();
 }
 
@@ -250,8 +270,14 @@ function setOrigin(o: Origin): void {
 }
 
 async function refresh(): Promise<void> {
+  const kws = followed();
+  if (kws.length === 0) {
+    events = [];
+    render();
+    return;
+  }
   try {
-    events = await fetchEvents(origin, FETCH_RADIUS_KM);
+    events = await fetchEvents(origin, FETCH_RADIUS_KM, kws);
     lastFetchAt = nowSec();
     updatedLabel.textContent = `更新 ${fmtTime(lastFetchAt)}`;
   } catch (e) {
@@ -267,6 +293,7 @@ function switchView(v: 'radar' | 'map'): void {
   $('#map-view').hidden = v !== 'map';
   viewBtn.textContent = v === 'radar' ? '地圖' : '雷達';
   pickBtn.hidden = v !== 'map';
+  $('#scale-chips').hidden = v !== 'radar';
   compassBtn.hidden = v !== 'radar' || !compassSupported();
   if (v === 'map') map.invalidate();
 }
@@ -351,8 +378,141 @@ function renderThemeList(): void {
 function openThemeSheet(open: boolean): void {
   themeSheet.hidden = !open;
   if (open) {
+    kwSheet.hidden = true;
     selectedId = null;
     detailEl.hidden = true;
+  }
+}
+
+function loadFollowed(): string[] | null {
+  const raw = lsGet(LS_KEYWORDS);
+  if (!raw) return null;
+  try {
+    const arr = JSON.parse(raw) as unknown;
+    return Array.isArray(arr) ? arr.filter((x): x is string => typeof x === 'string') : null;
+  } catch {
+    return null;
+  }
+}
+
+/** 沒自己選過就追蹤所有預設關鍵字 */
+function followed(): string[] {
+  if (!canEditKeywords) return available.map((k) => k.term);
+  return savedFollowed ?? available.filter((k) => k.pinned).map((k) => k.term);
+}
+
+function setFollowed(next: string[]): void {
+  savedFollowed = next;
+  lsSet(LS_KEYWORDS, JSON.stringify(next));
+  renderKeywords();
+  void refresh();
+}
+
+function renderKeywords(): void {
+  const f = followed();
+  kwBtn.classList.toggle('readonly', !canEditKeywords);
+  kwBtn.setAttribute('aria-label', canEditKeywords ? '管理追蹤的關鍵字' : '目前搜尋的關鍵字');
+  (kwBtn.querySelector('.kw-edit') as HTMLElement).hidden = !canEditKeywords;
+  (kwBtn.querySelector('.kw-label') as HTMLElement).textContent = canEditKeywords ? '追蹤' : '搜尋中';
+  kwSummary.replaceChildren();
+  if (f.length === 0) {
+    const s = document.createElement('span');
+    s.className = 'kw-tag more';
+    s.textContent = '尚未選擇';
+    kwSummary.appendChild(s);
+  } else {
+    const shown = canEditKeywords ? 2 : 3;
+    for (const t of f.slice(0, shown)) {
+      const s = document.createElement('span');
+      s.className = 'kw-tag';
+      s.textContent = t;
+      kwSummary.appendChild(s);
+    }
+    if (f.length > shown) {
+      const s = document.createElement('span');
+      s.className = 'kw-tag more';
+      s.textContent = `+${f.length - shown}`;
+      kwSummary.appendChild(s);
+    }
+  }
+
+  kwList.replaceChildren();
+  const activeTerms = new Set(available.map((k) => k.term));
+  const all: Array<{ term: string; pinned: boolean; stale: boolean }> = [
+    ...available.map((k) => ({ term: k.term, pinned: k.pinned, stale: false })),
+    ...f.filter((t) => !activeTerms.has(t)).map((t) => ({ term: t, pinned: false, stale: true })),
+  ];
+  for (const k of all) {
+    const b = document.createElement('button');
+    b.type = 'button';
+    const on = f.includes(k.term);
+    b.className = `chip kw-chip${on ? ' on' : ''}`;
+    b.setAttribute('aria-pressed', String(on));
+    b.innerHTML = `${esc(k.term)}${k.pinned ? '<span class="pin">預設</span>' : ''}${k.stale ? '<span class="pin">已停止，點一下重新搜尋</span>' : ''}`;
+    b.addEventListener('click', () => {
+      if (k.stale) {
+        void submitKeyword(k.term);
+        return;
+      }
+      setFollowed(on ? f.filter((t) => t !== k.term) : [...f, k.term]);
+    });
+    kwList.appendChild(b);
+  }
+}
+
+function setKwMsg(text: string, error = false): void {
+  kwMsg.textContent = text;
+  kwMsg.classList.toggle('kw-msg-error', error);
+}
+
+async function loadKeywords(): Promise<void> {
+  try {
+    const r = await fetchKeywords();
+    available = r.keywords;
+    canEditKeywords = r.userAdd === true;
+    kwMaxEl.textContent = String(r.max);
+  } catch (e) {
+    console.warn(e);
+  }
+  renderKeywords();
+}
+
+async function submitKeyword(raw: string): Promise<void> {
+  const term = raw.normalize('NFKC').replace(/\s+/g, ' ').trim().replace(/^#+/, '').trim();
+  const len = [...term].length;
+  if (len < 2 || len > 20 || KEYWORD_RE_INVALID.test(term)) {
+    setKwMsg('關鍵字需為 2 到 20 個字，不能含 % _ < > 等符號', true);
+    return;
+  }
+  kwAddBtn.disabled = true;
+  setKwMsg('加入中…');
+  const r = await addKeyword(term);
+  kwAddBtn.disabled = false;
+  if (!r.ok) {
+    setKwMsg(r.message, true);
+    return;
+  }
+  available = r.keywords;
+  kwInput.value = '';
+  const f = followed();
+  setFollowed(f.includes(r.keyword.term) ? f : [...f, r.keyword.term]);
+  setKwMsg(
+    r.status === 'exists'
+      ? `「${r.keyword.term}」已經在搜尋了，已幫你追蹤`
+      : `已開始搜尋「${r.keyword.term}」，約一分鐘後會出現結果`,
+  );
+  if (r.status !== 'exists') window.setTimeout(() => void refresh(), 45_000);
+}
+
+function openKwSheet(open: boolean): void {
+  if (open && !canEditKeywords) return;
+  kwSheet.hidden = !open;
+  if (open) {
+    themeSheet.hidden = true;
+    selectedId = null;
+    detailEl.hidden = true;
+    setKwMsg('');
+    void loadKeywords();
   }
 }
 
@@ -378,6 +538,12 @@ function wireControls(): void {
     openThemeSheet(themeSheet.hidden);
   });
   themeSheet.querySelector('[data-act="close"]')?.addEventListener('click', () => openThemeSheet(false));
+  kwBtn.addEventListener('click', () => openKwSheet(kwSheet.hidden));
+  kwSheet.querySelector('[data-act="close"]')?.addEventListener('click', () => openKwSheet(false));
+  kwForm.addEventListener('submit', (e) => {
+    e.preventDefault();
+    void submitKeyword(kwInput.value);
+  });
   pickBtn.addEventListener('click', () => {
     const on = !pickBtn.classList.contains('on');
     pickBtn.classList.toggle('on', on);
@@ -412,8 +578,12 @@ async function boot(): Promise<void> {
     modeBadge.textContent = '離線';
     modeBadge.hidden = false;
   }
+  await loadKeywords();
   await refresh();
-  if (new URLSearchParams(location.search).get('open') === 'theme') openThemeSheet(true);
+  const openParam = new URLSearchParams(location.search).get('open');
+  if (openParam === 'theme') openThemeSheet(true);
+  if (openParam === 'keywords') openKwSheet(true);
+  if (new URLSearchParams(location.search).get('view') === 'map') switchView('map');
   window.setInterval(render, TICK_MS);
   window.setInterval(() => void refresh(), POLL_MS);
 }

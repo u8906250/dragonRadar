@@ -1,18 +1,11 @@
 import type { Env } from './env';
 import { extractFromPost } from './extract';
-import { geocode } from './geocode';
+import { geocodeFirst, placeCandidates } from './geocode';
+import { listActiveKeywords, type KeywordRow } from './keywords';
 import { parseThreadsTimestamp, type ThreadsClient } from './threads';
 import { nowSec, parseIsoToUnix } from './util';
 
 export type EventStatus = 'upcoming' | 'active' | 'ended' | 'unlocated';
-
-export interface KeywordRow {
-  id: number;
-  term: string;
-  enabled: number;
-  last_since: number | null;
-  created_at: number;
-}
 
 export interface PostRow {
   id: string;
@@ -57,6 +50,7 @@ export interface EventOut {
   lng: number;
   status: 'upcoming' | 'active';
   confidence: number | null;
+  keyword: string | null;
   post: {
     id: string;
     username: string | null;
@@ -129,10 +123,7 @@ export async function processPost(env: Env, post: PostRow, now = nowSec()): Prom
   const placeText = extraction.place_text ?? extraction.place_query;
   if (!placeQuery || !placeText) return { event: null, reason: 'no_place' };
 
-  let point = await geocode(env, placeQuery);
-  if (!point && extraction.place_text && extraction.place_text !== placeQuery) {
-    point = await geocode(env, extraction.place_text);
-  }
+  const point = await geocodeFirst(env, placeCandidates(placeQuery, extraction.place_text));
 
   const status: EventStatus = !point ? 'unlocated' : start <= now ? 'active' : 'upcoming';
   const event = await env.DB.prepare(
@@ -224,15 +215,9 @@ export async function processBacklog(env: Env, now = nowSec(), limit = 20): Prom
   return out;
 }
 
-export async function listKeywords(env: Env, onlyEnabled = false): Promise<KeywordRow[]> {
-  const sql = onlyEnabled ? 'SELECT * FROM keywords WHERE enabled = 1 ORDER BY id' : 'SELECT * FROM keywords ORDER BY id';
-  const r = await env.DB.prepare(sql).all<KeywordRow>();
-  return r.results;
-}
-
 export async function ingestAll(env: Env, client: ThreadsClient, now = nowSec()): Promise<IngestResult[]> {
   const out: IngestResult[] = [];
-  for (const kw of await listKeywords(env, true)) {
+  for (const kw of await listActiveKeywords(env, now)) {
     try {
       out.push(await ingestKeyword(env, client, kw, now));
     } catch (e) {
@@ -316,9 +301,11 @@ export interface ListQuery {
   radiusKm: number;
   now: number;
   horizonSec: number;
+  /** 只回傳這些關鍵字的事件；貼文是用該關鍵字搜到的，或內文含有該關鍵字 */
+  keywords?: string[];
 }
 
-type JoinedRow = EventRow & { username: string | null; permalink: string | null; text: string; posted_at: number };
+type JoinedRow = EventRow & { username: string | null; permalink: string | null; text: string; posted_at: number; keyword: string | null };
 
 export function toEventOut(r: JoinedRow, now: number): EventOut {
   return {
@@ -332,6 +319,7 @@ export function toEventOut(r: JoinedRow, now: number): EventOut {
     lng: r.lng as number,
     status: r.start_at <= now ? 'active' : 'upcoming',
     confidence: r.confidence,
+    keyword: r.keyword,
     post: { id: r.post_id, username: r.username, permalink: r.permalink, postedAt: r.posted_at, text: r.text },
   };
 }
@@ -346,7 +334,15 @@ export async function listEvents(env: Env, q: ListQuery): Promise<EventOut[]> {
     conds.push('e.lat BETWEEN ? AND ?', 'e.lng BETWEEN ? AND ?');
     binds.push(q.lat - dLat, q.lat + dLat, q.lng - dLng, q.lng + dLng);
   }
-  const sql = `SELECT e.*, p.username, p.permalink, p.text, p.posted_at
+  if (q.keywords && q.keywords.length > 0) {
+    const ors: string[] = [];
+    for (const k of q.keywords) {
+      ors.push('p.keyword = ?', "p.text LIKE ? ESCAPE '\\'");
+      binds.push(k, `%${k.replace(/[\\%_]/g, '\\$&')}%`);
+    }
+    conds.push(`(${ors.join(' OR ')})`);
+  }
+  const sql = `SELECT e.*, p.username, p.permalink, p.text, p.posted_at, p.keyword
     FROM events e JOIN posts p ON p.id = e.post_id
     WHERE ${conds.join(' AND ')}
     ORDER BY e.start_at ASC LIMIT 200`;
@@ -358,7 +354,7 @@ export async function listEvents(env: Env, q: ListQuery): Promise<EventOut[]> {
 
 export async function getEvent(env: Env, id: number, now: number): Promise<EventOut | null> {
   const row = await env.DB.prepare(
-    'SELECT e.*, p.username, p.permalink, p.text, p.posted_at FROM events e JOIN posts p ON p.id = e.post_id WHERE e.id = ? AND e.lat IS NOT NULL',
+    'SELECT e.*, p.username, p.permalink, p.text, p.posted_at, p.keyword FROM events e JOIN posts p ON p.id = e.post_id WHERE e.id = ? AND e.lat IS NOT NULL',
   )
     .bind(id)
     .first<JoinedRow>();

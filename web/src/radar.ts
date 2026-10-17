@@ -196,7 +196,9 @@ export class Radar {
       g.appendChild(el('circle', { class: 'ping', r: 6 }));
       this.appendMark(g, out);
       if (it.showLabel) {
-        const label = el('text', { class: 'label', y: -13, 'text-anchor': 'middle' });
+        // 靠近左右邊緣的標籤往內對齊，避免被雷達外框切掉
+        const anchor = p.x > C + R * 0.45 ? 'end' : p.x < C - R * 0.45 ? 'start' : 'middle';
+        const label = el('text', { class: 'label', y: -13, x: anchor === 'end' ? 6 : anchor === 'start' ? -6 : 0, 'text-anchor': anchor });
         label.textContent = it.label;
         g.appendChild(label);
       }

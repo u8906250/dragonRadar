@@ -1,6 +1,7 @@
 import { getAccessToken, makeClient, saveAccessToken } from './client';
 import type { Env } from './env';
-import { getEvent, getPost, ingestAll, listEvents, listKeywords, processBacklog, processPost, storePost, updateLifecycle, type EventRow } from './events';
+import { getEvent, getPost, ingestAll, ingestKeyword, listEvents, processBacklog, processPost, storePost, updateLifecycle, type EventRow } from './events';
+import { addUserKeyword, listActiveKeywords, listAllKeywords, MAX_ACTIVE_KEYWORDS, normalizeKeyword, parseKeywordList, toKeywordOut, touchKeywords } from './keywords';
 import { jsonResponse, nowSec, parseIsoToUnix } from './util';
 
 const REFRESH_CRON = '0 3 * * 1';
@@ -67,8 +68,45 @@ async function handle(req: Request, env: Env, ctx: ExecutionContext): Promise<Re
     const lng = num(url.searchParams.get('lng'));
     const radiusKm = num(url.searchParams.get('radius_km')) ?? Number(env.DEFAULT_RADIUS_KM) ?? 30;
     const horizonH = num(url.searchParams.get('horizon_h')) ?? 24;
-    const events = await listEvents(env, { lat, lng, radiusKm: Math.min(200, Math.max(1, radiusKm)), now, horizonSec: Math.min(168, Math.max(1, horizonH)) * 3600 });
+    const keywords = parseKeywordList(url.searchParams.get('keywords'));
+    const events = await listEvents(env, {
+      lat,
+      lng,
+      radiusKm: Math.min(200, Math.max(1, radiusKm)),
+      now,
+      horizonSec: Math.min(168, Math.max(1, horizonH)) * 3600,
+      keywords,
+    });
+    if (keywords.length > 0) ctx.waitUntil(touchKeywords(env, keywords, now).catch((e) => console.warn('touch failed', e)));
     return jsonResponse({ now, events });
+  }
+
+  if (req.method === 'GET' && path === '/api/keywords') {
+    const active = await listActiveKeywords(env, now);
+    return jsonResponse({ max: MAX_ACTIVE_KEYWORDS, userAdd: env.ALLOW_USER_KEYWORDS === 'true', keywords: active.map(toKeywordOut) });
+  }
+
+  // 使用者新增關鍵字：所有人共用，有上限，7 天沒人追蹤會自動停止搜尋
+  if (req.method === 'POST' && path === '/api/keywords') {
+    if (env.ALLOW_USER_KEYWORDS !== 'true') throw new HttpError(403, '目前不開放新增關鍵字');
+    const body = await readJson<{ term?: unknown }>(req);
+    const term = normalizeKeyword(body.term);
+    if (!term) throw new HttpError(400, '關鍵字需為 2 到 20 個字，不能含特殊符號');
+    const r = await addUserKeyword(env, term, now);
+    if (r.status === 'full') throw new HttpError(429, `目前已有 ${MAX_ACTIVE_KEYWORDS} 個關鍵字在搜尋，請先追蹤現有的關鍵字`);
+    if (r.status !== 'exists') {
+      // 新關鍵字馬上搜一次，不用等下一輪 cron
+      const kw = r.keyword;
+      ctx.waitUntil(
+        (async () => {
+          const client = await makeClient(env);
+          const res = await ingestKeyword(env, client, kw, nowSec());
+          console.log(JSON.stringify({ firstIngest: res }));
+        })().catch((e) => console.error('first ingest failed', e)),
+      );
+    }
+    const active = await listActiveKeywords(env, now);
+    return jsonResponse({ status: r.status, keyword: toKeywordOut(r.keyword), max: MAX_ACTIVE_KEYWORDS, keywords: active.map(toKeywordOut) }, r.status === 'created' ? 201 : 200);
   }
 
   const evMatch = /^\/api\/events\/(\d+)$/.exec(path);
@@ -87,6 +125,7 @@ async function handle(req: Request, env: Env, ctx: ExecutionContext): Promise<Re
 }
 
 async function handleAdmin(req: Request, env: Env, _ctx: ExecutionContext, path: string, now: number): Promise<Response> {
+  const allKeywords = async (): Promise<Response> => jsonResponse({ max: MAX_ACTIVE_KEYWORDS, keywords: await listAllKeywords(env) });
   const url = new URL(req.url);
 
   // 手動塞一則貼文進來跑完整流程（審核期間或測試用）
@@ -127,23 +166,26 @@ async function handleAdmin(req: Request, env: Env, _ctx: ExecutionContext, path:
   }
 
   if (req.method === 'GET' && path === '/api/admin/keywords') {
-    return jsonResponse({ keywords: await listKeywords(env) });
+    return allKeywords();
   }
 
   if (req.method === 'POST' && path === '/api/admin/keywords') {
-    const body = await readJson<{ term?: string }>(req);
-    const term = body.term?.trim();
-    if (!term) throw new HttpError(400, 'term is required');
-    await env.DB.prepare('INSERT INTO keywords (term, enabled, created_at) VALUES (?, 1, ?) ON CONFLICT(term) DO UPDATE SET enabled = 1')
+    // 管理員新增的關鍵字是固定搜尋（pinned），不受 7 天規則影響
+    const body = await readJson<{ term?: unknown }>(req);
+    const term = normalizeKeyword(body.term);
+    if (!term) throw new HttpError(400, 'term must be 2-20 chars');
+    await env.DB.prepare(
+      "INSERT INTO keywords (term, enabled, pinned, source, created_at) VALUES (?, 1, 1, 'admin', ?) ON CONFLICT(term) DO UPDATE SET enabled = 1, pinned = 1",
+    )
       .bind(term, now)
       .run();
-    return jsonResponse({ keywords: await listKeywords(env) });
+    return allKeywords();
   }
 
   const kwMatch = /^\/api\/admin\/keywords\/(\d+)$/.exec(path);
   if (req.method === 'DELETE' && kwMatch) {
-    await env.DB.prepare('UPDATE keywords SET enabled = 0 WHERE id = ?').bind(Number(kwMatch[1])).run();
-    return jsonResponse({ keywords: await listKeywords(env) });
+    await env.DB.prepare('UPDATE keywords SET enabled = 0, pinned = 0 WHERE id = ?').bind(Number(kwMatch[1])).run();
+    return allKeywords();
   }
 
   if (req.method === 'POST' && path === '/api/admin/token') {

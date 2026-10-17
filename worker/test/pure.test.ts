@@ -62,3 +62,48 @@ describe('buildMessages', () => {
     expect(msgs[1].content).toContain('test');
   });
 });
+
+import { placeCandidates } from '../src/geocode';
+import { normalizeKeyword, parseKeywordList } from '../src/keywords';
+
+describe('normalizeKeyword', () => {
+  it('trims, strips leading # and collapses spaces', () => {
+    expect(normalizeKeyword('  #洋流飄帶 ')).toBe('洋流飄帶');
+    expect(normalizeKeyword('免費   發放')).toBe('免費 發放');
+  });
+  it('normalizes full-width characters', () => {
+    expect(normalizeKeyword('ＡＢＣ貼紙')).toBe('ABC貼紙');
+  });
+  it('rejects too short, too long, or unsafe input', () => {
+    expect(normalizeKeyword('洋')).toBeNull();
+    expect(normalizeKeyword('一二三四五六七八九十一二三四五六七八九十一')).toBeNull();
+    expect(normalizeKeyword('100%發放')).toBeNull();
+    expect(normalizeKeyword('<script>')).toBeNull();
+    expect(normalizeKeyword(42)).toBeNull();
+  });
+});
+
+describe('parseKeywordList', () => {
+  it('splits, dedupes and drops invalid entries', () => {
+    expect(parseKeywordList('洋流飄帶,洋流飄帶, 免費發放 ,x')).toEqual(['洋流飄帶', '免費發放']);
+    expect(parseKeywordList(null)).toEqual([]);
+  });
+});
+
+describe('placeCandidates', () => {
+  it('falls back from exit-level detail to the station name', () => {
+    const c = placeCandidates('台北市 捷運中山站 4號出口', '捷運中山站 4號出口');
+    expect(c[0]).toBe('台北市 捷運中山站 4號出口');
+    expect(c).toContain('台北市 捷運中山站');
+    expect(c).toContain('台北市 中山站');
+    expect(c.length).toBeLessThanOrEqual(5);
+  });
+  it('strips gate numbers', () => {
+    const c = placeCandidates('台北市 台北車站 東三門', '台北車站東三門');
+    expect(c.some((x) => !x.includes('東三門') && x.includes('台北車站'))).toBe(true);
+    expect(c).not.toContain('台北市 車站');
+  });
+  it('keeps plain landmarks untouched', () => {
+    expect(placeCandidates('台北市 松山文創園區', null)).toEqual(['台北市 松山文創園區']);
+  });
+});

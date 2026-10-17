@@ -56,12 +56,31 @@
           <button type="button" id="use-gps" class="link-btn" hidden>改用 GPS</button>
           <span id="updated-label" class="muted right"></span>
         </div>
+        <button type="button" id="kw-btn" class="kw-row" aria-label="管理追蹤的關鍵字">
+          <span class="kw-label">追蹤</span>
+          <span id="kw-summary" class="kw-tags"></span>
+          <span class="kw-edit">編輯</span>
+        </button>
         <ul id="event-list" class="event-list"></ul>
         <p id="empty-hint" class="muted hint" hidden></p>
       </aside>
 
       <div id="banner" class="banner" hidden></div>
       <div id="detail" class="sheet" hidden></div>
+      <div id="kw-sheet" class="sheet" hidden>
+        <div class="sheet-head">
+          <strong>追蹤關鍵字</strong>
+          <button type="button" class="chip" data-act="close" aria-label="關閉">關閉</button>
+        </div>
+        <p class="muted sheet-note">點一下切換追蹤。雷達只顯示你追蹤的關鍵字找到的發放。</p>
+        <div id="kw-list" class="kw-list" role="group" aria-label="關鍵字"></div>
+        <form id="kw-form" class="kw-form" autocomplete="off">
+          <input id="kw-input" type="text" inputmode="text" enterkeyhint="done" maxlength="20" placeholder="輸入新關鍵字，例如 免費發放" aria-label="新關鍵字" />
+          <button type="submit" class="btn primary" id="kw-add">加入</button>
+        </form>
+        <p id="kw-msg" class="muted sheet-note" aria-live="polite"></p>
+        <p class="muted sheet-note small">關鍵字由所有人共用，同時最多搜尋 <span id="kw-max">10</span> 個。新增的關鍵字 7 天沒人追蹤會自動停止搜尋。</p>
+      </div>
       <div id="theme-sheet" class="sheet" hidden>
         <div class="sheet-head">
           <strong>選擇主題</strong>
