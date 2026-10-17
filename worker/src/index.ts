@@ -1,6 +1,6 @@
 import { getAccessToken, makeClient, saveAccessToken } from './client';
 import type { Env } from './env';
-import { DEFAULT_DURATION_SEC, ENDED_WORDS, MAX_FUTURE_SEC, MIN_CONFIDENCE, getEvent, getPost, ingestAll, ingestKeyword, listEvents, processBacklog, processPost, storePost, updateLifecycle, type EventRow } from './events';
+import { DEFAULT_DURATION_SEC, ENDED_WORDS, MAX_FUTURE_SEC, MIN_CONFIDENCE, SPOT_DEFAULT_DAYS, getEvent, getPost, ingestAll, ingestKeyword, listEvents, processBacklog, processPost, storePost, updateLifecycle, type EventRow } from './events';
 import { runModel } from './extract';
 import { ingestNews, NEWS_FEEDS } from './sources/news';
 import { syncVoyage, VOYAGE_PAGE } from './sources/voyage';
@@ -107,6 +107,7 @@ async function handle(req: Request, env: Env, ctx: ExecutionContext): Promise<Re
         intervalMin: 10,
         defaultDurationMin: DEFAULT_DURATION_SEC / 60,
         maxFutureDays: MAX_FUTURE_SEC / 86400,
+        spotDefaultDays: SPOT_DEFAULT_DAYS,
         minConfidence: MIN_CONFIDENCE,
         endedWords: ENDED_WORDS,
         region: '全台灣',

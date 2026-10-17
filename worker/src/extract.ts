@@ -13,6 +13,10 @@ export interface ExtractedEvent {
   place_text: string | null;
   place_query: string | null;
   confidence: number;
+  /** 固定據點：店家、服務處等連續多天在固定時段都能去 */
+  spot: boolean;
+  /** 固定據點的最後一天 YYYY-MM-DD，沒寫則 null */
+  until: string | null;
 }
 
 export interface Extraction {
@@ -34,8 +38,10 @@ const EVENT_SCHEMA = {
     place_text: { type: ['string', 'null'] },
     place_query: { type: ['string', 'null'] },
     confidence: { type: 'number' },
+    spot: { type: 'boolean' },
+    until: { type: ['string', 'null'] },
   },
-  required: ['kind', 'title', 'item', 'start_at', 'end_at', 'place_text', 'place_query', 'confidence'],
+  required: ['kind', 'title', 'item', 'start_at', 'end_at', 'place_text', 'place_query', 'confidence', 'spot', 'until'],
 };
 
 const SCHEMA = {
@@ -68,12 +74,15 @@ events 每筆的欄位：
 - place_text: 貼文原文中的地點描述
 - place_query: 給地圖搜尋用的地址或地名。有門牌地址就用地址；要補上縣市，例如「宜蘭縣羅東鎮光榮路218號」「台北市 大龍峒保安宮」。鄉鎮區只有貼文寫了才加，不要自己猜（猜錯會定位到別的區）。店家寫「近XX站」時，用「縣市 + 捷運XX站」，例如「台北市 捷運忠孝復興站」。只有「XX服務處」「競選總部」而沒有地址時，填你能確定的最具體地名；沒有則 null
 - confidence: 這一筆 0 到 1 的信心分數
+- spot: 是否為「固定據點」：店家、服務處、競選總部等，連續多天在固定時段都可以去領或參加（例如寫了「每天」「每日」「營業時間」「營業日」「即日起」「長期」「10/17~10/19」）。單次、只有一天的活動或發放為 false
+- until: 固定據點的最後一天，格式 YYYY-MM-DD；沒寫最後一天或不是固定據點則 null
 
 規則：
 - 相對時間（今天、今晚、明天、週六、等等、下午）以「貼文發布時間」為基準換算，時區一律 +08:00。「今晚 5 點半」是發文當天 17:30。
 - 「早上 9 點到下午 5 點」這種時段，start_at 是 9:00、end_at 是 17:00。
 - 同一則貼文有多個地點或多個時段（例如行程表、車掃停靠點），要拆成多筆 events。
-- 連續多天、每天固定時段（例如「10/17~10/19 每日 11:00~18:00」），每天拆成一筆，各自是當天的開始與結束時間；不要把多天合成一段從第一天開到最後一天。
+- 固定據點（spot 為 true）每個地點只輸出一筆，不要每天拆一筆：start_at、end_at 填第一天的開放時段（例如「10/17~10/19 每日 11:00~18:00」→ start_at 10/17 11:00、end_at 10/17 18:00、until 2026-10-19）。沒寫每天幾點時，start_at 填第一天 00:00、end_at 為 null。「即日起」的第一天是發文當天。
+- 固定據點有寫日期範圍或「每天」就算有時間，不需要因為沒寫幾點而降低 confidence。
 - 車掃、遊行等移動路線，每個有時間的停靠點各一筆；沒有停靠點就用出發地。
 - 「發完為止」「數量有限」代表沒有明確結束時間，end_at 為 null。
 - 新聞報導、心得、活動回顧、徵求、詢問、線上抽獎、直播、線上活動、販售，is_event 為 false，events 為空陣列。
@@ -121,6 +130,8 @@ function normalizeEvent(o: Record<string, unknown>): ExtractedEvent {
     place_text: str(o.place_text),
     place_query: str(o.place_query),
     confidence: conf(o.confidence),
+    spot: o.spot === true || o.spot === 'true',
+    until: /^\d{4}-\d{2}-\d{2}/.test(str(o.until) ?? '') ? (str(o.until) as string).slice(0, 10) : null,
   };
 }
 

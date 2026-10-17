@@ -31,7 +31,7 @@
   --radar-sweep: #03615a; --radar-sweep-op: 0.4;
   --radar-me: #15171c; --radar-text: #5d5850; --radar-rose: #15171c;
   --blip: #ea611d; --blip-stroke: #15171c; --blip-stroke-w: 2; --blip-core: #ffffff;
-  --blip-activity: #03615a; --blip-soon: #ffe08a; --blip-soon-stroke: #15171c; --blip-selected: #03615a;
+  --blip-activity: #03615a; --blip-spot: #1d4e89; --blip-soon: #ffe08a; --blip-soon-stroke: #15171c; --blip-selected: #03615a;
   --label: #15171c; --label-halo: #fbf7ef;
 }
 
@@ -55,7 +55,7 @@
   --radar-sweep: #3cff8a; --radar-sweep-op: 0.55;
   --radar-me: #3cff8a; --radar-text: #7fa58f; --radar-rose: #7fa58f;
   --blip: #ffd43b; --blip-stroke: #6b4e00; --blip-stroke-w: 1; --blip-core: #ffffff;
-  --blip-activity: #5ad1ff; --blip-soon: #8fd3a8; --blip-soon-stroke: #2c5a3c; --blip-selected: #ffffff;
+  --blip-activity: #5ad1ff; --blip-spot: #ff8c42; --blip-soon: #8fd3a8; --blip-soon-stroke: #2c5a3c; --blip-selected: #ffffff;
   --label: #d8f5e3; --label-halo: #052016;
 }
 
@@ -79,7 +79,7 @@
   --radar-sweep: #5b3a1e; --radar-sweep-op: 0.5;
   --radar-me: #b8322a; --radar-text: #7a5c3a; --radar-rose: #5b3a1e;
   --blip: #b8322a; --blip-stroke: #b8322a; --blip-stroke-w: 0; --blip-core: #f7eed9;
-  --blip-activity: #2f5d8a; --blip-soon: #8a5a2b; --blip-soon-stroke: #8a5a2b; --blip-selected: #3b2612;
+  --blip-activity: #2f5d8a; --blip-spot: #4f7a28; --blip-soon: #8a5a2b; --blip-soon-stroke: #8a5a2b; --blip-selected: #3b2612;
   --label: #3b2612; --label-halo: #f3e7c9;
 }
 
@@ -103,7 +103,7 @@
   --radar-sweep: #ff3fa4; --radar-sweep-op: 0.5;
   --radar-me: #2ef2ff; --radar-text: #a88fc4; --radar-rose: #a88fc4;
   --blip: #ff3fa4; --blip-stroke: #ffffff; --blip-stroke-w: 1; --blip-core: #ffffff;
-  --blip-activity: #b388ff; --blip-soon: #2ef2ff; --blip-soon-stroke: #ffffff; --blip-selected: #ffffff;
+  --blip-activity: #b388ff; --blip-spot: #39ff88; --blip-soon: #2ef2ff; --blip-soon-stroke: #ffffff; --blip-selected: #ffffff;
   --label: #ffffff; --label-halo: #0b0612;
 }
 
@@ -232,7 +232,7 @@ button, select, a { touch-action: manipulation; }
 .panel.expanded { max-height: 80dvh; }
 /* 收合：只留橫條與「漂來幾個」那一行 */
 .panel.collapsed { max-height: calc(66px + env(safe-area-inset-bottom)); }
-.panel.collapsed .kw-bar, .panel.collapsed .event-list, .panel.collapsed .hint { visibility: hidden; }
+.panel.collapsed .kw-bar, .panel.collapsed .filter-row, .panel.collapsed .event-list, .panel.collapsed .hint { visibility: hidden; }
 .panel.collapsed .panel-head .right, .panel.collapsed #origin-label, .panel.collapsed #use-gps { display: none; }
 .panel.expanded .panel-handle span { opacity: 0.9; }
 .panel-handle { display: block; width: 100%; height: 28px; border: 0; background: transparent; cursor: grab; padding: 0; touch-action: none; }
@@ -351,7 +351,7 @@ button, select, a { touch-action: manipulation; }
   #stage { grid-column: 1; grid-row: 2; padding: 16px; }
   .panel { grid-column: 2; grid-row: 2; max-height: none; border-top: 0; border-left: var(--border-w) solid var(--line); border-radius: 0; box-shadow: none; }
   .panel.expanded, .panel.collapsed { max-height: none; }
-  .panel.collapsed .kw-bar, .panel.collapsed .event-list, .panel.collapsed .hint { visibility: visible; }
+  .panel.collapsed .kw-bar, .panel.collapsed .filter-row, .panel.collapsed .event-list, .panel.collapsed .hint { visibility: visible; }
   .panel-handle { display: none; }
   .panel-head { padding-top: 12px; }
   .sheet { left: auto; width: 440px; right: 16px; bottom: 16px; border-radius: 16px; border: var(--border-w) solid var(--line); }
@@ -371,3 +371,17 @@ button, select, a { touch-action: manipulation; }
 .report-tips { padding-left: 18px; }
 .report-tips li { margin-bottom: 4px; }
 .ended-note { font-size: 13px; margin: 8px 0 0; }
+
+/* 固定據點：菱形光點、休息中變淡 */
+.radar .blip.spot .dot { fill: var(--blip-spot); }
+.radar .blip.spot .ping { stroke: var(--blip-spot); }
+.radar .blip.phase-closed .dot { opacity: 0.4; animation: none; }
+.radar .blip.spot.phase-active .dot { animation: none; }
+.radar.blip-neon .blip.spot .dot { filter: drop-shadow(0 0 6px var(--blip-spot)); }
+.ev.spot .dot { border-radius: 1px; transform: rotate(45deg); background: var(--blip-spot); box-shadow: none; }
+.ev.spot.phase-active .dot { box-shadow: 0 0 8px var(--blip-spot); }
+.ev.spot.phase-closed .dot, .ev.spot.phase-later .dot { opacity: 0.45; }
+.ev.spot .kind-tag { background: var(--blip-spot); color: #fff; }
+.ev.spot.phase-active .ev-time { color: var(--blip-spot); }
+.filter-row { display: flex; gap: 8px; margin: -2px 12px 10px; }
+.chip.small { min-height: 32px; padding: 4px 12px; font-size: 13px; }

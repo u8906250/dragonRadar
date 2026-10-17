@@ -17,6 +17,8 @@ export interface EventOut {
   allDay?: boolean;
   /** 有幾個人回報已發完／已結束 */
   endedReports?: number;
+  /** 固定據點的其中一天 */
+  spot?: boolean;
   post: {
     id: string;
     /** threads、news、official、manual、link（使用者貼的連結） */
@@ -34,14 +36,23 @@ export interface Origin {
   source: 'gps' | 'manual' | 'default';
 }
 
-/** active 進行中；soon 即將開始，顯示淡光點；later 不顯示 */
-export type Phase = 'active' | 'soon' | 'later';
+/** active 進行中；soon 即將開始，顯示淡光點；later 不顯示；closed 固定據點休息中，顯示淡光點 */
+export type Phase = 'active' | 'soon' | 'later' | 'closed';
+
+/** 固定據點：同一則貼文、同一地點的每天時段合成一筆 */
+export interface SpotInfo {
+  key: string;
+  /** 還沒結束的時段，依時間排序 */
+  sessions: EventOut[];
+}
 
 export interface Item {
+  /** 固定據點時是目前或下一個時段 */
   ev: EventOut;
   distanceKm: number;
   bearing: number;
   phase: Phase;
+  spot?: SpotInfo;
 }
 
 export type { BlipStyle, SweepStyle } from './themes';
@@ -57,6 +68,7 @@ export interface KeywordRules {
   intervalMin: number;
   defaultDurationMin: number;
   maxFutureDays: number;
+  spotDefaultDays?: number;
   minConfidence: number;
   endedWords: string[];
   region: string;

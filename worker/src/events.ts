@@ -36,6 +36,7 @@ export interface EventRow {
   confidence: number | null;
   ended_reason: string | null;
   all_day?: number;
+  spot?: number;
   last_checked_at: number | null;
   created_at: number;
   updated_at: number;
@@ -58,6 +59,8 @@ export interface EventOut {
   allDay: boolean;
   /** 有幾個人回報已發完／已結束 */
   endedReports: number;
+  /** 固定據點的其中一天（同一則貼文、同一地點的每天各一筆） */
+  spot: boolean;
   post: {
     id: string;
     source: string;
@@ -72,6 +75,10 @@ export const DEFAULT_DURATION_SEC = 2 * 3600;
 export const MAX_FUTURE_SEC = 14 * 86400;
 const LOOKBACK_SEC = 24 * 3600;
 export const MIN_CONFIDENCE = 0.5;
+/** 固定據點沒寫最後一天時，從第一天起保留幾天 */
+export const SPOT_DEFAULT_DAYS = 7;
+const DAY_SEC = 86400;
+const TAIPEI_OFFSET_SEC = 8 * 3600;
 const DUP_WINDOW_SEC = 30 * 60;
 const DUP_DEG = 0.0014; // 約 150 m
 const RECHECK_INTERVAL_SEC = 600;
@@ -119,11 +126,54 @@ export interface ProcessResult {
 /** 建立的事件裡有幾個找得到位置 */
 export const locatedCount = (r: ProcessResult): number => r.events.filter((e) => e.status !== 'unlocated').length;
 
-async function createEvent(env: Env, post: PostRow, ex: ExtractedEvent, now: number): Promise<{ event: EventRow | null; reason: string }> {
+/** 台灣時間當天 00:00 的 unix 秒 */
+export function taipeiDayStart(unix: number): number {
+  return Math.floor((unix + TAIPEI_OFFSET_SEC) / DAY_SEC) * DAY_SEC - TAIPEI_OFFSET_SEC;
+}
+
+export interface Session {
+  start: number;
+  end: number;
+  allDay: boolean;
+}
+
+/**
+ * 固定據點展開成每天一個時段：從 start_at 那天到 until（沒寫就保留 SPOT_DEFAULT_DAYS 天），
+ * 每天用第一天的開放時段；沒寫幾點（00:00 開始、沒有結束）就是整天、標成時間未公布。
+ */
+export function spotSessions(ex: Pick<ExtractedEvent, 'start_at' | 'end_at' | 'until'>, postedAt: number, now: number): Session[] {
+  const start = parseIsoToUnix(ex.start_at) ?? taipeiDayStart(postedAt);
+  const end = parseIsoToUnix(ex.end_at);
+  const firstDay = taipeiDayStart(start);
+  const open = start - firstDay;
+  const allDay = open === 0 && end === null;
+  let close = allDay ? DAY_SEC : end !== null ? end - taipeiDayStart(end) : open + DEFAULT_DURATION_SEC;
+  if (close <= open) close = Math.min(DAY_SEC, open + DEFAULT_DURATION_SEC);
+
+  // 最後一天：until，其次是模型把多天合成一段時 end_at 的那天，都沒有就預設天數
+  const untilAt = ex.until ? parseIsoToUnix(`${ex.until}T00:00:00+08:00`) : null;
+  let lastDay = untilAt ?? (end !== null && taipeiDayStart(end) > firstDay ? taipeiDayStart(end) : firstDay + (SPOT_DEFAULT_DAYS - 1) * DAY_SEC);
+  lastDay = Math.min(lastDay, firstDay + 13 * DAY_SEC, taipeiDayStart(now + MAX_FUTURE_SEC));
+
+  const out: Session[] = [];
+  for (let day = firstDay; day <= lastDay; day += DAY_SEC) {
+    const s = { start: day + open, end: day + close, allDay };
+    if (s.end > now) out.push(s);
+  }
+  return out;
+}
+
+async function createEvent(
+  env: Env,
+  post: PostRow,
+  ex: ExtractedEvent,
+  now: number,
+  session?: Session,
+): Promise<{ event: EventRow | null; reason: string }> {
   if (ex.confidence < MIN_CONFIDENCE) return { event: null, reason: 'low_confidence' };
-  const start = parseIsoToUnix(ex.start_at);
+  const start = session ? session.start : parseIsoToUnix(ex.start_at);
   if (start === null) return { event: null, reason: 'no_start_time' };
-  let end = parseIsoToUnix(ex.end_at) ?? start + DEFAULT_DURATION_SEC;
+  let end = session ? session.end : (parseIsoToUnix(ex.end_at) ?? start + DEFAULT_DURATION_SEC);
   if (end <= start) end = start + DEFAULT_DURATION_SEC;
   if (end <= now) return { event: null, reason: 'already_over' };
   if (start > now + MAX_FUTURE_SEC) return { event: null, reason: 'too_far_in_future' };
@@ -147,10 +197,27 @@ async function createEvent(env: Env, post: PostRow, ex: ExtractedEvent, now: num
 
   const status: EventStatus = !point ? 'unlocated' : start <= now ? 'active' : 'upcoming';
   const event = await env.DB.prepare(
-    `INSERT INTO events (post_id, kind, title, item, start_at, end_at, place_text, place_query, lat, lng, status, confidence, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING *`,
+    `INSERT INTO events (post_id, kind, title, item, start_at, end_at, place_text, place_query, lat, lng, status, confidence, all_day, spot, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING *`,
   )
-    .bind(post.id, ex.kind, ex.title, ex.item, start, end, placeText, placeQuery, point?.lat ?? null, point?.lng ?? null, status, ex.confidence, now, now)
+    .bind(
+      post.id,
+      ex.kind,
+      ex.title,
+      ex.item,
+      start,
+      end,
+      placeText,
+      placeQuery,
+      point?.lat ?? null,
+      point?.lng ?? null,
+      status,
+      ex.confidence,
+      session?.allDay ? 1 : 0,
+      session ? 1 : 0,
+      now,
+      now,
+    )
     .first<EventRow>();
   return { event, reason: status };
 }
@@ -167,9 +234,19 @@ export async function processPost(env: Env, post: PostRow, now = nowSec()): Prom
 
   const out: ProcessResult = { events: [], reasons: [] };
   for (const ex of extraction.events) {
-    const r = await createEvent(env, post, ex, now);
-    if (r.event) out.events.push(r.event);
-    out.reasons.push(r.reason);
+    if (!ex.spot) {
+      const r = await createEvent(env, post, ex, now);
+      if (r.event) out.events.push(r.event);
+      out.reasons.push(r.reason);
+      continue;
+    }
+    const sessions = spotSessions(ex, post.posted_at, now);
+    if (sessions.length === 0) out.reasons.push('already_over');
+    for (const session of sessions) {
+      const r = await createEvent(env, post, ex, now, session);
+      if (r.event) out.events.push(r.event);
+      out.reasons.push(r.reason);
+    }
   }
   return out;
 }
@@ -352,6 +429,7 @@ export function toEventOut(r: JoinedRow, now: number): EventOut {
     keyword: r.keyword,
     allDay: r.all_day === 1,
     endedReports: r.ended_reports ?? 0,
+    spot: r.spot === 1,
     post: { id: r.post_id, source: r.source, username: r.username, permalink: r.permalink, postedAt: r.posted_at, text: r.text },
   };
 }

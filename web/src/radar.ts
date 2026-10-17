@@ -6,6 +6,8 @@ export interface RadarItem {
   distanceKm: number;
   bearing: number;
   phase: Phase;
+  /** 固定據點，畫成菱形 */
+  spot?: boolean;
   label: string;
   showLabel: boolean;
   selected: boolean;
@@ -163,8 +165,13 @@ export class Radar {
     }
   }
 
-  private appendMark(g: SVGGElement, out: boolean): void {
+  private appendMark(g: SVGGElement, out: boolean, spot = false): void {
     const r = out ? 4 : 6;
+    if (spot) {
+      const s = out ? 7 : 10;
+      g.appendChild(el('rect', { class: 'dot', x: -s / 2, y: -s / 2, width: s, height: s, transform: 'rotate(45)' }));
+      return;
+    }
     switch (this.style.blip) {
       case 'buoy':
         g.appendChild(el('circle', { class: 'dot', r: r + 1 }));
@@ -201,7 +208,7 @@ export class Radar {
       const out = ratio > 1;
       const p = polar(it.bearing - this.heading, Math.min(1, ratio) * (R - 8));
       const g = el('g', {
-        class: `blip phase-${it.phase} kind-${it.kind}${out ? ' out' : ''}${it.selected ? ' selected' : ''}`,
+        class: `blip phase-${it.phase} kind-${it.kind}${it.spot ? ' spot' : ''}${out ? ' out' : ''}${it.selected ? ' selected' : ''}`,
         transform: `translate(${p.x.toFixed(1)} ${p.y.toFixed(1)})`,
         tabindex: 0,
         role: 'button',
@@ -209,7 +216,7 @@ export class Radar {
       g.dataset.id = String(it.id);
       g.appendChild(el('circle', { class: 'hit', r: 22 }));
       g.appendChild(el('circle', { class: 'ping', r: 6 }));
-      this.appendMark(g, out);
+      this.appendMark(g, out, it.spot);
       if (it.showLabel && labelOk.has(it.id)) {
         // 靠近左右邊緣的標籤往內對齊，避免被雷達外框切掉
         const anchor = p.x > C + R * 0.45 ? 'end' : p.x < C - R * 0.45 ? 'start' : 'middle';

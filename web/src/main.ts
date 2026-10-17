@@ -22,6 +22,9 @@ const LS_BASE = 'dr.base';
 const BASES: BaseMap[] = ['nlsc', 'osm'];
 const LS_KEYWORDS = 'dr.keywords';
 const LS_ENDED = 'dr.endedReported';
+const LS_SPOTS = 'dr.showSpots';
+/** 固定據點休息中、下一段在這個時間內開始才畫淡光點 */
+const SPOT_SHOW_AHEAD_SEC = 24 * 3600;
 const KEYWORD_RE_INVALID = /[<>{}\\%_]/;
 
 const $ = <T extends HTMLElement>(sel: string): T => {
@@ -81,7 +84,9 @@ let canEditKeywords = false;
 let keywordRules: KeywordRules | null = null;
 let savedFollowed: string[] | null = loadFollowed();
 let theme: Theme = getTheme(new URLSearchParams(location.search).get('theme') ?? lsGet(LS_THEME) ?? DEFAULT_THEME_ID);
-const seenActive = new Set<number>();
+/** 已經提醒過的事件；固定據點用據點 key，每天開門不會重複嗶 */
+const seenActive = new Set<string>();
+let showSpots = lsGet(LS_SPOTS) !== '0';
 /** 這台裝置已經回報過「已發完」的事件 */
 const endedReported = new Set<number>(loadIdList(LS_ENDED));
 
@@ -126,6 +131,8 @@ const reportSubmit = $<HTMLButtonElement>('#report-submit');
 const reportPaste = $<HTMLButtonElement>('#report-paste');
 const reportResult = $('#report-result');
 const reportTips = $('#report-tips');
+const filterRow = $('#filter-row');
+const spotToggle = $<HTMLButtonElement>('#spot-toggle');
 const baseChipsEl = $('#base-chips');
 const baseChips = Array.from(document.querySelectorAll<HTMLButtonElement>('#base-chips [data-base]'));
 let baseMap: BaseMap = (BASES as string[]).includes(lsGet(LS_BASE) ?? '') ? (lsGet(LS_BASE) as BaseMap) : 'nlsc';
@@ -168,11 +175,33 @@ function dedupeEvents(list: EventOut[]): EventOut[] {
   return kept;
 }
 
+const spotKey = (ev: EventOut): string => `${ev.post.id}|${ev.placeText}`;
+
+/** 固定據點：目前開放中的時段，否則下一個時段 */
+function spotItem(key: string, sessions: EventOut[], me: LatLng, now: number): Item {
+  sessions.sort((a, b) => a.startAt - b.startAt);
+  const ev = sessions.find((s) => s.startAt <= now && now < s.endAt) ?? sessions[0];
+  const open = ev.startAt <= now && now < ev.endAt;
+  // 沒公布幾點的據點跟官方行程一樣，不算「進行中」，不會嗶
+  const phase: Phase = open ? (ev.allDay ? 'soon' : 'active') : ev.startAt - now <= SPOT_SHOW_AHEAD_SEC ? 'closed' : 'later';
+  return { ev, distanceKm: haversineKm(me, ev), bearing: bearingDeg(me, ev), phase, spot: { key, sessions } };
+}
+
 function computeItems(now: number): Item[] {
   const me: LatLng = { lat: origin.lat, lng: origin.lng };
-  return dedupeEvents(events)
-    .filter((ev) => ev.endAt > now)
-    .map((ev) => ({ ev, distanceKm: haversineKm(me, ev), bearing: bearingDeg(me, ev), phase: phaseOf(ev, now) }))
+  const items: Item[] = [];
+  const spots = new Map<string, EventOut[]>();
+  for (const ev of dedupeEvents(events)) {
+    if (ev.endAt <= now) continue;
+    if (ev.spot) {
+      const k = spotKey(ev);
+      spots.set(k, [...(spots.get(k) ?? []), ev]);
+    } else {
+      items.push({ ev, distanceKm: haversineKm(me, ev), bearing: bearingDeg(me, ev), phase: phaseOf(ev, now) });
+    }
+  }
+  for (const [k, sessions] of spots) items.push(spotItem(k, sessions, me, now));
+  return items
     // 進行中的照距離排；還沒開始的照開始時間排，同時間再照距離
     .sort((a, b) => {
       if (a.phase === 'active' && b.phase === 'active') return a.distanceKm - b.distanceKm;
@@ -184,7 +213,36 @@ function computeItems(now: number): Item[] {
 
 const dateFmt = new Intl.DateTimeFormat('zh-TW', { timeZone: 'Asia/Taipei', month: 'numeric', day: 'numeric', weekday: 'short' });
 
+const taipeiDay = (unix: number): number => Math.floor((unix + 8 * 3600) / 86400);
+
+function dayWord(unix: number, now: number): string {
+  const d = taipeiDay(unix) - taipeiDay(now);
+  return d === 0 ? '今天' : d === 1 ? '明天' : dateFmt.format(new Date(unix * 1000));
+}
+
+/** 固定據點的開放時段，例如「每天 11:00–18:00」 */
+function spotHours(ev: EventOut): string {
+  return ev.allDay ? '每天開放・時間未公布' : `每天 ${fmtTime(ev.startAt)}–${fmtTime(ev.endAt)}`;
+}
+
+function spotUntil(it: Item, now: number): string {
+  const last = it.spot?.sessions.at(-1);
+  if (!last) return '';
+  return taipeiDay(last.startAt) === taipeiDay(now) ? '今天最後一天' : `到 ${dateFmt.format(new Date(last.startAt * 1000))}`;
+}
+
+function spotLine(it: Item, now: number): string {
+  const { ev } = it;
+  const until = spotUntil(it, now);
+  if (ev.startAt <= now && now < ev.endAt) {
+    return ev.allDay ? `今天開放・時間未公布・${until}` : `營業中・今天到 ${fmtTime(ev.endAt)}・${until}`;
+  }
+  const next = ev.allDay ? `${dayWord(ev.startAt, now)}開放` : `${dayWord(ev.startAt, now)} ${fmtTime(ev.startAt)} 開始`;
+  return `休息中・${next}・${until}`;
+}
+
 function timeLine(it: Item, now: number): string {
+  if (it.spot) return spotLine(it, now);
   const { ev } = it;
   if (ev.allDay) {
     const today = ev.startAt <= now && now < ev.endAt;
@@ -202,18 +260,26 @@ function timeLine(it: Item, now: number): string {
 
 function render(): void {
   const now = nowSec();
-  const items = computeItems(now);
+  const all = computeItems(now);
+  const spotTotal = all.filter((it) => it.spot).length;
+  const items = showSpots ? all : all.filter((it) => !it.spot);
   const visible = items.filter((it) => it.phase !== 'later');
+  filterRow.hidden = spotTotal === 0;
+  spotToggle.textContent = `${showSpots ? '✓ ' : ''}顯示固定據點（${spotTotal}）`;
+  spotToggle.classList.toggle('on', showSpots);
+  spotToggle.setAttribute('aria-pressed', String(showSpots));
 
   radar.render(
     visible.map((it) => ({
       id: it.ev.id,
       kind: it.ev.kind,
+      spot: !!it.spot,
       distanceKm: it.distanceKm,
       bearing: it.bearing,
       phase: it.phase,
       label: it.ev.title,
-      showLabel: it.phase === 'active' || it.ev.id === selectedId,
+      // 據點整天都開著，標籤只在選取時顯示，免得蓋掉單次的發放
+      showLabel: (it.phase === 'active' && !it.spot) || it.ev.id === selectedId,
       selected: it.ev.id === selectedId,
     })),
   );
@@ -221,10 +287,11 @@ function render(): void {
     items.map((it) => ({
       id: it.ev.id,
       kind: it.ev.kind,
+      spot: !!it.spot,
       lat: it.ev.lat,
       lng: it.ev.lng,
       phase: it.phase,
-      title: `${kindLabel(it.ev)}｜${it.ev.title}`,
+      title: `${tagLabel(it)}｜${it.ev.title}`,
       subtitle: `${it.ev.placeText} · ${timeLine(it, now)}`,
       selected: it.ev.id === selectedId,
     })),
@@ -235,8 +302,9 @@ function render(): void {
   // 新變成進行中且在雷達範圍內的事件 → 嗶聲、震動、通知。第一次載入不吵。
   for (const it of items) {
     if (it.phase !== 'active') continue;
-    if (seenActive.has(it.ev.id)) continue;
-    seenActive.add(it.ev.id);
+    const seenKey = it.spot ? `spot:${it.spot.key}` : `ev:${it.ev.id}`;
+    if (seenActive.has(seenKey)) continue;
+    seenActive.add(seenKey);
     if (!notifiedOnce || it.distanceKm > scaleKm) continue;
     beep(theme.sound);
     try {
@@ -245,7 +313,7 @@ function render(): void {
       /* ignore */
     }
     const msg = `${it.ev.title}｜${it.ev.placeText}｜${formatKm(it.distanceKm)} ${compassLabel(it.bearing)}`;
-    const head = it.ev.kind === 'activity' ? '活動開始' : '開始發放';
+    const head = it.spot ? '據點開放中' : it.ev.kind === 'activity' ? '活動開始' : '開始發放';
     showBanner(bannerEl, `${head}：${msg}`, 10_000);
     systemNotify(head, msg);
   }
@@ -255,15 +323,19 @@ function render(): void {
 function renderList(items: Item[], now: number): void {
   const inRange = items.filter((it) => it.distanceKm <= scaleKm);
   const outRange = items.filter((it) => it.distanceKm > scaleKm);
-  const active = inRange.filter((it) => it.phase === 'active').length;
-  const soon = inRange.filter((it) => it.phase === 'soon').length;
+  // 摘要只算單次的發放和活動，固定據點另外列
+  const singles = inRange.filter((it) => !it.spot);
+  const active = singles.filter((it) => it.phase === 'active').length;
+  const soon = singles.filter((it) => it.phase === 'soon').length;
+  const spotsIn = inRange.length - singles.length;
   const none = followed().length === 0;
   const outText = outRange.length > 0 ? `・範圍外 ${outRange.length} 個` : '';
+  const spotText = spotsIn > 0 ? `・據點 ${spotsIn} 個` : '';
   countLabel.textContent = none
     ? '還沒追蹤關鍵字'
-    : inRange.length === 0
-      ? `${theme.emptyText}${outText}`
-      : `${theme.summary(active, soon, inRange.length)}${outText}`;
+    : singles.length === 0
+      ? `${theme.emptyText}${spotText}${outText}`
+      : `${theme.summary(active, soon, singles.length)}${spotText}${outText}`;
   emptyEl.textContent = none ? (canEditKeywords ? '點下方「追蹤」選擇或新增關鍵字，雷達就會開始找發放和活動。' : '目前沒有搜尋中的關鍵字。') : `${theme.emptyText}。雷達每分鐘更新，有新的會提醒你。`;
   listEl.replaceChildren();
   emptyEl.hidden = items.length > 0;
@@ -277,12 +349,12 @@ function renderList(items: Item[], now: number): void {
       continue;
     }
     const li = document.createElement('li');
-    li.className = `ev phase-${it.phase} kind-${it.ev.kind}${it.distanceKm > scaleKm ? ' out-of-range' : ''}${it.ev.id === selectedId ? ' selected' : ''}`;
+    li.className = `ev phase-${it.phase} kind-${it.ev.kind}${it.spot ? ' spot' : ''}${it.distanceKm > scaleKm ? ' out-of-range' : ''}${it.ev.id === selectedId ? ' selected' : ''}`;
     li.dataset.id = String(it.ev.id);
     li.innerHTML = `
-      <div class="ev-title"><span class="dot"></span><span class="kind-tag">${kindLabel(it.ev)}</span>${esc(it.ev.title)}${it.ev.item ? ` <span class="muted">· ${esc(it.ev.item)}</span>` : ''}${followed().length > 1 && it.ev.keyword ? `<span class="ev-kw">#${esc(it.ev.keyword)}</span>` : ''}</div>
+      <div class="ev-title"><span class="dot"></span><span class="kind-tag">${tagLabel(it)}</span>${esc(it.ev.title)}${it.ev.item ? ` <span class="muted">· ${esc(it.ev.item)}</span>` : ''}${followed().length > 1 && it.ev.keyword ? `<span class="ev-kw">#${esc(it.ev.keyword)}</span>` : ''}</div>
       <div class="ev-meta">${esc(it.ev.placeText)} · ${formatKm(it.distanceKm)} ${compassLabel(it.bearing)}</div>
-      <div class="ev-time">${esc(timeLine(it, now))}</div>`;
+      <div class="ev-time">${it.spot ? `${esc(spotHours(it.ev))}・` : ''}${esc(timeLine(it, now))}</div>`;
     li.addEventListener('click', () => select(it.ev.id));
     listEl.appendChild(li);
   }
@@ -307,14 +379,14 @@ function renderDetail(items: Item[], now: number): void {
       <button type="button" class="chip" data-act="close" aria-label="關閉">關閉</button>
     </div>
     <div class="sheet-body">
-      <p>類型：${kindLabel(ev)}<br>${ev.item ? `發放：${esc(ev.item)}<br>` : ''}${ev.keyword ? `關鍵字：#${esc(ev.keyword)}<br>` : ''}地點：${esc(ev.placeText)}<br>時間：${fmtTime(ev.startAt)} – ${fmtTime(ev.endAt)}<br>距離：${formatKm(it.distanceKm)}，${compassLabel(it.bearing)}方 · ${esc(timeLine(it, now))}</p>
+      <p>類型：${it.spot ? `固定據點（${kindLabel(ev)}）` : kindLabel(ev)}<br>${ev.item ? `發放：${esc(ev.item)}<br>` : ''}${ev.keyword ? `關鍵字：#${esc(ev.keyword)}<br>` : ''}地點：${esc(ev.placeText)}<br>時間：${it.spot ? esc(spotSchedule(it)) : `${fmtTime(ev.startAt)} – ${fmtTime(ev.endAt)}`}<br>距離：${formatKm(it.distanceKm)}，${compassLabel(it.bearing)}方 · ${esc(timeLine(it, now))}</p>
       <blockquote>${esc(ev.post.source === 'news' ? ev.post.text.split('\n')[0] : ev.post.text.slice(0, 300))}</blockquote>
       <p class="muted source-line">來源：${esc(sourceLabel(ev))}</p>
       <div class="sheet-actions">
         <a class="btn primary" href="https://www.google.com/maps/dir/?api=1&destination=${ev.lat},${ev.lng}&travelmode=walking" target="_blank" rel="noopener">導航</a>
         ${ev.post.permalink ? `<a class="btn" href="${esc(ev.post.permalink)}" target="_blank" rel="noopener">${esc(sourceLinkText(ev))}</a>` : ''}
         <button type="button" class="btn" data-act="map">在地圖上看</button>
-        ${canReportEnded(ev, now) ? `<button type="button" class="btn" data-act="ended"${endedReported.has(ev.id) ? ' disabled' : ''}>${endedReported.has(ev.id) ? '已回報' : ev.kind === 'activity' ? '回報已結束' : '回報已發完'}</button>` : ''}
+        ${canReportEnded(ev, now) ? `<button type="button" class="btn" data-act="ended"${endedReported.has(ev.id) ? ' disabled' : ''}>${endedReported.has(ev.id) ? '已回報' : `回報${it.spot ? '今天' : ''}${ev.kind === 'activity' ? '已結束' : '已發完'}`}</button>` : ''}
       </div>
       ${ev.endedReports ? `<p class="muted ended-note">已有 ${ev.endedReports} 人回報${ev.kind === 'activity' ? '已結束' : '已發完'}${neededText()}</p>` : ''}
     </div>`;
@@ -324,6 +396,16 @@ function renderDetail(items: Item[], now: number): void {
     map.focus(ev.id);
   });
   detailEl.querySelector('[data-act="ended"]')?.addEventListener('click', (e) => void sendEnded(ev, e.currentTarget as HTMLButtonElement));
+}
+
+/** 固定據點的完整時段，例如「每天 11:00–18:00，10/18（六）到 10/19（日）」 */
+function spotSchedule(it: Item): string {
+  const s = it.spot?.sessions ?? [];
+  const first = s[0];
+  const last = s.at(-1);
+  if (!first || !last) return '';
+  const range = first === last ? dateFmt.format(new Date(first.startAt * 1000)) : `${dateFmt.format(new Date(first.startAt * 1000))} 到 ${dateFmt.format(new Date(last.startAt * 1000))}`;
+  return `${spotHours(it.ev)}，${range}`;
 }
 
 /** 官方行程以官網為準；還沒開始的也不能回報 */
@@ -681,6 +763,7 @@ function renderRules(): void {
       <li><b>發放</b>：在某時某地免費發飄帶、貼紙、文宣、飲料等，雷達上是<span class="ex">橘色</span>光點。</li>
       <li><b>活動</b>：可以到場參加的車掃、掃街、市場開講、造勢晚會、見面會、座談等，雷達上是<span class="ex">另一個顏色</span>的光點。</li>
       <li>活動現場也有發放東西的，算成一筆發放。</li>
+      <li><b>固定據點</b>：店家、服務處等連續好幾天在固定時段都能去領或參加的，標成「據點」，雷達上是<span class="ex">菱形</span>光點，休息時間變淡。沒寫最後一天的，保留 ${r.spotDefaultDays ?? 7} 天。可以用清單上方的「顯示固定據點」開關隱藏。</li>
     </ul>
     <h3>時間地點怎麼判讀</h3>
     <ol>
@@ -728,6 +811,11 @@ function sourceLinkText(ev: EventOut): string {
 
 function kindLabel(ev: EventOut): string {
   return ev.kind === 'activity' ? '活動' : '發放';
+}
+
+/** 清單與地圖上的標籤：固定據點另外標「據點」 */
+function tagLabel(it: Item): string {
+  return it.spot ? '據點' : kindLabel(it.ev);
 }
 
 function setKwMsg(text: string, error = false): void {
@@ -1000,6 +1088,11 @@ function wireControls(): void {
     void submitKeyword(kwInput.value);
   });
   reportBtn.addEventListener('click', () => openReportSheet(reportSheet.hidden));
+  spotToggle.addEventListener('click', () => {
+    showSpots = !showSpots;
+    lsSet(LS_SPOTS, showSpots ? '1' : '0');
+    render();
+  });
   reportSheet.querySelector('[data-act="close"]')?.addEventListener('click', () => openReportSheet(false));
   reportForm.addEventListener('submit', (e) => {
     e.preventDefault();

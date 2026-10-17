@@ -8,6 +8,7 @@ export interface MapItem {
   lat: number;
   lng: number;
   phase: Phase;
+  spot?: boolean;
   title: string;
   subtitle: string;
   selected: boolean;
@@ -34,8 +35,9 @@ function cssVar(name: string, fallback: string): string {
   return v || fallback;
 }
 
-function markerColor(kind: EventKind, phase: Phase): string {
+function markerColor(kind: EventKind, phase: Phase, spot = false): string {
   if (phase === 'later') return cssVar('--muted', '#888888');
+  if (spot) return cssVar('--blip-spot', '#1d4e89');
   if (kind === 'activity') return cssVar('--blip-activity', '#03615a');
   return phase === 'soon' ? cssVar('--blip-soon', '#ffe08a') : cssVar('--blip', '#ea611d');
 }
@@ -156,8 +158,10 @@ export class MapView {
       m.setStyle({
         color: it.selected ? selectedStroke : stroke,
         weight: it.selected ? 3 : 2,
-        fillColor: markerColor(it.kind, it.phase),
-        fillOpacity: it.phase === 'later' ? 0.6 : 0.95,
+        fillColor: markerColor(it.kind, it.phase, it.spot),
+        fillOpacity: it.phase === 'later' || it.phase === 'closed' ? 0.5 : 0.95,
+        // 固定據點用虛線外框，跟單次的發放、活動分開
+        dashArray: it.spot ? '3 3' : '',
       });
       m.setPopupContent(`<strong>${escapeHtml(it.title)}</strong><br>${escapeHtml(it.subtitle)}`);
     }

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { detectEnded } from '../src/events';
+import { detectEnded, spotSessions } from '../src/events';
 import { buildMessages, normalizeExtraction } from '../src/extract';
 import { parseThreadsTimestamp } from '../src/threads';
 import { parseIsoToUnix } from '../src/util';
@@ -173,7 +173,7 @@ describe('responseContent', () => {
 
 describe('placeFidelity', () => {
   const text = '洋流測試：今晚 9 點在捷運市政府站 2號出口發放洋流飄帶';
-  const ev = (place: string) => ({ is_event: true, events: [{ kind: 'giveaway' as const, title: 't', item: null, start_at: null, end_at: null, place_text: place, place_query: null, confidence: 0.9 }] });
+  const ev = (place: string) => ({ is_event: true, events: [{ kind: 'giveaway' as const, title: 't', item: null, start_at: null, end_at: null, place_text: place, place_query: null, confidence: 0.9, spot: false, until: null }] });
   it('is high when the place comes from the post', () => {
     expect(placeFidelity(ev('捷運市政府站 2號出口'), text)).toBe(1);
   });
@@ -244,5 +244,27 @@ describe('threads link helpers', () => {
     expect(parseEmbedHtml(html)).toEqual({ status: 'ok', username: 'giver', text: '今天 15:00\n市政府站 #洋流 發飄帶&貼紙' });
     expect(parseEmbedHtml('<div class="OuterErrorContainer">Thread not available</div>')).toEqual({ status: 'gone' });
     expect(parseEmbedHtml('<html>login</html>').status).toBe('error');
+  });
+});
+
+describe('spotSessions', () => {
+  const t = (iso: string) => Date.parse(iso) / 1000;
+  const posted = t('2026-10-17T12:35:00+08:00');
+  it('expands a daily window up to the last day, skipping finished days', () => {
+    const now = t('2026-10-17T20:35:00+08:00');
+    const s = spotSessions({ start_at: '2026-10-17T11:00:00+08:00', end_at: '2026-10-17T18:00:00+08:00', until: '2026-10-19' }, posted, now);
+    expect(s).toEqual([
+      { start: t('2026-10-18T11:00:00+08:00'), end: t('2026-10-18T18:00:00+08:00'), allDay: false },
+      { start: t('2026-10-19T11:00:00+08:00'), end: t('2026-10-19T18:00:00+08:00'), allDay: false },
+    ]);
+  });
+  it('splits a merged multi-day range into daily windows', () => {
+    const s = spotSessions({ start_at: '2026-10-17T11:00:00+08:00', end_at: '2026-10-19T18:00:00+08:00', until: null }, posted, posted);
+    expect(s.map((x) => x.end - x.start)).toEqual([7 * 3600, 7 * 3600, 7 * 3600]);
+  });
+  it('keeps 7 days when no last day is given, and marks unknown hours as all-day', () => {
+    const s = spotSessions({ start_at: '2026-10-17T00:00:00+08:00', end_at: null, until: null }, posted, posted);
+    expect(s).toHaveLength(7);
+    expect(s[0]).toEqual({ start: t('2026-10-17T00:00:00+08:00'), end: t('2026-10-18T00:00:00+08:00'), allDay: true });
   });
 });
