@@ -15,9 +15,11 @@ export interface EventOut {
   keyword: string | null;
   /** 只有日期、沒有公布時間 */
   allDay?: boolean;
+  /** 有幾個人回報已發完／已結束 */
+  endedReports?: number;
   post: {
     id: string;
-    /** threads、news、official、manual */
+    /** threads、news、official、manual、link（使用者貼的連結） */
     source?: string;
     username: string | null;
     permalink: string | null;
@@ -50,6 +52,7 @@ export interface KeywordRules {
     threads: 'review' | 'approved';
     official: { name: string; url: string; intervalMin: number };
     news: { names: string[]; intervalMin: number };
+    link?: { maxAgeDays: number; recheckMin: number; endedReportsNeeded: number };
   };
   intervalMin: number;
   defaultDurationMin: number;
@@ -63,4 +66,20 @@ export interface KeywordRules {
 export interface KeywordInfo {
   term: string;
   pinned: boolean;
+}
+
+export type LinkOutcome = 'added' | 'duplicate' | 'no_place' | 'not_listed' | 'not_event' | 'failed';
+
+export interface SubmitResult {
+  existed: boolean;
+  outcome: LinkOutcome;
+  reasons: string[];
+  events: EventOut[];
+  permalink: string;
+}
+
+export interface EndedReportResult {
+  count: number;
+  needed: number;
+  ended: boolean;
 }

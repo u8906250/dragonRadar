@@ -7,7 +7,7 @@
 - 網址：**https://current-radar.pages.dev**（Cloudflare Pages，主要）；備用 https://u8906250.github.io/dragonRadar/
 - 前端：Vite + TypeScript，自繪 SVG 雷達，Leaflet + OpenStreetMap 地圖，部署在 Cloudflare Pages 與 GitHub Pages
 - 後端：Cloudflare Worker + D1 + Cron Trigger + Workers AI
-- 資料來源：Threads 官方 API 的 `keyword_search`（需要 `threads_keyword_search` 權限審核）
+- 資料來源：Threads 官方 API 的 `keyword_search`（需要 `threads_keyword_search` 權限審核）、使用者貼上的 Threads 貼文連結、台北大洋流官方航線、Yahoo 新聞 RSS
 - 地點轉座標：OpenStreetMap Nominatim（結果快取在 D1）
 
 ```
@@ -22,6 +22,15 @@ worker/   Cloudflare Worker（API、排程、資料庫）
 3. 地點用 Nominatim 轉成座標，寫進 `events`。
 4. 事件狀態：`upcoming` → `active`（到開始時間）→ `ended`（到結束時間，或作者後續貼文／回覆出現「發完」等字眼）。
 5. 前端每分鐘向 `/api/events` 拿附近事件，用使用者座標算方位與距離畫在雷達上；進行中事件變多時嗶聲＋通知。
+
+### 使用者回報貼文連結
+
+使用者按「＋回報」貼上 Threads 貼文連結（Android 加到主畫面後也能從 Threads 直接分享），Worker 讀取該則貼文的公開嵌入頁 `https://www.threads.com/t/<代碼>/embed` 取得內文與作者，發文時間由貼文代碼推算（Instagram 編號前 41 位元是建立時間），再走同一套判讀流程，貼文 id 為 `link-<代碼>`。
+
+- 只收 7 天內的貼文；同一個 IP（加鹽雜湊）每小時 10 則、全站每小時 200 則。
+- 排程每 30 分鐘重讀還在雷達上的回報貼文：刪文就下架、改成「發完了」就結束、內容改了就重新判讀。
+- 活動開始後，2 個不同的人按「回報已發完」就提早下架（官方行程除外）。
+- 亂貼的貼文可用 `DELETE /api/admin/posts/link-<代碼>` 移除。
 
 沒有 Threads token 或 `MOCK_MODE=true` 時，Worker 會用內建示範貼文跑同一套流程，前端會標示「示範資料」。
 
@@ -138,6 +147,8 @@ npm run deploy
 | GET | `/api/health` | `{ ok, mode: 'live' \| 'mock', time }` |
 | GET | `/api/events?lat=&lng=&radius_km=&horizon_h=&keywords=` | 附近、未結束、`horizon_h` 小時內會開始的事件，可用逗號分隔的關鍵字篩選 |
 | GET | `/api/events/:id` | 單一事件 |
+| POST | `/api/reports` | 使用者貼上 Threads 貼文連結 `{ url }`，回傳判讀結果 |
+| POST | `/api/events/:id/ended` | 回報已發完／已結束 |
 | GET | `/api/keywords` | 搜尋中的關鍵字、上限、是否開放使用者新增 |
 | POST | `/api/keywords` | 使用者新增關鍵字（`ALLOW_USER_KEYWORDS` 為 true 才開放） |
 | POST | `/api/admin/posts` | 手動塞貼文並立即解析 |
@@ -146,6 +157,7 @@ npm run deploy
 | GET | `/api/admin/posts` | 最近 100 則原始貼文與解析結果 |
 | DELETE | `/api/admin/posts/:id` | 刪除一則貼文與它的事件 |
 | POST | `/api/admin/extract` | 只判讀不存檔，可指定 models 比較 |
+| POST | `/api/admin/link-fetch` | 只讀取貼文連結的內容（確認讀得到），不判讀不存檔 |
 | GET/POST/DELETE | `/api/admin/keywords[/:id]` | 關鍵字管理（新增的會固定搜尋） |
 | GET/POST | `/api/admin/token` | 查看／更新 Threads token |
 

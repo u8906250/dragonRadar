@@ -1,5 +1,5 @@
 import type { LatLng } from './geo';
-import type { EventOut, KeywordInfo, KeywordRules } from './types';
+import type { EndedReportResult, EventOut, KeywordInfo, KeywordRules, SubmitResult } from './types';
 
 /** 正式環境的 Worker 網址；本機開發打 localhost，VITE_API_BASE 可覆寫（空字串視為未設定，CI 沒設變數時會傳空字串） */
 const PROD_API_BASE = 'https://dragon-radar.happybadminton.workers.dev';
@@ -50,3 +50,21 @@ export async function addKeyword(term: string): Promise<AddKeywordResult> {
     return { ok: false, message: '連線失敗，請稍後再試' };
   }
 }
+
+type Result<T> = { ok: true; data: T } | { ok: false; message: string };
+
+async function postJson<T>(path: string, body: unknown): Promise<Result<T>> {
+  try {
+    const r = await fetch(`${API_BASE}${path}`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
+    const j = (await r.json().catch(() => ({}))) as T & { error?: string };
+    if (!r.ok) return { ok: false, message: j.error ?? `送出失敗（${r.status}）` };
+    return { ok: true, data: j };
+  } catch {
+    return { ok: false, message: '連線失敗，請稍後再試' };
+  }
+}
+
+/** 貼上 Threads 貼文連結，後端讀取並判讀，可能要十幾秒 */
+export const submitLink = (url: string): Promise<Result<SubmitResult>> => postJson<SubmitResult>('/api/reports', { url });
+
+export const reportEnded = (eventId: number): Promise<Result<EndedReportResult>> => postJson<EndedReportResult>(`/api/events/${eventId}/ended`, {});

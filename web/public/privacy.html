@@ -11,7 +11,7 @@
   <nav><a href="./">← 洋流雷達</a><a href="terms.html">服務條款</a><a href="data-deletion.html">資料刪除</a></nav>
   <article>
     <h1>隱私權政策</h1>
-    <p class="meta">最後更新：2026 年 10 月 17 日（加入活動）</p>
+    <p class="meta">最後更新：2026 年 10 月 17 日（加入「回報貼文」）</p>
 
     <p>洋流雷達（以下稱「本服務」）是一個網頁工具，從 Threads 的公開貼文中找出「某時某地的免費發放或可參加的活動」，在雷達畫面上顯示相對位置。本政策說明本服務處理哪些資料，以及如何處理。</p>
 
@@ -21,6 +21,7 @@
       <li><b>位置：</b>你允許定位後，瀏覽器會把你的大略座標送到本服務的伺服器，只用來查詢附近的發放資訊。伺服器不儲存你的座標，也不記錄你的位置軌跡。距離與方位是在你的手機上計算。</li>
       <li><b>手機上的設定：</b>你選擇的主題、雷達範圍、手動設定的位置，只存在你自己瀏覽器的 localStorage，不會傳到伺服器。</li>
       <li><b>通知：</b>通知權限由瀏覽器管理，本服務不收集推播識別碼。</li>
+      <li><b>回報貼文與「回報已發完」：</b>你按「＋回報」送出 Threads 貼文連結，或在活動詳細資料按「回報已發完」時，伺服器會記錄這次回報、你回報的貼文或活動，以及你 IP 位址的<b>加鹽雜湊值</b>（無法還原成 IP），只用來限制回報頻率、避免同一人重複回報。這些紀錄 30 天後自動刪除。你回報過哪些活動，也會存在你瀏覽器的 localStorage，避免重複回報。</li>
       <li><b>服務紀錄：</b>本服務架設在 Cloudflare 與 GitHub Pages，這些平台可能依其政策保留一般連線紀錄（例如 IP 位址、瀏覽器類型），本服務不另外收集或使用這些資料。</li>
     </ul>
 
@@ -30,12 +31,14 @@
       <li><b>取得的內容：</b>貼文編號、內文、發文時間、作者的公開使用者名稱、貼文連結。不取得私人訊息、追蹤名單或任何非公開內容。</li>
       <li><b>用途：</b>以自動化方式（包含 AI 文字判讀）找出貼文中的發放或活動時間與地點，並把地點轉成地圖座標，顯示在雷達與地圖上，同時附上原貼文連結。不用於廣告、不建立個人檔案、不出售或分享給第三方。</li>
       <li><b>保存期限：</b>貼文與解析結果最多保存 30 天，之後自動刪除。</li>
+      <li><b>使用者回報的貼文：</b>使用者貼上 Threads 公開貼文連結時，本服務會讀取 Meta 提供給網站嵌入用的該則貼文公開頁面（只讀取那一則），取得內文與作者的公開使用者名稱，用上述相同方式判讀與保存。之後每 30 分鐘重讀一次，確認貼文是否刪除或修改；貼文刪除後相關的發放與活動會下架。</li>
       <li><b>授權帳號：</b>本服務的營運者以自己的 Threads 帳號授權搜尋，只保存該帳號的存取權杖，用來呼叫 API。</li>
     </ul>
 
     <h2>三、第三方服務</h2>
     <ul>
       <li>Meta Threads API：搜尋公開貼文。</li>
+      <li>Threads 公開貼文的嵌入頁面：讀取使用者回報的單一則貼文。</li>
       <li>新聞網站的公開 RSS（Yahoo 新聞，含其轉載的各家報導）：讀取含關鍵字的報導，判讀後只保留標題、短摘要與原文連結。</li>
       <li>台北大洋流官網公開的「未來航線」資料：車掃日期、地點與加油點。</li>
       <li>Cloudflare（Workers、D1、Workers AI、Pages）：網站與伺服器、資料庫、文字判讀。</li>
@@ -59,8 +62,8 @@
     <section class="en" lang="en">
       <h2>Privacy Policy (English summary)</h2>
       <p><b>What this service does.</b> 洋流雷達 (Current Radar) is a web tool that finds public Threads posts announcing in-person giveaways and events, extracts the time and place, and shows them on a radar and map relative to the visitor's location.</p>
-      <p><b>Website visitors.</b> No sign-up or login is required. If you allow location access, your approximate coordinates are sent to our server only to look up nearby events; they are not stored or logged. Preferences (theme, range, manual location) stay in your browser's localStorage.</p>
-      <p><b>Threads data.</b> Using the Meta Threads API we search <i>public</i> posts for a fixed keyword. We process the post ID, text, timestamp, author's public username and permalink, solely to extract the time and location of giveaways and events and display them with a link to the original post. We do not use the data for advertising, profiling, or sale, and we do not share it with third parties. Posts and extracted data are automatically deleted after 30 days. The only access token stored is the operator's own Threads token used to call the API.</p>
+      <p><b>Website visitors.</b> No sign-up or login is required. If you allow location access, your approximate coordinates are sent to our server only to look up nearby events; they are not stored or logged. Preferences (theme, range, manual location) stay in your browser's localStorage. When you submit a Threads post link or report that a giveaway has ended, we store the report together with a salted hash of your IP address (not reversible) only for rate limiting; these records are deleted after 30 days.</p>
+      <p><b>Threads data.</b> Using the Meta Threads API we search <i>public</i> posts for a fixed keyword. We process the post ID, text, timestamp, author's public username and permalink, solely to extract the time and location of giveaways and events and display them with a link to the original post. We do not use the data for advertising, profiling, or sale, and we do not share it with third parties. Posts and extracted data are automatically deleted after 30 days. For post links submitted by users, we read that single post's public embed page to obtain its text and author's public username, process it the same way, and re-read it every 30 minutes to detect deletion or edits. The only access token stored is the operator's own Threads token used to call the API.</p>
       <p><b>Processors.</b> Meta Threads API, public news RSS feeds (Yahoo News; only title, short excerpt and link are kept), the public route data of the official 台北大洋流 site, Cloudflare (Workers, D1, Workers AI, Pages), OpenStreetMap Nominatim and tiles, GitHub Pages.</p>
       <p><b>Deletion and contact.</b> See the <a href="data-deletion.html">data deletion instructions</a>. Questions: <a href="https://github.com/u8906250/dragonRadar/issues">GitHub Issues</a>.</p>
     </section>

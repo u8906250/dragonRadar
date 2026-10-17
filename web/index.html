@@ -63,11 +63,14 @@
           <button type="button" id="use-gps" class="link-btn" hidden>改用 GPS</button>
           <span id="updated-label" class="muted right"></span>
         </div>
-        <button type="button" id="kw-btn" class="kw-row" aria-label="管理追蹤的關鍵字">
-          <span class="kw-label">追蹤</span>
-          <span id="kw-summary" class="kw-tags"></span>
-          <span class="kw-edit">編輯</span>
-        </button>
+        <div class="kw-bar">
+          <button type="button" id="kw-btn" class="kw-row" aria-label="管理追蹤的關鍵字">
+            <span class="kw-label">追蹤</span>
+            <span id="kw-summary" class="kw-tags"></span>
+            <span class="kw-edit">編輯</span>
+          </button>
+          <button type="button" id="report-btn" class="btn primary report-btn" aria-label="回報 Threads 貼文">＋回報</button>
+        </div>
         <ul id="event-list" class="event-list"></ul>
         <p id="empty-hint" class="muted hint" hidden></p>
       </aside>
@@ -88,6 +91,20 @@
         <p id="kw-msg" class="muted sheet-note" aria-live="polite"></p>
         <div id="kw-rules" class="kw-rules"></div>
         <p class="muted sheet-note small" id="kw-share-note">關鍵字由所有人共用，同時最多搜尋 <span id="kw-max">10</span> 個。新增的關鍵字 7 天沒人追蹤會自動停止搜尋。</p>
+      </div>
+      <div id="report-sheet" class="sheet" hidden>
+        <div class="sheet-head">
+          <strong>回報 Threads 貼文</strong>
+          <button type="button" class="chip" data-act="close" aria-label="關閉">關閉</button>
+        </div>
+        <p class="muted sheet-note">看到發放或活動的 Threads 貼文？貼上連結，雷達會讀取貼文、判讀時間地點，標到地圖上給大家看。</p>
+        <form id="report-form" class="kw-form" autocomplete="off">
+          <input id="report-input" type="text" inputmode="url" enterkeyhint="send" placeholder="https://www.threads.com/@帳號/post/…" aria-label="Threads 貼文連結" />
+          <button type="button" class="btn" id="report-paste" hidden>貼上</button>
+          <button type="submit" class="btn primary" id="report-submit">送出</button>
+        </form>
+        <div id="report-result" class="report-result" aria-live="polite"></div>
+        <ul class="muted sheet-note small report-tips" id="report-tips"></ul>
       </div>
       <div id="theme-sheet" class="sheet" hidden>
         <div class="sheet-head">

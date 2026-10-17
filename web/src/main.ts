@@ -1,12 +1,12 @@
 import './styles.css';
-import { addKeyword, fetchEvents, fetchHealth, fetchKeywords } from './api';
+import { addKeyword, fetchEvents, fetchHealth, fetchKeywords, reportEnded, submitLink } from './api';
 import { compassSupported, startCompass } from './compass';
 import { bearingDeg, compassLabel, formatKm, haversineKm, shuangbeiRadiusKm, taiwanRadiusKm, type LatLng } from './geo';
 import { MapView, type BaseMap } from './map';
 import { beep, ensureNotificationPermission, notificationState, showBanner, systemNotify, unlockAudio } from './notify';
 import { Radar } from './radar';
 import { DEFAULT_THEME_ID, getTheme, THEMES, type Theme } from './themes';
-import type { EventOut, Item, KeywordInfo, KeywordRules, Origin, Phase } from './types';
+import type { EventOut, Item, KeywordInfo, KeywordRules, Origin, Phase, SubmitResult } from './types';
 
 const DEFAULT_ORIGIN: Origin = { lat: 25.0478, lng: 121.517, source: 'default' }; // 台北車站
 const SOON_SEC = 30 * 60;
@@ -21,6 +21,7 @@ const LS_THEME = 'dr.theme';
 const LS_BASE = 'dr.base';
 const BASES: BaseMap[] = ['nlsc', 'osm'];
 const LS_KEYWORDS = 'dr.keywords';
+const LS_ENDED = 'dr.endedReported';
 const KEYWORD_RE_INVALID = /[<>{}\\%_]/;
 
 const $ = <T extends HTMLElement>(sel: string): T => {
@@ -81,6 +82,8 @@ let keywordRules: KeywordRules | null = null;
 let savedFollowed: string[] | null = loadFollowed();
 let theme: Theme = getTheme(new URLSearchParams(location.search).get('theme') ?? lsGet(LS_THEME) ?? DEFAULT_THEME_ID);
 const seenActive = new Set<number>();
+/** 這台裝置已經回報過「已發完」的事件 */
+const endedReported = new Set<number>(loadIdList(LS_ENDED));
 
 // ---- elements ----
 const bannerEl = $('#banner');
@@ -115,6 +118,14 @@ const kwTitle = $('#kw-title');
 const kwIntro = $('#kw-intro');
 const kwShareNote = $('#kw-share-note');
 const locateBtn = $<HTMLButtonElement>('#locate-btn');
+const reportBtn = $<HTMLButtonElement>('#report-btn');
+const reportSheet = $('#report-sheet');
+const reportForm = $<HTMLFormElement>('#report-form');
+const reportInput = $<HTMLInputElement>('#report-input');
+const reportSubmit = $<HTMLButtonElement>('#report-submit');
+const reportPaste = $<HTMLButtonElement>('#report-paste');
+const reportResult = $('#report-result');
+const reportTips = $('#report-tips');
 const baseChipsEl = $('#base-chips');
 const baseChips = Array.from(document.querySelectorAll<HTMLButtonElement>('#base-chips [data-base]'));
 let baseMap: BaseMap = (BASES as string[]).includes(lsGet(LS_BASE) ?? '') ? (lsGet(LS_BASE) as BaseMap) : 'nlsc';
@@ -303,13 +314,47 @@ function renderDetail(items: Item[], now: number): void {
         <a class="btn primary" href="https://www.google.com/maps/dir/?api=1&destination=${ev.lat},${ev.lng}&travelmode=walking" target="_blank" rel="noopener">導航</a>
         ${ev.post.permalink ? `<a class="btn" href="${esc(ev.post.permalink)}" target="_blank" rel="noopener">${esc(sourceLinkText(ev))}</a>` : ''}
         <button type="button" class="btn" data-act="map">在地圖上看</button>
+        ${canReportEnded(ev, now) ? `<button type="button" class="btn" data-act="ended"${endedReported.has(ev.id) ? ' disabled' : ''}>${endedReported.has(ev.id) ? '已回報' : ev.kind === 'activity' ? '回報已結束' : '回報已發完'}</button>` : ''}
       </div>
+      ${ev.endedReports ? `<p class="muted ended-note">已有 ${ev.endedReports} 人回報${ev.kind === 'activity' ? '已結束' : '已發完'}${neededText()}</p>` : ''}
     </div>`;
   detailEl.querySelector('[data-act="close"]')?.addEventListener('click', () => select(null));
   detailEl.querySelector('[data-act="map"]')?.addEventListener('click', () => {
     switchView('map');
     map.focus(ev.id);
   });
+  detailEl.querySelector('[data-act="ended"]')?.addEventListener('click', (e) => void sendEnded(ev, e.currentTarget as HTMLButtonElement));
+}
+
+/** 官方行程以官網為準；還沒開始的也不能回報 */
+function canReportEnded(ev: EventOut, now: number): boolean {
+  return ev.post.source !== 'official' && !ev.allDay && ev.startAt <= now;
+}
+
+function neededText(): string {
+  const n = keywordRules?.sources?.link?.endedReportsNeeded;
+  return n ? `，${n} 人回報就會下架` : '';
+}
+
+async function sendEnded(ev: EventOut, btn: HTMLButtonElement): Promise<void> {
+  btn.disabled = true;
+  const r = await reportEnded(ev.id);
+  if (!r.ok) {
+    btn.disabled = false;
+    showBanner(bannerEl, r.message, 3500);
+    return;
+  }
+  endedReported.add(ev.id);
+  lsSet(LS_ENDED, JSON.stringify([...endedReported].slice(-200)));
+  if (r.data.ended) {
+    showBanner(bannerEl, `謝謝回報，「${ev.title}」已從雷達下架`, 3000);
+    selectedId = null;
+    await refresh();
+  } else {
+    ev.endedReports = r.data.count;
+    showBanner(bannerEl, `謝謝回報，再 ${r.data.needed - r.data.count} 人回報就會下架`, 3000);
+    render();
+  }
 }
 
 function select(id: number | null): void {
@@ -317,6 +362,7 @@ function select(id: number | null): void {
   if (selectedId !== null) {
     themeSheet.hidden = true;
     kwSheet.hidden = true;
+    reportSheet.hidden = true;
   }
   render();
 }
@@ -504,8 +550,18 @@ function openThemeSheet(open: boolean): void {
   themeSheet.hidden = !open;
   if (open) {
     kwSheet.hidden = true;
+    reportSheet.hidden = true;
     selectedId = null;
     detailEl.hidden = true;
+  }
+}
+
+function loadIdList(key: string): number[] {
+  try {
+    const arr = JSON.parse(lsGet(key) ?? '[]') as unknown;
+    return Array.isArray(arr) ? arr.filter((x): x is number => typeof x === 'number') : [];
+  } catch {
+    return [];
   }
 }
 
@@ -613,6 +669,7 @@ function renderRules(): void {
       ${src ? `<li><b>官方行程</b>：<a href="${esc(src.official.url)}" target="_blank" rel="noopener">${esc(src.official.name)}</a>，每 ${src.official.intervalMin} 分鐘更新車掃日期、終點與加油點。沒公布時間的會標「時間未公布」。</li>
       <li><b>新聞</b>：${src.news.names.map(esc).join('、')}的 RSS，每 ${src.news.intervalMin} 分鐘讀一次，標題或摘要有關鍵字的報導才判讀。只顯示標題與原文連結。</li>` : ''}
       ${threadsLine}
+      ${src?.link ? `<li><b>大家回報</b>：任何人都可以按「＋回報」貼上 Threads 貼文連結（${src.link.maxAgeDays} 天內的公開貼文），系統讀取貼文後用同樣的規則判讀。</li>` : ''}
     </ul>
     <h3>多久找一次</h3>
     <ul>
@@ -639,6 +696,8 @@ function renderRules(): void {
     <ul>
       <li>到了結束時間自動消失。</li>
       <li>原作者回覆或再發文提到「${r.endedWords.slice(0, 6).map(esc).join('」「')}」等字眼，也會提早消失。</li>
+      ${src?.link ? `<li>大家回報的貼文每 ${src.link.recheckMin} 分鐘重讀一次：原貼文刪除或改成「發完了」就下架，改了時間地點就重新判讀。</li>
+      <li>開始後，${src.link.endedReportsNeeded} 個人在詳細資料按「回報已發完」也會提早下架（官方行程除外）。</li>` : ''}
     </ul>
     <h3>貼文範例</h3>
     <div class="example">${esc(`#${kw}\n明天 10/18 下午 3 點在捷運市政府站 2號出口發放${kw}，限量 100 份，發完為止！`)}</div>
@@ -657,7 +716,8 @@ function fmtClock(totalMin: number): string {
 function sourceLabel(ev: EventOut): string {
   if (ev.post.source === 'news') return `新聞・${ev.post.username ?? ''}`;
   if (ev.post.source === 'official') return '台北大洋流官網「未來航線」';
-  return `Threads${ev.post.username ? `・@${ev.post.username}` : ''}`;
+  const who = `Threads${ev.post.username ? `・@${ev.post.username}` : ''}`;
+  return ev.post.source === 'link' ? `${who}（大家回報）` : who;
 }
 
 function sourceLinkText(ev: EventOut): string {
@@ -719,11 +779,87 @@ function openKwSheet(open: boolean): void {
   kwSheet.hidden = !open;
   if (open) {
     themeSheet.hidden = true;
+    reportSheet.hidden = true;
     selectedId = null;
     detailEl.hidden = true;
     setKwMsg('');
     void loadKeywords();
   }
+}
+
+function openReportSheet(open: boolean): void {
+  reportSheet.hidden = !open;
+  if (!open) return;
+  themeSheet.hidden = true;
+  kwSheet.hidden = true;
+  selectedId = null;
+  detailEl.hidden = true;
+  renderReportTips();
+}
+
+function renderReportTips(): void {
+  const l = keywordRules?.sources?.link;
+  const tips = [
+    '在 Threads 貼文按「分享」→「複製連結」，再貼到上面。Android 把洋流雷達加到主畫面後，也可以直接分享到洋流雷達。',
+    `只收${l ? ` ${l.maxAgeDays} 天內` : ''}的公開貼文，貼文要寫出時間和地點。`,
+    `原貼文刪除或改成「發完了」，雷達${l ? ` ${l.recheckMin} 分鐘內` : ''}會自動下架。`,
+  ];
+  reportTips.innerHTML = tips.map((t) => `<li>${esc(t)}</li>`).join('');
+}
+
+const OUTCOME_TEXT: Record<SubmitResult['outcome'], string> = {
+  added: '已加入雷達：',
+  duplicate: '雷達上已經有這一場了：',
+  no_place: '看得出是發放或活動，但找不到地點。地點要寫具體一點（例如「捷運市政府站 2號出口」）才能定位。',
+  not_listed: '判讀不出時間，或是已經結束、超過 14 天後才開始，所以沒有放上雷達。',
+  not_event: '這則看起來不是發放或活動。貼文要寫出在哪裡、什麼時候發放或舉辦，雷達才會收。',
+  failed: '判讀暫時失敗，系統稍後會自動再試一次。',
+};
+
+function setReportMsg(html: string): void {
+  reportResult.innerHTML = html;
+}
+
+async function submitReport(): Promise<void> {
+  const url = reportInput.value.trim();
+  if (!url) {
+    setReportMsg('<p class="msg error">請先貼上 Threads 貼文連結</p>');
+    return;
+  }
+  reportSubmit.disabled = true;
+  setReportMsg('<p class="msg busy">讀取貼文並判讀中，約需 10 秒</p>');
+  const r = await submitLink(url);
+  reportSubmit.disabled = false;
+  if (!r.ok) {
+    setReportMsg(`<p class="msg error">${esc(r.message)}</p>`);
+    return;
+  }
+  const { outcome, events: found, existed } = r.data;
+  const head = existed && (outcome === 'added' || outcome === 'duplicate') ? '這則之前已經有人回報，已在雷達上：' : OUTCOME_TEXT[outcome];
+  const list = found
+    .map((ev) => {
+      const when = ev.allDay ? '時間未公布' : `${dateFmt.format(new Date(ev.startAt * 1000))} ${fmtTime(ev.startAt)}`;
+      return `<li><button type="button" data-id="${ev.id}"><b>${kindLabel(ev)}｜${esc(ev.title)}</b><small>${esc(ev.placeText)} · ${esc(when)}</small></button></li>`;
+    })
+    .join('');
+  setReportMsg(`<p class="msg">${esc(head)}</p>${list ? `<ul class="report-events">${list}</ul>` : ''}`);
+  for (const b of reportResult.querySelectorAll<HTMLButtonElement>('[data-id]')) {
+    b.addEventListener('click', () => {
+      reportSheet.hidden = true;
+      selectedId = null;
+      select(Number(b.dataset.id));
+    });
+  }
+  if (found.length > 0) {
+    reportInput.value = '';
+    await refresh();
+  }
+}
+
+/** 從 Threads App 分享過來（PWA share target）或網址帶 ?url= */
+function takeSharedLink(params: URLSearchParams): string | null {
+  const text = [params.get('url'), params.get('text'), params.get('title')].filter(Boolean).join(' ');
+  return /threads\.(com|net)\//i.test(text) ? text : null;
 }
 
 function updateNotifyBtn(): void {
@@ -863,6 +999,22 @@ function wireControls(): void {
     e.preventDefault();
     void submitKeyword(kwInput.value);
   });
+  reportBtn.addEventListener('click', () => openReportSheet(reportSheet.hidden));
+  reportSheet.querySelector('[data-act="close"]')?.addEventListener('click', () => openReportSheet(false));
+  reportForm.addEventListener('submit', (e) => {
+    e.preventDefault();
+    void submitReport();
+  });
+  if (navigator.clipboard && 'readText' in navigator.clipboard) {
+    reportPaste.hidden = false;
+    reportPaste.addEventListener('click', async () => {
+      try {
+        reportInput.value = (await navigator.clipboard.readText()).trim();
+      } catch {
+        reportInput.focus();
+      }
+    });
+  }
   pickBtn.addEventListener('click', () => {
     const on = !pickBtn.classList.contains('on');
     pickBtn.classList.toggle('on', on);
@@ -900,9 +1052,19 @@ async function boot(): Promise<void> {
   }
   await loadKeywords();
   await refresh();
-  const openParam = new URLSearchParams(location.search).get('open');
+  const params = new URLSearchParams(location.search);
+  const openParam = params.get('open');
   if (openParam === 'theme') openThemeSheet(true);
   if (openParam === 'keywords') openKwSheet(true);
+  if (openParam === 'report') openReportSheet(true);
+  const shared = takeSharedLink(params);
+  if (shared) {
+    // 分享進來的網址用過就清掉，重新整理才不會再送一次
+    history.replaceState(null, '', location.pathname);
+    openReportSheet(true);
+    reportInput.value = shared;
+    void submitReport();
+  }
   const baseParam = new URLSearchParams(location.search).get('base');
   if (baseParam && (BASES as string[]).includes(baseParam)) setBase(baseParam as BaseMap);
   if (new URLSearchParams(location.search).get('view') === 'map') switchView('map');
