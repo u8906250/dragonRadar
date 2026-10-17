@@ -14,6 +14,9 @@ interface ApifyPost {
   timestamp?: string | number;
   publishedAt?: string | number;
   taken_at?: number;
+  published_at?: string | number;
+  like_count?: number;
+  reply_count?: number;
   username?: string;
   author?: { username?: string } | string;
   likeCount?: number;
@@ -61,14 +64,14 @@ export async function apifyTrial(env: Env, query: string, maxResults: number, ex
   const now = nowSec();
   const items: TrialItem[] = [];
   for (const r of rows) {
-    const ts = toUnix(r.timestamp ?? r.publishedAt ?? r.taken_at);
+    const ts = toUnix(r.published_at ?? r.timestamp ?? r.publishedAt ?? r.taken_at);
     const author = typeof r.author === 'string' ? r.author : r.author?.username;
     const text = String(r.text ?? r.caption ?? '');
     const item: TrialItem = {
       username: r.username ?? author ?? null,
       postedAt: ts ? new Date(ts * 1000).toISOString() : null,
       ageHours: ts ? Math.round(((now - ts) / 3600) * 10) / 10 : null,
-      likes: typeof r.likeCount === 'number' ? r.likeCount : typeof r.likes === 'number' ? r.likes : null,
+      likes: typeof r.like_count === 'number' ? r.like_count : typeof r.likeCount === 'number' ? r.likeCount : typeof r.likes === 'number' ? r.likes : null,
       text: text.slice(0, 160),
       url: r.url ?? null,
     };
