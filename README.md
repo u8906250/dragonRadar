@@ -114,9 +114,9 @@ npm run deploy
 
 | 欄位 | 網址 |
 |---|---|
-| 隱私權政策 | https://current-radar.pages.dev/privacy.html |
-| 服務條款 | https://current-radar.pages.dev/terms.html |
-| 資料刪除說明 | https://current-radar.pages.dev/data-deletion.html |
+| 隱私權政策 | https://current-radar.pages.dev/privacy |
+| 服務條款 | https://current-radar.pages.dev/terms |
+| 資料刪除說明 | https://current-radar.pages.dev/data-deletion |
 | 重新導向回呼 | https://dragon-radar.happybadminton.workers.dev/auth/threads/callback |
 | 解除安裝回呼 | https://dragon-radar.happybadminton.workers.dev/auth/threads/uninstall |
 | 刪除回呼 | https://dragon-radar.happybadminton.workers.dev/auth/threads/delete |
