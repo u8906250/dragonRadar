@@ -3,6 +3,8 @@ account_id = "79c279fdde0b82a171e0de6fd4c80c43"
 main = "src/index.ts"
 compatibility_date = "2025-10-01"
 compatibility_flags = ["nodejs_compat"]
+# 部署時保留在 Cloudflare 後台手動加的變數（例如 THREADS_APP_ID），不要被 wrangler deploy 清掉
+keep_vars = true
 
 [observability]
 enabled = true
