@@ -195,6 +195,17 @@ async function handleAdmin(req: Request, env: Env, _ctx: ExecutionContext, path:
     return jsonResponse({ events: r.results });
   }
 
+  // 刪除一則貼文與它產生的事件（作者要求移除、或測試貼文）
+  const postDel = /^\/api\/admin\/posts\/([^/]+)$/.exec(path);
+  if (req.method === 'DELETE' && postDel) {
+    const id = decodeURIComponent(postDel[1]);
+    const r = await env.DB.batch([
+      env.DB.prepare('DELETE FROM events WHERE post_id = ?').bind(id),
+      env.DB.prepare('DELETE FROM posts WHERE id = ?').bind(id),
+    ]);
+    return jsonResponse({ deleted_events: r[0].meta.changes ?? 0, deleted_posts: r[1].meta.changes ?? 0 });
+  }
+
   if (req.method === 'GET' && path === '/api/admin/posts') {
     const r = await env.DB.prepare('SELECT * FROM posts ORDER BY fetched_at DESC LIMIT 100').all();
     return jsonResponse({ posts: r.results.map((p) => ({ ...p, extraction: safeParse(p.extraction as string | null) })) });

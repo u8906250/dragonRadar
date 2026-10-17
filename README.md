@@ -144,6 +144,8 @@ npm run deploy
 | POST | `/api/admin/ingest` | 立刻跑一次抓取與狀態更新 |
 | GET | `/api/admin/events?status=` | 所有事件（含 ended、unlocated） |
 | GET | `/api/admin/posts` | 最近 100 則原始貼文與解析結果 |
+| DELETE | `/api/admin/posts/:id` | 刪除一則貼文與它的事件 |
+| POST | `/api/admin/extract` | 只判讀不存檔，可指定 models 比較 |
 | GET/POST/DELETE | `/api/admin/keywords[/:id]` | 關鍵字管理（新增的會固定搜尋） |
 | GET/POST | `/api/admin/token` | 查看／更新 Threads token |
 
