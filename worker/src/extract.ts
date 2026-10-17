@@ -70,8 +70,9 @@ events 每筆的欄位：
 - 不要編造貼文裡沒有的時間或地點，可以依上下文補上縣市。`;
 
 export function buildMessages(text: string, postedAt: number, now: number): Array<{ role: 'system' | 'user'; content: string }> {
+  void now;
   const user = `貼文發布時間：${formatTaipei(postedAt)}
-現在時間：${formatTaipei(now)}
+（貼文裡的「今天、今晚、明天」都以這個發布日期為準）
 
 貼文內容：
 """

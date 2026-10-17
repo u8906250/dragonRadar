@@ -72,9 +72,10 @@ describe('normalizeExtraction', () => {
 });
 
 describe('buildMessages', () => {
-  it('includes both post time and now in Taipei', () => {
+  it('anchors relative dates on the post time only', () => {
     const msgs = buildMessages('test', 1760684400, 1760688000);
     expect(msgs[1].content).toContain('貼文發布時間');
+    expect(msgs[1].content).not.toContain('現在時間');
     expect(msgs[1].content).toContain('Asia/Taipei');
     expect(msgs[1].content).toContain('test');
   });
