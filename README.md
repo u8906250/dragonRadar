@@ -110,13 +110,26 @@ npm run deploy
 
 ### 3. Threads API
 
-1. 在 [Meta for Developers](https://developers.facebook.com/) 建一個 App，加入 Threads API use case。
-2. 權限需要 `threads_basic` 與 `threads_keyword_search`，後者要送 App Review。
-3. 取得長效 token（60 天），用 `wrangler secret put THREADS_ACCESS_TOKEN` 或 `POST /api/admin/token` 存入。
-   Worker 每週一會自動呼叫 `refresh_access_token` 續期並存進 D1。
-4. 把 `MOCK_MODE` 設成 `false` 後重新部署。
+給 Meta App 設定用的網址：
 
-配額：每個使用者每日 2,200 次查詢。每 10 分鐘跑 N 個關鍵字一天用掉 144 × N 次，進行中的事件每 10 分鐘再多一次作者追蹤查詢。
+| 欄位 | 網址 |
+|---|---|
+| 隱私權政策 | https://current-radar.pages.dev/privacy.html |
+| 服務條款 | https://current-radar.pages.dev/terms.html |
+| 資料刪除說明 | https://current-radar.pages.dev/data-deletion.html |
+| 重新導向回呼 | https://dragon-radar.happybadminton.workers.dev/auth/threads/callback |
+| 解除安裝回呼 | https://dragon-radar.happybadminton.workers.dev/auth/threads/uninstall |
+| 刪除回呼 | https://dragon-radar.happybadminton.workers.dev/auth/threads/delete |
+| App 圖示 | web/public/icon-1024.png |
+
+流程：
+
+1. 在 [Meta for Developers](https://developers.facebook.com/) 建 App，使用案例選 Threads API，權限加 `threads_basic`、`threads_keyword_search`。
+2. 在 Cloudflare Worker 設 secret：`THREADS_APP_ID`、`THREADS_APP_SECRET`（App 設定裡 Threads 的那一組）。
+3. 打開 `https://dragon-radar.happybadminton.workers.dev/auth/threads/start?key=<ADMIN_TOKEN>` 用 Threads 帳號授權，長效 token（60 天）會自動存進 D1，之後每週一自動續期。
+4. `threads_keyword_search` 送 App Review 通過前，只能搜到授權帳號自己的貼文。
+
+配額：每個使用者每日 2,200 次查詢。每 10 分鐘跑 N 個關鍵字一天用掉 144 × N 次。
 
 ## API
 

@@ -10,5 +10,9 @@ export interface Env {
   /** "true" 才開放一般使用者新增關鍵字；等帳號綁定做好再打開 */
   ALLOW_USER_KEYWORDS?: string;
   THREADS_ACCESS_TOKEN?: string;
+  /** Threads App ID（App 設定 > 基本資料裡的 Threads 應用程式編號） */
+  THREADS_APP_ID?: string;
+  /** Threads App 密鑰，只能放在 secret */
+  THREADS_APP_SECRET?: string;
   ADMIN_TOKEN?: string;
 }

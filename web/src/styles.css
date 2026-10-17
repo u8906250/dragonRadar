@@ -297,6 +297,8 @@ button, select, a { touch-action: manipulation; }
   background: var(--card); font-size: 14px; line-height: 1.6; white-space: pre-wrap;
 }
 .kw-rules .example-out { margin: 6px 0 0; font-size: 13px; color: var(--muted); line-height: 1.6; }
+.legal-links { margin: 18px 0 0; font-size: 12px; color: var(--muted); }
+.legal-links a { color: var(--muted); }
 .ev-kw { display: inline-block; margin-left: 6px; font-size: 11px; font-weight: 700; color: var(--accent); }
 
 .theme-list { list-style: none; margin: 0; padding: 0; display: grid; grid-auto-rows: max-content; gap: 8px; }

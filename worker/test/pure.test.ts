@@ -124,3 +124,26 @@ describe('placeCandidates', () => {
     expect(placeCandidates('台北市 松山文創園區', null)).toEqual(['台北市 松山文創園區']);
   });
 });
+
+import { verifySignedRequest } from '../src/oauth';
+
+async function sign(payload: object, secret: string): Promise<string> {
+  const enc = (b: Uint8Array): string => btoa(String.fromCharCode(...b)).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+  const p = enc(new TextEncoder().encode(JSON.stringify(payload)));
+  const key = await crypto.subtle.importKey('raw', new TextEncoder().encode(secret), { name: 'HMAC', hash: 'SHA-256' }, false, ['sign']);
+  const sig = new Uint8Array(await crypto.subtle.sign('HMAC', key, new TextEncoder().encode(p)));
+  return `${enc(sig)}.${p}`;
+}
+
+describe('verifySignedRequest', () => {
+  it('accepts a request signed with the app secret', async () => {
+    const s = await sign({ algorithm: 'HMAC-SHA256', user_id: '123' }, 'secret-1');
+    expect((await verifySignedRequest(s, 'secret-1'))?.user_id).toBe('123');
+  });
+  it('rejects a wrong secret or tampered payload', async () => {
+    const s = await sign({ user_id: '123' }, 'secret-1');
+    expect(await verifySignedRequest(s, 'secret-2')).toBeNull();
+    expect(await verifySignedRequest(s.replace(/\.(.)/, '.A'), 'secret-1')).toBeNull();
+    expect(await verifySignedRequest('garbage', 'secret-1')).toBeNull();
+  });
+});

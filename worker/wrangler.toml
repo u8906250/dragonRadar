@@ -35,4 +35,6 @@ ALLOW_USER_KEYWORDS = "false"
 
 # Secrets（用 wrangler secret put 設定，不要寫在這裡）
 #   THREADS_ACCESS_TOKEN  Threads 長效 token
-#   ADMIN_TOKEN           /api/admin/* 的 Bearer token
+#   ADMIN_TOKEN           /api/admin/* 的 Bearer token，也用在 /auth/threads/start?key=
+#   THREADS_APP_ID        Threads App ID
+#   THREADS_APP_SECRET    Threads App 密鑰

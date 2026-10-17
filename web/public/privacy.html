@@ -1,0 +1,68 @@
+<!doctype html>
+<html lang="zh-Hant-TW">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>隱私權政策｜洋流雷達</title>
+  <link rel="stylesheet" href="legal.css" />
+</head>
+<body>
+<main>
+  <nav><a href="./">← 洋流雷達</a><a href="terms.html">服務條款</a><a href="data-deletion.html">資料刪除</a></nav>
+  <article>
+    <h1>隱私權政策</h1>
+    <p class="meta">最後更新：2026 年 10 月 17 日</p>
+
+    <p>洋流雷達（以下稱「本服務」）是一個網頁工具，從 Threads 的公開貼文中找出「某時某地免費發放」的資訊，在雷達畫面上顯示相對位置。本政策說明本服務處理哪些資料，以及如何處理。</p>
+
+    <h2>一、網站使用者</h2>
+    <ul>
+      <li><b>不需要註冊或登入。</b>本服務不要求你提供姓名、Email、電話或任何帳號。</li>
+      <li><b>位置：</b>你允許定位後，瀏覽器會把你的大略座標送到本服務的伺服器，只用來查詢附近的發放資訊。伺服器不儲存你的座標，也不記錄你的位置軌跡。距離與方位是在你的手機上計算。</li>
+      <li><b>手機上的設定：</b>你選擇的主題、雷達範圍、手動設定的位置，只存在你自己瀏覽器的 localStorage，不會傳到伺服器。</li>
+      <li><b>通知：</b>通知權限由瀏覽器管理，本服務不收集推播識別碼。</li>
+      <li><b>服務紀錄：</b>本服務架設在 Cloudflare 與 GitHub Pages，這些平台可能依其政策保留一般連線紀錄（例如 IP 位址、瀏覽器類型），本服務不另外收集或使用這些資料。</li>
+    </ul>
+
+    <h2>二、來自 Threads 的資料</h2>
+    <p>本服務透過 Meta 提供的 Threads API，以固定關鍵字搜尋<b>公開</b>貼文，處理方式如下：</p>
+    <ul>
+      <li><b>取得的內容：</b>貼文編號、內文、發文時間、作者的公開使用者名稱、貼文連結。不取得私人訊息、追蹤名單或任何非公開內容。</li>
+      <li><b>用途：</b>以自動化方式（包含 AI 文字判讀）找出貼文中的發放時間與地點，並把地點轉成地圖座標，顯示在雷達與地圖上，同時附上原貼文連結。不用於廣告、不建立個人檔案、不出售或分享給第三方。</li>
+      <li><b>保存期限：</b>貼文與解析結果最多保存 30 天，之後自動刪除。</li>
+      <li><b>授權帳號：</b>本服務的營運者以自己的 Threads 帳號授權搜尋，只保存該帳號的存取權杖，用來呼叫 API。</li>
+    </ul>
+
+    <h2>三、第三方服務</h2>
+    <ul>
+      <li>Meta Threads API：搜尋公開貼文。</li>
+      <li>Cloudflare（Workers、D1、Workers AI、Pages）：網站與伺服器、資料庫、文字判讀。</li>
+      <li>OpenStreetMap Nominatim：把地點文字轉成座標，只送出地點文字。</li>
+      <li>OpenStreetMap 圖磚：地圖畫面，由你的瀏覽器直接向 OpenStreetMap 下載。</li>
+      <li>GitHub Pages：網站備用位址。</li>
+    </ul>
+
+    <h2>四、你的權利</h2>
+    <ul>
+      <li>如果你是 Threads 貼文的作者，希望本服務移除與你貼文相關的資料，請依<a href="data-deletion.html">資料刪除說明</a>聯絡我們，我們會在 7 天內刪除。</li>
+      <li>你可以隨時在瀏覽器關閉定位或通知權限，或清除本網站的網站資料。</li>
+    </ul>
+
+    <h2>五、兒童隱私</h2>
+    <p>本服務不針對 13 歲以下兒童設計，也不刻意收集兒童的資料。</p>
+
+    <h2>六、政策變更與聯絡方式</h2>
+    <p>政策若有變更會更新本頁的日期。有任何問題請到 <a href="https://github.com/u8906250/dragonRadar/issues">GitHub Issues</a> 留言。</p>
+
+    <section class="en" lang="en">
+      <h2>Privacy Policy (English summary)</h2>
+      <p><b>What this service does.</b> 洋流雷達 (Current Radar) is a web tool that finds public Threads posts announcing in-person giveaways, extracts the time and place, and shows them on a radar and map relative to the visitor's location.</p>
+      <p><b>Website visitors.</b> No sign-up or login is required. If you allow location access, your approximate coordinates are sent to our server only to look up nearby events; they are not stored or logged. Preferences (theme, range, manual location) stay in your browser's localStorage.</p>
+      <p><b>Threads data.</b> Using the Meta Threads API we search <i>public</i> posts for a fixed keyword. We process the post ID, text, timestamp, author's public username and permalink, solely to extract giveaway time and location and display them with a link to the original post. We do not use the data for advertising, profiling, or sale, and we do not share it with third parties. Posts and extracted data are automatically deleted after 30 days. The only access token stored is the operator's own Threads token used to call the API.</p>
+      <p><b>Processors.</b> Meta Threads API, Cloudflare (Workers, D1, Workers AI, Pages), OpenStreetMap Nominatim and tiles, GitHub Pages.</p>
+      <p><b>Deletion and contact.</b> See the <a href="data-deletion.html">data deletion instructions</a>. Questions: <a href="https://github.com/u8906250/dragonRadar/issues">GitHub Issues</a>.</p>
+    </section>
+  </article>
+</main>
+</body>
+</html>

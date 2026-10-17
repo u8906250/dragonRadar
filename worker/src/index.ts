@@ -2,6 +2,7 @@ import { getAccessToken, makeClient, saveAccessToken } from './client';
 import type { Env } from './env';
 import { DEFAULT_DURATION_SEC, ENDED_WORDS, MAX_FUTURE_SEC, MIN_CONFIDENCE, getEvent, getPost, ingestAll, ingestKeyword, listEvents, processBacklog, processPost, storePost, updateLifecycle, type EventRow } from './events';
 import { addUserKeyword, listActiveKeywords, listAllKeywords, MAX_ACTIVE_KEYWORDS, normalizeKeyword, parseKeywordList, toKeywordOut, touchKeywords } from './keywords';
+import { CALLBACK_PATH, DELETE_PATH, DELETION_STATUS_PATH, UNINSTALL_PATH, deletionStatus, handleCallback, handleDelete, handleUninstall, startAuth } from './oauth';
 import { jsonResponse, nowSec, parseIsoToUnix } from './util';
 
 const REFRESH_CRON = '0 3 * * 1';
@@ -63,6 +64,13 @@ async function handle(req: Request, env: Env, ctx: ExecutionContext): Promise<Re
     const client = await makeClient(env);
     return jsonResponse({ ok: true, mode: client.mode, time: now });
   }
+
+  // Threads 授權（給管理員綁定搜尋用的帳號）與 Meta 要求的解除授權、刪除資料回呼
+  if (req.method === 'GET' && path === '/auth/threads/start') return startAuth(req, env);
+  if (req.method === 'GET' && path === CALLBACK_PATH) return handleCallback(req, env);
+  if (req.method === 'POST' && path === UNINSTALL_PATH) return handleUninstall(req, env);
+  if (req.method === 'POST' && path === DELETE_PATH) return handleDelete(req, env);
+  if (req.method === 'GET' && path === DELETION_STATUS_PATH) return deletionStatus(req);
 
   if (req.method === 'GET' && path === '/api/events') {
     const lat = num(url.searchParams.get('lat'));
@@ -228,6 +236,17 @@ function safeParse(s: string | null): unknown {
   }
 }
 
+/** 隱私權政策承諾的保存期限：貼文與事件最多留 30 天 */
+const RETENTION_SEC = 30 * 86400;
+async function purgeOldData(env: Env, now: number): Promise<number> {
+  const cutoff = now - RETENTION_SEC;
+  const r = await env.DB.batch([
+    env.DB.prepare('DELETE FROM events WHERE end_at < ?').bind(cutoff),
+    env.DB.prepare('DELETE FROM posts WHERE fetched_at < ? AND id NOT IN (SELECT post_id FROM events)').bind(cutoff),
+  ]);
+  return r.reduce((n, x) => n + (x.meta.changes ?? 0), 0);
+}
+
 async function refreshTokenJob(env: Env): Promise<void> {
   const client = await makeClient(env);
   if (client.mode !== 'live') return;
@@ -250,7 +269,8 @@ async function runScheduled(env: Env, cron: string): Promise<void> {
   const ingest = await ingestAll(env, client, now);
   const backlog = await processBacklog(env, now);
   const lifecycle = await updateLifecycle(env, client, now);
-  console.log(JSON.stringify({ cron, mode: client.mode, ingest, backlog, lifecycle }));
+  const purged = await purgeOldData(env, now);
+  console.log(JSON.stringify({ cron, mode: client.mode, ingest, backlog, lifecycle, purged }));
 }
 
 export default {
