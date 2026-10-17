@@ -121,7 +121,7 @@ describe('placeCandidates', () => {
     expect(c[0]).toBe('台北市 捷運中山站 4號出口');
     expect(c).toContain('台北市 捷運中山站');
     expect(c).toContain('台北市 中山站');
-    expect(c.length).toBeLessThanOrEqual(7);
+    expect(c.length).toBeLessThanOrEqual(8);
   });
   it('strips gate numbers', () => {
     const c = placeCandidates('台北市 台北車站 東三門', '台北車站東三門');
@@ -133,6 +133,12 @@ describe('placeCandidates', () => {
     expect(c).toContain('台北市 忠孝復興站');
     expect(c).toContain('忠孝復興站');
     expect(c.some((x) => x.includes('中正區忠孝復興站') && !x.includes(' '))).toBe(true);
+  });
+  it('never queries a bare city or district', () => {
+    const c = placeCandidates('台北市', '民權公園');
+    expect(c[0]).toBe('台北市 民權公園');
+    expect(c).not.toContain('台北市');
+    expect(placeCandidates('台北市 大安區', null)).toEqual([]);
   });
   it('keeps plain landmarks untouched', () => {
     expect(placeCandidates('台北市 松山文創園區', null)).toEqual(['台北市 松山文創園區']);

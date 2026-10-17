@@ -17,6 +17,18 @@ const CITY_RE = /(台北|臺北|新北|桃園|台中|臺中|台南|臺南|高雄
 /** 只拿掉「台北市」「新北市 」這種縣市前綴，不能動到「台北車站」裡的台北 */
 const CITY_PREFIX_RE = new RegExp(`${CITY_RE.source.replace('[市縣]?', '[市縣]')}\\s*`, 'g');
 
+const CITY_ANY_RE = new RegExp(CITY_RE.source, 'g');
+
+/** 只有縣市或鄉鎮區名稱（例如「台北市」「台北市 大安區」），拿去查只會得到行政區中心點 */
+export function isAdminOnly(s: string): boolean {
+  return (
+    s
+      .replace(CITY_ANY_RE, '')
+      .replace(/[\u4e00-\u9fff]{1,2}[區鄉鎮]/g, '')
+      .replace(/[\s,，、]/g, '') === ''
+  );
+}
+
 /**
  * 從 LLM 給的地點產生由精確到寬鬆的查詢候選。
  * Nominatim 常找不到「4號出口」「東三門」這種細節，所以逐步拿掉，最後退到車站或地標名稱。
@@ -25,7 +37,7 @@ export function placeCandidates(query: string, placeText?: string | null): strin
   const out: string[] = [];
   const push = (s: string | null | undefined): void => {
     const t = (s ?? '').replace(/\s+/g, ' ').trim();
-    if (t.length >= 2 && !out.includes(t)) out.push(t);
+    if (t.length >= 2 && !out.includes(t) && !isAdminOnly(t)) out.push(t);
   };
   const strip = (s: string): string =>
     s
@@ -37,8 +49,12 @@ export function placeCandidates(query: string, placeText?: string | null): strin
 
   const sources = [query, placeText ?? ''];
   const city = sources.map((s) => CITY_RE.exec(s)?.[0]).find(Boolean) ?? '';
-  for (const s of sources) push(s);
-  for (const s of sources) push(strip(s));
+  // 原文地點沒寫縣市時補上，避免查到別縣市同名的公園或車站
+  for (const s of sources) {
+    if (city && s && !CITY_RE.test(s)) push(`${city} ${s}`);
+    push(s);
+  }
+  const stations: string[] = [];
   for (const s of sources) {
     // 括號裡常是「近忠孝復興站」這種線索，所以這裡不拿掉括號內容；行政區和「近」也拿掉，只留站名
     const bare = s
@@ -47,12 +63,16 @@ export function placeCandidates(query: string, placeText?: string | null): strin
       .replace(/[\u4e00-\u9fff]{1,2}[區鄉鎮](?=[\u4e00-\u9fff]{2,}站)/g, ' ')
       .replace(/近|靠近|鄰近/g, ' ');
     const st = /(?:捷運|台鐵|臺鐵|高鐵)?\s*([\u4e00-\u9fff]{2,8}站)/.exec(strip(bare));
-    if (st) {
-      push(`${city} ${st[1]}`);
-      push(st[1]);
-    }
+    if (st) stations.push(`${city} ${st[1]}`, st[1]);
   }
-  return out.slice(0, 7);
+  // 站名比去掉出口、門號的版本可靠，先試
+  for (const s of stations) push(s);
+  for (const s of sources) {
+    const st = strip(s);
+    if (city && st.trim() && !CITY_RE.test(st)) push(`${city} ${st}`);
+    push(st);
+  }
+  return out.slice(0, 8);
 }
 
 async function politeDelay(): Promise<void> {

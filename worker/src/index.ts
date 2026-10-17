@@ -244,6 +244,21 @@ async function handleAdmin(req: Request, env: Env, _ctx: ExecutionContext, path:
     return jsonResponse({ events: r.results });
   }
 
+  // 用目前的判讀與定位規則重跑一則貼文：還沒結束的舊事件先刪掉
+  const reMatch = /^\/api\/admin\/posts\/([^/]+)\/reprocess$/.exec(path);
+  if (req.method === 'POST' && reMatch) {
+    const id = decodeURIComponent(reMatch[1]);
+    const post = await getPost(env, id);
+    if (!post) throw new HttpError(404, 'post not found');
+    if (post.source === 'official') throw new HttpError(400, '官方航線由同步程式產生，不能重新判讀');
+    await env.DB.batch([
+      env.DB.prepare("DELETE FROM ended_reports WHERE event_id IN (SELECT id FROM events WHERE post_id = ? AND status IN ('upcoming', 'active', 'unlocated'))").bind(id),
+      env.DB.prepare("DELETE FROM events WHERE post_id = ? AND status IN ('upcoming', 'active', 'unlocated')").bind(id),
+    ]);
+    const result = await processPost(env, post, now);
+    return jsonResponse({ post_id: id, reasons: result.reasons, events: result.events });
+  }
+
   // 刪除一則貼文與它產生的事件（作者要求移除、或測試貼文）
   const postDel = /^\/api\/admin\/posts\/([^/]+)$/.exec(path);
   if (req.method === 'DELETE' && postDel) {
