@@ -130,9 +130,19 @@ function phaseOf(ev: EventOut, now: number): Phase {
   return 'later';
 }
 
+/** 同地點（150 m 內）、開始時間差 30 分鐘內的事件只留一筆 */
+function dedupeEvents(list: EventOut[]): EventOut[] {
+  const kept: EventOut[] = [];
+  for (const ev of list) {
+    const dup = kept.some((k) => Math.abs(k.startAt - ev.startAt) <= 1800 && haversineKm(k, ev) <= 0.15);
+    if (!dup) kept.push(ev);
+  }
+  return kept;
+}
+
 function computeItems(now: number): Item[] {
   const me: LatLng = { lat: origin.lat, lng: origin.lng };
-  return events
+  return dedupeEvents(events)
     .filter((ev) => ev.endAt > now)
     .map((ev) => ({ ev, distanceKm: haversineKm(me, ev), bearing: bearingDeg(me, ev), phase: phaseOf(ev, now) }))
     .sort((a, b) => (a.phase === b.phase ? a.distanceKm - b.distanceKm : a.phase === 'active' ? -1 : b.phase === 'active' ? 1 : a.ev.startAt - b.ev.startAt));

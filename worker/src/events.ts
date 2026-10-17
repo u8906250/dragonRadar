@@ -64,6 +64,8 @@ export const DEFAULT_DURATION_SEC = 2 * 3600;
 export const MAX_FUTURE_SEC = 14 * 86400;
 const LOOKBACK_SEC = 24 * 3600;
 export const MIN_CONFIDENCE = 0.5;
+const DUP_WINDOW_SEC = 30 * 60;
+const DUP_DEG = 0.0014; // 約 150 m
 const RECHECK_INTERVAL_SEC = 600;
 const RECHECK_BATCH = 20;
 
@@ -125,6 +127,17 @@ export async function processPost(env: Env, post: PostRow, now = nowSec()): Prom
   if (!placeQuery || !placeText) return { event: null, reason: 'no_place' };
 
   const point = await geocodeFirst(env, placeCandidates(placeQuery, extraction.place_text));
+
+  // 同一場發放可能被多個關鍵字或多篇貼文找到：同地點（約 150 m 內）、開始時間差 30 分鐘內就視為重複
+  if (point) {
+    const dup = await env.DB.prepare(
+      `SELECT id FROM events WHERE status IN ('upcoming', 'active')
+         AND ABS(start_at - ?) <= ? AND lat BETWEEN ? AND ? AND lng BETWEEN ? AND ? LIMIT 1`,
+    )
+      .bind(start, DUP_WINDOW_SEC, point.lat - DUP_DEG, point.lat + DUP_DEG, point.lng - DUP_DEG, point.lng + DUP_DEG)
+      .first<{ id: number }>();
+    if (dup) return { event: null, reason: `duplicate_of_${dup.id}` };
+  }
 
   const status: EventStatus = !point ? 'unlocated' : start <= now ? 'active' : 'upcoming';
   const event = await env.DB.prepare(
