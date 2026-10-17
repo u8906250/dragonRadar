@@ -22,7 +22,11 @@ export interface NewsResult {
   errors: string[];
 }
 
-const UA = 'Mozilla/5.0 (compatible; CurrentRadar/1.0; +https://current-radar.pages.dev)';
+// 有些新聞網站會擋非瀏覽器的 User-Agent
+const HEADERS = {
+  'user-agent': 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.5 Mobile/15E148 Safari/604.1',
+  'accept-language': 'zh-TW,zh;q=0.9,en;q=0.6',
+};
 
 export async function ingestNews(env: Env, now = nowSec()): Promise<NewsResult> {
   const out: NewsResult = { matched: 0, processed: 0, created: 0, errors: [] };
@@ -30,10 +34,10 @@ export async function ingestNews(env: Env, now = nowSec()): Promise<NewsResult> 
   if (keywords.length === 0) return out;
 
   const seenTitles = new Set<string>();
-  const candidates: Array<{ feed: string; title: string; link: string; pubDate: number; keyword: string }> = [];
+  const candidates: Array<{ feed: string; title: string; link: string; pubDate: number; keyword: string; description: string }> = [];
   for (const feed of NEWS_FEEDS) {
     try {
-      const res = await fetch(feed.url, { headers: { 'user-agent': UA, accept: 'application/rss+xml, application/xml, text/xml' } });
+      const res = await fetch(feed.url, { headers: { ...HEADERS, accept: 'application/rss+xml, application/xml, text/xml' } });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       for (const it of parseRss(await res.text())) {
         const kw = keywords.find((k) => it.title.includes(k) || it.description.includes(k));
@@ -42,7 +46,7 @@ export async function ingestNews(env: Env, now = nowSec()): Promise<NewsResult> 
         const titleKey = it.title.replace(/\s+/g, '');
         if (seenTitles.has(titleKey)) continue;
         seenTitles.add(titleKey);
-        candidates.push({ feed: feed.name, title: it.title, link: it.link, pubDate: pub, keyword: kw });
+        candidates.push({ feed: feed.name, title: it.title, link: it.link, pubDate: pub, keyword: kw, description: it.description });
       }
     } catch (e) {
       out.errors.push(`${feed.url}: ${String(e)}`);
@@ -60,8 +64,13 @@ export async function ingestNews(env: Env, now = nowSec()): Promise<NewsResult> 
       .first<{ id: string }>();
     if (dupTitle) continue;
     try {
-      const res = await fetch(c.link, { headers: { 'user-agent': UA, accept: 'text/html' } });
-      const body = res.ok ? extractArticleText(await res.text()) : '';
+      const res = await fetch(c.link, { headers: { ...HEADERS, accept: 'text/html' } });
+      let body = res.ok ? extractArticleText(await res.text()) : '';
+      // 文章頁被擋或抓不到內文時，退回 RSS 摘要
+      if (body.length < 40) {
+        if (!res.ok) out.errors.push(`${c.link}: article HTTP ${res.status}, used RSS description`);
+        body = c.description.replace(/…+$/, '');
+      }
       const text = `${c.title}\n\n${body}`.trim();
       await storePost(env, { id, username: c.feed, text, permalink: c.link, posted_at: c.pubDate, keyword: c.keyword, source: 'news' }, now);
       const post = await getPost(env, id);
