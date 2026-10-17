@@ -229,8 +229,10 @@ button, select, a { touch-action: manipulation; }
   box-shadow: var(--panel-shadow);
   transition: max-height 0.25s ease;
 }
-.panel.expanded { max-height: 78dvh; }
-.panel-handle { display: block; width: 100%; height: 26px; border: 0; background: transparent; cursor: pointer; padding: 0; }
+.panel.expanded { max-height: 80dvh; }
+.panel.expanded .panel-handle span { opacity: 0.9; }
+.panel-handle { display: block; width: 100%; height: 28px; border: 0; background: transparent; cursor: grab; padding: 0; touch-action: none; }
+.panel-head { touch-action: none; }
 .panel-handle span { display: block; width: 40px; height: 5px; margin: 0 auto; border-radius: 3px; background: var(--muted); opacity: 0.6; }
 .panel-head { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; font-size: 13px; padding: 0 16px 8px; }
 .panel-head .right { margin-left: auto; }
@@ -323,8 +325,12 @@ button, select, a { touch-action: manipulation; }
 .theme-item small { color: var(--muted); font-size: 12px; }
 .theme-item .check { margin-left: auto; font-weight: 800; color: var(--highlight); }
 
-.leaflet-container { font: inherit; }
-.leaflet-popup-content-wrapper, .leaflet-popup-tip { background: var(--panel); color: var(--text); }
+.maplibregl-map { font: inherit; }
+.maplibregl-popup-content { background: var(--panel); color: var(--text); border: var(--border-w) solid var(--line); border-radius: 10px; padding: 8px 12px; font-size: 13px; line-height: 1.5; }
+.maplibregl-popup-tip { border-top-color: var(--panel) !important; border-bottom-color: var(--panel) !important; }
+#base-chips .chip { padding: 8px 10px; font-size: 13px; }
+.maplibregl-ctrl-bottom-right { bottom: 66px; }
+.banner { cursor: pointer; }
 
 /* 平板與桌機：清單移到右側欄 */
 @media (min-width: 900px) {

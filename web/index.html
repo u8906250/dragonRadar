@@ -35,6 +35,11 @@
         <section id="map-view" class="view" hidden aria-label="地圖"><div id="map"></div></section>
 
         <div class="overlay overlay-bl">
+          <div class="chips" id="base-chips" role="radiogroup" aria-label="底圖" hidden>
+            <button type="button" class="chip" data-base="clear" role="radio" aria-checked="false">清晰</button>
+            <button type="button" class="chip" data-base="nlsc" role="radio" aria-checked="false" title="內政部國土測繪中心 台灣通用電子地圖">台灣電子地圖</button>
+            <button type="button" class="chip" data-base="osm" role="radio" aria-checked="false">OSM</button>
+          </div>
           <div class="chips" id="scale-chips" role="radiogroup" aria-label="雷達範圍">
             <button type="button" class="chip" data-scale="1" role="radio" aria-checked="false">1 km</button>
             <button type="button" class="chip" data-scale="5" role="radio" aria-checked="false">5 km</button>
@@ -44,6 +49,7 @@
           </div>
         </div>
         <div class="overlay overlay-tr">
+          <button type="button" id="locate-btn" class="chip" title="重新定位到我的位置">定位</button>
           <button type="button" id="compass-btn" class="chip" hidden title="雷達跟著手機方向轉">指北針</button>
           <button type="button" id="pick-origin" class="chip" hidden>設定位置</button>
           <button type="button" id="view-btn" class="chip primary">地圖</button>

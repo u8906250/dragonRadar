@@ -52,9 +52,13 @@ export function beep(style: SoundStyle = 'beep'): void {
 }
 
 let bannerTimer: number | undefined;
-export function showBanner(el: HTMLElement, text: string, ms = 8000): void {
+export function showBanner(el: HTMLElement, text: string, ms = 2500): void {
   el.textContent = text;
   el.hidden = false;
+  el.onclick = () => {
+    window.clearTimeout(bannerTimer);
+    el.hidden = true;
+  };
   window.clearTimeout(bannerTimer);
   bannerTimer = window.setTimeout(() => {
     el.hidden = true;

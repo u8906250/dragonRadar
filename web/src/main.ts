@@ -2,7 +2,7 @@ import './styles.css';
 import { addKeyword, fetchEvents, fetchHealth, fetchKeywords } from './api';
 import { compassSupported, startCompass } from './compass';
 import { bearingDeg, compassLabel, formatKm, haversineKm, shuangbeiRadiusKm, taiwanRadiusKm, type LatLng } from './geo';
-import { MapView } from './map';
+import { MapView, type BaseMap } from './map';
 import { beep, ensureNotificationPermission, notificationState, showBanner, systemNotify, unlockAudio } from './notify';
 import { Radar } from './radar';
 import { DEFAULT_THEME_ID, getTheme, THEMES, type Theme } from './themes';
@@ -18,6 +18,8 @@ const TICK_MS = 5_000;
 const LS_SCALE = 'dr.scale';
 const LS_ORIGIN = 'dr.origin';
 const LS_THEME = 'dr.theme';
+const LS_BASE = 'dr.base';
+const BASES: BaseMap[] = ['clear', 'nlsc', 'osm'];
 const LS_KEYWORDS = 'dr.keywords';
 const KEYWORD_RE_INVALID = /[<>{}\\%_]/;
 
@@ -113,18 +115,30 @@ const kwRulesEl = $('#kw-rules');
 const kwTitle = $('#kw-title');
 const kwIntro = $('#kw-intro');
 const kwShareNote = $('#kw-share-note');
+const locateBtn = $<HTMLButtonElement>('#locate-btn');
+const baseChipsEl = $('#base-chips');
+const baseChips = Array.from(document.querySelectorAll<HTMLButtonElement>('#base-chips [data-base]'));
+let baseMap: BaseMap = (BASES as string[]).includes(lsGet(LS_BASE) ?? '') ? (lsGet(LS_BASE) as BaseMap) : 'clear';
+/** 最近一次 GPS 的誤差（公尺），手動或預設位置時為 null */
+let gpsAccuracy: number | null = null;
 const scaleChips = Array.from(document.querySelectorAll<HTMLButtonElement>('#scale-chips [data-scale]'));
 
 const radar = new Radar($('#radar-view'), select);
-const map = new MapView($('#map'), origin, {
-  onSelect: select,
-  onPickOrigin: (p) => {
-    setOrigin({ ...p, source: 'manual' });
-    map.setPickMode(false);
-    pickBtn.classList.remove('on');
-    showBanner(bannerEl, '已設定為手動位置');
+const map = new MapView(
+  $('#map'),
+  origin,
+  {
+    onSelect: select,
+    onPickOrigin: (p) => {
+      gpsAccuracy = null;
+      setOrigin({ ...p, source: 'manual' });
+      map.setPickMode(false);
+      pickBtn.classList.remove('on');
+      showBanner(bannerEl, '已設定為手動位置');
+    },
   },
-});
+  baseMap,
+);
 
 // ---- logic ----
 function phaseOf(ev: EventOut, now: number): Phase {
@@ -222,7 +236,7 @@ function render(): void {
     }
     const msg = `${it.ev.title}｜${it.ev.placeText}｜${formatKm(it.distanceKm)} ${compassLabel(it.bearing)}`;
     const head = it.ev.kind === 'activity' ? '活動開始' : '開始發放';
-    showBanner(bannerEl, `${head}：${msg}`, 12_000);
+    showBanner(bannerEl, `${head}：${msg}`, 10_000);
     systemNotify(head, msg);
   }
   if (lastFetchAt > 0) notifiedOnce = true;
@@ -301,7 +315,7 @@ function setOrigin(o: Origin): void {
   const moved = haversineKm(origin, o) > 0.2;
   origin = o;
   if (o.source === 'manual') lsSet(LS_ORIGIN, JSON.stringify(o));
-  map.setOrigin(o, moved);
+  map.setOrigin(o, moved, o.source === 'gps' ? gpsAccuracy : null);
   originLabel.textContent = o.source === 'gps' ? 'GPS 定位' : o.source === 'manual' ? '手動位置' : '預設：台北車站';
   useGpsBtn.hidden = o.source !== 'manual';
   if (isAutoScale(scaleSetting) && scaleKmFor(scaleSetting) !== scaleKm) {
@@ -338,6 +352,7 @@ function switchView(v: 'radar' | 'map'): void {
   viewBtn.textContent = v === 'radar' ? '地圖' : '雷達';
   pickBtn.hidden = v !== 'map';
   $('#scale-chips').hidden = v !== 'radar';
+  baseChipsEl.hidden = v !== 'map';
   compassBtn.hidden = v !== 'radar' || !compassSupported();
   if (v === 'map') map.invalidate();
 }
@@ -346,6 +361,17 @@ function scaleKmFor(setting: ScaleSetting): number {
   if (setting === 'region') return shuangbeiRadiusKm(origin);
   if (setting === 'taiwan') return taiwanRadiusKm(origin);
   return Number(setting);
+}
+
+function setBase(b: BaseMap): void {
+  baseMap = b;
+  lsSet(LS_BASE, b);
+  map.setBase(b);
+  for (const c of baseChips) {
+    const on = c.dataset.base === b;
+    c.classList.toggle('on', on);
+    c.setAttribute('aria-checked', String(on));
+  }
 }
 
 function setScale(setting: ScaleSetting): void {
@@ -363,6 +389,39 @@ function setScale(setting: ScaleSetting): void {
   render();
 }
 
+function geoErrorText(e: GeolocationPositionError): string {
+  if (e.code === e.PERMISSION_DENIED) return '定位權限被拒絕。請到瀏覽器的網站設定，允許這個網站使用位置，再按一次「定位」。';
+  if (e.code === e.TIMEOUT) return '定位逾時，請到戶外或開啟 Wi-Fi 後再試一次。';
+  return '目前無法取得位置，請稍後再試，或切到地圖用「設定位置」手動選。';
+}
+
+/** 「定位」按鈕：清掉手動位置，重新抓一次 GPS 並移到我的位置 */
+function locateMe(): void {
+  if (!('geolocation' in navigator)) {
+    showBanner(bannerEl, '此瀏覽器不支援定位，可切到地圖用「設定位置」手動選。', 4000);
+    return;
+  }
+  locateBtn.classList.add('on');
+  locateBtn.textContent = '定位中…';
+  navigator.geolocation.getCurrentPosition(
+    (pos) => {
+      locateBtn.classList.remove('on');
+      locateBtn.textContent = '定位';
+      lsSet(LS_ORIGIN, null);
+      gpsAccuracy = pos.coords.accuracy;
+      setOrigin({ lat: pos.coords.latitude, lng: pos.coords.longitude, source: 'gps' });
+      map.setOrigin(origin, true, gpsAccuracy);
+      showBanner(bannerEl, `已定位，誤差約 ${Math.round(pos.coords.accuracy)} 公尺`, 2000);
+    },
+    (e) => {
+      locateBtn.classList.remove('on');
+      locateBtn.textContent = '定位';
+      showBanner(bannerEl, geoErrorText(e), 5000);
+    },
+    { enableHighAccuracy: true, maximumAge: 0, timeout: 12_000 },
+  );
+}
+
 function startGeolocation(): void {
   if (!('geolocation' in navigator)) {
     showBanner(bannerEl, '此瀏覽器不支援定位，以台北車站為中心');
@@ -371,10 +430,11 @@ function startGeolocation(): void {
   navigator.geolocation.watchPosition(
     (pos) => {
       if (origin.source === 'manual') return;
+      gpsAccuracy = pos.coords.accuracy;
       setOrigin({ lat: pos.coords.latitude, lng: pos.coords.longitude, source: 'gps' });
     },
     () => {
-      if (origin.source === 'default') showBanner(bannerEl, '定位失敗，以台北車站為中心。可切到地圖手動設定位置。');
+      if (origin.source === 'default') showBanner(bannerEl, '還沒取得位置，先以台北車站為中心。按右上「定位」可重試。', 3500);
     },
     { enableHighAccuracy: true, maximumAge: 15_000, timeout: 15_000 },
   );
@@ -390,18 +450,19 @@ async function toggleCompass(): Promise<void> {
   }
   const stop = await startCompass((h) => radar.setHeading(h));
   if (!stop) {
-    showBanner(bannerEl, '沒有取得方向感測權限，雷達維持北在上');
+    showBanner(bannerEl, '沒有取得方向感測權限，雷達維持北在上', 2500);
     return;
   }
   stopCompass = stop;
   compassBtn.classList.add('on');
-  showBanner(bannerEl, '指北針已開啟，雷達上方就是你面對的方向', 5000);
+  showBanner(bannerEl, '指北針已開啟', 1500);
 }
 
 function applyTheme(t: Theme): void {
   theme = t;
   document.documentElement.dataset.theme = t.id;
   document.title = t.name;
+  map.setDark(t.id === 'dragon' || t.id === 'neon');
   brandText.textContent = t.name;
   document.querySelector('meta[name="theme-color"]')?.setAttribute('content', t.themeColor);
   radar.setStyle({ sweep: t.sweep, blip: t.blip, rose: t.rose });
@@ -660,9 +721,92 @@ function updateNotifyBtn(): void {
   notifyBtn.title = s === 'granted' ? '通知已開啟' : s === 'denied' ? '通知被封鎖，仍有音效' : '開啟聲音與通知';
 }
 
+/**
+ * 下方清單：抓橫條或標題列往上拉展開、往下拉恢復；輕點橫條切換。
+ * 展開時，清單捲到最上面再往下滑也會收回。桌機版清單在側欄，不啟用。
+ */
+function wirePanelDrag(): void {
+  const handle = $('#panel-toggle');
+  const head = panelEl.querySelector('.panel-head') as HTMLElement;
+  const desktop = window.matchMedia('(min-width: 900px)');
+  const THRESHOLD = 40;
+  let startY = 0;
+  let startH = 0;
+  let dragging = false;
+  let moved = false;
+
+  const setExpanded = (on: boolean): void => {
+    panelEl.classList.toggle('expanded', on);
+  };
+  const limits = (): { min: number; max: number } => {
+    const vh = window.innerHeight;
+    return { min: vh * 0.2, max: vh * 0.85 };
+  };
+
+  const start = (e: PointerEvent): void => {
+    if (desktop.matches || (e.pointerType === 'mouse' && e.button !== 0)) return;
+    dragging = true;
+    moved = false;
+    startY = e.clientY;
+    startH = panelEl.getBoundingClientRect().height;
+    panelEl.style.transition = 'none';
+    (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+  };
+  const move = (e: PointerEvent): void => {
+    if (!dragging) return;
+    const dy = e.clientY - startY;
+    if (Math.abs(dy) > 6) moved = true;
+    if (!moved) return;
+    const { min, max } = limits();
+    panelEl.style.maxHeight = `${Math.min(max, Math.max(min, startH - dy))}px`;
+  };
+  const end = (e: PointerEvent): void => {
+    if (!dragging) return;
+    dragging = false;
+    panelEl.style.transition = '';
+    panelEl.style.maxHeight = '';
+    const dy = e.clientY - startY;
+    if (!moved) {
+      // 只有輕點橫條才切換，點標題列不切換（上面有其他按鈕）
+      if (e.currentTarget === handle) setExpanded(!panelEl.classList.contains('expanded'));
+      return;
+    }
+    if (dy < -THRESHOLD) setExpanded(true);
+    else if (dy > THRESHOLD) setExpanded(false);
+  };
+  for (const el of [handle, head]) {
+    el.addEventListener('pointerdown', start);
+    el.addEventListener('pointermove', move);
+    el.addEventListener('pointerup', end);
+    el.addEventListener('pointercancel', end);
+  }
+
+  // 展開時，清單已經在最上面還往下滑 → 收回
+  let listStartY: number | null = null;
+  listEl.addEventListener(
+    'touchstart',
+    (e) => {
+      listStartY = panelEl.classList.contains('expanded') && listEl.scrollTop <= 0 ? e.touches[0].clientY : null;
+    },
+    { passive: true },
+  );
+  listEl.addEventListener(
+    'touchend',
+    (e) => {
+      if (listStartY === null) return;
+      const dy = e.changedTouches[0].clientY - listStartY;
+      listStartY = null;
+      if (dy > 60 && listEl.scrollTop <= 0) setExpanded(false);
+    },
+    { passive: true },
+  );
+}
+
 function wireControls(): void {
   for (const b of scaleChips) b.addEventListener('click', () => setScale((b.dataset.scale as ScaleSetting) ?? 'region'));
   viewBtn.addEventListener('click', () => switchView(view === 'radar' ? 'map' : 'radar'));
+  locateBtn.addEventListener('click', locateMe);
+  for (const b of baseChips) b.addEventListener('click', () => setBase(b.dataset.base as BaseMap));
   compassBtn.addEventListener('click', () => void toggleCompass());
   notifyBtn.addEventListener('click', async () => {
     unlockAudio();
@@ -693,7 +837,7 @@ function wireControls(): void {
     setOrigin(DEFAULT_ORIGIN);
     startGeolocation();
   });
-  $('#panel-toggle').addEventListener('click', () => panelEl.classList.toggle('expanded'));
+  wirePanelDrag();
   document.addEventListener('visibilitychange', () => {
     if (document.visibilityState === 'visible' && nowSec() - lastFetchAt > 30) void refresh();
   });
@@ -703,6 +847,7 @@ async function boot(): Promise<void> {
   wireControls();
   updateNotifyBtn();
   applyTheme(theme);
+  setBase(baseMap);
   switchView('radar');
   setScale(scaleSetting);
   setOrigin(origin);
@@ -721,6 +866,8 @@ async function boot(): Promise<void> {
   const openParam = new URLSearchParams(location.search).get('open');
   if (openParam === 'theme') openThemeSheet(true);
   if (openParam === 'keywords') openKwSheet(true);
+  const baseParam = new URLSearchParams(location.search).get('base');
+  if (baseParam && (BASES as string[]).includes(baseParam)) setBase(baseParam as BaseMap);
   if (new URLSearchParams(location.search).get('view') === 'map') switchView('map');
   const scaleParam = new URLSearchParams(location.search).get('scale');
   if (scaleParam && (SCALE_SETTINGS as string[]).includes(scaleParam)) setScale(scaleParam as ScaleSetting);
