@@ -34,6 +34,9 @@ const ROSE: Array<[string, number]> = [
 
 /** 光點距離小於這個像素就合成一群 */
 const GROUP_PX = 12;
+/** 一群光點的標籤最多幾行、每行高度 */
+const MAX_LABEL_LINES = 3;
+const LINE_PX = 14;
 const NICE_KM = [1, 2, 5, 10, 20, 50, 100, 200, 300];
 
 /**
@@ -69,6 +72,11 @@ function compressedRings(scaleKm: number): Array<{ km: number; label: boolean }>
     last = r;
   }
   return out;
+}
+
+/** 靠近左右邊緣的標籤往內對齊，避免被雷達外框切掉 */
+function anchorAt(x: number): 'start' | 'middle' | 'end' {
+  return x > C + R * 0.45 ? 'end' : x < C - R * 0.45 ? 'start' : 'middle';
 }
 
 function el<K extends keyof SVGElementTagNameMap>(tag: K, attrs: Record<string, string | number> = {}): SVGElementTagNameMap[K] {
@@ -310,18 +318,40 @@ export class Radar {
       else groups.push([it]);
     }
     const leaderOf = (g: RadarItem[]): RadarItem => g.find((it) => it.selected) ?? g.find((it) => it.showLabel) ?? g[0];
-    // 標籤避讓：選取的優先，其次依清單順序（進行中、近的在前），和已放的標籤重疊就不畫
-    const placed: Array<{ x: number; y: number; w: number }> = [];
-    const labelText = new Map<number, string>();
+    // 標籤避讓：選取的優先，其次依清單順序（進行中、近的在前），和已放的標籤重疊就不畫。
+    // 同一群的名稱一行一個疊起來（從你這裡看方向、距離都一樣的點，縮放也分不開），超過 3 個只列前 2 個
+    const placed: Array<{ left: number; right: number; top: number; bottom: number }> = [];
+    const labelLines = new Map<number, { lines: string[]; below: boolean }>();
     for (const g of [...groups].sort((a, b) => Number(b.some((it) => it.selected)) - Number(a.some((it) => it.selected)))) {
       const lead = leaderOf(g);
+      const named = [lead, ...g.filter((it) => it !== lead && it.showLabel)];
       if (!g.some((it) => it.showLabel)) continue;
+      const rest = g.length - named.length;
+      let full = named.map((it) => it.label);
+      if (full.length > MAX_LABEL_LINES) full = [...full.slice(0, MAX_LABEL_LINES - 1), `還有 ${g.length - MAX_LABEL_LINES + 1} 個`];
+      else if (rest > 0) full[full.length - 1] += ` +${rest}`;
       const p = pos.get(lead.id)!;
-      const text = g.length > 1 ? `${lead.label} +${g.length - 1}` : lead.label;
-      const w = [...text].length * 12;
-      if (placed.some((q) => Math.abs(q.y - p.y) < 15 && Math.abs(q.x - p.x) < (q.w + w) / 2)) continue;
-      placed.push({ x: p.x, y: p.y, w });
-      labelText.set(lead.id, text);
+      const anchor = anchorAt(p.x);
+      // 先試整串放上方、再試下方；都擠不下才縮成一行「名稱 +N」
+      const tries: Array<{ lines: string[]; below: boolean }> = [
+        { lines: full, below: false },
+        { lines: full, below: true },
+      ];
+      if (full.length > 1) {
+        const one = [`${lead.label} +${g.length - 1}`];
+        tries.push({ lines: one, below: false }, { lines: one, below: true });
+      }
+      for (const t of tries) {
+        const w = Math.max(...t.lines.map((x) => [...x].length * 12));
+        const h = t.lines.length * LINE_PX;
+        const left = anchor === 'end' ? p.x + 6 - w : anchor === 'start' ? p.x - 6 : p.x - w / 2;
+        const box = { left, right: left + w, top: t.below ? p.y + 8 : p.y - 13 - h + 4, bottom: t.below ? p.y + 8 + h : p.y - 9 };
+        if (box.top < 0 || box.bottom > SIZE) continue;
+        if (placed.some((q) => q.left < box.right && box.left < q.right && q.top < box.bottom && box.top < q.bottom)) continue;
+        placed.push(box);
+        labelLines.set(lead.id, t);
+        break;
+      }
     }
     for (const g of groups) {
       const lead = leaderOf(g);
@@ -340,12 +370,18 @@ export class Radar {
         node.appendChild(el('circle', { class: 'hit', r: 22 }));
         node.appendChild(el('circle', { class: 'ping', r: 6 }));
         this.appendMark(node, p.out, it.spot);
-        const text = it === lead ? labelText.get(it.id) : undefined;
-        if (text) {
-          // 靠近左右邊緣的標籤往內對齊，避免被雷達外框切掉
-          const anchor = p.x > C + R * 0.45 ? 'end' : p.x < C - R * 0.45 ? 'start' : 'middle';
-          const label = el('text', { class: 'label', y: -13, x: anchor === 'end' ? 6 : anchor === 'start' ? -6 : 0, 'text-anchor': anchor });
-          label.textContent = text;
+        const lbl = it === lead ? labelLines.get(it.id) : undefined;
+        if (lbl) {
+          const anchor = anchorAt(p.x);
+          const x = anchor === 'end' ? 6 : anchor === 'start' ? -6 : 0;
+          const n = lbl.lines.length;
+          const label = el('text', { class: 'label', 'text-anchor': anchor });
+          lbl.lines.forEach((line, i) => {
+            const y = lbl.below ? 22 + i * LINE_PX : -13 - (n - 1 - i) * LINE_PX;
+            const span = el('tspan', { x, y });
+            span.textContent = line;
+            label.appendChild(span);
+          });
           node.appendChild(label);
         }
         const title = el('title');
