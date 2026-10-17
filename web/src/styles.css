@@ -320,6 +320,8 @@ a.chip { display: inline-flex; align-items: center; text-decoration: none; }
 .kw-rules .example-out { margin: 6px 0 0; font-size: 13px; color: var(--muted); line-height: 1.6; }
 .pending-tag { display: inline-block; font-size: 11px; font-weight: 800; padding: 1px 7px; margin-right: 4px; border-radius: 999px; background: var(--highlight); color: var(--accent-text); }
 .source-line { font-size: 12px; margin: -4px 0 10px; }
+.nearby { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin: 0 0 10px; font-size: 13px; }
+.nearby .chip.small { white-space: normal; text-align: left; line-height: 1.3; }
 .legal-links { margin: 18px 0 0; font-size: 12px; color: var(--muted); }
 .legal-links a { color: var(--muted); }
 .ev-divider { list-style: none; display: flex; align-items: center; gap: 10px; margin: 6px 4px 0; font-size: 12px; font-weight: 700; color: var(--muted); }

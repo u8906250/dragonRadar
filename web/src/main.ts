@@ -391,6 +391,7 @@ function renderDetail(items: Item[], now: number): void {
       <button type="button" class="chip" data-act="close" aria-label="關閉">關閉</button>
     </div>
     <div class="sheet-body">
+      ${nearbyHtml(it, items)}
       <p>類型：${it.spot ? `固定據點（${kindLabel(ev)}）` : kindLabel(ev)}<br>${ev.item ? `發放：${esc(ev.item)}<br>` : ''}${ev.keyword ? `關鍵字：#${esc(ev.keyword)}<br>` : ''}地點：${esc(ev.placeText)}${ev.approxArea ? `<br><span class="approx-note">約略位置：只知道在${esc(ev.approxArea)}，地圖上是${esc(ev.approxArea)}的中心點，實際地點請看原文</span>` : ''}<br>時間：${it.spot ? esc(spotSchedule(it)) : ev.allDay ? `${dateFmt.format(new Date(ev.startAt * 1000))} 整天` : `${fmtTime(ev.startAt)} – ${fmtTime(ev.endAt)}`}<br>距離：${ev.approxArea ? '約 ' : ''}${formatKm(it.distanceKm)}，${compassLabel(it.bearing)}方 · ${esc(timeLine(it, now))}</p>
       <blockquote>${esc(ev.post.source === 'news' ? ev.post.text.split('\n')[0] : ev.post.text.slice(0, 300))}</blockquote>
       <p class="muted source-line">來源：${esc(sourceLabel(ev))}</p>
@@ -403,11 +404,25 @@ function renderDetail(items: Item[], now: number): void {
       ${ev.endedReports ? `<p class="muted ended-note">已有 ${ev.endedReports} 人回報${ev.kind === 'activity' ? '已結束' : '已發完'}${neededText()}</p>` : ''}
     </div>`;
   detailEl.querySelector('[data-act="close"]')?.addEventListener('click', () => select(null));
+  for (const b of detailEl.querySelectorAll<HTMLButtonElement>('[data-select]')) {
+    b.addEventListener('click', () => select(Number(b.dataset.select)));
+  }
   detailEl.querySelector('[data-act="map"]')?.addEventListener('click', () => {
     switchView('map');
     map.focus(ev.id);
   });
   detailEl.querySelector('[data-act="ended"]')?.addEventListener('click', (e) => void sendEnded(ev, e.currentTarget as HTMLButtonElement));
+}
+
+/** 雷達上跟這個疊在一起的其他光點，做成按鈕可以切過去 */
+function nearbyHtml(it: Item, items: Item[]): string {
+  const others = selectedGroup
+    .filter((id) => id !== it.ev.id)
+    .map((id) => items.find((x) => x.ev.id === id))
+    .filter((x): x is Item => !!x);
+  if (others.length === 0) return '';
+  const btns = others.map((o) => `<button type="button" class="chip small" data-select="${o.ev.id}">${esc(o.ev.title)}</button>`).join('');
+  return `<div class="nearby"><span class="muted">雷達上同一點還有 ${others.length} 個：</span>${btns}</div>`;
 }
 
 /** 固定據點的完整時段，例如「每天 11:00–18:00，10/18（六）到 10/19（日）」 */
@@ -451,7 +466,12 @@ async function sendEnded(ev: EventOut, btn: HTMLButtonElement): Promise<void> {
   }
 }
 
-function select(id: number | null): void {
+/** 雷達上疊在一起的光點，詳細資料會列出同一群的其他項目 */
+let selectedGroup: number[] = [];
+
+function select(id: number | null, group: number[] = []): void {
+  // 從同一群切換到另一個時保留整群，其他情況（點清單、地圖）就清掉
+  selectedGroup = group.length > 1 ? group : id !== null && selectedGroup.includes(id) ? selectedGroup : [];
   selectedId = selectedId === id ? null : id;
   if (selectedId !== null) {
     themeSheet.hidden = true;

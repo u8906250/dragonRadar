@@ -32,6 +32,8 @@ const ROSE: Array<[string, number]> = [
   ['W', 270],
 ];
 
+/** 光點距離小於這個像素就合成一群 */
+const GROUP_PX = 12;
 const NICE_KM = [1, 2, 5, 10, 20, 50, 100, 200, 300];
 
 /**
@@ -103,7 +105,7 @@ export class Radar {
    * onZoom(factor, done)：雙指捏合或滑鼠滾輪，factor > 1 代表拉遠（範圍變大）；
    * done = true 表示手勢結束
    */
-  constructor(container: HTMLElement, onSelect: (id: number) => void, onZoom?: (factor: number, done: boolean) => void) {
+  constructor(container: HTMLElement, onSelect: (id: number, group: number[]) => void, onZoom?: (factor: number, done: boolean) => void) {
     this.svg = el('svg', { viewBox: `0 0 ${SIZE} ${SIZE}`, class: 'radar', role: 'img', 'aria-label': '雷達畫面' });
     const wedgeEnd = polar(45, R);
     this.svg.innerHTML = `
@@ -162,7 +164,7 @@ export class Radar {
     }
     this.blipLayer.addEventListener('click', (e) => {
       const g = (e.target as Element).closest('.blip') as SVGGElement | null;
-      if (g?.dataset.id) onSelect(Number(g.dataset.id));
+      if (g?.dataset.id) onSelect(Number(g.dataset.id), (g.dataset.group ?? '').split(',').map(Number).filter(Boolean));
     });
     if (onZoom) this.wireZoom(onZoom);
     container.appendChild(this.svg);
@@ -289,44 +291,68 @@ export class Radar {
 
   private draw(): void {
     this.blipLayer.replaceChildren();
-    // 標籤避讓：選取的優先，其次依清單順序（進行中、近的在前），和已放的標籤重疊就不畫
-    const placed: Array<{ x: number; y: number; w: number }> = [];
-    const order = [...this.items].sort((a, b) => Number(b.selected) - Number(a.selected));
-    const labelOk = new Set<number>();
-    for (const it of order) {
-      if (!it.showLabel) continue;
-      const ratio = Math.min(1, this.ratio(it.distanceKm));
-      const p = polar(it.bearing - this.heading, ratio * (R - 8));
-      const w = [...it.label].length * 12;
-      if (placed.some((q) => Math.abs(q.y - p.y) < 15 && Math.abs(q.x - p.x) < (q.w + w) / 2)) continue;
-      placed.push({ x: p.x, y: p.y, w });
-      labelOk.add(it.id);
-    }
+    const pos = new Map<number, { x: number; y: number; out: boolean }>();
     for (const it of this.items) {
       const ratio = this.ratio(it.distanceKm);
-      const out = ratio > 1;
       const p = polar(it.bearing - this.heading, Math.min(1, ratio) * (R - 8));
-      const g = el('g', {
-        class: `blip phase-${it.phase} kind-${it.kind}${it.spot ? ' spot' : ''}${it.approx ? ' approx' : ''}${out ? ' out' : ''}${it.selected ? ' selected' : ''}`,
-        transform: `translate(${p.x.toFixed(1)} ${p.y.toFixed(1)})`,
-        tabindex: 0,
-        role: 'button',
+      pos.set(it.id, { ...p, out: ratio > 1 });
+    }
+    // 疊在一起（12 px 內）的光點合成一群：選取的、要顯示標籤的優先當代表，標籤加「+N」，
+    // 點下去詳細資料會列出同一群的其他項目，不然被蓋住的點不到
+    const groups: RadarItem[][] = [];
+    for (const it of this.items) {
+      const p = pos.get(it.id)!;
+      const g = groups.find((gr) => {
+        const q = pos.get(gr[0].id)!;
+        return Math.hypot(q.x - p.x, q.y - p.y) < GROUP_PX;
       });
-      g.dataset.id = String(it.id);
-      g.appendChild(el('circle', { class: 'hit', r: 22 }));
-      g.appendChild(el('circle', { class: 'ping', r: 6 }));
-      this.appendMark(g, out, it.spot);
-      if (it.showLabel && labelOk.has(it.id)) {
-        // 靠近左右邊緣的標籤往內對齊，避免被雷達外框切掉
-        const anchor = p.x > C + R * 0.45 ? 'end' : p.x < C - R * 0.45 ? 'start' : 'middle';
-        const label = el('text', { class: 'label', y: -13, x: anchor === 'end' ? 6 : anchor === 'start' ? -6 : 0, 'text-anchor': anchor });
-        label.textContent = it.label;
-        g.appendChild(label);
+      if (g) g.push(it);
+      else groups.push([it]);
+    }
+    const leaderOf = (g: RadarItem[]): RadarItem => g.find((it) => it.selected) ?? g.find((it) => it.showLabel) ?? g[0];
+    // 標籤避讓：選取的優先，其次依清單順序（進行中、近的在前），和已放的標籤重疊就不畫
+    const placed: Array<{ x: number; y: number; w: number }> = [];
+    const labelText = new Map<number, string>();
+    for (const g of [...groups].sort((a, b) => Number(b.some((it) => it.selected)) - Number(a.some((it) => it.selected)))) {
+      const lead = leaderOf(g);
+      if (!g.some((it) => it.showLabel)) continue;
+      const p = pos.get(lead.id)!;
+      const text = g.length > 1 ? `${lead.label} +${g.length - 1}` : lead.label;
+      const w = [...text].length * 12;
+      if (placed.some((q) => Math.abs(q.y - p.y) < 15 && Math.abs(q.x - p.x) < (q.w + w) / 2)) continue;
+      placed.push({ x: p.x, y: p.y, w });
+      labelText.set(lead.id, text);
+    }
+    for (const g of groups) {
+      const lead = leaderOf(g);
+      const ids = g.map((it) => it.id).join(',');
+      // 代表最後畫，疊在最上面
+      for (const it of [...g.filter((x) => x !== lead), lead]) {
+        const p = pos.get(it.id)!;
+        const node = el('g', {
+          class: `blip phase-${it.phase} kind-${it.kind}${it.spot ? ' spot' : ''}${it.approx ? ' approx' : ''}${p.out ? ' out' : ''}${it.selected ? ' selected' : ''}`,
+          transform: `translate(${p.x.toFixed(1)} ${p.y.toFixed(1)})`,
+          tabindex: 0,
+          role: 'button',
+        });
+        node.dataset.id = String(lead.id);
+        node.dataset.group = ids;
+        node.appendChild(el('circle', { class: 'hit', r: 22 }));
+        node.appendChild(el('circle', { class: 'ping', r: 6 }));
+        this.appendMark(node, p.out, it.spot);
+        const text = it === lead ? labelText.get(it.id) : undefined;
+        if (text) {
+          // 靠近左右邊緣的標籤往內對齊，避免被雷達外框切掉
+          const anchor = p.x > C + R * 0.45 ? 'end' : p.x < C - R * 0.45 ? 'start' : 'middle';
+          const label = el('text', { class: 'label', y: -13, x: anchor === 'end' ? 6 : anchor === 'start' ? -6 : 0, 'text-anchor': anchor });
+          label.textContent = text;
+          node.appendChild(label);
+        }
+        const title = el('title');
+        title.textContent = g.length > 1 ? g.map((x) => x.label).join('、') : it.label;
+        node.appendChild(title);
+        this.blipLayer.appendChild(node);
       }
-      const title = el('title');
-      title.textContent = it.label;
-      g.appendChild(title);
-      this.blipLayer.appendChild(g);
     }
   }
 }
