@@ -11,8 +11,8 @@ import type { EventOut, Item, KeywordInfo, KeywordRules, Origin, Phase } from '.
 const DEFAULT_ORIGIN: Origin = { lat: 25.0478, lng: 121.517, source: 'default' }; // 台北車站
 const SOON_SEC = 30 * 60;
 /** 後端查詢半徑：至少 80 km，選大範圍時跟著放大，才不會漏掉邊緣的發放 */
-const MIN_FETCH_RADIUS_KM = 80;
-const fetchRadiusKm = (): number => Math.min(600, Math.max(MIN_FETCH_RADIUS_KM, Math.ceil(scaleKm * 1.1)));
+/** 永遠抓全台（含離島）的資料，清單分「範圍內」與「雷達範圍外」 */
+const FETCH_RADIUS_KM = 600;
 const POLL_MS = 60_000;
 const TICK_MS = 5_000;
 const LS_SCALE = 'dr.scale';
@@ -69,7 +69,6 @@ const SCALE_SETTINGS: ScaleSetting[] = ['1', '5', '20', 'region', 'taiwan'];
 const isAutoScale = (s: ScaleSetting): boolean => s === 'region' || s === 'taiwan';
 let scaleSetting: ScaleSetting = (SCALE_SETTINGS as string[]).includes(lsGet(LS_SCALE) ?? '') ? (lsGet(LS_SCALE) as ScaleSetting) : 'region';
 let scaleKm = 5;
-let lastFetchRadius = 0;
 let view: 'radar' | 'map' = 'radar';
 let selectedId: number | null = null;
 let lastFetchAt = 0;
@@ -243,16 +242,31 @@ function render(): void {
 }
 
 function renderList(items: Item[], now: number): void {
-  const active = items.filter((it) => it.phase === 'active').length;
-  const soon = items.filter((it) => it.phase === 'soon').length;
+  const inRange = items.filter((it) => it.distanceKm <= scaleKm);
+  const outRange = items.filter((it) => it.distanceKm > scaleKm);
+  const active = inRange.filter((it) => it.phase === 'active').length;
+  const soon = inRange.filter((it) => it.phase === 'soon').length;
   const none = followed().length === 0;
-  countLabel.textContent = none ? '還沒追蹤關鍵字' : items.length === 0 ? theme.emptyText : theme.summary(active, soon, items.length);
+  const outText = outRange.length > 0 ? `・範圍外 ${outRange.length} 個` : '';
+  countLabel.textContent = none
+    ? '還沒追蹤關鍵字'
+    : inRange.length === 0
+      ? `${theme.emptyText}${outText}`
+      : `${theme.summary(active, soon, inRange.length)}${outText}`;
   emptyEl.textContent = none ? (canEditKeywords ? '點下方「追蹤」選擇或新增關鍵字，雷達就會開始找發放和活動。' : '目前沒有搜尋中的關鍵字。') : `${theme.emptyText}。雷達每分鐘更新，有新的會提醒你。`;
   listEl.replaceChildren();
   emptyEl.hidden = items.length > 0;
-  for (const it of items) {
+  const rows: Array<Item | 'divider'> = [...inRange, ...(outRange.length > 0 ? (['divider'] as const) : []), ...outRange];
+  for (const it of rows) {
+    if (it === 'divider') {
+      const d = document.createElement('li');
+      d.className = 'ev-divider';
+      d.textContent = `雷達範圍外（${outRange.length}）`;
+      listEl.appendChild(d);
+      continue;
+    }
     const li = document.createElement('li');
-    li.className = `ev phase-${it.phase} kind-${it.ev.kind}${it.ev.id === selectedId ? ' selected' : ''}`;
+    li.className = `ev phase-${it.phase} kind-${it.ev.kind}${it.distanceKm > scaleKm ? ' out-of-range' : ''}${it.ev.id === selectedId ? ' selected' : ''}`;
     li.dataset.id = String(it.ev.id);
     li.innerHTML = `
       <div class="ev-title"><span class="dot"></span><span class="kind-tag">${kindLabel(it.ev)}</span>${esc(it.ev.title)}${it.ev.item ? ` <span class="muted">· ${esc(it.ev.item)}</span>` : ''}${followed().length > 1 && it.ev.keyword ? `<span class="ev-kw">#${esc(it.ev.keyword)}</span>` : ''}</div>
@@ -334,8 +348,7 @@ async function refresh(): Promise<void> {
     return;
   }
   try {
-    lastFetchRadius = fetchRadiusKm();
-    events = await fetchEvents(origin, lastFetchRadius, kws);
+    events = await fetchEvents(origin, FETCH_RADIUS_KM, kws);
     lastFetchAt = nowSec();
     updatedLabel.textContent = `更新 ${fmtTime(lastFetchAt)}`;
   } catch (e) {
@@ -378,9 +391,7 @@ function setScale(setting: ScaleSetting): void {
   scaleSetting = setting;
   scaleKm = scaleKmFor(setting);
   lsSet(LS_SCALE, setting);
-  const prevFetch = lastFetchRadius;
   radar.setScale(scaleKm);
-  if (fetchRadiusKm() > prevFetch && lastFetchAt > 0) void refresh();
   for (const b of scaleChips) {
     const on = b.dataset.scale === setting;
     b.classList.toggle('on', on);
