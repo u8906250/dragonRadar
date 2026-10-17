@@ -251,6 +251,8 @@ async function handleAdmin(req: Request, env: Env, _ctx: ExecutionContext, path:
     const post = await getPost(env, id);
     if (!post) throw new HttpError(404, 'post not found');
     if (post.source === 'official') throw new HttpError(400, '官方航線由同步程式產生，不能重新判讀');
+    // 新聞判讀後只留標題加摘要，重跑會因為內容不完整而判讀錯
+    if (post.source === 'news') throw new HttpError(400, '新聞只保存標題與摘要，不能重新判讀');
     await env.DB.batch([
       env.DB.prepare("DELETE FROM ended_reports WHERE event_id IN (SELECT id FROM events WHERE post_id = ? AND status IN ('upcoming', 'active', 'unlocated'))").bind(id),
       env.DB.prepare("DELETE FROM events WHERE post_id = ? AND status IN ('upcoming', 'active', 'unlocated')").bind(id),
