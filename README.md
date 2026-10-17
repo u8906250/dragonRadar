@@ -1,7 +1,8 @@
-# 發放雷達 dragonRadar
+# 洋流雷達 dragonRadar
 
 從 Threads 找出「某時某地免費發放」的貼文，解析出時間與地點，
-時間一到就在龍珠雷達風格的畫面上顯示光點與相對位置，發完或過期就消失。
+時間一到就在雷達畫面上顯示光點與相對位置，發完或過期就消失。
+預設主題「洋流雷達」沿用 [台北大洋流](https://current.puma.taipei/) 船艙的視覺：品牌橘、奶油紙、墨線、海綠與硬陰影。
 
 - 前端：Vite + TypeScript，自繪 SVG 雷達，Leaflet + OpenStreetMap 地圖，部署在 GitHub Pages
 - 後端：Cloudflare Worker + D1 + Cron Trigger + Workers AI
@@ -22,6 +23,19 @@ worker/   Cloudflare Worker（API、排程、資料庫）
 5. 前端每分鐘向 `/api/events` 拿附近事件，用使用者座標算方位與距離畫在雷達上；進行中事件變多時嗶聲＋通知。
 
 沒有 Threads token 或 `MOCK_MODE=true` 時，Worker 會用內建示範貼文跑同一套流程，前端會標示「示範資料」。
+
+## 主題
+
+右上角「主題」可切換，選擇記在手機裡，也可用網址參數預覽，例如 `?theme=neon`。
+
+| id | 名稱 | 掃描 | 光點 | 提示音 |
+|---|---|---|---|---|
+| `current` | 洋流雷達（預設） | 向外擴散的水波 | 橘色浮標，羅盤 N/E/S/W | 聲納 ping |
+| `dragon` | 龍珠雷達 | 旋轉扇形 | 黃色閃點 | 嗶嗶兩聲 |
+| `treasure` | 尋寶地圖 | 旋轉羅盤針 | 紅色 X 記號 | 木質敲擊 |
+| `neon` | 夜市霓虹 | 旋轉扇形 | 霓虹粉發光點 | 合成器 |
+
+新增主題：在 `web/src/themes.ts` 加一筆設定，並在 `web/src/styles.css` 加一組 `:root[data-theme='...']` 變數。
 
 ## 手機介面
 

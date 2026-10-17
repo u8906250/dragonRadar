@@ -1,17 +1,17 @@
 <!doctype html>
-<html lang="zh-Hant-TW">
+<html lang="zh-Hant-TW" data-theme="current">
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-    <meta name="theme-color" content="#06281a" />
+    <meta name="theme-color" content="#ea611d" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
-    <meta name="apple-mobile-web-app-title" content="發放雷達" />
+    <meta name="apple-mobile-web-app-title" content="洋流雷達" />
     <link rel="manifest" href="manifest.webmanifest" />
     <link rel="icon" href="icon.svg" type="image/svg+xml" />
     <link rel="apple-touch-icon" href="icon-192.png" />
-    <title>發放雷達</title>
+    <title>洋流雷達</title>
     <meta name="description" content="從 Threads 找出附近正在發放的活動，用雷達顯示相對位置" />
   </head>
   <body>
@@ -19,10 +19,15 @@
       <header class="topbar">
         <div class="brand">
           <span class="brand-dot"></span>
-          發放雷達
+          <span class="brand-wave" aria-hidden="true">≋</span>
+          <span class="brand-text" id="brand-text">洋流雷達</span>
+          <span class="brand-wave" aria-hidden="true">≋</span>
           <span id="mode-badge" class="badge" hidden></span>
         </div>
-        <button type="button" id="notify-btn" class="chip" title="開啟聲音與通知">通知</button>
+        <div class="controls">
+          <button type="button" id="theme-btn" class="chip" title="切換主題">主題</button>
+          <button type="button" id="notify-btn" class="chip" title="開啟聲音與通知">通知</button>
+        </div>
       </header>
 
       <main id="stage">
@@ -36,7 +41,7 @@
             <button type="button" class="chip" data-scale="20" role="radio" aria-checked="false">20 km</button>
           </div>
         </div>
-        <div class="overlay overlay-br">
+        <div class="overlay overlay-tr">
           <button type="button" id="compass-btn" class="chip" hidden title="雷達跟著手機方向轉">指北針</button>
           <button type="button" id="pick-origin" class="chip" hidden>設定位置</button>
           <button type="button" id="view-btn" class="chip primary">地圖</button>
@@ -52,11 +57,18 @@
           <span id="updated-label" class="muted right"></span>
         </div>
         <ul id="event-list" class="event-list"></ul>
-        <p id="empty-hint" class="muted hint" hidden>目前附近沒有發放活動。雷達每分鐘更新，有新的會嗶一聲。</p>
+        <p id="empty-hint" class="muted hint" hidden></p>
       </aside>
 
       <div id="banner" class="banner" hidden></div>
       <div id="detail" class="sheet" hidden></div>
+      <div id="theme-sheet" class="sheet" hidden>
+        <div class="sheet-head">
+          <strong>選擇主題</strong>
+          <button type="button" class="chip" data-act="close" aria-label="關閉">關閉</button>
+        </div>
+        <ul id="theme-list" class="theme-list"></ul>
+      </div>
     </div>
     <script type="module" src="/src/main.ts"></script>
   </body>

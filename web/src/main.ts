@@ -5,6 +5,7 @@ import { bearingDeg, compassLabel, formatKm, haversineKm, type LatLng } from './
 import { MapView } from './map';
 import { beep, ensureNotificationPermission, notificationState, showBanner, systemNotify, unlockAudio } from './notify';
 import { Radar } from './radar';
+import { DEFAULT_THEME_ID, getTheme, THEMES, type Theme } from './themes';
 import type { EventOut, Item, Origin, Phase } from './types';
 
 const DEFAULT_ORIGIN: Origin = { lat: 25.0478, lng: 121.517, source: 'default' }; // 台北車站
@@ -14,6 +15,7 @@ const POLL_MS = 60_000;
 const TICK_MS = 5_000;
 const LS_SCALE = 'dr.scale';
 const LS_ORIGIN = 'dr.origin';
+const LS_THEME = 'dr.theme';
 
 const $ = <T extends HTMLElement>(sel: string): T => {
   const n = document.querySelector<T>(sel);
@@ -62,6 +64,7 @@ let selectedId: number | null = null;
 let lastFetchAt = 0;
 let notifiedOnce = false;
 let stopCompass: (() => void) | null = null;
+let theme: Theme = getTheme(new URLSearchParams(location.search).get('theme') ?? lsGet(LS_THEME) ?? DEFAULT_THEME_ID);
 const seenActive = new Set<number>();
 
 // ---- elements ----
@@ -79,6 +82,10 @@ const pickBtn = $<HTMLButtonElement>('#pick-origin');
 const viewBtn = $<HTMLButtonElement>('#view-btn');
 const compassBtn = $<HTMLButtonElement>('#compass-btn');
 const panelEl = $('#panel');
+const themeBtn = $<HTMLButtonElement>('#theme-btn');
+const themeSheet = $('#theme-sheet');
+const themeList = $<HTMLUListElement>('#theme-list');
+const brandText = $('#brand-text');
 const scaleChips = Array.from(document.querySelectorAll<HTMLButtonElement>('#scale-chips [data-scale]'));
 
 const radar = new Radar($('#radar-view'), select);
@@ -155,7 +162,7 @@ function render(): void {
     if (seenActive.has(it.ev.id)) continue;
     seenActive.add(it.ev.id);
     if (!notifiedOnce || it.distanceKm > scaleKm) continue;
-    beep();
+    beep(theme.sound);
     try {
       navigator.vibrate?.([120, 80, 160]);
     } catch {
@@ -171,8 +178,7 @@ function render(): void {
 function renderList(items: Item[], now: number): void {
   const active = items.filter((it) => it.phase === 'active').length;
   const soon = items.filter((it) => it.phase === 'soon').length;
-  countLabel.textContent =
-    items.length === 0 ? '附近沒有發放' : `${active > 0 ? `${active} 個進行中` : ''}${active > 0 && soon > 0 ? '、' : ''}${soon > 0 ? `${soon} 個即將開始` : ''}${active + soon === 0 ? `${items.length} 個稍後開始` : ''}`;
+  countLabel.textContent = items.length === 0 ? theme.emptyText : theme.summary(active, soon, items.length);
   listEl.replaceChildren();
   emptyEl.hidden = items.length > 0;
   for (const it of items) {
@@ -224,6 +230,7 @@ function renderDetail(items: Item[], now: number): void {
 
 function select(id: number | null): void {
   selectedId = selectedId === id ? null : id;
+  if (selectedId !== null) themeSheet.hidden = true;
   render();
 }
 
@@ -311,6 +318,44 @@ async function toggleCompass(): Promise<void> {
   showBanner(bannerEl, '指北針已開啟，雷達上方就是你面對的方向', 5000);
 }
 
+function applyTheme(t: Theme): void {
+  theme = t;
+  document.documentElement.dataset.theme = t.id;
+  document.title = t.name;
+  brandText.textContent = t.name;
+  document.querySelector('meta[name="theme-color"]')?.setAttribute('content', t.themeColor);
+  radar.setStyle({ sweep: t.sweep, blip: t.blip, rose: t.rose });
+  emptyEl.textContent = `${t.emptyText}。雷達每分鐘更新，有新的會提醒你。`;
+  lsSet(LS_THEME, t.id);
+  renderThemeList();
+  render();
+}
+
+function renderThemeList(): void {
+  themeList.replaceChildren();
+  for (const t of THEMES) {
+    const li = document.createElement('li');
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.className = `theme-item${t.id === theme.id ? ' on' : ''}`;
+    b.innerHTML = `<span class="swatch">${t.swatch.map((c) => `<i style="background:${c}"></i>`).join('')}</span><span><b>${esc(t.name)}</b><small>${esc(t.tagline)}</small></span>${t.id === theme.id ? '<span class="check">✓</span>' : ''}`;
+    b.addEventListener('click', () => {
+      applyTheme(t);
+      beep(t.sound);
+    });
+    li.appendChild(b);
+    themeList.appendChild(li);
+  }
+}
+
+function openThemeSheet(open: boolean): void {
+  themeSheet.hidden = !open;
+  if (open) {
+    selectedId = null;
+    detailEl.hidden = true;
+  }
+}
+
 function updateNotifyBtn(): void {
   const s = notificationState();
   notifyBtn.classList.toggle('on', s === 'granted');
@@ -326,8 +371,13 @@ function wireControls(): void {
     const ok = await ensureNotificationPermission();
     updateNotifyBtn();
     showBanner(bannerEl, ok ? '通知已開啟，開始發放時會提醒你' : '已開啟音效提醒；系統通知未取得權限');
-    beep();
+    beep(theme.sound);
   });
+  themeBtn.addEventListener('click', () => {
+    unlockAudio();
+    openThemeSheet(themeSheet.hidden);
+  });
+  themeSheet.querySelector('[data-act="close"]')?.addEventListener('click', () => openThemeSheet(false));
   pickBtn.addEventListener('click', () => {
     const on = !pickBtn.classList.contains('on');
     pickBtn.classList.toggle('on', on);
@@ -348,6 +398,7 @@ function wireControls(): void {
 async function boot(): Promise<void> {
   wireControls();
   updateNotifyBtn();
+  applyTheme(theme);
   switchView('radar');
   setScale(scaleKm);
   setOrigin(origin);
@@ -362,6 +413,7 @@ async function boot(): Promise<void> {
     modeBadge.hidden = false;
   }
   await refresh();
+  if (new URLSearchParams(location.search).get('open') === 'theme') openThemeSheet(true);
   window.setInterval(render, TICK_MS);
   window.setInterval(() => void refresh(), POLL_MS);
 }

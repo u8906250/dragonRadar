@@ -1,4 +1,4 @@
-import type { Phase } from './types';
+import type { BlipStyle, Phase, SweepStyle } from './types';
 
 export interface RadarItem {
   id: number;
@@ -10,10 +10,22 @@ export interface RadarItem {
   selected: boolean;
 }
 
+export interface RadarStyle {
+  sweep: SweepStyle;
+  blip: BlipStyle;
+  rose: boolean;
+}
+
 const SIZE = 400;
 const C = SIZE / 2;
 const R = 172;
 const SVG_NS = 'http://www.w3.org/2000/svg';
+const ROSE: Array<[string, number]> = [
+  ['N', 0],
+  ['E', 90],
+  ['S', 180],
+  ['W', 270],
+];
 
 function el<K extends keyof SVGElementTagNameMap>(tag: K, attrs: Record<string, string | number> = {}): SVGElementTagNameMap[K] {
   const n = document.createElementNS(SVG_NS, tag);
@@ -28,35 +40,37 @@ function polar(deg: number, r: number): { x: number; y: number } {
 }
 
 /**
- * 龍珠雷達風格的 SVG 雷達：使用者在圓心，光點依方位與距離擺放。
- * heading 不為 0 時整個畫面以手機朝向為上，N 標記會跟著移動，文字維持正立。
+ * SVG 雷達：使用者在圓心，光點依方位與距離擺放。
+ * 顏色全部走 CSS 變數，掃描樣式與光點形狀由主題決定。
+ * heading 不為 0 時以手機朝向為上，羅盤字會跟著移動，文字維持正立。
  */
 export class Radar {
   private readonly svg: SVGSVGElement;
   private readonly blipLayer: SVGGElement;
   private readonly scaleLabels: SVGGElement;
-  private readonly north: SVGTextElement;
+  private readonly roseLayer: SVGGElement;
   private scaleKm = 5;
   private heading = 0;
   private items: RadarItem[] = [];
+  private style: RadarStyle = { sweep: 'wedge', blip: 'dot', rose: false };
 
   constructor(container: HTMLElement, onSelect: (id: number) => void) {
     this.svg = el('svg', { viewBox: `0 0 ${SIZE} ${SIZE}`, class: 'radar', role: 'img', 'aria-label': '雷達畫面' });
     const wedgeEnd = polar(45, R);
     this.svg.innerHTML = `
       <defs>
-        <radialGradient id="rg-screen" cx="50%" cy="50%" r="50%">
-          <stop offset="0" stop-color="#0f4a2d" />
-          <stop offset="1" stop-color="#052016" />
+        <radialGradient id="rg-face" cx="50%" cy="50%" r="50%">
+          <stop offset="0" class="face-stop-1" />
+          <stop offset="1" class="face-stop-2" />
         </radialGradient>
         <linearGradient id="rg-sweep" gradientUnits="userSpaceOnUse" x1="${C}" y1="${C}" x2="${C + R}" y2="${C - R}">
-          <stop offset="0" stop-color="#3cff8a" stop-opacity="0.55" />
-          <stop offset="1" stop-color="#3cff8a" stop-opacity="0" />
+          <stop offset="0" class="sweep-stop-1" />
+          <stop offset="1" class="sweep-stop-2" />
         </linearGradient>
         <clipPath id="rg-clip"><circle cx="${C}" cy="${C}" r="${R}" /></clipPath>
       </defs>
       <circle class="bezel" cx="${C}" cy="${C}" r="${R + 16}" />
-      <circle class="screen" cx="${C}" cy="${C}" r="${R}" fill="url(#rg-screen)" />
+      <circle class="face" cx="${C}" cy="${C}" r="${R}" fill="url(#rg-face)" />
       <g class="grid">
         <circle cx="${C}" cy="${C}" r="${R * 0.25}" />
         <circle cx="${C}" cy="${C}" r="${R * 0.5}" />
@@ -65,26 +79,53 @@ export class Radar {
         <line x1="${C}" y1="${C - R}" x2="${C}" y2="${C + R}" />
         <line x1="${C - R}" y1="${C}" x2="${C + R}" y2="${C}" />
       </g>
-      <g clip-path="url(#rg-clip)">
-        <path class="sweep" fill="url(#rg-sweep)" d="M ${C} ${C} L ${C} ${C - R} A ${R} ${R} 0 0 1 ${wedgeEnd.x.toFixed(2)} ${wedgeEnd.y.toFixed(2)} Z">
+      <g clip-path="url(#rg-clip)" class="sweeps">
+        <path class="sweep-wedge" fill="url(#rg-sweep)" d="M ${C} ${C} L ${C} ${C - R} A ${R} ${R} 0 0 1 ${wedgeEnd.x.toFixed(2)} ${wedgeEnd.y.toFixed(2)} Z">
           <animateTransform attributeName="transform" type="rotate" from="0 ${C} ${C}" to="360 ${C} ${C}" dur="4s" repeatCount="indefinite" />
         </path>
+        <g class="sweep-ripple">
+          <circle cx="${C}" cy="${C}" r="0">
+            <animate attributeName="r" from="0" to="${R}" dur="3.2s" repeatCount="indefinite" />
+            <animate attributeName="opacity" from="0.7" to="0" dur="3.2s" repeatCount="indefinite" />
+          </circle>
+          <circle cx="${C}" cy="${C}" r="0">
+            <animate attributeName="r" from="0" to="${R}" dur="3.2s" begin="1.6s" repeatCount="indefinite" />
+            <animate attributeName="opacity" from="0.7" to="0" dur="3.2s" begin="1.6s" repeatCount="indefinite" />
+          </circle>
+        </g>
+        <g class="sweep-needle">
+          <line x1="${C}" y1="${C}" x2="${C}" y2="${C - R + 6}" />
+          <circle cx="${C}" cy="${C - R + 14}" r="4" />
+          <animateTransform attributeName="transform" type="rotate" from="0 ${C} ${C}" to="360 ${C} ${C}" dur="6s" repeatCount="indefinite" />
+        </g>
       </g>
       <g class="scale-labels"></g>
       <g class="blips"></g>
       <circle class="me" cx="${C}" cy="${C}" r="5" />
-      <text class="north" text-anchor="middle" dominant-baseline="middle">N</text>
+      <g class="rose"></g>
     `;
     this.blipLayer = this.svg.querySelector('.blips') as SVGGElement;
     this.scaleLabels = this.svg.querySelector('.scale-labels') as SVGGElement;
-    this.north = this.svg.querySelector('.north') as SVGTextElement;
+    this.roseLayer = this.svg.querySelector('.rose') as SVGGElement;
+    for (const [letter, deg] of ROSE) {
+      const t = el('text', { class: `rose-letter rose-${letter.toLowerCase()}`, 'text-anchor': 'middle', 'dominant-baseline': 'middle', 'data-deg': deg });
+      t.textContent = letter;
+      this.roseLayer.appendChild(t);
+    }
     this.blipLayer.addEventListener('click', (e) => {
       const g = (e.target as Element).closest('.blip') as SVGGElement | null;
       if (g?.dataset.id) onSelect(Number(g.dataset.id));
     });
     container.appendChild(this.svg);
+    this.setStyle(this.style);
     this.setScale(this.scaleKm);
-    this.placeNorth();
+    this.placeRose();
+  }
+
+  setStyle(s: RadarStyle): void {
+    this.style = s;
+    this.svg.setAttribute('class', `radar sweep-${s.sweep} blip-${s.blip}${s.rose ? ' has-rose' : ''}`);
+    this.draw();
   }
 
   setScale(km: number): void {
@@ -101,8 +142,8 @@ export class Radar {
   /** 手機朝向（0 = 北，順時針）。null 代表關閉指北針，恢復北在上 */
   setHeading(deg: number | null): void {
     this.heading = deg === null ? 0 : ((deg % 360) + 360) % 360;
-    this.north.classList.toggle('live', deg !== null);
-    this.placeNorth();
+    this.svg.classList.toggle('heading-live', deg !== null);
+    this.placeRose();
     this.draw();
   }
 
@@ -111,10 +152,31 @@ export class Radar {
     this.draw();
   }
 
-  private placeNorth(): void {
-    const p = polar(-this.heading, R + 4);
-    this.north.setAttribute('x', p.x.toFixed(1));
-    this.north.setAttribute('y', p.y.toFixed(1));
+  private placeRose(): void {
+    for (const t of Array.from(this.roseLayer.children) as SVGTextElement[]) {
+      const deg = Number(t.dataset.deg ?? 0);
+      const p = polar(deg - this.heading, R + 4);
+      t.setAttribute('x', p.x.toFixed(1));
+      t.setAttribute('y', p.y.toFixed(1));
+    }
+  }
+
+  private appendMark(g: SVGGElement, out: boolean): void {
+    const r = out ? 4 : 6;
+    switch (this.style.blip) {
+      case 'buoy':
+        g.appendChild(el('circle', { class: 'dot', r: r + 1 }));
+        g.appendChild(el('circle', { class: 'core', r: Math.max(1.5, r - 3.5) }));
+        break;
+      case 'x': {
+        const s = out ? 4 : 6;
+        g.appendChild(el('line', { class: 'mark', x1: -s, y1: -s, x2: s, y2: s }));
+        g.appendChild(el('line', { class: 'mark', x1: -s, y1: s, x2: s, y2: -s }));
+        break;
+      }
+      default:
+        g.appendChild(el('circle', { class: 'dot', r }));
+    }
   }
 
   private draw(): void {
@@ -132,9 +194,9 @@ export class Radar {
       g.dataset.id = String(it.id);
       g.appendChild(el('circle', { class: 'hit', r: 22 }));
       g.appendChild(el('circle', { class: 'ping', r: 6 }));
-      g.appendChild(el('circle', { class: 'dot', r: out ? 4 : 6 }));
+      this.appendMark(g, out);
       if (it.showLabel) {
-        const label = el('text', { class: 'label', y: -12, 'text-anchor': 'middle' });
+        const label = el('text', { class: 'label', y: -13, 'text-anchor': 'middle' });
         label.textContent = it.label;
         g.appendChild(label);
       }

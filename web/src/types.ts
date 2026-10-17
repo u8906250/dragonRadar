@@ -33,3 +33,5 @@ export interface Item {
   bearing: number;
   phase: Phase;
 }
+
+export type { BlipStyle, SweepStyle } from './themes';

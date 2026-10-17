@@ -1,4 +1,5 @@
 name = "dragon-radar"
+account_id = "79c279fdde0b82a171e0de6fd4c80c43"
 main = "src/index.ts"
 compatibility_date = "2025-10-01"
 compatibility_flags = ["nodejs_compat"]
@@ -16,7 +17,7 @@ binding = "AI"
 [[d1_databases]]
 binding = "DB"
 database_name = "dragon-radar"
-database_id = "REPLACE_WITH_YOUR_D1_DATABASE_ID"
+database_id = "87666f00-bba8-41ba-be54-920fbf40e849"
 migrations_dir = "migrations"
 
 [vars]
