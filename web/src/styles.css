@@ -142,6 +142,7 @@ button, select, a { touch-action: manipulation; }
 .badge { font-size: 11px; padding: 3px 8px; border-radius: 999px; background: var(--badge-bg); color: var(--badge-text); font-weight: 600; margin-left: 4px; }
 .badge.mock { background: var(--badge-mock-bg); color: var(--badge-mock-text); }
 .controls { display: flex; align-items: center; gap: 6px; }
+@media (max-width: 380px) { .controls { gap: 4px; } .controls .chip { padding: 8px 10px; font-size: 13px; } :root[data-theme='current'] .brand-wave { display: none; } }
 
 .chip {
   font: inherit; font-size: 14px; font-weight: 600; color: var(--chip-text);
@@ -151,6 +152,7 @@ button, select, a { touch-action: manipulation; }
   cursor: pointer; white-space: nowrap; line-height: 1;
 }
 .chip:active { transform: translate(1px, 1px); }
+a.chip { display: inline-flex; align-items: center; text-decoration: none; }
 .chip.on { background: var(--chip-on-bg); border-color: var(--chip-on-border); color: var(--chip-on-text); }
 .chip.primary { background: var(--chip-primary-bg); border-color: var(--chip-primary-border); color: var(--chip-primary-text); }
 .chips { display: flex; gap: 6px; }

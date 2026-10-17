@@ -5,6 +5,7 @@
 預設主題「洋流雷達」沿用 [台北大洋流](https://current.puma.taipei/) 船艙的視覺：品牌橘、奶油紙、墨線、海綠與硬陰影。
 
 - 網址：**https://current-radar.pages.dev**（Cloudflare Pages，主要）；備用 https://u8906250.github.io/dragonRadar/
+- 使用說明：https://current-radar.pages.dev/help.html（`web/public/help.html`）
 - 前端：Vite + TypeScript，自繪 SVG 雷達，Leaflet + OpenStreetMap 地圖，部署在 Cloudflare Pages 與 GitHub Pages
 - 後端：Cloudflare Worker + D1 + Cron Trigger + Workers AI
 - 資料來源：Threads 官方 API 的 `keyword_search`（需要 `threads_keyword_search` 權限審核）、使用者貼上的 Threads 貼文連結、台北大洋流官方航線、Yahoo 新聞 RSS
