@@ -68,6 +68,9 @@ async function nominatim(env: Env, q: string): Promise<GeoPoint | null> {
   url.searchParams.set('format', 'jsonv2');
   url.searchParams.set('limit', '1');
   url.searchParams.set('countrycodes', 'tw');
+  // 偏好台北市與新北市範圍（bounded=0 只是偏好，範圍外仍可能回傳）
+  url.searchParams.set('viewbox', '121.28,25.31,122.02,24.66');
+  url.searchParams.set('bounded', '0');
   url.searchParams.set('accept-language', 'zh-TW');
   url.searchParams.set('q', q);
   const res = await fetch(url.toString(), {

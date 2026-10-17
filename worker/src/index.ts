@@ -1,6 +1,6 @@
 import { getAccessToken, makeClient, saveAccessToken } from './client';
 import type { Env } from './env';
-import { getEvent, getPost, ingestAll, ingestKeyword, listEvents, processBacklog, processPost, storePost, updateLifecycle, type EventRow } from './events';
+import { DEFAULT_DURATION_SEC, ENDED_WORDS, MAX_FUTURE_SEC, MIN_CONFIDENCE, getEvent, getPost, ingestAll, ingestKeyword, listEvents, processBacklog, processPost, storePost, updateLifecycle, type EventRow } from './events';
 import { addUserKeyword, listActiveKeywords, listAllKeywords, MAX_ACTIVE_KEYWORDS, normalizeKeyword, parseKeywordList, toKeywordOut, touchKeywords } from './keywords';
 import { jsonResponse, nowSec, parseIsoToUnix } from './util';
 
@@ -66,7 +66,7 @@ async function handle(req: Request, env: Env, ctx: ExecutionContext): Promise<Re
   if (req.method === 'GET' && path === '/api/events') {
     const lat = num(url.searchParams.get('lat'));
     const lng = num(url.searchParams.get('lng'));
-    const radiusKm = num(url.searchParams.get('radius_km')) ?? Number(env.DEFAULT_RADIUS_KM) ?? 30;
+    const radiusKm = num(url.searchParams.get('radius_km')) ?? Number(env.DEFAULT_RADIUS_KM) ?? 80;
     const horizonH = num(url.searchParams.get('horizon_h')) ?? 24;
     const keywords = parseKeywordList(url.searchParams.get('keywords'));
     const events = await listEvents(env, {
@@ -83,7 +83,21 @@ async function handle(req: Request, env: Env, ctx: ExecutionContext): Promise<Re
 
   if (req.method === 'GET' && path === '/api/keywords') {
     const active = await listActiveKeywords(env, now);
-    return jsonResponse({ max: MAX_ACTIVE_KEYWORDS, userAdd: env.ALLOW_USER_KEYWORDS === 'true', keywords: active.map(toKeywordOut) });
+    return jsonResponse({
+      max: MAX_ACTIVE_KEYWORDS,
+      userAdd: env.ALLOW_USER_KEYWORDS === 'true',
+      keywords: active.map(toKeywordOut),
+      // 給前端「判讀規則」說明用，跟實際程式共用同一組數值
+      rules: {
+        intervalMin: 10,
+        defaultDurationMin: DEFAULT_DURATION_SEC / 60,
+        maxFutureDays: MAX_FUTURE_SEC / 86400,
+        minConfidence: MIN_CONFIDENCE,
+        endedWords: ENDED_WORDS,
+        region: '台北市、新北市',
+        timezone: 'Asia/Taipei',
+      },
+    });
   }
 
   // 使用者新增關鍵字：所有人共用，有上限，7 天沒人追蹤會自動停止搜尋

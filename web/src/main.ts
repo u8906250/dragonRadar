@@ -1,16 +1,17 @@
 import './styles.css';
 import { addKeyword, fetchEvents, fetchHealth, fetchKeywords } from './api';
 import { compassSupported, startCompass } from './compass';
-import { bearingDeg, compassLabel, formatKm, haversineKm, type LatLng } from './geo';
+import { bearingDeg, compassLabel, formatKm, haversineKm, shuangbeiRadiusKm, type LatLng } from './geo';
 import { MapView } from './map';
 import { beep, ensureNotificationPermission, notificationState, showBanner, systemNotify, unlockAudio } from './notify';
 import { Radar } from './radar';
 import { DEFAULT_THEME_ID, getTheme, THEMES, type Theme } from './themes';
-import type { EventOut, Item, KeywordInfo, Origin, Phase } from './types';
+import type { EventOut, Item, KeywordInfo, KeywordRules, Origin, Phase } from './types';
 
 const DEFAULT_ORIGIN: Origin = { lat: 25.0478, lng: 121.517, source: 'default' }; // 台北車站
 const SOON_SEC = 30 * 60;
-const FETCH_RADIUS_KM = 50;
+/** 後端查詢半徑：要比「雙北」範圍大，才不會漏掉邊緣的發放 */
+const FETCH_RADIUS_KM = 80;
 const POLL_MS = 60_000;
 const TICK_MS = 5_000;
 const LS_SCALE = 'dr.scale';
@@ -60,7 +61,10 @@ function loadOrigin(): Origin | null {
 // ---- state ----
 let origin: Origin = loadOrigin() ?? DEFAULT_ORIGIN;
 let events: EventOut[] = [];
-let scaleKm = Number(lsGet(LS_SCALE) ?? 5) || 5;
+type ScaleSetting = '1' | '5' | '20' | 'region';
+const SCALE_SETTINGS: ScaleSetting[] = ['1', '5', '20', 'region'];
+let scaleSetting: ScaleSetting = (SCALE_SETTINGS as string[]).includes(lsGet(LS_SCALE) ?? '') ? (lsGet(LS_SCALE) as ScaleSetting) : 'region';
+let scaleKm = 5;
 let view: 'radar' | 'map' = 'radar';
 let selectedId: number | null = null;
 let lastFetchAt = 0;
@@ -69,6 +73,7 @@ let stopCompass: (() => void) | null = null;
 let available: KeywordInfo[] = [];
 /** 後端開放使用者自訂關鍵字時才顯示編輯功能 */
 let canEditKeywords = false;
+let keywordRules: KeywordRules | null = null;
 let savedFollowed: string[] | null = loadFollowed();
 let theme: Theme = getTheme(new URLSearchParams(location.search).get('theme') ?? lsGet(LS_THEME) ?? DEFAULT_THEME_ID);
 const seenActive = new Set<number>();
@@ -101,6 +106,10 @@ const kwInput = $<HTMLInputElement>('#kw-input');
 const kwAddBtn = $<HTMLButtonElement>('#kw-add');
 const kwMsg = $('#kw-msg');
 const kwMaxEl = $('#kw-max');
+const kwRulesEl = $('#kw-rules');
+const kwTitle = $('#kw-title');
+const kwIntro = $('#kw-intro');
+const kwShareNote = $('#kw-share-note');
 const scaleChips = Array.from(document.querySelectorAll<HTMLButtonElement>('#scale-chips [data-scale]'));
 
 const radar = new Radar($('#radar-view'), select);
@@ -265,6 +274,10 @@ function setOrigin(o: Origin): void {
   map.setOrigin(o, moved);
   originLabel.textContent = o.source === 'gps' ? 'GPS 定位' : o.source === 'manual' ? '手動位置' : '預設：台北車站';
   useGpsBtn.hidden = o.source !== 'manual';
+  if (scaleSetting === 'region' && scaleKmFor('region') !== scaleKm) {
+    scaleKm = scaleKmFor('region');
+    radar.setScale(scaleKm);
+  }
   if (moved) void refresh();
   else render();
 }
@@ -298,12 +311,17 @@ function switchView(v: 'radar' | 'map'): void {
   if (v === 'map') map.invalidate();
 }
 
-function setScale(km: number): void {
-  scaleKm = km;
-  lsSet(LS_SCALE, String(km));
-  radar.setScale(km);
+function scaleKmFor(setting: ScaleSetting): number {
+  return setting === 'region' ? shuangbeiRadiusKm(origin) : Number(setting);
+}
+
+function setScale(setting: ScaleSetting): void {
+  scaleSetting = setting;
+  scaleKm = scaleKmFor(setting);
+  lsSet(LS_SCALE, setting);
+  radar.setScale(scaleKm);
   for (const b of scaleChips) {
-    const on = Number(b.dataset.scale) === km;
+    const on = b.dataset.scale === setting;
     b.classList.toggle('on', on);
     b.setAttribute('aria-checked', String(on));
   }
@@ -410,9 +428,15 @@ function setFollowed(next: string[]): void {
 
 function renderKeywords(): void {
   const f = followed();
-  kwBtn.classList.toggle('readonly', !canEditKeywords);
-  kwBtn.setAttribute('aria-label', canEditKeywords ? '管理追蹤的關鍵字' : '目前搜尋的關鍵字');
-  (kwBtn.querySelector('.kw-edit') as HTMLElement).hidden = !canEditKeywords;
+  kwBtn.setAttribute('aria-label', canEditKeywords ? '管理追蹤的關鍵字' : '查看搜尋中的關鍵字與判讀規則');
+  (kwBtn.querySelector('.kw-edit') as HTMLElement).textContent = canEditKeywords ? '編輯' : '說明';
+  kwTitle.textContent = canEditKeywords ? '追蹤關鍵字' : '搜尋中的關鍵字';
+  kwIntro.textContent = canEditKeywords
+    ? '點一下切換追蹤。雷達只顯示你追蹤的關鍵字找到的發放。'
+    : '系統會用這些關鍵字定時搜尋 Threads 的公開貼文，目前不開放修改。';
+  kwForm.hidden = !canEditKeywords;
+  kwShareNote.hidden = !canEditKeywords;
+  renderRules();
   (kwBtn.querySelector('.kw-label') as HTMLElement).textContent = canEditKeywords ? '追蹤' : '搜尋中';
   kwSummary.replaceChildren();
   if (f.length === 0) {
@@ -446,7 +470,8 @@ function renderKeywords(): void {
     const b = document.createElement('button');
     b.type = 'button';
     const on = f.includes(k.term);
-    b.className = `chip kw-chip${on ? ' on' : ''}`;
+    b.className = `chip kw-chip${on ? ' on' : ''}${canEditKeywords ? '' : ' static'}`;
+    if (!canEditKeywords) b.disabled = true;
     b.setAttribute('aria-pressed', String(on));
     b.innerHTML = `${esc(k.term)}${k.pinned ? '<span class="pin">預設</span>' : ''}${k.stale ? '<span class="pin">已停止，點一下重新搜尋</span>' : ''}`;
     b.addEventListener('click', () => {
@@ -460,6 +485,47 @@ function renderKeywords(): void {
   }
 }
 
+/** 「時間地點怎麼判讀」說明，數值來自後端，跟實際規則一致 */
+function renderRules(): void {
+  const r = keywordRules;
+  if (!r) {
+    kwRulesEl.replaceChildren();
+    return;
+  }
+  const hours = r.defaultDurationMin % 60 === 0 ? `${r.defaultDurationMin / 60} 小時` : `${r.defaultDurationMin} 分鐘`;
+  const f = followed();
+  const kw = f.includes('洋流飄帶') ? '洋流飄帶' : (f[0] ?? '洋流飄帶');
+  kwRulesEl.innerHTML = `
+    <h3>多久找一次</h3>
+    <ul>
+      <li>每 ${r.intervalMin} 分鐘用上面的關鍵字搜尋 Threads 最新的公開貼文。</li>
+      <li>只收${esc(r.region)}的發放，雷達選「雙北」就能看到整個區域。</li>
+    </ul>
+    <h3>時間地點怎麼判讀</h3>
+    <ol>
+      <li>貼文要同時寫出<b>時間</b>和<b>地點</b>，缺一個就不會出現在雷達上。</li>
+      <li>時間可以寫 <span class="ex">10/18 15:00</span>、<span class="ex">今天下午三點</span>、<span class="ex">明晚 7 點</span>、<span class="ex">週六 14:00–16:00</span>。「今天、明天、週六」以發文時間換算，時區是台灣時間。</li>
+      <li>沒寫結束時間，或寫「發完為止」，會預設開始後 ${hours}結束。</li>
+      <li>地點寫越具體越好，例如 <span class="ex">捷運市政府站 2號出口</span>、<span class="ex">板橋車站北一門</span>、<span class="ex">松山文創園區</span>。找不到出口時會退到車站位置。</li>
+      <li>只收 ${r.maxFutureDays} 天內的發放；已經結束的不會出現。</li>
+      <li>徵求、詢問、線上抽獎、販售不算發放，系統會略過。判讀信心低於 ${Math.round(r.minConfidence * 100)}% 的也會略過。</li>
+    </ol>
+    <h3>什麼時候消失</h3>
+    <ul>
+      <li>到了結束時間自動消失。</li>
+      <li>原作者回覆或再發文提到「${r.endedWords.slice(0, 6).map(esc).join('」「')}」等字眼，也會提早消失。</li>
+    </ul>
+    <h3>貼文範例</h3>
+    <div class="example">${esc(`#${kw}\n明天 10/18 下午 3 點在捷運市政府站 2號出口發放${kw}，限量 100 份，發完為止！`)}</div>
+    <p class="example-out">會判讀成：開始 10/18 15:00、結束 ${esc(fmtClock(15 * 60 + r.defaultDurationMin))}、地點「台北市 捷運市政府站 2號出口」。</p>`;
+}
+
+function fmtClock(totalMin: number): string {
+  const h = Math.floor(totalMin / 60) % 24;
+  const m = totalMin % 60;
+  return `10/18 ${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
+}
+
 function setKwMsg(text: string, error = false): void {
   kwMsg.textContent = text;
   kwMsg.classList.toggle('kw-msg-error', error);
@@ -470,6 +536,7 @@ async function loadKeywords(): Promise<void> {
     const r = await fetchKeywords();
     available = r.keywords;
     canEditKeywords = r.userAdd === true;
+    keywordRules = r.rules ?? null;
     kwMaxEl.textContent = String(r.max);
   } catch (e) {
     console.warn(e);
@@ -505,7 +572,6 @@ async function submitKeyword(raw: string): Promise<void> {
 }
 
 function openKwSheet(open: boolean): void {
-  if (open && !canEditKeywords) return;
   kwSheet.hidden = !open;
   if (open) {
     themeSheet.hidden = true;
@@ -523,7 +589,7 @@ function updateNotifyBtn(): void {
 }
 
 function wireControls(): void {
-  for (const b of scaleChips) b.addEventListener('click', () => setScale(Number(b.dataset.scale) || 5));
+  for (const b of scaleChips) b.addEventListener('click', () => setScale((b.dataset.scale as ScaleSetting) ?? 'region'));
   viewBtn.addEventListener('click', () => switchView(view === 'radar' ? 'map' : 'radar'));
   compassBtn.addEventListener('click', () => void toggleCompass());
   notifyBtn.addEventListener('click', async () => {
@@ -566,7 +632,7 @@ async function boot(): Promise<void> {
   updateNotifyBtn();
   applyTheme(theme);
   switchView('radar');
-  setScale(scaleKm);
+  setScale(scaleSetting);
   setOrigin(origin);
   startGeolocation();
   try {

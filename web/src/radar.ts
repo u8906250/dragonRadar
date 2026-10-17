@@ -133,7 +133,8 @@ export class Radar {
     this.scaleLabels.replaceChildren();
     for (const f of [0.5, 1]) {
       const t = el('text', { x: C + 5, y: C - R * f + 13, class: 'scale-label' });
-      t.textContent = `${f * km} km`;
+      const v = f * km;
+      t.textContent = `${Number.isInteger(v) ? v : v.toFixed(1)} km`;
       this.scaleLabels.appendChild(t);
     }
     this.draw();
@@ -181,6 +182,19 @@ export class Radar {
 
   private draw(): void {
     this.blipLayer.replaceChildren();
+    // 標籤避讓：選取的優先，其次依清單順序（進行中、近的在前），和已放的標籤重疊就不畫
+    const placed: Array<{ x: number; y: number; w: number }> = [];
+    const order = [...this.items].sort((a, b) => Number(b.selected) - Number(a.selected));
+    const labelOk = new Set<number>();
+    for (const it of order) {
+      if (!it.showLabel) continue;
+      const ratio = Math.min(1, it.distanceKm / this.scaleKm);
+      const p = polar(it.bearing - this.heading, ratio * (R - 8));
+      const w = [...it.label].length * 12;
+      if (placed.some((q) => Math.abs(q.y - p.y) < 15 && Math.abs(q.x - p.x) < (q.w + w) / 2)) continue;
+      placed.push({ x: p.x, y: p.y, w });
+      labelOk.add(it.id);
+    }
     for (const it of this.items) {
       const ratio = it.distanceKm / this.scaleKm;
       const out = ratio > 1;
@@ -195,7 +209,7 @@ export class Radar {
       g.appendChild(el('circle', { class: 'hit', r: 22 }));
       g.appendChild(el('circle', { class: 'ping', r: 6 }));
       this.appendMark(g, out);
-      if (it.showLabel) {
+      if (it.showLabel && labelOk.has(it.id)) {
         // 靠近左右邊緣的標籤往內對齊，避免被雷達外框切掉
         const anchor = p.x > C + R * 0.45 ? 'end' : p.x < C - R * 0.45 ? 'start' : 'middle';
         const label = el('text', { class: 'label', y: -13, x: anchor === 'end' ? 6 : anchor === 'start' ? -6 : 0, 'text-anchor': anchor });

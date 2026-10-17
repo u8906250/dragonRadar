@@ -1,5 +1,5 @@
 import type { LatLng } from './geo';
-import type { EventOut, KeywordInfo } from './types';
+import type { EventOut, KeywordInfo, KeywordRules } from './types';
 
 /** 正式環境的 Worker 網址；本機開發打 localhost，VITE_API_BASE 可覆寫 */
 const PROD_API_BASE = 'https://dragon-radar.happybadminton.workers.dev';
@@ -24,10 +24,10 @@ export async function fetchHealth(): Promise<{ ok: boolean; mode: 'live' | 'mock
   return (await r.json()) as { ok: boolean; mode: 'live' | 'mock' };
 }
 
-export async function fetchKeywords(): Promise<{ max: number; userAdd?: boolean; keywords: KeywordInfo[] }> {
+export async function fetchKeywords(): Promise<{ max: number; userAdd?: boolean; keywords: KeywordInfo[]; rules?: KeywordRules }> {
   const r = await fetch(`${API_BASE}/api/keywords`);
   if (!r.ok) throw new Error(`API ${r.status}`);
-  return (await r.json()) as { max: number; userAdd?: boolean; keywords: KeywordInfo[] };
+  return (await r.json()) as { max: number; userAdd?: boolean; keywords: KeywordInfo[]; rules?: KeywordRules };
 }
 
 export type AddKeywordResult =

@@ -37,6 +37,16 @@ export interface Item {
 
 export type { BlipStyle, SweepStyle } from './themes';
 
+export interface KeywordRules {
+  intervalMin: number;
+  defaultDurationMin: number;
+  maxFutureDays: number;
+  minConfidence: number;
+  endedWords: string[];
+  region: string;
+  timezone: string;
+}
+
 export interface KeywordInfo {
   term: string;
   pinned: boolean;

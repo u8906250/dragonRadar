@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { bearingDeg, compassLabel, formatKm, haversineKm } from '../src/geo';
+import { bearingDeg, compassLabel, formatKm, haversineKm, SHUANGBEI_EXTREMES, shuangbeiRadiusKm } from '../src/geo';
 
 const TAIPEI_MAIN = { lat: 25.0478, lng: 121.517 };
 const TAIPEI_101 = { lat: 25.034, lng: 121.5645 };
@@ -35,5 +35,17 @@ describe('formatKm', () => {
     expect(formatKm(0.42)).toBe('420 m');
     expect(formatKm(3.14)).toBe('3.1 km');
     expect(formatKm(12.6)).toBe('13 km');
+  });
+});
+
+describe('shuangbeiRadiusKm', () => {
+  it('covers every extreme point of Taipei and New Taipei from Taipei Main Station', () => {
+    const r = shuangbeiRadiusKm(TAIPEI_MAIN);
+    for (const p of SHUANGBEI_EXTREMES) expect(haversineKm(TAIPEI_MAIN, p)).toBeLessThanOrEqual(r);
+    expect(r % 5).toBe(0);
+    expect(r).toBeLessThanOrEqual(60);
+  });
+  it('grows when the user is near the edge of the region', () => {
+    expect(shuangbeiRadiusKm({ lat: 24.95, lng: 121.35 })).toBeGreaterThan(shuangbeiRadiusKm(TAIPEI_MAIN));
   });
 });

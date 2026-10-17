@@ -60,14 +60,15 @@ export interface EventOut {
   };
 }
 
-const DEFAULT_DURATION_SEC = 2 * 3600;
-const MAX_FUTURE_SEC = 14 * 86400;
+export const DEFAULT_DURATION_SEC = 2 * 3600;
+export const MAX_FUTURE_SEC = 14 * 86400;
 const LOOKBACK_SEC = 24 * 3600;
-const MIN_CONFIDENCE = 0.5;
+export const MIN_CONFIDENCE = 0.5;
 const RECHECK_INTERVAL_SEC = 600;
 const RECHECK_BATCH = 20;
 
-const ENDED_RE = /發完|送完|領完|完售|售完|收攤|撤收|沒了|沒有了|已結束|結束了|結束囉|活動結束|提前結束/;
+export const ENDED_WORDS = ['發完', '送完', '領完', '完售', '售完', '收攤', '撤收', '沒了', '沒有了', '已結束', '結束了', '結束囉', '活動結束', '提前結束'];
+const ENDED_RE = new RegExp(ENDED_WORDS.join('|'));
 
 /** 作者後續貼文或回覆是否宣告發完 */
 export function detectEnded(text: string): boolean {

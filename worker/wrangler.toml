@@ -29,7 +29,7 @@ THREADS_API_BASE = "https://graph.threads.net/v1.0"
 # Nominatim 要求識別用的 User-Agent，請改成可聯絡到你的資訊
 NOMINATIM_USER_AGENT = "dragonRadar/0.1 (https://github.com/u8906250/dragonRadar)"
 AI_MODEL = "@cf/meta/llama-3.3-70b-instruct-fp8-fast"
-DEFAULT_RADIUS_KM = "30"
+DEFAULT_RADIUS_KM = "80"
 # 是否開放一般使用者新增關鍵字。等帳號綁定做好再改成 "true"
 ALLOW_USER_KEYWORDS = "false"
 
