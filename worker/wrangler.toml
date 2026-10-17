@@ -22,7 +22,7 @@ migrations_dir = "migrations"
 
 [vars]
 # 允許的前端來源，逗號分隔。GitHub Pages 的網域加上本機開發
-ALLOWED_ORIGINS = "https://u8906250.github.io,http://localhost:5173"
+ALLOWED_ORIGINS = "https://current-radar.pages.dev,https://u8906250.github.io,http://localhost:5173"
 # "true" 時不打 Threads API，改用內建示範貼文
 MOCK_MODE = "false"
 THREADS_API_BASE = "https://graph.threads.net/v1.0"

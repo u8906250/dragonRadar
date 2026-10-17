@@ -1,0 +1,47 @@
+name: Deploy web to Cloudflare Pages
+
+# 主要網址：https://current-radar.pages.dev（免費，與後端同一個 Cloudflare 帳號）
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'web/**'
+      - 'package.json'
+      - 'package-lock.json'
+      - '.github/workflows/deploy-cf-pages.yml'
+  workflow_dispatch:
+
+concurrency:
+  group: cf-pages
+  cancel-in-progress: true
+
+env:
+  PROJECT: current-radar
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Build
+        run: npm run build -w web
+        env:
+          VITE_API_BASE: ${{ vars.API_BASE }}
+          VITE_BASE: /
+      - name: Create Pages project if missing
+        working-directory: worker
+        run: npx wrangler pages project create "$PROJECT" --production-branch main || echo "project exists or could not be created"
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      - name: Deploy
+        working-directory: worker
+        run: npx wrangler pages deploy ../web/dist --project-name "$PROJECT" --branch main --commit-dirty=true
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}

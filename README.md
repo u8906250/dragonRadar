@@ -4,7 +4,8 @@
 時間一到就在雷達畫面上顯示光點與相對位置，發完或過期就消失。
 預設主題「洋流雷達」沿用 [台北大洋流](https://current.puma.taipei/) 船艙的視覺：品牌橘、奶油紙、墨線、海綠與硬陰影。
 
-- 前端：Vite + TypeScript，自繪 SVG 雷達，Leaflet + OpenStreetMap 地圖，部署在 GitHub Pages
+- 網址：**https://current-radar.pages.dev**（Cloudflare Pages，主要）；備用 https://u8906250.github.io/dragonRadar/
+- 前端：Vite + TypeScript，自繪 SVG 雷達，Leaflet + OpenStreetMap 地圖，部署在 Cloudflare Pages 與 GitHub Pages
 - 後端：Cloudflare Worker + D1 + Cron Trigger + Workers AI
 - 資料來源：Threads 官方 API 的 `keyword_search`（需要 `threads_keyword_search` 權限審核）
 - 地點轉座標：OpenStreetMap Nominatim（結果快取在 D1）
@@ -102,7 +103,7 @@ npm run deploy
 
 - Settings → Pages → Source 選 **GitHub Actions**
 - Settings → Secrets and variables → Actions
-  - Secrets：`CLOUDFLARE_API_TOKEN`（權限：Workers Scripts Edit、D1 Edit、Workers AI Read）、`CLOUDFLARE_ACCOUNT_ID`
+  - Secrets：`CLOUDFLARE_API_TOKEN`（權限：Workers Scripts Edit、D1 Edit、Workers AI Read、Cloudflare Pages Edit）、`CLOUDFLARE_ACCOUNT_ID`
   - Variables：`API_BASE` 可選；不設就用 `web/src/api.ts` 裡寫死的正式 Worker 網址
 
 之後 push 到 `main`：改到 `web/` 會重新部署 Pages，改到 `worker/` 會重新部署 Worker。

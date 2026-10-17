@@ -13,6 +13,7 @@ function corsHeaders(env: Env, origin: string | null): Record<string, string> {
   let allow = '';
   if (allowed.includes('*')) allow = '*';
   else if (origin && allowed.includes(origin)) allow = origin;
+  else if (origin && /^https:\/\/[a-z0-9-]+\.current-radar\.pages\.dev$/.test(origin)) allow = origin;
   else allow = allowed[0] ?? '';
   return {
     'access-control-allow-origin': allow,
