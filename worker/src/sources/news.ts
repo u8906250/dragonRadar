@@ -4,10 +4,11 @@ import { listActiveKeywords } from '../keywords';
 import { nowSec } from '../util';
 import { extractArticleText, parseRss, sha1Hex } from './text';
 
+// 自由時報的 RSS 會擋 Cloudflare 主機（HTTP 403），改用轉載各家報導的 Yahoo 新聞
 export const NEWS_FEEDS = [
-  { name: '自由時報', url: 'https://news.ltn.com.tw/rss/politics.xml' },
-  { name: '自由時報', url: 'https://news.ltn.com.tw/rss/local.xml' },
   { name: 'Yahoo新聞', url: 'https://tw.news.yahoo.com/rss/politics' },
+  { name: 'Yahoo新聞', url: 'https://tw.news.yahoo.com/rss/local' },
+  { name: 'Yahoo新聞', url: 'https://tw.news.yahoo.com/rss/taipei' },
 ];
 
 const MAX_AGE_SEC = 3 * 86400;

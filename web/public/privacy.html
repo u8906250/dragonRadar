@@ -36,7 +36,7 @@
     <h2>三、第三方服務</h2>
     <ul>
       <li>Meta Threads API：搜尋公開貼文。</li>
-      <li>新聞網站的公開 RSS（自由時報、Yahoo 新聞）：讀取含關鍵字的報導，判讀後只保留標題、短摘要與原文連結。</li>
+      <li>新聞網站的公開 RSS（Yahoo 新聞，含其轉載的各家報導）：讀取含關鍵字的報導，判讀後只保留標題、短摘要與原文連結。</li>
       <li>台北大洋流官網公開的「未來航線」資料：車掃日期、地點與加油點。</li>
       <li>Cloudflare（Workers、D1、Workers AI、Pages）：網站與伺服器、資料庫、文字判讀。</li>
       <li>OpenStreetMap Nominatim：把地點文字轉成座標，只送出地點文字。</li>
@@ -61,7 +61,7 @@
       <p><b>What this service does.</b> 洋流雷達 (Current Radar) is a web tool that finds public Threads posts announcing in-person giveaways and events, extracts the time and place, and shows them on a radar and map relative to the visitor's location.</p>
       <p><b>Website visitors.</b> No sign-up or login is required. If you allow location access, your approximate coordinates are sent to our server only to look up nearby events; they are not stored or logged. Preferences (theme, range, manual location) stay in your browser's localStorage.</p>
       <p><b>Threads data.</b> Using the Meta Threads API we search <i>public</i> posts for a fixed keyword. We process the post ID, text, timestamp, author's public username and permalink, solely to extract the time and location of giveaways and events and display them with a link to the original post. We do not use the data for advertising, profiling, or sale, and we do not share it with third parties. Posts and extracted data are automatically deleted after 30 days. The only access token stored is the operator's own Threads token used to call the API.</p>
-      <p><b>Processors.</b> Meta Threads API, public news RSS feeds (Liberty Times, Yahoo News; only title, short excerpt and link are kept), the public route data of the official 台北大洋流 site, Cloudflare (Workers, D1, Workers AI, Pages), OpenStreetMap Nominatim and tiles, GitHub Pages.</p>
+      <p><b>Processors.</b> Meta Threads API, public news RSS feeds (Yahoo News; only title, short excerpt and link are kept), the public route data of the official 台北大洋流 site, Cloudflare (Workers, D1, Workers AI, Pages), OpenStreetMap Nominatim and tiles, GitHub Pages.</p>
       <p><b>Deletion and contact.</b> See the <a href="data-deletion.html">data deletion instructions</a>. Questions: <a href="https://github.com/u8906250/dragonRadar/issues">GitHub Issues</a>.</p>
     </section>
   </article>
