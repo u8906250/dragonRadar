@@ -97,7 +97,7 @@ npm run deploy
 - Settings → Pages → Source 選 **GitHub Actions**
 - Settings → Secrets and variables → Actions
   - Secrets：`CLOUDFLARE_API_TOKEN`（權限：Workers Scripts Edit、D1 Edit、Workers AI Read）、`CLOUDFLARE_ACCOUNT_ID`
-  - Variables：`API_BASE` = Worker 網址，例如 `https://dragon-radar.<account>.workers.dev`
+  - Variables：`API_BASE` 可選；不設就用 `web/src/api.ts` 裡寫死的正式 Worker 網址
 
 之後 push 到 `main`：改到 `web/` 會重新部署 Pages，改到 `worker/` 會重新部署 Worker。
 
