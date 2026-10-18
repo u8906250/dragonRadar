@@ -180,6 +180,10 @@ a.chip { display: inline-flex; align-items: center; text-decoration: none; }
 .radar .grid .outer { stroke-opacity: var(--radar-outer-op); }
 :root[data-theme='treasure'] .radar .grid circle, :root[data-theme='treasure'] .radar .grid line { stroke-dasharray: 4 4; }
 .radar .me { fill: var(--radar-me); filter: drop-shadow(0 0 4px var(--radar-me)); }
+/* 車掃路線：還沒出發是虛線，車掃中是實線 */
+.radar .route { fill: none; stroke: var(--accent); stroke-width: 3.5; stroke-linecap: round; stroke-linejoin: round; opacity: 0.7; pointer-events: none; }
+.radar .route-planned { stroke-dasharray: 6 5; }
+.radar .route-live { opacity: 0.9; }
 .radar .scale-label { fill: var(--radar-text); font-size: 11px; }
 .radar .rose-letter { fill: var(--radar-rose); font-size: 13px; font-weight: 800; }
 .radar:not(.has-rose) .rose-letter:not(.rose-n) { display: none; }
@@ -398,3 +402,21 @@ a.chip { display: inline-flex; align-items: center; text-decoration: none; }
 .radar .blip.approx.spot .dot { stroke: var(--blip-spot); }
 .radar .blip.approx .core, .radar .blip.approx .ping { display: none; }
 .approx-note { font-size: 13px; color: var(--muted); }
+
+/* 車掃路線：清單卡片、時間表、詳細資料裡的路線區塊 */
+.route-stops { list-style: none; margin: 0 0 10px; padding: 0 0 0 6px; }
+.route-stops .stop { position: relative; padding-left: 18px; }
+.route-stops .stop::before { content: ''; position: absolute; left: 4px; top: 0; bottom: 0; border-left: 3px solid var(--accent); opacity: 0.5; }
+.route-stops .stop:first-child::before { top: 16px; }
+.route-stops .stop:last-child::before { bottom: calc(100% - 16px); }
+.route-stops .stop::after { content: ''; position: absolute; left: 0; top: 11px; width: 11px; height: 11px; border-radius: 50%; background: var(--card); border: 3px solid var(--accent); box-sizing: border-box; }
+.route-stops .stop-start::after, .route-stops .stop-end::after { background: var(--accent); }
+.route-stops .passed { opacity: 0.55; }
+.route-stops button, .route-stops .stop > div { display: flex; gap: 10px; width: 100%; text-align: left; font: inherit; font-size: 14px; color: var(--text); background: transparent; border: 0; padding: 7px 4px; cursor: pointer; }
+.route-stops .stop > div { cursor: default; }
+.route-stops button:hover { background: var(--line-soft, rgba(0, 0, 0, 0.05)); border-radius: 8px; }
+.route-stops .stop-time { flex: 0 0 64px; font-weight: 700; font-variant-numeric: tabular-nums; }
+.route-stops .stop-name b { margin-right: 6px; font-size: 12px; color: var(--accent); }
+.route-stops small { display: block; color: var(--muted); margin-top: 1px; }
+.route-box { margin: 0 0 10px; padding: 8px 10px; font-size: 14px; border: var(--border-w) solid var(--line); border-radius: var(--card-radius); background: var(--card); }
+.route-box .link-btn { padding: 4px 0 0; }

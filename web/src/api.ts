@@ -1,5 +1,5 @@
 import type { LatLng } from './geo';
-import type { EndedReportResult, EventOut, KeywordInfo, KeywordRules, SubmitResult } from './types';
+import type { EndedReportResult, EventOut, KeywordInfo, KeywordRules, RouteOut, SubmitResult } from './types';
 
 /** 正式環境的 Worker 網址；本機開發打 localhost，VITE_API_BASE 可覆寫（空字串視為未設定，CI 沒設變數時會傳空字串） */
 const PROD_API_BASE = 'https://dragon-radar.happybadminton.workers.dev';
@@ -18,6 +18,17 @@ export async function fetchEvents(origin: LatLng, radiusKm: number, keywords: st
   if (!r.ok) throw new Error(`API ${r.status}`);
   const j = (await r.json()) as { events: EventOut[] };
   return j.events;
+}
+
+/** 今天的車掃路線；讀不到就當沒有，不影響其他資料 */
+export async function fetchRoutes(): Promise<RouteOut[]> {
+  try {
+    const r = await fetch(`${API_BASE}/api/routes`);
+    if (!r.ok) return [];
+    return ((await r.json()) as { routes?: RouteOut[] }).routes ?? [];
+  } catch {
+    return [];
+  }
 }
 
 export async function fetchHealth(): Promise<{ ok: boolean; mode: 'live' | 'mock' | 'unconfigured' }> {

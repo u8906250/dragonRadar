@@ -15,6 +15,14 @@ export interface RadarItem {
   selected: boolean;
 }
 
+/** 雷達上的車掃路線：每個點的方位與距離 */
+export interface RadarRoute {
+  id: string;
+  /** planned 還沒出發（虛線）；live 車掃中；done 已抵達（不畫） */
+  state: 'planned' | 'live' | 'done';
+  points: Array<{ bearing: number; distanceKm: number }>;
+}
+
 export interface RadarStyle {
   sweep: SweepStyle;
   blip: BlipStyle;
@@ -75,6 +83,8 @@ export class Radar {
   private readonly scaleLabels: SVGGElement;
   private readonly rings: SVGGElement;
   private readonly roseLayer: SVGGElement;
+  private readonly routeLayer: SVGGElement;
+  private routes: RadarRoute[] = [];
   private scaleKm = 5;
   private readonly pointers = new Map<number, { x: number; y: number }>();
   private pinchDist = 0;
@@ -130,6 +140,7 @@ export class Radar {
         </g>
       </g>
       <g class="scale-labels"></g>
+      <g class="routes" clip-path="url(#rg-clip)"></g>
       <circle class="me" cx="${C}" cy="${C}" r="5" />
       <g class="blips"></g>
       <g class="rose"></g>
@@ -138,6 +149,7 @@ export class Radar {
     this.scaleLabels = this.svg.querySelector('.scale-labels') as SVGGElement;
     this.rings = this.svg.querySelector('.rings') as SVGGElement;
     this.roseLayer = this.svg.querySelector('.rose') as SVGGElement;
+    this.routeLayer = this.svg.querySelector('.routes') as SVGGElement;
     for (const [letter, deg] of ROSE) {
       const t = el('text', { class: `rose-letter rose-${letter.toLowerCase()}`, 'text-anchor': 'middle', 'dominant-baseline': 'middle', 'data-deg': deg });
       t.textContent = letter;
@@ -239,9 +251,26 @@ export class Radar {
     this.draw();
   }
 
-  render(items: RadarItem[]): void {
+  render(items: RadarItem[], routes: RadarRoute[] = []): void {
     this.items = items;
+    this.routes = routes;
     this.draw();
+  }
+
+  /** 路線畫在光點下面；超出範圍的部分被外圈裁掉 */
+  private drawRoutes(): void {
+    this.routeLayer.replaceChildren();
+    for (const r of this.routes) {
+      if (r.state === 'done' || r.points.length < 2) continue;
+      const d = r.points
+        .map((pt, i) => {
+          const p = polar(pt.bearing - this.heading, this.ratio(pt.distanceKm) * (R - 8));
+          return `${i === 0 ? 'M' : 'L'}${p.x.toFixed(1)} ${p.y.toFixed(1)}`;
+        })
+        .join(' ');
+      const path = el('path', { class: `route route-${r.state}`, d });
+      this.routeLayer.appendChild(path);
+    }
   }
 
   private placeRose(): void {
@@ -277,6 +306,7 @@ export class Radar {
   }
 
   private draw(): void {
+    this.drawRoutes();
     this.blipLayer.replaceChildren();
     const pos = new Map<number, { x: number; y: number; out: boolean }>();
     for (const it of this.items) {

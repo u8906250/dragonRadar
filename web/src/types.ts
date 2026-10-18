@@ -32,6 +32,42 @@ export interface EventOut {
   };
 }
 
+/** 車掃路線上的一站；title 跟對應事件的標題一樣 */
+export interface RouteStop {
+  kind: 'start' | 'cheer' | 'end';
+  title: string;
+  name: string;
+  lat: number | null;
+  lng: number | null;
+  /** 出發／預計經過／抵達時間 */
+  at: number | null;
+}
+
+export interface RouteSegment {
+  seq: number;
+  from: string;
+  to: string;
+  path: Array<[number, number]>;
+  lengthM: number;
+  people: number;
+  target: number;
+}
+
+/** 車掃路線（來自大洋流車掃地圖） */
+export interface RouteOut {
+  id: string;
+  /** 事件掛在哪則官方貼文下，用來找出屬於這條路線的事件 */
+  postId: string;
+  title: string;
+  departAt: number | null;
+  arriveAt: number | null;
+  showUntil: number;
+  claimUrl: string | null;
+  stops: RouteStop[];
+  segments: RouteSegment[];
+  updatedAt: number;
+}
+
 export interface Origin {
   lat: number;
   lng: number;
@@ -63,7 +99,7 @@ export interface KeywordRules {
   kinds?: Record<EventKind, string>;
   sources?: {
     threads: 'review' | 'approved';
-    official: { name: string; url: string; intervalMin: number };
+    official: { name: string; url: string; mapName?: string; mapUrl?: string; intervalMin: number };
     news: { names: string[]; intervalMin: number };
     link?: { maxAgeDays: number; recheckMin: number; endedReportsNeeded: number };
   };

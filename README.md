@@ -8,7 +8,7 @@
 - 使用說明：https://current-radar.pages.dev/help.html（`web/public/help.html`）
 - 前端：Vite + TypeScript，自繪 SVG 雷達，Leaflet + OpenStreetMap 地圖，部署在 Cloudflare Pages 與 GitHub Pages
 - 後端：Cloudflare Worker + D1 + Cron Trigger + Workers AI
-- 資料來源：Threads 官方 API 的 `keyword_search`（需要 `threads_keyword_search` 權限審核）、使用者貼上的 Threads 貼文連結、台北大洋流官方航線、Yahoo 新聞 RSS
+- 資料來源：Threads 官方 API 的 `keyword_search`（需要 `threads_keyword_search` 權限審核）、使用者貼上的 Threads 貼文連結、台北大洋流官方航線與[車掃地圖](https://current-map.puma.taipei/)、Yahoo 新聞 RSS
 - 地點轉座標：OpenStreetMap Nominatim（結果快取在 D1）
 
 ```
@@ -23,6 +23,15 @@ worker/   Cloudflare Worker（API、排程、資料庫）
 3. 地點用 Nominatim 轉成座標，寫進 `events`。
 4. 事件狀態：`upcoming` → `active`（到開始時間）→ `ended`（到結束時間，或作者後續貼文／回覆出現「發完」等字眼）。
 5. 前端每分鐘向 `/api/events` 拿附近事件，用使用者座標算方位與距離畫在雷達上；進行中事件變多時嗶聲＋通知。
+
+### 車掃路線
+
+每 10 分鐘讀台北大洋流官網的「未來航線」與「大洋流車掃地圖」：
+
+- 車掃地圖的頁面寫出車掃時間（例如「車掃 17:30–18:30」）與抵達後的活動（「市政開講 18:30–20:30 · 民權公園」），路段 API 給實際路徑與各段認領人數。官網的船票時間是出發時間，車掃地圖讀不到時才用它。
+- 事件：起點（出發後保留 15 分鐘）、加油點（整天，到預計經過後 15 分鐘）、終點（抵達後的活動，沒有就保留 1 小時）。
+- 加油點的預計經過時間：投影到路線上，用累計距離在出發到抵達之間等速推算。路段名稱有寫到的加油點直接用車掃地圖的座標，地址查到的離路線超過 60 m 就移到路線上。
+- 路線存在 `routes` 表，前端用 `/api/routes` 畫在雷達與地圖上（地圖依認領人數上色），清單合成一張「車掃」卡片與每站時間表。不顯示車隊即時位置（官方要大家不跟車）。
 
 ### 使用者回報貼文連結
 
@@ -148,6 +157,7 @@ npm run deploy
 | GET | `/api/health` | `{ ok, mode: 'live' \| 'mock', time }` |
 | GET | `/api/events?lat=&lng=&radius_km=&horizon_h=&keywords=` | 附近、未結束、`horizon_h` 小時內會開始的事件，可用逗號分隔的關鍵字篩選 |
 | GET | `/api/events/:id` | 單一事件 |
+| GET | `/api/routes` | 今天的車掃路線：路徑、各站預計時間、各路段認領人數 |
 | POST | `/api/reports` | 使用者貼上 Threads 貼文連結 `{ url }`，回傳判讀結果 |
 | POST | `/api/events/:id/ended` | 回報已發完／已結束 |
 | GET | `/api/keywords` | 搜尋中的關鍵字、上限、是否開放使用者新增 |

@@ -18,6 +18,29 @@ export interface MapItem {
 /** 底圖：nlsc 台灣通用電子地圖（國土測繪中心）、osm OpenStreetMap */
 export type BaseMap = 'nlsc' | 'osm';
 
+/** 地圖上的車掃路線：每段依認領人數上色 */
+export interface MapRoute {
+  id: string;
+  title: string;
+  state: 'planned' | 'live' | 'done';
+  claimUrl: string | null;
+  segments: Array<{ seq: number; from: string; to: string; path: Array<[number, number]>; people: number; target: number }>;
+}
+
+/** 跟大洋流車掃地圖一樣的顏色：沒人灰、缺人綠、快滿（6 成以上）橘、已滿紅 */
+const CROWD = {
+  empty: { color: '#9ca3af', label: '還沒有人' },
+  low: { color: '#16a34a', label: '缺人' },
+  mid: { color: '#f59e0b', label: '快滿' },
+  full: { color: '#dc2626', label: '已滿' },
+} as const;
+
+export function crowdOf(people: number, target: number): keyof typeof CROWD {
+  if (people === 0) return 'empty';
+  const r = target > 0 ? people / target : 1;
+  return r >= 1 ? 'full' : r >= 0.6 ? 'mid' : 'low';
+}
+
 const BASES: Record<BaseMap, { url: string; attribution: string; maxNativeZoom: number }> = {
   nlsc: {
     url: 'https://wmts.nlsc.gov.tw/wmts/EMAP/default/GoogleMapsCompatible/{z}/{y}/{x}',
@@ -58,6 +81,8 @@ export class MapView {
   /** 雷達目前的範圍（外圈），切到地圖時用同樣的比例 */
   private rangeCircle: Leaflet.Circle | null = null;
   private readonly markers = new Map<number, Leaflet.CircleMarker>();
+  private routeLayer: Leaflet.LayerGroup | null = null;
+  private routes: MapRoute[] = [];
   /** 座標一樣合成一個點時，每個項目對應到畫出來的那個標記 */
   private readonly leaderOf = new Map<number, number>();
   /** 畫出來的標記代表哪些項目 */
@@ -96,6 +121,7 @@ export class MapView {
       const map = L.map(this.el, { zoomControl: true, attributionControl: true, zoomSnap: 0 }).setView([this.origin.lat, this.origin.lng], 15);
       map.attributionControl.setPrefix(false);
       this.map = map;
+      this.routeLayer = L.layerGroup().addTo(map);
       this.layer = L.layerGroup().addTo(map);
       this.accuracyCircle = L.circle([this.origin.lat, this.origin.lng], {
         radius: 0,
@@ -129,6 +155,7 @@ export class MapView {
       });
       this.applyBase();
       this.pushOrigin();
+      this.pushRoutes();
       this.pushItems();
       // 地圖容器剛從 hidden 變成顯示，尺寸要再算一次
       requestAnimationFrame(() => map.invalidateSize());
@@ -278,5 +305,45 @@ export class MapView {
   render(items: MapItem[]): void {
     this.items = items;
     this.pushItems();
+  }
+
+  setRoutes(routes: MapRoute[]): void {
+    const sig = (rs: MapRoute[]): string => JSON.stringify(rs.map((r) => [r.id, r.state, r.segments.map((x) => [x.people, x.target, x.path.length])]));
+    if (sig(routes) === sig(this.routes)) return;
+    this.routes = routes;
+    this.pushRoutes();
+  }
+
+  /** 地圖移到整條路線 */
+  focusRoute(id: string): void {
+    void this.ensure().then(() => {
+      const L = this.L;
+      const r = this.routes.find((x) => x.id === id);
+      if (!L || !this.map || !r) return;
+      const pts = r.segments.flatMap((x) => x.path);
+      if (pts.length > 0) this.map.fitBounds(L.latLngBounds(pts), { padding: [24, 24] });
+    });
+  }
+
+  private pushRoutes(): void {
+    const L = this.L;
+    const layer = this.routeLayer;
+    if (!L || !layer) return;
+    layer.clearLayers();
+    for (const r of this.routes) {
+      if (r.state === 'done') continue;
+      for (const seg of r.segments) {
+        const c = CROWD[crowdOf(seg.people, seg.target)];
+        const line = L.polyline(seg.path, { color: c.color, weight: 6, opacity: 0.85, lineCap: 'round', lineJoin: 'round' });
+        line.bindPopup(
+          `<strong>${escapeHtml(r.title)}・第 ${seg.seq} 段</strong><br>${escapeHtml(seg.from)} → ${escapeHtml(seg.to)}<br>` +
+            `認領 ${seg.people} / 目標 ${seg.target} 人（${c.label}）` +
+            (r.claimUrl ? `<br><a href="${escapeHtml(r.claimUrl)}" target="_blank" rel="noopener">到車掃地圖認領路段</a>` : ''),
+          { closeButton: false },
+        );
+        layer.addLayer(line);
+        line.bringToBack();
+      }
+    }
   }
 }

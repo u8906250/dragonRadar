@@ -1,12 +1,12 @@
 import './styles.css';
-import { addKeyword, fetchEvents, fetchHealth, fetchKeywords, reportEnded, submitLink } from './api';
+import { addKeyword, fetchEvents, fetchHealth, fetchKeywords, fetchRoutes, reportEnded, submitLink } from './api';
 import { compassSupported, startCompass } from './compass';
 import { bearingDeg, compassLabel, formatKm, haversineKm, shuangbeiRadiusKm, taiwanRadiusKm, type LatLng } from './geo';
-import { MapView, type BaseMap } from './map';
+import { crowdOf, MapView, type BaseMap } from './map';
 import { beep, ensureNotificationPermission, notificationState, showBanner, systemNotify, unlockAudio } from './notify';
-import { Radar } from './radar';
+import { Radar, type RadarRoute } from './radar';
 import { DEFAULT_THEME_ID, getTheme, THEMES, type Theme } from './themes';
-import type { EventOut, Item, KeywordInfo, KeywordRules, Origin, Phase, SubmitResult } from './types';
+import type { EventOut, Item, KeywordInfo, KeywordRules, Origin, Phase, RouteOut, RouteStop, SubmitResult } from './types';
 
 const DEFAULT_ORIGIN: Origin = { lat: 25.0478, lng: 121.517, source: 'default' }; // 台北車站
 const SOON_SEC = 30 * 60;
@@ -70,6 +70,10 @@ function loadOrigin(): Origin | null {
 // ---- state ----
 let origin: Origin = loadOrigin() ?? DEFAULT_ORIGIN;
 let events: EventOut[] = [];
+/** 今天的車掃路線 */
+let routes: RouteOut[] = [];
+/** 打開的是哪條路線的時間表 */
+let selectedRoute: string | null = null;
 type ScaleSetting = '1' | '5' | '20' | 'region' | 'taiwan' | 'custom';
 /** 下方按鈕的範圍；custom 是雙指縮放或滾輪調出來的 */
 const SCALE_SETTINGS: ScaleSetting[] = ['1', '5', '20', 'region', 'taiwan'];
@@ -247,10 +251,10 @@ function spotLine(it: Item, now: number): string {
   return `休息中・${next}・${until}`;
 }
 
-/** 沒有開始時間的：整天，或知道最晚到幾點（例如加油點到車隊靠港為止） */
+/** 沒有開始時間的：整天，或知道最晚到幾點（例如加油點到車隊經過為止） */
 function allDayText(ev: EventOut, today: boolean): string {
   if (ev.endAt - ev.startAt >= 86400 - 60) return today ? '今天整天' : '整天';
-  return `${today ? '今天' : ''}到 ${fmtTime(ev.endAt)}`;
+  return `${today ? '今天' : '整天，'}到 ${fmtTime(ev.endAt)}`;
 }
 
 function timeLine(it: Item, now: number): string {
@@ -258,6 +262,8 @@ function timeLine(it: Item, now: number): string {
   const { ev } = it;
   if (ev.allDay) {
     const today = ev.startAt <= now && now < ev.endAt;
+    const stop = stopOf(ev);
+    if (today && stop?.kind === 'cheer' && stop.at) return now < stop.at ? `進行中 · 車隊預計 ${fmtTime(stop.at)} 經過` : `車隊預計 ${fmtTime(stop.at)} 已經過`;
     return today ? `進行中 · ${allDayText(ev, true)}` : `${dateFmt.format(new Date(ev.startAt * 1000))} ${allDayText(ev, false)}`;
   }
   if (it.phase === 'active') {
@@ -268,6 +274,45 @@ function timeLine(it: Item, now: number): string {
   if (mins < 60) return `${fmtTime(ev.startAt)} 開始 · 還有 ${mins} 分鐘`;
   if (mins < 24 * 60) return `${fmtTime(ev.startAt)} 開始 · 還有 ${Math.floor(mins / 60)} 小時 ${mins % 60} 分`;
   return `${new Date(ev.startAt * 1000).toLocaleDateString('zh-TW', { timeZone: 'Asia/Taipei', month: 'numeric', day: 'numeric' })} ${fmtTime(ev.startAt)} 開始`;
+}
+
+// ---- 車掃路線 ----
+const routeOf = (ev: EventOut): RouteOut | undefined => routes.find((r) => r.postId === ev.post.id);
+const stopOf = (ev: EventOut): RouteStop | undefined => routeOf(ev)?.stops.find((s) => s.title === ev.title);
+const STOP_LABEL: Record<RouteStop['kind'], string> = { start: '出發', cheer: '加油點', end: '抵達' };
+
+function routeState(r: RouteOut, now: number): RadarRoute['state'] {
+  if (!r.departAt || now < r.departAt) return 'planned';
+  if (r.arriveAt && now >= r.arriveAt) return 'done';
+  return 'live';
+}
+
+/** 清單上有它的事件才顯示路線（跟著關鍵字篩選走） */
+const shownRoutes = (items: Item[]): RouteOut[] => routes.filter((r) => items.some((it) => it.ev.post.id === r.postId));
+const routeItems = (r: RouteOut, items: Item[]): Item[] => items.filter((it) => it.ev.post.id === r.postId);
+const routeKm = (r: RouteOut): number => r.segments.reduce((n, s) => n + s.lengthM, 0) / 1000;
+
+function untilText(unix: number, now: number): string {
+  const mins = Math.max(0, Math.round((unix - now) / 60));
+  return mins < 60 ? `還有 ${mins} 分鐘` : `還有 ${Math.floor(mins / 60)} 小時 ${mins % 60} 分`;
+}
+
+function routeTimeLine(r: RouteOut, items: Item[], now: number): string {
+  const end = r.stops.find((s) => s.kind === 'end');
+  const endEv = end && routeItems(r, items).find((it) => it.ev.title === end.title)?.ev;
+  const state = routeState(r, now);
+  if (!r.departAt) return '今天・出發時間未定';
+  if (state === 'planned') return `${fmtTime(r.departAt)} 出發 · ${untilText(r.departAt, now)}`;
+  if (state === 'live') return `車掃中 · 預計 ${r.arriveAt ? fmtTime(r.arriveAt) : ''} 抵達${end?.name ?? ''}`;
+  return endEv && endEv.endAt > now ? `已抵達 · ${endEv.title.split('・')[0]}到 ${fmtTime(endEv.endAt)}` : '已抵達';
+}
+
+/** 加油點、起點、終點在詳細資料裡的那一行 */
+function stopText(stop: RouteStop, now: number): string {
+  if (!stop.at) return '';
+  if (stop.kind === 'start') return `${fmtTime(stop.at)} 從這裡出發`;
+  if (stop.kind === 'end') return `預計 ${fmtTime(stop.at)} 抵達這裡`;
+  return now < stop.at ? `車隊預計 ${fmtTime(stop.at)} 經過這裡` : `車隊預計 ${fmtTime(stop.at)} 已經過`;
 }
 
 function render(): void {
@@ -295,7 +340,13 @@ function render(): void {
       showLabel: (it.phase === 'active' && !it.spot) || it.ev.id === selectedId,
       selected: it.ev.id === selectedId,
     })),
+    shownRoutes(items).map((r) => ({
+      id: r.id,
+      state: routeState(r, now),
+      points: r.segments.flatMap((sg) => sg.path).map(([lat, lng]) => ({ bearing: bearingDeg(origin, { lat, lng }), distanceKm: haversineKm(origin, { lat, lng }) })),
+    })),
   );
+  map.setRoutes(shownRoutes(items).map((r) => ({ id: r.id, title: r.title, state: routeState(r, now), claimUrl: r.claimUrl, segments: r.segments })));
   map.render(
     items.map((it) => ({
       id: it.ev.id,
@@ -358,12 +409,22 @@ function renderList(items: Item[], now: number): void {
   listEl.replaceChildren();
   emptyEl.hidden = items.length > 0;
   const rows: Array<Item | 'divider'> = [...inRange, ...(outRange.length > 0 ? (['divider'] as const) : []), ...outRange];
+  // 同一條車掃路線的起點、加油點、終點合成一張卡片，放在第一個出現的位置
+  const routeShown = new Set<string>();
   for (const it of rows) {
     if (it === 'divider') {
       const d = document.createElement('li');
       d.className = 'ev-divider';
       d.textContent = `雷達範圍外（${outRange.length}）`;
       listEl.appendChild(d);
+      continue;
+    }
+    const route = routeOf(it.ev);
+    if (route) {
+      if (!routeShown.has(route.id)) {
+        routeShown.add(route.id);
+        listEl.appendChild(routeCard(route, items, now));
+      }
       continue;
     }
     const li = document.createElement('li');
@@ -376,6 +437,69 @@ function renderList(items: Item[], now: number): void {
     li.addEventListener('click', () => select(it.ev.id));
     listEl.appendChild(li);
   }
+}
+
+function routeCard(r: RouteOut, items: Item[], now: number): HTMLLIElement {
+  const mine = routeItems(r, items);
+  const nearest = [...mine].sort((a, b) => a.distanceKm - b.distanceKm)[0];
+  const start = r.stops.find((s) => s.kind === 'start');
+  const end = r.stops.find((s) => s.kind === 'end');
+  const state = routeState(r, now);
+  const phase: Phase = state === 'planned' ? (r.departAt && r.departAt - now <= SOON_SEC ? 'soon' : mine.some((it) => it.phase === 'active') ? 'active' : 'later') : 'active';
+  const li = document.createElement('li');
+  li.className = `ev route-card phase-${phase} kind-activity${nearest && nearest.distanceKm > scaleKm ? ' out-of-range' : ''}${selectedRoute === r.id ? ' selected' : ''}`;
+  li.innerHTML = `
+    <div class="ev-title"><span class="dot"></span><span class="kind-tag">車掃</span>${esc(r.title)} <span class="muted">· ${r.stops.length} 站</span></div>
+    <div class="ev-meta">${esc(start?.name ?? '')} → ${esc(end?.name ?? '')} · 全長 ${routeKm(r).toFixed(1)} km${nearest ? ` · 最近 ${formatKm(nearest.distanceKm)}` : ''}</div>
+    <div class="ev-time">${esc(routeTimeLine(r, items, now))}</div>`;
+  li.addEventListener('click', () => selectRoute(r.id));
+  return li;
+}
+
+/** 車掃路線的時間表：每一站的時間、距離，點了看那一站 */
+function renderRouteDetail(r: RouteOut, items: Item[], now: number): void {
+  const mine = routeItems(r, items);
+  const people = r.segments.reduce((n, s) => n + s.people, 0);
+  const target = r.segments.reduce((n, s) => n + s.target, 0);
+  const needy = [...r.segments].filter((sg) => crowdOf(sg.people, sg.target) === 'empty' || crowdOf(sg.people, sg.target) === 'low').length;
+  const rows = r.stops
+    .map((st) => {
+      const it = mine.find((x) => x.ev.title === st.title);
+      const time = st.at ? `${st.kind === 'cheer' ? '約 ' : ''}${fmtTime(st.at)}` : '—';
+      const passed = st.at !== null && st.at <= now && st.kind !== 'end';
+      // 終點接著有活動（例如市政開講）就附上活動時間
+      const extra = st.kind === 'end' && it && !it.ev.allDay && !it.ev.title.includes('抵達') ? `<small>${esc(it.ev.title.split('・')[0])} ${fmtTime(it.ev.startAt)}–${fmtTime(it.ev.endAt)}</small>` : '';
+      const dist = it ? `<small>${formatKm(it.distanceKm)} ${compassLabel(it.bearing)}</small>` : '';
+      const body = `<span class="stop-time">${time}</span><span class="stop-name"><b>${STOP_LABEL[st.kind]}</b>${esc(st.name)}${extra}${dist}</span>`;
+      return `<li class="stop stop-${st.kind}${passed ? ' passed' : ''}">${it ? `<button type="button" data-select="${it.ev.id}">${body}</button>` : `<div>${body}</div>`}</li>`;
+    })
+    .join('');
+  detailEl.hidden = false;
+  detailEl.innerHTML = `
+    <div class="sheet-head">
+      <strong>${esc(r.title)}</strong>
+      <button type="button" class="chip" data-act="close" aria-label="關閉">關閉</button>
+    </div>
+    <div class="sheet-body">
+      <p>${esc(routeTimeLine(r, items, now))}<br><span class="muted">全長 ${routeKm(r).toFixed(1)} km・沿線認領 ${people.toLocaleString()} / 目標 ${target.toLocaleString()} 人${needy > 0 ? `・還有 ${needy} 段缺人` : ''}（${fmtTime(r.updatedAt)} 更新）</span></p>
+      <ol class="route-stops">${rows}</ol>
+      <p class="muted sheet-note">加油點的時間是用路線長度平均推算的，實際以現場為準。官方提醒：不跟車，在沿線等車隊經過；不放鞭炮。</p>
+      <div class="sheet-actions">
+        ${r.claimUrl ? `<a class="btn primary" href="${esc(r.claimUrl)}" target="_blank" rel="noopener">到車掃地圖認領路段</a>` : ''}
+        <button type="button" class="btn" data-act="route-map">在地圖上看路線</button>
+      </div>
+    </div>`;
+  detailEl.querySelector('[data-act="close"]')?.addEventListener('click', () => selectRoute(null));
+  for (const b of detailEl.querySelectorAll<HTMLButtonElement>('[data-select]')) {
+    b.addEventListener('click', () => select(Number(b.dataset.select)));
+  }
+  detailEl.querySelector('[data-act="route-map"]')?.addEventListener('click', () => {
+    // 收起時間表，不然整條路線被蓋住
+    selectedRoute = null;
+    render();
+    switchView('map');
+    map.focusRoute(r.id);
+  });
 }
 
 function renderChooser(items: Item[], now: number): void {
@@ -407,6 +531,12 @@ function renderChooser(items: Item[], now: number): void {
 }
 
 function renderDetail(items: Item[], now: number): void {
+  const route = selectedRoute ? routes.find((r) => r.id === selectedRoute) : undefined;
+  if (route && shownRoutes(items).includes(route)) {
+    renderRouteDetail(route, items, now);
+    return;
+  }
+  selectedRoute = null;
   if (choosing) {
     renderChooser(items, now);
     return;
@@ -430,6 +560,7 @@ function renderDetail(items: Item[], now: number): void {
     </div>
     <div class="sheet-body">
       ${nearbyHtml(it, items)}
+      ${routeBoxHtml(ev, now)}
       <p>類型：${it.spot ? `固定據點（${kindLabel(ev)}）` : kindLabel(ev)}<br>${ev.item ? `發放：${esc(ev.item)}<br>` : ''}${ev.keyword ? `關鍵字：#${esc(ev.keyword)}<br>` : ''}地點：${esc(ev.placeText)}${ev.approxArea ? `<br><span class="approx-note">約略位置：只知道在${esc(ev.approxArea)}，地圖上是${esc(ev.approxArea)}的中心點，實際地點請看原文</span>` : ''}<br>時間：${it.spot ? esc(spotSchedule(it)) : ev.allDay ? `${dateFmt.format(new Date(ev.startAt * 1000))} ${allDayText(ev, false)}` : `${fmtTime(ev.startAt)} – ${fmtTime(ev.endAt)}`}<br>距離：${ev.approxArea ? '約 ' : ''}${formatKm(it.distanceKm)}，${compassLabel(it.bearing)}方 · ${esc(timeLine(it, now))}</p>
       <blockquote>${esc(ev.post.source === 'news' ? ev.post.text.split('\n')[0] : ev.post.text.slice(0, 300))}</blockquote>
       <p class="muted source-line">來源：${esc(sourceLabel(ev))}</p>
@@ -450,6 +581,19 @@ function renderDetail(items: Item[], now: number): void {
     map.focus(ev.id);
   });
   detailEl.querySelector('[data-act="ended"]')?.addEventListener('click', (e) => void sendEnded(ev, e.currentTarget as HTMLButtonElement));
+  detailEl.querySelector('[data-act="route"]')?.addEventListener('click', () => {
+    const r = routeOf(ev);
+    if (r) selectRoute(r.id);
+  });
+}
+
+/** 屬於車掃路線的事件：這一站的時間，和回到整條路線時間表的按鈕 */
+function routeBoxHtml(ev: EventOut, now: number): string {
+  const r = routeOf(ev);
+  const st = stopOf(ev);
+  if (!r) return '';
+  const line = st ? stopText(st, now) : '';
+  return `<div class="route-box"><b>${esc(r.title)}</b>${line ? `：${esc(line)}` : ''}<br><button type="button" class="link-btn" data-act="route">看整條路線與每站時間</button></div>`;
 }
 
 /** 雷達上跟這個疊在一起的其他光點，做成按鈕可以切過去 */
@@ -511,7 +655,21 @@ let choosing: number[] | null = null;
 
 const sameGroup = (a: number[] | null, b: number[]): boolean => !!a && [...a].sort().join() === [...b].sort().join();
 
+function selectRoute(id: string | null): void {
+  selectedRoute = selectedRoute === id ? null : id;
+  selectedId = null;
+  choosing = null;
+  selectedGroup = [];
+  if (selectedRoute) {
+    themeSheet.hidden = true;
+    kwSheet.hidden = true;
+    reportSheet.hidden = true;
+  }
+  render();
+}
+
 function select(id: number | null, group: number[] = []): void {
+  selectedRoute = null;
   if (group.length > 1) {
     // 疊在一起的先列出來讓人選；同一群再點一次就收起
     choosing = sameGroup(choosing, group) ? null : group;
@@ -564,7 +722,7 @@ async function refresh(): Promise<void> {
     return;
   }
   try {
-    events = await fetchEvents(origin, FETCH_RADIUS_KM, kws);
+    [events, routes] = await Promise.all([fetchEvents(origin, FETCH_RADIUS_KM, kws), fetchRoutes()]);
     lastFetchAt = nowSec();
     updatedLabel.textContent = `更新 ${fmtTime(lastFetchAt)}`;
   } catch (e) {
@@ -877,7 +1035,7 @@ function renderRules(): void {
   kwRulesEl.innerHTML = `
     <h3>資料來源</h3>
     <ul>
-      ${src ? `<li><b>官方行程</b>：<a href="${esc(src.official.url)}" target="_blank" rel="noopener">${esc(src.official.name)}</a>，每 ${src.official.intervalMin} 分鐘更新車掃日期、終點與加油點。官網公布車隊抵達終點（靠港）的時間時，終點從那時開始、保留 1 小時，加油點到靠港時間為止；沒公布時間的當成整天，當天都算進行中。</li>
+      ${src ? `<li><b>官方行程</b>：<a href="${esc(src.official.url)}" target="_blank" rel="noopener">${esc(src.official.name)}</a>，${src.official.mapUrl ? `與<a href="${esc(src.official.mapUrl)}" target="_blank" rel="noopener">${esc(src.official.mapName ?? '車掃地圖')}</a>` : ''}，每 ${src.official.intervalMin} 分鐘更新車掃日期、路線、出發與抵達時間、各路段認領人數。起點在出發後保留 15 分鐘；加油點當天整天顯示，到車隊預計經過後 15 分鐘（預計時間用路線長度平均推算）；終點從抵達開始，接著有活動（例如市政開講）就到活動結束，否則保留 1 小時。沒公布時間的當成整天，當天都算進行中。</li>
       <li><b>新聞</b>：${src.news.names.map(esc).join('、')}的 RSS，每 ${src.news.intervalMin} 分鐘讀一次，標題或摘要有關鍵字的報導才判讀。只顯示標題與原文連結。</li>` : ''}
       ${threadsLine}
       ${src?.link ? `<li><b>大家回報</b>：任何人都可以按「＋回報」貼上 Threads 貼文連結（${src.link.maxAgeDays} 天內的公開貼文），系統讀取貼文後用同樣的規則判讀。</li>` : ''}
