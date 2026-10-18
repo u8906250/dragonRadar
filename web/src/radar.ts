@@ -221,6 +221,12 @@ export class Radar {
     this.scaleLabels.appendChild(t);
   }
 
+  /** 外圈（範圍）在螢幕上的半徑像素；雷達沒顯示時回傳 0 */
+  rangePx(): number {
+    const w = this.svg.getBoundingClientRect().width;
+    return w > 0 ? (R * Math.min(w, this.svg.getBoundingClientRect().height)) / SIZE : 0;
+  }
+
   private ratio(km: number): number {
     return radiusRatio(km, this.scaleKm);
   }

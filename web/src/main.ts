@@ -575,6 +575,8 @@ async function refresh(): Promise<void> {
 }
 
 function switchView(v: 'radar' | 'map'): void {
+  // 雷達藏起來前先量外圈多大，地圖照同樣的比例
+  const rangePx = radar.rangePx();
   view = v;
   $('#radar-view').hidden = v !== 'radar';
   $('#map-view').hidden = v !== 'map';
@@ -583,7 +585,7 @@ function switchView(v: 'radar' | 'map'): void {
   $('#scale-chips').hidden = v !== 'radar';
   baseChipsEl.hidden = v !== 'map';
   compassBtn.hidden = v !== 'radar' || !compassSupported();
-  if (v === 'map') map.invalidate();
+  if (v === 'map') map.showRange(scaleKm, rangePx);
 }
 
 function scaleKmFor(setting: ScaleSetting): number {

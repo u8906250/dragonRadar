@@ -55,6 +55,8 @@ export class MapView {
   private layer: Leaflet.LayerGroup | null = null;
   private originMarker: Leaflet.CircleMarker | null = null;
   private accuracyCircle: Leaflet.Circle | null = null;
+  /** 雷達目前的範圍（外圈），切到地圖時用同樣的比例 */
+  private rangeCircle: Leaflet.Circle | null = null;
   private readonly markers = new Map<number, Leaflet.CircleMarker>();
   /** 座標一樣合成一個點時，每個項目對應到畫出來的那個標記 */
   private readonly leaderOf = new Map<number, number>();
@@ -91,7 +93,7 @@ export class MapView {
       const [mod] = await Promise.all([import('leaflet'), import('leaflet/dist/leaflet.css')]);
       const L = ((mod as unknown as { default?: typeof Leaflet }).default ?? mod) as typeof Leaflet;
       this.L = L;
-      const map = L.map(this.el, { zoomControl: true, attributionControl: true }).setView([this.origin.lat, this.origin.lng], 15);
+      const map = L.map(this.el, { zoomControl: true, attributionControl: true, zoomSnap: 0 }).setView([this.origin.lat, this.origin.lng], 15);
       map.attributionControl.setPrefix(false);
       this.map = map;
       this.layer = L.layerGroup().addTo(map);
@@ -102,6 +104,15 @@ export class MapView {
         opacity: 0.5,
         fillColor: '#3b82f6',
         fillOpacity: 0.12,
+        interactive: false,
+      }).addTo(map);
+      this.rangeCircle = L.circle([this.origin.lat, this.origin.lng], {
+        radius: 0,
+        color: '#888888',
+        weight: 1.5,
+        opacity: 0.6,
+        dashArray: '6 6',
+        fill: false,
         interactive: false,
       }).addTo(map);
       this.originMarker = L.circleMarker([this.origin.lat, this.origin.lng], {
@@ -139,6 +150,7 @@ export class MapView {
     this.originMarker.setLatLng([this.origin.lat, this.origin.lng]);
     this.accuracyCircle.setLatLng([this.origin.lat, this.origin.lng]);
     this.accuracyCircle.setRadius(this.accuracy ?? 0);
+    this.rangeCircle?.setLatLng([this.origin.lat, this.origin.lng]);
   }
 
   private pushItems(): void {
@@ -206,6 +218,28 @@ export class MapView {
     this.accuracy = accuracyM;
     this.pushOrigin();
     if (pan && this.map) this.map.setView([p.lat, p.lng], Math.max(this.map.getZoom(), 15), { animate: true });
+  }
+
+  /**
+   * 切到地圖時呼叫：以目前位置為中心，每公里的像素和雷達一樣（px = 雷達外圈的半徑像素），
+   * 虛線圈就是雷達的外圈。不知道雷達多大時，讓畫面短邊剛好裝下範圍。
+   */
+  showRange(km: number, px: number): void {
+    void this.ensure().then(() => {
+      const L = this.L;
+      const map = this.map;
+      if (!L || !map) return;
+      map.invalidateSize();
+      const center = L.latLng(this.origin.lat, this.origin.lng);
+      this.rangeCircle?.setLatLng(center).setRadius(km * 1000);
+      const size = map.getSize();
+      const fit = Math.min(size.x, size.y) / 2;
+      const radiusPx = px > 0 ? Math.min(px, fit) : fit;
+      if (radiusPx <= 0) return;
+      // Web Mercator：縮放 z 時每像素 = 40075016.686 × cos(緯度) ÷ 2^(z+8) 公尺
+      const z = Math.log2((40075016.686 * Math.cos((center.lat * Math.PI) / 180) * radiusPx) / (km * 1000)) - 8;
+      map.setView(center, Math.min(Math.max(z, map.getMinZoom()), map.getMaxZoom()), { animate: false });
+    });
   }
 
   setPickMode(on: boolean): void {
