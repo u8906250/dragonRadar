@@ -1,7 +1,8 @@
 import './styles.css';
 import { addKeyword, fetchEvents, fetchHealth, fetchKeywords, fetchRoutes, reportEnded, submitLink } from './api';
 import { compassSupported, startCompass } from './compass';
-import { bearingDeg, compassLabel, formatKm, haversineKm, shuangbeiRadiusKm, taiwanRadiusKm, type LatLng } from './geo';
+import { bearingDeg, compassLabel, formatKm, haversineKm, taiwanRadiusKm, type LatLng } from './geo';
+import { inShuangbei, SHUANGBEI_RINGS, shuangbeiRadiusKm } from './shuangbei';
 import { crowdOf, MapView, type BaseMap } from './map';
 import { beep, ensureNotificationPermission, notificationState, showBanner, systemNotify, unlockAudio } from './notify';
 import { Radar, type RadarRoute } from './radar';
@@ -281,6 +282,37 @@ function timeLine(it: Item, now: number): string {
   return `${new Date(ev.startAt * 1000).toLocaleDateString('zh-TW', { timeZone: 'Asia/Taipei', month: 'numeric', day: 'numeric' })} ${fmtTime(ev.startAt)} 開始`;
 }
 
+// ---- 雷達範圍 ----
+const scopeCache = new Map<string, boolean>();
+
+/** 在不在雷達範圍內：距離在範圍內；選「雙北」時還要在台北市或新北市裡（基隆、桃園、宜蘭不算） */
+function inScope(ev: EventOut, distanceKm: number): boolean {
+  if (distanceKm > scaleKm) return false;
+  if (scaleSetting !== 'region') return true;
+  const key = `${ev.lat},${ev.lng}`;
+  let v = scopeCache.get(key);
+  if (v === undefined) {
+    v = inShuangbei(ev);
+    scopeCache.set(key, v);
+  }
+  return v;
+}
+
+const outLabel = (): string => (scaleSetting === 'region' ? '雙北以外' : '雷達範圍外');
+
+let outlineFor = '';
+let radarOutline: Array<Array<{ bearing: number; distanceKm: number }>> = [];
+
+/** 「雙北」時雷達上畫縣市界；位置變了才重算 */
+function updateOutline(): void {
+  const key = scaleSetting === 'region' ? `${origin.lat},${origin.lng}` : '';
+  if (key === outlineFor) return;
+  outlineFor = key;
+  radarOutline = key ? SHUANGBEI_RINGS.map((ring) => ring.map(([lat, lng]) => ({ bearing: bearingDeg(origin, { lat, lng }), distanceKm: haversineKm(origin, { lat, lng }) }))) : [];
+  radar.setOutline(radarOutline);
+  map.setOutline(key ? SHUANGBEI_RINGS : []);
+}
+
 // ---- 車掃路線 ----
 const routeOf = (ev: EventOut): RouteOut | undefined => routes.find((r) => r.postId === ev.post.id);
 const stopOf = (ev: EventOut): RouteStop | undefined => routeOf(ev)?.stops.find((s) => s.title === ev.title);
@@ -341,8 +373,9 @@ function render(): void {
   const all = computeItems(now);
   const spotTotal = all.filter((it) => it.spot).length;
   const items = showSpots ? all : all.filter((it) => !it.spot);
-  // 車掃路線上的點出發前也畫（淡色），看得到路線經過哪裡
-  const visible = items.filter((it) => it.phase !== 'later' || routeOf(it.ev));
+  // 車掃路線上的點出發前也畫（淡色），看得到路線經過哪裡；「雙北」時雙北以外的不畫
+  const visible = items.filter((it) => (it.phase !== 'later' || routeOf(it.ev)) && (scaleSetting !== 'region' || inScope(it.ev, it.distanceKm)));
+  updateOutline();
   filterRow.hidden = spotTotal === 0;
   spotToggle.textContent = `${showSpots ? '✓ ' : ''}顯示固定據點（${spotTotal}）`;
   spotToggle.classList.toggle('on', showSpots);
@@ -394,7 +427,7 @@ function render(): void {
     if (seenActive.has(seenKey)) continue;
     seenActive.add(seenKey);
     // 整天的沒有「開始」的時間點，不然半夜 12 點會一起響
-    if (!notifiedOnce || it.distanceKm > scaleKm || it.ev.allDay) continue;
+    if (!notifiedOnce || !inScope(it.ev, it.distanceKm) || it.ev.allDay) continue;
     beep(theme.sound);
     try {
       navigator.vibrate?.([120, 80, 160]);
@@ -410,7 +443,7 @@ function render(): void {
 }
 
 /** 清單上的一列：一般事件，或合成一張卡片的車掃路線 */
-type Row = { it: Item; route?: undefined; phase: Phase; distanceKm: number; spot: boolean; sortAt: number } | { route: RouteOut; it?: undefined; phase: Phase; distanceKm: number; spot: false; sortAt: number };
+type Row = { it: Item; route?: undefined; phase: Phase; distanceKm: number; inScope: boolean; spot: boolean; sortAt: number } | { route: RouteOut; it?: undefined; phase: Phase; distanceKm: number; inScope: boolean; spot: false; sortAt: number };
 
 /** 車掃卡片的狀態跟著車隊走：還沒出發是稍後／即將開始，車掃中、抵達後的活動進行中算進行中 */
 function routePhase(r: RouteOut, members: Item[], now: number): Phase {
@@ -426,13 +459,13 @@ function listRows(items: Item[], now: number): Row[] {
   for (const it of items) {
     const r = routeOf(it.ev);
     if (!r) {
-      rows.push({ it, phase: it.phase, distanceKm: it.distanceKm, spot: !!it.spot, sortAt: it.ev.startAt });
+      rows.push({ it, phase: it.phase, distanceKm: it.distanceKm, inScope: inScope(it.ev, it.distanceKm), spot: !!it.spot, sortAt: it.ev.startAt });
       continue;
     }
     if (seen.has(r.id)) continue;
     seen.add(r.id);
     const members = routeItems(r, items);
-    rows.push({ route: r, phase: routePhase(r, members, now), distanceKm: Math.min(...members.map((m) => m.distanceKm)), spot: false, sortAt: r.departAt ?? it.ev.startAt });
+    rows.push({ route: r, phase: routePhase(r, members, now), distanceKm: Math.min(...members.map((m) => m.distanceKm)), inScope: members.some((m) => inScope(m.ev, m.distanceKm)), spot: false, sortAt: r.departAt ?? it.ev.startAt });
   }
   return rows;
 }
@@ -442,8 +475,8 @@ const PHASE_TITLE: Partial<Record<Phase, string>> = { active: '進行中', soon:
 function renderList(items: Item[], now: number): void {
   // 摘要和清單用同一套「列」來算：車掃路線的起點、加油點、終點合成一張卡片，只算一個
   const rows = listRows(items, now);
-  const inRange = rows.filter((r) => r.distanceKm <= scaleKm);
-  const outRange = rows.filter((r) => r.distanceKm > scaleKm);
+  const inRange = rows.filter((r) => r.inScope);
+  const outRange = rows.filter((r) => !r.inScope);
   const singles = inRange.filter((r) => !r.spot);
   const spotsIn = inRange.filter((r) => r.spot);
   const byPhase = (ph: Phase): Row[] =>
@@ -454,11 +487,11 @@ function renderList(items: Item[], now: number): void {
   const sections: Array<{ title: string; rows: Row[] }> = [
     ...(['active', 'soon', 'later'] as const).map((ph) => ({ title: PHASE_TITLE[ph] as string, rows: byPhase(ph) })),
     { title: '固定據點', rows: spotsIn },
-    { title: '雷達範圍外', rows: outRange },
+    { title: outLabel(), rows: outRange },
   ];
   const counts = { active: byPhase('active').length, soon: byPhase('soon').length, later: byPhase('later').length };
   const none = followed().length === 0;
-  const outText = outRange.length > 0 ? `・範圍外 ${outRange.length} 個` : '';
+  const outText = outRange.length > 0 ? `・${scaleSetting === 'region' ? '雙北以外' : '範圍外'} ${outRange.length} 個` : '';
   const spotText = spotsIn.length > 0 ? `・據點 ${spotsIn.length} 個` : '';
   countLabel.textContent = none
     ? '還沒追蹤關鍵字'
@@ -481,7 +514,7 @@ function renderList(items: Item[], now: number): void {
 
 function itemCard(it: Item, now: number): HTMLLIElement {
   const li = document.createElement('li');
-  li.className = `ev phase-${it.phase} kind-${it.ev.kind}${it.spot ? ' spot' : ''}${it.distanceKm > scaleKm ? ' out-of-range' : ''}${it.ev.id === selectedId ? ' selected' : ''}`;
+  li.className = `ev phase-${it.phase} kind-${it.ev.kind}${it.spot ? ' spot' : ''}${inScope(it.ev, it.distanceKm) ? '' : ' out-of-range'}${it.ev.id === selectedId ? ' selected' : ''}`;
   li.dataset.id = String(it.ev.id);
   li.innerHTML = `
     <div class="ev-title"><span class="dot"></span><span class="kind-tag">${tagLabel(it)}</span>${esc(it.ev.title)}${it.ev.item ? ` <span class="muted">· ${esc(it.ev.item)}</span>` : ''}${followed().length > 1 && it.ev.keyword ? `<span class="ev-kw">#${esc(it.ev.keyword)}</span>` : ''}</div>
@@ -497,7 +530,7 @@ function routeCard(r: RouteOut, phase: Phase, items: Item[], now: number): HTMLL
   const start = r.stops.find((s) => s.kind === 'start');
   const end = r.stops.find((s) => s.kind === 'end');
   const li = document.createElement('li');
-  li.className = `ev route-card phase-${phase} kind-activity${nearest && nearest.distanceKm > scaleKm ? ' out-of-range' : ''}${selectedRoute === r.id ? ' selected' : ''}`;
+  li.className = `ev route-card phase-${phase} kind-activity${mine.some((m) => inScope(m.ev, m.distanceKm)) ? '' : ' out-of-range'}${selectedRoute === r.id ? ' selected' : ''}`;
   li.innerHTML = `
     <div class="ev-title"><span class="dot"></span><span class="kind-tag">車掃</span>${esc(r.title)} <span class="muted">· ${r.stops.length} 站</span></div>
     <div class="ev-meta">${esc(start?.name ?? '')} → ${esc(end?.name ?? '')} · 全長 ${routeKm(r).toFixed(1)} km${nearest ? ` · 最近 ${formatKm(nearest.distanceKm)}` : ''}</div>

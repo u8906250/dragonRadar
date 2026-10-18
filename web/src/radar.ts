@@ -85,6 +85,8 @@ export class Radar {
   private readonly roseLayer: SVGGElement;
   private readonly routeLayer: SVGGElement;
   private routes: RadarRoute[] = [];
+  private outline: Array<Array<{ bearing: number; distanceKm: number }>> = [];
+  private readonly outlineLayer: SVGGElement;
   private scaleKm = 5;
   private readonly pointers = new Map<number, { x: number; y: number }>();
   private pinchDist = 0;
@@ -140,6 +142,7 @@ export class Radar {
         </g>
       </g>
       <g class="scale-labels"></g>
+      <g class="outline" clip-path="url(#rg-clip)"></g>
       <g class="routes" clip-path="url(#rg-clip)"></g>
       <circle class="me" cx="${C}" cy="${C}" r="5" />
       <g class="blips"></g>
@@ -150,6 +153,7 @@ export class Radar {
     this.rings = this.svg.querySelector('.rings') as SVGGElement;
     this.roseLayer = this.svg.querySelector('.rose') as SVGGElement;
     this.routeLayer = this.svg.querySelector('.routes') as SVGGElement;
+    this.outlineLayer = this.svg.querySelector('.outline') as SVGGElement;
     for (const [letter, deg] of ROSE) {
       const t = el('text', { class: `rose-letter rose-${letter.toLowerCase()}`, 'text-anchor': 'middle', 'dominant-baseline': 'middle', 'data-deg': deg });
       t.textContent = letter;
@@ -257,18 +261,33 @@ export class Radar {
     this.draw();
   }
 
+  /** 範圍的實際形狀（例如雙北的縣市界），畫成淡淡的輪廓；空陣列就不畫 */
+  setOutline(rings: Array<Array<{ bearing: number; distanceKm: number }>>): void {
+    this.outline = rings;
+    this.draw();
+  }
+
+  private pathOf(points: Array<{ bearing: number; distanceKm: number }>, close = false): string {
+    const d = points
+      .map((pt, i) => {
+        const p = polar(pt.bearing - this.heading, this.ratio(pt.distanceKm) * (R - 8));
+        return `${i === 0 ? 'M' : 'L'}${p.x.toFixed(1)} ${p.y.toFixed(1)}`;
+      })
+      .join(' ');
+    return close ? `${d} Z` : d;
+  }
+
+  private drawOutline(): void {
+    this.outlineLayer.replaceChildren();
+    for (const ring of this.outline) if (ring.length > 2) this.outlineLayer.appendChild(el('path', { class: 'region-outline', d: this.pathOf(ring, true) }));
+  }
+
   /** 路線畫在光點下面；超出範圍的部分被外圈裁掉 */
   private drawRoutes(): void {
     this.routeLayer.replaceChildren();
     for (const r of this.routes) {
       if (r.state === 'done' || r.points.length < 2) continue;
-      const d = r.points
-        .map((pt, i) => {
-          const p = polar(pt.bearing - this.heading, this.ratio(pt.distanceKm) * (R - 8));
-          return `${i === 0 ? 'M' : 'L'}${p.x.toFixed(1)} ${p.y.toFixed(1)}`;
-        })
-        .join(' ');
-      const path = el('path', { class: `route route-${r.state}`, d });
+      const path = el('path', { class: `route route-${r.state}`, d: this.pathOf(r.points) });
       this.routeLayer.appendChild(path);
     }
   }
@@ -306,6 +325,7 @@ export class Radar {
   }
 
   private draw(): void {
+    this.drawOutline();
     this.drawRoutes();
     this.blipLayer.replaceChildren();
     const pos = new Map<number, { x: number; y: number; out: boolean }>();

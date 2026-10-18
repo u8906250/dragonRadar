@@ -82,6 +82,9 @@ export class MapView {
   private rangeCircle: Leaflet.Circle | null = null;
   private readonly markers = new Map<number, Leaflet.CircleMarker>();
   private routeLayer: Leaflet.LayerGroup | null = null;
+  /** 「雙北」範圍時的縣市界 */
+  private outline: Leaflet.Polygon | null = null;
+  private outlineRings: Array<Array<[number, number]>> = [];
   private routes: MapRoute[] = [];
   /** 座標一樣合成一個點時，每個項目對應到畫出來的那個標記 */
   private readonly leaderOf = new Map<number, number>();
@@ -155,6 +158,7 @@ export class MapView {
       });
       this.applyBase();
       this.pushOrigin();
+      this.pushOutline();
       this.pushRoutes();
       this.pushItems();
       // 地圖容器剛從 hidden 變成顯示，尺寸要再算一次
@@ -305,6 +309,24 @@ export class MapView {
   render(items: MapItem[]): void {
     this.items = items;
     this.pushItems();
+  }
+
+  /** 範圍的實際形狀（雙北的縣市界）；空陣列就不畫 */
+  setOutline(rings: Array<Array<[number, number]>>): void {
+    if (rings === this.outlineRings) return;
+    this.outlineRings = rings;
+    this.pushOutline();
+  }
+
+  private pushOutline(): void {
+    const L = this.L;
+    const map = this.map;
+    if (!L || !map) return;
+    this.outline?.remove();
+    this.outline = null;
+    if (this.outlineRings.length === 0) return;
+    this.outline = L.polygon(this.outlineRings, { color: '#03615a', weight: 3.5, opacity: 0.9, dashArray: '8 6', fillColor: '#03615a', fillOpacity: 0.08, interactive: false }).addTo(map);
+    this.outline.bringToBack();
   }
 
   setRoutes(routes: MapRoute[]): void {
