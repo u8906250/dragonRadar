@@ -4,7 +4,8 @@ import { DEFAULT_DURATION_SEC, ENDED_WORDS, MAX_FUTURE_SEC, MIN_CONFIDENCE, SPOT
 import { runModel } from './extract';
 import { geocode } from './geocode';
 import { ingestNews, NEWS_FEEDS } from './sources/news';
-import { syncVoyage, VOYAGE_PAGE } from './sources/voyage';
+import { listRoutes, syncVoyage, VOYAGE_PAGE } from './sources/voyage';
+import { CURRENT_MAP_URL } from './sources/currentmap';
 import { apifyTrial } from './sources/apify';
 import { fetchThreadsPost, resolveThreadsLink, shortcodeToUnix } from './sources/link';
 import { ENDED_REPORTS_NEEDED, MAX_LINK_AGE_SEC, ReportError, ipHash, purgeReports, recheckLinks, reportEnded, submitLink } from './reports';
@@ -97,6 +98,11 @@ async function handle(req: Request, env: Env, ctx: ExecutionContext): Promise<Re
     return jsonResponse({ now, events });
   }
 
+  // 今天的車掃路線（實際路徑、各站預計時間、各路段認領人數）
+  if (req.method === 'GET' && path === '/api/routes') {
+    return jsonResponse({ now, routes: await listRoutes(env, now) });
+  }
+
   if (req.method === 'GET' && path === '/api/keywords') {
     const active = await listActiveKeywords(env, now);
     return jsonResponse({
@@ -116,7 +122,7 @@ async function handle(req: Request, env: Env, ctx: ExecutionContext): Promise<Re
         sources: {
           threads: env.THREADS_SEARCH_STATUS === 'approved' ? 'approved' : 'review',
           link: { maxAgeDays: MAX_LINK_AGE_SEC / 86400, recheckMin: 30, endedReportsNeeded: ENDED_REPORTS_NEEDED },
-          official: { name: '台北大洋流「未來航線」', url: VOYAGE_PAGE, intervalMin: 60 },
+          official: { name: '台北大洋流「未來航線」', url: VOYAGE_PAGE, mapName: '大洋流車掃地圖', mapUrl: CURRENT_MAP_URL, intervalMin: 10 },
           news: { names: [...new Set(NEWS_FEEDS.map((f) => f.name))], intervalMin: 30 },
         },
         timezone: 'Asia/Taipei',
@@ -377,9 +383,9 @@ async function runScheduled(env: Env, cron: string): Promise<void> {
   const client = await makeClient(env);
   const ingest = await ingestAll(env, client, now);
   const backlog = await processBacklog(env, now);
-  // 官方航線每小時、新聞每 30 分鐘（cron 每 10 分鐘跑一次）
+  // 官方航線與車掃地圖每次都讀（路段認領人數會一直變），新聞每 30 分鐘（cron 每 10 分鐘跑一次）
   const minute = new Date(now * 1000).getUTCMinutes();
-  const voyage = minute < 10 ? await syncVoyage(env, now).catch((e) => ({ error: String(e) })) : null;
+  const voyage = await syncVoyage(env, now).catch((e) => ({ error: String(e) }));
   const news = minute % 30 < 10 ? await ingestNews(env, now).catch((e) => ({ error: String(e) })) : null;
   const lifecycle = await updateLifecycle(env, client, now);
   const links = await recheckLinks(env, now).catch((e) => ({ error: String(e) }));

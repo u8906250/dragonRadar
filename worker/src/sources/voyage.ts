@@ -1,6 +1,7 @@
 import type { Env } from '../env';
 import { geocodeFirst } from '../geocode';
 import { nowSec } from '../util';
+import { CURRENT_MAP_URL, fetchCurrentMap, projectOnRoute, routeLine, type CurrentMapRoute, type LatLngPair } from './currentmap';
 
 /** 台北大洋流官網「未來航線」的公開資料 */
 const VOYAGE_URL = 'https://current.puma.taipei/api/voyage';
@@ -9,8 +10,14 @@ export const VOYAGE_PAGE = 'https://current.puma.taipei/route/';
 const UA = 'Mozilla/5.0 (compatible; CurrentRadar/1.0; +https://current-radar.pages.dev)';
 const DAY = 86400;
 const LOOKAHEAD_DAYS = 14;
-/** 車隊抵達終點（靠港）後，在雷達上保留多久 */
-export const DOCK_KEEP_SEC = 3600;
+/** 出發點在出發後保留多久 */
+export const DEPART_KEEP_SEC = 15 * 60;
+/** 車隊預計經過加油點後，加油點再保留多久 */
+export const PASS_KEEP_SEC = 15 * 60;
+/** 抵達終點後沒有其他活動時，終點保留多久 */
+export const ARRIVE_KEEP_SEC = 3600;
+/** 只有出發時間、沒有抵達時間時，假設車掃走多久 */
+export const PARADE_GUESS_SEC = 3600;
 
 type RouteStep = string | { cheer: string; addr: string };
 
@@ -44,37 +51,65 @@ export function parseTicketTime(s: string | undefined, year: string): number | n
   return Number.isNaN(ms) ? null : Math.floor(ms / 1000);
 }
 
-function summary(stop: Stop, ticket: number | null): string {
+const hm = (unix: number): string => new Date(unix * 1000).toLocaleTimeString('zh-TW', { timeZone: 'Asia/Taipei', hour: '2-digit', minute: '2-digit', hour12: false });
+
+interface Plan {
+  depart: number | null;
+  arrive: number | null;
+  after: CurrentMapRoute['after'];
+  map: CurrentMapRoute | null;
+}
+
+function summary(stop: Stop, plan: Plan): string {
   const route = (stop.route ?? []).map((r) => (typeof r === 'string' ? r : `${r.cheer}（${r.addr}）`)).join(' → ');
-  const lines = [
-    `台北大洋流 ${stop.area ?? ''} 車掃`.trim(),
-    `日期：${stop.date}`,
-    `終點：${stop.place}${ticket ? `（${new Date(ticket * 1000).toLocaleTimeString('zh-TW', { timeZone: 'Asia/Taipei', hour: '2-digit', minute: '2-digit', hour12: false })} 靠港）` : ''}`,
-  ];
+  const { depart, arrive, after, map } = plan;
+  const lines = [`台北大洋流 ${stop.area ?? ''} 車掃`.trim(), `日期：${stop.date}`];
+  if (depart) lines.push(`時間：${hm(depart)} 出發${arrive ? `，${map?.arrive ? '' : '約 '}${hm(arrive)} 抵達${stop.place}` : ''}`);
+  lines.push(`終點：${stop.place}`);
+  if (after) lines.push(`抵達後：${after.name} ${hm(after.start)}–${hm(after.end)}（${after.place}）`);
   if (route) lines.push(`路線：${route}`);
+  if (map) lines.push(`車掃地圖：${map.slug}，${map.segments.length} 段，${(map.segments.reduce((n, s) => n + s.lengthM, 0) / 1000).toFixed(1)} km`);
   if (stop.changed) lines.push(`航線變更：${stop.changed}`);
   return lines.join('\n');
+}
+
+/** 路線上的一站，給前端畫路線與時間表；title 跟事件標題一樣，前端靠它對應 */
+export interface RouteStop {
+  kind: 'start' | 'cheer' | 'end';
+  title: string;
+  name: string;
+  lat: number | null;
+  lng: number | null;
+  /** 出發／預計經過／抵達時間 */
+  at: number | null;
 }
 
 export interface VoyageResult {
   stops: number;
   updated: number;
   events: number;
+  routes: number;
   errors: string[];
 }
 
 export async function syncVoyage(env: Env, now = nowSec()): Promise<VoyageResult> {
-  const out: VoyageResult = { stops: 0, updated: 0, events: 0, errors: [] };
+  const out: VoyageResult = { stops: 0, updated: 0, events: 0, routes: 0, errors: [] };
   let stops: Stop[] = [];
   let config: VoyageConfig = {};
+  let cmap: CurrentMapRoute | null = null;
   try {
-    const [v, c] = await Promise.all([
+    const [v, c, m] = await Promise.all([
       fetch(VOYAGE_URL, { headers: { 'user-agent': UA, accept: 'application/json' } }),
       fetch(CONFIG_URL, { headers: { 'user-agent': UA, accept: 'application/json' } }),
+      fetchCurrentMap().catch((e) => {
+        out.errors.push(String(e));
+        return null;
+      }),
     ]);
     if (!v.ok) throw new Error(`voyage HTTP ${v.status}`);
     stops = ((await v.json()) as { stops?: Stop[] }).stops ?? [];
     if (c.ok) config = (await c.json()) as VoyageConfig;
+    cmap = m;
   } catch (e) {
     out.errors.push(String(e));
     return out;
@@ -84,20 +119,35 @@ export async function syncVoyage(env: Env, now = nowSec()): Promise<VoyageResult
     const day = taipeiMidnight(stop.date);
     if (!stop.id || Number.isNaN(day) || stop.ended || day + DAY <= now || day > now + LOOKAHEAD_DAYS * DAY) continue;
     out.stops++;
+    const fleet = (stop.area ?? '').replace(/艦隊$/, '');
+    const map = cmap && cmap.date === stop.date && (!fleet || cmap.name.includes(fleet)) ? cmap : null;
+    // 官網的船票時間是車掃出發時間（車掃地圖寫「車掃 17:30–18:30」）。以車掃地圖為準，沒有才用船票時間
     const ticket = config.ticketPlace === stop.place ? parseTicketTime(config.ticketTime, stop.date.slice(0, 4)) : null;
-    const text = summary(stop, ticket);
+    const depart = map?.depart ?? ticket;
+    const arrive = map?.arrive ?? (depart ? depart + PARADE_GUESS_SEC : null);
+    const plan: Plan = { depart, arrive, after: map?.after ?? null, map };
+    const text = summary(stop, plan);
     const postId = `voyage-${stop.id}`;
     const existing = await env.DB.prepare('SELECT text FROM posts WHERE id = ?').bind(postId).first<{ text: string }>();
-    if (existing?.text === text) continue;
+    const route = map ? await env.DB.prepare('SELECT id FROM routes WHERE id = ?').bind(map.slug).first<{ id: string }>() : null;
+    if (existing?.text === text && (!map || route)) {
+      // 時間和路線都沒變：只更新各路段的認領人數
+      if (map) {
+        await env.DB.prepare('UPDATE routes SET segments = ?, updated_at = ? WHERE id = ?').bind(JSON.stringify(map.segments), now, map.slug).run();
+        out.routes++;
+      }
+      continue;
+    }
 
     // 航線有變更：整批重建這一站的事件
     await env.DB.batch([
       env.DB.prepare('DELETE FROM events WHERE post_id = ?').bind(postId),
+      env.DB.prepare('DELETE FROM routes WHERE post_id = ?').bind(postId),
       env.DB.prepare(
         `INSERT INTO posts (id, username, text, permalink, posted_at, keyword, source, fetched_at, processed_at)
          VALUES (?, '台北大洋流', ?, ?, ?, '洋流', 'official', ?, ?)
          ON CONFLICT(id) DO UPDATE SET text = excluded.text, fetched_at = excluded.fetched_at, processed_at = excluded.processed_at`,
-      ).bind(postId, text, VOYAGE_PAGE, now, now, now),
+      ).bind(postId, text, map ? CURRENT_MAP_URL : VOYAGE_PAGE, now, now, now),
     ]);
     out.updated++;
 
@@ -107,25 +157,106 @@ export async function syncVoyage(env: Env, now = nowSec()): Promise<VoyageResult
          VALUES (?, 'activity', ?, NULL, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?)`,
       ).bind(postId, title, start, end, placeText, placeQuery, lat, lng, lat === null ? 'unlocated' : start <= now ? 'active' : 'upcoming', allDay ? 1 : 0, now, now);
 
-    const fleet = (stop.area ?? '').replace(/艦隊$/, '');
     const dayEnd = day + DAY - 1;
-    // 官網船票的時間是車隊抵達終點（靠港）的時間：終點從那時開始、保留 1 小時；
-    // 加油點都在終點之前經過，所以到靠港時間為止。沒公布時間就當整天。
-    const cheerEnd = ticket ?? dayEnd;
-    const stmts = [
-      ticket
-        ? insert(`${fleet}靠港・${stop.place}`, stop.place, `台北市 ${stop.place}`, stop.latlng?.[0] ?? null, stop.latlng?.[1] ?? null, ticket, ticket + DOCK_KEEP_SEC, false)
-        : insert(`${fleet}車掃・${stop.place}`, stop.place, `台北市 ${stop.place}`, stop.latlng?.[0] ?? null, stop.latlng?.[1] ?? null, day, dayEnd, true),
-    ];
+    const stmts = [];
+    const routeStops: RouteStop[] = [];
+    const line = map ? routeLine(map.segments) : null;
+    const total = line ? line.cum[line.cum.length - 1] : 0;
+    // 沒有即時位置，假設車隊等速前進，用累計距離推算經過各點的時間
+    const timeAt = (m: number): number | null => (depart && arrive && total > 0 ? Math.round(depart + ((arrive - depart) * m) / total) : null);
+
+    // 起點：車掃地圖第一段的起點，沒有就用官網路線的第一站
+    const firstStep = (stop.route ?? []).find((r): r is string => typeof r === 'string');
+    const startName = map?.segments[0].from.replace(/^起點/, '').trim() || firstStep || '';
+    if (startName) {
+      let p: { lat: number; lng: number } | null = map ? { lat: map.segments[0].path[0][0], lng: map.segments[0].path[0][1] } : null;
+      if (!p) p = await geocodeFirst(env, [`台北市 ${startName}`]);
+      const title = `${fleet}出發・${startName}`;
+      routeStops.push({ kind: 'start', title, name: startName, lat: p?.lat ?? null, lng: p?.lng ?? null, at: depart });
+      stmts.push(depart ? insert(title, startName, `台北市 ${startName}`, p?.lat ?? null, p?.lng ?? null, depart, depart + DEPART_KEEP_SEC, false) : insert(title, startName, `台北市 ${startName}`, p?.lat ?? null, p?.lng ?? null, day, dayEnd, true));
+    }
+
+    // 加油點：一整天都在（大家會先去等），到車隊預計經過後 15 分鐘
+    let fromM = 0;
     for (const r of stop.route ?? []) {
       if (typeof r === 'string' || !r.addr) continue;
-      // OpenStreetMap 常沒有台灣門牌，查不到就退到路段（位置是大概的）
-      const street = r.addr.replace(/\d+(-\d+)?號.*$/, '').replace(/\d+巷.*$/, '').trim();
-      const p = await geocodeFirst(env, [`台北市 ${r.addr}`, `台北市 ${r.cheer}`, street ? `台北市 ${street}` : ''].filter(Boolean));
-      stmts.push(insert(`加油點・${r.cheer}`, `${r.cheer}（${r.addr}）`, `台北市 ${r.addr}`, p?.lat ?? null, p?.lng ?? null, day, cheerEnd, true));
+      const key = r.cheer.replace(/(加油點|加油站|服務處)$/, '');
+      // 車掃地圖的路段名稱有寫到的（例如「捷運永春站 許淑華加油站」）直接用它的座標，比地址查詢準
+      const named = map?.segments.find((s) => key && s.to.includes(key));
+      let p: LatLngPair | null = named ? named.path[named.path.length - 1] : null;
+      if (!p) {
+        // OpenStreetMap 常沒有台灣門牌，查不到就退到路段（位置是大概的）
+        const street = r.addr.replace(/\d+(-\d+)?號.*$/, '').replace(/\d+巷.*$/, '').trim();
+        const g = await geocodeFirst(env, [`台北市 ${r.addr}`, `台北市 ${r.cheer}`, street ? `台北市 ${street}` : ''].filter(Boolean));
+        if (g) p = [g.lat, g.lng];
+      }
+      const proj = line && p ? projectOnRoute(line, p, fromM) : null;
+      // 加油點一定在路線上：地址查到的位置離路線太遠，就移到路線上最近的地方
+      if (proj && !named && proj.offM > 60) p = proj.at;
+      if (proj) fromM = proj.m;
+      const pass = proj ? timeAt(proj.m) : null;
+      const title = `加油點・${r.cheer}`;
+      routeStops.push({ kind: 'cheer', title, name: r.cheer, lat: p?.[0] ?? null, lng: p?.[1] ?? null, at: pass });
+      stmts.push(insert(title, `${r.cheer}（${r.addr}）`, `台北市 ${r.addr}`, p?.[0] ?? null, p?.[1] ?? null, day, pass ? pass + PASS_KEEP_SEC : (arrive ?? dayEnd), true));
+    }
+
+    // 終點：抵達後有活動（例如市政開講）就用那個活動，否則保留 1 小時
+    const lastPath = map?.segments[map.segments.length - 1].path;
+    const endLL: LatLngPair | null = lastPath ? lastPath[lastPath.length - 1] : stop.latlng ?? null;
+    const after = plan.after;
+    const endTitle = after ? `${after.name}・${stop.place}` : `${fleet}抵達・${stop.place}`;
+    routeStops.push({ kind: 'end', title: endTitle, name: stop.place, lat: endLL?.[0] ?? null, lng: endLL?.[1] ?? null, at: arrive });
+    if (after) stmts.push(insert(endTitle, stop.place, `台北市 ${stop.place}`, endLL?.[0] ?? null, endLL?.[1] ?? null, Math.min(after.start, arrive ?? after.start), after.end, false));
+    else if (arrive) stmts.push(insert(endTitle, stop.place, `台北市 ${stop.place}`, endLL?.[0] ?? null, endLL?.[1] ?? null, arrive, arrive + ARRIVE_KEEP_SEC, false));
+    else stmts.push(insert(`${fleet}車掃・${stop.place}`, stop.place, `台北市 ${stop.place}`, endLL?.[0] ?? null, endLL?.[1] ?? null, day, dayEnd, true));
+
+    if (map) {
+      const showUntil = Math.max(after?.end ?? 0, (arrive ?? 0) + ARRIVE_KEEP_SEC, depart ? 0 : dayEnd);
+      stmts.push(
+        env.DB.prepare(
+          `INSERT INTO routes (id, post_id, title, day_start, depart_at, arrive_at, show_until, claim_url, stops, segments, updated_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+           ON CONFLICT(id) DO UPDATE SET post_id = excluded.post_id, title = excluded.title, day_start = excluded.day_start, depart_at = excluded.depart_at,
+             arrive_at = excluded.arrive_at, show_until = excluded.show_until, claim_url = excluded.claim_url, stops = excluded.stops,
+             segments = excluded.segments, updated_at = excluded.updated_at`,
+        ).bind(map.slug, postId, map.name, day, depart, arrive, showUntil, CURRENT_MAP_URL, JSON.stringify(routeStops), JSON.stringify(map.segments), now),
+      );
+      out.routes++;
     }
     await env.DB.batch(stmts);
-    out.events += stmts.length;
+    out.events += stmts.length - (map ? 1 : 0);
   }
   return out;
+}
+
+export interface RouteOut {
+  id: string;
+  postId: string;
+  title: string;
+  departAt: number | null;
+  arriveAt: number | null;
+  showUntil: number;
+  claimUrl: string | null;
+  stops: RouteStop[];
+  segments: CurrentMapRoute['segments'];
+  updatedAt: number;
+}
+
+/** 今天（已經到當天、還沒過顯示期限）的車掃路線 */
+export async function listRoutes(env: Env, now = nowSec()): Promise<RouteOut[]> {
+  const { results } = await env.DB.prepare('SELECT * FROM routes WHERE day_start <= ? AND show_until > ? ORDER BY depart_at')
+    .bind(now, now)
+    .all<{ id: string; post_id: string; title: string; depart_at: number | null; arrive_at: number | null; show_until: number; claim_url: string | null; stops: string; segments: string; updated_at: number }>();
+  return results.map((r) => ({
+    id: r.id,
+    postId: r.post_id,
+    title: r.title,
+    departAt: r.depart_at,
+    arriveAt: r.arrive_at,
+    showUntil: r.show_until,
+    claimUrl: r.claim_url,
+    stops: JSON.parse(r.stops) as RouteStop[],
+    segments: JSON.parse(r.segments) as CurrentMapRoute['segments'],
+    updatedAt: r.updated_at,
+  }));
 }
