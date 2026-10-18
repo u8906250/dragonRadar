@@ -577,6 +577,7 @@ async function refresh(): Promise<void> {
 function switchView(v: 'radar' | 'map'): void {
   // 雷達藏起來前先量外圈多大，地圖照同樣的比例
   const rangePx = radar.rangePx();
+  const from = view;
   view = v;
   $('#radar-view').hidden = v !== 'radar';
   $('#map-view').hidden = v !== 'map';
@@ -586,6 +587,10 @@ function switchView(v: 'radar' | 'map'): void {
   baseChipsEl.hidden = v !== 'map';
   compassBtn.hidden = v !== 'radar' || !compassSupported();
   if (v === 'map') map.showRange(scaleKm, rangePx);
+  // 切回雷達：雷達範圍改成地圖目前的比例（接近某個按鈕的範圍就對齊那個按鈕）
+  const kmPerPx = map.kmPerPx();
+  const px = radar.rangePx();
+  if (v === 'radar' && from === 'map' && kmPerPx && px > 0) zoomRadar((kmPerPx * px) / scaleKm, true);
 }
 
 function scaleKmFor(setting: ScaleSetting): number {

@@ -242,6 +242,12 @@ export class MapView {
     });
   }
 
+  /** 地圖目前在你的位置附近每像素幾公里；地圖還沒載入時回傳 null */
+  kmPerPx(): number | null {
+    if (!this.map) return null;
+    return (40075.016686 * Math.cos((this.origin.lat * Math.PI) / 180)) / 2 ** (this.map.getZoom() + 8);
+  }
+
   setPickMode(on: boolean): void {
     this.pickMode = on;
     if (this.map) this.map.getContainer().style.cursor = on ? 'crosshair' : '';
