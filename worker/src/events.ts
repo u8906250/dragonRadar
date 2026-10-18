@@ -64,6 +64,8 @@ export interface EventOut {
   spot: boolean;
   /** 找不到精確地點、只定位到鄉鎮區中心時的區域名稱，例如「雲林縣虎尾鎮」 */
   approxArea: string | null;
+  /** 官方行程才有：併進來的新聞、Threads 貼文（相關報導） */
+  related?: RelatedPost[];
   post: {
     id: string;
     source: string;
@@ -72,6 +74,14 @@ export interface EventOut {
     postedAt: number;
     text: string;
   };
+}
+
+export interface RelatedPost {
+  id: string;
+  source: string;
+  title: string;
+  url: string | null;
+  postedAt: number;
 }
 
 export const DEFAULT_DURATION_SEC = 2 * 3600;
@@ -445,7 +455,8 @@ export function toEventOut(r: JoinedRow, now: number): EventOut {
 
 /** 前端用：附近、還沒結束、horizon 內會開始的事件 */
 export async function listEvents(env: Env, q: ListQuery): Promise<EventOut[]> {
-  const conds = ["e.status IN ('upcoming', 'active')", 'e.end_at > ?', 'e.start_at <= ?', 'e.lat IS NOT NULL', 'e.lng IS NOT NULL'];
+  // 併進官方車掃的不單獨列，改放在官方那一場的相關報導
+  const conds = ["e.status IN ('upcoming', 'active')", 'e.end_at > ?', 'e.start_at <= ?', 'e.lat IS NOT NULL', 'e.lng IS NOT NULL', 'e.merged_into IS NULL'];
   const binds: unknown[] = [q.now, q.now + q.horizonSec];
   if (q.lat !== undefined && q.lng !== undefined) {
     const dLat = q.radiusKm / 111;
@@ -468,7 +479,36 @@ export async function listEvents(env: Env, q: ListQuery): Promise<EventOut[]> {
   const r = await env.DB.prepare(sql)
     .bind(...binds)
     .all<JoinedRow>();
-  return r.results.map((row) => toEventOut(row, q.now));
+  const out = r.results.map((row) => toEventOut(row, q.now));
+  const official = [...new Set(out.filter((e) => e.post.source === 'official').map((e) => e.post.id))];
+  if (official.length > 0) {
+    const related = await relatedPosts(env, official);
+    for (const e of out) if (related.has(e.post.id)) e.related = related.get(e.post.id);
+  }
+  return out;
+}
+
+/** 併進各官方貼文的新聞、Threads 貼文，同一則貼文只列一次 */
+async function relatedPosts(env: Env, officialIds: string[]): Promise<Map<string, RelatedPost[]>> {
+  const r = await env.DB.prepare(
+    `SELECT DISTINCT e.merged_into, p.id, p.source, p.username, p.permalink, p.text, p.posted_at
+       FROM events e JOIN posts p ON p.id = e.post_id
+      WHERE e.merged_into IN (${officialIds.map(() => '?').join(',')})
+      ORDER BY p.posted_at DESC`,
+  )
+    .bind(...officialIds)
+    .all<{ merged_into: string; id: string; source: string; username: string | null; permalink: string | null; text: string; posted_at: number }>();
+  const map = new Map<string, RelatedPost[]>();
+  for (const row of r.results) {
+    const list = map.get(row.merged_into) ?? [];
+    if (list.some((x) => x.id === row.id)) continue;
+    // 新聞用標題（第一行），貼文用作者加開頭幾個字
+    const first = row.text.split('\n')[0].trim();
+    const title = row.source === 'news' ? first : `@${row.username ?? ''}：${first.slice(0, 40)}`;
+    list.push({ id: row.id, source: row.source, title, url: row.permalink, postedAt: row.posted_at });
+    map.set(row.merged_into, list);
+  }
+  return map;
 }
 
 export async function getEvent(env: Env, id: number, now: number): Promise<EventOut | null> {

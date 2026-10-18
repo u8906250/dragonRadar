@@ -6,6 +6,7 @@ import { geocode } from './geocode';
 import { ingestNews, NEWS_FEEDS } from './sources/news';
 import { listRoutes, syncVoyage, VOYAGE_PAGE } from './sources/voyage';
 import { CURRENT_MAP_URL } from './sources/currentmap';
+import { mergeIntoOfficial } from './sources/merge';
 import { apifyTrial } from './sources/apify';
 import { fetchThreadsPost, resolveThreadsLink, shortcodeToUnix } from './sources/link';
 import { ENDED_REPORTS_NEEDED, MAX_LINK_AGE_SEC, ReportError, ipHash, purgeReports, recheckLinks, reportEnded, submitLink } from './reports';
@@ -157,7 +158,10 @@ async function handle(req: Request, env: Env, ctx: ExecutionContext): Promise<Re
   if (req.method === 'POST' && path === '/api/reports') {
     const body = await readJson<{ url?: unknown }>(req);
     if (typeof body.url !== 'string' || body.url.length > 2000) throw new HttpError(400, '請貼上 Threads 貼文連結');
-    return jsonResponse(await submitLink(env, body.url, await ipHash(env, req), now));
+    const result = await submitLink(env, body.url, await ipHash(env, req), now);
+    // 回報的如果是官方車掃，馬上併進去，不用等排程
+    await mergeIntoOfficial(env, now).catch((e) => console.warn('merge failed', e));
+    return jsonResponse(result);
   }
 
   const endedMatch = /^\/api\/events\/(\d+)\/ended$/.exec(path);
@@ -230,7 +234,8 @@ async function handleAdmin(req: Request, env: Env, _ctx: ExecutionContext, path:
   if (req.method === 'POST' && path === '/api/admin/sources') {
     const voyage = await syncVoyage(env, now);
     const news = await ingestNews(env, now);
-    return jsonResponse({ voyage, news });
+    const merge = await mergeIntoOfficial(env, now);
+    return jsonResponse({ voyage, news, merge });
   }
 
   if (req.method === 'POST' && path === '/api/admin/ingest') {
@@ -389,8 +394,10 @@ async function runScheduled(env: Env, cron: string): Promise<void> {
   const news = minute % 30 < 10 ? await ingestNews(env, now).catch((e) => ({ error: String(e) })) : null;
   const lifecycle = await updateLifecycle(env, client, now);
   const links = await recheckLinks(env, now).catch((e) => ({ error: String(e) }));
+  // 新聞、貼文講的是官方車掃就併進去（不管誰先到，每次都重新比對）
+  const merge = await mergeIntoOfficial(env, now).catch((e) => ({ error: String(e) }));
   const purged = await purgeOldData(env, now);
-  console.log(JSON.stringify({ cron, mode: client.mode, ingest, backlog, voyage, news, lifecycle, links, purged }));
+  console.log(JSON.stringify({ cron, mode: client.mode, ingest, backlog, voyage, news, lifecycle, links, merge, purged }));
 }
 
 export default {

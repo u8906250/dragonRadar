@@ -1,5 +1,14 @@
 export type EventKind = 'giveaway' | 'activity';
 
+export interface RelatedPost {
+  id: string;
+  /** news、threads、link */
+  source: string;
+  title: string;
+  url: string | null;
+  postedAt: number;
+}
+
 export interface EventOut {
   id: number;
   kind: EventKind;
@@ -21,6 +30,8 @@ export interface EventOut {
   spot?: boolean;
   /** 只定位到鄉鎮區中心時的區域名稱，例如「雲林縣虎尾鎮」 */
   approxArea?: string | null;
+  /** 官方行程才有：講同一場活動、已併進來的新聞與貼文 */
+  related?: RelatedPost[];
   post: {
     id: string;
     /** threads、news、official、manual、link（使用者貼的連結） */
