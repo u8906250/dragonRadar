@@ -211,6 +211,11 @@ function computeItems(now: number): Item[] {
     }
   }
   for (const [k, sessions] of spots) items.push(spotItem(k, sessions, me, now));
+  // 車掃還沒出發時，路線上的點（整天顯示的加油點也一樣）都算還沒開始，跟清單上的車掃卡片一致
+  for (const it of items) {
+    const r = routeOf(it.ev);
+    if (r && routeState(r, now) === 'planned') it.phase = routePhase(r, [], now);
+  }
   return items
     // 進行中的照距離排；還沒開始的照開始時間排，同時間再照距離
     .sort((a, b) => {
@@ -263,7 +268,7 @@ function timeLine(it: Item, now: number): string {
   if (ev.allDay) {
     const today = ev.startAt <= now && now < ev.endAt;
     const stop = stopOf(ev);
-    if (today && stop?.kind === 'cheer' && stop.at) return now < stop.at ? `進行中 · 車隊預計 ${fmtTime(stop.at)} 經過` : `車隊預計 ${fmtTime(stop.at)} 已經過`;
+    if (today && stop?.kind === 'cheer' && stop.at) return now < stop.at ? `${it.phase === 'active' ? '進行中 · ' : ''}車隊預計 ${fmtTime(stop.at)} 經過` : `車隊預計 ${fmtTime(stop.at)} 已經過`;
     return today ? `進行中 · ${allDayText(ev, true)}` : `${dateFmt.format(new Date(ev.startAt * 1000))} ${allDayText(ev, false)}`;
   }
   if (it.phase === 'active') {
@@ -336,7 +341,8 @@ function render(): void {
   const all = computeItems(now);
   const spotTotal = all.filter((it) => it.spot).length;
   const items = showSpots ? all : all.filter((it) => !it.spot);
-  const visible = items.filter((it) => it.phase !== 'later');
+  // 車掃路線上的點出發前也畫（淡色），看得到路線經過哪裡
+  const visible = items.filter((it) => it.phase !== 'later' || routeOf(it.ev));
   filterRow.hidden = spotTotal === 0;
   spotToggle.textContent = `${showSpots ? '✓ ' : ''}顯示固定據點（${spotTotal}）`;
   spotToggle.classList.toggle('on', showSpots);
@@ -350,7 +356,8 @@ function render(): void {
       approx: !!it.ev.approxArea,
       distanceKm: it.distanceKm,
       bearing: it.bearing,
-      phase: it.phase,
+      // 還沒出發的車掃路線點用「即將開始」的淡色畫
+      phase: it.phase === 'later' ? 'soon' : it.phase,
       label: it.ev.title,
       // 據點整天都開著，標籤只在選取時顯示，免得蓋掉單次的發放
       showLabel: (it.phase === 'active' && !it.spot) || it.ev.id === selectedId,
@@ -402,20 +409,57 @@ function render(): void {
   if (lastFetchAt > 0) notifiedOnce = true;
 }
 
+/** 清單上的一列：一般事件，或合成一張卡片的車掃路線 */
+type Row = { it: Item; route?: undefined; phase: Phase; distanceKm: number; spot: boolean; sortAt: number } | { route: RouteOut; it?: undefined; phase: Phase; distanceKm: number; spot: false; sortAt: number };
+
+/** 車掃卡片的狀態跟著車隊走：還沒出發是稍後／即將開始，車掃中、抵達後的活動進行中算進行中 */
+function routePhase(r: RouteOut, members: Item[], now: number): Phase {
+  const state = routeState(r, now);
+  if (state === 'live') return 'active';
+  if (state === 'done') return members.some((it) => it.phase === 'active') ? 'active' : 'later';
+  return r.departAt && r.departAt - now <= SOON_SEC ? 'soon' : 'later';
+}
+
+function listRows(items: Item[], now: number): Row[] {
+  const rows: Row[] = [];
+  const seen = new Set<string>();
+  for (const it of items) {
+    const r = routeOf(it.ev);
+    if (!r) {
+      rows.push({ it, phase: it.phase, distanceKm: it.distanceKm, spot: !!it.spot, sortAt: it.ev.startAt });
+      continue;
+    }
+    if (seen.has(r.id)) continue;
+    seen.add(r.id);
+    const members = routeItems(r, items);
+    rows.push({ route: r, phase: routePhase(r, members, now), distanceKm: Math.min(...members.map((m) => m.distanceKm)), spot: false, sortAt: r.departAt ?? it.ev.startAt });
+  }
+  return rows;
+}
+
+const PHASE_TITLE: Partial<Record<Phase, string>> = { active: '進行中', soon: '即將開始', later: '稍後開始' };
+
 function renderList(items: Item[], now: number): void {
-  const inRange = items.filter((it) => it.distanceKm <= scaleKm);
-  const outRange = items.filter((it) => it.distanceKm > scaleKm);
-  // 摘要只算單次的發放和活動，固定據點另外列
-  const singles = inRange.filter((it) => !it.spot);
-  const counts = {
-    active: singles.filter((it) => it.phase === 'active').length,
-    soon: singles.filter((it) => it.phase === 'soon').length,
-    later: singles.filter((it) => it.phase === 'later').length,
-  };
-  const spotsIn = inRange.length - singles.length;
+  // 摘要和清單用同一套「列」來算：車掃路線的起點、加油點、終點合成一張卡片，只算一個
+  const rows = listRows(items, now);
+  const inRange = rows.filter((r) => r.distanceKm <= scaleKm);
+  const outRange = rows.filter((r) => r.distanceKm > scaleKm);
+  const singles = inRange.filter((r) => !r.spot);
+  const spotsIn = inRange.filter((r) => r.spot);
+  const byPhase = (ph: Phase): Row[] =>
+    singles
+      .filter((r) => r.phase === ph)
+      // 進行中照距離，還沒開始的照開始時間
+      .sort((a, b) => (ph === 'active' ? a.distanceKm - b.distanceKm : a.sortAt - b.sortAt || a.distanceKm - b.distanceKm));
+  const sections: Array<{ title: string; rows: Row[] }> = [
+    ...(['active', 'soon', 'later'] as const).map((ph) => ({ title: PHASE_TITLE[ph] as string, rows: byPhase(ph) })),
+    { title: '固定據點', rows: spotsIn },
+    { title: '雷達範圍外', rows: outRange },
+  ];
+  const counts = { active: byPhase('active').length, soon: byPhase('soon').length, later: byPhase('later').length };
   const none = followed().length === 0;
   const outText = outRange.length > 0 ? `・範圍外 ${outRange.length} 個` : '';
-  const spotText = spotsIn > 0 ? `・據點 ${spotsIn} 個` : '';
+  const spotText = spotsIn.length > 0 ? `・據點 ${spotsIn.length} 個` : '';
   countLabel.textContent = none
     ? '還沒追蹤關鍵字'
     : singles.length === 0
@@ -424,44 +468,34 @@ function renderList(items: Item[], now: number): void {
   emptyEl.textContent = none ? (canEditKeywords ? '點下方「追蹤」選擇或新增關鍵字，雷達就會開始找發放和活動。' : '目前沒有搜尋中的關鍵字。') : `${theme.emptyText}。雷達每分鐘更新，有新的會提醒你。`;
   listEl.replaceChildren();
   emptyEl.hidden = items.length > 0;
-  const rows: Array<Item | 'divider'> = [...inRange, ...(outRange.length > 0 ? (['divider'] as const) : []), ...outRange];
-  // 同一條車掃路線的起點、加油點、終點合成一張卡片，放在第一個出現的位置
-  const routeShown = new Set<string>();
-  for (const it of rows) {
-    if (it === 'divider') {
-      const d = document.createElement('li');
-      d.className = 'ev-divider';
-      d.textContent = `雷達範圍外（${outRange.length}）`;
-      listEl.appendChild(d);
-      continue;
-    }
-    const route = routeOf(it.ev);
-    if (route) {
-      if (!routeShown.has(route.id)) {
-        routeShown.add(route.id);
-        listEl.appendChild(routeCard(route, items, now));
-      }
-      continue;
-    }
-    const li = document.createElement('li');
-    li.className = `ev phase-${it.phase} kind-${it.ev.kind}${it.spot ? ' spot' : ''}${it.distanceKm > scaleKm ? ' out-of-range' : ''}${it.ev.id === selectedId ? ' selected' : ''}`;
-    li.dataset.id = String(it.ev.id);
-    li.innerHTML = `
-      <div class="ev-title"><span class="dot"></span><span class="kind-tag">${tagLabel(it)}</span>${esc(it.ev.title)}${it.ev.item ? ` <span class="muted">· ${esc(it.ev.item)}</span>` : ''}${followed().length > 1 && it.ev.keyword ? `<span class="ev-kw">#${esc(it.ev.keyword)}</span>` : ''}</div>
-      <div class="ev-meta">${esc(placeLine(it.ev))} · ${it.ev.approxArea ? '約 ' : ''}${formatKm(it.distanceKm)} ${compassLabel(it.bearing)}</div>
-      <div class="ev-time">${it.spot ? `${esc(spotHours(it.ev))}・` : ''}${esc(timeLine(it, now))}</div>`;
-    li.addEventListener('click', () => select(it.ev.id));
-    listEl.appendChild(li);
+  // 每一段的標題寫上數量，跟上面的摘要對得起來
+  for (const sec of sections) {
+    if (sec.rows.length === 0) continue;
+    const d = document.createElement('li');
+    d.className = 'ev-divider';
+    d.textContent = `${sec.title}（${sec.rows.length}）`;
+    listEl.appendChild(d);
+    for (const row of sec.rows) listEl.appendChild(row.route ? routeCard(row.route, row.phase, items, now) : itemCard(row.it, now));
   }
 }
 
-function routeCard(r: RouteOut, items: Item[], now: number): HTMLLIElement {
+function itemCard(it: Item, now: number): HTMLLIElement {
+  const li = document.createElement('li');
+  li.className = `ev phase-${it.phase} kind-${it.ev.kind}${it.spot ? ' spot' : ''}${it.distanceKm > scaleKm ? ' out-of-range' : ''}${it.ev.id === selectedId ? ' selected' : ''}`;
+  li.dataset.id = String(it.ev.id);
+  li.innerHTML = `
+    <div class="ev-title"><span class="dot"></span><span class="kind-tag">${tagLabel(it)}</span>${esc(it.ev.title)}${it.ev.item ? ` <span class="muted">· ${esc(it.ev.item)}</span>` : ''}${followed().length > 1 && it.ev.keyword ? `<span class="ev-kw">#${esc(it.ev.keyword)}</span>` : ''}</div>
+    <div class="ev-meta">${esc(placeLine(it.ev))} · ${it.ev.approxArea ? '約 ' : ''}${formatKm(it.distanceKm)} ${compassLabel(it.bearing)}</div>
+    <div class="ev-time">${it.spot ? `${esc(spotHours(it.ev))}・` : ''}${esc(timeLine(it, now))}</div>`;
+  li.addEventListener('click', () => select(it.ev.id));
+  return li;
+}
+
+function routeCard(r: RouteOut, phase: Phase, items: Item[], now: number): HTMLLIElement {
   const mine = routeItems(r, items);
   const nearest = [...mine].sort((a, b) => a.distanceKm - b.distanceKm)[0];
   const start = r.stops.find((s) => s.kind === 'start');
   const end = r.stops.find((s) => s.kind === 'end');
-  const state = routeState(r, now);
-  const phase: Phase = state === 'planned' ? (r.departAt && r.departAt - now <= SOON_SEC ? 'soon' : mine.some((it) => it.phase === 'active') ? 'active' : 'later') : 'active';
   const li = document.createElement('li');
   li.className = `ev route-card phase-${phase} kind-activity${nearest && nearest.distanceKm > scaleKm ? ' out-of-range' : ''}${selectedRoute === r.id ? ' selected' : ''}`;
   li.innerHTML = `
@@ -1053,7 +1087,7 @@ function renderRules(): void {
   kwRulesEl.innerHTML = `
     <h3>資料來源</h3>
     <ul>
-      ${src ? `<li><b>官方行程</b>：<a href="${esc(src.official.url)}" target="_blank" rel="noopener">${esc(src.official.name)}</a>，${src.official.mapUrl ? `與<a href="${esc(src.official.mapUrl)}" target="_blank" rel="noopener">${esc(src.official.mapName ?? '車掃地圖')}</a>` : ''}，每 ${src.official.intervalMin} 分鐘更新車掃日期、路線、出發與抵達時間、各路段認領人數。起點在出發後保留 15 分鐘；加油點當天整天顯示，到車隊預計經過後 15 分鐘（預計時間用路線長度平均推算）；終點從抵達開始，接著有活動（例如市政開講）就到活動結束，否則保留 1 小時。沒公布時間的當成整天，當天都算進行中。新聞或 Threads 講的是同一場車掃（同一天、提到車掃，提到同一區或路線上的地點，或在路線 1.5 km 內）就併進官方那一場，列在「相關報導」，不另外顯示。</li>
+      ${src ? `<li><b>官方行程</b>：<a href="${esc(src.official.url)}" target="_blank" rel="noopener">${esc(src.official.name)}</a>，${src.official.mapUrl ? `與<a href="${esc(src.official.mapUrl)}" target="_blank" rel="noopener">${esc(src.official.mapName ?? '車掃地圖')}</a>` : ''}，每 ${src.official.intervalMin} 分鐘更新車掃日期、路線、出發與抵達時間、各路段認領人數。起點在出發後保留 15 分鐘；加油點當天整天顯示（車掃出發前算還沒開始），到車隊預計經過後 15 分鐘（預計時間用路線長度平均推算）；終點從抵達開始，接著有活動（例如市政開講）就到活動結束，否則保留 1 小時。沒公布時間的當成整天，當天都算進行中。新聞或 Threads 講的是同一場車掃（同一天、提到車掃，提到同一區或路線上的地點，或在路線 1.5 km 內）就併進官方那一場，列在「相關報導」，不另外顯示。</li>
       <li><b>新聞</b>：${src.news.names.map(esc).join('、')}的 RSS，每 ${src.news.intervalMin} 分鐘讀一次，標題或摘要有關鍵字的報導才判讀。只顯示標題與原文連結。</li>` : ''}
       ${threadsLine}
       ${src?.link ? `<li><b>大家回報</b>：任何人都可以按「＋回報」貼上 Threads 貼文連結（${src.link.maxAgeDays} 天內的公開貼文），系統讀取貼文後用同樣的規則判讀。</li>` : ''}
