@@ -94,16 +94,26 @@ export function deviceCode(): string {
   }
 }
 
-async function deviceJson<T>(path: string, method = 'GET', body?: unknown): Promise<Result<T>> {
+async function deviceJson<T>(path: string, method = 'GET', body?: unknown, retried = false): Promise<Result<T>> {
+  // 讀取的請求碰到暫時失敗（503、連線中斷）自動再試一次；寫入的不重送，伺服器那邊已經重試過
+  const again = async (): Promise<Result<T> | null> => {
+    if (method !== 'GET' || retried) return null;
+    await new Promise((r) => setTimeout(r, 800));
+    return deviceJson<T>(path, method, body, true);
+  };
   try {
     const headers: Record<string, string> = { 'x-device': deviceCode() };
     if (body !== undefined) headers['content-type'] = 'application/json';
     const r = await fetch(`${API_BASE}${path}`, { method, headers, body: body === undefined ? undefined : JSON.stringify(body) });
+    if (r.status === 503) {
+      const a = await again();
+      if (a) return a;
+    }
     const j = (await r.json().catch(() => ({}))) as T & { error?: string };
-    if (!r.ok) return { ok: false, message: j.error ?? `失敗（${r.status}）` };
+    if (!r.ok) return { ok: false, message: j.error ?? `暫時失敗，請再試一次（${r.status}）` };
     return { ok: true, data: j };
   } catch {
-    return { ok: false, message: '連線失敗，請稍後再試' };
+    return (await again()) ?? { ok: false, message: '連線失敗，請稍後再試' };
   }
 }
 

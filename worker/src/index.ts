@@ -10,6 +10,7 @@ import { mergeIntoOfficial } from './sources/merge';
 import { apifyTrial } from './sources/apify';
 import { fetchThreadsPost, resolveThreadsLink, shortcodeToUnix } from './sources/link';
 import { ENDED_REPORTS_NEEDED, MAX_LINK_AGE_SEC, ReportError, ipHash, purgeReports, recheckLinks, reportEnded, submitLink } from './reports';
+import { isTransient, withResilientDb } from './db';
 import { addressCacheKey, geocodeAddress, parseTwAddress } from './address';
 import { adminListBottles, adminSetBottle, BOTTLE_MAX_CHARS, BOTTLE_TTL_SEC, bottlesEnabled, deleteBottle, deviceId, dropBottle, listBottles, myBottles, PER_DEVICE_PER_DAY, PICK_RADIUS_M, pickBottle, purgeBottles, recycleBottle, reportBottle } from './bottles';
 import { approveSpotRequest, autoReview, cancelSpotRequest, listSpotRequests, locatePlace, rejectSpotRequest, SPOT_MAX_AGE_SEC, spotRequestStatus, submitSpotRequest, type ApproveBody, type SpotRequestRow } from './spots';
@@ -518,7 +519,8 @@ async function runScheduled(env: Env, cron: string): Promise<void> {
 }
 
 export default {
-  async fetch(req, env, ctx) {
+  async fetch(req, rawEnv, ctx) {
+    const env = withResilientDb(rawEnv);
     const cors = corsHeaders(env, req.headers.get('origin'));
     if (req.method === 'OPTIONS') return new Response(null, { status: 204, headers: cors });
     try {
@@ -528,13 +530,16 @@ export default {
       for (const [k, v] of Object.entries(cors)) out.headers.set(k, v);
       return out;
     } catch (e) {
-      const status = e instanceof HttpError || e instanceof ReportError ? e.status : 500;
-      if (status === 500) console.error(e);
-      return jsonResponse({ error: e instanceof Error ? e.message : String(e) }, status, cors);
+      if (e instanceof HttpError || e instanceof ReportError) return jsonResponse({ error: e.message }, e.status, cors);
+      // 非預期的錯誤（重試後還是失敗的資料庫錯誤等）：使用者只看到「暫時失敗」，細節留在紀錄；管理 API 照樣回傳細節方便除錯
+      console.error(e);
+      const detail = e instanceof Error ? e.message : String(e);
+      const admin = new URL(req.url).pathname.startsWith('/api/admin/');
+      return jsonResponse({ error: admin ? detail : '暫時失敗，請再試一次' }, isTransient(e) ? 503 : 500, cors);
     }
   },
 
   async scheduled(event, env, ctx) {
-    ctx.waitUntil(runScheduled(env, event.cron));
+    ctx.waitUntil(runScheduled(withResilientDb(env), event.cron));
   },
 } satisfies ExportedHandler<Env>;

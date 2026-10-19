@@ -178,6 +178,10 @@ npm run deploy
 - 撿到的人才能檢舉，檢舉就藏起來（`hidden`）；管理者用 `GET /api/admin/bottles?status=hidden` 看、`POST /api/admin/bottles/:id/remove|restore` 處理。
 - 有人亂丟時把 `wrangler.toml` 的 `BOTTLES_ENABLED` 改成 `"false"` 整個關掉。
 
+### 暫時性錯誤
+
+Cloudflare D1 偶爾回「D1_ERROR: internal error」這類暫時性錯誤。`src/db.ts` 把 `env.DB` 包一層，每個查詢與 batch 碰到這類錯誤自動重試（最多再試 2 次，間隔遞增）。重試後還失敗或其他非預期錯誤，使用者只看到「暫時失敗，請再試一次」（503／500），細節寫進紀錄；`/api/admin/*` 照樣回傳細節。前端讀取類請求碰到 503 或連線中斷也會自動再試一次。
+
 ## API
 
 | 方法 | 路徑 | 說明 |
