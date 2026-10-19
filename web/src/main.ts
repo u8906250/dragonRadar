@@ -466,7 +466,8 @@ function render(): void {
       points: r.segments.flatMap((sg) => sg.path).map(([lat, lng]) => ({ bearing: bearingDeg(origin, { lat, lng }), distanceKm: haversineKm(origin, { lat, lng }) })),
     })),
   );
-  const bottleViews = bottles.map((b) => ({ b, distanceKm: haversineKm(origin, b), bearing: bearingDeg(origin, b), state: bottleState(b) }));
+  // 撿走的瓶子不畫（伺服器也不會回傳，這裡再擋一次）
+  const bottleViews = bottles.filter((b) => !b.picked).map((b) => ({ b, distanceKm: haversineKm(origin, b), bearing: bearingDeg(origin, b), state: bottleState(b) }));
   radar.setBottles(bottleViews.map((v) => ({ id: v.b.id, bearing: v.bearing, distanceKm: v.distanceKm, state: v.state, mine: v.b.mine, picked: v.b.picked, selected: v.b.id === selectedBottle })));
   map.setBottles(bottleViews.map((v) => ({ id: v.b.id, lat: v.b.lat, lng: v.b.lng, state: v.state, mine: v.b.mine, picked: v.b.picked })));
   updateBottleBadge(bottleViews);
