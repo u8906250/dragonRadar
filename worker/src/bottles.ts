@@ -1,9 +1,9 @@
 /**
- * 漂流瓶：在自己附近丟一句打氣的話（60 字內），別人走到 60 m 內才撿得起來、看得到內容。
+ * 漂流瓶：在自己附近丟一句話（60 字內），別人走到 60 m 內才撿得起來、看得到內容。
  *
  * - 不用登入：前端第一次用時產生隨機的裝置代碼，放在 x-device 標頭；伺服器只存加鹽雜湊。
  * - 隱私：丟的位置先打散到約 100 m 內再存，不存真正的位置（不會因為在家丟瓶子就洩漏住址）。
- * - 內容只收打氣、正向的話：先用規則擋掉連結、電話、帳號，再交給 AI 判斷；AI 失敗就不收。
+ * - 內容：先用規則擋掉連結、電話、帳號，再交給 AI 擋攻擊性內容、廣告、個資（不要求一定正向）；AI 失敗就不收。
  * - 2 個不同的人檢舉就先藏起來，等管理者確認。瓶子 7 天後漂走。
  * - BOTTLES_ENABLED = "false" 可以整個關掉。
  */
@@ -99,20 +99,18 @@ export function ruleCheck(text: string): string | null {
   return null;
 }
 
-const MODERATION_PROMPT = `你是「洋流雷達」漂流瓶的內容審核員。漂流瓶是台北大洋流（沈伯洋台北市長競選活動）的支持者在街頭留給陌生人的一句話。
-只允許「打氣、正向」的內容，例如：加油、一起努力、謝謝志工、祝福台北、今天車掃好熱鬧、看到飄帶很開心、鼓勵路過的人。
+const MODERATION_PROMPT = `你是「洋流雷達」漂流瓶的內容審核員。漂流瓶是使用者在街頭留給路過陌生人的一句話（台北大洋流競選活動的網站上）。
+內容不一定要正向：打氣、感謝、心情、抱怨、日常小事、在地觀察、對城市的期待都可以。
 
-以下一律不允許：
-- 批評、嘲諷、攻擊任何人或團體（包括其他候選人、政黨、政府、媒體、網友），即使是開玩笑
-- 負面選舉訊息、抹黑、未經證實的指控或謠言
-- 提到具體個人的私事、住址、行蹤、聯絡方式
-- 髒話、色情、暴力、威脅、歧視、仇恨
-- 廣告、推銷、拉票換好處、抽獎、要求別人做事換東西
-- 跟打氣無關的抱怨、心情發洩、無意義的字
+只擋下這幾類：
+- 攻擊性內容：辱罵、嘲諷、貶低、人身攻擊任何人或團體（包括候選人、政黨、政府、媒體、網友），抹黑、未經證實的指控或謠言
+- 仇恨、歧視、威脅、暴力、色情
+- 廣告、推銷、拉客、抽獎、要別人做事換東西
+- 聯絡方式或個人資料：電話、帳號、住址、某個具體個人的私事或行蹤
 
-只輸出 JSON：{"allowed": true 或 false, "reason": "不允許時用一句話說明原因，給使用者看；允許時空字串"}`;
+只輸出 JSON：{"allowed": true 或 false, "reason": "不允許時用一句話說明是哪一類，給使用者看；允許時空字串"}`;
 
-/** AI 判斷是不是打氣、正向的內容；AI 失敗就當成不通過（寧可不收） */
+/** AI 判斷有沒有攻擊性、廣告、個資；AI 失敗就當成不通過（寧可不收） */
 async function moderate(env: Env, text: string): Promise<{ allowed: boolean; reason: string }> {
   const ai = env.AI as unknown as { run(model: string, inputs: unknown): Promise<unknown> };
   const messages = [
@@ -161,7 +159,7 @@ export async function dropBottle(env: Env, device: string | null, ip: string, bo
     throw new ReportError(429, '現在丟瓶子的人太多，請稍後再試');
 
   const verdict = await moderate(env, text);
-  if (!verdict.allowed) throw new ReportError(422, `漂流瓶只收打氣、正向的話${verdict.reason ? `：${verdict.reason}` : ''}`);
+  if (!verdict.allowed) throw new ReportError(422, `這句話不能丟${verdict.reason ? `：${verdict.reason}` : ''}`);
 
   const p = scatter(at);
   const row = await env.DB.prepare(

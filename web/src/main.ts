@@ -824,7 +824,7 @@ function renderBottleDetail(id: number): boolean {
     void loadBottle(id, origin);
   });
   detailEl.querySelector('[data-act="report"]')?.addEventListener('click', async (e) => {
-    if (!window.confirm('這個瓶子的內容不是打氣、正向的話？檢舉後會交給管理者確認。')) return;
+    if (!window.confirm('這個瓶子有攻擊性內容、廣告或個人資料？檢舉後會交給管理者確認。')) return;
     (e.currentTarget as HTMLButtonElement).disabled = true;
     const r = await reportBottle(id);
     if (!r.ok) {
@@ -879,7 +879,7 @@ function renderBottleSheet(): void {
   bottleDropBtn.disabled = !gps;
   bottleDropBtn.textContent = gps ? '丟出去' : '要先定位';
   bottleTips.innerHTML = [
-    '只收打氣、正向的話，例如加油、感謝、祝福。批評或攻擊任何人（包括其他候選人）、連結、電話、帳號都不會通過，丟出去前會先自動審核。',
+    '打氣、心情、抱怨、今天看到的事都可以。辱罵或攻擊任何人（包括其他候選人、政黨）、謠言、廣告、連結、電話、帳號、個人資料都不會通過，丟出去前會先自動審核。',
     `瓶子會丟在你目前 GPS 位置附近，隨機漂開約 100 m，${rules?.ttlDays ?? 7} 天後漂走。每天最多丟 3 個。`,
     `別人要走到 ${rules?.pickRadiusM ?? 60} m 內才撿得起來；遠的瓶子在雷達上只是一團模糊的訊號，走近才變清楚。`,
     '撿到不適合的內容可以檢舉，2 個人檢舉就會先藏起來。不用登入：你丟的、撿到的瓶子記在這個瀏覽器裡，清除瀏覽器資料就看不到了。',
@@ -931,7 +931,7 @@ async function renderMyBottles(): Promise<void> {
 async function submitBottle(): Promise<void> {
   const text = bottleText.value.trim();
   if (!text) {
-    bottleResult.innerHTML = '<p class="msg error">寫一句打氣的話再丟吧</p>';
+    bottleResult.innerHTML = '<p class="msg error">寫一句話再丟吧</p>';
     return;
   }
   if (origin.source !== 'gps') {
