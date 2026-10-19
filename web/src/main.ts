@@ -38,6 +38,8 @@ const LS_BOTTLE_DROPPED = 'dr.bottleDropped';
 const LS_BOTTLE_SEEN = 'dr.bottleSeen';
 /** 開始提醒（音效、震動、橫幅、系統通知）的開關：on／off；沒設過時，瀏覽器已允許通知就算開 */
 const LS_NOTIFY = 'dr.notify';
+/** 實驗功能：漂流瓶預設不顯示，在說明頁「實驗功能」或網址 ?lab=bottles 打開（?lab=off 關掉） */
+const LS_LAB_BOTTLES = 'dr.lab.bottles';
 /** 自己送出的固定據點的取消碼：{ 查詢代碼: 取消碼 } */
 const LS_SPOT_CANCEL = 'dr.spotCancel';
 /** 瀏覽器不能存資料（私密瀏覽等）時，這次開著的期間先記在這裡 */
@@ -743,7 +745,8 @@ function renderLandmarkDetail(id: string): boolean {
 // ---- 漂流瓶 ----
 /** 200 m 內看得到瓶子的樣子，更遠只是一團訊號 */
 const BOTTLE_NEAR_M = 200;
-const bottlesOn = (): boolean => keywordRules?.sources?.bottles?.enabled !== false;
+/** 伺服器沒關、而且這個瀏覽器打開了實驗功能 */
+const bottlesOn = (): boolean => keywordRules?.sources?.bottles?.enabled !== false && lsGet(LS_LAB_BOTTLES) === '1';
 const pickRadiusM = (): number => keywordRules?.sources?.bottles?.pickRadiusM ?? 60;
 const bottleDistM = (b: BottleOut): number => haversineKm(origin, b) * 1000;
 
@@ -2374,6 +2377,9 @@ function wireControls(): void {
 }
 
 async function boot(): Promise<void> {
+  const lab = new URLSearchParams(location.search).get('lab');
+  if (lab === 'bottles') lsSet(LS_LAB_BOTTLES, '1');
+  if (lab === 'off') lsSet(LS_LAB_BOTTLES, null);
   wireControls();
   updateNotifyBtn();
   applyTheme(theme);

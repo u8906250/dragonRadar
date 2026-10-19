@@ -6,6 +6,9 @@ article { background: var(--cream); border: 2px solid var(--ink); border-radius:
 h1 { font-size: 24px; margin: 0 0 4px; }
 h2 { font-size: 18px; margin: 28px 0 8px; }
 h3 { font-size: 16px; margin: 20px 0 6px; }
+h4 { font-size: 15px; margin: 16px 0 4px; }
+.lab-btn { font: inherit; font-size: 15px; font-weight: 700; color: var(--ink); background: #ffe08a; border: 2px solid var(--ink); border-radius: 999px; box-shadow: 3px 3px 0 var(--ink); padding: 8px 16px; cursor: pointer; }
+.lab-btn.on { background: var(--cream); }
 p, li { font-size: 15px; }
 ul { padding-left: 22px; }
 a { color: var(--sea); font-weight: 700; }
