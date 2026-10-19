@@ -771,9 +771,12 @@ async function loadBottle(id: number, at: Origin | null): Promise<void> {
   const r = await pickBottle(id, at);
   if (!r.ok) {
     bottleMsg = r.message;
+    // 被別人撿走了：雷達上也拿掉
+    if (/撿走|漂走/.test(r.message)) bottles = bottles.filter((b) => b.id !== id || b.mine);
   } else {
     bottleTexts.set(id, r.data);
-    bottles = bottles.map((b) => (b.id === id ? { ...b, ...r.data.bottle } : b));
+    // 撿走的瓶子從雷達上消失（內容留在詳細資料和「我撿到的」）；自己丟的照樣留著
+    bottles = bottles.filter((b) => b.id !== id || b.mine);
     bottleMsg = '';
   }
   render();
@@ -781,16 +784,17 @@ async function loadBottle(id: number, at: Origin | null): Promise<void> {
 
 /** 雷達或地圖上點了瓶子：距離、撿起來、內容、檢舉或收回 */
 function renderBottleDetail(id: number): boolean {
-  const b = bottles.find((x) => x.id === id);
-  if (!b) return false;
   const got = bottleTexts.get(id);
+  // 撿走後雷達上已經沒有這個瓶子，詳細資料用撿到時拿到的資料
+  const b = bottles.find((x) => x.id === id) ?? got?.bottle;
+  if (!b) return false;
   const d = bottleDistM(b);
   const reach = pickRadiusM();
   const where = `約 ${formatKm(d / 1000)} ${compassLabel(bearingDeg(origin, b))}`;
   let body: string;
   if (got) {
     body = `<blockquote class="bottle-note">${esc(got.text)}</blockquote>
-      <p class="muted">${ago(b.createdAt)}丟的・${b.picks} 人撿到・${daysLeft(b.expiresAt)}後漂走</p>`;
+      <p class="muted">${b.mine ? `你${ago(b.createdAt)}丟的・還沒被撿走・${daysLeft(b.expiresAt)}後漂走` : `${ago(b.createdAt)}丟的・你撿到了，瓶子收進「我撿到的」，雷達上不會再出現`}</p>`;
   } else if (b.mine || b.picked) {
     body = '<p class="muted">打開瓶子中…</p>';
   } else if (origin.source !== 'gps') {
@@ -830,7 +834,7 @@ function renderBottleDetail(id: number): boolean {
     if (!r.ok) {
       bottleMsg = r.message;
     } else {
-      showBanner(bannerEl, r.data.hidden ? '謝謝檢舉，這個瓶子先藏起來了' : '謝謝檢舉，會交給管理者確認', 3000);
+      showBanner(bannerEl, '謝謝檢舉，這個瓶子已經藏起來，會交給管理者確認', 3000);
       if (r.data.hidden) {
         bottles = bottles.filter((x) => x.id !== id);
         selectedBottle = null;
@@ -881,20 +885,20 @@ function renderBottleSheet(): void {
   bottleTips.innerHTML = [
     '打氣、心情、抱怨、今天看到的事都可以。辱罵或攻擊任何人（包括其他候選人、政黨）、謠言、廣告、連結、電話、帳號、個人資料都不會通過，丟出去前會先自動審核。',
     `瓶子會丟在你目前 GPS 位置附近，隨機漂開約 100 m，${rules?.ttlDays ?? 7} 天後漂走。每天最多丟 3 個。`,
-    `別人要走到 ${rules?.pickRadiusM ?? 60} m 內才撿得起來；遠的瓶子在雷達上只是一團模糊的訊號，走近才變清楚。`,
-    '撿到不適合的內容可以檢舉，2 個人檢舉就會先藏起來。不用登入：你丟的、撿到的瓶子記在這個瀏覽器裡，清除瀏覽器資料就看不到了。',
+    `別人要走到 ${rules?.pickRadiusM ?? 60} m 內才撿得起來；遠的瓶子在雷達上只是一團模糊的訊號，走近才變清楚。每個瓶子只能被一個人撿走，撿走就從雷達上消失。`,
+    '撿到不適合的內容可以檢舉，檢舉後就藏起來交給管理者確認。不用登入：你丟的、撿到的瓶子記在這個瀏覽器裡，清除瀏覽器資料就看不到了。',
   ]
     .map((t) => `<li>${esc(t)}</li>`)
     .join('');
   const near = bottles
-    .filter((b) => !b.mine)
+    .filter((b) => !b.mine && !b.picked)
     .map((b) => ({ b, d: bottleDistM(b) }))
     .sort((a, c) => a.d - c.d)
     .slice(0, 8);
   bottleNear.innerHTML = near.length
     ? `<h3 class="spot-mine-title">附近的瓶子</h3><ul class="report-events">${near
         .map(({ b, d }) => {
-          const st = b.picked ? '撿過了' : bottleState(b) === 'pick' ? '撿得到了！' : `還差約 ${formatKm(Math.max(0, d - pickRadiusM()) / 1000)}`;
+          const st = bottleState(b) === 'pick' ? '撿得到了！' : `還差約 ${formatKm(Math.max(0, d - pickRadiusM()) / 1000)}`;
           return `<li><button type="button" data-bottle="${b.id}"><b>漂流瓶・約 ${esc(formatKm(d / 1000))} ${esc(compassLabel(bearingDeg(origin, b)))}</b><small>${esc(st)}・${ago(b.createdAt)}丟的</small></button></li>`;
         })
         .join('')}</ul>`
@@ -909,7 +913,15 @@ async function renderMyBottles(): Promise<void> {
   }
   const { dropped, picked } = r.data;
   const statusText = (b: (typeof dropped)[number]): string =>
-    b.status === 'hidden' ? '被檢舉，暫時藏起來' : b.status === 'removed' ? '已被管理者移除' : b.status === 'deleted' ? '已漂走' : `${b.picks} 人撿到・${daysLeft(b.expiresAt)}後漂走`;
+    b.status === 'picked'
+      ? `被撿走了${b.pickedAt ? `（${ago(b.pickedAt)}）` : ''}`
+      : b.status === 'hidden'
+        ? '被檢舉，暫時藏起來'
+        : b.status === 'removed'
+          ? '已被管理者移除'
+          : b.status === 'deleted'
+            ? '沒人撿，已經漂走'
+            : `還沒被撿走・${daysLeft(b.expiresAt)}後漂走`;
   bottleMine.innerHTML =
     (dropped.length
       ? `<h3 class="spot-mine-title">我丟的瓶子</h3><ul class="spot-mine">${dropped
@@ -949,7 +961,7 @@ async function submitBottle(): Promise<void> {
   bottleTexts.set(r.data.bottle.id, r.data);
   bottles = [r.data.bottle, ...bottles.filter((b) => b.id !== r.data.bottle.id)];
   bottleText.value = '';
-  bottleResult.innerHTML = `<p class="msg">丟出去了！瓶子會在附近漂 ${keywordRules?.sources?.bottles?.ttlDays ?? 7} 天，有人撿到會顯示在「我丟的瓶子」。</p>`;
+  bottleResult.innerHTML = `<p class="msg">丟出去了！瓶子會在附近漂 ${keywordRules?.sources?.bottles?.ttlDays ?? 7} 天，被撿走時「我丟的瓶子」會顯示。</p>`;
   renderBottleSheet();
   void renderMyBottles();
   render();

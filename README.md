@@ -169,13 +169,13 @@ npm run deploy
 
 ### 漂流瓶（匿名，擋攻擊性內容、廣告、聯絡方式）
 
-使用者在自己 GPS 位置附近丟一句 60 字內的話（不限正向，心情、抱怨也可以），別人走到 60 m 內才撿得起來、看得到內容。
+使用者在自己 GPS 位置附近丟一句 60 字內的話（不限正向，心情、抱怨也可以），別人走到 60 m 內才撿得起來、看得到內容。每個瓶子只能被一個人撿走（`UPDATE … WHERE status = 'active'` 搶到的人算），撿走就從雷達上消失，狀態變成 `picked`。
 
 - 不用登入：前端產生隨機裝置代碼放在 `x-device` 標頭，伺服器只存加鹽雜湊。
 - 位置在丟的時候隨機打散到 100 m 內才存（不存真正位置）；撿瓶子時的座標只用來算距離。
 - 內容：先用規則擋連結、Email、電話、帳號，再交給 Workers AI 擋攻擊性內容（辱罵、嘲諷、人身攻擊任何人或團體、抹黑謠言）、仇恨威脅色情、廣告、個資；AI 失敗就不收。
 - 每台裝置每天 3 個、同 IP 每天 10 個、全站每小時 120 個；7 天後漂走，30 天後連撿起、檢舉紀錄一起刪除。
-- 撿過的人才能檢舉，2 個不同的人檢舉就先藏起來；管理者用 `GET /api/admin/bottles?status=hidden` 看、`POST /api/admin/bottles/:id/remove|restore` 處理。
+- 撿到的人才能檢舉，檢舉就藏起來（`hidden`）；管理者用 `GET /api/admin/bottles?status=hidden` 看、`POST /api/admin/bottles/:id/remove|restore` 處理。
 - 有人亂丟時把 `wrangler.toml` 的 `BOTTLES_ENABLED` 改成 `"false"` 整個關掉。
 
 ## API
@@ -191,7 +191,7 @@ npm run deploy
 | POST | `/api/bottles/:id/pick` | 撿瓶子 `{ lat, lng }`，60 m 內才回傳內容 |
 | GET | `/api/bottles/mine` | 我丟的、我撿到的 |
 | DELETE | `/api/bottles/:id` | 收回自己丟的 |
-| POST | `/api/bottles/:id/report` | 檢舉（要撿過） |
+| POST | `/api/bottles/:id/report` | 檢舉（撿到的人才能檢舉） |
 | POST | `/api/reports` | 使用者貼上 Threads 貼文連結 `{ url }`，回傳判讀結果 |
 | POST | `/api/events/:id/ended` | 回報已發完／已結束 |
 | GET | `/api/keywords` | 搜尋中的關鍵字、上限、是否開放使用者新增 |

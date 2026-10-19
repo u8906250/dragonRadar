@@ -4,7 +4,7 @@
  * - 不用登入：前端第一次用時產生隨機的裝置代碼，放在 x-device 標頭；伺服器只存加鹽雜湊。
  * - 隱私：丟的位置先打散到約 100 m 內再存，不存真正的位置（不會因為在家丟瓶子就洩漏住址）。
  * - 內容：先用規則擋掉連結、電話、帳號，再交給 AI 擋攻擊性內容、廣告、個資（不要求一定正向）；AI 失敗就不收。
- * - 2 個不同的人檢舉就先藏起來，等管理者確認。瓶子 7 天後漂走。
+ * - 一個瓶子只能被一個人撿走，撿走就從雷達上消失；撿到的人可以檢舉，檢舉就藏起來等管理者確認。沒人撿的 7 天後漂走。
  * - BOTTLES_ENABLED = "false" 可以整個關掉。
  */
 import type { Env } from './env';
@@ -21,10 +21,10 @@ const SCATTER_M = 100;
 const PER_DEVICE_PER_DAY = 3;
 const PER_IP_PER_DAY = 10;
 const GLOBAL_PER_HOUR = 120;
-const REPORTS_TO_HIDE = 2;
 const LIST_LIMIT = 200;
 
-export type BottleStatus = 'active' | 'hidden' | 'deleted' | 'removed';
+/** active 漂流中、picked 被撿走了、hidden 被檢舉藏起來、deleted 丟的人收回或漂走、removed 管理者移除 */
+export type BottleStatus = 'active' | 'picked' | 'hidden' | 'deleted' | 'removed';
 
 interface BottleRow {
   id: number;
@@ -198,69 +198,86 @@ export async function listBottles(env: Env, device: string | null, q: { lat?: nu
   return results.map((b) => toOut(b, device, picked.has(b.id)));
 }
 
-/** 撿起來：要在 PICK_RADIUS_M 內；自己丟的也可以看，但不算被撿 */
+/**
+ * 撿起來：要在 PICK_RADIUS_M 內。一個瓶子只能被一個人撿走，撿走後就從所有人的雷達上消失，
+ * 只有撿到的人（在「我撿到的」）和丟的人看得到內容。自己丟的可以看，但不能撿。
+ */
 export async function pickBottle(env: Env, device: string | null, id: number, body: { lat?: unknown; lng?: unknown }, now: number): Promise<{ bottle: BottleOut; text: string }> {
   const dev = needDevice(device);
-  const b = await env.DB.prepare("SELECT * FROM bottles WHERE id = ? AND status = 'active' AND expires_at > ?").bind(id, now).first<BottleRow>();
+  const b = await env.DB.prepare("SELECT * FROM bottles WHERE id = ? AND status IN ('active', 'picked')").bind(id).first<BottleRow>();
   if (!b) throw new ReportError(404, '這個瓶子已經漂走了');
   if (b.device_id === dev) return { bottle: toOut(b, dev, false), text: b.text };
-  const already = await env.DB.prepare('SELECT 1 AS x FROM bottle_picks WHERE bottle_id = ? AND device_id = ?').bind(id, dev).first();
-  if (!already) {
-    const at = validPoint(body.lat, body.lng);
-    if (!at) throw new ReportError(400, '要先定位才能撿瓶子');
-    const d = distM(at, b);
-    if (d > PICK_RADIUS_M) throw new ReportError(403, `還差 ${Math.round(d - PICK_RADIUS_M)} m，再走近一點才撿得到`);
-    await env.DB.batch([
-      env.DB.prepare('INSERT OR IGNORE INTO bottle_picks (bottle_id, device_id, created_at) VALUES (?, ?, ?)').bind(id, dev, now),
-      env.DB.prepare('UPDATE bottles SET picks = picks + 1 WHERE id = ?').bind(id),
-    ]);
-    b.picks += 1;
-  }
-  return { bottle: toOut(b, dev, true), text: b.text };
+  const mine = await env.DB.prepare('SELECT 1 AS x FROM bottle_picks WHERE bottle_id = ? AND device_id = ?').bind(id, dev).first();
+  if (mine) return { bottle: toOut(b, dev, true), text: b.text };
+  if (b.status !== 'active' || b.expires_at <= now) throw new ReportError(410, '晚了一步，這個瓶子已經被撿走或漂走了');
+  const at = validPoint(body.lat, body.lng);
+  if (!at) throw new ReportError(400, '要先定位才能撿瓶子');
+  const d = distM(at, b);
+  if (d > PICK_RADIUS_M) throw new ReportError(403, `還差 ${Math.round(d - PICK_RADIUS_M)} m，再走近一點才撿得到`);
+  // 兩個人同時撿：只有先改到狀態的那個人算數
+  const won = await env.DB.prepare("UPDATE bottles SET status = 'picked', picks = 1 WHERE id = ? AND status = 'active' RETURNING *").bind(id).first<BottleRow>();
+  if (!won) throw new ReportError(410, '晚了一步，這個瓶子剛被別人撿走了');
+  await env.DB.prepare('INSERT OR IGNORE INTO bottle_picks (bottle_id, device_id, created_at) VALUES (?, ?, ?)').bind(id, dev, now).run();
+  return { bottle: toOut(won, dev, true), text: won.text };
 }
 
 export interface MyBottles {
-  dropped: Array<{ id: number; text: string; createdAt: number; expiresAt: number; picks: number; status: BottleStatus }>;
+  dropped: Array<{ id: number; text: string; createdAt: number; expiresAt: number; picks: number; pickedAt: number | null; status: BottleStatus }>;
   picked: Array<{ id: number; text: string; pickedAt: number }>;
 }
 
 /** 我丟的、我撿到的 */
 export async function myBottles(env: Env, device: string | null, now: number): Promise<MyBottles> {
   const dev = needDevice(device);
-  const dropped = await env.DB.prepare("SELECT * FROM bottles WHERE device_id = ? AND status != 'deleted' AND created_at > ? ORDER BY id DESC LIMIT 30")
+  const dropped = await env.DB.prepare(
+    `SELECT b.*, (SELECT MIN(created_at) FROM bottle_picks p WHERE p.bottle_id = b.id) AS picked_at FROM bottles b
+      WHERE b.device_id = ? AND b.status != 'deleted' AND b.created_at > ? ORDER BY b.id DESC LIMIT 30`,
+  )
     .bind(dev, now - 30 * 86400)
-    .all<BottleRow>();
+    .all<BottleRow & { picked_at: number | null }>();
   const picked = await env.DB.prepare(
-    "SELECT b.id, b.text, p.created_at AS picked_at FROM bottle_picks p JOIN bottles b ON b.id = p.bottle_id WHERE p.device_id = ? AND b.status = 'active' ORDER BY p.created_at DESC LIMIT 100",
+    "SELECT b.id, b.text, p.created_at AS picked_at FROM bottle_picks p JOIN bottles b ON b.id = p.bottle_id WHERE p.device_id = ? AND b.status IN ('active', 'picked') ORDER BY p.created_at DESC LIMIT 100",
   )
     .bind(dev)
     .all<{ id: number; text: string; picked_at: number }>();
   return {
-    dropped: dropped.results.map((b) => ({ id: b.id, text: b.text, createdAt: b.created_at, expiresAt: b.expires_at, picks: b.picks, status: b.expires_at <= now && b.status === 'active' ? ('deleted' as const) : b.status })),
+    dropped: dropped.results.map((b) => ({
+      id: b.id,
+      text: b.text,
+      createdAt: b.created_at,
+      expiresAt: b.expires_at,
+      picks: b.picks,
+      pickedAt: b.picked_at,
+      status: b.expires_at <= now && b.status === 'active' ? ('deleted' as const) : b.status,
+    })),
     picked: picked.results.map((p) => ({ id: p.id, text: p.text, pickedAt: p.picked_at })),
   };
 }
 
-/** 收回自己丟的瓶子 */
+/** 收回自己丟的瓶子（還沒被撿走的） */
 export async function deleteBottle(env: Env, device: string | null, id: number): Promise<{ ok: true }> {
   const dev = needDevice(device);
   const r = await env.DB.prepare("UPDATE bottles SET status = 'deleted' WHERE id = ? AND device_id = ? AND status IN ('active', 'hidden')").bind(id, dev).run();
-  if ((r.meta.changes ?? 0) === 0) throw new ReportError(404, '找不到你丟的這個瓶子');
+  if ((r.meta.changes ?? 0) === 0) throw new ReportError(404, '這個瓶子已經被撿走或不見了，收不回來');
   return { ok: true };
 }
 
-/** 檢舉：要撿過才能檢舉；不同的人檢舉到門檻就藏起來 */
+/** 檢舉：撿到的人才能檢舉（瓶子已經只有他看得到），檢舉後藏起來交給管理者確認 */
 export async function reportBottle(env: Env, device: string | null, ip: string, id: number, reason: unknown, now: number): Promise<{ hidden: boolean }> {
   const dev = needDevice(device);
   const picked = await env.DB.prepare('SELECT 1 AS x FROM bottle_picks WHERE bottle_id = ? AND device_id = ?').bind(id, dev).first();
   if (!picked) throw new ReportError(403, '撿起來看過才能檢舉');
-  await env.DB.prepare('INSERT OR IGNORE INTO bottle_reports (bottle_id, device_id, ip_hash, reason, created_at) VALUES (?, ?, ?, ?, ?)')
-    .bind(id, dev, ip, typeof reason === 'string' ? reason.slice(0, 100) : null, now)
-    .run();
-  const n = await countSince(env, 'SELECT COUNT(DISTINCT COALESCE(ip_hash, device_id)) AS n FROM bottle_reports WHERE bottle_id = ? AND created_at > ?', [id, 0]);
-  const hide = n >= REPORTS_TO_HIDE;
-  await env.DB.prepare(`UPDATE bottles SET reports = ?${hide ? ", status = CASE WHEN status = 'active' THEN 'hidden' ELSE status END" : ''} WHERE id = ?`).bind(n, id).run();
-  return { hidden: hide };
+  await env.DB.batch([
+    env.DB.prepare('INSERT OR IGNORE INTO bottle_reports (bottle_id, device_id, ip_hash, reason, created_at) VALUES (?, ?, ?, ?, ?)').bind(
+      id,
+      dev,
+      ip,
+      typeof reason === 'string' ? reason.slice(0, 100) : null,
+      now,
+    ),
+    env.DB.prepare("UPDATE bottles SET reports = reports + 1, status = CASE WHEN status IN ('active', 'picked') THEN 'hidden' ELSE status END WHERE id = ?").bind(id),
+  ]);
+  return { hidden: true };
 }
 
 // ---- 管理者 ----
@@ -272,8 +289,14 @@ export async function adminListBottles(env: Env, status: string | null): Promise
   return r.results.map(({ ip_hash: _i, device_id: _d, ...rest }) => rest);
 }
 
+/** 移除，或恢復（被撿走的恢復成已撿走，還沒撿的恢復到雷達上） */
 export async function adminSetBottle(env: Env, id: number, status: 'active' | 'removed'): Promise<{ ok: boolean }> {
-  const r = await env.DB.prepare('UPDATE bottles SET status = ? WHERE id = ?').bind(status, id).run();
+  const r =
+    status === 'removed'
+      ? await env.DB.prepare("UPDATE bottles SET status = 'removed' WHERE id = ?").bind(id).run()
+      : await env.DB.prepare("UPDATE bottles SET status = CASE WHEN EXISTS (SELECT 1 FROM bottle_picks WHERE bottle_id = ?) THEN 'picked' ELSE 'active' END WHERE id = ?")
+          .bind(id, id)
+          .run();
   return { ok: (r.meta.changes ?? 0) > 0 };
 }
 

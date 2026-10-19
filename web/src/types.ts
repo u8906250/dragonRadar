@@ -104,7 +104,7 @@ export interface PickedBottle {
 }
 
 export interface MyBottles {
-  dropped: Array<{ id: number; text: string; createdAt: number; expiresAt: number; picks: number; status: 'active' | 'hidden' | 'deleted' | 'removed' }>;
+  dropped: Array<{ id: number; text: string; createdAt: number; expiresAt: number; picks: number; pickedAt: number | null; status: 'active' | 'picked' | 'hidden' | 'deleted' | 'removed' }>;
   picked: Array<{ id: number; text: string; pickedAt: number }>;
 }
 
