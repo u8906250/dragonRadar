@@ -13,6 +13,8 @@ export interface Env {
   ALLOW_USER_KEYWORDS?: string;
   /** Threads 關鍵字搜尋的審核狀態："review" 審核中、"approved" 已通過，只影響說明頁文字 */
   THREADS_SEARCH_STATUS?: string;
+  /** "false" 時回報的固定據點全部改人工審核（有人亂貼時用）；沒設就是自動審核 */
+  SPOT_AUTO_REVIEW?: string;
   /** Apify API token（試用第三方 Threads 爬蟲用，只放 secret） */
   APIFY_TOKEN?: string;
   THREADS_ACCESS_TOKEN?: string;

@@ -113,7 +113,7 @@ export interface KeywordRules {
     official: { name: string; url: string; mapName?: string; mapUrl?: string; intervalMin: number };
     news: { names: string[]; intervalMin: number };
     link?: { maxAgeDays: number; recheckMin: number; endedReportsNeeded: number };
-    spot?: { maxAgeDays: number };
+    spot?: { maxAgeDays: number; autoReview?: boolean };
   };
   intervalMin: number;
   defaultDurationMin: number;
@@ -150,6 +150,12 @@ export interface SpotRequestStatus {
   createdAt: number;
   reviewedAt: number | null;
   existed: boolean;
+  /** 自動審核通過 */
+  auto: boolean;
+  /** 等人工審核的原因 */
+  note: string | null;
+  /** 剛通過時放上雷達的據點 */
+  events?: EventOut[];
 }
 
 export interface EndedReportResult {

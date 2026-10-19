@@ -1370,14 +1370,14 @@ function spotKeys(): string[] {
   return [...new Set([...spotKeysMem, ...saved])].slice(0, 20);
 }
 
-const SPOT_STATUS_TEXT: Record<SpotRequestStatus['status'], string> = { pending: '審核中', approved: '已上雷達', rejected: '沒有通過' };
+const SPOT_STATUS_TEXT: Record<SpotRequestStatus['status'], string> = { pending: '等人工審核', approved: '已上雷達', rejected: '沒有通過' };
 
 /** 自己送出的固定據點與審核進度 */
 async function renderSpotMine(): Promise<void> {
   const l = keywordRules?.sources?.spot;
   spotTips.innerHTML = [
-    '貼文沒寫地址也沒關係，地點欄寫店名加地址，或路口、地標。',
-    `只收${l ? ` ${l.maxAgeDays} 天內` : ''}的公開貼文。審核時會看貼文和地點對不對得上，不是發放洋流周邊的不會通過。`,
+    '貼文沒寫地址也沒關係，地點欄寫店名加完整門牌（例如「台北市信義區信義路四段399號」），或路口、地標。',
+    `只收${l ? ` ${l.maxAgeDays} 天內` : ''}的公開貼文。${l?.autoReview === false ? '' : '自動審核會判讀貼文、查地點：要看得出是連續多天的發放或活動、跟洋流有關、地點查得到，貼文自己寫的地址也要跟你填的對得上。不符合的改由人工審核。'}`,
     '上雷達後，原貼文刪除會自動下架；已經發完可以在詳細資料按「回報已發完」。',
   ]
     .map((t) => `<li>${esc(t)}</li>`)
@@ -1392,7 +1392,7 @@ async function renderSpotMine(): Promise<void> {
     ? `<h3 class="spot-mine-title">你送出的固定據點</h3><ul class="spot-mine">${list
         .map(
           (r) =>
-            `<li><span class="spot-status spot-${r.status}">${SPOT_STATUS_TEXT[r.status]}</span><span>${esc(r.place)}${r.reason ? `<small>${esc(r.reason)}</small>` : ''}<small>${dateFmt.format(new Date(r.createdAt * 1000))} 送出${r.reviewedAt ? `・${dateFmt.format(new Date(r.reviewedAt * 1000))} 審核` : ''}${r.permalink ? `・<a href="${esc(r.permalink)}" target="_blank" rel="noopener">原貼文</a>` : ''}</small></span></li>`,
+            `<li><span class="spot-status spot-${r.status}">${SPOT_STATUS_TEXT[r.status]}</span><span>${esc(r.place)}${r.reason ? `<small>${esc(r.reason)}</small>` : ''}${r.note ? `<small>${esc(r.note)}</small>` : ''}${r.auto ? '<small>自動審核通過</small>' : ''}<small>${dateFmt.format(new Date(r.createdAt * 1000))} 送出${r.reviewedAt ? `・${dateFmt.format(new Date(r.reviewedAt * 1000))} 審核` : ''}${r.permalink ? `・<a href="${esc(r.permalink)}" target="_blank" rel="noopener">原貼文</a>` : ''}</small></span></li>`,
         )
         .join('')}</ul>`
     : '';
@@ -1406,7 +1406,7 @@ async function submitSpotReport(): Promise<void> {
     return;
   }
   spotSubmitBtn.disabled = true;
-  spotResult.innerHTML = '<p class="msg busy">讀取貼文中</p>';
+  spotResult.innerHTML = `<p class="msg busy">${keywordRules?.sources?.spot?.autoReview === false ? '讀取貼文中' : '讀取貼文並自動審核中，約需 10 秒'}</p>`;
   const r = await submitSpot({ url: val('url'), place: val('place'), hours: val('hours'), note: val('note') });
   spotSubmitBtn.disabled = false;
   if (!r.ok) {
@@ -1414,9 +1414,33 @@ async function submitSpotReport(): Promise<void> {
     return;
   }
   const s = r.data;
-  spotResult.innerHTML = `<p class="msg">${
-    s.existed ? (s.status === 'approved' ? '這則已經有人回報，已經在雷達上了。' : '這則已經有人回報，正在審核中。') : '已送出，審核通過後就會出現在雷達上。可以在下面看進度。'
-  }</p>`;
+  const head = s.existed
+    ? s.status === 'approved'
+      ? '這則已經有人回報，已經在雷達上了。'
+      : '這則已經有人回報，正在等人工審核。'
+    : s.status === 'approved'
+      ? '自動審核通過，已放上雷達：'
+      : s.note
+        ? `需要人工審核（${s.note}）。審核後可以在下面看結果。`
+        : '已送出，審核通過後就會出現在雷達上。可以在下面看進度。';
+  const found = s.events ?? [];
+  const list = found
+    .slice(0, 1)
+    .map((ev) => {
+      const days = found.length > 1 ? `・${found.length} 天` : '';
+      const when = ev.allDay ? allDayText(ev, false) : `每天 ${fmtTime(ev.startAt)}–${fmtTime(ev.endAt)}`;
+      return `<li><button type="button" data-id="${ev.id}"><b>${kindLabel(ev)}｜${esc(ev.title)}</b><small>${esc(ev.placeText)} · ${esc(when)}${days}</small></button></li>`;
+    })
+    .join('');
+  spotResult.innerHTML = `<p class="msg">${esc(head)}</p>${list ? `<ul class="report-events">${list}</ul>` : ''}`;
+  for (const b of spotResult.querySelectorAll<HTMLButtonElement>('[data-id]')) {
+    b.addEventListener('click', () => {
+      reportSheet.hidden = true;
+      selectedId = null;
+      select(Number(b.dataset.id));
+    });
+  }
+  if (found.length > 0) void refresh();
   const keys = [s.key, ...spotKeys().filter((k) => k !== s.key)].slice(0, 20);
   spotKeysMem = keys;
   lsSet(LS_SPOT_REQS, JSON.stringify(keys));

@@ -10,7 +10,7 @@ import { mergeIntoOfficial } from './sources/merge';
 import { apifyTrial } from './sources/apify';
 import { fetchThreadsPost, resolveThreadsLink, shortcodeToUnix } from './sources/link';
 import { ENDED_REPORTS_NEEDED, MAX_LINK_AGE_SEC, ReportError, ipHash, purgeReports, recheckLinks, reportEnded, submitLink } from './reports';
-import { approveSpotRequest, listSpotRequests, rejectSpotRequest, SPOT_MAX_AGE_SEC, spotRequestStatus, submitSpotRequest, type ApproveBody } from './spots';
+import { approveSpotRequest, autoReview, listSpotRequests, rejectSpotRequest, SPOT_MAX_AGE_SEC, spotRequestStatus, submitSpotRequest, type ApproveBody, type SpotRequestRow } from './spots';
 import { addUserKeyword, listActiveKeywords, listAllKeywords, MAX_ACTIVE_KEYWORDS, normalizeKeyword, parseKeywordList, toKeywordOut, touchKeywords } from './keywords';
 import { CALLBACK_PATH, DELETE_PATH, DELETION_STATUS_PATH, UNINSTALL_PATH, deletionStatus, handleCallback, handleDelete, handleUninstall, startAuth } from './oauth';
 import { jsonResponse, nowSec, parseIsoToUnix } from './util';
@@ -124,7 +124,7 @@ async function handle(req: Request, env: Env, ctx: ExecutionContext): Promise<Re
         sources: {
           threads: env.THREADS_SEARCH_STATUS === 'approved' ? 'approved' : 'review',
           link: { maxAgeDays: MAX_LINK_AGE_SEC / 86400, recheckMin: 30, endedReportsNeeded: ENDED_REPORTS_NEEDED },
-          spot: { maxAgeDays: SPOT_MAX_AGE_SEC / 86400 },
+          spot: { maxAgeDays: SPOT_MAX_AGE_SEC / 86400, autoReview: env.SPOT_AUTO_REVIEW !== 'false' },
           official: { name: '台北大洋流「未來航線」', url: VOYAGE_PAGE, mapName: '大洋流車掃地圖', mapUrl: CURRENT_MAP_URL, intervalMin: 10 },
           news: { names: [...new Set(NEWS_FEEDS.map((f) => f.name))], intervalMin: 30 },
         },
@@ -327,6 +327,14 @@ async function handleAdmin(req: Request, env: Env, _ctx: ExecutionContext, path:
   const spotOk = /^\/api\/admin\/spot-requests\/(\d+)\/approve$/.exec(path);
   if (req.method === 'POST' && spotOk) {
     return jsonResponse(await approveSpotRequest(env, Number(spotOk[1]), await readJson<ApproveBody>(req), now));
+  }
+
+  // 用目前的規則重跑一次自動審核（例如自動審核暫時失敗的）
+  const spotAuto = /^\/api\/admin\/spot-requests\/(\d+)\/auto$/.exec(path);
+  if (req.method === 'POST' && spotAuto) {
+    const row = await env.DB.prepare('SELECT * FROM spot_requests WHERE id = ?').bind(Number(spotAuto[1])).first<SpotRequestRow>();
+    if (!row) throw new HttpError(404, 'request not found');
+    return jsonResponse(await autoReview(env, row, now));
   }
 
   // 不通過：{ reason }；已通過的會從雷達撤下
