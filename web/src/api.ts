@@ -79,6 +79,10 @@ async function postJson<T>(path: string, body: unknown): Promise<Result<T>> {
 export const submitSpot = (body: { url: string; place: string; hours: string; note: string }): Promise<Result<SpotRequestStatus>> =>
   postJson<SpotRequestStatus>('/api/spot-requests', body);
 
+/** 取消自己送出的固定據點（已上雷達的會一起撤下） */
+export const cancelSpot = (key: string, cancelKey: string): Promise<Result<SpotRequestStatus>> =>
+  postJson<SpotRequestStatus>('/api/spot-requests/cancel', { key, cancelKey });
+
 /** 查自己送出的固定據點審核進度 */
 export async function fetchSpotStatus(keys: string[]): Promise<SpotRequestStatus[]> {
   if (keys.length === 0) return [];

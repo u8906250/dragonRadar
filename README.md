@@ -54,7 +54,7 @@ worker/   Cloudflare Worker（API、排程、資料庫）
 - 有人亂貼時把 `wrangler.toml` 的 `SPOT_AUTO_REVIEW` 改成 `"false"`，全部改回人工審核。`POST /api/admin/spot-requests/:id/auto` 可以用目前規則重跑一次自動審核。
 
 - 只收 30 天內的公開貼文；同一則貼文已在審核或已通過就不再收；同一個 IP 每小時 5 則、全站每小時 60 則。
-- 回報的人拿到隨機代碼，用 `GET /api/spot-requests?keys=` 看進度（前端存在 localStorage）。
+- 回報的人拿到隨機代碼，用 `GET /api/spot-requests?keys=` 看進度（前端存在 localStorage）；第一次送出時另外拿到取消碼，`POST /api/spot-requests/cancel { key, cancelKey }` 取消（已上雷達的一起撤下）。重複送同一則的人只拿得到查詢代碼，不能取消別人的。
 - 管理者用 `GET /api/admin/spot-requests?status=pending` 看佇列，`POST /api/admin/spot-requests/:id/approve` 通過（`title`、`item`、`place_text`、`lat`/`lng` 或 `place_query`、`from`、`until`、`open`、`close`），會建一則 `spot-<代碼>` 貼文，展開成每天一筆固定據點；再按一次通過就是修改。`POST .../reject { reason }` 不通過，已上雷達的會一起撤下。
 - 排程只檢查原貼文有沒有刪除；內容以審核時填的為準（公告常寫「送完為止」，不能當成發完）。
 

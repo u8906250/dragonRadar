@@ -11,7 +11,7 @@ import { apifyTrial } from './sources/apify';
 import { fetchThreadsPost, resolveThreadsLink, shortcodeToUnix } from './sources/link';
 import { ENDED_REPORTS_NEEDED, MAX_LINK_AGE_SEC, ReportError, ipHash, purgeReports, recheckLinks, reportEnded, submitLink } from './reports';
 import { geocodeAddress, parseTwAddress } from './address';
-import { approveSpotRequest, autoReview, listSpotRequests, locatePlace, rejectSpotRequest, SPOT_MAX_AGE_SEC, spotRequestStatus, submitSpotRequest, type ApproveBody, type SpotRequestRow } from './spots';
+import { approveSpotRequest, autoReview, cancelSpotRequest, listSpotRequests, locatePlace, rejectSpotRequest, SPOT_MAX_AGE_SEC, spotRequestStatus, submitSpotRequest, type ApproveBody, type SpotRequestRow } from './spots';
 import { addUserKeyword, listActiveKeywords, listAllKeywords, MAX_ACTIVE_KEYWORDS, normalizeKeyword, parseKeywordList, toKeywordOut, touchKeywords } from './keywords';
 import { CALLBACK_PATH, DELETE_PATH, DELETION_STATUS_PATH, UNINSTALL_PATH, deletionStatus, handleCallback, handleDelete, handleUninstall, startAuth } from './oauth';
 import { jsonResponse, nowSec, parseIsoToUnix } from './util';
@@ -172,6 +172,12 @@ async function handle(req: Request, env: Env, ctx: ExecutionContext): Promise<Re
     const body = await readJson<{ url?: unknown; place?: unknown; hours?: unknown; note?: unknown }>(req);
     const r = await submitSpotRequest(env, body, await ipHash(env, req), now);
     return jsonResponse(r, r.existed ? 200 : 201);
+  }
+
+  // 回報的人取消自己的固定據點回報：{ key, cancelKey }
+  if (req.method === 'POST' && path === '/api/spot-requests/cancel') {
+    const body = await readJson<{ key?: unknown; cancelKey?: unknown }>(req);
+    return jsonResponse(await cancelSpotRequest(env, body.key, body.cancelKey, now));
   }
 
   // 回報的人查審核進度：?keys=代碼,代碼

@@ -12,6 +12,13 @@ describe('parseTwAddress', () => {
     expect(parseTwAddress('北平東路30-1號')).toMatchObject({ city: null, district: null, street: '北平東路', number: 30, raw: '30-1' });
     expect(parseTwAddress('中正區北平東路30號')).toMatchObject({ city: null, district: '中正區', street: '北平東路', number: 30 });
   });
+  it('does not take a shop name ending in 鄉 or 飯 as the district', () => {
+    expect(parseTwAddress('蘭鄉排骨飯 台北市中正區青島東路25-2號')).toMatchObject({ city: '臺北市', district: '中正區', street: '青島東路', number: 25, raw: '25-2' });
+  });
+  it('keeps roads that contain 市', () => {
+    expect(parseTwAddress('臺北市信義區市府路1號')).toMatchObject({ street: '市府路', number: 1 });
+    expect(parseTwAddress('台北市中正區市民大道一段100號')).toMatchObject({ street: '市民大道一段', number: 100 });
+  });
   it('is null for landmarks', () => {
     expect(parseTwAddress('捷運市政府站 2號出口')).toBeNull();
   });

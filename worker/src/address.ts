@@ -55,14 +55,19 @@ function sectionCn(s: string): string {
 /** 從一段文字裡找出門牌地址，找不到回傳 null */
 export function parseTwAddress(text: string): TwAddress | null {
   const s = sectionCn(normalize(text));
-  const re =
-    /(?:\d{3,6})?((?:臺北|新北|桃園|臺中|臺南|高雄)市|(?:基隆|新竹|嘉義)市|[一-鿿]{2}縣)?([一-鿿]{1,3}[區鄉鎮市])?(?:[一-鿿]{1,3}[里村])?(?:\d+鄰)?([一-鿿]{1,6}?(?:路|街|大道)(?:[一二三四五六七八九十]段)?)(\d+巷)?(\d+弄)?(\d+(?:[之-]\d+)?)號/;
+  // 縣市、鄉鎮區要從固定的名稱認，不然「蘭鄉排骨飯台北市」會被當成「飯臺北市」；路名不能含區縣鄉鎮里
+  const city = '((?:臺北|新北|桃園|臺中|臺南|高雄|基隆|新竹|嘉義)市|(?:新竹|苗栗|彰化|南投|雲林|嘉義|屏東|宜蘭|花蓮|臺東|澎湖|金門|連江)縣)';
+  const re = new RegExp(
+    `(?:\\d{3,6})?(?:${city}([\\u4e00-\\u9fff]{1,3}?[區鄉鎮市])?|(?<![\\u4e00-\\u9fff])([\\u4e00-\\u9fff]{1,2}[區鄉鎮]))?` +
+      `(?:[\\u4e00-\\u9fff]{1,3}[里村])?(?:\\d+鄰)?` +
+      `([^\\s\\d區縣鄉鎮里村鄰巷弄號]{1,5}?(?:路|街|大道)(?:[一二三四五六七八九十]段)?)(\\d+巷)?(\\d+弄)?(\\d+(?:[之-]\\d+)?)號`,
+  );
   const m = re.exec(s);
   if (!m) return null;
-  const raw = m[6];
+  const raw = m[7];
   const number = Number(raw.split(/[之-]/)[0]);
   if (!Number.isFinite(number) || number <= 0) return null;
-  return { city: m[1] ?? null, district: m[2] ?? null, street: `${m[3]}${m[4] ?? ''}${m[5] ?? ''}`, number, raw };
+  return { city: m[1] ?? null, district: m[2] ?? m[3] ?? null, street: `${m[4]}${m[5] ?? ''}${m[6] ?? ''}`, number, raw };
 }
 
 /** 把門牌字串（「399號」「107之1」「12-1」）換成號碼 */

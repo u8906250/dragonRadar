@@ -147,7 +147,7 @@ export interface SubmitResult {
 /** 回報固定據點的審核進度 */
 export interface SpotRequestStatus {
   key: string;
-  status: 'pending' | 'approved' | 'rejected';
+  status: 'pending' | 'approved' | 'rejected' | 'cancelled';
   reason: string | null;
   place: string;
   permalink: string | null;
@@ -160,6 +160,8 @@ export interface SpotRequestStatus {
   note: string | null;
   /** 剛通過時放上雷達的據點 */
   events?: EventOut[];
+  /** 取消用的代碼，只有第一次送出時拿得到 */
+  cancelKey?: string;
 }
 
 export interface EndedReportResult {

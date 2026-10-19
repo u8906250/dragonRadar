@@ -21,7 +21,8 @@ const MAX_PLACE = 100;
 const MAX_HOURS = 100;
 const MAX_NOTE = 300;
 
-export type SpotStatus = 'pending' | 'approved' | 'rejected';
+/** pending 等人工審核、approved 已上雷達、rejected 沒有通過、cancelled 回報的人自己取消 */
+export type SpotStatus = 'pending' | 'approved' | 'rejected' | 'cancelled';
 
 export interface SpotRequestRow {
   id: number;
@@ -43,6 +44,8 @@ export interface SpotRequestRow {
   reviewer: string | null;
   /** 自動審核沒通過的原因 */
   review_note: string | null;
+  /** 取消用的代碼，只給第一次送出的人 */
+  cancel_key: string | null;
 }
 
 /** 給回報的人看的進度，不含別人填的內容 */
@@ -63,6 +66,8 @@ export interface SpotRequestStatus {
   note: string | null;
   /** 剛通過時附上放上雷達的據點 */
   events?: EventOut[];
+  /** 取消用的代碼：只有第一次送出時回傳，前端存起來 */
+  cancelKey?: string;
 }
 
 const statusOf = (r: SpotRequestRow, existed = false): SpotRequestStatus => ({
@@ -119,14 +124,29 @@ export async function submitSpotRequest(env: Env, body: { url?: unknown; place?:
   const username = fetched.username ?? link.username;
   const permalink = username ? `https://www.threads.com/@${username}/post/${link.code}` : `https://www.threads.com/t/${link.code}`;
   const row = await env.DB.prepare(
-    `INSERT INTO spot_requests (key, code, permalink, username, text, posted_at, place, hours, note, ip_hash, status, created_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?) RETURNING *`,
+    `INSERT INTO spot_requests (key, cancel_key, code, permalink, username, text, posted_at, place, hours, note, ip_hash, status, created_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?) RETURNING *`,
   )
-    .bind(crypto.randomUUID(), link.code, permalink, username, fetched.text, postedAt, place, clean(body.hours, MAX_HOURS), clean(body.note, MAX_NOTE), ip, now)
+    .bind(crypto.randomUUID(), crypto.randomUUID(), link.code, permalink, username, fetched.text, postedAt, place, clean(body.hours, MAX_HOURS), clean(body.note, MAX_NOTE), ip, now)
     .first<SpotRequestRow>();
   if (!row) throw new ReportError(500, '存檔失敗，請稍後再試');
-  if (env.SPOT_AUTO_REVIEW === 'false') return statusOf(row);
-  return autoReview(env, row, now);
+  const cancelKey = row.cancel_key ?? undefined;
+  if (env.SPOT_AUTO_REVIEW === 'false') return { ...statusOf(row), cancelKey };
+  return { ...(await autoReview(env, row, now)), cancelKey };
+}
+
+/** 回報的人取消：還在等審核的直接取消，已上雷達的一起撤下 */
+export async function cancelSpotRequest(env: Env, key: unknown, cancelKey: unknown, now: number): Promise<SpotRequestStatus> {
+  if (typeof key !== 'string' || typeof cancelKey !== 'string') throw new ReportError(400, '缺少取消代碼');
+  const req = await env.DB.prepare('SELECT * FROM spot_requests WHERE key = ?').bind(key).first<SpotRequestRow>();
+  if (!req || !req.cancel_key || req.cancel_key !== cancelKey) throw new ReportError(403, '只有送出的人可以取消');
+  if (req.status === 'cancelled') return statusOf(req);
+  if (req.status === 'rejected') throw new ReportError(400, '這筆沒有通過審核，不用取消');
+  await env.DB.prepare("UPDATE events SET status = 'ended', ended_reason = 'cancelled', updated_at = ? WHERE post_id = ? AND status IN ('upcoming', 'active', 'unlocated')")
+    .bind(now, `spot-${req.code}`)
+    .run();
+  const r = await env.DB.prepare("UPDATE spot_requests SET status = 'cancelled', reviewed_at = ? WHERE id = ? RETURNING *").bind(now, req.id).first<SpotRequestRow>();
+  return statusOf(r ?? req);
 }
 
 // ---- 自動審核 ----
@@ -235,11 +255,11 @@ export async function spotRequestStatus(env: Env, keys: string[]): Promise<SpotR
 
 // ---- 管理者審核 ----
 
-export async function listSpotRequests(env: Env, status: string | null): Promise<Array<Omit<SpotRequestRow, 'ip_hash'>>> {
+export async function listSpotRequests(env: Env, status: string | null): Promise<Array<Omit<SpotRequestRow, 'ip_hash' | 'cancel_key'>>> {
   const r = status
     ? await env.DB.prepare('SELECT * FROM spot_requests WHERE status = ? ORDER BY id DESC LIMIT 100').bind(status).all<SpotRequestRow>()
     : await env.DB.prepare('SELECT * FROM spot_requests ORDER BY id DESC LIMIT 100').all<SpotRequestRow>();
-  return r.results.map(({ ip_hash: _ip, ...rest }) => rest);
+  return r.results.map(({ ip_hash: _ip, cancel_key: _c, ...rest }) => rest);
 }
 
 export interface ApproveBody {

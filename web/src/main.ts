@@ -1,5 +1,5 @@
 import './styles.css';
-import { addKeyword, fetchEvents, fetchHealth, fetchKeywords, fetchRoutes, fetchSpotStatus, reportEnded, submitLink, submitSpot } from './api';
+import { addKeyword, cancelSpot, fetchEvents, fetchHealth, fetchKeywords, fetchRoutes, fetchSpotStatus, reportEnded, submitLink, submitSpot } from './api';
 import { compassSupported, startCompass } from './compass';
 import { bearingDeg, compassLabel, formatKm, haversineKm, taiwanRadiusKm, type LatLng } from './geo';
 import { inShuangbei, SHUANGBEI_RINGS, shuangbeiRadiusKm } from './shuangbei';
@@ -31,8 +31,11 @@ const LS_SPOTS = 'dr.showSpots';
 const LS_SPOT_REQS = 'dr.spotRequests';
 /** 上次選的回報種類 */
 const LS_REPORT_MODE = 'dr.reportMode';
+/** 自己送出的固定據點的取消碼：{ 查詢代碼: 取消碼 } */
+const LS_SPOT_CANCEL = 'dr.spotCancel';
 /** 瀏覽器不能存資料（私密瀏覽等）時，這次開著的期間先記在這裡 */
 let spotKeysMem: string[] = [];
+let spotCancelMem: Record<string, string> = {};
 /** 固定據點休息中、下一段在這個時間內開始才畫淡光點 */
 const SPOT_SHOW_AHEAD_SEC = 24 * 3600;
 const KEYWORD_RE_INVALID = /[<>{}\\%_]/;
@@ -1383,7 +1386,31 @@ function spotKeys(): string[] {
   return [...new Set([...spotKeysMem, ...saved])].slice(0, 20);
 }
 
-const SPOT_STATUS_TEXT: Record<SpotRequestStatus['status'], string> = { pending: '等人工審核', approved: '已上雷達', rejected: '沒有通過' };
+const SPOT_STATUS_TEXT: Record<SpotRequestStatus['status'], string> = { pending: '等人工審核', approved: '已上雷達', rejected: '沒有通過', cancelled: '已取消' };
+
+function spotCancelKeys(): Record<string, string> {
+  let saved: Record<string, string> = {};
+  try {
+    const v = JSON.parse(lsGet(LS_SPOT_CANCEL) ?? '{}') as unknown;
+    if (v && typeof v === 'object' && !Array.isArray(v)) saved = v as Record<string, string>;
+  } catch {
+    /* 壞掉的資料當成沒有 */
+  }
+  return { ...saved, ...spotCancelMem };
+}
+
+async function cancelSpotReport(key: string): Promise<void> {
+  const cancelKey = spotCancelKeys()[key];
+  if (!cancelKey) return;
+  const r = await cancelSpot(key, cancelKey);
+  if (!r.ok) {
+    spotResult.innerHTML = `<p class="msg error">${esc(r.message)}</p>`;
+    return;
+  }
+  spotResult.innerHTML = '<p class="msg">已取消。</p>';
+  await renderSpotMine();
+  await refresh();
+}
 
 /** 自己送出的固定據點與審核進度 */
 async function renderSpotMine(): Promise<void> {
@@ -1396,6 +1423,7 @@ async function renderSpotMine(): Promise<void> {
     .map((t) => `<li>${esc(t)}</li>`)
     .join('');
   const keys = spotKeys();
+  const cancels = spotCancelKeys();
   const list = await fetchSpotStatus(keys);
   if (keys.length > 0 && list.length === 0) {
     spotMine.innerHTML = '<h3 class="spot-mine-title">你送出的固定據點</h3><p class="muted sheet-note">暫時查不到審核進度，稍後再打開看看。</p>';
@@ -1405,7 +1433,11 @@ async function renderSpotMine(): Promise<void> {
     ? `<h3 class="spot-mine-title">你送出的固定據點</h3><ul class="spot-mine">${list
         .map(
           (r) =>
-            `<li><span class="spot-status spot-${r.status}">${SPOT_STATUS_TEXT[r.status]}</span><span>${esc(r.place)}${r.reason ? `<small>${esc(r.reason)}</small>` : ''}${r.note ? `<small>${esc(r.note)}</small>` : ''}${r.auto ? '<small>自動審核通過</small>' : ''}<small>${dateFmt.format(new Date(r.createdAt * 1000))} 送出${r.reviewedAt ? `・${dateFmt.format(new Date(r.reviewedAt * 1000))} 審核` : ''}${r.permalink ? `・<a href="${esc(r.permalink)}" target="_blank" rel="noopener">原貼文</a>` : ''}</small></span></li>`,
+            `<li><span class="spot-status spot-${r.status}">${SPOT_STATUS_TEXT[r.status]}</span><span class="spot-mine-body">${esc(r.place)}${r.reason ? `<small>${esc(r.reason)}</small>` : ''}${r.note ? `<small>${esc(r.note)}</small>` : ''}${r.auto ? '<small>自動審核通過</small>' : ''}<small>${dateFmt.format(new Date(r.createdAt * 1000))} 送出${r.reviewedAt ? `・${dateFmt.format(new Date(r.reviewedAt * 1000))} 審核` : ''}${r.permalink ? `・<a href="${esc(r.permalink)}" target="_blank" rel="noopener">原貼文</a>` : ''}</small></span>${
+              cancels[r.key] && (r.status === 'pending' || r.status === 'approved')
+                ? `<button type="button" class="chip spot-cancel" data-cancel="${esc(r.key)}" data-approved="${r.status === 'approved' ? '1' : ''}">${r.status === 'approved' ? '撤下' : '取消'}</button>`
+                : ''
+            }</li>`,
         )
         .join('')}</ul>`
     : '';
@@ -1458,6 +1490,11 @@ async function submitSpotReport(): Promise<void> {
   const keys = [s.key, ...spotKeys().filter((k) => k !== s.key)].slice(0, 20);
   spotKeysMem = keys;
   lsSet(LS_SPOT_REQS, JSON.stringify(keys));
+  if (s.cancelKey) {
+    const cancels = Object.fromEntries(Object.entries({ ...spotCancelKeys(), [s.key]: s.cancelKey }).filter(([k]) => keys.includes(k)));
+    spotCancelMem = cancels;
+    lsSet(LS_SPOT_CANCEL, JSON.stringify(cancels));
+  }
   spotForm.reset();
   await renderSpotMine();
 }
@@ -1679,6 +1716,14 @@ function wireControls(): void {
   spotForm.addEventListener('submit', (e) => {
     e.preventDefault();
     void submitSpotReport();
+  });
+  spotMine.addEventListener('click', (e) => {
+    const b = (e.target as Element).closest<HTMLButtonElement>('[data-cancel]');
+    if (!b?.dataset.cancel) return;
+    const ask = b.dataset.approved ? '要把這個據點從雷達上撤下嗎？' : '要取消這筆回報嗎？';
+    if (!window.confirm(ask)) return;
+    b.disabled = true;
+    void cancelSpotReport(b.dataset.cancel);
   });
   if (navigator.clipboard && 'readText' in navigator.clipboard) {
     reportPaste.hidden = false;
