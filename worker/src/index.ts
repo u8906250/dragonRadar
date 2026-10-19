@@ -11,7 +11,7 @@ import { apifyTrial } from './sources/apify';
 import { fetchThreadsPost, resolveThreadsLink, shortcodeToUnix } from './sources/link';
 import { ENDED_REPORTS_NEEDED, MAX_LINK_AGE_SEC, ReportError, ipHash, purgeReports, recheckLinks, reportEnded, submitLink } from './reports';
 import { addressCacheKey, geocodeAddress, parseTwAddress } from './address';
-import { adminListBottles, adminSetBottle, BOTTLE_MAX_CHARS, BOTTLE_TTL_SEC, bottlesEnabled, deleteBottle, deviceId, dropBottle, listBottles, myBottles, PER_DEVICE_MAX, PER_DEVICE_PER_DAY, PICK_RADIUS_M, pickBottle, purgeBottles, reportBottle } from './bottles';
+import { adminListBottles, adminSetBottle, BOTTLE_MAX_CHARS, BOTTLE_TTL_SEC, bottlesEnabled, deleteBottle, deviceId, dropBottle, listBottles, myBottles, PER_DEVICE_PER_DAY, PICK_RADIUS_M, pickBottle, purgeBottles, reportBottle } from './bottles';
 import { approveSpotRequest, autoReview, cancelSpotRequest, listSpotRequests, locatePlace, rejectSpotRequest, SPOT_MAX_AGE_SEC, spotRequestStatus, submitSpotRequest, type ApproveBody, type SpotRequestRow } from './spots';
 import { addUserKeyword, listActiveKeywords, listAllKeywords, MAX_ACTIVE_KEYWORDS, normalizeKeyword, parseKeywordList, toKeywordOut, touchKeywords } from './keywords';
 import { CALLBACK_PATH, DELETE_PATH, DELETION_STATUS_PATH, UNINSTALL_PATH, deletionStatus, handleCallback, handleDelete, handleUninstall, startAuth } from './oauth';
@@ -127,7 +127,7 @@ async function handle(req: Request, env: Env, ctx: ExecutionContext): Promise<Re
           threads: env.THREADS_SEARCH_STATUS === 'approved' ? 'approved' : 'review',
           link: { maxAgeDays: MAX_LINK_AGE_SEC / 86400, recheckMin: 30, endedReportsNeeded: ENDED_REPORTS_NEEDED },
           spot: { maxAgeDays: SPOT_MAX_AGE_SEC / 86400, autoReview: env.SPOT_AUTO_REVIEW !== 'false' },
-          bottles: { enabled: bottlesEnabled(env), maxChars: BOTTLE_MAX_CHARS, pickRadiusM: PICK_RADIUS_M, ttlDays: BOTTLE_TTL_SEC / 86400, perDay: PER_DEVICE_PER_DAY, perDayMax: PER_DEVICE_MAX },
+          bottles: { enabled: bottlesEnabled(env), maxChars: BOTTLE_MAX_CHARS, pickRadiusM: PICK_RADIUS_M, ttlDays: BOTTLE_TTL_SEC / 86400, perDay: PER_DEVICE_PER_DAY },
           official: { name: '台北大洋流「未來航線」', url: VOYAGE_PAGE, mapName: '大洋流車掃地圖', mapUrl: CURRENT_MAP_URL, intervalMin: 10 },
           news: { names: [...new Set(NEWS_FEEDS.map((f) => f.name))], intervalMin: 30 },
         },
