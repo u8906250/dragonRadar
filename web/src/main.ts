@@ -1866,6 +1866,13 @@ async function submitReport(): Promise<void> {
   }
 }
 
+/** 清單最下面的版號：網站（建置時的提交）與伺服器（部署時的提交）分開寫，看得出哪邊已經更新 */
+function showVersion(server: string | null): void {
+  const v = __APP_VERSION__;
+  const web = `${v.version}${v.date ? `（${v.date}${v.sha ? `・${v.sha}` : ''}）` : ''}`;
+  $('#app-version').textContent = `洋流雷達 ${web}${server && server !== v.version ? `・伺服器 ${server}` : ''}`;
+}
+
 /** 從 Threads App 分享過來（PWA share target）或網址帶 ?url= */
 function takeSharedLink(params: URLSearchParams): string | null {
   const text = [params.get('url'), params.get('text'), params.get('title')].filter(Boolean).join(' ');
@@ -2094,8 +2101,10 @@ async function boot(): Promise<void> {
   setScale(scaleSetting);
   setOrigin(origin);
   startGeolocation();
+  showVersion(null);
   try {
     const h = await fetchHealth();
+    showVersion(h.version ?? null);
     modeBadge.textContent = h.mode === 'mock' ? '示範資料' : h.mode === 'unconfigured' ? '未連線 Threads' : '即時';
     modeBadge.classList.toggle('mock', h.mode !== 'live');
     modeBadge.hidden = false;

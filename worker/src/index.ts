@@ -74,7 +74,7 @@ async function handle(req: Request, env: Env, ctx: ExecutionContext): Promise<Re
 
   if (req.method === 'GET' && (path === '/' || path === '/api/health')) {
     const client = await makeClient(env);
-    return jsonResponse({ ok: true, mode: client.mode, time: now });
+    return jsonResponse({ ok: true, mode: client.mode, time: now, version: env.APP_VERSION ?? 'dev' });
   }
 
   // Threads 授權（給管理員綁定搜尋用的帳號）與 Meta 要求的解除授權、刪除資料回呼

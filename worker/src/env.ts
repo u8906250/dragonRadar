@@ -17,6 +17,8 @@ export interface Env {
   SPOT_AUTO_REVIEW?: string;
   /** "false" 時關掉漂流瓶（有人亂丟時用） */
   BOTTLES_ENABLED?: string;
+  /** 版號，部署時用 --var 帶入（v1.<提交次數>） */
+  APP_VERSION?: string;
   /** Apify API token（試用第三方 Threads 爬蟲用，只放 secret） */
   APIFY_TOKEN?: string;
   THREADS_ACCESS_TOKEN?: string;

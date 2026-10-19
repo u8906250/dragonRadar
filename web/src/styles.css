@@ -508,3 +508,6 @@ a.chip { display: inline-flex; align-items: center; text-decoration: none; }
 .bottle-form textarea:focus { outline: 2px solid var(--highlight); outline-offset: 1px; }
 .bottle-form-row { display: flex; align-items: center; justify-content: space-between; }
 .sheet-body blockquote.bottle-note { margin: 4px 0 10px; padding: 14px 16px; font-size: 18px; line-height: 1.6; font-weight: 700; color: #1d3b44; background: linear-gradient(135deg, #e9f8fb, #c9eef6); border: 1.5px solid #8fdcec; border-radius: 14px; }
+
+/* 清單最下面的版號 */
+.app-version { margin: 18px 0 8px; font-size: 11px; text-align: center; opacity: 0.8; }

@@ -254,6 +254,14 @@
     </dl>
 
     <p class="meta" style="margin-top:28px">有問題或建議，請到 <a href="https://github.com/u8906250/dragonRadar/issues">GitHub Issues</a> 留言。</p>
+    <p class="meta" id="help-version"></p>
+    <script>
+      // 版號由建置時產生的 version.json 提供（v1.提交次數），每次更新自動加一
+      fetch('version.json', { cache: 'no-store' })
+        .then((r) => (r.ok ? r.json() : null))
+        .then((v) => { if (v) document.getElementById('help-version').textContent = `版本 ${v.version}（${v.date}・${v.sha}）`; })
+        .catch(() => {});
+    </script>
   </article>
 </main>
 </body>
