@@ -24,6 +24,10 @@ export interface EventOut {
   keyword: string | null;
   /** 只有日期、沒有公布時間 */
   allDay?: boolean;
+  /** 貼文沒寫結束時間：畫面寫「發完為止」，endAt 只是系統自動下架的時間 */
+  endOpen?: boolean;
+  /** 固定據點沒寫最後一天：畫面寫「發完為止」 */
+  untilOpen?: boolean;
   /** 有幾個人回報已發完／已結束 */
   endedReports?: number;
   /** 固定據點的其中一天 */

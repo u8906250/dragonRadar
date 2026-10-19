@@ -260,22 +260,27 @@ describe('spotSessions', () => {
     const now = t('2026-10-17T20:35:00+08:00');
     const s = spotSessions({ start_at: '2026-10-17T11:00:00+08:00', end_at: '2026-10-17T18:00:00+08:00', until: '2026-10-19' }, posted, now);
     expect(s).toEqual([
-      { start: t('2026-10-18T11:00:00+08:00'), end: t('2026-10-18T18:00:00+08:00'), allDay: false },
-      { start: t('2026-10-19T11:00:00+08:00'), end: t('2026-10-19T18:00:00+08:00'), allDay: false },
+      { start: t('2026-10-18T11:00:00+08:00'), end: t('2026-10-18T18:00:00+08:00'), allDay: false, endOpen: false, untilOpen: false },
+      { start: t('2026-10-19T11:00:00+08:00'), end: t('2026-10-19T18:00:00+08:00'), allDay: false, endOpen: false, untilOpen: false },
     ]);
   });
   it('splits a merged multi-day range into daily windows', () => {
     const s = spotSessions({ start_at: '2026-10-17T11:00:00+08:00', end_at: '2026-10-19T18:00:00+08:00', until: null }, posted, posted);
     expect(s.map((x) => x.end - x.start)).toEqual([7 * 3600, 7 * 3600, 7 * 3600]);
   });
-  it('treats a last day equal to the first day as "from that day" (「10/16 起」)', () => {
+  it('treats a last day equal to the first day as "from that day" (「10/16 起」), marking the last day as unknown', () => {
     const s = spotSessions({ start_at: '2026-10-17T13:00:00+08:00', end_at: '2026-10-17T20:00:00+08:00', until: '2026-10-17' }, posted, posted);
     expect(s).toHaveLength(7);
+    expect(s[0]).toMatchObject({ endOpen: false, untilOpen: true });
+  });
+  it('marks an unknown daily closing time', () => {
+    const s = spotSessions({ start_at: '2026-10-17T13:00:00+08:00', end_at: null, until: '2026-10-19' }, posted, posted);
+    expect(s[0]).toMatchObject({ allDay: false, endOpen: true, untilOpen: false });
   });
   it('keeps 7 days when no last day is given, and marks unknown hours as all-day', () => {
     const s = spotSessions({ start_at: '2026-10-17T00:00:00+08:00', end_at: null, until: null }, posted, posted);
     expect(s).toHaveLength(7);
-    expect(s[0]).toEqual({ start: t('2026-10-17T00:00:00+08:00'), end: t('2026-10-18T00:00:00+08:00'), allDay: true });
+    expect(s[0]).toEqual({ start: t('2026-10-17T00:00:00+08:00'), end: t('2026-10-18T00:00:00+08:00'), allDay: true, endOpen: false, untilOpen: true });
   });
 });
 

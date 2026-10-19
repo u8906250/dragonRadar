@@ -1,7 +1,7 @@
 import { getAccessToken, makeClient, saveAccessToken } from './client';
 import type { Env } from './env';
 import { DEFAULT_DURATION_SEC, ENDED_WORDS, MAX_FUTURE_SEC, MIN_CONFIDENCE, SPOT_DEFAULT_DAYS, getEvent, getPost, ingestAll, ingestKeyword, listEvents, processBacklog, processPost, storePost, updateLifecycle, type EventRow } from './events';
-import { runModel } from './extract';
+import { normalizeExtraction, runModel } from './extract';
 import { geocode } from './geocode';
 import { ingestNews, NEWS_FEEDS } from './sources/news';
 import { listRoutes, syncVoyage, VOYAGE_PAGE } from './sources/voyage';
@@ -328,6 +328,25 @@ async function handleAdmin(req: Request, env: Env, _ctx: ExecutionContext, path:
   const spotOk = /^\/api\/admin\/spot-requests\/(\d+)\/approve$/.exec(path);
   if (req.method === 'POST' && spotOk) {
     return jsonResponse(await approveSpotRequest(env, Number(spotOk[1]), await readJson<ApproveBody>(req), now));
+  }
+
+  // 一次性：還在雷達上的事件，依當初的 AI 判讀標出「沒寫結束時間」「沒寫最後一天」（0015 之前建的）
+  if (req.method === 'POST' && path === '/api/admin/backfill-open-end') {
+    const { results } = await env.DB.prepare(
+      `SELECT e.id, e.title, e.spot, e.all_day, p.extraction FROM events e JOIN posts p ON p.id = e.post_id
+        WHERE e.status IN ('upcoming', 'active') AND p.source NOT IN ('official', 'spot') AND p.extraction IS NOT NULL`,
+    ).all<{ id: number; title: string; spot: number; all_day: number; extraction: string }>();
+    const day = (iso: string | null): string => (iso ?? '').slice(0, 10);
+    const updates = [];
+    for (const r of results) {
+      const ex = normalizeExtraction((safeParse(r.extraction) as { response?: unknown } | null)?.response ?? null)?.events.find((x) => x.title === r.title);
+      if (!ex) continue;
+      const endOpen = r.all_day === 0 && ex.end_at === null;
+      const untilOpen = r.spot === 1 && ex.until === null && !(ex.end_at && day(ex.end_at) > day(ex.start_at));
+      updates.push(env.DB.prepare('UPDATE events SET end_open = ?, until_open = ? WHERE id = ?').bind(endOpen ? 1 : 0, untilOpen ? 1 : 0, r.id));
+    }
+    if (updates.length > 0) await env.DB.batch(updates);
+    return jsonResponse({ checked: results.length, updated: updates.length });
   }
 
   // 查地點（給審核用）：{ q }，回傳門牌解析、門牌定位與最後用的座標

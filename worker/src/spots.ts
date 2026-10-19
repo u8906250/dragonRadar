@@ -213,10 +213,10 @@ async function publishSpot(
   const out: EventOut[] = [];
   for (const s of d.sessions) {
     const row = await env.DB.prepare(
-      `INSERT INTO events (post_id, kind, title, item, start_at, end_at, place_text, place_query, lat, lng, status, confidence, all_day, spot, approx_area, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, 1, NULL, ?, ?) RETURNING id`,
+      `INSERT INTO events (post_id, kind, title, item, start_at, end_at, place_text, place_query, lat, lng, status, confidence, all_day, spot, approx_area, end_open, until_open, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, 1, NULL, ?, ?, ?, ?) RETURNING id`,
     )
-      .bind(postId, d.kind, d.title, d.item, s.start, s.end, d.placeText, d.placeQuery, d.point.lat, d.point.lng, s.start <= now ? 'active' : 'upcoming', s.allDay ? 1 : 0, now, now)
+      .bind(postId, d.kind, d.title, d.item, s.start, s.end, d.placeText, d.placeQuery, d.point.lat, d.point.lng, s.start <= now ? 'active' : 'upcoming', s.allDay ? 1 : 0, s.endOpen ? 1 : 0, s.untilOpen ? 1 : 0, now, now)
       .first<{ id: number }>();
     const ev = row ? await getEvent(env, row.id, now) : null;
     if (ev) out.push(ev);

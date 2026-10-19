@@ -36,6 +36,8 @@ export interface EventRow {
   confidence: number | null;
   ended_reason: string | null;
   all_day?: number;
+  end_open?: number;
+  until_open?: number;
   spot?: number;
   approx_area?: string | null;
   last_checked_at: number | null;
@@ -58,6 +60,10 @@ export interface EventOut {
   keyword: string | null;
   /** 只有日期、沒有公布時間 */
   allDay: boolean;
+  /** 貼文沒寫結束時間（畫面寫「發完為止」）；endAt 只是系統自動下架的時間 */
+  endOpen: boolean;
+  /** 固定據點沒寫最後一天（畫面寫「發完為止」） */
+  untilOpen: boolean;
   /** 有幾個人回報已發完／已結束 */
   endedReports: number;
   /** 固定據點的其中一天（同一則貼文、同一地點的每天各一筆） */
@@ -148,6 +154,10 @@ export interface Session {
   start: number;
   end: number;
   allDay: boolean;
+  /** 每天幾點結束沒寫，end 是預設的 */
+  endOpen: boolean;
+  /** 最後一天沒寫，天數是預設的 */
+  untilOpen: boolean;
 }
 
 /**
@@ -167,12 +177,14 @@ export function spotSessions(ex: Pick<ExtractedEvent, 'start_at' | 'end_at' | 'u
   // 固定據點是連續多天：最後一天不晚於第一天（模型把「10/16 起」寫成 until 10/16）就當作沒寫
   const untilRaw = ex.until ? parseIsoToUnix(`${ex.until}T00:00:00+08:00`) : null;
   const untilAt = untilRaw !== null && untilRaw > firstDay ? untilRaw : null;
-  let lastDay = untilAt ?? (end !== null && taipeiDayStart(end) > firstDay ? taipeiDayStart(end) : firstDay + (SPOT_DEFAULT_DAYS - 1) * DAY_SEC);
+  const multiDayEnd = end !== null && taipeiDayStart(end) > firstDay;
+  const untilOpen = untilAt === null && !multiDayEnd;
+  let lastDay = untilAt ?? (multiDayEnd ? taipeiDayStart(end) : firstDay + (SPOT_DEFAULT_DAYS - 1) * DAY_SEC);
   lastDay = Math.min(lastDay, firstDay + 13 * DAY_SEC, taipeiDayStart(now + MAX_FUTURE_SEC));
 
   const out: Session[] = [];
   for (let day = firstDay; day <= lastDay; day += DAY_SEC) {
-    const s = { start: day + open, end: day + close, allDay };
+    const s = { start: day + open, end: day + close, allDay, endOpen: !allDay && end === null, untilOpen };
     if (s.end > now) out.push(s);
   }
   return out;
@@ -216,8 +228,8 @@ async function createEvent(
 
   const status: EventStatus = !point ? 'unlocated' : start <= now ? 'active' : 'upcoming';
   const event = await env.DB.prepare(
-    `INSERT INTO events (post_id, kind, title, item, start_at, end_at, place_text, place_query, lat, lng, status, confidence, all_day, spot, approx_area, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING *`,
+    `INSERT INTO events (post_id, kind, title, item, start_at, end_at, place_text, place_query, lat, lng, status, confidence, all_day, spot, approx_area, end_open, until_open, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING *`,
   )
     .bind(
       post.id,
@@ -235,6 +247,8 @@ async function createEvent(
       session?.allDay ? 1 : 0,
       session ? 1 : 0,
       approxArea,
+      (session ? session.endOpen : !parseIsoToUnix(ex.end_at)) ? 1 : 0,
+      session?.untilOpen ? 1 : 0,
       now,
       now,
     )
@@ -448,6 +462,8 @@ export function toEventOut(r: JoinedRow, now: number): EventOut {
     confidence: r.confidence,
     keyword: r.keyword,
     allDay: r.all_day === 1,
+    endOpen: r.end_open === 1,
+    untilOpen: r.until_open === 1,
     endedReports: r.ended_reports ?? 0,
     spot: r.spot === 1,
     approxArea: r.approx_area ?? null,

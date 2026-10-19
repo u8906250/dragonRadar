@@ -258,14 +258,19 @@ function dayWord(unix: number, now: number): string {
   return d === 0 ? '今天' : d === 1 ? '明天' : dateFmt.format(new Date(unix * 1000));
 }
 
-/** 固定據點的開放時段，例如「每天 11:00–18:00」 */
+/** 貼文沒寫結束時間時的說法：不自己猜時間 */
+const openEndText = (ev: EventOut): string => (ev.kind === 'activity' ? '沒寫結束時間' : '發完為止');
+
+/** 固定據點的開放時段，例如「每天 11:00–18:00」；沒寫幾點結束就只寫開始 */
 function spotHours(ev: EventOut): string {
-  return ev.allDay ? '每天整天' : `每天 ${fmtTime(ev.startAt)}–${fmtTime(ev.endAt)}`;
+  if (ev.allDay) return '每天整天';
+  return ev.endOpen ? `每天 ${fmtTime(ev.startAt)} 開始` : `每天 ${fmtTime(ev.startAt)}–${fmtTime(ev.endAt)}`;
 }
 
 function spotUntil(it: Item, now: number): string {
   const last = it.spot?.sessions.at(-1);
   if (!last) return '';
+  if (last.untilOpen) return openEndText(last);
   return taipeiDay(last.startAt) === taipeiDay(now) ? '今天最後一天' : `到 ${dateFmt.format(new Date(last.startAt * 1000))}`;
 }
 
@@ -273,7 +278,9 @@ function spotLine(it: Item, now: number): string {
   const { ev } = it;
   const until = spotUntil(it, now);
   if (ev.startAt <= now && now < ev.endAt) {
-    return ev.allDay ? `開放中・${until}` : `營業中・今天到 ${fmtTime(ev.endAt)}・${until}`;
+    if (ev.allDay) return `開放中・${until}`;
+    // 沒寫幾點結束：不寫「今天到幾點」
+    return ev.endOpen ? `營業中・${until}` : `營業中・今天到 ${fmtTime(ev.endAt)}・${until}`;
   }
   const next = ev.allDay ? `${dayWord(ev.startAt, now)}開放` : `${dayWord(ev.startAt, now)} ${fmtTime(ev.startAt)} 開始`;
   return `休息中・${next}・${until}`;
@@ -295,6 +302,7 @@ function timeLine(it: Item, now: number): string {
     return today ? `進行中 · ${allDayText(ev, true)}` : `${dateFmt.format(new Date(ev.startAt * 1000))} ${allDayText(ev, false)}`;
   }
   if (it.phase === 'active') {
+    if (ev.endOpen) return `進行中 · ${openEndText(ev)}`;
     const left = Math.max(0, Math.round((ev.endAt - now) / 60));
     return `進行中 · 約 ${left} 分鐘後結束`;
   }
@@ -703,7 +711,7 @@ function renderDetail(items: Item[], now: number): void {
     <div class="sheet-body">
       ${nearbyHtml(it, items)}
       ${routeBoxHtml(ev, now)}
-      <p>類型：${it.spot ? `固定據點（${kindLabel(ev)}）` : kindLabel(ev)}<br>${ev.item ? `發放：${esc(ev.item)}<br>` : ''}${ev.keyword ? `關鍵字：#${esc(ev.keyword)}<br>` : ''}地點：${esc(ev.placeText)}${ev.approxArea ? `<br><span class="approx-note">約略位置：只知道在${esc(ev.approxArea)}，地圖上是${esc(ev.approxArea)}的中心點，實際地點請看原文</span>` : ''}<br>時間：${it.spot ? esc(spotSchedule(it)) : ev.allDay ? `${dateFmt.format(new Date(ev.startAt * 1000))} ${allDayText(ev, false)}` : `${fmtTime(ev.startAt)} – ${fmtTime(ev.endAt)}`}<br>距離：${ev.approxArea ? '約 ' : ''}${formatKm(it.distanceKm)}，${compassLabel(it.bearing)}方 · ${esc(timeLine(it, now))}</p>
+      <p>類型：${it.spot ? `固定據點（${kindLabel(ev)}）` : kindLabel(ev)}<br>${ev.item ? `發放：${esc(ev.item)}<br>` : ''}${ev.keyword ? `關鍵字：#${esc(ev.keyword)}<br>` : ''}地點：${esc(ev.placeText)}${ev.approxArea ? `<br><span class="approx-note">約略位置：只知道在${esc(ev.approxArea)}，地圖上是${esc(ev.approxArea)}的中心點，實際地點請看原文</span>` : ''}<br>時間：${it.spot ? esc(spotSchedule(it)) : ev.allDay ? `${dateFmt.format(new Date(ev.startAt * 1000))} ${allDayText(ev, false)}` : ev.endOpen ? `${fmtTime(ev.startAt)} 開始，${openEndText(ev)}` : `${fmtTime(ev.startAt)} – ${fmtTime(ev.endAt)}`}<br>距離：${ev.approxArea ? '約 ' : ''}${formatKm(it.distanceKm)}，${compassLabel(it.bearing)}方 · ${esc(timeLine(it, now))}</p>
       <blockquote>${esc(ev.post.source === 'news' ? ev.post.text.split('\n')[0] : ev.post.text.slice(0, 300))}</blockquote>
       <p class="muted source-line">來源：${esc(sourceLabel(ev))}</p>
       ${routeOf(ev) ? '' : relatedHtml(ev.related ?? [])}
@@ -756,7 +764,12 @@ function spotSchedule(it: Item): string {
   const first = s[0];
   const last = s.at(-1);
   if (!first || !last) return '';
-  const range = first === last ? dateFmt.format(new Date(first.startAt * 1000)) : `${dateFmt.format(new Date(first.startAt * 1000))} 到 ${dateFmt.format(new Date(last.startAt * 1000))}`;
+  // 沒寫最後一天：只寫從哪天開始，不寫系統預設的最後一天
+  const range = last.untilOpen
+    ? `${dateFmt.format(new Date(first.startAt * 1000))} 起，${openEndText(last)}`
+    : first === last
+      ? dateFmt.format(new Date(first.startAt * 1000))
+      : `${dateFmt.format(new Date(first.startAt * 1000))} 到 ${dateFmt.format(new Date(last.startAt * 1000))}`;
   return `${spotHours(it.ev)}，${range}`;
 }
 
@@ -1213,13 +1226,13 @@ function renderRules(): void {
       <li><b>發放</b>：在某時某地免費發飄帶、貼紙、文宣、飲料等，雷達上是<span class="ex">橘色</span>光點。</li>
       <li><b>活動</b>：可以到場參加的車掃、掃街、市場開講、造勢晚會、見面會、座談等，雷達上是<span class="ex">另一個顏色</span>的光點。</li>
       <li>活動現場也有發放東西的，算成一筆發放。</li>
-      <li><b>固定據點</b>：店家、服務處等連續好幾天在固定時段都能去領或參加的，標成「據點」，雷達上是<span class="ex">菱形</span>光點，休息時間變淡。沒寫最後一天的，保留 ${r.spotDefaultDays ?? 7} 天。可以用清單上方的「顯示固定據點」開關隱藏。</li>
+      <li><b>固定據點</b>：店家、服務處等連續好幾天在固定時段都能去領或參加的，標成「據點」，雷達上是<span class="ex">菱形</span>光點，休息時間變淡。沒寫最後一天的寫「發完為止」，${r.spotDefaultDays ?? 7} 天後自動下架。可以用清單上方的「顯示固定據點」開關隱藏。</li>
     </ul>
     <h3>時間地點怎麼判讀</h3>
     <ol>
       <li>貼文要同時寫出<b>時間</b>和<b>地點</b>，缺一個就不會出現在雷達上。</li>
       <li>時間可以寫 <span class="ex">10/18 15:00</span>、<span class="ex">今天下午三點</span>、<span class="ex">明晚 7 點</span>、<span class="ex">週六 14:00–16:00</span>。「今天、明天、週六」以發文時間換算，時區是台灣時間。</li>
-      <li>沒寫結束時間，或寫「發完為止」，會預設開始後 ${hours}結束。</li>
+      <li>沒寫結束時間，或寫「發完為止」：畫面上寫「發完為止」（活動寫「沒寫結束時間」），不猜幾點結束。為了不讓舊的一直留在雷達上，開始 ${hours}後會自動下架；固定據點沒寫最後一天的，${r.spotDefaultDays ?? 7} 天後下架。</li>
       <li>一則貼文有多個地點或時段（例如行程表、車掃停靠點），會拆成多筆。</li>
       <li>只查得到鄉鎮區、查不到確切地點的（例如新聞只寫「虎尾競選總部」），會定位在該鄉鎮區的中心並標成「約略位置」，雷達和地圖上是空心光點，請以原文為準。只知道縣市的不會放上雷達。</li>
       <li>地點寫越具體越好，例如 <span class="ex">捷運市政府站 2號出口</span>、<span class="ex">板橋車站北一門</span>、<span class="ex">松山文創園區</span>。找不到出口時會退到車站位置。</li>
@@ -1427,8 +1440,9 @@ async function submitSpotReport(): Promise<void> {
   const list = found
     .slice(0, 1)
     .map((ev) => {
-      const days = found.length > 1 ? `・${found.length} 天` : '';
-      const when = ev.allDay ? allDayText(ev, false) : `每天 ${fmtTime(ev.startAt)}–${fmtTime(ev.endAt)}`;
+      const last = found.at(-1);
+      const days = last?.untilOpen ? `・${openEndText(last)}` : found.length > 1 ? `・${found.length} 天` : '';
+      const when = spotHours(ev);
       return `<li><button type="button" data-id="${ev.id}"><b>${kindLabel(ev)}｜${esc(ev.title)}</b><small>${esc(ev.placeText)} · ${esc(when)}${days}</small></button></li>`;
     })
     .join('');
