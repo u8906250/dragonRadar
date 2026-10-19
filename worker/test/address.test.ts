@@ -60,3 +60,17 @@ describe('dailyWindows', () => {
     expect(dailyWindows('9:30～12：00')).toEqual([{ open: '09:30', close: '12:00' }]);
   });
 });
+
+describe('singleDay', () => {
+  it('flags a post that names only one day', async () => {
+    const { singleDay } = await import('../src/spots');
+    expect(singleDay('10/20 洋流小物 / 好豐盛的洋流小物自助餐 / 洋流小物發放時間 12:00-13:30；18:00-20:30 / #洋流 #台北順起來 #soon')).toBe('10/20');
+  });
+  it('lets through posts that say from / every day / opening hours, or no date at all', async () => {
+    const { singleDay } = await import('../src/spots');
+    expect(singleDay('10/16起，只要你帶著毛小孩來…都可以來鳥咖啡索取')).toBeNull();
+    expect(singleDay('10/19（ㄧ）感謝暖心支援 ☀️ 每日上午 11:00 起 洋流小物｜限量供應自取')).toBeNull();
+    expect(singleDay('洋流飄帶又來了喔！歡迎來店索取 領取時間：11:00-14:00 17:00-19:00')).toBeNull();
+    expect(singleDay('10/17~10/19 每日 11:00~18:00')).toBeNull();
+  });
+});

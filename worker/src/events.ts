@@ -170,7 +170,8 @@ export function spotSessions(ex: Pick<ExtractedEvent, 'start_at' | 'end_at' | 'u
   const firstDay = taipeiDayStart(start);
   const open = start - firstDay;
   const allDay = open === 0 && end === null;
-  let close = allDay ? DAY_SEC : end !== null ? end - taipeiDayStart(end) : open + DEFAULT_DURATION_SEC;
+  // 沒寫幾點結束（「每日上午 11:00 起」）：開到當天結束，不猜幾點收（畫面寫「11:00 開始」）
+  let close = allDay || end === null ? DAY_SEC : end - taipeiDayStart(end);
   if (close <= open) close = Math.min(DAY_SEC, open + DEFAULT_DURATION_SEC);
 
   // 最後一天：until，其次是模型把多天合成一段時 end_at 的那天，都沒有就預設天數

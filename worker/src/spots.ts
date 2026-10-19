@@ -181,6 +181,18 @@ export function dailyWindows(text: string): Array<{ open: string; close: string 
   return out;
 }
 
+/**
+ * 貼文只寫了某一天（「10/20 洋流小物」）、沒有「起、每天、營業時間」這類表示連續的字，就回傳那一天：
+ * 可能是單次發放，不該自動展開成好幾天。
+ */
+export function singleDay(text: string): string | null {
+  const dates = [...text.matchAll(/(?<![\d/])(\d{1,2})\/(\d{1,2})(?![\d/])/g)].map((m) => `${Number(m[1])}/${Number(m[2])}`);
+  // 「起」要接在日期、時間或「即日」後面才算（「#台北順起來」不算）
+  const continuous =
+    /(\d{1,2}\/\d{1,2}|即日|\d{1,2}[:：]\d{2})\s*(?:[（(][^)）]*[)）])?\s*起|每日|每天|天天|長期|營業時間|期間|\d{1,2}\/\d{1,2}\s*[~～至到-]\s*\d{1,2}\/\d{1,2}/.test(text);
+  return dates.length > 0 && new Set(dates).size === 1 && !continuous ? dates[0] : null;
+}
+
 /** 貼文自己寫的地址跟回報的地點差超過這個距離，就交給人工 */
 const PLACE_MISMATCH_KM = 1;
 
@@ -215,6 +227,9 @@ export async function autoReview(env: Env, req: SpotRequestRow, now: number): Pr
     // 回報者寫了一天好幾段（「11:00-14:00 17:00-19:00」）：每段各展開，AI 只會給一段
     const windows = dailyWindows(req.hours ?? '');
     const day = (ex.start_at ?? '').slice(0, 10);
+    const single = !ex.until ? singleDay(req.text) : null;
+    if (single) return await hold(`貼文只寫了 ${single} 一天，可能不是連續多天的據點`);
+
     const sessions = (
       windows.length >= 2 && /^\d{4}-\d{2}-\d{2}$/.test(day)
         ? windows.flatMap((w) => spotSessions({ start_at: `${day}T${w.open}:00+08:00`, end_at: `${day}T${w.close}:00+08:00`, until: ex.until }, req.posted_at, now))
@@ -301,6 +316,8 @@ export interface ApproveBody {
   /** 每天開放時間 HH:MM，都沒給就是整天 */
   open?: string | null;
   close?: string | null;
+  /** 一天好幾段：[{ open, close }]，有給就不用 open、close */
+  windows?: Array<{ open: string; close: string }>;
 }
 
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
@@ -316,6 +333,7 @@ export async function approveSpotRequest(env: Env, id: number, b: ApproveBody, n
   if (b.from && !DATE_RE.test(b.from)) throw new ReportError(400, 'from must be YYYY-MM-DD');
   if (b.until && !DATE_RE.test(b.until)) throw new ReportError(400, 'until must be YYYY-MM-DD');
   if ((b.open && !TIME_RE.test(b.open)) || (b.close && !TIME_RE.test(b.close))) throw new ReportError(400, 'open/close must be HH:MM');
+  if (b.windows?.some((w) => !TIME_RE.test(w.open) || !TIME_RE.test(w.close))) throw new ReportError(400, 'windows must be HH:MM');
 
   let point: { lat: number; lng: number } | null = null;
   if (Number.isFinite(b.lat) && Number.isFinite(b.lng)) point = { lat: Number(b.lat), lng: Number(b.lng) };
@@ -326,11 +344,14 @@ export async function approveSpotRequest(env: Env, id: number, b: ApproveBody, n
   if (!point) throw new ReportError(400, '查不到這個地點，請直接給 lat、lng');
 
   const from = b.from ?? new Date((req.posted_at + 8 * 3600) * 1000).toISOString().slice(0, 10);
-  const sessions = spotSessions(
-    { start_at: `${from}T${b.open ?? '00:00'}:00+08:00`, end_at: b.close ? `${from}T${b.close}:00+08:00` : null, until: b.until ?? null },
-    req.posted_at,
-    now,
-  ).filter((s) => s.start <= now + MAX_FUTURE_SEC);
+  const windows = b.windows?.length ? b.windows : [{ open: b.open ?? '00:00', close: b.close ?? '' }];
+  const day = (unix: number): string => new Date((unix + 8 * 3600) * 1000).toISOString().slice(0, 10);
+  const sessions = windows
+    .flatMap((w) => spotSessions({ start_at: `${from}T${w.open}:00+08:00`, end_at: w.close ? `${from}T${w.close}:00+08:00` : null, until: b.until ?? null }, req.posted_at, now))
+    // 管理者給的最後一天照給的算（同一天也算，就是只有那一天）
+    .filter((s) => s.start <= now + MAX_FUTURE_SEC && (!b.until || day(s.start) <= b.until))
+    .map((s) => (b.until ? { ...s, untilOpen: false } : s))
+    .sort((x, y) => x.start - y.start);
   if (sessions.length === 0) throw new ReportError(400, '這段期間已經結束了');
 
   const kind: EventKind = b.kind === 'activity' ? 'activity' : 'giveaway';

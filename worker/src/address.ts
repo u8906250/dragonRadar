@@ -204,7 +204,9 @@ export async function geocodeAddress(env: Env, text: string, debug?: { error?: s
   }
   let point: AddressPoint | null = null;
   try {
-    point = locateOnStreet(await photonHouses(env, a).catch(() => []), a.number, a.raw);
+    // Photon 偶爾一時連不上，再試一次
+    const houses = await photonHouses(env, a).catch(() => photonHouses(env, a).catch(() => []));
+    point = locateOnStreet(houses, a.number, a.raw);
     if (!point) point = locateOnStreet(await overpassHouses(env, a), a.number, a.raw);
   } catch (e) {
     // Overpass 暫時不通就不快取，下次再試
