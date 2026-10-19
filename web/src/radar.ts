@@ -201,8 +201,9 @@ export class Radar {
       <g class="outline" clip-path="url(#rg-clip)"></g>
       <g class="routes" clip-path="url(#rg-clip)"></g>
       <circle class="me" cx="${C}" cy="${C}" r="5" />
-      <g class="landmarks"></g>
       <g class="blips"></g>
+      <!-- 地標（星星）放在光點上面，疊在一起時也點得到 -->
+      <g class="landmarks"></g>
       <g class="rose"></g>
     `;
     this.blipLayer = this.svg.querySelector('.blips') as SVGGElement;
@@ -329,7 +330,7 @@ export class Radar {
     this.draw();
   }
 
-  /** 固定地標（星星），畫在光點下面，超出範圍時貼在外圈 */
+  /** 固定地標（星星），畫在光點上面，超出範圍時貼在外圈 */
   setLandmarks(list: RadarLandmark[]): void {
     this.landmarks = list;
     this.draw();
@@ -343,7 +344,8 @@ export class Radar {
       const p = polar(lm.bearing - this.heading, Math.min(1, ratio) * (R - 8));
       const g = el('g', { class: `landmark${out ? ' out' : ''}${lm.selected ? ' selected' : ''}`, transform: `translate(${p.x.toFixed(1)} ${p.y.toFixed(1)})`, tabindex: 0, role: 'button' });
       g.dataset.id = lm.id;
-      g.appendChild(el('circle', { class: 'hit', r: 18 }));
+      // 點擊範圍比光點小一點，旁邊的光點還點得到
+      g.appendChild(el('circle', { class: 'hit', r: 13 }));
       const body = el('g', { class: 'body' });
       body.appendChild(el('path', { class: 'star', d: starPath(out ? 7 : 10) }));
       g.appendChild(body);

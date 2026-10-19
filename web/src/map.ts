@@ -162,6 +162,8 @@ export class MapView {
           icon: L.divIcon({ className: 'map-star', html: '★', iconSize: [26, 26], iconAnchor: [13, 14] }),
           title: lm.name,
           keyboard: false,
+          // 放在所有標記上面，疊在一起時也點得到
+          zIndexOffset: 1000,
         })
           .bindPopup(
             `<strong>★ ${escapeHtml(lm.name)}</strong><br>${escapeHtml(lm.address)}<br>${escapeHtml(lm.about)}<br>` +
