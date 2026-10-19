@@ -53,11 +53,29 @@ const ROSE: Array<[string, number]> = [
 const SWEEP_SEC: Record<SweepStyle, number> = { wedge: 4, needle: 6, ripple: 1.6 };
 /** 扇形的前緣在旋轉角度 +45 度的地方 */
 const WEDGE_LEAD_DEG = 45;
-/** 掃過時的閃光：一下亮起、擴散淡出，其餘時間不顯示 */
-const FLASH_KEYFRAMES: Keyframe[] = [
-  { opacity: 0.95, transform: 'scale(0.8)', offset: 0 },
-  { opacity: 0, transform: 'scale(2.4)', offset: 0.14 },
-  { opacity: 0, transform: 'scale(2.4)', offset: 1 },
+/**
+ * 掃過時的閃光（毫秒）：光點本身放大變亮再彈回、後面一團光暈、往外擴散一圈亮環。
+ * 每一段都是「掃到的瞬間最亮，接著淡掉」，一圈裡其餘時間維持原狀。
+ */
+const FLASH_PARTS: Array<{ sel: string; ms: number; from: Keyframe; to: Keyframe }> = [
+  {
+    sel: '.body',
+    ms: 380,
+    from: { transform: 'scale(2.2)', filter: 'brightness(2) drop-shadow(0 0 6px rgba(255, 255, 255, 0.95))' },
+    to: { transform: 'scale(1)', filter: 'brightness(1) drop-shadow(0 0 0px rgba(255, 255, 255, 0))' },
+  },
+  { sel: '.flash', ms: 520, from: { opacity: 1, transform: 'scale(1.2)' }, to: { opacity: 0, transform: 'scale(2.8)' } },
+  { sel: '.flash-ring', ms: 800, from: { opacity: 1, transform: 'scale(1)' }, to: { opacity: 0, transform: 'scale(4.5)' } },
+];
+/** 系統設定「減少動態效果」時（Windows 關掉動畫效果的電腦常見）：不放大、不擴散，只亮一下 */
+const FLASH_PARTS_CALM: typeof FLASH_PARTS = [
+  {
+    sel: '.body',
+    ms: 600,
+    from: { filter: 'brightness(1.8) drop-shadow(0 0 6px rgba(255, 255, 255, 0.95))' },
+    to: { filter: 'brightness(1) drop-shadow(0 0 0px rgba(255, 255, 255, 0))' },
+  },
+  { sel: '.flash', ms: 600, from: { opacity: 0.9, transform: 'scale(1.8)' }, to: { opacity: 0, transform: 'scale(1.8)' } },
 ];
 
 /** 光點距離小於這個像素就合成一群 */
@@ -326,7 +344,9 @@ export class Radar {
       const g = el('g', { class: `landmark${out ? ' out' : ''}${lm.selected ? ' selected' : ''}`, transform: `translate(${p.x.toFixed(1)} ${p.y.toFixed(1)})`, tabindex: 0, role: 'button' });
       g.dataset.id = lm.id;
       g.appendChild(el('circle', { class: 'hit', r: 18 }));
-      g.appendChild(el('path', { class: 'star', d: starPath(out ? 7 : 10) }));
+      const body = el('g', { class: 'body' });
+      body.appendChild(el('path', { class: 'star', d: starPath(out ? 7 : 10) }));
+      g.appendChild(body);
       this.addFlash(g, lm.bearing - this.heading, Math.min(1, ratio) * (R - 8), out ? 6 : 9);
       if (!out || lm.selected) {
         const anchor = anchorAt(p.x);
@@ -387,15 +407,22 @@ export class Radar {
     return a * period;
   }
 
-  /** 加一圈閃光，時間對準掃描動畫 */
+  /** 掃到時閃一下：g 裡要有 .body（光點本身），這裡補上光暈和亮環，時間對準掃描動畫 */
   private addFlash(g: SVGGElement, angleDeg: number, radiusPx: number, r: number): void {
-    const flash = el('circle', { class: 'flash', r });
-    g.insertBefore(flash, g.firstChild);
-    if (typeof flash.animate !== 'function' || window.matchMedia?.('(prefers-reduced-motion: reduce)').matches) return;
-    const period = SWEEP_SEC[this.style.sweep];
-    const now = this.svg.getCurrentTime();
-    const anim = flash.animate(FLASH_KEYFRAMES, { duration: period * 1000, iterations: Infinity });
-    anim.currentTime = ((((now - this.sweepHitSec(angleDeg, radiusPx)) % period) + period) % period) * 1000;
+    g.insertBefore(el('circle', { class: 'flash-ring', r }), g.firstChild);
+    g.insertBefore(el('circle', { class: 'flash', r }), g.firstChild);
+    if (typeof g.animate !== 'function') return;
+    const calm = !!window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
+    const periodMs = SWEEP_SEC[this.style.sweep] * 1000;
+    const now = this.svg.getCurrentTime() * 1000;
+    const phase = (((now - this.sweepHitSec(angleDeg, radiusPx) * 1000) % periodMs) + periodMs) % periodMs;
+    for (const part of calm ? FLASH_PARTS_CALM : FLASH_PARTS) {
+      const target = g.querySelector<SVGElement>(part.sel);
+      if (!target) continue;
+      const end = Math.min(0.9, part.ms / periodMs);
+      const anim = target.animate([{ ...part.from, offset: 0 }, { ...part.to, offset: end }, { ...part.to, offset: 1 }], { duration: periodMs, iterations: Infinity, easing: 'linear' });
+      anim.currentTime = phase;
+    }
   }
 
   private appendMark(g: SVGGElement, out: boolean, spot = false): void {
@@ -489,7 +516,9 @@ export class Radar {
         node.dataset.group = ids;
         node.appendChild(el('circle', { class: 'hit', r: 22 }));
         node.appendChild(el('circle', { class: 'ping', r: 6 }));
-        this.appendMark(node, p.out, it.spot);
+        const body = el('g', { class: 'body' });
+        this.appendMark(body, p.out, it.spot);
+        node.appendChild(body);
         this.addFlash(node, p.angle, p.r, p.out ? 5 : 7);
         const lbl = it === lead ? labelLines.get(it.id) : undefined;
         if (lbl) {

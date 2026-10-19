@@ -29,6 +29,10 @@ const LS_ENDED = 'dr.endedReported';
 const LS_SPOTS = 'dr.showSpots';
 /** 自己送出的固定據點回報（審核進度的查詢代碼） */
 const LS_SPOT_REQS = 'dr.spotRequests';
+/** 上次選的回報種類 */
+const LS_REPORT_MODE = 'dr.reportMode';
+/** 瀏覽器不能存資料（私密瀏覽等）時，這次開著的期間先記在這裡 */
+let spotKeysMem: string[] = [];
 /** 固定據點休息中、下一段在這個時間內開始才畫淡光點 */
 const SPOT_SHOW_AHEAD_SEC = 24 * 3600;
 const KEYWORD_RE_INVALID = /[<>{}\\%_]/;
@@ -447,8 +451,8 @@ function render(): void {
     const seenKey = it.spot ? `spot:${it.spot.key}` : `ev:${it.ev.id}`;
     if (seenActive.has(seenKey)) continue;
     seenActive.add(seenKey);
-    // 整天的沒有「開始」的時間點，不然半夜 12 點會一起響
-    if (!notifiedOnce || !inScope(it.ev, it.distanceKm) || it.ev.allDay) continue;
+    // 整天的沒有「開始」的時間點，不然半夜 12 點會一起響；固定據點每天都開，不主動提醒
+    if (!notifiedOnce || !inScope(it.ev, it.distanceKm) || it.ev.allDay || it.spot) continue;
     beep(theme.sound);
     try {
       navigator.vibrate?.([120, 80, 160]);
@@ -456,7 +460,7 @@ function render(): void {
       /* ignore */
     }
     const msg = `${it.ev.title}｜${it.ev.placeText}｜${formatKm(it.distanceKm)} ${compassLabel(it.bearing)}`;
-    const head = it.spot ? '據點開放中' : it.ev.kind === 'activity' ? '活動開始' : '開始發放';
+    const head = it.ev.kind === 'activity' ? '活動開始' : '開始發放';
     showBanner(bannerEl, `${head}：${msg}`, 10_000);
     systemNotify(head, msg);
   }
@@ -1339,7 +1343,7 @@ function openReportSheet(open: boolean): void {
   selectedLandmark = null;
   detailEl.hidden = true;
   renderReportTips();
-  if (!reportSpotEl.hidden) void renderSpotMine();
+  setReportMode(lsGet(LS_REPORT_MODE) === 'spot' ? 'spot' : 'event');
 }
 
 function setReportMode(mode: 'event' | 'spot'): void {
@@ -1350,16 +1354,20 @@ function setReportMode(mode: 'event' | 'spot'): void {
   }
   reportEventEl.hidden = mode !== 'event';
   reportSpotEl.hidden = mode !== 'spot';
-  if (mode === 'spot') void renderSpotMine();
+  lsSet(LS_REPORT_MODE, mode);
+  // 審核進度兩種模式都顯示，之後打開回報就看得到
+  void renderSpotMine();
 }
 
 function spotKeys(): string[] {
+  let saved: string[] = [];
   try {
     const v = JSON.parse(lsGet(LS_SPOT_REQS) ?? '[]') as unknown;
-    return Array.isArray(v) ? v.filter((x): x is string => typeof x === 'string') : [];
+    if (Array.isArray(v)) saved = v.filter((x): x is string => typeof x === 'string');
   } catch {
-    return [];
+    /* 壞掉的資料當成沒有 */
   }
+  return [...new Set([...spotKeysMem, ...saved])].slice(0, 20);
 }
 
 const SPOT_STATUS_TEXT: Record<SpotRequestStatus['status'], string> = { pending: '審核中', approved: '已上雷達', rejected: '沒有通過' };
@@ -1374,12 +1382,17 @@ async function renderSpotMine(): Promise<void> {
   ]
     .map((t) => `<li>${esc(t)}</li>`)
     .join('');
-  const list = await fetchSpotStatus(spotKeys());
+  const keys = spotKeys();
+  const list = await fetchSpotStatus(keys);
+  if (keys.length > 0 && list.length === 0) {
+    spotMine.innerHTML = '<h3 class="spot-mine-title">你送出的固定據點</h3><p class="muted sheet-note">暫時查不到審核進度，稍後再打開看看。</p>';
+    return;
+  }
   spotMine.innerHTML = list.length
     ? `<h3 class="spot-mine-title">你送出的固定據點</h3><ul class="spot-mine">${list
         .map(
           (r) =>
-            `<li><span class="spot-status spot-${r.status}">${SPOT_STATUS_TEXT[r.status]}</span><span>${esc(r.place)}${r.reason ? `<small>${esc(r.reason)}</small>` : ''}<small>${dateFmt.format(new Date(r.createdAt * 1000))} 送出${r.permalink ? `・<a href="${esc(r.permalink)}" target="_blank" rel="noopener">原貼文</a>` : ''}</small></span></li>`,
+            `<li><span class="spot-status spot-${r.status}">${SPOT_STATUS_TEXT[r.status]}</span><span>${esc(r.place)}${r.reason ? `<small>${esc(r.reason)}</small>` : ''}<small>${dateFmt.format(new Date(r.createdAt * 1000))} 送出${r.reviewedAt ? `・${dateFmt.format(new Date(r.reviewedAt * 1000))} 審核` : ''}${r.permalink ? `・<a href="${esc(r.permalink)}" target="_blank" rel="noopener">原貼文</a>` : ''}</small></span></li>`,
         )
         .join('')}</ul>`
     : '';
@@ -1404,7 +1417,9 @@ async function submitSpotReport(): Promise<void> {
   spotResult.innerHTML = `<p class="msg">${
     s.existed ? (s.status === 'approved' ? '這則已經有人回報，已經在雷達上了。' : '這則已經有人回報，正在審核中。') : '已送出，審核通過後就會出現在雷達上。可以在下面看進度。'
   }</p>`;
-  lsSet(LS_SPOT_REQS, JSON.stringify([s.key, ...spotKeys().filter((k) => k !== s.key)].slice(0, 20)));
+  const keys = [s.key, ...spotKeys().filter((k) => k !== s.key)].slice(0, 20);
+  spotKeysMem = keys;
+  lsSet(LS_SPOT_REQS, JSON.stringify(keys));
   spotForm.reset();
   await renderSpotMine();
 }

@@ -386,6 +386,9 @@ a.chip { display: inline-flex; align-items: center; text-decoration: none; }
 
 /* 固定據點：菱形光點、休息中變淡 */
 .radar .blip.spot .dot { fill: var(--blip-spot); }
+/* 固定據點不主動發訊號：不擴散、不閃爍，只在掃描掃過時亮一下 */
+.radar .blip.spot .ping { display: none; }
+.radar .blip.spot .dot { animation: none; }
 .radar .blip.spot .ping { stroke: var(--blip-spot); }
 .radar .blip.phase-closed .dot { opacity: 0.4; animation: none; }
 .radar .blip.spot.phase-active .dot { animation: none; }
@@ -460,9 +463,12 @@ a.chip { display: inline-flex; align-items: center; text-decoration: none; }
 .spot-status.spot-approved { background: var(--blip-activity); color: #fff; }
 .spot-status.spot-rejected { background: var(--highlight); color: var(--accent-text); }
 
-/* 掃描線掃過光點時閃一下（時間由 radar.ts 對準掃描動畫） */
-.radar .flash { fill: var(--blip); opacity: 0; pointer-events: none; filter: drop-shadow(0 0 5px var(--radar-sweep)); }
-.radar .blip.kind-activity .flash { fill: var(--blip-activity); }
-.radar .blip.spot .flash { fill: var(--blip-spot); }
-.radar .blip.phase-soon .flash { fill: var(--blip-soon); }
-.radar .landmark .flash { fill: #ffc531; }
+/* 掃描線掃過光點時閃一下（時間由 radar.ts 對準掃描動畫）；顏色跟光點種類 */
+.radar .blip { color: var(--blip); }
+.radar .blip.kind-activity { color: var(--blip-activity); }
+.radar .blip.spot { color: var(--blip-spot); }
+.radar .blip.phase-soon { color: var(--blip-soon); }
+.radar .landmark { color: #ffc531; }
+.radar .flash { fill: currentColor; opacity: 0; pointer-events: none; filter: drop-shadow(0 0 6px currentColor); }
+.radar .flash-ring { fill: none; stroke: currentColor; stroke-width: 2.5; opacity: 0; pointer-events: none; }
+.radar .flash-ring { vector-effect: non-scaling-stroke; }
