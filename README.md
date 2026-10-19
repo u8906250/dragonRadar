@@ -48,7 +48,7 @@ worker/   Cloudflare Worker（API、排程、資料庫）
 店家、服務處的公告常常沒寫地址或時間，所以另外一條路：使用者在「＋回報」切到「固定據點」，貼連結並填地點（必填）、開放時間、補充說明，存進 `spot_requests`，接著馬上自動審核（約 10 秒）：
 
 - 貼文內文加上回報者補充的地點、時間交給同一套 AI 判讀，要有 `spot = true` 的場次、信心夠、內文或判讀結果有追蹤中的關鍵字。
-- 地點用 `locatePlace`：門牌地址先用 Overpass 找 OSM 門牌（`addr:street` 含巷弄 + `addr:housenumber`），沒有一樣的號碼就用同側前後門牌推算（相差 60 號內）；沒有門牌才用 Nominatim 查店名或地標，只查到整條路或行政區的不算。
+- 地點用 `locatePlace`：門牌地址先問 [Photon](https://photon.komoot.io/)（OSM 資料的地址搜尋，約 1 秒，查詢寫成「信義路四段 399 臺北市」），查不到再用 Overpass 找路附近的 OSM 門牌（`addr:street` 含巷弄 + `addr:housenumber`，8 秒逾時）；沒有一樣的號碼就用同側前後門牌推算（相差 60 號內）；沒有門牌才用 Nominatim 查店名或地標，只查到整條路或行政區的不算。
 - 貼文自己寫了不同的門牌地址、而且差超過 1 km，就交給人工（防止拿別人的貼文配假地址）。
 - 全部通過：建 `spot-<代碼>` 貼文並展開成每天一筆，`reviewer = 'auto'`；不通過：留在 pending，`review_note` 寫原因給回報的人看。
 - 有人亂貼時把 `wrangler.toml` 的 `SPOT_AUTO_REVIEW` 改成 `"false"`，全部改回人工審核。`POST /api/admin/spot-requests/:id/auto` 可以用目前規則重跑一次自動審核。

@@ -18,9 +18,9 @@ export const LANDMARKS: Landmark[] = [
     name: '洋流總部',
     about: '台北大洋流的總部，在北平東路、林森北路口附近，民進黨中央黨部旁。最新行程、車掃與活動以官網公告為準。',
     address: '臺北市中正區北平東路30-1號1樓',
-    // 北平東路 30 號（OSM）旁
+    // OSM 門牌「北平東路30之1號」
     lat: 25.0456,
-    lng: 121.5259,
+    lng: 121.5263,
     url: 'https://current.puma.taipei/',
     urlName: '台北大洋流官網',
   },

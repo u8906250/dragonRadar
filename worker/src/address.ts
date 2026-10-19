@@ -1,10 +1,12 @@
 /**
  * 台灣門牌地址定位：Nominatim 幾乎查不到門牌號碼（「信義路四段399號」只查得到整條路），
- * 但 OpenStreetMap 在台灣有大量門牌資料（addr:street + addr:housenumber），
- * 所以直接用 Overpass 找同一條路（含巷弄）的門牌：有完全一樣的號碼就用它，
- * 沒有就用同一側（單雙號）前後最近的兩個門牌推算位置。
+ * 但 OpenStreetMap 在台灣有大量門牌資料（addr:street + addr:housenumber）。
+ * 先問 Photon（用 OSM 資料建的地址搜尋，約 1 秒，寫成「信義路四段 399 臺北市」就查得到門牌），
+ * 沒有的話再用 Overpass 找同一條路附近的門牌（常常很慢，有逾時）。
+ * 有完全一樣的號碼就用它，沒有就用同一側（單雙號）前後最近的兩個門牌推算位置。
  */
 import type { Env } from './env';
+import { geocode } from './geocode';
 import { nowSec } from './util';
 
 export interface TwAddress {
@@ -27,6 +29,9 @@ export interface AddressPoint {
   how: 'exact' | 'interpolated';
 }
 
+const PHOTON_URL = 'https://photon.komoot.io/api/';
+/** Overpass 常常要 20 秒以上，自動審核等不了那麼久 */
+const OVERPASS_TIMEOUT_MS = 8000;
 /** 主站常對 Cloudflare 的共用 IP 限流，依序換鏡像站 */
 const OVERPASS_URLS = ['https://overpass-api.de/api/interpreter', 'https://overpass.private.coffee/api/interpreter', 'https://maps.mail.ru/osm/tools/overpass/api/interpreter'];
 const SECTION_CN = ['', '一', '二', '三', '四', '五', '六', '七', '八', '九', '十'];
@@ -97,16 +102,31 @@ export function locateOnStreet(rows: HouseRow[], number: number): AddressPoint |
   return null;
 }
 
+/** 路附近找門牌的範圍（度），約 2 公里：一段路通常不超過這麼長 */
+const NEAR_DEG = 0.02;
+
 async function overpassHouses(env: Env, a: TwAddress): Promise<HouseRow[]> {
-  // 有縣市就只找那個縣市，沒有的話用鄉鎮區（可能跨縣市同名，交給號碼比對）
-  const area = a.city ? `area["name"="${a.city}"]["admin_level"="4"]->.a;` : a.district ? `area["name"="${a.district}"]["admin_level"~"^(5|7)$"]->.a;` : '';
-  if (!area) return [];
-  const q = `[out:json][timeout:20];${area}nwr(area.a)["addr:street"="${a.street}"]["addr:housenumber"];out center tags;`;
+  // 先用 Nominatim 找到這條路（查得到路名，只是查不到門牌），只查路附近的門牌；
+  // 用整個縣市範圍查很慢，常常逾時
+  const road = a.street.replace(/\d+巷.*$/, '');
+  const center = await geocode(env, `${a.city ?? ''}${a.district ?? ''}${road}`);
+  let scope: string;
+  if (center) {
+    const dLng = NEAR_DEG / Math.cos((center.lat * Math.PI) / 180);
+    scope = `(${(center.lat - NEAR_DEG).toFixed(4)},${(center.lng - dLng).toFixed(4)},${(center.lat + NEAR_DEG).toFixed(4)},${(center.lng + dLng).toFixed(4)})`;
+  } else if (a.city) {
+    scope = '(area.a)';
+  } else {
+    return [];
+  }
+  const area = scope === '(area.a)' ? `area["name"="${a.city}"]["admin_level"="4"]->.a;` : '';
+  const q = `[out:json][timeout:15];${area}nwr${scope}["addr:street"="${a.street}"]["addr:housenumber"];out center tags;`;
   const errors: string[] = [];
   let res: Response | null = null;
   for (const url of OVERPASS_URLS) {
     try {
       const r = await fetch(url, {
+        signal: AbortSignal.timeout(OVERPASS_TIMEOUT_MS),
         method: 'POST',
         headers: { 'user-agent': env.NOMINATIM_USER_AGENT, 'content-type': 'application/x-www-form-urlencoded', accept: 'application/json' },
         body: `data=${encodeURIComponent(q)}`,
@@ -132,6 +152,33 @@ async function overpassHouses(env: Env, a: TwAddress): Promise<HouseRow[]> {
   return out;
 }
 
+interface PhotonFeature {
+  geometry?: { coordinates?: [number, number] };
+  properties?: { type?: string; street?: string; housenumber?: string; city?: string; district?: string };
+}
+
+/** Photon：同一條路（含巷弄）、同一個縣市的門牌 */
+async function photonHouses(env: Env, a: TwAddress): Promise<HouseRow[]> {
+  const u = new URL(PHOTON_URL);
+  u.searchParams.set('q', `${a.street} ${a.raw} ${a.city ?? a.district ?? ''}`.trim());
+  u.searchParams.set('limit', '10');
+  const res = await fetch(u.toString(), { signal: AbortSignal.timeout(6000), headers: { 'user-agent': env.NOMINATIM_USER_AGENT, accept: 'application/json' } });
+  if (!res.ok) throw new Error(`photon ${res.status}`);
+  const data = (await res.json()) as { features?: PhotonFeature[] };
+  const out: HouseRow[] = [];
+  for (const f of data.features ?? []) {
+    const p = f.properties ?? {};
+    const c = f.geometry?.coordinates;
+    if (p.type !== 'house' || !p.housenumber || !c || normalize(p.street ?? '') !== a.street) continue;
+    if (a.city && p.city && normalize(p.city) !== a.city) continue;
+    if (a.district && p.district && p.district !== a.district) continue;
+    // 沒寫縣市時至少要對到鄉鎮區，全台同名的路很多
+    if (!a.city && (!a.district || p.district !== a.district)) continue;
+    out.push({ number: p.housenumber, lat: c[1], lng: c[0] });
+  }
+  return out;
+}
+
 /** 門牌地址轉座標；不是門牌地址或找不到就回傳 null。結果快取在 geocode_cache（key 前面加「門牌:」） */
 export async function geocodeAddress(env: Env, text: string, debug?: { error?: string }): Promise<(AddressPoint & { address: TwAddress }) | null> {
   const a = parseTwAddress(text);
@@ -147,7 +194,8 @@ export async function geocodeAddress(env: Env, text: string, debug?: { error?: s
   }
   let point: AddressPoint | null = null;
   try {
-    point = locateOnStreet(await overpassHouses(env, a), a.number);
+    point = locateOnStreet(await photonHouses(env, a).catch(() => []), a.number);
+    if (!point) point = locateOnStreet(await overpassHouses(env, a), a.number);
   } catch (e) {
     // Overpass 暫時不通就不快取，下次再試
     console.warn(`address lookup failed for ${key}: ${String(e)}`);
