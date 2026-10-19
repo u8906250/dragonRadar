@@ -104,6 +104,8 @@ export interface PickedBottle {
 }
 
 export interface MyBottles {
+  /** 今天的額度：基本幾個、撿到幾個多幾個 */
+  quota: { used: number; bonus: number; limit: number; left: number };
   dropped: Array<{ id: number; text: string; createdAt: number; expiresAt: number; picks: number; pickedAt: number | null; status: 'active' | 'picked' | 'hidden' | 'deleted' | 'removed' }>;
   picked: Array<{ id: number; text: string; pickedAt: number }>;
 }
@@ -143,7 +145,7 @@ export interface KeywordRules {
     news: { names: string[]; intervalMin: number };
     link?: { maxAgeDays: number; recheckMin: number; endedReportsNeeded: number };
     spot?: { maxAgeDays: number; autoReview?: boolean };
-    bottles?: { enabled: boolean; maxChars: number; pickRadiusM: number; ttlDays: number };
+    bottles?: { enabled: boolean; maxChars: number; pickRadiusM: number; ttlDays: number; perDay?: number; perDayMax?: number };
   };
   intervalMin: number;
   defaultDurationMin: number;

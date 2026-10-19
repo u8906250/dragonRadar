@@ -167,6 +167,7 @@ const bottleSheet = $('#bottle-sheet');
 const bottleForm = $<HTMLFormElement>('#bottle-form');
 const bottleText = $<HTMLTextAreaElement>('#bottle-text');
 const bottleCount = $('#bottle-count');
+const bottleQuota = $('#bottle-quota');
 const bottleDropBtn = $<HTMLButtonElement>('#bottle-drop');
 const bottleResult = $('#bottle-result');
 const bottleNear = $('#bottle-near');
@@ -776,8 +777,10 @@ async function loadBottle(id: number, at: Origin | null): Promise<void> {
   } else {
     bottleTexts.set(id, r.data);
     // 撿走的瓶子從雷達上消失（內容留在詳細資料和「我撿到的」）；自己丟的照樣留著
+    const fresh = !r.data.bottle.mine && bottles.some((b) => b.id === id && !b.picked);
     bottles = bottles.filter((b) => b.id !== id || b.mine);
     bottleMsg = '';
+    if (fresh) showBanner(bannerEl, '撿到瓶子了！今天可以多丟一個', 3000);
   }
   render();
 }
@@ -884,7 +887,7 @@ function renderBottleSheet(): void {
   bottleDropBtn.textContent = gps ? '丟出去' : '要先定位';
   bottleTips.innerHTML = [
     '打氣、心情、抱怨、今天看到的事都可以。辱罵或攻擊任何人（包括其他候選人、政黨）、謠言、廣告、連結、電話、帳號、個人資料都不會通過，丟出去前會先自動審核。',
-    `瓶子會丟在你目前 GPS 位置附近，隨機漂開約 100 m，${rules?.ttlDays ?? 7} 天後漂走。每天最多丟 3 個。`,
+    `瓶子會丟在你目前 GPS 位置附近，隨機漂開約 100 m，${rules?.ttlDays ?? 7} 天後漂走。每天可以丟 ${rules?.perDay ?? 3} 個，每撿到一個別人的瓶子就多一個（一天最多 ${rules?.perDayMax ?? 10} 個）。`,
     `別人要走到 ${rules?.pickRadiusM ?? 60} m 內才撿得起來；遠的瓶子在雷達上只是一團模糊的訊號，走近才變清楚。每個瓶子只能被一個人撿走，撿走就從雷達上消失。`,
     '撿到不適合的內容可以檢舉，檢舉後就藏起來交給管理者確認。不用登入：你丟的、撿到的瓶子記在這個瀏覽器裡，清除瀏覽器資料就看不到了。',
   ]
@@ -911,7 +914,8 @@ async function renderMyBottles(): Promise<void> {
     bottleMine.innerHTML = '';
     return;
   }
-  const { dropped, picked } = r.data;
+  const { dropped, picked, quota } = r.data;
+  bottleQuota.textContent = `・今天還能丟 ${quota.left} 個${quota.bonus > 0 ? `（撿到 ${quota.bonus} 個，多 ${quota.limit - (keywordRules?.sources?.bottles?.perDay ?? 3)} 個）` : ''}`;
   const statusText = (b: (typeof dropped)[number]): string =>
     b.status === 'picked'
       ? `被撿走了${b.pickedAt ? `（${ago(b.pickedAt)}）` : ''}`

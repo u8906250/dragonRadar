@@ -18,8 +18,10 @@ export const BOTTLE_TTL_SEC = 7 * 86400;
 export const PICK_RADIUS_M = 60;
 /** 丟的位置打散的範圍 */
 const SCATTER_M = 100;
-const PER_DEVICE_PER_DAY = 3;
-const PER_IP_PER_DAY = 10;
+/** 每天基本可以丟幾個；每撿到一個瓶子多一個，最多到 PER_DEVICE_MAX（避免兩個人互丟互撿刷額度） */
+export const PER_DEVICE_PER_DAY = 3;
+export const PER_DEVICE_MAX = 10;
+const PER_IP_PER_DAY = 20;
 const GLOBAL_PER_HOUR = 120;
 const LIST_LIMIT = 200;
 
@@ -139,6 +141,25 @@ async function countSince(env: Env, sql: string, binds: unknown[]): Promise<numb
   return (await env.DB.prepare(sql).bind(...binds).first<{ n: number }>())?.n ?? 0;
 }
 
+export interface BottleQuota {
+  /** 過去 24 小時丟了幾個 */
+  used: number;
+  /** 過去 24 小時撿到幾個（每個多一個額度） */
+  bonus: number;
+  /** 今天總共可以丟幾個 */
+  limit: number;
+  /** 還能丟幾個 */
+  left: number;
+}
+
+/** 今天的額度：基本 3 個，撿到幾個就多幾個，最多 10 個（都算過去 24 小時） */
+export async function bottleQuota(env: Env, dev: string, now: number): Promise<BottleQuota> {
+  const used = await countSince(env, 'SELECT COUNT(*) AS n FROM bottles WHERE device_id = ? AND created_at > ?', [dev, now - 86400]);
+  const bonus = await countSince(env, 'SELECT COUNT(*) AS n FROM bottle_picks WHERE device_id = ? AND created_at > ?', [dev, now - 86400]);
+  const limit = Math.min(PER_DEVICE_MAX, PER_DEVICE_PER_DAY + bonus);
+  return { used, bonus, limit, left: Math.max(0, limit - used) };
+}
+
 const validPoint = (lat: unknown, lng: unknown): { lat: number; lng: number } | null =>
   typeof lat === 'number' && typeof lng === 'number' && Math.abs(lat) <= 90 && Math.abs(lng) <= 180 ? { lat, lng } : null;
 
@@ -151,8 +172,12 @@ export async function dropBottle(env: Env, device: string | null, ip: string, bo
   const at = validPoint(body.lat, body.lng);
   if (!at) throw new ReportError(400, '要先定位才能丟瓶子');
 
-  if ((await countSince(env, 'SELECT COUNT(*) AS n FROM bottles WHERE device_id = ? AND created_at > ?', [dev, now - 86400])) >= PER_DEVICE_PER_DAY)
-    throw new ReportError(429, `每天最多丟 ${PER_DEVICE_PER_DAY} 個瓶子，明天再來`);
+  const quota = await bottleQuota(env, dev, now);
+  if (quota.left <= 0)
+    throw new ReportError(
+      429,
+      quota.limit >= PER_DEVICE_MAX ? `今天已經丟了 ${PER_DEVICE_MAX} 個，明天再來` : `今天的瓶子丟完了。撿到一個別人的瓶子，就能多丟一個`,
+    );
   if ((await countSince(env, 'SELECT COUNT(*) AS n FROM bottles WHERE ip_hash = ? AND created_at > ?', [ip, now - 86400])) >= PER_IP_PER_DAY)
     throw new ReportError(429, '這個網路今天丟太多瓶子了，明天再來');
   if ((await countSince(env, 'SELECT COUNT(*) AS n FROM bottles WHERE created_at > ?', [now - 3600])) >= GLOBAL_PER_HOUR)
@@ -222,6 +247,7 @@ export async function pickBottle(env: Env, device: string | null, id: number, bo
 }
 
 export interface MyBottles {
+  quota: BottleQuota;
   dropped: Array<{ id: number; text: string; createdAt: number; expiresAt: number; picks: number; pickedAt: number | null; status: BottleStatus }>;
   picked: Array<{ id: number; text: string; pickedAt: number }>;
 }
@@ -241,6 +267,7 @@ export async function myBottles(env: Env, device: string | null, now: number): P
     .bind(dev)
     .all<{ id: number; text: string; picked_at: number }>();
   return {
+    quota: await bottleQuota(env, dev, now),
     dropped: dropped.results.map((b) => ({
       id: b.id,
       text: b.text,
