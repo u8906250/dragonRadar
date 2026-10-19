@@ -10,7 +10,8 @@ import { mergeIntoOfficial } from './sources/merge';
 import { apifyTrial } from './sources/apify';
 import { fetchThreadsPost, resolveThreadsLink, shortcodeToUnix } from './sources/link';
 import { ENDED_REPORTS_NEEDED, MAX_LINK_AGE_SEC, ReportError, ipHash, purgeReports, recheckLinks, reportEnded, submitLink } from './reports';
-import { approveSpotRequest, autoReview, listSpotRequests, rejectSpotRequest, SPOT_MAX_AGE_SEC, spotRequestStatus, submitSpotRequest, type ApproveBody, type SpotRequestRow } from './spots';
+import { geocodeAddress, parseTwAddress } from './address';
+import { approveSpotRequest, autoReview, listSpotRequests, locatePlace, rejectSpotRequest, SPOT_MAX_AGE_SEC, spotRequestStatus, submitSpotRequest, type ApproveBody, type SpotRequestRow } from './spots';
 import { addUserKeyword, listActiveKeywords, listAllKeywords, MAX_ACTIVE_KEYWORDS, normalizeKeyword, parseKeywordList, toKeywordOut, touchKeywords } from './keywords';
 import { CALLBACK_PATH, DELETE_PATH, DELETION_STATUS_PATH, UNINSTALL_PATH, deletionStatus, handleCallback, handleDelete, handleUninstall, startAuth } from './oauth';
 import { jsonResponse, nowSec, parseIsoToUnix } from './util';
@@ -327,6 +328,17 @@ async function handleAdmin(req: Request, env: Env, _ctx: ExecutionContext, path:
   const spotOk = /^\/api\/admin\/spot-requests\/(\d+)\/approve$/.exec(path);
   if (req.method === 'POST' && spotOk) {
     return jsonResponse(await approveSpotRequest(env, Number(spotOk[1]), await readJson<ApproveBody>(req), now));
+  }
+
+  // 查地點（給審核用）：{ q }，回傳門牌解析、門牌定位與最後用的座標
+  if (req.method === 'POST' && path === '/api/admin/geocode') {
+    const body = await readJson<{ q?: string }>(req);
+    const q = (body.q ?? '').trim();
+    if (!q) throw new HttpError(400, 'q is required');
+    const debug: { error?: string } = {};
+    const address = parseTwAddress(q);
+    const byAddress = await geocodeAddress(env, q, debug);
+    return jsonResponse({ address, byAddress, error: debug.error ?? null, located: await locatePlace(env, q) });
   }
 
   // 用目前的規則重跑一次自動審核（例如自動審核暫時失敗的）

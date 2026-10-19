@@ -27,7 +27,8 @@ export interface AddressPoint {
   how: 'exact' | 'interpolated';
 }
 
-const OVERPASS_URL = 'https://overpass-api.de/api/interpreter';
+/** 主站常對 Cloudflare 的共用 IP 限流，依序換鏡像站 */
+const OVERPASS_URLS = ['https://overpass-api.de/api/interpreter', 'https://overpass.private.coffee/api/interpreter', 'https://maps.mail.ru/osm/tools/overpass/api/interpreter'];
 const SECTION_CN = ['', '一', '二', '三', '四', '五', '六', '七', '八', '九', '十'];
 /** 推算時前後門牌最多差幾號，太遠就不準 */
 const MAX_GAP = 60;
@@ -101,12 +102,25 @@ async function overpassHouses(env: Env, a: TwAddress): Promise<HouseRow[]> {
   const area = a.city ? `area["name"="${a.city}"]["admin_level"="4"]->.a;` : a.district ? `area["name"="${a.district}"]["admin_level"~"^(5|7)$"]->.a;` : '';
   if (!area) return [];
   const q = `[out:json][timeout:20];${area}nwr(area.a)["addr:street"="${a.street}"]["addr:housenumber"];out center tags;`;
-  const res = await fetch(OVERPASS_URL, {
-    method: 'POST',
-    headers: { 'user-agent': env.NOMINATIM_USER_AGENT, 'content-type': 'application/x-www-form-urlencoded' },
-    body: `data=${encodeURIComponent(q)}`,
-  });
-  if (!res.ok) throw new Error(`overpass ${res.status}`);
+  const errors: string[] = [];
+  let res: Response | null = null;
+  for (const url of OVERPASS_URLS) {
+    try {
+      const r = await fetch(url, {
+        method: 'POST',
+        headers: { 'user-agent': env.NOMINATIM_USER_AGENT, 'content-type': 'application/x-www-form-urlencoded', accept: 'application/json' },
+        body: `data=${encodeURIComponent(q)}`,
+      });
+      if (r.ok && (r.headers.get('content-type') ?? '').includes('json')) {
+        res = r;
+        break;
+      }
+      errors.push(`${new URL(url).host} ${r.status}`);
+    } catch (e) {
+      errors.push(`${new URL(url).host} ${String(e)}`);
+    }
+  }
+  if (!res) throw new Error(`overpass: ${errors.join('; ')}`);
   const data = (await res.json()) as { elements?: Array<{ lat?: number; lon?: number; center?: { lat: number; lon: number }; tags?: Record<string, string> }> };
   const out: HouseRow[] = [];
   for (const e of data.elements ?? []) {
@@ -119,7 +133,7 @@ async function overpassHouses(env: Env, a: TwAddress): Promise<HouseRow[]> {
 }
 
 /** 門牌地址轉座標；不是門牌地址或找不到就回傳 null。結果快取在 geocode_cache（key 前面加「門牌:」） */
-export async function geocodeAddress(env: Env, text: string): Promise<(AddressPoint & { address: TwAddress }) | null> {
+export async function geocodeAddress(env: Env, text: string, debug?: { error?: string }): Promise<(AddressPoint & { address: TwAddress }) | null> {
   const a = parseTwAddress(text);
   if (!a) return null;
   const key = `門牌:${a.city ?? ''}${a.district ?? ''}${a.street}${a.raw}號`;
@@ -137,6 +151,7 @@ export async function geocodeAddress(env: Env, text: string): Promise<(AddressPo
   } catch (e) {
     // Overpass 暫時不通就不快取，下次再試
     console.warn(`address lookup failed for ${key}: ${String(e)}`);
+    if (debug) debug.error = String(e);
     return null;
   }
   await env.DB.prepare(
