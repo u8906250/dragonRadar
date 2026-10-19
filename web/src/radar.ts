@@ -348,12 +348,7 @@ export class Radar {
       body.appendChild(el('path', { class: 'star', d: starPath(out ? 7 : 10) }));
       g.appendChild(body);
       this.addFlash(g, lm.bearing - this.heading, Math.min(1, ratio) * (R - 8), out ? 6 : 9);
-      if (!out || lm.selected) {
-        const anchor = anchorAt(p.x);
-        const t = el('text', { class: 'label', 'text-anchor': anchor, x: anchor === 'end' ? 8 : anchor === 'start' ? -8 : 0, y: 24 });
-        t.textContent = lm.label;
-        g.appendChild(t);
-      }
+      // 星星旁邊不寫名稱，滑過或點了才看得到
       const title = el('title');
       title.textContent = lm.label;
       g.appendChild(title);
