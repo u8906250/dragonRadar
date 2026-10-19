@@ -49,6 +49,17 @@ const ROSE: Array<[string, number]> = [
   ['W', 270],
 ];
 
+/** 掃描一圈幾秒，要跟下面 SVG 動畫的 dur 一致；波紋兩圈相隔 1.6 秒，每 1.6 秒掃過一次 */
+const SWEEP_SEC: Record<SweepStyle, number> = { wedge: 4, needle: 6, ripple: 1.6 };
+/** 扇形的前緣在旋轉角度 +45 度的地方 */
+const WEDGE_LEAD_DEG = 45;
+/** 掃過時的閃光：一下亮起、擴散淡出，其餘時間不顯示 */
+const FLASH_KEYFRAMES: Keyframe[] = [
+  { opacity: 0.95, transform: 'scale(0.8)', offset: 0 },
+  { opacity: 0, transform: 'scale(2.4)', offset: 0.14 },
+  { opacity: 0, transform: 'scale(2.4)', offset: 1 },
+];
+
 /** 光點距離小於這個像素就合成一群 */
 const GROUP_PX = 12;
 /** 標籤每行高度 */
@@ -316,6 +327,7 @@ export class Radar {
       g.dataset.id = lm.id;
       g.appendChild(el('circle', { class: 'hit', r: 18 }));
       g.appendChild(el('path', { class: 'star', d: starPath(out ? 7 : 10) }));
+      this.addFlash(g, lm.bearing - this.heading, Math.min(1, ratio) * (R - 8), out ? 6 : 9);
       if (!out || lm.selected) {
         const anchor = anchorAt(p.x);
         const t = el('text', { class: 'label', 'text-anchor': anchor, x: anchor === 'end' ? 8 : anchor === 'start' ? -8 : 0, y: 24 });
@@ -363,6 +375,29 @@ export class Radar {
     }
   }
 
+  /**
+   * 掃描線掃到這個位置的時間點（相對於 SVG 動畫時間，秒），用來讓光點在掃過時閃一下。
+   * 扇形、指針看方位角；波紋看離圓心多遠。
+   */
+  private sweepHitSec(angleDeg: number, radiusPx: number): number {
+    const period = SWEEP_SEC[this.style.sweep];
+    const a = (((angleDeg % 360) + 360) % 360) / 360;
+    if (this.style.sweep === 'ripple') return (radiusPx / R) * 3.2;
+    if (this.style.sweep === 'wedge') return ((((angleDeg - WEDGE_LEAD_DEG) % 360) + 360) % 360 / 360) * period;
+    return a * period;
+  }
+
+  /** 加一圈閃光，時間對準掃描動畫 */
+  private addFlash(g: SVGGElement, angleDeg: number, radiusPx: number, r: number): void {
+    const flash = el('circle', { class: 'flash', r });
+    g.insertBefore(flash, g.firstChild);
+    if (typeof flash.animate !== 'function' || window.matchMedia?.('(prefers-reduced-motion: reduce)').matches) return;
+    const period = SWEEP_SEC[this.style.sweep];
+    const now = this.svg.getCurrentTime();
+    const anim = flash.animate(FLASH_KEYFRAMES, { duration: period * 1000, iterations: Infinity });
+    anim.currentTime = ((((now - this.sweepHitSec(angleDeg, radiusPx)) % period) + period) % period) * 1000;
+  }
+
   private appendMark(g: SVGGElement, out: boolean, spot = false): void {
     const r = out ? 4 : 6;
     if (spot) {
@@ -391,11 +426,12 @@ export class Radar {
     this.drawRoutes();
     this.drawLandmarks();
     this.blipLayer.replaceChildren();
-    const pos = new Map<number, { x: number; y: number; out: boolean }>();
+    const pos = new Map<number, { x: number; y: number; out: boolean; angle: number; r: number }>();
     for (const it of this.items) {
       const ratio = this.ratio(it.distanceKm);
-      const p = polar(it.bearing - this.heading, Math.min(1, ratio) * (R - 8));
-      pos.set(it.id, { ...p, out: ratio > 1 });
+      const angle = it.bearing - this.heading;
+      const r = Math.min(1, ratio) * (R - 8);
+      pos.set(it.id, { ...polar(angle, r), out: ratio > 1, angle, r });
     }
     // 疊在一起（12 px 內）的光點合成一群：選取的、要顯示標籤的優先當代表，標籤加「+N」，
     // 點下去先列出同一群讓人選，不然被蓋住的點不到
@@ -454,6 +490,7 @@ export class Radar {
         node.appendChild(el('circle', { class: 'hit', r: 22 }));
         node.appendChild(el('circle', { class: 'ping', r: 6 }));
         this.appendMark(node, p.out, it.spot);
+        this.addFlash(node, p.angle, p.r, p.out ? 5 : 7);
         const lbl = it === lead ? labelLines.get(it.id) : undefined;
         if (lbl) {
           const anchor = anchorAt(p.x);

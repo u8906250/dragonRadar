@@ -459,3 +459,10 @@ a.chip { display: inline-flex; align-items: center; text-decoration: none; }
 .spot-status { flex: 0 0 auto; font-size: 11px; font-weight: 800; padding: 2px 8px; border-radius: 999px; background: var(--line); color: var(--text); }
 .spot-status.spot-approved { background: var(--blip-activity); color: #fff; }
 .spot-status.spot-rejected { background: var(--highlight); color: var(--accent-text); }
+
+/* 掃描線掃過光點時閃一下（時間由 radar.ts 對準掃描動畫） */
+.radar .flash { fill: var(--blip); opacity: 0; pointer-events: none; filter: drop-shadow(0 0 5px var(--radar-sweep)); }
+.radar .blip.kind-activity .flash { fill: var(--blip-activity); }
+.radar .blip.spot .flash { fill: var(--blip-spot); }
+.radar .blip.phase-soon .flash { fill: var(--blip-soon); }
+.radar .landmark .flash { fill: #ffc531; }
