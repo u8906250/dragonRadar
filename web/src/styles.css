@@ -470,5 +470,5 @@ a.chip { display: inline-flex; align-items: center; text-decoration: none; }
 .radar .blip.phase-soon { color: var(--blip-soon); }
 .radar .landmark { color: #ffc531; }
 .radar .flash { fill: currentColor; opacity: 0; pointer-events: none; filter: drop-shadow(0 0 6px currentColor); }
-.radar .flash-ring { fill: none; stroke: currentColor; stroke-width: 2.5; opacity: 0; pointer-events: none; }
+.radar .flash-ring { fill: none; stroke: currentColor; stroke-width: 1.5; opacity: 0; pointer-events: none; }
 .radar .flash-ring { vector-effect: non-scaling-stroke; }

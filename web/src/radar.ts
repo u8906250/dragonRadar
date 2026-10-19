@@ -54,28 +54,28 @@ const SWEEP_SEC: Record<SweepStyle, number> = { wedge: 4, needle: 6, ripple: 1.6
 /** 扇形的前緣在旋轉角度 +45 度的地方 */
 const WEDGE_LEAD_DEG = 45;
 /**
- * 掃過時的閃光（毫秒）：光點本身放大變亮再彈回、後面一團光暈、往外擴散一圈亮環。
+ * 掃過時的閃光（毫秒）：光點本身稍微變亮（不放大）、後面一團淡淡的光暈、往外擴散一圈細環。
  * 每一段都是「掃到的瞬間最亮，接著淡掉」，一圈裡其餘時間維持原狀。
  */
 const FLASH_PARTS: Array<{ sel: string; ms: number; from: Keyframe; to: Keyframe }> = [
   {
     sel: '.body',
-    ms: 380,
-    from: { transform: 'scale(2.2)', filter: 'brightness(2) drop-shadow(0 0 6px rgba(255, 255, 255, 0.95))' },
-    to: { transform: 'scale(1)', filter: 'brightness(1) drop-shadow(0 0 0px rgba(255, 255, 255, 0))' },
+    ms: 450,
+    from: { filter: 'brightness(1.5) drop-shadow(0 0 4px rgba(255, 255, 255, 0.8))' },
+    to: { filter: 'brightness(1) drop-shadow(0 0 0px rgba(255, 255, 255, 0))' },
   },
-  { sel: '.flash', ms: 520, from: { opacity: 1, transform: 'scale(1.2)' }, to: { opacity: 0, transform: 'scale(2.8)' } },
-  { sel: '.flash-ring', ms: 800, from: { opacity: 1, transform: 'scale(1)' }, to: { opacity: 0, transform: 'scale(4.5)' } },
+  { sel: '.flash', ms: 500, from: { opacity: 0.6, transform: 'scale(1.3)' }, to: { opacity: 0, transform: 'scale(2.2)' } },
+  { sel: '.flash-ring', ms: 700, from: { opacity: 0.6, transform: 'scale(1)' }, to: { opacity: 0, transform: 'scale(3.2)' } },
 ];
 /** 系統設定「減少動態效果」時（Windows 關掉動畫效果的電腦常見）：不放大、不擴散，只亮一下 */
 const FLASH_PARTS_CALM: typeof FLASH_PARTS = [
   {
     sel: '.body',
     ms: 600,
-    from: { filter: 'brightness(1.8) drop-shadow(0 0 6px rgba(255, 255, 255, 0.95))' },
+    from: { filter: 'brightness(1.5) drop-shadow(0 0 4px rgba(255, 255, 255, 0.8))' },
     to: { filter: 'brightness(1) drop-shadow(0 0 0px rgba(255, 255, 255, 0))' },
   },
-  { sel: '.flash', ms: 600, from: { opacity: 0.9, transform: 'scale(1.8)' }, to: { opacity: 0, transform: 'scale(1.8)' } },
+  { sel: '.flash', ms: 600, from: { opacity: 0.6, transform: 'scale(1.6)' }, to: { opacity: 0, transform: 'scale(1.6)' } },
 ];
 
 /** 光點距離小於這個像素就合成一群 */
