@@ -268,6 +268,10 @@ describe('spotSessions', () => {
     const s = spotSessions({ start_at: '2026-10-17T11:00:00+08:00', end_at: '2026-10-19T18:00:00+08:00', until: null }, posted, posted);
     expect(s.map((x) => x.end - x.start)).toEqual([7 * 3600, 7 * 3600, 7 * 3600]);
   });
+  it('treats a last day equal to the first day as "from that day" (「10/16 起」)', () => {
+    const s = spotSessions({ start_at: '2026-10-17T13:00:00+08:00', end_at: '2026-10-17T20:00:00+08:00', until: '2026-10-17' }, posted, posted);
+    expect(s).toHaveLength(7);
+  });
   it('keeps 7 days when no last day is given, and marks unknown hours as all-day', () => {
     const s = spotSessions({ start_at: '2026-10-17T00:00:00+08:00', end_at: null, until: null }, posted, posted);
     expect(s).toHaveLength(7);

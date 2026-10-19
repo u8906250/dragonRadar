@@ -164,7 +164,9 @@ export function spotSessions(ex: Pick<ExtractedEvent, 'start_at' | 'end_at' | 'u
   if (close <= open) close = Math.min(DAY_SEC, open + DEFAULT_DURATION_SEC);
 
   // 最後一天：until，其次是模型把多天合成一段時 end_at 的那天，都沒有就預設天數
-  const untilAt = ex.until ? parseIsoToUnix(`${ex.until}T00:00:00+08:00`) : null;
+  // 固定據點是連續多天：最後一天不晚於第一天（模型把「10/16 起」寫成 until 10/16）就當作沒寫
+  const untilRaw = ex.until ? parseIsoToUnix(`${ex.until}T00:00:00+08:00`) : null;
+  const untilAt = untilRaw !== null && untilRaw > firstDay ? untilRaw : null;
   let lastDay = untilAt ?? (end !== null && taipeiDayStart(end) > firstDay ? taipeiDayStart(end) : firstDay + (SPOT_DEFAULT_DAYS - 1) * DAY_SEC);
   lastDay = Math.min(lastDay, firstDay + 13 * DAY_SEC, taipeiDayStart(now + MAX_FUTURE_SEC));
 
