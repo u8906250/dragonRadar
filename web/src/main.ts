@@ -4,6 +4,7 @@ import { compassSupported, startCompass } from './compass';
 import { bearingDeg, compassLabel, formatKm, haversineKm, taiwanRadiusKm, type LatLng } from './geo';
 import { inShuangbei, SHUANGBEI_RINGS, shuangbeiRadiusKm } from './shuangbei';
 import { LANDMARKS } from './landmarks';
+import { splitPlace } from './place';
 import { crowdOf, MapView, type BaseMap } from './map';
 import { beep, ensureNotificationPermission, notificationState, showBanner, systemNotify, unlockAudio } from './notify';
 import { Radar, type RadarRoute } from './radar';
@@ -431,7 +432,7 @@ function render(): void {
       bearing: it.bearing,
       // 還沒出發的車掃路線點用「即將開始」的淡色畫
       phase: it.phase === 'later' ? 'soon' : it.phase,
-      label: it.ev.title,
+      label: titleOf(it.ev),
       // 據點整天都開著，標籤只在選取時顯示，免得蓋掉單次的發放
       showLabel: (it.phase === 'active' && !it.spot) || it.ev.id === selectedId,
       selected: it.ev.id === selectedId,
@@ -455,7 +456,7 @@ function render(): void {
       lat: it.ev.lat,
       lng: it.ev.lng,
       phase: it.phase,
-      title: `${tagLabel(it)}｜${it.ev.title}`,
+      title: `${tagLabel(it)}｜${titleOf(it.ev)}`,
       subtitle: `${placeLine(it.ev)} · ${timeLine(it, now)}`,
       selected: it.ev.id === selectedId,
     })),
@@ -477,7 +478,7 @@ function render(): void {
     } catch {
       /* ignore */
     }
-    const msg = `${it.ev.title}｜${it.ev.placeText}｜${formatKm(it.distanceKm)} ${compassLabel(it.bearing)}`;
+    const msg = `${titleOf(it.ev)}｜${it.ev.placeText}｜${formatKm(it.distanceKm)} ${compassLabel(it.bearing)}`;
     const head = it.ev.kind === 'activity' ? '活動開始' : '開始發放';
     showBanner(bannerEl, `${head}：${msg}`, 10_000);
     systemNotify(head, msg);
@@ -560,7 +561,7 @@ function itemCard(it: Item, now: number): HTMLLIElement {
   li.className = `ev phase-${it.phase} kind-${it.ev.kind}${it.spot ? ' spot' : ''}${inScope(it.ev, it.distanceKm) ? '' : ' out-of-range'}${it.ev.id === selectedId ? ' selected' : ''}`;
   li.dataset.id = String(it.ev.id);
   li.innerHTML = `
-    <div class="ev-title"><span class="dot"></span><span class="kind-tag">${tagLabel(it)}</span>${esc(it.ev.title)}${it.ev.item ? ` <span class="muted">· ${esc(it.ev.item)}</span>` : ''}${followed().length > 1 && it.ev.keyword ? `<span class="ev-kw">#${esc(it.ev.keyword)}</span>` : ''}</div>
+    <div class="ev-title"><span class="dot"></span><span class="kind-tag">${tagLabel(it)}</span>${esc(titleOf(it.ev))}${it.ev.item ? ` <span class="muted">· ${esc(it.ev.item)}</span>` : ''}${followed().length > 1 && it.ev.keyword ? `<span class="ev-kw">#${esc(it.ev.keyword)}</span>` : ''}</div>
     <div class="ev-meta">${esc(placeLine(it.ev))} · ${it.ev.approxArea ? '約 ' : ''}${formatKm(it.distanceKm)} ${compassLabel(it.bearing)}</div>
     <div class="ev-time">${it.spot ? `${esc(spotHours(it.spot.sessions))}・` : ''}${esc(timeLine(it, now))}</div>`;
   li.addEventListener('click', () => select(it.ev.id));
@@ -647,7 +648,7 @@ function renderChooser(items: Item[], now: number): void {
       <ul class="report-events">${list
         .map(
           (it) =>
-            `<li><button type="button" data-select="${it.ev.id}"><b>${esc(tagLabel(it))}｜${esc(it.ev.title)}</b><small>${esc(placeLine(it.ev))} · ${it.ev.approxArea ? '約 ' : ''}${formatKm(it.distanceKm)} ${compassLabel(it.bearing)}</small><small>${esc(timeLine(it, now))}</small></button></li>`,
+            `<li><button type="button" data-select="${it.ev.id}"><b>${esc(tagLabel(it))}｜${esc(titleOf(it.ev))}</b><small>${esc(placeLine(it.ev))} · ${it.ev.approxArea ? '約 ' : ''}${formatKm(it.distanceKm)} ${compassLabel(it.bearing)}</small><small>${esc(timeLine(it, now))}</small></button></li>`,
         )
         .join('')}</ul>
     </div>`;
@@ -715,13 +716,13 @@ function renderDetail(items: Item[], now: number): void {
   detailEl.hidden = false;
   detailEl.innerHTML = `
     <div class="sheet-head">
-      <strong>${esc(ev.title)}</strong>
+      <strong>${esc(titleOf(ev))}</strong>
       <button type="button" class="chip" data-act="close" aria-label="關閉">關閉</button>
     </div>
     <div class="sheet-body">
       ${nearbyHtml(it, items)}
       ${routeBoxHtml(ev, now)}
-      <p>類型：${it.spot ? `固定據點（${kindLabel(ev)}）` : kindLabel(ev)}<br>${ev.item ? `發放：${esc(ev.item)}<br>` : ''}${ev.keyword ? `關鍵字：#${esc(ev.keyword)}<br>` : ''}地點：${esc(ev.placeText)}${ev.approxArea ? `<br><span class="approx-note">約略位置：只知道在${esc(ev.approxArea)}，地圖上是${esc(ev.approxArea)}的中心點，實際地點請看原文</span>` : ''}<br>時間：${it.spot ? esc(spotSchedule(it)) : ev.allDay ? `${dateFmt.format(new Date(ev.startAt * 1000))} ${allDayText(ev, false)}` : ev.endOpen ? `${fmtTime(ev.startAt)} 開始，${openEndText(ev)}` : `${fmtTime(ev.startAt)} – ${fmtTime(ev.endAt)}`}<br>距離：${ev.approxArea ? '約 ' : ''}${formatKm(it.distanceKm)}，${compassLabel(it.bearing)}方 · ${esc(timeLine(it, now))}</p>
+      <p>類型：${it.spot ? `固定據點（${kindLabel(ev)}）` : kindLabel(ev)}<br>${ev.item ? `發放：${esc(ev.item)}<br>` : ''}${ev.keyword ? `關鍵字：#${esc(ev.keyword)}<br>` : ''}地點：${esc(placeOf(ev))}${ev.approxArea ? `<br><span class="approx-note">約略位置：只知道在${esc(ev.approxArea)}，地圖上是${esc(ev.approxArea)}的中心點，實際地點請看原文</span>` : ''}<br>時間：${it.spot ? esc(spotSchedule(it)) : ev.allDay ? `${dateFmt.format(new Date(ev.startAt * 1000))} ${allDayText(ev, false)}` : ev.endOpen ? `${fmtTime(ev.startAt)} 開始，${openEndText(ev)}` : `${fmtTime(ev.startAt)} – ${fmtTime(ev.endAt)}`}<br>距離：${ev.approxArea ? '約 ' : ''}${formatKm(it.distanceKm)}，${compassLabel(it.bearing)}方 · ${esc(timeLine(it, now))}</p>
       <blockquote>${esc(ev.post.source === 'news' ? ev.post.text.split('\n')[0] : ev.post.text.slice(0, 300))}</blockquote>
       <p class="muted source-line">來源：${esc(sourceLabel(ev))}</p>
       ${routeOf(ev) ? '' : relatedHtml(ev.related ?? [])}
@@ -764,7 +765,7 @@ function nearbyHtml(it: Item, items: Item[]): string {
     .map((id) => items.find((x) => x.ev.id === id))
     .filter((x): x is Item => !!x);
   if (others.length === 0) return '';
-  const btns = others.map((o) => `<button type="button" class="chip small" data-select="${o.ev.id}">${esc(o.ev.title)}</button>`).join('');
+  const btns = others.map((o) => `<button type="button" class="chip small" data-select="${o.ev.id}">${esc(titleOf(o.ev))}</button>`).join('');
   return `<div class="nearby"><span class="muted">雷達上同一點還有 ${others.length} 個：</span>${btns}</div>`;
 }
 
@@ -804,7 +805,7 @@ async function sendEnded(ev: EventOut, btn: HTMLButtonElement): Promise<void> {
   endedReported.add(ev.id);
   lsSet(LS_ENDED, JSON.stringify([...endedReported].slice(-200)));
   if (r.data.ended) {
-    showBanner(bannerEl, `謝謝回報，「${ev.title}」已從雷達下架`, 3000);
+    showBanner(bannerEl, `謝謝回報，「${titleOf(ev)}」已從雷達下架`, 3000);
     selectedId = null;
     await refresh();
   } else {
@@ -1284,8 +1285,19 @@ function sourceLinkText(ev: EventOut): string {
 }
 
 /** 地點文字；約略位置會註明 */
+/** 顯示用的標題：固定據點用店家名稱（從地點拆出來），拆不出來才用判讀的標題 */
+function titleOf(ev: EventOut): string {
+  return (ev.spot && splitPlace(ev.placeText).name) || ev.title;
+}
+
+/** 地點文字：據點的標題已經是店名，這裡只寫地址 */
+function placeOf(ev: EventOut): string {
+  const p = ev.spot ? splitPlace(ev.placeText) : null;
+  return p?.name ? p.address : ev.placeText;
+}
+
 function placeLine(ev: EventOut): string {
-  return ev.approxArea ? `${ev.placeText}（約略位置：${ev.approxArea}）` : ev.placeText;
+  return ev.approxArea ? `${placeOf(ev)}（約略位置：${ev.approxArea}）` : placeOf(ev);
 }
 
 function kindLabel(ev: EventOut): string {
@@ -1482,7 +1494,7 @@ async function submitSpotReport(): Promise<void> {
       const last = found.at(-1);
       const days = last?.untilOpen ? `・${openEndText(last)}` : found.length > 1 ? `・${found.length} 天` : '';
       const when = spotHours(found);
-      return `<li><button type="button" data-id="${ev.id}"><b>${kindLabel(ev)}｜${esc(ev.title)}</b><small>${esc(ev.placeText)} · ${esc(when)}${days}</small></button></li>`;
+      return `<li><button type="button" data-id="${ev.id}"><b>${kindLabel(ev)}｜${esc(titleOf(ev))}</b><small>${esc(placeLine(ev))} · ${esc(when)}${days}</small></button></li>`;
     })
     .join('');
   spotResult.innerHTML = `<p class="msg">${esc(head)}</p>${list ? `<ul class="report-events">${list}</ul>` : ''}`;
@@ -1548,7 +1560,7 @@ async function submitReport(): Promise<void> {
   const list = found
     .map((ev) => {
       const when = ev.allDay ? `${dateFmt.format(new Date(ev.startAt * 1000))} ${allDayText(ev, false)}` : `${dateFmt.format(new Date(ev.startAt * 1000))} ${fmtTime(ev.startAt)}`;
-      return `<li><button type="button" data-id="${ev.id}"><b>${kindLabel(ev)}｜${esc(ev.title)}</b><small>${esc(ev.placeText)} · ${esc(when)}</small></button></li>`;
+      return `<li><button type="button" data-id="${ev.id}"><b>${kindLabel(ev)}｜${esc(titleOf(ev))}</b><small>${esc(placeLine(ev))} · ${esc(when)}</small></button></li>`;
     })
     .join('');
   setReportMsg(`<p class="msg">${esc(head)}</p>${list ? `<ul class="report-events">${list}</ul>` : ''}`);
