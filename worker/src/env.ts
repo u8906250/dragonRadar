@@ -15,6 +15,8 @@ export interface Env {
   THREADS_SEARCH_STATUS?: string;
   /** "false" 時回報的固定據點全部改人工審核（有人亂貼時用）；沒設就是自動審核 */
   SPOT_AUTO_REVIEW?: string;
+  /** "false" 時關掉漂流瓶（有人亂丟時用） */
+  BOTTLES_ENABLED?: string;
   /** Apify API token（試用第三方 Threads 爬蟲用，只放 secret） */
   APIFY_TOKEN?: string;
   THREADS_ACCESS_TOKEN?: string;

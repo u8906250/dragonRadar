@@ -83,6 +83,31 @@ export interface RouteOut {
   updatedAt: number;
 }
 
+/** 漂流瓶：撿起來之前看不到內容 */
+export interface BottleOut {
+  id: number;
+  lat: number;
+  lng: number;
+  createdAt: number;
+  expiresAt: number;
+  /** 自己丟的 */
+  mine: boolean;
+  /** 自己撿過了 */
+  picked: boolean;
+  /** 被撿起來的次數 */
+  picks: number;
+}
+
+export interface PickedBottle {
+  bottle: BottleOut;
+  text: string;
+}
+
+export interface MyBottles {
+  dropped: Array<{ id: number; text: string; createdAt: number; expiresAt: number; picks: number; status: 'active' | 'hidden' | 'deleted' | 'removed' }>;
+  picked: Array<{ id: number; text: string; pickedAt: number }>;
+}
+
 export interface Origin {
   lat: number;
   lng: number;
@@ -118,6 +143,7 @@ export interface KeywordRules {
     news: { names: string[]; intervalMin: number };
     link?: { maxAgeDays: number; recheckMin: number; endedReportsNeeded: number };
     spot?: { maxAgeDays: number; autoReview?: boolean };
+    bottles?: { enabled: boolean; maxChars: number; pickRadiusM: number; ttlDays: number };
   };
   intervalMin: number;
   defaultDurationMin: number;

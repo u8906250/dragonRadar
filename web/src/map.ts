@@ -71,6 +71,17 @@ const escapeHtml = (s: string): string =>
   s.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c] as string);
 
 /** Leaflet 地圖，第一次切到地圖時才載入 */
+export interface MapBottle {
+  id: number;
+  lat: number;
+  lng: number;
+  state: 'far' | 'near' | 'pick';
+  mine: boolean;
+  picked: boolean;
+}
+
+const MAP_BOTTLE_PATH = 'M-1.8 -8 h3.6 v3 l2.4 3 v8.2 a1.6 1.6 0 0 1 -1.6 1.6 h-5.2 a1.6 1.6 0 0 1 -1.6 -1.6 v-8.2 l2.4 -3 z';
+
 export class MapView {
   private L: typeof Leaflet | null = null;
   private map: Leaflet.Map | null = null;
@@ -87,6 +98,8 @@ export class MapView {
   private outline: Leaflet.Polygon | null = null;
   private outlineRings: Array<Array<[number, number]>> = [];
   private routes: MapRoute[] = [];
+  private bottleLayer: Leaflet.LayerGroup | null = null;
+  private bottles: MapBottle[] = [];
   /** 座標一樣合成一個點時，每個項目對應到畫出來的那個標記 */
   private readonly leaderOf = new Map<number, number>();
   /** 畫出來的標記代表哪些項目 */
@@ -100,7 +113,7 @@ export class MapView {
   constructor(
     private readonly el: HTMLElement,
     origin: LatLng,
-    private readonly handlers: { onSelect: (id: number, group: number[]) => void; onPickOrigin: (p: LatLng) => void },
+    private readonly handlers: { onSelect: (id: number, group: number[]) => void; onPickOrigin: (p: LatLng) => void; onBottle?: (id: number) => void },
     base: BaseMap = 'nlsc',
   ) {
     this.origin = origin;
@@ -126,6 +139,7 @@ export class MapView {
       map.attributionControl.setPrefix(false);
       this.map = map;
       this.routeLayer = L.layerGroup().addTo(map);
+      this.bottleLayer = L.layerGroup().addTo(map);
       this.layer = L.layerGroup().addTo(map);
       this.accuracyCircle = L.circle([this.origin.lat, this.origin.lng], {
         radius: 0,
@@ -177,6 +191,7 @@ export class MapView {
       this.pushOrigin();
       this.pushOutline();
       this.pushRoutes();
+      this.pushBottles();
       this.pushItems();
       // 地圖容器剛從 hidden 變成顯示，尺寸要再算一次
       requestAnimationFrame(() => map.invalidateSize());
@@ -351,6 +366,35 @@ export class MapView {
     if (this.outlineRings.length === 0) return;
     this.outline = L.polygon(this.outlineRings, { color: '#03615a', weight: 3.5, opacity: 0.9, dashArray: '8 6', fillColor: '#03615a', fillOpacity: 0.08, interactive: false }).addTo(map);
     this.outline.bringToBack();
+  }
+
+  /** 漂流瓶：遠的畫成約 150 m 的淡圈（只知道大概在哪），近的畫成瓶子 */
+  setBottles(list: MapBottle[]): void {
+    const sig = (bs: MapBottle[]): string => JSON.stringify(bs.map((b) => [b.id, b.state, b.mine, b.picked]));
+    if (sig(list) === sig(this.bottles)) return;
+    this.bottles = list;
+    this.pushBottles();
+  }
+
+  private pushBottles(): void {
+    const L = this.L;
+    const layer = this.bottleLayer;
+    if (!L || !layer) return;
+    layer.clearLayers();
+    for (const b of this.bottles) {
+      const open = (): void => this.handlers.onBottle?.(b.id);
+      if (b.state === 'far') {
+        layer.addLayer(L.circle([b.lat, b.lng], { radius: 150, color: '#43b8d4', weight: 1, dashArray: '4 4', fillColor: '#43b8d4', fillOpacity: 0.18 }).on('click', open));
+      } else {
+        const icon = L.divIcon({
+          className: `map-bottle${b.state === 'pick' ? ' can-pick' : ''}${b.mine ? ' mine' : ''}${b.picked ? ' picked' : ''}`,
+          html: `<svg viewBox="-10 -10 20 20" width="24" height="24"><path d="${MAP_BOTTLE_PATH}" transform="rotate(-20)"/></svg>`,
+          iconSize: [24, 24],
+          iconAnchor: [12, 12],
+        });
+        layer.addLayer(L.marker([b.lat, b.lng], { icon, keyboard: false, title: b.mine ? '你丟的漂流瓶' : '漂流瓶' }).on('click', open));
+      }
+    }
   }
 
   setRoutes(routes: MapRoute[]): void {

@@ -40,6 +40,8 @@ ALLOW_USER_KEYWORDS = "false"
 THREADS_SEARCH_STATUS = "review"
 # 回報的固定據點是否自動審核（AI 判讀加地點查核，有把握就直接上雷達）。有人亂貼時改成 "false"，全部改人工審核
 SPOT_AUTO_REVIEW = "true"
+# 漂流瓶（匿名、只收打氣正向的話）。有人亂丟時改成 "false" 整個關掉
+BOTTLES_ENABLED = "true"
 
 # Secrets（用 wrangler secret put 設定，不要寫在這裡）
 #   THREADS_ACCESS_TOKEN  Threads 長效 token

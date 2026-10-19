@@ -476,3 +476,35 @@ a.chip { display: inline-flex; align-items: center; text-decoration: none; }
 .radar .flash { fill: currentColor; opacity: 0; pointer-events: none; filter: drop-shadow(0 0 6px currentColor); }
 .radar .flash-ring { fill: none; stroke: currentColor; stroke-width: 1.5; opacity: 0; pointer-events: none; }
 .radar .flash-ring { vector-effect: non-scaling-stroke; }
+
+/* 漂流瓶：海玻璃色。遠的是一團模糊訊號，200 m 內看得到瓶子，撿得到時外面有一圈在呼吸 */
+.radar .bottle { cursor: pointer; color: #43b8d4; }
+.radar .bottle .hit { fill: transparent; }
+.radar .bottle .fog { fill: #43b8d4; opacity: 0.55; animation: fog 3.2s ease-in-out infinite; }
+.radar .bottle .glass { fill: #8fdcec; stroke: #155868; stroke-width: 1.3; stroke-linejoin: round; }
+.radar .bottle.mine .glass { fill: transparent; stroke: #2a9bb8; stroke-width: 1.8; }
+.radar .bottle.picked { opacity: 0.5; }
+.radar .bottle .reach { fill: none; stroke: #43b8d4; stroke-width: 2; animation: reach 1.4s ease-out infinite; }
+.radar .bottle.selected .glass { stroke: var(--blip-selected); stroke-width: 2.4; }
+@keyframes fog { 0%, 100% { opacity: 0.35; } 50% { opacity: 0.65; } }
+@keyframes reach { 0% { r: 8; opacity: 0.9; } 100% { r: 20; opacity: 0; } }
+@media (prefers-reduced-motion: reduce) { .radar .bottle .fog, .radar .bottle .reach { animation: none; } }
+.map-bottle { background: none; border: none; }
+.map-bottle path { fill: #8fdcec; stroke: #155868; stroke-width: 1.3; stroke-linejoin: round; }
+.map-bottle.mine path { fill: #fff; stroke: #2a9bb8; stroke-width: 1.8; }
+.map-bottle.picked { opacity: 0.55; }
+.map-bottle.can-pick svg { filter: drop-shadow(0 0 5px #43b8d4); }
+
+/* 漂流瓶按鈕與面板 */
+.chip-badge { display: inline-block; min-width: 18px; margin-left: 5px; padding: 0 5px; border-radius: 999px; background: #43b8d4; color: #fff; font-size: 11px; font-weight: 800; line-height: 18px; text-align: center; }
+#bottle-btn.glow { box-shadow: 0 0 0 3px rgba(67, 184, 212, 0.45), var(--chip-shadow, none); animation: bottle-glow 1.6s ease-in-out infinite; }
+@keyframes bottle-glow { 50% { box-shadow: 0 0 0 6px rgba(67, 184, 212, 0.15); } }
+@media (prefers-reduced-motion: reduce) { #bottle-btn.glow { animation: none; } }
+.bottle-form { display: flex; flex-direction: column; gap: 8px; }
+.bottle-form textarea {
+  font: inherit; font-size: 16px; color: var(--text); background: var(--card); resize: none;
+  border: var(--border-w) solid var(--line); border-radius: var(--card-radius); padding: 10px 12px;
+}
+.bottle-form textarea:focus { outline: 2px solid var(--highlight); outline-offset: 1px; }
+.bottle-form-row { display: flex; align-items: center; justify-content: space-between; }
+.sheet-body blockquote.bottle-note { margin: 4px 0 10px; padding: 14px 16px; font-size: 18px; line-height: 1.6; font-weight: 700; color: #1d3b44; background: linear-gradient(135deg, #e9f8fb, #c9eef6); border: 1.5px solid #8fdcec; border-radius: 14px; }

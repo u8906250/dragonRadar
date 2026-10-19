@@ -11,6 +11,7 @@ import { apifyTrial } from './sources/apify';
 import { fetchThreadsPost, resolveThreadsLink, shortcodeToUnix } from './sources/link';
 import { ENDED_REPORTS_NEEDED, MAX_LINK_AGE_SEC, ReportError, ipHash, purgeReports, recheckLinks, reportEnded, submitLink } from './reports';
 import { addressCacheKey, geocodeAddress, parseTwAddress } from './address';
+import { adminListBottles, adminSetBottle, BOTTLE_MAX_CHARS, BOTTLE_TTL_SEC, bottlesEnabled, deleteBottle, deviceId, dropBottle, listBottles, myBottles, PICK_RADIUS_M, pickBottle, purgeBottles, reportBottle } from './bottles';
 import { approveSpotRequest, autoReview, cancelSpotRequest, listSpotRequests, locatePlace, rejectSpotRequest, SPOT_MAX_AGE_SEC, spotRequestStatus, submitSpotRequest, type ApproveBody, type SpotRequestRow } from './spots';
 import { addUserKeyword, listActiveKeywords, listAllKeywords, MAX_ACTIVE_KEYWORDS, normalizeKeyword, parseKeywordList, toKeywordOut, touchKeywords } from './keywords';
 import { CALLBACK_PATH, DELETE_PATH, DELETION_STATUS_PATH, UNINSTALL_PATH, deletionStatus, handleCallback, handleDelete, handleUninstall, startAuth } from './oauth';
@@ -30,7 +31,7 @@ function corsHeaders(env: Env, origin: string | null): Record<string, string> {
   return {
     'access-control-allow-origin': allow,
     'access-control-allow-methods': 'GET,POST,DELETE,OPTIONS',
-    'access-control-allow-headers': 'content-type,authorization',
+    'access-control-allow-headers': 'content-type,authorization,x-device',
     'access-control-max-age': '86400',
     vary: 'origin',
   };
@@ -126,6 +127,7 @@ async function handle(req: Request, env: Env, ctx: ExecutionContext): Promise<Re
           threads: env.THREADS_SEARCH_STATUS === 'approved' ? 'approved' : 'review',
           link: { maxAgeDays: MAX_LINK_AGE_SEC / 86400, recheckMin: 30, endedReportsNeeded: ENDED_REPORTS_NEEDED },
           spot: { maxAgeDays: SPOT_MAX_AGE_SEC / 86400, autoReview: env.SPOT_AUTO_REVIEW !== 'false' },
+          bottles: { enabled: bottlesEnabled(env), maxChars: BOTTLE_MAX_CHARS, pickRadiusM: PICK_RADIUS_M, ttlDays: BOTTLE_TTL_SEC / 86400 },
           official: { name: '台北大洋流「未來航線」', url: VOYAGE_PAGE, mapName: '大洋流車掃地圖', mapUrl: CURRENT_MAP_URL, intervalMin: 10 },
           news: { names: [...new Set(NEWS_FEEDS.map((f) => f.name))], intervalMin: 30 },
         },
@@ -172,6 +174,31 @@ async function handle(req: Request, env: Env, ctx: ExecutionContext): Promise<Re
     const body = await readJson<{ url?: unknown; place?: unknown; hours?: unknown; note?: unknown }>(req);
     const r = await submitSpotRequest(env, body, await ipHash(env, req), now);
     return jsonResponse(r, r.existed ? 200 : 201);
+  }
+
+  // ---- 漂流瓶（裝置代碼放在 x-device 標頭）----
+  if (path === '/api/bottles' || path.startsWith('/api/bottles/')) {
+    if (!bottlesEnabled(env)) throw new HttpError(403, '漂流瓶暫時關閉');
+    const dev = await deviceId(env, req);
+    if (req.method === 'GET' && path === '/api/bottles') {
+      const radiusKm = Math.min(600, Math.max(0.1, num(url.searchParams.get('radius_km')) ?? 20));
+      return jsonResponse({ now, bottles: await listBottles(env, dev, { lat: num(url.searchParams.get('lat')), lng: num(url.searchParams.get('lng')), radiusKm }, now) });
+    }
+    if (req.method === 'GET' && path === '/api/bottles/mine') return jsonResponse(await myBottles(env, dev, now));
+    if (req.method === 'POST' && path === '/api/bottles') {
+      return jsonResponse(await dropBottle(env, dev, await ipHash(env, req), await readJson<{ text?: unknown; lat?: unknown; lng?: unknown }>(req), now), 201);
+    }
+    const one = /^\/api\/bottles\/(\d+)(?:\/(pick|report))?$/.exec(path);
+    if (one) {
+      const id = Number(one[1]);
+      if (req.method === 'POST' && one[2] === 'pick') return jsonResponse(await pickBottle(env, dev, id, await readJson<{ lat?: unknown; lng?: unknown }>(req), now));
+      if (req.method === 'POST' && one[2] === 'report') {
+        const body = await readJson<{ reason?: unknown }>(req);
+        return jsonResponse(await reportBottle(env, dev, await ipHash(env, req), id, body.reason, now));
+      }
+      if (req.method === 'DELETE' && !one[2]) return jsonResponse(await deleteBottle(env, dev, id));
+    }
+    throw new HttpError(404, 'not found');
   }
 
   // 回報的人取消自己的固定據點回報：{ key, cancelKey }
@@ -325,6 +352,15 @@ async function handleAdmin(req: Request, env: Env, _ctx: ExecutionContext, path:
     return jsonResponse({ deleted_events: r[0].meta.changes ?? 0, deleted_posts: r[1].meta.changes ?? 0 });
   }
 
+  // 漂流瓶：?status=active|hidden|deleted|removed
+  if (req.method === 'GET' && path === '/api/admin/bottles') {
+    return jsonResponse({ bottles: await adminListBottles(env, url.searchParams.get('status')) });
+  }
+  const bottleAdmin = /^\/api\/admin\/bottles\/(\d+)\/(remove|restore)$/.exec(path);
+  if (req.method === 'POST' && bottleAdmin) {
+    return jsonResponse(await adminSetBottle(env, Number(bottleAdmin[1]), bottleAdmin[2] === 'remove' ? 'removed' : 'active'));
+  }
+
   // 固定據點審核佇列：?status=pending|approved|rejected
   if (req.method === 'GET' && path === '/api/admin/spot-requests') {
     return jsonResponse({ requests: await listSpotRequests(env, url.searchParams.get('status')) });
@@ -444,7 +480,7 @@ async function purgeOldData(env: Env, now: number): Promise<number> {
     env.DB.prepare('DELETE FROM events WHERE end_at < ?').bind(cutoff),
     env.DB.prepare('DELETE FROM posts WHERE fetched_at < ? AND id NOT IN (SELECT post_id FROM events)').bind(cutoff),
   ]);
-  return r.reduce((n, x) => n + (x.meta.changes ?? 0), 0) + (await purgeReports(env, cutoff));
+  return r.reduce((n, x) => n + (x.meta.changes ?? 0), 0) + (await purgeReports(env, cutoff)) + (await purgeBottles(env, cutoff));
 }
 
 async function refreshTokenJob(env: Env): Promise<void> {

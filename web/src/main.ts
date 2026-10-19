@@ -1,5 +1,5 @@
 import './styles.css';
-import { addKeyword, cancelSpot, fetchEvents, fetchHealth, fetchKeywords, fetchRoutes, fetchSpotStatus, reportEnded, submitLink, submitSpot } from './api';
+import { addKeyword, cancelSpot, deleteBottle, dropBottle, fetchBottles, fetchEvents, fetchHealth, fetchKeywords, fetchMyBottles, fetchRoutes, fetchSpotStatus, pickBottle, reportBottle, reportEnded, submitLink, submitSpot } from './api';
 import { compassSupported, startCompass } from './compass';
 import { bearingDeg, compassLabel, formatKm, haversineKm, taiwanRadiusKm, type LatLng } from './geo';
 import { inShuangbei, SHUANGBEI_RINGS, shuangbeiRadiusKm } from './shuangbei';
@@ -9,7 +9,7 @@ import { crowdOf, MapView, type BaseMap } from './map';
 import { beep, ensureNotificationPermission, notificationState, showBanner, systemNotify, unlockAudio } from './notify';
 import { Radar, type RadarRoute } from './radar';
 import { DEFAULT_THEME_ID, getTheme, THEMES, type Theme } from './themes';
-import type { EventOut, Item, KeywordInfo, KeywordRules, Origin, Phase, RelatedPost, RouteOut, RouteStop, SpotRequestStatus, SubmitResult } from './types';
+import type { BottleOut, EventOut, Item, KeywordInfo, KeywordRules, Origin, Phase, PickedBottle, RelatedPost, RouteOut, RouteStop, SpotRequestStatus, SubmitResult } from './types';
 
 const DEFAULT_ORIGIN: Origin = { lat: 25.0478, lng: 121.517, source: 'default' }; // 台北車站
 const SOON_SEC = 30 * 60;
@@ -88,6 +88,13 @@ let routes: RouteOut[] = [];
 let selectedRoute: string | null = null;
 /** 點了雷達上的星星（固定地標） */
 let selectedLandmark: string | null = null;
+/** 附近的漂流瓶（沒有內容），點了雷達上的哪一個 */
+let bottles: BottleOut[] = [];
+let selectedBottle: number | null = null;
+/** 撿起來（或自己丟）的瓶子內容 */
+const bottleTexts = new Map<number, PickedBottle>();
+/** 漂流瓶詳細資料上的訊息（撿不到的原因、檢舉結果） */
+let bottleMsg = '';
 type ScaleSetting = '1' | '5' | '20' | 'region' | 'taiwan' | 'custom';
 /** 下方按鈕的範圍；custom 是雙指縮放或滾輪調出來的 */
 const SCALE_SETTINGS: ScaleSetting[] = ['1', '5', '20', 'region', 'taiwan'];
@@ -154,6 +161,17 @@ const reportSubmit = $<HTMLButtonElement>('#report-submit');
 const reportPaste = $<HTMLButtonElement>('#report-paste');
 const reportResult = $('#report-result');
 const reportTips = $('#report-tips');
+const bottleBtn = $<HTMLButtonElement>('#bottle-btn');
+const bottleBadge = $('#bottle-badge');
+const bottleSheet = $('#bottle-sheet');
+const bottleForm = $<HTMLFormElement>('#bottle-form');
+const bottleText = $<HTMLTextAreaElement>('#bottle-text');
+const bottleCount = $('#bottle-count');
+const bottleDropBtn = $<HTMLButtonElement>('#bottle-drop');
+const bottleResult = $('#bottle-result');
+const bottleNear = $('#bottle-near');
+const bottleMine = $('#bottle-mine');
+const bottleTips = $('#bottle-tips');
 const reportModeBtns = Array.from(document.querySelectorAll<HTMLButtonElement>('#report-sheet [data-mode]'));
 const reportEventEl = $('#report-event');
 const reportSpotEl = $('#report-spot');
@@ -176,12 +194,14 @@ const radar = new Radar(
   select,
   (factor, done) => zoomRadar(factor, done),
   (id) => selectLandmark(id),
+  (id) => selectBottle(id),
 );
 const map = new MapView(
   $('#map'),
   origin,
   {
     onSelect: select,
+    onBottle: (id) => selectBottle(id),
     onPickOrigin: (p) => {
       gpsAccuracy = null;
       setOrigin({ ...p, source: 'manual' });
@@ -443,6 +463,10 @@ function render(): void {
       points: r.segments.flatMap((sg) => sg.path).map(([lat, lng]) => ({ bearing: bearingDeg(origin, { lat, lng }), distanceKm: haversineKm(origin, { lat, lng }) })),
     })),
   );
+  const bottleViews = bottles.map((b) => ({ b, distanceKm: haversineKm(origin, b), bearing: bearingDeg(origin, b), state: bottleState(b) }));
+  radar.setBottles(bottleViews.map((v) => ({ id: v.b.id, bearing: v.bearing, distanceKm: v.distanceKm, state: v.state, mine: v.b.mine, picked: v.b.picked, selected: v.b.id === selectedBottle })));
+  map.setBottles(bottleViews.map((v) => ({ id: v.b.id, lat: v.b.lat, lng: v.b.lng, state: v.state, mine: v.b.mine, picked: v.b.picked })));
+  updateBottleBadge(bottleViews);
   radar.setLandmarks(
     LANDMARKS.map((lm) => ({ id: lm.id, label: lm.name, bearing: bearingDeg(origin, lm), distanceKm: haversineKm(origin, lm), selected: lm.id === selectedLandmark })),
   );
@@ -687,7 +711,253 @@ function renderLandmarkDetail(id: string): boolean {
   return true;
 }
 
+// ---- 漂流瓶 ----
+/** 200 m 內看得到瓶子的樣子，更遠只是一團訊號 */
+const BOTTLE_NEAR_M = 200;
+const bottlesOn = (): boolean => keywordRules?.sources?.bottles?.enabled !== false;
+const pickRadiusM = (): number => keywordRules?.sources?.bottles?.pickRadiusM ?? 60;
+const bottleDistM = (b: BottleOut): number => haversineKm(origin, b) * 1000;
+
+/** 用 GPS 定位而且走到撿得起來的距離才算 pick；手動位置不能撿 */
+function bottleState(b: BottleOut): 'far' | 'near' | 'pick' {
+  const d = bottleDistM(b);
+  if (origin.source === 'gps' && d <= pickRadiusM()) return 'pick';
+  return d <= BOTTLE_NEAR_M ? 'near' : 'far';
+}
+
+/** 按鈕上的數字：雷達範圍內還沒撿過、不是自己丟的瓶子 */
+function updateBottleBadge(views: Array<{ b: BottleOut; distanceKm: number; state: string }>): void {
+  bottleBtn.hidden = !bottlesOn();
+  const n = views.filter((v) => !v.b.mine && !v.b.picked && v.distanceKm <= scaleKm).length;
+  const canPick = views.some((v) => v.state === 'pick' && !v.b.mine && !v.b.picked);
+  bottleBadge.hidden = n === 0;
+  bottleBadge.textContent = String(n);
+  bottleBtn.classList.toggle('glow', canPick);
+}
+
+const daysLeft = (until: number): string => {
+  const d = Math.ceil((until - nowSec()) / 86400);
+  return d <= 1 ? '今天' : `${d} 天`;
+};
+
+function ago(unix: number): string {
+  const m = Math.max(0, Math.round((nowSec() - unix) / 60));
+  if (m < 60) return m <= 1 ? '剛剛' : `${m} 分鐘前`;
+  if (m < 24 * 60) return `${Math.floor(m / 60)} 小時前`;
+  return `${Math.floor(m / 1440)} 天前`;
+}
+
+function selectBottle(id: number | null): void {
+  selectedBottle = selectedBottle === id ? null : id;
+  bottleMsg = '';
+  selectedId = null;
+  selectedRoute = null;
+  selectedLandmark = null;
+  choosing = null;
+  selectedGroup = [];
+  if (selectedBottle !== null) {
+    themeSheet.hidden = true;
+    kwSheet.hidden = true;
+    reportSheet.hidden = true;
+    bottleSheet.hidden = true;
+    // 自己丟的、撿過的直接讀內容
+    const b = bottles.find((x) => x.id === selectedBottle);
+    if (b && (b.mine || b.picked) && !bottleTexts.has(b.id)) void loadBottle(b.id, null);
+  }
+  render();
+}
+
+async function loadBottle(id: number, at: Origin | null): Promise<void> {
+  const r = await pickBottle(id, at);
+  if (!r.ok) {
+    bottleMsg = r.message;
+  } else {
+    bottleTexts.set(id, r.data);
+    bottles = bottles.map((b) => (b.id === id ? { ...b, ...r.data.bottle } : b));
+    bottleMsg = '';
+  }
+  render();
+}
+
+/** 雷達或地圖上點了瓶子：距離、撿起來、內容、檢舉或收回 */
+function renderBottleDetail(id: number): boolean {
+  const b = bottles.find((x) => x.id === id);
+  if (!b) return false;
+  const got = bottleTexts.get(id);
+  const d = bottleDistM(b);
+  const reach = pickRadiusM();
+  const where = `約 ${formatKm(d / 1000)} ${compassLabel(bearingDeg(origin, b))}`;
+  let body: string;
+  if (got) {
+    body = `<blockquote class="bottle-note">${esc(got.text)}</blockquote>
+      <p class="muted">${ago(b.createdAt)}丟的・${b.picks} 人撿到・${daysLeft(b.expiresAt)}後漂走</p>`;
+  } else if (b.mine || b.picked) {
+    body = '<p class="muted">打開瓶子中…</p>';
+  } else if (origin.source !== 'gps') {
+    body = `<p>瓶子在${esc(where)}。按右上角「定位」用 GPS，走到 ${reach} m 內就能撿起來。</p>`;
+  } else if (d > reach) {
+    body = `<p>瓶子在${esc(where)}，還差約 ${Math.round(d - reach)} m。走近一點就能撿起來，越近雷達上越清楚。</p>`;
+  } else {
+    body = '<p>瓶子就在你旁邊！</p>';
+  }
+  const canPick = !got && !b.mine && !b.picked && origin.source === 'gps' && d <= reach;
+  detailEl.hidden = false;
+  detailEl.innerHTML = `
+    <div class="sheet-head">
+      <strong>${b.mine ? '你丟的漂流瓶' : '漂流瓶'}</strong>
+      <button type="button" class="chip" data-act="close" aria-label="關閉">關閉</button>
+    </div>
+    <div class="sheet-body">
+      ${body}
+      ${bottleMsg ? `<p class="msg error">${esc(bottleMsg)}</p>` : ''}
+      <div class="sheet-actions">
+        ${canPick ? '<button type="button" class="btn primary" data-act="pick">撿起來</button>' : ''}
+        ${!got && !b.mine && !canPick ? `<a class="btn" href="https://www.google.com/maps/dir/?api=1&destination=${b.lat},${b.lng}&travelmode=walking" target="_blank" rel="noopener">走過去</a>` : ''}
+        ${got && !b.mine ? '<button type="button" class="btn" data-act="report">檢舉</button>' : ''}
+        ${b.mine ? '<button type="button" class="btn" data-act="delete">收回</button>' : ''}
+      </div>
+      <p class="muted sheet-note small">瓶子的位置在丟的時候就隨機漂開約 100 m，不是丟的人站的地方。</p>
+    </div>`;
+  detailEl.querySelector('[data-act="close"]')?.addEventListener('click', () => selectBottle(null));
+  detailEl.querySelector('[data-act="pick"]')?.addEventListener('click', (e) => {
+    (e.currentTarget as HTMLButtonElement).disabled = true;
+    void loadBottle(id, origin);
+  });
+  detailEl.querySelector('[data-act="report"]')?.addEventListener('click', async (e) => {
+    if (!window.confirm('這個瓶子的內容不是打氣、正向的話？檢舉後會交給管理者確認。')) return;
+    (e.currentTarget as HTMLButtonElement).disabled = true;
+    const r = await reportBottle(id);
+    if (!r.ok) {
+      bottleMsg = r.message;
+    } else {
+      showBanner(bannerEl, r.data.hidden ? '謝謝檢舉，這個瓶子先藏起來了' : '謝謝檢舉，會交給管理者確認', 3000);
+      if (r.data.hidden) {
+        bottles = bottles.filter((x) => x.id !== id);
+        selectedBottle = null;
+      }
+    }
+    render();
+  });
+  detailEl.querySelector('[data-act="delete"]')?.addEventListener('click', async (e) => {
+    if (!window.confirm('要收回這個瓶子嗎？收回後就沒有人撿得到了。')) return;
+    (e.currentTarget as HTMLButtonElement).disabled = true;
+    const r = await deleteBottle(id);
+    if (!r.ok) {
+      bottleMsg = r.message;
+    } else {
+      bottles = bottles.filter((x) => x.id !== id);
+      selectedBottle = null;
+      showBanner(bannerEl, '瓶子收回了', 2000);
+    }
+    render();
+  });
+  return true;
+}
+
+function openBottleSheet(open: boolean): void {
+  bottleSheet.hidden = !open;
+  if (!open) return;
+  themeSheet.hidden = true;
+  kwSheet.hidden = true;
+  reportSheet.hidden = true;
+  selectedId = null;
+  selectedRoute = null;
+  selectedLandmark = null;
+  selectedBottle = null;
+  detailEl.hidden = true;
+  renderBottleSheet();
+  void renderMyBottles();
+}
+
+/** 丟瓶子的表單（要 GPS）、附近的瓶子、使用規則 */
+function renderBottleSheet(): void {
+  const rules = keywordRules?.sources?.bottles;
+  const max = rules?.maxChars ?? 60;
+  bottleText.maxLength = max;
+  bottleCount.textContent = `${[...bottleText.value].length} / ${max}`;
+  const gps = origin.source === 'gps';
+  bottleDropBtn.disabled = !gps;
+  bottleDropBtn.textContent = gps ? '丟出去' : '要先定位';
+  bottleTips.innerHTML = [
+    '只收打氣、正向的話，例如加油、感謝、祝福。批評或攻擊任何人（包括其他候選人）、連結、電話、帳號都不會通過，丟出去前會先自動審核。',
+    `瓶子會丟在你目前 GPS 位置附近，隨機漂開約 100 m，${rules?.ttlDays ?? 7} 天後漂走。每天最多丟 3 個。`,
+    `別人要走到 ${rules?.pickRadiusM ?? 60} m 內才撿得起來；遠的瓶子在雷達上只是一團模糊的訊號，走近才變清楚。`,
+    '撿到不適合的內容可以檢舉，2 個人檢舉就會先藏起來。不用登入：你丟的、撿到的瓶子記在這個瀏覽器裡，清除瀏覽器資料就看不到了。',
+  ]
+    .map((t) => `<li>${esc(t)}</li>`)
+    .join('');
+  const near = bottles
+    .filter((b) => !b.mine)
+    .map((b) => ({ b, d: bottleDistM(b) }))
+    .sort((a, c) => a.d - c.d)
+    .slice(0, 8);
+  bottleNear.innerHTML = near.length
+    ? `<h3 class="spot-mine-title">附近的瓶子</h3><ul class="report-events">${near
+        .map(({ b, d }) => {
+          const st = b.picked ? '撿過了' : bottleState(b) === 'pick' ? '撿得到了！' : `還差約 ${formatKm(Math.max(0, d - pickRadiusM()) / 1000)}`;
+          return `<li><button type="button" data-bottle="${b.id}"><b>漂流瓶・約 ${esc(formatKm(d / 1000))} ${esc(compassLabel(bearingDeg(origin, b)))}</b><small>${esc(st)}・${ago(b.createdAt)}丟的</small></button></li>`;
+        })
+        .join('')}</ul>`
+    : '<p class="muted sheet-note">附近還沒有瓶子，丟第一個吧！</p>';
+}
+
+async function renderMyBottles(): Promise<void> {
+  const r = await fetchMyBottles();
+  if (!r.ok) {
+    bottleMine.innerHTML = '';
+    return;
+  }
+  const { dropped, picked } = r.data;
+  const statusText = (b: (typeof dropped)[number]): string =>
+    b.status === 'hidden' ? '被檢舉，暫時藏起來' : b.status === 'removed' ? '已被管理者移除' : b.status === 'deleted' ? '已漂走' : `${b.picks} 人撿到・${daysLeft(b.expiresAt)}後漂走`;
+  bottleMine.innerHTML =
+    (dropped.length
+      ? `<h3 class="spot-mine-title">我丟的瓶子</h3><ul class="spot-mine">${dropped
+          .map(
+            (b) =>
+              `<li><span class="spot-mine-body">「${esc(b.text)}」<small>${ago(b.createdAt)}丟的・${esc(statusText(b))}</small></span>${
+                b.status === 'active' || b.status === 'hidden' ? `<button type="button" class="chip spot-cancel" data-delete-bottle="${b.id}">收回</button>` : ''
+              }</li>`,
+          )
+          .join('')}</ul>`
+      : '') +
+    (picked.length
+      ? `<h3 class="spot-mine-title">我撿到的瓶子（${picked.length}）</h3><ul class="spot-mine">${picked
+          .map((b) => `<li><span class="spot-mine-body">「${esc(b.text)}」<small>${ago(b.pickedAt)}撿到</small></span></li>`)
+          .join('')}</ul>`
+      : '');
+}
+
+async function submitBottle(): Promise<void> {
+  const text = bottleText.value.trim();
+  if (!text) {
+    bottleResult.innerHTML = '<p class="msg error">寫一句打氣的話再丟吧</p>';
+    return;
+  }
+  if (origin.source !== 'gps') {
+    bottleResult.innerHTML = '<p class="msg error">要先按右上角「定位」用 GPS，瓶子會丟在你現在的位置附近</p>';
+    return;
+  }
+  bottleDropBtn.disabled = true;
+  bottleResult.innerHTML = '<p class="msg busy">審核內容中</p>';
+  const r = await dropBottle(text, origin);
+  bottleDropBtn.disabled = false;
+  if (!r.ok) {
+    bottleResult.innerHTML = `<p class="msg error">${esc(r.message)}</p>`;
+    return;
+  }
+  bottleTexts.set(r.data.bottle.id, r.data);
+  bottles = [r.data.bottle, ...bottles.filter((b) => b.id !== r.data.bottle.id)];
+  bottleText.value = '';
+  bottleResult.innerHTML = `<p class="msg">丟出去了！瓶子會在附近漂 ${keywordRules?.sources?.bottles?.ttlDays ?? 7} 天，有人撿到會顯示在「我丟的瓶子」。</p>`;
+  renderBottleSheet();
+  void renderMyBottles();
+  render();
+}
+
 function renderDetail(items: Item[], now: number): void {
+  if (selectedBottle !== null && renderBottleDetail(selectedBottle)) return;
+  selectedBottle = null;
   if (selectedLandmark && renderLandmarkDetail(selectedLandmark)) return;
   selectedLandmark = null;
   const route = selectedRoute ? routes.find((r) => r.id === selectedRoute) : undefined;
@@ -709,6 +979,7 @@ function renderDetail(items: Item[], now: number): void {
     selectedId = null;
     selectedRoute = null;
     selectedLandmark = null;
+    selectedBottle = null;
     detailEl.hidden = true;
     return;
   }
@@ -824,6 +1095,7 @@ const sameGroup = (a: number[] | null, b: number[]): boolean => !!a && [...a].so
 
 function selectLandmark(id: string | null): void {
   selectedLandmark = selectedLandmark === id ? null : id;
+  selectedBottle = null;
   selectedRoute = null;
   selectedId = null;
   choosing = null;
@@ -832,6 +1104,7 @@ function selectLandmark(id: string | null): void {
     themeSheet.hidden = true;
     kwSheet.hidden = true;
     reportSheet.hidden = true;
+    bottleSheet.hidden = true;
   }
   render();
 }
@@ -839,6 +1112,7 @@ function selectLandmark(id: string | null): void {
 function selectRoute(id: string | null): void {
   selectedRoute = selectedRoute === id ? null : id;
   selectedLandmark = null;
+  selectedBottle = null;
   selectedId = null;
   choosing = null;
   selectedGroup = [];
@@ -846,6 +1120,7 @@ function selectRoute(id: string | null): void {
     themeSheet.hidden = true;
     kwSheet.hidden = true;
     reportSheet.hidden = true;
+    bottleSheet.hidden = true;
   }
   render();
 }
@@ -853,6 +1128,7 @@ function selectRoute(id: string | null): void {
 function select(id: number | null, group: number[] = []): void {
   selectedRoute = null;
   selectedLandmark = null;
+  selectedBottle = null;
   if (group.length > 1) {
     // 疊在一起的先列出來讓人選；同一群再點一次就收起
     choosing = sameGroup(choosing, group) ? null : group;
@@ -862,6 +1138,7 @@ function select(id: number | null, group: number[] = []): void {
       themeSheet.hidden = true;
       kwSheet.hidden = true;
       reportSheet.hidden = true;
+      bottleSheet.hidden = true;
     }
     render();
     return;
@@ -874,6 +1151,7 @@ function select(id: number | null, group: number[] = []): void {
     themeSheet.hidden = true;
     kwSheet.hidden = true;
     reportSheet.hidden = true;
+    bottleSheet.hidden = true;
   }
   render();
 }
@@ -899,13 +1177,16 @@ function setOrigin(o: Origin): void {
 
 async function refresh(): Promise<void> {
   const kws = followed();
+  // 漂流瓶跟關鍵字無關，一起抓
+  const bottleReq = bottlesOn() ? fetchBottles(origin, FETCH_RADIUS_KM) : Promise.resolve([] as BottleOut[]);
   if (kws.length === 0) {
     events = [];
+    bottles = await bottleReq;
     render();
     return;
   }
   try {
-    [events, routes] = await Promise.all([fetchEvents(origin, FETCH_RADIUS_KM, kws), fetchRoutes()]);
+    [events, routes, bottles] = await Promise.all([fetchEvents(origin, FETCH_RADIUS_KM, kws), fetchRoutes(), bottleReq]);
     lastFetchAt = nowSec();
     updatedLabel.textContent = `更新 ${fmtTime(lastFetchAt)}`;
   } catch (e) {
@@ -1103,9 +1384,11 @@ function openThemeSheet(open: boolean): void {
   if (open) {
     kwSheet.hidden = true;
     reportSheet.hidden = true;
+    bottleSheet.hidden = true;
     selectedId = null;
     selectedRoute = null;
     selectedLandmark = null;
+    selectedBottle = null;
     detailEl.hidden = true;
   }
 }
@@ -1359,9 +1642,11 @@ function openKwSheet(open: boolean): void {
   if (open) {
     themeSheet.hidden = true;
     reportSheet.hidden = true;
+    bottleSheet.hidden = true;
     selectedId = null;
     selectedRoute = null;
     selectedLandmark = null;
+    selectedBottle = null;
     detailEl.hidden = true;
     setKwMsg('');
     void loadKeywords();
@@ -1373,9 +1658,11 @@ function openReportSheet(open: boolean): void {
   if (!open) return;
   themeSheet.hidden = true;
   kwSheet.hidden = true;
+  bottleSheet.hidden = true;
   selectedId = null;
   selectedRoute = null;
   selectedLandmark = null;
+  selectedBottle = null;
   detailEl.hidden = true;
   renderReportTips();
   setReportMode(lsGet(LS_REPORT_MODE) === 'spot' ? 'spot' : 'event');
@@ -1501,6 +1788,7 @@ async function submitSpotReport(): Promise<void> {
   for (const b of spotResult.querySelectorAll<HTMLButtonElement>('[data-id]')) {
     b.addEventListener('click', () => {
       reportSheet.hidden = true;
+      bottleSheet.hidden = true;
       selectedId = null;
       select(Number(b.dataset.id));
     });
@@ -1567,6 +1855,7 @@ async function submitReport(): Promise<void> {
   for (const b of reportResult.querySelectorAll<HTMLButtonElement>('[data-id]')) {
     b.addEventListener('click', () => {
       reportSheet.hidden = true;
+      bottleSheet.hidden = true;
       selectedId = null;
       select(Number(b.dataset.id));
     });
@@ -1735,6 +2024,31 @@ function wireControls(): void {
   spotForm.addEventListener('submit', (e) => {
     e.preventDefault();
     void submitSpotReport();
+  });
+  bottleBtn.addEventListener('click', () => openBottleSheet(bottleSheet.hidden));
+  bottleSheet.querySelector('[data-act="close"]')?.addEventListener('click', () => openBottleSheet(false));
+  bottleText.addEventListener('input', () => {
+    bottleCount.textContent = `${[...bottleText.value].length} / ${bottleText.maxLength}`;
+  });
+  bottleForm.addEventListener('submit', (e) => {
+    e.preventDefault();
+    void submitBottle();
+  });
+  bottleNear.addEventListener('click', (e) => {
+    const b = (e.target as Element).closest<HTMLButtonElement>('[data-bottle]');
+    if (b?.dataset.bottle) selectBottle(Number(b.dataset.bottle));
+  });
+  bottleMine.addEventListener('click', async (e) => {
+    const b = (e.target as Element).closest<HTMLButtonElement>('[data-delete-bottle]');
+    if (!b?.dataset.deleteBottle || !window.confirm('要收回這個瓶子嗎？收回後就沒有人撿得到了。')) return;
+    b.disabled = true;
+    const id = Number(b.dataset.deleteBottle);
+    const r = await deleteBottle(id);
+    if (r.ok) bottles = bottles.filter((x) => x.id !== id);
+    bottleResult.innerHTML = r.ok ? '<p class="msg">瓶子收回了。</p>' : `<p class="msg error">${esc(r.message)}</p>`;
+    renderBottleSheet();
+    void renderMyBottles();
+    render();
   });
   spotMine.addEventListener('click', (e) => {
     const b = (e.target as Element).closest<HTMLButtonElement>('[data-cancel]');

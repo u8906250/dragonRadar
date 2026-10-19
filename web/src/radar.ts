@@ -32,6 +32,22 @@ export interface RadarLandmark {
   selected: boolean;
 }
 
+/** 漂流瓶：far 遠的只是一團模糊訊號；near 200 m 內看得到瓶子；pick 走到撿得起來的距離 */
+export interface RadarBottle {
+  id: number;
+  bearing: number;
+  distanceKm: number;
+  state: 'far' | 'near' | 'pick';
+  mine: boolean;
+  picked: boolean;
+  selected: boolean;
+}
+
+/** 瓶子的形狀（中心在原點，高約 16） */
+const BOTTLE_PATH = 'M-1.8 -8 h3.6 v3 l2.4 3 v8.2 a1.6 1.6 0 0 1 -1.6 1.6 h-5.2 a1.6 1.6 0 0 1 -1.6 -1.6 v-8.2 l2.4 -3 z';
+/** 遠的瓶子模糊成這麼大一團（公里），讓人只知道大概的方向和距離 */
+const BOTTLE_FOG_KM = 0.15;
+
 export interface RadarStyle {
   sweep: SweepStyle;
   blip: BlipStyle;
@@ -137,6 +153,8 @@ export class Radar {
   private outline: Array<Array<{ bearing: number; distanceKm: number }>> = [];
   private readonly outlineLayer: SVGGElement;
   private landmarks: RadarLandmark[] = [];
+  private bottles: RadarBottle[] = [];
+  private readonly bottleLayer: SVGGElement;
   private readonly landmarkLayer: SVGGElement;
   private scaleKm = 5;
   private readonly pointers = new Map<number, { x: number; y: number }>();
@@ -154,6 +172,7 @@ export class Radar {
     onSelect: (id: number, group: number[]) => void,
     onZoom?: (factor: number, done: boolean) => void,
     onLandmark?: (id: string) => void,
+    onBottle?: (id: number) => void,
   ) {
     this.svg = el('svg', { viewBox: `0 0 ${SIZE} ${SIZE}`, class: 'radar', role: 'img', 'aria-label': '雷達畫面' });
     const wedgeEnd = polar(45, R);
@@ -168,6 +187,7 @@ export class Radar {
           <stop offset="1" class="sweep-stop-2" />
         </linearGradient>
         <clipPath id="rg-clip"><circle cx="${C}" cy="${C}" r="${R}" /></clipPath>
+        <filter id="rg-fog" x="-100%" y="-100%" width="300%" height="300%"><feGaussianBlur stdDeviation="5" /></filter>
       </defs>
       <circle class="bezel" cx="${C}" cy="${C}" r="${R + 16}" />
       <circle class="face" cx="${C}" cy="${C}" r="${R}" fill="url(#rg-face)" />
@@ -200,6 +220,7 @@ export class Radar {
       <g class="scale-labels"></g>
       <g class="outline" clip-path="url(#rg-clip)"></g>
       <g class="routes" clip-path="url(#rg-clip)"></g>
+      <g class="bottles"></g>
       <circle class="me" cx="${C}" cy="${C}" r="5" />
       <g class="blips"></g>
       <!-- 地標（星星）放在光點上面，疊在一起時也點得到 -->
@@ -213,6 +234,11 @@ export class Radar {
     this.routeLayer = this.svg.querySelector('.routes') as SVGGElement;
     this.outlineLayer = this.svg.querySelector('.outline') as SVGGElement;
     this.landmarkLayer = this.svg.querySelector('.landmarks') as SVGGElement;
+    this.bottleLayer = this.svg.querySelector('.bottles') as SVGGElement;
+    this.bottleLayer.addEventListener('click', (e) => {
+      const g = (e.target as Element).closest('.bottle') as SVGGElement | null;
+      if (g?.dataset.id) onBottle?.(Number(g.dataset.id));
+    });
     this.landmarkLayer.addEventListener('click', (e) => {
       const g = (e.target as Element).closest('.landmark') as SVGGElement | null;
       if (g?.dataset.id) onLandmark?.(g.dataset.id);
@@ -328,6 +354,47 @@ export class Radar {
   setOutline(rings: Array<Array<{ bearing: number; distanceKm: number }>>): void {
     this.outline = rings;
     this.draw();
+  }
+
+  /** 漂流瓶，畫在光點下面 */
+  setBottles(list: RadarBottle[]): void {
+    this.bottles = list;
+    this.draw();
+  }
+
+  private drawBottles(): void {
+    this.bottleLayer.replaceChildren();
+    for (const b of this.bottles) {
+      const ratio = this.ratio(b.distanceKm);
+      // 範圍外的瓶子不畫，免得外圈擠滿
+      if (ratio > 1) continue;
+      const angle = b.bearing - this.heading;
+      const r = ratio * (R - 8);
+      const p = polar(angle, r);
+      const g = el('g', {
+        class: `bottle bottle-${b.state}${b.mine ? ' mine' : ''}${b.picked ? ' picked' : ''}${b.selected ? ' selected' : ''}`,
+        transform: `translate(${p.x.toFixed(1)} ${p.y.toFixed(1)})`,
+        tabindex: 0,
+        role: 'button',
+      });
+      g.dataset.id = String(b.id);
+      g.appendChild(el('circle', { class: 'hit', r: 14 }));
+      if (b.state === 'far') {
+        // 一團模糊的訊號：大小跟著比例，只看得出大概在哪
+        const fog = Math.max(7, Math.min(22, (BOTTLE_FOG_KM / this.scaleKm) * (R - 8)));
+        g.appendChild(el('circle', { class: 'fog', r: fog.toFixed(1), filter: 'url(#rg-fog)' }));
+      } else {
+        if (b.state === 'pick') g.appendChild(el('circle', { class: 'reach', r: 9 }));
+        const body = el('g', { class: 'body' });
+        body.appendChild(el('path', { class: 'glass', d: BOTTLE_PATH, transform: 'rotate(-20)' }));
+        g.appendChild(body);
+        this.addFlash(g, angle, r, 7);
+      }
+      const title = el('title');
+      title.textContent = b.mine ? '你丟的漂流瓶' : b.state === 'pick' ? '漂流瓶（撿得到了）' : '漂流瓶';
+      g.appendChild(title);
+      this.bottleLayer.appendChild(g);
+    }
   }
 
   /** 固定地標（星星），畫在光點上面，超出範圍時貼在外圈 */
@@ -454,6 +521,7 @@ export class Radar {
   private draw(): void {
     this.drawOutline();
     this.drawRoutes();
+    this.drawBottles();
     this.drawLandmarks();
     this.blipLayer.replaceChildren();
     const pos = new Map<number, { x: number; y: number; out: boolean; angle: number; r: number }>();

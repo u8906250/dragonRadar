@@ -167,6 +167,17 @@ npm run deploy
 
 配額：每個使用者每日 2,200 次查詢。每 10 分鐘跑 N 個關鍵字一天用掉 144 × N 次。
 
+### 漂流瓶（匿名，只收打氣正向的話）
+
+使用者在自己 GPS 位置附近丟一句 60 字內的話，別人走到 60 m 內才撿得起來、看得到內容。
+
+- 不用登入：前端產生隨機裝置代碼放在 `x-device` 標頭，伺服器只存加鹽雜湊。
+- 位置在丟的時候隨機打散到 100 m 內才存（不存真正位置）；撿瓶子時的座標只用來算距離。
+- 內容：先用規則擋連結、Email、電話、帳號，再交給 Workers AI 判斷是不是打氣、正向（批評或攻擊任何人都不收）；AI 失敗就不收。
+- 每台裝置每天 3 個、同 IP 每天 10 個、全站每小時 120 個；7 天後漂走，30 天後連撿起、檢舉紀錄一起刪除。
+- 撿過的人才能檢舉，2 個不同的人檢舉就先藏起來；管理者用 `GET /api/admin/bottles?status=hidden` 看、`POST /api/admin/bottles/:id/remove|restore` 處理。
+- 有人亂丟時把 `wrangler.toml` 的 `BOTTLES_ENABLED` 改成 `"false"` 整個關掉。
+
 ## API
 
 | 方法 | 路徑 | 說明 |
@@ -175,6 +186,12 @@ npm run deploy
 | GET | `/api/events?lat=&lng=&radius_km=&horizon_h=&keywords=` | 附近、未結束、`horizon_h` 小時內會開始的事件，可用逗號分隔的關鍵字篩選 |
 | GET | `/api/events/:id` | 單一事件 |
 | GET | `/api/routes` | 今天的車掃路線：路徑、各站預計時間、各路段認領人數 |
+| GET | `/api/bottles?lat=&lng=&radius_km=` | 附近漂流中的瓶子（沒有內容），標頭 `x-device` |
+| POST | `/api/bottles` | 丟瓶子 `{ text, lat, lng }` |
+| POST | `/api/bottles/:id/pick` | 撿瓶子 `{ lat, lng }`，60 m 內才回傳內容 |
+| GET | `/api/bottles/mine` | 我丟的、我撿到的 |
+| DELETE | `/api/bottles/:id` | 收回自己丟的 |
+| POST | `/api/bottles/:id/report` | 檢舉（要撿過） |
 | POST | `/api/reports` | 使用者貼上 Threads 貼文連結 `{ url }`，回傳判讀結果 |
 | POST | `/api/events/:id/ended` | 回報已發完／已結束 |
 | GET | `/api/keywords` | 搜尋中的關鍵字、上限、是否開放使用者新增 |
