@@ -148,6 +148,7 @@ npm run deploy
 2. 在 Cloudflare Worker 設 secret：`THREADS_APP_ID`、`THREADS_APP_SECRET`（App 設定裡 Threads 的那一組）。
 3. 打開 `https://dragon-radar.happybadminton.workers.dev/auth/threads/start?key=<ADMIN_TOKEN>` 用 Threads 帳號授權，長效 token（60 天）會自動存進 D1，之後每週一自動續期。
 4. `threads_keyword_search` 送 App Review 通過前，只能搜到授權帳號自己的貼文。
+5. 送 App Review 拿 Advanced Access 需要 App 掛在**已完成商家驗證**的 Meta 商業帳號底下。目前在找已驗證、願意讓 App 掛在名下的團隊、公司或人民團體，有意願請到 [GitHub Issues](https://github.com/u8906250/dragonRadar/issues) 留言。
 
 配額：每個使用者每日 2,200 次查詢。每 10 分鐘跑 N 個關鍵字一天用掉 144 × N 次。
 
