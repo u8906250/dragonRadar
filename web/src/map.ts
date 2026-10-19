@@ -388,8 +388,7 @@ export class MapView {
       } else {
         const icon = L.divIcon({
           className: `map-bottle${b.state === 'pick' ? ' can-pick' : ''}${b.mine ? ' mine' : ''}${b.picked ? ' picked' : ''}`,
-          // 漂流的節奏每個瓶子錯開
-          html: `<svg viewBox="-10 -10 20 20" width="24" height="24" style="animation-delay:-${((b.id * 1.37) % 6).toFixed(2)}s"><path d="${MAP_BOTTLE_PATH}" transform="rotate(-20)"/></svg>`,
+          html: `<svg viewBox="-10 -10 20 20" width="24" height="24"><path d="${MAP_BOTTLE_PATH}" transform="rotate(-20)"/></svg>`,
           iconSize: [24, 24],
           iconAnchor: [12, 12],
         });
