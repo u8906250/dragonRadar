@@ -264,10 +264,17 @@ function dayWord(unix: number, now: number): string {
 /** 貼文沒寫結束時間時的說法：不自己猜時間 */
 const openEndText = (ev: EventOut): string => (ev.kind === 'activity' ? '沒寫結束時間' : '發完為止');
 
-/** 固定據點的開放時段，例如「每天 11:00–18:00」；沒寫幾點結束就只寫開始 */
-function spotHours(ev: EventOut): string {
-  if (ev.allDay) return '每天整天';
-  return ev.endOpen ? `每天 ${fmtTime(ev.startAt)} 開始` : `每天 ${fmtTime(ev.startAt)}–${fmtTime(ev.endAt)}`;
+/** 固定據點的開放時段，例如「每天 11:00–18:00」「每天 11:00–14:00、17:00–19:00」；沒寫幾點結束就只寫開始 */
+function spotHours(sessions: EventOut[]): string {
+  if (sessions.some((s) => s.allDay)) return '每天整天';
+  const seen = new Set<string>();
+  const parts: string[] = [];
+  for (const s of [...sessions].sort((a, b) => ((a.startAt + 8 * 3600) % 86400) - ((b.startAt + 8 * 3600) % 86400))) {
+    const text = s.endOpen ? `${fmtTime(s.startAt)} 開始` : `${fmtTime(s.startAt)}–${fmtTime(s.endAt)}`;
+    if (!seen.has(text)) parts.push(text);
+    seen.add(text);
+  }
+  return `每天 ${parts.join('、')}`;
 }
 
 function spotUntil(it: Item, now: number): string {
@@ -555,7 +562,7 @@ function itemCard(it: Item, now: number): HTMLLIElement {
   li.innerHTML = `
     <div class="ev-title"><span class="dot"></span><span class="kind-tag">${tagLabel(it)}</span>${esc(it.ev.title)}${it.ev.item ? ` <span class="muted">· ${esc(it.ev.item)}</span>` : ''}${followed().length > 1 && it.ev.keyword ? `<span class="ev-kw">#${esc(it.ev.keyword)}</span>` : ''}</div>
     <div class="ev-meta">${esc(placeLine(it.ev))} · ${it.ev.approxArea ? '約 ' : ''}${formatKm(it.distanceKm)} ${compassLabel(it.bearing)}</div>
-    <div class="ev-time">${it.spot ? `${esc(spotHours(it.ev))}・` : ''}${esc(timeLine(it, now))}</div>`;
+    <div class="ev-time">${it.spot ? `${esc(spotHours(it.spot.sessions))}・` : ''}${esc(timeLine(it, now))}</div>`;
   li.addEventListener('click', () => select(it.ev.id));
   return li;
 }
@@ -773,7 +780,7 @@ function spotSchedule(it: Item): string {
     : first === last
       ? dateFmt.format(new Date(first.startAt * 1000))
       : `${dateFmt.format(new Date(first.startAt * 1000))} 到 ${dateFmt.format(new Date(last.startAt * 1000))}`;
-  return `${spotHours(it.ev)}，${range}`;
+  return `${spotHours(it.spot?.sessions ?? [it.ev])}，${range}`;
 }
 
 /** 官方行程以官網為準；還沒開始的也不能回報 */
@@ -1474,7 +1481,7 @@ async function submitSpotReport(): Promise<void> {
     .map((ev) => {
       const last = found.at(-1);
       const days = last?.untilOpen ? `・${openEndText(last)}` : found.length > 1 ? `・${found.length} 天` : '';
-      const when = spotHours(ev);
+      const when = spotHours(found);
       return `<li><button type="button" data-id="${ev.id}"><b>${kindLabel(ev)}｜${esc(ev.title)}</b><small>${esc(ev.placeText)} · ${esc(when)}${days}</small></button></li>`;
     })
     .join('');

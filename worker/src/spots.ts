@@ -170,6 +170,17 @@ function distKm(a: { lat: number; lng: number }, b: { lat: number; lng: number }
   return 2 * 6371 * Math.asin(Math.min(1, Math.sqrt(s)));
 }
 
+/** 「11:00-14:00 17:00-19:00」這種一天好幾段的開放時間 */
+export function dailyWindows(text: string): Array<{ open: string; close: string }> {
+  const out: Array<{ open: string; close: string }> = [];
+  const pad = (h: string, m: string): string => `${h.padStart(2, '0')}:${m}`;
+  for (const m of text.replace(/[０-９]/g, (c) => String.fromCharCode(c.charCodeAt(0) - 0xfee0)).matchAll(/(\d{1,2})[:：](\d{2})\s*[-–—~～至到]\s*(\d{1,2})[:：](\d{2})/g)) {
+    const w = { open: pad(m[1], m[2]), close: pad(m[3], m[4]) };
+    if (w.close > w.open && !out.some((x) => x.open === w.open)) out.push(w);
+  }
+  return out;
+}
+
 /** 貼文自己寫的地址跟回報的地點差超過這個距離，就交給人工 */
 const PLACE_MISMATCH_KM = 1;
 
@@ -201,7 +212,16 @@ export async function autoReview(env: Env, req: SpotRequestRow, now: number): Pr
       if (p && distKm(p, point) > PLACE_MISMATCH_KM) return await hold('貼文寫的地址跟回報的地點不一樣');
     }
 
-    const sessions = spotSessions(ex, req.posted_at, now).filter((x) => x.start <= now + MAX_FUTURE_SEC);
+    // 回報者寫了一天好幾段（「11:00-14:00 17:00-19:00」）：每段各展開，AI 只會給一段
+    const windows = dailyWindows(req.hours ?? '');
+    const day = (ex.start_at ?? '').slice(0, 10);
+    const sessions = (
+      windows.length >= 2 && /^\d{4}-\d{2}-\d{2}$/.test(day)
+        ? windows.flatMap((w) => spotSessions({ start_at: `${day}T${w.open}:00+08:00`, end_at: `${day}T${w.close}:00+08:00`, until: ex.until }, req.posted_at, now))
+        : spotSessions(ex, req.posted_at, now)
+    )
+      .filter((x) => x.start <= now + MAX_FUTURE_SEC)
+      .sort((a, b) => a.start - b.start);
     if (sessions.length === 0) return await hold('期間已經結束，或太久以後才開始');
 
     const events = await publishSpot(env, req, { kind: ex.kind, title: ex.title, item: ex.item, placeText: req.place, placeQuery: req.place, point, sessions }, now);

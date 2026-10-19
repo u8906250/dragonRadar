@@ -83,11 +83,13 @@ export interface HouseRow {
 }
 
 /** 從同一條路的門牌找位置：完全一樣（不含之幾）優先，否則同側前後兩個門牌線性推算 */
-export function locateOnStreet(rows: HouseRow[], number: number): AddressPoint | null {
+export function locateOnStreet(rows: HouseRow[], number: number, raw?: string): AddressPoint | null {
   const parsed = rows.map((r) => ({ ...r, h: houseNumber(r.number) })).filter((r) => r.h) as Array<HouseRow & { h: { n: number; sub: boolean } }>;
   const same = parsed.filter((r) => r.h.n === number);
   if (same.length > 0) {
-    const main = same.find((r) => !r.h.sub) ?? same[0];
+    // 「25-2」先找「25之2號」，沒有才用 25 號
+    const key = (x: string): string => normalize(x).replace(/-/g, '之').replace(/號$/, '');
+    const main = (raw ? same.find((r) => key(r.number) === key(raw)) : undefined) ?? same.find((r) => !r.h.sub) ?? same[0];
     return { lat: main.lat, lng: main.lng, how: 'exact' };
   }
   const side = parsed.filter((r) => r.h.n % 2 === number % 2 && !r.h.sub);
@@ -184,11 +186,14 @@ async function photonHouses(env: Env, a: TwAddress): Promise<HouseRow[]> {
   return out;
 }
 
+/** geocode_cache 裡門牌查詢的 key */
+export const addressCacheKey = (a: TwAddress): string => `門牌:${a.city ?? ''}${a.district ?? ''}${a.street}${a.raw}號`;
+
 /** 門牌地址轉座標；不是門牌地址或找不到就回傳 null。結果快取在 geocode_cache（key 前面加「門牌:」） */
 export async function geocodeAddress(env: Env, text: string, debug?: { error?: string }): Promise<(AddressPoint & { address: TwAddress }) | null> {
   const a = parseTwAddress(text);
   if (!a) return null;
-  const key = `門牌:${a.city ?? ''}${a.district ?? ''}${a.street}${a.raw}號`;
+  const key = addressCacheKey(a);
   const now = nowSec();
   const cached = await env.DB.prepare('SELECT lat, lng, display_name, resolved_at FROM geocode_cache WHERE query = ?')
     .bind(key)
@@ -199,8 +204,8 @@ export async function geocodeAddress(env: Env, text: string, debug?: { error?: s
   }
   let point: AddressPoint | null = null;
   try {
-    point = locateOnStreet(await photonHouses(env, a).catch(() => []), a.number);
-    if (!point) point = locateOnStreet(await overpassHouses(env, a), a.number);
+    point = locateOnStreet(await photonHouses(env, a).catch(() => []), a.number, a.raw);
+    if (!point) point = locateOnStreet(await overpassHouses(env, a), a.number, a.raw);
   } catch (e) {
     // Overpass 暫時不通就不快取，下次再試
     console.warn(`address lookup failed for ${key}: ${String(e)}`);

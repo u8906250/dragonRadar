@@ -34,6 +34,11 @@ describe('locateOnStreet', () => {
   it('uses the main number before 之幾 when the exact one is missing', () => {
     expect(locateOnStreet(rows, 399)).toEqual({ lat: 25.0, lng: 121.0035, how: 'exact' });
   });
+  it('prefers the exact 之 number when the address has one', () => {
+    expect(locateOnStreet(rows, 399, '399-1')).toEqual({ lat: 25.0, lng: 121.0035, how: 'exact' });
+    expect(locateOnStreet([{ number: '25號', lat: 1, lng: 1 }, { number: '25之2號', lat: 2, lng: 2 }], 25, '25-2')).toMatchObject({ lat: 2 });
+    expect(locateOnStreet([{ number: '25號', lat: 1, lng: 1 }, { number: '25之2號', lat: 2, lng: 2 }], 25, '25')).toMatchObject({ lat: 1 });
+  });
   it('interpolates between same-side neighbours', () => {
     const p = locateOnStreet(rows, 397)!;
     expect(p.how).toBe('interpolated');
@@ -41,5 +46,17 @@ describe('locateOnStreet', () => {
   });
   it('gives up when the nearest numbers are far apart', () => {
     expect(locateOnStreet([{ number: '1', lat: 0, lng: 0 }, { number: '201', lat: 0, lng: 1 }], 101)).toBeNull();
+  });
+});
+
+describe('dailyWindows', () => {
+  it('finds every daily window', async () => {
+    const { dailyWindows } = await import('../src/spots');
+    expect(dailyWindows('領取時間：11:00-14:00 17:00-19:00')).toEqual([
+      { open: '11:00', close: '14:00' },
+      { open: '17:00', close: '19:00' },
+    ]);
+    expect(dailyWindows('營業時間 13:00–20:00')).toEqual([{ open: '13:00', close: '20:00' }]);
+    expect(dailyWindows('9:30～12：00')).toEqual([{ open: '09:30', close: '12:00' }]);
   });
 });
