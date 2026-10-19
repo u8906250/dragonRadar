@@ -431,3 +431,12 @@ a.chip { display: inline-flex; align-items: center; text-decoration: none; }
 .related .kind-tag { margin-right: 6px; }
 .related a { color: var(--text); }
 .related p { margin: 4px 0 0; font-size: 12px; }
+
+/* 固定地標（洋流總部）：金色星星，各主題都看得到 */
+.radar .landmark { cursor: pointer; }
+.radar .landmark .hit { fill: transparent; }
+.radar .landmark .star { fill: #ffc531; stroke: #5c3d00; stroke-width: 1.5; stroke-linejoin: round; filter: drop-shadow(0 0 4px rgba(255, 197, 49, 0.7)); }
+.radar .landmark.out .star { opacity: 0.55; }
+.radar .landmark.selected .star { stroke: var(--blip-selected); stroke-width: 2.5; }
+.radar .landmark .label { fill: var(--label); font-size: 11px; font-weight: 700; paint-order: stroke; stroke: var(--label-halo); stroke-width: 3px; stroke-linejoin: round; pointer-events: none; }
+.map-star { background: none; border: none; color: #ffc531; font-size: 26px; line-height: 26px; text-align: center; -webkit-text-stroke: 1.5px #5c3d00; filter: drop-shadow(0 0 3px rgba(0, 0, 0, 0.35)); }

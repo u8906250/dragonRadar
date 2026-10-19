@@ -1,6 +1,7 @@
 import type * as Leaflet from 'leaflet';
 import type { LatLng } from './geo';
 import type { EventKind, Phase } from './types';
+import { LANDMARKS } from './landmarks';
 
 export interface MapItem {
   id: number;
@@ -156,6 +157,19 @@ export class MapView {
       map.on('click', (e: Leaflet.LeafletMouseEvent) => {
         if (this.pickMode) this.handlers.onPickOrigin({ lat: e.latlng.lat, lng: e.latlng.lng });
       });
+      for (const lm of LANDMARKS) {
+        L.marker([lm.lat, lm.lng], {
+          icon: L.divIcon({ className: 'map-star', html: '★', iconSize: [26, 26], iconAnchor: [13, 14] }),
+          title: lm.name,
+          keyboard: false,
+        })
+          .bindPopup(
+            `<strong>★ ${escapeHtml(lm.name)}</strong><br>${escapeHtml(lm.address)}<br>` +
+              `<a href="https://www.google.com/maps/dir/?api=1&destination=${lm.lat},${lm.lng}&travelmode=walking" target="_blank" rel="noopener">導航</a>`,
+            { closeButton: false },
+          )
+          .addTo(map);
+      }
       this.applyBase();
       this.pushOrigin();
       this.pushOutline();
@@ -303,6 +317,13 @@ export class MapView {
       if (!it || !m || !this.map) return;
       this.map.setView([it.lat, it.lng], Math.max(this.map.getZoom(), 15), { animate: true });
       m.openPopup();
+    });
+  }
+
+  /** 地圖移到某個點（例如洋流總部） */
+  focusLatLng(p: LatLng): void {
+    void this.ensure().then(() => {
+      if (this.map) this.map.setView([p.lat, p.lng], Math.max(this.map.getZoom(), 16), { animate: true });
     });
   }
 

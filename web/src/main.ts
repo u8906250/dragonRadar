@@ -3,6 +3,7 @@ import { addKeyword, fetchEvents, fetchHealth, fetchKeywords, fetchRoutes, repor
 import { compassSupported, startCompass } from './compass';
 import { bearingDeg, compassLabel, formatKm, haversineKm, taiwanRadiusKm, type LatLng } from './geo';
 import { inShuangbei, SHUANGBEI_RINGS, shuangbeiRadiusKm } from './shuangbei';
+import { LANDMARKS } from './landmarks';
 import { crowdOf, MapView, type BaseMap } from './map';
 import { beep, ensureNotificationPermission, notificationState, showBanner, systemNotify, unlockAudio } from './notify';
 import { Radar, type RadarRoute } from './radar';
@@ -75,6 +76,8 @@ let events: EventOut[] = [];
 let routes: RouteOut[] = [];
 /** 打開的是哪條路線的時間表 */
 let selectedRoute: string | null = null;
+/** 點了雷達上的星星（固定地標） */
+let selectedLandmark: string | null = null;
 type ScaleSetting = '1' | '5' | '20' | 'region' | 'taiwan' | 'custom';
 /** 下方按鈕的範圍；custom 是雙指縮放或滾輪調出來的 */
 const SCALE_SETTINGS: ScaleSetting[] = ['1', '5', '20', 'region', 'taiwan'];
@@ -150,7 +153,12 @@ let baseMap: BaseMap = (BASES as string[]).includes(lsGet(LS_BASE) ?? '') ? (lsG
 let gpsAccuracy: number | null = null;
 const scaleChips = Array.from(document.querySelectorAll<HTMLButtonElement>('#scale-chips [data-scale]'));
 
-const radar = new Radar($('#radar-view'), select, (factor, done) => zoomRadar(factor, done));
+const radar = new Radar(
+  $('#radar-view'),
+  select,
+  (factor, done) => zoomRadar(factor, done),
+  (id) => selectLandmark(id),
+);
 const map = new MapView(
   $('#map'),
   origin,
@@ -402,6 +410,9 @@ function render(): void {
       points: r.segments.flatMap((sg) => sg.path).map(([lat, lng]) => ({ bearing: bearingDeg(origin, { lat, lng }), distanceKm: haversineKm(origin, { lat, lng }) })),
     })),
   );
+  radar.setLandmarks(
+    LANDMARKS.map((lm) => ({ id: lm.id, label: lm.name, bearing: bearingDeg(origin, lm), distanceKm: haversineKm(origin, lm), selected: lm.id === selectedLandmark })),
+  );
   map.setRoutes(shownRoutes(items).map((r) => ({ id: r.id, title: r.title, state: routeState(r, now), claimUrl: r.claimUrl, segments: r.segments })));
   map.render(
     items.map((it) => ({
@@ -614,7 +625,36 @@ function renderChooser(items: Item[], now: number): void {
   }
 }
 
+/** 固定地標（洋流總部）：地址、距離、導航 */
+function renderLandmarkDetail(id: string): boolean {
+  const lm = LANDMARKS.find((x) => x.id === id);
+  if (!lm) return false;
+  detailEl.hidden = false;
+  detailEl.innerHTML = `
+    <div class="sheet-head">
+      <strong>★ ${esc(lm.name)}</strong>
+      <button type="button" class="chip" data-act="close" aria-label="關閉">關閉</button>
+    </div>
+    <div class="sheet-body">
+      <p>${esc(lm.address)}<br><span class="muted">${formatKm(haversineKm(origin, lm))} ${compassLabel(bearingDeg(origin, lm))}</span></p>
+      <div class="sheet-actions">
+        <a class="btn primary" href="https://www.google.com/maps/dir/?api=1&destination=${lm.lat},${lm.lng}&travelmode=walking" target="_blank" rel="noopener">導航</a>
+        <button type="button" class="btn" data-act="map">在地圖上看</button>
+      </div>
+    </div>`;
+  detailEl.querySelector('[data-act="close"]')?.addEventListener('click', () => selectLandmark(null));
+  detailEl.querySelector('[data-act="map"]')?.addEventListener('click', () => {
+    selectedLandmark = null;
+    render();
+    switchView('map');
+    map.focusLatLng(lm);
+  });
+  return true;
+}
+
 function renderDetail(items: Item[], now: number): void {
+  if (selectedLandmark && renderLandmarkDetail(selectedLandmark)) return;
+  selectedLandmark = null;
   const route = selectedRoute ? routes.find((r) => r.id === selectedRoute) : undefined;
   if (route && shownRoutes(items).includes(route)) {
     renderRouteDetail(route, items, now);
@@ -632,6 +672,8 @@ function renderDetail(items: Item[], now: number): void {
   const it = items.find((x) => x.ev.id === selectedId);
   if (!it) {
     selectedId = null;
+    selectedRoute = null;
+    selectedLandmark = null;
     detailEl.hidden = true;
     return;
   }
@@ -740,8 +782,23 @@ let choosing: number[] | null = null;
 
 const sameGroup = (a: number[] | null, b: number[]): boolean => !!a && [...a].sort().join() === [...b].sort().join();
 
+function selectLandmark(id: string | null): void {
+  selectedLandmark = selectedLandmark === id ? null : id;
+  selectedRoute = null;
+  selectedId = null;
+  choosing = null;
+  selectedGroup = [];
+  if (selectedLandmark) {
+    themeSheet.hidden = true;
+    kwSheet.hidden = true;
+    reportSheet.hidden = true;
+  }
+  render();
+}
+
 function selectRoute(id: string | null): void {
   selectedRoute = selectedRoute === id ? null : id;
+  selectedLandmark = null;
   selectedId = null;
   choosing = null;
   selectedGroup = [];
@@ -755,6 +812,7 @@ function selectRoute(id: string | null): void {
 
 function select(id: number | null, group: number[] = []): void {
   selectedRoute = null;
+  selectedLandmark = null;
   if (group.length > 1) {
     // 疊在一起的先列出來讓人選；同一群再點一次就收起
     choosing = sameGroup(choosing, group) ? null : group;
@@ -1006,6 +1064,8 @@ function openThemeSheet(open: boolean): void {
     kwSheet.hidden = true;
     reportSheet.hidden = true;
     selectedId = null;
+    selectedRoute = null;
+    selectedLandmark = null;
     detailEl.hidden = true;
   }
 }
@@ -1249,6 +1309,8 @@ function openKwSheet(open: boolean): void {
     themeSheet.hidden = true;
     reportSheet.hidden = true;
     selectedId = null;
+    selectedRoute = null;
+    selectedLandmark = null;
     detailEl.hidden = true;
     setKwMsg('');
     void loadKeywords();
@@ -1261,6 +1323,8 @@ function openReportSheet(open: boolean): void {
   themeSheet.hidden = true;
   kwSheet.hidden = true;
   selectedId = null;
+  selectedRoute = null;
+  selectedLandmark = null;
   detailEl.hidden = true;
   renderReportTips();
 }

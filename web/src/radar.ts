@@ -23,6 +23,15 @@ export interface RadarRoute {
   points: Array<{ bearing: number; distanceKm: number }>;
 }
 
+/** 固定的地標（例如洋流總部），畫成星星 */
+export interface RadarLandmark {
+  id: string;
+  label: string;
+  bearing: number;
+  distanceKm: number;
+  selected: boolean;
+}
+
 export interface RadarStyle {
   sweep: SweepStyle;
   blip: BlipStyle;
@@ -60,6 +69,17 @@ function anchorAt(x: number): 'start' | 'middle' | 'end' {
   return x > C + R * 0.45 ? 'end' : x < C - R * 0.45 ? 'start' : 'middle';
 }
 
+/** 五角星的路徑，r 是外接圓半徑 */
+function starPath(r: number): string {
+  const pts: string[] = [];
+  for (let i = 0; i < 10; i++) {
+    const a = (i * Math.PI) / 5;
+    const rr = i % 2 === 0 ? r : r * 0.45;
+    pts.push(`${(rr * Math.sin(a)).toFixed(2)} ${(-rr * Math.cos(a)).toFixed(2)}`);
+  }
+  return `M${pts.join(' L')} Z`;
+}
+
 function el<K extends keyof SVGElementTagNameMap>(tag: K, attrs: Record<string, string | number> = {}): SVGElementTagNameMap[K] {
   const n = document.createElementNS(SVG_NS, tag);
   for (const [k, v] of Object.entries(attrs)) n.setAttribute(k, String(v));
@@ -87,6 +107,8 @@ export class Radar {
   private routes: RadarRoute[] = [];
   private outline: Array<Array<{ bearing: number; distanceKm: number }>> = [];
   private readonly outlineLayer: SVGGElement;
+  private landmarks: RadarLandmark[] = [];
+  private readonly landmarkLayer: SVGGElement;
   private scaleKm = 5;
   private readonly pointers = new Map<number, { x: number; y: number }>();
   private pinchDist = 0;
@@ -98,7 +120,12 @@ export class Radar {
    * onZoom(factor, done)：雙指捏合或滑鼠滾輪，factor > 1 代表拉遠（範圍變大）；
    * done = true 表示手勢結束
    */
-  constructor(container: HTMLElement, onSelect: (id: number, group: number[]) => void, onZoom?: (factor: number, done: boolean) => void) {
+  constructor(
+    container: HTMLElement,
+    onSelect: (id: number, group: number[]) => void,
+    onZoom?: (factor: number, done: boolean) => void,
+    onLandmark?: (id: string) => void,
+  ) {
     this.svg = el('svg', { viewBox: `0 0 ${SIZE} ${SIZE}`, class: 'radar', role: 'img', 'aria-label': '雷達畫面' });
     const wedgeEnd = polar(45, R);
     this.svg.innerHTML = `
@@ -145,6 +172,7 @@ export class Radar {
       <g class="outline" clip-path="url(#rg-clip)"></g>
       <g class="routes" clip-path="url(#rg-clip)"></g>
       <circle class="me" cx="${C}" cy="${C}" r="5" />
+      <g class="landmarks"></g>
       <g class="blips"></g>
       <g class="rose"></g>
     `;
@@ -154,6 +182,11 @@ export class Radar {
     this.roseLayer = this.svg.querySelector('.rose') as SVGGElement;
     this.routeLayer = this.svg.querySelector('.routes') as SVGGElement;
     this.outlineLayer = this.svg.querySelector('.outline') as SVGGElement;
+    this.landmarkLayer = this.svg.querySelector('.landmarks') as SVGGElement;
+    this.landmarkLayer.addEventListener('click', (e) => {
+      const g = (e.target as Element).closest('.landmark') as SVGGElement | null;
+      if (g?.dataset.id) onLandmark?.(g.dataset.id);
+    });
     for (const [letter, deg] of ROSE) {
       const t = el('text', { class: `rose-letter rose-${letter.toLowerCase()}`, 'text-anchor': 'middle', 'dominant-baseline': 'middle', 'data-deg': deg });
       t.textContent = letter;
@@ -267,6 +300,35 @@ export class Radar {
     this.draw();
   }
 
+  /** 固定地標（星星），畫在光點下面，超出範圍時貼在外圈 */
+  setLandmarks(list: RadarLandmark[]): void {
+    this.landmarks = list;
+    this.draw();
+  }
+
+  private drawLandmarks(): void {
+    this.landmarkLayer.replaceChildren();
+    for (const lm of this.landmarks) {
+      const ratio = this.ratio(lm.distanceKm);
+      const out = ratio > 1;
+      const p = polar(lm.bearing - this.heading, Math.min(1, ratio) * (R - 8));
+      const g = el('g', { class: `landmark${out ? ' out' : ''}${lm.selected ? ' selected' : ''}`, transform: `translate(${p.x.toFixed(1)} ${p.y.toFixed(1)})`, tabindex: 0, role: 'button' });
+      g.dataset.id = lm.id;
+      g.appendChild(el('circle', { class: 'hit', r: 18 }));
+      g.appendChild(el('path', { class: 'star', d: starPath(out ? 7 : 10) }));
+      if (!out || lm.selected) {
+        const anchor = anchorAt(p.x);
+        const t = el('text', { class: 'label', 'text-anchor': anchor, x: anchor === 'end' ? 8 : anchor === 'start' ? -8 : 0, y: 24 });
+        t.textContent = lm.label;
+        g.appendChild(t);
+      }
+      const title = el('title');
+      title.textContent = lm.label;
+      g.appendChild(title);
+      this.landmarkLayer.appendChild(g);
+    }
+  }
+
   private pathOf(points: Array<{ bearing: number; distanceKm: number }>, close = false): string {
     const d = points
       .map((pt, i) => {
@@ -327,6 +389,7 @@ export class Radar {
   private draw(): void {
     this.drawOutline();
     this.drawRoutes();
+    this.drawLandmarks();
     this.blipLayer.replaceChildren();
     const pos = new Map<number, { x: number; y: number; out: boolean }>();
     for (const it of this.items) {
