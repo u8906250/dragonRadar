@@ -480,20 +480,32 @@ a.chip { display: inline-flex; align-items: center; text-decoration: none; }
 /* 漂流瓶：海玻璃色。遠的是一團模糊訊號，200 m 內看得到瓶子，撿得到時外面有一圈在呼吸 */
 .radar .bottle { cursor: pointer; color: #43b8d4; }
 .radar .bottle .hit { fill: transparent; }
-.radar .bottle .fog { fill: #43b8d4; opacity: 0.55; animation: fog 3.2s ease-in-out infinite; }
+.radar .bottle .fog { fill: #43b8d4; opacity: 0.55; animation: fog 3.2s ease-in-out infinite, fog-drift 9s ease-in-out infinite; }
 .radar .bottle .glass { fill: #8fdcec; stroke: #155868; stroke-width: 1.3; stroke-linejoin: round; }
 .radar .bottle.mine .glass { fill: transparent; stroke: #2a9bb8; stroke-width: 1.8; }
 .radar .bottle.picked { opacity: 0.5; }
 .radar .bottle .reach { fill: none; stroke: #43b8d4; stroke-width: 2; animation: reach 1.4s ease-out infinite; }
 .radar .bottle.selected .glass { stroke: var(--blip-selected); stroke-width: 2.4; }
 @keyframes fog { 0%, 100% { opacity: 0.35; } 50% { opacity: 0.65; } }
+/* 漂流：瓶子上下浮、左右搖，像在水面上；底下的水波跟著一縮一放；遠的那團訊號慢慢飄 */
+.radar .bottle .drift { animation: bob 4.2s ease-in-out infinite; }
+.radar .bottle .wake { fill: none; stroke: #43b8d4; stroke-width: 1.2; opacity: 0.5; transform-box: fill-box; transform-origin: center; animation: wake 4.2s ease-in-out infinite; }
+@keyframes bob {
+  0%, 100% { transform: translate(0, 0) rotate(-12deg); }
+  25% { transform: translate(2.5px, -3px) rotate(5deg); }
+  50% { transform: translate(1px, 1px) rotate(14deg); }
+  75% { transform: translate(-2.5px, -2px) rotate(-3deg); }
+}
+@keyframes wake { 0%, 100% { transform: scale(0.85); opacity: 0.55; } 50% { transform: scale(1.25); opacity: 0.2; } }
+@keyframes fog-drift { 0%, 100% { transform: translate(0, 0); } 33% { transform: translate(5px, -3px); } 66% { transform: translate(-4px, 4px); } }
 @keyframes reach { 0% { r: 8; opacity: 0.9; } 100% { r: 20; opacity: 0; } }
-@media (prefers-reduced-motion: reduce) { .radar .bottle .fog, .radar .bottle .reach { animation: none; } }
+@media (prefers-reduced-motion: reduce) { .radar .bottle .fog, .radar .bottle .reach, .radar .bottle .drift, .radar .bottle .wake, .map-bottle svg { animation: none; } }
 .map-bottle { background: none; border: none; }
 .map-bottle path { fill: #8fdcec; stroke: #155868; stroke-width: 1.3; stroke-linejoin: round; }
 .map-bottle.mine path { fill: #fff; stroke: #2a9bb8; stroke-width: 1.8; }
 .map-bottle.picked { opacity: 0.55; }
 .map-bottle.can-pick svg { filter: drop-shadow(0 0 5px #43b8d4); }
+.map-bottle svg { animation: bob 4.2s ease-in-out infinite; transform-origin: 50% 50%; }
 
 /* 漂流瓶按鈕與面板 */
 .chip-badge { display: inline-block; min-width: 18px; margin-left: 5px; padding: 0 5px; border-radius: 999px; background: #43b8d4; color: #fff; font-size: 11px; font-weight: 800; line-height: 18px; text-align: center; }

@@ -379,14 +379,20 @@ export class Radar {
       });
       g.dataset.id = String(b.id);
       g.appendChild(el('circle', { class: 'hit', r: 14 }));
+      // 每個瓶子的漂流節奏錯開，不會整齊劃一地一起晃
+      const phase = `animation-delay: -${((b.id * 1.37) % 6).toFixed(2)}s`;
       if (b.state === 'far') {
-        // 一團模糊的訊號：大小跟著比例，只看得出大概在哪
+        // 一團模糊的訊號：大小跟著比例，只看得出大概在哪；整團慢慢漂
         const fog = Math.max(7, Math.min(22, (BOTTLE_FOG_KM / this.scaleKm) * (R - 8)));
-        g.appendChild(el('circle', { class: 'fog', r: fog.toFixed(1), filter: 'url(#rg-fog)' }));
+        g.appendChild(el('circle', { class: 'fog', r: fog.toFixed(1), filter: 'url(#rg-fog)', style: phase }));
       } else {
         if (b.state === 'pick') g.appendChild(el('circle', { class: 'reach', r: 9 }));
+        // 瓶子底下一圈水波，瓶子本身上下浮、左右搖
+        g.appendChild(el('ellipse', { class: 'wake', cx: 0, cy: 6, rx: 6, ry: 2, style: phase }));
         const body = el('g', { class: 'body' });
-        body.appendChild(el('path', { class: 'glass', d: BOTTLE_PATH, transform: 'rotate(-20)' }));
+        const drift = el('g', { class: 'drift', style: phase });
+        drift.appendChild(el('path', { class: 'glass', d: BOTTLE_PATH, transform: 'rotate(-20)' }));
+        body.appendChild(drift);
         g.appendChild(body);
         this.addFlash(g, angle, r, 7);
       }
