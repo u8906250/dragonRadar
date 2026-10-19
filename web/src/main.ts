@@ -36,6 +36,8 @@ const LS_REPORT_MODE = 'dr.reportMode';
 /** 丟過瓶子（才需要去問有沒有被撿走）、看過的最後一次「被撿走」時間 */
 const LS_BOTTLE_DROPPED = 'dr.bottleDropped';
 const LS_BOTTLE_SEEN = 'dr.bottleSeen';
+/** 開始提醒（音效、震動、橫幅、系統通知）的開關：on／off；沒設過時，瀏覽器已允許通知就算開 */
+const LS_NOTIFY = 'dr.notify';
 /** 自己送出的固定據點的取消碼：{ 查詢代碼: 取消碼 } */
 const LS_SPOT_CANCEL = 'dr.spotCancel';
 /** 瀏覽器不能存資料（私密瀏覽等）時，這次開著的期間先記在這裡 */
@@ -522,7 +524,7 @@ function render(): void {
     if (seenActive.has(seenKey)) continue;
     seenActive.add(seenKey);
     // 整天的沒有「開始」的時間點，不然半夜 12 點會一起響；固定據點每天都開，不主動提醒
-    if (!notifiedOnce || !inScope(it.ev, it.distanceKm) || it.ev.allDay || it.spot) continue;
+    if (!notifiedOnce || !notifyOn() || !inScope(it.ev, it.distanceKm) || it.ev.allDay || it.spot) continue;
     beep(theme.sound);
     try {
       navigator.vibrate?.([120, 80, 160]);
@@ -2122,10 +2124,32 @@ function takeSharedLink(params: URLSearchParams): string | null {
   return /threads\.(com|net)\//i.test(text) ? text : null;
 }
 
+function notifyOn(): boolean {
+  const v = lsGet(LS_NOTIFY);
+  return v === null ? notificationState() === 'granted' : v === 'on';
+}
+
 function updateNotifyBtn(): void {
-  const s = notificationState();
-  notifyBtn.classList.toggle('on', s === 'granted');
-  notifyBtn.title = s === 'granted' ? '通知已開啟' : s === 'denied' ? '通知被封鎖，仍有音效' : '開啟聲音與通知';
+  const on = notifyOn();
+  notifyBtn.classList.toggle('on', on);
+  notifyBtn.setAttribute('aria-pressed', String(on));
+  notifyBtn.title = !on ? '開啟聲音與通知' : notificationState() === 'granted' ? '通知已開啟，再按一次關閉' : '音效提醒已開啟（系統通知被封鎖），再按一次關閉';
+}
+
+/** 通知按鈕：開著就關掉，關著就打開（第一次會問瀏覽器要通知權限） */
+async function toggleNotify(): Promise<void> {
+  if (notifyOn()) {
+    lsSet(LS_NOTIFY, 'off');
+    updateNotifyBtn();
+    showBanner(bannerEl, '通知已關閉，發放或活動開始時不會再響或跳通知');
+    return;
+  }
+  unlockAudio();
+  lsSet(LS_NOTIFY, 'on');
+  const ok = await ensureNotificationPermission();
+  updateNotifyBtn();
+  showBanner(bannerEl, ok ? '通知已開啟，發放或活動開始時會提醒你。再按一次「通知」可以關掉' : '已開啟音效提醒；系統通知未取得權限。再按一次「通知」可以關掉');
+  beep(theme.sound);
 }
 
 type PanelState = 'collapsed' | 'default' | 'expanded';
@@ -2241,13 +2265,7 @@ function wireControls(): void {
   locateBtn.addEventListener('click', locateMe);
   for (const b of baseChips) b.addEventListener('click', () => setBase(b.dataset.base as BaseMap));
   compassBtn.addEventListener('click', () => void toggleCompass());
-  notifyBtn.addEventListener('click', async () => {
-    unlockAudio();
-    const ok = await ensureNotificationPermission();
-    updateNotifyBtn();
-    showBanner(bannerEl, ok ? '通知已開啟，發放或活動開始時會提醒你' : '已開啟音效提醒；系統通知未取得權限');
-    beep(theme.sound);
-  });
+  notifyBtn.addEventListener('click', () => void toggleNotify());
   themeBtn.addEventListener('click', () => {
     unlockAudio();
     openThemeSheet(themeSheet.hidden);
