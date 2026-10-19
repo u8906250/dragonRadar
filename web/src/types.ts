@@ -113,6 +113,7 @@ export interface KeywordRules {
     official: { name: string; url: string; mapName?: string; mapUrl?: string; intervalMin: number };
     news: { names: string[]; intervalMin: number };
     link?: { maxAgeDays: number; recheckMin: number; endedReportsNeeded: number };
+    spot?: { maxAgeDays: number };
   };
   intervalMin: number;
   defaultDurationMin: number;
@@ -137,6 +138,18 @@ export interface SubmitResult {
   reasons: string[];
   events: EventOut[];
   permalink: string;
+}
+
+/** 回報固定據點的審核進度 */
+export interface SpotRequestStatus {
+  key: string;
+  status: 'pending' | 'approved' | 'rejected';
+  reason: string | null;
+  place: string;
+  permalink: string | null;
+  createdAt: number;
+  reviewedAt: number | null;
+  existed: boolean;
 }
 
 export interface EndedReportResult {

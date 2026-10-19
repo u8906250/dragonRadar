@@ -101,6 +101,11 @@
           <strong>回報 Threads 貼文</strong>
           <button type="button" class="chip" data-act="close" aria-label="關閉">關閉</button>
         </div>
+        <div class="chips report-modes" role="radiogroup" aria-label="回報種類">
+          <button type="button" class="chip on" data-mode="event" role="radio" aria-checked="true">發放或活動</button>
+          <button type="button" class="chip" data-mode="spot" role="radio" aria-checked="false">固定據點</button>
+        </div>
+        <div id="report-event">
         <p class="muted sheet-note">看到發放或活動的 Threads 貼文？貼上連結，雷達會讀取貼文、判讀時間地點，標到地圖上給大家看。</p>
         <form id="report-form" class="kw-form" autocomplete="off">
           <input id="report-input" type="text" inputmode="url" enterkeyhint="send" placeholder="https://www.threads.com/@帳號/post/…" aria-label="Threads 貼文連結" />
@@ -109,6 +114,20 @@
         </form>
         <div id="report-result" class="report-result" aria-live="polite"></div>
         <ul class="muted sheet-note small report-tips" id="report-tips"></ul>
+        </div>
+        <div id="report-spot" hidden>
+          <p class="muted sheet-note">店家、服務處這種連續好幾天都能去領的地方，貼上公告的 Threads 連結，補上地點。審核通過後就會出現在雷達上。</p>
+          <form id="spot-form" class="spot-form" autocomplete="off">
+            <label>Threads 貼文連結<input name="url" type="text" inputmode="url" placeholder="https://www.threads.com/@帳號/post/…" required /></label>
+            <label>地點（必填）<input name="place" type="text" maxlength="100" placeholder="店名加地址，例如「○○咖啡 台北市大安區○○街 12 號」" required /></label>
+            <label>開放時間<input name="hours" type="text" maxlength="100" placeholder="例如「每天 11:00–18:00，10/16 起送完為止」" /></label>
+            <label>補充說明<input name="note" type="text" maxlength="300" placeholder="例如「要出示船員證」「一人一條」" /></label>
+            <button type="submit" class="btn primary" id="spot-submit">送出審核</button>
+          </form>
+          <div id="spot-result" class="report-result" aria-live="polite"></div>
+          <div id="spot-mine"></div>
+          <ul class="muted sheet-note small report-tips" id="spot-tips"></ul>
+        </div>
       </div>
       <div id="theme-sheet" class="sheet" hidden>
         <div class="sheet-head">

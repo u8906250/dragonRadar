@@ -1,5 +1,5 @@
 import './styles.css';
-import { addKeyword, fetchEvents, fetchHealth, fetchKeywords, fetchRoutes, reportEnded, submitLink } from './api';
+import { addKeyword, fetchEvents, fetchHealth, fetchKeywords, fetchRoutes, fetchSpotStatus, reportEnded, submitLink, submitSpot } from './api';
 import { compassSupported, startCompass } from './compass';
 import { bearingDeg, compassLabel, formatKm, haversineKm, taiwanRadiusKm, type LatLng } from './geo';
 import { inShuangbei, SHUANGBEI_RINGS, shuangbeiRadiusKm } from './shuangbei';
@@ -8,7 +8,7 @@ import { crowdOf, MapView, type BaseMap } from './map';
 import { beep, ensureNotificationPermission, notificationState, showBanner, systemNotify, unlockAudio } from './notify';
 import { Radar, type RadarRoute } from './radar';
 import { DEFAULT_THEME_ID, getTheme, THEMES, type Theme } from './themes';
-import type { EventOut, Item, KeywordInfo, KeywordRules, Origin, Phase, RelatedPost, RouteOut, RouteStop, SubmitResult } from './types';
+import type { EventOut, Item, KeywordInfo, KeywordRules, Origin, Phase, RelatedPost, RouteOut, RouteStop, SpotRequestStatus, SubmitResult } from './types';
 
 const DEFAULT_ORIGIN: Origin = { lat: 25.0478, lng: 121.517, source: 'default' }; // 台北車站
 const SOON_SEC = 30 * 60;
@@ -27,6 +27,8 @@ const BASES: BaseMap[] = ['nlsc', 'osm'];
 const LS_KEYWORDS = 'dr.keywords';
 const LS_ENDED = 'dr.endedReported';
 const LS_SPOTS = 'dr.showSpots';
+/** 自己送出的固定據點回報（審核進度的查詢代碼） */
+const LS_SPOT_REQS = 'dr.spotRequests';
 /** 固定據點休息中、下一段在這個時間內開始才畫淡光點 */
 const SPOT_SHOW_AHEAD_SEC = 24 * 3600;
 const KEYWORD_RE_INVALID = /[<>{}\\%_]/;
@@ -144,6 +146,14 @@ const reportSubmit = $<HTMLButtonElement>('#report-submit');
 const reportPaste = $<HTMLButtonElement>('#report-paste');
 const reportResult = $('#report-result');
 const reportTips = $('#report-tips');
+const reportModeBtns = Array.from(document.querySelectorAll<HTMLButtonElement>('#report-sheet [data-mode]'));
+const reportEventEl = $('#report-event');
+const reportSpotEl = $('#report-spot');
+const spotForm = $<HTMLFormElement>('#spot-form');
+const spotSubmitBtn = $<HTMLButtonElement>('#spot-submit');
+const spotResult = $('#spot-result');
+const spotMine = $('#spot-mine');
+const spotTips = $('#spot-tips');
 const filterRow = $('#filter-row');
 const spotToggle = $<HTMLButtonElement>('#spot-toggle');
 const baseChipsEl = $('#base-chips');
@@ -637,8 +647,10 @@ function renderLandmarkDetail(id: string): boolean {
     </div>
     <div class="sheet-body">
       <p>${esc(lm.address)}<br><span class="muted">${formatKm(haversineKm(origin, lm))} ${compassLabel(bearingDeg(origin, lm))}</span></p>
+      <p>${esc(lm.about)}</p>
       <div class="sheet-actions">
         <a class="btn primary" href="https://www.google.com/maps/dir/?api=1&destination=${lm.lat},${lm.lng}&travelmode=walking" target="_blank" rel="noopener">導航</a>
+        <a class="btn" href="${esc(lm.url)}" target="_blank" rel="noopener">${esc(lm.urlName)}</a>
         <button type="button" class="btn" data-act="map">在地圖上看</button>
       </div>
     </div>`;
@@ -1235,7 +1247,7 @@ function sourceLabel(ev: EventOut): string {
   if (ev.post.source === 'news') return `新聞・${ev.post.username ?? ''}`;
   if (ev.post.source === 'official') return '台北大洋流官網「未來航線」';
   const who = `Threads${ev.post.username ? `・@${ev.post.username}` : ''}`;
-  return ev.post.source === 'link' ? `${who}（大家回報）` : who;
+  return ev.post.source === 'link' ? `${who}（大家回報）` : ev.post.source === 'spot' ? `${who}（大家回報・已審核）` : who;
 }
 
 function sourceLinkText(ev: EventOut): string {
@@ -1327,6 +1339,74 @@ function openReportSheet(open: boolean): void {
   selectedLandmark = null;
   detailEl.hidden = true;
   renderReportTips();
+  if (!reportSpotEl.hidden) void renderSpotMine();
+}
+
+function setReportMode(mode: 'event' | 'spot'): void {
+  for (const b of reportModeBtns) {
+    const on = b.dataset.mode === mode;
+    b.classList.toggle('on', on);
+    b.setAttribute('aria-checked', String(on));
+  }
+  reportEventEl.hidden = mode !== 'event';
+  reportSpotEl.hidden = mode !== 'spot';
+  if (mode === 'spot') void renderSpotMine();
+}
+
+function spotKeys(): string[] {
+  try {
+    const v = JSON.parse(lsGet(LS_SPOT_REQS) ?? '[]') as unknown;
+    return Array.isArray(v) ? v.filter((x): x is string => typeof x === 'string') : [];
+  } catch {
+    return [];
+  }
+}
+
+const SPOT_STATUS_TEXT: Record<SpotRequestStatus['status'], string> = { pending: '審核中', approved: '已上雷達', rejected: '沒有通過' };
+
+/** 自己送出的固定據點與審核進度 */
+async function renderSpotMine(): Promise<void> {
+  const l = keywordRules?.sources?.spot;
+  spotTips.innerHTML = [
+    '貼文沒寫地址也沒關係，地點欄寫店名加地址，或路口、地標。',
+    `只收${l ? ` ${l.maxAgeDays} 天內` : ''}的公開貼文。審核時會看貼文和地點對不對得上，不是發放洋流周邊的不會通過。`,
+    '上雷達後，原貼文刪除會自動下架；已經發完可以在詳細資料按「回報已發完」。',
+  ]
+    .map((t) => `<li>${esc(t)}</li>`)
+    .join('');
+  const list = await fetchSpotStatus(spotKeys());
+  spotMine.innerHTML = list.length
+    ? `<h3 class="spot-mine-title">你送出的固定據點</h3><ul class="spot-mine">${list
+        .map(
+          (r) =>
+            `<li><span class="spot-status spot-${r.status}">${SPOT_STATUS_TEXT[r.status]}</span><span>${esc(r.place)}${r.reason ? `<small>${esc(r.reason)}</small>` : ''}<small>${dateFmt.format(new Date(r.createdAt * 1000))} 送出${r.permalink ? `・<a href="${esc(r.permalink)}" target="_blank" rel="noopener">原貼文</a>` : ''}</small></span></li>`,
+        )
+        .join('')}</ul>`
+    : '';
+}
+
+async function submitSpotReport(): Promise<void> {
+  const fd = new FormData(spotForm);
+  const val = (k: string): string => String(fd.get(k) ?? '').trim();
+  if (!val('url') || !val('place')) {
+    spotResult.innerHTML = '<p class="msg error">請貼上 Threads 連結並填寫地點</p>';
+    return;
+  }
+  spotSubmitBtn.disabled = true;
+  spotResult.innerHTML = '<p class="msg busy">讀取貼文中</p>';
+  const r = await submitSpot({ url: val('url'), place: val('place'), hours: val('hours'), note: val('note') });
+  spotSubmitBtn.disabled = false;
+  if (!r.ok) {
+    spotResult.innerHTML = `<p class="msg error">${esc(r.message)}</p>`;
+    return;
+  }
+  const s = r.data;
+  spotResult.innerHTML = `<p class="msg">${
+    s.existed ? (s.status === 'approved' ? '這則已經有人回報，已經在雷達上了。' : '這則已經有人回報，正在審核中。') : '已送出，審核通過後就會出現在雷達上。可以在下面看進度。'
+  }</p>`;
+  lsSet(LS_SPOT_REQS, JSON.stringify([s.key, ...spotKeys().filter((k) => k !== s.key)].slice(0, 20)));
+  spotForm.reset();
+  await renderSpotMine();
 }
 
 function renderReportTips(): void {
@@ -1542,6 +1622,11 @@ function wireControls(): void {
     e.preventDefault();
     void submitReport();
   });
+  for (const b of reportModeBtns) b.addEventListener('click', () => setReportMode(b.dataset.mode === 'spot' ? 'spot' : 'event'));
+  spotForm.addEventListener('submit', (e) => {
+    e.preventDefault();
+    void submitSpotReport();
+  });
   if (navigator.clipboard && 'readText' in navigator.clipboard) {
     reportPaste.hidden = false;
     reportPaste.addEventListener('click', async () => {
@@ -1599,6 +1684,7 @@ async function boot(): Promise<void> {
     // 分享進來的網址用過就清掉，重新整理才不會再送一次
     history.replaceState(null, '', location.pathname);
     openReportSheet(true);
+    setReportMode('event');
     reportInput.value = shared;
     void submitReport();
   }

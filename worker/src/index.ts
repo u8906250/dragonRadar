@@ -10,6 +10,7 @@ import { mergeIntoOfficial } from './sources/merge';
 import { apifyTrial } from './sources/apify';
 import { fetchThreadsPost, resolveThreadsLink, shortcodeToUnix } from './sources/link';
 import { ENDED_REPORTS_NEEDED, MAX_LINK_AGE_SEC, ReportError, ipHash, purgeReports, recheckLinks, reportEnded, submitLink } from './reports';
+import { approveSpotRequest, listSpotRequests, rejectSpotRequest, SPOT_MAX_AGE_SEC, spotRequestStatus, submitSpotRequest, type ApproveBody } from './spots';
 import { addUserKeyword, listActiveKeywords, listAllKeywords, MAX_ACTIVE_KEYWORDS, normalizeKeyword, parseKeywordList, toKeywordOut, touchKeywords } from './keywords';
 import { CALLBACK_PATH, DELETE_PATH, DELETION_STATUS_PATH, UNINSTALL_PATH, deletionStatus, handleCallback, handleDelete, handleUninstall, startAuth } from './oauth';
 import { jsonResponse, nowSec, parseIsoToUnix } from './util';
@@ -123,6 +124,7 @@ async function handle(req: Request, env: Env, ctx: ExecutionContext): Promise<Re
         sources: {
           threads: env.THREADS_SEARCH_STATUS === 'approved' ? 'approved' : 'review',
           link: { maxAgeDays: MAX_LINK_AGE_SEC / 86400, recheckMin: 30, endedReportsNeeded: ENDED_REPORTS_NEEDED },
+          spot: { maxAgeDays: SPOT_MAX_AGE_SEC / 86400 },
           official: { name: '台北大洋流「未來航線」', url: VOYAGE_PAGE, mapName: '大洋流車掃地圖', mapUrl: CURRENT_MAP_URL, intervalMin: 10 },
           news: { names: [...new Set(NEWS_FEEDS.map((f) => f.name))], intervalMin: 30 },
         },
@@ -162,6 +164,19 @@ async function handle(req: Request, env: Env, ctx: ExecutionContext): Promise<Re
     // 回報的如果是官方車掃，馬上併進去，不用等排程
     await mergeIntoOfficial(env, now).catch((e) => console.warn('merge failed', e));
     return jsonResponse(result);
+  }
+
+  // 回報固定據點：{ url, place, hours?, note? }，進審核佇列
+  if (req.method === 'POST' && path === '/api/spot-requests') {
+    const body = await readJson<{ url?: unknown; place?: unknown; hours?: unknown; note?: unknown }>(req);
+    const r = await submitSpotRequest(env, body, await ipHash(env, req), now);
+    return jsonResponse(r, r.existed ? 200 : 201);
+  }
+
+  // 回報的人查審核進度：?keys=代碼,代碼
+  if (req.method === 'GET' && path === '/api/spot-requests') {
+    const keys = (url.searchParams.get('keys') ?? '').split(',').filter(Boolean);
+    return jsonResponse({ requests: await spotRequestStatus(env, keys) });
   }
 
   const endedMatch = /^\/api\/events\/(\d+)\/ended$/.exec(path);
@@ -301,6 +316,24 @@ async function handleAdmin(req: Request, env: Env, _ctx: ExecutionContext, path:
       env.DB.prepare('DELETE FROM posts WHERE id = ?').bind(id),
     ]);
     return jsonResponse({ deleted_events: r[0].meta.changes ?? 0, deleted_posts: r[1].meta.changes ?? 0 });
+  }
+
+  // 固定據點審核佇列：?status=pending|approved|rejected
+  if (req.method === 'GET' && path === '/api/admin/spot-requests') {
+    return jsonResponse({ requests: await listSpotRequests(env, url.searchParams.get('status')) });
+  }
+
+  // 通過（再按一次就是修改）：{ title, item?, kind?, place_text?, place_query? 或 lat、lng, from?, until?, open?, close? }
+  const spotOk = /^\/api\/admin\/spot-requests\/(\d+)\/approve$/.exec(path);
+  if (req.method === 'POST' && spotOk) {
+    return jsonResponse(await approveSpotRequest(env, Number(spotOk[1]), await readJson<ApproveBody>(req), now));
+  }
+
+  // 不通過：{ reason }；已通過的會從雷達撤下
+  const spotNo = /^\/api\/admin\/spot-requests\/(\d+)\/reject$/.exec(path);
+  if (req.method === 'POST' && spotNo) {
+    const body = await readJson<{ reason?: string }>(req);
+    return jsonResponse(await rejectSpotRequest(env, Number(spotNo[1]), body.reason ?? null, now));
   }
 
   if (req.method === 'GET' && path === '/api/admin/posts') {

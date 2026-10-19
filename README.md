@@ -43,6 +43,15 @@ worker/   Cloudflare Worker（API、排程、資料庫）
 - 活動開始後，2 個不同的人按「回報已發完」就提早下架（官方行程除外）。
 - 亂貼的貼文可用 `DELETE /api/admin/posts/link-<代碼>` 移除。
 
+### 回報固定據點（人工審核）
+
+店家、服務處的公告常常沒寫地址或時間，AI 判讀容易漏，所以另外一條路：使用者在「＋回報」切到「固定據點」，貼連結並填地點（必填）、開放時間、補充說明，存進 `spot_requests` 待審核，不交給 AI 判讀。
+
+- 只收 30 天內的公開貼文；同一則貼文已在審核或已通過就不再收；同一個 IP 每小時 5 則、全站每小時 60 則。
+- 回報的人拿到隨機代碼，用 `GET /api/spot-requests?keys=` 看進度（前端存在 localStorage）。
+- 管理者用 `GET /api/admin/spot-requests?status=pending` 看佇列，`POST /api/admin/spot-requests/:id/approve` 通過（`title`、`item`、`place_text`、`lat`/`lng` 或 `place_query`、`from`、`until`、`open`、`close`），會建一則 `spot-<代碼>` 貼文，展開成每天一筆固定據點；再按一次通過就是修改。`POST .../reject { reason }` 不通過，已上雷達的會一起撤下。
+- 排程只檢查原貼文有沒有刪除；內容以審核時填的為準（公告常寫「送完為止」，不能當成發完）。
+
 沒有 Threads token 或 `MOCK_MODE=true` 時，Worker 會用內建示範貼文跑同一套流程，前端會標示「示範資料」。
 
 ## 主題

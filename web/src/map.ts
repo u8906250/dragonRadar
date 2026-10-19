@@ -164,8 +164,9 @@ export class MapView {
           keyboard: false,
         })
           .bindPopup(
-            `<strong>★ ${escapeHtml(lm.name)}</strong><br>${escapeHtml(lm.address)}<br>` +
-              `<a href="https://www.google.com/maps/dir/?api=1&destination=${lm.lat},${lm.lng}&travelmode=walking" target="_blank" rel="noopener">導航</a>`,
+            `<strong>★ ${escapeHtml(lm.name)}</strong><br>${escapeHtml(lm.address)}<br>${escapeHtml(lm.about)}<br>` +
+              `<a href="https://www.google.com/maps/dir/?api=1&destination=${lm.lat},${lm.lng}&travelmode=walking" target="_blank" rel="noopener">導航</a>・` +
+              `<a href="${escapeHtml(lm.url)}" target="_blank" rel="noopener">${escapeHtml(lm.urlName)}</a>`,
             { closeButton: false },
           )
           .addTo(map);

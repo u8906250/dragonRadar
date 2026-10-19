@@ -112,7 +112,7 @@ export interface NewPost {
   permalink: string | null;
   posted_at: number;
   keyword: string | null;
-  source: 'threads' | 'manual' | 'news' | 'official' | 'link';
+  source: 'threads' | 'manual' | 'news' | 'official' | 'link' | 'spot';
 }
 
 /** 寫入貼文，回傳是否為新貼文 */
@@ -465,8 +465,8 @@ export async function listEvents(env: Env, q: ListQuery): Promise<EventOut[]> {
     binds.push(q.lat - dLat, q.lat + dLat, q.lng - dLng, q.lng + dLng);
   }
   if (q.keywords && q.keywords.length > 0) {
-    // 使用者主動回報的貼文不一定有寫關鍵字，一律顯示
-    const ors: string[] = ["p.source = 'link'"];
+    // 使用者主動回報的貼文、審核通過的固定據點不一定有寫關鍵字，一律顯示
+    const ors: string[] = ["p.source IN ('link', 'spot')"];
     for (const k of q.keywords) {
       ors.push('p.keyword = ?', "p.text LIKE ? ESCAPE '\\'");
       binds.push(k, `%${k.replace(/[\\%_]/g, '\\$&')}%`);

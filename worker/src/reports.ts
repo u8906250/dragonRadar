@@ -176,11 +176,14 @@ export interface RecheckLinksResult {
   edited: number;
 }
 
-/** 定時重讀使用者回報的貼文：刪文就下架、改成「發完了」就結束、內容改了就重新判讀 */
+/**
+ * 定時重讀使用者回報的貼文：刪文就下架、改成「發完了」就結束、內容改了就重新判讀。
+ * 審核通過的固定據點（spot-）只看有沒有刪文：內容以審核時填的為準，貼文常寫「送完為止」不能當成發完。
+ */
 export async function recheckLinks(env: Env, now: number): Promise<RecheckLinksResult> {
   const rows = await env.DB.prepare(
     `SELECT DISTINCT p.id, p.text FROM posts p JOIN events e ON e.post_id = p.id
-     WHERE p.source = 'link' AND e.status IN ('upcoming', 'active') AND (p.checked_at IS NULL OR p.checked_at <= ?)
+     WHERE p.source IN ('link', 'spot') AND e.status IN ('upcoming', 'active') AND (p.checked_at IS NULL OR p.checked_at <= ?)
      ORDER BY p.checked_at ASC LIMIT ?`,
   )
     .bind(now - RECHECK_LINK_SEC, RECHECK_LINK_BATCH)
@@ -193,11 +196,13 @@ export async function recheckLinks(env: Env, now: number): Promise<RecheckLinksR
 
   for (const row of rows.results) {
     out.checked++;
-    const r = await fetchThreadsPost(row.id.replace(/^link-/, ''));
+    const r = await fetchThreadsPost(row.id.replace(/^(link|spot)-/, ''));
     await env.DB.prepare('UPDATE posts SET checked_at = ? WHERE id = ?').bind(now, row.id).run();
     if (r.status === 'gone') {
       await endAll(row.id, 'deleted');
       out.deleted++;
+    } else if (r.status === 'ok' && r.text !== row.text && row.id.startsWith('spot-')) {
+      await env.DB.prepare('UPDATE posts SET text = ? WHERE id = ?').bind(r.text, row.id).run();
     } else if (r.status === 'ok' && r.text !== row.text) {
       if (detectEnded(r.text)) {
         await endAll(row.id, 'author');
@@ -229,6 +234,7 @@ export async function purgeReports(env: Env, cutoff: number): Promise<number> {
   const r = await env.DB.batch([
     env.DB.prepare('DELETE FROM submissions WHERE created_at < ?').bind(cutoff),
     env.DB.prepare('DELETE FROM ended_reports WHERE created_at < ?').bind(cutoff),
+    env.DB.prepare('UPDATE spot_requests SET ip_hash = NULL WHERE ip_hash IS NOT NULL AND created_at < ?').bind(cutoff),
   ]);
   return r.reduce((n, x) => n + (x.meta.changes ?? 0), 0);
 }

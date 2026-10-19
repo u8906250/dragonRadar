@@ -1,5 +1,5 @@
 import type { LatLng } from './geo';
-import type { EndedReportResult, EventOut, KeywordInfo, KeywordRules, RouteOut, SubmitResult } from './types';
+import type { EndedReportResult, EventOut, KeywordInfo, KeywordRules, RouteOut, SpotRequestStatus, SubmitResult } from './types';
 
 /** 正式環境的 Worker 網址；本機開發打 localhost，VITE_API_BASE 可覆寫（空字串視為未設定，CI 沒設變數時會傳空字串） */
 const PROD_API_BASE = 'https://dragon-radar.happybadminton.workers.dev';
@@ -72,6 +72,22 @@ async function postJson<T>(path: string, body: unknown): Promise<Result<T>> {
     return { ok: true, data: j };
   } catch {
     return { ok: false, message: '連線失敗，請稍後再試' };
+  }
+}
+
+/** 回報固定據點，進審核佇列 */
+export const submitSpot = (body: { url: string; place: string; hours: string; note: string }): Promise<Result<SpotRequestStatus>> =>
+  postJson<SpotRequestStatus>('/api/spot-requests', body);
+
+/** 查自己送出的固定據點審核進度 */
+export async function fetchSpotStatus(keys: string[]): Promise<SpotRequestStatus[]> {
+  if (keys.length === 0) return [];
+  try {
+    const r = await fetch(`${API_BASE}/api/spot-requests?keys=${encodeURIComponent(keys.join(','))}`);
+    if (!r.ok) return [];
+    return ((await r.json()) as { requests?: SpotRequestStatus[] }).requests ?? [];
+  } catch {
+    return [];
   }
 }
 

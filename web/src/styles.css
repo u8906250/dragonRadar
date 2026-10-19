@@ -440,3 +440,22 @@ a.chip { display: inline-flex; align-items: center; text-decoration: none; }
 .radar .landmark.selected .star { stroke: var(--blip-selected); stroke-width: 2.5; }
 .radar .landmark .label { fill: var(--label); font-size: 11px; font-weight: 700; paint-order: stroke; stroke: var(--label-halo); stroke-width: 3px; stroke-linejoin: round; pointer-events: none; }
 .map-star { background: none; border: none; color: #ffc531; font-size: 26px; line-height: 26px; text-align: center; -webkit-text-stroke: 1.5px #5c3d00; filter: drop-shadow(0 0 3px rgba(0, 0, 0, 0.35)); }
+
+/* 回報：發放或活動／固定據點 */
+.report-modes { margin: 0 0 12px; }
+.spot-form { display: flex; flex-direction: column; gap: 10px; }
+.spot-form label { display: flex; flex-direction: column; gap: 4px; font-size: 13px; font-weight: 700; color: var(--muted); }
+.spot-form input {
+  font: inherit; font-size: 16px; font-weight: 400; color: var(--text); background: var(--card);
+  border: var(--border-w) solid var(--line); border-radius: var(--card-radius); padding: 10px 12px; min-height: 44px;
+}
+.spot-form input:focus { outline: 2px solid var(--highlight); outline-offset: 1px; }
+.spot-form .btn { align-self: flex-end; }
+.spot-mine-title { font-size: 14px; margin: 14px 0 6px; }
+.spot-mine { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; font-size: 14px; }
+.spot-mine li { display: flex; gap: 8px; align-items: flex-start; }
+.spot-mine li > span:last-child { display: flex; flex-direction: column; min-width: 0; }
+.spot-mine small { color: var(--muted); font-size: 12px; }
+.spot-status { flex: 0 0 auto; font-size: 11px; font-weight: 800; padding: 2px 8px; border-radius: 999px; background: var(--line); color: var(--text); }
+.spot-status.spot-approved { background: var(--blip-activity); color: #fff; }
+.spot-status.spot-rejected { background: var(--highlight); color: var(--accent-text); }
