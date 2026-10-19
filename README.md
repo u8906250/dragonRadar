@@ -174,7 +174,11 @@ npm run deploy
 - 不用登入：前端產生隨機裝置代碼放在 `x-device` 標頭，伺服器只存加鹽雜湊。
 - 位置在丟的時候隨機打散到 100 m 內才存（不存真正位置）；撿瓶子時的座標只用來算距離。
 - 內容：先用規則擋連結、Email、電話、帳號，再交給 Workers AI 擋攻擊性內容（辱罵、嘲諷、人身攻擊任何人或團體、抹黑謠言）、仇恨威脅色情、廣告、個資；AI 失敗就不收。
-- 每台裝置每天 3 個，每「回收」一個撿到的瓶子多一個（`POST /api/bottles/:id/recycle`，回收後撿到的人也看不到了；一換一，額度不會越刷越多，不另設上限；都算過去 24 小時）；同 IP 每天 20 個、全站每小時 120 個；7 天後漂走，30 天後連撿起、檢舉紀錄一起刪除。
+- 每台裝置每天 3 個，每「回收」一個撿到的瓶子多一個（`POST /api/bottles/:id/recycle`，沒收藏的信回收後撿到的人也看不到了；一換一，額度不會越刷越多，不另設上限；都算過去 24 小時）；同 IP 每天 20 個、全站每小時 120 個；7 天後漂走，30 天後連撿起、檢舉紀錄一起刪除。
+- 洋流漂移：cron 每次跑 `driftBottles`，沒人撿、上次漂超過 3 小時的瓶子往 3 km 內最近的熱鬧地方（接下來 12 小時內的發放、活動、固定據點，加上洋流總部）漂一步，一次最多 300 m，停在目標旁 80–200 m（依瓶子 id 錯開）；附近沒有就隨機晃 80 m 內。`origin_lat/lng` 記丟下時（已打散）的位置，用來顯示「漂了多遠」。
+- `GET /api/bottles` 帶位置時從近到遠排，前端在雷達範圍內沒有別人的瓶子時，把 50 km 內最近的一個貼在外圈指方向。
+- 瓶中信收藏（前端 `#letters` 一頁）：撿到的瓶子可以收藏信（`POST /api/bottles/:id/collect|uncollect`）、回收瓶子，兩件事分開；`GET /api/bottles/mine` 回傳 `picked`（還沒回收）與 `letters`（收藏的信）。收藏的信不會被 30 天清掉，只清掉丟的人的裝置雜湊與 IP 雜湊；移出收藏後下一次清理一起刪。每台裝置最多收藏 500 封。
+- 被撿走提示：丟過瓶子的瀏覽器在打開或回到網頁時讀 `/api/bottles/mine`，有上次看過之後才被撿走的就在按鈕上加小紅點並提示一次。
 - 撿到的人才能檢舉，檢舉就藏起來（`hidden`）；管理者用 `GET /api/admin/bottles?status=hidden` 看、`POST /api/admin/bottles/:id/remove|restore` 處理。
 - 有人亂丟時把 `wrangler.toml` 的 `BOTTLES_ENABLED` 改成 `"false"` 整個關掉。
 
@@ -193,8 +197,9 @@ Cloudflare D1 偶爾回「D1_ERROR: internal error」這類暫時性錯誤。`sr
 | GET | `/api/bottles?lat=&lng=&radius_km=` | 附近漂流中的瓶子（沒有內容），標頭 `x-device` |
 | POST | `/api/bottles` | 丟瓶子 `{ text, lat, lng }` |
 | POST | `/api/bottles/:id/pick` | 撿瓶子 `{ lat, lng }`，60 m 內才回傳內容 |
-| GET | `/api/bottles/mine` | 我丟的、我撿到的 |
+| GET | `/api/bottles/mine` | 我丟的、我撿到的（還沒回收）、收藏的信、今天的額度 |
 | DELETE | `/api/bottles/:id` | 收回自己丟的 |
+| POST | `/api/bottles/:id/collect`、`/uncollect` | 收藏撿到的信、移出收藏 |
 | POST | `/api/bottles/:id/report` | 檢舉（撿到的人才能檢舉） |
 | POST | `/api/reports` | 使用者貼上 Threads 貼文連結 `{ url }`，回傳判讀結果 |
 | POST | `/api/events/:id/ended` | 回報已發完／已結束 |

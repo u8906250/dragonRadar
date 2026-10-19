@@ -127,8 +127,11 @@ export const pickBottle = (id: number, at: LatLng | null): Promise<Result<Picked
   deviceJson<PickedBottle>(`/api/bottles/${id}/pick`, 'POST', at ? { lat: at.lat, lng: at.lng } : {});
 export const fetchMyBottles = (): Promise<Result<MyBottles>> => deviceJson<MyBottles>('/api/bottles/mine');
 export const deleteBottle = (id: number): Promise<Result<{ ok: true }>> => deviceJson<{ ok: true }>(`/api/bottles/${id}`, 'DELETE');
-/** 回收撿到的瓶子：今天多一個額度，回收後就看不到了 */
+/** 回收撿到的瓶子：今天多一個額度；沒收藏的信回收後就看不到了 */
 export const recycleBottle = (id: number): Promise<Result<{ quota: MyBottles['quota'] }>> => deviceJson<{ quota: MyBottles['quota'] }>(`/api/bottles/${id}/recycle`, 'POST', {});
+/** 收藏撿到的信，或移出收藏 */
+export const collectLetter = (id: number, on: boolean): Promise<Result<{ collected: boolean }>> =>
+  deviceJson<{ collected: boolean }>(`/api/bottles/${id}/${on ? 'collect' : 'uncollect'}`, 'POST', {});
 export const reportBottle = (id: number): Promise<Result<{ hidden: boolean }>> => deviceJson<{ hidden: boolean }>(`/api/bottles/${id}/report`, 'POST', {});
 
 /** 回報固定據點，進審核佇列 */

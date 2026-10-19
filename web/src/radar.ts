@@ -41,6 +41,8 @@ export interface RadarBottle {
   mine: boolean;
   picked: boolean;
   selected: boolean;
+  /** 範圍內沒有瓶子時，最近那一個貼在外圈指方向，旁邊寫這段文字（例如「1.2 km」） */
+  hint?: string;
 }
 
 /** 瓶子的形狀（中心在原點，高約 16） */
@@ -366,11 +368,15 @@ export class Radar {
     this.bottleLayer.replaceChildren();
     for (const b of this.bottles) {
       const ratio = this.ratio(b.distanceKm);
-      // 範圍外的瓶子不畫，免得外圈擠滿
-      if (ratio > 1) continue;
+      // 範圍外的瓶子不畫，免得外圈擠滿；只有方向提示的那一個貼在外圈
+      if (ratio > 1 && !b.hint) continue;
       const angle = b.bearing - this.heading;
-      const r = ratio * (R - 8);
+      const r = Math.min(1, ratio) * (R - 8);
       const p = polar(angle, r);
+      if (ratio > 1) {
+        this.bottleLayer.appendChild(this.bottleHint(b, p));
+        continue;
+      }
       const g = el('g', {
         class: `bottle bottle-${b.state}${b.mine ? ' mine' : ''}${b.picked ? ' picked' : ''}${b.selected ? ' selected' : ''}`,
         transform: `translate(${p.x.toFixed(1)} ${p.y.toFixed(1)})`,
@@ -395,6 +401,26 @@ export class Radar {
       g.appendChild(title);
       this.bottleLayer.appendChild(g);
     }
+  }
+
+  /** 外圈的方向提示：小瓶子加距離，點了一樣打開瓶子 */
+  private bottleHint(b: RadarBottle, p: { x: number; y: number }): SVGGElement {
+    const g = el('g', { class: `bottle bottle-hint${b.selected ? ' selected' : ''}`, transform: `translate(${p.x.toFixed(1)} ${p.y.toFixed(1)})`, tabindex: 0, role: 'button' });
+    g.dataset.id = String(b.id);
+    g.appendChild(el('circle', { class: 'hit', r: 14 }));
+    const body = el('g', { class: 'body' });
+    body.appendChild(el('path', { class: 'glass', d: BOTTLE_PATH, transform: 'rotate(-20) scale(0.8)' }));
+    g.appendChild(body);
+    // 字寫在瓶子往圓心那一側，才不會跑出雷達
+    const anchor = anchorAt(p.x);
+    const inward = p.y > C ? -14 : 22;
+    const t = el('text', { class: 'hint-label', 'text-anchor': anchor, x: anchor === 'end' ? -10 : anchor === 'start' ? 10 : 0, y: anchor === 'middle' ? inward : 4 });
+    t.textContent = b.hint ?? '';
+    g.appendChild(t);
+    const title = el('title');
+    title.textContent = `最近的漂流瓶在這個方向，${b.hint ?? ''}`;
+    g.appendChild(title);
+    return g;
   }
 
   /** 固定地標（星星），畫在光點上面，超出範圍時貼在外圈 */

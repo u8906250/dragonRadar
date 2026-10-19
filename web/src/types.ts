@@ -106,8 +106,12 @@ export interface PickedBottle {
 export interface MyBottles {
   /** 今天的額度：基本幾個、撿到幾個多幾個 */
   quota: { used: number; bonus: number; limit: number; left: number };
-  dropped: Array<{ id: number; text: string; createdAt: number; expiresAt: number; picks: number; pickedAt: number | null; status: 'active' | 'picked' | 'hidden' | 'deleted' | 'removed' }>;
-  picked: Array<{ id: number; text: string; pickedAt: number }>;
+  /** driftM：從丟下的地方漂了幾公尺 */
+  dropped: Array<{ id: number; text: string; createdAt: number; expiresAt: number; picks: number; pickedAt: number | null; status: 'active' | 'picked' | 'hidden' | 'deleted' | 'removed'; driftM: number }>;
+  /** 撿到、還沒回收的瓶子 */
+  picked: Array<{ id: number; text: string; createdAt: number; pickedAt: number; driftM: number; collected: boolean }>;
+  /** 收藏的信（瓶子回收了也還在） */
+  letters: Array<{ id: number; text: string; createdAt: number; pickedAt: number; collectedAt: number; driftM: number }>;
 }
 
 export interface Origin {
@@ -145,7 +149,7 @@ export interface KeywordRules {
     news: { names: string[]; intervalMin: number };
     link?: { maxAgeDays: number; recheckMin: number; endedReportsNeeded: number };
     spot?: { maxAgeDays: number; autoReview?: boolean };
-    bottles?: { enabled: boolean; maxChars: number; pickRadiusM: number; ttlDays: number; perDay?: number };
+    bottles?: { enabled: boolean; maxChars: number; pickRadiusM: number; ttlDays: number; perDay?: number; driftHours?: number };
   };
   intervalMin: number;
   defaultDurationMin: number;

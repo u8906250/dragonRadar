@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { ruleCheck, scatter } from '../src/bottles';
+import { driftStep, ruleCheck, scatter } from '../src/bottles';
 
 describe('ruleCheck', () => {
   it('lets short cheering messages through', () => {
@@ -30,5 +30,36 @@ describe('scatter', () => {
       const dx = (q.lng - p.lng) * 111320 * Math.cos((p.lat * Math.PI) / 180);
       expect(Math.hypot(dx, dy)).toBeLessThanOrEqual(101);
     }
+  });
+});
+
+const meters = (a: { lat: number; lng: number }, b: { lat: number; lng: number }): number =>
+  Math.hypot((b.lat - a.lat) * 111320, (b.lng - a.lng) * 111320 * Math.cos((a.lat * Math.PI) / 180));
+
+describe('driftStep', () => {
+  const hq = { lat: 25.0456, lng: 121.5263 };
+  it('moves at most about 300 m toward the nearest place within 3 km', () => {
+    const b = { id: 1, lat: 25.0456 + 1500 / 111320, lng: 121.5263 };
+    const to = driftStep(b, [hq, { lat: 25.2, lng: 121.6 }], () => 0.5);
+    expect(to).not.toBeNull();
+    expect(meters(b, to!)).toBeLessThanOrEqual(302);
+    expect(meters(to!, hq)).toBeLessThan(meters(b, hq) - 290);
+  });
+  it('stops 80–200 m short of the place and then stays', () => {
+    let b = { id: 7, lat: 25.0456 + 700 / 111320, lng: 121.5263 };
+    for (let i = 0; i < 10; i++) {
+      const to = driftStep(b, [hq], () => 0.5);
+      if (!to) break;
+      b = { ...b, ...to };
+    }
+    const d = meters(b, hq);
+    expect(d).toBeGreaterThanOrEqual(75);
+    expect(d).toBeLessThanOrEqual(225);
+    expect(driftStep(b, [hq], () => 0.5)).toBeNull();
+  });
+  it('wanders a little when nothing is within reach', () => {
+    const b = { id: 3, lat: 23.5, lng: 120.5 };
+    const to = driftStep(b, [hq], () => 0.9)!;
+    expect(meters(b, to)).toBeLessThanOrEqual(81);
   });
 });

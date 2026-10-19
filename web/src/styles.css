@@ -266,7 +266,7 @@ a.chip { display: inline-flex; align-items: center; text-decoration: none; }
 
 /* 通知橫幅：浮在最上面，不推擠版面 */
 .banner {
-  position: fixed; left: 12px; right: 12px; z-index: 950;
+  position: fixed; left: 12px; right: 12px; z-index: 1100;
   top: calc(var(--topbar-h) + 8px + env(safe-area-inset-top));
   padding: 12px 14px; border-radius: 12px;
   background: var(--banner-bg); border: var(--border-w) solid var(--banner-border); color: var(--banner-text); font-size: 14px; line-height: 1.4;
@@ -486,6 +486,8 @@ a.chip { display: inline-flex; align-items: center; text-decoration: none; }
 .radar .bottle.picked { opacity: 0.5; }
 .radar .bottle .reach { fill: none; stroke: #43b8d4; stroke-width: 2; animation: reach 1.4s ease-out infinite; }
 .radar .bottle.selected .glass { stroke: var(--blip-selected); stroke-width: 2.4; }
+.radar .bottle-hint .glass { opacity: 0.85; }
+.radar .bottle-hint .hint-label { fill: #2a9bb8; font-size: 11px; font-weight: 700; paint-order: stroke; stroke: var(--label-halo); stroke-width: 3px; stroke-linejoin: round; pointer-events: none; }
 @keyframes fog { 0%, 100% { opacity: 0.35; } 50% { opacity: 0.65; } }
 @keyframes reach { 0% { r: 8; opacity: 0.9; } 100% { r: 20; opacity: 0; } }
 @media (prefers-reduced-motion: reduce) { .radar .bottle .fog, .radar .bottle .reach { animation: none; } }
@@ -508,6 +510,48 @@ a.chip { display: inline-flex; align-items: center; text-decoration: none; }
 .bottle-form textarea:focus { outline: 2px solid var(--highlight); outline-offset: 1px; }
 .bottle-form-row { display: flex; align-items: center; justify-content: space-between; }
 .sheet-body blockquote.bottle-note { margin: 4px 0 10px; padding: 14px 16px; font-size: 18px; line-height: 1.6; font-weight: 700; color: #1d3b44; background: linear-gradient(135deg, #e9f8fb, #c9eef6); border: 1.5px solid #8fdcec; border-radius: 14px; }
+
+/* 自己丟的瓶子被撿走了：按鈕右上角小紅點 */
+#bottle-btn { position: relative; }
+#bottle-btn.news::after { content: ''; position: absolute; top: -3px; right: -3px; width: 10px; height: 10px; border-radius: 50%; background: #e5484d; border: 2px solid var(--chip-bg); }
+.new-tag { display: inline-block; margin-right: 4px; padding: 0 5px; border-radius: 6px; background: #e5484d; color: #fff; font-size: 11px; line-height: 16px; }
+.btn.letters-open { width: 100%; justify-content: space-between; gap: 8px; margin-top: 12px; }
+.btn.letters-open small { color: var(--muted); font-weight: 500; font-size: 12px; }
+.btn.subtle { box-shadow: none; color: var(--muted); }
+
+/* 瓶中信收藏：蓋住整個畫面的一頁 */
+.letters-page {
+  position: fixed; inset: 0; z-index: 1000; overflow: auto; overscroll-behavior: contain;
+  background: var(--panel); color: var(--text);
+  padding: env(safe-area-inset-top) 0 calc(24px + env(safe-area-inset-bottom));
+}
+body.letters-open { overflow: hidden; }
+.letters-head {
+  position: sticky; top: 0; z-index: 1; display: flex; align-items: center; gap: 12px;
+  padding: 10px 16px; background: var(--topbar-bg); color: var(--topbar-text); border-bottom: var(--border-w) solid var(--topbar-border);
+}
+.letters-head h2 { margin: 0; font-size: 18px; }
+.letters-body { max-width: 720px; margin: 0 auto; padding: 4px 16px; }
+.letters-body h3 { font-size: 16px; margin: 18px 0 6px; }
+.letters-body .small { font-size: 12px; line-height: 1.5; }
+.letters-body .muted { color: var(--muted); }
+.letter-cards { list-style: none; margin: 8px 0 0; padding: 0; display: flex; flex-direction: column; gap: 14px; }
+.letter-card { display: flex; flex-direction: column; gap: 8px; }
+.letter-card blockquote.bottle-note { margin: 0; padding: 14px 16px; font-size: 18px; line-height: 1.6; font-weight: 700; color: #1d3b44; background: linear-gradient(135deg, #e9f8fb, #c9eef6); border: 1.5px solid #8fdcec; border-radius: 14px; white-space: pre-wrap; }
+.letter-grid { list-style: none; margin: 8px 0 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 14px; }
+/* 收藏的信：泛黃的信紙 */
+.letter-paper {
+  position: relative; display: flex; flex-direction: column; gap: 8px; padding: 18px 16px 12px;
+  color: #3b2f1e; background: repeating-linear-gradient(#fdf6e3 0 27px, #eadfc4 27px 28px); border: 1px solid #d9c9a3; border-radius: 6px;
+  box-shadow: 2px 3px 0 rgba(0, 0, 0, 0.12); transform: rotate(var(--tilt, -0.6deg));
+}
+.letter-paper:nth-child(2n) { --tilt: 0.7deg; }
+.letter-paper:nth-child(3n) { --tilt: -0.3deg; }
+.letter-paper .letter-text { margin: 0; font-size: 17px; line-height: 28px; font-weight: 600; white-space: pre-wrap; word-break: break-word; }
+.letter-paper small.muted { color: #7a6a4f; font-size: 12px; }
+.letter-paper .link-btn { align-self: flex-end; color: #7a6a4f; font-size: 12px; }
+.letters-note { margin-top: 24px; }
+@media (prefers-reduced-motion: reduce) { .letter-paper { transform: none; } }
 
 /* 清單最下面的版號 */
 .app-version { margin: 18px 0 8px; font-size: 11px; text-align: center; opacity: 0.8; }
