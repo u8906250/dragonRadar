@@ -764,9 +764,9 @@ function spotSchedule(it: Item): string {
   const first = s[0];
   const last = s.at(-1);
   if (!first || !last) return '';
-  // 沒寫最後一天：只寫從哪天開始，不寫系統預設的最後一天
+  // 沒寫最後一天：只寫「發完為止」，不寫系統預設的最後一天（第一天也可能已經過了，不寫）
   const range = last.untilOpen
-    ? `${dateFmt.format(new Date(first.startAt * 1000))} 起，${openEndText(last)}`
+    ? openEndText(last)
     : first === last
       ? dateFmt.format(new Date(first.startAt * 1000))
       : `${dateFmt.format(new Date(first.startAt * 1000))} 到 ${dateFmt.format(new Date(last.startAt * 1000))}`;
