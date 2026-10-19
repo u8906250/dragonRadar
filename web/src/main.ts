@@ -4,6 +4,7 @@ import { compassSupported, startCompass } from './compass';
 import { bearingDeg, compassLabel, formatKm, haversineKm, taiwanRadiusKm, type LatLng } from './geo';
 import { inShuangbei, SHUANGBEI_RINGS, shuangbeiRadiusKm } from './shuangbei';
 import { LANDMARKS } from './landmarks';
+import { X_MAX_WEIGHT, xLength } from './xcount';
 import { splitPlace } from './place';
 import { crowdOf, MapView, type BaseMap } from './map';
 import { beep, ensureNotificationPermission, notificationState, showBanner, systemNotify, unlockAudio } from './notify';
@@ -997,16 +998,27 @@ function openBottleSheet(open: boolean): void {
   void reloadMyBottles();
 }
 
+const bottleMaxWeight = (): number => keywordRules?.sources?.bottles?.maxWeight ?? X_MAX_WEIGHT;
+
+/** 字數（比照 X：中文算 2、英數算 1）；超過回傳 true */
+function updateBottleCount(): boolean {
+  const max = bottleMaxWeight();
+  const n = xLength(bottleText.value.trim());
+  bottleCount.textContent = `${n} / ${max}`;
+  bottleCount.classList.toggle('over', n > max);
+  return n > max;
+}
+
 /** 丟瓶子的表單（要 GPS）、附近的瓶子、使用規則 */
 function renderBottleSheet(): void {
   const rules = keywordRules?.sources?.bottles;
-  const max = rules?.maxChars ?? 60;
-  bottleText.maxLength = max;
-  bottleCount.textContent = `${[...bottleText.value].length} / ${max}`;
+  bottleText.maxLength = bottleMaxWeight();
+  const over = updateBottleCount();
   const gps = origin.source === 'gps';
-  bottleDropBtn.disabled = !gps;
+  bottleDropBtn.disabled = !gps || over;
   bottleDropBtn.textContent = gps ? '丟出去' : '要先定位';
   bottleTips.innerHTML = [
+    `字數比照 X：中文、全形字、表情符號算 2，英數算 1，最多 ${bottleMaxWeight()}（中文 ${bottleMaxWeight() / 2} 字）。`,
     '打氣、心情、抱怨、今天看到的事都可以。辱罵或攻擊任何人（包括其他候選人、政黨）、謠言、廣告、連結、電話、帳號、個人資料都不會通過，丟出去前會先自動審核。',
     `瓶子會丟在你目前 GPS 位置附近，隨機漂開約 100 m。沒人撿的話，每 ${rules?.driftHours ?? 3} 小時會順著洋流往附近熱鬧的地方（發放、活動、據點、洋流總部）漂一段，${rules?.ttlDays ?? 7} 天後漂走。`,
     `每天可以丟 ${rules?.perDay ?? 3} 個。撿到的瓶子在「瓶中信收藏」：喜歡的信可以收藏，回收瓶子就多一個額度；兩個都可以做。`,
@@ -1158,6 +1170,10 @@ async function submitBottle(): Promise<void> {
   const text = bottleText.value.trim();
   if (!text) {
     bottleResult.innerHTML = '<p class="msg error">寫一句話再丟吧</p>';
+    return;
+  }
+  if (xLength(text) > bottleMaxWeight()) {
+    bottleResult.innerHTML = '<p class="msg error">太長了：字數比照 X，中文最多 140 字、英文最多 280 字</p>';
     return;
   }
   if (origin.source !== 'gps') {
@@ -2262,7 +2278,8 @@ function wireControls(): void {
   bottleBtn.addEventListener('click', () => openBottleSheet(bottleSheet.hidden));
   bottleSheet.querySelector('[data-act="close"]')?.addEventListener('click', () => openBottleSheet(false));
   bottleText.addEventListener('input', () => {
-    bottleCount.textContent = `${[...bottleText.value].length} / ${bottleText.maxLength}`;
+    const over = updateBottleCount();
+    bottleDropBtn.disabled = origin.source !== 'gps' || over;
   });
   bottleForm.addEventListener('submit', (e) => {
     e.preventDefault();

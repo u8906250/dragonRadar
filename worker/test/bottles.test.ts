@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { driftStep, ruleCheck, scatter } from '../src/bottles';
+import { driftStep, ruleCheck, scatter, xLength } from '../src/bottles';
 
 describe('ruleCheck', () => {
   it('lets short cheering messages through', () => {
@@ -17,7 +17,21 @@ describe('ruleCheck', () => {
   it('blocks empty, symbol-only and too long text', () => {
     expect(ruleCheck('   ')).not.toBeNull();
     expect(ruleCheck('！！！')).not.toBeNull();
-    expect(ruleCheck('加'.repeat(61))).toMatch(/60/);
+    expect(ruleCheck('加'.repeat(140))).toBeNull();
+    expect(ruleCheck('加'.repeat(141))).toMatch(/140/);
+    expect(ruleCheck('go '.repeat(93) + 'g')).toBeNull();
+    expect(ruleCheck('a'.repeat(281))).toMatch(/280/);
+  });
+});
+
+describe('xLength', () => {
+  it('counts like X: latin 1, CJK and emoji 2', () => {
+    expect(xLength('hello, world')).toBe(12);
+    expect(xLength('台北加油')).toBe(8);
+    expect(xLength('加油！')).toBe(6);
+    expect(xLength('🌊')).toBe(2);
+    expect(xLength('👨‍👩‍👧')).toBe(2);
+    expect(xLength('Taipei 加油 🌊')).toBe(6 + 1 + 4 + 1 + 2);
   });
 });
 

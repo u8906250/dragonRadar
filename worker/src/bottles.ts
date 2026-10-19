@@ -1,5 +1,5 @@
 /**
- * 漂流瓶：在自己附近丟一句話（60 字內），別人走到 60 m 內才撿得起來、看得到內容。
+ * 漂流瓶：在自己附近丟一句話（字數比照 X：中文 140 字、英文 280 字），別人走到 60 m 內才撿得起來、看得到內容。
  *
  * - 不用登入：前端第一次用時產生隨機的裝置代碼，放在 x-device 標頭；伺服器只存加鹽雜湊。
  * - 隱私：丟的位置先打散到約 100 m 內再存，不存真正的位置（不會因為在家丟瓶子就洩漏住址）。
@@ -14,7 +14,22 @@ import { responseContent } from './extract';
 import { ReportError } from './reports';
 import { sha1Hex } from './sources/text';
 
-export const BOTTLE_MAX_CHARS = 60;
+/** 字數比照 X（Twitter）：上限 280，拉丁字母、數字、一般標點算 1，其他（中文、全形、表情）算 2 */
+export const BOTTLE_MAX_WEIGHT = 280;
+
+const lightChar = (cp: number): boolean =>
+  cp <= 0x10ff || (cp >= 0x2000 && cp <= 0x200d) || (cp >= 0x2010 && cp <= 0x201f) || (cp >= 0x2032 && cp <= 0x2037);
+
+/** X 的字數算法（跟 web/src/xcount.ts 同一套）：一整個表情組合算一個字 */
+export function xLength(text: string): number {
+  const segs = Array.from(new Intl.Segmenter('zh-Hant', { granularity: 'grapheme' }).segment(text.normalize('NFC')), (s) => s.segment);
+  let n = 0;
+  for (const g of segs) {
+    const cps = Array.from(g);
+    n += cps.length === 1 && lightChar(cps[0].codePointAt(0) ?? 0) ? 1 : 2;
+  }
+  return n;
+}
 export const BOTTLE_TTL_SEC = 7 * 86400;
 /** 走到這個距離內才撿得起來 */
 export const PICK_RADIUS_M = 60;
@@ -184,7 +199,7 @@ export function scatter(p: { lat: number; lng: number }, rand: () => number = Ma
 export function ruleCheck(text: string): string | null {
   const t = text.trim();
   if (!t) return '寫點什麼再丟吧';
-  if ([...t].length > BOTTLE_MAX_CHARS) return `最多 ${BOTTLE_MAX_CHARS} 個字`;
+  if (xLength(t) > BOTTLE_MAX_WEIGHT) return '太長了：字數比照 X，中文最多 140 字、英文最多 280 字';
   if (/[\w.+-]+@[\w-]+\.\w+/.test(t)) return '不能放 Email';
   if (/https?:\/\/|www\.|\.(com|net|tw|org|io|cc|me)\b/i.test(t)) return '不能放連結';
   if (/(?:\d[\s-]?){7,}/.test(t)) return '不能放電話或一長串數字';

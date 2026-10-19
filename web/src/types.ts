@@ -149,7 +149,7 @@ export interface KeywordRules {
     news: { names: string[]; intervalMin: number };
     link?: { maxAgeDays: number; recheckMin: number; endedReportsNeeded: number };
     spot?: { maxAgeDays: number; autoReview?: boolean };
-    bottles?: { enabled: boolean; maxChars: number; pickRadiusM: number; ttlDays: number; perDay?: number; driftHours?: number };
+    bottles?: { enabled: boolean; maxWeight?: number; maxChars: number; pickRadiusM: number; ttlDays: number; perDay?: number; driftHours?: number };
   };
   intervalMin: number;
   defaultDurationMin: number;
