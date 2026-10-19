@@ -350,7 +350,13 @@ export class Radar {
       body.appendChild(el('path', { class: 'star', d: starPath(out ? 7 : 10) }));
       g.appendChild(body);
       this.addFlash(g, lm.bearing - this.heading, Math.min(1, ratio) * (R - 8), out ? 6 : 9);
-      // 星星旁邊不寫名稱，滑過或點了才看得到
+      // 平常不寫名稱，點了（選取中）才在星星下面顯示
+      if (lm.selected) {
+        const anchor = anchorAt(p.x);
+        const t = el('text', { class: 'label', 'text-anchor': anchor, x: anchor === 'end' ? 8 : anchor === 'start' ? -8 : 0, y: 24 });
+        t.textContent = lm.label;
+        g.appendChild(t);
+      }
       const title = el('title');
       title.textContent = lm.label;
       g.appendChild(title);
