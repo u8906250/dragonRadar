@@ -288,7 +288,7 @@ const openEndText = (ev: EventOut): string => (ev.kind === 'activity' ? '沒寫�
 
 /** 固定據點的開放時段，例如「每天 11:00–18:00」「每天 11:00–14:00、17:00–19:00」；沒寫幾點結束就只寫開始 */
 function spotHours(sessions: EventOut[]): string {
-  if (sessions.some((s) => s.allDay)) return '每天整天';
+  if (sessions.some((s) => s.allDay)) return new Set(sessions.map((s) => taipeiDay(s.startAt))).size > 1 ? '每天整天' : '整天';
   const seen = new Set<string>();
   const parts: string[] = [];
   for (const s of [...sessions].sort((a, b) => ((a.startAt + 8 * 3600) % 86400) - ((b.startAt + 8 * 3600) % 86400))) {
@@ -296,7 +296,9 @@ function spotHours(sessions: EventOut[]): string {
     if (!seen.has(text)) parts.push(text);
     seen.add(text);
   }
-  return `每天 ${parts.join('、')}`;
+  // 只有一天的據點不寫「每天」
+  const days = new Set(sessions.map((s) => taipeiDay(s.startAt)));
+  return `${days.size > 1 || sessions.some((s) => s.untilOpen) ? '每天 ' : ''}${parts.join('、')}`;
 }
 
 function spotUntil(it: Item, now: number): string {
