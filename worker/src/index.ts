@@ -11,7 +11,7 @@ import { apifyTrial } from './sources/apify';
 import { fetchThreadsPost, resolveThreadsLink, shortcodeToUnix } from './sources/link';
 import { ENDED_REPORTS_NEEDED, MAX_LINK_AGE_SEC, ReportError, ipHash, purgeReports, recheckLinks, reportEnded, submitLink } from './reports';
 import { addressCacheKey, geocodeAddress, parseTwAddress } from './address';
-import { adminListBottles, adminSetBottle, BOTTLE_MAX_CHARS, BOTTLE_TTL_SEC, bottlesEnabled, deleteBottle, deviceId, dropBottle, listBottles, myBottles, PER_DEVICE_PER_DAY, PICK_RADIUS_M, pickBottle, purgeBottles, reportBottle } from './bottles';
+import { adminListBottles, adminSetBottle, BOTTLE_MAX_CHARS, BOTTLE_TTL_SEC, bottlesEnabled, deleteBottle, deviceId, dropBottle, listBottles, myBottles, PER_DEVICE_PER_DAY, PICK_RADIUS_M, pickBottle, purgeBottles, recycleBottle, reportBottle } from './bottles';
 import { approveSpotRequest, autoReview, cancelSpotRequest, listSpotRequests, locatePlace, rejectSpotRequest, SPOT_MAX_AGE_SEC, spotRequestStatus, submitSpotRequest, type ApproveBody, type SpotRequestRow } from './spots';
 import { addUserKeyword, listActiveKeywords, listAllKeywords, MAX_ACTIVE_KEYWORDS, normalizeKeyword, parseKeywordList, toKeywordOut, touchKeywords } from './keywords';
 import { CALLBACK_PATH, DELETE_PATH, DELETION_STATUS_PATH, UNINSTALL_PATH, deletionStatus, handleCallback, handleDelete, handleUninstall, startAuth } from './oauth';
@@ -188,9 +188,10 @@ async function handle(req: Request, env: Env, ctx: ExecutionContext): Promise<Re
     if (req.method === 'POST' && path === '/api/bottles') {
       return jsonResponse(await dropBottle(env, dev, await ipHash(env, req), await readJson<{ text?: unknown; lat?: unknown; lng?: unknown }>(req), now), 201);
     }
-    const one = /^\/api\/bottles\/(\d+)(?:\/(pick|report))?$/.exec(path);
+    const one = /^\/api\/bottles\/(\d+)(?:\/(pick|report|recycle))?$/.exec(path);
     if (one) {
       const id = Number(one[1]);
+      if (req.method === 'POST' && one[2] === 'recycle') return jsonResponse(await recycleBottle(env, dev, id, now));
       if (req.method === 'POST' && one[2] === 'pick') return jsonResponse(await pickBottle(env, dev, id, await readJson<{ lat?: unknown; lng?: unknown }>(req), now));
       if (req.method === 'POST' && one[2] === 'report') {
         const body = await readJson<{ reason?: unknown }>(req);

@@ -19,8 +19,8 @@ export const PICK_RADIUS_M = 60;
 /** 丟的位置打散的範圍 */
 const SCATTER_M = 100;
 /**
- * 每天基本可以丟幾個；每撿到一個別人的瓶子多一個。
- * 互丟互撿是一換一（丟一個用掉一個、撿一個拿回一個），剩下的額度不會越刷越多，所以不另設上限；
+ * 每天基本可以丟幾個；每回收一個撿到的瓶子多一個。
+ * 互丟互撿是一換一（丟一個用掉一個、回收一個拿回一個），剩下的額度不會越刷越多，所以不另設上限；
  * 總量由同 IP 每天、全站每小時的上限擋。
  */
 export const PER_DEVICE_PER_DAY = 3;
@@ -147,7 +147,7 @@ async function countSince(env: Env, sql: string, binds: unknown[]): Promise<numb
 export interface BottleQuota {
   /** 過去 24 小時丟了幾個 */
   used: number;
-  /** 過去 24 小時撿到幾個（每個多一個額度） */
+  /** 過去 24 小時回收了幾個撿到的瓶子（每個多一個額度） */
   bonus: number;
   /** 今天總共可以丟幾個 */
   limit: number;
@@ -155,10 +155,10 @@ export interface BottleQuota {
   left: number;
 }
 
-/** 今天的額度：基本 3 個，撿到幾個就多幾個（都算過去 24 小時） */
+/** 今天的額度：基本 3 個，回收幾個撿到的瓶子就多幾個（都算過去 24 小時） */
 export async function bottleQuota(env: Env, dev: string, now: number): Promise<BottleQuota> {
   const used = await countSince(env, 'SELECT COUNT(*) AS n FROM bottles WHERE device_id = ? AND created_at > ?', [dev, now - 86400]);
-  const bonus = await countSince(env, 'SELECT COUNT(*) AS n FROM bottle_picks WHERE device_id = ? AND created_at > ?', [dev, now - 86400]);
+  const bonus = await countSince(env, 'SELECT COUNT(*) AS n FROM bottle_picks WHERE device_id = ? AND recycled_at > ?', [dev, now - 86400]);
   const limit = PER_DEVICE_PER_DAY + bonus;
   return { used, bonus, limit, left: Math.max(0, limit - used) };
 }
@@ -177,7 +177,7 @@ export async function dropBottle(env: Env, device: string | null, ip: string, bo
 
   const quota = await bottleQuota(env, dev, now);
   if (quota.left <= 0)
-    throw new ReportError(429, '今天的瓶子丟完了。撿到一個別人的瓶子，就能多丟一個');
+    throw new ReportError(429, '今天的瓶子丟完了。回收一個撿到的瓶子，就能多丟一個');
   if ((await countSince(env, 'SELECT COUNT(*) AS n FROM bottles WHERE ip_hash = ? AND created_at > ?', [ip, now - 86400])) >= PER_IP_PER_DAY)
     throw new ReportError(429, '這個網路今天丟太多瓶子了，明天再來');
   if ((await countSince(env, 'SELECT COUNT(*) AS n FROM bottles WHERE created_at > ?', [now - 3600])) >= GLOBAL_PER_HOUR)
@@ -262,7 +262,7 @@ export async function myBottles(env: Env, device: string | null, now: number): P
     .bind(dev, now - 30 * 86400)
     .all<BottleRow & { picked_at: number | null }>();
   const picked = await env.DB.prepare(
-    "SELECT b.id, b.text, p.created_at AS picked_at FROM bottle_picks p JOIN bottles b ON b.id = p.bottle_id WHERE p.device_id = ? AND b.status IN ('active', 'picked') ORDER BY p.created_at DESC LIMIT 100",
+    "SELECT b.id, b.text, p.created_at AS picked_at FROM bottle_picks p JOIN bottles b ON b.id = p.bottle_id WHERE p.device_id = ? AND p.recycled_at IS NULL AND b.status IN ('active', 'picked') ORDER BY p.created_at DESC LIMIT 100",
   )
     .bind(dev)
     .all<{ id: number; text: string; picked_at: number }>();
@@ -279,6 +279,14 @@ export async function myBottles(env: Env, device: string | null, now: number): P
     })),
     picked: picked.results.map((p) => ({ id: p.id, text: p.text, pickedAt: p.picked_at })),
   };
+}
+
+/** 回收撿到的瓶子：今天多一個額度，回收後自己也看不到了 */
+export async function recycleBottle(env: Env, device: string | null, id: number, now: number): Promise<{ quota: BottleQuota }> {
+  const dev = needDevice(device);
+  const r = await env.DB.prepare('UPDATE bottle_picks SET recycled_at = ? WHERE bottle_id = ? AND device_id = ? AND recycled_at IS NULL').bind(now, id, dev).run();
+  if ((r.meta.changes ?? 0) === 0) throw new ReportError(404, '找不到你撿到的這個瓶子，可能已經回收了');
+  return { quota: await bottleQuota(env, dev, now) };
 }
 
 /** 收回自己丟的瓶子（還沒被撿走的） */
