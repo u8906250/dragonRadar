@@ -9,7 +9,7 @@ import { CURRENT_MAP_URL } from './sources/currentmap';
 import { mergeIntoOfficial } from './sources/merge';
 import { apifyTrial } from './sources/apify';
 import { fetchThreadsPost, resolveThreadsLink, shortcodeToUnix } from './sources/link';
-import { confirmLink, ENDED_REPORTS_NEEDED, MAX_LINK_AGE_SEC, ReportError, ipHash, purgeReports, recheckLinks, rejectLink, reportEnded, submitLink } from './reports';
+import { confirmLink, ENDED_REPORTS_NEEDED, MAX_LINK_AGE_SEC, ReportError, ipHash, purgeReports, recheckLinks, rejectLink, reportEnded, submitLink, supplementLink } from './reports';
 import { isTransient, withResilientDb } from './db';
 import { addressCacheKey, geocodeAddress, parseTwAddress } from './address';
 import { adminListBottles, adminSetBottle, BOTTLE_MAX_WEIGHT, BOTTLE_TTL_SEC, bottlesEnabled, collectLetter, deleteBottle, deviceId, DRIFT_EVERY_SEC, driftBottles, dropBottle, listBottles, myBottles, PER_DEVICE_PER_DAY, PICK_RADIUS_M, pickBottle, purgeBottles, recycleBottle, reportBottle } from './bottles';
@@ -165,6 +165,10 @@ async function handle(req: Request, env: Env, ctx: ExecutionContext): Promise<Re
     const result = await confirmLink(env, await readJson<{ postId?: unknown; token?: unknown }>(req), now);
     await mergeIntoOfficial(env, now).catch((e) => console.warn('merge failed', e));
     return jsonResponse(result);
+  }
+  // 貼文沒寫地點或時間：回報的人補充後再判讀一次 { postId, token, note }
+  if (req.method === 'POST' && path === '/api/reports/supplement') {
+    return jsonResponse(await supplementLink(env, await readJson<{ postId?: unknown; token?: unknown; note?: unknown }>(req), await ipHash(env, req), now));
   }
   if (req.method === 'POST' && path === '/api/reports/reject') {
     return jsonResponse(await rejectLink(env, await readJson<{ postId?: unknown; token?: unknown; note?: unknown }>(req)));

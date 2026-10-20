@@ -138,6 +138,9 @@ export const reportBottle = (id: number): Promise<Result<{ hidden: boolean }>> =
 export const submitLink = (url: string): Promise<Result<SubmitResult>> => postJson<SubmitResult>('/api/reports', { url });
 /** 判讀結果對：放上雷達 */
 export const confirmReport = (c: { postId: string; token: string }): Promise<Result<SubmitResult>> => postJson<SubmitResult>('/api/reports/confirm', c);
+/** 貼文沒寫地點或時間：補充後再判讀一次 */
+export const supplementReport = (c: { postId: string; token: string }, note: string): Promise<Result<SubmitResult>> =>
+  postJson<SubmitResult>('/api/reports/supplement', { ...c, note });
 /** 判讀錯了：不放，note 寫哪裡錯 */
 export const rejectReport = (c: { postId: string; token: string }, note: string): Promise<Result<{ ok: true }>> => postJson<{ ok: true }>('/api/reports/reject', { ...c, note });
 

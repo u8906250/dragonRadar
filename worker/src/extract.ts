@@ -17,6 +17,8 @@ export interface ExtractedEvent {
   spot: boolean;
   /** 固定據點的最後一天 YYYY-MM-DD，沒寫則 null */
   until: string | null;
+  /** 固定據點只在每週幾開（1 = 週一 … 7 = 週日），每天開或不是固定據點則 null */
+  weekdays?: number[] | null;
 }
 
 export interface Extraction {
@@ -40,6 +42,7 @@ const EVENT_SCHEMA = {
     confidence: { type: 'number' },
     spot: { type: 'boolean' },
     until: { type: ['string', 'null'] },
+    weekdays: { type: ['array', 'null'], items: { type: 'integer' } },
   },
   required: ['kind', 'title', 'item', 'start_at', 'end_at', 'place_text', 'place_query', 'confidence', 'spot', 'until'],
 };
@@ -76,6 +79,7 @@ events 每筆的欄位：
 - confidence: 這一筆 0 到 1 的信心分數
 - spot: 是否為「固定據點」：店家、服務處、競選總部等，連續多天在固定時段都可以去領或參加（例如寫了「每天」「每日」「營業時間」「營業日」「即日起」「長期」「10/17~10/19」）。單次、只有一天的活動或發放為 false
 - until: 固定據點的最後一天，格式 YYYY-MM-DD；沒寫最後一天或不是固定據點則 null
+- weekdays: 固定據點只在每週固定幾天開時，列出星期幾（1 = 週一 … 7 = 週日），例如「每週二、四」→ [2, 4]、「週一到週五」→ [1, 2, 3, 4, 5]；每天都開、或不是固定據點則 null。start_at 填第一個開放日
 
 規則：
 - 相對時間（今天、今晚、明天、週六、等等、下午）以「貼文發布時間」為基準換算，時區一律 +08:00。「今晚 5 點半」是發文當天 17:30。
@@ -87,7 +91,8 @@ events 每筆的欄位：
 - 「發完為止」「數量有限」代表沒有明確結束時間，end_at 為 null。
 - 新聞報導、心得、活動回顧、徵求、詢問、線上抽獎、直播、線上活動、販售，is_event 為 false，events 為空陣列。
 - 只有時間沒有地點、或只有地點沒有時間，該筆 confidence 必須低於 0.5。
-- 不要編造貼文裡沒有的時間或地點，可以依上下文補上縣市。`;
+- 不要編造貼文裡沒有的時間或地點，可以依上下文補上縣市。
+- 貼文最後如果有「【回報的人補充】」，那是看到貼文的人補上的地點或時間（例如店名、地址），貼文沒寫的可以用它補上；跟貼文衝突時以貼文為準。`;
 
 export function buildMessages(text: string, postedAt: number, now: number): Array<{ role: 'system' | 'user'; content: string }> {
   void now;
@@ -132,7 +137,35 @@ function normalizeEvent(o: Record<string, unknown>): ExtractedEvent {
     confidence: conf(o.confidence),
     spot: o.spot === true || o.spot === 'true',
     until: /^\d{4}-\d{2}-\d{2}/.test(str(o.until) ?? '') ? (str(o.until) as string).slice(0, 10) : null,
+    weekdays: normalizeWeekdays(o.weekdays),
   };
+}
+
+/** 1–7 不重複、排好；全部 7 天等於每天，回傳 null */
+export function normalizeWeekdays(v: unknown): number[] | null {
+  if (!Array.isArray(v)) return null;
+  const days = [...new Set(v.map(Number).filter((n) => Number.isInteger(n) && n >= 1 && n <= 7))].sort((a, b) => a - b);
+  return days.length > 0 && days.length < 7 ? days : null;
+}
+
+const WEEKDAY_CHAR: Record<string, number> = { 一: 1, 二: 2, 三: 3, 四: 4, 五: 5, 六: 6, 日: 7, 天: 7 };
+
+/**
+ * 從貼文找「每週二、四」「每週一至五」「每週六日」：模型漏掉時的備援。
+ * 一定要有「每」，「10/21（週二）」這種日期註記不算。
+ */
+export function weekdaysFromText(text: string): number[] | null {
+  const m = /每\s*(?:週|周|星期|禮拜)\s*([一二三四五六日天](?:\s*[、,，和與及跟/／]?\s*(?:[到至~～\-－]\s*)?(?:週|周|星期|禮拜)?\s*[一二三四五六日天])*)/.exec(text);
+  if (!m) return null;
+  const out: number[] = [];
+  const parts = m[1].replace(/(?:週|周|星期|禮拜)/g, '').replace(/\s/g, '');
+  const re = /([一二三四五六日天])(?:[到至~～\-－]([一二三四五六日天]))?/g;
+  for (const r of parts.matchAll(re)) {
+    const a = WEEKDAY_CHAR[r[1]];
+    const b = r[2] ? WEEKDAY_CHAR[r[2]] : a;
+    for (let d = a; d <= b; d++) out.push(d);
+  }
+  return normalizeWeekdays(out);
 }
 
 function parseLoose(raw: unknown): unknown {

@@ -34,6 +34,8 @@ export interface EventOut {
   spot?: boolean;
   /** 只定位到鄉鎮區中心時的區域名稱，例如「雲林縣虎尾鎮」 */
   approxArea?: string | null;
+  /** 固定據點每週幾開（1 = 週一 … 7 = 週日），每天則 null */
+  weekdays?: number[] | null;
   /** 官方行程才有：講同一場活動、已併進來的新聞與貼文 */
   related?: RelatedPost[];
   post: {
@@ -44,6 +46,8 @@ export interface EventOut {
     permalink: string | null;
     postedAt: number;
     text: string;
+    /** 回報的人補充的地點或時間（不是原貼文寫的） */
+    supplement?: string | null;
   };
 }
 
@@ -179,6 +183,8 @@ export interface PreviewItem {
   lng: number | null;
   /** 只定位到鄉鎮區 */
   approxArea: string | null;
+  /** 固定據點每週幾開（1 = 週一 … 7 = 週日），每天則 null */
+  weekdays?: number[] | null;
   spot: boolean;
   startAt: number;
   endAt: number;
@@ -197,7 +203,10 @@ export interface SubmitResult {
   permalink: string;
   /** outcome = 'preview'：判讀結果，確認了才放上雷達 */
   preview?: PreviewItem[];
+  /** 還沒放上雷達的回報：確認、說判讀錯了、補充資料都用這組代碼 */
   confirm?: { postId: string; token: string };
+  /** 回報的人補充過的資料 */
+  supplement?: string | null;
 }
 
 export interface EndedReportResult {

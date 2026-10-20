@@ -1,7 +1,7 @@
 import type { Env } from './env';
-import { extractFromPost, type EventKind, type ExtractedEvent } from './extract';
+import { extractFromPost, weekdaysFromText, type EventKind, type ExtractedEvent } from './extract';
 import { geocodeAddress, parseTwAddress, type TwAddress } from './address';
-import { adminArea, geocode, geocodeFirst, placeCandidates, type GeoPoint } from './geocode';
+import { adminArea, geocode, geocodeFirst, isAreaOnly, placeCandidates, type GeoPoint } from './geocode';
 import { listActiveKeywords, type KeywordRow } from './keywords';
 import { parseThreadsTimestamp, type ThreadsClient } from './threads';
 import { nowSec, parseIsoToUnix } from './util';
@@ -19,6 +19,8 @@ export interface PostRow {
   fetched_at: number;
   processed_at: number | null;
   extraction: string | null;
+  /** 回報的人補充的地點或時間，判讀時接在貼文後面 */
+  supplement?: string | null;
   /** 使用者回報的確認狀態：null（排程搜尋到的、舊資料）、pending、confirmed、rejected */
   confirm_state?: 'pending' | 'confirmed' | 'rejected' | null;
   confirm_plan?: string | null;
@@ -45,6 +47,7 @@ export interface EventRow {
   until_open?: number;
   spot?: number;
   approx_area?: string | null;
+  weekdays?: string | null;
   last_checked_at: number | null;
   created_at: number;
   updated_at: number;
@@ -75,6 +78,8 @@ export interface EventOut {
   spot: boolean;
   /** 找不到精確地點、只定位到鄉鎮區中心時的區域名稱，例如「雲林縣虎尾鎮」 */
   approxArea: string | null;
+  /** 固定據點每週幾開（1 = 週一 … 7 = 週日），每天則 null */
+  weekdays: number[] | null;
   /** 官方行程才有：併進來的新聞、Threads 貼文（相關報導） */
   related?: RelatedPost[];
   post: {
@@ -84,6 +89,8 @@ export interface EventOut {
     permalink: string | null;
     postedAt: number;
     text: string;
+    /** 回報的人補充的地點或時間 */
+    supplement?: string | null;
   };
 }
 
@@ -169,7 +176,7 @@ export interface Session {
  * 固定據點展開成每天一個時段：從 start_at 那天到 until（沒寫就保留 SPOT_DEFAULT_DAYS 天），
  * 每天用第一天的開放時段；沒寫幾點（00:00 開始、沒有結束）就是整天。
  */
-export function spotSessions(ex: Pick<ExtractedEvent, 'start_at' | 'end_at' | 'until'>, postedAt: number, now: number): Session[] {
+export function spotSessions(ex: Pick<ExtractedEvent, 'start_at' | 'end_at' | 'until' | 'weekdays'>, postedAt: number, now: number): Session[] {
   const start = parseIsoToUnix(ex.start_at) ?? taipeiDayStart(postedAt);
   const end = parseIsoToUnix(ex.end_at);
   const firstDay = taipeiDayStart(start);
@@ -189,7 +196,10 @@ export function spotSessions(ex: Pick<ExtractedEvent, 'start_at' | 'end_at' | 'u
   lastDay = Math.min(lastDay, firstDay + 13 * DAY_SEC, taipeiDayStart(now + MAX_FUTURE_SEC));
 
   const out: Session[] = [];
+  // 每週幾才開：其他天跳過（taipeiDay 換成星期：1 = 週一 … 7 = 週日）
+  const weekdays = ex.weekdays && ex.weekdays.length > 0 ? new Set(ex.weekdays) : null;
   for (let day = firstDay; day <= lastDay; day += DAY_SEC) {
+    if (weekdays && !weekdays.has(((new Date((day + TAIPEI_OFFSET_SEC) * 1000).getUTCDay() + 6) % 7) + 1)) continue;
     const s = { start: day + open, end: day + close, allDay, endOpen: !allDay && end === null, untilOpen };
     if (s.end > now) out.push(s);
   }
@@ -232,7 +242,9 @@ export async function locatePlaceForEvent(
     const p = area ? await geocode(env, area) : null;
     return { point: p, approxArea: p ? area : null };
   }
-  let point = await geocodeFirst(env, placeCandidates(placeQuery, placeText));
+  // 只寫了行政區（「中正萬華區」）不拿去查，不然會對到某個區的中心、看起來像精確地點
+  const vague = isAreaOnly(placeQuery) && isAreaOnly(placeText ?? placeQuery);
+  let point = vague ? null : await geocodeFirst(env, placeCandidates(placeQuery, placeText));
   // 精確地點查不到時退到鄉鎮區中心，標成約略位置
   const area = point ? null : adminArea(placeQuery, placeText);
   if (area) point = await geocode(env, area);
@@ -256,6 +268,8 @@ export interface PlannedEvent {
   approx_area: string | null;
   end_open: boolean;
   until_open: boolean;
+  /** 固定據點每週幾開（1–7），每天則 null */
+  weekdays?: number[] | null;
 }
 
 /** 判讀出來的一筆：plan 是可以寫進雷達的資料；沒有 plan 時 reason 寫原因（no_place、duplicate_of_3…）。group 是貼文裡第幾個地點或時段 */
@@ -318,6 +332,7 @@ async function planEvent(
       approx_area: approxArea,
       end_open: session ? session.endOpen : !parseIsoToUnix(ex.end_at),
       until_open: !!session?.untilOpen,
+      weekdays: session ? (ex.weekdays ?? null) : null,
     },
     reason: 'planned',
   };
@@ -332,8 +347,8 @@ export async function insertPlanned(env: Env, postId: string, p: PlannedEvent, n
   }
   const status: EventStatus = p.lat === null ? 'unlocated' : p.start_at <= now ? 'active' : 'upcoming';
   const event = await env.DB.prepare(
-    `INSERT INTO events (post_id, kind, title, item, start_at, end_at, place_text, place_query, lat, lng, status, confidence, all_day, spot, approx_area, end_open, until_open, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING *`,
+    `INSERT INTO events (post_id, kind, title, item, start_at, end_at, place_text, place_query, lat, lng, status, confidence, all_day, spot, approx_area, end_open, until_open, weekdays, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING *`,
   )
     .bind(
       postId,
@@ -353,6 +368,7 @@ export async function insertPlanned(env: Env, postId: string, p: PlannedEvent, n
       p.approx_area,
       p.end_open ? 1 : 0,
       p.until_open ? 1 : 0,
+      p.weekdays?.length ? p.weekdays.join(',') : null,
       now,
       now,
     )
@@ -362,7 +378,8 @@ export async function insertPlanned(env: Env, postId: string, p: PlannedEvent, n
 
 /** 對單一貼文跑 LLM 抽取、定位，列出每個地點或時段要建的事件（還沒寫進雷達）；early 是整則貼文就不行的原因 */
 export async function planPost(env: Env, post: PostRow, now = nowSec()): Promise<{ items: PlanItem[]; early: string | null }> {
-  const { extraction, raw, garbled } = await extractFromPost(env, post.text, post.posted_at, now);
+  const text = post.supplement ? `${post.text}\n\n【回報的人補充】${post.supplement}` : post.text;
+  const { extraction, raw, garbled } = await extractFromPost(env, text, post.posted_at, now);
   await env.DB.prepare('UPDATE posts SET processed_at = ?, extraction = ? WHERE id = ?').bind(now, raw, post.id).run();
 
   if (garbled) return { items: [], early: 'garbled' };
@@ -377,6 +394,8 @@ export async function planPost(env: Env, post: PostRow, now = nowSec()): Promise
       items.push({ group, ...(await planEvent(env, ex, now, deadline)) });
       continue;
     }
+    // 模型漏掉「每週二、四」時從貼文補：只有一個固定據點時才補，免得套到別的地點
+    if (!ex.weekdays && extraction.events.filter((e) => e.spot).length === 1) ex.weekdays = weekdaysFromText(text);
     const sessions = spotSessions(ex, post.posted_at, now);
     if (sessions.length === 0) items.push({ group, plan: null, reason: 'already_over' });
     // 每天一個時段，地點都一樣：只定位一次
@@ -568,9 +587,9 @@ export interface ListQuery {
   keywords?: string[];
 }
 
-type JoinedRow = EventRow & { username: string | null; permalink: string | null; text: string; posted_at: number; keyword: string | null; source: string; ended_reports: number | null };
+type JoinedRow = EventRow & { username: string | null; permalink: string | null; text: string; supplement?: string | null; posted_at: number; keyword: string | null; source: string; ended_reports: number | null };
 
-const JOINED_SELECT = `SELECT e.*, p.username, p.permalink, p.text, p.posted_at, p.keyword, p.source,
+const JOINED_SELECT = `SELECT e.*, p.username, p.permalink, p.text, p.supplement, p.posted_at, p.keyword, p.source,
     (SELECT COUNT(*) FROM ended_reports r WHERE r.event_id = e.id) AS ended_reports
   FROM events e JOIN posts p ON p.id = e.post_id`;
 
@@ -594,7 +613,8 @@ export function toEventOut(r: JoinedRow, now: number): EventOut {
     endedReports: r.ended_reports ?? 0,
     spot: r.spot === 1,
     approxArea: r.approx_area ?? null,
-    post: { id: r.post_id, source: r.source, username: r.username, permalink: r.permalink, postedAt: r.posted_at, text: r.text },
+    weekdays: r.weekdays ? r.weekdays.split(',').map(Number) : null,
+    post: { id: r.post_id, source: r.source, username: r.username, permalink: r.permalink, postedAt: r.posted_at, text: r.text, supplement: r.supplement ?? null },
   };
 }
 

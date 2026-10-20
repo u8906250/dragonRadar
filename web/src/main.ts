@@ -1,5 +1,5 @@
 import './styles.css';
-import { addKeyword, collectLetter, confirmReport, rejectReport, deleteBottle, dropBottle, recycleBottle, fetchBottles, fetchEvents, fetchHealth, fetchKeywords, fetchMyBottles, fetchRoutes, pickBottle, reportBottle, reportEnded, submitLink } from './api';
+import { addKeyword, collectLetter, confirmReport, rejectReport, supplementReport, deleteBottle, dropBottle, recycleBottle, fetchBottles, fetchEvents, fetchHealth, fetchKeywords, fetchMyBottles, fetchRoutes, pickBottle, reportBottle, reportEnded, submitLink } from './api';
 import { compassSupported, startCompass } from './compass';
 import { bearingDeg, compassLabel, formatKm, haversineKm, taiwanRadiusKm, type LatLng } from './geo';
 import { inShuangbei, SHUANGBEI_RINGS, shuangbeiRadiusKm } from './shuangbei';
@@ -284,9 +284,15 @@ function dayWord(unix: number, now: number): string {
 /** 貼文沒寫結束時間時的說法：不自己猜時間 */
 const openEndText = (ev: EventOut): string => (ev.kind === 'activity' ? '沒寫結束時間' : '發完為止');
 
-/** 固定據點的開放時段，例如「每天 11:00–18:00」「每天 11:00–14:00、17:00–19:00」；沒寫幾點結束就只寫開始 */
+/** 每週幾：[2, 4] →「每週二、四」，沒有就是 null */
+function weeklyText(days: number[] | null | undefined): string | null {
+  return days?.length ? `每週${days.map((d) => '一二三四五六日'[d - 1]).join('、')}` : null;
+}
+
+/** 固定據點的開放時段，例如「每天 11:00–18:00」「每週二、四 14:00–18:00」「每天 11:00–14:00、17:00–19:00」；沒寫幾點結束就只寫開始 */
 function spotHours(sessions: EventOut[]): string {
-  if (sessions.some((s) => s.allDay)) return new Set(sessions.map((s) => taipeiDay(s.startAt))).size > 1 ? '每天整天' : '整天';
+  const weekly = weeklyText(sessions[0]?.weekdays);
+  if (sessions.some((s) => s.allDay)) return weekly ? `${weekly}整天` : new Set(sessions.map((s) => taipeiDay(s.startAt))).size > 1 ? '每天整天' : '整天';
   const seen = new Set<string>();
   const parts: string[] = [];
   for (const s of [...sessions].sort((a, b) => ((a.startAt + 8 * 3600) % 86400) - ((b.startAt + 8 * 3600) % 86400))) {
@@ -296,6 +302,7 @@ function spotHours(sessions: EventOut[]): string {
   }
   // 只有一天的據點不寫「每天」
   const days = new Set(sessions.map((s) => taipeiDay(s.startAt)));
+  if (weekly) return `${weekly} ${parts.join('、')}`;
   return `${days.size > 1 || sessions.some((s) => s.untilOpen) ? '每天 ' : ''}${parts.join('、')}`;
 }
 
@@ -1226,6 +1233,7 @@ function renderDetail(items: Item[], now: number): void {
       ${routeBoxHtml(ev, now)}
       <p>類型：${it.spot ? `固定據點（${kindLabel(ev)}）` : kindLabel(ev)}<br>${ev.item ? `發放：${esc(ev.item)}<br>` : ''}${ev.keyword ? `關鍵字：#${esc(ev.keyword)}<br>` : ''}地點：${esc(placeOf(ev))}${ev.approxArea ? `<br><span class="approx-note">約略位置：只知道在${esc(ev.approxArea)}，地圖上是${esc(ev.approxArea)}的中心點，實際地點請看原文</span>` : ''}<br>時間：${it.spot ? esc(spotSchedule(it)) : ev.allDay ? `${dateFmt.format(new Date(ev.startAt * 1000))} ${allDayText(ev, false)}` : ev.endOpen ? `${fmtTime(ev.startAt)} 開始，${openEndText(ev)}` : `${fmtTime(ev.startAt)} – ${fmtTime(ev.endAt)}`}<br>距離：${ev.approxArea ? '約 ' : ''}${formatKm(it.distanceKm)}，${compassLabel(it.bearing)}方 · ${esc(timeLine(it, now))}</p>
       <blockquote>${esc(ev.post.source === 'news' ? ev.post.text.split('\n')[0] : ev.post.text.slice(0, 300))}</blockquote>
+      ${ev.post.supplement ? `<p class="muted supplement-line">回報的人補充：${esc(ev.post.supplement)}</p>` : ''}
       <p class="muted source-line">來源：${esc(sourceLabel(ev))}</p>
       ${routeOf(ev) ? '' : relatedHtml(ev.related ?? [])}
       <div class="sheet-actions">
@@ -1913,7 +1921,7 @@ const OUTCOME_TEXT: Record<SubmitResult['outcome'], string> = {
   preview: '判讀結果如下，請確認一次：',
   added: '已加入雷達：',
   duplicate: '雷達上已經有這一場了：',
-  no_place: '看得出是發放或活動，但找不到地點。地點要寫具體一點（例如「捷運市政府站 2號出口」）才能定位。',
+  no_place: '看得出是發放或活動，但貼文沒寫具體地點（或查不到），所以還沒放上雷達。知道在哪裡的話，可以在下面補充地點再判讀一次。',
   not_listed: '判讀不出時間，或是已經結束、超過 14 天後才開始，所以沒有放上雷達。',
   not_event: '這則看起來不是發放或活動。貼文要寫出在哪裡、什麼時候發放或舉辦，雷達才會收。',
   failed: '判讀暫時失敗，請稍後再貼一次。',
@@ -1940,7 +1948,7 @@ function previewWhen(p: PreviewItem): string {
   if (p.spot) {
     const hours = p.allDay ? '整天' : p.endOpen ? `${fmtTime(p.startAt)} 起（開到當天結束）` : `${fmtTime(p.startAt)}–${fmtTime(p.endAt)}`;
     const range = p.days > 1 ? `${day(p.startAt)} 到 ${day(p.lastStartAt)}，共 ${p.days} 天` : day(p.startAt);
-    return `每天 ${hours}・${range}${p.untilOpen ? '（貼文沒寫最後一天，先排這幾天，發完為止）' : ''}`;
+    return `${weeklyText(p.weekdays) ?? '每天'} ${hours}・${range}${p.untilOpen ? '（貼文沒寫最後一天，先排這幾天，發完為止）' : ''}`;
   }
   if (p.allDay) return `${day(p.startAt)} 整天`;
   return `${day(p.startAt)} ${fmtTime(p.startAt)}${p.endOpen ? ' 開始（沒寫結束時間）' : `–${fmtTime(p.endAt)}`}`;
@@ -1951,6 +1959,45 @@ function previewWhere(p: PreviewItem): string {
   if (p.lat === null || p.lng === null) return '<span class="preview-warn">找不到地點，確認了也不會出現在雷達上</span>';
   const link = `<a href="https://www.google.com/maps/search/?api=1&query=${p.lat},${p.lng}" target="_blank" rel="noopener">在地圖上看</a>`;
   return p.approxArea ? `<span class="preview-warn">只定位到${esc(p.approxArea)}（約略位置）</span>・${link}` : `已定位・${link}`;
+}
+
+/** 補充資料的表單：貼文沒寫地點或時間時，回報的人補上再判讀一次 */
+function supplementFormHtml(current: string, hidden: boolean): string {
+  return `<form class="preview-more"${hidden ? ' hidden' : ''}>
+      <textarea rows="2" maxlength="200" placeholder="例如「地點：厝邊咖啡，台北市萬華區○○路○號」「每週二、四 14:00–18:00」" aria-label="補充地點或時間">${esc(current)}</textarea>
+      <div class="sheet-actions"><button type="submit" class="btn primary">補充後再判讀</button>${hidden ? '<button type="button" class="btn" data-act="less">回上一步</button>' : ''}</div>
+      <p class="muted sheet-note small">補充的內容會跟原貼文一起判讀，放上雷達後會寫明「回報的人補充」。請只寫你確定的資訊。</p>
+    </form>`;
+}
+
+function wireSupplement(c: { postId: string; token: string }, actions: HTMLElement | null): void {
+  const form = reportResult.querySelector<HTMLFormElement>('.preview-more');
+  if (!form) return;
+  reportResult.querySelector('[data-act="more"]')?.addEventListener('click', () => {
+    form.hidden = false;
+    if (actions) actions.hidden = true;
+    form.querySelector('textarea')?.focus();
+  });
+  form.querySelector('[data-act="less"]')?.addEventListener('click', () => {
+    form.hidden = true;
+    if (actions) actions.hidden = false;
+  });
+  form.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const note = form.querySelector('textarea')?.value.trim() ?? '';
+    if (note.length < 2) {
+      showBanner(bannerEl, '請寫要補充的地點或時間', 2500);
+      return;
+    }
+    setReportBusy(true, '重新判讀中…');
+    const res = await supplementReport(c, note).finally(() => setReportBusy(false));
+    if (!res.ok) {
+      showBanner(bannerEl, res.message, 3500);
+      return;
+    }
+    if (res.data.outcome === 'preview') renderPreview(res.data);
+    else await showReportResult(res.data);
+  });
 }
 
 /** 判讀完先給回報的人看：對了才放上雷達，不對就不放並記下哪裡錯 */
@@ -1976,8 +2023,10 @@ function renderPreview(r: SubmitResult): void {
     ${dups}
     <div class="sheet-actions">
       <button type="button" class="btn primary" data-act="confirm">對，放上雷達</button>
+      <button type="button" class="btn" data-act="more">補充資料</button>
       <button type="button" class="btn" data-act="wrong">不對</button>
     </div>
+    ${supplementFormHtml(r.supplement ?? '', true)}
     <form class="preview-wrong" hidden>
       <textarea rows="2" maxlength="300" placeholder="哪裡判斷錯了？（選填，例如「地點是文化路 140 號」「只有 10/21 一天」）" aria-label="哪裡判斷錯了"></textarea>
       <div class="sheet-actions"><button type="submit" class="btn primary">送出，不放上雷達</button><button type="button" class="btn" data-act="back">回上一步</button></div>
@@ -1993,6 +2042,7 @@ function renderPreview(r: SubmitResult): void {
     }
     await showReportResult(res.data);
   });
+  wireSupplement(c, actions);
   reportResult.querySelector('[data-act="wrong"]')?.addEventListener('click', () => {
     if (!wrongForm || !actions) return;
     wrongForm.hidden = false;
@@ -2048,7 +2098,14 @@ async function showReportResult(data: SubmitResult): Promise<void> {
       return `<li><button type="button" data-id="${ev.id}"><b>${kindLabel(ev)}｜${esc(titleOf(ev))}</b><small>${esc(placeLine(ev))} · ${esc(when)}</small></button></li>`;
     })
     .join('');
-  setReportMsg(`<p class="msg">${esc(head)}</p>${list ? `<ul class="report-events">${list}</ul>` : ''}`);
+  // 還沒放上雷達（找不到地點、判讀不出時間）：可以補充資料再判讀一次
+  const canSupplement = !!data.confirm && (outcome === 'no_place' || outcome === 'not_listed' || outcome === 'not_event');
+  setReportMsg(
+    `<p class="msg">${esc(head)}</p>${list ? `<ul class="report-events">${list}</ul>` : ''}${
+      canSupplement ? `${data.supplement ? `<p class="muted sheet-note">你補充的：${esc(data.supplement)}</p>` : ''}${supplementFormHtml(data.supplement ?? '', false)}` : ''
+    }`,
+  );
+  if (canSupplement && data.confirm) wireSupplement(data.confirm, null);
   for (const b of reportResult.querySelectorAll<HTMLButtonElement>('[data-id]')) {
     b.addEventListener('click', () => {
       reportSheet.hidden = true;

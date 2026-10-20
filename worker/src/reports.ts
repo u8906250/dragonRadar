@@ -70,6 +70,8 @@ export interface PreviewItem {
   /** 固定據點排了幾天、最後一天的開始時間 */
   days: number;
   lastStartAt: number;
+  /** 固定據點每週幾開（1–7），每天則 null */
+  weekdays: number[] | null;
 }
 
 export interface SubmitResult {
@@ -80,9 +82,12 @@ export interface SubmitResult {
   /** 已經在雷達上的（包括重複的那一場） */
   events: EventOut[];
   permalink: string;
-  /** outcome = 'preview' 時：判讀結果，和確認用的代碼 */
+  /** outcome = 'preview' 時：判讀結果 */
   preview?: PreviewItem[];
+  /** 還沒放上雷達的回報：確認、說判讀錯了、補充資料都用這組代碼 */
   confirm?: { postId: string; token: string };
+  /** 回報的人補充過的資料 */
+  supplement?: string | null;
 }
 
 /** 判讀好、還沒寫進雷達的資料，存在 posts.confirm_plan */
@@ -117,19 +122,23 @@ export function previewOf(items: PlanItem[], now: number): PreviewItem[] {
       untilOpen: p.until_open,
       days: plans.length,
       lastStartAt: last.start_at,
+      weekdays: p.weekdays ?? null,
     };
   });
 }
 
-/** 有預覽就請回報的人確認；什麼都放不上去（不是發放、已結束、全部重複）就直接回傳結果 */
+/**
+ * 有預覽就請回報的人確認；什麼都放不上去（找不到地點、不是發放、已結束）就直接回傳原因。
+ * 兩種都附確認代碼：貼文沒寫地點或時間時，回報的人可以補充資料再判讀一次。
+ */
 async function previewResult(env: Env, post: PostRow, plan: StoredPlan, existed: boolean, now: number): Promise<SubmitResult> {
-  const permalink = post.permalink ?? '';
-  if (plan.early) return { existed, outcome: summarize([plan.early]), reasons: [plan.early], events: [], permalink };
+  const base = { existed, permalink: post.permalink ?? '', confirm: { postId: post.id, token: await confirmToken(env, post.id) }, supplement: post.supplement ?? null };
+  if (plan.early) return { ...base, outcome: summarize([plan.early]), reasons: [plan.early], events: [] };
   const reasons = plan.items.filter((it) => !it.plan).map((it) => it.reason);
   const events = await eventsForResult(env, post.id, reasons, now);
   const preview = previewOf(plan.items, now);
-  if (preview.length === 0) return { existed, outcome: summarize(reasons), reasons, events, permalink };
-  return { existed, outcome: 'preview', reasons, events, permalink, preview, confirm: { postId: post.id, token: await confirmToken(env, post.id) } };
+  if (preview.length === 0) return { ...base, outcome: summarize(reasons), reasons, events };
+  return { ...base, outcome: 'preview', reasons, events, preview };
 }
 
 const readPlan = (post: PostRow): StoredPlan | null => {
@@ -193,10 +202,12 @@ export async function submitLink(env: Env, input: string, ip: string, now: numbe
   const stored = waiting ? readPlan(existing) : null;
   if (existing && waiting && stored && stored.early !== 'extraction_failed') return previewResult(env, existing, stored, true, now);
   if (existing && !waiting) {
-    const last = await env.DB.prepare('SELECT result FROM submissions WHERE post_id = ? AND result IS NOT NULL ORDER BY id DESC LIMIT 1')
+    const last = await env.DB.prepare("SELECT result FROM submissions WHERE post_id = ? AND result IS NOT NULL AND result != '\"supplement\"' ORDER BY id DESC LIMIT 1")
       .bind(postId)
       .first<{ result: string }>();
-    const reasons = last ? (JSON.parse(last.result) as string[]) : [];
+    // 補充資料的紀錄存的是 "supplement"，不是判讀結果
+    const parsed = last ? (JSON.parse(last.result) as unknown) : [];
+    const reasons = Array.isArray(parsed) ? parsed.filter((x): x is string => typeof x === 'string') : [];
     const events = await eventsForResult(env, postId, reasons, now);
     return { existed: true, outcome: existedOutcome(reasons, events.length), reasons, events, permalink: existing.permalink ?? '' };
   }
@@ -263,6 +274,36 @@ export async function confirmLink(env: Env, body: { postId?: unknown; token?: un
     env.DB.prepare('UPDATE submissions SET result = ? WHERE id = (SELECT MAX(id) FROM submissions WHERE post_id = ?)').bind(JSON.stringify(result.reasons), post.id),
   ]);
   return { existed: false, outcome: summarize(result.reasons), reasons: result.reasons, events: await eventsForResult(env, post.id, result.reasons, now), permalink };
+}
+
+/** 一則貼文最多補充幾次（每次都要再跑一次 AI） */
+const SUPPLEMENTS_PER_POST = 5;
+
+/**
+ * 回報的人補充地點或時間（貼文沒寫、判讀不出來時）：接在貼文後面再判讀一次，回傳新的預覽。
+ * 補充的內容會顯示在雷達的詳細資料上（「回報的人補充」），看的人知道哪些不是原貼文寫的。
+ */
+export async function supplementLink(env: Env, body: { postId?: unknown; token?: unknown; note?: unknown }, ip: string, now: number): Promise<SubmitResult> {
+  const post = await checkConfirm(env, body);
+  if (post.confirm_state === 'confirmed') throw new ReportError(409, '這則已經放上雷達了，不能再補充');
+  const note = typeof body.note === 'string' ? body.note.replace(/\s+/g, ' ').trim().slice(0, 200) : '';
+  if (note.length < 2) throw new ReportError(400, '請寫要補充的地點或時間');
+  const mine = await countSince(env, 'SELECT COUNT(*) AS n FROM submissions WHERE ip_hash = ? AND created_at > ?', [ip, now - 3600]);
+  if (mine >= SUBMIT_PER_IP_PER_HOUR) throw new ReportError(429, '回報太頻繁了，請過一陣子再試');
+  const times = await countSince(env, "SELECT COUNT(*) AS n FROM submissions WHERE post_id = ? AND result = '\"supplement\"'", [post.id]);
+  if (times >= SUPPLEMENTS_PER_POST) throw new ReportError(429, '這則已經補充太多次了，請聯絡管理者');
+  await env.DB.prepare("INSERT INTO submissions (post_id, ip_hash, result, created_at) VALUES (?, ?, '\"supplement\"', ?)").bind(post.id, ip, now).run();
+
+  const updated: PostRow = { ...post, supplement: note };
+  let plan: StoredPlan;
+  try {
+    plan = await planPost(env, updated, now);
+  } catch (e) {
+    console.warn(`supplement plan failed for ${post.id}: ${String(e)}`);
+    throw new ReportError(503, '判讀暫時失敗，請稍後再試');
+  }
+  await env.DB.prepare("UPDATE posts SET supplement = ?, confirm_plan = ?, confirm_state = 'pending' WHERE id = ?").bind(note, JSON.stringify(plan), post.id).run();
+  return previewResult(env, updated, plan, false, now);
 }
 
 /** 回報的人說判讀錯了：不放上雷達，記下哪裡錯給管理者看 */

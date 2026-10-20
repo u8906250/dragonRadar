@@ -1,3 +1,5 @@
+import { weekdaysFromText } from '../src/extract';
+import { isAreaOnly } from '../src/geocode';
 import { existedOutcome, previewOf } from '../src/reports';
 import { describe, expect, it } from 'vitest';
 import { detectEnded, spotSessions } from '../src/events';
@@ -320,5 +322,36 @@ describe('existedOutcome', () => {
     expect(existedOutcome(['upcoming'], 0)).toBe('not_listed');
     expect(existedOutcome(['not_event'], 0)).toBe('not_event');
     expect(existedOutcome([], 0)).toBe('not_listed');
+  });
+});
+
+describe('isAreaOnly', () => {
+  it('treats district names alone as too vague', () => {
+    expect(isAreaOnly('台北市 中正萬華區')).toBe(true);
+    expect(isAreaOnly('中正萬華區')).toBe(true);
+    expect(isAreaOnly('台北市大安區')).toBe(true);
+  });
+  it('keeps real place names', () => {
+    expect(isAreaOnly('南港軟體園區')).toBe(false);
+    expect(isAreaOnly('信義計畫區')).toBe(false);
+    expect(isAreaOnly('台北市 厝邊咖啡')).toBe(false);
+  });
+});
+
+describe('weekdays', () => {
+  it('reads 每週 patterns but not date notes', () => {
+    expect(weekdaysFromText('💧領取時間｜每週二、四 14:00–18:00')).toEqual([2, 4]);
+    expect(weekdaysFromText('每週一至五 10:00-17:00')).toEqual([1, 2, 3, 4, 5]);
+    expect(weekdaysFromText('每週六日下午')).toEqual([6, 7]);
+    expect(weekdaysFromText('每星期三、星期五')).toEqual([3, 5]);
+    expect(weekdaysFromText('10/21（週二）上午 9 點開始')).toBeNull();
+    expect(weekdaysFromText('每週一到週日')).toBeNull();
+  });
+  it('only makes sessions on those days', () => {
+    // 2026-10-20 是週二
+    const posted = Date.parse('2026-10-20T08:00:00+08:00') / 1000;
+    const s = spotSessions({ start_at: '2026-10-20T14:00:00+08:00', end_at: '2026-10-20T18:00:00+08:00', until: null, weekdays: [2, 4] }, posted, posted);
+    const days = s.map((x) => new Date((x.start + 8 * 3600) * 1000).toISOString().slice(0, 10));
+    expect(days).toEqual(['2026-10-20', '2026-10-22']);
   });
 });

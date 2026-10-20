@@ -30,6 +30,16 @@ export function isAdminOnly(s: string): boolean {
 }
 
 /**
+ * 只寫了一個或幾個行政區（「中正萬華區」「台北市 大安區」）、沒有店名或地址：不能當成精確地點，
+ * 不然 Nominatim 會把它對到某個區的中心。「南港軟體園區」「信義計畫區」這種地名不算。
+ */
+export function isAreaOnly(s: string): boolean {
+  if (isAdminOnly(s)) return true;
+  const t = s.replace(CITY_ANY_RE, '').replace(/[市縣]/, '').replace(/[\s,，、#＃]/g, '');
+  return /^(?:[\u4e00-\u9fff]{2}){2,3}區$/.test(t) && !/(園|社|特|營|校|景|護|商|業|計畫)區$/.test(t);
+}
+
+/**
  * 精確地點都查不到時的退路：縣市加鄉鎮區，例如「雲林縣虎尾鎮」「台東縣 台東市」。
  * 只有縣市（例如「台北市」）範圍太大，不算。
  */

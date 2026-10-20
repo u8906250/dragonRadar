@@ -387,7 +387,10 @@ a.chip { display: inline-flex; align-items: center; text-decoration: none; }
 .report-preview li { font-size: 14px; background: var(--card); border: var(--border-w) solid var(--line); border-radius: var(--card-radius); padding: 10px 12px; }
 .report-preview small { display: block; color: var(--muted); margin-top: 3px; line-height: 1.5; }
 .report-preview .preview-warn { color: var(--highlight); font-weight: 700; }
-.preview-wrong { display: flex; flex-direction: column; gap: 8px; margin-top: 4px; }
+.preview-wrong, .preview-more { display: flex; flex-direction: column; gap: 8px; margin-top: 4px; }
+.preview-more[hidden], .preview-wrong[hidden] { display: none; }
+.preview-more textarea { font: inherit; font-size: 16px; color: var(--text); background: var(--card); resize: none; border: var(--border-w) solid var(--line); border-radius: var(--card-radius); padding: 10px 12px; }
+.supplement-line { font-size: 13px; margin: -4px 0 10px; }
 .preview-wrong textarea { font: inherit; font-size: 16px; color: var(--text); background: var(--card); resize: none; border: var(--border-w) solid var(--line); border-radius: var(--card-radius); padding: 10px 12px; }
 .report-tips { padding-left: 18px; }
 .report-tips li { margin-bottom: 4px; }
