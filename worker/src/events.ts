@@ -80,6 +80,8 @@ export interface EventOut {
   approxArea: string | null;
   /** 固定據點每週幾開（1 = 週一 … 7 = 週日），每天則 null */
   weekdays: number[] | null;
+  /** 固定據點才有：第一個時段開始的時間，還沒到就是「還沒開始」（不是休息中） */
+  firstStartAt?: number;
   /** 官方行程才有：併進來的新聞、Threads 貼文（相關報導） */
   related?: RelatedPost[];
   post: {
@@ -649,12 +651,27 @@ export async function listEvents(env: Env, q: ListQuery): Promise<EventOut[]> {
     .bind(...binds)
     .all<JoinedRow>();
   const out = r.results.map((row) => toEventOut(row, q.now));
+  await fillFirstStart(env, out);
   const official = [...new Set(out.filter((e) => e.post.source === 'official').map((e) => e.post.id))];
   if (official.length > 0) {
     const related = await relatedPosts(env, official);
     for (const e of out) if (related.has(e.post.id)) e.related = related.get(e.post.id);
   }
   return out;
+}
+
+/** 固定據點第一個時段的開始時間：已經過去的時段不在清單裡，要另外查（同一則貼文、同一地點） */
+async function fillFirstStart(env: Env, out: EventOut[]): Promise<void> {
+  const ids = [...new Set(out.filter((e) => e.spot).map((e) => e.post.id))];
+  if (ids.length === 0) return;
+  const r = await env.DB.prepare(
+    `SELECT post_id, place_text, MIN(start_at) AS first FROM events
+      WHERE spot = 1 AND post_id IN (${ids.map(() => '?').join(',')}) GROUP BY post_id, place_text`,
+  )
+    .bind(...ids)
+    .all<{ post_id: string; place_text: string; first: number }>();
+  const first = new Map(r.results.map((x) => [`${x.post_id}|${x.place_text}`, x.first]));
+  for (const e of out) if (e.spot) e.firstStartAt = first.get(`${e.post.id}|${e.placeText}`) ?? e.startAt;
 }
 
 /** 併進各官方貼文的新聞、Threads 貼文，同一則貼文只列一次 */

@@ -322,7 +322,9 @@ function spotLine(it: Item, now: number): string {
     return ev.endOpen ? `營業中・${until}` : `營業中・今天到 ${fmtTime(ev.endAt)}・${until}`;
   }
   const next = ev.allDay ? `${dayWord(ev.startAt, now)}開放` : `${dayWord(ev.startAt, now)} ${fmtTime(ev.startAt)} 開始`;
-  return `休息中・${next}・${until}`;
+  // 第一個時段還沒到：是還沒開始，不是休息中
+  const notYet = (ev.firstStartAt ?? Math.min(...(it.spot?.sessions ?? [ev]).map((x) => x.startAt))) > now;
+  return `${notYet ? '還沒開始' : '休息中'}・${next}・${until}`;
 }
 
 /** 沒有開始時間的：整天，或知道最晚到幾點（例如加油點到車隊經過為止） */

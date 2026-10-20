@@ -36,6 +36,8 @@ export interface EventOut {
   approxArea?: string | null;
   /** 固定據點每週幾開（1 = 週一 … 7 = 週日），每天則 null */
   weekdays?: number[] | null;
+  /** 固定據點第一個時段開始的時間，還沒到就是「還沒開始」 */
+  firstStartAt?: number;
   /** 官方行程才有：講同一場活動、已併進來的新聞與貼文 */
   related?: RelatedPost[];
   post: {
