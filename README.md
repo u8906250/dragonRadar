@@ -209,6 +209,7 @@ Cloudflare D1 偶爾回「D1_ERROR: internal error」這類暫時性錯誤。`sr
 | GET | `/api/admin/posts` | 最近 100 則原始貼文與解析結果 |
 | DELETE | `/api/admin/posts/:id` | 刪除一則貼文與它的事件 |
 | DELETE | `/api/admin/posts/:id/supplement` | 拿掉回報的人補充的資料（重複或寫錯），雷達上的事件不動 |
+| POST | `/api/admin/posts/:id/weekdays` | 固定據點只在每週幾開：`{ weekdays: [2, 3, 4, 5, 6, 7] }`（1 = 週一），其他天還沒結束的時段下架 |
 | POST | `/api/admin/events/:id/locate` | 手動修正位置：`{ lat, lng }` 或 `{ query }`，加 `approx_area` 標成約略位置 |
 | POST | `/api/admin/posts/:id/reprocess` | 用目前的規則重新判讀一則貼文（還沒結束的舊事件會先刪掉） |
 | POST | `/api/admin/extract` | 只判讀不存檔，可指定 models 比較 |

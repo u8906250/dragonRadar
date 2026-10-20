@@ -286,7 +286,11 @@ const openEndText = (ev: EventOut): string => (ev.kind === 'activity' ? '沒寫�
 
 /** 每週幾：[2, 4] →「每週二、四」，沒有就是 null */
 function weeklyText(days: number[] | null | undefined): string | null {
-  return days?.length ? `每週${days.map((d) => '一二三四五六日'[d - 1]).join('、')}` : null;
+  if (!days?.length) return null;
+  const name = (d: number): string => '一二三四五六日'[d - 1];
+  // 只休一天：「每天（週一公休）」比列出六天好讀
+  if (days.length === 6) return `每天（週${name([1, 2, 3, 4, 5, 6, 7].find((d) => !days.includes(d)) as number)}公休）`;
+  return `每週${days.map(name).join('、')}`;
 }
 
 /** 固定據點的開放時段，例如「每天 11:00–18:00」「每週二、四 14:00–18:00」「每天 11:00–14:00、17:00–19:00」；沒寫幾點結束就只寫開始 */

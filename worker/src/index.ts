@@ -359,6 +359,27 @@ async function handleAdmin(req: Request, env: Env, _ctx: ExecutionContext, path:
     return jsonResponse({ event: ev });
   }
 
+  // 固定據點只在每週幾開（例如貼文沒寫、查到週一公休）：{ weekdays: [2, 3, 4, 5, 6, 7] }，
+  // 其他天還沒結束的時段下架（ended_reason = 'closed_day'），留下的時段標上每週幾
+  const wdMatch = /^\/api\/admin\/posts\/([^/]+)\/weekdays$/.exec(path);
+  if (req.method === 'POST' && wdMatch) {
+    const id = decodeURIComponent(wdMatch[1]);
+    const body = await readJson<{ weekdays?: unknown }>(req);
+    const days = Array.isArray(body.weekdays) ? [...new Set(body.weekdays.map(Number))].filter((d) => Number.isInteger(d) && d >= 1 && d <= 7).sort() : [];
+    if (days.length === 0 || days.length === 7) throw new HttpError(400, 'weekdays 要是 1–7（週一到週日）裡的幾天，不能全選');
+    const r = await env.DB.prepare("SELECT id, start_at FROM events WHERE post_id = ? AND spot = 1 AND status IN ('upcoming', 'active')").bind(id).all<{ id: number; start_at: number }>();
+    // 台北時間的星期幾：1 = 週一 … 7 = 週日
+    const weekday = (t: number): number => ((Math.floor((t + 8 * 3600) / 86400) + 3) % 7) + 1;
+    const closed = r.results.filter((e) => !days.includes(weekday(e.start_at))).map((e) => e.id);
+    const kept = r.results.filter((e) => days.includes(weekday(e.start_at))).map((e) => e.id);
+    const stmts = [
+      ...closed.map((eid) => env.DB.prepare("UPDATE events SET status = 'ended', ended_reason = 'closed_day', updated_at = ? WHERE id = ?").bind(now, eid)),
+      ...kept.map((eid) => env.DB.prepare('UPDATE events SET weekdays = ?, updated_at = ? WHERE id = ?').bind(days.join(','), now, eid)),
+    ];
+    if (stmts.length > 0) await env.DB.batch(stmts);
+    return jsonResponse({ post_id: id, weekdays: days, closed, kept: kept.length });
+  }
+
   // 拿掉回報的人補充的資料（重複或寫錯）：只改詳細資料上的顯示，雷達上的事件不動
   const supDel = /^\/api\/admin\/posts\/([^/]+)\/supplement$/.exec(path);
   if (req.method === 'DELETE' && supDel) {
