@@ -442,8 +442,8 @@ function render(): void {
   const all = computeItems(now);
   const spotTotal = all.filter((it) => it.spot).length;
   const items = showSpots ? all : all.filter((it) => !it.spot);
-  // 車掃路線上的點出發前也畫（淡色），看得到路線經過哪裡；「雙北」時雙北以外的不畫
-  const visible = items.filter((it) => (it.phase !== 'later' || routeOf(it.ev)) && (scaleSetting !== 'region' || inScope(it.ev, it.distanceKm)));
+  // 車掃路線上的點出發前也畫（淡色），看得到路線經過哪裡；固定據點還沒開始也畫（淡色），跟清單一致；「雙北」時雙北以外的不畫
+  const visible = items.filter((it) => (it.phase !== 'later' || routeOf(it.ev) || it.spot) && (scaleSetting !== 'region' || inScope(it.ev, it.distanceKm)));
   updateOutline();
   filterRow.hidden = spotTotal === 0;
   spotToggle.textContent = `${showSpots ? '✓ ' : ''}顯示固定據點（${spotTotal}）`;
@@ -458,8 +458,8 @@ function render(): void {
       approx: !!it.ev.approxArea,
       distanceKm: it.distanceKm,
       bearing: it.bearing,
-      // 還沒出發的車掃路線點用「即將開始」的淡色畫
-      phase: it.phase === 'later' ? 'soon' : it.phase,
+      // 還沒出發的車掃路線點用「即將開始」的淡色畫；還沒開的據點跟休息中的一樣淡
+      phase: it.phase === 'later' ? (it.spot ? 'closed' : 'soon') : it.phase,
       label: titleOf(it.ev),
       // 據點整天都開著，標籤只在選取時顯示，免得蓋掉單次的發放
       showLabel: (it.phase === 'active' && !it.spot) || it.ev.id === selectedId,
