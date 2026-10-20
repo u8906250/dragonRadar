@@ -2,7 +2,7 @@ import { untilInText, weekdaysFromText } from '../src/extract';
 import { isAreaOnly } from '../src/geocode';
 import { existedOutcome, previewOf } from '../src/reports';
 import { describe, expect, it } from 'vitest';
-import { detectEnded, spotSessions } from '../src/events';
+import { detectEnded, spotMergeMode, spotSessions } from '../src/events';
 import { buildMessages, normalizeExtraction } from '../src/extract';
 import { parseThreadsTimestamp } from '../src/threads';
 import { parseIsoToUnix } from '../src/util';
@@ -310,6 +310,19 @@ describe('previewOf', () => {
     expect(out).toHaveLength(1);
     expect(out[0]).toMatchObject({ days: 2, startAt: 1000 + day, lastStartAt: 1000 + 2 * day, spot: true, untilOpen: true });
   });
+  it('tells the reporter when the spot is already on the radar', () => {
+    const merge = { mode: 'replace' as const, postId: 'spot-x', placeText: '蘭鄉排骨飯', eventId: 75, title: '蘭鄉排骨飯發飄帶' };
+    const out = previewOf([{ group: 0, reason: 'planned', plan: { ...base, start_at: 3000, end_at: 4000 }, merge }], 2500);
+    expect(out[0].update).toEqual({ mode: 'replace', title: '蘭鄉排骨飯發飄帶' });
+  });
+});
+
+describe('spotMergeMode', () => {
+  it('replaces only when the same account posts again', () => {
+    expect(spotMergeMode('psalmnprovers', 'PsalmNProvers')).toBe('replace');
+    expect(spotMergeMode('someone', 'psalmnprovers')).toBe('attach');
+    expect(spotMergeMode(null, null)).toBe('attach');
+  });
 });
 
 describe('existedOutcome', () => {
@@ -317,6 +330,7 @@ describe('existedOutcome', () => {
     expect(existedOutcome([], 14)).toBe('added');
     expect(existedOutcome(['unlocated', 'unlocated'], 3)).toBe('added');
     expect(existedOutcome(['duplicate_of_3'], 1)).toBe('duplicate');
+    expect(existedOutcome(['attached_to_75', 'attached_to_75'], 1)).toBe('attached');
   });
   it('does not claim it is on the radar when nothing is there', () => {
     expect(existedOutcome(['upcoming'], 0)).toBe('not_listed');

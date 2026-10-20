@@ -102,6 +102,8 @@ export interface RelatedPost {
   title: string;
   url: string | null;
   postedAt: number;
+  /** 固定據點才有：previous 同一個帳號之前的貼文（已被取代），related 別人提到這個據點的貼文 */
+  role?: 'previous' | 'related';
 }
 
 export const DEFAULT_DURATION_SEC = 2 * 3600;
@@ -276,22 +278,53 @@ export interface PlannedEvent {
   weekdays?: number[] | null;
 }
 
+/**
+ * 雷達上已經有同一個固定據點（同地點、還沒結束）時的處理：
+ * replace 同一個帳號的新貼文，據點改成以新貼文為準；attach 別人的貼文，只附在據點的詳細資料。
+ */
+export interface SpotMerge {
+  mode: 'replace' | 'attach';
+  /** 雷達上那個據點的貼文、地點文字、其中一筆事件（點了跳過去） */
+  postId: string;
+  placeText: string;
+  eventId: number;
+  title: string;
+}
+
 /** 判讀出來的一筆：plan 是可以寫進雷達的資料；沒有 plan 時 reason 寫原因（no_place、duplicate_of_3…）。group 是貼文裡第幾個地點或時段 */
 export interface PlanItem {
   group: number;
   plan: PlannedEvent | null;
   reason: string;
+  merge?: SpotMerge;
 }
 
-/** 同一場可能被多篇貼文找到：同類型、同地點（約 150 m 內）、開始時間差 30 分鐘內就視為重複 */
-async function findDuplicate(env: Env, kind: EventKind, start: number, lat: number, lng: number): Promise<number | null> {
+/** 同一場可能被多篇貼文找到：同類型、同地點（約 150 m 內）、開始時間差 30 分鐘內就視為重複。excludePost 的事件不算（要被取代的據點） */
+async function findDuplicate(env: Env, kind: EventKind, start: number, lat: number, lng: number, excludePost?: string): Promise<number | null> {
   const dup = await env.DB.prepare(
     `SELECT id FROM events WHERE status IN ('upcoming', 'active') AND kind = ?
-       AND ABS(start_at - ?) <= ? AND lat BETWEEN ? AND ? AND lng BETWEEN ? AND ? LIMIT 1`,
+       AND ABS(start_at - ?) <= ? AND lat BETWEEN ? AND ? AND lng BETWEEN ? AND ? AND post_id != ? LIMIT 1`,
   )
-    .bind(kind, start, DUP_WINDOW_SEC, lat - DUP_DEG, lat + DUP_DEG, lng - DUP_DEG, lng + DUP_DEG)
+    .bind(kind, start, DUP_WINDOW_SEC, lat - DUP_DEG, lat + DUP_DEG, lng - DUP_DEG, lng + DUP_DEG, excludePost ?? '')
     .first<{ id: number }>();
   return dup?.id ?? null;
+}
+
+/** 雷達上同地點（約 150 m 內）、還沒結束的固定據點，不算這則貼文自己的 */
+async function findSpotAt(env: Env, kind: EventKind, lat: number, lng: number, ownPostId: string): Promise<{ id: number; post_id: string; place_text: string; title: string; username: string | null } | null> {
+  return env.DB.prepare(
+    `SELECT e.id, e.post_id, e.place_text, e.title, p.username FROM events e JOIN posts p ON p.id = e.post_id
+      WHERE e.spot = 1 AND e.status IN ('upcoming', 'active') AND e.kind = ? AND e.merged_into IS NULL
+        AND e.lat BETWEEN ? AND ? AND e.lng BETWEEN ? AND ? AND e.post_id != ?
+      ORDER BY e.start_at LIMIT 1`,
+  )
+    .bind(kind, lat - DUP_DEG, lat + DUP_DEG, lng - DUP_DEG, lng + DUP_DEG, ownPostId)
+    .first();
+}
+
+/** 同一個帳號才取代（大小寫不分）；沒有帳號的一律只附上去 */
+export function spotMergeMode(newUser: string | null | undefined, oldUser: string | null | undefined): 'replace' | 'attach' {
+  return newUser && oldUser && newUser.toLowerCase() === oldUser.toLowerCase() ? 'replace' : 'attach';
 }
 
 async function planEvent(
@@ -301,6 +334,7 @@ async function planEvent(
   deadline: number,
   session?: Session,
   located?: { point: GeoPoint | null; approxArea: string | null },
+  excludePost?: string,
 ): Promise<{ plan: PlannedEvent | null; reason: string }> {
   if (ex.confidence < MIN_CONFIDENCE) return { plan: null, reason: 'low_confidence' };
   const start = session ? session.start : parseIsoToUnix(ex.start_at);
@@ -316,7 +350,7 @@ async function planEvent(
 
   const { point, approxArea } = located ?? (await locatePlaceForEvent(env, placeQuery, ex.place_text, deadline));
   if (point && !approxArea) {
-    const dup = await findDuplicate(env, ex.kind, start, point.lat, point.lng);
+    const dup = await findDuplicate(env, ex.kind, start, point.lat, point.lng, excludePost);
     if (dup !== null) return { plan: null, reason: `duplicate_of_${dup}` };
   }
   return {
@@ -407,7 +441,12 @@ export async function planPost(env: Env, post: PostRow, now = nowSec()): Promise
     // 每天一個時段，地點都一樣：只定位一次
     const placeQuery = ex.place_query ?? ex.place_text;
     const located = sessions.length > 0 && placeQuery ? await locatePlaceForEvent(env, placeQuery, ex.place_text ?? ex.place_query, deadline) : undefined;
-    for (const session of sessions) items.push({ group, ...(await planEvent(env, ex, now, deadline, session, located)) });
+    // 雷達上已經有這個據點：同一個帳號的新貼文取代它，別人的貼文附上去；舊據點的時段不算重複
+    const old = located?.point && !located.approxArea ? await findSpotAt(env, ex.kind, located.point.lat, located.point.lng, post.id) : null;
+    const merge: SpotMerge | undefined = old
+      ? { mode: spotMergeMode(post.username, old.username), postId: old.post_id, placeText: old.place_text, eventId: old.id, title: old.title }
+      : undefined;
+    for (const session of sessions) items.push({ group, ...(await planEvent(env, ex, now, deadline, session, located, old?.post_id)), ...(merge ? { merge } : {}) });
   }
   return { items, early: null };
 }
@@ -415,10 +454,27 @@ export async function planPost(env: Env, post: PostRow, now = nowSec()): Promise
 /** 把判讀好的寫進雷達，回傳跟 processPost 一樣的結果 */
 export async function commitPlan(env: Env, postId: string, items: PlanItem[], now: number): Promise<ProcessResult> {
   const out: ProcessResult = { events: [], reasons: [] };
+  const replaced = new Set<string>();
   for (const it of items) {
+    // 別人的貼文：不另外放，附在雷達上那個據點
+    if (it.merge?.mode === 'attach') {
+      await env.DB.prepare("UPDATE posts SET linked_to = ?, link_role = 'related' WHERE id = ?").bind(it.merge.postId, postId).run();
+      out.reasons.push(`attached_to_${it.merge.eventId}`);
+      continue;
+    }
     if (!it.plan) {
       out.reasons.push(it.reason);
       continue;
+    }
+    // 同一個帳號的新貼文：舊據點還沒開完的時段下架，舊貼文（和附在它上面的）改掛到新貼文
+    if (it.merge?.mode === 'replace' && it.plan.end_at > now && !replaced.has(it.merge.postId)) {
+      replaced.add(it.merge.postId);
+      const m = it.merge;
+      await env.DB.batch([
+        env.DB.prepare("UPDATE events SET status = 'ended', ended_reason = 'replaced', updated_at = ? WHERE post_id = ? AND place_text = ? AND status IN ('upcoming', 'active')").bind(now, m.postId, m.placeText),
+        env.DB.prepare('UPDATE posts SET linked_to = ? WHERE linked_to = ?').bind(postId, m.postId),
+        env.DB.prepare("UPDATE posts SET linked_to = ?, link_role = 'previous' WHERE id = ?").bind(postId, m.postId),
+      ]);
     }
     const r = await insertPlanned(env, postId, it.plan, now);
     if (r.event) out.events.push(r.event);
@@ -657,6 +713,11 @@ export async function listEvents(env: Env, q: ListQuery): Promise<EventOut[]> {
     const related = await relatedPosts(env, official);
     for (const e of out) if (related.has(e.post.id)) e.related = related.get(e.post.id);
   }
+  const spots = [...new Set(out.filter((e) => e.spot).map((e) => e.post.id))];
+  if (spots.length > 0) {
+    const linked = await linkedPosts(env, spots);
+    for (const e of out) if (e.spot && linked.has(e.post.id)) e.related = linked.get(e.post.id);
+  }
   return out;
 }
 
@@ -672,6 +733,23 @@ async function fillFirstStart(env: Env, out: EventOut[]): Promise<void> {
     .all<{ post_id: string; place_text: string; first: number }>();
   const first = new Map(r.results.map((x) => [`${x.post_id}|${x.place_text}`, x.first]));
   for (const e of out) if (e.spot) e.firstStartAt = first.get(`${e.post.id}|${e.placeText}`) ?? e.startAt;
+}
+
+/** 固定據點的其他貼文：同一個帳號之前的（已被取代）、別人提到這個據點的，新的在前 */
+async function linkedPosts(env: Env, spotPostIds: string[]): Promise<Map<string, RelatedPost[]>> {
+  const r = await env.DB.prepare(
+    `SELECT id, source, username, permalink, text, posted_at, linked_to, link_role FROM posts
+      WHERE linked_to IN (${spotPostIds.map(() => '?').join(',')}) ORDER BY posted_at DESC`,
+  )
+    .bind(...spotPostIds)
+    .all<{ id: string; source: string; username: string | null; permalink: string | null; text: string; posted_at: number; linked_to: string; link_role: string | null }>();
+  const map = new Map<string, RelatedPost[]>();
+  for (const row of r.results) {
+    const first = row.text.split('\n')[0].trim();
+    const role = row.link_role === 'previous' ? 'previous' : 'related';
+    map.set(row.linked_to, [...(map.get(row.linked_to) ?? []), { id: row.id, source: row.source, title: `@${row.username ?? ''}：${first.slice(0, 40)}`, url: row.permalink, postedAt: row.posted_at, role }]);
+  }
+  return map;
 }
 
 /** 併進各官方貼文的新聞、Threads 貼文，同一則貼文只列一次 */

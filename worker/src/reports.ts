@@ -42,6 +42,8 @@ export type LinkOutcome =
   | 'added'
   /** 跟已經在雷達上的事件重複 */
   | 'duplicate'
+  /** 雷達上已經有這個固定據點（別人發的），這則附在它的詳細資料 */
+  | 'attached'
   /** 判讀成發放或活動，但找不到地點 */
   | 'no_place'
   /** 判讀成發放或活動，但缺時間、已結束或太遠 */
@@ -72,6 +74,8 @@ export interface PreviewItem {
   lastStartAt: number;
   /** 固定據點每週幾開（1–7），每天則 null */
   weekdays: number[] | null;
+  /** 雷達上已經有這個據點：replace 同一個帳號，確認後以這則為準；attach 別人發的，確認後只附上去 */
+  update?: { mode: 'replace' | 'attach'; title: string };
 }
 
 export interface SubmitResult {
@@ -102,9 +106,15 @@ const confirmToken = (env: Env, postId: string): Promise<string> => sha1Hex(`con
 /** 同一個地點、時段（固定據點的每一天）合成一筆預覽 */
 export function previewOf(items: PlanItem[], now: number): PreviewItem[] {
   const groups = new Map<number, NonNullable<PlanItem['plan']>[]>();
-  for (const it of items) if (it.plan && it.plan.end_at > now) groups.set(it.group, [...(groups.get(it.group) ?? []), it.plan]);
-  return [...groups.values()].map((plans) => {
+  const merges = new Map<number, PlanItem['merge']>();
+  for (const it of items) {
+    if (!it.plan || it.plan.end_at <= now) continue;
+    groups.set(it.group, [...(groups.get(it.group) ?? []), it.plan]);
+    if (it.merge) merges.set(it.group, it.merge);
+  }
+  return [...groups.entries()].map(([group, plans]) => {
     const p = plans[0];
+    const m = merges.get(group);
     const last = plans[plans.length - 1];
     return {
       kind: p.kind,
@@ -123,6 +133,7 @@ export function previewOf(items: PlanItem[], now: number): PreviewItem[] {
       days: plans.length,
       lastStartAt: last.start_at,
       weekdays: p.weekdays ?? null,
+      ...(m ? { update: { mode: m.mode, title: m.title } } : {}),
     };
   });
 }
@@ -152,6 +163,7 @@ const readPlan = (post: PostRow): StoredPlan | null => {
 
 function summarize(reasons: string[]): LinkOutcome {
   if (reasons.some((r) => r === 'active' || r === 'upcoming')) return 'added';
+  if (reasons.some((r) => r.startsWith('attached_to_'))) return 'attached';
   if (reasons.some((r) => r.startsWith('duplicate_of_'))) return 'duplicate';
   if (reasons.some((r) => r === 'unlocated' || r === 'no_place')) return 'no_place';
   if (reasons.some((r) => r === 'not_event' || r === 'no_events')) return 'not_event';
@@ -166,8 +178,8 @@ function summarize(reasons: string[]): LinkOutcome {
  */
 export function existedOutcome(reasons: string[], eventsOnRadar: number): LinkOutcome {
   const outcome = summarize(reasons);
-  if (eventsOnRadar > 0) return outcome === 'duplicate' ? 'duplicate' : 'added';
-  return outcome === 'added' || outcome === 'duplicate' ? 'not_listed' : outcome;
+  if (eventsOnRadar > 0) return outcome === 'duplicate' || outcome === 'attached' ? outcome : 'added';
+  return outcome === 'added' || outcome === 'duplicate' || outcome === 'attached' ? 'not_listed' : outcome;
 }
 
 async function eventsForResult(env: Env, postId: string, reasons: string[], now: number): Promise<EventOut[]> {
@@ -175,7 +187,7 @@ async function eventsForResult(env: Env, postId: string, reasons: string[], now:
   const own = await env.DB.prepare("SELECT id FROM events WHERE post_id = ? AND status IN ('upcoming', 'active')").bind(postId).all<{ id: number }>();
   for (const r of own.results) ids.add(r.id);
   for (const r of reasons) {
-    const m = /^duplicate_of_(\d+)$/.exec(r);
+    const m = /^(?:duplicate_of|attached_to)_(\d+)$/.exec(r);
     if (m) ids.add(Number(m[1]));
   }
   const out: EventOut[] = [];

@@ -415,6 +415,17 @@ function routeTimeLine(r: RouteOut, items: Item[], now: number): string {
   return endEv && endEv.endAt > now ? `已抵達 · ${endEv.title.split('・')[0]}到 ${fmtTime(endEv.endAt)}` : '已抵達';
 }
 
+/** 固定據點的其他貼文：同一個帳號之前發的（已被新貼文取代）、別人提到這個據點的 */
+function spotPostsHtml(list: RelatedPost[]): string {
+  if (list.length === 0) return '';
+  return `<details class="related"><summary>這個據點的其他貼文（${list.length}）</summary><ul>${list
+    .map((r) => {
+      const title = `${dateFmt.format(new Date(r.postedAt * 1000))} ${r.title}`;
+      return `<li><span class="kind-tag">${r.role === 'previous' ? '之前的貼文' : '相關貼文'}</span>${r.url ? `<a href="${esc(r.url)}" target="_blank" rel="noopener">${esc(title)}</a>` : esc(title)}</li>`;
+    })
+    .join('')}</ul><p class="muted">「之前的貼文」是店家先前發的，已經以最新那則為準；「相關貼文」是別人提到這個據點的貼文，時間地點以據點的貼文為準。</p></details>`;
+}
+
 /** 講同一場官方活動的新聞與貼文，已經併進來、不另外顯示 */
 function relatedHtml(list: RelatedPost[]): string {
   if (list.length === 0) return '';
@@ -1237,7 +1248,7 @@ function renderDetail(items: Item[], now: number): void {
       <blockquote>${esc(ev.post.source === 'news' ? ev.post.text.split('\n')[0] : ev.post.text.slice(0, 300))}</blockquote>
       ${ev.post.supplement ? `<p class="muted supplement-line">回報的人補充：${esc(ev.post.supplement)}</p>` : ''}
       <p class="muted source-line">來源：${esc(sourceLabel(ev))}</p>
-      ${routeOf(ev) ? '' : relatedHtml(ev.related ?? [])}
+      ${routeOf(ev) ? '' : it.spot ? spotPostsHtml(ev.related ?? []) : relatedHtml(ev.related ?? [])}
       <div class="sheet-actions">
         <a class="btn primary" href="https://www.google.com/maps/dir/?api=1&destination=${ev.lat},${ev.lng}&travelmode=walking" target="_blank" rel="noopener">${ev.approxArea ? '導航到約略位置' : '導航'}</a>
         ${ev.post.permalink ? `<a class="btn" href="${esc(ev.post.permalink)}" target="_blank" rel="noopener">${esc(sourceLinkText(ev))}</a>` : ''}
@@ -1923,6 +1934,7 @@ const OUTCOME_TEXT: Record<SubmitResult['outcome'], string> = {
   preview: '判讀結果如下，請確認一次：',
   added: '已加入雷達：',
   duplicate: '雷達上已經有這一場了：',
+  attached: '雷達上已經有這個據點，這則已附在它的詳細資料（相關貼文）：',
   no_place: '看得出是發放或活動，但貼文沒寫具體地點（或查不到），所以還沒放上雷達。知道在哪裡的話，可以在下面補充地點再判讀一次。',
   not_listed: '判讀不出時間，或是已經結束、超過 14 天後才開始，所以沒有放上雷達。',
   not_event: '這則看起來不是發放或活動。貼文要寫出在哪裡、什麼時候發放或舉辦，雷達才會收。',
@@ -2002,6 +2014,13 @@ function wireSupplement(c: { postId: string; token: string }, actions: HTMLEleme
   });
 }
 
+/** 雷達上已經有這個據點時，確認後會怎樣 */
+function updateNote(u: NonNullable<PreviewItem['update']>): string {
+  return u.mode === 'replace'
+    ? `雷達上已經有「${u.title}」，這則是同一個帳號的新貼文：確認後據點改成以這則為準，舊貼文留在詳細資料。`
+    : `雷達上已經有「${u.title}」：確認後這則附在它的詳細資料（相關貼文），據點的內容不變。`;
+}
+
 /** 判讀完先給回報的人看：對了才放上雷達，不對就不放並記下哪裡錯 */
 function renderPreview(r: SubmitResult): void {
   const items = r.preview ?? [];
@@ -2019,12 +2038,13 @@ function renderPreview(r: SubmitResult): void {
           <small>時間：${esc(previewWhen(p))}</small>
           <small>地點：${esc(p.placeText.replace(/\s*\n\s*/g, ' '))}</small>
           <small>${previewWhere(p)}</small>
+          ${p.update ? `<small class="preview-warn">${esc(updateNote(p.update))}</small>` : ''}
         </li>`,
       )
       .join('')}</ul>
     ${dups}
     <div class="sheet-actions">
-      <button type="button" class="btn primary" data-act="confirm">對，放上雷達</button>
+      <button type="button" class="btn primary" data-act="confirm">${items.length > 0 && items.every((p) => p.update?.mode === 'attach') ? '對，附在這個據點' : '對，放上雷達'}</button>
       <button type="button" class="btn" data-act="more">補充資料</button>
       <button type="button" class="btn" data-act="wrong">不對</button>
     </div>
@@ -2093,7 +2113,7 @@ async function submitReport(): Promise<void> {
 /** 判讀或確認後的結果：放上雷達的、重複的，點了跳到那一場 */
 async function showReportResult(data: SubmitResult): Promise<void> {
   const { outcome, events: found, existed } = data;
-  const head = existed && (outcome === 'added' || outcome === 'duplicate') ? '這則之前已經有人回報，已在雷達上：' : OUTCOME_TEXT[outcome];
+  const head = existed && (outcome === 'added' || outcome === 'duplicate' || outcome === 'attached') ? '這則之前已經有人回報，已在雷達上：' : OUTCOME_TEXT[outcome];
   const list = found
     .map((ev) => {
       const when = ev.allDay ? `${dateFmt.format(new Date(ev.startAt * 1000))} ${allDayText(ev, false)}` : `${dateFmt.format(new Date(ev.startAt * 1000))} ${fmtTime(ev.startAt)}`;

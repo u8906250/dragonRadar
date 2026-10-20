@@ -7,6 +7,8 @@ export interface RelatedPost {
   title: string;
   url: string | null;
   postedAt: number;
+  /** 固定據點才有：previous 同一個帳號之前的貼文（已被取代），related 別人提到這個據點的貼文 */
+  role?: 'previous' | 'related';
 }
 
 export interface EventOut {
@@ -172,7 +174,7 @@ export interface KeywordInfo {
   pinned: boolean;
 }
 
-export type LinkOutcome = 'preview' | 'added' | 'duplicate' | 'no_place' | 'not_listed' | 'not_event' | 'failed';
+export type LinkOutcome = 'preview' | 'added' | 'duplicate' | 'attached' | 'no_place' | 'not_listed' | 'not_event' | 'failed';
 
 /** 判讀結果的預覽：一個地點或時段（固定據點的好幾天合成一筆） */
 export interface PreviewItem {
@@ -195,6 +197,8 @@ export interface PreviewItem {
   untilOpen: boolean;
   days: number;
   lastStartAt: number;
+  /** 雷達上已經有這個據點：replace 同一個帳號，確認後以這則為準；attach 別人發的，確認後只附上去 */
+  update?: { mode: 'replace' | 'attach'; title: string };
 }
 
 export interface SubmitResult {
