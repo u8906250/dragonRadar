@@ -2125,14 +2125,31 @@ async function submitReport(): Promise<void> {
   await showReportResult(r.data);
 }
 
+/** 結果清單：固定據點的每個時段、同一天同地點的好幾個時段合成一列，不然一個據點會列出一整排 */
+function resultGroups(list: EventOut[]): EventOut[][] {
+  const groups = new Map<string, EventOut[]>();
+  for (const ev of [...list].sort((a, b) => a.startAt - b.startAt)) {
+    const k = ev.spot ? `spot|${spotKey(ev)}` : `${ev.post.id}|${ev.placeText}|${taipeiDay(ev.startAt)}`;
+    groups.set(k, [...(groups.get(k) ?? []), ev]);
+  }
+  return [...groups.values()];
+}
+
 /** 判讀或確認後的結果：放上雷達的、重複的，點了跳到那一場 */
 async function showReportResult(data: SubmitResult): Promise<void> {
   const { outcome, events: found, existed } = data;
   const head = existed && (outcome === 'added' || outcome === 'duplicate' || outcome === 'attached') ? '這則之前已經有人回報，已在雷達上：' : OUTCOME_TEXT[outcome];
-  const list = found
-    .map((ev) => {
-      const when = ev.allDay ? `${dateFmt.format(new Date(ev.startAt * 1000))} ${allDayText(ev, false)}` : `${dateFmt.format(new Date(ev.startAt * 1000))} ${fmtTime(ev.startAt)}`;
-      return `<li><button type="button" data-id="${ev.id}"><b>${kindLabel(ev)}｜${esc(titleOf(ev))}</b><small>${esc(placeLine(ev))} · ${esc(when)}</small></button></li>`;
+  const list = resultGroups(found)
+    .map((g) => {
+      const ev = g[0];
+      const day = (t: number): string => dateFmt.format(new Date(t * 1000));
+      const last = g[g.length - 1];
+      const when = ev.spot
+        ? `${spotHours(g)}・${day(ev.startAt)}${taipeiDay(last.startAt) !== taipeiDay(ev.startAt) ? ` 到 ${day(last.startAt)}` : ''}${last.untilOpen ? `，${openEndText(last)}` : ''}`
+        : ev.allDay
+          ? `${day(ev.startAt)} ${allDayText(ev, false)}`
+          : `${day(ev.startAt)} ${g.map((x) => fmtTime(x.startAt)).join('、')}`;
+      return `<li><button type="button" data-id="${ev.id}"><b>${kindLabel(ev)}${ev.spot ? '・固定據點' : ''}｜${esc(titleOf(ev))}</b><small>${esc(placeLine(ev))} · ${esc(when)}</small></button></li>`;
     })
     .join('');
   // 還沒放上雷達（找不到地點、判讀不出時間）：可以補充資料再判讀一次
