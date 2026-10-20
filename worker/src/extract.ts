@@ -92,7 +92,8 @@ events 每筆的欄位：
 - 新聞報導、心得、活動回顧、徵求、詢問、線上抽獎、直播、線上活動、販售，is_event 為 false，events 為空陣列。
 - 只有時間沒有地點、或只有地點沒有時間，該筆 confidence 必須低於 0.5。
 - 不要編造貼文裡沒有的時間或地點，可以依上下文補上縣市。
-- 貼文最後如果有「【回報的人補充】」，那是看到貼文的人補上的地點或時間（例如店名、地址），貼文沒寫的可以用它補上；跟貼文衝突時以貼文為準。`;
+- 貼文最後如果有「【回報的人補充】」，那是看到貼文的人補上的地點或時間（例如店名、地址、日期），貼文沒寫的一定要用它補上；跟貼文衝突時以貼文為準。補充寫「只有 10/26」「只有那天」就是只有那一天：spot 為 false，start_at 用那天加貼文寫的時段。
+- 貼文和補充都沒寫星期幾，weekdays 就是 null，不要自己猜。`;
 
 export function buildMessages(text: string, postedAt: number, now: number): Array<{ role: 'system' | 'user'; content: string }> {
   void now;
@@ -171,6 +172,14 @@ const WEEKDAY_CHAR: Record<string, number> = { 一: 1, 二: 2, 三: 3, 四: 4, �
  * 從貼文找「每週二、四」「每週一至五」「每週六日」：模型漏掉時的備援。
  * 一定要有「每」，「10/21（週二）」這種日期註記不算。
  */
+/** 寫了「每週」「週二、四」「週一到週五」「平日」「週末」這類字才算有寫星期幾 */
+const WEEKLY_RE = /(?:每|逢)\s*(?:週|周|星期|禮拜)|(?:週|周|星期|禮拜)\s*[一二三四五六日天]\s*(?:到|至|~|～|-|－|、|,|，|和|與|及)\s*(?:週|周|星期|禮拜)?\s*[一二三四五六日天]|平日|週末|周末|假日/;
+
+/** 模型給的每週幾要貼文（或補充）真的有寫，不然當成每天（模型有時會自己編） */
+export function weekdaysInText(weekdays: number[] | null | undefined, text: string): number[] | null {
+  return weekdays?.length && WEEKLY_RE.test(text) ? weekdays : null;
+}
+
 export function weekdaysFromText(text: string): number[] | null {
   const m = /每\s*(?:週|周|星期|禮拜)\s*([一二三四五六日天](?:\s*[、,，和與及跟/／]?\s*(?:[到至~～\-－]\s*)?(?:週|周|星期|禮拜)?\s*[一二三四五六日天])*)/.exec(text);
   if (!m) return null;

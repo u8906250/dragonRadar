@@ -1,5 +1,5 @@
 import type { Env } from './env';
-import { extractFromPost, untilInText, weekdaysFromText, type EventKind, type ExtractedEvent } from './extract';
+import { extractFromPost, untilInText, weekdaysFromText, weekdaysInText, type EventKind, type ExtractedEvent } from './extract';
 import { geocodeAddress, parseTwAddress, type TwAddress } from './address';
 import { adminArea, geocode, geocodeFirst, isAreaOnly, placeCandidates, type GeoPoint } from './geocode';
 import { listActiveKeywords, type KeywordRow } from './keywords';
@@ -432,7 +432,8 @@ export async function planPost(env: Env, post: PostRow, now = nowSec()): Promise
       items.push({ group, ...(await planEvent(env, ex, now, deadline)) });
       continue;
     }
-    // 模型漏掉「每週二、四」時從貼文補：只有一個固定據點（可以有好幾個時段）時才補，免得套到別的地點
+    // 模型自己編的每週幾不算；漏掉「每週二、四」時從貼文補：只有一個固定據點（可以有好幾個時段）時才補，免得套到別的地點
+    ex.weekdays = weekdaysInText(ex.weekdays, text);
     if (!ex.weekdays && new Set(extraction.events.filter((e) => e.spot).map((e) => e.place_query ?? e.place_text)).size === 1) ex.weekdays = weekdaysFromText(text);
     // 最後一天要是貼文（或補充）寫的，模型自己猜的不算
     ex.until = untilInText(ex.until, text);

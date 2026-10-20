@@ -1,4 +1,4 @@
-import { untilInText, weekdaysFromText } from '../src/extract';
+import { untilInText, weekdaysFromText, weekdaysInText } from '../src/extract';
 import { isAreaOnly } from '../src/geocode';
 import { existedOutcome, previewOf } from '../src/reports';
 import { describe, expect, it } from 'vitest';
@@ -401,5 +401,17 @@ describe('untilInText', () => {
   it('drops an end date the model made up', () => {
     expect(untilInText('2026-12-31', '每週二、四 14:00–18:00，送完為止')).toBeNull();
     expect(untilInText('2026-10-29', '10/2 開始，10/290 號')).toBeNull();
+  });
+});
+
+describe('weekdaysInText', () => {
+  it('drops weekdays the post never mentions', () => {
+    expect(weekdaysInText([2, 4, 6], '發放時間｜13:30－14:00\n【回報的人補充】只有10/26')).toBeNull();
+    expect(weekdaysInText([2, 4], '10/21（週二）開始')).toBeNull();
+  });
+  it('keeps weekdays that are written', () => {
+    expect(weekdaysInText([2, 4], '每週二、四 14:00–18:00')).toEqual([2, 4]);
+    expect(weekdaysInText([1, 2, 3, 4, 5], '週一到週五 11:00')).toEqual([1, 2, 3, 4, 5]);
+    expect(weekdaysInText([6, 7], '週末下午兩點')).toEqual([6, 7]);
   });
 });
