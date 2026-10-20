@@ -60,7 +60,8 @@ const SYSTEM_PROMPT = `你是「洋流雷達」的資料抽取器。你會收到
 
 兩種類型：
 - giveaway（發放）：在特定時間地點免費發送飄帶、貼紙、文宣、周邊、飲料等給到場的人。
-- activity（活動）：在特定時間地點舉行、民眾可以到場參加的活動，例如車掃、掃街、市場開講、造勢晚會、見面會、座談、講座、遊行、快閃、志工集合。
+- activity（活動）：在特定時間地點舉行、民眾可以到場參加的活動，例如車掃、掃街、市場開講、造勢晚會、見面會、座談、講座、遊行、快閃、志工集合，還有市集擺攤幫忙編飄帶、綁飄帶、彩繪、拍照。
+- 只說「帶自己的飄帶來」「幫你編飄帶」而沒有免費送東西的，是 activity，不是 giveaway，item 為 null。
 
 只輸出 JSON：
 {
@@ -70,8 +71,8 @@ const SYSTEM_PROMPT = `你是「洋流雷達」的資料抽取器。你會收到
 
 events 每筆的欄位：
 - kind: "giveaway" 或 "activity"。活動現場也有發放東西時，用 "giveaway"，不要拆成兩筆
-- title: 12 字以內的短標題，要有地點或店名，例如「秀水服務處發飄帶」「保安宮市政開講」「豬跳舞小餐館發小物」
-- item: 發放的物品，例如「洋流飄帶」；活動或沒寫則 null
+- title: 12 字以內的短標題，要有地點或店名，活動要寫出做什麼，例如「秀水服務處發飄帶」「保安宮市政開講」「豬跳舞小餐館發小物」「散步遊者市集幫編飄帶」
+- item: 免費送出的物品，例如「洋流飄帶」；要民眾自己帶來的東西（例如自備飄帶來編）不算；活動沒送東西或沒寫則 null
 - start_at: 開始時間，ISO 8601 含時區，例如 2026-10-17T15:00:00+08:00；無法判斷則 null
 - end_at: 結束時間，同格式；沒有明確結束時間則 null
 - place_text: 貼文原文中的地點描述。內文沒寫地點、但最後有「📍 貼文的地點標記：XX」時，用標記的地點（店家發文時標的位置），place_query 填「XX」。hashtag（例如「#洋流」）、活動名稱不是地點
@@ -205,6 +206,21 @@ export function applySupplementDate(ex: Pick<ExtractedEvent, 'start_at' | 'end_a
   ex.start_at = taipeiIso(start + shift);
   const end = parseIsoToUnix(ex.end_at);
   if (end !== null) ex.end_at = taipeiIso(end + shift);
+}
+
+const BRING_OWN_RE = /帶著?(?:你|妳|大家)?自己的|自備|自行攜帶|自己帶/;
+const GIVE_RE = /發放|贈送|免費送|送給|送出|送完|領取|索取|發送|限量/;
+
+/**
+ * 「帶著自己的飄帶來找我，幫你編飄帶」：東西是民眾自己帶的，不是發放。貼文沒有任何送東西的字時，
+ * 改成活動、拿掉物品，免得畫面寫「發放：洋流飄帶」。改了回傳 true。
+ */
+export function dropBroughtItem(ex: Pick<ExtractedEvent, 'kind' | 'item'>, text: string): boolean {
+  if (!BRING_OWN_RE.test(text) || GIVE_RE.test(text)) return false;
+  if (!ex.item && ex.kind === 'activity') return false;
+  ex.item = null;
+  ex.kind = 'activity';
+  return true;
 }
 
 /**

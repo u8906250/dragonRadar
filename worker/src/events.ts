@@ -1,5 +1,5 @@
 import type { Env } from './env';
-import { applySupplementDate, extractFromPost, splitMultiDay, untilInText, weekdaysFromText, weekdaysInText, type EventKind, type ExtractedEvent } from './extract';
+import { applySupplementDate, dropBroughtItem, extractFromPost, splitMultiDay, untilInText, weekdaysFromText, weekdaysInText, type EventKind, type ExtractedEvent } from './extract';
 import { geocodeAddress, parseTwAddress, type TwAddress } from './address';
 import { adminArea, geocode, geocodeFirst, isAreaOnly, placeCandidates, type GeoPoint } from './geocode';
 import { listActiveKeywords, type KeywordRow } from './keywords';
@@ -432,6 +432,8 @@ export async function planPost(env: Env, post: PostRow, now = nowSec()): Promise
     applySupplementDate(ex, post.supplement, post.text, post.posted_at);
     // 跨好幾天、每天固定時段的（市集、展覽）：模型常讀成連續好幾天，改成每天一個時段
     splitMultiDay(ex, text);
+    // 「帶自己的飄帶來幫你編」不是發放
+    dropBroughtItem(ex, text);
     if (!ex.spot) {
       items.push({ group, ...(await planEvent(env, ex, now, deadline)) });
       continue;

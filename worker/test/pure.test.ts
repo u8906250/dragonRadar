@@ -1,4 +1,4 @@
-import { applySupplementDate, splitMultiDay, untilInText, weekdaysFromText, weekdaysInText } from '../src/extract';
+import { applySupplementDate, dropBroughtItem, splitMultiDay, untilInText, weekdaysFromText, weekdaysInText } from '../src/extract';
 import { isAreaOnly } from '../src/geocode';
 import { existedOutcome, previewOf } from '../src/reports';
 import { describe, expect, it } from 'vitest';
@@ -453,5 +453,19 @@ describe('splitMultiDay', () => {
     expect(splitMultiDay(night, '10/24 22:00 到天亮')).toBe(false);
     const guessed = { start_at: '2026-10-24T12:00:00+08:00', end_at: '2026-10-26T18:30:00+08:00', spot: false, until: null };
     expect(splitMultiDay(guessed, '週末 12:00 ～ 18:30')).toBe(false);
+  });
+});
+
+describe('dropBroughtItem', () => {
+  it('treats "bring your own ribbon and I will braid it" as an activity, not a giveaway', () => {
+    const ex = { kind: 'activity' as const, item: '洋流飄帶' as string | null };
+    expect(dropBroughtItem(ex, '歡迎大家帶著自己的飄帶來找我～～很樂意幫小水滴們編飄帶唷！！')).toBe(true);
+    expect(ex).toEqual({ kind: 'activity', item: null });
+  });
+  it('keeps real giveaways', () => {
+    const ex = { kind: 'giveaway' as const, item: '洋流飄帶' as string | null };
+    expect(dropBroughtItem(ex, '現場發放洋流飄帶，也可以自備飄帶來編')).toBe(false);
+    expect(dropBroughtItem(ex, '明天 15:00 市政府站發飄帶')).toBe(false);
+    expect(ex.item).toBe('洋流飄帶');
   });
 });
