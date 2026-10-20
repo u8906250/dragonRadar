@@ -20,7 +20,7 @@ worker/   Cloudflare Worker（API、排程、資料庫）
 
 1. 每 10 分鐘 Cron 喚醒 Worker，對每個關鍵字呼叫 Threads `keyword_search`（RECENT，`since` 只拿新貼文）。
 2. 新貼文丟給 Workers AI 抽出：是否為實體發放、開始／結束時間、地點文字、可搜尋的地點名稱、信心分數。
-3. 地點用 Nominatim 轉成座標，寫進 `events`。
+3. 地點轉成座標，寫進 `events`（`locatePlaceForEvent`）：貼文有寫門牌就只用門牌查（Photon、Overpass，跟固定據點同一套；地點欄沒寫縣市時從另一欄補，縣市不確定就不查），查不到就退到鄉鎮區中心標成約略位置，**不拿店名或「XX服務處」去猜**（會查到同名的別的機構）；沒有門牌才用 Nominatim 查地名。固定據點的每天時段只定位一次；一則貼文的 Overpass 最多查 25 秒，之後只用 Photon。
 4. 事件狀態：`upcoming` → `active`（到開始時間）→ `ended`（到結束時間，或作者後續貼文／回覆出現「發完」等字眼）。
 5. 前端每分鐘向 `/api/events` 拿附近事件，用使用者座標算方位與距離畫在雷達上；進行中事件變多時嗶聲＋通知。
 

@@ -1,3 +1,4 @@
+import { addressOf } from '../src/events';
 import { describe, expect, it } from 'vitest';
 import { locateOnStreet, parseTwAddress } from '../src/address';
 
@@ -72,5 +73,24 @@ describe('singleDay', () => {
     expect(singleDay('10/19（ㄧ）感謝暖心支援 ☀️ 每日上午 11:00 起 洋流小物｜限量供應自取')).toBeNull();
     expect(singleDay('洋流飄帶又來了喔！歡迎來店索取 領取時間：11:00-14:00 17:00-19:00')).toBeNull();
     expect(singleDay('10/17~10/19 每日 11:00~18:00')).toBeNull();
+  });
+});
+
+describe('addressOf (events)', () => {
+  it('takes the house number and borrows the city from the other field', () => {
+    expect(addressOf('台南市 善化服務處', '善化服務處\n地址：善化區中正路188巷12-1號')).toMatchObject({
+      text: '臺南市善化區中正路188巷12-1號',
+      area: '臺南市善化區',
+    });
+    expect(addressOf('台南市 玉井區中山路96號', '賴懋慶聯合服務處\n地址：玉井區中山路96號')).toMatchObject({
+      text: '臺南市玉井區中山路96號',
+      area: '臺南市玉井區',
+    });
+  });
+  it('does not guess the city', () => {
+    expect(addressOf('善化服務處', '地址：善化區中正路188巷12-1號')).toMatchObject({ text: '', area: null });
+  });
+  it('returns null without a house number', () => {
+    expect(addressOf('台北市 捷運忠孝復興站', '忠孝復興站 2 號出口')).toBeNull();
   });
 });

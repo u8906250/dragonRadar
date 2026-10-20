@@ -1,6 +1,7 @@
 import type { Env } from './env';
 import { extractFromPost, type EventKind, type ExtractedEvent } from './extract';
-import { adminArea, geocode, geocodeFirst, placeCandidates } from './geocode';
+import { geocodeAddress, parseTwAddress, type TwAddress } from './address';
+import { adminArea, geocode, geocodeFirst, placeCandidates, type GeoPoint } from './geocode';
 import { listActiveKeywords, type KeywordRow } from './keywords';
 import { parseThreadsTimestamp, type ThreadsClient } from './threads';
 import { nowSec, parseIsoToUnix } from './util';
@@ -191,12 +192,57 @@ export function spotSessions(ex: Pick<ExtractedEvent, 'start_at' | 'end_at' | 'u
   return out;
 }
 
+/** 門牌查詢（含很慢的 Overpass）一則貼文最多花這麼久，超過就只用 Photon，免得回報的人等太久 */
+const ADDRESS_BUDGET_MS = 25_000;
+
+/** 有寫門牌的地點：門牌加上縣市（地點欄沒寫縣市時，從另一欄補）；縣市不確定就不查，免得查到別縣市同名的路 */
+export function addressOf(placeQuery: string, placeText: string | null): { address: TwAddress; text: string; area: string | null } | null {
+  const sources = [placeQuery, placeText ?? ''];
+  const parsed = sources.map((s) => parseTwAddress(s));
+  // 縣市：門牌自己帶的優先，其次是另一欄的「台南市」「新北市」（不寫市、縣的不算，新竹、嘉義分不出來）
+  const cityWord = sources.map((s) => /(?:台|臺)?(?:北|新北|桃園|中|南|高雄|基隆|新竹|嘉義)市|(?:新竹|苗栗|彰化|南投|雲林|嘉義|屏東|宜蘭|花蓮|台東|臺東|澎湖|金門|連江)縣/.exec(s)?.[0]).find(Boolean);
+  const a = parsed.find((x) => x?.city) ?? parsed.find(Boolean);
+  if (!a) return null;
+  const city = a.city ?? (cityWord ? cityWord.replace(/^台/, '臺').replace(/^(北|中|南)市$/, '臺$1市') : null);
+  if (!city) return { address: a, text: '', area: null };
+  const area = a.district ? `${city}${a.district}` : null;
+  return { address: a, text: `${city}${a.district ?? ''}${a.street}${a.raw}號`, area };
+}
+
+/**
+ * 定位一個地點。貼文有寫門牌就只用門牌查：查不到退到鄉鎮區中心當作約略位置，
+ * 不拿店名或「XX服務處」去猜（會查到同名的別的機構，例如「佳里服務處」查到家扶中心的佳里服務處）。
+ * 沒有門牌才照舊用地名查。
+ */
+export async function locatePlaceForEvent(
+  env: Env,
+  placeQuery: string,
+  placeText: string | null,
+  deadline: number,
+): Promise<{ point: GeoPoint | null; approxArea: string | null }> {
+  const addr = addressOf(placeQuery, placeText);
+  if (addr) {
+    const hit = addr.text ? await geocodeAddress(env, addr.text, undefined, { overpass: Date.now() < deadline }) : null;
+    if (hit) return { point: { lat: hit.lat, lng: hit.lng, displayName: addr.text }, approxArea: null };
+    const area = addr.area ?? adminArea(placeQuery, placeText);
+    const p = area ? await geocode(env, area) : null;
+    return { point: p, approxArea: p ? area : null };
+  }
+  let point = await geocodeFirst(env, placeCandidates(placeQuery, placeText));
+  // 精確地點查不到時退到鄉鎮區中心，標成約略位置
+  const area = point ? null : adminArea(placeQuery, placeText);
+  if (area) point = await geocode(env, area);
+  return { point, approxArea: area && point ? area : null };
+}
+
 async function createEvent(
   env: Env,
   post: PostRow,
   ex: ExtractedEvent,
   now: number,
+  deadline: number,
   session?: Session,
+  located?: { point: GeoPoint | null; approxArea: string | null },
 ): Promise<{ event: EventRow | null; reason: string }> {
   if (ex.confidence < MIN_CONFIDENCE) return { event: null, reason: 'low_confidence' };
   const start = session ? session.start : parseIsoToUnix(ex.start_at);
@@ -210,11 +256,7 @@ async function createEvent(
   const placeText = ex.place_text ?? ex.place_query;
   if (!placeQuery || !placeText) return { event: null, reason: 'no_place' };
 
-  let point = await geocodeFirst(env, placeCandidates(placeQuery, ex.place_text));
-  // 精確地點查不到時退到鄉鎮區中心，標成約略位置
-  const area = point ? null : adminArea(placeQuery, ex.place_text);
-  if (area) point = await geocode(env, area);
-  const approxArea = area && point ? area : null;
+  const { point, approxArea } = located ?? (await locatePlaceForEvent(env, placeQuery, ex.place_text, deadline));
 
   // 同一場可能被多篇貼文找到：同類型、同地點（約 150 m 內）、開始時間差 30 分鐘內就視為重複
   if (point && !approxArea) {
@@ -268,17 +310,21 @@ export async function processPost(env: Env, post: PostRow, now = nowSec()): Prom
   if (extraction.events.length === 0) return { events: [], reasons: ['no_events'] };
 
   const out: ProcessResult = { events: [], reasons: [] };
+  const deadline = Date.now() + ADDRESS_BUDGET_MS;
   for (const ex of extraction.events) {
     if (!ex.spot) {
-      const r = await createEvent(env, post, ex, now);
+      const r = await createEvent(env, post, ex, now, deadline);
       if (r.event) out.events.push(r.event);
       out.reasons.push(r.reason);
       continue;
     }
     const sessions = spotSessions(ex, post.posted_at, now);
     if (sessions.length === 0) out.reasons.push('already_over');
+    // 每天一個時段，地點都一樣：只定位一次
+    const placeQuery = ex.place_query ?? ex.place_text;
+    const located = sessions.length > 0 && placeQuery ? await locatePlaceForEvent(env, placeQuery, ex.place_text ?? ex.place_query, deadline) : undefined;
     for (const session of sessions) {
-      const r = await createEvent(env, post, ex, now, session);
+      const r = await createEvent(env, post, ex, now, deadline, session, located);
       if (r.event) out.events.push(r.event);
       out.reasons.push(r.reason);
     }

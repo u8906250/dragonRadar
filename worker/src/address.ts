@@ -190,7 +190,13 @@ async function photonHouses(env: Env, a: TwAddress): Promise<HouseRow[]> {
 export const addressCacheKey = (a: TwAddress): string => `門牌:${a.city ?? ''}${a.district ?? ''}${a.street}${a.raw}號`;
 
 /** 門牌地址轉座標；不是門牌地址或找不到就回傳 null。結果快取在 geocode_cache（key 前面加「門牌:」） */
-export async function geocodeAddress(env: Env, text: string, debug?: { error?: string }): Promise<(AddressPoint & { address: TwAddress }) | null> {
+export async function geocodeAddress(
+  env: Env,
+  text: string,
+  debug?: { error?: string },
+  /** overpass: false 只查 Photon（很快），Overpass 很慢時用；查不到時不快取，之後還會再查 */
+  opts: { overpass?: boolean } = {},
+): Promise<(AddressPoint & { address: TwAddress }) | null> {
   const a = parseTwAddress(text);
   if (!a) return null;
   const key = addressCacheKey(a);
@@ -207,6 +213,7 @@ export async function geocodeAddress(env: Env, text: string, debug?: { error?: s
     // Photon 偶爾一時連不上，再試一次
     const houses = await photonHouses(env, a).catch(() => photonHouses(env, a).catch(() => []));
     point = locateOnStreet(houses, a.number, a.raw);
+    if (!point && opts.overpass === false) return null;
     if (!point) point = locateOnStreet(await overpassHouses(env, a), a.number, a.raw);
   } catch (e) {
     // Overpass 暫時不通就不快取，下次再試
