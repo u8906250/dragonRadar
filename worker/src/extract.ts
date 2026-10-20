@@ -1,5 +1,5 @@
 import type { Env } from './env';
-import { formatTaipei } from './util';
+import { formatTaipei, parseIsoToUnix } from './util';
 
 export type EventKind = 'giveaway' | 'activity';
 
@@ -168,10 +168,6 @@ export function untilInText(until: string | null, text: string): string | null {
 
 const WEEKDAY_CHAR: Record<string, number> = { 一: 1, 二: 2, 三: 3, 四: 4, 五: 5, 六: 6, 日: 7, 天: 7 };
 
-/**
- * 從貼文找「每週二、四」「每週一至五」「每週六日」：模型漏掉時的備援。
- * 一定要有「每」，「10/21（週二）」這種日期註記不算。
- */
 /** 寫了「每週」「週二、四」「週一到週五」「平日」「週末」這類字才算有寫星期幾 */
 const WEEKLY_RE = /(?:每|逢)\s*(?:週|周|星期|禮拜)|(?:週|周|星期|禮拜)\s*[一二三四五六日天]\s*(?:到|至|~|～|-|－|、|,|，|和|與|及)\s*(?:週|周|星期|禮拜)?\s*[一二三四五六日天]|平日|週末|周末|假日/;
 
@@ -180,6 +176,41 @@ export function weekdaysInText(weekdays: number[] | null | undefined, text: stri
   return weekdays?.length && WEEKLY_RE.test(text) ? weekdays : null;
 }
 
+const halfWidth = (s: string): string => s.replace(/[０-９]/g, (c) => String.fromCharCode(c.charCodeAt(0) - 0xfee0));
+const DATE_RE = /(?<!\d)(\d{1,2})\s*(?:[/.]|月)\s*(\d{1,2})(?!\d)/g;
+/** 貼文自己有寫哪天（日期、今天明天、星期幾）：這時以貼文為準，不拿補充的日期改 */
+const POST_DAY_RE = /(?<!\d)\d{1,2}\s*(?:[/.]|月)\s*\d{1,2}(?!\d)|今天|今日|明天|明日|後天|本週|這週|週[一二三四五六日天]|周[一二三四五六日天]|星期[一二三四五六日天]|禮拜[一二三四五六日天]/;
+const DAY_SEC = 86400;
+const taipeiDay = (unix: number): number => Math.floor((unix + 8 * 3600) / DAY_SEC);
+const taipeiIso = (unix: number): string => `${new Date((unix + 8 * 3600) * 1000).toISOString().slice(0, 19)}+08:00`;
+
+/**
+ * 貼文沒寫哪天、回報的人補充了一個日期（「只有10/26」）：模型有時不理補充、填發文當天，
+ * 這裡把開始、結束時間搬到補充的那天，幾點照模型讀到的。補充寫了好幾個日期就不動。
+ */
+export function applySupplementDate(ex: Pick<ExtractedEvent, 'start_at' | 'end_at'>, supplement: string | null | undefined, postText: string, postedAt: number): void {
+  if (!supplement || POST_DAY_RE.test(halfWidth(postText))) return;
+  const dates = new Set([...halfWidth(supplement).matchAll(DATE_RE)].map((m) => `${Number(m[1])}/${Number(m[2])}`));
+  if (dates.size !== 1) return;
+  const [mo, d] = [...dates][0].split('/').map(Number);
+  if (mo < 1 || mo > 12 || d < 1 || d > 31) return;
+  const start = parseIsoToUnix(ex.start_at);
+  if (start === null) return;
+  // 年份跟發文那年；比發文早一個月以上就是明年
+  const year = new Date((postedAt + 8 * 3600) * 1000).getUTCFullYear();
+  let target = Math.floor(Date.UTC(year, mo - 1, d) / 1000 / DAY_SEC);
+  if (target < taipeiDay(postedAt) - 30) target = Math.floor(Date.UTC(year + 1, mo - 1, d) / 1000 / DAY_SEC);
+  const shift = (target - taipeiDay(start)) * DAY_SEC;
+  if (shift === 0) return;
+  ex.start_at = taipeiIso(start + shift);
+  const end = parseIsoToUnix(ex.end_at);
+  if (end !== null) ex.end_at = taipeiIso(end + shift);
+}
+
+/**
+ * 從貼文找「每週二、四」「每週一至五」「每週六日」：模型漏掉時的備援。
+ * 一定要有「每」，「10/21（週二）」這種日期註記不算。
+ */
 export function weekdaysFromText(text: string): number[] | null {
   const m = /每\s*(?:週|周|星期|禮拜)\s*([一二三四五六日天](?:\s*[、,，和與及跟/／]?\s*(?:[到至~～\-－]\s*)?(?:週|周|星期|禮拜)?\s*[一二三四五六日天])*)/.exec(text);
   if (!m) return null;

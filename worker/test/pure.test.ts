@@ -1,4 +1,4 @@
-import { untilInText, weekdaysFromText, weekdaysInText } from '../src/extract';
+import { applySupplementDate, untilInText, weekdaysFromText, weekdaysInText } from '../src/extract';
 import { isAreaOnly } from '../src/geocode';
 import { existedOutcome, previewOf } from '../src/reports';
 import { describe, expect, it } from 'vitest';
@@ -413,5 +413,22 @@ describe('weekdaysInText', () => {
     expect(weekdaysInText([2, 4], '每週二、四 14:00–18:00')).toEqual([2, 4]);
     expect(weekdaysInText([1, 2, 3, 4, 5], '週一到週五 11:00')).toEqual([1, 2, 3, 4, 5]);
     expect(weekdaysInText([6, 7], '週末下午兩點')).toEqual([6, 7]);
+  });
+});
+
+describe('applySupplementDate', () => {
+  const posted = Date.parse('2026-10-19T23:59:00+08:00') / 1000;
+  const post = '📍 發放地點｜ 吳棋楠議員服務處（南投市民族路5號）\n🕜 發放時間｜ 13:30－14:00';
+  it('moves the event to the one date the reporter supplied when the post has none', () => {
+    const ex = { start_at: '2026-10-20T13:30:00+08:00', end_at: '2026-10-20T14:00:00+08:00' };
+    applySupplementDate(ex, '只有10/26 比較像活動', post, posted);
+    expect(ex).toEqual({ start_at: '2026-10-26T13:30:00+08:00', end_at: '2026-10-26T14:00:00+08:00' });
+  });
+  it('keeps the post date when the post names a day, or the supplement is ambiguous', () => {
+    const ex = { start_at: '2026-10-21T12:00:00+08:00', end_at: null };
+    applySupplementDate(ex, '只有10/26', '10/21 洋流小物 12:00', posted);
+    expect(ex.start_at).toBe('2026-10-21T12:00:00+08:00');
+    applySupplementDate(ex, '10/26 或 10/27', post, posted);
+    expect(ex.start_at).toBe('2026-10-21T12:00:00+08:00');
   });
 });

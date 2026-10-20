@@ -1,5 +1,5 @@
 import type { Env } from './env';
-import { extractFromPost, untilInText, weekdaysFromText, weekdaysInText, type EventKind, type ExtractedEvent } from './extract';
+import { applySupplementDate, extractFromPost, untilInText, weekdaysFromText, weekdaysInText, type EventKind, type ExtractedEvent } from './extract';
 import { geocodeAddress, parseTwAddress, type TwAddress } from './address';
 import { adminArea, geocode, geocodeFirst, isAreaOnly, placeCandidates, type GeoPoint } from './geocode';
 import { listActiveKeywords, type KeywordRow } from './keywords';
@@ -428,6 +428,8 @@ export async function planPost(env: Env, post: PostRow, now = nowSec()): Promise
   const items: PlanItem[] = [];
   const deadline = Date.now() + ADDRESS_BUDGET_MS;
   for (const [group, ex] of extraction.events.entries()) {
+    // 貼文沒寫哪天、補充寫了：用補充的日期（模型有時會忽略補充）
+    applySupplementDate(ex, post.supplement, post.text, post.posted_at);
     if (!ex.spot) {
       items.push({ group, ...(await planEvent(env, ex, now, deadline)) });
       continue;
