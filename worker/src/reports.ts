@@ -190,6 +190,9 @@ async function countSince(env: Env, sql: string, binds: unknown[]): Promise<numb
   return (await env.DB.prepare(sql).bind(...binds).first<{ n: number }>())?.n ?? 0;
 }
 
+export const UNREADABLE_POST =
+  'Threads 不讓外部讀取這則貼文，雷達讀不到內容。可能是貼文已刪除、帳號是私人帳號，或貼文限制只有登入的人才能看（例如酒類貼文限成年人觀看）。';
+
 /** 處理使用者貼上的連結：讀貼文、AI 判讀、定位，回傳結果 */
 export async function submitLink(env: Env, input: string, ip: string, now: number): Promise<SubmitResult> {
   const link = await resolveThreadsLink(input);
@@ -222,7 +225,8 @@ export async function submitLink(env: Env, input: string, ip: string, now: numbe
   if (all >= SUBMIT_GLOBAL_PER_HOUR) throw new ReportError(429, '目前回報的人太多，請稍後再試');
 
   const fetched = await fetchThreadsPost(link.code);
-  if (fetched.status === 'gone') throw new ReportError(404, '找不到這則貼文，可能已刪除或不是公開貼文');
+  // Threads 對刪除、私人帳號、限制觀看的貼文都回同一個「無法顯示串文」頁面，分不出是哪一種
+  if (fetched.status === 'gone') throw new ReportError(404, UNREADABLE_POST);
   if (fetched.status === 'no_text') throw new ReportError(422, '這則貼文沒有文字，雷達只能判讀有寫時間地點的文字');
   if (fetched.status === 'error') {
     console.warn(`embed fetch failed for ${link.code}: ${fetched.message}`);
