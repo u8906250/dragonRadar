@@ -1,5 +1,5 @@
 import type { Env } from './env';
-import { extractFromPost, weekdaysFromText, type EventKind, type ExtractedEvent } from './extract';
+import { extractFromPost, untilInText, weekdaysFromText, type EventKind, type ExtractedEvent } from './extract';
 import { geocodeAddress, parseTwAddress, type TwAddress } from './address';
 import { adminArea, geocode, geocodeFirst, isAreaOnly, placeCandidates, type GeoPoint } from './geocode';
 import { listActiveKeywords, type KeywordRow } from './keywords';
@@ -396,6 +396,8 @@ export async function planPost(env: Env, post: PostRow, now = nowSec()): Promise
     }
     // 模型漏掉「每週二、四」時從貼文補：只有一個固定據點時才補，免得套到別的地點
     if (!ex.weekdays && extraction.events.filter((e) => e.spot).length === 1) ex.weekdays = weekdaysFromText(text);
+    // 最後一天要是貼文（或補充）寫的，模型自己猜的不算
+    ex.until = untilInText(ex.until, text);
     const sessions = spotSessions(ex, post.posted_at, now);
     if (sessions.length === 0) items.push({ group, plan: null, reason: 'already_over' });
     // 每天一個時段，地點都一樣：只定位一次

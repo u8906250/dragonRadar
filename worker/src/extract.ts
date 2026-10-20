@@ -148,6 +148,23 @@ export function normalizeWeekdays(v: unknown): number[] | null {
   return days.length > 0 && days.length < 7 ? days : null;
 }
 
+/**
+ * 模型給的最後一天要在貼文裡找得到（「10/29」「10月29日」「10.29」），找不到就是模型自己猜的
+ * （例如沒寫結束就填年底），當成沒寫，畫面寫「發完為止」。
+ */
+export function untilInText(until: string | null, text: string): string | null {
+  if (!until) return null;
+  const m = /^\d{4}-(\d{2})-(\d{2})$/.exec(until);
+  if (!m) return null;
+  const mo = Number(m[1]);
+  const d = Number(m[2]);
+  const t = text.replace(/[０-９]/g, (c) => String.fromCharCode(c.charCodeAt(0) - 0xfee0));
+  const re = new RegExp(`(?<!\\d)0?${mo}\\s*(?:[/.\\-]|月)\\s*0?${d}(?!\\d)`);
+  // 「10/17~19」「10月17日至19日」：後半段省略月份
+  const range = new RegExp(`(?<!\\d)0?${mo}\\s*(?:[/.]|月)\\s*\\d{1,2}\\s*日?\\s*[~～至到\\-－]\\s*0?${d}(?!\\d)`);
+  return re.test(t) || range.test(t) ? until : null;
+}
+
 const WEEKDAY_CHAR: Record<string, number> = { 一: 1, 二: 2, 三: 3, 四: 4, 五: 5, 六: 6, 日: 7, 天: 7 };
 
 /**

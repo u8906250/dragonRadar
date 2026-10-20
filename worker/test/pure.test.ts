@@ -1,4 +1,4 @@
-import { weekdaysFromText } from '../src/extract';
+import { untilInText, weekdaysFromText } from '../src/extract';
 import { isAreaOnly } from '../src/geocode';
 import { existedOutcome, previewOf } from '../src/reports';
 import { describe, expect, it } from 'vitest';
@@ -353,5 +353,19 @@ describe('weekdays', () => {
     const s = spotSessions({ start_at: '2026-10-20T14:00:00+08:00', end_at: '2026-10-20T18:00:00+08:00', until: null, weekdays: [2, 4] }, posted, posted);
     const days = s.map((x) => new Date((x.start + 8 * 3600) * 1000).toISOString().slice(0, 10));
     expect(days).toEqual(['2026-10-20', '2026-10-22']);
+  });
+});
+
+describe('untilInText', () => {
+  it('keeps an end date the post actually wrote', () => {
+    expect(untilInText('2026-10-29', '10/17~10/29 每日 11:00')).toBe('2026-10-29');
+    expect(untilInText('2026-10-25', '發到10月25日為止')).toBe('2026-10-25');
+    expect(untilInText('2026-11-05', '到 11/5')).toBe('2026-11-05');
+    expect(untilInText('2026-10-19', '10/17~19 每日 11:00')).toBe('2026-10-19');
+    expect(untilInText('2026-10-19', '10月17日至19日')).toBe('2026-10-19');
+  });
+  it('drops an end date the model made up', () => {
+    expect(untilInText('2026-12-31', '每週二、四 14:00–18:00，送完為止')).toBeNull();
+    expect(untilInText('2026-10-29', '10/2 開始，10/290 號')).toBeNull();
   });
 });
