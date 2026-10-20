@@ -1,5 +1,5 @@
 import './styles.css';
-import { addKeyword, cancelSpot, collectLetter, deleteBottle, dropBottle, recycleBottle, fetchBottles, fetchEvents, fetchHealth, fetchKeywords, fetchMyBottles, fetchRoutes, fetchSpotStatus, pickBottle, reportBottle, reportEnded, submitLink, submitSpot } from './api';
+import { addKeyword, collectLetter, deleteBottle, dropBottle, recycleBottle, fetchBottles, fetchEvents, fetchHealth, fetchKeywords, fetchMyBottles, fetchRoutes, pickBottle, reportBottle, reportEnded, submitLink } from './api';
 import { compassSupported, startCompass } from './compass';
 import { bearingDeg, compassLabel, formatKm, haversineKm, taiwanRadiusKm, type LatLng } from './geo';
 import { inShuangbei, SHUANGBEI_RINGS, shuangbeiRadiusKm } from './shuangbei';
@@ -10,7 +10,7 @@ import { crowdOf, MapView, type BaseMap } from './map';
 import { beep, ensureNotificationPermission, notificationState, showBanner, systemNotify, unlockAudio } from './notify';
 import { Radar, type RadarRoute } from './radar';
 import { DEFAULT_THEME_ID, getTheme, THEMES, type Theme } from './themes';
-import type { BottleOut, EventOut, Item, KeywordInfo, KeywordRules, MyBottles, Origin, Phase, PickedBottle, RelatedPost, RouteOut, RouteStop, SpotRequestStatus, SubmitResult } from './types';
+import type { BottleOut, EventOut, Item, KeywordInfo, KeywordRules, MyBottles, Origin, Phase, PickedBottle, RelatedPost, RouteOut, RouteStop, SubmitResult } from './types';
 
 const DEFAULT_ORIGIN: Origin = { lat: 25.0478, lng: 121.517, source: 'default' }; // 台北車站
 const SOON_SEC = 30 * 60;
@@ -29,10 +29,6 @@ const BASES: BaseMap[] = ['nlsc', 'osm'];
 const LS_KEYWORDS = 'dr.keywords';
 const LS_ENDED = 'dr.endedReported';
 const LS_SPOTS = 'dr.showSpots';
-/** 自己送出的固定據點回報（審核進度的查詢代碼） */
-const LS_SPOT_REQS = 'dr.spotRequests';
-/** 上次選的回報種類 */
-const LS_REPORT_MODE = 'dr.reportMode';
 /** 丟過瓶子（才需要去問有沒有被撿走）、看過的最後一次「被撿走」時間 */
 const LS_BOTTLE_DROPPED = 'dr.bottleDropped';
 const LS_BOTTLE_SEEN = 'dr.bottleSeen';
@@ -40,11 +36,6 @@ const LS_BOTTLE_SEEN = 'dr.bottleSeen';
 const LS_NOTIFY = 'dr.notify';
 /** 實驗功能：漂流瓶預設不顯示，在說明頁「實驗功能」或網址 ?lab=bottles 打開（?lab=off 關掉） */
 const LS_LAB_BOTTLES = 'dr.lab.bottles';
-/** 自己送出的固定據點的取消碼：{ 查詢代碼: 取消碼 } */
-const LS_SPOT_CANCEL = 'dr.spotCancel';
-/** 瀏覽器不能存資料（私密瀏覽等）時，這次開著的期間先記在這裡 */
-let spotKeysMem: string[] = [];
-let spotCancelMem: Record<string, string> = {};
 /** 固定據點休息中、下一段在這個時間內開始才畫淡光點 */
 const SPOT_SHOW_AHEAD_SEC = 24 * 3600;
 const KEYWORD_RE_INVALID = /[<>{}\\%_]/;
@@ -188,14 +179,6 @@ const bottleTips = $('#bottle-tips');
 const lettersPage = $('#letters-page');
 const lettersPicked = $('#letters-picked');
 const lettersList = $('#letters-list');
-const reportModeBtns = Array.from(document.querySelectorAll<HTMLButtonElement>('#report-sheet [data-mode]'));
-const reportEventEl = $('#report-event');
-const reportSpotEl = $('#report-spot');
-const spotForm = $<HTMLFormElement>('#spot-form');
-const spotSubmitBtn = $<HTMLButtonElement>('#spot-submit');
-const spotResult = $('#spot-result');
-const spotMine = $('#spot-mine');
-const spotTips = $('#spot-tips');
 const filterRow = $('#filter-row');
 const spotToggle = $<HTMLButtonElement>('#spot-toggle');
 const baseChipsEl = $('#base-chips');
@@ -1913,145 +1896,6 @@ function openReportSheet(open: boolean): void {
   selectedBottle = null;
   detailEl.hidden = true;
   renderReportTips();
-  setReportMode(lsGet(LS_REPORT_MODE) === 'spot' ? 'spot' : 'event');
-}
-
-function setReportMode(mode: 'event' | 'spot'): void {
-  for (const b of reportModeBtns) {
-    const on = b.dataset.mode === mode;
-    b.classList.toggle('on', on);
-    b.setAttribute('aria-checked', String(on));
-  }
-  reportEventEl.hidden = mode !== 'event';
-  reportSpotEl.hidden = mode !== 'spot';
-  lsSet(LS_REPORT_MODE, mode);
-  // 審核進度兩種模式都顯示，之後打開回報就看得到
-  void renderSpotMine();
-}
-
-function spotKeys(): string[] {
-  let saved: string[] = [];
-  try {
-    const v = JSON.parse(lsGet(LS_SPOT_REQS) ?? '[]') as unknown;
-    if (Array.isArray(v)) saved = v.filter((x): x is string => typeof x === 'string');
-  } catch {
-    /* 壞掉的資料當成沒有 */
-  }
-  return [...new Set([...spotKeysMem, ...saved])].slice(0, 20);
-}
-
-const SPOT_STATUS_TEXT: Record<SpotRequestStatus['status'], string> = { pending: '等人工審核', approved: '已上雷達', rejected: '沒有通過', cancelled: '已取消' };
-
-function spotCancelKeys(): Record<string, string> {
-  let saved: Record<string, string> = {};
-  try {
-    const v = JSON.parse(lsGet(LS_SPOT_CANCEL) ?? '{}') as unknown;
-    if (v && typeof v === 'object' && !Array.isArray(v)) saved = v as Record<string, string>;
-  } catch {
-    /* 壞掉的資料當成沒有 */
-  }
-  return { ...saved, ...spotCancelMem };
-}
-
-async function cancelSpotReport(key: string): Promise<void> {
-  const cancelKey = spotCancelKeys()[key];
-  if (!cancelKey) return;
-  const r = await cancelSpot(key, cancelKey);
-  if (!r.ok) {
-    spotResult.innerHTML = `<p class="msg error">${esc(r.message)}</p>`;
-    return;
-  }
-  spotResult.innerHTML = '<p class="msg">已取消。</p>';
-  await renderSpotMine();
-  await refresh();
-}
-
-/** 自己送出的固定據點與審核進度 */
-async function renderSpotMine(): Promise<void> {
-  const l = keywordRules?.sources?.spot;
-  spotTips.innerHTML = [
-    '貼文沒寫地址也沒關係，地點欄寫店名加完整門牌（例如「台北市信義區信義路四段399號」），或路口、地標。',
-    `只收${l ? ` ${l.maxAgeDays} 天內` : ''}的公開貼文。${l?.autoReview === false ? '' : '自動審核會判讀貼文、查地點：要看得出是連續多天的發放或活動、跟洋流有關、地點查得到，貼文自己寫的地址也要跟你填的對得上。不符合的改由人工審核。'}`,
-    '上雷達後，原貼文刪除會自動下架；已經發完可以在詳細資料按「回報已發完」。',
-  ]
-    .map((t) => `<li>${esc(t)}</li>`)
-    .join('');
-  const keys = spotKeys();
-  const cancels = spotCancelKeys();
-  const list = await fetchSpotStatus(keys);
-  if (keys.length > 0 && list.length === 0) {
-    spotMine.innerHTML = '<h3 class="spot-mine-title">你送出的固定據點</h3><p class="muted sheet-note">暫時查不到審核進度，稍後再打開看看。</p>';
-    return;
-  }
-  spotMine.innerHTML = list.length
-    ? `<h3 class="spot-mine-title">你送出的固定據點</h3><ul class="spot-mine">${list
-        .map(
-          (r) =>
-            `<li><span class="spot-status spot-${r.status}">${SPOT_STATUS_TEXT[r.status]}</span><span class="spot-mine-body">${esc(r.place)}${r.reason ? `<small>${esc(r.reason)}</small>` : ''}${r.note ? `<small>${esc(r.note)}</small>` : ''}${r.auto ? '<small>自動審核通過</small>' : ''}<small>${dateFmt.format(new Date(r.createdAt * 1000))} 送出${r.reviewedAt ? `・${dateFmt.format(new Date(r.reviewedAt * 1000))} 審核` : ''}${r.permalink ? `・<a href="${esc(r.permalink)}" target="_blank" rel="noopener">原貼文</a>` : ''}</small></span>${
-              cancels[r.key] && (r.status === 'pending' || r.status === 'approved')
-                ? `<button type="button" class="chip spot-cancel" data-cancel="${esc(r.key)}" data-approved="${r.status === 'approved' ? '1' : ''}">${r.status === 'approved' ? '撤下' : '取消'}</button>`
-                : ''
-            }</li>`,
-        )
-        .join('')}</ul>`
-    : '';
-}
-
-async function submitSpotReport(): Promise<void> {
-  const fd = new FormData(spotForm);
-  const val = (k: string): string => String(fd.get(k) ?? '').trim();
-  if (!val('url') || !val('place')) {
-    spotResult.innerHTML = '<p class="msg error">請貼上 Threads 連結並填寫地點</p>';
-    return;
-  }
-  spotSubmitBtn.disabled = true;
-  spotResult.innerHTML = `<p class="msg busy">${keywordRules?.sources?.spot?.autoReview === false ? '讀取貼文中' : '讀取貼文並自動審核中，約需 10 秒'}</p>`;
-  const r = await submitSpot({ url: val('url'), place: val('place'), hours: val('hours'), note: val('note') });
-  spotSubmitBtn.disabled = false;
-  if (!r.ok) {
-    spotResult.innerHTML = `<p class="msg error">${esc(r.message)}</p>`;
-    return;
-  }
-  const s = r.data;
-  const head = s.existed
-    ? s.status === 'approved'
-      ? '這則已經有人回報，已經在雷達上了。'
-      : '這則已經有人回報，正在等人工審核。'
-    : s.status === 'approved'
-      ? '自動審核通過，已放上雷達：'
-      : s.note
-        ? `需要人工審核（${s.note}）。審核後可以在下面看結果。`
-        : '已送出，審核通過後就會出現在雷達上。可以在下面看進度。';
-  const found = s.events ?? [];
-  const list = found
-    .slice(0, 1)
-    .map((ev) => {
-      const last = found.at(-1);
-      const days = last?.untilOpen ? `・${openEndText(last)}` : found.length > 1 ? `・${found.length} 天` : '';
-      const when = spotHours(found);
-      return `<li><button type="button" data-id="${ev.id}"><b>${kindLabel(ev)}｜${esc(titleOf(ev))}</b><small>${esc(placeLine(ev))} · ${esc(when)}${days}</small></button></li>`;
-    })
-    .join('');
-  spotResult.innerHTML = `<p class="msg">${esc(head)}</p>${list ? `<ul class="report-events">${list}</ul>` : ''}`;
-  for (const b of spotResult.querySelectorAll<HTMLButtonElement>('[data-id]')) {
-    b.addEventListener('click', () => {
-      reportSheet.hidden = true;
-      bottleSheet.hidden = true;
-      selectedId = null;
-      select(Number(b.dataset.id));
-    });
-  }
-  if (found.length > 0) void refresh();
-  const keys = [s.key, ...spotKeys().filter((k) => k !== s.key)].slice(0, 20);
-  spotKeysMem = keys;
-  lsSet(LS_SPOT_REQS, JSON.stringify(keys));
-  if (s.cancelKey) {
-    const cancels = Object.fromEntries(Object.entries({ ...spotCancelKeys(), [s.key]: s.cancelKey }).filter(([k]) => keys.includes(k)));
-    spotCancelMem = cancels;
-    lsSet(LS_SPOT_CANCEL, JSON.stringify(cancels));
-  }
-  spotForm.reset();
-  await renderSpotMine();
 }
 
 function renderReportTips(): void {
@@ -2060,6 +1904,7 @@ function renderReportTips(): void {
     '在 Threads 貼文按「分享」→「複製連結」，再貼到上面。Android 把洋流雷達加到主畫面後，也可以直接分享到洋流雷達。',
     `只收${l ? ` ${l.maxAgeDays} 天內` : ''}的公開貼文，貼文要寫出時間和地點。`,
     `原貼文刪除或改成「發完了」，雷達${l ? ` ${l.recheckMin} 分鐘內` : ''}會自動下架。`,
+    '店家、服務處連續好幾天都能去領的（例如「明天起到服務處領取」），一樣貼連結，會自動判斷成固定據點，每天開放的時段都標上雷達。貼文最好寫出門牌地址，定位才準。',
   ];
   reportTips.innerHTML = tips.map((t) => `<li>${esc(t)}</li>`).join('');
 }
@@ -2077,16 +1922,26 @@ function setReportMsg(html: string): void {
   reportResult.innerHTML = html;
 }
 
+/** 判讀中鎖住輸入框和按鈕，免得改到網址或重複送出 */
+let reportBusy = false;
+function setReportBusy(busy: boolean): void {
+  reportBusy = busy;
+  reportInput.disabled = busy;
+  reportSubmit.disabled = busy;
+  reportPaste.disabled = busy;
+  reportSubmit.textContent = busy ? '判讀中…' : '送出';
+}
+
 async function submitReport(): Promise<void> {
+  if (reportBusy) return;
   const url = reportInput.value.trim();
   if (!url) {
     setReportMsg('<p class="msg error">請先貼上 Threads 貼文連結</p>');
     return;
   }
-  reportSubmit.disabled = true;
+  setReportBusy(true);
   setReportMsg('<p class="msg busy">讀取貼文並判讀中，約需 10 秒</p>');
-  const r = await submitLink(url);
-  reportSubmit.disabled = false;
+  const r = await submitLink(url).finally(() => setReportBusy(false));
   if (!r.ok) {
     setReportMsg(`<p class="msg error">${esc(r.message)}</p>`);
     return;
@@ -2291,11 +2146,6 @@ function wireControls(): void {
     e.preventDefault();
     void submitReport();
   });
-  for (const b of reportModeBtns) b.addEventListener('click', () => setReportMode(b.dataset.mode === 'spot' ? 'spot' : 'event'));
-  spotForm.addEventListener('submit', (e) => {
-    e.preventDefault();
-    void submitSpotReport();
-  });
   bottleBtn.addEventListener('click', () => openBottleSheet(bottleSheet.hidden));
   bottleSheet.querySelector('[data-act="close"]')?.addEventListener('click', () => openBottleSheet(false));
   bottleText.addEventListener('input', () => {
@@ -2337,14 +2187,6 @@ function wireControls(): void {
       lettersPage.hidden = true;
       document.body.classList.remove('letters-open');
     }
-  });
-  spotMine.addEventListener('click', (e) => {
-    const b = (e.target as Element).closest<HTMLButtonElement>('[data-cancel]');
-    if (!b?.dataset.cancel) return;
-    const ask = b.dataset.approved ? '要把這個據點從雷達上撤下嗎？' : '要取消這筆回報嗎？';
-    if (!window.confirm(ask)) return;
-    b.disabled = true;
-    void cancelSpotReport(b.dataset.cancel);
   });
   if (navigator.clipboard && 'readText' in navigator.clipboard) {
     reportPaste.hidden = false;
@@ -2413,7 +2255,6 @@ async function boot(): Promise<void> {
     // 分享進來的網址用過就清掉，重新整理才不會再送一次
     history.replaceState(null, '', location.pathname);
     openReportSheet(true);
-    setReportMode('event');
     reportInput.value = shared;
     void submitReport();
   }

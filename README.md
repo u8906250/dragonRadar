@@ -20,7 +20,7 @@ worker/   Cloudflare Worker（API、排程、資料庫）
 
 1. 每 10 分鐘 Cron 喚醒 Worker，對每個關鍵字呼叫 Threads `keyword_search`（RECENT，`since` 只拿新貼文）。
 2. 新貼文丟給 Workers AI 抽出：是否為實體發放、開始／結束時間、地點文字、可搜尋的地點名稱、信心分數。
-3. 地點轉成座標，寫進 `events`（`locatePlaceForEvent`）：貼文有寫門牌就只用門牌查（Photon、Overpass，跟固定據點同一套；地點欄沒寫縣市時從另一欄補，縣市不確定就不查），查不到就退到鄉鎮區中心標成約略位置，**不拿店名或「XX服務處」去猜**（會查到同名的別的機構）；沒有門牌才用 Nominatim 查地名。固定據點的每天時段只定位一次；一則貼文的 Overpass 最多查 25 秒，之後只用 Photon。
+3. 地點轉成座標，寫進 `events`（`locatePlaceForEvent`）：貼文有寫門牌就只用門牌查（Photon、Overpass，跟 `locatePlace` 同一套；地點欄沒寫縣市時從另一欄補，縣市不確定就不查），查不到就退到鄉鎮區中心標成約略位置，**不拿店名或「XX服務處」去猜**（會查到同名的別的機構）；沒有門牌才用 Nominatim 查地名。固定據點的每天時段只定位一次；一則貼文的 Overpass 最多查 25 秒，之後只用 Photon。
 4. 事件狀態：`upcoming` → `active`（到開始時間）→ `ended`（到結束時間，或作者後續貼文／回覆出現「發完」等字眼）。
 5. 前端每分鐘向 `/api/events` 拿附近事件，用使用者座標算方位與距離畫在雷達上；進行中事件變多時嗶聲＋通知。
 
@@ -43,20 +43,11 @@ worker/   Cloudflare Worker（API、排程、資料庫）
 - 活動開始後，2 個不同的人按「回報已發完」就提早下架（官方行程除外）。
 - 亂貼的貼文可用 `DELETE /api/admin/posts/link-<代碼>` 移除。
 
-### 回報固定據點（自動審核，沒把握才人工）
+### 固定據點
 
-店家、服務處的公告常常沒寫地址或時間，所以另外一條路：使用者在「＋回報」切到「固定據點」，貼連結並填地點（必填）、開放時間、補充說明，存進 `spot_requests`，接著馬上自動審核（約 10 秒）：
+店家、服務處連續好幾天都能去領的，一樣走「回報 Threads 貼文」（`/api/reports`）：AI 判讀時 `spot = true` 的場次展開成每天一筆（沒寫最後一天先排 7 天，沒寫幾點結束開到當天結束）。
 
-- 貼文內文加上回報者補充的地點、時間交給同一套 AI 判讀，要有 `spot = true` 的場次、信心夠、內文或判讀結果有追蹤中的關鍵字。
-- 地點用 `locatePlace`：門牌地址先問 [Photon](https://photon.komoot.io/)（OSM 資料的地址搜尋，約 1 秒，查詢寫成「信義路四段 399 臺北市」），查不到再用 Overpass 找路附近的 OSM 門牌（`addr:street` 含巷弄 + `addr:housenumber`，8 秒逾時）；沒有一樣的號碼就用同側前後門牌推算（相差 60 號內）；沒有門牌才用 Nominatim 查店名或地標，只查到整條路或行政區的不算。
-- 貼文自己寫了不同的門牌地址、而且差超過 1 km，就交給人工（防止拿別人的貼文配假地址）。
-- 全部通過：建 `spot-<代碼>` 貼文並展開成每天一筆，`reviewer = 'auto'`；不通過：留在 pending，`review_note` 寫原因給回報的人看。
-- 有人亂貼時把 `wrangler.toml` 的 `SPOT_AUTO_REVIEW` 改成 `"false"`，全部改回人工審核。`POST /api/admin/spot-requests/:id/auto` 可以用目前規則重跑一次自動審核。
-
-- 只收 30 天內的公開貼文；同一則貼文已在審核或已通過就不再收；同一個 IP 每小時 5 則、全站每小時 60 則。
-- 回報的人拿到隨機代碼，用 `GET /api/spot-requests?keys=` 看進度（前端存在 localStorage）；第一次送出時另外拿到取消碼，`POST /api/spot-requests/cancel { key, cancelKey }` 取消（已上雷達的一起撤下）。重複送同一則的人只拿得到查詢代碼，不能取消別人的。
-- 管理者用 `GET /api/admin/spot-requests?status=pending` 看佇列，`POST /api/admin/spot-requests/:id/approve` 通過（`title`、`item`、`place_text`、`lat`/`lng` 或 `place_query`、`from`、`until`、`open`、`close`），會建一則 `spot-<代碼>` 貼文，展開成每天一筆固定據點；再按一次通過就是修改。`POST .../reject { reason }` 不通過，已上雷達的會一起撤下。
-- 排程只檢查原貼文有沒有刪除；內容以審核時填的為準（公告常寫「送完為止」，不能當成發完）。
+以前另外有「回報固定據點」（使用者填地點、開放時間，自動審核、沒把握才人工），**已經拿掉**，統一用發放或活動判斷：前端沒有入口，`POST /api/spot-requests` 回 410 請使用者改貼連結。之前送出的資料照舊：`GET /api/spot-requests?keys=` 查進度、`POST /api/spot-requests/cancel` 取消、管理者的 `GET /api/admin/spot-requests`、`.../:id/approve|reject|auto` 都還能用（已上雷達的 `spot-<代碼>` 據點不受影響）。地點定位的 `locatePlace`（門牌先問 Photon，查不到再用 Overpass，同側前後門牌推算）也還在，發放判讀的門牌查詢用的是同一套。
 
 沒有 Threads token 或 `MOCK_MODE=true` 時，Worker 會用內建示範貼文跑同一套流程，前端會標示「示範資料」。
 

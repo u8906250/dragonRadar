@@ -311,6 +311,8 @@ a.chip { display: inline-flex; align-items: center; text-decoration: none; }
   border: var(--border-w) solid var(--line); border-radius: var(--card-radius); padding: 10px 12px; min-height: 44px;
 }
 .kw-form input:focus { outline: 2px solid var(--highlight); outline-offset: 1px; }
+/* 判讀中鎖住：看得出不能按 */
+#report-form input:disabled, #report-form .btn:disabled { opacity: 0.55; cursor: wait; }
 .kw-msg-error { color: var(--highlight); }
 .kw-chip.static { cursor: default; box-shadow: none; opacity: 1; }
 .kw-chip.static::before { content: none; }
@@ -445,25 +447,12 @@ a.chip { display: inline-flex; align-items: center; text-decoration: none; }
 .map-star { background: none; border: none; color: #ffc531; font-size: 26px; line-height: 26px; text-align: center; -webkit-text-stroke: 1.5px #5c3d00; filter: drop-shadow(0 0 3px rgba(0, 0, 0, 0.35)); }
 
 /* 回報：發放或活動／固定據點 */
-.report-modes { margin: 0 0 12px; }
-.spot-form { display: flex; flex-direction: column; gap: 10px; }
-.spot-form label { display: flex; flex-direction: column; gap: 4px; font-size: 13px; font-weight: 700; color: var(--muted); }
-.spot-form input {
-  font: inherit; font-size: 16px; font-weight: 400; color: var(--text); background: var(--card);
-  border: var(--border-w) solid var(--line); border-radius: var(--card-radius); padding: 10px 12px; min-height: 44px;
-}
-.spot-form input:focus { outline: 2px solid var(--highlight); outline-offset: 1px; }
-.spot-form .btn { align-self: flex-end; }
 .spot-mine-title { font-size: 14px; margin: 14px 0 6px; }
 .spot-mine { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; font-size: 14px; }
 .spot-mine li { display: flex; gap: 8px; align-items: flex-start; }
 .spot-mine-body { display: flex; flex-direction: column; min-width: 0; }
 .spot-mine small { color: var(--muted); font-size: 12px; }
 /* 狀態標籤：等審核、已取消用外框，各主題都看得清楚（洋流主題的 --line 是深色，不能當底色） */
-.spot-status { flex: 0 0 auto; font-size: 11px; font-weight: 800; padding: 1px 7px; border-radius: 999px; background: transparent; color: var(--text); border: 1.5px solid var(--muted); }
-.spot-status.spot-approved { background: var(--blip-activity); border-color: var(--blip-activity); color: #fff; }
-.spot-status.spot-rejected { background: var(--highlight); border-color: var(--highlight); color: var(--accent-text); }
-.spot-status.spot-cancelled { color: var(--muted); }
 .spot-mine-body { flex: 1 1 auto; }
 .spot-cancel { flex: 0 0 auto; padding: 4px 10px; font-size: 12px; }
 

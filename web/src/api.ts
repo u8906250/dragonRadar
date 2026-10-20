@@ -1,5 +1,5 @@
 import type { LatLng } from './geo';
-import type { BottleOut, EndedReportResult, EventOut, KeywordInfo, KeywordRules, MyBottles, PickedBottle, RouteOut, SpotRequestStatus, SubmitResult } from './types';
+import type { BottleOut, EndedReportResult, EventOut, KeywordInfo, KeywordRules, MyBottles, PickedBottle, RouteOut, SubmitResult } from './types';
 
 /** 正式環境的 Worker 網址；本機開發打 localhost，VITE_API_BASE 可覆寫（空字串視為未設定，CI 沒設變數時會傳空字串） */
 const PROD_API_BASE = 'https://dragon-radar.happybadminton.workers.dev';
@@ -133,26 +133,6 @@ export const recycleBottle = (id: number): Promise<Result<{ quota: MyBottles['qu
 export const collectLetter = (id: number, on: boolean): Promise<Result<{ collected: boolean }>> =>
   deviceJson<{ collected: boolean }>(`/api/bottles/${id}/${on ? 'collect' : 'uncollect'}`, 'POST', {});
 export const reportBottle = (id: number): Promise<Result<{ hidden: boolean }>> => deviceJson<{ hidden: boolean }>(`/api/bottles/${id}/report`, 'POST', {});
-
-/** 回報固定據點，進審核佇列 */
-export const submitSpot = (body: { url: string; place: string; hours: string; note: string }): Promise<Result<SpotRequestStatus>> =>
-  postJson<SpotRequestStatus>('/api/spot-requests', body);
-
-/** 取消自己送出的固定據點（已上雷達的會一起撤下） */
-export const cancelSpot = (key: string, cancelKey: string): Promise<Result<SpotRequestStatus>> =>
-  postJson<SpotRequestStatus>('/api/spot-requests/cancel', { key, cancelKey });
-
-/** 查自己送出的固定據點審核進度 */
-export async function fetchSpotStatus(keys: string[]): Promise<SpotRequestStatus[]> {
-  if (keys.length === 0) return [];
-  try {
-    const r = await fetch(`${API_BASE}/api/spot-requests?keys=${encodeURIComponent(keys.join(','))}`);
-    if (!r.ok) return [];
-    return ((await r.json()) as { requests?: SpotRequestStatus[] }).requests ?? [];
-  } catch {
-    return [];
-  }
-}
 
 /** 貼上 Threads 貼文連結，後端讀取並判讀，可能要十幾秒 */
 export const submitLink = (url: string): Promise<Result<SubmitResult>> => postJson<SubmitResult>('/api/reports', { url });

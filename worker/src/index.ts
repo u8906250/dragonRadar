@@ -13,7 +13,7 @@ import { ENDED_REPORTS_NEEDED, MAX_LINK_AGE_SEC, ReportError, ipHash, purgeRepor
 import { isTransient, withResilientDb } from './db';
 import { addressCacheKey, geocodeAddress, parseTwAddress } from './address';
 import { adminListBottles, adminSetBottle, BOTTLE_MAX_WEIGHT, BOTTLE_TTL_SEC, bottlesEnabled, collectLetter, deleteBottle, deviceId, DRIFT_EVERY_SEC, driftBottles, dropBottle, listBottles, myBottles, PER_DEVICE_PER_DAY, PICK_RADIUS_M, pickBottle, purgeBottles, recycleBottle, reportBottle } from './bottles';
-import { approveSpotRequest, autoReview, cancelSpotRequest, listSpotRequests, locatePlace, rejectSpotRequest, SPOT_MAX_AGE_SEC, spotRequestStatus, submitSpotRequest, type ApproveBody, type SpotRequestRow } from './spots';
+import { approveSpotRequest, autoReview, cancelSpotRequest, listSpotRequests, locatePlace, rejectSpotRequest, SPOT_MAX_AGE_SEC, spotRequestStatus, type ApproveBody, type SpotRequestRow } from './spots';
 import { addUserKeyword, listActiveKeywords, listAllKeywords, MAX_ACTIVE_KEYWORDS, normalizeKeyword, parseKeywordList, toKeywordOut, touchKeywords } from './keywords';
 import { CALLBACK_PATH, DELETE_PATH, DELETION_STATUS_PATH, UNINSTALL_PATH, deletionStatus, handleCallback, handleDelete, handleUninstall, startAuth } from './oauth';
 import { jsonResponse, nowSec, parseIsoToUnix } from './util';
@@ -170,11 +170,10 @@ async function handle(req: Request, env: Env, ctx: ExecutionContext): Promise<Re
     return jsonResponse(result);
   }
 
-  // 回報固定據點：{ url, place, hours?, note? }，進審核佇列
+  // 固定據點回報已經拿掉，統一用 /api/reports 判讀（AI 會自己判斷是不是固定據點）；
+  // 舊版網頁還開著的人送出時告訴他改用哪裡。以前送出的進度查詢、取消照舊。
   if (req.method === 'POST' && path === '/api/spot-requests') {
-    const body = await readJson<{ url?: unknown; place?: unknown; hours?: unknown; note?: unknown }>(req);
-    const r = await submitSpotRequest(env, body, await ipHash(env, req), now);
-    return jsonResponse(r, r.existed ? 200 : 201);
+    throw new HttpError(410, '固定據點回報已經合併到「回報 Threads 貼文」，直接貼連結就好，會自動判斷成固定據點。請重新整理頁面');
   }
 
   // ---- 漂流瓶（裝置代碼放在 x-device 標頭）----
