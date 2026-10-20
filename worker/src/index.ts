@@ -9,7 +9,7 @@ import { CURRENT_MAP_URL } from './sources/currentmap';
 import { mergeIntoOfficial } from './sources/merge';
 import { apifyTrial } from './sources/apify';
 import { fetchThreadsPost, resolveThreadsLink, shortcodeToUnix } from './sources/link';
-import { ENDED_REPORTS_NEEDED, MAX_LINK_AGE_SEC, ReportError, ipHash, purgeReports, recheckLinks, reportEnded, submitLink } from './reports';
+import { confirmLink, ENDED_REPORTS_NEEDED, MAX_LINK_AGE_SEC, ReportError, ipHash, purgeReports, recheckLinks, rejectLink, reportEnded, submitLink } from './reports';
 import { isTransient, withResilientDb } from './db';
 import { addressCacheKey, geocodeAddress, parseTwAddress } from './address';
 import { adminListBottles, adminSetBottle, BOTTLE_MAX_WEIGHT, BOTTLE_TTL_SEC, bottlesEnabled, collectLetter, deleteBottle, deviceId, DRIFT_EVERY_SEC, driftBottles, dropBottle, listBottles, myBottles, PER_DEVICE_PER_DAY, PICK_RADIUS_M, pickBottle, purgeBottles, recycleBottle, reportBottle } from './bottles';
@@ -160,7 +160,17 @@ async function handle(req: Request, env: Env, ctx: ExecutionContext): Promise<Re
     return jsonResponse({ status: r.status, keyword: toKeywordOut(r.keyword), max: MAX_ACTIVE_KEYWORDS, keywords: active.map(toKeywordOut) }, r.status === 'created' ? 201 : 200);
   }
 
-  // 使用者貼上 Threads 貼文連結：{ url }
+  // 回報的人確認判讀沒錯就放上雷達：{ postId, token }；說判讀錯了：{ postId, token, note? }
+  if (req.method === 'POST' && path === '/api/reports/confirm') {
+    const result = await confirmLink(env, await readJson<{ postId?: unknown; token?: unknown }>(req), now);
+    await mergeIntoOfficial(env, now).catch((e) => console.warn('merge failed', e));
+    return jsonResponse(result);
+  }
+  if (req.method === 'POST' && path === '/api/reports/reject') {
+    return jsonResponse(await rejectLink(env, await readJson<{ postId?: unknown; token?: unknown; note?: unknown }>(req)));
+  }
+
+  // 使用者貼上 Threads 貼文連結：{ url }。判讀好先回傳預覽（outcome = 'preview'），確認了才上雷達
   if (req.method === 'POST' && path === '/api/reports') {
     const body = await readJson<{ url?: unknown }>(req);
     if (typeof body.url !== 'string' || body.url.length > 2000) throw new HttpError(400, '請貼上 Threads 貼文連結');
@@ -321,6 +331,8 @@ async function handleAdmin(req: Request, env: Env, _ctx: ExecutionContext, path:
       env.DB.prepare("DELETE FROM events WHERE post_id = ? AND status IN ('upcoming', 'active', 'unlocated')").bind(id),
     ]);
     const result = await processPost(env, post, now);
+    // 管理者重跑就是確認過了：之後有人再貼這則，不會再要人確認、重複放一次
+    await env.DB.prepare("UPDATE posts SET confirm_state = 'confirmed', confirm_plan = NULL WHERE id = ? AND confirm_state IS NOT NULL").bind(id).run();
     return jsonResponse({ post_id: id, reasons: result.reasons, events: result.events });
   }
 
@@ -421,8 +433,12 @@ async function handleAdmin(req: Request, env: Env, _ctx: ExecutionContext, path:
     return jsonResponse(await rejectSpotRequest(env, Number(spotNo[1]), body.reason ?? null, now));
   }
 
+  // ?confirm=rejected 看回報的人說判讀錯的、pending 還沒確認的
   if (req.method === 'GET' && path === '/api/admin/posts') {
-    const r = await env.DB.prepare('SELECT * FROM posts ORDER BY fetched_at DESC LIMIT 100').all();
+    const confirm = url.searchParams.get('confirm');
+    const r = confirm
+      ? await env.DB.prepare('SELECT * FROM posts WHERE confirm_state = ? ORDER BY fetched_at DESC LIMIT 100').bind(confirm).all()
+      : await env.DB.prepare('SELECT * FROM posts ORDER BY fetched_at DESC LIMIT 100').all();
     return jsonResponse({ posts: r.results.map((p) => ({ ...p, extraction: safeParse(p.extraction as string | null) })) });
   }
 

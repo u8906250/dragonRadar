@@ -136,5 +136,9 @@ export const reportBottle = (id: number): Promise<Result<{ hidden: boolean }>> =
 
 /** 貼上 Threads 貼文連結，後端讀取並判讀，可能要十幾秒 */
 export const submitLink = (url: string): Promise<Result<SubmitResult>> => postJson<SubmitResult>('/api/reports', { url });
+/** 判讀結果對：放上雷達 */
+export const confirmReport = (c: { postId: string; token: string }): Promise<Result<SubmitResult>> => postJson<SubmitResult>('/api/reports/confirm', c);
+/** 判讀錯了：不放，note 寫哪裡錯 */
+export const rejectReport = (c: { postId: string; token: string }, note: string): Promise<Result<{ ok: true }>> => postJson<{ ok: true }>('/api/reports/reject', { ...c, note });
 
 export const reportEnded = (eventId: number): Promise<Result<EndedReportResult>> => postJson<EndedReportResult>(`/api/events/${eventId}/ended`, {});

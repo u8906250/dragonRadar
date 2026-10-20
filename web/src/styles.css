@@ -382,6 +382,13 @@ a.chip { display: inline-flex; align-items: center; text-decoration: none; }
 .report-events { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
 .report-events button { width: 100%; text-align: left; font: inherit; font-size: 14px; color: var(--text); background: var(--card); border: var(--border-w) solid var(--line); border-radius: var(--card-radius); box-shadow: var(--card-shadow); padding: 10px 12px; cursor: pointer; }
 .report-events small { display: block; color: var(--muted); margin-top: 2px; }
+/* 判讀結果的預覽：確認了才放上雷達 */
+.report-preview { list-style: none; margin: 0 0 10px; padding: 0; display: grid; gap: 8px; }
+.report-preview li { font-size: 14px; background: var(--card); border: var(--border-w) solid var(--line); border-radius: var(--card-radius); padding: 10px 12px; }
+.report-preview small { display: block; color: var(--muted); margin-top: 3px; line-height: 1.5; }
+.report-preview .preview-warn { color: var(--highlight); font-weight: 700; }
+.preview-wrong { display: flex; flex-direction: column; gap: 8px; margin-top: 4px; }
+.preview-wrong textarea { font: inherit; font-size: 16px; color: var(--text); background: var(--card); resize: none; border: var(--border-w) solid var(--line); border-radius: var(--card-radius); padding: 10px 12px; }
 .report-tips { padding-left: 18px; }
 .report-tips li { margin-bottom: 4px; }
 .ended-note { font-size: 13px; margin: 8px 0 0; }

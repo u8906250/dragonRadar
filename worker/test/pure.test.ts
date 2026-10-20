@@ -1,3 +1,4 @@
+import { previewOf } from '../src/reports';
 import { describe, expect, it } from 'vitest';
 import { detectEnded, spotSessions } from '../src/events';
 import { buildMessages, normalizeExtraction } from '../src/extract';
@@ -294,5 +295,17 @@ describe('adminArea', () => {
   it('does not accept a city alone', () => {
     expect(adminArea('台北市', '民權公園')).toBeNull();
     expect(adminArea('台北市 民權公園', null)).toBeNull();
+  });
+});
+
+describe('previewOf', () => {
+  const base = { kind: 'giveaway' as const, title: '佳里服務處發飄帶', item: '洋流飄帶', place_text: '佳里服務處', place_query: '臺南市佳里區文化路140號', lat: 23.16, lng: 120.17, confidence: 0.9, all_day: false, spot: true, approx_area: null, end_open: true, until_open: true };
+  it('merges the daily sessions of a spot into one item and drops past ones', () => {
+    const day = 86400;
+    const items = [0, 1, 2].map((d) => ({ group: 0, reason: 'planned', plan: { ...base, start_at: 1000 + d * day, end_at: 2000 + d * day } }));
+    items.push({ group: 1, reason: 'no_place', plan: null as never });
+    const out = previewOf(items, 2500);
+    expect(out).toHaveLength(1);
+    expect(out[0]).toMatchObject({ days: 2, startAt: 1000 + day, lastStartAt: 1000 + 2 * day, spot: true, untilOpen: true });
   });
 });

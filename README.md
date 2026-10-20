@@ -38,6 +38,7 @@ worker/   Cloudflare Worker（API、排程、資料庫）
 
 使用者按「＋回報」貼上 Threads 貼文連結（Android 加到主畫面後也能從 Threads 直接分享），Worker 讀取該則貼文的公開嵌入頁 `https://www.threads.com/t/<代碼>/embed` 取得內文與作者，發文時間由貼文代碼推算（Instagram 編號前 41 位元是建立時間），再走同一套判讀流程，貼文 id 為 `link-<代碼>`。
 
+- **先確認才上雷達**：判讀、定位完不寫進 `events`，先存在 `posts.confirm_plan`（`confirm_state = 'pending'`），回傳 `outcome: 'preview'`、`preview`（每個地點或時段一筆，固定據點的每天合成一筆，附定位結果）和 `confirm { postId, token }`（token 是貼文 id 加鹽雜湊）。回報的人按「對」打 `POST /api/reports/confirm` 才寫進雷達（寫之前再檢查一次有沒有結束、重複）；按「不對」打 `POST /api/reports/reject { note }`，`confirm_state = 'rejected'`、`confirm_note` 記哪裡錯，管理者用 `GET /api/admin/posts?confirm=rejected` 看，修好可以用 `.../reprocess` 重跑（直接上雷達）。還沒確認的貼文排程不會自己判讀；別人再貼同一則會再看到預覽、也能確認。排程搜尋到的貼文、已確認貼文內容改了的重新判讀，照舊直接上雷達。
 - 只收 7 天內的貼文；同一個 IP（加鹽雜湊）每小時 10 則、全站每小時 200 則。
 - 排程每 30 分鐘重讀還在雷達上的回報貼文：刪文就下架、改成「發完了」就結束、內容改了就重新判讀。
 - 活動開始後，2 個不同的人按「回報已發完」就提早下架（官方行程除外）。
@@ -195,7 +196,9 @@ Cloudflare D1 偶爾回「D1_ERROR: internal error」這類暫時性錯誤。`sr
 | DELETE | `/api/bottles/:id` | 收回自己丟的 |
 | POST | `/api/bottles/:id/collect`、`/uncollect` | 收藏撿到的信、移出收藏 |
 | POST | `/api/bottles/:id/report` | 檢舉（撿到的人才能檢舉） |
-| POST | `/api/reports` | 使用者貼上 Threads 貼文連結 `{ url }`，回傳判讀結果 |
+| POST | `/api/reports` | 使用者貼上 Threads 貼文連結 `{ url }`，回傳判讀結果（新貼文是 `preview`，確認了才上雷達） |
+| POST | `/api/reports/confirm` | 確認判讀結果，放上雷達 `{ postId, token }` |
+| POST | `/api/reports/reject` | 判讀錯了，不放 `{ postId, token, note? }` |
 | POST | `/api/events/:id/ended` | 回報已發完／已結束 |
 | GET | `/api/keywords` | 搜尋中的關鍵字、上限、是否開放使用者新增 |
 | POST | `/api/keywords` | 使用者新增關鍵字（`ALLOW_USER_KEYWORDS` 為 true 才開放） |

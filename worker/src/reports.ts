@@ -1,9 +1,12 @@
 /**
  * 使用者回報：貼上 Threads 貼文連結、回報已發完。
  * 不需要登入，用加鹽的 IP 雜湊限制頻率。
+ * 貼連結的流程：判讀、定位完先回傳預覽（outcome = 'preview'），回報的人按「對」（confirmLink）才寫進雷達，
+ * 按「不對」（rejectLink）就不放，留給管理者看。
  */
 import type { Env } from './env';
-import { detectEnded, getEvent, getPost, processPost, storePost, type EventOut } from './events';
+import { commitPlan, detectEnded, getEvent, getPost, planPost, processPost, storePost, type EventOut, type PlanItem, type PostRow } from './events';
+import type { EventKind } from './extract';
 import { fetchThreadsPost, resolveThreadsLink, shortcodeToUnix } from './sources/link';
 import { sha1Hex } from './sources/text';
 
@@ -33,6 +36,8 @@ export async function ipHash(env: Env, req: Request): Promise<string> {
 }
 
 export type LinkOutcome =
+  /** 判讀好了，等回報的人確認 */
+  | 'preview'
   /** 已在雷達上 */
   | 'added'
   /** 跟已經在雷達上的事件重複 */
@@ -45,14 +50,96 @@ export type LinkOutcome =
   | 'not_event'
   | 'failed';
 
+/** 預覽：一個地點或時段（固定據點的好幾天合成一筆） */
+export interface PreviewItem {
+  kind: EventKind;
+  title: string;
+  item: string | null;
+  placeText: string;
+  /** null：找不到地點，確認了也不會出現在雷達上 */
+  lat: number | null;
+  lng: number | null;
+  /** 只定位到鄉鎮區（約略位置） */
+  approxArea: string | null;
+  spot: boolean;
+  startAt: number;
+  endAt: number;
+  allDay: boolean;
+  endOpen: boolean;
+  untilOpen: boolean;
+  /** 固定據點排了幾天、最後一天的開始時間 */
+  days: number;
+  lastStartAt: number;
+}
+
 export interface SubmitResult {
   /** 這則貼文之前已經有人回報過 */
   existed: boolean;
   outcome: LinkOutcome;
   reasons: string[];
+  /** 已經在雷達上的（包括重複的那一場） */
   events: EventOut[];
   permalink: string;
+  /** outcome = 'preview' 時：判讀結果，和確認用的代碼 */
+  preview?: PreviewItem[];
+  confirm?: { postId: string; token: string };
 }
+
+/** 判讀好、還沒寫進雷達的資料，存在 posts.confirm_plan */
+interface StoredPlan {
+  items: PlanItem[];
+  early: string | null;
+}
+
+/** 確認用的代碼：拿得到預覽的人才能確認（貼文 id 加鹽雜湊，不用另外存） */
+const confirmToken = (env: Env, postId: string): Promise<string> => sha1Hex(`confirm|${postId}|${env.ADMIN_TOKEN ?? 'current-radar'}`, 20);
+
+/** 同一個地點、時段（固定據點的每一天）合成一筆預覽 */
+export function previewOf(items: PlanItem[], now: number): PreviewItem[] {
+  const groups = new Map<number, NonNullable<PlanItem['plan']>[]>();
+  for (const it of items) if (it.plan && it.plan.end_at > now) groups.set(it.group, [...(groups.get(it.group) ?? []), it.plan]);
+  return [...groups.values()].map((plans) => {
+    const p = plans[0];
+    const last = plans[plans.length - 1];
+    return {
+      kind: p.kind,
+      title: p.title,
+      item: p.item,
+      placeText: p.place_text,
+      lat: p.lat,
+      lng: p.lng,
+      approxArea: p.approx_area,
+      spot: p.spot,
+      startAt: p.start_at,
+      endAt: p.end_at,
+      allDay: p.all_day,
+      endOpen: p.end_open,
+      untilOpen: p.until_open,
+      days: plans.length,
+      lastStartAt: last.start_at,
+    };
+  });
+}
+
+/** 有預覽就請回報的人確認；什麼都放不上去（不是發放、已結束、全部重複）就直接回傳結果 */
+async function previewResult(env: Env, post: PostRow, plan: StoredPlan, existed: boolean, now: number): Promise<SubmitResult> {
+  const permalink = post.permalink ?? '';
+  if (plan.early) return { existed, outcome: summarize([plan.early]), reasons: [plan.early], events: [], permalink };
+  const reasons = plan.items.filter((it) => !it.plan).map((it) => it.reason);
+  const events = await eventsForResult(env, post.id, reasons, now);
+  const preview = previewOf(plan.items, now);
+  if (preview.length === 0) return { existed, outcome: summarize(reasons), reasons, events, permalink };
+  return { existed, outcome: 'preview', reasons, events, permalink, preview, confirm: { postId: post.id, token: await confirmToken(env, post.id) } };
+}
+
+const readPlan = (post: PostRow): StoredPlan | null => {
+  try {
+    const p = post.confirm_plan ? (JSON.parse(post.confirm_plan) as StoredPlan) : null;
+    return p && Array.isArray(p.items) ? p : null;
+  } catch {
+    return null;
+  }
+};
 
 function summarize(reasons: string[]): LinkOutcome {
   if (reasons.some((r) => r === 'active' || r === 'upcoming')) return 'added';
@@ -90,7 +177,11 @@ export async function submitLink(env: Env, input: string, ip: string, now: numbe
   const postId = `link-${link.code}`;
 
   const existing = await getPost(env, postId);
-  if (existing) {
+  // 之前有人貼過但還沒確認（或說判讀錯了）：再給這個人看一次預覽，讓他確認
+  const waiting = existing && (existing.confirm_state === 'pending' || existing.confirm_state === 'rejected');
+  const stored = waiting ? readPlan(existing) : null;
+  if (existing && waiting && stored && stored.early !== 'extraction_failed') return previewResult(env, existing, stored, true, now);
+  if (existing && !waiting) {
     const last = await env.DB.prepare('SELECT result FROM submissions WHERE post_id = ? AND result IS NOT NULL ORDER BY id DESC LIMIT 1')
       .bind(postId)
       .first<{ result: string }>();
@@ -121,23 +212,57 @@ export async function submitLink(env: Env, input: string, ip: string, now: numbe
   const username = fetched.username ?? link.username;
   const permalink = username ? `https://www.threads.com/@${username}/post/${link.code}` : `https://www.threads.com/t/${link.code}`;
   await storePost(env, { id: postId, username, text: fetched.text, permalink, posted_at: postedAt, keyword: null, source: 'link' }, now);
-  await env.DB.prepare('UPDATE posts SET checked_at = ? WHERE id = ?').bind(now, postId).run();
-  const sub = await env.DB.prepare('INSERT INTO submissions (post_id, ip_hash, created_at) VALUES (?, ?, ?) RETURNING id')
-    .bind(postId, ip, now)
-    .first<{ id: number }>();
+  // 等回報的人確認才放上雷達；排程也不會自己判讀
+  await env.DB.prepare("UPDATE posts SET checked_at = ?, text = ?, confirm_state = 'pending' WHERE id = ?").bind(now, fetched.text, postId).run();
+  await env.DB.prepare('INSERT INTO submissions (post_id, ip_hash, created_at) VALUES (?, ?, ?)').bind(postId, ip, now).run();
 
   const post = await getPost(env, postId);
   if (!post) throw new ReportError(500, 'post not stored');
-  let result;
+  let plan: StoredPlan;
   try {
-    result = await processPost(env, post, now);
+    plan = await planPost(env, post, now);
   } catch (e) {
-    // Workers AI 暫時出錯：貼文已存，排程會再判讀一次
-    console.warn(`process failed for ${postId}: ${String(e)}`);
+    // Workers AI 暫時出錯：貼文已存，回報的人再貼一次就會重新判讀
+    console.warn(`plan failed for ${postId}: ${String(e)}`);
     return { existed: false, outcome: 'failed', reasons: ['extraction_failed'], events: [], permalink };
   }
-  if (sub) await env.DB.prepare('UPDATE submissions SET result = ? WHERE id = ?').bind(JSON.stringify(result.reasons), sub.id).run();
-  return { existed: false, outcome: summarize(result.reasons), reasons: result.reasons, events: await eventsForResult(env, postId, result.reasons, now), permalink };
+  await env.DB.prepare('UPDATE posts SET confirm_plan = ? WHERE id = ?').bind(JSON.stringify(plan), postId).run();
+  return previewResult(env, { ...post, permalink }, plan, !!existing, now);
+}
+
+async function checkConfirm(env: Env, body: { postId?: unknown; token?: unknown }): Promise<PostRow> {
+  const postId = typeof body.postId === 'string' ? body.postId : '';
+  if (!/^link-[\w-]+$/.test(postId) || body.token !== (await confirmToken(env, postId))) throw new ReportError(400, '確認代碼不對，請重新貼一次連結');
+  const post = await getPost(env, postId);
+  if (!post) throw new ReportError(404, '找不到這則回報，請重新貼一次連結');
+  return post;
+}
+
+/** 回報的人確認判讀沒錯：寫進雷達 */
+export async function confirmLink(env: Env, body: { postId?: unknown; token?: unknown }, now: number): Promise<SubmitResult> {
+  const post = await checkConfirm(env, body);
+  const permalink = post.permalink ?? '';
+  if (post.confirm_state === 'confirmed') {
+    const events = await eventsForResult(env, post.id, [], now);
+    return { existed: true, outcome: events.length > 0 ? 'added' : 'not_listed', reasons: [], events, permalink };
+  }
+  const plan = readPlan(post);
+  if (!plan) throw new ReportError(409, '判讀結果不見了，請重新貼一次連結');
+  const result = await commitPlan(env, post.id, plan.items, now);
+  await env.DB.batch([
+    env.DB.prepare("UPDATE posts SET confirm_state = 'confirmed', confirm_plan = NULL WHERE id = ?").bind(post.id),
+    env.DB.prepare('UPDATE submissions SET result = ? WHERE id = (SELECT MAX(id) FROM submissions WHERE post_id = ?)').bind(JSON.stringify(result.reasons), post.id),
+  ]);
+  return { existed: false, outcome: summarize(result.reasons), reasons: result.reasons, events: await eventsForResult(env, post.id, result.reasons, now), permalink };
+}
+
+/** 回報的人說判讀錯了：不放上雷達，記下哪裡錯給管理者看 */
+export async function rejectLink(env: Env, body: { postId?: unknown; token?: unknown; note?: unknown }): Promise<{ ok: true }> {
+  const post = await checkConfirm(env, body);
+  if (post.confirm_state === 'confirmed') throw new ReportError(409, '這則已經有人確認放上雷達了；有錯可以在詳細資料回報');
+  const note = typeof body.note === 'string' ? body.note.trim().slice(0, 300) : '';
+  await env.DB.prepare("UPDATE posts SET confirm_state = 'rejected', confirm_note = COALESCE(NULLIF(?, ''), confirm_note) WHERE id = ?").bind(note, post.id).run();
+  return { ok: true };
 }
 
 export interface EndedReportResult {

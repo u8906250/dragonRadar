@@ -19,6 +19,10 @@ export interface PostRow {
   fetched_at: number;
   processed_at: number | null;
   extraction: string | null;
+  /** 使用者回報的確認狀態：null（排程搜尋到的、舊資料）、pending、confirmed、rejected */
+  confirm_state?: 'pending' | 'confirmed' | 'rejected' | null;
+  confirm_plan?: string | null;
+  confirm_note?: string | null;
 }
 
 export interface EventRow {
@@ -235,63 +239,120 @@ export async function locatePlaceForEvent(
   return { point, approxArea: area && point ? area : null };
 }
 
-async function createEvent(
+/** 一筆準備寫進 events 的資料：使用者回報時先給他看，確認了才寫 */
+export interface PlannedEvent {
+  kind: EventKind;
+  title: string;
+  item: string | null;
+  start_at: number;
+  end_at: number;
+  place_text: string;
+  place_query: string;
+  lat: number | null;
+  lng: number | null;
+  confidence: number;
+  all_day: boolean;
+  spot: boolean;
+  approx_area: string | null;
+  end_open: boolean;
+  until_open: boolean;
+}
+
+/** 判讀出來的一筆：plan 是可以寫進雷達的資料；沒有 plan 時 reason 寫原因（no_place、duplicate_of_3…）。group 是貼文裡第幾個地點或時段 */
+export interface PlanItem {
+  group: number;
+  plan: PlannedEvent | null;
+  reason: string;
+}
+
+/** 同一場可能被多篇貼文找到：同類型、同地點（約 150 m 內）、開始時間差 30 分鐘內就視為重複 */
+async function findDuplicate(env: Env, kind: EventKind, start: number, lat: number, lng: number): Promise<number | null> {
+  const dup = await env.DB.prepare(
+    `SELECT id FROM events WHERE status IN ('upcoming', 'active') AND kind = ?
+       AND ABS(start_at - ?) <= ? AND lat BETWEEN ? AND ? AND lng BETWEEN ? AND ? LIMIT 1`,
+  )
+    .bind(kind, start, DUP_WINDOW_SEC, lat - DUP_DEG, lat + DUP_DEG, lng - DUP_DEG, lng + DUP_DEG)
+    .first<{ id: number }>();
+  return dup?.id ?? null;
+}
+
+async function planEvent(
   env: Env,
-  post: PostRow,
   ex: ExtractedEvent,
   now: number,
   deadline: number,
   session?: Session,
   located?: { point: GeoPoint | null; approxArea: string | null },
-): Promise<{ event: EventRow | null; reason: string }> {
-  if (ex.confidence < MIN_CONFIDENCE) return { event: null, reason: 'low_confidence' };
+): Promise<{ plan: PlannedEvent | null; reason: string }> {
+  if (ex.confidence < MIN_CONFIDENCE) return { plan: null, reason: 'low_confidence' };
   const start = session ? session.start : parseIsoToUnix(ex.start_at);
-  if (start === null) return { event: null, reason: 'no_start_time' };
+  if (start === null) return { plan: null, reason: 'no_start_time' };
   let end = session ? session.end : (parseIsoToUnix(ex.end_at) ?? start + DEFAULT_DURATION_SEC);
   if (end <= start) end = start + DEFAULT_DURATION_SEC;
-  if (end <= now) return { event: null, reason: 'already_over' };
-  if (start > now + MAX_FUTURE_SEC) return { event: null, reason: 'too_far_in_future' };
+  if (end <= now) return { plan: null, reason: 'already_over' };
+  if (start > now + MAX_FUTURE_SEC) return { plan: null, reason: 'too_far_in_future' };
 
   const placeQuery = ex.place_query ?? ex.place_text;
   const placeText = ex.place_text ?? ex.place_query;
-  if (!placeQuery || !placeText) return { event: null, reason: 'no_place' };
+  if (!placeQuery || !placeText) return { plan: null, reason: 'no_place' };
 
   const { point, approxArea } = located ?? (await locatePlaceForEvent(env, placeQuery, ex.place_text, deadline));
-
-  // 同一場可能被多篇貼文找到：同類型、同地點（約 150 m 內）、開始時間差 30 分鐘內就視為重複
   if (point && !approxArea) {
-    const dup = await env.DB.prepare(
-      `SELECT id FROM events WHERE status IN ('upcoming', 'active') AND kind = ?
-         AND ABS(start_at - ?) <= ? AND lat BETWEEN ? AND ? AND lng BETWEEN ? AND ? LIMIT 1`,
-    )
-      .bind(ex.kind, start, DUP_WINDOW_SEC, point.lat - DUP_DEG, point.lat + DUP_DEG, point.lng - DUP_DEG, point.lng + DUP_DEG)
-      .first<{ id: number }>();
-    if (dup) return { event: null, reason: `duplicate_of_${dup.id}` };
+    const dup = await findDuplicate(env, ex.kind, start, point.lat, point.lng);
+    if (dup !== null) return { plan: null, reason: `duplicate_of_${dup}` };
   }
+  return {
+    plan: {
+      kind: ex.kind,
+      title: ex.title,
+      item: ex.item,
+      start_at: start,
+      end_at: end,
+      place_text: placeText,
+      place_query: placeQuery,
+      lat: point?.lat ?? null,
+      lng: point?.lng ?? null,
+      confidence: ex.confidence,
+      all_day: !!session?.allDay,
+      spot: !!session,
+      approx_area: approxArea,
+      end_open: session ? session.endOpen : !parseIsoToUnix(ex.end_at),
+      until_open: !!session?.untilOpen,
+    },
+    reason: 'planned',
+  };
+}
 
-  const status: EventStatus = !point ? 'unlocated' : start <= now ? 'active' : 'upcoming';
+/** 把判讀好的一筆寫進 events；寫之前再看一次有沒有結束、有沒有別人先放上同一場 */
+export async function insertPlanned(env: Env, postId: string, p: PlannedEvent, now: number): Promise<{ event: EventRow | null; reason: string }> {
+  if (p.end_at <= now) return { event: null, reason: 'already_over' };
+  if (p.lat !== null && p.lng !== null && !p.approx_area) {
+    const dup = await findDuplicate(env, p.kind, p.start_at, p.lat, p.lng);
+    if (dup !== null) return { event: null, reason: `duplicate_of_${dup}` };
+  }
+  const status: EventStatus = p.lat === null ? 'unlocated' : p.start_at <= now ? 'active' : 'upcoming';
   const event = await env.DB.prepare(
     `INSERT INTO events (post_id, kind, title, item, start_at, end_at, place_text, place_query, lat, lng, status, confidence, all_day, spot, approx_area, end_open, until_open, created_at, updated_at)
      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING *`,
   )
     .bind(
-      post.id,
-      ex.kind,
-      ex.title,
-      ex.item,
-      start,
-      end,
-      placeText,
-      placeQuery,
-      point?.lat ?? null,
-      point?.lng ?? null,
+      postId,
+      p.kind,
+      p.title,
+      p.item,
+      p.start_at,
+      p.end_at,
+      p.place_text,
+      p.place_query,
+      p.lat,
+      p.lng,
       status,
-      ex.confidence,
-      session?.allDay ? 1 : 0,
-      session ? 1 : 0,
-      approxArea,
-      (session ? session.endOpen : !parseIsoToUnix(ex.end_at)) ? 1 : 0,
-      session?.untilOpen ? 1 : 0,
+      p.confidence,
+      p.all_day ? 1 : 0,
+      p.spot ? 1 : 0,
+      p.approx_area,
+      p.end_open ? 1 : 0,
+      p.until_open ? 1 : 0,
       now,
       now,
     )
@@ -299,37 +360,53 @@ async function createEvent(
   return { event, reason: status };
 }
 
-/** 對單一貼文跑 LLM 抽取，每個地點或時段各建一個事件 */
-export async function processPost(env: Env, post: PostRow, now = nowSec()): Promise<ProcessResult> {
+/** 對單一貼文跑 LLM 抽取、定位，列出每個地點或時段要建的事件（還沒寫進雷達）；early 是整則貼文就不行的原因 */
+export async function planPost(env: Env, post: PostRow, now = nowSec()): Promise<{ items: PlanItem[]; early: string | null }> {
   const { extraction, raw, garbled } = await extractFromPost(env, post.text, post.posted_at, now);
   await env.DB.prepare('UPDATE posts SET processed_at = ?, extraction = ? WHERE id = ?').bind(now, raw, post.id).run();
 
-  if (garbled) return { events: [], reasons: ['garbled'] };
-  if (!extraction) return { events: [], reasons: ['extraction_failed'] };
-  if (!extraction.is_event) return { events: [], reasons: ['not_event'] };
-  if (extraction.events.length === 0) return { events: [], reasons: ['no_events'] };
+  if (garbled) return { items: [], early: 'garbled' };
+  if (!extraction) return { items: [], early: 'extraction_failed' };
+  if (!extraction.is_event) return { items: [], early: 'not_event' };
+  if (extraction.events.length === 0) return { items: [], early: 'no_events' };
 
-  const out: ProcessResult = { events: [], reasons: [] };
+  const items: PlanItem[] = [];
   const deadline = Date.now() + ADDRESS_BUDGET_MS;
-  for (const ex of extraction.events) {
+  for (const [group, ex] of extraction.events.entries()) {
     if (!ex.spot) {
-      const r = await createEvent(env, post, ex, now, deadline);
-      if (r.event) out.events.push(r.event);
-      out.reasons.push(r.reason);
+      items.push({ group, ...(await planEvent(env, ex, now, deadline)) });
       continue;
     }
     const sessions = spotSessions(ex, post.posted_at, now);
-    if (sessions.length === 0) out.reasons.push('already_over');
+    if (sessions.length === 0) items.push({ group, plan: null, reason: 'already_over' });
     // 每天一個時段，地點都一樣：只定位一次
     const placeQuery = ex.place_query ?? ex.place_text;
     const located = sessions.length > 0 && placeQuery ? await locatePlaceForEvent(env, placeQuery, ex.place_text ?? ex.place_query, deadline) : undefined;
-    for (const session of sessions) {
-      const r = await createEvent(env, post, ex, now, deadline, session, located);
-      if (r.event) out.events.push(r.event);
-      out.reasons.push(r.reason);
+    for (const session of sessions) items.push({ group, ...(await planEvent(env, ex, now, deadline, session, located)) });
+  }
+  return { items, early: null };
+}
+
+/** 把判讀好的寫進雷達，回傳跟 processPost 一樣的結果 */
+export async function commitPlan(env: Env, postId: string, items: PlanItem[], now: number): Promise<ProcessResult> {
+  const out: ProcessResult = { events: [], reasons: [] };
+  for (const it of items) {
+    if (!it.plan) {
+      out.reasons.push(it.reason);
+      continue;
     }
+    const r = await insertPlanned(env, postId, it.plan, now);
+    if (r.event) out.events.push(r.event);
+    out.reasons.push(r.reason);
   }
   return out;
+}
+
+/** 對單一貼文跑 LLM 抽取，每個地點或時段各建一個事件（排程搜尋到的貼文、回報的貼文內容改了，直接寫進雷達） */
+export async function processPost(env: Env, post: PostRow, now = nowSec()): Promise<ProcessResult> {
+  const { items, early } = await planPost(env, post, now);
+  if (early) return { events: [], reasons: [early] };
+  return commitPlan(env, post.id, items, now);
 }
 
 export interface IngestResult {
@@ -382,7 +459,10 @@ export interface BacklogResult {
 
 /** 重新處理之前沒成功抽取的貼文（例如 Workers AI 暫時出錯），只看最近 24 小時發的或收到的 */
 export async function processBacklog(env: Env, now = nowSec(), limit = 20): Promise<BacklogResult> {
-  const rows = await env.DB.prepare('SELECT * FROM posts WHERE processed_at IS NULL AND (posted_at > ? OR fetched_at > ?) ORDER BY posted_at ASC LIMIT ?')
+  // 使用者回報、還在等他確認的不自動判讀（他重貼一次就會再判讀）
+  const rows = await env.DB.prepare(
+    "SELECT * FROM posts WHERE processed_at IS NULL AND (confirm_state IS NULL OR confirm_state = 'confirmed') AND (posted_at > ? OR fetched_at > ?) ORDER BY posted_at ASC LIMIT ?",
+  )
     .bind(now - LOOKBACK_SEC, now - LOOKBACK_SEC, limit)
     .all<PostRow>();
   const out: BacklogResult = { processed: 0, created: 0, errors: [] };

@@ -1,5 +1,5 @@
 import './styles.css';
-import { addKeyword, collectLetter, deleteBottle, dropBottle, recycleBottle, fetchBottles, fetchEvents, fetchHealth, fetchKeywords, fetchMyBottles, fetchRoutes, pickBottle, reportBottle, reportEnded, submitLink } from './api';
+import { addKeyword, collectLetter, confirmReport, rejectReport, deleteBottle, dropBottle, recycleBottle, fetchBottles, fetchEvents, fetchHealth, fetchKeywords, fetchMyBottles, fetchRoutes, pickBottle, reportBottle, reportEnded, submitLink } from './api';
 import { compassSupported, startCompass } from './compass';
 import { bearingDeg, compassLabel, formatKm, haversineKm, taiwanRadiusKm, type LatLng } from './geo';
 import { inShuangbei, SHUANGBEI_RINGS, shuangbeiRadiusKm } from './shuangbei';
@@ -10,7 +10,7 @@ import { crowdOf, MapView, type BaseMap } from './map';
 import { beep, ensureNotificationPermission, notificationState, showBanner, systemNotify, unlockAudio } from './notify';
 import { Radar, type RadarRoute } from './radar';
 import { DEFAULT_THEME_ID, getTheme, THEMES, type Theme } from './themes';
-import type { BottleOut, EventOut, Item, KeywordInfo, KeywordRules, MyBottles, Origin, Phase, PickedBottle, RelatedPost, RouteOut, RouteStop, SubmitResult } from './types';
+import type { BottleOut, EventOut, Item, KeywordInfo, KeywordRules, MyBottles, Origin, Phase, PickedBottle, RelatedPost, RouteOut, PreviewItem, RouteStop, SubmitResult } from './types';
 
 const DEFAULT_ORIGIN: Origin = { lat: 25.0478, lng: 121.517, source: 'default' }; // 台北車站
 const SOON_SEC = 30 * 60;
@@ -1910,12 +1910,13 @@ function renderReportTips(): void {
 }
 
 const OUTCOME_TEXT: Record<SubmitResult['outcome'], string> = {
+  preview: '判讀結果如下，請確認一次：',
   added: '已加入雷達：',
   duplicate: '雷達上已經有這一場了：',
   no_place: '看得出是發放或活動，但找不到地點。地點要寫具體一點（例如「捷運市政府站 2號出口」）才能定位。',
   not_listed: '判讀不出時間，或是已經結束、超過 14 天後才開始，所以沒有放上雷達。',
   not_event: '這則看起來不是發放或活動。貼文要寫出在哪裡、什麼時候發放或舉辦，雷達才會收。',
-  failed: '判讀暫時失敗，系統稍後會自動再試一次。',
+  failed: '判讀暫時失敗，請稍後再貼一次。',
 };
 
 function setReportMsg(html: string): void {
@@ -1924,12 +1925,96 @@ function setReportMsg(html: string): void {
 
 /** 判讀中鎖住輸入框和按鈕，免得改到網址或重複送出 */
 let reportBusy = false;
-function setReportBusy(busy: boolean): void {
+function setReportBusy(busy: boolean, label = '判讀中…'): void {
   reportBusy = busy;
   reportInput.disabled = busy;
   reportSubmit.disabled = busy;
   reportPaste.disabled = busy;
-  reportSubmit.textContent = busy ? '判讀中…' : '送出';
+  reportSubmit.textContent = busy ? label : '送出';
+  for (const b of reportResult.querySelectorAll<HTMLButtonElement | HTMLTextAreaElement>('button, textarea')) b.disabled = busy;
+}
+
+/** 預覽上的時間：固定據點寫每天幾點、從哪天起排幾天；一般的寫哪天幾點到幾點 */
+function previewWhen(p: PreviewItem): string {
+  const day = (t: number): string => dateFmt.format(new Date(t * 1000));
+  if (p.spot) {
+    const hours = p.allDay ? '整天' : p.endOpen ? `${fmtTime(p.startAt)} 起（開到當天結束）` : `${fmtTime(p.startAt)}–${fmtTime(p.endAt)}`;
+    const range = p.days > 1 ? `${day(p.startAt)} 到 ${day(p.lastStartAt)}，共 ${p.days} 天` : day(p.startAt);
+    return `每天 ${hours}・${range}${p.untilOpen ? '（貼文沒寫最後一天，先排這幾天，發完為止）' : ''}`;
+  }
+  if (p.allDay) return `${day(p.startAt)} 整天`;
+  return `${day(p.startAt)} ${fmtTime(p.startAt)}${p.endOpen ? ' 開始（沒寫結束時間）' : `–${fmtTime(p.endAt)}`}`;
+}
+
+/** 預覽上的定位：精確、約略（只到鄉鎮區）、找不到；有座標就附「在地圖上看」 */
+function previewWhere(p: PreviewItem): string {
+  if (p.lat === null || p.lng === null) return '<span class="preview-warn">找不到地點，確認了也不會出現在雷達上</span>';
+  const link = `<a href="https://www.google.com/maps/search/?api=1&query=${p.lat},${p.lng}" target="_blank" rel="noopener">在地圖上看</a>`;
+  return p.approxArea ? `<span class="preview-warn">只定位到${esc(p.approxArea)}（約略位置）</span>・${link}` : `已定位・${link}`;
+}
+
+/** 判讀完先給回報的人看：對了才放上雷達，不對就不放並記下哪裡錯 */
+function renderPreview(r: SubmitResult): void {
+  const items = r.preview ?? [];
+  const c = r.confirm;
+  if (!c) return;
+  const dups = r.events.length
+    ? `<p class="muted sheet-note">雷達上已經有的：${r.events.map((ev) => esc(titleOf(ev))).join('、')}（不會重複放）</p>`
+    : '';
+  setReportMsg(`<p class="msg">${OUTCOME_TEXT.preview}對的話才會放上雷達。</p>
+    <ul class="report-preview">${items
+      .map(
+        (p) => `<li>
+          <b>${p.kind === 'activity' ? '活動' : '發放'}${p.spot ? '・固定據點' : ''}｜${esc(p.title)}</b>
+          ${p.item ? `<small>${esc(p.item)}</small>` : ''}
+          <small>時間：${esc(previewWhen(p))}</small>
+          <small>地點：${esc(p.placeText.replace(/\s*\n\s*/g, ' '))}</small>
+          <small>${previewWhere(p)}</small>
+        </li>`,
+      )
+      .join('')}</ul>
+    ${dups}
+    <div class="sheet-actions">
+      <button type="button" class="btn primary" data-act="confirm">對，放上雷達</button>
+      <button type="button" class="btn" data-act="wrong">不對</button>
+    </div>
+    <form class="preview-wrong" hidden>
+      <textarea rows="2" maxlength="300" placeholder="哪裡判斷錯了？（選填，例如「地點是文化路 140 號」「只有 10/21 一天」）" aria-label="哪裡判斷錯了"></textarea>
+      <div class="sheet-actions"><button type="submit" class="btn primary">送出，不放上雷達</button><button type="button" class="btn" data-act="back">回上一步</button></div>
+    </form>`);
+  const wrongForm = reportResult.querySelector<HTMLFormElement>('.preview-wrong');
+  const actions = reportResult.querySelector<HTMLElement>('.sheet-actions');
+  reportResult.querySelector('[data-act="confirm"]')?.addEventListener('click', async () => {
+    setReportBusy(true, '放上雷達中…');
+    const res = await confirmReport(c).finally(() => setReportBusy(false));
+    if (!res.ok) {
+      showBanner(bannerEl, res.message, 3500);
+      return;
+    }
+    await showReportResult(res.data);
+  });
+  reportResult.querySelector('[data-act="wrong"]')?.addEventListener('click', () => {
+    if (!wrongForm || !actions) return;
+    wrongForm.hidden = false;
+    actions.hidden = true;
+    wrongForm.querySelector('textarea')?.focus();
+  });
+  wrongForm?.querySelector('[data-act="back"]')?.addEventListener('click', () => {
+    wrongForm.hidden = true;
+    if (actions) actions.hidden = false;
+  });
+  wrongForm?.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const note = wrongForm.querySelector('textarea')?.value ?? '';
+    setReportBusy(true, '送出中…');
+    const res = await rejectReport(c, note).finally(() => setReportBusy(false));
+    setReportMsg(
+      res.ok
+        ? '<p class="msg">收到，這則不會放上雷達。你寫的會交給管理者看，修正後再放上去。</p>'
+        : `<p class="msg error">${esc(res.message)}</p>`,
+    );
+    if (res.ok) reportInput.value = '';
+  });
 }
 
 async function submitReport(): Promise<void> {
@@ -1946,7 +2031,16 @@ async function submitReport(): Promise<void> {
     setReportMsg(`<p class="msg error">${esc(r.message)}</p>`);
     return;
   }
-  const { outcome, events: found, existed } = r.data;
+  if (r.data.outcome === 'preview') {
+    renderPreview(r.data);
+    return;
+  }
+  await showReportResult(r.data);
+}
+
+/** 判讀或確認後的結果：放上雷達的、重複的，點了跳到那一場 */
+async function showReportResult(data: SubmitResult): Promise<void> {
+  const { outcome, events: found, existed } = data;
   const head = existed && (outcome === 'added' || outcome === 'duplicate') ? '這則之前已經有人回報，已在雷達上：' : OUTCOME_TEXT[outcome];
   const list = found
     .map((ev) => {

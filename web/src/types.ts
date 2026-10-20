@@ -166,7 +166,28 @@ export interface KeywordInfo {
   pinned: boolean;
 }
 
-export type LinkOutcome = 'added' | 'duplicate' | 'no_place' | 'not_listed' | 'not_event' | 'failed';
+export type LinkOutcome = 'preview' | 'added' | 'duplicate' | 'no_place' | 'not_listed' | 'not_event' | 'failed';
+
+/** 判讀結果的預覽：一個地點或時段（固定據點的好幾天合成一筆） */
+export interface PreviewItem {
+  kind: 'giveaway' | 'activity';
+  title: string;
+  item: string | null;
+  placeText: string;
+  /** null：找不到地點 */
+  lat: number | null;
+  lng: number | null;
+  /** 只定位到鄉鎮區 */
+  approxArea: string | null;
+  spot: boolean;
+  startAt: number;
+  endAt: number;
+  allDay: boolean;
+  endOpen: boolean;
+  untilOpen: boolean;
+  days: number;
+  lastStartAt: number;
+}
 
 export interface SubmitResult {
   existed: boolean;
@@ -174,6 +195,9 @@ export interface SubmitResult {
   reasons: string[];
   events: EventOut[];
   permalink: string;
+  /** outcome = 'preview'：判讀結果，確認了才放上雷達 */
+  preview?: PreviewItem[];
+  confirm?: { postId: string; token: string };
 }
 
 export interface EndedReportResult {
