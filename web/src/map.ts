@@ -11,6 +11,8 @@ export interface MapItem {
   phase: Phase;
   spot?: boolean;
   approx?: boolean;
+  /** 還沒開始的清楚程度：1 快開始了 … 0 一週以上 */
+  fade?: number;
   title: string;
   subtitle: string;
   selected: boolean;
@@ -253,9 +255,10 @@ export class MapView {
         color: it.selected ? selectedStroke : stroke,
         weight: it.selected ? 3 : 2,
         fillColor: markerColor(it.kind, it.phase, it.spot),
-        fillOpacity: it.approx ? 0.15 : it.phase === 'later' || it.phase === 'closed' ? 0.5 : 0.95,
-        // 固定據點、約略位置用虛線外框，跟精確的單次發放、活動分開
-        dashArray: it.spot || it.approx ? '3 3' : '',
+        fillOpacity: it.approx ? 0.15 : it.fade !== undefined ? 0.2 + 0.6 * it.fade : it.phase === 'later' || it.phase === 'closed' ? 0.5 : 0.95,
+        opacity: it.fade !== undefined && !it.selected ? 0.45 + 0.55 * it.fade : 1,
+        // 固定據點、約略位置、稍後開始用虛線外框，跟精確、進行中的分開
+        dashArray: it.spot || it.approx || it.phase === 'later' ? '3 3' : '',
       });
       m.setPopupContent(
         g.length > 1

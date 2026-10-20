@@ -10,6 +10,10 @@ export interface RadarItem {
   spot?: boolean;
   /** 約略位置，畫成空心 */
   approx?: boolean;
+  /** 還沒開始的清楚程度：1 快開始了（清楚）… 0 一週以上（淡、模糊）；沒給就照原樣 */
+  fade?: number;
+  /** 光點下方的小字，例如還沒開始的「5小時」「2天」 */
+  badge?: string;
   label: string;
   showLabel: boolean;
   selected: boolean;
@@ -615,9 +619,17 @@ export class Radar {
         node.appendChild(el('circle', { class: 'ping', r: 6 }));
         const body = el('g', { class: 'body' });
         this.appendMark(body, p.out, it.spot);
+        // 離開始越久越淡、越模糊；選取時看清楚
+        if (it.fade !== undefined && !it.selected) body.setAttribute('style', `opacity:${(0.35 + 0.65 * it.fade).toFixed(2)};filter:blur(${((1 - it.fade) * 1.5).toFixed(2)}px)`);
         node.appendChild(body);
         this.addFlash(node, p.angle, p.r, p.out ? 5 : 7);
         const lbl = it === lead ? labelLines.get(it.id) : undefined;
+        // 還有多久開始：寫在光點正下方，不跟著變淡；有名稱標籤時不寫，免得疊在一起
+        if (it === lead && it.badge && !lbl) {
+          const badge = el('text', { class: 'badge', 'text-anchor': 'middle', y: 19 });
+          badge.textContent = it.badge;
+          node.appendChild(badge);
+        }
         if (lbl) {
           const anchor = anchorAt(p.x);
           const x = anchor === 'end' ? 6 : anchor === 'start' ? -6 : 0;
