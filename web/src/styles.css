@@ -157,10 +157,16 @@ a.chip { display: inline-flex; align-items: center; text-decoration: none; }
 .chip.primary { background: var(--chip-primary-bg); border-color: var(--chip-primary-border); color: var(--chip-primary-text); }
 .chips { display: flex; gap: 6px; }
 #scale-chips .chip { padding: 8px 11px; }
-@media (max-width: 380px) { #scale-chips { gap: 4px; } #scale-chips .chip { padding: 8px 9px; font-size: 13px; } }
+/* 時間範圍：跟距離範圍同一組，小一點、疊在距離上面 */
+#time-chips .chip { min-height: 30px; padding: 4px 10px; font-size: 13px; }
+@media (max-width: 380px) { #scale-chips, #time-chips { gap: 4px; } #scale-chips .chip { padding: 8px 9px; font-size: 13px; } #time-chips .chip { padding: 4px 8px; font-size: 12px; } }
 .link-btn { font: inherit; font-size: 13px; border: 0; background: transparent; color: var(--accent); padding: 4px; text-decoration: underline; cursor: pointer; }
 
-#stage { position: relative; min-height: 0; padding: 8px 12px; display: grid; grid-template-rows: minmax(0, 1fr); }
+#stage { position: relative; min-height: 0; padding: 8px 12px; display: grid; grid-template-rows: minmax(0, 1fr) auto; }
+/* 雷達模式：時間、距離兩排按鈕放在雷達下面（不疊在雷達上），空間不夠時雷達縮小；地圖模式照舊浮在地圖上 */
+#stage[data-view="radar"] .overlay-bl { position: static; padding: 6px 4px 0; }
+/* 高度夠的手機：雷達上緣讓開右上角的按鈕，不蓋到 N 和刻度 */
+@media (min-height: 700px) and (max-width: 899px) { #stage[data-view="radar"] #radar-view { padding-top: 44px; box-sizing: border-box; } }
 .view { width: 100%; height: 100%; min-height: 0; display: grid; place-items: center; }
 .radar { width: 100%; height: 100%; display: block; filter: var(--glow); touch-action: none; }
 /* Leaflet 圖層 z-index 到 1000，用 isolation 把它關在自己的堆疊層裡，浮動按鈕才不會被蓋掉 */
@@ -168,7 +174,7 @@ a.chip { display: inline-flex; align-items: center; text-decoration: none; }
 #map { width: 100%; height: 100%; background: var(--panel); }
 
 .overlay { position: absolute; z-index: 20; display: flex; gap: 6px; align-items: center; }
-.overlay-bl { left: 16px; bottom: 16px; }
+.overlay-bl { left: 16px; bottom: 16px; flex-direction: column; align-items: flex-start; }
 .overlay-tr { right: 16px; top: 12px; }
 
 /* ========== 雷達 ========== */

@@ -31,7 +31,7 @@
         </div>
       </header>
 
-      <main id="stage">
+      <main id="stage" data-view="radar">
         <section id="radar-view" class="view" aria-label="雷達"></section>
         <section id="map-view" class="view" hidden aria-label="地圖"><div id="map"></div></section>
 
@@ -39,6 +39,13 @@
           <div class="chips" id="base-chips" role="radiogroup" aria-label="底圖" hidden>
             <button type="button" class="chip" data-base="nlsc" role="radio" aria-checked="false" title="內政部國土測繪中心 台灣通用電子地圖">台灣電子地圖</button>
             <button type="button" class="chip" data-base="osm" role="radio" aria-checked="false">OSM</button>
+          </div>
+          <div class="chips" id="time-chips" role="radiogroup" aria-label="時間範圍">
+            <button type="button" class="chip" data-time="now" role="radio" aria-checked="false" title="只看現在進行中、開放中的">現在</button>
+            <button type="button" class="chip" data-time="3h" role="radio" aria-checked="false" title="3 小時內開始的">3 小時</button>
+            <button type="button" class="chip" data-time="24h" role="radio" aria-checked="false" title="24 小時內開始的">24 小時</button>
+            <button type="button" class="chip" data-time="3d" role="radio" aria-checked="false" title="3 天內開始的">3 天</button>
+            <button type="button" class="chip on" data-time="all" role="radio" aria-checked="true" title="兩週內所有的">全部</button>
           </div>
           <div class="chips" id="scale-chips" role="radiogroup" aria-label="雷達範圍">
             <button type="button" class="chip" data-scale="1" role="radio" aria-checked="false">1 km</button>
@@ -75,7 +82,6 @@
         </div>
         <div class="filter-row" id="filter-row" hidden>
           <button type="button" id="spot-toggle" class="chip small on" aria-pressed="true" title="店家、服務處等連續多天都能去的固定據點">顯示固定據點</button>
-          <button type="button" id="upcoming-toggle" class="chip small on" aria-pressed="true" title="還沒開始的發放、活動（即將開始、稍後開始）">顯示還沒開始</button>
         </div>
         <ul id="event-list" class="event-list"></ul>
         <p id="empty-hint" class="muted hint" hidden></p>

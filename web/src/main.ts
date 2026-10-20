@@ -29,7 +29,7 @@ const BASES: BaseMap[] = ['nlsc', 'osm'];
 const LS_KEYWORDS = 'dr.keywords';
 const LS_ENDED = 'dr.endedReported';
 const LS_SPOTS = 'dr.showSpots';
-const LS_UPCOMING = 'dr.showUpcoming';
+const LS_TIME = 'dr.timeRange';
 /** 丟過瓶子（才需要去問有沒有被撿走）、看過的最後一次「被撿走」時間 */
 const LS_BOTTLE_DROPPED = 'dr.bottleDropped';
 const LS_BOTTLE_SEEN = 'dr.bottleSeen';
@@ -121,7 +121,10 @@ let theme: Theme = getTheme(new URLSearchParams(location.search).get('theme') ??
 /** 已經提醒過的事件；固定據點用據點 key，每天開門不會重複嗶 */
 const seenActive = new Set<string>();
 let showSpots = lsGet(LS_SPOTS) !== '0';
-let showUpcoming = lsGet(LS_UPCOMING) !== '0';
+/** 時間範圍（跟距離範圍對應）：雷達、地圖只畫這段時間內會開始的，進行中、開放中的一定畫 */
+type TimeSetting = 'now' | '3h' | '24h' | '3d' | 'all';
+const TIME_SEC: Record<TimeSetting, number> = { now: 0, '3h': 3 * 3600, '24h': 24 * 3600, '3d': 3 * 86400, all: Infinity };
+let timeSetting: TimeSetting = (lsGet(LS_TIME) ?? '') in TIME_SEC ? (lsGet(LS_TIME) as TimeSetting) : 'all';
 /** 這台裝置已經回報過「已發完」的事件 */
 const endedReported = new Set<number>(loadIdList(LS_ENDED));
 
@@ -183,7 +186,7 @@ const lettersPicked = $('#letters-picked');
 const lettersList = $('#letters-list');
 const filterRow = $('#filter-row');
 const spotToggle = $<HTMLButtonElement>('#spot-toggle');
-const upcomingToggle = $<HTMLButtonElement>('#upcoming-toggle');
+const timeChips = Array.from(document.querySelectorAll<HTMLButtonElement>('#time-chips [data-time]'));
 const baseChipsEl = $('#base-chips');
 const baseChips = Array.from(document.querySelectorAll<HTMLButtonElement>('#base-chips [data-base]'));
 let baseMap: BaseMap = (BASES as string[]).includes(lsGet(LS_BASE) ?? '') ? (lsGet(LS_BASE) as BaseMap) : 'nlsc';
@@ -377,15 +380,28 @@ function startsInShort(startAt: number, now: number): string {
   return h < 24 ? `${h}小時` : `${Math.floor(h / 24)}天`;
 }
 
-/** 離開始越近越清楚：快開始是 1，一週以上是 0（取對數，幾小時、幾天的差別都看得出來） */
+/** 離開始越近越清楚：快開始是 1，到時間範圍的盡頭是 0（「全部」算一週；取對數，近的差別看得出來） */
 const FADE_FULL_SEC = 7 * 24 * 3600;
 function clarityOf(ev: EventOut, now: number): number {
+  const span = Math.min(TIME_SEC[timeSetting], FADE_FULL_SEC);
+  if (span <= 0) return 1;
   const t = Math.max(0, ev.startAt - now);
-  return 1 - Math.min(1, Math.log1p(t / 600) / Math.log1p(FADE_FULL_SEC / 600));
+  return 1 - Math.min(1, Math.log1p(t / 600) / Math.log1p(span / 600));
 }
 
 /** 還沒開始的單次發放、活動（即將開始、稍後開始）；固定據點、車掃路線另外處理 */
 const isUpcoming = (it: Item): boolean => !it.spot && !routeOf(it.ev) && it.phase !== 'active';
+
+/** 在不在時間範圍內：進行中（開放中、車掃中）的一定在；其他看多久後開始（車掃看出發時間，據點看下一個時段） */
+function inTime(it: Item, now: number): boolean {
+  if (it.phase === 'active') return true;
+  const r = routeOf(it.ev);
+  if (r && routeState(r, now) !== 'planned') return true;
+  return (r?.departAt ?? it.ev.startAt) - now <= TIME_SEC[timeSetting];
+}
+
+/** 清單最下面放時間範圍外的那一段的標題 */
+const laterLabel = (): string => (timeSetting === 'now' ? '還沒開始、休息中' : `${{ '3h': '3 小時', '24h': '24 小時', '3d': '3 天' }[timeSetting as '3h' | '24h' | '3d']}以後才開始`);
 
 // ---- 雷達範圍 ----
 const scopeCache = new Map<string, boolean>();
@@ -488,20 +504,16 @@ function render(): void {
   const now = nowSec();
   const all = computeItems(now);
   const spotTotal = all.filter((it) => it.spot).length;
-  const upcomingTotal = all.filter(isUpcoming).length;
-  const items = all.filter((it) => (showSpots || !it.spot) && (showUpcoming || !isUpcoming(it)));
-  // 稍後才開始的也畫（虛線框、淡色），跟清單一致；「雙北」時雙北以外的不畫
-  const visible = items.filter((it) => scaleSetting !== 'region' || inScope(it.ev, it.distanceKm));
+  const items = showSpots ? all : all.filter((it) => !it.spot);
+  // 雷達、地圖只畫時間範圍內的；清單照樣全部列，範圍外的放最下面
+  const timed = items.filter((it) => inTime(it, now));
+  // 稍後才開始的也畫（虛線框、淡色）；「雙北」時雙北以外的不畫
+  const visible = timed.filter((it) => scaleSetting !== 'region' || inScope(it.ev, it.distanceKm));
   updateOutline();
-  filterRow.hidden = spotTotal === 0 && upcomingTotal === 0;
-  spotToggle.hidden = spotTotal === 0;
+  filterRow.hidden = spotTotal === 0;
   spotToggle.textContent = `${showSpots ? '✓ ' : ''}顯示固定據點（${spotTotal}）`;
   spotToggle.classList.toggle('on', showSpots);
   spotToggle.setAttribute('aria-pressed', String(showSpots));
-  upcomingToggle.hidden = upcomingTotal === 0;
-  upcomingToggle.textContent = `${showUpcoming ? '✓ ' : ''}顯示還沒開始（${upcomingTotal}）`;
-  upcomingToggle.classList.toggle('on', showUpcoming);
-  upcomingToggle.setAttribute('aria-pressed', String(showUpcoming));
 
   radar.render(
     visible.map((it) => ({
@@ -520,7 +532,7 @@ function render(): void {
       // 稍後開始的越久越淡；還沒開始的都在光點下寫還有多久
       ...(isUpcoming(it) ? { badge: startsInShort(it.ev.startAt, now), ...(it.phase === 'later' ? { fade: clarityOf(it.ev, now) } : {}) } : {}),
     })),
-    shownRoutes(items).map((r) => ({
+    shownRoutes(timed).map((r) => ({
       id: r.id,
       state: routeState(r, now),
       points: r.segments.flatMap((sg) => sg.path).map(([lat, lng]) => ({ bearing: bearingDeg(origin, { lat, lng }), distanceKm: haversineKm(origin, { lat, lng }) })),
@@ -546,9 +558,9 @@ function render(): void {
   radar.setLandmarks(
     LANDMARKS.map((lm) => ({ id: lm.id, label: lm.name, bearing: bearingDeg(origin, lm), distanceKm: haversineKm(origin, lm), selected: lm.id === selectedLandmark })),
   );
-  map.setRoutes(shownRoutes(items).map((r) => ({ id: r.id, title: r.title, state: routeState(r, now), claimUrl: r.claimUrl, segments: r.segments })));
+  map.setRoutes(shownRoutes(timed).map((r) => ({ id: r.id, title: r.title, state: routeState(r, now), claimUrl: r.claimUrl, segments: r.segments })));
   map.render(
-    items.map((it) => ({
+    timed.map((it) => ({
       id: it.ev.id,
       kind: it.ev.kind,
       spot: !!it.spot,
@@ -562,7 +574,7 @@ function render(): void {
       ...(isUpcoming(it) && it.phase === 'later' ? { fade: clarityOf(it.ev, now) } : {}),
     })),
   );
-  renderList(items, now, showUpcoming ? 0 : upcomingTotal);
+  renderList(items, now);
   renderDetail(items, now);
 
   // 新變成進行中且在雷達範圍內的事件 → 嗶聲、震動、通知。第一次載入不吵。
@@ -588,7 +600,7 @@ function render(): void {
 }
 
 /** 清單上的一列：一般事件，或合成一張卡片的車掃路線 */
-type Row = { it: Item; route?: undefined; phase: Phase; distanceKm: number; inScope: boolean; spot: boolean; sortAt: number } | { route: RouteOut; it?: undefined; phase: Phase; distanceKm: number; inScope: boolean; spot: false; sortAt: number };
+type Row = { it: Item; route?: undefined; phase: Phase; distanceKm: number; inScope: boolean; inTime: boolean; spot: boolean; sortAt: number } | { route: RouteOut; it?: undefined; phase: Phase; distanceKm: number; inScope: boolean; inTime: boolean; spot: false; sortAt: number };
 
 /** 車掃卡片的狀態跟著車隊走：還沒出發是稍後／即將開始，車掃中、抵達後的活動進行中算進行中 */
 function routePhase(r: RouteOut, members: Item[], now: number): Phase {
@@ -604,23 +616,25 @@ function listRows(items: Item[], now: number): Row[] {
   for (const it of items) {
     const r = routeOf(it.ev);
     if (!r) {
-      rows.push({ it, phase: it.phase, distanceKm: it.distanceKm, inScope: inScope(it.ev, it.distanceKm), spot: !!it.spot, sortAt: it.ev.startAt });
+      rows.push({ it, phase: it.phase, distanceKm: it.distanceKm, inScope: inScope(it.ev, it.distanceKm), inTime: inTime(it, now), spot: !!it.spot, sortAt: it.ev.startAt });
       continue;
     }
     if (seen.has(r.id)) continue;
     seen.add(r.id);
     const members = routeItems(r, items);
-    rows.push({ route: r, phase: routePhase(r, members, now), distanceKm: Math.min(...members.map((m) => m.distanceKm)), inScope: members.some((m) => inScope(m.ev, m.distanceKm)), spot: false, sortAt: r.departAt ?? it.ev.startAt });
+    rows.push({ route: r, phase: routePhase(r, members, now), distanceKm: Math.min(...members.map((m) => m.distanceKm)), inScope: members.some((m) => inScope(m.ev, m.distanceKm)), inTime: members.some((m) => inTime(m, now)), spot: false, sortAt: r.departAt ?? it.ev.startAt });
   }
   return rows;
 }
 
 const PHASE_TITLE: Partial<Record<Phase, string>> = { active: '進行中', soon: '即將開始', later: '稍後開始' };
 
-function renderList(items: Item[], now: number, hiddenUpcoming: number): void {
+function renderList(items: Item[], now: number): void {
   // 摘要和清單用同一套「列」來算：車掃路線的起點、加油點、終點合成一張卡片，只算一個
   const rows = listRows(items, now);
-  const inRange = rows.filter((r) => r.inScope);
+  const inRange = rows.filter((r) => r.inScope && r.inTime);
+  // 時間範圍外（還要很久才開始）：放在範圍外前面，照開始時間排
+  const laterRows = rows.filter((r) => r.inScope && !r.inTime).sort((a, b) => a.sortAt - b.sortAt || a.distanceKm - b.distanceKm);
   const outRange = rows.filter((r) => !r.inScope);
   const singles = inRange.filter((r) => !r.spot);
   const spotsIn = inRange.filter((r) => r.spot);
@@ -632,17 +646,19 @@ function renderList(items: Item[], now: number, hiddenUpcoming: number): void {
   const sections: Array<{ title: string; rows: Row[] }> = [
     ...(['active', 'soon', 'later'] as const).map((ph) => ({ title: PHASE_TITLE[ph] as string, rows: byPhase(ph) })),
     { title: '固定據點', rows: spotsIn },
+    { title: laterLabel(), rows: laterRows },
     { title: outLabel(), rows: outRange },
   ];
   const counts = { active: byPhase('active').length, soon: byPhase('soon').length, later: byPhase('later').length };
   const none = followed().length === 0;
   const outText = outRange.length > 0 ? `・${scaleSetting === 'region' ? '雙北以外' : '範圍外'} ${outRange.length} 個` : '';
-  const spotText = `${spotsIn.length > 0 ? `・據點 ${spotsIn.length} 個` : ''}${hiddenUpcoming > 0 ? `・隱藏 ${hiddenUpcoming} 個還沒開始` : ''}`;
+  const spotText = spotsIn.length > 0 ? `・據點 ${spotsIn.length} 個` : '';
+  const laterText = laterRows.length > 0 ? `・${timeSetting === 'now' ? '還沒開始' : laterLabel().replace('才開始', '')} ${laterRows.length} 個` : '';
   countLabel.textContent = none
     ? '還沒追蹤關鍵字'
     : singles.length === 0
-      ? `${theme.emptyText}${spotText}${outText}`
-      : `${theme.summary(counts)}${spotText}${outText}`;
+      ? `${theme.emptyText}${spotText}${laterText}${outText}`
+      : `${theme.summary(counts)}${spotText}${laterText}${outText}`;
   emptyEl.textContent = none ? (canEditKeywords ? '點下方「追蹤」選擇或新增關鍵字，雷達就會開始找發放和活動。' : '目前沒有搜尋中的關鍵字。') : `${theme.emptyText}。雷達每分鐘更新，有新的會提醒你。`;
   listEl.replaceChildren();
   emptyEl.hidden = items.length > 0;
@@ -1513,6 +1529,7 @@ function switchView(v: 'radar' | 'map'): void {
   view = v;
   $('#radar-view').hidden = v !== 'radar';
   $('#map-view').hidden = v !== 'map';
+  $('#stage').dataset.view = v;
   viewBtn.textContent = v === 'radar' ? '地圖' : '雷達';
   pickBtn.hidden = v !== 'map';
   $('#scale-chips').hidden = v !== 'radar';
@@ -1574,6 +1591,17 @@ function zoomRadar(factor: number, done: boolean): void {
       render();
     });
   }
+}
+
+function setTime(setting: TimeSetting): void {
+  timeSetting = setting;
+  lsSet(LS_TIME, setting);
+  for (const b of timeChips) {
+    const on = b.dataset.time === setting;
+    b.classList.toggle('on', on);
+    b.setAttribute('aria-checked', String(on));
+  }
+  render();
 }
 
 function setScale(setting: ScaleSetting): void {
@@ -2397,11 +2425,7 @@ function wireControls(): void {
     lsSet(LS_SPOTS, showSpots ? '1' : '0');
     render();
   });
-  upcomingToggle.addEventListener('click', () => {
-    showUpcoming = !showUpcoming;
-    lsSet(LS_UPCOMING, showUpcoming ? '1' : '0');
-    render();
-  });
+  for (const b of timeChips) b.addEventListener('click', () => setTime((b.dataset.time as TimeSetting) ?? 'all'));
   reportSheet.querySelector('[data-act="close"]')?.addEventListener('click', () => openReportSheet(false));
   reportForm.addEventListener('submit', (e) => {
     e.preventDefault();
@@ -2488,6 +2512,7 @@ async function boot(): Promise<void> {
   applyTheme(theme);
   setBase(baseMap);
   switchView('radar');
+  setTime(timeSetting);
   setScale(scaleSetting);
   setOrigin(origin);
   startGeolocation();
