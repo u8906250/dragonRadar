@@ -208,6 +208,26 @@ export function applySupplementDate(ex: Pick<ExtractedEvent, 'start_at' | 'end_a
 }
 
 /**
+ * 「10/24～10/26 12:00～18:30」被模型讀成從 10/24 12:00 一路到 10/26 18:30（半夜也算進行中）：
+ * 跨了好幾天、每天幾點到幾點的，改成固定據點每天一個時段，最後一天要貼文有寫。改了回傳 true。
+ */
+export function splitMultiDay(ex: Pick<ExtractedEvent, 'start_at' | 'end_at' | 'spot' | 'until'>, text: string): boolean {
+  if (ex.spot) return false;
+  const start = parseIsoToUnix(ex.start_at);
+  const end = parseIsoToUnix(ex.end_at);
+  if (start === null || end === null || end - start < 20 * 3600 || taipeiDay(end) <= taipeiDay(start)) return false;
+  const tod = (t: number): number => (t + 8 * 3600) % DAY_SEC;
+  // 每天的結束時間要比開始晚（12:00～18:30）；跨夜的（22:00 到隔天 02:00）不是這種
+  if (tod(end) <= tod(start)) return false;
+  const until = untilInText(taipeiIso(end).slice(0, 10), text);
+  if (!until) return false;
+  ex.spot = true;
+  ex.until = until;
+  ex.end_at = taipeiIso(start + (tod(end) - tod(start)));
+  return true;
+}
+
+/**
  * 從貼文找「每週二、四」「每週一至五」「每週六日」：模型漏掉時的備援。
  * 一定要有「每」，「10/21（週二）」這種日期註記不算。
  */

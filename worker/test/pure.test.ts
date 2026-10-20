@@ -1,4 +1,4 @@
-import { applySupplementDate, untilInText, weekdaysFromText, weekdaysInText } from '../src/extract';
+import { applySupplementDate, splitMultiDay, untilInText, weekdaysFromText, weekdaysInText } from '../src/extract';
 import { isAreaOnly } from '../src/geocode';
 import { existedOutcome, previewOf } from '../src/reports';
 import { describe, expect, it } from 'vitest';
@@ -142,6 +142,14 @@ describe('placeCandidates', () => {
     expect(c[0]).toBe('台北市 民權公園');
     expect(c).not.toContain('台北市');
     expect(placeCandidates('台北市 大安區', null)).toEqual([]);
+  });
+  it('uses the station, not the whole "near ... station" hint, and tries it as an MRT station first', () => {
+    const c = placeCandidates('台北市 松菸文創大街', '近國父紀念館站/大巨蛋');
+    expect(c[0]).toBe('台北市 松菸文創大街');
+    expect(c[1]).toBe('台北市 捷運國父紀念館站');
+    expect(c).not.toContain('近國父紀念館站/大巨蛋');
+    expect(c).not.toContain('台北市 近國父紀念館站/大巨蛋');
+    expect(placeCandidates('台北市 台北車站', null)).not.toContain('台北市 捷運台北車站');
   });
   it('keeps plain landmarks untouched', () => {
     expect(placeCandidates('台北市 松山文創園區', null)).toEqual(['台北市 松山文創園區']);
@@ -430,5 +438,20 @@ describe('applySupplementDate', () => {
     expect(ex.start_at).toBe('2026-10-21T12:00:00+08:00');
     applySupplementDate(ex, '10/26 或 10/27', post, posted);
     expect(ex.start_at).toBe('2026-10-21T12:00:00+08:00');
+  });
+});
+
+describe('splitMultiDay', () => {
+  const text = '𖦹 日期：10/24（六）～ 10/26（一）\n𖦹 時間：12:00 ～ 18:30';
+  it('turns a multi-day span with daily hours into a spot', () => {
+    const ex = { start_at: '2026-10-24T12:00:00+08:00', end_at: '2026-10-26T18:30:00+08:00', spot: false, until: null as string | null };
+    expect(splitMultiDay(ex, text)).toBe(true);
+    expect(ex).toEqual({ start_at: '2026-10-24T12:00:00+08:00', end_at: '2026-10-24T18:30:00+08:00', spot: true, until: '2026-10-26' });
+  });
+  it('leaves overnight events and spans without a written last day alone', () => {
+    const night = { start_at: '2026-10-24T22:00:00+08:00', end_at: '2026-10-25T02:00:00+08:00', spot: false, until: null };
+    expect(splitMultiDay(night, '10/24 22:00 到天亮')).toBe(false);
+    const guessed = { start_at: '2026-10-24T12:00:00+08:00', end_at: '2026-10-26T18:30:00+08:00', spot: false, until: null };
+    expect(splitMultiDay(guessed, '週末 12:00 ～ 18:30')).toBe(false);
   });
 });

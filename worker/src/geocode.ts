@@ -72,8 +72,11 @@ export function placeCandidates(query: string, placeText?: string | null): strin
 
   const sources = [query, placeText ?? ''];
   const city = sources.map((s) => CITY_RE.exec(s)?.[0]).find(Boolean) ?? '';
+  // 「近國父紀念館站/大巨蛋」這種只是車站線索，整串拿去查會對到別的地方，只用下面抽出來的站名
+  const nearOnly = (s: string): boolean => /^(?:近|靠近|鄰近)/.test(s.trim());
   // 原文地點沒寫縣市時補上，避免查到別縣市同名的公園或車站
   for (const s of sources) {
+    if (nearOnly(s)) continue;
     if (city && s && !CITY_RE.test(s)) push(`${city} ${s}`);
     push(s);
   }
@@ -85,12 +88,15 @@ export function placeCandidates(query: string, placeText?: string | null): strin
       .replace(CITY_PREFIX_RE, ' ')
       .replace(/[\u4e00-\u9fff]{1,2}[區鄉鎮](?=[\u4e00-\u9fff]{2,}站)/g, ' ')
       .replace(/近|靠近|鄰近/g, ' ');
-    const st = /(?:捷運|台鐵|臺鐵|高鐵)?\s*([\u4e00-\u9fff]{2,8}站)/.exec(strip(bare));
-    if (st) stations.push(`${city} ${st[1]}`, st[1]);
+    const st = /(捷運|台鐵|臺鐵|高鐵)?\s*([\u4e00-\u9fff]{2,8}站)/.exec(strip(bare));
+    // 沒寫哪種車站、也不是「XX車站」的，先當捷運站查（「國父紀念館站」單獨查會對到別的地方）
+    if (st && !st[1] && !st[2].endsWith('車站')) stations.push(`${city} 捷運${st[2]}`.trim());
+    if (st) stations.push(`${city} ${st[2]}`, st[2]);
   }
   // 站名比去掉出口、門號的版本可靠，先試
   for (const s of stations) push(s);
   for (const s of sources) {
+    if (nearOnly(s)) continue;
     const st = strip(s);
     if (city && st.trim() && !CITY_RE.test(st)) push(`${city} ${st}`);
     push(st);
