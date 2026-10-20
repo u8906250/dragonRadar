@@ -53,7 +53,7 @@ export function shortcodeToUnix(code: string, now = Math.floor(Date.now() / 1000
 }
 
 export type EmbedResult =
-  | { status: 'ok'; text: string; username: string | null }
+  | { status: 'ok'; text: string; username: string | null; location?: string | null }
   | { status: 'gone' }
   | { status: 'no_text' }
   | { status: 'error'; message: string };
@@ -65,6 +65,9 @@ export function parseEmbedHtml(html: string): EmbedResult {
   const main = fullAt >= 0 ? html.slice(fullAt) : html;
   if (!/HeaderContainer/.test(main)) return { status: 'error', message: 'unexpected embed page' };
   const username = /class="HeaderLink"><span>([A-Za-z0-9_.]+)<\/span>/.exec(main)?.[1] ?? null;
+  // 貼文的地點標記（Threads 發文時選的地點），內文沒寫地點時靠它
+  const tag = /class="LocationText">([^<]{1,80})<\/span>/.exec(main)?.[1];
+  const location = tag ? decodeEntities(tag).trim() || null : null;
   // 內文裡的 hashtag、連結是巢狀的 span / a，取到下一個 div（發文日期或圖片）之前
   const body = /class="BodyTextContainer">([\s\S]*?)<div/.exec(main)?.[1];
   if (body === undefined) return { status: 'no_text' };
@@ -72,7 +75,12 @@ export function parseEmbedHtml(html: string): EmbedResult {
     .replace(/[ \t\u00a0]+/g, ' ')
     .replace(/ *\n */g, '\n')
     .trim();
-  return text ? { status: 'ok', text, username } : { status: 'no_text' };
+  return text ? { status: 'ok', text, username, location } : { status: 'no_text' };
+}
+
+/** 內文接上地點標記給判讀用；內文已經寫了同一個地點就不重複 */
+export function withLocationTag(text: string, location: string | null | undefined): string {
+  return location && !text.includes(location) ? `${text}\n\n📍 貼文的地點標記：${location}` : text;
 }
 
 export async function fetchThreadsPost(code: string): Promise<EmbedResult> {

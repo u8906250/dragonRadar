@@ -199,6 +199,8 @@ export interface PreviewItem {
   lastStartAt: number;
   /** 雷達上已經有這個據點：replace 同一個帳號，確認後以這則為準；attach 別人發的，確認後只附上去 */
   update?: { mode: 'replace' | 'attach'; title: string };
+  /** 同一個地點一天有好幾個時段：每個時段的開始、結束時間 */
+  slots?: Array<{ startAt: number; endAt: number }>;
 }
 
 export interface SubmitResult {

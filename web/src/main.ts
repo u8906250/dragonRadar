@@ -1959,12 +1959,15 @@ function setReportBusy(busy: boolean, label = '判讀中…'): void {
 /** 預覽上的時間：固定據點寫每天幾點、從哪天起排幾天；一般的寫哪天幾點到幾點 */
 function previewWhen(p: PreviewItem): string {
   const day = (t: number): string => dateFmt.format(new Date(t * 1000));
+  // 一天好幾個時段：「12:00–13:30、18:00–20:30」
+  const slots = p.slots && p.slots.length > 1 ? p.slots.map((s) => `${fmtTime(s.startAt)}–${fmtTime(s.endAt)}`).join('、') : null;
   if (p.spot) {
-    const hours = p.allDay ? '整天' : p.endOpen ? `${fmtTime(p.startAt)} 起（開到當天結束）` : `${fmtTime(p.startAt)}–${fmtTime(p.endAt)}`;
+    const hours = p.allDay ? '整天' : slots ?? (p.endOpen ? `${fmtTime(p.startAt)} 起（開到當天結束）` : `${fmtTime(p.startAt)}–${fmtTime(p.endAt)}`);
     const range = p.days > 1 ? `${day(p.startAt)} 到 ${day(p.lastStartAt)}，共 ${p.days} 天` : day(p.startAt);
     return `${weeklyText(p.weekdays) ?? '每天'} ${hours}・${range}${p.untilOpen ? '（貼文沒寫最後一天，先排這幾天，發完為止）' : ''}`;
   }
   if (p.allDay) return `${day(p.startAt)} 整天`;
+  if (slots) return `${day(p.startAt)} ${slots}`;
   return `${day(p.startAt)} ${fmtTime(p.startAt)}${p.endOpen ? ' 開始（沒寫結束時間）' : `–${fmtTime(p.endAt)}`}`;
 }
 

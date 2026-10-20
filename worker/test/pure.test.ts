@@ -6,7 +6,7 @@ import { detectEnded, spotMergeMode, spotSessions } from '../src/events';
 import { buildMessages, normalizeExtraction } from '../src/extract';
 import { parseThreadsTimestamp } from '../src/threads';
 import { parseIsoToUnix } from '../src/util';
-import { parseEmbedHtml, parseThreadsUrl, shortcodeToUnix } from '../src/sources/link';
+import { parseEmbedHtml, parseThreadsUrl, shortcodeToUnix, withLocationTag } from '../src/sources/link';
 
 describe('parseThreadsTimestamp', () => {
   it('accepts Threads +0000 offsets', () => {
@@ -250,9 +250,18 @@ describe('threads link helpers', () => {
       `<div class="OuterContainer${full ? ' OuterContainerFull' : ''}"><div class="HeaderContainer"><a class="HeaderLink"><span>${user}</span></a></div>` +
       `<span class="TextContentContainer"><span class="BodyTextContainer"><span>${body}</span></span></span><div class="PostDateContainer"><span class="Timestamp">1:16 PM</span></div></div>`;
     const html = block(false, 'parent', '上一層') + block(true, 'giver', '今天 15:00<br>市政府站 <a href="#">#洋流</a> 發飄帶&amp;貼紙');
-    expect(parseEmbedHtml(html)).toEqual({ status: 'ok', username: 'giver', text: '今天 15:00\n市政府站 #洋流 發飄帶&貼紙' });
+    expect(parseEmbedHtml(html)).toEqual({ status: 'ok', username: 'giver', text: '今天 15:00\n市政府站 #洋流 發飄帶&貼紙', location: null });
     expect(parseEmbedHtml('<div class="OuterErrorContainer">Thread not available</div>')).toEqual({ status: 'gone' });
     expect(parseEmbedHtml('<html>login</html>').status).toBe('error');
+  });
+  it('reads the location tag and adds it for the model only when the text does not name it', () => {
+    const html =
+      '<div class="OuterContainer OuterContainerFull"><div class="HeaderContainer"><a class="HeaderLink"><span>chef</span></a></div>' +
+      '<span class="BodyTextContainer"><span>10/21 洋流小物</span></span><div class="LocationTag"><span class="LocationText">豬跳舞小餐館</span></div></div>';
+    expect(parseEmbedHtml(html)).toEqual({ status: 'ok', username: 'chef', text: '10/21 洋流小物', location: '豬跳舞小餐館' });
+    expect(withLocationTag('10/21 洋流小物', '豬跳舞小餐館')).toBe('10/21 洋流小物\n\n📍 貼文的地點標記：豬跳舞小餐館');
+    expect(withLocationTag('來豬跳舞小餐館領', '豬跳舞小餐館')).toBe('來豬跳舞小餐館領');
+    expect(withLocationTag('來店裡領', null)).toBe('來店裡領');
   });
 });
 
@@ -309,6 +318,16 @@ describe('previewOf', () => {
     const out = previewOf(items, 2500);
     expect(out).toHaveLength(1);
     expect(out[0]).toMatchObject({ days: 2, startAt: 1000 + day, lastStartAt: 1000 + 2 * day, spot: true, untilOpen: true });
+  });
+  it('merges time slots at the same place into one item', () => {
+    const one = { ...base, spot: false, until_open: false, end_open: false };
+    const items = [
+      { group: 0, reason: 'planned', plan: { ...one, start_at: 3000, end_at: 4000 } },
+      { group: 1, reason: 'planned', plan: { ...one, start_at: 9000, end_at: 9900 } },
+    ];
+    const out = previewOf(items, 2500);
+    expect(out).toHaveLength(1);
+    expect(out[0].slots).toEqual([{ startAt: 3000, endAt: 4000 }, { startAt: 9000, endAt: 9900 }]);
   });
   it('tells the reporter when the spot is already on the radar', () => {
     const merge = { mode: 'replace' as const, postId: 'spot-x', placeText: '蘭鄉排骨飯', eventId: 75, title: '蘭鄉排骨飯發飄帶' };

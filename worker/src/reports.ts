@@ -7,7 +7,7 @@
 import type { Env } from './env';
 import { commitPlan, detectEnded, getEvent, getPost, planPost, processPost, storePost, type EventOut, type PlanItem, type PostRow } from './events';
 import type { EventKind } from './extract';
-import { fetchThreadsPost, resolveThreadsLink, shortcodeToUnix } from './sources/link';
+import { fetchThreadsPost, resolveThreadsLink, shortcodeToUnix, withLocationTag } from './sources/link';
 import { sha1Hex } from './sources/text';
 
 /** 只收這麼新的貼文，太舊的公告通常已經過期 */
@@ -76,6 +76,8 @@ export interface PreviewItem {
   weekdays: number[] | null;
   /** 雷達上已經有這個據點：replace 同一個帳號，確認後以這則為準；attach 別人發的，確認後只附上去 */
   update?: { mode: 'replace' | 'attach'; title: string };
+  /** 同一個地點一天有好幾個時段（例如中午、晚上）：每個時段第一次的開始、結束時間，照時間排 */
+  slots?: Array<{ startAt: number; endAt: number }>;
 }
 
 export interface SubmitResult {
@@ -112,7 +114,7 @@ export function previewOf(items: PlanItem[], now: number): PreviewItem[] {
     groups.set(it.group, [...(groups.get(it.group) ?? []), it.plan]);
     if (it.merge) merges.set(it.group, it.merge);
   }
-  return [...groups.entries()].map(([group, plans]) => {
+  const out = [...groups.entries()].map(([group, plans]): PreviewItem => {
     const p = plans[0];
     const m = merges.get(group);
     const last = plans[plans.length - 1];
@@ -136,7 +138,31 @@ export function previewOf(items: PlanItem[], now: number): PreviewItem[] {
       ...(m ? { update: { mode: m.mode, title: m.title } } : {}),
     };
   });
+  return mergeSlots(out);
 }
+
+/** 同一個地點、同一種（固定據點或單次）的好幾個時段合成一筆，回報的人看到的是一個地點 */
+function mergeSlots(items: PreviewItem[]): PreviewItem[] {
+  const merged: PreviewItem[] = [];
+  for (const p of items) {
+    const same = merged.find((q) => q.placeText === p.placeText && q.spot === p.spot && q.kind === p.kind && (p.spot || sameDay(q.startAt, p.startAt)));
+    if (!same) {
+      merged.push(p);
+      continue;
+    }
+    const slots = [...(same.slots ?? [{ startAt: same.startAt, endAt: same.endAt }]), { startAt: p.startAt, endAt: p.endAt }].sort((a, b) => a.startAt - b.startAt);
+    Object.assign(same, {
+      slots,
+      startAt: Math.min(same.startAt, p.startAt),
+      endAt: Math.max(same.endAt, p.endAt),
+      lastStartAt: Math.max(same.lastStartAt, p.lastStartAt),
+      days: Math.max(same.days, p.days),
+    });
+  }
+  return merged;
+}
+
+const sameDay = (a: number, b: number): boolean => Math.floor((a + 8 * 3600) / 86400) === Math.floor((b + 8 * 3600) / 86400);
 
 /**
  * 有預覽就請回報的人確認；什麼都放不上去（找不到地點、不是發放、已結束）就直接回傳原因。
@@ -247,9 +273,10 @@ export async function submitLink(env: Env, input: string, ip: string, now: numbe
 
   const username = fetched.username ?? link.username;
   const permalink = username ? `https://www.threads.com/@${username}/post/${link.code}` : `https://www.threads.com/t/${link.code}`;
-  await storePost(env, { id: postId, username, text: fetched.text, permalink, posted_at: postedAt, keyword: null, source: 'link' }, now);
+  const text = withLocationTag(fetched.text, fetched.location);
+  await storePost(env, { id: postId, username, text, permalink, posted_at: postedAt, keyword: null, source: 'link' }, now);
   // 等回報的人確認才放上雷達；排程也不會自己判讀
-  await env.DB.prepare("UPDATE posts SET checked_at = ?, text = ?, confirm_state = 'pending' WHERE id = ?").bind(now, fetched.text, postId).run();
+  await env.DB.prepare("UPDATE posts SET checked_at = ?, text = ?, confirm_state = 'pending' WHERE id = ?").bind(now, text, postId).run();
   await env.DB.prepare('INSERT INTO submissions (post_id, ip_hash, created_at) VALUES (?, ?, ?)').bind(postId, ip, now).run();
 
   const post = await getPost(env, postId);
@@ -389,12 +416,14 @@ export async function recheckLinks(env: Env, now: number): Promise<RecheckLinksR
     out.checked++;
     const r = await fetchThreadsPost(row.id.replace(/^(link|spot)-/, ''));
     await env.DB.prepare('UPDATE posts SET checked_at = ? WHERE id = ?').bind(now, row.id).run();
+    // 存的內文可能接了地點標記（以前存的沒有），兩種都算沒改
+    const changed = r.status === 'ok' && r.text !== row.text && withLocationTag(r.text, r.location) !== row.text;
     if (r.status === 'gone') {
       await endAll(row.id, 'deleted');
       out.deleted++;
-    } else if (r.status === 'ok' && r.text !== row.text && row.id.startsWith('spot-')) {
+    } else if (r.status === 'ok' && changed && row.id.startsWith('spot-')) {
       await env.DB.prepare('UPDATE posts SET text = ? WHERE id = ?').bind(r.text, row.id).run();
-    } else if (r.status === 'ok' && r.text !== row.text) {
+    } else if (r.status === 'ok' && changed) {
       if (detectEnded(r.text)) {
         await endAll(row.id, 'author');
         out.ended++;
@@ -405,7 +434,7 @@ export async function recheckLinks(env: Env, now: number): Promise<RecheckLinksR
       await env.DB.batch([
         env.DB.prepare("DELETE FROM ended_reports WHERE event_id IN (SELECT id FROM events WHERE post_id = ? AND status IN ('upcoming', 'active', 'unlocated'))").bind(row.id),
         env.DB.prepare("DELETE FROM events WHERE post_id = ? AND status IN ('upcoming', 'active', 'unlocated')").bind(row.id),
-        env.DB.prepare('UPDATE posts SET text = ? WHERE id = ?').bind(r.text, row.id),
+        env.DB.prepare('UPDATE posts SET text = ? WHERE id = ?').bind(withLocationTag(r.text, r.location), row.id),
       ]);
       const post = await getPost(env, row.id);
       if (post) {
