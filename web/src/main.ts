@@ -660,7 +660,7 @@ function renderRouteDetail(r: RouteOut, items: Item[], now: number): void {
     })
     .join('');
   detailEl.hidden = false;
-  detailEl.innerHTML = `
+  setDetailHtml(`route:${r.id}`, `
     <div class="sheet-head">
       <strong>${esc(r.title)}</strong>
       <button type="button" class="chip" data-act="close" aria-label="關閉">關閉</button>
@@ -674,7 +674,7 @@ function renderRouteDetail(r: RouteOut, items: Item[], now: number): void {
         ${r.claimUrl ? `<a class="btn primary" href="${esc(r.claimUrl)}" target="_blank" rel="noopener">到車掃地圖認領路段</a>` : ''}
         <button type="button" class="btn" data-act="route-map">在地圖上看路線</button>
       </div>
-    </div>`;
+    </div>`);
   detailEl.querySelector('[data-act="close"]')?.addEventListener('click', () => selectRoute(null));
   for (const b of detailEl.querySelectorAll<HTMLButtonElement>('[data-select]')) {
     b.addEventListener('click', () => select(Number(b.dataset.select)));
@@ -696,7 +696,7 @@ function renderChooser(items: Item[], now: number): void {
     return;
   }
   detailEl.hidden = false;
-  detailEl.innerHTML = `
+  setDetailHtml('chooser', `
     <div class="sheet-head">
       <strong>這裡有 ${list.length} 個</strong>
       <button type="button" class="chip" data-act="close" aria-label="關閉">關閉</button>
@@ -709,7 +709,7 @@ function renderChooser(items: Item[], now: number): void {
             `<li><button type="button" data-select="${it.ev.id}"><b>${esc(tagLabel(it))}｜${esc(titleOf(it.ev))}</b><small>${esc(placeLine(it.ev))} · ${it.ev.approxArea ? '約 ' : ''}${formatKm(it.distanceKm)} ${compassLabel(it.bearing)}</small><small>${esc(timeLine(it, now))}</small></button></li>`,
         )
         .join('')}</ul>
-    </div>`;
+    </div>`);
   detailEl.querySelector('[data-act="close"]')?.addEventListener('click', () => select(null));
   for (const b of detailEl.querySelectorAll<HTMLButtonElement>('[data-select]')) {
     b.addEventListener('click', () => select(Number(b.dataset.select)));
@@ -721,7 +721,7 @@ function renderLandmarkDetail(id: string): boolean {
   const lm = LANDMARKS.find((x) => x.id === id);
   if (!lm) return false;
   detailEl.hidden = false;
-  detailEl.innerHTML = `
+  setDetailHtml(`landmark:${id}`, `
     <div class="sheet-head">
       <strong>★ ${esc(lm.name)}</strong>
       <button type="button" class="chip" data-act="close" aria-label="關閉">關閉</button>
@@ -734,7 +734,7 @@ function renderLandmarkDetail(id: string): boolean {
         <a class="btn" href="${esc(lm.url)}" target="_blank" rel="noopener">${esc(lm.urlName)}</a>
         <button type="button" class="btn" data-act="map">在地圖上看</button>
       </div>
-    </div>`;
+    </div>`);
   detailEl.querySelector('[data-act="close"]')?.addEventListener('click', () => selectLandmark(null));
   detailEl.querySelector('[data-act="map"]')?.addEventListener('click', () => {
     selectedLandmark = null;
@@ -859,7 +859,7 @@ function renderBottleDetail(id: number): boolean {
   }
   const canPick = !got && !b.mine && !b.picked && origin.source === 'gps' && d <= reach;
   detailEl.hidden = false;
-  detailEl.innerHTML = `
+  setDetailHtml(`bottle:${id}`, `
     <div class="sheet-head">
       <strong>${b.mine ? '你丟的漂流瓶' : '漂流瓶'}</strong>
       <button type="button" class="chip" data-act="close" aria-label="關閉">關閉</button>
@@ -874,7 +874,7 @@ function renderBottleDetail(id: number): boolean {
         ${b.mine ? '<button type="button" class="btn" data-act="delete">收回</button>' : ''}
       </div>
       <p class="muted sheet-note small">瓶子的位置在丟的時候就隨機漂開約 100 m，之後還會順著洋流漂，不是丟的人站的地方。</p>
-    </div>`;
+    </div>`);
   detailEl.querySelector('[data-act="close"]')?.addEventListener('click', () => selectBottle(null));
   detailEl.querySelector('[data-act="pick"]')?.addEventListener('click', (e) => {
     (e.currentTarget as HTMLButtonElement).disabled = true;
@@ -1206,6 +1206,23 @@ async function submitBottle(): Promise<void> {
   render();
 }
 
+/**
+ * 詳細資料每 5 秒重畫一次（倒數、狀態）：同一個選取還在時，保留展開的區塊（「其他貼文」「相關報導」）和捲動位置，
+ * 不然點開沒多久就自己收回去
+ */
+function setDetailHtml(key: string, html: string): void {
+  const same = detailEl.dataset.key === key;
+  const summaryKey = (d: Element): string => (d.querySelector('summary')?.textContent ?? '').replace(/（\d+）$/, '');
+  const open = same ? new Set([...detailEl.querySelectorAll('details[open]')].map(summaryKey)) : new Set<string>();
+  const top = detailEl.scrollTop;
+  detailEl.dataset.key = key;
+  detailEl.innerHTML = html;
+  if (!same) return;
+  for (const d of detailEl.querySelectorAll<HTMLDetailsElement>('details')) if (open.has(summaryKey(d))) d.open = true;
+  // 抽屜本身會捲動：展開的區塊放回去之後再還原位置
+  detailEl.scrollTop = top;
+}
+
 function renderDetail(items: Item[], now: number): void {
   if (selectedBottle !== null && renderBottleDetail(selectedBottle)) return;
   selectedBottle = null;
@@ -1236,7 +1253,7 @@ function renderDetail(items: Item[], now: number): void {
   }
   const { ev } = it;
   detailEl.hidden = false;
-  detailEl.innerHTML = `
+  setDetailHtml(`ev:${ev.id}`, `
     <div class="sheet-head">
       <strong>${esc(titleOf(ev))}</strong>
       <button type="button" class="chip" data-act="close" aria-label="關閉">關閉</button>
@@ -1256,7 +1273,7 @@ function renderDetail(items: Item[], now: number): void {
         ${canReportEnded(ev, now) ? `<button type="button" class="btn" data-act="ended"${endedReported.has(ev.id) ? ' disabled' : ''}>${endedReported.has(ev.id) ? '已回報' : `回報${it.spot ? '今天' : ''}${ev.kind === 'activity' ? '已結束' : '已發完'}`}</button>` : ''}
       </div>
       ${ev.endedReports ? `<p class="muted ended-note">已有 ${ev.endedReports} 人回報${ev.kind === 'activity' ? '已結束' : '已發完'}${neededText()}</p>` : ''}
-    </div>`;
+    </div>`);
   detailEl.querySelector('[data-act="close"]')?.addEventListener('click', () => select(null));
   for (const b of detailEl.querySelectorAll<HTMLButtonElement>('[data-select]')) {
     b.addEventListener('click', () => select(Number(b.dataset.select)));
