@@ -359,6 +359,14 @@ async function handleAdmin(req: Request, env: Env, _ctx: ExecutionContext, path:
     return jsonResponse({ event: ev });
   }
 
+  // 拿掉回報的人補充的資料（重複或寫錯）：只改詳細資料上的顯示，雷達上的事件不動
+  const supDel = /^\/api\/admin\/posts\/([^/]+)\/supplement$/.exec(path);
+  if (req.method === 'DELETE' && supDel) {
+    const id = decodeURIComponent(supDel[1]);
+    const r = await env.DB.prepare('UPDATE posts SET supplement = NULL WHERE id = ?').bind(id).run();
+    return jsonResponse({ post_id: id, updated: r.meta.changes ?? 0 });
+  }
+
   // 刪除一則貼文與它產生的事件（作者要求移除、或測試貼文）
   const postDel = /^\/api\/admin\/posts\/([^/]+)$/.exec(path);
   if (req.method === 'DELETE' && postDel) {
