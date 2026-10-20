@@ -150,6 +150,17 @@ function summarize(reasons: string[]): LinkOutcome {
   return 'not_listed';
 }
 
+/**
+ * 之前回報過的貼文：以現在雷達上有沒有為準，不只看當時的判讀結果。
+ * 當時的結果可能沒記到（管理者重跑、舊資料），或後來改過（補上位置、下架），
+ * 所以雷達上有就是「已在雷達上」（重複的那一場算「雷達上已經有」），沒有就不說在雷達上。
+ */
+export function existedOutcome(reasons: string[], eventsOnRadar: number): LinkOutcome {
+  const outcome = summarize(reasons);
+  if (eventsOnRadar > 0) return outcome === 'duplicate' ? 'duplicate' : 'added';
+  return outcome === 'added' || outcome === 'duplicate' ? 'not_listed' : outcome;
+}
+
 async function eventsForResult(env: Env, postId: string, reasons: string[], now: number): Promise<EventOut[]> {
   const ids = new Set<number>();
   const own = await env.DB.prepare("SELECT id FROM events WHERE post_id = ? AND status IN ('upcoming', 'active')").bind(postId).all<{ id: number }>();
@@ -187,9 +198,7 @@ export async function submitLink(env: Env, input: string, ip: string, now: numbe
       .first<{ result: string }>();
     const reasons = last ? (JSON.parse(last.result) as string[]) : [];
     const events = await eventsForResult(env, postId, reasons, now);
-    // 原本的事件已經下架或過期，就不要再說「已在雷達上」
-    const outcome = summarize(reasons);
-    return { existed: true, outcome: events.length === 0 && (outcome === 'added' || outcome === 'duplicate') ? 'not_listed' : outcome, reasons, events, permalink: existing.permalink ?? '' };
+    return { existed: true, outcome: existedOutcome(reasons, events.length), reasons, events, permalink: existing.permalink ?? '' };
   }
 
   const postedAt = shortcodeToUnix(link.code, now);

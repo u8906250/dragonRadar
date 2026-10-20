@@ -1,4 +1,4 @@
-import { previewOf } from '../src/reports';
+import { existedOutcome, previewOf } from '../src/reports';
 import { describe, expect, it } from 'vitest';
 import { detectEnded, spotSessions } from '../src/events';
 import { buildMessages, normalizeExtraction } from '../src/extract';
@@ -307,5 +307,18 @@ describe('previewOf', () => {
     const out = previewOf(items, 2500);
     expect(out).toHaveLength(1);
     expect(out[0]).toMatchObject({ days: 2, startAt: 1000 + day, lastStartAt: 1000 + 2 * day, spot: true, untilOpen: true });
+  });
+});
+
+describe('existedOutcome', () => {
+  it('says it is on the radar when events are there, even without a recorded result', () => {
+    expect(existedOutcome([], 14)).toBe('added');
+    expect(existedOutcome(['unlocated', 'unlocated'], 3)).toBe('added');
+    expect(existedOutcome(['duplicate_of_3'], 1)).toBe('duplicate');
+  });
+  it('does not claim it is on the radar when nothing is there', () => {
+    expect(existedOutcome(['upcoming'], 0)).toBe('not_listed');
+    expect(existedOutcome(['not_event'], 0)).toBe('not_event');
+    expect(existedOutcome([], 0)).toBe('not_listed');
   });
 });
