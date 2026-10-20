@@ -213,6 +213,11 @@ a.chip { display: inline-flex; align-items: center; text-decoration: none; }
 .radar .blip.phase-soon .mark { stroke: var(--blip-soon); opacity: 0.85; }
 .radar .blip.phase-soon .ping { stroke: var(--blip-soon); }
 .radar .blip.out .dot, .radar .blip.out .mark { opacity: 0.5; }
+/* 稍後才開始（30 分鐘以後）：淡色、虛線框，不閃 */
+.radar .blip.phase-later .dot { fill-opacity: 0.3; stroke: var(--blip); stroke-width: 2; stroke-dasharray: 3 2; }
+.radar .blip.phase-later.kind-activity .dot { stroke: var(--blip-activity); }
+.radar .blip.phase-later .mark { opacity: 0.45; stroke-dasharray: 3 2; }
+.radar .blip.phase-later .core, .radar .blip.phase-later .ping { display: none; }
 .radar .blip .label { fill: var(--label); font-size: 12px; font-weight: 600; paint-order: stroke; stroke: var(--label-halo); stroke-width: 3px; stroke-linejoin: round; pointer-events: none; }
 /* 活動：換顏色，進行中時一樣閃爍 */
 .radar .blip.kind-activity .dot { fill: var(--blip-activity); }
