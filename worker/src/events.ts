@@ -192,7 +192,9 @@ export function spotSessions(ex: Pick<ExtractedEvent, 'start_at' | 'end_at' | 'u
   const untilAt = untilRaw !== null && untilRaw > firstDay ? untilRaw : null;
   const multiDayEnd = end !== null && taipeiDayStart(end) > firstDay;
   const untilOpen = untilAt === null && !multiDayEnd;
-  let lastDay = untilAt ?? (multiDayEnd ? taipeiDayStart(end) : firstDay + (SPOT_DEFAULT_DAYS - 1) * DAY_SEC);
+  // 沒寫最後一天：每天開的先排 SPOT_DEFAULT_DAYS 天；每週幾才開的排兩週，才不會只剩一兩次
+  const defaultDays = ex.weekdays?.length ? 14 : SPOT_DEFAULT_DAYS;
+  let lastDay = untilAt ?? (multiDayEnd ? taipeiDayStart(end) : firstDay + (defaultDays - 1) * DAY_SEC);
   lastDay = Math.min(lastDay, firstDay + 13 * DAY_SEC, taipeiDayStart(now + MAX_FUTURE_SEC));
 
   const out: Session[] = [];

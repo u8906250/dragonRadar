@@ -352,7 +352,8 @@ describe('weekdays', () => {
     const posted = Date.parse('2026-10-20T08:00:00+08:00') / 1000;
     const s = spotSessions({ start_at: '2026-10-20T14:00:00+08:00', end_at: '2026-10-20T18:00:00+08:00', until: null, weekdays: [2, 4] }, posted, posted);
     const days = s.map((x) => new Date((x.start + 8 * 3600) * 1000).toISOString().slice(0, 10));
-    expect(days).toEqual(['2026-10-20', '2026-10-22']);
+    // 沒寫最後一天：每週幾才開的排兩週
+    expect(days).toEqual(['2026-10-20', '2026-10-22', '2026-10-27', '2026-10-29']);
   });
 });
 
