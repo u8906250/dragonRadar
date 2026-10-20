@@ -732,16 +732,10 @@ function renderLandmarkDetail(id: string): boolean {
       <div class="sheet-actions">
         <a class="btn primary" href="https://www.google.com/maps/dir/?api=1&destination=${lm.lat},${lm.lng}&travelmode=walking" target="_blank" rel="noopener">導航</a>
         <a class="btn" href="${esc(lm.url)}" target="_blank" rel="noopener">${esc(lm.urlName)}</a>
-        <button type="button" class="btn" data-act="map">在地圖上看</button>
+        <a class="btn" href="${googleMapsUrl(lm)}" target="_blank" rel="noopener">在 Google 地圖上看</a>
       </div>
     </div>`);
   detailEl.querySelector('[data-act="close"]')?.addEventListener('click', () => selectLandmark(null));
-  detailEl.querySelector('[data-act="map"]')?.addEventListener('click', () => {
-    selectedLandmark = null;
-    render();
-    switchView('map');
-    map.focusLatLng(lm);
-  });
   return true;
 }
 
@@ -1269,7 +1263,7 @@ function renderDetail(items: Item[], now: number): void {
       <div class="sheet-actions">
         <a class="btn primary" href="https://www.google.com/maps/dir/?api=1&destination=${ev.lat},${ev.lng}&travelmode=walking" target="_blank" rel="noopener">${ev.approxArea ? '導航到約略位置' : '導航'}</a>
         ${ev.post.permalink ? `<a class="btn" href="${esc(ev.post.permalink)}" target="_blank" rel="noopener">${esc(sourceLinkText(ev))}</a>` : ''}
-        <button type="button" class="btn" data-act="map">在地圖上看</button>
+        <a class="btn" href="${googleMapsUrl(ev)}" target="_blank" rel="noopener">在 Google 地圖上看</a>
         ${canReportEnded(ev, now) ? `<button type="button" class="btn" data-act="ended"${endedReported.has(ev.id) ? ' disabled' : ''}>${endedReported.has(ev.id) ? '已回報' : `回報${it.spot ? '今天' : ''}${ev.kind === 'activity' ? '已結束' : '已發完'}`}</button>` : ''}
       </div>
       ${ev.endedReports ? `<p class="muted ended-note">已有 ${ev.endedReports} 人回報${ev.kind === 'activity' ? '已結束' : '已發完'}${neededText()}</p>` : ''}
@@ -1278,10 +1272,6 @@ function renderDetail(items: Item[], now: number): void {
   for (const b of detailEl.querySelectorAll<HTMLButtonElement>('[data-select]')) {
     b.addEventListener('click', () => select(Number(b.dataset.select)));
   }
-  detailEl.querySelector('[data-act="map"]')?.addEventListener('click', () => {
-    switchView('map');
-    map.focus(ev.id);
-  });
   detailEl.querySelector('[data-act="ended"]')?.addEventListener('click', (e) => void sendEnded(ev, e.currentTarget as HTMLButtonElement));
   detailEl.querySelector('[data-act="route"]')?.addEventListener('click', () => {
     const r = routeOf(ev);
@@ -1988,10 +1978,15 @@ function previewWhen(p: PreviewItem): string {
   return `${day(p.startAt)} ${fmtTime(p.startAt)}${p.endOpen ? ' 開始（沒寫結束時間）' : `–${fmtTime(p.endAt)}`}`;
 }
 
+/** 在 Google 地圖上標出這個座標（新分頁；手機會開 Google 地圖 App） */
+function googleMapsUrl(p: LatLng): string {
+  return `https://www.google.com/maps/search/?api=1&query=${p.lat},${p.lng}`;
+}
+
 /** 預覽上的定位：精確、約略（只到鄉鎮區）、找不到；有座標就附「在地圖上看」 */
 function previewWhere(p: PreviewItem): string {
   if (p.lat === null || p.lng === null) return '<span class="preview-warn">找不到地點，確認了也不會出現在雷達上</span>';
-  const link = `<a href="https://www.google.com/maps/search/?api=1&query=${p.lat},${p.lng}" target="_blank" rel="noopener">在地圖上看</a>`;
+  const link = `<a href="${googleMapsUrl({ lat: p.lat, lng: p.lng })}" target="_blank" rel="noopener">在 Google 地圖上看</a>`;
   return p.approxArea ? `<span class="preview-warn">只定位到${esc(p.approxArea)}（約略位置）</span>・${link}` : `已定位・${link}`;
 }
 
