@@ -520,17 +520,17 @@ function render(): void {
   const items = all.filter((it) => shown[categoryOf(it)]);
   // 雷達、地圖只畫時間範圍內的；清單照樣全部列，範圍外的放最下面
   const timed = items.filter((it) => inTime(it, now));
-  // 稍後才開始的也畫（虛線框、淡色）；「雙北」時雙北以外的不畫
-  const visible = timed.filter((it) => scaleSetting !== 'region' || inScope(it.ev, it.distanceKm));
   updateOutline();
   updateCategoryToggles(all);
 
+  // 稍後才開始的也畫（虛線框、淡色）；「雙北」時雙北以外的也畫，跟超出範圍的一樣畫小、畫淡
   radar.render(
-    visible.map((it) => ({
+    timed.map((it) => ({
       id: it.ev.id,
       kind: it.ev.kind,
       spot: !!it.spot,
       approx: !!it.ev.approxArea,
+      outside: !inScope(it.ev, it.distanceKm),
       distanceKm: it.distanceKm,
       bearing: it.bearing,
       // 還沒出發的車掃路線點用「即將開始」的淡色畫；還沒開的據點跟休息中的一樣淡；其他稍後開始的畫虛線框

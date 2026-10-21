@@ -10,6 +10,8 @@ export interface RadarItem {
   spot?: boolean;
   /** 約略位置，畫成空心 */
   approx?: boolean;
+  /** 在圓圈裡但不在範圍內（選「雙北」時的基隆、桃園）：跟超出範圍的一樣畫小、畫淡 */
+  outside?: boolean;
   /** 還沒開始的清楚程度：1 快開始了（清楚）… 0 一週以上（淡、模糊）；沒給就照原樣 */
   fade?: number;
   /** 光點下方的小字，例如還沒開始的「5小時」「2天」 */
@@ -619,7 +621,7 @@ export class Radar {
       const ratio = this.ratio(it.distanceKm);
       const angle = it.bearing - this.heading;
       const r = Math.min(1, ratio) * (R - 8);
-      pos.set(it.id, { ...polar(angle, r), out: ratio > 1, angle, r });
+      pos.set(it.id, { ...polar(angle, r), out: ratio > 1 || !!it.outside, angle, r });
     }
     // 疊在一起（12 px 內）的光點合成一群：選取的、要顯示標籤的優先當代表，標籤加「+N」，
     // 點下去先列出同一群讓人選，不然被蓋住的點不到
