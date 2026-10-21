@@ -16,6 +16,13 @@ describe('splitPlace', () => {
   it('takes the name before a location hint in brackets and keeps the hint as the place', () => {
     expect(splitPlace('日常生活 a day cafe(近忠孝復興站）')).toEqual({ name: '日常生活 a day cafe', address: '日常生活 a day cafe(近忠孝復興站）' });
   });
+  it('does not take a location hint after the address as the name', () => {
+    const text = '新北市板橋區文化路二段263巷18號 (近捷運江子翠捷運站二號出口，走路三分鐘。農村公園正對面)';
+    expect(splitPlace(text)).toEqual({ name: null, address: text });
+    expect(splitPlace('台北市中正區青島東路25-2號 近善導寺站').name).toBeNull();
+    expect(splitPlace('台北市松山區復興北路167號14樓之4（三信大樓）').name).toBeNull();
+    expect(splitPlace('新北市板橋區文化路二段263巷18號（棲木咖啡）')).toEqual({ name: '棲木咖啡', address: '新北市板橋區文化路二段263巷18號' });
+  });
   it('has no name for a bare address or a landmark', () => {
     expect(splitPlace('台北市中正區青島東路25-2號').name).toBeNull();
     expect(splitPlace('捷運市政府站 2號出口').name).toBeNull();
