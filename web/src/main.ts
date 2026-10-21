@@ -132,23 +132,10 @@ const CATEGORY_LS: Record<Category, string> = { giveaway: LS_GIVEAWAYS, activity
 const shown: Record<Category, boolean> = { giveaway: lsGet(LS_GIVEAWAYS) !== '0', activity: lsGet(LS_ACTIVITIES) !== '0', spot: lsGet(LS_SPOTS) !== '0' };
 const categoryOf = (it: Item): Category => (it.spot ? 'spot' : it.ev.kind === 'activity' ? 'activity' : 'giveaway');
 /**
- * 只看進行中：雷達、地圖、清單都只剩現在就能去的（進行中的發放、活動，開放中的據點，車掃中），不管發放、活動、據點開關。
- * 跟發放、活動、據點開關互斥：打開時那三個都變成沒打開，點其中一個就離開「只看進行中」。
+ * 只看進行中：跟發放、活動、據點開關一起用，有打開的那幾類裡，只留現在就能去的
+ * （進行中的發放、活動，開放中的據點，車掃中）
  */
 let onlyActive = lsGet(LS_ONLY_ACTIVE) === '1';
-
-function setOnlyActive(on: boolean): void {
-  onlyActive = on;
-  lsSet(LS_ONLY_ACTIVE, on ? '1' : '0');
-}
-
-/** 只顯示某一類 */
-function setShown(cat: Category): void {
-  for (const c of Object.keys(shown) as Category[]) {
-    shown[c] = c === cat;
-    lsSet(CATEGORY_LS[c], shown[c] ? '1' : '0');
-  }
-}
 /** 時間範圍（跟距離範圍對應）：雷達、地圖只畫這段時間內會開始的，進行中、開放中的一定畫 */
 type TimeSetting = 'now' | '3h' | '24h' | '3d' | 'all';
 const TIME_SEC: Record<TimeSetting, number> = { now: 0, '3h': 3 * 3600, '24h': 24 * 3600, '3d': 3 * 86400, all: Infinity };
@@ -542,12 +529,13 @@ function stopText(stop: RouteStop, now: number): string {
 function render(): void {
   const now = nowSec();
   const all = computeItems(now);
-  const items = onlyActive ? all.filter((it) => activeNow(it, now)) : all.filter((it) => shown[categoryOf(it)]);
+  const byCategory = all.filter((it) => shown[categoryOf(it)]);
+  const items = onlyActive ? byCategory.filter((it) => activeNow(it, now)) : byCategory;
   // 雷達、地圖只畫時間範圍內的；清單照樣全部列，範圍外的放最下面
   const timed = items.filter((it) => inTime(it, now));
   updateOutline();
   updateCategoryToggles(all);
-  updateActiveToggle(all, now);
+  updateActiveToggle(byCategory, now);
 
   // 稍後才開始的也畫（虛線框、淡色）；「雙北」時雙北以外的也畫，跟超出範圍的一樣畫小、畫淡
   radar.render(
@@ -678,10 +666,8 @@ function updateCategoryToggles(all: Item[]): void {
     const cat = b.dataset.cat as Category;
     b.hidden = counts[cat] === 0;
     b.textContent = `${CATEGORY_NAME[cat]}（${counts[cat]}）`;
-    // 只看進行中的時候，三個都顯示成沒打開
-    const on = !onlyActive && shown[cat];
-    b.classList.toggle('on', on);
-    b.setAttribute('aria-pressed', String(on));
+    b.classList.toggle('on', shown[cat]);
+    b.setAttribute('aria-pressed', String(shown[cat]));
   }
   filterRow.hidden = categoryToggles.every((b) => b.hidden);
 }
@@ -2575,22 +2561,17 @@ function wireControls(): void {
     void submitKeyword(kwInput.value);
   });
   reportBtn.addEventListener('click', () => openReportSheet(reportSheet.hidden));
-  // 打開「只看進行中」：發放、活動、據點開關顯示成沒打開（原本的選擇留著）；關掉：回到原本的選擇
+  // 只看進行中跟發放、活動、據點開關各自獨立，一起用
   activeToggle.addEventListener('click', () => {
-    setOnlyActive(!onlyActive);
+    onlyActive = !onlyActive;
+    lsSet(LS_ONLY_ACTIVE, onlyActive ? '1' : '0');
     render();
   });
   for (const b of categoryToggles) {
     b.addEventListener('click', () => {
       const cat = b.dataset.cat as Category;
-      // 只看進行中的時候點某一類：離開只看進行中，只顯示這一類
-      if (onlyActive) {
-        setOnlyActive(false);
-        setShown(cat);
-      } else {
-        shown[cat] = !shown[cat];
-        lsSet(CATEGORY_LS[cat], shown[cat] ? '1' : '0');
-      }
+      shown[cat] = !shown[cat];
+      lsSet(CATEGORY_LS[cat], shown[cat] ? '1' : '0');
       render();
     });
   }
