@@ -396,13 +396,12 @@ a.chip { display: inline-flex; align-items: center; text-decoration: none; }
 .report-events small { display: block; color: var(--muted); margin-top: 2px; }
 /* 判讀結果的預覽：確認了才放上雷達 */
 .my-reports h3 { font-size: 15px; margin: 14px 0 8px; }
-.my-report-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
-.my-report-list li { display: flex; gap: 8px; align-items: center; justify-content: space-between; font-size: 14px; background: var(--card); border: var(--border-w) solid var(--line); border-radius: var(--card-radius); padding: 8px 10px; }
-.my-report-list li > div:first-child { min-width: 0; }
+.my-report-list { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: minmax(0, 1fr); gap: 8px; }
+.my-report-list li { font-size: 14px; background: var(--card); border: var(--border-w) solid var(--line); border-radius: var(--card-radius); padding: 8px 10px; }
 .my-report-list b { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .my-report-list small { display: block; color: var(--muted); margin-top: 2px; }
-.my-report-acts { display: flex; gap: 6px; flex-shrink: 0; }
-.my-report-acts .chip { text-decoration: none; }
+.my-report-acts { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+.my-report-acts .chip { text-decoration: none; padding: 4px 12px; font-size: 13px; }
 .report-preview { list-style: none; margin: 0 0 10px; padding: 0; display: grid; gap: 8px; }
 .report-preview li { font-size: 14px; background: var(--card); border: var(--border-w) solid var(--line); border-radius: var(--card-radius); padding: 10px 12px; }
 .report-preview small { display: block; color: var(--muted); margin-top: 3px; line-height: 1.5; }
