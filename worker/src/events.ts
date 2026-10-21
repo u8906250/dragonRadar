@@ -1,5 +1,5 @@
 import type { Env } from './env';
-import { applySupplementDate, dropBroughtItem, dropSelfPlace, extractFromPost, splitDropTimes, splitMultiDay, untilInText, weekdaysFromText, weekdaysInText, type EventKind, type ExtractedEvent } from './extract';
+import { applySupplementDate, dropBroughtItem, dropSelfPlace, extractFromPost, splitDropTimes, splitMultiDay, startNowForDeadline, untilInText, weekdaysFromText, weekdaysInText, type EventKind, type ExtractedEvent } from './extract';
 import { geocodeAddress, parseTwAddress, type TwAddress } from './address';
 import { adminArea, geocode, geocodeFirst, isAreaOnly, placeCandidates, type GeoPoint } from './geocode';
 import { listActiveKeywords, type KeywordRow } from './keywords';
@@ -439,6 +439,8 @@ export async function planPost(env: Env, post: PostRow, now = nowSec()): Promise
     // 只寫「本店」沒寫店名：當成沒寫地點，讓回報的人補充
     dropSelfPlace(ex);
     if (!ex.spot) {
+      // 「今天14:45前我都在」：從現在開始，不用模型猜的開始時間
+      startNowForDeadline(ex, text, now);
       items.push({ group, ...(await planEvent(env, ex, now, deadline)) });
       continue;
     }

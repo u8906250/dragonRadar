@@ -1,5 +1,5 @@
 import type { ExtractedEvent } from '../src/extract';
-import { applySupplementDate, dropBroughtItem, dropSelfPlace, splitDropTimes, splitMultiDay, untilInText, weekdaysFromText, weekdaysInText } from '../src/extract';
+import { applySupplementDate, dropBroughtItem, dropSelfPlace, splitDropTimes, splitMultiDay, startNowForDeadline, untilInText, weekdaysFromText, weekdaysInText } from '../src/extract';
 import { isAreaOnly } from '../src/geocode';
 import { existedOutcome, previewOf } from '../src/reports';
 import { describe, expect, it } from 'vitest';
@@ -568,5 +568,30 @@ describe('splitDropTimes', () => {
   it('leaves activities alone', () => {
     const a = ev('2026-10-21T13:00:00+08:00', '2026-10-21T15:00:00+08:00', 'activity');
     expect(splitDropTimes([a], drops)).toEqual([a]);
+  });
+});
+
+describe('startNowForDeadline', () => {
+  const now = Date.parse('2026-10-21T11:34:20+08:00') / 1000;
+  const ev = (start_at: string | null, end_at: string | null, spot = false) => ({ kind: 'giveaway', title: 't', item: null, start_at, end_at, place_text: '仁信裝潢', place_query: null, confidence: 0.95, spot, until: null }) as ExtractedEvent;
+  const text = '店門有開就可以直接進來詢問\n今天14:45前我都在喔！\n仁信裝潢-新北市新店區順安街35號';
+  it('starts now when the post only says "14:45前"', () => {
+    const e = ev('2026-10-21T14:00:00+08:00', '2026-10-21T14:45:00+08:00');
+    expect(startNowForDeadline(e, text, now)).toBe(true);
+    expect(e.start_at).toBe('2026-10-21T11:34:00+08:00');
+    expect(e.end_at).toBe('2026-10-21T14:45:00+08:00');
+    const f = ev(null, '2026-10-21T14:45:00+08:00');
+    expect(startNowForDeadline(f, '今天１４：４５以前都在', now)).toBe(true);
+    expect(f.start_at).toBe('2026-10-21T11:34:00+08:00');
+  });
+  it('keeps a start time the post wrote', () => {
+    const e = ev('2026-10-21T13:00:00+08:00', '2026-10-21T14:45:00+08:00');
+    expect(startNowForDeadline(e, '13:00 開始，14:45前發完', now)).toBe(false);
+    expect(e.start_at).toBe('2026-10-21T13:00:00+08:00');
+  });
+  it('leaves other days, spots, and posts without "前" alone', () => {
+    expect(startNowForDeadline(ev('2026-10-22T14:00:00+08:00', '2026-10-22T14:45:00+08:00'), '明天14:45前我都在', now)).toBe(false);
+    expect(startNowForDeadline(ev('2026-10-21T14:00:00+08:00', '2026-10-21T14:45:00+08:00', true), text, now)).toBe(false);
+    expect(startNowForDeadline(ev('2026-10-21T14:00:00+08:00', '2026-10-21T14:45:00+08:00'), '14:00-14:45 發放', now)).toBe(false);
   });
 });
