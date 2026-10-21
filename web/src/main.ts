@@ -3,6 +3,7 @@ import { addKeyword, collectLetter, confirmReport, rejectReport, supplementRepor
 import { compassSupported, startCompass } from './compass';
 import { bearingDeg, compassLabel, formatKm, haversineKm, taiwanRadiusKm, type LatLng } from './geo';
 import { inShuangbei, SHUANGBEI_RINGS, shuangbeiRadiusKm } from './shuangbei';
+import { TAIWAN_RINGS } from './taiwan';
 import { LANDMARKS } from './landmarks';
 import { X_MAX_WEIGHT, xLength } from './xcount';
 import { splitPlace } from './place';
@@ -439,13 +440,15 @@ let outlineFor = '';
 let radarOutline: Array<Array<{ bearing: number; distanceKm: number }>> = [];
 
 /** 「雙北」時雷達上畫縣市界；位置變了才重算 */
+/** 「雙北」畫雙北的縣市界，「全台」畫台灣的海岸線，其他範圍不畫 */
 function updateOutline(): void {
-  const key = scaleSetting === 'region' ? `${origin.lat},${origin.lng}` : '';
+  const rings = scaleSetting === 'region' ? SHUANGBEI_RINGS : scaleSetting === 'taiwan' ? TAIWAN_RINGS : null;
+  const key = rings ? `${scaleSetting}|${origin.lat},${origin.lng}` : '';
   if (key === outlineFor) return;
   outlineFor = key;
-  radarOutline = key ? SHUANGBEI_RINGS.map((ring) => ring.map(([lat, lng]) => ({ bearing: bearingDeg(origin, { lat, lng }), distanceKm: haversineKm(origin, { lat, lng }) }))) : [];
+  radarOutline = rings ? rings.map((ring) => ring.map(([lat, lng]) => ({ bearing: bearingDeg(origin, { lat, lng }), distanceKm: haversineKm(origin, { lat, lng }) }))) : [];
   radar.setOutline(radarOutline);
-  map.setOutline(key ? SHUANGBEI_RINGS : []);
+  map.setOutline(rings ?? []);
 }
 
 // ---- 車掃路線 ----
