@@ -31,6 +31,8 @@ const LS_ENDED = 'dr.endedReported';
 /** 這個瀏覽器回報過貼文：開頁面時才去拿「我的回報」，沒回報過的不用多一次請求 */
 const LS_REPORTED = 'dr.reported';
 const LS_SPOTS = 'dr.showSpots';
+const LS_GIVEAWAYS = 'dr.showGiveaways';
+const LS_ACTIVITIES = 'dr.showActivities';
 const LS_TIME = 'dr.timeRange';
 /** 丟過瓶子（才需要去問有沒有被撿走）、看過的最後一次「被撿走」時間 */
 const LS_BOTTLE_DROPPED = 'dr.bottleDropped';
@@ -122,7 +124,11 @@ let savedFollowed: string[] | null = loadFollowed();
 let theme: Theme = getTheme(new URLSearchParams(location.search).get('theme') ?? lsGet(LS_THEME) ?? DEFAULT_THEME_ID);
 /** 已經提醒過的事件；固定據點用據點 key，每天開門不會重複嗶 */
 const seenActive = new Set<string>();
-let showSpots = lsGet(LS_SPOTS) !== '0';
+/** 清單上方的開關：發放、活動（含車掃）、固定據點各自顯示或隱藏 */
+type Category = 'giveaway' | 'activity' | 'spot';
+const CATEGORY_LS: Record<Category, string> = { giveaway: LS_GIVEAWAYS, activity: LS_ACTIVITIES, spot: LS_SPOTS };
+const shown: Record<Category, boolean> = { giveaway: lsGet(LS_GIVEAWAYS) !== '0', activity: lsGet(LS_ACTIVITIES) !== '0', spot: lsGet(LS_SPOTS) !== '0' };
+const categoryOf = (it: Item): Category => (it.spot ? 'spot' : it.ev.kind === 'activity' ? 'activity' : 'giveaway');
 /** 時間範圍（跟距離範圍對應）：雷達、地圖只畫這段時間內會開始的，進行中、開放中的一定畫 */
 type TimeSetting = 'now' | '3h' | '24h' | '3d' | 'all';
 const TIME_SEC: Record<TimeSetting, number> = { now: 0, '3h': 3 * 3600, '24h': 24 * 3600, '3d': 3 * 86400, all: Infinity };
@@ -192,7 +198,7 @@ const lettersPage = $('#letters-page');
 const lettersPicked = $('#letters-picked');
 const lettersList = $('#letters-list');
 const filterRow = $('#filter-row');
-const spotToggle = $<HTMLButtonElement>('#spot-toggle');
+const categoryToggles = Array.from(document.querySelectorAll<HTMLButtonElement>('#filter-row [data-cat]'));
 const timeChips = Array.from(document.querySelectorAll<HTMLButtonElement>('#time-chips [data-time]'));
 const baseChipsEl = $('#base-chips');
 const baseChips = Array.from(document.querySelectorAll<HTMLButtonElement>('#base-chips [data-base]'));
@@ -511,17 +517,13 @@ function stopText(stop: RouteStop, now: number): string {
 function render(): void {
   const now = nowSec();
   const all = computeItems(now);
-  const spotTotal = all.filter((it) => it.spot).length;
-  const items = showSpots ? all : all.filter((it) => !it.spot);
+  const items = all.filter((it) => shown[categoryOf(it)]);
   // 雷達、地圖只畫時間範圍內的；清單照樣全部列，範圍外的放最下面
   const timed = items.filter((it) => inTime(it, now));
   // 稍後才開始的也畫（虛線框、淡色）；「雙北」時雙北以外的不畫
   const visible = timed.filter((it) => scaleSetting !== 'region' || inScope(it.ev, it.distanceKm));
   updateOutline();
-  filterRow.hidden = spotTotal === 0;
-  spotToggle.textContent = `${showSpots ? '✓ ' : ''}顯示固定據點（${spotTotal}）`;
-  spotToggle.classList.toggle('on', showSpots);
-  spotToggle.setAttribute('aria-pressed', String(showSpots));
+  updateCategoryToggles(all);
 
   radar.render(
     visible.map((it) => ({
@@ -605,6 +607,28 @@ function render(): void {
     systemNotify(head, msg);
   }
   if (lastFetchAt > 0) notifiedOnce = true;
+}
+
+const CATEGORY_NAME: Record<Category, string> = { giveaway: '發放', activity: '活動', spot: '固定據點' };
+
+/** 開關上寫各有幾個（車掃一條路線算一個），沒有的那一類不顯示開關；關掉的照樣列出數量 */
+function updateCategoryToggles(all: Item[]): void {
+  const seen = new Set<string>();
+  const counts: Record<Category, number> = { giveaway: 0, activity: 0, spot: 0 };
+  for (const it of all) {
+    const r = routeOf(it.ev);
+    if (r && seen.has(r.id)) continue;
+    if (r) seen.add(r.id);
+    counts[categoryOf(it)]++;
+  }
+  for (const b of categoryToggles) {
+    const cat = b.dataset.cat as Category;
+    b.hidden = counts[cat] === 0;
+    b.textContent = `${shown[cat] ? '✓ ' : ''}${CATEGORY_NAME[cat]}（${counts[cat]}）`;
+    b.classList.toggle('on', shown[cat]);
+    b.setAttribute('aria-pressed', String(shown[cat]));
+  }
+  filterRow.hidden = categoryToggles.every((b) => b.hidden);
 }
 
 /** 清單上的一列：一般事件，或合成一張卡片的車掃路線 */
@@ -1868,7 +1892,7 @@ function renderRules(): void {
       <li><b>發放</b>：在某時某地免費發飄帶、貼紙、文宣、飲料等，雷達上是<span class="ex">橘色</span>光點。</li>
       <li><b>活動</b>：可以到場參加的車掃、掃街、市場開講、造勢晚會、見面會、座談等，雷達上是<span class="ex">另一個顏色</span>的光點。</li>
       <li>活動現場也有發放東西的，算成一筆發放。</li>
-      <li><b>固定據點</b>：店家、服務處等連續好幾天在固定時段都能去領或參加的，標成「據點」，雷達上是<span class="ex">菱形</span>光點，休息時間變淡。沒寫最後一天的寫「發完為止」，${r.spotDefaultDays ?? 7} 天後自動下架。可以用清單上方的「顯示固定據點」開關隱藏。</li>
+      <li><b>固定據點</b>：店家、服務處等連續好幾天在固定時段都能去領或參加的，標成「據點」，雷達上是<span class="ex">菱形</span>光點，休息時間變淡。沒寫最後一天的寫「發完為止」，${r.spotDefaultDays ?? 7} 天後自動下架。可以用清單上方的「固定據點」開關隱藏。</li>
     </ul>
     <h3>時間地點怎麼判讀</h3>
     <ol>
@@ -2477,11 +2501,14 @@ function wireControls(): void {
     void submitKeyword(kwInput.value);
   });
   reportBtn.addEventListener('click', () => openReportSheet(reportSheet.hidden));
-  spotToggle.addEventListener('click', () => {
-    showSpots = !showSpots;
-    lsSet(LS_SPOTS, showSpots ? '1' : '0');
-    render();
-  });
+  for (const b of categoryToggles) {
+    b.addEventListener('click', () => {
+      const cat = b.dataset.cat as Category;
+      shown[cat] = !shown[cat];
+      lsSet(CATEGORY_LS[cat], shown[cat] ? '1' : '0');
+      render();
+    });
+  }
   for (const b of timeChips) b.addEventListener('click', () => setTime((b.dataset.time as TimeSetting) ?? 'all'));
   reportSheet.querySelector('[data-act="close"]')?.addEventListener('click', () => openReportSheet(false));
   myReportList.addEventListener('click', (e) => {

@@ -429,7 +429,8 @@ a.chip { display: inline-flex; align-items: center; text-decoration: none; }
 .ev.spot.phase-closed .dot, .ev.spot.phase-later .dot { opacity: 0.45; }
 .ev.spot .kind-tag { background: var(--blip-spot); color: #fff; }
 .ev.spot.phase-active .ev-time { color: var(--blip-spot); }
-.filter-row { display: flex; flex-wrap: wrap; gap: 8px; margin: -2px 12px 10px; }
+.filter-row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: -2px 12px 10px; }
+.filter-label { font-size: 13px; }
 .ev-time .countdown { color: var(--accent); font-weight: 800; }
 .chip.small { min-height: 32px; padding: 4px 12px; font-size: 13px; }
 

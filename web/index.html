@@ -81,7 +81,10 @@
           <button type="button" id="report-btn" class="btn primary report-btn" aria-label="回報 Threads 貼文">＋回報</button>
         </div>
         <div class="filter-row" id="filter-row" hidden>
-          <button type="button" id="spot-toggle" class="chip small on" aria-pressed="true" title="店家、服務處等連續多天都能去的固定據點">顯示固定據點</button>
+          <span class="filter-label muted">顯示</span>
+          <button type="button" class="chip small on" data-cat="giveaway" aria-pressed="true" title="單次的發放">發放</button>
+          <button type="button" class="chip small on" data-cat="activity" aria-pressed="true" title="單次的活動，包括車掃">活動</button>
+          <button type="button" class="chip small on" data-cat="spot" aria-pressed="true" title="店家、服務處等連續多天都能去的固定據點">固定據點</button>
         </div>
         <ul id="event-list" class="event-list"></ul>
         <p id="empty-hint" class="muted hint" hidden></p>
