@@ -1,5 +1,5 @@
 import './styles.css';
-import { addKeyword, collectLetter, confirmReport, rejectReport, supplementReport, deleteBottle, dropBottle, recycleBottle, fetchBottles, fetchEvents, fetchHealth, fetchKeywords, fetchMyBottles, fetchRoutes, pickBottle, reportBottle, reportEnded, submitLink } from './api';
+import { addKeyword, collectLetter, confirmReport, rejectReport, supplementReport, deleteBottle, dropBottle, recycleBottle, fetchBottles, fetchEvents, fetchHealth, fetchKeywords, fetchMyBottles, fetchMyReports, fetchRoutes, pickBottle, reportBottle, reportEnded, submitLink, withdrawReport } from './api';
 import { compassSupported, startCompass } from './compass';
 import { bearingDeg, compassLabel, formatKm, haversineKm, taiwanRadiusKm, type LatLng } from './geo';
 import { inShuangbei, SHUANGBEI_RINGS, shuangbeiRadiusKm } from './shuangbei';
@@ -10,7 +10,7 @@ import { crowdOf, MapView, type BaseMap } from './map';
 import { beep, ensureNotificationPermission, notificationState, showBanner, systemNotify, unlockAudio } from './notify';
 import { Radar, type RadarRoute } from './radar';
 import { DEFAULT_THEME_ID, getTheme, THEMES, type Theme } from './themes';
-import type { BottleOut, EventOut, Item, KeywordInfo, KeywordRules, MyBottles, Origin, Phase, PickedBottle, RelatedPost, RouteOut, PreviewItem, RouteStop, SubmitResult } from './types';
+import type { BottleOut, EventOut, Item, KeywordInfo, KeywordRules, MyBottles, MyReport, Origin, Phase, PickedBottle, RelatedPost, RouteOut, PreviewItem, RouteStop, SubmitResult } from './types';
 
 const DEFAULT_ORIGIN: Origin = { lat: 25.0478, lng: 121.517, source: 'default' }; // 台北車站
 const SOON_SEC = 30 * 60;
@@ -28,6 +28,8 @@ const LS_BASE = 'dr.base';
 const BASES: BaseMap[] = ['nlsc', 'osm'];
 const LS_KEYWORDS = 'dr.keywords';
 const LS_ENDED = 'dr.endedReported';
+/** 這個瀏覽器回報過貼文：開頁面時才去拿「我的回報」，沒回報過的不用多一次請求 */
+const LS_REPORTED = 'dr.reported';
 const LS_SPOTS = 'dr.showSpots';
 const LS_TIME = 'dr.timeRange';
 /** 丟過瓶子（才需要去問有沒有被撿走）、看過的最後一次「被撿走」時間 */
@@ -127,6 +129,9 @@ const TIME_SEC: Record<TimeSetting, number> = { now: 0, '3h': 3 * 3600, '24h': 2
 let timeSetting: TimeSetting = (lsGet(LS_TIME) ?? '') in TIME_SEC ? (lsGet(LS_TIME) as TimeSetting) : 'all';
 /** 這台裝置已經回報過「已發完」的事件 */
 const endedReported = new Set<number>(loadIdList(LS_ENDED));
+/** 用這個瀏覽器回報過的貼文（伺服器認裝置代碼）；詳細資料看到自己回報的可以刪除 */
+let myReports: MyReport[] = [];
+const myReportIds = new Set<string>();
 
 // ---- elements ----
 const bannerEl = $('#banner');
@@ -169,6 +174,8 @@ const reportSubmit = $<HTMLButtonElement>('#report-submit');
 const reportPaste = $<HTMLButtonElement>('#report-paste');
 const reportResult = $('#report-result');
 const reportTips = $('#report-tips');
+const myReportsEl = $('#my-reports');
+const myReportList = $<HTMLUListElement>('#my-report-list');
 const bottleBtn = $<HTMLButtonElement>('#bottle-btn');
 const bottleBadge = $('#bottle-badge');
 const bottleSheet = $('#bottle-sheet');
@@ -1332,6 +1339,7 @@ function renderDetail(items: Item[], now: number): void {
         ${ev.post.permalink ? `<a class="btn" href="${esc(ev.post.permalink)}" target="_blank" rel="noopener">${esc(sourceLinkText(ev))}</a>` : ''}
         <a class="btn" href="${googleMapsUrl(ev)}" target="_blank" rel="noopener">在 Google 地圖上看</a>
         ${canReportEnded(ev, now) ? `<button type="button" class="btn" data-act="ended"${endedReported.has(ev.id) ? ' disabled' : ''}>${endedReported.has(ev.id) ? '已回報' : `回報${it.spot ? '今天' : ''}${ev.kind === 'activity' ? '已結束' : '已發完'}`}</button>` : ''}
+        ${myReportIds.has(ev.post.id) ? '<button type="button" class="btn" data-act="withdraw">刪除我的回報</button>' : ''}
       </div>
       ${ev.endedReports ? `<p class="muted ended-note">已有 ${ev.endedReports} 人回報${ev.kind === 'activity' ? '已結束' : '已發完'}${neededText()}</p>` : ''}
     </div>`);
@@ -1340,6 +1348,7 @@ function renderDetail(items: Item[], now: number): void {
     b.addEventListener('click', () => select(Number(b.dataset.select)));
   }
   detailEl.querySelector('[data-act="ended"]')?.addEventListener('click', (e) => void sendEnded(ev, e.currentTarget as HTMLButtonElement));
+  detailEl.querySelector('[data-act="withdraw"]')?.addEventListener('click', () => void withdrawMine(ev.post.id));
   detailEl.querySelector('[data-act="route"]')?.addEventListener('click', () => {
     const r = routeOf(ev);
     if (r) selectRoute(r.id);
@@ -1994,6 +2003,7 @@ function openKwSheet(open: boolean): void {
 function openReportSheet(open: boolean): void {
   reportSheet.hidden = !open;
   if (!open) return;
+  void loadMyReports();
   themeSheet.hidden = true;
   kwSheet.hidden = true;
   bottleSheet.hidden = true;
@@ -2157,6 +2167,7 @@ function renderPreview(r: SubmitResult): void {
       return;
     }
     await showReportResult(res.data);
+    void loadMyReports();
   });
   wireSupplement(c, actions);
   reportResult.querySelector('[data-act="wrong"]')?.addEventListener('click', () => {
@@ -2197,6 +2208,8 @@ async function submitReport(): Promise<void> {
     setReportMsg(`<p class="msg error">${esc(r.message)}</p>`);
     return;
   }
+  lsSet(LS_REPORTED, '1');
+  void loadMyReports();
   if (r.data.outcome === 'preview') {
     renderPreview(r.data);
     return;
@@ -2251,6 +2264,47 @@ async function showReportResult(data: SubmitResult): Promise<void> {
     reportInput.value = '';
     await refresh();
   }
+}
+
+const MY_REPORT_STATE: Record<MyReport['state'], string> = {
+  on_radar: '在雷達上',
+  attached: '附在雷達上的據點',
+  pending: '還沒確認',
+  rejected: '你說判讀錯了，沒放上雷達',
+  not_listed: '不在雷達上（已結束或沒放上）',
+};
+
+/** 我的回報：30 天內用這個瀏覽器回報的，可以看、開原文、刪除 */
+async function loadMyReports(): Promise<void> {
+  const r = await fetchMyReports();
+  if (!r.ok) return;
+  myReports = r.data.reports;
+  myReportIds.clear();
+  for (const x of myReports) myReportIds.add(x.postId);
+  myReportsEl.hidden = myReports.length === 0;
+  myReportList.innerHTML = myReports
+    .map(
+      (x) => `<li>
+        <div><b>${esc(x.title || '（沒有內容）')}</b><small>${MY_REPORT_STATE[x.state]}${x.events > 1 ? `・${x.events} 場` : ''}・${dateFmt.format(new Date(x.reportedAt * 1000))} 回報${x.username ? `・@${esc(x.username)}` : ''}</small></div>
+        <div class="my-report-acts">${x.eventId ? `<button type="button" class="chip" data-show="${x.eventId}">看</button>` : ''}${x.permalink ? `<a class="chip" href="${esc(x.permalink)}" target="_blank" rel="noopener">原文</a>` : ''}<button type="button" class="chip" data-withdraw="${esc(x.postId)}">刪除</button></div>
+      </li>`,
+    )
+    .join('');
+}
+
+/** 刪除自己的回報：雷達上這則的發放、活動一起拿掉 */
+async function withdrawMine(postId: string): Promise<void> {
+  const x = myReports.find((r) => r.postId === postId);
+  const shown = !x || x.state === 'on_radar' || x.state === 'attached';
+  if (!window.confirm(shown ? '要刪除這則回報嗎？雷達上這則的發放、活動會一起拿掉，其他人也看不到了。' : '要刪除這則回報嗎？')) return;
+  const r = await withdrawReport(postId);
+  if (!r.ok) {
+    showBanner(bannerEl, r.message, 3500);
+    return;
+  }
+  showBanner(bannerEl, '已刪除這則回報', 2500);
+  await loadMyReports();
+  await refresh();
 }
 
 /** 清單最下面的版號：網站（建置時的提交）與伺服器（部署時的提交）分開寫，看得出哪邊已經更新 */
@@ -2427,6 +2481,14 @@ function wireControls(): void {
   });
   for (const b of timeChips) b.addEventListener('click', () => setTime((b.dataset.time as TimeSetting) ?? 'all'));
   reportSheet.querySelector('[data-act="close"]')?.addEventListener('click', () => openReportSheet(false));
+  myReportList.addEventListener('click', (e) => {
+    const b = (e.target as Element).closest<HTMLButtonElement>('button');
+    if (b?.dataset.withdraw) void withdrawMine(b.dataset.withdraw);
+    else if (b?.dataset.show) {
+      reportSheet.hidden = true;
+      select(Number(b.dataset.show));
+    }
+  });
   reportForm.addEventListener('submit', (e) => {
     e.preventDefault();
     void submitReport();
@@ -2549,6 +2611,7 @@ async function boot(): Promise<void> {
   if (new URLSearchParams(location.search).get('view') === 'map') switchView('map');
   const scaleParam = new URLSearchParams(location.search).get('scale');
   if (scaleParam && (SCALE_SETTINGS as string[]).includes(scaleParam)) setScale(scaleParam as ScaleSetting);
+  if (lsGet(LS_REPORTED)) void loadMyReports();
   window.setInterval(render, TICK_MS);
   window.setInterval(() => void refresh(), POLL_MS);
 }

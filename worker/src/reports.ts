@@ -232,14 +232,14 @@ export const UNREADABLE_POST =
   'Threads 不讓外部讀取這則貼文，雷達讀不到內容。可能是貼文已刪除、帳號是私人帳號，或貼文限制只有登入的人才能看（例如酒類貼文限成年人觀看）。';
 
 /** 處理使用者貼上的連結：讀貼文、AI 判讀、定位，回傳結果 */
-export async function submitLink(env: Env, input: string, ip: string, now: number): Promise<SubmitResult> {
+export async function submitLink(env: Env, input: string, ip: string, now: number, device: string | null = null): Promise<SubmitResult> {
   const link = await resolveThreadsLink(input);
   if (!link) throw new ReportError(400, '找不到 Threads 貼文連結，請貼上像 https://www.threads.com/@帳號/post/... 的網址');
   const postId = `link-${link.code}`;
 
   const existing = await getPost(env, postId);
-  // 之前有人貼過但還沒確認（或說判讀錯了）：再給這個人看一次預覽，讓他確認
-  const waiting = existing && (existing.confirm_state === 'pending' || existing.confirm_state === 'rejected');
+  // 之前有人貼過但還沒確認（或說判讀錯了）：再給這個人看一次預覽，讓他確認；回報的人刪掉的，重新判讀
+  const waiting = existing && (existing.confirm_state === 'pending' || existing.confirm_state === 'rejected' || existing.confirm_state === 'withdrawn');
   const stored = waiting ? readPlan(existing) : null;
   if (existing && waiting && stored && stored.early !== 'extraction_failed') return previewResult(env, existing, stored, true, now);
   if (existing && !waiting) {
@@ -277,7 +277,7 @@ export async function submitLink(env: Env, input: string, ip: string, now: numbe
   await storePost(env, { id: postId, username, text, permalink, posted_at: postedAt, keyword: null, source: 'link' }, now);
   // 等回報的人確認才放上雷達；排程也不會自己判讀
   await env.DB.prepare("UPDATE posts SET checked_at = ?, text = ?, confirm_state = 'pending' WHERE id = ?").bind(now, text, postId).run();
-  await env.DB.prepare('INSERT INTO submissions (post_id, ip_hash, created_at) VALUES (?, ?, ?)').bind(postId, ip, now).run();
+  await env.DB.prepare('INSERT INTO submissions (post_id, ip_hash, device, created_at) VALUES (?, ?, ?, ?)').bind(postId, ip, device, now).run();
 
   const post = await getPost(env, postId);
   if (!post) throw new ReportError(500, 'post not stored');
@@ -302,7 +302,7 @@ async function checkConfirm(env: Env, body: { postId?: unknown; token?: unknown 
 }
 
 /** 回報的人確認判讀沒錯：寫進雷達 */
-export async function confirmLink(env: Env, body: { postId?: unknown; token?: unknown }, now: number): Promise<SubmitResult> {
+export async function confirmLink(env: Env, body: { postId?: unknown; token?: unknown }, now: number, device: string | null = null): Promise<SubmitResult> {
   const post = await checkConfirm(env, body);
   const permalink = post.permalink ?? '';
   if (post.confirm_state === 'confirmed') {
@@ -314,7 +314,8 @@ export async function confirmLink(env: Env, body: { postId?: unknown; token?: un
   const result = await commitPlan(env, post.id, plan.items, now);
   await env.DB.batch([
     env.DB.prepare("UPDATE posts SET confirm_state = 'confirmed', confirm_plan = NULL WHERE id = ?").bind(post.id),
-    env.DB.prepare('UPDATE submissions SET result = ? WHERE id = (SELECT MAX(id) FROM submissions WHERE post_id = ?)').bind(JSON.stringify(result.reasons), post.id),
+    // 舊版網頁送出時沒帶裝置代碼：確認的人補上，之後才能自己刪除
+    env.DB.prepare('UPDATE submissions SET result = ?, device = COALESCE(device, ?) WHERE id = (SELECT MAX(id) FROM submissions WHERE post_id = ?)').bind(JSON.stringify(result.reasons), device, post.id),
   ]);
   return { existed: false, outcome: summarize(result.reasons), reasons: result.reasons, events: await eventsForResult(env, post.id, result.reasons, now), permalink };
 }
@@ -326,7 +327,7 @@ const SUPPLEMENTS_PER_POST = 5;
  * 回報的人補充地點或時間（貼文沒寫、判讀不出來時）：接在貼文後面再判讀一次，回傳新的預覽。
  * 補充的內容會顯示在雷達的詳細資料上（「回報的人補充」），看的人知道哪些不是原貼文寫的。
  */
-export async function supplementLink(env: Env, body: { postId?: unknown; token?: unknown; note?: unknown }, ip: string, now: number): Promise<SubmitResult> {
+export async function supplementLink(env: Env, body: { postId?: unknown; token?: unknown; note?: unknown }, ip: string, now: number, device: string | null = null): Promise<SubmitResult> {
   const post = await checkConfirm(env, body);
   if (post.confirm_state === 'confirmed') throw new ReportError(409, '這則已經放上雷達了，不能再補充');
   const note = typeof body.note === 'string' ? body.note.replace(/\s+/g, ' ').trim().slice(0, 200) : '';
@@ -335,7 +336,7 @@ export async function supplementLink(env: Env, body: { postId?: unknown; token?:
   if (mine >= SUBMIT_PER_IP_PER_HOUR) throw new ReportError(429, '回報太頻繁了，請過一陣子再試');
   const times = await countSince(env, "SELECT COUNT(*) AS n FROM submissions WHERE post_id = ? AND result = '\"supplement\"'", [post.id]);
   if (times >= SUPPLEMENTS_PER_POST) throw new ReportError(429, '這則已經補充太多次了，請聯絡管理者');
-  await env.DB.prepare("INSERT INTO submissions (post_id, ip_hash, result, created_at) VALUES (?, ?, '\"supplement\"', ?)").bind(post.id, ip, now).run();
+  await env.DB.prepare("INSERT INTO submissions (post_id, ip_hash, device, result, created_at) VALUES (?, ?, ?, '\"supplement\"', ?)").bind(post.id, ip, device, now).run();
 
   const updated: PostRow = { ...post, supplement: note };
   let plan: StoredPlan;
@@ -356,6 +357,84 @@ export async function rejectLink(env: Env, body: { postId?: unknown; token?: unk
   const note = typeof body.note === 'string' ? body.note.trim().slice(0, 300) : '';
   await env.DB.prepare("UPDATE posts SET confirm_state = 'rejected', confirm_note = COALESCE(NULLIF(?, ''), confirm_note) WHERE id = ?").bind(note, post.id).run();
   return { ok: true };
+}
+
+/** 我的回報（用同一個瀏覽器回報的）：on_radar 在雷達上、attached 附在別的據點、pending 還沒確認、rejected 說判讀錯了、not_listed 已結束或沒放上 */
+export interface MyReport {
+  postId: string;
+  permalink: string;
+  username: string | null;
+  title: string;
+  state: 'on_radar' | 'attached' | 'pending' | 'rejected' | 'not_listed';
+  /** 雷達上還沒結束的場次 */
+  events: number;
+  /** 點了跳到雷達上的哪一場 */
+  eventId: number | null;
+  reportedAt: number;
+}
+
+/** 這個裝置 30 天內回報過的貼文（回報紀錄 30 天後刪除，更早的就認不出來了） */
+export async function myReports(env: Env, device: string): Promise<MyReport[]> {
+  const { results: posts } = await env.DB.prepare(
+    `SELECT p.id, p.permalink, p.username, p.text, p.confirm_state, p.link_role, MAX(s.created_at) AS reported_at
+       FROM submissions s JOIN posts p ON p.id = s.post_id
+      WHERE s.device = ? AND p.source = 'link' AND COALESCE(p.confirm_state, '') != 'withdrawn'
+      GROUP BY p.id ORDER BY reported_at DESC LIMIT 30`,
+  )
+    .bind(device)
+    .all<{ id: string; permalink: string | null; username: string | null; text: string; confirm_state: string | null; link_role: string | null; reported_at: number }>();
+  if (posts.length === 0) return [];
+  const { results: evs } = await env.DB.prepare(
+    `SELECT id, post_id, title FROM events WHERE status IN ('upcoming', 'active') AND post_id IN (${posts.map(() => '?').join(',')}) ORDER BY start_at`,
+  )
+    .bind(...posts.map((p) => p.id))
+    .all<{ id: number; post_id: string; title: string }>();
+  return posts.map((p) => {
+    const mine = evs.filter((e) => e.post_id === p.id);
+    const state: MyReport['state'] =
+      p.confirm_state === 'pending' ? 'pending' : p.confirm_state === 'rejected' ? 'rejected' : mine.length > 0 ? 'on_radar' : p.link_role === 'related' ? 'attached' : 'not_listed';
+    const firstLine = p.text.split('\n').map((x) => x.trim()).find(Boolean) ?? '';
+    return {
+      postId: p.id,
+      permalink: p.permalink ?? '',
+      username: p.username,
+      title: mine[0]?.title ?? firstLine.slice(0, 40),
+      state,
+      events: mine.length,
+      eventId: mine[0]?.id ?? null,
+      reportedAt: p.reported_at,
+    };
+  });
+}
+
+/**
+ * 回報的人刪除自己的回報：雷達上這則的事件都拿掉。
+ * 這則取代過同一個帳號的舊據點的話，舊據點還沒過的時段放回雷達；附在這則上的別人的貼文改附回舊據點（沒有舊的就解除）。
+ */
+export async function withdrawReport(env: Env, postId: string, device: string, now: number): Promise<{ ok: true; removed: number }> {
+  const owned = await env.DB.prepare('SELECT 1 AS ok FROM submissions WHERE post_id = ? AND device = ? LIMIT 1').bind(postId, device).first<{ ok: number }>();
+  if (!owned) throw new ReportError(403, '只能刪除自己回報的貼文，而且要用回報時的同一個瀏覽器（30 天內）');
+  const post = await getPost(env, postId);
+  if (!post || post.source !== 'link') throw new ReportError(404, '找不到這則回報');
+  if (post.confirm_state === 'withdrawn') return { ok: true, removed: 0 };
+  const removed = (await env.DB.prepare("SELECT COUNT(*) AS n FROM events WHERE post_id = ? AND status IN ('upcoming', 'active')").bind(postId).first<{ n: number }>())?.n ?? 0;
+  const { results: prev } = await env.DB.prepare("SELECT id FROM posts WHERE linked_to = ? AND link_role = 'previous' ORDER BY posted_at DESC").bind(postId).all<{ id: string }>();
+  const restore = prev.map((p) =>
+    env.DB.prepare(
+      "UPDATE events SET status = CASE WHEN start_at <= ? THEN 'active' ELSE 'upcoming' END, ended_reason = NULL, updated_at = ? WHERE post_id = ? AND status = 'ended' AND ended_reason = 'replaced' AND end_at > ?",
+    ).bind(now, now, p.id, now),
+  );
+  await env.DB.batch([
+    env.DB.prepare('DELETE FROM ended_reports WHERE event_id IN (SELECT id FROM events WHERE post_id = ?)').bind(postId),
+    env.DB.prepare('DELETE FROM events WHERE post_id = ?').bind(postId),
+    ...restore,
+    prev.length > 0
+      ? env.DB.prepare("UPDATE posts SET linked_to = ? WHERE linked_to = ? AND link_role = 'related'").bind(prev[0].id, postId)
+      : env.DB.prepare("UPDATE posts SET linked_to = NULL, link_role = NULL WHERE linked_to = ? AND link_role = 'related'").bind(postId),
+    env.DB.prepare("UPDATE posts SET linked_to = NULL, link_role = NULL WHERE linked_to = ? AND link_role = 'previous'").bind(postId),
+    env.DB.prepare("UPDATE posts SET confirm_state = 'withdrawn', confirm_plan = NULL, linked_to = NULL, link_role = NULL WHERE id = ?").bind(postId),
+  ]);
+  return { ok: true, removed };
 }
 
 export interface EndedReportResult {

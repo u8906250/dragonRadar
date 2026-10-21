@@ -91,7 +91,7 @@ describe('buildMessages', () => {
   });
 });
 
-import { adminArea, placeCandidates } from '../src/geocode';
+import { adminArea, cityMatches, pickHit, placeCandidates } from '../src/geocode';
 import { normalizeKeyword, parseKeywordList } from '../src/keywords';
 
 describe('normalizeKeyword', () => {
@@ -153,6 +153,30 @@ describe('placeCandidates', () => {
   });
   it('keeps plain landmarks untouched', () => {
     expect(placeCandidates('台北市 松山文創園區', null)).toEqual(['台北市 松山文創園區']);
+  });
+  it('turns the colloquial 市府站 into 市政府站', () => {
+    const c = placeCandidates('台北市 捷運市府站', '捷運市府站2號出口附近');
+    expect(c).toContain('台北市 捷運市政府站');
+    expect(c.indexOf('台北市 捷運市政府站')).toBeLessThan(c.indexOf('捷運市府站'));
+    expect(c).not.toContain('市府站');
+  });
+});
+
+describe('cityMatches / pickHit', () => {
+  const taichung = { display_name: '捷運市府站(出口1), 文心路二段, 西屯區, 臺中市, 臺灣' };
+  const taipei = { display_name: '捷運市政府站, 忠孝東路五段, 信義區, 臺北市, 臺灣' };
+  it('rejects a hit outside the city the query names', () => {
+    expect(cityMatches('台北市 捷運市府站', taichung.display_name)).toBe(false);
+    expect(cityMatches('台北市 捷運市府站', taipei.display_name)).toBe(true);
+    expect(pickHit('台北市 捷運市府站', [taichung])).toBeUndefined();
+    expect(pickHit('台北市 捷運市府站', [taichung, taipei])).toBe(taipei);
+  });
+  it('does not treat 新北投 as 新北市', () => {
+    expect(cityMatches('新北投站', '新北投, 北投區, 臺北市, 臺灣')).toBe(true);
+  });
+  it('prefers Taipei / New Taipei when the query names no city', () => {
+    expect(pickHit('捷運市府站', [taichung, taipei])).toBe(taipei);
+    expect(pickHit('捷運市府站', [taichung])).toBe(taichung);
   });
 });
 

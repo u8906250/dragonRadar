@@ -21,8 +21,8 @@ export interface PostRow {
   extraction: string | null;
   /** 回報的人補充的地點或時間，判讀時接在貼文後面 */
   supplement?: string | null;
-  /** 使用者回報的確認狀態：null（排程搜尋到的、舊資料）、pending、confirmed、rejected */
-  confirm_state?: 'pending' | 'confirmed' | 'rejected' | null;
+  /** 使用者回報的確認狀態：null（排程搜尋到的、舊資料）、pending、confirmed、rejected、withdrawn（回報的人刪除了） */
+  confirm_state?: 'pending' | 'confirmed' | 'rejected' | 'withdrawn' | null;
   confirm_plan?: string | null;
   confirm_note?: string | null;
 }

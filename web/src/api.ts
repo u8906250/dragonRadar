@@ -1,5 +1,5 @@
 import type { LatLng } from './geo';
-import type { BottleOut, EndedReportResult, EventOut, KeywordInfo, KeywordRules, MyBottles, PickedBottle, RouteOut, SubmitResult } from './types';
+import type { BottleOut, EndedReportResult, EventOut, KeywordInfo, KeywordRules, MyBottles, MyReport, PickedBottle, RouteOut, SubmitResult } from './types';
 
 /** 正式環境的 Worker 網址；本機開發打 localhost，VITE_API_BASE 可覆寫（空字串視為未設定，CI 沒設變數時會傳空字串） */
 const PROD_API_BASE = 'https://dragon-radar.happybadminton.workers.dev';
@@ -134,14 +134,20 @@ export const collectLetter = (id: number, on: boolean): Promise<Result<{ collect
   deviceJson<{ collected: boolean }>(`/api/bottles/${id}/${on ? 'collect' : 'uncollect'}`, 'POST', {});
 export const reportBottle = (id: number): Promise<Result<{ hidden: boolean }>> => deviceJson<{ hidden: boolean }>(`/api/bottles/${id}/report`, 'POST', {});
 
+// 回報也帶裝置代碼：伺服器記下是哪個瀏覽器回報的，之後可以自己刪除
 /** 貼上 Threads 貼文連結，後端讀取並判讀，可能要十幾秒 */
-export const submitLink = (url: string): Promise<Result<SubmitResult>> => postJson<SubmitResult>('/api/reports', { url });
+export const submitLink = (url: string): Promise<Result<SubmitResult>> => deviceJson<SubmitResult>('/api/reports', 'POST', { url });
 /** 判讀結果對：放上雷達 */
-export const confirmReport = (c: { postId: string; token: string }): Promise<Result<SubmitResult>> => postJson<SubmitResult>('/api/reports/confirm', c);
+export const confirmReport = (c: { postId: string; token: string }): Promise<Result<SubmitResult>> => deviceJson<SubmitResult>('/api/reports/confirm', 'POST', c);
 /** 貼文沒寫地點或時間：補充後再判讀一次 */
 export const supplementReport = (c: { postId: string; token: string }, note: string): Promise<Result<SubmitResult>> =>
-  postJson<SubmitResult>('/api/reports/supplement', { ...c, note });
+  deviceJson<SubmitResult>('/api/reports/supplement', 'POST', { ...c, note });
 /** 判讀錯了：不放，note 寫哪裡錯 */
-export const rejectReport = (c: { postId: string; token: string }, note: string): Promise<Result<{ ok: true }>> => postJson<{ ok: true }>('/api/reports/reject', { ...c, note });
+export const rejectReport = (c: { postId: string; token: string }, note: string): Promise<Result<{ ok: true }>> => deviceJson<{ ok: true }>('/api/reports/reject', 'POST', { ...c, note });
+/** 我的回報：30 天內用這個瀏覽器回報的 */
+export const fetchMyReports = (): Promise<Result<{ reports: MyReport[] }>> => deviceJson<{ reports: MyReport[] }>('/api/reports/mine');
+/** 刪除自己的回報：雷達上這則的發放、活動一起拿掉 */
+export const withdrawReport = (postId: string): Promise<Result<{ ok: true; removed: number }>> =>
+  deviceJson<{ ok: true; removed: number }>(`/api/reports/${encodeURIComponent(postId)}`, 'DELETE');
 
 export const reportEnded = (eventId: number): Promise<Result<EndedReportResult>> => postJson<EndedReportResult>(`/api/events/${eventId}/ended`, {});

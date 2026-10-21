@@ -9,7 +9,7 @@ import { CURRENT_MAP_URL } from './sources/currentmap';
 import { mergeIntoOfficial } from './sources/merge';
 import { apifyTrial } from './sources/apify';
 import { fetchThreadsPost, resolveThreadsLink, shortcodeToUnix } from './sources/link';
-import { confirmLink, ENDED_REPORTS_NEEDED, MAX_LINK_AGE_SEC, ReportError, ipHash, purgeReports, recheckLinks, rejectLink, reportEnded, submitLink, supplementLink } from './reports';
+import { confirmLink, ENDED_REPORTS_NEEDED, MAX_LINK_AGE_SEC, ReportError, ipHash, myReports, purgeReports, recheckLinks, rejectLink, reportEnded, submitLink, supplementLink, withdrawReport } from './reports';
 import { isTransient, withResilientDb } from './db';
 import { addressCacheKey, geocodeAddress, parseTwAddress } from './address';
 import { adminListBottles, adminSetBottle, BOTTLE_MAX_WEIGHT, BOTTLE_TTL_SEC, bottlesEnabled, collectLetter, deleteBottle, deviceId, DRIFT_EVERY_SEC, driftBottles, dropBottle, listBottles, myBottles, PER_DEVICE_PER_DAY, PICK_RADIUS_M, pickBottle, purgeBottles, recycleBottle, reportBottle } from './bottles';
@@ -162,13 +162,24 @@ async function handle(req: Request, env: Env, ctx: ExecutionContext): Promise<Re
 
   // 回報的人確認判讀沒錯就放上雷達：{ postId, token }；說判讀錯了：{ postId, token, note? }
   if (req.method === 'POST' && path === '/api/reports/confirm') {
-    const result = await confirmLink(env, await readJson<{ postId?: unknown; token?: unknown }>(req), now);
+    const result = await confirmLink(env, await readJson<{ postId?: unknown; token?: unknown }>(req), now, await deviceId(env, req));
     await mergeIntoOfficial(env, now).catch((e) => console.warn('merge failed', e));
     return jsonResponse(result);
   }
   // 貼文沒寫地點或時間：回報的人補充後再判讀一次 { postId, token, note }
   if (req.method === 'POST' && path === '/api/reports/supplement') {
-    return jsonResponse(await supplementLink(env, await readJson<{ postId?: unknown; token?: unknown; note?: unknown }>(req), await ipHash(env, req), now));
+    return jsonResponse(await supplementLink(env, await readJson<{ postId?: unknown; token?: unknown; note?: unknown }>(req), await ipHash(env, req), now, await deviceId(env, req)));
+  }
+  // 我的回報（裝置代碼放在 x-device 標頭）：列出、刪除自己回報的
+  if (req.method === 'GET' && path === '/api/reports/mine') {
+    const dev = await deviceId(env, req);
+    return jsonResponse({ reports: dev ? await myReports(env, dev) : [] });
+  }
+  const mineDel = /^\/api\/reports\/(link-[\w-]+)$/.exec(path);
+  if (req.method === 'DELETE' && mineDel) {
+    const dev = await deviceId(env, req);
+    if (!dev) throw new HttpError(400, '缺少裝置代碼，請重新整理頁面');
+    return jsonResponse(await withdrawReport(env, mineDel[1], dev, now));
   }
   if (req.method === 'POST' && path === '/api/reports/reject') {
     return jsonResponse(await rejectLink(env, await readJson<{ postId?: unknown; token?: unknown; note?: unknown }>(req)));
@@ -178,7 +189,7 @@ async function handle(req: Request, env: Env, ctx: ExecutionContext): Promise<Re
   if (req.method === 'POST' && path === '/api/reports') {
     const body = await readJson<{ url?: unknown }>(req);
     if (typeof body.url !== 'string' || body.url.length > 2000) throw new HttpError(400, '請貼上 Threads 貼文連結');
-    const result = await submitLink(env, body.url, await ipHash(env, req), now);
+    const result = await submitLink(env, body.url, await ipHash(env, req), now, await deviceId(env, req));
     // 回報的如果是官方車掃，馬上併進去，不用等排程
     await mergeIntoOfficial(env, now).catch((e) => console.warn('merge failed', e));
     return jsonResponse(result);

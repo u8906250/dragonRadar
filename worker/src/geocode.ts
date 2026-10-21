@@ -19,6 +19,33 @@ const CITY_PREFIX_RE = new RegExp(`${CITY_RE.source.replace('[市縣]?', '[市�
 
 const CITY_ANY_RE = new RegExp(CITY_RE.source, 'g');
 
+/** 有寫「市」「縣」的才算指定縣市（「新北投站」裡的「新北」不算） */
+const CITY_STRICT_RE = new RegExp(CITY_RE.source.replace('[市縣]?', '[市縣]'));
+
+/** 雷達服務台北大洋流：沒寫縣市時，同名的地點優先用雙北的 */
+const HOME_RE = /臺北市|新北市/;
+
+/**
+ * 查到的結果在不在查詢寫的縣市。Nominatim 有時忽略縣市，例如「台北市 捷運市府站」對到台中的「捷運市府站(出口1)」。
+ * 沒寫縣市就不檢查。
+ */
+export function cityMatches(query: string, displayName: string | null | undefined): boolean {
+  const m = CITY_STRICT_RE.exec(query);
+  if (!m || !displayName) return true;
+  const norm = (s: string): string => s.replace(/台/g, '臺');
+  return norm(displayName).includes(norm(m[1]));
+}
+
+/** 從幾個結果裡挑：寫了縣市的只要那個縣市的；沒寫的雙北優先，沒有才用第一個 */
+export function pickHit<T extends { display_name?: string }>(query: string, hits: T[]): T | undefined {
+  const ok = hits.filter((h) => cityMatches(query, h.display_name));
+  if (CITY_STRICT_RE.test(query)) return ok[0];
+  return ok.find((h) => HOME_RE.test(h.display_name ?? '')) ?? ok[0];
+}
+
+/** 口語的站名換成正式站名再查 */
+const STATION_ALIAS: Record<string, string> = { 市府站: '市政府站' };
+
 /** 只有縣市或鄉鎮區名稱（例如「台北市」「台北市 大安區」），拿去查只會得到行政區中心點 */
 export function isAdminOnly(s: string): boolean {
   return (
@@ -88,10 +115,13 @@ export function placeCandidates(query: string, placeText?: string | null): strin
       .replace(CITY_PREFIX_RE, ' ')
       .replace(/[\u4e00-\u9fff]{1,2}[區鄉鎮](?=[\u4e00-\u9fff]{2,}站)/g, ' ')
       .replace(/近|靠近|鄰近/g, ' ');
-    const st = /(捷運|台鐵|臺鐵|高鐵)?\s*([\u4e00-\u9fff]{2,8}站)/.exec(strip(bare));
-    // 沒寫哪種車站、也不是「XX車站」的，先當捷運站查（「國父紀念館站」單獨查會對到別的地方）
-    if (st && !st[1] && !st[2].endsWith('車站')) stations.push(`${city} 捷運${st[2]}`.trim());
-    if (st) stations.push(`${city} ${st[2]}`, st[2]);
+    const st = /(捷運|台鐵|臺鐵|高鐵)?\s*([\u4e00-\u9fff]{2,8}站)/.exec(strip(bare).trim());
+    if (!st) continue;
+    const name = STATION_ALIAS[st[2]] ?? st[2];
+    // 沒寫哪種車站、也不是「XX車站」的，先當捷運站查（「國父紀念館站」單獨查會對到別的地方）；
+    // 口語站名（「市府站」）換成正式的，捷運站一樣先加「捷運」
+    if ((!st[1] || name !== st[2]) && !name.endsWith('車站')) stations.push(`${city} ${st[1] ?? '捷運'}${name}`.trim());
+    stations.push(`${city} ${name}`, name);
   }
   // 站名比去掉出口、門號的版本可靠，先試
   for (const s of stations) push(s);
@@ -121,7 +151,7 @@ async function nominatim(env: Env, q: string): Promise<GeoPoint | null> {
   await politeDelay();
   const url = new URL('https://nominatim.openstreetmap.org/search');
   url.searchParams.set('format', 'jsonv2');
-  url.searchParams.set('limit', '1');
+  url.searchParams.set('limit', '5');
   url.searchParams.set('countrycodes', 'tw');
   url.searchParams.set('accept-language', 'zh-TW');
   url.searchParams.set('q', q);
@@ -133,7 +163,7 @@ async function nominatim(env: Env, q: string): Promise<GeoPoint | null> {
     return null;
   }
   const arr = (await res.json()) as Array<{ lat: string; lon: string; display_name?: string; category?: string }>;
-  const hit = arr[0];
+  const hit = pickHit(q, arr);
   if (!hit) return null;
   // 只對到行政區（例如把「中正區忠孝復興站」對到整個中正區的中心）不算找到，除非本來就只查行政區
   if (hit.category === 'boundary' && !/[市縣區鄉鎮]$/.test(q.trim())) return null;
@@ -151,7 +181,8 @@ export async function geocode(env: Env, query: string): Promise<GeoPoint | null>
   const cached = await env.DB.prepare('SELECT lat, lng, display_name, resolved_at FROM geocode_cache WHERE query = ?')
     .bind(key)
     .first<CacheRow>();
-  if (cached) {
+  // 以前沒檢查縣市時查錯、存進快取的，重查一次
+  if (cached && !(cached.lat !== null && !cityMatches(key, cached.display_name))) {
     if (cached.lat !== null && cached.lng !== null) {
       return { lat: cached.lat, lng: cached.lng, displayName: cached.display_name ?? key };
     }
