@@ -1,6 +1,6 @@
 import { getAccessToken, makeClient, saveAccessToken } from './client';
 import type { Env } from './env';
-import { DEFAULT_DURATION_SEC, ENDED_WORDS, MAX_FUTURE_SEC, MIN_CONFIDENCE, SPOT_MAX_DAYS, extendOpenSpots, getEvent, getPost, ingestAll, ingestKeyword, listEvents, locatePlaceForEvent, processBacklog, processPost, storePost, updateLifecycle, type EventRow } from './events';
+import { DEFAULT_DURATION_SEC, ENDED_WORDS, MAX_FUTURE_SEC, MIN_CONFIDENCE, SPOT_MAX_DAYS, extendOpenSpots, getEvent, getPost, ingestAll, ingestKeyword, listEvents, locatePlaceForEvent, processBacklog, processPost, relocateApprox, storePost, updateLifecycle, type EventRow } from './events';
 import { normalizeExtraction, runModel } from './extract';
 import { geocode } from './geocode';
 import { ingestNews, NEWS_FEEDS } from './sources/news';
@@ -320,7 +320,8 @@ async function handleAdmin(req: Request, env: Env, _ctx: ExecutionContext, path:
     const backlog = await processBacklog(env, now);
     const lifecycle = await updateLifecycle(env, client, now);
     const extended = await extendOpenSpots(env, now);
-    return jsonResponse({ mode: client.mode, ingest, backlog, lifecycle, extended });
+    const relocated = await relocateApprox(env, now);
+    return jsonResponse({ mode: client.mode, ingest, backlog, lifecycle, extended, relocated });
   }
 
   if (req.method === 'GET' && path === '/api/admin/events') {
@@ -584,12 +585,14 @@ async function runScheduled(env: Env, cron: string): Promise<void> {
   const lifecycle = await updateLifecycle(env, client, now);
   // 沒寫最後一天的固定據點每天往後補時段（發完為止，不預設最後一天）
   const extended = await extendOpenSpots(env, now).catch((e) => ({ error: String(e) }));
+  // 有門牌卻只定位到路或鄉鎮區的，定時重查門牌（Overpass 恢復、OSM 補了門牌就改成精確位置）
+  const relocated = await relocateApprox(env, now).catch((e) => ({ error: String(e) }));
   const links = await recheckLinks(env, now).catch((e) => ({ error: String(e) }));
   // 新聞、貼文講的是官方車掃就併進去（不管誰先到，每次都重新比對）
   const merge = await mergeIntoOfficial(env, now).catch((e) => ({ error: String(e) }));
   const drift = bottlesEnabled(env) ? await driftBottles(env, now).catch((e) => ({ error: String(e) })) : null;
   const purged = await purgeOldData(env, now);
-  console.log(JSON.stringify({ cron, mode: client.mode, ingest, backlog, voyage, news, lifecycle, extended, links, merge, drift, purged }));
+  console.log(JSON.stringify({ cron, mode: client.mode, ingest, backlog, voyage, news, lifecycle, extended, relocated, links, merge, drift, purged }));
 }
 
 export default {

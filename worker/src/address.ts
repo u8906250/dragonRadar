@@ -6,7 +6,7 @@
  * 有完全一樣的號碼就用它，沒有就用同一側（單雙號）前後最近的兩個門牌推算位置。
  */
 import type { Env } from './env';
-import { geocode } from './geocode';
+import { geocode, geocodeStreet } from './geocode';
 import { nowSec } from './util';
 
 export interface TwAddress {
@@ -38,6 +38,8 @@ const SECTION_CN = ['', '一', '二', '三', '四', '五', '六', '七', '八', 
 /** 推算時前後門牌最多差幾號，太遠就不準 */
 const MAX_GAP = 60;
 const NEGATIVE_TTL_SEC = 24 * 3600;
+/** 別的鄉鎮區的門牌離寫的那一區的這條路幾公里內才算（跟 Overpass 查路附近的範圍差不多） */
+const NEIGHBOR_KM = 2;
 
 /** 全形數字轉半形、台轉臺（OSM 的縣市名稱用臺） */
 function normalize(s: string): string {
@@ -80,6 +82,8 @@ export interface HouseRow {
   number: string;
   lat: number;
   lng: number;
+  /** OSM 算在別的鄉鎮區（區界上的路），離寫的那一區的這條路夠近才用 */
+  elsewhere?: boolean;
 }
 
 /** 從同一條路的門牌找位置：完全一樣（不含之幾）優先，否則同側前後兩個門牌線性推算 */
@@ -164,7 +168,7 @@ interface PhotonFeature {
   properties?: { type?: string; street?: string; housenumber?: string; city?: string; district?: string };
 }
 
-/** Photon：同一條路（含巷弄）、同一個縣市的門牌 */
+/** Photon：同一條路（含巷弄）、同一個縣市的門牌；鄉鎮區不一樣的標成 elsewhere */
 async function photonHouses(env: Env, a: TwAddress): Promise<HouseRow[]> {
   const u = new URL(PHOTON_URL);
   u.searchParams.set('q', `${a.street} ${a.raw} ${a.city ?? a.district ?? ''}`.trim());
@@ -178,12 +182,29 @@ async function photonHouses(env: Env, a: TwAddress): Promise<HouseRow[]> {
     const c = f.geometry?.coordinates;
     if (p.type !== 'house' || !p.housenumber || !c || normalize(p.street ?? '') !== a.street) continue;
     if (a.city && p.city && normalize(p.city) !== a.city) continue;
-    if (a.district && p.district && p.district !== a.district) continue;
     // 沒寫縣市時至少要對到鄉鎮區，全台同名的路很多
     if (!a.city && (!a.district || p.district !== a.district)) continue;
-    out.push({ number: p.housenumber, lat: c[1], lng: c[0] });
+    out.push({ number: p.housenumber, lat: c[1], lng: c[0], elsewhere: !!(a.district && p.district && p.district !== a.district) });
   }
   return out;
+}
+
+const distKm = (a: { lat: number; lng: number }, b: { lat: number; lng: number }): number =>
+  Math.hypot((a.lat - b.lat) * 111, (a.lng - b.lng) * 111 * Math.cos((a.lat * Math.PI) / 180));
+
+/**
+ * 先只用同一個鄉鎮區的門牌；找不到再加上別的鄉鎮區、但離寫的那一區的這條路 NEIGHBOR_KM 內的門牌。
+ * 區界上的路兩邊分屬不同區（「臺南市中西區北門路一段55號」OSM 算在東區），
+ * 同一個縣市裡別區的同名路（板橋、永和都有中山路一段）通常離得比較遠。
+ */
+async function locateNearDistrict(env: Env, a: TwAddress, houses: HouseRow[]): Promise<AddressPoint | null> {
+  const same = houses.filter((h) => !h.elsewhere);
+  const point = locateOnStreet(same, a.number, a.raw);
+  const other = houses.filter((h) => h.elsewhere);
+  if (point || other.length === 0 || !a.city) return point;
+  const road = await geocodeStreet(env, a.city, a.district, a.street);
+  if (!road) return null;
+  return locateOnStreet([...same, ...other.filter((h) => distKm(h, road.point) <= NEIGHBOR_KM)], a.number, a.raw);
 }
 
 /** geocode_cache 裡門牌查詢的 key */
@@ -212,7 +233,7 @@ export async function geocodeAddress(
   try {
     // Photon 偶爾一時連不上，再試一次
     const houses = await photonHouses(env, a).catch(() => photonHouses(env, a).catch(() => []));
-    point = locateOnStreet(houses, a.number, a.raw);
+    point = await locateNearDistrict(env, a, houses);
     if (!point && opts.overpass === false) return null;
     if (!point) point = locateOnStreet(await overpassHouses(env, a), a.number, a.raw);
   } catch (e) {

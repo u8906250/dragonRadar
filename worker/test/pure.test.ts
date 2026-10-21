@@ -3,7 +3,7 @@ import { applySupplementDate, dropBroughtItem, dropSelfPlace, splitDropTimes, sp
 import { isAreaOnly } from '../src/geocode';
 import { existedOutcome, previewOf } from '../src/reports';
 import { describe, expect, it } from 'vitest';
-import { detectEnded, postExcerpt, spotMergeMode, spotSessions } from '../src/events';
+import { approxRank, detectEnded, postExcerpt, spotMergeMode, spotSessions } from '../src/events';
 import { buildMessages, normalizeExtraction } from '../src/extract';
 import { parseThreadsTimestamp } from '../src/threads';
 import { parseIsoToUnix } from '../src/util';
@@ -222,6 +222,17 @@ describe('placeFidelity', () => {
   });
   it('is low for garbled output', () => {
     expect(placeFidelity(ev('越車政園给行 2号 出口'), text)).toBeLessThan(0.7);
+  });
+});
+
+describe('approxRank', () => {
+  it('ranks an exact point over a road over a district', () => {
+    expect(approxRank(null)).toBe(2);
+    expect(approxRank('宜蘭縣羅東鎮公正路')).toBe(1);
+    expect(approxRank('臺南市中西區北門路一段')).toBe(1);
+    expect(approxRank('新北市淡水區北新路184巷')).toBe(1);
+    expect(approxRank('南投縣南投市')).toBe(0);
+    expect(approxRank('桃園市桃園區')).toBe(0);
   });
 });
 

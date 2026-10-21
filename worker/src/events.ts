@@ -313,6 +313,52 @@ export async function locatePlaceForEvent(
   return { point, approxArea: area && point ? area : null };
 }
 
+/** 約略位置有多準：精確 2、退到路 1、退到鄉鎮區 0 */
+export function approxRank(approxArea: string | null): number {
+  if (!approxArea) return 2;
+  return /(?:路|街|大道|段|巷|弄)$/.test(approxArea) ? 1 : 0;
+}
+
+/** 重查約略位置：每次排程最多查幾個地址、同一個地址隔多久再查 */
+const RELOCATE_PER_RUN = 3;
+const RELOCATE_EVERY_SEC = 3 * 3600;
+
+/**
+ * 有寫門牌卻只定位到路或鄉鎮區的事件（當時 Overpass 不通、OSM 沒有那個門牌）定時重查，
+ * 查到更準的位置（門牌，或從鄉鎮區變成路）就把同一則貼文、同一個地點還沒結束的時段都改過去。
+ * 門牌查不到會快取一天（geocodeAddress），所以 OSM 沒有的門牌一天只真的查一次。
+ */
+export async function relocateApprox(env: Env, now: number): Promise<{ checked: number; improved: number }> {
+  const { results } = await env.DB.prepare(
+    `SELECT post_id, place_query, place_text, MAX(approx_area) AS approx_area FROM events
+      WHERE status IN ('upcoming', 'active') AND approx_area IS NOT NULL AND lat IS NOT NULL
+        AND (locate_checked_at IS NULL OR locate_checked_at < ?)
+      GROUP BY post_id, place_query, place_text ORDER BY MIN(start_at) LIMIT 20`,
+  )
+    .bind(now - RELOCATE_EVERY_SEC)
+    .all<{ post_id: string; place_query: string; place_text: string; approx_area: string }>();
+  let checked = 0;
+  let improved = 0;
+  for (const r of results) {
+    // 沒有門牌的重查也不會更準，一樣記下查過了，隔幾小時才會再挑到
+    const hasAddress = !!addressOf(r.place_query, r.place_text)?.text;
+    if (hasAddress && checked >= RELOCATE_PER_RUN) break;
+    const same = "post_id = ? AND place_query IS ? AND place_text IS ? AND status IN ('upcoming', 'active')";
+    if (hasAddress) {
+      checked++;
+      const loc = await locatePlaceForEvent(env, r.place_query, r.place_text, Date.now() + ADDRESS_BUDGET_MS);
+      if (loc.point && approxRank(loc.approxArea) > approxRank(r.approx_area)) {
+        await env.DB.prepare(`UPDATE events SET lat = ?, lng = ?, approx_area = ?, updated_at = ? WHERE ${same}`)
+          .bind(loc.point.lat, loc.point.lng, loc.approxArea, now, r.post_id, r.place_query, r.place_text)
+          .run();
+        improved++;
+      }
+    }
+    await env.DB.prepare(`UPDATE events SET locate_checked_at = ? WHERE ${same}`).bind(now, r.post_id, r.place_query, r.place_text).run();
+  }
+  return { checked, improved };
+}
+
 /** 一筆準備寫進 events 的資料：使用者回報時先給他看，確認了才寫 */
 export interface PlannedEvent {
   kind: EventKind;
