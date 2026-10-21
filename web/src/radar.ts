@@ -168,6 +168,17 @@ export class Radar {
   private heading = 0;
   private items: RadarItem[] = [];
   private style: RadarStyle = { sweep: 'wedge', blip: 'dot', rose: false };
+  private drawFrame = 0;
+  /** 上次畫的內容，沒變就不重畫 */
+  private itemsKey = '';
+  private bottlesKey = '';
+  private landmarksKey = '';
+  /** 要在掃到時閃一下的節點，at 是一圈裡第幾毫秒被掃到；重畫後重新收集 */
+  private flashTargets: Array<{ g: SVGGElement; at: number }> = [];
+  private flashDirty = true;
+  /** 上一格畫面時掃描線在一圈裡的第幾毫秒；-1 代表重新開始算 */
+  private lastSweepMs = -1;
+  private readonly calm = window.matchMedia?.('(prefers-reduced-motion: reduce)');
 
   /**
    * onZoom(factor, done)：雙指捏合或滑鼠滾輪，factor > 1 代表拉遠（範圍變大）；
@@ -263,11 +274,13 @@ export class Radar {
     this.setStyle(this.style);
     this.setScale(this.scaleKm);
     this.placeRose();
+    requestAnimationFrame(this.tickFlash);
   }
 
   setStyle(s: RadarStyle): void {
     this.style = s;
     this.svg.setAttribute('class', `radar sweep-${s.sweep} blip-${s.blip}${s.rose ? ' has-rose' : ''}`);
+    this.lastSweepMs = -1;
     this.draw();
   }
 
@@ -351,6 +364,10 @@ export class Radar {
   }
 
   render(items: RadarItem[], routes: RadarRoute[] = []): void {
+    // 每 5 秒重算一次，內容沒變就不重畫；淡的程度差不到 0.05 看不出來，當作沒變
+    const key = JSON.stringify([items, routes], (k, v: unknown) => (k === 'fade' && typeof v === 'number' ? Math.round(v * 20) : v));
+    if (key === this.itemsKey) return;
+    this.itemsKey = key;
     this.items = items;
     this.routes = routes;
     this.draw();
@@ -364,6 +381,9 @@ export class Radar {
 
   /** 漂流瓶，畫在光點下面 */
   setBottles(list: RadarBottle[]): void {
+    const key = JSON.stringify(list);
+    if (key === this.bottlesKey) return;
+    this.bottlesKey = key;
     this.bottles = list;
     this.draw();
   }
@@ -429,6 +449,9 @@ export class Radar {
 
   /** 固定地標（星星），畫在光點上面，超出範圍時貼在外圈 */
   setLandmarks(list: RadarLandmark[]): void {
+    const key = JSON.stringify(list);
+    if (key === this.landmarksKey) return;
+    this.landmarksKey = key;
     this.landmarks = list;
     this.draw();
   }
@@ -507,21 +530,48 @@ export class Radar {
     return a * period;
   }
 
-  /** 掃到時閃一下：g 裡要有 .body（光點本身），這裡補上光暈和亮環，時間對準掃描動畫 */
+  /** 掃到時閃一下：g 裡要有 .body（光點本身），這裡補上光暈和亮環，記下一圈裡第幾毫秒會被掃到 */
   private addFlash(g: SVGGElement, angleDeg: number, radiusPx: number, r: number): void {
     g.insertBefore(el('circle', { class: 'flash-ring', r }), g.firstChild);
     g.insertBefore(el('circle', { class: 'flash', r }), g.firstChild);
-    if (typeof g.animate !== 'function') return;
-    const calm = !!window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
     const periodMs = SWEEP_SEC[this.style.sweep] * 1000;
-    const now = this.svg.getCurrentTime() * 1000;
-    const phase = (((now - this.sweepHitSec(angleDeg, radiusPx) * 1000) % periodMs) + periodMs) % periodMs;
-    for (const part of calm ? FLASH_PARTS_CALM : FLASH_PARTS) {
+    g.dataset.hit = String((((this.sweepHitSec(angleDeg, radiusPx) * 1000) % periodMs) + periodMs) % periodMs);
+  }
+
+  /**
+   * 每一格畫面看掃描線走到哪，上一格到這一格之間掃過的才閃一下（只跑一次的短動畫）。
+   * 以前每個光點掛三個一直重複的動畫，點一多每一格畫面都要算幾百個動畫，手機會卡。
+   */
+  private readonly tickFlash = (): void => {
+    requestAnimationFrame(this.tickFlash);
+    // 切到地圖、背景分頁時不用閃
+    if (document.hidden || typeof this.svg.animate !== 'function' || this.svg.getBoundingClientRect().width === 0) {
+      this.lastSweepMs = -1;
+      return;
+    }
+    if (this.flashDirty) {
+      this.flashDirty = false;
+      this.flashTargets = Array.from(this.svg.querySelectorAll<SVGGElement>('[data-hit]'), (g) => ({ g, at: Number(g.dataset.hit) }));
+    }
+    const periodMs = SWEEP_SEC[this.style.sweep] * 1000;
+    const t = (this.svg.getCurrentTime() * 1000) % periodMs;
+    const prev = this.lastSweepMs;
+    this.lastSweepMs = t;
+    if (prev < 0) return;
+    for (const f of this.flashTargets) {
+      // 跨過一圈的起點時分成兩段看
+      if (prev <= t ? f.at > prev && f.at <= t : f.at > prev || f.at <= t) this.flash(f.g);
+    }
+  };
+
+  private flash(g: SVGGElement): void {
+    for (const part of this.calm?.matches ? FLASH_PARTS_CALM : FLASH_PARTS) {
       const target = g.querySelector<SVGElement>(part.sel);
       if (!target) continue;
-      const end = Math.min(0.9, part.ms / periodMs);
-      const anim = target.animate([{ ...part.from, offset: 0 }, { ...part.to, offset: end }, { ...part.to, offset: 1 }], { duration: periodMs, iterations: Infinity, easing: 'linear' });
-      anim.currentTime = phase;
+      // 變淡、模糊的光點閃的時候保留原本的模糊，閃完回到原樣
+      const blur = target.dataset.blur;
+      const keep = (k: Keyframe): Keyframe => (blur && typeof k.filter === 'string' ? { ...k, filter: `${k.filter} blur(${blur}px)` } : k);
+      target.animate([keep(part.from), keep(part.to)], { duration: part.ms, easing: 'linear' });
     }
   }
 
@@ -548,7 +598,17 @@ export class Radar {
     }
   }
 
+  /** 同一格畫面裡的多次更新（範圍、光點、瓶子、地標）合成一次重畫 */
   private draw(): void {
+    if (this.drawFrame) return;
+    this.drawFrame = requestAnimationFrame(() => {
+      this.drawFrame = 0;
+      this.drawNow();
+    });
+  }
+
+  private drawNow(): void {
+    this.flashDirty = true;
     this.drawOutline();
     this.drawRoutes();
     this.drawBottles();
@@ -620,7 +680,11 @@ export class Radar {
         const body = el('g', { class: 'body' });
         this.appendMark(body, p.out, it.spot);
         // 離開始越久越淡、越模糊；選取時看清楚
-        if (it.fade !== undefined && !it.selected) body.setAttribute('style', `opacity:${(0.35 + 0.65 * it.fade).toFixed(2)};filter:blur(${((1 - it.fade) * 1.5).toFixed(2)}px)`);
+        if (it.fade !== undefined && !it.selected) {
+          const blur = ((1 - it.fade) * 1.5).toFixed(2);
+          body.setAttribute('style', `opacity:${(0.35 + 0.65 * it.fade).toFixed(2)};filter:blur(${blur}px)`);
+          body.dataset.blur = blur;
+        }
         node.appendChild(body);
         this.addFlash(node, p.angle, p.r, p.out ? 5 : 7);
         const lbl = it === lead ? labelLines.get(it.id) : undefined;
