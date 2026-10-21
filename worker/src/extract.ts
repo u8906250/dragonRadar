@@ -427,16 +427,60 @@ export function dropSelfPlace(ex: ExtractedEvent): boolean {
   return true;
 }
 
+/** 「🕐 13:00｜10 個」：時間後面接數量（不是「13:00-15:00」這種一段） */
+const DROP_RE = /(?<![\d:]|[-–—~～至到]\s*)(\d{1,2}):(\d{2})(?!\d)(?!\s*(?:[-–—~～]|至|到))[^\n\d]{0,6}\d+\s*(?:個|份|條|張|組|包|束|枚|顆|支)/g;
+
+/** 貼文列出的發放時間點（一天的第幾秒），至少兩個才算 */
+function dropTimes(text: string): number[] {
+  const t = halfWidth(text).replace(/：/g, ':');
+  const out = new Set<number>();
+  for (const m of t.matchAll(DROP_RE)) {
+    const h = Number(m[1]);
+    const min = Number(m[2]);
+    if (h < 24 && min < 60) out.add(h * 3600 + min * 60);
+  }
+  return out.size >= 2 ? [...out].sort((a, b) => a - b) : [];
+}
+
 /**
- * 「🕐 13:00｜10 個」「🕒 15:00｜10 個」這種幾點各發幾個、沒寫發到幾點的：模型常合成「13:00–15:00」一段，
- * 到 15:00 第二波開始發時雷達反而顯示結束。改成每個時間點各一筆、不寫結束（畫面寫「發完為止」）。
- * 貼文寫成一段（「13:00-15:00」「13:00 到 15:00」）或寫明幾點結束（「15:00 結束」）的照舊。
+ * 「🕐 13:00｜10 個」「🕒 15:00｜10 個」這種幾點各發幾個、沒寫發到幾點的：每個時間點各一筆、不寫結束（畫面寫「發完為止」）。
+ * 模型常合成「13:00–15:00」一段（到 15:00 第二波開始時雷達反而顯示結束），或只給第一個時間。
+ * 沒有數量的「13:00、15:00」只在模型合成一段時拆；貼文寫成一段（「13:00-15:00」）或寫明幾點結束（「15:00 結束」）的照舊。
  */
-export function splitDropTimes(ex: ExtractedEvent, text: string): ExtractedEvent[] {
-  if (ex.kind !== 'giveaway') return [ex];
-  const start = parseIsoToUnix(ex.start_at);
-  const end = parseIsoToUnix(ex.end_at);
-  if (start === null || end === null || end <= start || end - start > 12 * 3600) return [ex];
+export function splitDropTimes(events: ExtractedEvent[], text: string): ExtractedEvent[] {
+  const drops = dropTimes(text);
+  const out: ExtractedEvent[] = [];
+  const seen = new Set<string>();
+  const push = (e: ExtractedEvent): void => {
+    const k = `${e.start_at}|${e.end_at}|${e.place_query ?? e.place_text}|${e.spot}|${e.kind}`;
+    if (!seen.has(k)) out.push(e);
+    seen.add(k);
+  };
+  for (const ex of events) {
+    const start = parseIsoToUnix(ex.start_at);
+    const end = parseIsoToUnix(ex.end_at);
+    if (ex.kind !== 'giveaway' || start === null || (end !== null && (end <= start || end - start > 12 * 3600))) {
+      push(ex);
+      continue;
+    }
+    const day = (taipeiDay(start) * DAY_SEC) - 8 * 3600;
+    const tod = (u: number): number => u - day;
+    if (drops.includes(tod(start)) && (end === null || drops.includes(tod(end)))) {
+      for (const d of drops) push({ ...ex, start_at: taipeiIso(day + d), end_at: null });
+      continue;
+    }
+    if (end !== null && mergedTwoTimes(start, end, text)) {
+      push({ ...ex, end_at: null });
+      push({ ...ex, start_at: taipeiIso(end), end_at: null });
+      continue;
+    }
+    push(ex);
+  }
+  return out;
+}
+
+/** 貼文分開寫了開始和結束這兩個時間，沒寫成一段、也沒說幾點結束：是兩個發放時間點 */
+function mergedTwoTimes(start: number, end: number, text: string): boolean {
   const t = halfWidth(text).replace(/：/g, ':');
   const timeRe = (unix: number): string => {
     const [h, m] = new Date((unix + 8 * 3600) * 1000).toISOString().slice(11, 16).split(':');
@@ -444,11 +488,7 @@ export function splitDropTimes(ex: ExtractedEvent, text: string): ExtractedEvent
   };
   const a = timeRe(start);
   const b = timeRe(end);
-  if (!new RegExp(a).test(t) || !new RegExp(b).test(t)) return [ex];
-  if (new RegExp(`${a}\\s*(?:[-–—~～]|至|到)\\s*${b}`).test(t)) return [ex];
-  if (new RegExp(`(?:到|至)\\s*${b}|${b}\\s*(?:結束|截止|為止|止|收|前)`).test(t)) return [ex];
-  return [
-    { ...ex, end_at: null },
-    { ...ex, start_at: taipeiIso(end), end_at: null },
-  ];
+  if (!new RegExp(a).test(t) || !new RegExp(b).test(t)) return false;
+  if (new RegExp(`${a}\\s*(?:[-–—~～]|至|到)\\s*${b}`).test(t)) return false;
+  return !new RegExp(`(?:到|至)\\s*${b}|${b}\\s*(?:結束|截止|為止|止|收|前)`).test(t);
 }

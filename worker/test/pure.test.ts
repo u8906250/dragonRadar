@@ -532,25 +532,41 @@ describe('dropSelfPlace', () => {
 
 describe('splitDropTimes', () => {
   const ev = (start_at: string, end_at: string | null, kind: 'giveaway' | 'activity' = 'giveaway') => ({ kind, title: 't', item: '小物', start_at, end_at, place_text: '青雲 Misty', place_query: null, confidence: 0.9, spot: true, until: null }) as ExtractedEvent;
-  const drops = '📍 每日投放時間\n* 🕐 13:00｜10 個\n* 🕒 15:00｜10 個\n每天都有！';
+  const drops = '📍 每日投放時間\n\n* 🕐 13:00｜10 個\n* 🕒 15:00｜10 個\n\n每天都有！';
+  const starts = (xs: ExtractedEvent[]) => xs.map((x) => [x.start_at?.slice(11, 16), x.end_at]);
   it('splits "13:00 / 15:00 各發 10 個" merged into one window', () => {
-    const out = splitDropTimes(ev('2026-10-21T13:00:00+08:00', '2026-10-21T15:00:00+08:00'), drops);
-    expect(out).toHaveLength(2);
-    expect(out[0]).toMatchObject({ start_at: '2026-10-21T13:00:00+08:00', end_at: null, spot: true });
-    expect(out[1]).toMatchObject({ start_at: '2026-10-21T15:00:00+08:00', end_at: null, spot: true });
+    expect(starts(splitDropTimes([ev('2026-10-21T13:00:00+08:00', '2026-10-21T15:00:00+08:00')], drops))).toEqual([
+      ['13:00', null],
+      ['15:00', null],
+    ]);
+  });
+  it('adds the drops the model left out, without duplicates', () => {
+    expect(starts(splitDropTimes([ev('2026-10-21T13:00:00+08:00', null)], drops))).toEqual([
+      ['13:00', null],
+      ['15:00', null],
+    ]);
+    const both = [ev('2026-10-21T13:00:00+08:00', null), ev('2026-10-21T15:00:00+08:00', null)];
+    expect(starts(splitDropTimes(both, drops))).toEqual([
+      ['13:00', null],
+      ['15:00', null],
+    ]);
+    expect(splitDropTimes([ev('2026-10-21T13:00:00+08:00', null)], drops)[1].start_at).toBe('2026-10-21T15:00:00+08:00');
+  });
+  it('splits two separate times the model merged, even without counts', () => {
+    expect(starts(splitDropTimes([ev('2026-10-21T13:00:00+08:00', '2026-10-21T15:00:00+08:00')], '下午 13:00、15:00 兩次發放'))).toEqual([
+      ['13:00', null],
+      ['15:00', null],
+    ]);
   });
   it('keeps real ranges and stated end times', () => {
     const e = ev('2026-10-21T13:00:00+08:00', '2026-10-21T15:00:00+08:00');
-    expect(splitDropTimes(e, '發放時間 13:00-15:00')).toEqual([e]);
-    expect(splitDropTimes(e, '13:00 開始發放，到 15:00')).toEqual([e]);
-    expect(splitDropTimes(e, '13:00 開始，15:00 結束')).toEqual([e]);
-    expect(splitDropTimes(e, '１３：００～１５：００')).toEqual([e]);
-    expect(splitDropTimes(e, '下午一點開始')).toEqual([e]);
+    for (const text of ['發放時間 13:00-15:00，限量 100 個', '13:00 開始發放，到 15:00', '13:00 開始，15:00 結束', '１３：００～１５：００', '下午一點開始']) {
+      expect(splitDropTimes([e], text)).toEqual([e]);
+    }
+    expect(splitDropTimes([e], '13:00-15:00 發 50 個、18:00-20:00 發 50 個')).toEqual([e]);
   });
-  it('leaves activities and open-ended times alone', () => {
+  it('leaves activities alone', () => {
     const a = ev('2026-10-21T13:00:00+08:00', '2026-10-21T15:00:00+08:00', 'activity');
-    expect(splitDropTimes(a, drops)).toEqual([a]);
-    const o = ev('2026-10-21T13:00:00+08:00', null);
-    expect(splitDropTimes(o, drops)).toEqual([o]);
+    expect(splitDropTimes([a], drops)).toEqual([a]);
   });
 });

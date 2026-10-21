@@ -428,7 +428,7 @@ export async function planPost(env: Env, post: PostRow, now = nowSec()): Promise
   const items: PlanItem[] = [];
   const deadline = Date.now() + ADDRESS_BUDGET_MS;
   // 「13:00｜10 個、15:00｜10 個」被合成一段的，拆回每個時間點各一筆
-  extraction.events = extraction.events.flatMap((ex) => splitDropTimes(ex, text));
+  extraction.events = splitDropTimes(extraction.events, text);
   for (const [group, ex] of extraction.events.entries()) {
     // 貼文沒寫哪天、補充寫了：用補充的日期（模型有時會忽略補充）
     applySupplementDate(ex, post.supplement, post.text, post.posted_at);
