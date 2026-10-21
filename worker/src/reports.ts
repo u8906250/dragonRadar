@@ -77,7 +77,7 @@ export interface PreviewItem {
   /** 雷達上已經有這個據點：replace 同一個帳號，確認後以這則為準；attach 別人發的，確認後只附上去 */
   update?: { mode: 'replace' | 'attach'; title: string };
   /** 同一個地點一天有好幾個時段（例如中午、晚上）：每個時段第一次的開始、結束時間，照時間排 */
-  slots?: Array<{ startAt: number; endAt: number }>;
+  slots?: Array<{ startAt: number; endAt: number; endOpen?: boolean }>;
 }
 
 export interface SubmitResult {
@@ -150,9 +150,10 @@ function mergeSlots(items: PreviewItem[]): PreviewItem[] {
       merged.push(p);
       continue;
     }
-    const slots = [...(same.slots ?? [{ startAt: same.startAt, endAt: same.endAt }]), { startAt: p.startAt, endAt: p.endAt }].sort((a, b) => a.startAt - b.startAt);
+    const slots = [...(same.slots ?? [{ startAt: same.startAt, endAt: same.endAt, endOpen: same.endOpen }]), { startAt: p.startAt, endAt: p.endAt, endOpen: p.endOpen }].sort((a, b) => a.startAt - b.startAt);
     Object.assign(same, {
       slots,
+      endOpen: same.endOpen && p.endOpen,
       startAt: Math.min(same.startAt, p.startAt),
       endAt: Math.max(same.endAt, p.endAt),
       lastStartAt: Math.max(same.lastStartAt, p.lastStartAt),

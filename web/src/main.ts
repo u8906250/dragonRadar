@@ -335,8 +335,9 @@ function spotLine(it: Item, now: number): string {
   const until = spotUntil(it, now);
   if (ev.startAt <= now && now < ev.endAt) {
     if (ev.allDay) return `開放中・${until}`;
-    // 沒寫幾點結束：不寫「今天到幾點」
-    return ev.endOpen ? `營業中・${until}` : `營業中・今天到 ${fmtTime(ev.endAt)}・${until}`;
+    // 沒寫幾點結束：不寫「今天到幾點」，寫「發完為止」
+    if (ev.endOpen) return `營業中・${openEndText(ev)}${until === openEndText(ev) ? '' : `・${until}`}`;
+    return `營業中・今天到 ${fmtTime(ev.endAt)}・${until}`;
   }
   const next = ev.allDay ? `${dayWord(ev.startAt, now)}開放` : `${dayWord(ev.startAt, now)} ${fmtTime(ev.startAt)} 開始`;
   // 第一個時段還沒到：是還沒開始，不是休息中
@@ -2055,16 +2056,18 @@ function setReportBusy(busy: boolean, label = '判讀中…'): void {
 /** 預覽上的時間：固定據點寫每天幾點、從哪天起排幾天；一般的寫哪天幾點到幾點 */
 function previewWhen(p: PreviewItem): string {
   const day = (t: number): string => dateFmt.format(new Date(t * 1000));
-  // 一天好幾個時段：「12:00–13:30、18:00–20:30」
-  const slots = p.slots && p.slots.length > 1 ? p.slots.map((s) => `${fmtTime(s.startAt)}–${fmtTime(s.endAt)}`).join('、') : null;
+  // 一天好幾個時段：「12:00–13:30、18:00–20:30」；沒寫結束的只寫開始，最後寫「發完為止」
+  const open = p.kind === 'activity' ? '沒寫結束時間' : '發完為止';
+  const slotText = (s: { startAt: number; endAt: number; endOpen?: boolean }): string => (s.endOpen ? `${fmtTime(s.startAt)} 開始` : `${fmtTime(s.startAt)}–${fmtTime(s.endAt)}`);
+  const slots = p.slots && p.slots.length > 1 ? `${p.slots.map(slotText).join('、')}${p.slots.some((s) => s.endOpen) ? `，${open}` : ''}` : null;
   if (p.spot) {
-    const hours = p.allDay ? '整天' : slots ?? (p.endOpen ? `${fmtTime(p.startAt)} 起（開到當天結束）` : `${fmtTime(p.startAt)}–${fmtTime(p.endAt)}`);
+    const hours = p.allDay ? '整天' : slots ?? (p.endOpen ? `${fmtTime(p.startAt)} 開始，${open}` : `${fmtTime(p.startAt)}–${fmtTime(p.endAt)}`);
     const range = p.days > 1 ? `${day(p.startAt)} 到 ${day(p.lastStartAt)}，共 ${p.days} 天` : day(p.startAt);
     return `${weeklyText(p.weekdays) ?? '每天'} ${hours}・${range}${p.untilOpen ? '（貼文沒寫最後一天，先排這幾天，發完為止）' : ''}`;
   }
   if (p.allDay) return `${day(p.startAt)} 整天`;
   if (slots) return `${day(p.startAt)} ${slots}`;
-  return `${day(p.startAt)} ${fmtTime(p.startAt)}${p.endOpen ? ' 開始（沒寫結束時間）' : `–${fmtTime(p.endAt)}`}`;
+  return `${day(p.startAt)} ${fmtTime(p.startAt)}${p.endOpen ? ` 開始，${open}` : `–${fmtTime(p.endAt)}`}`;
 }
 
 /** 在 Google 地圖上標出這個座標（新分頁；手機會開 Google 地圖 App） */

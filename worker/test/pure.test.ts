@@ -1,5 +1,5 @@
 import type { ExtractedEvent } from '../src/extract';
-import { applySupplementDate, dropBroughtItem, dropSelfPlace, splitMultiDay, untilInText, weekdaysFromText, weekdaysInText } from '../src/extract';
+import { applySupplementDate, dropBroughtItem, dropSelfPlace, splitDropTimes, splitMultiDay, untilInText, weekdaysFromText, weekdaysInText } from '../src/extract';
 import { isAreaOnly } from '../src/geocode';
 import { existedOutcome, previewOf } from '../src/reports';
 import { describe, expect, it } from 'vitest';
@@ -360,7 +360,22 @@ describe('previewOf', () => {
     ];
     const out = previewOf(items, 2500);
     expect(out).toHaveLength(1);
-    expect(out[0].slots).toEqual([{ startAt: 3000, endAt: 4000 }, { startAt: 9000, endAt: 9900 }]);
+    expect(out[0].slots).toEqual([
+      { startAt: 3000, endAt: 4000, endOpen: false },
+      { startAt: 9000, endAt: 9900, endOpen: false },
+    ]);
+  });
+  it('keeps "no end time" per slot so the page can say 發完為止', () => {
+    const one = { ...base, spot: false, until_open: false, end_open: true };
+    const out = previewOf(
+      [
+        { group: 0, reason: 'planned', plan: { ...one, start_at: 3000, end_at: 8000 } },
+        { group: 1, reason: 'planned', plan: { ...one, start_at: 5000, end_at: 8000 } },
+      ],
+      2500,
+    );
+    expect(out[0].slots?.map((x) => x.endOpen)).toEqual([true, true]);
+    expect(out[0].endOpen).toBe(true);
   });
   it('tells the reporter when the spot is already on the radar', () => {
     const merge = { mode: 'replace' as const, postId: 'spot-x', placeText: '蘭鄉排骨飯', eventId: 75, title: '蘭鄉排骨飯發飄帶' };
@@ -512,5 +527,30 @@ describe('dropSelfPlace', () => {
   it('keeps real places', () => {
     expect(dropSelfPlace(ev('青雲 Misty 本店', '台北市'))).toBe(false);
     expect(dropSelfPlace(ev('捷運市府站2號出口附近', '台北市 捷運市府站'))).toBe(false);
+  });
+});
+
+describe('splitDropTimes', () => {
+  const ev = (start_at: string, end_at: string | null, kind: 'giveaway' | 'activity' = 'giveaway') => ({ kind, title: 't', item: '小物', start_at, end_at, place_text: '青雲 Misty', place_query: null, confidence: 0.9, spot: true, until: null }) as ExtractedEvent;
+  const drops = '📍 每日投放時間\n* 🕐 13:00｜10 個\n* 🕒 15:00｜10 個\n每天都有！';
+  it('splits "13:00 / 15:00 各發 10 個" merged into one window', () => {
+    const out = splitDropTimes(ev('2026-10-21T13:00:00+08:00', '2026-10-21T15:00:00+08:00'), drops);
+    expect(out).toHaveLength(2);
+    expect(out[0]).toMatchObject({ start_at: '2026-10-21T13:00:00+08:00', end_at: null, spot: true });
+    expect(out[1]).toMatchObject({ start_at: '2026-10-21T15:00:00+08:00', end_at: null, spot: true });
+  });
+  it('keeps real ranges and stated end times', () => {
+    const e = ev('2026-10-21T13:00:00+08:00', '2026-10-21T15:00:00+08:00');
+    expect(splitDropTimes(e, '發放時間 13:00-15:00')).toEqual([e]);
+    expect(splitDropTimes(e, '13:00 開始發放，到 15:00')).toEqual([e]);
+    expect(splitDropTimes(e, '13:00 開始，15:00 結束')).toEqual([e]);
+    expect(splitDropTimes(e, '１３：００～１５：００')).toEqual([e]);
+    expect(splitDropTimes(e, '下午一點開始')).toEqual([e]);
+  });
+  it('leaves activities and open-ended times alone', () => {
+    const a = ev('2026-10-21T13:00:00+08:00', '2026-10-21T15:00:00+08:00', 'activity');
+    expect(splitDropTimes(a, drops)).toEqual([a]);
+    const o = ev('2026-10-21T13:00:00+08:00', null);
+    expect(splitDropTimes(o, drops)).toEqual([o]);
   });
 });

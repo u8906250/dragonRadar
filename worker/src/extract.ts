@@ -88,6 +88,7 @@ events 每筆的欄位：
 - 「早上 9 點到下午 5 點」這種時段，start_at 是 9:00、end_at 是 17:00。
 - 同一則貼文有多個地點或多個時段（例如行程表、車掃停靠點），要拆成多筆 events。
 - 固定據點（spot 為 true）每個地點只輸出一筆，不要每天拆一筆；但一天有好幾個時段（例如「11:00–14:00／17:00–19:00」）時，每個時段各輸出一筆，地點、until 等其他欄位都一樣：start_at、end_at 填第一天的開放時段（例如「10/17~10/19 每日 11:00~18:00」→ start_at 10/17 11:00、end_at 10/17 18:00、until 2026-10-19）。沒寫每天幾點時，start_at 填第一天 00:00、end_at 為 null。「即日起」的第一天是發文當天。
+- 列出幾個發放時間點、沒寫發到幾點（例如「🕐 13:00｜10 個」「🕒 15:00｜10 個」）：每個時間點各輸出一筆，start_at 是那個時間、end_at 為 null（發完為止），不要合成「13:00–15:00」一段
 - 固定據點有寫日期範圍或「每天」就算有時間，不需要因為沒寫幾點而降低 confidence。
 - 車掃、遊行等移動路線，每個有時間的停靠點各一筆；沒有停靠點就用出發地。
 - 「發完為止」「數量有限」代表沒有明確結束時間，end_at 為 null。
@@ -424,4 +425,30 @@ export function dropSelfPlace(ex: ExtractedEvent): boolean {
   ex.place_text = null;
   ex.place_query = null;
   return true;
+}
+
+/**
+ * 「🕐 13:00｜10 個」「🕒 15:00｜10 個」這種幾點各發幾個、沒寫發到幾點的：模型常合成「13:00–15:00」一段，
+ * 到 15:00 第二波開始發時雷達反而顯示結束。改成每個時間點各一筆、不寫結束（畫面寫「發完為止」）。
+ * 貼文寫成一段（「13:00-15:00」「13:00 到 15:00」）或寫明幾點結束（「15:00 結束」）的照舊。
+ */
+export function splitDropTimes(ex: ExtractedEvent, text: string): ExtractedEvent[] {
+  if (ex.kind !== 'giveaway') return [ex];
+  const start = parseIsoToUnix(ex.start_at);
+  const end = parseIsoToUnix(ex.end_at);
+  if (start === null || end === null || end <= start || end - start > 12 * 3600) return [ex];
+  const t = halfWidth(text).replace(/：/g, ':');
+  const timeRe = (unix: number): string => {
+    const [h, m] = new Date((unix + 8 * 3600) * 1000).toISOString().slice(11, 16).split(':');
+    return `(?<![\\d:])0?${Number(h)}:${m}(?!\\d)`;
+  };
+  const a = timeRe(start);
+  const b = timeRe(end);
+  if (!new RegExp(a).test(t) || !new RegExp(b).test(t)) return [ex];
+  if (new RegExp(`${a}\\s*(?:[-–—~～]|至|到)\\s*${b}`).test(t)) return [ex];
+  if (new RegExp(`(?:到|至)\\s*${b}|${b}\\s*(?:結束|截止|為止|止|收|前)`).test(t)) return [ex];
+  return [
+    { ...ex, end_at: null },
+    { ...ex, start_at: taipeiIso(end), end_at: null },
+  ];
 }
