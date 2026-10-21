@@ -624,7 +624,7 @@ function updateCategoryToggles(all: Item[]): void {
   for (const b of categoryToggles) {
     const cat = b.dataset.cat as Category;
     b.hidden = counts[cat] === 0;
-    b.textContent = `${shown[cat] ? '✓ ' : ''}${CATEGORY_NAME[cat]}（${counts[cat]}）`;
+    b.textContent = `${CATEGORY_NAME[cat]}（${counts[cat]}）`;
     b.classList.toggle('on', shown[cat]);
     b.setAttribute('aria-pressed', String(shown[cat]));
   }
