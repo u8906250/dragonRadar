@@ -142,9 +142,10 @@ function setOnlyActive(on: boolean): void {
   lsSet(LS_ONLY_ACTIVE, on ? '1' : '0');
 }
 
-function setShown(cat: Category | 'all' | 'none'): void {
+/** 只顯示某一類 */
+function setShown(cat: Category): void {
   for (const c of Object.keys(shown) as Category[]) {
-    shown[c] = cat === 'all' || c === cat;
+    shown[c] = c === cat;
     lsSet(CATEGORY_LS[c], shown[c] ? '1' : '0');
   }
 }
@@ -2573,10 +2574,9 @@ function wireControls(): void {
     void submitKeyword(kwInput.value);
   });
   reportBtn.addEventListener('click', () => openReportSheet(reportSheet.hidden));
-  // 打開「只看進行中」：發放、活動、據點開關都變成沒打開；關掉：回到全部顯示
+  // 打開「只看進行中」：發放、活動、據點開關顯示成沒打開（原本的選擇留著）；關掉：回到原本的選擇
   activeToggle.addEventListener('click', () => {
     setOnlyActive(!onlyActive);
-    setShown(onlyActive ? 'none' : 'all');
     render();
   });
   for (const b of categoryToggles) {
