@@ -391,8 +391,17 @@ async function handleAdmin(req: Request, env: Env, _ctx: ExecutionContext, path:
     return jsonResponse({ post_id: id, weekdays: days, closed, kept: kept.length });
   }
 
-  // 拿掉回報的人補充的資料（重複或寫錯）：只改詳細資料上的顯示，雷達上的事件不動
+  // 拿掉回報的人補充的資料（重複或寫錯）：只改詳細資料上的顯示，雷達上的事件不動。
+  // POST { note }：管理者替貼文補充（例如查到店名地址），之後用 .../reprocess 重新判讀
   const supDel = /^\/api\/admin\/posts\/([^/]+)\/supplement$/.exec(path);
+  if (req.method === 'POST' && supDel) {
+    const id = decodeURIComponent(supDel[1]);
+    const body = await readJson<{ note?: string }>(req);
+    const note = (body.note ?? '').replace(/\s+/g, ' ').trim().slice(0, 200);
+    if (note.length < 2) throw new HttpError(400, 'note is required');
+    const r = await env.DB.prepare('UPDATE posts SET supplement = ? WHERE id = ?').bind(note, id).run();
+    return jsonResponse({ post_id: id, updated: r.meta.changes ?? 0, supplement: note });
+  }
   if (req.method === 'DELETE' && supDel) {
     const id = decodeURIComponent(supDel[1]);
     const r = await env.DB.prepare('UPDATE posts SET supplement = NULL WHERE id = ?').bind(id).run();

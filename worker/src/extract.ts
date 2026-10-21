@@ -1,4 +1,5 @@
 import type { Env } from './env';
+import { isAdminOnly } from './geocode';
 import { formatTaipei, parseIsoToUnix } from './util';
 
 export type EventKind = 'giveaway' | 'activity';
@@ -75,7 +76,7 @@ events 每筆的欄位：
 - item: 免費送出的物品，例如「洋流飄帶」；要民眾自己帶來的東西（例如自備飄帶來編）不算；活動沒送東西或沒寫則 null
 - start_at: 開始時間，ISO 8601 含時區，例如 2026-10-17T15:00:00+08:00；無法判斷則 null
 - end_at: 結束時間，同格式；沒有明確結束時間則 null
-- place_text: 貼文原文中的地點描述。內文沒寫地點、但最後有「📍 貼文的地點標記：XX」時，用標記的地點（店家發文時標的位置），place_query 填「XX」。hashtag（例如「#洋流」）、活動名稱不是地點
+- place_text: 貼文原文中的地點描述。內文沒寫地點、但最後有「📍 貼文的地點標記：XX」時，用標記的地點（店家發文時標的位置），place_query 填「XX」。hashtag（例如「#洋流」）、活動名稱不是地點。「本店」「店裡」「門市」「現場」這種沒寫店名、也沒寫地址的不算地點，place_text、place_query 都給 null（不要只填縣市），回報的人會補充店名
 - place_query: 給地圖搜尋用的地址或地名。有門牌地址就用地址；要補上縣市，例如「宜蘭縣羅東鎮光榮路218號」「台北市 大龍峒保安宮」。鄉鎮區只有貼文寫了才加，不要自己猜（猜錯會定位到別的區）。店家寫「近XX站」時，用「縣市 + 捷運XX站」，例如「台北市 捷運忠孝復興站」。只有「XX服務處」「競選總部」而沒有地址時，填你能確定的最具體地名；沒有則 null
 - confidence: 這一筆 0 到 1 的信心分數
 - spot: 是否為「固定據點」：店家、服務處、競選總部等，連續多天在固定時段都可以去領或參加（例如寫了「每天」「每日」「營業時間」「營業日」「即日起」「長期」「10/17~10/19」）。店家、餐廳、服務處在自己店裡發放（「歡迎來店索取」「來索取」「到店領取」），而且寫了發放或領取時段的，也是固定據點，就算只寫了開始那天的日期（例如「明天（10/21）開始 歡迎來店索取」「10/21 洋流小物 … 歡迎來索取 發放時間 12:00-13:30；18:00-20:30」），start_at 填那天、until 為 null；除非寫明只有那一天（「只有今天」「限定一天」「僅此一天」）。在路口、車站、公園、市場等公共場所的單次發放，或只有一天的活動，spot 為 false
@@ -404,4 +405,23 @@ export async function extractFromPost(
     model: last.model,
     garbled,
   };
+}
+
+/** 沒寫店名的自稱（「本店」「店裡」）：拿去查地圖只會對到同名的別的地方 */
+const SELF_PLACE_RE = /^(?:本店|本館|本處|本公司|本工作室|店內|店裡|店面|店門口|門口|門市|現場|小店|敝店|我們(?:的)?(?:店|店裡|這裡)?|這裡|我家|老地方|服務處)$/;
+
+function isSelfPlace(s: string | null): boolean {
+  return SELF_PLACE_RE.test((s ?? '').replace(/(台北|臺北|新北|桃園|台中|臺中|台南|臺南|高雄|基隆|新竹|嘉義)[市縣]/g, '').replace(/[\s，,、。.!！📍]/g, ''));
+}
+
+/**
+ * 地點只寫「本店」、查詢只有縣市（或也是「本店」）：當成沒寫地點，讓回報的人補充店名，
+ * 不然會對到別的地方（「台北市 本店」查到中山區一個不相干的點）。查詢有寫店名或地址的照用。
+ */
+export function dropSelfPlace(ex: ExtractedEvent): boolean {
+  if (!isSelfPlace(ex.place_text) && !(ex.place_text === null && isSelfPlace(ex.place_query))) return false;
+  if (ex.place_query && !isAdminOnly(ex.place_query) && !isSelfPlace(ex.place_query)) return false;
+  ex.place_text = null;
+  ex.place_query = null;
+  return true;
 }

@@ -1,4 +1,5 @@
-import { applySupplementDate, dropBroughtItem, splitMultiDay, untilInText, weekdaysFromText, weekdaysInText } from '../src/extract';
+import type { ExtractedEvent } from '../src/extract';
+import { applySupplementDate, dropBroughtItem, dropSelfPlace, splitMultiDay, untilInText, weekdaysFromText, weekdaysInText } from '../src/extract';
 import { isAreaOnly } from '../src/geocode';
 import { existedOutcome, previewOf } from '../src/reports';
 import { describe, expect, it } from 'vitest';
@@ -491,5 +492,25 @@ describe('dropBroughtItem', () => {
     expect(dropBroughtItem(ex, '現場發放洋流飄帶，也可以自備飄帶來編')).toBe(false);
     expect(dropBroughtItem(ex, '明天 15:00 市政府站發飄帶')).toBe(false);
     expect(ex.item).toBe('洋流飄帶');
+  });
+});
+
+describe('dropSelfPlace', () => {
+  const ev = (place_text: string | null, place_query: string | null) => ({ kind: 'giveaway', title: 't', item: null, start_at: null, end_at: null, place_text, place_query, confidence: 0.9, spot: true, until: null }) as ExtractedEvent;
+  it('treats 本店 with only a city as no place', () => {
+    const e = ev('本店', '台北市');
+    expect(dropSelfPlace(e)).toBe(true);
+    expect(e.place_text).toBeNull();
+    expect(e.place_query).toBeNull();
+    expect(dropSelfPlace(ev('店裡', null))).toBe(true);
+    expect(dropSelfPlace(ev(null, '台北市 本店'))).toBe(true);
+  });
+  it('keeps 本店 when the query names the shop or address', () => {
+    expect(dropSelfPlace(ev('本店', '台北市萬華區環河南路二段5巷6弄20號'))).toBe(false);
+    expect(dropSelfPlace(ev('本店', '青雲 Misty'))).toBe(false);
+  });
+  it('keeps real places', () => {
+    expect(dropSelfPlace(ev('青雲 Misty 本店', '台北市'))).toBe(false);
+    expect(dropSelfPlace(ev('捷運市府站2號出口附近', '台北市 捷運市府站'))).toBe(false);
   });
 });

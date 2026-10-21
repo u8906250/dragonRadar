@@ -1,5 +1,5 @@
 import type { Env } from './env';
-import { applySupplementDate, dropBroughtItem, extractFromPost, splitMultiDay, untilInText, weekdaysFromText, weekdaysInText, type EventKind, type ExtractedEvent } from './extract';
+import { applySupplementDate, dropBroughtItem, dropSelfPlace, extractFromPost, splitMultiDay, untilInText, weekdaysFromText, weekdaysInText, type EventKind, type ExtractedEvent } from './extract';
 import { geocodeAddress, parseTwAddress, type TwAddress } from './address';
 import { adminArea, geocode, geocodeFirst, isAreaOnly, placeCandidates, type GeoPoint } from './geocode';
 import { listActiveKeywords, type KeywordRow } from './keywords';
@@ -434,6 +434,8 @@ export async function planPost(env: Env, post: PostRow, now = nowSec()): Promise
     splitMultiDay(ex, text);
     // 「帶自己的飄帶來幫你編」不是發放
     dropBroughtItem(ex, text);
+    // 只寫「本店」沒寫店名：當成沒寫地點，讓回報的人補充
+    dropSelfPlace(ex);
     if (!ex.spot) {
       items.push({ group, ...(await planEvent(env, ex, now, deadline)) });
       continue;
