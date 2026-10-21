@@ -10,6 +10,8 @@ export interface MapItem {
   lng: number;
   phase: Phase;
   spot?: boolean;
+  /** 服務處、競選總部的固定據點：畫成房子圖示（其他是圓點） */
+  office?: boolean;
   approx?: boolean;
   /** 還沒開始的清楚程度：1 快開始了 … 0 一週以上 */
   fade?: number;
@@ -69,6 +71,11 @@ function markerColor(kind: EventKind, phase: Phase, spot = false): string {
   return phase === 'soon' ? cssVar('--blip-soon', '#ffe08a') : cssVar('--blip', '#ea611d');
 }
 
+/** 服務處的房子圖示（SVG），外框虛線跟其他固定據點一樣 */
+function officeSvg(fill: string, stroke: string, strokeW: number, fillOpacity: number, size: number): string {
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="${size}" height="${size}" viewBox="-12 -12 24 24"><path d="M0 -9.5 L9 -1.5 V9 H-9 V-1.5 Z" fill="${fill}" fill-opacity="${fillOpacity}" stroke="${stroke}" stroke-width="${strokeW}" stroke-dasharray="3 2" stroke-linejoin="round"/></svg>`;
+}
+
 const escapeHtml = (s: string): string =>
   s.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c] as string);
 
@@ -94,7 +101,9 @@ export class MapView {
   private accuracyCircle: Leaflet.Circle | null = null;
   /** 雷達目前的範圍（外圈），切到地圖時用同樣的比例 */
   private rangeCircle: Leaflet.Circle | null = null;
-  private readonly markers = new Map<number, Leaflet.CircleMarker>();
+  private readonly markers = new Map<number, Leaflet.CircleMarker | Leaflet.Marker>();
+  /** 房子圖示目前的樣子，沒變就不重畫（每 5 秒更新一次） */
+  private readonly iconKeys = new Map<number, string>();
   private routeLayer: Leaflet.LayerGroup | null = null;
   /** 「雙北」範圍時的縣市界 */
   private outline: Leaflet.Polygon | null = null;
@@ -239,10 +248,18 @@ export class MapView {
       const it = g.find((x) => x.selected) ?? g.find((x) => x.phase === 'active') ?? g[0];
       const ids = g.map((x) => x.id);
       keep.add(it.id);
+      // 服務處（位置精確的）畫房子圖示，其他畫圓點；類型變了就換一個
+      const house = !!it.office && !it.approx;
       let m = this.markers.get(it.id);
+      if (m && ('setRadius' in m) === house) {
+        layer.removeLayer(m);
+        this.markers.delete(it.id);
+        this.iconKeys.delete(it.id);
+        m = undefined;
+      }
       if (!m) {
         const id = it.id;
-        m = L.circleMarker([it.lat, it.lng]);
+        m = house ? L.marker([it.lat, it.lng], { keyboard: false }) : L.circleMarker([it.lat, it.lng]);
         m.on('click', () => this.handlers.onSelect(id, this.groupIds.get(id) ?? [id]));
         m.bindPopup('', { closeButton: false });
         layer.addLayer(m);
@@ -250,16 +267,29 @@ export class MapView {
       }
       this.groupIds.set(it.id, ids);
       m.setLatLng([it.lat, it.lng]);
-      m.setRadius(it.approx ? 14 : it.phase === 'active' ? 10 : 8);
-      m.setStyle({
-        color: it.selected ? selectedStroke : stroke,
-        weight: it.selected ? 3 : 2,
-        fillColor: markerColor(it.kind, it.phase, it.spot),
-        fillOpacity: it.approx ? 0.15 : it.fade !== undefined ? 0.2 + 0.6 * it.fade : it.phase === 'later' || it.phase === 'closed' ? 0.5 : 0.95,
-        opacity: it.fade !== undefined && !it.selected ? 0.45 + 0.55 * it.fade : 1,
-        // 固定據點、約略位置、稍後開始用虛線外框，跟精確、進行中的分開
-        dashArray: it.spot || it.approx || it.phase === 'later' ? '3 3' : '',
-      });
+      const fillOpacity = it.approx ? 0.15 : it.fade !== undefined ? 0.2 + 0.6 * it.fade : it.phase === 'later' || it.phase === 'closed' ? 0.5 : 0.95;
+      const opacity = it.fade !== undefined && !it.selected ? 0.45 + 0.55 * it.fade : 1;
+      if ('setRadius' in m) {
+        m.setRadius(it.approx ? 14 : it.phase === 'active' ? 10 : 8);
+        m.setStyle({
+          color: it.selected ? selectedStroke : stroke,
+          weight: it.selected ? 3 : 2,
+          fillColor: markerColor(it.kind, it.phase, it.spot),
+          fillOpacity,
+          opacity,
+          // 固定據點、約略位置、稍後開始用虛線外框，跟精確、進行中的分開
+          dashArray: it.spot || it.approx || it.phase === 'later' ? '3 3' : '',
+        });
+      } else {
+        const size = it.phase === 'active' || it.selected ? 26 : 22;
+        const svg = officeSvg(markerColor(it.kind, it.phase, true), it.selected ? selectedStroke : stroke, it.selected ? 3 : 2, fillOpacity, size);
+        if (this.iconKeys.get(it.id) !== svg) {
+          m.setIcon(L.divIcon({ className: 'map-office', html: svg, iconSize: [size, size], iconAnchor: [size / 2, size / 2] }));
+          this.iconKeys.set(it.id, svg);
+        }
+        m.setOpacity(opacity);
+        m.setZIndexOffset(it.selected ? 500 : 0);
+      }
       m.setPopupContent(
         g.length > 1
           ? `<strong>這裡有 ${g.length} 個</strong><br>${g.map((x) => escapeHtml(x.title)).join('<br>')}`
@@ -275,6 +305,7 @@ export class MapView {
       if (!keep.has(id)) {
         layer.removeLayer(m);
         this.markers.delete(id);
+        this.iconKeys.delete(id);
       }
     }
   }

@@ -601,6 +601,7 @@ function render(): void {
       id: it.ev.id,
       kind: it.ev.kind,
       spot: !!it.spot,
+      office: !!it.spot && isOffice(it.ev),
       approx: !!it.ev.approxArea,
       lat: it.ev.lat,
       lng: it.ev.lng,
