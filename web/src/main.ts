@@ -1557,6 +1557,40 @@ function select(id: number | null, group: number[] = []): void {
   render();
 }
 
+/**
+ * 從「我的回報」的「看」或剛回報完的結果點進來：被「顯示」「只看進行中」或時間範圍藏起來的，自動調整到看得到，再選取。
+ * 剛放上雷達的可能還沒抓到，先重抓一次。固定據點用任一個時段的 id 都找得到那個據點。
+ */
+async function reveal(id: number): Promise<void> {
+  const find = (now: number): Item | undefined => computeItems(now).find((x) => x.ev.id === id || x.spot?.sessions.some((s) => s.id === id));
+  themeSheet.hidden = true;
+  kwSheet.hidden = true;
+  reportSheet.hidden = true;
+  bottleSheet.hidden = true;
+  if (!find(nowSec())) await refresh();
+  const now = nowSec();
+  const it = find(now);
+  if (it) {
+    // 這一類被關掉了：打開
+    const cat = categoryOf(it);
+    if (!shown[cat]) {
+      shown[cat] = true;
+      lsSet(CATEGORY_LS[cat], '1');
+    }
+    // 只看進行中、但這個現在還沒開始：關掉只看進行中
+    if (onlyActive && !activeNow(it, now)) {
+      onlyActive = false;
+      lsSet(LS_ONLY_ACTIVE, '0');
+    }
+    // 時間範圍外（還要很久才開始）的雷達不畫：改成「全部」
+    if (!inTime(it, now)) setTime('all');
+  }
+  const target = it?.ev.id ?? id;
+  // select 再點同一個會取消選取，這裡一定要選上
+  if (selectedId === target) render();
+  else select(target);
+}
+
 function esc(s: string): string {
   return s.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c] as string);
 }
@@ -2334,7 +2368,7 @@ async function showReportResult(data: SubmitResult): Promise<void> {
       reportSheet.hidden = true;
       bottleSheet.hidden = true;
       selectedId = null;
-      select(Number(b.dataset.id));
+      void reveal(Number(b.dataset.id));
     });
   }
   if (found.length > 0) {
@@ -2584,10 +2618,7 @@ function wireControls(): void {
   myReportList.addEventListener('click', (e) => {
     const b = (e.target as Element).closest<HTMLButtonElement>('button');
     if (b?.dataset.withdraw) void withdrawMine(b.dataset.withdraw);
-    else if (b?.dataset.show) {
-      reportSheet.hidden = true;
-      select(Number(b.dataset.show));
-    }
+    else if (b?.dataset.show) void reveal(Number(b.dataset.show));
   });
   reportForm.addEventListener('submit', (e) => {
     e.preventDefault();
