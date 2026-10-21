@@ -742,8 +742,46 @@ export function toEventOut(r: JoinedRow, now: number): EventOut {
     spot: r.spot === 1,
     approxArea: r.approx_area ?? null,
     weekdays: r.weekdays ? r.weekdays.split(',').map(Number) : null,
-    post: { id: r.post_id, source: r.source, username: r.username, permalink: r.permalink, postedAt: r.posted_at, text: r.text, supplement: r.supplement ?? null },
+    // 只給摘錄（著作權：只做必要的引用），完整內容請人看原文
+    post: { id: r.post_id, source: r.source, username: r.username, permalink: r.permalink, postedAt: r.posted_at, text: postExcerpt(r.text, r.source), supplement: r.supplement ?? null },
   };
+}
+
+/** 寫時間、日期、地點的行（摘錄優先留這些） */
+const TIME_PLACE_RE = /\d{1,2}\s*[:：]\s*\d{2}|\d{1,2}\s*(?:\/|月)\s*\d{1,2}|📍|⏰|🕐|🕑|🕒|🕓|🕔|🕕|地點|地址|時間|日期|今天|明天|後天|今日|明日|每天|每日|週[一二三四五六日]|周[一二三四五六日]|星期|[路街巷弄]|\d+號|站/;
+/** 寫發什麼、怎麼領的行（時間地點不夠時補） */
+const GIVE_LINE_RE = /發放|領取|索取|免費|限量|數量/;
+/** 詳細資料引用原文的上限（字），最後一行可以超出一點，不從中間截斷 */
+const EXCERPT_MAX = 90;
+const EXCERPT_SLACK = 20;
+
+/**
+ * 詳細資料上引用的原文：只留寫時間、地點的幾行（不夠再補寫發什麼的），約 90 字，省略的地方寫「…」，
+ * 完整內容請人看原文（著作權：只做必要的引用）。新聞只留標題。給 API 的就是摘錄，不回傳全文。
+ */
+export function postExcerpt(text: string, source: string): string {
+  const lines = text.split('\n').map((l) => l.trim()).filter(Boolean);
+  if (source === 'news') return [...(lines[0] ?? '')].slice(0, EXCERPT_MAX).join('');
+  const len = (l: string): number => [...l].length;
+  const strong = lines.filter((l) => TIME_PLACE_RE.test(l));
+  const strongLen = strong.reduce((n, l) => n + len(l), 0);
+  // 時間地點的行不多時，補上寫發什麼、怎麼領的行；照原文順序
+  const keep = new Set(strongLen >= EXCERPT_MAX / 2 ? strong : lines.filter((l) => TIME_PLACE_RE.test(l) || GIVE_LINE_RE.test(l)));
+  const pick = keep.size > 0 ? lines.filter((l) => keep.has(l)) : lines.slice(0, 1);
+  const out: string[] = [];
+  let used = 0;
+  for (const l of pick) {
+    if (used + len(l) <= EXCERPT_MAX + EXCERPT_SLACK) {
+      out.push(l);
+      used += len(l);
+    } else if (out.length === 0) {
+      out.push(`${[...l].slice(0, EXCERPT_MAX).join('')}…`);
+      used = EXCERPT_MAX;
+    }
+    if (used >= EXCERPT_MAX) break;
+  }
+  const whole = out.join('\n');
+  return out.length < lines.length || whole !== lines.join('\n') ? `${whole}\n…` : whole;
 }
 
 /** 前端用：附近、還沒結束、horizon 內會開始的事件 */

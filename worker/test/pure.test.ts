@@ -3,7 +3,7 @@ import { applySupplementDate, dropBroughtItem, dropSelfPlace, splitDropTimes, sp
 import { isAreaOnly } from '../src/geocode';
 import { existedOutcome, previewOf } from '../src/reports';
 import { describe, expect, it } from 'vitest';
-import { detectEnded, spotMergeMode, spotSessions } from '../src/events';
+import { detectEnded, postExcerpt, spotMergeMode, spotSessions } from '../src/events';
 import { buildMessages, normalizeExtraction } from '../src/extract';
 import { parseThreadsTimestamp } from '../src/threads';
 import { parseIsoToUnix } from '../src/util';
@@ -602,5 +602,25 @@ describe('startNowForDeadline', () => {
     expect(startNowForDeadline(ev('2026-10-22T14:00:00+08:00', '2026-10-22T14:45:00+08:00'), '明天14:45前我都在', now)).toBe(false);
     expect(startNowForDeadline(ev('2026-10-21T14:00:00+08:00', '2026-10-21T14:45:00+08:00', true), text, now)).toBe(false);
     expect(startNowForDeadline(ev('2026-10-21T14:00:00+08:00', '2026-10-21T14:45:00+08:00'), '14:00-14:45 發放', now)).toBe(false);
+  });
+});
+
+describe('postExcerpt', () => {
+  const misty = '🌊 洋流小物投放計畫正式啟動！\n不消費也能免費領，這次我們真的要讓洋流遍地開花！\n\n首先，請大家一起感謝一位不具名的美女課金阿嬤🥹💙\n\n豪氣贊助 8,000 元，讓我們印製了 100 個精緻洋流吊牌！\n\n從明天 10/21 開始，每天固定投放 20 個洋流小物，一路發到選舉前！\n\n📍 每日投放時間\n\n* 🕐 13:00｜10 個\n* 🕒 15:00｜10 個\n\n每天都有！每天都有！每天都有！\n（很重要所以說三次🤣）';
+  it('keeps only the time and place lines, about 90 characters, and marks the cut', () => {
+    const e = postExcerpt(misty, 'link');
+    expect(e).toContain('🕐 13:00｜10 個');
+    expect(e).toContain('🕒 15:00｜10 個');
+    expect(e).not.toContain('阿嬤');
+    expect(e.endsWith('\n…')).toBe(true);
+    expect([...e].length).toBeLessThanOrEqual(115);
+  });
+  it('leaves a short post whole and keeps only the news headline', () => {
+    expect(postExcerpt('今天 15:00 捷運市政府站發飄帶', 'link')).toBe('今天 15:00 捷運市政府站發飄帶');
+    expect(postExcerpt('洋流外溢？標題\n\n摘要很長的一段', 'news')).toBe('洋流外溢？標題');
+  });
+  it('cuts one very long line instead of dropping everything', () => {
+    const e = postExcerpt('x'.repeat(300), 'link');
+    expect(e.startsWith('x'.repeat(90) + '…')).toBe(true);
   });
 });
