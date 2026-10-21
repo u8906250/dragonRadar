@@ -510,7 +510,7 @@ const BEFORE_RE = /(?<![\d:])(\d{1,2}):(\d{2})\s*(?:以前|之前|前)/g;
 /**
  * 「今天14:45前我都在喔！」只寫到幾點、沒寫幾點開始：從現在到 14:45。
  * 模型常自己猜一個開始時間（14:00–14:45），或把 14:45 當成開始時間、沒給結束（變成 14:45 起兩小時）。
- * 貼文有寫開始時間（「13:00 開始」「13:00-14:45」）的照貼文；不是今天的、固定據點不動。改了回傳 true。
+ * 貼文有寫開始時間（「13:00 開始」「13:00-14:45」）、或同一個時間別的地方沒有「前」的照貼文；不是今天的、固定據點不動。改了回傳 true。
  */
 export function startNowForDeadline(ex: ExtractedEvent, text: string, now: number): boolean {
   if (ex.spot) return false;
@@ -526,6 +526,9 @@ export function startNowForDeadline(ex: ExtractedEvent, text: string, now: numbe
     start = null;
   }
   if (end === null || end <= now || taipeiDay(end) !== taipeiDay(now) || !deadlines.has(tod(end))) return false;
+  // 同一個時間別的地方寫成開始時間（「19:00，免費發送 … 如果 19:00 前排隊已達 88 位就提前發」）：照模型的
+  const [eh, em] = [Math.floor(tod(end) / 3600), String(Math.floor((tod(end) % 3600) / 60)).padStart(2, '0')];
+  if (new RegExp(`(?<![\\d:])0?${eh}:${em}(?!\\d)(?!\\s*(?:以前|之前|前))`).test(t)) return false;
   if (start !== null && start < end) {
     const [h, m] = new Date((start + 8 * 3600) * 1000).toISOString().slice(11, 16).split(':');
     if (new RegExp(`(?<![\\d:])0?${Number(h)}:${m}(?!\\d)`).test(t)) return false;

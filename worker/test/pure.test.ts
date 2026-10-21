@@ -655,6 +655,12 @@ describe('startNowForDeadline', () => {
     expect(startNowForDeadline(ev('2026-10-21T14:00:00+08:00', '2026-10-21T14:45:00+08:00', true), text, now)).toBe(false);
     expect(startNowForDeadline(ev('2026-10-21T14:00:00+08:00', '2026-10-21T14:45:00+08:00'), '14:00-14:45 發放', now)).toBe(false);
   });
+  it('keeps a start time that the post also writes without "前"', () => {
+    const e = ev('2026-10-21T19:00:00+08:00', null);
+    const post = '📣 今天 10/21（三）19:00，免費發送 88 個虎爺鑰匙圈！\n所以這次如果 19:00 前，現場排隊人數已達 88 位，就可能提前發放。';
+    expect(startNowForDeadline(e, post, now)).toBe(false);
+    expect([e.start_at, e.end_at]).toEqual(['2026-10-21T19:00:00+08:00', null]);
+  });
 });
 
 describe('postExcerpt', () => {
