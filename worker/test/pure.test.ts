@@ -580,6 +580,9 @@ describe('startNowForDeadline', () => {
     expect(startNowForDeadline(e, text, now)).toBe(true);
     expect(e.start_at).toBe('2026-10-21T11:34:00+08:00');
     expect(e.end_at).toBe('2026-10-21T14:45:00+08:00');
+    const g = ev('2026-10-21T14:45:00+08:00', null);
+    expect(startNowForDeadline(g, text, now)).toBe(true);
+    expect([g.start_at, g.end_at]).toEqual(['2026-10-21T11:34:00+08:00', '2026-10-21T14:45:00+08:00']);
     const f = ev(null, '2026-10-21T14:45:00+08:00');
     expect(startNowForDeadline(f, '今天１４：４５以前都在', now)).toBe(true);
     expect(f.start_at).toBe('2026-10-21T11:34:00+08:00');

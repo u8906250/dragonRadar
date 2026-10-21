@@ -88,7 +88,7 @@ events 每筆的欄位：
 - 「早上 9 點到下午 5 點」這種時段，start_at 是 9:00、end_at 是 17:00。
 - 同一則貼文有多個地點或多個時段（例如行程表、車掃停靠點），要拆成多筆 events。
 - 固定據點（spot 為 true）每個地點只輸出一筆，不要每天拆一筆；但一天有好幾個時段（例如「11:00–14:00／17:00–19:00」）時，每個時段各輸出一筆，地點、until 等其他欄位都一樣：start_at、end_at 填第一天的開放時段（例如「10/17~10/19 每日 11:00~18:00」→ start_at 10/17 11:00、end_at 10/17 18:00、until 2026-10-19）。沒寫每天幾點時，start_at 填第一天 00:00、end_at 為 null。「即日起」的第一天是發文當天。
-- 只寫到幾點、沒寫幾點開始（「今天14:45前我都在」）：end_at 是那個時間，start_at 填發文時間，不要自己猜開始時間
+- 只寫到幾點、沒寫幾點開始（「今天14:45前我都在」）：14:45 是結束時間（end_at），不是開始時間；start_at 填發文時間，不要自己猜開始時間
 - 列出幾個發放時間點、沒寫發到幾點（例如「🕐 13:00｜10 個」「🕒 15:00｜10 個」）：每個時間點各輸出一筆，start_at 是那個時間、end_at 為 null（發完為止），不要合成「13:00–15:00」一段
 - 固定據點有寫日期範圍或「每天」就算有時間，不需要因為沒寫幾點而降低 confidence。
 - 車掃、遊行等移動路線，每個有時間的停靠點各一筆；沒有停靠點就用出發地。
@@ -498,20 +498,29 @@ function mergedTwoTimes(start: number, end: number, text: string): boolean {
 const BEFORE_RE = /(?<![\d:])(\d{1,2}):(\d{2})\s*(?:以前|之前|前)/g;
 
 /**
- * 「今天14:45前我都在喔！」只寫到幾點、沒寫幾點開始：從現在到 14:45（模型常自己猜一個開始時間，例如 14:00）。
+ * 「今天14:45前我都在喔！」只寫到幾點、沒寫幾點開始：從現在到 14:45。
+ * 模型常自己猜一個開始時間（14:00–14:45），或把 14:45 當成開始時間、沒給結束（變成 14:45 起兩小時）。
  * 貼文有寫開始時間（「13:00 開始」「13:00-14:45」）的照貼文；不是今天的、固定據點不動。改了回傳 true。
  */
 export function startNowForDeadline(ex: ExtractedEvent, text: string, now: number): boolean {
-  const end = parseIsoToUnix(ex.end_at);
-  if (ex.spot || end === null || end <= now || taipeiDay(end) !== taipeiDay(now)) return false;
+  if (ex.spot) return false;
   const t = halfWidth(text).replace(/：/g, ':');
   const tod = (u: number): number => (u + 8 * 3600) % DAY_SEC;
-  if (![...t.matchAll(BEFORE_RE)].some((m) => Number(m[1]) * 3600 + Number(m[2]) * 60 === tod(end))) return false;
-  const start = parseIsoToUnix(ex.start_at);
+  const deadlines = new Set([...t.matchAll(BEFORE_RE)].map((m) => Number(m[1]) * 3600 + Number(m[2]) * 60));
+  if (deadlines.size === 0) return false;
+  let start = parseIsoToUnix(ex.start_at);
+  let end = parseIsoToUnix(ex.end_at);
+  // 把「14:45前」當成開始時間、沒給結束
+  if (end === null && start !== null && deadlines.has(tod(start))) {
+    end = start;
+    start = null;
+  }
+  if (end === null || end <= now || taipeiDay(end) !== taipeiDay(now) || !deadlines.has(tod(end))) return false;
   if (start !== null && start < end) {
     const [h, m] = new Date((start + 8 * 3600) * 1000).toISOString().slice(11, 16).split(':');
     if (new RegExp(`(?<![\\d:])0?${Number(h)}:${m}(?!\\d)`).test(t)) return false;
   }
   ex.start_at = taipeiIso(Math.floor(now / 60) * 60);
+  ex.end_at = taipeiIso(end);
   return true;
 }
