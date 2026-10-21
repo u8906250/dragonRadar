@@ -201,6 +201,7 @@ const reportResult = $('#report-result');
 const reportTips = $('#report-tips');
 const myReportsEl = $('#my-reports');
 const myReportList = $<HTMLUListElement>('#my-report-list');
+const myReportsMore = $<HTMLButtonElement>('#my-reports-more');
 const bottleBtn = $<HTMLButtonElement>('#bottle-btn');
 const bottleBadge = $('#bottle-badge');
 const bottleSheet = $('#bottle-sheet');
@@ -2079,6 +2080,8 @@ function openKwSheet(open: boolean): void {
 function openReportSheet(open: boolean): void {
   reportSheet.hidden = !open;
   if (!open) return;
+  // 每次打開都先收起來
+  myReportsExpanded = false;
   void loadMyReports();
   themeSheet.hidden = true;
   kwSheet.hidden = true;
@@ -2358,8 +2361,17 @@ async function loadMyReports(): Promise<void> {
   myReports = r.data.reports;
   myReportIds.clear();
   for (const x of myReports) myReportIds.add(x.postId);
+  renderMyReports();
+}
+
+/** 我的回報超過幾筆就收起來，只列最新的幾筆 */
+const MY_REPORTS_FOLDED = 3;
+let myReportsExpanded = false;
+
+function renderMyReports(): void {
   myReportsEl.hidden = myReports.length === 0;
-  myReportList.innerHTML = myReports
+  const folded = !myReportsExpanded && myReports.length > MY_REPORTS_FOLDED;
+  myReportList.innerHTML = (folded ? myReports.slice(0, MY_REPORTS_FOLDED) : myReports)
     .map(
       (x) => `<li>
         <div><b>${esc(x.title || '（沒有內容）')}</b><small>${MY_REPORT_STATE[x.state]}${x.events > 1 ? `・${x.events} 場` : ''}・${dateFmt.format(new Date(x.reportedAt * 1000))} 回報${x.username ? `・@${esc(x.username)}` : ''}</small></div>
@@ -2367,6 +2379,9 @@ async function loadMyReports(): Promise<void> {
       </li>`,
     )
     .join('');
+  myReportsMore.hidden = myReports.length <= MY_REPORTS_FOLDED;
+  myReportsMore.textContent = folded ? `顯示全部（${myReports.length} 則）` : '收起';
+  myReportsMore.setAttribute('aria-expanded', String(!folded));
 }
 
 /** 刪除自己的回報：雷達上這則的發放、活動一起拿掉 */
@@ -2573,6 +2588,10 @@ function wireControls(): void {
   }
   for (const b of timeChips) b.addEventListener('click', () => setTime((b.dataset.time as TimeSetting) ?? 'all'));
   reportSheet.querySelector('[data-act="close"]')?.addEventListener('click', () => openReportSheet(false));
+  myReportsMore.addEventListener('click', () => {
+    myReportsExpanded = !myReportsExpanded;
+    renderMyReports();
+  });
   myReportList.addEventListener('click', (e) => {
     const b = (e.target as Element).closest<HTMLButtonElement>('button');
     if (b?.dataset.withdraw) void withdrawMine(b.dataset.withdraw);
