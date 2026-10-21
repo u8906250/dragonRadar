@@ -162,7 +162,8 @@ export interface KeywordRules {
   intervalMin: number;
   defaultDurationMin: number;
   maxFutureDays: number;
-  spotDefaultDays?: number;
+  /** 沒寫最後一天的固定據點最多排到發文後幾天（隱私權政策：貼文最多留 30 天） */
+  spotMaxDays?: number;
   minConfidence: number;
   endedWords: string[];
   region: string;

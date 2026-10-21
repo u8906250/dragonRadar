@@ -1892,13 +1892,13 @@ function renderRules(): void {
       <li><b>發放</b>：在某時某地免費發飄帶、貼紙、文宣、飲料等，雷達上是<span class="ex">橘色</span>光點。</li>
       <li><b>活動</b>：可以到場參加的車掃、掃街、市場開講、造勢晚會、見面會、座談等，雷達上是<span class="ex">另一個顏色</span>的光點。</li>
       <li>活動現場也有發放東西的，算成一筆發放。</li>
-      <li><b>固定據點</b>：店家、服務處等連續好幾天在固定時段都能去領或參加的，標成「據點」，雷達上是<span class="ex">菱形</span>光點，休息時間變淡。沒寫最後一天的寫「發完為止」，${r.spotDefaultDays ?? 7} 天後自動下架。可以用清單上方的「固定據點」開關隱藏。</li>
+      <li><b>固定據點</b>：店家、服務處等連續好幾天在固定時段都能去領或參加的，標成「據點」，雷達上是<span class="ex">菱形</span>光點，休息時間變淡。沒寫最後一天的寫「發完為止」，不預設哪天結束，一直顯示到原貼文刪除、作者說發完或管理者下架。可以用清單上方的「固定據點」開關隱藏。</li>
     </ul>
     <h3>時間地點怎麼判讀</h3>
     <ol>
       <li>貼文要同時寫出<b>時間</b>和<b>地點</b>，缺一個就不會出現在雷達上。</li>
       <li>時間可以寫 <span class="ex">10/18 15:00</span>、<span class="ex">今天下午三點</span>、<span class="ex">明晚 7 點</span>、<span class="ex">週六 14:00–16:00</span>。「今天、明天、週六」以發文時間換算，時區是台灣時間。</li>
-      <li>沒寫結束時間，或寫「發完為止」：畫面上寫「發完為止」（活動寫「沒寫結束時間」），不猜幾點結束。為了不讓舊的一直留在雷達上，開始 ${hours}後會自動下架；固定據點沒寫最後一天的，${r.spotDefaultDays ?? 7} 天後下架。</li>
+      <li>沒寫結束時間，或寫「發完為止」：畫面上寫「發完為止」（活動寫「沒寫結束時間」），不猜幾點結束。為了不讓舊的一直留在雷達上，單次的開始 ${hours}後會自動下架；固定據點沒寫最後一天的寫「發完為止」，不預設哪天結束。</li>
       <li>一則貼文有多個地點或時段（例如行程表、車掃停靠點），會拆成多筆。</li>
       <li>只查得到鄉鎮區、查不到確切地點的（例如新聞只寫「虎尾競選總部」），會定位在該鄉鎮區的中心並標成「約略位置」，雷達和地圖上是空心光點，請以原文為準。只知道縣市的不會放上雷達。</li>
       <li>地點寫越具體越好，例如 <span class="ex">捷運市政府站 2號出口</span>、<span class="ex">板橋車站北一門</span>、<span class="ex">松山文創園區</span>。找不到出口時會退到車站位置。</li>
@@ -2086,8 +2086,9 @@ function previewWhen(p: PreviewItem): string {
   const slots = p.slots && p.slots.length > 1 ? `${p.slots.map(slotText).join('、')}${p.slots.some((s) => s.endOpen) ? `，${open}` : ''}` : null;
   if (p.spot) {
     const hours = p.allDay ? '整天' : slots ?? (p.endOpen ? `${fmtTime(p.startAt)} 開始，${open}` : `${fmtTime(p.startAt)}–${fmtTime(p.endAt)}`);
-    const range = p.days > 1 ? `${day(p.startAt)} 到 ${day(p.lastStartAt)}，共 ${p.days} 天` : day(p.startAt);
-    return `${weeklyText(p.weekdays) ?? '每天'} ${hours}・${range}${p.untilOpen ? '（貼文沒寫最後一天，先排這幾天，發完為止）' : ''}`;
+    // 沒寫最後一天：不寫系統排到哪天，只寫「發完為止」
+    const range = p.untilOpen ? `${day(p.startAt)} 起，${open}` : p.days > 1 ? `${day(p.startAt)} 到 ${day(p.lastStartAt)}，共 ${p.days} 天` : day(p.startAt);
+    return `${weeklyText(p.weekdays) ?? '每天'} ${hours}・${range}`;
   }
   if (p.allDay) return `${day(p.startAt)} 整天`;
   if (slots) return `${day(p.startAt)} ${slots}`;

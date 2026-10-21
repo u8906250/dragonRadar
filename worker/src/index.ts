@@ -1,6 +1,6 @@
 import { getAccessToken, makeClient, saveAccessToken } from './client';
 import type { Env } from './env';
-import { DEFAULT_DURATION_SEC, ENDED_WORDS, MAX_FUTURE_SEC, MIN_CONFIDENCE, SPOT_DEFAULT_DAYS, getEvent, getPost, ingestAll, ingestKeyword, listEvents, processBacklog, processPost, storePost, updateLifecycle, type EventRow } from './events';
+import { DEFAULT_DURATION_SEC, ENDED_WORDS, MAX_FUTURE_SEC, MIN_CONFIDENCE, SPOT_MAX_DAYS, extendOpenSpots, getEvent, getPost, ingestAll, ingestKeyword, listEvents, processBacklog, processPost, storePost, updateLifecycle, type EventRow } from './events';
 import { normalizeExtraction, runModel } from './extract';
 import { geocode } from './geocode';
 import { ingestNews, NEWS_FEEDS } from './sources/news';
@@ -119,7 +119,7 @@ async function handle(req: Request, env: Env, ctx: ExecutionContext): Promise<Re
         intervalMin: 10,
         defaultDurationMin: DEFAULT_DURATION_SEC / 60,
         maxFutureDays: MAX_FUTURE_SEC / 86400,
-        spotDefaultDays: SPOT_DEFAULT_DAYS,
+        spotMaxDays: SPOT_MAX_DAYS,
         minConfidence: MIN_CONFIDENCE,
         endedWords: ENDED_WORDS,
         region: '全台灣',
@@ -319,7 +319,8 @@ async function handleAdmin(req: Request, env: Env, _ctx: ExecutionContext, path:
     const ingest = await ingestAll(env, client, now);
     const backlog = await processBacklog(env, now);
     const lifecycle = await updateLifecycle(env, client, now);
-    return jsonResponse({ mode: client.mode, ingest, backlog, lifecycle });
+    const extended = await extendOpenSpots(env, now);
+    return jsonResponse({ mode: client.mode, ingest, backlog, lifecycle, extended });
   }
 
   if (req.method === 'GET' && path === '/api/admin/events') {
@@ -580,12 +581,14 @@ async function runScheduled(env: Env, cron: string): Promise<void> {
   const voyage = await syncVoyage(env, now).catch((e) => ({ error: String(e) }));
   const news = minute % 30 < 10 ? await ingestNews(env, now).catch((e) => ({ error: String(e) })) : null;
   const lifecycle = await updateLifecycle(env, client, now);
+  // 沒寫最後一天的固定據點每天往後補時段（發完為止，不預設最後一天）
+  const extended = await extendOpenSpots(env, now).catch((e) => ({ error: String(e) }));
   const links = await recheckLinks(env, now).catch((e) => ({ error: String(e) }));
   // 新聞、貼文講的是官方車掃就併進去（不管誰先到，每次都重新比對）
   const merge = await mergeIntoOfficial(env, now).catch((e) => ({ error: String(e) }));
   const drift = bottlesEnabled(env) ? await driftBottles(env, now).catch((e) => ({ error: String(e) })) : null;
   const purged = await purgeOldData(env, now);
-  console.log(JSON.stringify({ cron, mode: client.mode, ingest, backlog, voyage, news, lifecycle, links, merge, drift, purged }));
+  console.log(JSON.stringify({ cron, mode: client.mode, ingest, backlog, voyage, news, lifecycle, extended, links, merge, drift, purged }));
 }
 
 export default {

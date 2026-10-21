@@ -110,8 +110,13 @@ export const DEFAULT_DURATION_SEC = 2 * 3600;
 export const MAX_FUTURE_SEC = 14 * 86400;
 const LOOKBACK_SEC = 24 * 3600;
 export const MIN_CONFIDENCE = 0.5;
-/** 固定據點沒寫最後一天時，從第一天起保留幾天 */
-export const SPOT_DEFAULT_DAYS = 7;
+/**
+ * 固定據點沒寫最後一天（發完為止）：先排到這麼多天後，之後每天往後補（extendOpenSpots），
+ * 不預設最後一天；貼文刪了、作者說發完、管理者下架才停
+ */
+export const SPOT_AHEAD_DAYS = 14;
+/** 隱私權政策：貼文最多留 30 天，沒寫最後一天的據點最多排到發文後這麼多天 */
+export const SPOT_MAX_DAYS = 30;
 const DAY_SEC = 86400;
 const TAIPEI_OFFSET_SEC = 8 * 3600;
 const DUP_WINDOW_SEC = 30 * 60;
@@ -177,7 +182,7 @@ export interface Session {
 }
 
 /**
- * 固定據點展開成每天一個時段：從 start_at 那天到 until（沒寫就保留 SPOT_DEFAULT_DAYS 天），
+ * 固定據點展開成每天一個時段：從 start_at 那天到 until（沒寫就先排 SPOT_AHEAD_DAYS 天，之後每天往後補），
  * 每天用第一天的開放時段；沒寫幾點（00:00 開始、沒有結束）就是整天。
  */
 export function spotSessions(ex: Pick<ExtractedEvent, 'start_at' | 'end_at' | 'until' | 'weekdays'>, postedAt: number, now: number): Session[] {
@@ -196,10 +201,10 @@ export function spotSessions(ex: Pick<ExtractedEvent, 'start_at' | 'end_at' | 'u
   const untilAt = untilRaw !== null && untilRaw > firstDay ? untilRaw : null;
   const multiDayEnd = end !== null && taipeiDayStart(end) > firstDay;
   const untilOpen = untilAt === null && !multiDayEnd;
-  // 沒寫最後一天：每天開的先排 SPOT_DEFAULT_DAYS 天；每週幾才開的排兩週，才不會只剩一兩次
-  const defaultDays = ex.weekdays?.length ? 14 : SPOT_DEFAULT_DAYS;
-  let lastDay = untilAt ?? (multiDayEnd ? taipeiDayStart(end) : firstDay + (defaultDays - 1) * DAY_SEC);
-  lastDay = Math.min(lastDay, firstDay + 13 * DAY_SEC, taipeiDayStart(now + MAX_FUTURE_SEC));
+  // 沒寫最後一天：先排 SPOT_AHEAD_DAYS 天（畫面寫「發完為止」），之後每天由 extendOpenSpots 往後補
+  let lastDay = untilAt ?? (multiDayEnd ? taipeiDayStart(end) : spotHorizon(now, postedAt));
+  if (!untilOpen) lastDay = Math.min(lastDay, firstDay + (SPOT_AHEAD_DAYS - 1) * DAY_SEC);
+  lastDay = Math.min(lastDay, taipeiDayStart(now + MAX_FUTURE_SEC));
 
   const out: Session[] = [];
   // 每週幾才開：其他天跳過（taipeiDay 換成星期：1 = 週一 … 7 = 週日）
@@ -210,6 +215,54 @@ export function spotSessions(ex: Pick<ExtractedEvent, 'start_at' | 'end_at' | 'u
     if (s.end > now) out.push(s);
   }
   return out;
+}
+
+/** 沒寫最後一天的據點排到哪一天：今天起 SPOT_AHEAD_DAYS 天，但不超過發文後 SPOT_MAX_DAYS 天 */
+function spotHorizon(now: number, postedAt: number): number {
+  return Math.min(taipeiDayStart(now) + (SPOT_AHEAD_DAYS - 1) * DAY_SEC, taipeiDayStart(postedAt) + (SPOT_MAX_DAYS - 1) * DAY_SEC);
+}
+
+/**
+ * 沒寫最後一天的固定據點（發完為止）每天往後補時段，一直排到 SPOT_AHEAD_DAYS 天後，不預設最後一天。
+ * 同一則貼文、同一個地點、每天同一個時間算一串；這串最後一個時段已經結束（貼文刪了、作者說發完、管理者下架）就不補。
+ * 回傳補了幾個時段。
+ */
+export async function extendOpenSpots(env: Env, now: number): Promise<number> {
+  const { results } = await env.DB.prepare(
+    `SELECT e.id, e.post_id, e.place_text, e.start_at, e.end_at, e.status, e.weekdays, p.posted_at
+       FROM events e JOIN posts p ON p.id = e.post_id
+      WHERE e.spot = 1 AND e.until_open = 1 AND e.end_at > ?`,
+  )
+    .bind(now - DAY_SEC)
+    .all<{ id: number; post_id: string; place_text: string; start_at: number; end_at: number; status: string; weekdays: string | null; posted_at: number }>();
+  // 每一串：最後一個時段排到哪天（包括公休、被回報發完而結束的），和用來複製的還沒結束的時段
+  const series = new Map<string, { lastStart: number; tpl: (typeof results)[number] | null }>();
+  for (const r of results) {
+    const k = `${r.post_id}|${r.place_text}|${(r.start_at + TAIPEI_OFFSET_SEC) % DAY_SEC}`;
+    const cur = series.get(k) ?? { lastStart: 0, tpl: null };
+    cur.lastStart = Math.max(cur.lastStart, r.start_at);
+    if ((r.status === 'upcoming' || r.status === 'active') && (!cur.tpl || r.start_at > cur.tpl.start_at)) cur.tpl = r;
+    series.set(k, cur);
+  }
+  const inserts = [];
+  for (const { lastStart, tpl } of series.values()) {
+    if (!tpl) continue;
+    const horizon = spotHorizon(now, tpl.posted_at);
+    const weekdays = tpl.weekdays ? new Set(tpl.weekdays.split(',').map(Number)) : null;
+    const open = tpl.start_at - taipeiDayStart(tpl.start_at);
+    for (let day = taipeiDayStart(lastStart) + DAY_SEC; day <= horizon; day += DAY_SEC) {
+      if (weekdays && !weekdays.has(((new Date((day + TAIPEI_OFFSET_SEC) * 1000).getUTCDay() + 6) % 7) + 1)) continue;
+      const start = day + open;
+      inserts.push(
+        env.DB.prepare(
+          `INSERT INTO events (post_id, kind, title, item, start_at, end_at, place_text, place_query, lat, lng, status, confidence, all_day, spot, approx_area, end_open, until_open, weekdays, created_at, updated_at)
+           SELECT post_id, kind, title, item, ?, ?, place_text, place_query, lat, lng, 'upcoming', confidence, all_day, spot, approx_area, end_open, until_open, weekdays, ?, ? FROM events WHERE id = ?`,
+        ).bind(start, start + (tpl.end_at - tpl.start_at), now, now, tpl.id),
+      );
+    }
+  }
+  for (let i = 0; i < inserts.length; i += 50) await env.DB.batch(inserts.slice(i, i + 50));
+  return inserts.length;
 }
 
 /** 門牌查詢（含很慢的 Overpass）一則貼文最多花這麼久，超過就只用 Photon，免得回報的人等太久 */

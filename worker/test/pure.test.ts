@@ -315,7 +315,7 @@ describe('spotSessions', () => {
   });
   it('treats a last day equal to the first day as "from that day" (「10/16 起」), marking the last day as unknown', () => {
     const s = spotSessions({ start_at: '2026-10-17T13:00:00+08:00', end_at: '2026-10-17T20:00:00+08:00', until: '2026-10-17' }, posted, posted);
-    expect(s).toHaveLength(7);
+    expect(s).toHaveLength(14);
     expect(s[0]).toMatchObject({ endOpen: false, untilOpen: true });
   });
   it('marks an unknown daily closing time', () => {
@@ -324,10 +324,16 @@ describe('spotSessions', () => {
     // 沒寫幾點結束就開到當天結束，不猜「兩小時後」
     expect(s[0].end).toBe(t('2026-10-18T00:00:00+08:00'));
   });
-  it('keeps 7 days when no last day is given, and marks unknown hours as all-day', () => {
+  it('schedules two weeks ahead (no default last day) when none is given, and marks unknown hours as all-day', () => {
     const s = spotSessions({ start_at: '2026-10-17T00:00:00+08:00', end_at: null, until: null }, posted, posted);
-    expect(s).toHaveLength(7);
+    expect(s).toHaveLength(14);
+    expect(s.every((x) => x.untilOpen)).toBe(true);
     expect(s[0]).toEqual({ start: t('2026-10-17T00:00:00+08:00'), end: t('2026-10-18T00:00:00+08:00'), allDay: true, endOpen: false, untilOpen: true });
+  });
+  it('never schedules an open-ended spot past 30 days after the post (privacy policy)', () => {
+    const later = t('2026-11-10T09:00:00+08:00');
+    const s = spotSessions({ start_at: '2026-10-17T13:00:00+08:00', end_at: '2026-10-17T15:00:00+08:00', until: null }, posted, later);
+    expect(s.at(-1)?.start).toBe(t('2026-11-15T13:00:00+08:00'));
   });
 });
 
