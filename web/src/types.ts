@@ -203,13 +203,13 @@ export interface PreviewItem {
   slots?: Array<{ startAt: number; endAt: number; endOpen?: boolean }>;
 }
 
-/** 我的回報（用同一個瀏覽器回報、30 天內的）：on_radar 在雷達上、attached 附在別的據點、pending 還沒確認、rejected 說判讀錯了、not_listed 已結束或沒放上 */
+/** 我的回報（用同一個瀏覽器回報、確認放上雷達、30 天內的）：on_radar 在雷達上、attached 附在別的據點、not_listed 已結束或沒放上 */
 export interface MyReport {
   postId: string;
   permalink: string;
   username: string | null;
   title: string;
-  state: 'on_radar' | 'attached' | 'pending' | 'rejected' | 'not_listed';
+  state: 'on_radar' | 'attached' | 'not_listed';
   events: number;
   eventId: number | null;
   reportedAt: number;

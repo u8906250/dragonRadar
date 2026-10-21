@@ -2296,12 +2296,10 @@ async function showReportResult(data: SubmitResult): Promise<void> {
 const MY_REPORT_STATE: Record<MyReport['state'], string> = {
   on_radar: '在雷達上',
   attached: '附在雷達上的據點',
-  pending: '還沒確認',
-  rejected: '你說判讀錯了，沒放上雷達',
-  not_listed: '不在雷達上（已結束或沒放上）',
+  not_listed: '不在雷達上（已結束）',
 };
 
-/** 我的回報：30 天內用這個瀏覽器回報的，可以看、開原文、刪除 */
+/** 我的回報：30 天內用這個瀏覽器回報、已經放上雷達的，可以看、開原文、刪除 */
 async function loadMyReports(): Promise<void> {
   const r = await fetchMyReports();
   if (!r.ok) return;

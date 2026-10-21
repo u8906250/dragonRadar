@@ -360,13 +360,13 @@ export async function rejectLink(env: Env, body: { postId?: unknown; token?: unk
   return { ok: true };
 }
 
-/** 我的回報（用同一個瀏覽器回報的）：on_radar 在雷達上、attached 附在別的據點、pending 還沒確認、rejected 說判讀錯了、not_listed 已結束或沒放上 */
+/** 我的回報（用同一個瀏覽器回報、確認放上雷達的）：on_radar 在雷達上、attached 附在別的據點、not_listed 已結束或沒放上 */
 export interface MyReport {
   postId: string;
   permalink: string;
   username: string | null;
   title: string;
-  state: 'on_radar' | 'attached' | 'pending' | 'rejected' | 'not_listed';
+  state: 'on_radar' | 'attached' | 'not_listed';
   /** 雷達上還沒結束的場次 */
   events: number;
   /** 點了跳到雷達上的哪一場 */
@@ -374,12 +374,16 @@ export interface MyReport {
   reportedAt: number;
 }
 
-/** 這個裝置 30 天內回報過的貼文（回報紀錄 30 天後刪除，更早的就認不出來了） */
+/**
+ * 這個裝置 30 天內回報、有放上雷達的貼文（附在別的據點的也算）。還沒確認、說判讀錯了、跟雷達上重複而沒放上的不列。
+ * 回報紀錄 30 天後刪除，更早的就認不出來了。
+ */
 export async function myReports(env: Env, device: string): Promise<MyReport[]> {
   const { results: posts } = await env.DB.prepare(
     `SELECT p.id, p.permalink, p.username, p.text, p.confirm_state, p.link_role, MAX(s.created_at) AS reported_at
        FROM submissions s JOIN posts p ON p.id = s.post_id
-      WHERE s.device = ? AND p.source = 'link' AND COALESCE(p.confirm_state, '') != 'withdrawn'
+      WHERE s.device = ? AND p.source = 'link' AND p.confirm_state = 'confirmed'
+        AND (p.link_role = 'related' OR EXISTS (SELECT 1 FROM events e WHERE e.post_id = p.id))
       GROUP BY p.id ORDER BY reported_at DESC LIMIT 30`,
   )
     .bind(device)
@@ -392,8 +396,7 @@ export async function myReports(env: Env, device: string): Promise<MyReport[]> {
     .all<{ id: number; post_id: string; title: string }>();
   return posts.map((p) => {
     const mine = evs.filter((e) => e.post_id === p.id);
-    const state: MyReport['state'] =
-      p.confirm_state === 'pending' ? 'pending' : p.confirm_state === 'rejected' ? 'rejected' : mine.length > 0 ? 'on_radar' : p.link_role === 'related' ? 'attached' : 'not_listed';
+    const state: MyReport['state'] = mine.length > 0 ? 'on_radar' : p.link_role === 'related' ? 'attached' : 'not_listed';
     const firstLine = p.text.split('\n').map((x) => x.trim()).find(Boolean) ?? '';
     return {
       postId: p.id,

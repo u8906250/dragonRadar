@@ -200,7 +200,7 @@ Cloudflare D1 偶爾回「D1_ERROR: internal error」這類暫時性錯誤。`sr
 | POST | `/api/reports/confirm` | 確認判讀結果，放上雷達 `{ postId, token }` |
 | POST | `/api/reports/supplement` | 補充地點或時間後再判讀一次 `{ postId, token, note }`，回傳新的預覽 |
 | POST | `/api/reports/reject` | 判讀錯了，不放 `{ postId, token, note? }` |
-| GET | `/api/reports/mine` | 我的回報（`x-device` 標頭）：30 天內用這個瀏覽器回報的貼文與狀態 |
+| GET | `/api/reports/mine` | 我的回報（`x-device` 標頭）：30 天內用這個瀏覽器回報、有放上雷達（或附在據點）的貼文與狀態 |
 | DELETE | `/api/reports/:postId` | 刪除自己的回報（`x-device` 要跟回報時一樣）：雷達上這則的事件都刪掉，`confirm_state = 'withdrawn'`；取代過的舊據點放回雷達 |
 | POST | `/api/events/:id/ended` | 回報已發完／已結束 |
 | GET | `/api/keywords` | 搜尋中的關鍵字、上限、是否開放使用者新增 |
