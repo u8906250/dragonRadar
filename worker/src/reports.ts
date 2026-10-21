@@ -12,9 +12,16 @@ import { sha1Hex } from './sources/text';
 
 /** 只收這麼新的貼文，太舊的公告通常已經過期 */
 export const MAX_LINK_AGE_SEC = 7 * 86400;
-const SUBMIT_PER_IP_PER_HOUR = 10;
+/** 同一個瀏覽器（裝置代碼）每小時最多回報幾則；補充資料不算 */
+const SUBMIT_PER_DEVICE_PER_HOUR = 20;
+/** 同一個 IP 每小時：手機網路、同一個 Wi-Fi 常很多人共用一個 IP，放寬，只用來擋清掉瀏覽器資料一直灌的 */
+const SUBMIT_PER_IP_PER_HOUR = 60;
+/** 沒帶裝置代碼（舊版網頁）時照以前：同一個 IP 每小時 10 則 */
+const SUBMIT_PER_IP_NO_DEVICE = 10;
 /** 全站每小時上限，避免被灌爆 Workers AI 用量 */
 const SUBMIT_GLOBAL_PER_HOUR = 200;
+/** 補充資料的紀錄 result 是 "supplement"，不算回報次數 */
+const NOT_SUPPLEMENT = `(result IS NULL OR result != '"supplement"')`;
 const ENDED_PER_IP_PER_HOUR = 20;
 /** 幾個不同的人回報已發完，事件才提早下架 */
 export const ENDED_REPORTS_NEEDED = 2;
@@ -229,6 +236,16 @@ async function countSince(env: Env, sql: string, binds: unknown[]): Promise<numb
   return (await env.DB.prepare(sql).bind(...binds).first<{ n: number }>())?.n ?? 0;
 }
 
+/** 過去一小時的回報次數到上限了：告訴回報的人大約幾分鐘後可以再回報 */
+async function checkHourlyLimit(env: Env, column: 'device' | 'ip_hash', value: string, max: number, now: number, who: string): Promise<void> {
+  const r = await env.DB.prepare(`SELECT COUNT(*) AS n, MIN(created_at) AS first FROM submissions WHERE ${column} = ? AND created_at > ? AND ${NOT_SUPPLEMENT}`)
+    .bind(value, now - 3600)
+    .first<{ n: number; first: number | null }>();
+  if ((r?.n ?? 0) < max) return;
+  const wait = Math.max(1, Math.ceil(((r?.first ?? now) + 3600 - now) / 60));
+  throw new ReportError(429, `回報太頻繁了：${who}一小時最多回報 ${max} 則，約 ${wait} 分鐘後可以再回報`);
+}
+
 export const UNREADABLE_POST =
   'Threads 不讓外部讀取這則貼文，雷達讀不到內容。可能是貼文已刪除、帳號是私人帳號，或貼文限制只有登入的人才能看（例如酒類貼文限成年人觀看）。';
 
@@ -258,9 +275,10 @@ export async function submitLink(env: Env, input: string, ip: string, now: numbe
   if (postedAt === null) throw new ReportError(400, '這個連結看起來不是 Threads 貼文');
   if (now - postedAt > MAX_LINK_AGE_SEC) throw new ReportError(400, `這則貼文發布超過 ${MAX_LINK_AGE_SEC / 86400} 天，雷達只收最近的發放和活動`);
 
-  const mine = await countSince(env, 'SELECT COUNT(*) AS n FROM submissions WHERE ip_hash = ? AND created_at > ?', [ip, now - 3600]);
-  if (mine >= SUBMIT_PER_IP_PER_HOUR) throw new ReportError(429, '回報太頻繁了，請過一陣子再試');
-  const all = await countSince(env, 'SELECT COUNT(*) AS n FROM submissions WHERE created_at > ?', [now - 3600]);
+  // 主要看同一個瀏覽器；IP 放寬（很多人共用一個 IP），只擋清掉瀏覽器資料一直灌的
+  if (device) await checkHourlyLimit(env, 'device', device, SUBMIT_PER_DEVICE_PER_HOUR, now, '同一個瀏覽器');
+  await checkHourlyLimit(env, 'ip_hash', ip, device ? SUBMIT_PER_IP_PER_HOUR : SUBMIT_PER_IP_NO_DEVICE, now, '同一個網路');
+  const all = await countSince(env, `SELECT COUNT(*) AS n FROM submissions WHERE created_at > ? AND ${NOT_SUPPLEMENT}`, [now - 3600]);
   if (all >= SUBMIT_GLOBAL_PER_HOUR) throw new ReportError(429, '目前回報的人太多，請稍後再試');
 
   const fetched = await fetchThreadsPost(link.code);
@@ -316,7 +334,8 @@ export async function confirmLink(env: Env, body: { postId?: unknown; token?: un
   await env.DB.batch([
     env.DB.prepare("UPDATE posts SET confirm_state = 'confirmed', confirm_plan = NULL WHERE id = ?").bind(post.id),
     // 舊版網頁送出時沒帶裝置代碼：確認的人補上，之後才能自己刪除
-    env.DB.prepare('UPDATE submissions SET result = ?, device = COALESCE(device, ?) WHERE id = (SELECT MAX(id) FROM submissions WHERE post_id = ?)').bind(JSON.stringify(result.reasons), device, post.id),
+    // 寫在這則最後一筆回報上；補充資料的紀錄不動（不然補充會被當成回報、補充次數也少算）
+    env.DB.prepare(`UPDATE submissions SET result = ?, device = COALESCE(device, ?) WHERE id = (SELECT MAX(id) FROM submissions WHERE post_id = ? AND ${NOT_SUPPLEMENT})`).bind(JSON.stringify(result.reasons), device, post.id),
   ]);
   return { existed: false, outcome: summarize(result.reasons), reasons: result.reasons, events: await eventsForResult(env, post.id, result.reasons, now), permalink };
 }
@@ -333,8 +352,7 @@ export async function supplementLink(env: Env, body: { postId?: unknown; token?:
   if (post.confirm_state === 'confirmed') throw new ReportError(409, '這則已經放上雷達了，不能再補充');
   const note = typeof body.note === 'string' ? body.note.replace(/\s+/g, ' ').trim().slice(0, 200) : '';
   if (note.length < 2) throw new ReportError(400, '請寫要補充的地點或時間');
-  const mine = await countSince(env, 'SELECT COUNT(*) AS n FROM submissions WHERE ip_hash = ? AND created_at > ?', [ip, now - 3600]);
-  if (mine >= SUBMIT_PER_IP_PER_HOUR) throw new ReportError(429, '回報太頻繁了，請過一陣子再試');
+  // 補充資料不算回報次數；一則最多補充 SUPPLEMENTS_PER_POST 次
   const times = await countSince(env, "SELECT COUNT(*) AS n FROM submissions WHERE post_id = ? AND result = '\"supplement\"'", [post.id]);
   if (times >= SUPPLEMENTS_PER_POST) throw new ReportError(429, '這則已經補充太多次了，請聯絡管理者');
   await env.DB.prepare("INSERT INTO submissions (post_id, ip_hash, device, result, created_at) VALUES (?, ?, ?, '\"supplement\"', ?)").bind(post.id, ip, device, now).run();
