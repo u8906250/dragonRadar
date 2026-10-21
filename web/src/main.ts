@@ -536,8 +536,8 @@ function render(): void {
       // 還沒出發的車掃路線點用「即將開始」的淡色畫；還沒開的據點跟休息中的一樣淡；其他稍後開始的畫虛線框
       phase: it.phase === 'later' ? (it.spot ? 'closed' : routeOf(it.ev) ? 'soon' : 'later') : it.phase,
       label: titleOf(it.ev),
-      // 據點整天都開著，標籤只在選取時顯示，免得蓋掉單次的發放
-      showLabel: (it.phase === 'active' && !it.spot) || it.ev.id === selectedId,
+      // 名稱只在選取時顯示，光點一多標題會蓋成一片
+      showLabel: it.ev.id === selectedId,
       selected: it.ev.id === selectedId,
       // 稍後開始的越久越淡；還沒開始的都在光點下寫還有多久
       ...(isUpcoming(it) ? { badge: startsInShort(it.ev.startAt, now), ...(it.phase === 'later' ? { fade: clarityOf(it.ev, now) } : {}) } : {}),
