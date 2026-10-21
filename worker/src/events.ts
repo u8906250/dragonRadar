@@ -473,7 +473,8 @@ export async function insertPlanned(env: Env, postId: string, p: PlannedEvent, n
 /** 對單一貼文跑 LLM 抽取、定位，列出每個地點或時段要建的事件（還沒寫進雷達）；early 是整則貼文就不行的原因 */
 export async function planPost(env: Env, post: PostRow, now = nowSec()): Promise<{ items: PlanItem[]; early: string | null }> {
   const text = post.supplement ? `${post.text}\n\n【回報的人補充】${post.supplement}` : post.text;
-  const { extraction, raw, garbled } = await extractFromPost(env, text, post.posted_at, now);
+  // 使用者貼連結回報的，主要模型說不是活動時再問備用模型（只多等一下，量不大）
+  const { extraction, raw, garbled } = await extractFromPost(env, text, post.posted_at, now, { secondOpinion: post.source === 'link' });
   await env.DB.prepare('UPDATE posts SET processed_at = ?, extraction = ? WHERE id = ?').bind(now, raw, post.id).run();
 
   if (garbled) return { items: [], early: 'garbled' };

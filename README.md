@@ -19,7 +19,7 @@ worker/   Cloudflare Worker（API、排程、資料庫）
 ## 運作流程
 
 1. 每 10 分鐘 Cron 喚醒 Worker，對每個關鍵字呼叫 Threads `keyword_search`（RECENT，`since` 只拿新貼文）。
-2. 新貼文丟給 Workers AI 抽出：是否為實體發放、開始／結束時間、地點文字、可搜尋的地點名稱、信心分數。
+2. 新貼文丟給 Workers AI 抽出：是否為實體發放、開始／結束時間、地點文字、可搜尋的地點名稱、信心分數。主要模型 `AI_MODEL`（Qwen3 30B）判讀失敗或地點亂碼時換備用模型 `AI_MODEL_FALLBACK`（Mistral Small 3.1）；使用者貼連結回報的，主要模型說「不是活動」也再問備用模型一次（`secondOpinion`，主要模型對同一則有時判成不是），備用模型壞掉就照主要模型的。
 3. 地點轉成座標，寫進 `events`（`locatePlaceForEvent`）：貼文有寫門牌就只用門牌查（Photon、Overpass，跟 `locatePlace` 同一套；地點欄沒寫縣市時從另一欄補，縣市不確定就不查），查不到就先退到那條路（`geocodeStreet`：先含巷「北新路184巷」再大路「北新路」，Nominatim 只接受道路、要在同一個縣市和鄉鎮區，快取鍵前面加 `road:`，`approx_area` 寫路名），再退到鄉鎮區中心，都標成約略位置，**不拿店名或「XX服務處」去猜**（會查到同名的別的機構）；沒有門牌才用 Nominatim 查地名。固定據點的每天時段只定位一次；一則貼文的 Overpass 最多查 25 秒，之後只用 Photon。
 4. 事件狀態：`upcoming` → `active`（到開始時間）→ `ended`（到結束時間，或作者後續貼文／回覆出現「發完」等字眼）。
 5. 前端每分鐘向 `/api/events` 拿附近事件，用使用者座標算方位與距離畫在雷達上；進行中事件變多時嗶聲＋通知。

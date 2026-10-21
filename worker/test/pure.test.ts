@@ -204,7 +204,8 @@ describe('verifySignedRequest', () => {
   });
 });
 
-import { placeFidelity, responseContent } from '../src/extract';
+import type { Env } from '../src/env';
+import { extractFromPost, placeFidelity, responseContent } from '../src/extract';
 
 describe('responseContent', () => {
   it('reads both Workers AI and OpenAI-style shapes', () => {
@@ -221,6 +222,46 @@ describe('placeFidelity', () => {
   });
   it('is low for garbled output', () => {
     expect(placeFidelity(ev('越車政園给行 2号 出口'), text)).toBeLessThan(0.7);
+  });
+});
+
+describe('extractFromPost second opinion', () => {
+  const NOT_EVENT = '{"is_event":false,"events":[]}';
+  const EVENT = '{"is_event":true,"events":[{"title":"珈琲無花果發小物","place_text":"安西街19號","confidence":0.9}]}';
+  const text = '珈琲無花果 📍台北市大同區安西街19號 各式貼紙請酌量自取';
+  // 模擬 Workers AI：每個模型回固定的內容，丟出錯誤就當作模型壞掉
+  const env = (answers: Record<string, string | Error>) => {
+    const calls: string[] = [];
+    const ai = {
+      run: async (model: string) => {
+        calls.push(model);
+        const a = answers[model];
+        if (a instanceof Error) throw a;
+        return { response: a };
+      },
+    };
+    return { calls, env: { AI: ai, AI_MODEL: 'primary', AI_MODEL_FALLBACK: 'fallback' } as unknown as Env };
+  };
+
+  it('asks the fallback when the primary says not an event', async () => {
+    const m = env({ primary: NOT_EVENT, fallback: EVENT });
+    const r = await extractFromPost(m.env, text, 0, 0, { secondOpinion: true });
+    expect(r.model).toBe('fallback');
+    expect(r.extraction?.is_event).toBe(true);
+  });
+  it('keeps the primary answer when the fallback breaks', async () => {
+    const m = env({ primary: NOT_EVENT, fallback: new Error('down') });
+    const r = await extractFromPost(m.env, text, 0, 0, { secondOpinion: true });
+    expect(r.model).toBe('primary');
+    expect(r.extraction?.is_event).toBe(false);
+  });
+  it('does not ask again without secondOpinion or when the primary found events', async () => {
+    const a = env({ primary: NOT_EVENT, fallback: EVENT });
+    expect((await extractFromPost(a.env, text, 0, 0)).extraction?.is_event).toBe(false);
+    expect(a.calls).toEqual(['primary']);
+    const b = env({ primary: EVENT, fallback: NOT_EVENT });
+    expect((await extractFromPost(b.env, text, 0, 0, { secondOpinion: true })).extraction?.is_event).toBe(true);
+    expect(b.calls).toEqual(['primary']);
   });
 });
 

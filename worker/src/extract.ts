@@ -385,19 +385,29 @@ export async function runModel(env: Env, model: string, text: string, postedAt: 
   return { model, ms: Date.now() - t0, extraction, raw, fidelity, ok: !!extraction && fidelity >= MIN_FIDELITY, error };
 }
 
-/** 主要模型判讀失敗或地點亂碼時，換備用模型再試 */
+/**
+ * 主要模型判讀失敗或地點亂碼時，換備用模型再試。
+ * secondOpinion：主要模型說「不是活動」也請備用模型再看一次（使用者貼連結回報的，
+ * 主要模型對同一則有時判成不是、有時判成是）；備用模型壞掉就照主要模型的
+ */
 export async function extractFromPost(
   env: Env,
   text: string,
   postedAt: number,
   now: number,
+  opts: { secondOpinion?: boolean } = {},
 ): Promise<{ extraction: Extraction | null; raw: string; model: string; garbled: boolean }> {
   const models = [env.AI_MODEL, env.AI_MODEL_FALLBACK].filter((m, i, a): m is string => !!m && a.indexOf(m) === i);
   let last: ModelAttempt | null = null;
   for (const m of models) {
-    last = await runModel(env, m, text, postedAt, now);
-    if (last.ok) break;
-    console.warn(`extract with ${m} not usable: fidelity=${last.fidelity.toFixed(2)} error=${last.error ?? ''}`);
+    const attempt = await runModel(env, m, text, postedAt, now);
+    if (last?.ok && !attempt.ok) {
+      console.warn(`second opinion with ${m} not usable, keeping ${last.model}: error=${attempt.error ?? ''}`);
+      break;
+    }
+    last = attempt;
+    if (last.ok && (last.extraction?.is_event || !opts.secondOpinion)) break;
+    if (!last.ok) console.warn(`extract with ${m} not usable: fidelity=${last.fidelity.toFixed(2)} error=${last.error ?? ''}`);
   }
   if (!last) return { extraction: null, raw: 'null', model: '', garbled: false };
   const garbled = !!last.extraction && last.fidelity < MIN_FIDELITY;
