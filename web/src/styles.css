@@ -426,6 +426,8 @@ a.chip { display: inline-flex; align-items: center; text-decoration: none; }
 .radar .blip.spot.phase-active .dot { animation: none; }
 .radar.blip-neon .blip.spot .dot { filter: drop-shadow(0 0 6px var(--blip-spot)); }
 .ev.spot .dot { border-radius: 1px; transform: rotate(45deg); background: var(--blip-spot); box-shadow: none; }
+/* 服務處：房子形狀 */
+.ev.spot.office .dot { width: 12px; height: 12px; border-radius: 0; transform: none; clip-path: polygon(50% 0, 100% 42%, 100% 100%, 0 100%, 0 42%); }
 .ev.spot.phase-active .dot { box-shadow: 0 0 8px var(--blip-spot); }
 .ev.spot.phase-closed .dot, .ev.spot.phase-later .dot { opacity: 0.45; }
 .ev.spot .kind-tag { background: var(--blip-spot); color: #fff; }

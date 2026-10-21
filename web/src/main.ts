@@ -554,6 +554,7 @@ function render(): void {
       id: it.ev.id,
       kind: it.ev.kind,
       spot: !!it.spot,
+      office: !!it.spot && isOffice(it.ev),
       approx: !!it.ev.approxArea,
       outside: !inScope(it.ev, it.distanceKm),
       distanceKm: it.distanceKm,
@@ -767,7 +768,7 @@ function timeLineHtml(it: Item, now: number): string {
 
 function itemCard(it: Item, now: number): HTMLLIElement {
   const li = document.createElement('li');
-  li.className = `ev phase-${it.phase} kind-${it.ev.kind}${it.spot ? ' spot' : ''}${inScope(it.ev, it.distanceKm) ? '' : ' out-of-range'}${it.ev.id === selectedId ? ' selected' : ''}`;
+  li.className = `ev phase-${it.phase} kind-${it.ev.kind}${it.spot ? ' spot' : ''}${it.spot && isOffice(it.ev) ? ' office' : ''}${inScope(it.ev, it.distanceKm) ? '' : ' out-of-range'}${it.ev.id === selectedId ? ' selected' : ''}`;
   li.dataset.id = String(it.ev.id);
   li.innerHTML = `
     <div class="ev-title"><span class="dot"></span><span class="kind-tag">${tagLabel(it)}</span>${esc(titleOf(it.ev))}${it.ev.item ? ` <span class="muted">· ${esc(it.ev.item)}</span>` : ''}${followed().length > 1 && it.ev.keyword ? `<span class="ev-kw">#${esc(it.ev.keyword)}</span>` : ''}</div>
@@ -2011,9 +2012,15 @@ function kindLabel(ev: EventOut): string {
   return ev.kind === 'activity' ? '活動' : '發放';
 }
 
-/** 清單與地圖上的標籤：固定據點另外標「據點」 */
+/** 服務處、競選總部（候選人、議員、政黨的）：固定據點用房子圖示、標「服務處」，跟店家、餐廳分開 */
+const OFFICE_RE = /服務處|服務中心|競選總部|競選辦公室|總部|黨部|辦事處/;
+function isOffice(ev: EventOut): boolean {
+  return OFFICE_RE.test(`${ev.title} ${ev.placeText}`);
+}
+
+/** 清單與地圖上的標籤：固定據點另外標「據點」，服務處標「服務處」 */
 function tagLabel(it: Item): string {
-  return it.spot ? '據點' : kindLabel(it.ev);
+  return it.spot ? (isOffice(it.ev) ? '服務處' : '據點') : kindLabel(it.ev);
 }
 
 function setKwMsg(text: string, error = false): void {

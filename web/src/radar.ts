@@ -8,6 +8,8 @@ export interface RadarItem {
   phase: Phase;
   /** 固定據點，畫成菱形 */
   spot?: boolean;
+  /** 服務處、競選總部的固定據點，畫成房子形狀（店家、餐廳等是菱形） */
+  office?: boolean;
   /** 約略位置，畫成空心 */
   approx?: boolean;
   /** 在圓圈裡但不在範圍內（選「雙北」時的基隆、桃園）：跟超出範圍的一樣畫小、畫淡 */
@@ -577,8 +579,15 @@ export class Radar {
     }
   }
 
-  private appendMark(g: SVGGElement, out: boolean, spot = false): void {
+  private appendMark(g: SVGGElement, out: boolean, spot = false, office = false): void {
     const r = out ? 4 : 6;
+    if (spot && office) {
+      // 房子形狀：服務處、競選總部
+      const s = out ? 7 : 10;
+      const w = s * 0.55;
+      g.appendChild(el('path', { class: 'dot', d: `M0 ${-s * 0.62} L${w} ${-s * 0.1} V${s * 0.55} H${-w} V${-s * 0.1} Z`, 'stroke-linejoin': 'round' }));
+      return;
+    }
     if (spot) {
       const s = out ? 7 : 10;
       g.appendChild(el('rect', { class: 'dot', x: -s / 2, y: -s / 2, width: s, height: s, transform: 'rotate(45)' }));
@@ -680,7 +689,7 @@ export class Radar {
         node.appendChild(el('circle', { class: 'hit', r: 22 }));
         node.appendChild(el('circle', { class: 'ping', r: 6 }));
         const body = el('g', { class: 'body' });
-        this.appendMark(body, p.out, it.spot);
+        this.appendMark(body, p.out, it.spot, it.office);
         // 離開始越久越淡、越模糊；選取時看清楚
         if (it.fade !== undefined && !it.selected) {
           const blur = ((1 - it.fade) * 1.5).toFixed(2);
