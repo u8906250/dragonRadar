@@ -85,6 +85,10 @@
           <button type="button" class="chip small on" data-cat="giveaway" aria-pressed="true" title="單次的發放">發放</button>
           <button type="button" class="chip small on" data-cat="activity" aria-pressed="true" title="單次的活動，包括車掃">活動</button>
           <button type="button" class="chip small on" data-cat="spot" aria-pressed="true" title="店家、服務處等連續多天都能去的固定據點">固定據點</button>
+          <span class="filter-group" id="only-group">
+            <span class="filter-label muted">只看</span>
+            <button type="button" class="chip small" id="active-toggle" aria-pressed="false" title="只看現在進行中、開放中的（雷達、地圖、清單都是）">進行中</button>
+          </span>
         </div>
         <ul id="event-list" class="event-list"></ul>
         <p id="empty-hint" class="muted hint" hidden></p>

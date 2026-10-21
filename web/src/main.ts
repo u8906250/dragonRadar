@@ -34,6 +34,7 @@ const LS_REPORTED = 'dr.reported';
 const LS_SPOTS = 'dr.showSpots';
 const LS_GIVEAWAYS = 'dr.showGiveaways';
 const LS_ACTIVITIES = 'dr.showActivities';
+const LS_ONLY_ACTIVE = 'dr.onlyActive';
 const LS_TIME = 'dr.timeRange';
 /** 丟過瓶子（才需要去問有沒有被撿走）、看過的最後一次「被撿走」時間 */
 const LS_BOTTLE_DROPPED = 'dr.bottleDropped';
@@ -130,6 +131,8 @@ type Category = 'giveaway' | 'activity' | 'spot';
 const CATEGORY_LS: Record<Category, string> = { giveaway: LS_GIVEAWAYS, activity: LS_ACTIVITIES, spot: LS_SPOTS };
 const shown: Record<Category, boolean> = { giveaway: lsGet(LS_GIVEAWAYS) !== '0', activity: lsGet(LS_ACTIVITIES) !== '0', spot: lsGet(LS_SPOTS) !== '0' };
 const categoryOf = (it: Item): Category => (it.spot ? 'spot' : it.ev.kind === 'activity' ? 'activity' : 'giveaway');
+/** 只看進行中：雷達、地圖、清單都只剩現在就能去的（進行中、據點開放中、車掃中） */
+let onlyActive = lsGet(LS_ONLY_ACTIVE) === '1';
 /** 時間範圍（跟距離範圍對應）：雷達、地圖只畫這段時間內會開始的，進行中、開放中的一定畫 */
 type TimeSetting = 'now' | '3h' | '24h' | '3d' | 'all';
 const TIME_SEC: Record<TimeSetting, number> = { now: 0, '3h': 3 * 3600, '24h': 24 * 3600, '3d': 3 * 86400, all: Infinity };
@@ -200,6 +203,8 @@ const lettersPicked = $('#letters-picked');
 const lettersList = $('#letters-list');
 const filterRow = $('#filter-row');
 const categoryToggles = Array.from(document.querySelectorAll<HTMLButtonElement>('#filter-row [data-cat]'));
+const activeToggle = $<HTMLButtonElement>('#active-toggle');
+const onlyGroup = $('#only-group');
 const timeChips = Array.from(document.querySelectorAll<HTMLButtonElement>('#time-chips [data-time]'));
 const baseChipsEl = $('#base-chips');
 const baseChips = Array.from(document.querySelectorAll<HTMLButtonElement>('#base-chips [data-base]'));
@@ -520,11 +525,13 @@ function stopText(stop: RouteStop, now: number): string {
 function render(): void {
   const now = nowSec();
   const all = computeItems(now);
-  const items = all.filter((it) => shown[categoryOf(it)]);
+  const byCategory = all.filter((it) => shown[categoryOf(it)]);
+  const items = onlyActive ? byCategory.filter((it) => activeNow(it, now)) : byCategory;
   // 雷達、地圖只畫時間範圍內的；清單照樣全部列，範圍外的放最下面
   const timed = items.filter((it) => inTime(it, now));
   updateOutline();
   updateCategoryToggles(all);
+  updateActiveToggle(byCategory, now);
 
   // 稍後才開始的也畫（虛線框、淡色）；「雙北」時雙北以外的也畫，跟超出範圍的一樣畫小、畫淡
   radar.render(
@@ -613,6 +620,31 @@ function render(): void {
 }
 
 const CATEGORY_NAME: Record<Category, string> = { giveaway: '發放', activity: '活動', spot: '固定據點' };
+
+/** 現在就能去：進行中、據點開放中、車掃中 */
+function activeNow(it: Item, now: number): boolean {
+  if (it.phase === 'active') return true;
+  const r = routeOf(it.ev);
+  return !!r && routeState(r, now) === 'live';
+}
+
+/** 「只看進行中」：括號寫現在有幾個（車掃一條算一個）；沒有進行中、也沒打開時不顯示 */
+function updateActiveToggle(items: Item[], now: number): void {
+  const seen = new Set<string>();
+  let n = 0;
+  for (const it of items) {
+    if (!activeNow(it, now)) continue;
+    const r = routeOf(it.ev);
+    if (r && seen.has(r.id)) continue;
+    if (r) seen.add(r.id);
+    n++;
+  }
+  onlyGroup.hidden = n === 0 && !onlyActive;
+  activeToggle.textContent = `進行中（${n}）`;
+  activeToggle.classList.toggle('on', onlyActive);
+  activeToggle.setAttribute('aria-pressed', String(onlyActive));
+  if (!onlyGroup.hidden) filterRow.hidden = false;
+}
 
 /** 開關上寫各有幾個（車掃一條路線算一個），沒有的那一類不顯示開關；關掉的照樣列出數量 */
 function updateCategoryToggles(all: Item[]): void {
@@ -2503,6 +2535,11 @@ function wireControls(): void {
     void submitKeyword(kwInput.value);
   });
   reportBtn.addEventListener('click', () => openReportSheet(reportSheet.hidden));
+  activeToggle.addEventListener('click', () => {
+    onlyActive = !onlyActive;
+    lsSet(LS_ONLY_ACTIVE, onlyActive ? '1' : '0');
+    render();
+  });
   for (const b of categoryToggles) {
     b.addEventListener('click', () => {
       const cat = b.dataset.cat as Category;
