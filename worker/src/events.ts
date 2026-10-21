@@ -1,7 +1,7 @@
 import type { Env } from './env';
 import { applySupplementDate, dropBroughtItem, dropSelfPlace, extractFromPost, splitDropTimes, splitMultiDay, startNowForDeadline, untilInText, weekdaysFromText, weekdaysInText, type EventKind, type ExtractedEvent } from './extract';
 import { geocodeAddress, parseTwAddress, type TwAddress } from './address';
-import { adminArea, geocode, geocodeFirst, isAreaOnly, placeCandidates, type GeoPoint } from './geocode';
+import { adminArea, geocode, geocodeFirst, geocodeStreet, isAreaOnly, placeCandidates, type GeoPoint } from './geocode';
 import { listActiveKeywords, type KeywordRow } from './keywords';
 import { parseThreadsTimestamp, type ThreadsClient } from './threads';
 import { nowSec, parseIsoToUnix } from './util';
@@ -269,7 +269,7 @@ export async function extendOpenSpots(env: Env, now: number): Promise<number> {
 const ADDRESS_BUDGET_MS = 25_000;
 
 /** 有寫門牌的地點：門牌加上縣市（地點欄沒寫縣市時，從另一欄補）；縣市不確定就不查，免得查到別縣市同名的路 */
-export function addressOf(placeQuery: string, placeText: string | null): { address: TwAddress; text: string; area: string | null } | null {
+export function addressOf(placeQuery: string, placeText: string | null): { address: TwAddress; text: string; area: string | null; city?: string } | null {
   const sources = [placeQuery, placeText ?? ''];
   const parsed = sources.map((s) => parseTwAddress(s));
   // 縣市：門牌自己帶的優先，其次是另一欄的「台南市」「新北市」（不寫市、縣的不算，新竹、嘉義分不出來）
@@ -279,7 +279,7 @@ export function addressOf(placeQuery: string, placeText: string | null): { addre
   const city = a.city ?? (cityWord ? cityWord.replace(/^台/, '臺').replace(/^(北|中|南)市$/, '臺$1市') : null);
   if (!city) return { address: a, text: '', area: null };
   const area = a.district ? `${city}${a.district}` : null;
-  return { address: a, text: `${city}${a.district ?? ''}${a.street}${a.raw}號`, area };
+  return { address: a, text: `${city}${a.district ?? ''}${a.street}${a.raw}號`, area, city };
 }
 
 /**
@@ -297,6 +297,9 @@ export async function locatePlaceForEvent(
   if (addr) {
     const hit = addr.text ? await geocodeAddress(env, addr.text, undefined, { overpass: Date.now() < deadline }) : null;
     if (hit) return { point: { lat: hit.lat, lng: hit.lng, displayName: addr.text }, approxArea: null };
+    // 門牌查不到：先退到那條路（同一個縣市、鄉鎮區），再退到鄉鎮區中心，都標成約略位置
+    const road = addr.city ? await geocodeStreet(env, addr.city, addr.address.district, addr.address.street) : null;
+    if (road) return { point: road.point, approxArea: road.area };
     const area = addr.area ?? adminArea(placeQuery, placeText);
     const p = area ? await geocode(env, area) : null;
     return { point: p, approxArea: p ? area : null };

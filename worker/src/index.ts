@@ -1,6 +1,6 @@
 import { getAccessToken, makeClient, saveAccessToken } from './client';
 import type { Env } from './env';
-import { DEFAULT_DURATION_SEC, ENDED_WORDS, MAX_FUTURE_SEC, MIN_CONFIDENCE, SPOT_MAX_DAYS, extendOpenSpots, getEvent, getPost, ingestAll, ingestKeyword, listEvents, processBacklog, processPost, storePost, updateLifecycle, type EventRow } from './events';
+import { DEFAULT_DURATION_SEC, ENDED_WORDS, MAX_FUTURE_SEC, MIN_CONFIDENCE, SPOT_MAX_DAYS, extendOpenSpots, getEvent, getPost, ingestAll, ingestKeyword, listEvents, locatePlaceForEvent, processBacklog, processPost, storePost, updateLifecycle, type EventRow } from './events';
 import { normalizeExtraction, runModel } from './extract';
 import { geocode } from './geocode';
 import { ingestNews, NEWS_FEEDS } from './sources/news';
@@ -469,7 +469,8 @@ async function handleAdmin(req: Request, env: Env, _ctx: ExecutionContext, path:
     // refresh：清掉這個門牌的快取重查（規則改了、之前查錯）
     if (body.refresh && address) await env.DB.prepare('DELETE FROM geocode_cache WHERE query = ?').bind(addressCacheKey(address)).run();
     const byAddress = await geocodeAddress(env, q, debug);
-    return jsonResponse({ address, byAddress, error: debug.error ?? null, located: await locatePlace(env, q) });
+    // forEvent：判讀事件時實際的定位（門牌查不到退到那條路、再退到鄉鎮區）
+    return jsonResponse({ address, byAddress, error: debug.error ?? null, located: await locatePlace(env, q), forEvent: await locatePlaceForEvent(env, q, q, Date.now() + 8000) });
   }
 
   // 用目前的規則重跑一次自動審核（例如自動審核暫時失敗的）

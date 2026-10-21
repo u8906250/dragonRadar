@@ -147,7 +147,10 @@ interface CacheRow {
   resolved_at: number;
 }
 
-async function nominatim(env: Env, q: string): Promise<GeoPoint | null> {
+/** 查什麼：any 什麼都可以；road 只要道路（門牌查不到時退到那條路） */
+type GeoKind = 'any' | 'road';
+
+async function nominatim(env: Env, q: string, kind: GeoKind = 'any'): Promise<GeoPoint | null> {
   await politeDelay();
   const url = new URL('https://nominatim.openstreetmap.org/search');
   url.searchParams.set('format', 'jsonv2');
@@ -163,7 +166,7 @@ async function nominatim(env: Env, q: string): Promise<GeoPoint | null> {
     return null;
   }
   const arr = (await res.json()) as Array<{ lat: string; lon: string; display_name?: string; category?: string }>;
-  const hit = pickHit(q, arr);
+  const hit = pickHit(q, kind === 'road' ? arr.filter((h) => h.category === 'highway') : arr);
   if (!hit) return null;
   // 只對到行政區（例如把「中正區忠孝復興站」對到整個中正區的中心）不算找到，除非本來就只查行政區
   if (hit.category === 'boundary' && !/[市縣區鄉鎮]$/.test(q.trim())) return null;
@@ -173,28 +176,50 @@ async function nominatim(env: Env, q: string): Promise<GeoPoint | null> {
   return { lat, lng, displayName: hit.display_name ?? q };
 }
 
-/** 地點文字轉座標，結果（含查不到）都快取在 D1 */
-export async function geocode(env: Env, query: string): Promise<GeoPoint | null> {
-  const key = query.trim().replace(/\s+/g, ' ');
-  if (!key) return null;
+/** 地點文字轉座標，結果（含查不到）都快取在 D1；只要道路的快取另外存（前面加「road:」） */
+export async function geocode(env: Env, query: string, kind: GeoKind = 'any'): Promise<GeoPoint | null> {
+  const q = query.trim().replace(/\s+/g, ' ');
+  if (!q) return null;
+  const key = kind === 'road' ? `road:${q}` : q;
   const now = nowSec();
   const cached = await env.DB.prepare('SELECT lat, lng, display_name, resolved_at FROM geocode_cache WHERE query = ?')
     .bind(key)
     .first<CacheRow>();
   // 以前沒檢查縣市時查錯、存進快取的，重查一次
-  if (cached && !(cached.lat !== null && !cityMatches(key, cached.display_name))) {
+  if (cached && !(cached.lat !== null && !cityMatches(q, cached.display_name))) {
     if (cached.lat !== null && cached.lng !== null) {
       return { lat: cached.lat, lng: cached.lng, displayName: cached.display_name ?? key };
     }
     if (cached.resolved_at > now - NEGATIVE_TTL_SEC) return null;
   }
-  const point = await nominatim(env, key);
+  const point = await nominatim(env, q, kind);
   await env.DB.prepare(
     'INSERT INTO geocode_cache (query, lat, lng, display_name, resolved_at) VALUES (?, ?, ?, ?, ?) ON CONFLICT(query) DO UPDATE SET lat = excluded.lat, lng = excluded.lng, display_name = excluded.display_name, resolved_at = excluded.resolved_at',
   )
     .bind(key, point?.lat ?? null, point?.lng ?? null, point?.displayName ?? null, now)
     .run();
   return point;
+}
+
+/** 門牌查不到時要退到的路：先含巷（「北新路184巷」），再大路（「北新路」）；弄太小，不單獨查 */
+export function streetFallbacks(street: string): string[] {
+  const lane = street.replace(/\d+弄$/, '');
+  const road = street.replace(/\d+巷.*$/, '');
+  return [...new Set([lane, road])].filter((x) => /(?:路|街|大道)(?:[一二三四五六七八九十]段)?(?:\d+巷)?$/.test(x));
+}
+
+/**
+ * 門牌查不到時退到那條路：只接受道路，而且要在同一個縣市、鄉鎮區（免得對到別區的同名路）。
+ * 回傳點和路名（畫面寫「只知道在○○路」，標成約略位置）。
+ */
+export async function geocodeStreet(env: Env, city: string, district: string | null, street: string): Promise<{ point: GeoPoint; area: string } | null> {
+  const norm = (x: string): string => x.replace(/台/g, '臺');
+  for (const name of streetFallbacks(street)) {
+    const area = `${city}${district ?? ''}${name}`;
+    const p = await geocode(env, area, 'road');
+    if (p && (!district || norm(p.displayName).includes(norm(district)))) return { point: p, area };
+  }
+  return null;
 }
 
 /** 依序嘗試候選地點，回傳第一個查得到的 */

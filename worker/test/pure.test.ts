@@ -92,7 +92,7 @@ describe('buildMessages', () => {
   });
 });
 
-import { adminArea, cityMatches, pickHit, placeCandidates } from '../src/geocode';
+import { adminArea, cityMatches, pickHit, placeCandidates, streetFallbacks } from '../src/geocode';
 import { normalizeKeyword, parseKeywordList } from '../src/keywords';
 
 describe('normalizeKeyword', () => {
@@ -622,5 +622,13 @@ describe('postExcerpt', () => {
   it('cuts one very long line instead of dropping everything', () => {
     const e = postExcerpt('x'.repeat(300), 'link');
     expect(e.startsWith('x'.repeat(90) + '…')).toBe(true);
+  });
+});
+
+describe('streetFallbacks', () => {
+  it('tries the lane first, then the road', () => {
+    expect(streetFallbacks('北新路184巷')).toEqual(['北新路184巷', '北新路']);
+    expect(streetFallbacks('信義路四段395巷6弄')).toEqual(['信義路四段395巷', '信義路四段']);
+    expect(streetFallbacks('民富十七街')).toEqual(['民富十七街']);
   });
 });
