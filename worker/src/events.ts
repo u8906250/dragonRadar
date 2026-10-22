@@ -1,6 +1,7 @@
 import type { Env } from './env';
 import { applySupplementDate, dropBroughtItem, dropSelfPlace, EVENT_SPEC, extractFromPost, localizeTimes, splitDropTimes, splitMultiDay, startNowForDeadline, timeZoneOf, untilInText, weekdaysFromText, weekdaysInText, type EventKind, type ExtractedEvent } from './extract';
 import { geocodeAddress, parseTwAddress, type TwAddress } from './address';
+import { SESSION_SPEC } from './badminton';
 import { JOB_SPEC, jobRisks } from './jobs';
 import { DEFAULT_MODULE, moduleOf, type ModuleId } from './modules';
 import { adminArea, cityLevel, cityOfDistrict, geocode, geocodeFirst, geocodeStreet, geocodeWorld, isAreaOnly, placeCandidates, type GeoPoint } from './geocode';
@@ -144,6 +145,8 @@ export const ENDED_WORDS = [
   '發完', '送完', '領完', '完售', '售完', '收攤', '撤收', '沒了', '沒有了', '已結束', '結束了', '結束囉', '活動結束', '提前結束',
   // 職缺（狗狗陪伴）：作者改成徵到了（「額滿為止」這種原本就會寫的不算，所以不收單獨的「額滿」）
   '已徵到', '徵到了', '已找到', '找到了', '已額滿', '已錄取', '停止招募', '暫停招募', '已截止', '徵才結束',
+  // 臨打（羽球臨打）：滿了、取消了
+  '名額已滿', '已滿員', '滿員了', '人數已滿', '臨打取消', '今日取消', '今天取消', '本週取消', '場地取消',
 ];
 const ENDED_RE = new RegExp(ENDED_WORDS.join('|'));
 
@@ -521,6 +524,8 @@ async function planEvent(
       until_open: !!session?.untilOpen,
       weekdays: session ? (ex.weekdays ?? null) : null,
       tz: ex.country ? timeZoneOf(ex) : null,
+      // 模組自己的欄位（臨打的費用、程度、缺幾位…）
+      extra: ex.extra ? JSON.stringify(ex.extra) : null,
     },
     reason: 'planned',
   };
@@ -571,7 +576,8 @@ export async function planPost(env: Env, post: PostRow, now = nowSec()): Promise
   const text = post.supplement ? `${post.text}\n\n【回報的人補充】${post.supplement}` : post.text;
   const module = moduleOf(post.module);
   // 使用者貼連結回報的，主要模型說不是活動時再問備用模型（只多等一下，量不大）
-  const { extraction, raw, garbled } = await extractFromPost(env, text, post.posted_at, now, { secondOpinion: post.source === 'link', spec: module === 'dog' ? JOB_SPEC : EVENT_SPEC });
+  const spec = module === 'dog' ? JOB_SPEC : module === 'badminton' ? SESSION_SPEC : EVENT_SPEC;
+  const { extraction, raw, garbled } = await extractFromPost(env, text, post.posted_at, now, { secondOpinion: post.source === 'link', spec });
   await env.DB.prepare('UPDATE posts SET processed_at = ?, extraction = ? WHERE id = ?').bind(now, raw, post.id).run();
 
   if (garbled) return { items: [], early: 'garbled' };
@@ -579,8 +585,12 @@ export async function planPost(env: Env, post: PostRow, now = nowSec()): Promise
   if (!extraction.is_event) return { items: [], early: 'not_event' };
   if (extraction.events.length === 0) return { items: [], early: 'no_events' };
   if (module === 'dog') return { items: await planJobs(env, post, extraction.events, now), early: null };
+  // 羽球臨打的找臨打（需求）是刊登，招臨打（提供）照場次排
+  const seeks = extraction.events.filter((e) => e.extra?.role === 'seek');
+  if (seeks.length > 0) extraction.events = extraction.events.filter((e) => e.extra?.role !== 'seek');
 
   const items: PlanItem[] = [];
+  if (seeks.length > 0) items.push(...(await planSeeks(env, post, seeks, now, extraction.events.length)));
   const deadline = Date.now() + ADDRESS_BUDGET_MS;
   // 「13:00｜10 個、15:00｜10 個」被合成一段的，拆回每個時間點各一筆
   extraction.events = splitDropTimes(extraction.events, text);
@@ -720,13 +730,7 @@ async function planJobs(env: Env, post: PostRow, jobs: ExtractedEvent[], now: nu
       items.push({ group, plan: null, reason: 'no_place' });
       continue;
     }
-    let { point, approxArea } = await locatePlaceForEvent(env, placeQuery, ex.place_text, deadline);
-    // 只寫到縣市（「台中市區」）：狗狗陪伴常常這樣寫，放在縣市中心、標成約略位置
-    const city = point ? null : (cityLevel(placeQuery) ?? cityLevel(placeText));
-    if (city) {
-      const p = await geocode(env, city);
-      if (p) ({ point, approxArea } = { point: p, approxArea: city });
-    }
+    const { point, approxArea } = await locateOrCity(env, placeQuery, placeText, ex.place_text, deadline);
     items.push({
       group,
       reason: 'planned',
@@ -749,6 +753,74 @@ async function planJobs(env: Env, post: PostRow, jobs: ExtractedEvent[], now: nu
         weekdays: null,
         tz: null,
         extra: JSON.stringify({ ...job, risks: jobRisks(job, post.text) }),
+      },
+    });
+  }
+  return items;
+}
+
+/** 定位；只寫到縣市（「台中市區」）的刊登常這樣寫：放在縣市中心、標成約略位置 */
+async function locateOrCity(env: Env, placeQuery: string, placeText: string, rawText: string | null, deadline: number): Promise<{ point: GeoPoint | null; approxArea: string | null }> {
+  const loc = await locatePlaceForEvent(env, placeQuery, rawText, deadline);
+  if (loc.point) return loc;
+  const city = cityLevel(placeQuery) ?? cityLevel(placeText);
+  const p = city ? await geocode(env, city) : null;
+  return p && city ? { point: p, approxArea: city } : loc;
+}
+
+/** 找臨打（需求）沒寫確切時間時，在雷達上留幾天 */
+const SEEK_DEFAULT_DAYS = 7;
+
+/**
+ * 羽球臨打的找臨打（球友想找地方打）：從發文開始就算刊登中；寫了想打的時段就到那個時段結束，沒寫留 SEEK_DEFAULT_DAYS 天。
+ * 想打的時段、可以打的時間、程度放在 extra
+ */
+async function planSeeks(env: Env, post: PostRow, seeks: ExtractedEvent[], now: number, groupFrom: number): Promise<PlanItem[]> {
+  const items: PlanItem[] = [];
+  const deadline = Date.now() + ADDRESS_BUDGET_MS;
+  for (const [i, ex] of seeks.entries()) {
+    const group = groupFrom + i;
+    if (ex.confidence < MIN_CONFIDENCE) {
+      items.push({ group, plan: null, reason: 'low_confidence' });
+      continue;
+    }
+    const playAt = parseIsoToUnix(ex.start_at);
+    const playEnd = playAt !== null ? (parseIsoToUnix(ex.end_at) ?? playAt + 3 * 3600) : null;
+    const start = Math.min(post.posted_at, now);
+    const end = playEnd ?? post.posted_at + SEEK_DEFAULT_DAYS * DAY_SEC;
+    if (end <= now) {
+      items.push({ group, plan: null, reason: 'already_over', start: playAt ?? start, end });
+      continue;
+    }
+    const placeQuery = ex.place_query ?? ex.place_text;
+    const placeText = ex.place_text ?? ex.place_query;
+    if (!placeQuery || !placeText) {
+      items.push({ group, plan: null, reason: 'no_place' });
+      continue;
+    }
+    const { point, approxArea } = await locateOrCity(env, placeQuery, placeText, ex.place_text, deadline);
+    items.push({
+      group,
+      reason: 'planned',
+      plan: {
+        kind: 'session',
+        title: ex.title,
+        item: (ex.extra?.level as string | null | undefined) ?? null,
+        start_at: start,
+        end_at: end,
+        place_text: placeText,
+        place_query: placeQuery,
+        lat: point?.lat ?? null,
+        lng: point?.lng ?? null,
+        confidence: ex.confidence,
+        all_day: false,
+        spot: false,
+        approx_area: approxArea,
+        end_open: playEnd === null,
+        until_open: false,
+        weekdays: null,
+        tz: null,
+        extra: JSON.stringify({ ...ex.extra, role: 'seek', play_at: playAt, play_end: playAt !== null ? playEnd : null }),
       },
     });
   }

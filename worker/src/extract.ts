@@ -2,8 +2,8 @@ import type { Env } from './env';
 import { isAdminOnly } from './geocode';
 import { formatTaipei, parseIsoToUnix } from './util';
 
-/** giveaway 發放、activity 活動（洋流）；job 職缺（狗狗陪伴） */
-export type EventKind = 'giveaway' | 'activity' | 'job';
+/** giveaway 發放、activity 活動（洋流）；job 職缺（狗狗陪伴）；session 臨打（羽球臨打） */
+export type EventKind = 'giveaway' | 'activity' | 'job' | 'session';
 
 /** 職缺（狗狗陪伴模組）：工作期間、每天時段、薪資、雇主、怎麼應徵 */
 export interface JobInfo {
@@ -43,6 +43,8 @@ export interface ExtractedEvent {
   timezone?: string | null;
   /** 職缺才有 */
   job?: JobInfo;
+  /** 模組自己的欄位（例如臨打的費用、程度、缺幾位），存在 events.extra */
+  extra?: Record<string, unknown> | null;
 }
 
 export interface Extraction {
@@ -168,6 +170,7 @@ export function conf(v: unknown): number {
 export function normalizeKind(v: unknown): EventKind {
   const k = typeof v === 'string' ? v.trim().toLowerCase() : '';
   if (k === 'job') return 'job';
+  if (k === 'session') return 'session';
   return k === 'activity' || k === 'event' || k === '活動' ? 'activity' : 'giveaway';
 }
 
