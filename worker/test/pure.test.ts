@@ -1,9 +1,9 @@
 import type { ExtractedEvent } from '../src/extract';
-import { applySupplementDate, dropBroughtItem, dropSelfPlace, splitDropTimes, splitMultiDay, startNowForDeadline, untilInText, weekdaysFromText, weekdaysInText } from '../src/extract';
+import { applySupplementDate, closedWeekdays, dropBroughtItem, dropSelfPlace, openWeekdaysFromText, splitDropTimes, splitMultiDay, spotEndFromText, startNowForDeadline, untilInText, weekdaysFromText, weekdaysInText } from '../src/extract';
 import { isAreaOnly } from '../src/geocode';
 import { existedOutcome, notListedWhy, previewOf } from '../src/reports';
 import { describe, expect, it } from 'vitest';
-import { approxRank, detectEnded, lngRange, postExcerpt, spotMergeMode, spotSessions } from '../src/events';
+import { approxRank, detectEnded, lngRange, postExcerpt, spotMergeMode, spotScope, spotSessions } from '../src/events';
 import { buildMessages, localizeTimes, localToUnix, normalizeCountry, normalizeExtraction, validTimeZone } from '../src/extract';
 import { parseThreadsTimestamp } from '../src/threads';
 import { parseIsoToUnix } from '../src/util';
@@ -792,5 +792,42 @@ describe('sharesName', () => {
   it('does not check queries that are only a city or district', () => {
     expect(sharesName('臺中市', '臺中市, 臺灣')).toBe(true);
     expect(sharesName('新北市 淡水區', '淡水區, 新北市')).toBe(true);
+  });
+});
+
+describe('fixed spot opening days and closing time', () => {
+  it('reads closed days, workdays and listed days', () => {
+    expect(closedWeekdays('12:00-20:00\n（週一公休）')).toEqual([1]);
+    expect(closedWeekdays('營業時間：11:30～14:30（週二、週三店休）')).toEqual([2, 3]);
+    expect(closedWeekdays('公休：週日')).toEqual([7]);
+    expect(closedWeekdays('這週六休息一天')).toBeNull();
+    expect(openWeekdaysFromText('雙貓戲絲堂 12:00-20:00（週一公休）')).toEqual([2, 3, 4, 5, 6, 7]);
+    expect(openWeekdaysFromText('（週二、週三店休）')).toEqual([1, 4, 5, 6, 7]);
+    expect(openWeekdaysFromText('服務時間：09:00~18:00（上班日）')).toEqual([1, 2, 3, 4, 5]);
+    expect(openWeekdaysFromText('每週一到六 10:00-18:00，週三公休')).toEqual([1, 2, 4, 5, 6]);
+    expect(openWeekdaysFromText('平日0930-2030 假日1000-1800')).toBeUndefined();
+    expect(openWeekdaysFromText('每日 11:00 起')).toBeUndefined();
+  });
+  it('fills a missing closing time from the hours or a supplement', () => {
+    const ex = (start: string) => ({ spot: true, start_at: start, end_at: null as string | null });
+    const a = ex('2026-10-21T12:00:00+08:00');
+    expect(spotEndFromText(a, '發完為止\n🕛營業時間：週三至周日的 12:00–21:00')).toBe(true);
+    expect(a.end_at).toBe('2026-10-21T21:00:00+08:00');
+    const b = ex('2026-10-22T11:00:00+08:00');
+    expect(spotEndFromText(b, '☀️ 每日上午 11:00 起\n\n【回報的人補充】時間：下午7點30結束')).toBe(true);
+    expect(b.end_at).toBe('2026-10-22T19:30:00+08:00');
+    const c = ex('2026-10-21T14:00:00+08:00');
+    expect(spotEndFromText(c, '10/21（三）14:00 開始\n【回報的人補充】時間：下午六點結束')).toBe(true);
+    expect(c.end_at).toBe('2026-10-21T18:00:00+08:00');
+    const d = ex('2026-10-24T12:00:00+08:00');
+    expect(spotEndFromText(d, '日期：10/24（六）～ 10/26（一）')).toBe(false);
+    const e = ex('2026-10-22T00:00:00+08:00');
+    expect(spotEndFromText(e, '10:00-19:00')).toBe(false);
+  });
+  it('scopes text to one of several spots', () => {
+    const text = '✅小港服務處：沿海一路261號\n服務時間：09:00~18:00（上班日）\n✅前鎮服務處：崗山中街228號\n服務時間：09:00~18:00（上班日）';
+    const all = [{ spot: true, place_text: '小港服務處：沿海一路261號', place_query: 'a' }, { spot: true, place_text: '前鎮服務處：崗山中街228號', place_query: 'b' }];
+    expect(spotScope(text, all[0], all)).toBe('小港服務處：沿海一路261號\n服務時間：09:00~18:00（上班日）\n✅');
+    expect(openWeekdaysFromText(spotScope(text, all[1], all) ?? '')).toEqual([1, 2, 3, 4, 5]);
   });
 });

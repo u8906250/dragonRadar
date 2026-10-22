@@ -1,5 +1,5 @@
 import type { Env } from './env';
-import { applySupplementDate, dropBroughtItem, dropSelfPlace, EVENT_SPEC, extractFromPost, localizeTimes, splitDropTimes, splitMultiDay, startNowForDeadline, timeZoneOf, untilInText, weekdaysFromText, weekdaysInText, type EventKind, type ExtractedEvent } from './extract';
+import { applySupplementDate, dropBroughtItem, dropSelfPlace, EVENT_SPEC, extractFromPost, localizeTimes, openWeekdaysFromText, splitDropTimes, splitMultiDay, spotEndFromText, startNowForDeadline, timeZoneOf, untilInText, weekdaysInText, type EventKind, type ExtractedEvent } from './extract';
 import { geocodeAddress, parseTwAddress, type TwAddress } from './address';
 import { SESSION_SPEC } from './badminton';
 import { FOOD_SPEC } from './food';
@@ -634,9 +634,14 @@ export async function planPost(env: Env, post: PostRow, now = nowSec()): Promise
       items.push({ group, ...(await planEvent(env, ex, now, deadline)) });
       continue;
     }
-    // 模型自己編的每週幾不算；漏掉「每週二、四」時從貼文補：只有一個固定據點（可以有好幾個時段）時才補，免得套到別的地點
+    // 模型自己編的每週幾不算；貼文寫的「每週二、四」「週一公休」「上班日」照貼文（模型常漏掉或算錯）。
+    // 只看這個地點的那一段，免得套到別的地點；平日、假日分兩筆的照模型
     ex.weekdays = weekdaysInText(ex.weekdays, text);
-    if (!ex.weekdays && new Set(extraction.events.filter((e) => e.spot).map((e) => e.place_query ?? e.place_text)).size === 1) ex.weekdays = weekdaysFromText(text);
+    const scope = spotScope(text, ex, extraction.events);
+    const open = scope ? openWeekdaysFromText(scope) : undefined;
+    if (open !== undefined && !(ex.weekdays && /平日|假日|週末|周末/.test(scope ?? ''))) ex.weekdays = open;
+    // 只讀到開始時間：從貼文、補充找結束時間（「12:00–21:00」「下午7點30結束」）
+    spotEndFromText(ex, scope ?? text, !!scope);
     // 最後一天要是貼文（或補充）寫的，模型自己猜的不算
     ex.until = untilInText(ex.until, text);
     const sessions = spotSessions(ex, post.posted_at, now);
@@ -652,6 +657,20 @@ export async function planPost(env: Env, post: PostRow, now = nowSec()): Promise
     for (const session of sessions) items.push({ group, ...(await planEvent(env, ex, now, deadline, session, located, old?.post_id)), ...(merge ? { merge } : {}) });
   }
   return { items, early: null };
+}
+
+/**
+ * 固定據點自己的那段文字：只有一個固定據點（可以有好幾個時段）就是整則貼文加補充；
+ * 好幾個地點時，從這個地點在貼文出現的地方，到下一個別的地點為止。找不到回傳 null。
+ */
+export function spotScope(text: string, ex: Pick<ExtractedEvent, 'place_text' | 'place_query'>, all: Array<Pick<ExtractedEvent, 'spot' | 'place_text' | 'place_query'>>): string | null {
+  const key = (e: Pick<ExtractedEvent, 'place_text' | 'place_query'>): string | null => e.place_query ?? e.place_text;
+  const others = [...new Set(all.filter((e) => e.spot && key(e) !== key(ex)).map((e) => e.place_text).filter((p): p is string => !!p))];
+  if (others.length === 0) return text;
+  const at = ex.place_text ? text.indexOf(ex.place_text) : -1;
+  if (at < 0) return null;
+  const next = others.map((p) => text.indexOf(p, at + 1)).filter((i) => i > at);
+  return text.slice(at, next.length > 0 ? Math.min(...next) : undefined);
 }
 
 /**

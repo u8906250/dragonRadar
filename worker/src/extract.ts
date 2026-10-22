@@ -110,7 +110,7 @@ events 每筆的欄位：
 - until: 固定據點的最後一天，格式 YYYY-MM-DD；沒寫最後一天或不是固定據點則 null
 - country: 活動在台灣以外的國家時，填國家代碼（ISO 3166-1 兩碼，例如美國 US、日本 JP、英國 GB）；在台灣則 null
 - timezone: 活動在國外時，填當地時區（IANA 名稱，例如美國灣區、洛杉磯 America/Los_Angeles、紐約 America/New_York、東京 Asia/Tokyo）；在台灣則 null
-- weekdays: 固定據點只在每週固定幾天開時，列出星期幾（1 = 週一 … 7 = 週日），例如「每週二、四」→ [2, 4]、「週一到週五」→ [1, 2, 3, 4, 5]；每天都開、或不是固定據點則 null。start_at 填第一個開放日
+- weekdays: 固定據點只在每週固定幾天開時，列出星期幾（1 = 週一 … 7 = 週日），例如「每週二、四」→ [2, 4]、「週一到週五」「上班日」「工作日」→ [1, 2, 3, 4, 5]；寫了公休日的列出有開的日子，例如「週一公休」→ [2, 3, 4, 5, 6, 7]；每天都開、或不是固定據點則 null。start_at 填第一個開放日
 
 規則：
 - 相對時間（今天、今晚、明天、週六、等等、下午）以「貼文發布時間」為基準換算，時區一律 +08:00。「今晚 5 點半」是發文當天 17:30。
@@ -123,7 +123,8 @@ events 每筆的欄位：
 - 列出幾個發放時間點、沒寫發到幾點（例如「🕐 13:00｜10 個」「🕒 15:00｜10 個」）：每個時間點各輸出一筆，start_at 是那個時間、end_at 為 null（發完為止），不要合成「13:00–15:00」一段
 - 固定據點有寫日期範圍或「每天」就算有時間，不需要因為沒寫幾點而降低 confidence。
 - 車掃、遊行等移動路線，每個有時間的停靠點各一筆；沒有停靠點就用出發地。
-- 「發完為止」「數量有限」代表沒有明確結束時間，end_at 為 null。
+- 「發完為止」「數量有限」代表沒有明確結束時間，end_at 為 null；但固定據點寫了營業時間或發放時段（例如「營業時間 12:00–21:00 … 發完為止」）時，end_at 是時段的結束時間（21:00）。
+- 固定據點平日、假日的時段不同（例如「平日 0930-2030 假日 1000-1800」）：各輸出一筆，平日那筆 weekdays [1, 2, 3, 4, 5]、時段 09:30–20:30，假日那筆 weekdays [6, 7]、時段 10:00–18:00。
 - 新聞報導、心得、活動回顧、徵求、詢問、線上抽獎、直播、線上活動、販售，is_event 為 false，events 為空陣列。
 - 只有時間沒有地點、或只有地點沒有時間，該筆 confidence 必須低於 0.5。
 - 不要編造貼文裡沒有的時間或地點，可以依上下文補上縣市。
@@ -281,7 +282,7 @@ export function untilInText(until: string | null, text: string): string | null {
 const WEEKDAY_CHAR: Record<string, number> = { 一: 1, 二: 2, 三: 3, 四: 4, 五: 5, 六: 6, 日: 7, 天: 7 };
 
 /** 寫了「每週」「週二、四」「週一到週五」「平日」「週末」這類字才算有寫星期幾 */
-const WEEKLY_RE = /(?:每|逢)\s*(?:週|周|星期|禮拜)|(?:週|周|星期|禮拜)\s*[一二三四五六日天]\s*(?:到|至|~|～|-|－|、|,|，|和|與|及)\s*(?:週|周|星期|禮拜)?\s*[一二三四五六日天]|平日|週末|周末|假日/;
+const WEEKLY_RE = /(?:每|逢)\s*(?:週|周|星期|禮拜)|(?:週|周|星期|禮拜)\s*[一二三四五六日天]\s*(?:到|至|~|～|-|－|、|,|，|和|與|及)\s*(?:週|周|星期|禮拜)?\s*[一二三四五六日天]|平日|週末|周末|假日|上班日|工作日|公休|店休/;
 
 /** 模型給的每週幾要貼文（或補充）真的有寫，不然當成每天（模型有時會自己編） */
 export function weekdaysInText(weekdays: number[] | null | undefined, text: string): number[] | null {
@@ -359,17 +360,88 @@ export function splitMultiDay(ex: Pick<ExtractedEvent, 'start_at' | 'end_at' | '
  * 一定要有「每」，「10/21（週二）」這種日期註記不算。
  */
 export function weekdaysFromText(text: string): number[] | null {
-  const m = /每\s*(?:週|周|星期|禮拜)\s*([一二三四五六日天](?:\s*[、,，和與及跟/／]?\s*(?:[到至~～\-－]\s*)?(?:週|周|星期|禮拜)?\s*[一二三四五六日天])*)/.exec(text);
-  if (!m) return null;
+  const m = new RegExp(`每\\s*${DAY_LIST}`).exec(text);
+  return m ? normalizeWeekdays(dayList(m[1])) : null;
+}
+
+/** 「一、三」「二到五」「六日」（前面的週、星期已經拿掉或不拿掉都可以） */
+const DAY_LIST = '(?:週|周|星期|禮拜)\\s*([一二三四五六日天](?:\\s*[、,，和與及跟/／]?\\s*(?:[到至~～\\-－]\\s*)?(?:週|周|星期|禮拜)?\\s*[一二三四五六日天])*)';
+function dayList(s: string): number[] {
   const out: number[] = [];
-  const parts = m[1].replace(/(?:週|周|星期|禮拜)/g, '').replace(/\s/g, '');
-  const re = /([一二三四五六日天])(?:[到至~～\-－]([一二三四五六日天]))?/g;
-  for (const r of parts.matchAll(re)) {
+  const parts = s.replace(/(?:週|周|星期|禮拜)/g, '').replace(/\s/g, '');
+  for (const r of parts.matchAll(/([一二三四五六日天])(?:[到至~～\-－]([一二三四五六日天]))?/g)) {
     const a = WEEKDAY_CHAR[r[1]];
     const b = r[2] ? WEEKDAY_CHAR[r[2]] : a;
     for (let d = a; d <= b; d++) out.push(d);
   }
-  return normalizeWeekdays(out);
+  return out;
+}
+
+/**
+ * 固定的公休日：「週一公休」「（週二、週三店休）」「每週一休」「公休：週日」。
+ * 「這週六休息」「本週日店休」是臨時的，不算。
+ */
+export function closedWeekdays(text: string): number[] | null {
+  const out: number[] = [];
+  const before = new RegExp(`(?<![這本下上今明])(?:每\\s*)?${DAY_LIST}\\s*(?:固定)?(?:公休|店休|休館|休息|休(?![閒憩假]))`, 'g');
+  const after = new RegExp(`(?:公休日?|店休日?|休館日|固定休)\\s*[:：]?\\s*(?:每\\s*)?${DAY_LIST}`, 'g');
+  for (const re of [before, after]) for (const m of text.matchAll(re)) out.push(...dayList(m[1]));
+  const days = [...new Set(out)].sort((a, b) => a - b);
+  return days.length > 0 && days.length < 7 ? days : null;
+}
+
+const ALL_DAYS = [1, 2, 3, 4, 5, 6, 7];
+
+/**
+ * 固定據點開哪幾天，照貼文（模型漏掉或算錯時的備援）：寫了公休日就是其他天（有寫「每週一到六」就從那幾天扣）；
+ * 「上班日」「工作日」是週一到週五（有寫假日、週末的時段就不算）。都沒寫回傳 undefined，照模型的。
+ */
+export function openWeekdaysFromText(text: string): number[] | null | undefined {
+  const listed = weekdaysFromText(text);
+  const closed = closedWeekdays(text);
+  if (closed) return normalizeWeekdays((listed ?? ALL_DAYS).filter((d) => !closed.includes(d)));
+  if (listed) return listed;
+  if (/上班日|工作日/.test(text) && !/假日|週末|周末|例假/.test(text)) return [1, 2, 3, 4, 5];
+  return undefined;
+}
+
+const CN_NUM: Record<string, number> = { 一: 1, 二: 2, 兩: 2, 三: 3, 四: 4, 五: 5, 六: 6, 七: 7, 八: 8, 九: 9, 十: 10, 十一: 11, 十二: 12 };
+const PM_RE = /下午|晚上|傍晚|晚間/;
+
+/**
+ * 固定據點只讀到開始時間（模型看到「發完為止」把結束當成沒寫、或沒理補充的「下午7點30結束」）：
+ * 從貼文找從那個時間開始的時段（「12:00–21:00」），或「7點30結束」「六點打烊」，補上結束時間。補了回傳 true。
+ */
+export function spotEndFromText(ex: Pick<ExtractedEvent, 'spot' | 'start_at' | 'end_at'>, text: string, endPhrase = true): boolean {
+  if (!ex.spot || ex.end_at) return false;
+  const start = parseIsoToUnix(ex.start_at);
+  if (start === null) return false;
+  const tod = (start + 8 * 3600) % DAY_SEC;
+  // 00:00 是沒寫幾點（整天）
+  if (tod === 0) return false;
+  const t = halfWidth(text);
+  const setEnd = (h: number, m: number): boolean => {
+    const end = h * 3600 + m * 60;
+    if (end <= tod || end > DAY_SEC) return false;
+    ex.end_at = taipeiIso(start - tod + end);
+    return true;
+  };
+  const range = /(?<![\d/.])([01]?\d|2[0-3])(?:\s*[:：點]\s*([0-5]\d|半)?)?\s*(?:[-–—~～至到]|－)\s*(上午|中午|下午|晚上|傍晚)?\s*([01]?\d|2[0-4])(?:\s*[:：點]\s*([0-5]\d|半)?)?(?![\d/.])/g;
+  const min = (s: string | undefined): number => (s === '半' ? 30 : s ? Number(s) : 0);
+  for (const m of t.matchAll(range)) {
+    let h1 = Number(m[1]);
+    if (h1 * 3600 + min(m[2]) * 60 !== tod && (h1 + 12) * 3600 + min(m[2]) * 60 !== tod) continue;
+    if ((h1 + 12) * 3600 + min(m[2]) * 60 === tod) h1 += 12;
+    let h2 = Number(m[4]);
+    if (h2 < h1 && h2 < 12) h2 += 12;
+    if (setEnd(h2, min(m[5]))) return true;
+  }
+  if (!endPhrase) return false;
+  const phrase = /(上午|中午|下午|晚上|傍晚|晚間)?\s*(\d{1,2}|十[一二]?|[一二兩三四五六七八九])\s*[點:：時]\s*(\d{1,2}|半)?\s*分?\s*(?:就)?(?:結束|截止|打烊|收攤|為止)/.exec(t);
+  if (!phrase) return false;
+  let h = /\d/.test(phrase[2]) ? Number(phrase[2]) : CN_NUM[phrase[2]];
+  if (h < 12 && (PM_RE.test(phrase[1] ?? '') || h * 3600 <= tod)) h += 12;
+  return setEnd(h, min(phrase[3]));
 }
 
 export function parseLoose(raw: unknown): unknown {
