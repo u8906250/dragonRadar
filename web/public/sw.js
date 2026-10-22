@@ -32,7 +32,9 @@ self.addEventListener('notificationclick', (e) => {
     (async () => {
       // 同一頁（雷達、管理頁）已經開著就切過去，雷達再選到那一則；不然開新的
       const wins = await self.clients.matchAll({ type: 'window', includeUncontrolled: true });
-      const win = wins.find((w) => new URL(w.url).pathname === target.pathname);
+      // Cloudflare Pages 會把 admin.html 轉到 /admin
+      const page = (u) => new URL(u).pathname.replace(/\.html$/, '').replace(/\/index$/, '/');
+      const win = wins.find((w) => page(w.url) === page(target.href));
       if (win) {
         await win.focus();
         win.postMessage(id ? { type: 'show-event', id } : { type: 'refresh' });
