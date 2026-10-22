@@ -40,6 +40,8 @@ export interface EventOut {
   weekdays?: number[] | null;
   /** 國外活動的當地時區（IANA），時間用當地時間顯示；台灣是 null */
   tz?: string | null;
+  /** 管理者直接改過標題：顯示就用 title */
+  manualTitle?: boolean;
   /** 固定據點第一個時段開始的時間，還沒到就是「還沒開始」 */
   firstStartAt?: number;
   /** 官方行程才有：講同一場活動、已併進來的新聞與貼文 */

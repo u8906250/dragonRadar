@@ -50,6 +50,8 @@ export interface EventRow {
   weekdays?: string | null;
   /** 國外活動的當地時區（IANA）；台灣是 null */
   tz?: string | null;
+  /** 管理者直接改的標題 */
+  title_manual?: number;
   last_checked_at: number | null;
   created_at: number;
   updated_at: number;
@@ -84,6 +86,8 @@ export interface EventOut {
   weekdays: number[] | null;
   /** 國外活動的當地時區（IANA），畫面用當地時間顯示；台灣是 null */
   tz: string | null;
+  /** 管理者直接改過標題：畫面就用 title，不從地點拆店名 */
+  manualTitle: boolean;
   /** 固定據點才有：第一個時段開始的時間，還沒到就是「還沒開始」（不是休息中） */
   firstStartAt?: number;
   /** 官方行程才有：併進來的新聞、Threads 貼文（相關報導） */
@@ -259,8 +263,8 @@ export async function extendOpenSpots(env: Env, now: number): Promise<number> {
       const start = day + open;
       inserts.push(
         env.DB.prepare(
-          `INSERT INTO events (post_id, kind, title, item, start_at, end_at, place_text, place_query, lat, lng, status, confidence, all_day, spot, approx_area, end_open, until_open, weekdays, created_at, updated_at)
-           SELECT post_id, kind, title, item, ?, ?, place_text, place_query, lat, lng, 'upcoming', confidence, all_day, spot, approx_area, end_open, until_open, weekdays, ?, ? FROM events WHERE id = ?`,
+          `INSERT INTO events (post_id, kind, title, item, start_at, end_at, place_text, place_query, lat, lng, status, confidence, all_day, spot, approx_area, end_open, until_open, weekdays, tz, title_manual, created_at, updated_at)
+           SELECT post_id, kind, title, item, ?, ?, place_text, place_query, lat, lng, 'upcoming', confidence, all_day, spot, approx_area, end_open, until_open, weekdays, tz, title_manual, ?, ? FROM events WHERE id = ?`,
         ).bind(start, start + (tpl.end_at - tpl.start_at), now, now, tpl.id),
       );
     }
@@ -614,13 +618,38 @@ export async function reprocessPost(env: Env, id: string, now: number): Promise<
   if (post.source === 'official') throw new Error('官方航線由同步程式產生，不能重新判讀');
   // 新聞判讀後只留標題加摘要，重跑會因為內容不完整而判讀錯
   if (post.source === 'news') throw new Error('新聞只保存標題與摘要，不能重新判讀');
+  // 管理者改過的標題：重新判讀後，同一個地點的照樣用
+  const { results: manual } = await env.DB.prepare(
+    "SELECT DISTINCT place_text, title FROM events WHERE post_id = ? AND title_manual = 1 AND status IN ('upcoming', 'active', 'unlocated')",
+  )
+    .bind(id)
+    .all<{ place_text: string; title: string }>();
   await env.DB.batch([
     env.DB.prepare("DELETE FROM ended_reports WHERE event_id IN (SELECT id FROM events WHERE post_id = ? AND status IN ('upcoming', 'active', 'unlocated'))").bind(id),
     env.DB.prepare("DELETE FROM events WHERE post_id = ? AND status IN ('upcoming', 'active', 'unlocated')").bind(id),
   ]);
   const result = await processPost(env, post, now);
+  if (manual.length > 0) {
+    await env.DB.batch(
+      manual.map((m) =>
+        env.DB.prepare("UPDATE events SET title = ?, title_manual = 1 WHERE post_id = ? AND place_text = ? AND status IN ('upcoming', 'active', 'unlocated')").bind(m.title, id, m.place_text),
+      ),
+    );
+  }
   await env.DB.prepare("UPDATE posts SET confirm_state = 'confirmed', confirm_plan = NULL WHERE id = ? AND confirm_state IS NOT NULL").bind(id).run();
   return result;
+}
+
+/** 管理者直接改標題：同一則貼文、同一個地點還沒結束的（固定據點的每天時段）都改，回傳改了幾筆 */
+export async function setManualTitle(env: Env, eventId: number, title: string, now: number): Promise<number> {
+  const ev = await env.DB.prepare('SELECT post_id, place_text FROM events WHERE id = ?').bind(eventId).first<{ post_id: string; place_text: string }>();
+  if (!ev) return 0;
+  const r = await env.DB.prepare(
+    "UPDATE events SET title = ?, title_manual = 1, updated_at = ? WHERE post_id = ? AND place_text = ? AND status IN ('upcoming', 'active', 'unlocated')",
+  )
+    .bind(title, now, ev.post_id, ev.place_text)
+    .run();
+  return r.meta.changes ?? 0;
 }
 
 /**
@@ -865,6 +894,7 @@ export function toEventOut(r: JoinedRow, now: number): EventOut {
     approxArea: r.approx_area ?? null,
     weekdays: r.weekdays ? r.weekdays.split(',').map(Number) : null,
     tz: r.tz ?? null,
+    manualTitle: r.title_manual === 1,
     // 只給摘錄（著作權：只做必要的引用），完整內容請人看原文
     post: { id: r.post_id, source: r.source, username: r.username, permalink: r.permalink, postedAt: r.posted_at, text: postExcerpt(r.text, r.source), supplement: r.supplement ?? null },
   };

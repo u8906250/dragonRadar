@@ -29,7 +29,8 @@
     .empty { color: #5d5850; text-align: center; padding: 24px 0; }
     .apply { margin-top: 10px; padding-top: 10px; border-top: 1px dashed #b9b2a6; }
     .apply textarea { width: 100%; font: inherit; font-size: 16px; padding: 8px 10px; border: 2px solid var(--ink); border-radius: 10px; background: #fff; resize: vertical; }
-    .apply .hint { font-size: 12px; color: #5d5850; margin: 4px 0 0; }
+    .apply .hint { font-size: 12px; color: #5d5850; margin: 4px 0 8px; }
+    .apply .title-input { flex: 1 1 160px; min-width: 0; font: inherit; font-size: 16px; padding: 6px 10px; border: 2px solid var(--ink); border-radius: 10px; background: #fff; }
     .result { margin: 0 0 12px; padding: 10px 12px; background: #e9f6ee; border: 2px solid #2f7d4f; border-radius: 12px; font-size: 14px; }
     .result.err { background: #fdecea; border-color: #b3261e; }
     .result ul { margin: 6px 0 0; padding-left: 20px; }
@@ -145,9 +146,12 @@
           const canReprocess = f.source !== 'official' && f.source !== 'news';
           const prefill = f.note ? (f.kind === 'location' ? `地點：${f.note}` : f.kind === 'time' ? `時間：${f.note}` : f.note) : '';
           const takedownScope = f.kind === 'not_event' ? 'post' : 'event';
+          const curTitle = f.event_title || f.title;
           const apply =
             f.status === 'open'
               ? `<div class="apply">
+              <div class="row"><input type="text" class="title-input" data-title="${f.id}" maxlength="30" value="${esc(curTitle)}" aria-label="新標題" /><button type="button" class="btn primary" data-apply="title" data-id="${f.id}">改標題</button></div>
+              <p class="hint">改標題：直接改這個地點的標題（固定據點的每天時段一起改），不經過 AI，之後重新判讀也會保留。</p>
               ${canReprocess ? `<textarea rows="2" maxlength="200" data-note="${f.id}" placeholder="要補充給 AI 的內容，例如：地點是○○路12號、時間是 15:00 開始">${esc(prefill)}</textarea>` : ''}
               <div class="row">
                 ${canReprocess ? `<button type="button" class="btn primary" data-apply="supplement" data-id="${f.id}">套用並重新判讀</button>` : ''}
@@ -188,7 +192,13 @@
         const id = a.dataset.id;
         const action = a.dataset.apply;
         const body = { action };
-        if (action === 'supplement') {
+        if (action === 'title') {
+          body.title = document.querySelector(`input[data-title="${id}"]`)?.value.trim() ?? '';
+          if (!body.title) {
+            showResult('請先寫新的標題。', true);
+            return;
+          }
+        } else if (action === 'supplement') {
           body.note = document.querySelector(`textarea[data-note="${id}"]`)?.value.trim() ?? '';
           if (!body.note) {
             showResult('請先寫要補充的內容。', true);
@@ -198,15 +208,19 @@
           body.scope = a.dataset.scope;
           if (!confirm(body.scope === 'post' ? '確定把這則貼文的發放、活動都從雷達下架？' : '確定把這一則從雷達下架？')) return;
         }
-        for (const x of a.closest('.apply').querySelectorAll('button, textarea')) x.disabled = true;
-        a.textContent = action === 'supplement' ? '重新判讀中…' : '下架中…';
+        for (const x of a.closest('.apply').querySelectorAll('button, textarea, input')) x.disabled = true;
+        a.textContent = action === 'supplement' ? '重新判讀中…' : action === 'title' ? '修改中…' : '下架中…';
         try {
           const r = await api(`/api/admin/feedback/${id}/apply`, { method: 'POST', body: JSON.stringify(body) });
           const list = (r.events || []).map(evLine).join('');
+          const lost = r.lostPlaces?.length ? `<br><b>注意：重新判讀後少了這些地點：${r.lostPlaces.map(esc).join('、')}。</b>補充只提到一個地點時，AI 常把其他地點漏掉；可以在「已處理」改回未處理，補充寫完整再套用一次。` : '';
           showResult(
-            action === 'supplement'
-              ? `已套用並重新判讀，標成已處理。現在雷達上的：${list ? `<ul>${list}</ul>` : '沒有（這次判讀沒有放上雷達，可以在「已處理」改回未處理再調整）'}`
-              : `已從雷達下架 ${r.removed ?? 0} 筆，標成已處理。${list ? `這則貼文還在雷達上的：<ul>${list}</ul>` : ''}`,
+            action === 'title'
+              ? `已改標題（${r.changed ?? 0} 筆），標成已處理。現在雷達上這則貼文的：<ul>${list}</ul>`
+              : action === 'supplement'
+                ? `已套用並重新判讀，標成已處理。現在雷達上的：${list ? `<ul>${list}</ul>` : '沒有（這次判讀沒有放上雷達，可以在「已處理」改回未處理再調整）'}${lost}`
+                : `已從雷達下架 ${r.removed ?? 0} 筆，標成已處理。${list ? `這則貼文還在雷達上的：<ul>${list}</ul>` : ''}`,
+            !!lost,
           );
           await load();
         } catch (err) {

@@ -2221,6 +2221,8 @@ function sourceLinkText(ev: EventOut): string {
  * 判讀的標題在店名前面多寫了是誰的（「陳致中前鎮服務處發飄帶」、地點只寫「前鎮服務處」），名稱就連前面的一起用
  */
 function titleOf(ev: EventOut): string {
+  // 管理者改過的標題照用
+  if (ev.manualTitle) return ev.title;
   const name = ev.spot ? splitPlace(ev.placeText).name : null;
   if (!name) return ev.title;
   const at = ev.title.indexOf(name);

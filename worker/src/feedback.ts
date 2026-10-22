@@ -3,7 +3,7 @@
  * 回報的內容只有管理者看得到；存裝置代碼與 IP 的加鹽雜湊（限制次數、同一個人同一則同一種問題只算一次），30 天後刪除。
  */
 import type { Env } from './env';
-import { getPost, reprocessPost, takeDown } from './events';
+import { getPost, reprocessPost, setManualTitle, takeDown } from './events';
 import { parseSubscription, PushError, sendPush, type PushMessage } from './push';
 
 export const FEEDBACK_KINDS = {
@@ -143,7 +143,7 @@ export async function listFeedback(env: Env, status: string | null): Promise<unk
 /** 套用後回給管理頁看的：現在雷達上這則貼文的事件（同一個地點的固定據點只列第一天） */
 async function currentEvents(env: Env, postId: string): Promise<unknown[]> {
   const { results } = await env.DB.prepare(
-    `SELECT id, title, kind, item, start_at, end_at, place_text, approx_area, lat, lng, status, spot, end_open FROM events
+    `SELECT id, title, title_manual, kind, item, start_at, end_at, place_text, approx_area, lat, lng, status, spot, end_open FROM events
       WHERE post_id = ? AND status IN ('upcoming', 'active', 'unlocated') ORDER BY start_at`,
   )
     .bind(postId)
@@ -163,16 +163,39 @@ async function currentEvents(env: Env, postId: string): Promise<unknown[]> {
  * - { action: 'takedown', scope?: 'event' | 'post' }：從雷達下架（不是發放或活動、重複）
  * 套用完標成已處理，回傳現在雷達上這則貼文的事件
  */
-export async function applyFeedback(env: Env, id: number, body: unknown, now: number): Promise<{ ok: true; action: string; removed?: number; events: unknown[] }> {
-  const fb = await env.DB.prepare('SELECT id, event_id, post_id, kind, note FROM event_feedback WHERE id = ?')
+export async function applyFeedback(
+  env: Env,
+  id: number,
+  body: unknown,
+  now: number,
+): Promise<{ ok: true; action: string; removed?: number; changed?: number; lostPlaces?: string[]; events: unknown[] }> {
+  const fb = await env.DB.prepare('SELECT id, event_id, post_id, place_text, kind, note FROM event_feedback WHERE id = ?')
     .bind(id)
-    .first<{ id: number; event_id: number; post_id: string | null; kind: FeedbackKind; note: string | null }>();
+    .first<{ id: number; event_id: number; post_id: string | null; place_text: string | null; kind: FeedbackKind; note: string | null }>();
   if (!fb) throw new PushError(404, '找不到這筆回報');
-  const b = (body ?? {}) as { action?: unknown; note?: unknown; scope?: unknown };
+  const b = (body ?? {}) as { action?: unknown; note?: unknown; scope?: unknown; title?: unknown };
   const postId = fb.post_id;
   if (!postId) throw new PushError(400, '這筆回報沒有對應的貼文');
   let removed: number | undefined;
-  if (b.action === 'supplement') {
+  let changed: number | undefined;
+  let lostPlaces: string[] | undefined;
+  // 回報的那一則現在的事件；被重新判讀換掉時，用同一則貼文同一個地點的（沒有才用第一則）
+  const liveId = async (): Promise<number | null> =>
+    (
+      await env.DB.prepare(
+        "SELECT id FROM events WHERE (id = ? OR post_id = ?) AND status IN ('upcoming', 'active', 'unlocated') ORDER BY (id = ?) DESC, (place_text = ?) DESC, start_at LIMIT 1",
+      )
+        .bind(fb.event_id, postId, fb.event_id, fb.place_text ?? '')
+        .first<{ id: number }>()
+    )?.id ?? null;
+  if (b.action === 'title') {
+    const title = cleanNote(b.title);
+    if (!title || [...title].length > 30) throw new PushError(400, '標題要 1 到 30 個字');
+    const target = await liveId();
+    if (target === null) throw new PushError(400, '這則已經不在雷達上了');
+    changed = await setManualTitle(env, target, title, now);
+  } else if (b.action === 'supplement') {
+    const placesBefore = await placesOf(env, postId);
     const note = cleanNote(b.note ?? fb.note);
     if (!note) throw new PushError(400, '請寫要補充的內容');
     const post = await getPost(env, postId);
@@ -183,13 +206,30 @@ export async function applyFeedback(env: Env, id: number, body: unknown, now: nu
     await reprocessPost(env, postId, now).catch((e: Error) => {
       throw new PushError(400, e.message);
     });
+    // AI 常因為補充只提到一個地點，就把貼文的其他地點漏掉：列出來提醒管理者
+    const after = new Set(await placesOf(env, postId));
+    lostPlaces = placesBefore.filter((p) => !after.has(p));
   } else if (b.action === 'takedown') {
     removed = await takeDown(env, fb.event_id, b.scope === 'post' ? 'post' : 'event', 'feedback', now);
   } else {
-    throw new PushError(400, "action 要是 'supplement' 或 'takedown'");
+    throw new PushError(400, "action 要是 'title'、'supplement' 或 'takedown'");
   }
   await env.DB.prepare("UPDATE event_feedback SET status = 'resolved', resolved_at = ? WHERE id = ?").bind(now, id).run();
-  return { ok: true, action: b.action, ...(removed !== undefined ? { removed } : {}), events: await currentEvents(env, postId) };
+  return {
+    ok: true,
+    action: b.action,
+    ...(removed !== undefined ? { removed } : {}),
+    ...(changed !== undefined ? { changed } : {}),
+    ...(lostPlaces?.length ? { lostPlaces } : {}),
+    events: await currentEvents(env, postId),
+  };
+}
+
+async function placesOf(env: Env, postId: string): Promise<string[]> {
+  const { results } = await env.DB.prepare("SELECT DISTINCT place_text FROM events WHERE post_id = ? AND status IN ('upcoming', 'active', 'unlocated')")
+    .bind(postId)
+    .all<{ place_text: string }>();
+  return results.map((r) => r.place_text);
 }
 
 /** 標成已處理，或改回未處理：{ status: 'resolved' | 'open' } */
