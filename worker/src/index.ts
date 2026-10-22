@@ -10,6 +10,7 @@ import { mergeIntoOfficial } from './sources/merge';
 import { apifyTrial } from './sources/apify';
 import { fetchThreadsPost, resolveThreadsLink, shortcodeToUnix } from './sources/link';
 import { applyFeedback, deleteAdminSubscription, listFeedback, notifyAdmins, purgeFeedback, saveAdminSubscription, setFeedbackStatus, submitFeedback } from './feedback';
+import { moduleOf } from './modules';
 import { PUSH_RADIUS_KM, PushError, b64urlEncode, deleteSubscription, encryptPayload, purgeSubscriptions, pushStarted, saveSubscription, sendPush, vapidKeys } from './push';
 import { confirmLink, ENDED_REPORTS_NEEDED, MAX_LINK_AGE_SEC, ReportError, ipHash, myReports, purgeReports, recheckLinks, rejectLink, reportEnded, submitLink, supplementLink, withdrawReport } from './reports';
 import { isTransient, withResilientDb } from './db';
@@ -93,7 +94,9 @@ async function handle(req: Request, env: Env, ctx: ExecutionContext): Promise<Re
     const radiusKm = num(url.searchParams.get('radius_km')) ?? Number(env.DEFAULT_RADIUS_KM) ?? 80;
     const horizonH = num(url.searchParams.get('horizon_h')) ?? 24;
     const keywords = parseKeywordList(url.searchParams.get('keywords'));
+    const module = moduleOf(url.searchParams.get('module'));
     const events = await listEvents(env, {
+      module,
       lat,
       lng,
       // 全球：半個地球（約 20,000 km）
@@ -209,9 +212,9 @@ async function handle(req: Request, env: Env, ctx: ExecutionContext): Promise<Re
 
   // 使用者貼上 Threads 貼文連結：{ url }。判讀好先回傳預覽（outcome = 'preview'），確認了才上雷達
   if (req.method === 'POST' && path === '/api/reports') {
-    const body = await readJson<{ url?: unknown }>(req);
+    const body = await readJson<{ url?: unknown; module?: unknown }>(req);
     if (typeof body.url !== 'string' || body.url.length > 2000) throw new HttpError(400, '請貼上 Threads 貼文連結');
-    const result = await submitLink(env, body.url, await ipHash(env, req), now, await deviceId(env, req));
+    const result = await submitLink(env, body.url, await ipHash(env, req), now, await deviceId(env, req), moduleOf(body.module));
     // 回報的如果是官方車掃，馬上併進去，不用等排程
     await mergeIntoOfficial(env, now).catch((e) => console.warn('merge failed', e));
     return jsonResponse(result);

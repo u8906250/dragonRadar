@@ -311,6 +311,8 @@ export async function pushStarted(env: Env, now: number): Promise<{ events: numb
       WHERE pushed_at IS NULL AND status IN ('upcoming', 'active') AND start_at <= ? AND end_at > ?
         AND (start_at > ? OR created_at > ?) AND spot = 0 AND all_day = 0
         AND lat IS NOT NULL AND lng IS NOT NULL AND merged_into IS NULL
+        -- 開始時推播只給洋流（狗狗陪伴的職缺沒有「開始」）
+        AND post_id IN (SELECT id FROM posts WHERE module = 'current')
       LIMIT 100`,
   )
     .bind(now, now, now - FRESH_SEC, now - FRESH_SEC)

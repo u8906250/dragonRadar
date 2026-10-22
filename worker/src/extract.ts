@@ -2,7 +2,22 @@ import type { Env } from './env';
 import { isAdminOnly } from './geocode';
 import { formatTaipei, parseIsoToUnix } from './util';
 
-export type EventKind = 'giveaway' | 'activity';
+/** giveaway 發放、activity 活動（洋流）；job 職缺（狗狗陪伴） */
+export type EventKind = 'giveaway' | 'activity' | 'job';
+
+/** 職缺（狗狗陪伴模組）：工作期間、每天時段、薪資、雇主、怎麼應徵 */
+export interface JobInfo {
+  /** 工作期間第一天、最後一天 YYYY-MM-DD；沒寫是 null */
+  work_from: string | null;
+  work_to: string | null;
+  /** 每天的工作時段，例如 ["09:00-12:00", "15:00-18:00"] */
+  slots: string[];
+  pay: string | null;
+  employer: string | null;
+  /** form 表單、line、dm 私訊、phone 電話、email、other；沒寫是 null */
+  contact: string | null;
+  requirements: string | null;
+}
 
 /** 一則貼文裡的一個場次（地點或時段不同就是不同場次） */
 export interface ExtractedEvent {
@@ -24,6 +39,8 @@ export interface ExtractedEvent {
   country?: string | null;
   /** 國外活動的當地時區（IANA，例如 America/Los_Angeles）；台灣或不確定是 null */
   timezone?: string | null;
+  /** 職缺才有 */
+  job?: JobInfo;
 }
 
 export interface Extraction {
@@ -108,7 +125,7 @@ events 每筆的欄位：
 - 貼文和補充都沒寫星期幾，weekdays 就是 null，不要自己猜。
 - 活動在國外（例如美國灣區、日本、歐洲的僑胞、留學生活動）：一樣要抽出來。start_at、end_at 寫當地的時間（貼文寫的時間就是當地時間），填 country、timezone；place_query 用當地的地名加城市，英文或當地語言，例如「Memorial Park, Cupertino」，不要加台灣的縣市。`;
 
-export function buildMessages(text: string, postedAt: number, now: number): Array<{ role: 'system' | 'user'; content: string }> {
+export function buildMessages(text: string, postedAt: number, now: number, system: string = SYSTEM_PROMPT): Array<{ role: 'system' | 'user'; content: string }> {
   void now;
   const user = `貼文發布時間：${formatTaipei(postedAt)}
 （貼文裡的「今天、今晚、明天」都以這個發布日期為準）
@@ -118,24 +135,35 @@ export function buildMessages(text: string, postedAt: number, now: number): Arra
 ${text.trim()}
 """`;
   return [
-    { role: 'system', content: SYSTEM_PROMPT },
+    { role: 'system', content: system },
     { role: 'user', content: user },
   ];
 }
 
-function str(v: unknown): string | null {
+/** 一種判讀（每個模組一種）：系統說明、JSON schema、把模型輸出整理成 Extraction */
+export interface ExtractSpec {
+  system: string;
+  schema: object;
+  normalize: (raw: unknown) => Extraction | null;
+}
+
+/** 洋流：發放、活動、固定據點 */
+export const EVENT_SPEC: ExtractSpec = { system: SYSTEM_PROMPT, schema: SCHEMA, normalize: (raw) => normalizeExtraction(raw) };
+
+export function str(v: unknown): string | null {
   if (typeof v !== 'string') return null;
   const t = v.trim();
   return t.length && t.toLowerCase() !== 'null' ? t : null;
 }
 
-function conf(v: unknown): number {
+export function conf(v: unknown): number {
   const n = typeof v === 'number' ? v : Number(v);
   return Number.isFinite(n) ? Math.min(1, Math.max(0, n)) : 0;
 }
 
 export function normalizeKind(v: unknown): EventKind {
   const k = typeof v === 'string' ? v.trim().toLowerCase() : '';
+  if (k === 'job') return 'job';
   return k === 'activity' || k === 'event' || k === '活動' ? 'activity' : 'giveaway';
 }
 
@@ -336,7 +364,7 @@ export function weekdaysFromText(text: string): number[] | null {
   return normalizeWeekdays(out);
 }
 
-function parseLoose(raw: unknown): unknown {
+export function parseLoose(raw: unknown): unknown {
   if (typeof raw !== 'string') return raw;
   // 推理型模型（Qwen3、GLM 等）可能先輸出 <think>…</think>
   const cleaned = raw
@@ -426,9 +454,9 @@ export interface ModelAttempt {
 }
 
 /** 用指定模型判讀一次。先用 JSON schema，模型不支援就退回純提示 */
-export async function runModel(env: Env, model: string, text: string, postedAt: number, now: number): Promise<ModelAttempt> {
+export async function runModel(env: Env, model: string, text: string, postedAt: number, now: number, spec: ExtractSpec = EVENT_SPEC): Promise<ModelAttempt> {
   const ai = env.AI as unknown as AiRunner;
-  const messages = buildMessages(text, postedAt, now);
+  const messages = buildMessages(text, postedAt, now, spec.system);
   // Qwen3 預設會先長篇推理，可能把 token 用完沒有輸出；這種抽取工作不需要推理
   if (/qwen3/i.test(model)) messages[messages.length - 1].content += '\n/no_think';
   const t0 = Date.now();
@@ -437,7 +465,7 @@ export async function runModel(env: Env, model: string, text: string, postedAt: 
   try {
     result = await ai.run(model, {
       messages,
-      response_format: { type: 'json_schema', json_schema: SCHEMA },
+      response_format: { type: 'json_schema', json_schema: spec.schema },
       max_tokens: 1200,
       temperature: 0.1,
     });
@@ -452,7 +480,7 @@ export async function runModel(env: Env, model: string, text: string, postedAt: 
   }
   const content = responseContent(result);
   const raw = typeof content === 'string' ? content : JSON.stringify(content ?? null);
-  const extraction = error ? null : normalizeExtraction(content);
+  const extraction = error ? null : spec.normalize(content);
   const fidelity = extraction ? placeFidelity(extraction, text) : 0;
   return { model, ms: Date.now() - t0, extraction, raw, fidelity, ok: !!extraction && fidelity >= MIN_FIDELITY, error };
 }
@@ -467,12 +495,12 @@ export async function extractFromPost(
   text: string,
   postedAt: number,
   now: number,
-  opts: { secondOpinion?: boolean } = {},
+  opts: { secondOpinion?: boolean; spec?: ExtractSpec } = {},
 ): Promise<{ extraction: Extraction | null; raw: string; model: string; garbled: boolean }> {
   const models = [env.AI_MODEL, env.AI_MODEL_FALLBACK].filter((m, i, a): m is string => !!m && a.indexOf(m) === i);
   let last: ModelAttempt | null = null;
   for (const m of models) {
-    const attempt = await runModel(env, m, text, postedAt, now);
+    const attempt = await runModel(env, m, text, postedAt, now, opts.spec);
     if (last?.ok && !attempt.ok) {
       console.warn(`second opinion with ${m} not usable, keeping ${last.model}: error=${attempt.error ?? ''}`);
       break;

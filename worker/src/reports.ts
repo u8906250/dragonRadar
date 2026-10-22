@@ -5,6 +5,7 @@
  * 按「不對」（rejectLink）就不放，留給管理者看。
  */
 import type { Env } from './env';
+import { DEFAULT_MODULE, moduleOf, type ModuleId } from './modules';
 import { commitPlan, detectEnded, getEvent, getPost, MAX_FUTURE_SEC, planPost, processPost, storePost, type EventOut, type PlanItem, type PostRow } from './events';
 import type { EventKind } from './extract';
 import { fetchThreadsPost, resolveThreadsLink, shortcodeToUnix, withLocationTag } from './sources/link';
@@ -104,6 +105,8 @@ export interface PreviewItem {
   weekdays: number[] | null;
   /** 國外活動的當地時區（IANA），預覽用當地時間顯示；台灣是 null */
   tz?: string | null;
+  /** 模組自己的欄位，例如職缺的工作期間、薪資、防詐提醒 */
+  extra?: Record<string, unknown> | null;
   /** 雷達上已經有這個據點：replace 同一個帳號，確認後以這則為準；attach 別人發的，確認後只附上去 */
   update?: { mode: 'replace' | 'attach'; title: string };
   /** 同一個地點一天有好幾個時段（例如中午、晚上）：每個時段第一次的開始、結束時間，照時間排 */
@@ -200,6 +203,7 @@ export function previewOf(items: PlanItem[], now: number): PreviewItem[] {
       lastStartAt: last.start_at,
       weekdays: p.weekdays ?? null,
       tz: p.tz ?? null,
+      extra: p.extra ? (JSON.parse(p.extra) as Record<string, unknown>) : null,
       ...(m ? { update: { mode: m.mode, title: m.title } } : {}),
     };
   });
@@ -312,7 +316,7 @@ export const UNREADABLE_POST =
   'Threads 不讓外部讀取這則貼文，雷達讀不到內容。可能是貼文已刪除、帳號是私人帳號，或貼文限制只有登入的人才能看（例如酒類貼文限成年人觀看）。';
 
 /** 處理使用者貼上的連結：讀貼文、AI 判讀、定位，回傳結果 */
-export async function submitLink(env: Env, input: string, ip: string, now: number, device: string | null = null): Promise<SubmitResult> {
+export async function submitLink(env: Env, input: string, ip: string, now: number, device: string | null = null, module: ModuleId = DEFAULT_MODULE): Promise<SubmitResult> {
   const link = await resolveThreadsLink(input);
   if (!link) throw new ReportError(400, '找不到 Threads 貼文連結，請貼上像 https://www.threads.com/@帳號/post/... 的網址');
   const postId = `link-${link.code}`;
@@ -320,7 +324,10 @@ export async function submitLink(env: Env, input: string, ip: string, now: numbe
   const existing = await getPost(env, postId);
   // 之前有人貼過但還沒確認（或說判讀錯了）：再給這個人看一次預覽，讓他確認；回報的人刪掉的，重新判讀
   const waiting = existing && (existing.confirm_state === 'pending' || existing.confirm_state === 'rejected' || existing.confirm_state === 'withdrawn');
-  const stored = waiting ? readPlan(existing) : null;
+  // 還沒放上雷達、這次從別的模組貼（例如先在洋流貼了狗狗陪伴的徵人文）：改成這個模組重新判讀
+  const moved = !!existing && !!waiting && moduleOf(existing.module) !== module;
+  if (moved) await env.DB.prepare('UPDATE posts SET module = ? WHERE id = ?').bind(module, postId).run();
+  const stored = waiting && !moved ? readPlan(existing) : null;
   if (existing && waiting && stored && stored.early !== 'extraction_failed') return previewResult(env, existing, stored, true, now);
   if (existing && !waiting) {
     const last = await env.DB.prepare("SELECT result FROM submissions WHERE post_id = ? AND result IS NOT NULL AND result != '\"supplement\"' ORDER BY id DESC LIMIT 1")
@@ -355,7 +362,7 @@ export async function submitLink(env: Env, input: string, ip: string, now: numbe
   const username = fetched.username ?? link.username;
   const permalink = username ? `https://www.threads.com/@${username}/post/${link.code}` : `https://www.threads.com/t/${link.code}`;
   const text = withLocationTag(fetched.text, fetched.location);
-  await storePost(env, { id: postId, username, text, permalink, posted_at: postedAt, keyword: null, source: 'link' }, now);
+  await storePost(env, { id: postId, username, text, permalink, posted_at: postedAt, keyword: null, source: 'link', module }, now);
   // 等回報的人確認才放上雷達；排程也不會自己判讀
   await env.DB.prepare("UPDATE posts SET checked_at = ?, text = ?, confirm_state = 'pending' WHERE id = ?").bind(now, text, postId).run();
   await env.DB.prepare('INSERT INTO submissions (post_id, ip_hash, device, created_at) VALUES (?, ?, ?, ?)').bind(postId, ip, device, now).run();
@@ -452,6 +459,8 @@ export interface MyReport {
   /** 點了跳到雷達上的哪一場 */
   eventId: number | null;
   reportedAt: number;
+  /** 回報在哪個模組 */
+  module: string;
 }
 
 /**
@@ -460,14 +469,14 @@ export interface MyReport {
  */
 export async function myReports(env: Env, device: string): Promise<MyReport[]> {
   const { results: posts } = await env.DB.prepare(
-    `SELECT p.id, p.permalink, p.username, p.text, p.confirm_state, p.link_role, MAX(s.created_at) AS reported_at
+    `SELECT p.id, p.permalink, p.username, p.text, p.confirm_state, p.link_role, p.module, MAX(s.created_at) AS reported_at
        FROM submissions s JOIN posts p ON p.id = s.post_id
       WHERE s.device = ? AND p.source = 'link' AND p.confirm_state = 'confirmed'
         AND (p.link_role = 'related' OR EXISTS (SELECT 1 FROM events e WHERE e.post_id = p.id))
       GROUP BY p.id ORDER BY reported_at DESC LIMIT 30`,
   )
     .bind(device)
-    .all<{ id: string; permalink: string | null; username: string | null; text: string; confirm_state: string | null; link_role: string | null; reported_at: number }>();
+    .all<{ id: string; permalink: string | null; username: string | null; text: string; confirm_state: string | null; link_role: string | null; module: string; reported_at: number }>();
   if (posts.length === 0) return [];
   const { results: evs } = await env.DB.prepare(
     `SELECT id, post_id, title FROM events WHERE status IN ('upcoming', 'active') AND post_id IN (${posts.map(() => '?').join(',')}) ORDER BY start_at`,
@@ -487,6 +496,7 @@ export async function myReports(env: Env, device: string): Promise<MyReport[]> {
       events: mine.length,
       eventId: mine[0]?.id ?? null,
       reportedAt: p.reported_at,
+      module: moduleOf(p.module),
     };
   });
 }

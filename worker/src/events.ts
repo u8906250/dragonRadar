@@ -1,6 +1,8 @@
 import type { Env } from './env';
-import { applySupplementDate, dropBroughtItem, dropSelfPlace, extractFromPost, localizeTimes, splitDropTimes, splitMultiDay, startNowForDeadline, timeZoneOf, untilInText, weekdaysFromText, weekdaysInText, type EventKind, type ExtractedEvent } from './extract';
+import { applySupplementDate, dropBroughtItem, dropSelfPlace, EVENT_SPEC, extractFromPost, localizeTimes, splitDropTimes, splitMultiDay, startNowForDeadline, timeZoneOf, untilInText, weekdaysFromText, weekdaysInText, type EventKind, type ExtractedEvent } from './extract';
 import { geocodeAddress, parseTwAddress, type TwAddress } from './address';
+import { JOB_SPEC, jobRisks } from './jobs';
+import { DEFAULT_MODULE, moduleOf, type ModuleId } from './modules';
 import { adminArea, cityOfDistrict, geocode, geocodeFirst, geocodeStreet, geocodeWorld, isAreaOnly, placeCandidates, type GeoPoint } from './geocode';
 import { listActiveKeywords, type KeywordRow } from './keywords';
 import { parseThreadsTimestamp, type ThreadsClient } from './threads';
@@ -25,6 +27,8 @@ export interface PostRow {
   confirm_state?: 'pending' | 'confirmed' | 'rejected' | 'withdrawn' | null;
   confirm_plan?: string | null;
   confirm_note?: string | null;
+  /** 哪個模組：current 洋流、dog 狗狗陪伴 */
+  module?: string;
 }
 
 export interface EventRow {
@@ -52,6 +56,8 @@ export interface EventRow {
   tz?: string | null;
   /** 管理者直接改的標題 */
   title_manual?: number;
+  /** 模組自己的欄位（JSON） */
+  extra?: string | null;
   last_checked_at: number | null;
   created_at: number;
   updated_at: number;
@@ -88,6 +94,8 @@ export interface EventOut {
   tz: string | null;
   /** 管理者直接改過標題：畫面就用 title，不從地點拆店名 */
   manualTitle: boolean;
+  /** 模組自己的欄位，例如職缺的工作期間、薪資、防詐提醒 */
+  extra: Record<string, unknown> | null;
   /** 固定據點才有：第一個時段開始的時間，還沒到就是「還沒開始」（不是休息中） */
   firstStartAt?: number;
   /** 官方行程才有：併進來的新聞、Threads 貼文（相關報導） */
@@ -148,14 +156,16 @@ export interface NewPost {
   posted_at: number;
   keyword: string | null;
   source: 'threads' | 'manual' | 'news' | 'official' | 'link' | 'spot';
+  /** 哪個模組，沒給就是洋流 */
+  module?: ModuleId;
 }
 
 /** 寫入貼文，回傳是否為新貼文 */
 export async function storePost(env: Env, p: NewPost, now = nowSec()): Promise<boolean> {
   const r = await env.DB.prepare(
-    'INSERT OR IGNORE INTO posts (id, username, text, permalink, posted_at, keyword, source, fetched_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+    'INSERT OR IGNORE INTO posts (id, username, text, permalink, posted_at, keyword, source, fetched_at, module) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
   )
-    .bind(p.id, p.username, p.text, p.permalink, p.posted_at, p.keyword, p.source, now)
+    .bind(p.id, p.username, p.text, p.permalink, p.posted_at, p.keyword, p.source, now, p.module ?? DEFAULT_MODULE)
     .run();
   return (r.meta.changes ?? 0) > 0;
 }
@@ -404,6 +414,8 @@ export interface PlannedEvent {
   weekdays?: number[] | null;
   /** 國外活動的當地時區（IANA）；台灣是 null */
   tz?: string | null;
+  /** 模組自己的欄位（JSON 字串） */
+  extra?: string | null;
 }
 
 /**
@@ -519,8 +531,8 @@ export async function insertPlanned(env: Env, postId: string, p: PlannedEvent, n
   }
   const status: EventStatus = p.lat === null ? 'unlocated' : p.start_at <= now ? 'active' : 'upcoming';
   const event = await env.DB.prepare(
-    `INSERT INTO events (post_id, kind, title, item, start_at, end_at, place_text, place_query, lat, lng, status, confidence, all_day, spot, approx_area, end_open, until_open, weekdays, tz, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING *`,
+    `INSERT INTO events (post_id, kind, title, item, start_at, end_at, place_text, place_query, lat, lng, status, confidence, all_day, spot, approx_area, end_open, until_open, weekdays, tz, extra, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING *`,
   )
     .bind(
       postId,
@@ -542,6 +554,7 @@ export async function insertPlanned(env: Env, postId: string, p: PlannedEvent, n
       p.until_open ? 1 : 0,
       p.weekdays?.length ? p.weekdays.join(',') : null,
       p.tz ?? null,
+      p.extra ?? null,
       now,
       now,
     )
@@ -552,14 +565,16 @@ export async function insertPlanned(env: Env, postId: string, p: PlannedEvent, n
 /** 對單一貼文跑 LLM 抽取、定位，列出每個地點或時段要建的事件（還沒寫進雷達）；early 是整則貼文就不行的原因 */
 export async function planPost(env: Env, post: PostRow, now = nowSec()): Promise<{ items: PlanItem[]; early: string | null }> {
   const text = post.supplement ? `${post.text}\n\n【回報的人補充】${post.supplement}` : post.text;
+  const module = moduleOf(post.module);
   // 使用者貼連結回報的，主要模型說不是活動時再問備用模型（只多等一下，量不大）
-  const { extraction, raw, garbled } = await extractFromPost(env, text, post.posted_at, now, { secondOpinion: post.source === 'link' });
+  const { extraction, raw, garbled } = await extractFromPost(env, text, post.posted_at, now, { secondOpinion: post.source === 'link', spec: module === 'dog' ? JOB_SPEC : EVENT_SPEC });
   await env.DB.prepare('UPDATE posts SET processed_at = ?, extraction = ? WHERE id = ?').bind(now, raw, post.id).run();
 
   if (garbled) return { items: [], early: 'garbled' };
   if (!extraction) return { items: [], early: 'extraction_failed' };
   if (!extraction.is_event) return { items: [], early: 'not_event' };
   if (extraction.events.length === 0) return { items: [], early: 'no_events' };
+  if (module === 'dog') return { items: await planJobs(env, post, extraction.events, now), early: null };
 
   const items: PlanItem[] = [];
   const deadline = Date.now() + ADDRESS_BUDGET_MS;
@@ -666,6 +681,79 @@ export async function takeDown(env: Env, eventId: number, scope: 'event' | 'post
         ? await env.DB.prepare(`UPDATE events SET status = 'ended', ended_reason = ?, updated_at = ? WHERE post_id = ? AND place_text = ? AND ${live}`).bind(reason, now, ev.post_id, ev.place_text).run()
         : await env.DB.prepare(`UPDATE events SET status = 'ended', ended_reason = ?, updated_at = ? WHERE id = ? AND ${live}`).bind(reason, now, ev.id).run();
   return r.meta.changes ?? 0;
+}
+
+/** 職缺沒寫工作期間時，在雷達上留幾天；有寫也最多留到發文後幾天（貼文最多存 30 天） */
+const JOB_DEFAULT_DAYS = 14;
+const JOB_MAX_DAYS = 30;
+
+/** 「2026-11-30」台北時間那天 00:00 */
+const taipeiDayOf = (d: string | null): number | null => (d && /^\d{4}-\d{2}-\d{2}$/.test(d) ? Date.parse(`${d}T00:00:00+08:00`) / 1000 : null);
+
+/**
+ * 狗狗陪伴：每個工作地點一筆。從發文開始就算「徵才中」，到工作期間最後一天結束（沒寫就留 JOB_DEFAULT_DAYS 天），
+ * 工作期間、每天時段、薪資、雇主、怎麼應徵、防詐提醒放在 extra
+ */
+async function planJobs(env: Env, post: PostRow, jobs: ExtractedEvent[], now: number): Promise<PlanItem[]> {
+  const items: PlanItem[] = [];
+  const deadline = Date.now() + ADDRESS_BUDGET_MS;
+  for (const [group, ex] of jobs.entries()) {
+    if (ex.confidence < MIN_CONFIDENCE) {
+      items.push({ group, plan: null, reason: 'low_confidence' });
+      continue;
+    }
+    const job = ex.job ?? { work_from: null, work_to: null, slots: [], pay: null, employer: null, contact: null, requirements: null };
+    const start = Math.min(post.posted_at, now);
+    const lastDay = taipeiDayOf(job.work_to) ?? taipeiDayOf(job.work_from);
+    const end = Math.min(lastDay !== null ? lastDay + DAY_SEC : post.posted_at + JOB_DEFAULT_DAYS * DAY_SEC, post.posted_at + JOB_MAX_DAYS * DAY_SEC);
+    if (end <= now) {
+      items.push({ group, plan: null, reason: 'already_over', start, end });
+      continue;
+    }
+    const placeQuery = ex.place_query ?? ex.place_text;
+    const placeText = ex.place_text ?? ex.place_query;
+    if (!placeQuery || !placeText) {
+      items.push({ group, plan: null, reason: 'no_place' });
+      continue;
+    }
+    const { point, approxArea } = await locatePlaceForEvent(env, placeQuery, ex.place_text, deadline);
+    items.push({
+      group,
+      reason: 'planned',
+      plan: {
+        kind: 'job',
+        title: ex.title,
+        item: job.pay,
+        start_at: start,
+        end_at: end,
+        place_text: placeText,
+        place_query: placeQuery,
+        lat: point?.lat ?? null,
+        lng: point?.lng ?? null,
+        confidence: ex.confidence,
+        all_day: false,
+        spot: false,
+        approx_area: approxArea,
+        end_open: lastDay === null,
+        until_open: false,
+        weekdays: null,
+        tz: null,
+        extra: JSON.stringify({ ...job, risks: jobRisks(job, post.text) }),
+      },
+    });
+  }
+  return items;
+}
+
+/** extra 欄位（JSON）讀出來；壞掉的當沒有 */
+function parseExtra(v: string | null | undefined): Record<string, unknown> | null {
+  if (!v) return null;
+  try {
+    const o = JSON.parse(v) as unknown;
+    return o && typeof o === 'object' && !Array.isArray(o) ? (o as Record<string, unknown>) : null;
+  } catch {
+    return null;
+  }
 }
 
 /** 把判讀好的寫進雷達，回傳跟 processPost 一樣的結果 */
@@ -864,6 +952,8 @@ export interface ListQuery {
   horizonSec: number;
   /** 只回傳這些關鍵字的事件；貼文是用該關鍵字搜到的，或內文含有該關鍵字 */
   keywords?: string[];
+  /** 哪個模組的，沒給就是洋流 */
+  module?: ModuleId;
 }
 
 type JoinedRow = EventRow & { username: string | null; permalink: string | null; text: string; supplement?: string | null; posted_at: number; keyword: string | null; source: string; ended_reports: number | null };
@@ -895,6 +985,7 @@ export function toEventOut(r: JoinedRow, now: number): EventOut {
     weekdays: r.weekdays ? r.weekdays.split(',').map(Number) : null,
     tz: r.tz ?? null,
     manualTitle: r.title_manual === 1,
+    extra: parseExtra(r.extra),
     // 只給摘錄（著作權：只做必要的引用），完整內容請人看原文
     post: { id: r.post_id, source: r.source, username: r.username, permalink: r.permalink, postedAt: r.posted_at, text: postExcerpt(r.text, r.source), supplement: r.supplement ?? null },
   };
@@ -972,7 +1063,10 @@ export async function listEvents(env: Env, q: ListQuery): Promise<EventOut[]> {
       binds.push(...lngCond.binds);
     }
   }
-  if (q.keywords && q.keywords.length > 0) {
+  conds.push('p.module = ?');
+  binds.push(q.module ?? DEFAULT_MODULE);
+  // 關鍵字是洋流的（Threads 搜尋用），其他模組不篩
+  if (q.keywords && q.keywords.length > 0 && (q.module ?? DEFAULT_MODULE) === DEFAULT_MODULE) {
     // 使用者主動回報的貼文、審核通過的固定據點不一定有寫關鍵字，一律顯示
     const ors: string[] = ["p.source IN ('link', 'spot')"];
     for (const k of q.keywords) {
