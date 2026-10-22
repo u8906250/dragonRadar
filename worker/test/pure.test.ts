@@ -1,5 +1,5 @@
 import type { ExtractedEvent } from '../src/extract';
-import { applySupplementDate, closedWeekdays, dropBroughtItem, dropSelfPlace, openWeekdaysFromText, splitDropTimes, splitMultiDay, spotHoursFromText, splitWeekdayWeekend, startNowForDeadline, untilInText, weekdaysFromText, weekdaysInText } from '../src/extract';
+import { applySupplementDate, closedWeekdays, dropBroughtItem, dropSelfPlace, openWeekdaysFromText, splitDropTimes, splitMultiDay, slotWeekdays, spotHoursFromText, splitWeekdayWeekend, startNowForDeadline, untilInText, weekdaysFromText, weekdaysInText } from '../src/extract';
 import { isAreaOnly } from '../src/geocode';
 import { existedOutcome, notListedWhy, previewOf } from '../src/reports';
 import { describe, expect, it } from 'vitest';
@@ -865,5 +865,16 @@ describe('threads profile hints', () => {
     expect(profileCandidates('準備了50個 由挺台店家@luguocafe "爐鍋咖啡@ 小藝埕" 代為發放', 'kylekuo1979')).toEqual(['luguocafe']);
     expect(profileCandidates('本店今天發飄帶，希望 @pumashen 當選', 'someshop')).toEqual(['someshop']);
     expect(profileCandidates('支持 @pumashen 加油', 'someone')).toEqual([]);
+  });
+});
+
+describe('slotWeekdays', () => {
+  const sup = '門診時間：週一到週六 08:30–12:00、14:30–18:00，平日晚上 18:30–21:00，週六晚上、週日休診';
+  it('reads the weekdays written right before a slot', () => {
+    expect(slotWeekdays(sup, '2026-10-22T08:30:00+08:00')).toEqual([1, 2, 3, 4, 5, 6]);
+    expect(slotWeekdays(sup, '2026-10-22T14:30:00+08:00')).toBeUndefined();
+    expect(slotWeekdays(sup, '2026-10-22T18:30:00+08:00')).toEqual([1, 2, 3, 4, 5]);
+    expect(slotWeekdays('平日0930-2030\n假日1000-1800', '2026-10-22T10:00:00+08:00')).toEqual([6, 7]);
+    expect(slotWeekdays('營業時間：11:30～14:30，17:00～20:30', '2026-10-22T11:30:00+08:00')).toBeUndefined();
   });
 });

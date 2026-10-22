@@ -484,6 +484,30 @@ export function spotHoursFromText(ex: Pick<ExtractedEvent, 'spot' | 'start_at' |
   return ex.start_at + '|' + ex.end_at !== before;
 }
 
+/**
+ * 這個時段自己寫的星期幾：時段前面、同一句裡的「平日」「假日」「週一到週六」「每天」
+ * （「週一到週六 08:30–12:00，平日晚上 18:30–21:00」的晚上是週一到五）。沒寫回傳 undefined。
+ */
+export function slotWeekdays(text: string, startAt: string | null): number[] | null | undefined {
+  const start = parseIsoToUnix(startAt);
+  if (start === null) return undefined;
+  const tod = (start + 8 * 3600) % DAY_SEC;
+  const t = halfWidth(text);
+  for (const m of t.matchAll(RANGE_RE)) {
+    if (clockSec(m, 1) !== tod) continue;
+    const before = t.slice(0, m.index);
+    const cut = Math.max(...['；', ';', '，', ',', '。', '\n', '、', '|', '／', '/'].map((c) => before.lastIndexOf(c)));
+    const seg = before.slice(cut + 1);
+    if (/每天|每日|天天/.test(seg)) return null;
+    if (/平日|週間|周間/.test(seg)) return [1, 2, 3, 4, 5];
+    if (/假日|週末|周末/.test(seg)) return [6, 7];
+    const listed = new RegExp(`(?:每\\s*)?${DAY_LIST}`).exec(seg);
+    if (listed) return normalizeWeekdays(dayList(listed[1]));
+    return undefined;
+  }
+  return undefined;
+}
+
 /** 文字裡有沒有提到這個時刻（「13:00」「下午1點」「1300」） */
 function clockMentioned(t: string, tod: number): boolean {
   for (const m of t.matchAll(new RegExp(`(?<![\\d/.])${CLOCK}(?![\\d/.])`, 'g'))) {

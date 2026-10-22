@@ -1,6 +1,6 @@
 import type { Env } from './env';
 import { fetchThreadsProfile, profileCandidates, profileHintText, type ThreadsProfile } from './sources/profile';
-import { applySupplementDate, closedWeekdays, dropBroughtItem, dropSelfPlace, EVENT_SPEC, extractFromPost, localizeTimes, openWeekdaysFromText, splitDropTimes, splitMultiDay, splitWeekdayWeekend, spotHoursFromText, startNowForDeadline, timeZoneOf, untilInText, weekdaysInText, type EventKind, type ExtractedEvent } from './extract';
+import { applySupplementDate, closedWeekdays, slotWeekdays, dropBroughtItem, dropSelfPlace, EVENT_SPEC, extractFromPost, localizeTimes, openWeekdaysFromText, splitDropTimes, splitMultiDay, splitWeekdayWeekend, spotHoursFromText, startNowForDeadline, timeZoneOf, untilInText, weekdaysInText, type EventKind, type ExtractedEvent } from './extract';
 import { geocodeAddress, parseTwAddress, type TwAddress } from './address';
 import { SESSION_SPEC } from './badminton';
 import { FOOD_SPEC } from './food';
@@ -665,9 +665,12 @@ async function planPostWith(env: Env, post: PostRow, now: number, profileHint: s
     ex.weekdays = weekdaysInText(ex.weekdays, text);
     const scope = spotScope(text, ex, extraction.events);
     const open = scope ? openWeekdaysFromText(scope) : undefined;
-    if (open !== undefined && !(ex.weekdays && /平日|假日|週末|周末/.test(scope ?? ''))) ex.weekdays = open;
-    else if (ex.weekdays && scope) {
-      // 平日、假日分兩筆的再扣掉公休日（「週一、二公休 平日12-21 假日11-20」的平日是週三到五）
+    // 時段自己寫了星期幾（「平日晚上 18:30–21:00」）：照那個時段的
+    const own = scope ? slotWeekdays(scope, ex.start_at) : undefined;
+    if (own) ex.weekdays = own;
+    else if (open !== undefined && !(ex.weekdays && /平日|假日|週末|周末/.test(scope ?? ''))) ex.weekdays = open;
+    if (ex.weekdays && scope) {
+      // 再扣掉公休日（「週一、二公休 平日12-21 假日11-20」的平日是週三到五）
       const closed = closedWeekdays(scope) ?? [];
       const left = ex.weekdays.filter((d) => !closed.includes(d));
       if (left.length > 0) ex.weekdays = left;
