@@ -37,9 +37,30 @@ export class ReportError extends Error {
   }
 }
 
+let saltCache: string | null = null;
+
+/**
+ * 裝置代碼、IP、確認代碼雜湊用的鹽。以前直接用 ADMIN_TOKEN，第一次用到時把當時的 ADMIN_TOKEN 存進 settings，
+ * 之後都讀 settings：換 ADMIN_TOKEN 不會讓大家的「我的回報」、漂流瓶、還沒確認的預覽對不上。
+ */
+export async function hashSalt(env: Env): Promise<string> {
+  if (saltCache) return saltCache;
+  const read = async (): Promise<string | null> =>
+    (await env.DB.prepare("SELECT value FROM settings WHERE key = 'hash_salt'").first<{ value: string }>())?.value ?? null;
+  let salt = await read();
+  if (!salt) {
+    await env.DB.prepare("INSERT OR IGNORE INTO settings (key, value, updated_at) VALUES ('hash_salt', ?, ?)")
+      .bind(env.ADMIN_TOKEN ?? 'current-radar', Math.floor(Date.now() / 1000))
+      .run();
+    salt = (await read()) ?? env.ADMIN_TOKEN ?? 'current-radar';
+  }
+  saltCache = salt;
+  return salt;
+}
+
 export async function ipHash(env: Env, req: Request): Promise<string> {
   const ip = req.headers.get('cf-connecting-ip') ?? 'unknown';
-  return sha1Hex(`${ip}|${env.ADMIN_TOKEN ?? 'current-radar'}`);
+  return sha1Hex(`${ip}|${await hashSalt(env)}`);
 }
 
 export type LinkOutcome =
@@ -110,7 +131,7 @@ interface StoredPlan {
 }
 
 /** 確認用的代碼：拿得到預覽的人才能確認（貼文 id 加鹽雜湊，不用另外存） */
-const confirmToken = (env: Env, postId: string): Promise<string> => sha1Hex(`confirm|${postId}|${env.ADMIN_TOKEN ?? 'current-radar'}`, 20);
+const confirmToken = async (env: Env, postId: string): Promise<string> => sha1Hex(`confirm|${postId}|${await hashSalt(env)}`, 20);
 
 /** 同一個地點、時段（固定據點的每一天）合成一筆預覽 */
 export function previewOf(items: PlanItem[], now: number): PreviewItem[] {

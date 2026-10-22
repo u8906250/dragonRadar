@@ -11,7 +11,7 @@
  */
 import type { Env } from './env';
 import { responseContent } from './extract';
-import { ReportError } from './reports';
+import { hashSalt, ReportError } from './reports';
 import { sha1Hex } from './sources/text';
 
 /** 字數比照 X（Twitter）：上限 280，拉丁字母、數字、一般標點算 1，其他（中文、全形、表情）算 2 */
@@ -96,7 +96,7 @@ export const bottlesEnabled = (env: Env): boolean => env.BOTTLES_ENABLED !== 'fa
 export async function deviceId(env: Env, req: Request): Promise<string | null> {
   const raw = req.headers.get('x-device') ?? '';
   if (!/^[0-9a-f-]{36}$/i.test(raw)) return null;
-  return sha1Hex(`device|${raw}|${env.ADMIN_TOKEN ?? 'current-radar'}`, 24);
+  return sha1Hex(`device|${raw}|${await hashSalt(env)}`, 24);
 }
 
 function needDevice(id: string | null): string {

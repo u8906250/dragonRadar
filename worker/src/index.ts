@@ -349,7 +349,9 @@ async function handleAdmin(req: Request, env: Env, ctx: ExecutionContext, path: 
     );
     const expected = 'DGv6ra1nlYgDCS1FRnbzlwAAEABBBP4z9KsN6nGRTbVYI_c7VJSPQTBtkgcy27mlmlMoZIIgDll6e3vCYLocInmYWAmS6TlzAC8wEqKK6PBru3jl7A_yl95bQpu6cVPTpK4Mqgkf1CXztLVBSt2Ks3oZwbuwXPXLWyouBWLVWGNWQexSgSxsj_Qulcy4a-fN';
     const subs = await env.DB.prepare('SELECT COUNT(*) AS n FROM push_subscriptions').first<{ n: number }>();
-    return jsonResponse({ rfc8291: b64urlEncode(out) === expected, vapid: !!(await vapidKeys(env)).publicKey, subscriptions: subs?.n ?? 0 });
+    // 雜湊用的鹽有沒有存好（換 ADMIN_TOKEN 前要是 true）
+    const salt = await env.DB.prepare("SELECT 1 AS ok FROM settings WHERE key = 'hash_salt'").first<{ ok: number }>();
+    return jsonResponse({ rfc8291: b64urlEncode(out) === expected, vapid: !!(await vapidKeys(env)).publicKey, subscriptions: subs?.n ?? 0, hashSaltStored: !!salt });
   }
 
   // 試用 Apify 的 Threads 爬蟲：只回傳結果與 AI 判讀，不寫入資料庫

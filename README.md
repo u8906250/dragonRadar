@@ -236,6 +236,8 @@ Cloudflare D1 偶爾回「D1_ERROR: internal error」這類暫時性錯誤。`sr
 
 admin 路徑需要 `Authorization: Bearer <ADMIN_TOKEN>`。
 
+換 ADMIN_TOKEN：裝置代碼、IP、回報確認代碼的雜湊用的鹽存在 `settings.hash_salt`（第一次用到時存當時的 ADMIN_TOKEN），之後跟 ADMIN_TOKEN 無關，換 token 不會讓「我的回報」、漂流瓶、還沒確認的預覽對不上。換之前先確認 `POST /api/admin/push-selftest` 回傳 `hashSaltStored: true`；換完管理頁要用新的 token 重新登入。
+
 ## 之後可以做的
 
 - Web Push：目前通知只在頁面開著時出現，背景推播需要 Service Worker + VAPID。
