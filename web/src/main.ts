@@ -2391,8 +2391,14 @@ function resultGroups(list: EventOut[]): EventOut[][] {
 /** 判讀或確認後的結果：放上雷達的、重複的，點了跳到那一場 */
 async function showReportResult(data: SubmitResult): Promise<void> {
   const { outcome, events: found, existed } = data;
-  const head = existed && (outcome === 'added' || outcome === 'duplicate' || outcome === 'attached') ? '這則之前已經有人回報，已在雷達上：' : OUTCOME_TEXT[outcome];
-  const list = resultGroups(found)
+  // 自己剛加入雷達的會出現在下面的「我的回報」，不再列一次；別人之前回報過的、附在據點的不在我的回報裡，照樣列
+  const inMine = outcome === 'added' && !existed;
+  const head = inMine
+    ? '已加入雷達，可以在下面「我的回報」按「看」。'
+    : existed && (outcome === 'added' || outcome === 'duplicate' || outcome === 'attached')
+      ? '這則之前已經有人回報，已在雷達上：'
+      : OUTCOME_TEXT[outcome];
+  const list = (inMine ? [] : resultGroups(found))
     .map((g) => {
       const ev = g[0];
       const day = (t: number): string => dateFmt.format(new Date(t * 1000));
