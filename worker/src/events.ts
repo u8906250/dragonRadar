@@ -310,6 +310,15 @@ export function addressOf(placeQuery: string, placeText: string | null): { addre
   return addressWithCity(a, city);
 }
 
+/**
+ * 「永順街31巷口」：巷子是從大路的同一個號碼旁邊轉進去的，巷口就當成「永順街31號」查門牌；
+ * 回傳當成門牌的文字（前面的縣市、區照原文）和那條巷子（門牌查不到時先退到巷子）
+ */
+export function laneMouth(s: string | null | undefined): { asAddress: string; lane: string } | null {
+  const m = /^(.*?)([^\s\d區縣鄉鎮里村鄰巷弄號（）()「」、,，:：]{1,5}?(?:路|街|大道)(?:[一二三四五六七八九十]段)?)\s*(\d+)\s*巷\s*口/.exec(s ?? '');
+  return m ? { asAddress: `${m[1]}${m[2]}${m[3]}號`, lane: `${m[2]}${m[3]}巷` } : null;
+}
+
 /** 門牌加上縣市：查詢字串、約略位置用的區 */
 export function addressWithCity(a: TwAddress, city: string): { address: TwAddress; text: string; area: string | null; city: string } {
   return { address: a, text: `${city}${a.district ?? ''}${a.street}${a.raw}號`, area: a.district ? `${city}${a.district}` : null, city };
@@ -332,7 +341,9 @@ export async function locatePlaceForEvent(
     const hit = await geocodeWorld(env, placeQuery, placeText, country);
     return { point: hit?.point ?? null, approxArea: hit?.approxArea ?? null };
   }
-  let addr = addressOf(placeQuery, placeText);
+  // 沒有門牌但寫了「N巷口」：當成大路的 N 號查
+  const lane = addressOf(placeQuery, placeText) ? null : (laneMouth(placeQuery) ?? laneMouth(placeText));
+  let addr = lane ? addressOf(lane.asAddress, placeText) : addressOf(placeQuery, placeText);
   // 只寫了區沒寫縣市（「淡水區中山北路二段200號」）：全台只有一個同名區的，補上縣市再查
   if (addr && !addr.city && addr.address.district) {
     const city = await cityOfDistrict(env, addr.address.district).catch(() => null);
@@ -341,8 +352,9 @@ export async function locatePlaceForEvent(
   if (addr) {
     const hit = addr.text ? await geocodeAddress(env, addr.text, undefined, { overpass: Date.now() < deadline }) : null;
     if (hit) return { point: { lat: hit.lat, lng: hit.lng, displayName: addr.text }, approxArea: null };
-    // 門牌查不到：先退到那條路（同一個縣市、鄉鎮區），再退到鄉鎮區中心，都標成約略位置
-    const road = addr.city ? await geocodeStreet(env, addr.city, addr.address.district, addr.address.street) : null;
+    // 門牌查不到：先退到那條路（巷口的先退到那條巷子；同一個縣市、鄉鎮區），再退到鄉鎮區中心，都標成約略位置
+    const street = lane ? `${addr.address.street}${lane.lane.replace(/^.*?(\d+巷)$/, '$1')}` : addr.address.street;
+    const road = addr.city ? await geocodeStreet(env, addr.city, addr.address.district, street) : null;
     if (road) return { point: road.point, approxArea: road.area };
     const area = addr.area ?? adminArea(placeQuery, placeText);
     const p = area ? await geocode(env, area) : null;

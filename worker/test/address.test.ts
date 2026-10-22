@@ -1,4 +1,4 @@
-import { addressOf, addressWithCity } from '../src/events';
+import { addressOf, addressWithCity, laneMouth } from '../src/events';
 import { describe, expect, it } from 'vitest';
 import { locateOnStreet, parseTwAddress } from '../src/address';
 
@@ -117,5 +117,17 @@ describe('parseTwAddress with punctuation around the address', () => {
     expect(parseTwAddress('景華公園(景華街55號)')).toMatchObject({ street: '景華街', number: 55 });
     expect(parseTwAddress('地點：「景華街55號」')).toMatchObject({ street: '景華街', number: 55 });
     expect(parseTwAddress('新市國小活動中心-淡水區中山北路二段200號')).toMatchObject({ district: '淡水區', street: '中山北路二段', number: 200 });
+  });
+});
+
+describe('laneMouth', () => {
+  it('treats the mouth of lane N as house number N on the main street', () => {
+    expect(laneMouth('桃園市 桃園區 永順街31巷口')).toEqual({ asAddress: '桃園市 桃園區 永順街31號', lane: '永順街31巷' });
+    expect(laneMouth('地址：桃園區永順街31巷口')).toEqual({ asAddress: '地址：桃園區永順街31號', lane: '永順街31巷' });
+    expect(addressOf(laneMouth('桃園市 桃園區 永順街31巷口')?.asAddress ?? '', '桃園區永順街31巷口')).toMatchObject({ text: '桃園市桃園區永順街31號' });
+  });
+  it('ignores places that are not a lane mouth', () => {
+    expect(laneMouth('永順街31巷5號')).toBeNull();
+    expect(laneMouth('台北車站')).toBeNull();
   });
 });
