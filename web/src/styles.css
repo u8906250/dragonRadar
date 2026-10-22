@@ -582,3 +582,15 @@ body.letters-open { overflow: hidden; }
 
 /* 清單最下面的版號 */
 .app-version { margin: 18px 0 8px; font-size: 11px; text-align: center; opacity: 0.8; }
+
+/* 回報問題：疊在詳細資料上面 */
+.sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
+.feedback-sheet { z-index: 950; }
+.feedback-form { display: flex; flex-direction: column; gap: 10px; }
+.feedback-kinds { border: 0; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: 8px; }
+.feedback-kinds label { display: inline-flex; align-items: center; gap: 6px; font-size: 14px; color: var(--text); background: var(--card); border: var(--border-w) solid var(--line); border-radius: var(--radius); padding: 8px 12px; min-height: 40px; cursor: pointer; }
+.feedback-kinds label:has(input:checked) { border-color: var(--accent); box-shadow: inset 0 0 0 1px var(--accent); }
+.feedback-kinds input { accent-color: var(--accent); margin: 0; }
+.feedback-form textarea { font: inherit; font-size: 16px; color: var(--text); background: var(--card); resize: none; border: var(--border-w) solid var(--line); border-radius: var(--card-radius); padding: 10px 12px; }
+.admin-link { display: block; color: var(--muted); margin-top: -4px; }
+.admin-link[hidden] { display: none; }

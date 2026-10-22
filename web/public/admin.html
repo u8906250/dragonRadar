@@ -1,0 +1,279 @@
+<!doctype html>
+<html lang="zh-Hant-TW">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="robots" content="noindex, nofollow" />
+  <title>回報管理｜洋流雷達</title>
+  <link rel="manifest" href="manifest.webmanifest" />
+  <link rel="stylesheet" href="legal.css" />
+  <style>
+    .row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+    .btn { font: inherit; font-size: 14px; font-weight: 700; color: var(--ink); background: #fff; border: 2px solid var(--ink); border-radius: 999px; box-shadow: 2px 2px 0 var(--ink); padding: 6px 14px; cursor: pointer; text-decoration: none; display: inline-flex; align-items: center; min-height: 36px; }
+    .btn.primary { background: #ffe08a; }
+    .btn:disabled { opacity: 0.5; cursor: default; }
+    input[type='password'] { font: inherit; font-size: 16px; flex: 1 1 200px; min-width: 0; padding: 8px 12px; border: 2px solid var(--ink); border-radius: 10px; background: #fff; }
+    .msg { font-size: 14px; color: #5d5850; margin: 8px 0 0; }
+    .msg.err { color: #b3261e; font-weight: 700; }
+    .tabs { display: flex; gap: 8px; margin: 20px 0 12px; }
+    .tabs .btn[aria-selected='true'] { background: var(--ink); color: var(--cream); }
+    .list { list-style: none; margin: 0; padding: 0; display: grid; gap: 12px; }
+    .fb { background: #fff; border: 2px solid var(--ink); border-radius: 12px; padding: 12px 14px; }
+    .fb-head { display: flex; justify-content: space-between; gap: 8px; font-size: 13px; color: #5d5850; }
+    .tag { display: inline-block; padding: 0 8px; border-radius: 999px; background: var(--orange); color: #fff; font-weight: 700; font-size: 13px; }
+    .fb b { display: block; margin: 6px 0 2px; font-size: 16px; overflow-wrap: anywhere; }
+    .fb .muted { color: #5d5850; font-size: 13px; overflow-wrap: anywhere; }
+    .fb .note { margin: 8px 0; padding: 6px 10px; background: #fff8ec; border-left: 4px solid var(--orange); font-size: 15px; white-space: pre-wrap; overflow-wrap: anywhere; }
+    .fb .note.none { color: #5d5850; font-style: italic; }
+    .fb .row { margin-top: 10px; }
+    .empty { color: #5d5850; text-align: center; padding: 24px 0; }
+    [hidden] { display: none !important; }
+  </style>
+</head>
+<body>
+<main>
+  <nav><a href="./">← 回雷達</a></nav>
+  <article>
+    <h1>回報管理</h1>
+    <p class="meta">大家在詳細資料按「回報問題」送來的地點錯誤、時間錯誤等。只有拿管理 token 的人看得到。</p>
+
+    <section id="login" hidden>
+      <form id="login-form" class="row" autocomplete="off">
+        <input id="token" type="password" placeholder="管理 token（ADMIN_TOKEN）" aria-label="管理 token" />
+        <button type="submit" class="btn primary">登入</button>
+      </form>
+      <p class="msg">token 只存在這支手機的瀏覽器裡。</p>
+      <p id="login-msg" class="msg err" aria-live="polite"></p>
+    </section>
+
+    <section id="panel" hidden>
+      <div class="row">
+        <button type="button" class="btn primary" id="push-btn">開啟回報通知</button>
+        <button type="button" class="btn" id="logout">登出</button>
+      </div>
+      <p id="push-msg" class="msg" aria-live="polite"></p>
+      <div class="tabs" role="tablist">
+        <button type="button" class="btn" role="tab" data-status="open" aria-selected="true">未處理</button>
+        <button type="button" class="btn" role="tab" data-status="resolved" aria-selected="false">已處理</button>
+      </div>
+      <ul id="list" class="list" aria-live="polite"></ul>
+      <p id="list-msg" class="msg err" aria-live="polite"></p>
+    </section>
+  </article>
+</main>
+<script>
+  (() => {
+    const PROD_API = 'https://dragon-radar.happybadminton.workers.dev';
+    const local = /^(localhost|127\.0\.0\.1)$/.test(location.hostname);
+    // 不接受網址參數指定 API：不然有人做一個連結就能把 token 送到別的網站
+    const API = local ? 'http://localhost:8787' : PROD_API;
+    const LS_TOKEN = 'dr.adminToken';
+    const LS_PUSH = 'dr.adminPush';
+    const $ = (s) => document.querySelector(s);
+    const ls = {
+      get: (k) => { try { return localStorage.getItem(k); } catch { return null; } },
+      set: (k, v) => { try { v === null ? localStorage.removeItem(k) : localStorage.setItem(k, v); } catch { /* 無痕模式 */ } },
+    };
+    const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
+    const fmt = new Intl.DateTimeFormat('zh-TW', { timeZone: 'Asia/Taipei', month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit', hour12: false });
+    const when = (t) => (t ? fmt.format(new Date(t * 1000)) : '');
+    const EVENT_STATUS = { upcoming: '還沒開始', active: '進行中', ended: '已結束', unlocated: '找不到地點' };
+    let status = 'open';
+
+    async function api(path, opts = {}) {
+      const r = await fetch(API + path, {
+        ...opts,
+        headers: { authorization: `Bearer ${ls.get(LS_TOKEN) || ''}`, ...(opts.body ? { 'content-type': 'application/json' } : {}) },
+      });
+      const j = await r.json().catch(() => ({}));
+      if (r.status === 401) throw Object.assign(new Error('token 不對'), { auth: true });
+      if (!r.ok) throw new Error(j.error || `錯誤 ${r.status}`);
+      return j;
+    }
+
+    function show(loggedIn) {
+      $('#login').hidden = loggedIn;
+      $('#panel').hidden = !loggedIn;
+    }
+
+    async function load() {
+      $('#list-msg').textContent = '';
+      try {
+        const { feedback } = await api(`/api/admin/feedback?status=${status}`);
+        render(feedback);
+        if (status === 'open') document.title = feedback.length ? `(${feedback.length}) 回報管理｜洋流雷達` : '回報管理｜洋流雷達';
+      } catch (e) {
+        if (e.auth) {
+          ls.set(LS_TOKEN, null);
+          show(false);
+          $('#login-msg').textContent = 'token 不對或已經換了，請重新登入';
+          return;
+        }
+        $('#list-msg').textContent = e.message;
+      }
+    }
+
+    function render(rows) {
+      const list = $('#list');
+      if (!rows.length) {
+        list.innerHTML = `<li class="empty">${status === 'open' ? '沒有未處理的回報' : '還沒有已處理的回報'}</li>`;
+        return;
+      }
+      list.innerHTML = rows
+        .map((f) => {
+          const evState = f.event_status ? EVENT_STATUS[f.event_status] || f.event_status : '已刪除';
+          const live = f.event_status === 'upcoming' || f.event_status === 'active';
+          const renamed = f.event_title && f.event_title !== f.title ? `（現在的標題：${esc(f.event_title)}）` : '';
+          const links = [
+            live ? `<a class="btn" href="./?event=${f.event_id}">雷達上看</a>` : '',
+            /^https:\/\//.test(f.permalink || '') ? `<a class="btn" href="${esc(f.permalink)}" target="_blank" rel="noopener">原文</a>` : '',
+            f.lat != null ? `<a class="btn" href="https://www.google.com/maps/search/?api=1&query=${f.lat},${f.lng}" target="_blank" rel="noopener">Google 地圖</a>` : '',
+            f.status === 'open'
+              ? `<button type="button" class="btn primary" data-id="${f.id}" data-to="resolved">已處理</button>`
+              : `<button type="button" class="btn" data-id="${f.id}" data-to="open">改回未處理</button>`,
+          ].join('');
+          return `<li class="fb">
+            <div class="fb-head"><span class="tag">${esc(f.kind_label)}</span><span>${when(f.created_at)} 回報${f.resolved_at ? `・${when(f.resolved_at)} 處理` : ''}</span></div>
+            <b>${esc(f.title)}${renamed}</b>
+            <div class="muted">地點：${esc(f.event_place || f.place_text || '')}${f.approx_area ? `（約略位置：${esc(f.approx_area)}）` : ''}</div>
+            <div class="muted">事件：#${f.event_id}・${esc(evState)}${f.start_at ? `・${when(f.start_at)} 開始` : ''}${f.username ? `・@${esc(f.username)}` : ''}</div>
+            ${f.supplement ? `<div class="muted">補充：${esc(f.supplement)}</div>` : ''}
+            <p class="note${f.note ? '' : ' none'}">${f.note ? esc(f.note) : '沒寫說明'}</p>
+            <div class="row">${links}</div>
+          </li>`;
+        })
+        .join('');
+    }
+
+    $('#list').addEventListener('click', async (e) => {
+      const b = e.target.closest('button[data-id]');
+      if (!b) return;
+      b.disabled = true;
+      try {
+        await api(`/api/admin/feedback/${b.dataset.id}`, { method: 'POST', body: JSON.stringify({ status: b.dataset.to }) });
+        await load();
+      } catch (err) {
+        b.disabled = false;
+        $('#list-msg').textContent = err.message;
+      }
+    });
+
+    for (const t of document.querySelectorAll('[role="tab"]')) {
+      t.addEventListener('click', () => {
+        status = t.dataset.status;
+        for (const x of document.querySelectorAll('[role="tab"]')) x.setAttribute('aria-selected', String(x === t));
+        void load();
+      });
+    }
+
+    $('#login-form').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const v = $('#token').value.trim();
+      if (!v) return;
+      ls.set(LS_TOKEN, v);
+      $('#login-msg').textContent = '';
+      show(true);
+      $('#token').value = '';
+      await load();
+      void syncPushUi();
+    });
+
+    $('#logout').addEventListener('click', async () => {
+      if (ls.get(LS_PUSH) === 'on') await stopPush().catch(() => undefined);
+      ls.set(LS_TOKEN, null);
+      show(false);
+    });
+
+    // ---- 回報通知（手機推播） ----
+    let reg = null;
+    const b64 = (s) => Uint8Array.from(atob(s.replace(/-/g, '+').replace(/_/g, '/') + '='.repeat((4 - (s.length % 4)) % 4)), (c) => c.charCodeAt(0));
+    const ios = /iPhone|iPad|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+    const standalone = matchMedia('(display-mode: standalone)').matches || navigator.standalone === true;
+
+    async function registration() {
+      if (reg || !('serviceWorker' in navigator)) return reg;
+      try {
+        reg = await navigator.serviceWorker.register('sw.js');
+      } catch {
+        reg = null;
+      }
+      return reg;
+    }
+
+    function pushUi(on, msg) {
+      $('#push-btn').textContent = on ? '關閉回報通知' : '開啟回報通知';
+      $('#push-msg').textContent = msg || (on ? '有新回報時會推到這支手機。' : '');
+    }
+
+    async function startPush() {
+      const r = await registration();
+      if (!r || !('PushManager' in window)) {
+        throw new Error(ios && !standalone ? 'iPhone 要先在洋流雷達按「分享 → 加入主畫面」，從主畫面打開，再連點版本字樣 5 下進來這頁開通知' : '這個瀏覽器不支援推播');
+      }
+      if ((await Notification.requestPermission()) !== 'granted') throw new Error('沒有取得通知權限，請到瀏覽器設定允許洋流雷達的通知');
+      const { key } = await (await fetch(`${API}/api/push/key`)).json();
+      const want = b64(key);
+      let sub = await r.pushManager.getSubscription();
+      const cur = sub && sub.options.applicationServerKey ? new Uint8Array(sub.options.applicationServerKey) : null;
+      if (sub && cur && (cur.length !== want.length || cur.some((x, i) => x !== want[i]))) {
+        await sub.unsubscribe();
+        sub = null;
+      }
+      sub = sub || (await r.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: want }));
+      await api('/api/admin/push/subscribe', { method: 'POST', body: JSON.stringify({ subscription: sub.toJSON() }) });
+      ls.set(LS_PUSH, 'on');
+    }
+
+    async function stopPush() {
+      const r = await registration();
+      const sub = r ? await r.pushManager.getSubscription() : null;
+      if (sub) await api('/api/admin/push/unsubscribe', { method: 'POST', body: JSON.stringify({ endpoint: sub.endpoint }) });
+      ls.set(LS_PUSH, 'off');
+      // 雷達的附近通知也用同一個訂閱，開著就不取消
+      if (sub && ls.get('dr.push') !== 'on') await sub.unsubscribe().catch(() => undefined);
+    }
+
+    $('#push-btn').addEventListener('click', async () => {
+      const btn = $('#push-btn');
+      btn.disabled = true;
+      try {
+        if (ls.get(LS_PUSH) === 'on') {
+          await stopPush();
+          pushUi(false, '已關閉回報通知。');
+        } else {
+          await startPush();
+          pushUi(true, '已開啟，馬上會收到一則確認通知。');
+        }
+      } catch (e) {
+        pushUi(ls.get(LS_PUSH) === 'on', e.message);
+      }
+      btn.disabled = false;
+    });
+
+    /** 打開時確認訂閱還在（瀏覽器可能換了訂閱） */
+    async function syncPushUi() {
+      const on = ls.get(LS_PUSH) === 'on';
+      pushUi(on);
+      if (on) await startPush().catch((e) => pushUi(true, `回報通知可能失效了：${e.message}`));
+    }
+
+    if ('serviceWorker' in navigator) {
+      navigator.serviceWorker.addEventListener('message', (e) => {
+        if (e.data && e.data.type === 'refresh') void load();
+      });
+    }
+    document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState === 'visible' && ls.get(LS_TOKEN)) void load();
+    });
+
+    if (ls.get(LS_TOKEN)) {
+      show(true);
+      void load();
+      void syncPushUi();
+    } else {
+      show(false);
+    }
+  })();
+</script>
+</body>
+</html>

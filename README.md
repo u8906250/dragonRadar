@@ -80,6 +80,10 @@ worker/   Cloudflare Worker（API、排程、資料庫）
 - 手機推播（Web Push，網頁關掉也收得到）：開通知時瀏覽器支援就一起訂閱（iPhone 要 iOS 16.4 以上、加入主畫面後從主畫面打開），把推播訂閱和約略位置（小數點後 3 位）存進 `push_subscriptions`；網頁開著時移動超過 300 m 更新位置。排程每 10 分鐘 `pushStarted` 找剛開始（30 分鐘內開始、或剛放上雷達就已經開始）、還沒推過（`events.pushed_at`）的發放、活動（固定據點、整天的不推），推給 1 km 內的訂閱者，一個人一次合成一則；深夜 23:00–8:00 不推也不補推。內容依 RFC 8291 加密（aes128gcm），VAPID 金鑰第一次用到時產生、存在 `settings`（`vapid_private_jwk`、`vapid_public`），不用另外設定 secret。推播服務回 404、410 或 30 天沒打開網頁就刪掉訂閱。點通知打開 `./?event=<id>` 選到那一則（網頁開著就由 service worker 傳訊息過去）。
 - 有 manifest 與圖示，可「加入主畫面」以全螢幕開啟。
 
+## 問題回報
+
+詳細資料的「回報問題」：選類型（地點錯誤、時間錯誤、標題或內容錯誤、不是發放或活動、重複、其他）加選填說明，存進 `event_feedback`（回報當時的標題、地點；裝置代碼與 IP 的加鹽雜湊，限制每小時次數、同一個人同一則同一種只算一次；30 天後刪除），馬上推到管理者手機（`admin_push_subscriptions`，同一個 tag，新的取代舊的但會再響）。管理頁 `admin.html`（不公開連結；雷達側欄的版本字樣連點 5 下進去，存過 token 的會顯示「管理回報」連結）輸入一次 ADMIN_TOKEN（只存在那支手機的 localStorage），可以開回報通知、看未處理／已處理的回報、標成已處理。管理頁的 API 網址固定，不接受網址參數，免得 token 被送到別的網站。同一個瀏覽器只有一個推播訂閱：雷達關掉附近通知時，管理頁的回報通知開著就不取消訂閱，反之亦然。
+
 ## 本機開發
 
 ```bash
@@ -205,6 +209,7 @@ Cloudflare D1 偶爾回「D1_ERROR: internal error」這類暫時性錯誤。`sr
 | GET | `/api/reports/mine` | 我的回報（`x-device` 標頭）：30 天內用這個瀏覽器回報、有放上雷達（或附在據點）的貼文與狀態 |
 | DELETE | `/api/reports/:postId` | 刪除自己的回報（`x-device` 要跟回報時一樣）：雷達上這則的事件都刪掉，`confirm_state = 'withdrawn'`；取代過的舊據點放回雷達 |
 | POST | `/api/events/:id/ended` | 回報已發完／已結束 |
+| POST | `/api/events/:id/feedback` | 回報問題 `{ kind: location \| time \| content \| not_event \| duplicate \| other, note? }`（`x-device` 標頭），推到管理者手機；同一個人同一則同一種只算一次 |
 | GET | `/api/push/key` | 手機推播的 VAPID 公鑰、通知半徑 |
 | POST | `/api/push/subscribe` | 訂閱推播或更新位置 `{ subscription, lat, lng }`（只接受 Google、Apple、Mozilla、Microsoft 的推播網址），第一次訂閱會送一則確認通知 |
 | POST | `/api/push/unsubscribe` | 取消推播 `{ endpoint }` |
@@ -221,6 +226,9 @@ Cloudflare D1 偶爾回「D1_ERROR: internal error」這類暫時性錯誤。`sr
 | POST | `/api/admin/events/:id/locate` | 手動修正位置：`{ lat, lng }` 或 `{ query }`，加 `approx_area` 標成約略位置 |
 | POST | `/api/admin/posts/:id/reprocess` | 用目前的規則重新判讀一則貼文（還沒結束的舊事件會先刪掉） |
 | POST | `/api/admin/extract` | 只判讀不存檔，可指定 models 比較 |
+| GET | `/api/admin/feedback?status=open\|resolved` | 問題回報列表（含事件現在的狀態、位置、原文連結） |
+| POST | `/api/admin/feedback/:id` | 標成已處理或改回未處理 `{ status: 'resolved' \| 'open' }` |
+| POST | `/api/admin/push/subscribe`、`/unsubscribe` | 管理者手機開、關回報通知 `{ subscription }`、`{ endpoint }` |
 | POST | `/api/admin/push-selftest` | 用 RFC 8291 的範例確認推播加密在 Workers 上正確，回傳訂閱數 |
 | POST | `/api/admin/link-fetch` | 只讀取貼文連結的內容（確認讀得到），不判讀不存檔 |
 | GET/POST/DELETE | `/api/admin/keywords[/:id]` | 關鍵字管理（新增的會固定搜尋） |

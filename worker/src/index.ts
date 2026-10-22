@@ -9,6 +9,7 @@ import { CURRENT_MAP_URL } from './sources/currentmap';
 import { mergeIntoOfficial } from './sources/merge';
 import { apifyTrial } from './sources/apify';
 import { fetchThreadsPost, resolveThreadsLink, shortcodeToUnix } from './sources/link';
+import { deleteAdminSubscription, listFeedback, notifyAdmins, purgeFeedback, saveAdminSubscription, setFeedbackStatus, submitFeedback } from './feedback';
 import { PUSH_RADIUS_KM, PushError, b64urlEncode, deleteSubscription, encryptPayload, purgeSubscriptions, pushStarted, saveSubscription, sendPush, vapidKeys } from './push';
 import { confirmLink, ENDED_REPORTS_NEEDED, MAX_LINK_AGE_SEC, ReportError, ipHash, myReports, purgeReports, recheckLinks, rejectLink, reportEnded, submitLink, supplementLink, withdrawReport } from './reports';
 import { isTransient, withResilientDb } from './db';
@@ -265,6 +266,14 @@ async function handle(req: Request, env: Env, ctx: ExecutionContext): Promise<Re
     return jsonResponse(await reportEnded(env, Number(endedMatch[1]), await ipHash(env, req), now));
   }
 
+  // 回報問題（地點錯誤、時間錯誤…）：{ kind, note }，推到管理者手機
+  const fbMatch = /^\/api\/events\/(\d+)\/feedback$/.exec(path);
+  if (req.method === 'POST' && fbMatch) {
+    const { result, created } = await submitFeedback(env, Number(fbMatch[1]), await readJson(req), await deviceId(env, req), await ipHash(env, req), now);
+    if (created) ctx.waitUntil(notifyAdmins(env, created, now).catch((e) => console.warn('notify admins failed', e)));
+    return jsonResponse(result);
+  }
+
   const evMatch = /^\/api\/events\/(\d+)$/.exec(path);
   if (req.method === 'GET' && evMatch) {
     const ev = await getEvent(env, Number(evMatch[1]), now);
@@ -280,7 +289,7 @@ async function handle(req: Request, env: Env, ctx: ExecutionContext): Promise<Re
   throw new HttpError(404, 'not found');
 }
 
-async function handleAdmin(req: Request, env: Env, _ctx: ExecutionContext, path: string, now: number): Promise<Response> {
+async function handleAdmin(req: Request, env: Env, ctx: ExecutionContext, path: string, now: number): Promise<Response> {
   const allKeywords = async (): Promise<Response> => jsonResponse({ max: MAX_ACTIVE_KEYWORDS, keywords: await listAllKeywords(env) });
   const url = new URL(req.url);
 
@@ -307,6 +316,27 @@ async function handleAdmin(req: Request, env: Env, _ctx: ExecutionContext, path:
     const results = [];
     for (const m of models) results.push(await runModel(env, m, body.text, postedAt, now));
     return jsonResponse({ results });
+  }
+
+  // 問題回報：?status=open（預設）| resolved
+  if (req.method === 'GET' && path === '/api/admin/feedback') {
+    return jsonResponse({ feedback: await listFeedback(env, url.searchParams.get('status')) });
+  }
+  const fbStatus = /^\/api\/admin\/feedback\/(\d+)$/.exec(path);
+  if (req.method === 'POST' && fbStatus) {
+    return jsonResponse(await setFeedbackStatus(env, Number(fbStatus[1]), await readJson(req), now));
+  }
+  // 管理者手機收回報通知：{ subscription }；取消：{ endpoint }
+  if (req.method === 'POST' && path === '/api/admin/push/subscribe') {
+    const r = await saveAdminSubscription(env, await readJson(req), now);
+    if (r.created) {
+      const msg = { title: '會收到回報通知了', body: '有人回報地點錯誤、時間錯誤等問題時會通知你，點通知打開管理頁', tag: 'feedback-welcome', url: './admin.html' };
+      ctx.waitUntil(sendPush(env, r.sub, msg, now, 'admin_push_subscriptions').catch((e) => console.warn('admin welcome push failed', e)));
+    }
+    return jsonResponse({ ok: true, created: r.created });
+  }
+  if (req.method === 'POST' && path === '/api/admin/push/unsubscribe') {
+    return jsonResponse(await deleteAdminSubscription(env, await readJson(req)));
   }
 
   // 推播加密在 Workers 上對不對（RFC 8291 的範例），和目前的訂閱數
@@ -587,7 +617,7 @@ async function purgeOldData(env: Env, now: number): Promise<number> {
     env.DB.prepare('DELETE FROM events WHERE end_at < ?').bind(cutoff),
     env.DB.prepare('DELETE FROM posts WHERE fetched_at < ? AND id NOT IN (SELECT post_id FROM events)').bind(cutoff),
   ]);
-  return r.reduce((n, x) => n + (x.meta.changes ?? 0), 0) + (await purgeReports(env, cutoff)) + (await purgeBottles(env, cutoff)) + (await purgeSubscriptions(env, cutoff));
+  return r.reduce((n, x) => n + (x.meta.changes ?? 0), 0) + (await purgeReports(env, cutoff)) + (await purgeBottles(env, cutoff)) + (await purgeSubscriptions(env, cutoff)) + (await purgeFeedback(env, cutoff));
 }
 
 async function refreshTokenJob(env: Env): Promise<void> {

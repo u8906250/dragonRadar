@@ -16,6 +16,7 @@ self.addEventListener('push', (e) => {
     self.registration.showNotification(d.title || '洋流雷達', {
       body: d.body || '',
       tag: d.tag || 'dragon-radar',
+      renotify: !!d.renotify,
       icon: 'icon-192.png',
       badge: 'icon-192.png',
       data: { url: d.url || './' },
@@ -25,18 +26,19 @@ self.addEventListener('push', (e) => {
 
 self.addEventListener('notificationclick', (e) => {
   e.notification.close();
-  const url = new URL((e.notification.data && e.notification.data.url) || './', self.registration.scope).href;
-  const id = Number(new URL(url).searchParams.get('event')) || null;
+  const target = new URL((e.notification.data && e.notification.data.url) || './', self.registration.scope);
+  const id = Number(target.searchParams.get('event')) || null;
   e.waitUntil(
     (async () => {
+      // 同一頁（雷達、管理頁）已經開著就切過去，雷達再選到那一則；不然開新的
       const wins = await self.clients.matchAll({ type: 'window', includeUncontrolled: true });
-      const win = wins.find((w) => w.url.startsWith(self.registration.scope));
+      const win = wins.find((w) => new URL(w.url).pathname === target.pathname);
       if (win) {
         await win.focus();
-        if (id) win.postMessage({ type: 'show-event', id });
+        win.postMessage(id ? { type: 'show-event', id } : { type: 'refresh' });
         return;
       }
-      await self.clients.openWindow(url);
+      await self.clients.openWindow(target.href);
     })(),
   );
 });

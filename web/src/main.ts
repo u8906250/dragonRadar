@@ -1,5 +1,5 @@
 import './styles.css';
-import { addKeyword, collectLetter, deletePushSubscription, fetchPushKey, savePushSubscription, confirmReport, rejectReport, supplementReport, deleteBottle, dropBottle, recycleBottle, fetchBottles, fetchEvents, fetchHealth, fetchKeywords, fetchMyBottles, fetchMyReports, fetchRoutes, pickBottle, reportBottle, reportEnded, submitLink, withdrawReport } from './api';
+import { addKeyword, collectLetter, deletePushSubscription, sendFeedback, type FeedbackKind, fetchPushKey, savePushSubscription, confirmReport, rejectReport, supplementReport, deleteBottle, dropBottle, recycleBottle, fetchBottles, fetchEvents, fetchHealth, fetchKeywords, fetchMyBottles, fetchMyReports, fetchRoutes, pickBottle, reportBottle, reportEnded, submitLink, withdrawReport } from './api';
 import { compassSupported, startCompass } from './compass';
 import { bearingDeg, compassLabel, formatKm, haversineKm, taiwanRadiusKm, type LatLng } from './geo';
 import { inShuangbei, SHUANGBEI_RINGS, shuangbeiRadiusKm } from './shuangbei';
@@ -45,6 +45,9 @@ const LS_NOTIFY = 'dr.notify';
 const LS_PUSH = 'dr.push';
 /** 之前就開了通知的人，提示過一次可以開手機推播 */
 const LS_PUSH_HINT = 'dr.pushHint';
+/** 管理頁（admin.html）存的：管理 token、這支手機有沒有開回報通知 */
+const LS_ADMIN_TOKEN = 'dr.adminToken';
+const LS_ADMIN_PUSH = 'dr.adminPush';
 /** 實驗功能：漂流瓶預設不顯示，在說明頁「實驗功能」或網址 ?lab=bottles 打開（?lab=off 關掉） */
 const LS_LAB_BOTTLES = 'dr.lab.bottles';
 /** 固定據點休息中、下一段在這個時間內開始才畫淡光點 */
@@ -197,6 +200,12 @@ const myReportsMore = $<HTMLButtonElement>('#my-reports-more');
 const bottleBtn = $<HTMLButtonElement>('#bottle-btn');
 const bottleBadge = $('#bottle-badge');
 const bottleSheet = $('#bottle-sheet');
+const feedbackSheet = $('#feedback-sheet');
+const feedbackForm = $<HTMLFormElement>('#feedback-form');
+const feedbackNote = $<HTMLTextAreaElement>('#feedback-note');
+const feedbackSubmit = $<HTMLButtonElement>('#feedback-submit');
+/** 正在回報問題的事件 */
+let feedbackEventId: number | null = null;
 const bottleForm = $<HTMLFormElement>('#bottle-form');
 const bottleText = $<HTMLTextAreaElement>('#bottle-text');
 const bottleCount = $('#bottle-count');
@@ -1410,6 +1419,7 @@ function renderDetail(items: Item[], now: number): void {
         <a class="btn" href="${googleMapsUrl(ev)}" target="_blank" rel="noopener">在 Google 地圖上看</a>
         ${canReportEnded(ev, now) ? `<button type="button" class="btn" data-act="ended"${endedReported.has(ev.id) ? ' disabled' : ''}>${endedReported.has(ev.id) ? '已回報' : `回報${it.spot ? '今天' : ''}${ev.kind === 'activity' ? '已結束' : '已發完'}`}</button>` : ''}
         ${myReportIds.has(ev.post.id) ? '<button type="button" class="btn" data-act="withdraw">刪除我的回報</button>' : ''}
+        <button type="button" class="btn" data-act="feedback">回報問題</button>
       </div>
       ${ev.endedReports ? `<p class="muted ended-note">已有 ${ev.endedReports} 人回報${ev.kind === 'activity' ? '已結束' : '已發完'}${neededText()}</p>` : ''}
     </div>`);
@@ -1419,6 +1429,7 @@ function renderDetail(items: Item[], now: number): void {
   }
   detailEl.querySelector('[data-act="ended"]')?.addEventListener('click', (e) => void sendEnded(ev, e.currentTarget as HTMLButtonElement));
   detailEl.querySelector('[data-act="withdraw"]')?.addEventListener('click', () => void withdrawMine(ev.post.id));
+  detailEl.querySelector('[data-act="feedback"]')?.addEventListener('click', () => openFeedback(ev));
   detailEl.querySelector('[data-act="route"]')?.addEventListener('click', () => {
     const r = routeOf(ev);
     if (r) selectRoute(r.id);
@@ -1468,6 +1479,39 @@ function canReportEnded(ev: EventOut, now: number): boolean {
 function neededText(): string {
   const n = keywordRules?.sources?.link?.endedReportsNeeded;
   return n ? `，${n} 人回報就會下架` : '';
+}
+
+/** 回報問題：疊在詳細資料上面，選類型、寫說明 */
+function openFeedback(ev: EventOut): void {
+  feedbackEventId = ev.id;
+  feedbackForm.reset();
+  $('#feedback-target').textContent = `「${titleOf(ev)}」哪裡有問題？`;
+  feedbackSheet.hidden = false;
+}
+
+async function submitFeedback(): Promise<void> {
+  if (feedbackEventId === null) return;
+  const kind = (feedbackForm.elements.namedItem('kind') as RadioNodeList).value as FeedbackKind | '';
+  if (!kind) {
+    showBanner(bannerEl, '請選擇問題類型', 3000);
+    return;
+  }
+  const note = feedbackNote.value.trim();
+  if (kind === 'other' && !note) {
+    showBanner(bannerEl, '選「其他」請寫一下是什麼問題', 3000);
+    feedbackNote.focus();
+    return;
+  }
+  feedbackSubmit.disabled = true;
+  const r = await sendFeedback(feedbackEventId, kind, note);
+  feedbackSubmit.disabled = false;
+  if (!r.ok) {
+    showBanner(bannerEl, r.message, 4000);
+    return;
+  }
+  feedbackSheet.hidden = true;
+  feedbackEventId = null;
+  showBanner(bannerEl, r.data.duplicate ? '你已經回報過這個問題了，謝謝' : '謝謝回報，管理者會盡快處理', 3500);
 }
 
 async function sendEnded(ev: EventOut, btn: HTMLButtonElement): Promise<void> {
@@ -1531,6 +1575,7 @@ function selectRoute(id: string | null): void {
 }
 
 function select(id: number | null, group: number[] = []): void {
+  feedbackSheet.hidden = true;
   selectedRoute = null;
   selectedLandmark = null;
   selectedBottle = null;
@@ -2488,6 +2533,12 @@ async function syncPush(create: boolean): Promise<'ok' | 'unsupported' | 'no-loc
 async function stopPush(): Promise<void> {
   lsSet(LS_PUSH, 'off');
   pushSyncedAt = null;
+  // 管理頁開了回報通知：同一個瀏覽器只有一個推播訂閱，不能取消，只從附近通知的名單拿掉
+  if (lsGet(LS_ADMIN_PUSH) === 'on') {
+    const sub = await fetchPushKey().then((key) => (key ? pushSubscription(key, false) : null)).catch(() => null);
+    if (sub) await deletePushSubscription(sub.endpoint);
+    return;
+  }
   const endpoint = await unsubscribePush();
   if (endpoint) await deletePushSubscription(endpoint);
 }
@@ -2647,6 +2698,21 @@ function wireControls(): void {
   themeSheet.querySelector('[data-act="close"]')?.addEventListener('click', () => openThemeSheet(false));
   kwBtn.addEventListener('click', () => openKwSheet(kwSheet.hidden));
   kwSheet.querySelector('[data-act="close"]')?.addEventListener('click', () => openKwSheet(false));
+  feedbackSheet.querySelector('[data-act="close"]')?.addEventListener('click', () => {
+    feedbackSheet.hidden = true;
+  });
+  feedbackForm.addEventListener('submit', (e) => {
+    e.preventDefault();
+    void submitFeedback();
+  });
+  // 管理頁的入口：版本字樣連點 5 下（加入主畫面的 App 沒有網址列），存過管理 token 的直接顯示連結
+  let taps: number[] = [];
+  $('#app-version').addEventListener('click', () => {
+    const t = Date.now();
+    taps = [...taps.filter((x) => t - x < 2000), t];
+    if (taps.length >= 5) location.href = 'admin.html';
+  });
+  $('#admin-link').hidden = !lsGet(LS_ADMIN_TOKEN);
   kwForm.addEventListener('submit', (e) => {
     e.preventDefault();
     void submitKeyword(kwInput.value);

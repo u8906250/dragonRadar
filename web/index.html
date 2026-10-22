@@ -93,6 +93,7 @@
         <ul id="event-list" class="event-list"></ul>
         <p id="empty-hint" class="muted hint" hidden></p>
         <p id="app-version" class="app-version muted"></p>
+        <a id="admin-link" class="app-version admin-link" href="admin.html" hidden>管理回報</a>
       </aside>
 
       <div id="banner" class="banner" hidden></div>
@@ -133,6 +134,27 @@
         </section>
         <ul class="muted sheet-note small report-tips" id="report-tips"></ul>
         </div>
+      </div>
+      <div id="feedback-sheet" class="sheet feedback-sheet" hidden>
+        <div class="sheet-head">
+          <strong>回報問題</strong>
+          <button type="button" class="chip" data-act="close" aria-label="關閉">關閉</button>
+        </div>
+        <p class="muted sheet-note" id="feedback-target"></p>
+        <form id="feedback-form" class="feedback-form" autocomplete="off">
+          <fieldset class="feedback-kinds">
+            <legend class="sr-only">問題類型</legend>
+            <label><input type="radio" name="kind" value="location" required /> 地點錯誤</label>
+            <label><input type="radio" name="kind" value="time" /> 時間錯誤</label>
+            <label><input type="radio" name="kind" value="content" /> 標題或內容錯誤</label>
+            <label><input type="radio" name="kind" value="not_event" /> 不是發放或活動</label>
+            <label><input type="radio" name="kind" value="duplicate" /> 重複</label>
+            <label><input type="radio" name="kind" value="other" /> 其他</label>
+          </fieldset>
+          <textarea id="feedback-note" rows="3" maxlength="200" placeholder="補充說明（選填），例如：實際在 2 號出口、15:00 才開始" aria-label="補充說明"></textarea>
+          <div class="sheet-actions"><button type="submit" class="btn primary" id="feedback-submit">送出</button></div>
+        </form>
+        <p class="muted sheet-note small">回報只有管理者看得到，會盡快處理。已經發完、結束的，請用詳細資料裡的「回報已發完」。</p>
       </div>
       <div id="bottle-sheet" class="sheet" hidden>
         <div class="sheet-head">

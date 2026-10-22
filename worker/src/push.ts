@@ -174,16 +174,23 @@ export function isPushEndpoint(endpoint: string): boolean {
 /** 約略位置：小數點後 3 位（約 100 公尺） */
 const coarse = (x: number): number => Math.round(x * 1000) / 1000;
 
-/** 訂閱或更新位置：{ subscription: { endpoint, keys: { p256dh, auth } }, lat, lng } */
-export async function saveSubscription(env: Env, body: unknown, now: number): Promise<{ ok: true; created: boolean }> {
-  const b = (body ?? {}) as { subscription?: { endpoint?: unknown; keys?: { p256dh?: unknown; auth?: unknown } }; lat?: unknown; lng?: unknown };
-  const endpoint = b.subscription?.endpoint;
-  const p256dh = b.subscription?.keys?.p256dh;
-  const auth = b.subscription?.keys?.auth;
-  const lat = Number(b.lat);
-  const lng = Number(b.lng);
+/** 檢查瀏覽器送來的推播訂閱 { endpoint, keys: { p256dh, auth } } */
+export function parseSubscription(v: unknown): Pick<PushSubRow, 'endpoint' | 'p256dh' | 'auth'> {
+  const sub = (v ?? {}) as { endpoint?: unknown; keys?: { p256dh?: unknown; auth?: unknown } };
+  const { endpoint } = sub;
+  const p256dh = sub.keys?.p256dh;
+  const auth = sub.keys?.auth;
   if (typeof endpoint !== 'string' || !isPushEndpoint(endpoint)) throw new PushError(400, '不支援這個瀏覽器的推播服務');
   if (typeof p256dh !== 'string' || typeof auth !== 'string' || !/^[\w-]{80,100}$/.test(p256dh) || !/^[\w-]{16,32}$/.test(auth)) throw new PushError(400, '推播訂閱資料不完整');
+  return { endpoint, p256dh, auth };
+}
+
+/** 訂閱或更新位置：{ subscription: { endpoint, keys: { p256dh, auth } }, lat, lng } */
+export async function saveSubscription(env: Env, body: unknown, now: number): Promise<{ ok: true; created: boolean }> {
+  const b = (body ?? {}) as { subscription?: unknown; lat?: unknown; lng?: unknown };
+  const { endpoint, p256dh, auth } = parseSubscription(b.subscription);
+  const lat = Number(b.lat);
+  const lng = Number(b.lng);
   // 台灣附近才收
   if (!(lat > 20 && lat < 27 && lng > 117 && lng < 123)) throw new PushError(400, '位置要在台灣');
   const existed = await env.DB.prepare('SELECT 1 AS ok FROM push_subscriptions WHERE endpoint = ?').bind(endpoint).first<{ ok: number }>();
@@ -212,10 +219,21 @@ export interface PushMessage {
   tag: string;
   /** 點通知打開的網址，相對於網站（例如「./?event=123」） */
   url: string;
+  /** 同一個 tag 取代舊通知時也再響一次（管理者的回報通知） */
+  renotify?: boolean;
 }
 
-/** 送一則推播；回傳推播服務的狀態碼（201 成功；404、410 代表訂閱已失效） */
-export async function sendPush(env: Env, sub: PushSubRow, msg: PushMessage, now: number): Promise<number> {
+/** 訂閱存在哪個表：大家的附近通知、管理者的回報通知 */
+export type PushTable = 'push_subscriptions' | 'admin_push_subscriptions';
+
+/** 送一則推播；回傳推播服務的狀態碼（201 成功；404、410 代表訂閱已失效，從 table 刪掉） */
+export async function sendPush(
+  env: Env,
+  sub: Pick<PushSubRow, 'endpoint' | 'p256dh' | 'auth'>,
+  msg: PushMessage,
+  now: number,
+  table: PushTable = 'push_subscriptions',
+): Promise<number> {
   const keys = await vapidKeys(env);
   const body = await encryptPayload(sub.p256dh, sub.auth, enc.encode(JSON.stringify(msg)));
   const r = await fetch(sub.endpoint, {
@@ -229,8 +247,8 @@ export async function sendPush(env: Env, sub: PushSubRow, msg: PushMessage, now:
     },
     body,
   });
-  if (r.status === 404 || r.status === 410) await env.DB.prepare('DELETE FROM push_subscriptions WHERE endpoint = ?').bind(sub.endpoint).run();
-  else if (r.ok) await env.DB.prepare('UPDATE push_subscriptions SET last_push_at = ? WHERE endpoint = ?').bind(now, sub.endpoint).run();
+  if (r.status === 404 || r.status === 410) await env.DB.prepare(`DELETE FROM ${table} WHERE endpoint = ?`).bind(sub.endpoint).run();
+  else if (r.ok) await env.DB.prepare(`UPDATE ${table} SET last_push_at = ? WHERE endpoint = ?`).bind(now, sub.endpoint).run();
   else console.warn(`push ${new URL(sub.endpoint).host} ${r.status} ${(await r.text()).slice(0, 200)}`);
   return r.status;
 }

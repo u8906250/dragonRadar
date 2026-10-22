@@ -154,6 +154,10 @@ export const recycleBottle = (id: number): Promise<Result<{ quota: MyBottles['qu
 /** 收藏撿到的信，或移出收藏 */
 export const collectLetter = (id: number, on: boolean): Promise<Result<{ collected: boolean }>> =>
   deviceJson<{ collected: boolean }>(`/api/bottles/${id}/${on ? 'collect' : 'uncollect'}`, 'POST', {});
+/** 回報問題（地點錯誤、時間錯誤…），只有管理者看得到 */
+export type FeedbackKind = 'location' | 'time' | 'content' | 'not_event' | 'duplicate' | 'other';
+export const sendFeedback = (eventId: number, kind: FeedbackKind, note: string): Promise<Result<{ ok: true; duplicate: boolean }>> =>
+  deviceJson<{ ok: true; duplicate: boolean }>(`/api/events/${eventId}/feedback`, 'POST', { kind, note });
 export const reportBottle = (id: number): Promise<Result<{ hidden: boolean }>> => deviceJson<{ hidden: boolean }>(`/api/bottles/${id}/report`, 'POST', {});
 
 // 回報也帶裝置代碼：伺服器記下是哪個瀏覽器回報的，之後可以自己刪除
