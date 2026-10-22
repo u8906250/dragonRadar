@@ -6,8 +6,9 @@ const PROD_API_BASE = 'https://dragon-radar.happybadminton.workers.dev';
 const isLocal = typeof location !== 'undefined' && /^(localhost|127\.0\.0\.1|\[::1\])$/.test(location.hostname);
 const API_BASE = ((import.meta.env.VITE_API_BASE as string | undefined) || (isLocal ? 'http://localhost:8787' : PROD_API_BASE)).replace(/\/$/, '');
 
-export async function fetchEvents(origin: LatLng, radiusKm: number, keywords: string[]): Promise<EventOut[]> {
+export async function fetchEvents(origin: LatLng, radiusKm: number, keywords: string[], module = 'current'): Promise<EventOut[]> {
   const u = new URL(`${API_BASE}/api/events`);
+  if (module !== 'current') u.searchParams.set('module', module);
   u.searchParams.set('lat', origin.lat.toFixed(5));
   u.searchParams.set('lng', origin.lng.toFixed(5));
   u.searchParams.set('radius_km', String(radiusKm));
@@ -170,7 +171,7 @@ export const reportBottle = (id: number): Promise<Result<{ hidden: boolean }>> =
 
 // 回報也帶裝置代碼：伺服器記下是哪個瀏覽器回報的，之後可以自己刪除
 /** 貼上 Threads 貼文連結，後端讀取並判讀，可能要十幾秒 */
-export const submitLink = (url: string): Promise<Result<SubmitResult>> => deviceJson<SubmitResult>('/api/reports', 'POST', { url });
+export const submitLink = (url: string, module = 'current'): Promise<Result<SubmitResult>> => deviceJson<SubmitResult>('/api/reports', 'POST', { url, module });
 /** 判讀結果對：放上雷達 */
 export const confirmReport = (c: { postId: string; token: string }): Promise<Result<SubmitResult>> => deviceJson<SubmitResult>('/api/reports/confirm', 'POST', c);
 /** 貼文沒寫地點或時間：補充後再判讀一次 */

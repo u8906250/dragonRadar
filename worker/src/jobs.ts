@@ -61,6 +61,12 @@ const JOB_SCHEMA = {
 };
 
 const CONTACTS = new Set(['form', 'line', 'dm', 'phone', 'email', 'other']);
+/** 「僱主」「飼主」「我們」這種沒有名字的稱呼不算寫了雇主（模型常照抄） */
+const NAMELESS_EMPLOYER = /^(?:僱主|雇主|飼主|主人|狗主人|毛孩家長|家長|我們|我|本人|屋主|業主|老闆|案主|委託人|個人|私人)$/;
+export const employerName = (v: unknown): string | null => {
+  const s = str(v);
+  return s && !NAMELESS_EMPLOYER.test(s.replace(/\s/g, '')) ? s : null;
+};
 const day = (v: unknown): string | null => (/^\d{4}-\d{2}-\d{2}/.test(str(v) ?? '') ? (str(v) as string).slice(0, 10) : null);
 
 /** 「9:00－12:00」「09:00 - 12:00」整理成「09:00-12:00」；看不懂的丟掉 */
@@ -84,7 +90,7 @@ export function normalizeJobs(raw: unknown): Extraction | null {
       work_to: day(j.work_to),
       slots: Array.isArray(j.slots) ? j.slots.map(normalizeSlot).filter((s): s is string => !!s) : [],
       pay: str(j.pay),
-      employer: str(j.employer),
+      employer: employerName(j.employer),
       contact: CONTACTS.has(contact) ? contact : null,
       requirements: str(j.requirements),
     };

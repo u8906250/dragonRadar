@@ -1,4 +1,5 @@
-export type EventKind = 'giveaway' | 'activity';
+/** giveaway 發放、activity 活動（洋流）；job 職缺（狗狗陪伴） */
+export type EventKind = 'giveaway' | 'activity' | 'job';
 
 export interface RelatedPost {
   id: string;
@@ -42,6 +43,8 @@ export interface EventOut {
   tz?: string | null;
   /** 管理者直接改過標題：顯示就用 title */
   manualTitle?: boolean;
+  /** 模組自己的欄位，例如職缺的工作期間、薪資、防詐提醒 */
+  extra?: Record<string, unknown> | null;
   /** 固定據點第一個時段開始的時間，還沒到就是「還沒開始」 */
   firstStartAt?: number;
   /** 官方行程才有：講同一場活動、已併進來的新聞與貼文 */
@@ -183,7 +186,9 @@ export type LinkOutcome = 'preview' | 'added' | 'duplicate' | 'attached' | 'no_p
 
 /** 判讀結果的預覽：一個地點或時段（固定據點的好幾天合成一筆） */
 export interface PreviewItem {
-  kind: 'giveaway' | 'activity';
+  kind: EventKind;
+  /** 模組自己的欄位，例如職缺的工作期間、薪資、防詐提醒 */
+  extra?: Record<string, unknown> | null;
   title: string;
   item: string | null;
   placeText: string;
@@ -220,6 +225,8 @@ export interface MyReport {
   events: number;
   eventId: number | null;
   reportedAt: number;
+  /** 回報在哪個模組 */
+  module?: string;
 }
 
 export interface SubmitResult {

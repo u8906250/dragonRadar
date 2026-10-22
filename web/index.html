@@ -20,7 +20,7 @@
         <div class="brand">
           <span class="brand-dot"></span>
           <span class="brand-wave" aria-hidden="true">≋</span>
-          <span class="brand-text" id="brand-text">洋流雷達</span>
+          <button type="button" id="module-btn" class="module-btn" aria-label="切換雷達" title="切換雷達（洋流、狗狗陪伴…）"><span class="brand-text" id="brand-text">洋流雷達</span><span class="module-caret" aria-hidden="true">▾</span></button>
           <span class="brand-wave" aria-hidden="true">≋</span>
           <span id="mode-badge" class="badge" hidden></span>
         </div>
@@ -122,7 +122,7 @@
           <button type="button" class="chip" data-act="close" aria-label="關閉">關閉</button>
         </div>
         <div id="report-event">
-        <p class="muted sheet-note">看到發放或活動的 Threads 貼文？貼上連結，雷達會讀取貼文、判讀時間地點，標到地圖上給大家看。店家、服務處連續好幾天的發放也一樣貼，會自動判斷成固定據點。</p>
+        <p class="muted sheet-note" id="report-intro">看到發放或活動的 Threads 貼文？貼上連結，雷達會讀取貼文、判讀時間地點，標到地圖上給大家看。店家、服務處連續好幾天的發放也一樣貼，會自動判斷成固定據點。</p>
         <form id="report-form" class="kw-form" autocomplete="off">
           <input id="report-input" type="text" inputmode="url" enterkeyhint="send" placeholder="https://www.threads.com/@帳號/post/…" aria-label="Threads 貼文連結" />
           <button type="button" class="btn" id="report-paste" hidden>貼上</button>
@@ -188,6 +188,14 @@
           <p class="muted small letters-note">收藏記在這個瀏覽器裡（不用登入），清除瀏覽器資料就看不到了。信是陌生人匿名留下的，看到不適合的內容可以檢舉。</p>
         </div>
       </section>
+      <div id="module-sheet" class="sheet" hidden>
+        <div class="sheet-head">
+          <strong>切換雷達</strong>
+          <button type="button" class="chip" data-act="close" aria-label="關閉">關閉</button>
+        </div>
+        <p class="muted sheet-note">同一個雷達、地圖、清單、回報，換不同主題的資料。</p>
+        <ul id="module-list" class="theme-list"></ul>
+      </div>
       <div id="theme-sheet" class="sheet" hidden>
         <div class="sheet-head">
           <strong>選擇主題</strong>

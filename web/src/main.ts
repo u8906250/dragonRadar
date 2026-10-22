@@ -5,6 +5,7 @@ import { bearingDeg, compassLabel, destination, formatKm, haversineKm, taiwanRad
 import { inShuangbei, SHUANGBEI_RINGS, shuangbeiRadiusKm } from './shuangbei';
 import { TAIWAN_RINGS } from './taiwan';
 import { LANDMARKS } from './landmarks';
+import { getModule, JOB_RISK_TEXT, JOB_SAFETY_TIPS, MODULES, type ModuleDef, type ModuleId } from './modules';
 import { X_MAX_WEIGHT, xLength } from './xcount';
 import { splitPlace } from './place';
 import { crowdOf, MapView, type BaseMap } from './map';
@@ -138,10 +139,43 @@ let theme: Theme = getTheme(new URLSearchParams(location.search).get('theme') ??
 /** 已經提醒過的事件；固定據點用據點 key，每天開門不會重複嗶 */
 const seenActive = new Set<string>();
 /** 清單上方的開關：發放、活動（含車掃）、固定據點各自顯示或隱藏 */
-type Category = 'giveaway' | 'activity' | 'spot';
-const CATEGORY_LS: Record<Category, string> = { giveaway: LS_GIVEAWAYS, activity: LS_ACTIVITIES, spot: LS_SPOTS };
-const shown: Record<Category, boolean> = { giveaway: lsGet(LS_GIVEAWAYS) !== '0', activity: lsGet(LS_ACTIVITIES) !== '0', spot: lsGet(LS_SPOTS) !== '0' };
-const categoryOf = (it: Item): Category => (it.spot ? 'spot' : it.ev.kind === 'activity' ? 'activity' : 'giveaway');
+type Category = 'giveaway' | 'activity' | 'spot' | 'job';
+const CATEGORY_LS: Record<Category, string> = { giveaway: LS_GIVEAWAYS, activity: LS_ACTIVITIES, spot: LS_SPOTS, job: 'dr.showJobs' };
+// 職缺只有一類（狗狗陪伴），不給關
+const shown: Record<Category, boolean> = { giveaway: lsGet(LS_GIVEAWAYS) !== '0', activity: lsGet(LS_ACTIVITIES) !== '0', spot: lsGet(LS_SPOTS) !== '0', job: true };
+const categoryOf = (it: Item): Category => (it.ev.kind === 'job' ? 'job' : it.spot ? 'spot' : it.ev.kind === 'activity' ? 'activity' : 'giveaway');
+
+// ---- 模組：洋流、狗狗陪伴…（同一套雷達換資料），網址 ?module=dog 或上次選的 ----
+const LS_MODULE = 'dr.module';
+let mod: ModuleDef = getModule(new URLSearchParams(location.search).get('module') ?? lsGet(LS_MODULE));
+
+// ---- 職缺（狗狗陪伴）----
+interface JobExtra {
+  work_from?: string | null;
+  work_to?: string | null;
+  slots?: string[];
+  pay?: string | null;
+  employer?: string | null;
+  contact?: string | null;
+  requirements?: string | null;
+  risks?: string[];
+}
+const jobOf = (ev: { extra?: Record<string, unknown> | null }): JobExtra => (ev.extra ?? {}) as JobExtra;
+const CONTACT_TEXT: Record<string, string> = { form: '填表單', line: '加 LINE', dm: '私訊、留言', phone: '打電話', email: 'Email', other: '其他方式' };
+const mdText = (d: string): string => d.slice(5).split('-').map(Number).join('/');
+/** 「11/20–11/30・每天 09:00–12:00、15:00–18:00」 */
+function jobPeriod(j: JobExtra): string {
+  const range = j.work_from && j.work_to && j.work_from !== j.work_to ? `${mdText(j.work_from)}–${mdText(j.work_to)}` : j.work_from ? mdText(j.work_from) : j.work_to ? `到 ${mdText(j.work_to)}` : '';
+  const slots = (j.slots ?? []).map((s) => s.replace('-', '–')).join('、');
+  return [range, slots && `每天 ${slots}`].filter(Boolean).join('・') || '沒寫工作期間';
+}
+/** 有防詐提醒的職缺 */
+const jobRisky = (ev: { extra?: Record<string, unknown> | null }): boolean => (jobOf(ev).risks ?? []).some((r) => r !== 'no_employer');
+/** 職缺的防詐提醒：這則的可疑之處，加上每則都提醒的 */
+function fraudBoxHtml(ev: { extra?: Record<string, unknown> | null }): string {
+  const risks = (jobOf(ev).risks ?? []).map((r) => JOB_RISK_TEXT[r]).filter(Boolean);
+  return `<div class="fraud-box"><b>⚠️ 防詐提醒</b>${risks.length ? `<ul>${risks.map((r) => `<li class="risk">${esc(r)}</li>`).join('')}</ul>` : ''}<ul>${JOB_SAFETY_TIPS.map((t) => `<li>${esc(t)}</li>`).join('')}</ul></div>`;
+}
 /**
  * 只看進行中：跟發放、活動、據點開關一起用，有打開的那幾類裡，只留現在就能去的
  * （進行中的發放、活動，開放中的據點，車掃中）
@@ -414,6 +448,8 @@ function allDayText(ev: EventOut, today: boolean): string {
 }
 
 function timeLine(it: Item, now: number): string {
+  // 職缺：工作期間、每天時段（從刊登起都算徵才中）
+  if (it.ev.kind === 'job') return `工作 ${jobPeriod(jobOf(it.ev))}`;
   if (it.spot) return spotLine(it, now);
   const { ev } = it;
   if (ev.allDay) {
@@ -640,7 +676,7 @@ function render(): void {
   // 搜尋時雷達、地圖、清單、各類的數量都只算符合的
   const all = searchTerms.length > 0 ? fetched.filter(matchesSearch) : fetched;
   const byCategory = all.filter((it) => shown[categoryOf(it)]);
-  const items = onlyActive ? byCategory.filter((it) => activeNow(it, now)) : byCategory;
+  const items = onlyActive && mod.current ? byCategory.filter((it) => activeNow(it, now)) : byCategory;
   // 雷達、地圖只畫時間範圍內的；清單照樣全部列，範圍外的放最下面
   const timed = items.filter((it) => inTime(it, now));
   updateOutline();
@@ -691,7 +727,7 @@ function render(): void {
   map.setBottles(bottleViews.map((v) => ({ id: v.b.id, lat: v.b.lat, lng: v.b.lng, state: v.state, mine: v.b.mine, picked: v.b.picked })));
   updateBottleBadge(bottleViews);
   radar.setLandmarks(
-    LANDMARKS.map((lm) => ({ id: lm.id, label: lm.name, bearing: bearingDeg(origin, lm), distanceKm: haversineKm(origin, lm), selected: lm.id === selectedLandmark })),
+    (mod.current ? LANDMARKS : []).map((lm) => ({ id: lm.id, label: lm.name, bearing: bearingDeg(origin, lm), distanceKm: haversineKm(origin, lm), selected: lm.id === selectedLandmark })),
   );
   map.setRoutes(shownRoutes(timed).map((r) => ({ id: r.id, title: r.title, state: routeState(r, now), claimUrl: r.claimUrl, segments: r.segments })));
   map.render(
@@ -729,14 +765,14 @@ function render(): void {
       /* ignore */
     }
     const msg = `${titleOf(it.ev)}｜${it.ev.placeText}｜${formatKm(it.distanceKm)} ${compassLabel(it.bearing)}`;
-    const head = it.ev.kind === 'activity' ? '活動開始' : '開始發放';
+    const head = it.ev.kind === 'job' ? '附近有新職缺' : it.ev.kind === 'activity' ? '活動開始' : '開始發放';
     showBanner(bannerEl, `${head}：${msg}`, 10_000);
     systemNotify(head, msg, `ev-${it.ev.id}`);
   }
   if (lastFetchAt > 0) notifiedOnce = true;
 }
 
-const CATEGORY_NAME: Record<Category, string> = { giveaway: '發放', activity: '活動', spot: '固定據點' };
+const CATEGORY_NAME: Record<Category, string> = { giveaway: '發放', activity: '活動', spot: '固定據點', job: '職缺' };
 
 /** 現在就能去：進行中、據點開放中、車掃中 */
 function activeNow(it: Item, now: number): boolean {
@@ -756,7 +792,7 @@ function updateActiveToggle(items: Item[], now: number): void {
     if (r) seen.add(r.id);
     n++;
   }
-  onlyGroup.hidden = n === 0 && !onlyActive;
+  onlyGroup.hidden = !mod.current || (n === 0 && !onlyActive);
   activeToggle.textContent = `進行中（${n}）`;
   activeToggle.classList.toggle('on', onlyActive);
   activeToggle.setAttribute('aria-pressed', String(onlyActive));
@@ -766,7 +802,7 @@ function updateActiveToggle(items: Item[], now: number): void {
 /** 開關上寫各有幾個（車掃一條路線算一個），沒有的那一類不顯示開關；關掉的照樣列出數量 */
 function updateCategoryToggles(all: Item[]): void {
   const seen = new Set<string>();
-  const counts: Record<Category, number> = { giveaway: 0, activity: 0, spot: 0 };
+  const counts: Record<Category, number> = { giveaway: 0, activity: 0, spot: 0, job: 0 };
   for (const it of all) {
     const r = routeOf(it.ev);
     if (r && seen.has(r.id)) continue;
@@ -780,7 +816,7 @@ function updateCategoryToggles(all: Item[]): void {
     b.classList.toggle('on', shown[cat]);
     b.setAttribute('aria-pressed', String(shown[cat]));
   }
-  filterRow.hidden = categoryToggles.every((b) => b.hidden);
+  filterRow.hidden = !mod.current || categoryToggles.every((b) => b.hidden);
 }
 
 /** 清單上的一列：一般事件，或合成一張卡片的車掃路線 */
@@ -828,13 +864,14 @@ function renderList(items: Item[], now: number): void {
       // 進行中照距離，還沒開始的照開始時間
       .sort((a, b) => (ph === 'active' ? a.distanceKm - b.distanceKm : a.sortAt - b.sortAt || a.distanceKm - b.distanceKm));
   const sections: Array<{ title: string; rows: Row[] }> = [
-    ...(['active', 'soon', 'later'] as const).map((ph) => ({ title: PHASE_TITLE[ph] as string, rows: byPhase(ph) })),
+    // 職缺從刊登起都算「徵才中」
+    ...(['active', 'soon', 'later'] as const).map((ph) => ({ title: !mod.current && ph === 'active' ? '徵才中' : (PHASE_TITLE[ph] as string), rows: byPhase(ph) })),
     { title: '固定據點', rows: spotsIn },
     { title: laterLabel(), rows: laterRows },
     { title: outLabel(), rows: outRange },
   ];
   const counts = { active: byPhase('active').length, soon: byPhase('soon').length, later: byPhase('later').length };
-  const none = followed().length === 0;
+  const none = mod.current && followed().length === 0;
   const outText = outRange.length > 0 ? `・${scaleSetting === 'region' ? '雙北以外' : '範圍外'} ${outRange.length} 個` : '';
   const spotText = spotsIn.length > 0 ? `・據點 ${spotsIn.length} 個` : '';
   const laterText = laterRows.length > 0 ? `・${timeSetting === 'now' ? '還沒開始' : laterLabel().replace('才開始', '')} ${laterRows.length} 個` : '';
@@ -843,15 +880,17 @@ function renderList(items: Item[], now: number): void {
     ? '還沒追蹤關鍵字'
     : searching && rows.length === 0
       ? `${searching}找不到`
-      : singles.length === 0
-        ? `${searching}${theme.emptyText}${spotText}${laterText}${outText}`
-        : `${searching}${theme.summary(counts)}${spotText}${laterText}${outText}`;
+      : !mod.current
+        ? `${searching}${singles.length === 0 ? mod.emptyText : `${singles.length} ${mod.unit}徵才中`}${outText}`
+        : singles.length === 0
+          ? `${searching}${theme.emptyText}${spotText}${laterText}${outText}`
+          : `${searching}${theme.summary(counts)}${spotText}${laterText}${outText}`;
   emptyEl.textContent =
     searchTerms.length > 0
       ? `目前的發放、活動裡沒有符合「${searchInput.value.trim()}」的。可以換個字，或按 ✕ 清除搜尋。`
       : none
         ? '目前沒有搜尋中的關鍵字。'
-        : `${theme.emptyText}。雷達每分鐘更新，有新的會提醒你。`;
+        : `${emptyText()}。雷達每分鐘更新，有新的會提醒你。`;
   listEl.replaceChildren();
   emptyEl.hidden = items.length > 0;
   // 每一段的標題寫上數量，跟上面的摘要對得起來
@@ -878,7 +917,7 @@ function itemCard(it: Item, now: number): HTMLLIElement {
   li.className = `ev phase-${it.phase} kind-${it.ev.kind}${it.spot ? ' spot' : ''}${it.spot && isOffice(it.ev) ? ' office' : ''}${inScope(it.ev, it.distanceKm) ? '' : ' out-of-range'}${it.ev.id === selectedId ? ' selected' : ''}`;
   li.dataset.id = String(it.ev.id);
   li.innerHTML = `
-    <div class="ev-title"><span class="dot"></span><span class="kind-tag">${tagLabel(it)}</span>${esc(titleOf(it.ev))}${it.ev.item ? ` <span class="muted">· ${esc(it.ev.item)}</span>` : ''}${followed().length > 1 && it.ev.keyword ? `<span class="ev-kw">#${esc(it.ev.keyword)}</span>` : ''}</div>
+    <div class="ev-title"><span class="dot"></span><span class="kind-tag">${tagLabel(it)}</span>${esc(titleOf(it.ev))}${it.ev.item ? ` <span class="muted">· ${esc(it.ev.item)}</span>` : ''}${it.ev.kind === 'job' && jobRisky(it.ev) ? '<span class="risk-tag">⚠️ 注意</span>' : ''}${followed().length > 1 && it.ev.keyword ? `<span class="ev-kw">#${esc(it.ev.keyword)}</span>` : ''}</div>
     <div class="ev-meta">${esc(placeLine(it.ev))} · ${it.ev.approxArea ? '約 ' : ''}${formatKm(it.distanceKm)} ${compassLabel(it.bearing)}</div>
     <div class="ev-time">${it.spot ? `${esc(spotHours(it.spot.sessions))}・` : ''}${timeLineHtml(it, now)}</div>`;
   li.addEventListener('click', () => select(it.ev.id));
@@ -1002,7 +1041,7 @@ function renderLandmarkDetail(id: string): boolean {
 /** 200 m 內看得到瓶子的樣子，更遠只是一團訊號 */
 const BOTTLE_NEAR_M = 200;
 /** 伺服器沒關、而且這個瀏覽器打開了實驗功能 */
-const bottlesOn = (): boolean => keywordRules?.sources?.bottles?.enabled !== false && lsGet(LS_LAB_BOTTLES) === '1';
+const bottlesOn = (): boolean => mod.current && keywordRules?.sources?.bottles?.enabled !== false && lsGet(LS_LAB_BOTTLES) === '1';
 const pickRadiusM = (): number => keywordRules?.sources?.bottles?.pickRadiusM ?? 60;
 const bottleDistM = (b: BottleOut): number => haversineKm(origin, b) * 1000;
 
@@ -1514,7 +1553,7 @@ function renderDetail(items: Item[], now: number): void {
     <div class="sheet-body">
       ${nearbyHtml(it, items)}
       ${routeBoxHtml(ev, now)}
-      <p>類型：${it.spot ? `固定據點（${kindLabel(ev)}）` : kindLabel(ev)}<br>${ev.item ? `${ev.kind === 'activity' ? '物品' : '發放'}：${esc(ev.item)}<br>` : ''}${ev.keyword ? `關鍵字：#${esc(ev.keyword)}<br>` : ''}地點：${esc(placeOf(ev))}${ev.approxArea ? `<br><span class="approx-note">約略位置：只知道在${esc(ev.approxArea)}，地圖上是${esc(ev.approxArea)}的中心點，實際地點請看原文</span>` : ''}<br>時間：${it.spot ? esc(spotSchedule(it)) : ev.allDay ? `${dateFmt.format(new Date(ev.startAt * 1000))} ${allDayText(ev, false)}` : esc(eventTimeText(ev))}<br>距離：${ev.approxArea ? '約 ' : ''}${formatKm(it.distanceKm)}，${compassLabel(it.bearing)}方 · ${esc(timeLine(it, now))}</p>
+      ${ev.kind === 'job' ? jobDetailHtml(it, now) : `<p>類型：${it.spot ? `固定據點（${kindLabel(ev)}）` : kindLabel(ev)}<br>${ev.item ? `${ev.kind === 'activity' ? '物品' : '發放'}：${esc(ev.item)}<br>` : ''}${ev.keyword ? `關鍵字：#${esc(ev.keyword)}<br>` : ''}地點：${esc(placeOf(ev))}${ev.approxArea ? `<br><span class="approx-note">約略位置：只知道在${esc(ev.approxArea)}，地圖上是${esc(ev.approxArea)}的中心點，實際地點請看原文</span>` : ''}<br>時間：${it.spot ? esc(spotSchedule(it)) : ev.allDay ? `${dateFmt.format(new Date(ev.startAt * 1000))} ${allDayText(ev, false)}` : esc(eventTimeText(ev))}<br>距離：${ev.approxArea ? '約 ' : ''}${formatKm(it.distanceKm)}，${compassLabel(it.bearing)}方 · ${esc(timeLine(it, now))}</p>`}
       <blockquote class="post-excerpt" title="原文摘錄，完整內容請看原文">${esc(ev.post.source === 'news' ? ev.post.text.split('\n')[0] : ev.post.text)}</blockquote>
       ${ev.post.supplement ? `<p class="muted supplement-line">回報的人補充：${esc(ev.post.supplement)}</p>` : ''}
       <p class="muted source-line">來源：${esc(sourceLabel(ev))}</p>
@@ -1523,11 +1562,11 @@ function renderDetail(items: Item[], now: number): void {
         <a class="btn primary" href="https://www.google.com/maps/dir/?api=1&destination=${ev.lat},${ev.lng}&travelmode=walking" target="_blank" rel="noopener">${ev.approxArea ? '導航到約略位置' : '導航'}</a>
         ${ev.post.permalink ? `<a class="btn" href="${esc(ev.post.permalink)}" target="_blank" rel="noopener">${esc(sourceLinkText(ev))}</a>` : ''}
         <a class="btn" href="${googleMapsUrl(ev)}" target="_blank" rel="noopener">在 Google 地圖上看</a>
-        ${canReportEnded(ev, now) ? `<button type="button" class="btn" data-act="ended"${endedReported.has(ev.id) ? ' disabled' : ''}>${endedReported.has(ev.id) ? '已回報' : `回報${it.spot ? '今天' : ''}${ev.kind === 'activity' ? '已結束' : '已發完'}`}</button>` : ''}
+        ${canReportEnded(ev, now) ? `<button type="button" class="btn" data-act="ended"${endedReported.has(ev.id) ? ' disabled' : ''}>${endedReported.has(ev.id) ? '已回報' : `回報${it.spot ? '今天' : ''}${endedWord(ev)}`}</button>` : ''}
         ${myReportIds.has(ev.post.id) ? '<button type="button" class="btn" data-act="withdraw">刪除我的回報</button>' : ''}
         <button type="button" class="btn" data-act="feedback">回報問題</button>
       </div>
-      ${ev.endedReports ? `<p class="muted ended-note">已有 ${ev.endedReports} 人回報${ev.kind === 'activity' ? '已結束' : '已發完'}${neededText()}</p>` : ''}
+      ${ev.endedReports ? `<p class="muted ended-note">已有 ${ev.endedReports} 人回報${endedWord(ev)}${neededText()}</p>` : ''}
     </div>`);
   detailEl.querySelector('[data-act="close"]')?.addEventListener('click', () => select(null));
   for (const b of detailEl.querySelectorAll<HTMLButtonElement>('[data-select]')) {
@@ -1578,6 +1617,16 @@ function spotSchedule(it: Item): string {
 }
 
 /** 官方行程以官網為準；還沒開始的也不能回報 */
+/** 「回報已發完」的說法：活動「已結束」、職缺「已徵到」 */
+const endedWord = (ev: EventOut): string => (ev.kind === 'job' ? '已徵到' : ev.kind === 'activity' ? '已結束' : '已發完');
+
+/** 職缺的詳細資料：薪資、工作期間、雇主、怎麼應徵、內容，加上防詐提醒 */
+function jobDetailHtml(it: Item, now: number): string {
+  const { ev } = it;
+  const j = jobOf(ev);
+  return `${fraudBoxHtml(ev)}<p>類型：職缺<br>${j.pay ? `薪資：${esc(j.pay)}<br>` : ''}工作期間：${esc(jobPeriod(j))}<br>雇主：${j.employer ? esc(j.employer) : '<span class="risk">沒寫</span>'}<br>${j.contact ? `應徵方式：${esc(CONTACT_TEXT[j.contact] ?? j.contact)}<br>` : ''}${j.requirements ? `內容：${esc(j.requirements)}<br>` : ''}地點：${esc(placeOf(ev))}${ev.approxArea ? `<br><span class="approx-note">約略位置：只知道在${esc(ev.approxArea)}</span>` : ''}<br>距離：${ev.approxArea ? '約 ' : ''}${formatKm(it.distanceKm)}，${compassLabel(it.bearing)}方${ev.endOpen ? '' : ` · 刊登到 ${dateFmt.format(new Date((ev.endAt - 1) * 1000))}`}${now ? '' : ''}</p>`;
+}
+
 function canReportEnded(ev: EventOut, now: number): boolean {
   return ev.post.source !== 'official' && ev.startAt <= now;
 }
@@ -1723,6 +1772,11 @@ async function reveal(id: number): Promise<void> {
   reportSheet.hidden = true;
   bottleSheet.hidden = true;
   if (!find(nowSec())) await refresh();
+  // 在別的模組找不到（例如點了洋流的推播通知）：切回洋流再找
+  if (!find(nowSec()) && !mod.current) {
+    switchModule('current', false);
+    await refresh();
+  }
   const now = nowSec();
   const it = find(now);
   // 搜尋中、這一則不符合：清掉搜尋才看得到
@@ -1823,11 +1877,17 @@ function setOrigin(o: Origin): void {
   if (pushOn() && o.source !== 'default' && (!pushSyncedAt || haversineKm(pushSyncedAt, o) > PUSH_RESYNC_KM)) void syncPush(false);
 }
 
+/** 每次重抓加一；切換模組時，舊模組還沒回來的結果不要蓋掉新的 */
+let fetchSeq = 0;
+
 async function refresh(): Promise<void> {
-  const kws = followed();
+  const seq = ++fetchSeq;
+  const forModule = mod;
+  // 搜尋關鍵字、車掃路線、漂流瓶都是洋流才有
+  const kws = forModule.current ? followed() : [];
   // 漂流瓶跟關鍵字無關，一起抓
   const bottleReq = bottlesOn() ? fetchBottles(origin, FETCH_RADIUS_KM) : Promise.resolve([] as BottleOut[]);
-  if (kws.length === 0) {
+  if (forModule.current && kws.length === 0) {
     events = [];
     bottles = await bottleReq;
     render();
@@ -1835,7 +1895,9 @@ async function refresh(): Promise<void> {
   }
   try {
     const radius = fetchRadiusKm(scaleKm);
-    [events, routes, bottles] = await Promise.all([fetchEvents(origin, radius, kws), fetchRoutes(), bottleReq]);
+    const got = await Promise.all([fetchEvents(origin, radius, kws, forModule.id), forModule.current ? fetchRoutes() : Promise.resolve([] as RouteOut[]), bottleReq]);
+    if (seq !== fetchSeq) return;
+    [events, routes, bottles] = got;
     lastFetchRadius = radius;
     lastFetchAt = nowSec();
     updatedLabel.textContent = `更新 ${fmtTime(lastFetchAt)}`;
@@ -2020,15 +2082,87 @@ async function toggleCompass(): Promise<void> {
   showBanner(bannerEl, '指北針已開啟', 1500);
 }
 
+/** 空白時的說法：洋流照主題，其他模組用自己的 */
+const emptyText = (): string => (mod.current ? theme.emptyText : mod.emptyText);
+
+const moduleSheet = $('#module-sheet');
+const moduleList = $('#module-list');
+const reportIntro = $('#report-intro');
+const CURRENT_REPORT_INTRO = reportIntro.textContent ?? '';
+
+/** 模組的文字、標題、只有洋流才有的東西（地標、車掃、漂流瓶、類型開關） */
+function applyModule(): void {
+  document.documentElement.dataset.module = mod.id;
+  document.title = mod.current ? theme.name : mod.name;
+  brandText.textContent = mod.current ? theme.name : mod.short;
+  searchInput.placeholder = mod.searchPlaceholder;
+  reportIntro.textContent = mod.current ? CURRENT_REPORT_INTRO : mod.reportIntro;
+  map.setLandmarksVisible(mod.current);
+  if (!mod.current) bottleBtn.hidden = true;
+  renderReportTips();
+  renderModuleList();
+}
+
+/** 切換模組：清掉上一個模組的資料、選取、搜尋，重抓（fetch = false 時呼叫的人自己抓） */
+function switchModule(id: ModuleId, fetch = true): void {
+  moduleSheet.hidden = true;
+  if (id === mod.id) return;
+  mod = getModule(id);
+  lsSet(LS_MODULE, mod.id);
+  events = [];
+  routes = [];
+  bottles = [];
+  selectedId = null;
+  selectedRoute = null;
+  selectedLandmark = null;
+  selectedBottle = null;
+  choosing = null;
+  // 換模組後第一次抓到的不算「新開始」，不要一次響一堆
+  seenActive.clear();
+  notifiedOnce = false;
+  searchInput.value = '';
+  searchClear.hidden = true;
+  searchTerms = [];
+  applyModule();
+  render();
+  if (fetch) void refresh();
+}
+
+function renderModuleList(): void {
+  moduleList.replaceChildren();
+  for (const m of MODULES) {
+    const li = document.createElement('li');
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.className = `theme-item module-item${m.id === mod.id ? ' on' : ''}`;
+    b.innerHTML = `<span class="emoji" aria-hidden="true">${m.emoji}</span><span><b>${esc(m.name)}</b><small>${esc(m.tagline)}</small></span>${m.id === mod.id ? '<span class="check">✓</span>' : ''}`;
+    b.addEventListener('click', () => switchModule(m.id));
+    li.appendChild(b);
+    moduleList.appendChild(li);
+  }
+}
+
+function openModuleSheet(open: boolean): void {
+  moduleSheet.hidden = !open;
+  if (!open) return;
+  themeSheet.hidden = true;
+  kwSheet.hidden = true;
+  reportSheet.hidden = true;
+  bottleSheet.hidden = true;
+  feedbackSheet.hidden = true;
+  renderModuleList();
+}
+
 function applyTheme(t: Theme): void {
   theme = t;
   document.documentElement.dataset.theme = t.id;
-  document.title = t.name;
+  document.title = mod.current ? t.name : mod.name;
   map.setDark(t.id === 'dragon' || t.id === 'neon');
-  brandText.textContent = t.name;
+  // 標題列放不下長名稱：其他模組用短名稱（跟「洋流雷達」一樣 4 個字）
+  brandText.textContent = mod.current ? t.name : mod.short;
   document.querySelector('meta[name="theme-color"]')?.setAttribute('content', t.themeColor);
   radar.setStyle({ sweep: t.sweep, blip: t.blip, rose: t.rose });
-  emptyEl.textContent = `${t.emptyText}。雷達每分鐘更新，有新的會提醒你。`;
+  emptyEl.textContent = `${emptyText()}。雷達每分鐘更新，有新的會提醒你。`;
   lsSet(LS_THEME, t.id);
   renderThemeList();
   render();
@@ -2240,7 +2374,7 @@ function placeLine(ev: EventOut): string {
 }
 
 function kindLabel(ev: EventOut): string {
-  return ev.kind === 'activity' ? '活動' : '發放';
+  return ev.kind === 'job' ? '職缺' : ev.kind === 'activity' ? '活動' : '發放';
 }
 
 /** 服務處、競選總部（候選人、議員、政黨的）：固定據點用房子圖示、標「服務處」，跟店家、餐廳分開 */
@@ -2334,8 +2468,13 @@ function openReportSheet(open: boolean): void {
 
 function renderReportTips(): void {
   const l = keywordRules?.sources?.link;
+  const share = '在 Threads 貼文按「分享」→「複製連結」，再貼到上面。Android 把洋流雷達加到主畫面後，也可以直接分享到洋流雷達。';
+  if (!mod.current) {
+    reportTips.innerHTML = [share, ...mod.reportTips].map((t) => `<li>${esc(t)}</li>`).join('');
+    return;
+  }
   const tips = [
-    '在 Threads 貼文按「分享」→「複製連結」，再貼到上面。Android 把洋流雷達加到主畫面後，也可以直接分享到洋流雷達。',
+    share,
     `只收${l ? ` ${l.maxAgeDays} 天內` : ''}的公開貼文，貼文要寫出時間和地點。`,
     `原貼文刪除或改成「發完了」，雷達${l ? ` ${l.recheckMin} 分鐘內` : ''}會自動下架。`,
     '店家、服務處連續好幾天都能去領的（例如「明天起到服務處領取」），一樣貼連結，會自動判斷成固定據點，每天開放的時段都標上雷達。貼文最好寫出門牌地址，定位才準。',
@@ -2371,6 +2510,7 @@ function setReportBusy(busy: boolean, label = '判讀中…'): void {
 
 /** 預覽上的時間：固定據點寫每天幾點、從哪天起排幾天；一般的寫哪天幾點到幾點 */
 function previewWhen(p: PreviewItem): string {
+  if (p.kind === 'job') return `工作 ${jobPeriod(jobOf(p))}`;
   const day = (t: number): string => dateFmt.format(new Date(t * 1000));
   // 一天好幾個時段：「12:00–13:30、18:00–20:30」；沒寫結束的只寫開始，最後寫「發完為止」
   const open = p.kind === 'activity' ? '沒寫結束時間' : '發完為止';
@@ -2459,7 +2599,8 @@ function renderPreview(r: SubmitResult): void {
     <ul class="report-preview">${items
       .map(
         (p) => `<li>
-          <b>${p.kind === 'activity' ? '活動' : '發放'}${p.spot ? '・固定據點' : ''}｜${esc(p.title)}</b>
+          <b>${p.kind === 'job' ? '職缺' : p.kind === 'activity' ? '活動' : '發放'}${p.spot ? '・固定據點' : ''}｜${esc(p.title)}</b>
+          ${p.kind === 'job' && (jobOf(p).risks ?? []).some((r) => r !== 'no_employer') ? `<small class="preview-warn">⚠️ ${esc((jobOf(p).risks ?? []).map((r) => JOB_RISK_TEXT[r]).filter(Boolean).join('；'))}</small>` : ''}
           ${p.item ? `<small>${esc(p.item)}</small>` : ''}
           <small>時間：${esc(previewWhen(p))}</small>
           <small>地點：${esc(p.placeText.replace(/\s*\n\s*/g, ' '))}</small>
@@ -2525,7 +2666,7 @@ async function submitReport(): Promise<void> {
   }
   setReportBusy(true);
   setReportMsg('<p class="msg busy">讀取貼文並判讀中，約需 10 秒</p>');
-  const r = await submitLink(url).finally(() => setReportBusy(false));
+  const r = await submitLink(url, mod.id).finally(() => setReportBusy(false));
   if (!r.ok) {
     setReportMsg(`<p class="msg error">${esc(r.message)}</p>`);
     return;
@@ -2573,7 +2714,7 @@ async function showReportResult(data: SubmitResult): Promise<void> {
     ? '已加入雷達，可以在下面「我的回報」按「看」。'
     : existed && (outcome === 'added' || outcome === 'duplicate' || outcome === 'attached')
       ? '這則之前已經有人回報，已在雷達上：'
-      : (outcome === 'not_listed' && data.why && notListedText(data.why)) || OUTCOME_TEXT[outcome];
+      : (outcome === 'not_listed' && data.why && notListedText(data.why)) || (outcome === 'not_event' ? mod.notEventText : outcome === 'no_place' ? mod.noPlaceText : OUTCOME_TEXT[outcome]);
   const list = (inMine ? [] : resultGroups(found))
     .map((g) => {
       const ev = g[0];
@@ -2635,7 +2776,7 @@ function renderMyReports(): void {
   myReportList.innerHTML = (folded ? myReports.slice(0, MY_REPORTS_FOLDED) : myReports)
     .map(
       (x) => `<li>
-        <div><b>${esc(x.title || '（沒有內容）')}</b><small>${MY_REPORT_STATE[x.state]}${x.events > 1 ? `・${x.events} 場` : ''}・${dateFmt.format(new Date(x.reportedAt * 1000))} 回報${x.username ? `・@${esc(x.username)}` : ''}</small></div>
+        <div><b>${esc(x.title || '（沒有內容）')}</b><small>${MY_REPORT_STATE[x.state]}${x.events > 1 ? `・${x.events} 場` : ''}・${dateFmt.format(new Date(x.reportedAt * 1000))} 回報${x.username ? `・@${esc(x.username)}` : ''}${x.module && x.module !== mod.id ? `・${esc(getModule(x.module).short)}` : ''}</small></div>
         <div class="my-report-acts">${x.eventId ? `<button type="button" class="chip" data-show="${x.eventId}">看</button>` : ''}${x.permalink ? `<a class="chip" href="${esc(x.permalink)}" target="_blank" rel="noopener">原文</a>` : ''}<button type="button" class="chip" data-withdraw="${esc(x.postId)}">刪除</button></div>
       </li>`,
     )
@@ -2879,6 +3020,8 @@ function wireControls(): void {
     openThemeSheet(themeSheet.hidden);
   });
   themeSheet.querySelector('[data-act="close"]')?.addEventListener('click', () => openThemeSheet(false));
+  $('#module-btn').addEventListener('click', () => openModuleSheet(moduleSheet.hidden));
+  moduleSheet.querySelector('[data-act="close"]')?.addEventListener('click', () => openModuleSheet(false));
   // 搜尋：打字就篩（停一下再篩，免得每個字都重畫），清除鈕、Enter 收起鍵盤
   let searchTimer = 0;
   searchInput.addEventListener('input', () => {
@@ -2941,7 +3084,12 @@ function wireControls(): void {
   myReportList.addEventListener('click', (e) => {
     const b = (e.target as Element).closest<HTMLButtonElement>('button');
     if (b?.dataset.withdraw) void withdrawMine(b.dataset.withdraw);
-    else if (b?.dataset.show) void reveal(Number(b.dataset.show));
+    else if (b?.dataset.show) {
+      // 回報在別的模組：先切過去再看
+      const x = myReports.find((r) => String(r.eventId) === b.dataset.show);
+      if (x?.module && x.module !== mod.id) switchModule(x.module as ModuleId);
+      void reveal(Number(b.dataset.show));
+    }
   });
   reportForm.addEventListener('submit', (e) => {
     e.preventDefault();
@@ -3027,7 +3175,9 @@ async function boot(): Promise<void> {
   updateNotifyBtn();
   // 點手機推播的通知、網頁已經開著：選到那一則
   await registerServiceWorker((id) => void reveal(id));
+  lsSet(LS_MODULE, mod.id);
   applyTheme(theme);
+  applyModule();
   setBase(baseMap);
   switchView('radar');
   setTime(timeSetting);

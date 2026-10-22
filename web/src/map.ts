@@ -108,6 +108,9 @@ export class MapView {
   /** 「雙北」範圍時的縣市界 */
   private outline: Leaflet.Polygon | null = null;
   private outlineRings: Array<Array<[number, number]>> = [];
+  /** 洋流的地標（★）：其他模組不顯示 */
+  private landmarkGroup: Leaflet.LayerGroup | null = null;
+  private landmarksOn = true;
   private routes: MapRoute[] = [];
   private bottleLayer: Leaflet.LayerGroup | null = null;
   private bottles: MapBottle[] = [];
@@ -182,6 +185,8 @@ export class MapView {
       map.on('click', (e: Leaflet.LeafletMouseEvent) => {
         if (this.pickMode) this.handlers.onPickOrigin({ lat: e.latlng.lat, lng: e.latlng.lng });
       });
+      this.landmarkGroup = L.layerGroup();
+      if (this.landmarksOn) this.landmarkGroup.addTo(map);
       for (const lm of LANDMARKS) {
         L.marker([lm.lat, lm.lng], {
           icon: L.divIcon({ className: 'map-star', html: '★', iconSize: [26, 26], iconAnchor: [13, 14] }),
@@ -196,7 +201,7 @@ export class MapView {
               `<a href="${escapeHtml(lm.url)}" target="_blank" rel="noopener">${escapeHtml(lm.urlName)}</a>`,
             { closeButton: false },
           )
-          .addTo(map);
+          .addTo(this.landmarkGroup);
       }
       this.applyBase();
       this.pushOrigin();
@@ -383,6 +388,14 @@ export class MapView {
   render(items: MapItem[]): void {
     this.items = items;
     this.pushItems();
+  }
+
+  /** 顯示或藏起洋流的地標（換到其他模組時藏起來） */
+  setLandmarksVisible(on: boolean): void {
+    this.landmarksOn = on;
+    if (!this.map || !this.landmarkGroup) return;
+    if (on) this.landmarkGroup.addTo(this.map);
+    else this.landmarkGroup.remove();
   }
 
   /** 範圍的實際形狀（雙北的縣市界）；空陣列就不畫 */

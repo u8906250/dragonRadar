@@ -134,6 +134,16 @@ button, select, a { touch-action: manipulation; }
   background: var(--topbar-bg); color: var(--topbar-text);
 }
 .brand { display: flex; align-items: center; gap: 6px; font-weight: 800; letter-spacing: 0.04em; white-space: nowrap; font-size: 17px; }
+/* 標題就是切換雷達（模組）的按鈕 */
+.module-btn { display: inline-flex; align-items: center; gap: 2px; font: inherit; color: inherit; letter-spacing: inherit; background: transparent; border: 0; padding: 0; cursor: pointer; }
+.module-caret { font-size: 11px; opacity: 0.7; }
+.module-item .emoji { flex: 0 0 auto; font-size: 26px; width: 36px; text-align: center; }
+/* 職缺的防詐提醒 */
+.fraud-box { margin: 0 0 12px; padding: 10px 12px; border-radius: var(--card-radius); background: #fff4e5; color: #4a2c00; border: 1.5px solid #f0a020; font-size: 13px; line-height: 1.6; }
+.fraud-box b { display: block; margin-bottom: 4px; font-size: 14px; }
+.fraud-box ul { margin: 4px 0 0; padding-left: 18px; }
+.fraud-box .risk { color: #b3261e; font-weight: 700; }
+.risk-tag { display: inline-block; margin-left: 6px; padding: 0 6px; border-radius: 999px; background: #fdecea; color: #b3261e; font-size: 11px; font-weight: 700; vertical-align: 1px; }
 .brand-dot { width: 10px; height: 10px; border-radius: 50%; background: var(--highlight); box-shadow: 0 0 8px var(--highlight); margin-right: 2px; }
 .brand-wave { display: none; opacity: 0.9; }
 :root[data-theme='current'] .brand-wave { display: inline; }
@@ -142,7 +152,8 @@ button, select, a { touch-action: manipulation; }
 .badge { font-size: 11px; padding: 3px 8px; border-radius: 999px; background: var(--badge-bg); color: var(--badge-text); font-weight: 600; margin-left: 4px; }
 .badge.mock { background: var(--badge-mock-bg); color: var(--badge-mock-text); }
 .controls { display: flex; align-items: center; gap: 6px; }
-@media (max-width: 380px) { .controls { gap: 4px; } .controls .chip { padding: 8px 10px; font-size: 13px; } :root[data-theme='current'] .brand-wave { display: none; } }
+/* 標題多了切換雷達的 ▾：400 寬以下就精簡，不然右上的按鈕會擠到邊 */
+@media (max-width: 400px) { .controls { gap: 4px; } .controls .chip { padding: 8px 10px; font-size: 13px; } :root[data-theme='current'] .brand-wave { display: none; } }
 
 .chip {
   font: inherit; font-size: 14px; font-weight: 600; color: var(--chip-text);

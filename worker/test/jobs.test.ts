@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { jobRisks, normalizeJobs, normalizeSlot } from '../src/jobs';
+import { employerName, jobRisks, normalizeJobs, normalizeSlot } from '../src/jobs';
 import { moduleOf } from '../src/modules';
 
 const POST = `🐶 【台北誠徵/狗狗陪伴員】
@@ -68,5 +68,13 @@ describe('moduleOf', () => {
     expect(moduleOf('dog')).toBe('dog');
     expect(moduleOf('cat')).toBe('current');
     expect(moduleOf(undefined)).toBe('current');
+  });
+});
+
+describe('employerName', () => {
+  it('treats nameless words as no employer', () => {
+    expect(employerName('僱主')).toBeNull();
+    expect(employerName(' 飼主 ')).toBeNull();
+    expect(employerName('毛孩旅館')).toBe('毛孩旅館');
   });
 });
