@@ -497,17 +497,32 @@ const outLabel = (): string => (scaleSetting === 'region' ? '雙北以外' : '�
 let outlineFor = '';
 let radarOutline: Array<Array<{ bearing: number; distanceKm: number }>> = [];
 
-/** 全世界的海岸線（約 30 KB），第一次選「全球」才載入 */
-let worldRings: Array<Array<[number, number]>> | null = null;
+/** 範圍比雙北大時畫的海岸線：台灣用詳細的，加上全世界的（約 30 KB，第一次用到才載入；世界資料裡的台灣只有幾個點，換掉） */
+let landRings: Array<Array<[number, number]>> = TAIWAN_RINGS;
+let worldLoaded = false;
 let worldLoading = false;
+const inTaiwanBox = (ring: Array<[number, number]>): boolean => ring.every(([lat, lng]) => lat > 21 && lat < 26.5 && lng > 118 && lng < 123);
 
-/** 「雙北」畫雙北的縣市界，「全台」畫台灣的海岸線，「全球」畫全世界的海岸線，其他範圍不畫；位置變了才重算 */
+/** 雙北的半徑（能涵蓋整個雙北）只跟位置有關，拖曳時每一幀都要用，記住上一次的 */
+let sbRadius = { key: '', km: 0 };
+function shuangbeiKm(): number {
+  const key = `${origin.lat},${origin.lng}`;
+  if (sbRadius.key !== key) sbRadius = { key, km: shuangbeiRadiusKm(origin) };
+  return sbRadius.km;
+}
+
+/**
+ * 「雙北」畫雙北的縣市界；範圍比雙北大（全台、全球、縮放到更遠）一律畫海岸線（台灣加上全世界），
+ * 比雙北小的不畫；位置變了才重算
+ */
 function updateOutline(): void {
-  if (scaleSetting === 'world' && !worldRings && !worldLoading) {
+  const kind = scaleSetting === 'region' ? 'region' : scaleKm > shuangbeiKm() ? 'land' : 'none';
+  if (kind === 'land' && !worldLoaded && !worldLoading) {
     worldLoading = true;
     void import('./world')
       .then((m) => {
-        worldRings = m.WORLD_RINGS;
+        landRings = [...TAIWAN_RINGS, ...m.WORLD_RINGS.filter((r) => !inTaiwanBox(r))];
+        worldLoaded = true;
         outlineFor = '';
         updateOutline();
       })
@@ -515,8 +530,8 @@ function updateOutline(): void {
         worldLoading = false;
       });
   }
-  const rings = scaleSetting === 'region' ? SHUANGBEI_RINGS : scaleSetting === 'taiwan' ? TAIWAN_RINGS : scaleSetting === 'world' ? worldRings : null;
-  const key = rings ? `${scaleSetting}|${origin.lat},${origin.lng}` : '';
+  const rings = kind === 'region' ? SHUANGBEI_RINGS : kind === 'land' ? landRings : null;
+  const key = rings ? `${kind}|${worldLoaded}|${origin.lat},${origin.lng}` : '';
   if (key === outlineFor) return;
   outlineFor = key;
   radarOutline = rings ? rings.map((ring) => ring.map(([lat, lng]) => ({ bearing: bearingDeg(origin, { lat, lng }), distanceKm: haversineKm(origin, { lat, lng }) }))) : [];

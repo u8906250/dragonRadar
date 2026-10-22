@@ -197,6 +197,7 @@ a.chip { display: inline-flex; align-items: center; text-decoration: none; }
 .radar .route-planned { stroke-dasharray: 6 5; }
 /* 「雙北」範圍的縣市界輪廓 */
 .radar .region-outline { fill: var(--accent); fill-opacity: 0.05; stroke: var(--accent); stroke-width: 1.5; stroke-opacity: 0.45; stroke-dasharray: 3 3; pointer-events: none; }
+.radar .region-outline.open { fill: none; }
 .radar .route-live { opacity: 0.9; }
 .radar .scale-label { fill: var(--radar-text); font-size: 11px; }
 .radar .rose-letter { fill: var(--radar-rose); font-size: 13px; font-weight: 800; }
