@@ -92,7 +92,7 @@ describe('buildMessages', () => {
   });
 });
 
-import { adminArea, citiesOfDistrict, cityLevel, cityMatches, pickHit, placeCandidates, streetFallbacks, worldCandidates } from '../src/geocode';
+import { adminArea, citiesOfDistrict, cityLevel, cityMatches, sharesName, pickHit, placeCandidates, streetFallbacks, worldCandidates } from '../src/geocode';
 import { normalizeKeyword, parseKeywordList } from '../src/keywords';
 
 describe('normalizeKeyword', () => {
@@ -776,5 +776,21 @@ describe('cityLevel', () => {
   });
   it('makes city-only text count as an area, not a place', () => {
     expect(isAreaOnly('台中市區')).toBe(true);
+  });
+});
+
+describe('sharesName', () => {
+  it('rejects a hit whose name has nothing to do with the query', () => {
+    expect(sharesName('丞風羽球館', '玉勅鳳邑琉球城隍廟, 觀光港路, 琉球鄉, 屏東縣, 臺灣')).toBe(false);
+  });
+  it('accepts real matches', () => {
+    expect(sharesName('台北市 捷運市政府站', '市政府, 信義路五段, 信義區, 臺北市, 臺灣')).toBe(true);
+    expect(sharesName('南港國小', '臺北市南港區南港國民小學, 南港區, 臺北市')).toBe(true);
+    expect(sharesName('台北市 信義運動中心', '臺北市信義運動中心, 松勤街, 信義區')).toBe(true);
+    expect(sharesName('台北市 大龍峒保安宮', '大龍峒保安宮, 哈密街, 大同區, 臺北市')).toBe(true);
+  });
+  it('does not check queries that are only a city or district', () => {
+    expect(sharesName('臺中市', '臺中市, 臺灣')).toBe(true);
+    expect(sharesName('新北市 淡水區', '淡水區, 新北市')).toBe(true);
   });
 });

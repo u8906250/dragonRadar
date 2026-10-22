@@ -162,6 +162,19 @@ interface CacheRow {
   resolved_at: number;
 }
 
+/**
+ * 用地名查到的結果，名字要跟查的地名有兩個以上連續的字一樣（「丞風羽球館」不能對到「玉勅鳳邑琉球城隍廟」）。
+ * 查的只有縣市、行政區（拿掉後不到兩個字）就不檢查
+ */
+export function sharesName(query: string, displayName: string | null | undefined): boolean {
+  const fold = (s: string): string => s.replace(/臺/g, '台').replace(/\s+/g, '');
+  const core = fold(query.replace(CITY_PREFIX_RE, '').replace(/[\u4e00-\u9fff]{1,2}[區鄉鎮](?=[\u4e00-\u9fff]{2,})/g, '')).replace(/[^\u4e00-\u9fff]/g, '');
+  if (core.length < 2) return true;
+  const name = fold((displayName ?? '').split(',')[0] ?? '');
+  for (let i = 0; i + 2 <= core.length; i++) if (name.includes(core.slice(i, i + 2))) return true;
+  return false;
+}
+
 /** 查什麼：any 什麼都可以；road 只要道路（門牌查不到時退到那條路） */
 type GeoKind = 'any' | 'road';
 
@@ -181,7 +194,8 @@ async function nominatim(env: Env, q: string, kind: GeoKind = 'any'): Promise<Ge
     return null;
   }
   const arr = (await res.json()) as Array<{ lat: string; lon: string; display_name?: string; category?: string }>;
-  const hit = pickHit(q, kind === 'road' ? arr.filter((h) => h.category === 'highway') : arr);
+  // 地名查的：名字要對得上（道路照類型挑）
+  const hit = pickHit(q, kind === 'road' ? arr.filter((h) => h.category === 'highway') : arr.filter((h) => sharesName(q, h.display_name)));
   if (!hit) return null;
   // 只對到行政區（例如把「中正區忠孝復興站」對到整個中正區的中心）不算找到，除非本來就只查行政區
   if (hit.category === 'boundary' && !/[市縣區鄉鎮]$/.test(q.trim())) return null;
@@ -200,8 +214,8 @@ export async function geocode(env: Env, query: string, kind: GeoKind = 'any'): P
   const cached = await env.DB.prepare('SELECT lat, lng, display_name, resolved_at FROM geocode_cache WHERE query = ?')
     .bind(key)
     .first<CacheRow>();
-  // 以前沒檢查縣市時查錯、存進快取的，重查一次
-  if (cached && !(cached.lat !== null && !cityMatches(q, cached.display_name))) {
+  // 以前沒檢查縣市、名字時查錯、存進快取的，重查一次
+  if (cached && !(cached.lat !== null && (!cityMatches(q, cached.display_name) || (kind === 'any' && !sharesName(q, cached.display_name))))) {
     if (cached.lat !== null && cached.lng !== null) {
       return { lat: cached.lat, lng: cached.lng, displayName: cached.display_name ?? key };
     }
