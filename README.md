@@ -85,9 +85,10 @@ worker/   Cloudflare Worker（API、排程、資料庫）
 ## 模組（切換雷達）
 
 同一套雷達、地圖、清單、搜尋、回報、回報管理，換不同主題的資料。點標題（`#module-btn`）切換，記在 `localStorage`（`dr.module`），網址 `?module=dog` 也可以。
-- 後端：`worker/src/modules.ts`（`current` 洋流、`dog` 狗狗陪伴、`badminton` 羽球臨打）；貼文記在 `posts.module`，事件跟著貼文（`/api/events?module=`、`POST /api/reports { url, module }`）；判讀說明照模組換（`ExtractSpec`：洋流用 `EVENT_SPEC`，狗狗陪伴用 `worker/src/jobs.ts` 的 `JOB_SPEC`）。還沒放上雷達的回報從別的模組再貼一次，會改成那個模組重新判讀。
+- 後端：`worker/src/modules.ts`（`current` 洋流、`dog` 狗狗陪伴、`badminton` 羽球臨打、`food` 等一下吃什麼）；貼文記在 `posts.module`，事件跟著貼文（`/api/events?module=`、`POST /api/reports { url, module }`）；判讀說明照模組換（`ExtractSpec`：洋流用 `EVENT_SPEC`，狗狗陪伴用 `worker/src/jobs.ts` 的 `JOB_SPEC`）。還沒放上雷達的回報從別的模組再貼一次，會改成那個模組重新判讀。
 - 前端：`web/src/modules.ts` 放每個模組的名稱、說明、空白時的說法、回報說明、判讀結果的說法、說明頁（洋流 `help.html`、狗狗陪伴 `help-dog.html`，標題列的「說明」照目前的模組打開）。洋流專屬的官方航線、車掃、漂流瓶、地標、搜尋關鍵字、類型開關、只看進行中、開始時推播，在其他模組不顯示。換模組時清掉選取、搜尋，第一次抓到的不算「新開始」（不會一次響一堆）。
 - 羽球臨打（`worker/src/badminton.ts` 的 `SESSION_SPEC`，`kind = 'session'`）：收兩種，`extra.role` 是 `offer`（招臨打：球團開放名額，照洋流的場次排，每週固定的變成固定場，`extra` 放費用、程度、缺幾位、用球、球團、報名方式）或 `seek`（找臨打：球友想找地方打，`planSeeks` 當成刊登，寫了想打的時段顯示到那個時段結束，沒寫顯示 7 天，`extra` 放可以打的時間、程度）；畫面標「招臨打」「固定場」「找臨打」，清單的找臨打另外一段；「名額已滿」「臨打取消」「場地取消」會自動下架。說明頁 `help-badminton.html`。
+- 等一下吃什麼（`worker/src/food.ts` 的 `FOOD_SPEC`，`kind = 'food'`）：`extra.role` 是 `vendor`（出攤：餐車、市集攤位，照場次排，每週固定的變固定擺攤）、`recommend`（網友推薦的店，刊登 14 天，沒有時間）、`meetup`（揪團吃飯，約的時段結束或 3 天）；`extra` 放店名、吃什麼、價位、營業時間、缺幾人、報名方式。畫面分「店家發布」（出攤、固定攤）和網友推薦、揪團吃飯兩段，揪團的詳細資料有跟網友吃飯的安全提醒。店家自己的優惠、限量、新開幕廣告不收。刊登（找臨打、推薦、揪團）共用 `planPostings`（`POSTING_DAYS`）。說明頁 `help-food.html`。
 - 狗狗陪伴：收兩種刊登，`extra.role` 是 `hire`（徵人：飼主、店家找人照顧）或 `offer`（可照顧：個人說可以幫忙照顧、寄宿、遛狗，免費或收費；店家廣告不收），畫面標「徵人」「可照顧」；可照顧的只標「提到先付錢」，詳細資料顯示給飼主的安全提醒。判讀工作地點、工作期間、每天時段、薪資、雇主、怎麼應徵、內容，存在 `events.extra`（JSON），`kind = 'job'`。從發文起算「徵才中」，到工作期間最後一天（沒寫 14 天，最多發文後 30 天）。防詐提醒（`jobRisks`）：沒寫雇主（「僱主」「飼主」這種沒名字的不算）、只留表單、只加 LINE（沒有電話也沒有單位名稱）、提到保證金、先付款、提款卡、帳戶；每則都顯示防詐提醒，有可疑之處的清單標「⚠️ 注意」。作者把貼文改成「已徵到」「已額滿」「停止招募」等（`ENDED_WORDS`）會自動下架。
 
 ## 問題回報

@@ -2,7 +2,7 @@
  * 模組：同一套雷達、地圖、清單、回報，換不同主題的資料（跟伺服器的 worker/src/modules.ts 對應）。
  * 洋流有自己的官方航線、車掃、漂流瓶、地標、搜尋關鍵字；其他模組只有大家回報的貼文。
  */
-export type ModuleId = 'current' | 'dog' | 'badminton';
+export type ModuleId = 'current' | 'dog' | 'badminton' | 'food';
 
 export interface ModuleDef {
   id: ModuleId;
@@ -89,6 +89,27 @@ MODULES.push({
   helpPage: 'help-badminton.html',
 });
 
+MODULES.push({
+  id: 'food',
+  name: '等一下吃什麼',
+  short: '吃什麼',
+  tagline: '附近的餐車、市集攤位，網友推薦的店，揪團吃飯',
+  emoji: '🍜',
+  current: false,
+  unit: '個',
+  emptyText: '附近還沒有等一下吃什麼的資料',
+  searchPlaceholder: '搜尋店名、吃什麼、地點…',
+  reportIntro: '看到餐車、市集攤位出攤，網友推薦的店，或揪團吃飯的 Threads 貼文？貼上連結，雷達會判讀地點、時間、吃什麼、價位，標到地圖上。',
+  reportTips: [
+    '收三種：出攤（餐車、市集攤位公告哪天幾點在哪裡）、推薦（網友推薦某家店）、揪團（揪人一起吃飯）。店家自己的優惠、限量、新開幕廣告不收。',
+    '出攤要寫出時間和地點；「每週六都在 xx 市集」這種會排成每週固定擺攤。推薦要寫出店名或地點。',
+    '推薦顯示 14 天；揪團寫了約的時間就顯示到那時，沒寫顯示 3 天。原貼文刪除或改成「今天不出攤」「揪滿了」會自動下架。',
+  ],
+  notEventText: '這則看起來不是出攤、推薦或揪團吃飯的貼文。要寫出店名、攤位或地點，雷達才會收。',
+  noPlaceText: '看得出是吃的，但貼文沒寫店名、地點（或查不到），所以還沒放上雷達。知道在哪裡的話，可以在下面補充地點再判讀一次。',
+  helpPage: 'help-food.html',
+});
+
 export const DEFAULT_MODULE: ModuleId = 'current';
 export const getModule = (id: string | null | undefined): ModuleDef => MODULES.find((m) => m.id === id) ?? (MODULES[0] as ModuleDef);
 
@@ -106,6 +127,13 @@ export const OFFER_SAFETY_TIPS = [
   '先說好照顧方式、時間、緊急時的處理和就醫，留下狗狗的病歷、晶片資料。',
   '不要預付費用或保證金；說是免費的，中途要求收費要特別小心。',
   '照顧期間請對方定時傳照片、影片回報；覺得不對勁就提早接回。',
+];
+
+/** 揪團吃飯：跟網友吃飯前的安全提醒 */
+export const MEETUP_SAFETY_TIPS = [
+  '第一次見面約在人多的店或公開場所，告訴家人朋友去哪裡、跟誰。',
+  '各付各的；不要先轉帳給不認識的人「幫忙訂位」。',
+  '喝酒要節制，自己的飲料不要離開視線；覺得不對勁就先離開。',
 ];
 
 /** 每則職缺都顯示的防詐提醒 */
