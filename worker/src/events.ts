@@ -2,6 +2,7 @@ import type { Env } from './env';
 import { applySupplementDate, dropBroughtItem, dropSelfPlace, EVENT_SPEC, extractFromPost, localizeTimes, splitDropTimes, splitMultiDay, startNowForDeadline, timeZoneOf, untilInText, weekdaysFromText, weekdaysInText, type EventKind, type ExtractedEvent } from './extract';
 import { geocodeAddress, parseTwAddress, type TwAddress } from './address';
 import { SESSION_SPEC } from './badminton';
+import { FOOD_SPEC } from './food';
 import { JOB_SPEC, jobRisks } from './jobs';
 import { DEFAULT_MODULE, moduleOf, type ModuleId } from './modules';
 import { adminArea, cityLevel, cityOfDistrict, geocode, geocodeFirst, geocodeStreet, geocodeWorld, isAreaOnly, placeCandidates, type GeoPoint } from './geocode';
@@ -147,6 +148,8 @@ export const ENDED_WORDS = [
   '已徵到', '徵到了', '已找到', '找到了', '已額滿', '已錄取', '停止招募', '暫停招募', '已截止', '徵才結束',
   // 臨打（羽球臨打）：滿了、取消了
   '名額已滿', '已滿員', '滿員了', '人數已滿', '臨打取消', '今日取消', '今天取消', '本週取消', '場地取消',
+  // 等一下吃什麼：今天不出攤、揪滿了（「收攤」「售完」上面已經有）
+  '今日不出攤', '今天不出攤', '今日休息', '今天休息', '臨時休息', '已滿團', '揪滿了', '揪到了',
 ];
 const ENDED_RE = new RegExp(ENDED_WORDS.join('|'));
 
@@ -576,7 +579,7 @@ export async function planPost(env: Env, post: PostRow, now = nowSec()): Promise
   const text = post.supplement ? `${post.text}\n\n【回報的人補充】${post.supplement}` : post.text;
   const module = moduleOf(post.module);
   // 使用者貼連結回報的，主要模型說不是活動時再問備用模型（只多等一下，量不大）
-  const spec = module === 'dog' ? JOB_SPEC : module === 'badminton' ? SESSION_SPEC : EVENT_SPEC;
+  const spec = module === 'dog' ? JOB_SPEC : module === 'badminton' ? SESSION_SPEC : module === 'food' ? FOOD_SPEC : EVENT_SPEC;
   const { extraction, raw, garbled } = await extractFromPost(env, text, post.posted_at, now, { secondOpinion: post.source === 'link', spec });
   await env.DB.prepare('UPDATE posts SET processed_at = ?, extraction = ? WHERE id = ?').bind(now, raw, post.id).run();
 
@@ -587,12 +590,12 @@ export async function planPost(env: Env, post: PostRow, now = nowSec()): Promise
   if (module === 'dog') return { items: await planJobs(env, post, extraction.events, now), early: null };
   // 模型常把付款的 Line Pay 當成用 LINE 聯絡：貼文只有 Line Pay 的不算
   if (!/(?:line|賴)(?!\s*pay)/i.test(text)) for (const e of extraction.events) if (e.extra?.contact === 'line') e.extra.contact = null;
-  // 羽球臨打的找臨打（需求）是刊登，招臨打（提供）照場次排
-  const seeks = extraction.events.filter((e) => e.extra?.role === 'seek');
-  if (seeks.length > 0) extraction.events = extraction.events.filter((e) => e.extra?.role !== 'seek');
+  // 刊登（找臨打、網友推薦、揪團吃飯）不是場次：從發文起顯示一段時間；招臨打、出攤照場次排
+  const postings = extraction.events.filter((e) => POSTING_DAYS[String(e.extra?.role)] !== undefined);
+  if (postings.length > 0) extraction.events = extraction.events.filter((e) => POSTING_DAYS[String(e.extra?.role)] === undefined);
 
   const items: PlanItem[] = [];
-  if (seeks.length > 0) items.push(...(await planSeeks(env, post, seeks, now, extraction.events.length)));
+  if (postings.length > 0) items.push(...(await planPostings(env, post, postings, now, extraction.events.length)));
   const deadline = Date.now() + ADDRESS_BUDGET_MS;
   // 「13:00｜10 個、15:00｜10 個」被合成一段的，拆回每個時間點各一筆
   extraction.events = splitDropTimes(extraction.events, text);
@@ -770,17 +773,20 @@ async function locateOrCity(env: Env, placeQuery: string, placeText: string, raw
   return p && city ? { point: p, approxArea: city } : loc;
 }
 
-/** 找臨打（需求）沒寫確切時間時，在雷達上留幾天 */
-const SEEK_DEFAULT_DAYS = 7;
+/**
+ * 刊登（不是場次）的角色，沒寫確切時間時在雷達上留幾天：
+ * 找臨打（羽球臨打）7 天、網友推薦（等一下吃什麼）14 天、揪團吃飯 3 天
+ */
+const POSTING_DAYS: Record<string, number> = { seek: 7, recommend: 14, meetup: 3 };
 
 /**
- * 羽球臨打的找臨打（球友想找地方打）：從發文開始就算刊登中；寫了想打的時段就到那個時段結束，沒寫留 SEEK_DEFAULT_DAYS 天。
- * 想打的時段、可以打的時間、程度放在 extra
+ * 刊登（找臨打、網友推薦、揪團吃飯）：從發文開始就算刊登中；寫了約的時段（想打、約吃飯）就到那個時段結束，
+ * 沒寫留 POSTING_DAYS 天。約的時段放在 extra 的 play_at、play_end
  */
-async function planSeeks(env: Env, post: PostRow, seeks: ExtractedEvent[], now: number, groupFrom: number): Promise<PlanItem[]> {
+async function planPostings(env: Env, post: PostRow, list: ExtractedEvent[], now: number, groupFrom: number): Promise<PlanItem[]> {
   const items: PlanItem[] = [];
   const deadline = Date.now() + ADDRESS_BUDGET_MS;
-  for (const [i, ex] of seeks.entries()) {
+  for (const [i, ex] of list.entries()) {
     const group = groupFrom + i;
     if (ex.confidence < MIN_CONFIDENCE) {
       items.push({ group, plan: null, reason: 'low_confidence' });
@@ -789,7 +795,7 @@ async function planSeeks(env: Env, post: PostRow, seeks: ExtractedEvent[], now: 
     const playAt = parseIsoToUnix(ex.start_at);
     const playEnd = playAt !== null ? (parseIsoToUnix(ex.end_at) ?? playAt + 3 * 3600) : null;
     const start = Math.min(post.posted_at, now);
-    const end = playEnd ?? post.posted_at + SEEK_DEFAULT_DAYS * DAY_SEC;
+    const end = playEnd ?? post.posted_at + (POSTING_DAYS[String(ex.extra?.role)] ?? 7) * DAY_SEC;
     if (end <= now) {
       items.push({ group, plan: null, reason: 'already_over', start: playAt ?? start, end });
       continue;
@@ -805,9 +811,10 @@ async function planSeeks(env: Env, post: PostRow, seeks: ExtractedEvent[], now: 
       group,
       reason: 'planned',
       plan: {
-        kind: 'session',
+        kind: ex.kind,
         title: ex.title,
-        item: (ex.extra?.level as string | null | undefined) ?? null,
+        // 找臨打的卡片寫程度，其他寫吃什麼
+        item: ex.kind === 'session' ? ((ex.extra?.level as string | null | undefined) ?? null) : ex.item,
         start_at: start,
         end_at: end,
         place_text: placeText,
@@ -822,7 +829,7 @@ async function planSeeks(env: Env, post: PostRow, seeks: ExtractedEvent[], now: 
         until_open: false,
         weekdays: null,
         tz: null,
-        extra: JSON.stringify({ ...ex.extra, role: 'seek', play_at: playAt, play_end: playAt !== null ? playEnd : null }),
+        extra: JSON.stringify({ ...ex.extra, play_at: playAt, play_end: playAt !== null ? playEnd : null }),
       },
     });
   }

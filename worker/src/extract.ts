@@ -2,8 +2,8 @@ import type { Env } from './env';
 import { isAdminOnly } from './geocode';
 import { formatTaipei, parseIsoToUnix } from './util';
 
-/** giveaway 發放、activity 活動（洋流）；job 職缺（狗狗陪伴）；session 臨打（羽球臨打） */
-export type EventKind = 'giveaway' | 'activity' | 'job' | 'session';
+/** giveaway 發放、activity 活動（洋流）；job 職缺（狗狗陪伴）；session 臨打（羽球臨打）；food 吃的（等一下吃什麼） */
+export type EventKind = 'giveaway' | 'activity' | 'job' | 'session' | 'food';
 
 /** 職缺（狗狗陪伴模組）：工作期間、每天時段、薪資、雇主、怎麼應徵 */
 export interface JobInfo {
@@ -171,6 +171,7 @@ export function normalizeKind(v: unknown): EventKind {
   const k = typeof v === 'string' ? v.trim().toLowerCase() : '';
   if (k === 'job') return 'job';
   if (k === 'session') return 'session';
+  if (k === 'food') return 'food';
   return k === 'activity' || k === 'event' || k === '活動' ? 'activity' : 'giveaway';
 }
 

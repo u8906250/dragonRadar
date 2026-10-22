@@ -11,6 +11,7 @@ import { apifyTrial } from './sources/apify';
 import { fetchThreadsPost, resolveThreadsLink, shortcodeToUnix } from './sources/link';
 import { applyFeedback, deleteAdminSubscription, listFeedback, notifyAdmins, purgeFeedback, saveAdminSubscription, setFeedbackStatus, submitFeedback } from './feedback';
 import { SESSION_SPEC } from './badminton';
+import { FOOD_SPEC } from './food';
 import { JOB_SPEC } from './jobs';
 import { moduleOf } from './modules';
 import { PUSH_RADIUS_KM, PushError, b64urlEncode, deleteSubscription, encryptPayload, purgeSubscriptions, pushStarted, saveSubscription, sendPush, vapidKeys } from './push';
@@ -319,7 +320,7 @@ async function handleAdmin(req: Request, env: Env, ctx: ExecutionContext, path: 
     if (!body.text?.trim()) throw new HttpError(400, 'text is required');
     // module：用哪個模組的判讀（dog、badminton），沒給是洋流
     const mod = moduleOf(body.module);
-    const spec = mod === 'dog' ? JOB_SPEC : mod === 'badminton' ? SESSION_SPEC : undefined;
+    const spec = mod === 'dog' ? JOB_SPEC : mod === 'badminton' ? SESSION_SPEC : mod === 'food' ? FOOD_SPEC : undefined;
     const postedAt = typeof body.posted_at === 'number' ? body.posted_at : parseIsoToUnix(body.posted_at) ?? now;
     const models = (body.models?.length ? body.models : [env.AI_MODEL, env.AI_MODEL_FALLBACK]).filter((m): m is string => !!m).slice(0, 6);
     const results = [];

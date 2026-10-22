@@ -2,7 +2,7 @@
  * 羽球臨打模組：判讀兩種貼文
  * - offer 招臨打（提供）：球團、場主開放臨打名額，抽出球館、時段（每週固定的當成固定場）、費用、程度、缺幾位、用球、球團、怎麼報名；
  *   場次照洋流的發放活動一樣排（開始、結束、每週固定時段）
- * - seek 找臨打（需求）：球友想找地方打，抽出程度、可以打的時間、地區、怎麼聯絡；當成刊登（events.ts 的 planSeeks）
+ * - seek 找臨打（需求）：球友想找地方打，抽出程度、可以打的時間、地區、怎麼聯絡；當成刊登（events.ts 的 planPostings）
  * 臨打自己的欄位放在 extra。
  */
 import { conf, normalizeWeekdays, parseLoose, str, type ExtractedEvent, type Extraction, type ExtractSpec } from './extract';
