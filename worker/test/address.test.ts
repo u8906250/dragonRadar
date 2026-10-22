@@ -110,3 +110,12 @@ describe('addressWithCity', () => {
     expect(a && addressWithCity(a.address, '新北市')).toMatchObject({ text: '新北市淡水區中山北路二段200號', area: '新北市淡水區', city: '新北市' });
   });
 });
+
+describe('parseTwAddress with punctuation around the address', () => {
+  it('does not take brackets or punctuation into the street name', () => {
+    expect(parseTwAddress('景華公園（景華街55號）')).toMatchObject({ street: '景華街', number: 55 });
+    expect(parseTwAddress('景華公園(景華街55號)')).toMatchObject({ street: '景華街', number: 55 });
+    expect(parseTwAddress('地點：「景華街55號」')).toMatchObject({ street: '景華街', number: 55 });
+    expect(parseTwAddress('新市國小活動中心-淡水區中山北路二段200號')).toMatchObject({ district: '淡水區', street: '中山北路二段', number: 200 });
+  });
+});
