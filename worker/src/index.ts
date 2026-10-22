@@ -9,6 +9,7 @@ import { CURRENT_MAP_URL } from './sources/currentmap';
 import { mergeIntoOfficial } from './sources/merge';
 import { apifyTrial } from './sources/apify';
 import { fetchThreadsPost, resolveThreadsLink, shortcodeToUnix } from './sources/link';
+import { PUSH_RADIUS_KM, PushError, b64urlEncode, deleteSubscription, encryptPayload, purgeSubscriptions, pushStarted, saveSubscription, sendPush, vapidKeys } from './push';
 import { confirmLink, ENDED_REPORTS_NEEDED, MAX_LINK_AGE_SEC, ReportError, ipHash, myReports, purgeReports, recheckLinks, rejectLink, reportEnded, submitLink, supplementLink, withdrawReport } from './reports';
 import { isTransient, withResilientDb } from './db';
 import { addressCacheKey, geocodeAddress, parseTwAddress } from './address';
@@ -101,6 +102,25 @@ async function handle(req: Request, env: Env, ctx: ExecutionContext): Promise<Re
     });
     if (keywords.length > 0) ctx.waitUntil(touchKeywords(env, keywords, now).catch((e) => console.warn('touch failed', e)));
     return jsonResponse({ now, events });
+  }
+
+  // 手機推播：公鑰、訂閱（含約略位置，換位置時再送一次）、取消
+  if (req.method === 'GET' && path === '/api/push/key') {
+    return jsonResponse({ key: (await vapidKeys(env)).publicKey, radiusKm: PUSH_RADIUS_KM });
+  }
+  if (req.method === 'POST' && path === '/api/push/subscribe') {
+    const body = await readJson<{ subscription?: { endpoint?: string; keys?: { p256dh?: string; auth?: string } } }>(req);
+    const r = await saveSubscription(env, body, now);
+    // 第一次訂閱送一則確認通知，順便確認收得到
+    if (r.created && body.subscription?.endpoint && body.subscription.keys?.p256dh && body.subscription.keys.auth) {
+      const sub = { endpoint: body.subscription.endpoint, p256dh: body.subscription.keys.p256dh, auth: body.subscription.keys.auth, lat: 0, lng: 0 };
+      const msg = { title: '洋流雷達通知已開啟', body: `附近 ${PUSH_RADIUS_KM} 公里內開始發放、活動開始時會通知你（深夜 23:00–8:00 不通知）`, tag: 'welcome', url: './' };
+      ctx.waitUntil(sendPush(env, sub, msg, now).catch((e) => console.warn('welcome push failed', e)));
+    }
+    return jsonResponse(r);
+  }
+  if (req.method === 'POST' && path === '/api/push/unsubscribe') {
+    return jsonResponse(await deleteSubscription(env, await readJson<{ endpoint?: string }>(req)));
   }
 
   // 今天的車掃路線（實際路徑、各站預計時間、各路段認領人數）
@@ -287,6 +307,19 @@ async function handleAdmin(req: Request, env: Env, _ctx: ExecutionContext, path:
     const results = [];
     for (const m of models) results.push(await runModel(env, m, body.text, postedAt, now));
     return jsonResponse({ results });
+  }
+
+  // 推播加密在 Workers 上對不對（RFC 8291 的範例），和目前的訂閱數
+  if (req.method === 'POST' && path === '/api/admin/push-selftest') {
+    const out = await encryptPayload(
+      'BCVxsr7N_eNgVRqvHtD0zTZsEc6-VV-JvLexhqUzORcxaOzi6-AYWXvTBHm4bjyPjs7Vd8pZGH6SRpkNtoIAiw4',
+      'BTBZMqHH6r4Tts7J_aSIgg',
+      new TextEncoder().encode('When I grow up, I want to be a watermelon'),
+      { asPrivateB64: 'yfWPiYE-n46HLnH0KqZOF1fJJU3MYrct3AELtAQ-oRw', asPublicB64: 'BP4z9KsN6nGRTbVYI_c7VJSPQTBtkgcy27mlmlMoZIIgDll6e3vCYLocInmYWAmS6TlzAC8wEqKK6PBru3jl7A8', saltB64: 'DGv6ra1nlYgDCS1FRnbzlw' },
+    );
+    const expected = 'DGv6ra1nlYgDCS1FRnbzlwAAEABBBP4z9KsN6nGRTbVYI_c7VJSPQTBtkgcy27mlmlMoZIIgDll6e3vCYLocInmYWAmS6TlzAC8wEqKK6PBru3jl7A_yl95bQpu6cVPTpK4Mqgkf1CXztLVBSt2Ks3oZwbuwXPXLWyouBWLVWGNWQexSgSxsj_Qulcy4a-fN';
+    const subs = await env.DB.prepare('SELECT COUNT(*) AS n FROM push_subscriptions').first<{ n: number }>();
+    return jsonResponse({ rfc8291: b64urlEncode(out) === expected, vapid: !!(await vapidKeys(env)).publicKey, subscriptions: subs?.n ?? 0 });
   }
 
   // 試用 Apify 的 Threads 爬蟲：只回傳結果與 AI 判讀，不寫入資料庫
@@ -554,7 +587,7 @@ async function purgeOldData(env: Env, now: number): Promise<number> {
     env.DB.prepare('DELETE FROM events WHERE end_at < ?').bind(cutoff),
     env.DB.prepare('DELETE FROM posts WHERE fetched_at < ? AND id NOT IN (SELECT post_id FROM events)').bind(cutoff),
   ]);
-  return r.reduce((n, x) => n + (x.meta.changes ?? 0), 0) + (await purgeReports(env, cutoff)) + (await purgeBottles(env, cutoff));
+  return r.reduce((n, x) => n + (x.meta.changes ?? 0), 0) + (await purgeReports(env, cutoff)) + (await purgeBottles(env, cutoff)) + (await purgeSubscriptions(env, cutoff));
 }
 
 async function refreshTokenJob(env: Env): Promise<void> {
@@ -583,6 +616,8 @@ async function runScheduled(env: Env, cron: string): Promise<void> {
   const voyage = await syncVoyage(env, now).catch((e) => ({ error: String(e) }));
   const news = minute % 30 < 10 ? await ingestNews(env, now).catch((e) => ({ error: String(e) })) : null;
   const lifecycle = await updateLifecycle(env, client, now);
+  // 剛開始的發放、活動推給 1 公里內有開通知的人
+  const pushed = await pushStarted(env, now).catch((e) => ({ error: String(e) }));
   // 沒寫最後一天的固定據點每天往後補時段（發完為止，不預設最後一天）
   const extended = await extendOpenSpots(env, now).catch((e) => ({ error: String(e) }));
   // 有門牌卻只定位到路或鄉鎮區的，定時重查門牌（Overpass 恢復、OSM 補了門牌就改成精確位置）
@@ -592,7 +627,7 @@ async function runScheduled(env: Env, cron: string): Promise<void> {
   const merge = await mergeIntoOfficial(env, now).catch((e) => ({ error: String(e) }));
   const drift = bottlesEnabled(env) ? await driftBottles(env, now).catch((e) => ({ error: String(e) })) : null;
   const purged = await purgeOldData(env, now);
-  console.log(JSON.stringify({ cron, mode: client.mode, ingest, backlog, voyage, news, lifecycle, extended, relocated, links, merge, drift, purged }));
+  console.log(JSON.stringify({ cron, mode: client.mode, ingest, backlog, voyage, news, lifecycle, pushed, extended, relocated, links, merge, drift, purged }));
 }
 
 export default {
@@ -607,7 +642,7 @@ export default {
       for (const [k, v] of Object.entries(cors)) out.headers.set(k, v);
       return out;
     } catch (e) {
-      if (e instanceof HttpError || e instanceof ReportError) return jsonResponse({ error: e.message }, e.status, cors);
+      if (e instanceof HttpError || e instanceof ReportError || e instanceof PushError) return jsonResponse({ error: e.message }, e.status, cors);
       // 非預期的錯誤（重試後還是失敗的資料庫錯誤等）：使用者只看到「暫時失敗」，細節留在紀錄；管理 API 照樣回傳細節方便除錯
       console.error(e);
       const detail = e instanceof Error ? e.message : String(e);

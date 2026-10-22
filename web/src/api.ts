@@ -75,6 +75,28 @@ async function postJson<T>(path: string, body: unknown): Promise<Result<T>> {
   }
 }
 
+// ---- 手機推播 ----
+
+/** 推播用的伺服器公鑰；拿不到就是 null（推播先不開） */
+export async function fetchPushKey(): Promise<string | null> {
+  try {
+    const r = await fetch(`${API_BASE}/api/push/key`);
+    if (!r.ok) return null;
+    return ((await r.json()) as { key?: string }).key ?? null;
+  } catch {
+    return null;
+  }
+}
+
+/** 送出推播訂閱和約略位置（伺服器只存到小數點後 3 位）；換位置時再送一次 */
+export function savePushSubscription(sub: PushSubscription, at: LatLng): Promise<Result<{ ok: true; created: boolean }>> {
+  return postJson('/api/push/subscribe', { subscription: sub.toJSON(), lat: Number(at.lat.toFixed(3)), lng: Number(at.lng.toFixed(3)) });
+}
+
+export function deletePushSubscription(endpoint: string): Promise<Result<{ ok: true }>> {
+  return postJson('/api/push/unsubscribe', { endpoint });
+}
+
 // ---- 漂流瓶：不用登入，用瀏覽器裡的隨機裝置代碼（x-device 標頭）認自己丟的、撿的 ----
 const LS_DEVICE = 'dr.device';
 let deviceMem = '';

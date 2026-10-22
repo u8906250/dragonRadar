@@ -76,7 +76,8 @@ worker/   Cloudflare Worker（API、排程、資料庫）
 
 - 以手機直式為主：雷達占滿中間，底部是可上拉的清單面板，桌機則把清單放右側欄。
 - 雷達左下可切 1 / 5 / 20 km、「雙北」與「全台」範圍。「雙北」照台北市＋新北市的縣市界判斷（`web/src/shuangbei.ts`，OpenStreetMap 新北市行政界簡化，© OpenStreetMap contributors，ODbL），雷達與地圖畫出輪廓，基隆、桃園、宜蘭算雙北以外。「雙北」是預設；「雙北」「全台」的半徑會依你的位置自動算到能涵蓋整個區域（全台含澎湖、金門、馬祖）；右上可切換地圖、開啟指北針（雷達跟著手機朝向轉，iOS 會先問權限）。
-- 新事件開始時：嗶聲、震動（Android）、頁內橫幅，有授權時再加系統通知。聲音需要先按一次右上角「通知」。
+- 新事件開始時：嗶聲、震動（Android）、頁內橫幅，有授權時再加系統通知（透過 service worker `web/public/sw.js`，Android 的 Chrome 不允許頁面直接 `new Notification`）。聲音需要先按一次右上角「通知」。
+- 手機推播（Web Push，網頁關掉也收得到）：開通知時瀏覽器支援就一起訂閱（iPhone 要 iOS 16.4 以上、加入主畫面後從主畫面打開），把推播訂閱和約略位置（小數點後 3 位）存進 `push_subscriptions`；網頁開著時移動超過 300 m 更新位置。排程每 10 分鐘 `pushStarted` 找剛開始（30 分鐘內開始、或剛放上雷達就已經開始）、還沒推過（`events.pushed_at`）的發放、活動（固定據點、整天的不推），推給 1 km 內的訂閱者，一個人一次合成一則；深夜 23:00–8:00 不推也不補推。內容依 RFC 8291 加密（aes128gcm），VAPID 金鑰第一次用到時產生、存在 `settings`（`vapid_private_jwk`、`vapid_public`），不用另外設定 secret。推播服務回 404、410 或 30 天沒打開網頁就刪掉訂閱。點通知打開 `./?event=<id>` 選到那一則（網頁開著就由 service worker 傳訊息過去）。
 - 有 manifest 與圖示，可「加入主畫面」以全螢幕開啟。
 
 ## 本機開發
@@ -204,6 +205,9 @@ Cloudflare D1 偶爾回「D1_ERROR: internal error」這類暫時性錯誤。`sr
 | GET | `/api/reports/mine` | 我的回報（`x-device` 標頭）：30 天內用這個瀏覽器回報、有放上雷達（或附在據點）的貼文與狀態 |
 | DELETE | `/api/reports/:postId` | 刪除自己的回報（`x-device` 要跟回報時一樣）：雷達上這則的事件都刪掉，`confirm_state = 'withdrawn'`；取代過的舊據點放回雷達 |
 | POST | `/api/events/:id/ended` | 回報已發完／已結束 |
+| GET | `/api/push/key` | 手機推播的 VAPID 公鑰、通知半徑 |
+| POST | `/api/push/subscribe` | 訂閱推播或更新位置 `{ subscription, lat, lng }`（只接受 Google、Apple、Mozilla、Microsoft 的推播網址），第一次訂閱會送一則確認通知 |
+| POST | `/api/push/unsubscribe` | 取消推播 `{ endpoint }` |
 | GET | `/api/keywords` | 搜尋中的關鍵字、上限、是否開放使用者新增 |
 | POST | `/api/keywords` | 使用者新增關鍵字（`ALLOW_USER_KEYWORDS` 為 true 才開放） |
 | POST | `/api/admin/posts` | 手動塞貼文並立即解析 |
@@ -217,6 +221,7 @@ Cloudflare D1 偶爾回「D1_ERROR: internal error」這類暫時性錯誤。`sr
 | POST | `/api/admin/events/:id/locate` | 手動修正位置：`{ lat, lng }` 或 `{ query }`，加 `approx_area` 標成約略位置 |
 | POST | `/api/admin/posts/:id/reprocess` | 用目前的規則重新判讀一則貼文（還沒結束的舊事件會先刪掉） |
 | POST | `/api/admin/extract` | 只判讀不存檔，可指定 models 比較 |
+| POST | `/api/admin/push-selftest` | 用 RFC 8291 的範例確認推播加密在 Workers 上正確，回傳訂閱數 |
 | POST | `/api/admin/link-fetch` | 只讀取貼文連結的內容（確認讀得到），不判讀不存檔 |
 | GET/POST/DELETE | `/api/admin/keywords[/:id]` | 關鍵字管理（新增的會固定搜尋） |
 | GET/POST | `/api/admin/token` | 查看／更新 Threads token |

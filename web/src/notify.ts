@@ -80,11 +80,71 @@ export async function ensureNotificationPermission(): Promise<boolean> {
   }
 }
 
-export function systemNotify(title: string, body: string): void {
-  if (!('Notification' in window) || Notification.permission !== 'granted') return;
+let swReg: ServiceWorkerRegistration | null = null;
+
+/** 註冊 service worker：手機推播、Android 的系統通知都要靠它。點通知時它會傳要看的事件過來 */
+export async function registerServiceWorker(onShowEvent: (id: number) => void): Promise<void> {
+  if (!('serviceWorker' in navigator)) return;
   try {
-    new Notification(title, { body, tag: `dragon-radar-${title}` });
+    swReg = await navigator.serviceWorker.register(`${import.meta.env.BASE_URL}sw.js`);
+    navigator.serviceWorker.addEventListener('message', (e: MessageEvent<{ type?: string; id?: number }>) => {
+      if (e.data?.type === 'show-event' && Number(e.data.id)) onShowEvent(Number(e.data.id));
+    });
+  } catch {
+    swReg = null;
+  }
+}
+
+/** tag 一樣的通知會取代，不會重複跳（跟推播的同一則事件用同一個 tag） */
+export function systemNotify(title: string, body: string, tag: string): void {
+  if (!('Notification' in window) || Notification.permission !== 'granted') return;
+  // Android 的 Chrome 不允許頁面直接 new Notification，要透過 service worker
+  if (swReg) {
+    void swReg.showNotification(title, { body, tag, icon: `${import.meta.env.BASE_URL}icon-192.png` }).catch(() => undefined);
+    return;
+  }
+  try {
+    new Notification(title, { body, tag });
   } catch {
     /* 某些行動瀏覽器不允許頁面直接建立通知 */
   }
+}
+
+/** 這個瀏覽器能不能收手機推播（iPhone 要加入主畫面、從主畫面打開才有） */
+export function pushSupported(): boolean {
+  return !!swReg && 'PushManager' in window && 'Notification' in window;
+}
+
+/** iPhone、iPad 的 Safari 分頁（還沒加入主畫面） */
+export function iosNeedsHomeScreen(): boolean {
+  const ios = /iPhone|iPad|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+  const standalone = window.matchMedia('(display-mode: standalone)').matches || (navigator as Navigator & { standalone?: boolean }).standalone === true;
+  return ios && !standalone;
+}
+
+function b64urlBytes(s: string): Uint8Array<ArrayBuffer> {
+  const bin = atob(s.replace(/-/g, '+').replace(/_/g, '/') + '='.repeat((4 - (s.length % 4)) % 4));
+  return Uint8Array.from(bin, (c) => c.charCodeAt(0));
+}
+
+/** 目前的推播訂閱；create 時沒有就訂閱。伺服器金鑰換過的舊訂閱重新訂閱 */
+export async function pushSubscription(key: string, create: boolean): Promise<PushSubscription | null> {
+  if (!swReg || !pushSupported()) return null;
+  const want = b64urlBytes(key);
+  let cur = await swReg.pushManager.getSubscription();
+  const curKey = cur?.options.applicationServerKey ? new Uint8Array(cur.options.applicationServerKey) : null;
+  if (cur && curKey && (curKey.length !== want.length || curKey.some((b, i) => b !== want[i]))) {
+    await cur.unsubscribe().catch(() => false);
+    cur = null;
+  }
+  if (cur || !create) return cur;
+  return swReg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: want });
+}
+
+/** 取消推播訂閱，回傳原本的 endpoint（沒有訂閱就是 null） */
+export async function unsubscribePush(): Promise<string | null> {
+  const cur = swReg ? await swReg.pushManager.getSubscription().catch(() => null) : null;
+  if (!cur) return null;
+  await cur.unsubscribe().catch(() => false);
+  return cur.endpoint;
 }

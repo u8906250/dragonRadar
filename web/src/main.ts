@@ -1,5 +1,5 @@
 import './styles.css';
-import { addKeyword, collectLetter, confirmReport, rejectReport, supplementReport, deleteBottle, dropBottle, recycleBottle, fetchBottles, fetchEvents, fetchHealth, fetchKeywords, fetchMyBottles, fetchMyReports, fetchRoutes, pickBottle, reportBottle, reportEnded, submitLink, withdrawReport } from './api';
+import { addKeyword, collectLetter, deletePushSubscription, fetchPushKey, savePushSubscription, confirmReport, rejectReport, supplementReport, deleteBottle, dropBottle, recycleBottle, fetchBottles, fetchEvents, fetchHealth, fetchKeywords, fetchMyBottles, fetchMyReports, fetchRoutes, pickBottle, reportBottle, reportEnded, submitLink, withdrawReport } from './api';
 import { compassSupported, startCompass } from './compass';
 import { bearingDeg, compassLabel, formatKm, haversineKm, taiwanRadiusKm, type LatLng } from './geo';
 import { inShuangbei, SHUANGBEI_RINGS, shuangbeiRadiusKm } from './shuangbei';
@@ -8,7 +8,7 @@ import { LANDMARKS } from './landmarks';
 import { X_MAX_WEIGHT, xLength } from './xcount';
 import { splitPlace } from './place';
 import { crowdOf, MapView, type BaseMap } from './map';
-import { beep, ensureNotificationPermission, notificationState, showBanner, systemNotify, unlockAudio } from './notify';
+import { beep, ensureNotificationPermission, iosNeedsHomeScreen, notificationState, pushSubscription, pushSupported, registerServiceWorker, showBanner, systemNotify, unlockAudio, unsubscribePush } from './notify';
 import { Radar, type RadarRoute } from './radar';
 import { DEFAULT_THEME_ID, getTheme, THEMES, type Theme } from './themes';
 import type { BottleOut, EventOut, Item, KeywordInfo, KeywordRules, MyBottles, MyReport, Origin, Phase, PickedBottle, RelatedPost, RouteOut, PreviewItem, RouteStop, SubmitResult } from './types';
@@ -41,6 +41,10 @@ const LS_BOTTLE_DROPPED = 'dr.bottleDropped';
 const LS_BOTTLE_SEEN = 'dr.bottleSeen';
 /** 開始提醒（音效、震動、橫幅、系統通知）的開關：on／off；沒設過時，瀏覽器已允許通知就算開 */
 const LS_NOTIFY = 'dr.notify';
+/** 手機推播（網頁關掉也收得到）開著：'on' */
+const LS_PUSH = 'dr.push';
+/** 之前就開了通知的人，提示過一次可以開手機推播 */
+const LS_PUSH_HINT = 'dr.pushHint';
 /** 實驗功能：漂流瓶預設不顯示，在說明頁「實驗功能」或網址 ?lab=bottles 打開（?lab=off 關掉） */
 const LS_LAB_BOTTLES = 'dr.lab.bottles';
 /** 固定據點休息中、下一段在這個時間內開始才畫淡光點 */
@@ -620,7 +624,7 @@ function render(): void {
     const msg = `${titleOf(it.ev)}｜${it.ev.placeText}｜${formatKm(it.distanceKm)} ${compassLabel(it.bearing)}`;
     const head = it.ev.kind === 'activity' ? '活動開始' : '開始發放';
     showBanner(bannerEl, `${head}：${msg}`, 10_000);
-    systemNotify(head, msg);
+    systemNotify(head, msg, `ev-${it.ev.id}`);
   }
   if (lastFetchAt > 0) notifiedOnce = true;
 }
@@ -1608,6 +1612,7 @@ function setOrigin(o: Origin): void {
   }
   if (moved) void refresh();
   else render();
+  if (pushOn() && o.source !== 'default' && (!pushSyncedAt || haversineKm(pushSyncedAt, o) > PUSH_RESYNC_KM)) void syncPush(false);
 }
 
 async function refresh(): Promise<void> {
@@ -2453,20 +2458,72 @@ function updateNotifyBtn(): void {
   notifyBtn.title = !on ? '開啟聲音與通知' : notificationState() === 'granted' ? '通知已開啟，再按一次關閉' : '音效提醒已開啟（系統通知被封鎖），再按一次關閉';
 }
 
-/** 通知按鈕：開著就關掉，關著就打開（第一次會問瀏覽器要通知權限） */
+const pushOn = (): boolean => lsGet(LS_PUSH) === 'on';
+/** 上次送給伺服器的推播位置；離這裡超過 PUSH_RESYNC_KM 才再送 */
+let pushSyncedAt: LatLng | null = null;
+const PUSH_RESYNC_KM = 0.3;
+
+/**
+ * 手機推播：訂閱（create）或確認還在，把約略位置送給伺服器。
+ * 還沒有位置（預設的台北車站）不送，等 GPS 或手動設定位置後 setOrigin 會再送。
+ */
+async function syncPush(create: boolean): Promise<'ok' | 'unsupported' | 'no-location' | 'failed'> {
+  if (!pushSupported() || Notification.permission !== 'granted') return 'unsupported';
+  if (origin.source === 'default') return 'no-location';
+  const key = await fetchPushKey();
+  if (!key) return 'failed';
+  try {
+    const sub = await pushSubscription(key, create || pushOn());
+    if (!sub) return 'failed';
+    const at = { lat: origin.lat, lng: origin.lng };
+    const r = await savePushSubscription(sub, at);
+    if (!r.ok) return 'failed';
+    pushSyncedAt = at;
+    return 'ok';
+  } catch {
+    return 'failed';
+  }
+}
+
+async function stopPush(): Promise<void> {
+  lsSet(LS_PUSH, 'off');
+  pushSyncedAt = null;
+  const endpoint = await unsubscribePush();
+  if (endpoint) await deletePushSubscription(endpoint);
+}
+
+/** 通知按鈕：開著就關掉，關著就打開（第一次會問瀏覽器要通知權限，能收手機推播的也一起訂閱） */
 async function toggleNotify(): Promise<void> {
   if (notifyOn()) {
     lsSet(LS_NOTIFY, 'off');
     updateNotifyBtn();
     showBanner(bannerEl, '通知已關閉，發放或活動開始時不會再響或跳通知');
+    void stopPush();
     return;
   }
   unlockAudio();
   lsSet(LS_NOTIFY, 'on');
+  lsSet(LS_PUSH_HINT, '1');
   const ok = await ensureNotificationPermission();
   updateNotifyBtn();
-  showBanner(bannerEl, ok ? '通知已開啟，發放或活動開始時會提醒你。再按一次「通知」可以關掉' : '已開啟音效提醒；系統通知未取得權限。再按一次「通知」可以關掉');
   beep(theme.sound);
+  if (!ok) {
+    showBanner(bannerEl, '已開啟音效提醒；系統通知未取得權限。再按一次「通知」可以關掉', 6000);
+    return;
+  }
+  const push = await syncPush(true);
+  if (push === 'ok' || push === 'no-location') lsSet(LS_PUSH, 'on');
+  const msg =
+    push === 'ok'
+      ? '通知已開啟：附近 1 公里內開始發放、活動開始時，網頁關掉也會通知你（深夜 23:00–8:00 不通知）'
+      : push === 'no-location'
+        ? '通知已開啟。開 GPS 或在地圖上設定位置後，網頁關掉也會通知你附近 1 公里內開始的發放、活動'
+        : push === 'failed'
+          ? '通知已開啟（網頁開著時提醒）；網頁關掉後的通知暫時開不了，晚點關掉「通知」再打開試試'
+          : iosNeedsHomeScreen()
+            ? '通知已開啟（網頁開著時提醒）。iPhone 要先「分享 → 加入主畫面」，從主畫面打開再開通知，網頁關掉也收得到'
+            : '通知已開啟，網頁開著時發放或活動開始會提醒你。這個瀏覽器收不到網頁關掉後的通知';
+  showBanner(bannerEl, msg, 8000);
 }
 
 type PanelState = 'collapsed' | 'default' | 'expanded';
@@ -2702,6 +2759,8 @@ async function boot(): Promise<void> {
   if (lab === 'off') lsSet(LS_LAB_BOTTLES, null);
   wireControls();
   updateNotifyBtn();
+  // 點手機推播的通知、網頁已經開著：選到那一則
+  await registerServiceWorker((id) => void reveal(id));
   applyTheme(theme);
   setBase(baseMap);
   switchView('radar');
@@ -2743,6 +2802,19 @@ async function boot(): Promise<void> {
   const scaleParam = new URLSearchParams(location.search).get('scale');
   if (scaleParam && (SCALE_SETTINGS as string[]).includes(scaleParam)) setScale(scaleParam as ScaleSetting);
   if (lsGet(LS_REPORTED)) void loadMyReports();
+  // 點推播通知打開的：?event=123 選到那一則
+  const eventParam = Number(params.get('event'));
+  if (eventParam) {
+    history.replaceState(null, '', location.pathname);
+    void reveal(eventParam);
+  }
+  // 開著手機推播：確認訂閱還在、更新位置（30 天沒打開，伺服器會刪掉訂閱）
+  if (notifyOn() && pushOn()) void syncPush(true);
+  // 之前就開了通知的人：提示一次現在網頁關掉也能收
+  else if (notifyOn() && !lsGet(LS_PUSH_HINT) && pushSupported() && notificationState() === 'granted') {
+    lsSet(LS_PUSH_HINT, '1');
+    showBanner(bannerEl, '新功能：網頁關掉也能收到附近 1 公里的發放、活動通知。按「通知」關掉再打開一次就能啟用', 10_000);
+  }
   window.setInterval(render, TICK_MS);
   window.setInterval(() => void refresh(), POLL_MS);
 }
