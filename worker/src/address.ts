@@ -30,8 +30,8 @@ export interface AddressPoint {
 }
 
 const PHOTON_URL = 'https://photon.komoot.io/api/';
-/** Overpass 常常要 20 秒以上，自動審核等不了那麼久 */
-const OVERPASS_TIMEOUT_MS = 8000;
+/** Overpass 常常很慢（能用的鏡像站有時要 15 秒）：幾個鏡像站同時查，誰先回應用誰，最多等這麼久 */
+const OVERPASS_TIMEOUT_MS = 18_000;
 /** 主站常對 Cloudflare 的共用 IP 限流，依序換鏡像站 */
 const OVERPASS_URLS = ['https://overpass-api.de/api/interpreter', 'https://overpass.private.coffee/api/interpreter', 'https://maps.mail.ru/osm/tools/overpass/api/interpreter'];
 const SECTION_CN = ['', '一', '二', '三', '四', '五', '六', '七', '八', '九', '十'];
@@ -132,27 +132,37 @@ async function overpassHouses(env: Env, a: TwAddress): Promise<HouseRow[]> {
   }
   const area = scope === '(area.a)' ? `area["name"="${a.city}"]["admin_level"="4"]->.a;` : '';
   const q = `[out:json][timeout:15];${area}nwr${scope}["addr:street"="${a.street}"]["addr:housenumber"];out center tags;`;
-  const errors: string[] = [];
-  let res: Response | null = null;
-  for (const url of OVERPASS_URLS) {
-    try {
-      const r = await fetch(url, {
-        signal: AbortSignal.timeout(OVERPASS_TIMEOUT_MS),
-        method: 'POST',
-        headers: { 'user-agent': env.NOMINATIM_USER_AGENT, 'content-type': 'application/x-www-form-urlencoded', accept: 'application/json' },
-        body: `data=${encodeURIComponent(q)}`,
-      });
-      if (r.ok && (r.headers.get('content-type') ?? '').includes('json')) {
-        res = r;
-        break;
-      }
-      errors.push(`${new URL(url).host} ${r.status}`);
-    } catch (e) {
-      errors.push(`${new URL(url).host} ${String(e)}`);
-    }
+  // 鏡像站常常有的掛掉、有的很慢：同時查，第一個回 JSON 的就用，其他的取消
+  const controllers = OVERPASS_URLS.map(() => new AbortController());
+  const timer = setTimeout(() => controllers.forEach((c) => c.abort()), OVERPASS_TIMEOUT_MS);
+  type OverpassData = { elements?: Array<{ lat?: number; lon?: number; center?: { lat: number; lon: number }; tags?: Record<string, string> }> };
+  let data: OverpassData;
+  try {
+    data = await Promise.any(
+      OVERPASS_URLS.map(async (url, i) => {
+        const host = new URL(url).host;
+        try {
+          const r = await fetch(url, {
+            signal: controllers[i].signal,
+            method: 'POST',
+            headers: { 'user-agent': env.NOMINATIM_USER_AGENT, 'content-type': 'application/x-www-form-urlencoded', accept: 'application/json' },
+            body: `data=${encodeURIComponent(q)}`,
+          });
+          if (!r.ok || !(r.headers.get('content-type') ?? '').includes('json')) throw new Error(`${r.status}`);
+          const json = (await r.json()) as OverpassData;
+          controllers.forEach((c, j) => j !== i && c.abort());
+          return json;
+        } catch (e) {
+          throw new Error(`${host} ${e instanceof Error ? e.message : String(e)}`);
+        }
+      }),
+    );
+  } catch (e) {
+    const errs = e instanceof AggregateError ? e.errors.map((x) => (x instanceof Error ? x.message : String(x))) : [String(e)];
+    throw new Error(`overpass: ${errs.join('; ')}`);
+  } finally {
+    clearTimeout(timer);
   }
-  if (!res) throw new Error(`overpass: ${errors.join('; ')}`);
-  const data = (await res.json()) as { elements?: Array<{ lat?: number; lon?: number; center?: { lat: number; lon: number }; tags?: Record<string, string> }> };
   const out: HouseRow[] = [];
   for (const e of data.elements ?? []) {
     const lat = e.lat ?? e.center?.lat;
@@ -169,9 +179,9 @@ interface PhotonFeature {
 }
 
 /** Photon：同一條路（含巷弄）、同一個縣市的門牌；鄉鎮區不一樣的標成 elsewhere */
-async function photonHouses(env: Env, a: TwAddress): Promise<HouseRow[]> {
+async function photonHouses(env: Env, a: TwAddress, raw: string = a.raw): Promise<HouseRow[]> {
   const u = new URL(PHOTON_URL);
-  u.searchParams.set('q', `${a.street} ${a.raw} ${a.city ?? a.district ?? ''}`.trim());
+  u.searchParams.set('q', `${a.street} ${raw} ${a.city ?? a.district ?? ''}`.trim());
   u.searchParams.set('limit', '10');
   const res = await fetch(u.toString(), { signal: AbortSignal.timeout(6000), headers: { 'user-agent': env.NOMINATIM_USER_AGENT, accept: 'application/json' } });
   if (!res.ok) throw new Error(`photon ${res.status}`);
@@ -234,6 +244,12 @@ export async function geocodeAddress(
     // Photon 偶爾一時連不上，再試一次
     const houses = await photonHouses(env, a).catch(() => photonHouses(env, a).catch(() => []));
     point = await locateNearDistrict(env, a, houses);
+    // Photon 搜「自立街 22」只回傳一樣是 22 號的（常常是別區的），前後的門牌要另外查：同一側先 ±2，沒有再 ±4
+    for (const step of [2, 4]) {
+      if (point) break;
+      const near = (await Promise.all([a.number - step, a.number + step].filter((n) => n > 0).map((n) => photonHouses(env, a, String(n)).catch(() => [])))).flat();
+      if (near.length > 0) point = await locateNearDistrict(env, a, [...houses, ...near]);
+    }
     if (!point && opts.overpass === false) return null;
     if (!point) point = locateOnStreet(await overpassHouses(env, a), a.number, a.raw);
   } catch (e) {

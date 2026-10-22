@@ -302,8 +302,11 @@ export class Radar {
       const [a, b] = [...this.pointers.values()];
       return Math.hypot(a.x - b.x, a.y - b.y);
     };
+    // 網頁版用滑鼠拖曳時不要選到雷達上的字（公里數），選到之後瀏覽器會改成拖那段字，雷達就拖不動
+    svg.addEventListener('dragstart', (e) => e.preventDefault());
     svg.addEventListener('pointerdown', (e) => {
       if (e.pointerType === 'mouse' && e.button !== 0) return;
+      if (e.pointerType === 'mouse') e.preventDefault();
       this.pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
       if (this.pointers.size === 1) {
         this.panStart = { x: e.clientX, y: e.clientY };
