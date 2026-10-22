@@ -102,6 +102,8 @@ export interface PreviewItem {
   lastStartAt: number;
   /** 固定據點每週幾開（1–7），每天則 null */
   weekdays: number[] | null;
+  /** 國外活動的當地時區（IANA），預覽用當地時間顯示；台灣是 null */
+  tz?: string | null;
   /** 雷達上已經有這個據點：replace 同一個帳號，確認後以這則為準；attach 別人發的，確認後只附上去 */
   update?: { mode: 'replace' | 'attach'; title: string };
   /** 同一個地點一天有好幾個時段（例如中午、晚上）：每個時段第一次的開始、結束時間，照時間排 */
@@ -163,6 +165,7 @@ export function previewOf(items: PlanItem[], now: number): PreviewItem[] {
       days: plans.length,
       lastStartAt: last.start_at,
       weekdays: p.weekdays ?? null,
+      tz: p.tz ?? null,
       ...(m ? { update: { mode: m.mode, title: m.title } } : {}),
     };
   });

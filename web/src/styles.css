@@ -159,7 +159,9 @@ a.chip { display: inline-flex; align-items: center; text-decoration: none; }
 #scale-chips .chip { padding: 8px 11px; }
 /* 時間範圍：跟距離範圍同一組，小一點、疊在距離上面 */
 #time-chips .chip { min-height: 30px; padding: 4px 10px; font-size: 13px; }
-@media (max-width: 380px) { #scale-chips, #time-chips { gap: 4px; } #scale-chips .chip { padding: 8px 9px; font-size: 13px; } #time-chips .chip { padding: 4px 8px; font-size: 12px; } }
+/* 範圍有 6 個（多了「全球」）：手機上縮小一點才放得下一排 */
+@media (max-width: 440px) { #scale-chips { gap: 4px; } #scale-chips .chip { padding: 8px 8px; font-size: 13px; } }
+@media (max-width: 380px) { #scale-chips, #time-chips { gap: 4px; } #scale-chips .chip { padding: 8px 6px; font-size: 12px; } #time-chips .chip { padding: 4px 8px; font-size: 12px; } }
 .link-btn { font: inherit; font-size: 13px; border: 0; background: transparent; color: var(--accent); padding: 4px; text-decoration: underline; cursor: pointer; }
 
 #stage { position: relative; min-height: 0; padding: 8px 12px; display: grid; grid-template-rows: minmax(0, 1fr) auto; }

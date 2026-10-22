@@ -19,7 +19,7 @@ worker/   Cloudflare Worker（API、排程、資料庫）
 ## 運作流程
 
 1. 每 10 分鐘 Cron 喚醒 Worker，對每個關鍵字呼叫 Threads `keyword_search`（RECENT，`since` 只拿新貼文）。
-2. 新貼文丟給 Workers AI 抽出：是否為實體發放、開始／結束時間、地點文字、可搜尋的地點名稱、信心分數。主要模型 `AI_MODEL`（Qwen3 30B）判讀失敗或地點亂碼時換備用模型 `AI_MODEL_FALLBACK`（Mistral Small 3.1）；使用者貼連結回報的，主要模型說「不是活動」也再問備用模型一次（`secondOpinion`，主要模型對同一則有時判成不是），備用模型壞掉就照主要模型的。
+2. 新貼文丟給 Workers AI 抽出：是否為實體發放、開始／結束時間、地點文字、可搜尋的地點名稱、信心分數。21 天內開始的才收（`MAX_FUTURE_SEC`）。國外的活動（例如美國灣區的僑胞活動）模型另外回 `country`（ISO 兩碼）與 `timezone`（IANA）：時間照當地時間換算（`localizeTimes`，夏令時間也算；沒給時區時只有單一時區的國家照國家補，美國這種好幾個時區的不猜），地點只在那個國家用 Nominatim 查（`geocodeWorld`，「, CA, USA」這種後面的州、國家一段一段拿掉再查，至少留地名加城市；只對到城市的標成約略位置），時區存在 `events.tz`，畫面用當地時間顯示、詳細資料附台灣時間；國外的固定據點先當單次（每天的時段是照台灣時間排的）。手機推播的深夜不推照訂閱者自己的時區（`push_subscriptions.tz`）。主要模型 `AI_MODEL`（Qwen3 30B）判讀失敗或地點亂碼時換備用模型 `AI_MODEL_FALLBACK`（Mistral Small 3.1）；使用者貼連結回報的，主要模型說「不是活動」也再問備用模型一次（`secondOpinion`，主要模型對同一則有時判成不是），備用模型壞掉就照主要模型的。
 3. 地點轉成座標，寫進 `events`（`locatePlaceForEvent`）：貼文有寫門牌就只用門牌查（Photon、Overpass，跟 `locatePlace` 同一套；地點欄沒寫縣市時從另一欄補，縣市不確定就不查；Photon 的門牌 OSM 算在別的鄉鎮區時，離寫的那一區的這條路 2 公里內才用，區界上的路例如「臺南市中西區北門路一段55號」OSM 算在東區），查不到就先退到那條路（`geocodeStreet`：先含巷「北新路184巷」再大路「北新路」，Nominatim 只接受道路、要在同一個縣市和鄉鎮區，快取鍵前面加 `road:`，`approx_area` 寫路名），再退到鄉鎮區中心，都標成約略位置，**不拿店名或「XX服務處」去猜**（會查到同名的別的機構）；沒有門牌才用 Nominatim 查地名。固定據點的每天時段只定位一次；一則貼文的 Overpass 最多查 25 秒，之後只用 Photon。有門牌卻只定位到路或鄉鎮區的事件，排程每次挑 3 個地址重查（`relocateApprox`，同一個地址隔 3 小時、記在 `events.locate_checked_at`；門牌查不到快取一天），Overpass 恢復或 OSM 補了門牌、查到更準的位置就把那則貼文那個地點還沒結束的時段都改過去。
 4. 事件狀態：`upcoming` → `active`（到開始時間）→ `ended`（到結束時間，或作者後續貼文／回覆出現「發完」等字眼）。
 5. 前端每分鐘向 `/api/events` 拿附近事件，用使用者座標算方位與距離畫在雷達上；進行中事件變多時嗶聲＋通知。
@@ -75,7 +75,7 @@ worker/   Cloudflare Worker（API、排程、資料庫）
 ## 手機介面
 
 - 以手機直式為主：雷達占滿中間，底部是可上拉的清單面板，桌機則把清單放右側欄。
-- 雷達左下可切 1 / 5 / 20 km、「雙北」與「全台」範圍。「雙北」照台北市＋新北市的縣市界判斷（`web/src/shuangbei.ts`，OpenStreetMap 新北市行政界簡化，© OpenStreetMap contributors，ODbL），雷達與地圖畫出輪廓，基隆、桃園、宜蘭算雙北以外。「雙北」是預設；「雙北」「全台」的半徑會依你的位置自動算到能涵蓋整個區域（全台含澎湖、金門、馬祖）；右上可切換地圖、開啟指北針（雷達跟著手機朝向轉，iOS 會先問權限）。
+- 雷達左下可切 1 / 5 / 20 km、「雙北」「全台」「全球」範圍。「全球」半徑約 20,040 km（地球另一面），用 Natural Earth 1:110m 的陸地海岸線（`web/src/world.ts`，公有領域，簡化到約 0.25 度、去掉南極洲和小島，第一次選才載入）畫虛線；雷達是以目前位置為中心的方位等距投影，相鄰兩點在畫面上離太遠就斷開不連線。範圍超過 600 km 時改抓全世界的事件（`/api/events` 的 `radius_km` 最大 20,040），一次最多回傳 1000 筆（固定據點每天一筆，200 筆時比較晚開始的會被擠掉）。「雙北」照台北市＋新北市的縣市界判斷（`web/src/shuangbei.ts`，OpenStreetMap 新北市行政界簡化，© OpenStreetMap contributors，ODbL），雷達與地圖畫出輪廓，基隆、桃園、宜蘭算雙北以外。「雙北」是預設；「雙北」「全台」的半徑會依你的位置自動算到能涵蓋整個區域（全台含澎湖、金門、馬祖）；右上可切換地圖、開啟指北針（雷達跟著手機朝向轉，iOS 會先問權限）。
 - 新事件開始時：嗶聲、震動（Android）、頁內橫幅，有授權時再加系統通知（透過 service worker `web/public/sw.js`，Android 的 Chrome 不允許頁面直接 `new Notification`）。聲音需要先按一次右上角「通知」。
 - 手機推播（Web Push，網頁關掉也收得到）：開通知時瀏覽器支援就一起訂閱（iPhone 要 iOS 16.4 以上、加入主畫面後從主畫面打開），把推播訂閱和約略位置（小數點後 3 位）存進 `push_subscriptions`；網頁開著時移動超過 300 m 更新位置。排程每 10 分鐘 `pushStarted` 找剛開始（30 分鐘內開始、或剛放上雷達就已經開始）、還沒推過（`events.pushed_at`）的發放、活動（固定據點、整天的不推），推給 1 km 內的訂閱者，一個人一次合成一則；深夜 23:00–8:00 不推也不補推。內容依 RFC 8291 加密（aes128gcm），VAPID 金鑰第一次用到時產生、存在 `settings`（`vapid_private_jwk`、`vapid_public`），不用另外設定 secret。推播服務回 404、410 或 30 天沒打開網頁就刪掉訂閱。點通知打開 `./?event=<id>` 選到那一則（網頁開著就由 service worker 傳訊息過去）。
 - 有 manifest 與圖示，可「加入主畫面」以全螢幕開啟。

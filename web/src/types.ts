@@ -38,6 +38,8 @@ export interface EventOut {
   approxArea?: string | null;
   /** 固定據點每週幾開（1 = 週一 … 7 = 週日），每天則 null */
   weekdays?: number[] | null;
+  /** 國外活動的當地時區（IANA），時間用當地時間顯示；台灣是 null */
+  tz?: string | null;
   /** 固定據點第一個時段開始的時間，還沒到就是「還沒開始」 */
   firstStartAt?: number;
   /** 官方行程才有：講同一場活動、已併進來的新聞與貼文 */
@@ -190,6 +192,8 @@ export interface PreviewItem {
   approxArea: string | null;
   /** 固定據點每週幾開（1 = 週一 … 7 = 週日），每天則 null */
   weekdays?: number[] | null;
+  /** 國外活動的當地時區（IANA）；台灣是 null */
+  tz?: string | null;
   spot: boolean;
   startAt: number;
   endAt: number;

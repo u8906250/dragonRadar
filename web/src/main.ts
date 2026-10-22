@@ -18,6 +18,8 @@ const SOON_SEC = 30 * 60;
 /** 後端查詢半徑：至少 80 km，選大範圍時跟著放大，才不會漏掉邊緣的發放 */
 /** 永遠抓全台（含離島）的資料，清單分「範圍內」與「雷達範圍外」 */
 const FETCH_RADIUS_KM = 600;
+/** 範圍超過 600 km（全球、縮放到很遠）就抓全世界的，平常只抓附近 600 km */
+let lastFetchRadius = FETCH_RADIUS_KM;
 const POLL_MS = 60_000;
 const TICK_MS = 5_000;
 const LS_SCALE = 'dr.scale';
@@ -112,10 +114,12 @@ let bottleMsg = '';
 let myBottlesData: MyBottles | null = null;
 /** 這次打開網頁已經提示過「瓶子被撿走了」 */
 let bottleNewsShown = false;
-type ScaleSetting = '1' | '5' | '20' | 'region' | 'taiwan' | 'custom';
+type ScaleSetting = '1' | '5' | '20' | 'region' | 'taiwan' | 'world' | 'custom';
 /** 下方按鈕的範圍；custom 是雙指縮放或滾輪調出來的 */
-const SCALE_SETTINGS: ScaleSetting[] = ['1', '5', '20', 'region', 'taiwan'];
-const isAutoScale = (s: ScaleSetting): boolean => s === 'region' || s === 'taiwan';
+const SCALE_SETTINGS: ScaleSetting[] = ['1', '5', '20', 'region', 'taiwan', 'world'];
+const isAutoScale = (s: ScaleSetting): boolean => s === 'region' || s === 'taiwan' || s === 'world';
+/** 「全球」的範圍：半個地球（地球另一面最遠約 20,000 km） */
+const WORLD_KM = 20040;
 const MIN_ZOOM_KM = 0.5;
 let customKm = Number(lsGet(LS_SCALE_KM)) || 10;
 let scaleSetting: ScaleSetting = ([...SCALE_SETTINGS, 'custom'] as string[]).includes(lsGet(LS_SCALE) ?? '') ? (lsGet(LS_SCALE) as ScaleSetting) : 'region';
@@ -323,6 +327,33 @@ function dayWord(unix: number, now: number): string {
   return d === 0 ? '今天' : d === 1 ? '明天' : dateFmt.format(new Date(unix * 1000));
 }
 
+/** 國外活動用當地時間顯示：時區不同的格式化器各存一個 */
+const tzFmts = new Map<string, { time: Intl.DateTimeFormat; date: Intl.DateTimeFormat }>();
+function fmtsFor(tz: string): { time: Intl.DateTimeFormat; date: Intl.DateTimeFormat } {
+  let f = tzFmts.get(tz);
+  if (!f) {
+    f = {
+      time: new Intl.DateTimeFormat('zh-TW', { timeZone: tz, hour: '2-digit', minute: '2-digit', hour12: false }),
+      date: new Intl.DateTimeFormat('zh-TW', { timeZone: tz, month: 'numeric', day: 'numeric', weekday: 'short' }),
+    };
+    tzFmts.set(tz, f);
+  }
+  return f;
+}
+/** 國外活動的當地時區；台灣的是 null */
+const localTz = (ev: { tz?: string | null }): string | null => (ev.tz && ev.tz !== 'Asia/Taipei' ? ev.tz : null);
+const fmtTimeTz = (unix: number, tz: string | null): string => (tz ? fmtsFor(tz).time.format(new Date(unix * 1000)) : fmtTime(unix));
+const fmtDateTz = (unix: number, tz: string | null): string => (tz ? fmtsFor(tz).date.format(new Date(unix * 1000)) : dateFmt.format(new Date(unix * 1000)));
+
+/** 詳細資料的時間（單次的）：國外的寫當地日期時間，後面附台灣時間 */
+function eventTimeText(ev: EventOut): string {
+  const tz = localTz(ev);
+  const span = (z: string | null): string => (ev.endOpen ? `${fmtTimeTz(ev.startAt, z)} 開始` : `${fmtTimeTz(ev.startAt, z)} – ${fmtTimeTz(ev.endAt, z)}`);
+  const open = ev.endOpen ? `，${openEndText(ev)}` : '';
+  if (!tz) return `${span(null)}${open}`;
+  return `${fmtDateTz(ev.startAt, tz)} ${span(tz)}${open}（當地時間；台灣時間 ${fmtDateTz(ev.startAt, null)} ${span(null)}）`;
+}
+
 /** 貼文沒寫結束時間時的說法：不自己猜時間 */
 const openEndText = (ev: EventOut): string => (ev.kind === 'activity' ? '沒寫結束時間' : '發完為止');
 
@@ -396,6 +427,9 @@ function timeLine(it: Item, now: number): string {
     return `進行中 · 約 ${left} 分鐘後結束`;
   }
   const mins = Math.round((ev.startAt - now) / 60);
+  // 國外的：一律寫當地日期（台灣的「今天」不一定是當地的今天）
+  const tz = localTz(ev);
+  if (tz) return `當地 ${fmtDateTz(ev.startAt, tz)} ${fmtTimeTz(ev.startAt, tz)} 開始 · ${startsIn(ev.startAt, now)}`;
   const day = mins < 24 * 60 ? '' : `${new Date(ev.startAt * 1000).toLocaleDateString('zh-TW', { timeZone: 'Asia/Taipei', month: 'numeric', day: 'numeric' })} `;
   return `${day}${fmtTime(ev.startAt)} 開始 · ${startsIn(ev.startAt, now)}`;
 }
@@ -443,7 +477,7 @@ const laterLabel = (): string => (timeSetting === 'now' ? '還沒開始、休息
 // ---- 雷達範圍 ----
 const scopeCache = new Map<string, boolean>();
 
-/** 在不在雷達範圍內：距離在範圍內；選「雙北」時還要在台北市或新北市裡（基隆、桃園、宜蘭不算） */
+/** 在不在雷達範圍內：距離在範圍內（「全球」都算）；選「雙北」時還要在台北市或新北市裡（基隆、桃園、宜蘭不算） */
 function inScope(ev: EventOut, distanceKm: number): boolean {
   if (distanceKm > scaleKm) return false;
   if (scaleSetting !== 'region') return true;
@@ -461,10 +495,25 @@ const outLabel = (): string => (scaleSetting === 'region' ? '雙北以外' : '�
 let outlineFor = '';
 let radarOutline: Array<Array<{ bearing: number; distanceKm: number }>> = [];
 
-/** 「雙北」時雷達上畫縣市界；位置變了才重算 */
-/** 「雙北」畫雙北的縣市界，「全台」畫台灣的海岸線，其他範圍不畫 */
+/** 全世界的海岸線（約 30 KB），第一次選「全球」才載入 */
+let worldRings: Array<Array<[number, number]>> | null = null;
+let worldLoading = false;
+
+/** 「雙北」畫雙北的縣市界，「全台」畫台灣的海岸線，「全球」畫全世界的海岸線，其他範圍不畫；位置變了才重算 */
 function updateOutline(): void {
-  const rings = scaleSetting === 'region' ? SHUANGBEI_RINGS : scaleSetting === 'taiwan' ? TAIWAN_RINGS : null;
+  if (scaleSetting === 'world' && !worldRings && !worldLoading) {
+    worldLoading = true;
+    void import('./world')
+      .then((m) => {
+        worldRings = m.WORLD_RINGS;
+        outlineFor = '';
+        updateOutline();
+      })
+      .finally(() => {
+        worldLoading = false;
+      });
+  }
+  const rings = scaleSetting === 'region' ? SHUANGBEI_RINGS : scaleSetting === 'taiwan' ? TAIWAN_RINGS : scaleSetting === 'world' ? worldRings : null;
   const key = rings ? `${scaleSetting}|${origin.lat},${origin.lng}` : '';
   if (key === outlineFor) return;
   outlineFor = key;
@@ -1408,7 +1457,7 @@ function renderDetail(items: Item[], now: number): void {
     <div class="sheet-body">
       ${nearbyHtml(it, items)}
       ${routeBoxHtml(ev, now)}
-      <p>類型：${it.spot ? `固定據點（${kindLabel(ev)}）` : kindLabel(ev)}<br>${ev.item ? `${ev.kind === 'activity' ? '物品' : '發放'}：${esc(ev.item)}<br>` : ''}${ev.keyword ? `關鍵字：#${esc(ev.keyword)}<br>` : ''}地點：${esc(placeOf(ev))}${ev.approxArea ? `<br><span class="approx-note">約略位置：只知道在${esc(ev.approxArea)}，地圖上是${esc(ev.approxArea)}的中心點，實際地點請看原文</span>` : ''}<br>時間：${it.spot ? esc(spotSchedule(it)) : ev.allDay ? `${dateFmt.format(new Date(ev.startAt * 1000))} ${allDayText(ev, false)}` : ev.endOpen ? `${fmtTime(ev.startAt)} 開始，${openEndText(ev)}` : `${fmtTime(ev.startAt)} – ${fmtTime(ev.endAt)}`}<br>距離：${ev.approxArea ? '約 ' : ''}${formatKm(it.distanceKm)}，${compassLabel(it.bearing)}方 · ${esc(timeLine(it, now))}</p>
+      <p>類型：${it.spot ? `固定據點（${kindLabel(ev)}）` : kindLabel(ev)}<br>${ev.item ? `${ev.kind === 'activity' ? '物品' : '發放'}：${esc(ev.item)}<br>` : ''}${ev.keyword ? `關鍵字：#${esc(ev.keyword)}<br>` : ''}地點：${esc(placeOf(ev))}${ev.approxArea ? `<br><span class="approx-note">約略位置：只知道在${esc(ev.approxArea)}，地圖上是${esc(ev.approxArea)}的中心點，實際地點請看原文</span>` : ''}<br>時間：${it.spot ? esc(spotSchedule(it)) : ev.allDay ? `${dateFmt.format(new Date(ev.startAt * 1000))} ${allDayText(ev, false)}` : esc(eventTimeText(ev))}<br>距離：${ev.approxArea ? '約 ' : ''}${formatKm(it.distanceKm)}，${compassLabel(it.bearing)}方 · ${esc(timeLine(it, now))}</p>
       <blockquote class="post-excerpt" title="原文摘錄，完整內容請看原文">${esc(ev.post.source === 'news' ? ev.post.text.split('\n')[0] : ev.post.text)}</blockquote>
       ${ev.post.supplement ? `<p class="muted supplement-line">回報的人補充：${esc(ev.post.supplement)}</p>` : ''}
       <p class="muted source-line">來源：${esc(sourceLabel(ev))}</p>
@@ -1671,7 +1720,9 @@ async function refresh(): Promise<void> {
     return;
   }
   try {
-    [events, routes, bottles] = await Promise.all([fetchEvents(origin, FETCH_RADIUS_KM, kws), fetchRoutes(), bottleReq]);
+    const radius = fetchRadiusKm(scaleKm);
+    [events, routes, bottles] = await Promise.all([fetchEvents(origin, radius, kws), fetchRoutes(), bottleReq]);
+    lastFetchRadius = radius;
     lastFetchAt = nowSec();
     updatedLabel.textContent = `更新 ${fmtTime(lastFetchAt)}`;
   } catch (e) {
@@ -1701,10 +1752,14 @@ function switchView(v: 'radar' | 'map'): void {
   if (v === 'radar' && from === 'map' && kmPerPx && px > 0) zoomRadar((kmPerPx * px) / scaleKm, true);
 }
 
+/** 要抓多遠的：範圍超過 600 km 就抓全世界 */
+const fetchRadiusKm = (km: number): number => (km > FETCH_RADIUS_KM ? WORLD_KM : FETCH_RADIUS_KM);
+
 function scaleKmFor(setting: ScaleSetting): number {
-  if (setting === 'custom') return Math.min(Math.max(customKm, MIN_ZOOM_KM), taiwanRadiusKm(origin));
+  if (setting === 'custom') return Math.min(Math.max(customKm, MIN_ZOOM_KM), WORLD_KM);
   if (setting === 'region') return shuangbeiRadiusKm(origin);
   if (setting === 'taiwan') return taiwanRadiusKm(origin);
+  if (setting === 'world') return WORLD_KM;
   return Number(setting);
 }
 
@@ -1723,8 +1778,7 @@ let zoomFrame = 0;
 
 /** 雙指縮放、滾輪：連續調整範圍；放開時接近某個按鈕的範圍（差 6% 以內）就對齊那個按鈕 */
 function zoomRadar(factor: number, done: boolean): void {
-  const max = taiwanRadiusKm(origin);
-  customKm = Math.min(Math.max(scaleKm * factor, MIN_ZOOM_KM), max);
+  customKm = Math.min(Math.max(scaleKm * factor, MIN_ZOOM_KM), WORLD_KM);
   if (done) {
     const near = SCALE_SETTINGS.find((st) => Math.abs(scaleKmFor(st) / customKm - 1) < 0.06);
     if (near) {
@@ -1732,6 +1786,7 @@ function zoomRadar(factor: number, done: boolean): void {
       return;
     }
     lsSet(LS_SCALE_KM, customKm.toFixed(2));
+    if (fetchRadiusKm(customKm) !== lastFetchRadius) void refresh();
   }
   if (scaleSetting !== 'custom' || done) {
     scaleSetting = 'custom';
@@ -1766,6 +1821,8 @@ function setTime(setting: TimeSetting): void {
 function setScale(setting: ScaleSetting): void {
   scaleSetting = setting;
   scaleKm = scaleKmFor(setting);
+  // 切到全球（或從全球切回來）：抓的範圍不一樣，重抓
+  if (fetchRadiusKm(scaleKm) !== lastFetchRadius) void refresh();
   lsSet(LS_SCALE, setting);
   radar.setScale(scaleKm);
   for (const b of scaleChips) {
@@ -2190,7 +2247,7 @@ const OUTCOME_TEXT: Record<SubmitResult['outcome'], string> = {
   duplicate: '雷達上已經有這一場了：',
   attached: '雷達上已經有這個據點，這則已附在它的詳細資料（相關貼文）：',
   no_place: '看得出是發放或活動，但貼文沒寫具體地點（或查不到），所以還沒放上雷達。知道在哪裡的話，可以在下面補充地點再判讀一次。',
-  not_listed: '判讀不出時間，或是已經結束、超過 14 天後才開始，所以沒有放上雷達。',
+  not_listed: '判讀不出時間，或是已經結束、超過 21 天後才開始，所以沒有放上雷達。',
   not_event: '這則看起來不是發放或活動。貼文要寫出在哪裡、什麼時候發放或舉辦，雷達才會收。',
   failed: '判讀暫時失敗，請稍後再貼一次。',
 };
@@ -2225,7 +2282,9 @@ function previewWhen(p: PreviewItem): string {
   }
   if (p.allDay) return `${day(p.startAt)} 整天`;
   if (slots) return `${day(p.startAt)} ${slots}`;
-  return `${day(p.startAt)} ${fmtTime(p.startAt)}${p.endOpen ? ` 開始，${open}` : `–${fmtTime(p.endAt)}`}`;
+  // 國外的：寫當地時間
+  const tz = localTz(p);
+  return `${fmtDateTz(p.startAt, tz)} ${fmtTimeTz(p.startAt, tz)}${p.endOpen ? ` 開始，${open}` : `–${fmtTimeTz(p.endAt, tz)}`}${tz ? '（當地時間）' : ''}`;
 }
 
 /** 在 Google 地圖上標出這個座標（新分頁；手機會開 Google 地圖 App） */
@@ -2407,7 +2466,7 @@ async function showReportResult(data: SubmitResult): Promise<void> {
         ? `${spotHours(g)}・${day(ev.startAt)}${taipeiDay(last.startAt) !== taipeiDay(ev.startAt) ? ` 到 ${day(last.startAt)}` : ''}${last.untilOpen ? `，${openEndText(last)}` : ''}`
         : ev.allDay
           ? `${day(ev.startAt)} ${allDayText(ev, false)}`
-          : `${day(ev.startAt)} ${g.map((x) => fmtTime(x.startAt)).join('、')}`;
+          : `${fmtDateTz(ev.startAt, localTz(ev))} ${g.map((x) => fmtTimeTz(x.startAt, localTz(ev))).join('、')}${localTz(ev) ? '（當地時間）' : ''}`;
       return `<li><button type="button" data-id="${ev.id}"><b>${kindLabel(ev)}${ev.spot ? '・固定據點' : ''}｜${esc(titleOf(ev))}</b><small>${esc(placeLine(ev))} · ${esc(when)}</small></button></li>`;
     })
     .join('');

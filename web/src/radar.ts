@@ -500,7 +500,28 @@ export class Radar {
 
   private drawOutline(): void {
     this.outlineLayer.replaceChildren();
-    for (const ring of this.outline) if (ring.length > 2) this.outlineLayer.appendChild(el('path', { class: 'region-outline', d: this.pathOf(ring, true) }));
+    for (const ring of this.outline) if (ring.length > 2) this.outlineLayer.appendChild(el('path', { class: 'region-outline', d: this.outlinePath(ring) }));
+  }
+
+  /**
+   * 輪廓：相鄰兩點在畫面上離太遠就斷開（「全球」時地球另一面的海岸線會被拉得很長），沒斷開的才封閉。
+   * 雙北、全台的輪廓點很密，不會斷。
+   */
+  private outlinePath(ring: Array<{ bearing: number; distanceKm: number }>): string {
+    const maxJump = (R - 8) * 0.3;
+    let prev: { x: number; y: number } | null = null;
+    let broken = false;
+    const d = ring
+      .map((pt) => {
+        const p = polar(pt.bearing - this.heading, Math.min(1, this.ratio(pt.distanceKm)) * (R - 8));
+        const jump = prev !== null && Math.hypot(p.x - prev.x, p.y - prev.y) > maxJump;
+        if (jump) broken = true;
+        const cmd = prev === null || jump ? 'M' : 'L';
+        prev = p;
+        return `${cmd}${p.x.toFixed(1)} ${p.y.toFixed(1)}`;
+      })
+      .join(' ');
+    return broken ? d : `${d} Z`;
   }
 
   /** 路線畫在光點下面；超出範圍的部分被外圈裁掉 */

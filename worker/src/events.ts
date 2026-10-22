@@ -1,7 +1,7 @@
 import type { Env } from './env';
-import { applySupplementDate, dropBroughtItem, dropSelfPlace, extractFromPost, splitDropTimes, splitMultiDay, startNowForDeadline, untilInText, weekdaysFromText, weekdaysInText, type EventKind, type ExtractedEvent } from './extract';
+import { applySupplementDate, dropBroughtItem, dropSelfPlace, extractFromPost, localizeTimes, splitDropTimes, splitMultiDay, startNowForDeadline, timeZoneOf, untilInText, weekdaysFromText, weekdaysInText, type EventKind, type ExtractedEvent } from './extract';
 import { geocodeAddress, parseTwAddress, type TwAddress } from './address';
-import { adminArea, geocode, geocodeFirst, geocodeStreet, isAreaOnly, placeCandidates, type GeoPoint } from './geocode';
+import { adminArea, geocode, geocodeFirst, geocodeStreet, geocodeWorld, isAreaOnly, placeCandidates, type GeoPoint } from './geocode';
 import { listActiveKeywords, type KeywordRow } from './keywords';
 import { parseThreadsTimestamp, type ThreadsClient } from './threads';
 import { nowSec, parseIsoToUnix } from './util';
@@ -48,6 +48,8 @@ export interface EventRow {
   spot?: number;
   approx_area?: string | null;
   weekdays?: string | null;
+  /** 國外活動的當地時區（IANA）；台灣是 null */
+  tz?: string | null;
   last_checked_at: number | null;
   created_at: number;
   updated_at: number;
@@ -80,6 +82,8 @@ export interface EventOut {
   approxArea: string | null;
   /** 固定據點每週幾開（1 = 週一 … 7 = 週日），每天則 null */
   weekdays: number[] | null;
+  /** 國外活動的當地時區（IANA），畫面用當地時間顯示；台灣是 null */
+  tz: string | null;
   /** 固定據點才有：第一個時段開始的時間，還沒到就是「還沒開始」（不是休息中） */
   firstStartAt?: number;
   /** 官方行程才有：併進來的新聞、Threads 貼文（相關報導） */
@@ -107,7 +111,7 @@ export interface RelatedPost {
 }
 
 export const DEFAULT_DURATION_SEC = 2 * 3600;
-export const MAX_FUTURE_SEC = 14 * 86400;
+export const MAX_FUTURE_SEC = 21 * 86400;
 const LOOKBACK_SEC = 24 * 3600;
 export const MIN_CONFIDENCE = 0.5;
 /**
@@ -292,7 +296,13 @@ export async function locatePlaceForEvent(
   placeQuery: string,
   placeText: string | null,
   deadline: number,
+  /** 國外的活動：國家代碼（ISO 兩碼），只在那個國家查 */
+  country?: string | null,
 ): Promise<{ point: GeoPoint | null; approxArea: string | null }> {
+  if (country) {
+    const hit = await geocodeWorld(env, placeQuery, placeText, country);
+    return { point: hit?.point ?? null, approxArea: hit?.approxArea ?? null };
+  }
   const addr = addressOf(placeQuery, placeText);
   if (addr) {
     const hit = addr.text ? await geocodeAddress(env, addr.text, undefined, { overpass: Date.now() < deadline }) : null;
@@ -378,6 +388,8 @@ export interface PlannedEvent {
   until_open: boolean;
   /** 固定據點每週幾開（1–7），每天則 null */
   weekdays?: number[] | null;
+  /** 國外活動的當地時區（IANA）；台灣是 null */
+  tz?: string | null;
 }
 
 /**
@@ -450,7 +462,7 @@ async function planEvent(
   const placeText = ex.place_text ?? ex.place_query;
   if (!placeQuery || !placeText) return { plan: null, reason: 'no_place' };
 
-  const { point, approxArea } = located ?? (await locatePlaceForEvent(env, placeQuery, ex.place_text, deadline));
+  const { point, approxArea } = located ?? (await locatePlaceForEvent(env, placeQuery, ex.place_text, deadline, ex.country));
   if (point && !approxArea) {
     const dup = await findDuplicate(env, ex.kind, start, point.lat, point.lng, excludePost);
     if (dup !== null) return { plan: null, reason: `duplicate_of_${dup}` };
@@ -473,6 +485,7 @@ async function planEvent(
       end_open: session ? session.endOpen : !parseIsoToUnix(ex.end_at),
       until_open: !!session?.untilOpen,
       weekdays: session ? (ex.weekdays ?? null) : null,
+      tz: ex.country ? timeZoneOf(ex) : null,
     },
     reason: 'planned',
   };
@@ -487,8 +500,8 @@ export async function insertPlanned(env: Env, postId: string, p: PlannedEvent, n
   }
   const status: EventStatus = p.lat === null ? 'unlocated' : p.start_at <= now ? 'active' : 'upcoming';
   const event = await env.DB.prepare(
-    `INSERT INTO events (post_id, kind, title, item, start_at, end_at, place_text, place_query, lat, lng, status, confidence, all_day, spot, approx_area, end_open, until_open, weekdays, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING *`,
+    `INSERT INTO events (post_id, kind, title, item, start_at, end_at, place_text, place_query, lat, lng, status, confidence, all_day, spot, approx_area, end_open, until_open, weekdays, tz, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING *`,
   )
     .bind(
       postId,
@@ -509,6 +522,7 @@ export async function insertPlanned(env: Env, postId: string, p: PlannedEvent, n
       p.end_open ? 1 : 0,
       p.until_open ? 1 : 0,
       p.weekdays?.length ? p.weekdays.join(',') : null,
+      p.tz ?? null,
       now,
       now,
     )
@@ -533,6 +547,14 @@ export async function planPost(env: Env, post: PostRow, now = nowSec()): Promise
   // 「13:00｜10 個、15:00｜10 個」被合成一段的，拆回每個時間點各一筆
   extraction.events = splitDropTimes(extraction.events, text);
   for (const [group, ex] of extraction.events.entries()) {
+    // 國外的活動：時間換成當地時區的時間點、地點在那個國家查；固定據點的每天時段是照台灣時間排的，國外的先當單次
+    if (ex.country) {
+      localizeTimes(ex);
+      ex.spot = false;
+      dropBroughtItem(ex, text);
+      items.push({ group, ...(await planEvent(env, ex, now, deadline)) });
+      continue;
+    }
     // 貼文沒寫哪天、補充寫了：用補充的日期（模型有時會忽略補充）
     applySupplementDate(ex, post.supplement, post.text, post.posted_at);
     // 跨好幾天、每天固定時段的（市集、展覽）：模型常讀成連續好幾天，改成每天一個時段
@@ -792,6 +814,7 @@ export function toEventOut(r: JoinedRow, now: number): EventOut {
     spot: r.spot === 1,
     approxArea: r.approx_area ?? null,
     weekdays: r.weekdays ? r.weekdays.split(',').map(Number) : null,
+    tz: r.tz ?? null,
     // 只給摘錄（著作權：只做必要的引用），完整內容請人看原文
     post: { id: r.post_id, source: r.source, username: r.username, permalink: r.permalink, postedAt: r.posted_at, text: postExcerpt(r.text, r.source), supplement: r.supplement ?? null },
   };
@@ -834,6 +857,12 @@ export function postExcerpt(text: string, source: string): string {
   return out.length < lines.length || whole !== lines.join('\n') ? `${whole}\n…` : whole;
 }
 
+/**
+ * 一次最多回傳幾筆：固定據點每天一筆，20 個據點排 21 天就 400 多筆，200 筆時比較晚開始的活動會被擠掉。
+ * 回應有壓縮，1000 筆大約 50 KB
+ */
+const LIST_LIMIT = 1000;
+
 /** 前端用：附近、還沒結束、horizon 內會開始的事件 */
 export async function listEvents(env: Env, q: ListQuery): Promise<EventOut[]> {
   // 併進官方車掃的不單獨列，改放在官方那一場的相關報導
@@ -856,7 +885,7 @@ export async function listEvents(env: Env, q: ListQuery): Promise<EventOut[]> {
   }
   const sql = `${JOINED_SELECT}
     WHERE ${conds.join(' AND ')}
-    ORDER BY e.start_at ASC LIMIT 200`;
+    ORDER BY e.start_at ASC LIMIT ${LIST_LIMIT}`;
   const r = await env.DB.prepare(sql)
     .bind(...binds)
     .all<JoinedRow>();

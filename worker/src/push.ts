@@ -5,12 +5,13 @@
  * 內容依 RFC 8291 加密（aes128gcm），用 RFC 8292 的 VAPID 金鑰簽名；金鑰第一次用到時產生，存在 settings。
  */
 import type { Env } from './env';
+import { tzOffsetSec, validTimeZone } from './extract';
 
 /** 附近：訂閱的位置幾公里內 */
 export const PUSH_RADIUS_KM = 1;
 /** 開始後多久內（或剛放上雷達多久內）還算「剛開始」：排程每 10 分鐘，留一點餘裕 */
 const FRESH_SEC = 30 * 60;
-/** 深夜不推（台北時間 23:00–08:00）；那段時間開始的不補推 */
+/** 深夜不推（訂閱者當地時間 23:00–08:00，沒有時區就是台灣時間）；那段時間開始的不補推 */
 const QUIET_FROM_H = 23;
 const QUIET_TO_H = 8;
 /** 推播服務保留多久（手機離線太久就不送了） */
@@ -151,6 +152,8 @@ export interface PushSubRow {
   auth: string;
   lat: number;
   lng: number;
+  /** 訂閱者所在的時區（深夜不推照當地時間）；沒有就是台灣 */
+  tz?: string | null;
 }
 
 export class PushError extends Error {
@@ -187,18 +190,18 @@ export function parseSubscription(v: unknown): Pick<PushSubRow, 'endpoint' | 'p2
 
 /** 訂閱或更新位置：{ subscription: { endpoint, keys: { p256dh, auth } }, lat, lng } */
 export async function saveSubscription(env: Env, body: unknown, now: number): Promise<{ ok: true; created: boolean }> {
-  const b = (body ?? {}) as { subscription?: unknown; lat?: unknown; lng?: unknown };
+  const b = (body ?? {}) as { subscription?: unknown; lat?: unknown; lng?: unknown; tz?: unknown };
   const { endpoint, p256dh, auth } = parseSubscription(b.subscription);
   const lat = Number(b.lat);
   const lng = Number(b.lng);
-  // 台灣附近才收
-  if (!(lat > 20 && lat < 27 && lng > 117 && lng < 123)) throw new PushError(400, '位置要在台灣');
+  if (!(Math.abs(lat) <= 90 && Math.abs(lng) <= 180)) throw new PushError(400, '位置不對');
+  const tz = validTimeZone(typeof b.tz === 'string' ? b.tz.slice(0, 64) : null);
   const existed = await env.DB.prepare('SELECT 1 AS ok FROM push_subscriptions WHERE endpoint = ?').bind(endpoint).first<{ ok: number }>();
   await env.DB.prepare(
-    `INSERT INTO push_subscriptions (endpoint, p256dh, auth, lat, lng, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)
-     ON CONFLICT(endpoint) DO UPDATE SET p256dh = excluded.p256dh, auth = excluded.auth, lat = excluded.lat, lng = excluded.lng, updated_at = excluded.updated_at`,
+    `INSERT INTO push_subscriptions (endpoint, p256dh, auth, lat, lng, tz, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+     ON CONFLICT(endpoint) DO UPDATE SET p256dh = excluded.p256dh, auth = excluded.auth, lat = excluded.lat, lng = excluded.lng, tz = excluded.tz, updated_at = excluded.updated_at`,
   )
-    .bind(endpoint, p256dh, auth, coarse(lat), coarse(lng), now, now)
+    .bind(endpoint, p256dh, auth, coarse(lat), coarse(lng), tz, now, now)
     .run();
   return { ok: true, created: !existed };
 }
@@ -273,9 +276,10 @@ export function distKm(a: { lat: number; lng: number }, b: { lat: number; lng: n
   return 2 * R * Math.asin(Math.sqrt(h));
 }
 
-/** 台北時間深夜（23:00–08:00）不推 */
-export function isQuietHour(now: number): boolean {
-  const h = Math.floor(((now + 8 * 3600) % 86400) / 3600);
+/** 深夜（23:00–08:00）不推；時區是訂閱者的，沒有就是台灣 */
+export function isQuietHour(now: number, tz?: string | null): boolean {
+  const offset = tz ? tzOffsetSec(now, tz) : 8 * 3600;
+  const h = Math.floor((((now + offset) % 86400) + 86400) % 86400 / 3600);
   return h >= QUIET_FROM_H || h < QUIET_TO_H;
 }
 
@@ -301,7 +305,7 @@ export function planPushes(subs: PushSubRow[], events: StartedEvent[]): Array<{ 
  * 找剛開始（或剛放上雷達就已經開始）、還沒推過的發放、活動，推給 1 公里內的訂閱者。
  * 找到的都標成推過（深夜、沒人在附近的也標），之後不會補推。
  */
-export async function pushStarted(env: Env, now: number): Promise<{ events: number; sent: number; failed: number; quiet: boolean }> {
+export async function pushStarted(env: Env, now: number): Promise<{ events: number; sent: number; failed: number; quiet: number }> {
   const { results: events } = await env.DB.prepare(
     `SELECT id, kind, title, place_text, lat, lng, approx_area FROM events
       WHERE pushed_at IS NULL AND status IN ('upcoming', 'active') AND start_at <= ? AND end_at > ?
@@ -311,24 +315,29 @@ export async function pushStarted(env: Env, now: number): Promise<{ events: numb
   )
     .bind(now, now, now - FRESH_SEC, now - FRESH_SEC)
     .all<StartedEvent>();
-  if (events.length === 0) return { events: 0, sent: 0, failed: 0, quiet: false };
+  if (events.length === 0) return { events: 0, sent: 0, failed: 0, quiet: 0 };
   await env.DB.prepare(`UPDATE events SET pushed_at = ? WHERE id IN (${events.map(() => '?').join(',')})`)
     .bind(now, ...events.map((e) => e.id))
     .run();
-  const quiet = isQuietHour(now);
-  if (quiet) return { events: events.length, sent: 0, failed: 0, quiet };
   // 只撈這些事件附近的訂閱
   const pad = PUSH_RADIUS_KM / 111 + 0.002;
   const lats = events.map((e) => e.lat);
   const lngs = events.map((e) => e.lng);
+  // 經度一度的距離越往高緯度越短
+  const lngPad = pad / Math.max(0.2, Math.cos((Math.max(...lats.map(Math.abs)) * Math.PI) / 180));
   const { results: subs } = await env.DB.prepare(
-    'SELECT endpoint, p256dh, auth, lat, lng FROM push_subscriptions WHERE lat BETWEEN ? AND ? AND lng BETWEEN ? AND ?',
+    'SELECT endpoint, p256dh, auth, lat, lng, tz FROM push_subscriptions WHERE lat BETWEEN ? AND ? AND lng BETWEEN ? AND ?',
   )
-    .bind(Math.min(...lats) - pad, Math.max(...lats) + pad, Math.min(...lngs) - pad * 1.2, Math.max(...lngs) + pad * 1.2)
+    .bind(Math.min(...lats) - pad, Math.max(...lats) + pad, Math.min(...lngs) - lngPad, Math.max(...lngs) + lngPad)
     .all<PushSubRow>();
   let sent = 0;
   let failed = 0;
+  let quiet = 0;
   for (const { sub, msg } of planPushes(subs, events).slice(0, MAX_SENDS_PER_RUN)) {
+    if (isQuietHour(now, sub.tz)) {
+      quiet++;
+      continue;
+    }
     const status = await sendPush(env, sub, msg, now).catch((e) => {
       console.warn('push failed', e);
       return 0;

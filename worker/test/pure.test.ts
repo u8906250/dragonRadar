@@ -4,7 +4,7 @@ import { isAreaOnly } from '../src/geocode';
 import { existedOutcome, previewOf } from '../src/reports';
 import { describe, expect, it } from 'vitest';
 import { approxRank, detectEnded, postExcerpt, spotMergeMode, spotSessions } from '../src/events';
-import { buildMessages, normalizeExtraction } from '../src/extract';
+import { buildMessages, localizeTimes, localToUnix, normalizeCountry, normalizeExtraction, validTimeZone } from '../src/extract';
 import { parseThreadsTimestamp } from '../src/threads';
 import { parseIsoToUnix } from '../src/util';
 import { parseEmbedHtml, parseThreadsUrl, shortcodeToUnix, withLocationTag } from '../src/sources/link';
@@ -92,7 +92,7 @@ describe('buildMessages', () => {
   });
 });
 
-import { adminArea, cityMatches, pickHit, placeCandidates, streetFallbacks } from '../src/geocode';
+import { adminArea, cityMatches, pickHit, placeCandidates, streetFallbacks, worldCandidates } from '../src/geocode';
 import { normalizeKeyword, parseKeywordList } from '../src/keywords';
 
 describe('normalizeKeyword', () => {
@@ -688,5 +688,42 @@ describe('streetFallbacks', () => {
     expect(streetFallbacks('北新路184巷')).toEqual(['北新路184巷', '北新路']);
     expect(streetFallbacks('信義路四段395巷6弄')).toEqual(['信義路四段395巷', '信義路四段']);
     expect(streetFallbacks('民富十七街')).toEqual(['民富十七街']);
+  });
+});
+
+describe('overseas events', () => {
+  it('reads the wall clock in the local time zone, including daylight saving', () => {
+    // 11/07 加州已經換回標準時間（UTC-8）
+    expect(localToUnix('2026-11-07T11:30:00+08:00', 'America/Los_Angeles')).toBe(Date.parse('2026-11-07T19:30:00Z') / 1000);
+    // 10/22 還是夏令時間（UTC-7）
+    expect(localToUnix('2026-10-22T09:00', 'America/Los_Angeles')).toBe(Date.parse('2026-10-22T16:00:00Z') / 1000);
+    expect(localToUnix('2026-11-07T11:30', 'Asia/Tokyo')).toBe(Date.parse('2026-11-07T02:30:00Z') / 1000);
+  });
+  it('localizes extracted times and falls back to single-zone countries', () => {
+    const ev = { kind: 'activity', title: '灣區洋流野餐日', item: null, start_at: '2026-11-07T11:30:00+08:00', end_at: '2026-11-07T14:00:00+08:00', place_text: 'Cupertino Memorial Park', place_query: 'Memorial Park, Cupertino', confidence: 0.9, spot: false, until: null, country: 'US', timezone: 'America/Los_Angeles' } as ExtractedEvent;
+    expect(localizeTimes(ev)).toBe('America/Los_Angeles');
+    expect([ev.start_at, ev.end_at]).toEqual(['2026-11-07T19:30:00Z', '2026-11-07T22:00:00Z']);
+    const jp = { ...ev, start_at: '2026-11-07T11:30:00+08:00', end_at: null, country: 'JP', timezone: null } as ExtractedEvent;
+    expect(localizeTimes(jp)).toBe('Asia/Tokyo');
+    expect(jp.start_at).toBe('2026-11-07T02:30:00Z');
+    const us = { ...ev, start_at: '2026-11-07T11:30:00+08:00', timezone: null } as ExtractedEvent;
+    expect(localizeTimes(us)).toBeNull();
+    expect(us.start_at).toBe('2026-11-07T11:30:00+08:00');
+  });
+  it('normalizes country codes and time zones', () => {
+    expect(normalizeCountry('us')).toBe('US');
+    expect(normalizeCountry('TW')).toBeNull();
+    expect(normalizeCountry('Taiwan')).toBeNull();
+    expect(validTimeZone('America/Los_Angeles')).toBe('America/Los_Angeles');
+    expect(validTimeZone('Asia/Taipei')).toBeNull();
+    expect(validTimeZone('Mars/Olympus')).toBeNull();
+  });
+  it('tries shorter place queries for Nominatim', () => {
+    expect(worldCandidates('Memorial Park, Cupertino, CA, USA', 'Cupertino Memorial Park')).toEqual([
+      'Memorial Park, Cupertino, CA, USA',
+      'Memorial Park, Cupertino, CA',
+      'Memorial Park, Cupertino',
+      'Cupertino Memorial Park',
+    ]);
   });
 });

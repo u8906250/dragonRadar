@@ -96,9 +96,10 @@ async function handle(req: Request, env: Env, ctx: ExecutionContext): Promise<Re
     const events = await listEvents(env, {
       lat,
       lng,
-      radiusKm: Math.min(600, Math.max(1, radiusKm)),
+      // 全球：半個地球（約 20,000 km）
+      radiusKm: Math.min(20040, Math.max(1, radiusKm)),
       now,
-      horizonSec: Math.min(336, Math.max(1, horizonH)) * 3600,
+      horizonSec: Math.min(MAX_FUTURE_SEC / 3600, Math.max(1, horizonH)) * 3600,
       keywords,
     });
     if (keywords.length > 0) ctx.waitUntil(touchKeywords(env, keywords, now).catch((e) => console.warn('touch failed', e)));

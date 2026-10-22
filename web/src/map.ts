@@ -328,7 +328,8 @@ export class MapView {
       if (!L || !map) return;
       map.invalidateSize();
       const center = L.latLng(this.origin.lat, this.origin.lng);
-      this.rangeCircle?.setLatLng(center).setRadius(km * 1000);
+      // 全球：半個地球的圓在地圖（麥卡托投影）上會變形，不畫，地圖縮到看得到全世界
+      this.rangeCircle?.setLatLng(center).setRadius(km * 1000).setStyle({ opacity: km > 5000 ? 0 : 0.6 });
       const size = map.getSize();
       const fit = Math.min(size.x, size.y) / 2;
       const radiusPx = px > 0 ? Math.min(px, fit) : fit;

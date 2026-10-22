@@ -12,8 +12,8 @@ export async function fetchEvents(origin: LatLng, radiusKm: number, keywords: st
   u.searchParams.set('lng', origin.lng.toFixed(5));
   u.searchParams.set('radius_km', String(radiusKm));
   if (keywords.length > 0) u.searchParams.set('keywords', keywords.join(','));
-  // 官方行程常是幾天後的，清單列出 14 天內的，雷達只畫快開始的
-  u.searchParams.set('horizon_h', '336');
+  // 官方行程常是幾天後的，清單列出 21 天內的（伺服器收 21 天內開始的），雷達只畫快開始的
+  u.searchParams.set('horizon_h', '504');
   const r = await fetch(u.toString());
   if (!r.ok) throw new Error(`API ${r.status}`);
   const j = (await r.json()) as { events: EventOut[] };
@@ -90,7 +90,15 @@ export async function fetchPushKey(): Promise<string | null> {
 
 /** 送出推播訂閱和約略位置（伺服器只存到小數點後 3 位）；換位置時再送一次 */
 export function savePushSubscription(sub: PushSubscription, at: LatLng): Promise<Result<{ ok: true; created: boolean }>> {
-  return postJson('/api/push/subscribe', { subscription: sub.toJSON(), lat: Number(at.lat.toFixed(3)), lng: Number(at.lng.toFixed(3)) });
+  // 時區：深夜不推照這支手機的當地時間（國外的人）
+  const tz = (() => {
+    try {
+      return Intl.DateTimeFormat().resolvedOptions().timeZone;
+    } catch {
+      return undefined;
+    }
+  })();
+  return postJson('/api/push/subscribe', { subscription: sub.toJSON(), lat: Number(at.lat.toFixed(3)), lng: Number(at.lng.toFixed(3)), tz });
 }
 
 export function deletePushSubscription(endpoint: string): Promise<Result<{ ok: true }>> {

@@ -201,6 +201,66 @@ export async function geocode(env: Env, query: string, kind: GeoKind = 'any'): P
   return point;
 }
 
+/** 國外地點的查詢字串：原樣、地點原文，再把「, CA, USA」這種後面的州、國家一段一段拿掉（Nominatim 寫太完整反而查不到），至少留地名加城市 */
+export function worldCandidates(query: string, placeText: string | null): string[] {
+  const out: string[] = [];
+  for (const s of [query, placeText ?? '']) {
+    const parts = s.split(/\s*[,，]\s*/).filter(Boolean);
+    // 至少留兩段（地名加城市），只剩「Memorial Park」會對到別州的同名公園
+    for (let n = parts.length; n >= Math.min(2, parts.length); n--) out.push(parts.slice(0, n).join(', '));
+  }
+  return [...new Set(out.map((x) => x.trim()).filter(Boolean))].slice(0, 6);
+}
+
+/**
+ * 國外的地點：Nominatim 只查那個國家；對到的是整個城市、行政區時標成約略位置（approxArea 寫地名）。
+ * 快取鍵前面加「world:國家:」，跟台灣的分開。
+ */
+export async function geocodeWorld(env: Env, query: string, placeText: string | null, country: string): Promise<{ point: GeoPoint; approxArea: string | null } | null> {
+  const cc = country.toLowerCase();
+  const now = nowSec();
+  for (const q of worldCandidates(query, placeText)) {
+    const key = `world:${cc}:${q}`;
+    const cached = await env.DB.prepare('SELECT lat, lng, display_name, resolved_at FROM geocode_cache WHERE query = ?').bind(key).first<CacheRow>();
+    let hit: { lat: number; lng: number; displayName: string; area: boolean } | null = null;
+    if (cached && (cached.lat !== null || cached.resolved_at > now - NEGATIVE_TTL_SEC)) {
+      if (cached.lat !== null && cached.lng !== null) {
+        // display_name 存成「area|地名」或「place|地名」
+        const m = /^(area|place)\|(.*)$/s.exec(cached.display_name ?? '');
+        hit = { lat: cached.lat, lng: cached.lng, displayName: m?.[2] || q, area: m?.[1] === 'area' };
+      }
+    } else {
+      await politeDelay();
+      const url = new URL('https://nominatim.openstreetmap.org/search');
+      url.searchParams.set('format', 'jsonv2');
+      url.searchParams.set('limit', '1');
+      url.searchParams.set('countrycodes', cc);
+      url.searchParams.set('accept-language', 'en');
+      url.searchParams.set('q', q);
+      const res = await fetch(url.toString(), { headers: { 'user-agent': env.NOMINATIM_USER_AGENT, accept: 'application/json' } });
+      if (!res.ok) {
+        console.warn(`nominatim ${res.status} for ${q}`);
+        continue;
+      }
+      const h = ((await res.json()) as Array<{ lat: string; lon: string; display_name?: string; category?: string; addresstype?: string }>)[0];
+      const lat = Number(h?.lat);
+      const lng = Number(h?.lon);
+      const area = !!h && (h.category === 'boundary' || (h.category === 'place' && /^(city|town|village|county|state|region|country|municipality)$/.test(h.addresstype ?? '')));
+      hit = h && Number.isFinite(lat) && Number.isFinite(lng) ? { lat, lng, displayName: h.display_name ?? q, area } : null;
+      await env.DB.prepare(
+        'INSERT INTO geocode_cache (query, lat, lng, display_name, resolved_at) VALUES (?, ?, ?, ?, ?) ON CONFLICT(query) DO UPDATE SET lat = excluded.lat, lng = excluded.lng, display_name = excluded.display_name, resolved_at = excluded.resolved_at',
+      )
+        .bind(key, hit?.lat ?? null, hit?.lng ?? null, hit ? `${hit.area ? 'area' : 'place'}|${hit.displayName}` : null, now)
+        .run();
+    }
+    if (!hit) continue;
+    // 只對到城市：約略位置，寫「Cupertino, California」這種前兩段
+    const approxArea = hit.area ? hit.displayName.split(', ').slice(0, 2).join(', ') : null;
+    return { point: { lat: hit.lat, lng: hit.lng, displayName: hit.displayName }, approxArea };
+  }
+  return null;
+}
+
 /** 門牌查不到時要退到的路：先含巷（「北新路184巷」），再大路（「北新路」）；弄太小，不單獨查 */
 export function streetFallbacks(street: string): string[] {
   const lane = street.replace(/\d+弄$/, '');

@@ -56,6 +56,11 @@ describe('isQuietHour', () => {
     expect(isQuietHour(at('07:59'))).toBe(true);
     expect(isQuietHour(at('08:00'))).toBe(false);
   });
+  it("uses the subscriber's own time zone", () => {
+    // 台灣 10/22 15:00 是加州 10/22 00:00（夏令時間 UTC-7）
+    expect(isQuietHour(at('15:00'), 'America/Los_Angeles')).toBe(true);
+    expect(isQuietHour(at('03:00'), 'America/Los_Angeles')).toBe(false);
+  });
 });
 
 describe('planPushes', () => {

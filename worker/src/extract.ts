@@ -20,6 +20,10 @@ export interface ExtractedEvent {
   until: string | null;
   /** 固定據點只在每週幾開（1 = 週一 … 7 = 週日），每天開或不是固定據點則 null */
   weekdays?: number[] | null;
+  /** 活動在哪個國家（ISO 3166-1 兩碼，例如 US、JP）；台灣或沒寫是 null */
+  country?: string | null;
+  /** 國外活動的當地時區（IANA，例如 America/Los_Angeles）；台灣或不確定是 null */
+  timezone?: string | null;
 }
 
 export interface Extraction {
@@ -44,6 +48,8 @@ const EVENT_SCHEMA = {
     spot: { type: 'boolean' },
     until: { type: ['string', 'null'] },
     weekdays: { type: ['array', 'null'], items: { type: 'integer' } },
+    country: { type: ['string', 'null'] },
+    timezone: { type: ['string', 'null'] },
   },
   required: ['kind', 'title', 'item', 'start_at', 'end_at', 'place_text', 'place_query', 'confidence', 'spot', 'until'],
 };
@@ -81,6 +87,8 @@ events 每筆的欄位：
 - confidence: 這一筆 0 到 1 的信心分數
 - spot: 是否為「固定據點」：店家、服務處、競選總部等，連續多天在固定時段都可以去領或參加（例如寫了「每天」「每日」「營業時間」「營業日」「即日起」「長期」「10/17~10/19」）。店家、餐廳、服務處在自己店裡發放（「歡迎來店索取」「來索取」「到店領取」），而且寫了發放或領取時段的，也是固定據點，就算只寫了開始那天的日期（例如「明天（10/21）開始 歡迎來店索取」「10/21 洋流小物 … 歡迎來索取 發放時間 12:00-13:30；18:00-20:30」），start_at 填那天、until 為 null；除非寫明只有那一天（「只有今天」「限定一天」「僅此一天」）。在路口、車站、公園、市場等公共場所的單次發放，或只有一天的活動，spot 為 false
 - until: 固定據點的最後一天，格式 YYYY-MM-DD；沒寫最後一天或不是固定據點則 null
+- country: 活動在台灣以外的國家時，填國家代碼（ISO 3166-1 兩碼，例如美國 US、日本 JP、英國 GB）；在台灣則 null
+- timezone: 活動在國外時，填當地時區（IANA 名稱，例如美國灣區、洛杉磯 America/Los_Angeles、紐約 America/New_York、東京 Asia/Tokyo）；在台灣則 null
 - weekdays: 固定據點只在每週固定幾天開時，列出星期幾（1 = 週一 … 7 = 週日），例如「每週二、四」→ [2, 4]、「週一到週五」→ [1, 2, 3, 4, 5]；每天都開、或不是固定據點則 null。start_at 填第一個開放日
 
 規則：
@@ -97,7 +105,8 @@ events 每筆的欄位：
 - 只有時間沒有地點、或只有地點沒有時間，該筆 confidence 必須低於 0.5。
 - 不要編造貼文裡沒有的時間或地點，可以依上下文補上縣市。
 - 貼文最後如果有「【回報的人補充】」，那是看到貼文的人補上的地點或時間（例如店名、地址、日期），貼文沒寫的一定要用它補上；跟貼文衝突時以貼文為準。補充寫「只有 10/26」「只有那天」就是只有那一天：spot 為 false，start_at 用那天加貼文寫的時段。
-- 貼文和補充都沒寫星期幾，weekdays 就是 null，不要自己猜。`;
+- 貼文和補充都沒寫星期幾，weekdays 就是 null，不要自己猜。
+- 活動在國外（例如美國灣區、日本、歐洲的僑胞、留學生活動）：一樣要抽出來。start_at、end_at 寫當地的時間（貼文寫的時間就是當地時間），填 country、timezone；place_query 用當地的地名加城市，英文或當地語言，例如「Memorial Park, Cupertino」，不要加台灣的縣市。`;
 
 export function buildMessages(text: string, postedAt: number, now: number): Array<{ role: 'system' | 'user'; content: string }> {
   void now;
@@ -143,7 +152,70 @@ function normalizeEvent(o: Record<string, unknown>): ExtractedEvent {
     spot: o.spot === true || o.spot === 'true',
     until: /^\d{4}-\d{2}-\d{2}/.test(str(o.until) ?? '') ? (str(o.until) as string).slice(0, 10) : null,
     weekdays: normalizeWeekdays(o.weekdays),
+    country: normalizeCountry(o.country),
+    timezone: validTimeZone(str(o.timezone)),
   };
+}
+
+/** 國家代碼：兩個英文字母、大寫；台灣（TW）當成 null */
+export function normalizeCountry(v: unknown): string | null {
+  const c = typeof v === 'string' ? v.trim().toUpperCase() : '';
+  return /^[A-Z]{2}$/.test(c) && c !== 'TW' ? c : null;
+}
+
+/** 合法的 IANA 時區才收；台灣時間當成 null */
+export function validTimeZone(tz: string | null): string | null {
+  if (!tz || tz === 'Asia/Taipei') return null;
+  try {
+    new Intl.DateTimeFormat('en-US', { timeZone: tz });
+    return tz;
+  } catch {
+    return null;
+  }
+}
+
+/** 只有一個時區的國家：模型沒給時區時用（美國、加拿大、澳洲這種好幾個時區的不猜） */
+const COUNTRY_TZ: Record<string, string> = {
+  JP: 'Asia/Tokyo', KR: 'Asia/Seoul', HK: 'Asia/Hong_Kong', MO: 'Asia/Macau', SG: 'Asia/Singapore', MY: 'Asia/Kuala_Lumpur',
+  TH: 'Asia/Bangkok', VN: 'Asia/Ho_Chi_Minh', PH: 'Asia/Manila', GB: 'Europe/London', IE: 'Europe/Dublin', FR: 'Europe/Paris',
+  DE: 'Europe/Berlin', NL: 'Europe/Amsterdam', BE: 'Europe/Brussels', CH: 'Europe/Zurich', AT: 'Europe/Vienna', IT: 'Europe/Rome',
+  ES: 'Europe/Madrid', CZ: 'Europe/Prague', PL: 'Europe/Warsaw', SE: 'Europe/Stockholm', NO: 'Europe/Oslo', DK: 'Europe/Copenhagen',
+  FI: 'Europe/Helsinki', NZ: 'Pacific/Auckland', IN: 'Asia/Kolkata', IL: 'Asia/Jerusalem', AE: 'Asia/Dubai',
+};
+
+export const timeZoneOf = (ex: Pick<ExtractedEvent, 'country' | 'timezone'>): string | null => ex.timezone ?? (ex.country ? (COUNTRY_TZ[ex.country] ?? null) : null);
+
+/** 某個時區在某個時間點比 UTC 快幾秒（夏令時間也算進去） */
+export function tzOffsetSec(unix: number, tz: string): number {
+  const parts = new Intl.DateTimeFormat('en-US', { timeZone: tz, hourCycle: 'h23', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit' }).formatToParts(new Date(unix * 1000));
+  const g = (k: string): number => Number(parts.find((p) => p.type === k)?.value ?? 0);
+  return Date.UTC(g('year'), g('month') - 1, g('day'), g('hour') % 24, g('minute'), g('second')) / 1000 - unix;
+}
+
+/** 「2026-11-07T11:30」當成 tz 的當地時間，換成 unix 秒（不管字串後面寫的時區） */
+export function localToUnix(iso: string, tz: string): number | null {
+  const m = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})(?::(\d{2}))?/.exec(iso);
+  if (!m) return null;
+  const wall = Date.UTC(+m[1], +m[2] - 1, +m[3], +m[4], +m[5], +(m[6] ?? 0)) / 1000;
+  const first = wall - tzOffsetSec(wall, tz);
+  // 換算後的偏移不一樣（剛好碰到夏令時間切換）就用換算後的
+  const off = tzOffsetSec(first, tz);
+  return wall - off;
+}
+
+/**
+ * 國外的活動：模型寫的是當地時間，換成正確的時間點（存成 UTC 的 ISO 字串，後面照常處理）。
+ * 回傳當地時區；不是國外或不知道時區回傳 null（時間照模型給的）。
+ */
+export function localizeTimes(ex: ExtractedEvent): string | null {
+  const tz = timeZoneOf(ex);
+  if (!tz) return null;
+  for (const k of ['start_at', 'end_at'] as const) {
+    const v = ex[k];
+    const t = v ? localToUnix(v, tz) : null;
+    if (t !== null) ex[k] = new Date(t * 1000).toISOString().replace('.000Z', 'Z');
+  }
+  return tz;
 }
 
 /** 1–7 不重複、排好；全部 7 天等於每天，回傳 null */
