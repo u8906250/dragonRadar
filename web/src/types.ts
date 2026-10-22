@@ -232,6 +232,16 @@ export interface SubmitResult {
   confirm?: { postId: string; token: string };
   /** 回報的人補充過的資料 */
   supplement?: string | null;
+  /** outcome = 'not_listed' 而且原因確定時：直接講是哪個原因 */
+  why?: {
+    reason: 'already_over' | 'too_far_in_future' | 'no_start_time';
+    startAt?: number;
+    endAt?: number;
+    /** 國外活動的當地時區 */
+    tz?: string | null;
+    /** 太久以後才開始的：這天之後再貼就收得到 */
+    reportFrom?: number;
+  };
 }
 
 export interface EndedReportResult {

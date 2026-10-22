@@ -1,7 +1,7 @@
 import type { ExtractedEvent } from '../src/extract';
 import { applySupplementDate, dropBroughtItem, dropSelfPlace, splitDropTimes, splitMultiDay, startNowForDeadline, untilInText, weekdaysFromText, weekdaysInText } from '../src/extract';
 import { isAreaOnly } from '../src/geocode';
-import { existedOutcome, previewOf } from '../src/reports';
+import { existedOutcome, notListedWhy, previewOf } from '../src/reports';
 import { describe, expect, it } from 'vitest';
 import { approxRank, detectEnded, lngRange, postExcerpt, spotMergeMode, spotSessions } from '../src/events';
 import { buildMessages, localizeTimes, localToUnix, normalizeCountry, normalizeExtraction, validTimeZone } from '../src/extract';
@@ -747,5 +747,20 @@ describe('citiesOfDistrict', () => {
         { category: 'highway', display_name: '東區路, 臺中市, 臺灣' },
       ]),
     ).toEqual(['臺南市', '新竹市']);
+  });
+});
+
+describe('notListedWhy', () => {
+  const day = 86400;
+  it('names the reason when every item failed the same way', () => {
+    expect(notListedWhy([{ group: 0, plan: null, reason: 'already_over', start: 1000, end: 8200, tz: null }, { group: 1, plan: null, reason: 'already_over', start: 5000, end: 9000, tz: null }])).toEqual({ reason: 'already_over', startAt: 5000, endAt: 9000, tz: null });
+    const far = notListedWhy([{ group: 0, plan: null, reason: 'too_far_in_future', start: 30 * day, end: 30 * day + 7200, tz: 'America/Los_Angeles' }]);
+    expect(far).toEqual({ reason: 'too_far_in_future', startAt: 30 * day, endAt: 30 * day + 7200, tz: 'America/Los_Angeles', reportFrom: 9 * day });
+    expect(notListedWhy([{ group: 0, plan: null, reason: 'no_start_time' }])).toEqual({ reason: 'no_start_time' });
+    expect(notListedWhy([{ group: 0, plan: null, reason: 'already_over' }])).toEqual({ reason: 'already_over' });
+  });
+  it('stays vague when the reasons are mixed or not about time', () => {
+    expect(notListedWhy([{ group: 0, plan: null, reason: 'already_over', start: 1, end: 2 }, { group: 1, plan: null, reason: 'too_far_in_future', start: 3, end: 4 }])).toBeUndefined();
+    expect(notListedWhy([{ group: 0, plan: null, reason: 'low_confidence' }])).toBeUndefined();
   });
 });

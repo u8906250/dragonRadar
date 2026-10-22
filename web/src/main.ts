@@ -2519,6 +2519,21 @@ function resultGroups(list: EventOut[]): EventOut[][] {
   return [...groups.values()];
 }
 
+/** 沒放上雷達、原因確定時直接講：「這場是 10/20（二）19:00 開始的，已經結束了」 */
+function notListedText(w: NonNullable<SubmitResult['why']>): string | null {
+  const tz = w.tz && w.tz !== 'Asia/Taipei' ? w.tz : null;
+  const local = tz ? '（當地時間）' : '';
+  if (w.reason === 'no_start_time') return '判讀不出時間（貼文沒寫哪天或幾點），所以沒有放上雷達。知道時間的話，可以在下面補充再判讀一次。';
+  if (w.reason === 'already_over') {
+    return w.startAt ? `這場是 ${fmtDateTz(w.startAt, tz)} ${fmtTimeTz(w.startAt, tz)}${local} 開始的，已經結束了，所以沒有放上雷達。` : '這則的時段都已經結束了，所以沒有放上雷達。';
+  }
+  if (w.reason === 'too_far_in_future' && w.startAt) {
+    const from = w.reportFrom ? `，${dateFmt.format(new Date(w.reportFrom * 1000))} 之後再貼一次就能放上去` : '';
+    return `這場 ${fmtDateTz(w.startAt, tz)}${local} 才開始，雷達只收 21 天內開始的${from}。`;
+  }
+  return null;
+}
+
 /** 判讀或確認後的結果：放上雷達的、重複的，點了跳到那一場 */
 async function showReportResult(data: SubmitResult): Promise<void> {
   const { outcome, events: found, existed } = data;
@@ -2528,7 +2543,7 @@ async function showReportResult(data: SubmitResult): Promise<void> {
     ? '已加入雷達，可以在下面「我的回報」按「看」。'
     : existed && (outcome === 'added' || outcome === 'duplicate' || outcome === 'attached')
       ? '這則之前已經有人回報，已在雷達上：'
-      : OUTCOME_TEXT[outcome];
+      : (outcome === 'not_listed' && data.why && notListedText(data.why)) || OUTCOME_TEXT[outcome];
   const list = (inMine ? [] : resultGroups(found))
     .map((g) => {
       const ev = g[0];

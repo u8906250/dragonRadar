@@ -421,6 +421,10 @@ export interface PlanItem {
   plan: PlannedEvent | null;
   reason: string;
   merge?: SpotMerge;
+  /** 已經結束、太久以後才開始的：那一場的時間（回報結果直接講原因用）；國外的附當地時區 */
+  start?: number;
+  end?: number;
+  tz?: string | null;
 }
 
 /** 同一場可能被多篇貼文找到：同類型、同地點（約 150 m 內）、開始時間差 30 分鐘內就視為重複。excludePost 的事件不算（要被取代的據點） */
@@ -459,14 +463,15 @@ async function planEvent(
   session?: Session,
   located?: { point: GeoPoint | null; approxArea: string | null },
   excludePost?: string,
-): Promise<{ plan: PlannedEvent | null; reason: string }> {
+): Promise<{ plan: PlannedEvent | null; reason: string; start?: number; end?: number; tz?: string | null }> {
   if (ex.confidence < MIN_CONFIDENCE) return { plan: null, reason: 'low_confidence' };
   const start = session ? session.start : parseIsoToUnix(ex.start_at);
   if (start === null) return { plan: null, reason: 'no_start_time' };
   let end = session ? session.end : (parseIsoToUnix(ex.end_at) ?? start + DEFAULT_DURATION_SEC);
   if (end <= start) end = start + DEFAULT_DURATION_SEC;
-  if (end <= now) return { plan: null, reason: 'already_over' };
-  if (start > now + MAX_FUTURE_SEC) return { plan: null, reason: 'too_far_in_future' };
+  const when = { start, end, tz: ex.country ? timeZoneOf(ex) : null };
+  if (end <= now) return { plan: null, reason: 'already_over', ...when };
+  if (start > now + MAX_FUTURE_SEC) return { plan: null, reason: 'too_far_in_future', ...when };
 
   const placeQuery = ex.place_query ?? ex.place_text;
   const placeText = ex.place_text ?? ex.place_query;

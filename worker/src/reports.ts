@@ -5,7 +5,7 @@
  * 按「不對」（rejectLink）就不放，留給管理者看。
  */
 import type { Env } from './env';
-import { commitPlan, detectEnded, getEvent, getPost, planPost, processPost, storePost, type EventOut, type PlanItem, type PostRow } from './events';
+import { commitPlan, detectEnded, getEvent, getPost, MAX_FUTURE_SEC, planPost, processPost, storePost, type EventOut, type PlanItem, type PostRow } from './events';
 import type { EventKind } from './extract';
 import { fetchThreadsPost, resolveThreadsLink, shortcodeToUnix, withLocationTag } from './sources/link';
 import { sha1Hex } from './sources/text';
@@ -124,6 +124,40 @@ export interface SubmitResult {
   confirm?: { postId: string; token: string };
   /** 回報的人補充過的資料 */
   supplement?: string | null;
+  /** outcome = 'not_listed' 而且原因確定時：直接講是哪個原因（已經結束、太久以後才開始、判讀不出時間） */
+  why?: NotListedWhy;
+}
+
+export interface NotListedWhy {
+  reason: 'already_over' | 'too_far_in_future' | 'no_start_time';
+  /** 那一場的時間（已經結束的取最晚的一場，太久以後的取最早的一場） */
+  startAt?: number;
+  endAt?: number;
+  /** 國外活動的當地時區 */
+  tz?: string | null;
+  /** 太久以後才開始的：這天之後再貼就收得到 */
+  reportFrom?: number;
+}
+
+/** 沒放上雷達的原因只有一種、而且是這幾種之一才講；好幾種原因混在一起就照舊用籠統的說法 */
+export function notListedWhy(items: PlanItem[]): NotListedWhy | undefined {
+  const failed = items.filter((it) => !it.plan);
+  const reasons = new Set(failed.map((it) => it.reason));
+  if (failed.length === 0 || reasons.size !== 1) return undefined;
+  const reason = failed[0].reason;
+  if (reason === 'no_start_time') return { reason };
+  if (reason !== 'already_over' && reason !== 'too_far_in_future') return undefined;
+  const timed = failed.filter((it): it is PlanItem & { start: number; end: number } => typeof it.start === 'number' && typeof it.end === 'number');
+  // 固定據點的時段都過了：沒有單一時間，只說已經結束
+  if (timed.length === 0) return reason === 'already_over' ? { reason } : undefined;
+  const pick = timed.reduce((a, b) => (reason === 'already_over' ? (b.start > a.start ? b : a) : b.start < a.start ? b : a));
+  return {
+    reason,
+    startAt: pick.start,
+    endAt: pick.end,
+    tz: pick.tz ?? null,
+    ...(reason === 'too_far_in_future' ? { reportFrom: pick.start - MAX_FUTURE_SEC } : {}),
+  };
 }
 
 /** 判讀好、還沒寫進雷達的資料，存在 posts.confirm_plan */
@@ -206,7 +240,11 @@ async function previewResult(env: Env, post: PostRow, plan: StoredPlan, existed:
   const reasons = plan.items.filter((it) => !it.plan).map((it) => it.reason);
   const events = await eventsForResult(env, post.id, reasons, now);
   const preview = previewOf(plan.items, now);
-  if (preview.length === 0) return { ...base, outcome: summarize(reasons), reasons, events };
+  if (preview.length === 0) {
+    const outcome = summarize(reasons);
+    const why = outcome === 'not_listed' ? notListedWhy(plan.items) : undefined;
+    return { ...base, outcome, reasons, events, ...(why ? { why } : {}) };
+  }
   return { ...base, outcome: 'preview', reasons, events, preview };
 }
 
