@@ -450,6 +450,22 @@ async function handleAdmin(req: Request, env: Env, ctx: ExecutionContext, path: 
     return jsonResponse({ changed: await setManualTitle(env, Number(titleMatch[1]), title, now) });
   }
 
+  // 管理者改地點文字（同一則貼文、同一個地點還沒結束的一起改）：{ place_text }
+  const placeMatch = /^\/api\/admin\/events\/(\d+)\/place$/.exec(path);
+  if (req.method === 'POST' && placeMatch) {
+    const body = await readJson<{ place_text?: string }>(req);
+    const placeText = (body.place_text ?? '').replace(/\s+/g, ' ').trim();
+    if (!placeText || [...placeText].length > 80) throw new HttpError(400, 'place_text must be 1-80 chars');
+    const ev = await env.DB.prepare('SELECT post_id, place_text FROM events WHERE id = ?').bind(Number(placeMatch[1])).first<{ post_id: string; place_text: string }>();
+    if (!ev) throw new HttpError(404, 'event not found');
+    const r = await env.DB.prepare(
+      "UPDATE events SET place_text = ?, updated_at = ? WHERE post_id = ? AND place_text = ? AND status IN ('upcoming', 'active', 'unlocated')",
+    )
+      .bind(placeText, now, ev.post_id, ev.place_text)
+      .run();
+    return jsonResponse({ changed: r.meta.changes ?? 0 });
+  }
+
   const locMatch = /^\/api\/admin\/events\/(\d+)\/locate$/.exec(path);
   if (req.method === 'POST' && locMatch) {
     const body = await readJson<{ lat?: number; lng?: number; query?: string; approx_area?: string | null }>(req);
