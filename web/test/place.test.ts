@@ -28,3 +28,12 @@ describe('splitPlace', () => {
     expect(splitPlace('捷運市政府站 2號出口').name).toBeNull();
   });
 });
+
+describe('splitPlace floors', () => {
+  it('keeps the floor with the address instead of taking it as the name', () => {
+    expect(splitPlace('臺北市大同區永樂里迪化街一段32巷1號2F')).toEqual({ name: null, address: '臺北市大同區永樂里迪化街一段32巷1號2F' });
+    expect(splitPlace('台北市大安區光復南路290巷48號 B1')).toEqual({ name: null, address: '台北市大安區光復南路290巷48號 B1' });
+    expect(splitPlace('台北市松山區復興北路167號14樓之4 TIA辦公室')).toEqual({ name: 'TIA辦公室', address: '台北市松山區復興北路167號14樓之4' });
+    expect(splitPlace('台北市大同區迪化街一段32巷1號2F 爐鍋咖啡')).toEqual({ name: '爐鍋咖啡', address: '台北市大同區迪化街一段32巷1號2F' });
+  });
+});
