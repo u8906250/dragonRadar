@@ -480,11 +480,27 @@ function weeklyText(days: number[] | null | undefined): string | null {
   const name = (d: number): string => '一二三四五六日'[d - 1];
   // 只休一天：「每天（週一公休）」比列出六天好讀
   if (days.length === 6) return `每天（週${name([1, 2, 3, 4, 5, 6, 7].find((d) => !days.includes(d)) as number)}公休）`;
+  // 連續三天以上：「每週一到五」
+  if (days.length >= 3 && days[days.length - 1] - days[0] === days.length - 1) return `每週${name(days[0])}到${name(days[days.length - 1])}`;
   return `每週${days.map(name).join('、')}`;
 }
 
 /** 固定據點的開放時段，例如「每天 11:00–18:00」「每週二、四 14:00–18:00」「每天 11:00–14:00、17:00–19:00」；沒寫幾點結束就只寫開始 */
 function spotHours(sessions: EventOut[]): string {
+  // 時段的星期幾不一樣（「週一到六 08:30–12:00；週一到五 18:30–21:00」）：照星期幾分開寫
+  const key = (s: EventOut): string => (s.weekdays ?? []).join(',');
+  const keys = [...new Set(sessions.map(key))];
+  if (keys.length > 1 && !sessions.some((s) => s.allDay)) {
+    const tod = (s: EventOut): number => (s.startAt + 8 * 3600) % 86400;
+    return keys
+      .map((k) => sessions.filter((s) => key(s) === k))
+      .sort((a, b) => Math.min(...a.map(tod)) - Math.min(...b.map(tod)))
+      .map((group) => {
+        const text = spotHours(group.map((s) => ({ ...s, untilOpen: true })));
+        return group[0].weekdays?.length ? text : text.startsWith('每天') ? text : `每天 ${text}`;
+      })
+      .join('；');
+  }
   const weekly = weeklyText(sessions[0]?.weekdays);
   if (sessions.some((s) => s.allDay)) return weekly ? `${weekly}整天` : new Set(sessions.map((s) => taipeiDay(s.startAt))).size > 1 ? '每天整天' : '整天';
   const seen = new Set<string>();
