@@ -397,7 +397,7 @@ export async function relocateApprox(env: Env, now: number): Promise<{ checked: 
   let improved = 0;
   for (const r of results) {
     // 沒有門牌的重查也不會更準，一樣記下查過了，隔幾小時才會再挑到
-    const hasAddress = !!addressOf(r.place_query, r.place_text)?.text;
+    const hasAddress = !!addressOf(r.place_query, r.place_text)?.text || !!(laneMouth(r.place_query) ?? laneMouth(r.place_text));
     if (hasAddress && checked >= RELOCATE_PER_RUN) break;
     const same = "post_id = ? AND place_query IS ? AND place_text IS ? AND status IN ('upcoming', 'active')";
     if (hasAddress) {
