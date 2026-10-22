@@ -1,6 +1,6 @@
 import { getAccessToken, makeClient, saveAccessToken } from './client';
 import type { Env } from './env';
-import { DEFAULT_DURATION_SEC, ENDED_WORDS, MAX_FUTURE_SEC, MIN_CONFIDENCE, SPOT_MAX_DAYS, extendOpenSpots, getEvent, getPost, ingestAll, ingestKeyword, listEvents, locatePlaceForEvent, processBacklog, processPost, relocateApprox, reprocessPost, storePost, updateLifecycle, type EventRow } from './events';
+import { DEFAULT_DURATION_SEC, ENDED_WORDS, MAX_FUTURE_SEC, MIN_CONFIDENCE, SPOT_MAX_DAYS, extendOpenSpots, getEvent, getPost, ingestAll, ingestKeyword, listEvents, locatePlaceForEvent, processBacklog, processPost, relocateApprox, reprocessPost, setManualTitle, storePost, updateLifecycle, type EventRow } from './events';
 import { normalizeExtraction, runModel } from './extract';
 import { geocode } from './geocode';
 import { ingestNews, NEWS_FEEDS } from './sources/news';
@@ -426,6 +426,15 @@ async function handleAdmin(req: Request, env: Env, ctx: ExecutionContext, path: 
   }
 
   // 手動修正事件位置：{ lat, lng } 或 { query }（拿去查地圖）；approx_area 有值就標成約略位置，沒給就當作精確位置
+  // 管理者直接改標題（同一個地點的每天時段一起改，重新判讀後照用）：{ title }
+  const titleMatch = /^\/api\/admin\/events\/(\d+)\/title$/.exec(path);
+  if (req.method === 'POST' && titleMatch) {
+    const body = await readJson<{ title?: string }>(req);
+    const title = (body.title ?? '').replace(/\s+/g, ' ').trim();
+    if (!title || [...title].length > 30) throw new HttpError(400, 'title must be 1-30 chars');
+    return jsonResponse({ changed: await setManualTitle(env, Number(titleMatch[1]), title, now) });
+  }
+
   const locMatch = /^\/api\/admin\/events\/(\d+)\/locate$/.exec(path);
   if (req.method === 'POST' && locMatch) {
     const body = await readJson<{ lat?: number; lng?: number; query?: string; approx_area?: string | null }>(req);
