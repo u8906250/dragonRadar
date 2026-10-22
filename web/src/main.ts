@@ -2216,9 +2216,15 @@ function sourceLinkText(ev: EventOut): string {
 }
 
 /** 地點文字；約略位置會註明 */
-/** 顯示用的標題：固定據點用店家名稱（從地點拆出來），拆不出來才用判讀的標題 */
+/**
+ * 顯示用的標題：固定據點用店家名稱（從地點拆出來），拆不出來才用判讀的標題。
+ * 判讀的標題在店名前面多寫了是誰的（「陳致中前鎮服務處發飄帶」、地點只寫「前鎮服務處」），名稱就連前面的一起用
+ */
 function titleOf(ev: EventOut): string {
-  return (ev.spot && splitPlace(ev.placeText).name) || ev.title;
+  const name = ev.spot ? splitPlace(ev.placeText).name : null;
+  if (!name) return ev.title;
+  const at = ev.title.indexOf(name);
+  return at > 0 ? ev.title.slice(0, at + name.length) : name;
 }
 
 /** 地點文字：據點的標題已經是店名，這裡只寫地址 */
