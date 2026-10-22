@@ -3,7 +3,7 @@ import { applySupplementDate, dropBroughtItem, dropSelfPlace, EVENT_SPEC, extrac
 import { geocodeAddress, parseTwAddress, type TwAddress } from './address';
 import { JOB_SPEC, jobRisks } from './jobs';
 import { DEFAULT_MODULE, moduleOf, type ModuleId } from './modules';
-import { adminArea, cityOfDistrict, geocode, geocodeFirst, geocodeStreet, geocodeWorld, isAreaOnly, placeCandidates, type GeoPoint } from './geocode';
+import { adminArea, cityLevel, cityOfDistrict, geocode, geocodeFirst, geocodeStreet, geocodeWorld, isAreaOnly, placeCandidates, type GeoPoint } from './geocode';
 import { listActiveKeywords, type KeywordRow } from './keywords';
 import { parseThreadsTimestamp, type ThreadsClient } from './threads';
 import { nowSec, parseIsoToUnix } from './util';
@@ -720,7 +720,13 @@ async function planJobs(env: Env, post: PostRow, jobs: ExtractedEvent[], now: nu
       items.push({ group, plan: null, reason: 'no_place' });
       continue;
     }
-    const { point, approxArea } = await locatePlaceForEvent(env, placeQuery, ex.place_text, deadline);
+    let { point, approxArea } = await locatePlaceForEvent(env, placeQuery, ex.place_text, deadline);
+    // 只寫到縣市（「台中市區」）：狗狗陪伴常常這樣寫，放在縣市中心、標成約略位置
+    const city = point ? null : (cityLevel(placeQuery) ?? cityLevel(placeText));
+    if (city) {
+      const p = await geocode(env, city);
+      if (p) ({ point, approxArea } = { point: p, approxArea: city });
+    }
     items.push({
       group,
       reason: 'planned',

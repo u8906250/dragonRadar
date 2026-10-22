@@ -46,8 +46,23 @@ export function pickHit<T extends { display_name?: string }>(query: string, hits
 /** 口語的站名換成正式站名再查 */
 const STATION_ALIAS: Record<string, string> = { 市府站: '市政府站' };
 
-/** 只有縣市或鄉鎮區名稱（例如「台北市」「台北市 大安區」），拿去查只會得到行政區中心點 */
+const COUNTIES = /^(苗栗|彰化|南投|雲林|屏東|宜蘭|花蓮|台東|臺東|澎湖|金門|連江)$/;
+
+/**
+ * 只寫到縣市（「台中市區」「台北市一帶」「新竹」）：回傳正式的縣市名（「臺中市」），不是的回傳 null。
+ * 新竹、嘉義沒寫市或縣的當成市
+ */
+export function cityLevel(s: string | null | undefined): string | null {
+  const t = (s ?? '').replace(/[\s,，、📍]/g, '');
+  const m = new RegExp(`^(${CITY_RE.source.slice(1, CITY_RE.source.indexOf(')'))})([市縣])?(?:區|市區|中心|市中心|一帶|附近|地區|周邊|內)?$`).exec(t);
+  if (!m) return null;
+  const name = m[1].replace(/^台(北|中|南|東)/, '臺$1');
+  return `${name}${m[2] ?? (COUNTIES.test(m[1]) ? '縣' : '市')}`;
+}
+
+/** 只有縣市或鄉鎮區名稱（例如「台北市」「台北市 大安區」「台中市區」），拿去查只會得到行政區中心點 */
 export function isAdminOnly(s: string): boolean {
+  if (cityLevel(s)) return true;
   return (
     s
       .replace(CITY_ANY_RE, '')

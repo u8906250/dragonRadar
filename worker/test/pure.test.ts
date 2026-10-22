@@ -92,7 +92,7 @@ describe('buildMessages', () => {
   });
 });
 
-import { adminArea, citiesOfDistrict, cityMatches, pickHit, placeCandidates, streetFallbacks, worldCandidates } from '../src/geocode';
+import { adminArea, citiesOfDistrict, cityLevel, cityMatches, pickHit, placeCandidates, streetFallbacks, worldCandidates } from '../src/geocode';
 import { normalizeKeyword, parseKeywordList } from '../src/keywords';
 
 describe('normalizeKeyword', () => {
@@ -762,5 +762,19 @@ describe('notListedWhy', () => {
   it('stays vague when the reasons are mixed or not about time', () => {
     expect(notListedWhy([{ group: 0, plan: null, reason: 'already_over', start: 1, end: 2 }, { group: 1, plan: null, reason: 'too_far_in_future', start: 3, end: 4 }])).toBeUndefined();
     expect(notListedWhy([{ group: 0, plan: null, reason: 'low_confidence' }])).toBeUndefined();
+  });
+});
+
+describe('cityLevel', () => {
+  it('recognizes places that only name a city or county', () => {
+    expect(cityLevel('台中市區')).toBe('臺中市');
+    expect(cityLevel('📍台北市 一帶')).toBe('臺北市');
+    expect(cityLevel('新竹')).toBe('新竹市');
+    expect(cityLevel('宜蘭')).toBe('宜蘭縣');
+    expect(cityLevel('台中市西區自立街22號')).toBeNull();
+    expect(cityLevel('台中車站')).toBeNull();
+  });
+  it('makes city-only text count as an area, not a place', () => {
+    expect(isAreaOnly('台中市區')).toBe(true);
   });
 });
