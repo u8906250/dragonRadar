@@ -863,6 +863,19 @@ export function postExcerpt(text: string, source: string): string {
  */
 const LIST_LIMIT = 1000;
 
+/**
+ * 經度範圍的條件：超過 ±180 要繞回去（「全球」時從台北往東 199 度就是加州的 −122 度）；
+ * 寬到繞一圈以上就不限經度（回傳 null）
+ */
+export function lngRange(lng: number, dLng: number): { sql: string; binds: number[] } | null {
+  const lo = lng - dLng;
+  const hi = lng + dLng;
+  if (hi - lo >= 360) return null;
+  if (lo < -180) return { sql: '(e.lng >= ? OR e.lng <= ?)', binds: [lo + 360, hi] };
+  if (hi > 180) return { sql: '(e.lng >= ? OR e.lng <= ?)', binds: [lo, hi - 360] };
+  return { sql: 'e.lng BETWEEN ? AND ?', binds: [lo, hi] };
+}
+
 /** 前端用：附近、還沒結束、horizon 內會開始的事件 */
 export async function listEvents(env: Env, q: ListQuery): Promise<EventOut[]> {
   // 併進官方車掃的不單獨列，改放在官方那一場的相關報導
@@ -871,8 +884,13 @@ export async function listEvents(env: Env, q: ListQuery): Promise<EventOut[]> {
   if (q.lat !== undefined && q.lng !== undefined) {
     const dLat = q.radiusKm / 111;
     const dLng = q.radiusKm / (111 * Math.max(0.2, Math.cos((q.lat * Math.PI) / 180)));
-    conds.push('e.lat BETWEEN ? AND ?', 'e.lng BETWEEN ? AND ?');
-    binds.push(q.lat - dLat, q.lat + dLat, q.lng - dLng, q.lng + dLng);
+    conds.push('e.lat BETWEEN ? AND ?');
+    binds.push(q.lat - dLat, q.lat + dLat);
+    const lngCond = lngRange(q.lng, dLng);
+    if (lngCond) {
+      conds.push(lngCond.sql);
+      binds.push(...lngCond.binds);
+    }
   }
   if (q.keywords && q.keywords.length > 0) {
     // 使用者主動回報的貼文、審核通過的固定據點不一定有寫關鍵字，一律顯示

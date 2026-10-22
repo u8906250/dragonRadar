@@ -3,7 +3,7 @@ import { applySupplementDate, dropBroughtItem, dropSelfPlace, splitDropTimes, sp
 import { isAreaOnly } from '../src/geocode';
 import { existedOutcome, previewOf } from '../src/reports';
 import { describe, expect, it } from 'vitest';
-import { approxRank, detectEnded, postExcerpt, spotMergeMode, spotSessions } from '../src/events';
+import { approxRank, detectEnded, lngRange, postExcerpt, spotMergeMode, spotSessions } from '../src/events';
 import { buildMessages, localizeTimes, localToUnix, normalizeCountry, normalizeExtraction, validTimeZone } from '../src/extract';
 import { parseThreadsTimestamp } from '../src/threads';
 import { parseIsoToUnix } from '../src/util';
@@ -725,5 +725,14 @@ describe('overseas events', () => {
       'Memorial Park, Cupertino',
       'Cupertino Memorial Park',
     ]);
+  });
+});
+
+describe('lngRange', () => {
+  it('wraps around the antimeridian and drops the limit for the whole world', () => {
+    expect(lngRange(121.5, 10)).toEqual({ sql: 'e.lng BETWEEN ? AND ?', binds: [111.5, 131.5] });
+    expect(lngRange(121.5, 199)).toBeNull();
+    expect(lngRange(170, 20)).toEqual({ sql: '(e.lng >= ? OR e.lng <= ?)', binds: [150, -170] });
+    expect(lngRange(-170, 20)).toEqual({ sql: '(e.lng >= ? OR e.lng <= ?)', binds: [170, -150] });
   });
 });
