@@ -78,3 +78,12 @@ describe('employerName', () => {
     expect(employerName('毛孩旅館')).toBe('毛孩旅館');
   });
 });
+
+import { detectEnded } from '../src/events';
+
+describe('detectEnded for jobs', () => {
+  it('sees a filled job but not "until full"', () => {
+    expect(detectEnded('更新：已徵到，謝謝大家')).toBe(true);
+    expect(detectEnded('狗狗陪伴員 名額有限 額滿為止')).toBe(false);
+  });
+});

@@ -25,6 +25,8 @@ export interface ModuleDef {
   /** 判讀結果：不是這個模組要的貼文 */
   notEventText: string;
   noPlaceText: string;
+  /** 「說明」按鈕打開的頁面 */
+  helpPage: string;
 }
 
 export const MODULES: ModuleDef[] = [
@@ -42,6 +44,7 @@ export const MODULES: ModuleDef[] = [
     reportTips: [],
     notEventText: '這則看起來不是發放或活動。貼文要寫出在哪裡、什麼時候發放或舉辦，雷達才會收。',
     noPlaceText: '看得出是發放或活動，但貼文沒寫具體地點（或查不到），所以還沒放上雷達。知道在哪裡的話，可以在下面補充地點再判讀一次。',
+    helpPage: 'help.html',
   },
   {
     id: 'dog',
@@ -61,6 +64,7 @@ export const MODULES: ModuleDef[] = [
     ],
     notEventText: '這則看起來不是徵人照顧狗狗的貼文。要寫出在哪裡工作、做什麼，雷達才會收。',
     noPlaceText: '看得出是徵人，但貼文沒寫工作地點（或查不到），所以還沒放上雷達。知道在哪裡的話，可以在下面補充地點再判讀一次。',
+    helpPage: 'help-dog.html',
   },
 ];
 
