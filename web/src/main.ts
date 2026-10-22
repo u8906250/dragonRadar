@@ -2751,6 +2751,7 @@ function renderPreview(r: SubmitResult): void {
           <small>時間：${esc(previewWhen(p))}</small>
           <small>地點：${esc(p.placeText.replace(/\s*\n\s*/g, ' '))}</small>
           <small>${previewWhere(p)}</small>
+          ${p.profileHint ? `<small class="preview-warn">📍 貼文沒寫地點，這是從 ${esc(p.profileHint)} 的帳號名稱、簡介推的，請確認是不是這裡。</small>` : ''}
           ${p.update ? `<small class="preview-warn">${esc(updateNote(p.update))}</small>` : ''}
         </li>`,
       )

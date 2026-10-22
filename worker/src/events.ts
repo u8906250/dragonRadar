@@ -1,4 +1,5 @@
 import type { Env } from './env';
+import { fetchThreadsProfile, profileCandidates, profileHintText, type ThreadsProfile } from './sources/profile';
 import { applySupplementDate, dropBroughtItem, dropSelfPlace, EVENT_SPEC, extractFromPost, localizeTimes, openWeekdaysFromText, splitDropTimes, splitMultiDay, splitWeekdayWeekend, spotHoursFromText, startNowForDeadline, timeZoneOf, untilInText, weekdaysInText, type EventKind, type ExtractedEvent } from './extract';
 import { geocodeAddress, parseTwAddress, type TwAddress } from './address';
 import { SESSION_SPEC } from './badminton';
@@ -459,6 +460,8 @@ export interface PlanItem {
   plan: PlannedEvent | null;
   reason: string;
   merge?: SpotMerge;
+  /** 地點是從這些帳號（「@luguocafe」）的名稱、簡介推的，回報的人要確認 */
+  profileHint?: string;
   /** 已經結束、太久以後才開始的：那一場的時間（回報結果直接講原因用）；國外的附當地時區 */
   start?: number;
   end?: number;
@@ -588,7 +591,28 @@ export async function insertPlanned(env: Env, postId: string, p: PlannedEvent, n
 
 /** 對單一貼文跑 LLM 抽取、定位，列出每個地點或時段要建的事件（還沒寫進雷達）；early 是整則貼文就不行的原因 */
 export async function planPost(env: Env, post: PostRow, now = nowSec()): Promise<{ items: PlanItem[]; early: string | null }> {
-  const text = post.supplement ? `${post.text}\n\n【回報的人補充】${post.supplement}` : post.text;
+  const first = await planPostWith(env, post, now, null);
+  // 使用者貼連結回報的、找不到地點：看發文的店家帳號、標記的店家帳號的名稱和簡介，再判讀一次
+  if (post.source !== 'link' || first.early || !lacksPlace(first.items)) return first;
+  const accounts = profileCandidates(post.text, post.username);
+  if (accounts.length === 0) return first;
+  const profiles = (await Promise.all(accounts.map((u) => fetchThreadsProfile(u)))).filter((p): p is ThreadsProfile => !!p);
+  const hint = profileHintText(profiles);
+  if (!hint) return first;
+  const second = await planPostWith(env, post, now, hint);
+  if (located(second.items) <= located(first.items)) return first;
+  const from = profiles.filter((p) => p.name || p.bio).map((p) => `@${p.username}`).join('、');
+  return { ...second, items: second.items.map((it) => (it.plan && it.plan.lat !== null ? { ...it, profileHint: from } : it)) };
+}
+
+const located = (items: PlanItem[]): number => items.filter((it) => it.plan && it.plan.lat !== null).length;
+/** 判讀得出來，但地點都找不到（沒寫地點、或查不到） */
+const lacksPlace = (items: PlanItem[]): boolean =>
+  items.length > 0 && located(items) === 0 && items.some((it) => (it.plan ? it.plan.lat === null : it.reason === 'no_place'));
+
+async function planPostWith(env: Env, post: PostRow, now: number, profileHint: string | null): Promise<{ items: PlanItem[]; early: string | null }> {
+  const base = post.supplement ? `${post.text}\n\n【回報的人補充】${post.supplement}` : post.text;
+  const text = profileHint ? `${base}\n\n【帳號簡介】${profileHint}` : base;
   const module = moduleOf(post.module);
   // 使用者貼連結回報的，主要模型說不是活動時再問備用模型（只多等一下，量不大）
   const spec = module === 'dog' ? JOB_SPEC : module === 'badminton' ? SESSION_SPEC : module === 'food' ? FOOD_SPEC : EVENT_SPEC;

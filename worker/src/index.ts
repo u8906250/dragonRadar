@@ -1,6 +1,7 @@
 import { getAccessToken, makeClient, saveAccessToken } from './client';
 import type { Env } from './env';
-import { DEFAULT_DURATION_SEC, ENDED_WORDS, MAX_FUTURE_SEC, MIN_CONFIDENCE, SPOT_MAX_DAYS, extendOpenSpots, getEvent, getPost, ingestAll, ingestKeyword, listEvents, locatePlaceForEvent, processBacklog, processPost, relocateApprox, reprocessPost, setManualTitle, storePost, updateLifecycle, type EventRow } from './events';
+import { fetchThreadsProfile } from './sources/profile';
+import { DEFAULT_DURATION_SEC, ENDED_WORDS, MAX_FUTURE_SEC, MIN_CONFIDENCE, SPOT_MAX_DAYS, extendOpenSpots, getEvent, getPost, ingestAll, ingestKeyword, listEvents, locatePlaceForEvent, processBacklog, processPost, relocateApprox, planPost, reprocessPost, setManualTitle, storePost, updateLifecycle, type EventRow, type PostRow } from './events';
 import { normalizeExtraction, runModel } from './extract';
 import { geocode } from './geocode';
 import { ingestNews, NEWS_FEEDS } from './sources/news';
@@ -326,6 +327,20 @@ async function handleAdmin(req: Request, env: Env, ctx: ExecutionContext, path: 
     const results = [];
     for (const m of models) results.push(await runModel(env, m, body.text, postedAt, now, spec));
     return jsonResponse({ results });
+  }
+
+  // 試跑回報流程（判讀、定位、帳號簡介提示），不存檔：{ text, username?, posted_at?, supplement?, module? }
+  if (req.method === 'POST' && path === '/api/admin/plan') {
+    const body = await readJson<{ text?: string; username?: string; posted_at?: string | number; supplement?: string; module?: string }>(req);
+    if (!body.text?.trim()) throw new HttpError(400, 'text is required');
+    const postedAt = typeof body.posted_at === 'number' ? body.posted_at : parseIsoToUnix(body.posted_at) ?? now;
+    const post: PostRow = { id: `dry-${crypto.randomUUID()}`, username: body.username ?? null, text: body.text, permalink: null, posted_at: postedAt, keyword: null, source: 'link', fetched_at: now, processed_at: null, extraction: null, supplement: body.supplement ?? null, module: moduleOf(body.module) };
+    return jsonResponse(await planPost(env, post, now));
+  }
+  // 讀 Threads 帳號的公開名稱、簡介（確認伺服器抓得到）
+  if (req.method === 'POST' && path === '/api/admin/profile') {
+    const body = await readJson<{ username?: string }>(req);
+    return jsonResponse({ profile: body.username ? await fetchThreadsProfile(body.username) : null });
   }
 
   // 問題回報：?status=open（預設）| resolved

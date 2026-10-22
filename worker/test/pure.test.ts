@@ -8,6 +8,7 @@ import { buildMessages, localizeTimes, localToUnix, normalizeCountry, normalizeE
 import { parseThreadsTimestamp } from '../src/threads';
 import { parseIsoToUnix } from '../src/util';
 import { parseEmbedHtml, parseThreadsUrl, shortcodeToUnix, withLocationTag } from '../src/sources/link';
+import { parseProfileHtml, profileCandidates } from '../src/sources/profile';
 
 describe('parseThreadsTimestamp', () => {
   it('accepts Threads +0000 offsets', () => {
@@ -846,5 +847,19 @@ describe('fixed spot opening days and closing time', () => {
     const all = [{ spot: true, place_text: '小港服務處：沿海一路261號', place_query: 'a' }, { spot: true, place_text: '前鎮服務處：崗山中街228號', place_query: 'b' }];
     expect(spotScope(text, all[0], all)).toBe('小港服務處：沿海一路261號\n服務時間：09:00~18:00（上班日）\n✅');
     expect(openWeekdaysFromText(spotScope(text, all[1], all) ?? '')).toEqual([1, 2, 3, 4, 5]);
+  });
+});
+
+describe('threads profile hints', () => {
+  it('parses name and bio from the profile page', () => {
+    const html = '<meta property="og:title" content="爐鍋咖啡 Luguo Cafe (&#064;luguocafe) &#x2022; Threads, Say more" /><meta property="og:description" content="5.3K Followers &#x2022; 861 Threads &#x2022; &#x1f49a;LuguoCafe in Taiwan. #爐鍋咖啡好喝. See the latest conversations with @luguocafe." />';
+    expect(parseProfileHtml(html, 'luguocafe')).toEqual({ username: 'luguocafe', name: '爐鍋咖啡 Luguo Cafe', bio: '💚LuguoCafe in Taiwan. #爐鍋咖啡好喝.' });
+    const empty = '<meta property="og:title" content="kylekuo1979 (&#064;kylekuo1979) &#x2022; Threads, Say more" /><meta property="og:description" content="180 Followers &#x2022; 61 Threads. See the latest conversations with @kylekuo1979." />';
+    expect(parseProfileHtml(empty, 'kylekuo1979')).toEqual({ username: 'kylekuo1979', name: null, bio: null });
+  });
+  it('picks the shop accounts to look up', () => {
+    expect(profileCandidates('準備了50個 由挺台店家@luguocafe "爐鍋咖啡@ 小藝埕" 代為發放', 'kylekuo1979')).toEqual(['luguocafe']);
+    expect(profileCandidates('本店今天發飄帶，希望 @pumashen 當選', 'someshop')).toEqual(['someshop']);
+    expect(profileCandidates('支持 @pumashen 加油', 'someone')).toEqual([]);
   });
 });

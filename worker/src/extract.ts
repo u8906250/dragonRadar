@@ -130,6 +130,7 @@ events 每筆的欄位：
 - 不要編造貼文裡沒有的時間或地點，可以依上下文補上縣市。
 - 貼文最後如果有「【回報的人補充】」，那是看到貼文的人補上的地點或時間（例如店名、地址、日期），貼文沒寫的一定要用它補上；跟貼文衝突時以貼文為準。補充寫了店名、或是誰的服務處（例如「陳致中前鎮服務處」），title 要用補充寫的名稱（例如「陳致中前鎮服務處發飄帶」）；貼文有好幾個地點時，只改補充提到的那個地點的 title。補充寫「只有 10/26」「只有那天」就是只有那一天：spot 為 false，start_at 用那天加貼文寫的時段。
 - 貼文和補充都沒寫星期幾，weekdays 就是 null，不要自己猜。
+- 貼文最後如果有「【帳號簡介】」，那是發文帳號或貼文標記的店家帳號的名稱、簡介。貼文沒寫地點時，用它找出店名或地址填 place_text、place_query（例如「由 @luguocafe 代為發放」、簡介是「爐鍋咖啡」→ place_query「爐鍋咖啡」；簡介有地址就用地址）；簡介沒有店名也沒有地址就不要用。貼文自己寫了地點時以貼文為準。
 - 活動在國外（例如美國灣區、日本、歐洲的僑胞、留學生活動）：一樣要抽出來。start_at、end_at 寫當地的時間（貼文寫的時間就是當地時間），填 country、timezone；place_query 用當地的地名加城市，英文或當地語言，例如「Memorial Park, Cupertino」，不要加台灣的縣市。`;
 
 export function buildMessages(text: string, postedAt: number, now: number, system: string = SYSTEM_PROMPT): Array<{ role: 'system' | 'user'; content: string }> {

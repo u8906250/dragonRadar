@@ -84,6 +84,8 @@ export type LinkOutcome =
 /** 預覽：一個地點或時段（固定據點的好幾天合成一筆） */
 export interface PreviewItem {
   kind: EventKind;
+  /** 地點是從這些帳號的名稱、簡介推的（「@luguocafe」） */
+  profileHint?: string;
   title: string;
   item: string | null;
   placeText: string;
@@ -176,10 +178,12 @@ const confirmToken = async (env: Env, postId: string): Promise<string> => sha1He
 export function previewOf(items: PlanItem[], now: number): PreviewItem[] {
   const groups = new Map<number, NonNullable<PlanItem['plan']>[]>();
   const merges = new Map<number, PlanItem['merge']>();
+  const hints = new Map<number, string>();
   for (const it of items) {
     if (!it.plan || it.plan.end_at <= now) continue;
     groups.set(it.group, [...(groups.get(it.group) ?? []), it.plan]);
     if (it.merge) merges.set(it.group, it.merge);
+    if (it.profileHint) hints.set(it.group, it.profileHint);
   }
   const out = [...groups.entries()].map(([group, plans]): PreviewItem => {
     const p = plans[0];
@@ -205,6 +209,7 @@ export function previewOf(items: PlanItem[], now: number): PreviewItem[] {
       tz: p.tz ?? null,
       extra: p.extra ? (JSON.parse(p.extra) as Record<string, unknown>) : null,
       ...(m ? { update: { mode: m.mode, title: m.title } } : {}),
+      ...(hints.has(group) ? { profileHint: hints.get(group) } : {}),
     };
   });
   return mergeSlots(out);
