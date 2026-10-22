@@ -164,6 +164,29 @@ interface JobExtra {
 }
 const jobOf = (ev: { extra?: Record<string, unknown> | null }): JobExtra => (ev.extra ?? {}) as JobExtra;
 const isOffer = (ev: { extra?: Record<string, unknown> | null }): boolean => jobOf(ev).role === 'offer';
+
+// ---- 羽球臨打：招臨打（提供）照場次排，找臨打（需求）是刊登 ----
+interface SessionExtra {
+  role?: 'offer' | 'seek';
+  available?: string | null;
+  fee?: string | null;
+  level?: string | null;
+  slots?: string | null;
+  shuttle?: string | null;
+  team?: string | null;
+  contact?: string | null;
+  /** 找臨打寫了想打的時段 */
+  play_at?: number | null;
+  play_end?: number | null;
+}
+const sessionOf = (ev: { extra?: Record<string, unknown> | null }): SessionExtra => (ev.extra ?? {}) as SessionExtra;
+const isSeek = (ev: { kind: string; extra?: Record<string, unknown> | null }): boolean => ev.kind === 'session' && sessionOf(ev).role === 'seek';
+/** 找臨打的時間：「想打 10/25（六）14:00–17:00」或「可以打 週末下午」 */
+function seekWhen(ev: { extra?: Record<string, unknown> | null }): string {
+  const x = sessionOf(ev);
+  if (x.play_at) return `想打 ${dateFmt.format(new Date(x.play_at * 1000))} ${fmtTime(x.play_at)}${x.play_end ? `–${fmtTime(x.play_end)}` : ''}`;
+  return `可以打 ${x.available ?? '時間可討論'}`;
+}
 const CONTACT_TEXT: Record<string, string> = { form: '填表單', line: '加 LINE', dm: '私訊、留言', phone: '打電話', email: 'Email', other: '其他方式' };
 const mdText = (d: string): string => d.slice(5).split('-').map(Number).join('/');
 /** 「11/20–11/30・每天 09:00–12:00、15:00–18:00」 */
@@ -395,7 +418,9 @@ function eventTimeText(ev: EventOut): string {
 }
 
 /** 貼文沒寫結束時間時的說法：不自己猜時間 */
-const openEndText = (ev: EventOut): string => (ev.kind === 'activity' ? '沒寫結束時間' : '發完為止');
+const openEndText = (ev: EventOut): string =>
+  // 臨打的每週固定場沒寫到哪天：長期開放；單場沒寫幾點結束跟活動一樣
+  ev.kind === 'session' ? (ev.spot ? '長期開放' : '沒寫結束時間') : ev.kind === 'activity' ? '沒寫結束時間' : '發完為止';
 
 /** 每週幾：[2, 4] →「每週二、四」，沒有就是 null */
 function weeklyText(days: number[] | null | undefined): string | null {
@@ -453,6 +478,7 @@ function allDayText(ev: EventOut, today: boolean): string {
 
 function timeLine(it: Item, now: number): string {
   // 職缺：工作期間、每天時段（從刊登起都算刊登中）；可照顧的沒寫期間就是時間可討論
+  if (isSeek(it.ev)) return seekWhen(it.ev);
   if (it.ev.kind === 'job') {
     const period = jobPeriod(jobOf(it.ev));
     return isOffer(it.ev) ? `可照顧 ${period === '沒寫工作期間' ? '時間可討論' : period}` : `工作 ${period}`;
@@ -682,7 +708,8 @@ function render(): void {
   const fetched = computeItems(now);
   // 搜尋時雷達、地圖、清單、各類的數量都只算符合的
   const all = searchTerms.length > 0 ? fetched.filter(matchesSearch) : fetched;
-  const byCategory = all.filter((it) => shown[categoryOf(it)]);
+  // 發放、活動、據點的開關是洋流的，其他模組不篩
+  const byCategory = mod.current ? all.filter((it) => shown[categoryOf(it)]) : all;
   const items = onlyActive && mod.current ? byCategory.filter((it) => activeNow(it, now)) : byCategory;
   // 雷達、地圖只畫時間範圍內的；清單照樣全部列，範圍外的放最下面
   const timed = items.filter((it) => inTime(it, now));
@@ -772,7 +799,18 @@ function render(): void {
       /* ignore */
     }
     const msg = `${titleOf(it.ev)}｜${it.ev.placeText}｜${formatKm(it.distanceKm)} ${compassLabel(it.bearing)}`;
-    const head = it.ev.kind === 'job' ? (isOffer(it.ev) ? '附近有人可以幫忙照顧狗狗' : '附近有新職缺') : it.ev.kind === 'activity' ? '活動開始' : '開始發放';
+    const head =
+      it.ev.kind === 'session'
+        ? isSeek(it.ev)
+          ? '附近有人找臨打'
+          : '臨打開始'
+        : it.ev.kind === 'job'
+          ? isOffer(it.ev)
+            ? '附近有人可以幫忙照顧狗狗'
+            : '附近有新職缺'
+          : it.ev.kind === 'activity'
+            ? '活動開始'
+            : '開始發放';
     showBanner(bannerEl, `${head}：${msg}`, 10_000);
     systemNotify(head, msg, `ev-${it.ev.id}`);
   }
@@ -863,7 +901,9 @@ function renderList(items: Item[], now: number): void {
   // 時間範圍外（還要很久才開始）：放在範圍外前面，照開始時間排
   const laterRows = rows.filter((r) => r.inScope && !r.inTime).sort((a, b) => a.sortAt - b.sortAt || a.distanceKm - b.distanceKm);
   const outRange = rows.filter((r) => !r.inScope);
-  const singles = inRange.filter((r) => !r.spot);
+  // 羽球臨打的找臨打（需求）另外一段
+  const seekRows = mod.id === 'badminton' ? inRange.filter((r) => r.it && isSeek(r.it.ev)) : [];
+  const singles = inRange.filter((r) => !r.spot && !seekRows.includes(r));
   const spotsIn = inRange.filter((r) => r.spot);
   const byPhase = (ph: Phase): Row[] =>
     singles
@@ -873,7 +913,8 @@ function renderList(items: Item[], now: number): void {
   const sections: Array<{ title: string; rows: Row[] }> = [
     // 職缺從刊登起都算「徵才中」
     ...(['active', 'soon', 'later'] as const).map((ph) => ({ title: !mod.current && ph === 'active' ? '刊登中' : (PHASE_TITLE[ph] as string), rows: byPhase(ph) })),
-    { title: '固定據點', rows: spotsIn },
+    { title: mod.id === 'badminton' ? '每週固定場' : '固定據點', rows: spotsIn },
+    { title: '找臨打', rows: seekRows },
     { title: laterLabel(), rows: laterRows },
     { title: outLabel(), rows: outRange },
   ];
@@ -888,7 +929,15 @@ function renderList(items: Item[], now: number): void {
     : searching && rows.length === 0
       ? `${searching}找不到`
       : !mod.current
-        ? `${searching}${singles.length === 0 ? mod.emptyText : dogSummary(singles)}${outText}`
+        ? `${searching}${
+            mod.id === 'badminton'
+              ? singles.length + spotsIn.length + seekRows.length === 0
+                ? mod.emptyText
+                : [singles.length + spotsIn.length ? `${singles.length + spotsIn.length} 場招臨打` : '', seekRows.length ? `${seekRows.length} 個找臨打` : ''].filter(Boolean).join('、')
+              : singles.length === 0
+                ? mod.emptyText
+                : dogSummary(singles)
+          }${outText}`
         : singles.length === 0
           ? `${searching}${theme.emptyText}${spotText}${laterText}${outText}`
           : `${searching}${theme.summary(counts)}${spotText}${laterText}${outText}`;
@@ -1560,7 +1609,7 @@ function renderDetail(items: Item[], now: number): void {
     <div class="sheet-body">
       ${nearbyHtml(it, items)}
       ${routeBoxHtml(ev, now)}
-      ${ev.kind === 'job' ? jobDetailHtml(it, now) : `<p>類型：${it.spot ? `固定據點（${kindLabel(ev)}）` : kindLabel(ev)}<br>${ev.item ? `${ev.kind === 'activity' ? '物品' : '發放'}：${esc(ev.item)}<br>` : ''}${ev.keyword ? `關鍵字：#${esc(ev.keyword)}<br>` : ''}地點：${esc(placeOf(ev))}${ev.approxArea ? `<br><span class="approx-note">約略位置：只知道在${esc(ev.approxArea)}，地圖上是${esc(ev.approxArea)}的中心點，實際地點請看原文</span>` : ''}<br>時間：${it.spot ? esc(spotSchedule(it)) : ev.allDay ? `${dateFmt.format(new Date(ev.startAt * 1000))} ${allDayText(ev, false)}` : esc(eventTimeText(ev))}<br>距離：${ev.approxArea ? '約 ' : ''}${formatKm(it.distanceKm)}，${compassLabel(it.bearing)}方 · ${esc(timeLine(it, now))}</p>`}
+      ${ev.kind === 'job' ? jobDetailHtml(it, now) : ev.kind === 'session' ? sessionDetailHtml(it, now) : `<p>類型：${it.spot ? `固定據點（${kindLabel(ev)}）` : kindLabel(ev)}<br>${ev.item ? `${ev.kind === 'activity' ? '物品' : '發放'}：${esc(ev.item)}<br>` : ''}${ev.keyword ? `關鍵字：#${esc(ev.keyword)}<br>` : ''}地點：${esc(placeOf(ev))}${ev.approxArea ? `<br><span class="approx-note">約略位置：只知道在${esc(ev.approxArea)}，地圖上是${esc(ev.approxArea)}的中心點，實際地點請看原文</span>` : ''}<br>時間：${it.spot ? esc(spotSchedule(it)) : ev.allDay ? `${dateFmt.format(new Date(ev.startAt * 1000))} ${allDayText(ev, false)}` : esc(eventTimeText(ev))}<br>距離：${ev.approxArea ? '約 ' : ''}${formatKm(it.distanceKm)}，${compassLabel(it.bearing)}方 · ${esc(timeLine(it, now))}</p>`}
       <blockquote class="post-excerpt" title="原文摘錄，完整內容請看原文">${esc(ev.post.source === 'news' ? ev.post.text.split('\n')[0] : ev.post.text)}</blockquote>
       ${ev.post.supplement ? `<p class="muted supplement-line">回報的人補充：${esc(ev.post.supplement)}</p>` : ''}
       <p class="muted source-line">來源：${esc(sourceLabel(ev))}</p>
@@ -1625,7 +1674,22 @@ function spotSchedule(it: Item): string {
 
 /** 官方行程以官網為準；還沒開始的也不能回報 */
 /** 「回報已發完」的說法：活動「已結束」、徵人「已徵到」、可照顧「已不提供」 */
-const endedWord = (ev: EventOut): string => (ev.kind === 'job' ? (isOffer(ev) ? '已不提供' : '已徵到') : ev.kind === 'activity' ? '已結束' : '已發完');
+const endedWord = (ev: EventOut): string =>
+  ev.kind === 'session' ? (isSeek(ev) ? '已找到' : '已額滿') : ev.kind === 'job' ? (isOffer(ev) ? '已不提供' : '已徵到') : ev.kind === 'activity' ? '已結束' : '已發完';
+
+/** 羽球臨打的詳細資料：招臨打寫時段、費用、程度、缺幾位、用球、球團；找臨打寫程度、可以打的時間、地區 */
+function sessionDetailHtml(it: Item, now: number): string {
+  const { ev } = it;
+  const x = sessionOf(ev);
+  const line = (k: string, v: string | null | undefined): string => (v ? `${k}：${esc(v)}<br>` : '');
+  const where = `地點：${esc(placeOf(ev))}${ev.approxArea ? `<br><span class="approx-note">約略位置：只知道在${esc(ev.approxArea)}</span>` : ''}<br>距離：${ev.approxArea ? '約 ' : ''}${formatKm(it.distanceKm)}，${compassLabel(it.bearing)}方`;
+  const contact = x.contact ? (CONTACT_TEXT[x.contact] ?? x.contact) : null;
+  if (isSeek(ev)) {
+    return `<p>類型：找臨打（球友想找地方打）<br>${line('程度', x.level)}時間：${esc(seekWhen(ev))}<br>${line('聯絡方式', contact)}${where}</p>`;
+  }
+  const time = it.spot ? spotSchedule(it) : eventTimeText(ev);
+  return `<p>類型：${it.spot ? '招臨打・每週固定場' : '招臨打'}<br>時間：${esc(time)}<br>${line('費用', x.fee ?? ev.item)}${line('程度', x.level)}${line('缺幾位', x.slots)}${line('用球', x.shuttle)}${line('球團', x.team)}${line('報名方式', contact)}${where} · ${esc(timeLine(it, now))}</p>`;
+}
 
 /** 狗狗陪伴的摘要：「2 個徵人、1 個可照顧」 */
 function dogSummary(rows: Array<{ it?: Item }>): string {
@@ -2393,6 +2457,7 @@ function placeLine(ev: EventOut): string {
 }
 
 function kindLabel(ev: EventOut): string {
+  if (ev.kind === 'session') return isSeek(ev) ? '找臨打' : '招臨打';
   return ev.kind === 'job' ? (isOffer(ev) ? '可照顧' : '徵人') : ev.kind === 'activity' ? '活動' : '發放';
 }
 
@@ -2404,6 +2469,7 @@ function isOffice(ev: EventOut): boolean {
 
 /** 清單與地圖上的標籤：固定據點另外標「據點」，服務處標「服務處」 */
 function tagLabel(it: Item): string {
+  if (it.ev.kind === 'session') return it.spot ? '固定場' : kindLabel(it.ev);
   return it.spot ? (isOffice(it.ev) ? '服務處' : '據點') : kindLabel(it.ev);
 }
 
@@ -2530,9 +2596,10 @@ function setReportBusy(busy: boolean, label = '判讀中…'): void {
 /** 預覽上的時間：固定據點寫每天幾點、從哪天起排幾天；一般的寫哪天幾點到幾點 */
 function previewWhen(p: PreviewItem): string {
   if (p.kind === 'job') return `${isOffer(p) ? '可照顧' : '工作'} ${jobPeriod(jobOf(p))}`;
+  if (isSeek(p)) return seekWhen(p);
   const day = (t: number): string => dateFmt.format(new Date(t * 1000));
   // 一天好幾個時段：「12:00–13:30、18:00–20:30」；沒寫結束的只寫開始，最後寫「發完為止」
-  const open = p.kind === 'activity' ? '沒寫結束時間' : '發完為止';
+  const open = p.kind === 'session' ? (p.spot ? '長期開放' : '沒寫結束時間') : p.kind === 'activity' ? '沒寫結束時間' : '發完為止';
   const slotText = (s: { startAt: number; endAt: number; endOpen?: boolean }): string => (s.endOpen ? `${fmtTime(s.startAt)} 開始` : `${fmtTime(s.startAt)}–${fmtTime(s.endAt)}`);
   const slots = p.slots && p.slots.length > 1 ? `${p.slots.map(slotText).join('、')}${p.slots.some((s) => s.endOpen) ? `，${open}` : ''}` : null;
   if (p.spot) {
@@ -2618,7 +2685,7 @@ function renderPreview(r: SubmitResult): void {
     <ul class="report-preview">${items
       .map(
         (p) => `<li>
-          <b>${p.kind === 'job' ? (isOffer(p) ? '可照顧' : '徵人') : p.kind === 'activity' ? '活動' : '發放'}${p.spot ? '・固定據點' : ''}｜${esc(p.title)}</b>
+          <b>${p.kind === 'session' ? (isSeek(p) ? '找臨打' : '招臨打') : p.kind === 'job' ? (isOffer(p) ? '可照顧' : '徵人') : p.kind === 'activity' ? '活動' : '發放'}${p.spot ? (p.kind === 'session' ? '・每週固定場' : '・固定據點') : ''}｜${esc(p.title)}</b>
           ${p.kind === 'job' && (jobOf(p).risks ?? []).some((r) => r !== 'no_employer') ? `<small class="preview-warn">⚠️ ${esc((jobOf(p).risks ?? []).map((r) => JOB_RISK_TEXT[r]).filter(Boolean).join('；'))}</small>` : ''}
           ${p.item ? `<small>${esc(p.item)}</small>` : ''}
           <small>時間：${esc(previewWhen(p))}</small>

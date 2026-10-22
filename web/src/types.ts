@@ -1,5 +1,5 @@
-/** giveaway 發放、activity 活動（洋流）；job 職缺（狗狗陪伴） */
-export type EventKind = 'giveaway' | 'activity' | 'job';
+/** giveaway 發放、activity 活動（洋流）；job 職缺（狗狗陪伴）；session 臨打（羽球臨打） */
+export type EventKind = 'giveaway' | 'activity' | 'job' | 'session';
 
 export interface RelatedPost {
   id: string;

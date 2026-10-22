@@ -10,6 +10,8 @@ import { mergeIntoOfficial } from './sources/merge';
 import { apifyTrial } from './sources/apify';
 import { fetchThreadsPost, resolveThreadsLink, shortcodeToUnix } from './sources/link';
 import { applyFeedback, deleteAdminSubscription, listFeedback, notifyAdmins, purgeFeedback, saveAdminSubscription, setFeedbackStatus, submitFeedback } from './feedback';
+import { SESSION_SPEC } from './badminton';
+import { JOB_SPEC } from './jobs';
 import { moduleOf } from './modules';
 import { PUSH_RADIUS_KM, PushError, b64urlEncode, deleteSubscription, encryptPayload, purgeSubscriptions, pushStarted, saveSubscription, sendPush, vapidKeys } from './push';
 import { confirmLink, ENDED_REPORTS_NEEDED, MAX_LINK_AGE_SEC, ReportError, ipHash, myReports, purgeReports, recheckLinks, rejectLink, reportEnded, submitLink, supplementLink, withdrawReport } from './reports';
@@ -313,12 +315,15 @@ async function handleAdmin(req: Request, env: Env, ctx: ExecutionContext, path: 
 
   // 只判讀不存檔，用來比較模型：{ text, posted_at?, models?: string[] }
   if (req.method === 'POST' && path === '/api/admin/extract') {
-    const body = await readJson<{ text?: string; posted_at?: string | number; models?: string[] }>(req);
+    const body = await readJson<{ text?: string; posted_at?: string | number; models?: string[]; module?: string }>(req);
     if (!body.text?.trim()) throw new HttpError(400, 'text is required');
+    // module：用哪個模組的判讀（dog、badminton），沒給是洋流
+    const mod = moduleOf(body.module);
+    const spec = mod === 'dog' ? JOB_SPEC : mod === 'badminton' ? SESSION_SPEC : undefined;
     const postedAt = typeof body.posted_at === 'number' ? body.posted_at : parseIsoToUnix(body.posted_at) ?? now;
     const models = (body.models?.length ? body.models : [env.AI_MODEL, env.AI_MODEL_FALLBACK]).filter((m): m is string => !!m).slice(0, 6);
     const results = [];
-    for (const m of models) results.push(await runModel(env, m, body.text, postedAt, now));
+    for (const m of models) results.push(await runModel(env, m, body.text, postedAt, now, spec));
     return jsonResponse({ results });
   }
 

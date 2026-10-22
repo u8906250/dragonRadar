@@ -2,7 +2,7 @@
  * 模組：同一套雷達、地圖、清單、回報，換不同主題的資料（跟伺服器的 worker/src/modules.ts 對應）。
  * 洋流有自己的官方航線、車掃、漂流瓶、地標、搜尋關鍵字；其他模組只有大家回報的貼文。
  */
-export type ModuleId = 'current' | 'dog';
+export type ModuleId = 'current' | 'dog' | 'badminton';
 
 export interface ModuleDef {
   id: ModuleId;
@@ -67,6 +67,27 @@ export const MODULES: ModuleDef[] = [
     helpPage: 'help-dog.html',
   },
 ];
+
+MODULES.push({
+  id: 'badminton',
+  name: '羽球臨打雷達',
+  short: '羽球臨打',
+  tagline: '附近開放臨打的球團，和想找臨打的球友',
+  emoji: '🏸',
+  current: false,
+  unit: '場',
+  emptyText: '附近還沒有羽球臨打',
+  searchPlaceholder: '搜尋球館、程度、費用…',
+  reportIntro: '看到招臨打（球團開放名額）或找臨打（球友想找地方打）的 Threads 貼文？貼上連結，雷達會判讀球館、時段、費用、程度、缺幾位，標到地圖上。',
+  reportTips: [
+    '收兩種：招臨打（球團、場主開放臨打名額）、找臨打（球友想找球團、找人一起打）。賣球具、教練招生、比賽報名不收。',
+    '招臨打要寫出球館和時段；「每週三 19:00–22:00」這種會排成每週的固定場。',
+    '找臨打沒寫確切時間的顯示 7 天；寫了想打的時段就顯示到那個時段結束。原貼文刪除或改成「名額已滿」「臨打取消」會自動下架。',
+  ],
+  notEventText: '這則看起來不是招臨打或找臨打的貼文。要寫出球館和時段（或想打的地區），雷達才會收。',
+  noPlaceText: '看得出是羽球臨打，但貼文沒寫球館或地區（或查不到），所以還沒放上雷達。知道在哪裡的話，可以在下面補充地點再判讀一次。',
+  helpPage: 'help-badminton.html',
+});
 
 export const DEFAULT_MODULE: ModuleId = 'current';
 export const getModule = (id: string | null | undefined): ModuleDef => MODULES.find((m) => m.id === id) ?? (MODULES[0] as ModuleDef);

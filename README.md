@@ -85,8 +85,9 @@ worker/   Cloudflare Worker（API、排程、資料庫）
 ## 模組（切換雷達）
 
 同一套雷達、地圖、清單、搜尋、回報、回報管理，換不同主題的資料。點標題（`#module-btn`）切換，記在 `localStorage`（`dr.module`），網址 `?module=dog` 也可以。
-- 後端：`worker/src/modules.ts`（`current` 洋流、`dog` 狗狗陪伴）；貼文記在 `posts.module`，事件跟著貼文（`/api/events?module=`、`POST /api/reports { url, module }`）；判讀說明照模組換（`ExtractSpec`：洋流用 `EVENT_SPEC`，狗狗陪伴用 `worker/src/jobs.ts` 的 `JOB_SPEC`）。還沒放上雷達的回報從別的模組再貼一次，會改成那個模組重新判讀。
+- 後端：`worker/src/modules.ts`（`current` 洋流、`dog` 狗狗陪伴、`badminton` 羽球臨打）；貼文記在 `posts.module`，事件跟著貼文（`/api/events?module=`、`POST /api/reports { url, module }`）；判讀說明照模組換（`ExtractSpec`：洋流用 `EVENT_SPEC`，狗狗陪伴用 `worker/src/jobs.ts` 的 `JOB_SPEC`）。還沒放上雷達的回報從別的模組再貼一次，會改成那個模組重新判讀。
 - 前端：`web/src/modules.ts` 放每個模組的名稱、說明、空白時的說法、回報說明、判讀結果的說法、說明頁（洋流 `help.html`、狗狗陪伴 `help-dog.html`，標題列的「說明」照目前的模組打開）。洋流專屬的官方航線、車掃、漂流瓶、地標、搜尋關鍵字、類型開關、只看進行中、開始時推播，在其他模組不顯示。換模組時清掉選取、搜尋，第一次抓到的不算「新開始」（不會一次響一堆）。
+- 羽球臨打（`worker/src/badminton.ts` 的 `SESSION_SPEC`，`kind = 'session'`）：收兩種，`extra.role` 是 `offer`（招臨打：球團開放名額，照洋流的場次排，每週固定的變成固定場，`extra` 放費用、程度、缺幾位、用球、球團、報名方式）或 `seek`（找臨打：球友想找地方打，`planSeeks` 當成刊登，寫了想打的時段顯示到那個時段結束，沒寫顯示 7 天，`extra` 放可以打的時間、程度）；畫面標「招臨打」「固定場」「找臨打」，清單的找臨打另外一段；「名額已滿」「臨打取消」「場地取消」會自動下架。說明頁 `help-badminton.html`。
 - 狗狗陪伴：收兩種刊登，`extra.role` 是 `hire`（徵人：飼主、店家找人照顧）或 `offer`（可照顧：個人說可以幫忙照顧、寄宿、遛狗，免費或收費；店家廣告不收），畫面標「徵人」「可照顧」；可照顧的只標「提到先付錢」，詳細資料顯示給飼主的安全提醒。判讀工作地點、工作期間、每天時段、薪資、雇主、怎麼應徵、內容，存在 `events.extra`（JSON），`kind = 'job'`。從發文起算「徵才中」，到工作期間最後一天（沒寫 14 天，最多發文後 30 天）。防詐提醒（`jobRisks`）：沒寫雇主（「僱主」「飼主」這種沒名字的不算）、只留表單、只加 LINE（沒有電話也沒有單位名稱）、提到保證金、先付款、提款卡、帳戶；每則都顯示防詐提醒，有可疑之處的清單標「⚠️ 注意」。作者把貼文改成「已徵到」「已額滿」「停止招募」等（`ENDED_WORDS`）會自動下架。
 
 ## 問題回報
@@ -234,7 +235,7 @@ Cloudflare D1 偶爾回「D1_ERROR: internal error」這類暫時性錯誤。`sr
 | POST | `/api/admin/posts/:id/weekdays` | 固定據點只在每週幾開：`{ weekdays: [2, 3, 4, 5, 6, 7] }`（1 = 週一），其他天還沒結束的時段下架 |
 | POST | `/api/admin/events/:id/locate` | 手動修正位置：`{ lat, lng }` 或 `{ query }`，加 `approx_area` 標成約略位置 |
 | POST | `/api/admin/posts/:id/reprocess` | 用目前的規則重新判讀一則貼文（還沒結束的舊事件會先刪掉） |
-| POST | `/api/admin/extract` | 只判讀不存檔，可指定 models 比較 |
+| POST | `/api/admin/extract` | 只判讀不存檔，可指定 models 比較，`module` 指定用哪個模組的判讀（`dog`、`badminton`） |
 | GET | `/api/admin/feedback?status=open\|resolved` | 問題回報列表（含事件現在的狀態、位置、原文連結） |
 | POST | `/api/admin/feedback/:id` | 標成已處理或改回未處理 `{ status: 'resolved' \| 'open' }` |
 | POST | `/api/admin/feedback/:id/apply` | 套用回報：`{ action: 'title', title }` 直接改標題、`{ action: 'supplement', note }` 補充後重新判讀，或 `{ action: 'takedown', scope: 'event' \| 'post' }` 從雷達下架；完成後標成已處理 |
