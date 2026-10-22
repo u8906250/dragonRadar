@@ -177,8 +177,8 @@ const themeBtn = $<HTMLButtonElement>('#theme-btn');
 const themeSheet = $('#theme-sheet');
 const themeList = $<HTMLUListElement>('#theme-list');
 const brandText = $('#brand-text');
-const kwBtn = $<HTMLButtonElement>('#kw-btn');
-const kwSummary = $('#kw-summary');
+const searchInput = $<HTMLInputElement>('#search-input');
+const searchClear = $<HTMLButtonElement>('#search-clear');
 const kwSheet = $('#kw-sheet');
 const kwList = $('#kw-list');
 const kwForm = $<HTMLFormElement>('#kw-form');
@@ -605,9 +605,40 @@ function stopText(stop: RouteStop, now: number): string {
   return now < stop.at ? `車隊預計 ${fmtTime(stop.at)} 經過這裡` : `車隊預計 ${fmtTime(stop.at)} 已經過`;
 }
 
+// ---- 搜尋：在目前抓到的發放、活動（含車掃、固定據點）裡找字 ----
+let searchTerms: string[] = [];
+/** 搜尋比對用：小寫、去空白、臺台不分 */
+const foldText = (s: string): string => s.toLowerCase().replace(/\s+/g, '').replace(/臺/g, '台');
+/** 每一則可以搜尋的文字（標題、地點、物品、帳號、關鍵字、原文摘錄、補充、類型、車掃名稱）；事件重抓才會換物件，跟著物件記 */
+const searchText = new WeakMap<EventOut, string>();
+function searchable(it: Item): string {
+  let t = searchText.get(it.ev);
+  if (t === undefined) {
+    const ev = it.ev;
+    t = foldText(
+      [ev.title, titleOf(ev), ev.item, ev.placeText, ev.approxArea, ev.keyword, ev.post.username, ev.post.text, ev.post.supplement, kindLabel(ev), it.spot ? '固定據點' : '', routeOf(ev)?.title]
+        .filter(Boolean)
+        .join(' '),
+    );
+    searchText.set(ev, t);
+  }
+  return t;
+}
+/** 空白分開的每個字都要找得到 */
+const matchesSearch = (it: Item): boolean => searchTerms.every((w) => searchable(it).includes(w));
+
+function setSearch(q: string): void {
+  const terms = q.trim().split(/\s+/).filter(Boolean).map(foldText);
+  if (terms.join(' ') === searchTerms.join(' ')) return;
+  searchTerms = terms;
+  render();
+}
+
 function render(): void {
   const now = nowSec();
-  const all = computeItems(now);
+  const fetched = computeItems(now);
+  // 搜尋時雷達、地圖、清單、各類的數量都只算符合的
+  const all = searchTerms.length > 0 ? fetched.filter(matchesSearch) : fetched;
   const byCategory = all.filter((it) => shown[categoryOf(it)]);
   const items = onlyActive ? byCategory.filter((it) => activeNow(it, now)) : byCategory;
   // 雷達、地圖只畫時間範圍內的；清單照樣全部列，範圍外的放最下面
@@ -682,8 +713,9 @@ function render(): void {
   renderList(items, now);
   renderDetail(items, now);
 
-  // 新變成進行中且在雷達範圍內的事件 → 嗶聲、震動、通知。第一次載入不吵。
-  for (const it of items) {
+  // 新變成進行中且在雷達範圍內的事件 → 嗶聲、震動、通知。第一次載入不吵。搜尋只影響畫面，通知照樣看全部
+  const notifyPool = searchTerms.length > 0 ? fetched.filter((it) => shown[categoryOf(it)] && (!onlyActive || activeNow(it, now))) : items;
+  for (const it of notifyPool) {
     if (it.phase !== 'active') continue;
     const seenKey = it.spot ? `spot:${it.spot.key}` : `ev:${it.ev.id}`;
     if (seenActive.has(seenKey)) continue;
@@ -806,12 +838,20 @@ function renderList(items: Item[], now: number): void {
   const outText = outRange.length > 0 ? `・${scaleSetting === 'region' ? '雙北以外' : '範圍外'} ${outRange.length} 個` : '';
   const spotText = spotsIn.length > 0 ? `・據點 ${spotsIn.length} 個` : '';
   const laterText = laterRows.length > 0 ? `・${timeSetting === 'now' ? '還沒開始' : laterLabel().replace('才開始', '')} ${laterRows.length} 個` : '';
+  const searching = searchTerms.length > 0 ? `搜尋「${searchInput.value.trim()}」・` : '';
   countLabel.textContent = none
     ? '還沒追蹤關鍵字'
-    : singles.length === 0
-      ? `${theme.emptyText}${spotText}${laterText}${outText}`
-      : `${theme.summary(counts)}${spotText}${laterText}${outText}`;
-  emptyEl.textContent = none ? (canEditKeywords ? '點下方「追蹤」選擇或新增關鍵字，雷達就會開始找發放和活動。' : '目前沒有搜尋中的關鍵字。') : `${theme.emptyText}。雷達每分鐘更新，有新的會提醒你。`;
+    : searching && rows.length === 0
+      ? `${searching}找不到`
+      : singles.length === 0
+        ? `${searching}${theme.emptyText}${spotText}${laterText}${outText}`
+        : `${searching}${theme.summary(counts)}${spotText}${laterText}${outText}`;
+  emptyEl.textContent =
+    searchTerms.length > 0
+      ? `目前的發放、活動裡沒有符合「${searchInput.value.trim()}」的。可以換個字，或按 ✕ 清除搜尋。`
+      : none
+        ? '目前沒有搜尋中的關鍵字。'
+        : `${theme.emptyText}。雷達每分鐘更新，有新的會提醒你。`;
   listEl.replaceChildren();
   emptyEl.hidden = items.length > 0;
   // 每一段的標題寫上數量，跟上面的摘要對得起來
@@ -1685,6 +1725,12 @@ async function reveal(id: number): Promise<void> {
   if (!find(nowSec())) await refresh();
   const now = nowSec();
   const it = find(now);
+  // 搜尋中、這一則不符合：清掉搜尋才看得到
+  if (it && searchTerms.length > 0 && !matchesSearch(it)) {
+    searchInput.value = '';
+    searchClear.hidden = true;
+    searchTerms = [];
+  }
   if (it) {
     // 這一類被關掉了：打開
     const cat = categoryOf(it);
@@ -2054,8 +2100,6 @@ function setFollowed(next: string[]): void {
 
 function renderKeywords(): void {
   const f = followed();
-  kwBtn.setAttribute('aria-label', canEditKeywords ? '管理追蹤的關鍵字' : '查看搜尋中的關鍵字與判讀規則');
-  (kwBtn.querySelector('.kw-edit') as HTMLElement).textContent = canEditKeywords ? '編輯' : '說明';
   kwTitle.textContent = canEditKeywords ? '追蹤關鍵字' : '搜尋中的關鍵字';
   kwIntro.textContent = canEditKeywords
     ? '點一下切換追蹤。雷達只顯示你追蹤的關鍵字找到的發放。'
@@ -2063,29 +2107,7 @@ function renderKeywords(): void {
   kwForm.hidden = !canEditKeywords;
   kwShareNote.hidden = !canEditKeywords;
   renderRules();
-  (kwBtn.querySelector('.kw-label') as HTMLElement).textContent = canEditKeywords ? '追蹤' : '搜尋中';
-  kwSummary.replaceChildren();
-  if (f.length === 0) {
-    const s = document.createElement('span');
-    s.className = 'kw-tag more';
-    s.textContent = '尚未選擇';
-    kwSummary.appendChild(s);
-  } else {
-    const shown = canEditKeywords ? 2 : 3;
-    for (const t of f.slice(0, shown)) {
-      const s = document.createElement('span');
-      s.className = 'kw-tag';
-      s.textContent = t;
-      kwSummary.appendChild(s);
-    }
-    if (f.length > shown) {
-      const s = document.createElement('span');
-      s.className = 'kw-tag more';
-      s.textContent = `+${f.length - shown}`;
-      kwSummary.appendChild(s);
-    }
-  }
-
+  // 搜尋中的關鍵字移到說明頁（說明頁從 /api/keywords 讀），這裡的面板從說明頁的連結（?open=keywords）打開
   kwList.replaceChildren();
   const activeTerms = new Set(available.map((k) => k.term));
   const all: Array<{ term: string; pinned: boolean; stale: boolean }> = [
@@ -2849,7 +2871,24 @@ function wireControls(): void {
     openThemeSheet(themeSheet.hidden);
   });
   themeSheet.querySelector('[data-act="close"]')?.addEventListener('click', () => openThemeSheet(false));
-  kwBtn.addEventListener('click', () => openKwSheet(kwSheet.hidden));
+  // 搜尋：打字就篩（停一下再篩，免得每個字都重畫），清除鈕、Enter 收起鍵盤
+  let searchTimer = 0;
+  searchInput.addEventListener('input', () => {
+    searchClear.hidden = searchInput.value === '';
+    window.clearTimeout(searchTimer);
+    searchTimer = window.setTimeout(() => setSearch(searchInput.value), 150);
+  });
+  $('#search-form').addEventListener('submit', (e) => {
+    e.preventDefault();
+    setSearch(searchInput.value);
+    searchInput.blur();
+  });
+  searchClear.addEventListener('click', () => {
+    searchInput.value = '';
+    searchClear.hidden = true;
+    setSearch('');
+    searchInput.focus();
+  });
   kwSheet.querySelector('[data-act="close"]')?.addEventListener('click', () => openKwSheet(false));
   feedbackSheet.querySelector('[data-act="close"]')?.addEventListener('click', () => {
     feedbackSheet.hidden = true;

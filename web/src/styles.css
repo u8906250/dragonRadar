@@ -308,16 +308,18 @@ a.chip { display: inline-flex; align-items: center; text-decoration: none; }
 
 .kw-bar { display: flex; gap: 8px; margin: 0 12px 10px; }
 .report-btn { flex: 0 0 auto; padding: 8px 12px; font-size: 14px; }
-.kw-row {
-  display: flex; align-items: center; gap: 8px; flex: 1; min-width: 0;
-  padding: 8px 12px; min-height: 44px; font: inherit; font-size: 13px; text-align: left; color: var(--text);
-  background: var(--card); border: var(--border-w) solid var(--line); border-radius: var(--card-radius); box-shadow: var(--card-shadow); cursor: pointer;
+/* 搜尋框：在目前抓到的發放、活動裡找字，雷達、地圖、清單都只留符合的 */
+.search-box { position: relative; display: flex; align-items: center; flex: 1; min-width: 0; }
+.search-box input {
+  flex: 1; min-width: 0; min-height: 44px; padding: 8px 36px 8px 12px; font: inherit; font-size: 16px; color: var(--text);
+  background: var(--card); border: var(--border-w) solid var(--line); border-radius: var(--card-radius); box-shadow: var(--card-shadow);
+  -webkit-appearance: none; appearance: none;
 }
-.kw-label { color: var(--muted); flex: 0 0 auto; }
-.kw-tags { flex: 1; min-width: 0; display: flex; gap: 6px; overflow: hidden; white-space: nowrap; }
-.kw-tag { padding: 3px 9px; border-radius: 999px; background: var(--chip-on-bg); color: var(--chip-on-text); font-weight: 700; font-size: 12px; }
-.kw-tag.more { background: transparent; color: var(--muted); padding-left: 0; }
-.kw-edit { flex: 0 0 auto; font-weight: 700; color: var(--accent); }
+.search-box input::placeholder { color: var(--muted); font-size: 14px; }
+.search-box input::-webkit-search-cancel-button { display: none; }
+.search-box input:focus { outline: 2px solid var(--highlight); outline-offset: 1px; }
+.search-clear { position: absolute; right: 6px; width: 30px; height: 30px; border: 0; border-radius: 999px; background: transparent; color: var(--muted); font-size: 15px; cursor: pointer; }
+.search-clear[hidden] { display: none; }
 .sheet-note { margin: 0 0 10px; font-size: 13px; line-height: 1.5; }
 .sheet-note.small { font-size: 12px; margin-top: 12px; }
 .kw-list { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 14px; }

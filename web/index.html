@@ -77,11 +77,10 @@
           <span id="updated-label" class="muted right"></span>
         </div>
         <div class="kw-bar">
-          <button type="button" id="kw-btn" class="kw-row" aria-label="管理追蹤的關鍵字">
-            <span class="kw-label">追蹤</span>
-            <span id="kw-summary" class="kw-tags"></span>
-            <span class="kw-edit">編輯</span>
-          </button>
+          <form id="search-form" class="search-box" role="search" autocomplete="off">
+            <input id="search-input" type="search" enterkeyhint="search" placeholder="搜尋標題、地點、物品、帳號…" aria-label="在目前的發放、活動裡搜尋" />
+            <button type="button" id="search-clear" class="search-clear" aria-label="清除搜尋" hidden>✕</button>
+          </form>
           <button type="button" id="report-btn" class="btn primary report-btn" aria-label="回報 Threads 貼文">＋回報</button>
         </div>
         <div class="filter-row" id="filter-row" hidden>
