@@ -592,8 +592,10 @@ export async function insertPlanned(env: Env, postId: string, p: PlannedEvent, n
 /** 對單一貼文跑 LLM 抽取、定位，列出每個地點或時段要建的事件（還沒寫進雷達）；early 是整則貼文就不行的原因 */
 export async function planPost(env: Env, post: PostRow, now = nowSec()): Promise<{ items: PlanItem[]; early: string | null }> {
   const first = await planPostWith(env, post, now, null);
-  // 使用者貼連結回報的、找不到地點：看發文的店家帳號、標記的店家帳號的名稱和簡介，再判讀一次
-  if (post.source !== 'link' || first.early || !lacksPlace(first.items)) return first;
+  // 使用者貼連結回報的、找不到地點：看發文的店家帳號、標記的店家帳號的名稱和簡介，再判讀一次。
+  // 店家貼文只寫「在櫃檯出示船員證」、沒寫地址時，模型常直接說不是活動，這種也試
+  const noPlace = first.early ? first.early === 'not_event' || first.early === 'no_events' : lacksPlace(first.items);
+  if (post.source !== 'link' || !noPlace) return first;
   const accounts = profileCandidates(post.text, post.username);
   if (accounts.length === 0) return first;
   const profiles = (await Promise.all(accounts.map((u) => fetchThreadsProfile(u)))).filter((p): p is ThreadsProfile => !!p);

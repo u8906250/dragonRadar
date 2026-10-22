@@ -50,7 +50,7 @@ export async function fetchThreadsProfile(username: string, timeoutMs = 8000): P
 }
 
 /** 貼文是店家自己發的（「本店」「歡迎來店」）：發文帳號就是店家 */
-const OWN_SHOP_RE = /本店|店內|店裡|小店|本攤|我們店|來店|到店|門市|本館/;
+const OWN_SHOP_RE = /本店|店內|店裡|小店|本攤|我們店|來店|到店|門市|本館|店休|公休|櫃檯|櫃台|店員|營業時間/;
 /** 標記的帳號前後有這些字，才當成店家（「由挺台店家 @luguocafe 代為發放」「在 @xxx 領取」） */
 const SHOP_BEFORE_RE = /店|館|坊|咖啡|餐|攤|市集|代為|代發|在|到|地點|地址/;
 const SHOP_AFTER_RE = /代為|代發|領取|索取|店|館|坊|咖啡|餐|攤/;
