@@ -5,7 +5,7 @@ import { bearingDeg, compassLabel, destination, formatKm, haversineKm, taiwanRad
 import { inShuangbei, SHUANGBEI_RINGS, shuangbeiRadiusKm } from './shuangbei';
 import { TAIWAN_RINGS } from './taiwan';
 import { LANDMARKS } from './landmarks';
-import { getModule, JOB_RISK_TEXT, JOB_SAFETY_TIPS, MODULES, type ModuleDef, type ModuleId } from './modules';
+import { getModule, JOB_RISK_TEXT, JOB_SAFETY_TIPS, MODULES, OFFER_SAFETY_TIPS, type ModuleDef, type ModuleId } from './modules';
 import { X_MAX_WEIGHT, xLength } from './xcount';
 import { splitPlace } from './place';
 import { crowdOf, MapView, type BaseMap } from './map';
@@ -151,6 +151,8 @@ let mod: ModuleDef = getModule(new URLSearchParams(location.search).get('module'
 
 // ---- 職缺（狗狗陪伴）----
 interface JobExtra {
+  /** hire 徵人；offer 可照顧（個人說可以幫忙照顧） */
+  role?: 'hire' | 'offer';
   work_from?: string | null;
   work_to?: string | null;
   slots?: string[];
@@ -161,6 +163,7 @@ interface JobExtra {
   risks?: string[];
 }
 const jobOf = (ev: { extra?: Record<string, unknown> | null }): JobExtra => (ev.extra ?? {}) as JobExtra;
+const isOffer = (ev: { extra?: Record<string, unknown> | null }): boolean => jobOf(ev).role === 'offer';
 const CONTACT_TEXT: Record<string, string> = { form: '填表單', line: '加 LINE', dm: '私訊、留言', phone: '打電話', email: 'Email', other: '其他方式' };
 const mdText = (d: string): string => d.slice(5).split('-').map(Number).join('/');
 /** 「11/20–11/30・每天 09:00–12:00、15:00–18:00」 */
@@ -171,10 +174,11 @@ function jobPeriod(j: JobExtra): string {
 }
 /** 有防詐提醒的職缺 */
 const jobRisky = (ev: { extra?: Record<string, unknown> | null }): boolean => (jobOf(ev).risks ?? []).some((r) => r !== 'no_employer');
-/** 職缺的防詐提醒：這則的可疑之處，加上每則都提醒的 */
+/** 職缺的防詐提醒：這則的可疑之處，加上每則都提醒的（可照顧的是給飼主的安全提醒） */
 function fraudBoxHtml(ev: { extra?: Record<string, unknown> | null }): string {
   const risks = (jobOf(ev).risks ?? []).map((r) => JOB_RISK_TEXT[r]).filter(Boolean);
-  return `<div class="fraud-box"><b>⚠️ 防詐提醒</b>${risks.length ? `<ul>${risks.map((r) => `<li class="risk">${esc(r)}</li>`).join('')}</ul>` : ''}<ul>${JOB_SAFETY_TIPS.map((t) => `<li>${esc(t)}</li>`).join('')}</ul></div>`;
+  const offer = isOffer(ev);
+  return `<div class="fraud-box"><b>⚠️ ${offer ? '把狗狗交給別人前' : '防詐提醒'}</b>${risks.length ? `<ul>${risks.map((r) => `<li class="risk">${esc(r)}</li>`).join('')}</ul>` : ''}<ul>${(offer ? OFFER_SAFETY_TIPS : JOB_SAFETY_TIPS).map((t) => `<li>${esc(t)}</li>`).join('')}</ul></div>`;
 }
 /**
  * 只看進行中：跟發放、活動、據點開關一起用，有打開的那幾類裡，只留現在就能去的
@@ -448,8 +452,11 @@ function allDayText(ev: EventOut, today: boolean): string {
 }
 
 function timeLine(it: Item, now: number): string {
-  // 職缺：工作期間、每天時段（從刊登起都算徵才中）
-  if (it.ev.kind === 'job') return `工作 ${jobPeriod(jobOf(it.ev))}`;
+  // 職缺：工作期間、每天時段（從刊登起都算刊登中）；可照顧的沒寫期間就是時間可討論
+  if (it.ev.kind === 'job') {
+    const period = jobPeriod(jobOf(it.ev));
+    return isOffer(it.ev) ? `可照顧 ${period === '沒寫工作期間' ? '時間可討論' : period}` : `工作 ${period}`;
+  }
   if (it.spot) return spotLine(it, now);
   const { ev } = it;
   if (ev.allDay) {
@@ -765,7 +772,7 @@ function render(): void {
       /* ignore */
     }
     const msg = `${titleOf(it.ev)}｜${it.ev.placeText}｜${formatKm(it.distanceKm)} ${compassLabel(it.bearing)}`;
-    const head = it.ev.kind === 'job' ? '附近有新職缺' : it.ev.kind === 'activity' ? '活動開始' : '開始發放';
+    const head = it.ev.kind === 'job' ? (isOffer(it.ev) ? '附近有人可以幫忙照顧狗狗' : '附近有新職缺') : it.ev.kind === 'activity' ? '活動開始' : '開始發放';
     showBanner(bannerEl, `${head}：${msg}`, 10_000);
     systemNotify(head, msg, `ev-${it.ev.id}`);
   }
@@ -865,7 +872,7 @@ function renderList(items: Item[], now: number): void {
       .sort((a, b) => (ph === 'active' ? a.distanceKm - b.distanceKm : a.sortAt - b.sortAt || a.distanceKm - b.distanceKm));
   const sections: Array<{ title: string; rows: Row[] }> = [
     // 職缺從刊登起都算「徵才中」
-    ...(['active', 'soon', 'later'] as const).map((ph) => ({ title: !mod.current && ph === 'active' ? '徵才中' : (PHASE_TITLE[ph] as string), rows: byPhase(ph) })),
+    ...(['active', 'soon', 'later'] as const).map((ph) => ({ title: !mod.current && ph === 'active' ? '刊登中' : (PHASE_TITLE[ph] as string), rows: byPhase(ph) })),
     { title: '固定據點', rows: spotsIn },
     { title: laterLabel(), rows: laterRows },
     { title: outLabel(), rows: outRange },
@@ -881,7 +888,7 @@ function renderList(items: Item[], now: number): void {
     : searching && rows.length === 0
       ? `${searching}找不到`
       : !mod.current
-        ? `${searching}${singles.length === 0 ? mod.emptyText : `${singles.length} ${mod.unit}徵才中`}${outText}`
+        ? `${searching}${singles.length === 0 ? mod.emptyText : dogSummary(singles)}${outText}`
         : singles.length === 0
           ? `${searching}${theme.emptyText}${spotText}${laterText}${outText}`
           : `${searching}${theme.summary(counts)}${spotText}${laterText}${outText}`;
@@ -1617,14 +1624,24 @@ function spotSchedule(it: Item): string {
 }
 
 /** 官方行程以官網為準；還沒開始的也不能回報 */
-/** 「回報已發完」的說法：活動「已結束」、職缺「已徵到」 */
-const endedWord = (ev: EventOut): string => (ev.kind === 'job' ? '已徵到' : ev.kind === 'activity' ? '已結束' : '已發完');
+/** 「回報已發完」的說法：活動「已結束」、徵人「已徵到」、可照顧「已不提供」 */
+const endedWord = (ev: EventOut): string => (ev.kind === 'job' ? (isOffer(ev) ? '已不提供' : '已徵到') : ev.kind === 'activity' ? '已結束' : '已發完');
+
+/** 狗狗陪伴的摘要：「2 個徵人、1 個可照顧」 */
+function dogSummary(rows: Array<{ it?: Item }>): string {
+  const offers = rows.filter((r) => r.it && isOffer(r.it.ev)).length;
+  const hires = rows.length - offers;
+  return [hires ? `${hires} 個徵人` : '', offers ? `${offers} 個可照顧` : ''].filter(Boolean).join('、');
+}
 
 /** 職缺的詳細資料：薪資、工作期間、雇主、怎麼應徵、內容，加上防詐提醒 */
 function jobDetailHtml(it: Item, now: number): string {
   const { ev } = it;
   const j = jobOf(ev);
-  return `${fraudBoxHtml(ev)}<p>類型：職缺<br>${j.pay ? `薪資：${esc(j.pay)}<br>` : ''}工作期間：${esc(jobPeriod(j))}<br>雇主：${j.employer ? esc(j.employer) : '<span class="risk">沒寫</span>'}<br>${j.contact ? `應徵方式：${esc(CONTACT_TEXT[j.contact] ?? j.contact)}<br>` : ''}${j.requirements ? `內容：${esc(j.requirements)}<br>` : ''}地點：${esc(placeOf(ev))}${ev.approxArea ? `<br><span class="approx-note">約略位置：只知道在${esc(ev.approxArea)}</span>` : ''}<br>距離：${ev.approxArea ? '約 ' : ''}${formatKm(it.distanceKm)}，${compassLabel(it.bearing)}方${ev.endOpen ? '' : ` · 刊登到 ${dateFmt.format(new Date((ev.endAt - 1) * 1000))}`}${now ? '' : ''}</p>`;
+  const offer = isOffer(ev);
+  const period = jobPeriod(j);
+  const who = offer ? `提供者：${j.employer ? esc(j.employer) : '個人'}<br>` : `雇主：${j.employer ? esc(j.employer) : '<span class="risk">沒寫</span>'}<br>`;
+  return `${fraudBoxHtml(ev)}<p>類型：${offer ? '可照顧（有人可以幫忙照顧狗狗）' : '徵人（找人照顧狗狗）'}<br>${j.pay ? `${offer ? '費用' : '薪資'}：${esc(j.pay)}<br>` : ''}${offer ? '可照顧期間' : '工作期間'}：${esc(offer && period === '沒寫工作期間' ? '時間可討論' : period)}<br>${who}${j.contact ? `${offer ? '聯絡方式' : '應徵方式'}：${esc(CONTACT_TEXT[j.contact] ?? j.contact)}<br>` : ''}${j.requirements ? `${offer ? '條件' : '內容'}：${esc(j.requirements)}<br>` : ''}地點：${esc(placeOf(ev))}${ev.approxArea ? `<br><span class="approx-note">約略位置：只知道在${esc(ev.approxArea)}</span>` : ''}<br>距離：${ev.approxArea ? '約 ' : ''}${formatKm(it.distanceKm)}，${compassLabel(it.bearing)}方${ev.endOpen ? '' : ` · 刊登到 ${dateFmt.format(new Date((ev.endAt - 1) * 1000))}`}${now ? '' : ''}</p>`;
 }
 
 function canReportEnded(ev: EventOut, now: number): boolean {
@@ -2376,7 +2393,7 @@ function placeLine(ev: EventOut): string {
 }
 
 function kindLabel(ev: EventOut): string {
-  return ev.kind === 'job' ? '職缺' : ev.kind === 'activity' ? '活動' : '發放';
+  return ev.kind === 'job' ? (isOffer(ev) ? '可照顧' : '徵人') : ev.kind === 'activity' ? '活動' : '發放';
 }
 
 /** 服務處、競選總部（候選人、議員、政黨的）：固定據點用房子圖示、標「服務處」，跟店家、餐廳分開 */
@@ -2512,7 +2529,7 @@ function setReportBusy(busy: boolean, label = '判讀中…'): void {
 
 /** 預覽上的時間：固定據點寫每天幾點、從哪天起排幾天；一般的寫哪天幾點到幾點 */
 function previewWhen(p: PreviewItem): string {
-  if (p.kind === 'job') return `工作 ${jobPeriod(jobOf(p))}`;
+  if (p.kind === 'job') return `${isOffer(p) ? '可照顧' : '工作'} ${jobPeriod(jobOf(p))}`;
   const day = (t: number): string => dateFmt.format(new Date(t * 1000));
   // 一天好幾個時段：「12:00–13:30、18:00–20:30」；沒寫結束的只寫開始，最後寫「發完為止」
   const open = p.kind === 'activity' ? '沒寫結束時間' : '發完為止';
@@ -2601,7 +2618,7 @@ function renderPreview(r: SubmitResult): void {
     <ul class="report-preview">${items
       .map(
         (p) => `<li>
-          <b>${p.kind === 'job' ? '職缺' : p.kind === 'activity' ? '活動' : '發放'}${p.spot ? '・固定據點' : ''}｜${esc(p.title)}</b>
+          <b>${p.kind === 'job' ? (isOffer(p) ? '可照顧' : '徵人') : p.kind === 'activity' ? '活動' : '發放'}${p.spot ? '・固定據點' : ''}｜${esc(p.title)}</b>
           ${p.kind === 'job' && (jobOf(p).risks ?? []).some((r) => r !== 'no_employer') ? `<small class="preview-warn">⚠️ ${esc((jobOf(p).risks ?? []).map((r) => JOB_RISK_TEXT[r]).filter(Boolean).join('；'))}</small>` : ''}
           ${p.item ? `<small>${esc(p.item)}</small>` : ''}
           <small>時間：${esc(previewWhen(p))}</small>

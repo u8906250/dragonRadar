@@ -35,7 +35,7 @@ describe('normalizeJobs', () => {
     );
     expect(r?.is_event).toBe(true);
     expect(r?.events[0]).toMatchObject({ kind: 'job', title: '大安區狗狗陪伴員', item: 'NT$300/時', spot: false });
-    expect(r?.events[0].job).toEqual({ work_from: '2026-11-20', work_to: '2026-11-30', slots: ['09:00-12:00', '15:00-18:00'], pay: 'NT$300/時', employer: null, contact: 'form', requirements: '陪狗狗散步、玩耍' });
+    expect(r?.events[0].job).toEqual({ role: 'hire', work_from: '2026-11-20', work_to: '2026-11-30', slots: ['09:00-12:00', '15:00-18:00'], pay: 'NT$300/時', employer: null, contact: 'form', requirements: '陪狗狗散步、玩耍' });
   });
   it('drops jobs when it is not a job post', () => {
     expect(normalizeJobs('{"is_job":false,"jobs":[{"title":"x"}]}')).toEqual({ is_event: false, events: [] });
@@ -51,7 +51,7 @@ describe('normalizeSlot', () => {
 });
 
 describe('jobRisks', () => {
-  const job = { work_from: null, work_to: null, slots: [], pay: null, employer: null, contact: 'form', requirements: null };
+  const job = { role: 'hire' as const, work_from: null, work_to: null, slots: [], pay: null, employer: null, contact: 'form', requirements: null };
   it('flags a form-only post with no employer or phone', () => {
     expect(jobRisks(job, POST)).toEqual(['no_employer', 'form_only']);
   });
@@ -85,5 +85,15 @@ describe('detectEnded for jobs', () => {
   it('sees a filled job but not "until full"', () => {
     expect(detectEnded('更新：已徵到，謝謝大家')).toBe(true);
     expect(detectEnded('狗狗陪伴員 名額有限 額滿為止')).toBe(false);
+  });
+});
+
+describe('offers to look after dogs', () => {
+  it('reads an offer and only flags money requests', () => {
+    const r = normalizeJobs({ is_job: true, jobs: [{ role: 'offer', title: '台中市區免費寄宿照顧', place_text: '台中市區', place_query: '台中市', work_from: null, work_to: null, slots: [], pay: '免費', employer: null, contact: 'dm', requirements: '飼主自備飼料、用品', confidence: 0.9 }] });
+    const job = r?.events[0].job;
+    expect(job?.role).toBe('offer');
+    expect(job && jobRisks(job, '可以免費幫忙照顧，私訊我')).toEqual([]);
+    expect(job && jobRisks(job, '照顧前要先匯保證金')).toEqual(['money']);
   });
 });

@@ -706,7 +706,7 @@ async function planJobs(env: Env, post: PostRow, jobs: ExtractedEvent[], now: nu
       items.push({ group, plan: null, reason: 'low_confidence' });
       continue;
     }
-    const job = ex.job ?? { work_from: null, work_to: null, slots: [], pay: null, employer: null, contact: null, requirements: null };
+    const job = ex.job ?? { role: 'hire' as const, work_from: null, work_to: null, slots: [], pay: null, employer: null, contact: null, requirements: null };
     const start = Math.min(post.posted_at, now);
     const lastDay = taipeiDayOf(job.work_to) ?? taipeiDayOf(job.work_from);
     const end = Math.min(lastDay !== null ? lastDay + DAY_SEC : post.posted_at + JOB_DEFAULT_DAYS * DAY_SEC, post.posted_at + JOB_MAX_DAYS * DAY_SEC);

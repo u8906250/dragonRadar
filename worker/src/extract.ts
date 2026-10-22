@@ -7,6 +7,8 @@ export type EventKind = 'giveaway' | 'activity' | 'job';
 
 /** 職缺（狗狗陪伴模組）：工作期間、每天時段、薪資、雇主、怎麼應徵 */
 export interface JobInfo {
+  /** hire 徵人（飼主、店家找人照顧）；offer 可照顧（個人說可以幫忙照顧、寄宿、遛狗，免費或收費） */
+  role: 'hire' | 'offer';
   /** 工作期間第一天、最後一天 YYYY-MM-DD；沒寫是 null */
   work_from: string | null;
   work_to: string | null;
