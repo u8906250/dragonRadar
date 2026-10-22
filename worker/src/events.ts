@@ -585,6 +585,8 @@ export async function planPost(env: Env, post: PostRow, now = nowSec()): Promise
   if (!extraction.is_event) return { items: [], early: 'not_event' };
   if (extraction.events.length === 0) return { items: [], early: 'no_events' };
   if (module === 'dog') return { items: await planJobs(env, post, extraction.events, now), early: null };
+  // 模型常把付款的 Line Pay 當成用 LINE 聯絡：貼文只有 Line Pay 的不算
+  if (!/(?:line|賴)(?!\s*pay)/i.test(text)) for (const e of extraction.events) if (e.extra?.contact === 'line') e.extra.contact = null;
   // 羽球臨打的找臨打（需求）是刊登，招臨打（提供）照場次排
   const seeks = extraction.events.filter((e) => e.extra?.role === 'seek');
   if (seeks.length > 0) extraction.events = extraction.events.filter((e) => e.extra?.role !== 'seek');
