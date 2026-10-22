@@ -1,5 +1,5 @@
 import type { Env } from './env';
-import { applySupplementDate, dropBroughtItem, dropSelfPlace, EVENT_SPEC, extractFromPost, localizeTimes, openWeekdaysFromText, splitDropTimes, splitMultiDay, spotEndFromText, startNowForDeadline, timeZoneOf, untilInText, weekdaysInText, type EventKind, type ExtractedEvent } from './extract';
+import { applySupplementDate, dropBroughtItem, dropSelfPlace, EVENT_SPEC, extractFromPost, localizeTimes, openWeekdaysFromText, splitDropTimes, splitMultiDay, splitWeekdayWeekend, spotHoursFromText, startNowForDeadline, timeZoneOf, untilInText, weekdaysInText, type EventKind, type ExtractedEvent } from './extract';
 import { geocodeAddress, parseTwAddress, type TwAddress } from './address';
 import { SESSION_SPEC } from './badminton';
 import { FOOD_SPEC } from './food';
@@ -611,6 +611,8 @@ export async function planPost(env: Env, post: PostRow, now = nowSec()): Promise
   const deadline = Date.now() + ADDRESS_BUDGET_MS;
   // 「13:00｜10 個、15:00｜10 個」被合成一段的，拆回每個時間點各一筆
   extraction.events = splitDropTimes(extraction.events, text);
+  // 「平日 0930-2030 假日 1000-1800」只給一筆的，拆成平日、假日兩筆
+  extraction.events = extraction.events.flatMap((ex) => splitWeekdayWeekend(ex, spotScope(text, ex, extraction.events) ?? ''));
   for (const [group, ex] of extraction.events.entries()) {
     // 國外的活動：時間換成當地時區的時間點、地點在那個國家查；固定據點的每天時段是照台灣時間排的，國外的先當單次
     if (ex.country) {
@@ -640,8 +642,10 @@ export async function planPost(env: Env, post: PostRow, now = nowSec()): Promise
     const scope = spotScope(text, ex, extraction.events);
     const open = scope ? openWeekdaysFromText(scope) : undefined;
     if (open !== undefined && !(ex.weekdays && /平日|假日|週末|周末/.test(scope ?? ''))) ex.weekdays = open;
-    // 只讀到開始時間：從貼文、補充找結束時間（「12:00–21:00」「下午7點30結束」）
-    spotEndFromText(ex, scope ?? text, !!scope);
+    // 時段照貼文校正：開始時間是貼文某段的開始就用那段的結束；貼文沒寫的開始時間換成貼文寫的；
+    // 還是沒結束就找「下午7點30結束」
+    const slots = extraction.events.filter((e) => e.spot && (e.place_query ?? e.place_text) === (ex.place_query ?? ex.place_text)).length;
+    spotHoursFromText(ex, scope ?? text, { endPhrase: !!scope, single: !!scope && slots === 1 });
     // 最後一天要是貼文（或補充）寫的，模型自己猜的不算
     ex.until = untilInText(ex.until, text);
     const sessions = spotSessions(ex, post.posted_at, now);

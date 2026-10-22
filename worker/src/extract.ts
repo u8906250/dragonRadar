@@ -361,7 +361,10 @@ export function splitMultiDay(ex: Pick<ExtractedEvent, 'start_at' | 'end_at' | '
  */
 export function weekdaysFromText(text: string): number[] | null {
   const m = new RegExp(`每\\s*${DAY_LIST}`).exec(text);
-  return m ? normalizeWeekdays(dayList(m[1])) : null;
+  if (m) return normalizeWeekdays(dayList(m[1]));
+  // 營業時間寫「週三至周日」「週一到週六」這種範圍（前面不是日期的括號）
+  const r = /(?<![（(\d/])(?:週|周|星期|禮拜)\s*([一二三四五六日天])\s*(?:到|至|~|～|-|－)\s*(?:週|周|星期|禮拜)\s*([一二三四五六日天])(?![）)])/.exec(text);
+  return r ? normalizeWeekdays(dayList(`${r[1]}到${r[2]}`)) : null;
 }
 
 /** 「一、三」「二到五」「六日」（前面的週、星期已經拿掉或不拿掉都可以） */
@@ -407,41 +410,110 @@ export function openWeekdaysFromText(text: string): number[] | null | undefined 
 
 const CN_NUM: Record<string, number> = { 一: 1, 二: 2, 兩: 2, 三: 3, 四: 4, 五: 5, 六: 6, 七: 7, 八: 8, 九: 9, 十: 10, 十一: 11, 十二: 12 };
 const PM_RE = /下午|晚上|傍晚|晚間/;
+/** 一個時刻：「12:00」「0930」「9點半」「下午7點30」「11」（「11-21」那種只寫小時的） */
+const CLOCK = '(?:(上午|中午|下午|晚上|傍晚|晚間)\\s*)?(?:([01]\\d|2[0-4])([0-5]\\d)|([01]?\\d|2[0-4])(?:\\s*[:：點時]\\s*([0-5]\\d|半)?)?)';
+const RANGE_RE = new RegExp(`(?<![\\d/.])${CLOCK}\\s*(?:[-–—~～至到]|－)\\s*${CLOCK}(?![\\d/.])`, 'g');
+const START_RE = new RegExp(`(?<![\\d/.])${CLOCK}(?![\\d/.])\\s*(?:起|開始)`, 'g');
+
+/** 照上午下午換成當天第幾秒；after 是同一段的開始（「11-21」「9點到5點」的結束比開始早就是下午） */
+function clockSec(m: RegExpMatchArray, i: number, after?: number): number | null {
+  const ampm = m[i] ?? '';
+  let h = m[i + 1] !== undefined ? Number(m[i + 1]) : Number(m[i + 3]);
+  const min = m[i + 1] !== undefined ? Number(m[i + 2]) : m[i + 4] === '半' ? 30 : m[i + 4] ? Number(m[i + 4]) : 0;
+  if (!Number.isFinite(h) || h > 24) return null;
+  if (h < 12 && PM_RE.test(ampm)) h += 12;
+  if (ampm === '中午' && h < 6) h += 12;
+  let sec = h * 3600 + min * 60;
+  if (after !== undefined && sec <= after && h < 12) sec += 12 * 3600;
+  return sec <= DAY_SEC ? sec : null;
+}
+
+/** 文字裡的時段（開始、結束都是當天第幾秒） */
+export function timeRanges(text: string): Array<[number, number]> {
+  const out: Array<[number, number]> = [];
+  for (const m of halfWidth(text).matchAll(RANGE_RE)) {
+    const a = clockSec(m, 1);
+    const b = a === null ? null : clockSec(m, 6, a);
+    if (a !== null && b !== null && b > a) out.push([a, b]);
+  }
+  return out;
+}
 
 /**
- * 固定據點只讀到開始時間（模型看到「發完為止」把結束當成沒寫、或沒理補充的「下午7點30結束」）：
- * 從貼文找從那個時間開始的時段（「12:00–21:00」），或「7點30結束」「六點打烊」，補上結束時間。補了回傳 true。
+ * 固定據點的時段照貼文校正（模型常讀錯）：
+ * - 開始時間是貼文某個時段的開始（「11:30～14:30，17:00～20:30」的 11:30）：結束就是那個時段的結束，模型給的不算
+ * - 開始時間貼文根本沒寫（只有一個時段時）：貼文只寫了一個開始時間（「每日上午 11:00 起」）就用它
+ * - 還是沒有結束：「下午7點30結束」「六點打烊」（endPhrase 為 true 時才看，好幾個地點時不看）
+ * 改了回傳 true。
  */
-export function spotEndFromText(ex: Pick<ExtractedEvent, 'spot' | 'start_at' | 'end_at'>, text: string, endPhrase = true): boolean {
-  if (!ex.spot || ex.end_at) return false;
+export function spotHoursFromText(ex: Pick<ExtractedEvent, 'spot' | 'start_at' | 'end_at'>, text: string, opts: { endPhrase?: boolean; single?: boolean } = {}): boolean {
+  if (!ex.spot) return false;
   const start = parseIsoToUnix(ex.start_at);
   if (start === null) return false;
-  const tod = (start + 8 * 3600) % DAY_SEC;
+  let tod = (start + 8 * 3600) % DAY_SEC;
   // 00:00 是沒寫幾點（整天）
   if (tod === 0) return false;
+  const day = start - tod;
   const t = halfWidth(text);
-  const setEnd = (h: number, m: number): boolean => {
-    const end = h * 3600 + m * 60;
-    if (end <= tod || end > DAY_SEC) return false;
-    ex.end_at = taipeiIso(start - tod + end);
-    return true;
-  };
-  const range = /(?<![\d/.])([01]?\d|2[0-3])(?:\s*[:：點]\s*([0-5]\d|半)?)?\s*(?:[-–—~～至到]|－)\s*(上午|中午|下午|晚上|傍晚)?\s*([01]?\d|2[0-4])(?:\s*[:：點]\s*([0-5]\d|半)?)?(?![\d/.])/g;
-  const min = (s: string | undefined): number => (s === '半' ? 30 : s ? Number(s) : 0);
-  for (const m of t.matchAll(range)) {
-    let h1 = Number(m[1]);
-    if (h1 * 3600 + min(m[2]) * 60 !== tod && (h1 + 12) * 3600 + min(m[2]) * 60 !== tod) continue;
-    if ((h1 + 12) * 3600 + min(m[2]) * 60 === tod) h1 += 12;
-    let h2 = Number(m[4]);
-    if (h2 < h1 && h2 < 12) h2 += 12;
-    if (setEnd(h2, min(m[5]))) return true;
+  const ranges = timeRanges(t);
+  const starts = [...t.matchAll(START_RE)].map((m) => clockSec(m, 1)).filter((x): x is number => x !== null);
+  const before = ex.start_at + '|' + ex.end_at;
+  // 模型的開始時間貼文沒寫：只有一個候選時才換
+  const mentioned = ranges.some(([a]) => a === tod) || starts.includes(tod) || clockMentioned(t, tod);
+  if (!mentioned && opts.single) {
+    const cands = [...new Set([...ranges.map(([a]) => a), ...starts])];
+    if (cands.length === 1) {
+      tod = cands[0];
+      ex.start_at = taipeiIso(day + tod);
+      const endNow = parseIsoToUnix(ex.end_at);
+      if (endNow !== null && (endNow + 8 * 3600) % DAY_SEC <= tod) ex.end_at = null;
+    }
   }
-  if (!endPhrase) return false;
-  const phrase = /(上午|中午|下午|晚上|傍晚|晚間)?\s*(\d{1,2}|十[一二]?|[一二兩三四五六七八九])\s*[點:：時]\s*(\d{1,2}|半)?\s*分?\s*(?:就)?(?:結束|截止|打烊|收攤|為止)/.exec(t);
-  if (!phrase) return false;
-  let h = /\d/.test(phrase[2]) ? Number(phrase[2]) : CN_NUM[phrase[2]];
-  if (h < 12 && (PM_RE.test(phrase[1] ?? '') || h * 3600 <= tod)) h += 12;
-  return setEnd(h, min(phrase[3]));
+  const ends = [...new Set(ranges.filter(([a]) => a === tod).map(([, b]) => b))];
+  if (ends.length === 1) ex.end_at = taipeiIso(day + ends[0]);
+  else if (!ex.end_at && opts.endPhrase) {
+    const phrase = /(上午|中午|下午|晚上|傍晚|晚間)?\s*(\d{1,2}|十[一二]?|[一二兩三四五六七八九])\s*[點:：時]\s*(\d{1,2}|半)?\s*分?\s*(?:就)?(?:結束|截止|打烊|收攤|為止)/.exec(t);
+    if (phrase) {
+      let h = /\d/.test(phrase[2]) ? Number(phrase[2]) : CN_NUM[phrase[2]];
+      if (h < 12 && (PM_RE.test(phrase[1] ?? '') || h * 3600 <= tod)) h += 12;
+      const end = h * 3600 + (phrase[3] === '半' ? 30 : phrase[3] ? Number(phrase[3]) : 0) * 60;
+      if (end > tod && end <= DAY_SEC) ex.end_at = taipeiIso(day + end);
+    }
+  }
+  return ex.start_at + '|' + ex.end_at !== before;
+}
+
+/** 文字裡有沒有提到這個時刻（「13:00」「下午1點」「1300」） */
+function clockMentioned(t: string, tod: number): boolean {
+  for (const m of t.matchAll(new RegExp(`(?<![\\d/.])${CLOCK}(?![\\d/.])`, 'g'))) {
+    if (m[2] === undefined && m[5] === undefined && !/[:：點時]/.test(m[0])) continue;
+    const sec = clockSec(m, 1);
+    if (sec === tod || (sec !== null && sec + 12 * 3600 === tod)) return true;
+  }
+  return false;
+}
+
+/**
+ * 「平日 0930-2030 假日 1000-1800」模型只給一筆、沒分星期幾：拆成平日（週一到五）、假日（週六日）各一筆。
+ * 已經有分星期幾的不動。
+ */
+export function splitWeekdayWeekend<T extends Pick<ExtractedEvent, 'spot' | 'start_at' | 'end_at' | 'weekdays'>>(ex: T, text: string): T[] {
+  if (!ex.spot || ex.weekdays?.length) return [ex];
+  const start = parseIsoToUnix(ex.start_at);
+  if (start === null) return [ex];
+  const t = halfWidth(text);
+  const pick = (label: string): [number, number] | null => {
+    const m = new RegExp(`(?:${label})\\s*[:：]?\\s*((?:[^\\n\\d]{0,4})${CLOCK}\\s*(?:[-–—~～至到]|－)\\s*${CLOCK})`).exec(t);
+    return m ? (timeRanges(m[1])[0] ?? null) : null;
+  };
+  const weekday = pick('平日|週一至週五|周一至周五|週一到週五|周一到周五');
+  const weekend = pick('假日|例假日|週末|周末|六日|週六日|周六日');
+  if (!weekday || !weekend) return [ex];
+  const day = start - ((start + 8 * 3600) % DAY_SEC);
+  return [
+    { ...ex, weekdays: [1, 2, 3, 4, 5], start_at: taipeiIso(day + weekday[0]), end_at: taipeiIso(day + weekday[1]) },
+    { ...ex, weekdays: [6, 7], start_at: taipeiIso(day + weekend[0]), end_at: taipeiIso(day + weekend[1]) },
+  ];
 }
 
 export function parseLoose(raw: unknown): unknown {

@@ -1,5 +1,5 @@
 import type { ExtractedEvent } from '../src/extract';
-import { applySupplementDate, closedWeekdays, dropBroughtItem, dropSelfPlace, openWeekdaysFromText, splitDropTimes, splitMultiDay, spotEndFromText, startNowForDeadline, untilInText, weekdaysFromText, weekdaysInText } from '../src/extract';
+import { applySupplementDate, closedWeekdays, dropBroughtItem, dropSelfPlace, openWeekdaysFromText, splitDropTimes, splitMultiDay, spotHoursFromText, splitWeekdayWeekend, startNowForDeadline, untilInText, weekdaysFromText, weekdaysInText } from '../src/extract';
 import { isAreaOnly } from '../src/geocode';
 import { existedOutcome, notListedWhy, previewOf } from '../src/reports';
 import { describe, expect, it } from 'vitest';
@@ -808,21 +808,38 @@ describe('fixed spot opening days and closing time', () => {
     expect(openWeekdaysFromText('平日0930-2030 假日1000-1800')).toBeUndefined();
     expect(openWeekdaysFromText('每日 11:00 起')).toBeUndefined();
   });
-  it('fills a missing closing time from the hours or a supplement', () => {
-    const ex = (start: string) => ({ spot: true, start_at: start, end_at: null as string | null });
+  it('corrects spot hours from the post', () => {
+    const ex = (start: string, end: string | null = null) => ({ spot: true, start_at: start, end_at: end });
     const a = ex('2026-10-21T12:00:00+08:00');
-    expect(spotEndFromText(a, '發完為止\n🕛營業時間：週三至周日的 12:00–21:00')).toBe(true);
+    expect(spotHoursFromText(a, '發完為止\n🕛營業時間：週三至周日的 12:00–21:00')).toBe(true);
     expect(a.end_at).toBe('2026-10-21T21:00:00+08:00');
     const b = ex('2026-10-22T11:00:00+08:00');
-    expect(spotEndFromText(b, '☀️ 每日上午 11:00 起\n\n【回報的人補充】時間：下午7點30結束')).toBe(true);
+    expect(spotHoursFromText(b, '☀️ 每日上午 11:00 起\n\n【回報的人補充】時間：下午7點30結束', { endPhrase: true })).toBe(true);
     expect(b.end_at).toBe('2026-10-22T19:30:00+08:00');
     const c = ex('2026-10-21T14:00:00+08:00');
-    expect(spotEndFromText(c, '10/21（三）14:00 開始\n【回報的人補充】時間：下午六點結束')).toBe(true);
+    expect(spotHoursFromText(c, '10/21（三）14:00 開始\n【回報的人補充】時間：下午六點結束', { endPhrase: true })).toBe(true);
     expect(c.end_at).toBe('2026-10-21T18:00:00+08:00');
-    const d = ex('2026-10-24T12:00:00+08:00');
-    expect(spotEndFromText(d, '日期：10/24（六）～ 10/26（一）')).toBe(false);
-    const e = ex('2026-10-22T00:00:00+08:00');
-    expect(spotEndFromText(e, '10:00-19:00')).toBe(false);
+    // 模型把兩段合成 11:30–20:30
+    const d = ex('2026-10-21T11:30:00+08:00', '2026-10-21T20:30:00+08:00');
+    expect(spotHoursFromText(d, '營業時間：11:30～14:30，17:00～20:30')).toBe(true);
+    expect(d.end_at).toBe('2026-10-21T14:30:00+08:00');
+    // 模型編了 13:00（貼文是「11:00 起」和「下午 1:15」限定場）
+    const e = ex('2026-10-22T13:00:00+08:00', '2026-10-22T19:30:00+08:00');
+    expect(spotHoursFromText(e, '☀️ 每日上午 11:00 起\n🌊 10/22（四） 下午 1:15 限定\n【回報的人補充】時間：下午7點30結束', { endPhrase: true, single: true })).toBe(true);
+    expect([e.start_at, e.end_at]).toEqual(['2026-10-22T11:00:00+08:00', '2026-10-22T19:30:00+08:00']);
+    expect(spotHoursFromText(ex('2026-10-24T12:00:00+08:00'), '日期：10/24（六）～ 10/26（一）')).toBe(false);
+    expect(spotHoursFromText(ex('2026-10-22T00:00:00+08:00'), '10:00-19:00')).toBe(false);
+    const f = ex('2026-10-22T20:00:00+08:00', '2026-10-22T21:00:00+08:00');
+    expect(spotHoursFromText(f, '🈺11-21\n晚上20-21點發放')).toBe(false);
+  });
+  it('splits weekday and weekend hours', () => {
+    const out = splitWeekdayWeekend({ spot: true, start_at: '2026-10-22T09:30:00+08:00', end_at: '2026-10-22T20:30:00+08:00', weekdays: null }, '板橋莒光路99號\n\n平日0930-2030\n假日1000-1800');
+    expect(out.map((e) => [e.weekdays, e.start_at.slice(11, 16), e.end_at?.slice(11, 16)])).toEqual([[[1, 2, 3, 4, 5], '09:30', '20:30'], [[6, 7], '10:00', '18:00']]);
+    expect(splitWeekdayWeekend({ spot: true, start_at: '2026-10-22T09:30:00+08:00', end_at: null, weekdays: null }, '每日 09:30-20:30')).toHaveLength(1);
+  });
+  it('reads a bare weekday range', () => {
+    expect(weekdaysFromText('🕛營業時間：週三至周日的 12:00–21:00')).toEqual([3, 4, 5, 6, 7]);
+    expect(weekdaysFromText('10/21（週三）~10/25（週日）')).toBeNull();
   });
   it('scopes text to one of several spots', () => {
     const text = '✅小港服務處：沿海一路261號\n服務時間：09:00~18:00（上班日）\n✅前鎮服務處：崗山中街228號\n服務時間：09:00~18:00（上班日）';
