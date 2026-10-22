@@ -25,9 +25,9 @@ export function parseProfileHtml(html: string, username: string): ThreadsProfile
   const name = rawName && rawName.toLowerCase() !== username.toLowerCase() ? rawName : null;
   const bio =
     desc
-      ?.replace(/^\s*[\d.,]+\s*[KMkm萬]?\s*(?:Followers?|位粉絲|粉絲)\s*•\s*(?:[\d.,]+\s*[KMkm萬]?\s*(?:Threads?|則串文|串文)\s*[•.]\s*)?/, '')
+      ?.replace(/^\s*[\d.,]+\s*[KMkm萬]?\s*(?:Followers?|位粉絲|粉絲)\s*•\s*(?:[\d.,]+\s*[KMkm萬]?\s*(?:Threads?|則串文|串文)\s*[•.。]?\s*)?/, '')
       .replace(/\s*See the latest conversations with @[A-Za-z0-9_.]+\.?\s*$/, '')
-      .replace(/\s*查看 @[A-Za-z0-9_.]+ 的最新對話.*$/, '')
+      .replace(/\s*[。.]?\s*查看 @[A-Za-z0-9_.]+ .*?最新對話。?\s*$/, '')
       .trim() || null;
   // 沒有簡介、名稱又跟帳號一樣：沒有線索
   if (!name && (!bio || /^[\d.,]+\s*[KMkm萬]?\s*(?:Followers?|粉絲)/.test(bio))) return { username, name: null, bio: null };

@@ -856,6 +856,10 @@ describe('threads profile hints', () => {
     expect(parseProfileHtml(html, 'luguocafe')).toEqual({ username: 'luguocafe', name: '爐鍋咖啡 Luguo Cafe', bio: '💚LuguoCafe in Taiwan. #爐鍋咖啡好喝.' });
     const empty = '<meta property="og:title" content="kylekuo1979 (&#064;kylekuo1979) &#x2022; Threads, Say more" /><meta property="og:description" content="180 Followers &#x2022; 61 Threads. See the latest conversations with @kylekuo1979." />';
     expect(parseProfileHtml(empty, 'kylekuo1979')).toEqual({ username: 'kylekuo1979', name: null, bio: null });
+    const zh = '<meta property="og:description" content="180 位粉絲 &#x2022; 61 則串文。查看 @kylekuo1979 參與的最新對話。" />';
+    expect(parseProfileHtml(zh, 'kylekuo1979')).toEqual({ username: 'kylekuo1979', name: null, bio: null });
+    const zh2 = '<meta property="og:description" content="5,300 位粉絲 &#x2022; 861 則串文 &#x2022; LuguoCafe in Taiwan. #爐鍋咖啡好喝 #luguocafe.com 。查看 @luguocafe 參與的最新對話。" />';
+    expect(parseProfileHtml(zh2, 'luguocafe')?.bio).toBe('LuguoCafe in Taiwan. #爐鍋咖啡好喝 #luguocafe.com');
   });
   it('picks the shop accounts to look up', () => {
     expect(profileCandidates('準備了50個 由挺台店家@luguocafe "爐鍋咖啡@ 小藝埕" 代為發放', 'kylekuo1979')).toEqual(['luguocafe']);
