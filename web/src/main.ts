@@ -1,7 +1,7 @@
 import './styles.css';
 import { addKeyword, collectLetter, deletePushSubscription, sendFeedback, type FeedbackKind, fetchPushKey, savePushSubscription, confirmReport, rejectReport, supplementReport, deleteBottle, dropBottle, recycleBottle, fetchBottles, fetchEvents, fetchHealth, fetchKeywords, fetchMyBottles, fetchMyReports, fetchRoutes, pickBottle, reportBottle, reportEnded, submitLink, withdrawReport } from './api';
 import { compassSupported, startCompass } from './compass';
-import { bearingDeg, compassLabel, formatKm, haversineKm, taiwanRadiusKm, type LatLng } from './geo';
+import { bearingDeg, compassLabel, destination, formatKm, haversineKm, taiwanRadiusKm, type LatLng } from './geo';
 import { inShuangbei, SHUANGBEI_RINGS, shuangbeiRadiusKm } from './shuangbei';
 import { TAIWAN_RINGS } from './taiwan';
 import { LANDMARKS } from './landmarks';
@@ -165,6 +165,7 @@ const detailEl = $('#detail');
 const countLabel = $('#count-label');
 const originLabel = $('#origin-label');
 const useGpsBtn = $<HTMLButtonElement>('#use-gps');
+const homeBtn = $<HTMLButtonElement>('#home-btn');
 const updatedLabel = $('#updated-label');
 const modeBadge = $('#mode-badge');
 const notifyBtn = $<HTMLButtonElement>('#notify-btn');
@@ -240,6 +241,7 @@ const radar = new Radar(
   (factor, done) => zoomRadar(factor, done),
   (id) => selectLandmark(id),
   (id) => selectBottle(id),
+  (bearing, km, done) => panRadar(bearing, km, done),
 );
 const map = new MapView(
   $('#map'),
@@ -1693,6 +1695,56 @@ function esc(s: string): string {
   return s.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c] as string);
 }
 
+/** 拖曳雷達：開始拖之前的位置（放開時跟它比有沒有移動，決定要不要重抓） */
+let panFrom: Origin | null = null;
+let panFrame = 0;
+
+/**
+ * 在雷達上拖曳＝移動你的位置（變成手動位置）。拖的時候只重畫雷達、清單，範圍維持原本的公里數；
+ * 放開才存下來、重抓附近的資料（雙北、全台的範圍也這時照新位置重算）
+ */
+function panRadar(bearing: number, km: number, done: boolean): void {
+  if (!panFrom) panFrom = origin;
+  if (km > 0) {
+    const p = destination(origin, bearing, km);
+    origin = { lat: Math.max(-85, Math.min(85, p.lat)), lng: p.lng, source: 'manual' };
+  }
+  if (done) {
+    const end = origin;
+    origin = panFrom;
+    panFrom = null;
+    if (end !== origin) setOrigin(end);
+    return;
+  }
+  if (!panFrame) {
+    panFrame = requestAnimationFrame(() => {
+      panFrame = 0;
+      render();
+    });
+  }
+}
+
+/** 最新的 GPS 位置（手動位置時也一直更新） */
+let lastGps: Origin | null = null;
+let lastGpsAccuracy: number | null = null;
+
+/** 「回到我的位置」：有 GPS 位置就馬上回去（之後 GPS 照常更新），還沒有就重新定位 */
+function goHome(): void {
+  if (!lastGps) {
+    locateMe();
+    return;
+  }
+  lsSet(LS_ORIGIN, null);
+  gpsAccuracy = lastGpsAccuracy;
+  setOrigin(lastGps);
+  map.setOrigin(origin, true, gpsAccuracy);
+}
+
+/** 「回到我的位置」：手動位置（拖曳雷達、在地圖上設定）時，雷達上才出現 */
+function updateHomeBtn(): void {
+  homeBtn.hidden = origin.source !== 'manual' || view !== 'radar';
+}
+
 function setOrigin(o: Origin): void {
   const moved = haversineKm(origin, o) > 0.2;
   origin = o;
@@ -1700,6 +1752,7 @@ function setOrigin(o: Origin): void {
   map.setOrigin(o, moved, o.source === 'gps' ? gpsAccuracy : null);
   originLabel.textContent = o.source === 'gps' ? 'GPS 定位' : o.source === 'manual' ? '手動位置' : '預設：台北車站';
   useGpsBtn.hidden = o.source !== 'manual';
+  updateHomeBtn();
   if (isAutoScale(scaleSetting) && scaleKmFor(scaleSetting) !== scaleKm) {
     scaleKm = scaleKmFor(scaleSetting);
     radar.setScale(scaleKm);
@@ -1739,6 +1792,7 @@ function switchView(v: 'radar' | 'map'): void {
   view = v;
   $('#radar-view').hidden = v !== 'radar';
   $('#map-view').hidden = v !== 'map';
+  updateHomeBtn();
   $('#stage').dataset.view = v;
   viewBtn.textContent = v === 'radar' ? '地圖' : '雷達';
   pickBtn.hidden = v !== 'map';
@@ -1873,9 +1927,12 @@ function startGeolocation(): void {
   }
   navigator.geolocation.watchPosition(
     (pos) => {
+      // 手動位置時也記著最新的 GPS 位置，「回到我的位置」可以馬上回來
+      lastGps = { lat: pos.coords.latitude, lng: pos.coords.longitude, source: 'gps' };
+      lastGpsAccuracy = pos.coords.accuracy;
       if (origin.source === 'manual') return;
       gpsAccuracy = pos.coords.accuracy;
-      setOrigin({ lat: pos.coords.latitude, lng: pos.coords.longitude, source: 'gps' });
+      setOrigin(lastGps);
     },
     () => {
       if (origin.source === 'default') showBanner(bannerEl, '還沒取得位置，先以台北車站為中心。按右上「定位」可重試。', 3500);
@@ -2753,6 +2810,7 @@ function wireControls(): void {
   for (const b of scaleChips) b.addEventListener('click', () => setScale((b.dataset.scale as ScaleSetting) ?? 'region'));
   viewBtn.addEventListener('click', () => switchView(view === 'radar' ? 'map' : 'radar'));
   locateBtn.addEventListener('click', locateMe);
+  homeBtn.addEventListener('click', goHome);
   for (const b of baseChips) b.addEventListener('click', () => setBase(b.dataset.base as BaseMap));
   compassBtn.addEventListener('click', () => void toggleCompass());
   notifyBtn.addEventListener('click', () => void toggleNotify());

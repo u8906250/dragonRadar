@@ -169,6 +169,12 @@ export class Radar {
   private scaleKm = 5;
   private readonly pointers = new Map<number, { x: number; y: number }>();
   private pinchDist = 0;
+  /** 單指拖曳移動位置：按下的位置、上一次的位置、是不是已經開始拖（移動超過幾像素才算，免得點光點時不小心移動） */
+  private panStart: { x: number; y: number } | null = null;
+  private panLast: { x: number; y: number } | null = null;
+  private panning = false;
+  /** 剛拖完：放開時瀏覽器還會送一個 click，不要當成點光點 */
+  private justPanned = false;
   private heading = 0;
   private items: RadarItem[] = [];
   private style: RadarStyle = { sweep: 'wedge', blip: 'dot', rose: false };
@@ -186,7 +192,8 @@ export class Radar {
 
   /**
    * onZoom(factor, done)：雙指捏合或滑鼠滾輪，factor > 1 代表拉遠（範圍變大）；
-   * done = true 表示手勢結束
+   * done = true 表示手勢結束。
+   * onPan(bearing, km, done)：單指（或滑鼠）拖曳，中心要往 bearing 方向（0 = 北）移動 km 公里；done = true 表示放開
    */
   constructor(
     container: HTMLElement,
@@ -194,6 +201,7 @@ export class Radar {
     onZoom?: (factor: number, done: boolean) => void,
     onLandmark?: (id: string) => void,
     onBottle?: (id: number) => void,
+    private readonly onPan?: (bearing: number, km: number, done: boolean) => void,
   ) {
     this.svg = el('svg', { viewBox: `0 0 ${SIZE} ${SIZE}`, class: 'radar', role: 'img', 'aria-label': '雷達畫面' });
     const wedgeEnd = polar(45, R);
@@ -295,12 +303,25 @@ export class Radar {
       return Math.hypot(a.x - b.x, a.y - b.y);
     };
     svg.addEventListener('pointerdown', (e) => {
+      if (e.pointerType === 'mouse' && e.button !== 0) return;
       this.pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
-      if (this.pointers.size === 2) this.pinchDist = dist();
+      if (this.pointers.size === 1) {
+        this.panStart = { x: e.clientX, y: e.clientY };
+        this.panLast = this.panStart;
+      }
+      if (this.pointers.size === 2) {
+        // 拖到一半放第二根手指：改成縮放
+        this.endPan();
+        this.pinchDist = dist();
+      }
     });
     svg.addEventListener('pointermove', (e) => {
       if (!this.pointers.has(e.pointerId)) return;
       this.pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+      if (this.pointers.size === 1) {
+        this.panMove(e);
+        return;
+      }
       if (this.pointers.size !== 2) return;
       const d = dist();
       if (this.pinchDist > 0 && d > 0) onZoom(this.pinchDist / d, false);
@@ -308,9 +329,23 @@ export class Radar {
     });
     const end = (e: PointerEvent): void => {
       if (!this.pointers.delete(e.pointerId)) return;
+      if (this.pointers.size === 0) this.endPan();
       if (this.pointers.size === 1 && this.pinchDist > 0) onZoom(1, true);
       if (this.pointers.size < 2) this.pinchDist = 0;
+      // 縮放完剩一根手指：不接著拖
+      this.panStart = null;
+      this.panLast = null;
     };
+    // 剛拖完放開時的 click 不要選到光點、瓶子
+    svg.addEventListener(
+      'click',
+      (e) => {
+        if (!this.justPanned) return;
+        e.stopPropagation();
+        e.preventDefault();
+      },
+      true,
+    );
     svg.addEventListener('pointerup', end);
     svg.addEventListener('pointercancel', end);
     svg.addEventListener('pointerleave', end);
@@ -327,6 +362,44 @@ export class Radar {
       },
       { passive: false },
     );
+  }
+
+  /** 單指拖曳：移動超過 8 像素才開始；畫面上往哪拖，內容就往哪移，中心（你的位置）往反方向 */
+  private panMove(e: PointerEvent): void {
+    if (!this.onPan || !this.panStart || !this.panLast) return;
+    if (!this.panning) {
+      if (Math.hypot(e.clientX - this.panStart.x, e.clientY - this.panStart.y) < 8) return;
+      this.panning = true;
+      this.svg.classList.add('panning');
+      try {
+        this.svg.setPointerCapture(e.pointerId);
+      } catch {
+        /* 有些瀏覽器拿不到 capture，照樣拖 */
+      }
+    }
+    const rect = this.svg.getBoundingClientRect();
+    // 螢幕像素換成 SVG 座標（viewBox 是正方形，照短邊縮放）
+    const unit = SIZE / Math.max(1, Math.min(rect.width, rect.height));
+    const dx = (e.clientX - this.panLast.x) * unit;
+    const dy = (e.clientY - this.panLast.y) * unit;
+    this.panLast = { x: e.clientX, y: e.clientY };
+    const r = Math.hypot(dx, dy);
+    if (r === 0) return;
+    const km = (r / (R - 8)) * this.scaleKm;
+    // 內容往畫面上的 screen 方向移動；指北針模式要加回手機朝向；中心往反方向
+    const screen = (Math.atan2(dx, -dy) * 180) / Math.PI;
+    this.onPan(((screen + this.heading + 180) % 360 + 360) % 360, km, false);
+  }
+
+  private endPan(): void {
+    if (!this.panning) return;
+    this.panning = false;
+    this.svg.classList.remove('panning');
+    this.justPanned = true;
+    window.setTimeout(() => {
+      this.justPanned = false;
+    }, 80);
+    this.onPan?.(0, 0, true);
   }
 
   /** 照比例畫：外圈是範圍，裡面三圈是 1/4、1/2、3/4 */

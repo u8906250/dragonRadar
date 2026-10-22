@@ -23,6 +23,17 @@ export function bearingDeg(from: LatLng, to: LatLng): number {
   return ((Math.atan2(y, x) * 180) / Math.PI + 360) % 360;
 }
 
+/** 從 from 往 bearing 方向（0 = 北，順時針）走 km 公里到的點（大圓） */
+export function destination(from: LatLng, bearing: number, km: number): LatLng {
+  const d = km / EARTH_KM;
+  const t = toRad(bearing);
+  const p1 = toRad(from.lat);
+  const l1 = toRad(from.lng);
+  const p2 = Math.asin(Math.sin(p1) * Math.cos(d) + Math.cos(p1) * Math.sin(d) * Math.cos(t));
+  const l2 = l1 + Math.atan2(Math.sin(t) * Math.sin(d) * Math.cos(p1), Math.cos(d) - Math.sin(p1) * Math.sin(p2));
+  return { lat: (p2 * 180) / Math.PI, lng: ((((l2 * 180) / Math.PI + 540) % 360) + 360) % 360 - 180 };
+}
+
 export function formatKm(km: number): string {
   if (km < 1) return `${Math.round(km * 1000)} m`;
   if (km < 10) return `${km.toFixed(1)} km`;

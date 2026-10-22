@@ -78,3 +78,20 @@ describe('taiwanRadiusKm', () => {
     expect(r).toBeGreaterThan(shuangbeiRadiusKm(TAIPEI_MAIN));
   });
 });
+
+import { destination } from '../src/geo';
+
+describe('destination', () => {
+  it('walks the given bearing and distance', () => {
+    const p = destination(TAIPEI_MAIN, 90, 5);
+    expect(haversineKm(TAIPEI_MAIN, p)).toBeCloseTo(5, 3);
+    expect(bearingDeg(TAIPEI_MAIN, p)).toBeCloseTo(90, 0);
+    const back = destination(p, bearingDeg(p, TAIPEI_MAIN), haversineKm(p, TAIPEI_MAIN));
+    expect(back.lat).toBeCloseTo(TAIPEI_MAIN.lat, 5);
+    expect(back.lng).toBeCloseTo(TAIPEI_MAIN.lng, 5);
+  });
+  it('wraps longitude across the antimeridian', () => {
+    const p = destination({ lat: 0, lng: 179.9 }, 90, 50);
+    expect(p.lng).toBeLessThan(-179);
+  });
+});
