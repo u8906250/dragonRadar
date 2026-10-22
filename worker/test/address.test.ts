@@ -1,4 +1,4 @@
-import { addressOf } from '../src/events';
+import { addressOf, addressWithCity } from '../src/events';
 import { describe, expect, it } from 'vitest';
 import { locateOnStreet, parseTwAddress } from '../src/address';
 
@@ -92,5 +92,21 @@ describe('addressOf (events)', () => {
   });
   it('returns null without a house number', () => {
     expect(addressOf('台北市 捷運忠孝復興站', '忠孝復興站 2 號出口')).toBeNull();
+  });
+});
+
+describe('addressOf with a district but no city', () => {
+  it('prefers the field where the district is recognized', () => {
+    const a = addressOf('新市國小活動中心 淡水區中山北路二段200號', '新市國小活動中心-淡水區中山北路二段200號');
+    expect(a?.address).toMatchObject({ city: null, district: '淡水區', street: '中山北路二段', number: 200 });
+    // 縣市不確定：先不查（之後用區名查是哪個縣市）
+    expect(a?.text).toBe('');
+  });
+});
+
+describe('addressWithCity', () => {
+  it('puts the inferred city in front of the district', () => {
+    const a = addressOf('新市國小活動中心 淡水區中山北路二段200號', '新市國小活動中心-淡水區中山北路二段200號');
+    expect(a && addressWithCity(a.address, '新北市')).toMatchObject({ text: '新北市淡水區中山北路二段200號', area: '新北市淡水區', city: '新北市' });
   });
 });

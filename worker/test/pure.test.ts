@@ -92,7 +92,7 @@ describe('buildMessages', () => {
   });
 });
 
-import { adminArea, cityMatches, pickHit, placeCandidates, streetFallbacks, worldCandidates } from '../src/geocode';
+import { adminArea, citiesOfDistrict, cityMatches, pickHit, placeCandidates, streetFallbacks, worldCandidates } from '../src/geocode';
 import { normalizeKeyword, parseKeywordList } from '../src/keywords';
 
 describe('normalizeKeyword', () => {
@@ -734,5 +734,18 @@ describe('lngRange', () => {
     expect(lngRange(121.5, 199)).toBeNull();
     expect(lngRange(170, 20)).toEqual({ sql: '(e.lng >= ? OR e.lng <= ?)', binds: [150, -170] });
     expect(lngRange(-170, 20)).toEqual({ sql: '(e.lng >= ? OR e.lng <= ?)', binds: [170, -150] });
+  });
+});
+
+describe('citiesOfDistrict', () => {
+  it('finds the one city of a unique district and all cities of a shared name', () => {
+    expect(citiesOfDistrict('淡水區', [{ category: 'boundary', display_name: '淡水區, 滬尾, 新北市, 臺灣' }])).toEqual(['新北市']);
+    expect(
+      citiesOfDistrict('東區', [
+        { category: 'boundary', display_name: '東區, 虎尾寮, 臺南市, 701, 臺灣' },
+        { category: 'boundary', display_name: '東區, 新竹市, 臺灣' },
+        { category: 'highway', display_name: '東區路, 臺中市, 臺灣' },
+      ]),
+    ).toEqual(['臺南市', '新竹市']);
   });
 });

@@ -201,6 +201,45 @@ export async function geocode(env: Env, query: string, kind: GeoKind = 'any'): P
   return point;
 }
 
+const FULL_CITY_RE = /(臺北市|新北市|桃園市|臺中市|臺南市|高雄市|基隆市|新竹市|嘉義市|新竹縣|苗栗縣|彰化縣|南投縣|雲林縣|嘉義縣|屏東縣|宜蘭縣|花蓮縣|臺東縣|澎湖縣|金門縣|連江縣)/;
+
+/** 從 Nominatim 的行政區結果裡，找出名字剛好是這個區的那幾筆各在哪個縣市 */
+export function citiesOfDistrict(district: string, hits: Array<{ category?: string; display_name?: string }>): string[] {
+  const cities = hits
+    .filter((h) => h.category === 'boundary' && (h.display_name ?? '').split(', ')[0] === district)
+    .map((h) => FULL_CITY_RE.exec(h.display_name ?? '')?.[1])
+    .filter((c): c is string => !!c);
+  return [...new Set(cities)];
+}
+
+/**
+ * 只寫了區（「淡水區中山北路二段200號」）：查這個區在哪個縣市。全台只有一個的（淡水區只在新北市）才回傳，
+ * 東區、中正區這種好幾個縣市都有的回傳 null。快取鍵「city-of:區名」，display_name 存縣市
+ */
+export async function cityOfDistrict(env: Env, district: string): Promise<string | null> {
+  const key = `city-of:${district}`;
+  const now = nowSec();
+  const cached = await env.DB.prepare('SELECT lat, lng, display_name, resolved_at FROM geocode_cache WHERE query = ?').bind(key).first<CacheRow>();
+  if (cached && (cached.display_name || cached.resolved_at > now - NEGATIVE_TTL_SEC)) return cached.display_name;
+  await politeDelay();
+  const url = new URL('https://nominatim.openstreetmap.org/search');
+  url.searchParams.set('format', 'jsonv2');
+  url.searchParams.set('limit', '10');
+  url.searchParams.set('countrycodes', 'tw');
+  url.searchParams.set('accept-language', 'zh-TW');
+  url.searchParams.set('q', district);
+  const res = await fetch(url.toString(), { headers: { 'user-agent': env.NOMINATIM_USER_AGENT, accept: 'application/json' } });
+  if (!res.ok) return null;
+  const cities = citiesOfDistrict(district, (await res.json()) as Array<{ category?: string; display_name?: string }>);
+  const city = cities.length === 1 ? cities[0] : null;
+  await env.DB.prepare(
+    'INSERT INTO geocode_cache (query, lat, lng, display_name, resolved_at) VALUES (?, NULL, NULL, ?, ?) ON CONFLICT(query) DO UPDATE SET display_name = excluded.display_name, resolved_at = excluded.resolved_at',
+  )
+    .bind(key, city, now)
+    .run();
+  return city;
+}
+
 /** 國外地點的查詢字串：原樣、地點原文，再把「, CA, USA」這種後面的州、國家一段一段拿掉（Nominatim 寫太完整反而查不到），至少留地名加城市 */
 export function worldCandidates(query: string, placeText: string | null): string[] {
   const out: string[] = [];

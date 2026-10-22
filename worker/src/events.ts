@@ -1,7 +1,7 @@
 import type { Env } from './env';
 import { applySupplementDate, dropBroughtItem, dropSelfPlace, extractFromPost, localizeTimes, splitDropTimes, splitMultiDay, startNowForDeadline, timeZoneOf, untilInText, weekdaysFromText, weekdaysInText, type EventKind, type ExtractedEvent } from './extract';
 import { geocodeAddress, parseTwAddress, type TwAddress } from './address';
-import { adminArea, geocode, geocodeFirst, geocodeStreet, geocodeWorld, isAreaOnly, placeCandidates, type GeoPoint } from './geocode';
+import { adminArea, cityOfDistrict, geocode, geocodeFirst, geocodeStreet, geocodeWorld, isAreaOnly, placeCandidates, type GeoPoint } from './geocode';
 import { listActiveKeywords, type KeywordRow } from './keywords';
 import { parseThreadsTimestamp, type ThreadsClient } from './threads';
 import { nowSec, parseIsoToUnix } from './util';
@@ -278,12 +278,17 @@ export function addressOf(placeQuery: string, placeText: string | null): { addre
   const parsed = sources.map((s) => parseTwAddress(s));
   // 縣市：門牌自己帶的優先，其次是另一欄的「台南市」「新北市」（不寫市、縣的不算，新竹、嘉義分不出來）
   const cityWord = sources.map((s) => /(?:台|臺)?(?:北|新北|桃園|中|南|高雄|基隆|新竹|嘉義)市|(?:新竹|苗栗|彰化|南投|雲林|嘉義|屏東|宜蘭|花蓮|台東|臺東|澎湖|金門|連江)縣/.exec(s)?.[0]).find(Boolean);
-  const a = parsed.find((x) => x?.city) ?? parsed.find(Boolean);
+  // 有縣市的優先，其次有區的（「新市國小活動中心 淡水區…」空白拿掉後「心淡水區」認不出區，另一欄「中心-淡水區」認得出來）
+  const a = parsed.find((x) => x?.city) ?? parsed.find((x) => x?.district) ?? parsed.find(Boolean);
   if (!a) return null;
   const city = a.city ?? (cityWord ? cityWord.replace(/^台/, '臺').replace(/^(北|中|南)市$/, '臺$1市') : null);
   if (!city) return { address: a, text: '', area: null };
-  const area = a.district ? `${city}${a.district}` : null;
-  return { address: a, text: `${city}${a.district ?? ''}${a.street}${a.raw}號`, area, city };
+  return addressWithCity(a, city);
+}
+
+/** 門牌加上縣市：查詢字串、約略位置用的區 */
+export function addressWithCity(a: TwAddress, city: string): { address: TwAddress; text: string; area: string | null; city: string } {
+  return { address: a, text: `${city}${a.district ?? ''}${a.street}${a.raw}號`, area: a.district ? `${city}${a.district}` : null, city };
 }
 
 /**
@@ -303,7 +308,12 @@ export async function locatePlaceForEvent(
     const hit = await geocodeWorld(env, placeQuery, placeText, country);
     return { point: hit?.point ?? null, approxArea: hit?.approxArea ?? null };
   }
-  const addr = addressOf(placeQuery, placeText);
+  let addr = addressOf(placeQuery, placeText);
+  // 只寫了區沒寫縣市（「淡水區中山北路二段200號」）：全台只有一個同名區的，補上縣市再查
+  if (addr && !addr.city && addr.address.district) {
+    const city = await cityOfDistrict(env, addr.address.district).catch(() => null);
+    if (city) addr = addressWithCity(addr.address, city);
+  }
   if (addr) {
     const hit = addr.text ? await geocodeAddress(env, addr.text, undefined, { overpass: Date.now() < deadline }) : null;
     if (hit) return { point: { lat: hit.lat, lng: hit.lng, displayName: addr.text }, approxArea: null };
