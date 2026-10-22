@@ -3,6 +3,7 @@
  * 回報的內容只有管理者看得到；存裝置代碼與 IP 的加鹽雜湊（限制次數、同一個人同一則同一種問題只算一次），30 天後刪除。
  */
 import type { Env } from './env';
+import { getPost, reprocessPost, takeDown } from './events';
 import { parseSubscription, PushError, sendPush, type PushMessage } from './push';
 
 export const FEEDBACK_KINDS = {
@@ -125,7 +126,9 @@ export async function listFeedback(env: Env, status: string | null): Promise<unk
   const { results } = await env.DB.prepare(
     `SELECT f.id, f.event_id, f.post_id, f.title, f.place_text, f.kind, f.note, f.status, f.created_at, f.resolved_at,
             e.status AS event_status, e.start_at, e.end_at, e.lat, e.lng, e.approx_area, e.title AS event_title, e.place_text AS event_place,
-            p.permalink, p.username, p.supplement
+            p.permalink, p.username, p.supplement, p.source,
+            -- 重新判讀後原本那一則會換成新的：同一則貼文現在雷達上的第一則
+            (SELECT c.id FROM events c WHERE c.post_id = f.post_id AND c.status IN ('upcoming', 'active') ORDER BY c.start_at LIMIT 1) AS current_event_id
        FROM event_feedback f
        LEFT JOIN events e ON e.id = f.event_id
        LEFT JOIN posts p ON p.id = f.post_id
@@ -135,6 +138,58 @@ export async function listFeedback(env: Env, status: string | null): Promise<unk
     .bind(st)
     .all();
   return results.map((r) => ({ ...r, kind_label: FEEDBACK_KINDS[r.kind as FeedbackKind] ?? r.kind }));
+}
+
+/** 套用後回給管理頁看的：現在雷達上這則貼文的事件（同一個地點的固定據點只列第一天） */
+async function currentEvents(env: Env, postId: string): Promise<unknown[]> {
+  const { results } = await env.DB.prepare(
+    `SELECT id, title, kind, item, start_at, end_at, place_text, approx_area, lat, lng, status, spot, end_open FROM events
+      WHERE post_id = ? AND status IN ('upcoming', 'active', 'unlocated') ORDER BY start_at`,
+  )
+    .bind(postId)
+    .all<{ id: number; spot: number; place_text: string }>();
+  const seen = new Set<string>();
+  return results.filter((e) => {
+    if (!e.spot) return true;
+    if (seen.has(e.place_text)) return false;
+    seen.add(e.place_text);
+    return true;
+  });
+}
+
+/**
+ * 套用回報：
+ * - { action: 'supplement', note }：把說明（管理者可以改過）加到貼文的補充，重新判讀這則貼文
+ * - { action: 'takedown', scope?: 'event' | 'post' }：從雷達下架（不是發放或活動、重複）
+ * 套用完標成已處理，回傳現在雷達上這則貼文的事件
+ */
+export async function applyFeedback(env: Env, id: number, body: unknown, now: number): Promise<{ ok: true; action: string; removed?: number; events: unknown[] }> {
+  const fb = await env.DB.prepare('SELECT id, event_id, post_id, kind, note FROM event_feedback WHERE id = ?')
+    .bind(id)
+    .first<{ id: number; event_id: number; post_id: string | null; kind: FeedbackKind; note: string | null }>();
+  if (!fb) throw new PushError(404, '找不到這筆回報');
+  const b = (body ?? {}) as { action?: unknown; note?: unknown; scope?: unknown };
+  const postId = fb.post_id;
+  if (!postId) throw new PushError(400, '這筆回報沒有對應的貼文');
+  let removed: number | undefined;
+  if (b.action === 'supplement') {
+    const note = cleanNote(b.note ?? fb.note);
+    if (!note) throw new PushError(400, '請寫要補充的內容');
+    const post = await getPost(env, postId);
+    if (!post) throw new PushError(404, '這則貼文已經不在了');
+    // 原本有補充就接在後面（貼文補充最多 200 字）
+    const merged = [...(post.supplement ? `${post.supplement}；${note}` : note)].slice(0, 200).join('');
+    await env.DB.prepare('UPDATE posts SET supplement = ? WHERE id = ?').bind(merged, postId).run();
+    await reprocessPost(env, postId, now).catch((e: Error) => {
+      throw new PushError(400, e.message);
+    });
+  } else if (b.action === 'takedown') {
+    removed = await takeDown(env, fb.event_id, b.scope === 'post' ? 'post' : 'event', 'feedback', now);
+  } else {
+    throw new PushError(400, "action 要是 'supplement' 或 'takedown'");
+  }
+  await env.DB.prepare("UPDATE event_feedback SET status = 'resolved', resolved_at = ? WHERE id = ?").bind(now, id).run();
+  return { ok: true, action: b.action, ...(removed !== undefined ? { removed } : {}), events: await currentEvents(env, postId) };
 }
 
 /** 標成已處理，或改回未處理：{ status: 'resolved' | 'open' } */

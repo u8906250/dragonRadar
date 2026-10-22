@@ -27,6 +27,12 @@
     .fb .note.none { color: #5d5850; font-style: italic; }
     .fb .row { margin-top: 10px; }
     .empty { color: #5d5850; text-align: center; padding: 24px 0; }
+    .apply { margin-top: 10px; padding-top: 10px; border-top: 1px dashed #b9b2a6; }
+    .apply textarea { width: 100%; font: inherit; font-size: 16px; padding: 8px 10px; border: 2px solid var(--ink); border-radius: 10px; background: #fff; resize: vertical; }
+    .apply .hint { font-size: 12px; color: #5d5850; margin: 4px 0 0; }
+    .result { margin: 0 0 12px; padding: 10px 12px; background: #e9f6ee; border: 2px solid #2f7d4f; border-radius: 12px; font-size: 14px; }
+    .result.err { background: #fdecea; border-color: #b3261e; }
+    .result ul { margin: 6px 0 0; padding-left: 20px; }
     [hidden] { display: none !important; }
   </style>
 </head>
@@ -56,6 +62,7 @@
         <button type="button" class="btn" role="tab" data-status="open" aria-selected="true">未處理</button>
         <button type="button" class="btn" role="tab" data-status="resolved" aria-selected="false">已處理</button>
       </div>
+      <div id="result" class="result" hidden aria-live="polite"></div>
       <ul id="list" class="list" aria-live="polite"></ul>
       <p id="list-msg" class="msg err" aria-live="polite"></p>
     </section>
@@ -121,17 +128,34 @@
       }
       list.innerHTML = rows
         .map((f) => {
-          const evState = f.event_status ? EVENT_STATUS[f.event_status] || f.event_status : '已刪除';
+          const evState = f.event_status ? EVENT_STATUS[f.event_status] || f.event_status : f.current_event_id ? `已重新判讀，現在是 #${f.current_event_id}` : '已刪除';
           const live = f.event_status === 'upcoming' || f.event_status === 'active';
+          // 重新判讀過、原本那一則換掉了：連到同一則貼文現在的那一則
+          const showId = live ? f.event_id : f.current_event_id;
           const renamed = f.event_title && f.event_title !== f.title ? `（現在的標題：${esc(f.event_title)}）` : '';
           const links = [
-            live ? `<a class="btn" href="./?event=${f.event_id}">雷達上看</a>` : '',
+            showId ? `<a class="btn" href="./?event=${showId}">雷達上看</a>` : '',
             /^https:\/\//.test(f.permalink || '') ? `<a class="btn" href="${esc(f.permalink)}" target="_blank" rel="noopener">原文</a>` : '',
             f.lat != null ? `<a class="btn" href="https://www.google.com/maps/search/?api=1&query=${f.lat},${f.lng}" target="_blank" rel="noopener">Google 地圖</a>` : '',
             f.status === 'open'
-              ? `<button type="button" class="btn primary" data-id="${f.id}" data-to="resolved">已處理</button>`
+              ? `<button type="button" class="btn" data-id="${f.id}" data-to="resolved">已處理</button>`
               : `<button type="button" class="btn" data-id="${f.id}" data-to="open">改回未處理</button>`,
           ].join('');
+          // 套用：說明當成補充、重新判讀；不是發放活動、重複的直接下架
+          const canReprocess = f.source !== 'official' && f.source !== 'news';
+          const prefill = f.note ? (f.kind === 'location' ? `地點：${f.note}` : f.kind === 'time' ? `時間：${f.note}` : f.note) : '';
+          const takedownScope = f.kind === 'not_event' ? 'post' : 'event';
+          const apply =
+            f.status === 'open'
+              ? `<div class="apply">
+              ${canReprocess ? `<textarea rows="2" maxlength="200" data-note="${f.id}" placeholder="要補充給 AI 的內容，例如：地點是○○路12號、時間是 15:00 開始">${esc(prefill)}</textarea>` : ''}
+              <div class="row">
+                ${canReprocess ? `<button type="button" class="btn primary" data-apply="supplement" data-id="${f.id}">套用並重新判讀</button>` : ''}
+                <button type="button" class="btn" data-apply="takedown" data-scope="${takedownScope}" data-id="${f.id}">${takedownScope === 'post' ? '整則從雷達下架' : '從雷達下架'}</button>
+              </div>
+              <p class="hint">${canReprocess ? '套用：把上面的內容加到這則貼文的補充，用現在的規則重新判讀（之前手動改過的會被蓋掉）。' : '官方行程、新聞不能重新判讀。'}套用或下架後自動標成已處理。</p>
+            </div>`
+              : '';
           return `<li class="fb">
             <div class="fb-head"><span class="tag">${esc(f.kind_label)}</span><span>${when(f.created_at)} 回報${f.resolved_at ? `・${when(f.resolved_at)} 處理` : ''}</span></div>
             <b>${esc(f.title)}${renamed}</b>
@@ -140,12 +164,57 @@
             ${f.supplement ? `<div class="muted">補充：${esc(f.supplement)}</div>` : ''}
             <p class="note${f.note ? '' : ' none'}">${f.note ? esc(f.note) : '沒寫說明'}</p>
             <div class="row">${links}</div>
+            ${apply}
           </li>`;
         })
         .join('');
     }
 
+    const evLine = (ev) => {
+      const where = ev.lat == null ? '（找不到地點，不會出現在雷達上）' : ev.approx_area ? `（約略位置：${esc(ev.approx_area)}）` : '';
+      return `<li>${esc(ev.title)}｜${when(ev.start_at)}${ev.spot ? ' 起，固定據點' : ev.end_open ? ' 開始' : `–${fmt.format(new Date(ev.end_at * 1000)).split(' ').pop()}`}｜${esc(ev.place_text)}${where}</li>`;
+    };
+
+    function showResult(html, err = false) {
+      const el = $('#result');
+      el.innerHTML = html;
+      el.classList.toggle('err', err);
+      el.hidden = false;
+    }
+
     $('#list').addEventListener('click', async (e) => {
+      const a = e.target.closest('button[data-apply]');
+      if (a) {
+        const id = a.dataset.id;
+        const action = a.dataset.apply;
+        const body = { action };
+        if (action === 'supplement') {
+          body.note = document.querySelector(`textarea[data-note="${id}"]`)?.value.trim() ?? '';
+          if (!body.note) {
+            showResult('請先寫要補充的內容。', true);
+            return;
+          }
+        } else {
+          body.scope = a.dataset.scope;
+          if (!confirm(body.scope === 'post' ? '確定把這則貼文的發放、活動都從雷達下架？' : '確定把這一則從雷達下架？')) return;
+        }
+        for (const x of a.closest('.apply').querySelectorAll('button, textarea')) x.disabled = true;
+        a.textContent = action === 'supplement' ? '重新判讀中…' : '下架中…';
+        try {
+          const r = await api(`/api/admin/feedback/${id}/apply`, { method: 'POST', body: JSON.stringify(body) });
+          const list = (r.events || []).map(evLine).join('');
+          showResult(
+            action === 'supplement'
+              ? `已套用並重新判讀，標成已處理。現在雷達上的：${list ? `<ul>${list}</ul>` : '沒有（這次判讀沒有放上雷達，可以在「已處理」改回未處理再調整）'}`
+              : `已從雷達下架 ${r.removed ?? 0} 筆，標成已處理。${list ? `這則貼文還在雷達上的：<ul>${list}</ul>` : ''}`,
+          );
+          await load();
+        } catch (err) {
+          showResult(esc(err.message), true);
+          await load();
+        }
+        return;
+      }
       const b = e.target.closest('button[data-id]');
       if (!b) return;
       b.disabled = true;

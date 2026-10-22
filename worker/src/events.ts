@@ -604,6 +604,41 @@ export async function planPost(env: Env, post: PostRow, now = nowSec()): Promise
   return { items, early: null };
 }
 
+/**
+ * 用目前的判讀與定位規則重跑一則貼文：還沒結束的舊事件先刪掉；管理者重跑就是確認過了
+ * （之後有人再貼這則，不會再要人確認、重複放一次）
+ */
+export async function reprocessPost(env: Env, id: string, now: number): Promise<ProcessResult> {
+  const post = await getPost(env, id);
+  if (!post) throw new Error('post not found');
+  if (post.source === 'official') throw new Error('官方航線由同步程式產生，不能重新判讀');
+  // 新聞判讀後只留標題加摘要，重跑會因為內容不完整而判讀錯
+  if (post.source === 'news') throw new Error('新聞只保存標題與摘要，不能重新判讀');
+  await env.DB.batch([
+    env.DB.prepare("DELETE FROM ended_reports WHERE event_id IN (SELECT id FROM events WHERE post_id = ? AND status IN ('upcoming', 'active', 'unlocated'))").bind(id),
+    env.DB.prepare("DELETE FROM events WHERE post_id = ? AND status IN ('upcoming', 'active', 'unlocated')").bind(id),
+  ]);
+  const result = await processPost(env, post, now);
+  await env.DB.prepare("UPDATE posts SET confirm_state = 'confirmed', confirm_plan = NULL WHERE id = ? AND confirm_state IS NOT NULL").bind(id).run();
+  return result;
+}
+
+/**
+ * 從雷達下架：scope = 'post' 整則貼文的；'event' 只有這一則（固定據點連同同一個地點的每天時段）。回傳下架幾筆
+ */
+export async function takeDown(env: Env, eventId: number, scope: 'event' | 'post', reason: string, now: number): Promise<number> {
+  const ev = await env.DB.prepare('SELECT id, post_id, place_text, spot FROM events WHERE id = ?').bind(eventId).first<{ id: number; post_id: string; place_text: string; spot: number }>();
+  if (!ev) return 0;
+  const live = "status IN ('upcoming', 'active', 'unlocated')";
+  const r =
+    scope === 'post'
+      ? await env.DB.prepare(`UPDATE events SET status = 'ended', ended_reason = ?, updated_at = ? WHERE post_id = ? AND ${live}`).bind(reason, now, ev.post_id).run()
+      : ev.spot
+        ? await env.DB.prepare(`UPDATE events SET status = 'ended', ended_reason = ?, updated_at = ? WHERE post_id = ? AND place_text = ? AND ${live}`).bind(reason, now, ev.post_id, ev.place_text).run()
+        : await env.DB.prepare(`UPDATE events SET status = 'ended', ended_reason = ?, updated_at = ? WHERE id = ? AND ${live}`).bind(reason, now, ev.id).run();
+  return r.meta.changes ?? 0;
+}
+
 /** 把判讀好的寫進雷達，回傳跟 processPost 一樣的結果 */
 export async function commitPlan(env: Env, postId: string, items: PlanItem[], now: number): Promise<ProcessResult> {
   const out: ProcessResult = { events: [], reasons: [] };

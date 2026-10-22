@@ -84,7 +84,7 @@ worker/   Cloudflare Worker（API、排程、資料庫）
 
 ## 問題回報
 
-詳細資料的「回報問題」：選類型（地點錯誤、時間錯誤、標題或內容錯誤、不是發放或活動、重複、其他）加選填說明，存進 `event_feedback`（回報當時的標題、地點；裝置代碼與 IP 的加鹽雜湊，限制每小時次數、同一個人同一則同一種只算一次；30 天後刪除），馬上推到管理者手機（`admin_push_subscriptions`，同一個 tag，新的取代舊的但會再響）。管理頁 `admin.html`（不公開連結；雷達側欄的版本字樣連點 5 下進去，存過 token 的會顯示「管理回報」連結）輸入一次 ADMIN_TOKEN（只存在那支手機的 localStorage），可以開回報通知、看未處理／已處理的回報、標成已處理。管理頁的 API 網址固定，不接受網址參數，免得 token 被送到別的網站。同一個瀏覽器只有一個推播訂閱：雷達關掉附近通知時，管理頁的回報通知開著就不取消訂閱，反之亦然。
+詳細資料的「回報問題」：選類型（地點錯誤、時間錯誤、標題或內容錯誤、不是發放或活動、重複、其他）加選填說明，存進 `event_feedback`（回報當時的標題、地點；裝置代碼與 IP 的加鹽雜湊，限制每小時次數、同一個人同一則同一種只算一次；30 天後刪除），馬上推到管理者手機（`admin_push_subscriptions`，同一個 tag，新的取代舊的但會再響）。管理頁 `admin.html`（不公開連結；雷達側欄的版本字樣連點 5 下進去，存過 token 的會顯示「管理回報」連結）輸入一次 ADMIN_TOKEN（只存在那支手機的 localStorage），可以開回報通知、看未處理／已處理的回報、標成已處理，或直接套用：把說明（管理者可以先改，地點錯誤的預設加「地點：」、時間錯誤加「時間：」）加到貼文補充、重新判讀（`reprocessPost`），或從雷達下架（`takeDown`：不是發放活動的整則貼文，其他的只下架那一則，固定據點連同同一個地點的每天時段）；套用後自動標成已處理，管理頁列出現在雷達上這則貼文的事件。管理頁的 API 網址固定，不接受網址參數，免得 token 被送到別的網站。同一個瀏覽器只有一個推播訂閱：雷達關掉附近通知時，管理頁的回報通知開著就不取消訂閱，反之亦然。
 
 ## 本機開發
 
@@ -230,6 +230,7 @@ Cloudflare D1 偶爾回「D1_ERROR: internal error」這類暫時性錯誤。`sr
 | POST | `/api/admin/extract` | 只判讀不存檔，可指定 models 比較 |
 | GET | `/api/admin/feedback?status=open\|resolved` | 問題回報列表（含事件現在的狀態、位置、原文連結） |
 | POST | `/api/admin/feedback/:id` | 標成已處理或改回未處理 `{ status: 'resolved' \| 'open' }` |
+| POST | `/api/admin/feedback/:id/apply` | 套用回報：`{ action: 'supplement', note }` 補充後重新判讀，或 `{ action: 'takedown', scope: 'event' \| 'post' }` 從雷達下架；完成後標成已處理 |
 | POST | `/api/admin/push/subscribe`、`/unsubscribe` | 管理者手機開、關回報通知 `{ subscription }`、`{ endpoint }` |
 | POST | `/api/admin/push-selftest` | 用 RFC 8291 的範例確認推播加密在 Workers 上正確，回傳訂閱數 |
 | POST | `/api/admin/link-fetch` | 只讀取貼文連結的內容（確認讀得到），不判讀不存檔 |

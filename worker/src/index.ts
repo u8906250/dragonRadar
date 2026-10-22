@@ -1,6 +1,6 @@
 import { getAccessToken, makeClient, saveAccessToken } from './client';
 import type { Env } from './env';
-import { DEFAULT_DURATION_SEC, ENDED_WORDS, MAX_FUTURE_SEC, MIN_CONFIDENCE, SPOT_MAX_DAYS, extendOpenSpots, getEvent, getPost, ingestAll, ingestKeyword, listEvents, locatePlaceForEvent, processBacklog, processPost, relocateApprox, storePost, updateLifecycle, type EventRow } from './events';
+import { DEFAULT_DURATION_SEC, ENDED_WORDS, MAX_FUTURE_SEC, MIN_CONFIDENCE, SPOT_MAX_DAYS, extendOpenSpots, getEvent, getPost, ingestAll, ingestKeyword, listEvents, locatePlaceForEvent, processBacklog, processPost, relocateApprox, reprocessPost, storePost, updateLifecycle, type EventRow } from './events';
 import { normalizeExtraction, runModel } from './extract';
 import { geocode } from './geocode';
 import { ingestNews, NEWS_FEEDS } from './sources/news';
@@ -9,7 +9,7 @@ import { CURRENT_MAP_URL } from './sources/currentmap';
 import { mergeIntoOfficial } from './sources/merge';
 import { apifyTrial } from './sources/apify';
 import { fetchThreadsPost, resolveThreadsLink, shortcodeToUnix } from './sources/link';
-import { deleteAdminSubscription, listFeedback, notifyAdmins, purgeFeedback, saveAdminSubscription, setFeedbackStatus, submitFeedback } from './feedback';
+import { applyFeedback, deleteAdminSubscription, listFeedback, notifyAdmins, purgeFeedback, saveAdminSubscription, setFeedbackStatus, submitFeedback } from './feedback';
 import { PUSH_RADIUS_KM, PushError, b64urlEncode, deleteSubscription, encryptPayload, purgeSubscriptions, pushStarted, saveSubscription, sendPush, vapidKeys } from './push';
 import { confirmLink, ENDED_REPORTS_NEEDED, MAX_LINK_AGE_SEC, ReportError, ipHash, myReports, purgeReports, recheckLinks, rejectLink, reportEnded, submitLink, supplementLink, withdrawReport } from './reports';
 import { isTransient, withResilientDb } from './db';
@@ -323,6 +323,11 @@ async function handleAdmin(req: Request, env: Env, ctx: ExecutionContext, path: 
   if (req.method === 'GET' && path === '/api/admin/feedback') {
     return jsonResponse({ feedback: await listFeedback(env, url.searchParams.get('status')) });
   }
+  // 套用回報：{ action: 'supplement', note } 把說明當成補充、重新判讀；{ action: 'takedown', scope } 從雷達下架
+  const fbApply = /^\/api\/admin\/feedback\/(\d+)\/apply$/.exec(path);
+  if (req.method === 'POST' && fbApply) {
+    return jsonResponse(await applyFeedback(env, Number(fbApply[1]), await readJson(req), now));
+  }
   const fbStatus = /^\/api\/admin\/feedback\/(\d+)$/.exec(path);
   if (req.method === 'POST' && fbStatus) {
     return jsonResponse(await setFeedbackStatus(env, Number(fbStatus[1]), await readJson(req), now));
@@ -404,18 +409,10 @@ async function handleAdmin(req: Request, env: Env, ctx: ExecutionContext, path: 
   const reMatch = /^\/api\/admin\/posts\/([^/]+)\/reprocess$/.exec(path);
   if (req.method === 'POST' && reMatch) {
     const id = decodeURIComponent(reMatch[1]);
-    const post = await getPost(env, id);
-    if (!post) throw new HttpError(404, 'post not found');
-    if (post.source === 'official') throw new HttpError(400, '官方航線由同步程式產生，不能重新判讀');
-    // 新聞判讀後只留標題加摘要，重跑會因為內容不完整而判讀錯
-    if (post.source === 'news') throw new HttpError(400, '新聞只保存標題與摘要，不能重新判讀');
-    await env.DB.batch([
-      env.DB.prepare("DELETE FROM ended_reports WHERE event_id IN (SELECT id FROM events WHERE post_id = ? AND status IN ('upcoming', 'active', 'unlocated'))").bind(id),
-      env.DB.prepare("DELETE FROM events WHERE post_id = ? AND status IN ('upcoming', 'active', 'unlocated')").bind(id),
-    ]);
-    const result = await processPost(env, post, now);
-    // 管理者重跑就是確認過了：之後有人再貼這則，不會再要人確認、重複放一次
-    await env.DB.prepare("UPDATE posts SET confirm_state = 'confirmed', confirm_plan = NULL WHERE id = ? AND confirm_state IS NOT NULL").bind(id).run();
+    if (!(await getPost(env, id))) throw new HttpError(404, 'post not found');
+    const result = await reprocessPost(env, id, now).catch((e: Error) => {
+      throw new HttpError(400, e.message);
+    });
     return jsonResponse({ post_id: id, reasons: result.reasons, events: result.events });
   }
 
