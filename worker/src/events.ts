@@ -1,7 +1,7 @@
 import type { Env } from './env';
 import { fetchThreadsProfile, profileCandidates, profileHintText, type ThreadsProfile } from './sources/profile';
 import { applySupplementDate, closedWeekdays, slotWeekdays, dropBroughtItem, dropSelfPlace, EVENT_SPEC, extractFromPost, localizeTimes, openWeekdaysFromText, splitDropTimes, splitMultiDay, splitWeekdayWeekend, spotHoursFromText, startNowForDeadline, timeZoneOf, untilInText, weekdaysInText, type EventKind, type ExtractedEvent } from './extract';
-import { geocodeAddress, parseTwAddress, type TwAddress } from './address';
+import { cityOfHouse, geocodeAddress, parseTwAddress, type TwAddress } from './address';
 import { SESSION_SPEC } from './badminton';
 import { FOOD_SPEC } from './food';
 import { JOB_SPEC, jobRisks } from './jobs';
@@ -355,11 +355,20 @@ export async function locatePlaceForEvent(
   }
   if (addr) {
     let hit = addr.text ? await geocodeAddress(env, addr.text, undefined, { overpass: Date.now() < deadline }) : null;
+    // 地點原文沒寫縣市（模型自己補的「新北市」「新竹縣」，或根本沒有）：門牌在那個縣市查不到時，全台只有一個縣市有這個門牌就改用那個縣市
+    const guessed = !CITY_WORD_RE.test(placeText ?? '');
+    if (!hit && guessed) {
+      const city = await cityOfHouse(env, addr.address).catch(() => null);
+      if (city && city !== addr.city) {
+        addr = addressWithCity(addr.address, city);
+        hit = await geocodeAddress(env, addr.text, undefined, { overpass: Date.now() < deadline });
+      }
+    }
     // 門牌查不到：先退到那條路（巷口的先退到那條巷子；同一個縣市、鄉鎮區），再退到鄉鎮區中心，都標成約略位置
     const street = lane ? `${addr.address.street}${lane.lane.replace(/^.*?(\d+巷)$/, '$1')}` : addr.address.street;
     let road = !hit && addr.city ? await geocodeStreet(env, addr.city, addr.address.district, street) : null;
-    // 地點原文沒寫縣市（模型自己補的「新北市」，或根本沒有）、那個縣市又沒有這條路：全台只有一個縣市有這條路就改用那個縣市
-    if (!hit && !road && !CITY_WORD_RE.test(placeText ?? '')) {
+    // 縣市是猜的、那個縣市又沒有這條路：全台只有一個縣市有這條路就改用那個縣市
+    if (!hit && !road && guessed) {
       const city = await cityOfRoad(env, addr.address.street).catch(() => null);
       if (city && city !== addr.city) {
         addr = addressWithCity(addr.address, city);

@@ -1,6 +1,6 @@
 import { addressOf, addressWithCity, laneMouth } from '../src/events';
 import { describe, expect, it } from 'vitest';
-import { locateOnStreet, parseTwAddress } from '../src/address';
+import { citiesOfHouse, locateOnStreet, parseTwAddress } from '../src/address';
 
 describe('parseTwAddress', () => {
   it('pulls the address out of a shop name with postcode and village', () => {
@@ -129,5 +129,14 @@ describe('laneMouth', () => {
   it('ignores places that are not a lane mouth', () => {
     expect(laneMouth('永順街31巷5號')).toBeNull();
     expect(laneMouth('台北車站')).toBeNull();
+  });
+});
+
+describe('citiesOfHouse', () => {
+  it('finds the city that really has this house number', () => {
+    const f = (street: string, housenumber: string, city: string, district = '關東里') => ({ properties: { type: 'house', street, housenumber, city, district } });
+    // 模型把「關新路186號」補成新北市、新竹縣：全台只有新竹市有這個門牌
+    expect(citiesOfHouse({ street: '關新路', raw: '186', district: null }, [f('關新路', '186號', '新竹市'), f('關新路', '18號', '新竹縣'), f('關新東路', '186號', '新竹縣')])).toEqual(['新竹市']);
+    expect(citiesOfHouse({ street: '中山路', raw: '1', district: null }, [f('中山路', '1號', '台中市'), f('中山路', '1號', '新北市')])).toEqual(['臺中市', '新北市']);
   });
 });

@@ -200,6 +200,30 @@ async function photonHouses(env: Env, a: TwAddress, raw: string = a.raw): Promis
   return out;
 }
 
+/** 從 Photon 的結果裡，找出剛好是這個門牌（同一條路、同一號）的各在哪個縣市 */
+export function citiesOfHouse(a: Pick<TwAddress, 'street' | 'raw' | 'district'>, features: PhotonFeature[]): string[] {
+  const cities = features
+    .map((f) => f.properties ?? {})
+    .filter((p) => p.type === 'house' && normalize(p.street ?? '') === a.street && (p.housenumber ?? '').replace(/號$/, '') === a.raw && (!a.district || p.district === a.district))
+    .map((p) => (p.city ? normalize(p.city) : ''))
+    .filter((c) => /[市縣]$/.test(c));
+  return [...new Set(cities)];
+}
+
+/**
+ * 門牌的縣市不是貼文寫的（模型自己補的「新北市關新路186號」「新竹縣關新路186號」）、在那個縣市查不到時：
+ * 全台只有一個縣市有這個門牌就回傳那個縣市
+ */
+export async function cityOfHouse(env: Env, a: TwAddress): Promise<string | null> {
+  const u = new URL(PHOTON_URL);
+  u.searchParams.set('q', `${a.street} ${a.raw}`);
+  u.searchParams.set('limit', '20');
+  const res = await fetch(u.toString(), { signal: AbortSignal.timeout(6000), headers: { 'user-agent': env.NOMINATIM_USER_AGENT, accept: 'application/json' } });
+  if (!res.ok) return null;
+  const cities = citiesOfHouse(a, ((await res.json()) as { features?: PhotonFeature[] }).features ?? []);
+  return cities.length === 1 ? cities[0] : null;
+}
+
 const distKm = (a: { lat: number; lng: number }, b: { lat: number; lng: number }): number =>
   Math.hypot((a.lat - b.lat) * 111, (a.lng - b.lng) * 111 * Math.cos((a.lat * Math.PI) / 180));
 
