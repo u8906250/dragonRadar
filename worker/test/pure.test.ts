@@ -806,6 +806,9 @@ describe('fixed spot opening days and closing time', () => {
     expect(openWeekdaysFromText('（週二、週三店休）')).toEqual([1, 4, 5, 6, 7]);
     expect(openWeekdaysFromText('服務時間：09:00~18:00（上班日）')).toEqual([1, 2, 3, 4, 5]);
     expect(openWeekdaysFromText('每週一到六 10:00-18:00，週三公休')).toEqual([1, 2, 4, 5, 6]);
+    // 「每週四公休」是休息的日子，不是只開週四
+    expect(openWeekdaysFromText('營業時間：7:00～14:00\n每週四公休')).toEqual([1, 2, 3, 5, 6, 7]);
+    expect(weekdaysFromText('每週四公休，每週一到六 10:00-18:00')).toEqual([1, 2, 3, 4, 5, 6]);
     expect(openWeekdaysFromText('平日0930-2030 假日1000-1800')).toBeUndefined();
     expect(openWeekdaysFromText('每日 11:00 起')).toBeUndefined();
   });

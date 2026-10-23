@@ -361,12 +361,17 @@ export function splitMultiDay(ex: Pick<ExtractedEvent, 'start_at' | 'end_at' | '
  * 一定要有「每」，「10/21（週二）」這種日期註記不算。
  */
 export function weekdaysFromText(text: string): number[] | null {
-  const m = new RegExp(`每\\s*${DAY_LIST}`).exec(text);
+  // 後面接公休、店休的（「每週四公休」）是休息的日子，不是開的日子
+  const open = (m: RegExpMatchArray): boolean => !CLOSED_AFTER_RE.test(text.slice((m.index ?? 0) + m[0].length));
+  const m = [...text.matchAll(new RegExp(`每\\s*${DAY_LIST}`, 'g'))].find(open);
   if (m) return normalizeWeekdays(dayList(m[1]));
   // 營業時間寫「週三至周日」「週一到週六」這種範圍（前面不是日期的括號）
-  const r = /(?<![（(\d/])(?:週|周|星期|禮拜)\s*([一二三四五六日天])\s*(?:到|至|~|～|-|－)\s*(?:週|周|星期|禮拜)\s*([一二三四五六日天])(?![）)])/.exec(text);
+  const r = [...text.matchAll(/(?<![（(\d/])(?:週|周|星期|禮拜)\s*([一二三四五六日天])\s*(?:到|至|~|～|-|－)\s*(?:週|周|星期|禮拜)\s*([一二三四五六日天])(?![）)])/g)].find(open);
   return r ? normalizeWeekdays(dayList(`${r[1]}到${r[2]}`)) : null;
 }
+
+/** 星期幾後面接的休息字樣（「每週四公休」「週一店休」） */
+const CLOSED_AFTER_RE = /^\s*(?:固定)?(?:公休|店休|休館|休息|休(?![閒憩假]))/;
 
 /** 「一、三」「二到五」「六日」（前面的週、星期已經拿掉或不拿掉都可以） */
 const DAY_LIST = '(?:週|周|星期|禮拜)\\s*([一二三四五六日天](?:\\s*[、,，和與及跟/／]?\\s*(?:[到至~～\\-－]\\s*)?(?:週|周|星期|禮拜)?\\s*[一二三四五六日天])*)';
