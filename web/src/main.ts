@@ -2060,8 +2060,9 @@ function setOrigin(o: Origin): void {
     scaleKm = scaleKmFor(scaleSetting);
     radar.setScale(scaleKm);
   }
+  // 先用手上的資料照新位置畫（跟拖曳時一樣），不用等重抓回來；移動了再去抓新位置附近的
+  render();
   if (moved) void refresh();
-  else render();
   if (pushOn() && o.source !== 'default' && (!pushSyncedAt || haversineKm(pushSyncedAt, o) > PUSH_RESYNC_KM)) void syncPush(false);
 }
 
