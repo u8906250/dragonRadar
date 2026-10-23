@@ -307,7 +307,8 @@ export function planPushes(subs: PushSubRow[], events: StartedEvent[]): Array<{ 
  */
 export async function pushStarted(env: Env, now: number): Promise<{ events: number; sent: number; failed: number; quiet: number }> {
   const { results: events } = await env.DB.prepare(
-    `SELECT id, kind, title, place_text, lat, lng, approx_area FROM events
+    // 指定用 (status, start_at) 的索引：只看已經開始的（幾十列）；資料庫自己選常選到 (status, end_at)，要讀所有還沒結束的
+    `SELECT id, kind, title, place_text, lat, lng, approx_area FROM events INDEXED BY idx_events_status_time
       WHERE pushed_at IS NULL AND status IN ('upcoming', 'active') AND start_at <= ? AND end_at > ?
         AND (start_at > ? OR created_at > ?) AND spot = 0 AND all_day = 0
         AND lat IS NOT NULL AND lng IS NOT NULL AND merged_into IS NULL
