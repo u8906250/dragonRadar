@@ -6,7 +6,7 @@ import { describe, expect, it } from 'vitest';
 import { approxRank, detectEnded, inLngRange, lngRange, postExcerpt, spotMergeMode, spotScope, spotSessions } from '../src/events';
 import { buildMessages, localizeTimes, localToUnix, normalizeCountry, normalizeExtraction, validTimeZone } from '../src/extract';
 import { parseThreadsTimestamp } from '../src/threads';
-import { parseIsoToUnix } from '../src/util';
+import { etagMatches, parseIsoToUnix } from '../src/util';
 import { parseEmbedHtml, parseThreadsUrl, shortcodeToUnix, withLocationTag } from '../src/sources/link';
 import { parseProfileHtml, profileCandidates } from '../src/sources/profile';
 
@@ -914,5 +914,16 @@ describe('slotWeekdays', () => {
     expect(slotWeekdays(sup, '2026-10-22T18:30:00+08:00')).toEqual([1, 2, 3, 4, 5]);
     expect(slotWeekdays('平日0930-2030\n假日1000-1800', '2026-10-22T10:00:00+08:00')).toEqual([6, 7]);
     expect(slotWeekdays('營業時間：11:30～14:30，17:00～20:30', '2026-10-22T11:30:00+08:00')).toBeUndefined();
+  });
+});
+
+describe('etagMatches', () => {
+  it('matches strong, weak and listed tags', () => {
+    expect(etagMatches(null, 'W/"abc"')).toBe(false);
+    expect(etagMatches('W/"abc"', 'W/"abc"')).toBe(true);
+    // Cloudflare 壓縮時可能把強 ETag 改成弱的，或反過來
+    expect(etagMatches('"abc"', 'W/"abc"')).toBe(true);
+    expect(etagMatches('W/"x", W/"abc"', 'W/"abc"')).toBe(true);
+    expect(etagMatches('W/"abd"', 'W/"abc"')).toBe(false);
   });
 });

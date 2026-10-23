@@ -23,7 +23,7 @@ import { adminListBottles, adminSetBottle, BOTTLE_MAX_WEIGHT, BOTTLE_TTL_SEC, bo
 import { approveSpotRequest, autoReview, cancelSpotRequest, listSpotRequests, locatePlace, rejectSpotRequest, SPOT_MAX_AGE_SEC, spotRequestStatus, type ApproveBody, type SpotRequestRow } from './spots';
 import { addUserKeyword, listActiveKeywords, listAllKeywords, MAX_ACTIVE_KEYWORDS, normalizeKeyword, parseKeywordList, toKeywordOut, touchKeywords } from './keywords';
 import { CALLBACK_PATH, DELETE_PATH, DELETION_STATUS_PATH, UNINSTALL_PATH, deletionStatus, handleCallback, handleDelete, handleUninstall, startAuth } from './oauth';
-import { jsonResponse, nowSec, parseIsoToUnix } from './util';
+import { etagMatches, jsonResponse, nowSec, parseIsoToUnix } from './util';
 
 const REFRESH_CRON = '0 3 * * 1';
 
@@ -43,6 +43,11 @@ function corsHeaders(env: Env, origin: string | null): Record<string, string> {
     'access-control-max-age': '86400',
     vary: 'origin',
   };
+}
+
+async function sha1Hex(s: string): Promise<string> {
+  const buf = await crypto.subtle.digest('SHA-1', new TextEncoder().encode(s));
+  return [...new Uint8Array(buf)].map((b) => b.toString(16).padStart(2, '0')).join('');
 }
 
 function isAdmin(req: Request, env: Env): boolean {
@@ -110,7 +115,12 @@ async function handle(req: Request, env: Env, ctx: ExecutionContext): Promise<Re
       keywords,
     });
     if (keywords.length > 0) ctx.waitUntil(touchKeywords(env, keywords, now).catch((e) => console.warn('touch failed', e)));
-    return jsonResponse({ now, events });
+    // 資料沒變就回 304（不再傳幾百 KB）：ETag 照事件內容算，瀏覽器的快取會自動帶 If-None-Match、拿快取的內容
+    const body = JSON.stringify(events);
+    const etag = `W/"${await sha1Hex(body)}"`;
+    const headers = { etag, 'cache-control': 'private, no-cache' };
+    if (etagMatches(req.headers.get('if-none-match'), etag)) return new Response(null, { status: 304, headers });
+    return new Response(`{"now":${now},"events":${body}}`, { headers: { 'content-type': 'application/json; charset=utf-8', ...headers } });
   }
 
   // 手機推播：公鑰、訂閱（含約略位置，換位置時再送一次）、取消

@@ -36,3 +36,10 @@ export function jsonResponse(data: unknown, status = 200, headers: Record<string
     headers: { 'content-type': 'application/json; charset=utf-8', ...headers },
   });
 }
+
+/** If-None-Match 有沒有對到（可能好幾個、可能被 Cloudflare 改成弱 ETag 的 W/） */
+export function etagMatches(header: string | null, etag: string): boolean {
+  if (!header) return false;
+  const bare = (t: string): string => t.trim().replace(/^W\//, '');
+  return header.split(',').some((t) => t.trim() === '*' || bare(t) === bare(etag));
+}
