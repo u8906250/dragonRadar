@@ -278,6 +278,9 @@ a.chip { display: inline-flex; align-items: center; text-decoration: none; }
 .panel-handle span { display: block; width: 40px; height: 5px; margin: 0 auto; border-radius: 3px; background: var(--muted); opacity: 0.6; }
 .panel-head { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; font-size: 13px; padding: 0 16px 8px; }
 .panel-head .right { margin-left: auto; }
+.refresh-box { display: inline-flex; align-items: center; gap: 4px; }
+.refresh-btn { color: var(--muted); font-size: 13px; padding: 4px 2px; white-space: nowrap; }
+.poll-select { font: inherit; font-size: 12px; color: var(--muted); background: transparent; border: 1px solid currentColor; border-radius: 8px; padding: 2px 4px; max-width: 9em; }
 .muted { color: var(--muted); }
 .hint { padding: 0 16px 16px; margin: 0; font-size: 14px; line-height: 1.5; }
 .event-list { list-style: none; margin: 0; padding: 0 12px 12px; display: grid; grid-auto-rows: max-content; gap: 8px; overflow: auto; -webkit-overflow-scrolling: touch; min-height: 0; }

@@ -21,7 +21,16 @@ const SOON_SEC = 30 * 60;
 const FETCH_RADIUS_KM = 600;
 /** 範圍超過 600 km（全球、縮放到很遠）就抓全世界的，平常只抓附近 600 km */
 let lastFetchRadius = FETCH_RADIUS_KM;
-const POLL_MS = 60_000;
+/**
+ * 自動更新的間隔（秒），0 是關掉（預設）：一直開著的網頁每次更新都算伺服器的請求數（免費方案每天 10 萬次）。
+ * 關掉時點「更新 HH:MM」手動更新；新貼文是伺服器排程每 10 分鐘才抓一次，自己回報、確認、換位置時另外會馬上更新
+ */
+const POLL_CHOICES = [0, 60, 300, 600];
+const LS_POLL = 'dr.poll';
+/** 切回這個分頁時，上次更新超過這麼久就馬上更新 */
+const STALE_ON_SHOW_SEC = 120;
+/** 車掃路線最多每 10 分鐘抓一次（伺服器的排程也是每 10 分鐘才更新） */
+const ROUTES_EVERY_SEC = 600;
 const TICK_MS = 5_000;
 const LS_SCALE = 'dr.scale';
 /** 雙指縮放後的自訂範圍（公里） */
@@ -102,6 +111,16 @@ let origin: Origin = loadOrigin() ?? DEFAULT_ORIGIN;
 let events: EventOut[] = [];
 /** 今天的車掃路線 */
 let routes: RouteOut[] = [];
+/** 上次抓到的車掃路線（換模組再換回洋流時直接用） */
+let routesCache: RouteOut[] = [];
+let routesAt = 0;
+
+async function currentRoutes(): Promise<RouteOut[]> {
+  if (nowSec() - routesAt < ROUTES_EVERY_SEC) return routesCache;
+  routesCache = await fetchRoutes();
+  routesAt = nowSec();
+  return routesCache;
+}
 /** 打開的是哪條路線的時間表 */
 let selectedRoute: string | null = null;
 /** 點了雷達上的星星（固定地標） */
@@ -281,7 +300,27 @@ const countLabel = $('#count-label');
 const originLabel = $('#origin-label');
 const useGpsBtn = $<HTMLButtonElement>('#use-gps');
 const homeBtn = $<HTMLButtonElement>('#home-btn');
-const updatedLabel = $('#updated-label');
+const updatedLabel = $<HTMLButtonElement>('#updated-label');
+const pollSelect = $<HTMLSelectElement>('#poll-select');
+
+let pollSec = ((): number => {
+  const v = Number(lsGet(LS_POLL) ?? 0);
+  return POLL_CHOICES.includes(v) ? v : 0;
+})();
+let pollTimer = 0;
+
+/** 自動更新：照選的間隔重抓；分頁在背景（切到別的分頁、手機鎖螢幕）時不抓，切回來時 visibilitychange 會補抓 */
+function setPoll(sec: number): void {
+  pollSec = POLL_CHOICES.includes(sec) ? sec : 0;
+  lsSet(LS_POLL, pollSec ? String(pollSec) : null);
+  pollSelect.value = String(pollSec);
+  window.clearInterval(pollTimer);
+  pollTimer = pollSec
+    ? window.setInterval(() => {
+        if (document.visibilityState === 'visible') void refresh();
+      }, pollSec * 1000)
+    : 0;
+}
 const modeBadge = $('#mode-badge');
 const notifyBtn = $<HTMLButtonElement>('#notify-btn');
 const pickBtn = $<HTMLButtonElement>('#pick-origin');
@@ -2084,14 +2123,14 @@ async function refresh(): Promise<void> {
   }
   try {
     const radius = fetchRadiusKm(scaleKm);
-    const got = await Promise.all([fetchEvents(origin, radius, kws, forModule.id), forModule.current ? fetchRoutes() : Promise.resolve([] as RouteOut[]), bottleReq]);
+    const got = await Promise.all([fetchEvents(origin, radius, kws, forModule.id), forModule.current ? currentRoutes() : Promise.resolve([] as RouteOut[]), bottleReq]);
     if (seq !== fetchSeq) return;
     [events, routes, bottles] = got;
     lastFetchRadius = radius;
     lastFetchAt = nowSec();
-    updatedLabel.textContent = `更新 ${fmtTime(lastFetchAt)}`;
+    updatedLabel.textContent = `↻ 更新 ${fmtTime(lastFetchAt)}`;
   } catch (e) {
-    updatedLabel.textContent = '連線失敗';
+    updatedLabel.textContent = '↻ 連線失敗，點這裡重試';
     console.warn(e);
   }
   render();
@@ -3362,8 +3401,18 @@ function wireControls(): void {
     startGeolocation();
   });
   wirePanelDrag();
+  // 手動更新、自動更新的間隔
+  updatedLabel.addEventListener('click', () => {
+    updatedLabel.disabled = true;
+    void checkBottleNews();
+    void refresh().finally(() => {
+      updatedLabel.disabled = false;
+      showBanner(bannerEl, '已更新', 1200);
+    });
+  });
+  pollSelect.addEventListener('change', () => setPoll(Number(pollSelect.value)));
   document.addEventListener('visibilitychange', () => {
-    if (document.visibilityState === 'visible' && nowSec() - lastFetchAt > 30) {
+    if (document.visibilityState === 'visible' && nowSec() - lastFetchAt > STALE_ON_SHOW_SEC) {
       void refresh();
       void checkBottleNews();
     }
@@ -3435,10 +3484,7 @@ async function boot(): Promise<void> {
     showBanner(bannerEl, '新功能：網頁關掉也能收到附近 1 公里的發放、活動通知。按「通知」關掉再打開一次就能啟用', 10_000);
   }
   window.setInterval(render, TICK_MS);
-  // 分頁在背景（切到別的分頁、手機鎖螢幕）時不抓，切回來時 visibilitychange 會補抓
-  window.setInterval(() => {
-    if (document.visibilityState === 'visible') void refresh();
-  }, POLL_MS);
+  setPoll(pollSec);
 }
 
 void boot();
