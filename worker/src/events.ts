@@ -1332,7 +1332,7 @@ async function firstStarts(env: Env, pairs: Array<{ post_id: string; place_text:
   for (let i = 0; i < pairs.length; i += 50) {
     const chunk = pairs.slice(i, i + 50);
     const rs = await env.DB.batch(
-      chunk.map((x) => env.DB.prepare('SELECT MIN(start_at) AS first FROM events WHERE post_id = ? AND place_text = ?').bind(x.post_id, x.place_text)),
+      chunk.map((x) => env.DB.prepare('SELECT MIN(start_at) AS first FROM events WHERE post_id = ? AND place_text = ? AND spot = 1').bind(x.post_id, x.place_text)),
     );
     chunk.forEach((x, j) => {
       const v = (rs[j].results[0] as { first: number | null } | undefined)?.first;
