@@ -711,14 +711,16 @@ async function runScheduled(env: Env, cron: string, meter: D1Meter): Promise<voi
   // 剛開始的發放、活動推給 1 公里內有開通知的人
   const pushed = await step('push', () => pushStarted(env, now)).catch((e) => ({ error: String(e) }));
   // 沒寫最後一天的固定據點每天往後補時段（發完為止，不預設最後一天）
-  const extended = await step('extend', () => extendOpenSpots(env, now)).catch((e) => ({ error: String(e) }));
+  // 下面幾項每次都要掃很多列（D1 免費方案每天讀 500 萬列），不用每 10 分鐘：每小時一次（整點後 10 分鐘內那次）
+  const hourly = minute < 10;
+  const extended = hourly ? await step('extend', () => extendOpenSpots(env, now)).catch((e) => ({ error: String(e) })) : null;
   // 有門牌卻只定位到路或鄉鎮區的，定時重查門牌（Overpass 恢復、OSM 補了門牌就改成精確位置）
-  const relocated = await step('relocate', () => relocateApprox(env, now)).catch((e) => ({ error: String(e) }));
-  const links = await step('links', () => recheckLinks(env, now)).catch((e) => ({ error: String(e) }));
-  // 新聞、貼文講的是官方車掃就併進去（不管誰先到，每次都重新比對）
-  const merge = await step('merge', () => mergeIntoOfficial(env, now)).catch((e) => ({ error: String(e) }));
+  const relocated = hourly ? await step('relocate', () => relocateApprox(env, now)).catch((e) => ({ error: String(e) })) : null;
+  const links = hourly ? await step('links', () => recheckLinks(env, now)).catch((e) => ({ error: String(e) })) : null;
+  // 新聞、貼文講的是官方車掃就併進去（不管誰先到，每 30 分鐘重新比對；回報確認時另外會比對）
+  const merge = minute % 30 < 10 ? await step('merge', () => mergeIntoOfficial(env, now)).catch((e) => ({ error: String(e) })) : null;
   const drift = bottlesEnabled(env) ? await step('drift', () => driftBottles(env, now)).catch((e) => ({ error: String(e) })) : null;
-  const purged = await step('purge', () => purgeOldData(env, now));
+  const purged = hourly ? await step('purge', () => purgeOldData(env, now)) : null;
   meter.label = '';
   console.log(JSON.stringify({ cron, mode: client.mode, ingest, backlog, voyage, news, lifecycle, pushed, extended, relocated, links, merge, drift, purged, rowsRead: meter.rowsRead }));
 }
@@ -763,6 +765,8 @@ export default {
     // 讀了幾列：回應標頭附上（方便量），也累積起來寫進 d1_usage
     const done = (res: Response): Response => {
       res.headers.set('x-d1-rows-read', String(meter.rowsRead));
+      // 管理者：附上讀最多的查詢
+      if (isAdmin(req, rawEnv)) res.headers.set('x-d1-top', encodeURIComponent(JSON.stringify(meter.top(10))));
       if (reqPath.startsWith('/api/')) {
         noteUsage(usageLabel(req.method, reqPath), meter.rowsRead);
         ctx.waitUntil(flushUsage(rawEnv.DB));
