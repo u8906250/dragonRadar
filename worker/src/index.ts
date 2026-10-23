@@ -1,7 +1,7 @@
 import { getAccessToken, makeClient, saveAccessToken } from './client';
 import type { Env } from './env';
 import { fetchThreadsProfile } from './sources/profile';
-import { DEFAULT_DURATION_SEC, ENDED_WORDS, MAX_FUTURE_SEC, MIN_CONFIDENCE, SPOT_MAX_DAYS, extendOpenSpots, getEvent, getPost, ingestAll, ingestKeyword, listEvents, locatePlaceForEvent, processBacklog, processPost, relocateApprox, planPost, reprocessPost, setManualTitle, storePost, updateLifecycle, type EventRow, type PostRow } from './events';
+import { DEFAULT_DURATION_SEC, ENDED_WORDS, MAX_FUTURE_SEC, MIN_CONFIDENCE, SPOT_MAX_DAYS, extendOpenSpots, getEvent, getPost, ingestAll, ingestKeyword, clearEventSnapshots, listEvents, locatePlaceForEvent, processBacklog, processPost, relocateApprox, planPost, reprocessPost, setManualTitle, storePost, updateLifecycle, type EventRow, type PostRow } from './events';
 import { normalizeExtraction, runModel } from './extract';
 import { geocode } from './geocode';
 import { ingestNews, NEWS_FEEDS } from './sources/news';
@@ -778,6 +778,8 @@ export default {
     try {
       // Response.redirect() 等回應的標頭是唯讀的，先複製一份再補 CORS 標頭
       const original = await handle(req, env, ctx);
+      // 有寫入的請求（回報、確認、管理者修改）：這個 isolate 暫存的事件清掉，下一次重讀
+      if (req.method !== 'GET') clearEventSnapshots();
       const out = new Response(original.body, original);
       for (const [k, v] of Object.entries(cors)) out.headers.set(k, v);
       return done(out);

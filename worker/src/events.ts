@@ -1229,67 +1229,117 @@ export function lngRange(lng: number, dLng: number): { sql: string; binds: numbe
   return { sql: 'e.lng BETWEEN ? AND ?', binds: [lo, hi] };
 }
 
+/** 經度在不在範圍內（跨過 ±180 度的也算），跟 lngRange 一樣 */
+export function inLngRange(x: number, lng: number, dLng: number): boolean {
+  const lo = lng - dLng;
+  const hi = lng + dLng;
+  if (hi - lo >= 360) return true;
+  if (lo < -180) return x >= lo + 360 || x <= hi;
+  if (hi > 180) return x >= lo || x <= hi - 360;
+  return x >= lo && x <= hi;
+}
+
+/**
+ * 一個模組還沒結束的事件（不分位置、關鍵字），連同固定據點的第一天、相關貼文，暫存在這個 isolate：
+ * 每個開著的網頁每分鐘重抓一次，每次都查 D1 要讀上千列（免費方案每天 500 萬列）。
+ * 事件有新增或更新（最大的 id、updated_at 變了）、或超過 SNAPSHOT_TTL_MS 才重讀，平常每次只讀幾列
+ */
+interface ModuleSnapshot {
+  version: string;
+  at: number;
+  /** 讀的時候的 now；之後的請求照自己的 now 再篩 */
+  now: number;
+  rows: JoinedRow[];
+  first: Map<string, number>;
+  related: Map<string, RelatedPost[]>;
+  linked: Map<string, RelatedPost[]>;
+}
+const SNAPSHOT_TTL_MS = 5 * 60_000;
+const snapshots = new Map<string, ModuleSnapshot>();
+
+/** 有寫入（回報、確認、管理者修改）的請求之後清掉，下一次重讀 */
+export function clearEventSnapshots(): void {
+  snapshots.clear();
+}
+
+async function eventsVersion(env: Env): Promise<string> {
+  const v = await env.DB.prepare('SELECT (SELECT MAX(id) FROM events) AS id, (SELECT MAX(updated_at) FROM events) AS u').first<{ id: number | null; u: number | null }>();
+  return `${v?.id ?? 0}|${v?.u ?? 0}`;
+}
+
+async function moduleSnapshot(env: Env, module: ModuleId, now: number): Promise<ModuleSnapshot> {
+  const version = await eventsVersion(env);
+  const cached = snapshots.get(module);
+  if (cached && cached.version === version && Date.now() - cached.at < SNAPSHOT_TTL_MS) return cached;
+  // 併進官方車掃的不單獨列，改放在官方那一場的相關報導
+  const r = await env.DB.prepare(
+    `${JOINED_SELECT}
+    WHERE e.status IN ('upcoming', 'active') AND e.end_at > ? AND e.start_at <= ? AND e.lat IS NOT NULL AND e.lng IS NOT NULL AND e.merged_into IS NULL AND p.module = ?
+    ORDER BY e.start_at ASC LIMIT ${SNAPSHOT_LIMIT}`,
+  )
+    .bind(now, now + MAX_FUTURE_SEC, module)
+    .all<JoinedRow>();
+  const rows = r.results;
+  const spotPairs = [...new Map(rows.filter((x) => x.spot).map((x) => [`${x.post_id}|${x.place_text}`, x])).values()];
+  const official = [...new Set(rows.filter((x) => x.source === 'official').map((x) => x.post_id))];
+  const spotPosts = [...new Set(spotPairs.map((x) => x.post_id))];
+  const snap: ModuleSnapshot = {
+    version,
+    at: Date.now(),
+    now,
+    rows,
+    first: await firstStarts(env, spotPairs),
+    related: official.length > 0 ? await relatedPosts(env, official) : new Map(),
+    linked: spotPosts.length > 0 ? await linkedPosts(env, spotPosts) : new Map(),
+  };
+  snapshots.set(module, snap);
+  return snap;
+}
+
 /** 前端用：附近、還沒結束、horizon 內會開始的事件 */
 export async function listEvents(env: Env, q: ListQuery): Promise<EventOut[]> {
-  // 併進官方車掃的不單獨列，改放在官方那一場的相關報導
-  const conds = ["e.status IN ('upcoming', 'active')", 'e.end_at > ?', 'e.start_at <= ?', 'e.lat IS NOT NULL', 'e.lng IS NOT NULL', 'e.merged_into IS NULL'];
-  const binds: unknown[] = [q.now, q.now + q.horizonSec];
-  if (q.lat !== undefined && q.lng !== undefined) {
-    const dLat = q.radiusKm / 111;
-    const dLng = q.radiusKm / (111 * Math.max(0.2, Math.cos((q.lat * Math.PI) / 180)));
-    conds.push('e.lat BETWEEN ? AND ?');
-    binds.push(q.lat - dLat, q.lat + dLat);
-    const lngCond = lngRange(q.lng, dLng);
-    if (lngCond) {
-      conds.push(lngCond.sql);
-      binds.push(...lngCond.binds);
-    }
-  }
-  conds.push('p.module = ?');
-  binds.push(q.module ?? DEFAULT_MODULE);
-  // 關鍵字是洋流的（Threads 搜尋用），其他模組不篩
-  if (q.keywords && q.keywords.length > 0 && (q.module ?? DEFAULT_MODULE) === DEFAULT_MODULE) {
-    // 使用者主動回報的貼文、審核通過的固定據點不一定有寫關鍵字，一律顯示
-    const ors: string[] = ["p.source IN ('link', 'spot')"];
-    for (const k of q.keywords) {
-      ors.push('p.keyword = ?', "p.text LIKE ? ESCAPE '\\'");
-      binds.push(k, `%${k.replace(/[\\%_]/g, '\\$&')}%`);
-    }
-    conds.push(`(${ors.join(' OR ')})`);
-  }
-  const sql = `${JOINED_SELECT}
-    WHERE ${conds.join(' AND ')}
-    ORDER BY e.start_at ASC LIMIT ${LIST_LIMIT}`;
-  const r = await env.DB.prepare(sql)
-    .bind(...binds)
-    .all<JoinedRow>();
-  const out = r.results.map((row) => toEventOut(row, q.now));
-  await fillFirstStart(env, out);
-  const official = [...new Set(out.filter((e) => e.post.source === 'official').map((e) => e.post.id))];
-  if (official.length > 0) {
-    const related = await relatedPosts(env, official);
-    for (const e of out) if (related.has(e.post.id)) e.related = related.get(e.post.id);
-  }
-  const spots = [...new Set(out.filter((e) => e.spot).map((e) => e.post.id))];
-  if (spots.length > 0) {
-    const linked = await linkedPosts(env, spots);
-    for (const e of out) if (e.spot && linked.has(e.post.id)) e.related = linked.get(e.post.id);
+  const module = q.module ?? DEFAULT_MODULE;
+  const snap = await moduleSnapshot(env, module, q.now);
+  const box =
+    q.lat !== undefined && q.lng !== undefined
+      ? { lat: q.lat, lng: q.lng, dLat: q.radiusKm / 111, dLng: q.radiusKm / (111 * Math.max(0.2, Math.cos((q.lat * Math.PI) / 180))) }
+      : null;
+  // 關鍵字是洋流的（Threads 搜尋用），其他模組不篩；使用者主動回報的貼文、審核通過的固定據點不一定有寫關鍵字，一律顯示
+  const kws = q.keywords && q.keywords.length > 0 && module === DEFAULT_MODULE ? q.keywords.map((k) => k.toLowerCase()) : null;
+  const rows = snap.rows
+    .filter((r) => r.end_at > q.now && r.start_at <= q.now + q.horizonSec)
+    .filter((r) => !box || (Math.abs((r.lat ?? 0) - box.lat) <= box.dLat && inLngRange(r.lng ?? 0, box.lng, box.dLng)))
+    .filter((r) => !kws || r.source === 'link' || r.source === 'spot' || kws.some((k) => r.keyword?.toLowerCase() === k || r.text.toLowerCase().includes(k)))
+    .slice(0, LIST_LIMIT);
+  const out = rows.map((row) => toEventOut(row, q.now));
+  for (const e of out) {
+    if (e.spot) e.firstStartAt = snap.first.get(`${e.post.id}|${e.placeText}`) ?? e.startAt;
+    if (e.post.source === 'official' && snap.related.has(e.post.id)) e.related = snap.related.get(e.post.id);
+    if (e.spot && snap.linked.has(e.post.id)) e.related = snap.linked.get(e.post.id);
   }
   return out;
 }
 
-/** 固定據點第一個時段的開始時間：已經過去的時段不在清單裡，要另外查（同一則貼文、同一地點） */
-async function fillFirstStart(env: Env, out: EventOut[]): Promise<void> {
-  const ids = [...new Set(out.filter((e) => e.spot).map((e) => e.post.id))];
-  if (ids.length === 0) return;
-  const r = await env.DB.prepare(
-    `SELECT post_id, place_text, MIN(start_at) AS first FROM events
-      WHERE spot = 1 AND post_id IN (${ids.map(() => '?').join(',')}) GROUP BY post_id, place_text`,
-  )
-    .bind(...ids)
-    .all<{ post_id: string; place_text: string; first: number }>();
-  const first = new Map(r.results.map((x) => [`${x.post_id}|${x.place_text}`, x.first]));
-  for (const e of out) if (e.spot) e.firstStartAt = first.get(`${e.post.id}|${e.placeText}`) ?? e.startAt;
+/** 暫存的時候多抓一些（不分位置），每個人再照自己的範圍篩到 LIST_LIMIT */
+const SNAPSHOT_LIMIT = 3000;
+
+/**
+ * 固定據點第一個時段的開始時間：已經過去的時段不在清單裡，要另外查（同一則貼文、同一地點）。
+ * 每個地點各查一次 MIN（用 post_id、place_text、start_at 的索引，只讀一列），不用把每個據點所有時段都讀過
+ */
+async function firstStarts(env: Env, pairs: Array<{ post_id: string; place_text: string }>): Promise<Map<string, number>> {
+  const first = new Map<string, number>();
+  for (let i = 0; i < pairs.length; i += 50) {
+    const chunk = pairs.slice(i, i + 50);
+    const rs = await env.DB.batch(
+      chunk.map((x) => env.DB.prepare('SELECT MIN(start_at) AS first FROM events WHERE post_id = ? AND place_text = ?').bind(x.post_id, x.place_text)),
+    );
+    chunk.forEach((x, j) => {
+      const v = (rs[j].results[0] as { first: number | null } | undefined)?.first;
+      if (v) first.set(`${x.post_id}|${x.place_text}`, v);
+    });
+  }
+  return first;
 }
 
 /** 固定據點的其他貼文：同一個帳號之前的（已被取代）、別人提到這個據點的，新的在前 */

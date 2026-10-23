@@ -3,7 +3,7 @@ import { applySupplementDate, closedWeekdays, dropBroughtItem, dropSelfPlace, op
 import { isAreaOnly } from '../src/geocode';
 import { existedOutcome, notListedWhy, previewOf } from '../src/reports';
 import { describe, expect, it } from 'vitest';
-import { approxRank, detectEnded, lngRange, postExcerpt, spotMergeMode, spotScope, spotSessions } from '../src/events';
+import { approxRank, detectEnded, inLngRange, lngRange, postExcerpt, spotMergeMode, spotScope, spotSessions } from '../src/events';
 import { buildMessages, localizeTimes, localToUnix, normalizeCountry, normalizeExtraction, validTimeZone } from '../src/extract';
 import { parseThreadsTimestamp } from '../src/threads';
 import { parseIsoToUnix } from '../src/util';
@@ -735,6 +735,14 @@ describe('lngRange', () => {
     expect(lngRange(121.5, 199)).toBeNull();
     expect(lngRange(170, 20)).toEqual({ sql: '(e.lng >= ? OR e.lng <= ?)', binds: [150, -170] });
     expect(lngRange(-170, 20)).toEqual({ sql: '(e.lng >= ? OR e.lng <= ?)', binds: [170, -150] });
+  });
+  it('inLngRange matches the same ranges in JS', () => {
+    expect(inLngRange(121, 121.5, 10)).toBe(true);
+    expect(inLngRange(100, 121.5, 10)).toBe(false);
+    expect(inLngRange(-80, 121.5, 199)).toBe(true);
+    expect(inLngRange(-175, 170, 20)).toBe(true);
+    expect(inLngRange(140, 170, 20)).toBe(false);
+    expect(inLngRange(175, -170, 20)).toBe(true);
   });
 });
 
