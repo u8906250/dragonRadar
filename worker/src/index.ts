@@ -17,7 +17,7 @@ import { JOB_SPEC } from './jobs';
 import { moduleOf } from './modules';
 import { PUSH_RADIUS_KM, PushError, b64urlEncode, deleteSubscription, encryptPayload, purgeSubscriptions, pushStarted, saveSubscription, sendPush, vapidKeys } from './push';
 import { confirmLink, ENDED_REPORTS_NEEDED, MAX_LINK_AGE_SEC, ReportError, ipHash, myReports, purgeReports, recheckLinks, rejectLink, reportEnded, submitLink, supplementLink, withdrawReport } from './reports';
-import { isTransient, withResilientDb } from './db';
+import { D1Meter, isTransient, withResilientDb } from './db';
 import { addressCacheKey, geocodeAddress, parseTwAddress } from './address';
 import { adminListBottles, adminSetBottle, BOTTLE_MAX_WEIGHT, BOTTLE_TTL_SEC, bottlesEnabled, collectLetter, deleteBottle, deviceId, DRIFT_EVERY_SEC, driftBottles, dropBottle, listBottles, myBottles, PER_DEVICE_PER_DAY, PICK_RADIUS_M, pickBottle, purgeBottles, recycleBottle, reportBottle } from './bottles';
 import { approveSpotRequest, autoReview, cancelSpotRequest, listSpotRequests, locatePlace, rejectSpotRequest, SPOT_MAX_AGE_SEC, spotRequestStatus, type ApproveBody, type SpotRequestRow } from './spots';
@@ -602,6 +602,14 @@ async function handleAdmin(req: Request, env: Env, ctx: ExecutionContext, path: 
   }
 
   // ?confirm=rejected 看回報的人說判讀錯的、pending 還沒確認的
+  // D1 讀了幾列：?day=YYYY-MM-DD（UTC，預設今天），加上最近一次排程讀最多的查詢
+  if (req.method === 'GET' && path === '/api/admin/usage') {
+    const day = url.searchParams.get('day') ?? new Date(now * 1000).toISOString().slice(0, 10);
+    const r = await env.DB.prepare('SELECT label, calls, rows_read FROM d1_usage WHERE day = ? ORDER BY rows_read DESC').bind(day).all();
+    const top = await env.DB.prepare("SELECT value, updated_at FROM settings WHERE key = 'usage:cron:top'").first<{ value: string; updated_at: number }>();
+    return jsonResponse({ day, usage: r.results, cronTop: top ? { at: top.updated_at, queries: safeParse(top.value) } : null });
+  }
+
   if (req.method === 'GET' && path === '/api/admin/posts') {
     const confirm = url.searchParams.get('confirm');
     const r = confirm
@@ -681,37 +689,86 @@ async function refreshTokenJob(env: Env): Promise<void> {
   console.log(`threads token refreshed, expires in ${r.expires_in}s`);
 }
 
-async function runScheduled(env: Env, cron: string): Promise<void> {
+async function runScheduled(env: Env, cron: string, meter: D1Meter): Promise<void> {
   if (cron === REFRESH_CRON) {
     await refreshTokenJob(env);
     return;
   }
   const now = nowSec();
+  // 每一項工作讀了幾列分開算（meter.label）
+  const step = <T>(label: string, fn: () => Promise<T>): Promise<T> => {
+    meter.label = `cron:${label}`;
+    return fn();
+  };
   const client = await makeClient(env);
-  const ingest = await ingestAll(env, client, now);
-  const backlog = await processBacklog(env, now);
+  const ingest = await step('ingest', () => ingestAll(env, client, now));
+  const backlog = await step('backlog', () => processBacklog(env, now));
   // 官方航線與車掃地圖每次都讀（路段認領人數會一直變），新聞每 30 分鐘（cron 每 10 分鐘跑一次）
   const minute = new Date(now * 1000).getUTCMinutes();
-  const voyage = await syncVoyage(env, now).catch((e) => ({ error: String(e) }));
-  const news = minute % 30 < 10 ? await ingestNews(env, now).catch((e) => ({ error: String(e) })) : null;
-  const lifecycle = await updateLifecycle(env, client, now);
+  const voyage = await step('voyage', () => syncVoyage(env, now)).catch((e) => ({ error: String(e) }));
+  const news = minute % 30 < 10 ? await step('news', () => ingestNews(env, now)).catch((e) => ({ error: String(e) })) : null;
+  const lifecycle = await step('lifecycle', () => updateLifecycle(env, client, now));
   // 剛開始的發放、活動推給 1 公里內有開通知的人
-  const pushed = await pushStarted(env, now).catch((e) => ({ error: String(e) }));
+  const pushed = await step('push', () => pushStarted(env, now)).catch((e) => ({ error: String(e) }));
   // 沒寫最後一天的固定據點每天往後補時段（發完為止，不預設最後一天）
-  const extended = await extendOpenSpots(env, now).catch((e) => ({ error: String(e) }));
+  const extended = await step('extend', () => extendOpenSpots(env, now)).catch((e) => ({ error: String(e) }));
   // 有門牌卻只定位到路或鄉鎮區的，定時重查門牌（Overpass 恢復、OSM 補了門牌就改成精確位置）
-  const relocated = await relocateApprox(env, now).catch((e) => ({ error: String(e) }));
-  const links = await recheckLinks(env, now).catch((e) => ({ error: String(e) }));
+  const relocated = await step('relocate', () => relocateApprox(env, now)).catch((e) => ({ error: String(e) }));
+  const links = await step('links', () => recheckLinks(env, now)).catch((e) => ({ error: String(e) }));
   // 新聞、貼文講的是官方車掃就併進去（不管誰先到，每次都重新比對）
-  const merge = await mergeIntoOfficial(env, now).catch((e) => ({ error: String(e) }));
-  const drift = bottlesEnabled(env) ? await driftBottles(env, now).catch((e) => ({ error: String(e) })) : null;
-  const purged = await purgeOldData(env, now);
-  console.log(JSON.stringify({ cron, mode: client.mode, ingest, backlog, voyage, news, lifecycle, pushed, extended, relocated, links, merge, drift, purged }));
+  const merge = await step('merge', () => mergeIntoOfficial(env, now)).catch((e) => ({ error: String(e) }));
+  const drift = bottlesEnabled(env) ? await step('drift', () => driftBottles(env, now)).catch((e) => ({ error: String(e) })) : null;
+  const purged = await step('purge', () => purgeOldData(env, now));
+  meter.label = '';
+  console.log(JSON.stringify({ cron, mode: client.mode, ingest, backlog, voyage, news, lifecycle, pushed, extended, relocated, links, merge, drift, purged, rowsRead: meter.rowsRead }));
 }
+
+/** 這個 isolate 累積、還沒寫進 d1_usage 的 API 讀取量；最多每 2 分鐘寫一次 */
+const pendingUsage = new Map<string, { calls: number; rows: number }>();
+let usageFlushedAt = 0;
+const USAGE_FLUSH_MS = 120_000;
+
+function noteUsage(label: string, rows: number): void {
+  const cur = pendingUsage.get(label) ?? { calls: 0, rows: 0 };
+  cur.calls++;
+  cur.rows += rows;
+  pendingUsage.set(label, cur);
+}
+
+async function flushUsage(db: D1Database, force = false): Promise<void> {
+  if (pendingUsage.size === 0 || (!force && Date.now() - usageFlushedAt < USAGE_FLUSH_MS)) return;
+  usageFlushedAt = Date.now();
+  const day = new Date().toISOString().slice(0, 10);
+  const rows = [...pendingUsage];
+  pendingUsage.clear();
+  await db
+    .batch(
+      rows.map(([label, v]) =>
+        db
+          .prepare('INSERT INTO d1_usage (day, label, calls, rows_read) VALUES (?, ?, ?, ?) ON CONFLICT(day, label) DO UPDATE SET calls = calls + excluded.calls, rows_read = rows_read + excluded.rows_read')
+          .bind(day, label, v.calls, v.rows),
+      ),
+    )
+    .catch((e) => console.warn('usage flush failed', e));
+}
+
+/** API 的標籤：路徑裡的編號換成 :id */
+const usageLabel = (method: string, path: string): string => `${method} ${path.replace(/\/(?:link-[\w-]+|spot-[\w-]+|\d+)(?=\/|$)/g, '/:id')}`;
 
 export default {
   async fetch(req, rawEnv, ctx) {
-    const env = withResilientDb(rawEnv);
+    const meter = new D1Meter();
+    const env = withResilientDb(rawEnv, meter);
+    const reqPath = new URL(req.url).pathname.replace(/\/+$/, '') || '/';
+    // 讀了幾列：回應標頭附上（方便量），也累積起來寫進 d1_usage
+    const done = (res: Response): Response => {
+      res.headers.set('x-d1-rows-read', String(meter.rowsRead));
+      if (reqPath.startsWith('/api/')) {
+        noteUsage(usageLabel(req.method, reqPath), meter.rowsRead);
+        ctx.waitUntil(flushUsage(rawEnv.DB));
+      }
+      return res;
+    };
     const cors = corsHeaders(env, req.headers.get('origin'));
     if (req.method === 'OPTIONS') return new Response(null, { status: 204, headers: cors });
     try {
@@ -719,9 +776,9 @@ export default {
       const original = await handle(req, env, ctx);
       const out = new Response(original.body, original);
       for (const [k, v] of Object.entries(cors)) out.headers.set(k, v);
-      return out;
+      return done(out);
     } catch (e) {
-      if (e instanceof HttpError || e instanceof ReportError || e instanceof PushError) return jsonResponse({ error: e.message }, e.status, cors);
+      if (e instanceof HttpError || e instanceof ReportError || e instanceof PushError) return done(jsonResponse({ error: e.message }, e.status, cors));
       // 非預期的錯誤（重試後還是失敗的資料庫錯誤等）：使用者只看到「暫時失敗」，細節留在紀錄；管理 API 照樣回傳細節方便除錯
       console.error(e);
       const detail = e instanceof Error ? e.message : String(e);
@@ -731,6 +788,17 @@ export default {
   },
 
   async scheduled(event, env, ctx) {
-    ctx.waitUntil(runScheduled(withResilientDb(env), event.cron));
+    const meter = new D1Meter();
+    ctx.waitUntil(
+      runScheduled(withResilientDb(env, meter), event.cron, meter).finally(async () => {
+        for (const [label, rows] of meter.byLabel) noteUsage(label, rows);
+        await flushUsage(env.DB, true);
+        // 最近一次排程讀最多的查詢（找出哪裡讀太多）
+        await env.DB.prepare('INSERT INTO settings (key, value, updated_at) VALUES (?, ?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at')
+          .bind('usage:cron:top', JSON.stringify(meter.top(25)), nowSec())
+          .run()
+          .catch(() => undefined);
+      }),
+    );
   },
 } satisfies ExportedHandler<Env>;

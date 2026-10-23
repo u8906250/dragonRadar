@@ -3435,7 +3435,10 @@ async function boot(): Promise<void> {
     showBanner(bannerEl, '新功能：網頁關掉也能收到附近 1 公里的發放、活動通知。按「通知」關掉再打開一次就能啟用', 10_000);
   }
   window.setInterval(render, TICK_MS);
-  window.setInterval(() => void refresh(), POLL_MS);
+  // 分頁在背景（切到別的分頁、手機鎖螢幕）時不抓，切回來時 visibilitychange 會補抓
+  window.setInterval(() => {
+    if (document.visibilityState === 'visible') void refresh();
+  }, POLL_MS);
 }
 
 void boot();
