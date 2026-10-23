@@ -1999,7 +1999,7 @@ function panRadar(bearing: number, km: number, done: boolean): void {
 let lastGps: Origin | null = null;
 let lastGpsAccuracy: number | null = null;
 
-/** 移動前的位置：GPS 或預設位置，連同 GPS 誤差 */
+/** 上次知道的位置（最後一次的 GPS 或移動前的位置），連同 GPS 誤差；存在瀏覽器，重新開頁面也記得 */
 interface Home {
   lat: number;
   lng: number;
@@ -2022,8 +2022,8 @@ function loadHome(): Home | null {
 let home: Home | null = loadHome();
 
 /**
- * 「回到我的位置」：有 GPS 位置就馬上回去；還沒收到 GPS（剛開頁面）就先回到移動前的位置，
- * 不用等重新定位，之後 GPS 回來照常更新。兩個都沒有才重新定位
+ * 「回到我的位置」：有 GPS 位置就馬上回去；還沒收到 GPS（剛開頁面）就先回到上次知道的位置
+ * （最後一次的 GPS 或移動前的位置），不用等重新定位，之後 GPS 回來照常更新。都沒有才重新定位
  */
 function goHome(): void {
   const to: Home | null = lastGps ? { ...lastGps, source: 'gps', accuracy: lastGpsAccuracy } : home;
@@ -2241,7 +2241,12 @@ function startGeolocation(): void {
       // 手動位置時也記著最新的 GPS 位置，「回到我的位置」可以馬上回來
       lastGps = { lat: pos.coords.latitude, lng: pos.coords.longitude, source: 'gps' };
       lastGpsAccuracy = pos.coords.accuracy;
-      if (origin.source === 'manual') return;
+      if (origin.source === 'manual') {
+        // 手動位置時也存下來：下次開頁面還沒定位到，「回到我的位置」也能馬上回到這裡
+        home = { ...lastGps, source: 'gps', accuracy: lastGpsAccuracy };
+        lsSet(LS_HOME, JSON.stringify(home));
+        return;
+      }
       gpsAccuracy = pos.coords.accuracy;
       setOrigin(lastGps);
     },
