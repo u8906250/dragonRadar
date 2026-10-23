@@ -93,7 +93,7 @@ describe('buildMessages', () => {
   });
 });
 
-import { adminArea, citiesOfDistrict, cityLevel, cityMatches, sharesName, pickHit, placeCandidates, streetFallbacks, worldCandidates } from '../src/geocode';
+import { adminArea, citiesOfDistrict, citiesOfRoad, cityLevel, isRoadHit, cityMatches, sharesName, pickHit, placeCandidates, streetFallbacks, worldCandidates } from '../src/geocode';
 import { normalizeKeyword, parseKeywordList } from '../src/keywords';
 
 describe('normalizeKeyword', () => {
@@ -748,6 +748,32 @@ describe('citiesOfDistrict', () => {
         { category: 'highway', display_name: '東區路, 臺中市, 臺灣' },
       ]),
     ).toEqual(['臺南市', '新竹市']);
+  });
+});
+
+describe('isRoadHit / citiesOfRoad', () => {
+  it('only accepts a road that is really named like the query', () => {
+    // 新北市沒有關新路：Nominatim 回傳的公車站不能當成那條路
+    expect(isRoadHit('新北市關新路', '八里行政中心(十三行博物館), 中山路二段, 舊城里, 八里區, 新北市, 臺灣')).toBe(false);
+    expect(isRoadHit('新竹市關新路', '關新路, 關新里, 東區, 新竹市, 300, 臺灣')).toBe(true);
+    expect(isRoadHit('臺北市大安區忠孝東路四段', '忠孝東路四段, 大安區, 臺北市, 臺灣')).toBe(true);
+    expect(isRoadHit('新北市新店區北新路184巷', '北新路184巷, 新店區, 新北市, 臺灣')).toBe(true);
+  });
+  it('finds the one city that has the road', () => {
+    expect(
+      citiesOfRoad('關新路', [
+        { category: 'highway', display_name: '關新路, 關新里, 東區, 新竹市, 300, 臺灣' },
+        { category: 'highway', display_name: '關新路, 東區, 新竹市, 臺灣' },
+        { category: 'highway', display_name: '關新東路, 竹北市, 新竹縣, 臺灣' },
+        { category: 'highway', display_name: '關新路口, 東區, 臺南市, 臺灣' },
+      ]),
+    ).toEqual(['新竹市']);
+    expect(
+      citiesOfRoad('中山路', [
+        { category: 'highway', display_name: '中山路, 板橋區, 新北市, 臺灣' },
+        { category: 'highway', display_name: '中山路, 中正區, 基隆市, 臺灣' },
+      ]),
+    ).toEqual(['新北市', '基隆市']);
   });
 });
 

@@ -175,6 +175,23 @@ export function sharesName(query: string, displayName: string | null | undefined
   return false;
 }
 
+/** 查的路名：「新北市關新路」→「關新路」、「臺北市大安區忠孝東路四段」→「忠孝東路四段」 */
+function roadOf(query: string): string | null {
+  return /([^\s市縣區鄉鎮]+?(?:路|街|大道)(?:[一二三四五六七八九十]段)?(?:\d+巷)?)$/.exec(query.trim())?.[1] ?? null;
+}
+
+const foldName = (s: string): string => s.replace(/臺/g, '台').replace(/\s+/g, '');
+
+/**
+ * 退到那條路時，查到的名字要真的是那條路：OSM 的公車站也算 highway，
+ * 「新北市關新路」（新北市沒有關新路）會對到叫「八里行政中心」的公車站
+ */
+export function isRoadHit(query: string, displayName: string | null | undefined): boolean {
+  const road = roadOf(query);
+  if (!road) return true;
+  return foldName((displayName ?? '').split(',')[0] ?? '').includes(foldName(road));
+}
+
 /** 查什麼：any 什麼都可以；road 只要道路（門牌查不到時退到那條路） */
 type GeoKind = 'any' | 'road';
 
@@ -195,7 +212,7 @@ async function nominatim(env: Env, q: string, kind: GeoKind = 'any'): Promise<Ge
   }
   const arr = (await res.json()) as Array<{ lat: string; lon: string; display_name?: string; category?: string }>;
   // 地名查的：名字要對得上（道路照類型挑）
-  const hit = pickHit(q, kind === 'road' ? arr.filter((h) => h.category === 'highway') : arr.filter((h) => sharesName(q, h.display_name)));
+  const hit = pickHit(q, kind === 'road' ? arr.filter((h) => h.category === 'highway' && isRoadHit(q, h.display_name)) : arr.filter((h) => sharesName(q, h.display_name)));
   if (!hit) return null;
   // 只對到行政區（例如把「中正區忠孝復興站」對到整個中正區的中心）不算找到，除非本來就只查行政區
   if (hit.category === 'boundary' && !/[市縣區鄉鎮]$/.test(q.trim())) return null;
@@ -215,7 +232,7 @@ export async function geocode(env: Env, query: string, kind: GeoKind = 'any'): P
     .bind(key)
     .first<CacheRow>();
   // 以前沒檢查縣市、名字時查錯、存進快取的，重查一次
-  if (cached && !(cached.lat !== null && (!cityMatches(q, cached.display_name) || (kind === 'any' && !sharesName(q, cached.display_name))))) {
+  if (cached && !(cached.lat !== null && (!cityMatches(q, cached.display_name) || (kind === 'any' ? !sharesName(q, cached.display_name) : !isRoadHit(q, cached.display_name))))) {
     if (cached.lat !== null && cached.lng !== null) {
       return { lat: cached.lat, lng: cached.lng, displayName: cached.display_name ?? key };
     }
@@ -260,6 +277,43 @@ export async function cityOfDistrict(env: Env, district: string): Promise<string
   const res = await fetch(url.toString(), { headers: { 'user-agent': env.NOMINATIM_USER_AGENT, accept: 'application/json' } });
   if (!res.ok) return null;
   const cities = citiesOfDistrict(district, (await res.json()) as Array<{ category?: string; display_name?: string }>);
+  const city = cities.length === 1 ? cities[0] : null;
+  await env.DB.prepare(
+    'INSERT INTO geocode_cache (query, lat, lng, display_name, resolved_at) VALUES (?, NULL, NULL, ?, ?) ON CONFLICT(query) DO UPDATE SET display_name = excluded.display_name, resolved_at = excluded.resolved_at',
+  )
+    .bind(key, city, now)
+    .run();
+  return city;
+}
+
+/** 從 Nominatim 的結果裡，找出名字剛好是這條路的那幾段各在哪個縣市 */
+export function citiesOfRoad(road: string, hits: Array<{ category?: string; display_name?: string }>): string[] {
+  const cities = hits
+    .filter((h) => h.category === 'highway' && foldName((h.display_name ?? '').split(',')[0] ?? '') === foldName(road))
+    .map((h) => FULL_CITY_RE.exec(h.display_name ?? '')?.[1])
+    .filter((c): c is string => !!c);
+  return [...new Set(cities)];
+}
+
+/**
+ * 門牌的縣市不是貼文寫的（模型自己補的「新北市關新路186號」）、那個縣市又沒有這條路時：查這條路在哪個縣市。
+ * 全台只有一個縣市有的（關新路只在新竹市）才回傳，中山路這種到處都有的回傳 null。快取鍵「city-of-road:路名」
+ */
+export async function cityOfRoad(env: Env, road: string): Promise<string | null> {
+  const key = `city-of-road:${road}`;
+  const now = nowSec();
+  const cached = await env.DB.prepare('SELECT lat, lng, display_name, resolved_at FROM geocode_cache WHERE query = ?').bind(key).first<CacheRow>();
+  if (cached && (cached.display_name || cached.resolved_at > now - NEGATIVE_TTL_SEC)) return cached.display_name;
+  await politeDelay();
+  const url = new URL('https://nominatim.openstreetmap.org/search');
+  url.searchParams.set('format', 'jsonv2');
+  url.searchParams.set('limit', '40');
+  url.searchParams.set('countrycodes', 'tw');
+  url.searchParams.set('accept-language', 'zh-TW');
+  url.searchParams.set('q', road);
+  const res = await fetch(url.toString(), { headers: { 'user-agent': env.NOMINATIM_USER_AGENT, accept: 'application/json' } });
+  if (!res.ok) return null;
+  const cities = citiesOfRoad(road, (await res.json()) as Array<{ category?: string; display_name?: string }>);
   const city = cities.length === 1 ? cities[0] : null;
   await env.DB.prepare(
     'INSERT INTO geocode_cache (query, lat, lng, display_name, resolved_at) VALUES (?, NULL, NULL, ?, ?) ON CONFLICT(query) DO UPDATE SET display_name = excluded.display_name, resolved_at = excluded.resolved_at',

@@ -6,7 +6,7 @@ import { SESSION_SPEC } from './badminton';
 import { FOOD_SPEC } from './food';
 import { JOB_SPEC, jobRisks } from './jobs';
 import { DEFAULT_MODULE, moduleOf, type ModuleId } from './modules';
-import { adminArea, cityLevel, cityOfDistrict, geocode, geocodeFirst, geocodeStreet, geocodeWorld, isAreaOnly, placeCandidates, type GeoPoint } from './geocode';
+import { adminArea, cityLevel, cityOfDistrict, cityOfRoad, geocode, geocodeFirst, geocodeStreet, geocodeWorld, isAreaOnly, placeCandidates, type GeoPoint } from './geocode';
 import { listActiveKeywords, type KeywordRow } from './keywords';
 import { parseThreadsTimestamp, type ThreadsClient } from './threads';
 import { nowSec, parseIsoToUnix } from './util';
@@ -297,12 +297,15 @@ export async function extendOpenSpots(env: Env, now: number): Promise<number> {
 /** 門牌查詢（含很慢的 Overpass）一則貼文最多花這麼久，超過就只用 Photon，免得回報的人等太久 */
 const ADDRESS_BUDGET_MS = 25_000;
 
+/** 寫了「市」「縣」的縣市名 */
+const CITY_WORD_RE = /(?:台|臺)?(?:北|新北|桃園|中|南|高雄|基隆|新竹|嘉義)市|(?:新竹|苗栗|彰化|南投|雲林|嘉義|屏東|宜蘭|花蓮|台東|臺東|澎湖|金門|連江)縣/;
+
 /** 有寫門牌的地點：門牌加上縣市（地點欄沒寫縣市時，從另一欄補）；縣市不確定就不查，免得查到別縣市同名的路 */
 export function addressOf(placeQuery: string, placeText: string | null): { address: TwAddress; text: string; area: string | null; city?: string } | null {
   const sources = [placeQuery, placeText ?? ''];
   const parsed = sources.map((s) => parseTwAddress(s));
   // 縣市：門牌自己帶的優先，其次是另一欄的「台南市」「新北市」（不寫市、縣的不算，新竹、嘉義分不出來）
-  const cityWord = sources.map((s) => /(?:台|臺)?(?:北|新北|桃園|中|南|高雄|基隆|新竹|嘉義)市|(?:新竹|苗栗|彰化|南投|雲林|嘉義|屏東|宜蘭|花蓮|台東|臺東|澎湖|金門|連江)縣/.exec(s)?.[0]).find(Boolean);
+  const cityWord = sources.map((s) => CITY_WORD_RE.exec(s)?.[0]).find(Boolean);
   // 有縣市的優先，其次有區的（「新市國小活動中心 淡水區…」空白拿掉後「心淡水區」認不出區，另一欄「中心-淡水區」認得出來）
   const a = parsed.find((x) => x?.city) ?? parsed.find((x) => x?.district) ?? parsed.find(Boolean);
   if (!a) return null;
@@ -351,11 +354,20 @@ export async function locatePlaceForEvent(
     if (city) addr = addressWithCity(addr.address, city);
   }
   if (addr) {
-    const hit = addr.text ? await geocodeAddress(env, addr.text, undefined, { overpass: Date.now() < deadline }) : null;
-    if (hit) return { point: { lat: hit.lat, lng: hit.lng, displayName: addr.text }, approxArea: null };
+    let hit = addr.text ? await geocodeAddress(env, addr.text, undefined, { overpass: Date.now() < deadline }) : null;
     // 門牌查不到：先退到那條路（巷口的先退到那條巷子；同一個縣市、鄉鎮區），再退到鄉鎮區中心，都標成約略位置
     const street = lane ? `${addr.address.street}${lane.lane.replace(/^.*?(\d+巷)$/, '$1')}` : addr.address.street;
-    const road = addr.city ? await geocodeStreet(env, addr.city, addr.address.district, street) : null;
+    let road = !hit && addr.city ? await geocodeStreet(env, addr.city, addr.address.district, street) : null;
+    // 地點原文沒寫縣市（模型自己補的「新北市」，或根本沒有）、那個縣市又沒有這條路：全台只有一個縣市有這條路就改用那個縣市
+    if (!hit && !road && !CITY_WORD_RE.test(placeText ?? '')) {
+      const city = await cityOfRoad(env, addr.address.street).catch(() => null);
+      if (city && city !== addr.city) {
+        addr = addressWithCity(addr.address, city);
+        hit = await geocodeAddress(env, addr.text, undefined, { overpass: Date.now() < deadline });
+        road = hit ? null : await geocodeStreet(env, city, addr.address.district, street);
+      }
+    }
+    if (hit) return { point: { lat: hit.lat, lng: hit.lng, displayName: addr.text }, approxArea: null };
     if (road) return { point: road.point, approxArea: road.area };
     const area = addr.area ?? adminArea(placeQuery, placeText);
     const p = area ? await geocode(env, area) : null;
