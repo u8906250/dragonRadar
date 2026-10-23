@@ -27,6 +27,8 @@ const LS_SCALE = 'dr.scale';
 /** 雙指縮放後的自訂範圍（公里） */
 const LS_SCALE_KM = 'dr.scaleKm';
 const LS_ORIGIN = 'dr.origin';
+/** 移動成手動位置之前的位置（「回到我的位置」還沒收到 GPS 時直接回這裡，不用等重新定位） */
+const LS_HOME = 'dr.home';
 const LS_THEME = 'dr.theme';
 const LS_BASE = 'dr.base';
 const BASES: BaseMap[] = ['nlsc', 'osm'];
@@ -1997,15 +1999,41 @@ function panRadar(bearing: number, km: number, done: boolean): void {
 let lastGps: Origin | null = null;
 let lastGpsAccuracy: number | null = null;
 
-/** 「回到我的位置」：有 GPS 位置就馬上回去（之後 GPS 照常更新），還沒有就重新定位 */
+/** 移動前的位置：GPS 或預設位置，連同 GPS 誤差 */
+interface Home {
+  lat: number;
+  lng: number;
+  source: 'gps' | 'default';
+  accuracy: number | null;
+}
+
+function loadHome(): Home | null {
+  const raw = lsGet(LS_HOME);
+  if (!raw) return null;
+  try {
+    const h = JSON.parse(raw) as Home;
+    if ((h.source === 'gps' || h.source === 'default') && Number.isFinite(h.lat) && Number.isFinite(h.lng)) return h;
+  } catch {
+    /* ignore */
+  }
+  return null;
+}
+
+let home: Home | null = loadHome();
+
+/**
+ * 「回到我的位置」：有 GPS 位置就馬上回去；還沒收到 GPS（剛開頁面）就先回到移動前的位置，
+ * 不用等重新定位，之後 GPS 回來照常更新。兩個都沒有才重新定位
+ */
 function goHome(): void {
-  if (!lastGps) {
+  const to: Home | null = lastGps ? { ...lastGps, source: 'gps', accuracy: lastGpsAccuracy } : home;
+  if (!to) {
     locateMe();
     return;
   }
   lsSet(LS_ORIGIN, null);
-  gpsAccuracy = lastGpsAccuracy;
-  setOrigin(lastGps);
+  gpsAccuracy = to.source === 'gps' ? to.accuracy : null;
+  setOrigin({ lat: to.lat, lng: to.lng, source: to.source });
   map.setOrigin(origin, true, gpsAccuracy);
 }
 
@@ -2016,6 +2044,12 @@ function updateHomeBtn(): void {
 
 function setOrigin(o: Origin): void {
   const moved = haversineKm(origin, o) > 0.2;
+  // 記住不是手動的位置：之後拖曳、在地圖上設定，「回到我的位置」可以直接回來
+  // （預設位置不蓋掉上次的 GPS 位置）
+  if (o.source === 'gps' || (o.source === 'default' && home?.source !== 'gps')) {
+    home = { lat: o.lat, lng: o.lng, source: o.source, accuracy: o.source === 'gps' ? gpsAccuracy : null };
+    lsSet(LS_HOME, JSON.stringify(home));
+  }
   origin = o;
   if (o.source === 'manual') lsSet(LS_ORIGIN, JSON.stringify(o));
   map.setOrigin(o, moved, o.source === 'gps' ? gpsAccuracy : null);
