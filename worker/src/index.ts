@@ -711,12 +711,14 @@ async function runScheduled(env: Env, cron: string, meter: D1Meter): Promise<voi
     return fn();
   };
   const client = await makeClient(env);
-  const ingest = await step('ingest', () => ingestAll(env, client, now));
+  // AUTO_SOURCES = "false"：不自動抓資料（Threads 關鍵字搜尋、新聞、官方航線），資料只從使用者回報來
+  const auto = env.AUTO_SOURCES !== 'false';
+  const ingest = auto ? await step('ingest', () => ingestAll(env, client, now)) : null;
   const backlog = await step('backlog', () => processBacklog(env, now));
   // 官方航線與車掃地圖每次都讀（路段認領人數會一直變），新聞每 30 分鐘（cron 每 10 分鐘跑一次）
   const minute = new Date(now * 1000).getUTCMinutes();
-  const voyage = await step('voyage', () => syncVoyage(env, now)).catch((e) => ({ error: String(e) }));
-  const news = minute % 30 < 10 ? await step('news', () => ingestNews(env, now)).catch((e) => ({ error: String(e) })) : null;
+  const voyage = auto ? await step('voyage', () => syncVoyage(env, now)).catch((e) => ({ error: String(e) })) : null;
+  const news = auto && minute % 30 < 10 ? await step('news', () => ingestNews(env, now)).catch((e) => ({ error: String(e) })) : null;
   const lifecycle = await step('lifecycle', () => updateLifecycle(env, client, now));
   // 剛開始的發放、活動推給 1 公里內有開通知的人
   const pushed = await step('push', () => pushStarted(env, now)).catch((e) => ({ error: String(e) }));
@@ -728,7 +730,7 @@ async function runScheduled(env: Env, cron: string, meter: D1Meter): Promise<voi
   const relocated = hourly ? await step('relocate', () => relocateApprox(env, now)).catch((e) => ({ error: String(e) })) : null;
   const links = hourly ? await step('links', () => recheckLinks(env, now)).catch((e) => ({ error: String(e) })) : null;
   // 新聞、貼文講的是官方車掃就併進去（不管誰先到，每 30 分鐘重新比對；回報確認時另外會比對）
-  const merge = minute % 30 < 10 ? await step('merge', () => mergeIntoOfficial(env, now)).catch((e) => ({ error: String(e) })) : null;
+  const merge = auto && minute % 30 < 10 ? await step('merge', () => mergeIntoOfficial(env, now)).catch((e) => ({ error: String(e) })) : null;
   const drift = bottlesEnabled(env) ? await step('drift', () => driftBottles(env, now)).catch((e) => ({ error: String(e) })) : null;
   const purged = hourly ? await step('purge', () => purgeOldData(env, now)) : null;
   meter.label = '';

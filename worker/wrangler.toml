@@ -42,6 +42,8 @@ THREADS_SEARCH_STATUS = "review"
 SPOT_AUTO_REVIEW = "true"
 # 漂流瓶（匿名；擋攻擊性內容、廣告、聯絡方式）。有人亂丟時改成 "false" 整個關掉
 BOTTLES_ENABLED = "true"
+# 自動抓資料（Threads 關鍵字搜尋、新聞、官方航線）：改版中先關掉，資料只從使用者回報來
+AUTO_SOURCES = "false"
 
 # Secrets（用 wrangler secret put 設定，不要寫在這裡）
 #   THREADS_ACCESS_TOKEN  Threads 長效 token
