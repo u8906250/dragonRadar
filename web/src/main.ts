@@ -2118,6 +2118,8 @@ async function refresh(): Promise<void> {
   if (forModule.current && kws.length === 0) {
     events = [];
     bottles = await bottleReq;
+    lastFetchAt = nowSec();
+    updatedLabel.textContent = `↻ 更新 ${fmtTime(lastFetchAt)}`;
     render();
     return;
   }
@@ -3411,6 +3413,7 @@ function wireControls(): void {
     });
   });
   pollSelect.addEventListener('change', () => setPoll(Number(pollSelect.value)));
+  setPoll(pollSec);
   document.addEventListener('visibilitychange', () => {
     if (document.visibilityState === 'visible' && nowSec() - lastFetchAt > STALE_ON_SHOW_SEC) {
       void refresh();
@@ -3484,7 +3487,6 @@ async function boot(): Promise<void> {
     showBanner(bannerEl, '新功能：網頁關掉也能收到附近 1 公里的發放、活動通知。按「通知」關掉再打開一次就能啟用', 10_000);
   }
   window.setInterval(render, TICK_MS);
-  setPoll(pollSec);
 }
 
 void boot();

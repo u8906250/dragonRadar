@@ -1,0 +1,18 @@
+HTTP/2 200 
+date: Fri, 23 Oct 2026 04:24:56 GMT
+content-type: application/json; charset=utf-8
+access-control-allow-origin: https://current-radar.pages.dev
+cache-control: private, no-cache
+etag: W/"0027b15b7e4dbddeb3f131648d4a55d2827647b9"
+vary: origin
+access-control-allow-headers: content-type,authorization,x-device
+access-control-allow-methods: GET,POST,DELETE,OPTIONS
+access-control-max-age: 86400
+x-d1-rows-read: 1492
+report-to: {"group":"cf-nel","max_age":604800,"endpoints":[{"url":"https://a.nel.cloudflare.com/report/v4?s=nKLrgZe8KGrwCXSZHXxogy35k2lRlsmmICEs8Lc3NlOXI%2BwFTvDZZeeBzf5xVAyLbmBodiMMVy1NiJiSNIWtmckrmttf1S14rZuoSn%2FvxQejS3%2FkCA4nj0g%2B96h4GGU3Cd9IesaMnOoDhT%2FB6V0Jgq%2FIubLsQNLr%2BuM%3D"}]}
+nel: {"report_to":"cf-nel","success_fraction":0.0,"max_age":604800}
+content-encoding: zstd
+server: cloudflare
+cf-ray: a4edf993695d67d9-SJC
+alt-svc: h3=":443"; ma=86400
+
