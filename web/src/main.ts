@@ -1058,7 +1058,7 @@ function renderList(items: Item[], now: number): void {
       ? `目前的發放、活動裡沒有符合「${searchInput.value.trim()}」的。可以換個字，或按 ✕ 清除搜尋。`
       : none
         ? '目前沒有搜尋中的關鍵字。'
-        : `${emptyText()}。雷達每分鐘更新，有新的會提醒你。`;
+        : `${emptyText()}。點清單上方的「↻ 更新」看有沒有新的，或在旁邊打開自動更新。`;
   listEl.replaceChildren();
   emptyEl.hidden = items.length > 0;
   // 每一段的標題寫上數量，跟上面的摘要對得起來
@@ -2399,7 +2399,7 @@ function applyTheme(t: Theme): void {
   brandText.textContent = mod.current ? t.name : mod.short;
   document.querySelector('meta[name="theme-color"]')?.setAttribute('content', t.themeColor);
   radar.setStyle({ sweep: t.sweep, blip: t.blip, rose: t.rose });
-  emptyEl.textContent = `${emptyText()}。雷達每分鐘更新，有新的會提醒你。`;
+  emptyEl.textContent = `${emptyText()}。點清單上方的「↻ 更新」看有沒有新的，或在旁邊打開自動更新。`;
   lsSet(LS_THEME, t.id);
   renderThemeList();
   render();
