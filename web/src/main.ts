@@ -2690,7 +2690,23 @@ function openKwSheet(open: boolean): void {
   }
 }
 
+/** 回報功能開著嗎：伺服器的 /api/health 說鎖住（改版中）就不打開回報畫面 */
+let reportsOpen = true;
+const REPORTS_LOCKED_TEXT = '回報功能改版中，暫時關閉';
+
+function applyReportsOpen(open: boolean): void {
+  reportsOpen = open;
+  reportBtn.textContent = open ? '＋回報' : '回報暫停';
+  reportBtn.classList.toggle('locked', !open);
+  reportBtn.setAttribute('aria-label', open ? '回報 Threads 貼文' : REPORTS_LOCKED_TEXT);
+  if (!open) reportSheet.hidden = true;
+}
+
 function openReportSheet(open: boolean): void {
+  if (open && !reportsOpen) {
+    showBanner(bannerEl, REPORTS_LOCKED_TEXT, 3000);
+    return;
+  }
   reportSheet.hidden = !open;
   if (!open) return;
   // 每次打開都先收起來
@@ -2902,7 +2918,7 @@ function renderPreview(r: SubmitResult): void {
 }
 
 async function submitReport(): Promise<void> {
-  if (reportBusy) return;
+  if (reportBusy || !reportsOpen) return;
   const url = reportInput.value.trim();
   if (!url) {
     setReportMsg('<p class="msg error">請先貼上 Threads 貼文連結</p>');
@@ -3443,6 +3459,7 @@ async function boot(): Promise<void> {
   try {
     const h = await fetchHealth();
     showVersion(h.version ?? null);
+    applyReportsOpen(h.reports !== false);
     modeBadge.textContent = h.mode === 'mock' ? '示範資料' : h.mode === 'unconfigured' ? '未連線 Threads' : '即時';
     modeBadge.classList.toggle('mock', h.mode !== 'live');
     modeBadge.hidden = false;

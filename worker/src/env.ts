@@ -19,6 +19,8 @@ export interface Env {
   BOTTLES_ENABLED?: string;
   /** "false"：排程不自動抓資料（Threads 關鍵字搜尋、新聞、官方航線與合併），資料只從使用者回報來 */
   AUTO_SOURCES?: string;
+  /** "false"：鎖住使用者回報（貼連結回報、確認、補充、回報已發完、意見回饋），改版中用 */
+  REPORTS_ENABLED?: string;
   /** 版號，部署時用 --var 帶入（v1.<提交次數>） */
   APP_VERSION?: string;
   /** Apify API token（試用第三方 Threads 爬蟲用，只放 secret） */

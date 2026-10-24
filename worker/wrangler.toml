@@ -44,6 +44,8 @@ SPOT_AUTO_REVIEW = "true"
 BOTTLES_ENABLED = "true"
 # 自動抓資料（Threads 關鍵字搜尋、新聞、官方航線）：改版中先關掉，資料只從使用者回報來
 AUTO_SOURCES = "false"
+# 使用者回報：改版中先鎖住（伺服器不收，網頁按鈕顯示「回報暫停」），改回 "true" 恢復
+REPORTS_ENABLED = "false"
 
 # Secrets（用 wrangler secret put 設定，不要寫在這裡）
 #   THREADS_ACCESS_TOKEN  Threads 長效 token

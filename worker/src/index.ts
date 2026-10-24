@@ -50,6 +50,11 @@ async function sha1Hex(s: string): Promise<string> {
   return [...new Uint8Array(buf)].map((b) => b.toString(16).padStart(2, '0')).join('');
 }
 
+/** 回報功能開著嗎（REPORTS_ENABLED = "false" 時鎖住） */
+const reportsOpen = (env: Env): boolean => env.REPORTS_ENABLED !== 'false';
+/** 使用者回報會寫入的 API（管理者的不算） */
+const REPORT_WRITE_RE = /^\/api\/(?:reports(?:\/(?:confirm|supplement|reject))?|events\/\d+\/(?:ended|feedback)|spot-requests)$/;
+
 function isAdmin(req: Request, env: Env): boolean {
   if (!env.ADMIN_TOKEN) return false;
   const auth = req.headers.get('authorization') ?? '';
@@ -87,7 +92,12 @@ async function handle(req: Request, env: Env, ctx: ExecutionContext): Promise<Re
 
   if (req.method === 'GET' && (path === '/' || path === '/api/health')) {
     const client = await makeClient(env);
-    return jsonResponse({ ok: true, mode: client.mode, time: now, version: env.APP_VERSION ?? 'dev' });
+    return jsonResponse({ ok: true, mode: client.mode, time: now, version: env.APP_VERSION ?? 'dev', reports: reportsOpen(env) });
+  }
+
+  // 回報功能鎖住（REPORTS_ENABLED = "false"，改版中）：貼連結回報、確認、補充、說判讀錯、回報已發完、意見回饋都不收
+  if (!reportsOpen(env) && req.method === 'POST' && REPORT_WRITE_RE.test(path)) {
+    throw new HttpError(503, '回報功能改版中，暫時關閉');
   }
 
   // Threads 授權（給管理員綁定搜尋用的帳號）與 Meta 要求的解除授權、刪除資料回呼
