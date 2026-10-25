@@ -19,8 +19,13 @@ describe('normalizeActivities', () => {
     expect(ex?.events[1].title).toBe('');
     expect(ex?.events[1].country).toBeNull();
   });
-  it('drops events when the post is not an event', () => {
-    expect(normalizeActivities({ is_event: false, events: [{ title: 'x' }] })?.events).toEqual([]);
+  it('drops events when the post is not an event and keeps the reason', () => {
+    const ex = normalizeActivities({ is_event: false, reason: '這是活動心得，不是預告', events: [{ title: 'x' }] });
+    expect(ex?.events).toEqual([]);
+    expect(ex?.reason).toBe('這是活動心得，不是預告');
+  });
+  it('has no reason when the post is an event', () => {
+    expect(normalizeActivities({ is_event: true, reason: '？', events: [] })?.reason).toBeNull();
   });
 });
 

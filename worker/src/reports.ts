@@ -6,7 +6,7 @@
  */
 import type { Env } from './env';
 import { DEFAULT_MODULE, isModule, MODULE_IDS, moduleOf, type ModuleId } from './modules';
-import { commitPlan, detectEnded, getEvent, getPost, MAX_FUTURE_SEC, planPost, processPost, storePost, type EventOut, type PlanItem, type PostRow } from './events';
+import { commitPlan, detectEnded, getEvent, getPost, MAX_FUTURE_SEC, planPost, processPost, storePost, type EventOut, type FailedItem, type PlanItem, type PostRow } from './events';
 import type { ActivityPart, EventKind } from './extract';
 import { fetchThreadsPost, resolveThreadsLink, shortcodeToUnix, withLocationTag } from './sources/link';
 import { sha1Hex } from './sources/text';
@@ -154,6 +154,10 @@ export interface SubmitResult {
   supplement?: string | null;
   /** outcome = 'not_listed' 而且原因確定時：直接講是哪個原因（已經結束、太久以後才開始、判讀不出時間） */
   why?: NotListedWhy;
+  /** 洋流的活動：沒放上雷達的每一場和原因 */
+  failures?: FailedItem[];
+  /** 判讀成不是活動時，AI 說的理由 */
+  note?: string;
 }
 
 export interface NotListedWhy {
@@ -202,6 +206,8 @@ export function notListedWhy(items: PlanItem[]): NotListedWhy | undefined {
 interface StoredPlan {
   items: PlanItem[];
   early: string | null;
+  /** 不是活動時 AI 說的理由 */
+  note?: string | null;
 }
 
 /** 確認用的代碼：拿得到預覽的人才能確認（貼文 id 加鹽雜湊，不用另外存） */
@@ -278,16 +284,18 @@ const sameDay = (a: number, b: number): boolean => Math.floor((a + 8 * 3600) / 8
  */
 async function previewResult(env: Env, post: PostRow, plan: StoredPlan, existed: boolean, now: number): Promise<SubmitResult> {
   const base = { existed, permalink: post.permalink ?? '', confirm: { postId: post.id, token: await confirmToken(env, post.id) }, supplement: post.supplement ?? null };
-  if (plan.early) return { ...base, outcome: summarize([plan.early]), reasons: [plan.early], events: [] };
+  if (plan.early) return { ...base, outcome: summarize([plan.early]), reasons: [plan.early], events: [], ...(plan.note ? { note: plan.note } : {}) };
   const reasons = plan.items.filter((it) => !it.plan).map((it) => it.reason);
   const events = await eventsForResult(env, post.id, reasons, now);
   const preview = previewOf(plan.items, now);
+  const failures = plan.items.flatMap((it) => (!it.plan && it.fail ? [it.fail] : []));
+  const fails = failures.length > 0 ? { failures } : {};
   if (preview.length === 0) {
     const outcome = summarize(reasons);
     const why = outcome === 'not_listed' ? notListedWhy(plan.items) : undefined;
-    return { ...base, outcome, reasons, events, ...(why ? { why } : {}) };
+    return { ...base, outcome, reasons, events, ...(why ? { why } : {}), ...fails };
   }
-  return { ...base, outcome: 'preview', reasons, events, preview };
+  return { ...base, outcome: 'preview', reasons, events, preview, ...fails };
 }
 
 const readPlan = (post: PostRow): StoredPlan | null => {

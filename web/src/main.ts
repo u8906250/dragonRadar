@@ -12,7 +12,7 @@ import { crowdOf, MapView, type BaseMap } from './map';
 import { beep, ensureNotificationPermission, iosNeedsHomeScreen, notificationState, pushSubscription, pushSupported, registerServiceWorker, showBanner, systemNotify, unlockAudio, unsubscribePush } from './notify';
 import { Radar, type RadarRoute } from './radar';
 import { DEFAULT_THEME_ID, getTheme, THEMES, type Theme } from './themes';
-import type { BottleOut, EventOut, Item, KeywordInfo, KeywordRules, MyBottles, MyReport, Origin, Phase, PickedBottle, RelatedPost, RouteOut, PreviewItem, RouteStop, SubmitResult } from './types';
+import type { BottleOut, EventOut, Item, KeywordInfo, KeywordRules, MyBottles, MyReport, Origin, Phase, PickedBottle, RelatedPost, RouteOut, PreviewItem, RouteStop, SubmitResult, FailedItem } from './types';
 
 const DEFAULT_ORIGIN: Origin = { lat: 25.0478, lng: 121.517, source: 'default' }; // 台北車站
 const SOON_SEC = 30 * 60;
@@ -2878,7 +2878,7 @@ function renderPreview(r: SubmitResult): void {
         </li>`,
       )
       .join('')}</ul>
-    ${dups}${skippedNote(r.reasons)}
+    ${dups}${r.failures?.length ? `<p class="muted sheet-note">${r.failures.length > 1 ? `下面 ${r.failures.length} 場` : '下面這場'}不會放上雷達${canFixByNote(r.failures) ? '，知道的話可以按「補充資料」補上' : ''}：</p>${failuresHtml(r.failures)}` : ''}
     <div class="sheet-actions">
       <button type="button" class="btn primary" data-act="confirm">${items.length > 0 && items.every((p) => p.update?.mode === 'attach') ? '對，附在這個據點' : '對，放上雷達'}</button>
       <button type="button" class="btn" data-act="more">補充資料</button>
@@ -2964,22 +2964,53 @@ const ACTIVITY_PART_TEXT: Record<'content' | 'place' | 'start', string> = { cont
 /** 洋流的活動缺哪些（「地點、結束時間」） */
 const missingText = (parts: Array<keyof typeof ACTIVITY_PART_TEXT>): string => parts.map((p) => ACTIVITY_PART_TEXT[p]).join('、');
 
-/** 預覽時同一則貼文還有沒放上去的場次（缺資料、地點查不到）：講一聲，免得以為漏了 */
-function skippedNote(reasons: string[]): string {
-  const parts = new Set<keyof typeof ACTIVITY_PART_TEXT>();
-  let incomplete = 0;
-  for (const r of reasons) {
-    if (!r.startsWith('incomplete:')) continue;
-    incomplete++;
-    for (const p of r.slice('incomplete:'.length).split(',')) if (p in ACTIVITY_PART_TEXT) parts.add(p as keyof typeof ACTIVITY_PART_TEXT);
+/** 沒放上雷達的一場為什麼：缺什麼、哪裡不對，一句一句講清楚 */
+function failureReason(f: FailedItem): string {
+  const tz = f.tz && f.tz !== 'Asia/Taipei' ? f.tz : null;
+  const local = tz ? '（當地時間）' : '';
+  const at = (t: number): string => `${fmtDateTz(t, tz)} ${fmtTimeTz(t, tz)}${local}`;
+  if (f.reason === 'incomplete') {
+    return (f.missing ?? [])
+      .map((p) =>
+        p === 'content'
+          ? '看不出要做什麼（沒有活動內容）'
+          : p === 'place'
+            ? f.selfPlace
+              ? `地點只寫了「${f.selfPlace}」，沒寫店名或地址`
+              : '沒寫在哪裡（沒有地點）'
+            : f.dateOnly
+              ? `只寫了日期（${fmtDateTz(f.dateOnly, tz)}），沒寫幾點開始`
+              : '沒寫哪天幾點開始',
+      )
+      .join('；');
   }
-  const unlocated = reasons.filter((r) => r === 'unlocated').length;
-  const lines = [
-    incomplete ? `另外 ${incomplete} 場判讀不到${missingText((['content', 'place', 'start'] as const).filter((p) => parts.has(p)))}` : '',
-    unlocated ? `${incomplete ? '' : '另外 '}${unlocated} 場的地點在地圖上查不到` : '',
-  ].filter(Boolean);
-  return lines.length ? `<p class="muted sheet-note">${esc(lines.join('，'))}，不會放上雷達；知道的話可以按「補充資料」補上。</p>` : '';
+  if (f.reason === 'unlocated') return `地點「${f.place ?? ''}」在地圖上查不到，請補充完整地址或店名`;
+  if (f.reason === 'already_over') {
+    if (!f.startAt) return '時間已經過了';
+    return f.endOpen
+      ? `${at(f.startAt)} 開始、沒寫結束時間，當成開始後兩小時結束，已經過了`
+      : `${at(f.startAt)} 開始${f.endAt ? `、${fmtTimeTz(f.endAt, tz)} 結束` : ''}，已經過了`;
+  }
+  if (f.reason === 'too_far_in_future') {
+    const from = f.reportFrom ? `，${dateFmt.format(new Date(f.reportFrom * 1000))} 之後再貼一次就能放上去` : '';
+    return `${f.startAt ? `${at(f.startAt)} 才開始` : '太久以後才開始'}，雷達只收 21 天內開始的${from}`;
+  }
+  return 'AI 不太確定這是可以到場參加的活動，或是內容、時間、地點讀得不確定';
 }
+
+/** 沒放上雷達的每一場：標題（沒有就寫第幾場）、地點、原因 */
+function failuresHtml(fails: FailedItem[]): string {
+  const name = (f: FailedItem, i: number): string => f.title ?? (fails.length > 1 ? `第 ${i + 1} 場` : '這場活動');
+  return `<ul class="report-preview">${fails
+    .map(
+      (f, i) =>
+        `<li><b>${esc(name(f, i))}</b>${f.place && f.reason !== 'unlocated' ? `<small>地點：${esc(f.place)}</small>` : ''}<small class="preview-warn">${esc(failureReason(f))}</small></li>`,
+    )
+    .join('')}</ul>`;
+}
+
+/** 缺資料、地點查不到的可以補充：講一下要補什麼 */
+const canFixByNote = (fails: FailedItem[]): boolean => fails.some((f) => f.reason === 'incomplete' || f.reason === 'unlocated');
 
 /** 沒放上雷達、原因確定時直接講：「這場是 10/20（二）19:00 開始的，已經結束了」 */
 function notListedText(w: NonNullable<SubmitResult['why']>): string | null {
@@ -3004,11 +3035,29 @@ async function showReportResult(data: SubmitResult): Promise<void> {
   const { outcome, events: found, existed } = data;
   // 自己剛加入雷達的會出現在下面的「我的回報」，不再列一次；別人之前回報過的、附在據點的不在我的回報裡，照樣列
   const inMine = outcome === 'added' && !existed;
+  // 洋流的活動：每一場沒放上雷達的原因（缺什麼、地點查不到、時間不對）
+  const fails = data.failures ?? [];
+  const noneListed = outcome === 'not_listed' || outcome === 'no_place';
   const head = inMine
     ? '已加入雷達，可以在下面「我的回報」按「看」。'
     : existed && (outcome === 'added' || outcome === 'duplicate' || outcome === 'attached')
       ? '這則之前已經有人回報，已在雷達上：'
-      : (outcome === 'not_listed' && data.why && notListedText(data.why)) || (outcome === 'not_event' ? mod.notEventText : outcome === 'no_place' ? mod.noPlaceText : OUTCOME_TEXT[outcome]);
+      : noneListed && fails.length > 0
+        ? fails.length > 1
+          ? `這則判讀出 ${fails.length} 場活動，都沒有放上雷達：`
+          : '這則沒有放上雷達：'
+        : (outcome === 'not_listed' && data.why && notListedText(data.why)) || (outcome === 'not_event' ? mod.notEventText : outcome === 'no_place' ? mod.noPlaceText : OUTCOME_TEXT[outcome]);
+  const failHtml =
+    fails.length > 0
+      ? `${noneListed ? '' : '<p class="muted sheet-note">另外這些沒有放上雷達：</p>'}${failuresHtml(fails)}${
+          canFixByNote(fails) ? '<p class="muted sheet-note">活動要有內容、地點和開始時間才收（沒寫結束時間的當成發完為止）；知道的話可以在下面補充再判讀一次。</p>' : ''
+        }`
+      : '';
+  // 判讀成不是活動：附上 AI 的理由，判斷錯了可以補充
+  const noteHtml =
+    outcome === 'not_event' && data.note
+      ? `<p class="muted sheet-note">AI 的判斷：${esc(data.note)}。如果判斷錯了，可以在下面補充活動內容、地點和時間再判讀一次。</p>`
+      : '';
   const list = (inMine ? [] : resultGroups(found))
     .map((g) => {
       const ev = g[0];
@@ -3025,7 +3074,7 @@ async function showReportResult(data: SubmitResult): Promise<void> {
   // 還沒放上雷達（找不到地點、判讀不出時間）：可以補充資料再判讀一次
   const canSupplement = !!data.confirm && (outcome === 'no_place' || outcome === 'not_listed' || outcome === 'not_event');
   setReportMsg(
-    `<p class="msg">${esc(head)}</p>${list ? `<ul class="report-events">${list}</ul>` : ''}${
+    `<p class="msg">${esc(head)}</p>${list ? `<ul class="report-events">${list}</ul>` : ''}${failHtml}${noteHtml}${
       canSupplement ? `${data.supplement ? `<p class="muted sheet-note">你補充的：${esc(data.supplement)}</p>` : ''}${supplementFormHtml(data.supplement ?? '', false)}` : ''
     }`,
   );

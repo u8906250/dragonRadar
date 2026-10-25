@@ -1,6 +1,6 @@
 import type { Env } from './env';
 import { fetchThreadsProfile, profileCandidates, profileHintText, type ThreadsProfile } from './sources/profile';
-import { ACTIVITY_SPEC, applySupplementDate, closedWeekdays, slotWeekdays, dropBroughtItem, dropSelfPlace, extractFromPost, localizeTimes, missingActivityParts, openWeekdaysFromText, splitDropTimes, splitMultiDay, splitWeekdayWeekend, spotHoursFromText, startNowForDeadline, guessedMidnight, timeZoneOf, untilInText, weekdaysInText, type EventKind, type ExtractedEvent } from './extract';
+import { ACTIVITY_SPEC, applySupplementDate, closedWeekdays, slotWeekdays, dropBroughtItem, dropSelfPlace, extractFromPost, localizeTimes, missingActivityParts, openWeekdaysFromText, splitDropTimes, splitMultiDay, splitWeekdayWeekend, spotHoursFromText, startNowForDeadline, guessedMidnight, timeZoneOf, untilInText, weekdaysInText, type ActivityPart, type EventKind, type ExtractedEvent } from './extract';
 import { cityOfHouse, geocodeAddress, parseTwAddress, type TwAddress } from './address';
 import { SESSION_SPEC } from './badminton';
 import { FOOD_SPEC } from './food';
@@ -477,11 +477,35 @@ export interface SpotMerge {
   title: string;
 }
 
+/**
+ * 洋流的活動沒放上雷達：哪一場（標題、地點）、為什麼，回報結果一場一場講清楚。
+ * incomplete 缺內容、地點或開始時間；unlocated 地點查不到；already_over、too_far_in_future 時間不對；low_confidence 不確定是不是活動
+ */
+export interface FailedItem {
+  title: string | null;
+  place: string | null;
+  reason: 'incomplete' | 'unlocated' | 'already_over' | 'too_far_in_future' | 'low_confidence';
+  missing?: ActivityPart[];
+  /** 地點只寫了「本店」這類說法 */
+  selfPlace?: string;
+  /** 只寫了日期沒寫幾點：那天（00:00） */
+  dateOnly?: number;
+  startAt?: number;
+  endAt?: number;
+  /** 沒寫結束時間（發完為止） */
+  endOpen?: boolean;
+  tz?: string | null;
+  /** 太久以後才開始的：這天之後再貼就收得到 */
+  reportFrom?: number;
+}
+
 /** 判讀出來的一筆：plan 是可以寫進雷達的資料；沒有 plan 時 reason 寫原因（no_place、duplicate_of_3…）。group 是貼文裡第幾個地點或時段 */
 export interface PlanItem {
   group: number;
   plan: PlannedEvent | null;
   reason: string;
+  /** 洋流的活動沒放上雷達的詳細原因 */
+  fail?: FailedItem;
   merge?: SpotMerge;
   /** 地點是從這些帳號（「@luguocafe」）的名稱、簡介推的，回報的人要確認 */
   profileHint?: string;
@@ -615,7 +639,7 @@ export async function insertPlanned(env: Env, postId: string, p: PlannedEvent, n
 }
 
 /** 對單一貼文跑 LLM 抽取、定位，列出每個地點或時段要建的事件（還沒寫進雷達）；early 是整則貼文就不行的原因 */
-export async function planPost(env: Env, post: PostRow, now = nowSec()): Promise<{ items: PlanItem[]; early: string | null }> {
+export async function planPost(env: Env, post: PostRow, now = nowSec()): Promise<PlanResult> {
   const first = await planPostWith(env, post, now, null);
   // 使用者貼連結回報的、找不到地點：看發文的店家帳號、標記的店家帳號的名稱和簡介，再判讀一次。
   // 店家貼文只寫「在櫃檯出示船員證」、沒寫地址時，模型常直接說不是活動，這種也試
@@ -639,7 +663,14 @@ const noPlaceReason = (reason: string): boolean => reason === 'no_place' || reas
 const lacksPlace = (items: PlanItem[]): boolean =>
   items.length > 0 && located(items) === 0 && items.some((it) => (it.plan ? it.plan.lat === null : noPlaceReason(it.reason)));
 
-async function planPostWith(env: Env, post: PostRow, now: number, profileHint: string | null): Promise<{ items: PlanItem[]; early: string | null }> {
+/** 一則貼文的判讀結果：early 是整則就不行的原因；note 是模型說不是活動的理由 */
+export interface PlanResult {
+  items: PlanItem[];
+  early: string | null;
+  note?: string | null;
+}
+
+async function planPostWith(env: Env, post: PostRow, now: number, profileHint: string | null): Promise<PlanResult> {
   const base = post.supplement ? `${post.text}\n\n【回報的人補充】${post.supplement}` : post.text;
   const text = profileHint ? `${base}\n\n【帳號簡介】${profileHint}` : base;
   const module = moduleOf(post.module);
@@ -651,7 +682,7 @@ async function planPostWith(env: Env, post: PostRow, now: number, profileHint: s
 
   if (garbled) return { items: [], early: 'garbled' };
   if (!extraction) return { items: [], early: 'extraction_failed' };
-  if (!extraction.is_event) return { items: [], early: 'not_event' };
+  if (!extraction.is_event) return { items: [], early: 'not_event', note: extraction.reason ?? null };
   if (extraction.events.length === 0) return { items: [], early: 'no_events' };
   if (module === 'dog') return { items: await planJobs(env, post, extraction.events, now), early: null };
   if (module === 'current') return { items: await planActivities(env, post, extraction.events, text, now), early: null };
@@ -744,23 +775,48 @@ async function planActivities(env: Env, post: PostRow, events: ExtractedEvent[],
       // 「今天14:45前我都在」：從現在到 14:45（不然 14:45 會被當成開始、再往後排）
       startNowForDeadline(ex, text, now);
     }
-    // 只寫「本店」沒寫店名：當成沒寫地點
-    dropSelfPlace(ex);
+    // 只寫「本店」沒寫店名：當成沒寫地點（記下原本寫的，回報結果講「只寫了本店」）
+    const rawPlace = ex.place_text ?? ex.place_query;
+    const selfPlace = dropSelfPlace(ex) ? rawPlace : null;
     const missing = missingActivityParts(ex);
     const start = parseIsoToUnix(ex.start_at);
     const end = parseIsoToUnix(ex.end_at);
+    const tz = ex.country ? timeZoneOf(ex) : null;
     // 只寫日期沒寫幾點：模型常填 00:00，當成沒寫開始時間
-    if (start !== null && guessedMidnight(start, ex.country ? timeZoneOf(ex) : null, text)) missing.push('start');
+    const dateOnly = start !== null && guessedMidnight(start, tz, text);
+    if (dateOnly) missing.push('start');
     // 跨過午夜、模型把結束寫成同一天（22:00–02:00）：結束是隔天；差更多的是讀錯，當成沒寫結束（發完為止）
     if (start !== null && end !== null && end <= start) ex.end_at = end + DAY_SEC > start ? new Date((end + DAY_SEC) * 1000).toISOString() : null;
+    const which = { title: ex.title.trim() || null, place: ex.place_text ?? ex.place_query ?? selfPlace ?? null };
     if (missing.length > 0) {
-      items.push({ group, plan: null, reason: `incomplete:${missing.join(',')}` });
+      const fail: FailedItem = { ...which, reason: 'incomplete', missing, ...(selfPlace ? { selfPlace } : {}), ...(dateOnly && start !== null ? { dateOnly: start, tz } : {}) };
+      items.push({ group, plan: null, reason: `incomplete:${missing.join(',')}`, fail });
       continue;
     }
     const r = await planEvent(env, ex, now, deadline, undefined, undefined, undefined, OPEN_END_SEC);
-    items.push(r.plan && r.plan.lat === null ? { group, plan: null, reason: 'unlocated' } : { group, ...r });
+    if (r.plan && r.plan.lat === null) {
+      items.push({ group, plan: null, reason: 'unlocated', fail: { ...which, reason: 'unlocated' } });
+      continue;
+    }
+    const fail = r.plan ? undefined : failOf(r, which, ex.end_at === null);
+    items.push({ group, ...r, ...(fail ? { fail } : {}) });
   }
   return items;
+}
+
+/** planEvent 沒排上去的原因換成回報結果用的說明；重複的不算（回報結果會列出雷達上的那一場） */
+function failOf(r: { reason: string; start?: number; end?: number; tz?: string | null }, which: Pick<FailedItem, 'title' | 'place'>, endOpen: boolean): FailedItem | undefined {
+  if (r.reason === 'low_confidence') return { ...which, reason: 'low_confidence' };
+  if (r.reason !== 'already_over' && r.reason !== 'too_far_in_future') return undefined;
+  return {
+    ...which,
+    reason: r.reason,
+    startAt: r.start,
+    endAt: r.end,
+    endOpen,
+    tz: r.tz ?? null,
+    ...(r.reason === 'too_far_in_future' && r.start !== undefined ? { reportFrom: r.start - MAX_FUTURE_SEC } : {}),
+  };
 }
 
 /**

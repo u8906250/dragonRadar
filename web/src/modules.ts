@@ -45,7 +45,7 @@ export const MODULES: ModuleDef[] = [
     searchPlaceholder: '搜尋標題、地點、物品、帳號…',
     reportIntro: REPORT_INTRO,
     reportTips: [],
-    notEventText: '這則看起來不是可以到場參加的活動。貼文要寫出做什麼、在哪裡、哪天幾點到幾點，雷達才會收。',
+    notEventText: '這則看起來不是可以到場參加的活動。貼文要寫出做什麼、在哪裡、哪天幾點開始，雷達才會收。',
     noPlaceText: '看得出是活動，但貼文寫的地點在地圖上查不到，所以還沒放上雷達。知道在哪裡的話，可以在下面補充完整地址或店名再判讀一次。',
     helpPage: 'help.html',
   },

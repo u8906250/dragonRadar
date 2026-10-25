@@ -51,6 +51,8 @@ export interface Extraction {
   /** 是否宣告了可到場的實體活動或發放 */
   is_event: boolean;
   events: ExtractedEvent[];
+  /** 洋流的活動判讀：不是活動時，模型說的原因（「這是活動心得，不是預告」） */
+  reason?: string | null;
 }
 
 const MAX_EVENTS_PER_POST = 6;
@@ -162,6 +164,7 @@ const ACTIVITY_SCHEMA = {
   type: 'object',
   properties: {
     is_event: { type: 'boolean' },
+    reason: { type: ['string', 'null'] },
     events: {
       type: 'array',
       maxItems: MAX_EVENTS_PER_POST,
@@ -181,7 +184,7 @@ const ACTIVITY_SCHEMA = {
       },
     },
   },
-  required: ['is_event', 'events'],
+  required: ['is_event', 'reason', 'events'],
 };
 
 const ACTIVITY_PROMPT = `你是「洋流雷達」的活動判讀器。你會收到一則台灣 Threads 貼文，請判斷它是否在宣告「民眾可以到場參加的實體活動」，並抽出每一場的活動內容、地點、開始時間、結束時間。
@@ -191,6 +194,7 @@ const ACTIVITY_PROMPT = `你是「洋流雷達」的活動判讀器。你會收�
 只輸出 JSON：
 {
   "is_event": 是否宣告了至少一場可到場的實體活動（布林值）,
+  "reason": is_event 為 false 時，用一句話（20 字以內）說明為什麼不算，例如「這是活動心得，不是預告」「是線上直播」「在販售商品」「只是詢問哪裡有發」；is_event 為 true 則 null,
   "events": [ 每一個「地點 + 時段」一筆，最多 ${MAX_EVENTS_PER_POST} 筆 ]
 }
 
@@ -240,7 +244,7 @@ export function normalizeActivities(raw: unknown): Extraction | null {
       timezone: validTimeZone(str(e.timezone)),
     }),
   );
-  return { is_event: isEvent, events: isEvent ? events : [] };
+  return { is_event: isEvent, events: isEvent ? events : [], reason: isEvent ? null : (str(o.reason)?.slice(0, 60) ?? null) };
 }
 
 export const ACTIVITY_SPEC: ExtractSpec = { system: ACTIVITY_PROMPT, schema: ACTIVITY_SCHEMA, normalize: normalizeActivities };

@@ -243,6 +243,10 @@ export interface SubmitResult {
   confirm?: { postId: string; token: string };
   /** 回報的人補充過的資料 */
   supplement?: string | null;
+  /** 洋流的活動：沒放上雷達的每一場和原因 */
+  failures?: FailedItem[];
+  /** 判讀成不是活動時，AI 說的理由 */
+  note?: string;
   /** outcome = 'not_listed' 而且原因確定時：直接講是哪個原因 */
   why?: {
     reason: 'already_over' | 'too_far_in_future' | 'no_start_time' | 'incomplete';
@@ -261,4 +265,23 @@ export interface EndedReportResult {
   count: number;
   needed: number;
   ended: boolean;
+}
+
+/** 洋流的活動沒放上雷達的一場：哪一場（標題、地點）、為什麼 */
+export interface FailedItem {
+  title: string | null;
+  place: string | null;
+  /** incomplete 缺內容、地點或開始時間；unlocated 地點查不到；already_over、too_far_in_future 時間不對；low_confidence 不確定是不是活動 */
+  reason: 'incomplete' | 'unlocated' | 'already_over' | 'too_far_in_future' | 'low_confidence';
+  missing?: Array<'content' | 'place' | 'start'>;
+  /** 地點只寫了「本店」這類說法 */
+  selfPlace?: string;
+  /** 只寫了日期沒寫幾點：那天 */
+  dateOnly?: number;
+  startAt?: number;
+  endAt?: number;
+  /** 沒寫結束時間（發完為止） */
+  endOpen?: boolean;
+  tz?: string | null;
+  reportFrom?: number;
 }
