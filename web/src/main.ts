@@ -2739,8 +2739,8 @@ function renderReportTips(): void {
   }
   const tips = [
     share,
-    `只收${l ? ` ${l.maxAgeDays} 天內` : ''}的公開貼文。每一場活動都要讀得到做什麼、在哪裡、哪天幾點開始、幾點結束，缺一個就不會放上雷達。`,
-    '今天的活動沒寫幾點結束，會寫「發完為止」，雷達上顯示到開始後兩小時；其他天的要寫幾點結束。',
+    `只收${l ? ` ${l.maxAgeDays} 天內` : ''}的公開貼文。每一場活動都要讀得到做什麼、在哪裡、哪天幾點開始，缺一個就不會放上雷達。`,
+    '沒寫幾點結束的寫「發完為止」，雷達上顯示到開始後兩小時。',
     '貼文沒寫的，可以在判讀結果按「補充資料」補上再判讀。連續好幾天的活動每天各算一場（最多 6 場）。貼文最好寫出門牌地址，定位才準。',
     `原貼文刪除或改成「結束了」，雷達${l ? ` ${l.recheckMin} 分鐘內` : ''}會自動下架。`,
   ];
@@ -2753,7 +2753,7 @@ const OUTCOME_TEXT: Record<SubmitResult['outcome'], string> = {
   duplicate: '雷達上已經有這一場了：',
   attached: '雷達上已經有這個據點，這則已附在它的詳細資料（相關貼文）：',
   no_place: '看得出是活動，但貼文沒寫具體地點（或查不到），所以還沒放上雷達。知道在哪裡的話，可以在下面補充地點再判讀一次。',
-  not_listed: '判讀不到完整的活動內容、地點、開始和結束時間，或是已經結束、超過 21 天後才開始，所以沒有放上雷達。',
+  not_listed: '判讀不到完整的活動內容、地點、開始時間，或是已經結束、超過 21 天後才開始，所以沒有放上雷達。',
   not_event: '這則看起來不是活動。貼文要寫出做什麼、在哪裡、什麼時候舉辦，雷達才會收。',
   failed: '判讀暫時失敗，請稍後再貼一次。',
 };
@@ -2959,7 +2959,7 @@ function resultGroups(list: EventOut[]): EventOut[][] {
   return [...groups.values()];
 }
 
-const ACTIVITY_PART_TEXT: Record<'content' | 'place' | 'start' | 'end', string> = { content: '活動內容', place: '地點', start: '開始時間', end: '結束時間' };
+const ACTIVITY_PART_TEXT: Record<'content' | 'place' | 'start', string> = { content: '活動內容', place: '地點', start: '開始時間（哪天幾點）' };
 
 /** 洋流的活動缺哪些（「地點、結束時間」） */
 const missingText = (parts: Array<keyof typeof ACTIVITY_PART_TEXT>): string => parts.map((p) => ACTIVITY_PART_TEXT[p]).join('、');
@@ -2975,7 +2975,7 @@ function skippedNote(reasons: string[]): string {
   }
   const unlocated = reasons.filter((r) => r === 'unlocated').length;
   const lines = [
-    incomplete ? `另外 ${incomplete} 場判讀不到${missingText((['content', 'place', 'start', 'end'] as const).filter((p) => parts.has(p)))}` : '',
+    incomplete ? `另外 ${incomplete} 場判讀不到${missingText((['content', 'place', 'start'] as const).filter((p) => parts.has(p)))}` : '',
     unlocated ? `${incomplete ? '' : '另外 '}${unlocated} 場的地點在地圖上查不到` : '',
   ].filter(Boolean);
   return lines.length ? `<p class="muted sheet-note">${esc(lines.join('，'))}，不會放上雷達；知道的話可以按「補充資料」補上。</p>` : '';
@@ -2986,8 +2986,7 @@ function notListedText(w: NonNullable<SubmitResult['why']>): string | null {
   const tz = w.tz && w.tz !== 'Asia/Taipei' ? w.tz : null;
   const local = tz ? '（當地時間）' : '';
   if (w.reason === 'incomplete' && w.missing?.length) {
-    const endNote = w.missing.includes('end') ? '（今天的活動沒寫結束時間會當成發完為止，其他天的要寫幾點結束）' : '';
-    return `判讀不到${missingText(w.missing)}，所以沒有放上雷達。活動要有內容、地點、開始和結束時間才收${endNote}；知道的話可以在下面補充再判讀一次。`;
+    return `判讀不到${missingText(w.missing)}，所以沒有放上雷達。活動要有內容、地點和開始時間才收；知道的話可以在下面補充再判讀一次。`;
   }
   if (w.reason === 'no_start_time') return '判讀不出時間（貼文沒寫哪天或幾點），所以沒有放上雷達。知道時間的話，可以在下面補充再判讀一次。';
   if (w.reason === 'already_over') {

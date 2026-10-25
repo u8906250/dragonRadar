@@ -158,7 +158,7 @@ export interface SubmitResult {
 
 export interface NotListedWhy {
   reason: 'already_over' | 'too_far_in_future' | 'no_start_time' | 'incomplete';
-  /** reason = 'incomplete'（洋流的活動）：缺了哪些，照 內容、地點、開始、結束 的順序 */
+  /** reason = 'incomplete'（洋流的活動）：缺了哪些，照 內容、地點、開始 的順序 */
   missing?: ActivityPart[];
   /** 那一場的時間（已經結束的取最晚的一場，太久以後的取最早的一場） */
   startAt?: number;
@@ -170,12 +170,12 @@ export interface NotListedWhy {
 }
 
 const INCOMPLETE = 'incomplete:';
-const ACTIVITY_PARTS: ActivityPart[] = ['content', 'place', 'start', 'end'];
+const ACTIVITY_PARTS: ActivityPart[] = ['content', 'place', 'start'];
 
 /** 沒放上雷達的原因只有一種、而且是這幾種之一才講；好幾種原因混在一起就照舊用籠統的說法 */
 export function notListedWhy(items: PlanItem[]): NotListedWhy | undefined {
   const failed = items.filter((it) => !it.plan);
-  // 洋流的活動缺內容、地點、開始或結束時間：好幾場缺的不一樣也合起來講
+  // 洋流的活動缺內容、地點或開始時間：好幾場缺的不一樣也合起來講
   if (failed.length > 0 && failed.every((it) => it.reason.startsWith(INCOMPLETE))) {
     const missing = new Set(failed.flatMap((it) => it.reason.slice(INCOMPLETE.length).split(',')));
     return { reason: 'incomplete', missing: ACTIVITY_PARTS.filter((p) => missing.has(p)) };

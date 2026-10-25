@@ -247,7 +247,7 @@ export interface SubmitResult {
   why?: {
     reason: 'already_over' | 'too_far_in_future' | 'no_start_time' | 'incomplete';
     /** reason = 'incomplete'（洋流的活動）：缺了哪些 */
-    missing?: Array<'content' | 'place' | 'start' | 'end'>;
+    missing?: Array<'content' | 'place' | 'start'>;
     startAt?: number;
     endAt?: number;
     /** 國外活動的當地時區 */

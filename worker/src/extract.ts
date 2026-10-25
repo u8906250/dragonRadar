@@ -245,16 +245,15 @@ export function normalizeActivities(raw: unknown): Extraction | null {
 
 export const ACTIVITY_SPEC: ExtractSpec = { system: ACTIVITY_PROMPT, schema: ACTIVITY_SCHEMA, normalize: normalizeActivities };
 
-/** 一場活動一定要有的：活動內容、地點、開始時間、結束時間 */
-export type ActivityPart = 'content' | 'place' | 'start' | 'end';
+/** 一場活動一定要有的：活動內容、地點、開始時間（沒寫結束的當成發完為止） */
+export type ActivityPart = 'content' | 'place' | 'start';
 
-/** 這場活動缺了哪些（照 內容、地點、開始、結束 的順序）；都有回傳空陣列 */
-export function missingActivityParts(ex: Pick<ExtractedEvent, 'title' | 'place_text' | 'place_query' | 'start_at' | 'end_at'>): ActivityPart[] {
+/** 這場活動缺了哪些（照 內容、地點、開始 的順序）；都有回傳空陣列 */
+export function missingActivityParts(ex: Pick<ExtractedEvent, 'title' | 'place_text' | 'place_query' | 'start_at'>): ActivityPart[] {
   const out: ActivityPart[] = [];
   if (!ex.title.trim()) out.push('content');
   if (!(ex.place_query ?? ex.place_text)) out.push('place');
   if (parseIsoToUnix(ex.start_at) === null) out.push('start');
-  if (parseIsoToUnix(ex.end_at) === null) out.push('end');
   return out;
 }
 
