@@ -19,7 +19,7 @@ export interface Env {
   BOTTLES_ENABLED?: string;
   /** "false"：排程不自動抓資料（Threads 關鍵字搜尋、新聞、官方航線與合併），資料只從使用者回報來 */
   AUTO_SOURCES?: string;
-  /** "false"：鎖住使用者回報（貼連結回報、確認、補充、回報已發完、意見回饋），改版中用 */
+  /** 使用者回報收哪些模組："true"（或沒設）全部、"false" 全部鎖住、或列出模組（"current,food"）；鎖住的不收貼連結回報、確認、補充、回報已發完、意見回饋 */
   REPORTS_ENABLED?: string;
   /** 版號，部署時用 --var 帶入（v1.<提交次數>） */
   APP_VERSION?: string;

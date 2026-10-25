@@ -32,10 +32,10 @@ export async function fetchRoutes(): Promise<RouteOut[]> {
   }
 }
 
-export async function fetchHealth(): Promise<{ ok: boolean; mode: 'live' | 'mock' | 'unconfigured'; version?: string; reports?: boolean }> {
+export async function fetchHealth(): Promise<{ ok: boolean; mode: 'live' | 'mock' | 'unconfigured'; version?: string; reports?: boolean; reportModules?: string[] }> {
   const r = await fetch(`${API_BASE}/api/health`);
   if (!r.ok) throw new Error(`API ${r.status}`);
-  return (await r.json()) as { ok: boolean; mode: 'live' | 'mock' | 'unconfigured'; version?: string; reports?: boolean };
+  return (await r.json()) as { ok: boolean; mode: 'live' | 'mock' | 'unconfigured'; version?: string; reports?: boolean; reportModules?: string[] };
 }
 
 export async function fetchKeywords(): Promise<{ max: number; userAdd?: boolean; keywords: KeywordInfo[]; rules?: KeywordRules }> {

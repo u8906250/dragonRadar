@@ -5,9 +5,9 @@
  * 按「不對」（rejectLink）就不放，留給管理者看。
  */
 import type { Env } from './env';
-import { DEFAULT_MODULE, moduleOf, type ModuleId } from './modules';
+import { DEFAULT_MODULE, isModule, MODULE_IDS, moduleOf, type ModuleId } from './modules';
 import { commitPlan, detectEnded, getEvent, getPost, MAX_FUTURE_SEC, planPost, processPost, storePost, type EventOut, type PlanItem, type PostRow } from './events';
-import type { EventKind } from './extract';
+import type { ActivityPart, EventKind } from './extract';
 import { fetchThreadsPost, resolveThreadsLink, shortcodeToUnix, withLocationTag } from './sources/link';
 import { sha1Hex } from './sources/text';
 
@@ -36,6 +36,29 @@ export class ReportError extends Error {
   ) {
     super(message);
   }
+}
+
+/**
+ * 哪些模組收回報（wrangler.toml 的 REPORTS_ENABLED）：沒設或 "true" 全部收、"false" 全部不收，
+ * 也可以列出模組，例如 "current" 只收洋流、"current,food"。
+ */
+export function reportModules(v: string | undefined): ModuleId[] {
+  const s = (v ?? 'true').trim().toLowerCase();
+  if (s === 'true') return [...MODULE_IDS];
+  return s.split(',').map((x) => x.trim()).filter(isModule);
+}
+
+export const REPORTS_LOCKED = '回報功能改版中，暫時關閉';
+
+/** 這個模組的回報鎖住了：貼連結、確認、補充、說判讀錯、回報已發完、意見回饋都不收 */
+export function assertReportsOpen(env: Env, module: unknown): void {
+  if (!reportModules(env.REPORTS_ENABLED).includes(moduleOf(module))) throw new ReportError(503, REPORTS_LOCKED);
+}
+
+/** 回報已發完、意見回饋：看那一場是哪個模組的 */
+export async function assertEventReportsOpen(env: Env, eventId: number): Promise<void> {
+  const r = await env.DB.prepare('SELECT p.module FROM events e JOIN posts p ON p.id = e.post_id WHERE e.id = ?').bind(eventId).first<{ module: string | null }>();
+  assertReportsOpen(env, r?.module);
 }
 
 let saltCache: string | null = null;
@@ -134,7 +157,9 @@ export interface SubmitResult {
 }
 
 export interface NotListedWhy {
-  reason: 'already_over' | 'too_far_in_future' | 'no_start_time';
+  reason: 'already_over' | 'too_far_in_future' | 'no_start_time' | 'incomplete';
+  /** reason = 'incomplete'（洋流的活動）：缺了哪些，照 內容、地點、開始、結束 的順序 */
+  missing?: ActivityPart[];
   /** 那一場的時間（已經結束的取最晚的一場，太久以後的取最早的一場） */
   startAt?: number;
   endAt?: number;
@@ -144,9 +169,17 @@ export interface NotListedWhy {
   reportFrom?: number;
 }
 
+const INCOMPLETE = 'incomplete:';
+const ACTIVITY_PARTS: ActivityPart[] = ['content', 'place', 'start', 'end'];
+
 /** 沒放上雷達的原因只有一種、而且是這幾種之一才講；好幾種原因混在一起就照舊用籠統的說法 */
 export function notListedWhy(items: PlanItem[]): NotListedWhy | undefined {
   const failed = items.filter((it) => !it.plan);
+  // 洋流的活動缺內容、地點、開始或結束時間：好幾場缺的不一樣也合起來講
+  if (failed.length > 0 && failed.every((it) => it.reason.startsWith(INCOMPLETE))) {
+    const missing = new Set(failed.flatMap((it) => it.reason.slice(INCOMPLETE.length).split(',')));
+    return { reason: 'incomplete', missing: ACTIVITY_PARTS.filter((p) => missing.has(p)) };
+  }
   const reasons = new Set(failed.map((it) => it.reason));
   if (failed.length === 0 || reasons.size !== 1) return undefined;
   const reason = failed[0].reason;
@@ -322,6 +355,7 @@ export const UNREADABLE_POST =
 
 /** 處理使用者貼上的連結：讀貼文、AI 判讀、定位，回傳結果 */
 export async function submitLink(env: Env, input: string, ip: string, now: number, device: string | null = null, module: ModuleId = DEFAULT_MODULE): Promise<SubmitResult> {
+  assertReportsOpen(env, module);
   const link = await resolveThreadsLink(input);
   if (!link) throw new ReportError(400, '找不到 Threads 貼文連結，請貼上像 https://www.threads.com/@帳號/post/... 的網址');
   const postId = `link-${link.code}`;
@@ -391,6 +425,7 @@ async function checkConfirm(env: Env, body: { postId?: unknown; token?: unknown 
   if (!/^link-[\w-]+$/.test(postId) || body.token !== (await confirmToken(env, postId))) throw new ReportError(400, '確認代碼不對，請重新貼一次連結');
   const post = await getPost(env, postId);
   if (!post) throw new ReportError(404, '找不到這則回報，請重新貼一次連結');
+  assertReportsOpen(env, post.module);
   return post;
 }
 

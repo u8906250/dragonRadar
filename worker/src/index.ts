@@ -2,7 +2,7 @@ import { getAccessToken, makeClient, saveAccessToken } from './client';
 import type { Env } from './env';
 import { fetchThreadsProfile } from './sources/profile';
 import { DEFAULT_DURATION_SEC, ENDED_WORDS, MAX_FUTURE_SEC, MIN_CONFIDENCE, SPOT_MAX_DAYS, extendOpenSpots, getEvent, getPost, ingestAll, ingestKeyword, clearEventSnapshots, listEvents, locatePlaceForEvent, processBacklog, processPost, relocateApprox, planPost, reprocessPost, setManualTitle, storePost, updateLifecycle, type EventRow, type PostRow } from './events';
-import { normalizeExtraction, runModel } from './extract';
+import { ACTIVITY_SPEC, normalizeExtraction, runModel } from './extract';
 import { geocode } from './geocode';
 import { ingestNews, NEWS_FEEDS } from './sources/news';
 import { listRoutes, syncVoyage, VOYAGE_PAGE } from './sources/voyage';
@@ -16,7 +16,7 @@ import { FOOD_SPEC } from './food';
 import { JOB_SPEC } from './jobs';
 import { moduleOf } from './modules';
 import { PUSH_RADIUS_KM, PushError, b64urlEncode, deleteSubscription, encryptPayload, purgeSubscriptions, pushStarted, saveSubscription, sendPush, vapidKeys } from './push';
-import { confirmLink, ENDED_REPORTS_NEEDED, MAX_LINK_AGE_SEC, ReportError, ipHash, myReports, purgeReports, recheckLinks, rejectLink, reportEnded, submitLink, supplementLink, withdrawReport } from './reports';
+import { assertEventReportsOpen, confirmLink, ENDED_REPORTS_NEEDED, MAX_LINK_AGE_SEC, ReportError, REPORTS_LOCKED, ipHash, myReports, purgeReports, recheckLinks, rejectLink, reportEnded, reportModules, submitLink, supplementLink, withdrawReport } from './reports';
 import { D1Meter, isTransient, withResilientDb } from './db';
 import { addressCacheKey, geocodeAddress, parseTwAddress } from './address';
 import { adminListBottles, adminSetBottle, BOTTLE_MAX_WEIGHT, BOTTLE_TTL_SEC, bottlesEnabled, collectLetter, deleteBottle, deviceId, DRIFT_EVERY_SEC, driftBottles, dropBottle, listBottles, myBottles, PER_DEVICE_PER_DAY, PICK_RADIUS_M, pickBottle, purgeBottles, recycleBottle, reportBottle } from './bottles';
@@ -50,8 +50,6 @@ async function sha1Hex(s: string): Promise<string> {
   return [...new Uint8Array(buf)].map((b) => b.toString(16).padStart(2, '0')).join('');
 }
 
-/** 回報功能開著嗎（REPORTS_ENABLED = "false" 時鎖住） */
-const reportsOpen = (env: Env): boolean => env.REPORTS_ENABLED !== 'false';
 /** 使用者回報會寫入的 API（管理者的不算） */
 const REPORT_WRITE_RE = /^\/api\/(?:reports(?:\/(?:confirm|supplement|reject))?|events\/\d+\/(?:ended|feedback)|spot-requests)$/;
 
@@ -92,12 +90,14 @@ async function handle(req: Request, env: Env, ctx: ExecutionContext): Promise<Re
 
   if (req.method === 'GET' && (path === '/' || path === '/api/health')) {
     const client = await makeClient(env);
-    return jsonResponse({ ok: true, mode: client.mode, time: now, version: env.APP_VERSION ?? 'dev', reports: reportsOpen(env) });
+    const open = reportModules(env.REPORTS_ENABLED);
+    return jsonResponse({ ok: true, mode: client.mode, time: now, version: env.APP_VERSION ?? 'dev', reports: open.length > 0, reportModules: open });
   }
 
-  // 回報功能鎖住（REPORTS_ENABLED = "false"，改版中）：貼連結回報、確認、補充、說判讀錯、回報已發完、意見回饋都不收
-  if (!reportsOpen(env) && req.method === 'POST' && REPORT_WRITE_RE.test(path)) {
-    throw new HttpError(503, '回報功能改版中，暫時關閉');
+  // 回報功能全部鎖住（REPORTS_ENABLED = "false"）：貼連結回報、確認、補充、說判讀錯、回報已發完、意見回饋都不收。
+  // 只開部分模組時，各個 API 自己看是哪個模組的
+  if (reportModules(env.REPORTS_ENABLED).length === 0 && req.method === 'POST' && REPORT_WRITE_RE.test(path)) {
+    throw new HttpError(503, REPORTS_LOCKED);
   }
 
   // Threads 授權（給管理員綁定搜尋用的帳號）與 Meta 要求的解除授權、刪除資料回呼
@@ -291,12 +291,14 @@ async function handle(req: Request, env: Env, ctx: ExecutionContext): Promise<Re
 
   const endedMatch = /^\/api\/events\/(\d+)\/ended$/.exec(path);
   if (req.method === 'POST' && endedMatch) {
+    await assertEventReportsOpen(env, Number(endedMatch[1]));
     return jsonResponse(await reportEnded(env, Number(endedMatch[1]), await ipHash(env, req), now));
   }
 
   // 回報問題（地點錯誤、時間錯誤…）：{ kind, note }，推到管理者手機
   const fbMatch = /^\/api\/events\/(\d+)\/feedback$/.exec(path);
   if (req.method === 'POST' && fbMatch) {
+    await assertEventReportsOpen(env, Number(fbMatch[1]));
     const { result, created } = await submitFeedback(env, Number(fbMatch[1]), await readJson(req), await deviceId(env, req), await ipHash(env, req), now);
     if (created) ctx.waitUntil(notifyAdmins(env, created, now).catch((e) => console.warn('notify admins failed', e)));
     return jsonResponse(result);
@@ -341,7 +343,7 @@ async function handleAdmin(req: Request, env: Env, ctx: ExecutionContext, path: 
     if (!body.text?.trim()) throw new HttpError(400, 'text is required');
     // module：用哪個模組的判讀（dog、badminton），沒給是洋流
     const mod = moduleOf(body.module);
-    const spec = mod === 'dog' ? JOB_SPEC : mod === 'badminton' ? SESSION_SPEC : mod === 'food' ? FOOD_SPEC : undefined;
+    const spec = mod === 'dog' ? JOB_SPEC : mod === 'badminton' ? SESSION_SPEC : mod === 'food' ? FOOD_SPEC : ACTIVITY_SPEC;
     const postedAt = typeof body.posted_at === 'number' ? body.posted_at : parseIsoToUnix(body.posted_at) ?? now;
     const models = (body.models?.length ? body.models : [env.AI_MODEL, env.AI_MODEL_FALLBACK]).filter((m): m is string => !!m).slice(0, 6);
     const results = [];

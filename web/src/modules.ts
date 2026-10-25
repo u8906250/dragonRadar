@@ -29,21 +29,24 @@ export interface ModuleDef {
   helpPage: string;
 }
 
+/** 洋流的回報說明（改版後只判斷活動）；index.html 的 #report-intro 也是這段 */
+const REPORT_INTRO = '看到洋流活動的 Threads 貼文？貼上連結，雷達會判讀活動內容、地點、開始和結束時間，四個都讀到才會標到地圖上給大家看。';
+
 export const MODULES: ModuleDef[] = [
   {
     id: 'current',
     name: '洋流雷達',
     short: '洋流',
-    tagline: '附近的洋流飄帶發放、活動、固定據點',
+    tagline: '附近的洋流活動',
     emoji: '🌊',
     current: true,
     unit: '個',
     emptyText: '',
     searchPlaceholder: '搜尋標題、地點、物品、帳號…',
-    reportIntro: '看到發放或活動的 Threads 貼文？貼上連結，雷達會讀取貼文、判讀時間地點，標到地圖上給大家看。店家、服務處連續好幾天的發放也一樣貼，會自動判斷成固定據點。',
+    reportIntro: REPORT_INTRO,
     reportTips: [],
-    notEventText: '這則看起來不是發放或活動。貼文要寫出在哪裡、什麼時候發放或舉辦，雷達才會收。',
-    noPlaceText: '看得出是發放或活動，但貼文沒寫具體地點（或查不到），所以還沒放上雷達。知道在哪裡的話，可以在下面補充地點再判讀一次。',
+    notEventText: '這則看起來不是可以到場參加的活動。貼文要寫出做什麼、在哪裡、哪天幾點到幾點，雷達才會收。',
+    noPlaceText: '看得出是活動，但貼文寫的地點在地圖上查不到，所以還沒放上雷達。知道在哪裡的話，可以在下面補充完整地址或店名再判讀一次。',
     helpPage: 'help.html',
   },
   {

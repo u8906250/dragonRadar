@@ -1,6 +1,6 @@
 import type { Env } from './env';
 import { fetchThreadsProfile, profileCandidates, profileHintText, type ThreadsProfile } from './sources/profile';
-import { applySupplementDate, closedWeekdays, slotWeekdays, dropBroughtItem, dropSelfPlace, EVENT_SPEC, extractFromPost, localizeTimes, openWeekdaysFromText, splitDropTimes, splitMultiDay, splitWeekdayWeekend, spotHoursFromText, startNowForDeadline, timeZoneOf, untilInText, weekdaysInText, type EventKind, type ExtractedEvent } from './extract';
+import { ACTIVITY_SPEC, applySupplementDate, closedWeekdays, slotWeekdays, dropBroughtItem, dropSelfPlace, extractFromPost, localizeTimes, missingActivityParts, openWeekdaysFromText, splitDropTimes, splitMultiDay, splitWeekdayWeekend, spotHoursFromText, startNowForDeadline, timeZoneOf, untilInText, weekdaysInText, type EventKind, type ExtractedEvent } from './extract';
 import { cityOfHouse, geocodeAddress, parseTwAddress, type TwAddress } from './address';
 import { SESSION_SPEC } from './badminton';
 import { FOOD_SPEC } from './food';
@@ -629,16 +629,19 @@ export async function planPost(env: Env, post: PostRow, now = nowSec()): Promise
 }
 
 const located = (items: PlanItem[]): number => items.filter((it) => it.plan && it.plan.lat !== null).length;
+/** 這一筆沒有地點：沒寫、或查不到（洋流的活動缺地點記成 incomplete:place…、查不到記成 unlocated） */
+const noPlaceReason = (reason: string): boolean => reason === 'no_place' || reason === 'unlocated' || /^incomplete:(?:.*,)?place\b/.test(reason);
 /** 判讀得出來，但地點都找不到（沒寫地點、或查不到） */
 const lacksPlace = (items: PlanItem[]): boolean =>
-  items.length > 0 && located(items) === 0 && items.some((it) => (it.plan ? it.plan.lat === null : it.reason === 'no_place'));
+  items.length > 0 && located(items) === 0 && items.some((it) => (it.plan ? it.plan.lat === null : noPlaceReason(it.reason)));
 
 async function planPostWith(env: Env, post: PostRow, now: number, profileHint: string | null): Promise<{ items: PlanItem[]; early: string | null }> {
   const base = post.supplement ? `${post.text}\n\n【回報的人補充】${post.supplement}` : post.text;
   const text = profileHint ? `${base}\n\n【帳號簡介】${profileHint}` : base;
   const module = moduleOf(post.module);
   // 使用者貼連結回報的，主要模型說不是活動時再問備用模型（只多等一下，量不大）
-  const spec = module === 'dog' ? JOB_SPEC : module === 'badminton' ? SESSION_SPEC : module === 'food' ? FOOD_SPEC : EVENT_SPEC;
+  // 洋流改版後只判斷活動（不再分發放、固定據點）
+  const spec = module === 'dog' ? JOB_SPEC : module === 'badminton' ? SESSION_SPEC : module === 'food' ? FOOD_SPEC : ACTIVITY_SPEC;
   const { extraction, raw, garbled } = await extractFromPost(env, text, post.posted_at, now, { secondOpinion: post.source === 'link', spec });
   await env.DB.prepare('UPDATE posts SET processed_at = ?, extraction = ? WHERE id = ?').bind(now, raw, post.id).run();
 
@@ -647,6 +650,7 @@ async function planPostWith(env: Env, post: PostRow, now: number, profileHint: s
   if (!extraction.is_event) return { items: [], early: 'not_event' };
   if (extraction.events.length === 0) return { items: [], early: 'no_events' };
   if (module === 'dog') return { items: await planJobs(env, post, extraction.events, now), early: null };
+  if (module === 'current') return { items: await planActivities(env, post, extraction.events, now), early: null };
   // 模型常把付款的 Line Pay 當成用 LINE 聯絡：貼文只有 Line Pay 的不算
   if (!/(?:line|賴)(?!\s*pay)/i.test(text)) for (const e of extraction.events) if (e.extra?.contact === 'line') e.extra.contact = null;
   // 刊登（找臨打、網友推薦、揪團吃飯）不是場次：從發文起顯示一段時間；招臨打、出攤照場次排
@@ -717,6 +721,38 @@ async function planPostWith(env: Env, post: PostRow, now: number, profileHint: s
     for (const session of sessions) items.push({ group, ...(await planEvent(env, ex, now, deadline, session, located, old?.post_id)), ...(merge ? { merge } : {}) });
   }
   return { items, early: null };
+}
+
+/**
+ * 洋流（改版後）：只收活動，每一場都要判讀出活動內容、地點、開始和結束時間才算成功。
+ * 缺的記成 incomplete:place,end（照 內容、地點、開始、結束 的順序，回報的人可以補充再判讀），
+ * 寫了地點、地圖上查不到記成 unlocated。不再推算固定據點、「發完為止」、預設兩小時。
+ */
+async function planActivities(env: Env, post: PostRow, events: ExtractedEvent[], now: number): Promise<PlanItem[]> {
+  const deadline = Date.now() + ADDRESS_BUDGET_MS;
+  const items: PlanItem[] = [];
+  for (const [group, ex] of events.entries()) {
+    // 國外的：時間換成當地時區的時間點；台灣的貼文沒寫哪天、補充寫了，用補充的日期（模型有時會忽略補充）
+    if (ex.country) localizeTimes(ex);
+    else applySupplementDate(ex, post.supplement, post.text, post.posted_at);
+    // 只寫「本店」沒寫店名：當成沒寫地點
+    dropSelfPlace(ex);
+    const missing = missingActivityParts(ex);
+    const start = parseIsoToUnix(ex.start_at);
+    const end = parseIsoToUnix(ex.end_at);
+    // 跨過午夜、模型把結束寫成同一天（22:00–02:00）：結束是隔天；差更多的是讀錯，當成沒讀到結束時間
+    if (start !== null && end !== null && end <= start) {
+      if (end + DAY_SEC > start) ex.end_at = new Date((end + DAY_SEC) * 1000).toISOString();
+      else missing.push('end');
+    }
+    if (missing.length > 0) {
+      items.push({ group, plan: null, reason: `incomplete:${missing.join(',')}` });
+      continue;
+    }
+    const r = await planEvent(env, ex, now, deadline);
+    items.push(r.plan && r.plan.lat === null ? { group, plan: null, reason: 'unlocated' } : { group, ...r });
+  }
+  return items;
 }
 
 /**

@@ -245,7 +245,9 @@ export interface SubmitResult {
   supplement?: string | null;
   /** outcome = 'not_listed' 而且原因確定時：直接講是哪個原因 */
   why?: {
-    reason: 'already_over' | 'too_far_in_future' | 'no_start_time';
+    reason: 'already_over' | 'too_far_in_future' | 'no_start_time' | 'incomplete';
+    /** reason = 'incomplete'（洋流的活動）：缺了哪些 */
+    missing?: Array<'content' | 'place' | 'start' | 'end'>;
     startAt?: number;
     endAt?: number;
     /** 國外活動的當地時區 */

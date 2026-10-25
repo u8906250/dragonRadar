@@ -158,6 +158,106 @@ export interface ExtractSpec {
 /** 洋流：發放、活動、固定據點 */
 export const EVENT_SPEC: ExtractSpec = { system: SYSTEM_PROMPT, schema: SCHEMA, normalize: (raw) => normalizeExtraction(raw) };
 
+const ACTIVITY_SCHEMA = {
+  type: 'object',
+  properties: {
+    is_event: { type: 'boolean' },
+    events: {
+      type: 'array',
+      maxItems: MAX_EVENTS_PER_POST,
+      items: {
+        type: 'object',
+        properties: {
+          title: { type: ['string', 'null'] },
+          start_at: { type: ['string', 'null'] },
+          end_at: { type: ['string', 'null'] },
+          place_text: { type: ['string', 'null'] },
+          place_query: { type: ['string', 'null'] },
+          confidence: { type: 'number' },
+          country: { type: ['string', 'null'] },
+          timezone: { type: ['string', 'null'] },
+        },
+        required: ['title', 'start_at', 'end_at', 'place_text', 'place_query', 'confidence'],
+      },
+    },
+  },
+  required: ['is_event', 'events'],
+};
+
+const ACTIVITY_PROMPT = `你是「洋流雷達」的活動判讀器。你會收到一則台灣 Threads 貼文，請判斷它是否在宣告「民眾可以到場參加的實體活動」，並抽出每一場的活動內容、地點、開始時間、結束時間。
+
+活動：在特定時間地點舉行、民眾可以到場參加的，例如發放飄帶或小物、車掃、掃街、市場開講、造勢晚會、見面會、座談、講座、遊行、快閃、志工集合、市集擺攤、幫忙編飄帶、彩繪、拍照。
+
+只輸出 JSON：
+{
+  "is_event": 是否宣告了至少一場可到場的實體活動（布林值）,
+  "events": [ 每一個「地點 + 時段」一筆，最多 ${MAX_EVENTS_PER_POST} 筆 ]
+}
+
+events 每筆的欄位：
+- title: 活動內容，16 字以內的短標題，要寫出在哪裡做什麼，例如「秀水服務處發飄帶」「保安宮市政開講」「散步遊者市集幫編飄帶」「景華公園表演同樂會」。做什麼要照貼文寫的（發飄帶、表演、同樂會、講座、掃街、見面會…），不要自己編；服務處、競選總部要寫出是誰的（看貼文署名或內文的名字）。看不出要做什麼則 null
+- start_at: 開始時間，ISO 8601 含時區，例如 2026-10-17T15:00:00+08:00。貼文要寫出哪天、幾點開始；沒寫幾點開始（例如只寫「14:45 前我都在」）則 null，不要自己猜
+- end_at: 結束時間，同格式。貼文要寫出幾點結束（例如「14:00–17:00」「到下午 5 點」「17:00 結束」）；只寫開始時間、「發完為止」「數量有限」、沒寫結束則 null，不要自己推算或補上
+- place_text: 貼文原文中的地點描述。內文沒寫地點、但最後有「📍 貼文的地點標記：XX」時，用標記的地點，place_query 填「XX」。hashtag、活動名稱不是地點。「本店」「店裡」「門市」「現場」這種沒寫店名、也沒寫地址的不算地點，place_text、place_query 都給 null（不要只填縣市）
+- place_query: 給地圖搜尋用的地址或地名。有門牌地址就用地址；要補上縣市，例如「宜蘭縣羅東鎮光榮路218號」「台北市 大龍峒保安宮」。鄉鎮區只有貼文寫了才加，不要自己猜。店家寫「近XX站」時，用「縣市 + 捷運XX站」。沒有能查的地名則 null
+- confidence: 這一筆是真的可到場活動、而且內容時間地點都讀對的信心，0 到 1
+- country: 活動在台灣以外的國家時，填國家代碼（ISO 3166-1 兩碼，例如 US、JP）；在台灣則 null
+- timezone: 活動在國外時，填當地時區（IANA 名稱，例如 America/Los_Angeles、Asia/Tokyo）；在台灣則 null
+
+規則：
+- 相對時間（今天、今晚、明天、週六、下午）以「貼文發布時間」為基準換算，時區一律 +08:00。「今晚 5 點半」是發文當天 17:30。
+- 「早上 9 點到下午 5 點」：start_at 9:00、end_at 17:00。跨過午夜的（「22:00–02:00」）end_at 是隔天 02:00。
+- 「🈺」是「營業中」的意思：「🈺11-21」是 11:00 到 21:00，不是日期。
+- 同一則貼文有多個地點或多個時段（行程表、車掃停靠點、中午一場晚上一場），每個地點 + 時段各一筆。
+- 連續好幾天、每天同樣時段的（「10/17~10/19 每日 11:00~18:00」、店家「即日起 每天 12:00–21:00 發放」），每天各一筆，最多 ${MAX_EVENTS_PER_POST} 筆；沒寫到哪天為止的，只輸出第一天（「即日起」是發文當天）。
+- 新聞報導、心得、活動回顧、徵求、詢問、線上抽獎、直播、線上活動、販售，is_event 為 false，events 為空陣列。
+- 不要編造貼文裡沒有的內容、時間或地點，可以依上下文補上縣市。
+- 貼文最後如果有「【回報的人補充】」，那是看到貼文的人補上的活動內容、地點或時間，貼文沒寫的一定要用它補上；跟貼文衝突時以貼文為準。補充寫了店名、或是誰的服務處，title 要用補充寫的名稱。
+- 貼文最後如果有「【帳號簡介】」，那是發文帳號或貼文標記的店家帳號的名稱、簡介。貼文沒寫地點時，用它找出店名或地址填 place_text、place_query；簡介沒有店名也沒有地址就不要用。貼文自己寫了地點時以貼文為準。
+- 活動在國外：一樣要抽出來。start_at、end_at 寫當地的時間，填 country、timezone；place_query 用當地的地名加城市，英文或當地語言，不要加台灣的縣市。`;
+
+/** 洋流（改版後）：只判斷活動，每一場要有內容、地點、開始和結束時間 */
+export function normalizeActivities(raw: unknown): Extraction | null {
+  const obj = parseLoose(raw);
+  if (!obj || typeof obj !== 'object' || Array.isArray(obj)) return null;
+  const o = obj as Record<string, unknown>;
+  const isEvent = o.is_event === true || o.is_event === 'true';
+  const list = Array.isArray(o.events) ? o.events.filter((e): e is Record<string, unknown> => !!e && typeof e === 'object' && !Array.isArray(e)) : [];
+  const events = list.slice(0, MAX_EVENTS_PER_POST).map(
+    (e): ExtractedEvent => ({
+      kind: 'activity',
+      title: str(e.title) ?? '',
+      item: null,
+      start_at: str(e.start_at),
+      end_at: str(e.end_at),
+      place_text: str(e.place_text),
+      place_query: str(e.place_query),
+      confidence: conf(e.confidence),
+      spot: false,
+      until: null,
+      weekdays: null,
+      country: normalizeCountry(e.country),
+      timezone: validTimeZone(str(e.timezone)),
+    }),
+  );
+  return { is_event: isEvent, events: isEvent ? events : [] };
+}
+
+export const ACTIVITY_SPEC: ExtractSpec = { system: ACTIVITY_PROMPT, schema: ACTIVITY_SCHEMA, normalize: normalizeActivities };
+
+/** 一場活動一定要有的：活動內容、地點、開始時間、結束時間 */
+export type ActivityPart = 'content' | 'place' | 'start' | 'end';
+
+/** 這場活動缺了哪些（照 內容、地點、開始、結束 的順序）；都有回傳空陣列 */
+export function missingActivityParts(ex: Pick<ExtractedEvent, 'title' | 'place_text' | 'place_query' | 'start_at' | 'end_at'>): ActivityPart[] {
+  const out: ActivityPart[] = [];
+  if (!ex.title.trim()) out.push('content');
+  if (!(ex.place_query ?? ex.place_text)) out.push('place');
+  if (parseIsoToUnix(ex.start_at) === null) out.push('start');
+  if (parseIsoToUnix(ex.end_at) === null) out.push('end');
+  return out;
+}
+
 export function str(v: unknown): string | null {
   if (typeof v !== 'string') return null;
   const t = v.trim();

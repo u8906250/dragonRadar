@@ -2336,6 +2336,7 @@ function applyModule(): void {
   reportIntro.textContent = mod.current ? CURRENT_REPORT_INTRO : mod.reportIntro;
   map.setLandmarksVisible(mod.current);
   if (!mod.current) bottleBtn.hidden = true;
+  applyReportsOpen();
   renderReportTips();
   renderModuleList();
 }
@@ -2690,11 +2691,17 @@ function openKwSheet(open: boolean): void {
   }
 }
 
-/** 回報功能開著嗎：伺服器的 /api/health 說鎖住（改版中）就不打開回報畫面 */
+/**
+ * 回報功能開著嗎：伺服器的 /api/health 說這個模組鎖住（改版中）就不打開回報畫面。
+ * reportModules 是收回報的模組；舊版伺服器沒給，照 reports 開關
+ */
 let reportsOpen = true;
+let reportsAll = true;
+let reportModules: string[] | null = null;
 const REPORTS_LOCKED_TEXT = '回報功能改版中，暫時關閉';
 
-function applyReportsOpen(open: boolean): void {
+function applyReportsOpen(): void {
+  const open = reportModules ? reportModules.includes(mod.id) : reportsAll;
   reportsOpen = open;
   reportBtn.textContent = open ? '＋回報' : '回報暫停';
   reportBtn.classList.toggle('locked', !open);
@@ -2732,9 +2739,9 @@ function renderReportTips(): void {
   }
   const tips = [
     share,
-    `只收${l ? ` ${l.maxAgeDays} 天內` : ''}的公開貼文，貼文要寫出時間和地點。`,
-    `原貼文刪除或改成「發完了」，雷達${l ? ` ${l.recheckMin} 分鐘內` : ''}會自動下架。`,
-    '店家、服務處連續好幾天都能去領的（例如「明天起到服務處領取」），一樣貼連結，會自動判斷成固定據點，每天開放的時段都標上雷達。貼文最好寫出門牌地址，定位才準。',
+    `只收${l ? ` ${l.maxAgeDays} 天內` : ''}的公開貼文。每一場活動都要讀得到做什麼、在哪裡、哪天幾點開始、幾點結束，缺一個就不會放上雷達。`,
+    '貼文沒寫的（例如沒寫幾點結束），可以在判讀結果按「補充資料」補上再判讀。連續好幾天的活動每天各算一場（最多 6 場）。貼文最好寫出門牌地址，定位才準。',
+    `原貼文刪除或改成「結束了」，雷達${l ? ` ${l.recheckMin} 分鐘內` : ''}會自動下架。`,
   ];
   reportTips.innerHTML = tips.map((t) => `<li>${esc(t)}</li>`).join('');
 }
@@ -2744,9 +2751,9 @@ const OUTCOME_TEXT: Record<SubmitResult['outcome'], string> = {
   added: '已加入雷達：',
   duplicate: '雷達上已經有這一場了：',
   attached: '雷達上已經有這個據點，這則已附在它的詳細資料（相關貼文）：',
-  no_place: '看得出是發放或活動，但貼文沒寫具體地點（或查不到），所以還沒放上雷達。知道在哪裡的話，可以在下面補充地點再判讀一次。',
-  not_listed: '判讀不出時間，或是已經結束、超過 21 天後才開始，所以沒有放上雷達。',
-  not_event: '這則看起來不是發放或活動。貼文要寫出在哪裡、什麼時候發放或舉辦，雷達才會收。',
+  no_place: '看得出是活動，但貼文沒寫具體地點（或查不到），所以還沒放上雷達。知道在哪裡的話，可以在下面補充地點再判讀一次。',
+  not_listed: '判讀不到完整的活動內容、地點、開始和結束時間，或是已經結束、超過 21 天後才開始，所以沒有放上雷達。',
+  not_event: '這則看起來不是活動。貼文要寫出做什麼、在哪裡、什麼時候舉辦，雷達才會收。',
   failed: '判讀暫時失敗，請稍後再貼一次。',
 };
 
@@ -2802,8 +2809,9 @@ function previewWhere(p: PreviewItem): string {
 
 /** 補充資料的表單：貼文沒寫地點或時間時，回報的人補上再判讀一次 */
 function supplementFormHtml(current: string, hidden: boolean): string {
+  const example = mod.current ? '例如「10/26 14:00–17:00」「地點：厝邊咖啡，台北市萬華區○○路○號」' : '例如「地點：厝邊咖啡，台北市萬華區○○路○號」「每週二、四 14:00–18:00」';
   return `<form class="preview-more"${hidden ? ' hidden' : ''}>
-      <textarea rows="2" maxlength="200" placeholder="例如「地點：厝邊咖啡，台北市萬華區○○路○號」「每週二、四 14:00–18:00」" aria-label="補充地點或時間">${esc(current)}</textarea>
+      <textarea rows="2" maxlength="200" placeholder="${example}" aria-label="補充地點或時間">${esc(current)}</textarea>
       <div class="sheet-actions"><button type="submit" class="btn primary">補充後再判讀</button>${hidden ? '<button type="button" class="btn" data-act="less">回上一步</button>' : ''}</div>
       <p class="muted sheet-note small">補充的內容會跟原貼文一起判讀，放上雷達後會寫明「回報的人補充」。請只寫你確定的資訊。</p>
     </form>`;
@@ -2869,7 +2877,7 @@ function renderPreview(r: SubmitResult): void {
         </li>`,
       )
       .join('')}</ul>
-    ${dups}
+    ${dups}${skippedNote(r.reasons)}
     <div class="sheet-actions">
       <button type="button" class="btn primary" data-act="confirm">${items.length > 0 && items.every((p) => p.update?.mode === 'attach') ? '對，附在這個據點' : '對，放上雷達'}</button>
       <button type="button" class="btn" data-act="more">補充資料</button>
@@ -2950,10 +2958,35 @@ function resultGroups(list: EventOut[]): EventOut[][] {
   return [...groups.values()];
 }
 
+const ACTIVITY_PART_TEXT: Record<'content' | 'place' | 'start' | 'end', string> = { content: '活動內容', place: '地點', start: '開始時間', end: '結束時間' };
+
+/** 洋流的活動缺哪些（「地點、結束時間」） */
+const missingText = (parts: Array<keyof typeof ACTIVITY_PART_TEXT>): string => parts.map((p) => ACTIVITY_PART_TEXT[p]).join('、');
+
+/** 預覽時同一則貼文還有沒放上去的場次（缺資料、地點查不到）：講一聲，免得以為漏了 */
+function skippedNote(reasons: string[]): string {
+  const parts = new Set<keyof typeof ACTIVITY_PART_TEXT>();
+  let incomplete = 0;
+  for (const r of reasons) {
+    if (!r.startsWith('incomplete:')) continue;
+    incomplete++;
+    for (const p of r.slice('incomplete:'.length).split(',')) if (p in ACTIVITY_PART_TEXT) parts.add(p as keyof typeof ACTIVITY_PART_TEXT);
+  }
+  const unlocated = reasons.filter((r) => r === 'unlocated').length;
+  const lines = [
+    incomplete ? `另外 ${incomplete} 場判讀不到${missingText((['content', 'place', 'start', 'end'] as const).filter((p) => parts.has(p)))}` : '',
+    unlocated ? `${incomplete ? '' : '另外 '}${unlocated} 場的地點在地圖上查不到` : '',
+  ].filter(Boolean);
+  return lines.length ? `<p class="muted sheet-note">${esc(lines.join('，'))}，不會放上雷達；知道的話可以按「補充資料」補上。</p>` : '';
+}
+
 /** 沒放上雷達、原因確定時直接講：「這場是 10/20（二）19:00 開始的，已經結束了」 */
 function notListedText(w: NonNullable<SubmitResult['why']>): string | null {
   const tz = w.tz && w.tz !== 'Asia/Taipei' ? w.tz : null;
   const local = tz ? '（當地時間）' : '';
+  if (w.reason === 'incomplete' && w.missing?.length) {
+    return `判讀不到${missingText(w.missing)}，所以沒有放上雷達。活動要有內容、地點、開始和結束時間才收；知道的話可以在下面補充再判讀一次。`;
+  }
   if (w.reason === 'no_start_time') return '判讀不出時間（貼文沒寫哪天或幾點），所以沒有放上雷達。知道時間的話，可以在下面補充再判讀一次。';
   if (w.reason === 'already_over') {
     return w.startAt ? `這場是 ${fmtDateTz(w.startAt, tz)} ${fmtTimeTz(w.startAt, tz)}${local} 開始的，已經結束了，所以沒有放上雷達。` : '這則的時段都已經結束了，所以沒有放上雷達。';
@@ -3459,7 +3492,9 @@ async function boot(): Promise<void> {
   try {
     const h = await fetchHealth();
     showVersion(h.version ?? null);
-    applyReportsOpen(h.reports !== false);
+    reportsAll = h.reports !== false;
+    reportModules = h.reportModules ?? null;
+    applyReportsOpen();
     modeBadge.textContent = h.mode === 'mock' ? '示範資料' : h.mode === 'unconfigured' ? '未連線 Threads' : '即時';
     modeBadge.classList.toggle('mock', h.mode !== 'live');
     modeBadge.hidden = false;
