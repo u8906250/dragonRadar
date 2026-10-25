@@ -182,7 +182,9 @@ export function notListedWhy(items: PlanItem[]): NotListedWhy | undefined {
   // 洋流的活動缺內容、地點或開始時間：好幾場缺的不一樣也合起來講
   if (failed.length > 0 && failed.every((it) => it.reason.startsWith(INCOMPLETE))) {
     const missing = new Set(failed.flatMap((it) => it.reason.slice(INCOMPLETE.length).split(',')));
-    return { reason: 'incomplete', missing: ACTIVITY_PARTS.filter((p) => missing.has(p)) };
+    const parts = ACTIVITY_PARTS.filter((p) => missing.has(p));
+    // 舊規則的原因（例如以前要寫結束時間）現在已經不算缺：講不出來就不講
+    return parts.length > 0 ? { reason: 'incomplete', missing: parts } : undefined;
   }
   const reasons = new Set(failed.map((it) => it.reason));
   if (failed.length === 0 || reasons.size !== 1) return undefined;
@@ -202,13 +204,24 @@ export function notListedWhy(items: PlanItem[]): NotListedWhy | undefined {
   };
 }
 
+/**
+ * 判讀規則的版本：規則改了（例如結束時間改成不用寫）就加一。
+ * 還沒確認的回報再貼一次時，存的是舊版的判讀結果就重新判讀，不沿用（舊的原因可能已經不成立，畫面也講不出原因）
+ */
+export const PLAN_VERSION = 2;
+
 /** 判讀好、還沒寫進雷達的資料，存在 posts.confirm_plan */
 interface StoredPlan {
   items: PlanItem[];
   early: string | null;
   /** 不是活動時 AI 說的理由 */
   note?: string | null;
+  /** 用哪一版規則判讀的（PLAN_VERSION），舊資料沒有 */
+  v?: number;
 }
+
+/** 存進 posts.confirm_plan：記下判讀規則的版本 */
+const storePlan = (plan: StoredPlan): string => JSON.stringify({ ...plan, v: PLAN_VERSION });
 
 /** 確認用的代碼：拿得到預覽的人才能確認（貼文 id 加鹽雜湊，不用另外存） */
 const confirmToken = async (env: Env, postId: string): Promise<string> => sha1Hex(`confirm|${postId}|${await hashSalt(env)}`, 20);
@@ -375,7 +388,8 @@ export async function submitLink(env: Env, input: string, ip: string, now: numbe
   const moved = !!existing && !!waiting && moduleOf(existing.module) !== module;
   if (moved) await env.DB.prepare('UPDATE posts SET module = ? WHERE id = ?').bind(module, postId).run();
   const stored = waiting && !moved ? readPlan(existing) : null;
-  if (existing && waiting && stored && stored.early !== 'extraction_failed') return previewResult(env, existing, stored, true, now);
+  // 存的判讀結果是舊版規則的、或當時判讀失敗：重新判讀
+  if (existing && waiting && stored && stored.early !== 'extraction_failed' && stored.v === PLAN_VERSION) return previewResult(env, existing, stored, true, now);
   if (existing && !waiting) {
     const last = await env.DB.prepare("SELECT result FROM submissions WHERE post_id = ? AND result IS NOT NULL AND result != '\"supplement\"' ORDER BY id DESC LIMIT 1")
       .bind(postId)
@@ -424,7 +438,7 @@ export async function submitLink(env: Env, input: string, ip: string, now: numbe
     console.warn(`plan failed for ${postId}: ${String(e)}`);
     return { existed: false, outcome: 'failed', reasons: ['extraction_failed'], events: [], permalink };
   }
-  await env.DB.prepare('UPDATE posts SET confirm_plan = ? WHERE id = ?').bind(JSON.stringify(plan), postId).run();
+  await env.DB.prepare('UPDATE posts SET confirm_plan = ? WHERE id = ?').bind(storePlan(plan), postId).run();
   return previewResult(env, { ...post, permalink }, plan, !!existing, now);
 }
 
@@ -482,7 +496,7 @@ export async function supplementLink(env: Env, body: { postId?: unknown; token?:
     console.warn(`supplement plan failed for ${post.id}: ${String(e)}`);
     throw new ReportError(503, '判讀暫時失敗，請稍後再試');
   }
-  await env.DB.prepare("UPDATE posts SET supplement = ?, confirm_plan = ?, confirm_state = 'pending' WHERE id = ?").bind(note, JSON.stringify(plan), post.id).run();
+  await env.DB.prepare("UPDATE posts SET supplement = ?, confirm_plan = ?, confirm_state = 'pending' WHERE id = ?").bind(note, storePlan(plan), post.id).run();
   return previewResult(env, updated, plan, false, now);
 }
 

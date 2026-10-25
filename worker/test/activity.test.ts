@@ -56,6 +56,9 @@ describe('notListedWhy incomplete', () => {
       ]),
     ).toEqual({ reason: 'incomplete', missing: ['place', 'start'] });
   });
+  it('says nothing for reasons from older rules (end time used to be required)', () => {
+    expect(notListedWhy([{ group: 0, plan: null, reason: 'incomplete:end' }])).toBeUndefined();
+  });
   it('stays generic when mixed with other reasons', () => {
     expect(notListedWhy([{ group: 0, plan: null, reason: 'incomplete:start' }, { group: 1, plan: null, reason: 'already_over' }])).toBeUndefined();
   });
