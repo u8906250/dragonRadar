@@ -127,7 +127,7 @@ export interface RelatedPost {
 
 export const DEFAULT_DURATION_SEC = 2 * 3600;
 /** 洋流的活動：今天的、沒寫幾點結束的當成「發完為止」，雷達上從開始排這麼久 */
-export const OPEN_END_SEC = 3600;
+export const OPEN_END_SEC = 2 * 3600;
 export const MAX_FUTURE_SEC = 21 * 86400;
 const LOOKBACK_SEC = 24 * 3600;
 export const MIN_CONFIDENCE = 0.5;
@@ -744,7 +744,7 @@ async function planActivities(env: Env, post: PostRow, events: ExtractedEvent[],
     if (ex.country) localizeTimes(ex);
     else {
       applySupplementDate(ex, post.supplement, post.text, post.posted_at);
-      // 「今天14:45前我都在」：從現在到 14:45（不然 14:45 會被當成開始、再排一小時）
+      // 「今天14:45前我都在」：從現在到 14:45（不然 14:45 會被當成開始、再往後排）
       startNowForDeadline(ex, text, now);
     }
     // 只寫「本店」沒寫店名：當成沒寫地點
