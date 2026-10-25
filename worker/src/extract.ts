@@ -196,7 +196,7 @@ const ACTIVITY_PROMPT = `你是「洋流雷達」的活動判讀器。你會收�
 
 events 每筆的欄位：
 - title: 活動內容，16 字以內的短標題，要寫出在哪裡做什麼，例如「秀水服務處發飄帶」「保安宮市政開講」「散步遊者市集幫編飄帶」「景華公園表演同樂會」。做什麼要照貼文寫的（發飄帶、表演、同樂會、講座、掃街、見面會…），不要自己編；服務處、競選總部要寫出是誰的（看貼文署名或內文的名字）。看不出要做什麼則 null
-- start_at: 開始時間，ISO 8601 含時區，例如 2026-10-17T15:00:00+08:00。貼文要寫出哪天、幾點開始；沒寫幾點開始（例如只寫「14:45 前我都在」）則 null，不要自己猜
+- start_at: 開始時間，ISO 8601 含時區，例如 2026-10-17T15:00:00+08:00。貼文要寫出哪天、幾點開始；只寫日期沒寫幾點（例如「10/27 發飄帶」）、沒寫幾點開始（例如只寫「14:45 前我都在」）則 null，不要填 00:00，也不要自己猜
 - end_at: 結束時間，同格式。貼文要寫出幾點結束（例如「14:00–17:00」「到下午 5 點」「17:00 結束」）；只寫開始時間、「發完為止」「數量有限」、沒寫結束則 null，不要自己推算或補上
 - place_text: 貼文原文中的地點描述。內文沒寫地點、但最後有「📍 貼文的地點標記：XX」時，用標記的地點，place_query 填「XX」。hashtag、活動名稱不是地點。「本店」「店裡」「門市」「現場」這種沒寫店名、也沒寫地址的不算地點，place_text、place_query 都給 null（不要只填縣市）
 - place_query: 給地圖搜尋用的地址或地名。有門牌地址就用地址；要補上縣市，例如「宜蘭縣羅東鎮光榮路218號」「台北市 大龍峒保安宮」。鄉鎮區只有貼文寫了才加，不要自己猜。店家寫「近XX站」時，用「縣市 + 捷運XX站」。沒有能查的地名則 null
@@ -247,6 +247,18 @@ export const ACTIVITY_SPEC: ExtractSpec = { system: ACTIVITY_PROMPT, schema: ACT
 
 /** 一場活動一定要有的：活動內容、地點、開始時間（沒寫結束的當成發完為止） */
 export type ActivityPart = 'content' | 'place' | 'start';
+
+/** 貼文寫了半夜 12 點（「00:00」「24:00」「午夜」「凌晨 12 點」） */
+const MIDNIGHT_RE = /(?<![\d:：])(?:0?0|24)\s*[:：]\s*00|午夜|零時|凌晨\s*(?:12|十二|0|零)\s*[點時:：]/;
+
+/**
+ * 開始時間是半夜 00:00、貼文又沒寫半夜：模型把「10/27」這種只寫日期的填成 00:00，當成沒寫幾點開始。
+ * tz 是國外活動的當地時區（台灣是 null）
+ */
+export function guessedMidnight(start: number, tz: string | null, text: string): boolean {
+  const tod = (((start + (tz ? tzOffsetSec(start, tz) : 8 * 3600)) % 86400) + 86400) % 86400;
+  return tod === 0 && !MIDNIGHT_RE.test(halfWidth(text));
+}
 
 /** 這場活動缺了哪些（照 內容、地點、開始 的順序）；都有回傳空陣列 */
 export function missingActivityParts(ex: Pick<ExtractedEvent, 'title' | 'place_text' | 'place_query' | 'start_at'>): ActivityPart[] {

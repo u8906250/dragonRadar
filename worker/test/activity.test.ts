@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { missingActivityParts, normalizeActivities } from '../src/extract';
+import { guessedMidnight, missingActivityParts, normalizeActivities } from '../src/extract';
 import { notListedWhy, reportModules } from '../src/reports';
 
 describe('normalizeActivities', () => {
@@ -67,5 +67,25 @@ describe('reportModules', () => {
   it('opens only the listed modules', () => {
     expect(reportModules('current')).toEqual(['current']);
     expect(reportModules(' current , food ,nope')).toEqual(['current', 'food']);
+  });
+});
+
+describe('guessedMidnight', () => {
+  const midnightTw = Date.UTC(2026, 9, 26, 16) / 1000; // 10/27 00:00 台灣時間
+  it('treats a date-only start the model filled as 00:00 as missing', () => {
+    expect(guessedMidnight(midnightTw, null, '10/27 在大安森林公園發飄帶')).toBe(true);
+  });
+  it('keeps a midnight the post actually wrote', () => {
+    expect(guessedMidnight(midnightTw, null, '10/27 00:00 跨夜發飄帶')).toBe(false);
+    expect(guessedMidnight(midnightTw, null, '10/26 午夜開始發')).toBe(false);
+    expect(guessedMidnight(midnightTw, null, '凌晨12點準時發')).toBe(false);
+  });
+  it('ignores other times', () => {
+    expect(guessedMidnight(midnightTw + 3600, null, '10/27 1:00 發飄帶')).toBe(false);
+  });
+  it('uses the local time zone abroad', () => {
+    const midnightLa = Date.UTC(2026, 9, 27, 7) / 1000; // 洛杉磯 10/27 00:00
+    expect(guessedMidnight(midnightLa, 'America/Los_Angeles', 'Oct 27 Memorial Park')).toBe(true);
+    expect(guessedMidnight(midnightLa, null, 'Oct 27 Memorial Park')).toBe(false);
   });
 });

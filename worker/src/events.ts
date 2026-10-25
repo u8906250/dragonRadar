@@ -1,6 +1,6 @@
 import type { Env } from './env';
 import { fetchThreadsProfile, profileCandidates, profileHintText, type ThreadsProfile } from './sources/profile';
-import { ACTIVITY_SPEC, applySupplementDate, closedWeekdays, slotWeekdays, dropBroughtItem, dropSelfPlace, extractFromPost, localizeTimes, missingActivityParts, openWeekdaysFromText, splitDropTimes, splitMultiDay, splitWeekdayWeekend, spotHoursFromText, startNowForDeadline, timeZoneOf, untilInText, weekdaysInText, type EventKind, type ExtractedEvent } from './extract';
+import { ACTIVITY_SPEC, applySupplementDate, closedWeekdays, slotWeekdays, dropBroughtItem, dropSelfPlace, extractFromPost, localizeTimes, missingActivityParts, openWeekdaysFromText, splitDropTimes, splitMultiDay, splitWeekdayWeekend, spotHoursFromText, startNowForDeadline, guessedMidnight, timeZoneOf, untilInText, weekdaysInText, type EventKind, type ExtractedEvent } from './extract';
 import { cityOfHouse, geocodeAddress, parseTwAddress, type TwAddress } from './address';
 import { SESSION_SPEC } from './badminton';
 import { FOOD_SPEC } from './food';
@@ -749,6 +749,8 @@ async function planActivities(env: Env, post: PostRow, events: ExtractedEvent[],
     const missing = missingActivityParts(ex);
     const start = parseIsoToUnix(ex.start_at);
     const end = parseIsoToUnix(ex.end_at);
+    // 只寫日期沒寫幾點：模型常填 00:00，當成沒寫開始時間
+    if (start !== null && guessedMidnight(start, ex.country ? timeZoneOf(ex) : null, text)) missing.push('start');
     // 跨過午夜、模型把結束寫成同一天（22:00–02:00）：結束是隔天；差更多的是讀錯，當成沒寫結束（發完為止）
     if (start !== null && end !== null && end <= start) ex.end_at = end + DAY_SEC > start ? new Date((end + DAY_SEC) * 1000).toISOString() : null;
     if (missing.length > 0) {
