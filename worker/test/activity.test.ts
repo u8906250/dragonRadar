@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { localDay } from '../src/events';
 import { missingActivityParts, normalizeActivities } from '../src/extract';
 import { notListedWhy, reportModules } from '../src/reports';
 
@@ -64,5 +65,18 @@ describe('reportModules', () => {
   it('opens only the listed modules', () => {
     expect(reportModules('current')).toEqual(['current']);
     expect(reportModules(' current , food ,nope')).toEqual(['current', 'food']);
+  });
+});
+
+describe('localDay', () => {
+  it('splits days at Taipei midnight for Taiwan events', () => {
+    const t = Date.UTC(2026, 9, 25, 15, 59) / 1000; // 10/25 23:59 台灣時間
+    expect(localDay(t, null)).toBe(localDay(t - 23 * 3600, null));
+    expect(localDay(t + 120, null)).toBe(localDay(t, null) + 1);
+  });
+  it('uses the local time zone abroad', () => {
+    const t = Date.UTC(2026, 9, 25, 15, 59) / 1000; // 洛杉磯 10/25 08:59
+    expect(localDay(t, 'America/Los_Angeles')).toBe(localDay(t + 15 * 3600, 'America/Los_Angeles'));
+    expect(localDay(t + 16 * 3600, 'America/Los_Angeles')).toBe(localDay(t, 'America/Los_Angeles') + 1);
   });
 });

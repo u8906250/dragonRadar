@@ -1,6 +1,6 @@
 import type { Env } from './env';
 import { fetchThreadsProfile, profileCandidates, profileHintText, type ThreadsProfile } from './sources/profile';
-import { ACTIVITY_SPEC, applySupplementDate, closedWeekdays, slotWeekdays, dropBroughtItem, dropSelfPlace, extractFromPost, localizeTimes, missingActivityParts, openWeekdaysFromText, splitDropTimes, splitMultiDay, splitWeekdayWeekend, spotHoursFromText, startNowForDeadline, timeZoneOf, untilInText, weekdaysInText, type EventKind, type ExtractedEvent } from './extract';
+import { ACTIVITY_SPEC, applySupplementDate, closedWeekdays, slotWeekdays, dropBroughtItem, dropSelfPlace, extractFromPost, localizeTimes, missingActivityParts, openWeekdaysFromText, splitDropTimes, splitMultiDay, splitWeekdayWeekend, spotHoursFromText, startNowForDeadline, timeZoneOf, tzOffsetSec, untilInText, weekdaysInText, type EventKind, type ExtractedEvent } from './extract';
 import { cityOfHouse, geocodeAddress, parseTwAddress, type TwAddress } from './address';
 import { SESSION_SPEC } from './badminton';
 import { FOOD_SPEC } from './food';
@@ -126,6 +126,8 @@ export interface RelatedPost {
 }
 
 export const DEFAULT_DURATION_SEC = 2 * 3600;
+/** 洋流的活動：今天的、沒寫幾點結束的當成「發完為止」，雷達上從開始排這麼久 */
+export const OPEN_END_SEC = 3600;
 export const MAX_FUTURE_SEC = 21 * 86400;
 const LOOKBACK_SEC = 24 * 3600;
 export const MIN_CONFIDENCE = 0.5;
@@ -525,12 +527,14 @@ async function planEvent(
   session?: Session,
   located?: { point: GeoPoint | null; approxArea: string | null },
   excludePost?: string,
+  openEndSec = DEFAULT_DURATION_SEC,
 ): Promise<{ plan: PlannedEvent | null; reason: string; start?: number; end?: number; tz?: string | null }> {
   if (ex.confidence < MIN_CONFIDENCE) return { plan: null, reason: 'low_confidence' };
   const start = session ? session.start : parseIsoToUnix(ex.start_at);
   if (start === null) return { plan: null, reason: 'no_start_time' };
-  let end = session ? session.end : (parseIsoToUnix(ex.end_at) ?? start + DEFAULT_DURATION_SEC);
-  if (end <= start) end = start + DEFAULT_DURATION_SEC;
+  // 沒寫結束時間：從開始排 openEndSec（畫面寫「發完為止」，不寫幾點結束）
+  let end = session ? session.end : (parseIsoToUnix(ex.end_at) ?? start + openEndSec);
+  if (end <= start) end = start + openEndSec;
   const when = { start, end, tz: ex.country ? timeZoneOf(ex) : null };
   if (end <= now) return { plan: null, reason: 'already_over', ...when };
   if (start > now + MAX_FUTURE_SEC) return { plan: null, reason: 'too_far_in_future', ...when };
@@ -650,7 +654,7 @@ async function planPostWith(env: Env, post: PostRow, now: number, profileHint: s
   if (!extraction.is_event) return { items: [], early: 'not_event' };
   if (extraction.events.length === 0) return { items: [], early: 'no_events' };
   if (module === 'dog') return { items: await planJobs(env, post, extraction.events, now), early: null };
-  if (module === 'current') return { items: await planActivities(env, post, extraction.events, now), early: null };
+  if (module === 'current') return { items: await planActivities(env, post, extraction.events, text, now), early: null };
   // 模型常把付款的 Line Pay 當成用 LINE 聯絡：貼文只有 Line Pay 的不算
   if (!/(?:line|賴)(?!\s*pay)/i.test(text)) for (const e of extraction.events) if (e.extra?.contact === 'line') e.extra.contact = null;
   // 刊登（找臨打、網友推薦、揪團吃飯）不是場次：從發文起顯示一段時間；招臨打、出攤照場次排
@@ -723,23 +727,35 @@ async function planPostWith(env: Env, post: PostRow, now: number, profileHint: s
   return { items, early: null };
 }
 
+/** 活動當地的第幾天：台灣用台灣時間，國外用當地時區 */
+export const localDay = (unix: number, tz: string | null): number => Math.floor((unix + (tz ? tzOffsetSec(unix, tz) : 8 * 3600)) / DAY_SEC);
+
 /**
  * 洋流（改版後）：只收活動，每一場都要判讀出活動內容、地點、開始和結束時間才算成功。
+ * 例外是今天（判讀當下）的活動沒寫幾點結束：當成「發完為止」，雷達上從開始排 OPEN_END_SEC。
  * 缺的記成 incomplete:place,end（照 內容、地點、開始、結束 的順序，回報的人可以補充再判讀），
- * 寫了地點、地圖上查不到記成 unlocated。不再推算固定據點、「發完為止」、預設兩小時。
+ * 寫了地點、地圖上查不到記成 unlocated。不再推算固定據點。
  */
-async function planActivities(env: Env, post: PostRow, events: ExtractedEvent[], now: number): Promise<PlanItem[]> {
+async function planActivities(env: Env, post: PostRow, events: ExtractedEvent[], text: string, now: number): Promise<PlanItem[]> {
   const deadline = Date.now() + ADDRESS_BUDGET_MS;
   const items: PlanItem[] = [];
   for (const [group, ex] of events.entries()) {
     // 國外的：時間換成當地時區的時間點；台灣的貼文沒寫哪天、補充寫了，用補充的日期（模型有時會忽略補充）
     if (ex.country) localizeTimes(ex);
-    else applySupplementDate(ex, post.supplement, post.text, post.posted_at);
+    else {
+      applySupplementDate(ex, post.supplement, post.text, post.posted_at);
+      // 「今天14:45前我都在」：從現在到 14:45（不然 14:45 會被當成開始、再排一小時）
+      startNowForDeadline(ex, text, now);
+    }
     // 只寫「本店」沒寫店名：當成沒寫地點
     dropSelfPlace(ex);
-    const missing = missingActivityParts(ex);
+    let missing = missingActivityParts(ex);
     const start = parseIsoToUnix(ex.start_at);
     const end = parseIsoToUnix(ex.end_at);
+    const tz = ex.country ? timeZoneOf(ex) : null;
+    // 今天的活動沒寫結束時間：不算缺，當成發完為止
+    const openEnd = end === null && start !== null && localDay(start, tz) === localDay(now, tz);
+    if (openEnd) missing = missing.filter((p) => p !== 'end');
     // 跨過午夜、模型把結束寫成同一天（22:00–02:00）：結束是隔天；差更多的是讀錯，當成沒讀到結束時間
     if (start !== null && end !== null && end <= start) {
       if (end + DAY_SEC > start) ex.end_at = new Date((end + DAY_SEC) * 1000).toISOString();
@@ -749,7 +765,7 @@ async function planActivities(env: Env, post: PostRow, events: ExtractedEvent[],
       items.push({ group, plan: null, reason: `incomplete:${missing.join(',')}` });
       continue;
     }
-    const r = await planEvent(env, ex, now, deadline);
+    const r = await planEvent(env, ex, now, deadline, undefined, undefined, undefined, OPEN_END_SEC);
     items.push(r.plan && r.plan.lat === null ? { group, plan: null, reason: 'unlocated' } : { group, ...r });
   }
   return items;

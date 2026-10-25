@@ -510,10 +510,10 @@ function eventTimeText(ev: EventOut): string {
   return `${fmtDateTz(ev.startAt, tz)} ${span(tz)}${open}（當地時間；台灣時間 ${fmtDateTz(ev.startAt, null)} ${span(null)}）`;
 }
 
-/** 貼文沒寫結束時間時的說法：不自己猜時間 */
+/** 貼文沒寫結束時間時的說法：不自己猜時間（洋流的活動、發放寫「發完為止」） */
 const openEndText = (ev: EventOut): string =>
-  // 臨打、擺攤的每週固定場沒寫到哪天：長期開放；單場沒寫幾點結束跟活動一樣
-  ev.kind === 'session' || ev.kind === 'food' ? (ev.spot ? '長期開放' : '沒寫結束時間') : ev.kind === 'activity' ? '沒寫結束時間' : '發完為止';
+  // 臨打、擺攤的每週固定場沒寫到哪天：長期開放；單場沒寫幾點結束
+  ev.kind === 'session' || ev.kind === 'food' ? (ev.spot ? '長期開放' : '沒寫結束時間') : '發完為止';
 
 /** 每週幾：[2, 4] →「每週二、四」，沒有就是 null */
 function weeklyText(days: number[] | null | undefined): string | null {
@@ -2740,7 +2740,8 @@ function renderReportTips(): void {
   const tips = [
     share,
     `只收${l ? ` ${l.maxAgeDays} 天內` : ''}的公開貼文。每一場活動都要讀得到做什麼、在哪裡、哪天幾點開始、幾點結束，缺一個就不會放上雷達。`,
-    '貼文沒寫的（例如沒寫幾點結束），可以在判讀結果按「補充資料」補上再判讀。連續好幾天的活動每天各算一場（最多 6 場）。貼文最好寫出門牌地址，定位才準。',
+    '今天的活動沒寫幾點結束，會寫「發完為止」，雷達上顯示到開始後一小時；其他天的要寫幾點結束。',
+    '貼文沒寫的，可以在判讀結果按「補充資料」補上再判讀。連續好幾天的活動每天各算一場（最多 6 場）。貼文最好寫出門牌地址，定位才準。',
     `原貼文刪除或改成「結束了」，雷達${l ? ` ${l.recheckMin} 分鐘內` : ''}會自動下架。`,
   ];
   reportTips.innerHTML = tips.map((t) => `<li>${esc(t)}</li>`).join('');
@@ -2779,7 +2780,7 @@ function previewWhen(p: PreviewItem): string {
   if (foodRole(p) === 'recommend') return `網友推薦${foodOf(p).hours ? `・營業 ${foodOf(p).hours}` : ''}`;
   const day = (t: number): string => dateFmt.format(new Date(t * 1000));
   // 一天好幾個時段：「12:00–13:30、18:00–20:30」；沒寫結束的只寫開始，最後寫「發完為止」
-  const open = p.kind === 'session' || p.kind === 'food' ? (p.spot ? '長期開放' : '沒寫結束時間') : p.kind === 'activity' ? '沒寫結束時間' : '發完為止';
+  const open = p.kind === 'session' || p.kind === 'food' ? (p.spot ? '長期開放' : '沒寫結束時間') : '發完為止';
   const slotText = (s: { startAt: number; endAt: number; endOpen?: boolean }): string => (s.endOpen ? `${fmtTime(s.startAt)} 開始` : `${fmtTime(s.startAt)}–${fmtTime(s.endAt)}`);
   const slots = p.slots && p.slots.length > 1 ? `${p.slots.map(slotText).join('、')}${p.slots.some((s) => s.endOpen) ? `，${open}` : ''}` : null;
   if (p.spot) {
@@ -2985,7 +2986,8 @@ function notListedText(w: NonNullable<SubmitResult['why']>): string | null {
   const tz = w.tz && w.tz !== 'Asia/Taipei' ? w.tz : null;
   const local = tz ? '（當地時間）' : '';
   if (w.reason === 'incomplete' && w.missing?.length) {
-    return `判讀不到${missingText(w.missing)}，所以沒有放上雷達。活動要有內容、地點、開始和結束時間才收；知道的話可以在下面補充再判讀一次。`;
+    const endNote = w.missing.includes('end') ? '（今天的活動沒寫結束時間會當成發完為止，其他天的要寫幾點結束）' : '';
+    return `判讀不到${missingText(w.missing)}，所以沒有放上雷達。活動要有內容、地點、開始和結束時間才收${endNote}；知道的話可以在下面補充再判讀一次。`;
   }
   if (w.reason === 'no_start_time') return '判讀不出時間（貼文沒寫哪天或幾點），所以沒有放上雷達。知道時間的話，可以在下面補充再判讀一次。';
   if (w.reason === 'already_over') {
