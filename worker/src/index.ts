@@ -1,7 +1,7 @@
 import { getAccessToken, makeClient, saveAccessToken } from './client';
 import type { Env } from './env';
 import { fetchThreadsProfile } from './sources/profile';
-import { DEFAULT_DURATION_SEC, ENDED_WORDS, MAX_FUTURE_SEC, MIN_CONFIDENCE, SPOT_MAX_DAYS, extendOpenSpots, getEvent, getPost, ingestAll, ingestKeyword, clearEventSnapshots, listEvents, locatePlaceForEvent, processBacklog, processPost, relocateApprox, planPost, reprocessPost, setManualTitle, storePost, updateLifecycle, type EventRow, type PostRow } from './events';
+import { DEFAULT_DURATION_SEC, ENDED_WORDS, MAX_FUTURE_SEC, MIN_CONFIDENCE, SPOT_MAX_DAYS, extendOpenSpots, getEvent, getPost, ingestAll, ingestKeyword, clearEventSnapshots, listEvents, locatePlaceForEvent, processBacklog, processPost, relocateApprox, relocateRouteStops, planPost, reprocessPost, setManualTitle, storePost, updateLifecycle, type EventRow, type PostRow } from './events';
 import { ACTIVITY_SPEC, normalizeExtraction, runModel } from './extract';
 import { geocode } from './geocode';
 import { ingestNews, NEWS_FEEDS } from './sources/news';
@@ -599,6 +599,11 @@ async function handleAdmin(req: Request, env: Env, ctx: ExecutionContext, path: 
   }
 
   // 查地點（給審核用）：{ q }，回傳門牌解析、門牌定位與最後用的座標
+  // 馬上重查車掃路線上寫了門牌、沒有確切位置的站（排程每 10 分鐘也會查）
+  if (req.method === 'POST' && path === '/api/admin/relocate-routes') {
+    return jsonResponse(await relocateRouteStops(env, now));
+  }
+
   if (req.method === 'POST' && path === '/api/admin/geocode') {
     const body = await readJson<{ q?: string; refresh?: boolean }>(req);
     const q = (body.q ?? '').trim();
@@ -744,13 +749,15 @@ async function runScheduled(env: Env, cron: string, meter: D1Meter): Promise<voi
   const extended = hourly ? await step('extend', () => extendOpenSpots(env, now)).catch((e) => ({ error: String(e) })) : null;
   // 有門牌卻只定位到路或鄉鎮區的，定時重查門牌（Overpass 恢復、OSM 補了門牌就改成精確位置）
   const relocated = hourly ? await step('relocate', () => relocateApprox(env, now)).catch((e) => ({ error: String(e) })) : null;
+  // 車掃路線上寫了門牌、當時沒查到確切位置的站：每 10 分鐘重查幾站（車掃多半當天就開始，等不了一小時）
+  const routeStops = await step('route-stops', () => relocateRouteStops(env, now)).catch((e) => ({ error: String(e) }));
   const links = hourly ? await step('links', () => recheckLinks(env, now)).catch((e) => ({ error: String(e) })) : null;
   // 新聞、貼文講的是官方車掃就併進去（不管誰先到，每 30 分鐘重新比對；回報確認時另外會比對）
   const merge = auto && minute % 30 < 10 ? await step('merge', () => mergeIntoOfficial(env, now)).catch((e) => ({ error: String(e) })) : null;
   const drift = bottlesEnabled(env) ? await step('drift', () => driftBottles(env, now)).catch((e) => ({ error: String(e) })) : null;
   const purged = hourly ? await step('purge', () => purgeOldData(env, now)) : null;
   meter.label = '';
-  console.log(JSON.stringify({ cron, mode: client.mode, ingest, backlog, voyage, news, lifecycle, pushed, extended, relocated, links, merge, drift, purged, rowsRead: meter.rowsRead }));
+  console.log(JSON.stringify({ cron, mode: client.mode, ingest, backlog, voyage, news, lifecycle, pushed, extended, relocated, routeStops, links, merge, drift, purged, rowsRead: meter.rowsRead }));
 }
 
 /** 這個 isolate 累積、還沒寫進 d1_usage 的 API 讀取量；最多每 2 分鐘寫一次 */

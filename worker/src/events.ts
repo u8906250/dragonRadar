@@ -522,6 +522,8 @@ export interface RouteStopPlan {
   /** 確切位置；只定位到鄉鎮區、查不到的是 null（不畫進路線） */
   lat: number | null;
   lng: number | null;
+  /** 查地圖用的（有門牌的，沒有確切位置時排程會再查：relocateRouteStops） */
+  query?: string;
 }
 
 /** 判讀出來的一筆：plan 是可以寫進雷達的資料；沒有 plan 時 reason 寫原因（no_place、duplicate_of_3…）。group 是貼文裡第幾個地點或時段 */
@@ -943,7 +945,8 @@ export function markRoutes(items: PlanItem[], text: string, routeTitle: string |
       const p = it.plan;
       const own = p?.title ?? it.fail?.title ?? null;
       const stopTitle = retitle || !own ? `${title}・${name}` : own;
-      const route: RouteStopPlan = { key, title, seq: i + 1, kind: i === 0 ? 'start' : i === list.length - 1 ? 'end' : 'cheer', name, stopTitle, at, lat: null, lng: null };
+      const query = p?.place_query ?? name;
+      const route: RouteStopPlan = { key, title, seq: i + 1, kind: i === 0 ? 'start' : i === list.length - 1 ? 'end' : 'cheer', name, stopTitle, at, lat: null, lng: null, ...(query !== name ? { query } : {}) };
       it.route = route;
       if (p && p.approx_area) {
         // 只定位到鄉鎮區、路：不放上雷達，請回報的人標位置（帶著約略位置，地圖從那裡開始）
@@ -970,6 +973,76 @@ export function markRoutes(items: PlanItem[], text: string, routeTitle: string |
   return items;
 }
 
+/** routes.stops 存的一站 */
+interface StoredRouteStop {
+  kind: 'start' | 'cheer' | 'end';
+  title: string;
+  name: string;
+  lat: number | null;
+  lng: number | null;
+  at: number | null;
+  query?: string;
+  /** 排程上次重查位置的時間 */
+  checkedAt?: number;
+}
+
+/** 有確切位置的站照順序用直線連起來（不知道實際走哪些路），沒有認領人數 */
+function routeSegments(stops: Array<{ name: string; lat: number | null; lng: number | null; at: number | null }>) {
+  const pts = stops.filter((st): st is typeof st & { lat: number; lng: number } => st.lat !== null && st.lng !== null);
+  return pts.slice(1).map((b, i) => {
+    const a = pts[i];
+    return { seq: i + 1, from: a.name, to: b.name, path: [[a.lat, a.lng], [b.lat, b.lng]], lengthM: Math.round(distM(a, b)), people: 0, target: 0, toAt: b.at };
+  });
+}
+
+/** 車掃路線上沒有確切位置、寫了門牌的站：每次排程最多查幾站、同一站隔多久再查 */
+const ROUTE_RELOCATE_PER_RUN = 3;
+const ROUTE_RELOCATE_EVERY_SEC = 20 * 60;
+
+/**
+ * 回報的車掃路線上，寫了門牌卻沒有確切位置的站（判讀、修改當時門牌查詢失敗或逾時，只退到路、鄉鎮區）定時重查：
+ * 查到確切位置就放上雷達（預計經過前 10 分到後 15 分），路線補上這一站、重新連線。
+ * 車隊已經經過的、雷達上這則貼文已經沒有東西的（下架、刪除）不查；沒寫門牌的（只有店名）重查也一樣，要回報的人標位置
+ */
+export async function relocateRouteStops(env: Env, now: number): Promise<{ checked: number; located: number }> {
+  const { results } = await env.DB.prepare(
+    `SELECT id, post_id, stops FROM routes WHERE id LIKE 'link-%' AND show_until > ?
+       AND EXISTS (SELECT 1 FROM events e WHERE e.post_id = routes.post_id AND e.status IN ('upcoming', 'active'))`,
+  )
+    .bind(now)
+    .all<{ id: string; post_id: string; stops: string }>();
+  let checked = 0;
+  let located = 0;
+  for (const r of results) {
+    const stops = JSON.parse(r.stops) as StoredRouteStop[];
+    let changed = false;
+    for (const st of stops) {
+      if (checked >= ROUTE_RELOCATE_PER_RUN) break;
+      if (st.lat !== null || st.at === null || st.at + ROUTE_KEEP_SEC <= now) continue;
+      if (!addressOf(st.query ?? st.name, st.name) || (st.checkedAt ?? 0) > now - ROUTE_RELOCATE_EVERY_SEC) continue;
+      checked++;
+      st.checkedAt = now;
+      changed = true;
+      const loc = await locatePlaceForEvent(env, st.query ?? st.name, st.name, Date.now() + ADDRESS_BUDGET_MS);
+      if (!loc.point || loc.approxArea) continue;
+      st.lat = loc.point.lat;
+      st.lng = loc.point.lng;
+      located++;
+      // 雷達上已經有同一場（別人回報的）就不另外放，路線照樣連過去
+      await insertPlanned(
+        env,
+        r.post_id,
+        { kind: 'activity', title: st.title, item: null, start_at: st.at - ROUTE_LEAD_SEC, end_at: st.at + ROUTE_KEEP_SEC, place_text: st.name, place_query: st.query ?? st.name, lat: st.lat, lng: st.lng, confidence: 1, all_day: false, spot: false, approx_area: null, end_open: false, until_open: false, tz: null, extra: null },
+        now,
+      );
+    }
+    if (changed) {
+      await env.DB.prepare('UPDATE routes SET stops = ?, segments = ?, updated_at = ? WHERE id = ?').bind(JSON.stringify(stops), JSON.stringify(routeSegments(stops)), now, r.id).run();
+    }
+  }
+  return { checked, located };
+}
+
 /** 兩點的直線距離（公尺） */
 function distM(a: { lat: number; lng: number }, b: { lat: number; lng: number }): number {
   const rad = Math.PI / 180;
@@ -988,11 +1061,7 @@ async function saveRoutes(env: Env, postId: string, items: PlanItem[], now: numb
   const stmts = [env.DB.prepare('DELETE FROM routes WHERE post_id = ?').bind(postId)];
   for (const [key, list] of byKey) {
     const stops = [...list].sort((a, b) => a.seq - b.seq);
-    const pts = stops.filter((st): st is RouteStopPlan & { lat: number; lng: number } => st.lat !== null && st.lng !== null);
-    const segments = pts.slice(1).map((b, i) => {
-      const a = pts[i];
-      return { seq: i + 1, from: a.name, to: b.name, path: [[a.lat, a.lng], [b.lat, b.lng]], lengthM: Math.round(distM(a, b)), people: 0, target: 0, toAt: b.at };
-    });
+    const segments = routeSegments(stops);
     const first = stops[0];
     const last = stops[stops.length - 1];
     stmts.push(
@@ -1007,7 +1076,7 @@ async function saveRoutes(env: Env, postId: string, items: PlanItem[], now: numb
         first.at,
         last.at,
         last.at + ROUTE_KEEP_SEC,
-        JSON.stringify(stops.map((st) => ({ kind: st.kind, title: st.stopTitle, name: st.name, lat: st.lat, lng: st.lng, at: st.at }))),
+        JSON.stringify(stops.map((st): StoredRouteStop => ({ kind: st.kind, title: st.stopTitle, name: st.name, lat: st.lat, lng: st.lng, at: st.at, ...(st.query ? { query: st.query } : {}) }))),
         JSON.stringify(segments),
         now,
       ),
