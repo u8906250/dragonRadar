@@ -27,7 +27,7 @@ export interface EventOut {
   keyword: string | null;
   /** 只有日期、沒有公布時間 */
   allDay?: boolean;
-  /** 貼文沒寫結束時間：畫面寫「發完為止」，endAt 只是系統自動下架的時間 */
+  /** 貼文沒寫結束時間：發放寫「發完為止」、活動只寫幾點開始，endAt 只是系統自動下架的時間 */
   endOpen?: boolean;
   /** 固定據點沒寫最後一天：畫面寫「發完為止」 */
   untilOpen?: boolean;
@@ -269,7 +269,7 @@ export interface EndedReportResult {
   ended: boolean;
 }
 
-/** 補充資料表單的一場：時間是 unix 秒；endAt null 是發完為止；dateOnly 只知道哪天、不知道幾點 */
+/** 補充資料表單的一場：時間是 unix 秒；endAt null 是沒寫結束；dateOnly 只知道哪天、不知道幾點 */
 export interface EditItem {
   title: string;
   startAt: number | null;

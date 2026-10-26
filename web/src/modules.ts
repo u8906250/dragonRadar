@@ -30,7 +30,7 @@ export interface ModuleDef {
 }
 
 /** 洋流的回報說明（改版後只判斷活動）；index.html 的 #report-intro 也是這段 */
-const REPORT_INTRO = '看到洋流活動的 Threads 貼文？貼上連結，雷達會判讀活動內容、地點、開始時間，三個都讀到才會標到地圖上給大家看；沒寫幾點結束的寫「發完為止」。';
+const REPORT_INTRO = '看到洋流活動的 Threads 貼文？貼上連結，雷達會判讀活動內容、地點、開始時間，三個都讀到才會標到地圖上給大家看；結束時間可以不寫。';
 
 export const MODULES: ModuleDef[] = [
   {

@@ -126,7 +126,7 @@ export interface RelatedPost {
 }
 
 export const DEFAULT_DURATION_SEC = 2 * 3600;
-/** 洋流的活動：寫了哪天幾點開始、沒寫幾點結束的當成「發完為止」，雷達上從開始排這麼久 */
+/** 洋流的活動：寫了哪天幾點開始、沒寫幾點結束的（畫面只寫幾點開始），雷達上從開始排這麼久 */
 export const OPEN_END_SEC = 2 * 3600;
 export const MAX_FUTURE_SEC = 21 * 86400;
 const LOOKBACK_SEC = 24 * 3600;
@@ -763,7 +763,7 @@ async function planPostWith(env: Env, post: PostRow, now: number, profileHint: s
 
 /**
  * 洋流（改版後）：只收活動，每一場都要判讀出活動內容、地點、哪天幾點開始才算成功。
- * 沒寫幾點結束的當成「發完為止」，雷達上從開始排 OPEN_END_SEC。
+ * 沒寫幾點結束的也收（畫面只寫幾點開始，不寫「發完為止」：活動不一定是發東西），雷達上從開始排 OPEN_END_SEC。
  * 缺的記成 incomplete:place,start（照 內容、地點、開始 的順序，回報的人可以補充再判讀），
  * 寫了地點、地圖上查不到記成 unlocated。不再推算固定據點。
  */
@@ -788,7 +788,7 @@ async function planActivities(env: Env, post: PostRow, events: ExtractedEvent[],
     // 只寫日期沒寫幾點：模型常填 00:00，當成沒寫開始時間
     const dateOnly = start !== null && guessedMidnight(start, tz, text);
     if (dateOnly) missing.push('start');
-    // 跨過午夜、模型把結束寫成同一天（22:00–02:00）：結束是隔天；差更多的是讀錯，當成沒寫結束（發完為止）
+    // 跨過午夜、模型把結束寫成同一天（22:00–02:00）：結束是隔天；差更多的是讀錯，當成沒寫結束
     if (start !== null && end !== null && end <= start) ex.end_at = end + DAY_SEC > start ? new Date((end + DAY_SEC) * 1000).toISOString() : null;
     const which = { title: ex.title.trim() || null, place: ex.place_text ?? ex.place_query ?? selfPlace ?? null };
     if (missing.length > 0) {
@@ -813,7 +813,7 @@ async function planActivities(env: Env, post: PostRow, events: ExtractedEvent[],
 /** 地點查不到的那一場的時間（回報的人修改資料時不用重填） */
 const planWhen = (p: PlannedEvent): Pick<FailedItem, 'startAt' | 'endAt' | 'endOpen' | 'tz'> => ({ startAt: p.start_at, endAt: p.end_at, endOpen: p.end_open, tz: p.tz ?? null });
 
-/** 回報的人自己填的一場（洋流的活動）：時間是 unix 秒，結束 null 是發完為止；lat、lng 是在地圖上標的位置，沒標就照地點查 */
+/** 回報的人自己填的一場（洋流的活動）：時間是 unix 秒，結束 null 是沒寫結束；lat、lng 是在地圖上標的位置，沒標就照地點查 */
 export interface ManualActivity {
   title: string;
   startAt: number;

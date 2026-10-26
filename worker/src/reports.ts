@@ -162,7 +162,7 @@ export interface SubmitResult {
   edit?: EditItem[];
 }
 
-/** 補充資料表單的一場：時間是 unix 秒；endAt null 是發完為止；dateOnly 只知道哪天、不知道幾點 */
+/** 補充資料表單的一場：時間是 unix 秒；endAt null 是沒寫結束；dateOnly 只知道哪天、不知道幾點 */
 export interface EditItem {
   title: string;
   startAt: number | null;
@@ -545,7 +545,7 @@ const MAX_EDIT_ITEMS = 6;
 /** 一場活動最長多久（開始到結束） */
 const MAX_EDIT_SPAN_SEC = 24 * 3600;
 
-/** 表單送來的每一場：標題、地點、開始時間一定要有；結束沒填是發完為止；有標地圖位置才帶座標 */
+/** 表單送來的每一場：標題、地點、開始時間一定要有；結束可以不填；有標地圖位置才帶座標 */
 export function parseEditItems(raw: unknown): ManualActivity[] {
   if (!Array.isArray(raw) || raw.length === 0) throw new ReportError(400, '至少要填一場活動');
   if (raw.length > MAX_EDIT_ITEMS) throw new ReportError(400, `一則最多 ${MAX_EDIT_ITEMS} 場`);
@@ -589,7 +589,7 @@ export function editSummary(before: EditItem[], after: ManualActivity[], listed:
     const changes: string[] = [];
     if (!b || b.title !== a.title) changes.push(`內容「${a.title}」`);
     if (!b || b.dateOnly || b.startAt !== a.startAt || b.endAt !== a.endAt) {
-      changes.push(`時間 ${whenText(a.startAt)}${a.endAt === null ? ' 開始（發完為止）' : `–${whenText(a.endAt).split(' ')[1]}`}`);
+      changes.push(`時間 ${whenText(a.startAt)}${a.endAt === null ? ' 開始' : `–${whenText(a.endAt).split(' ')[1]}`}`);
     }
     if (!b || b.place !== a.place) changes.push(`地點「${a.place}」`);
     if (a.lat !== null) changes.push('在地圖上標了位置');

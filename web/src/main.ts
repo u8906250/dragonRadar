@@ -505,15 +505,20 @@ const fmtDateTz = (unix: number, tz: string | null): string => (tz ? fmtsFor(tz)
 function eventTimeText(ev: EventOut): string {
   const tz = localTz(ev);
   const span = (z: string | null): string => (ev.endOpen ? `${fmtTimeTz(ev.startAt, z)} 開始` : `${fmtTimeTz(ev.startAt, z)} – ${fmtTimeTz(ev.endAt, z)}`);
-  const open = ev.endOpen ? `，${openEndText(ev)}` : '';
+  const open = ev.endOpen && openEndText(ev) ? `，${openEndText(ev)}` : '';
   if (!tz) return `${span(null)}${open}`;
   return `${fmtDateTz(ev.startAt, tz)} ${span(tz)}${open}（當地時間；台灣時間 ${fmtDateTz(ev.startAt, null)} ${span(null)}）`;
 }
 
-/** 貼文沒寫結束時間時的說法：不自己猜時間（洋流的活動、發放寫「發完為止」） */
-const openEndText = (ev: EventOut): string =>
+/**
+ * 貼文沒寫結束時間時的說法：不自己猜時間。發放寫「發完為止」；
+ * 洋流的活動不一定是發東西，單場的什麼都不寫（只寫幾點開始），空字串
+ */
+const openEndText = (ev: { kind: EventOut['kind']; spot?: boolean }): string =>
   // 臨打、擺攤的每週固定場沒寫到哪天：長期開放；單場沒寫幾點結束
-  ev.kind === 'session' || ev.kind === 'food' ? (ev.spot ? '長期開放' : '沒寫結束時間') : '發完為止';
+  ev.kind === 'session' || ev.kind === 'food' ? (ev.spot ? '長期開放' : '沒寫結束時間') : ev.kind === 'activity' ? (ev.spot ? '長期開放' : '') : '發完為止';
+/** 「，發完為止」；活動沒有說法就不加 */
+const openEndTail = (ev: { kind: EventOut['kind']; spot?: boolean }): string => (openEndText(ev) ? `，${openEndText(ev)}` : '');
 
 /** 每週幾：[2, 4] →「每週二、四」，沒有就是 null */
 function weeklyText(days: number[] | null | undefined): string | null {
@@ -569,7 +574,7 @@ function spotLine(it: Item, now: number): string {
   const until = spotUntil(it, now);
   if (ev.startAt <= now && now < ev.endAt) {
     if (ev.allDay) return `開放中・${until}`;
-    // 沒寫幾點結束：不寫「今天到幾點」，寫「發完為止」
+    // 沒寫幾點結束：不寫「今天到幾點」，寫「發完為止」（活動是「長期開放」）
     if (ev.endOpen) return `營業中・${openEndText(ev)}${until === openEndText(ev) ? '' : `・${until}`}`;
     return `營業中・今天到 ${fmtTime(ev.endAt)}・${until}`;
   }
@@ -605,7 +610,8 @@ function timeLine(it: Item, now: number): string {
     return `${dateFmt.format(new Date(ev.startAt * 1000))} ${allDayText(ev, false)}${ev.startAt > now ? ` · ${startsIn(ev.startAt, now)}` : ''}`;
   }
   if (it.phase === 'active') {
-    if (ev.endOpen) return `進行中 · ${openEndText(ev)}`;
+    // 活動沒寫結束：只寫進行中
+    if (ev.endOpen) return openEndText(ev) ? `進行中 · ${openEndText(ev)}` : '進行中';
     const left = Math.max(0, Math.round((ev.endAt - now) / 60));
     return `進行中 · 約 ${left} 分鐘後結束`;
   }
@@ -2546,7 +2552,7 @@ function renderRules(): void {
     <ol>
       <li>貼文要同時寫出<b>時間</b>和<b>地點</b>，缺一個就不會出現在雷達上。</li>
       <li>時間可以寫 <span class="ex">10/18 15:00</span>、<span class="ex">今天下午三點</span>、<span class="ex">明晚 7 點</span>、<span class="ex">週六 14:00–16:00</span>。「今天、明天、週六」以發文時間換算，時區是台灣時間。</li>
-      <li>沒寫結束時間，或寫「發完為止」：畫面上寫「發完為止」（活動寫「沒寫結束時間」），不猜幾點結束。為了不讓舊的一直留在雷達上，單次的開始 ${hours}後會自動下架；固定據點沒寫最後一天的寫「發完為止」，不預設哪天結束。</li>
+      <li>沒寫結束時間，或寫「發完為止」：發放寫「發完為止」，活動只寫幾點開始，不猜幾點結束。為了不讓舊的一直留在雷達上，單次的開始 ${hours}後會自動下架；固定據點沒寫最後一天的寫「發完為止」，不預設哪天結束。</li>
       <li>一則貼文有多個地點或時段（例如行程表、車掃停靠點），會拆成多筆。</li>
       <li>只查得到鄉鎮區、查不到確切地點的（例如新聞只寫「虎尾競選總部」），會定位在該鄉鎮區的中心並標成「約略位置」，雷達和地圖上是空心光點，請以原文為準。只知道縣市的不會放上雷達。</li>
       <li>地點寫越具體越好，例如 <span class="ex">捷運市政府站 2號出口</span>、<span class="ex">板橋車站北一門</span>、<span class="ex">松山文創園區</span>。找不到出口時會退到車站位置。</li>
@@ -2740,7 +2746,7 @@ function renderReportTips(): void {
   const tips = [
     share,
     `只收${l ? ` ${l.maxAgeDays} 天內` : ''}的公開貼文。每一場活動都要讀得到做什麼、在哪裡、哪天幾點開始，缺一個就不會放上雷達。`,
-    '沒寫幾點結束的寫「發完為止」，雷達上顯示到開始後兩小時。',
+    '結束時間可以不寫：沒寫的只寫幾點開始，雷達上顯示到開始後兩小時。',
     '貼文沒寫或判讀錯的，可以在判讀結果按「補充資料」直接改活動內容、時間、地點，位置不對可以在地圖上標。連續好幾天的活動每天各算一場（最多 6 場）。貼文最好寫出門牌地址，定位才準。',
     `原貼文刪除或改成「結束了」，雷達${l ? ` ${l.recheckMin} 分鐘內` : ''}會自動下架。`,
   ];
@@ -2779,21 +2785,21 @@ function previewWhen(p: PreviewItem): string {
   if (isSeek(p) || foodRole(p) === 'meetup') return seekWhen(p);
   if (foodRole(p) === 'recommend') return `網友推薦${foodOf(p).hours ? `・營業 ${foodOf(p).hours}` : ''}`;
   const day = (t: number): string => dateFmt.format(new Date(t * 1000));
-  // 一天好幾個時段：「12:00–13:30、18:00–20:30」；沒寫結束的只寫開始，最後寫「發完為止」
-  const open = p.kind === 'session' || p.kind === 'food' ? (p.spot ? '長期開放' : '沒寫結束時間') : '發完為止';
+  // 一天好幾個時段：「12:00–13:30、18:00–20:30」；沒寫結束的只寫開始，最後寫「發完為止」（活動不寫）
+  const open = openEndTail(p);
   const slotText = (s: { startAt: number; endAt: number; endOpen?: boolean }): string => (s.endOpen ? `${fmtTime(s.startAt)} 開始` : `${fmtTime(s.startAt)}–${fmtTime(s.endAt)}`);
-  const slots = p.slots && p.slots.length > 1 ? `${p.slots.map(slotText).join('、')}${p.slots.some((s) => s.endOpen) ? `，${open}` : ''}` : null;
+  const slots = p.slots && p.slots.length > 1 ? `${p.slots.map(slotText).join('、')}${p.slots.some((s) => s.endOpen) ? open : ''}` : null;
   if (p.spot) {
-    const hours = p.allDay ? '整天' : slots ?? (p.endOpen ? `${fmtTime(p.startAt)} 開始，${open}` : `${fmtTime(p.startAt)}–${fmtTime(p.endAt)}`);
+    const hours = p.allDay ? '整天' : slots ?? (p.endOpen ? `${fmtTime(p.startAt)} 開始${open}` : `${fmtTime(p.startAt)}–${fmtTime(p.endAt)}`);
     // 沒寫最後一天：不寫系統排到哪天，只寫「發完為止」
-    const range = p.untilOpen ? `${day(p.startAt)} 起，${open}` : p.days > 1 ? `${day(p.startAt)} 到 ${day(p.lastStartAt)}，共 ${p.days} 天` : day(p.startAt);
+    const range = p.untilOpen ? `${day(p.startAt)} 起${open}` : p.days > 1 ? `${day(p.startAt)} 到 ${day(p.lastStartAt)}，共 ${p.days} 天` : day(p.startAt);
     return `${weeklyText(p.weekdays) ?? '每天'} ${hours}・${range}`;
   }
   if (p.allDay) return `${day(p.startAt)} 整天`;
   if (slots) return `${day(p.startAt)} ${slots}`;
   // 國外的：寫當地時間
   const tz = localTz(p);
-  return `${fmtDateTz(p.startAt, tz)} ${fmtTimeTz(p.startAt, tz)}${p.endOpen ? ` 開始，${open}` : `–${fmtTimeTz(p.endAt, tz)}`}${tz ? '（當地時間）' : ''}`;
+  return `${fmtDateTz(p.startAt, tz)} ${fmtTimeTz(p.startAt, tz)}${p.endOpen ? ` 開始${open}` : `–${fmtTimeTz(p.endAt, tz)}`}${tz ? '（當地時間）' : ''}`;
 }
 
 /** 在 Google 地圖上標出這個座標（新分頁；手機會開 Google 地圖 App） */
@@ -2889,7 +2895,7 @@ function editCardHtml(it: EditItem | null): string {
         <label>開始<input type="time" name="start" value="${it?.dateOnly ? '' : (start?.time ?? '')}"></label>
         <label>結束<input type="time" name="end" value="${end}"></label>
       </div>
-      <small class="muted">結束沒填就是「發完為止」，雷達上顯示到開始後兩小時。</small>
+      <small class="muted">結束可以不填：只寫幾點開始，雷達上顯示到開始後兩小時。</small>
       <label>地點<input name="place" maxlength="80" value="${esc(it?.place ?? '')}" placeholder="店名或地址，例如：厝邊咖啡 台北市萬華區○○路○號"></label>
       <div class="edit-pin"><small class="edit-pin-state"></small><button type="button" class="chip" data-act="pin">在地圖上標位置</button><button type="button" class="chip" data-act="unpin" hidden>不用標的位置</button></div>
       <div class="edit-map" hidden></div>
@@ -3245,7 +3251,7 @@ async function showReportResult(data: SubmitResult): Promise<void> {
   const failHtml =
     fails.length > 0
       ? `${noneListed ? '' : '<p class="muted sheet-note">另外這些沒有放上雷達：</p>'}${failuresHtml(fails)}${
-          canFixByNote(fails) ? '<p class="muted sheet-note">活動要有內容、地點和開始時間才收（沒寫結束時間的當成發完為止）；知道的話可以在下面補上。</p>' : ''
+          canFixByNote(fails) ? '<p class="muted sheet-note">活動要有內容、地點和開始時間才收（結束時間可以不寫）；知道的話可以在下面補上。</p>' : ''
         }`
       : '';
   // 判讀成不是活動：附上 AI 的理由，判斷錯了可以補充
@@ -3259,7 +3265,7 @@ async function showReportResult(data: SubmitResult): Promise<void> {
       const day = (t: number): string => dateFmt.format(new Date(t * 1000));
       const last = g[g.length - 1];
       const when = ev.spot
-        ? `${spotHours(g)}・${day(ev.startAt)}${taipeiDay(last.startAt) !== taipeiDay(ev.startAt) ? ` 到 ${day(last.startAt)}` : ''}${last.untilOpen ? `，${openEndText(last)}` : ''}`
+        ? `${spotHours(g)}・${day(ev.startAt)}${taipeiDay(last.startAt) !== taipeiDay(ev.startAt) ? ` 到 ${day(last.startAt)}` : ''}${last.untilOpen ? openEndTail(last) : ''}`
         : ev.allDay
           ? `${day(ev.startAt)} ${allDayText(ev, false)}`
           : `${fmtDateTz(ev.startAt, localTz(ev))} ${g.map((x) => fmtTimeTz(x.startAt, localTz(ev))).join('、')}${localTz(ev) ? '（當地時間）' : ''}`;

@@ -147,8 +147,8 @@ describe('editSummary', () => {
   });
   it('lists everything for an activity the AI did not read', () => {
     const acts = [{ title: 'A', startAt: T18, endAt: null, place: 'B', lat: null, lng: null }, { title: 'C', startAt: T20, endAt: null, place: 'D', lat: null, lng: null }];
-    expect(editSummary([], acts)).toBe('改了第 1 場內容「A」、時間 10/26 18:00 開始（發完為止）、地點「B」；第 2 場內容「C」、時間 10/26 20:00 開始（發完為止）、地點「D」');
+    expect(editSummary([], acts)).toBe('改了第 1 場內容「A」、時間 10/26 18:00 開始、地點「B」；第 2 場內容「C」、時間 10/26 20:00 開始、地點「D」');
     // 沒排上雷達的那場不寫
-    expect(editSummary([], acts, [false, true])).toBe('改了內容「C」、時間 10/26 20:00 開始（發完為止）、地點「D」');
+    expect(editSummary([], acts, [false, true])).toBe('改了內容「C」、時間 10/26 20:00 開始、地點「D」');
   });
 });

@@ -249,7 +249,7 @@ export function normalizeActivities(raw: unknown): Extraction | null {
 
 export const ACTIVITY_SPEC: ExtractSpec = { system: ACTIVITY_PROMPT, schema: ACTIVITY_SCHEMA, normalize: normalizeActivities };
 
-/** 一場活動一定要有的：活動內容、地點、開始時間（沒寫結束的當成發完為止） */
+/** 一場活動一定要有的：活動內容、地點、開始時間（結束可以不寫） */
 export type ActivityPart = 'content' | 'place' | 'start';
 
 /** 貼文寫了半夜 12 點（「00:00」「24:00」「午夜」「凌晨 12 點」） */
