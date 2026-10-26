@@ -1035,24 +1035,16 @@ const ROUTE_RELOCATE_EVERY_SEC = 20 * 60;
  */
 export async function relocateRouteStops(env: Env, now: number): Promise<{ checked: number; located: number }> {
   const { results } = await env.DB.prepare(
-    `SELECT id, post_id, title, stops FROM routes WHERE id LIKE 'link-%' AND show_until > ?
+    `SELECT id, post_id, stops FROM routes WHERE id LIKE 'link-%' AND show_until > ?
        AND EXISTS (SELECT 1 FROM events e WHERE e.post_id = routes.post_id AND e.status IN ('upcoming', 'active'))`,
   )
     .bind(now)
-    .all<{ id: string; post_id: string; title: string; stops: string }>();
+    .all<{ id: string; post_id: string; stops: string }>();
   let checked = 0;
   let located = 0;
   for (const r of results) {
     const stops = JSON.parse(r.stops) as StoredRouteStop[];
     let changed = false;
-    // 暫時：v1.226 以前存的路線，地點填地址的站把地址存成站名；改成標題取的站名，地址放 place
-    for (const st of stops) {
-      const name = st.place ? st.name : stopNameOf(st.title, r.title, st.name);
-      if (name === st.name) continue;
-      st.place = st.name;
-      st.name = name;
-      changed = true;
-    }
     for (const st of stops) {
       if (checked >= ROUTE_RELOCATE_PER_RUN) break;
       if (st.lat !== null || st.at === null || st.at + ROUTE_KEEP_SEC <= now) continue;
