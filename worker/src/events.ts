@@ -1,6 +1,6 @@
 import type { Env } from './env';
 import { fetchThreadsProfile, profileCandidates, profileHintText, type ThreadsProfile } from './sources/profile';
-import { ACTIVITY_SPEC, applySupplementDate, closedWeekdays, slotWeekdays, dropBroughtItem, dropSelfPlace, extractFromPost, localizeTimes, missingActivityParts, openWeekdaysFromText, splitDropTimes, splitMultiDay, splitWeekdayWeekend, spotHoursFromText, startNowForDeadline, guessedMidnight, timeZoneOf, untilInText, weekdaysInText, type ActivityPart, type EventKind, type ExtractedEvent } from './extract';
+import { ACTIVITY_SPEC, applySupplementDate, reconcileRouteStops, closedWeekdays, slotWeekdays, dropBroughtItem, dropSelfPlace, extractFromPost, localizeTimes, missingActivityParts, openWeekdaysFromText, splitDropTimes, splitMultiDay, splitWeekdayWeekend, spotHoursFromText, startNowForDeadline, guessedMidnight, timeZoneOf, untilInText, weekdaysInText, type ActivityPart, type EventKind, type ExtractedEvent } from './extract';
 import { cityOfHouse, geocodeAddress, parseTwAddress, type TwAddress } from './address';
 import { SESSION_SPEC } from './badminton';
 import { FOOD_SPEC } from './food';
@@ -488,6 +488,8 @@ export interface FailedItem {
   missing?: ActivityPart[];
   /** reason = 'approximate'（車掃的站只定位到鄉鎮區、路）：定位到哪裡 */
   area?: string;
+  /** reason = 'unlocated'（車掃的站）：跟另一站定位在同一點，可能查錯了 */
+  sameAs?: string;
   /** 地點只寫了「本店」這類說法 */
   selfPlace?: string;
   /** 只寫了日期沒寫幾點：那天（00:00） */
@@ -789,9 +791,11 @@ async function planPostWith(env: Env, post: PostRow, now: number, profileHint: s
  * 缺的記成 incomplete:place,start（照 內容、地點、開始 的順序，回報的人可以補充再判讀），
  * 寫了地點、地圖上查不到記成 unlocated。不再推算固定據點。
  */
-async function planActivities(env: Env, post: PostRow, events: ExtractedEvent[], text: string, now: number, routeTitle: string | null): Promise<PlanItem[]> {
+async function planActivities(env: Env, post: PostRow, extracted: ExtractedEvent[], text: string, now: number, routeTitle: string | null): Promise<PlanItem[]> {
   const deadline = Date.now() + ADDRESS_BUDGET_MS;
   const items: PlanItem[] = [];
+  // 車掃的站：照貼文一行一站的清單補上模型漏掉的、改正套錯的地名
+  const events = reconcileRouteStops(extracted, text);
   for (const [group, ex] of events.entries()) {
     // 國外的：時間換成當地時區的時間點；台灣的貼文沒寫哪天、補充寫了，用補充的日期（模型有時會忽略補充）
     if (ex.country) localizeTimes(ex);
@@ -913,9 +917,27 @@ export function markRoutes(items: PlanItem[], text: string, routeTitle: string |
   const title = routeTitle?.trim() || `${kw}路線`;
   for (const [key, list] of days) {
     if (list.length < 2) continue;
+    list.sort((a, b) => a.at - b.at);
+    // 兩個不同的站定位在同一點（40 m 內）：其中一站多半查錯了（模型把別站的地名套過來）。
+    // 查詢沒寫到自己站名的那站不放上雷達，請回報的人標位置；分不出來就算後面那站
+    const core = (name: string): string => [...name].slice(-3).join('');
+    for (const [i, a] of list.entries()) {
+      for (const b of list.slice(i + 1)) {
+        const pa = a.it.plan;
+        const pb = b.it.plan;
+        if (!pa || !pb || pa.lat === null || pa.lng === null || pb.lat === null || pb.lng === null || pa.approx_area || pb.approx_area || a.name === b.name) continue;
+        if (distM({ lat: pa.lat, lng: pa.lng }, { lat: pb.lat, lng: pb.lng }) > 40) continue;
+        const aOk = pa.place_query.includes(core(a.name));
+        const bOk = pb.place_query.includes(core(b.name));
+        const [bad, good] = aOk && !bOk ? [b, a] : !aOk && bOk ? [a, b] : [b, a];
+        const title = bad === a ? pa.title : pb.title;
+        bad.it.plan = null;
+        bad.it.reason = 'unlocated';
+        bad.it.fail = { title, place: bad.name, reason: 'unlocated', sameAs: good.name, startAt: bad.at, endOpen: true };
+      }
+    }
     // 至少一站放得上雷達（有確切位置、還沒經過）
     if (!list.some((st) => st.it.plan && st.it.plan.lat !== null && !st.it.plan.approx_area && st.at + ROUTE_KEEP_SEC > now)) continue;
-    list.sort((a, b) => a.at - b.at);
     list.forEach((st, i) => {
       const { it, at, name } = st;
       const p = it.plan;

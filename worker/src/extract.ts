@@ -220,13 +220,68 @@ events 每筆的欄位：
 - 「早上 9 點到下午 5 點」：start_at 9:00、end_at 17:00。跨過午夜的（「22:00–02:00」）end_at 是隔天 02:00。
 - 「🈺」是「營業中」的意思：「🈺11-21」是 11:00 到 21:00，不是日期。
 - 同一則貼文有多個地點或多個時段（行程表、車掃停靠點、中午一場晚上一場），每個地點 + 時段各一筆。
-- 車掃、掃街、車隊列出的每一個應援點、停靠點都要各一筆，一個都不能少（最多 ${MAX_ACTIVITY_EVENTS} 筆），照貼文的順序；start_at 是預計到那一點的時間，end_at 為 null。
+- 車掃、掃街、車隊列出的每一個應援點、停靠點都要各一筆，第一站也要，一個都不能少（最多 ${MAX_ACTIVITY_EVENTS} 筆），照貼文的順序；start_at 是預計到那一點的時間，end_at 為 null。每一站的 place_text、place_query 要用那一站自己寫的名稱（例如「② 14:20｜蘇巧慧鶯歌服務處」的 place_query 是「新北市鶯歌區 蘇巧慧服務處」），不要套用前後站的地名。
 - 連續好幾天、每天同樣時段的（「10/17~10/19 每日 11:00~18:00」、店家「即日起 每天 12:00–21:00 發放」），每天各一筆，最多 ${MAX_EVENTS_PER_POST} 天；沒寫到哪天為止的，只輸出第一天（「即日起」是發文當天）。
 - 新聞報導、心得、活動回顧、徵求、詢問、線上抽獎、直播、線上活動、販售，is_event 為 false，events 為空陣列。
 - 不要編造貼文裡沒有的內容、時間或地點，可以依上下文補上縣市。
 - 貼文最後如果有「【回報的人補充】」，那是看到貼文的人補上的活動內容、地點或時間，貼文沒寫的一定要用它補上；跟貼文衝突時以貼文為準。補充寫了店名、或是誰的服務處，title 要用補充寫的名稱。
 - 貼文最後如果有「【帳號簡介】」，那是發文帳號或貼文標記的店家帳號的名稱、簡介。貼文沒寫地點時，用它找出店名或地址填 place_text、place_query；簡介沒有店名也沒有地址就不要用。貼文自己寫了地點時以貼文為準。
 - 活動在國外：一樣要抽出來。start_at、end_at 寫當地的時間，填 country、timezone；place_query 用當地的地名加城市，英文或當地語言，不要加台灣的縣市。`;
+
+/** 車掃、掃街、車隊的停靠點常一行一站：「① 14:00｜鶯歌永福宮」「14:20 蘇巧慧鶯歌服務處」 */
+const STOP_LINE_RE = /^[\s\p{Extended_Pictographic}\uFE0F]*(?:[①-⑳]|\d{1,2}[.、)）]|[-•・*▶►➤])?\s*(\d{1,2})[:：](\d{2})\s*(?:[｜|│/:：、,，\-–—~～]\s*|\s+)(.+?)\s*$/u;
+
+/** 貼文裡一行一站的清單（時間、站名），至少兩行才算 */
+export function routeStopLines(text: string): Array<{ hm: string; name: string }> {
+  const out: Array<{ hm: string; name: string }> = [];
+  for (const line of halfWidth(text).split('\n')) {
+    const m = STOP_LINE_RE.exec(line);
+    if (!m) continue;
+    const h = Number(m[1]);
+    const min = Number(m[2]);
+    // 站名去掉 emoji、後面括號的說明；「14:00–16:00 發飄帶」這種是時段，不是站
+    const name = m[3].replace(/[\p{Extended_Pictographic}\uFE0F]/gu, '').replace(/\s*[（(].*$/, '').trim();
+    if (h > 23 || min > 59 || [...name].length < 2 || [...name].length > 30 || /\d{1,2}[:：]\d{2}/.test(name)) continue;
+    out.push({ hm: `${String(h).padStart(2, '0')}:${String(min).padStart(2, '0')}`, name });
+  }
+  return out.length >= 2 ? out : [];
+}
+
+/**
+ * 車掃、掃街、車隊：貼文一行一站的清單跟模型判讀的對一次。模型常漏掉一站，或把前後站的地名套到這一站
+ * （「蘇巧慧鶯歌服務處」查成「新北市鶯歌區永福宮」）。同一天、同一個時間的：站名不一樣就照清單，
+ * 查詢寫的是別站的地名就換成「縣市 站名」；清單有、模型漏掉的補上。模型的站不只一天、或國外的不動
+ */
+export function reconcileRouteStops(events: ExtractedEvent[], text: string): ExtractedEvent[] {
+  if (!/車掃|掃街|車隊/.test(text)) return events;
+  const lines = routeStopLines(text);
+  if (lines.length === 0) return events;
+  const local = events.filter((e) => !e.country && parseIsoToUnix(e.start_at) !== null);
+  const days = new Set(local.map((e) => new Date(((parseIsoToUnix(e.start_at) as number) + 8 * 3600) * 1000).toISOString().slice(0, 10)));
+  if (days.size !== 1) return events;
+  const [day] = [...days];
+  // 查詢用的縣市：模型寫最多的那個
+  const cities = local.map((e) => /^(\S{2}[市縣])/.exec(e.place_query ?? '')?.[1]).filter((c): c is string => !!c);
+  const city = cities.sort((a, b) => cities.filter((c) => c === b).length - cities.filter((c) => c === a).length)[0] ?? '';
+  const core = (name: string): string => [...name].slice(-3).join('');
+  const out = [...events];
+  for (const { hm, name } of lines) {
+    const at = parseIsoToUnix(`${day}T${hm}:00+08:00`);
+    const query = city ? `${city} ${name}` : name;
+    const same = out.find((e) => !e.country && parseIsoToUnix(e.start_at) === at);
+    if (!same) {
+      out.push({ kind: 'activity', title: name, item: null, start_at: `${day}T${hm}:00+08:00`, end_at: null, place_text: name, place_query: query, confidence: 0.9, spot: false, until: null, weekdays: null, country: null, timezone: null });
+      continue;
+    }
+    const q = (same.place_query ?? '').replace(/\s+/g, '');
+    const others = lines.filter((o) => o.name !== name).map((o) => core(o.name));
+    if ((same.place_text ?? '').replace(/\s+/g, '') !== name.replace(/\s+/g, '')) {
+      same.place_text = name;
+      same.place_query = query;
+    } else if (!q.includes(core(name)) && others.some((c) => q.includes(c))) same.place_query = query;
+  }
+  return out;
+}
 
 /** 洋流（改版後）：只判斷活動，每一場要有內容、地點、開始和結束時間 */
 export function normalizeActivities(raw: unknown): Extraction | null {

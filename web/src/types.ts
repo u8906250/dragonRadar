@@ -287,6 +287,8 @@ export interface RoutePreview {
     /** listed 會放上雷達；approximate 只定位到鄉鎮區、路；unlocated 查不到；passed 車隊已經經過 */
     status: 'listed' | 'approximate' | 'unlocated' | 'passed';
     area?: string;
+    /** 跟這一站定位在同一點（可能查錯了） */
+    sameAs?: string;
   }>;
 }
 
@@ -322,6 +324,8 @@ export interface FailedItem {
   missing?: Array<'content' | 'place' | 'start'>;
   /** reason = 'approximate'（車掃的站）：只定位到哪裡 */
   area?: string;
+  /** reason = 'unlocated'（車掃的站）：跟另一站定位在同一點，可能查錯了 */
+  sameAs?: string;
   /** 地點只寫了「本店」這類說法 */
   selfPlace?: string;
   /** 只寫了日期沒寫幾點：那天 */

@@ -176,6 +176,8 @@ export interface RoutePreview {
     /** listed 會放上雷達；approximate 只定位到鄉鎮區、路；unlocated 查不到；passed 車隊已經經過 */
     status: 'listed' | 'approximate' | 'unlocated' | 'passed';
     area?: string;
+    /** 跟這一站定位在同一點（可能查錯了） */
+    sameAs?: string;
   }>;
 }
 
@@ -190,7 +192,7 @@ export function routePreviews(items: PlanItem[]): RoutePreview[] {
       stops: sorted.map((it) => {
         const r = it.route as NonNullable<PlanItem['route']>;
         const status = it.plan ? 'listed' : it.reason === 'approximate' ? 'approximate' : it.reason === 'unlocated' ? 'unlocated' : 'passed';
-        return { kind: r.kind, name: r.name, at: r.at, lat: it.plan?.lat ?? r.lat, lng: it.plan?.lng ?? r.lng, status, ...(it.fail?.area ? { area: it.fail.area } : {}) };
+        return { kind: r.kind, name: r.name, at: r.at, lat: it.plan?.lat ?? r.lat, lng: it.plan?.lng ?? r.lng, status, ...(it.fail?.area ? { area: it.fail.area } : {}), ...(it.fail?.sameAs ? { sameAs: it.fail.sameAs } : {}) };
       }),
     };
   });
