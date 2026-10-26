@@ -504,7 +504,10 @@ const fmtDateTz = (unix: number, tz: string | null): string => (tz ? fmtsFor(tz)
 /** 詳細資料的時間（單次的）：國外的寫當地日期時間，後面附台灣時間 */
 function eventTimeText(ev: EventOut): string {
   const rs = reportedStop(ev);
-  if (rs?.at) return `${dateFmt.format(new Date(rs.at * 1000))} 約 ${fmtTime(rs.at)} 車隊經過`;
+  if (rs?.at) {
+    const day = dateFmt.format(new Date(rs.at * 1000));
+    return rs.kind === 'start' ? `${day} ${fmtTime(rs.at)} 從這裡出發` : `${day} 約 ${fmtTime(rs.at)} 車隊${rs.kind === 'end' ? '抵達' : '經過'}`;
+  }
   const tz = localTz(ev);
   const span = (z: string | null): string => (ev.endOpen ? `${fmtTimeTz(ev.startAt, z)} 開始` : `${fmtTimeTz(ev.startAt, z)} – ${fmtTimeTz(ev.endAt, z)}`);
   const open = ev.endOpen && openEndText(ev) ? `，${openEndText(ev)}` : '';
@@ -607,9 +610,14 @@ function timeLine(it: Item, now: number): string {
   // 回報的車掃的一站：寫車隊預計幾點經過（雷達上從前 10 分鐘顯示到經過後 15 分鐘）
   const rs = reportedStop(ev);
   if (rs?.at) {
-    if (it.phase === 'active') return `車隊預計 ${fmtTime(rs.at)} 經過 · ${now < rs.at ? '快到了' : '可能剛經過'}`;
+    // 起點寫「出發」、終點寫「抵達」、中間的站寫「經過」
+    const verb = rs.kind === 'start' ? '出發' : rs.kind === 'end' ? '抵達' : '經過';
+    if (it.phase === 'active') {
+      if (rs.kind === 'start') return now < rs.at ? `${fmtTime(rs.at)} 從這裡出發 · 快出發了` : `${fmtTime(rs.at)} 從這裡出發 · 可能剛出發`;
+      return `車隊預計 ${fmtTime(rs.at)} ${verb} · ${now < rs.at ? '快到了' : `可能剛${verb}`}`;
+    }
     const day = taipeiDay(rs.at) === taipeiDay(now) ? '' : `${dateFmt.format(new Date(rs.at * 1000))} `;
-    return `${day}約 ${fmtTime(rs.at)} 經過 · ${startsIn(rs.at, now)}`;
+    return `${day}${rs.kind === 'start' ? '' : '約 '}${fmtTime(rs.at)} ${verb} · ${startsIn(rs.at, now)}`;
   }
   if (ev.allDay) {
     const today = ev.startAt <= now && now < ev.endAt;
@@ -764,6 +772,27 @@ function routeState(r: RouteOut, now: number): RadarRoute['state'] {
 const shownRoutes = (items: Item[]): RouteOut[] => routes.filter((r) => items.some((it) => routeOf(it.ev)?.id === r.id));
 const routeItems = (r: RouteOut, items: Item[]): Item[] => items.filter((it) => routeOf(it.ev)?.id === r.id);
 const routeKm = (r: RouteOut): number => r.segments.reduce((n, s) => n + s.lengthM, 0) / 1000;
+/**
+ * 車掃還沒出發：雷達、地圖只畫起點，路線和其他站出發後才畫（清單、時間表照樣列）；
+ * 點了這個車掃（時間表、其中一站、「在地圖上看路線」）就先畫出來
+ */
+const beforeDeparture = (it: Item, now: number, focused: string | null): boolean => {
+  const r = routeOf(it.ev);
+  return !!r && r.id !== focused && routeState(r, now) === 'planned' && stopOf(it.ev)?.kind !== 'start';
+};
+/** 雷達、地圖上要畫的路線：出發後才畫，出發前點了才畫 */
+const drawnRoutes = (items: Item[], now: number, focused: string | null): RouteOut[] =>
+  shownRoutes(items).filter((r) => routeState(r, now) !== 'planned' || r.id === focused);
+/** 出發前按「在地圖上看路線」：這條路線先畫出來，點其他地方收起 */
+let routeOnMap: string | null = null;
+/** 現在點開的車掃：時間表、選到的那一站、或按了「在地圖上看路線」的 */
+function focusedRoute(items: Item[]): string | null {
+  if (selectedRoute) return selectedRoute;
+  if (routeOnMap) return routeOnMap;
+  const sel = selectedId !== null ? items.find((it) => it.ev.id === selectedId) : undefined;
+  return sel ? (routeOf(sel.ev)?.id ?? null) : null;
+}
+
 /** 回報的車掃：下一個還沒經過的站 */
 const nextStop = (r: RouteOut, now: number): RouteStop | undefined => r.stops.find((s) => s.at !== null && s.at > now);
 
@@ -866,13 +895,16 @@ function render(): void {
   const items = onlyActive && mod.current ? byCategory.filter((it) => activeNow(it, now)) : byCategory;
   // 雷達、地圖只畫時間範圍內的；清單照樣全部列，範圍外的放最下面
   const timed = items.filter((it) => inTime(it, now));
+  // 雷達、地圖上畫的：車掃還沒出發的只畫起點（點開的那條整條畫）
+  const focused = focusedRoute(items);
+  const drawn = timed.filter((it) => !beforeDeparture(it, now, focused));
   updateOutline();
   updateCategoryToggles(all);
   updateActiveToggle(byCategory, now);
 
   // 稍後才開始的也畫（虛線框、淡色）；「雙北」時雙北以外的也畫，跟超出範圍的一樣畫小、畫淡
   radar.render(
-    timed.map((it) => ({
+    drawn.map((it) => ({
       id: it.ev.id,
       kind: it.ev.kind,
       spot: !!it.spot,
@@ -891,7 +923,7 @@ function render(): void {
       // 回報的車掃：寫還有多久經過（不是前 10 分鐘的開始）
       ...(isUpcoming(it) ? { badge: startsInShort(reportedStop(it.ev)?.at ?? it.ev.startAt, now), ...(it.phase === 'later' ? { fade: clarityOf(it.ev, now) } : {}) } : {}),
     })),
-    shownRoutes(timed).map((r) => ({
+    drawnRoutes(timed, now, focused).map((r) => ({
       id: r.id,
       state: routeState(r, now),
       points: r.segments.flatMap((sg) => sg.path).map(([lat, lng]) => ({ bearing: bearingDeg(origin, { lat, lng }), distanceKm: haversineKm(origin, { lat, lng }) })),
@@ -918,7 +950,7 @@ function render(): void {
     (mod.current ? LANDMARKS : []).map((lm) => ({ id: lm.id, label: lm.name, bearing: bearingDeg(origin, lm), distanceKm: haversineKm(origin, lm), selected: lm.id === selectedLandmark })),
   );
   map.setRoutes(
-    shownRoutes(timed).map((r) => ({
+    drawnRoutes(timed, now, focused).map((r) => ({
       id: r.id,
       title: r.title,
       state: routeState(r, now),
@@ -929,7 +961,7 @@ function render(): void {
     })),
   );
   map.render(
-    timed.map((it) => ({
+    drawn.map((it) => ({
       id: it.ev.id,
       kind: it.ev.kind,
       spot: !!it.spot,
@@ -1164,6 +1196,8 @@ function routeCard(r: RouteOut, phase: Phase, items: Item[], now: number): HTMLL
 /** 車掃路線的時間表：每一站的時間、距離，點了看那一站 */
 function renderRouteDetail(r: RouteOut, items: Item[], now: number): void {
   const mine = routeItems(r, items);
+  // 還沒出發：平常雷達、地圖上只有起點
+  const planned = routeState(r, now) === 'planned';
   // 回報的車掃：標出離你最近、還沒經過的那一站
   const nearestStop = isReported(r) ? [...mine].filter((x) => x.ev.endAt > now).sort((a, b) => a.distanceKm - b.distanceKm)[0] : undefined;
   const people = r.segments.reduce((n, s) => n + s.people, 0);
@@ -1197,6 +1231,7 @@ function renderRouteDetail(r: RouteOut, items: Item[], now: number): void {
           : `<p>${esc(routeTimeLine(r, items, now))}<br><span class="muted">全長 ${routeKm(r).toFixed(1)} km・沿線認領 ${people.toLocaleString()} / 目標 ${target.toLocaleString()} 人${needy > 0 ? `・還有 ${needy} 段缺人` : ''}（${fmtTime(r.updatedAt)} 更新）</span></p>`
       }
       <ol class="route-stops">${rows}</ol>
+      ${planned ? '<p class="muted sheet-note">還沒出發：平常雷達和地圖上只顯示起點，點開這個車掃時才畫出整條路線，出發後一直顯示。</p>' : ''}
       <p class="muted sheet-note">${
         isReported(r)
           ? '時間是貼文寫的預計時間，僅供參考，以現場為準。雷達上每一站從預計經過前 10 分鐘顯示到經過後 15 分鐘；地圖上各站用直線連起來，不是實際走的路。'
@@ -1214,8 +1249,9 @@ function renderRouteDetail(r: RouteOut, items: Item[], now: number): void {
     b.addEventListener('click', () => select(Number(b.dataset.select)));
   }
   detailEl.querySelector('[data-act="route-map"]')?.addEventListener('click', () => {
-    // 收起時間表，不然整條路線被蓋住
+    // 收起時間表，不然整條路線被蓋住；還沒出發的路線照樣畫出來（點其他地方才收起）
     selectedRoute = null;
+    routeOnMap = planned ? r.id : null;
     render();
     switchView('map');
     map.focusRoute(r.id);
@@ -1977,6 +2013,7 @@ function selectLandmark(id: string | null): void {
 }
 
 function selectRoute(id: string | null): void {
+  routeOnMap = null;
   selectedRoute = selectedRoute === id ? null : id;
   selectedLandmark = null;
   selectedBottle = null;
@@ -1994,6 +2031,7 @@ function selectRoute(id: string | null): void {
 
 function select(id: number | null, group: number[] = []): void {
   feedbackSheet.hidden = true;
+  routeOnMap = null;
   selectedRoute = null;
   selectedLandmark = null;
   selectedBottle = null;
@@ -3129,6 +3167,36 @@ function wireEdit(c: { postId: string; token: string }, items: EditItem[], actio
   });
 }
 
+/**
+ * 卡片（點光點、清單跳出來的詳細資料、車掃時間表、主題、類別、關鍵字）點其他地方就關閉。
+ * 點的是按鈕、連結、欄位、雷達光點、地圖標記、清單的一列（會自己打開別的）或卡片裡面不關；
+ * 拖動（移動雷達、地圖）不算點。回報、漂流瓶有打字的內容，不跟著關
+ */
+const KEEP_OPEN = 'button, a, input, select, textarea, label, .sheet, .blip, .landmark, .bottle, .leaflet-marker-icon, .leaflet-interactive, .leaflet-popup, .leaflet-control, #event-list li';
+function wireTapOutside(): void {
+  let down: { x: number; y: number } | null = null;
+  document.addEventListener('pointerdown', (e) => (down = { x: e.clientX, y: e.clientY }), true);
+  // 在 capture 階段判斷：點清單、光點會馬上重畫，等冒泡上來時點的那個元素已經不在畫面上
+  document.addEventListener(
+    'click',
+    (e) => {
+      const moved = !!down && Math.hypot(e.clientX - down.x, e.clientY - down.y) > 10;
+      down = null;
+      const t = e.target instanceof Element ? e.target : null;
+      if (moved || !t || t.closest(KEEP_OPEN)) return;
+      for (const sheet of [detailEl, themeSheet, moduleSheet, kwSheet]) {
+        if (!sheet.hidden) sheet.querySelector<HTMLButtonElement>('[data-act="close"]')?.click();
+      }
+      // 車掃出發前按「在地圖上看路線」畫出來的路線：點其他地方收起，回到只顯示起點
+      if (routeOnMap) {
+        routeOnMap = null;
+        render();
+      }
+    },
+    true,
+  );
+}
+
 /** 雷達上已經有這個據點時，確認後會怎樣 */
 function updateNote(u: NonNullable<PreviewItem['update']>): string {
   return u.mode === 'replace'
@@ -3764,6 +3832,7 @@ function wireControls(): void {
   });
   bottleBtn.addEventListener('click', () => openBottleSheet(bottleSheet.hidden));
   bottleSheet.querySelector('[data-act="close"]')?.addEventListener('click', () => openBottleSheet(false));
+  wireTapOutside();
   bottleText.addEventListener('input', () => {
     const over = updateBottleCount();
     bottleDropBtn.disabled = origin.source !== 'gps' || over;
