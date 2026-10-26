@@ -53,6 +53,8 @@ export interface Extraction {
   events: ExtractedEvent[];
   /** 洋流的活動判讀：不是活動時，模型說的原因（「這是活動心得，不是預告」） */
   reason?: string | null;
+  /** 洋流的活動判讀：車掃、掃街、車隊這種一天依序經過好幾個點的，整場的名稱（「蘇巧慧報告號次大車掃」） */
+  route_title?: string | null;
 }
 
 const MAX_EVENTS_PER_POST = 6;
@@ -160,14 +162,18 @@ export interface ExtractSpec {
 /** 洋流：發放、活動、固定據點 */
 export const EVENT_SPEC: ExtractSpec = { system: SYSTEM_PROMPT, schema: SCHEMA, normalize: (raw) => normalizeExtraction(raw) };
 
+/** 洋流的活動一則最多幾筆：車掃、掃街的停靠點常超過 6 個（連續好幾天的還是最多 6 天） */
+const MAX_ACTIVITY_EVENTS = 20;
+
 const ACTIVITY_SCHEMA = {
   type: 'object',
   properties: {
     is_event: { type: 'boolean' },
     reason: { type: ['string', 'null'] },
+    route_title: { type: ['string', 'null'] },
     events: {
       type: 'array',
-      maxItems: MAX_EVENTS_PER_POST,
+      maxItems: MAX_ACTIVITY_EVENTS,
       items: {
         type: 'object',
         properties: {
@@ -195,7 +201,8 @@ const ACTIVITY_PROMPT = `你是「洋流雷達」的活動判讀器。你會收�
 {
   "is_event": 是否宣告了至少一場可到場的實體活動（布林值）,
   "reason": is_event 為 false 時，用一句話（20 字以內）說明為什麼不算，例如「這是活動心得，不是預告」「是線上直播」「在販售商品」「只是詢問哪裡有發」；is_event 為 true 則 null,
-  "events": [ 每一個「地點 + 時段」一筆，最多 ${MAX_EVENTS_PER_POST} 筆 ]
+  "route_title": 車掃、掃街、車隊這種一天依序經過好幾個點的，整場活動的名稱，20 字以內、不含站名，要寫出是誰的，例如「蘇巧慧報告號次大車掃」「吳怡農中正萬華掃街」；不是則 null,
+  "events": [ 每一個「地點 + 時段」一筆，最多 ${MAX_ACTIVITY_EVENTS} 筆 ]
 }
 
 events 每筆的欄位：
@@ -213,7 +220,8 @@ events 每筆的欄位：
 - 「早上 9 點到下午 5 點」：start_at 9:00、end_at 17:00。跨過午夜的（「22:00–02:00」）end_at 是隔天 02:00。
 - 「🈺」是「營業中」的意思：「🈺11-21」是 11:00 到 21:00，不是日期。
 - 同一則貼文有多個地點或多個時段（行程表、車掃停靠點、中午一場晚上一場），每個地點 + 時段各一筆。
-- 連續好幾天、每天同樣時段的（「10/17~10/19 每日 11:00~18:00」、店家「即日起 每天 12:00–21:00 發放」），每天各一筆，最多 ${MAX_EVENTS_PER_POST} 筆；沒寫到哪天為止的，只輸出第一天（「即日起」是發文當天）。
+- 車掃、掃街、車隊列出的每一個應援點、停靠點都要各一筆，一個都不能少（最多 ${MAX_ACTIVITY_EVENTS} 筆），照貼文的順序；start_at 是預計到那一點的時間，end_at 為 null。
+- 連續好幾天、每天同樣時段的（「10/17~10/19 每日 11:00~18:00」、店家「即日起 每天 12:00–21:00 發放」），每天各一筆，最多 ${MAX_EVENTS_PER_POST} 天；沒寫到哪天為止的，只輸出第一天（「即日起」是發文當天）。
 - 新聞報導、心得、活動回顧、徵求、詢問、線上抽獎、直播、線上活動、販售，is_event 為 false，events 為空陣列。
 - 不要編造貼文裡沒有的內容、時間或地點，可以依上下文補上縣市。
 - 貼文最後如果有「【回報的人補充】」，那是看到貼文的人補上的活動內容、地點或時間，貼文沒寫的一定要用它補上；跟貼文衝突時以貼文為準。補充寫了店名、或是誰的服務處，title 要用補充寫的名稱。
@@ -227,7 +235,7 @@ export function normalizeActivities(raw: unknown): Extraction | null {
   const o = obj as Record<string, unknown>;
   const isEvent = o.is_event === true || o.is_event === 'true';
   const list = Array.isArray(o.events) ? o.events.filter((e): e is Record<string, unknown> => !!e && typeof e === 'object' && !Array.isArray(e)) : [];
-  const events = list.slice(0, MAX_EVENTS_PER_POST).map(
+  const events = list.slice(0, MAX_ACTIVITY_EVENTS).map(
     (e): ExtractedEvent => ({
       kind: 'activity',
       title: str(e.title) ?? '',
@@ -244,7 +252,12 @@ export function normalizeActivities(raw: unknown): Extraction | null {
       timezone: validTimeZone(str(e.timezone)),
     }),
   );
-  return { is_event: isEvent, events: isEvent ? events : [], reason: isEvent ? null : (str(o.reason)?.slice(0, 60) ?? null) };
+  return {
+    is_event: isEvent,
+    events: isEvent ? events : [],
+    reason: isEvent ? null : (str(o.reason)?.slice(0, 60) ?? null),
+    route_title: isEvent ? ([...(str(o.route_title) ?? '')].slice(0, 30).join('') || null) : null,
+  };
 }
 
 export const ACTIVITY_SPEC: ExtractSpec = { system: ACTIVITY_PROMPT, schema: ACTIVITY_SCHEMA, normalize: normalizeActivities };
@@ -763,13 +776,14 @@ export async function runModel(env: Env, model: string, text: string, postedAt: 
     result = await ai.run(model, {
       messages,
       response_format: { type: 'json_schema', json_schema: spec.schema },
-      max_tokens: 1200,
+      // 車掃的停靠點最多 20 筆，1200 不夠
+      max_tokens: 2400,
       temperature: 0.1,
     });
   } catch (e) {
     error = String(e);
     try {
-      result = await ai.run(model, { messages, max_tokens: 1200, temperature: 0.1 });
+      result = await ai.run(model, { messages, max_tokens: 2400, temperature: 0.1 });
       error = undefined;
     } catch (e2) {
       error = `${error} / ${String(e2)}`;

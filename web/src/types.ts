@@ -81,11 +81,15 @@ export interface RouteSegment {
   lengthM: number;
   people: number;
   target: number;
+  /** 回報的車掃：到這一段終點的預計時間（經過了畫淡一點） */
+  toAt?: number | null;
 }
 
 /** 車掃路線（來自大洋流車掃地圖） */
 export interface RouteOut {
   id: string;
+  /** official 官方航線（車掃地圖，有實際路徑和認領人數）；report 回報的車掃貼文（各站直線連起來） */
+  source?: 'official' | 'report';
   /** 事件掛在哪則官方貼文下，用來找出屬於這條路線的事件 */
   postId: string;
   title: string;
@@ -249,6 +253,8 @@ export interface SubmitResult {
   note?: string;
   /** 洋流的活動：補充資料表單預先填好的每一場，回報的人直接改 */
   edit?: EditItem[];
+  /** 車掃、掃街、車隊合成的路線：每一站的時間、會不會放上雷達 */
+  routes?: RoutePreview[];
   /** outcome = 'not_listed' 而且原因確定時：直接講是哪個原因 */
   why?: {
     reason: 'already_over' | 'too_far_in_future' | 'no_start_time' | 'incomplete';
@@ -267,6 +273,21 @@ export interface EndedReportResult {
   count: number;
   needed: number;
   ended: boolean;
+}
+
+/** 預覽上的一條車掃路線 */
+export interface RoutePreview {
+  title: string;
+  stops: Array<{
+    kind: 'start' | 'cheer' | 'end';
+    name: string;
+    at: number;
+    lat: number | null;
+    lng: number | null;
+    /** listed 會放上雷達；approximate 只定位到鄉鎮區、路；unlocated 查不到；passed 車隊已經經過 */
+    status: 'listed' | 'approximate' | 'unlocated' | 'passed';
+    area?: string;
+  }>;
 }
 
 /** 補充資料表單的一場：時間是 unix 秒；endAt null 是沒寫結束；dateOnly 只知道哪天、不知道幾點 */
@@ -297,8 +318,10 @@ export interface FailedItem {
   title: string | null;
   place: string | null;
   /** incomplete 缺內容、地點或開始時間；unlocated 地點查不到；already_over、too_far_in_future 時間不對；low_confidence 不確定是不是活動 */
-  reason: 'incomplete' | 'unlocated' | 'already_over' | 'too_far_in_future' | 'low_confidence';
+  reason: 'incomplete' | 'unlocated' | 'approximate' | 'already_over' | 'too_far_in_future' | 'low_confidence';
   missing?: Array<'content' | 'place' | 'start'>;
+  /** reason = 'approximate'（車掃的站）：只定位到哪裡 */
+  area?: string;
   /** 地點只寫了「本店」這類說法 */
   selfPlace?: string;
   /** 只寫了日期沒寫幾點：那天 */

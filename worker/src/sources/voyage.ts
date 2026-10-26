@@ -231,6 +231,8 @@ export async function syncVoyage(env: Env, now = nowSec()): Promise<VoyageResult
 
 export interface RouteOut {
   id: string;
+  /** official 官方航線（車掃地圖，有實際路徑和認領人數）；report 回報的車掃貼文（各站直線連起來） */
+  source: 'official' | 'report';
   postId: string;
   title: string;
   departAt: number | null;
@@ -242,13 +244,14 @@ export interface RouteOut {
   updatedAt: number;
 }
 
-/** 今天（已經到當天、還沒過顯示期限）的車掃路線 */
+/** 車掃路線：官方的只給今天的（已經到當天、還沒過顯示期限）；回報的（id 是 link-…）還沒到那天也給，清單才合成一張卡片 */
 export async function listRoutes(env: Env, now = nowSec()): Promise<RouteOut[]> {
-  const { results } = await env.DB.prepare('SELECT * FROM routes WHERE day_start <= ? AND show_until > ? ORDER BY depart_at')
+  const { results } = await env.DB.prepare("SELECT * FROM routes WHERE (day_start <= ? OR id LIKE 'link-%') AND show_until > ? ORDER BY depart_at")
     .bind(now, now)
     .all<{ id: string; post_id: string; title: string; depart_at: number | null; arrive_at: number | null; show_until: number; claim_url: string | null; stops: string; segments: string; updated_at: number }>();
   return results.map((r) => ({
     id: r.id,
+    source: r.id.startsWith('link-') ? 'report' : 'official',
     postId: r.post_id,
     title: r.title,
     departAt: r.depart_at,

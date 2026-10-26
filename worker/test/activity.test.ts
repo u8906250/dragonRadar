@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { guessedMidnight, missingActivityParts, normalizeActivities } from '../src/extract';
-import type { PlanItem } from '../src/events';
-import { editItemsOf, editSummary, notListedWhy, parseEditItems, ReportError, reportModules } from '../src/reports';
+import { markRoutes, type PlanItem } from '../src/events';
+import { editItemsOf, editSummary, notListedWhy, parseEditItems, ReportError, reportModules, routePreviews } from '../src/reports';
 
 describe('normalizeActivities', () => {
   it('keeps every event as a single activity and blanks a missing title', () => {
@@ -150,5 +150,79 @@ describe('editSummary', () => {
     expect(editSummary([], acts)).toBe('改了第 1 場內容「A」、時間 10/26 18:00 開始、地點「B」；第 2 場內容「C」、時間 10/26 20:00 開始、地點「D」');
     // 沒排上雷達的那場不寫
     expect(editSummary([], acts, [false, true])).toBe('改了內容「C」、時間 10/26 20:00 開始、地點「D」');
+  });
+});
+
+describe('markRoutes', () => {
+  // 2026-10-27 14:00（台北）
+  const T14 = Date.UTC(2026, 9, 27, 6) / 1000;
+  const NOW = T14 - 86400;
+  const planned = (title: string, place: string, at: number, approx: string | null = null): PlanItem => ({
+    group: 0,
+    plan: { kind: 'activity', title, item: null, start_at: at, end_at: at + 7200, place_text: place, place_query: place, lat: 25, lng: 121.5, confidence: 1, all_day: false, spot: false, approx_area: approx, end_open: true, until_open: false },
+    reason: 'planned',
+  });
+  const stops = (): PlanItem[] => [
+    planned('永福宮車掃', '鶯歌永福宮', T14),
+    planned('服務處車掃', '蘇巧慧鶯歌服務處', T14 + 1200, '新北市鶯歌區'),
+    planned('濟安宮車掃', '樹林濟安宮', T14 + 3600),
+    { group: 3, plan: null, reason: 'unlocated', fail: { title: '鎮南宮', place: '樹林鎮南宮', reason: 'unlocated', startAt: T14 + 4500, endOpen: true } },
+  ];
+
+  it('turns same-day stops into one route', () => {
+    const items = markRoutes(stops(), '10/27 報告號次大車掃', '蘇巧慧報告號次大車掃', NOW);
+    expect(items.map((it) => [it.route?.seq, it.route?.kind, it.route?.stopTitle])).toEqual([
+      [1, 'start', '蘇巧慧報告號次大車掃・鶯歌永福宮'],
+      [2, 'cheer', '蘇巧慧報告號次大車掃・蘇巧慧鶯歌服務處'],
+      [3, 'cheer', '蘇巧慧報告號次大車掃・樹林濟安宮'],
+      [4, 'end', '蘇巧慧報告號次大車掃・樹林鎮南宮'],
+    ]);
+    // 每一站：預計經過前 10 分鐘到經過後 15 分鐘
+    expect(items[0].plan).toMatchObject({ title: '蘇巧慧報告號次大車掃・鶯歌永福宮', start_at: T14 - 600, end_at: T14 + 900, end_open: false });
+    expect(items[0].route).toMatchObject({ key: '2026-10-27', at: T14, lat: 25, lng: 121.5 });
+    // 只定位到鄉鎮區：不放上雷達，帶著約略位置給回報的人標
+    expect(items[1].plan).toBeNull();
+    expect(items[1].reason).toBe('approximate');
+    expect(items[1].fail).toMatchObject({ reason: 'approximate', area: '新北市鶯歌區', startAt: T14 + 1200, lat: 25 });
+    expect(items[1].route?.lat).toBeNull();
+    expect(items[3].fail?.title).toBe('蘇巧慧報告號次大車掃・樹林鎮南宮');
+  });
+
+  it('keeps passed stops on the timetable only', () => {
+    const items = markRoutes(stops(), '掃街', null, T14 + 1800);
+    expect(items[0].plan).toBeNull();
+    expect(items[0].reason).toBe('already_over');
+    expect(items[0].route).toMatchObject({ title: '掃街路線', lat: 25 });
+    expect(items[2].plan?.start_at).toBe(T14 + 3000);
+  });
+
+  it('needs the keyword, two stops a day and one listable stop', () => {
+    expect(markRoutes(stops(), '發飄帶', null, NOW).some((it) => it.route)).toBe(false);
+    expect(markRoutes([planned('a', 'A', T14), planned('b', 'B', T14 + 86400)], '車隊', null, NOW).some((it) => it.route)).toBe(false);
+    expect(markRoutes([planned('a', 'A', T14, '新北市鶯歌區'), planned('b', 'B', T14 + 600, '新北市樹林區')], '車隊', null, NOW).some((it) => it.route)).toBe(false);
+  });
+
+  it('keeps the reporter titles when editing', () => {
+    const items = markRoutes([planned('我改的標題', 'A', T14), planned('b', 'B', T14 + 600)], '車掃', 'X', NOW, false);
+    expect(items[0].plan?.title).toBe('我改的標題');
+    expect(items[0].route?.stopTitle).toBe('我改的標題');
+  });
+
+  it('lists the route for the preview and prefills the stop times', () => {
+    const items = markRoutes(stops(), '車掃', 'R', NOW);
+    expect(routePreviews(items)).toEqual([
+      {
+        title: 'R',
+        stops: [
+          { kind: 'start', name: '鶯歌永福宮', at: T14, lat: 25, lng: 121.5, status: 'listed' },
+          { kind: 'cheer', name: '蘇巧慧鶯歌服務處', at: T14 + 1200, lat: null, lng: null, status: 'approximate', area: '新北市鶯歌區' },
+          { kind: 'cheer', name: '樹林濟安宮', at: T14 + 3600, lat: 25, lng: 121.5, status: 'listed' },
+          { kind: 'end', name: '樹林鎮南宮', at: T14 + 4500, lat: null, lng: null, status: 'unlocated' },
+        ],
+      },
+    ]);
+    const edit = editItemsOf(items);
+    expect(edit.map((e) => [e.startAt, e.endAt])).toEqual([[T14, null], [T14 + 1200, null], [T14 + 3600, null], [T14 + 4500, null]]);
+    expect(edit[1]).toMatchObject({ approxArea: '新北市鶯歌區', lat: 25 });
   });
 });

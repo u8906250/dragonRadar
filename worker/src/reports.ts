@@ -160,6 +160,40 @@ export interface SubmitResult {
   note?: string;
   /** 洋流的活動：補充資料表單預先填好的每一場（判讀出來的、沒放上雷達的），回報的人直接改 */
   edit?: EditItem[];
+  /** 車掃、掃街、車隊：合成路線的（每一站的時間、會不會放上雷達），這些站不在 preview、failures 裡 */
+  routes?: RoutePreview[];
+}
+
+/** 預覽上的一條車掃路線 */
+export interface RoutePreview {
+  title: string;
+  stops: Array<{
+    kind: 'start' | 'cheer' | 'end';
+    name: string;
+    at: number;
+    lat: number | null;
+    lng: number | null;
+    /** listed 會放上雷達；approximate 只定位到鄉鎮區、路；unlocated 查不到；passed 車隊已經經過 */
+    status: 'listed' | 'approximate' | 'unlocated' | 'passed';
+    area?: string;
+  }>;
+}
+
+/** 判讀結果裡的車掃路線，一條一條列出每一站 */
+export function routePreviews(items: PlanItem[]): RoutePreview[] {
+  const byKey = new Map<string, PlanItem[]>();
+  for (const it of items) if (it.route) byKey.set(it.route.key, [...(byKey.get(it.route.key) ?? []), it]);
+  return [...byKey.values()].map((list) => {
+    const sorted = [...list].sort((a, b) => (a.route?.seq ?? 0) - (b.route?.seq ?? 0));
+    return {
+      title: sorted[0].route?.title ?? '',
+      stops: sorted.map((it) => {
+        const r = it.route as NonNullable<PlanItem['route']>;
+        const status = it.plan ? 'listed' : it.reason === 'approximate' ? 'approximate' : it.reason === 'unlocated' ? 'unlocated' : 'passed';
+        return { kind: r.kind, name: r.name, at: r.at, lat: it.plan?.lat ?? r.lat, lng: it.plan?.lng ?? r.lng, status, ...(it.fail?.area ? { area: it.fail.area } : {}) };
+      }),
+    };
+  });
 }
 
 /** 補充資料表單的一場：時間是 unix 秒；endAt null 是沒寫結束；dateOnly 只知道哪天、不知道幾點 */
@@ -179,19 +213,23 @@ export interface EditItem {
 export function editItemsOf(items: PlanItem[]): EditItem[] {
   return items.flatMap((it): EditItem[] => {
     const p = it.plan;
-    if (p) return [{ title: p.title, startAt: p.start_at, endAt: p.end_open ? null : p.end_at, place: p.place_text, lat: p.lat, lng: p.lng, approxArea: p.approx_area }];
+    // 車掃的站：時間是預計經過的時間，沒有結束
+    const r = it.route;
+    if (p) return [{ title: p.title, startAt: r?.at ?? p.start_at, endAt: r || p.end_open ? null : p.end_at, place: p.place_text, lat: p.lat, lng: p.lng, approxArea: p.approx_area }];
     const f = it.fail;
-    if (!f) return [];
+    // 車隊已經經過的站
+    if (!f) return r ? [{ title: r.stopTitle, startAt: r.at, endAt: null, place: r.name, lat: r.lat, lng: r.lng }] : [];
     return [
       {
         title: f.title ?? '',
-        startAt: f.startAt ?? f.dateOnly ?? null,
+        startAt: r?.at ?? f.startAt ?? f.dateOnly ?? null,
         ...(f.dateOnly && f.startAt === undefined ? { dateOnly: true } : {}),
-        endAt: f.endOpen === false ? (f.endAt ?? null) : null,
+        endAt: !r && f.endOpen === false ? (f.endAt ?? null) : null,
         // 只寫「本店」的留空，讓回報的人填店名
         place: f.selfPlace ? '' : (f.place ?? ''),
         lat: f.lat ?? null,
         lng: f.lng ?? null,
+        ...(f.area ? { approxArea: f.area } : {}),
       },
     ];
   });
@@ -245,7 +283,7 @@ export function notListedWhy(items: PlanItem[]): NotListedWhy | undefined {
  * 判讀規則的版本：規則改了（例如結束時間改成不用寫）就加一。
  * 還沒確認的回報再貼一次時，存的是舊版的判讀結果就重新判讀，不沿用（舊的原因可能已經不成立，畫面也講不出原因）
  */
-export const PLAN_VERSION = 2;
+export const PLAN_VERSION = 3;
 
 /** 判讀好、還沒寫進雷達的資料，存在 posts.confirm_plan */
 interface StoredPlan {
@@ -339,10 +377,13 @@ async function previewResult(env: Env, post: PostRow, plan: StoredPlan, existed:
   if (plan.early) return { ...base, outcome: summarize([plan.early]), reasons: [plan.early], events: [], ...(plan.note ? { note: plan.note } : {}) };
   const reasons = plan.items.filter((it) => !it.plan).map((it) => it.reason);
   const events = await eventsForResult(env, post.id, reasons, now);
-  const preview = previewOf(plan.items, now);
-  const failures = plan.items.flatMap((it) => (!it.plan && it.fail ? [it.fail] : []));
-  const fails = failures.length > 0 ? { failures } : {};
-  if (preview.length === 0) {
+  // 車掃路線的站另外列（一條路線一塊），不在一般的預覽、沒放上雷達的清單裡
+  const single = plan.items.filter((it) => !it.route);
+  const preview = previewOf(single, now);
+  const routes = routePreviews(plan.items);
+  const failures = single.flatMap((it) => (!it.plan && it.fail ? [it.fail] : []));
+  const fails = { ...(failures.length > 0 ? { failures } : {}), ...(routes.length > 0 ? { routes } : {}) };
+  if (preview.length === 0 && !routes.some((r) => r.stops.some((st) => st.status === 'listed'))) {
     const outcome = summarize(reasons);
     const why = outcome === 'not_listed' ? notListedWhy(plan.items) : undefined;
     return { ...base, outcome, reasons, events, ...(why ? { why } : {}), ...fails };
@@ -541,7 +582,8 @@ export async function supplementLink(env: Env, body: { postId?: unknown; token?:
 
 /** 直接修改資料不用問 AI（只查地點），一則可以多改幾次；跟補充資料算在一起 */
 const EDITS_PER_POST = 10;
-const MAX_EDIT_ITEMS = 6;
+// 車掃的站最多 20 個（跟判讀一樣）
+const MAX_EDIT_ITEMS = 20;
 /** 一場活動最長多久（開始到結束） */
 const MAX_EDIT_SPAN_SEC = 24 * 3600;
 
@@ -577,9 +619,9 @@ function whenText(t: number): string {
 
 /**
  * 回報的人改了哪些（跟判讀結果比），寫在雷達詳細資料的「回報的人補充」，看的人知道哪些不是原貼文寫的。
- * listed 是每一場有沒有排上雷達：沒排上的不寫
+ * listed 是每一場有沒有排上雷達：沒排上的不寫；unit 是「場」，車掃的是「站」
  */
-export function editSummary(before: EditItem[], after: ManualActivity[], listed: boolean[] = after.map(() => true)): string | null {
+export function editSummary(before: EditItem[], after: ManualActivity[], listed: boolean[] = after.map(() => true), unit = '場'): string | null {
   const shown = after.filter((_, i) => listed[i]).length;
   let no = 0;
   const parts = after.flatMap((a, i) => {
@@ -593,7 +635,7 @@ export function editSummary(before: EditItem[], after: ManualActivity[], listed:
     }
     if (!b || b.place !== a.place) changes.push(`地點「${a.place}」`);
     if (a.lat !== null) changes.push('在地圖上標了位置');
-    return changes.length > 0 ? [`${shown > 1 ? `第 ${no} 場` : ''}${changes.join('、')}`] : [];
+    return changes.length > 0 ? [`${shown > 1 ? `第 ${no} ${unit}` : ''}${changes.join('、')}`] : [];
   });
   return parts.length > 0 ? [...`改了${parts.join('；')}`].slice(0, 200).join('') : null;
 }
@@ -612,8 +654,10 @@ export async function editLink(env: Env, body: { postId?: unknown; token?: unkno
   await env.DB.prepare("INSERT INTO submissions (post_id, ip_hash, device, result, created_at) VALUES (?, ?, ?, '\"supplement\"', ?)").bind(post.id, ip, device, now).run();
 
   const stored = readPlan(post);
-  const items = await planManual(env, acts, now);
-  const note = editSummary(stored ? editItemsOf(stored.items) : [], acts, items.map((it) => !!it.plan)) ?? post.supplement ?? null;
+  // 車掃：路線名稱沿用判讀出來的
+  const routeTitle = stored?.items.find((it) => it.route)?.route?.title ?? null;
+  const items = await planManual(env, acts, now, post.text, routeTitle);
+  const note = editSummary(stored ? editItemsOf(stored.items) : [], acts, items.map((it) => !!it.plan), items.some((it) => it.route) ? '站' : '場') ?? post.supplement ?? null;
   const plan: StoredPlan = { items, early: null };
   await env.DB.prepare("UPDATE posts SET supplement = ?, confirm_plan = ?, confirm_state = 'pending' WHERE id = ?").bind(note, storePlan(plan), post.id).run();
   return previewResult(env, { ...post, supplement: note }, plan, false, now);
@@ -702,6 +746,8 @@ export async function withdrawReport(env: Env, postId: string, device: string, n
   await env.DB.batch([
     env.DB.prepare('DELETE FROM ended_reports WHERE event_id IN (SELECT id FROM events WHERE post_id = ?)').bind(postId),
     env.DB.prepare('DELETE FROM events WHERE post_id = ?').bind(postId),
+    // 車掃路線跟著事件一起拿掉
+    env.DB.prepare('DELETE FROM routes WHERE post_id = ?').bind(postId),
     ...restore,
     prev.length > 0
       ? env.DB.prepare("UPDATE posts SET linked_to = ? WHERE linked_to = ? AND link_role = 'related'").bind(prev[0].id, postId)

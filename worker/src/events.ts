@@ -484,8 +484,10 @@ export interface SpotMerge {
 export interface FailedItem {
   title: string | null;
   place: string | null;
-  reason: 'incomplete' | 'unlocated' | 'already_over' | 'too_far_in_future' | 'low_confidence';
+  reason: 'incomplete' | 'unlocated' | 'approximate' | 'already_over' | 'too_far_in_future' | 'low_confidence';
   missing?: ActivityPart[];
+  /** reason = 'approximate'（車掃的站只定位到鄉鎮區、路）：定位到哪裡 */
+  area?: string;
   /** 地點只寫了「本店」這類說法 */
   selfPlace?: string;
   /** 只寫了日期沒寫幾點：那天（00:00） */
@@ -497,9 +499,27 @@ export interface FailedItem {
   tz?: string | null;
   /** 太久以後才開始的：這天之後再貼就收得到 */
   reportFrom?: number;
-  /** 回報的人在地圖上標的位置（修改資料時帶回表單） */
+  /** 地圖上的位置（回報的人標的，或車掃的站的約略位置），修改資料時帶回表單 */
   lat?: number;
   lng?: number;
+}
+
+/** 車掃路線上的一站：確認放上雷達時寫進 routes（commitPlan） */
+export interface RouteStopPlan {
+  /** 哪一天的路線（YYYY-MM-DD，台北時間） */
+  key: string;
+  /** 整條路線的名稱 */
+  title: string;
+  seq: number;
+  kind: 'start' | 'cheer' | 'end';
+  name: string;
+  /** 這一站的事件標題（前端靠它對應到路線上的站） */
+  stopTitle: string;
+  /** 預計經過的時間 */
+  at: number;
+  /** 確切位置；只定位到鄉鎮區、查不到的是 null（不畫進路線） */
+  lat: number | null;
+  lng: number | null;
 }
 
 /** 判讀出來的一筆：plan 是可以寫進雷達的資料；沒有 plan 時 reason 寫原因（no_place、duplicate_of_3…）。group 是貼文裡第幾個地點或時段 */
@@ -512,6 +532,8 @@ export interface PlanItem {
   merge?: SpotMerge;
   /** 地點是從這些帳號（「@luguocafe」）的名稱、簡介推的，回報的人要確認 */
   profileHint?: string;
+  /** 車掃、掃街、車隊路線上的一站 */
+  route?: RouteStopPlan;
   /** 已經結束、太久以後才開始的：那一場的時間（回報結果直接講原因用）；國外的附當地時區 */
   start?: number;
   end?: number;
@@ -688,7 +710,7 @@ async function planPostWith(env: Env, post: PostRow, now: number, profileHint: s
   if (!extraction.is_event) return { items: [], early: 'not_event', note: extraction.reason ?? null };
   if (extraction.events.length === 0) return { items: [], early: 'no_events' };
   if (module === 'dog') return { items: await planJobs(env, post, extraction.events, now), early: null };
-  if (module === 'current') return { items: await planActivities(env, post, extraction.events, text, now), early: null };
+  if (module === 'current') return { items: await planActivities(env, post, extraction.events, text, now, extraction.route_title ?? null), early: null };
   // 模型常把付款的 Line Pay 當成用 LINE 聯絡：貼文只有 Line Pay 的不算
   if (!/(?:line|賴)(?!\s*pay)/i.test(text)) for (const e of extraction.events) if (e.extra?.contact === 'line') e.extra.contact = null;
   // 刊登（找臨打、網友推薦、揪團吃飯）不是場次：從發文起顯示一段時間；招臨打、出攤照場次排
@@ -767,7 +789,7 @@ async function planPostWith(env: Env, post: PostRow, now: number, profileHint: s
  * 缺的記成 incomplete:place,start（照 內容、地點、開始 的順序，回報的人可以補充再判讀），
  * 寫了地點、地圖上查不到記成 unlocated。不再推算固定據點。
  */
-async function planActivities(env: Env, post: PostRow, events: ExtractedEvent[], text: string, now: number): Promise<PlanItem[]> {
+async function planActivities(env: Env, post: PostRow, events: ExtractedEvent[], text: string, now: number, routeTitle: string | null): Promise<PlanItem[]> {
   const deadline = Date.now() + ADDRESS_BUDGET_MS;
   const items: PlanItem[] = [];
   for (const [group, ex] of events.entries()) {
@@ -807,7 +829,7 @@ async function planActivities(env: Env, post: PostRow, events: ExtractedEvent[],
     const fail = r.plan ? undefined : failOf(r, which, ex.end_at === null);
     items.push({ group, ...r, ...(fail ? { fail } : {}) });
   }
-  return items;
+  return markRoutes(items, text, routeTitle, now);
 }
 
 /** 地點查不到的那一場的時間（回報的人修改資料時不用重填） */
@@ -827,7 +849,7 @@ export interface ManualActivity {
  * 回報的人直接修改的活動：不再問 AI，照填的資料排（有標位置就用標的，沒標照地點查），
  * 一樣檢查時間（已經過了、太久以後）和雷達上有沒有同一場
  */
-export async function planManual(env: Env, acts: ManualActivity[], now: number): Promise<PlanItem[]> {
+export async function planManual(env: Env, acts: ManualActivity[], now: number, text = '', routeTitle: string | null = null): Promise<PlanItem[]> {
   const deadline = Date.now() + ADDRESS_BUDGET_MS;
   const items: PlanItem[] = [];
   for (const [group, a] of acts.entries()) {
@@ -855,7 +877,121 @@ export async function planManual(env: Env, acts: ManualActivity[], now: number):
     const fail = r.plan ? undefined : failOf(r, which, a.endAt === null);
     items.push({ group, ...r, ...(fail ? { fail: { ...fail, ...(pin ?? {}) } } : {}) });
   }
+  // 車掃：回報的人填的標題照用，不改成「路線名稱・站名」
+  return markRoutes(items, text, routeTitle, now, false);
+}
+
+/** 車掃、掃街、車隊：貼文有這些字、同一天讀出好幾站的，合成一條路線 */
+export const ROUTE_RE = /車掃|掃街|車隊/;
+/** 車掃的每一站：預計經過前 10 分鐘到經過後 15 分鐘算「經過中」 */
+export const ROUTE_LEAD_SEC = 10 * 60;
+export const ROUTE_KEEP_SEC = 15 * 60;
+
+/** 台北時間的日期「2026-10-27」 */
+const taipeiDate = (unix: number): string => new Date((unix + 8 * 3600) * 1000).toISOString().slice(0, 10);
+
+/**
+ * 貼文寫了車掃、掃街、車隊，同一天又有兩站以上（有時間、有地點）：合成一條路線（PlanItem.route）。
+ * 每一站的事件改成預計經過前 ROUTE_LEAD_SEC 到經過後 ROUTE_KEEP_SEC（不是一般活動的兩小時），標題改成「路線名稱・站名」；
+ * 只定位到鄉鎮區、路的站不放上雷達（記成 approximate，路線上也不畫），回報的人在地圖上標出位置才放；
+ * 已經經過的站留在時間表上。一站都放不上雷達的就不算路線，照一般活動。
+ * retitle = false：回報的人自己填的標題照用
+ */
+export function markRoutes(items: PlanItem[], text: string, routeTitle: string | null, now: number, retitle = true): PlanItem[] {
+  const kw = ROUTE_RE.exec(text)?.[0];
+  if (!kw) return items;
+  const stops: Array<{ it: PlanItem; at: number; name: string }> = [];
+  for (const it of items) {
+    const p = it.plan;
+    const f = it.fail;
+    // 國外的不算（時間是當地的）
+    if (p && !p.spot && !p.tz) stops.push({ it, at: p.start_at, name: p.place_text });
+    else if (!p && f && (f.reason === 'unlocated' || f.reason === 'already_over') && f.startAt !== undefined && f.place && !f.tz) stops.push({ it, at: f.startAt, name: f.place });
+  }
+  const days = new Map<string, typeof stops>();
+  for (const st of stops) days.set(taipeiDate(st.at), [...(days.get(taipeiDate(st.at)) ?? []), st]);
+  const title = routeTitle?.trim() || `${kw}路線`;
+  for (const [key, list] of days) {
+    if (list.length < 2) continue;
+    // 至少一站放得上雷達（有確切位置、還沒經過）
+    if (!list.some((st) => st.it.plan && st.it.plan.lat !== null && !st.it.plan.approx_area && st.at + ROUTE_KEEP_SEC > now)) continue;
+    list.sort((a, b) => a.at - b.at);
+    list.forEach((st, i) => {
+      const { it, at, name } = st;
+      const p = it.plan;
+      const own = p?.title ?? it.fail?.title ?? null;
+      const stopTitle = retitle || !own ? `${title}・${name}` : own;
+      const route: RouteStopPlan = { key, title, seq: i + 1, kind: i === 0 ? 'start' : i === list.length - 1 ? 'end' : 'cheer', name, stopTitle, at, lat: null, lng: null };
+      it.route = route;
+      if (p && p.approx_area) {
+        // 只定位到鄉鎮區、路：不放上雷達，請回報的人標位置（帶著約略位置，地圖從那裡開始）
+        it.plan = null;
+        it.reason = 'approximate';
+        it.fail = { title: stopTitle, place: name, reason: 'approximate', area: p.approx_area, startAt: at, endOpen: true, ...(p.lat !== null && p.lng !== null ? { lat: p.lat, lng: p.lng } : {}) };
+        return;
+      }
+      if (p && p.lat !== null && p.lng !== null) {
+        route.lat = p.lat;
+        route.lng = p.lng;
+        if (at + ROUTE_KEEP_SEC <= now) {
+          // 車隊已經經過：留在時間表上，不放上雷達
+          it.plan = null;
+          it.reason = 'already_over';
+          return;
+        }
+        Object.assign(p, { title: stopTitle, start_at: at - ROUTE_LEAD_SEC, end_at: at + ROUTE_KEEP_SEC, end_open: false });
+        return;
+      }
+      if (it.fail) it.fail = { ...it.fail, title: stopTitle };
+    });
+  }
   return items;
+}
+
+/** 兩點的直線距離（公尺） */
+function distM(a: { lat: number; lng: number }, b: { lat: number; lng: number }): number {
+  const rad = Math.PI / 180;
+  const h = Math.sin(((b.lat - a.lat) * rad) / 2) ** 2 + Math.cos(a.lat * rad) * Math.cos(b.lat * rad) * Math.sin(((b.lng - a.lng) * rad) / 2) ** 2;
+  return 2 * 6_371_000 * Math.asin(Math.sqrt(h));
+}
+
+/**
+ * 回報的車掃路線寫進 routes（id 是「貼文 id-日期」）：每一站的預計時間，有確切位置的站照順序用直線連起來
+ * （不知道實際走哪些路），沒有認領人數。同一則貼文舊的路線先刪掉
+ */
+async function saveRoutes(env: Env, postId: string, items: PlanItem[], now: number): Promise<void> {
+  const byKey = new Map<string, RouteStopPlan[]>();
+  for (const it of items) if (it.route) byKey.set(it.route.key, [...(byKey.get(it.route.key) ?? []), it.route]);
+  if (byKey.size === 0) return;
+  const stmts = [env.DB.prepare('DELETE FROM routes WHERE post_id = ?').bind(postId)];
+  for (const [key, list] of byKey) {
+    const stops = [...list].sort((a, b) => a.seq - b.seq);
+    const pts = stops.filter((st): st is RouteStopPlan & { lat: number; lng: number } => st.lat !== null && st.lng !== null);
+    const segments = pts.slice(1).map((b, i) => {
+      const a = pts[i];
+      return { seq: i + 1, from: a.name, to: b.name, path: [[a.lat, a.lng], [b.lat, b.lng]], lengthM: Math.round(distM(a, b)), people: 0, target: 0, toAt: b.at };
+    });
+    const first = stops[0];
+    const last = stops[stops.length - 1];
+    stmts.push(
+      env.DB.prepare(
+        `INSERT OR REPLACE INTO routes (id, post_id, title, day_start, depart_at, arrive_at, show_until, claim_url, stops, segments, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?)`,
+      ).bind(
+        `${postId}-${key}`,
+        postId,
+        first.title,
+        Math.floor(Date.parse(`${key}T00:00:00+08:00`) / 1000),
+        first.at,
+        last.at,
+        last.at + ROUTE_KEEP_SEC,
+        JSON.stringify(stops.map((st) => ({ kind: st.kind, title: st.stopTitle, name: st.name, lat: st.lat, lng: st.lng, at: st.at }))),
+        JSON.stringify(segments),
+        now,
+      ),
+    );
+  }
+  await env.DB.batch(stmts);
 }
 
 /** planEvent 沒排上去的原因換成回報結果用的說明；重複的不算（回報結果會列出雷達上的那一場） */
@@ -1121,6 +1257,8 @@ export async function commitPlan(env: Env, postId: string, items: PlanItem[], no
     if (r.event) out.events.push(r.event);
     out.reasons.push(r.reason);
   }
+  // 車掃、掃街、車隊：路線（每一站的時間、連線）另外存，雷達和地圖畫成路線
+  if (out.events.length > 0) await saveRoutes(env, postId, items, now);
   return out;
 }
 

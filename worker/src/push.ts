@@ -266,6 +266,8 @@ export interface StartedEvent {
   lat: number;
   lng: number;
   approx_area: string | null;
+  /** 車掃路線上的一站（1）：推「車隊快到了」 */
+  route?: number | null;
 }
 
 export function distKm(a: { lat: number; lng: number }, b: { lat: number; lng: number }): number {
@@ -293,7 +295,7 @@ export function planPushes(subs: PushSubRow[], events: StartedEvent[]): Array<{ 
       .sort((a, b) => a.km - b.km);
     if (near.length === 0) continue;
     const { e, km } = near[0];
-    const head = near.length > 1 ? `附近 ${near.length} 個發放、活動開始了` : e.kind === 'activity' ? '活動開始' : '開始發放';
+    const head = near.length > 1 ? `附近 ${near.length} 個發放、活動開始了` : e.route ? '車隊快到了' : e.kind === 'activity' ? '活動開始' : '開始發放';
     const dist = `${Math.max(10, Math.round((km * 1000) / 10) * 10)} 公尺${e.approx_area ? '（約略位置）' : ''}`;
     const more = near.length > 1 ? `，還有 ${near.slice(1).map((x) => x.e.title).join('、')}` : '';
     out.push({ sub, msg: { title: head, body: `${e.title}｜${e.place_text}｜${dist}${more}`, tag: `ev-${e.id}`, url: `./?event=${e.id}` } });
@@ -308,7 +310,9 @@ export function planPushes(subs: PushSubRow[], events: StartedEvent[]): Array<{ 
 export async function pushStarted(env: Env, now: number): Promise<{ events: number; sent: number; failed: number; quiet: number }> {
   const { results: events } = await env.DB.prepare(
     // 指定用 (status, start_at) 的索引：只看已經開始的（幾十列）；資料庫自己選常選到 (status, end_at)，要讀所有還沒結束的
-    `SELECT id, kind, title, place_text, lat, lng, approx_area FROM events INDEXED BY idx_events_status_time
+    `SELECT id, kind, title, place_text, lat, lng, approx_area,
+        (SELECT 1 FROM routes r WHERE r.post_id = events.post_id LIMIT 1) AS route
+      FROM events INDEXED BY idx_events_status_time
       WHERE pushed_at IS NULL AND status IN ('upcoming', 'active') AND start_at <= ? AND end_at > ?
         AND (start_at > ? OR created_at > ?) AND spot = 0 AND all_day = 0
         AND lat IS NOT NULL AND lng IS NOT NULL AND merged_into IS NULL

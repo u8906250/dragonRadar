@@ -29,7 +29,9 @@ export interface MapRoute {
   title: string;
   state: 'planned' | 'live' | 'done';
   claimUrl: string | null;
-  segments: Array<{ seq: number; from: string; to: string; path: Array<[number, number]>; people: number; target: number }>;
+  /** report：回報的車掃貼文，各站直線連起來、沒有認領人數 */
+  source?: 'official' | 'report';
+  segments: Array<{ seq: number; from: string; to: string; path: Array<[number, number]>; people: number; target: number; passed?: boolean }>;
 }
 
 /** 跟大洋流車掃地圖一樣的顏色：沒人灰、缺人綠、快滿（6 成以上）橘、已滿紅 */
@@ -470,6 +472,22 @@ export class MapView {
     layer.clearLayers();
     for (const r of this.routes) {
       if (r.state === 'done') continue;
+      if (r.source === 'report') {
+        // 回報的車掃：活動的顏色，還沒出發畫虛線，已經經過的那段畫淡；不知道實際走哪些路，是直線
+        for (const seg of r.segments) {
+          const line = L.polyline(seg.path, {
+            color: cssVar('--blip-activity', '#03615a'),
+            weight: 5,
+            opacity: seg.passed ? 0.3 : 0.85,
+            dashArray: r.state === 'planned' ? '8 8' : undefined,
+            lineCap: 'round',
+          });
+          line.bindPopup(`<strong>${escapeHtml(r.title)}・第 ${seg.seq} 段</strong><br>${escapeHtml(seg.from)} → ${escapeHtml(seg.to)}<br>直線連接各站，實際路線以現場為準`, { closeButton: false });
+          layer.addLayer(line);
+          line.bringToBack();
+        }
+        continue;
+      }
       for (const seg of r.segments) {
         const c = CROWD[crowdOf(seg.people, seg.target)];
         const line = L.polyline(seg.path, { color: c.color, weight: 6, opacity: 0.85, lineCap: 'round', lineJoin: 'round' });
