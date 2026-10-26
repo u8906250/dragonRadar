@@ -2831,15 +2831,29 @@ function setReportMsg(html: string): void {
   reportResult.innerHTML = html;
 }
 
-/** 判讀中鎖住輸入框和按鈕，免得改到網址或重複送出 */
+/**
+ * 判讀中鎖住輸入框和按鈕，免得改到網址或重複送出：判讀結果裡的按鈕、欄位、標位置的小地圖都鎖住，
+ * 按下去的那個按鈕（trigger）改寫成進行中的字，失敗時換回來
+ */
 let reportBusy = false;
-function setReportBusy(busy: boolean, label = '判讀中…'): void {
+function setReportBusy(busy: boolean, label = '判讀中…', trigger?: Element | null): void {
   reportBusy = busy;
   reportInput.disabled = busy;
   reportSubmit.disabled = busy;
   reportPaste.disabled = busy;
   reportSubmit.textContent = busy ? label : '送出';
-  for (const b of reportResult.querySelectorAll<HTMLButtonElement | HTMLTextAreaElement>('button, textarea')) b.disabled = busy;
+  reportResult.classList.toggle('busy', busy);
+  for (const b of reportResult.querySelectorAll<HTMLButtonElement | HTMLTextAreaElement | HTMLInputElement>('button, textarea, input')) b.disabled = busy;
+  if (busy && trigger instanceof HTMLButtonElement) {
+    trigger.dataset.idle = trigger.textContent ?? '';
+    trigger.textContent = label;
+  }
+  if (!busy) {
+    for (const b of reportResult.querySelectorAll<HTMLButtonElement>('[data-idle]')) {
+      b.textContent = b.dataset.idle ?? '';
+      delete b.dataset.idle;
+    }
+  }
 }
 
 /** 預覽上的時間：固定據點寫每天幾點、從哪天起排幾天；一般的寫哪天幾點到幾點 */
@@ -2901,12 +2915,13 @@ function wireSupplement(c: { postId: string; token: string }, actions: HTMLEleme
   });
   form.addEventListener('submit', async (e) => {
     e.preventDefault();
+    if (reportBusy) return;
     const note = form.querySelector('textarea')?.value.trim() ?? '';
     if (note.length < 2) {
       showBanner(bannerEl, '請寫要補充的地點或時間', 2500);
       return;
     }
-    setReportBusy(true, '重新判讀中…');
+    setReportBusy(true, '重新判讀中…', form.querySelector('[type="submit"]'));
     const res = await supplementReport(c, note).finally(() => setReportBusy(false));
     if (!res.ok) {
       showBanner(bannerEl, res.message, 3500);
@@ -3096,12 +3111,14 @@ function wireEdit(c: { postId: string; token: string }, items: EditItem[], actio
   });
   form.addEventListener('submit', async (e) => {
     e.preventDefault();
+    // 欄位裡按 Enter 也會送出：送出中不再送
+    if (reportBusy) return;
     const read = readEditForm(form);
     if (typeof read === 'string') {
       showBanner(bannerEl, read, 3000);
       return;
     }
-    setReportBusy(true, '更新預覽中…');
+    setReportBusy(true, '更新預覽中…', form.querySelector('[type="submit"]'));
     const res = await editReport(c, read).finally(() => setReportBusy(false));
     if (!res.ok) {
       showBanner(bannerEl, res.message, 3500);
@@ -3187,8 +3204,9 @@ function renderPreview(r: SubmitResult): void {
     </form>`);
   const wrongForm = reportResult.querySelector<HTMLFormElement>('.preview-wrong');
   const actions = reportResult.querySelector<HTMLElement>('.sheet-actions');
-  reportResult.querySelector('[data-act="confirm"]')?.addEventListener('click', async () => {
-    setReportBusy(true, '放上雷達中…');
+  reportResult.querySelector('[data-act="confirm"]')?.addEventListener('click', async (e) => {
+    if (reportBusy) return;
+    setReportBusy(true, '放上雷達中…', e.currentTarget as Element);
     const res = await confirmReport(c).finally(() => setReportBusy(false));
     if (!res.ok) {
       showBanner(bannerEl, res.message, 3500);
@@ -3211,8 +3229,9 @@ function renderPreview(r: SubmitResult): void {
   });
   wrongForm?.addEventListener('submit', async (e) => {
     e.preventDefault();
+    if (reportBusy) return;
     const note = wrongForm.querySelector('textarea')?.value ?? '';
-    setReportBusy(true, '送出中…');
+    setReportBusy(true, '送出中…', wrongForm.querySelector('[type="submit"]'));
     const res = await rejectReport(c, note).finally(() => setReportBusy(false));
     setReportMsg(
       res.ok

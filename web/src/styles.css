@@ -452,6 +452,9 @@ a.chip { display: inline-flex; align-items: center; text-decoration: none; }
 .edit-pin .chip { padding: 4px 12px; font-size: 13px; }
 .edit-map { height: 220px; border-radius: var(--card-radius); border: var(--border-w) solid var(--line); overflow: hidden; }
 .edit-map[hidden], .edit-item [hidden] { display: none; }
+/* 送出中：標位置的小地圖也鎖住，表單變淡 */
+#report-result.busy .edit-map { pointer-events: none; }
+#report-result.busy .edit-items, #report-result.busy .preview-more textarea { opacity: 0.6; }
 .edit-form > .btn[data-act="add"] { align-self: flex-start; }
 .edit-form > .btn[hidden] { display: none; }
 .pin-marker span { display: block; width: 18px; height: 18px; margin: 2px 0 0 5px; border-radius: 50% 50% 50% 0; background: #dc2626; border: 3px solid #fff; box-shadow: 0 1px 4px rgba(0, 0, 0, 0.45); transform: rotate(-45deg); box-sizing: border-box; }
