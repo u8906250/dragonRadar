@@ -46,7 +46,7 @@ export const MODULES: ModuleDef[] = [
     reportIntro: REPORT_INTRO,
     reportTips: [],
     notEventText: '這則看起來不是可以到場參加的活動。貼文要寫出做什麼、在哪裡、哪天幾點開始，雷達才會收。',
-    noPlaceText: '看得出是活動，但貼文寫的地點在地圖上查不到，所以還沒放上雷達。知道在哪裡的話，可以在下面補充完整地址或店名再判讀一次。',
+    noPlaceText: '看得出是活動，但貼文寫的地點在地圖上查不到，所以還沒放上雷達。知道在哪裡的話，可以在下面補上完整地址或店名，或在地圖上標出位置。',
     helpPage: 'help.html',
   },
   {

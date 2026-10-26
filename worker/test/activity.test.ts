@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { guessedMidnight, missingActivityParts, normalizeActivities } from '../src/extract';
-import { notListedWhy, reportModules } from '../src/reports';
+import type { PlanItem } from '../src/events';
+import { editItemsOf, editSummary, notListedWhy, parseEditItems, ReportError, reportModules } from '../src/reports';
 
 describe('normalizeActivities', () => {
   it('keeps every event as a single activity and blanks a missing title', () => {
@@ -95,5 +96,59 @@ describe('guessedMidnight', () => {
     const midnightLa = Date.UTC(2026, 9, 27, 7) / 1000; // 洛杉磯 10/27 00:00
     expect(guessedMidnight(midnightLa, 'America/Los_Angeles', 'Oct 27 Memorial Park')).toBe(true);
     expect(guessedMidnight(midnightLa, null, 'Oct 27 Memorial Park')).toBe(false);
+  });
+});
+
+// 2026-10-26 18:00、20:00（台北）
+const T18 = Date.UTC(2026, 9, 26, 10) / 1000;
+const T20 = T18 + 7200;
+
+describe('parseEditItems', () => {
+  it('needs content, place and start; a blank end is open', () => {
+    const [a] = parseEditItems([{ title: '  發飄帶 ', place: 'PEG coffee', startAt: T18, endAt: null, lat: null, lng: null }]);
+    expect(a).toEqual({ title: '發飄帶', startAt: T18, endAt: null, place: 'PEG coffee', lat: null, lng: null });
+    expect(() => parseEditItems([{ title: '', place: 'PEG coffee', startAt: T18 }])).toThrow('請填活動內容');
+    expect(() => parseEditItems([{ title: 'x', place: ' ', startAt: T18 }])).toThrow('請填地點');
+    expect(() => parseEditItems([{ title: 'x', place: 'y' }, { title: 'x', place: 'y', startAt: 1.5 }])).toThrow('第 1 場：請填哪天幾點開始');
+    expect(() => parseEditItems([])).toThrow(ReportError);
+  });
+
+  it('checks the end and keeps a pin only with both coordinates', () => {
+    expect(() => parseEditItems([{ title: 'x', place: 'y', startAt: T18, endAt: T18 }])).toThrow('結束時間');
+    expect(() => parseEditItems([{ title: 'x', place: 'y', startAt: T18, endAt: T18 + 25 * 3600 }])).toThrow('結束時間');
+    expect(parseEditItems([{ title: 'x', place: 'y', startAt: T18, endAt: T20, lat: 25.02, lng: 121.53 }])[0]).toMatchObject({ endAt: T20, lat: 25.02, lng: 121.53 });
+    expect(parseEditItems([{ title: 'x', place: 'y', startAt: T18, lat: 25.02 }])[0]).toMatchObject({ lat: null, lng: null });
+    expect(parseEditItems([{ title: 'x', place: 'y', startAt: T18, lat: 95, lng: 121 }])[0]).toMatchObject({ lat: null, lng: null });
+  });
+});
+
+describe('editItemsOf', () => {
+  it('prefills planned and failed activities, skipping duplicates', () => {
+    const plan = { kind: 'activity', title: '發飄帶', item: null, start_at: T18, end_at: T20, place_text: 'PEG coffee', place_query: 'PEG coffee', lat: 25.02, lng: 121.53, confidence: 1, all_day: false, spot: false, approx_area: null, end_open: true, until_open: false } as const;
+    const items: PlanItem[] = [
+      { group: 0, plan: { ...plan }, reason: 'planned' },
+      { group: 1, plan: null, reason: 'duplicate_of_3' },
+      { group: 2, plan: null, reason: 'incomplete:place', fail: { title: '市集', place: '本店', reason: 'incomplete', missing: ['place'], selfPlace: '本店', startAt: T18, endAt: T20, endOpen: false } },
+      { group: 3, plan: null, reason: 'incomplete:start', fail: { title: '講座', place: '公館', reason: 'incomplete', missing: ['start'], dateOnly: T18 - 10 * 3600 } },
+    ];
+    expect(editItemsOf(items)).toEqual([
+      { title: '發飄帶', startAt: T18, endAt: null, place: 'PEG coffee', lat: 25.02, lng: 121.53, approxArea: null },
+      { title: '市集', startAt: T18, endAt: T20, place: '', lat: null, lng: null },
+      { title: '講座', startAt: T18 - 10 * 3600, dateOnly: true, endAt: null, place: '公館', lat: null, lng: null },
+    ]);
+  });
+});
+
+describe('editSummary', () => {
+  const before = [{ title: '發飄帶', startAt: T18, endAt: null, place: 'PEG coffee', lat: 25.02, lng: 121.53 }];
+  it('lists only what the reporter changed', () => {
+    expect(editSummary(before, [{ title: '發飄帶', startAt: T18, endAt: null, place: 'PEG coffee', lat: null, lng: null }])).toBeNull();
+    expect(editSummary(before, [{ title: '發飄帶', startAt: T18, endAt: T20, place: 'PEG coffee', lat: 25.03, lng: 121.54 }])).toBe('改了時間 10/26 18:00–20:00、在地圖上標了位置');
+  });
+  it('lists everything for an activity the AI did not read', () => {
+    const acts = [{ title: 'A', startAt: T18, endAt: null, place: 'B', lat: null, lng: null }, { title: 'C', startAt: T20, endAt: null, place: 'D', lat: null, lng: null }];
+    expect(editSummary([], acts)).toBe('改了第 1 場內容「A」、時間 10/26 18:00 開始（發完為止）、地點「B」；第 2 場內容「C」、時間 10/26 20:00 開始（發完為止）、地點「D」');
+    // 沒排上雷達的那場不寫
+    expect(editSummary([], acts, [false, true])).toBe('改了內容「C」、時間 10/26 20:00 開始（發完為止）、地點「D」');
   });
 });

@@ -247,6 +247,8 @@ export interface SubmitResult {
   failures?: FailedItem[];
   /** 判讀成不是活動時，AI 說的理由 */
   note?: string;
+  /** 洋流的活動：補充資料表單預先填好的每一場，回報的人直接改 */
+  edit?: EditItem[];
   /** outcome = 'not_listed' 而且原因確定時：直接講是哪個原因 */
   why?: {
     reason: 'already_over' | 'too_far_in_future' | 'no_start_time' | 'incomplete';
@@ -265,6 +267,29 @@ export interface EndedReportResult {
   count: number;
   needed: number;
   ended: boolean;
+}
+
+/** 補充資料表單的一場：時間是 unix 秒；endAt null 是發完為止；dateOnly 只知道哪天、不知道幾點 */
+export interface EditItem {
+  title: string;
+  startAt: number | null;
+  dateOnly?: boolean;
+  endAt: number | null;
+  place: string;
+  lat: number | null;
+  lng: number | null;
+  /** 只定位到鄉鎮區、路（約略位置） */
+  approxArea?: string | null;
+}
+
+/** 修改資料送出的一場：lat、lng 是在地圖上標的位置，沒標是 null（照地點查） */
+export interface EditInput {
+  title: string;
+  startAt: number;
+  endAt: number | null;
+  place: string;
+  lat: number | null;
+  lng: number | null;
 }
 
 /** 洋流的活動沒放上雷達的一場：哪一場（標題、地點）、為什麼 */

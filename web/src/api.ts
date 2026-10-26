@@ -1,5 +1,5 @@
 import type { LatLng } from './geo';
-import type { BottleOut, EndedReportResult, EventOut, KeywordInfo, KeywordRules, MyBottles, MyReport, PickedBottle, RouteOut, SubmitResult } from './types';
+import type { BottleOut, EditInput, EndedReportResult, EventOut, KeywordInfo, KeywordRules, MyBottles, MyReport, PickedBottle, RouteOut, SubmitResult } from './types';
 
 /** 正式環境的 Worker 網址；本機開發打 localhost，VITE_API_BASE 可覆寫（空字串視為未設定，CI 沒設變數時會傳空字串） */
 const PROD_API_BASE = 'https://dragon-radar.happybadminton.workers.dev';
@@ -177,6 +177,9 @@ export const confirmReport = (c: { postId: string; token: string }): Promise<Res
 /** 貼文沒寫地點或時間：補充後再判讀一次 */
 export const supplementReport = (c: { postId: string; token: string }, note: string): Promise<Result<SubmitResult>> =>
   deviceJson<SubmitResult>('/api/reports/supplement', 'POST', { ...c, note });
+/** 洋流的活動：直接改每一場的標題、時間、地點、地圖位置，回傳新的預覽 */
+export const editReport = (c: { postId: string; token: string }, items: EditInput[]): Promise<Result<SubmitResult>> =>
+  deviceJson<SubmitResult>('/api/reports/edit', 'POST', { ...c, items });
 /** 判讀錯了：不放，note 寫哪裡錯 */
 export const rejectReport = (c: { postId: string; token: string }, note: string): Promise<Result<{ ok: true }>> => deviceJson<{ ok: true }>('/api/reports/reject', 'POST', { ...c, note });
 /** 我的回報：30 天內用這個瀏覽器回報的 */

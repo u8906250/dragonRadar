@@ -16,7 +16,7 @@ import { FOOD_SPEC } from './food';
 import { JOB_SPEC } from './jobs';
 import { moduleOf } from './modules';
 import { PUSH_RADIUS_KM, PushError, b64urlEncode, deleteSubscription, encryptPayload, purgeSubscriptions, pushStarted, saveSubscription, sendPush, vapidKeys } from './push';
-import { assertEventReportsOpen, confirmLink, ENDED_REPORTS_NEEDED, MAX_LINK_AGE_SEC, ReportError, REPORTS_LOCKED, ipHash, myReports, purgeReports, recheckLinks, rejectLink, reportEnded, reportModules, submitLink, supplementLink, withdrawReport } from './reports';
+import { assertEventReportsOpen, confirmLink, editLink, ENDED_REPORTS_NEEDED, MAX_LINK_AGE_SEC, ReportError, REPORTS_LOCKED, ipHash, myReports, purgeReports, recheckLinks, rejectLink, reportEnded, reportModules, submitLink, supplementLink, withdrawReport } from './reports';
 import { D1Meter, isTransient, withResilientDb } from './db';
 import { addressCacheKey, geocodeAddress, parseTwAddress } from './address';
 import { adminListBottles, adminSetBottle, BOTTLE_MAX_WEIGHT, BOTTLE_TTL_SEC, bottlesEnabled, collectLetter, deleteBottle, deviceId, DRIFT_EVERY_SEC, driftBottles, dropBottle, listBottles, myBottles, PER_DEVICE_PER_DAY, PICK_RADIUS_M, pickBottle, purgeBottles, recycleBottle, reportBottle } from './bottles';
@@ -51,7 +51,7 @@ async function sha1Hex(s: string): Promise<string> {
 }
 
 /** 使用者回報會寫入的 API（管理者的不算） */
-const REPORT_WRITE_RE = /^\/api\/(?:reports(?:\/(?:confirm|supplement|reject))?|events\/\d+\/(?:ended|feedback)|spot-requests)$/;
+const REPORT_WRITE_RE = /^\/api\/(?:reports(?:\/(?:confirm|supplement|edit|reject))?|events\/\d+\/(?:ended|feedback)|spot-requests)$/;
 
 function isAdmin(req: Request, env: Env): boolean {
   if (!env.ADMIN_TOKEN) return false;
@@ -216,6 +216,10 @@ async function handle(req: Request, env: Env, ctx: ExecutionContext): Promise<Re
     return jsonResponse(result);
   }
   // 貼文沒寫地點或時間：回報的人補充後再判讀一次 { postId, token, note }
+  // 洋流的活動：回報的人直接改每一場的標題、時間、地點、地圖位置
+  if (req.method === 'POST' && path === '/api/reports/edit') {
+    return jsonResponse(await editLink(env, await readJson<{ postId?: unknown; token?: unknown; items?: unknown }>(req), await ipHash(env, req), now, await deviceId(env, req)));
+  }
   if (req.method === 'POST' && path === '/api/reports/supplement') {
     return jsonResponse(await supplementLink(env, await readJson<{ postId?: unknown; token?: unknown; note?: unknown }>(req), await ipHash(env, req), now, await deviceId(env, req)));
   }

@@ -485,3 +485,51 @@ export class MapView {
     }
   }
 }
+
+/** 標位置用的小地圖：點地圖或拖標記改位置，每次改都呼叫 onPick */
+export interface PinPicker {
+  /** 把標記移到這裡（不呼叫 onPick），null 是拿掉標記 */
+  set(p: LatLng | null, zoom?: number): void;
+  remove(): void;
+}
+
+/** 在 el 放一張小地圖：有 pin 就標在那裡，沒有就以 center 為中心、等使用者點 */
+export async function pinPicker(el: HTMLElement, pin: LatLng | null, center: LatLng, base: BaseMap, onPick: (p: LatLng) => void): Promise<PinPicker> {
+  const [mod] = await Promise.all([import('leaflet'), import('leaflet/dist/leaflet.css')]);
+  const L = ((mod as unknown as { default?: typeof Leaflet }).default ?? mod) as typeof Leaflet;
+  const start = pin ?? center;
+  const map = L.map(el, { zoomControl: true, attributionControl: true, zoomSnap: 0 }).setView([start.lat, start.lng], pin ? 17 : 15);
+  map.attributionControl.setPrefix(false);
+  const b = BASES[base];
+  L.tileLayer(b.url, { maxZoom: 20, maxNativeZoom: b.maxNativeZoom, attribution: b.attribution }).addTo(map);
+  const icon = L.divIcon({ className: 'pin-marker', html: '<span></span>', iconSize: [28, 28], iconAnchor: [14, 26] });
+  let marker: Leaflet.Marker | null = null;
+  const place = (p: LatLng): Leaflet.Marker => {
+    if (marker) return marker.setLatLng([p.lat, p.lng]);
+    marker = L.marker([p.lat, p.lng], { icon, draggable: true, autoPan: true, keyboard: false }).addTo(map);
+    marker.on('dragend', () => {
+      const ll = marker?.getLatLng();
+      if (ll) onPick({ lat: ll.lat, lng: ll.lng });
+    });
+    return marker;
+  };
+  if (pin) place(pin);
+  map.on('click', (e: Leaflet.LeafletMouseEvent) => {
+    place({ lat: e.latlng.lat, lng: e.latlng.lng });
+    onPick({ lat: e.latlng.lat, lng: e.latlng.lng });
+  });
+  // 剛從 hidden 變成顯示，尺寸要再算一次
+  requestAnimationFrame(() => map.invalidateSize());
+  return {
+    set(p, zoom) {
+      if (!p) {
+        marker?.remove();
+        marker = null;
+        return;
+      }
+      place(p);
+      map.setView([p.lat, p.lng], zoom ?? map.getZoom());
+    },
+    remove: () => map.remove(),
+  };
+}

@@ -1,5 +1,5 @@
 import './styles.css';
-import { addKeyword, collectLetter, deletePushSubscription, sendFeedback, type FeedbackKind, fetchPushKey, savePushSubscription, confirmReport, rejectReport, supplementReport, deleteBottle, dropBottle, recycleBottle, fetchBottles, fetchEvents, fetchHealth, fetchKeywords, fetchMyBottles, fetchMyReports, fetchRoutes, pickBottle, reportBottle, reportEnded, submitLink, withdrawReport } from './api';
+import { addKeyword, collectLetter, deletePushSubscription, sendFeedback, type FeedbackKind, fetchPushKey, savePushSubscription, confirmReport, editReport, rejectReport, supplementReport, deleteBottle, dropBottle, recycleBottle, fetchBottles, fetchEvents, fetchHealth, fetchKeywords, fetchMyBottles, fetchMyReports, fetchRoutes, pickBottle, reportBottle, reportEnded, submitLink, withdrawReport } from './api';
 import { compassSupported, startCompass } from './compass';
 import { bearingDeg, compassLabel, destination, formatKm, haversineKm, taiwanRadiusKm, type LatLng } from './geo';
 import { inShuangbei, SHUANGBEI_RINGS, shuangbeiRadiusKm } from './shuangbei';
@@ -8,11 +8,11 @@ import { LANDMARKS } from './landmarks';
 import { getModule, JOB_RISK_TEXT, JOB_SAFETY_TIPS, MEETUP_SAFETY_TIPS, MODULES, OFFER_SAFETY_TIPS, type ModuleDef, type ModuleId } from './modules';
 import { X_MAX_WEIGHT, xLength } from './xcount';
 import { splitPlace } from './place';
-import { crowdOf, MapView, type BaseMap } from './map';
+import { crowdOf, MapView, pinPicker, type BaseMap, type PinPicker } from './map';
 import { beep, ensureNotificationPermission, iosNeedsHomeScreen, notificationState, pushSubscription, pushSupported, registerServiceWorker, showBanner, systemNotify, unlockAudio, unsubscribePush } from './notify';
 import { Radar, type RadarRoute } from './radar';
 import { DEFAULT_THEME_ID, getTheme, THEMES, type Theme } from './themes';
-import type { BottleOut, EventOut, Item, KeywordInfo, KeywordRules, MyBottles, MyReport, Origin, Phase, PickedBottle, RelatedPost, RouteOut, PreviewItem, RouteStop, SubmitResult, FailedItem } from './types';
+import type { BottleOut, EventOut, Item, KeywordInfo, KeywordRules, MyBottles, MyReport, Origin, Phase, PickedBottle, RelatedPost, RouteOut, PreviewItem, RouteStop, SubmitResult, FailedItem, EditItem, EditInput } from './types';
 
 const DEFAULT_ORIGIN: Origin = { lat: 25.0478, lng: 121.517, source: 'default' }; // 台北車站
 const SOON_SEC = 30 * 60;
@@ -2741,7 +2741,7 @@ function renderReportTips(): void {
     share,
     `只收${l ? ` ${l.maxAgeDays} 天內` : ''}的公開貼文。每一場活動都要讀得到做什麼、在哪裡、哪天幾點開始，缺一個就不會放上雷達。`,
     '沒寫幾點結束的寫「發完為止」，雷達上顯示到開始後兩小時。',
-    '貼文沒寫的，可以在判讀結果按「補充資料」補上再判讀。連續好幾天的活動每天各算一場（最多 6 場）。貼文最好寫出門牌地址，定位才準。',
+    '貼文沒寫或判讀錯的，可以在判讀結果按「補充資料」直接改活動內容、時間、地點，位置不對可以在地圖上標。連續好幾天的活動每天各算一場（最多 6 場）。貼文最好寫出門牌地址，定位才準。',
     `原貼文刪除或改成「結束了」，雷達${l ? ` ${l.recheckMin} 分鐘內` : ''}會自動下架。`,
   ];
   reportTips.innerHTML = tips.map((t) => `<li>${esc(t)}</li>`).join('');
@@ -2848,6 +2848,200 @@ function wireSupplement(c: { postId: string; token: string }, actions: HTMLEleme
   });
 }
 
+const TPE_OFFSET_SEC = 8 * 3600;
+const pad2 = (n: number): string => String(n).padStart(2, '0');
+/** unix 秒 → 表單用的台北日期「2026-10-26」、時間「18:00」 */
+function tpeInput(t: number): { date: string; time: string } {
+  const d = new Date((t + TPE_OFFSET_SEC) * 1000);
+  return { date: `${d.getUTCFullYear()}-${pad2(d.getUTCMonth() + 1)}-${pad2(d.getUTCDate())}`, time: `${pad2(d.getUTCHours())}:${pad2(d.getUTCMinutes())}` };
+}
+/** 表單的台北日期、時間 → unix 秒 */
+function tpeUnix(date: string, time: string): number | null {
+  const d = /^(\d{4})-(\d{2})-(\d{2})$/.exec(date);
+  const t = /^(\d{2}):(\d{2})/.exec(time);
+  if (!d || !t) return null;
+  return Date.UTC(Number(d[1]), Number(d[2]) - 1, Number(d[3]), Number(t[1]), Number(t[2])) / 1000 - TPE_OFFSET_SEC;
+}
+
+const MAX_EDIT_ITEMS = 6;
+
+/** 補充資料表單的一場：判讀出來的位置、回報的人標的位置、小地圖 */
+interface EditPin {
+  /** 判讀時依地點查到的位置（地點文字改了就不算） */
+  found: LatLng | null;
+  foundPlace: string;
+  approxArea: string | null;
+  /** 回報的人在地圖上標的 */
+  pinned: LatLng | null;
+  picker: PinPicker | null;
+}
+const editPins = new Map<HTMLElement, EditPin>();
+
+/** 洋流的補充資料：每一場直接改標題、時間、地點，位置不對可以在地圖上標 */
+function editCardHtml(it: EditItem | null): string {
+  const start = it?.startAt ? tpeInput(it.startAt) : null;
+  const end = it?.endAt ? tpeInput(it.endAt).time : '';
+  return `<fieldset class="edit-item">
+      <legend><span class="edit-no"></span><button type="button" class="chip" data-act="drop">不要這場</button></legend>
+      <label>活動內容<input name="title" maxlength="60" value="${esc(it?.title ?? '')}" placeholder="例如：發飄帶、景華公園表演同樂會"></label>
+      <div class="edit-row">
+        <label>日期<input type="date" name="date" value="${start?.date ?? ''}"></label>
+        <label>開始<input type="time" name="start" value="${it?.dateOnly ? '' : (start?.time ?? '')}"></label>
+        <label>結束<input type="time" name="end" value="${end}"></label>
+      </div>
+      <small class="muted">結束沒填就是「發完為止」，雷達上顯示到開始後兩小時。</small>
+      <label>地點<input name="place" maxlength="80" value="${esc(it?.place ?? '')}" placeholder="店名或地址，例如：厝邊咖啡 台北市萬華區○○路○號"></label>
+      <div class="edit-pin"><small class="edit-pin-state"></small><button type="button" class="chip" data-act="pin">在地圖上標位置</button><button type="button" class="chip" data-act="unpin" hidden>不用標的位置</button></div>
+      <div class="edit-map" hidden></div>
+    </fieldset>`;
+}
+
+function editFormHtml(items: EditItem[], hidden: boolean): string {
+  const list = items.length > 0 ? items.slice(0, MAX_EDIT_ITEMS) : [null];
+  return `<form class="preview-more edit-form"${hidden ? ' hidden' : ''} novalidate>
+      <p class="muted sheet-note">直接改每一場的活動內容、時間、地點；位置不對可以按「在地圖上標位置」，點地圖或拖標記。</p>
+      <div class="edit-items">${list.map(editCardHtml).join('')}</div>
+      <button type="button" class="btn" data-act="add">再加一場</button>
+      <div class="sheet-actions"><button type="submit" class="btn primary">用這些資料預覽</button>${hidden ? '<button type="button" class="btn" data-act="less">回上一步</button>' : ''}</div>
+      <p class="muted sheet-note small">改過的地方放上雷達後會寫明是回報的人改的。請只填你確定的資訊。</p>
+    </form>`;
+}
+
+/** 標位置的說明：用標的、用依地點查到的、還是送出後再查 */
+function updatePinState(card: HTMLElement): void {
+  const pin = editPins.get(card);
+  if (!pin) return;
+  const place = card.querySelector<HTMLInputElement>('[name="place"]')?.value.trim() ?? '';
+  const found = pin.found && place === pin.foundPlace;
+  const state = card.querySelector<HTMLElement>('.edit-pin-state');
+  if (state) {
+    state.textContent = pin.pinned
+      ? '📍 用你在地圖上標的位置'
+      : found
+        ? pin.approxArea
+          ? `只定位到${pin.approxArea}（約略位置），可以在地圖上標出正確位置`
+          : '已依地點定位，位置不對可以在地圖上標'
+        : '送出後依地點查位置；查不到的話請在地圖上標';
+    state.classList.toggle('preview-warn', !pin.pinned && !!found && !!pin.approxArea);
+  }
+  const unpin = card.querySelector<HTMLElement>('[data-act="unpin"]');
+  if (unpin) unpin.hidden = !pin.pinned;
+}
+
+function wireEditCard(card: HTMLElement, it: EditItem | null, form: HTMLFormElement): void {
+  const found = it && it.lat !== null && it.lng !== null ? { lat: it.lat, lng: it.lng } : null;
+  const pin: EditPin = { found, foundPlace: it?.place ?? '', approxArea: it?.approxArea ?? null, pinned: null, picker: null };
+  editPins.set(card, pin);
+  const mapEl = card.querySelector<HTMLElement>('.edit-map');
+  const pinBtn = card.querySelector<HTMLButtonElement>('[data-act="pin"]');
+  card.querySelector('[name="place"]')?.addEventListener('input', () => updatePinState(card));
+  pinBtn?.addEventListener('click', async () => {
+    if (!mapEl) return;
+    mapEl.hidden = !mapEl.hidden;
+    pinBtn.textContent = mapEl.hidden ? '在地圖上標位置' : '收起地圖';
+    if (mapEl.hidden || pin.picker) return;
+    const place = card.querySelector<HTMLInputElement>('[name="place"]')?.value.trim() ?? '';
+    const start = pin.pinned ?? (pin.found && place === pin.foundPlace ? pin.found : null);
+    pin.picker = await pinPicker(mapEl, start, origin, baseMap, (p) => {
+      pin.pinned = p;
+      updatePinState(card);
+    });
+  });
+  card.querySelector('[data-act="unpin"]')?.addEventListener('click', () => {
+    pin.pinned = null;
+    const place = card.querySelector<HTMLInputElement>('[name="place"]')?.value.trim() ?? '';
+    pin.picker?.set(pin.found && place === pin.foundPlace ? pin.found : null);
+    updatePinState(card);
+  });
+  card.querySelector('[data-act="drop"]')?.addEventListener('click', () => {
+    pin.picker?.remove();
+    editPins.delete(card);
+    card.remove();
+    renumberEdit(form);
+  });
+  updatePinState(card);
+}
+
+/** 第幾場、只剩一場時不能刪、最多幾場 */
+function renumberEdit(form: HTMLFormElement): void {
+  const cards = [...form.querySelectorAll<HTMLElement>('.edit-item')];
+  cards.forEach((c, i) => {
+    const no = c.querySelector('.edit-no');
+    if (no) no.textContent = cards.length > 1 ? `第 ${i + 1} 場` : '活動';
+    const drop = c.querySelector<HTMLElement>('[data-act="drop"]');
+    if (drop) drop.hidden = cards.length <= 1;
+  });
+  const add = form.querySelector<HTMLElement>('[data-act="add"]');
+  if (add) add.hidden = cards.length >= MAX_EDIT_ITEMS;
+}
+
+/** 讀表單：缺的直接講是第幾場缺什麼 */
+function readEditForm(form: HTMLFormElement): EditInput[] | string {
+  const cards = [...form.querySelectorAll<HTMLElement>('.edit-item')];
+  const out: EditInput[] = [];
+  for (const [i, card] of cards.entries()) {
+    const at = cards.length > 1 ? `第 ${i + 1} 場：` : '';
+    const val = (name: string): string => card.querySelector<HTMLInputElement>(`[name="${name}"]`)?.value.trim() ?? '';
+    const title = val('title');
+    const place = val('place');
+    if (!title) return `${at}請填活動內容`;
+    if (!val('date') || !val('start')) return `${at}請填哪天幾點開始`;
+    if (!place) return `${at}請填地點`;
+    const startAt = tpeUnix(val('date'), val('start'));
+    if (startAt === null) return `${at}日期或時間看不懂，請重新選`;
+    let endAt = val('end') ? tpeUnix(val('date'), val('end')) : null;
+    // 結束比開始早：跨過午夜，是隔天
+    if (endAt !== null && endAt <= startAt) endAt += 86400;
+    const pinned = editPins.get(card)?.pinned ?? null;
+    out.push({ title, startAt, endAt, place, lat: pinned?.lat ?? null, lng: pinned?.lng ?? null });
+  }
+  return out.length > 0 ? out : '至少要填一場活動';
+}
+
+function wireEdit(c: { postId: string; token: string }, items: EditItem[], actions: HTMLElement | null): void {
+  const form = reportResult.querySelector<HTMLFormElement>('.edit-form');
+  if (!form) return;
+  // 換了一個表單：舊的小地圖拿掉
+  for (const pin of editPins.values()) pin.picker?.remove();
+  editPins.clear();
+  const list = form.querySelector<HTMLElement>('.edit-items');
+  [...form.querySelectorAll<HTMLElement>('.edit-item')].forEach((card, i) => wireEditCard(card, items[i] ?? null, form));
+  renumberEdit(form);
+  form.querySelector('[data-act="add"]')?.addEventListener('click', () => {
+    if (!list) return;
+    list.insertAdjacentHTML('beforeend', editCardHtml(null));
+    const card = list.lastElementChild as HTMLElement;
+    wireEditCard(card, null, form);
+    renumberEdit(form);
+    card.querySelector<HTMLInputElement>('[name="title"]')?.focus();
+  });
+  reportResult.querySelector('[data-act="more"]')?.addEventListener('click', () => {
+    form.hidden = false;
+    if (actions) actions.hidden = true;
+    form.querySelector<HTMLInputElement>('input')?.focus();
+  });
+  form.querySelector('[data-act="less"]')?.addEventListener('click', () => {
+    form.hidden = true;
+    if (actions) actions.hidden = false;
+  });
+  form.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const read = readEditForm(form);
+    if (typeof read === 'string') {
+      showBanner(bannerEl, read, 3000);
+      return;
+    }
+    setReportBusy(true, '更新預覽中…');
+    const res = await editReport(c, read).finally(() => setReportBusy(false));
+    if (!res.ok) {
+      showBanner(bannerEl, res.message, 3500);
+      return;
+    }
+    if (res.data.outcome === 'preview') renderPreview(res.data);
+    else await showReportResult(res.data);
+  });
+}
+
 /** 雷達上已經有這個據點時，確認後會怎樣 */
 function updateNote(u: NonNullable<PreviewItem['update']>): string {
   return u.mode === 'replace'
@@ -2884,7 +3078,7 @@ function renderPreview(r: SubmitResult): void {
       <button type="button" class="btn" data-act="more">補充資料</button>
       <button type="button" class="btn" data-act="wrong">不對</button>
     </div>
-    ${supplementFormHtml(r.supplement ?? '', true)}
+    ${mod.current ? editFormHtml(r.edit ?? [], true) : supplementFormHtml(r.supplement ?? '', true)}
     <form class="preview-wrong" hidden>
       <textarea rows="2" maxlength="300" placeholder="哪裡判斷錯了？（選填，例如「地點是文化路 140 號」「只有 10/21 一天」）" aria-label="哪裡判斷錯了"></textarea>
       <div class="sheet-actions"><button type="submit" class="btn primary">送出，不放上雷達</button><button type="button" class="btn" data-act="back">回上一步</button></div>
@@ -2901,7 +3095,8 @@ function renderPreview(r: SubmitResult): void {
     await showReportResult(res.data);
     void loadMyReports();
   });
-  wireSupplement(c, actions);
+  if (mod.current) wireEdit(c, r.edit ?? [], actions);
+  else wireSupplement(c, actions);
   reportResult.querySelector('[data-act="wrong"]')?.addEventListener('click', () => {
     if (!wrongForm || !actions) return;
     wrongForm.hidden = false;
@@ -2984,7 +3179,7 @@ function failureReason(f: FailedItem): string {
       )
       .join('；');
   }
-  if (f.reason === 'unlocated') return `地點「${f.place ?? ''}」在地圖上查不到，請補充完整地址或店名`;
+  if (f.reason === 'unlocated') return `地點「${f.place ?? ''}」在地圖上查不到，請補上完整地址或店名，或在地圖上標出位置`;
   if (f.reason === 'already_over') {
     if (!f.startAt) return '時間已經過了';
     return f.endOpen
@@ -3017,7 +3212,7 @@ function notListedText(w: NonNullable<SubmitResult['why']>): string | null {
   const tz = w.tz && w.tz !== 'Asia/Taipei' ? w.tz : null;
   const local = tz ? '（當地時間）' : '';
   if (w.reason === 'incomplete' && w.missing?.length) {
-    return `判讀不到${missingText(w.missing)}，所以沒有放上雷達。活動要有內容、地點和開始時間才收；知道的話可以在下面補充再判讀一次。`;
+    return `判讀不到${missingText(w.missing)}，所以沒有放上雷達。活動要有內容、地點和開始時間才收；知道的話可以在下面補上。`;
   }
   if (w.reason === 'no_start_time') return '判讀不出時間（貼文沒寫哪天或幾點），所以沒有放上雷達。知道時間的話，可以在下面補充再判讀一次。';
   if (w.reason === 'already_over') {
@@ -3050,13 +3245,13 @@ async function showReportResult(data: SubmitResult): Promise<void> {
   const failHtml =
     fails.length > 0
       ? `${noneListed ? '' : '<p class="muted sheet-note">另外這些沒有放上雷達：</p>'}${failuresHtml(fails)}${
-          canFixByNote(fails) ? '<p class="muted sheet-note">活動要有內容、地點和開始時間才收（沒寫結束時間的當成發完為止）；知道的話可以在下面補充再判讀一次。</p>' : ''
+          canFixByNote(fails) ? '<p class="muted sheet-note">活動要有內容、地點和開始時間才收（沒寫結束時間的當成發完為止）；知道的話可以在下面補上。</p>' : ''
         }`
       : '';
   // 判讀成不是活動：附上 AI 的理由，判斷錯了可以補充
   const noteHtml =
     outcome === 'not_event' && data.note
-      ? `<p class="muted sheet-note">AI 的判斷：${esc(data.note)}。如果判斷錯了，可以在下面補充活動內容、地點和時間再判讀一次。</p>`
+      ? `<p class="muted sheet-note">AI 的判斷：${esc(data.note)}。如果判斷錯了，可以在下面直接填活動內容、時間和地點。</p>`
       : '';
   const list = (inMine ? [] : resultGroups(found))
     .map((g) => {
@@ -3075,10 +3270,17 @@ async function showReportResult(data: SubmitResult): Promise<void> {
   const canSupplement = !!data.confirm && (outcome === 'no_place' || outcome === 'not_listed' || outcome === 'not_event');
   setReportMsg(
     `<p class="msg">${esc(head)}</p>${list ? `<ul class="report-events">${list}</ul>` : ''}${failHtml}${noteHtml}${
-      canSupplement ? `${data.supplement ? `<p class="muted sheet-note">你補充的：${esc(data.supplement)}</p>` : ''}${supplementFormHtml(data.supplement ?? '', false)}` : ''
+      !canSupplement
+        ? ''
+        : mod.current
+          ? editFormHtml(data.edit ?? [], false)
+          : `${data.supplement ? `<p class="muted sheet-note">你補充的：${esc(data.supplement)}</p>` : ''}${supplementFormHtml(data.supplement ?? '', false)}`
     }`,
   );
-  if (canSupplement && data.confirm) wireSupplement(data.confirm, null);
+  if (canSupplement && data.confirm) {
+    if (mod.current) wireEdit(data.confirm, data.edit ?? [], null);
+    else wireSupplement(data.confirm, null);
+  }
   for (const b of reportResult.querySelectorAll<HTMLButtonElement>('[data-id]')) {
     b.addEventListener('click', () => {
       reportSheet.hidden = true;

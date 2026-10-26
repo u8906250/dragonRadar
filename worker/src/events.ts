@@ -497,6 +497,9 @@ export interface FailedItem {
   tz?: string | null;
   /** 太久以後才開始的：這天之後再貼就收得到 */
   reportFrom?: number;
+  /** 回報的人在地圖上標的位置（修改資料時帶回表單） */
+  lat?: number;
+  lng?: number;
 }
 
 /** 判讀出來的一筆：plan 是可以寫進雷達的資料；沒有 plan 時 reason 寫原因（no_place、duplicate_of_3…）。group 是貼文裡第幾個地點或時段 */
@@ -789,17 +792,68 @@ async function planActivities(env: Env, post: PostRow, events: ExtractedEvent[],
     if (start !== null && end !== null && end <= start) ex.end_at = end + DAY_SEC > start ? new Date((end + DAY_SEC) * 1000).toISOString() : null;
     const which = { title: ex.title.trim() || null, place: ex.place_text ?? ex.place_query ?? selfPlace ?? null };
     if (missing.length > 0) {
-      const fail: FailedItem = { ...which, reason: 'incomplete', missing, ...(selfPlace ? { selfPlace } : {}), ...(dateOnly && start !== null ? { dateOnly: start, tz } : {}) };
+      // 讀得到的時間也帶著，回報的人修改資料時不用重填
+      const fixedEnd = parseIsoToUnix(ex.end_at);
+      const when = start !== null && !dateOnly ? { startAt: start, ...(fixedEnd !== null ? { endAt: fixedEnd } : {}), endOpen: fixedEnd === null, tz } : {};
+      const fail: FailedItem = { ...which, reason: 'incomplete', missing, ...(selfPlace ? { selfPlace } : {}), ...(dateOnly && start !== null ? { dateOnly: start, tz } : {}), ...when };
       items.push({ group, plan: null, reason: `incomplete:${missing.join(',')}`, fail });
       continue;
     }
     const r = await planEvent(env, ex, now, deadline, undefined, undefined, undefined, OPEN_END_SEC);
     if (r.plan && r.plan.lat === null) {
-      items.push({ group, plan: null, reason: 'unlocated', fail: { ...which, reason: 'unlocated' } });
+      items.push({ group, plan: null, reason: 'unlocated', fail: { ...which, reason: 'unlocated', ...planWhen(r.plan) } });
       continue;
     }
     const fail = r.plan ? undefined : failOf(r, which, ex.end_at === null);
     items.push({ group, ...r, ...(fail ? { fail } : {}) });
+  }
+  return items;
+}
+
+/** 地點查不到的那一場的時間（回報的人修改資料時不用重填） */
+const planWhen = (p: PlannedEvent): Pick<FailedItem, 'startAt' | 'endAt' | 'endOpen' | 'tz'> => ({ startAt: p.start_at, endAt: p.end_at, endOpen: p.end_open, tz: p.tz ?? null });
+
+/** 回報的人自己填的一場（洋流的活動）：時間是 unix 秒，結束 null 是發完為止；lat、lng 是在地圖上標的位置，沒標就照地點查 */
+export interface ManualActivity {
+  title: string;
+  startAt: number;
+  endAt: number | null;
+  place: string;
+  lat: number | null;
+  lng: number | null;
+}
+
+/**
+ * 回報的人直接修改的活動：不再問 AI，照填的資料排（有標位置就用標的，沒標照地點查），
+ * 一樣檢查時間（已經過了、太久以後）和雷達上有沒有同一場
+ */
+export async function planManual(env: Env, acts: ManualActivity[], now: number): Promise<PlanItem[]> {
+  const deadline = Date.now() + ADDRESS_BUDGET_MS;
+  const items: PlanItem[] = [];
+  for (const [group, a] of acts.entries()) {
+    const iso = (t: number): string => new Date(t * 1000).toISOString();
+    const ex: ExtractedEvent = {
+      kind: 'activity',
+      title: a.title,
+      item: null,
+      start_at: iso(a.startAt),
+      end_at: a.endAt === null ? null : iso(a.endAt),
+      place_text: a.place,
+      place_query: a.place,
+      confidence: 1,
+      spot: false,
+      until: null,
+    };
+    const pin = a.lat !== null && a.lng !== null ? { lat: a.lat, lng: a.lng } : null;
+    const located = pin ? { point: { ...pin, displayName: a.place }, approxArea: null } : undefined;
+    const r = await planEvent(env, ex, now, deadline, undefined, located, undefined, OPEN_END_SEC);
+    const which = { title: a.title, place: a.place };
+    if (r.plan && r.plan.lat === null) {
+      items.push({ group, plan: null, reason: 'unlocated', fail: { ...which, reason: 'unlocated', ...planWhen(r.plan) } });
+      continue;
+    }
+    const fail = r.plan ? undefined : failOf(r, which, a.endAt === null);
+    items.push({ group, ...r, ...(fail ? { fail: { ...fail, ...(pin ?? {}) } } : {}) });
   }
   return items;
 }

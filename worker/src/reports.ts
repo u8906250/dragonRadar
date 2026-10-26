@@ -6,7 +6,7 @@
  */
 import type { Env } from './env';
 import { DEFAULT_MODULE, isModule, MODULE_IDS, moduleOf, type ModuleId } from './modules';
-import { commitPlan, detectEnded, getEvent, getPost, MAX_FUTURE_SEC, planPost, processPost, storePost, type EventOut, type FailedItem, type PlanItem, type PostRow } from './events';
+import { commitPlan, detectEnded, getEvent, getPost, MAX_FUTURE_SEC, planManual, planPost, processPost, storePost, type EventOut, type FailedItem, type ManualActivity, type PlanItem, type PostRow } from './events';
 import type { ActivityPart, EventKind } from './extract';
 import { fetchThreadsPost, resolveThreadsLink, shortcodeToUnix, withLocationTag } from './sources/link';
 import { sha1Hex } from './sources/text';
@@ -158,6 +158,43 @@ export interface SubmitResult {
   failures?: FailedItem[];
   /** 判讀成不是活動時，AI 說的理由 */
   note?: string;
+  /** 洋流的活動：補充資料表單預先填好的每一場（判讀出來的、沒放上雷達的），回報的人直接改 */
+  edit?: EditItem[];
+}
+
+/** 補充資料表單的一場：時間是 unix 秒；endAt null 是發完為止；dateOnly 只知道哪天、不知道幾點 */
+export interface EditItem {
+  title: string;
+  startAt: number | null;
+  dateOnly?: boolean;
+  endAt: number | null;
+  place: string;
+  lat: number | null;
+  lng: number | null;
+  /** 只定位到鄉鎮區、路（約略位置） */
+  approxArea?: string | null;
+}
+
+/** 判讀結果換成表單的每一場；重複的（雷達上已經有）不列 */
+export function editItemsOf(items: PlanItem[]): EditItem[] {
+  return items.flatMap((it): EditItem[] => {
+    const p = it.plan;
+    if (p) return [{ title: p.title, startAt: p.start_at, endAt: p.end_open ? null : p.end_at, place: p.place_text, lat: p.lat, lng: p.lng, approxArea: p.approx_area }];
+    const f = it.fail;
+    if (!f) return [];
+    return [
+      {
+        title: f.title ?? '',
+        startAt: f.startAt ?? f.dateOnly ?? null,
+        ...(f.dateOnly && f.startAt === undefined ? { dateOnly: true } : {}),
+        endAt: f.endOpen === false ? (f.endAt ?? null) : null,
+        // 只寫「本店」的留空，讓回報的人填店名
+        place: f.selfPlace ? '' : (f.place ?? ''),
+        lat: f.lat ?? null,
+        lng: f.lng ?? null,
+      },
+    ];
+  });
 }
 
 export interface NotListedWhy {
@@ -296,7 +333,9 @@ const sameDay = (a: number, b: number): boolean => Math.floor((a + 8 * 3600) / 8
  * 兩種都附確認代碼：貼文沒寫地點或時間時，回報的人可以補充資料再判讀一次。
  */
 async function previewResult(env: Env, post: PostRow, plan: StoredPlan, existed: boolean, now: number): Promise<SubmitResult> {
-  const base = { existed, permalink: post.permalink ?? '', confirm: { postId: post.id, token: await confirmToken(env, post.id) }, supplement: post.supplement ?? null };
+  // 洋流的活動：補充資料是一場一場的欄位（標題、時間、地點、地圖位置），先填好判讀出來的
+  const edit = moduleOf(post.module) === 'current' ? { edit: editItemsOf(plan.items) } : {};
+  const base = { existed, permalink: post.permalink ?? '', confirm: { postId: post.id, token: await confirmToken(env, post.id) }, supplement: post.supplement ?? null, ...edit };
   if (plan.early) return { ...base, outcome: summarize([plan.early]), reasons: [plan.early], events: [], ...(plan.note ? { note: plan.note } : {}) };
   const reasons = plan.items.filter((it) => !it.plan).map((it) => it.reason);
   const events = await eventsForResult(env, post.id, reasons, now);
@@ -498,6 +537,86 @@ export async function supplementLink(env: Env, body: { postId?: unknown; token?:
   }
   await env.DB.prepare("UPDATE posts SET supplement = ?, confirm_plan = ?, confirm_state = 'pending' WHERE id = ?").bind(note, storePlan(plan), post.id).run();
   return previewResult(env, updated, plan, false, now);
+}
+
+/** 直接修改資料不用問 AI（只查地點），一則可以多改幾次；跟補充資料算在一起 */
+const EDITS_PER_POST = 10;
+const MAX_EDIT_ITEMS = 6;
+/** 一場活動最長多久（開始到結束） */
+const MAX_EDIT_SPAN_SEC = 24 * 3600;
+
+/** 表單送來的每一場：標題、地點、開始時間一定要有；結束沒填是發完為止；有標地圖位置才帶座標 */
+export function parseEditItems(raw: unknown): ManualActivity[] {
+  if (!Array.isArray(raw) || raw.length === 0) throw new ReportError(400, '至少要填一場活動');
+  if (raw.length > MAX_EDIT_ITEMS) throw new ReportError(400, `一則最多 ${MAX_EDIT_ITEMS} 場`);
+  const text = (v: unknown, max: number): string => (typeof v === 'string' ? [...v.replace(/\s+/g, ' ').trim()].slice(0, max).join('') : '');
+  const coord = (v: unknown, max: number): number | null => (typeof v === 'number' && Number.isFinite(v) && Math.abs(v) <= max ? v : null);
+  return raw.map((r, i): ManualActivity => {
+    const o = (r && typeof r === 'object' ? r : {}) as Record<string, unknown>;
+    const at = raw.length > 1 ? `第 ${i + 1} 場：` : '';
+    const title = text(o.title, 60);
+    const place = text(o.place, 80);
+    if (!title) throw new ReportError(400, `${at}請填活動內容`);
+    if (!place) throw new ReportError(400, `${at}請填地點`);
+    if (!Number.isSafeInteger(o.startAt)) throw new ReportError(400, `${at}請填哪天幾點開始`);
+    const startAt = o.startAt as number;
+    const endAt = o.endAt === null || o.endAt === undefined ? null : Number.isSafeInteger(o.endAt) ? (o.endAt as number) : NaN;
+    if (endAt !== null && !(endAt > startAt && endAt - startAt <= MAX_EDIT_SPAN_SEC)) throw new ReportError(400, `${at}結束時間要在開始之後的 24 小時內`);
+    const lat = coord(o.lat, 90);
+    const lng = coord(o.lng, 180);
+    return { title, startAt, endAt, place, lat: lat !== null && lng !== null ? lat : null, lng: lat !== null && lng !== null ? lng : null };
+  });
+}
+
+const taipeiWhen = new Intl.DateTimeFormat('en-US', { timeZone: 'Asia/Taipei', month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' });
+/** 「10/26 18:00」 */
+function whenText(t: number): string {
+  const p = Object.fromEntries(taipeiWhen.formatToParts(new Date(t * 1000)).map((x) => [x.type, x.value]));
+  return `${p.month}/${p.day} ${p.hour}:${p.minute}`;
+}
+
+/**
+ * 回報的人改了哪些（跟判讀結果比），寫在雷達詳細資料的「回報的人補充」，看的人知道哪些不是原貼文寫的。
+ * listed 是每一場有沒有排上雷達：沒排上的不寫
+ */
+export function editSummary(before: EditItem[], after: ManualActivity[], listed: boolean[] = after.map(() => true)): string | null {
+  const shown = after.filter((_, i) => listed[i]).length;
+  let no = 0;
+  const parts = after.flatMap((a, i) => {
+    if (!listed[i]) return [];
+    no++;
+    const b = before[i];
+    const changes: string[] = [];
+    if (!b || b.title !== a.title) changes.push(`內容「${a.title}」`);
+    if (!b || b.dateOnly || b.startAt !== a.startAt || b.endAt !== a.endAt) {
+      changes.push(`時間 ${whenText(a.startAt)}${a.endAt === null ? ' 開始（發完為止）' : `–${whenText(a.endAt).split(' ')[1]}`}`);
+    }
+    if (!b || b.place !== a.place) changes.push(`地點「${a.place}」`);
+    if (a.lat !== null) changes.push('在地圖上標了位置');
+    return changes.length > 0 ? [`${shown > 1 ? `第 ${no} 場` : ''}${changes.join('、')}`] : [];
+  });
+  return parts.length > 0 ? [...`改了${parts.join('；')}`].slice(0, 200).join('') : null;
+}
+
+/**
+ * 回報的人直接修改每一場的標題、時間、地點、地圖位置（洋流的活動）：不再問 AI，照填的資料排、定位，回傳新的預覽。
+ * 改了哪些記在補充（雷達詳細資料寫「回報的人補充」），看的人知道哪些不是原貼文寫的。
+ */
+export async function editLink(env: Env, body: { postId?: unknown; token?: unknown; items?: unknown }, ip: string, now: number, device: string | null = null): Promise<SubmitResult> {
+  const post = await checkConfirm(env, body);
+  if (post.confirm_state === 'confirmed') throw new ReportError(409, '這則已經放上雷達了，不能再修改');
+  if (moduleOf(post.module) !== 'current') throw new ReportError(400, '這個類別還不能直接修改，請用補充資料');
+  const acts = parseEditItems(body.items);
+  const times = await countSince(env, "SELECT COUNT(*) AS n FROM submissions WHERE post_id = ? AND result = '\"supplement\"'", [post.id]);
+  if (times >= EDITS_PER_POST) throw new ReportError(429, '這則已經修改太多次了，請聯絡管理者');
+  await env.DB.prepare("INSERT INTO submissions (post_id, ip_hash, device, result, created_at) VALUES (?, ?, ?, '\"supplement\"', ?)").bind(post.id, ip, device, now).run();
+
+  const stored = readPlan(post);
+  const items = await planManual(env, acts, now);
+  const note = editSummary(stored ? editItemsOf(stored.items) : [], acts, items.map((it) => !!it.plan)) ?? post.supplement ?? null;
+  const plan: StoredPlan = { items, early: null };
+  await env.DB.prepare("UPDATE posts SET supplement = ?, confirm_plan = ?, confirm_state = 'pending' WHERE id = ?").bind(note, storePlan(plan), post.id).run();
+  return previewResult(env, { ...post, supplement: note }, plan, false, now);
 }
 
 /** 回報的人說判讀錯了：不放上雷達，記下哪裡錯給管理者看 */

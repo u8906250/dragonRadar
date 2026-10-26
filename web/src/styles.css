@@ -435,6 +435,26 @@ a.chip { display: inline-flex; align-items: center; text-decoration: none; }
 .preview-more[hidden], .preview-wrong[hidden] { display: none; }
 .preview-more textarea { font: inherit; font-size: 16px; color: var(--text); background: var(--card); resize: none; border: var(--border-w) solid var(--line); border-radius: var(--card-radius); padding: 10px 12px; }
 .supplement-line { font-size: 13px; margin: -4px 0 10px; }
+/* 洋流的補充資料：每一場的欄位、標位置的小地圖 */
+.edit-items { display: grid; gap: 10px; }
+.edit-item { display: flex; flex-direction: column; gap: 8px; margin: 0; min-width: 0; background: var(--card); border: var(--border-w) solid var(--line); border-radius: var(--card-radius); padding: 10px 12px; }
+.edit-item legend { display: flex; align-items: center; gap: 8px; padding: 0 4px; font-weight: 700; font-size: 14px; }
+.edit-item legend .chip { padding: 2px 10px; font-size: 12px; font-weight: 400; }
+.edit-item label { display: flex; flex-direction: column; gap: 3px; font-size: 13px; color: var(--muted); min-width: 0; }
+.edit-item input { font: inherit; font-size: 16px; color: var(--text); background: var(--panel); border: var(--border-w) solid var(--line); border-radius: var(--card-radius); padding: 8px 10px; min-width: 0; width: 100%; box-sizing: border-box; }
+.edit-item input:focus { outline: 2px solid var(--highlight); outline-offset: 1px; }
+.edit-row { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 6px; }
+.edit-row label:first-child { grid-column: 1 / -1; }
+.edit-item > small { color: var(--muted); font-size: 12px; margin-top: -4px; }
+.edit-pin { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.edit-pin-state { flex: 1 1 100%; font-size: 13px; color: var(--muted); }
+.edit-pin-state.preview-warn { color: var(--highlight); font-weight: 700; }
+.edit-pin .chip { padding: 4px 12px; font-size: 13px; }
+.edit-map { height: 220px; border-radius: var(--card-radius); border: var(--border-w) solid var(--line); overflow: hidden; }
+.edit-map[hidden], .edit-item [hidden] { display: none; }
+.edit-form > .btn[data-act="add"] { align-self: flex-start; }
+.edit-form > .btn[hidden] { display: none; }
+.pin-marker span { display: block; width: 18px; height: 18px; margin: 2px 0 0 5px; border-radius: 50% 50% 50% 0; background: #dc2626; border: 3px solid #fff; box-shadow: 0 1px 4px rgba(0, 0, 0, 0.45); transform: rotate(-45deg); box-sizing: border-box; }
 .preview-wrong textarea { font: inherit; font-size: 16px; color: var(--text); background: var(--card); resize: none; border: var(--border-w) solid var(--line); border-radius: var(--card-radius); padding: 10px 12px; }
 .report-tips { padding-left: 18px; }
 .report-tips li { margin-bottom: 4px; }
