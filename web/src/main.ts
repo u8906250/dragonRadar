@@ -666,8 +666,12 @@ function clarityOf(ev: EventOut, now: number): number {
   return 1 - Math.min(1, Math.log1p(t / 600) / Math.log1p(span / 600));
 }
 
-/** 還沒開始的單次發放、活動（即將開始、稍後開始）；固定據點、車掃路線另外處理 */
-const isUpcoming = (it: Item): boolean => !it.spot && !routeOf(it.ev) && it.phase !== 'active';
+/** 還沒開始的單次發放、活動（即將開始、稍後開始），回報的車掃的每一站也算；固定據點、官方車掃路線另外處理 */
+const isUpcoming = (it: Item): boolean => {
+  if (it.spot || it.phase === 'active') return false;
+  const r = routeOf(it.ev);
+  return !r || isReported(r);
+};
 
 /** 在不在時間範圍內：進行中（開放中、車掃中）的一定在；其他看多久後開始（車掃看出發時間，據點看下一個時段） */
 function inTime(it: Item, now: number): boolean {
@@ -913,8 +917,8 @@ function render(): void {
       outside: !inScope(it.ev, it.distanceKm),
       distanceKm: it.distanceKm,
       bearing: it.bearing,
-      // 還沒出發的車掃路線點用「即將開始」的淡色畫；還沒開的據點跟休息中的一樣淡；其他稍後開始的畫虛線框
-      phase: it.phase === 'later' ? (it.spot ? 'closed' : routeOf(it.ev) ? 'soon' : 'later') : it.phase,
+      // 還沒出發的官方車掃路線點用「即將開始」的淡色畫；還沒開的據點跟休息中的一樣淡；其他稍後開始的（回報的車掃的站也是）畫虛線框
+      phase: it.phase === 'later' ? (it.spot ? 'closed' : routeOf(it.ev) && !reportedStop(it.ev) ? 'soon' : 'later') : it.phase,
       label: titleOf(it.ev),
       // 名稱只在選取時顯示，光點一多標題會蓋成一片
       showLabel: it.ev.id === selectedId,
@@ -1162,7 +1166,7 @@ function renderList(items: Item[], now: number): void {
 function timeLineHtml(it: Item, now: number): string {
   const text = esc(timeLine(it, now));
   if (!isUpcoming(it)) return text;
-  const left = esc(startsIn(it.ev.startAt, now));
+  const left = esc(startsIn(reportedStop(it.ev)?.at ?? it.ev.startAt, now));
   return text.replace(left, `<b class="countdown">${left}</b>`);
 }
 
