@@ -78,6 +78,8 @@ export interface RouteStop {
   kind: 'start' | 'cheer' | 'end';
   title: string;
   name: string;
+  /** 回報的車掃：這一站的地點（地址），跟站名不一樣時才有 */
+  place?: string;
   lat: number | null;
   lng: number | null;
   /** 出發／預計經過／抵達時間 */

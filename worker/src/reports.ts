@@ -170,6 +170,8 @@ export interface RoutePreview {
   stops: Array<{
     kind: 'start' | 'cheer' | 'end';
     name: string;
+    /** 地點（地址），跟站名不一樣時才有 */
+    place?: string;
     at: number;
     lat: number | null;
     lng: number | null;
@@ -192,7 +194,7 @@ export function routePreviews(items: PlanItem[]): RoutePreview[] {
       stops: sorted.map((it) => {
         const r = it.route as NonNullable<PlanItem['route']>;
         const status = it.plan ? 'listed' : it.reason === 'approximate' ? 'approximate' : it.reason === 'unlocated' ? 'unlocated' : 'passed';
-        return { kind: r.kind, name: r.name, at: r.at, lat: it.plan?.lat ?? r.lat, lng: it.plan?.lng ?? r.lng, status, ...(it.fail?.area ? { area: it.fail.area } : {}), ...(it.fail?.sameAs ? { sameAs: it.fail.sameAs } : {}) };
+        return { kind: r.kind, name: r.name, ...(r.place ? { place: r.place } : {}), at: r.at, lat: it.plan?.lat ?? r.lat, lng: it.plan?.lng ?? r.lng, status, ...(it.fail?.area ? { area: it.fail.area } : {}), ...(it.fail?.sameAs ? { sameAs: it.fail.sameAs } : {}) };
       }),
     };
   });

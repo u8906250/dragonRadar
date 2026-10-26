@@ -514,7 +514,10 @@ export interface RouteStopPlan {
   title: string;
   seq: number;
   kind: 'start' | 'cheer' | 'end';
+  /** 時間表上的站名 */
   name: string;
+  /** 這一站的地點（地址），跟站名不一樣時才有 */
+  place?: string;
   /** 這一站的事件標題（前端靠它對應到路線上的站） */
   stopTitle: string;
   /** 預計經過的時間 */
@@ -906,6 +909,7 @@ const taipeiDate = (unix: number): string => new Date((unix + 8 * 3600) * 1000).
 export function markRoutes(items: PlanItem[], text: string, routeTitle: string | null, now: number, retitle = true): PlanItem[] {
   const kw = ROUTE_RE.exec(text)?.[0];
   if (!kw) return items;
+  // name 是這一站的地點（place_text）
   const stops: Array<{ it: PlanItem; at: number; name: string }> = [];
   for (const it of items) {
     const p = it.plan;
@@ -945,8 +949,22 @@ export function markRoutes(items: PlanItem[], text: string, routeTitle: string |
       const p = it.plan;
       const own = p?.title ?? it.fail?.title ?? null;
       const stopTitle = retitle || !own ? `${title}・${name}` : own;
+      // 時間表寫站名：回報的人自己填的標題「路線名稱・蘇巧慧鶯歌服務處」取站名，地點填地址時另外列
+      const stopName = retitle ? name : stopNameOf(stopTitle, title, name);
       const query = p?.place_query ?? name;
-      const route: RouteStopPlan = { key, title, seq: i + 1, kind: i === 0 ? 'start' : i === list.length - 1 ? 'end' : 'cheer', name, stopTitle, at, lat: null, lng: null, ...(query !== name ? { query } : {}) };
+      const route: RouteStopPlan = {
+        key,
+        title,
+        seq: i + 1,
+        kind: i === 0 ? 'start' : i === list.length - 1 ? 'end' : 'cheer',
+        name: stopName,
+        ...(stopName !== name ? { place: name } : {}),
+        stopTitle,
+        at,
+        lat: null,
+        lng: null,
+        ...(query !== name ? { query } : {}),
+      };
       it.route = route;
       if (p && p.approx_area) {
         // 只定位到鄉鎮區、路：不放上雷達，請回報的人標位置（帶著約略位置，地圖從那裡開始）
@@ -973,11 +991,22 @@ export function markRoutes(items: PlanItem[], text: string, routeTitle: string |
   return items;
 }
 
+/**
+ * 時間表上的站名：標題「路線名稱・站名」（或「…・站名」）取「・」後面；標題就是路線名稱、取不出來的用地點
+ */
+export function stopNameOf(stopTitle: string, routeTitle: string, place: string): string {
+  const rest = stopTitle.startsWith(`${routeTitle}・`) ? stopTitle.slice(routeTitle.length + 1) : stopTitle.includes('・') ? stopTitle.slice(stopTitle.lastIndexOf('・') + 1) : stopTitle === routeTitle ? '' : stopTitle;
+  return rest.trim() || place;
+}
+
 /** routes.stops 存的一站 */
 interface StoredRouteStop {
   kind: 'start' | 'cheer' | 'end';
   title: string;
+  /** 站名 */
   name: string;
+  /** 地點（地址），跟站名不一樣時才有 */
+  place?: string;
   lat: number | null;
   lng: number | null;
   at: number | null;
@@ -1019,11 +1048,12 @@ export async function relocateRouteStops(env: Env, now: number): Promise<{ check
     for (const st of stops) {
       if (checked >= ROUTE_RELOCATE_PER_RUN) break;
       if (st.lat !== null || st.at === null || st.at + ROUTE_KEEP_SEC <= now) continue;
-      if (!addressOf(st.query ?? st.name, st.name) || (st.checkedAt ?? 0) > now - ROUTE_RELOCATE_EVERY_SEC) continue;
+      const place = st.place ?? st.name;
+      if (!addressOf(st.query ?? place, place) || (st.checkedAt ?? 0) > now - ROUTE_RELOCATE_EVERY_SEC) continue;
       checked++;
       st.checkedAt = now;
       changed = true;
-      const loc = await locatePlaceForEvent(env, st.query ?? st.name, st.name, Date.now() + ADDRESS_BUDGET_MS);
+      const loc = await locatePlaceForEvent(env, st.query ?? place, place, Date.now() + ADDRESS_BUDGET_MS);
       if (!loc.point || loc.approxArea) continue;
       st.lat = loc.point.lat;
       st.lng = loc.point.lng;
@@ -1032,7 +1062,7 @@ export async function relocateRouteStops(env: Env, now: number): Promise<{ check
       await insertPlanned(
         env,
         r.post_id,
-        { kind: 'activity', title: st.title, item: null, start_at: st.at - ROUTE_LEAD_SEC, end_at: st.at + ROUTE_KEEP_SEC, place_text: st.name, place_query: st.query ?? st.name, lat: st.lat, lng: st.lng, confidence: 1, all_day: false, spot: false, approx_area: null, end_open: false, until_open: false, tz: null, extra: null },
+        { kind: 'activity', title: st.title, item: null, start_at: st.at - ROUTE_LEAD_SEC, end_at: st.at + ROUTE_KEEP_SEC, place_text: place, place_query: st.query ?? place, lat: st.lat, lng: st.lng, confidence: 1, all_day: false, spot: false, approx_area: null, end_open: false, until_open: false, tz: null, extra: null },
         now,
       );
     }
@@ -1076,7 +1106,7 @@ async function saveRoutes(env: Env, postId: string, items: PlanItem[], now: numb
         first.at,
         last.at,
         last.at + ROUTE_KEEP_SEC,
-        JSON.stringify(stops.map((st): StoredRouteStop => ({ kind: st.kind, title: st.stopTitle, name: st.name, lat: st.lat, lng: st.lng, at: st.at, ...(st.query ? { query: st.query } : {}) }))),
+        JSON.stringify(stops.map((st): StoredRouteStop => ({ kind: st.kind, title: st.stopTitle, name: st.name, ...(st.place ? { place: st.place } : {}), lat: st.lat, lng: st.lng, at: st.at, ...(st.query ? { query: st.query } : {}) }))),
         JSON.stringify(segments),
         now,
       ),

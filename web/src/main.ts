@@ -1218,7 +1218,9 @@ function renderRouteDetail(r: RouteOut, items: Item[], now: number): void {
       // 回報的車掃：沒放上雷達的站講原因（經過了不用講）
       const why = !it && isReported(r) && !passed ? `<small>${st.lat === null ? '沒有確切位置，不在雷達上' : '不在雷達上'}</small>` : '';
       const dist = it ? `<small>${formatKm(it.distanceKm)} ${compassLabel(it.bearing)}${near}</small>` : why;
-      const body = `<span class="stop-time">${time}</span><span class="stop-name"><b>${stopLabel(r, st.kind)}</b>${esc(st.name)}${extra}${dist}</span>`;
+      // 回報的人地點填地址的：站名下面另外列地址
+      const place = st.place ? `<small class="stop-place">${esc(st.place)}</small>` : '';
+      const body = `<span class="stop-time">${time}</span><span class="stop-name"><b>${stopLabel(r, st.kind)}</b>${esc(st.name)}${place}${extra}${dist}</span>`;
       return `<li class="stop stop-${st.kind}${passed ? ' passed' : ''}${near ? ' nearest' : ''}">${it ? `<button type="button" data-select="${it.ev.id}">${body}</button>` : `<div>${body}</div>`}</li>`;
     })
     .join('');
@@ -3229,7 +3231,7 @@ function routePreviewHtml(rt: RoutePreview): string {
                 ? `<span class="preview-warn">跟「${esc(st.sameAs)}」定位在同一個地方，可能查錯了，不會放上雷達；可以按「補充資料」在地圖上標出位置</span>`
                 : '<span class="preview-warn">地圖上查不到，不會放上雷達；可以按「補充資料」補上地址或在地圖上標</span>'
               : '車隊已經經過';
-      return `<li class="stop stop-${st.kind}${st.status === 'passed' ? ' passed' : ''}"><div><span class="stop-time">${st.kind === 'start' ? '' : '約 '}${fmtTime(st.at)}</span><span class="stop-name"><b>${label[st.kind]}</b>${esc(st.name)}<small>${status}</small></span></div></li>`;
+      return `<li class="stop stop-${st.kind}${st.status === 'passed' ? ' passed' : ''}"><div><span class="stop-time">${st.kind === 'start' ? '' : '約 '}${fmtTime(st.at)}</span><span class="stop-name"><b>${label[st.kind]}</b>${esc(st.name)}${st.place ? `<small class="stop-place">${esc(st.place)}</small>` : ''}<small>${status}</small></span></div></li>`;
     })
     .join('');
   return `<li>

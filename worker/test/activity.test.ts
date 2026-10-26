@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { guessedMidnight, missingActivityParts, normalizeActivities, reconcileRouteStops, routeStopLines, type ExtractedEvent } from '../src/extract';
-import { markRoutes, type PlanItem } from '../src/events';
+import { markRoutes, stopNameOf, type PlanItem } from '../src/events';
 import { editItemsOf, editSummary, notListedWhy, parseEditItems, ReportError, reportModules, routePreviews } from '../src/reports';
 
 describe('normalizeActivities', () => {
@@ -209,6 +209,17 @@ describe('markRoutes', () => {
     expect(items[0].route?.stopTitle).toBe('我改的標題');
   });
 
+  it('names the stop from the title when the place is an address', () => {
+    const addr = '239新北市鶯歌區東鶯里文化路175號';
+    const items = markRoutes([planned('R・鶯歌永福宮', '鶯歌永福宮', T14), planned('R・蘇巧慧鶯歌服務處', addr, T14 + 1200)], '車掃', 'R', NOW, false);
+    expect(items[0].route).toMatchObject({ name: '鶯歌永福宮' });
+    expect(items[0].route?.place).toBeUndefined();
+    expect(items[1].route).toMatchObject({ name: '蘇巧慧鶯歌服務處', place: addr, stopTitle: 'R・蘇巧慧鶯歌服務處' });
+    expect(routePreviews(items)[0].stops[1]).toMatchObject({ name: '蘇巧慧鶯歌服務處', place: addr });
+    // 雷達上的這一站照樣是地址
+    expect(items[1].plan?.place_text).toBe(addr);
+  });
+
   it('lists the route for the preview and prefills the stop times', () => {
     const items = markRoutes(stops(), '車掃', 'R', NOW);
     expect(routePreviews(items)).toEqual([
@@ -225,6 +236,16 @@ describe('markRoutes', () => {
     const edit = editItemsOf(items);
     expect(edit.map((e) => [e.startAt, e.endAt])).toEqual([[T14, null], [T14 + 1200, null], [T14 + 3600, null], [T14 + 4500, null]]);
     expect(edit[1]).toMatchObject({ approxArea: '新北市鶯歌區', lat: 25.0012 });
+  });
+});
+
+describe('stopNameOf', () => {
+  it('takes the stop name from the stop title', () => {
+    expect(stopNameOf('蘇巧慧報告號次大車掃・蘇巧慧樹林服務處', '蘇巧慧報告號次大車掃', '238新北市樹林區大安路499號')).toBe('蘇巧慧樹林服務處');
+    expect(stopNameOf('別的名稱・樹林濟安宮', 'R', '樹林濟安宮')).toBe('樹林濟安宮');
+    expect(stopNameOf('R', 'R', '新北市樹林區大安路499號')).toBe('新北市樹林區大安路499號');
+    expect(stopNameOf('R・', 'R', '樹林濟安宮')).toBe('樹林濟安宮');
+    expect(stopNameOf('鶯歌永福宮出發', 'R', '新北市鶯歌區')).toBe('鶯歌永福宮出發');
   });
 });
 
