@@ -7,7 +7,7 @@ import { TAIWAN_RINGS } from './taiwan';
 import { LANDMARKS } from './landmarks';
 import { getModule, JOB_RISK_TEXT, JOB_SAFETY_TIPS, MEETUP_SAFETY_TIPS, MODULES, OFFER_SAFETY_TIPS, type ModuleDef, type ModuleId } from './modules';
 import { X_MAX_WEIGHT, xLength } from './xcount';
-import { splitPlace } from './place';
+import { shortAddress, splitPlace } from './place';
 import { crowdOf, MapView, pinPicker, type BaseMap, type PinPicker } from './map';
 import { beep, ensureNotificationPermission, iosNeedsHomeScreen, notificationState, pushSubscription, pushSupported, registerServiceWorker, showBanner, systemNotify, unlockAudio, unsubscribePush } from './notify';
 import { Radar, type RadarRoute } from './radar';
@@ -1219,7 +1219,7 @@ function renderRouteDetail(r: RouteOut, items: Item[], now: number): void {
       const why = !it && isReported(r) && !passed ? `<small>${st.lat === null ? '沒有確切位置，不在雷達上' : '不在雷達上'}</small>` : '';
       const dist = it ? `<small>${formatKm(it.distanceKm)} ${compassLabel(it.bearing)}${near}</small>` : why;
       // 回報的人地點填地址的：站名下面另外列地址
-      const place = st.place ? `<small class="stop-place">${esc(st.place)}</small>` : '';
+      const place = st.place ? `<small class="stop-place">${esc(shortAddress(st.place))}</small>` : '';
       const body = `<span class="stop-time">${time}</span><span class="stop-name"><b>${stopLabel(r, st.kind)}</b>${esc(st.name)}${place}${extra}${dist}</span>`;
       return `<li class="stop stop-${st.kind}${passed ? ' passed' : ''}${near ? ' nearest' : ''}">${it ? `<button type="button" data-select="${it.ev.id}">${body}</button>` : `<div>${body}</div>`}</li>`;
     })
@@ -2713,10 +2713,10 @@ function titleOf(ev: EventOut): string {
   return at > 0 ? ev.title.slice(0, at + name.length) : name;
 }
 
-/** 地點文字：據點的標題已經是店名，這裡只寫地址 */
+/** 地點文字：據點的標題已經是店名，這裡只寫地址；不寫郵遞區號和里 */
 function placeOf(ev: EventOut): string {
   const p = ev.spot ? splitPlace(ev.placeText) : null;
-  return p?.name ? p.address : ev.placeText;
+  return shortAddress(p?.name ? p.address : ev.placeText);
 }
 
 function placeLine(ev: EventOut): string {
@@ -3231,7 +3231,7 @@ function routePreviewHtml(rt: RoutePreview): string {
                 ? `<span class="preview-warn">跟「${esc(st.sameAs)}」定位在同一個地方，可能查錯了，不會放上雷達；可以按「補充資料」在地圖上標出位置</span>`
                 : '<span class="preview-warn">地圖上查不到，不會放上雷達；可以按「補充資料」補上地址或在地圖上標</span>'
               : '車隊已經經過';
-      return `<li class="stop stop-${st.kind}${st.status === 'passed' ? ' passed' : ''}"><div><span class="stop-time">${st.kind === 'start' ? '' : '約 '}${fmtTime(st.at)}</span><span class="stop-name"><b>${label[st.kind]}</b>${esc(st.name)}${st.place ? `<small class="stop-place">${esc(st.place)}</small>` : ''}<small>${status}</small></span></div></li>`;
+      return `<li class="stop stop-${st.kind}${st.status === 'passed' ? ' passed' : ''}"><div><span class="stop-time">${st.kind === 'start' ? '' : '約 '}${fmtTime(st.at)}</span><span class="stop-name"><b>${label[st.kind]}</b>${esc(st.name)}${st.place ? `<small class="stop-place">${esc(shortAddress(st.place))}</small>` : ''}<small>${status}</small></span></div></li>`;
     })
     .join('');
   return `<li>
@@ -3258,7 +3258,7 @@ function renderPreview(r: SubmitResult): void {
           ${p.kind === 'job' && (jobOf(p).risks ?? []).some((r) => r !== 'no_employer') ? `<small class="preview-warn">⚠️ ${esc((jobOf(p).risks ?? []).map((r) => JOB_RISK_TEXT[r]).filter(Boolean).join('；'))}</small>` : ''}
           ${p.item ? `<small>${esc(p.item)}</small>` : ''}
           <small>時間：${esc(previewWhen(p))}</small>
-          <small>地點：${esc(p.placeText.replace(/\s*\n\s*/g, ' '))}</small>
+          <small>地點：${esc(shortAddress(p.placeText.replace(/\s*\n\s*/g, ' ')))}</small>
           <small>${previewWhere(p)}</small>
           ${p.profileHint ? `<small class="preview-warn">📍 貼文沒寫地點，這是從 ${esc(p.profileHint)} 的帳號名稱、簡介推的，請確認是不是這裡。</small>` : ''}
           ${p.update ? `<small class="preview-warn">${esc(updateNote(p.update))}</small>` : ''}
@@ -3395,7 +3395,7 @@ function failuresHtml(fails: FailedItem[]): string {
   return `<ul class="report-preview">${fails
     .map(
       (f, i) =>
-        `<li><b>${esc(name(f, i))}</b>${f.place && f.reason !== 'unlocated' ? `<small>地點：${esc(f.place)}</small>` : ''}<small class="preview-warn">${esc(failureReason(f))}</small></li>`,
+        `<li><b>${esc(name(f, i))}</b>${f.place && f.reason !== 'unlocated' ? `<small>地點：${esc(shortAddress(f.place))}</small>` : ''}<small class="preview-warn">${esc(failureReason(f))}</small></li>`,
     )
     .join('')}</ul>`;
 }

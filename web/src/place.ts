@@ -48,3 +48,12 @@ export function splitPlace(text: string): { name: string | null; address: string
   }
   return { name: null, address: full };
 }
+
+/** 郵遞區號（在縣市前面）；里、鄰（在鄉鎮市區後面，接著是路名門牌）。「萬里區」「大里區」「萬里路」的里不算 */
+const POSTAL = new RegExp(`\\d{3}(?:\\d{2,3})?\\s*(?=${CITY})`, 'g');
+const VILLAGE = /([區鄉鎮市])[^\s\d區鄉鎮市縣路街巷段道弄號里]{1,3}里(?:\d+鄰)?(?![區鄉鎮市路街巷段道弄號])(?=\S*?(?:路|街|大道)\S*?\d+(?:[之-]\d+)?號)/g;
+
+/** 顯示用的地址：拿掉郵遞區號和里名（「239新北市鶯歌區東鶯里文化路175號」→「新北市鶯歌區文化路175號」） */
+export function shortAddress(text: string): string {
+  return text.replace(POSTAL, '').replace(VILLAGE, '$1');
+}

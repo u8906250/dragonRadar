@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { splitPlace } from '../src/place';
+import { shortAddress, splitPlace } from '../src/place';
 
 describe('splitPlace', () => {
   it('takes the shop name before the address', () => {
@@ -35,5 +35,20 @@ describe('splitPlace floors', () => {
     expect(splitPlace('台北市大安區光復南路290巷48號 B1')).toEqual({ name: null, address: '台北市大安區光復南路290巷48號 B1' });
     expect(splitPlace('台北市松山區復興北路167號14樓之4 TIA辦公室')).toEqual({ name: 'TIA辦公室', address: '台北市松山區復興北路167號14樓之4' });
     expect(splitPlace('台北市大同區迪化街一段32巷1號2F 爐鍋咖啡')).toEqual({ name: '爐鍋咖啡', address: '台北市大同區迪化街一段32巷1號2F' });
+  });
+});
+
+describe('shortAddress', () => {
+  it('drops the postal code and the village', () => {
+    expect(shortAddress('239新北市鶯歌區東鶯里文化路175號')).toBe('新北市鶯歌區文化路175號');
+    expect(shortAddress('242新北市新莊區光華里民安西路319號')).toBe('新北市新莊區民安西路319號');
+    expect(shortAddress('Thebirdscafe鳥咖啡 110臺北市信義區中興里信義路四段399號')).toBe('Thebirdscafe鳥咖啡 臺北市信義區信義路四段399號');
+    expect(shortAddress('台中市大里區大明里5鄰大明路1號')).toBe('台中市大里區大明路1號');
+  });
+  it('keeps districts and roads named with 里 and plain place names', () => {
+    expect(shortAddress('新北市萬里區萬里路1號')).toBe('新北市萬里區萬里路1號');
+    expect(shortAddress('新北市萬里區萬里國小')).toBe('新北市萬里區萬里國小');
+    expect(shortAddress('鶯歌永福宮')).toBe('鶯歌永福宮');
+    expect(shortAddress('台北市大安區大安森林公園')).toBe('台北市大安區大安森林公園');
   });
 });
