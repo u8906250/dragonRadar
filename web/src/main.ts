@@ -516,14 +516,24 @@ function eventTimeText(ev: EventOut): string {
 }
 
 /**
- * 貼文沒寫結束時間時的說法：不自己猜時間。發放寫「發完為止」；
- * 洋流的活動不一定是發東西，單場的什麼都不寫（只寫幾點開始），空字串
+ * 貼文沒寫結束時間時的說法。發放寫「發完為止」；
+ * 洋流的單場活動不一定是發東西，不寫發完為止，寫雷達先估到幾點（從開始排兩小時）；不知道排到幾點的（好幾個時段一起寫）什麼都不寫
  */
-const openEndText = (ev: { kind: EventOut['kind']; spot?: boolean }): string =>
+const openEndText = (ev: { kind: EventOut['kind']; spot?: boolean; endAt?: number; tz?: string | null }): string =>
   // 臨打、擺攤的每週固定場沒寫到哪天：長期開放；單場沒寫幾點結束
-  ev.kind === 'session' || ev.kind === 'food' ? (ev.spot ? '長期開放' : '沒寫結束時間') : ev.kind === 'activity' ? (ev.spot ? '長期開放' : '') : '發完為止';
+  ev.kind === 'session' || ev.kind === 'food'
+    ? ev.spot
+      ? '長期開放'
+      : '沒寫結束時間'
+    : ev.kind === 'activity'
+      ? ev.spot
+        ? '長期開放'
+        : ev.endAt
+          ? `沒寫結束時間，預估到 ${fmtTimeTz(ev.endAt, localTz(ev))}`
+          : ''
+      : '發完為止';
 /** 「，發完為止」；活動沒有說法就不加 */
-const openEndTail = (ev: { kind: EventOut['kind']; spot?: boolean }): string => (openEndText(ev) ? `，${openEndText(ev)}` : '');
+const openEndTail = (ev: { kind: EventOut['kind']; spot?: boolean; endAt?: number; tz?: string | null }): string => (openEndText(ev) ? `，${openEndText(ev)}` : '');
 
 /** 每週幾：[2, 4] →「每週二、四」，沒有就是 null */
 function weeklyText(days: number[] | null | undefined): string | null {
@@ -2909,7 +2919,7 @@ function previewWhen(p: PreviewItem): string {
   // 一天好幾個時段：「12:00–13:30、18:00–20:30」；沒寫結束的只寫開始，最後寫「發完為止」（活動不寫）
   const open = openEndTail(p);
   const slotText = (s: { startAt: number; endAt: number; endOpen?: boolean }): string => (s.endOpen ? `${fmtTime(s.startAt)} 開始` : `${fmtTime(s.startAt)}–${fmtTime(s.endAt)}`);
-  const slots = p.slots && p.slots.length > 1 ? `${p.slots.map(slotText).join('、')}${p.slots.some((s) => s.endOpen) ? open : ''}` : null;
+  const slots = p.slots && p.slots.length > 1 ? `${p.slots.map(slotText).join('、')}${p.slots.some((s) => s.endOpen) ? openEndTail({ kind: p.kind, spot: p.spot }) : ''}` : null;
   if (p.spot) {
     const hours = p.allDay ? '整天' : slots ?? (p.endOpen ? `${fmtTime(p.startAt)} 開始${open}` : `${fmtTime(p.startAt)}–${fmtTime(p.endAt)}`);
     // 沒寫最後一天：不寫系統排到哪天，只寫「發完為止」
