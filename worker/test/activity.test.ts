@@ -30,6 +30,15 @@ describe('normalizeActivities', () => {
   });
 });
 
+describe('normalizeActivities place from the bio', () => {
+  it('uses the query when the model copied the bio line into the place', () => {
+    const ex = normalizeActivities({ is_event: true, reason: null, events: [{ title: '發飄帶', start_at: null, end_at: null, place_text: '@bloomteatw：簡介「可外送、自取 地址：板橋區文化路一段343號」', place_query: '新北市板橋區文化路一段343號', confidence: 0.9 }] });
+    expect(ex?.events[0].place_text).toBe('新北市板橋區文化路一段343號');
+    const ok = normalizeActivities({ is_event: true, reason: null, events: [{ title: '發飄帶', start_at: null, end_at: null, place_text: '板橋區文化路一段343號', place_query: '新北市板橋區文化路一段343號', confidence: 0.9 }] });
+    expect(ok?.events[0].place_text).toBe('板橋區文化路一段343號');
+  });
+});
+
 describe('missingActivityParts', () => {
   const full = { title: '保安宮市政開講', place_text: '保安宮', place_query: '台北市 大龍峒保安宮', start_at: '2026-10-26T19:00:00+08:00', end_at: '2026-10-26T21:00:00+08:00' };
   it('accepts content, place and start', () => {

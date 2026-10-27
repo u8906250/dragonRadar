@@ -287,6 +287,11 @@ export function reconcileRouteStops(events: ExtractedEvent[], text: string): Ext
 }
 
 /** 洋流（改版後）：只判斷活動，每一場要有內容、地點、開始和結束時間 */
+/** 模型有時把【帳號簡介】那一整行抄進地點（「@xxx：簡介「…地址：板橋區…」」）：改用查詢用的地址 */
+function placeFromBio(placeText: string | null, query: string | null): string | null {
+  return placeText && /簡介「|^@[A-Za-z0-9_.]+[：:]/.test(placeText) ? (query ?? placeText) : placeText;
+}
+
 export function normalizeActivities(raw: unknown): Extraction | null {
   const obj = parseLoose(raw);
   if (!obj || typeof obj !== 'object' || Array.isArray(obj)) return null;
@@ -300,7 +305,7 @@ export function normalizeActivities(raw: unknown): Extraction | null {
       item: null,
       start_at: str(e.start_at),
       end_at: str(e.end_at),
-      place_text: str(e.place_text),
+      place_text: placeFromBio(str(e.place_text), str(e.place_query)),
       place_query: str(e.place_query),
       confidence: conf(e.confidence),
       spot: false,
