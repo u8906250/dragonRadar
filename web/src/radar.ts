@@ -643,9 +643,9 @@ export class Radar {
     return a * period;
   }
 
-  /** 掃過時名稱亮多久（毫秒）：一圈的 45%，最多 1.8 秒（波紋一圈很短，名稱不會一直亮著） */
+  /** 掃過時名稱亮多久（毫秒）：一圈的 75%，最多 3 秒（波紋一圈很短，名稱不會一直亮著） */
   private sweepLabelMs(): number {
-    return Math.min(1800, SWEEP_SEC[this.style.sweep] * 1000 * 0.45);
+    return Math.min(3000, SWEEP_SEC[this.style.sweep] * 1000 * 0.75);
   }
 
   /** 一圈裡第幾毫秒會被掃到 */
@@ -751,7 +751,7 @@ export class Radar {
       target.animate([keep(part.from), keep(part.to)], { duration: part.ms, easing: 'linear' });
     }
     // 名稱：淡入、停一下、淡出
-    g.querySelector<SVGElement>('.sweep-label')?.animate([{ opacity: 0 }, { opacity: 1, offset: 0.15 }, { opacity: 1, offset: 0.7 }, { opacity: 0 }], { duration: this.sweepLabelMs(), easing: 'ease-out' });
+    g.querySelector<SVGElement>('.sweep-label')?.animate([{ opacity: 0 }, { opacity: 1, offset: 0.1 }, { opacity: 1, offset: 0.75 }, { opacity: 0 }], { duration: this.sweepLabelMs(), easing: 'ease-out' });
   }
 
   private appendMark(g: SVGGElement, out: boolean, spot = false, office = false): void {
