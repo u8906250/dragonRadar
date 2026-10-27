@@ -244,6 +244,8 @@ a.chip { display: inline-flex; align-items: center; text-decoration: none; }
 .radar .blip.phase-later .core, .radar .blip.phase-later .ping { display: none; }
 .radar .blip .badge { fill: var(--label); font-size: 10px; font-weight: 800; paint-order: stroke; stroke: var(--label-halo); stroke-width: 3px; stroke-linejoin: round; pointer-events: none; }
 .radar .blip .label { fill: var(--label); font-size: 12px; font-weight: 600; paint-order: stroke; stroke: var(--label-halo); stroke-width: 3px; stroke-linejoin: round; pointer-events: none; }
+/* 掃過時才短暫出現的名稱（平常看不到） */
+.radar .blip .sweep-label { opacity: 0; font-size: 11px; }
 /* 活動：換顏色，進行中時一樣閃爍 */
 .radar .blip.kind-activity .dot { fill: var(--blip-activity); }
 .radar .blip.kind-activity .mark { stroke: var(--blip-activity); }
