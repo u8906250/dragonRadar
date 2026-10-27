@@ -902,6 +902,8 @@ describe('threads profile hints', () => {
     expect(profileCandidates('準備了50個 由挺台店家@luguocafe "爐鍋咖啡@ 小藝埕" 代為發放', 'kylekuo1979')).toEqual(['luguocafe']);
     expect(profileCandidates('本店今天發飄帶，希望 @pumashen 當選', 'someshop')).toEqual(['someshop']);
     expect(profileCandidates('支持 @pumashen 加油', 'someone')).toEqual([]);
+    expect(profileCandidates('現在開始不限制發的時間\n基本上我們有就可以領\n請直接跟我們說要哪一款', 'bloomteatw')).toEqual(['bloomteatw']);
+    expect(profileCandidates('我們有去領飄帶，好開心', 'someone')).toEqual([]);
     expect(profileCandidates('若 10.23 臺北市放颱風假，美好也將配合店休\n設計師 @sasaki790108\n請在櫃檯出示您的船員證', 'lovelyrooom')).toEqual(['lovelyrooom']);
   });
 });
