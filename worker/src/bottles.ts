@@ -233,7 +233,8 @@ async function moderate(env: Env, text: string): Promise<{ allowed: boolean; rea
   };
   for (const model of [env.AI_MODEL, env.AI_MODEL_FALLBACK].filter((m): m is string => !!m)) {
     try {
-      const res = await ai.run(model, { messages, response_format: { type: 'json_schema', json_schema: schema }, max_tokens: 200, temperature: 0 });
+      // 備用模型會先推理再回答，推理也算在 max_tokens 裡，給寬一點
+      const res = await ai.run(model, { messages, response_format: { type: 'json_schema', json_schema: schema }, max_tokens: 1000, temperature: 0 });
       const c = responseContent(res);
       const o = (typeof c === 'string' ? JSON.parse(c.replace(/^[^{]*/, '').replace(/[^}]*$/, '')) : c) as { allowed?: unknown; reason?: unknown };
       if (typeof o?.allowed === 'boolean') return { allowed: o.allowed, reason: typeof o.reason === 'string' ? o.reason.slice(0, 80) : '' };
