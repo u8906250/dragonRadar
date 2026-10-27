@@ -683,12 +683,21 @@ export async function planPost(env: Env, post: PostRow, now = nowSec()): Promise
   const hint = profileHintText(profiles);
   if (!hint) return first;
   const second = await planPostWith(env, post, now, hint);
-  if (located(second.items) <= located(first.items)) return first;
+  if (!profilePlanBetter(first.items, second.items)) return first;
   const from = profiles.filter((p) => p.name || p.bio).map((p) => `@${p.username}`).join('、');
   return { ...second, items: second.items.map((it) => (it.plan && it.plan.lat !== null ? { ...it, profileHint: from } : it)) };
 }
 
 const located = (items: PlanItem[]): number => items.filter((it) => it.plan && it.plan.lat !== null).length;
+/** 有地點的筆數：放得上雷達的，或沒放上但地點有寫、也不是查不到的（例如只缺時間） */
+const withPlace = (items: PlanItem[]): number => items.filter((it) => (it.plan ? it.plan.lat !== null : !!it.fail?.place && !noPlaceReason(it.reason))).length;
+/**
+ * 讀了帳號簡介的判讀比較好才用：放得上雷達的多；一樣多時，有地點的多
+ * （簡介寫了地址、貼文只缺時間：回報的人在表單補上時間就好，不要退回「不是活動」）
+ */
+export function profilePlanBetter(first: PlanItem[], second: PlanItem[]): boolean {
+  return (located(second) - located(first) || withPlace(second) - withPlace(first)) > 0;
+}
 /** 這一筆沒有地點：沒寫、或查不到（洋流的活動缺地點記成 incomplete:place…、查不到記成 unlocated） */
 const noPlaceReason = (reason: string): boolean => reason === 'no_place' || reason === 'unlocated' || /^incomplete:(?:.*,)?place\b/.test(reason);
 /** 判讀得出來，但地點都找不到（沒寫地點、或查不到） */

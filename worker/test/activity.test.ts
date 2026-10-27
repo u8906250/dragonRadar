@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { guessedMidnight, missingActivityParts, normalizeActivities, reconcileRouteStops, routeStopLines, type ExtractedEvent } from '../src/extract';
-import { markRoutes, stopNameOf, type PlanItem } from '../src/events';
+import { markRoutes, profilePlanBetter, stopNameOf, type PlanItem } from '../src/events';
 import { editItemsOf, editSummary, notListedWhy, parseEditItems, ReportError, reportModules, routePreviews } from '../src/reports';
 
 describe('normalizeActivities', () => {
@@ -236,6 +236,27 @@ describe('markRoutes', () => {
     const edit = editItemsOf(items);
     expect(edit.map((e) => [e.startAt, e.endAt])).toEqual([[T14, null], [T14 + 1200, null], [T14 + 3600, null], [T14 + 4500, null]]);
     expect(edit[1]).toMatchObject({ approxArea: '新北市鶯歌區', lat: 25.0012 });
+  });
+});
+
+describe('profilePlanBetter', () => {
+  const noTime: PlanItem = { group: 0, plan: null, reason: 'incomplete:start', fail: { title: '發飄帶', place: '板橋區文化路一段343號', reason: 'incomplete', missing: ['start'] } };
+  const noPlace: PlanItem = { group: 0, plan: null, reason: 'incomplete:place,start', fail: { title: '發飄帶', place: null, reason: 'incomplete', missing: ['place', 'start'] } };
+  const listed: PlanItem = {
+    group: 0,
+    plan: { kind: 'activity', title: '發飄帶', item: null, start_at: 1, end_at: 2, place_text: 'x', place_query: 'x', lat: 25, lng: 121.5, confidence: 1, all_day: false, spot: false, approx_area: null, end_open: true, until_open: false },
+    reason: 'planned',
+  };
+  it('prefers the bio result when it finds the place, even without a time', () => {
+    // 第一次判成不是活動（沒有任何一筆）、讀簡介後地點有了只缺時間
+    expect(profilePlanBetter([], [noTime])).toBe(true);
+    expect(profilePlanBetter([noPlace], [noTime])).toBe(true);
+    expect(profilePlanBetter([noTime], [listed])).toBe(true);
+  });
+  it('keeps the first result when the bio does not help', () => {
+    expect(profilePlanBetter([], [noPlace])).toBe(false);
+    expect(profilePlanBetter([noTime], [noTime])).toBe(false);
+    expect(profilePlanBetter([listed], [noTime])).toBe(false);
   });
 });
 
