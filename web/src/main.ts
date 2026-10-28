@@ -1339,7 +1339,7 @@ function renderRouteDetail(r: RouteOut, items: Item[], now: number): void {
   const target = r.segments.reduce((n, s) => n + s.target, 0);
   const needy = [...r.segments].filter((sg) => crowdOf(sg.people, sg.target) === 'empty' || crowdOf(sg.people, sg.target) === 'low').length;
   const rows = r.stops
-    .map((st) => {
+    .map((st, i) => {
       const it = mine.find((x) => (isReported(r) ? stopMatches(st, x.ev) : x.ev.title === st.title));
       const time = st.at ? `${st.kind === 'cheer' || (isReported(r) && st.kind === 'end') ? '約 ' : ''}${fmtTime(st.at)}` : '—';
       const passed = st.at !== null && st.at <= now && st.kind !== 'end';
@@ -1347,7 +1347,9 @@ function renderRouteDetail(r: RouteOut, items: Item[], now: number): void {
       const extra = st.kind === 'end' && it && !isReported(r) && !it.ev.allDay && !it.ev.title.includes('抵達') ? `<small>${esc(it.ev.title.split('・')[0])} ${fmtTime(it.ev.startAt)}–${fmtTime(it.ev.endAt)}</small>` : '';
       const near = it && it === nearestStop ? '・離你最近' : '';
       // 回報的車掃：沒放上雷達的站講原因（經過了不用講）
-      const why = !it && isReported(r) && !passed ? `<small>${st.lat === null ? '沒有確切位置，不在雷達上' : '不在雷達上'}</small>` : '';
+      // 沒有確切位置的：知道在哪的人直接回報那一站的地點（管理者標好就放上雷達）
+      const fix = st.lat === null && mine[0] ? `<button type="button" class="stop-fix" data-fix="${i}">我知道在哪</button>` : '';
+      const why = !it && isReported(r) && !passed ? `<small>${st.lat === null ? '沒有確切位置，不在雷達上' : '不在雷達上'}</small>${fix}` : '';
       const dist = it ? `<small>${formatKm(it.distanceKm)} ${compassLabel(it.bearing)}${near}</small>` : why;
       // 回報的人地點填地址的：站名下面另外列地址
       const place = st.place ? `<small class="stop-place">${esc(shortAddress(st.place))}</small>` : '';
@@ -1395,6 +1397,11 @@ function renderRouteDetail(r: RouteOut, items: Item[], now: number): void {
   detailEl.querySelector('[data-act="route-feedback"]')?.addEventListener('click', () => {
     if (mine[0]) openFeedback(mine[0].ev, r);
   });
+  for (const b of detailEl.querySelectorAll<HTMLButtonElement>('[data-fix]')) {
+    b.addEventListener('click', () => {
+      if (mine[0]) openFeedback(mine[0].ev, r, Number(b.dataset.fix));
+    });
+  }
   detailEl.querySelector('[data-act="route-map"]')?.addEventListener('click', () => {
     // 收起時間表，不然整條路線被蓋住；還沒出發的路線照樣畫出來（點其他地方才收起）
     selectedRoute = null;
@@ -2093,7 +2100,8 @@ let feedbackStops: RouteStop[] | null = null;
  * 回報問題：疊在詳細資料上面，選類型、寫說明。
  * 回報的車掃可以選哪一站（從某一站打開時預設那一站，從時間表打開時預設整條路線），多一個「刪除這一站」
  */
-function openFeedback(ev: EventOut, fromRoute?: RouteOut): void {
+/** fixStop：時間表上沒有確切位置的站按「我知道在哪」，先選好那一站、地點錯誤 */
+function openFeedback(ev: EventOut, fromRoute?: RouteOut, fixStop?: number): void {
   feedbackEventId = ev.id;
   feedbackForm.reset();
   const r = fromRoute ?? routeOf(ev);
@@ -2108,8 +2116,17 @@ function openFeedback(ev: EventOut, fromRoute?: RouteOut): void {
   }
   $('#feedback-stop-row').hidden = !route;
   $('#feedback-remove-stop').hidden = !route;
+  const fix = route && fixStop !== undefined ? route.stops[fixStop] : undefined;
+  if (fix) {
+    select.value = String(fixStop);
+    (feedbackForm.elements.namedItem('kind') as RadioNodeList).value = 'location';
+  }
   // 車掃：某一站地點錯了，請寫正確的地點（管理者照這個改那一站）
-  feedbackNote.placeholder = route ? '補充說明（選填）。某一站的地點錯了，請寫那一站正確的地址或店名' : '補充說明（選填），例如：實際在 2 號出口、15:00 才開始';
+  feedbackNote.placeholder = fix
+    ? `「${fix.name}」在哪裡？請寫地址或店名，也可以貼 Google 地圖的座標`
+    : route
+      ? '補充說明（選填）。某一站的地點錯了，請寫那一站正確的地址或店名'
+      : '補充說明（選填），例如：實際在 2 號出口、15:00 才開始';
   $('#feedback-target').textContent = route ? `「${route.title}」哪裡有問題？` : `「${titleOf(ev)}」哪裡有問題？`;
   feedbackSheet.hidden = false;
 }
@@ -2134,6 +2151,13 @@ async function submitFeedback(): Promise<void> {
     $<HTMLSelectElement>('#feedback-stop').focus();
     return;
   }
+  // 沒有確切位置的站：沒寫在哪裡，管理者也沒辦法放上雷達
+  const locating = kind === 'location' && !!stop && stop.lat === null;
+  if (locating && !note) {
+    showBanner(bannerEl, `請寫「${stop.name}」在哪裡（地址或店名）`, 3000);
+    feedbackNote.focus();
+    return;
+  }
   feedbackSubmit.disabled = true;
   const r = await sendFeedback(feedbackEventId, kind, note, stop ? { title: stop.title, at: stop.at } : undefined);
   feedbackSubmit.disabled = false;
@@ -2143,7 +2167,7 @@ async function submitFeedback(): Promise<void> {
   }
   feedbackSheet.hidden = true;
   feedbackEventId = null;
-  showBanner(bannerEl, r.data.duplicate ? '你已經回報過這個問題了，謝謝' : '謝謝回報，管理者會盡快處理', 3500);
+  showBanner(bannerEl, r.data.duplicate ? '你已經回報過這個問題了，謝謝' : locating ? '謝謝回報，管理者確認位置後就會放上雷達' : '謝謝回報，管理者會盡快處理', 3500);
 }
 
 async function sendEnded(ev: EventOut, btn: HTMLButtonElement): Promise<void> {

@@ -85,6 +85,8 @@ export async function submitFeedback(
   const stop = stopTitle ? await findRouteStop(env, ev.post_id, stopTitle, stopAt) : null;
   if (stopTitle && !stop) throw new PushError(404, '找不到這一站，路線可能更新過了，請重新整理再試');
   if (b.kind === 'remove_stop' && !stop) throw new PushError(400, '請選擇要刪除哪一站');
+  // 沒有確切位置的站回報地點：沒寫在哪裡就沒辦法放上雷達
+  if (b.kind === 'location' && stop && stop.lat === null && !note) throw new PushError(400, `請寫「${stop.name}」在哪裡（地址或店名）`);
   // 那一站在雷達上的點
   const stopEvent = stop
     ? await env.DB.prepare(
