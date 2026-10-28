@@ -491,6 +491,8 @@ a.chip { display: inline-flex; align-items: center; text-decoration: none; }
 .edit-map { height: 220px; border-radius: var(--card-radius); border: var(--border-w) solid var(--line); overflow: hidden; }
 /* 回報地點錯誤的小地圖 */
 .feedback-pin { display: grid; gap: 6px; margin: 4px 0 8px; }
+.feedback-find { flex-wrap: nowrap; }
+.feedback-find input { flex: 1 1 auto; min-width: 0; font: inherit; font-size: 16px; color: var(--text); background: var(--card); border: var(--border-w) solid var(--line); border-radius: var(--card-radius); padding: 6px 10px; }
 .edit-map[hidden], .edit-item [hidden] { display: none; }
 /* 送出中：標位置的小地圖也鎖住，表單變淡 */
 #report-result.busy .edit-map { pointer-events: none; }

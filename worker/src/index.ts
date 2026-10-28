@@ -10,7 +10,7 @@ import { CURRENT_MAP_URL } from './sources/currentmap';
 import { mergeIntoOfficial } from './sources/merge';
 import { apifyTrial } from './sources/apify';
 import { fetchThreadsPost, resolveThreadsLink, shortcodeToUnix } from './sources/link';
-import { adminLocate, applyFeedback, deleteAdminSubscription, listFeedback, notifyAdmins, purgeFeedback, saveAdminSubscription, setFeedbackStatus, submitFeedback } from './feedback';
+import { adminLocate, applyFeedback, deleteAdminSubscription, listFeedback, locateForFeedback, notifyAdmins, purgeFeedback, saveAdminSubscription, setFeedbackStatus, submitFeedback } from './feedback';
 import { SESSION_SPEC } from './badminton';
 import { FOOD_SPEC } from './food';
 import { JOB_SPEC } from './jobs';
@@ -51,7 +51,7 @@ async function sha1Hex(s: string): Promise<string> {
 }
 
 /** 使用者回報會寫入的 API（管理者的不算） */
-const REPORT_WRITE_RE = /^\/api\/(?:reports(?:\/(?:confirm|supplement|edit|locate|reject))?|events\/\d+\/(?:ended|feedback)|spot-requests)$/;
+const REPORT_WRITE_RE = /^\/api\/(?:reports(?:\/(?:confirm|supplement|edit|locate|reject))?|events\/\d+\/(?:ended|feedback|locate)|spot-requests)$/;
 
 function isAdmin(req: Request, env: Env): boolean {
   if (!env.ADMIN_TOKEN) return false;
@@ -310,6 +310,13 @@ async function handle(req: Request, env: Env, ctx: ExecutionContext): Promise<Re
     const { result, created } = await submitFeedback(env, Number(fbMatch[1]), await readJson(req), await deviceId(env, req), await ipHash(env, req), now);
     if (created) ctx.waitUntil(notifyAdmins(env, created, now).catch((e) => console.warn('notify admins failed', e)));
     return jsonResponse(result);
+  }
+
+  // 回報地點錯誤的「查地點」：{ place }，查到的標在回報表單的小地圖上
+  const fbLocate = /^\/api\/events\/(\d+)\/locate$/.exec(path);
+  if (req.method === 'POST' && fbLocate) {
+    await assertEventReportsOpen(env, Number(fbLocate[1]));
+    return jsonResponse(await locateForFeedback(env, Number(fbLocate[1]), await readJson(req), await deviceId(env, req), await ipHash(env, req), now));
   }
 
   const evMatch = /^\/api\/events\/(\d+)$/.exec(path);

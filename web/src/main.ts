@@ -1,5 +1,5 @@
 import './styles.css';
-import { addKeyword, collectLetter, deletePushSubscription, sendFeedback, type FeedbackKind, fetchPushKey, savePushSubscription, confirmReport, editReport, locatePlace, rejectReport, supplementReport, deleteBottle, dropBottle, recycleBottle, fetchBottles, fetchEvents, fetchHealth, fetchKeywords, fetchMyBottles, fetchMyReports, fetchRoutes, pickBottle, reportBottle, reportEnded, submitLink, withdrawReport } from './api';
+import { addKeyword, collectLetter, deletePushSubscription, locateFeedbackPlace, sendFeedback, type FeedbackKind, fetchPushKey, savePushSubscription, confirmReport, editReport, locatePlace, rejectReport, supplementReport, deleteBottle, dropBottle, recycleBottle, fetchBottles, fetchEvents, fetchHealth, fetchKeywords, fetchMyBottles, fetchMyReports, fetchRoutes, pickBottle, reportBottle, reportEnded, submitLink, withdrawReport } from './api';
 import { compassSupported, startCompass } from './compass';
 import { bearingDeg, compassLabel, destination, formatKm, haversineKm, taiwanRadiusKm, type LatLng } from './geo';
 import { inShuangbei, SHUANGBEI_RINGS, shuangbeiRadiusKm } from './shuangbei';
@@ -2222,6 +2222,7 @@ function resetFeedbackPin(): void {
   feedbackPicker = null;
   feedbackPickerFor = '';
   feedbackPin = null;
+  feedbackFound = '';
 }
 
 /** 選的那一站（沒選、不是車掃是 undefined） */
@@ -2230,14 +2231,56 @@ const feedbackStop = (): RouteStop | undefined => {
   return feedbackStops && picked !== '' ? feedbackStops[Number(picked)] : undefined;
 };
 
+/** 查地點的結果（寫在小地圖上面）；換站、清除標記、自己點地圖就不顯示 */
+let feedbackFound = '';
+
 function feedbackPinState(): void {
   const st = feedbackStop();
-  $('#feedback-pin-state').textContent = feedbackPin
+  $('#feedback-pin-state').textContent = feedbackFound || (feedbackPin
     ? '標好了，送出後管理者確認就會改；不對可以拖紅色標記或再點一次地圖'
     : st && st.lat === null
       ? `點地圖標出「${st.name}」在哪裡，或在下面寫地址、店名`
-      : '點地圖標出正確的位置（灰點是現在的位置），也可以只寫說明';
+      : '寫地址、店名按「查地點」，或直接點地圖標出正確的位置（灰點是現在的位置）；也可以只寫說明');
   $('#feedback-unpin').hidden = !feedbackPin;
+}
+
+/** 查地點：查到確切位置就標上去（再拖可以改），只查到約略位置就移過去讓人自己點；說明沒寫就帶入查的地點，管理者看得到 */
+async function findFeedbackPlace(): Promise<void> {
+  const input = $<HTMLInputElement>('#feedback-place');
+  const btn = $<HTMLButtonElement>('#feedback-locate');
+  const place = input.value.trim();
+  if (place.length < 2 || feedbackEventId === null) {
+    showBanner(bannerEl, '請先寫地址或店名', 2500);
+    input.focus();
+    return;
+  }
+  btn.disabled = true;
+  btn.textContent = '查詢中…';
+  const r = await locateFeedbackPlace(feedbackEventId, place);
+  btn.disabled = false;
+  btn.textContent = '查地點';
+  if (!r.ok) {
+    showBanner(bannerEl, r.message, 3500);
+    return;
+  }
+  if (!feedbackPicker) {
+    showBanner(bannerEl, '地圖還在載入，請再按一次', 2500);
+    return;
+  }
+  const { found, lat, lng, name, approxArea } = r.data;
+  if (!found || lat === null || lng === null) {
+    feedbackFound = '查不到這個地點，請寫完整地址或店名，或直接在地圖上點';
+  } else if (approxArea) {
+    feedbackPicker.view({ lat, lng }, 15);
+    feedbackFound = `只查到約略位置（${approxArea}），請在地圖上點出正確的位置`;
+  } else {
+    feedbackPin = { lat, lng };
+    feedbackPicker.set(feedbackPin, 17);
+    // 查到的名稱是「台北車站, 49, 忠孝西路一段, 黎明里, …, 臺灣」：只寫前三段
+    feedbackFound = `查到${name ? `：${name.split(/,\s*/).slice(0, 3).join(' ')}` : ''}。不對可以拖紅色標記或點地圖`;
+  }
+  if (!feedbackNote.value.trim()) feedbackNote.value = place;
+  feedbackPinState();
 }
 
 /** 選了「地點錯誤」才顯示小地圖；換站時重建（灰點換成那一站，標過的清掉） */
@@ -2264,6 +2307,7 @@ async function syncFeedbackPin(): Promise<void> {
     baseMap,
     (p) => {
       feedbackPin = p;
+      feedbackFound = '';
       feedbackPinState();
     },
     cur ? { at: cur, title: '現在的位置' } : undefined,
@@ -4223,7 +4267,15 @@ function wireControls(): void {
   $('#feedback-unpin').addEventListener('click', () => {
     feedbackPicker?.set(null);
     feedbackPin = null;
+    feedbackFound = '';
     feedbackPinState();
+  });
+  $('#feedback-locate').addEventListener('click', () => void findFeedbackPlace());
+  // 地點欄按 Enter 是查地點，不是送出回報
+  $('#feedback-place').addEventListener('keydown', (e) => {
+    if (e.key !== 'Enter' || e.isComposing) return;
+    e.preventDefault();
+    void findFeedbackPlace();
   });
   // 管理頁的入口：版本字樣連點 5 下（加入主畫面的 App 沒有網址列），存過管理 token 的直接顯示連結
   let taps: number[] = [];

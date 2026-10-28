@@ -217,6 +217,39 @@ export async function listFeedback(env: Env, status: string | null): Promise<unk
   });
 }
 
+/** 回報問題的「查地點」：同一個裝置每小時幾次、同一個 IP 每小時幾次（共用外面的地圖查詢服務，不能讓人一直查） */
+const LOCATES_PER_DEVICE_HOUR = 20;
+const LOCATES_PER_IP_HOUR = 60;
+
+/** settings 裡的計數加一，回傳加完的次數 */
+async function bump(env: Env, key: string, now: number): Promise<number> {
+  const row = await env.DB.prepare(
+    "INSERT INTO settings (key, value, updated_at) VALUES (?, '1', ?) ON CONFLICT(key) DO UPDATE SET value = CAST(value AS INTEGER) + 1, updated_at = excluded.updated_at RETURNING value",
+  )
+    .bind(key, now)
+    .first<{ value: string }>();
+  return Number(row?.value ?? 1);
+}
+
+/**
+ * 回報地點錯誤時的「查地點」：{ place }，查法跟回報修改表單的一樣（「緯度, 經度」直接用）；
+ * 次數記在 settings（flocate:裝置或 IP:第幾個小時），兩小時前的順手清掉
+ */
+export async function locateForFeedback(env: Env, eventId: number, body: unknown, device: string | null, ip: string, now: number): Promise<{ found: boolean; lat: number | null; lng: number | null; name: string | null; approxArea: string | null }> {
+  const place = cleanNote((body as { place?: unknown } | null)?.place);
+  if (!place || [...place].length < 2 || [...place].length > 80) throw new PushError(400, '請寫 2 到 80 個字的地址或店名');
+  const ev = await env.DB.prepare('SELECT id FROM events WHERE id = ?').bind(eventId).first<{ id: number }>();
+  if (!ev) throw new PushError(404, '找不到這個發放或活動，可能已經下架了');
+  const coord = parseLatLng(place);
+  if (coord) return { found: true, ...coord, name: null, approxArea: null };
+  const hour = Math.floor(now / 3600);
+  await env.DB.prepare("DELETE FROM settings WHERE key LIKE 'flocate:%' AND updated_at < ?").bind(now - 7200).run();
+  if (device && (await bump(env, `flocate:d:${device}:${hour}`, now)) > LOCATES_PER_DEVICE_HOUR) throw new PushError(429, '查太多次了，請直接在地圖上點出位置');
+  if ((await bump(env, `flocate:i:${ip}:${hour}`, now)) > LOCATES_PER_IP_HOUR) throw new PushError(429, '查太多次了，請直接在地圖上點出位置');
+  const r = await locateTypedPlace(env, place, Date.now() + ADDRESS_BUDGET_MS);
+  return { found: !!r.point, lat: r.point?.lat ?? null, lng: r.point?.lng ?? null, name: r.point?.displayName ?? null, approxArea: r.approxArea };
+}
+
 /** 管理頁的小地圖查地點：{ place }，查法跟回報修改表單的「查地點」一樣 */
 export async function adminLocate(env: Env, body: unknown): Promise<{ found: boolean; lat: number | null; lng: number | null; name: string | null; approxArea: string | null }> {
   const place = cleanNote((body as { place?: unknown } | null)?.place);

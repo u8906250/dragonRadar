@@ -174,6 +174,9 @@ export const sendFeedback = (
   pin?: { lat: number; lng: number } | null,
 ): Promise<Result<{ ok: true; duplicate: boolean }>> =>
   deviceJson<{ ok: true; duplicate: boolean }>(`/api/events/${eventId}/feedback`, 'POST', { kind, note, ...(stop ? { stop: stop.title, stopAt: stop.at } : {}), ...(pin ? { lat: pin.lat, lng: pin.lng } : {}) });
+/** 回報地點錯誤的「查地點」：查到的標在表單的小地圖上 */
+export const locateFeedbackPlace = (eventId: number, place: string): Promise<Result<{ found: boolean; lat: number | null; lng: number | null; name: string | null; approxArea: string | null }>> =>
+  deviceJson(`/api/events/${eventId}/locate`, 'POST', { place });
 export const reportBottle = (id: number): Promise<Result<{ hidden: boolean }>> => deviceJson<{ hidden: boolean }>(`/api/bottles/${id}/report`, 'POST', {});
 
 // 回報也帶裝置代碼：伺服器記下是哪個瀏覽器回報的，之後可以自己刪除
