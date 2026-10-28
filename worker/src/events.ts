@@ -1196,6 +1196,23 @@ export async function setRouteStopPlace(
   return changed;
 }
 
+/**
+ * 管理者改一個地點的位置（回報地點錯誤）：同一則貼文、同一個地點還沒結束的一起改（固定據點的每天時段、連續幾天的每一場），
+ * 約略位置拿掉，原本找不到地點的放上雷達；placeText 有給就連地點名稱一起改。重新判讀這則貼文會蓋掉
+ */
+export async function setEventPlace(env: Env, eventId: number, point: { lat: number; lng: number }, placeText: string | null, now: number): Promise<number> {
+  const ev = await env.DB.prepare('SELECT post_id, place_text FROM events WHERE id = ?').bind(eventId).first<{ post_id: string; place_text: string }>();
+  if (!ev) return 0;
+  const r = await env.DB.prepare(
+    `UPDATE events SET lat = ?, lng = ?, place_text = COALESCE(?, place_text), place_query = COALESCE(?, place_query), approx_area = NULL,
+       status = CASE WHEN status = 'unlocated' THEN (CASE WHEN start_at <= ? THEN 'active' ELSE 'upcoming' END) ELSE status END, updated_at = ?
+     WHERE post_id = ? AND place_text = ? AND status IN ('upcoming', 'active', 'unlocated')`,
+  )
+    .bind(point.lat, point.lng, placeText, placeText, now, now, ev.post_id, ev.place_text)
+    .run();
+  return r.meta.changes ?? 0;
+}
+
 /** 有確切位置的站照順序用直線連起來（不知道實際走哪些路），沒有認領人數 */
 function routeSegments(stops: Array<{ name: string; lat: number | null; lng: number | null; at: number | null }>) {
   const pts = stops.filter((st): st is typeof st & { lat: number; lng: number } => st.lat !== null && st.lng !== null);

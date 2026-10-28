@@ -165,8 +165,15 @@ export const collectLetter = (id: number, on: boolean): Promise<Result<{ collect
   deviceJson<{ collected: boolean }>(`/api/bottles/${id}/${on ? 'collect' : 'uncollect'}`, 'POST', {});
 /** 回報問題（地點錯誤、時間錯誤…），只有管理者看得到；車掃可以指定哪一站（那一站的標題、預計經過時間） */
 export type FeedbackKind = 'location' | 'time' | 'content' | 'not_event' | 'duplicate' | 'remove_stop' | 'other';
-export const sendFeedback = (eventId: number, kind: FeedbackKind, note: string, stop?: { title: string; at: number | null }): Promise<Result<{ ok: true; duplicate: boolean }>> =>
-  deviceJson<{ ok: true; duplicate: boolean }>(`/api/events/${eventId}/feedback`, 'POST', { kind, note, ...(stop ? { stop: stop.title, stopAt: stop.at } : {}) });
+/** pin：地點錯誤時在小地圖上標的正確位置 */
+export const sendFeedback = (
+  eventId: number,
+  kind: FeedbackKind,
+  note: string,
+  stop?: { title: string; at: number | null },
+  pin?: { lat: number; lng: number } | null,
+): Promise<Result<{ ok: true; duplicate: boolean }>> =>
+  deviceJson<{ ok: true; duplicate: boolean }>(`/api/events/${eventId}/feedback`, 'POST', { kind, note, ...(stop ? { stop: stop.title, stopAt: stop.at } : {}), ...(pin ? { lat: pin.lat, lng: pin.lng } : {}) });
 export const reportBottle = (id: number): Promise<Result<{ hidden: boolean }>> => deviceJson<{ hidden: boolean }>(`/api/bottles/${id}/report`, 'POST', {});
 
 // 回報也帶裝置代碼：伺服器記下是哪個瀏覽器回報的，之後可以自己刪除

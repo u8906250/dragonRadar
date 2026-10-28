@@ -175,6 +175,11 @@
             <label id="feedback-remove-stop" hidden><input type="radio" name="kind" value="remove_stop" /> 刪除這一站（沒有這一站、取消了）</label>
             <label><input type="radio" name="kind" value="other" /> 其他</label>
           </fieldset>
+          <!-- 地點錯誤：在小地圖上標正確的位置（選填，管理者確認後才改） -->
+          <div id="feedback-pin" class="feedback-pin" hidden>
+            <div class="edit-pin"><span id="feedback-pin-state" class="edit-pin-state"></span><button type="button" class="chip" id="feedback-unpin" hidden>清除標記</button></div>
+            <div id="feedback-map" class="edit-map"></div>
+          </div>
           <textarea id="feedback-note" rows="3" maxlength="200" placeholder="補充說明（選填），例如：實際在 2 號出口、15:00 才開始" aria-label="補充說明"></textarea>
           <div class="sheet-actions"><button type="submit" class="btn primary" id="feedback-submit">送出</button></div>
         </form>

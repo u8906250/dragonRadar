@@ -106,6 +106,10 @@
     const DRAFT_FIELDS = '#list [data-place], #list [data-title], #list [data-note]';
     const draftKey = (el) => ['place', 'title', 'note'].filter((k) => el.dataset[k] !== undefined).map((k) => `${k}:${el.dataset[k]}`)[0];
     const TAIPEI = { lat: 25.0478, lng: 121.517 };
+    /** 回報的人標的位置已經放上地圖的（只放一次，之後管理者拖過、查過的不蓋掉） */
+    const seeded = new Set();
+    /** 車掃的站改「這一站」，其他的改這個地點（同一則貼文同一個地點的每一場） */
+    const applyLabel = (id) => (rowsById.get(id)?.stop ? '修改這一站的地點' : '修改地點');
 
     async function api(path, opts = {}) {
       const r = await fetch(API + path, {
@@ -163,6 +167,12 @@
           // 車掃指定了哪一站：回報可能掛在同一則貼文的別站上（那一站不在雷達上時），不比對標題
           const renamed = !f.stop && f.event_title && f.event_title !== f.title ? `（現在的標題：${esc(f.event_title)}）` : '';
           const stopLine = f.stop ? `<div class="muted">車掃的站：${esc(f.stop)}${f.stop_at ? `（預計 ${when(f.stop_at)} 經過）` : ''}</div>` : '';
+          const pinLine =
+            f.pin_lat != null
+              ? `<div class="muted">回報的人在地圖上標了位置：<a href="https://www.google.com/maps/search/?api=1&query=${f.pin_lat},${f.pin_lng}" target="_blank" rel="noopener">${Number(f.pin_lat).toFixed(5)}, ${Number(f.pin_lng).toFixed(5)}</a></div>`
+              : '';
+          // 改位置：車掃的站、地點錯誤、回報的人標了位置的
+          const placeFix = f.stop || f.kind === 'location' || f.pin_lat != null;
           const links = [
             showId ? `<a class="btn" href="./?event=${showId}">雷達上看</a>` : '',
             /^https:\/\//.test(f.permalink || '') ? `<a class="btn" href="${esc(f.permalink)}" target="_blank" rel="noopener">原文</a>` : '',
@@ -180,12 +190,12 @@
             f.status === 'open'
               ? `<div class="apply">
               ${
-                f.stop
-                  ? `<div class="row"><input type="text" class="title-input" data-place="${f.id}" maxlength="120" value="${esc(f.kind === 'location' ? f.note || '' : '')}" placeholder="地址、店名，或座標 25.0478, 121.5170" aria-label="這一站的地點" /><button type="button" class="btn" data-find="${f.id}">查地點</button><button type="button" class="btn" data-map="${f.id}">在地圖上標</button></div>
+                placeFix
+                  ? `<div class="row"><input type="text" class="title-input" data-place="${f.id}" maxlength="120" value="${esc(f.kind === 'location' ? f.note || '' : '')}" placeholder="地址、店名，或座標 25.0478, 121.5170" aria-label="${f.stop ? '這一站的地點' : '地點'}" /><button type="button" class="btn" data-find="${f.id}">查地點</button><button type="button" class="btn" data-map="${f.id}">在地圖上標</button></div>
               <div class="pin-map" id="pin-map-${f.id}" hidden></div>
               <p class="pin-msg" id="pin-msg-${f.id}" aria-live="polite"></p>
-              <div class="row"><button type="button" class="btn${f.kind === 'location' ? ' primary' : ''}" data-apply="stop_place" data-id="${f.id}">修改這一站的地點</button></div>
-              <p class="hint">只改這一站：寫地址、店名按「查地點」標到地圖上，不對再拖紅色標記或點地圖；也可以按「在地圖上標」直接點（灰點是這一站現在的位置）。標了位置就用標的，上面寫的當成地點名稱（空白就保留原本的）；沒標就照寫的查（查到約略位置不算），或貼 Google 地圖按右鍵複製的座標。雷達上的點、時間表、路線跟著改，其他站不動。</p>`
+              <div class="row"><button type="button" class="btn${f.kind === 'location' ? ' primary' : ''}" data-apply="${f.stop ? 'stop_place' : 'event_place'}" data-id="${f.id}">${f.stop ? '修改這一站的地點' : '修改地點'}</button></div>
+              <p class="hint">${f.stop ? '只改這一站' : '改這個地點的位置'}：寫地址、店名按「查地點」標到地圖上，不對再拖紅色標記或點地圖；也可以按「在地圖上標」直接點（灰點是${f.stop ? '這一站' : ''}現在的位置${f.pin_lat != null ? '，紅色標記一開始是回報的人標的' : ''}）。標了位置就用標的，上面寫的當成地點名稱（空白就保留原本的）；沒標就照寫的查（查到約略位置不算），或貼 Google 地圖按右鍵複製的座標。${f.stop ? '雷達上的點、時間表、路線跟著改，其他站不動。' : '同一則貼文同一個地點還沒結束的一起改（固定據點的每天時段也是），之後重新判讀會蓋掉。'}</p>`
                   : ''
               }
               <div class="row"><input type="text" class="title-input" data-title="${f.id}" maxlength="30" value="${esc(curTitle)}" aria-label="新標題" /><button type="button" class="btn primary" data-apply="title" data-id="${f.id}">改標題</button></div>
@@ -206,6 +216,7 @@
             <div class="fb-head"><span class="tag">${esc(f.kind_label)}</span><span>${when(f.created_at)} 回報${f.resolved_at ? `・${when(f.resolved_at)} 處理` : ''}</span></div>
             <b>${esc(f.title)}${renamed}</b>
             ${stopLine}
+            ${pinLine}
             <div class="muted">地點：${esc(f.stop ? f.place_text || '' : f.event_place || f.place_text || '')}${!f.stop && f.approx_area ? `（約略位置：${esc(f.approx_area)}）` : ''}</div>
             <div class="muted">事件：#${f.event_id}・${esc(evState)}${f.start_at ? `・${when(f.start_at)} 開始` : ''}${f.username ? `・@${esc(f.username)}` : ''}</div>
             ${f.supplement ? `<div class="muted">補充：${esc(f.supplement)}</div>` : ''}
@@ -224,6 +235,15 @@
         if (rowsById.get(id)?.status === 'open') continue;
         pins.delete(id);
         pinMsgs.delete(id);
+      }
+      // 回報的人在地圖上標了位置：直接放上小地圖（紅色標記），管理者看過沒問題就套用
+      for (const f of rows) {
+        const id = String(f.id);
+        if (f.status !== 'open' || f.pin_lat == null || seeded.has(id)) continue;
+        seeded.add(id);
+        if (pins.has(id)) continue;
+        pins.set(id, { lat: f.pin_lat, lng: f.pin_lng });
+        pinMsg(id, `紅色標記是回報的人標的位置，沒問題就按「${applyLabel(id)}」；不對可以拖或點地圖。`);
       }
       for (const [id, m] of pinMsgs) pinMsg(id, m.text, m.err);
       for (const id of new Set([...wasOpen, ...pins.keys()])) if (rowsById.get(id)?.status === 'open') void openMap(id);
@@ -244,7 +264,8 @@
       const f = rowsById.get(id);
       if (!el || !f) return Promise.resolve(null);
       el.hidden = false;
-      const cur = f.stop_lat != null ? { lat: f.stop_lat, lng: f.stop_lng } : null;
+      // 灰點：車掃的站是那一站現在的位置，其他的是回報的那一則
+      const cur = f.stop ? (f.stop_lat != null ? { lat: f.stop_lat, lng: f.stop_lng } : null) : f.lat != null ? { lat: f.lat, lng: f.lng } : null;
       const pin = pins.get(id) ?? null;
       const center = pin ?? cur ?? (f.lat != null ? { lat: f.lat, lng: f.lng } : TAIPEI);
       const p = pinPicker(
@@ -254,9 +275,9 @@
         'nlsc',
         (ll) => {
           pins.set(id, ll);
-          pinMsg(id, `標在 ${ll.lat.toFixed(5)}, ${ll.lng.toFixed(5)}，按「修改這一站的地點」套用。`);
+          pinMsg(id, `標在 ${ll.lat.toFixed(5)}, ${ll.lng.toFixed(5)}，按「${applyLabel(id)}」套用。`);
         },
-        cur ? { at: cur, title: '現在的位置' } : undefined,
+        cur ? { at: cur, title: !f.stop && f.approx_area ? '現在的位置（約略）' : '現在的位置' } : undefined,
       ).catch((e) => {
         pickers.delete(id);
         pinMsg(id, `地圖載入失敗：${e.message}`, true);
@@ -291,7 +312,7 @@
           const p = { lat: r.lat, lng: r.lng };
           pins.set(id, p);
           picker.set(p, 17);
-          pinMsg(id, `查到${r.name ? `：${r.name}` : ''}。位置不對可以拖紅色標記或點地圖，再按「修改這一站的地點」。`);
+          pinMsg(id, `查到${r.name ? `：${r.name}` : ''}。位置不對可以拖紅色標記或點地圖，再按「${applyLabel(id)}」。`);
         }
       } catch (e) {
         pinMsg(id, e.message, true);
@@ -330,7 +351,9 @@
       if (mapBtn) {
         const id = mapBtn.dataset.map;
         void openMap(id).then((p) => {
-          if (p && !pins.has(id)) pinMsg(id, rowsById.get(id)?.stop_lat != null ? '點地圖標出這一站的正確位置（灰點是現在的位置）。' : '這一站現在沒有確切位置，點地圖標出來。');
+          const f = rowsById.get(id);
+          const has = f?.stop ? f.stop_lat != null : f?.lat != null;
+          if (p && !pins.has(id)) pinMsg(id, has ? `點地圖標出${f?.stop ? '這一站' : ''}的正確位置（灰點是現在的位置）。` : `${f?.stop ? '這一站' : '這一則'}現在沒有確切位置，點地圖標出來。`);
         });
         return;
       }
@@ -351,18 +374,19 @@
             showResult('請先寫要補充的內容。', true);
             return;
           }
-        } else if (action === 'stop_place') {
+        } else if (action === 'stop_place' || action === 'event_place') {
+          const what = action === 'stop_place' ? '這一站' : '';
           body.place = document.querySelector(`input[data-place="${id}"]`)?.value.trim() ?? '';
           const pin = pins.get(id);
           if (!body.place && !pin) {
-            showResult('請先寫這一站的地點，或在地圖上標位置。', true);
+            showResult(`請先寫${what}的地點，或在地圖上標位置。`, true);
             return;
           }
           if (pin) {
             body.lat = pin.lat;
             body.lng = pin.lng;
             // 欄位預先帶的是回報的說明，不一定是地名：先確認會寫成什麼
-            if (!confirm(`這一站改到地圖上標的位置，地點名稱${body.place ? `寫成「${body.place}」` : '不變'}？`)) return;
+            if (!confirm(`${what || '這個地點（同一則貼文同一個地點的每一場）'}改到地圖上標的位置，地點名稱${body.place ? `寫成「${body.place}」` : '不變'}？`)) return;
           }
         } else if (action === 'remove_stop') {
           if (!confirm('確定刪除這一站？車掃的時間表、路線、雷達上的點都會拿掉這一站。')) return;
@@ -371,7 +395,7 @@
           if (!confirm(body.scope === 'post' ? '確定把這則貼文的發放、活動都從雷達下架？' : '確定把這一則從雷達下架？')) return;
         }
         for (const x of a.closest('.apply').querySelectorAll('button, textarea, input')) x.disabled = true;
-        a.textContent = action === 'supplement' ? '重新判讀中…' : action === 'title' || action === 'stop_place' ? '修改中…' : action === 'remove_stop' ? '刪除中…' : '下架中…';
+        a.textContent = action === 'supplement' ? '重新判讀中…' : action === 'title' || action === 'stop_place' || action === 'event_place' ? '修改中…' : action === 'remove_stop' ? '刪除中…' : '下架中…';
         try {
           const r = await api(`/api/admin/feedback/${id}/apply`, { method: 'POST', body: JSON.stringify(body) });
           forget(id);
@@ -384,6 +408,8 @@
                 ? `已套用並重新判讀，標成已處理。現在雷達上的：${list ? `<ul>${list}</ul>` : '沒有（這次判讀沒有放上雷達，可以在「已處理」改回未處理再調整）'}${lost}`
                 : action === 'stop_place'
                   ? `已修改這一站的地點，標成已處理。現在雷達上這則貼文的：<ul>${list}</ul>`
+                  : action === 'event_place'
+                  ? `已修改地點（${r.changed ?? 0} 筆），標成已處理。現在雷達上這則貼文的：<ul>${list}</ul>`
                   : action === 'remove_stop'
                   ? `已刪除這一站（時間表 ${r.removedStops ?? 0} 站、雷達上 ${r.removed ?? 0} 個點），標成已處理。${list ? `這則貼文還在雷達上的：<ul>${list}</ul>` : ''}`
                   : `已從雷達下架 ${r.removed ?? 0} 筆，標成已處理。${list ? `這則貼文還在雷達上的：<ul>${list}</ul>` : ''}`,

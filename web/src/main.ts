@@ -2201,6 +2201,7 @@ let feedbackStops: RouteStop[] | null = null;
 /** fixStop：時間表上沒有確切位置的站按「我知道在哪」，先選好那一站、地點錯誤 */
 function openFeedback(ev: EventOut, fromRoute?: RouteOut, fixStop?: number): void {
   feedbackEventId = ev.id;
+  feedbackEv = ev;
   feedbackForm.reset();
   const r = fromRoute ?? routeOf(ev);
   const route = r && isReported(r) ? r : null;
@@ -2227,6 +2228,71 @@ function openFeedback(ev: EventOut, fromRoute?: RouteOut, fixStop?: number): voi
       : '補充說明（選填），例如：實際在 2 號出口、15:00 才開始';
   $('#feedback-target').textContent = route ? `「${route.title}」哪裡有問題？` : `「${titleOf(ev)}」哪裡有問題？`;
   feedbackSheet.hidden = false;
+  resetFeedbackPin();
+  void syncFeedbackPin();
+}
+
+// ---- 回報地點錯誤：小地圖上標正確的位置（選填），灰點是現在的位置；管理者確認後才改 ----
+let feedbackEv: EventOut | null = null;
+let feedbackPin: LatLng | null = null;
+let feedbackPicker: PinPicker | null = null;
+/** 小地圖是替哪一站（或這一則）建的：換站就重建，灰點跟著換 */
+let feedbackPickerFor = '';
+
+function resetFeedbackPin(): void {
+  feedbackPicker?.remove();
+  feedbackPicker = null;
+  feedbackPickerFor = '';
+  feedbackPin = null;
+}
+
+/** 選的那一站（沒選、不是車掃是 undefined） */
+const feedbackStop = (): RouteStop | undefined => {
+  const picked = feedbackStops ? $<HTMLSelectElement>('#feedback-stop').value : '';
+  return feedbackStops && picked !== '' ? feedbackStops[Number(picked)] : undefined;
+};
+
+function feedbackPinState(): void {
+  const st = feedbackStop();
+  $('#feedback-pin-state').textContent = feedbackPin
+    ? '標好了，送出後管理者確認就會改；不對可以拖紅色標記或再點一次地圖'
+    : st && st.lat === null
+      ? `點地圖標出「${st.name}」在哪裡，或在下面寫地址、店名`
+      : '點地圖標出正確的位置（灰點是現在的位置），也可以只寫說明';
+  $('#feedback-unpin').hidden = !feedbackPin;
+}
+
+/** 選了「地點錯誤」才顯示小地圖；換站時重建（灰點換成那一站，標過的清掉） */
+async function syncFeedbackPin(): Promise<void> {
+  const kind = (feedbackForm.elements.namedItem('kind') as RadioNodeList).value;
+  const box = $('#feedback-pin');
+  box.hidden = kind !== 'location' || !feedbackEv;
+  if (box.hidden || !feedbackEv) return;
+  feedbackPinState();
+  const st = feedbackStop();
+  const key = `${feedbackEventId}|${st ? st.title : ''}|${st?.at ?? ''}`;
+  if (key === feedbackPickerFor) return;
+  resetFeedbackPin();
+  feedbackPickerFor = key;
+  feedbackPinState();
+  const ev = feedbackEv;
+  const cur = st ? (st.lat !== null && st.lng !== null ? { lat: st.lat, lng: st.lng } : null) : ev.lat !== null && ev.lng !== null && !ev.approxArea ? { lat: ev.lat, lng: ev.lng } : null;
+  // 沒有確切位置的站：從這則的位置（車掃的另一站）或你的位置開始
+  const center = cur ?? (ev.lat !== null && ev.lng !== null ? { lat: ev.lat, lng: ev.lng } : origin);
+  const picker = await pinPicker(
+    $('#feedback-map'),
+    null,
+    center,
+    baseMap,
+    (p) => {
+      feedbackPin = p;
+      feedbackPinState();
+    },
+    cur ? { at: cur, title: '現在的位置' } : undefined,
+  );
+  // 等地圖載入時又換了站、關掉了：這張不要了
+  if (feedbackPickerFor !== key) picker.remove();
+  else feedbackPicker = picker;
 }
 
 async function submitFeedback(): Promise<void> {
@@ -2249,15 +2315,16 @@ async function submitFeedback(): Promise<void> {
     $<HTMLSelectElement>('#feedback-stop').focus();
     return;
   }
-  // 沒有確切位置的站：沒寫在哪裡，管理者也沒辦法放上雷達
+  // 沒有確切位置的站：沒寫在哪裡、也沒在地圖上標，管理者也沒辦法放上雷達
   const locating = kind === 'location' && !!stop && stop.lat === null;
-  if (locating && !note) {
-    showBanner(bannerEl, `請寫「${stop.name}」在哪裡（地址或店名）`, 3000);
+  const pin = kind === 'location' ? feedbackPin : null;
+  if (locating && !note && !pin) {
+    showBanner(bannerEl, `請寫「${stop.name}」在哪裡（地址或店名），或在地圖上標出來`, 3000);
     feedbackNote.focus();
     return;
   }
   feedbackSubmit.disabled = true;
-  const r = await sendFeedback(feedbackEventId, kind, note, stop ? { title: stop.title, at: stop.at } : undefined);
+  const r = await sendFeedback(feedbackEventId, kind, note, stop ? { title: stop.title, at: stop.at } : undefined, pin);
   feedbackSubmit.disabled = false;
   if (!r.ok) {
     showBanner(bannerEl, r.message, 4000);
@@ -4170,6 +4237,16 @@ function wireControls(): void {
   feedbackForm.addEventListener('submit', (e) => {
     e.preventDefault();
     void submitFeedback();
+  });
+  // 換類型、換站：地點錯誤才顯示小地圖，換站重建
+  feedbackForm.addEventListener('change', (e) => {
+    const t = e.target as HTMLElement;
+    if (t.matches('input[name="kind"], #feedback-stop')) void syncFeedbackPin();
+  });
+  $('#feedback-unpin').addEventListener('click', () => {
+    feedbackPicker?.set(null);
+    feedbackPin = null;
+    feedbackPinState();
   });
   // 管理頁的入口：版本字樣連點 5 下（加入主畫面的 App 沒有網址列），存過管理 token 的直接顯示連結
   let taps: number[] = [];

@@ -3,7 +3,7 @@
  * 回報的內容只有管理者看得到；存裝置代碼與 IP 的加鹽雜湊（限制次數、同一個人同一則同一種問題只算一次），30 天後刪除。
  */
 import type { Env } from './env';
-import { ADDRESS_BUDGET_MS, findRouteStop, getPost, locateTypedPlace, removeRouteStop, reprocessPost, setManualTitle, setRouteStopPlace, takeDown } from './events';
+import { ADDRESS_BUDGET_MS, findRouteStop, getPost, locateTypedPlace, removeRouteStop, reprocessPost, setEventPlace, setManualTitle, setRouteStopPlace, takeDown } from './events';
 import { parseSubscription, PushError, sendPush, type PushMessage } from './push';
 
 export const FEEDBACK_KINDS = {
@@ -41,6 +41,25 @@ export function parseLatLng(s: string): { lat: number; lng: number } | null {
   return Math.abs(lat) <= 90 && Math.abs(lng) <= 180 ? { lat, lng } : null;
 }
 
+/**
+ * 管理者給的新位置：有 lat、lng（在小地圖上標的）就用標的，place 當地點名稱；沒有就照 place 查
+ * （地址、店名照修改表單「查地點」的方式，查到約略位置不算；或「緯度, 經度」）。placeText 是 null 時地點名稱不變
+ */
+async function newPlace(env: Env, rawPlace: unknown, lat: unknown, lng: unknown, what: string): Promise<{ point: { lat: number; lng: number }; placeText: string | null }> {
+  const place = cleanNote(rawPlace);
+  const coord = place ? parseLatLng(place) : null;
+  const pinned = pinOf(lat, lng);
+  let point = pinned ?? coord;
+  if (!point && place) {
+    const r = await locateTypedPlace(env, place, Date.now() + ADDRESS_BUDGET_MS);
+    if (!r.point) throw new PushError(400, '查不到這個地點，請寫完整地址，或貼 Google 地圖的座標（例如 25.0478, 121.5170）');
+    if (r.approxArea) throw new PushError(400, `只查到約略位置（${r.approxArea}），請寫完整地址，或貼 Google 地圖的座標`);
+    point = { lat: r.point.lat, lng: r.point.lng };
+  }
+  if (!point) throw new PushError(400, `請寫${what}的地點，或在地圖上標位置`);
+  return { point, placeText: coord ? null : place };
+}
+
 /** 地圖上標的位置：兩個都是範圍內的數字才算 */
 export function pinOf(lat: unknown, lng: unknown): { lat: number; lng: number } | null {
   if (typeof lat !== 'number' || typeof lng !== 'number' || !Number.isFinite(lat) || !Number.isFinite(lng)) return null;
@@ -72,7 +91,7 @@ export async function submitFeedback(
   ip: string,
   now: number,
 ): Promise<{ result: FeedbackResult; created: FeedbackRow | null }> {
-  const b = (body ?? {}) as { kind?: unknown; note?: unknown; stop?: unknown; stopAt?: unknown };
+  const b = (body ?? {}) as { kind?: unknown; note?: unknown; stop?: unknown; stopAt?: unknown; lat?: unknown; lng?: unknown };
   if (!isKind(b.kind)) throw new PushError(400, '請選擇問題類型');
   const note = cleanNote(b.note);
   if (b.kind === 'other' && !note) throw new PushError(400, '選「其他」請寫一下是什麼問題');
@@ -85,8 +104,10 @@ export async function submitFeedback(
   const stop = stopTitle ? await findRouteStop(env, ev.post_id, stopTitle, stopAt) : null;
   if (stopTitle && !stop) throw new PushError(404, '找不到這一站，路線可能更新過了，請重新整理再試');
   if (b.kind === 'remove_stop' && !stop) throw new PushError(400, '請選擇要刪除哪一站');
-  // 沒有確切位置的站回報地點：沒寫在哪裡就沒辦法放上雷達
-  if (b.kind === 'location' && stop && stop.lat === null && !note) throw new PushError(400, `請寫「${stop.name}」在哪裡（地址或店名）`);
+  // 地點錯誤：在小地圖上標的正確位置（選填，管理者確認後才改）
+  const pin = b.kind === 'location' ? pinOf(b.lat, b.lng) : null;
+  // 沒有確切位置的站回報地點：沒寫在哪裡、也沒標，就沒辦法放上雷達
+  if (b.kind === 'location' && stop && stop.lat === null && !note && !pin) throw new PushError(400, `請寫「${stop.name}」在哪裡（地址或店名），或在地圖上標出來`);
   // 那一站在雷達上的點
   const stopEvent = stop
     ? await env.DB.prepare(
@@ -110,10 +131,10 @@ export async function submitFeedback(
   if (dup) return { result: { ok: true, duplicate: true }, created: null };
 
   const row = await env.DB.prepare(
-    `INSERT INTO event_feedback (event_id, post_id, title, place_text, kind, note, device, ip, status, created_at, stop, stop_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'open', ?, ?, ?) RETURNING id, event_id, post_id, title, place_text, kind, note, status, created_at, resolved_at, stop, stop_at`,
+    `INSERT INTO event_feedback (event_id, post_id, title, place_text, kind, note, device, ip, status, created_at, stop, stop_at, pin_lat, pin_lng)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'open', ?, ?, ?, ?, ?) RETURNING id, event_id, post_id, title, place_text, kind, note, status, created_at, resolved_at, stop, stop_at, pin_lat, pin_lng`,
   )
-    .bind(targetId, ev.post_id, stop?.title ?? ev.title, stop ? (stop.place ?? stop.name) : ev.place_text, b.kind, note, device, ip, now, stop?.title ?? null, stop?.at ?? null)
+    .bind(targetId, ev.post_id, stop?.title ?? ev.title, stop ? (stop.place ?? stop.name) : ev.place_text, b.kind, note, device, ip, now, stop?.title ?? null, stop?.at ?? null, pin?.lat ?? null, pin?.lng ?? null)
     .first<FeedbackRow>();
   return { result: { ok: true, duplicate: false }, created: row };
 }
@@ -132,13 +153,17 @@ export interface FeedbackRow {
   /** 車掃指定的那一站（標題）、預計經過時間 */
   stop?: string | null;
   stop_at?: number | null;
+  /** 地點錯誤時在小地圖上標的位置 */
+  pin_lat?: number | null;
+  pin_lng?: number | null;
 }
 
 /** 推給管理者的通知：同一個 tag，新的取代舊的，但會再響一次 */
-export function feedbackMessage(row: Pick<FeedbackRow, 'kind' | 'title' | 'note'>, open: number): PushMessage {
+export function feedbackMessage(row: Pick<FeedbackRow, 'kind' | 'title' | 'note' | 'pin_lat'>, open: number): PushMessage {
+  const pinned = row.pin_lat !== null && row.pin_lat !== undefined;
   return {
     title: `新回報：${FEEDBACK_KINDS[row.kind]}${open > 1 ? `（未處理 ${open} 則）` : ''}`,
-    body: `${row.title}｜${row.note ?? '沒寫說明'}`,
+    body: `${row.title}｜${[row.note ?? (pinned ? '' : '沒寫說明'), pinned ? '在地圖上標了位置' : ''].filter(Boolean).join('，')}`,
     tag: 'feedback',
     url: './admin.html',
     renotify: true,
@@ -166,7 +191,7 @@ export async function notifyAdmins(env: Env, row: FeedbackRow, now: number): Pro
 export async function listFeedback(env: Env, status: string | null): Promise<unknown[]> {
   const st = status === 'resolved' ? 'resolved' : 'open';
   const { results } = await env.DB.prepare(
-    `SELECT f.id, f.event_id, f.post_id, f.title, f.place_text, f.kind, f.note, f.status, f.created_at, f.resolved_at, f.stop, f.stop_at,
+    `SELECT f.id, f.event_id, f.post_id, f.title, f.place_text, f.kind, f.note, f.status, f.created_at, f.resolved_at, f.stop, f.stop_at, f.pin_lat, f.pin_lng,
             e.status AS event_status, e.start_at, e.end_at, e.lat, e.lng, e.approx_area, e.title AS event_title, e.place_text AS event_place,
             p.permalink, p.username, p.supplement, p.source,
             -- 重新判讀後原本那一則會換成新的：同一則貼文現在雷達上的第一則
@@ -226,6 +251,7 @@ async function currentEvents(env: Env, postId: string): Promise<unknown[]> {
  * - { action: 'remove_stop' }：車掃指定的那一站從時間表、路線、雷達拿掉
  * - { action: 'stop_place', place, lat?, lng? }：車掃指定的那一站改位置：有 lat、lng（管理頁在小地圖上標的）就用標的位置，place 當成地點名稱（可以不寫）；
  *   沒有就照 place 查（地址、店名照查地點的方式查，或直接貼「緯度, 經度」）
+ * - { action: 'event_place', place, lat?, lng? }：不是車掃的，改回報那一則的位置（同一則貼文同一個地點還沒結束的一起改），位置的給法同上
  * 套用完標成已處理，回傳現在雷達上這則貼文的事件
  */
 export async function applyFeedback(
@@ -279,20 +305,15 @@ export async function applyFeedback(
     removed = await takeDown(env, fb.event_id, b.scope === 'post' ? 'post' : 'event', 'feedback', now);
   } else if (b.action === 'stop_place') {
     if (!fb.stop) throw new PushError(400, '這筆回報沒有指定哪一站');
-    const place = cleanNote(b.place);
-    const coord = place ? parseLatLng(place) : null;
-    const pinned = pinOf(b.lat, b.lng);
-    if (!place && !pinned) throw new PushError(400, '請寫這一站的地點，或在地圖上標位置');
-    let point = pinned ?? coord;
-    if (!point && place) {
-      const r = await locateTypedPlace(env, place, Date.now() + ADDRESS_BUDGET_MS);
-      if (!r.point) throw new PushError(400, '查不到這個地點，請寫完整地址，或貼 Google 地圖的座標（例如 25.0478, 121.5170）');
-      if (r.approxArea) throw new PushError(400, `只查到約略位置（${r.approxArea}），請寫完整地址，或貼 Google 地圖的座標`);
-      point = { lat: r.point.lat, lng: r.point.lng };
-    }
-    if (!point) throw new PushError(400, '請寫這一站的地點，或在地圖上標位置');
-    changed = await setRouteStopPlace(env, postId, fb.stop, fb.stop_at, point, coord ? null : place, now);
+    const { point, placeText } = await newPlace(env, b.place, b.lat, b.lng, '這一站');
+    changed = await setRouteStopPlace(env, postId, fb.stop, fb.stop_at, point, placeText, now);
     if (changed === 0) throw new PushError(400, '路線上已經沒有這一站了');
+  } else if (b.action === 'event_place') {
+    if (fb.stop) throw new PushError(400, '車掃的站請用「修改這一站的地點」');
+    const { point, placeText } = await newPlace(env, b.place, b.lat, b.lng, '這個活動');
+    const target = await liveId();
+    if (target === null) throw new PushError(400, '這則已經不在雷達上了');
+    changed = await setEventPlace(env, target, point, placeText, now);
   } else if (b.action === 'remove_stop') {
     if (!fb.stop) throw new PushError(400, '這筆回報沒有指定哪一站');
     const r = await removeRouteStop(env, postId, fb.stop, fb.stop_at === null ? null : { from: fb.stop_at, to: fb.stop_at }, now);
@@ -300,7 +321,7 @@ export async function applyFeedback(
     removed = r.events;
     removedStops = r.stops;
   } else {
-    throw new PushError(400, "action 要是 'title'、'supplement'、'takedown'、'remove_stop' 或 'stop_place'");
+    throw new PushError(400, "action 要是 'title'、'supplement'、'takedown'、'remove_stop'、'stop_place' 或 'event_place'");
   }
   await env.DB.prepare("UPDATE event_feedback SET status = 'resolved', resolved_at = ? WHERE id = ?").bind(now, id).run();
   return {
