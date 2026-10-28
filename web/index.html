@@ -43,6 +43,12 @@
             <button type="button" class="chip" data-base="nlsc" role="radio" aria-checked="false" title="內政部國土測繪中心 台灣通用電子地圖">台灣電子地圖</button>
             <button type="button" class="chip" data-base="osm" role="radio" aria-checked="false">OSM</button>
           </div>
+          <!-- 選「太空」時才顯示 -->
+          <div class="chips" id="space-chips" role="radiogroup" aria-label="太空" hidden>
+            <button type="button" class="chip" data-space="globe" role="radio" aria-checked="true">地球</button>
+            <button type="button" class="chip" data-space="solar" role="radio" aria-checked="false">太陽系</button>
+            <small id="space-note" class="space-note"></small>
+          </div>
           <div class="chips" id="time-chips" role="radiogroup" aria-label="時間範圍">
             <button type="button" class="chip" data-time="now" role="radio" aria-checked="false" title="只看現在進行中、開放中的">現在</button>
             <button type="button" class="chip" data-time="3h" role="radio" aria-checked="false" title="3 小時內開始的">3 小時</button>
@@ -57,6 +63,7 @@
             <button type="button" class="chip on" data-scale="region" role="radio" aria-checked="true" title="涵蓋整個台北市與新北市">雙北</button>
             <button type="button" class="chip" data-scale="taiwan" role="radio" aria-checked="false" title="涵蓋全台灣與離島">全台</button>
             <button type="button" class="chip" data-scale="world" role="radio" aria-checked="false" title="涵蓋全世界，國外的活動也看得到">全球</button>
+            <button type="button" class="chip" data-scale="space" role="radio" aria-checked="false" title="從太空看地球、太陽系">太空</button>
           </div>
         </div>
         <div class="overlay overlay-tl">
