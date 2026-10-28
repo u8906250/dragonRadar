@@ -10,7 +10,7 @@ import { X_MAX_WEIGHT, xLength } from './xcount';
 import { shortAddress, splitPlace } from './place';
 import { crowdOf, MapView, pinPicker, type BaseMap, type PinPicker } from './map';
 import { beep, ensureNotificationPermission, iosNeedsHomeScreen, notificationState, pushSubscription, pushSupported, registerServiceWorker, showBanner, systemNotify, unlockAudio, unsubscribePush } from './notify';
-import { Radar, type RadarRoute } from './radar';
+import { Radar, type RadarRoute, type RadarStreets } from './radar';
 import { DEFAULT_THEME_ID, getTheme, THEMES, type Theme } from './themes';
 import type { BottleOut, EventOut, Item, KeywordInfo, KeywordRules, MyBottles, MyReport, Origin, Phase, PickedBottle, RelatedPost, RouteOut, PreviewItem, RouteStop, RoutePreview, SubmitResult, FailedItem, EditItem, EditInput } from './types';
 
@@ -729,6 +729,60 @@ function shuangbeiKm(): number {
   return sbRadius.km;
 }
 
+// ---- 街道：放大到 2 km 內畫（streets.ts，OpenFreeMap 的向量圖磚，第一次用到才載入） ----
+const STREET_KM = 2;
+let streetsMod: typeof import('./streets') | null = null;
+let streetsLoading = false;
+/** 上次畫的位置、範圍、抓到第幾張圖磚，沒變就不重算 */
+let streetsFor = '';
+let streetTiles = 0;
+
+/** 範圍內的街道換成相對於圓心的公里數（範圍小，用平面近似就夠準，拖曳時每一幀都要算） */
+function updateStreets(): void {
+  const show = scaleKm <= STREET_KM;
+  $('#radar-attrib').hidden = !show;
+  if (!show) {
+    if (streetsFor) radar.setStreets(null);
+    streetsFor = '';
+    return;
+  }
+  if (!streetsMod) {
+    if (streetsLoading) return;
+    streetsLoading = true;
+    void import('./streets')
+      .then((m) => {
+        streetsMod = m;
+        updateStreets();
+      })
+      .finally(() => {
+        streetsLoading = false;
+      });
+    return;
+  }
+  const key = `${origin.lat},${origin.lng}|${scaleKm}|${streetTiles}`;
+  if (key === streetsFor) return;
+  streetsFor = key;
+  const reach = scaleKm * 1.05;
+  const lines = streetsMod.streetsAround(origin.lat, origin.lng, reach, () => {
+    streetTiles++;
+    updateStreets();
+  });
+  const kx = 111.32 * Math.cos((origin.lat * Math.PI) / 180);
+  const ky = 110.574;
+  const box = [origin.lat - reach / ky, origin.lng - reach / kx, origin.lat + reach / ky, origin.lng + reach / kx];
+  const out: RadarStreets = { major: [], minor: [] };
+  for (const l of lines) {
+    if (l.box[0] > box[2] || l.box[2] < box[0] || l.box[1] > box[3] || l.box[3] < box[1]) continue;
+    const xy = new Float64Array(l.pts.length);
+    for (let i = 0; i < l.pts.length; i += 2) {
+      xy[i] = (l.pts[i + 1] - origin.lng) * kx;
+      xy[i + 1] = (l.pts[i] - origin.lat) * ky;
+    }
+    out[l.cls].push(xy);
+  }
+  radar.setStreets(out);
+}
+
 /**
  * 「雙北」畫雙北的縣市界；範圍比雙北大（全台、全球、縮放到更遠）一律畫海岸線（台灣加上全世界），
  * 比雙北小的不畫；位置變了才重算
@@ -913,6 +967,7 @@ function render(): void {
   const focused = focusedRoute(items);
   const drawn = timed.filter((it) => !beforeDeparture(it, now, focused));
   updateOutline();
+  updateStreets();
   updateCategoryToggles(all);
   updateActiveToggle(byCategory, now);
 

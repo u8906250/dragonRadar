@@ -31,6 +31,12 @@ export interface RadarRoute {
   points: Array<{ bearing: number; distanceKm: number }>;
 }
 
+/** 放大時畫的街道：每條線是 [往東 km, 往北 km, 往東 km, …]（相對於圓心）；major 大路、minor 其他街道 */
+export interface RadarStreets {
+  major: Float64Array[];
+  minor: Float64Array[];
+}
+
 /** 固定的地標（例如洋流總部），畫成星星 */
 export interface RadarLandmark {
   id: string;
@@ -162,6 +168,8 @@ export class Radar {
   private routes: RadarRoute[] = [];
   private outline: Array<Array<{ bearing: number; distanceKm: number }>> = [];
   private readonly outlineLayer: SVGGElement;
+  private streets: RadarStreets | null = null;
+  private readonly streetLayer: SVGGElement;
   private landmarks: RadarLandmark[] = [];
   private bottles: RadarBottle[] = [];
   private readonly bottleLayer: SVGGElement;
@@ -226,6 +234,7 @@ export class Radar {
         <line x1="${C}" y1="${C - R}" x2="${C}" y2="${C + R}" />
         <line x1="${C - R}" y1="${C}" x2="${C + R}" y2="${C}" />
       </g>
+      <g class="streets" clip-path="url(#rg-clip)"></g>
       <g clip-path="url(#rg-clip)" class="sweeps">
         <path class="sweep-wedge" fill="url(#rg-sweep)" d="M ${C} ${C} L ${C} ${C - R} A ${R} ${R} 0 0 1 ${wedgeEnd.x.toFixed(2)} ${wedgeEnd.y.toFixed(2)} Z">
           <animateTransform attributeName="transform" type="rotate" from="0 ${C} ${C}" to="360 ${C} ${C}" dur="4s" repeatCount="indefinite" />
@@ -262,6 +271,7 @@ export class Radar {
     this.roseLayer = this.svg.querySelector('.rose') as SVGGElement;
     this.routeLayer = this.svg.querySelector('.routes') as SVGGElement;
     this.outlineLayer = this.svg.querySelector('.outline') as SVGGElement;
+    this.streetLayer = this.svg.querySelector('.streets') as SVGGElement;
     this.landmarkLayer = this.svg.querySelector('.landmarks') as SVGGElement;
     this.bottleLayer = this.svg.querySelector('.bottles') as SVGGElement;
     this.bottleLayer.addEventListener('click', (e) => {
@@ -459,6 +469,12 @@ export class Radar {
     this.draw();
   }
 
+  /** 放大時的街道；null 不畫 */
+  setStreets(s: RadarStreets | null): void {
+    this.streets = s;
+    this.draw();
+  }
+
   /** 漂流瓶，畫在光點下面 */
   setBottles(list: RadarBottle[]): void {
     const key = JSON.stringify(list);
@@ -572,6 +588,55 @@ export class Radar {
       })
       .join(' ');
     return close ? `${d} Z` : d;
+  }
+
+  /** 街道：大路、其他街道各合成一條 path（線很多，一條一個元素太慢） */
+  private drawStreets(): void {
+    this.streetLayer.replaceChildren();
+    const s = this.streets;
+    if (!s) return;
+    const k = (R - 8) / this.scaleKm;
+    const h = (this.heading * Math.PI) / 180;
+    const cos = Math.cos(h);
+    const sin = Math.sin(h);
+    const lim2 = (this.scaleKm * 1.05) ** 2;
+    for (const [cls, lines] of [
+      ['street-minor', s.minor],
+      ['street-major', s.major],
+    ] as const) {
+      let d = '';
+      for (const l of lines) d += this.streetPath(l, k, cos, sin, lim2);
+      if (d) this.streetLayer.appendChild(el('path', { class: cls, d }));
+    }
+  }
+
+  /**
+   * 一條街：外圈外面的點，前後一點在圈內的才留（線畫到外圈再被裁掉），都在外面的斷開；
+   * 畫面上離上一點不到 1.5 像素的省略。手機朝向轉了就跟著轉
+   */
+  private streetPath(l: Float64Array, k: number, cos: number, sin: number, lim2: number): string {
+    const n = l.length / 2;
+    const near = (i: number): boolean => i >= 0 && i < n && l[2 * i] ** 2 + l[2 * i + 1] ** 2 <= lim2;
+    let d = '';
+    let pen = false;
+    let px = 0;
+    let py = 0;
+    for (let i = 0; i < n; i++) {
+      if (!near(i) && !near(i - 1) && !near(i + 1)) {
+        pen = false;
+        continue;
+      }
+      const dx = l[2 * i];
+      const dy = l[2 * i + 1];
+      const x = C + k * (dx * cos - dy * sin);
+      const y = C - k * (dy * cos + dx * sin);
+      if (pen && i < n - 1 && Math.abs(x - px) + Math.abs(y - py) < 1.5) continue;
+      d += `${pen ? 'L' : 'M'}${x.toFixed(1)} ${y.toFixed(1)}`;
+      pen = true;
+      px = x;
+      py = y;
+    }
+    return d;
   }
 
   private drawOutline(): void {
@@ -727,6 +792,7 @@ export class Radar {
 
   private drawNow(): void {
     this.flashDirty = true;
+    this.drawStreets();
     this.drawOutline();
     this.drawRoutes();
     this.drawBottles();

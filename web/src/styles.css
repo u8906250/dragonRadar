@@ -209,6 +209,14 @@ a.chip { display: inline-flex; align-items: center; text-decoration: none; }
 /* 「雙北」範圍的縣市界輪廓 */
 .radar .region-outline { fill: var(--accent); fill-opacity: 0.05; stroke: var(--accent); stroke-width: 1.5; stroke-opacity: 0.45; stroke-dasharray: 3 3; pointer-events: none; }
 .radar .region-outline.open { fill: none; }
+/* 放大到 2 km 內畫的街道：淡淡的細線，大路粗一點，不搶光點 */
+.radar .streets path { fill: none; stroke: var(--radar-grid); stroke-linejoin: round; stroke-linecap: round; pointer-events: none; }
+.radar .street-minor { stroke-width: 0.8; stroke-opacity: 0.2; }
+.radar .street-major { stroke-width: 2; stroke-opacity: 0.24; }
+#radar-view { position: relative; }
+.radar-attrib { position: absolute; right: 2px; bottom: 0; font-size: 9px; color: var(--muted); opacity: 0.8; }
+.radar-attrib a { color: inherit; text-decoration: none; }
+.radar-attrib[hidden] { display: none; }
 .radar .route-live { opacity: 0.9; }
 .radar .scale-label { fill: var(--radar-text); font-size: 11px; }
 .radar .rose-letter { fill: var(--radar-rose); font-size: 13px; font-weight: 800; }
