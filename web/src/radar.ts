@@ -108,12 +108,6 @@ const FLASH_PARTS_CALM: typeof FLASH_PARTS = [
 const GROUP_PX = 12;
 /** 標籤每行高度 */
 const LINE_PX = 14;
-/** 掃過時顯示的名稱最多幾個中文字寬（超過截短加「…」） */
-const SWEEP_LABEL_CHARS = 10;
-
-type Box = { left: number; right: number; top: number; bottom: number };
-/** 掃過時顯示的名稱：一群的每個名稱（輪流）、放的位置 */
-type SweepLabel = { texts: string[]; key: string; anchor: 'start' | 'middle' | 'end'; x: number; y: number };
 
 /** 距離換成半徑比例（0 = 圓心，1 = 外圈，超出範圍會大於 1），全部照比例 */
 function radiusRatio(km: number, scaleKm: number): number {
@@ -194,8 +188,6 @@ export class Radar {
   private flashDirty = true;
   /** 上一格畫面時掃描線在一圈裡的第幾毫秒；-1 代表重新開始算 */
   private lastSweepMs = -1;
-  /** 疊在一起的一群掃過時輪到第幾個名稱（key 是這群的 id） */
-  private readonly sweepTurn = new Map<string, number>();
   private readonly calm = window.matchMedia?.('(prefers-reduced-motion: reduce)');
 
   /**
@@ -649,90 +641,12 @@ export class Radar {
     return a * period;
   }
 
-  /** 掃過時名稱亮多久（毫秒）：一圈的 75%，最多 3 秒（波紋一圈很短，名稱不會一直亮著） */
-  private sweepLabelMs(): number {
-    return Math.min(3000, SWEEP_SEC[this.style.sweep] * 1000 * 0.75);
-  }
-
-  /** 一圈裡第幾毫秒會被掃到 */
-  private hitMs(angleDeg: number, radiusPx: number): number {
-    const periodMs = SWEEP_SEC[this.style.sweep] * 1000;
-    return (((this.sweepHitSec(angleDeg, radiusPx) * 1000) % periodMs) + periodMs) % periodMs;
-  }
-
-  /**
-   * 掃過時短暫顯示的名稱：沒有固定標籤的每一群代表都有，名稱太長截短。
-   * 疊在一起的一群每掃一圈換下一個名稱（「PEG coffee發飄帶 2/3」），每一個都輪得到。
-   * 位置依序試上方、下方（下面寫了還有多久就不放）、右邊、左邊：先找不會蓋到別的光點、還有多久、地標的；
-   * 都會蓋到就只要不跟固定標籤、同時亮著的其他名稱重疊（只亮一下，蓋到光點沒關係），還是放不下才不放
-   */
-  private placeSweepLabels(
-    groups: RadarItem[][],
-    leaderOf: (g: RadarItem[]) => RadarItem,
-    pos: Map<number, { x: number; y: number; angle: number; r: number }>,
-    labelLines: Map<number, unknown>,
-    fixed: Box[],
-  ): Map<number, SweepLabel> {
-    const out = new Map<number, SweepLabel>();
-    const periodMs = SWEEP_SEC[this.style.sweep] * 1000;
-    const showMs = this.sweepLabelMs();
-    const shown: Array<{ box: Box; at: number }> = [];
-    const overlap = (a: Box, b: Box): boolean => a.left < b.right && b.left < a.right && a.top < b.bottom && b.top < a.bottom;
-    const around = (x: number, y: number, h: number): Box => ({ left: x - h, right: x + h, top: y - h, bottom: y + h });
-    // 盡量不蓋到的：每一群的光點、光點下面寫的還有多久、地標的星星
-    const blocks = groups.map((g) => {
-      const lead = leaderOf(g);
-      const p = pos.get(lead.id)!;
-      return { ids: new Set(g.map((it) => it.id)), boxes: [around(p.x, p.y, 7), ...(lead.badge && !labelLines.has(lead.id) ? [{ left: p.x - 14, right: p.x + 14, top: p.y + 10, bottom: p.y + 21 }] : [])] };
-    });
-    const stars = this.landmarks.map((lm) => {
-      const q = polar(lm.bearing - this.heading, Math.min(1, this.ratio(lm.distanceKm)) * (R - 8));
-      return around(q.x, q.y, 10);
-    });
-    // 英文、數字比中文窄，算 0.6 個字寬
-    const units = (t: string): number => [...t].reduce((n, c) => n + (c.charCodeAt(0) < 0x2e80 ? 0.6 : 1), 0);
-    const short = (label: string): string => {
-      if (units(label) <= SWEEP_LABEL_CHARS) return label;
-      let out = '';
-      for (const c of label) {
-        if (units(out + c) > SWEEP_LABEL_CHARS - 1) break;
-        out += c;
-      }
-      return `${out}…`;
-    };
-    for (const g of groups) {
-      const lead = leaderOf(g);
-      if (labelLines.has(lead.id)) continue;
-      const p = pos.get(lead.id)!;
-      const members = [lead, ...g.filter((it) => it !== lead)];
-      const texts = members.map((it, i) => (members.length > 1 ? `${short(it.label)} ${i + 1}/${members.length}` : short(it.label)));
-      const at = this.hitMs(p.angle, p.r);
-      const w = Math.max(...texts.map(units)) * 12;
-      const anchor = anchorAt(p.x);
-      const left = anchor === 'end' ? p.x + 6 - w : anchor === 'start' ? p.x - 6 : p.x - w / 2;
-      const spots: Array<{ box: Box; anchor: 'start' | 'middle' | 'end'; x: number; y: number }> = [
-        { box: { left, right: left + w, top: p.y - 13 - LINE_PX + 4, bottom: p.y - 9 }, anchor, x: anchor === 'end' ? 6 : anchor === 'start' ? -6 : 0, y: -13 },
-        ...(lead.badge ? [] : [{ box: { left, right: left + w, top: p.y + 8, bottom: p.y + 8 + LINE_PX }, anchor, x: anchor === 'end' ? 6 : anchor === 'start' ? -6 : 0, y: 22 }]),
-        { box: { left: p.x + 10, right: p.x + 10 + w, top: p.y - 9, bottom: p.y + 5 }, anchor: 'start' as const, x: 10, y: 4 },
-        { box: { left: p.x - 10 - w, right: p.x - 10, top: p.y - 9, bottom: p.y + 5 }, anchor: 'end' as const, x: -10, y: 4 },
-      ].filter((c) => c.box.top >= 0 && c.box.bottom <= SIZE && c.box.left >= 0 && c.box.right <= SIZE);
-      // 掃到的時間差（一圈是環狀的）小於亮著的時間，才會同時出現
-      const free = (box: Box): boolean =>
-        !fixed.some((q) => overlap(q, box)) && !shown.some((q) => overlap(q.box, box) && Math.min(Math.abs(q.at - at), periodMs - Math.abs(q.at - at)) < showMs);
-      const clear = (box: Box): boolean => !stars.some((q) => overlap(q, box)) && !blocks.some((b) => !b.ids.has(lead.id) && b.boxes.some((q) => overlap(q, box)));
-      const spot = spots.find((c) => free(c.box) && clear(c.box)) ?? spots.find((c) => free(c.box));
-      if (!spot) continue;
-      shown.push({ box: spot.box, at });
-      out.set(lead.id, { texts, key: members.map((it) => it.id).join(','), anchor: spot.anchor, x: spot.x, y: spot.y });
-    }
-    return out;
-  }
-
   /** 掃到時閃一下：g 裡要有 .body（光點本身），這裡補上光暈和亮環，記下一圈裡第幾毫秒會被掃到 */
   private addFlash(g: SVGGElement, angleDeg: number, radiusPx: number, r: number): void {
     g.insertBefore(el('circle', { class: 'flash-ring', r }), g.firstChild);
     g.insertBefore(el('circle', { class: 'flash', r }), g.firstChild);
-    g.dataset.hit = String(this.hitMs(angleDeg, radiusPx));
+    const periodMs = SWEEP_SEC[this.style.sweep] * 1000;
+    g.dataset.hit = String((((this.sweepHitSec(angleDeg, radiusPx) * 1000) % periodMs) + periodMs) % periodMs);
   }
 
   /**
@@ -770,15 +684,6 @@ export class Radar {
       const keep = (k: Keyframe): Keyframe => (blur && typeof k.filter === 'string' ? { ...k, filter: `${k.filter} blur(${blur}px)` } : k);
       target.animate([keep(part.from), keep(part.to)], { duration: part.ms, easing: 'linear' });
     }
-    // 名稱：一群的換下一個，淡入、停一下、淡出
-    const label = g.querySelector<SVGElement>('.sweep-label');
-    if (label?.dataset.names && label.dataset.key) {
-      const names = JSON.parse(label.dataset.names) as string[];
-      const turn = this.sweepTurn.has(label.dataset.key) ? ((this.sweepTurn.get(label.dataset.key) ?? 0) + 1) % names.length : 0;
-      this.sweepTurn.set(label.dataset.key, turn);
-      label.textContent = names[turn];
-    }
-    label?.animate([{ opacity: 0 }, { opacity: 1, offset: 0.1 }, { opacity: 1, offset: 0.75 }, { opacity: 0 }], { duration: this.sweepLabelMs(), easing: 'ease-out' });
   }
 
   private appendMark(g: SVGGElement, out: boolean, spot = false, office = false): void {
@@ -874,7 +779,6 @@ export class Radar {
         break;
       }
     }
-    const sweepLabels = this.placeSweepLabels(groups, leaderOf, pos, labelLines, placed);
     for (const g of groups) {
       const lead = leaderOf(g);
       const ids = g.map((it) => it.id).join(',');
@@ -907,17 +811,6 @@ export class Radar {
           const badge = el('text', { class: 'badge', 'text-anchor': 'middle', y: 19 });
           badge.textContent = it.badge;
           node.appendChild(badge);
-        }
-        const sweep = it === lead && !lbl ? sweepLabels.get(it.id) : undefined;
-        if (sweep) {
-          const label = el('text', { class: 'label sweep-label', 'text-anchor': sweep.anchor, x: sweep.x, y: sweep.y });
-          // 一群的：接著上一圈輪到的名稱（重畫不會從頭開始）
-          label.textContent = sweep.texts[(this.sweepTurn.get(sweep.key) ?? 0) % sweep.texts.length];
-          if (sweep.texts.length > 1) {
-            label.dataset.names = JSON.stringify(sweep.texts);
-            label.dataset.key = sweep.key;
-          }
-          node.appendChild(label);
         }
         if (lbl) {
           const anchor = anchorAt(p.x);
