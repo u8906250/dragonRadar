@@ -116,3 +116,30 @@ describe('spaceMarkup', () => {
     expect((all.match(/space-orbit/g) ?? []).length).toBeGreaterThanOrEqual(5);
   });
 });
+
+describe('spaceMarkup when the view is dragged away from the Earth', () => {
+  const when = new Date('2026-10-28T08:00:00Z');
+  const base = { center: { lat: 25.04, lng: 121.52 }, land: [] as Array<Array<[number, number]>>, when };
+  it('can centre on Jupiter and zoom in to see its bands and Great Red Spot', () => {
+    const ps = planetPositions(when);
+    const e = ps.find((p) => p.key === 'earth')!;
+    const j = ps.find((p) => p.key === 'jupiter')!;
+    const AU = 149_597_870.7;
+    const offset = { x: (j.x - e.x) * AU, y: (j.y - e.y) * AU };
+    const near = spaceMarkup({ ...base, scaleKm: 1e6, rg: 164 * globeFrac(1e6), offset });
+    expect(near).toContain('>木星<');
+    expect(near).toContain('space-spot');
+    expect(near).toContain('space-detail');
+    // 地球在 6 億公里外，不在畫面上
+    expect(near).not.toContain('space-me');
+  });
+
+  it('draws you on the Earth and names it when the view has moved', () => {
+    const moved = spaceMarkup({ ...base, scaleKm: 3e8, rg: 164 * globeFrac(3e8), offset: { x: 5e7, y: 0 } });
+    expect(moved).toContain('>地球（你）<');
+    expect(moved).toContain('space-me');
+    const still = spaceMarkup({ ...base, scaleKm: 3e8, rg: 164 * globeFrac(3e8) });
+    expect(still).toContain('>地球<');
+    expect(still).not.toContain('space-me');
+  });
+});

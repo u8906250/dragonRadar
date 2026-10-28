@@ -104,8 +104,8 @@ export function globeFrac(scaleKm: number): number {
   return (SPACE_FROM_KM / scaleKm) ** (1 - t) * (EARTH_KM / scaleKm) ** t;
 }
 
-/** 太空的畫法（space.ts）：照範圍、地球半徑畫成 SVG */
-export type SpaceDraw = (scaleKm: number, earthR: number) => string;
+/** 太空的畫法（space.ts）：照範圍、地球半徑、視野移開了多少（公里，黃道面上，x 往春分點方向、y 往上）畫成 SVG */
+export type SpaceDraw = (scaleKm: number, earthR: number, offset: { x: number; y: number }) => string;
 const SVG_NS = 'http://www.w3.org/2000/svg';
 const ROSE: Array<[string, number]> = [
   ['N', 0],
@@ -251,6 +251,10 @@ export class Radar {
   /** 太空（比全球再遠）的畫法；還沒載入是 null */
   private spaceDraw: SpaceDraw | null = null;
   private readonly spaceLayer: SVGGElement;
+  /** 地球只剩一個點時（太陽系那幾層）拖曳移動的是視野：中心離地球多遠（公里，黃道面） */
+  private spaceOffset = { x: 0, y: 0 };
+  /** 視野移開、拉回地球時通知外面（「回到我的位置」要不要顯示） */
+  onSpaceMove: (() => void) | null = null;
   private readonly stack: HTMLDivElement;
   private readonly pointers = new Map<number, { x: number; y: number }>();
   private pinchDist = 0;
@@ -468,8 +472,7 @@ export class Radar {
       if (e.pointerType === 'mouse' && e.button !== 0) return;
       if (e.pointerType === 'mouse') e.preventDefault();
       this.pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
-      // 太空裡地球小到看不出形狀（月球、行星那幾層）不能拖：抓不到地球，一拖就跑到別的洲
-      if (this.pointers.size === 1 && !this.tinyEarth) {
+      if (this.pointers.size === 1) {
         this.panStart = { x: e.clientX, y: e.clientY };
         this.panLast = this.panStart;
       }
@@ -549,6 +552,17 @@ export class Radar {
     this.panLast = { x: e.clientX, y: e.clientY };
     const r = Math.hypot(dx, dy);
     if (r === 0) return;
+    // 地球只剩一個點（太陽系那幾層）或視野已經移開：移動視野，不動你的位置。太空那一層跟著指北針轉了 -heading，拖的方向要轉回來
+    if (this.earthHidden) {
+      const h = (this.heading * Math.PI) / 180;
+      const lx = dx * Math.cos(h) - dy * Math.sin(h);
+      const ly = dx * Math.sin(h) + dy * Math.cos(h);
+      const kmPerUnit = this.scaleKm / (R - 8);
+      this.spaceOffset = { x: this.spaceOffset.x - lx * kmPerUnit, y: this.spaceOffset.y + ly * kmPerUnit };
+      this.drawSpace();
+      this.onSpaceMove?.();
+      return;
+    }
     // 太空：轉動地球，手指拖過地球表面多遠就轉多少（照地球在雷達上的半徑換算）
     const km = this.inSpace ? (r / (globeFrac(this.scaleKm) * (R - 8))) * EARTH_KM : (r / (R - 8)) * this.scaleKm;
     // 內容往畫面上的 screen 方向移動；指北針模式要加回手機朝向；中心往反方向
@@ -570,6 +584,11 @@ export class Radar {
   /** 照比例畫：外圈是範圍，裡面三圈是 1/4、1/2、3/4 */
   setScale(km: number): void {
     this.scaleKm = km;
+    // 回到平常的範圍（全球以內）：一定以你為中心，移開的視野拉回來；太空裡移開了就一直移開（可以拖到木星再放大）
+    if (!this.inSpace && this.spaceMoved) {
+      this.spaceOffset = { x: 0, y: 0 };
+      this.onSpaceMove?.();
+    }
     this.rings.replaceChildren();
     this.scaleLabels.replaceChildren();
     const marks = [0.25, 0.5, 0.75].map((f) => ({ km: f * km, label: f === 0.5 }));
@@ -609,6 +628,24 @@ export class Radar {
     return this.inSpace && globeFrac(this.scaleKm) * (R - 8) < TINY_EARTH;
   }
 
+  /** 光點、路線、地標不畫：地球只剩一個點，或視野移開了（中心不是你） */
+  private get earthHidden(): boolean {
+    return this.tinyEarth || (this.inSpace && this.spaceMoved);
+  }
+
+  /** 太陽系那幾層把視野移開了（中心不是地球） */
+  get spaceMoved(): boolean {
+    return this.spaceOffset.x !== 0 || this.spaceOffset.y !== 0;
+  }
+
+  /** 視野拉回地球 */
+  resetSpace(): void {
+    if (!this.spaceMoved) return;
+    this.spaceOffset = { x: 0, y: 0 };
+    this.drawSpace();
+    this.onSpaceMove?.();
+  }
+
   /** 太空（比全球再遠）的畫法：地球、月球、太陽、行星（space.ts，第一次用到才載入）；null 是還沒載入 */
   setSpace(draw: SpaceDraw | null): void {
     this.spaceDraw = draw;
@@ -618,11 +655,12 @@ export class Radar {
   /** 太空：畫在海岸線那一層，跟著指北針轉；平常清空 */
   private drawSpace(): void {
     this.stack.classList.toggle('space', this.inSpace);
+    this.stack.classList.toggle('space-moved', this.inSpace && this.spaceMoved);
     if (!this.inSpace || !this.spaceDraw) {
       if (this.spaceLayer.firstChild) this.spaceLayer.replaceChildren();
       return;
     }
-    this.spaceLayer.innerHTML = this.spaceDraw(this.scaleKm, globeFrac(this.scaleKm) * (R - 8));
+    this.spaceLayer.innerHTML = this.spaceDraw(this.scaleKm, globeFrac(this.scaleKm) * (R - 8), this.spaceOffset);
     if (this.heading) this.spaceLayer.setAttribute('transform', `rotate(${(-this.heading).toFixed(1)} ${C} ${C})`);
     else this.spaceLayer.removeAttribute('transform');
   }
@@ -665,7 +703,7 @@ export class Radar {
     this.carLayer.replaceChildren();
     for (const c of this.cars) {
       const ratio = this.ratio(c.distanceKm);
-      if (ratio > 1 || this.tinyEarth) continue;
+      if (ratio > 1 || this.earthHidden) continue;
       const p = polar(c.bearing - this.heading, ratio * (R - 8));
       const g = el('g', { class: 'car', transform: `translate(${p.x.toFixed(1)} ${p.y.toFixed(1)})`, tabindex: 0, role: 'button' });
       g.dataset.id = c.id;
@@ -704,7 +742,7 @@ export class Radar {
     for (const b of this.bottles) {
       const ratio = this.ratio(b.distanceKm);
       // 範圍外的瓶子不畫，免得外圈擠滿；只有方向提示的那一個貼在外圈（太空不畫）
-      if (this.tinyEarth || (ratio > 1 && (!b.hint || this.inSpace))) continue;
+      if (this.earthHidden || (ratio > 1 && (!b.hint || this.inSpace))) continue;
       const angle = b.bearing - this.heading;
       const r = Math.min(1, ratio) * (R - 8);
       const p = polar(angle, r);
@@ -772,7 +810,7 @@ export class Radar {
     for (const lm of this.landmarks) {
       const ratio = this.ratio(lm.distanceKm);
       const out = ratio > 1;
-      if (this.inSpace && (out || this.tinyEarth)) continue;
+      if (this.inSpace && (out || this.earthHidden)) continue;
       const p = polar(lm.bearing - this.heading, Math.min(1, ratio) * (R - 8));
       const g = el('g', { class: `landmark${out ? ' out' : ''}${lm.selected ? ' selected' : ''}`, transform: `translate(${p.x.toFixed(1)} ${p.y.toFixed(1)})`, tabindex: 0, role: 'button' });
       g.dataset.id = lm.id;
@@ -900,7 +938,7 @@ export class Radar {
   private drawRoutes(): void {
     this.routeLayer.replaceChildren();
     for (const r of this.routes) {
-      if (r.state === 'done' || r.points.length < 2 || this.tinyEarth) continue;
+      if (r.state === 'done' || r.points.length < 2 || this.earthHidden) continue;
       // 太空：有一段在地球另一面就不畫（直線會穿過地球）
       if (this.inSpace && r.points.some((pt) => pt.distanceKm > HORIZON_KM)) continue;
       const path = el('path', { class: `route route-${r.state}`, d: this.pathOf(r.points) });
@@ -1088,7 +1126,7 @@ export class Radar {
     this.blipLayer.replaceChildren();
     const pos = new Map<number, { x: number; y: number; out: boolean; angle: number; r: number }>();
     // 太空：地球另一面的不畫；地球太小時都擠在一起，不畫
-    const items = this.tinyEarth ? [] : this.inSpace ? this.items.filter((it) => it.distanceKm <= HORIZON_KM) : this.items;
+    const items = this.earthHidden ? [] : this.inSpace ? this.items.filter((it) => it.distanceKm <= HORIZON_KM) : this.items;
     for (const it of items) {
       const ratio = this.ratio(it.distanceKm);
       const angle = it.bearing - this.heading;

@@ -197,6 +197,8 @@ interface Body {
   r: number;
   cls: string;
   name: string;
+  /** 一定要寫名字（視野移開時的地球：你在哪裡），都疊到就放在下面 */
+  force?: boolean;
 }
 
 /** 名字先放下面，疊到別的名字、天體就換上面、右邊、左邊 */
@@ -212,11 +214,71 @@ function labels(bodies: Body[]): string {
       { box: [b.x + b.r + 3, b.y - 7, b.x + b.r + 3 + w, b.y + 6], tx: b.x + b.r + 3, ty: b.y + 4, anchor: 'start' },
       { box: [b.x - b.r - 3 - w, b.y - 7, b.x - b.r - 3, b.y + 6], tx: b.x - b.r - 3, ty: b.y + 4, anchor: 'end' },
     ];
-    const pick = options.find((o) => !hit(o.box, i));
+    const pick = options.find((o) => !hit(o.box, i)) ?? (b.force ? options[0] : undefined);
     if (!pick) return;
     boxes.push(pick.box);
     out += `<text class="space-label" x="${f1(pick.tx)}" y="${f1(pick.ty)}" text-anchor="${pick.anchor}">${b.name}</text>`;
   });
+  return out;
+}
+
+/** 天體的真實半徑（公里）、拉遠時最小畫多大（SVG 單位），淡淡的顏色（線條跟雷達一樣，顏色只是讓人認得出來） */
+const LOOKS: Record<string, { km: number; min: number; tint: string }> = {
+  sun: { km: 696_340, min: 6, tint: '' },
+  mercury: { km: 2_440, min: 2.6, tint: '#a39e96' },
+  venus: { km: 6_052, min: 3.4, tint: '#dcbf78' },
+  earth: { km: 6_371, min: 3.6, tint: '#5b95d6' },
+  moon: { km: 1_737, min: 2.2, tint: '#b3afa7' },
+  mars: { km: 3_390, min: 3, tint: '#cf6c40' },
+  jupiter: { km: 69_911, min: 6, tint: '#cfa77d' },
+  saturn: { km: 58_232, min: 5, tint: '#ddc88e' },
+  uranus: { km: 25_362, min: 4.2, tint: '#86cbd2' },
+  neptune: { km: 24_622, min: 4.2, tint: '#5876d6' },
+};
+
+/** 圓裡面一條水平的弦（木星的條紋）：離圓心 dy，畫在圓裡面那一段 */
+function chord(x: number, y: number, r: number, dy: number): string {
+  const w = Math.sqrt(Math.max(0, r * r - dy * dy));
+  return `M${f1(x - w)} ${f1(y + dy)}L${f1(x + w)} ${f1(y + dy)}`;
+}
+
+/**
+ * 一顆星球：照真實大小畫（太小就畫最小的大小），背對太陽的那一半變暗；
+ * 太陽有光芒、土星有環（後半圈被星球擋住）、天王星的環是直的、木星有條紋和大紅斑、火星有極冠、月球有坑
+ */
+function bodySvg(key: string, x: number, y: number, r: number, sun: { x: number; y: number } | null): string {
+  const c = `cx="${f1(x)}" cy="${f1(y)}"`;
+  if (key === 'sun') {
+    let rays = '';
+    for (let i = 0; i < 8; i++) {
+      const a = (i * Math.PI) / 4;
+      rays += `M${f1(x + (r + 2) * Math.cos(a))} ${f1(y + (r + 2) * Math.sin(a))}L${f1(x + (r + 5) * Math.cos(a))} ${f1(y + (r + 5) * Math.sin(a))}`;
+    }
+    return `<path class="space-sun-ray" d="${rays}" /><circle class="space-sun" ${c} r="${f1(r)}" />`;
+  }
+  const look = LOOKS[key];
+  let out = '';
+  const ringRx = r * 2.2;
+  const ringRy = r * 0.7;
+  if (key === 'saturn') out += `<ellipse class="space-ring" ${c} rx="${f1(ringRx)}" ry="${f1(ringRy)}" />`;
+  if (key === 'uranus') out += `<ellipse class="space-ring" ${c} rx="${f1(r * 0.5)}" ry="${f1(r * 1.8)}" />`;
+  out += `<circle class="space-planet" ${c} r="${f1(r)}" fill="${look.tint}" />`;
+  if (key === 'jupiter' && r >= 4) {
+    out += `<path class="space-detail" d="${chord(x, y, r, -r * 0.45)}${chord(x, y, r, -r * 0.1)}${chord(x, y, r, r * 0.3)}" />`;
+    if (r >= 8) out += `<ellipse class="space-spot" cx="${f1(x + r * 0.32)}" cy="${f1(y + r * 0.45)}" rx="${f1(r * 0.22)}" ry="${f1(r * 0.12)}" />`;
+  }
+  if (key === 'neptune' && r >= 6) out += `<path class="space-detail" d="${chord(x, y, r, r * 0.2)}" /><ellipse class="space-spot" cx="${f1(x - r * 0.3)}" cy="${f1(y - r * 0.2)}" rx="${f1(r * 0.2)}" ry="${f1(r * 0.12)}" />`;
+  if (key === 'mars' && r >= 5) out += `<ellipse class="space-cap" cx="${f1(x)}" cy="${f1(y - r * 0.82)}" rx="${f1(r * 0.4)}" ry="${f1(r * 0.16)}" />`;
+  if (key === 'moon' && r >= 4) out += `<circle class="space-detail" cx="${f1(x - r * 0.3)}" cy="${f1(y - r * 0.2)}" r="${f1(r * 0.22)}" /><circle class="space-detail" cx="${f1(x + r * 0.35)}" cy="${f1(y + r * 0.3)}" r="${f1(r * 0.15)}" />`;
+  // 背對太陽的那一半：從朝太陽的方向轉 90 度到 -90 度，經過背面那一邊
+  if (sun && r >= 3) {
+    const a = Math.atan2(sun.y - y, sun.x - x);
+    const p1 = [x + r * Math.cos(a + Math.PI / 2), y + r * Math.sin(a + Math.PI / 2)];
+    const p2 = [x + r * Math.cos(a - Math.PI / 2), y + r * Math.sin(a - Math.PI / 2)];
+    out += `<path class="space-shade" d="M${f1(p1[0])} ${f1(p1[1])}A${f1(r)} ${f1(r)} 0 0 1 ${f1(p2[0])} ${f1(p2[1])}Z" />`;
+  }
+  // 土星的環：前半圈蓋在星球上
+  if (key === 'saturn') out += `<path class="space-ring" d="M${f1(x - ringRx)} ${f1(y)}A${f1(ringRx)} ${f1(ringRy)} 0 0 0 ${f1(x + ringRx)} ${f1(y)}" />`;
   return out;
 }
 
@@ -230,64 +292,82 @@ export interface SpaceOpts {
   scaleKm: number;
   /** 地球在雷達上的半徑（雷達照這個擺光點） */
   rg: number;
+  /** 太陽系那幾層拖曳移開的視野：中心離地球多遠（公里，黃道面，x 往春分點方向、y 往上） */
+  offset?: { x: number; y: number };
 }
 
 /**
  * 太空：地球（夠大才畫海岸線、經緯線、晝夜），月球、太陽、行星照真實距離擺在地球周圍（黃道面，春分點方向在右邊），
- * 軌道用虛線；不在雷達範圍裡的不畫
+ * 軌道用虛線，星球照真實大小（太小就畫最小的大小）；不在雷達範圍裡的不畫
  */
 export function spaceMarkup(o: SpaceOpts): string {
   const k = INNER / o.scaleKm;
-  const inView = (x: number, y: number): boolean => Math.hypot(x - C, y - C) <= INNER;
-  const bodies: Body[] = [];
+  const inView = (x: number, y: number, r = 0): boolean => Math.hypot(x - C, y - C) - r <= INNER;
+  // 地球（你）在畫面上的位置：視野沒移開就在正中間
+  const ox = o.offset?.x ?? 0;
+  const oy = o.offset?.y ?? 0;
+  const moved = ox !== 0 || oy !== 0;
+  const ex = C - ox * k;
+  const ey = C + oy * k;
+  const planets = planetPositions(o.when);
+  const earth = planets.find((p) => p.key === 'earth')!;
+  const sun = { x: ex - earth.x * AU_KM * k, y: ey + earth.y * AU_KM * k };
+  const radius = (key: string): number => Math.max(LOOKS[key].min, LOOKS[key].km * k);
+  const named: Body[] = [];
   let lines = '';
-  let dots = '';
-  // 地球
+  let bodies = '';
+  // 地球：大到看得出形狀就畫海岸線、經緯線、晝夜（視野移開了就整顆搬過去）
   if (o.rg >= TINY_EARTH) {
-    const sun = subsolar(o.when);
-    lines += `<path class="space-night" d="${nightPath(o.center, sun, o.rg)}" />`;
-    if (o.rg >= 30) lines += `<path class="space-grat" d="${graticule(o.center, o.rg)}" />`;
-    lines += `<path class="region-outline" d="${landPath(o.center, o.land, o.rg)}" />`;
-    lines += `<circle class="region-outline open space-limb" cx="${C}" cy="${C}" r="${f1(o.rg)}" />`;
-  } else {
-    lines += `<circle class="region-outline space-limb" cx="${C}" cy="${C}" r="${f1(Math.max(o.rg, 3))}" />`;
+    if (inView(ex, ey, o.rg)) {
+      const s = subsolar(o.when);
+      let globe = `<path class="space-night" d="${nightPath(o.center, s, o.rg)}" />`;
+      if (o.rg >= 30) globe += `<path class="space-grat" d="${graticule(o.center, o.rg)}" />`;
+      globe += `<path class="region-outline" d="${landPath(o.center, o.land, o.rg)}" />`;
+      globe += `<circle class="region-outline open space-limb" cx="${C}" cy="${C}" r="${f1(o.rg)}" />`;
+      lines += moved ? `<g transform="translate(${f1(ex - C)} ${f1(ey - C)})">${globe}</g>` : globe;
+      if (moved) bodies += `<circle class="space-me" cx="${f1(ex)}" cy="${f1(ey)}" r="4" />`;
+    }
+  } else if (inView(ex, ey)) {
+    bodies += bodySvg('earth', ex, ey, radius('earth'), sun);
+    // 視野移開了：雷達中間的圓點（你）不在地球上，在地球那裡畫一個
+    if (moved) bodies += `<circle class="space-me" cx="${f1(ex)}" cy="${f1(ey)}" r="3" />`;
   }
   // 地球小到看不出形狀：寫名字（中間的圓點是你）
-  if (o.rg < 24) bodies.push({ x: C, y: C, r: Math.max(o.rg, 5), cls: 'earth', name: '地球' });
+  if (o.rg < 24 && inView(ex, ey)) named.push({ x: ex, y: ey, r: Math.max(o.rg, radius('earth')), cls: 'earth', name: moved ? '地球（你）' : '地球', force: moved });
   // 月球：軌道看得出來才畫
   const moonR = MOON_KM * k;
-  if (moonR >= 12 && moonR <= INNER * 3) {
-    lines += `<circle class="region-outline open space-orbit" cx="${C}" cy="${C}" r="${f1(moonR)}" />`;
+  if (moonR >= 12 && moonR <= INNER * 3 && Math.hypot(ex - C, ey - C) - moonR < INNER) {
+    lines += `<circle class="region-outline open space-orbit" cx="${f1(ex)}" cy="${f1(ey)}" r="${f1(moonR)}" />`;
     const m = moonPosition(o.when);
-    const x = C + m.dist * k * Math.cos(m.lon * RAD);
-    const y = C - m.dist * k * Math.sin(m.lon * RAD);
-    if (inView(x, y)) {
-      dots += `<circle class="space-body" cx="${f1(x)}" cy="${f1(y)}" r="2.5" />`;
-      bodies.push({ x, y, r: 2.5, cls: 'moon', name: '月球' });
+    const x = ex + m.dist * k * Math.cos(m.lon * RAD);
+    const y = ey - m.dist * k * Math.sin(m.lon * RAD);
+    const r = radius('moon');
+    if (inView(x, y, r)) {
+      bodies += bodySvg('moon', x, y, r, sun);
+      named.push({ x, y, r, cls: 'moon', name: '月球' });
     }
   }
   // 太陽、行星：以地球為中心（行星的日心位置減掉地球的）
-  const planets = planetPositions(o.when);
-  const earth = planets.find((p) => p.key === 'earth')!;
-  const sx = C - earth.x * AU_KM * k;
-  const sy = C + earth.y * AU_KM * k;
-  const sunDist = Math.hypot(sx - C, sy - C);
+  const sunDist = Math.hypot(sun.x - C, sun.y - C);
   for (const p of planets) {
-    const r = p.a * AU_KM * k;
+    const orbit = p.a * AU_KM * k;
     // 軌道：太小、太大（看起來是直線）、跟雷達範圍沒交集的不畫
-    if (r >= 6 && r <= INNER * 12 && sunDist - r < INNER && r - sunDist < INNER) {
-      lines += `<circle class="region-outline open space-orbit" cx="${f1(sx)}" cy="${f1(sy)}" r="${f1(r)}" />`;
+    if (orbit >= 6 && orbit <= INNER * 12 && sunDist - orbit < INNER && orbit - sunDist < INNER) {
+      lines += `<circle class="region-outline open space-orbit" cx="${f1(sun.x)}" cy="${f1(sun.y)}" r="${f1(orbit)}" />`;
     }
     if (p.key === 'earth') continue;
-    const x = C + (p.x - earth.x) * AU_KM * k;
-    const y = C - (p.y - earth.y) * AU_KM * k;
-    if (!inView(x, y)) continue;
-    dots += `<circle class="space-body" cx="${f1(x)}" cy="${f1(y)}" r="2.5" />`;
-    bodies.push({ x, y, r: 2.5, cls: p.key, name: p.name });
+    const x = ex + (p.x - earth.x) * AU_KM * k;
+    const y = ey - (p.y - earth.y) * AU_KM * k;
+    const r = radius(p.key);
+    if (!inView(x, y, r)) continue;
+    bodies += bodySvg(p.key, x, y, r, sun);
+    named.push({ x, y, r: p.key === 'saturn' ? r * 2.2 : r, cls: p.key, name: p.name });
   }
-  if (inView(sx, sy)) {
-    dots += `<circle class="space-sun" cx="${f1(sx)}" cy="${f1(sy)}" r="5" />`;
-    bodies.unshift({ x: sx, y: sy, r: 5, cls: 'sun', name: '太陽' });
+  const sunR = radius('sun');
+  if (inView(sun.x, sun.y, sunR)) {
+    bodies += bodySvg('sun', sun.x, sun.y, sunR, null);
+    // 名字照順序放：地球（你）最優先，再來是太陽
+    named.splice(named[0]?.cls === 'earth' ? 1 : 0, 0, { x: sun.x, y: sun.y, r: sunR + 5, cls: 'sun', name: '太陽' });
   }
-  return `${lines}${dots}${labels(bodies)}`;
+  return `${lines}${bodies}${labels(named)}`;
 }

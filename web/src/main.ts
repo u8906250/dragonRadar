@@ -404,6 +404,8 @@ const radar = new Radar(
 );
 // 點了車掃的車子：打開那條車掃的時間表
 radar.onCar = (id) => selectRoute(id);
+// 太陽系那幾層拖曳移開了視野、拉回地球：「回到我的位置」跟著出現、消失
+radar.onSpaceMove = () => updateHomeBtn();
 const map = new MapView(
   $('#map'),
   origin,
@@ -830,7 +832,7 @@ function updateSpace(): void {
   const center = { lat: origin.lat, lng: origin.lng };
   const land = landRings;
   const when = new Date();
-  radar.setSpace((km, rg) => mod.spaceMarkup({ center, land, when, scaleKm: km, rg }));
+  radar.setSpace((km, rg, offset) => mod.spaceMarkup({ center, land, when, scaleKm: km, rg, offset }));
 }
 
 /**
@@ -2566,6 +2568,11 @@ let home: Home | null = loadHome();
  * （最後一次的 GPS 或移動前的位置），不用等重新定位，之後 GPS 回來照常更新。都沒有才重新定位
  */
 function goHome(): void {
+  // 太陽系那幾層移開了視野：先拉回地球；位置本來就不是手動的就到這裡為止
+  if (radar.spaceMoved) {
+    radar.resetSpace();
+    if (origin.source !== 'manual') return;
+  }
   const to: Home | null = lastGps ? { ...lastGps, source: 'gps', accuracy: lastGpsAccuracy } : home;
   if (!to) {
     locateMe();
@@ -2577,9 +2584,9 @@ function goHome(): void {
   map.setOrigin(origin, true, gpsAccuracy);
 }
 
-/** 「回到我的位置」：手動位置（拖曳雷達、在地圖上設定）時，雷達上才出現 */
+/** 「回到我的位置」：手動位置（拖曳雷達、在地圖上設定）、太陽系那幾層移開了視野時，雷達上才出現 */
 function updateHomeBtn(): void {
-  homeBtn.hidden = origin.source !== 'manual' || view !== 'radar';
+  homeBtn.hidden = (origin.source !== 'manual' && !radar.spaceMoved) || view !== 'radar';
 }
 
 function setOrigin(o: Origin): void {
