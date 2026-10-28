@@ -1,10 +1,11 @@
 /**
- * 雷達放大（2 km 內）時畫的街道：OpenFreeMap 的向量圖磚（OpenMapTiles 格式，資料來自 OpenStreetMap），
+ * 雷達 50 km 內（和「雙北」）畫的道路：OpenFreeMap 的向量圖磚（OpenMapTiles 格式，資料來自 OpenStreetMap），
  * 只取 transportation 圖層的道路（不含隧道、步道、服務道路、鐵路），第一次用到才載入。
+ * 範圍越大用越粗一級的圖磚（OpenMapTiles 已經簡化過，越粗的只留越大的路），畫的路也越少。
  * 圖磚是 Mapbox Vector Tile（protobuf），這裡只解讀用得到的欄位，不另外加函式庫。
  */
 
-/** 大路（快速道路、主要幹道）畫粗一點，其他街道、巷弄畫細 */
+/** 粗線、細線 */
 export type StreetClass = 'major' | 'minor';
 
 /** 一條街：pts 是 [緯度, 經度, 緯度, 經度, …]；box 是 [最小緯度, 最小經度, 最大緯度, 最大經度] */
@@ -14,21 +15,24 @@ export interface StreetLine {
   box: [number, number, number, number];
 }
 
-/** OpenMapTiles 的道路種類 → 畫法；沒列的（service、track、path、rail、ferry…）不畫 */
-const CLASS_OF: Record<string, StreetClass> = {
-  motorway: 'major',
-  trunk: 'major',
-  primary: 'major',
-  secondary: 'major',
-  tertiary: 'minor',
-  minor: 'minor',
-};
+/** OpenMapTiles 的道路種類 → 畫法；沒列的（service、track、path、rail、ferry、施工中…）不畫 */
+type Classes = Record<string, StreetClass>;
+/** 國道、快速道路粗線 */
+const HIGHWAYS: Classes = { motorway: 'major', trunk: 'major' };
 
 /**
- * 用 z13 的圖磚（一張約 4.4 km 寬，1 km 範圍通常一兩張）：大街小巷都有，座標精度約 1 m；
- * z14 多了建築、門牌、店家，市區一張壓縮後就六百多 KB，用不到
+ * 雷達範圍（半徑）→ 用哪一級圖磚、畫哪些路。一張圖磚的寬度（台灣約緯度 25 度）要大於畫面直徑，最多才四張：
+ * z13 約 4.4 km、z11 約 18 km、z10 約 35 km、z9 約 71 km、z8 約 142 km。
+ * 2 km 內大街小巷都畫（z14 多了建築、門牌、店家，市區一張壓縮後就六百多 KB，用不到）
  */
-export const STREET_ZOOM = 13;
+export const STREET_TIERS: Array<{ maxKm: number; zoom: number; classes: Classes }> = [
+  { maxKm: 2, zoom: 13, classes: { motorway: 'major', trunk: 'major', primary: 'major', secondary: 'major', tertiary: 'minor', minor: 'minor' } },
+  { maxKm: 8, zoom: 11, classes: { ...HIGHWAYS, primary: 'minor', secondary: 'minor' } },
+  { maxKm: 16, zoom: 10, classes: { ...HIGHWAYS, primary: 'minor' } },
+  { maxKm: 33, zoom: 9, classes: { ...HIGHWAYS, primary: 'minor' } },
+  { maxKm: Infinity, zoom: 8, classes: HIGHWAYS },
+];
+const tierOf = (km: number): (typeof STREET_TIERS)[number] => STREET_TIERS.find((t) => km <= t.maxKm) ?? STREET_TIERS[STREET_TIERS.length - 1];
 const TILEJSON = 'https://tiles.openfreemap.org/planet';
 /** 最多記住幾張圖磚（拖來拖去不要一直重抓） */
 const MAX_TILES = 64;
@@ -85,8 +89,8 @@ class Pbf {
   }
 }
 
-/** 圖磚裡的 transportation 圖層 → 要畫的街道（座標換成經緯度） */
-export function decodeStreets(buf: Uint8Array, x: number, y: number, z: number): StreetLine[] {
+/** 圖磚裡的 transportation 圖層 → 要畫的道路（classes 有列的種類；座標換成經緯度） */
+export function decodeStreets(buf: Uint8Array, x: number, y: number, z: number, classes: Classes = STREET_TIERS[0].classes): StreetLine[] {
   const tile = new Pbf(buf);
   while (tile.more()) {
     const key = tile.varint();
@@ -140,7 +144,7 @@ export function decodeStreets(buf: Uint8Array, x: number, y: number, z: number):
       for (let i = 0; i + 1 < tags.length; i += 2) {
         const tk = keys[tags[i]];
         const tv = values[tags[i + 1]];
-        if (tk === 'class' && tv) cls = CLASS_OF[tv];
+        if (tk === 'class' && tv) cls = classes[tv];
         else if (tk === 'brunnel' && tv === 'tunnel') tunnel = true;
       }
       // 地下道、隧道在地面上看不到，不畫
@@ -214,18 +218,19 @@ function tileTemplate(): Promise<string | null> {
 const tiles = new Map<string, StreetLine[] | 'loading'>();
 
 /**
- * 涵蓋 (lat, lng) 方圓 km 的街道：已經抓到的圖磚先畫，還沒抓的去抓，抓到了呼叫 onLoad 重畫。
+ * 涵蓋 (lat, lng) 方圓 km 的道路（範圍 rangeKm 決定用哪一級圖磚）：已經抓到的圖磚先畫，還沒抓的去抓，抓到了呼叫 onLoad 重畫。
  * 抓失敗的不記住（下次重畫再試）
  */
-export function streetsAround(lat: number, lng: number, km: number, onLoad: () => void): StreetLine[] {
+export function streetsAround(lat: number, lng: number, km: number, rangeKm: number, onLoad: () => void): StreetLine[] {
+  const { zoom, classes } = tierOf(rangeKm);
   const dLat = km / 110.574;
   const dLng = km / (111.32 * Math.cos((lat * Math.PI) / 180));
-  const a = tileOf(lat + dLat, lng - dLng, STREET_ZOOM);
-  const b = tileOf(lat - dLat, lng + dLng, STREET_ZOOM);
+  const a = tileOf(lat + dLat, lng - dLng, zoom);
+  const b = tileOf(lat - dLat, lng + dLng, zoom);
   const out: StreetLine[] = [];
   for (let x = a.x; x <= b.x; x++) {
     for (let y = a.y; y <= b.y; y++) {
-      const key = `${x}/${y}`;
+      const key = `${zoom}/${x}/${y}`;
       const got = tiles.get(key);
       if (got === 'loading') continue;
       if (got) {
@@ -237,11 +242,11 @@ export function streetsAround(lat: number, lng: number, km: number, onLoad: () =
       }
       tiles.set(key, 'loading');
       void tileTemplate()
-        .then((t) => (t ? fetch(t.replace('{z}', String(STREET_ZOOM)).replace('{x}', String(x)).replace('{y}', String(y))) : null))
+        .then((t) => (t ? fetch(t.replace('{z}', String(zoom)).replace('{x}', String(x)).replace('{y}', String(y))) : null))
         .then((r) => (r?.ok ? r.arrayBuffer() : null))
         .then((ab) => {
           if (!ab) throw new Error('no tile');
-          tiles.set(key, decodeStreets(new Uint8Array(ab), x, y, STREET_ZOOM));
+          tiles.set(key, decodeStreets(new Uint8Array(ab), x, y, zoom, classes));
           while (tiles.size > MAX_TILES) tiles.delete(tiles.keys().next().value as string);
           onLoad();
         })

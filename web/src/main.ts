@@ -729,17 +729,18 @@ function shuangbeiKm(): number {
   return sbRadius.km;
 }
 
-// ---- 街道：放大到 2 km 內畫（streets.ts，OpenFreeMap 的向量圖磚，第一次用到才載入） ----
-const STREET_KM = 2;
+// ---- 道路：50 km 內和「雙北」畫（streets.ts，OpenFreeMap 的向量圖磚，第一次用到才載入；範圍越大畫的路越少） ----
+const STREET_KM = 50;
 let streetsMod: typeof import('./streets') | null = null;
 let streetsLoading = false;
 /** 上次畫的位置、範圍、抓到第幾張圖磚，沒變就不重算 */
 let streetsFor = '';
 let streetTiles = 0;
 
-/** 範圍內的街道換成相對於圓心的公里數（範圍小，用平面近似就夠準，拖曳時每一幀都要算） */
+/** 範圍內的道路換成相對於圓心的公里數（範圍不大，用平面近似就夠準，拖曳時每一幀都要算） */
 function updateStreets(): void {
-  const show = scaleKm <= STREET_KM;
+  // 「雙北」的半徑依位置算，45–65 km
+  const show = scaleKm <= STREET_KM || scaleSetting === 'region';
   $('#radar-attrib').hidden = !show;
   if (!show) {
     if (streetsFor) radar.setStreets(null);
@@ -763,7 +764,7 @@ function updateStreets(): void {
   if (key === streetsFor) return;
   streetsFor = key;
   const reach = scaleKm * 1.05;
-  const lines = streetsMod.streetsAround(origin.lat, origin.lng, reach, () => {
+  const lines = streetsMod.streetsAround(origin.lat, origin.lng, reach, scaleKm, () => {
     streetTiles++;
     updateStreets();
   });

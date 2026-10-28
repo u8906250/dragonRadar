@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { decodeStreets, tileOf } from '../src/streets';
+import { decodeStreets, STREET_TIERS, tileOf } from '../src/streets';
 
 /** 組一張只有 transportation 圖層的小圖磚（protobuf） */
 function varint(n: number): number[] {
@@ -62,6 +62,15 @@ describe('decodeStreets', () => {
   });
   it('ignores other layers', () => {
     expect(decodeStreets(tile([{ tags: [0, 0], type: 2, geom: [(1 << 3) | 1, 0, 0, (1 << 3) | 2, 2, 2] }], 'water'), 0, 0, 0)).toEqual([]);
+  });
+});
+
+describe('STREET_TIERS', () => {
+  it('fits the radar in at most 2 x 2 tiles', () => {
+    // 圖磚寬度（緯度 25 度）要大於畫面直徑
+    for (const t of STREET_TIERS.filter((t) => t.maxKm !== Infinity)) {
+      expect((40075 * Math.cos((25 * Math.PI) / 180)) / 2 ** t.zoom).toBeGreaterThan(t.maxKm * 2 * 1.05);
+    }
   });
 });
 
