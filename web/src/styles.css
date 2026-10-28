@@ -266,6 +266,14 @@ a.chip { display: inline-flex; align-items: center; text-decoration: none; }
 .radar .blip.phase-later.kind-activity .dot { stroke: var(--blip-activity); }
 .radar .blip.phase-later .mark { opacity: 0.45; stroke-dasharray: 3 2; }
 .radar .blip.phase-later .core, .radar .blip.phase-later .ping { display: none; }
+/* 車掃的起點 🚩、終點 🏁 */
+.radar .blip .flag { font-size: 18px; text-anchor: middle; dominant-baseline: central; pointer-events: none; }
+.radar .blip.out .flag { font-size: 13px; }
+/* 車掃進行中的車子（推算的位置），下面寫「預估位置」 */
+.radar .car { cursor: pointer; }
+.radar .car .hit { fill: transparent; }
+.radar .car-icon { font-size: 20px; text-anchor: middle; dominant-baseline: central; pointer-events: none; }
+.radar .car-note { fill: var(--label); font-size: 9px; font-weight: 700; text-anchor: middle; paint-order: stroke; stroke: var(--label-halo); stroke-width: 3px; stroke-linejoin: round; pointer-events: none; }
 .radar .blip .badge { fill: var(--label); font-size: 10px; font-weight: 800; paint-order: stroke; stroke: var(--label-halo); stroke-width: 3px; stroke-linejoin: round; pointer-events: none; }
 .radar .blip .label { fill: var(--label); font-size: 12px; font-weight: 600; paint-order: stroke; stroke: var(--label-halo); stroke-width: 3px; stroke-linejoin: round; pointer-events: none; }
 /* 活動：換顏色，進行中時一樣閃爍 */
@@ -554,6 +562,14 @@ a.chip { display: inline-flex; align-items: center; text-decoration: none; }
 .radar .landmark.selected .star { stroke: var(--blip-selected); stroke-width: 2.5; }
 .radar .landmark .label { fill: var(--label); font-size: 11px; font-weight: 700; paint-order: stroke; stroke: var(--label-halo); stroke-width: 3px; stroke-linejoin: round; pointer-events: none; }
 .map-office { background: none; border: none; filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.35)); }
+/* 車掃的起點 🚩、終點 🏁；選到時加一圈 */
+.map-flag { background: none; border: none; display: grid; place-items: center; line-height: 1; filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.35)); }
+.map-flag .selected { border-radius: 50%; box-shadow: 0 0 0 3px var(--blip-selected); }
+/* 車掃進行中的車子（推算的位置） */
+.map-car { background: none; border: none; display: flex; flex-direction: column; align-items: center; line-height: 1; filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.35)); }
+.map-car span { font-size: 24px; }
+.map-car small { font-size: 10px; font-weight: 700; color: #15171c; background: rgba(255, 255, 255, 0.85); border-radius: 4px; padding: 0 3px; white-space: nowrap; }
+.route-car { margin: 0 0 8px; }
 .map-star { background: none; border: none; color: #ffc531; font-size: 26px; line-height: 26px; text-align: center; -webkit-text-stroke: 1.5px #5c3d00; filter: drop-shadow(0 0 3px rgba(0, 0, 0, 0.35)); }
 
 /* 回報：發放或活動／固定據點 */

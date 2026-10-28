@@ -18,6 +18,8 @@ export interface RadarItem {
   fade?: number;
   /** 光點下方的小字，例如還沒開始的「5小時」「2天」 */
   badge?: string;
+  /** 車掃的起點、終點：畫成 🚩、🏁（不畫圓點） */
+  flag?: string;
   label: string;
   showLabel: boolean;
   selected: boolean;
@@ -35,6 +37,15 @@ export interface RadarRoute {
 export interface RadarStreets {
   major: Float64Array[];
   minor: Float64Array[];
+}
+
+/** 車掃進行中的車子：照各站預計時間推算的位置（不是實際位置） */
+export interface RadarCar {
+  id: string;
+  bearing: number;
+  distanceKm: number;
+  /** 滑鼠移上去、讀螢幕的說明（要講是推算的） */
+  title: string;
 }
 
 /** 固定的地標（例如洋流總部），畫成星星 */
@@ -203,6 +214,11 @@ export class Radar {
   private streets: RadarStreets | null = null;
   private readonly streetLayer: SVGGElement;
   private landmarks: RadarLandmark[] = [];
+  private cars: RadarCar[] = [];
+  private carsKey = '';
+  private readonly carLayer: SVGGElement;
+  /** 點了車子：打開那條車掃的時間表 */
+  onCar: ((routeId: string) => void) | null = null;
   private bottles: RadarBottle[] = [];
   private readonly bottleLayer: SVGGElement;
   private readonly landmarkLayer: SVGGElement;
@@ -287,6 +303,7 @@ export class Radar {
       <g class="bottles"></g>
       <circle class="me" cx="${C}" cy="${C}" r="5" />
       <g class="blips"></g>
+      <g class="cars"></g>
       <!-- 地標（星星）放在光點上面，疊在一起時也點得到 -->
       <g class="landmarks"></g>
       <g class="rose"></g>
@@ -299,6 +316,11 @@ export class Radar {
     this.outlineLayer = this.svg.querySelector('.outline') as SVGGElement;
     this.streetLayer = this.svg.querySelector('.streets') as SVGGElement;
     this.landmarkLayer = this.svg.querySelector('.landmarks') as SVGGElement;
+    this.carLayer = this.svg.querySelector('.cars') as SVGGElement;
+    this.carLayer.addEventListener('click', (e) => {
+      const g = (e.target as Element).closest('.car') as SVGGElement | null;
+      if (g?.dataset.id) this.onCar?.(g.dataset.id);
+    });
     this.bottleLayer = this.svg.querySelector('.bottles') as SVGGElement;
     this.bottleLayer.addEventListener('click', (e) => {
       const g = (e.target as Element).closest('.bottle') as SVGGElement | null;
@@ -564,6 +586,38 @@ export class Radar {
     this.outline = rings;
     this.outlineLines = lines;
     this.draw();
+  }
+
+  /** 車掃進行中的車子：位置每 5 秒跟著時間變，只重畫車子這一層（不重畫整個雷達） */
+  setCars(list: RadarCar[]): void {
+    const key = JSON.stringify(list);
+    if (key === this.carsKey) return;
+    this.carsKey = key;
+    this.cars = list;
+    this.drawCars();
+  }
+
+  private drawCars(): void {
+    this.carLayer.replaceChildren();
+    for (const c of this.cars) {
+      const ratio = this.ratio(c.distanceKm);
+      if (ratio > 1) continue;
+      const p = polar(c.bearing - this.heading, ratio * (R - 8));
+      const g = el('g', { class: 'car', transform: `translate(${p.x.toFixed(1)} ${p.y.toFixed(1)})`, tabindex: 0, role: 'button' });
+      g.dataset.id = c.id;
+      g.appendChild(el('circle', { class: 'hit', r: 16 }));
+      const icon = el('text', { class: 'car-icon' });
+      icon.textContent = '🚗';
+      g.appendChild(icon);
+      // 一定要讓人知道這不是實際位置
+      const note = el('text', { class: 'car-note', y: 17 });
+      note.textContent = '預估位置';
+      g.appendChild(note);
+      const title = el('title');
+      title.textContent = c.title;
+      g.appendChild(title);
+      this.carLayer.appendChild(g);
+    }
   }
 
   /** 放大時的街道；null 不畫 */
@@ -960,6 +1014,7 @@ export class Radar {
     this.drawRoutes();
     this.drawBottles();
     this.drawLandmarks();
+    this.drawCars();
     this.blipLayer.replaceChildren();
     const pos = new Map<number, { x: number; y: number; out: boolean; angle: number; r: number }>();
     for (const it of this.items) {
@@ -1024,7 +1079,11 @@ export class Radar {
         node.dataset.group = ids;
         node.appendChild(el('circle', { class: 'hit', r: 22 }));
         const body = el('g', { class: 'body' });
-        this.appendMark(body, p.out, it.spot, it.office);
+        if (it.flag) {
+          const f = el('text', { class: 'flag' });
+          f.textContent = it.flag;
+          body.appendChild(f);
+        } else this.appendMark(body, p.out, it.spot, it.office);
         // 離開始越久越淡、越模糊；選取時看清楚
         if (it.fade !== undefined && !it.selected) {
           const blur = ((1 - it.fade) * 1.5).toFixed(2);

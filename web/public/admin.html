@@ -152,6 +152,12 @@
           const apply =
             f.status === 'open'
               ? `<div class="apply">
+              ${
+                f.stop
+                  ? `<div class="row"><input type="text" class="title-input" data-place="${f.id}" maxlength="120" value="${esc(f.kind === 'location' ? f.note || '' : '')}" placeholder="地址、店名，或座標 25.0478, 121.5170" aria-label="這一站的地點" /><button type="button" class="btn${f.kind === 'location' ? ' primary' : ''}" data-apply="stop_place" data-id="${f.id}">修改這一站的地點</button></div>
+              <p class="hint">只改這一站：照地址、店名查位置（查到約略位置不算），或貼 Google 地圖按右鍵複製的座標；雷達上的點、時間表、路線跟著改，其他站不動。</p>`
+                  : ''
+              }
               <div class="row"><input type="text" class="title-input" data-title="${f.id}" maxlength="30" value="${esc(curTitle)}" aria-label="新標題" /><button type="button" class="btn primary" data-apply="title" data-id="${f.id}">改標題</button></div>
               <p class="hint">改標題：直接改這個地點的標題（固定據點的每天時段一起改），不經過 AI，之後重新判讀也會保留。</p>
               ${canReprocess ? `<textarea rows="2" maxlength="200" data-note="${f.id}" placeholder="要補充給 AI 的內容，例如：地點是○○路12號、時間是 15:00 開始">${esc(prefill)}</textarea>` : ''}
@@ -211,6 +217,12 @@
             showResult('請先寫要補充的內容。', true);
             return;
           }
+        } else if (action === 'stop_place') {
+          body.place = document.querySelector(`input[data-place="${id}"]`)?.value.trim() ?? '';
+          if (!body.place) {
+            showResult('請先寫這一站的地點。', true);
+            return;
+          }
         } else if (action === 'remove_stop') {
           if (!confirm('確定刪除這一站？車掃的時間表、路線、雷達上的點都會拿掉這一站。')) return;
         } else {
@@ -218,7 +230,7 @@
           if (!confirm(body.scope === 'post' ? '確定把這則貼文的發放、活動都從雷達下架？' : '確定把這一則從雷達下架？')) return;
         }
         for (const x of a.closest('.apply').querySelectorAll('button, textarea, input')) x.disabled = true;
-        a.textContent = action === 'supplement' ? '重新判讀中…' : action === 'title' ? '修改中…' : action === 'remove_stop' ? '刪除中…' : '下架中…';
+        a.textContent = action === 'supplement' ? '重新判讀中…' : action === 'title' || action === 'stop_place' ? '修改中…' : action === 'remove_stop' ? '刪除中…' : '下架中…';
         try {
           const r = await api(`/api/admin/feedback/${id}/apply`, { method: 'POST', body: JSON.stringify(body) });
           const list = (r.events || []).map(evLine).join('');
@@ -228,7 +240,9 @@
               ? `已改標題（${r.changed ?? 0} 筆），標成已處理。現在雷達上這則貼文的：<ul>${list}</ul>`
               : action === 'supplement'
                 ? `已套用並重新判讀，標成已處理。現在雷達上的：${list ? `<ul>${list}</ul>` : '沒有（這次判讀沒有放上雷達，可以在「已處理」改回未處理再調整）'}${lost}`
-                : action === 'remove_stop'
+                : action === 'stop_place'
+                  ? `已修改這一站的地點，標成已處理。現在雷達上這則貼文的：<ul>${list}</ul>`
+                  : action === 'remove_stop'
                   ? `已刪除這一站（時間表 ${r.removedStops ?? 0} 站、雷達上 ${r.removed ?? 0} 個點），標成已處理。${list ? `這則貼文還在雷達上的：<ul>${list}</ul>` : ''}`
                   : `已從雷達下架 ${r.removed ?? 0} 筆，標成已處理。${list ? `這則貼文還在雷達上的：<ul>${list}</ul>` : ''}`,
             !!lost,

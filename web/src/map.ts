@@ -15,6 +15,8 @@ export interface MapItem {
   approx?: boolean;
   /** 還沒開始的清楚程度：1 快開始了 … 0 一週以上 */
   fade?: number;
+  /** 車掃的起點、終點：畫成 🚩、🏁 */
+  flag?: string;
   title: string;
   subtitle: string;
   selected: boolean;
@@ -32,6 +34,8 @@ export interface MapRoute {
   /** report：回報的車掃貼文，各站直線連起來、沒有認領人數 */
   source?: 'official' | 'report';
   segments: Array<{ seq: number; from: string; to: string; path: Array<[number, number]>; people: number; target: number; passed?: boolean }>;
+  /** 車掃進行中：照各站預計時間推算的車子位置（不是實際位置），note 是點了顯示的說明 */
+  car?: { lat: number; lng: number; note: string };
 }
 
 /** 跟大洋流車掃地圖一樣的顏色：沒人灰、缺人綠、快滿（6 成以上）橘、已滿紅 */
@@ -255,8 +259,8 @@ export class MapView {
       const it = g.find((x) => x.selected) ?? g.find((x) => x.phase === 'active') ?? g[0];
       const ids = g.map((x) => x.id);
       keep.add(it.id);
-      // 服務處（位置精確的）畫房子圖示，其他畫圓點；類型變了就換一個
-      const house = !!it.office && !it.approx;
+      // 服務處（位置精確的）畫房子圖示、車掃起終點畫 🚩🏁，其他畫圓點；類型變了就換一個
+      const house = (!!it.office && !it.approx) || !!it.flag;
       let m = this.markers.get(it.id);
       if (m && ('setRadius' in m) === house) {
         layer.removeLayer(m);
@@ -287,6 +291,15 @@ export class MapView {
           // 固定據點、約略位置、稍後開始用虛線外框，跟精確、進行中的分開
           dashArray: it.spot || it.approx || it.phase === 'later' ? '3 3' : '',
         });
+      } else if (it.flag) {
+        const size = it.phase === 'active' || it.selected ? 30 : 26;
+        const html = `<span class="${it.selected ? 'selected' : ''}" style="font-size:${size - 6}px">${it.flag}</span>`;
+        if (this.iconKeys.get(it.id) !== html) {
+          m.setIcon(L.divIcon({ className: 'map-flag', html, iconSize: [size, size], iconAnchor: [size / 2, size / 2] }));
+          this.iconKeys.set(it.id, html);
+        }
+        m.setOpacity(opacity);
+        m.setZIndexOffset(it.selected ? 500 : 100);
       } else {
         const size = it.phase === 'active' || it.selected ? 26 : 22;
         const svg = officeSvg(markerColor(it.kind, it.phase, true), it.selected ? selectedStroke : stroke, it.selected ? 3 : 2, fillOpacity, size);
@@ -448,7 +461,8 @@ export class MapView {
   }
 
   setRoutes(routes: MapRoute[]): void {
-    const sig = (rs: MapRoute[]): string => JSON.stringify(rs.map((r) => [r.id, r.state, r.segments.map((x) => [x.people, x.target, x.path.length])]));
+    const sig = (rs: MapRoute[]): string =>
+      JSON.stringify(rs.map((r) => [r.id, r.state, r.segments.map((x) => [x.people, x.target, x.path.length, !!x.passed]), r.car ? [r.car.lat.toFixed(5), r.car.lng.toFixed(5), r.car.note] : null]));
     if (sig(routes) === sig(this.routes)) return;
     this.routes = routes;
     this.pushRoutes();
@@ -472,6 +486,12 @@ export class MapView {
     layer.clearLayers();
     for (const r of this.routes) {
       if (r.state === 'done') continue;
+      if (r.car) {
+        const icon = L.divIcon({ className: 'map-car', html: '<span>🚗</span><small>預估位置</small>', iconSize: [56, 40], iconAnchor: [28, 14] });
+        const car = L.marker([r.car.lat, r.car.lng], { icon, keyboard: false, zIndexOffset: 800, title: '車隊預估位置（不是實際位置）' });
+        car.bindPopup(`<strong>${escapeHtml(r.title)}</strong><br>${r.car.note}`, { closeButton: false });
+        layer.addLayer(car);
+      }
       if (r.source === 'report') {
         // 回報的車掃：活動的顏色，還沒出發畫虛線，已經經過的那段畫淡；不知道實際走哪些路，是直線
         for (const seg of r.segments) {

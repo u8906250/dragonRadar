@@ -49,6 +49,8 @@ export interface EventOut {
   firstStartAt?: number;
   /** 官方行程才有：講同一場活動、已併進來的新聞與貼文 */
   related?: RelatedPost[];
+  /** 這則貼文有車掃路線（這一點可能是路線上的一站） */
+  route?: boolean;
   post: {
     id: string;
     /** threads、news、official、manual、link（使用者貼的連結） */

@@ -115,6 +115,9 @@ let routes: RouteOut[] = [];
 let routesCache: RouteOut[] = [];
 let routesAt = 0;
 
+/** 因為有沒有路線的車掃點而重抓過路線的貼文（伺服器說有路線、但路線清單裡沒有的，不要每次都重抓） */
+const routesRefetched = new Set<string>();
+
 async function currentRoutes(): Promise<RouteOut[]> {
   if (nowSec() - routesAt < ROUTES_EVERY_SEC) return routesCache;
   routesCache = await fetchRoutes();
@@ -397,6 +400,8 @@ const radar = new Radar(
   (id) => selectBottle(id),
   (bearing, km, done) => panRadar(bearing, km, done),
 );
+// 點了車掃的車子：打開那條車掃的時間表
+radar.onCar = (id) => selectRoute(id);
 const map = new MapView(
   $('#map'),
   origin,
@@ -842,6 +847,40 @@ const reportedStop = (ev: EventOut): RouteStop | undefined => {
   return r && isReported(r) ? stopOf(ev) : undefined;
 };
 const stopLabel = (r: RouteOut, kind: RouteStop['kind']): string => ({ start: '出發', cheer: isReported(r) ? '應援點' : '加油點', end: '抵達' })[kind];
+/** 車掃的起點、終點像賽車一樣插旗 */
+const STOP_FLAG: Partial<Record<RouteStop['kind'], string>> = { start: '🚩', end: '🏁' };
+/** 這一點是車掃的起點、終點：🚩、🏁 */
+const flagOf = (ev: EventOut): string | undefined => {
+  const st = routeOf(ev) ? stopOf(ev) : undefined;
+  return st ? STOP_FLAG[st.kind] : undefined;
+};
+/** 時間表、清單上的「🚩 出發」「🏁 抵達」 */
+const stopLabelHtml = (r: RouteOut, kind: RouteStop['kind']): string => `${STOP_FLAG[kind] ? `${STOP_FLAG[kind]} ` : ''}${stopLabel(r, kind)}`;
+
+/**
+ * 車掃進行中，車隊大概在哪：照各站的預計時間，在前後兩站之間按時間比例推算（直線），不是實際位置。
+ * 還沒到第一站的時間在起點，過了最後一站在終點；沒有確切位置的站跳過
+ */
+function carOf(r: RouteOut, now: number): { lat: number; lng: number; from: RouteStop; to: RouteStop | null } | null {
+  if (routeState(r, now) !== 'live') return null;
+  const pts = r.stops.filter((s): s is RouteStop & { lat: number; lng: number; at: number } => s.lat !== null && s.lng !== null && s.at !== null);
+  if (pts.length === 0) return null;
+  if (now <= pts[0].at) return { lat: pts[0].lat, lng: pts[0].lng, from: pts[0], to: pts[1] ?? null };
+  for (let i = 0; i + 1 < pts.length; i++) {
+    const a = pts[i];
+    const b = pts[i + 1];
+    if (now < b.at) {
+      const t = b.at > a.at ? (now - a.at) / (b.at - a.at) : 1;
+      return { lat: a.lat + (b.lat - a.lat) * t, lng: a.lng + (b.lng - a.lng) * t, from: a, to: b };
+    }
+  }
+  const last = pts[pts.length - 1];
+  return { lat: last.lat, lng: last.lng, from: last, to: null };
+}
+/** 車子位置的說明：一定要講不是實際位置 */
+const carNote = (car: NonNullable<ReturnType<typeof carOf>>): string =>
+  car.to ? `車隊預估在「${car.from.name}」到「${car.to.name}」之間` : `車隊預估已到「${car.from.name}」`;
+const CAR_DISCLAIMER = '照各站的預計時間推算，不是實際位置';
 
 function routeState(r: RouteOut, now: number): RadarRoute['state'] {
   if (!r.departAt || now < r.departAt) return 'planned';
@@ -999,6 +1038,7 @@ function render(): void {
       // 還沒出發的官方車掃路線點用「即將開始」的淡色畫；還沒開的據點跟休息中的一樣淡；其他稍後開始的（回報的車掃的站也是）畫虛線框
       phase: it.phase === 'later' ? (it.spot ? 'closed' : routeOf(it.ev) && !reportedStop(it.ev) ? 'soon' : 'later') : it.phase,
       label: titleOf(it.ev),
+      flag: flagOf(it.ev),
       // 名稱只在選取時顯示，光點一多標題會蓋成一片
       showLabel: it.ev.id === selectedId,
       selected: it.ev.id === selectedId,
@@ -1012,6 +1052,12 @@ function render(): void {
       points: r.segments.flatMap((sg) => sg.path).map(([lat, lng]) => ({ bearing: bearingDeg(origin, { lat, lng }), distanceKm: haversineKm(origin, { lat, lng }) })),
     })),
   );
+  // 車掃進行中：車子畫在推算的位置（點了打開時間表）
+  const cars = drawnRoutes(timed, now, focused).flatMap((r) => {
+    const car = carOf(r, now);
+    return car ? [{ r, car }] : [];
+  });
+  radar.setCars(cars.map(({ r, car }) => ({ id: r.id, bearing: bearingDeg(origin, car), distanceKm: haversineKm(origin, car), title: `${r.title}：${carNote(car)}（${CAR_DISCLAIMER}）` })));
   // 撿走的瓶子不畫（伺服器也不會回傳，這裡再擋一次）
   const bottleViews = bottles.filter((b) => !b.picked).map((b) => ({ b, distanceKm: haversineKm(origin, b), bearing: bearingDeg(origin, b), state: bottleState(b) }));
   const hint = nearestHint(bottleViews);
@@ -1041,6 +1087,10 @@ function render(): void {
       source: r.source,
       // 回報的車掃：已經經過的那段畫淡
       segments: r.segments.map((sg) => ({ ...sg, passed: !!sg.toAt && sg.toAt <= now })),
+      ...((): { car?: { lat: number; lng: number; note: string } } => {
+        const car = carOf(r, now);
+        return car ? { car: { lat: car.lat, lng: car.lng, note: `${carNote(car)}<br>${CAR_DISCLAIMER}` } } : {};
+      })(),
     })),
   );
   map.render(
@@ -1054,6 +1104,7 @@ function render(): void {
       lng: it.ev.lng,
       phase: it.phase,
       title: `${tagLabel(it)}｜${titleOf(it.ev)}`,
+      flag: flagOf(it.ev),
       subtitle: `${placeLine(it.ev)} · ${timeLine(it, now)}`,
       selected: it.ev.id === selectedId,
       ...(isUpcoming(it) && it.phase === 'later' ? { fade: clarityOf(it.ev, now) } : {}),
@@ -1270,7 +1321,7 @@ function routeCard(r: RouteOut, phase: Phase, items: Item[], now: number): HTMLL
   li.className = `ev route-card phase-${phase} kind-activity${mine.some((m) => inScope(m.ev, m.distanceKm)) ? '' : ' out-of-range'}${selectedRoute === r.id ? ' selected' : ''}`;
   li.innerHTML = `
     <div class="ev-title"><span class="dot"></span><span class="kind-tag">車掃</span>${esc(r.title)} <span class="muted">· ${r.stops.length} 站</span></div>
-    <div class="ev-meta">${esc(start?.name ?? '')} → ${esc(end?.name ?? '')}${isReported(r) ? '' : ` · 全長 ${routeKm(r).toFixed(1)} km`}${nearest ? ` · ${isReported(r) ? '離你最近' : '最近'} ${formatKm(nearest.distanceKm)}` : ''}</div>
+    <div class="ev-meta">🚩 ${esc(start?.name ?? '')} → 🏁 ${esc(end?.name ?? '')}${isReported(r) ? '' : ` · 全長 ${routeKm(r).toFixed(1)} km`}${nearest ? ` · ${isReported(r) ? '離你最近' : '最近'} ${formatKm(nearest.distanceKm)}` : ''}</div>
     <div class="ev-time">${esc(routeTimeLine(r, items, now))}</div>`;
   li.addEventListener('click', () => selectRoute(r.id));
   return li;
@@ -1283,6 +1334,7 @@ function renderRouteDetail(r: RouteOut, items: Item[], now: number): void {
   const planned = routeState(r, now) === 'planned';
   // 回報的車掃：標出離你最近、還沒經過的那一站
   const nearestStop = isReported(r) ? [...mine].filter((x) => x.ev.endAt > now).sort((a, b) => a.distanceKm - b.distanceKm)[0] : undefined;
+  const car = carOf(r, now);
   const people = r.segments.reduce((n, s) => n + s.people, 0);
   const target = r.segments.reduce((n, s) => n + s.target, 0);
   const needy = [...r.segments].filter((sg) => crowdOf(sg.people, sg.target) === 'empty' || crowdOf(sg.people, sg.target) === 'low').length;
@@ -1299,7 +1351,7 @@ function renderRouteDetail(r: RouteOut, items: Item[], now: number): void {
       const dist = it ? `<small>${formatKm(it.distanceKm)} ${compassLabel(it.bearing)}${near}</small>` : why;
       // 回報的人地點填地址的：站名下面另外列地址
       const place = st.place ? `<small class="stop-place">${esc(shortAddress(st.place))}</small>` : '';
-      const body = `<span class="stop-time">${time}</span><span class="stop-name"><b>${stopLabel(r, st.kind)}</b>${esc(st.name)}${place}${extra}${dist}</span>`;
+      const body = `<span class="stop-time">${time}</span><span class="stop-name"><b>${stopLabelHtml(r, st.kind)}</b>${esc(st.name)}${place}${extra}${dist}</span>`;
       return `<li class="stop stop-${st.kind}${passed ? ' passed' : ''}${near ? ' nearest' : ''}">${it ? `<button type="button" data-select="${it.ev.id}">${body}</button>` : `<div>${body}</div>`}</li>`;
     })
     .join('');
@@ -1315,6 +1367,7 @@ function renderRouteDetail(r: RouteOut, items: Item[], now: number): void {
           ? `<p>${esc(routeTimeLine(r, items, now))}<br><span class="muted">${r.departAt ? `${dateFmt.format(new Date(r.departAt * 1000))}・` : ''}共 ${r.stops.length} 站</span></p>`
           : `<p>${esc(routeTimeLine(r, items, now))}<br><span class="muted">全長 ${routeKm(r).toFixed(1)} km・沿線認領 ${people.toLocaleString()} / 目標 ${target.toLocaleString()} 人${needy > 0 ? `・還有 ${needy} 段缺人` : ''}（${fmtTime(r.updatedAt)} 更新）</span></p>`
       }
+      ${car ? `<p class="route-car">🚗 ${esc(carNote(car))}<br><small class="muted">${CAR_DISCLAIMER}；雷達和地圖上的車子畫在這個位置</small></p>` : ''}
       <ol class="route-stops">${rows}</ol>
       ${planned ? '<p class="muted sheet-note">還沒出發：平常雷達和地圖上只顯示起點，點開這個車掃時才畫出整條路線，出發後一直顯示。</p>' : ''}
       <p class="muted sheet-note">${
@@ -1328,12 +1381,17 @@ function renderRouteDetail(r: RouteOut, items: Item[], now: number): void {
         ${r.claimUrl ? `<a class="btn primary" href="${esc(r.claimUrl)}" target="_blank" rel="noopener">到車掃地圖認領路段</a>` : ''}
         <button type="button" class="btn" data-act="route-map">在地圖上看路線</button>
         ${isReported(r) && mine[0] ? '<button type="button" class="btn" data-act="route-feedback">回報問題</button>' : ''}
+        ${isReported(r) && myReportIds.has(r.postId) ? '<button type="button" class="btn" data-act="route-withdraw">刪除我的回報</button>' : ''}
       </div>
     </div>`);
   detailEl.querySelector('[data-act="close"]')?.addEventListener('click', () => selectRoute(null));
   for (const b of detailEl.querySelectorAll<HTMLButtonElement>('[data-select]')) {
     b.addEventListener('click', () => select(Number(b.dataset.select)));
   }
+  // 車掃是整則貼文一起刪（每一站、路線），所以放在時間表，不放在個別的站
+  detailEl.querySelector('[data-act="route-withdraw"]')?.addEventListener('click', async () => {
+    if (await withdrawMine(r.postId)) selectRoute(null);
+  });
   detailEl.querySelector('[data-act="route-feedback"]')?.addEventListener('click', () => {
     if (mine[0]) openFeedback(mine[0].ev, r);
   });
@@ -1924,7 +1982,7 @@ function renderDetail(items: Item[], now: number): void {
         ${ev.post.permalink ? `<a class="btn" href="${esc(ev.post.permalink)}" target="_blank" rel="noopener">${esc(sourceLinkText(ev))}</a>` : ''}
         <a class="btn" href="${googleMapsUrl(ev)}" target="_blank" rel="noopener">在 Google 地圖上看</a>
         ${canReportEnded(ev, now) ? `<button type="button" class="btn" data-act="ended"${endedReported.has(ev.id) ? ' disabled' : ''}>${endedReported.has(ev.id) ? '已回報' : `回報${it.spot ? '今天' : ''}${endedWord(ev)}`}</button>` : ''}
-        ${myReportIds.has(ev.post.id) ? '<button type="button" class="btn" data-act="withdraw">刪除我的回報</button>' : ''}
+        ${myReportIds.has(ev.post.id) && !routeOf(ev) ? '<button type="button" class="btn" data-act="withdraw">刪除我的回報</button>' : ''}
         <button type="button" class="btn" data-act="feedback">回報問題</button>
       </div>
       ${ev.endedReports ? `<p class="muted ended-note">已有 ${ev.endedReports} 人回報${endedWord(ev)}${neededText()}</p>` : ''}
@@ -2046,6 +2104,8 @@ function openFeedback(ev: EventOut, fromRoute?: RouteOut): void {
   }
   $('#feedback-stop-row').hidden = !route;
   $('#feedback-remove-stop').hidden = !route;
+  // 車掃：某一站地點錯了，請寫正確的地點（管理者照這個改那一站）
+  feedbackNote.placeholder = route ? '補充說明（選填）。某一站的地點錯了，請寫那一站正確的地址或店名' : '補充說明（選填），例如：實際在 2 號出口、15:00 才開始';
   $('#feedback-target').textContent = route ? `「${route.title}」哪裡有問題？` : `「${titleOf(ev)}」哪裡有問題？`;
   feedbackSheet.hidden = false;
 }
@@ -2348,6 +2408,14 @@ async function refresh(): Promise<void> {
     const got = await Promise.all([fetchEvents(origin, radius, kws, forModule.id), forModule.current ? currentRoutes() : Promise.resolve([] as RouteOut[]), bottleReq]);
     if (seq !== fetchSeq) return;
     [events, routes, bottles] = got;
+    // 車掃剛放上雷達：路線還在快取裡沒有這條，每一站會各自畫出來；有這種點就馬上重抓路線（同一則只重抓一次）
+    const missing = forModule.current ? [...new Set(events.filter((ev) => ev.route && !routes.some((r) => r.postId === ev.post.id)).map((ev) => ev.post.id))] : [];
+    if (missing.some((id) => !routesRefetched.has(id))) {
+      for (const id of missing) routesRefetched.add(id);
+      routesAt = 0;
+      routes = await currentRoutes();
+      if (seq !== fetchSeq) return;
+    }
     lastFetchRadius = radius;
     lastFetchAt = nowSec();
     updatedLabel.textContent = `↻ 更新 ${fmtTime(lastFetchAt)}`;
@@ -3696,18 +3764,21 @@ function renderMyReports(): void {
 }
 
 /** 刪除自己的回報：雷達上這則的發放、活動一起拿掉 */
-async function withdrawMine(postId: string): Promise<void> {
+/** 刪除自己的回報（車掃是整條路線、每一站一起）；有刪掉回傳 true */
+async function withdrawMine(postId: string): Promise<boolean> {
   const x = myReports.find((r) => r.postId === postId);
   const shown = !x || x.state === 'on_radar' || x.state === 'attached';
-  if (!window.confirm(shown ? '要刪除這則回報嗎？雷達上這則的發放、活動會一起拿掉，其他人也看不到了。' : '要刪除這則回報嗎？')) return;
+  const what = routes.some((r) => r.postId === postId) ? '這條車掃的每一站和路線' : '雷達上這則的發放、活動';
+  if (!window.confirm(shown ? `要刪除這則回報嗎？${what}會一起拿掉，其他人也看不到了。` : '要刪除這則回報嗎？')) return false;
   const r = await withdrawReport(postId);
   if (!r.ok) {
     showBanner(bannerEl, r.message, 3500);
-    return;
+    return false;
   }
   showBanner(bannerEl, '已刪除這則回報', 2500);
   await loadMyReports();
   await refresh();
+  return true;
 }
 
 /** 清單最下面的版號：網站（建置時的提交）與伺服器（部署時的提交）分開寫，看得出哪邊已經更新 */

@@ -103,6 +103,8 @@ export interface EventOut {
   firstStartAt?: number;
   /** 官方行程才有：併進來的新聞、Threads 貼文（相關報導） */
   related?: RelatedPost[];
+  /** 這則貼文有車掃路線（這一點可能是路線上的一站）：網頁沒有這條路線就重抓路線，免得每一站都畫出來 */
+  route?: true;
   post: {
     id: string;
     source: string;
@@ -1133,6 +1135,56 @@ export async function removeRouteStop(env: Env, postId: string, title: string, w
   return { events: ev.meta.changes ?? 0, stops };
 }
 
+/**
+ * 改回報的車掃路線上一站的位置（管理者處理「地點錯誤」）：時間表、路線的連線跟著改；
+ * 雷達上那一站的點改位置，原本不在雷達上（只有約略位置、查不到）的、車隊還沒經過的，放上雷達。
+ * placeText 是新的地點文字（貼座標的是 null，地點文字不變）。回傳改了幾站
+ */
+export async function setRouteStopPlace(
+  env: Env,
+  postId: string,
+  title: string,
+  at: number | null,
+  point: { lat: number; lng: number },
+  placeText: string | null,
+  now: number,
+): Promise<number> {
+  const { results } = await env.DB.prepare('SELECT id, stops FROM routes WHERE post_id = ?').bind(postId).all<{ id: string; stops: string }>();
+  const win = at === null ? null : { from: at, to: at };
+  let changed = 0;
+  let stop: StoredRouteStop | null = null;
+  for (const r of results) {
+    const list = JSON.parse(r.stops) as StoredRouteStop[];
+    const st = list.find((s) => isStop(s, title, win));
+    if (!st) continue;
+    st.lat = point.lat;
+    st.lng = point.lng;
+    if (placeText) st.place = placeText;
+    stop = st;
+    changed++;
+    await env.DB.prepare('UPDATE routes SET stops = ?, segments = ?, updated_at = ? WHERE id = ?').bind(JSON.stringify(list), JSON.stringify(routeSegments(list)), now, r.id).run();
+  }
+  if (!stop) return 0;
+  const place = placeText ?? stop.place ?? stop.name;
+  const live = "status IN ('upcoming', 'active', 'unlocated')";
+  const ev = await env.DB.prepare(
+    `UPDATE events SET lat = ?, lng = ?, place_text = ?, place_query = ?, approx_area = NULL, status = CASE WHEN start_at <= ? THEN 'active' ELSE 'upcoming' END, updated_at = ?
+      WHERE post_id = ? AND title = ? AND ${live}${stop.at !== null ? ' AND start_at <= ? AND end_at >= ?' : ''}`,
+  )
+    .bind(point.lat, point.lng, place, place, now, now, postId, title, ...(stop.at !== null ? [stop.at, stop.at] : []))
+    .run();
+  // 原本沒放上雷達的站：車隊還沒經過就放上去（預計經過前 10 分到後 15 分）
+  if ((ev.meta.changes ?? 0) === 0 && stop.at !== null && stop.at + ROUTE_KEEP_SEC > now) {
+    await insertPlanned(
+      env,
+      postId,
+      { kind: 'activity', title, item: null, start_at: stop.at - ROUTE_LEAD_SEC, end_at: stop.at + ROUTE_KEEP_SEC, place_text: place, place_query: place, lat: point.lat, lng: point.lng, confidence: 1, all_day: false, spot: false, approx_area: null, end_open: false, until_open: false, tz: null, extra: null },
+      now,
+    );
+  }
+  return changed;
+}
+
 /** 有確切位置的站照順序用直線連起來（不知道實際走哪些路），沒有認領人數 */
 function routeSegments(stops: Array<{ name: string; lat: number | null; lng: number | null; at: number | null }>) {
   const pts = stops.filter((st): st is typeof st & { lat: number; lng: number } => st.lat !== null && st.lng !== null);
@@ -1676,10 +1728,11 @@ export interface ListQuery {
   module?: ModuleId;
 }
 
-type JoinedRow = EventRow & { username: string | null; permalink: string | null; text: string; supplement?: string | null; posted_at: number; keyword: string | null; source: string; ended_reports: number | null };
+type JoinedRow = EventRow & { username: string | null; permalink: string | null; text: string; supplement?: string | null; posted_at: number; keyword: string | null; source: string; ended_reports: number | null; has_route?: number | null };
 
 const JOINED_SELECT = `SELECT e.*, p.username, p.permalink, p.text, p.supplement, p.posted_at, p.keyword, p.source,
-    (SELECT COUNT(*) FROM ended_reports r WHERE r.event_id = e.id) AS ended_reports
+    (SELECT COUNT(*) FROM ended_reports r WHERE r.event_id = e.id) AS ended_reports,
+    (SELECT 1 FROM routes rt WHERE rt.post_id = e.post_id LIMIT 1) AS has_route
   FROM events e JOIN posts p ON p.id = e.post_id`;
 
 export function toEventOut(r: JoinedRow, now: number): EventOut {
@@ -1708,6 +1761,7 @@ export function toEventOut(r: JoinedRow, now: number): EventOut {
     extra: parseExtra(r.extra),
     // 只給摘錄（著作權：只做必要的引用），完整內容請人看原文
     post: { id: r.post_id, source: r.source, username: r.username, permalink: r.permalink, postedAt: r.posted_at, text: postExcerpt(r.text, r.source), supplement: r.supplement ?? null },
+    ...(r.has_route ? { route: true as const } : {}),
   };
 }
 

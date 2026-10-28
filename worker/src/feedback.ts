@@ -3,7 +3,7 @@
  * 回報的內容只有管理者看得到；存裝置代碼與 IP 的加鹽雜湊（限制次數、同一個人同一則同一種問題只算一次），30 天後刪除。
  */
 import type { Env } from './env';
-import { findRouteStop, getPost, removeRouteStop, reprocessPost, setManualTitle, takeDown } from './events';
+import { ADDRESS_BUDGET_MS, findRouteStop, getPost, locateTypedPlace, removeRouteStop, reprocessPost, setManualTitle, setRouteStopPlace, takeDown } from './events';
 import { parseSubscription, PushError, sendPush, type PushMessage } from './push';
 
 export const FEEDBACK_KINDS = {
@@ -31,6 +31,15 @@ export interface FeedbackResult {
 }
 
 const isKind = (v: unknown): v is FeedbackKind => typeof v === 'string' && Object.prototype.hasOwnProperty.call(FEEDBACK_KINDS, v);
+
+/** 「25.0478, 121.5170」這種座標（Google 地圖按右鍵複製的格式）；不是座標回傳 null */
+export function parseLatLng(s: string): { lat: number; lng: number } | null {
+  const m = /^\s*(-?\d{1,2}(?:\.\d+)?)\s*[,，]\s*(-?\d{1,3}(?:\.\d+)?)\s*$/.exec(s);
+  if (!m) return null;
+  const lat = Number(m[1]);
+  const lng = Number(m[2]);
+  return Math.abs(lat) <= 90 && Math.abs(lng) <= 180 ? { lat, lng } : null;
+}
 
 /** 整理備註：去掉頭尾空白、連續空白，最多 NOTE_MAX 字；沒寫是 null */
 export function cleanNote(v: unknown): string | null {
@@ -187,6 +196,7 @@ async function currentEvents(env: Env, postId: string): Promise<unknown[]> {
  * - { action: 'supplement', note }：把說明（管理者可以改過）加到貼文的補充，重新判讀這則貼文
  * - { action: 'takedown', scope?: 'event' | 'post' }：從雷達下架（不是發放或活動、重複）；車掃的一站連時間表、路線一起拿掉
  * - { action: 'remove_stop' }：車掃指定的那一站從時間表、路線、雷達拿掉
+ * - { action: 'stop_place', place }：車掃指定的那一站改位置（地址、店名照查地點的方式查，或直接貼「緯度, 經度」）
  * 套用完標成已處理，回傳現在雷達上這則貼文的事件
  */
 export async function applyFeedback(
@@ -199,7 +209,7 @@ export async function applyFeedback(
     .bind(id)
     .first<{ id: number; event_id: number; post_id: string | null; place_text: string | null; kind: FeedbackKind; note: string | null; stop: string | null; stop_at: number | null }>();
   if (!fb) throw new PushError(404, '找不到這筆回報');
-  const b = (body ?? {}) as { action?: unknown; note?: unknown; scope?: unknown; title?: unknown };
+  const b = (body ?? {}) as { action?: unknown; note?: unknown; scope?: unknown; title?: unknown; place?: unknown };
   const postId = fb.post_id;
   if (!postId) throw new PushError(400, '這筆回報沒有對應的貼文');
   let removed: number | undefined;
@@ -238,6 +248,20 @@ export async function applyFeedback(
     lostPlaces = placesBefore.filter((p) => !after.has(p));
   } else if (b.action === 'takedown') {
     removed = await takeDown(env, fb.event_id, b.scope === 'post' ? 'post' : 'event', 'feedback', now);
+  } else if (b.action === 'stop_place') {
+    if (!fb.stop) throw new PushError(400, '這筆回報沒有指定哪一站');
+    const place = cleanNote(b.place);
+    if (!place) throw new PushError(400, '請寫這一站的地點');
+    const coord = parseLatLng(place);
+    let point = coord;
+    if (!point) {
+      const r = await locateTypedPlace(env, place, Date.now() + ADDRESS_BUDGET_MS);
+      if (!r.point) throw new PushError(400, '查不到這個地點，請寫完整地址，或貼 Google 地圖的座標（例如 25.0478, 121.5170）');
+      if (r.approxArea) throw new PushError(400, `只查到約略位置（${r.approxArea}），請寫完整地址，或貼 Google 地圖的座標`);
+      point = { lat: r.point.lat, lng: r.point.lng };
+    }
+    changed = await setRouteStopPlace(env, postId, fb.stop, fb.stop_at, point, coord ? null : place, now);
+    if (changed === 0) throw new PushError(400, '路線上已經沒有這一站了');
   } else if (b.action === 'remove_stop') {
     if (!fb.stop) throw new PushError(400, '這筆回報沒有指定哪一站');
     const r = await removeRouteStop(env, postId, fb.stop, fb.stop_at === null ? null : { from: fb.stop_at, to: fb.stop_at }, now);
@@ -245,7 +269,7 @@ export async function applyFeedback(
     removed = r.events;
     removedStops = r.stops;
   } else {
-    throw new PushError(400, "action 要是 'title'、'supplement'、'takedown' 或 'remove_stop'");
+    throw new PushError(400, "action 要是 'title'、'supplement'、'takedown'、'remove_stop' 或 'stop_place'");
   }
   await env.DB.prepare("UPDATE event_feedback SET status = 'resolved', resolved_at = ? WHERE id = ?").bind(now, id).run();
   return {
