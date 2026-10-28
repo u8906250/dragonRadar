@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { cleanNote, feedbackMessage, parseLatLng } from '../src/feedback';
+import { cleanNote, feedbackMessage, parseLatLng, pinOf } from '../src/feedback';
 
 describe('cleanNote', () => {
   it('trims, collapses spaces and caps at 200 characters', () => {
@@ -25,5 +25,15 @@ describe('parseLatLng', () => {
     expect(parseLatLng(' 25.04，121.51 ')).toEqual({ lat: 25.04, lng: 121.51 });
     expect(parseLatLng('台北市中正區忠孝東路二段94號')).toBeNull();
     expect(parseLatLng('95, 121')).toBeNull();
+  });
+});
+
+describe('pinOf', () => {
+  it('takes a pin from the map only when both are numbers in range', () => {
+    expect(pinOf(25.0478, 121.517)).toEqual({ lat: 25.0478, lng: 121.517 });
+    expect(pinOf('25.0478', 121.517)).toBeNull();
+    expect(pinOf(25, undefined)).toBeNull();
+    expect(pinOf(Number.NaN, 121)).toBeNull();
+    expect(pinOf(91, 121)).toBeNull();
   });
 });

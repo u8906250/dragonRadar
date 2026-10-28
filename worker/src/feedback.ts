@@ -41,6 +41,12 @@ export function parseLatLng(s: string): { lat: number; lng: number } | null {
   return Math.abs(lat) <= 90 && Math.abs(lng) <= 180 ? { lat, lng } : null;
 }
 
+/** 地圖上標的位置：兩個都是範圍內的數字才算 */
+export function pinOf(lat: unknown, lng: unknown): { lat: number; lng: number } | null {
+  if (typeof lat !== 'number' || typeof lng !== 'number' || !Number.isFinite(lat) || !Number.isFinite(lng)) return null;
+  return Math.abs(lat) <= 90 && Math.abs(lng) <= 180 ? { lat, lng } : null;
+}
+
 /** 整理備註：去掉頭尾空白、連續空白，最多 NOTE_MAX 字；沒寫是 null */
 export function cleanNote(v: unknown): string | null {
   if (typeof v !== 'string') return null;
@@ -170,8 +176,28 @@ export async function listFeedback(env: Env, status: string | null): Promise<unk
       ORDER BY f.created_at DESC LIMIT 200`,
   )
     .bind(st)
-    .all();
-  return results.map((r) => ({ ...r, kind_label: FEEDBACK_KINDS[r.kind as FeedbackKind] ?? r.kind }));
+    .all<Record<string, unknown> & { kind: string; post_id: string | null; stop: string | null; stop_at: number | null }>();
+  // 車掃指定了哪一站：附上那一站現在在路線上的位置（回報可能掛在別站的點上，事件的座標不一定是這一站），管理頁的小地圖從這裡開始
+  const stops = new Map<string, { lat: number | null; lng: number | null } | null>();
+  for (const r of results) {
+    if (!r.stop || !r.post_id) continue;
+    const key = `${r.post_id}|${r.stop}|${r.stop_at ?? ''}`;
+    if (!stops.has(key)) stops.set(key, await findRouteStop(env, r.post_id, r.stop, r.stop_at));
+  }
+  return results.map((r) => {
+    const st = r.stop && r.post_id ? stops.get(`${r.post_id}|${r.stop}|${r.stop_at ?? ''}`) : null;
+    return { ...r, kind_label: FEEDBACK_KINDS[r.kind as FeedbackKind] ?? r.kind, ...(r.stop ? { stop_lat: st?.lat ?? null, stop_lng: st?.lng ?? null } : {}) };
+  });
+}
+
+/** 管理頁的小地圖查地點：{ place }，查法跟回報修改表單的「查地點」一樣 */
+export async function adminLocate(env: Env, body: unknown): Promise<{ found: boolean; lat: number | null; lng: number | null; name: string | null; approxArea: string | null }> {
+  const place = cleanNote((body as { place?: unknown } | null)?.place);
+  if (!place || [...place].length < 2) throw new PushError(400, '請先寫地點');
+  const coord = parseLatLng(place);
+  if (coord) return { found: true, ...coord, name: null, approxArea: null };
+  const r = await locateTypedPlace(env, place, Date.now() + ADDRESS_BUDGET_MS);
+  return { found: !!r.point, lat: r.point?.lat ?? null, lng: r.point?.lng ?? null, name: r.point?.displayName ?? null, approxArea: r.approxArea };
 }
 
 /** 套用後回給管理頁看的：現在雷達上這則貼文的事件（同一個地點的固定據點只列第一天） */
@@ -196,7 +222,8 @@ async function currentEvents(env: Env, postId: string): Promise<unknown[]> {
  * - { action: 'supplement', note }：把說明（管理者可以改過）加到貼文的補充，重新判讀這則貼文
  * - { action: 'takedown', scope?: 'event' | 'post' }：從雷達下架（不是發放或活動、重複）；車掃的一站連時間表、路線一起拿掉
  * - { action: 'remove_stop' }：車掃指定的那一站從時間表、路線、雷達拿掉
- * - { action: 'stop_place', place }：車掃指定的那一站改位置（地址、店名照查地點的方式查，或直接貼「緯度, 經度」）
+ * - { action: 'stop_place', place, lat?, lng? }：車掃指定的那一站改位置：有 lat、lng（管理頁在小地圖上標的）就用標的位置，place 當成地點名稱（可以不寫）；
+ *   沒有就照 place 查（地址、店名照查地點的方式查，或直接貼「緯度, 經度」）
  * 套用完標成已處理，回傳現在雷達上這則貼文的事件
  */
 export async function applyFeedback(
@@ -209,7 +236,7 @@ export async function applyFeedback(
     .bind(id)
     .first<{ id: number; event_id: number; post_id: string | null; place_text: string | null; kind: FeedbackKind; note: string | null; stop: string | null; stop_at: number | null }>();
   if (!fb) throw new PushError(404, '找不到這筆回報');
-  const b = (body ?? {}) as { action?: unknown; note?: unknown; scope?: unknown; title?: unknown; place?: unknown };
+  const b = (body ?? {}) as { action?: unknown; note?: unknown; scope?: unknown; title?: unknown; place?: unknown; lat?: unknown; lng?: unknown };
   const postId = fb.post_id;
   if (!postId) throw new PushError(400, '這筆回報沒有對應的貼文');
   let removed: number | undefined;
@@ -251,15 +278,17 @@ export async function applyFeedback(
   } else if (b.action === 'stop_place') {
     if (!fb.stop) throw new PushError(400, '這筆回報沒有指定哪一站');
     const place = cleanNote(b.place);
-    if (!place) throw new PushError(400, '請寫這一站的地點');
-    const coord = parseLatLng(place);
-    let point = coord;
-    if (!point) {
+    const coord = place ? parseLatLng(place) : null;
+    const pinned = pinOf(b.lat, b.lng);
+    if (!place && !pinned) throw new PushError(400, '請寫這一站的地點，或在地圖上標位置');
+    let point = pinned ?? coord;
+    if (!point && place) {
       const r = await locateTypedPlace(env, place, Date.now() + ADDRESS_BUDGET_MS);
       if (!r.point) throw new PushError(400, '查不到這個地點，請寫完整地址，或貼 Google 地圖的座標（例如 25.0478, 121.5170）');
       if (r.approxArea) throw new PushError(400, `只查到約略位置（${r.approxArea}），請寫完整地址，或貼 Google 地圖的座標`);
       point = { lat: r.point.lat, lng: r.point.lng };
     }
+    if (!point) throw new PushError(400, '請寫這一站的地點，或在地圖上標位置');
     changed = await setRouteStopPlace(env, postId, fb.stop, fb.stop_at, point, coord ? null : place, now);
     if (changed === 0) throw new PushError(400, '路線上已經沒有這一站了');
   } else if (b.action === 'remove_stop') {

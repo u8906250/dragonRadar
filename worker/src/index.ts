@@ -10,7 +10,7 @@ import { CURRENT_MAP_URL } from './sources/currentmap';
 import { mergeIntoOfficial } from './sources/merge';
 import { apifyTrial } from './sources/apify';
 import { fetchThreadsPost, resolveThreadsLink, shortcodeToUnix } from './sources/link';
-import { applyFeedback, deleteAdminSubscription, listFeedback, notifyAdmins, purgeFeedback, saveAdminSubscription, setFeedbackStatus, submitFeedback } from './feedback';
+import { adminLocate, applyFeedback, deleteAdminSubscription, listFeedback, notifyAdmins, purgeFeedback, saveAdminSubscription, setFeedbackStatus, submitFeedback } from './feedback';
 import { SESSION_SPEC } from './badminton';
 import { FOOD_SPEC } from './food';
 import { JOB_SPEC } from './jobs';
@@ -381,6 +381,10 @@ async function handleAdmin(req: Request, env: Env, ctx: ExecutionContext, path: 
   const fbApply = /^\/api\/admin\/feedback\/(\d+)\/apply$/.exec(path);
   if (req.method === 'POST' && fbApply) {
     return jsonResponse(await applyFeedback(env, Number(fbApply[1]), await readJson(req), now));
+  }
+  // 管理頁的小地圖查地點：{ place }
+  if (req.method === 'POST' && path === '/api/admin/locate') {
+    return jsonResponse(await adminLocate(env, await readJson(req)));
   }
   const fbStatus = /^\/api\/admin\/feedback\/(\d+)$/.exec(path);
   if (req.method === 'POST' && fbStatus) {

@@ -528,15 +528,27 @@ export class MapView {
 export interface PinPicker {
   /** 把標記移到這裡（不呼叫 onPick），null 是拿掉標記 */
   set(p: LatLng | null, zoom?: number): void;
+  /** 只移動地圖，不動標記 */
+  view(p: LatLng, zoom?: number): void;
   remove(): void;
 }
 
-/** 在 el 放一張小地圖：有 pin 就標在那裡，沒有就以 center 為中心、等使用者點 */
-export async function pinPicker(el: HTMLElement, pin: LatLng | null, center: LatLng, base: BaseMap, onPick: (p: LatLng) => void): Promise<PinPicker> {
+/**
+ * 在 el 放一張小地圖：有 pin 就標在那裡，沒有就以 center 為中心、等使用者點。
+ * mark 是要對照的原本位置（灰色圓點，不能拖），例如管理頁改車掃一站的地點時，那一站現在在哪
+ */
+export async function pinPicker(
+  el: HTMLElement,
+  pin: LatLng | null,
+  center: LatLng,
+  base: BaseMap,
+  onPick: (p: LatLng) => void,
+  mark?: { at: LatLng; title: string },
+): Promise<PinPicker> {
   const [mod] = await Promise.all([import('leaflet'), import('leaflet/dist/leaflet.css')]);
   const L = ((mod as unknown as { default?: typeof Leaflet }).default ?? mod) as typeof Leaflet;
   const start = pin ?? center;
-  const map = L.map(el, { zoomControl: true, attributionControl: true, zoomSnap: 0 }).setView([start.lat, start.lng], pin ? 17 : 15);
+  const map = L.map(el, { zoomControl: true, attributionControl: true, zoomSnap: 0 }).setView([start.lat, start.lng], pin || mark ? 17 : 15);
   map.attributionControl.setPrefix(false);
   // 國土測繪中心的底圖只有台灣：標國外的位置時換成 OpenStreetMap
   let shown: BaseMap | null = null;
@@ -563,6 +575,11 @@ export async function pinPicker(el: HTMLElement, pin: LatLng | null, center: Lat
     });
     return marker;
   };
+  if (mark) {
+    L.circleMarker([mark.at.lat, mark.at.lng], { radius: 7, color: '#fff', weight: 2, fillColor: '#6b7280', fillOpacity: 0.9, interactive: false })
+      .bindTooltip(mark.title, { permanent: true, direction: 'top', offset: [0, -8], className: 'pin-mark-label' })
+      .addTo(map);
+  }
   if (pin) place(pin);
   map.on('click', (e: Leaflet.LeafletMouseEvent) => {
     place({ lat: e.latlng.lat, lng: e.latlng.lng });
@@ -578,6 +595,9 @@ export async function pinPicker(el: HTMLElement, pin: LatLng | null, center: Lat
         return;
       }
       place(p);
+      map.setView([p.lat, p.lng], zoom ?? map.getZoom());
+    },
+    view(p, zoom) {
       map.setView([p.lat, p.lng], zoom ?? map.getZoom());
     },
     remove: () => map.remove(),

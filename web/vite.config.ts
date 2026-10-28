@@ -1,4 +1,5 @@
 import { execSync } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
 import { defineConfig, type Plugin } from 'vite';
 
 /**
@@ -27,7 +28,17 @@ const versionJson = (): Plugin => ({
 // GitHub Pages 的專案頁面要掛在 /<repo>/ 底下，CI 會把 VITE_BASE 設成 /dragonRadar/
 export default defineConfig({
   base: process.env.VITE_BASE ?? '/',
-  build: { target: 'es2022', sourcemap: false },
+  build: {
+    target: 'es2022',
+    sourcemap: false,
+    // 管理頁也打包（用雷達的小地圖），網址照舊是 admin.html
+    rolldownOptions: {
+      input: {
+        main: fileURLToPath(new URL('index.html', import.meta.url)),
+        admin: fileURLToPath(new URL('admin.html', import.meta.url)),
+      },
+    },
+  },
   define: { __APP_VERSION__: JSON.stringify(VERSION) },
   plugins: [versionJson()],
 });

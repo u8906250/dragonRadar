@@ -6,6 +6,7 @@
   <meta name="robots" content="noindex, nofollow" />
   <title>回報管理｜洋流雷達</title>
   <link rel="manifest" href="manifest.webmanifest" />
+  <link rel="icon" href="icon.svg" type="image/svg+xml" />
   <link rel="stylesheet" href="legal.css" />
   <style>
     .row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
@@ -34,6 +35,12 @@
     .result { margin: 0 0 12px; padding: 10px 12px; background: #e9f6ee; border: 2px solid #2f7d4f; border-radius: 12px; font-size: 14px; }
     .result.err { background: #fdecea; border-color: #b3261e; }
     .result ul { margin: 6px 0 0; padding-left: 20px; }
+    .pin-map { height: 280px; margin-top: 8px; border: 2px solid var(--ink); border-radius: 10px; overflow: hidden; position: relative; z-index: 0; }
+    .pin-msg { font-size: 13px; margin: 6px 0 0; color: #2f7d4f; overflow-wrap: anywhere; }
+    .pin-msg.err { color: #b3261e; font-weight: 700; }
+    .pin-msg:empty { display: none; }
+    .pin-marker span { display: block; width: 18px; height: 18px; margin: 2px 0 0 5px; border-radius: 50% 50% 50% 0; background: #dc2626; border: 3px solid #fff; box-shadow: 0 1px 4px rgba(0, 0, 0, 0.45); transform: rotate(-45deg); box-sizing: border-box; }
+    .pin-mark-label { font-size: 12px; font-weight: 700; padding: 0 6px; }
     [hidden] { display: none !important; }
   </style>
 </head>
@@ -69,7 +76,9 @@
     </section>
   </article>
 </main>
-<script>
+<script type="module">
+  import { pinPicker } from './src/map';
+
   (() => {
     const PROD_API = 'https://dragon-radar.happybadminton.workers.dev';
     const local = /^(localhost|127\.0\.0\.1)$/.test(location.hostname);
@@ -87,6 +96,16 @@
     const when = (t) => (t ? fmt.format(new Date(t * 1000)) : '');
     const EVENT_STATUS = { upcoming: '還沒開始', active: '進行中', ended: '已結束', unlocated: '找不到地點' };
     let status = 'open';
+    // 改車掃一站的地點用的小地圖：每筆回報一張（按了才開），標的位置、查詢結果另外記，
+    // 列表重畫（切到別的分頁再回來會重新載入）後照樣放回去；還沒送出的欄位也一樣
+    let rowsById = new Map();
+    const pickers = new Map();
+    const pins = new Map();
+    const pinMsgs = new Map();
+    const drafts = new Map();
+    const DRAFT_FIELDS = '#list [data-place], #list [data-title], #list [data-note]';
+    const draftKey = (el) => ['place', 'title', 'note'].filter((k) => el.dataset[k] !== undefined).map((k) => `${k}:${el.dataset[k]}`)[0];
+    const TAIPEI = { lat: 25.0478, lng: 121.517 };
 
     async function api(path, opts = {}) {
       const r = await fetch(API + path, {
@@ -123,6 +142,14 @@
 
     function render(rows) {
       const list = $('#list');
+      for (const el of document.querySelectorAll(DRAFT_FIELDS)) {
+        if (el.value !== el.defaultValue) drafts.set(draftKey(el), el.value);
+        else drafts.delete(draftKey(el));
+      }
+      const wasOpen = [...pickers.keys()];
+      for (const p of pickers.values()) void p.then((x) => x.remove());
+      pickers.clear();
+      rowsById = new Map(rows.map((f) => [String(f.id), f]));
       if (!rows.length) {
         list.innerHTML = `<li class="empty">${status === 'open' ? '沒有未處理的回報' : '還沒有已處理的回報'}</li>`;
         return;
@@ -154,8 +181,11 @@
               ? `<div class="apply">
               ${
                 f.stop
-                  ? `<div class="row"><input type="text" class="title-input" data-place="${f.id}" maxlength="120" value="${esc(f.kind === 'location' ? f.note || '' : '')}" placeholder="地址、店名，或座標 25.0478, 121.5170" aria-label="這一站的地點" /><button type="button" class="btn${f.kind === 'location' ? ' primary' : ''}" data-apply="stop_place" data-id="${f.id}">修改這一站的地點</button></div>
-              <p class="hint">只改這一站：照地址、店名查位置（查到約略位置不算），或貼 Google 地圖按右鍵複製的座標；雷達上的點、時間表、路線跟著改，其他站不動。</p>`
+                  ? `<div class="row"><input type="text" class="title-input" data-place="${f.id}" maxlength="120" value="${esc(f.kind === 'location' ? f.note || '' : '')}" placeholder="地址、店名，或座標 25.0478, 121.5170" aria-label="這一站的地點" /><button type="button" class="btn" data-find="${f.id}">查地點</button><button type="button" class="btn" data-map="${f.id}">在地圖上標</button></div>
+              <div class="pin-map" id="pin-map-${f.id}" hidden></div>
+              <p class="pin-msg" id="pin-msg-${f.id}" aria-live="polite"></p>
+              <div class="row"><button type="button" class="btn${f.kind === 'location' ? ' primary' : ''}" data-apply="stop_place" data-id="${f.id}">修改這一站的地點</button></div>
+              <p class="hint">只改這一站：寫地址、店名按「查地點」標到地圖上，不對再拖紅色標記或點地圖；也可以按「在地圖上標」直接點（灰點是這一站現在的位置）。標了位置就用標的，上面寫的當成地點名稱（空白就保留原本的）；沒標就照寫的查（查到約略位置不算），或貼 Google 地圖按右鍵複製的座標。雷達上的點、時間表、路線跟著改，其他站不動。</p>`
                   : ''
               }
               <div class="row"><input type="text" class="title-input" data-title="${f.id}" maxlength="30" value="${esc(curTitle)}" aria-label="新標題" /><button type="button" class="btn primary" data-apply="title" data-id="${f.id}">改標題</button></div>
@@ -185,6 +215,97 @@
           </li>`;
         })
         .join('');
+      for (const el of document.querySelectorAll(DRAFT_FIELDS)) {
+        const v = drafts.get(draftKey(el));
+        if (v !== undefined) el.value = v;
+      }
+      // 不在這次列表、或已經處理的：地圖上標的位置不用留
+      for (const id of [...pins.keys(), ...pinMsgs.keys()]) {
+        if (rowsById.get(id)?.status === 'open') continue;
+        pins.delete(id);
+        pinMsgs.delete(id);
+      }
+      for (const [id, m] of pinMsgs) pinMsg(id, m.text, m.err);
+      for (const id of new Set([...wasOpen, ...pins.keys()])) if (rowsById.get(id)?.status === 'open') void openMap(id);
+    }
+
+    function pinMsg(id, text, err = false) {
+      pinMsgs.set(id, { text, err });
+      const el = document.getElementById(`pin-msg-${id}`);
+      if (!el) return;
+      el.textContent = text;
+      el.classList.toggle('err', err);
+    }
+
+    /** 打開這筆回報的小地圖：從標過的位置、這一站現在的位置（灰點）或回報的那一則開始 */
+    function openMap(id) {
+      if (pickers.has(id)) return pickers.get(id);
+      const el = document.getElementById(`pin-map-${id}`);
+      const f = rowsById.get(id);
+      if (!el || !f) return Promise.resolve(null);
+      el.hidden = false;
+      const cur = f.stop_lat != null ? { lat: f.stop_lat, lng: f.stop_lng } : null;
+      const pin = pins.get(id) ?? null;
+      const center = pin ?? cur ?? (f.lat != null ? { lat: f.lat, lng: f.lng } : TAIPEI);
+      const p = pinPicker(
+        el,
+        pin,
+        center,
+        'nlsc',
+        (ll) => {
+          pins.set(id, ll);
+          pinMsg(id, `標在 ${ll.lat.toFixed(5)}, ${ll.lng.toFixed(5)}，按「修改這一站的地點」套用。`);
+        },
+        cur ? { at: cur, title: '現在的位置' } : undefined,
+      ).catch((e) => {
+        pickers.delete(id);
+        pinMsg(id, `地圖載入失敗：${e.message}`, true);
+        return null;
+      });
+      pickers.set(id, p);
+      return p;
+    }
+
+    /** 照欄位寫的查位置，查到的標在小地圖上 */
+    async function findPlace(id, btn) {
+      const place = document.querySelector(`input[data-place="${id}"]`)?.value.trim() ?? '';
+      if (!place) {
+        pinMsg(id, '請先寫地址、店名或座標。', true);
+        return;
+      }
+      btn.disabled = true;
+      btn.textContent = '查詢中…';
+      try {
+        const r = await api('/api/admin/locate', { method: 'POST', body: JSON.stringify({ place }) });
+        const picker = await openMap(id);
+        if (!picker) return;
+        if (!r.found) {
+          pinMsg(id, '查不到這個地點，請寫完整地址或店名，或直接在地圖上點。', true);
+        } else if (r.approxArea) {
+          // 約略位置不標：只移過去，讓管理者自己點
+          pins.delete(id);
+          picker.set(null);
+          picker.view({ lat: r.lat, lng: r.lng }, 15);
+          pinMsg(id, `只查到約略位置（${r.approxArea}），請在地圖上點出正確位置。`, true);
+        } else {
+          const p = { lat: r.lat, lng: r.lng };
+          pins.set(id, p);
+          picker.set(p, 17);
+          pinMsg(id, `查到${r.name ? `：${r.name}` : ''}。位置不對可以拖紅色標記或點地圖，再按「修改這一站的地點」。`);
+        }
+      } catch (e) {
+        pinMsg(id, e.message, true);
+      } finally {
+        btn.disabled = false;
+        btn.textContent = '查地點';
+      }
+    }
+
+    /** 套用成功：這筆回報標的位置、沒送出的欄位不用留 */
+    function forget(id) {
+      pins.delete(id);
+      pinMsgs.delete(id);
+      for (const k of ['place', 'title', 'note']) drafts.delete(`${k}:${id}`);
     }
 
     const evLine = (ev) => {
@@ -200,6 +321,19 @@
     }
 
     $('#list').addEventListener('click', async (e) => {
+      const find = e.target.closest('button[data-find]');
+      if (find) {
+        void findPlace(find.dataset.find, find);
+        return;
+      }
+      const mapBtn = e.target.closest('button[data-map]');
+      if (mapBtn) {
+        const id = mapBtn.dataset.map;
+        void openMap(id).then((p) => {
+          if (p && !pins.has(id)) pinMsg(id, rowsById.get(id)?.stop_lat != null ? '點地圖標出這一站的正確位置（灰點是現在的位置）。' : '這一站現在沒有確切位置，點地圖標出來。');
+        });
+        return;
+      }
       const a = e.target.closest('button[data-apply]');
       if (a) {
         const id = a.dataset.id;
@@ -219,9 +353,16 @@
           }
         } else if (action === 'stop_place') {
           body.place = document.querySelector(`input[data-place="${id}"]`)?.value.trim() ?? '';
-          if (!body.place) {
-            showResult('請先寫這一站的地點。', true);
+          const pin = pins.get(id);
+          if (!body.place && !pin) {
+            showResult('請先寫這一站的地點，或在地圖上標位置。', true);
             return;
+          }
+          if (pin) {
+            body.lat = pin.lat;
+            body.lng = pin.lng;
+            // 欄位預先帶的是回報的說明，不一定是地名：先確認會寫成什麼
+            if (!confirm(`這一站改到地圖上標的位置，地點名稱${body.place ? `寫成「${body.place}」` : '不變'}？`)) return;
           }
         } else if (action === 'remove_stop') {
           if (!confirm('確定刪除這一站？車掃的時間表、路線、雷達上的點都會拿掉這一站。')) return;
@@ -233,6 +374,7 @@
         a.textContent = action === 'supplement' ? '重新判讀中…' : action === 'title' || action === 'stop_place' ? '修改中…' : action === 'remove_stop' ? '刪除中…' : '下架中…';
         try {
           const r = await api(`/api/admin/feedback/${id}/apply`, { method: 'POST', body: JSON.stringify(body) });
+          forget(id);
           const list = (r.events || []).map(evLine).join('');
           const lost = r.lostPlaces?.length ? `<br><b>注意：重新判讀後少了這些地點：${r.lostPlaces.map(esc).join('、')}。</b>補充只提到一個地點時，AI 常把其他地點漏掉；可以在「已處理」改回未處理，補充寫完整再套用一次。` : '';
           showResult(
@@ -264,6 +406,15 @@
         b.disabled = false;
         $('#list-msg').textContent = err.message;
       }
+    });
+
+    // 地點欄位按 Enter 就查
+    $('#list').addEventListener('keydown', (e) => {
+      const input = e.target.closest('input[data-place]');
+      if (!input || e.key !== 'Enter' || e.isComposing) return;
+      e.preventDefault();
+      const btn = document.querySelector(`button[data-find="${input.dataset.place}"]`);
+      if (btn && !btn.disabled) void findPlace(input.dataset.place, btn);
     });
 
     for (const t of document.querySelectorAll('[role="tab"]')) {
