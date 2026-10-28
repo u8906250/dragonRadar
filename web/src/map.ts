@@ -393,7 +393,21 @@ export class MapView {
     });
   }
 
-  /** 地圖移到某個點（例如洋流總部） */
+  /**
+   * 這個點不在看得到的地方才移過去（移最少、不改縮放）。cover 是卡片蓋住地圖右邊、下面幾 px，
+   * 蓋住的地方不算看得到（至少留 120 px 給地圖）
+   */
+  panIntoView(p: LatLng, cover = { right: 0, bottom: 0 }): void {
+    void this.ensure().then(() => {
+      if (!this.map) return;
+      const size = this.map.getSize();
+      const right = Math.max(0, Math.min(cover.right, size.x - 120));
+      const bottom = Math.max(0, Math.min(cover.bottom, size.y - 120));
+      this.map.panInside([p.lat, p.lng], { paddingTopLeft: [40, 40], paddingBottomRight: [40 + right, 40 + bottom] });
+    });
+  }
+
+    /** 地圖移到某個點（例如洋流總部） */
   focusLatLng(p: LatLng): void {
     void this.ensure().then(() => {
       if (this.map) this.map.setView([p.lat, p.lng], Math.max(this.map.getZoom(), 16), { animate: true });

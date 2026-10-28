@@ -1982,7 +1982,7 @@ function renderDetail(items: Item[], now: number): void {
     </div>
     <div class="sheet-body">
       ${nearbyHtml(it, items)}
-      ${routeBoxHtml(ev, now)}
+      ${routeBoxHtml(ev, items, now)}
       ${ev.kind === 'job' ? jobDetailHtml(it, now) : ev.kind === 'session' ? sessionDetailHtml(it, now) : ev.kind === 'food' ? foodDetailHtml(it, now) : `<p>類型：${it.spot ? `固定據點（${kindLabel(ev)}）` : kindLabel(ev)}<br>${ev.item ? `${ev.kind === 'activity' ? '物品' : '發放'}：${esc(ev.item)}<br>` : ''}${ev.keyword ? `關鍵字：#${esc(ev.keyword)}<br>` : ''}地點：${esc(placeOf(ev))}${ev.approxArea ? `<br><span class="approx-note">約略位置：只知道在${esc(ev.approxArea)}，地圖上是${esc(ev.approxArea)}的中心點，實際地點請看原文</span>` : ''}<br>時間：${it.spot ? esc(spotSchedule(it)) : ev.allDay ? `${dateFmt.format(new Date(ev.startAt * 1000))} ${allDayText(ev, false)}` : esc(eventTimeText(ev))}<br>距離：${ev.approxArea ? '約 ' : ''}${formatKm(it.distanceKm)}，${compassLabel(it.bearing)}方 · ${esc(timeLine(it, now))}</p>`}
       <blockquote class="post-excerpt" title="原文摘錄，完整內容請看原文">${esc(ev.post.source === 'news' ? ev.post.text.split('\n')[0] : ev.post.text)}</blockquote>
       ${ev.post.supplement ? `<p class="muted supplement-line">回報的人補充：${esc(ev.post.supplement)}</p>` : ''}
@@ -2002,6 +2002,15 @@ function renderDetail(items: Item[], now: number): void {
   for (const b of detailEl.querySelectorAll<HTMLButtonElement>('[data-select]')) {
     b.addEventListener('click', () => select(Number(b.dataset.select)));
   }
+  // 車掃的上一站、下一站：地圖上那一站不在畫面裡就移過去
+  for (const b of detailEl.querySelectorAll<HTMLButtonElement>('[data-stop-go]')) {
+    b.addEventListener('click', () => {
+      const id = Number(b.dataset.stopGo);
+      const to = items.find((x) => x.ev.id === id)?.ev;
+      select(id);
+      if (view === 'map' && to?.lat != null && to.lng != null) map.panIntoView({ lat: to.lat, lng: to.lng }, sheetCover());
+    });
+  }
   detailEl.querySelector('[data-act="ended"]')?.addEventListener('click', (e) => void sendEnded(ev, e.currentTarget as HTMLButtonElement));
   detailEl.querySelector('[data-act="withdraw"]')?.addEventListener('click', () => void withdrawMine(ev.post.id));
   detailEl.querySelector('[data-act="feedback"]')?.addEventListener('click', () => openFeedback(ev));
@@ -2011,13 +2020,43 @@ function renderDetail(items: Item[], now: number): void {
   });
 }
 
-/** 屬於車掃路線的事件：這一站的時間，和回到整條路線時間表的按鈕 */
-function routeBoxHtml(ev: EventOut, now: number): string {
+/** 詳細資料卡片蓋住地圖的部分：手機蓋住下面、電腦蓋住右邊一點 */
+function sheetCover(): { right: number; bottom: number } {
+  if (detailEl.hidden) return { right: 0, bottom: 0 };
+  const m = $('#map').getBoundingClientRect();
+  const d = detailEl.getBoundingClientRect();
+  const w = Math.min(m.right, d.right) - Math.max(m.left, d.left);
+  const h = Math.min(m.bottom, d.bottom) - Math.max(m.top, d.top);
+  if (w <= 0 || h <= 0) return { right: 0, bottom: 0 };
+  return w >= m.width * 0.6 ? { right: 0, bottom: m.bottom - d.top } : { right: m.right - d.left, bottom: 0 };
+}
+
+/** 屬於車掃路線的事件：這一站的時間、切到上一站下一站，和回到整條路線時間表的按鈕 */
+function routeBoxHtml(ev: EventOut, items: Item[], now: number): string {
   const r = routeOf(ev);
   const st = stopOf(ev);
   if (!r) return '';
   const line = st ? stopText(st, now) : '';
-  return `<div class="route-box"><b>${esc(r.title)}</b>${line ? `：${esc(line)}` : ''}<br><button type="button" class="link-btn" data-act="route">看整條路線與每站時間</button></div>`;
+  const i = st ? r.stops.indexOf(st) : -1;
+  const mine = routeItems(r, items);
+  // 沒放上雷達的站（沒有確切位置、已經經過）沒有卡片：跳過，切到再前、再後面有卡片的那一站
+  const near = (step: -1 | 1): { st: RouteStop; it: Item } | undefined => {
+    for (let j = i + step; i >= 0 && j >= 0 && j < r.stops.length; j += step) {
+      const s = r.stops[j];
+      const it = mine.find((x) => x.ev.id !== ev.id && (isReported(r) ? stopMatches(s, x.ev) : x.ev.title === s.title));
+      if (it) return { st: s, it };
+    }
+    return undefined;
+  };
+  const prev = near(-1);
+  const next = near(1);
+  const stopBtn = (n: { st: RouteStop; it: Item }, dir: 'prev' | 'next'): string => {
+    const name = `${STOP_FLAG[n.st.kind] ? `${STOP_FLAG[n.st.kind]} ` : ''}${esc(n.st.name)}`;
+    return `<button type="button" class="chip small stop-${dir}" data-stop-go="${n.it.ev.id}">${dir === 'prev' ? `‹ 上一站：${name}` : `下一站：${name} ›`}</button>`;
+  };
+  const nav = prev || next ? `<div class="stop-nav">${prev ? stopBtn(prev, 'prev') : '<span></span>'}${next ? stopBtn(next, 'next') : ''}</div>` : '';
+  const pos = i >= 0 ? `<span class="muted">（第 ${i + 1} 站，共 ${r.stops.length} 站）</span>` : '';
+  return `<div class="route-box"><b>${esc(r.title)}</b>${pos}${line ? `<br>${esc(line)}` : ''}${nav || '<br>'}<button type="button" class="link-btn" data-act="route">看整條路線與每站時間</button></div>`;
 }
 
 /** 雷達上跟這個疊在一起的其他光點，做成按鈕可以切過去 */
