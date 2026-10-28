@@ -1069,6 +1069,70 @@ interface StoredRouteStop {
   checkedAt?: number;
 }
 
+/** 路線上的一站：標題一樣、預計經過時間在 window 裡（null 就只看標題） */
+type StopWindow = { from: number; to: number } | null;
+const isStop = (st: { title: string; at: number | null }, title: string, win: StopWindow): boolean =>
+  st.title === title && (win === null || (st.at !== null && st.at >= win.from && st.at <= win.to));
+
+/** 路線拿掉一站：其他站照順序，第一站改成出發、最後一站改成抵達；沒有這一站回傳 null */
+export function withoutStop<T extends { kind: 'start' | 'cheer' | 'end'; title: string; at: number | null }>(stops: T[], title: string, win: StopWindow): T[] | null {
+  const keep = stops.filter((st) => !isStop(st, title, win));
+  if (keep.length === stops.length) return null;
+  return keep.map((st, i) => ({ ...st, kind: i === 0 ? 'start' : i === keep.length - 1 ? 'end' : 'cheer' }));
+}
+
+/** 回報的車掃路線上的一站（問題回報指定哪一站時用） */
+export async function findRouteStop(env: Env, postId: string, title: string, at: number | null): Promise<StoredRouteStop | null> {
+  const { results } = await env.DB.prepare('SELECT stops FROM routes WHERE post_id = ?').bind(postId).all<{ stops: string }>();
+  for (const r of results) {
+    const st = (JSON.parse(r.stops) as StoredRouteStop[]).find((s) => isStop(s, title, at === null ? null : { from: at, to: at }));
+    if (st) return st;
+  }
+  return null;
+}
+
+/**
+ * 從回報的車掃路線拿掉一站：時間表、路線的連線、出發和抵達時間跟著改（一站都不剩就刪掉路線），
+ * 雷達上那一站的點也下架。回傳下架幾個點、拿掉幾站
+ */
+export async function removeRouteStop(env: Env, postId: string, title: string, win: StopWindow, now: number): Promise<{ events: number; stops: number }> {
+  const { results } = await env.DB.prepare('SELECT id, stops FROM routes WHERE post_id = ?').bind(postId).all<{ id: string; stops: string }>();
+  const stmts: D1PreparedStatement[] = [];
+  let stops = 0;
+  for (const r of results) {
+    const list = JSON.parse(r.stops) as StoredRouteStop[];
+    const keep = withoutStop(list, title, win);
+    if (!keep) continue;
+    stops += list.length - keep.length;
+    if (keep.length === 0) {
+      stmts.push(env.DB.prepare('DELETE FROM routes WHERE id = ?').bind(r.id));
+      continue;
+    }
+    const first = keep[0];
+    const last = keep[keep.length - 1];
+    stmts.push(
+      env.DB.prepare('UPDATE routes SET stops = ?, segments = ?, depart_at = ?, arrive_at = ?, show_until = ?, updated_at = ? WHERE id = ?').bind(
+        JSON.stringify(keep),
+        JSON.stringify(routeSegments(keep)),
+        first.at,
+        last.at,
+        (last.at ?? now) + ROUTE_KEEP_SEC,
+        now,
+        r.id,
+      ),
+    );
+  }
+  if (stmts.length > 0) await env.DB.batch(stmts);
+  // 雷達上那一站的點：同一則貼文、同一個標題、預計經過時間在那一場裡
+  const ev = await env.DB.prepare(
+    `UPDATE events SET status = 'ended', ended_reason = 'feedback', updated_at = ?
+      WHERE post_id = ? AND title = ? AND status IN ('upcoming', 'active', 'unlocated')${win ? ' AND start_at <= ? AND end_at >= ?' : ''}`,
+  )
+    .bind(now, postId, title, ...(win ? [win.to, win.from] : []))
+    .run();
+  return { events: ev.meta.changes ?? 0, stops };
+}
+
 /** 有確切位置的站照順序用直線連起來（不知道實際走哪些路），沒有認領人數 */
 function routeSegments(stops: Array<{ name: string; lat: number | null; lng: number | null; at: number | null }>) {
   const pts = stops.filter((st): st is typeof st & { lat: number; lng: number } => st.lat !== null && st.lng !== null);
@@ -1246,8 +1310,15 @@ export async function setManualTitle(env: Env, eventId: number, title: string, n
  * 從雷達下架：scope = 'post' 整則貼文的；'event' 只有這一則（固定據點連同同一個地點的每天時段）。回傳下架幾筆
  */
 export async function takeDown(env: Env, eventId: number, scope: 'event' | 'post', reason: string, now: number): Promise<number> {
-  const ev = await env.DB.prepare('SELECT id, post_id, place_text, spot FROM events WHERE id = ?').bind(eventId).first<{ id: number; post_id: string; place_text: string; spot: number }>();
+  const ev = await env.DB.prepare('SELECT id, post_id, title, place_text, spot, start_at, end_at FROM events WHERE id = ?')
+    .bind(eventId)
+    .first<{ id: number; post_id: string; title: string; place_text: string; spot: number; start_at: number; end_at: number }>();
   if (!ev) return 0;
+  // 車掃的一站：時間表、路線也拿掉這一站
+  if (scope === 'event' && !ev.spot) {
+    const r = await removeRouteStop(env, ev.post_id, ev.title, { from: ev.start_at, to: ev.end_at }, now);
+    if (r.stops > 0) return r.events;
+  }
   const live = "status IN ('upcoming', 'active', 'unlocated')";
   const r =
     scope === 'post'

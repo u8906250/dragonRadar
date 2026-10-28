@@ -3,7 +3,7 @@
  * 回報的內容只有管理者看得到；存裝置代碼與 IP 的加鹽雜湊（限制次數、同一個人同一則同一種問題只算一次），30 天後刪除。
  */
 import type { Env } from './env';
-import { getPost, reprocessPost, setManualTitle, takeDown } from './events';
+import { findRouteStop, getPost, removeRouteStop, reprocessPost, setManualTitle, takeDown } from './events';
 import { parseSubscription, PushError, sendPush, type PushMessage } from './push';
 
 export const FEEDBACK_KINDS = {
@@ -12,6 +12,8 @@ export const FEEDBACK_KINDS = {
   content: '標題或內容錯誤',
   not_event: '不是發放或活動',
   duplicate: '重複',
+  /** 車掃的一站沒有了、取消了（回報時要選哪一站） */
+  remove_stop: '刪除這一站',
   other: '其他',
 } as const;
 export type FeedbackKind = keyof typeof FEEDBACK_KINDS;
@@ -42,7 +44,11 @@ async function countSince(env: Env, col: 'device' | 'ip', value: string, since: 
   return r?.n ?? 0;
 }
 
-/** 回報一則事件的問題：{ kind, note }；回傳要推給管理者的那一筆（重複的不推） */
+/**
+ * 回報一則事件的問題：{ kind, note, stop?, stopAt? }；回傳要推給管理者的那一筆（重複的不推）。
+ * 車掃可以指定哪一站（stop 是那一站的標題、stopAt 預計經過時間）：記在 stop、stop_at，
+ * 標題、地點寫那一站的；那一站在雷達上有點就掛在那個點，沒有（只有約略位置、已經經過）就掛在回報的那一則
+ */
 export async function submitFeedback(
   env: Env,
   eventId: number,
@@ -51,7 +57,7 @@ export async function submitFeedback(
   ip: string,
   now: number,
 ): Promise<{ result: FeedbackResult; created: FeedbackRow | null }> {
-  const b = (body ?? {}) as { kind?: unknown; note?: unknown };
+  const b = (body ?? {}) as { kind?: unknown; note?: unknown; stop?: unknown; stopAt?: unknown };
   if (!isKind(b.kind)) throw new PushError(400, '請選擇問題類型');
   const note = cleanNote(b.note);
   if (b.kind === 'other' && !note) throw new PushError(400, '選「其他」請寫一下是什麼問題');
@@ -59,22 +65,38 @@ export async function submitFeedback(
     .bind(eventId)
     .first<{ id: number; post_id: string; title: string; place_text: string }>();
   if (!ev) throw new PushError(404, '找不到這個發放或活動，可能已經下架了');
+  const stopTitle = typeof b.stop === 'string' ? [...b.stop.trim()].slice(0, 120).join('') : '';
+  const stopAt = Number.isSafeInteger(b.stopAt) ? (b.stopAt as number) : null;
+  const stop = stopTitle ? await findRouteStop(env, ev.post_id, stopTitle, stopAt) : null;
+  if (stopTitle && !stop) throw new PushError(404, '找不到這一站，路線可能更新過了，請重新整理再試');
+  if (b.kind === 'remove_stop' && !stop) throw new PushError(400, '請選擇要刪除哪一站');
+  // 那一站在雷達上的點
+  const stopEvent = stop
+    ? await env.DB.prepare(
+        `SELECT id FROM events WHERE post_id = ? AND title = ? AND status IN ('upcoming', 'active', 'unlocated')${stop.at !== null ? ' AND start_at <= ? AND end_at >= ?' : ''} LIMIT 1`,
+      )
+        .bind(ev.post_id, stop.title, ...(stop.at !== null ? [stop.at, stop.at] : []))
+        .first<{ id: number }>()
+    : null;
+  const targetId = stopEvent?.id ?? ev.id;
 
   const hour = now - 3600;
   if (device && (await countSince(env, 'device', device, hour)) >= PER_DEVICE_PER_HOUR) throw new PushError(429, '回報太頻繁了，請過一陣子再試');
   if ((await countSince(env, 'ip', ip, hour)) >= (device ? PER_IP_PER_HOUR : PER_IP_NO_DEVICE_PER_HOUR)) throw new PushError(429, '回報太頻繁了，請過一陣子再試');
 
-  // 同一個人（沒有裝置代碼就看 IP）同一則同一種問題只算一次
-  const dup = await env.DB.prepare(`SELECT 1 AS ok FROM event_feedback WHERE event_id = ? AND kind = ? AND ${device ? 'device = ?' : 'device IS NULL AND ip = ?'}`)
-    .bind(eventId, b.kind, device ?? ip)
+  // 同一個人（沒有裝置代碼就看 IP）同一則（車掃的同一站）同一種問題只算一次
+  const dup = await env.DB.prepare(
+    `SELECT 1 AS ok FROM event_feedback WHERE event_id = ? AND kind = ? AND COALESCE(stop, '') = ? AND ${device ? 'device = ?' : 'device IS NULL AND ip = ?'}`,
+  )
+    .bind(targetId, b.kind, stop?.title ?? '', device ?? ip)
     .first<{ ok: number }>();
   if (dup) return { result: { ok: true, duplicate: true }, created: null };
 
   const row = await env.DB.prepare(
-    `INSERT INTO event_feedback (event_id, post_id, title, place_text, kind, note, device, ip, status, created_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'open', ?) RETURNING id, event_id, post_id, title, place_text, kind, note, status, created_at, resolved_at`,
+    `INSERT INTO event_feedback (event_id, post_id, title, place_text, kind, note, device, ip, status, created_at, stop, stop_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'open', ?, ?, ?) RETURNING id, event_id, post_id, title, place_text, kind, note, status, created_at, resolved_at, stop, stop_at`,
   )
-    .bind(ev.id, ev.post_id, ev.title, ev.place_text, b.kind, note, device, ip, now)
+    .bind(targetId, ev.post_id, stop?.title ?? ev.title, stop ? (stop.place ?? stop.name) : ev.place_text, b.kind, note, device, ip, now, stop?.title ?? null, stop?.at ?? null)
     .first<FeedbackRow>();
   return { result: { ok: true, duplicate: false }, created: row };
 }
@@ -90,6 +112,9 @@ export interface FeedbackRow {
   status: 'open' | 'resolved';
   created_at: number;
   resolved_at: number | null;
+  /** 車掃指定的那一站（標題）、預計經過時間 */
+  stop?: string | null;
+  stop_at?: number | null;
 }
 
 /** 推給管理者的通知：同一個 tag，新的取代舊的，但會再響一次 */
@@ -124,7 +149,7 @@ export async function notifyAdmins(env: Env, row: FeedbackRow, now: number): Pro
 export async function listFeedback(env: Env, status: string | null): Promise<unknown[]> {
   const st = status === 'resolved' ? 'resolved' : 'open';
   const { results } = await env.DB.prepare(
-    `SELECT f.id, f.event_id, f.post_id, f.title, f.place_text, f.kind, f.note, f.status, f.created_at, f.resolved_at,
+    `SELECT f.id, f.event_id, f.post_id, f.title, f.place_text, f.kind, f.note, f.status, f.created_at, f.resolved_at, f.stop, f.stop_at,
             e.status AS event_status, e.start_at, e.end_at, e.lat, e.lng, e.approx_area, e.title AS event_title, e.place_text AS event_place,
             p.permalink, p.username, p.supplement, p.source,
             -- 重新判讀後原本那一則會換成新的：同一則貼文現在雷達上的第一則
@@ -160,7 +185,8 @@ async function currentEvents(env: Env, postId: string): Promise<unknown[]> {
 /**
  * 套用回報：
  * - { action: 'supplement', note }：把說明（管理者可以改過）加到貼文的補充，重新判讀這則貼文
- * - { action: 'takedown', scope?: 'event' | 'post' }：從雷達下架（不是發放或活動、重複）
+ * - { action: 'takedown', scope?: 'event' | 'post' }：從雷達下架（不是發放或活動、重複）；車掃的一站連時間表、路線一起拿掉
+ * - { action: 'remove_stop' }：車掃指定的那一站從時間表、路線、雷達拿掉
  * 套用完標成已處理，回傳現在雷達上這則貼文的事件
  */
 export async function applyFeedback(
@@ -168,15 +194,16 @@ export async function applyFeedback(
   id: number,
   body: unknown,
   now: number,
-): Promise<{ ok: true; action: string; removed?: number; changed?: number; lostPlaces?: string[]; events: unknown[] }> {
-  const fb = await env.DB.prepare('SELECT id, event_id, post_id, place_text, kind, note FROM event_feedback WHERE id = ?')
+): Promise<{ ok: true; action: string; removed?: number; removedStops?: number; changed?: number; lostPlaces?: string[]; events: unknown[] }> {
+  const fb = await env.DB.prepare('SELECT id, event_id, post_id, place_text, kind, note, stop, stop_at FROM event_feedback WHERE id = ?')
     .bind(id)
-    .first<{ id: number; event_id: number; post_id: string | null; place_text: string | null; kind: FeedbackKind; note: string | null }>();
+    .first<{ id: number; event_id: number; post_id: string | null; place_text: string | null; kind: FeedbackKind; note: string | null; stop: string | null; stop_at: number | null }>();
   if (!fb) throw new PushError(404, '找不到這筆回報');
   const b = (body ?? {}) as { action?: unknown; note?: unknown; scope?: unknown; title?: unknown };
   const postId = fb.post_id;
   if (!postId) throw new PushError(400, '這筆回報沒有對應的貼文');
   let removed: number | undefined;
+  let removedStops: number | undefined;
   let changed: number | undefined;
   let lostPlaces: string[] | undefined;
   // 回報的那一則現在的事件；被重新判讀換掉時，用同一則貼文同一個地點的（沒有才用第一則）
@@ -211,14 +238,21 @@ export async function applyFeedback(
     lostPlaces = placesBefore.filter((p) => !after.has(p));
   } else if (b.action === 'takedown') {
     removed = await takeDown(env, fb.event_id, b.scope === 'post' ? 'post' : 'event', 'feedback', now);
+  } else if (b.action === 'remove_stop') {
+    if (!fb.stop) throw new PushError(400, '這筆回報沒有指定哪一站');
+    const r = await removeRouteStop(env, postId, fb.stop, fb.stop_at === null ? null : { from: fb.stop_at, to: fb.stop_at }, now);
+    if (r.stops === 0 && r.events === 0) throw new PushError(400, '路線上已經沒有這一站了');
+    removed = r.events;
+    removedStops = r.stops;
   } else {
-    throw new PushError(400, "action 要是 'title'、'supplement' 或 'takedown'");
+    throw new PushError(400, "action 要是 'title'、'supplement'、'takedown' 或 'remove_stop'");
   }
   await env.DB.prepare("UPDATE event_feedback SET status = 'resolved', resolved_at = ? WHERE id = ?").bind(now, id).run();
   return {
     ok: true,
     action: b.action,
     ...(removed !== undefined ? { removed } : {}),
+    ...(removedStops !== undefined ? { removedStops } : {}),
     ...(changed !== undefined ? { changed } : {}),
     ...(lostPlaces?.length ? { lostPlaces } : {}),
     events: await currentEvents(env, postId),

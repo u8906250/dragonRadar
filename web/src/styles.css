@@ -658,6 +658,9 @@ body.letters-open { overflow: hidden; }
 .feedback-sheet { z-index: 950; }
 .feedback-form { display: flex; flex-direction: column; gap: 10px; }
 .feedback-kinds { border: 0; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: 8px; }
+.feedback-kinds label[hidden], .feedback-stop[hidden] { display: none; }
+.feedback-stop { display: flex; flex-direction: column; gap: 4px; font-size: 13px; color: var(--muted); }
+.feedback-stop select { font: inherit; font-size: 16px; color: var(--text); background: var(--card); border: var(--border-w) solid var(--line); border-radius: var(--card-radius); padding: 8px 10px; min-width: 0; max-width: 100%; }
 .feedback-kinds label { display: inline-flex; align-items: center; gap: 6px; font-size: 14px; color: var(--text); background: var(--card); border: var(--border-w) solid var(--line); border-radius: var(--radius); padding: 8px 12px; min-height: 40px; cursor: pointer; }
 .feedback-kinds label:has(input:checked) { border-color: var(--accent); box-shadow: inset 0 0 0 1px var(--accent); }
 .feedback-kinds input { accent-color: var(--accent); margin: 0; }

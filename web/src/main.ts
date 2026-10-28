@@ -1327,12 +1327,16 @@ function renderRouteDetail(r: RouteOut, items: Item[], now: number): void {
       <div class="sheet-actions">
         ${r.claimUrl ? `<a class="btn primary" href="${esc(r.claimUrl)}" target="_blank" rel="noopener">到車掃地圖認領路段</a>` : ''}
         <button type="button" class="btn" data-act="route-map">在地圖上看路線</button>
+        ${isReported(r) && mine[0] ? '<button type="button" class="btn" data-act="route-feedback">回報問題</button>' : ''}
       </div>
     </div>`);
   detailEl.querySelector('[data-act="close"]')?.addEventListener('click', () => selectRoute(null));
   for (const b of detailEl.querySelectorAll<HTMLButtonElement>('[data-select]')) {
     b.addEventListener('click', () => select(Number(b.dataset.select)));
   }
+  detailEl.querySelector('[data-act="route-feedback"]')?.addEventListener('click', () => {
+    if (mine[0]) openFeedback(mine[0].ev, r);
+  });
   detailEl.querySelector('[data-act="route-map"]')?.addEventListener('click', () => {
     // 收起時間表，不然整條路線被蓋住；還沒出發的路線照樣畫出來（點其他地方才收起）
     selectedRoute = null;
@@ -2020,11 +2024,29 @@ function neededText(): string {
   return n ? `，${n} 人回報就會下架` : '';
 }
 
-/** 回報問題：疊在詳細資料上面，選類型、寫說明 */
-function openFeedback(ev: EventOut): void {
+/** 正在回報問題的車掃（回報的）每一站；不是車掃是 null */
+let feedbackStops: RouteStop[] | null = null;
+
+/**
+ * 回報問題：疊在詳細資料上面，選類型、寫說明。
+ * 回報的車掃可以選哪一站（從某一站打開時預設那一站，從時間表打開時預設整條路線），多一個「刪除這一站」
+ */
+function openFeedback(ev: EventOut, fromRoute?: RouteOut): void {
   feedbackEventId = ev.id;
   feedbackForm.reset();
-  $('#feedback-target').textContent = `「${titleOf(ev)}」哪裡有問題？`;
+  const r = fromRoute ?? routeOf(ev);
+  const route = r && isReported(r) ? r : null;
+  feedbackStops = route ? route.stops : null;
+  const select = $<HTMLSelectElement>('#feedback-stop');
+  if (route) {
+    const cur = fromRoute ? undefined : stopOf(ev);
+    select.innerHTML = `<option value="">整條路線</option>${route.stops
+      .map((st, i) => `<option value="${i}"${st === cur ? ' selected' : ''}>${st.at ? `${fmtTime(st.at)} ` : ''}${esc(stopLabel(route, st.kind))} ${esc(st.name)}</option>`)
+      .join('')}`;
+  }
+  $('#feedback-stop-row').hidden = !route;
+  $('#feedback-remove-stop').hidden = !route;
+  $('#feedback-target').textContent = route ? `「${route.title}」哪裡有問題？` : `「${titleOf(ev)}」哪裡有問題？`;
   feedbackSheet.hidden = false;
 }
 
@@ -2041,8 +2063,15 @@ async function submitFeedback(): Promise<void> {
     feedbackNote.focus();
     return;
   }
+  const picked = feedbackStops ? $<HTMLSelectElement>('#feedback-stop').value : '';
+  const stop = feedbackStops && picked !== '' ? feedbackStops[Number(picked)] : undefined;
+  if (kind === 'remove_stop' && !stop) {
+    showBanner(bannerEl, '請選擇要刪除哪一站', 3000);
+    $<HTMLSelectElement>('#feedback-stop').focus();
+    return;
+  }
   feedbackSubmit.disabled = true;
-  const r = await sendFeedback(feedbackEventId, kind, note);
+  const r = await sendFeedback(feedbackEventId, kind, note, stop ? { title: stop.title, at: stop.at } : undefined);
   feedbackSubmit.disabled = false;
   if (!r.ok) {
     showBanner(bannerEl, r.message, 4000);

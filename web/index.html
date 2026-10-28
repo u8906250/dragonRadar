@@ -156,6 +156,8 @@
         </div>
         <p class="muted sheet-note" id="feedback-target"></p>
         <form id="feedback-form" class="feedback-form" autocomplete="off">
+          <!-- 車掃：選哪一站（或整條路線） -->
+          <label id="feedback-stop-row" class="feedback-stop" hidden>哪一站<select id="feedback-stop"></select></label>
           <fieldset class="feedback-kinds">
             <legend class="sr-only">問題類型</legend>
             <label><input type="radio" name="kind" value="location" required /> 地點錯誤</label>
@@ -163,6 +165,7 @@
             <label><input type="radio" name="kind" value="content" /> 標題或內容錯誤</label>
             <label><input type="radio" name="kind" value="not_event" /> 不是發放或活動</label>
             <label><input type="radio" name="kind" value="duplicate" /> 重複</label>
+            <label id="feedback-remove-stop" hidden><input type="radio" name="kind" value="remove_stop" /> 刪除這一站（沒有這一站、取消了）</label>
             <label><input type="radio" name="kind" value="other" /> 其他</label>
           </fieldset>
           <textarea id="feedback-note" rows="3" maxlength="200" placeholder="補充說明（選填），例如：實際在 2 號出口、15:00 才開始" aria-label="補充說明"></textarea>

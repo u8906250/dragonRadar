@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { guessedMidnight, missingActivityParts, normalizeActivities, reconcileRouteStops, routeStopLines, type ExtractedEvent } from '../src/extract';
-import { atLocalTimes, markRoutes, profilePlanBetter, stopNameOf, type PlanItem } from '../src/events';
+import { atLocalTimes, markRoutes, profilePlanBetter, stopNameOf, withoutStop, type PlanItem } from '../src/events';
 import type { Env } from '../src/env';
 import { editItemsOf, editSummary, notListedWhy, parseEditItems, ReportError, reportModules, routePreviews } from '../src/reports';
 
@@ -374,5 +374,21 @@ describe('markRoutes same point', () => {
     expect(items[1].plan).toBeNull();
     expect(items[1].fail).toMatchObject({ reason: 'unlocated', sameAs: '鶯歌永福宮', title: 'R・蘇巧慧鶯歌服務處' });
     expect(routePreviews(items)[0].stops[1]).toMatchObject({ status: 'unlocated', sameAs: '鶯歌永福宮' });
+  });
+});
+
+describe('withoutStop', () => {
+  const st = (title: string, at: number | null, kind: 'start' | 'cheer' | 'end' = 'cheer') => ({ kind, title, at, name: title, lat: null, lng: null });
+  const stops = [st('車掃・A', 100, 'start'), st('車掃・B', 200), st('車掃・C', 300), st('車掃・D', 400, 'end')];
+  it('drops the stop and keeps start and end at the ends', () => {
+    expect(withoutStop(stops, '車掃・B', { from: 200, to: 200 })?.map((s) => `${s.title}:${s.kind}`)).toEqual(['車掃・A:start', '車掃・C:cheer', '車掃・D:end']);
+    // 拿掉出發那一站：下一站變出發
+    expect(withoutStop(stops, '車掃・A', null)?.map((s) => s.kind)).toEqual(['start', 'cheer', 'end']);
+    expect(withoutStop(stops, '車掃・D', { from: 350, to: 450 })?.map((s) => `${s.title}:${s.kind}`)).toEqual(['車掃・A:start', '車掃・B:cheer', '車掃・C:end']);
+  });
+  it('matches the time too (the same stop name on another day stays)', () => {
+    expect(withoutStop(stops, '車掃・B', { from: 300, to: 400 })).toBeNull();
+    expect(withoutStop(stops, '車掃・X', null)).toBeNull();
+    expect(withoutStop([st('車掃・A', 100, 'start')], '車掃・A', null)).toEqual([]);
   });
 });

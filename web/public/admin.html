@@ -133,7 +133,9 @@
           const live = f.event_status === 'upcoming' || f.event_status === 'active';
           // 重新判讀過、原本那一則換掉了：連到同一則貼文現在的那一則
           const showId = live ? f.event_id : f.current_event_id;
-          const renamed = f.event_title && f.event_title !== f.title ? `（現在的標題：${esc(f.event_title)}）` : '';
+          // 車掃指定了哪一站：回報可能掛在同一則貼文的別站上（那一站不在雷達上時），不比對標題
+          const renamed = !f.stop && f.event_title && f.event_title !== f.title ? `（現在的標題：${esc(f.event_title)}）` : '';
+          const stopLine = f.stop ? `<div class="muted">車掃的站：${esc(f.stop)}${f.stop_at ? `（預計 ${when(f.stop_at)} 經過）` : ''}</div>` : '';
           const links = [
             showId ? `<a class="btn" href="./?event=${showId}">雷達上看</a>` : '',
             /^https:\/\//.test(f.permalink || '') ? `<a class="btn" href="${esc(f.permalink)}" target="_blank" rel="noopener">原文</a>` : '',
@@ -155,15 +157,20 @@
               ${canReprocess ? `<textarea rows="2" maxlength="200" data-note="${f.id}" placeholder="要補充給 AI 的內容，例如：地點是○○路12號、時間是 15:00 開始">${esc(prefill)}</textarea>` : ''}
               <div class="row">
                 ${canReprocess ? `<button type="button" class="btn primary" data-apply="supplement" data-id="${f.id}">套用並重新判讀</button>` : ''}
-                <button type="button" class="btn" data-apply="takedown" data-scope="${takedownScope}" data-id="${f.id}">${takedownScope === 'post' ? '整則從雷達下架' : '從雷達下架'}</button>
+                ${
+                  f.stop
+                    ? `<button type="button" class="btn${f.kind === 'remove_stop' ? ' primary' : ''}" data-apply="remove_stop" data-id="${f.id}">刪除這一站</button>`
+                    : `<button type="button" class="btn" data-apply="takedown" data-scope="${takedownScope}" data-id="${f.id}">${takedownScope === 'post' ? '整則從雷達下架' : '從雷達下架'}</button>`
+                }
               </div>
-              <p class="hint">${canReprocess ? '套用：把上面的內容加到這則貼文的補充，用現在的規則重新判讀（之前手動改過的會被蓋掉）。' : '官方行程、新聞不能重新判讀。'}套用或下架後自動標成已處理。</p>
+              <p class="hint">${canReprocess ? '套用：把上面的內容加到這則貼文的補充，用現在的規則重新判讀（之前手動改過的會被蓋掉）。' : '官方行程、新聞不能重新判讀。'}${f.stop ? '刪除這一站：從車掃的時間表、路線、雷達拿掉這一站，其他站照舊。' : ''}套用或下架後自動標成已處理。</p>
             </div>`
               : '';
           return `<li class="fb">
             <div class="fb-head"><span class="tag">${esc(f.kind_label)}</span><span>${when(f.created_at)} 回報${f.resolved_at ? `・${when(f.resolved_at)} 處理` : ''}</span></div>
             <b>${esc(f.title)}${renamed}</b>
-            <div class="muted">地點：${esc(f.event_place || f.place_text || '')}${f.approx_area ? `（約略位置：${esc(f.approx_area)}）` : ''}</div>
+            ${stopLine}
+            <div class="muted">地點：${esc(f.stop ? f.place_text || '' : f.event_place || f.place_text || '')}${!f.stop && f.approx_area ? `（約略位置：${esc(f.approx_area)}）` : ''}</div>
             <div class="muted">事件：#${f.event_id}・${esc(evState)}${f.start_at ? `・${when(f.start_at)} 開始` : ''}${f.username ? `・@${esc(f.username)}` : ''}</div>
             ${f.supplement ? `<div class="muted">補充：${esc(f.supplement)}</div>` : ''}
             <p class="note${f.note ? '' : ' none'}">${f.note ? esc(f.note) : '沒寫說明'}</p>
@@ -204,12 +211,14 @@
             showResult('請先寫要補充的內容。', true);
             return;
           }
+        } else if (action === 'remove_stop') {
+          if (!confirm('確定刪除這一站？車掃的時間表、路線、雷達上的點都會拿掉這一站。')) return;
         } else {
           body.scope = a.dataset.scope;
           if (!confirm(body.scope === 'post' ? '確定把這則貼文的發放、活動都從雷達下架？' : '確定把這一則從雷達下架？')) return;
         }
         for (const x of a.closest('.apply').querySelectorAll('button, textarea, input')) x.disabled = true;
-        a.textContent = action === 'supplement' ? '重新判讀中…' : action === 'title' ? '修改中…' : '下架中…';
+        a.textContent = action === 'supplement' ? '重新判讀中…' : action === 'title' ? '修改中…' : action === 'remove_stop' ? '刪除中…' : '下架中…';
         try {
           const r = await api(`/api/admin/feedback/${id}/apply`, { method: 'POST', body: JSON.stringify(body) });
           const list = (r.events || []).map(evLine).join('');
@@ -219,7 +228,9 @@
               ? `已改標題（${r.changed ?? 0} 筆），標成已處理。現在雷達上這則貼文的：<ul>${list}</ul>`
               : action === 'supplement'
                 ? `已套用並重新判讀，標成已處理。現在雷達上的：${list ? `<ul>${list}</ul>` : '沒有（這次判讀沒有放上雷達，可以在「已處理」改回未處理再調整）'}${lost}`
-                : `已從雷達下架 ${r.removed ?? 0} 筆，標成已處理。${list ? `這則貼文還在雷達上的：<ul>${list}</ul>` : ''}`,
+                : action === 'remove_stop'
+                  ? `已刪除這一站（時間表 ${r.removedStops ?? 0} 站、雷達上 ${r.removed ?? 0} 個點），標成已處理。${list ? `這則貼文還在雷達上的：<ul>${list}</ul>` : ''}`
+                  : `已從雷達下架 ${r.removed ?? 0} 筆，標成已處理。${list ? `這則貼文還在雷達上的：<ul>${list}</ul>` : ''}`,
             !!lost,
           );
           await load();
