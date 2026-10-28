@@ -81,8 +81,8 @@ const ROSE: Array<[string, number]> = [
   ['W', 270],
 ];
 
-/** 掃描一圈幾秒，要跟下面 SVG 動畫的 dur 一致；波紋兩圈相隔 1.6 秒，每 1.6 秒掃過一次 */
-const SWEEP_SEC: Record<SweepStyle, number> = { wedge: 4, needle: 6, ripple: 1.6 };
+/** 掃描一圈幾秒（buildSweep 的動畫照這個）；波紋一個圈 5 秒擴散到外圈、兩個圈相隔 2.5 秒，所以每 2.5 秒掃過一次 */
+const SWEEP_SEC: Record<SweepStyle, number> = { wedge: 4, needle: 6, ripple: 2.5 };
 /** 扇形的前緣在旋轉角度 +45 度的地方 */
 const WEDGE_LEAD_DEG = 45;
 /** 多久看一次掃描線走到哪（毫秒） */
@@ -390,7 +390,7 @@ export class Radar {
     }
     if (typeof this.sweepBox.animate !== 'function') return;
     if (sweep === 'ripple') {
-      // 波紋一圈 3.2 秒，兩個圈差半圈，所以每 1.6 秒（SWEEP_SEC）掃過一次
+      // 波紋一個圈擴散到外圈要兩倍的 SWEEP_SEC，兩個圈差半圈，所以每 SWEEP_SEC 秒掃過一次
       const grow = [
         { transform: 'scale(0)', opacity: 0.7 },
         { transform: 'scale(1)', opacity: 0 },
@@ -795,13 +795,13 @@ export class Radar {
   }
 
   /**
-   * 掃描線掃到這個位置的時間點（相對於 SVG 動畫時間，秒），用來讓光點在掃過時閃一下。
+   * 掃描線掃到這個位置的時間點（相對於掃描動畫開始，秒），用來讓光點在掃過時閃一下。
    * 扇形、指針看方位角；波紋看離圓心多遠。
    */
   private sweepHitSec(angleDeg: number, radiusPx: number): number {
     const period = SWEEP_SEC[this.style.sweep];
     const a = (((angleDeg % 360) + 360) % 360) / 360;
-    if (this.style.sweep === 'ripple') return (radiusPx / R) * 3.2;
+    if (this.style.sweep === 'ripple') return (radiusPx / R) * period * 2;
     if (this.style.sweep === 'wedge') return ((((angleDeg - WEDGE_LEAD_DEG) % 360) + 360) % 360 / 360) * period;
     return a * period;
   }
