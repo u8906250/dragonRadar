@@ -740,10 +740,16 @@ let streetsLoading = false;
 let streetsFor = '';
 let streetTiles = 0;
 
+/**
+ * 比這個範圍大就畫海岸線、縣市界的虛線，不畫道路：雙北的半徑（依位置算），最多 50 km
+ * （人在雙北以外時雙北的半徑很大，例如新竹約 110 km，不能讓道路和虛線中間空一段）
+ */
+const outlineKm = (): number => Math.min(STREET_KM, shuangbeiKm());
+
 /** 範圍內的道路換成相對於圓心的公里數（範圍不大，用平面近似就夠準，拖曳時每一幀都要算） */
 function updateStreets(): void {
-  // 選「雙北」、範圍比雙北大的只畫雙北縣市界、海岸線的虛線
-  const show = scaleSetting !== 'region' && scaleKm <= Math.min(STREET_KM, shuangbeiKm());
+  // 選「雙北」、範圍再大的只畫縣市界、海岸線的虛線
+  const show = scaleSetting !== 'region' && scaleKm <= outlineKm();
   $('#radar-attrib').hidden = !show;
   if (!show) {
     if (streetsFor) radar.setStreets(null);
@@ -788,11 +794,11 @@ function updateStreets(): void {
 }
 
 /**
- * 「雙北」畫雙北的縣市界；範圍比雙北大（全台、全球、縮放到更遠）一律畫海岸線（台灣加上全世界），1000 km 內再畫縣市交界，
- * 比雙北小的不畫；位置變了才重算
+ * 「雙北」畫雙北的縣市界；範圍比雙北大（雙北以外的地方是比 50 km 大；全台、全球、縮放到更遠）一律畫海岸線（台灣加上全世界），1000 km 內再畫縣市交界，
+ * 比這個小的不畫（畫道路）；位置變了才重算
  */
 function updateOutline(): void {
-  const kind = scaleSetting === 'region' ? 'region' : scaleKm > shuangbeiKm() ? 'land' : 'none';
+  const kind = scaleSetting === 'region' ? 'region' : scaleKm > outlineKm() ? 'land' : 'none';
   if (kind === 'land' && !worldLoaded && !worldLoading) {
     worldLoading = true;
     void Promise.all([import('./world'), import('./counties')])
