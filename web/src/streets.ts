@@ -1,5 +1,5 @@
 /**
- * 雷達 50 km 內（和「雙北」）畫的道路：OpenFreeMap 的向量圖磚（OpenMapTiles 格式，資料來自 OpenStreetMap），
+ * 雷達範圍比雙北小、50 km 內畫的道路：OpenFreeMap 的向量圖磚（OpenMapTiles 格式，資料來自 OpenStreetMap），
  * 只取 transportation 圖層的道路（不含隧道、步道、服務道路、鐵路），第一次用到才載入。
  * 範圍越大用越粗一級的圖磚（OpenMapTiles 已經簡化過，越粗的只留越大的路），畫的路也越少。
  * 圖磚是 Mapbox Vector Tile（protobuf），這裡只解讀用得到的欄位，不另外加函式庫。
