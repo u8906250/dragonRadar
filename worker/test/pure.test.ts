@@ -935,6 +935,8 @@ describe('threads profile hints', () => {
     expect(profileCandidates('支持 @pumashen 加油', 'someone')).toEqual([]);
     expect(profileCandidates('現在開始不限制發的時間\n基本上我們有就可以領\n請直接跟我們說要哪一款', 'bloomteatw')).toEqual(['bloomteatw']);
     expect(profileCandidates('我們有去領飄帶，好開心', 'someone')).toEqual([]);
+    // 發文的人自己在發，沒寫地點
+    expect(profileCandidates('早安！\n\n今天發放（一下限擇一）\n🛟橘色Q版飄帶\n\n感謝@cfoodc 設計師特別送來好幾次', 'bellydailycafe')).toEqual(['bellydailycafe']);
     expect(profileCandidates('若 10.23 臺北市放颱風假，美好也將配合店休\n設計師 @sasaki790108\n請在櫃檯出示您的船員證', 'lovelyrooom')).toEqual(['lovelyrooom']);
   });
 });

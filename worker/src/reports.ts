@@ -290,7 +290,7 @@ export function notListedWhy(items: PlanItem[]): NotListedWhy | undefined {
  * 判讀規則的版本：規則改了（例如結束時間改成不用寫）就加一。
  * 還沒確認的回報再貼一次時，存的是舊版的判讀結果就重新判讀，不沿用（舊的原因可能已經不成立，畫面也講不出原因）
  */
-export const PLAN_VERSION = 6;
+export const PLAN_VERSION = 7;
 
 /** 判讀好、還沒寫進雷達的資料，存在 posts.confirm_plan */
 interface StoredPlan {

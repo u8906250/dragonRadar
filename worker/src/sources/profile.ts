@@ -51,16 +51,18 @@ export async function fetchThreadsProfile(username: string, timeoutMs = 8000): P
 
 /** 貼文是店家自己發的（「本店」「歡迎來店」「我們有就可以領」「直接跟我們說要哪一款」）：發文帳號就是店家 */
 const OWN_SHOP_RE = /本店|店內|店裡|小店|本攤|我們店|來店|到店|門市|本館|店休|公休|櫃檯|櫃台|店員|營業時間|跟我們(?:說|拿|領)|找我們|我們有就/;
+/** 發文的人自己在發（「今天發放」「開放索取」「歡迎來拿」「限擇一」）：沒寫地點時，地點多半就是發文帳號的店、服務處 */
+const SELF_GIVE_RE = /(?:今[天日]|現在|即日起)\s*(?:開始)?\s*(?:發放|開放)|發放中|開放(?:大家)?(?:索取|領取)|歡迎(?:大家)?(?:索取|領取|來拿|來領)|擇一/;
 /** 標記的帳號前後有這些字，才當成店家（「由挺台店家 @luguocafe 代為發放」「在 @xxx 領取」） */
 const SHOP_BEFORE_RE = /店|館|坊|咖啡|餐|攤|市集|代為|代發|在|到|地點|地址/;
 const SHOP_AFTER_RE = /代為|代發|領取|索取|店|館|坊|咖啡|餐|攤/;
 
 /**
- * 要查哪些帳號：店家自己發的查發文帳號；標記的帳號旁邊寫了店家、發放、領取的也查。最多 max 個
+ * 要查哪些帳號：店家自己發的、發文的人自己在發的查發文帳號；標記的帳號旁邊寫了店家、發放、領取的也查。最多 max 個
  */
 export function profileCandidates(text: string, author: string | null, max = 2): string[] {
   const out: string[] = [];
-  if (author && OWN_SHOP_RE.test(text)) out.push(author);
+  if (author && (OWN_SHOP_RE.test(text) || SELF_GIVE_RE.test(text))) out.push(author);
   for (const m of text.matchAll(/@([A-Za-z0-9_.]{2,30})/g)) {
     const u = m[1].replace(/\.+$/, '');
     const at = m.index ?? 0;
