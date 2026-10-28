@@ -14,7 +14,7 @@ export const SHUANGBEI_RINGS: Array<Array<[number, number]>> = [
 /** 邊界簡化過，海岸線、縣市交界上的點容易被切到框外，300 m 內都算在雙北 */
 const EDGE_TOLERANCE_KM = 0.3;
 
-function inRing(p: LatLng, ring: Array<[number, number]>): boolean {
+export function inRing(p: LatLng, ring: Array<[number, number]>): boolean {
   let inside = false;
   for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
     const [yi, xi] = ring[i];

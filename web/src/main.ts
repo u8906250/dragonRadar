@@ -1,8 +1,8 @@
 import './styles.css';
 import { addKeyword, collectLetter, deletePushSubscription, sendFeedback, type FeedbackKind, fetchPushKey, savePushSubscription, confirmReport, editReport, locatePlace, rejectReport, supplementReport, deleteBottle, dropBottle, recycleBottle, fetchBottles, fetchEvents, fetchHealth, fetchKeywords, fetchMyBottles, fetchMyReports, fetchRoutes, pickBottle, reportBottle, reportEnded, submitLink, withdrawReport } from './api';
 import { compassSupported, startCompass } from './compass';
-import { bearingDeg, compassLabel, destination, formatKm, haversineKm, taiwanRadiusKm, type LatLng } from './geo';
-import { inShuangbei, SHUANGBEI_RINGS, shuangbeiRadiusKm } from './shuangbei';
+import { bearingDeg, compassLabel, decodePolyline, destination, formatKm, haversineKm, taiwanRadiusKm, type LatLng } from './geo';
+import { inRing, inShuangbei, SHUANGBEI_RINGS, shuangbeiRadiusKm } from './shuangbei';
 import { TAIWAN_RINGS } from './taiwan';
 import { LANDMARKS } from './landmarks';
 import { getModule, JOB_RISK_TEXT, JOB_SAFETY_TIPS, MEETUP_SAFETY_TIPS, MODULES, OFFER_SAFETY_TIPS, type ModuleDef, type ModuleId } from './modules';
@@ -729,12 +729,115 @@ function shuangbeiKm(): number {
   return sbRadius.km;
 }
 
+// ---- 底圖：範圍不比雙北大時畫雙北的區界、海岸線、河流、區名（basemap.ts，第一次用到才載入） ----
+type BaseLine = { pts: Array<[number, number]>; box: [number, number, number, number] };
+type BaseArea = { name: string; rings: Array<Array<[number, number]>>; box: [number, number, number, number]; label: [number, number] | null };
+let basemapData: { borders: BaseLine[]; coast: BaseLine[]; rivers: BaseLine[]; minor: BaseLine[]; areas: BaseArea[] } | null = null;
+let basemapLoading = false;
+let basemapFor = '';
+/** 區名範圍 12 km 內才寫，小的河 6 km 內才畫（範圍大時太密） */
+const BASEMAP_LABEL_KM = 12;
+const BASEMAP_MINOR_KM = 6;
+
+function boxOf(pts: Array<[number, number]>): [number, number, number, number] {
+  const lats = pts.map((p) => p[0]);
+  const lngs = pts.map((p) => p[1]);
+  return [Math.min(...lats), Math.min(...lngs), Math.max(...lats), Math.max(...lngs)];
+}
+
+function baseLine(s: string): BaseLine {
+  const pts = decodePolyline(s);
+  return { pts, box: boxOf(pts) };
+}
+
+/**
+ * 畫面裡有哪幾區、區名寫在哪：在畫面裡取幾個點（圓心、兩圈各 8、12 個方向）看落在哪一區；
+ * 區的 label 點在畫面裡就寫在那裡，不在的（範圍小時常這樣）寫在那一區取到的點的中間那一個
+ */
+function districtLabels(areas: BaseArea[], kx: number, ky: number): Array<{ text: string; x: number; y: number }> {
+  const samples: Array<[number, number]> = [[0, 0]];
+  for (const [frac, n] of [[0.35, 8], [0.68, 12]] as const) {
+    for (let i = 0; i < n; i++) {
+      const a = (i / n) * 2 * Math.PI;
+      samples.push([Math.sin(a) * frac * scaleKm, Math.cos(a) * frac * scaleKm]);
+    }
+  }
+  const hits = new Map<BaseArea, Array<[number, number]>>();
+  for (const [x, y] of samples) {
+    const p = { lat: origin.lat + y / ky, lng: origin.lng + x / kx };
+    const area = areas.find((a) => p.lat >= a.box[0] && p.lat <= a.box[2] && p.lng >= a.box[1] && p.lng <= a.box[3] && a.rings.some((r) => inRing(p, r)));
+    if (area) hits.set(area, [...(hits.get(area) ?? []), [x, y]]);
+  }
+  return [...hits].map(([area, pts]) => {
+    const lx = area.label ? (area.label[1] - origin.lng) * kx : 0;
+    const ly = area.label ? (area.label[0] - origin.lat) * ky : 0;
+    if (area.label && Math.hypot(lx, ly) <= scaleKm * 0.85) return { text: area.name, x: lx, y: ly };
+    const mx = pts.reduce((s, p) => s + p[0], 0) / pts.length;
+    const my = pts.reduce((s, p) => s + p[1], 0) / pts.length;
+    const [x, y] = pts.reduce((best, p) => (Math.hypot(p[0] - mx, p[1] - my) < Math.hypot(best[0] - mx, best[1] - my) ? p : best));
+    return { text: area.name, x, y };
+  });
+}
+
+/** 範圍內的線換成雷達的方位、距離：範圍小，用平面近似就夠準，拖曳時每一幀都要算 */
+function updateBasemap(show: boolean): void {
+  if (!show) {
+    if (basemapFor) radar.setBasemap(null);
+    basemapFor = '';
+    return;
+  }
+  if (!basemapData) {
+    if (basemapLoading) return;
+    basemapLoading = true;
+    void import('./basemap')
+      .then((m) => {
+        basemapData = {
+          borders: m.BORDERS.map(baseLine),
+          coast: m.COAST.map(baseLine),
+          rivers: m.RIVERS.filter((r) => r[1] === 1).map((r) => baseLine(r[2])),
+          minor: m.RIVERS.filter((r) => r[1] === 2).map((r) => baseLine(r[2])),
+          areas: m.DISTRICT_AREAS.map(([name, rings]) => {
+            const pts = rings.map(decodePolyline);
+            const lb = m.DISTRICT_LABELS.find((l) => l[0] === name);
+            return { name, rings: pts, box: boxOf(pts.flat()), label: lb ? [lb[1], lb[2]] : null };
+          }),
+        };
+        basemapFor = '';
+        updateOutline();
+      })
+      .finally(() => {
+        basemapLoading = false;
+      });
+    return;
+  }
+  const key = `${origin.lat},${origin.lng}|${scaleKm}`;
+  if (key === basemapFor) return;
+  basemapFor = key;
+  const kx = 111.32 * Math.cos((origin.lat * Math.PI) / 180);
+  const ky = 110.574;
+  const reach = scaleKm * 1.05;
+  const box = [origin.lat - reach / ky, origin.lng - reach / kx, origin.lat + reach / ky, origin.lng + reach / kx];
+  const inBox = (b: number[]): boolean => b[0] <= box[2] && b[2] >= box[0] && b[1] <= box[3] && b[3] >= box[1];
+  const polarOf = (x: number, y: number): { bearing: number; distanceKm: number } => ({ bearing: ((Math.atan2(x, y) * 180) / Math.PI + 360) % 360, distanceKm: Math.hypot(x, y) });
+  const toPt = (lat: number, lng: number): { bearing: number; distanceKm: number } => polarOf((lng - origin.lng) * kx, (lat - origin.lat) * ky);
+  const pick = (lines: BaseLine[]): Array<Array<{ bearing: number; distanceKm: number }>> => lines.filter((l) => inBox(l.box)).map((l) => l.pts.map(([lat, lng]) => toPt(lat, lng)));
+  const d = basemapData;
+  radar.setBasemap({
+    borders: pick(d.borders),
+    coast: pick(d.coast),
+    rivers: pick(d.rivers),
+    minorRivers: scaleKm <= BASEMAP_MINOR_KM ? pick(d.minor) : [],
+    labels: scaleKm <= BASEMAP_LABEL_KM ? districtLabels(d.areas, kx, ky).map((l) => ({ text: l.text, ...polarOf(l.x, l.y) })) : [],
+  });
+}
+
 /**
  * 「雙北」畫雙北的縣市界；範圍比雙北大（全台、全球、縮放到更遠）一律畫海岸線（台灣加上全世界），
- * 比雙北小的不畫；位置變了才重算
+ * 範圍不比雙北大的再畫底圖（雙北的區界、河流）；位置變了才重算
  */
 function updateOutline(): void {
   const kind = scaleSetting === 'region' ? 'region' : scaleKm > shuangbeiKm() ? 'land' : 'none';
+  updateBasemap(kind !== 'land');
   if (kind === 'land' && !worldLoaded && !worldLoading) {
     worldLoading = true;
     void import('./world')
