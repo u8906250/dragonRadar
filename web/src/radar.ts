@@ -91,8 +91,8 @@ export const SPACE_FROM_KM = 20040;
 export const EARTH_KM = 6371;
 /** 地球表面離圓心超過這個（四分之一圈）就在另一面，看不到 */
 const HORIZON_KM = (Math.PI / 2) * EARTH_KM;
-/** 太空裡地球小於這個（SVG 單位）就看不出光點在哪：光點、路線、地標都不畫 */
-const TINY_EARTH = 24;
+/** 太空裡地球小於這個（SVG 單位）就只剩一個點（space.ts 也是這個大小以上才畫海岸線）：光點、路線、地標都不畫，也不能拖 */
+export const TINY_EARTH = 10;
 
 /**
  * 太空裡地球的半徑是光點範圍（inner）的幾成：剛超過全球時塞滿雷達（接得上全球），
@@ -468,8 +468,8 @@ export class Radar {
       if (e.pointerType === 'mouse' && e.button !== 0) return;
       if (e.pointerType === 'mouse') e.preventDefault();
       this.pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
-      // 太空不能拖曳移動位置（一拖就是幾千公里）
-      if (this.pointers.size === 1 && !this.inSpace) {
+      // 太空裡地球小到看不出形狀（月球、行星那幾層）不能拖：抓不到地球，一拖就跑到別的洲
+      if (this.pointers.size === 1 && !this.tinyEarth) {
         this.panStart = { x: e.clientX, y: e.clientY };
         this.panLast = this.panStart;
       }
@@ -549,7 +549,8 @@ export class Radar {
     this.panLast = { x: e.clientX, y: e.clientY };
     const r = Math.hypot(dx, dy);
     if (r === 0) return;
-    const km = (r / (R - 8)) * this.scaleKm;
+    // 太空：轉動地球，手指拖過地球表面多遠就轉多少（照地球在雷達上的半徑換算）
+    const km = this.inSpace ? (r / (globeFrac(this.scaleKm) * (R - 8))) * EARTH_KM : (r / (R - 8)) * this.scaleKm;
     // 內容往畫面上的 screen 方向移動；指北針模式要加回手機朝向；中心往反方向
     const screen = (Math.atan2(dx, -dy) * 180) / Math.PI;
     this.onPan(((screen + this.heading + 180) % 360 + 360) % 360, km, false);

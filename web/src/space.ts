@@ -4,7 +4,7 @@
  * - 再拉遠：月球的軌道和月球，太陽、行星和它們的軌道（以地球為中心，距離照真實比例，位置照今天推算）
  */
 import type { LatLng } from './geo';
-import { RADAR_GEOM } from './radar';
+import { RADAR_GEOM, TINY_EARTH } from './radar';
 
 const { c: C, inner: INNER } = RADAR_GEOM;
 const RAD = Math.PI / 180;
@@ -243,7 +243,7 @@ export function spaceMarkup(o: SpaceOpts): string {
   let lines = '';
   let dots = '';
   // 地球
-  if (o.rg >= 10) {
+  if (o.rg >= TINY_EARTH) {
     const sun = subsolar(o.when);
     lines += `<path class="space-night" d="${nightPath(o.center, sun, o.rg)}" />`;
     if (o.rg >= 30) lines += `<path class="space-grat" d="${graticule(o.center, o.rg)}" />`;
