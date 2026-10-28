@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { guessedMidnight, missingActivityParts, normalizeActivities, reconcileRouteStops, routeStopLines, type ExtractedEvent } from '../src/extract';
-import { markRoutes, profilePlanBetter, stopNameOf, type PlanItem } from '../src/events';
+import { atLocalTimes, markRoutes, profilePlanBetter, stopNameOf, type PlanItem } from '../src/events';
+import type { Env } from '../src/env';
 import { editItemsOf, editSummary, notListedWhy, parseEditItems, ReportError, reportModules, routePreviews } from '../src/reports';
 
 describe('normalizeActivities', () => {
@@ -159,6 +160,25 @@ describe('editSummary', () => {
     expect(editSummary([], acts)).toBe('改了第 1 場內容「A」、時間 10/26 18:00 開始、地點「B」；第 2 場內容「C」、時間 10/26 20:00 開始、地點「D」');
     // 沒排上雷達的那場不寫
     expect(editSummary([], acts, [false, true])).toBe('改了內容「C」、時間 10/26 20:00 開始、地點「D」');
+  });
+  it('writes overseas times in local time', () => {
+    const acts = [{ title: 'A', startAt: Date.UTC(2026, 9, 28, 17, 0) / 1000, endAt: null, place: 'B', lat: null, lng: null }];
+    expect(editSummary([], acts, [true], '場', ['America/Los_Angeles'])).toBe('改了內容「A」、時間 10/28 10:00 開始（當地時間）、地點「B」');
+  });
+});
+
+describe('atLocalTimes', () => {
+  // 寫了州和郵遞區號的不用查地點，env 用不到
+  const env = {} as Env;
+  it('reads the form times as local time for an overseas place', async () => {
+    // 網頁照台北時間換的 10/28 11:00、13:00
+    const tpe = (h: number): number => Date.UTC(2026, 9, 28, h - 8, 0) / 1000;
+    const [us] = await atLocalTimes(env, [{ title: 'A', startAt: tpe(11), endAt: tpe(13), place: '12901 Alcosta Blvd D, San Ramon, CA 94583美國', lat: null, lng: null }]);
+    // 加州 10/28 是夏令時間（UTC-7）
+    expect(us.startAt).toBe(Date.UTC(2026, 9, 28, 18, 0) / 1000);
+    expect(us.endAt).toBe(Date.UTC(2026, 9, 28, 20, 0) / 1000);
+    const tw = { title: 'B', startAt: tpe(11), endAt: null, place: '台北市中正區忠孝東路二段94號', lat: null, lng: null };
+    expect(await atLocalTimes(env, [tw])).toEqual([tw]);
   });
 });
 

@@ -307,6 +307,8 @@ export interface EditItem {
   lng: number | null;
   /** 只定位到鄉鎮區、路（約略位置） */
   approxArea?: string | null;
+  /** 國外活動的當地時區：表單的時間照當地時間顯示 */
+  tz?: string | null;
 }
 
 /** 修改資料送出的一場：lat、lng 是在地圖上標的位置，沒標是 null（照地點查） */
@@ -317,6 +319,19 @@ export interface EditInput {
   place: string;
   lat: number | null;
   lng: number | null;
+}
+
+/** 修改表單按「查地點」的結果 */
+export interface LocateResult {
+  found: boolean;
+  lat: number | null;
+  lng: number | null;
+  /** 查到的地名（國外的是完整地址） */
+  name: string | null;
+  /** 只定位到鄉鎮區、路、城市（約略位置） */
+  approxArea: string | null;
+  /** 國外的當地時區 */
+  tz: string | null;
 }
 
 /** 洋流的活動沒放上雷達的一場：哪一場（標題、地點）、為什麼 */

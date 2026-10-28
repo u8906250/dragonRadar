@@ -1,12 +1,12 @@
 import type { Env } from './env';
 import { fetchThreadsProfile, profileCandidates, profileHintText, type ThreadsProfile } from './sources/profile';
-import { ACTIVITY_SPEC, applySupplementDate, reconcileRouteStops, closedWeekdays, slotWeekdays, dropBroughtItem, dropSelfPlace, extractFromPost, localizeTimes, missingActivityParts, openWeekdaysFromText, splitDropTimes, splitMultiDay, splitWeekdayWeekend, spotHoursFromText, startNowForDeadline, guessedMidnight, timeZoneOf, untilInText, weekdaysInText, type ActivityPart, type EventKind, type ExtractedEvent } from './extract';
+import { ACTIVITY_SPEC, applySupplementDate, reconcileRouteStops, closedWeekdays, slotWeekdays, dropBroughtItem, dropSelfPlace, extractFromPost, localizeTimes, missingActivityParts, openWeekdaysFromText, splitDropTimes, splitMultiDay, splitWeekdayWeekend, spotHoursFromText, startNowForDeadline, guessedMidnight, localToUnix, regionTimeZone, timeZoneOf, untilInText, weekdaysInText, type ActivityPart, type EventKind, type ExtractedEvent } from './extract';
 import { cityOfHouse, geocodeAddress, parseTwAddress, type TwAddress } from './address';
 import { SESSION_SPEC } from './badminton';
 import { FOOD_SPEC } from './food';
 import { JOB_SPEC, jobRisks } from './jobs';
 import { DEFAULT_MODULE, moduleOf, type ModuleId } from './modules';
-import { adminArea, cityLevel, cityOfDistrict, cityOfRoad, geocode, geocodeFirst, geocodeStreet, geocodeWorld, isAreaOnly, placeCandidates, type GeoPoint } from './geocode';
+import { adminArea, cityLevel, cityOfDistrict, cityOfRoad, countryOfPlace, geocode, geocodeFirst, geocodeStreet, geocodeWorld, isAreaOnly, placeCandidates, regionOfPlace, type GeoPoint } from './geocode';
 import { listActiveKeywords, type KeywordRow } from './keywords';
 import { parseThreadsTimestamp, type ThreadsClient } from './threads';
 import { nowSec, parseIsoToUnix } from './util';
@@ -297,7 +297,7 @@ export async function extendOpenSpots(env: Env, now: number): Promise<number> {
 }
 
 /** 門牌查詢（含很慢的 Overpass）一則貼文最多花這麼久，超過就只用 Photon，免得回報的人等太久 */
-const ADDRESS_BUDGET_MS = 25_000;
+export const ADDRESS_BUDGET_MS = 25_000;
 
 /** 寫了「市」「縣」的縣市名 */
 const CITY_WORD_RE = /(?:台|臺)?(?:北|新北|桃園|中|南|高雄|基隆|新竹|嘉義)市|(?:新竹|苗栗|彰化|南投|雲林|嘉義|屏東|宜蘭|花蓮|台東|臺東|澎湖|金門|連江)縣/;
@@ -864,6 +864,44 @@ export interface ManualActivity {
 }
 
 /**
+ * 回報的人填的地點（修改表單）：最後寫了國名、或有美國的州加郵遞區號的，只在那個國家查，順便帶出當地時區；
+ * 其他照台灣的查法（門牌查不到退到路、鄉鎮區）
+ */
+export async function locateTypedPlace(
+  env: Env,
+  place: string,
+  deadline: number,
+): Promise<{ point: GeoPoint | null; approxArea: string | null; country: string | null; tz: string | null }> {
+  const country = countryOfPlace(place);
+  if (!country) return { ...(await locatePlaceForEvent(env, place, place, deadline)), country: null, tz: null };
+  const hit = await geocodeWorld(env, place, place, country);
+  const tz = timeZoneOf({ country, timezone: regionTimeZone(regionOfPlace(place) ?? hit?.region) });
+  return { point: hit?.point ?? null, approxArea: hit?.approxArea ?? null, country, tz };
+}
+
+/** 回報的人填的地點的當地時區：國外才有；地址沒寫州就用查到的州（查過的有快取） */
+export async function typedPlaceTimeZone(env: Env, place: string): Promise<string | null> {
+  const country = countryOfPlace(place);
+  if (!country) return null;
+  const region = regionOfPlace(place) ?? (await geocodeWorld(env, place, place, country))?.region;
+  return timeZoneOf({ country, timezone: regionTimeZone(region) });
+}
+
+/**
+ * 修改表單的時間是活動當地的時間（網頁先照台北時間換成秒送來）：國外的地點換成當地時間的時間點，台灣的不動。
+ * 一場一場來（Nominatim 每秒最多一次）
+ */
+export async function atLocalTimes(env: Env, acts: ManualActivity[]): Promise<ManualActivity[]> {
+  const out: ManualActivity[] = [];
+  for (const a of acts) {
+    const tz = await typedPlaceTimeZone(env, a.place);
+    const shift = (t: number): number => (tz ? (localToUnix(new Date((t + 8 * 3600) * 1000).toISOString().slice(0, 19), tz) ?? t) : t);
+    out.push({ ...a, startAt: shift(a.startAt), endAt: a.endAt === null ? null : shift(a.endAt) });
+  }
+  return out;
+}
+
+/**
  * 回報的人直接修改的活動：不再問 AI，照填的資料排（有標位置就用標的，沒標照地點查），
  * 一樣檢查時間（已經過了、太久以後）和雷達上有沒有同一場
  */
@@ -872,6 +910,11 @@ export async function planManual(env: Env, acts: ManualActivity[], now: number, 
   const items: PlanItem[] = [];
   for (const [group, a] of acts.entries()) {
     const iso = (t: number): string => new Date(t * 1000).toISOString();
+    const pin = a.lat !== null && a.lng !== null ? { lat: a.lat, lng: a.lng } : null;
+    // 有標位置就不用查；國家、時區還是看填的地點
+    const found = pin
+      ? { point: { ...pin, displayName: a.place }, approxArea: null, country: countryOfPlace(a.place), tz: await typedPlaceTimeZone(env, a.place) }
+      : await locateTypedPlace(env, a.place, deadline);
     const ex: ExtractedEvent = {
       kind: 'activity',
       title: a.title,
@@ -883,9 +926,11 @@ export async function planManual(env: Env, acts: ManualActivity[], now: number, 
       confidence: 1,
       spot: false,
       until: null,
+      // 時間是表單送來的時間點，不用換算，時區只用來顯示當地時間
+      country: found.country,
+      timezone: found.tz,
     };
-    const pin = a.lat !== null && a.lng !== null ? { lat: a.lat, lng: a.lng } : null;
-    const located = pin ? { point: { ...pin, displayName: a.place }, approxArea: null } : undefined;
+    const located = { point: found.point, approxArea: found.approxArea };
     const r = await planEvent(env, ex, now, deadline, undefined, located, undefined, OPEN_END_SEC);
     const which = { title: a.title, place: a.place };
     if (r.plan && r.plan.lat === null) {

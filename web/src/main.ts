@@ -1,5 +1,5 @@
 import './styles.css';
-import { addKeyword, collectLetter, deletePushSubscription, sendFeedback, type FeedbackKind, fetchPushKey, savePushSubscription, confirmReport, editReport, rejectReport, supplementReport, deleteBottle, dropBottle, recycleBottle, fetchBottles, fetchEvents, fetchHealth, fetchKeywords, fetchMyBottles, fetchMyReports, fetchRoutes, pickBottle, reportBottle, reportEnded, submitLink, withdrawReport } from './api';
+import { addKeyword, collectLetter, deletePushSubscription, sendFeedback, type FeedbackKind, fetchPushKey, savePushSubscription, confirmReport, editReport, locatePlace, rejectReport, supplementReport, deleteBottle, dropBottle, recycleBottle, fetchBottles, fetchEvents, fetchHealth, fetchKeywords, fetchMyBottles, fetchMyReports, fetchRoutes, pickBottle, reportBottle, reportEnded, submitLink, withdrawReport } from './api';
 import { compassSupported, startCompass } from './compass';
 import { bearingDeg, compassLabel, destination, formatKm, haversineKm, taiwanRadiusKm, type LatLng } from './geo';
 import { inShuangbei, SHUANGBEI_RINGS, shuangbeiRadiusKm } from './shuangbei';
@@ -2988,12 +2988,17 @@ function wireSupplement(c: { postId: string; token: string }, actions: HTMLEleme
 
 const TPE_OFFSET_SEC = 8 * 3600;
 const pad2 = (n: number): string => String(n).padStart(2, '0');
-/** unix 秒 → 表單用的台北日期「2026-10-26」、時間「18:00」 */
-function tpeInput(t: number): { date: string; time: string } {
+/** unix 秒 → 表單用的日期「2026-10-26」、時間「18:00」：活動當地的時間（國外的照 tz，其他台北） */
+function wallInput(t: number, tz: string | null): { date: string; time: string } {
+  if (tz) {
+    const fmt = new Intl.DateTimeFormat('en-US', { timeZone: tz, year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' });
+    const p = Object.fromEntries(fmt.formatToParts(new Date(t * 1000)).map((x) => [x.type, x.value]));
+    return { date: `${p.year}-${p.month}-${p.day}`, time: `${p.hour}:${p.minute}` };
+  }
   const d = new Date((t + TPE_OFFSET_SEC) * 1000);
   return { date: `${d.getUTCFullYear()}-${pad2(d.getUTCMonth() + 1)}-${pad2(d.getUTCDate())}`, time: `${pad2(d.getUTCHours())}:${pad2(d.getUTCMinutes())}` };
 }
-/** 表單的台北日期、時間 → unix 秒 */
+/** 表單的日期、時間 → unix 秒，先照台北時間換；國外的活動填的是當地時間，伺服器看地點再換（送出時帶 localTimes） */
 function tpeUnix(date: string, time: string): number | null {
   const d = /^(\d{4})-(\d{2})-(\d{2})$/.exec(date);
   const t = /^(\d{2}):(\d{2})/.exec(time);
@@ -3006,10 +3011,13 @@ const MAX_EDIT_ITEMS = 20;
 
 /** 補充資料表單的一場：判讀出來的位置、回報的人標的位置、小地圖 */
 interface EditPin {
-  /** 判讀時依地點查到的位置（地點文字改了就不算） */
+  /** 判讀時或按「查地點」依地點查到的位置（地點文字改了就不算） */
   found: LatLng | null;
   foundPlace: string;
   approxArea: string | null;
+  /** 按「查地點」查到的地名；查不到是 null（missed 是查不到的那段地點） */
+  foundName: string | null;
+  missed: string | null;
   /** 回報的人在地圖上標的 */
   pinned: LatLng | null;
   picker: PinPicker | null;
@@ -3018,8 +3026,9 @@ const editPins = new Map<HTMLElement, EditPin>();
 
 /** 洋流的補充資料：每一場直接改標題、時間、地點，位置不對可以在地圖上標 */
 function editCardHtml(it: EditItem | null): string {
-  const start = it?.startAt ? tpeInput(it.startAt) : null;
-  const end = it?.endAt ? tpeInput(it.endAt).time : '';
+  const tz = it ? localTz(it) : null;
+  const start = it?.startAt ? wallInput(it.startAt, tz) : null;
+  const end = it?.endAt ? wallInput(it.endAt, tz).time : '';
   return `<fieldset class="edit-item">
       <legend><span class="edit-no"></span><button type="button" class="chip" data-act="drop">不要這場</button></legend>
       <label>活動內容<input name="title" maxlength="60" value="${esc(it?.title ?? '')}" placeholder="例如：發飄帶、景華公園表演同樂會"></label>
@@ -3028,9 +3037,9 @@ function editCardHtml(it: EditItem | null): string {
         <label>開始<input type="time" name="start" value="${it?.dateOnly ? '' : (start?.time ?? '')}"></label>
         <label>結束<input type="time" name="end" value="${end}"></label>
       </div>
-      <small class="muted">結束可以不填：只寫幾點開始，雷達上顯示到開始後兩小時。</small>
+      <small class="muted">結束可以不填：只寫幾點開始，雷達上顯示到開始後兩小時。國外的活動填當地時間。</small>
       <label>地點<input name="place" maxlength="80" value="${esc(it?.place ?? '')}" placeholder="店名或地址，例如：厝邊咖啡 台北市萬華區○○路○號"></label>
-      <div class="edit-pin"><small class="edit-pin-state"></small><button type="button" class="chip" data-act="pin">在地圖上標位置</button><button type="button" class="chip" data-act="unpin" hidden>不用標的位置</button></div>
+      <div class="edit-pin"><small class="edit-pin-state"></small><button type="button" class="chip" data-act="locate">查地點</button><button type="button" class="chip" data-act="pin">在地圖上標位置</button><button type="button" class="chip" data-act="unpin" hidden>不用標的位置</button></div>
       <div class="edit-map" hidden></div>
     </fieldset>`;
 }
@@ -3052,6 +3061,9 @@ function updatePinState(card: HTMLElement): void {
   if (!pin) return;
   const place = card.querySelector<HTMLInputElement>('[name="place"]')?.value.trim() ?? '';
   const found = pin.found && place === pin.foundPlace;
+  const missed = !pin.pinned && !found && pin.missed === place;
+  // 國外的完整地址很長：「12901, Alcosta Boulevard, San Ramon, Contra Costa County, California, …」留前四段
+  const name = pin.foundName?.split(/,\s*/).slice(0, 4).join(', ');
   const state = card.querySelector<HTMLElement>('.edit-pin-state');
   if (state) {
     state.textContent = pin.pinned
@@ -3059,32 +3071,80 @@ function updatePinState(card: HTMLElement): void {
       : found
         ? pin.approxArea
           ? `只定位到${pin.approxArea}（約略位置），可以在地圖上標出正確位置`
-          : '已依地點定位，位置不對可以在地圖上標'
-        : '送出後依地點查位置；查不到的話請在地圖上標';
-    state.classList.toggle('preview-warn', !pin.pinned && !!found && !!pin.approxArea);
+          : name
+            ? `📍 查到：${name}。位置不對可以拖標記或點地圖`
+            : '已依地點定位，位置不對可以在地圖上標'
+        : missed
+          ? '查不到這個地點。可以寫完整一點：台灣的寫縣市、路名、門牌；國外的寫門牌、街道、城市、州和國家（例如「12901 Alcosta Blvd, San Ramon, CA 94583, USA」），或在地圖上標'
+          : '可以按「查地點」先在地圖上看位置；不查的話送出後依地點查';
+    state.classList.toggle('preview-warn', !pin.pinned && ((!!found && !!pin.approxArea) || missed));
   }
   const unpin = card.querySelector<HTMLElement>('[data-act="unpin"]');
   if (unpin) unpin.hidden = !pin.pinned;
 }
 
-function wireEditCard(card: HTMLElement, it: EditItem | null, form: HTMLFormElement): void {
+function wireEditCard(c: { postId: string; token: string }, card: HTMLElement, it: EditItem | null, form: HTMLFormElement): void {
   const found = it && it.lat !== null && it.lng !== null ? { lat: it.lat, lng: it.lng } : null;
-  const pin: EditPin = { found, foundPlace: it?.place ?? '', approxArea: it?.approxArea ?? null, pinned: null, picker: null };
+  const pin: EditPin = { found, foundPlace: it?.place ?? '', approxArea: it?.approxArea ?? null, foundName: null, missed: null, pinned: null, picker: null };
   editPins.set(card, pin);
   const mapEl = card.querySelector<HTMLElement>('.edit-map');
   const pinBtn = card.querySelector<HTMLButtonElement>('[data-act="pin"]');
-  card.querySelector('[name="place"]')?.addEventListener('input', () => updatePinState(card));
-  pinBtn?.addEventListener('click', async () => {
-    if (!mapEl) return;
-    mapEl.hidden = !mapEl.hidden;
-    pinBtn.textContent = mapEl.hidden ? '在地圖上標位置' : '收起地圖';
-    if (mapEl.hidden || pin.picker) return;
-    const place = card.querySelector<HTMLInputElement>('[name="place"]')?.value.trim() ?? '';
+  const placeInput = card.querySelector<HTMLInputElement>('[name="place"]');
+  placeInput?.addEventListener('input', () => updatePinState(card));
+  // 打開小地圖（第一次才建）：從標的位置、查到的位置開始，都沒有就從使用者的位置
+  const openMap = async (): Promise<void> => {
+    if (!mapEl || !pinBtn) return;
+    mapEl.hidden = false;
+    pinBtn.textContent = '收起地圖';
+    if (pin.picker) return;
+    const place = placeInput?.value.trim() ?? '';
     const start = pin.pinned ?? (pin.found && place === pin.foundPlace ? pin.found : null);
     pin.picker = await pinPicker(mapEl, start, origin, baseMap, (p) => {
       pin.pinned = p;
       updatePinState(card);
     });
+  };
+  pinBtn?.addEventListener('click', async () => {
+    if (!mapEl) return;
+    if (!mapEl.hidden) {
+      mapEl.hidden = true;
+      pinBtn.textContent = '在地圖上標位置';
+      return;
+    }
+    await openMap();
+  });
+  // 查地點：查法跟送出後一樣，查到的標在小地圖上（之前在地圖上標的不算了），位置不對再拖
+  const locateBtn = card.querySelector<HTMLButtonElement>('[data-act="locate"]');
+  locateBtn?.addEventListener('click', async () => {
+    const place = placeInput?.value.trim() ?? '';
+    if (place.length < 2) {
+      showBanner(bannerEl, '請先填地點', 2500);
+      placeInput?.focus();
+      return;
+    }
+    locateBtn.disabled = true;
+    locateBtn.textContent = '查詢中…';
+    const res = await locatePlace(c, place).finally(() => {
+      locateBtn.disabled = false;
+      locateBtn.textContent = '查地點';
+    });
+    if (!res.ok) {
+      showBanner(bannerEl, res.message, 3500);
+      return;
+    }
+    const r = res.data;
+    const hit = r.found && r.lat !== null && r.lng !== null ? { lat: r.lat, lng: r.lng } : null;
+    pin.foundPlace = place;
+    pin.found = hit;
+    pin.approxArea = hit ? r.approxArea : null;
+    pin.foundName = hit ? r.name : null;
+    pin.missed = hit ? null : place;
+    // 查了新的地點：之前在地圖上標的不算
+    pin.pinned = null;
+    updatePinState(card);
+    if (!hit) return;
+    await openMap();
+    pin.picker?.set(hit, r.approxArea ? 14 : 17);
   });
   card.querySelector('[data-act="unpin"]')?.addEventListener('click', () => {
     pin.pinned = null;
@@ -3144,13 +3204,13 @@ function wireEdit(c: { postId: string; token: string }, items: EditItem[], actio
   for (const pin of editPins.values()) pin.picker?.remove();
   editPins.clear();
   const list = form.querySelector<HTMLElement>('.edit-items');
-  [...form.querySelectorAll<HTMLElement>('.edit-item')].forEach((card, i) => wireEditCard(card, items[i] ?? null, form));
+  [...form.querySelectorAll<HTMLElement>('.edit-item')].forEach((card, i) => wireEditCard(c, card, items[i] ?? null, form));
   renumberEdit(form);
   form.querySelector('[data-act="add"]')?.addEventListener('click', () => {
     if (!list) return;
     list.insertAdjacentHTML('beforeend', editCardHtml(null));
     const card = list.lastElementChild as HTMLElement;
-    wireEditCard(card, null, form);
+    wireEditCard(c, card, null, form);
     renumberEdit(form);
     card.querySelector<HTMLInputElement>('[name="title"]')?.focus();
   });

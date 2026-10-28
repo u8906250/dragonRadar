@@ -415,6 +415,43 @@ const COUNTRY_TZ: Record<string, string> = {
 
 export const timeZoneOf = (ex: Pick<ExtractedEvent, 'country' | 'timezone'>): string | null => ex.timezone ?? (ex.country ? (COUNTRY_TZ[ex.country] ?? null) : null);
 
+/** 好幾個時區的國家，照州、省（ISO 3166-2）：回報的人直接填地址時用（沒有模型給的時區）。跨時區的州用大部分地方的 */
+const REGION_TZ: Record<string, string> = {
+  ...Object.fromEntries('CA OR WA NV'.split(' ').map((s) => [`US-${s}`, 'America/Los_Angeles'])),
+  ...Object.fromEntries('CO MT NM UT WY'.split(' ').map((s) => [`US-${s}`, 'America/Denver'])),
+  'US-AZ': 'America/Phoenix',
+  'US-ID': 'America/Boise',
+  ...Object.fromEntries('AL AR IA IL KS LA MN MO MS ND NE OK SD TN TX WI'.split(' ').map((s) => [`US-${s}`, 'America/Chicago'])),
+  ...Object.fromEntries('CT DC DE FL GA KY MA MD ME NC NH NJ NY OH PA RI SC VA VT WV'.split(' ').map((s) => [`US-${s}`, 'America/New_York'])),
+  'US-MI': 'America/Detroit',
+  'US-IN': 'America/Indiana/Indianapolis',
+  'US-AK': 'America/Anchorage',
+  'US-HI': 'Pacific/Honolulu',
+  'CA-BC': 'America/Vancouver',
+  'CA-AB': 'America/Edmonton',
+  'CA-SK': 'America/Regina',
+  'CA-MB': 'America/Winnipeg',
+  'CA-ON': 'America/Toronto',
+  'CA-QC': 'America/Toronto',
+  'CA-NB': 'America/Halifax',
+  'CA-NS': 'America/Halifax',
+  'CA-PE': 'America/Halifax',
+  'CA-NL': 'America/St_Johns',
+  'CA-YT': 'America/Whitehorse',
+  'CA-NT': 'America/Yellowknife',
+  'CA-NU': 'America/Iqaluit',
+  'AU-NSW': 'Australia/Sydney',
+  'AU-ACT': 'Australia/Sydney',
+  'AU-VIC': 'Australia/Melbourne',
+  'AU-QLD': 'Australia/Brisbane',
+  'AU-SA': 'Australia/Adelaide',
+  'AU-WA': 'Australia/Perth',
+  'AU-TAS': 'Australia/Hobart',
+  'AU-NT': 'Australia/Darwin',
+};
+
+export const regionTimeZone = (region: string | null | undefined): string | null => (region ? (REGION_TZ[region] ?? null) : null);
+
 /** 某個時區在某個時間點比 UTC 快幾秒（夏令時間也算進去） */
 export function tzOffsetSec(unix: number, tz: string): number {
   const parts = new Intl.DateTimeFormat('en-US', { timeZone: tz, hourCycle: 'h23', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit' }).formatToParts(new Date(unix * 1000));

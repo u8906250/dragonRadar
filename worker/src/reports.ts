@@ -6,7 +6,7 @@
  */
 import type { Env } from './env';
 import { DEFAULT_MODULE, isModule, MODULE_IDS, moduleOf, type ModuleId } from './modules';
-import { commitPlan, detectEnded, getEvent, getPost, MAX_FUTURE_SEC, planManual, planPost, processPost, storePost, type EventOut, type FailedItem, type ManualActivity, type PlanItem, type PostRow } from './events';
+import { ADDRESS_BUDGET_MS, atLocalTimes, commitPlan, detectEnded, getEvent, getPost, locateTypedPlace, MAX_FUTURE_SEC, planManual, planPost, processPost, storePost, type EventOut, type FailedItem, type ManualActivity, type PlanItem, type PostRow } from './events';
 import type { ActivityPart, EventKind } from './extract';
 import { fetchThreadsPost, resolveThreadsLink, shortcodeToUnix, withLocationTag } from './sources/link';
 import { sha1Hex } from './sources/text';
@@ -211,6 +211,8 @@ export interface EditItem {
   lng: number | null;
   /** 只定位到鄉鎮區、路（約略位置） */
   approxArea?: string | null;
+  /** 國外活動的當地時區：表單的時間照當地時間顯示 */
+  tz?: string | null;
 }
 
 /** 判讀結果換成表單的每一場；重複的（雷達上已經有）不列 */
@@ -219,7 +221,7 @@ export function editItemsOf(items: PlanItem[]): EditItem[] {
     const p = it.plan;
     // 車掃的站：時間是預計經過的時間，沒有結束
     const r = it.route;
-    if (p) return [{ title: p.title, startAt: r?.at ?? p.start_at, endAt: r || p.end_open ? null : p.end_at, place: p.place_text, lat: p.lat, lng: p.lng, approxArea: p.approx_area }];
+    if (p) return [{ title: p.title, startAt: r?.at ?? p.start_at, endAt: r || p.end_open ? null : p.end_at, place: p.place_text, lat: p.lat, lng: p.lng, approxArea: p.approx_area, ...(p.tz ? { tz: p.tz } : {}) }];
     const f = it.fail;
     // 車隊已經經過的站
     if (!f) return r ? [{ title: r.stopTitle, startAt: r.at, endAt: null, place: r.name, lat: r.lat, lng: r.lng }] : [];
@@ -234,6 +236,7 @@ export function editItemsOf(items: PlanItem[]): EditItem[] {
         lat: f.lat ?? null,
         lng: f.lng ?? null,
         ...(f.area ? { approxArea: f.area } : {}),
+        ...(f.tz ? { tz: f.tz } : {}),
       },
     ];
   });
@@ -614,10 +617,10 @@ export function parseEditItems(raw: unknown): ManualActivity[] {
   });
 }
 
-const taipeiWhen = new Intl.DateTimeFormat('en-US', { timeZone: 'Asia/Taipei', month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' });
-/** 「10/26 18:00」 */
-function whenText(t: number): string {
-  const p = Object.fromEntries(taipeiWhen.formatToParts(new Date(t * 1000)).map((x) => [x.type, x.value]));
+/** 「10/26 18:00」：台北時間，國外的活動用當地時間 */
+function whenText(t: number, tz: string | null = null): string {
+  const fmt = new Intl.DateTimeFormat('en-US', { timeZone: tz ?? 'Asia/Taipei', month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' });
+  const p = Object.fromEntries(fmt.formatToParts(new Date(t * 1000)).map((x) => [x.type, x.value]));
   return `${p.month}/${p.day} ${p.hour}:${p.minute}`;
 }
 
@@ -625,7 +628,7 @@ function whenText(t: number): string {
  * 回報的人改了哪些（跟判讀結果比），寫在雷達詳細資料的「回報的人補充」，看的人知道哪些不是原貼文寫的。
  * listed 是每一場有沒有排上雷達：沒排上的不寫；unit 是「場」，車掃的是「站」
  */
-export function editSummary(before: EditItem[], after: ManualActivity[], listed: boolean[] = after.map(() => true), unit = '場'): string | null {
+export function editSummary(before: EditItem[], after: ManualActivity[], listed: boolean[] = after.map(() => true), unit = '場', tzs: Array<string | null> = []): string | null {
   const shown = after.filter((_, i) => listed[i]).length;
   let no = 0;
   const parts = after.flatMap((a, i) => {
@@ -635,7 +638,8 @@ export function editSummary(before: EditItem[], after: ManualActivity[], listed:
     const changes: string[] = [];
     if (!b || b.title !== a.title) changes.push(`內容「${a.title}」`);
     if (!b || b.dateOnly || b.startAt !== a.startAt || b.endAt !== a.endAt) {
-      changes.push(`時間 ${whenText(a.startAt)}${a.endAt === null ? ' 開始' : `–${whenText(a.endAt).split(' ')[1]}`}`);
+      const tz = tzs[i] ?? null;
+      changes.push(`時間 ${whenText(a.startAt, tz)}${a.endAt === null ? ' 開始' : `–${whenText(a.endAt, tz).split(' ')[1]}`}${tz ? '（當地時間）' : ''}`);
     }
     if (!b || b.place !== a.place) changes.push(`地點「${a.place}」`);
     if (a.lat !== null) changes.push('在地圖上標了位置');
@@ -648,11 +652,13 @@ export function editSummary(before: EditItem[], after: ManualActivity[], listed:
  * 回報的人直接修改每一場的標題、時間、地點、地圖位置（洋流的活動）：不再問 AI，照填的資料排、定位，回傳新的預覽。
  * 改了哪些記在補充（雷達詳細資料寫「回報的人補充」），看的人知道哪些不是原貼文寫的。
  */
-export async function editLink(env: Env, body: { postId?: unknown; token?: unknown; items?: unknown }, ip: string, now: number, device: string | null = null): Promise<SubmitResult> {
+export async function editLink(env: Env, body: { postId?: unknown; token?: unknown; items?: unknown; localTimes?: unknown }, ip: string, now: number, device: string | null = null): Promise<SubmitResult> {
   const post = await checkConfirm(env, body);
   if (post.confirm_state === 'confirmed') throw new ReportError(409, '這則已經放上雷達了，不能再修改');
   if (moduleOf(post.module) !== 'current') throw new ReportError(400, '這個類別還不能直接修改，請用補充資料');
-  const acts = parseEditItems(body.items);
+  const parsed = parseEditItems(body.items);
+  // 新版網頁填的是活動當地的時間：國外的換成當地時間的時間點（舊版網頁一律是台北時間）
+  const acts = body.localTimes === true ? await atLocalTimes(env, parsed) : parsed;
   const times = await countSince(env, "SELECT COUNT(*) AS n FROM submissions WHERE post_id = ? AND result = '\"supplement\"'", [post.id]);
   if (times >= EDITS_PER_POST) throw new ReportError(429, '這則已經修改太多次了，請聯絡管理者');
   await env.DB.prepare("INSERT INTO submissions (post_id, ip_hash, device, result, created_at) VALUES (?, ?, ?, '\"supplement\"', ?)").bind(post.id, ip, device, now).run();
@@ -661,10 +667,47 @@ export async function editLink(env: Env, body: { postId?: unknown; token?: unkno
   // 車掃：路線名稱沿用判讀出來的
   const routeTitle = stored?.items.find((it) => it.route)?.route?.title ?? null;
   const items = await planManual(env, acts, now, post.text, routeTitle);
-  const note = editSummary(stored ? editItemsOf(stored.items) : [], acts, items.map((it) => !!it.plan), items.some((it) => it.route) ? '站' : '場') ?? post.supplement ?? null;
+  const tzs = items.map((it) => it.plan?.tz ?? it.fail?.tz ?? null);
+  const note = editSummary(stored ? editItemsOf(stored.items) : [], acts, items.map((it) => !!it.plan), items.some((it) => it.route) ? '站' : '場', tzs) ?? post.supplement ?? null;
   const plan: StoredPlan = { items, early: null };
   await env.DB.prepare("UPDATE posts SET supplement = ?, confirm_plan = ?, confirm_state = 'pending' WHERE id = ?").bind(note, storePlan(plan), post.id).run();
   return previewResult(env, { ...post, supplement: note }, plan, false, now);
+}
+
+/** 修改表單按「查地點」：一則最多查幾次（每次可能打好幾次 Nominatim） */
+const LOCATES_PER_POST = 30;
+
+export interface LocateResult {
+  found: boolean;
+  lat: number | null;
+  lng: number | null;
+  /** 查到的地名（國外的是 Nominatim 的完整地址） */
+  name: string | null;
+  /** 只定位到鄉鎮區、路、城市（約略位置） */
+  approxArea: string | null;
+  /** 國外的當地時區 */
+  tz: string | null;
+}
+
+/**
+ * 修改表單裡先查填的地點，在小地圖上標出來給回報的人看（查法跟送出後一樣，結果有快取）。
+ * 要有這則回報的確認代碼；次數記在 settings（locate:貼文 id），清舊回報時一起清
+ */
+export async function locateForEdit(env: Env, body: { postId?: unknown; token?: unknown; place?: unknown }, now: number): Promise<LocateResult> {
+  const post = await checkConfirm(env, body);
+  if (post.confirm_state === 'confirmed') throw new ReportError(409, '這則已經放上雷達了，不能再修改');
+  if (moduleOf(post.module) !== 'current') throw new ReportError(400, '這個類別還不能直接修改，請用補充資料');
+  const place = typeof body.place === 'string' ? [...body.place.replace(/\s+/g, ' ').trim()].slice(0, 80).join('') : '';
+  if (place.length < 2) throw new ReportError(400, '請先填地點');
+  const key = `locate:${post.id}`;
+  const row = await env.DB.prepare('SELECT value FROM settings WHERE key = ?').bind(key).first<{ value: string }>();
+  const times = Number(row?.value ?? 0) || 0;
+  if (times >= LOCATES_PER_POST) throw new ReportError(429, '這則查太多次了，請直接在地圖上標位置');
+  await env.DB.prepare('INSERT INTO settings (key, value, updated_at) VALUES (?, ?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at')
+    .bind(key, String(times + 1), now)
+    .run();
+  const r = await locateTypedPlace(env, place, Date.now() + ADDRESS_BUDGET_MS);
+  return { found: !!r.point, lat: r.point?.lat ?? null, lng: r.point?.lng ?? null, name: r.point?.displayName ?? null, approxArea: r.approxArea, tz: r.tz };
 }
 
 /** 回報的人說判讀錯了：不放上雷達，記下哪裡錯給管理者看 */
@@ -859,6 +902,7 @@ export async function purgeReports(env: Env, cutoff: number): Promise<number> {
     env.DB.prepare('DELETE FROM submissions WHERE created_at < ?').bind(cutoff),
     env.DB.prepare('DELETE FROM ended_reports WHERE created_at < ?').bind(cutoff),
     env.DB.prepare('UPDATE spot_requests SET ip_hash = NULL WHERE ip_hash IS NOT NULL AND created_at < ?').bind(cutoff),
+    env.DB.prepare("DELETE FROM settings WHERE key LIKE 'locate:%' AND updated_at < ?").bind(cutoff),
   ]);
   return r.reduce((n, x) => n + (x.meta.changes ?? 0), 0);
 }

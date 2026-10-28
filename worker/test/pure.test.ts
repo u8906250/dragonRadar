@@ -4,7 +4,7 @@ import { isAreaOnly } from '../src/geocode';
 import { existedOutcome, notListedWhy, previewOf } from '../src/reports';
 import { describe, expect, it } from 'vitest';
 import { approxRank, detectEnded, inLngRange, lngRange, postExcerpt, spotMergeMode, spotScope, spotSessions } from '../src/events';
-import { buildMessages, localizeTimes, localToUnix, normalizeCountry, normalizeExtraction, validTimeZone } from '../src/extract';
+import { buildMessages, localizeTimes, localToUnix, normalizeCountry, normalizeExtraction, regionTimeZone, validTimeZone } from '../src/extract';
 import { parseThreadsTimestamp } from '../src/threads';
 import { etagMatches, parseIsoToUnix } from '../src/util';
 import { parseEmbedHtml, parseThreadsUrl, shortcodeToUnix, withLocationTag } from '../src/sources/link';
@@ -93,7 +93,7 @@ describe('buildMessages', () => {
   });
 });
 
-import { adminArea, citiesOfDistrict, citiesOfRoad, cityLevel, isRoadHit, cityMatches, sharesName, pickHit, placeCandidates, streetFallbacks, worldCandidates } from '../src/geocode';
+import { adminArea, citiesOfDistrict, citiesOfRoad, cityLevel, isRoadHit, cityMatches, sharesName, pickHit, placeCandidates, streetFallbacks, worldCandidates, cleanWorldAddress, countryOfPlace, regionOfPlace } from '../src/geocode';
 import { normalizeKeyword, parseKeywordList } from '../src/keywords';
 
 describe('normalizeKeyword', () => {
@@ -726,6 +726,37 @@ describe('overseas events', () => {
       'Memorial Park, Cupertino',
       'Cupertino Memorial Park',
     ]);
+  });
+  it('drops unit numbers and a glued country name before asking Nominatim', () => {
+    expect(cleanWorldAddress('12901 Alcosta Blvd D, San Ramon, CA 94583美國')).toBe('12901 Alcosta Blvd, San Ramon, CA 94583');
+    expect(cleanWorldAddress('10050 S De Anza Blvd Suite 100, Cupertino, CA 95014, USA')).toBe('10050 S De Anza Blvd, Cupertino, CA 95014, USA');
+    expect(cleanWorldAddress('500 Main St, #12, Fremont, CA')).toBe('500 Main St, Fremont, CA');
+    expect(cleanWorldAddress('1600 Pennsylvania Ave NW, Washington, DC 20500')).toBe('1600 Pennsylvania Ave NW, Washington, DC 20500');
+    expect(cleanWorldAddress('123 King St W, Toronto, ON M5H 1A1加拿大')).toBe('123 King St W, Toronto, ON M5H 1A1');
+    expect(cleanWorldAddress('123 Avenue A, New York, NY 10009')).toBe('123 Avenue A, New York, NY 10009');
+    expect(worldCandidates('12901 Alcosta Blvd D, San Ramon, CA 94583美國', null)).toEqual([
+      '12901 Alcosta Blvd, San Ramon, CA 94583',
+      '12901 Alcosta Blvd, San Ramon',
+      '12901 Alcosta Blvd D, San Ramon, CA 94583美國',
+      '12901 Alcosta Blvd D, San Ramon',
+    ]);
+  });
+  it('tells overseas places typed by the reporter', () => {
+    expect(countryOfPlace('12901 Alcosta Blvd D, San Ramon, CA 94583美國')).toBe('US');
+    expect(countryOfPlace("Ema's Table, San Ramon, CA 94583")).toBe('US');
+    expect(countryOfPlace('Memorial Park, Cupertino, CA, USA')).toBe('US');
+    expect(countryOfPlace('123 King St W, Toronto, ON M5H 1A1')).toBe('CA');
+    expect(countryOfPlace('1 Martin Pl, Sydney NSW 2000澳洲')).toBe('AU');
+    expect(countryOfPlace('日本〒150-0002 東京都渋谷区渋谷2-21-1')).toBe('JP');
+    expect(countryOfPlace('台北市大安區忠孝東路四段1號')).toBeNull();
+    expect(countryOfPlace('台北日本')).toBeNull();
+    expect(countryOfPlace('信義區 日本料理店')).toBeNull();
+    expect(regionOfPlace('12901 Alcosta Blvd D, San Ramon, CA 94583美國')).toBe('US-CA');
+    expect(regionOfPlace('台北市中正區忠孝東路二段94號')).toBeNull();
+    expect(regionTimeZone('US-CA')).toBe('America/Los_Angeles');
+    expect(regionTimeZone('US-NY')).toBe('America/New_York');
+    expect(regionTimeZone('CA-ON')).toBe('America/Toronto');
+    expect(regionTimeZone(null)).toBeNull();
   });
 });
 

@@ -518,8 +518,20 @@ export async function pinPicker(el: HTMLElement, pin: LatLng | null, center: Lat
   const start = pin ?? center;
   const map = L.map(el, { zoomControl: true, attributionControl: true, zoomSnap: 0 }).setView([start.lat, start.lng], pin ? 17 : 15);
   map.attributionControl.setPrefix(false);
-  const b = BASES[base];
-  L.tileLayer(b.url, { maxZoom: 20, maxNativeZoom: b.maxNativeZoom, attribution: b.attribution }).addTo(map);
+  // 國土測繪中心的底圖只有台灣：標國外的位置時換成 OpenStreetMap
+  let shown: BaseMap | null = null;
+  let tiles: Leaflet.TileLayer | null = null;
+  const useBase = (): void => {
+    const c = map.getCenter();
+    const want: BaseMap = base === 'nlsc' && !(c.lat > 21 && c.lat < 26.5 && c.lng > 118 && c.lng < 123) ? 'osm' : base;
+    if (want === shown) return;
+    tiles?.remove();
+    const b = BASES[want];
+    tiles = L.tileLayer(b.url, { maxZoom: 20, maxNativeZoom: b.maxNativeZoom, attribution: b.attribution }).addTo(map);
+    shown = want;
+  };
+  useBase();
+  map.on('moveend', useBase);
   const icon = L.divIcon({ className: 'pin-marker', html: '<span></span>', iconSize: [28, 28], iconAnchor: [14, 26] });
   let marker: Leaflet.Marker | null = null;
   const place = (p: LatLng): Leaflet.Marker => {

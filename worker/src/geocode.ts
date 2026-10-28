@@ -323,33 +323,100 @@ export async function cityOfRoad(env: Env, road: string): Promise<string | null>
   return city;
 }
 
-/** 國外地點的查詢字串：原樣、地點原文，再把「, CA, USA」這種後面的州、國家一段一段拿掉（Nominatim 寫太完整反而查不到），至少留地名加城市 */
+/** 地址最後寫的國名（Google 地圖中文版「…CA 94583美國」、英文「…, USA」）對應的國家代碼 */
+const COUNTRY_NAMES: Array<[string, string[]]> = [
+  ['US', ['美國', '美国', 'USA', 'U.S.A.', 'United States', 'United States of America']],
+  ['CA', ['加拿大', 'Canada']],
+  ['AU', ['澳洲', '澳大利亞', 'Australia']],
+  ['NZ', ['紐西蘭', 'New Zealand']],
+  ['GB', ['英國', '英国', 'United Kingdom', 'UK']],
+  ['JP', ['日本', 'Japan']],
+  ['SG', ['新加坡', 'Singapore']],
+  ['DE', ['德國', 'Germany']],
+  ['FR', ['法國', 'France']],
+  ['NL', ['荷蘭', 'Netherlands']],
+  ['MY', ['馬來西亞', 'Malaysia']],
+  ['TH', ['泰國', 'Thailand']],
+];
+const escapeRe = (s: string): string => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+/** 國名前面要是開頭、數字、英文、空白、逗號（「台北日本料理」的日本不算） */
+const COUNTRY_END_RE = new RegExp(`(?:^|(?<=[\\s,，\\dA-Za-z.]))(${COUNTRY_NAMES.flatMap(([, n]) => n).map(escapeRe).join('|')})\\s*$`);
+const US_STATES = new Set('AL AK AZ AR CA CO CT DE DC FL GA HI ID IL IN IA KS KY LA ME MD MA MI MN MS MO MT NE NV NH NJ NM NY NC ND OH OK OR PA RI SC SD TN TX UT VT VA WA WV WI WY'.split(' '));
+const CA_PROVINCES = new Set('AB BC MB NB NL NS NT NU ON PE QC SK YT'.split(' '));
+
+/** 地址寫的州、省（ISO 3166-2，例如 US-CA）：美國「, CA 94583」、加拿大「, ON M5V 3L9」、澳洲「NSW 2000」 */
+export function regionOfPlace(text: string): string | null {
+  const us = /,\s*([A-Z]{2})\s+\d{5}(?:-\d{4})?(?!\d)/.exec(text);
+  if (us && US_STATES.has(us[1])) return `US-${us[1]}`;
+  const ca = /,\s*([A-Z]{2})\s+[A-Z]\d[A-Z]\s?\d[A-Z]\d\b/.exec(text);
+  if (ca && CA_PROVINCES.has(ca[1])) return `CA-${ca[1]}`;
+  const au = /\b(NSW|VIC|QLD|SA|WA|TAS|ACT|NT)\s+\d{4}(?!\d)/.exec(text);
+  return au ? `AU-${au[1]}` : null;
+}
+
+/** 回報的人填的地點是不是國外：最後寫了國名，或有美國、加拿大、澳洲的州加郵遞區號。台灣、看不出來是 null */
+export function countryOfPlace(text: string): string | null {
+  const t = text.trim();
+  const name = COUNTRY_END_RE.exec(t)?.[1];
+  if (name) return COUNTRY_NAMES.find(([, n]) => n.includes(name))?.[0] ?? null;
+  if (/^日本\s*〒/.test(t)) return 'JP';
+  return regionOfPlace(t)?.slice(0, 2) ?? null;
+}
+
+const STREET_TYPE = 'St|Street|Ave|Avenue|Blvd|Boulevard|Rd|Road|Dr|Drive|Way|Ln|Lane|Ct|Court|Pl|Place|Pkwy|Parkway|Hwy|Highway|Ter|Terrace|Cir|Circle|Sq|Square|Plz|Plaza';
+const UNIT_WORD = '(?:#|Suite|Ste|Unit|Apt|Apartment|Rm|Room|Fl|Floor|Bldg|Building)\\.?\\s*#?\\s*[\\w-]+';
+const UNIT_SEGMENT_RE = new RegExp(`^${UNIT_WORD}$`, 'i');
+const UNIT_TAIL_RE = new RegExp(`\\s+${UNIT_WORD}$`, 'i');
+/** 「12901 Alcosta Blvd D」：門牌、路名、路的種類後面的單位號（一個字母或短的數字）；N、S、E、W 是方位（King St W），不拿 */
+const STREET_UNIT_RE = new RegExp(`^(\\d+[A-Za-z]?\\s+.+?\\s(?:${STREET_TYPE})\\.?)\\s+(?:(?![NSEW]$)[A-Z]|\\d{1,5}|[A-Z]\\d{1,4}|\\d{1,4}[A-Z])$`);
+
+/**
+ * 國外地址拿掉 Nominatim 看不懂的：黏在最後的國名（「CA 94583美國」整段查不到），
+ * 單位號（「Blvd D」「Suite 100」「#5」，Nominatim 只到門牌）
+ */
+export function cleanWorldAddress(s: string): string {
+  const noCountry = s.trim().replace(COUNTRY_END_RE, (m, name: string) => (/[^\x00-\x7f]/.test(name) ? '' : m)).replace(/[\s,，]+$/, '');
+  return noCountry
+    .split(/\s*[,，]\s*/)
+    .filter((p) => p && !UNIT_SEGMENT_RE.test(p))
+    .map((p) => p.replace(UNIT_TAIL_RE, '').replace(STREET_UNIT_RE, '$1'))
+    .join(', ');
+}
+
+/** 國外地點的查詢字串：整理過的、原樣、地點原文，再把「, CA, USA」這種後面的州、國家一段一段拿掉（Nominatim 寫太完整反而查不到），至少留地名加城市 */
 export function worldCandidates(query: string, placeText: string | null): string[] {
   const out: string[] = [];
   for (const s of [query, placeText ?? '']) {
-    const parts = s.split(/\s*[,，]\s*/).filter(Boolean);
-    // 至少留兩段（地名加城市），只剩「Memorial Park」會對到別州的同名公園
-    for (let n = parts.length; n >= Math.min(2, parts.length); n--) out.push(parts.slice(0, n).join(', '));
+    for (const v of new Set([cleanWorldAddress(s), s])) {
+      const parts = v.split(/\s*[,，]\s*/).filter(Boolean);
+      // 至少留兩段（地名加城市），只剩「Memorial Park」會對到別州的同名公園
+      for (let n = parts.length; n >= Math.min(2, parts.length); n--) out.push(parts.slice(0, n).join(', '));
+    }
   }
   return [...new Set(out.map((x) => x.trim()).filter(Boolean))].slice(0, 6);
 }
 
 /**
  * 國外的地點：Nominatim 只查那個國家；對到的是整個城市、行政區時標成約略位置（approxArea 寫地名）。
- * 快取鍵前面加「world:國家:」，跟台灣的分開。
+ * region 是在哪個州、省（「US-CA」，用來決定時區；舊的快取沒有）。快取鍵前面加「world:國家:」，跟台灣的分開。
  */
-export async function geocodeWorld(env: Env, query: string, placeText: string | null, country: string): Promise<{ point: GeoPoint; approxArea: string | null } | null> {
+export async function geocodeWorld(
+  env: Env,
+  query: string,
+  placeText: string | null,
+  country: string,
+): Promise<{ point: GeoPoint; approxArea: string | null; region: string | null } | null> {
   const cc = country.toLowerCase();
   const now = nowSec();
   for (const q of worldCandidates(query, placeText)) {
     const key = `world:${cc}:${q}`;
     const cached = await env.DB.prepare('SELECT lat, lng, display_name, resolved_at FROM geocode_cache WHERE query = ?').bind(key).first<CacheRow>();
-    let hit: { lat: number; lng: number; displayName: string; area: boolean } | null = null;
+    let hit: { lat: number; lng: number; displayName: string; area: boolean; region: string | null } | null = null;
     if (cached && (cached.lat !== null || cached.resolved_at > now - NEGATIVE_TTL_SEC)) {
       if (cached.lat !== null && cached.lng !== null) {
-        // display_name 存成「area|地名」或「place|地名」
-        const m = /^(area|place)\|(.*)$/s.exec(cached.display_name ?? '');
-        hit = { lat: cached.lat, lng: cached.lng, displayName: m?.[2] || q, area: m?.[1] === 'area' };
+        // display_name 存成「area|地名」「place:US-CA|地名」（冒號後面是州、省）
+        const m = /^(area|place)(?::([A-Z]{2}-[A-Z0-9]{1,3}))?\|(.*)$/s.exec(cached.display_name ?? '');
+        hit = { lat: cached.lat, lng: cached.lng, displayName: m?.[3] || q, area: m?.[1] === 'area', region: m?.[2] ?? null };
       }
     } else {
       await politeDelay();
@@ -358,27 +425,30 @@ export async function geocodeWorld(env: Env, query: string, placeText: string | 
       url.searchParams.set('limit', '1');
       url.searchParams.set('countrycodes', cc);
       url.searchParams.set('accept-language', 'en');
+      url.searchParams.set('addressdetails', '1');
       url.searchParams.set('q', q);
       const res = await fetch(url.toString(), { headers: { 'user-agent': env.NOMINATIM_USER_AGENT, accept: 'application/json' } });
       if (!res.ok) {
         console.warn(`nominatim ${res.status} for ${q}`);
         continue;
       }
-      const h = ((await res.json()) as Array<{ lat: string; lon: string; display_name?: string; category?: string; addresstype?: string }>)[0];
+      const h = ((await res.json()) as Array<{ lat: string; lon: string; display_name?: string; category?: string; addresstype?: string; address?: Record<string, string> }>)[0];
       const lat = Number(h?.lat);
       const lng = Number(h?.lon);
       const area = !!h && (h.category === 'boundary' || (h.category === 'place' && /^(city|town|village|county|state|region|country|municipality)$/.test(h.addresstype ?? '')));
-      hit = h && Number.isFinite(lat) && Number.isFinite(lng) ? { lat, lng, displayName: h.display_name ?? q, area } : null;
+      const iso = h?.address?.['ISO3166-2-lvl4'];
+      const region = iso && /^[A-Z]{2}-[A-Z0-9]{1,3}$/.test(iso) ? iso : null;
+      hit = h && Number.isFinite(lat) && Number.isFinite(lng) ? { lat, lng, displayName: h.display_name ?? q, area, region } : null;
       await env.DB.prepare(
         'INSERT INTO geocode_cache (query, lat, lng, display_name, resolved_at) VALUES (?, ?, ?, ?, ?) ON CONFLICT(query) DO UPDATE SET lat = excluded.lat, lng = excluded.lng, display_name = excluded.display_name, resolved_at = excluded.resolved_at',
       )
-        .bind(key, hit?.lat ?? null, hit?.lng ?? null, hit ? `${hit.area ? 'area' : 'place'}|${hit.displayName}` : null, now)
+        .bind(key, hit?.lat ?? null, hit?.lng ?? null, hit ? `${hit.area ? 'area' : 'place'}${hit.region ? `:${hit.region}` : ''}|${hit.displayName}` : null, now)
         .run();
     }
     if (!hit) continue;
     // 只對到城市：約略位置，寫「Cupertino, California」這種前兩段
     const approxArea = hit.area ? hit.displayName.split(', ').slice(0, 2).join(', ') : null;
-    return { point: { lat: hit.lat, lng: hit.lng, displayName: hit.displayName }, approxArea };
+    return { point: { lat: hit.lat, lng: hit.lng, displayName: hit.displayName }, approxArea, region: hit.region ?? regionOfPlace(query) };
   }
   return null;
 }
