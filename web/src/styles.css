@@ -182,6 +182,19 @@ a.chip { display: inline-flex; align-items: center; text-decoration: none; }
 @media (min-height: 700px) and (max-width: 899px) { #stage[data-view="radar"] #radar-view { padding-top: 44px; box-sizing: border-box; } }
 .view { width: 100%; height: 100%; min-height: 0; display: grid; place-items: center; }
 .radar { width: 100%; height: 100%; display: block; filter: var(--glow); touch-action: none; user-select: none; -webkit-user-select: none; }
+/* 雷達分四層疊在一起（radar.ts）：外框底色、掃描、特效在下面，主圖層（光點、文字，接觸控）在最上面 */
+.radar-stack { position: relative; place-self: stretch; min-width: 0; min-height: 0; }
+.radar-stack > .radar-layer { position: absolute; inset: 0; pointer-events: none; }
+.radar-stack > .radar-main { position: relative; }
+/* 一直在動的兩層不加光暈濾鏡（每一格都要重算） */
+.radar.radar-sweep, .radar.radar-fx, .radar.radar-flashes { filter: none; }
+.radar-sweep-box { will-change: transform; }
+/* 閃光層：掃到時的光暈、亮環（一般的 div，只動 transform、opacity）；--u 是一個 SVG 單位幾像素（radar.ts 算） */
+.radar-square { position: absolute; }
+.radar-flash-square > div { position: absolute; width: 0; height: 0; }
+.radar-flash-square span { position: absolute; border-radius: 50%; opacity: 0; box-sizing: border-box; }
+.radar-flash-square .fx-glow { background: currentColor; box-shadow: 0 0 calc(6 * var(--u)) currentColor; }
+.radar-flash-square .fx-ring { border: 1.5px solid currentColor; }
 /* Leaflet 圖層 z-index 到 1000，用 isolation 把它關在自己的堆疊層裡，浮動按鈕才不會被蓋掉 */
 #map-view { position: relative; isolation: isolate; z-index: 0; border-radius: 14px; overflow: hidden; border: var(--border-w) solid var(--line); }
 #map { width: 100%; height: 100%; background: var(--panel); }
@@ -226,11 +239,10 @@ a.chip { display: inline-flex; align-items: center; text-decoration: none; }
 .radar.heading-live .rose-n { fill: var(--highlight); }
 
 /* 掃描：三種樣式都在 DOM 裡，由主題 class 決定顯示哪一個 */
-.radar .sweep-wedge, .radar .sweep-ripple, .radar .sweep-needle { display: none; }
-.radar.sweep-wedge .sweep-wedge, .radar.sweep-ripple .sweep-ripple, .radar.sweep-needle .sweep-needle { display: inline; }
 .radar .sweep-stop-1 { stop-color: var(--radar-sweep); stop-opacity: var(--radar-sweep-op); }
 .radar .sweep-stop-2 { stop-color: var(--radar-sweep); stop-opacity: 0; }
-.radar .sweep-ripple circle { fill: none; stroke: var(--radar-sweep); stroke-width: 3; }
+/* 波紋：最後的大小畫 6px 的線，從 0 放大（線也跟著從細變粗，同時越來越淡） */
+.radar-square .ripple { position: absolute; box-sizing: border-box; border-radius: 50%; border: 6px solid var(--radar-sweep); opacity: 0; }
 .radar .sweep-needle line { stroke: var(--radar-sweep); stroke-width: 2; stroke-dasharray: 6 5; stroke-linecap: round; }
 .radar .sweep-needle circle { fill: var(--radar-sweep); }
 
@@ -240,12 +252,14 @@ a.chip { display: inline-flex; align-items: center; text-decoration: none; }
 .radar .blip .dot { fill: var(--blip); stroke: var(--blip-stroke); stroke-width: var(--blip-stroke-w); }
 .radar .blip .core { fill: var(--blip-core); }
 .radar .blip .mark { stroke: var(--blip); stroke-width: 3.5; stroke-linecap: round; }
-.radar .blip .ping { fill: none; stroke: var(--blip); stroke-width: 2; opacity: 0; }
+/* 進行中的擴散圈：閃光層的 div（顏色跟著光點），放大、變淡，只動 transform、opacity */
+.radar .blip .ping { border: 2px solid currentColor; opacity: 0; }
 .radar .blip.phase-active .ping { animation: ping 1.6s ease-out infinite; }
-.radar .blip.phase-active .dot, .radar .blip.phase-active .mark { animation: blink 1.2s steps(2, start) infinite; }
+/* 進行中的光點閃爍：程式每 0.6 秒換一次 class（用 CSS 動畫的話，整個主圖層每一格都要重畫） */
+.radar.blink-on .blip.phase-active .dot, .radar.blink-on .blip.phase-active .mark { opacity: 0.675; }
+.radar.blink-dim .blip.phase-active .dot, .radar.blink-dim .blip.phase-active .mark { opacity: 0.35; }
 .radar .blip.phase-soon .dot { fill: var(--blip-soon); stroke: var(--blip-soon-stroke); opacity: 0.85; }
 .radar .blip.phase-soon .mark { stroke: var(--blip-soon); opacity: 0.85; }
-.radar .blip.phase-soon .ping { stroke: var(--blip-soon); }
 .radar .blip.out .dot, .radar .blip.out .mark { opacity: 0.5; }
 /* 稍後才開始（30 分鐘以後）：淡色、虛線框，不閃 */
 .radar .blip.phase-later .dot { fill-opacity: 0.55; stroke: var(--blip); stroke-width: 2; stroke-dasharray: 3 2; }
@@ -257,15 +271,13 @@ a.chip { display: inline-flex; align-items: center; text-decoration: none; }
 /* 活動：換顏色，進行中時一樣閃爍 */
 .radar .blip.kind-activity .dot { fill: var(--blip-activity); }
 .radar .blip.kind-activity .mark { stroke: var(--blip-activity); }
-.radar .blip.kind-activity .ping { stroke: var(--blip-activity); }
 .radar .blip.kind-activity.phase-soon .dot { fill: var(--blip-activity); opacity: 0.6; }
 .radar .blip.kind-activity.phase-soon .mark { stroke: var(--blip-activity); opacity: 0.6; }
 .radar.blip-neon .blip.kind-activity .dot { filter: drop-shadow(0 0 6px var(--blip-activity)); }
 .radar .blip.selected .dot, .radar .blip.selected .mark { stroke: var(--blip-selected); stroke-width: 3; }
 .radar.blip-neon .blip .dot { filter: drop-shadow(0 0 6px var(--blip)); }
 .radar.blip-neon .blip.phase-soon .dot { filter: drop-shadow(0 0 6px var(--blip-soon)); }
-@keyframes ping { 0% { r: 6; opacity: 0.9; } 100% { r: 22; opacity: 0; } }
-@keyframes blink { 0% { opacity: 1; } 100% { opacity: 0.35; } }
+@keyframes ping { 0% { transform: scale(0.2727); opacity: 0.9; } 100% { transform: scale(1); opacity: 0; } }
 @media (prefers-reduced-motion: reduce) { .radar .blip .ping, .radar .blip .dot, .radar .blip .mark { animation: none !important; } }
 
 /* ========== 底部清單面板 ========== */
@@ -478,7 +490,6 @@ a.chip { display: inline-flex; align-items: center; text-decoration: none; }
 /* 固定據點不主動發訊號：不擴散、不閃爍，只在掃描掃過時亮一下 */
 .radar .blip.spot .ping { display: none; }
 .radar .blip.spot .dot { animation: none; }
-.radar .blip.spot .ping { stroke: var(--blip-spot); }
 .radar .blip.phase-closed .dot { opacity: 0.4; animation: none; }
 .radar .blip.spot.phase-active .dot { animation: none; }
 .radar.blip-neon .blip.spot .dot { filter: drop-shadow(0 0 6px var(--blip-spot)); }
@@ -561,9 +572,6 @@ a.chip { display: inline-flex; align-items: center; text-decoration: none; }
 .radar .blip.spot { color: var(--blip-spot); }
 .radar .blip.phase-soon { color: var(--blip-soon); }
 .radar .landmark { color: #ffc531; }
-.radar .flash { fill: currentColor; opacity: 0; pointer-events: none; filter: drop-shadow(0 0 6px currentColor); }
-.radar .flash-ring { fill: none; stroke: currentColor; stroke-width: 1.5; opacity: 0; pointer-events: none; }
-.radar .flash-ring { vector-effect: non-scaling-stroke; }
 
 /* 漂流瓶：海玻璃色。遠的是一團模糊訊號，200 m 內看得到瓶子，撿得到時外面有一圈在呼吸 */
 .radar .bottle { cursor: pointer; color: #43b8d4; }

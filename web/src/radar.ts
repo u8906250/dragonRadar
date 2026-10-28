@@ -85,29 +85,26 @@ const ROSE: Array<[string, number]> = [
 const SWEEP_SEC: Record<SweepStyle, number> = { wedge: 4, needle: 6, ripple: 1.6 };
 /** 扇形的前緣在旋轉角度 +45 度的地方 */
 const WEDGE_LEAD_DEG = 45;
+/** 多久看一次掃描線走到哪（毫秒） */
+const FLASH_TICK_MS = 40;
+/** 亮環最後放大到光點的幾倍 */
+const RING_GROW = 3.2;
 /**
- * 掃過時的閃光（毫秒）：光點本身稍微變亮（不放大）、後面一團淡淡的光暈、往外擴散一圈細環。
+ * 掃過時的閃光（毫秒，畫在閃光層）：光點後面一團淡淡的光暈、往外擴散一圈細環；光點本身稍微變亮見 BODY_FLASH。
  * 每一段都是「掃到的瞬間最亮，接著淡掉」，一圈裡其餘時間維持原狀。
  */
 const FLASH_PARTS: Array<{ sel: string; ms: number; from: Keyframe; to: Keyframe }> = [
-  {
-    sel: '.body',
-    ms: 450,
-    from: { filter: 'brightness(1.5) drop-shadow(0 0 4px rgba(255, 255, 255, 0.8))' },
-    to: { filter: 'brightness(1) drop-shadow(0 0 0px rgba(255, 255, 255, 0))' },
-  },
-  { sel: '.flash', ms: 500, from: { opacity: 0.6, transform: 'scale(1.3)' }, to: { opacity: 0, transform: 'scale(2.2)' } },
-  { sel: '.flash-ring', ms: 700, from: { opacity: 0.6, transform: 'scale(1)' }, to: { opacity: 0, transform: 'scale(3.2)' } },
+  { sel: '.fx-glow', ms: 500, from: { opacity: 0.6, transform: 'scale(1.3)' }, to: { opacity: 0, transform: 'scale(2.2)' } },
+  // 亮環畫成最後的大小（3.2 倍），從 1/3.2 放大，線才不會跟著變粗
+  { sel: '.fx-ring', ms: 700, from: { opacity: 0.6, transform: `scale(${1 / RING_GROW})` }, to: { opacity: 0, transform: 'scale(1)' } },
 ];
+/** 光點本體亮一下：分兩段（最亮、一半亮），多久回原樣 */
+const BODY_FLASH = ['', 'brightness(1.25) drop-shadow(0 0 2px rgba(255, 255, 255, 0.4))', 'brightness(1.5) drop-shadow(0 0 4px rgba(255, 255, 255, 0.8))'];
+const BODY_FLASH_MS = 450;
+const BODY_FLASH_MS_CALM = 600;
 /** 系統設定「減少動態效果」時（Windows 關掉動畫效果的電腦常見）：不放大、不擴散，只亮一下 */
 const FLASH_PARTS_CALM: typeof FLASH_PARTS = [
-  {
-    sel: '.body',
-    ms: 600,
-    from: { filter: 'brightness(1.5) drop-shadow(0 0 4px rgba(255, 255, 255, 0.8))' },
-    to: { filter: 'brightness(1) drop-shadow(0 0 0px rgba(255, 255, 255, 0))' },
-  },
-  { sel: '.flash', ms: 600, from: { opacity: 0.6, transform: 'scale(1.6)' }, to: { opacity: 0, transform: 'scale(1.6)' } },
+  { sel: '.fx-glow', ms: 600, from: { opacity: 0.6, transform: 'scale(1.6)' }, to: { opacity: 0, transform: 'scale(1.6)' } },
 ];
 
 /** 光點距離小於這個像素就合成一群 */
@@ -159,7 +156,40 @@ function polar(deg: number, r: number): { x: number; y: number } {
  * heading 不為 0 時以手機朝向為上，羅盤字會跟著移動，文字維持正立。
  */
 export class Radar {
+  /**
+   * 雷達分好幾層，疊在一起：base 外框和底色、sweepBox 掃描（只放目前主題那一種，整層用 CSS 旋轉）、
+   * fx 漂流瓶的霧和可撿範圍（小 SVG）、flashBox 擴散圈和掃到時的閃光（div，只動 transform、opacity）、
+   * svg 主圖層（格線、道路、光點、文字，接觸控）。
+   * 主圖層有一千多個元素，裡面只要有東西每一格在動，整層每一格都要重算樣式、排版、重畫（待機 CPU 兩成以上），
+   * 所以會動的都搬出去；主圖層只在資料、範圍變了，或光點亮一下、閃爍換一段時才改
+   */
   private readonly svg: SVGSVGElement;
+  private readonly base: SVGSVGElement;
+  private readonly sweepSvg: SVGSVGElement;
+  /** 掃描層外面包的 div：扇形、指針轉的是它（SVG 元素的動畫 Chrome 不交給顯示晶片，div 的才會） */
+  private readonly sweepBox: HTMLDivElement;
+  /** 波紋的兩個圈（div）放在這個跟雷達同比例、置中的正方形裡 */
+  private readonly sweepSquare: HTMLDivElement;
+  private readonly fx: SVGSVGElement;
+  private readonly fxLayer: SVGGElement;
+  /**
+   * 閃光層：掃到時的光暈、亮環用一般的 div 畫，只動 transform、opacity，整個交給顯示晶片
+   * （SVG 裡的動畫每一格都要重畫整層）；square 是跟雷達同比例、置中的正方形，--u 是一個 SVG 單位幾像素
+   */
+  private readonly flashBox: HTMLDivElement;
+  private readonly flashSquare: HTMLDivElement;
+  private flashOf = new WeakMap<SVGGElement, HTMLDivElement>();
+  /** 主圖層的瓶子 → 特效層裡同位置、同 class（顏色照舊）的那一組 */
+  private fxOf = new WeakMap<SVGGElement, SVGGElement>();
+  /** 掃描動畫：掃到光點的時間照它的進度算；沒有（瀏覽器不支援）就不閃 */
+  private sweepClock: Animation | null = null;
+  private sweepAnims: Animation[] = [];
+  /** 雷達有沒有顯示（切到地圖時沒有）：ResizeObserver 更新，不用每一格量大小（量大小會逼瀏覽器每一格重新排版） */
+  private shown = true;
+  /** 亮一下的光點本體：分兩段變暗，每一段才改一次樣式，不是每一格都改 */
+  private lit: Array<{ el: SVGElement; at: number; ms: number; base: string; blur: string; level: number }> = [];
+  /** 進行中的光點閃爍目前在第幾段（-1 是還沒開始） */
+  private blinkStep = -1;
   private readonly blipLayer: SVGGElement;
   private readonly scaleLabels: SVGGElement;
   private readonly rings: SVGGElement;
@@ -213,23 +243,37 @@ export class Radar {
     onBottle?: (id: number) => void,
     private readonly onPan?: (bearing: number, km: number, done: boolean) => void,
   ) {
-    this.svg = el('svg', { viewBox: `0 0 ${SIZE} ${SIZE}`, class: 'radar', role: 'img', 'aria-label': '雷達畫面' });
-    const wedgeEnd = polar(45, R);
-    this.svg.innerHTML = `
+    const layer = (cls: string): SVGSVGElement => el('svg', { viewBox: `0 0 ${SIZE} ${SIZE}`, class: cls, 'aria-hidden': 'true' }) as SVGSVGElement;
+    this.base = layer('radar radar-layer radar-base');
+    this.base.innerHTML = `
       <defs>
         <radialGradient id="rg-face" cx="50%" cy="50%" r="50%">
           <stop offset="0" class="face-stop-1" />
           <stop offset="1" class="face-stop-2" />
         </radialGradient>
-        <linearGradient id="rg-sweep" gradientUnits="userSpaceOnUse" x1="${C}" y1="${C}" x2="${C + R}" y2="${C - R}">
-          <stop offset="0" class="sweep-stop-1" />
-          <stop offset="1" class="sweep-stop-2" />
-        </linearGradient>
+      </defs>
+      <circle class="bezel" cx="${C}" cy="${C}" r="${R + 16}" />
+      <circle class="face" cx="${C}" cy="${C}" r="${R}" fill="url(#rg-face)" />`;
+    this.sweepSvg = layer('radar radar-sweep');
+    this.sweepBox = document.createElement('div');
+    this.sweepBox.className = 'radar-layer radar-sweep-box';
+    this.sweepSquare = document.createElement('div');
+    this.sweepSquare.className = 'radar-square';
+    this.sweepBox.append(this.sweepSvg, this.sweepSquare);
+    this.fx = layer('radar radar-layer radar-fx');
+    this.flashBox = document.createElement('div');
+    this.flashBox.className = 'radar radar-layer radar-flashes';
+    this.flashSquare = document.createElement('div');
+    this.flashSquare.className = 'radar-square radar-flash-square';
+    this.flashBox.appendChild(this.flashSquare);
+    this.fxLayer = el('g', { class: 'fx' }) as SVGGElement;
+    this.fx.appendChild(this.fxLayer);
+    this.svg = el('svg', { viewBox: `0 0 ${SIZE} ${SIZE}`, class: 'radar radar-main', role: 'img', 'aria-label': '雷達畫面' });
+    this.svg.innerHTML = `
+      <defs>
         <clipPath id="rg-clip"><circle cx="${C}" cy="${C}" r="${R}" /></clipPath>
         <filter id="rg-fog" x="-100%" y="-100%" width="300%" height="300%"><feGaussianBlur stdDeviation="5" /></filter>
       </defs>
-      <circle class="bezel" cx="${C}" cy="${C}" r="${R + 16}" />
-      <circle class="face" cx="${C}" cy="${C}" r="${R}" fill="url(#rg-face)" />
       <g class="grid">
         <g class="rings"></g>
         <circle cx="${C}" cy="${C}" r="${R}" class="outer" />
@@ -237,26 +281,6 @@ export class Radar {
         <line x1="${C - R}" y1="${C}" x2="${C + R}" y2="${C}" />
       </g>
       <g class="streets" clip-path="url(#rg-clip)"></g>
-      <g clip-path="url(#rg-clip)" class="sweeps">
-        <path class="sweep-wedge" fill="url(#rg-sweep)" d="M ${C} ${C} L ${C} ${C - R} A ${R} ${R} 0 0 1 ${wedgeEnd.x.toFixed(2)} ${wedgeEnd.y.toFixed(2)} Z">
-          <animateTransform attributeName="transform" type="rotate" from="0 ${C} ${C}" to="360 ${C} ${C}" dur="4s" repeatCount="indefinite" />
-        </path>
-        <g class="sweep-ripple">
-          <circle cx="${C}" cy="${C}" r="0">
-            <animate attributeName="r" from="0" to="${R}" dur="3.2s" repeatCount="indefinite" />
-            <animate attributeName="opacity" from="0.7" to="0" dur="3.2s" repeatCount="indefinite" />
-          </circle>
-          <circle cx="${C}" cy="${C}" r="0">
-            <animate attributeName="r" from="0" to="${R}" dur="3.2s" begin="1.6s" repeatCount="indefinite" />
-            <animate attributeName="opacity" from="0.7" to="0" dur="3.2s" begin="1.6s" repeatCount="indefinite" />
-          </circle>
-        </g>
-        <g class="sweep-needle">
-          <line x1="${C}" y1="${C}" x2="${C}" y2="${C - R + 6}" />
-          <circle cx="${C}" cy="${C - R + 14}" r="4" />
-          <animateTransform attributeName="transform" type="rotate" from="0 ${C} ${C}" to="360 ${C} ${C}" dur="6s" repeatCount="indefinite" />
-        </g>
-      </g>
       <g class="scale-labels"></g>
       <g class="outline" clip-path="url(#rg-clip)"></g>
       <g class="routes" clip-path="url(#rg-clip)"></g>
@@ -294,18 +318,88 @@ export class Radar {
       if (g?.dataset.id) onSelect(Number(g.dataset.id), (g.dataset.group ?? '').split(',').map(Number).filter(Boolean));
     });
     if (onZoom) this.wireZoom(onZoom);
-    container.appendChild(this.svg);
+    const stack = document.createElement('div');
+    stack.className = 'radar-stack';
+    stack.append(this.base, this.sweepBox, this.fx, this.flashBox, this.svg);
+    container.appendChild(stack);
+    new ResizeObserver(([e]) => {
+      const { width: w, height: h } = e.contentRect;
+      this.shown = w > 0;
+      // SVG 照比例縮放、置中（viewBox 是正方形）：閃光層的正方形跟著對齊
+      const size = Math.min(w, h);
+      for (const sq of [this.flashSquare, this.sweepSquare]) {
+        Object.assign(sq.style, { width: `${size}px`, height: `${size}px`, left: `${(w - size) / 2}px`, top: `${(h - size) / 2}px` });
+        sq.style.setProperty('--u', `${size / SIZE}px`);
+      }
+    }).observe(stack);
     this.setStyle(this.style);
     this.setScale(this.scaleKm);
     this.placeRose();
-    requestAnimationFrame(this.tickFlash);
+    // 每 40 毫秒看一次掃到哪（閃光最多晚 0.04 秒，看不出來）：用 requestAnimationFrame 的話，
+    // 就算畫面沒變也逼瀏覽器每一格準備一次畫面；背景分頁時瀏覽器會自己放慢
+    window.setInterval(this.tickFlash, FLASH_TICK_MS);
   }
 
   setStyle(s: RadarStyle): void {
     this.style = s;
-    this.svg.setAttribute('class', `radar sweep-${s.sweep} blip-${s.blip}${s.rose ? ' has-rose' : ''}`);
+    const cls = `radar sweep-${s.sweep} blip-${s.blip}${s.rose ? ' has-rose' : ''}`;
+    const live = this.svg.classList.contains('heading-live');
+    this.svg.setAttribute('class', `${cls} radar-main${live ? ' heading-live' : ''}`);
+    this.base.setAttribute('class', `${cls} radar-layer radar-base`);
+    this.sweepSvg.setAttribute('class', `${cls} radar-sweep`);
+    this.fx.setAttribute('class', `${cls} radar-layer radar-fx`);
+    this.flashBox.setAttribute('class', `${cls} radar-layer radar-flashes`);
+    this.buildSweep();
     this.lastSweepMs = -1;
+    this.blinkStep = -1;
     this.draw();
+  }
+
+  /**
+   * 只建目前主題的那一種掃描。扇形、指針整層一起轉（CSS transform 交給顯示晶片，不用重畫）；
+   * 波紋是兩個圈（div）放大、變淡，一個晚半圈：線跟著圈放大變粗（同時越來越淡），像水波擴散
+   */
+  private buildSweep(): void {
+    for (const a of this.sweepAnims) a.cancel();
+    this.sweepAnims = [];
+    this.sweepClock = null;
+    const svg = this.sweepSvg;
+    const sweep = this.style.sweep;
+    const period = SWEEP_SEC[sweep] * 1000;
+    this.sweepSquare.replaceChildren();
+    if (sweep === 'ripple') {
+      svg.replaceChildren();
+      for (let i = 0; i < 2; i++) {
+        const ring = document.createElement('span');
+        ring.className = 'ripple';
+        Object.assign(ring.style, { left: `calc(${C - R} * var(--u))`, top: `calc(${C - R} * var(--u))`, width: `calc(${2 * R} * var(--u))`, height: `calc(${2 * R} * var(--u))` });
+        this.sweepSquare.appendChild(ring);
+      }
+    } else if (sweep === 'needle') {
+      svg.innerHTML = `<g class="sweep-needle"><line x1="${C}" y1="${C}" x2="${C}" y2="${C - R + 6}" /><circle cx="${C}" cy="${C - R + 14}" r="4" /></g>`;
+    } else {
+      const end = polar(45, R);
+      svg.innerHTML = `
+        <defs>
+          <linearGradient id="rg-sweep" gradientUnits="userSpaceOnUse" x1="${C}" y1="${C}" x2="${C + R}" y2="${C - R}">
+            <stop offset="0" class="sweep-stop-1" />
+            <stop offset="1" class="sweep-stop-2" />
+          </linearGradient>
+        </defs>
+        <path class="sweep-wedge" fill="url(#rg-sweep)" d="M ${C} ${C} L ${C} ${C - R} A ${R} ${R} 0 0 1 ${end.x.toFixed(2)} ${end.y.toFixed(2)} Z" />`;
+    }
+    if (typeof this.sweepBox.animate !== 'function') return;
+    if (sweep === 'ripple') {
+      // 波紋一圈 3.2 秒，兩個圈差半圈，所以每 1.6 秒（SWEEP_SEC）掃過一次
+      const grow = [
+        { transform: 'scale(0)', opacity: 0.7 },
+        { transform: 'scale(1)', opacity: 0 },
+      ];
+      this.sweepAnims = [...this.sweepSquare.children].map((c, i) => c.animate(grow, { duration: period * 2, iterations: Infinity, iterationStart: i * 0.5 }));
+    } else {
+      this.sweepAnims = [this.sweepBox.animate([{ transform: 'rotate(0deg)' }, { transform: 'rotate(360deg)' }], { duration: period, iterations: Infinity })];
+    }
+    this.sweepClock = this.sweepAnims[0] ?? null;
   }
 
   private wireZoom(onZoom: (factor: number, done: boolean) => void): void {
@@ -511,9 +605,9 @@ export class Radar {
       if (b.state === 'far') {
         // 一團模糊的訊號：大小跟著比例，只看得出大概在哪
         const fog = Math.max(7, Math.min(22, (BOTTLE_FOG_KM / this.scaleKm) * (R - 8)));
-        g.appendChild(el('circle', { class: 'fog', r: fog.toFixed(1), filter: 'url(#rg-fog)' }));
+        this.fxTwin(g).appendChild(el('circle', { class: 'fog', r: fog.toFixed(1), filter: 'url(#rg-fog)' }));
       } else {
-        if (b.state === 'pick') g.appendChild(el('circle', { class: 'reach', r: 9 }));
+        if (b.state === 'pick') this.fxTwin(g).appendChild(el('circle', { class: 'reach', r: 9 }));
         const body = el('g', { class: 'body' });
         body.appendChild(el('path', { class: 'glass', d: BOTTLE_PATH, transform: 'rotate(-20)' }));
         g.appendChild(body);
@@ -712,31 +806,68 @@ export class Radar {
     return a * period;
   }
 
-  /** 掃到時閃一下：g 裡要有 .body（光點本身），這裡補上光暈和亮環，記下一圈裡第幾毫秒會被掃到 */
+  /** 主圖層的 g 在特效層的那一組（同位置、同 class），第一次用到才建 */
+  private fxTwin(g: SVGGElement): SVGGElement {
+    let fx = this.fxOf.get(g);
+    if (!fx) {
+      fx = el('g', { class: g.getAttribute('class') ?? '', transform: g.getAttribute('transform') ?? '' }) as SVGGElement;
+      this.fxOf.set(g, fx);
+      this.fxLayer.appendChild(fx);
+    }
+    return fx;
+  }
+
+  /** 閃光層的一個圓：半徑 r 個 SVG 單位，圓心在那一組的位置 */
+  private fxSpan(cls: string, r: number): HTMLSpanElement {
+    const sp = document.createElement('span');
+    sp.className = cls;
+    Object.assign(sp.style, { width: `calc(${2 * r} * var(--u))`, height: `calc(${2 * r} * var(--u))`, left: `calc(${-r} * var(--u))`, top: `calc(${-r} * var(--u))` });
+    return sp;
+  }
+
+  /** 掃到時閃一下：g 裡要有 .body（光點本身），光暈和亮環畫在閃光層（同位置、同 class，顏色照舊），記下一圈裡第幾毫秒會被掃到 */
   private addFlash(g: SVGGElement, angleDeg: number, radiusPx: number, r: number): void {
-    g.insertBefore(el('circle', { class: 'flash-ring', r }), g.firstChild);
-    g.insertBefore(el('circle', { class: 'flash', r }), g.firstChild);
+    const p = polar(angleDeg, radiusPx);
+    const twin = document.createElement('div');
+    twin.className = g.getAttribute('class') ?? '';
+    Object.assign(twin.style, { left: `calc(${p.x.toFixed(1)} * var(--u))`, top: `calc(${p.y.toFixed(1)} * var(--u))` });
+    twin.append(this.fxSpan('fx-glow', r), this.fxSpan('fx-ring', r * RING_GROW));
+    this.flashSquare.appendChild(twin);
+    this.flashOf.set(g, twin);
     const periodMs = SWEEP_SEC[this.style.sweep] * 1000;
     g.dataset.hit = String((((this.sweepHitSec(angleDeg, radiusPx) * 1000) % periodMs) + periodMs) % periodMs);
   }
 
   /**
-   * 每一格畫面看掃描線走到哪，上一格到這一格之間掃過的才閃一下（只跑一次的短動畫）。
+   * 每 40 毫秒看掃描線走到哪，上一次到這一次之間掃過的才閃一下（只跑一次的短動畫）。
    * 以前每個光點掛三個一直重複的動畫，點一多每一格畫面都要算幾百個動畫，手機會卡。
    */
   private readonly tickFlash = (): void => {
-    requestAnimationFrame(this.tickFlash);
     // 切到地圖、背景分頁時不用閃
-    if (document.hidden || typeof this.svg.animate !== 'function' || this.svg.getBoundingClientRect().width === 0) {
+    if (document.hidden || !this.shown || !this.sweepClock) {
       this.lastSweepMs = -1;
       return;
+    }
+    const now = performance.now();
+    this.stepLit(now);
+    // 進行中的光點閃爍：每 0.6 秒換一段（主圖層一秒改不到兩次）
+    if (!this.calm?.matches) {
+      const step = Math.floor(now / 600) % 2;
+      if (step !== this.blinkStep) {
+        this.blinkStep = step;
+        this.svg.classList.toggle('blink-dim', step === 1);
+        this.svg.classList.toggle('blink-on', step === 0);
+      }
+    } else if (this.blinkStep !== -1) {
+      this.blinkStep = -1;
+      this.svg.classList.remove('blink-dim', 'blink-on');
     }
     if (this.flashDirty) {
       this.flashDirty = false;
       this.flashTargets = Array.from(this.svg.querySelectorAll<SVGGElement>('[data-hit]'), (g) => ({ g, at: Number(g.dataset.hit) }));
     }
     const periodMs = SWEEP_SEC[this.style.sweep] * 1000;
-    const t = (this.svg.getCurrentTime() * 1000) % periodMs;
+    const t = Number(this.sweepClock.currentTime ?? 0) % periodMs;
     const prev = this.lastSweepMs;
     this.lastSweepMs = t;
     if (prev < 0) return;
@@ -746,15 +877,35 @@ export class Radar {
     }
   };
 
+  /**
+   * 掃到時閃一下：光暈、亮環在閃光層用動畫放大變淡；光點本體在主圖層，只分兩段變亮再回原樣
+   * （本體每一格變一次的話，整個主圖層每一格都要重畫）
+   */
   private flash(g: SVGGElement): void {
-    for (const part of this.calm?.matches ? FLASH_PARTS_CALM : FLASH_PARTS) {
-      const target = g.querySelector<SVGElement>(part.sel);
-      if (!target) continue;
-      // 變淡、模糊的光點閃的時候保留原本的模糊，閃完回到原樣
-      const blur = target.dataset.blur;
-      const keep = (k: Keyframe): Keyframe => (blur && typeof k.filter === 'string' ? { ...k, filter: `${k.filter} blur(${blur}px)` } : k);
-      target.animate([keep(part.from), keep(part.to)], { duration: part.ms, easing: 'linear' });
+    const calm = !!this.calm?.matches;
+    const fx = this.flashOf.get(g);
+    for (const part of calm ? FLASH_PARTS_CALM : FLASH_PARTS) {
+      const target = fx?.querySelector<SVGElement>(part.sel);
+      if (target) target.animate([part.from, part.to], { duration: part.ms, easing: 'linear' });
     }
+    const body = g.querySelector<SVGElement>('.body');
+    if (!body || this.lit.some((l) => l.el === body)) return;
+    // 變淡、模糊的光點閃的時候保留原本的模糊，閃完回到原樣
+    this.lit.push({ el: body, at: performance.now(), ms: calm ? BODY_FLASH_MS_CALM : BODY_FLASH_MS, base: body.style.filter, blur: body.dataset.blur ? ` blur(${body.dataset.blur}px)` : '', level: -1 });
+  }
+
+  /** 亮一下的光點本體：前三分之一最亮，中間三分之一一半亮，之後回原樣 */
+  private stepLit(now: number): void {
+    if (this.lit.length === 0) return;
+    this.lit = this.lit.filter((l) => {
+      const k = (now - l.at) / l.ms;
+      const level = k < 1 / 3 ? 2 : k < 2 / 3 ? 1 : 0;
+      if (level !== l.level) {
+        l.level = level;
+        l.el.style.filter = level === 0 ? l.base : `${BODY_FLASH[level]}${l.blur}`;
+      }
+      return level > 0 && l.el.isConnected;
+    });
   }
 
   private appendMark(g: SVGGElement, out: boolean, spot = false, office = false): void {
@@ -798,6 +949,12 @@ export class Radar {
 
   private drawNow(): void {
     this.flashDirty = true;
+    // 特效層、閃光層跟著主圖層整個重建（光點、瓶子、地標各自建它們的那一組）
+    this.fxLayer.replaceChildren();
+    this.fxOf = new WeakMap();
+    this.flashSquare.replaceChildren();
+    this.flashOf = new WeakMap();
+    this.lit = [];
     this.drawStreets();
     this.drawOutline();
     this.drawRoutes();
@@ -866,7 +1023,6 @@ export class Radar {
         node.dataset.id = String(lead.id);
         node.dataset.group = ids;
         node.appendChild(el('circle', { class: 'hit', r: 22 }));
-        node.appendChild(el('circle', { class: 'ping', r: 6 }));
         const body = el('g', { class: 'body' });
         this.appendMark(body, p.out, it.spot, it.office);
         // 離開始越久越淡、越模糊；選取時看清楚
@@ -877,6 +1033,8 @@ export class Radar {
         }
         node.appendChild(body);
         this.addFlash(node, p.angle, p.r, p.out ? 5 : 7);
+        // 進行中的擴散圈（從 6 放大到 22）：跟光暈同一組
+        this.flashOf.get(node)?.appendChild(this.fxSpan('ping', 22));
         const lbl = it === lead ? labelLines.get(it.id) : undefined;
         // 還有多久開始：寫在光點正下方，不跟著變淡；有名稱標籤時不寫，免得疊在一起
         if (it === lead && it.badge && !lbl) {
