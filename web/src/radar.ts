@@ -104,8 +104,16 @@ export function globeFrac(scaleKm: number): number {
   return (SPACE_FROM_KM / scaleKm) ** (1 - t) * (EARTH_KM / scaleKm) ** t;
 }
 
-/** 太空的畫法（space.ts）：照範圍、地球半徑、視野移開了多少（公里，黃道面上，x 往春分點方向、y 往上）畫成 SVG */
-export type SpaceDraw = (scaleKm: number, earthR: number, offset: { x: number; y: number }) => string;
+/** 太陽系那幾層的看法：中心是哪一顆（null 是地球、你），繞中心左右轉、往下傾斜（弧度） */
+export interface SpaceView {
+  focus: string | null;
+  yaw: number;
+  pitch: number;
+}
+/** 太空的畫法（space.ts）：照範圍、地球半徑、3D 的看法畫成 SVG */
+export type SpaceDraw = (scaleKm: number, earthR: number, view: SpaceView) => string;
+/** 傾斜最多幾度（快要從側面看） */
+const MAX_PITCH = (80 * Math.PI) / 180;
 const SVG_NS = 'http://www.w3.org/2000/svg';
 const ROSE: Array<[string, number]> = [
   ['N', 0],
@@ -251,9 +259,9 @@ export class Radar {
   /** 太空（比全球再遠）的畫法；還沒載入是 null */
   private spaceDraw: SpaceDraw | null = null;
   private readonly spaceLayer: SVGGElement;
-  /** 地球只剩一個點時（太陽系那幾層）拖曳移動的是視野：中心離地球多遠（公里，黃道面） */
-  private spaceOffset = { x: 0, y: 0 };
-  /** 視野移開、拉回地球時通知外面（「回到我的位置」要不要顯示） */
+  /** 太陽系那幾層的 3D 看法：拖曳繞中心轉、點星球換中心 */
+  private spaceView: SpaceView = { focus: null, yaw: 0, pitch: 0 };
+  /** 看法變了、拉回地球時通知外面（「回到我的位置」要不要顯示） */
   onSpaceMove: (() => void) | null = null;
   private readonly stack: HTMLDivElement;
   private readonly pointers = new Map<number, { x: number; y: number }>();
@@ -364,6 +372,11 @@ export class Radar {
     this.landmarkLayer.addEventListener('click', (e) => {
       const g = (e.target as Element).closest('.landmark') as SVGGElement | null;
       if (g?.dataset.id) onLandmark?.(g.dataset.id);
+    });
+    // 太空：點星球飛過去（剛拖完放開的那一下不算）
+    this.spaceLayer.addEventListener('click', (e) => {
+      const g = (e.target as Element).closest('.space-hit') as SVGGElement | null;
+      if (g?.dataset.body && !this.justPanned) this.focusOn(g.dataset.body);
     });
     for (const [letter, deg] of ROSE) {
       const t = el('text', { class: `rose-letter rose-${letter.toLowerCase()}`, 'text-anchor': 'middle', 'dominant-baseline': 'middle', 'data-deg': deg });
@@ -552,13 +565,15 @@ export class Radar {
     this.panLast = { x: e.clientX, y: e.clientY };
     const r = Math.hypot(dx, dy);
     if (r === 0) return;
-    // 地球只剩一個點（太陽系那幾層）或視野已經移開：移動視野，不動你的位置。太空那一層跟著指北針轉了 -heading，拖的方向要轉回來
+    // 地球只剩一個點（太陽系那幾層）或中心換到別的星球：3D 轉視角（左右拖繞中心轉、上下拖傾斜），不動你的位置。
+    // 太空那一層跟著指北針轉了 -heading，拖的方向要轉回來；拖過整個雷達的寬度轉半圈
     if (this.earthHidden) {
       const h = (this.heading * Math.PI) / 180;
       const lx = dx * Math.cos(h) - dy * Math.sin(h);
       const ly = dx * Math.sin(h) + dy * Math.cos(h);
-      const kmPerUnit = this.scaleKm / (R - 8);
-      this.spaceOffset = { x: this.spaceOffset.x - lx * kmPerUnit, y: this.spaceOffset.y + ly * kmPerUnit };
+      const perUnit = Math.PI / (2 * R);
+      const v = this.spaceView;
+      this.spaceView = { ...v, yaw: v.yaw + lx * perUnit, pitch: Math.max(-MAX_PITCH, Math.min(MAX_PITCH, v.pitch + ly * perUnit)) };
       this.drawSpace();
       this.onSpaceMove?.();
       return;
@@ -584,9 +599,9 @@ export class Radar {
   /** 照比例畫：外圈是範圍，裡面三圈是 1/4、1/2、3/4 */
   setScale(km: number): void {
     this.scaleKm = km;
-    // 回到平常的範圍（全球以內）：一定以你為中心，移開的視野拉回來；太空裡移開了就一直移開（可以拖到木星再放大）
-    if (!this.inSpace && this.spaceMoved) {
-      this.spaceOffset = { x: 0, y: 0 };
+    // 中心是你、拉近到看得出地球的形狀（或回到全球以內）：從正上方看你，轉過的視角轉回來；中心換到別的星球就一直維持（可以飛到月球再放大）
+    if (!this.spaceView.focus && (this.spaceView.yaw || this.spaceView.pitch) && !this.tinyEarth) {
+      this.spaceView = { focus: null, yaw: 0, pitch: 0 };
       this.onSpaceMove?.();
     }
     this.rings.replaceChildren();
@@ -618,9 +633,9 @@ export class Radar {
     return radiusRatio(km, this.scaleKm);
   }
 
-  /** 比全球再遠：太空 */
+  /** 比全球再遠：太空；中心換到別的星球時（例如月球）拉近到全球以內也還是太空 */
   private get inSpace(): boolean {
-    return this.scaleKm > SPACE_FROM_KM;
+    return this.scaleKm > SPACE_FROM_KM || this.spaceView.focus !== null;
   }
 
   /** 太空裡地球小到看不出光點在哪 */
@@ -628,21 +643,41 @@ export class Radar {
     return this.inSpace && globeFrac(this.scaleKm) * (R - 8) < TINY_EARTH;
   }
 
-  /** 光點、路線、地標不畫：地球只剩一個點，或視野移開了（中心不是你） */
+  /** 光點、路線、地標不畫：地球只剩一個點，或看法變了（中心不是你、轉過視角） */
   private get earthHidden(): boolean {
     return this.tinyEarth || (this.inSpace && this.spaceMoved);
   }
 
-  /** 太陽系那幾層把視野移開了（中心不是地球） */
+  /** 太陽系那幾層的看法變了：中心換到別的星球，或轉過視角 */
   get spaceMoved(): boolean {
-    return this.spaceOffset.x !== 0 || this.spaceOffset.y !== 0;
+    const v = this.spaceView;
+    return v.focus !== null || v.yaw !== 0 || v.pitch !== 0;
   }
 
-  /** 視野拉回地球 */
+  /** 中心換到別的星球了（月球、行星）：外面照太空處理，拉近到全球以內也是 */
+  get spaceFocused(): boolean {
+    return this.spaceView.focus !== null;
+  }
+
+  /** 中心是哪一顆（null 是地球、你） */
+  get spaceFocusKey(): string | null {
+    return this.spaceView.focus;
+  }
+
+  /** 回到地球、從正上方看 */
   resetSpace(): void {
     if (!this.spaceMoved) return;
-    this.spaceOffset = { x: 0, y: 0 };
-    this.drawSpace();
+    this.spaceView = { focus: null, yaw: 0, pitch: 0 };
+    this.setScale(this.scaleKm);
+    this.onSpaceMove?.();
+  }
+
+  /** 點了星球：飛過去當中心（點地球就回到你），視角維持 */
+  private focusOn(key: string): void {
+    const focus = key === 'earth' ? null : key;
+    if (focus === this.spaceView.focus) return;
+    this.spaceView = { ...this.spaceView, focus };
+    this.setScale(this.scaleKm);
     this.onSpaceMove?.();
   }
 
@@ -655,12 +690,12 @@ export class Radar {
   /** 太空：畫在海岸線那一層，跟著指北針轉；平常清空 */
   private drawSpace(): void {
     this.stack.classList.toggle('space', this.inSpace);
-    this.stack.classList.toggle('space-moved', this.inSpace && this.spaceMoved);
+    this.stack.classList.toggle('space-moved', this.inSpace && this.spaceView.focus !== null);
     if (!this.inSpace || !this.spaceDraw) {
       if (this.spaceLayer.firstChild) this.spaceLayer.replaceChildren();
       return;
     }
-    this.spaceLayer.innerHTML = this.spaceDraw(this.scaleKm, globeFrac(this.scaleKm) * (R - 8), this.spaceOffset);
+    this.spaceLayer.innerHTML = this.spaceDraw(this.scaleKm, globeFrac(this.scaleKm) * (R - 8), this.spaceView);
     if (this.heading) this.spaceLayer.setAttribute('transform', `rotate(${(-this.heading).toFixed(1)} ${C} ${C})`);
     else this.spaceLayer.removeAttribute('transform');
   }
@@ -848,7 +883,7 @@ export class Radar {
   private drawStreets(): void {
     this.streetLayer.replaceChildren();
     const s = this.streets;
-    if (!s) return;
+    if (!s || this.inSpace) return;
     const k = (R - 8) / this.scaleKm;
     const h = (this.heading * Math.PI) / 180;
     const cos = Math.cos(h);

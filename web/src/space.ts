@@ -33,11 +33,28 @@ export function subsolar(at: Date): { lat: number; lng: number; eclLon: number }
 }
 
 /** 月球的黃經（度）、離地球多遠（公里）：簡化公式，誤差約 1、2 度 */
-export function moonPosition(at: Date): { lon: number; dist: number } {
+export function moonPosition(at: Date): { lon: number; lat: number; dist: number } {
   const d = daysJ2000(at);
   const L = 218.316 + 13.176396 * d;
   const M = (134.963 + 13.064993 * d) * RAD;
-  return { lon: norm360(L + 6.289 * Math.sin(M)), dist: 385_001 - 20_905 * Math.cos(M) };
+  const F = (93.272 + 13.22935 * d) * RAD;
+  return { lon: norm360(L + 6.289 * Math.sin(M)), lat: 5.128 * Math.sin(F), dist: 385_001 - 20_905 * Math.cos(M) };
+}
+
+type Vec3 = [number, number, number];
+
+/** 月球的軌道：繞地球一圈（平均距離），跟黃道面斜 5.1 度，升交點每天往回移一點 */
+function moonOrbit(at: Date): Vec3[] {
+  const node = (125.04 - 0.052954 * daysJ2000(at)) * RAD;
+  const inc = 5.145 * RAD;
+  const out: Vec3[] = [];
+  for (let i = 0; i < 96; i++) {
+    const u = (i / 96) * 2 * Math.PI;
+    const x1 = MOON_KM * Math.cos(u);
+    const y1 = MOON_KM * Math.sin(u) * Math.cos(inc);
+    out.push([x1 * Math.cos(node) - y1 * Math.sin(node), x1 * Math.sin(node) + y1 * Math.cos(node), MOON_KM * Math.sin(u) * Math.sin(inc)]);
+  }
+  return out;
 }
 
 /** 經緯度 → 以 center 為中心的正射投影：x 往東、y 往北（地球半徑 = 1），z > 0 是看得到的這一面 */
@@ -158,8 +175,8 @@ const PLANETS: Array<{ key: string; name: string; el: Elements }> = [
   { key: 'neptune', name: '海王星', el: [30.06992276, 0.00026291, 0.00859048, 0.00005105, 1.77004347, 0.00035372, -55.12002969, 218.45945325, 44.96476227, -0.32241464, 131.78422574, -0.00508664] },
 ];
 
-/** 一顆行星在黃道面上的日心位置（AU）：解克卜勒方程式；a 是軌道半長軸 */
-function helio(el: Elements, T: number): { x: number; y: number; a: number } {
+/** 軌道根數換成這一刻的形狀：半長軸、離心率、平近點角，和軌道面轉到黃道座標的係數 */
+function orbitOf(el: Elements, T: number) {
   const [a0, da, e0, de, i0, di, l0, dl, w0, dw, o0, dO] = el;
   const a = a0 + da * T;
   const e = e0 + de * T;
@@ -168,26 +185,38 @@ function helio(el: Elements, T: number): { x: number; y: number; a: number } {
   const node = o0 + dO * T;
   const omega = (wbar - node) * RAD;
   const om = node * RAD;
-  const M = norm180(l0 + dl * T - wbar) * RAD;
-  let E = M + e * Math.sin(M);
-  for (let i = 0; i < 8; i++) E -= (E - e * Math.sin(E) - M) / (1 - e * Math.cos(E));
-  const xp = a * (Math.cos(E) - e);
-  const yp = a * Math.sqrt(1 - e * e) * Math.sin(E);
-  const [co, so, cO, sO, ci] = [Math.cos(omega), Math.sin(omega), Math.cos(om), Math.sin(om), Math.cos(inc)];
-  return {
-    x: (co * cO - so * sO * ci) * xp + (-so * cO - co * sO * ci) * yp,
-    y: (co * sO + so * cO * ci) * xp + (-so * sO + co * cO * ci) * yp,
-    a,
+  const [co, so, cO, sO, ci, si] = [Math.cos(omega), Math.sin(omega), Math.cos(om), Math.sin(om), Math.cos(inc), Math.sin(inc)];
+  /** 偏近點角 E 的位置（日心黃道座標，AU） */
+  const at = (E: number): Vec3 => {
+    const xp = a * (Math.cos(E) - e);
+    const yp = a * Math.sqrt(1 - e * e) * Math.sin(E);
+    return [(co * cO - so * sO * ci) * xp + (-so * cO - co * sO * ci) * yp, (co * sO + so * cO * ci) * xp + (-so * sO + co * cO * ci) * yp, so * si * xp + co * si * yp];
   };
+  return { a, e, M: norm180(l0 + dl * T - wbar) * RAD, at };
 }
 
-/** 八大行星現在的日心黃經、離太陽多遠（AU） */
-export function planetPositions(when: Date): Array<{ key: string; name: string; lon: number; dist: number; x: number; y: number; a: number }> {
+/** 一顆行星的日心位置（AU）：解克卜勒方程式；a 是軌道半長軸 */
+function helio(el: Elements, T: number): { x: number; y: number; z: number; a: number } {
+  const o = orbitOf(el, T);
+  let E = o.M + o.e * Math.sin(o.M);
+  for (let i = 0; i < 8; i++) E -= (E - o.e * Math.sin(E) - o.M) / (1 - o.e * Math.cos(E));
+  const [x, y, z] = o.at(E);
+  return { x, y, z, a: o.a };
+}
+
+/** 八大行星現在的日心黃經、離太陽多遠（AU），和日心位置 */
+export function planetPositions(when: Date): Array<{ key: string; name: string; lon: number; dist: number; x: number; y: number; z: number; a: number }> {
   const T = daysJ2000(when) / 36525;
   return PLANETS.map((p) => {
     const h = helio(p.el, T);
     return { key: p.key, name: p.name, lon: norm360(Math.atan2(h.y, h.x) / RAD), dist: Math.hypot(h.x, h.y), ...h };
   });
+}
+
+/** 一顆行星的整圈軌道（日心，AU） */
+function orbitPath(key: string, when: Date): Vec3[] {
+  const o = orbitOf(PLANETS.find((p) => p.key === key)!.el, daysJ2000(when) / 36525);
+  return Array.from({ length: 128 }, (_, i) => o.at((i / 128) * 2 * Math.PI));
 }
 
 /** 雷達上的一個天體：圓點和名字（名字疊到別的就換位置，都疊到就不寫） */
@@ -236,6 +265,9 @@ const LOOKS: Record<string, { km: number; min: number; tint: string }> = {
   neptune: { km: 24_622, min: 4.2, tint: '#5876d6' },
 };
 
+/** 天體的真實半徑（公里）：中心換到這顆時，最多放大到剛好看得到整顆 */
+export const bodyRadiusKm = (key: string): number => LOOKS[key]?.km ?? 0;
+
 /** 圓裡面一條水平的弦（木星的條紋）：離圓心 dy，畫在圓裡面那一段 */
 function chord(x: number, y: number, r: number, dy: number): string {
   const w = Math.sqrt(Math.max(0, r * r - dy * dy));
@@ -269,7 +301,16 @@ function bodySvg(key: string, x: number, y: number, r: number, sun: { x: number;
   }
   if (key === 'neptune' && r >= 6) out += `<path class="space-detail" d="${chord(x, y, r, r * 0.2)}" /><ellipse class="space-spot" cx="${f1(x - r * 0.3)}" cy="${f1(y - r * 0.2)}" rx="${f1(r * 0.2)}" ry="${f1(r * 0.12)}" />`;
   if (key === 'mars' && r >= 5) out += `<ellipse class="space-cap" cx="${f1(x)}" cy="${f1(y - r * 0.82)}" rx="${f1(r * 0.4)}" ry="${f1(r * 0.16)}" />`;
-  if (key === 'moon' && r >= 4) out += `<circle class="space-detail" cx="${f1(x - r * 0.3)}" cy="${f1(y - r * 0.2)}" r="${f1(r * 0.22)}" /><circle class="space-detail" cx="${f1(x + r * 0.35)}" cy="${f1(y + r * 0.3)}" r="${f1(r * 0.15)}" />`;
+  if (key === 'moon' && r >= 4) {
+    // 放大看得清楚：暗暗的月海、更多坑
+    if (r >= 20) {
+      for (const [mx, my, mrx, mry] of [[-0.25, -0.3, 0.32, 0.22], [0.2, -0.1, 0.22, 0.18], [-0.05, 0.25, 0.26, 0.14]]) {
+        out += `<ellipse class="space-mare" cx="${f1(x + r * mx)}" cy="${f1(y + r * my)}" rx="${f1(r * mrx)}" ry="${f1(r * mry)}" />`;
+      }
+    }
+    const craters = r >= 20 ? [[-0.3, -0.2, 0.22], [0.35, 0.3, 0.15], [0.1, 0.6, 0.1], [0.55, -0.35, 0.09], [-0.6, 0.25, 0.12], [-0.1, -0.65, 0.07], [0.3, 0.05, 0.06]] : [[-0.3, -0.2, 0.22], [0.35, 0.3, 0.15]];
+    for (const [cx, cy, cr] of craters) out += `<circle class="space-detail" cx="${f1(x + r * cx)}" cy="${f1(y + r * cy)}" r="${f1(r * cr)}" />`;
+  }
   // 背對太陽的那一半：從朝太陽的方向轉 90 度到 -90 度，經過背面那一邊
   if (sun && r >= 3) {
     const a = Math.atan2(sun.y - y, sun.x - x);
@@ -282,6 +323,13 @@ function bodySvg(key: string, x: number, y: number, r: number, sun: { x: number;
   return out;
 }
 
+/** 太陽系那幾層的看法：中心是哪一顆（null 是地球、你）、繞著中心左右轉幾度、往下傾斜幾度（0 是從黃道北邊正上方往下看） */
+export interface SpaceView {
+  focus: string | null;
+  yaw: number;
+  pitch: number;
+}
+
 export interface SpaceOpts {
   /** 你的位置（地球的正中間） */
   center: LatLng;
@@ -292,82 +340,90 @@ export interface SpaceOpts {
   scaleKm: number;
   /** 地球在雷達上的半徑（雷達照這個擺光點） */
   rg: number;
-  /** 太陽系那幾層拖曳移開的視野：中心離地球多遠（公里，黃道面，x 往春分點方向、y 往上） */
-  offset?: { x: number; y: number };
+  view?: SpaceView;
 }
 
+/** 太陽系的天體在這一刻的位置（以地球為中心的黃道座標，公里） */
+function bodyPositions(when: Date): Map<string, Vec3> {
+  const ps = planetPositions(when);
+  const e = ps.find((p) => p.key === 'earth')!;
+  const out = new Map<string, Vec3>();
+  out.set('earth', [0, 0, 0]);
+  out.set('sun', [-e.x * AU_KM, -e.y * AU_KM, -e.z * AU_KM]);
+  for (const p of ps) if (p.key !== 'earth') out.set(p.key, [(p.x - e.x) * AU_KM, (p.y - e.y) * AU_KM, (p.z - e.z) * AU_KM]);
+  const m = moonPosition(when);
+  const cl = Math.cos(m.lat * RAD);
+  out.set('moon', [m.dist * cl * Math.cos(m.lon * RAD), m.dist * cl * Math.sin(m.lon * RAD), m.dist * Math.sin(m.lat * RAD)]);
+  return out;
+}
+
+const NAMES: Record<string, string> = { sun: '太陽', moon: '月球', ...Object.fromEntries(PLANETS.map((p) => [p.key, p.name])) };
+
 /**
- * 太空：地球（夠大才畫海岸線、經緯線、晝夜），月球、太陽、行星照真實距離擺在地球周圍（黃道面，春分點方向在右邊），
- * 軌道用虛線，星球照真實大小（太小就畫最小的大小）；不在雷達範圍裡的不畫
+ * 太空：地球（夠大、從正上方看你的時候畫海岸線、經緯線、晝夜），月球、太陽、行星照真實距離擺（黃道座標，春分點方向在右邊），
+ * 軌道用虛線，星球照真實大小（太小就畫最小的大小）。view 是 3D 的看法：繞中心轉、傾斜，中心可以換成別的星球；
+ * 遠的先畫，每顆星球可以點（data-body），不在雷達範圍裡的不畫
  */
 export function spaceMarkup(o: SpaceOpts): string {
   const k = INNER / o.scaleKm;
+  const view = o.view ?? { focus: null, yaw: 0, pitch: 0 };
+  const topDown = view.yaw === 0 && view.pitch === 0;
+  const pos = bodyPositions(o.when);
+  const F = (view.focus && pos.get(view.focus)) || ([0, 0, 0] as Vec3);
+  const [cy, sy, cp, sp] = [Math.cos(view.yaw), Math.sin(view.yaw), Math.cos(view.pitch), Math.sin(view.pitch)];
+  /** 3D（公里，以地球為中心）→ 畫面座標和深度（越大越靠近看的人） */
+  const proj = (p: Vec3): { x: number; y: number; d: number } => {
+    const x = p[0] - F[0];
+    const y = p[1] - F[1];
+    const z = p[2] - F[2];
+    const x1 = x * cy - y * sy;
+    const y1 = x * sy + y * cy;
+    return { x: C + x1 * k, y: C - (y1 * cp + z * sp) * k, d: -y1 * sp + z * cp };
+  };
+  const pathOf = (pts: Vec3[]): string => `M${pts.map((p) => { const q = proj(p); return `${f1(q.x)} ${f1(q.y)}`; }).join('L')}Z`;
   const inView = (x: number, y: number, r = 0): boolean => Math.hypot(x - C, y - C) - r <= INNER;
-  // 地球（你）在畫面上的位置：視野沒移開就在正中間
-  const ox = o.offset?.x ?? 0;
-  const oy = o.offset?.y ?? 0;
-  const moved = ox !== 0 || oy !== 0;
-  const ex = C - ox * k;
-  const ey = C + oy * k;
-  const planets = planetPositions(o.when);
-  const earth = planets.find((p) => p.key === 'earth')!;
-  const sun = { x: ex - earth.x * AU_KM * k, y: ey + earth.y * AU_KM * k };
   const radius = (key: string): number => Math.max(LOOKS[key].min, LOOKS[key].km * k);
   const named: Body[] = [];
   let lines = '';
+  // 地球：中心是你、從正上方看、大到看得出形狀，就畫海岸線、經緯線、晝夜（跟光點的位置一致）
+  const globe = !view.focus && topDown && o.rg >= TINY_EARTH;
+  if (globe) {
+    lines += `<path class="space-night" d="${nightPath(o.center, subsolar(o.when), o.rg)}" />`;
+    if (o.rg >= 30) lines += `<path class="space-grat" d="${graticule(o.center, o.rg)}" />`;
+    lines += `<path class="region-outline" d="${landPath(o.center, o.land, o.rg)}" />`;
+    lines += `<circle class="region-outline open space-limb" cx="${C}" cy="${C}" r="${f1(o.rg)}" />`;
+  }
+  // 軌道：月球繞地球、行星繞太陽；太小、太大（看起來是直線）的不畫
+  if (MOON_KM * k >= 12 && MOON_KM * k <= INNER * 3) {
+    const earth = pos.get('earth')!;
+    lines += `<path class="region-outline open space-orbit" d="${pathOf(moonOrbit(o.when).map((p) => [p[0] + earth[0], p[1] + earth[1], p[2] + earth[2]] as Vec3))}" />`;
+  }
+  const sun = pos.get('sun')!;
+  for (const p of PLANETS) {
+    const a = p.el[0] * AU_KM * k;
+    if (a < 6 || a > INNER * 12) continue;
+    lines += `<path class="region-outline open space-orbit" d="${pathOf(orbitPath(p.key, o.when).map((q) => [q[0] * AU_KM + sun[0], q[1] * AU_KM + sun[1], q[2] * AU_KM + sun[2]] as Vec3))}" />`;
+  }
+  // 星球：遠的先畫，近的蓋在上面
+  const sunAt = proj(sun);
+  const list = [...pos.entries()]
+    .filter(([key]) => !(key === 'earth' && globe))
+    .map(([key, p]) => ({ key, ...proj(p), r: radius(key) }))
+    .filter((b) => inView(b.x, b.y, b.r))
+    .sort((a, b) => a.d - b.d);
   let bodies = '';
-  // 地球：大到看得出形狀就畫海岸線、經緯線、晝夜（視野移開了就整顆搬過去）
-  if (o.rg >= TINY_EARTH) {
-    if (inView(ex, ey, o.rg)) {
-      const s = subsolar(o.when);
-      let globe = `<path class="space-night" d="${nightPath(o.center, s, o.rg)}" />`;
-      if (o.rg >= 30) globe += `<path class="space-grat" d="${graticule(o.center, o.rg)}" />`;
-      globe += `<path class="region-outline" d="${landPath(o.center, o.land, o.rg)}" />`;
-      globe += `<circle class="region-outline open space-limb" cx="${C}" cy="${C}" r="${f1(o.rg)}" />`;
-      lines += moved ? `<g transform="translate(${f1(ex - C)} ${f1(ey - C)})">${globe}</g>` : globe;
-      if (moved) bodies += `<circle class="space-me" cx="${f1(ex)}" cy="${f1(ey)}" r="4" />`;
-    }
-  } else if (inView(ex, ey)) {
-    bodies += bodySvg('earth', ex, ey, radius('earth'), sun);
-    // 視野移開了：雷達中間的圓點（你）不在地球上，在地球那裡畫一個
-    if (moved) bodies += `<circle class="space-me" cx="${f1(ex)}" cy="${f1(ey)}" r="3" />`;
+  for (const b of list) {
+    // 點星球飛過去：點擊範圍至少半徑 12
+    bodies += `<g class="space-hit" data-body="${b.key}"><circle class="hit" cx="${f1(b.x)}" cy="${f1(b.y)}" r="${f1(Math.max(b.r + 3, 12))}" />${bodySvg(b.key, b.x, b.y, b.r, b.key === 'sun' ? null : sunAt)}</g>`;
+    // 中心換到別的星球：雷達中間的圓點不是你，你畫在地球那裡
+    if (b.key === 'earth' && view.focus) bodies += `<circle class="space-me" cx="${f1(b.x)}" cy="${f1(b.y)}" r="3" />`;
+    const name = b.key === 'earth' ? (view.focus ? '地球（你）' : '地球') : NAMES[b.key];
+    const r = b.key === 'saturn' ? b.r * 2.2 : b.key === 'sun' ? b.r + 5 : b.r;
+    named.push({ x: b.x, y: b.y, r, cls: b.key, name, force: b.key === 'earth' && !!view.focus });
   }
-  // 地球小到看不出形狀：寫名字（中間的圓點是你）
-  if (o.rg < 24 && inView(ex, ey)) named.push({ x: ex, y: ey, r: Math.max(o.rg, radius('earth')), cls: 'earth', name: moved ? '地球（你）' : '地球', force: moved });
-  // 月球：軌道看得出來才畫
-  const moonR = MOON_KM * k;
-  if (moonR >= 12 && moonR <= INNER * 3 && Math.hypot(ex - C, ey - C) - moonR < INNER) {
-    lines += `<circle class="region-outline open space-orbit" cx="${f1(ex)}" cy="${f1(ey)}" r="${f1(moonR)}" />`;
-    const m = moonPosition(o.when);
-    const x = ex + m.dist * k * Math.cos(m.lon * RAD);
-    const y = ey - m.dist * k * Math.sin(m.lon * RAD);
-    const r = radius('moon');
-    if (inView(x, y, r)) {
-      bodies += bodySvg('moon', x, y, r, sun);
-      named.push({ x, y, r, cls: 'moon', name: '月球' });
-    }
-  }
-  // 太陽、行星：以地球為中心（行星的日心位置減掉地球的）
-  const sunDist = Math.hypot(sun.x - C, sun.y - C);
-  for (const p of planets) {
-    const orbit = p.a * AU_KM * k;
-    // 軌道：太小、太大（看起來是直線）、跟雷達範圍沒交集的不畫
-    if (orbit >= 6 && orbit <= INNER * 12 && sunDist - orbit < INNER && orbit - sunDist < INNER) {
-      lines += `<circle class="region-outline open space-orbit" cx="${f1(sun.x)}" cy="${f1(sun.y)}" r="${f1(orbit)}" />`;
-    }
-    if (p.key === 'earth') continue;
-    const x = ex + (p.x - earth.x) * AU_KM * k;
-    const y = ey - (p.y - earth.y) * AU_KM * k;
-    const r = radius(p.key);
-    if (!inView(x, y, r)) continue;
-    bodies += bodySvg(p.key, x, y, r, sun);
-    named.push({ x, y, r: p.key === 'saturn' ? r * 2.2 : r, cls: p.key, name: p.name });
-  }
-  const sunR = radius('sun');
-  if (inView(sun.x, sun.y, sunR)) {
-    bodies += bodySvg('sun', sun.x, sun.y, sunR, null);
-    // 名字照順序放：地球（你）最優先，再來是太陽
-    named.splice(named[0]?.cls === 'earth' ? 1 : 0, 0, { x: sun.x, y: sun.y, r: sunR + 5, cls: 'sun', name: '太陽' });
-  }
-  return `${lines}${bodies}${labels(named)}`;
+  // 名字照順序放：地球（你）最優先，再來是中心那顆、太陽
+  const rank = (b: Body): number => (b.force ? 0 : b.cls === view.focus ? 1 : b.cls === 'sun' ? 2 : 3);
+  named.sort((a, b) => rank(a) - rank(b));
+  // 地球大到看得出形狀時（從正上方看你）不寫名字
+  return `${lines}${bodies}${labels(named.filter((b) => !(b.cls === 'earth' && !view.focus && o.rg >= 24)))}`;
 }

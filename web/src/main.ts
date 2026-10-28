@@ -758,7 +758,7 @@ const outlineKm = (): number => Math.min(STREET_KM, shuangbeiKm());
 /** 範圍內的道路換成相對於圓心的公里數（範圍不大，用平面近似就夠準，拖曳時每一幀都要算） */
 function updateStreets(): void {
   // 選「雙北」、範圍再大的只畫縣市界、海岸線的虛線
-  const show = scaleSetting !== 'region' && scaleKm <= outlineKm();
+  const show = scaleSetting !== 'region' && scaleKm <= outlineKm() && !radar.spaceFocused;
   $('#radar-attrib').hidden = !show;
   if (!show) {
     if (streetsFor) radar.setStreets(null);
@@ -809,7 +809,8 @@ let spaceLoading = false;
 let spaceFor = '';
 
 function updateSpace(): void {
-  if (scaleKm <= WORLD_KM) return;
+  // 太空：比全球再遠，或中心換到別的星球（拉近看月球時範圍會比全球小）
+  if (scaleKm <= WORLD_KM && !radar.spaceFocused) return;
   if (!spaceMod) {
     if (spaceLoading) return;
     spaceLoading = true;
@@ -832,7 +833,7 @@ function updateSpace(): void {
   const center = { lat: origin.lat, lng: origin.lng };
   const land = landRings;
   const when = new Date();
-  radar.setSpace((km, rg, offset) => mod.spaceMarkup({ center, land, when, scaleKm: km, rg, offset }));
+  radar.setSpace((km, rg, view) => mod.spaceMarkup({ center, land, when, scaleKm: km, rg, view }));
 }
 
 /**
@@ -2704,9 +2705,13 @@ let zoomFrame = 0;
 function zoomRadar(factor: number, done: boolean, gesture = false): void {
   // 太空（比全球再遠）一次縮放的幅度大一點：從全球到整個太陽系差了幾十萬倍
   const f = gesture && (scaleKm > WORLD_KM || (scaleKm >= WORLD_KM && factor > 1)) ? factor ** 2 : factor;
-  customKm = Math.min(Math.max(scaleKm * f, MIN_ZOOM_KM), SPACE_MAX_KM);
+  // 太空裡中心換到別的星球（月球、木星…）：最多放大到剛好看得到整顆
+  const focus = radar.spaceFocusKey;
+  const minKm = focus && spaceMod ? spaceMod.bodyRadiusKm(focus) * 1.3 : MIN_ZOOM_KM;
+  customKm = Math.min(Math.max(scaleKm * f, minKm), SPACE_MAX_KM);
   if (done) {
-    const near = SCALE_SETTINGS.find((st) => Math.abs(scaleKmFor(st) / customKm - 1) < 0.06);
+    // 中心換到別的星球時不對齊按鈕（按鈕的範圍是以你為中心的）
+    const near = radar.spaceFocused ? undefined : SCALE_SETTINGS.find((st) => Math.abs(scaleKmFor(st) / customKm - 1) < 0.06);
     if (near) {
       setScale(near);
       return;
@@ -3646,7 +3651,7 @@ function wireEdit(c: { postId: string; token: string }, items: EditItem[], actio
  * 點的是按鈕、連結、欄位、雷達光點、地圖標記、清單的一列（會自己打開別的）或卡片裡面不關；
  * 拖動（移動雷達、地圖）不算點。回報、漂流瓶有打字的內容，不跟著關
  */
-const KEEP_OPEN = 'button, a, input, select, textarea, label, .sheet, .blip, .landmark, .bottle, .leaflet-marker-icon, .leaflet-interactive, .leaflet-popup, .leaflet-control, #event-list li';
+const KEEP_OPEN = 'button, a, input, select, textarea, label, .sheet, .blip, .landmark, .bottle, .space-hit, .leaflet-marker-icon, .leaflet-interactive, .leaflet-popup, .leaflet-control, #event-list li';
 function wireTapOutside(): void {
   let down: { x: number; y: number } | null = null;
   document.addEventListener('pointerdown', (e) => (down = { x: e.clientX, y: e.clientY }), true);
@@ -4226,7 +4231,13 @@ function wirePanelDrag(): void {
 }
 
 function wireControls(): void {
-  for (const b of scaleChips) b.addEventListener('click', () => setScale((b.dataset.scale as ScaleSetting) ?? 'region'));
+  // 按範圍按鈕：太空裡轉過的視角、換過的中心都回到你
+  for (const b of scaleChips) {
+    b.addEventListener('click', () => {
+      radar.resetSpace();
+      setScale((b.dataset.scale as ScaleSetting) ?? 'region');
+    });
+  }
   viewBtn.addEventListener('click', () => switchView(view === 'radar' ? 'map' : 'radar'));
   locateBtn.addEventListener('click', locateMe);
   homeBtn.addEventListener('click', goHome);

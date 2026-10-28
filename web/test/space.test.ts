@@ -117,29 +117,44 @@ describe('spaceMarkup', () => {
   });
 });
 
-describe('spaceMarkup when the view is dragged away from the Earth', () => {
+describe('spaceMarkup in 3D', () => {
   const when = new Date('2026-10-28T08:00:00Z');
   const base = { center: { lat: 25.04, lng: 121.52 }, land: [] as Array<Array<[number, number]>>, when };
-  it('can centre on Jupiter and zoom in to see its bands and Great Red Spot', () => {
-    const ps = planetPositions(when);
-    const e = ps.find((p) => p.key === 'earth')!;
-    const j = ps.find((p) => p.key === 'jupiter')!;
-    const AU = 149_597_870.7;
-    const offset = { x: (j.x - e.x) * AU, y: (j.y - e.y) * AU };
-    const near = spaceMarkup({ ...base, scaleKm: 1e6, rg: 164 * globeFrac(1e6), offset });
+  it('can fly to Jupiter and zoom in to see its bands and Great Red Spot', () => {
+    const near = spaceMarkup({ ...base, scaleKm: 1e6, rg: 164 * globeFrac(1e6), view: { focus: 'jupiter', yaw: 0, pitch: 0 } });
     expect(near).toContain('>木星<');
     expect(near).toContain('space-spot');
-    expect(near).toContain('space-detail');
+    expect(near).toContain('data-body="jupiter"');
     // 地球在 6 億公里外，不在畫面上
     expect(near).not.toContain('space-me');
   });
 
-  it('draws you on the Earth and names it when the view has moved', () => {
-    const moved = spaceMarkup({ ...base, scaleKm: 3e8, rg: 164 * globeFrac(3e8), offset: { x: 5e7, y: 0 } });
+  it('can fly to the Moon and zoom in below 全球 to see its maria and craters', () => {
+    const moon = spaceMarkup({ ...base, scaleKm: 5000, rg: 164, view: { focus: 'moon', yaw: 0, pitch: 0 } });
+    expect(moon).toContain('>月球<');
+    expect(moon).toContain('space-mare');
+    expect((moon.match(/space-detail/g) ?? []).length).toBeGreaterThanOrEqual(7);
+    // 地球的海岸線不畫（中心不是你）
+    expect(moon).not.toContain('space-limb');
+  });
+
+  it('draws you on the Earth and names it when the centre is somewhere else', () => {
+    const moved = spaceMarkup({ ...base, scaleKm: 3e8, rg: 164 * globeFrac(3e8), view: { focus: 'venus', yaw: 0, pitch: 0 } });
     expect(moved).toContain('>地球（你）<');
     expect(moved).toContain('space-me');
     const still = spaceMarkup({ ...base, scaleKm: 3e8, rg: 164 * globeFrac(3e8) });
     expect(still).toContain('>地球<');
     expect(still).not.toContain('space-me');
+  });
+
+  it('squashes the orbits into ellipses when tilted', () => {
+    const height = (d: string): number => {
+      const ys = [...d.matchAll(/[ML]([\d.-]+) ([\d.-]+)/g)].map((m) => Number(m[2]));
+      return Math.max(...ys) - Math.min(...ys);
+    };
+    const orbit = (m: string): string => [...m.matchAll(/space-orbit" d="([^"]+)"/g)].at(-1)![1];
+    const flat = spaceMarkup({ ...base, scaleKm: 5e9, rg: 164 * globeFrac(5e9) });
+    const tilted = spaceMarkup({ ...base, scaleKm: 5e9, rg: 164 * globeFrac(5e9), view: { focus: null, yaw: 0, pitch: 1.2 } });
+    expect(height(orbit(tilted))).toBeLessThan(height(orbit(flat)) * 0.5);
   });
 });

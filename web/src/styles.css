@@ -435,6 +435,10 @@ a.chip { display: inline-flex; align-items: center; text-decoration: none; }
 .radar .space-spot { fill: #b5532f; fill-opacity: 0.7; stroke: none; }
 .radar .space-cap { fill: #ffffff; fill-opacity: 0.85; stroke: none; }
 .radar .space-shade { fill: #000000; fill-opacity: 0.32; stroke: none; }
+.radar .space-mare { fill: #6f6b64; fill-opacity: 0.35; stroke: none; }
+/* 點星球飛過去 */
+.radar .space-hit { cursor: pointer; }
+.radar .space-hit .hit { fill: transparent; pointer-events: all; }
 /* 太陽系那幾層移開了視野：中間的圓點不是你，你畫在地球那裡 */
 .radar-stack.space-moved .radar-main .me { display: none; }
 .radar .space-me { fill: var(--radar-me); filter: drop-shadow(0 0 3px var(--radar-me)); }
