@@ -209,13 +209,6 @@ a.chip { display: inline-flex; align-items: center; text-decoration: none; }
 /* 「雙北」範圍的縣市界輪廓 */
 .radar .region-outline { fill: var(--accent); fill-opacity: 0.05; stroke: var(--accent); stroke-width: 1.5; stroke-opacity: 0.45; stroke-dasharray: 3 3; pointer-events: none; }
 .radar .region-outline.open { fill: none; }
-/* 底圖（範圍不比雙北大時）：區界虛線、海岸線、河流、區名，淡淡的不搶光點 */
-.radar .basemap path { fill: none; pointer-events: none; stroke-linejoin: round; stroke-linecap: round; }
-.radar .map-border { stroke: var(--radar-grid); stroke-width: 1; stroke-opacity: 0.4; stroke-dasharray: 4 3; }
-.radar .map-coast { stroke: var(--radar-grid); stroke-width: 1.2; stroke-opacity: 0.5; }
-.radar .map-river { stroke: var(--accent); stroke-width: 3; stroke-opacity: 0.3; }
-.radar .map-river.minor { stroke-width: 1.3; stroke-opacity: 0.25; }
-.radar .map-label { fill: var(--radar-text); font-size: 10px; font-weight: 600; opacity: 0.7; text-anchor: middle; dominant-baseline: middle; pointer-events: none; }
 .radar .route-live { opacity: 0.9; }
 .radar .scale-label { fill: var(--radar-text); font-size: 11px; }
 .radar .rose-letter { fill: var(--radar-rose); font-size: 13px; font-weight: 800; }

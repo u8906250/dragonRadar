@@ -1,7 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { bearingDeg, compassLabel, decodePolyline, formatKm, haversineKm, TAIWAN_EXTREMES, taiwanRadiusKm } from '../src/geo';
-import { DISTRICT_AREAS, DISTRICT_LABELS } from '../src/basemap';
-import { inRing } from '../src/shuangbei';
+import { bearingDeg, compassLabel, formatKm, haversineKm, TAIWAN_EXTREMES, taiwanRadiusKm } from '../src/geo';
 import { inShuangbei, SHUANGBEI_RINGS, shuangbeiRadiusKm } from '../src/shuangbei';
 
 const TAIPEI_MAIN = { lat: 25.0478, lng: 121.517 };
@@ -95,26 +93,5 @@ describe('destination', () => {
   it('wraps longitude across the antimeridian', () => {
     const p = destination({ lat: 0, lng: 179.9 }, 90, 50);
     expect(p.lng).toBeLessThan(-179);
-  });
-});
-
-describe('decodePolyline', () => {
-  it('decodes Google polyline strings', () => {
-    // Google 文件的範例
-    expect(decodePolyline('_p~iF~ps|U_ulLnnqC_mqNvxq`@')).toEqual([
-      [38.5, -120.2],
-      [40.7, -120.95],
-      [43.252, -126.453],
-    ]);
-  });
-  it('puts each district label inside its own area', () => {
-    expect(DISTRICT_AREAS).toHaveLength(41);
-    for (const [name, lat, lng] of DISTRICT_LABELS) {
-      const area = DISTRICT_AREAS.find((a) => a[0] === name);
-      expect(area?.[1].map(decodePolyline).some((r) => inRing({ lat, lng }, r))).toBe(true);
-    }
-    // 台北車站在中正區
-    const zz = DISTRICT_AREAS.find((a) => a[0] === '中正區')!;
-    expect(zz[1].map(decodePolyline).some((r) => inRing(TAIPEI_MAIN, r))).toBe(true);
   });
 });

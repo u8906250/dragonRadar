@@ -68,28 +68,3 @@ export function regionRadiusKm(from: LatLng, points: LatLng[], step: number, min
 export function taiwanRadiusKm(from: LatLng): number {
   return regionRadiusKm(from, TAIWAN_EXTREMES, 50, 200);
 }
-
-/** Google polyline 編碼（精度 1e-5 度）→ [緯度, 經度] */
-export function decodePolyline(s: string): Array<[number, number]> {
-  const out: Array<[number, number]> = [];
-  let i = 0;
-  let lat = 0;
-  let lng = 0;
-  const next = (): number => {
-    let shift = 0;
-    let v = 0;
-    let b: number;
-    do {
-      b = s.charCodeAt(i++) - 63;
-      v |= (b & 0x1f) << shift;
-      shift += 5;
-    } while (b >= 0x20);
-    return v & 1 ? ~(v >> 1) : v >> 1;
-  };
-  while (i < s.length) {
-    lat += next();
-    lng += next();
-    out.push([lat / 1e5, lng / 1e5]);
-  }
-  return out;
-}

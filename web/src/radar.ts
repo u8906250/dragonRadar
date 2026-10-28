@@ -31,18 +31,6 @@ export interface RadarRoute {
   points: Array<{ bearing: number; distanceKm: number }>;
 }
 
-/** 雷達上的一個點：方位與距離 */
-type RadarPoint = { bearing: number; distanceKm: number };
-
-/** 範圍小時的底圖：區界、海岸線、河流（minor 是小的河）、區名 */
-export interface RadarBasemap {
-  borders: RadarPoint[][];
-  coast: RadarPoint[][];
-  rivers: RadarPoint[][];
-  minorRivers: RadarPoint[][];
-  labels: Array<RadarPoint & { text: string }>;
-}
-
 /** 固定的地標（例如洋流總部），畫成星星 */
 export interface RadarLandmark {
   id: string;
@@ -174,8 +162,6 @@ export class Radar {
   private routes: RadarRoute[] = [];
   private outline: Array<Array<{ bearing: number; distanceKm: number }>> = [];
   private readonly outlineLayer: SVGGElement;
-  private basemap: RadarBasemap | null = null;
-  private readonly basemapLayer: SVGGElement;
   private landmarks: RadarLandmark[] = [];
   private bottles: RadarBottle[] = [];
   private readonly bottleLayer: SVGGElement;
@@ -240,7 +226,6 @@ export class Radar {
         <line x1="${C}" y1="${C - R}" x2="${C}" y2="${C + R}" />
         <line x1="${C - R}" y1="${C}" x2="${C + R}" y2="${C}" />
       </g>
-      <g class="basemap" clip-path="url(#rg-clip)"></g>
       <g clip-path="url(#rg-clip)" class="sweeps">
         <path class="sweep-wedge" fill="url(#rg-sweep)" d="M ${C} ${C} L ${C} ${C - R} A ${R} ${R} 0 0 1 ${wedgeEnd.x.toFixed(2)} ${wedgeEnd.y.toFixed(2)} Z">
           <animateTransform attributeName="transform" type="rotate" from="0 ${C} ${C}" to="360 ${C} ${C}" dur="4s" repeatCount="indefinite" />
@@ -277,7 +262,6 @@ export class Radar {
     this.roseLayer = this.svg.querySelector('.rose') as SVGGElement;
     this.routeLayer = this.svg.querySelector('.routes') as SVGGElement;
     this.outlineLayer = this.svg.querySelector('.outline') as SVGGElement;
-    this.basemapLayer = this.svg.querySelector('.basemap') as SVGGElement;
     this.landmarkLayer = this.svg.querySelector('.landmarks') as SVGGElement;
     this.bottleLayer = this.svg.querySelector('.bottles') as SVGGElement;
     this.bottleLayer.addEventListener('click', (e) => {
@@ -475,12 +459,6 @@ export class Radar {
     this.draw();
   }
 
-  /** 範圍小時的底圖線條；null 不畫 */
-  setBasemap(map: RadarBasemap | null): void {
-    this.basemap = map;
-    this.draw();
-  }
-
   /** 漂流瓶，畫在光點下面 */
   setBottles(list: RadarBottle[]): void {
     const key = JSON.stringify(list);
@@ -594,54 +572,6 @@ export class Radar {
       })
       .join(' ');
     return close ? `${d} Z` : d;
-  }
-
-  /** 底圖：每一類合成一條 path（點很多，一段一個元素太慢） */
-  private drawBasemap(): void {
-    this.basemapLayer.replaceChildren();
-    const m = this.basemap;
-    if (!m) return;
-    const layers: Array<[string, RadarPoint[][]]> = [
-      ['map-border', m.borders],
-      ['map-coast', m.coast],
-      ['map-river minor', m.minorRivers],
-      ['map-river', m.rivers],
-    ];
-    for (const [cls, lines] of layers) {
-      const d = lines.map((l) => this.linePath(l)).join('');
-      if (d) this.basemapLayer.appendChild(el('path', { class: cls, d }));
-    }
-    for (const lb of m.labels) {
-      const ratio = this.ratio(lb.distanceKm);
-      if (ratio > 0.92) continue;
-      const p = polar(lb.bearing - this.heading, ratio * (R - 8));
-      const t = el('text', { class: 'map-label', x: p.x.toFixed(1), y: p.y.toFixed(1) });
-      t.textContent = lb.text;
-      this.basemapLayer.appendChild(t);
-    }
-  }
-
-  /**
-   * 底圖的一條線（不封閉）：外圈外面的點，前後一點在圈內的才留（線畫到外圈再被裁掉），都在外面的斷開；
-   * 畫面上離上一點不到 1.5 像素的省略（範圍大時點太密）
-   */
-  private linePath(pts: RadarPoint[]): string {
-    const lim = 1.02;
-    const near = (i: number): boolean => i >= 0 && i < pts.length && this.ratio(pts[i].distanceKm) <= lim;
-    let d = '';
-    let prev: { x: number; y: number } | null = null;
-    for (let i = 0; i < pts.length; i++) {
-      if (!near(i) && !near(i - 1) && !near(i + 1)) {
-        prev = null;
-        continue;
-      }
-      const p = polar(pts[i].bearing - this.heading, this.ratio(pts[i].distanceKm) * (R - 8));
-      if (prev && i < pts.length - 1 && Math.hypot(p.x - prev.x, p.y - prev.y) < 1.5) continue;
-      d += `${prev ? 'L' : 'M'}${p.x.toFixed(1)} ${p.y.toFixed(1)}`;
-      prev = p;
-    }
-    // 只有一個點畫不出線
-    return /L/.test(d) ? d : '';
   }
 
   private drawOutline(): void {
@@ -797,7 +727,6 @@ export class Radar {
 
   private drawNow(): void {
     this.flashDirty = true;
-    this.drawBasemap();
     this.drawOutline();
     this.drawRoutes();
     this.drawBottles();
