@@ -84,14 +84,28 @@ export interface RadarStyle {
 const SIZE = 400;
 const C = SIZE / 2;
 const R = 172;
-/** 雷達的大小（space.ts 畫太空背景用）：inner 是光點最遠擺到哪 */
+/** 雷達的大小（space.ts 畫太空用）：inner 是光點最遠擺到哪 */
 export const RADAR_GEOM = { size: SIZE, c: C, r: R, inner: R - 8 };
-/** 「太空」的地球：半徑是光點範圍的幾成；地球半徑（公里） */
-export const GLOBE_FRAC = 0.78;
+/** 「全球」的範圍（半個地球）：再拉遠就是太空 */
+export const SPACE_FROM_KM = 20040;
 export const EARTH_KM = 6371;
 /** 地球表面離圓心超過這個（四分之一圈）就在另一面，看不到 */
 const HORIZON_KM = (Math.PI / 2) * EARTH_KM;
-export type SpaceLevel = 'globe' | 'solar';
+/** 太空裡地球小於這個（SVG 單位）就看不出光點在哪：光點、路線、地標都不畫 */
+const TINY_EARTH = 24;
+
+/**
+ * 太空裡地球的半徑是光點範圍（inner）的幾成：剛超過全球時塞滿雷達（接得上全球），
+ * 拉遠到 4 倍以後照真實比例（跟外圈的公里數、月球、行星的距離一致），中間照對數慢慢接過去
+ */
+export function globeFrac(scaleKm: number): number {
+  if (scaleKm <= SPACE_FROM_KM) return 1;
+  const t = Math.min(1, Math.log(scaleKm / SPACE_FROM_KM) / Math.log(4));
+  return (SPACE_FROM_KM / scaleKm) ** (1 - t) * (EARTH_KM / scaleKm) ** t;
+}
+
+/** 太空的畫法（space.ts）：照範圍、地球半徑畫成 SVG */
+export type SpaceDraw = (scaleKm: number, earthR: number) => string;
 const SVG_NS = 'http://www.w3.org/2000/svg';
 const ROSE: Array<[string, number]> = [
   ['N', 0],
@@ -137,6 +151,9 @@ function radiusRatio(km: number, scaleKm: number): number {
 }
 
 function fmtKm(km: number): string {
+  // 太空：幾萬、幾億公里
+  if (km >= 1e8) return `${(km / 1e8).toFixed(km >= 1e9 ? 0 : 1)} 億 km`;
+  if (km >= 1e5) return `${Math.round(km / 1e4)} 萬 km`;
   if (km >= 10) return `${Math.round(km)} km`;
   return `${Number.isInteger(km) ? km : km.toFixed(1)} km`;
 }
@@ -231,8 +248,8 @@ export class Radar {
   private readonly bottleLayer: SVGGElement;
   private readonly landmarkLayer: SVGGElement;
   private scaleKm = 5;
-  /** 「太空」：globe 從太空看的地球、solar 太陽系；null 是平常的雷達 */
-  private space: SpaceLevel | null = null;
+  /** 太空（比全球再遠）的畫法；還沒載入是 null */
+  private spaceDraw: SpaceDraw | null = null;
   private readonly spaceLayer: SVGGElement;
   private readonly stack: HTMLDivElement;
   private readonly pointers = new Map<number, { x: number; y: number }>();
@@ -281,9 +298,7 @@ export class Radar {
         </radialGradient>
       </defs>
       <circle class="bezel" cx="${C}" cy="${C}" r="${R + 16}" />
-      <circle class="face" cx="${C}" cy="${C}" r="${R}" fill="url(#rg-face)" />
-      <g class="space"></g>`;
-    this.spaceLayer = this.base.querySelector('.space') as SVGGElement;
+      <circle class="face" cx="${C}" cy="${C}" r="${R}" fill="url(#rg-face)" />`;
     this.sweepSvg = layer('radar radar-sweep');
     this.sweepBox = document.createElement('div');
     this.sweepBox.className = 'radar-layer radar-sweep-box';
@@ -313,6 +328,7 @@ export class Radar {
       <g class="streets" clip-path="url(#rg-clip)"></g>
       <g class="scale-labels"></g>
       <g class="outline" clip-path="url(#rg-clip)"></g>
+      <g class="space" clip-path="url(#rg-clip)"></g>
       <g class="routes" clip-path="url(#rg-clip)"></g>
       <g class="bottles"></g>
       <circle class="me" cx="${C}" cy="${C}" r="5" />
@@ -328,6 +344,7 @@ export class Radar {
     this.roseLayer = this.svg.querySelector('.rose') as SVGGElement;
     this.routeLayer = this.svg.querySelector('.routes') as SVGGElement;
     this.outlineLayer = this.svg.querySelector('.outline') as SVGGElement;
+    this.spaceLayer = this.svg.querySelector('.space') as SVGGElement;
     this.streetLayer = this.svg.querySelector('.streets') as SVGGElement;
     this.landmarkLayer = this.svg.querySelector('.landmarks') as SVGGElement;
     this.carLayer = this.svg.querySelector('.cars') as SVGGElement;
@@ -452,7 +469,7 @@ export class Radar {
       if (e.pointerType === 'mouse') e.preventDefault();
       this.pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
       // 太空不能拖曳移動位置（一拖就是幾千公里）
-      if (this.pointers.size === 1 && !this.space) {
+      if (this.pointers.size === 1 && !this.inSpace) {
         this.panStart = { x: e.clientX, y: e.clientY };
         this.panLast = this.panStart;
       }
@@ -575,32 +592,38 @@ export class Radar {
     return w > 0 ? (R * Math.min(w, this.svg.getBoundingClientRect().height)) / SIZE : 0;
   }
 
-  /** 地球：照球面擺（正射投影，離圓心的角度取 sin），另一面的回傳 2（範圍外） */
+  /** 太空：光點照地球的球面擺（正射投影，離圓心的角度取 sin），另一面的回傳 2（範圍外） */
   private ratio(km: number): number {
-    if (this.space === 'globe') return km <= HORIZON_KM ? GLOBE_FRAC * Math.sin(km / EARTH_KM) : 2;
+    if (this.inSpace) return km <= HORIZON_KM ? globeFrac(this.scaleKm) * Math.sin(km / EARTH_KM) : 2;
     return radiusRatio(km, this.scaleKm);
   }
 
-  /**
-   * 「太空」：globe 畫成從太空看的地球（以你為中心），光點照球面擺，另一面的不畫；solar 畫太陽系，光點都在地球上、不畫。
-   * markup 是 space.ts 畫好的背景，放在最底層，掃描照樣蓋在上面；不能拖曳移動位置
-   */
-  setSpace(level: SpaceLevel | null, markup = ''): void {
-    const changed = level !== this.space;
-    this.space = level;
-    this.spaceLayer.innerHTML = markup;
-    this.stack.classList.toggle('space', level !== null);
-    this.stack.classList.toggle('space-globe', level === 'globe');
-    this.stack.classList.toggle('space-solar', level === 'solar');
-    this.rotateSpace();
-    if (changed) this.draw();
+  /** 比全球再遠：太空 */
+  private get inSpace(): boolean {
+    return this.scaleKm > SPACE_FROM_KM;
   }
 
-  /** 地球跟著指北針轉（太陽系不轉） */
-  private rotateSpace(): void {
-    const g = this.spaceLayer.querySelector('.space-rot');
-    if (g && this.space === 'globe' && this.heading) g.setAttribute('transform', `rotate(${(-this.heading).toFixed(1)} ${C} ${C})`);
-    else g?.removeAttribute('transform');
+  /** 太空裡地球小到看不出光點在哪 */
+  private get tinyEarth(): boolean {
+    return this.inSpace && globeFrac(this.scaleKm) * (R - 8) < TINY_EARTH;
+  }
+
+  /** 太空（比全球再遠）的畫法：地球、月球、太陽、行星（space.ts，第一次用到才載入）；null 是還沒載入 */
+  setSpace(draw: SpaceDraw | null): void {
+    this.spaceDraw = draw;
+    this.draw();
+  }
+
+  /** 太空：畫在海岸線那一層，跟著指北針轉；平常清空 */
+  private drawSpace(): void {
+    this.stack.classList.toggle('space', this.inSpace);
+    if (!this.inSpace || !this.spaceDraw) {
+      if (this.spaceLayer.firstChild) this.spaceLayer.replaceChildren();
+      return;
+    }
+    this.spaceLayer.innerHTML = this.spaceDraw(this.scaleKm, globeFrac(this.scaleKm) * (R - 8));
+    if (this.heading) this.spaceLayer.setAttribute('transform', `rotate(${(-this.heading).toFixed(1)} ${C} ${C})`);
+    else this.spaceLayer.removeAttribute('transform');
   }
 
   /** 手機朝向（0 = 北，順時針）。null 代表關閉指北針，恢復北在上 */
@@ -608,7 +631,6 @@ export class Radar {
     this.heading = deg === null ? 0 : ((deg % 360) + 360) % 360;
     this.svg.classList.toggle('heading-live', deg !== null);
     this.placeRose();
-    this.rotateSpace();
     this.draw();
   }
 
@@ -642,7 +664,7 @@ export class Radar {
     this.carLayer.replaceChildren();
     for (const c of this.cars) {
       const ratio = this.ratio(c.distanceKm);
-      if (ratio > 1 || this.space === 'solar') continue;
+      if (ratio > 1 || this.tinyEarth) continue;
       const p = polar(c.bearing - this.heading, ratio * (R - 8));
       const g = el('g', { class: 'car', transform: `translate(${p.x.toFixed(1)} ${p.y.toFixed(1)})`, tabindex: 0, role: 'button' });
       g.dataset.id = c.id;
@@ -681,7 +703,7 @@ export class Radar {
     for (const b of this.bottles) {
       const ratio = this.ratio(b.distanceKm);
       // 範圍外的瓶子不畫，免得外圈擠滿；只有方向提示的那一個貼在外圈（太空不畫）
-      if (this.space === 'solar' || (ratio > 1 && (!b.hint || this.space))) continue;
+      if (this.tinyEarth || (ratio > 1 && (!b.hint || this.inSpace))) continue;
       const angle = b.bearing - this.heading;
       const r = Math.min(1, ratio) * (R - 8);
       const p = polar(angle, r);
@@ -749,7 +771,7 @@ export class Radar {
     for (const lm of this.landmarks) {
       const ratio = this.ratio(lm.distanceKm);
       const out = ratio > 1;
-      if (this.space === 'solar' || (this.space === 'globe' && out)) continue;
+      if (this.inSpace && (out || this.tinyEarth)) continue;
       const p = polar(lm.bearing - this.heading, Math.min(1, ratio) * (R - 8));
       const g = el('g', { class: `landmark${out ? ' out' : ''}${lm.selected ? ' selected' : ''}`, transform: `translate(${p.x.toFixed(1)} ${p.y.toFixed(1)})`, tabindex: 0, role: 'button' });
       g.dataset.id = lm.id;
@@ -835,7 +857,7 @@ export class Radar {
   private drawOutline(): void {
     this.outlineLayer.replaceChildren();
     // 太空：陸地畫在地球上（space.ts）
-    if (this.space) return;
+    if (this.inSpace) return;
     for (const ring of this.outline) {
       if (ring.length < 3) continue;
       const p = this.outlinePath(ring);
@@ -877,9 +899,9 @@ export class Radar {
   private drawRoutes(): void {
     this.routeLayer.replaceChildren();
     for (const r of this.routes) {
-      if (r.state === 'done' || r.points.length < 2 || this.space === 'solar') continue;
-      // 地球：有一段在另一面就不畫（直線會穿過地球）
-      if (this.space === 'globe' && r.points.some((pt) => pt.distanceKm > HORIZON_KM)) continue;
+      if (r.state === 'done' || r.points.length < 2 || this.tinyEarth) continue;
+      // 太空：有一段在地球另一面就不畫（直線會穿過地球）
+      if (this.inSpace && r.points.some((pt) => pt.distanceKm > HORIZON_KM)) continue;
       const path = el('path', { class: `route route-${r.state}`, d: this.pathOf(r.points) });
       this.routeLayer.appendChild(path);
     }
@@ -1057,14 +1079,15 @@ export class Radar {
     this.lit = [];
     this.drawStreets();
     this.drawOutline();
+    this.drawSpace();
     this.drawRoutes();
     this.drawBottles();
     this.drawLandmarks();
     this.drawCars();
     this.blipLayer.replaceChildren();
     const pos = new Map<number, { x: number; y: number; out: boolean; angle: number; r: number }>();
-    // 地球另一面的不畫；太陽系不畫光點（都在地球上）
-    const items = this.space === 'solar' ? [] : this.space === 'globe' ? this.items.filter((it) => it.distanceKm <= HORIZON_KM) : this.items;
+    // 太空：地球另一面的不畫；地球太小時都擠在一起，不畫
+    const items = this.tinyEarth ? [] : this.inSpace ? this.items.filter((it) => it.distanceKm <= HORIZON_KM) : this.items;
     for (const it of items) {
       const ratio = this.ratio(it.distanceKm);
       const angle = it.bearing - this.heading;

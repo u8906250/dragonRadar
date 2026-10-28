@@ -10,7 +10,7 @@ import { X_MAX_WEIGHT, xLength } from './xcount';
 import { shortAddress, splitPlace } from './place';
 import { crowdOf, MapView, pinPicker, type BaseMap, type PinPicker } from './map';
 import { beep, ensureNotificationPermission, iosNeedsHomeScreen, notificationState, pushSubscription, pushSupported, registerServiceWorker, showBanner, systemNotify, unlockAudio, unsubscribePush } from './notify';
-import { Radar, type RadarRoute, type RadarStreets, type SpaceLevel } from './radar';
+import { Radar, SPACE_FROM_KM, type RadarRoute, type RadarStreets } from './radar';
 import { DEFAULT_THEME_ID, getTheme, THEMES, type Theme } from './themes';
 import type { BottleOut, EventOut, Item, KeywordInfo, KeywordRules, MyBottles, MyReport, Origin, Phase, PickedBottle, RelatedPost, RouteOut, PreviewItem, RouteStop, RoutePreview, SubmitResult, FailedItem, EditItem, EditInput } from './types';
 
@@ -139,12 +139,14 @@ let bottleMsg = '';
 let myBottlesData: MyBottles | null = null;
 /** 這次打開網頁已經提示過「瓶子被撿走了」 */
 let bottleNewsShown = false;
-type ScaleSetting = '1' | '5' | '20' | 'region' | 'taiwan' | 'world' | 'space' | 'custom';
-/** 下方按鈕的範圍；custom 是雙指縮放或滾輪調出來的；space 是「太空」（地球、太陽系，抓的範圍跟全球一樣） */
-const SCALE_SETTINGS: ScaleSetting[] = ['1', '5', '20', 'region', 'taiwan', 'world', 'space'];
-const isAutoScale = (s: ScaleSetting): boolean => s === 'region' || s === 'taiwan' || s === 'world' || s === 'space';
+type ScaleSetting = '1' | '5' | '20' | 'region' | 'taiwan' | 'world' | 'custom';
+/** 下方按鈕的範圍；custom 是雙指縮放或滾輪調出來的（從「全球」再拉遠就是太空） */
+const SCALE_SETTINGS: ScaleSetting[] = ['1', '5', '20', 'region', 'taiwan', 'world'];
+const isAutoScale = (s: ScaleSetting): boolean => s === 'region' || s === 'taiwan' || s === 'world';
 /** 「全球」的範圍：半個地球（地球另一面最遠約 20,000 km） */
-const WORLD_KM = 20040;
+const WORLD_KM = SPACE_FROM_KM;
+/** 太空最遠拉到哪：整個太陽系（海王星的軌道離地球最遠約 31 AU） */
+const SPACE_MAX_KM = 5e9;
 const MIN_ZOOM_KM = 0.5;
 let customKm = Number(lsGet(LS_SCALE_KM)) || 10;
 let scaleSetting: ScaleSetting = ([...SCALE_SETTINGS, 'custom'] as string[]).includes(lsGet(LS_SCALE) ?? '') ? (lsGet(LS_SCALE) as ScaleSetting) : 'region';
@@ -391,14 +393,11 @@ let baseMap: BaseMap = (BASES as string[]).includes(lsGet(LS_BASE) ?? '') ? (lsG
 /** 最近一次 GPS 的誤差（公尺），手動或預設位置時為 null */
 let gpsAccuracy: number | null = null;
 const scaleChips = Array.from(document.querySelectorAll<HTMLButtonElement>('#scale-chips [data-scale]'));
-const spaceChipsEl = $('#space-chips');
-const spaceChips = Array.from(document.querySelectorAll<HTMLButtonElement>('#space-chips [data-space]'));
-const spaceNote = $('#space-note');
 
 const radar = new Radar(
   $('#radar-view'),
   select,
-  (factor, done) => zoomRadar(factor, done),
+  (factor, done) => zoomRadar(factor, done, true),
   (id) => selectLandmark(id),
   (id) => selectBottle(id),
   (bearing, km, done) => panRadar(bearing, km, done),
@@ -801,32 +800,14 @@ function updateStreets(): void {
   radar.setStreets(out);
 }
 
-// ---- 太空：從太空看的地球（以你為中心，陸地用全世界的海岸線）、太陽系；space.ts 第一次用到才載入 ----
-const LS_SPACE = 'dr.space';
-let spaceLevel: SpaceLevel = lsGet(LS_SPACE) === 'solar' ? 'solar' : 'globe';
+// ---- 太空：比「全球」再拉遠，畫地球、月球、太陽、行星（space.ts，第一次用到才載入；陸地用全世界的海岸線） ----
 let spaceMod: typeof import('./space') | null = null;
 let spaceLoading = false;
-/** 上次畫的（哪一種、位置、陸地載入了沒、第幾個 10 分鐘），沒變就不重畫 */
+/** 上次給雷達的畫法（位置、陸地載入了沒、第幾個 10 分鐘），沒變就不換 */
 let spaceFor = '';
-const SPACE_NOTE: Record<SpaceLevel, string> = {
-  globe: '以你為中心的地球，暗的一半是現在的夜晚；另一面的看不到',
-  solar: '行星照今天的位置推算，軌道距離不照比例；雷達上的點都在地球上',
-};
 
 function updateSpace(): void {
-  const on = scaleSetting === 'space';
-  spaceChipsEl.hidden = !on || view !== 'radar';
-  if (!on) {
-    if (spaceFor) radar.setSpace(null);
-    spaceFor = '';
-    return;
-  }
-  for (const b of spaceChips) {
-    const sel = b.dataset.space === spaceLevel;
-    b.classList.toggle('on', sel);
-    b.setAttribute('aria-checked', String(sel));
-  }
-  spaceNote.textContent = SPACE_NOTE[spaceLevel];
+  if (scaleKm <= WORLD_KM) return;
   if (!spaceMod) {
     if (spaceLoading) return;
     spaceLoading = true;
@@ -840,19 +821,16 @@ function updateSpace(): void {
       });
     return;
   }
-  // 晝夜、行星位置每 10 分鐘重畫一次
+  // 晝夜、月球、行星位置每 10 分鐘換一次
   const slot = Math.floor(Date.now() / 600_000);
-  const key = `${spaceLevel}|${worldLoaded}|${origin.lat},${origin.lng}|${slot}`;
+  const key = `${worldLoaded}|${origin.lat},${origin.lng}|${slot}`;
   if (key === spaceFor) return;
   spaceFor = key;
+  const mod = spaceMod;
+  const center = { lat: origin.lat, lng: origin.lng };
+  const land = landRings;
   const when = new Date();
-  radar.setSpace(spaceLevel, spaceLevel === 'globe' ? spaceMod.globeMarkup(origin, landRings, when) : spaceMod.solarMarkup(when));
-}
-
-function setSpaceLevel(level: SpaceLevel): void {
-  spaceLevel = level;
-  lsSet(LS_SPACE, level);
-  updateSpace();
+  radar.setSpace((km, rg) => mod.spaceMarkup({ center, land, when, scaleKm: km, rg }));
 }
 
 /**
@@ -2638,7 +2616,6 @@ function switchView(v: 'radar' | 'map'): void {
   pickBtn.hidden = v !== 'map';
   $('#scale-chips').hidden = v !== 'radar';
   baseChipsEl.hidden = v !== 'map';
-  spaceChipsEl.hidden = v !== 'radar' || scaleSetting !== 'space';
   compassBtn.hidden = v !== 'radar' || !compassSupported();
   if (v === 'map') map.showRange(scaleKm, rangePx);
   // 切回雷達：雷達範圍改成地圖目前的比例（接近某個按鈕的範圍就對齊那個按鈕）
@@ -2651,10 +2628,10 @@ function switchView(v: 'radar' | 'map'): void {
 const fetchRadiusKm = (km: number): number => (km > FETCH_RADIUS_KM ? WORLD_KM : FETCH_RADIUS_KM);
 
 function scaleKmFor(setting: ScaleSetting): number {
-  if (setting === 'custom') return Math.min(Math.max(customKm, MIN_ZOOM_KM), WORLD_KM);
+  if (setting === 'custom') return Math.min(Math.max(customKm, MIN_ZOOM_KM), SPACE_MAX_KM);
   if (setting === 'region') return shuangbeiRadiusKm(origin);
   if (setting === 'taiwan') return taiwanRadiusKm(origin);
-  if (setting === 'world' || setting === 'space') return WORLD_KM;
+  if (setting === 'world') return WORLD_KM;
   return Number(setting);
 }
 
@@ -2672,10 +2649,11 @@ function setBase(b: BaseMap): void {
 let zoomFrame = 0;
 
 /** 雙指縮放、滾輪：連續調整範圍；放開時接近某個按鈕的範圍（差 6% 以內）就對齊那個按鈕 */
-function zoomRadar(factor: number, done: boolean): void {
-  // 太空不縮放（用下面的「地球」「太陽系」切換）
-  if (scaleSetting === 'space') return;
-  customKm = Math.min(Math.max(scaleKm * factor, MIN_ZOOM_KM), WORLD_KM);
+/** gesture：雙指、滾輪（太空裡幅度加大）；從地圖切回來是直接換成地圖的比例，不加大 */
+function zoomRadar(factor: number, done: boolean, gesture = false): void {
+  // 太空（比全球再遠）一次縮放的幅度大一點：從全球到整個太陽系差了幾十萬倍
+  const f = gesture && (scaleKm > WORLD_KM || (scaleKm >= WORLD_KM && factor > 1)) ? factor ** 2 : factor;
+  customKm = Math.min(Math.max(scaleKm * f, MIN_ZOOM_KM), SPACE_MAX_KM);
   if (done) {
     const near = SCALE_SETTINGS.find((st) => Math.abs(scaleKmFor(st) / customKm - 1) < 0.06);
     if (near) {
@@ -4198,7 +4176,6 @@ function wirePanelDrag(): void {
 
 function wireControls(): void {
   for (const b of scaleChips) b.addEventListener('click', () => setScale((b.dataset.scale as ScaleSetting) ?? 'region'));
-  for (const b of spaceChips) b.addEventListener('click', () => setSpaceLevel(b.dataset.space === 'solar' ? 'solar' : 'globe'));
   viewBtn.addEventListener('click', () => switchView(view === 'radar' ? 'map' : 'radar'));
   locateBtn.addEventListener('click', locateMe);
   homeBtn.addEventListener('click', goHome);

@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { landPath, nightPath, ortho, planetPositions, subsolar } from '../src/space';
+import { globeFrac, SPACE_FROM_KM } from '../src/radar';
+import { landPath, moonPosition, nightPath, ortho, planetPositions, spaceMarkup, subsolar } from '../src/space';
 
 const diff = (a: number, b: number): number => Math.abs(((((a - b) % 360) + 540) % 360) - 180);
 const lonOf = (when: string, key: string): number => planetPositions(new Date(when)).find((p) => p.key === key)!.lon;
@@ -47,9 +48,9 @@ describe('ortho', () => {
 describe('nightPath', () => {
   it('draws no night under the Sun and a full disc on the opposite side', () => {
     const sun = { lat: 10, lng: 50 };
-    expect(nightPath(sun, sun)).toBe('');
-    expect(nightPath({ lat: -10, lng: -130 }, sun)).toMatch(/^M.*A.*A.*Z$/);
-    expect(nightPath({ lat: 25, lng: 121 }, sun)).toMatch(/^M[\d. L]+Z$/);
+    expect(nightPath(sun, sun, 100)).toBe('');
+    expect(nightPath({ lat: -10, lng: -130 }, sun, 100)).toMatch(/^M.*A.*A.*Z$/);
+    expect(nightPath({ lat: 25, lng: 121 }, sun, 100)).toMatch(/^M[\d. L]+Z$/);
   });
 });
 
@@ -72,9 +73,46 @@ describe('landPath', () => {
 
   it('never wraps a continent around the whole globe, even when it passes behind the far side', async () => {
     const { WORLD_RINGS } = await import('../src/world');
-    const disc = Math.PI * (0.78 * 164) ** 2;
+    const disc = Math.PI * 164 ** 2;
     for (const center of [{ lat: 25.04, lng: 121.52 }, { lat: 37.78, lng: -121.98 }, { lat: -25, lng: -58 }, { lat: 51.5, lng: 0 }]) {
-      for (const a of areas(landPath(center, WORLD_RINGS))) expect(Math.abs(a)).toBeLessThan(disc * 0.6);
+      for (const a of areas(landPath(center, WORLD_RINGS, 164))) expect(Math.abs(a)).toBeLessThan(disc * 0.6);
     }
+  });
+});
+
+describe('moonPosition', () => {
+  it('lines up with the Sun at the 2024-04-08 eclipse and sits opposite it at the 2024-01-25 full moon', () => {
+    const eclipse = new Date('2024-04-08T18:21:00Z');
+    expect(diff(moonPosition(eclipse).lon, subsolar(eclipse).eclLon)).toBeLessThan(3);
+    const full = new Date('2024-01-25T17:54:00Z');
+    expect(diff(moonPosition(full).lon, subsolar(full).eclLon + 180)).toBeLessThan(3);
+    expect(moonPosition(full).dist).toBeGreaterThan(356_000);
+    expect(moonPosition(full).dist).toBeLessThan(407_000);
+  });
+});
+
+describe('globeFrac', () => {
+  it('fills the radar right after 全球 and reaches true scale four times further out', () => {
+    expect(globeFrac(SPACE_FROM_KM)).toBe(1);
+    expect(globeFrac(SPACE_FROM_KM * 1.0001)).toBeCloseTo(1, 3);
+    expect(globeFrac(SPACE_FROM_KM * 4)).toBeCloseTo(6371 / (SPACE_FROM_KM * 4), 9);
+    expect(globeFrac(1e6)).toBeCloseTo(6371 / 1e6, 9);
+    // 越拉遠越小
+    expect(globeFrac(30_000)).toBeLessThan(globeFrac(25_000));
+  });
+});
+
+describe('spaceMarkup', () => {
+  const opts = { center: { lat: 25.04, lng: 121.52 }, land: [] as Array<Array<[number, number]>>, when: new Date('2026-10-28T08:00:00Z') };
+  it('shows the Moon only at Moon scale and the Sun and planets further out', () => {
+    const moon = spaceMarkup({ ...opts, scaleKm: 500_000, rg: 164 * globeFrac(500_000) });
+    expect(moon).toContain('>月球<');
+    expect(moon).not.toContain('>太陽<');
+    const inner = spaceMarkup({ ...opts, scaleKm: 3e8, rg: 164 * globeFrac(3e8) });
+    expect(inner).toContain('>太陽<');
+    expect(inner).toContain('>地球<');
+    const all = spaceMarkup({ ...opts, scaleKm: 5e9, rg: 164 * globeFrac(5e9) });
+    expect(all).toContain('>海王星<');
+    expect((all.match(/space-orbit/g) ?? []).length).toBeGreaterThanOrEqual(5);
   });
 });
