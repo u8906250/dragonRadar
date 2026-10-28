@@ -1962,6 +1962,10 @@ function renderDetail(items: Item[], now: number): void {
     detailEl.hidden = true;
     return;
   }
+  if (dismissedId === selectedId) {
+    detailEl.hidden = true;
+    return;
+  }
   const { ev } = it;
   detailEl.hidden = false;
   setDetailHtml(`ev:${ev.id}`, `
@@ -2167,6 +2171,8 @@ async function sendEnded(ev: EventOut, btn: HTMLButtonElement): Promise<void> {
 let selectedGroup: number[] = [];
 /** 點了疊在一起的一群、還沒選是哪一個 */
 let choosing: number[] | null = null;
+/** 點其他地方收起詳細資料的那一則：雷達、地圖、清單上照樣選著，再點它（光點、標記、清單）重新打開 */
+let dismissedId: number | null = null;
 
 const sameGroup = (a: number[] | null, b: number[]): boolean => !!a && [...a].sort().join() === [...b].sort().join();
 
@@ -2204,6 +2210,9 @@ function selectRoute(id: string | null): void {
 }
 
 function select(id: number | null, group: number[] = []): void {
+  // 收起詳細資料、還選著的這一則：再點它是打開，不是取消選取
+  const reopen = id !== null && id === selectedId && id === dismissedId;
+  dismissedId = null;
   feedbackSheet.hidden = true;
   routeOnMap = null;
   selectedRoute = null;
@@ -2226,7 +2235,7 @@ function select(id: number | null, group: number[] = []): void {
   choosing = null;
   // 從同一群切換到另一個時保留整群，其他情況（點清單）就清掉
   selectedGroup = id !== null && selectedGroup.includes(id) ? selectedGroup : [];
-  selectedId = selectedId === id ? null : id;
+  selectedId = reopen || selectedId !== id ? id : null;
   if (selectedId !== null) {
     themeSheet.hidden = true;
     kwSheet.hidden = true;
@@ -2276,7 +2285,8 @@ async function reveal(id: number): Promise<void> {
     if (!inTime(it, now)) setTime('all');
   }
   const target = it?.ev.id ?? id;
-  // select 再點同一個會取消選取，這裡一定要選上
+  // select 再點同一個會取消選取，這裡一定要選上（收起了詳細資料的也打開）
+  dismissedId = null;
   if (selectedId === target) render();
   else select(target);
 }
@@ -3411,6 +3421,7 @@ function wireEdit(c: { postId: string; token: string }, items: EditItem[], actio
 
 /**
  * 卡片（點光點、清單跳出來的詳細資料、車掃時間表、主題、類別、關鍵字）點其他地方就關閉。
+ * 一則的詳細資料只收起卡片，雷達、地圖、清單上照樣選著（按卡片的「關閉」才取消選取）。
  * 點的是按鈕、連結、欄位、雷達光點、地圖標記、清單的一列（會自己打開別的）或卡片裡面不關；
  * 拖動（移動雷達、地圖）不算點。回報、漂流瓶有打字的內容，不跟著關
  */
@@ -3427,7 +3438,13 @@ function wireTapOutside(): void {
       const t = e.target instanceof Element ? e.target : null;
       if (moved || !t || t.closest(KEEP_OPEN)) return;
       for (const sheet of [detailEl, themeSheet, moduleSheet, kwSheet]) {
-        if (!sheet.hidden) sheet.querySelector<HTMLButtonElement>('[data-act="close"]')?.click();
+        if (sheet.hidden) continue;
+        if (sheet === detailEl && selectedId !== null && detailEl.dataset.key === `ev:${selectedId}`) {
+          dismissedId = selectedId;
+          detailEl.hidden = true;
+          continue;
+        }
+        sheet.querySelector<HTMLButtonElement>('[data-act="close"]')?.click();
       }
       // 車掃出發前按「在地圖上看路線」畫出來的路線：點其他地方收起，回到只顯示起點
       if (routeOnMap) {
