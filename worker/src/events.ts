@@ -633,11 +633,20 @@ async function planEvent(
 }
 
 /** 把判讀好的一筆寫進 events；寫之前再看一次有沒有結束、有沒有別人先放上同一場 */
-export async function insertPlanned(env: Env, postId: string, p: PlannedEvent, now: number): Promise<{ event: EventRow | null; reason: string }> {
+/** routeStop：車掃路線上的一站 */
+export async function insertPlanned(env: Env, postId: string, p: PlannedEvent, now: number, routeStop = false): Promise<{ event: EventRow | null; reason: string }> {
   if (p.end_at <= now) return { event: null, reason: 'already_over' };
   if (p.lat !== null && p.lng !== null && !p.approx_area) {
-    // 跟判讀時一樣只比別的貼文：同一則的車掃各站時間相同、又離不到 150 m 時（莒光路、西藏路），不然後面那站會被當成重複
-    const dup = await findDuplicate(env, p.kind, p.start_at, p.lat, p.lng, postId);
+    // 車掃的站只比別的貼文和同一站：同一則的各站時間常常一樣、又離不到 150 m（莒光路、西藏路），不然後面那站會被當成重複
+    const dup = routeStop
+      ? ((await findDuplicate(env, p.kind, p.start_at, p.lat, p.lng, postId)) ??
+        (
+          await env.DB.prepare("SELECT id FROM events WHERE post_id = ? AND title = ? AND status IN ('upcoming', 'active') AND ABS(start_at - ?) <= ? LIMIT 1")
+            .bind(postId, p.title, p.start_at, DUP_WINDOW_SEC)
+            .first<{ id: number }>()
+        )?.id ??
+        null)
+      : await findDuplicate(env, p.kind, p.start_at, p.lat, p.lng);
     if (dup !== null) return { event: null, reason: `duplicate_of_${dup}` };
   }
   const status: EventStatus = p.lat === null ? 'unlocated' : p.start_at <= now ? 'active' : 'upcoming';
@@ -1181,6 +1190,7 @@ export async function setRouteStopPlace(
       postId,
       { kind: 'activity', title, item: null, start_at: stop.at - ROUTE_LEAD_SEC, end_at: stop.at + ROUTE_KEEP_SEC, place_text: place, place_query: place, lat: point.lat, lng: point.lng, confidence: 1, all_day: false, spot: false, approx_area: null, end_open: false, until_open: false, tz: null, extra: null },
       now,
+      true,
     );
   }
   return changed;
@@ -1232,6 +1242,7 @@ export async function relocateRouteStops(env: Env, now: number): Promise<{ check
           r.post_id,
           { kind: 'activity', title: st.title, item: null, start_at: at - ROUTE_LEAD_SEC, end_at: at + ROUTE_KEEP_SEC, place_text: place, place_query: st.query ?? place, lat: st.lat, lng: st.lng, confidence: 1, all_day: false, spot: false, approx_area: null, end_open: false, until_open: false, tz: null, extra: null },
           now,
+          true,
         );
         if (ins.event) restored++;
         continue;
@@ -1253,6 +1264,7 @@ export async function relocateRouteStops(env: Env, now: number): Promise<{ check
         r.post_id,
         { kind: 'activity', title: st.title, item: null, start_at: st.at - ROUTE_LEAD_SEC, end_at: st.at + ROUTE_KEEP_SEC, place_text: place, place_query: st.query ?? place, lat: st.lat, lng: st.lng, confidence: 1, all_day: false, spot: false, approx_area: null, end_open: false, until_open: false, tz: null, extra: null },
         now,
+        true,
       );
     }
     if (changed) {
@@ -1570,7 +1582,7 @@ export async function commitPlan(env: Env, postId: string, items: PlanItem[], no
         env.DB.prepare("UPDATE posts SET linked_to = ?, link_role = 'previous' WHERE id = ?").bind(postId, m.postId),
       ]);
     }
-    const r = await insertPlanned(env, postId, it.plan, now);
+    const r = await insertPlanned(env, postId, it.plan, now, !!it.route);
     if (r.event) out.events.push(r.event);
     out.reasons.push(r.reason);
   }
