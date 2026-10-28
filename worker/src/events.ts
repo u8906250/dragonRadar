@@ -636,7 +636,8 @@ async function planEvent(
 export async function insertPlanned(env: Env, postId: string, p: PlannedEvent, now: number): Promise<{ event: EventRow | null; reason: string }> {
   if (p.end_at <= now) return { event: null, reason: 'already_over' };
   if (p.lat !== null && p.lng !== null && !p.approx_area) {
-    const dup = await findDuplicate(env, p.kind, p.start_at, p.lat, p.lng);
+    // 跟判讀時一樣只比別的貼文：同一則的車掃各站時間相同、又離不到 150 m 時（莒光路、西藏路），不然後面那站會被當成重複
+    const dup = await findDuplicate(env, p.kind, p.start_at, p.lat, p.lng, postId);
     if (dup !== null) return { event: null, reason: `duplicate_of_${dup}` };
   }
   const status: EventStatus = p.lat === null ? 'unlocated' : p.start_at <= now ? 'active' : 'upcoming';
@@ -1201,9 +1202,10 @@ const ROUTE_RELOCATE_EVERY_SEC = 20 * 60;
 /**
  * 回報的車掃路線上，寫了門牌卻沒有確切位置的站（判讀、修改當時門牌查詢失敗或逾時，只退到路、鄉鎮區）定時重查：
  * 查到確切位置就放上雷達（預計經過前 10 分到後 15 分），路線補上這一站、重新連線。
- * 車隊已經經過的、雷達上這則貼文已經沒有東西的（下架、刪除）不查；沒寫門牌的（只有店名）重查也一樣，要回報的人標位置
+ * 車隊已經經過的、雷達上這則貼文已經沒有東西的（下架、刪除）不查；沒寫門牌的（只有店名）重查也一樣，要回報的人標位置。
+ * 有確切位置、還沒經過，卻從來沒放上雷達的站（以前同一則的站離不到 150 m 被當成重複）也在這裡補放上去
  */
-export async function relocateRouteStops(env: Env, now: number): Promise<{ checked: number; located: number }> {
+export async function relocateRouteStops(env: Env, now: number): Promise<{ checked: number; located: number; restored: number }> {
   const { results } = await env.DB.prepare(
     `SELECT id, post_id, stops FROM routes WHERE id LIKE 'link-%' AND show_until > ?
        AND EXISTS (SELECT 1 FROM events e WHERE e.post_id = routes.post_id AND e.status IN ('upcoming', 'active'))`,
@@ -1212,12 +1214,29 @@ export async function relocateRouteStops(env: Env, now: number): Promise<{ check
     .all<{ id: string; post_id: string; stops: string }>();
   let checked = 0;
   let located = 0;
+  let restored = 0;
   for (const r of results) {
     const stops = JSON.parse(r.stops) as StoredRouteStop[];
     let changed = false;
+    // 這則貼文每一站的點（不管狀態：已經下架、回報發完的不再放回去）
+    const { results: evs } = await env.DB.prepare('SELECT title, start_at, end_at FROM events WHERE post_id = ?').bind(r.post_id).all<{ title: string; start_at: number; end_at: number }>();
     for (const st of stops) {
-      if (checked >= ROUTE_RELOCATE_PER_RUN) break;
-      if (st.lat !== null || st.at === null || st.at + ROUTE_KEEP_SEC <= now) continue;
+      if (st.at === null || st.at + ROUTE_KEEP_SEC <= now) continue;
+      // 有確切位置、還沒經過，雷達上卻從來沒有這一站（以前同一則離太近的站被當成重複）：補放上去
+      if (st.lat !== null && st.lng !== null) {
+        const at = st.at;
+        if (evs.some((e) => e.title === st.title && e.start_at <= at && e.end_at >= at)) continue;
+        const place = st.place ?? st.name;
+        const ins = await insertPlanned(
+          env,
+          r.post_id,
+          { kind: 'activity', title: st.title, item: null, start_at: at - ROUTE_LEAD_SEC, end_at: at + ROUTE_KEEP_SEC, place_text: place, place_query: st.query ?? place, lat: st.lat, lng: st.lng, confidence: 1, all_day: false, spot: false, approx_area: null, end_open: false, until_open: false, tz: null, extra: null },
+          now,
+        );
+        if (ins.event) restored++;
+        continue;
+      }
+      if (checked >= ROUTE_RELOCATE_PER_RUN) continue;
       const place = st.place ?? st.name;
       if (!addressOf(st.query ?? place, place) || (st.checkedAt ?? 0) > now - ROUTE_RELOCATE_EVERY_SEC) continue;
       checked++;
@@ -1240,7 +1259,7 @@ export async function relocateRouteStops(env: Env, now: number): Promise<{ check
       await env.DB.prepare('UPDATE routes SET stops = ?, segments = ?, updated_at = ? WHERE id = ?').bind(JSON.stringify(stops), JSON.stringify(routeSegments(stops)), now, r.id).run();
     }
   }
-  return { checked, located };
+  return { checked, located, restored };
 }
 
 /** 兩點的直線距離（公尺） */
