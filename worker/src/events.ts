@@ -543,6 +543,8 @@ export interface PlanItem {
   profileHint?: string;
   /** 車掃、掃街、車隊路線上的一站 */
   route?: RouteStopPlan;
+  /** 管理者處理回報時手動改過這一筆的地點（重新判讀套回去的）：from 是判讀出來的地點文字（地點名稱也改了才有，車掃的站名照原本的） */
+  manualPlace?: { from: string | null };
   /** 已經結束、太久以後才開始的：那一場的時間（回報結果直接講原因用）；國外的附當地時區 */
   start?: number;
   end?: number;
@@ -820,6 +822,8 @@ async function planPostWith(env: Env, post: PostRow, now: number, profileHint: s
 async function planActivities(env: Env, post: PostRow, extracted: ExtractedEvent[], text: string, now: number, routeTitle: string | null): Promise<PlanItem[]> {
   const deadline = Date.now() + ADDRESS_BUDGET_MS;
   const items: PlanItem[] = [];
+  // 管理者處理回報時手動改過的地點、時間（重新判讀不能蓋掉）
+  const fixes = await manualFixesOf(env, post.id);
   // 車掃的站：照貼文一行一站的清單補上模型漏掉的、改正套錯的地名
   const events = reconcileRouteStops(extracted, text);
   for (const [group, ex] of events.entries()) {
@@ -833,12 +837,15 @@ async function planActivities(env: Env, post: PostRow, extracted: ExtractedEvent
     // 只寫「本店」沒寫店名：當成沒寫地點（記下原本寫的，回報結果講「只寫了本店」）
     const rawPlace = ex.place_text ?? ex.place_query;
     const selfPlace = dropSelfPlace(ex) ? rawPlace : null;
+    // 手動改過的：地點用管理者標的位置（不再查地圖）、時間用管理者給的
+    const fix = applyManualFixes(ex, fixes);
+    const manual: Pick<PlanItem, 'manualPlace'> = fix.point ? { manualPlace: { from: fix.placeFrom } } : {};
     const missing = missingActivityParts(ex);
     const start = parseIsoToUnix(ex.start_at);
     const end = parseIsoToUnix(ex.end_at);
     const tz = ex.country ? timeZoneOf(ex) : null;
-    // 只寫日期沒寫幾點：模型常填 00:00，當成沒寫開始時間
-    const dateOnly = start !== null && guessedMidnight(start, tz, text);
+    // 只寫日期沒寫幾點：模型常填 00:00，當成沒寫開始時間（管理者改的時間照用）
+    const dateOnly = start !== null && !fix.timeFixed && guessedMidnight(start, tz, text);
     if (dateOnly) missing.push('start');
     // 跨過午夜、模型把結束寫成同一天（22:00–02:00）：結束是隔天；差更多的是讀錯，當成沒寫結束
     if (start !== null && end !== null && end <= start) ex.end_at = end + DAY_SEC > start ? new Date((end + DAY_SEC) * 1000).toISOString() : null;
@@ -851,13 +858,13 @@ async function planActivities(env: Env, post: PostRow, extracted: ExtractedEvent
       items.push({ group, plan: null, reason: `incomplete:${missing.join(',')}`, fail });
       continue;
     }
-    const r = await planEvent(env, ex, now, deadline, undefined, undefined, undefined, OPEN_END_SEC);
+    const r = await planEvent(env, ex, now, deadline, undefined, fix.point ? { point: fix.point, approxArea: null } : undefined, undefined, OPEN_END_SEC);
     if (r.plan && r.plan.lat === null) {
       items.push({ group, plan: null, reason: 'unlocated', fail: { ...which, reason: 'unlocated', ...planWhen(r.plan) } });
       continue;
     }
     const fail = r.plan ? undefined : failOf(r, which, ex.end_at === null);
-    items.push({ group, ...r, ...(fail ? { fail } : {}) });
+    items.push({ group, ...r, ...(fail ? { fail } : {}), ...manual });
   }
   return markRoutes(items, text, routeTitle, now);
 }
@@ -975,14 +982,15 @@ const taipeiDate = (unix: number): string => new Date((unix + 8 * 3600) * 1000).
 export function markRoutes(items: PlanItem[], text: string, routeTitle: string | null, now: number, retitle = true): PlanItem[] {
   const kw = ROUTE_RE.exec(text)?.[0];
   if (!kw) return items;
-  // name 是這一站的地點（place_text）
-  const stops: Array<{ it: PlanItem; at: number; name: string }> = [];
+  // place 是這一站的地點（place_text）；name 是站名，通常就是地點，管理者手動改過地點名稱的照原本判讀出來的
+  const stops: Array<{ it: PlanItem; at: number; name: string; place: string }> = [];
   for (const it of items) {
     const p = it.plan;
     const f = it.fail;
+    const from = it.manualPlace?.from ?? null;
     // 國外的不算（時間是當地的）
-    if (p && !p.spot && !p.tz) stops.push({ it, at: p.start_at, name: p.place_text });
-    else if (!p && f && (f.reason === 'unlocated' || f.reason === 'already_over') && f.startAt !== undefined && f.place && !f.tz) stops.push({ it, at: f.startAt, name: f.place });
+    if (p && !p.spot && !p.tz) stops.push({ it, at: p.start_at, name: from ?? p.place_text, place: p.place_text });
+    else if (!p && f && (f.reason === 'unlocated' || f.reason === 'already_over') && f.startAt !== undefined && f.place && !f.tz) stops.push({ it, at: f.startAt, name: from ?? f.place, place: f.place });
   }
   const days = new Map<string, typeof stops>();
   for (const st of stops) days.set(taipeiDate(st.at), [...(days.get(taipeiDate(st.at)) ?? []), st]);
@@ -998,6 +1006,8 @@ export function markRoutes(items: PlanItem[], text: string, routeTitle: string |
         const pa = a.it.plan;
         const pb = b.it.plan;
         if (!pa || !pb || pa.lat === null || pa.lng === null || pb.lat === null || pb.lng === null || pa.approx_area || pb.approx_area || a.name === b.name) continue;
+        // 管理者手動標的位置不算查錯
+        if (a.it.manualPlace || b.it.manualPlace) continue;
         if (distM({ lat: pa.lat, lng: pa.lng }, { lat: pb.lat, lng: pb.lng }) > 40) continue;
         const aOk = pa.place_query.includes(core(a.name));
         const bOk = pb.place_query.includes(core(b.name));
@@ -1011,32 +1021,32 @@ export function markRoutes(items: PlanItem[], text: string, routeTitle: string |
     // 至少一站放得上雷達（有確切位置、還沒經過）
     if (!list.some((st) => st.it.plan && st.it.plan.lat !== null && !st.it.plan.approx_area && st.at + ROUTE_KEEP_SEC > now)) continue;
     list.forEach((st, i) => {
-      const { it, at, name } = st;
+      const { it, at, name, place } = st;
       const p = it.plan;
       const own = p?.title ?? it.fail?.title ?? null;
       const stopTitle = retitle || !own ? `${title}・${name}` : own;
       // 時間表寫站名：回報的人自己填的標題「路線名稱・蘇巧慧鶯歌服務處」取站名，地點填地址時另外列
       const stopName = retitle ? name : stopNameOf(stopTitle, title, name);
-      const query = p?.place_query ?? name;
+      const query = p?.place_query ?? place;
       const route: RouteStopPlan = {
         key,
         title,
         seq: i + 1,
         kind: i === 0 ? 'start' : i === list.length - 1 ? 'end' : 'cheer',
         name: stopName,
-        ...(stopName !== name ? { place: name } : {}),
+        ...(stopName !== place ? { place } : {}),
         stopTitle,
         at,
         lat: null,
         lng: null,
-        ...(query !== name ? { query } : {}),
+        ...(query !== place ? { query } : {}),
       };
       it.route = route;
       if (p && p.approx_area) {
         // 只定位到鄉鎮區、路：不放上雷達，請回報的人標位置（帶著約略位置，地圖從那裡開始）
         it.plan = null;
         it.reason = 'approximate';
-        it.fail = { title: stopTitle, place: name, reason: 'approximate', area: p.approx_area, startAt: at, endOpen: true, ...(p.lat !== null && p.lng !== null ? { lat: p.lat, lng: p.lng } : {}) };
+        it.fail = { title: stopTitle, place, reason: 'approximate', area: p.approx_area, startAt: at, endOpen: true, ...(p.lat !== null && p.lng !== null ? { lat: p.lat, lng: p.lng } : {}) };
         return;
       }
       if (p && p.lat !== null && p.lng !== null) {
@@ -1163,10 +1173,13 @@ export async function setRouteStopPlace(
   const win = at === null ? null : { from: at, to: at };
   let changed = 0;
   let stop: StoredRouteStop | null = null;
+  let current: string | null = null;
   for (const r of results) {
     const list = JSON.parse(r.stops) as StoredRouteStop[];
     const st = list.find((s) => isStop(s, title, win));
     if (!st) continue;
+    // 改之前的地點文字（雷達上那一站的 place_text）：重新判讀時照這個認出這一站
+    current ??= st.place ?? st.name;
     st.lat = point.lat;
     st.lng = point.lng;
     if (placeText) st.place = placeText;
@@ -1174,7 +1187,8 @@ export async function setRouteStopPlace(
     changed++;
     await env.DB.prepare('UPDATE routes SET stops = ?, segments = ?, updated_at = ? WHERE id = ?').bind(JSON.stringify(list), JSON.stringify(routeSegments(list)), now, r.id).run();
   }
-  if (!stop) return 0;
+  if (!stop || current === null) return 0;
+  await savePlaceFix(env, postId, current, point, placeText, now);
   const place = placeText ?? stop.place ?? stop.name;
   const live = "status IN ('upcoming', 'active', 'unlocated')";
   const ev = await env.DB.prepare(
@@ -1198,7 +1212,7 @@ export async function setRouteStopPlace(
 
 /**
  * 管理者改一個地點的位置（回報地點錯誤）：同一則貼文、同一個地點還沒結束的一起改（固定據點的每天時段、連續幾天的每一場），
- * 約略位置拿掉，原本找不到地點的放上雷達；placeText 有給就連地點名稱一起改。重新判讀這則貼文會蓋掉
+ * 約略位置拿掉，原本找不到地點的放上雷達；placeText 有給就連地點名稱一起改。記在 manual_fixes，重新判讀這則貼文照樣用
  */
 export async function setEventPlace(env: Env, eventId: number, point: { lat: number; lng: number }, placeText: string | null, now: number): Promise<number> {
   const ev = await env.DB.prepare('SELECT post_id, place_text FROM events WHERE id = ?').bind(eventId).first<{ post_id: string; place_text: string }>();
@@ -1210,7 +1224,174 @@ export async function setEventPlace(env: Env, eventId: number, point: { lat: num
   )
     .bind(point.lat, point.lng, placeText, placeText, now, now, ev.post_id, ev.place_text)
     .run();
+  if (r.meta.changes) await savePlaceFix(env, ev.post_id, ev.place_text, point, placeText, now);
   return r.meta.changes ?? 0;
+}
+
+/**
+ * 管理者改一則的時間（回報時間錯誤）：只改這一則；endAt 是 null 就是沒寫結束（從開始排 OPEN_END_SEC）。
+ * 記在 manual_fixes，重新判讀這則貼文照樣用（補充改了時間、判讀出不一樣的開始時間就照新的）
+ */
+export async function setEventTime(env: Env, eventId: number, startAt: number, endAt: number | null, now: number): Promise<number> {
+  const ev = await env.DB.prepare('SELECT post_id, place_text, start_at FROM events WHERE id = ?').bind(eventId).first<{ post_id: string; place_text: string; start_at: number }>();
+  if (!ev) return 0;
+  const r = await env.DB.prepare(
+    `UPDATE events SET start_at = ?, end_at = ?, end_open = ?, status = CASE WHEN status = 'unlocated' THEN status WHEN ? <= ? THEN 'active' ELSE 'upcoming' END, updated_at = ?
+      WHERE id = ? AND status IN ('upcoming', 'active', 'unlocated')`,
+  )
+    .bind(startAt, endAt ?? startAt + OPEN_END_SEC, endAt === null ? 1 : 0, startAt, now, now, eventId)
+    .run();
+  if (r.meta.changes) await saveTimeFix(env, ev.post_id, ev.place_text, ev.start_at, startAt, endAt, now);
+  return r.meta.changes ?? 0;
+}
+
+/** 路線的站照預計經過時間重新排，第一站是出發、最後一站是抵達 */
+export function sortStops<T extends { kind: 'start' | 'cheer' | 'end'; at: number | null }>(stops: T[]): T[] {
+  const at = (st: T): number => st.at ?? Number.MAX_SAFE_INTEGER;
+  return [...stops].sort((a, b) => at(a) - at(b)).map((st, i, all) => ({ ...st, kind: i === 0 ? 'start' : i === all.length - 1 ? 'end' : 'cheer' }));
+}
+
+/**
+ * 改回報的車掃路線上一站的預計經過時間（管理者處理「時間錯誤」）：時間表照新的時間重新排、路線重新連線；
+ * 雷達上那一站改成預計經過前 10 分到後 15 分，原本沒放上雷達的（已經經過）有確切位置就放上去。回傳改了幾站
+ */
+export async function setRouteStopTime(env: Env, postId: string, title: string, at: number | null, newAt: number, now: number): Promise<number> {
+  const { results } = await env.DB.prepare('SELECT id, stops FROM routes WHERE post_id = ?').bind(postId).all<{ id: string; stops: string }>();
+  const win = at === null ? null : { from: at, to: at };
+  const stmts: D1PreparedStatement[] = [];
+  let stop: StoredRouteStop | null = null;
+  let oldAt: number | null = null;
+  for (const r of results) {
+    const list = JSON.parse(r.stops) as StoredRouteStop[];
+    const st = list.find((s) => isStop(s, title, win));
+    if (!st) continue;
+    oldAt ??= st.at;
+    st.at = newAt;
+    stop = st;
+    const sorted = sortStops(list);
+    const first = sorted[0];
+    const last = sorted[sorted.length - 1];
+    stmts.push(
+      env.DB.prepare('UPDATE routes SET stops = ?, segments = ?, depart_at = ?, arrive_at = ?, show_until = ?, updated_at = ? WHERE id = ?').bind(
+        JSON.stringify(sorted),
+        JSON.stringify(routeSegments(sorted)),
+        first.at,
+        last.at,
+        (last.at ?? now) + ROUTE_KEEP_SEC,
+        now,
+        r.id,
+      ),
+    );
+  }
+  if (!stop) return 0;
+  // 同一站別人的回報跟著改時間（回報靠標題、預計經過時間找這一站）
+  if (oldAt !== null) stmts.push(env.DB.prepare('UPDATE event_feedback SET stop_at = ? WHERE post_id = ? AND stop = ? AND stop_at = ?').bind(newAt, postId, title, oldAt));
+  await env.DB.batch(stmts);
+  const place = stop.place ?? stop.name;
+  if (oldAt !== null) await saveTimeFix(env, postId, place, oldAt, newAt, null, now);
+  const start = newAt - ROUTE_LEAD_SEC;
+  const ev = await env.DB.prepare(
+    `UPDATE events SET start_at = ?, end_at = ?, status = CASE WHEN status = 'unlocated' THEN status WHEN ? <= ? THEN 'active' ELSE 'upcoming' END, updated_at = ?
+      WHERE post_id = ? AND title = ? AND status IN ('upcoming', 'active', 'unlocated')${oldAt !== null ? ' AND start_at <= ? AND end_at >= ?' : ''}`,
+  )
+    .bind(start, newAt + ROUTE_KEEP_SEC, start, now, now, postId, title, ...(oldAt !== null ? [oldAt, oldAt] : []))
+    .run();
+  // 原本沒在雷達上（已經經過、時間改到後面）：有確切位置、車隊還沒經過就放上去
+  if ((ev.meta.changes ?? 0) === 0 && stop.lat !== null && stop.lng !== null && newAt + ROUTE_KEEP_SEC > now) {
+    await insertPlanned(
+      env,
+      postId,
+      { kind: 'activity', title, item: null, start_at: start, end_at: newAt + ROUTE_KEEP_SEC, place_text: place, place_query: stop.query ?? place, lat: stop.lat, lng: stop.lng, confidence: 1, all_day: false, spot: false, approx_area: null, end_open: false, until_open: false, tz: null, extra: null },
+      now,
+      true,
+    );
+  }
+  return 1;
+}
+
+/** 管理者處理回報時手動改的地點、時間（manual_fixes）：重新判讀時套回去 */
+export interface ManualFix {
+  kind: 'place' | 'time';
+  /** 判讀出來的地點文字（去掉空白） */
+  placeKey: string;
+  /** 改時間：判讀出來的開始時間（車掃的站是預計經過時間） */
+  atKey: number;
+  lat: number | null;
+  lng: number | null;
+  placeText: string | null;
+  startAt: number | null;
+  endAt: number | null;
+}
+
+/** 比對地點文字用：去掉空白 */
+export const placeKeyOf = (s: string): string => s.replace(/\s+/g, '');
+
+async function manualFixesOf(env: Env, postId: string): Promise<ManualFix[]> {
+  const { results } = await env.DB.prepare('SELECT kind, place_key, at_key, lat, lng, place_text, start_at, end_at FROM manual_fixes WHERE post_id = ?')
+    .bind(postId)
+    .all<{ kind: string; place_key: string; at_key: number; lat: number | null; lng: number | null; place_text: string | null; start_at: number | null; end_at: number | null }>();
+  return results.map((r) => ({ kind: r.kind === 'time' ? 'time' : 'place', placeKey: r.place_key, atKey: r.at_key, lat: r.lat, lng: r.lng, placeText: r.place_text, startAt: r.start_at, endAt: r.end_at }));
+}
+
+/**
+ * 判讀出來的一筆套用手動改過的：地點（地點文字或查詢文字一樣的）改成管理者標的位置，有改地點名稱就連名稱一起改；
+ * 時間（同一個地點、開始時間一樣的）改成管理者給的。ex 直接改；回傳標的位置（沒改過是 null，照常查地圖）、
+ * 地點名稱改了時原本判讀出來的地點文字、時間有沒有改
+ */
+export function applyManualFixes(ex: ExtractedEvent, fixes: ManualFix[]): { point: GeoPoint | null; placeFrom: string | null; timeFixed: boolean } {
+  if (fixes.length === 0) return { point: null, placeFrom: null, timeFixed: false };
+  const before = [ex.place_text, ex.place_query].filter((v): v is string => !!v).map(placeKeyOf);
+  const place = fixes.find((f) => f.kind === 'place' && f.lat !== null && f.lng !== null && before.includes(f.placeKey));
+  const from = ex.place_text ?? ex.place_query;
+  if (place?.placeText) {
+    ex.place_text = place.placeText;
+    ex.place_query = place.placeText;
+  }
+  // 時間：改地點之前、之後的地點文字都認（先改時間再改地點名稱、或反過來）
+  const keys = [...before, ...(ex.place_text ? [placeKeyOf(ex.place_text)] : [])];
+  const start = parseIsoToUnix(ex.start_at);
+  const time = start === null ? undefined : fixes.find((f) => f.kind === 'time' && f.atKey === start && f.startAt !== null && keys.includes(f.placeKey));
+  if (time?.startAt != null) {
+    ex.start_at = new Date(time.startAt * 1000).toISOString();
+    ex.end_at = time.endAt !== null ? new Date(time.endAt * 1000).toISOString() : null;
+  }
+  return {
+    point: place && place.lat !== null && place.lng !== null ? { lat: place.lat, lng: place.lng, displayName: ex.place_text ?? '' } : null,
+    placeFrom: place?.placeText && from && placeKeyOf(from) !== placeKeyOf(place.placeText) ? from : null,
+    timeFixed: !!time,
+  };
+}
+
+/**
+ * 記下手動改的位置：current 是改之前的地點文字，placeText 是新的地點名稱（null 是不改）。
+ * 之前改到 current 的（A 改成 B、現在又改 B）一起改；地點名稱改了，這個地點改過的時間跟著換地點文字
+ */
+async function savePlaceFix(env: Env, postId: string, current: string, point: { lat: number; lng: number }, placeText: string | null, now: number): Promise<void> {
+  const cur = placeKeyOf(current);
+  const next = placeText ? placeKeyOf(placeText) : cur;
+  const keys = [...new Set([cur, next])].filter(Boolean);
+  await env.DB.batch([
+    env.DB.prepare("UPDATE manual_fixes SET lat = ?, lng = ?, place_text = COALESCE(?, place_text) WHERE post_id = ? AND kind = 'place' AND place_text = ?").bind(point.lat, point.lng, placeText, postId, current),
+    ...keys.map((k) =>
+      env.DB.prepare(
+        `INSERT INTO manual_fixes (post_id, kind, place_key, at_key, lat, lng, place_text, created_at) VALUES (?, 'place', ?, 0, ?, ?, ?, ?)
+         ON CONFLICT(post_id, kind, place_key, at_key) DO UPDATE SET lat = excluded.lat, lng = excluded.lng, place_text = COALESCE(excluded.place_text, manual_fixes.place_text), created_at = excluded.created_at`,
+      ).bind(postId, k, point.lat, point.lng, placeText, now),
+    ),
+    ...(next !== cur ? [env.DB.prepare("UPDATE OR REPLACE manual_fixes SET place_key = ? WHERE post_id = ? AND kind = 'time' AND place_key = ?").bind(next, postId, cur)] : []),
+  ]);
+}
+
+/** 記下手動改的時間：place 是這一則的地點文字，atKey 是改之前的開始時間（車掃的站是預計經過時間）；之前改成 atKey 的一起改 */
+async function saveTimeFix(env: Env, postId: string, place: string, atKey: number, startAt: number, endAt: number | null, now: number): Promise<void> {
+  const key = placeKeyOf(place);
+  await env.DB.batch([
+    env.DB.prepare("UPDATE manual_fixes SET start_at = ?, end_at = ? WHERE post_id = ? AND kind = 'time' AND place_key = ? AND start_at = ?").bind(startAt, endAt, postId, key, atKey),
+    env.DB.prepare(
+      `INSERT INTO manual_fixes (post_id, kind, place_key, at_key, start_at, end_at, created_at) VALUES (?, 'time', ?, ?, ?, ?, ?)
+       ON CONFLICT(post_id, kind, place_key, at_key) DO UPDATE SET start_at = excluded.start_at, end_at = excluded.end_at, created_at = excluded.created_at`,
+    ).bind(postId, key, atKey, startAt, endAt, now),
+  ]);
 }
 
 /** 有確切位置的站照順序用直線連起來（不知道實際走哪些路），沒有認領人數 */

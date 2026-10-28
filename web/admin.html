@@ -31,6 +31,8 @@
     .apply { margin-top: 10px; padding-top: 10px; border-top: 1px dashed #b9b2a6; }
     .apply textarea { width: 100%; font: inherit; font-size: 16px; padding: 8px 10px; border: 2px solid var(--ink); border-radius: 10px; background: #fff; resize: vertical; }
     .apply .hint { font-size: 12px; color: #5d5850; margin: 4px 0 8px; }
+    .apply .time-input { display: flex; flex: 1 1 220px; min-width: 0; align-items: center; gap: 6px; font-size: 14px; white-space: nowrap; }
+    .apply .time-input input { flex: 1 1 0; width: 0; font: inherit; font-size: 16px; padding: 5px 8px; border: 2px solid var(--ink); border-radius: 10px; background: #fff; min-width: 0; }
     .apply .title-input { flex: 1 1 160px; min-width: 0; font: inherit; font-size: 16px; padding: 6px 10px; border: 2px solid var(--ink); border-radius: 10px; background: #fff; }
     .result { margin: 0 0 12px; padding: 10px 12px; background: #e9f6ee; border: 2px solid #2f7d4f; border-radius: 12px; font-size: 14px; }
     .result.err { background: #fdecea; border-color: #b3261e; }
@@ -94,6 +96,12 @@
     const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
     const fmt = new Intl.DateTimeFormat('zh-TW', { timeZone: 'Asia/Taipei', month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit', hour12: false });
     const when = (t) => (t ? fmt.format(new Date(t * 1000)) : '');
+    /** 時間欄位（台灣時間「2026-10-29T14:00」）和 unix 秒互換 */
+    const localInput = (t) => (t ? new Date((t + 8 * 3600) * 1000).toISOString().slice(0, 16) : '');
+    const unixOf = (v) => {
+      const ms = v ? Date.parse(`${v.slice(0, 16)}:00+08:00`) : NaN;
+      return Number.isNaN(ms) ? null : Math.floor(ms / 1000);
+    };
     const EVENT_STATUS = { upcoming: '還沒開始', active: '進行中', ended: '已結束', unlocated: '找不到地點' };
     let status = 'open';
     // 改車掃一站的地點用的小地圖：每筆回報一張（按了才開），標的位置、查詢結果另外記，
@@ -103,8 +111,8 @@
     const pins = new Map();
     const pinMsgs = new Map();
     const drafts = new Map();
-    const DRAFT_FIELDS = '#list [data-place], #list [data-title], #list [data-note]';
-    const draftKey = (el) => ['place', 'title', 'note'].filter((k) => el.dataset[k] !== undefined).map((k) => `${k}:${el.dataset[k]}`)[0];
+    const DRAFT_FIELDS = '#list [data-place], #list [data-title], #list [data-note], #list [data-start], #list [data-end]';
+    const draftKey = (el) => ['place', 'title', 'note', 'start', 'end'].filter((k) => el.dataset[k] !== undefined).map((k) => `${k}:${el.dataset[k]}`)[0];
     const TAIPEI = { lat: 25.0478, lng: 121.517 };
     /** 回報的人標的位置已經放上地圖的（只放一次，之後管理者拖過、查過的不蓋掉） */
     const seeded = new Set();
@@ -195,8 +203,17 @@
               <div class="pin-map" id="pin-map-${f.id}" hidden></div>
               <p class="pin-msg" id="pin-msg-${f.id}" aria-live="polite"></p>
               <div class="row"><button type="button" class="btn${f.kind === 'location' ? ' primary' : ''}" data-apply="${f.stop ? 'stop_place' : 'event_place'}" data-id="${f.id}">${f.stop ? '修改這一站的地點' : '修改地點'}</button></div>
-              <p class="hint">${f.stop ? '只改這一站' : '改這個地點的位置'}：寫地址、店名按「查地點」標到地圖上，不對再拖紅色標記或點地圖；也可以按「在地圖上標」直接點（灰點是${f.stop ? '這一站' : ''}現在的位置${f.pin_lat != null ? '，紅色標記一開始是回報的人標的' : ''}）。標了位置就用標的，上面寫的當成地點名稱（空白就保留原本的）；沒標就照寫的查（查到約略位置不算），或貼 Google 地圖按右鍵複製的座標。${f.stop ? '雷達上的點、時間表、路線跟著改，其他站不動。' : '同一則貼文同一個地點還沒結束的一起改（固定據點的每天時段也是），之後重新判讀會蓋掉。'}</p>`
+              <p class="hint">${f.stop ? '只改這一站' : '改這個地點的位置'}：寫地址、店名按「查地點」標到地圖上，不對再拖紅色標記或點地圖；也可以按「在地圖上標」直接點（灰點是${f.stop ? '這一站' : ''}現在的位置${f.pin_lat != null ? '，紅色標記一開始是回報的人標的' : ''}）。標了位置就用標的，上面寫的當成地點名稱（空白就保留原本的）；沒標就照寫的查（查到約略位置不算），或貼 Google 地圖按右鍵複製的座標。${f.stop ? '雷達上的點、時間表、路線跟著改，其他站不動。' : '同一則貼文同一個地點還沒結束的一起改（固定據點的每天時段也是）。'}之後重新判讀也會保留。</p>`
                   : ''
+              }
+              ${
+                f.kind !== 'time'
+                  ? ''
+                  : f.stop
+                    ? `<div class="row"><label class="time-input">預計經過<input type="datetime-local" data-start="${f.id}" value="${localInput(f.stop_at)}" /></label><button type="button" class="btn primary" data-apply="stop_time" data-id="${f.id}">修改這一站的時間</button></div>
+              <p class="hint">改這一站的預計經過時間（台灣時間）：雷達上是經過前 10 分到經過後 15 分，時間表照時間重新排，其他站不動。之後重新判讀也會保留。</p>`
+                    : `<div class="row"><label class="time-input">開始<input type="datetime-local" data-start="${f.id}" value="${localInput(f.start_at)}" /></label><label class="time-input">結束<input type="datetime-local" data-end="${f.id}" value="${f.end_open ? '' : localInput(f.end_at)}" /></label><button type="button" class="btn primary" data-apply="event_time" data-id="${f.id}">修改時間</button></div>
+              <p class="hint">直接改這一則的開始、結束（台灣時間），不經過 AI；結束空白是沒寫結束（雷達上排 2 小時）。之後重新判讀也會保留（補充改了時間、AI 讀出別的開始時間就照新的）。</p>`
               }
               <div class="row"><input type="text" class="title-input" data-title="${f.id}" maxlength="30" value="${esc(curTitle)}" aria-label="新標題" /><button type="button" class="btn primary" data-apply="title" data-id="${f.id}">改標題</button></div>
               <p class="hint">改標題：直接改這個地點的標題（固定據點的每天時段一起改），不經過 AI，之後重新判讀也會保留。</p>
@@ -209,7 +226,7 @@
                     : `<button type="button" class="btn" data-apply="takedown" data-scope="${takedownScope}" data-id="${f.id}">${takedownScope === 'post' ? '整則從雷達下架' : '從雷達下架'}</button>`
                 }
               </div>
-              <p class="hint">${canReprocess ? '套用：把上面的內容加到這則貼文的補充，用現在的規則重新判讀（之前手動改過的會被蓋掉）。' : '官方行程、新聞不能重新判讀。'}${f.stop ? '刪除這一站：從車掃的時間表、路線、雷達拿掉這一站，其他站照舊。' : ''}套用或下架後自動標成已處理。</p>
+              <p class="hint">${canReprocess ? '套用：把上面的內容加到這則貼文的補充，用現在的規則重新判讀（手動改過的地點、時間、標題會保留）。' : '官方行程、新聞不能重新判讀。'}${f.stop ? '刪除這一站：從車掃的時間表、路線、雷達拿掉這一站，其他站照舊。' : ''}套用或下架後自動標成已處理。</p>
             </div>`
               : '';
           return `<li class="fb">
@@ -326,7 +343,7 @@
     function forget(id) {
       pins.delete(id);
       pinMsgs.delete(id);
-      for (const k of ['place', 'title', 'note']) drafts.delete(`${k}:${id}`);
+      for (const k of ['place', 'title', 'note', 'start', 'end']) drafts.delete(`${k}:${id}`);
     }
 
     const evLine = (ev) => {
@@ -388,6 +405,13 @@
             // 欄位預先帶的是回報的說明，不一定是地名：先確認會寫成什麼
             if (!confirm(`${what || '這個地點（同一則貼文同一個地點的每一場）'}改到地圖上標的位置，地點名稱${body.place ? `寫成「${body.place}」` : '不變'}？`)) return;
           }
+        } else if (action === 'event_time' || action === 'stop_time') {
+          body.start = unixOf(document.querySelector(`input[data-start="${id}"]`)?.value);
+          if (body.start === null) {
+            showResult(`請先填${action === 'stop_time' ? '預計經過' : '開始'}時間。`, true);
+            return;
+          }
+          if (action === 'event_time') body.end = unixOf(document.querySelector(`input[data-end="${id}"]`)?.value);
         } else if (action === 'remove_stop') {
           if (!confirm('確定刪除這一站？車掃的時間表、路線、雷達上的點都會拿掉這一站。')) return;
         } else {
@@ -395,7 +419,7 @@
           if (!confirm(body.scope === 'post' ? '確定把這則貼文的發放、活動都從雷達下架？' : '確定把這一則從雷達下架？')) return;
         }
         for (const x of a.closest('.apply').querySelectorAll('button, textarea, input')) x.disabled = true;
-        a.textContent = action === 'supplement' ? '重新判讀中…' : action === 'title' || action === 'stop_place' || action === 'event_place' ? '修改中…' : action === 'remove_stop' ? '刪除中…' : '下架中…';
+        a.textContent = action === 'supplement' ? '重新判讀中…' : action === 'title' || action === 'stop_place' || action === 'event_place' || action === 'event_time' || action === 'stop_time' ? '修改中…' : action === 'remove_stop' ? '刪除中…' : '下架中…';
         try {
           const r = await api(`/api/admin/feedback/${id}/apply`, { method: 'POST', body: JSON.stringify(body) });
           forget(id);
@@ -410,6 +434,10 @@
                   ? `已修改這一站的地點，標成已處理。現在雷達上這則貼文的：<ul>${list}</ul>`
                   : action === 'event_place'
                   ? `已修改地點（${r.changed ?? 0} 筆），標成已處理。現在雷達上這則貼文的：<ul>${list}</ul>`
+                  : action === 'event_time'
+                  ? `已修改時間，標成已處理。現在雷達上這則貼文的：<ul>${list}</ul>`
+                  : action === 'stop_time'
+                  ? `已修改這一站的時間，標成已處理。現在雷達上這則貼文的：<ul>${list}</ul>`
                   : action === 'remove_stop'
                   ? `已刪除這一站（時間表 ${r.removedStops ?? 0} 站、雷達上 ${r.removed ?? 0} 個點），標成已處理。${list ? `這則貼文還在雷達上的：<ul>${list}</ul>` : ''}`
                   : `已從雷達下架 ${r.removed ?? 0} 筆，標成已處理。${list ? `這則貼文還在雷達上的：<ul>${list}</ul>` : ''}`,

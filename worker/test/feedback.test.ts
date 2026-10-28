@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { cleanNote, feedbackMessage, parseLatLng, pinOf } from '../src/feedback';
+import { cleanNote, feedbackMessage, newTimes, parseLatLng, pinOf } from '../src/feedback';
 
 describe('cleanNote', () => {
   it('trims, collapses spaces and caps at 200 characters', () => {
@@ -37,5 +37,24 @@ describe('pinOf', () => {
     expect(pinOf(25, undefined)).toBeNull();
     expect(pinOf(Number.NaN, 121)).toBeNull();
     expect(pinOf(91, 121)).toBeNull();
+  });
+});
+
+describe('newTimes', () => {
+  const now = 1_800_000_000;
+  it('takes a start and an optional end', () => {
+    expect(newTimes(now + 600, now + 4200, now, 7200)).toEqual({ start: now + 600, end: now + 4200 });
+    expect(newTimes(now + 600, null, now, 7200)).toEqual({ start: now + 600, end: null });
+    expect(newTimes(now + 600, '', now, 7200)).toEqual({ start: now + 600, end: null });
+    // 已經開始、還沒結束的可以
+    expect(newTimes(now - 600, null, now, 7200).start).toBe(now - 600);
+  });
+  it('rejects a missing start, an end before the start, a time already over or too far ahead', () => {
+    expect(() => newTimes(undefined, null, now, 7200)).toThrow('開始');
+    expect(() => newTimes(now + 600, now + 600, now, 7200)).toThrow('之後');
+    expect(() => newTimes(now + 600, 'x', now, 7200)).toThrow('格式');
+    expect(() => newTimes(now - 3600, now - 60, now, 7200)).toThrow('已經過了');
+    expect(() => newTimes(now - 1200, null, now, 900)).toThrow('已經過了');
+    expect(() => newTimes(now + 22 * 86400, null, now, 7200)).toThrow('21 天');
   });
 });

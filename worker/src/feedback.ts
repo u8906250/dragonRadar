@@ -3,7 +3,7 @@
  * 回報的內容只有管理者看得到；存裝置代碼與 IP 的加鹽雜湊（限制次數、同一個人同一則同一種問題只算一次），30 天後刪除。
  */
 import type { Env } from './env';
-import { ADDRESS_BUDGET_MS, findRouteStop, getPost, locateTypedPlace, removeRouteStop, reprocessPost, setEventPlace, setManualTitle, setRouteStopPlace, takeDown } from './events';
+import { ADDRESS_BUDGET_MS, findRouteStop, getPost, locateTypedPlace, MAX_FUTURE_SEC, OPEN_END_SEC, removeRouteStop, reprocessPost, ROUTE_KEEP_SEC, setEventPlace, setEventTime, setManualTitle, setRouteStopPlace, setRouteStopTime, takeDown } from './events';
 import { parseSubscription, PushError, sendPush, type PushMessage } from './push';
 
 export const FEEDBACK_KINDS = {
@@ -192,7 +192,7 @@ export async function listFeedback(env: Env, status: string | null): Promise<unk
   const st = status === 'resolved' ? 'resolved' : 'open';
   const { results } = await env.DB.prepare(
     `SELECT f.id, f.event_id, f.post_id, f.title, f.place_text, f.kind, f.note, f.status, f.created_at, f.resolved_at, f.stop, f.stop_at, f.pin_lat, f.pin_lng,
-            e.status AS event_status, e.start_at, e.end_at, e.lat, e.lng, e.approx_area, e.title AS event_title, e.place_text AS event_place,
+            e.status AS event_status, e.start_at, e.end_at, e.end_open, e.lat, e.lng, e.approx_area, e.title AS event_title, e.place_text AS event_place,
             p.permalink, p.username, p.supplement, p.source,
             -- 重新判讀後原本那一則會換成新的：同一則貼文現在雷達上的第一則
             (SELECT c.id FROM events c WHERE c.post_id = f.post_id AND c.status IN ('upcoming', 'active') ORDER BY c.start_at LIMIT 1) AS current_event_id
@@ -260,6 +260,21 @@ export async function adminLocate(env: Env, body: unknown): Promise<{ found: boo
   return { found: !!r.point, lat: r.point?.lat ?? null, lng: r.point?.lng ?? null, name: r.point?.displayName ?? null, approxArea: r.approxArea };
 }
 
+/**
+ * 管理者改的時間：start 是開始（車掃的站是預計經過時間），end 是結束（null 是沒寫結束）；都是 unix 秒。
+ * keep 是沒寫結束時排多久（車掃的站是經過後 15 分），改完就已經結束的不行
+ */
+export function newTimes(start: unknown, end: unknown, now: number, keep: number): { start: number; end: number | null } {
+  if (!Number.isSafeInteger(start)) throw new PushError(400, '請填開始時間');
+  const s = start as number;
+  const e = end === null || end === undefined || end === '' ? null : Number.isSafeInteger(end) ? (end as number) : NaN;
+  if (Number.isNaN(e)) throw new PushError(400, '結束時間格式不對');
+  if (e !== null && e <= s) throw new PushError(400, '結束時間要在開始之後');
+  if ((e ?? s + keep) <= now) throw new PushError(400, '改的時間已經過了；要拿掉請用「從雷達下架」');
+  if (s > now + MAX_FUTURE_SEC) throw new PushError(400, '開始時間最多排到 21 天後');
+  return { start: s, end: e };
+}
+
 /** 套用後回給管理頁看的：現在雷達上這則貼文的事件（同一個地點的固定據點只列第一天） */
 async function currentEvents(env: Env, postId: string): Promise<unknown[]> {
   const { results } = await env.DB.prepare(
@@ -285,7 +300,9 @@ async function currentEvents(env: Env, postId: string): Promise<unknown[]> {
  * - { action: 'stop_place', place, lat?, lng? }：車掃指定的那一站改位置：有 lat、lng（管理頁在小地圖上標的）就用標的位置，place 當成地點名稱（可以不寫）；
  *   沒有就照 place 查（地址、店名照查地點的方式查，或直接貼「緯度, 經度」）
  * - { action: 'event_place', place, lat?, lng? }：不是車掃的，改回報那一則的位置（同一則貼文同一個地點還沒結束的一起改），位置的給法同上
- * 套用完標成已處理，回傳現在雷達上這則貼文的事件
+ * - { action: 'event_time', start, end? }：不是車掃的，改回報那一則的開始、結束時間（unix 秒，沒有 end 是沒寫結束）
+ * - { action: 'stop_time', start }：車掃指定的那一站改預計經過時間，時間表照時間重新排
+ * 手動改的地點、時間記在 manual_fixes，之後重新判讀照樣用。套用完標成已處理，回傳現在雷達上這則貼文的事件
  */
 export async function applyFeedback(
   env: Env,
@@ -297,7 +314,7 @@ export async function applyFeedback(
     .bind(id)
     .first<{ id: number; event_id: number; post_id: string | null; place_text: string | null; kind: FeedbackKind; note: string | null; stop: string | null; stop_at: number | null }>();
   if (!fb) throw new PushError(404, '找不到這筆回報');
-  const b = (body ?? {}) as { action?: unknown; note?: unknown; scope?: unknown; title?: unknown; place?: unknown; lat?: unknown; lng?: unknown };
+  const b = (body ?? {}) as { action?: unknown; note?: unknown; scope?: unknown; title?: unknown; place?: unknown; lat?: unknown; lng?: unknown; start?: unknown; end?: unknown };
   const postId = fb.post_id;
   if (!postId) throw new PushError(400, '這筆回報沒有對應的貼文');
   let removed: number | undefined;
@@ -347,6 +364,17 @@ export async function applyFeedback(
     const target = await liveId();
     if (target === null) throw new PushError(400, '這則已經不在雷達上了');
     changed = await setEventPlace(env, target, point, placeText, now);
+  } else if (b.action === 'event_time') {
+    if (fb.stop) throw new PushError(400, '車掃的站請用「修改這一站的時間」');
+    const t = newTimes(b.start, b.end, now, OPEN_END_SEC);
+    const target = await liveId();
+    if (target === null) throw new PushError(400, '這則已經不在雷達上了');
+    changed = await setEventTime(env, target, t.start, t.end, now);
+  } else if (b.action === 'stop_time') {
+    if (!fb.stop) throw new PushError(400, '這筆回報沒有指定哪一站');
+    const t = newTimes(b.start, null, now, ROUTE_KEEP_SEC);
+    changed = await setRouteStopTime(env, postId, fb.stop, fb.stop_at, t.start, now);
+    if (changed === 0) throw new PushError(400, '路線上已經沒有這一站了');
   } else if (b.action === 'remove_stop') {
     if (!fb.stop) throw new PushError(400, '這筆回報沒有指定哪一站');
     const r = await removeRouteStop(env, postId, fb.stop, fb.stop_at === null ? null : { from: fb.stop_at, to: fb.stop_at }, now);
@@ -354,7 +382,7 @@ export async function applyFeedback(
     removed = r.events;
     removedStops = r.stops;
   } else {
-    throw new PushError(400, "action 要是 'title'、'supplement'、'takedown'、'remove_stop'、'stop_place' 或 'event_place'");
+    throw new PushError(400, "action 要是 'title'、'supplement'、'takedown'、'remove_stop'、'stop_place'、'event_place'、'event_time' 或 'stop_time'");
   }
   await env.DB.prepare("UPDATE event_feedback SET status = 'resolved', resolved_at = ? WHERE id = ?").bind(now, id).run();
   return {

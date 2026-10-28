@@ -570,6 +570,7 @@ async function handleAdmin(req: Request, env: Env, ctx: ExecutionContext, path: 
     const r = await env.DB.batch([
       env.DB.prepare('DELETE FROM events WHERE post_id = ?').bind(id),
       env.DB.prepare('DELETE FROM posts WHERE id = ?').bind(id),
+      env.DB.prepare('DELETE FROM manual_fixes WHERE post_id = ?').bind(id),
     ]);
     return jsonResponse({ deleted_events: r[0].meta.changes ?? 0, deleted_posts: r[1].meta.changes ?? 0 });
   }
@@ -719,6 +720,8 @@ async function purgeOldData(env: Env, now: number): Promise<number> {
   const r = await env.DB.batch([
     env.DB.prepare('DELETE FROM events WHERE end_at < ?').bind(cutoff),
     env.DB.prepare('DELETE FROM posts WHERE fetched_at < ? AND id NOT IN (SELECT post_id FROM events)').bind(cutoff),
+    // 手動改的地點、時間跟著貼文
+    env.DB.prepare('DELETE FROM manual_fixes WHERE post_id NOT IN (SELECT id FROM posts)'),
   ]);
   return r.reduce((n, x) => n + (x.meta.changes ?? 0), 0) + (await purgeReports(env, cutoff)) + (await purgeBottles(env, cutoff)) + (await purgeSubscriptions(env, cutoff)) + (await purgeFeedback(env, cutoff));
 }

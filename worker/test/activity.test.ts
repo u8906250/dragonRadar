@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { guessedMidnight, missingActivityParts, normalizeActivities, reconcileRouteStops, routeStopLines, type ExtractedEvent } from '../src/extract';
-import { atLocalTimes, markRoutes, profilePlanBetter, stopNameOf, withoutStop, type PlanItem } from '../src/events';
+import { applyManualFixes, atLocalTimes, markRoutes, profilePlanBetter, sortStops, stopNameOf, withoutStop, type ManualFix, type PlanItem } from '../src/events';
+import { parseIsoToUnix } from '../src/util';
 import type { Env } from '../src/env';
 import { editItemsOf, editSummary, notListedWhy, parseEditItems, ReportError, reportModules, routePreviews } from '../src/reports';
 
@@ -390,5 +391,67 @@ describe('withoutStop', () => {
     expect(withoutStop(stops, '車掃・B', { from: 300, to: 400 })).toBeNull();
     expect(withoutStop(stops, '車掃・X', null)).toBeNull();
     expect(withoutStop([st('車掃・A', 100, 'start')], '車掃・A', null)).toEqual([]);
+  });
+});
+
+describe('applyManualFixes', () => {
+  const T14 = Date.UTC(2026, 9, 27, 6) / 1000;
+  const ex = (place: string, start = '2026-10-27T14:00:00+08:00'): ExtractedEvent => ({ kind: 'activity', title: 'R', item: null, start_at: start, end_at: null, place_text: place, place_query: `新北市${place}`, confidence: 1, spot: false, until: null });
+  const placeFix = (key: string, placeText: string | null): ManualFix => ({ kind: 'place', placeKey: key, atKey: 0, lat: 25.01, lng: 121.46, placeText, startAt: null, endAt: null });
+  const timeFix = (key: string, at: number, startAt: number, endAt: number | null = null): ManualFix => ({ kind: 'time', placeKey: key, atKey: at, lat: null, lng: null, placeText: null, startAt, endAt });
+
+  it('uses the pinned place and the new name, and remembers the name the AI read', () => {
+    const e = ex('莒光路');
+    const r = applyManualFixes(e, [placeFix('莒光路', '莒光路 1 號前')]);
+    expect(r.point).toMatchObject({ lat: 25.01, lng: 121.46 });
+    expect(r.placeFrom).toBe('莒光路');
+    expect(e.place_text).toBe('莒光路 1 號前');
+    expect(e.place_query).toBe('莒光路 1 號前');
+    // 貼座標改的（名稱不變）
+    const same = ex('莒光路');
+    expect(applyManualFixes(same, [placeFix('莒光路', null)])).toMatchObject({ placeFrom: null, timeFixed: false });
+    expect(same.place_text).toBe('莒光路');
+    // 別的地點不動，也不比空白
+    expect(applyManualFixes(ex('長泰街'), [placeFix('莒光路', 'X')]).point).toBeNull();
+    expect(applyManualFixes(ex('莒光 路'), [placeFix('莒光路', 'X')]).point).not.toBeNull();
+  });
+
+  it('uses the new time only when the AI reads the same start at the same place', () => {
+    const e = ex('莒光路');
+    const r = applyManualFixes(e, [timeFix('莒光路', T14, T14 + 1800, T14 + 5400)]);
+    expect(r.timeFixed).toBe(true);
+    expect(parseIsoToUnix(e.start_at)).toBe(T14 + 1800);
+    expect(parseIsoToUnix(e.end_at)).toBe(T14 + 5400);
+    // 補充改了時間（判讀出別的時間）就照判讀的
+    const later = ex('莒光路', '2026-10-27T15:00:00+08:00');
+    expect(applyManualFixes(later, [timeFix('莒光路', T14, T14 + 1800)]).timeFixed).toBe(false);
+    expect(later.start_at).toBe('2026-10-27T15:00:00+08:00');
+    // 先改地點名稱再改時間：時間記在新的名稱
+    const both = ex('莒光路');
+    expect(applyManualFixes(both, [placeFix('莒光路', '莒光路 1 號前'), timeFix('莒光路1號前', T14, T14 + 600)]).timeFixed).toBe(true);
+    expect(both.end_at).toBeNull();
+  });
+
+  it('keeps the stop name and skips the same-point check for a pinned stop on the route', () => {
+    const at = (title: string, place: string, t: number, manualPlace?: PlanItem['manualPlace']): PlanItem => ({
+      group: 0,
+      plan: { kind: 'activity', title, item: null, start_at: t, end_at: t + 7200, place_text: place, place_query: place, lat: 25.01, lng: 121.46, confidence: 1, all_day: false, spot: false, approx_area: null, end_open: true, until_open: false },
+      reason: 'planned',
+      ...(manualPlace ? { manualPlace } : {}),
+    });
+    const items = markRoutes([at('a', '長泰街', T14), at('b', '莒光路 1 號前', T14 + 600, { from: '莒光路' })], '車掃', 'R', T14 - 86400);
+    // 兩站在同一點也都留著（手動標的不算查錯）
+    expect(items.every((it) => it.plan)).toBe(true);
+    expect(items[1].route).toMatchObject({ name: '莒光路', place: '莒光路 1 號前', stopTitle: 'R・莒光路', lat: 25.01 });
+    expect(items[1].plan).toMatchObject({ title: 'R・莒光路', place_text: '莒光路 1 號前' });
+    expect(items[0].route?.place).toBeUndefined();
+  });
+});
+
+describe('sortStops', () => {
+  it('reorders the stops by time and renames start and end', () => {
+    const st = (title: string, at: number | null) => ({ kind: 'cheer' as const, title, at });
+    expect(sortStops([st('A', 100), st('B', 400), st('C', 300)]).map((s) => `${s.title}:${s.kind}`)).toEqual(['A:start', 'C:cheer', 'B:end']);
+    expect(sortStops([st('A', null), st('B', 100)]).map((s) => s.title)).toEqual(['B', 'A']);
   });
 });
