@@ -167,6 +167,8 @@ export class Radar {
   private readonly routeLayer: SVGGElement;
   private routes: RadarRoute[] = [];
   private outline: Array<Array<{ bearing: number; distanceKm: number }>> = [];
+  /** 不封閉的線（縣市交界），只畫虛線、不填色 */
+  private outlineLines: Array<Array<{ bearing: number; distanceKm: number }>> = [];
   private readonly outlineLayer: SVGGElement;
   private streets: RadarStreets | null = null;
   private readonly streetLayer: SVGGElement;
@@ -464,8 +466,9 @@ export class Radar {
   }
 
   /** 範圍的實際形狀（例如雙北的縣市界），畫成淡淡的輪廓；空陣列就不畫 */
-  setOutline(rings: Array<Array<{ bearing: number; distanceKm: number }>>): void {
+  setOutline(rings: Array<Array<{ bearing: number; distanceKm: number }>>, lines: Array<Array<{ bearing: number; distanceKm: number }>> = []): void {
     this.outline = rings;
+    this.outlineLines = lines;
     this.draw();
   }
 
@@ -647,13 +650,16 @@ export class Radar {
       // 斷開的只畫線、不填色（填色會把斷開的兩端直接連起來）
       if (p) this.outlineLayer.appendChild(el('path', { class: `region-outline${p.closed ? '' : ' open'}`, d: p.d }));
     }
+    // 縣市交界合成一條 path
+    const d = this.outlineLines.map((l) => this.outlinePath(l, true)?.d ?? '').join(' ');
+    if (d.trim()) this.outlineLayer.appendChild(el('path', { class: 'region-outline open county-line', d }));
   }
 
   /**
    * 輪廓：超出外圈的點不畫（縮放到比全台小時，台灣、對岸的海岸線大多在外面），
    * 相鄰兩點在畫面上離太遠也斷開（「全球」時地球另一面的海岸線會被拉得很長）；整圈都畫到的才封閉。
    */
-  private outlinePath(ring: Array<{ bearing: number; distanceKm: number }>): { d: string; closed: boolean } | null {
+  private outlinePath(ring: Array<{ bearing: number; distanceKm: number }>, open = false): { d: string; closed: boolean } | null {
     const maxJump = (R - 8) * 0.3;
     let prev: { x: number; y: number } | null = null;
     let broken = false;
@@ -672,7 +678,7 @@ export class Radar {
       prev = p;
     }
     if (parts.length < 2) return null;
-    return broken ? { d: parts.join(' '), closed: false } : { d: `${parts.join(' ')} Z`, closed: true };
+    return broken || open ? { d: parts.join(' '), closed: false } : { d: `${parts.join(' ')} Z`, closed: true };
   }
 
   /** 路線畫在光點下面；超出範圍的部分被外圈裁掉 */
