@@ -37,6 +37,8 @@ describe('normalizeActivities place from the bio', () => {
     expect(ex?.events[0].place_text).toBe('新北市板橋區文化路一段343號');
     const ok = normalizeActivities({ is_event: true, reason: null, events: [{ title: '發飄帶', start_at: null, end_at: null, place_text: '板橋區文化路一段343號', place_query: '新北市板橋區文化路一段343號', confidence: 0.9 }] });
     expect(ok?.events[0].place_text).toBe('板橋區文化路一段343號');
+    const handle = normalizeActivities({ is_event: true, reason: null, events: [{ title: '發小物', start_at: null, end_at: null, place_text: '@bellydailycafe', place_query: '台北市大安區新生南路三段19巷3號', confidence: 0.9 }] });
+    expect(handle?.events[0].place_text).toBe('台北市大安區新生南路三段19巷3號');
   });
 });
 
