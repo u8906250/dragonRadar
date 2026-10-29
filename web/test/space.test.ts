@@ -373,6 +373,20 @@ describe('汪星的中山公園', () => {
     expect(ripplePath({ lat, lng }, rg, 200, 200)!.d.slice(0, 40)).not.toBe(grassPath({ lat, lng }, rg, 200, 200)?.d.slice(0, 40));
   });
 
+  it('draws 翠湖 with its islands cut out', () => {
+    const lake: [number, number] = [25.0384268, 121.5593159];
+    const island: [number, number] = [25.0383369, 121.558924];
+    const waves = (m: string): number => (/class="woof-ripple"[^>]* d="([^"]*)"/.exec(m)?.[1].match(/M/g) ?? []).length;
+    const at = (km: number, p: [number, number]): string => spaceMarkup({ ...base, scaleKm: km, rg: 164, view: viewAt(p) });
+    // 映池一圈、翠湖外框和 6 個小島
+    const fill = /class="woof-pond" d="([^"]*)"/.exec(at(1, lake))![1];
+    expect(fill.match(/M/g)).toHaveLength(8);
+    expect(waves(at(0.03, lake))).toBeGreaterThan(10);
+    expect(waves(at(0.003, lake))).toBeGreaterThan(10);
+    // 最大的小島（約 14 × 23 公尺）上面沒有水波
+    expect(waves(at(0.003, island))).toBe(0);
+  });
+
   it('keeps every tuft in place while zooming in (only adds more)', () => {
     const [lat, lng] = toWoof([25.0383215, 121.5608674]);
     const { c, inner } = RADAR_GEOM;

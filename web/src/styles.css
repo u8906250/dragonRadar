@@ -451,8 +451,8 @@ a.chip { display: inline-flex; align-items: center; text-decoration: none; }
 /* 草地花圃淡淡的草綠色；拉近長出一叢叢的草（線的粗細跟著放大，寫在 stroke-width） */
 .radar .woof-lawn { fill: var(--grass); fill-opacity: 0.2; stroke: none; pointer-events: none; }
 .radar .woof-grass { fill: none; stroke: var(--grass); stroke-opacity: 0.55; stroke-linecap: round; pointer-events: none; }
-/* 映池淡淡的水藍色；拉近有一道道的水波 */
-.radar .woof-pond { fill: var(--water); fill-opacity: 0.2; stroke: none; pointer-events: none; }
+/* 映池、翠湖淡淡的水藍色（翠湖的小島挖掉）；拉近有一道道的水波 */
+.radar .woof-pond { fill: var(--water); fill-opacity: 0.2; fill-rule: evenodd; stroke: none; pointer-events: none; }
 .radar .woof-ripple { fill: none; stroke: var(--water); stroke-opacity: 0.6; stroke-linecap: round; pointer-events: none; }
 .radar .woof-road { fill: none; stroke: var(--radar-grid); stroke-linejoin: round; stroke-linecap: round; pointer-events: none; }
 /* 點星球飛過去 */

@@ -371,13 +371,13 @@ const woofArea = (r: Array<[number, number]>): Array<[number, number]> => {
   const ring = densify(r.map(toWoof), true);
   return ringArea(ring) < 0 ? ring.reverse() : ring;
 };
-/** 中山公園（國父紀念館）：公園的範圍、草地花圃、映池（逆時針，填色用）、建築、映池的邊、草地花圃的邊、步道，汪星的經緯度 */
+/** 中山公園（國父紀念館）：公園的範圍、草地花圃、水面（逆時針，填色用；水面的小島疊在上面，填色用 evenodd 挖掉）、建築、水面的邊、草地花圃的邊、步道，汪星的經緯度 */
 const PARK = {
   outline: woofArea(ZHONGSHAN_PARK.outline),
   lawns: ZHONGSHAN_PARK.green.map(woofArea),
-  ponds: ZHONGSHAN_PARK.water.map(woofArea),
+  ponds: ZHONGSHAN_PARK.water.flat().map(woofArea),
   buildings: ZHONGSHAN_PARK.buildings.map(woofRing),
-  water: ZHONGSHAN_PARK.water.map(woofRing),
+  water: ZHONGSHAN_PARK.water.flat().map(woofRing),
   green: ZHONGSHAN_PARK.green.map(woofRing),
   paths: woofLines(ZHONGSHAN_PARK.paths),
 };
@@ -421,22 +421,37 @@ const PARK_O = (() => {
   const my = WOOF_KM * 1000 * RAD;
   return { lat, lng, my, mx: my * Math.cos(lat * RAD) };
 })();
-/** 一塊塊的範圍（台北的經緯度）攤平成公尺，加上外框 */
+/**
+ * 一塊塊的範圍（台北的經緯度，每一塊是一組圈：外框和裡面挖掉的小島）攤平成公尺，加上外框的範圍；
+ * 邊照南北切成一條條的帶子（bands），看一個點在不在裡面只要看它那一條帶子裡的邊
+ */
 interface Patch {
-  pts: Array<[number, number]>;
+  /** 每個邊四個數字：兩端的 x、y */
+  edges: Float64Array;
+  bands: number[][];
   x0: number;
   y0: number;
   x1: number;
   y1: number;
 }
-const patches = (rings: Array<Array<[number, number]>>): { list: Patch[]; box: [number, number, number, number] } => {
-  const list = rings.map((r) => {
-    const pts = r.map(toWoof).map(([lat, lng]): [number, number] => [(lng - PARK_O.lng) * PARK_O.mx, (lat - PARK_O.lat) * PARK_O.my]);
-    return { pts, x0: Math.min(...pts.map((p) => p[0])), y0: Math.min(...pts.map((p) => p[1])), x1: Math.max(...pts.map((p) => p[0])), y1: Math.max(...pts.map((p) => p[1])) };
+const patches = (groups: Array<Array<Array<[number, number]>>>): { list: Patch[]; box: [number, number, number, number] } => {
+  const list = groups.map((g) => {
+    const rings = g.map((r) => r.map(toWoof).map(([lat, lng]): [number, number] => [(lng - PARK_O.lng) * PARK_O.mx, (lat - PARK_O.lat) * PARK_O.my]));
+    const [x0, y0, x1, y1] = [Math.min(...rings[0].map((p) => p[0])), Math.min(...rings[0].map((p) => p[1])), Math.max(...rings[0].map((p) => p[0])), Math.max(...rings[0].map((p) => p[1]))];
+    const edges = new Float64Array(rings.flatMap((pts) => pts.flatMap((a, i) => [...a, ...pts[(i + 1) % pts.length]])));
+    const n = edges.length / 4;
+    const bands: number[][] = Array.from({ length: Math.max(1, Math.min(256, Math.ceil(n / 4))) }, () => []);
+    const h = (y1 - y0) / bands.length || 1;
+    const band = (y: number): number => Math.max(0, Math.min(bands.length - 1, Math.floor((y - y0) / h)));
+    for (let e = 0; e < n; e++) {
+      const [ya, yb] = [edges[e * 4 + 1], edges[e * 4 + 3]];
+      for (let b = band(Math.min(ya, yb)); b <= band(Math.max(ya, yb)); b++) bands[b].push(e * 4);
+    }
+    return { edges, bands, x0, y0, x1, y1 };
   });
   return { list, box: [Math.min(...list.map((l) => l.x0)), Math.min(...list.map((l) => l.y0)), Math.max(...list.map((l) => l.x1)), Math.max(...list.map((l) => l.y1))] };
 };
-const LAWNS = patches(ZHONGSHAN_PARK.green);
+const LAWNS = patches(ZHONGSHAN_PARK.green.map((r) => [r]));
 const PONDS = patches(ZHONGSHAN_PARK.water);
 /** 草：每叢 2～4 根，真的長度 4～10 公分，往上長、往兩邊散開一點；太短畫成草地記號 */
 const GRASS: Texture = {
@@ -459,7 +474,7 @@ const GRASS: Texture = {
     return d;
   },
 };
-/** 水波：一道（一半多一道在下面）左右彎一下的波紋，真的長度 15～35 公分；太短畫成水的記號 */
+/** 水波：一道（一半多一道在下面）左右彎一下的波紋，真的長度 15～35 公分；太短畫成水的記號（翠湖的小島上沒有） */
 const RIPPLES: Texture = {
   px: 16,
   size: 0.35,
@@ -513,10 +528,11 @@ function texturePath(center: LatLng, rg: number, rx: number, ry: number, area: {
     for (let m = 0; m < list.length; m++) {
       const l = list[(hit + m) % list.length];
       if (x < l.x0 || x > l.x1 || y < l.y0 || y > l.y1) continue;
+      // 外框裡面、小島外面（往東的射線穿過的邊是單數）
       let odd = false;
-      for (let i = 0, j = l.pts.length - 1; i < l.pts.length; j = i++) {
-        const [xa, ya] = l.pts[i];
-        const [xb, yb] = l.pts[j];
+      const { edges } = l;
+      for (const e of l.bands[Math.max(0, Math.min(l.bands.length - 1, Math.floor(((y - l.y0) / (l.y1 - l.y0 || 1)) * l.bands.length)))]) {
+        const [xa, ya, xb, yb] = [edges[e], edges[e + 1], edges[e + 2], edges[e + 3]];
         if (ya > y !== yb > y && x < xa + ((y - ya) * (xb - xa)) / (yb - ya)) odd = !odd;
       }
       if (odd) {
@@ -559,7 +575,7 @@ function texturePath(center: LatLng, rg: number, rx: number, ry: number, area: {
 }
 /** 畫面上的草（球的座標乘 10） */
 export const grassPath = (center: LatLng, rg: number, rx: number, ry: number): { d: string; w: number } | null => texturePath(center, rg, rx, ry, LAWNS, GRASS, 0);
-/** 畫面上映池的水波（球的座標乘 10） */
+/** 畫面上映池、翠湖的水波（球的座標乘 10） */
 export const ripplePath = (center: LatLng, rg: number, rx: number, ry: number): { d: string; w: number } | null => texturePath(center, rg, rx, ry, PONDS, RIPPLES, 1);
 
 /** 汪星正中間的經緯度：跟著視角轉，左右拖轉經度、上下拖轉緯度 */
@@ -854,7 +870,7 @@ const sub = (a: Vec3, b: Vec3): Vec3 => [a[0] - b[0], a[1] - b[1], a[2] - b[2]];
  * 市界是海岸（虛線，陸地淡淡填色，外面空白是海；只畫畫面裡的那一段）、區界、道路（國道、快速道路粗線，主要幹道細線），夠大才畫道路；
  * 經緯線每 30 度（夠大才畫）、虛線的邊，夜晚那一半照太陽真正的方向（toSun：看的人的座標）。
  * 正中間的經緯度跟著視角轉：左右拖轉經度、上下拖轉緯度。中心是汪星時可以放大到 1 km（focusMinKm），
- * 拉近到畫面上的台北半徑 2 km 內換成大街小巷（streets：跟雷達一樣的圖磚）；中山公園描繪出來（草地花圃草綠色、映池水藍色，拉近長出一叢叢的草、一道道的水波），那裡可以放大到 0.5 公尺，看得到的那一小塊線切細
+ * 拉近到畫面上的台北半徑 2 km 內換成大街小巷（streets：跟雷達一樣的圖磚）；中山公園描繪出來（草地花圃草綠色、映池和翠湖水藍色，拉近長出一叢叢的草、一道道的水波），那裡可以放大到 0.5 公尺，看得到的那一小塊線切細
  */
 function woofGlobe(x: number, y: number, r: number, view: SpaceView, toSun: Vec3, streets?: WoofStreets): string {
   const center = woofCenter(view);
@@ -884,7 +900,7 @@ function woofGlobe(x: number, y: number, r: number, view: SpaceView, toSun: Vec3
     out += `<path class="woof-park-edge" d="${lines([[...PARK.outline, PARK.outline[0]]])}" />`;
   }
   if (r >= 600) {
-    // 草地花圃淡淡的草綠色、映池淡淡的水藍色，拉近到幾百公尺內長出一叢一叢的草、一道道的水波
+    // 草地花圃淡淡的草綠色、映池和翠湖淡淡的水藍色（小島挖掉），拉近到幾百公尺內長出一叢一叢的草、一道道的水波
     // 放大很多時只畫看得到的那一小塊附近的
     const fill = (rings: Array<Array<[number, number]>>): string =>
       (near ? rings.filter((ring) => ring.some(([a]) => a >= near.lat0) && ring.some(([a]) => a <= near.lat1) && ring.some(([, b]) => b >= near.lng0) && ring.some(([, b]) => b <= near.lng1)) : rings)
