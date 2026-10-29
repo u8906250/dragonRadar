@@ -833,7 +833,7 @@ function updateSpace(): void {
   const center = { lat: origin.lat, lng: origin.lng };
   const land = landRings;
   const when = new Date();
-  radar.setSpace((km, rg, view) => mod.spaceMarkup({ center, land, when, scaleKm: km, rg, view }));
+  radar.setSpace((km, rg, view) => mod.spaceMarkup({ center, land, when, scaleKm: km, rg, view }), mod.bodyRadiusKm);
 }
 
 /**
@@ -2705,9 +2705,9 @@ let zoomFrame = 0;
 function zoomRadar(factor: number, done: boolean, gesture = false): void {
   // 太空（比全球再遠）一次縮放的幅度大一點：從全球到整個太陽系差了幾十萬倍
   const f = gesture && (scaleKm > WORLD_KM || (scaleKm >= WORLD_KM && factor > 1)) ? factor ** 2 : factor;
-  // 太空裡中心換到別的星球（月球、木星…）：最多放大到剛好看得到整顆
+  // 太空裡中心換到別的星球（月球、木星…）：最多放大到剛好看得到整顆，汪星可以放大到 1 km
   const focus = radar.spaceFocusKey;
-  const minKm = focus && spaceMod ? spaceMod.bodyRadiusKm(focus) * 1.3 : MIN_ZOOM_KM;
+  const minKm = focus && spaceMod ? spaceMod.focusMinKm(focus) : MIN_ZOOM_KM;
   customKm = Math.min(Math.max(scaleKm * f, minKm), SPACE_MAX_KM);
   if (done) {
     // 中心換到別的星球時不對齊按鈕（按鈕的範圍是以你為中心的）

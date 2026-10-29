@@ -436,9 +436,9 @@ a.chip { display: inline-flex; align-items: center; text-decoration: none; }
 .radar .space-cap { fill: #ffffff; fill-opacity: 0.85; stroke: none; }
 .radar .space-shade { fill: #000000; fill-opacity: 0.32; stroke: none; }
 .radar .space-mare { fill: #6f6b64; fill-opacity: 0.35; stroke: none; }
-/* 汪星的地表（台北市）：道路跟雷達的街道一樣（粗細、深淺照 street-major、street-minor），區名小一點 */
+/* 汪星的地表（台北市）：道路跟雷達的街道一樣（粗細、深淺照 street-major、street-minor） */
+.radar .region-outline.woof-land { stroke: none; }
 .radar .woof-road { fill: none; stroke: var(--radar-grid); stroke-linejoin: round; stroke-linecap: round; pointer-events: none; }
-.radar .space-label.woof-name { font-size: 10px; }
 /* 點星球飛過去 */
 .radar .space-hit { cursor: pointer; }
 .radar .space-hit .hit { fill: transparent; pointer-events: all; }

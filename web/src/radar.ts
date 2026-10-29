@@ -258,6 +258,7 @@ export class Radar {
   private scaleKm = 5;
   /** 太空（比全球再遠）的畫法；還沒載入是 null */
   private spaceDraw: SpaceDraw | null = null;
+  private spaceBodyKm: ((key: string) => number) | null = null;
   private readonly spaceLayer: SVGGElement;
   /** 太陽系那幾層的 3D 看法：拖曳繞中心轉、點星球換中心 */
   private spaceView: SpaceView = { focus: null, yaw: 0, pitch: 0 };
@@ -571,8 +572,10 @@ export class Radar {
       const h = (this.heading * Math.PI) / 180;
       const lx = dx * Math.cos(h) - dy * Math.sin(h);
       const ly = dx * Math.sin(h) + dy * Math.cos(h);
-      const perUnit = Math.PI / (2 * R);
       const v = this.spaceView;
+      // 中心的星球大到比雷達還大（汪星可以放大到 1 km）：手指拖過表面多遠就轉多少
+      const bodyR = v.focus && this.spaceBodyKm ? (this.spaceBodyKm(v.focus) * (R - 8)) / this.scaleKm : 0;
+      const perUnit = Math.min(Math.PI / (2 * R), bodyR > 0 ? 1 / bodyR : Infinity);
       this.spaceView = { ...v, yaw: v.yaw + lx * perUnit, pitch: Math.max(-MAX_PITCH, Math.min(MAX_PITCH, v.pitch + ly * perUnit)) };
       this.drawSpace();
       this.onSpaceMove?.();
@@ -608,15 +611,23 @@ export class Radar {
     this.scaleLabels.replaceChildren();
     const marks = [0.25, 0.5, 0.75].map((f) => ({ km: f * km, label: f === 0.5 }));
     for (const m of marks) {
-      this.rings.appendChild(el('circle', { cx: C, cy: C, r: (this.ratio(m.km) * R).toFixed(1) }));
+      const ratio = this.ringRatio(m.km);
+      // 太空裡超過地球另一面的（ratio 是 2）在雷達外面：電腦版雷達兩旁還有空間，會露出一圈
+      if (ratio > 1) continue;
+      this.rings.appendChild(el('circle', { cx: C, cy: C, r: (ratio * R).toFixed(1) }));
       if (m.label) this.addScaleLabel(m.km);
     }
-    this.addScaleLabel(km);
+    if (this.ringRatio(km) <= 1) this.addScaleLabel(km);
     this.draw();
   }
 
+  /** 刻度圈的半徑比例：中心換到別的星球時照比例（跟星球的畫法一樣），其他跟光點一樣 */
+  private ringRatio(km: number): number {
+    return this.spaceView.focus !== null ? km / this.scaleKm : this.ratio(km);
+  }
+
   private addScaleLabel(km: number): void {
-    const t = el('text', { x: C + 5, y: C - this.ratio(km) * R + 13, class: 'scale-label' });
+    const t = el('text', { x: C + 5, y: C - this.ringRatio(km) * R + 13, class: 'scale-label' });
     t.textContent = fmtKm(km);
     this.scaleLabels.appendChild(t);
   }
@@ -681,9 +692,10 @@ export class Radar {
     this.onSpaceMove?.();
   }
 
-  /** 太空（比全球再遠）的畫法：地球、月球、太陽、行星（space.ts，第一次用到才載入）；null 是還沒載入 */
-  setSpace(draw: SpaceDraw | null): void {
+  /** 太空（比全球再遠）的畫法：地球、月球、太陽、行星（space.ts，第一次用到才載入）；null 是還沒載入。bodyKm：星球的半徑（公里） */
+  setSpace(draw: SpaceDraw | null, bodyKm?: (key: string) => number): void {
     this.spaceDraw = draw;
+    this.spaceBodyKm = bodyKm ?? null;
     this.draw();
   }
 

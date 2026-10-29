@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { globeFrac, SPACE_FROM_KM } from '../src/radar';
-import { hemiPath, landPath, moonPosition, nightPath, onWoofLand, ortho, planetPositions, spaceMarkup, subsolar, toWoof } from '../src/space';
+import { globeFrac, RADAR_GEOM, SPACE_FROM_KM } from '../src/radar';
+import { focusMinKm, hemiPath, landPath, moonPosition, nightPath, onWoofLand, ortho, planetPositions, spaceMarkup, subsolar, toWoof } from '../src/space';
 
 const diff = (a: number, b: number): number => Math.abs(((((a - b) % 360) + 540) % 360) - 180);
 const lonOf = (when: string, key: string): number => planetPositions(new Date(when)).find((p) => p.key === key)!.lon;
@@ -177,9 +177,8 @@ describe('汪星', () => {
     const near = spaceMarkup({ ...base, scaleKm: 20_000, rg: 164, view: { focus: 'woof', yaw: 0, pitch: 0 } });
     const woof = near.slice(near.indexOf('data-body="woof"'));
     for (const cls of ['space-globe', 'space-grat', 'space-night', 'space-limb', 'region-outline', 'county-line']) expect(woof).toContain(cls);
-    // 還小：道路、區名先不畫
+    // 還小：道路先不畫
     expect(woof).not.toContain('woof-road');
-    expect(woof).not.toContain('woof-name');
     // 拖曳轉視角：球跟著轉
     const turned = spaceMarkup({ ...base, scaleKm: 20_000, rg: 164, view: { focus: 'woof', yaw: 0.5, pitch: 0.3 } });
     const grat = (m: string): string => /space-grat" d="([^"]+)"/.exec(m.slice(m.indexOf('data-body="woof"')))![1];
@@ -199,19 +198,47 @@ describe('汪星', () => {
     expect(onWoofLand(0, 179)).toBe(false);
   });
 
-  it('draws the city in lines like Taipei on the radar: coast, districts, roads and district names', () => {
+  it('draws the city in lines like Taipei on the radar: coast, districts and roads', () => {
     // 正中間轉到台北車站
     const [lat, lng] = toWoof([25.0478, 121.517]);
     const near = spaceMarkup({ ...base, scaleKm: 6_000, rg: 164, view: { focus: 'woof', yaw: (-lng * Math.PI) / 180, pitch: (lat * Math.PI) / 180 } });
     const woof = near.slice(near.indexOf('data-body="woof"'));
-    expect(woof).toMatch(/class="region-outline" d="M[\d. L]+Z"/);
+    // 陸地淡淡填色、海岸線虛線分開畫
+    expect(woof).toMatch(/class="region-outline woof-land" d="M[\d. L]+Z"/);
+    expect(woof).toMatch(/class="region-outline open" d="M[\d. LM]+"/);
     expect(woof).toMatch(/class="woof-road street-major" d="M/);
     expect(woof).toMatch(/class="woof-road street-minor" d="M/);
-    expect(woof).toContain('>中正區<');
-    // 另一面的區不寫
-    expect(woof).not.toContain('>內湖區<');
+    // 區名不寫
+    expect(woof).not.toContain('區<');
     // 沒有填顏色的底
     expect(woof).not.toContain('fill="#');
+  });
+
+  it('zooms in to 1 km, keeping the lines where they are on the sphere', () => {
+    expect(focusMinKm('woof')).toBe(1);
+    expect(focusMinKm('moon')).toBeCloseTo(1737 * 1.3);
+    // 正中間放在北緯 30 度的緯線上、兩個點（經度 0、3 度）中間：拉近到 1 km，緯線還是要通過正中間
+    const view = { focus: 'woof', yaw: (-1.5 * Math.PI) / 180, pitch: (30 * Math.PI) / 180 };
+    const m = spaceMarkup({ ...base, scaleKm: 1, rg: 164, view });
+    const woof = m.slice(m.indexOf('data-body="woof"'));
+    const grat = /space-grat" d="([^"]+)"/.exec(woof)![1];
+    const C = RADAR_GEOM.c;
+    let best = Infinity;
+    for (const part of grat.split('M').filter(Boolean)) {
+      const pts = [...part.matchAll(/(-?[\d.]+) (-?[\d.]+)/g)].map((x) => [Number(x[1]), Number(x[2])]);
+      for (let i = 0; i + 1 < pts.length; i++) {
+        const [a, b] = [pts[i], pts[i + 1]];
+        const t = Math.max(0, Math.min(1, ((C - a[0]) * (b[0] - a[0]) + (C - a[1]) * (b[1] - a[1])) / ((b[0] - a[0]) ** 2 + (b[1] - a[1]) ** 2 || 1)));
+        best = Math.min(best, Math.hypot(a[0] + t * (b[0] - a[0]) - C, a[1] + t * (b[1] - a[1]) - C));
+      }
+    }
+    expect(best).toBeLessThan(2);
+    // 放大很多：畫面外的線、球的邊不畫（虛線整圈有幾百萬公里長，要畫好幾秒）
+    expect(m.length).toBeLessThan(40_000);
+    expect(woof).not.toContain('space-limb');
+    for (const d of woof.matchAll(/class="(?:space-grat|region-outline open[^"]*|woof-road[^"]*)" d="([^"]*)"/g)) {
+      for (const n of d[1].matchAll(/-?\d+\.\d/g)) expect(Math.abs(Number(n[0]))).toBeLessThan(5_000);
+    }
   });
 });
 
