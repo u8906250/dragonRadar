@@ -224,6 +224,16 @@ a.chip { display: inline-flex; align-items: center; text-decoration: none; }
 .radar .me { fill: var(--radar-me); filter: drop-shadow(0 0 4px var(--radar-me)); }
 /* 車掃路線：還沒出發是虛線，車掃中是實線 */
 .radar .route { fill: none; stroke: var(--accent); stroke-width: 3.5; stroke-linecap: round; stroke-linejoin: round; opacity: 0.7; pointer-events: none; }
+/* 遊行的彩虹路線：六條由粗到細疊起來（紅在最外、紫在中間），還沒出發（點開才畫）淡一點 */
+.radar .route-rainbow path { fill: none; stroke-linecap: round; stroke-linejoin: round; pointer-events: none; }
+.radar .route-rainbow { opacity: 0.9; }
+.radar .route-rainbow.route-planned { opacity: 0.55; }
+.radar .route-rainbow .rainbow-0 { stroke: #e40303; stroke-width: 6.6; }
+.radar .route-rainbow .rainbow-1 { stroke: #ff8c00; stroke-width: 5.5; }
+.radar .route-rainbow .rainbow-2 { stroke: #ffed00; stroke-width: 4.4; }
+.radar .route-rainbow .rainbow-3 { stroke: #008026; stroke-width: 3.3; }
+.radar .route-rainbow .rainbow-4 { stroke: #004dff; stroke-width: 2.2; }
+.radar .route-rainbow .rainbow-5 { stroke: #750787; stroke-width: 1.1; }
 .radar .route-planned { stroke-dasharray: 6 5; }
 /* 「雙北」範圍的縣市界輪廓 */
 .radar .region-outline { fill: var(--accent); fill-opacity: 0.05; stroke: var(--accent); stroke-width: 1.5; stroke-opacity: 0.45; stroke-dasharray: 3 3; pointer-events: none; }
@@ -695,6 +705,11 @@ a.chip { display: inline-flex; align-items: center; text-decoration: none; }
 
 /* 車掃路線：清單卡片、時間表、詳細資料裡的路線區塊 */
 .route-stops { list-style: none; margin: 0 0 10px; padding: 0 0 0 6px; }
+/* 遊行的每一條路線（北路線、南路線）：左邊一條彩虹 */
+.parade-ways { list-style: none; margin: 0 0 10px; padding: 0; }
+.parade-ways li { margin: 0 0 8px; padding: 2px 0 2px 12px; border-left: 4px solid #e40303; border-image: linear-gradient(#e40303, #ff8c00, #ffed00, #008026, #004dff, #750787) 1; }
+.parade-ways b { margin-right: 6px; }
+.parade-ways small { display: block; color: var(--muted); }
 .route-stops .stop { position: relative; padding-left: 18px; }
 .route-stops .stop::before { content: ''; position: absolute; left: 4px; top: 0; bottom: 0; border-left: 3px solid var(--accent); opacity: 0.5; }
 .route-stops .stop:first-child::before { top: 16px; }

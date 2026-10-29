@@ -820,6 +820,7 @@ export async function reportEnded(env: Env, eventId: number, ip: string, now: nu
     .first<{ id: number; status: string; start_at: number; source: string }>();
   if (!ev) throw new ReportError(404, '這個發放或活動已經下架了');
   if (ev.source === 'official') throw new ReportError(400, '官方行程不開放回報，以官網公布為準');
+  if (ev.source === 'site') throw new ReportError(400, '主辦單位公告的活動不開放回報，以主辦單位公布為準');
   if (ev.start_at > now) throw new ReportError(400, '還沒開始，等開始後再回報');
 
   const mine = await countSince(env, 'SELECT COUNT(*) AS n FROM ended_reports WHERE ip_hash = ? AND created_at > ?', [ip, now - 3600]);

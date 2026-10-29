@@ -30,6 +30,8 @@ export interface RadarRoute {
   id: string;
   /** planned 還沒出發（虛線）；live 車掃中；done 已抵達（不畫） */
   state: 'planned' | 'live' | 'done';
+  /** 畫成彩虹（同志遊行） */
+  rainbow?: boolean;
   points: Array<{ bearing: number; distanceKm: number }>;
 }
 
@@ -1123,7 +1125,15 @@ export class Radar {
       if (r.state === 'done' || r.points.length < 2 || this.earthHidden) continue;
       // 太空：有一段在地球另一面就不畫（直線會穿過地球）
       if (this.inSpace && r.points.some((pt) => pt.distanceKm > HORIZON_KM)) continue;
-      const path = el('path', { class: `route route-${r.state}`, d: this.pathOf(r.points) });
+      const d = this.pathOf(r.points);
+      // 彩虹：六條由粗到細疊起來（紅在最外、紫在中間）
+      if (r.rainbow) {
+        const g = el('g', { class: `route-rainbow route-${r.state}` });
+        for (let i = 0; i < 6; i++) g.appendChild(el('path', { class: `rainbow-${i}`, d }));
+        this.routeLayer.appendChild(g);
+        continue;
+      }
+      const path = el('path', { class: `route route-${r.state}`, d });
       this.routeLayer.appendChild(path);
     }
   }

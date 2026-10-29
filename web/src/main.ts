@@ -1109,23 +1109,30 @@ const reportedStop = (ev: EventOut): RouteStop | undefined => {
   const r = routeOf(ev);
   return r && isReported(r) ? stopOf(ev) : undefined;
 };
-const stopLabel = (r: RouteOut, kind: RouteStop['kind']): string => ({ start: '出發', cheer: isReported(r) ? '應援點' : '加油點', end: '抵達' })[kind];
-/** 車掃的起點、終點像賽車一樣插旗 */
+/** 遊行（同志遊行）：彩虹路線，從同一個地方出發再回來，沒有車子 */
+const isParade = (r: RouteOut): boolean => r.style === 'rainbow';
+const stopLabel = (r: RouteOut, kind: RouteStop['kind']): string => ({ start: '出發', cheer: isReported(r) ? '應援點' : '加油點', end: isParade(r) ? '回到' : '抵達' })[kind];
+/** 車掃的起點、終點像賽車一樣插旗；遊行插彩虹旗 */
 const STOP_FLAG: Partial<Record<RouteStop['kind'], string>> = { start: '🚩', end: '🏁' };
-/** 這一點是車掃的起點、終點：🚩、🏁 */
+const stopFlag = (r: RouteOut, kind: RouteStop['kind']): string | undefined => (isParade(r) ? (kind === 'cheer' ? undefined : '🏳️‍🌈') : STOP_FLAG[kind]);
+/** 這一點是車掃的起點、終點：🚩、🏁（遊行 🏳️‍🌈） */
 const flagOf = (ev: EventOut): string | undefined => {
-  const st = routeOf(ev) ? stopOf(ev) : undefined;
-  return st ? STOP_FLAG[st.kind] : undefined;
+  const r = routeOf(ev);
+  const st = r ? stopOf(ev) : undefined;
+  return r && st ? stopFlag(r, st.kind) : undefined;
 };
 /** 時間表、清單上的「🚩 出發」「🏁 抵達」 */
-const stopLabelHtml = (r: RouteOut, kind: RouteStop['kind']): string => `${STOP_FLAG[kind] ? `${STOP_FLAG[kind]} ` : ''}${stopLabel(r, kind)}`;
+const stopLabelHtml = (r: RouteOut, kind: RouteStop['kind']): string => `${stopFlag(r, kind) ? `${stopFlag(r, kind)} ` : ''}${stopLabel(r, kind)}`;
+/** 遊行的每一條路線：「北路線 3.6 km」 */
+const paradeWays = (r: RouteOut): string => r.segments.map((s) => `${s.from} ${(s.lengthM / 1000).toFixed(1)} km`).join('、');
 
 /**
  * 車掃進行中，車隊大概在哪：照各站的預計時間，在前後兩站之間按時間比例推算（直線），不是實際位置。
  * 還沒到第一站的時間在起點，過了最後一站在終點；沒有確切位置的站跳過
  */
 function carOf(r: RouteOut, now: number): { lat: number; lng: number; from: RouteStop; to: RouteStop | null } | null {
-  if (routeState(r, now) !== 'live') return null;
+  // 遊行從同一個地方出發再回來，隊伍很長，不推算位置
+  if (isParade(r) || routeState(r, now) !== 'live') return null;
   const pts = r.stops.filter((s): s is RouteStop & { lat: number; lng: number; at: number } => s.lat !== null && s.lng !== null && s.at !== null);
   if (pts.length === 0) return null;
   if (now <= pts[0].at) return { lat: pts[0].lat, lng: pts[0].lng, from: pts[0], to: pts[1] ?? null };
@@ -1199,6 +1206,13 @@ function routeTimeLine(r: RouteOut, items: Item[], now: number): string {
   const end = r.stops.find((s) => s.kind === 'end');
   const endEv = end && routeItems(r, items).find((it) => it.ev.title === end.title)?.ev;
   const state = routeState(r, now);
+  // 遊行：前幾天就列出來，不是今天的寫日期；回來後會場活動還在進行
+  if (isParade(r) && r.departAt) {
+    const day = taipeiDay(r.departAt) === taipeiDay(now) ? '' : `${dateFmt.format(new Date(r.departAt * 1000))} `;
+    if (state === 'planned') return `${day}${fmtTime(r.departAt)} 出發 · ${startsIn(r.departAt, now)}`;
+    if (state === 'live') return `遊行中 · 預計 ${r.arriveAt ? fmtTime(r.arriveAt) : ''} 回到${end?.name ?? ''}`;
+    return endEv && endEv.endAt > now ? `遊行隊伍已回來 · 會場活動到 ${fmtTime(endEv.endAt)}` : '已結束';
+  }
   if (!r.departAt) return '今天・出發時間未定';
   if (state === 'planned') return `${fmtTime(r.departAt)} 出發 · ${untilText(r.departAt, now)}`;
   if (state === 'live') return `車掃中 · 預計 ${r.arriveAt ? fmtTime(r.arriveAt) : ''} 抵達${end?.name ?? ''}`;
@@ -1314,6 +1328,7 @@ function render(): void {
     drawnRoutes(timed, now, focused).map((r) => ({
       id: r.id,
       state: routeState(r, now),
+      ...(isParade(r) ? { rainbow: true } : {}),
       points: r.segments.flatMap((sg) => sg.path).map(([lat, lng]) => ({ bearing: bearingDeg(origin, { lat, lng }), distanceKm: haversineKm(origin, { lat, lng }) })),
     })),
   );
@@ -1350,6 +1365,7 @@ function render(): void {
       state: routeState(r, now),
       claimUrl: r.claimUrl,
       source: r.source,
+      ...(isParade(r) ? { rainbow: true } : {}),
       // 回報的車掃：已經經過的那段畫淡
       segments: r.segments.map((sg) => ({ ...sg, passed: !!sg.toAt && sg.toAt <= now })),
       ...((): { car?: { lat: number; lng: number; note: string } } => {
@@ -1585,8 +1601,12 @@ function routeCard(r: RouteOut, phase: Phase, items: Item[], now: number): HTMLL
   const li = document.createElement('li');
   li.className = `ev route-card phase-${phase} kind-activity${mine.some((m) => inScope(m.ev, m.distanceKm)) ? '' : ' out-of-range'}${selectedRoute === r.id ? ' selected' : ''}`;
   li.innerHTML = `
-    <div class="ev-title"><span class="dot"></span><span class="kind-tag">車掃</span>${esc(r.title)} <span class="muted">· ${r.stops.length} 站</span></div>
-    <div class="ev-meta">🚩 ${esc(start?.name ?? '')} → 🏁 ${esc(end?.name ?? '')}${isReported(r) ? '' : ` · 全長 ${routeKm(r).toFixed(1)} km`}${nearest ? ` · ${isReported(r) ? '離你最近' : '最近'} ${formatKm(nearest.distanceKm)}` : ''}</div>
+    <div class="ev-title"><span class="dot"></span><span class="kind-tag">${isParade(r) ? '遊行' : '車掃'}</span>${esc(r.title)}${isParade(r) ? '' : ` <span class="muted">· ${r.stops.length} 站</span>`}</div>
+    <div class="ev-meta">${
+      isParade(r)
+        ? `🏳️‍🌈 ${esc(start?.name ?? '')}出發再回來 · ${esc(paradeWays(r))}`
+        : `🚩 ${esc(start?.name ?? '')} → 🏁 ${esc(end?.name ?? '')}${isReported(r) ? '' : ` · 全長 ${routeKm(r).toFixed(1)} km`}`
+    }${nearest ? ` · ${isReported(r) ? '離你最近' : '最近'} ${formatKm(nearest.distanceKm)}` : ''}</div>
     <div class="ev-time">${esc(routeTimeLine(r, items, now))}</div>`;
   li.addEventListener('click', () => selectRoute(r.id));
   return li;
@@ -1630,19 +1650,25 @@ function renderRouteDetail(r: RouteOut, items: Item[], now: number): void {
     </div>
     <div class="sheet-body">
       ${
-        isReported(r)
-          ? `<p>${esc(routeTimeLine(r, items, now))}<br><span class="muted">${r.departAt ? `${dateFmt.format(new Date(r.departAt * 1000))}・` : ''}共 ${r.stops.length} 站</span></p>`
-          : `<p>${esc(routeTimeLine(r, items, now))}<br><span class="muted">全長 ${routeKm(r).toFixed(1)} km・沿線認領 ${people.toLocaleString()} / 目標 ${target.toLocaleString()} 人${needy > 0 ? `・還有 ${needy} 段缺人` : ''}（${fmtTime(r.updatedAt)} 更新）</span></p>`
+        isParade(r)
+          ? `<p>${esc(routeTimeLine(r, items, now))}<br><span class="muted">${r.departAt ? `${dateFmt.format(new Date(r.departAt * 1000))}・` : ''}${r.segments.length} 條路線同時出發</span></p>
+             <ul class="parade-ways">${r.segments.map((s) => `<li><b>${esc(s.from)}</b>${esc(s.to)}<small>${(s.lengthM / 1000).toFixed(1)} km</small></li>`).join('')}</ul>`
+          : isReported(r)
+            ? `<p>${esc(routeTimeLine(r, items, now))}<br><span class="muted">${r.departAt ? `${dateFmt.format(new Date(r.departAt * 1000))}・` : ''}共 ${r.stops.length} 站</span></p>`
+            : `<p>${esc(routeTimeLine(r, items, now))}<br><span class="muted">全長 ${routeKm(r).toFixed(1)} km・沿線認領 ${people.toLocaleString()} / 目標 ${target.toLocaleString()} 人${needy > 0 ? `・還有 ${needy} 段缺人` : ''}（${fmtTime(r.updatedAt)} 更新）</span></p>`
       }
       ${car ? `<p class="route-car">🚗 ${esc(carNote(car))}<br><small class="muted">${CAR_DISCLAIMER}；雷達和地圖上的車子畫在這個位置</small></p>` : ''}
       <ol class="route-stops">${rows}</ol>
-      ${planned ? '<p class="muted sheet-note">還沒出發：平常雷達和地圖上只顯示起點，點開這個車掃時才畫出整條路線，出發後一直顯示。</p>' : ''}
+      ${planned ? `<p class="muted sheet-note">還沒出發：平常雷達和地圖上只顯示起點，點開這個${isParade(r) ? '遊行' : '車掃'}時才畫出整條路線，出發後一直顯示。</p>` : ''}
       <p class="muted sheet-note">${
-        isReported(r)
+        isParade(r)
+          ? '時間和路線是主辦單位公布的（回到市民廣場的時間是警方預估），以現場為準。雷達和地圖上的彩虹照公布的道路畫。'
+          : isReported(r)
           ? '時間是貼文寫的預計時間，僅供參考，以現場為準。雷達上每一站從預計經過前 10 分鐘顯示到經過後 15 分鐘；地圖上各站用直線連起來，不是實際走的路。'
           : '加油點的時間是用路線長度平均推算的，實際以現場為準。官方提醒：不跟車，在沿線等車隊經過；不放鞭炮。'
       }</p>
       ${isReported(r) && mine[0]?.ev.post.permalink ? `<p class="muted sheet-note">來源：<a href="${esc(mine[0].ev.post.permalink)}" target="_blank" rel="noopener">${esc(mine[0].ev.post.username ? `@${mine[0].ev.post.username} 的貼文` : '原貼文')}</a></p>` : ''}
+      ${isParade(r) && mine[0]?.ev.post.permalink ? `<p class="muted sheet-note">來源：<a href="${esc(mine[0].ev.post.permalink)}" target="_blank" rel="noopener">${esc(mine[0].ev.post.username ?? '主辦單位')}官網</a></p>` : ''}
       ${relatedHtml(routeRelated(r, items))}
       <div class="sheet-actions">
         ${r.claimUrl ? `<a class="btn primary" href="${esc(r.claimUrl)}" target="_blank" rel="noopener">到車掃地圖認領路段</a>` : ''}
@@ -2389,7 +2415,7 @@ function jobDetailHtml(it: Item, now: number): string {
 }
 
 function canReportEnded(ev: EventOut, now: number): boolean {
-  return ev.post.source !== 'official' && ev.startAt <= now;
+  return ev.post.source !== 'official' && ev.post.source !== 'site' && ev.startAt <= now;
 }
 
 function neededText(): string {
@@ -3381,6 +3407,7 @@ function fmtClock(totalMin: number): string {
 }
 
 function sourceLabel(ev: EventOut): string {
+  if (ev.post.source === 'site') return `${ev.post.username ?? '主辦單位'}（主辦單位公告）`;
   if (ev.post.source === 'news') return `新聞・${ev.post.username ?? ''}`;
   if (ev.post.source === 'official') return '台北大洋流官網「未來航線」';
   const who = `Threads${ev.post.username ? `・@${ev.post.username}` : ''}`;
@@ -3388,6 +3415,7 @@ function sourceLabel(ev: EventOut): string {
 }
 
 function sourceLinkText(ev: EventOut): string {
+  if (ev.post.source === 'site') return '看主辦單位公告';
   if (ev.post.source === 'news') return '看新聞原文';
   if (ev.post.source === 'official') return '看官方航線';
   return '在 Threads 查看';

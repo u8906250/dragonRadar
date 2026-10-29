@@ -33,10 +33,15 @@ export interface MapRoute {
   claimUrl: string | null;
   /** report：回報的車掃貼文，各站直線連起來、沒有認領人數 */
   source?: 'official' | 'report';
+  /** 畫成彩虹（同志遊行）：每一段是一條路線（from 是名稱、to 是經過的路） */
+  rainbow?: boolean;
   segments: Array<{ seq: number; from: string; to: string; path: Array<[number, number]>; people: number; target: number; passed?: boolean }>;
   /** 車掃進行中：照各站預計時間推算的車子位置（不是實際位置），note 是點了顯示的說明 */
   car?: { lat: number; lng: number; note: string };
 }
+
+/** 彩虹旗的六個顏色（紅、橙、黃、綠、藍、紫） */
+export const RAINBOW = ['#e40303', '#ff8c00', '#ffed00', '#008026', '#004dff', '#750787'];
 
 /** 跟大洋流車掃地圖一樣的顏色：沒人灰、缺人綠、快滿（6 成以上）橘、已滿紅 */
 const CROWD = {
@@ -505,6 +510,17 @@ export class MapView {
         const car = L.marker([r.car.lat, r.car.lng], { icon, keyboard: false, zIndexOffset: 800, title: '車隊預估位置（不是實際位置）' });
         car.bindPopup(`<strong>${escapeHtml(r.title)}</strong><br>${r.car.note}`, { closeButton: false });
         layer.addLayer(car);
+      }
+      if (r.rainbow) {
+        // 遊行：六條由粗到細疊成彩虹（紅在最外、紫在中間），還沒出發的淡一點；點了看是哪一條路線
+        for (const seg of r.segments) {
+          RAINBOW.forEach((color, i) => {
+            const line = L.polyline(seg.path, { color, weight: 13 - i * 2, opacity: r.state === 'planned' ? 0.55 : 0.9, lineCap: 'round', lineJoin: 'round' });
+            line.bindPopup(`<strong>${escapeHtml(r.title)}・${escapeHtml(seg.from)}</strong><br>${escapeHtml(seg.to)}<br>主辦單位公布的路線，以現場為準`, { closeButton: false });
+            layer.addLayer(line);
+          });
+        }
+        continue;
       }
       if (r.source === 'report') {
         // 回報的車掃：活動的顏色，還沒出發畫虛線，已經經過的那段畫淡；不知道實際走哪些路，是直線

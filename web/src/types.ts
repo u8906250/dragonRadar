@@ -94,6 +94,8 @@ export interface RouteOut {
   id: string;
   /** official 官方航線（車掃地圖，有實際路徑和認領人數）；report 回報的車掃貼文（各站直線連起來） */
   source?: 'official' | 'report';
+  /** 畫法：rainbow 是彩虹（同志遊行：主辦單位公布的路線，有實際路徑、沒有認領）；沒有是車掃 */
+  style?: 'rainbow';
   /** 事件掛在哪則官方貼文下，用來找出屬於這條路線的事件 */
   postId: string;
   title: string;
