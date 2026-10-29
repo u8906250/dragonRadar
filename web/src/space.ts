@@ -807,18 +807,21 @@ export function spaceMarkup(o: SpaceOpts): string {
     .filter((b) => inView(b.x, b.y, b.r))
     .sort((a, b) => a.d - b.d);
   let bodies = '';
+  // 你在哪一顆：中心是汪星時你在汪星（點汪星飛過去、搭火箭過去），其他時候在地球（中心是地球時雷達中間的圓點就是你，不另外標）
+  const you = view.focus === 'woof' ? 'woof' : view.focus ? 'earth' : null;
   for (const b of list) {
     // 汪星大到看得出形狀：跟地球一樣畫成球
     const look = b.key === 'woof' && b.r >= TINY_EARTH ? woofGlobe(b.x, b.y, b.r, view, rot(sub(sun, pos.get('woof')!)), o.streets) : bodySvg(b.key, b.x, b.y, b.r, b.key === 'sun' ? null : sunAt);
     // 點星球飛過去：點擊範圍至少半徑 12
     bodies += `<g class="space-hit" data-body="${b.key}"><circle class="hit" cx="${f1(b.x)}" cy="${f1(b.y)}" r="${f1(Math.max(b.r + 3, 12))}" />${look}</g>`;
-    // 中心換到別的星球：雷達中間的圓點不是你，你畫在地球那裡
-    if (b.key === 'earth' && view.focus) bodies += `<circle class="space-me" cx="${f1(b.x)}" cy="${f1(b.y)}" r="3" />`;
-    const name = b.key === 'earth' ? (view.focus ? '地球（你）' : '地球') : NAMES[b.key];
+    // 中心換到別的星球：雷達中間的圓點不是你，你畫在你在的那一顆（地球；在汪星上是汪星，汪星大到畫成球時不畫）
+    const here = b.key === you;
+    if (here && b.r < TINY_EARTH) bodies += `<circle class="space-me" cx="${f1(b.x)}" cy="${f1(b.y)}" r="3" />`;
+    const name = `${b.key === 'earth' ? '地球' : NAMES[b.key]}${here ? '（你）' : ''}`;
     const r = b.key === 'saturn' ? b.r * 2.2 : b.key === 'sun' ? b.r + 5 : b.r;
-    named.push({ x: b.x, y: b.y, r, cls: b.key, name, force: b.key === 'earth' && !!view.focus });
+    named.push({ x: b.x, y: b.y, r, cls: b.key, name, force: here });
   }
-  // 名字照順序放：地球（你）最優先，再來是中心那顆、太陽
+  // 名字照順序放：你在的那一顆（地球（你）、汪星（你））最優先，再來是中心那顆、太陽
   const rank = (b: Body): number => (b.force ? 0 : b.cls === view.focus ? 1 : b.cls === 'sun' ? 2 : 3);
   named.sort((a, b) => rank(a) - rank(b));
   // 地球大到看得出形狀時（從正上方看你）不寫名字
