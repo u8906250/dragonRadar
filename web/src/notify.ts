@@ -52,17 +52,64 @@ export function beep(style: SoundStyle = 'beep'): void {
 }
 
 let bannerTimer: number | undefined;
+/**
+ * 通知橫幅：ms 毫秒後自己收起來，點一下也收起來；左右滑可以拿掉（滑超過寬度的三分之一或快速一甩就往那邊滑出去，
+ * 不然彈回來；按著的時候不會自己收起來，放開再重新算）
+ */
 export function showBanner(el: HTMLElement, text: string, ms = 2500): void {
   el.textContent = text;
   el.hidden = false;
-  el.onclick = () => {
+  el.style.transition = el.style.transform = el.style.opacity = '';
+  const hide = (): void => {
     window.clearTimeout(bannerTimer);
     el.hidden = true;
+    el.style.transition = el.style.transform = el.style.opacity = '';
   };
-  window.clearTimeout(bannerTimer);
-  bannerTimer = window.setTimeout(() => {
-    el.hidden = true;
-  }, ms);
+  const later = (): void => {
+    window.clearTimeout(bannerTimer);
+    bannerTimer = window.setTimeout(hide, ms);
+  };
+  let start: { x: number; y: number; t: number; id: number } | null = null;
+  let dx = 0;
+  // 拖過了（上下左右）就不算點一下
+  let moved = false;
+  el.onpointerdown = (e) => {
+    start = { x: e.clientX, y: e.clientY, t: e.timeStamp, id: e.pointerId };
+    dx = 0;
+    moved = false;
+    window.clearTimeout(bannerTimer);
+    el.style.transition = 'none';
+    el.setPointerCapture(e.pointerId);
+  };
+  el.onpointermove = (e) => {
+    if (!start || e.pointerId !== start.id) return;
+    dx = e.clientX - start.x;
+    if (Math.hypot(dx, e.clientY - start.y) > 6) moved = true;
+    el.style.transform = `translateX(${dx}px)`;
+    el.style.opacity = String(Math.max(0.2, 1 - Math.abs(dx) / el.offsetWidth));
+  };
+  const end = (e: PointerEvent): void => {
+    if (!start || e.pointerId !== start.id) return;
+    // 平均速度（像素 / 毫秒）
+    const v = dx / Math.max(1, e.timeStamp - start.t);
+    start = null;
+    el.style.transition = 'transform 0.18s ease-out, opacity 0.18s ease-out';
+    if (moved && (Math.abs(dx) > el.offsetWidth / 3 || Math.abs(v) > 0.5)) {
+      el.style.transform = `translateX(${Math.sign(dx) * el.offsetWidth * 1.2}px)`;
+      el.style.opacity = '0';
+      window.clearTimeout(bannerTimer);
+      bannerTimer = window.setTimeout(hide, 180);
+    } else {
+      el.style.transform = el.style.opacity = '';
+      later();
+    }
+  };
+  el.onpointerup = end;
+  el.onpointercancel = end;
+  el.onclick = () => {
+    if (!moved) hide();
+  };
+  later();
 }
 
 export function notificationState(): 'unsupported' | NotificationPermission {

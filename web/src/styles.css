@@ -465,6 +465,8 @@ a.chip { display: inline-flex; align-items: center; text-decoration: none; }
 .radar .space-label { fill: var(--label); font-size: 11px; font-weight: 600; paint-order: stroke; stroke: var(--label-halo); stroke-width: 3px; stroke-linejoin: round; pointer-events: none; }
 
 .banner { cursor: pointer; }
+/* 左右滑可以拿掉：橫向的手勢給橫幅，上下還是捲動；拖的時候不要選到字 */
+.banner { touch-action: pan-y; user-select: none; -webkit-user-select: none; }
 
 /* 平板與桌機：清單移到右側欄 */
 @media (min-width: 900px) {
