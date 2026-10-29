@@ -5,7 +5,7 @@
  * 汪星是球面（ParkWorld 把台北的經緯度換成汪星的，space.ts）。地球上第一次在公園附近才載入
  */
 import type { LatLng } from './geo';
-import { RADAR_GEOM } from './radar';
+import { RADAR_GEOM, type TripAt } from './radar';
 import { ZHONGSHAN_PARK } from './zhongshan';
 
 const { c: C, inner: INNER, size: SIZE } = RADAR_GEOM;
@@ -204,7 +204,8 @@ const STATUE_SVG = (() => {
  * - stored：收在這一邊的發射口（廣場中間那塊草皮）底下，看不到；點這一邊的銅像叫出來；
  * - summon（SUMMON_MS）：發射口從中間分成兩半、帶著上面的草往兩邊滑進地底，底下是黑黑的井，火箭慢慢升上來，門再滑回來關上；
  * - parked：火箭停在草皮上，點得到（rocket-hit）：問要不要飛到另一邊（地球→汪星、汪星→地球）；
- * - depart（DEPART_MS）：點火（火焰、白煙、抖一抖）、越飛越快飛出畫面，之後 away（main.ts 拉遠、換到另一邊、拉近，畫面正中間一支小火箭 tripSvg）；
+ * - depart（DEPART_MS）：點火（火焰、白煙、抖一抖）、離地，之後 away：main.ts 讓小火箭（tripSvg）從這裡接手、移到雷達正中間陪著飛
+ *   （拉遠、鏡頭從這一顆移到另一顆、拉近），最後移到降落開始的地方交回來；
  * - arrive（ARRIVE_MS）：在另一邊的發射口，門打開，火箭從上面（畫面上半部）慢慢降下來、直接降進井裡，門關回來，收在那邊（stored）。
  * 存起來的只有在哪一邊、停在草皮上還是收在底下：飛走時就記成收在另一邊（飛到一半重新整理，火箭就在那邊）。
  * 動畫都是 CSS（styles.css 的 summon-*、depart-*、arrive-*），--t 是這一段已經過了多久（負的），中途重畫（拖曳、縮放）會接著播，不會重來
@@ -212,7 +213,7 @@ const STATUE_SVG = (() => {
 export type RocketWorld = 'earth' | 'woof';
 export type RocketPhase = 'stored' | 'summon' | 'parked' | 'depart' | 'away' | 'arrive';
 export const SUMMON_MS = 5000;
-export const DEPART_MS = 3000;
+export const DEPART_MS = 1600;
 export const ARRIVE_MS = 5500;
 /** 發射口的正中間（台北的經緯度）：火箭站的地方，飛到汪星時汪星轉到這裡、回地球時雷達正中間換到這裡 */
 export const HATCH_CENTER: Pt = [ZHONGSHAN_PARK.hatch.reduce((s, p) => s + p[0], 0) / 4, ZHONGSHAN_PARK.hatch.reduce((s, p) => s + p[1], 0) / 4];
@@ -299,12 +300,21 @@ const rocketSvg = (clip: string): string =>
 const ROCKET_H = 8.5;
 const ROCKET_HIT = 20;
 
-/** 飛行中畫在雷達正中間的小火箭（固定大小，火焰一直噴、左右晃，旁邊一道道往下的氣流） */
+/** 飛行中小火箭在雷達正中間（固定大小） */
+export const TRIP_AT: TripAt = { x: C, y: C + 12, k: 3.4 };
+/** 降落開始時地圖上的火箭在哪（雷達外圈 scaleKm、正中間是發射口）：小火箭最後移到這裡交回來 */
+export function arriveAt(scaleKm: number): TripAt {
+  const ppm = INNER / (scaleKm * 1000);
+  return { x: C, y: C - Math.min(45 * ppm, 0.35 * INNER), k: ppm };
+}
+
+/** 飛行中畫在雷達正中間的小火箭（火焰一直噴、左右晃，旁邊一道道往後的氣流）；rocket-tilt 繞火箭中間轉（頭朝要去的方向） */
 export function tripSvg(): string {
   return (
-    `<g class="rocket-trip" transform="translate(${C} ${C + 12}) scale(3.4)">` +
+    `<g class="rocket-trip" transform="translate(${TRIP_AT.x} ${TRIP_AT.y}) scale(${TRIP_AT.k})">` +
+    `<g transform="translate(0 -4)"><g class="rocket-tilt"><g transform="translate(0 4)">` +
     `<path class="trip-streak" d="M-3 -16L-3 8M3.2 -12L3.2 12M-5.5 -6L-5.5 14M5.8 -18L5.8 4" />` +
-    `<g class="rocket-wobble">${rocketSvg('')}</g></g>`
+    `<g class="rocket-wobble">${rocketSvg('')}</g></g></g></g></g>`
   );
 }
 

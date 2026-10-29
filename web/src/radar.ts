@@ -104,11 +104,19 @@ export function globeFrac(scaleKm: number): number {
   return (SPACE_FROM_KM / scaleKm) ** (1 - t) * (EARTH_KM / scaleKm) ** t;
 }
 
-/** 太陽系那幾層的看法：中心是哪一顆（null 是地球、你），繞中心左右轉、往下傾斜（弧度） */
+/** 太陽系那幾層的看法：中心是哪一顆（null 是地球、你），繞中心左右轉、往下傾斜（弧度）；toward、u：中心往那一顆移了多少（火箭飛行，space.ts） */
 export interface SpaceView {
   focus: string | null;
   yaw: number;
   pitch: number;
+  toward?: string;
+  u?: number;
+}
+/** 小火箭擺在哪、多大：底在 (x, y)、每公尺 k 像素（雷達的 SVG 座標，park.ts） */
+export interface TripAt {
+  x: number;
+  y: number;
+  k: number;
 }
 /** 太空的畫法（space.ts）：照範圍、地球半徑、3D 的看法畫成 SVG */
 export type SpaceDraw = (scaleKm: number, earthR: number, view: SpaceView) => string;
@@ -716,22 +724,50 @@ export class Radar {
     this.onSpaceMove?.();
   }
 
-  /** 直接換到這個看法（火箭飛到汪星：中心換成汪星、轉到中山公園） */
-  setSpaceView(view: SpaceView): void {
+  /** 直接換到這個看法（火箭飛到汪星：鏡頭從地球移到汪星、中心換成汪星、轉到中山公園）；quiet 是動畫中間的每一格（不通知 main.ts） */
+  setSpaceView(view: SpaceView, quiet = false): void {
     this.spaceView = { ...view };
     this.setScale(this.scaleKm);
-    this.onSpaceMove?.();
+    if (!quiet) this.onSpaceMove?.();
   }
 
-  /** 火箭飛行中：雷達正中間畫一支小火箭（空字串是收掉）；on 是整趟（點火到降落）不接受拖曳、縮放、點擊 */
-  setTrip(svg: string, on = svg !== ''): void {
+  /**
+   * 火箭飛行中：畫一支小火箭（空字串是收掉）；on 是整趟（點火到降落）不接受拖曳、縮放、點擊。
+   * from、to：從地圖上火箭的位置和大小接手，1 秒內移到 to（雷達正中間）
+   */
+  setTrip(svg: string, on = svg !== '', from?: TripAt | null, to?: TripAt): void {
     this.tripLayer.innerHTML = svg;
     this.stack.classList.toggle('trip', on);
+    if (!from || !to) return;
+    this.moveTrip(from, 0);
+    requestAnimationFrame(() => requestAnimationFrame(() => this.moveTrip(to, 1000)));
   }
 
-  /** 火箭飛行中換到另一邊：太空那一層先淡出、換好再淡入 */
-  fadeSpace(out: boolean): void {
-    this.stack.classList.toggle('trip-fade', out);
+  /** 小火箭慢慢移到這裡（底在 x, y、每公尺 k 像素），ms 是花多久 */
+  moveTrip(to: TripAt, ms: number): void {
+    const g = this.tripLayer.firstElementChild as SVGGElement | null;
+    if (!g) return;
+    g.style.transition = ms ? `transform ${ms}ms cubic-bezier(0.4, 0, 0.2, 1)` : 'none';
+    g.style.transform = `translate(${to.x.toFixed(1)}px, ${to.y.toFixed(1)}px) scale(${to.k.toPrecision(4)})`;
+  }
+
+  /** 小火箭的頭轉向太空那一層的這個方向（順時針、0 是上，度；太空那一層跟著指北針轉了 -heading）；null 是轉回直立 */
+  tiltTrip(deg: number | null, ms: number): void {
+    const t = this.tripLayer.querySelector('.rocket-tilt') as SVGGElement | null;
+    if (!t) return;
+    const a = deg === null ? 0 : ((((deg - this.heading) % 360) + 540) % 360) - 180;
+    t.style.transition = `transform ${ms}ms ease-in-out`;
+    t.style.transform = `rotate(${a.toFixed(1)}deg)`;
+  }
+
+  /** 起飛中的火箭在雷達上的位置和大小（底、每公尺幾像素，SVG 座標）：小火箭從這裡接手；沒畫出來是 null */
+  rocketAt(): TripAt | null {
+    const el = this.svg.querySelector('.park-launch .rocket-fly') as SVGGraphicsElement | null;
+    const a = el?.getScreenCTM();
+    const b = this.svg.getScreenCTM();
+    if (!a || !b) return null;
+    const m = b.inverse().multiply(a);
+    return { x: m.e, y: m.f, k: Math.hypot(m.a, m.b) };
   }
 
   /** 點了星球：飛過去當中心（點地球就回到你），視角維持 */

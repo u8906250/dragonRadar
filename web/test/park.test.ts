@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { RADAR_GEOM } from '../src/radar';
 import { ARRIVE_MS, arriveRocket, DEPART_MS, departRocket, EARTH, earthParkSvg, HATCH_CENTER, nearPark, PARK_MIN_KM, parkGeom, parkTexture, resetRocket, rocketNow, SUMMON_MS, summonRocket } from '../src/park';
-import { spaceMarkup, toWoof } from '../src/space';
+import { bodyBearing, spaceMarkup, toWoof } from '../src/space';
 
 const { c: C, inner: INNER } = RADAR_GEOM;
 const hall: [number, number] = [25.0400096, 121.5602923];
@@ -161,6 +161,35 @@ describe('地球的雷達上的中山公園（跟汪星共用一份）', () => {
     store.set('dr.rocket', '{oops');
     resetRocket();
     expect(rocketNow()).toMatchObject({ world: 'earth', phase: 'stored' });
+  });
+
+  it('moves the camera from Earth to 汪星 while the rocket flies (no jump at either end)', () => {
+    const when = new Date('2026-10-28T08:00:00Z');
+    const far = (view: { focus: string | null; yaw: number; pitch: number; toward?: string; u?: number }): string => spaceMarkup({ center: { lat: 25.04, lng: 121.52 }, land: [], when, scaleKm: 4e8, rg: 164, view });
+    /** 這顆星球在畫面上的位置（點的那一圈的圓心） */
+    const body = (m: string, key: string): number[] => {
+      const r = new RegExp(`data-body="${key}"><circle class="hit" cx="([-\\d.]+)" cy="([-\\d.]+)"`).exec(m);
+      return r ? r.slice(1).map(Number) : [];
+    };
+    // 中心是地球（地球不畫成可以點的星球）：汪星、火星在哪
+    const start = far({ focus: null, yaw: 0, pitch: 0 });
+    const [wx, wy] = body(start, 'woof');
+    const mars = body(start, 'mars');
+    expect(Math.hypot(wx - C, wy - C)).toBeGreaterThan(10);
+    // 火箭的頭朝汪星（畫面上汪星的方向，順時針、0 是上）
+    const a = (Math.atan2(wx - C, C - wy) * 180) / Math.PI;
+    expect(Math.abs(((a - bodyBearing('earth', 'woof', when) + 540) % 360) - 180)).toBeLessThan(1);
+    // 鏡頭移到一半：汪星離中心剩一半；移到底跟中心換成汪星一樣
+    const half = body(far({ focus: null, yaw: 0, pitch: 0, toward: 'woof', u: 0.5 }), 'woof');
+    expect(half[0] - C).toBeCloseTo((wx - C) / 2, 0);
+    expect(half[1] - C).toBeCloseTo((wy - C) / 2, 0);
+    const end = far({ focus: null, yaw: 0, pitch: 0, toward: 'woof', u: 1 });
+    expect(body(end, 'woof')).toEqual([C, C]);
+    expect(body(end, 'mars')).toEqual(body(far({ focus: 'woof', yaw: 0, pitch: 0 }), 'mars'));
+    // 回地球：從汪星往地球移到底，跟中心是地球一樣
+    const back = far({ focus: 'woof', yaw: 0, pitch: 0, toward: 'earth', u: 1 });
+    expect(body(back, 'woof')).toEqual([wx, wy]);
+    expect(body(back, 'mars')).toEqual(mars);
   });
 
   it('grows grass on the lawns and ripples on 映池 and 翠湖 (not on the islands)', () => {

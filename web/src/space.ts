@@ -589,6 +589,13 @@ const LOOKS: Record<string, { km: number; min: number; tint: string }> = {
 /** 天體的真實半徑（公里）：中心換到這顆時，最多放大到剛好看得到整顆 */
 export const bodyRadiusKm = (key: string): number => LOOKS[key]?.km ?? 0;
 
+/** 從一顆星球看另一顆在太空那一層的哪個方向（從黃道北邊正上方看，順時針、0 是上，度）：火箭飛過去時頭朝這邊 */
+export function bodyBearing(from: string, to: string, when = new Date()): number {
+  const pos = bodyPositions(when);
+  const [a, b] = [pos.get(from) ?? [0, 0, 0], pos.get(to) ?? [0, 0, 0]];
+  return Math.atan2(b[0] - a[0], b[1] - a[1]) / RAD;
+}
+
 /** 中心換到這顆時最多放大到多少（雷達外圈幾公里）：剛好看得到整顆；汪星可以放大到 1 km 看地表，正中間在中山公園附近可以到 0.5 公尺 */
 export const focusMinKm = (key: string, view?: SpaceView): number => (key === 'woof' ? (view && atPark(view) ? PARK_MIN_KM : 1) : bodyRadiusKm(key) * 1.3);
 
@@ -698,11 +705,16 @@ function woofGlobe(x: number, y: number, r: number, view: SpaceView, toSun: Vec3
   return `<g class="space-globe" transform="translate(${f1(ox)} ${f1(oy)})">${out}</g>`;
 }
 
-/** 太陽系那幾層的看法：中心是哪一顆（null 是地球、你）、繞著中心左右轉幾度、往下傾斜幾度（0 是從黃道北邊正上方往下看） */
+/**
+ * 太陽系那幾層的看法：中心是哪一顆（null 是地球、你）、繞著中心左右轉幾度、往下傾斜幾度（0 是從黃道北邊正上方往下看）；
+ * toward、u：中心從這一顆往 toward（'earth'、'woof'…）移了多少（0～1，火箭飛過去時鏡頭跟著走）
+ */
 export interface SpaceView {
   focus: string | null;
   yaw: number;
   pitch: number;
+  toward?: string;
+  u?: number;
 }
 
 export interface SpaceOpts {
@@ -746,7 +758,11 @@ export function spaceMarkup(o: SpaceOpts): string {
   const view = o.view ?? { focus: null, yaw: 0, pitch: 0 };
   const topDown = view.yaw === 0 && view.pitch === 0;
   const pos = bodyPositions(o.when);
-  const F = (view.focus && pos.get(view.focus)) || ([0, 0, 0] as Vec3);
+  const F0 = (view.focus && pos.get(view.focus)) || ([0, 0, 0] as Vec3);
+  // 鏡頭從中心那一顆往 toward 移了 u（火箭飛行）
+  const T = view.toward ? pos.get(view.toward) : undefined;
+  const u = T ? (view.u ?? 0) : 0;
+  const F: Vec3 = T ? [F0[0] + (T[0] - F0[0]) * u, F0[1] + (T[1] - F0[1]) * u, F0[2] + (T[2] - F0[2]) * u] : F0;
   const [cy, sy, cp, sp] = [Math.cos(view.yaw), Math.sin(view.yaw), Math.cos(view.pitch), Math.sin(view.pitch)];
   /** 3D 的方向轉成看的人的座標：x 往右、y 往上、z 朝看的人 */
   const rot = (v: Vec3): Vec3 => {
