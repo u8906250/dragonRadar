@@ -405,6 +405,14 @@ const radar = new Radar(
 );
 // 點了車掃的車子：打開那條車掃的時間表
 radar.onCar = (id) => selectRoute(id);
+// 點了中山公園的銅像（地球或汪星）：發射火箭，播完再重畫一次把它收掉
+radar.onStatue = () => {
+  void import('./park').then((m) => {
+    if (!m.launchRocket()) return;
+    radar.redrawPark();
+    window.setTimeout(() => radar.redrawPark(), m.LAUNCH_MS + 100);
+  });
+};
 // 太陽系那幾層拖曳移開了視野、拉回地球：「回到我的位置」跟著出現、消失
 radar.onSpaceMove = () => {
   updateHomeBtn();

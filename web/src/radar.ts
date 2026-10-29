@@ -261,6 +261,8 @@ export class Radar {
   private readonly carLayer: SVGGElement;
   /** 點了車子：打開那條車掃的時間表 */
   onCar: ((routeId: string) => void) | null = null;
+  /** 點了中山公園的銅像（地球或汪星，拉近到整座銅像畫出來時才點得到） */
+  onStatue: (() => void) | null = null;
   private bottles: RadarBottle[] = [];
   private readonly bottleLayer: SVGGElement;
   private readonly landmarkLayer: SVGGElement;
@@ -385,10 +387,17 @@ export class Radar {
       const g = (e.target as Element).closest('.landmark') as SVGGElement | null;
       if (g?.dataset.id) onLandmark?.(g.dataset.id);
     });
-    // 太空：點星球飛過去（剛拖完放開的那一下不算）
+    // 太空：點星球飛過去（剛拖完放開的那一下不算）；汪星上的中山公園銅像
     this.spaceLayer.addEventListener('click', (e) => {
+      if ((e.target as Element).closest('.park-statue')) {
+        this.onStatue?.();
+        return;
+      }
       const g = (e.target as Element).closest('.space-hit') as SVGGElement | null;
       if (g?.dataset.body && !this.justPanned) this.focusOn(g.dataset.body);
+    });
+    this.parkLayer.addEventListener('click', (e) => {
+      if ((e.target as Element).closest('.park-statue')) this.onStatue?.();
     });
     for (const [letter, deg] of ROSE) {
       const t = el('text', { class: `rose-letter rose-${letter.toLowerCase()}`, 'text-anchor': 'middle', 'dominant-baseline': 'middle', 'data-deg': deg });
@@ -713,6 +722,12 @@ export class Radar {
     this.spaceDraw = draw;
     this.spaceBodyKm = bodyKm ?? null;
     this.draw();
+  }
+
+  /** 中山公園要重畫（點了銅像開始發射、發射完）：地球上重畫公園那一層，在太空裡重畫太空那一層（汪星） */
+  redrawPark(): void {
+    if (this.inSpace) this.drawSpace();
+    else this.drawPark();
   }
 
   /** 太空裡的東西載入了（例如汪星的街道圖磚）：只重畫太空那一層 */

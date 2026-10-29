@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { RADAR_GEOM } from '../src/radar';
-import { EARTH, earthParkSvg, nearPark, PARK_MIN_KM, parkGeom, parkTexture } from '../src/park';
+import { EARTH, earthParkSvg, LAUNCH_MS, launchRocket, nearPark, PARK_MIN_KM, parkGeom, parkTexture } from '../src/park';
 import { spaceMarkup, toWoof } from '../src/space';
 
 const { c: C, inner: INNER } = RADAR_GEOM;
@@ -51,10 +51,10 @@ describe('地球的雷達上的中山公園（跟汪星共用一份）', () => {
     for (const cls of ['park-edge', 'park-green', 'park-water', 'park-path street-minor', 'park-building']) expect(at(1, hall)).toMatch(new RegExp(`class="${cls}" d="M`));
   });
 
-  it('draws 孫中山銅像 standing just east of the middle lawn in the square plaza, level with its middle', () => {
+  it('draws 孫中山銅像 sitting just east of the middle lawn in the square plaza, level with its middle', () => {
     const statue: [number, number] = [25.040048, 121.5594];
     /** 銅像站的地方（畫面上）和放大幾倍（每公尺幾像素） */
-    const place = (m: string): number[] => /class="park-statue" data-at="([-\d.]+) ([-\d.]+)"><g transform="translate\(([-\d.]+) ([-\d.]+)\) scale\(([\d.]+)\)"/.exec(m)!.slice(1).map(Number);
+    const place = (m: string): number[] => /class="park-statue" data-at="([-\d.]+) ([-\d.]+)"><circle class="statue-hit"[^>]*\/><g transform="translate\(([-\d.]+) ([-\d.]+)\) scale\(([\d.]+)\)"/.exec(m)!.slice(1).map(Number);
     // 照真的大小：拉遠到約 500 公尺外看不到，再近一點是一個點，拉近到約 28 公尺內才畫出整座銅像（每公尺幾像素就放大幾倍）
     expect(at(1, statue)).not.toContain('park-statue');
     expect(at(0.3, statue)).toMatch(/class="park-statue" data-at="200.0 200.0"><circle class="statue-dot" cx="200.0" cy="200.0" r="1.2" \/>/);
@@ -63,8 +63,9 @@ describe('地球的雷達上的中山公園（跟汪星共用一份）', () => {
     expect([ax, ay, x, y]).toEqual([C, C, C, C]);
     expect(k).toBeCloseTo(INNER / 25, 2);
     expect(place(at(0.005, statue))[4]).toBeCloseTo(INNER / 5, 0);
-    // 立體的人形：石頭台座三面、銅像（長袍、頭、拐杖）
-    for (const cls of ['statue-stone-front', 'statue-stone-top', 'statue-stone-side', 'statue-body', 'statue-cane', 'statue-arm']) expect(at(0.025, statue)).toContain(`class="${cls}`);
+    // 立體的人形：石頭台座三面、坐在椅子上的銅像；整座畫出來才點得到
+    expect(at(0.03, statue)).not.toContain('statue-hit');
+    for (const cls of ['statue-stone-front', 'statue-stone-top', 'statue-stone-side', 'statue-chair', 'statue-body', 'statue-arm', 'statue-hit']) expect(at(0.025, statue)).toContain(`class="${cls}`);
     // 廣場中間那塊草皮（約 8 公尺見方）的東邊外面 3 公尺內、南北對齊草皮的中間
     const g = parkGeom(EARTH);
     const mid = g.lawns.find((r) => r.length === 4 && r.some((p) => Math.abs(p[0] - statue[0]) < 0.0001 && Math.abs(p[1] - statue[1]) < 0.0001))!;
@@ -76,6 +77,27 @@ describe('地球的雷達上的中山公園（跟汪星共用一份）', () => {
     // 拉近到別的地方、看不到就不畫
     expect(at(0.01, hall)).not.toContain('park-statue');
     expect(at(2, hall)).not.toContain('park-statue');
+  });
+
+  it('opens the middle lawn and launches a rocket when 孫中山銅像 is tapped (once at a time, picks up where it was when redrawn)', () => {
+    const statue: [number, number] = [25.040048, 121.5594];
+    const now = performance.now();
+    expect(at(0.025, statue)).not.toContain('park-launch');
+    expect(launchRocket(now - 2000)).toBe(true);
+    // 還在播：再點不會重來
+    expect(launchRocket(now)).toBe(false);
+    const m = at(0.025, statue);
+    const t = Number(/class="park-launch" style="--t:(-\d+)ms"/.exec(m)![1]);
+    expect(t).toBeLessThanOrEqual(-2000);
+    expect(t).toBeGreaterThan(-2500);
+    for (const cls of ['launch-shaft', 'launch-door launch-door-w', 'launch-door launch-door-e', 'park-rocket', 'rocket-fly', 'rocket-rise', 'rocket-flame', 'rocket-smoke']) expect(m).toContain(`class="${cls}"`);
+    // 火箭站在發射口（廣場中間那塊草皮）的正中間，往西 4.5 公尺左右；發射口在銅像左邊
+    const [rx] = /class="park-rocket" data-at="([-\d.]+) ([-\d.]+)"/.exec(m)!.slice(1).map(Number);
+    expect((C - rx) / (INNER / 25)).toBeGreaterThan(3.5);
+    expect((C - rx) / (INNER / 25)).toBeLessThan(6);
+    // 播完可以再點（這裡是在 LAUNCH_MS 之後才點的那一下，那個時間還沒到就不畫）
+    expect(launchRocket(now + LAUNCH_MS)).toBe(true);
+    expect(at(0.025, statue)).not.toContain('park-launch');
   });
 
   it('grows grass on the lawns and ripples on 映池 and 翠湖 (not on the islands)', () => {

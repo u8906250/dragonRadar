@@ -68,6 +68,7 @@ export interface ParkGeom {
   green: Pt[][];
   paths: Pt[][];
   statue: Pt;
+  hatch: Pt[];
   O: { lat: number; lng: number; mx: number; my: number };
   lawnPatches: Patches;
   pondPatches: Patches;
@@ -120,6 +121,7 @@ export function parkGeom(w: ParkWorld): ParkGeom {
     green: ZHONGSHAN_PARK.green.map(loop),
     paths: ZHONGSHAN_PARK.paths.map((l) => dense(l.map(w.to))),
     statue: w.to(ZHONGSHAN_PARK.statue),
+    hatch: ZHONGSHAN_PARK.hatch.map(w.to),
     O,
     lawnPatches: patches(ZHONGSHAN_PARK.green.map((r) => [r])),
     pondPatches: patches(ZHONGSHAN_PARK.water),
@@ -142,15 +144,17 @@ export interface ParkCanvas {
 }
 
 /**
- * 孫中山銅像：立體的，石頭台座（約 2 公尺寬、1.2 公尺高，看得到上面和右邊）上站著穿長袍、拄著拐杖的銅像（約 2.3 公尺高），
+ * 孫中山銅像：立體的，石頭台座（約 2 公尺寬、1.2 公尺高，看得到上面和右邊）上坐著穿長袍的銅像（坐在椅子上，手放在膝蓋上），
  * 側面面向右邊（東邊，國父紀念館那邊），左上照光（背後亮、前面暗），地上一塊影子。
- * 單位是公尺，(0, 0) 是台座的中心（站的地方），往上是負的；整個約 3.6 公尺高（STATUE_H）。照真的大小畫，跟著縮放：
- * 雷達外圈約 500 公尺內（每公尺 STATUE_FROM 像素，跟草一樣）才看得到，先是一個點（慢慢變大），外圈約 28 公尺內（STATUE_FULL）才畫出整座銅像。
+ * 單位是公尺，(0, 0) 是台座的中心（站的地方），往上是負的；整個約 3.1 公尺高（STATUE_H）。照真的大小畫，跟著縮放：
+ * 雷達外圈約 500 公尺內（每公尺 STATUE_FROM 像素，跟草一樣）才看得到，先是一個點（慢慢變大），外圈約 28 公尺內（STATUE_FULL）才畫出整座銅像，
+ * 這時候點得到（statue-hit，至少 STATUE_HIT 像素半徑）：點了發射火箭（launchRocket）。
  * 不管指北針怎麼轉都站著、面向東邊（radar.ts 照 data-at 轉回來，東邊轉到左邊就左右翻過來）
  */
-const STATUE_H = 3.64;
+const STATUE_H = 3.1;
 const STATUE_FROM = 0.33;
 const STATUE_FULL = INNER / 28;
+const STATUE_HIT = 20;
 const STATUE_SVG = (() => {
   const [fx, fy] = [0.175, -1.15];
   const n = (v: number): number => +v.toFixed(3);
@@ -162,30 +166,94 @@ const STATUE_SVG = (() => {
     `<path class="statue-stone-front" d="${p([[-1, -0.95], [1, -0.95], [1, 0.25], [-1, 0.25]])}" />` +
     `<path class="statue-stone-side" d="${p([[1, -0.95], [1.35, -1.4], [1.35, -0.2], [1, 0.25]])}" />` +
     `<path class="statue-stone-top" d="${p([[-1, -0.95], [1, -0.95], [1.35, -1.4], [-0.65, -1.4]])}" />` +
-    // 拐杖拄在前面、兩隻鞋子朝右
-    `<path class="statue-cane" d="M${at(0.4, -1.12)}L${at(0.52, -0.02)}" />` +
-    `<ellipse class="statue-dark" ${xy(-0.06, -0.05)} rx="0.14" ry="0.06" /><ellipse class="statue-dark" ${xy(0.1, -0.05)} rx="0.17" ry="0.06" />` +
-    // 長袍（側面）：背後一條亮的、前面一半暗，中間一條褶
-    `<path class="statue-body" d="M${at(-0.2, -1.74)}Q${at(-0.16, -1.9)} ${at(0, -1.9)}L${at(0.1, -1.9)}Q${at(0.22, -1.86)} ${at(0.2, -1.66)}L${at(0.3, -0.1)}L${at(-0.3, -0.1)}Z" />` +
-    `<path class="statue-dark" d="M${at(0.04, -1.9)}L${at(0.1, -1.9)}Q${at(0.22, -1.86)} ${at(0.2, -1.66)}L${at(0.3, -0.1)}L${at(0.08, -0.1)}Z" />` +
-    `<path class="statue-lit" d="M${at(-0.17, -1.76)}L${at(-0.26, -0.14)}L${at(-0.17, -0.14)}L${at(-0.08, -1.8)}Z" />` +
-    `<path class="statue-seam" d="M${at(0.02, -1.5)}L${at(0.04, -0.12)}" />` +
+    // 椅背（在背後）、椅座
+    `<path class="statue-chair" d="M${at(-0.5, -0.45)}L${at(-0.5, -1.42)}Q${at(-0.5, -1.52)} ${at(-0.41, -1.52)}Q${at(-0.32, -1.52)} ${at(-0.32, -1.42)}L${at(-0.32, -0.45)}Z" />` +
+    `<path class="statue-chair" d="M${at(-0.5, -0.5)}L${at(0.22, -0.5)}L${at(0.22, 0)}L${at(-0.5, 0)}Z" />` +
+    // 上身（背後一條亮的、前面暗）
+    `<path class="statue-body" d="M${at(-0.33, -0.5)}L${at(-0.3, -1.22)}Q${at(-0.27, -1.38)} ${at(-0.12, -1.38)}L${at(-0.02, -1.38)}Q${at(0.1, -1.36)} ${at(0.08, -1.2)}L${at(0.1, -0.5)}Z" />` +
+    `<path class="statue-dark" d="M${at(-0.06, -1.38)}L${at(-0.02, -1.38)}Q${at(0.1, -1.36)} ${at(0.08, -1.2)}L${at(0.1, -0.5)}L${at(-0.04, -0.5)}Z" />` +
+    `<path class="statue-lit" d="M${at(-0.28, -1.22)}L${at(-0.3, -0.55)}L${at(-0.22, -0.55)}L${at(-0.2, -1.28)}Z" />` +
+    // 大腿（長袍蓋著，上面亮一點）、小腿垂下來、鞋子朝右
+    `<path class="statue-body" d="M${at(-0.2, -0.78)}L${at(0.4, -0.76)}Q${at(0.47, -0.74)} ${at(0.47, -0.62)}L${at(0.47, -0.5)}L${at(-0.2, -0.5)}Z" />` +
+    `<path class="statue-lit" d="M${at(-0.1, -0.78)}L${at(0.38, -0.765)}L${at(0.38, -0.72)}L${at(-0.1, -0.73)}Z" />` +
+    `<path class="statue-body" d="M${at(0.2, -0.6)}L${at(0.47, -0.6)}L${at(0.5, -0.06)}L${at(0.18, -0.06)}Z" />` +
+    `<path class="statue-dark" d="M${at(0.38, -0.6)}L${at(0.47, -0.6)}L${at(0.5, -0.06)}L${at(0.4, -0.06)}Z" />` +
+    `<ellipse class="statue-dark" ${xy(0.44, -0.04)} rx="0.15" ry="0.05" />` +
+    // 手垂下來放在膝蓋上
+    `<path class="statue-arm" d="M${at(-0.14, -1.28)}L${at(-0.08, -0.92)}L${at(0.3, -0.82)}" />` +
+    `<circle class="statue-body" ${xy(0.33, -0.81)} r="0.06" />` +
     // 脖子、頭（鼻子朝右、耳朵、鬍子，後腦一點亮）
-    `<path class="statue-dark" d="${p([[fx, fy - 1.98], [fx + 0.1, fy - 1.98], [fx + 0.1, fy - 1.88], [fx, fy - 1.88]])}" />` +
-    `<path class="statue-body" d="M${at(0.19, -2.13)}L${at(0.27, -2.05)}L${at(0.19, -2.02)}Z" />` +
-    `<circle class="statue-body" ${xy(0.06, -2.08)} r="0.16" />` +
-    `<circle class="statue-dark" ${xy(0.02, -2.07)} r="0.035" />` +
-    `<circle class="statue-lit" ${xy(-0.01, -2.15)} r="0.05" />` +
-    `<path class="statue-seam" d="M${at(0.15, -2)}L${at(0.24, -2.01)}" />` +
-    // 靠我們這邊的手往前伸、握著拐杖
-    `<path class="statue-arm" d="M${at(-0.02, -1.72)}L${at(0.12, -1.35)}L${at(0.36, -1.1)}" />` +
-    `<circle class="statue-body" ${xy(0.39, -1.09)} r="0.07" />`
+    `<path class="statue-dark" d="${p([[fx - 0.1, fy - 1.46], [fx, fy - 1.46], [fx, fy - 1.36], [fx - 0.1, fy - 1.36]])}" />` +
+    `<path class="statue-body" d="M${at(0.09, -1.6)}L${at(0.16, -1.53)}L${at(0.09, -1.5)}Z" />` +
+    `<circle class="statue-body" ${xy(-0.05, -1.56)} r="0.15" />` +
+    `<circle class="statue-dark" ${xy(-0.09, -1.55)} r="0.033" />` +
+    `<circle class="statue-lit" ${xy(-0.12, -1.63)} r="0.045" />` +
+    `<path class="statue-seam" d="M${at(0.04, -1.48)}L${at(0.12, -1.49)}" />`
   );
 })();
 
 /**
+ * 火箭發射（點銅像）：廣場中間那塊草皮（發射口）從中間分成兩半往兩邊收進去，底下是黑黑的井，火箭慢慢升上來、點火（火焰、白煙）、
+ * 越飛越快飛出畫面，最後兩片門關回來。全部 LAUNCH_MS 毫秒，用 CSS 動畫（styles.css 的 launch-*、rocket-*），
+ * --t 是已經過了多久（負的），中途重畫（拖曳、縮放）會接著播，不會重來。地球的雷達和汪星共用（park.ts 這一份記著什麼時候開始的）
+ */
+export const LAUNCH_MS = 9500;
+let launchAt: number | null = null;
+/** 點了銅像：開始發射（上一次還沒播完就不算，回傳 false） */
+export function launchRocket(now = performance.now()): boolean {
+  if (launchAt !== null && now - launchAt < LAUNCH_MS) return false;
+  launchAt = now;
+  return true;
+}
+/** 火箭（側面、站著）：底在 (0, 0)，約 8.5 公尺高、3.5 公尺寬（含尾翼），白色機身、紅色鼻錐和尾翼、一個圓窗；底下的火焰會閃 */
+const ROCKET_SVG =
+  `<clipPath id="park-rocket-clip"><rect x="-4" y="-80" width="8" height="80.25" /></clipPath>` +
+  `<g class="rocket-fly">` +
+  `<g class="rocket-flame"><g class="rocket-flicker"><path class="flame-out" d="M-0.62 0.15Q-0.75 1.7 0 3.6Q0.75 1.7 0.62 0.15Z" /><path class="flame-in" d="M-0.32 0.15Q-0.38 1.1 0 2.2Q0.38 1.1 0.32 0.15Z" /></g></g>` +
+  `<g clip-path="url(#park-rocket-clip)"><g class="rocket-rise">` +
+  `<path class="rocket-red" d="M-0.9 -2.4L-1.75 -0.1L-1.75 0.15L-0.9 -0.35Z" /><path class="rocket-red rocket-red-dark" d="M0.9 -2.4L1.75 -0.1L1.75 0.15L0.9 -0.35Z" />` +
+  `<path class="rocket-nozzle" d="M-0.55 -0.3L0.55 -0.3L0.72 0.18L-0.72 0.18Z" />` +
+  `<path class="rocket-body" d="M-0.9 -0.3L-0.9 -5.4L0.9 -5.4L0.9 -0.3Z" /><path class="rocket-shade" d="M0.35 -5.4L0.9 -5.4L0.9 -0.3L0.35 -0.3Z" />` +
+  `<path class="rocket-red" d="M-0.9 -1.35L0.9 -1.35L0.9 -1L-0.9 -1Z" />` +
+  `<path class="rocket-red" d="M-0.9 -5.4Q-0.85 -7.3 0 -8.5Q0.85 -7.3 0.9 -5.4Z" /><path class="rocket-shade" d="M0.25 -5.4Q0.45 -7 0 -8.5Q0.85 -7.3 0.9 -5.4Z" />` +
+  `<circle class="rocket-window" cx="0" cy="-3.9" r="0.4" /><circle class="rocket-glint" cx="-0.12" cy="-4.02" r="0.12" />` +
+  `<path class="rocket-red" d="M-0.13 -1.9L0.13 -1.9L0.13 0.15L-0.13 0.15Z" />` +
+  `</g></g></g>` +
+  `<g class="rocket-smoke">${[
+    [-2.4, 0.25, 1.1, 0],
+    [-1.3, -0.3, 1.2, 80],
+    [0, 0.4, 1.3, 40],
+    [1.3, -0.2, 1.2, 120],
+    [2.5, 0.3, 1, 60],
+  ]
+    .map(([x, y, r, d]) => `<circle style="--d:${d}ms" cx="${x}" cy="${y}" r="${r}" />`)
+    .join('')}</g>`;
+
+/** 發射中（已經過了 e 毫秒）：井、兩片門、火箭（站著，跟銅像一樣照 data-at 轉回來） */
+function launchSvg(g: ParkGeom, c: ParkCanvas, e: number): string {
+  const q = g.hatch.map(([a, b]) => c.at(a, b));
+  if (q.some((p) => !p)) return '';
+  const [ne, nw, sw, se] = q as Pt[];
+  const mid = (a: Pt, b: Pt): Pt => [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2];
+  const [n, s] = [mid(ne, nw), mid(sw, se)];
+  const o = mid(n, s);
+  const poly = (pts: Pt[]): string => `M${pts.map(([x, y]) => `${x.toFixed(1)} ${y.toFixed(1)}`).join('L')}Z`;
+  const inner = [ne, nw, sw, se].map(([x, y]): Pt => [o[0] + (x - o[0]) * 0.75, o[1] + (y - o[1]) * 0.75]);
+  const door = (side: string, pts: Pt[]): string => `<g class="launch-door launch-door-${side}"><path class="door-base" d="${poly(pts)}" /><path class="door-top" d="${poly(pts)}" /></g>`;
+  const at = `${o[0].toFixed(1)} ${o[1].toFixed(1)}`;
+  return (
+    `<g class="park-launch" style="--t:${-Math.round(e)}ms">` +
+    `<path class="launch-shaft" d="${poly([ne, nw, sw, se])}" /><path class="launch-shaft-in" d="${poly(inner)}" />` +
+    door('w', [n, nw, sw, s]) +
+    door('e', [ne, n, s, se]) +
+    `<g class="park-rocket" data-at="${at}"><g transform="translate(${at}) scale(${+c.ppm.toPrecision(4)})">${ROCKET_SVG}</g></g>` +
+    `</g>`
+  );
+}
+
+/**
  * 中山公園：範圍淡淡填色、虛線的邊；拉近到 1.8 km 內再畫草地花圃（淡淡的草綠色、點線的邊）、水面（淡淡的水藍色、虛線的邊）、
- * 步道（跟街道的細線一樣）、建築（實線）、孫中山銅像，拉近到幾百公尺內草地長出一叢叢的草、水面有一道道的水波
+ * 步道（跟街道的細線一樣）、建築（實線）、孫中山銅像（點了發射火箭），拉近到幾百公尺內草地長出一叢叢的草、水面有一道道的水波
  */
 export function parkSvg(g: ParkGeom, c: ParkCanvas): string {
   if (c.ppm < FILL_PPM) return '';
@@ -208,14 +276,17 @@ export function parkSvg(g: ParkGeom, c: ParkCanvas): string {
   out += `<path class="park-water" d="${c.lines(g.water)}" />`;
   out += `<path class="park-path street-minor" d="${c.lines(g.paths)}" />`;
   out += `<path class="park-building" d="${c.lines(g.buildings)}" />`;
+  const e = launchAt === null ? -1 : performance.now() - launchAt;
+  if (e >= 0 && e < LAUNCH_MS) out += launchSvg(g, c, e);
   const s = c.ppm >= STATUE_FROM ? c.at(...g.statue) : null;
   const h = STATUE_H * c.ppm;
   if (s && Math.hypot(s[0] - c.rx, s[1] - c.ry) - h < INNER + 2) {
     const [x, y] = s.map((v) => v.toFixed(1));
     out +=
       c.ppm < STATUE_FULL
-        ? `<g class="park-statue" data-at="${x} ${y}"><circle class="statue-dot" cx="${x}" cy="${y}" r="${Math.min(4, Math.max(1.2, h * 0.2)).toFixed(1)}" /></g>`
-        : `<g class="park-statue" data-at="${x} ${y}"><g transform="translate(${x} ${y}) scale(${+c.ppm.toPrecision(4)})">${STATUE_SVG}</g></g>`;
+        ? `<g class="park-statue" data-at="${x} ${y}"><circle class="statue-dot" cx="${x}" cy="${y}" r="${Math.min(4, Math.max(1.2, c.ppm * 0.75)).toFixed(1)}" /></g>`
+        : `<g class="park-statue" data-at="${x} ${y}"><circle class="statue-hit" cx="${x}" cy="${(s[1] - h * 0.4).toFixed(1)}" r="${Math.max(STATUE_HIT, h * 0.6).toFixed(1)}" />` +
+          `<g transform="translate(${x} ${y}) scale(${+c.ppm.toPrecision(4)})">${STATUE_SVG}</g></g>`;
   }
   return out;
 }
