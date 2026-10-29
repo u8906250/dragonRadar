@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { globeFrac, RADAR_GEOM, SPACE_FROM_KM } from '../src/radar';
+import type { StreetLine } from '../src/streets';
 import { focusMinKm, hemiPath, landPath, moonPosition, nightPath, onWoofLand, ortho, planetPositions, spaceMarkup, subsolar, toWoof } from '../src/space';
 
 const diff = (a: number, b: number): number => Math.abs(((((a - b) % 360) + 540) % 360) - 180);
@@ -239,6 +240,54 @@ describe('汪星', () => {
     for (const d of woof.matchAll(/class="(?:space-grat|region-outline open[^"]*|woof-road[^"]*)" d="([^"]*)"/g)) {
       for (const n of d[1].matchAll(/-?\d+\.\d/g)) expect(Math.abs(Number(n[0]))).toBeLessThan(5_000);
     }
+  });
+});
+
+describe('汪星的台北街道', () => {
+  const base = { center: { lat: 25.04, lng: 121.52 }, land: [] as Array<Array<[number, number]>>, when: new Date('2026-10-28T08:00:00Z') };
+  const line = (cls: 'major' | 'minor', pts: Array<[number, number]>): StreetLine => ({
+    cls,
+    pts: new Float64Array(pts.flat()),
+    box: [Math.min(...pts.map((p) => p[0])), Math.min(...pts.map((p) => p[1])), Math.max(...pts.map((p) => p[0])), Math.max(...pts.map((p) => p[1]))],
+  });
+  // 台北車站前東西向的一條街、板橋（新北，海）的一條街
+  const station = line('minor', [[25.0478, 121.505], [25.0478, 121.53]]);
+  const banqiao = line('minor', [[25.0143, 121.458], [25.0143, 121.466]]);
+  const [lat, lng] = toWoof([25.0478, 121.517]);
+  const view = { focus: 'woof', yaw: (-lng * Math.PI) / 180, pitch: (lat * Math.PI) / 180 };
+  const roads = (m: string, cls: string): string => new RegExp(`woof-road street-${cls}" d="([^"]*)"`).exec(m)![1];
+
+  it('loads the streets of the part of Taipei on screen once it is within 2 km, like the radar', () => {
+    const calls: number[][] = [];
+    const streets = (a: number, b: number, km: number, range: number): { lines: StreetLine[]; pending: number } => {
+      calls.push([a, b, km, range]);
+      return { lines: [station, banqiao], pending: 0 };
+    };
+    // 整顆看得到：用內建的道路，不載入
+    spaceMarkup({ ...base, scaleKm: 6_000, rg: 164, view, streets });
+    expect(calls).toHaveLength(0);
+    const m = spaceMarkup({ ...base, scaleKm: 200, rg: 164, view, streets });
+    expect(calls).toHaveLength(1);
+    const [a, b, , range] = calls[0];
+    expect(Math.abs(a - 25.0478)).toBeLessThan(0.001);
+    expect(Math.abs(b - 121.517)).toBeLessThan(0.001);
+    expect(range).toBeLessThan(2);
+    // 車站前的街從畫面正中間橫過去；板橋在海上不畫；這一級的圖磚沒有的粗線也不畫內建的
+    const d = roads(m, 'minor');
+    const C = RADAR_GEOM.c;
+    const ys = [...d.matchAll(/(-?[\d.]+) (-?[\d.]+)/g)].map((x) => [Number(x[1]), Number(x[2])]).filter(([x]) => Math.abs(x - C) < 100);
+    expect(ys.length).toBeGreaterThan(1);
+    for (const [, y] of ys) expect(Math.abs(y - C)).toBeLessThan(3);
+    expect(roads(m, 'major')).toBe('');
+  });
+
+  it('keeps the built-in roads until every tile is there, and draws nothing over the sea', () => {
+    const builtIn = spaceMarkup({ ...base, scaleKm: 200, rg: 164, view });
+    const loading = spaceMarkup({ ...base, scaleKm: 200, rg: 164, view, streets: () => ({ lines: [station], pending: 1 }) });
+    expect(roads(loading, 'minor')).toBe(roads(builtIn, 'minor'));
+    expect(spaceMarkup({ ...base, scaleKm: 200, rg: 164, view, streets: () => null })).toBe(builtIn);
+    const sea = spaceMarkup({ ...base, scaleKm: 200, rg: 164, view, streets: () => ({ lines: [banqiao], pending: 0 }) });
+    expect(roads(sea, 'minor')).toBe('');
   });
 });
 

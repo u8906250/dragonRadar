@@ -699,6 +699,11 @@ export class Radar {
     this.draw();
   }
 
+  /** 太空裡的東西載入了（例如汪星的街道圖磚）：只重畫太空那一層 */
+  redrawSpace(): void {
+    if (this.inSpace) this.drawSpace();
+  }
+
   /** 太空：畫在海岸線那一層，跟著指北針轉；平常清空 */
   private drawSpace(): void {
     this.stack.classList.toggle('space', this.inSpace);

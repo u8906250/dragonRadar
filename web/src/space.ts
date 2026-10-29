@@ -5,6 +5,7 @@
  */
 import type { LatLng } from './geo';
 import { RADAR_GEOM, TINY_EARTH } from './radar';
+import type { StreetClass, StreetLine } from './streets';
 import { TAIPEI_DISTRICT_LINES, TAIPEI_MAJOR_ROADS, TAIPEI_MINOR_ROADS, TAIPEI_OUTLINE } from './taipei';
 
 const { c: C, inner: INNER, size: SIZE } = RADAR_GEOM;
@@ -335,6 +336,78 @@ export function onWoofLand(lat: number, lng: number): boolean {
   return inside;
 }
 
+/** 汪星的經緯度 → 台北市的經緯度 */
+const fromWoof = (lat: number, lng: number): [number, number] => [
+  TP.lat0 + ((lat + 80) * (TP.lat1 - TP.lat0)) / 160,
+  TP.lng0 + ((lng + 172) * (TP.lng1 - TP.lng0)) / 344,
+];
+
+/** 台北市的經緯度在不在市界裡面 */
+function inTaipei(lat: number, lng: number): boolean {
+  if (lat < TP.lat0 || lat > TP.lat1 || lng < TP.lng0 || lng > TP.lng1) return false;
+  let inside = false;
+  const r = TAIPEI_OUTLINE;
+  for (let i = 0, j = r.length - 1; i < r.length; j = i++) {
+    const [ya, xa] = r[i];
+    const [yb, xb] = r[j];
+    if (ya > lat !== yb > lat && lng < xa + ((lat - ya) * (xb - xa)) / (yb - ya)) inside = !inside;
+  }
+  return inside;
+}
+
+/**
+ * 拉近時載入台北的街道（跟雷達一樣的圖磚）：涵蓋台北 (lat, lng) 方圓 km、範圍 rangeKm 決定用哪一級；
+ * pending 是還沒抓到的圖磚，抓到了外面會重畫
+ */
+export type WoofStreets = (lat: number, lng: number, km: number, rangeKm: number) => { lines: StreetLine[]; pending: number } | null;
+
+/** 畫面上的台北比這個小（半徑，公里）就載入街道：跟雷達 2 km 內一樣大街小巷都畫；比較大的用內建的國道、快速道路、幹道 */
+export const WOOF_STREET_KM = 2;
+
+/** 一條街換成汪星的經緯度，市界外面（海）的切掉；圖磚記住的街道不變，算過的記起來 */
+const woofOfStreet = new WeakMap<StreetLine, Array<Array<[number, number]>>>();
+function streetOnWoof(l: StreetLine): Array<Array<[number, number]>> {
+  let got = woofOfStreet.get(l);
+  if (got) return got;
+  got = [];
+  let cur: Array<[number, number]> = [];
+  for (let i = 0; i < l.pts.length; i += 2) {
+    if (inTaipei(l.pts[i], l.pts[i + 1])) {
+      cur.push(toWoof([l.pts[i], l.pts[i + 1]]));
+      continue;
+    }
+    if (cur.length > 1) got.push(cur);
+    cur = [];
+  }
+  if (cur.length > 1) got.push(cur);
+  woofOfStreet.set(l, got);
+  return got;
+}
+
+/**
+ * 畫面上看得到的台北街道（粗線、細線）：畫面上的台北半徑超過 WOOF_STREET_KM、還沒載入、圖磚還沒全部抓到是 null（畫內建的道路）。
+ * a 是看得到的範圍（從球心看的角度，度）
+ */
+function woofStreetLines(center: LatLng, a: number, streets: WoofStreets): Record<StreetClass, Array<Array<[number, number]>>> | null {
+  const top = Math.min(89, Math.abs(center.lat) + a);
+  // 看得到的那一塊換成台北的經緯度範圍
+  const [la0, ln0] = fromWoof(center.lat - a, center.lng - a / Math.cos(top * RAD));
+  const [la1, ln1] = fromWoof(center.lat + a, center.lng + a / Math.cos(top * RAD));
+  const kx = 111.32 * Math.cos(((TP.lat0 + TP.lat1) / 2) * RAD);
+  const rangeKm = Math.max(((la1 - la0) / 2) * 110.574, ((ln1 - ln0) / 2) * kx);
+  if (rangeKm > WOOF_STREET_KM) return null;
+  // 整塊都在台北外面（海）：不用抓
+  if (la1 < TP.lat0 || la0 > TP.lat1 || ln1 < TP.lng0 || ln0 > TP.lng1) return { major: [], minor: [] };
+  const got = streets((la0 + la1) / 2, (ln0 + ln1) / 2, rangeKm * 1.05, rangeKm);
+  if (!got || got.pending > 0) return null;
+  const out: Record<StreetClass, Array<Array<[number, number]>>> = { major: [], minor: [] };
+  for (const l of got.lines) {
+    if (l.box[0] > la1 || l.box[2] < la0 || l.box[1] > ln1 || l.box[3] < ln0) continue;
+    out[l.cls].push(...streetOnWoof(l));
+  }
+  return out;
+}
+
 /**
  * 陸地在看得到這一面的部分（ring 要逆時針）：海岸線轉到另一面的地方沿著球的邊緣走，從轉過去的地方逆時針走到下一個轉回來的地方
  * （陸地在海岸線的左手邊，往外走的左手邊就是邊緣的逆時針方向）；整圈都在另一面的，正中間在陸地上（centerOnLand）就整面都是陸地。
@@ -526,9 +599,10 @@ const sub = (a: Vec3, b: Vec3): Vec3 => [a[0] - b[0], a[1] - b[1], a[2] - b[2]];
  * 汪星畫成跟地球一樣的球：正射投影，地表是台北市（WOOF_LAND），跟雷達畫台北一樣只用線條：
  * 市界是海岸（虛線，陸地淡淡填色，外面空白是海；只畫畫面裡的那一段）、區界、道路（國道、快速道路粗線，主要幹道細線），夠大才畫道路；
  * 經緯線每 30 度（夠大才畫）、虛線的邊，夜晚那一半照太陽真正的方向（toSun：看的人的座標）。
- * 正中間的經緯度跟著視角轉：左右拖轉經度、上下拖轉緯度。中心是汪星時可以放大到 1 km（focusMinKm），看得到的那一小塊線切細
+ * 正中間的經緯度跟著視角轉：左右拖轉經度、上下拖轉緯度。中心是汪星時可以放大到 1 km（focusMinKm），看得到的那一小塊線切細，
+ * 拉近到畫面上的台北半徑 2 km 內換成大街小巷（streets：跟雷達一樣的圖磚）
  */
-function woofGlobe(x: number, y: number, r: number, view: SpaceView, toSun: Vec3): string {
+function woofGlobe(x: number, y: number, r: number, view: SpaceView, toSun: Vec3, streets?: WoofStreets): string {
   const center = { lat: Math.max(-80, Math.min(80, view.pitch / RAD)), lng: norm180(-view.yaw / RAD) };
   const n = Math.hypot(...toSun) || 1;
   const near = view.focus === 'woof' ? nearOf(center, r) : null;
@@ -544,8 +618,10 @@ function woofGlobe(x: number, y: number, r: number, view: SpaceView, toSun: Vec3
   out += `<path class="region-outline open" d="${lines(WOOF_LAND.map((ring) => [...ring, ring[0]]))}" />`;
   if (r >= 30) out += `<path class="region-outline open county-line" d="${lines(WOOF_DISTRICT_LINES)}" />`;
   if (r >= 60) {
-    out += `<path class="woof-road street-minor" d="${lines(WOOF_MINOR_ROADS)}" />`;
-    out += `<path class="woof-road street-major" d="${lines(WOOF_MAJOR_ROADS)}" />`;
+    // 拉近到畫面上的台北半徑 2 km 內：換成大街小巷（抓到圖磚之前先畫內建的）
+    const fine = near && streets ? woofStreetLines(center, Math.asin(Math.min(1, (INNER * 1.1) / r)) / RAD, streets) : null;
+    out += `<path class="woof-road street-minor" d="${lines(fine?.minor ?? WOOF_MINOR_ROADS)}" />`;
+    out += `<path class="woof-road street-major" d="${lines(fine?.major ?? WOOF_MAJOR_ROADS)}" />`;
   }
   out += `<path class="space-night" d="${nightFrom([toSun[0] / n, toSun[1] / n, toSun[2] / n], r)}" />`;
   // 球的邊在雷達外面就不畫
@@ -571,6 +647,8 @@ export interface SpaceOpts {
   /** 地球在雷達上的半徑（雷達照這個擺光點） */
   rg: number;
   view?: SpaceView;
+  /** 汪星拉近時載入台北的街道；沒給就只畫內建的道路 */
+  streets?: WoofStreets;
 }
 
 /** 太陽系的天體在這一刻的位置（以地球為中心的黃道座標，公里） */
@@ -646,7 +724,7 @@ export function spaceMarkup(o: SpaceOpts): string {
   let bodies = '';
   for (const b of list) {
     // 汪星大到看得出形狀：跟地球一樣畫成球
-    const look = b.key === 'woof' && b.r >= TINY_EARTH ? woofGlobe(b.x, b.y, b.r, view, rot(sub(sun, pos.get('woof')!))) : bodySvg(b.key, b.x, b.y, b.r, b.key === 'sun' ? null : sunAt);
+    const look = b.key === 'woof' && b.r >= TINY_EARTH ? woofGlobe(b.x, b.y, b.r, view, rot(sub(sun, pos.get('woof')!)), o.streets) : bodySvg(b.key, b.x, b.y, b.r, b.key === 'sun' ? null : sunAt);
     // 點星球飛過去：點擊範圍至少半徑 12
     bodies += `<g class="space-hit" data-body="${b.key}"><circle class="hit" cx="${f1(b.x)}" cy="${f1(b.y)}" r="${f1(Math.max(b.r + 3, 12))}" />${look}</g>`;
     // 中心換到別的星球：雷達中間的圓點不是你，你畫在地球那裡

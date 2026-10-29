@@ -755,6 +755,30 @@ let streetTiles = 0;
  */
 const outlineKm = (): number => Math.min(STREET_KM, shuangbeiKm());
 
+/** streets.ts 第一次用到才載入：載好了重畫雷達的道路和汪星的街道 */
+function loadStreets(): void {
+  if (streetsMod || streetsLoading) return;
+  streetsLoading = true;
+  void import('./streets')
+    .then((m) => {
+      streetsMod = m;
+      updateStreets();
+      radar.redrawSpace();
+    })
+    .finally(() => {
+      streetsLoading = false;
+    });
+}
+
+/** 汪星拉近時的台北街道（space.ts 用）：跟雷達一樣的圖磚，抓到了重畫太空 */
+const woofStreets: import('./space').WoofStreets = (lat, lng, km, rangeKm) => {
+  if (!streetsMod) {
+    loadStreets();
+    return null;
+  }
+  return streetsMod.streetTiles(lat, lng, km, rangeKm, () => radar.redrawSpace());
+};
+
 /** 範圍內的道路換成相對於圓心的公里數（範圍不大，用平面近似就夠準，拖曳時每一幀都要算） */
 function updateStreets(): void {
   // 選「雙北」、範圍再大的只畫縣市界、海岸線的虛線
@@ -766,16 +790,7 @@ function updateStreets(): void {
     return;
   }
   if (!streetsMod) {
-    if (streetsLoading) return;
-    streetsLoading = true;
-    void import('./streets')
-      .then((m) => {
-        streetsMod = m;
-        updateStreets();
-      })
-      .finally(() => {
-        streetsLoading = false;
-      });
+    loadStreets();
     return;
   }
   const key = `${origin.lat},${origin.lng}|${scaleKm}|${streetTiles}`;
@@ -833,7 +848,7 @@ function updateSpace(): void {
   const center = { lat: origin.lat, lng: origin.lng };
   const land = landRings;
   const when = new Date();
-  radar.setSpace((km, rg, view) => mod.spaceMarkup({ center, land, when, scaleKm: km, rg, view }), mod.bodyRadiusKm);
+  radar.setSpace((km, rg, view) => mod.spaceMarkup({ center, land, when, scaleKm: km, rg, view, streets: woofStreets }), mod.bodyRadiusKm);
 }
 
 /**

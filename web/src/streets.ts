@@ -222,17 +222,26 @@ const tiles = new Map<string, StreetLine[] | 'loading'>();
  * 抓失敗的不記住（下次重畫再試）
  */
 export function streetsAround(lat: number, lng: number, km: number, rangeKm: number, onLoad: () => void): StreetLine[] {
+  return streetTiles(lat, lng, km, rangeKm, onLoad).lines;
+}
+
+/** 跟 streetsAround 一樣，多回傳還有幾張圖磚沒抓到（汪星等全部抓到才換掉原本的道路） */
+export function streetTiles(lat: number, lng: number, km: number, rangeKm: number, onLoad: () => void): { lines: StreetLine[]; pending: number } {
   const { zoom, classes } = tierOf(rangeKm);
   const dLat = km / 110.574;
   const dLng = km / (111.32 * Math.cos((lat * Math.PI) / 180));
   const a = tileOf(lat + dLat, lng - dLng, zoom);
   const b = tileOf(lat - dLat, lng + dLng, zoom);
   const out: StreetLine[] = [];
+  let pending = 0;
   for (let x = a.x; x <= b.x; x++) {
     for (let y = a.y; y <= b.y; y++) {
       const key = `${zoom}/${x}/${y}`;
       const got = tiles.get(key);
-      if (got === 'loading') continue;
+      if (got === 'loading') {
+        pending++;
+        continue;
+      }
       if (got) {
         // 最近用到的放到最後，太多時從最前面刪
         tiles.delete(key);
@@ -241,6 +250,7 @@ export function streetsAround(lat: number, lng: number, km: number, rangeKm: num
         continue;
       }
       tiles.set(key, 'loading');
+      pending++;
       void tileTemplate()
         .then((t) => (t ? fetch(t.replace('{z}', String(zoom)).replace('{x}', String(x)).replace('{y}', String(y))) : null))
         .then((r) => (r?.ok ? r.arrayBuffer() : null))
@@ -253,5 +263,5 @@ export function streetsAround(lat: number, lng: number, km: number, rangeKm: num
         .catch(() => tiles.delete(key));
     }
   }
-  return out;
+  return { lines: out, pending };
 }
