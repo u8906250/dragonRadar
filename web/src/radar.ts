@@ -269,6 +269,8 @@ export class Radar {
   private readonly carLayer: SVGGElement;
   /** 點了車子：打開那條車掃的時間表 */
   onCar: ((routeId: string) => void) | null = null;
+  /** 你在哪一顆（搭火箭到汪星就在汪星）：在汪星時點地球只是看過去（跟別的星球一樣），不會回到你在地球的位置 */
+  youOn: 'earth' | 'woof' = 'earth';
   /** 點了中山公園的銅像、停著的火箭（地球或汪星，拉近到畫出來時才點得到）：哪個世界的 */
   onStatue: ((world: 'earth' | 'woof') => void) | null = null;
   onRocket: ((world: 'earth' | 'woof') => void) | null = null;
@@ -770,9 +772,9 @@ export class Radar {
     return { x: m.e, y: m.f, k: Math.hypot(m.a, m.b) };
   }
 
-  /** 點了星球：飛過去當中心（點地球就回到你），視角維持 */
+  /** 點了星球：飛過去當中心（你在地球時點地球就回到你），視角維持 */
   private focusOn(key: string): void {
-    const focus = key === 'earth' ? null : key;
+    const focus = key === 'earth' && this.youOn === 'earth' ? null : key;
     if (focus === this.spaceView.focus) return;
     this.spaceView = { ...this.spaceView, focus };
     this.setScale(this.scaleKm);

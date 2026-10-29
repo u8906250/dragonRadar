@@ -159,8 +159,21 @@ const savedWoof = ((): SpaceView | null => {
     return null;
   }
 })();
+/**
+ * 你在哪一顆：火箭在哪一邊你就在哪一邊（park.ts 存在 dr.rocket；搭火箭到汪星就在汪星，點別的星球只是看過去，坐火箭回來才回到地球）。
+ * 在汪星時：太陽系寫「汪星（你）」、「回到我的位置」回到汪星的發射口、「定位」沒有反應、範圍按鈕是汪星的
+ */
+let youOn: 'earth' | 'woof' = ((): 'earth' | 'woof' => {
+  try {
+    return (JSON.parse(lsGet('dr.rocket') ?? 'null') as { world?: string } | null)?.world === 'woof' ? 'woof' : 'earth';
+  } catch {
+    return 'earth';
+  }
+})();
+/** 火箭飛行中（整趟不接受範圍按鈕、定位、回到我的位置） */
+let tripping = false;
 // 汪星的中山公園可以放大到 1 公尺以內：重新整理後還在汪星就照存的範圍（最近 0.5 公尺，跟 park.ts 的 PARK_MIN_KM 一樣），回到地球至少是雷達平常的最小範圍
-let customKm = Math.max(savedWoof ? 0.0005 : MIN_ZOOM_KM, Number(lsGet(LS_SCALE_KM)) || 10);
+let customKm = Math.max(savedWoof || youOn === 'woof' ? 0.0005 : MIN_ZOOM_KM, Number(lsGet(LS_SCALE_KM)) || 10);
 let scaleSetting: ScaleSetting = ([...SCALE_SETTINGS, 'custom'] as string[]).includes(lsGet(LS_SCALE) ?? '') ? (lsGet(LS_SCALE) as ScaleSetting) : 'region';
 let scaleKm = 5;
 let view: 'radar' | 'map' = 'radar';
@@ -420,11 +433,13 @@ const radar = new Radar(
 radar.onCar = (id) => selectRoute(id);
 // 點了中山公園的銅像（地球或汪星）：發射口打開、升起火箭、關上，火箭停在那邊；點火箭問要不要飛到另一邊（rocketTrip）
 // （火箭記得在哪一邊；不在這一邊、已經出來了就沒有反應）
+// 火箭停在草皮上時再點銅像：收回井裡
+radar.youOn = youOn;
 radar.onStatue = (world) => {
   void import('./park').then((m) => {
-    if (!m.summonRocket(world)) return;
+    if (!m.summonRocket(world) && !m.stowRocket(world)) return;
     radar.redrawPark();
-    window.setTimeout(() => radar.redrawPark(), m.SUMMON_MS + 50);
+    window.setTimeout(() => radar.redrawPark(), Math.max(m.SUMMON_MS, m.STOW_MS) + 50);
   });
 };
 radar.onRocket = (world) => {
@@ -898,7 +913,19 @@ function updatePark(): void {
 /** 在汪星上就記住中心和轉的角度（重新整理回到汪星同一個地方），不在汪星就清掉 */
 function saveSpaceView(): void {
   const v = radar.spaceViewNow;
-  lsSet(LS_SPACE, v.focus === 'woof' ? JSON.stringify({ focus: 'woof', yaw: +v.yaw.toFixed(6), pitch: +v.pitch.toFixed(6) }) : null);
+  // 你在汪星、鏡頭看別的星球：留著上次在汪星的看法（重新整理回到汪星）
+  if (v.focus === 'woof') lsSet(LS_SPACE, JSON.stringify({ focus: 'woof', yaw: +v.yaw.toFixed(6), pitch: +v.pitch.toFixed(6) }));
+  else if (youOn !== 'woof') lsSet(LS_SPACE, null);
+}
+
+/** 你在汪星時的「你的位置」：汪星轉到中山公園的發射口（火箭降落的地方） */
+let woofHome: SpaceView | null = null;
+async function woofHomeView(): Promise<SpaceView> {
+  if (woofHome) return woofHome;
+  const [sp, pk] = await Promise.all([import('./space'), import('./park')]);
+  const [la, ln] = sp.toWoof(pk.HATCH_CENTER);
+  woofHome = { focus: 'woof', yaw: (-ln * Math.PI) / 180, pitch: (la * Math.PI) / 180 };
+  return woofHome;
 }
 
 /** 火箭飛行時拉遠到多遠（雷達外圈，公里）：約 2.7 AU，地球和汪星（離太陽 1.26 AU）一起看得到 */
@@ -943,6 +970,7 @@ const wait = (ms: number): Promise<void> => new Promise((r) => window.setTimeout
 async function rocketTrip(m: typeof import('./park'), from: 'earth' | 'woof'): Promise<void> {
   const to = m.departRocket();
   if (!to) return;
+  tripping = true;
   parkMod = m;
   radar.setTrip('', true);
   radar.redrawPark();
@@ -951,8 +979,7 @@ async function rocketTrip(m: typeof import('./park'), from: 'earth' | 'woof'): P
   const sp = spaceMod ?? (await import('./space'));
   spaceMod = sp;
   const [lat, lng] = m.HATCH_CENTER;
-  const [la, ln] = sp.toWoof([lat, lng]);
-  const park: SpaceView = { focus: 'woof', yaw: (-ln * Math.PI) / 180, pitch: (la * Math.PI) / 180 };
+  const park = await woofHomeView();
   await wait(Math.max(0, m.DEPART_MS - 30));
   // 小火箭從地圖上的火箭接手（先量位置，再把地圖上的收掉）
   radar.setTrip(m.tripSvg(), true, radar.rocketAt(), m.TRIP_AT);
@@ -983,11 +1010,19 @@ async function rocketTrip(m: typeof import('./park'), from: 'earth' | 'woof'): P
     radar.setSpaceView({ ...park, yaw: park.yaw * v, pitch: park.pitch * v }, !turned);
   });
   m.arriveRocket(to);
+  // 你到了那一邊
+  youOn = to;
+  radar.youOn = to;
+  saveSpaceView();
+  updateScaleChips();
+  updateHomeBtn();
+  updateSpace();
   radar.redrawPark();
   radar.setTrip('', true);
   await wait(m.ARRIVE_MS + 50);
   radar.redrawPark();
   radar.setTrip('', false);
+  tripping = false;
 }
 
 // ---- 太空：比「全球」再拉遠，畫地球、月球、太陽、行星（space.ts，第一次用到才載入；陸地用全世界的海岸線） ----
@@ -1014,14 +1049,15 @@ function updateSpace(): void {
   }
   // 晝夜、月球、行星位置每 10 分鐘換一次
   const slot = Math.floor(Date.now() / 600_000);
-  const key = `${worldLoaded}|${origin.lat},${origin.lng}|${slot}`;
+  const key = `${worldLoaded}|${origin.lat},${origin.lng}|${slot}|${youOn}`;
   if (key === spaceFor) return;
   spaceFor = key;
   const mod = spaceMod;
   const center = { lat: origin.lat, lng: origin.lng };
   const land = landRings;
   const when = new Date();
-  radar.setSpace((km, rg, view) => mod.spaceMarkup({ center, land, when, scaleKm: km, rg, view, streets: woofStreets }), mod.bodyRadiusKm);
+  const you = youOn;
+  radar.setSpace((km, rg, view) => mod.spaceMarkup({ center, land, when, scaleKm: km, rg, view, streets: woofStreets, you }), mod.bodyRadiusKm);
 }
 
 /**
@@ -2758,6 +2794,12 @@ let home: Home | null = loadHome();
  * （最後一次的 GPS 或移動前的位置），不用等重新定位，之後 GPS 回來照常更新。都沒有才重新定位
  */
 function goHome(): void {
+  if (tripping) return;
+  // 你在汪星：回到汪星的發射口（點別的星球只是看過去，坐火箭回來才回到地球）
+  if (youOn === 'woof') {
+    void woofHomeView().then((v) => radar.setSpaceView(v));
+    return;
+  }
   // 太陽系那幾層移開了視野：先拉回地球；位置本來就不是手動的就到這裡為止
   if (radar.spaceMoved) {
     radar.resetSpace();
@@ -2777,7 +2819,10 @@ function goHome(): void {
 
 /** 「回到我的位置」：手動位置（拖曳雷達、在地圖上設定）、太陽系那幾層移開了視野時，雷達上才出現 */
 function updateHomeBtn(): void {
-  homeBtn.hidden = (origin.source !== 'manual' && !radar.spaceMoved) || view !== 'radar';
+  // 你在汪星：鏡頭正對著汪星的發射口就不用出現
+  const v = radar.spaceViewNow;
+  const home = youOn === 'woof' ? !!woofHome && v.focus === 'woof' && Math.abs(v.yaw - woofHome.yaw) < 1e-5 && Math.abs(v.pitch - woofHome.pitch) < 1e-5 : origin.source !== 'manual' && !radar.spaceMoved;
+  homeBtn.hidden = home || view !== 'radar';
 }
 
 function setOrigin(o: Origin): void {
@@ -2869,8 +2914,8 @@ function switchView(v: 'radar' | 'map'): void {
 /** 要抓多遠的：範圍超過 600 km 就抓全世界 */
 const fetchRadiusKm = (km: number): number => (km > FETCH_RADIUS_KM ? WORLD_KM : FETCH_RADIUS_KM);
 
-/** 中心在汪星（點汪星飛過去、搭火箭過去） */
-const onWoof = (): boolean => radar.spaceFocusKey === 'woof';
+/** 你在汪星（搭火箭過去，坐火箭回來為止） */
+const onWoof = (): boolean => youOn === 'woof';
 /**
  * 汪星上的範圍按鈕：汪星半徑只有約 6.6 km、陸地（台北）幾乎包住整顆，地球的 20 km、雙北、全台、全球都比整顆大，
  * 換成 1～5 km 和全球（整顆汪星剛好填滿雷達）
@@ -4468,17 +4513,26 @@ function wirePanelDrag(): void {
 }
 
 function wireControls(): void {
-  // 按範圍按鈕：太空裡轉過的視角、換過的中心都回到你；在汪星上就留在汪星（汪星的範圍）
+  // 按範圍按鈕：太空裡轉過的視角、換過的中心都回到你；你在汪星就回到汪星（鏡頭在汪星上就留在原地），用汪星的範圍
   for (const b of scaleChips) {
     b.addEventListener('click', () => {
-      if (!onWoof()) radar.resetSpace();
-      setScale((b.dataset.scale as ScaleSetting) ?? 'region');
+      if (tripping) return;
+      const st = (b.dataset.scale as ScaleSetting) ?? 'region';
+      if (!onWoof()) {
+        radar.resetSpace();
+        setScale(st);
+      } else if (radar.spaceFocusKey === 'woof') setScale(st);
+      else
+        void woofHomeView().then((v) => {
+          radar.setSpaceView(v);
+          setScale(st);
+        });
     });
   }
   viewBtn.addEventListener('click', () => switchView(view === 'radar' ? 'map' : 'radar'));
-  // 定位：在汪星上沒有反應
+  // 定位：你在汪星、火箭飛行中沒有反應
   locateBtn.addEventListener('click', () => {
-    if (!onWoof()) locateMe();
+    if (!onWoof() && !tripping) locateMe();
   });
   homeBtn.addEventListener('click', goHome);
   for (const b of baseChips) b.addEventListener('click', () => setBase(b.dataset.base as BaseMap));
@@ -4682,10 +4736,16 @@ async function boot(): Promise<void> {
   setBase(baseMap);
   switchView('radar');
   setTime(timeSetting);
-  // 上次在汪星：先換到汪星再套範圍（太空的畫法 render 時才載入）
+  // 上次在汪星：先換到汪星再套範圍（太空的畫法 render 時才載入）；你在汪星但沒存看法：換到汪星的發射口
+  updateScaleChips();
   if (savedWoof) radar.setSpaceView(savedWoof);
   setScale(scaleSetting);
   booted = true;
+  if (youOn === 'woof')
+    void woofHomeView().then((v) => {
+      if (!savedWoof && radar.spaceFocusKey !== 'woof') radar.setSpaceView(v);
+      updateHomeBtn();
+    });
   setOrigin(origin);
   startGeolocation();
   showVersion(null);

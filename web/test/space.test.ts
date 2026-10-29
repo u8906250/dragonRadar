@@ -149,8 +149,18 @@ describe('spaceMarkup in 3D', () => {
     expect(still).not.toContain('space-me');
   });
 
-  it('puts you on 汪星 when the centre is 汪星 (flew there)', () => {
-    const woof = spaceMarkup({ ...base, scaleKm: 3e8, rg: 164 * globeFrac(3e8), view: { focus: 'woof', yaw: 0, pitch: 0 } });
+  it('puts you on 汪星 after the rocket took you there, whichever body the centre is', () => {
+    // 從地球點汪星看過去：你還在地球
+    const look = spaceMarkup({ ...base, scaleKm: 3e8, rg: 164 * globeFrac(3e8), view: { focus: 'woof', yaw: 0, pitch: 0 } });
+    expect(look).toContain('>地球（你）<');
+    expect(look).toContain('>汪星<');
+    // 搭火箭到汪星：中心換到火星、地球（點過去看）都一樣，你在汪星
+    for (const focus of ['mars', 'earth']) {
+      const m = spaceMarkup({ ...base, scaleKm: 3e8, rg: 164 * globeFrac(3e8), view: { focus, yaw: 0, pitch: 0 }, you: 'woof' });
+      expect(m).toContain('>汪星（你）<');
+      expect(m).not.toContain('地球（你）');
+    }
+    const woof = spaceMarkup({ ...base, scaleKm: 3e8, rg: 164 * globeFrac(3e8), view: { focus: 'woof', yaw: 0, pitch: 0 }, you: 'woof' });
     expect(woof).toContain('>汪星（你）<');
     expect(woof).toContain('>地球<');
     expect(woof).not.toContain('地球（你）');
@@ -159,7 +169,7 @@ describe('spaceMarkup in 3D', () => {
     expect(woof).toContain(`class="space-me" cx="${C.toFixed(1)}" cy="${C.toFixed(1)}"`);
     expect(woof.match(/space-me/g)).toHaveLength(1);
     // 拉近到汪星畫成球：不另外畫圓點
-    expect(spaceMarkup({ ...base, scaleKm: 30, rg: 164 * globeFrac(30), view: { focus: 'woof', yaw: 0, pitch: 0 } })).not.toContain('space-me');
+    expect(spaceMarkup({ ...base, scaleKm: 30, rg: 164 * globeFrac(30), view: { focus: 'woof', yaw: 0, pitch: 0 }, you: 'woof' })).not.toContain('space-me');
   });
 
   it('squashes the orbits into ellipses when tilted', () => {

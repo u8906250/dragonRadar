@@ -730,6 +730,8 @@ export interface SpaceOpts {
   view?: SpaceView;
   /** 汪星拉近時載入台北的街道；沒給就只畫內建的道路 */
   streets?: WoofStreets;
+  /** 你在哪一顆（搭火箭到汪星就在汪星，點別的星球只是看過去，不會回到地球）；沒給是地球 */
+  you?: 'earth' | 'woof';
 }
 
 /** 太陽系的天體在這一刻的位置（以地球為中心的黃道座標，公里） */
@@ -807,8 +809,8 @@ export function spaceMarkup(o: SpaceOpts): string {
     .filter((b) => inView(b.x, b.y, b.r))
     .sort((a, b) => a.d - b.d);
   let bodies = '';
-  // 你在哪一顆：中心是汪星時你在汪星（點汪星飛過去、搭火箭過去），其他時候在地球（中心是地球時雷達中間的圓點就是你，不另外標）
-  const you = view.focus === 'woof' ? 'woof' : view.focus ? 'earth' : null;
+  // 你在哪一顆（中心是你在的地球時，雷達中間的圓點就是你，不另外標）
+  const you = o.you === 'woof' ? 'woof' : view.focus ? 'earth' : null;
   for (const b of list) {
     // 汪星大到看得出形狀：跟地球一樣畫成球
     const look = b.key === 'woof' && b.r >= TINY_EARTH ? woofGlobe(b.x, b.y, b.r, view, rot(sub(sun, pos.get('woof')!)), o.streets) : bodySvg(b.key, b.x, b.y, b.r, b.key === 'sun' ? null : sunAt);

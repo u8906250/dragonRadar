@@ -476,6 +476,7 @@ a.chip { display: inline-flex; align-items: center; text-decoration: none; }
 /*
  * 火箭（park.ts 的 rocketPart，--t 是這一段已經過了多久）：
  * summon 5 秒：0～1.2 秒發射口的兩片門帶著草往兩邊滑進地底、1.2～3.6 秒火箭從井裡升上來、3.8～5 秒門滑回來關上；parked 停著（點得到）；
+ * stow 5 秒：門打開、火箭降回井裡、門關上（時間跟 summon 一樣）；
  * depart 1.6 秒：點火（火焰、白煙、抖一抖），1 秒後慢慢離地（之後小火箭接手，main.ts）；
  * arrive 5.5 秒：0～1.2 秒門打開，同時火箭從上面慢慢降下來（火焰，2.8 秒到地面、落地冒白煙），2.9～4.2 秒降進井裡，4.3～5.5 秒門關回來
  */
@@ -483,7 +484,7 @@ a.chip { display: inline-flex; align-items: center; text-decoration: none; }
 .radar .park-launch .rocket-hit { fill: transparent; pointer-events: all; cursor: pointer; }
 .radar .launch-shaft { fill: #121212; }
 .radar .launch-shaft-in { fill: #000; }
-.radar .summon .launch-door { animation: summon-door 5s linear var(--t) both; }
+.radar .summon .launch-door, .radar .stow .launch-door { animation: summon-door 5s linear var(--t) both; }
 .radar .arrive .launch-door { animation: arrive-door 5.5s linear var(--t) both; }
 .radar .launch-door .door-base { fill: var(--radar-face-1); }
 .radar .launch-door .door-top { fill: var(--grass); fill-opacity: 0.2; }
@@ -504,7 +505,12 @@ a.chip { display: inline-flex; align-items: center; text-decoration: none; }
   0%, 24% { transform: translateY(9px); animation-timing-function: cubic-bezier(0.25, 0.5, 0.4, 1); }
   72%, 100% { transform: translateY(0); }
 }
-.radar .summon .rocket-flame, .radar .summon .rocket-smoke, .radar .parked .rocket-flame, .radar .parked .rocket-smoke, .radar .rocket-trip .rocket-smoke { display: none; }
+.radar .stow .rocket-rise { animation: stow-sink 5s linear var(--t) both; }
+@keyframes stow-sink {
+  0%, 24% { transform: translateY(0); animation-timing-function: ease-in-out; }
+  72%, 100% { transform: translateY(9px); }
+}
+.radar .summon .rocket-flame, .radar .summon .rocket-smoke, .radar .parked .rocket-flame, .radar .parked .rocket-smoke, .radar .stow .rocket-flame, .radar .stow .rocket-smoke, .radar .rocket-trip .rocket-smoke { display: none; }
 .radar .depart .rocket-fly { animation: depart-fly 1.6s linear var(--t) both; }
 @keyframes depart-fly {
   0%, 18% { transform: translate(0, 0); }

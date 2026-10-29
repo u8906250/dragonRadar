@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { RADAR_GEOM } from '../src/radar';
-import { ARRIVE_MS, arriveRocket, DEPART_MS, departRocket, EARTH, earthParkSvg, HATCH_CENTER, nearPark, PARK_MIN_KM, parkGeom, parkTexture, resetRocket, rocketNow, SUMMON_MS, summonRocket } from '../src/park';
+import { ARRIVE_MS, arriveRocket, DEPART_MS, departRocket, EARTH, earthParkSvg, HATCH_CENTER, nearPark, PARK_MIN_KM, parkGeom, parkTexture, resetRocket, rocketNow, STOW_MS, stowRocket, SUMMON_MS, summonRocket } from '../src/park';
 import { bodyBearing, spaceMarkup, toWoof } from '../src/space';
 
 const { c: C, inner: INNER } = RADAR_GEOM;
@@ -121,6 +121,17 @@ describe('地球的雷達上的中山公園（跟汪星共用一份）', () => {
     expect(parked).toContain('class="park-launch parked"');
     expect(parked).toContain('class="rocket-hit"');
     expect(parked).not.toContain('launch-shaft');
+    // 停著時再點銅像：門打開、火箭降回井裡、門關上（汪星那邊的銅像沒反應）
+    expect(stowRocket('woof', now)).toBe(false);
+    const ts = performance.now();
+    expect(stowRocket('earth', ts)).toBe(true);
+    const stowing = at(0.025, statue);
+    for (const cls of ['park-launch stow', 'launch-shaft', 'launch-door', 'rocket-rise']) expect(stowing).toContain(`class="${cls}"`);
+    expect(stowing).not.toContain('rocket-hit');
+    expect(rocketNow(ts + STOW_MS + 1).phase).toBe('stored');
+    // 再叫出來、停好
+    resetRocket();
+    summonRocket('earth', now - SUMMON_MS - 1);
     // 飛走：點火、飛出畫面，之後不畫（每一段都用當下的時間：測試跑得慢也還在播；播完的時間多 1 毫秒，小數相減差一點點）
     const t1 = performance.now();
     expect(departRocket(t1)).toBe('woof');
