@@ -113,55 +113,16 @@ export function landPath(center: LatLng, rings: Array<Array<[number, number]>>, 
 }
 
 /**
- * 放大到很近時看得到的那一小塊（經緯度範圍，含邊緣多留的一點）和要切多細（度）：
- * 線每 2 度一點，連起來在球上是弦，放大到幾百公里內看得出偏離，這一塊裡面的再切細；看得到的範圍還很大就是 null
- */
-interface Near {
-  lat0: number;
-  lat1: number;
-  lng0: number;
-  lng1: number;
-  step: number;
-}
-function nearOf(center: LatLng, rg: number): Near | null {
-  const a = Math.asin(Math.min(1, (INNER * 1.5) / rg)) / RAD;
-  const step = a / 16;
-  if (step >= 1) return null;
-  // 多留 0.1 度：2 度的弦離球面最多約半徑的萬分之一點五
-  const m = a + 0.1;
-  const top = Math.max(Math.abs(center.lat - m), Math.abs(center.lat + m));
-  const dl = top >= 89 ? 360 : m / Math.cos(top * RAD);
-  return { lat0: center.lat - m, lat1: center.lat + m, lng0: center.lng - dl, lng1: center.lng + dl, step };
-}
-
-/** 線（closed 是一圈）在 near 那一塊裡面的段切細到 near.step；near 是 null 就照原本的 */
-function refine(pts: Array<[number, number]>, near: Near | null, closed = false): Array<[number, number]> {
-  if (!near) return pts;
-  const out: Array<[number, number]> = [];
-  const n = closed ? pts.length : pts.length - 1;
-  const hit = (lo: number, hi: number): boolean => [-360, 0, 360].some((s) => hi + s >= near.lng0 && lo + s <= near.lng1);
-  for (let i = 0; i < n; i++) {
-    const [a, b] = [pts[i], pts[(i + 1) % pts.length]];
-    out.push(a);
-    if (Math.max(a[0], b[0]) < near.lat0 || Math.min(a[0], b[0]) > near.lat1 || !hit(Math.min(a[1], b[1]), Math.max(a[1], b[1]))) continue;
-    const k = Math.ceil(Math.max(Math.abs(b[0] - a[0]), Math.abs(b[1] - a[1])) / near.step);
-    for (let j = 1; j < k; j++) out.push([a[0] + ((b[0] - a[0]) * j) / k, a[1] + ((b[1] - a[1]) * j) / k]);
-  }
-  if (!closed) out.push(pts[pts.length - 1]);
-  return out;
-}
-
-/**
  * 線（每條是一串「緯度, 經度」）看得到這一面的部分，轉到另一面就斷開；
- * near：放大時切細；box：畫面的範圍（x0, y0, x1, y1），兩點都在同一邊外面的段不畫（放大很多時 path 不會太長）
+ * box：畫面的範圍（x0, y0, x1, y1），兩點都在同一邊外面的段不畫（放大很多時 path 不會太長）
  */
-function linesPath(center: LatLng, lines: Array<Array<[number, number]>>, rg: number, near: Near | null = null, box?: [number, number, number, number]): string {
+function linesPath(center: LatLng, lines: Array<Array<[number, number]>>, rg: number, box?: [number, number, number, number]): string {
   let d = '';
   for (const line of lines) {
     // prev：前一個看得到的點；drawn：prev 已經畫進目前這一筆
     let prev: [number, number] | null = null;
     let drawn = false;
-    for (const [lat, lng] of refine(line, near)) {
+    for (const [lat, lng] of line) {
       const [x, y, z] = ortho(center, lat, lng);
       if (z <= 0) {
         prev = null;
@@ -185,12 +146,12 @@ function linesPath(center: LatLng, lines: Array<Array<[number, number]>>, rg: nu
 }
 
 /** 經緯線：每 30 度一條，另一面的不畫 */
-function graticule(center: LatLng, rg: number, near: Near | null = null, box?: [number, number, number, number]): string {
+function graticule(center: LatLng, rg: number, box?: [number, number, number, number]): string {
   const lines: Array<Array<[number, number]>> = [];
   const steps = (from: number, to: number, step: number): number[] => Array.from({ length: Math.round((to - from) / step) + 1 }, (_, i) => from + i * step);
   for (let lng = -180; lng < 180; lng += 30) lines.push(steps(-90, 90, 3).map((lat) => [lat, lng]));
   for (let lat = -60; lat <= 60; lat += 30) lines.push(steps(-180, 180, 3).map((lng) => [lat, lng]));
-  return linesPath(center, lines, rg, near, box);
+  return linesPath(center, lines, rg, box);
 }
 
 /**
@@ -283,7 +244,7 @@ export function planetPositions(when: Date): Array<{ key: string; name: string; 
 
 /**
  * 汪星的地表是台北市：市界的範圍攤開包住整顆汪星（緯度 ±80 度、經度 ±172 度，像把平面地圖貼到地球儀上，東西向拉寬了），
- * 市界外面是海，南北極和背面接縫的地方也是海
+ * 市界外面是海，南北極和背面接縫的地方也是海；汪星的大小照台北市的面積算（WOOF_KM）
  */
 const TP = {
   lat0: Math.min(...TAIPEI_OUTLINE.map((p) => p[0])),
@@ -318,6 +279,24 @@ export const WOOF_LAND: Array<Array<[number, number]>> = [TAIPEI_OUTLINE].map((r
   const ring = densify(r.map(toWoof), true);
   return ringArea(ring) < 0 ? ring.reverse() : ring;
 });
+/** 台北市的面積（平方公里，平面近似） */
+const TAIPEI_KM2 = (() => {
+  const kx = 111.32 * Math.cos(((TP.lat0 + TP.lat1) / 2) * RAD);
+  return Math.abs(ringArea(TAIPEI_OUTLINE.map(([lat, lng]) => [lat * 110.574, lng * kx])));
+})();
+/**
+ * 汪星的半徑（公里）：陸地的面積跟台北市一樣（約 6.6 km），平均來說是台北的真實大小
+ * （東西向赤道附近寬約 1.9 倍、南北向約 0.66 倍）。球面上經緯度圍起來的面積 = R² ∮ -sin(緯度) d經度（弧度）
+ */
+export const WOOF_KM = (() => {
+  const ring = WOOF_LAND[0];
+  let unit = 0;
+  for (let i = 0; i < ring.length; i++) {
+    const [a, b] = [ring[i], ring[(i + 1) % ring.length]];
+    unit -= ((Math.sin(a[0] * RAD) + Math.sin(b[0] * RAD)) / 2) * (b[1] - a[1]) * RAD;
+  }
+  return Math.sqrt(TAIPEI_KM2 / Math.abs(unit));
+})();
 const woofLines = (lines: Array<Array<[number, number]>>): Array<Array<[number, number]>> => lines.map((l) => densify(l.map(toWoof)));
 const WOOF_DISTRICT_LINES = woofLines(TAIPEI_DISTRICT_LINES);
 const WOOF_MAJOR_ROADS = woofLines(TAIPEI_MAJOR_ROADS);
@@ -361,10 +340,10 @@ function inTaipei(lat: number, lng: number): boolean {
  */
 export type WoofStreets = (lat: number, lng: number, km: number, rangeKm: number) => { lines: StreetLine[]; pending: number } | null;
 
-/** 畫面上的台北比這個小（半徑，公里）就載入街道：跟雷達 2 km 內一樣大街小巷都畫；比較大的用內建的國道、快速道路、幹道 */
+/** 畫面上的台北比這個小（半徑，公里，南北、東西平均）就載入街道：跟雷達 2 km 內一樣大街小巷都畫；比較大的用內建的國道、快速道路、幹道 */
 export const WOOF_STREET_KM = 2;
 
-/** 一條街換成汪星的經緯度，市界外面（海）的切掉；圖磚記住的街道不變，算過的記起來 */
+/** 一條街換成汪星的經緯度，市界外面（海）的切掉、每 2 度一點（筆直的長街在球上是彎的）；圖磚記住的街道不變，算過的記起來 */
 const woofOfStreet = new WeakMap<StreetLine, Array<Array<[number, number]>>>();
 function streetOnWoof(l: StreetLine): Array<Array<[number, number]>> {
   let got = woofOfStreet.get(l);
@@ -376,29 +355,34 @@ function streetOnWoof(l: StreetLine): Array<Array<[number, number]>> {
       cur.push(toWoof([l.pts[i], l.pts[i + 1]]));
       continue;
     }
-    if (cur.length > 1) got.push(cur);
+    if (cur.length > 1) got.push(densify(cur));
     cur = [];
   }
-  if (cur.length > 1) got.push(cur);
+  if (cur.length > 1) got.push(densify(cur));
   woofOfStreet.set(l, got);
   return got;
 }
 
 /**
  * 畫面上看得到的台北街道（粗線、細線）：畫面上的台北半徑超過 WOOF_STREET_KM、還沒載入、圖磚還沒全部抓到是 null（畫內建的道路）。
- * a 是看得到的範圍（從球心看的角度，度）
+ * r 是汪星在雷達上的半徑：雷達外圈看得到的範圍決定畫多細，抓的範圍多留一點
  */
-function woofStreetLines(center: LatLng, a: number, streets: WoofStreets): Record<StreetClass, Array<Array<[number, number]>>> | null {
+function woofStreetLines(center: LatLng, r: number, streets: WoofStreets): Record<StreetClass, Array<Array<[number, number]>>> | null {
+  // 從球心看的角度（度）
+  const a = Math.asin(Math.min(1, (INNER * 1.1) / r)) / RAD;
+  const ring = Math.asin(Math.min(1, INNER / r)) / RAD;
   const top = Math.min(89, Math.abs(center.lat) + a);
   // 看得到的那一塊換成台北的經緯度範圍
   const [la0, ln0] = fromWoof(center.lat - a, center.lng - a / Math.cos(top * RAD));
   const [la1, ln1] = fromWoof(center.lat + a, center.lng + a / Math.cos(top * RAD));
   const kx = 111.32 * Math.cos(((TP.lat0 + TP.lat1) / 2) * RAD);
-  const rangeKm = Math.max(((la1 - la0) / 2) * 110.574, ((ln1 - ln0) / 2) * kx);
+  const [hy, hx] = [((la1 - la0) / 2) * 110.574, ((ln1 - ln0) / 2) * kx];
+  // 南北壓扁、東西拉寬：用兩個方向的平均決定畫多細（跟雷達的範圍一樣），抓的範圍要涵蓋比較大的那個方向
+  const rangeKm = (Math.sqrt(hy * hx) * ring) / a;
   if (rangeKm > WOOF_STREET_KM) return null;
   // 整塊都在台北外面（海）：不用抓
   if (la1 < TP.lat0 || la0 > TP.lat1 || ln1 < TP.lng0 || ln0 > TP.lng1) return { major: [], minor: [] };
-  const got = streets((la0 + la1) / 2, (ln0 + ln1) / 2, rangeKm * 1.05, rangeKm);
+  const got = streets((la0 + la1) / 2, (ln0 + ln1) / 2, Math.max(hy, hx) * 1.05, rangeKm);
   if (!got || got.pending > 0) return null;
   const out: Record<StreetClass, Array<Array<[number, number]>>> = { major: [], minor: [] };
   for (const l of got.lines) {
@@ -411,10 +395,10 @@ function woofStreetLines(center: LatLng, a: number, streets: WoofStreets): Recor
 /**
  * 陸地在看得到這一面的部分（ring 要逆時針）：海岸線轉到另一面的地方沿著球的邊緣走，從轉過去的地方逆時針走到下一個轉回來的地方
  * （陸地在海岸線的左手邊，往外走的左手邊就是邊緣的逆時針方向）；整圈都在另一面的，正中間在陸地上（centerOnLand）就整面都是陸地。
- * 陸地比半個球大也畫得對（landPath 是走不到半圈的那邊，只適合地球的大陸）。near：放大時切細
+ * 陸地比半個球大也畫得對（landPath 是走不到半圈的那邊，只適合地球的大陸）
  */
-export function hemiPath(center: LatLng, ring: Array<[number, number]>, rg: number, centerOnLand: boolean, near: Near | null = null): string {
-  const pts = refine(ring, near, true).map(([lat, lng]) => ortho(center, lat, lng));
+export function hemiPath(center: LatLng, ring: Array<[number, number]>, rg: number, centerOnLand: boolean): string {
+  const pts = ring.map(([lat, lng]) => ortho(center, lat, lng));
   const n = pts.length;
   const start = pts.findIndex((p) => p[2] > 0);
   if (start < 0) return centerOnLand ? `M${at(1, 0, rg)}A${rg} ${rg} 0 1 0 ${at(-1, 0, rg)}A${rg} ${rg} 0 1 0 ${at(1, 0, rg)}Z` : '';
@@ -524,7 +508,7 @@ const LOOKS: Record<string, { km: number; min: number; tint: string }> = {
   venus: { km: 6_052, min: 3.4, tint: '#dcbf78' },
   earth: { km: 6_371, min: 3.6, tint: '#5b95d6' },
   moon: { km: 1_737, min: 2.2, tint: '#b3afa7' },
-  woof: { km: 4_800, min: 3.2, tint: '#c98f55' },
+  woof: { km: WOOF_KM, min: 3.2, tint: '#c98f55' },
   mars: { km: 3_390, min: 3, tint: '#cf6c40' },
   jupiter: { km: 69_911, min: 6, tint: '#cfa77d' },
   saturn: { km: 58_232, min: 5, tint: '#ddc88e' },
@@ -599,27 +583,26 @@ const sub = (a: Vec3, b: Vec3): Vec3 => [a[0] - b[0], a[1] - b[1], a[2] - b[2]];
  * 汪星畫成跟地球一樣的球：正射投影，地表是台北市（WOOF_LAND），跟雷達畫台北一樣只用線條：
  * 市界是海岸（虛線，陸地淡淡填色，外面空白是海；只畫畫面裡的那一段）、區界、道路（國道、快速道路粗線，主要幹道細線），夠大才畫道路；
  * 經緯線每 30 度（夠大才畫）、虛線的邊，夜晚那一半照太陽真正的方向（toSun：看的人的座標）。
- * 正中間的經緯度跟著視角轉：左右拖轉經度、上下拖轉緯度。中心是汪星時可以放大到 1 km（focusMinKm），看得到的那一小塊線切細，
+ * 正中間的經緯度跟著視角轉：左右拖轉經度、上下拖轉緯度。中心是汪星時可以放大到 1 km（focusMinKm），
  * 拉近到畫面上的台北半徑 2 km 內換成大街小巷（streets：跟雷達一樣的圖磚）
  */
 function woofGlobe(x: number, y: number, r: number, view: SpaceView, toSun: Vec3, streets?: WoofStreets): string {
   const center = { lat: Math.max(-80, Math.min(80, view.pitch / RAD)), lng: norm180(-view.yaw / RAD) };
   const n = Math.hypot(...toSun) || 1;
-  const near = view.focus === 'woof' ? nearOf(center, r) : null;
   // 畫面（球的座標：球心在 C）
   const [ox, oy] = [x - C, y - C];
   const box: [number, number, number, number] = [-ox - 20, -oy - 20, SIZE - ox + 20, SIZE - oy + 20];
-  const lines = (ls: Array<Array<[number, number]>>): string => linesPath(center, ls, r, near, box);
+  const lines = (ls: Array<Array<[number, number]>>): string => linesPath(center, ls, r, box);
   let out = '';
-  if (r >= 30) out += `<path class="space-grat" d="${graticule(center, r, near, box)}" />`;
+  if (r >= 30) out += `<path class="space-grat" d="${graticule(center, r, box)}" />`;
   // 陸地：填色和海岸線分開畫（放大很多時陸地比畫面大上千倍，整圈虛線要畫好幾秒）
-  const land = WOOF_LAND.map((ring) => hemiPath(center, ring, r, onWoofLand(center.lat, center.lng), near)).join('');
+  const land = WOOF_LAND.map((ring) => hemiPath(center, ring, r, onWoofLand(center.lat, center.lng))).join('');
   if (land) out += `<path class="region-outline woof-land" d="${land}" />`;
   out += `<path class="region-outline open" d="${lines(WOOF_LAND.map((ring) => [...ring, ring[0]]))}" />`;
   if (r >= 30) out += `<path class="region-outline open county-line" d="${lines(WOOF_DISTRICT_LINES)}" />`;
   if (r >= 60) {
     // 拉近到畫面上的台北半徑 2 km 內：換成大街小巷（抓到圖磚之前先畫內建的）
-    const fine = near && streets ? woofStreetLines(center, Math.asin(Math.min(1, (INNER * 1.1) / r)) / RAD, streets) : null;
+    const fine = view.focus === 'woof' && streets ? woofStreetLines(center, r, streets) : null;
     out += `<path class="woof-road street-minor" d="${lines(fine?.minor ?? WOOF_MINOR_ROADS)}" />`;
     out += `<path class="woof-road street-major" d="${lines(fine?.major ?? WOOF_MAJOR_ROADS)}" />`;
   }

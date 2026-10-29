@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { globeFrac, RADAR_GEOM, SPACE_FROM_KM } from '../src/radar';
 import type { StreetLine } from '../src/streets';
-import { focusMinKm, hemiPath, landPath, moonPosition, nightPath, onWoofLand, ortho, planetPositions, spaceMarkup, subsolar, toWoof } from '../src/space';
+import { focusMinKm, hemiPath, WOOF_KM, landPath, moonPosition, nightPath, onWoofLand, ortho, planetPositions, spaceMarkup, subsolar, toWoof } from '../src/space';
 
 const diff = (a: number, b: number): number => Math.abs(((((a - b) % 360) + 540) % 360) - 180);
 const lonOf = (when: string, key: string): number => planetPositions(new Date(when)).find((p) => p.key === key)!.lon;
@@ -175,13 +175,13 @@ describe('汪星', () => {
     const inner = spaceMarkup({ ...base, scaleKm: 3e8, rg: 164 * globeFrac(3e8) });
     expect(inner).toContain('>汪星<');
     expect(inner).toContain('data-body="woof"');
-    const near = spaceMarkup({ ...base, scaleKm: 20_000, rg: 164, view: { focus: 'woof', yaw: 0, pitch: 0 } });
+    const near = spaceMarkup({ ...base, scaleKm: (WOOF_KM * 164) / 39, rg: 164, view: { focus: 'woof', yaw: 0, pitch: 0 } });
     const woof = near.slice(near.indexOf('data-body="woof"'));
     for (const cls of ['space-globe', 'space-grat', 'space-night', 'space-limb', 'region-outline', 'county-line']) expect(woof).toContain(cls);
     // 還小：道路先不畫
     expect(woof).not.toContain('woof-road');
     // 拖曳轉視角：球跟著轉
-    const turned = spaceMarkup({ ...base, scaleKm: 20_000, rg: 164, view: { focus: 'woof', yaw: 0.5, pitch: 0.3 } });
+    const turned = spaceMarkup({ ...base, scaleKm: (WOOF_KM * 164) / 39, rg: 164, view: { focus: 'woof', yaw: 0.5, pitch: 0.3 } });
     const grat = (m: string): string => /space-grat" d="([^"]+)"/.exec(m.slice(m.indexOf('data-body="woof"')))![1];
     expect(grat(turned)).not.toBe(grat(near));
   });
@@ -202,7 +202,7 @@ describe('汪星', () => {
   it('draws the city in lines like Taipei on the radar: coast, districts and roads', () => {
     // 正中間轉到台北車站
     const [lat, lng] = toWoof([25.0478, 121.517]);
-    const near = spaceMarkup({ ...base, scaleKm: 6_000, rg: 164, view: { focus: 'woof', yaw: (-lng * Math.PI) / 180, pitch: (lat * Math.PI) / 180 } });
+    const near = spaceMarkup({ ...base, scaleKm: (WOOF_KM * 164) / 131, rg: 164, view: { focus: 'woof', yaw: (-lng * Math.PI) / 180, pitch: (lat * Math.PI) / 180 } });
     const woof = near.slice(near.indexOf('data-body="woof"'));
     // 陸地淡淡填色、海岸線虛線分開畫
     expect(woof).toMatch(/class="region-outline woof-land" d="M[\d. L]+Z"/);
@@ -258,15 +258,18 @@ describe('汪星的台北街道', () => {
   const roads = (m: string, cls: string): string => new RegExp(`woof-road street-${cls}" d="([^"]*)"`).exec(m)![1];
 
   it('loads the streets of the part of Taipei on screen once it is within 2 km, like the radar', () => {
+    // 照台北的面積算：半徑約 6.6 km
+    expect(WOOF_KM).toBeGreaterThan(6.3);
+    expect(WOOF_KM).toBeLessThan(6.9);
     const calls: number[][] = [];
     const streets = (a: number, b: number, km: number, range: number): { lines: StreetLine[]; pending: number } => {
       calls.push([a, b, km, range]);
       return { lines: [station, banqiao], pending: 0 };
     };
     // 整顆看得到：用內建的道路，不載入
-    spaceMarkup({ ...base, scaleKm: 6_000, rg: 164, view, streets });
+    spaceMarkup({ ...base, scaleKm: (WOOF_KM * 164) / 131, rg: 164, view, streets });
     expect(calls).toHaveLength(0);
-    const m = spaceMarkup({ ...base, scaleKm: 200, rg: 164, view, streets });
+    const m = spaceMarkup({ ...base, scaleKm: 1.2, rg: 164, view, streets });
     expect(calls).toHaveLength(1);
     const [a, b, , range] = calls[0];
     expect(Math.abs(a - 25.0478)).toBeLessThan(0.001);
@@ -282,11 +285,11 @@ describe('汪星的台北街道', () => {
   });
 
   it('keeps the built-in roads until every tile is there, and draws nothing over the sea', () => {
-    const builtIn = spaceMarkup({ ...base, scaleKm: 200, rg: 164, view });
-    const loading = spaceMarkup({ ...base, scaleKm: 200, rg: 164, view, streets: () => ({ lines: [station], pending: 1 }) });
+    const builtIn = spaceMarkup({ ...base, scaleKm: 1.2, rg: 164, view });
+    const loading = spaceMarkup({ ...base, scaleKm: 1.2, rg: 164, view, streets: () => ({ lines: [station], pending: 1 }) });
     expect(roads(loading, 'minor')).toBe(roads(builtIn, 'minor'));
-    expect(spaceMarkup({ ...base, scaleKm: 200, rg: 164, view, streets: () => null })).toBe(builtIn);
-    const sea = spaceMarkup({ ...base, scaleKm: 200, rg: 164, view, streets: () => ({ lines: [banqiao], pending: 0 }) });
+    expect(spaceMarkup({ ...base, scaleKm: 1.2, rg: 164, view, streets: () => null })).toBe(builtIn);
+    const sea = spaceMarkup({ ...base, scaleKm: 1.2, rg: 164, view, streets: () => ({ lines: [banqiao], pending: 0 }) });
     expect(roads(sea, 'minor')).toBe('');
   });
 });
