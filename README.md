@@ -89,7 +89,7 @@ worker/   Cloudflare Worker（API、排程、資料庫）
 
 ## 模組（切換雷達）
 
-同一套雷達、地圖、清單、搜尋、回報、回報管理，換不同主題的資料。點標題（`#module-btn`）切換，記在 `localStorage`（`dr.module`），網址 `?module=dog` 也可以。
+同一套雷達、地圖、清單、搜尋、回報、回報管理，換不同主題的資料。點標題旁邊的箭頭（`#module-btn`）切換（點標題本身 `#brand-btn` 是重新整理頁面），記在 `localStorage`（`dr.module`），網址 `?module=dog` 也可以。
 - 後端：`worker/src/modules.ts`（`current` 洋流、`dog` 狗狗陪伴、`badminton` 羽球臨打、`food` 等一下吃什麼）；貼文記在 `posts.module`，事件跟著貼文（`/api/events?module=`、`POST /api/reports { url, module }`）；判讀說明照模組換（`ExtractSpec`：洋流用 `EVENT_SPEC`，狗狗陪伴用 `worker/src/jobs.ts` 的 `JOB_SPEC`）。還沒放上雷達的回報從別的模組再貼一次，會改成那個模組重新判讀。
 - 前端：`web/src/modules.ts` 放每個模組的名稱、說明、空白時的說法、回報說明、判讀結果的說法、說明頁（洋流 `help.html`、狗狗陪伴 `help-dog.html`，標題列的「說明」照目前的模組打開）。洋流專屬的官方航線、車掃、漂流瓶、地標、搜尋關鍵字、類型開關、只看進行中、開始時推播，在其他模組不顯示。換模組時清掉選取、搜尋，第一次抓到的不算「新開始」（不會一次響一堆）。
 - 羽球臨打（`worker/src/badminton.ts` 的 `SESSION_SPEC`，`kind = 'session'`）：收兩種，`extra.role` 是 `offer`（招臨打：球團開放名額，照洋流的場次排，每週固定的變成固定場，`extra` 放費用、程度、缺幾位、用球、球團、報名方式）或 `seek`（找臨打：球友想找地方打，`planSeeks` 當成刊登，寫了想打的時段顯示到那個時段結束，沒寫顯示 7 天，`extra` 放可以打的時間、程度）；畫面標「招臨打」「固定場」「找臨打」，清單的找臨打另外一段；「名額已滿」「臨打取消」「場地取消」會自動下架。說明頁 `help-badminton.html`。

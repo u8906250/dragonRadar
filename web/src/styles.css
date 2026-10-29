@@ -138,8 +138,9 @@ button, select, a { touch-action: manipulation; }
   background: var(--topbar-bg); color: var(--topbar-text);
 }
 .brand { display: flex; align-items: center; gap: 6px; font-weight: 800; letter-spacing: 0.04em; white-space: nowrap; font-size: 17px; }
-/* 標題就是切換雷達（模組）的按鈕 */
-.module-btn { display: inline-flex; align-items: center; gap: 2px; font: inherit; color: inherit; letter-spacing: inherit; background: transparent; border: 0; padding: 0; cursor: pointer; }
+/* 點標題重新整理，點旁邊的箭頭切換雷達（模組）；箭頭很小，按的範圍往四周加大，看起來的位置不變 */
+.brand-btn { font: inherit; color: inherit; letter-spacing: inherit; background: transparent; border: 0; padding: 0; cursor: pointer; }
+.module-btn { display: inline-flex; align-items: center; font: inherit; color: inherit; background: transparent; border: 0; padding: 8px 8px 8px 2px; margin: -8px -8px -8px -6px; cursor: pointer; }
 .module-caret { font-size: 11px; opacity: 0.7; }
 .module-item .emoji { flex: 0 0 auto; font-size: 26px; width: 36px; text-align: center; }
 /* 職缺的防詐提醒 */

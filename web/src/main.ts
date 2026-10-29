@@ -4270,6 +4270,8 @@ function wireControls(): void {
     openThemeSheet(themeSheet.hidden);
   });
   themeSheet.querySelector('[data-act="close"]')?.addEventListener('click', () => openThemeSheet(false));
+  // 點標題重新整理，點旁邊的箭頭才切換雷達
+  $('#brand-btn').addEventListener('click', () => location.reload());
   $('#module-btn').addEventListener('click', () => openModuleSheet(moduleSheet.hidden));
   moduleSheet.querySelector('[data-act="close"]')?.addEventListener('click', () => openModuleSheet(false));
   // 搜尋：打字就篩（停一下再篩，免得每個字都重畫），清除鈕、Enter 收起鍵盤
