@@ -28,7 +28,7 @@
   --radar-bezel: #d9b24c; --radar-bezel-stroke: #15171c; --radar-bezel-w: 4;
   --radar-face-1: #fbf7ef; --radar-face-2: #efe6d3; --radar-face-stroke: #15171c;
   --radar-grid: #15171c; --radar-grid-op: 0.28; --radar-outer-op: 0.9;
-  --grass: #3f8f2f; --water: #2f7fc0;
+  --grass: #3f8f2f; --water: #2f7fc0; --bronze: #8a5a24;
   --radar-sweep: #03615a; --radar-sweep-op: 0.4;
   --radar-me: #15171c; --radar-text: #5d5850; --radar-rose: #15171c;
   --blip: #ea611d; --blip-stroke: #15171c; --blip-stroke-w: 2; --blip-core: #ffffff;
@@ -53,7 +53,7 @@
   --radar-bezel: #0f1a13; --radar-bezel-stroke: #2a3b30; --radar-bezel-w: 6;
   --radar-face-1: #0f4a2d; --radar-face-2: #052016; --radar-face-stroke: #1f8a4c;
   --radar-grid: #3cff8a; --radar-grid-op: 0.28; --radar-outer-op: 0.6;
-  --grass: #b4e86a; --water: #6fd0ff;
+  --grass: #b4e86a; --water: #6fd0ff; --bronze: #e0b060;
   --radar-sweep: #3cff8a; --radar-sweep-op: 0.55;
   --radar-me: #3cff8a; --radar-text: #7fa58f; --radar-rose: #7fa58f;
   --blip: #ffd43b; --blip-stroke: #6b4e00; --blip-stroke-w: 1; --blip-core: #ffffff;
@@ -78,7 +78,7 @@
   --radar-bezel: #8a5a2b; --radar-bezel-stroke: #5b3a1e; --radar-bezel-w: 3;
   --radar-face-1: #f3e7c9; --radar-face-2: #dfcb98; --radar-face-stroke: #5b3a1e;
   --radar-grid: #5b3a1e; --radar-grid-op: 0.35; --radar-outer-op: 0.8;
-  --grass: #5f7f22; --water: #2f6f99;
+  --grass: #5f7f22; --water: #2f6f99; --bronze: #7a4a1a;
   --radar-sweep: #5b3a1e; --radar-sweep-op: 0.5;
   --radar-me: #b8322a; --radar-text: #7a5c3a; --radar-rose: #5b3a1e;
   --blip: #b8322a; --blip-stroke: #b8322a; --blip-stroke-w: 0; --blip-core: #f7eed9;
@@ -103,7 +103,7 @@
   --radar-bezel: #1a0f28; --radar-bezel-stroke: #3a2158; --radar-bezel-w: 6;
   --radar-face-1: #2a1245; --radar-face-2: #0b0612; --radar-face-stroke: #ff3fa4;
   --radar-grid: #2ef2ff; --radar-grid-op: 0.3; --radar-outer-op: 0.7;
-  --grass: #7be36b; --water: #5ab4ff;
+  --grass: #7be36b; --water: #5ab4ff; --bronze: #f0b860;
   --radar-sweep: #ff3fa4; --radar-sweep-op: 0.5;
   --radar-me: #2ef2ff; --radar-text: #a88fc4; --radar-rose: #a88fc4;
   --blip: #ff3fa4; --blip-stroke: #ffffff; --blip-stroke-w: 1; --blip-core: #ffffff;
@@ -456,6 +456,10 @@ a.chip { display: inline-flex; align-items: center; text-decoration: none; }
 /* 映池、翠湖淡淡的水藍色（翠湖的小島挖掉）；拉近有一道道的水波 */
 .radar .park-pond { fill: var(--water); fill-opacity: 0.2; fill-rule: evenodd; stroke: none; pointer-events: none; }
 .radar .park-ripple { fill: none; stroke: var(--water); stroke-opacity: 0.6; stroke-linecap: round; pointer-events: none; }
+/* 孫中山銅像：方的台座（蓋住底下的草，邊跟建築同色）、上面圓的銅像（古銅色） */
+.radar .park-statue { pointer-events: none; }
+.radar .park-statue rect { fill: var(--radar-face-1); stroke: var(--radar-grid); stroke-width: 1; stroke-opacity: 0.6; }
+.radar .park-statue circle { fill: var(--bronze); stroke: none; }
 .radar .woof-road { fill: none; stroke: var(--radar-grid); stroke-linejoin: round; stroke-linecap: round; pointer-events: none; }
 /* 點星球飛過去 */
 .radar .space-hit { cursor: pointer; }

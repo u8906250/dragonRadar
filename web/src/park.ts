@@ -67,6 +67,7 @@ export interface ParkGeom {
   water: Pt[][];
   green: Pt[][];
   paths: Pt[][];
+  statue: Pt;
   O: { lat: number; lng: number; mx: number; my: number };
   lawnPatches: Patches;
   pondPatches: Patches;
@@ -118,6 +119,7 @@ export function parkGeom(w: ParkWorld): ParkGeom {
     water: ZHONGSHAN_PARK.water.flat().map(loop),
     green: ZHONGSHAN_PARK.green.map(loop),
     paths: ZHONGSHAN_PARK.paths.map((l) => dense(l.map(w.to))),
+    statue: w.to(ZHONGSHAN_PARK.statue),
     O,
     lawnPatches: patches(ZHONGSHAN_PARK.green.map((r) => [r])),
     pondPatches: patches(ZHONGSHAN_PARK.water),
@@ -139,9 +141,13 @@ export interface ParkCanvas {
   at: (lat: number, lng: number) => Pt | null;
 }
 
+/** 孫中山銅像（從上面看）：方的台座、上面圓的銅像，真的台座約 2 公尺見方，畫面上至少 9 像素 */
+const STATUE_M = 2;
+const STATUE_MIN = 9;
+
 /**
  * 中山公園：範圍淡淡填色、虛線的邊；拉近到 1.8 km 內再畫草地花圃（淡淡的草綠色、點線的邊）、水面（淡淡的水藍色、虛線的邊）、
- * 步道（跟街道的細線一樣）、建築（實線），拉近到幾百公尺內草地長出一叢叢的草、水面有一道道的水波
+ * 步道（跟街道的細線一樣）、建築（實線）、孫中山銅像，拉近到幾百公尺內草地長出一叢叢的草、水面有一道道的水波
  */
 export function parkSvg(g: ParkGeom, c: ParkCanvas): string {
   if (c.ppm < FILL_PPM) return '';
@@ -164,6 +170,12 @@ export function parkSvg(g: ParkGeom, c: ParkCanvas): string {
   out += `<path class="park-water" d="${c.lines(g.water)}" />`;
   out += `<path class="park-path street-minor" d="${c.lines(g.paths)}" />`;
   out += `<path class="park-building" d="${c.lines(g.buildings)}" />`;
+  const s = c.at(...g.statue);
+  const h = Math.max(STATUE_M * c.ppm, STATUE_MIN) / 2;
+  if (s && Math.hypot(s[0] - c.rx, s[1] - c.ry) - h * Math.SQRT2 < INNER + 2) {
+    const [x, y] = s.map((v) => v.toFixed(1));
+    out += `<g class="park-statue"><rect x="${(s[0] - h).toFixed(1)}" y="${(s[1] - h).toFixed(1)}" width="${(2 * h).toFixed(1)}" height="${(2 * h).toFixed(1)}" /><circle cx="${x}" cy="${y}" r="${(h * 0.45).toFixed(1)}" /></g>`;
+  }
   return out;
 }
 

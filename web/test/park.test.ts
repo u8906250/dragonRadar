@@ -32,7 +32,7 @@ describe('地球的雷達上的中山公園（跟汪星共用一份）', () => {
     const woof = spaceMarkup({ center: { lat: 25.04, lng: 121.52 }, land: [], when: new Date('2026-10-28T08:00:00Z'), scaleKm: 1, rg: 164, view: { focus: 'woof', yaw: (-ln * Math.PI) / 180, pitch: (la * Math.PI) / 180 } });
     const layers = (m: string): string[] => [...m.matchAll(/class="(park-[^"]*)"/g)].map((x) => x[1]);
     expect(layers(at(1, hall))).toEqual(layers(woof));
-    expect(layers(at(1, hall))).toEqual(['park-area', 'park-edge', 'park-lawn', 'park-pond', 'park-green', 'park-water', 'park-path street-minor', 'park-building']);
+    expect(layers(at(1, hall))).toEqual(['park-area', 'park-edge', 'park-lawn', 'park-pond', 'park-green', 'park-water', 'park-path street-minor', 'park-building', 'park-statue']);
   });
 
   it('shows the park only when it is on the radar', () => {
@@ -42,6 +42,21 @@ describe('地球的雷達上的中山公園（跟汪星共用一份）', () => {
     expect(at(18, hall)).not.toContain('park-building');
     expect(at(30, hall)).toBe('');
     for (const cls of ['park-edge', 'park-green', 'park-water', 'park-path street-minor', 'park-building']) expect(at(1, hall)).toMatch(new RegExp(`class="${cls}" d="M`));
+  });
+
+  it('draws 孫中山銅像 on the east side of the middle lawn in the square plaza', () => {
+    const statue: [number, number] = [25.04004, 121.55937];
+    const box = (m: string): number[] => /class="park-statue"><rect x="([-\d.]+)" y="([-\d.]+)" width="([\d.]+)"/.exec(m)!.slice(1).map(Number);
+    // 正中間：台座的中心就是雷達中心；1 km 時畫成 9 像素的記號，拉近到 5 公尺是真的 2 公尺見方
+    const [x, y, w] = box(at(1, statue));
+    expect([x + w / 2, y + w / 2, w]).toEqual([C, C, 9]);
+    expect(box(at(0.005, statue))[2]).toBeCloseTo((2 * INNER) / 5, 0);
+    // 在廣場中間那塊草皮（約 8 公尺見方）裡面
+    const g = parkGeom(EARTH);
+    expect(g.lawns.some((r) => r.length === 4 && Math.min(...r.map((p) => p[1])) < statue[1] && Math.max(...r.map((p) => p[1])) > statue[1] && Math.min(...r.map((p) => p[0])) < statue[0] && Math.max(...r.map((p) => p[0])) > statue[0])).toBe(true);
+    // 拉近到別的地方、看不到就不畫
+    expect(at(0.01, hall)).not.toContain('park-statue');
+    expect(at(2, hall)).not.toContain('park-statue');
   });
 
   it('grows grass on the lawns and ripples on 映池 and 翠湖 (not on the islands)', () => {
