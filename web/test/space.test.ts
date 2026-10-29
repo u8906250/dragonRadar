@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { globeFrac, SPACE_FROM_KM } from '../src/radar';
-import { landPath, moonPosition, nightPath, ortho, planetPositions, spaceMarkup, subsolar } from '../src/space';
+import { landPath, moonPosition, nightPath, ortho, planetPositions, spaceMarkup, subsolar, WOOF_LAND } from '../src/space';
 
 const diff = (a: number, b: number): number => Math.abs(((((a - b) % 360) + 540) % 360) - 180);
 const lonOf = (when: string, key: string): number => planetPositions(new Date(when)).find((p) => p.key === key)!.lon;
@@ -159,7 +159,7 @@ describe('spaceMarkup in 3D', () => {
   });
 });
 
-describe('汪星球', () => {
+describe('汪星', () => {
   const base = { center: { lat: 25.04, lng: 121.52 }, land: [] as Array<Array<[number, number]>>, when: new Date('2026-10-28T08:00:00Z') };
   it('orbits between the Earth and Mars', () => {
     for (const when of ['2026-10-28T00:00:00Z', '2027-06-01T00:00:00Z', '2030-01-01T00:00:00Z']) {
@@ -170,13 +170,28 @@ describe('汪星球', () => {
     }
   });
 
-  it('shows up with the planets, and with its ears and face when you fly there', () => {
+  it('shows up with the planets, and as a globe like the Earth when you fly there', () => {
     const inner = spaceMarkup({ ...base, scaleKm: 3e8, rg: 164 * globeFrac(3e8) });
-    expect(inner).toContain('>汪星球<');
+    expect(inner).toContain('>汪星<');
     expect(inner).toContain('data-body="woof"');
     const near = spaceMarkup({ ...base, scaleKm: 20_000, rg: 164, view: { focus: 'woof', yaw: 0, pitch: 0 } });
-    expect((near.match(/space-ear/g) ?? []).length).toBe(2);
-    expect(near).toContain('space-snout');
-    expect((near.match(/space-face/g) ?? []).length).toBe(3);
+    const woof = near.slice(near.indexOf('data-body="woof"'));
+    for (const cls of ['space-globe', 'space-grat', 'space-night', 'space-limb']) expect(woof).toContain(cls);
+    // 還沒規劃陸地
+    expect(woof).not.toContain('class="region-outline" d=');
+    // 拖曳轉視角：球跟著轉
+    const turned = spaceMarkup({ ...base, scaleKm: 20_000, rg: 164, view: { focus: 'woof', yaw: 0.5, pitch: 0.3 } });
+    const grat = (m: string): string => /space-grat" d="([^"]+)"/.exec(m.slice(m.indexOf('data-body="woof"')))![1];
+    expect(grat(turned)).not.toBe(grat(near));
+  });
+
+  it('draws the land once it is planned', () => {
+    WOOF_LAND.push([[10, -20], [10, 20], [-10, 20], [-10, -20]]);
+    try {
+      const near = spaceMarkup({ ...base, scaleKm: 20_000, rg: 164, view: { focus: 'woof', yaw: 0, pitch: 0 } });
+      expect(near.slice(near.indexOf('data-body="woof"'))).toMatch(/class="region-outline" d="M[\d. L]+Z"/);
+    } finally {
+      WOOF_LAND.pop();
+    }
   });
 });
