@@ -155,7 +155,7 @@ export interface ParkCanvas {
  * 側面面向右邊（東邊，國父紀念館那邊），左上照光（背後亮、前面暗），地上一塊影子。
  * 單位是公尺，(0, 0) 是台座的中心（站的地方），往上是負的；整個約 2.3 公尺高（STATUE_H）。照真的大小畫，跟著縮放：
  * 雷達外圈約 500 公尺內（每公尺 STATUE_FROM 像素，跟草一樣）才看得到，先是一個點（慢慢變大），外圈約 28 公尺內（STATUE_FULL）才畫出整座銅像，
- * 這時候點得到（statue-hit，至少 STATUE_HIT 像素半徑）：點了叫出火箭（summonRocket）。
+ * 這時候點得到（statue-hit，至少 STATUE_HIT 像素半徑）：點了叫出收在這一邊的火箭（summonRocket）。
  * 不管指北針怎麼轉都站著、面向東邊（radar.ts 照 data-at 轉回來，東邊轉到左邊就左右翻過來）
  */
 const STATUE_H = 2.3;
@@ -200,48 +200,75 @@ const STATUE_SVG = (() => {
 })();
 
 /**
- * 火箭（點銅像叫出來，地球和汪星共用一支）：
- * - summon（SUMMON_MS）：廣場中間那塊草皮（發射口）從中間分成兩半、帶著上面的草往兩邊滑進地底，底下是黑黑的井，火箭慢慢升上來，門再滑回來關上；
+ * 火箭（地球和汪星共用一支，記得在哪一邊，存在 localStorage 的 dr.rocket，重新整理也還在；一開始收在地球的發射口底下）：
+ * - stored：收在這一邊的發射口（廣場中間那塊草皮）底下，看不到；點這一邊的銅像叫出來；
+ * - summon（SUMMON_MS）：發射口從中間分成兩半、帶著上面的草往兩邊滑進地底，底下是黑黑的井，火箭慢慢升上來，門再滑回來關上；
  * - parked：火箭停在草皮上，點得到（rocket-hit）：問要不要飛到另一邊（地球→汪星、汪星→地球）；
  * - depart（DEPART_MS）：點火（火焰、白煙、抖一抖）、越飛越快飛出畫面，之後 away（main.ts 拉遠、換到另一邊、拉近，畫面正中間一支小火箭 tripSvg）；
- * - land（LAND_MS）：在另一邊的發射口從上面（畫面上半部）慢慢降落、白煙散掉，再停著（parked）。
- * 動畫都是 CSS（styles.css 的 rocket-*、launch-*），--t 是這一段已經過了多久（負的），中途重畫（拖曳、縮放）會接著播，不會重來
+ * - arrive（ARRIVE_MS）：在另一邊的發射口，門打開，火箭從上面（畫面上半部）慢慢降下來、直接降進井裡，門關回來，收在那邊（stored）。
+ * 存起來的只有在哪一邊、停在草皮上還是收在底下：飛走時就記成收在另一邊（飛到一半重新整理，火箭就在那邊）。
+ * 動畫都是 CSS（styles.css 的 summon-*、depart-*、arrive-*），--t 是這一段已經過了多久（負的），中途重畫（拖曳、縮放）會接著播，不會重來
  */
 export type RocketWorld = 'earth' | 'woof';
-export type RocketPhase = 'summon' | 'parked' | 'depart' | 'away' | 'land';
+export type RocketPhase = 'stored' | 'summon' | 'parked' | 'depart' | 'away' | 'arrive';
 export const SUMMON_MS = 5000;
 export const DEPART_MS = 3000;
-export const LAND_MS = 2600;
+export const ARRIVE_MS = 5500;
 /** 發射口的正中間（台北的經緯度）：火箭站的地方，飛到汪星時汪星轉到這裡、回地球時雷達正中間換到這裡 */
 export const HATCH_CENTER: Pt = [ZHONGSHAN_PARK.hatch.reduce((s, p) => s + p[0], 0) / 4, ZHONGSHAN_PARK.hatch.reduce((s, p) => s + p[1], 0) / 4];
-let rocket: { world: RocketWorld; phase: RocketPhase; at: number } | null = null;
-/** 火箭現在在哪、在做什麼、這一段過了幾毫秒（summon、land 播完是停著，depart 播完是飛走了）；還沒叫出來是 null */
-export function rocketNow(now = performance.now()): { world: RocketWorld; phase: RocketPhase; e: number } | null {
-  if (!rocket) return null;
+const LS_ROCKET = 'dr.rocket';
+type Rocket = { world: RocketWorld; phase: RocketPhase; at: number };
+let rocket: Rocket | null = null;
+/** 存起來的火箭（在哪一邊、停著還是收著）；沒存過、讀不到是收在地球 */
+function loadRocket(): Rocket {
+  try {
+    const v = JSON.parse(localStorage.getItem(LS_ROCKET) ?? 'null') as { world?: string; parked?: boolean } | null;
+    if (v && (v.world === 'earth' || v.world === 'woof')) return { world: v.world, phase: v.parked ? 'parked' : 'stored', at: 0 };
+  } catch {
+    /* 沒有 localStorage（隱私模式、測試）就從地球開始 */
+  }
+  return { world: 'earth', phase: 'stored', at: 0 };
+}
+function saveRocket(world: RocketWorld, parked: boolean): void {
+  try {
+    localStorage.setItem(LS_ROCKET, JSON.stringify({ world, parked }));
+  } catch {
+    /* 存不了就只記在這一頁 */
+  }
+}
+/** 火箭現在在哪、在做什麼、這一段過了幾毫秒（summon 播完是停著、arrive 播完是收著，depart 播完是飛走了） */
+export function rocketNow(now = performance.now()): { world: RocketWorld; phase: RocketPhase; e: number } {
+  rocket ??= loadRocket();
   const e = now - rocket.at;
   const { world, phase } = rocket;
-  if ((phase === 'summon' && e >= SUMMON_MS) || (phase === 'land' && e >= LAND_MS)) return { world, phase: 'parked', e };
+  if (phase === 'summon' && e >= SUMMON_MS) return { world, phase: 'parked', e };
+  if (phase === 'arrive' && e >= ARRIVE_MS) return { world, phase: 'stored', e };
   if (phase === 'depart' && e >= DEPART_MS) return { world, phase: 'away', e };
   return { world, phase, e };
 }
-/** 點了銅像：從這一邊的發射口叫出火箭（已經叫出來了就不算，回傳 false） */
+/** 點了這一邊的銅像：火箭收在這一邊就叫出來（回傳 false 是不在這一邊、或已經出來了） */
 export function summonRocket(world: RocketWorld, now = performance.now()): boolean {
-  if (rocket) return false;
-  rocket = { world, phase: 'summon', at: now };
-  return true;
-}
-/** 要飛了：停著才能飛（回傳 false 是不能飛） */
-export function departRocket(now = performance.now()): boolean {
   const r = rocketNow(now);
-  if (r?.phase !== 'parked') return false;
-  rocket = { world: r.world, phase: 'depart', at: now };
+  if (r.world !== world || r.phase !== 'stored') return false;
+  rocket = { world, phase: 'summon', at: now };
+  saveRocket(world, true);
   return true;
 }
-/** 飛到了：在這一邊降落 */
-export function landRocket(world: RocketWorld, now = performance.now()): void {
-  rocket = { world, phase: 'land', at: now };
+/** 要飛了：停著才能飛，回傳要飛去哪一邊（null 是不能飛）；這時候就記成收在那一邊 */
+export function departRocket(now = performance.now()): RocketWorld | null {
+  const r = rocketNow(now);
+  if (r.phase !== 'parked') return null;
+  rocket = { world: r.world, phase: 'depart', at: now };
+  const to: RocketWorld = r.world === 'earth' ? 'woof' : 'earth';
+  saveRocket(to, false);
+  return to;
 }
-/** 收掉火箭（測試用） */
+/** 飛到了：在這一邊的發射口打開門、降進井裡、關上 */
+export function arriveRocket(world: RocketWorld, now = performance.now()): void {
+  rocket = { world, phase: 'arrive', at: now };
+  saveRocket(world, false);
+}
+/** 下次用到時重新讀存起來的（測試用） */
 export function resetRocket(): void {
   rocket = null;
 }
@@ -281,7 +308,7 @@ export function tripSvg(): string {
   );
 }
 
-/** 火箭這一段（已經過了 e 毫秒）：發射口的井和兩片門（叫出來時）、火箭（站著，跟銅像一樣照 data-at 轉回來） */
+/** 火箭這一段（已經過了 e 毫秒）：發射口的井和兩片門（叫出來、降進去時）、火箭（站著，跟銅像一樣照 data-at 轉回來） */
 function rocketPart(g: ParkGeom, c: ParkCanvas, phase: RocketPhase, e: number): string {
   const q = g.hatch.map(([a, b]) => c.at(a, b));
   if (q.some((p) => !p)) return '';
@@ -293,9 +320,10 @@ function rocketPart(g: ParkGeom, c: ParkCanvas, phase: RocketPhase, e: number): 
   const poly = (pts: Pt[]): string => `M${pts.map(([x, y]) => `${f1(x)} ${f1(y)}`).join('L')}Z`;
   const at = `${f1(o[0])} ${f1(o[1])}`;
   // 降落從畫面上半部（雷達中心上面外圈的 0.35 倍、最多 45 公尺）開始，一飛到就看得到
-  const land = phase === 'land' ? `;--land:-${f1(Math.min(45, (0.35 * INNER) / c.ppm))}px` : '';
+  const land = phase === 'arrive' ? `;--land:-${f1(Math.min(45, (0.35 * INNER) / c.ppm))}px` : '';
+  const hatch = phase === 'summon' || phase === 'arrive';
   let out = `<g class="park-launch ${phase}"${phase === 'parked' ? '' : ` style="--t:${-Math.round(e)}ms${land}"`}>`;
-  if (phase === 'summon') {
+  if (hatch) {
     // 兩片門上的草：跟草地上的同一叢一叢（只長發射口這一塊），門滑開時跟著走；滑出發射口的部分收進地底（照發射口剪掉）
     const t = c.textures ? parkTexture(g, 'grass', c, g.hatchPatches) : null;
     const grass = t ? `<path class="park-grass" transform="scale(0.1)" stroke-width="${(t.w * 10).toFixed(1)}" d="${t.d}" />` : '';
@@ -308,7 +336,7 @@ function rocketPart(g: ParkGeom, c: ParkCanvas, phase: RocketPhase, e: number): 
       `<g clip-path="url(#park-hatch)">${door('w', [n, nw, sw, s], [nw[0] - n[0], nw[1] - n[1]])}${door('e', [ne, n, s, se], [ne[0] - n[0], ne[1] - n[1]])}</g>`;
   }
   out += `<g class="park-rocket" data-at="${at}"><g transform="translate(${at}) scale(${+c.ppm.toPrecision(4)})">`;
-  out += phase === 'summon' ? `<clipPath id="park-rocket-clip"><rect x="-4" y="-80" width="8" height="80.25" /></clipPath>${rocketSvg('park-rocket-clip')}` : rocketSvg('');
+  out += hatch ? `<clipPath id="park-rocket-clip"><rect x="-4" y="-80" width="8" height="80.25" /></clipPath>${rocketSvg('park-rocket-clip')}` : rocketSvg('');
   out += `</g>`;
   if (phase === 'parked') out += `<circle class="rocket-hit" cx="${at.split(' ')[0]}" cy="${f1(o[1] - ROCKET_H * 0.45 * c.ppm)}" r="${f1(Math.max(ROCKET_HIT, ROCKET_H * 0.55 * c.ppm))}" />`;
   return `${out}</g></g>`;
@@ -340,7 +368,7 @@ export function parkSvg(g: ParkGeom, c: ParkCanvas): string {
   out += `<path class="park-path street-minor" d="${c.lines(g.paths)}" />`;
   out += `<path class="park-building" d="${c.lines(g.buildings)}" />`;
   const r = rocketNow();
-  if (r && r.world === g.name && r.phase !== 'away' && r.e >= 0) out += rocketPart(g, c, r.phase, r.e);
+  if (r.world === g.name && r.phase !== 'away' && r.phase !== 'stored' && r.e >= 0) out += rocketPart(g, c, r.phase, r.e);
   const s = c.ppm >= STATUE_FROM ? c.at(...g.statue) : null;
   const h = STATUE_H * c.ppm;
   if (s && Math.hypot(s[0] - c.rx, s[1] - c.ry) - h < INNER + 2) {

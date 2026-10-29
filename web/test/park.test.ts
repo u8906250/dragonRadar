@@ -1,6 +1,6 @@
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { RADAR_GEOM } from '../src/radar';
-import { DEPART_MS, EARTH, earthParkSvg, HATCH_CENTER, LAND_MS, landRocket, departRocket, nearPark, PARK_MIN_KM, parkGeom, parkTexture, resetRocket, rocketNow, SUMMON_MS, summonRocket } from '../src/park';
+import { ARRIVE_MS, arriveRocket, DEPART_MS, departRocket, EARTH, earthParkSvg, HATCH_CENTER, nearPark, PARK_MIN_KM, parkGeom, parkTexture, resetRocket, rocketNow, SUMMON_MS, summonRocket } from '../src/park';
 import { spaceMarkup, toWoof } from '../src/space';
 
 const { c: C, inner: INNER } = RADAR_GEOM;
@@ -19,7 +19,10 @@ const earthCanvas = (km: number, [lat, lng]: [number, number]) => {
 
 describe('地球的雷達上的中山公園（跟汪星共用一份）', () => {
   // 火箭是 park.ts 裡的狀態：每個測試完都收掉（中途失敗也不會影響下一個）
-  afterEach(() => resetRocket());
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    resetRocket();
+  });
 
   it('lets the radar zoom in to 0.5 m only around the park', () => {
     expect(nearPark(...hall)).toBe(true);
@@ -82,12 +85,14 @@ describe('地球的雷達上的中山公園（跟汪星共用一份）', () => {
     expect(at(2, hall)).not.toContain('park-statue');
   });
 
-  it('summons a rocket from the middle lawn, parks it, flies it to 汪星 and lands it there', () => {
+  it('summons the rocket stored under the middle lawn, parks it, flies it to 汪星 and stores it there', () => {
     const statue: [number, number] = [25.040048, 121.5594];
     const now = performance.now();
-    resetRocket();
+    // 一開始收在地球的發射口底下：看不到；汪星的銅像叫不出來
+    expect(rocketNow()).toMatchObject({ world: 'earth', phase: 'stored' });
     expect(at(0.025, statue)).not.toContain('park-launch');
-    // 點銅像：發射口打開（兩片門帶著草滑開）、火箭升上來；播完前再點不算
+    expect(summonRocket('woof', now)).toBe(false);
+    // 點地球的銅像：發射口打開（兩片門帶著草滑開）、火箭升上來；播完前再點不算
     expect(summonRocket('earth', now - 1000)).toBe(true);
     expect(summonRocket('earth', now)).toBe(false);
     const m = at(0.025, statue);
@@ -109,29 +114,53 @@ describe('地球的雷達上的中山公園（跟汪星共用一份）', () => {
     expect((C - rx) / (INNER / 25)).toBeGreaterThan(3.5);
     expect((C - rx) / (INNER / 25)).toBeLessThan(6.5);
     // 門關上後停著：點得到火箭，沒有井和門
-    expect(rocketNow(now - 1000 + SUMMON_MS)?.phase).toBe('parked');
-    expect(summonRocket('earth', now - 1000 - SUMMON_MS)).toBe(false);
+    expect(rocketNow(now - 1000 + SUMMON_MS + 1).phase).toBe('parked');
     resetRocket();
     summonRocket('earth', now - SUMMON_MS - 1);
     const parked = at(0.025, statue);
     expect(parked).toContain('class="park-launch parked"');
     expect(parked).toContain('class="rocket-hit"');
     expect(parked).not.toContain('launch-shaft');
-    // 飛走：點火、飛出畫面，之後不畫；地球上的銅像再點也叫不出第二支（每一段都用當下的時間：測試跑得慢也還在播）
+    // 飛走：點火、飛出畫面，之後不畫（每一段都用當下的時間：測試跑得慢也還在播；播完的時間多 1 毫秒，小數相減差一點點）
     const t1 = performance.now();
-    expect(departRocket(t1)).toBe(true);
-    expect(departRocket(t1)).toBe(false);
+    expect(departRocket(t1)).toBe('woof');
+    expect(departRocket(t1)).toBe(null);
     expect(at(0.025, statue)).toContain('class="park-launch depart"');
-    expect(rocketNow(t1 + DEPART_MS)?.phase).toBe('away');
-    // 汪星上同一個地方降落，地球上沒有
+    expect(rocketNow(t1 + DEPART_MS + 1).phase).toBe('away');
+    // 汪星上同一個地方：門打開、降進井裡、門關上，收在汪星；地球上沒有、地球的銅像叫不出來
     const t2 = performance.now();
-    landRocket('woof', t2);
+    arriveRocket('woof', t2);
     expect(at(0.025, statue)).not.toContain('park-rocket');
     const [la, ln] = toWoof(HATCH_CENTER);
-    const woof = spaceMarkup({ center: { lat: 25.04, lng: 121.52 }, land: [], when: new Date('2026-10-28T08:00:00Z'), scaleKm: 0.025, rg: 164, view: { focus: 'woof', yaw: (-ln * Math.PI) / 180, pitch: (la * Math.PI) / 180 } });
-    expect(woof).toContain('class="park-launch land"');
-    expect(/class="park-rocket" data-at="([-\d.]+) ([-\d.]+)"/.exec(woof)!.slice(1).map(Number)).toEqual([C, C]);
-    expect(rocketNow(t2 + LAND_MS)).toMatchObject({ world: 'woof', phase: 'parked' });
+    const woof = (): string => spaceMarkup({ center: { lat: 25.04, lng: 121.52 }, land: [], when: new Date('2026-10-28T08:00:00Z'), scaleKm: 0.025, rg: 164, view: { focus: 'woof', yaw: (-ln * Math.PI) / 180, pitch: (la * Math.PI) / 180 } });
+    const arriving = woof();
+    expect(arriving).toContain('class="park-launch arrive"');
+    expect(arriving).toContain('class="launch-door"');
+    expect(/class="park-rocket" data-at="([-\d.]+) ([-\d.]+)"/.exec(arriving)!.slice(1).map(Number)).toEqual([C, C]);
+    expect(rocketNow(t2 + ARRIVE_MS + 1)).toMatchObject({ world: 'woof', phase: 'stored' });
+    expect(summonRocket('earth', t2 + ARRIVE_MS + 1)).toBe(false);
+    expect(summonRocket('woof', t2 + ARRIVE_MS + 1)).toBe(true);
+  });
+
+  it('remembers which side the rocket is on (and whether it is out) across reloads', () => {
+    const store = new Map<string, string>();
+    vi.stubGlobal('localStorage', { getItem: (k: string) => store.get(k) ?? null, setItem: (k: string, v: string) => void store.set(k, v) });
+    resetRocket();
+    expect(rocketNow()).toMatchObject({ world: 'earth', phase: 'stored' });
+    const now = performance.now();
+    summonRocket('earth', now - SUMMON_MS - 1);
+    expect(JSON.parse(store.get('dr.rocket')!)).toEqual({ world: 'earth', parked: true });
+    // 重新整理：停在地球的草皮上
+    resetRocket();
+    expect(rocketNow()).toMatchObject({ world: 'earth', phase: 'parked' });
+    // 一起飛就記成收在汪星（飛到一半重新整理，火箭就在汪星）
+    departRocket(now);
+    resetRocket();
+    expect(rocketNow()).toMatchObject({ world: 'woof', phase: 'stored' });
+    // 存的東西壞掉：從地球開始
+    store.set('dr.rocket', '{oops');
+    resetRocket();
+    expect(rocketNow()).toMatchObject({ world: 'earth', phase: 'stored' });
   });
 
   it('grows grass on the lawns and ripples on 映池 and 翠湖 (not on the islands)', () => {

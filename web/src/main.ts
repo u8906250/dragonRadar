@@ -10,7 +10,7 @@ import { X_MAX_WEIGHT, xLength } from './xcount';
 import { shortAddress, splitPlace } from './place';
 import { crowdOf, MapView, pinPicker, type BaseMap, type PinPicker } from './map';
 import { beep, ensureNotificationPermission, iosNeedsHomeScreen, notificationState, pushSubscription, pushSupported, registerServiceWorker, showBanner, systemNotify, unlockAudio, unsubscribePush } from './notify';
-import { Radar, SPACE_FROM_KM, type RadarRoute, type RadarStreets } from './radar';
+import { Radar, SPACE_FROM_KM, type RadarRoute, type RadarStreets, type SpaceView } from './radar';
 import { DEFAULT_THEME_ID, getTheme, THEMES, type Theme } from './themes';
 import type { BottleOut, EventOut, Item, KeywordInfo, KeywordRules, MyBottles, MyReport, Origin, Phase, PickedBottle, RelatedPost, RouteOut, PreviewItem, RouteStop, RoutePreview, SubmitResult, FailedItem, EditItem, EditInput } from './types';
 
@@ -35,6 +35,8 @@ const TICK_MS = 5_000;
 const LS_SCALE = 'dr.scale';
 /** 雙指縮放後的自訂範圍（公里） */
 const LS_SCALE_KM = 'dr.scaleKm';
+/** 在汪星上（點汪星飛過去、搭火箭過去）：中心、轉的角度，重新整理也回到汪星同一個地方；離開汪星就清掉 */
+const LS_SPACE = 'dr.space';
 const LS_ORIGIN = 'dr.origin';
 /** 移動成手動位置之前的位置（「回到我的位置」還沒收到 GPS 時直接回這裡，不用等重新定位） */
 const LS_HOME = 'dr.home';
@@ -148,8 +150,17 @@ const WORLD_KM = SPACE_FROM_KM;
 /** 太空最遠拉到哪：整個太陽系（海王星的軌道離地球最遠約 31 AU） */
 const SPACE_MAX_KM = 5e9;
 const MIN_ZOOM_KM = 0.5;
-// 汪星的中山公園可以放大到 1 公尺以內，重新整理後回到地球：至少是雷達平常的最小範圍
-let customKm = Math.max(MIN_ZOOM_KM, Number(lsGet(LS_SCALE_KM)) || 10);
+/** 上次在汪星：重新整理也回到汪星（null 是在地球、其他星球） */
+const savedWoof = ((): SpaceView | null => {
+  try {
+    const v = JSON.parse(lsGet(LS_SPACE) ?? 'null') as { focus?: string; yaw?: number; pitch?: number } | null;
+    return v?.focus === 'woof' && Number.isFinite(v.yaw) && Number.isFinite(v.pitch) ? { focus: 'woof', yaw: v.yaw!, pitch: v.pitch! } : null;
+  } catch {
+    return null;
+  }
+})();
+// 汪星的中山公園可以放大到 1 公尺以內：重新整理後還在汪星就照存的範圍（最近 0.5 公尺，跟 park.ts 的 PARK_MIN_KM 一樣），回到地球至少是雷達平常的最小範圍
+let customKm = Math.max(savedWoof ? 0.0005 : MIN_ZOOM_KM, Number(lsGet(LS_SCALE_KM)) || 10);
 let scaleSetting: ScaleSetting = ([...SCALE_SETTINGS, 'custom'] as string[]).includes(lsGet(LS_SCALE) ?? '') ? (lsGet(LS_SCALE) as ScaleSetting) : 'region';
 let scaleKm = 5;
 let view: 'radar' | 'map' = 'radar';
@@ -406,22 +417,28 @@ const radar = new Radar(
 // 點了車掃的車子：打開那條車掃的時間表
 radar.onCar = (id) => selectRoute(id);
 // 點了中山公園的銅像（地球或汪星）：發射口打開、升起火箭、關上，火箭停在那邊；點火箭問要不要飛到另一邊（rocketTrip）
+// （火箭記得在哪一邊；收在另一邊時點銅像，提示火箭在哪）
 radar.onStatue = (world) => {
   void import('./park').then((m) => {
-    if (!m.summonRocket(world)) return;
+    if (!m.summonRocket(world)) {
+      const r = m.rocketNow();
+      if (r.world !== world && (r.phase === 'stored' || r.phase === 'parked')) showBanner(bannerEl, `火箭在${r.world === 'earth' ? '地球' : '汪星'}的中山公園`, 2500);
+      return;
+    }
     radar.redrawPark();
     window.setTimeout(() => radar.redrawPark(), m.SUMMON_MS + 50);
   });
 };
 radar.onRocket = (world) => {
   void import('./park').then((m) => {
-    if (m.rocketNow()?.phase !== 'parked' || !window.confirm(world === 'earth' ? '是否要到汪星球？' : '是否要回地球？')) return;
+    if (m.rocketNow().phase !== 'parked' || !window.confirm(world === 'earth' ? '是否要到汪星球？' : '是否要回地球？')) return;
     void rocketTrip(m, world);
   });
 };
 // 太陽系那幾層拖曳移開了視野、拉回地球：「回到我的位置」跟著出現、消失
 radar.onSpaceMove = () => {
   updateHomeBtn();
+  saveSpaceView();
   // 從汪星的中山公園（可以放大到 1 公尺以內）回到地球：地球上不在中山公園附近就拉遠到雷達平常的最小範圍
   fitEarthZoom();
 };
@@ -879,6 +896,12 @@ function updatePark(): void {
   radar.setPark(drawPark);
 }
 
+/** 在汪星上就記住中心和轉的角度（重新整理回到汪星同一個地方），不在汪星就清掉 */
+function saveSpaceView(): void {
+  const v = radar.spaceViewNow;
+  lsSet(LS_SPACE, v.focus === 'woof' ? JSON.stringify({ focus: 'woof', yaw: +v.yaw.toFixed(6), pitch: +v.pitch.toFixed(6) }) : null);
+}
+
 /** 火箭飛行時拉遠到多遠（雷達外圈，公里）：約 2.7 AU，地球和汪星（離太陽 1.26 AU）一起看得到 */
 const TRIP_OUT_KM = 4e8;
 
@@ -904,12 +927,13 @@ function animateScale(toKm: number, ms: number): Promise<void> {
 const wait = (ms: number): Promise<void> => new Promise((r) => window.setTimeout(r, ms));
 
 /**
- * 火箭從中山公園飛到另一邊的中山公園（地球→汪星、汪星→地球），範圍跟出發時一樣：點火飛走、雷達拉遠到看得到地球和汪星、
- * 中心換到另一邊（汪星轉到中山公園；回地球時雷達正中間換到發射口，手動位置）、拉近，正中間一支小火箭陪著飛，最後在發射口降落。
- * 整趟不接受拖曳、縮放（radar.setTrip）
+ * 火箭從中山公園飛到另一邊的中山公園（地球→汪星、汪星→地球），飛行約 15 秒，範圍跟出發時一樣：
+ * 點火飛走、雷達慢慢拉遠到看得到地球和汪星（5.2 秒）、淡出淡入換到另一邊（汪星轉到中山公園；回地球時雷達正中間換到發射口，手動位置）、
+ * 慢慢拉近（6.5 秒），正中間一支小火箭陪著飛；到了之後發射口打開、火箭降進井裡、門關上，收在那一邊。整趟不接受拖曳、縮放（radar.setTrip）
  */
 async function rocketTrip(m: typeof import('./park'), from: 'earth' | 'woof'): Promise<void> {
-  if (!m.departRocket()) return;
+  const to = m.departRocket();
+  if (!to) return;
   parkMod = m;
   radar.setTrip('', true);
   radar.redrawPark();
@@ -918,7 +942,9 @@ async function rocketTrip(m: typeof import('./park'), from: 'earth' | 'woof'): P
   spaceMod = sp;
   await wait(m.DEPART_MS - 700);
   radar.setTrip(m.tripSvg());
-  await animateScale(TRIP_OUT_KM, 2400);
+  await animateScale(TRIP_OUT_KM, 5200);
+  radar.fadeSpace(true);
+  await wait(350);
   const [lat, lng] = m.HATCH_CENTER;
   if (from === 'earth') {
     const [la, ln] = sp.toWoof([lat, lng]);
@@ -927,12 +953,13 @@ async function rocketTrip(m: typeof import('./park'), from: 'earth' | 'woof'): P
     setOrigin({ lat, lng, source: 'manual' });
     radar.resetSpace();
   }
-  await wait(250);
-  await animateScale(startKm, 2800);
-  m.landRocket(from === 'earth' ? 'woof' : 'earth');
+  radar.fadeSpace(false);
+  await wait(650);
+  await animateScale(startKm, 6500);
+  m.arriveRocket(to);
   radar.setTrip('', true);
   radar.redrawPark();
-  await wait(m.LAND_MS + 50);
+  await wait(m.ARRIVE_MS + 50);
   radar.redrawPark();
   radar.setTrip('', false);
 }
@@ -2817,7 +2844,8 @@ function switchView(v: 'radar' | 'map'): void {
 const fetchRadiusKm = (km: number): number => (km > FETCH_RADIUS_KM ? WORLD_KM : FETCH_RADIUS_KM);
 
 function scaleKmFor(setting: ScaleSetting): number {
-  if (setting === 'custom') return Math.min(Math.max(customKm, earthMinKm()), SPACE_MAX_KM);
+  // 中心在別的星球（汪星）：範圍照存的，最近多少由 zoomRadar 照那顆星球管
+  if (setting === 'custom') return Math.min(radar.spaceFocused ? customKm : Math.max(customKm, earthMinKm()), SPACE_MAX_KM);
   if (setting === 'region') return shuangbeiRadiusKm(origin);
   if (setting === 'taiwan') return taiwanRadiusKm(origin);
   if (setting === 'world') return WORLD_KM;
@@ -4581,6 +4609,8 @@ async function boot(): Promise<void> {
   setBase(baseMap);
   switchView('radar');
   setTime(timeSetting);
+  // 上次在汪星：先換到汪星再套範圍（太空的畫法 render 時才載入）
+  if (savedWoof) radar.setSpaceView(savedWoof);
   setScale(scaleSetting);
   setOrigin(origin);
   startGeolocation();

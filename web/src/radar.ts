@@ -729,6 +729,11 @@ export class Radar {
     this.stack.classList.toggle('trip', on);
   }
 
+  /** 火箭飛行中換到另一邊：太空那一層先淡出、換好再淡入 */
+  fadeSpace(out: boolean): void {
+    this.stack.classList.toggle('trip-fade', out);
+  }
+
   /** 點了星球：飛過去當中心（點地球就回到你），視角維持 */
   private focusOn(key: string): void {
     const focus = key === 'earth' ? null : key;

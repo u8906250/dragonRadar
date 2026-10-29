@@ -476,19 +476,27 @@ a.chip { display: inline-flex; align-items: center; text-decoration: none; }
 /*
  * 火箭（park.ts 的 rocketPart，--t 是這一段已經過了多久）：
  * summon 5 秒：0～1.2 秒發射口的兩片門帶著草往兩邊滑進地底、1.2～3.6 秒火箭從井裡升上來、3.8～5 秒門滑回來關上；parked 停著（點得到）；
- * depart 3 秒：點火（火焰、白煙、抖一抖），1 秒後慢慢離地、越飛越快飛出去；land 2.6 秒：從上面慢慢降下來（火焰），落地冒白煙、散掉
+ * depart 3 秒：點火（火焰、白煙、抖一抖），1 秒後慢慢離地、越飛越快飛出去；
+ * arrive 5.5 秒：0～1.2 秒門打開，同時火箭從上面慢慢降下來（火焰，2.8 秒到地面、落地冒白煙），2.9～4.2 秒降進井裡，4.3～5.5 秒門關回來
  */
 .radar .park-launch { pointer-events: none; }
 .radar .park-launch .rocket-hit { fill: transparent; pointer-events: all; cursor: pointer; }
 .radar .launch-shaft { fill: #121212; }
 .radar .launch-shaft-in { fill: #000; }
-.radar .launch-door { animation: summon-door 5s linear var(--t) both; }
+.radar .summon .launch-door { animation: summon-door 5s linear var(--t) both; }
+.radar .arrive .launch-door { animation: arrive-door 5.5s linear var(--t) both; }
 .radar .launch-door .door-base { fill: var(--radar-face-1); }
 .radar .launch-door .door-top { fill: var(--grass); fill-opacity: 0.2; }
 @keyframes summon-door {
   0% { transform: translate(0, 0); animation-timing-function: ease-in-out; }
   24% { transform: translate(var(--dx), var(--dy)); }
   76% { transform: translate(var(--dx), var(--dy)); animation-timing-function: ease-in-out; }
+  100% { transform: translate(0, 0); }
+}
+@keyframes arrive-door {
+  0% { transform: translate(0, 0); animation-timing-function: ease-in-out; }
+  21.8% { transform: translate(var(--dx), var(--dy)); }
+  78.2% { transform: translate(var(--dx), var(--dy)); animation-timing-function: ease-in-out; }
   100% { transform: translate(0, 0); }
 }
 .radar .summon .rocket-rise { animation: summon-rise 5s linear var(--t) both; }
@@ -517,16 +525,21 @@ a.chip { display: inline-flex; align-items: center; text-decoration: none; }
   33% { transform: scaleY(1.2); }
   100% { opacity: 1; transform: scaleY(1.6); }
 }
-.radar .land .rocket-fly { animation: land-fly 2.6s linear var(--t) both; }
-@keyframes land-fly {
+.radar .arrive .rocket-fly { animation: arrive-fly 5.5s linear var(--t) both; }
+@keyframes arrive-fly {
   0% { transform: translate(0, var(--land, -45px)); animation-timing-function: cubic-bezier(0.2, 0.6, 0.35, 1); }
-  77%, 100% { transform: translate(0, 0); }
+  50.9%, 100% { transform: translate(0, 0); }
 }
-.radar .land .rocket-flame { animation: land-flame 2.6s linear var(--t) both; }
-@keyframes land-flame {
-  0%, 70% { opacity: 1; transform: scaleY(1.1); }
-  77% { opacity: 1; transform: scaleY(0.6); }
-  86%, 100% { opacity: 0; transform: scaleY(0.2); }
+.radar .arrive .rocket-rise { animation: arrive-sink 5.5s linear var(--t) both; }
+@keyframes arrive-sink {
+  0%, 52.7% { transform: translateY(0); animation-timing-function: ease-in-out; }
+  76.4%, 100% { transform: translateY(9px); }
+}
+.radar .arrive .rocket-flame { animation: arrive-flame 5.5s linear var(--t) both; }
+@keyframes arrive-flame {
+  0%, 44% { opacity: 1; transform: scaleY(1.1); }
+  50.9% { opacity: 1; transform: scaleY(0.6); }
+  56%, 100% { opacity: 0; transform: scaleY(0.2); }
 }
 .radar .rocket-flicker { transform-box: fill-box; transform-origin: 50% 0%; animation: rocket-flicker 0.12s ease-in-out infinite alternate; }
 @keyframes rocket-flicker { from { transform: scaleY(0.85); } to { transform: scaleY(1.1); } }
@@ -538,14 +551,18 @@ a.chip { display: inline-flex; align-items: center; text-decoration: none; }
   70% { opacity: 0.7; transform: scale(1.8); }
   100% { opacity: 0; transform: scale(2.4); }
 }
-.radar .land .rocket-smoke circle { animation: land-smoke 2.6s ease-out calc(var(--t) + var(--d, 0ms)) both; }
-@keyframes land-smoke {
-  0%, 55% { opacity: 0; transform: scale(0.2); }
-  75% { opacity: 0.85; transform: scale(1); }
-  100% { opacity: 0; transform: scale(2); }
+.radar .arrive .rocket-smoke circle { animation: arrive-smoke 5.5s ease-out calc(var(--t) + var(--d, 0ms)) both; }
+@keyframes arrive-smoke {
+  0%, 38% { opacity: 0; transform: scale(0.2); }
+  52% { opacity: 0.85; transform: scale(1); }
+  70% { opacity: 0.6; transform: scale(1.7); }
+  86%, 100% { opacity: 0; transform: scale(2.2); }
 }
 /* 飛行中雷達正中間的小火箭：左右晃，旁邊一道道往下的氣流 */
 .radar-stack.trip .radar-main { pointer-events: none; }
+/* 換到另一邊時太空那一層淡出淡入 */
+.radar-main .space { transition: opacity 0.35s ease; }
+.radar-stack.trip-fade .radar-main .space { opacity: 0; }
 .radar .rocket-trip { pointer-events: none; }
 .radar .rocket-wobble { transform-box: fill-box; transform-origin: 50% 60%; animation: trip-wobble 0.7s ease-in-out infinite alternate; }
 @keyframes trip-wobble { from { transform: rotate(-3deg); } to { transform: rotate(3deg); } }
