@@ -28,6 +28,7 @@
   --radar-bezel: #d9b24c; --radar-bezel-stroke: #15171c; --radar-bezel-w: 4;
   --radar-face-1: #fbf7ef; --radar-face-2: #efe6d3; --radar-face-stroke: #15171c;
   --radar-grid: #15171c; --radar-grid-op: 0.28; --radar-outer-op: 0.9;
+  --grass: #3f8f2f;
   --radar-sweep: #03615a; --radar-sweep-op: 0.4;
   --radar-me: #15171c; --radar-text: #5d5850; --radar-rose: #15171c;
   --blip: #ea611d; --blip-stroke: #15171c; --blip-stroke-w: 2; --blip-core: #ffffff;
@@ -52,6 +53,7 @@
   --radar-bezel: #0f1a13; --radar-bezel-stroke: #2a3b30; --radar-bezel-w: 6;
   --radar-face-1: #0f4a2d; --radar-face-2: #052016; --radar-face-stroke: #1f8a4c;
   --radar-grid: #3cff8a; --radar-grid-op: 0.28; --radar-outer-op: 0.6;
+  --grass: #b4e86a;
   --radar-sweep: #3cff8a; --radar-sweep-op: 0.55;
   --radar-me: #3cff8a; --radar-text: #7fa58f; --radar-rose: #7fa58f;
   --blip: #ffd43b; --blip-stroke: #6b4e00; --blip-stroke-w: 1; --blip-core: #ffffff;
@@ -76,6 +78,7 @@
   --radar-bezel: #8a5a2b; --radar-bezel-stroke: #5b3a1e; --radar-bezel-w: 3;
   --radar-face-1: #f3e7c9; --radar-face-2: #dfcb98; --radar-face-stroke: #5b3a1e;
   --radar-grid: #5b3a1e; --radar-grid-op: 0.35; --radar-outer-op: 0.8;
+  --grass: #5f7f22;
   --radar-sweep: #5b3a1e; --radar-sweep-op: 0.5;
   --radar-me: #b8322a; --radar-text: #7a5c3a; --radar-rose: #5b3a1e;
   --blip: #b8322a; --blip-stroke: #b8322a; --blip-stroke-w: 0; --blip-core: #f7eed9;
@@ -100,6 +103,7 @@
   --radar-bezel: #1a0f28; --radar-bezel-stroke: #3a2158; --radar-bezel-w: 6;
   --radar-face-1: #2a1245; --radar-face-2: #0b0612; --radar-face-stroke: #ff3fa4;
   --radar-grid: #2ef2ff; --radar-grid-op: 0.3; --radar-outer-op: 0.7;
+  --grass: #7be36b;
   --radar-sweep: #ff3fa4; --radar-sweep-op: 0.5;
   --radar-me: #2ef2ff; --radar-text: #a88fc4; --radar-rose: #a88fc4;
   --blip: #ff3fa4; --blip-stroke: #ffffff; --blip-stroke-w: 1; --blip-core: #ffffff;
@@ -438,12 +442,15 @@ a.chip { display: inline-flex; align-items: center; text-decoration: none; }
 .radar .space-mare { fill: #6f6b64; fill-opacity: 0.35; stroke: none; }
 /* 汪星的地表（台北市）：道路跟雷達的街道一樣（粗細、深淺照 street-major、street-minor） */
 .radar .region-outline.woof-land { stroke: none; }
-/* 汪星的中山公園：範圍淡淡填色、虛線的邊；建築實線、映池虛線、草地花圃很淡的點線，步道跟街道的細線一樣 */
+/* 汪星的中山公園：範圍淡淡填色、虛線的邊；建築實線、映池虛線、草地花圃草綠色的點線，步道跟街道的細線一樣 */
 .radar .woof-park { fill: var(--accent); fill-opacity: 0.1; stroke: none; pointer-events: none; }
 .radar .woof-park-edge { fill: none; stroke: var(--accent); stroke-width: 1.2; stroke-opacity: 0.6; stroke-dasharray: 2 2; pointer-events: none; }
 .radar .woof-park-building { fill: none; stroke: var(--radar-grid); stroke-width: 1; stroke-opacity: 0.55; stroke-linejoin: round; pointer-events: none; }
 .radar .woof-park-water { fill: none; stroke: var(--accent); stroke-width: 1; stroke-opacity: 0.6; stroke-dasharray: 3 2; pointer-events: none; }
-.radar .woof-park-green { fill: none; stroke: var(--radar-grid); stroke-width: 0.6; stroke-opacity: 0.3; stroke-dasharray: 1 2; pointer-events: none; }
+.radar .woof-park-green { fill: none; stroke: var(--grass); stroke-width: 0.6; stroke-opacity: 0.55; stroke-dasharray: 1 2; pointer-events: none; }
+/* 草地花圃淡淡的草綠色；拉近長出一叢叢的草（線的粗細跟著放大，寫在 stroke-width） */
+.radar .woof-lawn { fill: var(--grass); fill-opacity: 0.2; stroke: none; pointer-events: none; }
+.radar .woof-grass { fill: none; stroke: var(--grass); stroke-opacity: 0.55; stroke-linecap: round; pointer-events: none; }
 .radar .woof-road { fill: none; stroke: var(--radar-grid); stroke-linejoin: round; stroke-linecap: round; pointer-events: none; }
 /* 點星球飛過去 */
 .radar .space-hit { cursor: pointer; }

@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { fmtKm, globeFrac, RADAR_GEOM, SPACE_FROM_KM } from '../src/radar';
 import type { StreetLine } from '../src/streets';
-import { atPark, focusMinKm, hemiPath, PARK_MIN_KM, WOOF_KM, landPath, moonPosition, nightPath, onWoofLand, ortho, planetPositions, spaceMarkup, subsolar, toWoof } from '../src/space';
+import { atPark, focusMinKm, grassPath, hemiPath, PARK_MIN_KM, WOOF_KM, landPath, moonPosition, nightPath, onWoofLand, ortho, planetPositions, spaceMarkup, subsolar, toWoof } from '../src/space';
 
 const diff = (a: number, b: number): number => Math.abs(((((a - b) % 360) + 540) % 360) - 180);
 const lonOf = (when: string, key: string): number => planetPositions(new Date(when)).find((p) => p.key === key)!.lon;
@@ -327,6 +327,46 @@ describe('汪星的中山公園', () => {
     // 0.5 公尺：國父紀念館的牆還在畫面上，path 不會太長
     const close = spaceMarkup({ ...base, scaleKm: PARK_MIN_KM, rg: 164, view: viewAt([25.0400096, 121.5595]) });
     expect(close.length).toBeLessThan(60_000);
+  });
+
+  it('grows tufts of grass on the lawns once you are within a few hundred metres', () => {
+    // 東南邊最大的草地裡面
+    const lawn: [number, number] = [25.0383215, 121.5608674];
+    const blades = (m: string): number => (/class="woof-grass"[^>]* d="([^"]*)"/.exec(m)?.[1].match(/M/g) ?? []).length;
+    const at = (km: number, p: [number, number]): string => spaceMarkup({ ...base, scaleKm: km, rg: 164, view: viewAt(p) });
+    // 1 km：草地填草綠色，還沒有草
+    expect(at(1, lawn)).toMatch(/class="woof-lawn" d="M/);
+    expect(blades(at(1, lawn))).toBe(0);
+    for (const km of [0.3, 0.03, 0.003, PARK_MIN_KM]) {
+      const n = blades(at(km, lawn));
+      expect(n).toBeGreaterThan(40);
+      expect(n).toBeLessThan(2500);
+    }
+    // 國父紀念館裡面沒有草；每次畫都一樣
+    expect(blades(at(0.003, hall))).toBe(0);
+    expect(at(0.003, lawn)).toBe(at(0.003, lawn));
+    // 0.5 公尺：整個畫面都是草也不會太長
+    expect(at(PARK_MIN_KM, lawn).length).toBeLessThan(100_000);
+  });
+
+  it('keeps every tuft in place while zooming in (only adds more)', () => {
+    const [lat, lng] = toWoof([25.0383215, 121.5608674]);
+    const { c, inner } = RADAR_GEOM;
+    /** 草的根（球面上的方向，跟放大多少無關） */
+    const roots = (km: number): Array<[number, number]> => {
+      const rg = (164 * WOOF_KM) / km;
+      const g = grassPath({ lat, lng }, rg, c, c)!;
+      return [...g.d.matchAll(/M(-?\d+) (-?\d+)/g)].map((m) => [(Number(m[1]) / 10 - c) / rg, (c - Number(m[2]) / 10) / rg]);
+    };
+    const far = roots(0.03);
+    const near = roots(0.02);
+    // 拉近後還在畫面裡的（離中心不到外圈的 0.6 倍）都還在原來的地方（同一叢的草根左右差一點點）
+    const kept = far.filter(([x, y]) => Math.hypot(x, y) < (0.6 * inner * 0.03) / (164 * WOOF_KM));
+    expect(kept.length).toBeGreaterThan(100);
+    const tol = 3 / ((164 * WOOF_KM) / 0.03);
+    const found = kept.filter(([x, y]) => near.some(([u, v]) => Math.abs(u - x) < tol && Math.abs(v - y) < tol));
+    expect(found.length).toBe(kept.length);
+    expect(near.length).toBeGreaterThan(far.length * 0.9);
   });
 
   it('labels the rings in metres and centimetres', () => {

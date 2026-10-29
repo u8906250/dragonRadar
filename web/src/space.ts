@@ -126,8 +126,9 @@ interface Near {
 }
 function nearOf(center: LatLng, rg: number): Near | null {
   const a = Math.asin(Math.min(1, (INNER * 1.5) / rg)) / RAD;
-  const step = a / 16;
-  if (step >= 1) return null;
+  if (a / 16 >= 1) return null;
+  // 切到弦離球面不到 0.05 像素就好（弦長 L 弧度離球面約 rg L² / 8）：放大很多時比看得到的範圍的 1/16 粗很多
+  const step = Math.min(1, Math.max(a / 16, Math.sqrt(0.4 / rg) / RAD));
   // 多留 0.1 度：2 度的弦離球面最多約半徑的萬分之一點五
   const m = a + 0.1;
   const top = Math.max(Math.abs(center.lat - m), Math.abs(center.lat + m));
@@ -135,18 +136,36 @@ function nearOf(center: LatLng, rg: number): Near | null {
   return { lat0: center.lat - m, lat1: center.lat + m, lng0: center.lng - dl, lng1: center.lng + dl, step };
 }
 
-/** 線（closed 是一圈）在 near 那一塊裡面的段切細到 near.step；near 是 null 就照原本的 */
+/**
+ * 線（closed 是一圈）在 near 那一塊裡面的那一段切細到 near.step（只切那一段：整段都切的話，放大很多時一段 1 度的邊要切成幾千點）；
+ * near 是 null 就照原本的
+ */
 function refine(pts: Array<[number, number]>, near: Near | null, closed = false): Array<[number, number]> {
   if (!near) return pts;
   const out: Array<[number, number]> = [];
   const n = closed ? pts.length : pts.length - 1;
-  const hit = (lo: number, hi: number): boolean => [-360, 0, 360].some((s) => hi + s >= near.lng0 && lo + s <= near.lng1);
   for (let i = 0; i < n; i++) {
     const [a, b] = [pts[i], pts[(i + 1) % pts.length]];
     out.push(a);
-    if (Math.max(a[0], b[0]) < near.lat0 || Math.min(a[0], b[0]) > near.lat1 || !hit(Math.min(a[1], b[1]), Math.max(a[1], b[1]))) continue;
-    const k = Math.ceil(Math.max(Math.abs(b[0] - a[0]), Math.abs(b[1] - a[1])) / near.step);
-    for (let j = 1; j < k; j++) out.push([a[0] + ((b[0] - a[0]) * j) / k, a[1] + ((b[1] - a[1]) * j) / k]);
+    const [dy, dx] = [b[0] - a[0], b[1] - a[1]];
+    for (const s of [-360, 0, 360]) {
+      // 這一段在 near 裡面的部分：從 t0 到 t1（a 是 0、b 是 1）
+      let [t0, t1] = [0, 1];
+      const clip = (p: number, q: number): boolean => {
+        if (p === 0) return q >= 0;
+        const t = q / p;
+        if (p < 0) t0 = Math.max(t0, t);
+        else t1 = Math.min(t1, t);
+        return t0 <= t1;
+      };
+      if (!(clip(-dy, a[0] - near.lat0) && clip(dy, near.lat1 - a[0]) && clip(-dx, a[1] + s - near.lng0) && clip(dx, near.lng1 - a[1] - s))) continue;
+      const k = Math.ceil(((t1 - t0) * Math.max(Math.abs(dy), Math.abs(dx))) / near.step);
+      for (let j = 0; j <= k; j++) {
+        const t = t0 + ((t1 - t0) * j) / k;
+        if (t > 0 && t < 1) out.push([a[0] + dy * t, a[1] + dx * t]);
+      }
+      break;
+    }
   }
   if (!closed) out.push(pts[pts.length - 1]);
   return out;
@@ -347,12 +366,15 @@ const woofRing = (r: Array<[number, number]>): Array<[number, number]> => {
   const ring = densify(r.map(toWoof), true);
   return [...ring, ring[0]];
 };
-/** 中山公園（國父紀念館）：公園的範圍（逆時針，填色用）、建築、映池、草地花圃、步道，汪星的經緯度 */
+/** 一圈換成汪星的經緯度、逆時針（填色用） */
+const woofArea = (r: Array<[number, number]>): Array<[number, number]> => {
+  const ring = densify(r.map(toWoof), true);
+  return ringArea(ring) < 0 ? ring.reverse() : ring;
+};
+/** 中山公園（國父紀念館）：公園的範圍、草地花圃（逆時針，填色用）、建築、映池、草地花圃的邊、步道，汪星的經緯度 */
 const PARK = {
-  outline: (() => {
-    const ring = densify(ZHONGSHAN_PARK.outline.map(toWoof), true);
-    return ringArea(ring) < 0 ? ring.reverse() : ring;
-  })(),
+  outline: woofArea(ZHONGSHAN_PARK.outline),
+  lawns: ZHONGSHAN_PARK.green.map(woofArea),
   buildings: ZHONGSHAN_PARK.buildings.map(woofRing),
   water: ZHONGSHAN_PARK.water.map(woofRing),
   green: ZHONGSHAN_PARK.green.map(woofRing),
@@ -366,6 +388,115 @@ const PARK_BOX = (() => {
 })();
 /** 中山公園附近可以放大到這麼近（雷達外圈，公里）：0.5 公尺 */
 export const PARK_MIN_KM = 0.0005;
+
+/**
+ * 中山公園的草：草地花圃裡一叢一叢的草（每叢 2～4 根），位置照汪星上的地方固定，同一個地方每次看都一樣。
+ * 一層層的格子（每層邊長減半），每一格有一叢、在格子裡的哪裡用亂數決定：畫的那一層在畫面上約一叢間隔的 1.15～2.3 倍像素一格，
+ * 再細一層照拉近的程度慢慢加進來（拉近只會多、不會跳），畫面上大約每 GRASS_PX 像素見方一叢（雷達 400 見方，整個雷達最多約八百叢）。
+ * 草是真的長度（4～10 公分），畫面上太短就畫成固定大小的草地記號；拉遠到每公尺不到 GRASS_FROM 像素（雷達外圈約 500 公尺）就不畫
+ */
+const GRASS_PX = 12.5;
+const GRASS_FROM = 0.33;
+const GRASS_MIN_M = 0.01;
+const GRASS_TOP = 15;
+/** 公園中間附近攤平成公尺（x 往東、y 往北） */
+const LAWN_O = (() => {
+  const lat = (Math.min(...PARK.outline.map((p) => p[0])) + Math.max(...PARK.outline.map((p) => p[0]))) / 2;
+  const lng = (Math.min(...PARK.outline.map((p) => p[1])) + Math.max(...PARK.outline.map((p) => p[1]))) / 2;
+  const my = WOOF_KM * 1000 * RAD;
+  return { lat, lng, my, mx: my * Math.cos(lat * RAD) };
+})();
+const LAWNS = ZHONGSHAN_PARK.green.map((r) => {
+  const pts = r.map(toWoof).map(([lat, lng]): [number, number] => [(lng - LAWN_O.lng) * LAWN_O.mx, (lat - LAWN_O.lat) * LAWN_O.my]);
+  return { pts, x0: Math.min(...pts.map((p) => p[0])), y0: Math.min(...pts.map((p) => p[1])), x1: Math.max(...pts.map((p) => p[0])), y1: Math.max(...pts.map((p) => p[1])) };
+});
+const LAWN_BOX = [Math.min(...LAWNS.map((l) => l.x0)), Math.min(...LAWNS.map((l) => l.y0)), Math.max(...LAWNS.map((l) => l.x1)), Math.max(...LAWNS.map((l) => l.y1))];
+/** 格子 (i, j)、第 k 層的第 n 個亂數（0～1，每次都一樣） */
+function cellRand(i: number, j: number, k: number, n: number): number {
+  let h = Math.imul(i, 0x27d4eb2d) ^ Math.imul(j, 0x165667b1) ^ Math.imul(k * 16 + n + 1, 0x9e3779b1);
+  h = Math.imul(h ^ (h >>> 15), 0x85ebca6b);
+  h = Math.imul(h ^ (h >>> 13), 0xc2b2ae35);
+  return ((h ^ (h >>> 16)) >>> 0) / 4294967296;
+}
+/** 畫面上的草（球的座標乘 10，rx、ry 是雷達的圓心）和線的粗細；太遠、畫面上沒有草地就是 null */
+export function grassPath(center: LatLng, rg: number, rx: number, ry: number): { d: string; w: number } | null {
+  const ppm = rg / (WOOF_KM * 1000);
+  if (ppm < GRASS_FROM) return null;
+  // 每公尺 0.33 到 0.66 像素之間（雷達外圈約 500 到 250 公尺）慢慢長出來
+  const fade = Math.min(1, ppm / GRASS_FROM - 1);
+  // 草最長在畫面上幾像素；比一叢的間隔長很多（放大到 1 公尺內）就不再加，草只是跟著變長，不會密成一片
+  const tall = Math.max(0.1 * ppm, 6);
+  const p = Math.max(GRASS_PX, 0.5 * tall) * Math.sqrt(4 / 3);
+  // 畫的這一層：格子在畫面上 p～2p 像素；再細一層加進來的比例讓每像素的叢數不變
+  const k0 = Math.min(GRASS_TOP, Math.max(1, Math.ceil(Math.log2(p / ppm / GRASS_MIN_M))));
+  const cell = GRASS_MIN_M * 2 ** k0 * ppm;
+  const more = Math.min(1, ((cell / p) ** 2 - 1) / 3);
+  // 看得到的範圍（攤平的公尺，多留一點：球面和攤平的方向差一點點）
+  const half = ((INNER + 10) / ppm) * 1.15 + 0.1;
+  const cx = (center.lng - LAWN_O.lng) * LAWN_O.mx;
+  const cy = (center.lat - LAWN_O.lat) * LAWN_O.my;
+  const x0 = Math.max(cx - half, LAWN_BOX[0]);
+  const x1 = Math.min(cx + half, LAWN_BOX[2]);
+  const y0 = Math.max(cy - half, LAWN_BOX[1]);
+  const y1 = Math.min(cy + half, LAWN_BOX[3]);
+  if (x0 > x1 || y0 > y1) return null;
+  // 只看範圍裡面的草地
+  const lawns = LAWNS.filter((l) => l.x1 >= x0 && l.x0 <= x1 && l.y1 >= y0 && l.y0 <= y1);
+  if (!lawns.length) return null;
+  // 上一叢所在的草地先看（旁邊的格子多半在同一塊）
+  let hit = 0;
+  const inLawn = (x: number, y: number): boolean => {
+    for (let m = 0; m < lawns.length; m++) {
+      const l = lawns[(hit + m) % lawns.length];
+      if (x < l.x0 || x > l.x1 || y < l.y0 || y > l.y1) continue;
+      let inside = false;
+      for (let i = 0, j = l.pts.length - 1; i < l.pts.length; j = i++) {
+        const [xa, ya] = l.pts[i];
+        const [xb, yb] = l.pts[j];
+        if (ya > y !== yb > y && x < xa + ((y - ya) * (xb - xa)) / (yb - ya)) inside = !inside;
+      }
+      if (inside) {
+        hit = (hit + m) % lawns.length;
+        return true;
+      }
+    }
+    return false;
+  };
+  const w = Math.min(1.6, Math.max(0.6, 0.004 * ppm));
+  const reach = (INNER + 0.3 * tall + 2) ** 2;
+  // 座標乘 10 寫成整數（小數轉字串慢好幾倍），畫的時候縮回 0.1 倍
+  const r1 = (v: number): number => Math.round(v * 10);
+  let d = '';
+  let tufts = 0;
+  for (let k = k0 - 1; k <= GRASS_TOP; k++) {
+    const s = GRASS_MIN_M * 2 ** k;
+    for (let i = Math.floor(x0 / s); i <= Math.floor(x1 / s); i++) {
+      for (let j = Math.floor(y0 / s); j <= Math.floor(y1 / s); j++) {
+        if (cellRand(i, j, k, 0) >= fade || (k < k0 && cellRand(i, j, k, 1) >= more)) continue;
+        const x = (i + 0.1 + 0.8 * cellRand(i, j, k, 2)) * s;
+        const y = (j + 0.1 + 0.8 * cellRand(i, j, k, 3)) * s;
+        const [px, py, pz] = ortho(center, LAWN_O.lat + y / LAWN_O.my, LAWN_O.lng + x / LAWN_O.mx);
+        if (pz <= 0) continue;
+        const bx = C + rg * px;
+        const by = C - rg * py;
+        // 草往上長：底在雷達下緣外面、草尖伸得進來的也要畫；在不在草地裡比較慢，最後才看
+        const ey = Math.min(by, Math.max(by - tall, ry)) - ry;
+        if ((bx - rx) ** 2 + ey ** 2 > reach || !inLawn(x, y)) continue;
+        const n = 2 + Math.floor(cellRand(i, j, k, 4) * 3);
+        for (let b = 0; b < n; b++) {
+          const h = cellRand(i, j, k, 5 + b);
+          const len = Math.max((0.04 + 0.06 * h) * ppm, 4 + 2 * h);
+          const a = (b - (n - 1) / 2) * 0.35 + (h - 0.5) * 0.4;
+          const [sx, sy] = [Math.sin(a) * len, Math.cos(a) * len];
+          d += `M${r1(bx + (b - (n - 1) / 2) * w)} ${r1(by)}q${r1(sx * 0.25)} ${r1(-sy * 0.6)} ${r1(sx * 1.2)} ${r1(-sy)}`;
+        }
+        // 萬一算錯也不會多到拖不動
+        if (++tufts >= 1500) return { d, w };
+      }
+    }
+  }
+  return d ? { d, w } : null;
+}
 
 /** 汪星正中間的經緯度：跟著視角轉，左右拖轉經度、上下拖轉緯度 */
 const woofCenter = (view: SpaceView): LatLng => ({ lat: Math.max(-80, Math.min(80, view.pitch / RAD)), lng: norm180(-view.yaw / RAD) });
@@ -659,7 +790,7 @@ const sub = (a: Vec3, b: Vec3): Vec3 => [a[0] - b[0], a[1] - b[1], a[2] - b[2]];
  * 市界是海岸（虛線，陸地淡淡填色，外面空白是海；只畫畫面裡的那一段）、區界、道路（國道、快速道路粗線，主要幹道細線），夠大才畫道路；
  * 經緯線每 30 度（夠大才畫）、虛線的邊，夜晚那一半照太陽真正的方向（toSun：看的人的座標）。
  * 正中間的經緯度跟著視角轉：左右拖轉經度、上下拖轉緯度。中心是汪星時可以放大到 1 km（focusMinKm），
- * 拉近到畫面上的台北半徑 2 km 內換成大街小巷（streets：跟雷達一樣的圖磚）；中山公園描繪出來，那裡可以放大到 0.5 公尺，看得到的那一小塊線切細
+ * 拉近到畫面上的台北半徑 2 km 內換成大街小巷（streets：跟雷達一樣的圖磚）；中山公園描繪出來（草地花圃草綠色，拉近長出一叢叢的草），那裡可以放大到 0.5 公尺，看得到的那一小塊線切細
  */
 function woofGlobe(x: number, y: number, r: number, view: SpaceView, toSun: Vec3, streets?: WoofStreets): string {
   const center = woofCenter(view);
@@ -682,13 +813,20 @@ function woofGlobe(x: number, y: number, r: number, view: SpaceView, toSun: Vec3
     out += `<path class="woof-road street-minor" d="${lines(fine?.minor ?? WOOF_MINOR_ROADS)}" />`;
     out += `<path class="woof-road street-major" d="${lines(fine?.major ?? WOOF_MAJOR_ROADS)}" />`;
   }
-  // 中山公園：範圍淡淡填色、虛線的邊；拉近到看得出來再畫建築、映池、草地花圃、步道
+  // 中山公園：範圍淡淡填色、虛線的邊；拉近到看得出來再畫草地花圃（草綠色、一叢叢的草）、建築、映池、步道
   if (r >= 60) {
     const fill = hemiPath(center, PARK.outline, r, false, near);
     if (fill) out += `<path class="woof-park" d="${fill}" />`;
     out += `<path class="woof-park-edge" d="${lines([[...PARK.outline, PARK.outline[0]]])}" />`;
   }
   if (r >= 600) {
+    // 草地花圃淡淡的草綠色，拉近到幾百公尺內長出一叢一叢的草
+    // 放大很多時只畫看得到的那一小塊附近的草地
+    const lawns = near ? PARK.lawns.filter((ring) => ring.some(([a]) => a >= near.lat0) && ring.some(([a]) => a <= near.lat1) && ring.some(([, b]) => b >= near.lng0) && ring.some(([, b]) => b <= near.lng1)) : PARK.lawns;
+    const lawn = lawns.map((ring) => hemiPath(center, ring, r, false, near)).join('');
+    if (lawn) out += `<path class="woof-lawn" d="${lawn}" />`;
+    const grass = view.focus === 'woof' ? grassPath(center, r, C - ox, C - oy) : null;
+    if (grass) out += `<path class="woof-grass" transform="scale(0.1)" stroke-width="${(grass.w * 10).toFixed(1)}" d="${grass.d}" />`;
     out += `<path class="woof-park-green" d="${lines(PARK.green)}" />`;
     out += `<path class="woof-park-water" d="${lines(PARK.water)}" />`;
     out += `<path class="woof-road street-minor woof-park-path" d="${lines(PARK.paths)}" />`;
