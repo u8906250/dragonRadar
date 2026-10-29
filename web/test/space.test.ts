@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { fmtKm, globeFrac, RADAR_GEOM, SPACE_FROM_KM } from '../src/radar';
 import type { StreetLine } from '../src/streets';
-import { atPark, focusMinKm, grassPath, hemiPath, PARK_MIN_KM, WOOF_KM, landPath, moonPosition, nightPath, onWoofLand, ortho, planetPositions, spaceMarkup, subsolar, toWoof } from '../src/space';
+import { atPark, focusMinKm, grassPath, hemiPath, ripplePath, PARK_MIN_KM, WOOF_KM, landPath, moonPosition, nightPath, onWoofLand, ortho, planetPositions, spaceMarkup, subsolar, toWoof } from '../src/space';
 
 const diff = (a: number, b: number): number => Math.abs(((((a - b) % 360) + 540) % 360) - 180);
 const lonOf = (when: string, key: string): number => planetPositions(new Date(when)).find((p) => p.key === key)!.lon;
@@ -347,6 +347,30 @@ describe('汪星的中山公園', () => {
     expect(at(0.003, lawn)).toBe(at(0.003, lawn));
     // 0.5 公尺：整個畫面都是草也不會太長
     expect(at(PARK_MIN_KM, lawn).length).toBeLessThan(100_000);
+  });
+
+  it('fills the pond in water blue and adds ripples once you are close', () => {
+    // 映池中間
+    const pond: [number, number] = [25.039066, 121.56026];
+    const waves = (m: string): number => (/class="woof-ripple"[^>]* d="([^"]*)"/.exec(m)?.[1].match(/M/g) ?? []).length;
+    const at = (km: number, p: [number, number]): string => spaceMarkup({ ...base, scaleKm: km, rg: 164, view: viewAt(p) });
+    expect(at(1, pond)).toMatch(/class="woof-pond" d="M/);
+    expect(waves(at(1, pond))).toBe(0);
+    for (const km of [0.1, 0.03, 0.003, PARK_MIN_KM]) {
+      const n = waves(at(km, pond));
+      expect(n).toBeGreaterThan(10);
+      expect(n).toBeLessThan(1500);
+    }
+    // 拉近到 50 cm 是真的大小（15～35 公分），比 3 m 時少很多、長很多
+    expect(waves(at(PARK_MIN_KM, pond))).toBeLessThan(waves(at(0.003, pond)) / 4);
+    // 草地上沒有水波、水上沒有草；每次畫都一樣
+    expect(waves(at(0.003, [25.0383215, 121.5608674]))).toBe(0);
+    expect(at(0.003, pond)).not.toContain('woof-grass');
+    expect(at(0.003, pond)).toBe(at(0.003, pond));
+    // 水波跟草用不同的亂數：位置不會跟草一樣
+    const [lat, lng] = toWoof(pond);
+    const rg = (164 * WOOF_KM) / 0.03;
+    expect(ripplePath({ lat, lng }, rg, 200, 200)!.d.slice(0, 40)).not.toBe(grassPath({ lat, lng }, rg, 200, 200)?.d.slice(0, 40));
   });
 
   it('keeps every tuft in place while zooming in (only adds more)', () => {
