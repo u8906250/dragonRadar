@@ -44,16 +44,25 @@ describe('地球的雷達上的中山公園（跟汪星共用一份）', () => {
     for (const cls of ['park-edge', 'park-green', 'park-water', 'park-path street-minor', 'park-building']) expect(at(1, hall)).toMatch(new RegExp(`class="${cls}" d="M`));
   });
 
-  it('draws 孫中山銅像 on the east side of the middle lawn in the square plaza', () => {
-    const statue: [number, number] = [25.04004, 121.55937];
-    const box = (m: string): number[] => /class="park-statue"><rect x="([-\d.]+)" y="([-\d.]+)" width="([\d.]+)"/.exec(m)!.slice(1).map(Number);
-    // 正中間：台座的中心就是雷達中心；1 km 時畫成 9 像素的記號，拉近到 5 公尺是真的 2 公尺見方
-    const [x, y, w] = box(at(1, statue));
-    expect([x + w / 2, y + w / 2, w]).toEqual([C, C, 9]);
-    expect(box(at(0.005, statue))[2]).toBeCloseTo((2 * INNER) / 5, 0);
-    // 在廣場中間那塊草皮（約 8 公尺見方）裡面
+  it('draws 孫中山銅像 standing just east of the middle lawn in the square plaza, level with its middle', () => {
+    const statue: [number, number] = [25.040048, 121.5594];
+    /** 銅像站的地方（畫面上）和放大幾倍（每公尺幾像素） */
+    const place = (m: string): number[] => /class="park-statue" data-at="([-\d.]+) ([-\d.]+)"><g transform="translate\(([-\d.]+) ([-\d.]+)\) scale\(([\d.]+)\)"/.exec(m)!.slice(1).map(Number);
+    // 正中間：站在雷達中心；1 km 時放大成 22 像素高，拉近到 5 公尺是真的大小（每公尺幾像素）
+    const [ax, ay, x, y, k] = place(at(1, statue));
+    expect([ax, ay, x, y]).toEqual([C, C, C, C]);
+    expect(k * 3.64).toBeCloseTo(22, 0);
+    expect(place(at(0.005, statue))[4]).toBeCloseTo(INNER / 5, 0);
+    // 立體的人形：石頭台座三面、銅像（長袍、頭、拐杖）
+    for (const cls of ['statue-stone-front', 'statue-stone-top', 'statue-stone-side', 'statue-body', 'statue-cane', 'statue-arm']) expect(at(1, statue)).toContain(`class="${cls}`);
+    // 廣場中間那塊草皮（約 8 公尺見方）的東邊外面 3 公尺內、南北對齊草皮的中間
     const g = parkGeom(EARTH);
-    expect(g.lawns.some((r) => r.length === 4 && Math.min(...r.map((p) => p[1])) < statue[1] && Math.max(...r.map((p) => p[1])) > statue[1] && Math.min(...r.map((p) => p[0])) < statue[0] && Math.max(...r.map((p) => p[0])) > statue[0])).toBe(true);
+    const mid = g.lawns.find((r) => r.length === 4 && r.some((p) => Math.abs(p[0] - statue[0]) < 0.0001 && Math.abs(p[1] - statue[1]) < 0.0001))!;
+    const east = Math.max(...mid.map((p) => p[1]));
+    const mx = EARTH.mx(statue[0]);
+    expect((statue[1] - east) * mx).toBeGreaterThan(1);
+    expect((statue[1] - east) * mx).toBeLessThan(3);
+    expect(Math.abs(statue[0] - mid.reduce((s, p) => s + p[0], 0) / 4) * EARTH.my).toBeLessThan(0.5);
     // 拉近到別的地方、看不到就不畫
     expect(at(0.01, hall)).not.toContain('park-statue');
     expect(at(2, hall)).not.toContain('park-statue');

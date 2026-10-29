@@ -141,9 +141,39 @@ export interface ParkCanvas {
   at: (lat: number, lng: number) => Pt | null;
 }
 
-/** 孫中山銅像（從上面看）：方的台座、上面圓的銅像，真的台座約 2 公尺見方，畫面上至少 9 像素 */
-const STATUE_M = 2;
-const STATUE_MIN = 9;
+/**
+ * 孫中山銅像：立體的，石頭台座（約 2 公尺寬、1.2 公尺高，看得到上面和右邊）上站著穿長袍、右手拄著拐杖的銅像（約 2.3 公尺高），
+ * 左上照光（左邊亮、右邊暗），地上一塊影子。單位是公尺，(0, 0) 是台座的中心（站的地方），往上是負的；整個約 3.6 公尺高（STATUE_H）。
+ * 不管指北針怎麼轉都站著（radar.ts 照 data-at 轉回來）；真的大小在畫面上太小就放大到 STATUE_MIN 像素高
+ */
+const STATUE_H = 3.64;
+const STATUE_MIN = 22;
+const STATUE_SVG = (() => {
+  const [fx, fy] = [0.175, -1.15];
+  const n = (v: number): number => +v.toFixed(3);
+  const p = (pts: Array<[number, number]>): string => pts.map(([x, y], i) => `${i ? 'L' : 'M'}${n(x)} ${n(y)}`).join('') + 'Z';
+  const at = (x: number, y: number): string => `${n(fx + x)} ${n(fy + y)}`;
+  return (
+    `<ellipse class="statue-shadow" cx="0.55" cy="0.1" rx="1.6" ry="0.38" />` +
+    `<path class="statue-stone-front" d="${p([[-1, -0.95], [1, -0.95], [1, 0.25], [-1, 0.25]])}" />` +
+    `<path class="statue-stone-side" d="${p([[1, -0.95], [1.35, -1.4], [1.35, -0.2], [1, 0.25]])}" />` +
+    `<path class="statue-stone-top" d="${p([[-1, -0.95], [1, -0.95], [1.35, -1.4], [-0.65, -1.4]])}" />` +
+    // 拐杖、左手垂著、右手往前拄著
+    `<path class="statue-cane" d="M${at(0.64, -1.02)}L${at(0.74, -0.02)}" />` +
+    `<path class="statue-arm" d="M${at(-0.33, -1.68)}L${at(-0.42, -0.98)}" />` +
+    `<path class="statue-arm statue-arm-dark" d="M${at(0.33, -1.68)}L${at(0.52, -1.3)}L${at(0.63, -1.02)}" />` +
+    `<ellipse class="statue-dark" cx="${n(fx - 0.13)}" cy="${n(fy - 0.05)}" rx="0.13" ry="0.06" /><ellipse class="statue-dark" cx="${n(fx + 0.13)}" cy="${n(fy - 0.05)}" rx="0.13" ry="0.06" />` +
+    // 長袍：肩膀圓的、下襬寬一點，右邊一半暗、左邊一條亮的，中間一條襟
+    `<path class="statue-body" d="M${at(-0.36, -1.72)}Q${at(-0.36, -1.88)} ${at(-0.12, -1.9)}L${at(0.12, -1.9)}Q${at(0.36, -1.88)} ${at(0.36, -1.72)}L${at(0.42, -0.1)}L${at(-0.42, -0.1)}Z" />` +
+    `<path class="statue-dark" d="M${at(0.06, -1.9)}L${at(0.12, -1.9)}Q${at(0.36, -1.88)} ${at(0.36, -1.72)}L${at(0.42, -0.1)}L${at(0.1, -0.1)}Z" />` +
+    `<path class="statue-lit" d="M${at(-0.3, -1.74)}L${at(-0.35, -0.14)}L${at(-0.24, -0.14)}L${at(-0.19, -1.78)}Z" />` +
+    `<path class="statue-seam" d="M${at(0, -1.86)}L${at(0, -0.12)}" />` +
+    // 脖子、頭（左上一點亮）
+    `<path class="statue-dark" d="${p([[fx - 0.07, fy - 1.97], [fx + 0.07, fy - 1.97], [fx + 0.07, fy - 1.88], [fx - 0.07, fy - 1.88]])}" />` +
+    `<circle class="statue-body" cx="${n(fx)}" cy="${n(fy - 2.09)}" r="0.17" />` +
+    `<circle class="statue-lit" cx="${n(fx - 0.06)}" cy="${n(fy - 2.15)}" r="0.06" />`
+  );
+})();
 
 /**
  * 中山公園：範圍淡淡填色、虛線的邊；拉近到 1.8 km 內再畫草地花圃（淡淡的草綠色、點線的邊）、水面（淡淡的水藍色、虛線的邊）、
@@ -171,10 +201,10 @@ export function parkSvg(g: ParkGeom, c: ParkCanvas): string {
   out += `<path class="park-path street-minor" d="${c.lines(g.paths)}" />`;
   out += `<path class="park-building" d="${c.lines(g.buildings)}" />`;
   const s = c.at(...g.statue);
-  const h = Math.max(STATUE_M * c.ppm, STATUE_MIN) / 2;
-  if (s && Math.hypot(s[0] - c.rx, s[1] - c.ry) - h * Math.SQRT2 < INNER + 2) {
-    const [x, y] = s.map((v) => v.toFixed(1));
-    out += `<g class="park-statue"><rect x="${(s[0] - h).toFixed(1)}" y="${(s[1] - h).toFixed(1)}" width="${(2 * h).toFixed(1)}" height="${(2 * h).toFixed(1)}" /><circle cx="${x}" cy="${y}" r="${(h * 0.45).toFixed(1)}" /></g>`;
+  const k = Math.max(c.ppm, STATUE_MIN / STATUE_H);
+  if (s && Math.hypot(s[0] - c.rx, s[1] - c.ry) - STATUE_H * k < INNER + 2) {
+    const at = `${s[0].toFixed(1)} ${s[1].toFixed(1)}`;
+    out += `<g class="park-statue" data-at="${at}"><g transform="translate(${at}) scale(${+k.toPrecision(4)})">${STATUE_SVG}</g></g>`;
   }
   return out;
 }

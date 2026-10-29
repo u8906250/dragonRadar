@@ -731,6 +731,13 @@ export class Radar {
     this.spaceLayer.innerHTML = this.spaceDraw(this.scaleKm, globeFrac(this.scaleKm) * (R - 8), this.spaceView);
     if (this.heading) this.spaceLayer.setAttribute('transform', `rotate(${(-this.heading).toFixed(1)} ${C} ${C})`);
     else this.spaceLayer.removeAttribute('transform');
+    this.standUp(this.spaceLayer);
+  }
+
+  /** 畫成立體、站著的東西（中山公園的銅像，data-at 是它站的地方）：整層跟著指北針轉了 -heading，它自己轉回來，在畫面上一直站著 */
+  private standUp(layer: SVGGElement): void {
+    if (!this.heading) return;
+    for (const el of layer.querySelectorAll<SVGGElement>('[data-at]')) el.setAttribute('transform', `rotate(${this.heading.toFixed(1)} ${el.dataset.at})`);
   }
 
   /** 手機朝向（0 = 北，順時針）。null 代表關閉指北針，恢復北在上 */
@@ -978,6 +985,7 @@ export class Radar {
     this.parkLayer.innerHTML = svg;
     if (this.heading) this.parkLayer.setAttribute('transform', `rotate(${(-this.heading).toFixed(1)} ${C} ${C})`);
     else this.parkLayer.removeAttribute('transform');
+    this.standUp(this.parkLayer);
   }
 
   private drawOutline(): void {
