@@ -408,8 +408,8 @@ radar.onCar = (id) => selectRoute(id);
 // 太陽系那幾層拖曳移開了視野、拉回地球：「回到我的位置」跟著出現、消失
 radar.onSpaceMove = () => {
   updateHomeBtn();
-  // 從汪星的中山公園（可以放大到 1 公尺以內）回到地球：拉遠到雷達平常的最小範圍
-  if (!radar.spaceFocused && scaleKm < MIN_ZOOM_KM) zoomRadar(MIN_ZOOM_KM / scaleKm, true);
+  // 從汪星的中山公園（可以放大到 1 公尺以內）回到地球：地球上不在中山公園附近就拉遠到雷達平常的最小範圍
+  fitEarthZoom();
 };
 const map = new MapView(
   $('#map'),
@@ -420,6 +420,7 @@ const map = new MapView(
     onPickOrigin: (p) => {
       gpsAccuracy = null;
       setOrigin({ ...p, source: 'manual' });
+      fitEarthZoom();
       map.setPickMode(false);
       pickBtn.classList.remove('on');
       showBanner(bannerEl, '已設定為手動位置');
@@ -822,6 +823,48 @@ function updateStreets(): void {
   radar.setStreets(out);
 }
 
+// ---- 中山公園（park.ts，跟汪星共用一份）：地球的雷達上第一次在公園附近才載入 ----
+let parkMod: typeof import('./park') | null = null;
+let parkLoading = false;
+/** 中山公園大約在哪裡：只用來決定要不要載入 park.ts（畫的位置、範圍、可以放大到多近都在 park.ts） */
+const PARK_NEAR = { lat: 25.0395, lng: 121.5596 };
+
+/** 地球上雷達正中間可以放大到多近：中山公園附近 0.5 公尺（park.ts 載入了才知道），其他地方 MIN_ZOOM_KM */
+function earthMinKm(): number {
+  return parkMod?.nearPark(origin.lat, origin.lng) ? parkMod.PARK_MIN_KM : MIN_ZOOM_KM;
+}
+
+/** 換了位置（回到我的位置、在地圖上設定、從汪星回來）不在中山公園附近了：拉遠到雷達平常的最小範圍 */
+function fitEarthZoom(): void {
+  if (!radar.spaceFocused && scaleKm < earthMinKm()) zoomRadar(earthMinKm() / scaleKm, true);
+}
+
+/** 照雷達正中間（拖曳時每一幀都變）畫 */
+const drawPark = (km: number): string => parkMod?.earthParkSvg(origin, km) ?? '';
+
+/** 公園可能在雷達上（約 18 km 內才畫）才載入、才畫 */
+function updatePark(): void {
+  if (radar.spaceFocused || scaleKm > 20 || haversineKm(origin, PARK_NEAR) > scaleKm * 1.5 + 1) {
+    radar.setPark(null);
+    return;
+  }
+  if (!parkMod) {
+    if (!parkLoading) {
+      parkLoading = true;
+      void import('./park')
+        .then((m) => {
+          parkMod = m;
+          updatePark();
+        })
+        .finally(() => {
+          parkLoading = false;
+        });
+    }
+    return;
+  }
+  radar.setPark(drawPark);
+}
+
 // ---- 太空：比「全球」再拉遠，畫地球、月球、太陽、行星（space.ts，第一次用到才載入；陸地用全世界的海岸線） ----
 let spaceMod: typeof import('./space') | null = null;
 let spaceLoading = false;
@@ -1080,6 +1123,7 @@ function render(): void {
   const drawn = timed.filter((it) => !beforeDeparture(it, now, focused));
   updateOutline();
   updateStreets();
+  updatePark();
   updateSpace();
   updateCategoryToggles(all);
   updateActiveToggle(byCategory, now);
@@ -2603,6 +2647,7 @@ function goHome(): void {
   gpsAccuracy = to.source === 'gps' ? to.accuracy : null;
   setOrigin({ lat: to.lat, lng: to.lng, source: to.source });
   map.setOrigin(origin, true, gpsAccuracy);
+  fitEarthZoom();
 }
 
 /** 「回到我的位置」：手動位置（拖曳雷達、在地圖上設定）、太陽系那幾層移開了視野時，雷達上才出現 */
@@ -2700,7 +2745,7 @@ function switchView(v: 'radar' | 'map'): void {
 const fetchRadiusKm = (km: number): number => (km > FETCH_RADIUS_KM ? WORLD_KM : FETCH_RADIUS_KM);
 
 function scaleKmFor(setting: ScaleSetting): number {
-  if (setting === 'custom') return Math.min(Math.max(customKm, MIN_ZOOM_KM), SPACE_MAX_KM);
+  if (setting === 'custom') return Math.min(Math.max(customKm, earthMinKm()), SPACE_MAX_KM);
   if (setting === 'region') return shuangbeiRadiusKm(origin);
   if (setting === 'taiwan') return taiwanRadiusKm(origin);
   if (setting === 'world') return WORLD_KM;
@@ -2725,10 +2770,10 @@ let zoomFrame = 0;
 function zoomRadar(factor: number, done: boolean, gesture = false): void {
   // 太空（比全球再遠）一次縮放的幅度大一點：從全球到整個太陽系差了幾十萬倍
   const f = gesture && (scaleKm > WORLD_KM || (scaleKm >= WORLD_KM && factor > 1)) ? factor ** 2 : factor;
-  // 太空裡中心換到別的星球（月球、木星…）：最多放大到剛好看得到整顆，汪星可以放大到 1 km，中山公園附近到 0.5 公尺
-  // （放大到比限制還近之後拖離公園：不再放大，可以拉遠）
+  // 太空裡中心換到別的星球（月球、木星…）：最多放大到剛好看得到整顆，汪星可以放大到 1 km，中山公園附近到 0.5 公尺；
+  // 地球上雷達正中間在中山公園附近也是 0.5 公尺（放大到比限制還近之後拖離公園：不再放大，可以拉遠）
   const focus = radar.spaceFocusKey;
-  const minKm = focus && spaceMod ? spaceMod.focusMinKm(focus, radar.spaceViewNow) : MIN_ZOOM_KM;
+  const minKm = focus && spaceMod ? spaceMod.focusMinKm(focus, radar.spaceViewNow) : earthMinKm();
   customKm = Math.min(Math.max(scaleKm * f, Math.min(minKm, scaleKm)), SPACE_MAX_KM);
   if (done) {
     // 中心換到別的星球時不對齊按鈕（按鈕的範圍是以你為中心的）
@@ -2737,7 +2782,8 @@ function zoomRadar(factor: number, done: boolean, gesture = false): void {
       setScale(near);
       return;
     }
-    lsSet(LS_SCALE_KM, customKm.toFixed(2));
+    // 有效數字三位（中山公園附近放大到公尺、公分，小數兩位會存成 0）
+    lsSet(LS_SCALE_KM, String(Number(customKm.toPrecision(3))));
     if (fetchRadiusKm(customKm) !== lastFetchRadius) void refresh();
   }
   if (scaleSetting !== 'custom' || done) {

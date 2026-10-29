@@ -252,6 +252,9 @@ export class Radar {
   private readonly outlineLayer: SVGGElement;
   private streets: RadarStreets | null = null;
   private readonly streetLayer: SVGGElement;
+  /** 地球上的中山公園（park.ts，跟汪星共用）：照雷達外圈的公里數畫成 SVG（北在上）；不在附近是 null */
+  private parkDraw: ((scaleKm: number) => string) | null = null;
+  private readonly parkLayer: SVGGElement;
   private landmarks: RadarLandmark[] = [];
   private cars: RadarCar[] = [];
   private carsKey = '';
@@ -345,6 +348,7 @@ export class Radar {
         <line x1="${C - R}" y1="${C}" x2="${C + R}" y2="${C}" />
       </g>
       <g class="streets" clip-path="url(#rg-clip)"></g>
+      <g class="park" clip-path="url(#rg-clip)"></g>
       <g class="scale-labels"></g>
       <g class="outline" clip-path="url(#rg-clip)"></g>
       <g class="space" clip-path="url(#rg-clip)"></g>
@@ -365,6 +369,7 @@ export class Radar {
     this.outlineLayer = this.svg.querySelector('.outline') as SVGGElement;
     this.spaceLayer = this.svg.querySelector('.space') as SVGGElement;
     this.streetLayer = this.svg.querySelector('.streets') as SVGGElement;
+    this.parkLayer = this.svg.querySelector('.park') as SVGGElement;
     this.landmarkLayer = this.svg.querySelector('.landmarks') as SVGGElement;
     this.carLayer = this.svg.querySelector('.cars') as SVGGElement;
     this.carLayer.addEventListener('click', (e) => {
@@ -791,6 +796,13 @@ export class Radar {
     this.draw();
   }
 
+  /** 地球上的中山公園（畫在街道上面）；null 不畫 */
+  setPark(draw: ((scaleKm: number) => string) | null): void {
+    if (draw === this.parkDraw) return;
+    this.parkDraw = draw;
+    this.draw();
+  }
+
   /** 漂流瓶，畫在光點下面 */
   setBottles(list: RadarBottle[]): void {
     const key = JSON.stringify(list);
@@ -954,6 +966,18 @@ export class Radar {
       py = y;
     }
     return d;
+  }
+
+  /** 中山公園：北在上畫好，整層跟著指北針轉（跟太空一樣）；太空裡不畫 */
+  private drawPark(): void {
+    const svg = this.parkDraw && !this.inSpace ? this.parkDraw(this.scaleKm) : '';
+    if (!svg) {
+      if (this.parkLayer.firstChild) this.parkLayer.replaceChildren();
+      return;
+    }
+    this.parkLayer.innerHTML = svg;
+    if (this.heading) this.parkLayer.setAttribute('transform', `rotate(${(-this.heading).toFixed(1)} ${C} ${C})`);
+    else this.parkLayer.removeAttribute('transform');
   }
 
   private drawOutline(): void {
@@ -1180,6 +1204,7 @@ export class Radar {
     this.flashOf = new WeakMap();
     this.lit = [];
     this.drawStreets();
+    this.drawPark();
     this.drawOutline();
     this.drawSpace();
     this.drawRoutes();

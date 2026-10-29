@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import { fmtKm, globeFrac, RADAR_GEOM, SPACE_FROM_KM } from '../src/radar';
+import { PARK_MIN_KM } from '../src/park';
 import type { StreetLine } from '../src/streets';
-import { atPark, focusMinKm, grassPath, hemiPath, ripplePath, PARK_MIN_KM, WOOF_KM, landPath, moonPosition, nightPath, onWoofLand, ortho, planetPositions, spaceMarkup, subsolar, toWoof } from '../src/space';
+import { atPark, focusMinKm, hemiPath, WOOF_KM, landPath, moonPosition, nightPath, onWoofLand, ortho, planetPositions, spaceMarkup, subsolar, toWoof } from '../src/space';
 
 const diff = (a: number, b: number): number => Math.abs(((((a - b) % 360) + 540) % 360) - 180);
 const lonOf = (when: string, key: string): number => planetPositions(new Date(when)).find((p) => p.key === key)!.lon;
@@ -243,7 +244,7 @@ describe('汪星', () => {
     // 放大很多：畫面外的線、球的邊不畫（虛線整圈有幾百萬公里長，要畫好幾秒）
     expect(m.length).toBeLessThan(40_000);
     expect(woof).not.toContain('space-limb');
-    for (const d of woof.matchAll(/class="(?:space-grat|region-outline open[^"]*|woof-road[^"]*)" d="([^"]*)"/g)) {
+    for (const d of woof.matchAll(/class="(?:space-grat|region-outline open[^"]*|woof-road[^"]*|park-(?:edge|green|water|path|building)[^"]*)" d="([^"]*)"/g)) {
       for (const n of d[1].matchAll(/-?\d+\.\d/g)) expect(Math.abs(Number(n[0]))).toBeLessThan(5_000);
     }
   });
@@ -320,10 +321,10 @@ describe('汪星的中山公園', () => {
 
   it('draws the park in lines once you are close enough', () => {
     const far = spaceMarkup({ ...base, scaleKm: (WOOF_KM * 164) / 131, rg: 164, view: viewAt(hall) });
-    expect(far).toContain('class="woof-park"');
-    expect(far).not.toContain('woof-park-building');
+    expect(far).toContain('class="park-area"');
+    expect(far).not.toContain('park-building');
     const near = spaceMarkup({ ...base, scaleKm: 1, rg: 164, view: viewAt(hall) });
-    for (const cls of ['woof-park-edge', 'woof-park-green', 'woof-park-water', 'woof-park-path', 'woof-park-building']) expect(near).toMatch(new RegExp(`${cls}" d="M`));
+    for (const cls of ['park-edge', 'park-green', 'park-water', 'park-path street-minor', 'park-building']) expect(near).toMatch(new RegExp(`class="${cls}" d="M`));
     // 0.5 公尺：國父紀念館的牆還在畫面上，path 不會太長
     const close = spaceMarkup({ ...base, scaleKm: PARK_MIN_KM, rg: 164, view: viewAt([25.0400096, 121.5595]) });
     expect(close.length).toBeLessThan(60_000);
@@ -332,10 +333,10 @@ describe('汪星的中山公園', () => {
   it('grows tufts of grass on the lawns once you are within a few hundred metres', () => {
     // 東南邊最大的草地裡面
     const lawn: [number, number] = [25.0383215, 121.5608674];
-    const blades = (m: string): number => (/class="woof-grass"[^>]* d="([^"]*)"/.exec(m)?.[1].match(/M/g) ?? []).length;
+    const blades = (m: string): number => (/class="park-grass"[^>]* d="([^"]*)"/.exec(m)?.[1].match(/M/g) ?? []).length;
     const at = (km: number, p: [number, number]): string => spaceMarkup({ ...base, scaleKm: km, rg: 164, view: viewAt(p) });
     // 1 km：草地填草綠色，還沒有草
-    expect(at(1, lawn)).toMatch(/class="woof-lawn" d="M/);
+    expect(at(1, lawn)).toMatch(/class="park-lawn" d="M/);
     expect(blades(at(1, lawn))).toBe(0);
     for (const km of [0.3, 0.03, 0.003, PARK_MIN_KM]) {
       const n = blades(at(km, lawn));
@@ -352,9 +353,9 @@ describe('汪星的中山公園', () => {
   it('fills the pond in water blue and adds ripples once you are close', () => {
     // 映池中間
     const pond: [number, number] = [25.039066, 121.56026];
-    const waves = (m: string): number => (/class="woof-ripple"[^>]* d="([^"]*)"/.exec(m)?.[1].match(/M/g) ?? []).length;
+    const waves = (m: string): number => (/class="park-ripple"[^>]* d="([^"]*)"/.exec(m)?.[1].match(/M/g) ?? []).length;
     const at = (km: number, p: [number, number]): string => spaceMarkup({ ...base, scaleKm: km, rg: 164, view: viewAt(p) });
-    expect(at(1, pond)).toMatch(/class="woof-pond" d="M/);
+    expect(at(1, pond)).toMatch(/class="park-pond" d="M/);
     expect(waves(at(1, pond))).toBe(0);
     for (const km of [0.1, 0.03, 0.003, PARK_MIN_KM]) {
       const n = waves(at(km, pond));
@@ -365,46 +366,22 @@ describe('汪星的中山公園', () => {
     expect(waves(at(PARK_MIN_KM, pond))).toBeLessThan(waves(at(0.003, pond)) / 4);
     // 草地上沒有水波、水上沒有草；每次畫都一樣
     expect(waves(at(0.003, [25.0383215, 121.5608674]))).toBe(0);
-    expect(at(0.003, pond)).not.toContain('woof-grass');
+    expect(at(0.003, pond)).not.toContain('park-grass');
     expect(at(0.003, pond)).toBe(at(0.003, pond));
-    // 水波跟草用不同的亂數：位置不會跟草一樣
-    const [lat, lng] = toWoof(pond);
-    const rg = (164 * WOOF_KM) / 0.03;
-    expect(ripplePath({ lat, lng }, rg, 200, 200)!.d.slice(0, 40)).not.toBe(grassPath({ lat, lng }, rg, 200, 200)?.d.slice(0, 40));
   });
 
   it('draws 翠湖 with its islands cut out', () => {
     const lake: [number, number] = [25.0384268, 121.5593159];
     const island: [number, number] = [25.0383369, 121.558924];
-    const waves = (m: string): number => (/class="woof-ripple"[^>]* d="([^"]*)"/.exec(m)?.[1].match(/M/g) ?? []).length;
+    const waves = (m: string): number => (/class="park-ripple"[^>]* d="([^"]*)"/.exec(m)?.[1].match(/M/g) ?? []).length;
     const at = (km: number, p: [number, number]): string => spaceMarkup({ ...base, scaleKm: km, rg: 164, view: viewAt(p) });
     // 映池一圈、翠湖外框和 6 個小島
-    const fill = /class="woof-pond" d="([^"]*)"/.exec(at(1, lake))![1];
+    const fill = /class="park-pond" d="([^"]*)"/.exec(at(1, lake))![1];
     expect(fill.match(/M/g)).toHaveLength(8);
     expect(waves(at(0.03, lake))).toBeGreaterThan(10);
     expect(waves(at(0.003, lake))).toBeGreaterThan(10);
     // 最大的小島（約 14 × 23 公尺）上面沒有水波
     expect(waves(at(0.003, island))).toBe(0);
-  });
-
-  it('keeps every tuft in place while zooming in (only adds more)', () => {
-    const [lat, lng] = toWoof([25.0383215, 121.5608674]);
-    const { c, inner } = RADAR_GEOM;
-    /** 草的根（球面上的方向，跟放大多少無關） */
-    const roots = (km: number): Array<[number, number]> => {
-      const rg = (164 * WOOF_KM) / km;
-      const g = grassPath({ lat, lng }, rg, c, c)!;
-      return [...g.d.matchAll(/M(-?\d+) (-?\d+)/g)].map((m) => [(Number(m[1]) / 10 - c) / rg, (c - Number(m[2]) / 10) / rg]);
-    };
-    const far = roots(0.03);
-    const near = roots(0.02);
-    // 拉近後還在畫面裡的（離中心不到外圈的 0.6 倍）都還在原來的地方（同一叢的草根左右差一點點）
-    const kept = far.filter(([x, y]) => Math.hypot(x, y) < (0.6 * inner * 0.03) / (164 * WOOF_KM));
-    expect(kept.length).toBeGreaterThan(100);
-    const tol = 3 / ((164 * WOOF_KM) / 0.03);
-    const found = kept.filter(([x, y]) => near.some(([u, v]) => Math.abs(u - x) < tol && Math.abs(v - y) < tol));
-    expect(found.length).toBe(kept.length);
-    expect(near.length).toBeGreaterThan(far.length * 0.9);
   });
 
   it('labels the rings in metres and centimetres', () => {
