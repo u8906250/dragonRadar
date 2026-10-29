@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { globeFrac, SPACE_FROM_KM } from '../src/radar';
-import { landPath, moonPosition, nightPath, ortho, planetPositions, spaceMarkup, subsolar, WOOF_LAND } from '../src/space';
+import { hemiPath, landPath, moonPosition, nightPath, onWoofLand, ortho, planetPositions, spaceMarkup, subsolar, toWoof } from '../src/space';
 
 const diff = (a: number, b: number): number => Math.abs(((((a - b) % 360) + 540) % 360) - 180);
 const lonOf = (when: string, key: string): number => planetPositions(new Date(when)).find((p) => p.key === key)!.lon;
@@ -176,22 +176,89 @@ describe('汪星', () => {
     expect(inner).toContain('data-body="woof"');
     const near = spaceMarkup({ ...base, scaleKm: 20_000, rg: 164, view: { focus: 'woof', yaw: 0, pitch: 0 } });
     const woof = near.slice(near.indexOf('data-body="woof"'));
-    for (const cls of ['space-globe', 'space-grat', 'space-night', 'space-limb']) expect(woof).toContain(cls);
-    // 還沒規劃陸地
-    expect(woof).not.toContain('class="region-outline" d=');
+    for (const cls of ['space-globe', 'space-grat', 'space-night', 'space-limb', 'region-outline', 'county-line']) expect(woof).toContain(cls);
+    // 還小：道路、區名先不畫
+    expect(woof).not.toContain('woof-road');
+    expect(woof).not.toContain('woof-name');
     // 拖曳轉視角：球跟著轉
     const turned = spaceMarkup({ ...base, scaleKm: 20_000, rg: 164, view: { focus: 'woof', yaw: 0.5, pitch: 0.3 } });
     const grat = (m: string): string => /space-grat" d="([^"]+)"/.exec(m.slice(m.indexOf('data-body="woof"')))![1];
     expect(grat(turned)).not.toBe(grat(near));
   });
 
-  it('draws the land once it is planned', () => {
-    WOOF_LAND.push([[10, -20], [10, 20], [-10, 20], [-10, -20]]);
-    try {
-      const near = spaceMarkup({ ...base, scaleKm: 20_000, rg: 164, view: { focus: 'woof', yaw: 0, pitch: 0 } });
-      expect(near.slice(near.indexOf('data-body="woof"'))).toMatch(/class="region-outline" d="M[\d. L]+Z"/);
-    } finally {
-      WOOF_LAND.pop();
+  it('wraps Taipei City around the whole planet, with the sea outside the city', () => {
+    // 市界最西南、最東北的角落
+    const sw = toWoof([24.9605, 121.4571]);
+    const ne = toWoof([25.2103, 121.6659]);
+    for (const [v, want] of [[sw[0], -80], [sw[1], -172], [ne[0], 80], [ne[1], 172]]) expect(Math.abs(v - want)).toBeLessThan(0.1);
+    // 台北車站、台北 101 是陸地，板橋、三重（新北）是海
+    for (const p of [[25.0478, 121.517], [25.034, 121.5645]] as Array<[number, number]>) expect(onWoofLand(...toWoof(p))).toBe(true);
+    for (const p of [[25.0143, 121.4627], [25.0615, 121.4875]] as Array<[number, number]>) expect(onWoofLand(...toWoof(p))).toBe(false);
+    // 南北極、背面的接縫是海
+    expect(onWoofLand(89, 0)).toBe(false);
+    expect(onWoofLand(0, 179)).toBe(false);
+  });
+
+  it('draws the city in lines like Taipei on the radar: coast, districts, roads and district names', () => {
+    // 正中間轉到台北車站
+    const [lat, lng] = toWoof([25.0478, 121.517]);
+    const near = spaceMarkup({ ...base, scaleKm: 6_000, rg: 164, view: { focus: 'woof', yaw: (-lng * Math.PI) / 180, pitch: (lat * Math.PI) / 180 } });
+    const woof = near.slice(near.indexOf('data-body="woof"'));
+    expect(woof).toMatch(/class="region-outline" d="M[\d. L]+Z"/);
+    expect(woof).toMatch(/class="woof-road street-major" d="M/);
+    expect(woof).toMatch(/class="woof-road street-minor" d="M/);
+    expect(woof).toContain('>中正區<');
+    // 另一面的區不寫
+    expect(woof).not.toContain('>內湖區<');
+    // 沒有填顏色的底
+    expect(woof).not.toContain('fill="#');
+  });
+});
+
+describe('hemiPath', () => {
+  /** 平面上的長方形（逆時針，每 2 度一個點），[緯度, 經度] */
+  const box = (lat0: number, lat1: number, lng0: number, lng1: number): Array<[number, number]> => {
+    const out: Array<[number, number]> = [];
+    for (let x = lng0; x < lng1; x += 2) out.push([lat0, x]);
+    for (let y = lat0; y < lat1; y += 2) out.push([y, lng1]);
+    for (let x = lng1; x > lng0; x -= 2) out.push([lat1, x]);
+    for (let y = lat1; y > lat0; y -= 2) out.push([y, lng0]);
+    return out;
+  };
+  /** path 圍起來的面積（半徑 1）和有幾塊 */
+  const areaOf = (d: string, rg: number): { area: number; parts: number } => {
+    let area = 0;
+    const parts = d.split('M').filter(Boolean);
+    for (const part of parts) {
+      const pts = [...part.matchAll(/(-?[\d.]+) (-?[\d.]+)/g)].map((m) => [Number(m[1]), Number(m[2])]);
+      for (let i = 0; i < pts.length; i++) {
+        const [a, b] = [pts[i], pts[(i + 1) % pts.length]];
+        area += (a[0] * b[1] - b[0] * a[1]) / 2;
+      }
     }
+    return { area: Math.abs(area) / (rg * rg), parts: parts.length };
+  };
+  const band = box(-60, 60, -170, 170);
+
+  it('draws land bigger than half the globe on the right side of the coast', () => {
+    // 正面整片都是陸地，只有南北緯 60 度以外是海
+    const front = areaOf(hemiPath({ lat: 0, lng: 0 }, band, 100, true), 100);
+    expect(front.area).toBeCloseTo(Math.PI - 2 * (Math.acos(Math.sqrt(3) / 2) - Math.sqrt(3) / 4), 1);
+    // 背面：中間有一條 20 度寬的海，陸地分成左右兩塊
+    const back = areaOf(hemiPath({ lat: 0, lng: 180 }, band, 100, false), 100);
+    expect(back.parts).toBe(2);
+    expect(back.area).toBeCloseTo(2.446, 1);
+  });
+
+  it('fills the whole face when the coast is all on the other side and the middle is land', () => {
+    const ring: Array<[number, number]> = [[-85, -175], [-85, 175], [85, 175], [85, -175]];
+    expect(hemiPath({ lat: 0, lng: 0 }, ring, 100, true)).toContain('A100 100');
+    expect(hemiPath({ lat: 0, lng: 0 }, ring, 100, false)).toBe('');
+  });
+
+  it('keeps a small island as is', () => {
+    const d = hemiPath({ lat: 0, lng: 0 }, box(-10, 10, -20, 20), 100, false);
+    expect(d.match(/M/g)).toHaveLength(1);
+    expect(areaOf(d, 100).area).toBeGreaterThan(0.1);
   });
 });

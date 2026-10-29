@@ -5,6 +5,7 @@
  */
 import type { LatLng } from './geo';
 import { RADAR_GEOM, TINY_EARTH } from './radar';
+import { TAIPEI_DISTRICT_LINES, TAIPEI_DISTRICTS, TAIPEI_MAJOR_ROADS, TAIPEI_MINOR_ROADS, TAIPEI_OUTLINE } from './taipei';
 
 const { c: C, inner: INNER } = RADAR_GEOM;
 const RAD = Math.PI / 180;
@@ -110,10 +111,10 @@ export function landPath(center: LatLng, rings: Array<Array<[number, number]>>, 
   return d;
 }
 
-/** 經緯線：每 30 度一條，另一面的不畫 */
-function graticule(center: LatLng, rg: number): string {
+/** 線（每條是一串「緯度, 經度」）看得到這一面的部分，轉到另一面就斷開 */
+function linesPath(center: LatLng, lines: Array<Array<[number, number]>>, rg: number): string {
   let d = '';
-  const line = (pts: Array<[number, number]>): void => {
+  for (const pts of lines) {
     let pen = false;
     for (const [lat, lng] of pts) {
       const [x, y, z] = ortho(center, lat, lng);
@@ -124,11 +125,17 @@ function graticule(center: LatLng, rg: number): string {
       d += `${pen ? 'L' : 'M'}${at(x, y, rg)}`;
       pen = true;
     }
-  };
-  const steps = (from: number, to: number, step: number): number[] => Array.from({ length: Math.round((to - from) / step) + 1 }, (_, i) => from + i * step);
-  for (let lng = -180; lng < 180; lng += 30) line(steps(-90, 90, 3).map((lat) => [lat, lng]));
-  for (let lat = -60; lat <= 60; lat += 30) line(steps(-180, 180, 3).map((lng) => [lat, lng]));
+  }
   return d;
+}
+
+/** 經緯線：每 30 度一條，另一面的不畫 */
+function graticule(center: LatLng, rg: number): string {
+  const lines: Array<Array<[number, number]>> = [];
+  const steps = (from: number, to: number, step: number): number[] => Array.from({ length: Math.round((to - from) / step) + 1 }, (_, i) => from + i * step);
+  for (let lng = -180; lng < 180; lng += 30) lines.push(steps(-90, 90, 3).map((lat) => [lat, lng]));
+  for (let lat = -60; lat <= 60; lat += 30) lines.push(steps(-180, 180, 3).map((lng) => [lat, lng]));
+  return linesPath(center, lines, rg);
 }
 
 /**
@@ -220,10 +227,131 @@ export function planetPositions(when: Date): Array<{ key: string; name: string; 
 }
 
 /**
- * 汪星表面的陸地（跟地球的海岸線一樣：每一塊是一圈「緯度, 經度」），還沒規劃，現在是空的；
- * 放大到看得出形狀時跟地球一樣畫（淡淡填色、虛線海岸）
+ * 汪星的地表是台北市：市界的範圍攤開包住整顆汪星（緯度 ±80 度、經度 ±172 度，像把平面地圖貼到地球儀上，東西向拉寬了），
+ * 市界外面是海，南北極和背面接縫的地方也是海
  */
-export const WOOF_LAND: Array<Array<[number, number]>> = [];
+const TP = {
+  lat0: Math.min(...TAIPEI_OUTLINE.map((p) => p[0])),
+  lat1: Math.max(...TAIPEI_OUTLINE.map((p) => p[0])),
+  lng0: Math.min(...TAIPEI_OUTLINE.map((p) => p[1])),
+  lng1: Math.max(...TAIPEI_OUTLINE.map((p) => p[1])),
+};
+/** 台北市的經緯度 → 汪星的經緯度 */
+export const toWoof = ([lat, lng]: [number, number]): [number, number] => [
+  -80 + (160 * (lat - TP.lat0)) / (TP.lat1 - TP.lat0),
+  -172 + (344 * (lng - TP.lng0)) / (TP.lng1 - TP.lng0),
+];
+
+/** 每段切到 2 度以內（轉到另一面的地方才算得準）；closed 是一圈，最後一點接回第一點 */
+function densify(pts: Array<[number, number]>, closed = false): Array<[number, number]> {
+  const out: Array<[number, number]> = [];
+  const n = closed ? pts.length : pts.length - 1;
+  for (let i = 0; i < n; i++) {
+    const [a, b] = [pts[i], pts[(i + 1) % pts.length]];
+    const k = Math.max(1, Math.ceil(Math.max(Math.abs(b[0] - a[0]), Math.abs(b[1] - a[1])) / 2));
+    for (let j = 0; j < k; j++) out.push([a[0] + ((b[0] - a[0]) * j) / k, a[1] + ((b[1] - a[1]) * j) / k]);
+  }
+  if (!closed) out.push(pts[pts.length - 1]);
+  return out;
+}
+
+/** 平面上的有向面積（x 經度、y 緯度）：正的是逆時針 */
+const ringArea = (r: Array<[number, number]>): number => r.reduce((s, p, i) => s + p[1] * r[(i + 1) % r.length][0] - r[(i + 1) % r.length][1] * p[0], 0) / 2;
+
+/** 汪星的陸地（市界）：逆時針，陸地在海岸線的左手邊 */
+export const WOOF_LAND: Array<Array<[number, number]>> = [TAIPEI_OUTLINE].map((r) => {
+  const ring = densify(r.map(toWoof), true);
+  return ringArea(ring) < 0 ? ring.reverse() : ring;
+});
+const woofLines = (lines: Array<Array<[number, number]>>): Array<Array<[number, number]>> => lines.map((l) => densify(l.map(toWoof)));
+const WOOF_DISTRICT_LINES = woofLines(TAIPEI_DISTRICT_LINES);
+const WOOF_MAJOR_ROADS = woofLines(TAIPEI_MAJOR_ROADS);
+const WOOF_MINOR_ROADS = woofLines(TAIPEI_MINOR_ROADS);
+const WOOF_NAMES = TAIPEI_DISTRICTS.map((d) => ({ name: d.name, at: toWoof(d.at) }));
+
+/** 汪星上這個地方是不是陸地（陸地不會跨過南北極和背面的接縫，所以照平面的經緯度算就好） */
+export function onWoofLand(lat: number, lng: number): boolean {
+  let inside = false;
+  for (const ring of WOOF_LAND) {
+    for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
+      const [ya, xa] = ring[i];
+      const [yb, xb] = ring[j];
+      if (ya > lat !== yb > lat && lng < xa + ((lat - ya) * (xb - xa)) / (yb - ya)) inside = !inside;
+    }
+  }
+  return inside;
+}
+
+/**
+ * 陸地在看得到這一面的部分（ring 要逆時針）：海岸線轉到另一面的地方沿著球的邊緣走，從轉過去的地方逆時針走到下一個轉回來的地方
+ * （陸地在海岸線的左手邊，往外走的左手邊就是邊緣的逆時針方向）；整圈都在另一面的，正中間在陸地上（centerOnLand）就整面都是陸地。
+ * 陸地比半個球大也畫得對（landPath 是走不到半圈的那邊，只適合地球的大陸）
+ */
+export function hemiPath(center: LatLng, ring: Array<[number, number]>, rg: number, centerOnLand: boolean): string {
+  const pts = ring.map(([lat, lng]) => ortho(center, lat, lng));
+  const n = pts.length;
+  const start = pts.findIndex((p) => p[2] > 0);
+  if (start < 0) return centerOnLand ? `M${at(1, 0, rg)}A${rg} ${rg} 0 1 0 ${at(-1, 0, rg)}A${rg} ${rg} 0 1 0 ${at(1, 0, rg)}Z` : '';
+  /** 海岸線和邊緣的交點（邊緣上的角度） */
+  const cross = (a: Vec3, b: Vec3): number => {
+    const t = a[2] / (a[2] - b[2]);
+    return Math.atan2(a[1] + t * (b[1] - a[1]), a[0] + t * (b[0] - a[0]));
+  };
+  // 看得到的一段段海岸線：from 是從邊緣轉回來的角度、to 是轉過去的角度
+  type Piece = { d: string[]; from: number; to: number };
+  const pieces: Piece[] = [];
+  let cur: Piece | null = { d: [], from: NaN, to: NaN };
+  for (let i = 0; i < n; i++) {
+    const a = pts[(start + i) % n];
+    const b = pts[(start + i + 1) % n];
+    if (a[2] > 0) {
+      cur!.d.push(at(a[0], a[1], rg));
+      if (b[2] <= 0) {
+        cur!.to = cross(a, b);
+        cur!.d.push(at(Math.cos(cur!.to), Math.sin(cur!.to), rg));
+        pieces.push(cur!);
+        cur = null;
+      }
+    } else if (b[2] > 0) {
+      const from = cross(a, b);
+      cur = { d: [at(Math.cos(from), Math.sin(from), rg)], from, to: NaN };
+    }
+  }
+  // 整圈都看得到
+  if (pieces.length === 0) return `M${cur!.d.join('L')}Z`;
+  // 從看得到的點開始繞，最後一段（轉回來之後）接上第一段
+  if (cur) {
+    pieces[0].d = [...cur.d, ...pieces[0].d];
+    pieces[0].from = cur.from;
+  }
+  const TAU = 2 * Math.PI;
+  let d = '';
+  const used = new Set<number>();
+  for (let first = 0; first < pieces.length; first++) {
+    if (used.has(first)) continue;
+    let i = first;
+    d += `M${pieces[i].d.join('L')}`;
+    used.add(i);
+    for (;;) {
+      // 沿著邊緣逆時針走到最近的轉回來的地方
+      const to = pieces[i].to;
+      let next = first;
+      let best = Infinity;
+      pieces.forEach((p, j) => {
+        const delta = (((p.from - to) % TAU) + TAU) % TAU;
+        if (delta < best) [best, next] = [delta, j];
+      });
+      const steps = Math.ceil(best / 0.05);
+      for (let k = 1; k < steps; k++) d += `L${at(Math.cos(to + (best * k) / steps), Math.sin(to + (best * k) / steps), rg)}`;
+      if (next === first || used.has(next)) break;
+      i = next;
+      used.add(i);
+      d += `L${pieces[i].d.join('L')}`;
+    }
+    d += 'Z';
+  }
+  return d;
+}
 
 /** 一顆行星的整圈軌道（日心，AU） */
 function orbitPath(key: string, when: Date): Vec3[] {
@@ -339,18 +467,33 @@ function bodySvg(key: string, x: number, y: number, r: number, sun: { x: number;
 const sub = (a: Vec3, b: Vec3): Vec3 => [a[0] - b[0], a[1] - b[1], a[2] - b[2]];
 
 /**
- * 汪星畫成跟地球一樣的球：正射投影，經緯線每 30 度（夠大才畫）、陸地（WOOF_LAND）、虛線的邊，
- * 夜晚那一半照太陽真正的方向（toSun：看的人的座標）。正中間的經緯度跟著視角轉：左右拖轉經度、上下拖轉緯度
+ * 汪星畫成跟地球一樣的球：正射投影，地表是台北市（WOOF_LAND），跟雷達畫台北一樣只用線條：
+ * 市界是海岸（虛線，陸地淡淡填色，外面空白是海）、區界、道路（國道、快速道路粗線，主要幹道細線），夠大才畫道路、寫區名；
+ * 經緯線每 30 度（夠大才畫）、虛線的邊，夜晚那一半照太陽真正的方向（toSun：看的人的座標）。
+ * 正中間的經緯度跟著視角轉：左右拖轉經度、上下拖轉緯度
  */
 function woofGlobe(x: number, y: number, r: number, view: SpaceView, toSun: Vec3): string {
   const center = { lat: Math.max(-80, Math.min(80, view.pitch / RAD)), lng: norm180(-view.yaw / RAD) };
   const n = Math.hypot(...toSun) || 1;
-  let out = `<circle class="space-planet space-globe" cx="${f1(C)}" cy="${f1(C)}" r="${f1(r)}" fill="${LOOKS.woof.tint}" />`;
+  let out = '';
   if (r >= 30) out += `<path class="space-grat" d="${graticule(center, r)}" />`;
-  if (WOOF_LAND.length > 0) out += `<path class="region-outline" d="${landPath(center, WOOF_LAND, r)}" />`;
+  const land = WOOF_LAND.map((ring) => hemiPath(center, ring, r, onWoofLand(center.lat, center.lng))).join('');
+  if (land) out += `<path class="region-outline" d="${land}" />`;
+  if (r >= 30) out += `<path class="region-outline open county-line" d="${linesPath(center, WOOF_DISTRICT_LINES, r)}" />`;
+  if (r >= 60) {
+    out += `<path class="woof-road street-minor" d="${linesPath(center, WOOF_MINOR_ROADS, r)}" />`;
+    out += `<path class="woof-road street-major" d="${linesPath(center, WOOF_MAJOR_ROADS, r)}" />`;
+  }
   out += `<path class="space-night" d="${nightFrom([toSun[0] / n, toSun[1] / n, toSun[2] / n], r)}" />`;
+  // 區名：轉到邊邊擠在一起的不寫
+  if (r >= 80) {
+    for (const d of WOOF_NAMES) {
+      const [px, py, pz] = ortho(center, d.at[0], d.at[1]);
+      if (pz > 0.35) out += `<text class="space-label woof-name" x="${f1(C + r * px)}" y="${f1(C - r * py + 4)}" text-anchor="middle">${d.name}</text>`;
+    }
+  }
   out += `<circle class="region-outline open space-limb" cx="${f1(C)}" cy="${f1(C)}" r="${f1(r)}" />`;
-  return `<g transform="translate(${f1(x - C)} ${f1(y - C)})">${out}</g>`;
+  return `<g class="space-globe" transform="translate(${f1(x - C)} ${f1(y - C)})">${out}</g>`;
 }
 
 /** 太陽系那幾層的看法：中心是哪一顆（null 是地球、你）、繞著中心左右轉幾度、往下傾斜幾度（0 是從黃道北邊正上方往下看） */
