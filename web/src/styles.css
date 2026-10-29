@@ -438,6 +438,12 @@ a.chip { display: inline-flex; align-items: center; text-decoration: none; }
 .radar .space-mare { fill: #6f6b64; fill-opacity: 0.35; stroke: none; }
 /* 汪星的地表（台北市）：道路跟雷達的街道一樣（粗細、深淺照 street-major、street-minor） */
 .radar .region-outline.woof-land { stroke: none; }
+/* 汪星的中山公園：範圍淡淡填色、虛線的邊；建築實線、映池虛線、草地花圃很淡的點線，步道跟街道的細線一樣 */
+.radar .woof-park { fill: var(--accent); fill-opacity: 0.1; stroke: none; pointer-events: none; }
+.radar .woof-park-edge { fill: none; stroke: var(--accent); stroke-width: 1.2; stroke-opacity: 0.6; stroke-dasharray: 2 2; pointer-events: none; }
+.radar .woof-park-building { fill: none; stroke: var(--radar-grid); stroke-width: 1; stroke-opacity: 0.55; stroke-linejoin: round; pointer-events: none; }
+.radar .woof-park-water { fill: none; stroke: var(--accent); stroke-width: 1; stroke-opacity: 0.6; stroke-dasharray: 3 2; pointer-events: none; }
+.radar .woof-park-green { fill: none; stroke: var(--radar-grid); stroke-width: 0.6; stroke-opacity: 0.3; stroke-dasharray: 1 2; pointer-events: none; }
 .radar .woof-road { fill: none; stroke: var(--radar-grid); stroke-linejoin: round; stroke-linecap: round; pointer-events: none; }
 /* 點星球飛過去 */
 .radar .space-hit { cursor: pointer; }

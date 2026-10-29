@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
-import { globeFrac, RADAR_GEOM, SPACE_FROM_KM } from '../src/radar';
+import { fmtKm, globeFrac, RADAR_GEOM, SPACE_FROM_KM } from '../src/radar';
 import type { StreetLine } from '../src/streets';
-import { focusMinKm, hemiPath, WOOF_KM, landPath, moonPosition, nightPath, onWoofLand, ortho, planetPositions, spaceMarkup, subsolar, toWoof } from '../src/space';
+import { atPark, focusMinKm, hemiPath, PARK_MIN_KM, WOOF_KM, landPath, moonPosition, nightPath, onWoofLand, ortho, planetPositions, spaceMarkup, subsolar, toWoof } from '../src/space';
 
 const diff = (a: number, b: number): number => Math.abs(((((a - b) % 360) + 540) % 360) - 180);
 const lonOf = (when: string, key: string): number => planetPositions(new Date(when)).find((p) => p.key === key)!.lon;
@@ -222,18 +222,24 @@ describe('汪星', () => {
     const view = { focus: 'woof', yaw: (-1.5 * Math.PI) / 180, pitch: (30 * Math.PI) / 180 };
     const m = spaceMarkup({ ...base, scaleKm: 1, rg: 164, view });
     const woof = m.slice(m.indexOf('data-body="woof"'));
-    const grat = /space-grat" d="([^"]+)"/.exec(woof)![1];
     const C = RADAR_GEOM.c;
-    let best = Infinity;
-    for (const part of grat.split('M').filter(Boolean)) {
-      const pts = [...part.matchAll(/(-?[\d.]+) (-?[\d.]+)/g)].map((x) => [Number(x[1]), Number(x[2])]);
-      for (let i = 0; i + 1 < pts.length; i++) {
-        const [a, b] = [pts[i], pts[i + 1]];
-        const t = Math.max(0, Math.min(1, ((C - a[0]) * (b[0] - a[0]) + (C - a[1]) * (b[1] - a[1])) / ((b[0] - a[0]) ** 2 + (b[1] - a[1]) ** 2 || 1)));
-        best = Math.min(best, Math.hypot(a[0] + t * (b[0] - a[0]) - C, a[1] + t * (b[1] - a[1]) - C));
+    /** 經緯線離正中間最近多遠 */
+    const gap = (markup: string): number => {
+      const grat = /space-grat" d="([^"]+)"/.exec(markup)![1];
+      let best = Infinity;
+      for (const part of grat.split('M').filter(Boolean)) {
+        const pts = [...part.matchAll(/(-?[\d.]+) (-?[\d.]+)/g)].map((x) => [Number(x[1]), Number(x[2])]);
+        for (let i = 0; i + 1 < pts.length; i++) {
+          const [a, b] = [pts[i], pts[i + 1]];
+          const t = Math.max(0, Math.min(1, ((C - a[0]) * (b[0] - a[0]) + (C - a[1]) * (b[1] - a[1])) / ((b[0] - a[0]) ** 2 + (b[1] - a[1]) ** 2 || 1)));
+          best = Math.min(best, Math.hypot(a[0] + t * (b[0] - a[0]) - C, a[1] + t * (b[1] - a[1]) - C));
+        }
       }
-    }
-    expect(best).toBeLessThan(2);
+      return best;
+    };
+    expect(gap(woof)).toBeLessThan(2);
+    // 放大到 0.5 公尺（中山公園那種）：每 3 度一點的弦在這裡差將近 1 公尺，要切細才會通過正中間
+    expect(gap(spaceMarkup({ ...base, scaleKm: PARK_MIN_KM, rg: 164, view }))).toBeLessThan(2);
     // 放大很多：畫面外的線、球的邊不畫（虛線整圈有幾百萬公里長，要畫好幾秒）
     expect(m.length).toBeLessThan(40_000);
     expect(woof).not.toContain('space-limb');
@@ -291,6 +297,46 @@ describe('汪星的台北街道', () => {
     expect(spaceMarkup({ ...base, scaleKm: 1.2, rg: 164, view, streets: () => null })).toBe(builtIn);
     const sea = spaceMarkup({ ...base, scaleKm: 1.2, rg: 164, view, streets: () => ({ lines: [banqiao], pending: 0 }) });
     expect(roads(sea, 'minor')).toBe('');
+  });
+});
+
+describe('汪星的中山公園', () => {
+  const base = { center: { lat: 25.04, lng: 121.52 }, land: [] as Array<Array<[number, number]>>, when: new Date('2026-10-28T08:00:00Z') };
+  /** 正中間轉到台北的這個地方 */
+  const viewAt = (p: [number, number]): { focus: string; yaw: number; pitch: number } => {
+    const [lat, lng] = toWoof(p);
+    return { focus: 'woof', yaw: (-lng * Math.PI) / 180, pitch: (lat * Math.PI) / 180 };
+  };
+  const hall: [number, number] = [25.0400096, 121.5602923];
+
+  it('lets you zoom in to 0.5 m only around the park', () => {
+    expect(atPark(viewAt(hall))).toBe(true);
+    expect(focusMinKm('woof', viewAt(hall))).toBe(PARK_MIN_KM);
+    // 台北車站、沒給視角：1 km
+    expect(focusMinKm('woof', viewAt([25.0478, 121.517]))).toBe(1);
+    expect(focusMinKm('woof')).toBe(1);
+    expect(PARK_MIN_KM * 1000).toBeLessThan(1);
+  });
+
+  it('draws the park in lines once you are close enough', () => {
+    const far = spaceMarkup({ ...base, scaleKm: (WOOF_KM * 164) / 131, rg: 164, view: viewAt(hall) });
+    expect(far).toContain('class="woof-park"');
+    expect(far).not.toContain('woof-park-building');
+    const near = spaceMarkup({ ...base, scaleKm: 1, rg: 164, view: viewAt(hall) });
+    for (const cls of ['woof-park-edge', 'woof-park-green', 'woof-park-water', 'woof-park-path', 'woof-park-building']) expect(near).toMatch(new RegExp(`${cls}" d="M`));
+    // 0.5 公尺：國父紀念館的牆還在畫面上，path 不會太長
+    const close = spaceMarkup({ ...base, scaleKm: PARK_MIN_KM, rg: 164, view: viewAt([25.0400096, 121.5595]) });
+    expect(close.length).toBeLessThan(60_000);
+  });
+
+  it('labels the rings in metres and centimetres', () => {
+    expect(fmtKm(PARK_MIN_KM)).toBe('50 cm');
+    expect(fmtKm(PARK_MIN_KM / 4)).toBe('13 cm');
+    expect(fmtKm(0.001)).toBe('1 m');
+    expect(fmtKm(0.0025)).toBe('2.5 m');
+    expect(fmtKm(0.05)).toBe('50 m');
+    expect(fmtKm(0.5)).toBe('0.5 km');
+    expect(fmtKm(1)).toBe('1 km');
   });
 });
 

@@ -148,7 +148,8 @@ const WORLD_KM = SPACE_FROM_KM;
 /** 太空最遠拉到哪：整個太陽系（海王星的軌道離地球最遠約 31 AU） */
 const SPACE_MAX_KM = 5e9;
 const MIN_ZOOM_KM = 0.5;
-let customKm = Number(lsGet(LS_SCALE_KM)) || 10;
+// 汪星的中山公園可以放大到 1 公尺以內，重新整理後回到地球：至少是雷達平常的最小範圍
+let customKm = Math.max(MIN_ZOOM_KM, Number(lsGet(LS_SCALE_KM)) || 10);
 let scaleSetting: ScaleSetting = ([...SCALE_SETTINGS, 'custom'] as string[]).includes(lsGet(LS_SCALE) ?? '') ? (lsGet(LS_SCALE) as ScaleSetting) : 'region';
 let scaleKm = 5;
 let view: 'radar' | 'map' = 'radar';
@@ -405,7 +406,11 @@ const radar = new Radar(
 // 點了車掃的車子：打開那條車掃的時間表
 radar.onCar = (id) => selectRoute(id);
 // 太陽系那幾層拖曳移開了視野、拉回地球：「回到我的位置」跟著出現、消失
-radar.onSpaceMove = () => updateHomeBtn();
+radar.onSpaceMove = () => {
+  updateHomeBtn();
+  // 從汪星的中山公園（可以放大到 1 公尺以內）回到地球：拉遠到雷達平常的最小範圍
+  if (!radar.spaceFocused && scaleKm < MIN_ZOOM_KM) zoomRadar(MIN_ZOOM_KM / scaleKm, true);
+};
 const map = new MapView(
   $('#map'),
   origin,
@@ -2720,10 +2725,11 @@ let zoomFrame = 0;
 function zoomRadar(factor: number, done: boolean, gesture = false): void {
   // 太空（比全球再遠）一次縮放的幅度大一點：從全球到整個太陽系差了幾十萬倍
   const f = gesture && (scaleKm > WORLD_KM || (scaleKm >= WORLD_KM && factor > 1)) ? factor ** 2 : factor;
-  // 太空裡中心換到別的星球（月球、木星…）：最多放大到剛好看得到整顆，汪星可以放大到 1 km
+  // 太空裡中心換到別的星球（月球、木星…）：最多放大到剛好看得到整顆，汪星可以放大到 1 km，中山公園附近到 0.5 公尺
+  // （放大到比限制還近之後拖離公園：不再放大，可以拉遠）
   const focus = radar.spaceFocusKey;
-  const minKm = focus && spaceMod ? spaceMod.focusMinKm(focus) : MIN_ZOOM_KM;
-  customKm = Math.min(Math.max(scaleKm * f, minKm), SPACE_MAX_KM);
+  const minKm = focus && spaceMod ? spaceMod.focusMinKm(focus, radar.spaceViewNow) : MIN_ZOOM_KM;
+  customKm = Math.min(Math.max(scaleKm * f, Math.min(minKm, scaleKm)), SPACE_MAX_KM);
   if (done) {
     // 中心換到別的星球時不對齊按鈕（按鈕的範圍是以你為中心的）
     const near = radar.spaceFocused ? undefined : SCALE_SETTINGS.find((st) => Math.abs(scaleKmFor(st) / customKm - 1) < 0.06);

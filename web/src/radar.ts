@@ -158,11 +158,17 @@ function radiusRatio(km: number, scaleKm: number): number {
   return km / scaleKm;
 }
 
-function fmtKm(km: number): string {
+export function fmtKm(km: number): string {
   // 太空：幾萬、幾億公里
   if (km >= 1e8) return `${(km / 1e8).toFixed(km >= 1e9 ? 0 : 1)} 億 km`;
   if (km >= 1e5) return `${Math.round(km / 1e4)} 萬 km`;
   if (km >= 10) return `${Math.round(km)} km`;
+  // 汪星的中山公園可以放大到 1 公尺以內：100 公尺內寫公尺、公分
+  if (km < 0.1) {
+    const m = km * 1000;
+    if (m < 1) return `${Math.round(m * 100)} cm`;
+    return `${m >= 10 ? Math.round(m) : Number.isInteger(m) ? m : m.toFixed(1)} m`;
+  }
   return `${Number.isInteger(km) ? km : km.toFixed(1)} km`;
 }
 
@@ -673,6 +679,11 @@ export class Radar {
   /** 中心是哪一顆（null 是地球、你） */
   get spaceFocusKey(): string | null {
     return this.spaceView.focus;
+  }
+
+  /** 太陽系那幾層現在的看法（中心、轉的角度） */
+  get spaceViewNow(): SpaceView {
+    return { ...this.spaceView };
   }
 
   /** 回到地球、從正上方看 */
