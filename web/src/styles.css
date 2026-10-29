@@ -436,6 +436,10 @@ a.chip { display: inline-flex; align-items: center; text-decoration: none; }
 .radar .space-cap { fill: #ffffff; fill-opacity: 0.85; stroke: none; }
 .radar .space-shade { fill: #000000; fill-opacity: 0.32; stroke: none; }
 .radar .space-mare { fill: #6f6b64; fill-opacity: 0.35; stroke: none; }
+/* 汪星球：垂耳、嘴巴、眼睛鼻子 */
+.radar .space-ear { fill: #8a5a33; fill-opacity: 0.9; stroke: var(--radar-grid); stroke-opacity: 0.7; stroke-width: 0.8; }
+.radar .space-snout { fill: #f3dcb8; fill-opacity: 0.9; stroke: none; }
+.radar .space-face { fill: #2b2118; stroke: none; }
 /* 點星球飛過去 */
 .radar .space-hit { cursor: pointer; }
 .radar .space-hit .hit { fill: transparent; pointer-events: all; }

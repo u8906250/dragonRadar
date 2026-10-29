@@ -168,6 +168,8 @@ const PLANETS: Array<{ key: string; name: string; el: Elements }> = [
   { key: 'mercury', name: '水星', el: [0.38709927, 0.00000037, 0.20563593, 0.00001906, 7.00497902, -0.00594749, 252.2503235, 149472.67411175, 77.45779628, 0.16047689, 48.33076593, -0.12534081] },
   { key: 'venus', name: '金星', el: [0.72333566, 0.0000039, 0.00677672, -0.00004107, 3.39467605, -0.0007889, 181.9790995, 58517.81538729, 131.60246718, 0.00268329, 76.67984255, -0.27769418] },
   { key: 'earth', name: '地球', el: [1.00000261, 0.00000562, 0.01671123, -0.00004392, -0.00001531, -0.01294668, 100.46457166, 35999.37244981, 102.93768193, 0.32327364, 0, 0] },
+  // 汪星球：不是真的行星，放在地球和火星之間（1.26 AU，照克卜勒定律約 1.4 年繞一圈）
+  { key: 'woof', name: '汪星球', el: [1.26, 0, 0.03, 0, 1.2, 0, 140, 25453, 60, 0, 80, 0] },
   { key: 'mars', name: '火星', el: [1.52371034, 0.00001847, 0.0933941, 0.00007882, 1.84969142, -0.00813131, -4.55343205, 19140.30268499, -23.94362959, 0.44441088, 49.55953891, -0.29257343] },
   { key: 'jupiter', name: '木星', el: [5.202887, -0.00011607, 0.04838624, -0.00013253, 1.30439695, -0.00183714, 34.39644051, 3034.74612775, 14.72847983, 0.21252668, 100.47390909, 0.20469106] },
   { key: 'saturn', name: '土星', el: [9.53667594, -0.0012506, 0.05386179, -0.00050991, 2.48599187, 0.00193609, 49.95424423, 1222.49362201, 92.59887831, -0.41897216, 113.66242448, -0.28867794] },
@@ -204,7 +206,7 @@ function helio(el: Elements, T: number): { x: number; y: number; z: number; a: n
   return { x, y, z, a: o.a };
 }
 
-/** 八大行星現在的日心黃經、離太陽多遠（AU），和日心位置 */
+/** 行星（八大行星加汪星球）現在的日心黃經、離太陽多遠（AU），和日心位置 */
 export function planetPositions(when: Date): Array<{ key: string; name: string; lon: number; dist: number; x: number; y: number; z: number; a: number }> {
   const T = daysJ2000(when) / 36525;
   return PLANETS.map((p) => {
@@ -258,6 +260,7 @@ const LOOKS: Record<string, { km: number; min: number; tint: string }> = {
   venus: { km: 6_052, min: 3.4, tint: '#dcbf78' },
   earth: { km: 6_371, min: 3.6, tint: '#5b95d6' },
   moon: { km: 1_737, min: 2.2, tint: '#b3afa7' },
+  woof: { km: 4_800, min: 3.2, tint: '#c98f55' },
   mars: { km: 3_390, min: 3, tint: '#cf6c40' },
   jupiter: { km: 69_911, min: 6, tint: '#cfa77d' },
   saturn: { km: 58_232, min: 5, tint: '#ddc88e' },
@@ -276,7 +279,8 @@ function chord(x: number, y: number, r: number, dy: number): string {
 
 /**
  * 一顆星球：照真實大小畫（太小就畫最小的大小），背對太陽的那一半變暗；
- * 太陽有光芒、土星有環（後半圈被星球擋住）、天王星的環是直的、木星有條紋和大紅斑、火星有極冠、月球有坑
+ * 太陽有光芒、土星有環（後半圈被星球擋住）、天王星的環是直的、木星有條紋和大紅斑、火星有極冠、月球有坑、
+ * 汪星球兩邊有垂下來的耳朵（放大看得到臉）
  */
 function bodySvg(key: string, x: number, y: number, r: number, sun: { x: number; y: number } | null): string {
   const c = `cx="${f1(x)}" cy="${f1(y)}"`;
@@ -294,7 +298,20 @@ function bodySvg(key: string, x: number, y: number, r: number, sun: { x: number;
   const ringRy = r * 0.7;
   if (key === 'saturn') out += `<ellipse class="space-ring" ${c} rx="${f1(ringRx)}" ry="${f1(ringRy)}" />`;
   if (key === 'uranus') out += `<ellipse class="space-ring" ${c} rx="${f1(r * 0.5)}" ry="${f1(r * 1.8)}" />`;
+  // 汪星球的耳朵：先畫，根部被星球蓋住，往外垂下來
+  if (key === 'woof' && r >= 4) {
+    for (const side of [-1, 1]) {
+      const ex = x + side * r * 0.82;
+      const ey = y - r * 0.05;
+      out += `<ellipse class="space-ear" cx="${f1(ex)}" cy="${f1(ey)}" rx="${f1(r * 0.3)}" ry="${f1(r * 0.62)}" transform="rotate(${-side * 20} ${f1(ex)} ${f1(ey)})" />`;
+    }
+  }
   out += `<circle class="space-planet" ${c} r="${f1(r)}" fill="${look.tint}" />`;
+  if (key === 'woof' && r >= 10) {
+    out += `<ellipse class="space-snout" cx="${f1(x)}" cy="${f1(y + r * 0.35)}" rx="${f1(r * 0.38)}" ry="${f1(r * 0.28)}" />`;
+    for (const side of [-1, 1]) out += `<circle class="space-face" cx="${f1(x + side * r * 0.32)}" cy="${f1(y - r * 0.12)}" r="${f1(r * 0.09)}" />`;
+    out += `<ellipse class="space-face" cx="${f1(x)}" cy="${f1(y + r * 0.24)}" rx="${f1(r * 0.13)}" ry="${f1(r * 0.09)}" />`;
+  }
   if (key === 'jupiter' && r >= 4) {
     out += `<path class="space-detail" d="${chord(x, y, r, -r * 0.45)}${chord(x, y, r, -r * 0.1)}${chord(x, y, r, r * 0.3)}" />`;
     if (r >= 8) out += `<ellipse class="space-spot" cx="${f1(x + r * 0.32)}" cy="${f1(y + r * 0.45)}" rx="${f1(r * 0.22)}" ry="${f1(r * 0.12)}" />`;
@@ -418,7 +435,7 @@ export function spaceMarkup(o: SpaceOpts): string {
     // 中心換到別的星球：雷達中間的圓點不是你，你畫在地球那裡
     if (b.key === 'earth' && view.focus) bodies += `<circle class="space-me" cx="${f1(b.x)}" cy="${f1(b.y)}" r="3" />`;
     const name = b.key === 'earth' ? (view.focus ? '地球（你）' : '地球') : NAMES[b.key];
-    const r = b.key === 'saturn' ? b.r * 2.2 : b.key === 'sun' ? b.r + 5 : b.r;
+    const r = b.key === 'saturn' ? b.r * 2.2 : b.key === 'woof' ? b.r * 1.2 : b.key === 'sun' ? b.r + 5 : b.r;
     named.push({ x: b.x, y: b.y, r, cls: b.key, name, force: b.key === 'earth' && !!view.focus });
   }
   // 名字照順序放：地球（你）最優先，再來是中心那顆、太陽

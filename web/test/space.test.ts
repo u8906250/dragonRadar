@@ -158,3 +158,25 @@ describe('spaceMarkup in 3D', () => {
     expect(height(orbit(tilted))).toBeLessThan(height(orbit(flat)) * 0.5);
   });
 });
+
+describe('汪星球', () => {
+  const base = { center: { lat: 25.04, lng: 121.52 }, land: [] as Array<Array<[number, number]>>, when: new Date('2026-10-28T08:00:00Z') };
+  it('orbits between the Earth and Mars', () => {
+    for (const when of ['2026-10-28T00:00:00Z', '2027-06-01T00:00:00Z', '2030-01-01T00:00:00Z']) {
+      const ps = planetPositions(new Date(when));
+      const woof = ps.find((p) => p.key === 'woof')!;
+      expect(woof.dist).toBeGreaterThan(ps.find((p) => p.key === 'earth')!.dist + 0.15);
+      expect(woof.dist).toBeLessThan(ps.find((p) => p.key === 'mars')!.dist - 0.05);
+    }
+  });
+
+  it('shows up with the planets, and with its ears and face when you fly there', () => {
+    const inner = spaceMarkup({ ...base, scaleKm: 3e8, rg: 164 * globeFrac(3e8) });
+    expect(inner).toContain('>汪星球<');
+    expect(inner).toContain('data-body="woof"');
+    const near = spaceMarkup({ ...base, scaleKm: 20_000, rg: 164, view: { focus: 'woof', yaw: 0, pitch: 0 } });
+    expect((near.match(/space-ear/g) ?? []).length).toBe(2);
+    expect(near).toContain('space-snout');
+    expect((near.match(/space-face/g) ?? []).length).toBe(3);
+  });
+});
