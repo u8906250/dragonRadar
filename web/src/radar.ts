@@ -734,10 +734,18 @@ export class Radar {
     this.standUp(this.spaceLayer);
   }
 
-  /** 畫成立體、站著的東西（中山公園的銅像，data-at 是它站的地方）：整層跟著指北針轉了 -heading，它自己轉回來，在畫面上一直站著 */
+  /**
+   * 畫成立體、站著的東西（中山公園的銅像，data-at 是它站的地方，面向東邊）：整層跟著指北針轉了 -heading，它自己轉回來，在畫面上一直站著；
+   * 東邊轉到畫面左邊時左右翻過來，還是面向東邊
+   */
   private standUp(layer: SVGGElement): void {
     if (!this.heading) return;
-    for (const el of layer.querySelectorAll<SVGGElement>('[data-at]')) el.setAttribute('transform', `rotate(${this.heading.toFixed(1)} ${el.dataset.at})`);
+    const flip = Math.cos((this.heading * Math.PI) / 180) < 0;
+    for (const el of layer.querySelectorAll<SVGGElement>('[data-at]')) {
+      const at = el.dataset.at ?? '0 0';
+      const back = at.split(' ').map((v) => -Number(v)).join(' ');
+      el.setAttribute('transform', `rotate(${this.heading.toFixed(1)} ${at})${flip ? ` translate(${at}) scale(-1 1) translate(${back})` : ''}`);
+    }
   }
 
   /** 手機朝向（0 = 北，順時針）。null 代表關閉指北針，恢復北在上 */

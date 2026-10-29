@@ -142,36 +142,44 @@ export interface ParkCanvas {
 }
 
 /**
- * 孫中山銅像：立體的，石頭台座（約 2 公尺寬、1.2 公尺高，看得到上面和右邊）上站著穿長袍、右手拄著拐杖的銅像（約 2.3 公尺高），
- * 左上照光（左邊亮、右邊暗），地上一塊影子。單位是公尺，(0, 0) 是台座的中心（站的地方），往上是負的；整個約 3.6 公尺高（STATUE_H）。
- * 不管指北針怎麼轉都站著（radar.ts 照 data-at 轉回來）；真的大小在畫面上太小就放大到 STATUE_MIN 像素高
+ * 孫中山銅像：立體的，石頭台座（約 2 公尺寬、1.2 公尺高，看得到上面和右邊）上站著穿長袍、拄著拐杖的銅像（約 2.3 公尺高），
+ * 側面面向右邊（東邊，國父紀念館那邊），左上照光（背後亮、前面暗），地上一塊影子。
+ * 單位是公尺，(0, 0) 是台座的中心（站的地方），往上是負的；整個約 3.6 公尺高（STATUE_H）。照真的大小畫，跟著縮放：
+ * 雷達外圈約 500 公尺內（每公尺 STATUE_FROM 像素，跟草一樣）才看得到，先是一個點（慢慢變大），外圈約 28 公尺內（STATUE_FULL）才畫出整座銅像。
+ * 不管指北針怎麼轉都站著、面向東邊（radar.ts 照 data-at 轉回來，東邊轉到左邊就左右翻過來）
  */
 const STATUE_H = 3.64;
-const STATUE_MIN = 22;
+const STATUE_FROM = 0.33;
+const STATUE_FULL = INNER / 28;
 const STATUE_SVG = (() => {
   const [fx, fy] = [0.175, -1.15];
   const n = (v: number): number => +v.toFixed(3);
   const p = (pts: Array<[number, number]>): string => pts.map(([x, y], i) => `${i ? 'L' : 'M'}${n(x)} ${n(y)}`).join('') + 'Z';
   const at = (x: number, y: number): string => `${n(fx + x)} ${n(fy + y)}`;
+  const xy = (x: number, y: number): string => `cx="${n(fx + x)}" cy="${n(fy + y)}"`;
   return (
     `<ellipse class="statue-shadow" cx="0.55" cy="0.1" rx="1.6" ry="0.38" />` +
     `<path class="statue-stone-front" d="${p([[-1, -0.95], [1, -0.95], [1, 0.25], [-1, 0.25]])}" />` +
     `<path class="statue-stone-side" d="${p([[1, -0.95], [1.35, -1.4], [1.35, -0.2], [1, 0.25]])}" />` +
     `<path class="statue-stone-top" d="${p([[-1, -0.95], [1, -0.95], [1.35, -1.4], [-0.65, -1.4]])}" />` +
-    // 拐杖、左手垂著、右手往前拄著
-    `<path class="statue-cane" d="M${at(0.64, -1.02)}L${at(0.74, -0.02)}" />` +
-    `<path class="statue-arm" d="M${at(-0.33, -1.68)}L${at(-0.42, -0.98)}" />` +
-    `<path class="statue-arm statue-arm-dark" d="M${at(0.33, -1.68)}L${at(0.52, -1.3)}L${at(0.63, -1.02)}" />` +
-    `<ellipse class="statue-dark" cx="${n(fx - 0.13)}" cy="${n(fy - 0.05)}" rx="0.13" ry="0.06" /><ellipse class="statue-dark" cx="${n(fx + 0.13)}" cy="${n(fy - 0.05)}" rx="0.13" ry="0.06" />` +
-    // 長袍：肩膀圓的、下襬寬一點，右邊一半暗、左邊一條亮的，中間一條襟
-    `<path class="statue-body" d="M${at(-0.36, -1.72)}Q${at(-0.36, -1.88)} ${at(-0.12, -1.9)}L${at(0.12, -1.9)}Q${at(0.36, -1.88)} ${at(0.36, -1.72)}L${at(0.42, -0.1)}L${at(-0.42, -0.1)}Z" />` +
-    `<path class="statue-dark" d="M${at(0.06, -1.9)}L${at(0.12, -1.9)}Q${at(0.36, -1.88)} ${at(0.36, -1.72)}L${at(0.42, -0.1)}L${at(0.1, -0.1)}Z" />` +
-    `<path class="statue-lit" d="M${at(-0.3, -1.74)}L${at(-0.35, -0.14)}L${at(-0.24, -0.14)}L${at(-0.19, -1.78)}Z" />` +
-    `<path class="statue-seam" d="M${at(0, -1.86)}L${at(0, -0.12)}" />` +
-    // 脖子、頭（左上一點亮）
-    `<path class="statue-dark" d="${p([[fx - 0.07, fy - 1.97], [fx + 0.07, fy - 1.97], [fx + 0.07, fy - 1.88], [fx - 0.07, fy - 1.88]])}" />` +
-    `<circle class="statue-body" cx="${n(fx)}" cy="${n(fy - 2.09)}" r="0.17" />` +
-    `<circle class="statue-lit" cx="${n(fx - 0.06)}" cy="${n(fy - 2.15)}" r="0.06" />`
+    // 拐杖拄在前面、兩隻鞋子朝右
+    `<path class="statue-cane" d="M${at(0.4, -1.12)}L${at(0.52, -0.02)}" />` +
+    `<ellipse class="statue-dark" ${xy(-0.06, -0.05)} rx="0.14" ry="0.06" /><ellipse class="statue-dark" ${xy(0.1, -0.05)} rx="0.17" ry="0.06" />` +
+    // 長袍（側面）：背後一條亮的、前面一半暗，中間一條褶
+    `<path class="statue-body" d="M${at(-0.2, -1.74)}Q${at(-0.16, -1.9)} ${at(0, -1.9)}L${at(0.1, -1.9)}Q${at(0.22, -1.86)} ${at(0.2, -1.66)}L${at(0.3, -0.1)}L${at(-0.3, -0.1)}Z" />` +
+    `<path class="statue-dark" d="M${at(0.04, -1.9)}L${at(0.1, -1.9)}Q${at(0.22, -1.86)} ${at(0.2, -1.66)}L${at(0.3, -0.1)}L${at(0.08, -0.1)}Z" />` +
+    `<path class="statue-lit" d="M${at(-0.17, -1.76)}L${at(-0.26, -0.14)}L${at(-0.17, -0.14)}L${at(-0.08, -1.8)}Z" />` +
+    `<path class="statue-seam" d="M${at(0.02, -1.5)}L${at(0.04, -0.12)}" />` +
+    // 脖子、頭（鼻子朝右、耳朵、鬍子，後腦一點亮）
+    `<path class="statue-dark" d="${p([[fx, fy - 1.98], [fx + 0.1, fy - 1.98], [fx + 0.1, fy - 1.88], [fx, fy - 1.88]])}" />` +
+    `<path class="statue-body" d="M${at(0.19, -2.13)}L${at(0.27, -2.05)}L${at(0.19, -2.02)}Z" />` +
+    `<circle class="statue-body" ${xy(0.06, -2.08)} r="0.16" />` +
+    `<circle class="statue-dark" ${xy(0.02, -2.07)} r="0.035" />` +
+    `<circle class="statue-lit" ${xy(-0.01, -2.15)} r="0.05" />` +
+    `<path class="statue-seam" d="M${at(0.15, -2)}L${at(0.24, -2.01)}" />` +
+    // 靠我們這邊的手往前伸、握著拐杖
+    `<path class="statue-arm" d="M${at(-0.02, -1.72)}L${at(0.12, -1.35)}L${at(0.36, -1.1)}" />` +
+    `<circle class="statue-body" ${xy(0.39, -1.09)} r="0.07" />`
   );
 })();
 
@@ -200,11 +208,14 @@ export function parkSvg(g: ParkGeom, c: ParkCanvas): string {
   out += `<path class="park-water" d="${c.lines(g.water)}" />`;
   out += `<path class="park-path street-minor" d="${c.lines(g.paths)}" />`;
   out += `<path class="park-building" d="${c.lines(g.buildings)}" />`;
-  const s = c.at(...g.statue);
-  const k = Math.max(c.ppm, STATUE_MIN / STATUE_H);
-  if (s && Math.hypot(s[0] - c.rx, s[1] - c.ry) - STATUE_H * k < INNER + 2) {
-    const at = `${s[0].toFixed(1)} ${s[1].toFixed(1)}`;
-    out += `<g class="park-statue" data-at="${at}"><g transform="translate(${at}) scale(${+k.toPrecision(4)})">${STATUE_SVG}</g></g>`;
+  const s = c.ppm >= STATUE_FROM ? c.at(...g.statue) : null;
+  const h = STATUE_H * c.ppm;
+  if (s && Math.hypot(s[0] - c.rx, s[1] - c.ry) - h < INNER + 2) {
+    const [x, y] = s.map((v) => v.toFixed(1));
+    out +=
+      c.ppm < STATUE_FULL
+        ? `<g class="park-statue" data-at="${x} ${y}"><circle class="statue-dot" cx="${x}" cy="${y}" r="${Math.min(4, Math.max(1.2, h * 0.2)).toFixed(1)}" /></g>`
+        : `<g class="park-statue" data-at="${x} ${y}"><g transform="translate(${x} ${y}) scale(${+c.ppm.toPrecision(4)})">${STATUE_SVG}</g></g>`;
   }
   return out;
 }
