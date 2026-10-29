@@ -261,8 +261,11 @@ export class Radar {
   private readonly carLayer: SVGGElement;
   /** 點了車子：打開那條車掃的時間表 */
   onCar: ((routeId: string) => void) | null = null;
-  /** 點了中山公園的銅像（地球或汪星，拉近到整座銅像畫出來時才點得到） */
-  onStatue: (() => void) | null = null;
+  /** 點了中山公園的銅像、停著的火箭（地球或汪星，拉近到畫出來時才點得到）：哪個世界的 */
+  onStatue: ((world: 'earth' | 'woof') => void) | null = null;
+  onRocket: ((world: 'earth' | 'woof') => void) | null = null;
+  /** 火箭飛行中畫在正中間的那一層（不跟著指北針轉） */
+  private readonly tripLayer: SVGGElement;
   private bottles: RadarBottle[] = [];
   private readonly bottleLayer: SVGGElement;
   private readonly landmarkLayer: SVGGElement;
@@ -361,6 +364,7 @@ export class Radar {
       <g class="cars"></g>
       <!-- 地標（星星）放在光點上面，疊在一起時也點得到 -->
       <g class="landmarks"></g>
+      <g class="trip"></g>
       <g class="rose"></g>
     `;
     this.blipLayer = this.svg.querySelector('.blips') as SVGGElement;
@@ -372,6 +376,7 @@ export class Radar {
     this.spaceLayer = this.svg.querySelector('.space') as SVGGElement;
     this.streetLayer = this.svg.querySelector('.streets') as SVGGElement;
     this.parkLayer = this.svg.querySelector('.park') as SVGGElement;
+    this.tripLayer = this.svg.querySelector('.trip') as SVGGElement;
     this.landmarkLayer = this.svg.querySelector('.landmarks') as SVGGElement;
     this.carLayer = this.svg.querySelector('.cars') as SVGGElement;
     this.carLayer.addEventListener('click', (e) => {
@@ -387,18 +392,21 @@ export class Radar {
       const g = (e.target as Element).closest('.landmark') as SVGGElement | null;
       if (g?.dataset.id) onLandmark?.(g.dataset.id);
     });
-    // 太空：點星球飛過去（剛拖完放開的那一下不算）；汪星上的中山公園銅像
+    /** 點到中山公園的銅像、停著的火箭了沒（點到就交給 main.ts） */
+    const parkTap = (e: Event, world: 'earth' | 'woof'): boolean => {
+      const t = e.target as Element;
+      if (t.closest('.rocket-hit')) this.onRocket?.(world);
+      else if (t.closest('.park-statue')) this.onStatue?.(world);
+      else return false;
+      return true;
+    };
+    // 太空：點星球飛過去（剛拖完放開的那一下不算）；汪星上的中山公園銅像、火箭
     this.spaceLayer.addEventListener('click', (e) => {
-      if ((e.target as Element).closest('.park-statue')) {
-        this.onStatue?.();
-        return;
-      }
+      if (parkTap(e, 'woof')) return;
       const g = (e.target as Element).closest('.space-hit') as SVGGElement | null;
       if (g?.dataset.body && !this.justPanned) this.focusOn(g.dataset.body);
     });
-    this.parkLayer.addEventListener('click', (e) => {
-      if ((e.target as Element).closest('.park-statue')) this.onStatue?.();
-    });
+    this.parkLayer.addEventListener('click', (e) => parkTap(e, 'earth'));
     for (const [letter, deg] of ROSE) {
       const t = el('text', { class: `rose-letter rose-${letter.toLowerCase()}`, 'text-anchor': 'middle', 'dominant-baseline': 'middle', 'data-deg': deg });
       t.textContent = letter;
@@ -708,6 +716,19 @@ export class Radar {
     this.onSpaceMove?.();
   }
 
+  /** 直接換到這個看法（火箭飛到汪星：中心換成汪星、轉到中山公園） */
+  setSpaceView(view: SpaceView): void {
+    this.spaceView = { ...view };
+    this.setScale(this.scaleKm);
+    this.onSpaceMove?.();
+  }
+
+  /** 火箭飛行中：雷達正中間畫一支小火箭（空字串是收掉）；on 是整趟（點火到降落）不接受拖曳、縮放、點擊 */
+  setTrip(svg: string, on = svg !== ''): void {
+    this.tripLayer.innerHTML = svg;
+    this.stack.classList.toggle('trip', on);
+  }
+
   /** 點了星球：飛過去當中心（點地球就回到你），視角維持 */
   private focusOn(key: string): void {
     const focus = key === 'earth' ? null : key;
@@ -724,7 +745,7 @@ export class Radar {
     this.draw();
   }
 
-  /** 中山公園要重畫（點了銅像開始發射、發射完）：地球上重畫公園那一層，在太空裡重畫太空那一層（汪星） */
+  /** 中山公園要重畫（火箭的每一段開始、結束）：地球上重畫公園那一層，在太空裡重畫太空那一層（汪星） */
   redrawPark(): void {
     if (this.inSpace) this.drawSpace();
     else this.drawPark();

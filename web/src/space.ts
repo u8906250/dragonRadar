@@ -361,7 +361,7 @@ const WOOF_MAJOR_ROADS = woofLines(TAIPEI_MAJOR_ROADS);
 const WOOF_MINOR_ROADS = woofLines(TAIPEI_MINOR_ROADS);
 
 /** 中山公園（park.ts，跟地球的雷達共用）換到汪星上：台北的經緯度攤開成汪星的、每 2 度一點，草和水波的大小是汪星上的公尺 */
-const WOOF_PARK = parkGeom({ to: toWoof, my: WOOF_KM * 1000 * RAD, mx: (lat) => WOOF_KM * 1000 * RAD * Math.cos(lat * RAD), densify });
+const WOOF_PARK = parkGeom({ name: 'woof', to: toWoof, my: WOOF_KM * 1000 * RAD, mx: (lat) => WOOF_KM * 1000 * RAD * Math.cos(lat * RAD), densify });
 
 /** 汪星正中間的經緯度：跟著視角轉，左右拖轉經度、上下拖轉緯度 */
 const woofCenter = (view: SpaceView): LatLng => ({ lat: Math.max(-80, Math.min(80, view.pitch / RAD)), lng: norm180(-view.yaw / RAD) });

@@ -32,6 +32,8 @@ const DETAIL_PPM = 0.09;
 
 /** 畫在哪個世界：台北的經緯度換成這個世界的經緯度、每度幾公尺，要不要把線切細（汪星畫在球上，每 2 度一點） */
 export interface ParkWorld {
+  /** 哪個世界（火箭停在哪一邊） */
+  name: RocketWorld;
   to: (p: Pt) => Pt;
   /** 南北、東西（照緯度）每度幾公尺 */
   my: number;
@@ -59,6 +61,7 @@ interface Patches {
 
 /** 這個世界的公園：填色的圈（逆時針）、線，草地、水面攤平成公尺（O 是公園中間，x 往東、y 往北） */
 export interface ParkGeom {
+  name: RocketWorld;
   outline: Pt[];
   outlineLine: Pt[];
   lawns: Pt[][];
@@ -72,6 +75,8 @@ export interface ParkGeom {
   O: { lat: number; lng: number; mx: number; my: number };
   lawnPatches: Patches;
   pondPatches: Patches;
+  /** 發射口（廣場中間那塊草皮）：開關的時候兩片門上的草只長這一塊的 */
+  hatchPatches: Patches;
 }
 
 const geoms = new WeakMap<ParkWorld, ParkGeom>();
@@ -111,6 +116,7 @@ export function parkGeom(w: ParkWorld): ParkGeom {
     return { list, box: [Math.min(...list.map((l) => l.x0)), Math.min(...list.map((l) => l.y0)), Math.max(...list.map((l) => l.x1)), Math.max(...list.map((l) => l.y1))] };
   };
   const g: ParkGeom = {
+    name: w.name,
     outline,
     outlineLine: [...outline, outline[0]],
     lawns: ZHONGSHAN_PARK.green.map(area),
@@ -125,6 +131,7 @@ export function parkGeom(w: ParkWorld): ParkGeom {
     O,
     lawnPatches: patches(ZHONGSHAN_PARK.green.map((r) => [r])),
     pondPatches: patches(ZHONGSHAN_PARK.water),
+    hatchPatches: patches([[ZHONGSHAN_PARK.hatch]]),
   };
   geoms.set(w, g);
   return g;
@@ -144,28 +151,28 @@ export interface ParkCanvas {
 }
 
 /**
- * 孫中山銅像：立體的，石頭台座（約 2 公尺寬、1.2 公尺高，看得到上面和右邊）上坐著穿長袍的銅像（坐在椅子上，手放在膝蓋上），
+ * 孫中山銅像：立體的，矮矮的石頭台座（約 2 公尺寬、離地 0.3 公尺，看得到上面和右邊）上坐著穿長袍的銅像（坐在椅子上，手放在膝蓋上），
  * 側面面向右邊（東邊，國父紀念館那邊），左上照光（背後亮、前面暗），地上一塊影子。
- * 單位是公尺，(0, 0) 是台座的中心（站的地方），往上是負的；整個約 3.1 公尺高（STATUE_H）。照真的大小畫，跟著縮放：
+ * 單位是公尺，(0, 0) 是台座的中心（站的地方），往上是負的；整個約 2.3 公尺高（STATUE_H）。照真的大小畫，跟著縮放：
  * 雷達外圈約 500 公尺內（每公尺 STATUE_FROM 像素，跟草一樣）才看得到，先是一個點（慢慢變大），外圈約 28 公尺內（STATUE_FULL）才畫出整座銅像，
- * 這時候點得到（statue-hit，至少 STATUE_HIT 像素半徑）：點了發射火箭（launchRocket）。
+ * 這時候點得到（statue-hit，至少 STATUE_HIT 像素半徑）：點了叫出火箭（summonRocket）。
  * 不管指北針怎麼轉都站著、面向東邊（radar.ts 照 data-at 轉回來，東邊轉到左邊就左右翻過來）
  */
-const STATUE_H = 3.1;
+const STATUE_H = 2.3;
 const STATUE_FROM = 0.33;
 const STATUE_FULL = INNER / 28;
 const STATUE_HIT = 20;
 const STATUE_SVG = (() => {
-  const [fx, fy] = [0.175, -1.15];
+  const [fx, fy] = [0.175, -0.28];
   const n = (v: number): number => +v.toFixed(3);
   const p = (pts: Array<[number, number]>): string => pts.map(([x, y], i) => `${i ? 'L' : 'M'}${n(x)} ${n(y)}`).join('') + 'Z';
   const at = (x: number, y: number): string => `${n(fx + x)} ${n(fy + y)}`;
   const xy = (x: number, y: number): string => `cx="${n(fx + x)}" cy="${n(fy + y)}"`;
   return (
     `<ellipse class="statue-shadow" cx="0.55" cy="0.1" rx="1.6" ry="0.38" />` +
-    `<path class="statue-stone-front" d="${p([[-1, -0.95], [1, -0.95], [1, 0.25], [-1, 0.25]])}" />` +
-    `<path class="statue-stone-side" d="${p([[1, -0.95], [1.35, -1.4], [1.35, -0.2], [1, 0.25]])}" />` +
-    `<path class="statue-stone-top" d="${p([[-1, -0.95], [1, -0.95], [1.35, -1.4], [-0.65, -1.4]])}" />` +
+    `<path class="statue-stone-front" d="${p([[-1, -0.05], [1, -0.05], [1, 0.25], [-1, 0.25]])}" />` +
+    `<path class="statue-stone-side" d="${p([[1, -0.05], [1.35, -0.5], [1.35, -0.2], [1, 0.25]])}" />` +
+    `<path class="statue-stone-top" d="${p([[-1, -0.05], [1, -0.05], [1.35, -0.5], [-0.65, -0.5]])}" />` +
     // 椅背（在背後）、椅座
     `<path class="statue-chair" d="M${at(-0.5, -0.45)}L${at(-0.5, -1.42)}Q${at(-0.5, -1.52)} ${at(-0.41, -1.52)}Q${at(-0.32, -1.52)} ${at(-0.32, -1.42)}L${at(-0.32, -0.45)}Z" />` +
     `<path class="statue-chair" d="M${at(-0.5, -0.5)}L${at(0.22, -0.5)}L${at(0.22, 0)}L${at(-0.5, 0)}Z" />` +
@@ -193,24 +200,57 @@ const STATUE_SVG = (() => {
 })();
 
 /**
- * 火箭發射（點銅像）：廣場中間那塊草皮（發射口）從中間分成兩半往兩邊收進去，底下是黑黑的井，火箭慢慢升上來、點火（火焰、白煙）、
- * 越飛越快飛出畫面，最後兩片門關回來。全部 LAUNCH_MS 毫秒，用 CSS 動畫（styles.css 的 launch-*、rocket-*），
- * --t 是已經過了多久（負的），中途重畫（拖曳、縮放）會接著播，不會重來。地球的雷達和汪星共用（park.ts 這一份記著什麼時候開始的）
+ * 火箭（點銅像叫出來，地球和汪星共用一支）：
+ * - summon（SUMMON_MS）：廣場中間那塊草皮（發射口）從中間分成兩半、帶著上面的草往兩邊滑進地底，底下是黑黑的井，火箭慢慢升上來，門再滑回來關上；
+ * - parked：火箭停在草皮上，點得到（rocket-hit）：問要不要飛到另一邊（地球→汪星、汪星→地球）；
+ * - depart（DEPART_MS）：點火（火焰、白煙、抖一抖）、越飛越快飛出畫面，之後 away（main.ts 拉遠、換到另一邊、拉近，畫面正中間一支小火箭 tripSvg）；
+ * - land（LAND_MS）：在另一邊的發射口從上面（畫面上半部）慢慢降落、白煙散掉，再停著（parked）。
+ * 動畫都是 CSS（styles.css 的 rocket-*、launch-*），--t 是這一段已經過了多久（負的），中途重畫（拖曳、縮放）會接著播，不會重來
  */
-export const LAUNCH_MS = 9500;
-let launchAt: number | null = null;
-/** 點了銅像：開始發射（上一次還沒播完就不算，回傳 false） */
-export function launchRocket(now = performance.now()): boolean {
-  if (launchAt !== null && now - launchAt < LAUNCH_MS) return false;
-  launchAt = now;
+export type RocketWorld = 'earth' | 'woof';
+export type RocketPhase = 'summon' | 'parked' | 'depart' | 'away' | 'land';
+export const SUMMON_MS = 5000;
+export const DEPART_MS = 3000;
+export const LAND_MS = 2600;
+/** 發射口的正中間（台北的經緯度）：火箭站的地方，飛到汪星時汪星轉到這裡、回地球時雷達正中間換到這裡 */
+export const HATCH_CENTER: Pt = [ZHONGSHAN_PARK.hatch.reduce((s, p) => s + p[0], 0) / 4, ZHONGSHAN_PARK.hatch.reduce((s, p) => s + p[1], 0) / 4];
+let rocket: { world: RocketWorld; phase: RocketPhase; at: number } | null = null;
+/** 火箭現在在哪、在做什麼、這一段過了幾毫秒（summon、land 播完是停著，depart 播完是飛走了）；還沒叫出來是 null */
+export function rocketNow(now = performance.now()): { world: RocketWorld; phase: RocketPhase; e: number } | null {
+  if (!rocket) return null;
+  const e = now - rocket.at;
+  const { world, phase } = rocket;
+  if ((phase === 'summon' && e >= SUMMON_MS) || (phase === 'land' && e >= LAND_MS)) return { world, phase: 'parked', e };
+  if (phase === 'depart' && e >= DEPART_MS) return { world, phase: 'away', e };
+  return { world, phase, e };
+}
+/** 點了銅像：從這一邊的發射口叫出火箭（已經叫出來了就不算，回傳 false） */
+export function summonRocket(world: RocketWorld, now = performance.now()): boolean {
+  if (rocket) return false;
+  rocket = { world, phase: 'summon', at: now };
   return true;
 }
-/** 火箭（側面、站著）：底在 (0, 0)，約 8.5 公尺高、3.5 公尺寬（含尾翼），白色機身、紅色鼻錐和尾翼、一個圓窗；底下的火焰會閃 */
-const ROCKET_SVG =
-  `<clipPath id="park-rocket-clip"><rect x="-4" y="-80" width="8" height="80.25" /></clipPath>` +
+/** 要飛了：停著才能飛（回傳 false 是不能飛） */
+export function departRocket(now = performance.now()): boolean {
+  const r = rocketNow(now);
+  if (r?.phase !== 'parked') return false;
+  rocket = { world: r.world, phase: 'depart', at: now };
+  return true;
+}
+/** 飛到了：在這一邊降落 */
+export function landRocket(world: RocketWorld, now = performance.now()): void {
+  rocket = { world, phase: 'land', at: now };
+}
+/** 收掉火箭（測試用） */
+export function resetRocket(): void {
+  rocket = null;
+}
+
+/** 火箭（側面、站著）：底在 (0, 0)，約 8.5 公尺高、3.5 公尺寬（含尾翼），白色機身、紅色鼻錐和尾翼、一個圓窗；底下的火焰會閃，旁邊的白煙 */
+const rocketSvg = (clip: string): string =>
   `<g class="rocket-fly">` +
   `<g class="rocket-flame"><g class="rocket-flicker"><path class="flame-out" d="M-0.62 0.15Q-0.75 1.7 0 3.6Q0.75 1.7 0.62 0.15Z" /><path class="flame-in" d="M-0.32 0.15Q-0.38 1.1 0 2.2Q0.38 1.1 0.32 0.15Z" /></g></g>` +
-  `<g clip-path="url(#park-rocket-clip)"><g class="rocket-rise">` +
+  `<g${clip ? ` clip-path="url(#${clip})"` : ''}><g class="rocket-rise">` +
   `<path class="rocket-red" d="M-0.9 -2.4L-1.75 -0.1L-1.75 0.15L-0.9 -0.35Z" /><path class="rocket-red rocket-red-dark" d="M0.9 -2.4L1.75 -0.1L1.75 0.15L0.9 -0.35Z" />` +
   `<path class="rocket-nozzle" d="M-0.55 -0.3L0.55 -0.3L0.72 0.18L-0.72 0.18Z" />` +
   `<path class="rocket-body" d="M-0.9 -0.3L-0.9 -5.4L0.9 -5.4L0.9 -0.3Z" /><path class="rocket-shade" d="M0.35 -5.4L0.9 -5.4L0.9 -0.3L0.35 -0.3Z" />` +
@@ -228,32 +268,55 @@ const ROCKET_SVG =
   ]
     .map(([x, y, r, d]) => `<circle style="--d:${d}ms" cx="${x}" cy="${y}" r="${r}" />`)
     .join('')}</g>`;
+/** 火箭高幾公尺（點的範圍照這個大小） */
+const ROCKET_H = 8.5;
+const ROCKET_HIT = 20;
 
-/** 發射中（已經過了 e 毫秒）：井、兩片門、火箭（站著，跟銅像一樣照 data-at 轉回來） */
-function launchSvg(g: ParkGeom, c: ParkCanvas, e: number): string {
+/** 飛行中畫在雷達正中間的小火箭（固定大小，火焰一直噴、左右晃，旁邊一道道往下的氣流） */
+export function tripSvg(): string {
+  return (
+    `<g class="rocket-trip" transform="translate(${C} ${C + 12}) scale(3.4)">` +
+    `<path class="trip-streak" d="M-3 -16L-3 8M3.2 -12L3.2 12M-5.5 -6L-5.5 14M5.8 -18L5.8 4" />` +
+    `<g class="rocket-wobble">${rocketSvg('')}</g></g>`
+  );
+}
+
+/** 火箭這一段（已經過了 e 毫秒）：發射口的井和兩片門（叫出來時）、火箭（站著，跟銅像一樣照 data-at 轉回來） */
+function rocketPart(g: ParkGeom, c: ParkCanvas, phase: RocketPhase, e: number): string {
   const q = g.hatch.map(([a, b]) => c.at(a, b));
   if (q.some((p) => !p)) return '';
   const [ne, nw, sw, se] = q as Pt[];
   const mid = (a: Pt, b: Pt): Pt => [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2];
   const [n, s] = [mid(ne, nw), mid(sw, se)];
   const o = mid(n, s);
-  const poly = (pts: Pt[]): string => `M${pts.map(([x, y]) => `${x.toFixed(1)} ${y.toFixed(1)}`).join('L')}Z`;
-  const inner = [ne, nw, sw, se].map(([x, y]): Pt => [o[0] + (x - o[0]) * 0.75, o[1] + (y - o[1]) * 0.75]);
-  const door = (side: string, pts: Pt[]): string => `<g class="launch-door launch-door-${side}"><path class="door-base" d="${poly(pts)}" /><path class="door-top" d="${poly(pts)}" /></g>`;
-  const at = `${o[0].toFixed(1)} ${o[1].toFixed(1)}`;
-  return (
-    `<g class="park-launch" style="--t:${-Math.round(e)}ms">` +
-    `<path class="launch-shaft" d="${poly([ne, nw, sw, se])}" /><path class="launch-shaft-in" d="${poly(inner)}" />` +
-    door('w', [n, nw, sw, s]) +
-    door('e', [ne, n, s, se]) +
-    `<g class="park-rocket" data-at="${at}"><g transform="translate(${at}) scale(${+c.ppm.toPrecision(4)})">${ROCKET_SVG}</g></g>` +
-    `</g>`
-  );
+  const f1 = (v: number): string => v.toFixed(1);
+  const poly = (pts: Pt[]): string => `M${pts.map(([x, y]) => `${f1(x)} ${f1(y)}`).join('L')}Z`;
+  const at = `${f1(o[0])} ${f1(o[1])}`;
+  // 降落從畫面上半部（雷達中心上面外圈的 0.35 倍、最多 45 公尺）開始，一飛到就看得到
+  const land = phase === 'land' ? `;--land:-${f1(Math.min(45, (0.35 * INNER) / c.ppm))}px` : '';
+  let out = `<g class="park-launch ${phase}"${phase === 'parked' ? '' : ` style="--t:${-Math.round(e)}ms${land}"`}>`;
+  if (phase === 'summon') {
+    // 兩片門上的草：跟草地上的同一叢一叢（只長發射口這一塊），門滑開時跟著走；滑出發射口的部分收進地底（照發射口剪掉）
+    const t = c.textures ? parkTexture(g, 'grass', c, g.hatchPatches) : null;
+    const grass = t ? `<path class="park-grass" transform="scale(0.1)" stroke-width="${(t.w * 10).toFixed(1)}" d="${t.d}" />` : '';
+    const door = (side: string, pts: Pt[], [dx, dy]: Pt): string =>
+      `<g class="launch-door" style="--dx:${f1(dx)}px;--dy:${f1(dy)}px"><clipPath id="park-door-${side}"><path d="${poly(pts)}" /></clipPath>` +
+      `<path class="door-base" d="${poly(pts)}" /><g clip-path="url(#park-door-${side})"><path class="door-top" d="${poly(pts)}" />${grass}</g></g>`;
+    out +=
+      `<clipPath id="park-hatch"><path d="${poly([ne, nw, sw, se])}" /></clipPath>` +
+      `<path class="launch-shaft" d="${poly([ne, nw, sw, se])}" /><path class="launch-shaft-in" d="${poly([ne, nw, sw, se].map(([x, y]): Pt => [o[0] + (x - o[0]) * 0.75, o[1] + (y - o[1]) * 0.75]))}" />` +
+      `<g clip-path="url(#park-hatch)">${door('w', [n, nw, sw, s], [nw[0] - n[0], nw[1] - n[1]])}${door('e', [ne, n, s, se], [ne[0] - n[0], ne[1] - n[1]])}</g>`;
+  }
+  out += `<g class="park-rocket" data-at="${at}"><g transform="translate(${at}) scale(${+c.ppm.toPrecision(4)})">`;
+  out += phase === 'summon' ? `<clipPath id="park-rocket-clip"><rect x="-4" y="-80" width="8" height="80.25" /></clipPath>${rocketSvg('park-rocket-clip')}` : rocketSvg('');
+  out += `</g>`;
+  if (phase === 'parked') out += `<circle class="rocket-hit" cx="${at.split(' ')[0]}" cy="${f1(o[1] - ROCKET_H * 0.45 * c.ppm)}" r="${f1(Math.max(ROCKET_HIT, ROCKET_H * 0.55 * c.ppm))}" />`;
+  return `${out}</g></g>`;
 }
 
 /**
  * 中山公園：範圍淡淡填色、虛線的邊；拉近到 1.8 km 內再畫草地花圃（淡淡的草綠色、點線的邊）、水面（淡淡的水藍色、虛線的邊）、
- * 步道（跟街道的細線一樣）、建築（實線）、孫中山銅像（點了發射火箭），拉近到幾百公尺內草地長出一叢叢的草、水面有一道道的水波
+ * 步道（跟街道的細線一樣）、建築（實線）、孫中山銅像（點了叫出火箭）、火箭，拉近到幾百公尺內草地長出一叢叢的草、水面有一道道的水波
  */
 export function parkSvg(g: ParkGeom, c: ParkCanvas): string {
   if (c.ppm < FILL_PPM) return '';
@@ -276,8 +339,8 @@ export function parkSvg(g: ParkGeom, c: ParkCanvas): string {
   out += `<path class="park-water" d="${c.lines(g.water)}" />`;
   out += `<path class="park-path street-minor" d="${c.lines(g.paths)}" />`;
   out += `<path class="park-building" d="${c.lines(g.buildings)}" />`;
-  const e = launchAt === null ? -1 : performance.now() - launchAt;
-  if (e >= 0 && e < LAUNCH_MS) out += launchSvg(g, c, e);
+  const r = rocketNow();
+  if (r && r.world === g.name && r.phase !== 'away' && r.e >= 0) out += rocketPart(g, c, r.phase, r.e);
   const s = c.ppm >= STATUE_FROM ? c.at(...g.statue) : null;
   const h = STATUE_H * c.ppm;
   if (s && Math.hypot(s[0] - c.rx, s[1] - c.ry) - h < INNER + 2) {
@@ -359,9 +422,11 @@ function cellRand(i: number, j: number, k: number, n: number): number {
   h = Math.imul(h ^ (h >>> 13), 0xc2b2ae35);
   return ((h ^ (h >>> 16)) >>> 0) / 4294967296;
 }
-/** 畫面上的草或水波（畫的座標乘 10）和線的粗細；太遠、畫面上沒有草地（水面）就是 null */
-export function parkTexture(g: ParkGeom, kind: 'grass' | 'ripple', c: Pick<ParkCanvas, 'ppm' | 'center' | 'rx' | 'ry' | 'at'>): { d: string; w: number } | null {
-  const [area, t, salt] = kind === 'grass' ? [g.lawnPatches, GRASS, 0] : [g.pondPatches, RIPPLES, 1];
+/** 畫面上的草或水波（畫的座標乘 10）和線的粗細；太遠、畫面上沒有草地（水面）就是 null；only 是只長在這幾塊裡（跟長滿時同一叢一叢） */
+export function parkTexture(g: ParkGeom, kind: 'grass' | 'ripple', c: Pick<ParkCanvas, 'ppm' | 'center' | 'rx' | 'ry' | 'at'>, only?: Patches): { d: string; w: number } | null {
+  const [all, t, salt] = kind === 'grass' ? [g.lawnPatches, GRASS, 0] : [g.pondPatches, RIPPLES, 1];
+  // only：只長這幾塊（發射口的門上），位置跟長滿草地時一樣
+  const area = only ?? all;
   const { ppm, O } = { ppm: c.ppm, O: g.O };
   if (ppm < TEXTURE_FROM) return null;
   // 每公尺 0.33 到 0.66 像素之間（雷達外圈約 500 到 250 公尺）慢慢長出來
@@ -437,7 +502,7 @@ export function parkTexture(g: ParkGeom, kind: 'grass' | 'ripple', c: Pick<ParkC
 }
 
 /** 地球：台北的經緯度就是地球的，每度的公尺數跟雷達的街道一樣 */
-export const EARTH: ParkWorld = { to: (p) => p, my: 110_574, mx: (lat) => 111_320 * Math.cos(lat * RAD) };
+export const EARTH: ParkWorld = { name: 'earth', to: (p) => p, my: 110_574, mx: (lat) => 111_320 * Math.cos(lat * RAD) };
 
 /**
  * 地球的雷達上的中山公園（北在上，雷達整層跟著指北針轉）：origin 是雷達正中間、scaleKm 是外圈幾公里；

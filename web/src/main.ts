@@ -405,12 +405,18 @@ const radar = new Radar(
 );
 // 點了車掃的車子：打開那條車掃的時間表
 radar.onCar = (id) => selectRoute(id);
-// 點了中山公園的銅像（地球或汪星）：發射火箭，播完再重畫一次把它收掉
-radar.onStatue = () => {
+// 點了中山公園的銅像（地球或汪星）：發射口打開、升起火箭、關上，火箭停在那邊；點火箭問要不要飛到另一邊（rocketTrip）
+radar.onStatue = (world) => {
   void import('./park').then((m) => {
-    if (!m.launchRocket()) return;
+    if (!m.summonRocket(world)) return;
     radar.redrawPark();
-    window.setTimeout(() => radar.redrawPark(), m.LAUNCH_MS + 100);
+    window.setTimeout(() => radar.redrawPark(), m.SUMMON_MS + 50);
+  });
+};
+radar.onRocket = (world) => {
+  void import('./park').then((m) => {
+    if (m.rocketNow()?.phase !== 'parked' || !window.confirm(world === 'earth' ? '是否要到汪星球？' : '是否要回地球？')) return;
+    void rocketTrip(m, world);
   });
 };
 // 太陽系那幾層拖曳移開了視野、拉回地球：「回到我的位置」跟著出現、消失
@@ -871,6 +877,64 @@ function updatePark(): void {
     return;
   }
   radar.setPark(drawPark);
+}
+
+/** 火箭飛行時拉遠到多遠（雷達外圈，公里）：約 2.7 AU，地球和汪星（離太陽 1.26 AU）一起看得到 */
+const TRIP_OUT_KM = 4e8;
+
+/** 雷達範圍照時間慢慢換（對數上平均，頭尾慢）：火箭飛行的拉遠、拉近 */
+function animateScale(toKm: number, ms: number): Promise<void> {
+  return new Promise((done) => {
+    const from = scaleKm;
+    const t0 = performance.now();
+    const step = (now: number): void => {
+      const u = Math.min(1, (now - t0) / ms);
+      const e = u < 0.5 ? 2 * u * u : 1 - (-2 * u + 2) ** 2 / 2;
+      zoomRadar((from * (toKm / from) ** e) / scaleKm, false);
+      if (u < 1) requestAnimationFrame(step);
+      else {
+        zoomRadar(1, true);
+        done();
+      }
+    };
+    requestAnimationFrame(step);
+  });
+}
+
+const wait = (ms: number): Promise<void> => new Promise((r) => window.setTimeout(r, ms));
+
+/**
+ * 火箭從中山公園飛到另一邊的中山公園（地球→汪星、汪星→地球），範圍跟出發時一樣：點火飛走、雷達拉遠到看得到地球和汪星、
+ * 中心換到另一邊（汪星轉到中山公園；回地球時雷達正中間換到發射口，手動位置）、拉近，正中間一支小火箭陪著飛，最後在發射口降落。
+ * 整趟不接受拖曳、縮放（radar.setTrip）
+ */
+async function rocketTrip(m: typeof import('./park'), from: 'earth' | 'woof'): Promise<void> {
+  if (!m.departRocket()) return;
+  parkMod = m;
+  radar.setTrip('', true);
+  radar.redrawPark();
+  const startKm = scaleKm;
+  const sp = spaceMod ?? (await import('./space'));
+  spaceMod = sp;
+  await wait(m.DEPART_MS - 700);
+  radar.setTrip(m.tripSvg());
+  await animateScale(TRIP_OUT_KM, 2400);
+  const [lat, lng] = m.HATCH_CENTER;
+  if (from === 'earth') {
+    const [la, ln] = sp.toWoof([lat, lng]);
+    radar.setSpaceView({ focus: 'woof', yaw: (-ln * Math.PI) / 180, pitch: (la * Math.PI) / 180 });
+  } else {
+    setOrigin({ lat, lng, source: 'manual' });
+    radar.resetSpace();
+  }
+  await wait(250);
+  await animateScale(startKm, 2800);
+  m.landRocket(from === 'earth' ? 'woof' : 'earth');
+  radar.setTrip('', true);
+  radar.redrawPark();
+  await wait(m.LAND_MS + 50);
+  radar.redrawPark();
+  radar.setTrip('', false);
 }
 
 // ---- 太空：比「全球」再拉遠，畫地球、月球、太陽、行星（space.ts，第一次用到才載入；陸地用全世界的海岸線） ----

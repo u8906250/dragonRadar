@@ -1,6 +1,6 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it } from 'vitest';
 import { RADAR_GEOM } from '../src/radar';
-import { EARTH, earthParkSvg, LAUNCH_MS, launchRocket, nearPark, PARK_MIN_KM, parkGeom, parkTexture } from '../src/park';
+import { DEPART_MS, EARTH, earthParkSvg, HATCH_CENTER, LAND_MS, landRocket, departRocket, nearPark, PARK_MIN_KM, parkGeom, parkTexture, resetRocket, rocketNow, SUMMON_MS, summonRocket } from '../src/park';
 import { spaceMarkup, toWoof } from '../src/space';
 
 const { c: C, inner: INNER } = RADAR_GEOM;
@@ -18,6 +18,9 @@ const earthCanvas = (km: number, [lat, lng]: [number, number]) => {
 };
 
 describe('地球的雷達上的中山公園（跟汪星共用一份）', () => {
+  // 火箭是 park.ts 裡的狀態：每個測試完都收掉（中途失敗也不會影響下一個）
+  afterEach(() => resetRocket());
+
   it('lets the radar zoom in to 0.5 m only around the park', () => {
     expect(nearPark(...hall)).toBe(true);
     expect(nearPark(...lake)).toBe(true);
@@ -79,25 +82,56 @@ describe('地球的雷達上的中山公園（跟汪星共用一份）', () => {
     expect(at(2, hall)).not.toContain('park-statue');
   });
 
-  it('opens the middle lawn and launches a rocket when 孫中山銅像 is tapped (once at a time, picks up where it was when redrawn)', () => {
+  it('summons a rocket from the middle lawn, parks it, flies it to 汪星 and lands it there', () => {
     const statue: [number, number] = [25.040048, 121.5594];
     const now = performance.now();
+    resetRocket();
     expect(at(0.025, statue)).not.toContain('park-launch');
-    expect(launchRocket(now - 2000)).toBe(true);
-    // 還在播：再點不會重來
-    expect(launchRocket(now)).toBe(false);
+    // 點銅像：發射口打開（兩片門帶著草滑開）、火箭升上來；播完前再點不算
+    expect(summonRocket('earth', now - 1000)).toBe(true);
+    expect(summonRocket('earth', now)).toBe(false);
     const m = at(0.025, statue);
-    const t = Number(/class="park-launch" style="--t:(-\d+)ms"/.exec(m)![1]);
-    expect(t).toBeLessThanOrEqual(-2000);
-    expect(t).toBeGreaterThan(-2500);
-    for (const cls of ['launch-shaft', 'launch-door launch-door-w', 'launch-door launch-door-e', 'park-rocket', 'rocket-fly', 'rocket-rise', 'rocket-flame', 'rocket-smoke']) expect(m).toContain(`class="${cls}"`);
-    // 火箭站在發射口（廣場中間那塊草皮）的正中間，往西 4.5 公尺左右；發射口在銅像左邊
+    const t = Number(/class="park-launch summon" style="--t:(-\d+)ms"/.exec(m)![1]);
+    // 已經過了 1 秒多（測試跑得慢也還在播：門要 5 秒才關上）
+    expect(t).toBeLessThanOrEqual(-1000);
+    expect(t).toBeGreaterThan(-1000 - SUMMON_MS / 2);
+    for (const cls of ['launch-shaft', 'launch-door', 'door-top', 'park-rocket', 'rocket-rise']) expect(m).toContain(`class="${cls}"`);
+    expect(m).not.toContain('rocket-hit');
+    // 門上的草：跟草地上同一叢一叢（只長發射口那一塊），兩片門各一份
+    const tufts = (d: string): string[] => d.match(/M-?\d+ -?\d+/g) ?? [];
+    const lawnGrass = tufts(/class="park-grass"[^>]* d="([^"]*)"/.exec(m)![1]);
+    const doors = [...m.matchAll(/class="launch-door"[\s\S]*?class="park-grass"[^>]* d="([^"]*)"/g)].map((x) => tufts(x[1]));
+    expect(doors).toHaveLength(2);
+    expect(doors[0].length).toBeGreaterThan(3);
+    expect(doors[0].every((p) => lawnGrass.includes(p))).toBe(true);
+    // 火箭站在發射口的正中間（銅像西邊約 5 公尺）
     const [rx] = /class="park-rocket" data-at="([-\d.]+) ([-\d.]+)"/.exec(m)!.slice(1).map(Number);
     expect((C - rx) / (INNER / 25)).toBeGreaterThan(3.5);
-    expect((C - rx) / (INNER / 25)).toBeLessThan(6);
-    // 播完可以再點（這裡是在 LAUNCH_MS 之後才點的那一下，那個時間還沒到就不畫）
-    expect(launchRocket(now + LAUNCH_MS)).toBe(true);
-    expect(at(0.025, statue)).not.toContain('park-launch');
+    expect((C - rx) / (INNER / 25)).toBeLessThan(6.5);
+    // 門關上後停著：點得到火箭，沒有井和門
+    expect(rocketNow(now - 1000 + SUMMON_MS)?.phase).toBe('parked');
+    expect(summonRocket('earth', now - 1000 - SUMMON_MS)).toBe(false);
+    resetRocket();
+    summonRocket('earth', now - SUMMON_MS - 1);
+    const parked = at(0.025, statue);
+    expect(parked).toContain('class="park-launch parked"');
+    expect(parked).toContain('class="rocket-hit"');
+    expect(parked).not.toContain('launch-shaft');
+    // 飛走：點火、飛出畫面，之後不畫；地球上的銅像再點也叫不出第二支（每一段都用當下的時間：測試跑得慢也還在播）
+    const t1 = performance.now();
+    expect(departRocket(t1)).toBe(true);
+    expect(departRocket(t1)).toBe(false);
+    expect(at(0.025, statue)).toContain('class="park-launch depart"');
+    expect(rocketNow(t1 + DEPART_MS)?.phase).toBe('away');
+    // 汪星上同一個地方降落，地球上沒有
+    const t2 = performance.now();
+    landRocket('woof', t2);
+    expect(at(0.025, statue)).not.toContain('park-rocket');
+    const [la, ln] = toWoof(HATCH_CENTER);
+    const woof = spaceMarkup({ center: { lat: 25.04, lng: 121.52 }, land: [], when: new Date('2026-10-28T08:00:00Z'), scaleKm: 0.025, rg: 164, view: { focus: 'woof', yaw: (-ln * Math.PI) / 180, pitch: (la * Math.PI) / 180 } });
+    expect(woof).toContain('class="park-launch land"');
+    expect(/class="park-rocket" data-at="([-\d.]+) ([-\d.]+)"/.exec(woof)!.slice(1).map(Number)).toEqual([C, C]);
+    expect(rocketNow(t2 + LAND_MS)).toMatchObject({ world: 'woof', phase: 'parked' });
   });
 
   it('grows grass on the lawns and ripples on 映池 and 翠湖 (not on the islands)', () => {
