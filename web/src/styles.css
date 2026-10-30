@@ -455,6 +455,9 @@ a.chip { display: inline-flex; align-items: center; text-decoration: none; }
 .radar .space-mare { fill: #6f6b64; fill-opacity: 0.35; stroke: none; }
 /* 汪星的地表（台北市）：道路跟雷達的街道一樣（粗細、深淺照 street-major、street-minor） */
 .radar .region-outline.woof-land { stroke: none; }
+/* 汪星的海：整顆挖掉陸地（evenodd），跟公園的水池一樣淡淡的水色，拉近時一道道的水波（space.ts 的 woofGlobe） */
+.radar .woof-sea { fill: var(--water); fill-opacity: 0.16; fill-rule: evenodd; stroke: none; pointer-events: none; }
+.radar .woof-ripple { fill: none; stroke: var(--water); stroke-opacity: 0.5; stroke-linecap: round; pointer-events: none; }
 /* 中山公園（park.ts，地球的雷達和汪星共用）：範圍淡淡填色、虛線的邊；建築實線、水面水藍色的虛線、草地花圃草綠色的點線，步道跟街道的細線一樣 */
 .radar .park-area { fill: var(--accent); fill-opacity: 0.1; stroke: none; pointer-events: none; }
 .radar .park-edge { fill: none; stroke: var(--accent); stroke-width: 1.2; stroke-opacity: 0.6; stroke-dasharray: 2 2; pointer-events: none; }

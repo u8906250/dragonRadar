@@ -835,33 +835,12 @@ function cellRand(i: number, j: number, k: number, n: number): number {
 }
 /** 畫面上的草或水波（畫的座標乘 10）和線的粗細；太遠、畫面上沒有草地（水面）就是 null；only 是只長在這幾塊裡（跟長滿時同一叢一叢） */
 export function parkTexture(g: ParkGeom, kind: 'grass' | 'ripple', c: Pick<ParkCanvas, 'ppm' | 'center' | 'rx' | 'ry' | 'at'>, only?: Patches): { d: string; w: number } | null {
-  const [all, t, salt] = kind === 'grass' ? [g.lawnPatches, GRASS, 0] : [g.pondPatches, RIPPLES, 1];
+  const [all, salt] = kind === 'grass' ? [g.lawnPatches, 0] : [g.pondPatches, 1];
   // only：只長這幾塊（發射口的門上），位置跟長滿草地時一樣
   const area = only ?? all;
-  const { ppm, O } = { ppm: c.ppm, O: g.O };
-  if (ppm < TEXTURE_FROM) return null;
-  // 每公尺 0.33 到 0.66 像素之間（雷達外圈約 500 到 250 公尺）慢慢長出來
-  const fade = Math.min(1, ppm / TEXTURE_FROM - 1);
-  // 最大在畫面上幾像素；比間隔大很多（放大到 1 公尺內）就不再加，只是跟著變大，不會密成一片
-  const big = Math.max(t.size * ppm, t.min);
-  const p = Math.max(t.px, big / t.dense) * Math.sqrt(4 / 3);
-  // 畫的這一層：格子在畫面上 p～2p 像素；再細一層加進來的比例讓每像素的個數不變
-  const k0 = Math.min(TEXTURE_TOP, Math.max(1, Math.ceil(Math.log2(p / ppm / TEXTURE_MIN_M))));
-  const cell = TEXTURE_MIN_M * 2 ** k0 * ppm;
-  const more = Math.min(1, ((cell / p) ** 2 - 1) / 3);
-  // 看得到的範圍（攤平的公尺，多留一點：球面和攤平的方向差一點點）
-  const half = ((INNER + 10) / ppm) * 1.15 + t.size;
-  const cx = (c.center.lng - O.lng) * O.mx;
-  const cy = (c.center.lat - O.lat) * O.my;
-  const x0 = Math.max(cx - half, area.box[0]);
-  const x1 = Math.min(cx + half, area.box[2]);
-  const y0 = Math.max(cy - half, area.box[1]);
-  const y1 = Math.min(cy + half, area.box[3]);
-  if (x0 > x1 || y0 > y1) return null;
-  // 只看範圍裡面的那幾塊
-  const list = area.list.filter((l) => l.x1 >= x0 && l.x0 <= x1 && l.y1 >= y0 && l.y0 <= y1);
-  if (!list.length) return null;
+  const box: Box = [area.box[0], area.box[1], area.box[2], area.box[3]];
   // 上一個所在的那一塊先看（旁邊的格子多半在同一塊）
+  let list = area.list;
   let hit = 0;
   const inside = (x: number, y: number): boolean => {
     for (let m = 0; m < list.length; m++) {
@@ -881,6 +860,49 @@ export function parkTexture(g: ParkGeom, kind: 'grass' | 'ripple', c: Pick<ParkC
     }
     return false;
   };
+  // 只看範圍裡面的那幾塊
+  return scatter(kind, c, g.O, box, inside, salt, (x0, y0, x1, y1) => {
+    list = area.list.filter((l) => l.x1 >= x0 && l.x0 <= x1 && l.y1 >= y0 && l.y0 <= y1);
+    return list.length > 0;
+  });
+}
+
+/**
+ * 草和水波撒在一塊地方：O 是攤平成公尺的原點（每度幾公尺），box 是這塊地方的範圍（攤平的公尺），inside 看一點在不在裡面；
+ * near 是知道看得到的範圍後先篩一次（沒有東西就不畫）；salt 讓不同的地方亂數不一樣（汪星的海用自己的）
+ */
+export function scatter(
+  kind: 'grass' | 'ripple',
+  c: Pick<ParkCanvas, 'ppm' | 'center' | 'rx' | 'ry' | 'at'>,
+  O: { lat: number; lng: number; mx: number; my: number },
+  box: Box,
+  inside: (x: number, y: number) => boolean,
+  salt: number,
+  near?: (x0: number, y0: number, x1: number, y1: number) => boolean,
+): { d: string; w: number } | null {
+  const t = kind === 'grass' ? GRASS : RIPPLES;
+  const area = { box };
+  const ppm = c.ppm;
+  if (ppm < TEXTURE_FROM) return null;
+  // 每公尺 0.33 到 0.66 像素之間（雷達外圈約 500 到 250 公尺）慢慢長出來
+  const fade = Math.min(1, ppm / TEXTURE_FROM - 1);
+  // 最大在畫面上幾像素；比間隔大很多（放大到 1 公尺內）就不再加，只是跟著變大，不會密成一片
+  const big = Math.max(t.size * ppm, t.min);
+  const p = Math.max(t.px, big / t.dense) * Math.sqrt(4 / 3);
+  // 畫的這一層：格子在畫面上 p～2p 像素；再細一層加進來的比例讓每像素的個數不變
+  const k0 = Math.min(TEXTURE_TOP, Math.max(1, Math.ceil(Math.log2(p / ppm / TEXTURE_MIN_M))));
+  const cell = TEXTURE_MIN_M * 2 ** k0 * ppm;
+  const more = Math.min(1, ((cell / p) ** 2 - 1) / 3);
+  // 看得到的範圍（攤平的公尺，多留一點：球面和攤平的方向差一點點）
+  const half = ((INNER + 10) / ppm) * 1.15 + t.size;
+  const cx = (c.center.lng - O.lng) * O.mx;
+  const cy = (c.center.lat - O.lat) * O.my;
+  const x0 = Math.max(cx - half, area.box[0]);
+  const x1 = Math.min(cx + half, area.box[2]);
+  const y0 = Math.max(cy - half, area.box[1]);
+  const y1 = Math.min(cy + half, area.box[3]);
+  if (x0 > x1 || y0 > y1) return null;
+  if (near && !near(x0, y0, x1, y1)) return null;
   const w = Math.min(t.width[2], Math.max(t.width[1], t.width[0] * ppm));
   const reach = (INNER + 2) ** 2;
   const [bx0, by0, bx1, by1] = t.box.map((v) => v * big);

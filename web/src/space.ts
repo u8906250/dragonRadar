@@ -6,7 +6,7 @@
 import type { LatLng } from './geo';
 import { RADAR_GEOM, TINY_EARTH } from './radar';
 import type { StreetClass, StreetLine } from './streets';
-import { nearPark, PARK_MIN_KM, parkGeom, parkSvg, ringArea } from './park';
+import { nearPark, PARK_MIN_KM, parkGeom, parkSvg, ringArea, scatter } from './park';
 import { TAIPEI_DISTRICT_LINES, TAIPEI_MAJOR_ROADS, TAIPEI_MINOR_ROADS, TAIPEI_OUTLINE } from './taipei';
 
 const { c: C, inner: INNER, size: SIZE } = RADAR_GEOM;
@@ -675,9 +675,16 @@ function woofGlobe(x: number, y: number, r: number, view: SpaceView, toSun: Vec3
   const box: [number, number, number, number] = [-ox - 20, -oy - 20, SIZE - ox + 20, SIZE - oy + 20];
   const lines = (ls: Array<Array<[number, number]>>): string => linesPath(center, ls, r, box, near);
   let out = '';
-  if (r >= 30) out += `<path class="space-grat" d="${graticule(center, r, box, near)}" />`;
   // 陸地：填色和海岸線分開畫（放大很多時陸地比畫面大上千倍，整圈虛線要畫好幾秒）
   const land = WOOF_LAND.map((ring) => hemiPath(center, ring, r, onWoofLand(center.lat, center.lng), near)).join('');
+  // 海：整顆汪星挖掉陸地（evenodd），淡淡的水色（陸地是半透明的，不能整顆鋪在下面）；
+  // 放大很多時汪星比畫面大上千倍，雷達整個在球上就用畫面的範圍（太大的圓瀏覽器畫不準）
+  const disc =
+    r - Math.hypot(ox, oy) > INNER + 40
+      ? `M${f1(box[0])} ${f1(box[1])}H${f1(box[2])}V${f1(box[3])}H${f1(box[0])}Z`
+      : `M${f1(C - r)} ${f1(C)}A${f1(r)} ${f1(r)} 0 1 0 ${f1(C + r)} ${f1(C)}A${f1(r)} ${f1(r)} 0 1 0 ${f1(C - r)} ${f1(C)}Z`;
+  out += `<path class="woof-sea" d="${disc}${land}" />`;
+  if (r >= 30) out += `<path class="space-grat" d="${graticule(center, r, box, near)}" />`;
   if (land) out += `<path class="region-outline woof-land" d="${land}" />`;
   out += `<path class="region-outline open" d="${lines(WOOF_LAND.map((ring) => [...ring, ring[0]]))}" />`;
   if (r >= 30) out += `<path class="region-outline open county-line" d="${lines(WOOF_DISTRICT_LINES)}" />`;
@@ -686,6 +693,19 @@ function woofGlobe(x: number, y: number, r: number, view: SpaceView, toSun: Vec3
     const fine = view.focus === 'woof' && streets ? woofStreetLines(center, r, streets) : null;
     out += `<path class="woof-road street-minor" d="${lines(fine?.minor ?? WOOF_MINOR_ROADS)}" />`;
     out += `<path class="woof-road street-major" d="${lines(fine?.major ?? WOOF_MAJOR_ROADS)}" />`;
+  }
+  // 海上的水波（跟公園的水池一樣，拉近到外圈約 500 公尺內才長出來；要飛過去當中心才畫）：照中山公園那裡攤平成公尺撒，不在陸地上的才畫
+  if (view.focus === 'woof') {
+    const O = WOOF_PARK.O;
+    const waves = scatter(
+      'ripple',
+      { ppm: r / (WOOF_KM * 1000), center, rx: C - ox, ry: C - oy, at: (lat, lng) => { const [px, py, pz] = ortho(center, lat, lng); return pz > 0 ? [C + r * px, C - r * py] : null; } },
+      O,
+      [-1e9, -1e9, 1e9, 1e9],
+      (x, y) => !onWoofLand(O.lat + y / O.my, O.lng + x / O.mx),
+      2,
+    );
+    if (waves) out += `<path class="woof-ripple" transform="scale(0.1)" stroke-width="${(waves.w * 10).toFixed(1)}" d="${waves.d}" />`;
   }
   // 中山公園（park.ts，跟地球的雷達共用）：放大很多時只填看得到的那一小塊附近的；草和水波要飛過去當中心才畫
   const nearRing = (ring: Array<[number, number]>): boolean => !near || (ring.some(([a]) => a >= near.lat0) && ring.some(([a]) => a <= near.lat1) && ring.some(([, b]) => b >= near.lng0) && ring.some(([, b]) => b <= near.lng1));

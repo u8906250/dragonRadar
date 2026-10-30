@@ -229,6 +229,25 @@ describe('汪星', () => {
     expect(focusMinKm('woof', at, true)).toBe(PARK_MIN_KM);
   });
 
+  it('paints the sea (the planet minus the land), with ripples when close', () => {
+    const near = spaceMarkup({ ...base, scaleKm: (WOOF_KM * 164) / 39, rg: 164, view: { focus: 'woof', yaw: 0, pitch: 0 } });
+    // 整顆是一個圓，挖掉陸地（evenodd）
+    expect(near).toMatch(/class="woof-sea" d="M[\d.]+ [\d.]+A[^"]*Z.+"/);
+    // 看不到地圖（你在地球）：沒有海
+    expect(spaceMarkup({ ...base, scaleKm: WOOF_KM * 1.3, rg: 164, view: { focus: 'woof', yaw: 0, pitch: 0 }, woofMap: false })).not.toContain('woof-sea');
+    // 拉近到板橋那邊（汪星的海，萬華的對岸）：鋪滿畫面、有水波；拉近到台北車站（陸地）：沒有水波
+    const at = (p: [number, number], km: number): string => {
+      const [la, ln] = toWoof(p);
+      return spaceMarkup({ ...base, scaleKm: km, rg: 164, view: { focus: 'woof', yaw: (-ln * Math.PI) / 180, pitch: (la * Math.PI) / 180 } });
+    };
+    const sea = at([25.02, 121.487], 0.3);
+    expect(sea).toMatch(/class="woof-sea" d="M[-\d.]+ [-\d.]+H/);
+    expect((/class="woof-ripple"[^>]* d="([^"]*)"/.exec(sea)?.[1].match(/M/g) ?? []).length).toBeGreaterThan(50);
+    expect(at([25.0478, 121.517], 0.3)).not.toContain('woof-ripple');
+    // 拉遠看不到水波
+    expect(at([25.02, 121.487], 3)).not.toContain('woof-ripple');
+  });
+
   it('wraps Taipei City around the whole planet, with the sea outside the city', () => {
     // 市界最西南、最東北的角落
     const sw = toWoof([24.9605, 121.4571]);
