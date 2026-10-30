@@ -14,12 +14,14 @@ const YARD: DogYard = {
   metres: (a, b) => Math.hypot(a[0] - b[0], a[1] - b[1]),
 };
 const onLawn = (ring: number, [y, x]: [number, number]): boolean => y >= 0 && y <= 40 && x >= ring * 60 && x <= ring * 60 + 40;
+/** 白天（中午 12 點）：不受跑測試是幾點影響 */
+const noon = (): number => 12;
 const seeded = (seed: number) => (): number => ((seed = (seed * 16807) % 2147483647) - 1) / 2147483646;
 
 describe('會動的狗（dogs.ts）', () => {
   it('walks slowly, runs, stops, sniffs and sits, one piece after another', () => {
     const rand = seeded(11);
-    const dog = new Dog({ id: 'test-a', name: '測試', look: MALTESE, yard: YARD });
+    const dog = new Dog({ id: 'test-a', name: '測試', look: MALTESE, yard: YARD, hour: noon });
     expect(dogById('test-a')).toBe(dog);
     dog.place(rand, 0);
     // 三小時，每半秒看一次：一段接一段（沒有跳），停著的不動，走、跑照速度，每一段一開始面向上一段的方向
@@ -43,7 +45,9 @@ describe('會動的狗（dogs.ts）', () => {
         if (s.do !== 'drink') expect(s.dir).toEqual(s.dir0);
       }
     }
-    expect(new Set(list.map((s) => s.do))).toEqual(new Set(['stand', 'idle', 'sniff', 'sit', 'lie', 'stretch', 'drink', 'walk', 'run']));
+    // （白天偶爾打個盹）
+    expect(new Set(list.map((s) => s.do))).toEqual(new Set(['stand', 'idle', 'sniff', 'sit', 'lie', 'sleep', 'stretch', 'drink', 'walk', 'run']));
+    for (const s of list.filter((x) => x.do === 'sleep')) expect(s.ms).toBeLessThanOrEqual(600_000);
     // 跑完不一定休息：趴下來、停下來發呆，或改成走路（不再跑）
     const afterRun = list.filter((s, i) => i > 0 && list[i - 1].do === 'run' && !list[i - 1].goal && !list[i - 1].via?.length);
     expect(afterRun.length).toBeGreaterThan(10);
@@ -101,7 +105,7 @@ describe('會動的狗（dogs.ts）', () => {
 
   it('follows its own nature (another dog can love running)', () => {
     const rand = seeded(3);
-    const runner = new Dog({ id: 'test-c', name: '愛跑的', look: MALTESE, yard: YARD, nature: { ...NATURE, run: 0.6, stays: { sniff: 1 }, afterRun: { lie: 1, idle: 0, walk: 0 } } });
+    const runner = new Dog({ id: 'test-c', name: '愛跑的', look: MALTESE, yard: YARD, nature: { ...NATURE, run: 0.6, stays: { sniff: 1 }, afterRun: { lie: 1, idle: 0, walk: 0 } }, hour: noon });
     runner.place(rand, 0);
     const segs = new Map<number, NonNullable<Dog['seg']>>();
     for (let t = 0; t <= 3_600_000; t += 500) segs.set(runner.now(t, rand).seg.start, runner.now(t, rand).seg);
@@ -113,26 +117,71 @@ describe('會動的狗（dogs.ts）', () => {
     expect(list.slice(1).some((s) => s.do === 'stand' || s.do === 'sit' || s.do === 'idle')).toBe(false);
   });
 
+  it('curls up to sleep, much more at night (until 9 in the morning), and wakes up when tapped', () => {
+    // 從晚上 10 點開始（performance.now() 的 0 是 22:00）
+    const at22 = (t: number): number => (22 + t / 3_600_000) % 24;
+    const rand = seeded(21);
+    const dog = new Dog({ id: 'test-sleep', name: '測試', look: MALTESE, yard: YARD, hour: at22 });
+    dog.place(rand, 0);
+    let slept: DogSeg | null = null;
+    for (let t = 0; t <= 3_600_000 && !slept; t += 500) {
+      const d = dog.now(t, rand);
+      if (d.seg.do === 'sleep') slept = d.seg;
+    }
+    // 晚上很快就睡了，一睡就睡到早上 9 點
+    expect(slept).not.toBeNull();
+    expect(slept!.start).toBeLessThan(1_800_000);
+    expect(at22(slept!.start + slept!.ms)).toBeCloseTo(9, 3);
+    // 睡覺的樣子：趴下、捲起來、閉眼睛
+    const p = dogPose(slept!, 60_000);
+    expect(p.lie).toBe(1);
+    expect(p.curl).toBe(1);
+    expect(p.blink).toBe(1);
+    // 點了醒過來：慢慢站起來，接著伸懶腰（不會轉頭看、不會坐下）
+    const t1 = slept!.start + 60_000;
+    dog.pet(t1, () => 0);
+    expect(dog.glance).toBeNull();
+    expect(dog.seg!.do).toBe('sleep');
+    expect(dog.seg!.start + dog.seg!.ms - t1).toBeLessThanOrEqual(1600);
+    expect(dog.now(t1 + 1700, rand).seg.do).toBe('stretch');
+    // 白天：大多不睡，睡了也只是打個盹
+    const day = new Dog({ id: 'test-nap', name: '測試', look: MALTESE, yard: YARD, hour: noon });
+    day.place(rand, 0);
+    let stays = 0;
+    let naps = 0;
+    for (let t = 0, last = -1; t <= 3_600_000; t += 500) {
+      const s = day.now(t, rand).seg;
+      if (s.start === last) continue;
+      last = s.start;
+      if (s.from === s.to) stays++;
+      if (s.do === 'sleep') {
+        naps++;
+        expect(s.ms).toBeLessThanOrEqual(600_000);
+      }
+    }
+    expect(naps).toBeLessThan(stays * 0.1);
+  });
+
   it('stays where it was after reloading the page', () => {
     const store = new Map<string, string>();
     vi.stubGlobal('localStorage', { getItem: (k: string) => store.get(k) ?? null, setItem: (k: string, v: string) => void store.set(k, v), removeItem: (k: string) => void store.delete(k) });
     try {
       const rand = seeded(9);
-      const a = new Dog({ id: 'test-reload', name: '測試', look: MALTESE, yard: YARD });
+      const a = new Dog({ id: 'test-reload', name: '測試', look: MALTESE, yard: YARD, hour: noon });
       a.place(rand, 1000);
       const before = a.now(20_000, rand);
       expect(store.has('dr.dog.test-reload')).toBe(true);
       // 重新整理：同一隻狗（同一個 id）接著同一段，在同一個地方
-      const b = new Dog({ id: 'test-reload', name: '測試', look: MALTESE, yard: YARD });
+      const b = new Dog({ id: 'test-reload', name: '測試', look: MALTESE, yard: YARD, hour: noon });
       expect(b.seg?.start).toBeCloseTo(before.seg.start, 3);
       expect(b.now(20_000, rand).at).toEqual(before.at);
       // 離開很久了：停在上次那一段的終點
-      const c = new Dog({ id: 'test-reload', name: '測試', look: MALTESE, yard: YARD });
+      const c = new Dog({ id: 'test-reload', name: '測試', look: MALTESE, yard: YARD, hour: noon });
       const later = c.now(before.seg.start + before.seg.ms + 600_000, rand);
       expect(later.seg.from).toEqual(before.seg.to);
       // 存的東西壞掉：重新放
       store.set('dr.dog.test-reload', '{"do":1}');
-      expect(new Dog({ id: 'test-reload', name: '測試', look: MALTESE, yard: YARD }).seg).toBeNull();
+      expect(new Dog({ id: 'test-reload', name: '測試', look: MALTESE, yard: YARD, hour: noon }).seg).toBeNull();
     } finally {
       vi.unstubAllGlobals();
     }
@@ -140,7 +189,7 @@ describe('會動的狗（dogs.ts）', () => {
 
   it('sometimes just turns its head to look at you when tapped, and carries on', () => {
     const rand = seeded(4);
-    const dog = new Dog({ id: 'test-glance', name: '測試', look: MALTESE, yard: YARD });
+    const dog = new Dog({ id: 'test-glance', name: '測試', look: MALTESE, yard: YARD, hour: noon });
     dog.place(rand, 0);
     const before = dog.now(10_000, rand);
     dog.pet(10_000, () => 0);
@@ -159,7 +208,7 @@ describe('會動的狗（dogs.ts）', () => {
     // 照個性：大概六成只轉頭看、四成轉過來坐下
     let looks = 0;
     for (let i = 0; i < 200; i++) {
-      const d = new Dog({ id: `test-glance-${i}`, name: '測試', look: MALTESE, yard: YARD });
+      const d = new Dog({ id: `test-glance-${i}`, name: '測試', look: MALTESE, yard: YARD, hour: noon });
       d.place(rand, 0);
       d.pet(1000, rand);
       if (d.glance) looks++;
@@ -170,7 +219,7 @@ describe('會動的狗（dogs.ts）', () => {
 
   it('turns to face you (south) and sits when tapped, and sits longer when tapped again', () => {
     const rand = seeded(5);
-    const dog = new Dog({ id: 'test-b', name: '測試', look: MALTESE, yard: YARD });
+    const dog = new Dog({ id: 'test-b', name: '測試', look: MALTESE, yard: YARD, hour: noon });
     dog.place(rand, 0);
     const before = dog.now(20_000, rand);
     // （不要只轉頭看）

@@ -76,7 +76,7 @@ export const dogHeight = (look: DogLook): number => 0.38 * look.size;
  * lean 身體前面往下幾度（跑步時前後搖、聞的時候前面低下去），nod 脖子和頭往下低幾度，look 頭往左轉幾度，
  * ear 耳朵往後飛幾度（跑步），wag 尾巴往左右搖幾度，tail 尾巴放下來多少（0 往上捲過背～1 垂在後面），tongue 吐舌頭，
  * lie 趴下多少（0 站著～1 整個貼地：前腳往前伸平、後腳收在身體兩側），blink 眼睛閉起來多少（眨眼、趴著睡覺），
- * lips 畫嘴唇線（站著、走路時）
+ * lips 畫嘴唇線（站著、走路時），curl 身體捲起來多少（0～1，睡覺：前半身和屁股往左彎成一圈，頭靠到尾巴旁邊）
  */
 export interface DogPose {
   legs: Array<[number, number]>;
@@ -92,8 +92,9 @@ export interface DogPose {
   lie: number;
   blink: number;
   lips: boolean;
+  curl: number;
 }
-export const STILL: DogPose = { legs: [[0, 0], [0, 0], [0, 0], [0, 0]], bob: 0, sit: 0, lean: 0, nod: 0, look: 0, ear: 0, wag: 0, tail: 0, tongue: false, lie: 0, blink: 0, lips: false };
+export const STILL: DogPose = { legs: [[0, 0], [0, 0], [0, 0], [0, 0]], bob: 0, sit: 0, lean: 0, nod: 0, look: 0, ear: 0, wag: 0, tail: 0, tongue: false, lie: 0, blink: 0, lips: false, curl: 0 };
 
 const RAD = Math.PI / 180;
 /** 從水平往下看幾度（跟銅像、火箭差不多，看得到背） */
@@ -165,19 +166,23 @@ function parts(look: DogLook, pose: DogPose): Part[] {
   const P = S([-0.1, 0, 0.16]);
   const drop = (sit * 0.07 + pose.lie * 0.115 - pose.bob) * s;
   const body = joint({ p: (q) => [q[0], q[1], q[2] - drop], d: (q) => q }, P, (sit * 26 - pose.lean) * RAD);
-  // 脖子和頭繞肩膀轉：低頭聞（nod，鼻子湊到地上）、左右看（look），坐下時轉回來平平地看
-  const neck = joint(body, S([0.09, 0, 0.22]), -(pose.nod + sit * 20) * RAD, pose.look * RAD);
-  // 尾巴繞連到屁股的地方：往後放下來（垂在後面）、左右搖
+  // 捲起來睡覺：前半身（胸、脖子、頭、前腳）和後半身（屁股、尾巴、後腳）繞身體中間都往左彎，彎成一圈
+  const curl = pose.curl * 52 * RAD;
+  const fore = joint(body, S([0, 0, 0.2]), 0, curl);
+  const hind = joint(body, S([0, 0, 0.2]), 0, -curl);
+  // 脖子和頭繞肩膀轉：低頭聞（nod，鼻子湊到地上）、左右看（look），坐下時轉回來平平地看；捲起來時頭再往左轉、低到地上，靠到尾巴旁邊
+  const neck = joint(fore, S([0.09, 0, 0.22]), -(pose.nod + sit * 20 + pose.curl * 22) * RAD, (pose.look + pose.curl * 62) * RAD);
+  // 尾巴繞連到屁股的地方：往後放下來（垂在後面）、左右搖；捲起來時繞到前面
   const B = S([-0.155, 0, 0.25]);
-  const tail = joint(body, B, pose.tail * 145 * RAD, pose.wag * RAD);
+  const tail = joint(hind, B, pose.tail * 145 * RAD, (pose.wag - pose.curl * 95) * RAD);
   const H = look.hair;
   const out: Part[] = [];
   const furry = (key: string, e: Ell, hair = H, tones = fur, fill = fur[1], dense = 1): void => void out.push({ key, e, fill, hair, tones, dense });
   /** 臉附近的毛密一點 */
   const FACE = 2.5;
-  furry('body', move(ell(S([0, 0, 0.205]), 0.135 * s, 0.096 * s, 0.08 * s), body));
-  furry('rump', move(ell(S([-0.095, 0, 0.205]), 0.078 * s, 0.093 * s, 0.082 * s), body));
-  furry('chest', move(ell(S([0.09, 0, 0.2]), 0.08 * s, 0.096 * s, 0.092 * s), body), H * 1.15);
+  furry('body', move(ell(S([0, 0, 0.205]), 0.135 * s * (1 - 0.35 * pose.curl), 0.096 * s, 0.08 * s), body));
+  furry('rump', move(ell(S([-0.095, 0, 0.205]), 0.078 * s, 0.093 * s, 0.082 * s), hind));
+  furry('chest', move(ell(S([0.09, 0, 0.2]), 0.08 * s, 0.096 * s, 0.092 * s), fore), H * 1.15);
   furry('neck', move(ell(S([0.13, 0, 0.255]), 0.05 * s, 0.06 * s, 0.066 * s), neck));
   // 頭（大大圓圓、毛茸茸，頭頂一團蓬蓬的毛）、嘴巴（藏在毛裡）、臉頰、下巴的鬍子、鼻子（鼻孔、一點光澤）、眼睛、淚痕、舌頭（只有跑步時）
   const F = look.face;
@@ -258,7 +263,7 @@ function parts(look: DogLook, pose: DogPose): Part[] {
   const hips: Array<[number, number, boolean]> = [[0.09, 0.05, true], [0.09, -0.05, true], [-0.095, 0.052, false], [-0.095, -0.052, false]];
   hips.forEach(([u, v, front], i) => {
     const [deg, lift] = pose.legs[i] ?? [0, 0];
-    const hip = body.p(S([u, v, 0.16]));
+    const hip = (front ? fore : hind).p(S([u, v, 0.16]));
     const th = deg * RAD;
     // 腳從連到身體的地方到地上；往前伸很多時（伸懶腰）照腳的長度伸出去，腳往下壓（lift 是負的）就貼在地上
     const L = Math.max(0.02 * s, hip[2], 0.17 * s * Math.abs(Math.sin(th)));

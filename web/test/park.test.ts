@@ -7,6 +7,8 @@ import { dogHeight, MALTESE } from '../src/dog';
 import { Dog } from '../src/dogs';
 
 const { c: C, inner: INNER } = RADAR_GEOM;
+/** 白天（中午 12 點）：不受跑測試是幾點影響 */
+const noon = (): number => 12;
 const hall: [number, number] = [25.0400096, 121.5602923];
 const lawn: [number, number] = [25.0383215, 121.5608674];
 const pond: [number, number] = [25.039066, 121.56026];
@@ -160,7 +162,7 @@ describe('地球的雷達上的中山公園（跟汪星共用一份）', () => {
     }
     expect(drank).toBeGreaterThan(2);
     // 小法兩小時：每一段走過的路都在草地或步道上（不進建築、不下水、不橫越廣場），也不去公園最右上那一區
-    const xiaofa = new Dog({ id: 'xiaofa-sim', name: '小法', look: MALTESE, yard: PARK_DOGS[0].yard });
+    const xiaofa = new Dog({ id: 'xiaofa-sim', name: '小法', look: MALTESE, yard: PARK_DOGS[0].yard, hour: noon });
     xiaofa.place(rand, 0);
     const segs = new Map<number, NonNullable<Dog['seg']>>();
     for (let t = 0; t <= 2 * 3_600_000; t += 500) {

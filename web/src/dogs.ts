@@ -13,7 +13,7 @@
 import { dogHeight, dogSvg, STILL, type DogLook, type DogPose } from './dog';
 
 type Pt = [number, number];
-export type DogDo = 'stand' | 'idle' | 'sniff' | 'sit' | 'lie' | 'stretch' | 'drink' | 'walk' | 'run';
+export type DogDo = 'stand' | 'idle' | 'sniff' | 'sit' | 'lie' | 'sleep' | 'stretch' | 'drink' | 'walk' | 'run';
 export interface DogSeg {
   do: DogDo;
   from: Pt;
@@ -68,6 +68,7 @@ export interface DogYard {
  * last 每種停下來的動作停多久（毫秒，最短～最長），
  * afterRun 跑完做什麼（權重：趴下來休息、停下來發呆、改成走路），stretchAfterRest 坐完趴完伸懶腰、chin 趴著下巴靠下去閉眼睛的機率，
  * glance 點了只轉頭看你（繼續做原本的事）的機率（其他時候轉過來坐下），
+ * sleep 停下來捲成一圈睡覺的權重（白天、晚上不一樣，晚上是 night 那幾點：晚上一睡就睡到早上，白天打個盹 nap 毫秒），
  * tail 每種動作尾巴垂下來的機率
  */
 export interface DogNature {
@@ -86,6 +87,9 @@ export interface DogNature {
   stretchAfterRest: number;
   chin: number;
   glance: number;
+  sleep: { day: number; night: number };
+  night: [number, number];
+  nap: [number, number];
   tail: Partial<Record<DogDo, number>>;
   last: Partial<Record<DogDo, [number, number]>>;
 }
@@ -106,7 +110,10 @@ export const NATURE: DogNature = {
   stretchAfterRest: 0.4,
   chin: 0.5,
   glance: 0.6,
-  tail: { sniff: 0.5, walk: 0.3, stand: 0.35, idle: 0.7, sit: 0.6, lie: 0.75, drink: 0.4 },
+  sleep: { day: 0.03, night: 0.6 },
+  night: [22, 9],
+  nap: [240_000, 600_000],
+  tail: { sniff: 0.5, walk: 0.3, stand: 0.35, idle: 0.7, sit: 0.6, lie: 0.75, sleep: 1, drink: 0.4 },
   last: { stand: [1500, 3500], sniff: [2000, 5000], idle: [3500, 8500], sit: [6000, 14000], lie: [15000, 35000] },
 };
 /** 這一段走多快 */
@@ -117,6 +124,8 @@ const PET_MS = 6000;
 /** 點了只轉頭看你：看多久 */
 const GLANCE_MS = 2600;
 const STRETCH_MS = 3400;
+/** 睡覺：被點了多久站起來（捲起來的身體慢慢打開） */
+const WAKE_MS = 1600;
 const DRINK_MS = 5500;
 /** 往南（點了轉過來面向你） */
 const SOUTH: Pt = [-1e-5, 0];
@@ -158,8 +167,16 @@ export class Dog {
   readonly look: DogLook;
   readonly yard: DogYard;
   readonly nature: DogNature;
-  constructor(o: { id: string; name: string; look: DogLook; yard: DogYard; nature?: DogNature }) {
+  /** performance.now() 的時間是幾點（小數，照手機、電腦的時間；測試可以換） */
+  readonly hour: (t: number) => number;
+  constructor(o: { id: string; name: string; look: DogLook; yard: DogYard; nature?: DogNature; hour?: (t: number) => number }) {
     [this.id, this.name, this.look, this.yard, this.nature] = [o.id, o.name, o.look, o.yard, o.nature ?? NATURE];
+    this.hour =
+      o.hour ??
+      ((t) => {
+        const d = new Date(Date.now() - performance.now() + t);
+        return d.getHours() + d.getMinutes() / 60;
+      });
     DOGS.set(this.id, this);
     // 上次在哪、在做什麼（重新整理網頁還在同一個地方）
     this.seg = loadSeg(this.id);
@@ -205,9 +222,13 @@ export class Dog {
     return smooth(Math.max(0, Math.min(1, t / 350, (g.ms - t) / 350)));
   }
 
-  /** 點了：有時候（照個性）只轉頭看你、繼續做原本的事，其他時候轉過來面向你（往南）坐下；已經坐著就再多坐一下 */
+  /** 點了：睡覺的話醒過來（慢慢站起來、伸懶腰）；有時候（照個性）只轉頭看你、繼續做原本的事，其他時候轉過來面向你（往南）坐下；已經坐著就再多坐一下 */
   pet(now = performance.now(), rand: () => number = Math.random): void {
     const d = this.now(now);
+    if (d.seg.do === 'sleep') {
+      if (d.e < d.seg.ms - WAKE_MS) this.set({ ...d.seg, ms: d.e + WAKE_MS });
+      return;
+    }
     if (d.seg.pet && d.e < d.seg.ms - 600) {
       this.set({ ...d.seg, ms: d.e + PET_MS });
       return;
@@ -252,12 +273,17 @@ export class Dog {
     if (s.goal === 'drink' && s.face) return { do: 'drink', from: at, to: at, start, ms: DRINK_MS, dir0, dir: [s.face[0] - at[0], s.face[1] - at[1]], ring: s.ring, back: s.back };
     if (s.do === 'drink' && s.back?.length) return this.legs('walk', at, s.back, start, dir0, s.ring);
     const moving = s.do === 'walk' || s.do === 'run';
+    const h = this.hour(start);
+    const night = N.night[0] > N.night[1] ? h >= N.night[0] || h < N.night[1] : h >= N.night[0] && h < N.night[1];
     const stay = (how: DogDo): DogSeg => {
-      const [lo, hi] = N.last[how] ?? [1500, 3500];
-      const ms = how === 'stretch' ? STRETCH_MS : lo + rand() * (hi - lo);
+      const [lo, hi] = how === 'sleep' ? N.nap : (N.last[how] ?? [1500, 3500]);
+      // 晚上一睡就睡到早上（至少 10 分鐘），白天打個盹
+      const toMorning = (((N.night[1] - h) % 24) + 24) % 24;
+      const ms = how === 'stretch' ? STRETCH_MS : how === 'sleep' && night ? Math.max(600_000, toMorning * 3_600_000) : lo + rand() * (hi - lo);
       return { do: how, from: at, to: at, start, ms, dir0, dir: dir0, ring: s.ring, ...(how === 'lie' && rand() < N.chin ? { rest: true } : {}) };
     };
-    // 坐完、趴完常常伸個懶腰
+    // 睡醒一定伸個懶腰；坐完、趴完常常伸個懶腰
+    if (s.do === 'sleep') return stay('stretch');
     if ((s.do === 'sit' || s.do === 'lie') && rand() < N.stretchAfterRest) return stay('stretch');
     // 跑完照個性：趴下來休息、停下來發呆，或改成走路（不再跑、不換草皮）
     let walkOn = false;
@@ -269,8 +295,8 @@ export class Dog {
       else return stay(how);
     }
     if (!walkOn && rand() < (moving ? N.stop : N.again)) {
-      // 照權重抽停下來做什麼
-      const ways = Object.entries(N.stays) as Array<[DogDo, number]>;
+      // 照權重抽停下來做什麼（晚上比較常睡覺）
+      const ways = Object.entries({ ...N.stays, sleep: night ? N.sleep.night : N.sleep.day }) as Array<[DogDo, number]>;
       let r = rand() * ways.reduce((a, [, w]) => a + w, 0);
       return stay((ways.find(([, w]) => (r -= w) < 0) ?? ways[ways.length - 1])[0]);
     }
@@ -340,6 +366,7 @@ const tailNow = (s: DogSeg, e: number): number => {
  * - 伸懶腰（下犬式）：兩隻前腳往前伸、貼在地上，身體前面往下壓（胸口貼地）、屁股翹高、後腳直直的，頭抬起來看前面、尾巴搖，停一下再站起來；
  * - 喝水：身體前面往下、頭低到水面，頭一點一點、舌頭一伸一縮地舔；
  * - 趴著：身體整個貼地，前腳往前伸平、後腳收在兩側，頭抬著看看四周（下巴靠在前腳上休息的閉著眼睛），最後站起來；
+ * - 睡覺：慢慢趴下、身體捲成一圈（頭靠到尾巴旁邊，前腳收在胸口下面），閉上眼睛，身體跟著呼吸慢慢起伏；醒來慢慢打開、站起來；
  * - 發呆：站著一動也不動，頭低一點、慢慢轉去盯著旁邊某個方向（每一段左邊或右邊），尾巴不搖，慢慢眨眼；
  * - 尾巴有時候垂下來（每一段決定，tailFor），一開始慢慢放下或翹起來；平常每 4 秒左右眨一下眼睛；站著、走路時畫嘴唇線
  */
@@ -395,6 +422,11 @@ function motion(s: DogSeg, e: number): DogPose {
     }
     case 'sit':
       return { ...STILL, sit: ramp(550, s.pet ? TURN_MS * 0.6 : 0), wag: 12 * wave(650) };
+    case 'sleep': {
+      const r = ramp(1500);
+      const shut = smooth(Math.max(0, Math.min(1, (e - 1100) / 800, (s.ms - e - 300) / 500)));
+      return { ...STILL, legs: [[-46 * r, -0.2 * r], [-42 * r, -0.2 * r], [0, 0], [0, 0]], lie: r, curl: r, nod: 10 * r, blink: shut, bob: 0.004 * Math.sin((2 * Math.PI * e) / 4200) * r };
+    }
     case 'idle': {
       const r = ramp(900);
       const side = Math.floor(s.start / 7) % 2 ? 1 : -1;
