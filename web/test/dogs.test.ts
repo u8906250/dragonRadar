@@ -21,9 +21,9 @@ describe('會動的狗（dogs.ts）', () => {
     const dog = new Dog({ id: 'test-a', name: '測試', look: MALTESE, yard: YARD });
     expect(dogById('test-a')).toBe(dog);
     dog.place(rand, 0);
-    // 三十分鐘，每半秒看一次：一段接一段（沒有跳），停著的不動，走、跑照速度，每一段一開始面向上一段的方向
+    // 三小時，每半秒看一次：一段接一段（沒有跳），停著的不動，走、跑照速度，每一段一開始面向上一段的方向
     const segs = new Map<number, NonNullable<Dog['seg']>>();
-    for (let t = 0; t <= 1_800_000; t += 500) {
+    for (let t = 0; t <= 3 * 3_600_000; t += 500) {
       const d = dog.now(t, rand);
       segs.set(d.seg.start, d.seg);
     }
@@ -54,10 +54,14 @@ describe('會動的狗（dogs.ts）', () => {
     const count = (f: (s: DogSeg) => boolean): number => list.filter(f).length;
     expect(count((s) => s.do === 'sniff') + count((s) => !!s.nose)).toBeGreaterThan(count((s) => s.do === 'stand') + count((s) => s.do === 'sit'));
     expect(count((s) => s.do === 'walk' && !s.cross && !s.goal)).toBeGreaterThan(count((s) => s.do === 'run' && !s.cross && !s.goal) * 5);
+    // 跑步不多（不到移動的一成）；趴著休息久一點（15～35 秒）
+    const moves = list.filter((s) => s.do === 'walk' || s.do === 'run');
+    expect(moves.filter((s) => s.do === 'run').length).toBeLessThan(moves.length * 0.12);
+    for (const s of list.slice(1)) if (s.do === 'lie') expect(s.ms).toBeGreaterThanOrEqual(15_000);
     // 在草皮裡跑一下就好（8 公尺內，約 3 秒）
     for (const s of list) if (s.do === 'run' && !s.cross && !s.goal) expect(YARD.metres(s.from, s.to)).toBeLessThanOrEqual(8 + 1e-9);
     expect(count((s) => !!s.nose)).toBeGreaterThan(0);
-    // 待在一塊草皮裡；換草皮時經過地面跑過去（大多用跑的）
+    // 待在一塊草皮裡；換草皮時經過地面過去
     // 喝水：先走或跑到岸上，面向水喝，喝完走回原來的地方（其他時候都在草皮上）
     const drinks = list.map((s, i) => [s, i] as const).filter(([s]) => s.do === 'drink');
     expect(drinks.length).toBeGreaterThan(0);
@@ -75,7 +79,9 @@ describe('會動的狗（dogs.ts）', () => {
     const cross = list.filter((s) => s.cross);
     expect(cross.length).toBeGreaterThan(2);
     for (const s of cross) expect(onLawn(s.ring, s.from)).toBe(false);
-    expect(cross.filter((s) => s.do === 'run').length).toBeGreaterThan(cross.length / 2);
+    // 換草皮時用走的、用跑的都有（照個性 crossRun，小法一半一半）
+    expect(cross.some((s) => s.do === 'run')).toBe(true);
+    expect(cross.some((s) => s.do === 'walk')).toBe(true);
     // 在草皮裡走、跑（喝完水從岸邊走回來的除外）
     list.forEach((s, i) => {
       if (!s.cross && (s.do === 'walk' || s.do === 'run') && list[i - 1]?.do !== 'drink') expect(onLawn(s.ring, s.from)).toBe(true);
@@ -87,7 +93,7 @@ describe('會動的狗（dogs.ts）', () => {
     const runner = new Dog({ id: 'test-c', name: '愛跑的', look: MALTESE, yard: YARD, nature: { ...NATURE, run: 0.6, stays: { sniff: 1 }, afterRun: { lie: 1, idle: 0, walk: 0 } } });
     runner.place(rand, 0);
     const segs = new Map<number, NonNullable<Dog['seg']>>();
-    for (let t = 0; t <= 600_000; t += 500) segs.set(runner.now(t, rand).seg.start, runner.now(t, rand).seg);
+    for (let t = 0; t <= 3_600_000; t += 500) segs.set(runner.now(t, rand).seg.start, runner.now(t, rand).seg);
     const list = [...segs.values()];
     const runs = list.filter((s) => s.do === 'run' && !s.cross && !s.goal).length;
     const walks = list.filter((s) => s.do === 'walk' && !s.cross && !s.goal).length;

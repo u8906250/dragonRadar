@@ -60,7 +60,8 @@ export interface DogYard {
  * 個性（每隻狗可以不一樣；之後給一隻狗自己的動作和個性就給牠自己的一份）：
  * speed 走路、邊走邊聞、跑步多快（公尺／秒），reach 一次走、聞著走、在草皮裡跑多遠（公尺），
  * stop 走完停下來、again 停完再停一下的機率，stays 停下來做什麼（權重：聞、站著、發呆、坐、趴、伸懶腰），
- * run 在草皮裡用跑的、nose 邊走邊聞、cross 換到另一塊草皮、drink 去湖邊喝水的機率，crossWalk 幾公尺內換草皮、去喝水偶爾用走的，
+ * run 在草皮裡用跑的、nose 邊走邊聞、cross 換到另一塊草皮、crossRun 換草皮時用跑的、drink 去湖邊喝水的機率，crossWalk 幾公尺內去喝水偶爾用走的（再遠用跑的），
+ * last 每種停下來的動作停多久（毫秒，最短～最長），
  * afterRun 跑完做什麼（權重：趴下來休息、停下來發呆、改成走路），stretchAfterRest 坐完趴完伸懶腰、chin 趴著下巴靠下去閉眼睛的機率，
  * tail 每種動作尾巴垂下來的機率
  */
@@ -73,29 +74,33 @@ export interface DogNature {
   run: number;
   nose: number;
   cross: number;
+  crossRun: number;
   drink: number;
   crossWalk: number;
   afterRun: { lie: number; idle: number; walk: number };
   stretchAfterRest: number;
   chin: number;
   tail: Partial<Record<DogDo, number>>;
+  last: Partial<Record<DogDo, [number, number]>>;
 }
-/** 一般的狗（小法現在也是）：大多走一走、停下來聞一聞，偶爾站著、發呆、坐、趴、伸懶腰，在草皮裡偶爾跑一下，跑完趴下來、發呆或改成走路 */
+/** 一般的狗（小法現在也是）：大多走一走、停下來聞一聞，偶爾站著、發呆、坐、趴（趴比較久）、伸懶腰，偶爾才跑一下，跑完趴下來、發呆或改成走路 */
 export const NATURE: DogNature = {
   speed: { walk: 0.3, sniff: 0.18, run: 2.4 },
   reach: { walk: [0.8, 4], sniff: [0.5, 2.5], run: [3, 8] },
   stop: 0.8,
   again: 0.15,
   stays: { sniff: 0.5, stand: 0.1, idle: 0.11, sit: 0.09, lie: 0.1, stretch: 0.1 },
-  run: 0.08,
+  run: 0.04,
   nose: 0.4,
-  cross: 0.15,
+  cross: 0.1,
+  crossRun: 0.5,
   drink: 0.06,
   crossWalk: 12,
   afterRun: { lie: 0.35, idle: 0.3, walk: 0.35 },
   stretchAfterRest: 0.4,
   chin: 0.5,
   tail: { sniff: 0.5, walk: 0.3, stand: 0.35, idle: 0.7, sit: 0.6, lie: 0.75, drink: 0.4 },
+  last: { stand: [1500, 3500], sniff: [2000, 5000], idle: [3500, 8500], sit: [6000, 14000], lie: [15000, 35000] },
 };
 /** 這一段走多快 */
 export const speedOf = (s: DogSeg, nature: DogNature = NATURE): number => nature.speed[s.do === 'run' ? 'run' : s.nose ? 'sniff' : 'walk'];
@@ -176,8 +181,8 @@ export class Dog {
     }
     const moving = s.do === 'walk' || s.do === 'run';
     const stay = (how: DogDo): DogSeg => {
-      const long: Partial<Record<DogDo, number>> = { sit: 4000 + rand() * 5000, lie: 7000 + rand() * 9000, sniff: 2000 + rand() * 3000, idle: 3500 + rand() * 5000, stretch: STRETCH_MS };
-      const ms = long[how] ?? 1500 + rand() * 2000;
+      const [lo, hi] = N.last[how] ?? [1500, 3500];
+      const ms = how === 'stretch' ? STRETCH_MS : lo + rand() * (hi - lo);
       return { do: how, from: at, to: at, start, ms, dir0, dir: dir0, ring: s.ring, ...(how === 'lie' && rand() < N.chin ? { rest: true } : {}) };
     };
     // 坐完、趴完常常伸個懶腰
@@ -211,7 +216,7 @@ export class Dog {
       const o = this.yard.elsewhere(s.ring, at, rand);
       if (o) {
         const m = this.yard.metres(at, o.at);
-        const how = m > N.crossWalk || rand() < 0.75 ? 'run' : 'walk';
+        const how = rand() < N.crossRun ? 'run' : 'walk';
         const seg: DogSeg = { do: how, from: at, to: o.at, start, ms: 0, dir0, dir: [o.at[0] - at[0], o.at[1] - at[1]], ring: o.ring, cross: true };
         return { ...seg, ms: (m / speedOf_(seg)) * 1000 };
       }
