@@ -374,15 +374,30 @@ export function atPark(view: SpaceView): boolean {
 
 /** 汪星上這個地方是不是陸地（陸地不會跨過南北極和背面的接縫，所以照平面的經緯度算就好） */
 export function onWoofLand(lat: number, lng: number): boolean {
+  // 只看這個緯度那一條帶子裡的邊（海上的水波每一道都要看一次，整條市界跑一遍太慢）
+  const bands = (landBands ??= bandEdges());
+  const list = bands[Math.max(0, Math.min(LAND_BANDS - 1, Math.floor(((lat + 90) / 180) * LAND_BANDS)))];
   let inside = false;
+  for (let k = 0; k < list.length; k += 4) {
+    const [ya, xa, yb, xb] = [list[k], list[k + 1], list[k + 2], list[k + 3]];
+    if (ya > lat !== yb > lat && lng < xa + ((lat - ya) * (xb - xa)) / (yb - ya)) inside = !inside;
+  }
+  return inside;
+}
+/** 市界的邊照緯度分成一條條帶子（每條帶子記住跨過它的邊：兩端的緯度、經度） */
+const LAND_BANDS = 720;
+let landBands: number[][] | null = null;
+function bandEdges(): number[][] {
+  const bands: number[][] = Array.from({ length: LAND_BANDS }, () => []);
+  const band = (lat: number): number => Math.max(0, Math.min(LAND_BANDS - 1, Math.floor(((lat + 90) / 180) * LAND_BANDS)));
   for (const ring of WOOF_LAND) {
     for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
       const [ya, xa] = ring[i];
       const [yb, xb] = ring[j];
-      if (ya > lat !== yb > lat && lng < xa + ((lat - ya) * (xb - xa)) / (yb - ya)) inside = !inside;
+      for (let b = band(Math.min(ya, yb)); b <= band(Math.max(ya, yb)); b++) bands[b].push(ya, xa, yb, xb);
     }
   }
-  return inside;
+  return bands;
 }
 
 /** 汪星的經緯度 → 台北市的經緯度 */
