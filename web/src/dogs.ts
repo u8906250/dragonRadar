@@ -208,13 +208,14 @@ const tailNow = (s: DogSeg, e: number): number => {
  * - 伸懶腰（下犬式）：兩隻前腳往前伸、貼在地上，身體前面往下壓（胸口貼地）、屁股翹高、後腳直直的，頭抬起來看前面、尾巴搖，停一下再站起來；
  * - 喝水：身體前面往下、頭低到水面，頭一點一點、舌頭一伸一縮地舔；
  * - 趴著：身體整個貼地，前腳往前伸平、後腳收在兩側，頭抬著看看四周（下巴靠在前腳上休息的閉著眼睛），最後站起來；
- * - 尾巴有時候垂下來（每一段決定，tailFor），一開始慢慢放下或翹起來；平常每 4 秒左右眨一下眼睛
+ * - 尾巴有時候垂下來（每一段決定，tailFor），一開始慢慢放下或翹起來；平常每 4 秒左右眨一下眼睛；站著、走路時畫嘴唇線
  */
 export function dogPose(s: DogSeg, e: number): DogPose {
   const p = motion(s, e);
   // 眨眼：每 4 秒左右一下（每一段的節奏錯開一點）
   const blink = (e + (s.start % 1700)) % 4100 < 140 ? 1 : 0;
-  return { ...p, tail: tailNow(s, e), blink: Math.max(p.blink, blink) };
+  // 嘴唇線只在站著、走路時畫
+  return { ...p, tail: tailNow(s, e), blink: Math.max(p.blink, blink), lips: s.do === 'stand' || s.do === 'walk' };
 }
 
 /** 尾巴以外的動作 */

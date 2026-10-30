@@ -144,6 +144,21 @@ describe('姿勢（dogPose）', () => {
     expect(dogPose(seg('lie', { ms: 9000 }), 0).lie).toBe(0);
   });
 
+  it('shows the lip line only when standing or walking', () => {
+    const k = 400;
+    const face = (d: DogSeg['do'], e = 2000): string => dogSvg(MALTESE, dogPose(seg(d, { ms: 9000 }), e), 180, k);
+    for (const d of ['stand', 'walk'] as const) {
+      expect(dogPose(seg(d), 2000).lips).toBe(true);
+      for (const part of ['philtrum', 'lip1', 'lip-1']) expect(face(d)).toContain(`data-part="${part}"`);
+    }
+    for (const d of ['sit', 'lie', 'run', 'sniff', 'drink', 'stretch'] as const) {
+      expect(dogPose(seg(d), 2000).lips).toBe(false);
+      expect(face(d)).not.toContain('data-part="lip1"');
+    }
+    // 從背後看不到
+    expect(dogSvg(MALTESE, dogPose(seg('stand'), 2000), 0, k)).not.toContain('data-part="lip1"');
+  });
+
   it('blinks now and then', () => {
     const s = seg('stand', { ms: 60_000 });
     const blinks = Array.from({ length: 600 }, (_, i) => dogPose(s, i * 50).blink);

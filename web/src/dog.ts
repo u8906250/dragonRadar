@@ -75,7 +75,8 @@ export const dogHeight = (look: DogLook): number => 0.38 * look.size;
  * 姿勢：legs 四隻腳（左前、右前、左後、右後）往前擺幾度、腳抬多高（公尺，負的是往下壓、貼在地上），bob 身體往上幾公尺，sit 坐下多少（0 站著～1 坐好），
  * lean 身體前面往下幾度（跑步時前後搖、聞的時候前面低下去），nod 脖子和頭往下低幾度，look 頭往左轉幾度，
  * ear 耳朵往後飛幾度（跑步），wag 尾巴往左右搖幾度，tail 尾巴放下來多少（0 往上捲過背～1 垂在後面），tongue 吐舌頭，
- * lie 趴下多少（0 站著～1 整個貼地：前腳往前伸平、後腳收在身體兩側），blink 眼睛閉起來多少（眨眼、趴著睡覺）
+ * lie 趴下多少（0 站著～1 整個貼地：前腳往前伸平、後腳收在身體兩側），blink 眼睛閉起來多少（眨眼、趴著睡覺），
+ * lips 畫嘴唇線（站著、走路時）
  */
 export interface DogPose {
   legs: Array<[number, number]>;
@@ -90,8 +91,9 @@ export interface DogPose {
   tongue: boolean;
   lie: number;
   blink: number;
+  lips: boolean;
 }
-export const STILL: DogPose = { legs: [[0, 0], [0, 0], [0, 0], [0, 0]], bob: 0, sit: 0, lean: 0, nod: 0, look: 0, ear: 0, wag: 0, tail: 0, tongue: false, lie: 0, blink: 0 };
+export const STILL: DogPose = { legs: [[0, 0], [0, 0], [0, 0], [0, 0]], bob: 0, sit: 0, lean: 0, nod: 0, look: 0, ear: 0, wag: 0, tail: 0, tongue: false, lie: 0, blink: 0, lips: false };
 
 const RAD = Math.PI / 180;
 /** 從水平往下看幾度（跟銅像、火箭差不多，看得到背） */
@@ -205,6 +207,13 @@ function parts(look: DogLook, pose: DogPose): Part[] {
   solid('nose', move(ell(N, F.nose * 0.8 * s, F.nose * s, F.nose * 0.72 * s), neck), F.noseColor);
   for (const side of [1, -1]) solid(`nostril${side}`, move(patch(add(N, S([F.nose * 0.72, F.nose * 0.42 * side, -F.nose * 0.12])), fn, F.nose * 0.24, 1, 0.7), neck), '#050404', 0.0045, neck.d(fn));
   solid('noseshine', move(patch(add(N, S([F.nose * 0.55, 0, F.nose * 0.45])), norm([0.6, 0, 0.8]), F.nose * 0.3, 1.4, 0.6), neck), shade(F.noseColor, 0.35), 0.005);
+  // 嘴唇線（站著、走路時）：鼻子下面一小段直的，接著一條兩端往下彎的深色嘴唇
+  if (pose.lips) {
+    const fm = norm([1, 0, -0.35]);
+    const lip = shade(F.noseColor, 0.12);
+    solid('philtrum', move(patch(add(M, S([mu * 0.93, 0, -0.006])), fm, 0.0042, 0.25, 1), neck), lip, 0.0042, neck.d(fm));
+    for (const side of [1, -1]) solid(`lip${side}`, move(patch(add(M, S([mu * 0.86, 0.008 * side, -0.013])), norm([1, 0.25 * side, -0.35]), 0.0095, 1, 0.22, -0.3 * side), neck), lip, 0.0042, neck.d(fm));
+  }
   if (pose.tongue) solid('tongue', move(ell(add(M, S([mu * 0.55, 0, -0.026])), 0.013 * s, 0.011 * s, 0.005 * s), neck), '#e8828c', 0.002);
   // 眼睛：深色的眼眶、深棕色的眼珠、黑瞳孔、兩點反光（朝光的那邊）；內側往下淡淡的淚痕
   for (const side of [1, -1]) {
