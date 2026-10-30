@@ -106,9 +106,9 @@ describe('地球的雷達上的中山公園（跟汪星共用一份）', () => {
       expect(Math.hypot((at[0] - HATCH_CENTER[0]) * EARTH.my, (at[1] - HATCH_CENTER[1]) * EARTH.mx(at[0]))).toBeGreaterThan(6);
     }
     expect(new Set(spots.map((s) => s.ring)).size).toBeGreaterThan(15);
-    // 現在是使用者的馬爾濟斯，約 0.37 公尺高（坐著的銅像腳的一半高）
+    // 現在是使用者的馬爾濟斯，約 0.38 公尺高（坐著的銅像腳的一半高）
     expect(PARK_DOGS.map((d) => d.look.name)).toEqual(['馬爾濟斯']);
-    expect(dogHeight(PARK_DOGS[0].look)).toBeCloseTo(0.37, 2);
+    expect(dogHeight(PARK_DOGS[0].look)).toBeCloseTo(0.38, 2);
     const dog = PARK_DOGS[0].place(rand).from;
     // 地球的雷達上沒有
     expect(at(0.005, dog)).not.toContain('woof-dog');

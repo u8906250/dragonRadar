@@ -1,7 +1,8 @@
 /**
  * 會動的狗（dog.ts 畫、park.ts 放在汪星的中山公園；之後可以有很多隻，每隻一個 Dog，長相是 DogLook）：
- * 每隻狗一段一段地動（DogSeg）：stand 站著搖尾巴、sniff 低頭聞一聞、sit 坐下（坐一下再站起來）、walk 走、run 跑（from 走到 to），
- * 在同一塊草皮裡（DogYard 決定能去哪），走完、跑完多半停下來，停完多半再走；點了（pet）轉過來面向你（往南）坐下。
+ * 每隻狗一段一段地動（DogSeg）：stand 站著搖尾巴、sniff 低頭聞一聞（鼻子湊到地上、左右聞）、sit 坐下（坐一下再站起來）、
+ * walk 走（四隻腳輪流，有時候邊走邊低頭聞 nose）、run 跑（真的跑：前腳一起伸、後腳一起蹬，偶爾才跑），from 走到 to；
+ * 在同一塊草皮裡（DogYard 決定能去哪），大多是走一走、停下來聞一聞，偶爾站著、坐下；點了（pet）轉過來面向你（往南）坐下。
  * 每一段開始時慢慢轉到要走的方向（dir0 → dir，緯經度的方向）。拉近畫出整隻時每一格畫面重畫（animateDogs：照這一段在畫面上從哪到哪、
  * 面向哪邊，用 dog.ts 畫 3D 的狗），這一段結束時重畫整層（onDogMove 給的 redraw，算下一段在畫面上的位置）
  */
@@ -23,6 +24,8 @@ export interface DogSeg {
   ring: number;
   /** 被點了坐下 */
   pet?: boolean;
+  /** 邊走邊低頭聞 */
+  nose?: boolean;
 }
 
 /** 狗待的地方：隨機一塊的隨機一處、這一塊裡隨機一處（抽不到是 null）、兩點差幾公尺（狗走在哪個世界就照那裡的公尺） */
@@ -32,9 +35,11 @@ export interface DogYard {
   metres(a: Pt, b: Pt): number;
 }
 
-/** 走路、跑步多快（公尺／秒），走、跑多遠（公尺） */
-export const DOG_SPEED = { walk: 0.3, run: 2.4 };
-const REACH = { walk: [1, 6], run: [3, 20] };
+/** 走路、邊走邊聞、跑步多快（公尺／秒），走多遠（公尺） */
+export const DOG_SPEED = { walk: 0.3, sniff: 0.18, run: 2.4 };
+const REACH = { walk: [0.8, 4], sniff: [0.5, 2.5], run: [4, 20] };
+/** 這一段走多快 */
+export const speedOf = (s: DogSeg): number => DOG_SPEED[s.do === 'run' ? 'run' : s.nose ? 'sniff' : 'walk'];
 /** 轉身多久、點了坐多久 */
 const TURN_MS = 450;
 const PET_MS = 6000;
@@ -84,17 +89,19 @@ export class Dog {
     this.seg = { ...d.seg, do: 'sit', from: d.at, to: d.at, start: now, ms: PET_MS, dir0: d.seg.dir, dir: SOUTH, pet: true };
   }
 
-  /** 下一段：走完、跑完多半停下來（站著、聞一聞或坐下，坐比較久），停完多半再走（三成用跑的）；都在同一塊草皮裡 */
+  /** 下一段：走完多半停下來聞一聞（有時候站著、坐下），停完多半再走（四成邊走邊聞，偶爾跑）；都在同一塊草皮裡 */
   private next(s: DogSeg, rand: () => number): DogSeg {
     const [at, start, dir0] = [s.to, s.start + s.ms, s.dir];
     const moving = s.do === 'walk' || s.do === 'run';
-    if (rand() < (moving ? 0.7 : 0.25)) {
+    if (rand() < (moving ? 0.8 : 0.15)) {
       const r = rand();
-      const how: DogDo = r < 0.4 ? 'stand' : r < 0.65 ? 'sniff' : 'sit';
-      return { do: how, from: at, to: at, start, ms: how === 'sit' ? 4000 + rand() * 5000 : 1500 + rand() * 3000, dir0, dir: dir0, ring: s.ring };
+      const how: DogDo = r < 0.65 ? 'sniff' : r < 0.82 ? 'stand' : 'sit';
+      const ms = how === 'sit' ? 4000 + rand() * 5000 : how === 'sniff' ? 2000 + rand() * 3000 : 1500 + rand() * 2000;
+      return { do: how, from: at, to: at, start, ms, dir0, dir: dir0, ring: s.ring };
     }
-    const how = rand() < 0.3 ? 'run' : 'walk';
-    const [lo, hi] = REACH[how];
+    const run = rand() < 0.08;
+    const nose = !run && rand() < 0.4;
+    const [lo, hi] = REACH[run ? 'run' : nose ? 'sniff' : 'walk'];
     let best: { to: Pt; m: number } | null = null;
     for (let i = 0; i < 12; i++) {
       const to = this.yard.within(s.ring, rand);
@@ -104,27 +111,67 @@ export class Dog {
         best = { to, m };
         break;
       }
-      if (m >= 0.5 && (!best || Math.abs(m - hi) < Math.abs(best.m - hi))) best = { to, m };
+      if (m >= 0.3 && (!best || Math.abs(m - hi) < Math.abs(best.m - hi))) best = { to, m };
     }
-    if (!best) return { do: 'stand', from: at, to: at, start, ms: 2000, dir0, dir: dir0, ring: s.ring };
-    return { do: how, from: at, to: best.to, start, ms: (best.m / DOG_SPEED[how]) * 1000, dir0, dir: [best.to[0] - at[0], best.to[1] - at[1]], ring: s.ring };
+    if (!best) return { do: 'sniff', from: at, to: at, start, ms: 2500, dir0, dir: dir0, ring: s.ring };
+    // 走太遠的只走一段（走到一半停下來聞）
+    const to: Pt = best.m > hi ? [at[0] + ((best.to[0] - at[0]) * hi) / best.m, at[1] + ((best.to[1] - at[1]) * hi) / best.m] : best.to;
+    const m = Math.min(best.m, hi);
+    const seg: DogSeg = { do: run ? 'run' : 'walk', from: at, to, start, ms: 0, dir0, dir: [to[0] - at[0], to[1] - at[1]], ring: s.ring, ...(nose ? { nose } : {}) };
+    return { ...seg, ms: (m / speedOf(seg)) * 1000 };
   }
 }
 
 /** 0～1 頭尾慢 */
 const smooth = (t: number): number => t * t * (3 - 2 * t);
 
-/** 這一段的姿勢（已經過了 e 毫秒）：走路對角的腳輪流往前、跑步腳擺得大又快還吐舌頭、聞的時候頭低下去、坐下一開始坐下最後站起來 */
+/**
+ * 這一段的姿勢（已經過了 e 毫秒）：
+ * - 走路：四隻腳輪流（左後、左前、右後、右前各差四分之一步），往前擺時抬起來；邊走邊聞的走得慢、頭低下去左右聞；
+ * - 跑步：兩隻前腳一起往前伸、兩隻後腳一起往後蹬（身體拉長、離地），再一起收到肚子下面；身體前後搖、上下彈，耳朵往後飛，吐舌頭；
+ * - 聞：身體前面往下、頭低到鼻子湊到地上，左右慢慢聞；坐下一開始坐下最後站起來；站著搖尾巴
+ */
 export function dogPose(s: DogSeg, e: number): DogPose {
   const ramp = (r: number, from = 0): number => smooth(Math.max(0, Math.min(1, (e - from) / r, (s.ms - e) / r)));
-  const wave = (ms: number): number => Math.sin((2 * Math.PI * e) / ms);
+  const wave = (ms: number, off = 0): number => Math.sin(2 * Math.PI * (e / ms - off));
   switch (s.do) {
-    case 'walk':
-      return { ...STILL, phase: (e / 700) % 1, swing: 16, bob: 0.003 * Math.abs(wave(700)), wag: 10 * wave(700) };
-    case 'run':
-      return { ...STILL, phase: (e / 280) % 1, swing: 34, bob: 0.018 * Math.abs(wave(560)), wag: 16 * wave(280), tongue: true };
-    case 'sniff':
-      return { ...STILL, nod: (30 + 4 * wave(450)) * ramp(400), wag: 6 * wave(900) };
+    case 'walk': {
+      const ms = s.nose ? 950 : 750;
+      const leg = (off: number): [number, number] => {
+        const t = 2 * Math.PI * (e / ms - off);
+        return [16 * Math.sin(t), 0.018 * Math.max(0, Math.cos(t))];
+      };
+      const sniff = s.nose ? ramp(400) : 0;
+      return {
+        ...STILL,
+        legs: [leg(0.25), leg(0.75), leg(0), leg(0.5)],
+        bob: 0.003 * Math.abs(wave(ms / 2)),
+        nod: (38 + 4 * wave(500)) * sniff + 3 * wave(ms / 2) * (1 - sniff),
+        lean: 8 * sniff,
+        look: 8 * wave(1700) * sniff,
+        wag: 10 * wave(ms),
+      };
+    }
+    case 'run': {
+      const ms = 260;
+      const t = (off: number): number => 2 * Math.PI * (e / ms - off);
+      const front = (off: number): [number, number] => [42 * Math.sin(t(off)), 0.05 * Math.max(0, Math.cos(t(off)))];
+      const hind = (off: number): [number, number] => [-42 * Math.sin(t(off)), 0.05 * Math.max(0, -Math.cos(t(off)))];
+      return {
+        ...STILL,
+        legs: [front(0), front(0.07), hind(0.05), hind(0.12)],
+        bob: 0.008 + 0.03 * Math.max(0, Math.sin(t(0))),
+        lean: 7 * Math.cos(t(0)),
+        nod: 6 - 6 * Math.cos(t(0)),
+        ear: 40,
+        wag: 6 * wave(ms),
+        tongue: true,
+      };
+    }
+    case 'sniff': {
+      const r = ramp(450);
+      return { ...STILL, nod: (50 + 4 * wave(380)) * r, lean: 12 * r, look: 12 * wave(1800) * r, wag: 6 * wave(900) };
+    }
     case 'sit':
       return { ...STILL, sit: ramp(550, s.pet ? TURN_MS * 0.6 : 0), wag: 12 * wave(650), tongue: !!s.pet };
     default:
@@ -205,10 +252,19 @@ export function animateDogs(): void {
   if (raf || typeof requestAnimationFrame !== 'function') return;
   raf = requestAnimationFrame(tick);
 }
+/** 畫一格平均要多久（毫秒）、這一格要不要跳過（畫一格超過 10 毫秒的慢手機隔一格畫一次） */
+let cost = 0;
+let skip = false;
 function tick(now: number): void {
   raf = 0;
   const els = document.querySelectorAll<SVGGElement>('.woof-dog[data-path]');
   if (!els.length) return;
+  skip = cost > 10 && !skip;
+  if (skip) {
+    animateDogs();
+    return;
+  }
+  const t0 = performance.now();
   const heading = headingOf();
   let stale = false;
   for (const el of els) {
@@ -234,6 +290,7 @@ function tick(now: number): void {
       body.innerHTML = f.svg;
     }
   }
+  cost = cost * 0.9 + (performance.now() - t0) * 0.1;
   if (stale) redraw?.();
   animateDogs();
 }

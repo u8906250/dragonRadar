@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { dogSvg, MALTESE, STILL, dogHeight, type DogLook } from '../src/dog';
-import { Dog, DOG_SPEED, dogById, dogPose, type DogYard } from '../src/dogs';
+import { Dog, DOG_SPEED, dogById, dogPose, speedOf, type DogSeg, type DogYard } from '../src/dogs';
 
 /** 一塊 40 公尺見方的草皮（緯經度當公尺用，1 度 = 1 公尺） */
 const YARD: DogYard = {
@@ -29,7 +29,7 @@ describe('會動的狗（dogs.ts）', () => {
       expect(s.from).toEqual(prev.to);
       expect(s.dir0).toEqual(prev.dir);
       if (s.do === 'walk' || s.do === 'run') {
-        expect(YARD.metres(s.from, s.to) / (s.ms / 1000)).toBeCloseTo(DOG_SPEED[s.do], 6);
+        expect(YARD.metres(s.from, s.to) / (s.ms / 1000)).toBeCloseTo(speedOf(s), 6);
         expect(s.dir).toEqual([s.to[0] - s.from[0], s.to[1] - s.from[1]]);
       } else {
         expect(s.to).toEqual(s.from);
@@ -37,8 +37,12 @@ describe('會動的狗（dogs.ts）', () => {
       }
     }
     expect(new Set(list.map((s) => s.do))).toEqual(new Set(['stand', 'sniff', 'sit', 'walk', 'run']));
-    // 走路慢慢走
+    // 走路慢慢走，大多是走一走、停下來聞一聞（也會邊走邊聞），偶爾才跑
     expect(DOG_SPEED.walk).toBeLessThanOrEqual(0.3);
+    const count = (f: (s: DogSeg) => boolean): number => list.filter(f).length;
+    expect(count((s) => s.do === 'sniff') + count((s) => !!s.nose)).toBeGreaterThan(count((s) => s.do === 'stand') + count((s) => s.do === 'sit'));
+    expect(count((s) => s.do === 'walk')).toBeGreaterThan(count((s) => s.do === 'run') * 5);
+    expect(count((s) => !!s.nose)).toBeGreaterThan(0);
   });
 
   it('turns to face you (south) and sits when tapped, and sits longer when tapped again', () => {
@@ -62,6 +66,41 @@ describe('會動的狗（dogs.ts）', () => {
     dog.pet(23_000);
     expect(dog.now(23_100, rand).seg.start).toBe(20_000);
     expect(dog.seg!.start + dog.seg!.ms).toBeGreaterThan(end);
+  });
+});
+
+describe('姿勢（dogPose）', () => {
+  const seg = (d: DogSeg['do'], extra: Partial<DogSeg> = {}): DogSeg => ({ do: d, from: [0, 0], to: [1, 0], start: 0, ms: 8000, dir0: [1, 0], dir: [1, 0], ring: 0, ...extra });
+
+  it('walks one leg after another, and runs like a dog (front legs together, hind legs together)', () => {
+    // 走路：四隻腳輪流（各差四分之一步），往前擺時抬起來
+    for (let e = 0; e < 750; e += 50) {
+      const legs = dogPose(seg('walk'), e).legs;
+      expect(new Set(legs.map(([d]) => d.toFixed(3))).size).toBeGreaterThanOrEqual(3);
+    }
+    // 跑步：前腳差不多一起、後腳差不多一起，前後相反（伸長、收起來），身體離地、耳朵往後飛、吐舌頭
+    for (let e = 0; e < 260; e += 20) {
+      const p = dogPose(seg('run'), e);
+      const [fl, fr, hl, hr] = p.legs.map(([d]) => d);
+      expect(Math.abs(fl - fr)).toBeLessThan(20);
+      expect(Math.abs(hl - hr)).toBeLessThan(20);
+      if (Math.abs(fl) > 30) expect(Math.sign(hl)).toBe(-Math.sign(fl));
+      expect(p.bob).toBeGreaterThan(0);
+      expect(p.ear).toBeGreaterThan(20);
+      expect(p.tongue).toBe(true);
+    }
+  });
+
+  it('puts its nose down to the ground when sniffing', () => {
+    const p = dogPose(seg('sniff'), 2000);
+    expect(p.nod).toBeGreaterThan(45);
+    expect(p.lean).toBeGreaterThan(8);
+    const k = 400;
+    const noseY = (svg: string): number => Number(/data-part="nose"><ellipse cx="[-\d.]+" cy="([-\d.]+)"/.exec(svg)![1]);
+    // 鼻子離地不到 7 公分（畫面往下是正的，地是 0）
+    expect(noseY(dogSvg(MALTESE, p, 90, k))).toBeGreaterThan(-0.07 * k * Math.cos((22 * Math.PI) / 180));
+    // 邊走邊聞：頭也低下去
+    expect(dogPose(seg('walk', { nose: true }), 2000).nod).toBeGreaterThan(30);
   });
 });
 
@@ -101,11 +140,14 @@ describe('3D 的狗（dog.ts）', () => {
     expect(b2[2] - b2[0]).toBeLessThan((b1[2] - b1[0]) * 0.75);
   });
 
-  it('draws fur like grass, more hairs when bigger', () => {
+  it('grows dense fur like grass, at any size', () => {
     const hairs = (k: number): number => (dogSvg(MALTESE, STILL, 90, k).match(/Q/g) ?? []).length;
-    expect(hairs(400)).toBeGreaterThan(350);
-    expect(hairs(30)).toBeLessThan(hairs(400) / 3);
-    expect(hairs(30)).toBeGreaterThan(50);
+    // 拉近：整隻最多約 3000 根（背面的不畫，畫出來一千多根）
+    expect(hairs(400)).toBeGreaterThan(1000);
+    expect(hairs(400)).toBeLessThan(2000);
+    // 畫面上小的時候（整隻約 11 像素高）也是密密的：約每 1.6 像素一根
+    const small = 30;
+    expect(hairs(small)).toBeGreaterThan(120);
   });
 
   it('sits down lower, nods to sniff and shows its tongue', () => {
