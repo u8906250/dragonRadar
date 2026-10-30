@@ -451,10 +451,10 @@ radar.onRocket = (world) => {
     void rocketTrip(m, world);
   });
 };
-// 點了汪星的小狗：跳兩下、叫「汪！」，接著跑開
-radar.onDog = () => {
+// 點了汪星的狗：轉過來面向你坐下
+radar.onDog = (id) => {
   void import('./park').then((m) => {
-    m.petDog();
+    m.petDog(id);
     radar.redrawPark();
   });
 };
@@ -981,9 +981,9 @@ async function rocketTrip(m: typeof import('./park'), from: 'earth' | 'woof'): P
   const to = m.departRocket();
   if (!to) return;
   tripping = true;
-  // 飛往汪星：拉近時看得到汪星的地圖；小狗換到別塊草皮
+  // 飛往汪星：拉近時看得到汪星的地圖；狗換到別塊草皮
   tripTo = to;
-  if (to === 'woof') m.moveDog();
+  if (to === 'woof') m.moveDogs();
   parkMod = m;
   radar.setTrip('', true);
   radar.redrawPark();
@@ -1072,8 +1072,8 @@ function updateSpace(): void {
   const land = landRings;
   const when = new Date();
   const you = youOn;
-  // 汪星的小狗走完一段：重畫汪星（下一段）
-  void import('./park').then((p) => p.onDogMove(() => radar.redrawPark()));
+  // 汪星的狗走完一段：重畫汪星（下一段）；每一格照指北針轉回來
+  void import('./park').then((p) => p.onDogMove(() => radar.redrawPark(), () => radar.headingDeg));
   radar.setSpace((km, rg, view) => mod.spaceMarkup({ center, land, when, scaleKm: km, rg, view, streets: woofStreets, you, woofMap: map }), mod.bodyRadiusKm);
 }
 

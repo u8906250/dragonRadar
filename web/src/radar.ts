@@ -276,8 +276,8 @@ export class Radar {
   /** 點了中山公園的銅像、停著的火箭（地球或汪星，拉近到畫出來時才點得到）：哪個世界的 */
   onStatue: ((world: 'earth' | 'woof') => void) | null = null;
   onRocket: ((world: 'earth' | 'woof') => void) | null = null;
-  /** 點了汪星的小狗（拉近到畫出整隻時才點得到） */
-  onDog: (() => void) | null = null;
+  /** 點了汪星的狗（拉近到畫出整隻時才點得到）：哪一隻（data-dog） */
+  onDog: ((id: string) => void) | null = null;
   /** 火箭飛行中畫在正中間的那一層（不跟著指北針轉） */
   private readonly tripLayer: SVGGElement;
   private bottles: RadarBottle[] = [];
@@ -409,7 +409,8 @@ export class Radar {
     /** 點到中山公園的銅像、停著的火箭、汪星的小狗了沒（點到就交給 main.ts） */
     const parkTap = (e: Event, world: 'earth' | 'woof'): boolean => {
       const t = e.target as Element;
-      if (t.closest('.dog-hit')) this.onDog?.();
+      const dog = t.closest('.dog-hit') ? (t.closest('.woof-dog') as SVGGElement | null)?.dataset.dog : undefined;
+      if (dog) this.onDog?.(dog);
       else if (t.closest('.rocket-hit')) this.onRocket?.(world);
       else if (t.closest('.park-statue')) this.onStatue?.(world);
       else return false;
@@ -765,6 +766,11 @@ export class Radar {
     const a = deg === null ? 0 : ((((deg - this.heading) % 360) + 540) % 360) - 180;
     t.style.transition = `transform ${ms}ms ease-in-out`;
     t.style.transform = `rotate(${a.toFixed(1)}deg)`;
+  }
+
+  /** 指北針轉了幾度（汪星的狗每一格自己轉回來、算面向哪） */
+  get headingDeg(): number {
+    return this.heading;
   }
 
   /** 起飛中的火箭在雷達上的位置和大小（底、每公尺幾像素，SVG 座標）：小火箭從這裡接手；沒畫出來是 null */
