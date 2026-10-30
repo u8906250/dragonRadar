@@ -37,22 +37,26 @@ export interface DogSeg {
   tail?: number;
   /** 趴著時下巴靠在前腳上、閉眼睛 */
   rest?: boolean;
-  /** 去喝水：走到岸上之後面向哪（水裡的一點）、喝完走回哪裡 */
+  /** 照步道走：走到 to 之後接著走的轉折點 */
+  via?: Pt[];
+  /** 去喝水：走到岸上之後面向哪（水裡的一點）、喝完照原路走回去的轉折點 */
   goal?: 'drink';
   face?: Pt;
-  home?: Pt;
+  back?: Pt[];
 }
 
 /**
- * 狗待的地方：隨機一塊的隨機一處、這一塊裡隨機一處、從這裡到附近另一塊草皮的隨機一處（路上不經過水、建築；抽不到是 null）、
- * 兩點差幾公尺（狗走在哪個世界就照那裡的公尺）
+ * 狗待的地方：隨機一塊的隨機一處、這一塊裡隨機一處、直直走過去走不走得到（只走草地和步道）、照步道從這裡走到那裡的轉折點、
+ * 從這裡照步道走到附近另一塊草皮的轉折點（最後一點是要去的地方；抽不到是 null）、兩點差幾公尺（狗走在哪個世界就照那裡的公尺）
  */
 export interface DogYard {
   anywhere(rand: () => number): { ring: number; at: Pt } | null;
   within(ring: number, rand: () => number): Pt | null;
-  elsewhere(ring: number, at: Pt, rand: () => number): { ring: number; at: Pt } | null;
-  /** 附近的湖邊：站在岸上哪裡、面向水裡哪一點（路上不經過水、建築）；沒有水是 undefined */
-  water?(at: Pt, rand: () => number): { at: Pt; face: Pt } | null;
+  canWalk?(a: Pt, b: Pt): boolean;
+  route?(a: Pt, b: Pt, maxM?: number): Pt[] | null;
+  elsewhere(ring: number, at: Pt, rand: () => number): { ring: number; path: Pt[] } | null;
+  /** 附近的湖邊：照步道走到岸上的轉折點（最後一點站在岸上）、面向水裡哪一點；沒有水是 undefined */
+  water?(at: Pt, rand: () => number): { path: Pt[]; face: Pt } | null;
   metres(a: Pt, b: Pt): number;
 }
 
@@ -140,7 +144,7 @@ export class Dog {
   /** 現在在哪、在做什麼（這一段已經過了 e 毫秒）；還沒放就先放，很久沒看（分頁在背景）從停下來的地方重新開始 */
   now(now = performance.now(), rand: () => number = Math.random): { at: Pt; seg: DogSeg; e: number } {
     let s = this.seg ?? this.place(rand, now);
-    if (now - (s.start + s.ms) > 60_000) s = { ...s, do: 'stand', from: s.to, to: s.to, start: now, ms: 2000, dir0: s.dir, goal: undefined, home: undefined };
+    if (now - (s.start + s.ms) > 60_000) s = { ...s, do: 'stand', from: s.to, to: s.to, start: now, ms: 2000, dir0: s.dir, goal: undefined, back: undefined, via: undefined };
     while (now >= s.start + s.ms) s = this.next(s, rand);
     this.seg = s;
     const e = now - s.start;
@@ -155,7 +159,7 @@ export class Dog {
       this.seg = { ...d.seg, ms: d.e + PET_MS };
       return;
     }
-    this.seg = { ...d.seg, do: 'sit', from: d.at, to: d.at, start: now, ms: PET_MS, dir0: d.seg.dir, dir: SOUTH, pet: true, tail0: tailNow(d.seg, d.e), tail: 0, goal: undefined, home: undefined };
+    this.seg = { ...d.seg, do: 'sit', from: d.at, to: d.at, start: now, ms: PET_MS, dir0: d.seg.dir, dir: SOUTH, pet: true, tail0: tailNow(d.seg, d.e), tail: 0, goal: undefined, back: undefined, via: undefined };
   }
 
   /** 這一段的尾巴（照個性）：跑步、伸懶腰時翹著；聞的時候一半垂下來，走路、站著有時候垂下來，坐著、趴著多半垂在後面 */
@@ -166,19 +170,30 @@ export class Dog {
   /** 下一段：走完多半停下來聞一聞（有時候站著、坐下），停完多半再走（四成邊走邊聞，偶爾跑）；都在同一塊草皮裡 */
   private next(s: DogSeg, rand: () => number): DogSeg {
     const seg = this.step(s, rand);
-    return { ...seg, tail0: s.tail ?? 0, tail: this.tailFor(seg.do, rand) };
+    // 照步道走的下一段：尾巴照舊
+    const on = !!s.via?.length && seg.do === s.do;
+    return { ...seg, tail0: s.tail ?? 0, tail: on ? (s.tail ?? 0) : this.tailFor(seg.do, rand) };
+  }
+
+  /** 照轉折點走（走路或跑步）：第一段走到 path[0]，接著的放在 via；extra 是要一起帶著的（換草皮、去喝水） */
+  private legs(how: 'walk' | 'run', at: Pt, path: Pt[], start: number, dir0: Pt, ring: number, extra: Partial<DogSeg> = {}): DogSeg {
+    const [to, ...via] = path;
+    const seg: DogSeg = { do: how, from: at, to, start, ms: 0, dir0, dir: [to[0] - at[0], to[1] - at[1]], ring, ...extra, via };
+    return { ...seg, ms: (Math.max(0.2, this.yard.metres(at, to)) / speedOf(seg, this.nature)) * 1000 };
   }
 
   private step(s: DogSeg, rand: () => number): DogSeg {
     const [at, start, dir0] = [s.to, s.start + s.ms, s.dir];
     const N = this.nature;
     const speedOf_ = (x: DogSeg): number => speedOf(x, N);
-    // 走到湖邊了：面向水低頭喝；喝完走回原來的地方
-    if (s.goal === 'drink' && s.face) return { do: 'drink', from: at, to: at, start, ms: DRINK_MS, dir0, dir: [s.face[0] - at[0], s.face[1] - at[1]], ring: s.ring, home: s.home };
-    if (s.do === 'drink' && s.home) {
-      const seg: DogSeg = { do: 'walk', from: at, to: s.home, start, ms: 0, dir0, dir: [s.home[0] - at[0], s.home[1] - at[1]], ring: s.ring };
-      return { ...seg, ms: (Math.max(0.3, this.yard.metres(at, s.home)) / speedOf_(seg)) * 1000 };
+    // 照步道走：接著走到下一個轉折點
+    if (s.via?.length && (s.do === 'walk' || s.do === 'run')) {
+      const { cross, goal, face, back, nose } = s;
+      return this.legs(s.do, at, s.via, start, dir0, s.ring, { cross, goal, face, back, nose });
     }
+    // 走到湖邊了：面向水低頭喝；喝完照原路走回去
+    if (s.goal === 'drink' && s.face) return { do: 'drink', from: at, to: at, start, ms: DRINK_MS, dir0, dir: [s.face[0] - at[0], s.face[1] - at[1]], ring: s.ring, back: s.back };
+    if (s.do === 'drink' && s.back?.length) return this.legs('walk', at, s.back, start, dir0, s.ring);
     const moving = s.do === 'walk' || s.do === 'run';
     const stay = (how: DogDo): DogSeg => {
       const [lo, hi] = N.last[how] ?? [1500, 3500];
@@ -202,32 +217,34 @@ export class Dog {
       let r = rand() * ways.reduce((a, [, w]) => a + w, 0);
       return stay((ways.find(([, w]) => (r -= w) < 0) ?? ways[ways.length - 1])[0]);
     }
-    // 去附近的湖邊喝水：遠的用跑的
+    /** 照轉折點走多遠 */
+    const along = (path: Pt[]): number => path.reduce((m, p, i) => m + this.yard.metres(i ? path[i - 1] : at, p), 0);
+    // 去附近的湖邊喝水（照步道走過去）：遠的用跑的，喝完照原路走回來
     if (!walkOn && this.yard.water && rand() < N.drink) {
       const w = this.yard.water(at, rand);
       if (w) {
-        const m = this.yard.metres(at, w.at);
-        const seg: DogSeg = { do: m > N.crossWalk || rand() < 0.4 ? 'run' : 'walk', from: at, to: w.at, start, ms: 0, dir0, dir: [w.at[0] - at[0], w.at[1] - at[1]], ring: s.ring, goal: 'drink', face: w.face, home: at };
-        return { ...seg, ms: (Math.max(0.3, m) / speedOf_(seg)) * 1000 };
+        const back = [...w.path.slice(0, -1).reverse(), at];
+        return this.legs(along(w.path) > N.crossWalk || rand() < 0.4 ? 'run' : 'walk', at, w.path, start, dir0, s.ring, { goal: 'drink', face: w.face, back });
       }
     }
-    // 經過地面到附近另一塊草皮：大多用跑的，近的偶爾用走的
+    // 照步道走到附近另一塊草皮：照個性一部分用跑的
     if (!walkOn && rand() < N.cross) {
       const o = this.yard.elsewhere(s.ring, at, rand);
-      if (o) {
-        const m = this.yard.metres(at, o.at);
-        const how = rand() < N.crossRun ? 'run' : 'walk';
-        const seg: DogSeg = { do: how, from: at, to: o.at, start, ms: 0, dir0, dir: [o.at[0] - at[0], o.at[1] - at[1]], ring: o.ring, cross: true };
-        return { ...seg, ms: (m / speedOf_(seg)) * 1000 };
-      }
+      if (o) return this.legs(rand() < N.crossRun ? 'run' : 'walk', at, o.path, start, dir0, o.ring, { cross: true });
     }
     const run = !walkOn && rand() < N.run;
     const nose = !run && !walkOn && rand() < N.nose;
     const [lo, hi] = N.reach[run ? 'run' : nose ? 'sniff' : 'walk'];
+    // 在草皮裡走：直直走過去要走得到（不穿過建築、廣場）
     let best: { to: Pt; m: number } | null = null;
+    let detour: Pt | null = null;
     for (let i = 0; i < 12; i++) {
       const to = this.yard.within(s.ring, rand);
       if (!to) break;
+      if (this.yard.canWalk && !this.yard.canWalk(at, to)) {
+        detour ??= to;
+        continue;
+      }
       const m = this.yard.metres(at, to);
       if (m >= lo && m <= hi) {
         best = { to, m };
@@ -235,7 +252,12 @@ export class Dog {
       }
       if (m >= 0.3 && (!best || Math.abs(m - hi) < Math.abs(best.m - hi))) best = { to, m };
     }
-    if (!best) return { do: 'sniff', from: at, to: at, start, ms: 2500, dir0, dir: dir0, ring: s.ring };
+    if (!best) {
+      // 不在草皮上直直走不到（例如走到一半被點了坐在步道上）：照步道走回草皮
+      const path = detour && this.yard.route ? this.yard.route(at, detour) : null;
+      if (path) return this.legs('walk', at, path, start, dir0, s.ring);
+      return { do: 'sniff', from: at, to: at, start, ms: 2500, dir0, dir: dir0, ring: s.ring };
+    }
     // 走太遠的只走一段（走到一半停下來聞）
     const to: Pt = best.m > hi ? [at[0] + ((best.to[0] - at[0]) * hi) / best.m, at[1] + ((best.to[1] - at[1]) * hi) / best.m] : best.to;
     const m = Math.min(best.m, hi);

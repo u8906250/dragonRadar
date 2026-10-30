@@ -1,9 +1,10 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { RADAR_GEOM } from '../src/radar';
-import { ARRIVE_MS, arriveRocket, DEPART_MS, departRocket, EARTH, earthParkSvg, HATCH_CENTER, nearPark, PARK_DOGS, PARK_YARD, PARK_MIN_KM, parkGeom, parkTexture, resetRocket, rocketNow, STOW_MS, stowRocket, SUMMON_MS, summonRocket } from '../src/park';
+import { ARRIVE_MS, arriveRocket, DEPART_MS, departRocket, EARTH, earthParkSvg, HATCH_CENTER, nearPark, PARK_DOGS, PARK_YARD, PARK_MIN_KM, XIAOFA_AVOID, parkGeom, parkTexture, resetRocket, rocketNow, STOW_MS, stowRocket, SUMMON_MS, summonRocket } from '../src/park';
 import { ZHONGSHAN_PARK } from '../src/zhongshan';
 import { bodyBearing, spaceMarkup, toWoof } from '../src/space';
-import { dogHeight } from '../src/dog';
+import { dogHeight, MALTESE } from '../src/dog';
+import { Dog } from '../src/dogs';
 
 const { c: C, inner: INNER } = RADAR_GEOM;
 const hall: [number, number] = [25.0400096, 121.5602923];
@@ -106,39 +107,75 @@ describe('地球的雷達上的中山公園（跟汪星共用一份）', () => {
       expect(Math.hypot((at[0] - HATCH_CENTER[0]) * EARTH.my, (at[1] - HATCH_CENTER[1]) * EARTH.mx(at[0]))).toBeGreaterThan(6);
     }
     expect(new Set(spots.map((s) => s.ring)).size).toBeGreaterThan(15);
-    // 經過地面到附近另一塊草皮：20 公尺內（跑步不要跑太久），路上不經過水池（翠湖、映池）和建築，不出公園
+    /** 這一點狗走得到嗎：不在建築、水裡，在草皮裡或在步道上 */
+    const m = (p: [number, number]): [number, number] => [(p[1] - 121.5596) * EARTH.mx(25.0394), (p[0] - 25.0394) * EARTH.my];
+    const nearPath = (p: [number, number]): boolean => {
+      const [x, y] = m(p);
+      return ZHONGSHAN_PARK.paths.some((l) => l.some((q, i) => {
+        if (!i) return false;
+        const [ax, ay] = m(l[i - 1]);
+        const [bx, by] = m(q);
+        const t = Math.max(0, Math.min(1, ((x - ax) * (bx - ax) + (y - ay) * (by - ay)) / ((bx - ax) ** 2 + (by - ay) ** 2 || 1)));
+        // 步道兩邊 1.2 公尺（每 0.5 公尺看一次，草皮和步道之間不到半公尺的縫多留一點）
+        return Math.hypot(ax + (bx - ax) * t - x, ay + (by - ay) * t - y) <= 1.5;
+      }));
+    };
+    const walkable = (p: [number, number]): boolean =>
+      !ZHONGSHAN_PARK.buildings.some((r) => inRing(p, r)) && !ZHONGSHAN_PARK.water.some((w) => inRing(p, w[0])) && (ZHONGSHAN_PARK.green.some((r) => inRing(p, r)) || nearPath(p));
+    /** 照轉折點走過去，每 0.5 公尺都走得到 */
+    const walkedOk = (from: [number, number], path: Array<[number, number]>): boolean =>
+      path.every((to, i) => {
+        const a = i ? path[i - 1] : from;
+        const n = Math.max(1, Math.ceil(Math.hypot(m(to)[0] - m(a)[0], m(to)[1] - m(a)[1]) / 0.5));
+        return Array.from({ length: n + 1 }, (_, k) => [a[0] + ((to[0] - a[0]) * k) / n, a[1] + ((to[1] - a[1]) * k) / n] as [number, number]).every(walkable);
+      });
+    const routeLen = (from: [number, number], path: Array<[number, number]>): number => path.reduce((s, p, i) => s + Math.hypot(m(p)[0] - m(i ? path[i - 1] : from)[0], m(p)[1] - m(i ? path[i - 1] : from)[1]), 0);
+    for (const { at } of spots) expect(walkable(at)).toBe(true);
+    // 直直走：穿過紀念館（建築）、橫越廣場走不到；同一塊草皮裡走得到
+    expect(PARK_YARD.canWalk!([25.0402, 121.5597], [25.0402, 121.5606])).toBe(false);
+    expect(PARK_YARD.canWalk!([25.0391, 121.5594], [25.0391, 121.5609])).toBe(false);
+    // 照步道走到附近另一塊草皮（最多 32 公尺）：每 0.5 公尺都在草地或步道上，不穿過建築、水池、廣場
     let crossed = 0;
-    for (const { ring, at } of spots.slice(0, 60)) {
+    for (const { ring, at } of spots.slice(0, 80)) {
       const o = PARK_YARD.elsewhere(ring, at, rand);
       if (!o) continue;
       crossed++;
+      const to = o.path[o.path.length - 1];
       expect(o.ring).not.toBe(ring);
-      expect(inRing(o.at, ZHONGSHAN_PARK.green[o.ring])).toBe(true);
-      expect(Math.hypot((o.at[0] - at[0]) * EARTH.my, (o.at[1] - at[1]) * EARTH.mx(at[0]))).toBeLessThanOrEqual(20);
-      for (let i = 1; i < 50; i++) {
-        const p: [number, number] = [at[0] + ((o.at[0] - at[0]) * i) / 50, at[1] + ((o.at[1] - at[1]) * i) / 50];
-        expect(inRing(p, ZHONGSHAN_PARK.outline)).toBe(true);
-        expect(ZHONGSHAN_PARK.water.some((w) => inRing(p, w[0]))).toBe(false);
-      }
+      expect(inRing(to, ZHONGSHAN_PARK.green[o.ring])).toBe(true);
+      expect(routeLen(at, o.path)).toBeLessThanOrEqual(32.5);
+      expect(walkedOk(at, o.path)).toBe(true);
     }
-    expect(crossed).toBeGreaterThan(40);
-    // 去 20 公尺內的湖邊喝水：站在岸上（不在水裡、離水不到半公尺），面向水裡，路上不經過水池
+    expect(crossed).toBeGreaterThan(20);
+    // 照步道走到附近的湖邊喝水：站在岸上（草地或步道上，離水不到半公尺），面向水裡
     let drank = 0;
     for (const { at } of spots) {
       const w = PARK_YARD.water!(at, rand);
       if (!w) continue;
       drank++;
-      const pond = ZHONGSHAN_PARK.water.find((p) => inRing(w.face, p[0]));
-      expect(pond).toBeDefined();
-      expect(ZHONGSHAN_PARK.water.some((p) => inRing(w.at, p[0]))).toBe(false);
-      expect(Math.hypot((w.face[0] - w.at[0]) * EARTH.my, (w.face[1] - w.at[1]) * EARTH.mx(at[0]))).toBeLessThan(0.8);
-      expect(Math.hypot((w.at[0] - at[0]) * EARTH.my, (w.at[1] - at[1]) * EARTH.mx(at[0]))).toBeLessThanOrEqual(20);
-      for (let i = 1; i < 50; i++) {
-        const p: [number, number] = [at[0] + ((w.at[0] - at[0]) * i) / 50, at[1] + ((w.at[1] - at[1]) * i) / 50];
-        expect(ZHONGSHAN_PARK.water.some((q) => inRing(p, q[0]))).toBe(false);
-      }
+      const shore = w.path[w.path.length - 1];
+      expect(ZHONGSHAN_PARK.water.find((p) => inRing(w.face, p[0]))).toBeDefined();
+      expect(Math.hypot((w.face[0] - shore[0]) * EARTH.my, (w.face[1] - shore[1]) * EARTH.mx(at[0]))).toBeLessThan(0.8);
+      expect(walkedOk(at, w.path)).toBe(true);
     }
-    expect(drank).toBeGreaterThan(10);
+    expect(drank).toBeGreaterThan(2);
+    // 小法兩小時：每一段走過的路都在草地或步道上（不進建築、不下水、不橫越廣場），也不去公園最右上那一區
+    const xiaofa = new Dog({ id: 'xiaofa-sim', name: '小法', look: MALTESE, yard: PARK_DOGS[0].yard });
+    xiaofa.place(rand, 0);
+    const segs = new Map<number, NonNullable<Dog['seg']>>();
+    for (let t = 0; t <= 2 * 3_600_000; t += 500) {
+      const d = xiaofa.now(t, rand);
+      segs.set(d.seg.start, d.seg);
+    }
+    const legs = [...segs.values()];
+    expect(legs.filter((x) => x.cross).length).toBeGreaterThan(3);
+    for (const x of legs) {
+      expect(walkedOk(x.from, [x.to])).toBe(true);
+      expect(inRing(x.from, XIAOFA_AVOID) || inRing(x.to, XIAOFA_AVOID)).toBe(false);
+    }
+    // 一般的公園（沒有不去的地方）抽得到那一區
+    expect(Array.from({ length: 400 }, () => PARK_YARD.anywhere(rand)!).some(({ at }) => inRing(at, XIAOFA_AVOID))).toBe(true);
+    expect(Array.from({ length: 400 }, () => PARK_DOGS[0].yard.anywhere(rand)!).some(({ at }) => inRing(at, XIAOFA_AVOID))).toBe(false);
     // 現在是使用者的馬爾濟斯小法，約 0.38 公尺高（坐著的銅像腳的一半高）
     expect(PARK_DOGS.map((d) => [d.name, d.look.name])).toEqual([['小法', '馬爾濟斯']]);
     expect(dogHeight(PARK_DOGS[0].look)).toBeCloseTo(0.38, 2);

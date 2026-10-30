@@ -733,6 +733,29 @@ export class Radar {
   }
 
   /** 直接換到這個看法（火箭飛到汪星：鏡頭從地球移到汪星、中心換成汪星、轉到中山公園）；quiet 是動畫中間的每一格（不通知 main.ts） */
+  /**
+   * 鏡頭跟著東西走（汪星的狗鎖定時每一格），不算使用者移動：每一格只移動很少，先把太空那一層平移過去（便宜），
+   * 跟上次整層重畫差超過 16 個 SVG 單位或過了 1 秒才整層重畫（慢手機每一格重畫整顆汪星會掉到 20 fps）。
+   * 平移照中心那顆的半徑換算：往東轉 Δyaw 是 r·cos(緯度)·Δyaw，往北轉 Δpitch 是 r·Δpitch（正中間附近）
+   */
+  followSpace(view: SpaceView): void {
+    this.spaceView = { ...view };
+    const d = this.drawnView;
+    const km = view.focus && this.spaceBodyKm ? this.spaceBodyKm(view.focus) : 0;
+    if (!d || d.focus !== view.focus || !km || performance.now() - this.drawnAt > 1000) {
+      this.drawSpace();
+      return;
+    }
+    const r = (km * (R - 8)) / this.scaleKm;
+    const [dx, dy] = [r * Math.cos(view.pitch) * (view.yaw - d.yaw), r * (view.pitch - d.pitch)];
+    if (Math.hypot(dx, dy) > 16) {
+      this.drawSpace();
+      return;
+    }
+    // 平移裡面那一層（外面那一層有圓形的裁切、跟著指北針轉，裁切不能跟著移）
+    this.spaceLayer.querySelector('.space-shift')?.setAttribute('transform', `translate(${dx.toFixed(2)} ${dy.toFixed(2)})`);
+  }
+
   setSpaceView(view: SpaceView, quiet = false): void {
     this.spaceView = { ...view };
     this.setScale(this.scaleKm);
@@ -767,6 +790,10 @@ export class Radar {
     t.style.transition = `transform ${ms}ms ease-in-out`;
     t.style.transform = `rotate(${a.toFixed(1)}deg)`;
   }
+
+  /** 上次整層重畫太空時的看法、什麼時候（跟著狗走時中間只平移，followSpace） */
+  private drawnView: SpaceView | null = null;
+  private drawnAt = 0;
 
   /** 指北針轉了幾度（汪星的狗每一格自己轉回來、算面向哪） */
   get headingDeg(): number {
@@ -818,9 +845,11 @@ export class Radar {
       if (this.spaceLayer.firstChild) this.spaceLayer.replaceChildren();
       return;
     }
-    this.spaceLayer.innerHTML = this.spaceDraw(this.scaleKm, globeFrac(this.scaleKm) * (R - 8), this.spaceView);
+    this.spaceLayer.innerHTML = `<g class="space-shift">${this.spaceDraw(this.scaleKm, globeFrac(this.scaleKm) * (R - 8), this.spaceView)}</g>`;
     if (this.heading) this.spaceLayer.setAttribute('transform', `rotate(${(-this.heading).toFixed(1)} ${C} ${C})`);
     else this.spaceLayer.removeAttribute('transform');
+    this.drawnView = { ...this.spaceView };
+    this.drawnAt = performance.now();
     this.standUp(this.spaceLayer);
   }
 

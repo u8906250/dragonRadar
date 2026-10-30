@@ -207,8 +207,8 @@ const STATUE_SVG = (() => {
 
 /**
  * 汪星的狗（dog.ts 畫 3D 的狗、dogs.ts 讓牠動）：PARK_DOGS 是公園裡有哪幾隻（現在是使用者的馬爾濟斯小法，之後可以加），
- * 只在汪星，在中山公園的草皮上（PARK_YARD：照面積抽一塊草皮，不在發射口和銅像旁邊，火箭、銅像不會蓋住；走多遠照汪星的公尺算；
- * 有時候經過地面到 20 公尺內另一塊草皮，或去 20 公尺內的湖邊喝水，路上不經過水池、建築、不出公園）。
+ * 只在汪星，只走草地和步道（parkYard：照面積抽一塊草皮，不在發射口和銅像旁邊，火箭、銅像不會蓋住；走多遠照汪星的公尺算；
+ * 有時候照步道走到附近另一塊草皮、去附近的湖邊喝水，不穿過建築、水池、廣場；每隻狗可以有不去的地方）。
  * 打開網頁第一次畫、搭火箭到汪星時（main.ts 的 moveDogs）換到隨機一塊草皮。跟銅像一樣：雷達外圈約 500 公尺內（STATUE_FROM）先是一個點
  * （照這一段 CSS 移過去，styles.css 的 dog-go），約 30 公尺內（DOG_FULL，整隻約 2 個 SVG 單位高：電腦約 7 像素、手機約 2 像素）畫出整隻、點得到（dog-hit，點了坐下）
  */
@@ -218,107 +218,294 @@ let dogWorld: ParkGeom | null = null;
 /** 草皮的面積（照面積抽哪一塊） */
 let lawnAreas: number[] | null = null;
 
-/** 這塊草皮裡隨機一個地方（不在發射口和銅像旁邊）；near 是只在這一點附近幾公尺內抽；抽不到是 null */
-function spotIn(ring: number, rand: () => number, near?: { at: Pt; m: number }): Pt | null {
-  const r = ZHONGSHAN_PARK.green[ring];
-  const [my, mx] = [EARTH.my, EARTH.mx(HATCH_CENTER[0])];
-  const far = (p: Pt, q: Pt, m: number): boolean => Math.abs((p[0] - q[0]) * my) > m || Math.abs((p[1] - q[1]) * mx) > m;
-  let [a0, a1] = [Math.min(...r.map((q) => q[0])), Math.max(...r.map((q) => q[0]))];
-  let [b0, b1] = [Math.min(...r.map((q) => q[1])), Math.max(...r.map((q) => q[1]))];
-  if (near) {
-    [a0, a1] = [Math.max(a0, near.at[0] - near.m / my), Math.min(a1, near.at[0] + near.m / my)];
-    [b0, b1] = [Math.max(b0, near.at[1] - near.m / mx), Math.min(b1, near.at[1] + near.m / mx)];
-    if (a0 > a1 || b0 > b1) return null;
+/**
+ * 狗走得到的地方（照使用者說的：只有草地和步道可以走）：在草皮裡（不在建築、水裡），或離步道 PATH_W 公尺內；
+ * 一段直直走過去的路每 0.5 公尺都要走得到（不穿過建築、不橫越廣場）。換草皮、去湖邊照步道走（像導航：步道每 3 公尺一點、
+ * 接在一起的步道連起來，最短的走法，再把看得到的點之間拉直）。算的時候換成公園附近的公尺（往東、往北）
+ */
+const PATH_W = 1.2;
+const WALK_M0: Pt = [25.0394, 121.5596];
+const WALK_MY = 110_574;
+const WALK_MX = 111_320 * Math.cos(WALK_M0[0] * RAD);
+const toM = ([a, b]: Pt): Pt => [(b - WALK_M0[1]) * WALK_MX, (a - WALK_M0[0]) * WALK_MY];
+const fromM = ([x, y]: Pt): Pt => [WALK_M0[0] + y / WALK_MY, WALK_M0[1] + x / WALK_MX];
+type Box = [number, number, number, number];
+const boxOf = (r: Pt[]): Box => [Math.min(...r.map((p) => p[0])), Math.min(...r.map((p) => p[1])), Math.max(...r.map((p) => p[0])), Math.max(...r.map((p) => p[1]))];
+const inBox = ([x, y]: Pt, b: Box, pad = 0): boolean => x >= b[0] - pad && x <= b[2] + pad && y >= b[1] - pad && y <= b[3] + pad;
+/** 點在不在一圈裡面（公尺座標，射線法） */
+function inRingM([x, y]: Pt, r: Pt[]): boolean {
+  let inside = false;
+  for (let i = 0, j = r.length - 1; i < r.length; j = i++) {
+    const [xi, yi] = r[i];
+    const [xj, yj] = r[j];
+    if (yi > y !== yj > y && x < ((xj - xi) * (y - yi)) / (yj - yi) + xi) inside = !inside;
   }
-  for (let i = 0; i < 40; i++) {
-    const at: Pt = [a0 + rand() * (a1 - a0), b0 + rand() * (b1 - b0)];
-    if (inRing(at, r) && far(at, HATCH_CENTER, 6) && far(at, ZHONGSHAN_PARK.statue, 2.5)) return at;
-  }
-  return null;
+  return inside;
 }
-
-/** 台北的經緯度差幾公尺（地球上，挑附近的草皮、看路上經過哪裡） */
-const earthMetres = (a: Pt, b: Pt): number => Math.hypot((a[0] - b[0]) * EARTH.my, (a[1] - b[1]) * EARTH.mx(a[0]));
-/** 換到另一塊草皮、去湖邊最遠幾公尺（跑步不要跑太久） */
-const CROSS_MAX_M = 20;
-/** 一點離一段線多遠（公尺） */
-function toSegment(p: Pt, a: Pt, b: Pt): number {
-  const [my, mx] = [EARTH.my, EARTH.mx(p[0])];
-  const [ax, ay, bx, by] = [(a[1] - p[1]) * mx, (a[0] - p[0]) * my, (b[1] - p[1]) * mx, (b[0] - p[0]) * my];
+/** 點到一段線多遠（公尺座標） */
+function segDist([px, py]: Pt, [ax, ay]: Pt, [bx, by]: Pt): number {
   const [dx, dy] = [bx - ax, by - ay];
-  const t = Math.max(0, Math.min(1, -(ax * dx + ay * dy) / (dx * dx + dy * dy || 1)));
-  return Math.hypot(ax + dx * t, ay + dy * t);
+  const t = Math.max(0, Math.min(1, ((px - ax) * dx + (py - ay) * dy) / (dx * dx + dy * dy || 1)));
+  return Math.hypot(ax + dx * t - px, ay + dy * t - py);
 }
 
-/** 從 a 直直走到 b 一路都在公園裡、不經過水池和建築（每 0.8 公尺看一次） */
-function clearPath(a: Pt, b: Pt): boolean {
-  const n = Math.max(1, Math.ceil(earthMetres(a, b) / 0.8));
-  for (let i = 1; i < n; i++) {
-    const p: Pt = [a[0] + ((b[0] - a[0]) * i) / n, a[1] + ((b[1] - a[1]) * i) / n];
-    if (!inRing(p, ZHONGSHAN_PARK.outline)) return false;
-    if (ZHONGSHAN_PARK.water.some((w) => inRing(p, w[0])) || ZHONGSHAN_PARK.buildings.some((r) => inRing(p, r))) return false;
+/** 公園裡走得到的地方（第一次用到才算）：草皮、擋住的（建築、水池）、步道的每一段（5 公尺一格的索引）、步道的路網 */
+interface Walk {
+  lawns: Array<{ ring: Pt[]; box: Box }>;
+  blocks: Array<{ ring: Pt[]; box: Box }>;
+  segs: Array<[Pt, Pt]>;
+  grid: Map<string, number[]>;
+  nodes: Pt[];
+  nodeGrid: Map<string, number[]>;
+  adj: Array<Array<[number, number]>>;
+}
+let walkData: Walk | null = null;
+const CELL = 5;
+const cellKey = (x: number, y: number): string => `${Math.floor(x / CELL)},${Math.floor(y / CELL)}`;
+/** 這一點附近（r 公尺內）的格子裡的東西 */
+function nearby(grid: Map<string, number[]>, [x, y]: Pt, r: number): number[] {
+  const out: number[] = [];
+  for (let i = Math.floor((x - r) / CELL); i <= Math.floor((x + r) / CELL); i++)
+    for (let j = Math.floor((y - r) / CELL); j <= Math.floor((y + r) / CELL); j++) for (const k of grid.get(`${i},${j}`) ?? []) out.push(k);
+  return out;
+}
+function walkOf(): Walk {
+  if (walkData) return walkData;
+  const ringM = (r: Pt[]): { ring: Pt[]; box: Box } => {
+    const ring = r.map(toM);
+    return { ring, box: boxOf(ring) };
+  };
+  const lawns = ZHONGSHAN_PARK.green.map(ringM);
+  const blocks = [...ZHONGSHAN_PARK.buildings.map(ringM), ...ZHONGSHAN_PARK.water.map((w) => ringM(w[0]))];
+  const blocked = (p: Pt): boolean => blocks.some((b) => inBox(p, b.box) && inRingM(p, b.ring));
+  const segs: Array<[Pt, Pt]> = [];
+  const grid = new Map<string, number[]>();
+  const nodes: Pt[] = [];
+  const nodeGrid = new Map<string, number[]>();
+  const adj: Array<Array<[number, number]>> = [];
+  const addNode = (p: Pt): number => {
+    nodes.push(p);
+    adj.push([]);
+    const k = cellKey(...p);
+    nodeGrid.set(k, [...(nodeGrid.get(k) ?? []), nodes.length - 1]);
+    return nodes.length - 1;
+  };
+  for (const line of ZHONGSHAN_PARK.paths) {
+    const pts = line.map(toM);
+    let prev = -1;
+    for (let i = 0; i < pts.length; i++) {
+      if (i > 0) {
+        const [a, b] = [pts[i - 1], pts[i]];
+        segs.push([a, b]);
+        // 這一段經過的格子都記一下（段最長也才幾十公尺，每 2 公尺記一次）
+        const n = Math.max(1, Math.ceil(Math.hypot(b[0] - a[0], b[1] - a[1]) / 2));
+        const keys = new Set<string>();
+        for (let t = 0; t <= n; t++) keys.add(cellKey(a[0] + ((b[0] - a[0]) * t) / n, a[1] + ((b[1] - a[1]) * t) / n));
+        for (const k of keys) grid.set(k, [...(grid.get(k) ?? []), segs.length - 1]);
+        // 路網：每 3 公尺一點，經過建築、水裡的斷開
+        const m = Math.max(1, Math.ceil(Math.hypot(b[0] - a[0], b[1] - a[1]) / 3));
+        for (let t = 1; t <= m; t++) {
+          const p: Pt = [a[0] + ((b[0] - a[0]) * t) / m, a[1] + ((b[1] - a[1]) * t) / m];
+          if (blocked(p)) {
+            prev = -1;
+            continue;
+          }
+          const id = addNode(p);
+          if (prev >= 0) {
+            const d = Math.hypot(p[0] - nodes[prev][0], p[1] - nodes[prev][1]);
+            adj[prev].push([id, d]);
+            adj[id].push([prev, d]);
+          }
+          prev = id;
+        }
+      } else if (!blocked(pts[0])) prev = addNode(pts[0]);
+      else prev = -1;
+    }
   }
-  return true;
+  // 接在一起的步道（端點、交叉的地方離不到 1.5 公尺）連起來
+  nodes.forEach((p, i) => {
+    for (const j of nearby(nodeGrid, p, 1.5)) {
+      if (j <= i) continue;
+      const d = Math.hypot(p[0] - nodes[j][0], p[1] - nodes[j][1]);
+      if (d < 1.5 && !adj[i].some(([k]) => k === j)) {
+        adj[i].push([j, d]);
+        adj[j].push([i, d]);
+      }
+    }
+  });
+  return (walkData = { lawns, blocks, segs, grid, nodes, nodeGrid, adj });
 }
 
-/** 中山公園的草皮（狗待的地方） */
-export const PARK_YARD: DogYard = {
-  anywhere: (rand) => {
-    const areas = (lawnAreas ??= ZHONGSHAN_PARK.green.map((r) => Math.abs(ringArea(r))));
-    const total = areas.reduce((a, b) => a + b, 0);
-    for (let tries = 0; tries < 1000; tries++) {
-      let pick = rand() * total;
-      const ring = Math.max(0, areas.findIndex((a) => (pick -= a) < 0));
-      const at = spotIn(ring, rand);
-      if (at) return { ring, at };
+/**
+ * 中山公園給一隻狗待的地方（DogYard）：草皮和步道上，照面積抽一塊草皮，不在發射口和銅像旁邊（火箭、銅像不會蓋住）；
+ * avoid 是這隻狗不去的地方（一圈圈台北的經緯度，例如小法不去公園最右上那一區）；走多遠照汪星的公尺算
+ */
+export function parkYard(o: { avoid?: Pt[][] } = {}): DogYard {
+  const avoid = (o.avoid ?? []).map((r) => {
+    const ring = r.map(toM);
+    return { ring, box: boxOf(ring) };
+  });
+  /** 這一點走得到嗎（公尺座標）：不在建築、水裡、不去的地方，在草皮裡或離步道 PATH_W 內 */
+  const okM = (p: Pt): boolean => {
+    const w = walkOf();
+    if (w.blocks.some((b) => inBox(p, b.box) && inRingM(p, b.ring))) return false;
+    if (avoid.some((b) => inBox(p, b.box) && inRingM(p, b.ring))) return false;
+    if (w.lawns.some((l) => inBox(p, l.box) && inRingM(p, l.ring))) return true;
+    return nearby(w.grid, p, PATH_W).some((i) => segDist(p, ...w.segs[i]) <= PATH_W);
+  };
+  /** 從 a 直直走到 b 一路都走得到（每 0.5 公尺看一次，公尺座標） */
+  const lineM = (a: Pt, b: Pt): boolean => {
+    const n = Math.max(1, Math.ceil(Math.hypot(b[0] - a[0], b[1] - a[1]) / 0.5));
+    for (let i = 0; i <= n; i++) if (!okM([a[0] + ((b[0] - a[0]) * i) / n, a[1] + ((b[1] - a[1]) * i) / n])) return false;
+    return true;
+  };
+  /** 路網上這隻狗不去的點 */
+  let banned: Set<number> | null = null;
+  const bannedNodes = (): Set<number> => (banned ??= new Set(walkOf().nodes.flatMap((p, i) => (avoid.some((b) => inBox(p, b.box) && inRingM(p, b.ring)) ? [i] : []))));
+  /** 照步道從 a 走到 b（公尺座標）：直直走得到就直接走；不然接上附近（12 公尺內、直直走得到）的步道，走最短的，最多 maxM 公尺；拉直後的轉折點（不含 a，最後一點是 b） */
+  const routeM = (a: Pt, b: Pt, maxM: number): Pt[] | null => {
+    if (lineM(a, b)) return [b];
+    const w = walkOf();
+    const ban = bannedNodes();
+    const links = (p: Pt): Array<[number, number]> => nearby(w.nodeGrid, p, 12).flatMap((i): Array<[number, number]> => {
+      const d = Math.hypot(w.nodes[i][0] - p[0], w.nodes[i][1] - p[1]);
+      return d <= 12 && !ban.has(i) && lineM(p, w.nodes[i]) ? [[i, d]] : [];
+    });
+    const [starts, ends] = [links(a), links(b)];
+    if (!starts.length || !ends.length) return null;
+    const endAt = new Map(ends);
+    // 最短的走法（Dijkstra，節點不多，用陣列找最小的就好）
+    const dist = new Map<number, number>();
+    const from = new Map<number, number>();
+    const open = new Map<number, number>();
+    for (const [i, d] of starts) open.set(i, Math.min(open.get(i) ?? Infinity, d));
+    let best: { i: number; d: number } | null = null;
+    while (open.size) {
+      let [i, d] = [-1, Infinity];
+      for (const [k, v] of open) if (v < d) [i, d] = [k, v];
+      open.delete(i);
+      if (d > maxM || (best && d >= best.d)) break;
+      dist.set(i, d);
+      const e = endAt.get(i);
+      if (e !== undefined && (!best || d + e < best.d)) best = { i, d: d + e };
+      for (const [j, step] of w.adj[i]) {
+        if (dist.has(j) || ban.has(j)) continue;
+        if (d + step < (open.get(j) ?? Infinity)) {
+          open.set(j, d + step);
+          from.set(j, i);
+        }
+      }
+    }
+    if (!best || best.d > maxM) return null;
+    const pts: Pt[] = [];
+    for (let i: number | undefined = best.i; i !== undefined; i = from.get(i)) pts.unshift(w.nodes[i]);
+    const all = [a, ...pts, b];
+    // 拉直：從現在這點直直走得到的最遠那一點
+    const out: Pt[] = [];
+    let at = 0;
+    while (at < all.length - 1) {
+      let k = all.length - 1;
+      while (k > at + 1 && !lineM(all[at], all[k])) k--;
+      out.push(all[k]);
+      at = k;
+    }
+    return out;
+  };
+  const len = (from: Pt, path: Pt[]): number => path.reduce((s, p, i) => s + Math.hypot(p[0] - (i ? path[i - 1] : from)[0], p[1] - (i ? path[i - 1] : from)[1]), 0);
+  /** 這塊草皮裡隨機一個走得到的地方（不在發射口和銅像旁邊）；near 是只在這一點附近幾公尺內抽；抽不到是 null */
+  const spotIn = (ring: number, rand: () => number, near?: { at: Pt; m: number }): Pt | null => {
+    const r = ZHONGSHAN_PARK.green[ring];
+    const [my, mx] = [EARTH.my, EARTH.mx(HATCH_CENTER[0])];
+    const far = (p: Pt, q: Pt, m: number): boolean => Math.abs((p[0] - q[0]) * my) > m || Math.abs((p[1] - q[1]) * mx) > m;
+    let [a0, a1] = [Math.min(...r.map((q) => q[0])), Math.max(...r.map((q) => q[0]))];
+    let [b0, b1] = [Math.min(...r.map((q) => q[1])), Math.max(...r.map((q) => q[1]))];
+    if (near) {
+      [a0, a1] = [Math.max(a0, near.at[0] - near.m / my), Math.min(a1, near.at[0] + near.m / my)];
+      [b0, b1] = [Math.max(b0, near.at[1] - near.m / mx), Math.min(b1, near.at[1] + near.m / mx)];
+      if (a0 > a1 || b0 > b1) return null;
+    }
+    for (let i = 0; i < 40; i++) {
+      const at: Pt = [a0 + rand() * (a1 - a0), b0 + rand() * (b1 - b0)];
+      if (inRing(at, r) && far(at, HATCH_CENTER, 6) && far(at, ZHONGSHAN_PARK.statue, 2.5) && okM(toM(at))) return at;
     }
     return null;
-  },
-  within: spotIn,
-  // 附近（邊離這裡 CROSS_MAX_M 內）的其他草皮，在離這裡 CROSS_MAX_M 內的那一部分抽一處，路上不經過水池、建築
-  elsewhere: (ring, at, rand) => {
-    const near = ZHONGSHAN_PARK.green.map((r, i) => i).filter((i) => i !== ring && ZHONGSHAN_PARK.green[i].some((p, j, r) => toSegment(at, p, r[(j + 1) % r.length]) < CROSS_MAX_M));
-    for (let tries = 0; tries < 20 && near.length; tries++) {
-      const i = near[Math.floor(rand() * near.length)];
-      const to = spotIn(i, rand, { at, m: CROSS_MAX_M });
-      if (to && earthMetres(at, to) <= CROSS_MAX_M && clearPath(at, to)) return { ring: i, at: to };
-    }
-    return null;
-  },
-  // 附近（CROSS_MAX_M 內）的湖邊（翠湖、映池的岸）：站在岸上離水 0.35 公尺、面向水，路上不經過水池、建築
-  water: (at, rand) => {
-    // 離這裡 CROSS_MAX_M 內的岸
-    const shores = ZHONGSHAN_PARK.water.flatMap((w) => w[0].map((a, i, r): [Pt[], Pt, Pt] => [r, a, r[(i + 1) % r.length]])).filter(([, a, b]) => toSegment(at, a, b) < CROSS_MAX_M);
-    for (let tries = 0; tries < 40 && shores.length; tries++) {
-      const [pond, a, b] = shores[Math.floor(rand() * shores.length)];
-      const t = rand();
-      const edge: Pt = [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t];
-      // 岸的方向（公尺：往東、往北），往兩邊各 0.35 公尺，不在水裡的那邊是岸上
-      const [my, mx] = [EARTH.my, EARTH.mx(edge[0])];
-      const [ex, ey] = [(b[1] - a[1]) * mx, (b[0] - a[0]) * my];
-      const len = Math.hypot(ex, ey);
-      if (len < 0.2) continue;
-      const off = (m: number): Pt => [edge[0] + ((ex / len) * m) / my, edge[1] + ((-ey / len) * m) / mx];
-      const [p, q] = inRing(off(0.35), pond) ? [off(-0.35), off(0.35)] : [off(0.35), off(-0.35)];
-      if (inRing(p, pond) || !inRing(q, pond) || earthMetres(at, p) > CROSS_MAX_M || !clearPath(at, p)) continue;
-      if (!inRing(p, ZHONGSHAN_PARK.outline) || ZHONGSHAN_PARK.buildings.some((r) => inRing(p, r))) continue;
-      return { at: p, face: q };
-    }
-    return null;
-  },
-  metres: (a, b) => {
-    const g = dogWorld ?? parkGeom(EARTH);
-    const [p, q] = [g.to(a), g.to(b)];
-    return Math.hypot((p[0] - q[0]) * g.O.my, (p[1] - q[1]) * g.O.mx);
-  },
-};
+  };
+  return {
+    anywhere: (rand) => {
+      const areas = (lawnAreas ??= ZHONGSHAN_PARK.green.map((r) => Math.abs(ringArea(r))));
+      const total = areas.reduce((a, b) => a + b, 0);
+      for (let tries = 0; tries < 1000; tries++) {
+        let pick = rand() * total;
+        const ring = Math.max(0, areas.findIndex((a) => (pick -= a) < 0));
+        const at = spotIn(ring, rand);
+        if (at) return { ring, at };
+      }
+      return null;
+    },
+    within: (ring, rand) => spotIn(ring, rand),
+    canWalk: (a, b) => lineM(toM(a), toM(b)),
+    route: (a, b, maxM = CROSS_MAX_M) => routeM(toM(a), toM(b), maxM)?.map(fromM) ?? null,
+    // 附近的其他草皮（邊離這裡 CROSS_NEAR_M 內，在離這裡 CROSS_NEAR_M 內的那一部分抽一處），照步道走過去，最多 CROSS_MAX_M 公尺
+    elsewhere: (ring, at, rand) => {
+      const a = toM(at);
+      const near = walkOf().lawns.map((l, i) => i).filter((i) => i !== ring && walkOf().lawns[i].ring.some((p, j, r) => segDist(a, p, r[(j + 1) % r.length]) < CROSS_NEAR_M));
+      for (let tries = 0; tries < 12 && near.length; tries++) {
+        const i = near[Math.floor(rand() * near.length)];
+        const to = spotIn(i, rand, { at, m: CROSS_NEAR_M });
+        const path = to ? routeM(a, toM(to), CROSS_MAX_M) : null;
+        if (to && path) return { ring: i, path: path.map(fromM) };
+      }
+      return null;
+    },
+    // 附近的湖邊（翠湖、映池的岸，岸邊離這裡 CROSS_NEAR_M 內）：站在岸上離水 0.35 公尺（草皮或步道上）、面向水，照步道走過去
+    water: (at, rand) => {
+      const a = toM(at);
+      const shores = ZHONGSHAN_PARK.water.flatMap((w) => w[0].map((p, i, r): [Pt[], Pt, Pt] => [r, p, r[(i + 1) % r.length]])).filter(([, p, q]) => segDist(a, toM(p), toM(q)) < CROSS_NEAR_M);
+      for (let tries = 0; tries < 30 && shores.length; tries++) {
+        const [pond, p0, p1] = shores[Math.floor(rand() * shores.length)];
+        const t = rand();
+        const edge: Pt = [p0[0] + (p1[0] - p0[0]) * t, p0[1] + (p1[1] - p0[1]) * t];
+        // 岸的方向（公尺：往東、往北），往兩邊各 0.35 公尺，不在水裡的那邊是岸上
+        const [ex, ey] = [(p1[1] - p0[1]) * WALK_MX, (p1[0] - p0[0]) * WALK_MY];
+        const l = Math.hypot(ex, ey);
+        if (l < 0.2) continue;
+        const off = (m: number): Pt => [edge[0] + ((-ex / l) * m) / WALK_MY, edge[1] + ((ey / l) * m) / WALK_MX];
+        const [p, q] = inRing(off(0.35), pond) ? [off(-0.35), off(0.35)] : [off(0.35), off(-0.35)];
+        if (inRing(p, pond) || !inRing(q, pond) || !okM(toM(p))) continue;
+        const path = routeM(a, toM(p), CROSS_MAX_M);
+        if (path) return { path: path.map(fromM), face: q };
+      }
+      return null;
+    },
+    metres: (a, b) => {
+      const g = dogWorld ?? parkGeom(EARTH);
+      const [p, q] = [g.to(a), g.to(b)];
+      return Math.hypot((p[0] - q[0]) * g.O.my, (p[1] - q[1]) * g.O.mx);
+    },
+  };
+}
 
-/** 公園裡的狗：小法（使用者的馬爾濟斯；之後可能單獨給他其他動作和個性，就給他自己的 nature） */
-export const PARK_DOGS: Dog[] = [new Dog({ id: 'xiaofa', name: '小法', look: MALTESE, yard: PARK_YARD })];
+/** 換草皮、去湖邊：找邊離這裡多近的草皮、湖岸（直線，公尺），照步道走最多幾公尺（跑步不要跑太久） */
+const CROSS_NEAR_M = 20;
+const CROSS_MAX_M = 32;
+
+/** 一般的公園（沒有不去的地方） */
+export const PARK_YARD: DogYard = parkYard();
+
+/** 小法不去的地方：公園最右上那一區（國父紀念館東邊那條南北向步道以東、橫過整個公園那條東西向步道以北，東北角那一排草皮） */
+export const XIAOFA_AVOID: Pt[] = [[25.03932, 121.56098], [25.0413, 121.56098], [25.0413, 121.5618], [25.03932, 121.5618]];
+
+/** 公園裡的狗：小法（使用者的馬爾濟斯；不去公園最右上那一區；之後可能單獨給他其他動作和個性，就給他自己的 nature） */
+export const PARK_DOGS: Dog[] = [new Dog({ id: 'xiaofa', name: '小法', look: MALTESE, yard: parkYard({ avoid: [XIAOFA_AVOID] }) })];
 
 /** 搭火箭到汪星：每隻狗換到隨機一塊草皮 */
 export function moveDogs(): void {
   for (const d of PARK_DOGS) d.place();
+}
+
+/** 這隻狗現在在哪（台北的經緯度；鎖定時雷達正中間跟著牠）；沒有這隻是 null */
+export function dogAt(id: string): Pt | null {
+  return dogById(id)?.now().at ?? null;
 }
 
 /** 點了這隻狗：轉過來面向你坐下 */

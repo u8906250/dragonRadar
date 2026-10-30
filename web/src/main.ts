@@ -333,6 +333,12 @@ const countLabel = $('#count-label');
 const originLabel = $('#origin-label');
 const useGpsBtn = $<HTMLButtonElement>('#use-gps');
 const homeBtn = $<HTMLButtonElement>('#home-btn');
+/** 汪星的狗：「鎖定」按鈕、點過可以鎖定的狗（10 秒沒按就收起來）、鎖定中的狗 */
+const dogLockBtn = $<HTMLButtonElement>('#dog-lock-btn');
+let dogOffer: string | null = null;
+let dogLocked: string | null = null;
+let dogOfferTimer = 0;
+let dogFollow = 0;
 const updatedLabel = $<HTMLButtonElement>('#updated-label');
 const pollSelect = $<HTMLSelectElement>('#poll-select');
 
@@ -451,15 +457,18 @@ radar.onRocket = (world) => {
     void rocketTrip(m, world);
   });
 };
-// 點了汪星的狗：轉過來面向你坐下
+// 點了汪星的狗：轉過來面向你坐下，左上角出現「鎖定」
 radar.onDog = (id) => {
   void import('./park').then((m) => {
+    parkMod = m;
     m.petDog(id);
     radar.redrawPark();
+    offerDogLock(id);
   });
 };
-// 太陽系那幾層拖曳移開了視野、拉回地球：「回到我的位置」跟著出現、消失
+// 太陽系那幾層拖曳移開了視野、拉回地球：「回到我的位置」跟著出現、消失；自己移動了就不再跟著狗
 radar.onSpaceMove = () => {
+  if (dogLocked || dogOffer) lockDog(null);
   updateHomeBtn();
   saveSpaceView();
   updateScaleChips();
@@ -981,6 +990,7 @@ async function rocketTrip(m: typeof import('./park'), from: 'earth' | 'woof'): P
   const to = m.departRocket();
   if (!to) return;
   tripping = true;
+  lockDog(null);
   // 飛往汪星：拉近時看得到汪星的地圖；狗換到別塊草皮
   tripTo = to;
   if (to === 'woof') m.moveDogs();
@@ -2838,6 +2848,7 @@ let home: Home | null = loadHome();
  */
 function goHome(): void {
   if (tripping) return;
+  lockDog(null);
   // 你在汪星：回到汪星的發射口（點別的星球只是看過去，坐火箭回來才回到地球）
   if (youOn === 'woof') {
     void woofHomeView().then((v) => radar.setSpaceView(v));
@@ -2858,6 +2869,58 @@ function goHome(): void {
   setOrigin({ lat: to.lat, lng: to.lng, source: to.source });
   map.setOrigin(origin, true, gpsAccuracy);
   fitEarthZoom();
+}
+
+// ---- 汪星的狗：點了出現「鎖定」，按了雷達正中間跟著牠（鏡頭慢慢追上），再按、自己拖曳、換星球、回到我的位置、搭火箭、切到地圖就解除 ----
+
+function updateDogLockBtn(): void {
+  dogLockBtn.hidden = !(dogLocked || dogOffer) || view !== 'radar';
+  dogLockBtn.textContent = dogLocked ? '解除鎖定' : '鎖定';
+  dogLockBtn.classList.toggle('on', !!dogLocked);
+  dogLockBtn.setAttribute('aria-pressed', String(!!dogLocked));
+}
+
+/** 點了狗：出現「鎖定」（已經鎖定就維持） */
+function offerDogLock(id: string): void {
+  if (dogLocked) return;
+  dogOffer = id;
+  window.clearTimeout(dogOfferTimer);
+  dogOfferTimer = window.setTimeout(() => {
+    dogOffer = null;
+    updateDogLockBtn();
+  }, 10_000);
+  updateDogLockBtn();
+}
+
+/** 鎖定這隻狗（null 是解除：記住現在的看法、「回到我的位置」照常） */
+function lockDog(id: string | null): void {
+  const was = dogLocked;
+  dogLocked = id;
+  dogOffer = null;
+  window.clearTimeout(dogOfferTimer);
+  updateDogLockBtn();
+  if (id && !dogFollow) dogFollow = requestAnimationFrame(followDog);
+  if (!id && was) {
+    saveSpaceView();
+    updateHomeBtn();
+  }
+}
+
+/** 每一格把汪星轉到狗在的地方（每一格追上剩下的 2 成：一開始慢慢移過去，之後緊跟著） */
+function followDog(): void {
+  dogFollow = 0;
+  if (!dogLocked || !spaceMod || !parkMod || tripping) return;
+  const at = parkMod.dogAt(dogLocked);
+  if (!at || radar.spaceFocusKey !== 'woof') {
+    lockDog(null);
+    return;
+  }
+  const [la, ln] = spaceMod.toWoof(at);
+  const v = radar.spaceViewNow;
+  const [yaw, pitch] = [(-ln * Math.PI) / 180, (la * Math.PI) / 180];
+  const k = Math.hypot(yaw - v.yaw, pitch - v.pitch) < 1e-9 ? 1 : 0.2;
+  radar.followSpace({ focus: 'woof', yaw: v.yaw + (yaw - v.yaw) * k, pitch: v.pitch + (pitch - v.pitch) * k });
+  dogFollow = requestAnimationFrame(followDog);
 }
 
 /** 「回到我的位置」：手動位置（拖曳雷達、在地圖上設定）、太陽系那幾層移開了視野時，雷達上才出現 */
@@ -2940,6 +3003,7 @@ function switchView(v: 'radar' | 'map'): void {
   view = v;
   $('#radar-view').hidden = v !== 'radar';
   $('#map-view').hidden = v !== 'map';
+  if (v !== 'radar') lockDog(null);
   updateHomeBtn();
   $('#stage').dataset.view = v;
   viewBtn.textContent = v === 'radar' ? '地圖' : '雷達';
@@ -4580,6 +4644,7 @@ function wireControls(): void {
     if (!onWoof() && !tripping) locateMe();
   });
   homeBtn.addEventListener('click', goHome);
+  dogLockBtn.addEventListener('click', () => lockDog(dogLocked ? null : dogOffer));
   for (const b of baseChips) b.addEventListener('click', () => setBase(b.dataset.base as BaseMap));
   compassBtn.addEventListener('click', () => void toggleCompass());
   notifyBtn.addEventListener('click', () => void toggleNotify());

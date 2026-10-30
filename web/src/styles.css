@@ -208,8 +208,8 @@ a.chip { display: inline-flex; align-items: center; text-decoration: none; }
 .overlay { position: absolute; z-index: 20; display: flex; gap: 6px; align-items: center; }
 .overlay-bl { left: 16px; bottom: 16px; flex-direction: column; align-items: flex-start; }
 .overlay-tr { right: 16px; top: 12px; }
-/* 雷達拖曳過（手動位置）才出現的「回到我的位置」，放在左上，不跟右上的按鈕擠 */
-.overlay-tl { left: 16px; top: 12px; }
+/* 雷達拖曳過（手動位置）才出現的「回到我的位置」，放在左上，不跟右上的按鈕擠；汪星的狗的「鎖定」排在它下面（手機上排在旁邊會被右上的「定位」蓋住） */
+.overlay-tl { left: 16px; top: 12px; flex-direction: column; align-items: flex-start; }
 @media (max-width: 380px) { #home-btn { padding: 8px 8px; font-size: 12px; } }
 .radar.panning { cursor: grabbing; }
 
