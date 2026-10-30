@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { guessedMidnight, missingActivityParts, normalizeActivities, reconcileRouteStops, routeStopLines, type ExtractedEvent } from '../src/extract';
+import { cleanTopic, guessedMidnight, missingActivityParts, normalizeActivities, reconcileRouteStops, routeStopLines, type ExtractedEvent } from '../src/extract';
 import { applyManualFixes, atLocalTimes, markRoutes, profilePlanBetter, sortStops, stopNameOf, withoutStop, type ManualFix, type PlanItem } from '../src/events';
 import { parseIsoToUnix } from '../src/util';
 import type { Env } from '../src/env';
@@ -29,6 +29,29 @@ describe('normalizeActivities', () => {
   });
   it('has no reason when the post is an event', () => {
     expect(normalizeActivities({ is_event: true, reason: '？', events: [] })?.reason).toBeNull();
+  });
+});
+
+describe('normalizeActivities topic', () => {
+  it('keeps the topic the model read from the post, for each event', () => {
+    const ex = normalizeActivities({
+      is_event: true,
+      reason: null,
+      events: [
+        { topic: '遊行', title: '凱道同志遊行', start_at: null, end_at: null, place_text: '凱達格蘭大道', place_query: '台北市 凱達格蘭大道', confidence: 0.9 },
+        { topic: '講座活動', title: '公館講座', start_at: null, end_at: null, place_text: '公館', place_query: '台北市 公館', confidence: 0.9 },
+        { topic: null, title: '同樂會', start_at: null, end_at: null, place_text: '景華公園', place_query: '景華公園', confidence: 0.9 },
+      ],
+    });
+    expect(ex?.events.map((e) => e.extra)).toEqual([{ topic: '遊行' }, { topic: '講座' }, null]);
+  });
+  it('cleans the topic: no symbols, no bare 活動, not a whole sentence', () => {
+    expect(cleanTopic('「市集」')).toBe('市集');
+    expect(cleanTopic('🎤 開講')).toBe('開講');
+    expect(cleanTopic('活動')).toBeNull();
+    expect(cleanTopic('null')).toBeNull();
+    expect(cleanTopic('在公園舉辦的表演同樂會')).toBeNull();
+    expect(cleanTopic(3)).toBeNull();
   });
 });
 
@@ -119,7 +142,10 @@ const T20 = T18 + 7200;
 describe('parseEditItems', () => {
   it('needs content, place and start; a blank end is open', () => {
     const [a] = parseEditItems([{ title: '  發飄帶 ', place: 'PEG coffee', startAt: T18, endAt: null, lat: null, lng: null }]);
-    expect(a).toEqual({ title: '發飄帶', startAt: T18, endAt: null, place: 'PEG coffee', lat: null, lng: null });
+    expect(a).toEqual({ title: '發飄帶', topic: null, startAt: T18, endAt: null, place: 'PEG coffee', lat: null, lng: null });
+    // 主題可以不填；填了照判讀的規則整理（拿掉符號、後面的「活動」）
+    expect(parseEditItems([{ title: 'x', topic: ' 遊行！', place: 'y', startAt: T18 }])[0].topic).toBe('遊行');
+    expect(parseEditItems([{ title: 'x', topic: '活動', place: 'y', startAt: T18 }])[0].topic).toBeNull();
     expect(() => parseEditItems([{ title: '', place: 'PEG coffee', startAt: T18 }])).toThrow('請填活動內容');
     expect(() => parseEditItems([{ title: 'x', place: ' ', startAt: T18 }])).toThrow('請填地點');
     expect(() => parseEditItems([{ title: 'x', place: 'y' }, { title: 'x', place: 'y', startAt: 1.5 }])).toThrow('第 1 場：請填哪天幾點開始');
@@ -139,15 +165,15 @@ describe('editItemsOf', () => {
   it('prefills planned and failed activities, skipping duplicates', () => {
     const plan = { kind: 'activity', title: '發飄帶', item: null, start_at: T18, end_at: T20, place_text: 'PEG coffee', place_query: 'PEG coffee', lat: 25.02, lng: 121.53, confidence: 1, all_day: false, spot: false, approx_area: null, end_open: true, until_open: false } as const;
     const items: PlanItem[] = [
-      { group: 0, plan: { ...plan }, reason: 'planned' },
+      { group: 0, plan: { ...plan, extra: JSON.stringify({ topic: '發放' }) }, reason: 'planned' },
       { group: 1, plan: null, reason: 'duplicate_of_3' },
-      { group: 2, plan: null, reason: 'incomplete:place', fail: { title: '市集', place: '本店', reason: 'incomplete', missing: ['place'], selfPlace: '本店', startAt: T18, endAt: T20, endOpen: false } },
+      { group: 2, plan: null, reason: 'incomplete:place', fail: { title: '市集', place: '本店', topic: '市集', reason: 'incomplete', missing: ['place'], selfPlace: '本店', startAt: T18, endAt: T20, endOpen: false } },
       { group: 3, plan: null, reason: 'incomplete:start', fail: { title: '講座', place: '公館', reason: 'incomplete', missing: ['start'], dateOnly: T18 - 10 * 3600 } },
     ];
     expect(editItemsOf(items)).toEqual([
-      { title: '發飄帶', startAt: T18, endAt: null, place: 'PEG coffee', lat: 25.02, lng: 121.53, approxArea: null },
-      { title: '市集', startAt: T18, endAt: T20, place: '', lat: null, lng: null },
-      { title: '講座', startAt: T18 - 10 * 3600, dateOnly: true, endAt: null, place: '公館', lat: null, lng: null },
+      { title: '發飄帶', topic: '發放', startAt: T18, endAt: null, place: 'PEG coffee', lat: 25.02, lng: 121.53, approxArea: null },
+      { title: '市集', topic: '市集', startAt: T18, endAt: T20, place: '', lat: null, lng: null },
+      { title: '講座', topic: null, startAt: T18 - 10 * 3600, dateOnly: true, endAt: null, place: '公館', lat: null, lng: null },
     ]);
   });
 });
@@ -157,6 +183,11 @@ describe('editSummary', () => {
   it('lists only what the reporter changed', () => {
     expect(editSummary(before, [{ title: '發飄帶', startAt: T18, endAt: null, place: 'PEG coffee', lat: null, lng: null }])).toBeNull();
     expect(editSummary(before, [{ title: '發飄帶', startAt: T18, endAt: T20, place: 'PEG coffee', lat: 25.03, lng: 121.54 }])).toBe('改了時間 10/26 18:00–20:00、在地圖上標了位置');
+  });
+  it('mentions a changed topic', () => {
+    const judged = [{ ...before[0], topic: '發放' }];
+    expect(editSummary(judged, [{ ...judged[0], lat: null, lng: null }])).toBeNull();
+    expect(editSummary(judged, [{ ...judged[0], topic: '市集', lat: null, lng: null }])).toBe('改了主題「市集」');
   });
   it('lists everything for an activity the AI did not read', () => {
     const acts = [{ title: 'A', startAt: T18, endAt: null, place: 'B', lat: null, lng: null }, { title: 'C', startAt: T20, endAt: null, place: 'D', lat: null, lng: null }];

@@ -177,6 +177,7 @@ const ACTIVITY_SCHEMA = {
       items: {
         type: 'object',
         properties: {
+          topic: { type: ['string', 'null'] },
           title: { type: ['string', 'null'] },
           start_at: { type: ['string', 'null'] },
           end_at: { type: ['string', 'null'] },
@@ -186,16 +187,16 @@ const ACTIVITY_SCHEMA = {
           country: { type: ['string', 'null'] },
           timezone: { type: ['string', 'null'] },
         },
-        required: ['title', 'start_at', 'end_at', 'place_text', 'place_query', 'confidence'],
+        required: ['topic', 'title', 'start_at', 'end_at', 'place_text', 'place_query', 'confidence'],
       },
     },
   },
   required: ['is_event', 'reason', 'events'],
 };
 
-const ACTIVITY_PROMPT = `你是「洋流雷達」的活動判讀器。你會收到一則台灣 Threads 貼文，請判斷它是否在宣告「民眾可以到場參加的實體活動」，並抽出每一場的活動內容、地點、開始時間、結束時間。
+const ACTIVITY_PROMPT = `你是「洋流雷達」的活動判讀器。你會收到一則台灣 Threads 貼文，請判斷它是否在宣告「民眾可以到場參加的實體活動」，照貼文內容判斷每一場是什麼主題，並抽出每一場的活動內容、地點、開始時間、結束時間。
 
-活動：在特定時間地點舉行、民眾可以到場參加的，例如發放飄帶或小物、車掃、掃街、市場開講、造勢晚會、見面會、座談、講座、遊行、快閃、志工集合、市集擺攤、幫忙編飄帶、彩繪、拍照。店家或個人開放大家去索取、領取小物也算（例如「只限今日洋流小物補貨，現在到 19:00 歡迎索取」）。
+活動：在特定時間地點舉行、民眾可以到場參加的，什麼主題都可以，不限政治、競選，例如遊行、講座、座談、讀書會、市集、展覽、表演、音樂會、運動、淨灘、志工、見面會、市政開講、車掃、掃街、造勢晚會、快閃、工作坊、發放小物。店家或個人開放大家去索取、領取東西也算（例如「只限今日小物補貨，現在到 19:00 歡迎索取」）。
 
 只輸出 JSON：
 {
@@ -206,8 +207,9 @@ const ACTIVITY_PROMPT = `你是「洋流雷達」的活動判讀器。你會收�
 }
 
 events 每筆的欄位：
-- title: 活動內容，16 字以內的短標題，要寫出在哪裡做什麼，例如「秀水服務處發飄帶」「保安宮市政開講」「散步遊者市集幫編飄帶」「景華公園表演同樂會」。做什麼要照貼文寫的（發飄帶、表演、同樂會、講座、掃街、見面會…），不要自己編；服務處、競選總部要寫出是誰的（看貼文署名或內文的名字）；店家發的寫店名（貼文或【帳號簡介】的名稱，沒有就用帳號），口號（例如「定慧贏」「凍蒜」）不是地點。看不出要做什麼則 null
-- start_at: 開始時間，ISO 8601 含時區，例如 2026-10-17T15:00:00+08:00。貼文要寫出哪天、幾點開始；只寫日期沒寫幾點（例如「10/27 發飄帶」）、沒寫幾點開始（例如只寫「14:45 前我都在」）則 null，不要填 00:00，也不要自己猜
+- topic: 這一場的主題，照貼文的內容判斷是什麼活動，2～4 字，例如「遊行」「講座」「座談」「讀書會」「市集」「展覽」「表演」「音樂會」「運動」「淨灘」「志工」「見面會」「開講」「車掃」「掃街」「造勢」「快閃」「工作坊」「發放」。照這一場主要做的事判斷：貼文提到某樣東西（例如飄帶、貼紙）不代表是發放，免費送東西給到場的人才是「發放」；同一則不同場的主題可以不一樣。看不出來則 null，不要只寫「活動」
+- title: 活動內容，16 字以內的短標題，要寫出在哪裡做什麼，例如「保安宮市政開講」「景華公園表演同樂會」「華山草地市集」「凱道同志遊行」「秀水服務處發小物」。做什麼要照貼文寫的（遊行、表演、同樂會、講座、市集、掃街、見面會、發東西…），不要自己編；服務處、競選總部要寫出是誰的（看貼文署名或內文的名字）；店家發的寫店名（貼文或【帳號簡介】的名稱，沒有就用帳號），口號（例如「定慧贏」「凍蒜」）不是地點。看不出要做什麼則 null
+- start_at: 開始時間，ISO 8601 含時區，例如 2026-10-17T15:00:00+08:00。貼文要寫出哪天、幾點開始；只寫日期沒寫幾點（例如「10/27 市集」）、沒寫幾點開始（例如只寫「14:45 前我都在」）則 null，不要填 00:00，也不要自己猜
 - end_at: 結束時間，同格式。貼文要寫出幾點結束（例如「14:00–17:00」「到下午 5 點」「17:00 結束」）；只寫開始時間、「發完為止」「數量有限」、沒寫結束則 null，不要自己推算或補上
 - place_text: 貼文原文中的地點描述。內文沒寫地點、但最後有「📍 貼文的地點標記：XX」時，用標記的地點，place_query 填「XX」。hashtag、活動名稱不是地點。「本店」「店裡」「門市」「現場」這種沒寫店名、也沒寫地址的不算地點，place_text、place_query 都給 null（不要只填縣市）
 - place_query: 給地圖搜尋用的地址或地名。有門牌地址就用地址；要補上縣市，例如「宜蘭縣羅東鎮光榮路218號」「台北市 大龍峒保安宮」。鄉鎮區只有貼文寫了才加，不要自己猜。店家寫「近XX站」時，用「縣市 + 捷運XX站」。沒有能查的地名則 null
@@ -227,7 +229,7 @@ events 每筆的欄位：
 - 車掃、掃街、車隊列出的每一個應援點、停靠點都要各一筆，第一站也要，一個都不能少（最多 ${MAX_ACTIVITY_EVENTS} 筆），照貼文的順序；start_at 是預計到那一點的時間，end_at 為 null。每一站的 place_text、place_query 要用那一站自己寫的名稱（例如「② 14:20｜蘇巧慧鶯歌服務處」的 place_query 是「新北市鶯歌區 蘇巧慧服務處」），不要套用前後站的地名。
 - 連續好幾天、每天同樣時段的（「10/17~10/19 每日 11:00~18:00」、店家「即日起 每天 12:00–21:00 發放」），每天各一筆，最多 ${MAX_EVENTS_PER_POST} 天；沒寫到哪天為止的，只輸出第一天（「即日起」是發文當天）。
 - 新聞報導、心得與活動回顧（只講已經發生的事）、徵求、詢問、線上抽獎、直播、線上活動、販售（有標價、「私訊下單」「面交」），is_event 為 false，events 為空陣列。
-- 除了上面這些，寫了今天或之後的時間和地點、民眾可以到場的活動（晚會、講座、發放…）都算：沒寫「歡迎參加」、要報名、卡司和內容還沒公布的也算；叫大家追蹤社群帳號留意消息，不代表是線上活動；「現在到 19:00」「只限今日」也是。
+- 除了上面這些，寫了今天或之後的時間和地點、民眾可以到場的活動（晚會、講座、市集、遊行、發放…）都算，跟政治、競選無關的也算：沒寫「歡迎參加」、要報名、卡司和內容還沒公布的也算；叫大家追蹤社群帳號留意消息，不代表是線上活動；「現在到 19:00」「只限今日」也是。
 - 不要編造貼文裡沒有的內容、時間或地點，可以依上下文補上縣市。
 - 貼文最後如果有「【回報的人補充】」，那是看到貼文的人補上的活動內容、地點或時間，貼文沒寫的一定要用它補上；跟貼文衝突時以貼文為準。補充寫了店名、或是誰的服務處，title 要用補充寫的名稱。
 - 貼文最後如果有「【帳號簡介】」，那是發文帳號或貼文標記的店家帳號的名稱、簡介。貼文沒寫地點時，用它找出店名或地址填 place_text、place_query；簡介沒有店名也沒有地址就不要用。貼文自己寫了地點時以貼文為準。
@@ -294,6 +296,16 @@ function placeFromBio(placeText: string | null, query: string | null): string | 
   return placeText && /簡介「|^@[A-Za-z0-9_.]+(?:[：:]|\s*$)/.test(placeText) ? (query ?? placeText) : placeText;
 }
 
+/** 每一場的主題（「遊行」「講座」）：拿掉符號、emoji、後面的「活動」，太長（不是一個主題）或只寫「活動」的當成沒寫 */
+export function cleanTopic(v: unknown): string | null {
+  const t = (str(v) ?? '').replace(/[\s\p{P}\p{S}\p{Extended_Pictographic}\uFE0F]/gu, '');
+  const topic = t.length > 2 ? t.replace(/活動$/, '') : t;
+  return topic && topic !== '活動' && [...topic].length <= 6 ? topic : null;
+}
+
+/** 洋流的活動的主題，存在 events.extra（{ topic }） */
+export const topicExtra = (topic: string | null | undefined): Record<string, unknown> | null => (topic ? { topic } : null);
+
 export function normalizeActivities(raw: unknown): Extraction | null {
   const obj = parseLoose(raw);
   if (!obj || typeof obj !== 'object' || Array.isArray(obj)) return null;
@@ -315,6 +327,7 @@ export function normalizeActivities(raw: unknown): Extraction | null {
       weekdays: null,
       country: normalizeCountry(e.country),
       timezone: validTimeZone(str(e.timezone)),
+      extra: topicExtra(cleanTopic(e.topic)),
     }),
   );
   return {

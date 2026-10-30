@@ -6,8 +6,8 @@
  */
 import type { Env } from './env';
 import { DEFAULT_MODULE, isModule, MODULE_IDS, moduleOf, type ModuleId } from './modules';
-import { ADDRESS_BUDGET_MS, atLocalTimes, commitPlan, detectEnded, getEvent, getPost, locateTypedPlace, MAX_FUTURE_SEC, planManual, planPost, processPost, storePost, type EventOut, type FailedItem, type ManualActivity, type PlanItem, type PostRow } from './events';
-import type { ActivityPart, EventKind } from './extract';
+import { ADDRESS_BUDGET_MS, atLocalTimes, commitPlan, detectEnded, getEvent, getPost, locateTypedPlace, MAX_FUTURE_SEC, planManual, planPost, processPost, storePost, topicOf, type EventOut, type FailedItem, type ManualActivity, type PlanItem, type PostRow } from './events';
+import { cleanTopic, type ActivityPart, type EventKind } from './extract';
 import { fetchThreadsPost, resolveThreadsLink, shortcodeToUnix, withLocationTag } from './sources/link';
 import { sha1Hex } from './sources/text';
 
@@ -203,6 +203,8 @@ export function routePreviews(items: PlanItem[]): RoutePreview[] {
 /** 補充資料表單的一場：時間是 unix 秒；endAt null 是沒寫結束；dateOnly 只知道哪天、不知道幾點 */
 export interface EditItem {
   title: string;
+  /** 主題（「遊行」「講座」）；判讀不出來是 null */
+  topic?: string | null;
   startAt: number | null;
   dateOnly?: boolean;
   endAt: number | null;
@@ -221,13 +223,14 @@ export function editItemsOf(items: PlanItem[]): EditItem[] {
     const p = it.plan;
     // 車掃的站：時間是預計經過的時間，沒有結束
     const r = it.route;
-    if (p) return [{ title: p.title, startAt: r?.at ?? p.start_at, endAt: r || p.end_open ? null : p.end_at, place: p.place_text, lat: p.lat, lng: p.lng, approxArea: p.approx_area, ...(p.tz ? { tz: p.tz } : {}) }];
+    if (p) return [{ title: p.title, topic: topicOf(p.extra), startAt: r?.at ?? p.start_at, endAt: r || p.end_open ? null : p.end_at, place: p.place_text, lat: p.lat, lng: p.lng, approxArea: p.approx_area, ...(p.tz ? { tz: p.tz } : {}) }];
     const f = it.fail;
     // 車隊已經經過的站
     if (!f) return r ? [{ title: r.stopTitle, startAt: r.at, endAt: null, place: r.name, lat: r.lat, lng: r.lng }] : [];
     return [
       {
         title: f.title ?? '',
+        topic: f.topic ?? null,
         startAt: r?.at ?? f.startAt ?? f.dateOnly ?? null,
         ...(f.dateOnly && f.startAt === undefined ? { dateOnly: true } : {}),
         endAt: !r && f.endOpen === false ? (f.endAt ?? null) : null,
@@ -290,7 +293,7 @@ export function notListedWhy(items: PlanItem[]): NotListedWhy | undefined {
  * 判讀規則的版本：規則改了（例如結束時間改成不用寫）就加一。
  * 還沒確認的回報再貼一次時，存的是舊版的判讀結果就重新判讀，不沿用（舊的原因可能已經不成立，畫面也講不出原因）
  */
-export const PLAN_VERSION = 7;
+export const PLAN_VERSION = 8;
 
 /** 判讀好、還沒寫進雷達的資料，存在 posts.confirm_plan */
 interface StoredPlan {
@@ -613,7 +616,7 @@ export function parseEditItems(raw: unknown): ManualActivity[] {
     if (endAt !== null && !(endAt > startAt && endAt - startAt <= MAX_EDIT_SPAN_SEC)) throw new ReportError(400, `${at}結束時間要在開始之後的 24 小時內`);
     const lat = coord(o.lat, 90);
     const lng = coord(o.lng, 180);
-    return { title, startAt, endAt, place, lat: lat !== null && lng !== null ? lat : null, lng: lat !== null && lng !== null ? lng : null };
+    return { title, topic: cleanTopic(text(o.topic, 12)), startAt, endAt, place, lat: lat !== null && lng !== null ? lat : null, lng: lat !== null && lng !== null ? lng : null };
   });
 }
 
@@ -636,6 +639,7 @@ export function editSummary(before: EditItem[], after: ManualActivity[], listed:
     no++;
     const b = before[i];
     const changes: string[] = [];
+    if (b && (b.topic ?? null) !== (a.topic ?? null) && a.topic) changes.push(`主題「${a.topic}」`);
     if (!b || b.title !== a.title) changes.push(`內容「${a.title}」`);
     if (!b || b.dateOnly || b.startAt !== a.startAt || b.endAt !== a.endAt) {
       const tz = tzs[i] ?? null;

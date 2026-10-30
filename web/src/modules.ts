@@ -30,14 +30,14 @@ export interface ModuleDef {
 }
 
 /** 洋流的回報說明（改版後只判斷活動）；index.html 的 #report-intro 也是這段 */
-const REPORT_INTRO = '看到洋流活動的 Threads 貼文？貼上連結，雷達會判讀活動內容、地點、開始時間，三個都讀到才會標到地圖上給大家看；結束時間可以不寫。';
+const REPORT_INTRO = '看到活動的 Threads 貼文？貼上連結，雷達會照貼文內容判斷是什麼活動（遊行、講座、市集、表演…），讀出活動內容、地點、開始時間，三個都讀到才會標到地圖上給大家看；結束時間可以不寫。';
 
 export const MODULES: ModuleDef[] = [
   {
     id: 'current',
     name: '洋流雷達',
     short: '洋流',
-    tagline: '附近的洋流活動',
+    tagline: '附近可以參加的活動',
     emoji: '🌊',
     current: true,
     unit: '個',

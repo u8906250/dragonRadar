@@ -81,4 +81,9 @@ describe('planPushes', () => {
     expect(plans[0].msg.title).toBe('活動開始');
     expect(plans[0].msg.tag).toBe('ev-5');
   });
+  it('says the topic the post was judged to be about', () => {
+    const parade = { ...ev(6, 25.05, 121.517, 'activity'), extra: JSON.stringify({ topic: '遊行' }) };
+    expect(planPushes([sub(25.0478, 121.517)], [parade])[0].msg.title).toBe('遊行開始');
+    expect(planPushes([sub(25.0478, 121.517)], [{ ...parade, extra: '{' }])[0].msg.title).toBe('活動開始');
+  });
 });

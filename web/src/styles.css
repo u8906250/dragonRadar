@@ -672,6 +672,8 @@ a.chip { display: inline-flex; align-items: center; text-decoration: none; }
 .edit-item input { font: inherit; font-size: 16px; color: var(--text); background: var(--panel); border: var(--border-w) solid var(--line); border-radius: var(--card-radius); padding: 8px 10px; min-width: 0; width: 100%; box-sizing: border-box; }
 .edit-item input:focus { outline: 2px solid var(--highlight); outline-offset: 1px; }
 .edit-row { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 6px; }
+/* 主題窄窄的（2～4 字），活動內容寬 */
+.edit-what { display: grid; grid-template-columns: minmax(0, 6.5em) minmax(0, 1fr); gap: 6px; }
 .edit-row label:first-child { grid-column: 1 / -1; }
 .edit-item > small { color: var(--muted); font-size: 12px; margin-top: -4px; }
 .edit-pin { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }

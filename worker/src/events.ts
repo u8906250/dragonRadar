@@ -1,6 +1,6 @@
 import type { Env } from './env';
 import { fetchThreadsProfile, profileCandidates, profileHintText, type ThreadsProfile } from './sources/profile';
-import { ACTIVITY_SPEC, applySupplementDate, reconcileRouteStops, closedWeekdays, slotWeekdays, dropBroughtItem, dropSelfPlace, extractFromPost, localizeTimes, missingActivityParts, openWeekdaysFromText, splitDropTimes, splitMultiDay, splitWeekdayWeekend, spotHoursFromText, startNowForDeadline, guessedMidnight, localToUnix, regionTimeZone, timeZoneOf, untilInText, weekdaysInText, type ActivityPart, type EventKind, type ExtractedEvent } from './extract';
+import { ACTIVITY_SPEC, applySupplementDate, reconcileRouteStops, closedWeekdays, slotWeekdays, dropBroughtItem, dropSelfPlace, extractFromPost, localizeTimes, missingActivityParts, openWeekdaysFromText, splitDropTimes, splitMultiDay, splitWeekdayWeekend, spotHoursFromText, startNowForDeadline, guessedMidnight, localToUnix, regionTimeZone, timeZoneOf, topicExtra, untilInText, weekdaysInText, type ActivityPart, type EventKind, type ExtractedEvent } from './extract';
 import { cityOfHouse, geocodeAddress, parseTwAddress, type TwAddress } from './address';
 import { SESSION_SPEC } from './badminton';
 import { FOOD_SPEC } from './food';
@@ -486,6 +486,8 @@ export interface SpotMerge {
 export interface FailedItem {
   title: string | null;
   place: string | null;
+  /** 判讀出來的主題（「遊行」「講座」），修改資料時帶回表單 */
+  topic?: string | null;
   reason: 'incomplete' | 'unlocated' | 'approximate' | 'already_over' | 'too_far_in_future' | 'low_confidence';
   missing?: ActivityPart[];
   /** reason = 'approximate'（車掃的站只定位到鄉鎮區、路）：定位到哪裡 */
@@ -650,6 +652,11 @@ export async function insertPlanned(env: Env, postId: string, p: PlannedEvent, n
         null)
       : await findDuplicate(env, p.kind, p.start_at, p.lat, p.lng);
     if (dup !== null) return { event: null, reason: `duplicate_of_${dup}` };
+  }
+  // 車掃後來才放上去的站（重查到位置、改了時間）：主題跟同一則已經放上去的站一樣
+  if (routeStop && !p.extra) {
+    const sib = await env.DB.prepare('SELECT extra FROM events WHERE post_id = ? AND extra IS NOT NULL LIMIT 1').bind(postId).first<{ extra: string }>();
+    if (sib) p = { ...p, extra: sib.extra };
   }
   const status: EventStatus = p.lat === null ? 'unlocated' : p.start_at <= now ? 'active' : 'upcoming';
   const event = await env.DB.prepare(
@@ -849,7 +856,7 @@ async function planActivities(env: Env, post: PostRow, extracted: ExtractedEvent
     if (dateOnly) missing.push('start');
     // 跨過午夜、模型把結束寫成同一天（22:00–02:00）：結束是隔天；差更多的是讀錯，當成沒寫結束
     if (start !== null && end !== null && end <= start) ex.end_at = end + DAY_SEC > start ? new Date((end + DAY_SEC) * 1000).toISOString() : null;
-    const which = { title: ex.title.trim() || null, place: ex.place_text ?? ex.place_query ?? selfPlace ?? null };
+    const which = { title: ex.title.trim() || null, place: ex.place_text ?? ex.place_query ?? selfPlace ?? null, topic: topicOf(ex.extra) };
     if (missing.length > 0) {
       // 讀得到的時間也帶著，回報的人修改資料時不用重填
       const fixedEnd = parseIsoToUnix(ex.end_at);
@@ -875,6 +882,8 @@ const planWhen = (p: PlannedEvent): Pick<FailedItem, 'startAt' | 'endAt' | 'endO
 /** 回報的人自己填的一場（洋流的活動）：時間是 unix 秒，結束 null 是沒寫結束；lat、lng 是在地圖上標的位置，沒標就照地點查 */
 export interface ManualActivity {
   title: string;
+  /** 主題（「遊行」「講座」）；沒填是 null */
+  topic?: string | null;
   startAt: number;
   endAt: number | null;
   place: string;
@@ -948,10 +957,11 @@ export async function planManual(env: Env, acts: ManualActivity[], now: number, 
       // 時間是表單送來的時間點，不用換算，時區只用來顯示當地時間
       country: found.country,
       timezone: found.tz,
+      extra: topicExtra(a.topic),
     };
     const located = { point: found.point, approxArea: found.approxArea };
     const r = await planEvent(env, ex, now, deadline, undefined, located, undefined, OPEN_END_SEC);
-    const which = { title: a.title, place: a.place };
+    const which = { title: a.title, place: a.place, topic: a.topic ?? null };
     if (r.plan && r.plan.lat === null) {
       items.push({ group, plan: null, reason: 'unlocated', fail: { ...which, reason: 'unlocated', ...planWhen(r.plan) } });
       continue;
@@ -1015,7 +1025,7 @@ export function markRoutes(items: PlanItem[], text: string, routeTitle: string |
         const title = bad === a ? pa.title : pb.title;
         bad.it.plan = null;
         bad.it.reason = 'unlocated';
-        bad.it.fail = { title, place: bad.name, reason: 'unlocated', sameAs: good.name, startAt: bad.at, endOpen: true };
+        bad.it.fail = { title, place: bad.name, topic: topicOf(bad === a ? pa.extra : pb.extra), reason: 'unlocated', sameAs: good.name, startAt: bad.at, endOpen: true };
       }
     }
     // 至少一站放得上雷達（有確切位置、還沒經過）
@@ -1046,7 +1056,7 @@ export function markRoutes(items: PlanItem[], text: string, routeTitle: string |
         // 只定位到鄉鎮區、路：不放上雷達，請回報的人標位置（帶著約略位置，地圖從那裡開始）
         it.plan = null;
         it.reason = 'approximate';
-        it.fail = { title: stopTitle, place, reason: 'approximate', area: p.approx_area, startAt: at, endOpen: true, ...(p.lat !== null && p.lng !== null ? { lat: p.lat, lng: p.lng } : {}) };
+        it.fail = { title: stopTitle, place, topic: topicOf(p.extra), reason: 'approximate', area: p.approx_area, startAt: at, endOpen: true, ...(p.lat !== null && p.lng !== null ? { lat: p.lat, lng: p.lng } : {}) };
         return;
       }
       if (p && p.lat !== null && p.lng !== null) {
@@ -1515,7 +1525,7 @@ async function saveRoutes(env: Env, postId: string, items: PlanItem[], now: numb
 }
 
 /** planEvent 沒排上去的原因換成回報結果用的說明；重複的不算（回報結果會列出雷達上的那一場） */
-function failOf(r: { reason: string; start?: number; end?: number; tz?: string | null }, which: Pick<FailedItem, 'title' | 'place'>, endOpen: boolean): FailedItem | undefined {
+function failOf(r: { reason: string; start?: number; end?: number; tz?: string | null }, which: Pick<FailedItem, 'title' | 'place' | 'topic'>, endOpen: boolean): FailedItem | undefined {
   if (r.reason === 'low_confidence') return { ...which, reason: 'low_confidence' };
   if (r.reason !== 'already_over' && r.reason !== 'too_far_in_future') return undefined;
   return {
@@ -1745,6 +1755,12 @@ async function planPostings(env: Env, post: PostRow, list: ExtractedEvent[], now
 }
 
 /** extra 欄位（JSON）讀出來；壞掉的當沒有 */
+/** 洋流的活動的主題（events.extra 的 topic）；沒有是 null */
+export function topicOf(extra: Record<string, unknown> | string | null | undefined): string | null {
+  const o = typeof extra === 'string' ? parseExtra(extra) : extra;
+  return typeof o?.topic === 'string' && o.topic ? o.topic : null;
+}
+
 function parseExtra(v: string | null | undefined): Record<string, unknown> | null {
   if (!v) return null;
   try {

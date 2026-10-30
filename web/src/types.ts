@@ -303,6 +303,8 @@ export interface RoutePreview {
 /** 補充資料表單的一場：時間是 unix 秒；endAt null 是沒寫結束；dateOnly 只知道哪天、不知道幾點 */
 export interface EditItem {
   title: string;
+  /** 主題（「遊行」「講座」）；判讀不出來是 null */
+  topic?: string | null;
   startAt: number | null;
   dateOnly?: boolean;
   endAt: number | null;
@@ -318,6 +320,8 @@ export interface EditItem {
 /** 修改資料送出的一場：lat、lng 是在地圖上標的位置，沒標是 null（照地點查） */
 export interface EditInput {
   title: string;
+  /** 主題；沒填是 null */
+  topic: string | null;
   startAt: number;
   endAt: number | null;
   place: string;

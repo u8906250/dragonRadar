@@ -1484,7 +1484,7 @@ function render(): void {
           : reportedStop(it.ev)
             ? '車隊快到了'
             : it.ev.kind === 'activity'
-              ? '活動開始'
+              ? `${topicOf(it.ev) ?? '活動'}開始`
               : '開始發放';
     showBanner(bannerEl, `${head}：${msg}`, 10_000);
     systemNotify(head, msg, `ev-${it.ev.id}`);
@@ -3570,7 +3570,16 @@ function placeLine(ev: EventOut): string {
 function kindLabel(ev: EventOut): string {
   if (ev.kind === 'session') return isSeek(ev) ? '找臨打' : '招臨打';
   if (ev.kind === 'food') return { vendor: '出攤', recommend: '推薦', meetup: '揪團' }[foodRole(ev) ?? 'recommend'] ?? '推薦';
-  return ev.kind === 'job' ? (isOffer(ev) ? '可照顧' : '徵人') : ev.kind === 'activity' ? '活動' : '發放';
+  return ev.kind === 'job' ? (isOffer(ev) ? '可照顧' : '徵人') : ev.kind === 'activity' ? (topicOf(ev) ?? '活動') : '發放';
+}
+
+/**
+ * 活動的主題（AI 照貼文內容判斷的「遊行」「講座」「市集」，存在 extra.topic）；舊資料、判讀不出來的是 null。
+ * 只收文字、數字（伺服器已經拿掉符號），標籤有些地方直接放進 HTML
+ */
+function topicOf(ev: { extra?: Record<string, unknown> | null }): string | null {
+  const t = ev.extra?.topic;
+  return typeof t === 'string' && /^[\p{L}\p{N}]{1,8}$/u.test(t) ? t : null;
 }
 
 /** 服務處、競選總部（候選人、議員、政黨的）：固定據點用房子圖示、標「服務處」，跟店家、餐廳分開 */
@@ -3865,7 +3874,10 @@ function editCardHtml(it: EditItem | null): string {
   const end = it?.endAt ? wallInput(it.endAt, tz).time : '';
   return `<fieldset class="edit-item">
       <legend><span class="edit-no"></span><button type="button" class="chip" data-act="drop">不要這場</button></legend>
-      <label>活動內容<input name="title" maxlength="60" value="${esc(it?.title ?? '')}" placeholder="例如：發飄帶、景華公園表演同樂會"></label>
+      <div class="edit-what">
+        <label>主題<input name="topic" maxlength="6" value="${esc(it?.topic ?? '')}" placeholder="例如：遊行"></label>
+        <label>活動內容<input name="title" maxlength="60" value="${esc(it?.title ?? '')}" placeholder="例如：景華公園表演同樂會"></label>
+      </div>
       <div class="edit-row">
         <label>日期<input type="date" name="date" value="${start?.date ?? ''}"></label>
         <label>開始<input type="time" name="start" value="${it?.dateOnly ? '' : (start?.time ?? '')}"></label>
@@ -3881,7 +3893,7 @@ function editCardHtml(it: EditItem | null): string {
 function editFormHtml(items: EditItem[], hidden: boolean): string {
   const list = items.length > 0 ? items.slice(0, MAX_EDIT_ITEMS) : [null];
   return `<form class="preview-more edit-form"${hidden ? ' hidden' : ''} novalidate>
-      <p class="muted sheet-note">直接改每一場的活動內容、時間、地點；位置不對可以按「在地圖上標位置」，點地圖或拖標記。</p>
+      <p class="muted sheet-note">直接改每一場的主題、活動內容、時間、地點；位置不對可以按「在地圖上標位置」，點地圖或拖標記。</p>
       <div class="edit-items">${list.map(editCardHtml).join('')}</div>
       <button type="button" class="btn" data-act="add">再加一場</button>
       <div class="sheet-actions"><button type="submit" class="btn primary">用這些資料預覽</button>${hidden ? '<button type="button" class="btn" data-act="less">回上一步</button>' : ''}</div>
@@ -4016,6 +4028,7 @@ function readEditForm(form: HTMLFormElement): EditInput[] | string {
     const at = cards.length > 1 ? `第 ${i + 1} 場：` : '';
     const val = (name: string): string => card.querySelector<HTMLInputElement>(`[name="${name}"]`)?.value.trim() ?? '';
     const title = val('title');
+    const topic = val('topic') || null;
     const place = val('place');
     if (!title) return `${at}請填活動內容`;
     if (!val('date') || !val('start')) return `${at}請填哪天幾點開始`;
@@ -4026,7 +4039,7 @@ function readEditForm(form: HTMLFormElement): EditInput[] | string {
     // 結束比開始早：跨過午夜，是隔天
     if (endAt !== null && endAt <= startAt) endAt += 86400;
     const pinned = editPins.get(card)?.pinned ?? null;
-    out.push({ title, startAt, endAt, place, lat: pinned?.lat ?? null, lng: pinned?.lng ?? null });
+    out.push({ title, topic, startAt, endAt, place, lat: pinned?.lat ?? null, lng: pinned?.lng ?? null });
   }
   return out.length > 0 ? out : '至少要填一場活動';
 }
@@ -4165,7 +4178,7 @@ function renderPreview(r: SubmitResult): void {
     <ul class="report-preview">${(r.routes ?? []).map(routePreviewHtml).join('')}${items
       .map(
         (p) => `<li>
-          <b>${p.kind === 'food' ? ({ vendor: '出攤', recommend: '推薦', meetup: '揪團' }[foodRole(p) ?? 'recommend'] ?? '推薦') : p.kind === 'session' ? (isSeek(p) ? '找臨打' : '招臨打') : p.kind === 'job' ? (isOffer(p) ? '可照顧' : '徵人') : p.kind === 'activity' ? '活動' : '發放'}${p.spot ? (p.kind === 'session' ? '・每週固定場' : p.kind === 'food' ? '・每週固定擺攤' : '・固定據點') : ''}｜${esc(p.title)}</b>
+          <b>${p.kind === 'food' ? ({ vendor: '出攤', recommend: '推薦', meetup: '揪團' }[foodRole(p) ?? 'recommend'] ?? '推薦') : p.kind === 'session' ? (isSeek(p) ? '找臨打' : '招臨打') : p.kind === 'job' ? (isOffer(p) ? '可照顧' : '徵人') : p.kind === 'activity' ? esc(topicOf(p) ?? '活動') : '發放'}${p.spot ? (p.kind === 'session' ? '・每週固定場' : p.kind === 'food' ? '・每週固定擺攤' : '・固定據點') : ''}｜${esc(p.title)}</b>
           ${p.kind === 'job' && (jobOf(p).risks ?? []).some((r) => r !== 'no_employer') ? `<small class="preview-warn">⚠️ ${esc((jobOf(p).risks ?? []).map((r) => JOB_RISK_TEXT[r]).filter(Boolean).join('；'))}</small>` : ''}
           ${p.item ? `<small>${esc(p.item)}</small>` : ''}
           <small>時間：${esc(previewWhen(p))}</small>
