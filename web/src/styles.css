@@ -244,9 +244,20 @@ a.chip { display: inline-flex; align-items: center; text-decoration: none; }
 .radar-stack.fill .radar .bezel, .radar-stack.fill .radar .face { display: none; }
 .radar-stack.fill .radar-sweep { overflow: visible; }
 .radar-stack.fill > .radar-relief { clip-path: none; }
-/* 鋪滿時只留地圖和光點：距離圈、刻度、掃描線不畫（看右下角的比例尺）；方位字只在指北針轉的時候留著，看得出北在哪 */
-.radar-stack.fill .radar .grid, .radar-stack.fill .radar .scale-labels, .radar-stack.fill .radar-sweep-box { display: none; }
-.radar-stack.fill .radar:not(.heading-live) .rose { display: none; }
+/* 鋪滿時只留地圖和光點：距離圈、刻度、掃描線、方位字、中間的點不畫（看比例尺；指北針轉的時候北在哪看右上角的小指北針） */
+.radar-stack.fill .radar .grid, .radar-stack.fill .radar .scale-labels, .radar-stack.fill .radar .rose, .radar-stack.fill .radar-sweep-box { display: none; }
+/* 中間代表你的那個點也不畫 */
+.radar-stack.fill .radar .me { display: none; }
+/* 小指北針：右上角按鈕下面，圓圓的、跟按鈕一樣的底，紅色那頭指北 */
+.mini-compass {
+  position: absolute; z-index: 20; right: 10px; top: calc(104px + env(safe-area-inset-top)); width: 40px; height: 40px; border-radius: 50%; pointer-events: none;
+  background: var(--chip-bg); border: var(--border-w) solid var(--chip-border); box-shadow: var(--chip-shadow); box-sizing: border-box;
+}
+.mini-compass svg { display: block; width: 100%; height: 100%; }
+.mini-compass .needle-n { fill: var(--highlight); }
+.mini-compass .needle-s { fill: var(--chip-text); opacity: 0.35; }
+.mini-compass .needle-letter { fill: var(--chip-text); font-size: 7px; font-weight: 800; }
+.mini-compass[hidden], #stage[data-view="map"] .mini-compass { display: none; }
 /* 比例尺：左下按鈕的上面，一條兩端翹起來的線，距離寫在上面（radar.ts 的 drawScaleBar 決定多長） */
 .scale-bar { position: relative; height: 6px; margin: 16px 0 2px 4px; color: var(--radar-text); border: 2px solid currentColor; border-top: 0; box-sizing: border-box; pointer-events: none; }
 .scale-bar span { position: absolute; bottom: 7px; left: 50%; transform: translateX(-50%); font-size: 12px; font-weight: 700; white-space: nowrap; }
@@ -708,6 +719,7 @@ a.chip { display: inline-flex; align-items: center; text-decoration: none; }
   #app.full #list-btn { display: inline-flex; align-items: center; }
   #app.full .panel { grid-row: 1; }
   #app.full .overlay-tr { top: calc(8px + env(safe-area-inset-top)); right: 196px; }
+  .mini-compass { top: calc(58px + env(safe-area-inset-top)); }
   #app.full.list-off { grid-template-columns: minmax(0, 1fr); }
   #app.full.list-off .panel { display: none; }
   #app.full.list-off .topbar { right: 0; }

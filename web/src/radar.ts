@@ -287,6 +287,8 @@ export class Radar {
   private readonly scaleLabels: SVGGElement;
   /** 全螢幕鋪滿時的比例尺（main.ts 給的，放在左下的按鈕上面）；沒有是 null */
   private scaleBarEl: HTMLElement | null = null;
+  /** 全螢幕鋪滿、指北針轉的時候右上角的小指北針（main.ts 給的）；沒有是 null */
+  private compassEl: HTMLElement | null = null;
   private readonly rings: SVGGElement;
   private readonly roseLayer: SVGGElement;
   private readonly routeLayer: SVGGElement;
@@ -546,6 +548,7 @@ export class Radar {
     this.fill = on;
     RADAR_VIEW.fill = on;
     this.stack.classList.toggle('fill', on);
+    this.placeCompass();
     this.measureView();
     this.placeRelief();
     this.reliefKey = '';
@@ -595,6 +598,20 @@ export class Radar {
     const [sx, sy] = [Math.abs(Math.sin(a)), Math.abs(Math.cos(a))];
     const [hx, hy] = [RADAR_VIEW.hx - inset, RADAR_VIEW.hy - inset];
     return Math.min(sx > 1e-9 ? hx / sx : Infinity, sy > 1e-9 ? hy / sy : Infinity);
+  }
+
+  /** 右上角的小指北針（main.ts 的 #mini-compass，裡面的 .mini-needle 跟著轉） */
+  setCompass(el: HTMLElement): void {
+    this.compassEl = el;
+    this.placeCompass();
+  }
+
+  /** 小指北針：全螢幕鋪滿、指北針轉的時候才出現，針轉到北邊（手機朝東時北在左邊） */
+  private placeCompass(): void {
+    const el = this.compassEl;
+    if (!el) return;
+    el.hidden = !this.fill || !this.svg.classList.contains('heading-live');
+    if (!el.hidden) el.querySelector<SVGGElement>('.mini-needle')?.setAttribute('transform', `rotate(${(-this.heading).toFixed(1)})`);
   }
 
   /** 全螢幕鋪滿時的比例尺放在哪（main.ts 的 #scale-bar，裡面的 span 寫距離） */
@@ -1447,6 +1464,7 @@ export class Radar {
   }
 
   private placeRose(): void {
+    this.placeCompass();
     for (const t of Array.from(this.roseLayer.children) as SVGTextElement[]) {
       const deg = Number(t.dataset.deg ?? 0);
       const p = polar(deg - this.heading, R + 4);

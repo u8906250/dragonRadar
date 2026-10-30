@@ -67,6 +67,10 @@
             <button type="button" class="chip" data-scale="world" role="radio" aria-checked="false" title="涵蓋全世界，國外的活動也看得到">全球</button>
           </div>
         </div>
+        <!-- 全螢幕、指北針轉的時候：右上角小小的指北針（北在哪），雷達中間不畫方位字 -->
+        <div id="mini-compass" class="mini-compass" hidden aria-hidden="true">
+          <svg viewBox="-20 -20 40 40"><g class="mini-needle"><path class="needle-n" d="M0 -13 L5 0 L-5 0 Z" /><path class="needle-s" d="M0 13 L5 0 L-5 0 Z" /><text class="needle-letter" y="-14.5" text-anchor="middle">N</text></g></svg>
+        </div>
         <div class="overlay overlay-tl">
           <button type="button" id="home-btn" class="chip" hidden title="回到 GPS 定位的位置">回到我的位置</button>
           <button type="button" id="dog-lock-btn" class="chip" hidden aria-pressed="false" title="雷達正中間跟著這隻狗">鎖定</button>
