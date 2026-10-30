@@ -88,6 +88,19 @@ const C = SIZE / 2;
 const R = 172;
 /** 雷達的大小（space.ts 畫太空用）：inner 是光點最遠擺到哪 */
 export const RADAR_GEOM = { size: SIZE, c: C, r: R, inner: R - 8 };
+/**
+ * 雷達看得到的範圍（SVG 單位，以圓心為中心的半寬 hx、半高 hy）：平常只看圓裡面（fill = false）；
+ * 全螢幕時雷達的地圖鋪滿整個長方形（fill = true，短邊的一半是 C，比例跟平常一樣），
+ * space.ts、park.ts 照這個決定畫到多遠（viewReach、viewRect）
+ */
+export const RADAR_VIEW = { fill: false, hx: C, hy: C };
+/** 看得到的最遠（離圓心，SVG 單位）：平常是光點範圍（inner），鋪滿時是長方形的角 */
+export const viewReach = (): number => (RADAR_VIEW.fill ? Math.hypot(RADAR_VIEW.hx, RADAR_VIEW.hy) : R - 8);
+/** 看得到的方框（SVG 座標 [左, 上, 右, 下]，四周多留 m）：平常是整個正方形 */
+export const viewRect = (m = 0): [number, number, number, number] =>
+  RADAR_VIEW.fill ? [C - RADAR_VIEW.hx - m, C - RADAR_VIEW.hy - m, C + RADAR_VIEW.hx + m, C + RADAR_VIEW.hy + m] : [-m, -m, SIZE + m, SIZE + m];
+/** 鋪滿時光點、地標離畫面邊緣至少多遠（SVG 單位），超出的貼在邊上 */
+const FILL_INSET = 12;
 /** 「全球」的範圍（半個地球）：再拉遠就是太空 */
 export const SPACE_FROM_KM = 20040;
 export const EARTH_KM = 6371;
@@ -250,7 +263,13 @@ export class Radar {
   /** 汪星的地形圖（雷達底色上面、掃描下面的 canvas，正方形對齊 SVG）、雷達的正方形幾像素、畫地形圖的（main.ts 給） */
   private readonly reliefCanvas: HTMLCanvasElement;
   private squarePx = 0;
-  private reliefPaint: ((out: Uint8ClampedArray, n: number, view: SpaceView, scaleKm: number, heading: number, j0?: number, j1?: number) => number) | null = null;
+  /** 雷達這一塊的大小（像素）：鋪滿時換算長方形 */
+  private boxPx = { w: 0, h: 0 };
+  /** 全螢幕：地圖鋪滿整個長方形（不裁成圓、沒有外框） */
+  private fill = false;
+  /** 鋪滿時看得到的範圍變了（換方向、改視窗大小）：main.ts 重抓道路 */
+  onView?: () => void;
+  private reliefPaint: ((out: Uint8ClampedArray, n: number, view: SpaceView, scaleKm: number, heading: number, j0?: number, j1?: number, span?: number) => number) | null = null;
   private reliefImage: ImageData | null = null;
   private flashOf = new WeakMap<SVGGElement, HTMLDivElement>();
   /** 主圖層的瓶子 → 特效層裡同位置、同 class（顏色照舊）的那一組 */
@@ -351,7 +370,12 @@ export class Radar {
           <stop offset="0" class="face-stop-1" />
           <stop offset="1" class="face-stop-2" />
         </radialGradient>
+        <radialGradient id="rg-face-fill" gradientUnits="userSpaceOnUse" cx="${C}" cy="${C}" r="${R}">
+          <stop offset="0" class="face-stop-1" />
+          <stop offset="1" class="face-stop-2" />
+        </radialGradient>
       </defs>
+      <rect class="face-fill" fill="url(#rg-face-fill)" />
       <circle class="bezel" cx="${C}" cy="${C}" r="${R + 16}" />
       <circle class="face" cx="${C}" cy="${C}" r="${R}" fill="url(#rg-face)" />`;
     this.reliefCanvas = document.createElement('canvas');
@@ -463,18 +487,28 @@ export class Radar {
     new ResizeObserver(([e]) => {
       const { width: w, height: h } = e.contentRect;
       this.shown = w > 0;
-      // SVG 照比例縮放、置中（viewBox 是正方形）：閃光層的正方形跟著對齊
+      // SVG 照比例縮放、置中（viewBox 是正方形；鋪滿時 viewBox 往長邊延伸，中間的正方形還是在一樣的地方）：閃光層的正方形跟著對齊
       const size = Math.min(w, h);
-      for (const sq of [this.flashSquare, this.glintSquare, this.sweepSquare, this.reliefCanvas]) {
+      for (const sq of [this.flashSquare, this.glintSquare, this.sweepSquare]) {
         Object.assign(sq.style, { width: `${size}px`, height: `${size}px`, left: `${(w - size) / 2}px`, top: `${(h - size) / 2}px` });
         sq.style.setProperty('--u', `${size / SIZE}px`);
       }
+      this.boxPx = { w, h };
       // 地形圖照新的大小重畫
       const was = this.squarePx;
       this.squarePx = size;
-      if (Math.abs(was - size) > 1) {
+      const [hx, hy] = [RADAR_VIEW.hx, RADAR_VIEW.hy];
+      this.measureView();
+      const moved = Math.abs(hx - RADAR_VIEW.hx) > 1 || Math.abs(hy - RADAR_VIEW.hy) > 1;
+      this.placeRelief();
+      if (Math.abs(was - size) > 1 || (this.fill && moved)) {
         this.reliefKey = '';
         this.paintRelief();
+      }
+      // 鋪滿時長方形變了：viewBox、掃描、光點擺到哪都要重算
+      if (this.fill && moved) {
+        this.applyView();
+        this.onView?.();
       }
     }).observe(stack);
     this.setStyle(this.style);
@@ -502,6 +536,71 @@ export class Radar {
   }
 
   /**
+   * 全螢幕：雷達的地圖鋪滿整個長方形（不裁成圓、沒有外框），距離圈、掃描線照樣疊在上面；
+   * 範圍外、還在畫面裡的光點畫在真的位置，畫面外的貼在邊上
+   */
+  setFill(on: boolean): void {
+    if (on === this.fill) return;
+    this.fill = on;
+    RADAR_VIEW.fill = on;
+    this.stack.classList.toggle('fill', on);
+    this.measureView();
+    this.placeRelief();
+    this.reliefKey = '';
+    this.applyView();
+    this.paintRelief();
+  }
+
+  /** 鋪滿了沒（main.ts：範圍外的光點照真的位置畫） */
+  get filling(): boolean {
+    return this.fill;
+  }
+
+  /** 看得到的最遠是範圍的幾倍（main.ts 抓道路用）：平常是 1 */
+  get reach(): number {
+    return viewReach() / (R - 8);
+  }
+
+  /** 照雷達這一塊的長寬比算看得到的範圍：短邊的一半是 C（跟平常的正方形一樣大） */
+  private measureView(): void {
+    const { w, h } = this.boxPx;
+    if (w <= 0 || h <= 0) return;
+    [RADAR_VIEW.hx, RADAR_VIEW.hy] = w >= h ? [(C * w) / h, C] : [C, (C * h) / w];
+  }
+
+  /** 換 viewBox（每一層一樣）、圓形裁切、底色、掃描，重畫 */
+  private applyView(): void {
+    const [x0, y0, x1, y1] = viewRect();
+    const vb = `${x0.toFixed(1)} ${y0.toFixed(1)} ${(x1 - x0).toFixed(1)} ${(y1 - y0).toFixed(1)}`;
+    for (const s of [this.base, this.sweepSvg, this.fx, this.svg]) s.setAttribute('viewBox', vb);
+    this.svg.querySelector('#rg-clip circle')?.setAttribute('r', String(this.fill ? 100000 : R));
+    const face = this.base.querySelector('.face-fill');
+    if (face) for (const [k, v] of Object.entries({ x: x0, y: y0, width: x1 - x0, height: y1 - y0 })) face.setAttribute(k, v.toFixed(1));
+    this.base.querySelector('#rg-face-fill')?.setAttribute('r', viewReach().toFixed(1));
+    this.buildSweep();
+    this.lastSweepMs = -1;
+    this.draw();
+  }
+
+  /**
+   * 這個方向的光點最遠擺到哪（SVG 單位，離圓心）：平常是光點範圍（圓），鋪滿時是長方形的邊往內 inset
+   * （inset 是負的就是畫到邊外面一點，給線條用）
+   */
+  private edgeR(angleDeg: number, inset = FILL_INSET): number {
+    // 太空裡光點都在地球上（另一面的 ratio 是 2）：照圓
+    if (!this.fill || this.inSpace) return R - 8;
+    const a = (angleDeg * Math.PI) / 180;
+    const [sx, sy] = [Math.abs(Math.sin(a)), Math.abs(Math.cos(a))];
+    const [hx, hy] = [RADAR_VIEW.hx - inset, RADAR_VIEW.hy - inset];
+    return Math.min(sx > 1e-9 ? hx / sx : Infinity, sy > 1e-9 ? hy / sy : Infinity);
+  }
+
+  /** 掃描線、波紋畫多長：平常到外圈，鋪滿時到畫面的角 */
+  private get sweepR(): number {
+    return this.fill ? viewReach() + 4 : R;
+  }
+
+  /**
    * 只建目前主題的那一種掃描。扇形、指針整層一起轉（CSS transform 交給顯示晶片，不用重畫）；
    * 波紋是兩個圈（div）放大、變淡，一個晚半圈：線跟著圈放大變粗（同時越來越淡），像水波擴散
    */
@@ -513,26 +612,28 @@ export class Radar {
     const sweep = this.style.sweep;
     const period = SWEEP_SEC[sweep] * 1000;
     this.sweepSquare.replaceChildren();
+    // 鋪滿時畫到畫面的角（比外圈長）
+    const sr = this.sweepR;
     if (sweep === 'ripple') {
       svg.replaceChildren();
       for (let i = 0; i < 2; i++) {
         const ring = document.createElement('span');
         ring.className = 'ripple';
-        Object.assign(ring.style, { left: `calc(${C - R} * var(--u))`, top: `calc(${C - R} * var(--u))`, width: `calc(${2 * R} * var(--u))`, height: `calc(${2 * R} * var(--u))` });
+        Object.assign(ring.style, { left: `calc(${C - sr} * var(--u))`, top: `calc(${C - sr} * var(--u))`, width: `calc(${2 * sr} * var(--u))`, height: `calc(${2 * sr} * var(--u))` });
         this.sweepSquare.appendChild(ring);
       }
     } else if (sweep === 'needle') {
-      svg.innerHTML = `<g class="sweep-needle"><line x1="${C}" y1="${C}" x2="${C}" y2="${C - R + 6}" /><circle cx="${C}" cy="${C - R + 14}" r="4" /></g>`;
+      svg.innerHTML = `<g class="sweep-needle"><line x1="${C}" y1="${C}" x2="${C}" y2="${(C - sr + 6).toFixed(1)}" /><circle cx="${C}" cy="${(C - R + 14).toFixed(1)}" r="4" /></g>`;
     } else {
-      const end = polar(45, R);
+      const end = polar(45, sr);
       svg.innerHTML = `
         <defs>
-          <linearGradient id="rg-sweep" gradientUnits="userSpaceOnUse" x1="${C}" y1="${C}" x2="${C + R}" y2="${C - R}">
+          <linearGradient id="rg-sweep" gradientUnits="userSpaceOnUse" x1="${C}" y1="${C}" x2="${(C + sr).toFixed(1)}" y2="${(C - sr).toFixed(1)}">
             <stop offset="0" class="sweep-stop-1" />
             <stop offset="1" class="sweep-stop-2" />
           </linearGradient>
         </defs>
-        <path class="sweep-wedge" fill="url(#rg-sweep)" d="M ${C} ${C} L ${C} ${C - R} A ${R} ${R} 0 0 1 ${end.x.toFixed(2)} ${end.y.toFixed(2)} Z" />`;
+        <path class="sweep-wedge" fill="url(#rg-sweep)" d="M ${C} ${C} L ${C} ${(C - sr).toFixed(2)} A ${sr.toFixed(2)} ${sr.toFixed(2)} 0 0 1 ${end.x.toFixed(2)} ${end.y.toFixed(2)} Z" />`;
     }
     if (typeof this.sweepBox.animate !== 'function') return;
     if (sweep === 'ripple') {
@@ -795,7 +896,7 @@ export class Radar {
   }
 
   /** 汪星的地形圖怎麼畫（main.ts：地形圖載好了、看得到汪星的地圖才畫；回傳要多不透明，0 是不畫）；null 是不畫 */
-  setRelief(paint: ((out: Uint8ClampedArray, n: number, view: SpaceView, scaleKm: number, heading: number, j0?: number, j1?: number) => number) | null): void {
+  setRelief(paint: ((out: Uint8ClampedArray, n: number, view: SpaceView, scaleKm: number, heading: number, j0?: number, j1?: number, span?: number) => number) | null): void {
     this.reliefPaint = paint;
     this.reliefKey = '';
     this.paintRelief();
@@ -813,6 +914,18 @@ export class Radar {
    * 每次先馬上畫粗的（最多 220 見方，拖曳、縮放、火箭飛行時每一格都這樣），停下來 0.2 秒再畫細的（最多 800 見方）：
    * 細的分好幾格畫（每一格最多算 10 毫秒，算好再整張換上去，慢手機也不會卡），鎖定跟著狗走時先不畫細的
    */
+  /** 地形圖畫多大一塊（SVG 單位，以圓心為中心的正方形）：平常是整個正方形，鋪滿時蓋住整個長方形 */
+  private get reliefSpan(): number {
+    return this.fill ? 2 * Math.max(RADAR_VIEW.hx, RADAR_VIEW.hy) : SIZE;
+  }
+
+  /** 地形圖那一層的位置：圓心對齊，大小是 reliefSpan */
+  private placeRelief(): void {
+    const { w, h } = this.boxPx;
+    const px = (this.reliefSpan * this.squarePx) / SIZE;
+    Object.assign(this.reliefCanvas.style, { width: `${px}px`, height: `${px}px`, left: `${(w - px) / 2}px`, top: `${(h - px) / 2}px` });
+  }
+
   private paintRelief(fine = false): void {
     const c = this.reliefCanvas;
     const hide = (): void => {
@@ -822,7 +935,8 @@ export class Radar {
     window.clearTimeout(this.reliefTimer);
     if (!this.inSpace || !this.reliefPaint || !this.squarePx) return hide();
     const v = this.spaceView;
-    const key = `${v.focus},${v.yaw},${v.pitch},${v.toward},${v.u},${this.scaleKm},${this.heading},${this.squarePx}`;
+    const span = this.reliefSpan;
+    const key = `${v.focus},${v.yaw},${v.pitch},${v.toward},${v.u},${this.scaleKm},${this.heading},${this.squarePx},${span.toFixed(0)}`;
     const job = ++this.reliefJob;
     const paint = this.reliefPaint;
     const [view, km, heading] = [{ ...v }, this.scaleKm, this.heading];
@@ -839,7 +953,7 @@ export class Radar {
     const later = (): void => {
       this.reliefTimer = window.setTimeout(() => this.paintRelief(true), Math.max(200, this.followUntil - performance.now()));
     };
-    const px = this.squarePx * (window.devicePixelRatio || 1);
+    const px = ((this.squarePx * span) / SIZE) * (window.devicePixelRatio || 1);
     if (!fine) {
       if (key === this.reliefKey && c.style.display !== 'none') {
         c.style.transform = '';
@@ -848,7 +962,7 @@ export class Radar {
       }
       const n = Math.max(64, Math.round(Math.min(px, 220)));
       if (!this.reliefImage || this.reliefImage.width !== n) this.reliefImage = new ImageData(n, n);
-      const alpha = paint(this.reliefImage.data, n, view, km, heading);
+      const alpha = paint(this.reliefImage.data, n, view, km, heading, 0, n, span);
       if (alpha <= 0) return hide();
       show(this.reliefImage, alpha);
       this.reliefKey = key;
@@ -866,7 +980,7 @@ export class Radar {
       const t0 = performance.now();
       while (j < n && performance.now() - t0 < 10) {
         const j1 = Math.min(n, j + 16);
-        alpha = paint(img.data, n, view, km, heading, j, j1);
+        alpha = paint(img.data, n, view, km, heading, j, j1, span);
         j = j1;
       }
       if (j < n) {
@@ -1030,7 +1144,7 @@ export class Radar {
     this.carLayer.replaceChildren();
     for (const c of this.cars) {
       const ratio = this.ratio(c.distanceKm);
-      if (ratio > 1 || this.earthHidden) continue;
+      if (ratio * (R - 8) > this.edgeR(c.bearing - this.heading) || this.earthHidden) continue;
       const p = polar(c.bearing - this.heading, ratio * (R - 8));
       const g = el('g', { class: 'car', transform: `translate(${p.x.toFixed(1)} ${p.y.toFixed(1)})`, tabindex: 0, role: 'button' });
       g.dataset.id = c.id;
@@ -1075,12 +1189,14 @@ export class Radar {
     this.bottleLayer.replaceChildren();
     for (const b of this.bottles) {
       const ratio = this.ratio(b.distanceKm);
-      // 範圍外的瓶子不畫，免得外圈擠滿；只有方向提示的那一個貼在外圈（太空不畫）
-      if (this.earthHidden || (ratio > 1 && (!b.hint || this.inSpace))) continue;
       const angle = b.bearing - this.heading;
-      const r = Math.min(1, ratio) * (R - 8);
+      // 範圍外（鋪滿時是畫面外）的瓶子不畫，免得外圈擠滿；只有方向提示的那一個貼在外圈（太空不畫）
+      const lim = this.edgeR(angle);
+      const beyond = ratio * (R - 8) > lim;
+      if (this.earthHidden || (beyond && (!b.hint || this.inSpace))) continue;
+      const r = Math.min(ratio * (R - 8), lim);
       const p = polar(angle, r);
-      if (ratio > 1) {
+      if (beyond) {
         this.bottleLayer.appendChild(this.bottleHint(b, p));
         continue;
       }
@@ -1143,9 +1259,11 @@ export class Radar {
     this.landmarkLayer.replaceChildren();
     for (const lm of this.landmarks) {
       const ratio = this.ratio(lm.distanceKm);
-      const out = ratio > 1;
+      const lim = this.edgeR(lm.bearing - this.heading);
+      const out = ratio * (R - 8) > lim;
       if (this.inSpace && (out || this.earthHidden)) continue;
-      const p = polar(lm.bearing - this.heading, Math.min(1, ratio) * (R - 8));
+      const lr = Math.min(ratio * (R - 8), lim);
+      const p = polar(lm.bearing - this.heading, lr);
       const g = el('g', { class: `landmark${out ? ' out' : ''}${lm.selected ? ' selected' : ''}`, transform: `translate(${p.x.toFixed(1)} ${p.y.toFixed(1)})`, tabindex: 0, role: 'button' });
       g.dataset.id = lm.id;
       // 點擊範圍比光點小一點，旁邊的光點還點得到
@@ -1153,7 +1271,7 @@ export class Radar {
       const body = el('g', { class: 'body' });
       body.appendChild(el('path', { class: 'star', d: starPath(out ? 7 : 10) }));
       g.appendChild(body);
-      this.addFlash(g, lm.bearing - this.heading, Math.min(1, ratio) * (R - 8), out ? 6 : 9);
+      this.addFlash(g, lm.bearing - this.heading, lr, out ? 6 : 9);
       // 平常不寫名稱，點了（選取中）才在星星下面顯示
       if (lm.selected) {
         const anchor = anchorAt(p.x);
@@ -1187,7 +1305,7 @@ export class Radar {
     const h = (this.heading * Math.PI) / 180;
     const cos = Math.cos(h);
     const sin = Math.sin(h);
-    const lim2 = (this.scaleKm * 1.05) ** 2;
+    const lim2 = (this.scaleKm * this.reach * 1.05) ** 2;
     for (const [cls, lines] of [
       ['street-minor', s.minor],
       ['street-major', s.major],
@@ -1266,7 +1384,8 @@ export class Radar {
     const parts: string[] = [];
     for (const pt of ring) {
       const ratio = this.ratio(pt.distanceKm);
-      if (ratio > 1) {
+      // 鋪滿時畫到畫面外面一點（線才會接到邊上）
+      if (ratio * (R - 8) > (this.fill ? this.edgeR(pt.bearing - this.heading, -40) : R - 8)) {
         prev = null;
         broken = true;
         continue;
@@ -1317,7 +1436,7 @@ export class Radar {
   private sweepHitSec(angleDeg: number, radiusPx: number): number {
     const period = SWEEP_SEC[this.style.sweep];
     const a = (((angleDeg % 360) + 360) % 360) / 360;
-    if (this.style.sweep === 'ripple') return (radiusPx / R) * period * 2;
+    if (this.style.sweep === 'ripple') return (radiusPx / this.sweepR) * period * 2;
     if (this.style.sweep === 'wedge') return ((((angleDeg - WEDGE_LEAD_DEG) % 360) + 360) % 360 / 360) * period;
     return a * period;
   }
@@ -1518,8 +1637,10 @@ export class Radar {
     for (const it of items) {
       const ratio = this.ratio(it.distanceKm);
       const angle = it.bearing - this.heading;
-      const r = Math.min(1, ratio) * (R - 8);
-      pos.set(it.id, { ...polar(angle, r), out: ratio > 1 || !!it.outside, angle, r });
+      // 範圍外（鋪滿時是畫面外）的貼在邊上
+      const lim = this.edgeR(angle);
+      const r = Math.min(ratio * (R - 8), lim);
+      pos.set(it.id, { ...polar(angle, r), out: ratio * (R - 8) > lim || !!it.outside, angle, r });
     }
     // 疊在一起（12 px 內）的光點合成一群：選取的、要顯示標籤的優先當代表，標籤加「+N」，
     // 點下去先列出同一群讓人選，不然被蓋住的點不到
@@ -1537,6 +1658,8 @@ export class Radar {
     // 標籤避讓：選取的優先，其次依清單順序（進行中、近的在前），和已放的標籤重疊就不畫。
     // 同一群只標代表的名稱加「+N」，點下去再選
     const placed: Array<{ left: number; right: number; top: number; bottom: number }> = [];
+    // 標籤不超出畫面（鋪滿時是長方形）
+    const [, labelTop, , labelBottom] = viewRect();
     const labelLines = new Map<number, { lines: string[]; below: boolean }>();
     for (const g of [...groups].sort((a, b) => Number(b.some((it) => it.selected)) - Number(a.some((it) => it.selected)))) {
       const lead = leaderOf(g);
@@ -1554,7 +1677,7 @@ export class Radar {
         const h = t.lines.length * LINE_PX;
         const left = anchor === 'end' ? p.x + 6 - w : anchor === 'start' ? p.x - 6 : p.x - w / 2;
         const box = { left, right: left + w, top: t.below ? p.y + 8 : p.y - 13 - h + 4, bottom: t.below ? p.y + 8 + h : p.y - 9 };
-        if (box.top < 0 || box.bottom > SIZE) continue;
+        if (box.top < labelTop || box.bottom > labelBottom) continue;
         if (placed.some((q) => q.left < box.right && box.left < q.right && q.top < box.bottom && box.top < q.bottom)) continue;
         placed.push(box);
         labelLines.set(lead.id, t);

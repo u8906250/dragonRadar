@@ -873,11 +873,13 @@ function woofRelief(): import('./space').ReliefTexture | null {
     });
   return null;
 }
-radar.setRelief((out, n, view, km, heading, j0, j1) => {
+radar.setRelief((out, n, view, km, heading, j0, j1, span) => {
   if (!spaceMod || !woofMap()) return 0;
   const t = view.focus === 'woof' ? woofRelief() : null;
-  return t ? spaceMod.paintWoofRelief(out, n, t, view, km, heading, j0, j1) : 0;
+  return t ? spaceMod.paintWoofRelief(out, n, t, view, km, heading, j0, j1, span) : 0;
 });
+// 全螢幕鋪滿時看得到的範圍變了（換方向、改視窗大小）：道路抓到畫面的角
+radar.onView = () => updateStreets();
 const woofStreets: import('./space').WoofStreets = (lat, lng, km, rangeKm) => {
   if (!streetsMod) {
     loadStreets();
@@ -900,10 +902,11 @@ function updateStreets(): void {
     loadStreets();
     return;
   }
-  const key = `${origin.lat},${origin.lng}|${scaleKm}|${streetTiles}`;
+  // 全螢幕鋪滿時抓到畫面的角（radar.reach 是範圍的幾倍，平常是 1）
+  const key = `${origin.lat},${origin.lng}|${scaleKm}|${streetTiles}|${radar.reach.toFixed(2)}`;
   if (key === streetsFor) return;
   streetsFor = key;
-  const reach = scaleKm * 1.05;
+  const reach = scaleKm * radar.reach * 1.05;
   const lines = streetsMod.streetsAround(origin.lat, origin.lng, reach, scaleKm, () => {
     streetTiles++;
     updateStreets();
@@ -1375,7 +1378,8 @@ function render(): void {
       spot: !!it.spot,
       office: !!it.spot && isOffice(it.ev),
       approx: !!it.ev.approxArea,
-      outside: !inScope(it.ev, it.distanceKm),
+      // 全螢幕鋪滿時範圍外、還在畫面裡的照真的位置畫（雷達自己把畫面外的貼在邊上），「雙北」時雙北以外的照樣畫淡
+      outside: !inScope(it.ev, radar.filling ? 0 : it.distanceKm),
       distanceKm: it.distanceKm,
       bearing: it.bearing,
       // 還沒出發的官方車掃路線點用「即將開始」的淡色畫；還沒開的據點跟休息中的一樣淡；其他稍後開始的（回報的車掃的站也是）畫虛線框
@@ -4680,7 +4684,8 @@ function wirePanelDrag(): void {
 }
 
 /**
- * 全螢幕（像 Google 地圖）：地圖、雷達鋪滿，標題列收成浮動按鈕，再按一次回到原本的樣子；瀏覽器記住開著還是關著。
+ * 全螢幕（像 Google 地圖）：地圖、雷達鋪滿，標題列收成浮動按鈕；雷達的地圖也鋪滿整個長方形（不裁成圓、沒有外框，radar.setFill），
+ * 距離圈、掃描線照樣疊在上面。再按一次回到原本的樣子；瀏覽器記住開著還是關著。
  * 電腦全螢幕時「清單」收起右邊的清單（也記住）。不是瀏覽器的全螢幕（網址列不會不見，重新整理也不能自己再開）
  */
 function wireFullScreen(): void {
@@ -4698,8 +4703,11 @@ function wireFullScreen(): void {
       if (view === 'map') map.invalidate();
     });
   };
-  const setFull = (on: boolean): void => {
+  const setFull = (on: boolean, initial = false): void => {
     appEl.classList.toggle('full', on);
+    // 雷達的地圖也鋪滿整個長方形（不裁成圓）；重畫（道路抓到畫面的角，範圍外的光點照真的位置畫）。剛打開網頁時之後會載入、畫第一次
+    radar.setFill(on);
+    if (!initial) render();
     fullBtn.setAttribute('aria-pressed', String(on));
     fullBtn.title = on ? '離開全螢幕' : '全螢幕';
     fullBtn.setAttribute('aria-label', fullBtn.title);
@@ -4712,7 +4720,7 @@ function wireFullScreen(): void {
     listBtn.title = off ? '打開清單' : '收起清單';
     relayout();
   };
-  setFull(lsGet(LS_FULL) === '1');
+  setFull(lsGet(LS_FULL) === '1', true);
   setListOff(lsGet(LS_LIST_OFF) === '1');
   fullBtn.addEventListener('click', () => {
     const on = !appEl.classList.contains('full');

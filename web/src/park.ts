@@ -5,13 +5,13 @@
  * 汪星是球面（ParkWorld 把台北的經緯度換成汪星的，space.ts）。地球上第一次在公園附近才載入
  */
 import type { LatLng } from './geo';
-import { RADAR_GEOM, type TripAt } from './radar';
+import { RADAR_GEOM, viewReach, viewRect, type TripAt } from './radar';
 import { ZHONGSHAN_PARK } from './zhongshan';
 import { MALTESE, dogHeight } from './dog';
 import { animateDogs, Dog, dogById, dogHeading, dogMarkup, NATURE, wakeDogs, type DogNature, type DogYard } from './dogs';
 export { onDogMove } from './dogs';
 
-const { c: C, inner: INNER, size: SIZE } = RADAR_GEOM;
+const { c: C, inner: INNER } = RADAR_GEOM;
 const RAD = Math.PI / 180;
 type Pt = [number, number];
 
@@ -551,7 +551,7 @@ function dogPart(g: ParkGeom, c: ParkCanvas, dog: Dog): string {
   // 這一段走過的路離雷達中心最近多遠（起點、終點都在畫面外面，中間可能經過畫面）
   const [vx, vy] = [b[0] - a[0], b[1] - a[1]];
   const u = Math.max(0, Math.min(1, ((c.rx - a[0]) * vx + (c.ry - a[1]) * vy) / (vx * vx + vy * vy || 1)));
-  if (Math.hypot(a[0] + vx * u - c.rx, a[1] + vy * u - c.ry) - h > INNER + 2) return '';
+  if (Math.hypot(a[0] + vx * u - c.rx, a[1] + vy * u - c.ry) - h > viewReach() + 2) return '';
   const f1 = (v: number): string => v.toFixed(1);
   const moving = s.do === 'walk' || s.do === 'run';
   if (c.ppm < DOG_FULL) {
@@ -767,7 +767,7 @@ export function parkSvg(g: ParkGeom, c: ParkCanvas): string {
   if (r.world === g.name && r.phase !== 'away' && r.phase !== 'stored' && r.e >= 0) out += rocketPart(g, c, r.phase, r.e);
   const s = c.ppm >= STATUE_FROM ? c.at(...g.statue) : null;
   const h = STATUE_H * c.ppm;
-  if (s && Math.hypot(s[0] - c.rx, s[1] - c.ry) - h < INNER + 2) {
+  if (s && Math.hypot(s[0] - c.rx, s[1] - c.ry) - h < viewReach() + 2) {
     const [x, y] = s.map((v) => v.toFixed(1));
     out +=
       c.ppm < STATUE_FULL
@@ -907,7 +907,7 @@ export function scatter(
   const cell = TEXTURE_MIN_M * 2 ** k0 * ppm;
   const more = Math.min(1, ((cell / p) ** 2 - 1) / 3);
   // 看得到的範圍（攤平的公尺，多留一點：球面和攤平的方向差一點點）
-  const half = ((INNER + 10) / ppm) * 1.15 + t.size;
+  const half = ((viewReach() + 10) / ppm) * 1.15 + t.size;
   const cx = (c.center.lng - O.lng) * O.mx;
   const cy = (c.center.lat - O.lat) * O.my;
   const x0 = Math.max(cx - half, area.box[0]);
@@ -917,7 +917,7 @@ export function scatter(
   if (x0 > x1 || y0 > y1) return null;
   if (near && !near(x0, y0, x1, y1)) return null;
   const w = Math.min(t.width[2], Math.max(t.width[1], t.width[0] * ppm));
-  const reach = (INNER + 2) ** 2;
+  const reach = (viewReach() + 2) ** 2;
   const [bx0, by0, bx1, by1] = t.box.map((v) => v * big);
   // 座標乘 10 寫成整數（小數轉字串慢好幾倍），畫的時候縮回 0.1 倍
   const r1 = (v: number): number => Math.round(v * 10);
@@ -961,7 +961,7 @@ export function earthParkSvg(origin: LatLng, scaleKm: number): string {
   const kx = EARTH.mx(origin.lat) * ppm;
   const ky = EARTH.my * ppm;
   const xy = (lat: number, lng: number): Pt => [C + (lng - origin.lng) * kx, C - (lat - origin.lat) * ky];
-  const [x0, y0, x1, y1] = [-20, -20, SIZE + 20, SIZE + 20];
+  const [x0, y0, x1, y1] = viewRect(20);
   const f1 = (n: number): string => n.toFixed(1);
   /** 一圈投影後的範圍碰不碰得到畫面 */
   const shows = (pts: Pt[]): boolean => {

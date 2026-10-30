@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { fmtKm, globeFrac, RADAR_GEOM, SPACE_FROM_KM } from '../src/radar';
+import { fmtKm, globeFrac, RADAR_GEOM, RADAR_VIEW, SPACE_FROM_KM, viewReach, viewRect } from '../src/radar';
 import { PARK_MIN_KM } from '../src/park';
 import type { StreetLine } from '../src/streets';
 import { atPark, focusMinKm, graticule, hemiPath, nearOf, paintWoofRelief, WOOF_KM, landPath, moonPosition, nightPath, onWoofLand, ortho, planetPositions, spaceMarkup, subsolar, toWoof } from '../src/space';
@@ -547,5 +547,25 @@ describe('hemiPath', () => {
     const d = hemiPath({ lat: 0, lng: 0 }, box(-10, 10, -20, 20), 100, false);
     expect(d.match(/M/g)).toHaveLength(1);
     expect(areaOf(d, 100).area).toBeGreaterThan(0.1);
+  });
+});
+
+describe('雷達看得到的範圍（全螢幕時地圖鋪滿長方形）', () => {
+  it('is the circle normally and the whole rectangle when filling', () => {
+    expect(viewReach()).toBe(RADAR_GEOM.inner);
+    expect(viewRect(20)).toEqual([-20, -20, 420, 420]);
+    Object.assign(RADAR_VIEW, { fill: true, hx: 300, hy: 200 });
+    try {
+      expect(viewReach()).toBeCloseTo(Math.hypot(300, 200));
+      expect(viewRect()).toEqual([-100, 0, 500, 400]);
+      // 汪星看得到的那一塊多抓一些（全螢幕的角也要有陸地、道路）
+      const center = { lat: 25.04, lng: 121.56 };
+      const wide = nearOf(center, 5000);
+      Object.assign(RADAR_VIEW, { fill: false });
+      const narrow = nearOf(center, 5000);
+      expect(wide!.lat1 - wide!.lat0).toBeGreaterThan(narrow!.lat1 - narrow!.lat0);
+    } finally {
+      Object.assign(RADAR_VIEW, { fill: false, hx: 200, hy: 200 });
+    }
   });
 });

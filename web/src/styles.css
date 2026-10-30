@@ -237,6 +237,13 @@ a.chip { display: inline-flex; align-items: center; text-decoration: none; }
 .radar .face { stroke: var(--radar-face-stroke); stroke-width: 2; }
 .radar .face-stop-1 { stop-color: var(--radar-face-1); }
 .radar .face-stop-2 { stop-color: var(--radar-face-2); }
+/* 全螢幕：雷達的地圖鋪滿整個長方形（radar.ts 的 setFill）：沒有外框、不裁成圓，底色鋪滿；掃描線畫到畫面的角（轉的時候超出那一層，整塊裁掉） */
+.radar .face-fill { display: none; }
+.radar-stack.fill { overflow: hidden; }
+.radar-stack.fill .radar .face-fill { display: inline; }
+.radar-stack.fill .radar .bezel, .radar-stack.fill .radar .face { display: none; }
+.radar-stack.fill .radar-sweep { overflow: visible; }
+.radar-stack.fill > .radar-relief { clip-path: none; }
 .radar .grid circle, .radar .grid line { fill: none; stroke: var(--radar-grid); stroke-opacity: var(--radar-grid-op); stroke-width: 1; }
 .radar .grid .outer { stroke-opacity: var(--radar-outer-op); }
 :root[data-theme='treasure'] .radar .grid circle, :root[data-theme='treasure'] .radar .grid line { stroke-dasharray: 4 4; }
@@ -368,17 +375,16 @@ a.chip { display: inline-flex; align-items: center; text-decoration: none; }
 #app.full .overlay-tr { right: 10px; }
 #app.full .overlay-tl, #app.full .overlay-bl { left: 10px; }
 #app.full .leaflet-top { top: calc(46px + env(safe-area-inset-top)); }
-#app.full #stage[data-view="radar"] .overlay-bl { padding: 6px 10px 0; }
-#app.full #stage[data-view="radar"] #radar-view { padding-top: calc(100px + env(safe-area-inset-top)); box-sizing: border-box; }
+/* 雷達也鋪滿（不留上面的空間給按鈕）：時間、範圍按鈕跟地圖一樣浮在左下 */
+#app.full #stage[data-view="radar"] #radar-view { padding-top: 0; }
+#app.full #stage[data-view="radar"] .overlay-bl { position: absolute; padding: 0; }
 #app.full .panel { grid-row: 2; position: relative; z-index: 22; }
 #app.full .banner { top: calc(56px + env(safe-area-inset-top)); }
 @media (max-width: 899px) {
   /* 清單上緣的圓角疊在地圖上（地圖畫到清單後面），地圖上的按鈕、出處往上讓開 */
   #app.full .panel { margin-top: -18px; }
-  #app.full #stage { padding-bottom: 18px; }
-  #app.full #stage[data-view="map"] { padding-bottom: 0; }
-  #app.full #stage[data-view="map"] .overlay-bl { bottom: 28px; }
-  #app.full .leaflet-bottom { bottom: 18px; }
+  #app.full #stage .overlay-bl { bottom: 28px; }
+  #app.full .leaflet-bottom, #app.full .radar-attrib { bottom: 18px; }
 }
 
 .panel-handle { display: block; width: 100%; height: 28px; border: 0; background: transparent; cursor: grab; padding: 0; touch-action: none; }
@@ -695,7 +701,6 @@ a.chip { display: inline-flex; align-items: center; text-decoration: none; }
   #app.full #list-btn { display: inline-flex; align-items: center; }
   #app.full .panel { grid-row: 1; }
   #app.full .overlay-tr { top: calc(8px + env(safe-area-inset-top)); right: 196px; }
-  #app.full #stage[data-view="radar"] #radar-view { padding-top: 56px; }
   #app.full.list-off { grid-template-columns: minmax(0, 1fr); }
   #app.full.list-off .panel { display: none; }
   #app.full.list-off .topbar { right: 0; }

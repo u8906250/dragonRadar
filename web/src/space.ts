@@ -4,7 +4,7 @@
  * - 再拉遠：月球的軌道和月球，太陽、行星和它們的軌道（以地球為中心，距離照真實比例，位置照今天推算）
  */
 import type { LatLng } from './geo';
-import { RADAR_GEOM, TINY_EARTH } from './radar';
+import { RADAR_GEOM, RADAR_VIEW, TINY_EARTH, viewReach, viewRect } from './radar';
 import type { StreetClass, StreetLine } from './streets';
 import { nearPark, PARK_MIN_KM, parkGeom, parkSvg, ringArea, scatter } from './park';
 import { TAIPEI_MAJOR_ROADS, TAIPEI_MINOR_ROADS, TAIPEI_OUTLINE } from './taipei';
@@ -126,7 +126,8 @@ interface Near {
   step: number;
 }
 export function nearOf(center: LatLng, rg: number): Near | null {
-  const a = Math.asin(Math.min(1, (INNER * 1.5) / rg)) / RAD;
+  // 看得到的範圍（全螢幕鋪滿時是畫面的角）多留一些
+  const a = Math.asin(Math.min(1, (viewReach() * 1.5) / rg)) / RAD;
   if (a / 16 >= 1) return null;
   // 切到弦離球面不到 0.05 像素就好（弦長 L 弧度離球面約 rg L² / 8）：放大很多時比看得到的範圍的 1/16 粗很多
   const step = Math.min(1, Math.max(a / 16, Math.sqrt(0.4 / rg) / RAD));
@@ -454,7 +455,7 @@ function streetOnWoof(l: StreetLine): Array<Array<[number, number]>> {
  */
 function woofStreetLines(center: LatLng, r: number, streets: WoofStreets): Record<StreetClass, Array<Array<[number, number]>>> | null {
   // 從球心看的角度（度）
-  const a = Math.asin(Math.min(1, (INNER * 1.1) / r)) / RAD;
+  const a = Math.asin(Math.min(1, (viewReach() * 1.1) / r)) / RAD;
   const ring = Math.asin(Math.min(1, INNER / r)) / RAD;
   const top = Math.min(89, Math.abs(center.lat) + a);
   // 看得到的那一塊換成台北的經緯度範圍
@@ -689,7 +690,8 @@ function woofGlobe(x: number, y: number, r: number, view: SpaceView, toSun: Vec3
   const near = view.focus === 'woof' ? nearOf(center, r) : null;
   // 畫面（球的座標：球心在 C）
   const [ox, oy] = [x - C, y - C];
-  const box: [number, number, number, number] = [-ox - 20, -oy - 20, SIZE - ox + 20, SIZE - oy + 20];
+  const [bx0, by0, bx1, by1] = viewRect(20);
+  const box: [number, number, number, number] = [bx0 - ox, by0 - oy, bx1 - ox, by1 - oy];
   const lines = (ls: Array<Array<[number, number]>>): string => linesPath(center, ls, r, box, near);
   let out = '';
   // 陸地：填色和海岸線分開畫（放大很多時陸地比畫面大上千倍，整圈虛線要畫好幾秒）
@@ -697,7 +699,7 @@ function woofGlobe(x: number, y: number, r: number, view: SpaceView, toSun: Vec3
   // 海：整顆汪星挖掉陸地（evenodd），淡淡的水色（陸地是半透明的，不能整顆鋪在下面）；
   // 放大很多時汪星比畫面大上千倍，雷達整個在球上就用畫面的範圍（太大的圓瀏覽器畫不準）
   const disc =
-    r - Math.hypot(ox, oy) > INNER + 40
+    r - Math.hypot(ox, oy) > viewReach() + 40
       ? `M${f1(box[0])} ${f1(box[1])}H${f1(box[2])}V${f1(box[3])}H${f1(box[0])}Z`
       : `M${f1(C - r)} ${f1(C)}A${f1(r)} ${f1(r)} 0 1 0 ${f1(C + r)} ${f1(C)}A${f1(r)} ${f1(r)} 0 1 0 ${f1(C - r)} ${f1(C)}Z`;
   out += `<path class="woof-sea" d="${disc}${land}" />`;
@@ -749,12 +751,13 @@ export interface ReliefTexture {
 }
 
 /**
- * 汪星的地形圖貼到球上（雷達下面另外一層 canvas，radar.ts 的 paintRelief）：out 是 n×n 的 RGBA（整個雷達的正方形），
+ * 汪星的地形圖貼到球上（雷達下面另外一層 canvas，radar.ts 的 paintRelief）：out 是 n×n 的 RGBA（以圓心為中心、邊長 span 的正方形：
+ * 平常是整個雷達的正方形，全螢幕鋪滿時大到蓋住整個長方形），
  * 每一個像素反推回汪星的經緯度（正射投影反過來，扣掉指北針轉的角度）去地形圖上取顏色，球外面、海是透明的。
  * 取顏色時附近四格照距離混在一起（拉近不會一格一格的）。中心要是汪星才畫；拉近慢慢變淡（外圈約 3 公里內開始，約 400 公尺內不畫），
  * 讓道路、公園清楚。回傳這一層要多不透明（0 是不用畫）
  */
-export function paintWoofRelief(out: Uint8ClampedArray, n: number, tex: ReliefTexture, view: SpaceView, scaleKm: number, heading: number, j0 = 0, j1 = n): number {
+export function paintWoofRelief(out: Uint8ClampedArray, n: number, tex: ReliefTexture, view: SpaceView, scaleKm: number, heading: number, j0 = 0, j1 = n, span = SIZE): number {
   if (view.focus !== 'woof') return 0;
   const r = (WOOF_KM * INNER) / scaleKm;
   const ppm = r / (WOOF_KM * 1000);
@@ -764,11 +767,11 @@ export function paintWoofRelief(out: Uint8ClampedArray, n: number, tex: ReliefTe
   const p0 = center.lat * RAD;
   const [sp0, cp0] = [Math.sin(p0), Math.cos(p0)];
   const [ch, sh] = [Math.cos(heading * RAD), Math.sin(heading * RAD)];
-  const s = SIZE / n;
+  const s = span / n;
   const { w: tw, h: th, data } = tex;
   /** 雷達上第 (i, j) 個像素（可以是小數）在汪星上的經緯度；球外面是 null */
   const geo = (i: number, j: number): [number, number] | null => {
-    const [dx, dy] = [i * s - C, j * s - C];
+    const [dx, dy] = [i * s - span / 2, j * s - span / 2];
     // 雷達上的點 → 汪星那一層的座標（那一層跟著指北針轉了 -heading）→ 球上（半徑 1）
     const x = (ch * dx - sh * dy) / r;
     const y = -(sh * dx + ch * dy) / r;
@@ -903,7 +906,9 @@ export function spaceMarkup(o: SpaceOpts): string {
     return { x: C + x * k, y: C - y * k, d };
   };
   const pathOf = (pts: Vec3[]): string => `M${pts.map((p) => { const q = proj(p); return `${f1(q.x)} ${f1(q.y)}`; }).join('L')}Z`;
-  const inView = (x: number, y: number, r = 0): boolean => Math.hypot(x - C, y - C) - r <= INNER;
+  // 全螢幕鋪滿時看整個長方形，平常看圓裡面
+  const inView = (x: number, y: number, r = 0): boolean =>
+    RADAR_VIEW.fill ? Math.abs(x - C) - r <= RADAR_VIEW.hx && Math.abs(y - C) - r <= RADAR_VIEW.hy : Math.hypot(x - C, y - C) - r <= INNER;
   const radius = (key: string): number => Math.max(LOOKS[key].min, LOOKS[key].km * k);
   const named: Body[] = [];
   let lines = '';
