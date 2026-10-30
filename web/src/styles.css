@@ -191,6 +191,8 @@ a.chip { display: inline-flex; align-items: center; text-decoration: none; }
 /* 雷達分四層疊在一起（radar.ts）：外框底色、掃描、特效在下面，主圖層（光點、文字，接觸控）在最上面 */
 .radar-stack { position: relative; place-self: stretch; min-width: 0; min-height: 0; }
 .radar-stack > .radar-layer { position: absolute; inset: 0; pointer-events: none; }
+/* 汪星的地形圖（radar.ts 的 paintRelief，canvas 對齊 SVG 的正方形）：裁成雷達的圓，CSS 放大，地形本來就是模糊的 */
+.radar-stack > .radar-relief { position: absolute; pointer-events: none; clip-path: circle(43% at 50% 50%); }
 .radar-stack > .radar-main { position: relative; }
 /* 一直在動的兩層不加光暈濾鏡（每一格都要重算） */
 .radar.radar-sweep, .radar.radar-fx, .radar.radar-flashes { filter: none; }
@@ -458,12 +460,6 @@ a.chip { display: inline-flex; align-items: center; text-decoration: none; }
 /* 汪星的海：整顆挖掉陸地（evenodd），跟公園的水池一樣淡淡的水色，拉近時一道道的水波（space.ts 的 woofGlobe） */
 .radar .woof-sea { fill: var(--water); fill-opacity: 0.16; fill-rule: evenodd; stroke: none; pointer-events: none; }
 .radar .woof-ripple { fill: none; stroke: var(--water); stroke-opacity: 0.5; stroke-linecap: round; pointer-events: none; }
-/* 汪星的山（space.ts）：淡淡的棕色等高線（200 公尺的倍數粗一點），山頂小小的 ▲，拉近寫名字和高度 */
-.radar .woof-contour { fill: none; stroke: #a0703f; stroke-opacity: 0.35; stroke-width: 0.8; stroke-linejoin: round; pointer-events: none; }
-.radar .woof-contour.index { stroke-opacity: 0.55; stroke-width: 1.2; }
-.radar .woof-peak { pointer-events: none; }
-.radar .woof-peak path { fill: #8a5a2c; fill-opacity: 0.85; }
-.radar .woof-peak text { fill: var(--label); font-size: 9px; font-weight: 600; paint-order: stroke; stroke: var(--label-halo); stroke-width: 2.5px; stroke-linejoin: round; }
 /* 中山公園（park.ts，地球的雷達和汪星共用）：範圍淡淡填色、虛線的邊；建築實線、水面水藍色的虛線、草地花圃草綠色的點線，步道跟街道的細線一樣 */
 .radar .park-area { fill: var(--accent); fill-opacity: 0.1; stroke: none; pointer-events: none; }
 .radar .park-edge { fill: none; stroke: var(--accent); stroke-width: 1.2; stroke-opacity: 0.6; stroke-dasharray: 2 2; pointer-events: none; }

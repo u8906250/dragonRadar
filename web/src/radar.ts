@@ -238,6 +238,11 @@ export class Radar {
    */
   private readonly flashBox: HTMLDivElement;
   private readonly flashSquare: HTMLDivElement;
+  /** 汪星的地形圖（雷達底色上面、掃描下面的 canvas，正方形對齊 SVG）、雷達的正方形幾像素、畫地形圖的（main.ts 給） */
+  private readonly reliefCanvas: HTMLCanvasElement;
+  private squarePx = 0;
+  private reliefPaint: ((out: Uint8ClampedArray, n: number, view: SpaceView, scaleKm: number, heading: number) => number) | null = null;
+  private reliefImage: ImageData | null = null;
   private flashOf = new WeakMap<SVGGElement, HTMLDivElement>();
   /** 主圖層的瓶子 → 特效層裡同位置、同 class（顏色照舊）的那一組 */
   private fxOf = new WeakMap<SVGGElement, SVGGElement>();
@@ -340,6 +345,9 @@ export class Radar {
       </defs>
       <circle class="bezel" cx="${C}" cy="${C}" r="${R + 16}" />
       <circle class="face" cx="${C}" cy="${C}" r="${R}" fill="url(#rg-face)" />`;
+    this.reliefCanvas = document.createElement('canvas');
+    this.reliefCanvas.className = 'radar-relief';
+    this.reliefCanvas.setAttribute('aria-hidden', 'true');
     this.sweepSvg = layer('radar radar-sweep');
     this.sweepBox = document.createElement('div');
     this.sweepBox.className = 'radar-layer radar-sweep-box';
@@ -436,17 +444,21 @@ export class Radar {
     const stack = document.createElement('div');
     stack.className = 'radar-stack';
     this.stack = stack;
-    stack.append(this.base, this.sweepBox, this.fx, this.flashBox, this.svg);
+    stack.append(this.base, this.reliefCanvas, this.sweepBox, this.fx, this.flashBox, this.svg);
     container.appendChild(stack);
     new ResizeObserver(([e]) => {
       const { width: w, height: h } = e.contentRect;
       this.shown = w > 0;
       // SVG 照比例縮放、置中（viewBox 是正方形）：閃光層的正方形跟著對齊
       const size = Math.min(w, h);
-      for (const sq of [this.flashSquare, this.sweepSquare]) {
+      for (const sq of [this.flashSquare, this.sweepSquare, this.reliefCanvas]) {
         Object.assign(sq.style, { width: `${size}px`, height: `${size}px`, left: `${(w - size) / 2}px`, top: `${(h - size) / 2}px` });
         sq.style.setProperty('--u', `${size / SIZE}px`);
       }
+      // 地形圖照新的大小重畫
+      const was = this.squarePx;
+      this.squarePx = size;
+      if (Math.abs(was - size) > 1) this.paintRelief();
     }).observe(stack);
     this.setStyle(this.style);
     this.setScale(this.scaleKm);
@@ -641,6 +653,8 @@ export class Radar {
       this.justPanned = false;
     }, 80);
     this.onPan?.(0, 0, true);
+    // 拖曳時地形圖畫粗一點（快），放開再畫細
+    this.paintRelief();
   }
 
   /** 照比例畫：外圈是範圍，裡面三圈是 1/4、1/2、3/4 */
@@ -752,8 +766,40 @@ export class Radar {
       this.drawSpace();
       return;
     }
-    // 平移裡面那一層（外面那一層有圓形的裁切、跟著指北針轉，裁切不能跟著移）
+    // 平移裡面那一層（外面那一層有圓形的裁切、跟著指北針轉，裁切不能跟著移）；地形圖那一層一起移（照指北針轉過的方向、換成像素）
     this.spaceLayer.querySelector('.space-shift')?.setAttribute('transform', `translate(${dx.toFixed(2)} ${dy.toFixed(2)})`);
+    if (this.reliefCanvas.style.display !== 'none') {
+      const h = (-this.heading * Math.PI) / 180;
+      const u = this.squarePx / SIZE;
+      this.reliefCanvas.style.transform = `translate(${((dx * Math.cos(h) - dy * Math.sin(h)) * u).toFixed(1)}px, ${((dx * Math.sin(h) + dy * Math.cos(h)) * u).toFixed(1)}px)`;
+    }
+  }
+
+  /** 汪星的地形圖怎麼畫（main.ts：地形圖載好了、看得到汪星的地圖才畫；回傳要多不透明，0 是不畫）；null 是不畫 */
+  setRelief(paint: ((out: Uint8ClampedArray, n: number, view: SpaceView, scaleKm: number, heading: number) => number) | null): void {
+    this.reliefPaint = paint;
+    this.paintRelief();
+  }
+
+  /** 畫汪星的地形圖：太空、有畫法才畫；canvas 最多 480 像素見方（拖曳時 200，CSS 放大到雷達的大小，地形本來就是模糊的） */
+  private paintRelief(): void {
+    const c = this.reliefCanvas;
+    const hide = (): void => {
+      c.style.display = 'none';
+    };
+    if (!this.inSpace || !this.reliefPaint || !this.squarePx) return hide();
+    const n = Math.max(64, Math.round(Math.min(this.squarePx * (window.devicePixelRatio || 1), this.panning ? 200 : 480)));
+    if (!this.reliefImage || this.reliefImage.width !== n) this.reliefImage = new ImageData(n, n);
+    const alpha = this.reliefPaint(this.reliefImage.data, n, this.spaceView, this.scaleKm, this.heading);
+    if (alpha <= 0) return hide();
+    if (c.width !== n) {
+      c.width = n;
+      c.height = n;
+    }
+    c.getContext('2d')?.putImageData(this.reliefImage, 0, 0);
+    c.style.opacity = alpha.toFixed(2);
+    c.style.transform = '';
+    c.style.display = '';
   }
 
   setSpaceView(view: SpaceView, quiet = false): void {
@@ -843,6 +889,7 @@ export class Radar {
     this.stack.classList.toggle('space-moved', this.inSpace && this.spaceView.focus !== null);
     if (!this.inSpace || !this.spaceDraw) {
       if (this.spaceLayer.firstChild) this.spaceLayer.replaceChildren();
+      this.paintRelief();
       return;
     }
     this.spaceLayer.innerHTML = `<g class="space-shift">${this.spaceDraw(this.scaleKm, globeFrac(this.scaleKm) * (R - 8), this.spaceView)}</g>`;
@@ -850,6 +897,7 @@ export class Radar {
     else this.spaceLayer.removeAttribute('transform');
     this.drawnView = { ...this.spaceView };
     this.drawnAt = performance.now();
+    this.paintRelief();
     this.standUp(this.spaceLayer);
   }
 

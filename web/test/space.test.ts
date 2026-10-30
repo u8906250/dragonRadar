@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { fmtKm, globeFrac, RADAR_GEOM, SPACE_FROM_KM } from '../src/radar';
 import { PARK_MIN_KM } from '../src/park';
 import type { StreetLine } from '../src/streets';
-import { atPark, focusMinKm, graticule, hemiPath, nearOf, WOOF_KM, landPath, moonPosition, nightPath, onWoofLand, ortho, planetPositions, spaceMarkup, subsolar, toWoof } from '../src/space';
+import { atPark, focusMinKm, graticule, hemiPath, nearOf, paintWoofRelief, WOOF_KM, landPath, moonPosition, nightPath, onWoofLand, ortho, planetPositions, spaceMarkup, subsolar, toWoof } from '../src/space';
 
 const diff = (a: number, b: number): number => Math.abs(((((a - b) % 360) + 540) % 360) - 180);
 const lonOf = (when: string, key: string): number => planetPositions(new Date(when)).find((p) => p.key === key)!.lon;
@@ -250,43 +250,35 @@ describe('汪星', () => {
     expect(at([25.02, 121.487], 3)).not.toContain('woof-ripple');
   });
 
-  it('draws the mountains: contour lines (200 m far, 100 m, then 50 m close) and peaks with names when close', async () => {
-    const T = await import('../src/terrain');
-    // 資料：每 50 公尺一條，都在台北附近；山頂有七星山、象山，從高排到低
-    for (const c of T.TAIPEI_CONTOURS) {
-      expect(c.ele % 50).toBe(0);
-      for (const [lat, lng] of c.line) {
-        expect(lat).toBeGreaterThan(24.95);
-        expect(lat).toBeLessThan(25.22);
-        expect(lng).toBeGreaterThan(121.45);
-        expect(lng).toBeLessThan(121.68);
-      }
-    }
-    expect(T.TAIPEI_PEAKS[0][0]).toBe('七星山');
-    expect(T.TAIPEI_PEAKS.find((p) => p[0] === '象山')?.[1]).toBe(184);
-    const at = (p: [number, number], km: number, terrain: (() => typeof T | null) | undefined = () => T): string => {
-      const [la, ln] = toWoof(p);
-      return spaceMarkup({ ...base, scaleKm: km, rg: 164, view: { focus: 'woof', yaw: (-ln * Math.PI) / 180, pitch: (la * Math.PI) / 180 }, terrain });
-    };
-    const yms: [number, number] = [25.16, 121.545];
-    const step = (m: string): string | undefined => /class="woof-contours" data-step="(\d+)"/.exec(m)?.[1];
-    expect(step(at(yms, WOOF_KM))).toBe('200');
-    expect(step(at(yms, 3))).toBe('100');
-    expect(step(at(yms, 1))).toBe('50');
-    expect(at(yms, 1)).toMatch(/class="woof-contour index" d="M/);
-    // 山頂：拉遠只有 ▲，拉近寫名字和高度（站著，只轉不翻）
-    const far = at(yms, WOOF_KM);
-    expect(far).toContain('class="woof-peak" data-at=');
-    expect(far).not.toMatch(/class="woof-peak"[^>]*>[^<]*<path[^>]*\/><text/);
-    expect(at([25.1707, 121.55344], 1)).toMatch(/<g class="woof-peak" data-at="[\d.]+ [\d.]+" data-flip="no"><path[^>]*\/><text[^>]*>七星山 1118<\/text>/);
-    expect(at([25.02654, 121.57554], 1)).toContain('>象山 184<');
-    // 拉遠時山頂不擠在一起
-    const pts = [...far.matchAll(/class="woof-peak" data-at="([\d.]+) ([\d.]+)"/g)].map((m) => [Number(m[1]), Number(m[2])]);
-    for (let i = 0; i < pts.length; i++) for (let j = 0; j < i; j++) expect(Math.hypot(pts[i][0] - pts[j][0], pts[i][1] - pts[j][1])).toBeGreaterThanOrEqual(44);
-    // 還沒載入、沒給：不畫山（也不會壞）
-    expect(at(yms, 1, () => null)).not.toContain('woof-contour');
-    const [la, ln] = toWoof(yms);
-    expect(spaceMarkup({ ...base, scaleKm: 1, rg: 164, view: { focus: 'woof', yaw: (-ln * Math.PI) / 180, pitch: (la * Math.PI) / 180 } })).not.toContain('woof-peak');
+  it('paints the real terrain (heights in colour, light and shadow) onto the globe', async () => {
+    // 地形圖：WebP，不大（第一次看汪星的地圖才下載）
+    const { default: inline } = await import('../src/woof-relief.webp?inline');
+    expect(inline.startsWith('data:image/webp;base64,')).toBe(true);
+    expect(((inline.length - 23) * 3) / 4).toBeLessThan(60_000);
+    // 假的地形圖：每度一個像素，紅色記經度、綠色記緯度
+    const [tw, th] = [344, 160];
+    const data = new Uint8ClampedArray(tw * th * 4);
+    for (let v = 0; v < th; v++) for (let u = 0; u < tw; u++) data.set([u % 256, v, 7, 255], (v * tw + u) * 4);
+    const tex = { w: tw, h: th, data };
+    const n = 101;
+    const out = new Uint8ClampedArray(n * n * 4);
+    const px = (i: number, j: number): number[] => [...out.subarray((j * n + i) * 4, (j * n + i) * 4 + 4)];
+    const view = { focus: 'woof', yaw: (-20 * Math.PI) / 180, pitch: (10 * Math.PI) / 180 };
+    // 整顆汪星看得到：正中間是北緯 10 度、東經 20 度那一格，角落是球外面（透明）
+    expect(paintWoofRelief(out, n, tex, view, WOOF_KM * 1.6, 0)).toBeGreaterThan(0.5);
+    expect(px(50, 50)).toEqual([(20 + 172) % 256, 80 - 10, 7, 255]);
+    expect(px(0, 0)[3]).toBe(0);
+    // 往右是東邊（經度變大）、往上是北邊；指北針轉了 90 度，往右變成南邊
+    expect(px(70, 50)[0]).toBeGreaterThan(px(50, 50)[0]);
+    expect(px(50, 30)[1]).toBeLessThan(px(50, 50)[1]);
+    paintWoofRelief(out, n, tex, view, WOOF_KM * 1.6, 90);
+    expect(px(70, 50)[1]).toBeGreaterThan(80 - 10);
+    expect(px(70, 50)[0]).toBe((20 + 172) % 256);
+    // 中心不是汪星、拉得很近（外圈 50 公尺）：不畫
+    expect(paintWoofRelief(out, n, tex, { ...view, focus: 'mars' }, WOOF_KM * 1.6, 0)).toBe(0);
+    expect(paintWoofRelief(out, n, tex, view, 0.05, 0)).toBe(0);
+    // 拉近慢慢變淡
+    expect(paintWoofRelief(out, n, tex, view, 0.5, 0)).toBeLessThan(paintWoofRelief(out, n, tex, view, 3, 0));
   });
 
   it('wraps Taipei City around the whole planet, with the sea outside the city', () => {

@@ -13,6 +13,7 @@ import { beep, ensureNotificationPermission, iosNeedsHomeScreen, notificationSta
 import { Radar, SPACE_FROM_KM, type RadarRoute, type RadarStreets, type SpaceView } from './radar';
 import { DEFAULT_THEME_ID, getTheme, THEMES, type Theme } from './themes';
 import type { BottleOut, EventOut, Item, KeywordInfo, KeywordRules, MyBottles, MyReport, Origin, Phase, PickedBottle, RelatedPost, RouteOut, PreviewItem, RouteStop, RoutePreview, SubmitResult, FailedItem, EditItem, EditInput } from './types';
+import reliefUrl from './woof-relief.webp';
 
 const DEFAULT_ORIGIN: Origin = { lat: 25.0478, lng: 121.517, source: 'default' }; // 台北車站
 const SOON_SEC = 30 * 60;
@@ -841,22 +842,38 @@ function loadStreets(): void {
 }
 
 /** 汪星拉近時的台北街道（space.ts 用）：跟雷達一樣的圖磚，抓到了重畫太空 */
-/** 汪星的山（terrain.ts，等高線、山頂）：第一次看汪星的地圖才載入，載好了重畫太空 */
-let terrainMod: typeof import('./terrain') | null = null;
-let terrainLoading = false;
-const woofTerrain = (): typeof import('./terrain') | null => {
-  if (terrainMod || terrainLoading) return terrainMod;
-  terrainLoading = true;
-  void import('./terrain')
-    .then((m) => {
-      terrainMod = m;
+/**
+ * 汪星的地形圖（woof-relief.webp，約 34 KB：台北真實的高度上色、山的光影，攤在汪星的經緯度上）：
+ * 第一次看汪星的地圖才下載、解開成像素，好了重畫；radar.ts 畫在雷達下面那一層，space.ts 的 paintWoofRelief 貼到球上
+ */
+let relief: import('./space').ReliefTexture | null = null;
+let reliefLoading = false;
+function woofRelief(): import('./space').ReliefTexture | null {
+  if (relief || reliefLoading) return relief;
+  reliefLoading = true;
+  const img = new Image();
+  img.src = reliefUrl;
+  void img
+    .decode()
+    .then(() => {
+      const c = document.createElement('canvas');
+      [c.width, c.height] = [img.naturalWidth, img.naturalHeight];
+      const ctx = c.getContext('2d');
+      if (!ctx) return;
+      ctx.drawImage(img, 0, 0);
+      relief = { w: c.width, h: c.height, data: ctx.getImageData(0, 0, c.width, c.height).data };
       radar.redrawSpace();
     })
     .finally(() => {
-      terrainLoading = false;
+      reliefLoading = false;
     });
   return null;
-};
+}
+radar.setRelief((out, n, view, km, heading) => {
+  if (!spaceMod || !woofMap()) return 0;
+  const t = view.focus === 'woof' ? woofRelief() : null;
+  return t ? spaceMod.paintWoofRelief(out, n, t, view, km, heading) : 0;
+});
 const woofStreets: import('./space').WoofStreets = (lat, lng, km, rangeKm) => {
   if (!streetsMod) {
     loadStreets();
@@ -1100,7 +1117,7 @@ function updateSpace(): void {
   const you = youOn;
   // 汪星的狗走完一段：重畫汪星（下一段）；每一格照指北針轉回來
   void import('./park').then((p) => p.onDogMove(() => radar.redrawPark(), () => radar.headingDeg));
-  radar.setSpace((km, rg, view) => mod.spaceMarkup({ center, land, when, scaleKm: km, rg, view, streets: woofStreets, terrain: woofTerrain, you, woofMap: map }), mod.bodyRadiusKm);
+  radar.setSpace((km, rg, view) => mod.spaceMarkup({ center, land, when, scaleKm: km, rg, view, streets: woofStreets, you, woofMap: map }), mod.bodyRadiusKm);
 }
 
 /**

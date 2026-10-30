@@ -357,28 +357,6 @@ export const WOOF_KM = (() => {
 })();
 const woofLines = (lines: Array<Array<[number, number]>>): Array<Array<[number, number]>> => lines.map((l) => densify(l.map(toWoof)));
 
-/** 汪星的山（terrain.ts：台北的等高線、山頂，第一次看汪星的地圖才載入） */
-export type WoofTerrain = typeof import('./terrain');
-/** 等高線、山頂換到汪星上（線每 2 度一點），算過記起來 */
-type Contour = { ele: number; line: Array<[number, number]>; box: [number, number, number, number] };
-const woofTerrain = new WeakMap<object, { contours: Contour[]; peaks: Array<{ name: string; ele: number; at: [number, number] }> }>();
-function terrainOf(t: WoofTerrain): { contours: Contour[]; peaks: Array<{ name: string; ele: number; at: [number, number] }> } {
-  let got = woofTerrain.get(t.TAIPEI_CONTOURS);
-  if (!got) {
-    got = {
-      contours: t.TAIPEI_CONTOURS.map((c) => {
-        const line = densify(c.line.map(toWoof));
-        const box: [number, number, number, number] = [Math.min(...line.map((p) => p[0])), Math.min(...line.map((p) => p[1])), Math.max(...line.map((p) => p[0])), Math.max(...line.map((p) => p[1]))];
-        return { ele: c.ele, line, box };
-      }),
-      peaks: t.TAIPEI_PEAKS.map(([name, ele, lat, lng]) => ({ name, ele, at: toWoof([lat, lng]) })),
-    };
-    woofTerrain.set(t.TAIPEI_CONTOURS, got);
-  }
-  return got;
-}
-/** 等高線、山頂：汪星在畫面上多大以上才畫（跟道路一樣） */
-const TERRAIN_FROM_R = 60;
 const WOOF_MAJOR_ROADS = woofLines(TAIPEI_MAJOR_ROADS);
 const WOOF_MINOR_ROADS = woofLines(TAIPEI_MINOR_ROADS);
 
@@ -698,12 +676,12 @@ const sub = (a: Vec3, b: Vec3): Vec3 => [a[0] - b[0], a[1] - b[1], a[2] - b[2]];
 
 /**
  * 汪星畫成跟地球一樣的球：正射投影，地表是台北市（WOOF_LAND）：陸地淡淡填色，外面是海（淡淡的水色），
- * 道路（國道、快速道路粗線，主要幹道細線，夠大才畫）、山（等高線、山頂）；不畫虛線（經緯線、海岸線、區界、球的邊），
+ * 道路（國道、快速道路粗線，主要幹道細線，夠大才畫）；山是另外一層的地形圖（paintWoofRelief）；不畫虛線（經緯線、海岸線、區界、球的邊），
  * 海岸和球的邊看陸地、海的顏色；夜晚那一半照太陽真正的方向（toSun：看的人的座標）。
  * 正中間的經緯度跟著視角轉：左右拖轉經度、上下拖轉緯度。中心是汪星時可以放大到 1 km（focusMinKm），
  * 拉近到畫面上的台北半徑 2 km 內換成大街小巷（streets：跟雷達一樣的圖磚）；中山公園描繪出來（草地花圃草綠色、映池和翠湖水藍色，拉近長出一叢叢的草、一道道的水波），那裡可以放大到 0.5 公尺，看得到的那一小塊線切細
  */
-function woofGlobe(x: number, y: number, r: number, view: SpaceView, toSun: Vec3, streets?: WoofStreets, terrain?: () => WoofTerrain | null): string {
+function woofGlobe(x: number, y: number, r: number, view: SpaceView, toSun: Vec3, streets?: WoofStreets): string {
   const center = woofCenter(view);
   const n = Math.hypot(...toSun) || 1;
   const near = view.focus === 'woof' ? nearOf(center, r) : null;
@@ -723,43 +701,11 @@ function woofGlobe(x: number, y: number, r: number, view: SpaceView, toSun: Vec3
   out += `<path class="woof-sea" d="${disc}${land}" />`;
   // 汪星不畫虛線（經緯線、海岸線、區界、球的邊都不畫）：海岸和球的邊看陸地、海的顏色就看得出來
   if (land) out += `<path class="region-outline woof-land" d="${land}" />`;
-  // 山的等高線：拉遠每 200 公尺一條，拉近每 100、50 公尺一條；200 公尺的倍數畫粗一點
-  const T = r >= TERRAIN_FROM_R && terrain ? terrain() : null;
-  const ppm = r / (WOOF_KM * 1000);
-  if (T) {
-    const step = ppm < 0.04 ? 200 : ppm < 0.12 ? 100 : 50;
-    // 拉近時只看畫面附近的（每一條的範圍碰得到看得到的那一塊經緯度）
-    const deg = ((INNER + 20) / r) * (180 / Math.PI) * 1.2;
-    const lat0 = center.lat - deg;
-    const lat1 = center.lat + deg;
-    const dl = deg / Math.max(0.05, Math.cos(Math.min(89, Math.abs(center.lat) + deg) * RAD));
-    const seen = (c: Contour): boolean => deg > 60 || (c.box[2] >= lat0 && c.box[0] <= lat1 && c.box[3] >= center.lng - dl && c.box[1] <= center.lng + dl);
-    const { contours } = terrainOf(T);
-    const pick = (index: boolean): string => lines(contours.filter((c) => c.ele % step === 0 && c.ele % 200 === 0 === index && seen(c)).map((c) => c.line));
-    out += `<g class="woof-contours" data-step="${step}"><path class="woof-contour" d="${pick(false)}" /><path class="woof-contour index" d="${pick(true)}" /></g>`;
-  }
   if (r >= 60) {
     // 拉近到畫面上的台北半徑 2 km 內：換成大街小巷（抓到圖磚之前先畫內建的）
     const fine = view.focus === 'woof' && streets ? woofStreetLines(center, r, streets) : null;
     out += `<path class="woof-road street-minor" d="${lines(fine?.minor ?? WOOF_MINOR_ROADS)}" />`;
     out += `<path class="woof-road street-major" d="${lines(fine?.major ?? WOOF_MAJOR_ROADS)}" />`;
-  }
-  // 山頂：小小的 ▲，從高的開始放，畫面上離已經放的太近就不放（拉遠只剩主峰，拉近才出現小山）；拉近（外圈約 3 公里內）寫名字和高度。
-  // 跟著指北針轉回來站著（data-at，只轉不翻）
-  if (T) {
-    const named = ppm >= 0.05;
-    const gap = named ? 56 : 44;
-    const [sx, sy] = [C - ox, C - oy];
-    const put: Array<[number, number]> = [];
-    for (const p of terrainOf(T).peaks) {
-      const [px, py, pz] = ortho(center, ...p.at);
-      if (pz <= 0) continue;
-      const [qx, qy] = [C + r * px, C - r * py];
-      if (Math.hypot(qx - sx, qy - sy) > INNER + 10 || put.some(([ax, ay]) => Math.hypot(ax - qx, ay - qy) < gap)) continue;
-      put.push([qx, qy]);
-      const [a, b] = [f1(qx), f1(qy)];
-      out += `<g class="woof-peak" data-at="${a} ${b}" data-flip="no"><path d="M${a} ${f1(qy - 4)}L${f1(qx + 3.5)} ${f1(qy + 2.5)}L${f1(qx - 3.5)} ${f1(qy + 2.5)}Z" />${named ? `<text x="${f1(qx + 6)}" y="${f1(qy + 3)}">${p.name} ${p.ele}</text>` : ''}</g>`;
-    }
   }
   // 海上的水波（跟公園的水池一樣，拉近到外圈約 500 公尺內才長出來；要飛過去當中心才畫）：照中山公園那裡攤平成公尺撒，不在陸地上的才畫
   if (view.focus === 'woof') {
@@ -793,6 +739,91 @@ function woofGlobe(x: number, y: number, r: number, view: SpaceView, toSun: Vec3
   return `<g class="space-globe" transform="translate(${f1(ox)} ${f1(oy)})">${out}</g>`;
 }
 
+/** 汪星的地形圖（woof-relief.webp 解開的像素）：寬、高、RGBA；經度 -172～172、緯度 80～-80 平均攤開（跟 toWoof 一樣） */
+export interface ReliefTexture {
+  w: number;
+  h: number;
+  data: Uint8ClampedArray;
+}
+
+/**
+ * 汪星的地形圖貼到球上（雷達下面另外一層 canvas，radar.ts 的 paintRelief）：out 是 n×n 的 RGBA（整個雷達的正方形），
+ * 每一個像素反推回汪星的經緯度（正射投影反過來，扣掉指北針轉的角度）去地形圖上取顏色，球外面、海是透明的。
+ * 取顏色時附近四格照距離混在一起（拉近不會一格一格的）。中心要是汪星才畫；拉近慢慢變淡（外圈約 3 公里內開始，約 400 公尺內不畫），
+ * 讓道路、公園清楚。回傳這一層要多不透明（0 是不用畫）
+ */
+export function paintWoofRelief(out: Uint8ClampedArray, n: number, tex: ReliefTexture, view: SpaceView, scaleKm: number, heading: number): number {
+  if (view.focus !== 'woof') return 0;
+  const r = (WOOF_KM * INNER) / scaleKm;
+  const ppm = r / (WOOF_KM * 1000);
+  const fade = Math.max(0, Math.min(1, 1 - Math.log(ppm / 0.05) / Math.log(0.4 / 0.05)));
+  if (fade <= 0 || r < TINY_EARTH) return 0;
+  const center = woofCenter(view);
+  const p0 = center.lat * RAD;
+  const [sp0, cp0] = [Math.sin(p0), Math.cos(p0)];
+  const [ch, sh] = [Math.cos(heading * RAD), Math.sin(heading * RAD)];
+  const s = SIZE / n;
+  const { w: tw, h: th, data } = tex;
+  /** 雷達上第 (i, j) 個像素（可以是小數）在汪星上的經緯度；球外面是 null */
+  const geo = (i: number, j: number): [number, number] | null => {
+    const [dx, dy] = [i * s - C, j * s - C];
+    // 雷達上的點 → 汪星那一層的座標（那一層跟著指北針轉了 -heading）→ 球上（半徑 1）
+    const x = (ch * dx - sh * dy) / r;
+    const y = -(sh * dx + ch * dy) / r;
+    const d2 = x * x + y * y;
+    if (d2 >= 1) return null;
+    const z = Math.sqrt(1 - d2);
+    const lat = Math.asin(Math.max(-1, Math.min(1, y * cp0 + z * sp0))) / RAD;
+    let lng = center.lng + Math.atan2(x, z * cp0 - y * sp0) / RAD;
+    if (lng > 180) lng -= 360;
+    else if (lng < -180) lng += 360;
+    return [lat, lng];
+  };
+  // 經緯度每 B 個像素精算一次（反三角函數很慢），中間照比例內插；四個角有一個在球外面、跨過經度 180 度就每一點都精算（球的邊、接縫）
+  const B = 4;
+  const m = Math.ceil(n / B) + 1;
+  const nodes: Array<[number, number] | null> = [];
+  for (let gj = 0; gj < m; gj++) for (let gi = 0; gi < m; gi++) nodes.push(geo(gi * B + 0.5, gj * B + 0.5));
+  for (let j = 0; j < n; j++) {
+    const gj = Math.floor(j / B);
+    const fj = (j - gj * B) / B;
+    for (let i = 0; i < n; i++) {
+      const o = (j * n + i) * 4;
+      const gi = Math.floor(i / B);
+      const fi = (i - gi * B) / B;
+      const [p00, p10, p01, p11] = [nodes[gj * m + gi], nodes[gj * m + gi + 1], nodes[(gj + 1) * m + gi], nodes[(gj + 1) * m + gi + 1]];
+      let ll: [number, number] | null;
+      if (p00 && p10 && p01 && p11 && Math.max(p00[1], p10[1], p01[1], p11[1]) - Math.min(p00[1], p10[1], p01[1], p11[1]) < 90) {
+        const [w00, w10, w01, w11] = [(1 - fi) * (1 - fj), fi * (1 - fj), (1 - fi) * fj, fi * fj];
+        ll = [p00[0] * w00 + p10[0] * w10 + p01[0] * w01 + p11[0] * w11, p00[1] * w00 + p10[1] * w10 + p01[1] * w01 + p11[1] * w11];
+      } else ll = geo(i + 0.5, j + 0.5);
+      if (!ll) {
+        out[o + 3] = 0;
+        continue;
+      }
+      const [lat, lng] = ll;
+      // 地形圖上的位置（像素中心對齊），附近四格照距離混
+      const fu = ((lng + 172) / 344) * tw - 0.5;
+      const fv = ((80 - lat) / 160) * th - 0.5;
+      if (fu < -0.5 || fu > tw - 0.5 || fv < -0.5 || fv > th - 0.5) {
+        out[o + 3] = 0;
+        continue;
+      }
+      const u0 = Math.max(0, Math.min(tw - 2, Math.floor(fu)));
+      const v0 = Math.max(0, Math.min(th - 2, Math.floor(fv)));
+      const a = Math.max(0, Math.min(1, fu - u0));
+      const b = Math.max(0, Math.min(1, fv - v0));
+      const t00 = (v0 * tw + u0) * 4;
+      const t10 = t00 + 4;
+      const t01 = t00 + tw * 4;
+      const t11 = t01 + 4;
+      const [w00, w10, w01, w11] = [(1 - a) * (1 - b), a * (1 - b), (1 - a) * b, a * b];
+      for (let c = 0; c < 4; c++) out[o + c] = data[t00 + c] * w00 + data[t10 + c] * w10 + data[t01 + c] * w01 + data[t11 + c] * w11;
+    }
+  }
+  return fade;
+}
+
 /**
  * 太陽系那幾層的看法：中心是哪一顆（null 是地球、你）、繞著中心左右轉幾度、往下傾斜幾度（0 是從黃道北邊正上方往下看）；
  * toward、u：中心從這一顆往 toward（'earth'、'woof'…）移了多少（0～1，火箭飛過去時鏡頭跟著走）
@@ -822,8 +853,6 @@ export interface SpaceOpts {
   you?: 'earth' | 'woof';
   /** 汪星的地圖（台北的陸地、道路、中山公園）看不看得到：false 是你在地球、火箭還沒飛過去，汪星畫成普通的星球；沒給是看得到 */
   woofMap?: boolean;
-  /** 汪星的山（等高線、山頂）：第一次要畫時才載入，還沒載入回傳 null（載好了重畫）；沒給就不畫山 */
-  terrain?: () => WoofTerrain | null;
 }
 
 /** 太陽系的天體在這一刻的位置（以地球為中心的黃道座標，公里） */
@@ -905,7 +934,7 @@ export function spaceMarkup(o: SpaceOpts): string {
   const you = o.you === 'woof' ? 'woof' : view.focus ? 'earth' : null;
   for (const b of list) {
     // 汪星大到看得出形狀：跟地球一樣畫成球（地圖要搭火箭飛過去才看得到，之前是普通的星球）
-    const look = b.key === 'woof' && b.r >= TINY_EARTH && o.woofMap !== false ? woofGlobe(b.x, b.y, b.r, view, rot(sub(sun, pos.get('woof')!)), o.streets, o.terrain) : bodySvg(b.key, b.x, b.y, b.r, b.key === 'sun' ? null : sunAt);
+    const look = b.key === 'woof' && b.r >= TINY_EARTH && o.woofMap !== false ? woofGlobe(b.x, b.y, b.r, view, rot(sub(sun, pos.get('woof')!)), o.streets) : bodySvg(b.key, b.x, b.y, b.r, b.key === 'sun' ? null : sunAt);
     // 點星球飛過去：點擊範圍至少半徑 12
     bodies += `<g class="space-hit" data-body="${b.key}"><circle class="hit" cx="${f1(b.x)}" cy="${f1(b.y)}" r="${f1(Math.max(b.r + 3, 12))}" />${look}</g>`;
     // 中心換到別的星球：雷達中間的圓點不是你，你畫在你在的那一顆（地球；在汪星上是汪星，汪星大到畫成球時不畫）
