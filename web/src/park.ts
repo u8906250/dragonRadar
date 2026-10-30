@@ -208,7 +208,7 @@ const STATUE_SVG = (() => {
 /**
  * 汪星的狗（dog.ts 畫 3D 的狗、dogs.ts 讓牠動）：PARK_DOGS 是公園裡有哪幾隻（現在是使用者的馬爾濟斯，之後可以加），
  * 只在汪星，在中山公園的草皮上（PARK_YARD：照面積抽一塊草皮，不在發射口和銅像旁邊，火箭、銅像不會蓋住；走多遠照汪星的公尺算；
- * 有時候經過地面到 60 公尺內另一塊草皮，路上不經過水池、建築、不出公園）。
+ * 有時候經過地面到 60 公尺內另一塊草皮，或去 60 公尺內的湖邊喝水，路上不經過水池、建築、不出公園）。
  * 打開網頁第一次畫、搭火箭到汪星時（main.ts 的 moveDogs）換到隨機一塊草皮。跟銅像一樣：雷達外圈約 500 公尺內（STATUE_FROM）先是一個點
  * （照這一段 CSS 移過去，styles.css 的 dog-go），約 6 公尺內（DOG_FULL，整隻約 10 像素高）畫出整隻、點得到（dog-hit，點了坐下）
  */
@@ -275,6 +275,28 @@ export const PARK_YARD: DogYard = {
       const i = near.find((j) => (pick -= areas[j]) < 0) ?? near[near.length - 1];
       const to = spotIn(i, rand);
       if (to && earthMetres(at, to) <= CROSS_MAX_M && clearPath(at, to)) return { ring: i, at: to };
+    }
+    return null;
+  },
+  // 附近（CROSS_MAX_M 內）的湖邊（翠湖、映池的岸）：站在岸上離水 0.35 公尺、面向水，路上不經過水池、建築
+  water: (at, rand) => {
+    const ponds = ZHONGSHAN_PARK.water.map((w) => w[0]);
+    for (let tries = 0; tries < 40; tries++) {
+      const pond = ponds[Math.floor(rand() * ponds.length)];
+      const i = Math.floor(rand() * pond.length);
+      const [a, b] = [pond[i], pond[(i + 1) % pond.length]];
+      const t = rand();
+      const edge: Pt = [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t];
+      // 岸的方向（公尺：往東、往北），往兩邊各 0.35 公尺，不在水裡的那邊是岸上
+      const [my, mx] = [EARTH.my, EARTH.mx(edge[0])];
+      const [ex, ey] = [(b[1] - a[1]) * mx, (b[0] - a[0]) * my];
+      const len = Math.hypot(ex, ey);
+      if (len < 0.2) continue;
+      const off = (m: number): Pt => [edge[0] + ((ex / len) * m) / my, edge[1] + ((-ey / len) * m) / mx];
+      const [p, q] = inRing(off(0.35), pond) ? [off(-0.35), off(0.35)] : [off(0.35), off(-0.35)];
+      if (inRing(p, pond) || !inRing(q, pond) || earthMetres(at, p) > CROSS_MAX_M || !clearPath(at, p)) continue;
+      if (!inRing(p, ZHONGSHAN_PARK.outline) || ZHONGSHAN_PARK.buildings.some((r) => inRing(p, r))) continue;
+      return { at: p, face: q };
     }
     return null;
   },

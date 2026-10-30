@@ -8,6 +8,8 @@ const YARD: DogYard = {
   anywhere: (rand) => ({ ring: 0, at: lawn(0, rand) }),
   within: (ring, rand) => lawn(ring, rand),
   elsewhere: (ring, _at, rand) => ({ ring: 1 - ring, at: lawn(1 - ring, rand) }),
+  // 兩塊草皮中間的地面上有個小水池：岸在 (45, 50)
+  water: () => ({ at: [45, 50], face: [45.4, 50] }),
   metres: (a, b) => Math.hypot(a[0] - b[0], a[1] - b[1]),
 };
 const onLawn = (ring: number, [y, x]: [number, number]): boolean => y >= 0 && y <= 40 && x >= ring * 60 && x <= ring * 60 + 40;
@@ -19,9 +21,9 @@ describe('會動的狗（dogs.ts）', () => {
     const dog = new Dog('test-a', MALTESE, YARD);
     expect(dogById('test-a')).toBe(dog);
     dog.place(rand, 0);
-    // 十分鐘，每半秒看一次：一段接一段（沒有跳），停著的不動，走、跑照速度，每一段一開始面向上一段的方向
+    // 三十分鐘，每半秒看一次：一段接一段（沒有跳），停著的不動，走、跑照速度，每一段一開始面向上一段的方向
     const segs = new Map<number, NonNullable<Dog['seg']>>();
-    for (let t = 0; t <= 600_000; t += 500) {
+    for (let t = 0; t <= 1_800_000; t += 500) {
       const d = dog.now(t, rand);
       segs.set(d.seg.start, d.seg);
     }
@@ -36,10 +38,14 @@ describe('會動的狗（dogs.ts）', () => {
         expect(s.dir).toEqual([s.to[0] - s.from[0], s.to[1] - s.from[1]]);
       } else {
         expect(s.to).toEqual(s.from);
-        expect(s.dir).toEqual(s.dir0);
+        // 停著的面向不變（喝水的轉向水）
+        if (s.do !== 'drink') expect(s.dir).toEqual(s.dir0);
       }
     }
-    expect(new Set(list.map((s) => s.do))).toEqual(new Set(['stand', 'sniff', 'sit', 'stretch', 'walk', 'run']));
+    expect(new Set(list.map((s) => s.do))).toEqual(new Set(['stand', 'sniff', 'sit', 'lie', 'stretch', 'drink', 'walk', 'run']));
+    // 跑完多半趴下來休息
+    const afterRun = list.filter((s, i) => i > 0 && list[i - 1].do === 'run' && !list[i - 1].goal);
+    expect(afterRun.filter((s) => s.do === 'lie').length).toBeGreaterThan(afterRun.length * 0.35);
     // 走路慢慢走，大多是走一走、停下來聞一聞（也會邊走邊聞），在草皮裡偶爾才跑
     expect(DOG_SPEED.walk).toBeLessThanOrEqual(0.3);
     const count = (f: (s: DogSeg) => boolean): number => list.filter(f).length;
@@ -47,12 +53,28 @@ describe('會動的狗（dogs.ts）', () => {
     expect(count((s) => s.do === 'walk' && !s.cross)).toBeGreaterThan(count((s) => s.do === 'run' && !s.cross) * 5);
     expect(count((s) => !!s.nose)).toBeGreaterThan(0);
     // 待在一塊草皮裡；換草皮時經過地面跑過去（大多用跑的）
-    for (const s of list) expect(onLawn(s.ring, s.to)).toBe(true);
+    // 喝水：先走或跑到岸上，面向水喝，喝完走回原來的地方（其他時候都在草皮上）
+    const drinks = list.map((s, i) => [s, i] as const).filter(([s]) => s.do === 'drink');
+    expect(drinks.length).toBeGreaterThan(0);
+    for (const [s, i] of drinks) {
+      const [go, back] = [list[i - 1], list[i + 1]];
+      expect(go.goal).toBe('drink');
+      expect(s.from).toEqual([45, 50]);
+      expect(s.dir[0]).toBeCloseTo(0.4);
+      if (back) expect(back.to).toEqual(go.from);
+    }
+    const shore = new Set(drinks.flatMap(([, i]) => [i - 1, i]));
+    list.forEach((s, i) => {
+      if (!shore.has(i)) expect(onLawn(s.ring, s.to)).toBe(true);
+    });
     const cross = list.filter((s) => s.cross);
     expect(cross.length).toBeGreaterThan(2);
     for (const s of cross) expect(onLawn(s.ring, s.from)).toBe(false);
     expect(cross.filter((s) => s.do === 'run').length).toBeGreaterThan(cross.length / 2);
-    for (const s of list.filter((x) => !x.cross)) if (s.do === 'walk' || s.do === 'run') expect(onLawn(s.ring, s.from)).toBe(true);
+    // 在草皮裡走、跑（喝完水從岸邊走回來的除外）
+    list.forEach((s, i) => {
+      if (!s.cross && (s.do === 'walk' || s.do === 'run') && list[i - 1]?.do !== 'drink') expect(onLawn(s.ring, s.from)).toBe(true);
+    });
   });
 
   it('turns to face you (south) and sits when tapped, and sits longer when tapped again', () => {
@@ -99,6 +121,45 @@ describe('姿勢（dogPose）', () => {
       expect(p.ear).toBeGreaterThan(20);
       expect(p.tongue).toBe(true);
     }
+  });
+
+  it('lies down to rest: body on the ground, front legs forward, sometimes chin down with eyes closed', () => {
+    const k = 400;
+    const y = (svg: string, part: string): number => Number(new RegExp(`data-part="${part}"><ellipse cx="[-\\d.]+" cy="([-\\d.]+)"`).exec(svg)![1]);
+    const x = (svg: string, part: string): number => Number(new RegExp(`data-part="${part}"><ellipse cx="([-\\d.]+)"`).exec(svg)![1]);
+    const lying = dogPose(seg('lie', { ms: 9000 }), 3000);
+    expect(lying.lie).toBe(1);
+    const [stand, lie] = [dogSvg(MALTESE, STILL, 90, k), dogSvg(MALTESE, lying, 90, k)];
+    // 身體往下 10 公分以上（貼地），前腳掌伸到胸口前面
+    expect(y(lie, 'body') - y(stand, 'body')).toBeGreaterThan(0.1 * k * 0.9);
+    expect(x(lie, 'legflpaw')).toBeGreaterThan(x(lie, 'chest') + 0.05 * k);
+    expect(lie).toContain('data-part="leghlthigh"');
+    // 頭抬著、張著眼睛（偶爾眨眼）；休息的下巴靠下去、閉眼睛
+    expect(lying.blink).toBe(0);
+    const rest = dogPose(seg('lie', { ms: 9000, rest: true }), 4000);
+    expect(rest.blink).toBe(1);
+    expect(rest.nod).toBeGreaterThan(15);
+    expect(dogSvg(MALTESE, rest, 180, k)).not.toContain('data-part="pupil1"');
+    // 一開始、最後是站著
+    expect(dogPose(seg('lie', { ms: 9000 }), 0).lie).toBe(0);
+  });
+
+  it('blinks now and then', () => {
+    const s = seg('stand', { ms: 60_000 });
+    const blinks = Array.from({ length: 600 }, (_, i) => dogPose(s, i * 50).blink);
+    expect(blinks.filter((b) => b === 1).length).toBeGreaterThan(5);
+    expect(blinks.filter((b) => b === 1).length).toBeLessThan(60);
+  });
+
+  it('laps water with its head down at the lake', () => {
+    const s = seg('drink', { ms: 5500 });
+    const ps = Array.from({ length: 20 }, (_, i) => dogPose(s, 1500 + i * 60));
+    for (const p of ps) {
+      expect(p.nod).toBeGreaterThan(50);
+      expect(p.lean).toBeGreaterThan(10);
+    }
+    // 舌頭一伸一縮
+    expect(new Set(ps.map((p) => p.tongue))).toEqual(new Set([true, false]));
   });
 
   it('stretches like a downward dog: front legs forward on the ground, chest down, rump up', () => {
@@ -177,9 +238,9 @@ describe('3D 的狗（dog.ts）', () => {
 
   it('grows dense fur like grass, at any size', () => {
     const hairs = (k: number): number => (dogSvg(MALTESE, STILL, 90, k).match(/Q/g) ?? []).length;
-    // 拉近：整隻最多約 3000 根（背面的不畫，畫出來一千多根）
-    expect(hairs(400)).toBeGreaterThan(1000);
-    expect(hairs(400)).toBeLessThan(2000);
+    // 拉近：整隻最多約 3600 根（臉附近密一點，背面的不畫，畫出來兩千多根）
+    expect(hairs(400)).toBeGreaterThan(1500);
+    expect(hairs(400)).toBeLessThan(2600);
     // 畫面上小的時候（整隻約 11 像素高）也是密密的：約每 1.6 像素一根
     const small = 30;
     expect(hairs(small)).toBeGreaterThan(120);

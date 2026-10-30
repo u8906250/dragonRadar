@@ -122,6 +122,22 @@ describe('地球的雷達上的中山公園（跟汪星共用一份）', () => {
       }
     }
     expect(crossed).toBeGreaterThan(40);
+    // 去湖邊喝水：站在岸上（不在水裡、離水不到半公尺），面向水裡，路上不經過水池
+    let drank = 0;
+    for (const { at } of spots.slice(0, 80)) {
+      const w = PARK_YARD.water!(at, rand);
+      if (!w) continue;
+      drank++;
+      const pond = ZHONGSHAN_PARK.water.find((p) => inRing(w.face, p[0]));
+      expect(pond).toBeDefined();
+      expect(ZHONGSHAN_PARK.water.some((p) => inRing(w.at, p[0]))).toBe(false);
+      expect(Math.hypot((w.face[0] - w.at[0]) * EARTH.my, (w.face[1] - w.at[1]) * EARTH.mx(at[0]))).toBeLessThan(0.8);
+      for (let i = 1; i < 50; i++) {
+        const p: [number, number] = [at[0] + ((w.at[0] - at[0]) * i) / 50, at[1] + ((w.at[1] - at[1]) * i) / 50];
+        expect(ZHONGSHAN_PARK.water.some((q) => inRing(p, q[0]))).toBe(false);
+      }
+    }
+    expect(drank).toBeGreaterThan(10);
     // 現在是使用者的馬爾濟斯，約 0.38 公尺高（坐著的銅像腳的一半高）
     expect(PARK_DOGS.map((d) => d.look.name)).toEqual(['馬爾濟斯']);
     expect(dogHeight(PARK_DOGS[0].look)).toBeCloseTo(0.38, 2);
