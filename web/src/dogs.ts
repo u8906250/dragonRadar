@@ -61,7 +61,8 @@ export interface DogYard {
  * speed 走路、邊走邊聞、跑步多快（公尺／秒），reach 一次走、聞著走、在草皮裡跑多遠（公尺），
  * stop 走完停下來、again 停完再停一下的機率，stays 停下來做什麼（權重：聞、站著、發呆、坐、趴、伸懶腰），
  * run 在草皮裡用跑的、nose 邊走邊聞、cross 換到另一塊草皮、drink 去湖邊喝水的機率，crossWalk 幾公尺內換草皮、去喝水偶爾用走的，
- * restAfterRun 跑完趴下來、stretchAfterRest 坐完趴完伸懶腰、chin 趴著下巴靠下去閉眼睛的機率，tail 每種動作尾巴垂下來的機率
+ * afterRun 跑完做什麼（權重：趴下來休息、停下來發呆、改成走路），stretchAfterRest 坐完趴完伸懶腰、chin 趴著下巴靠下去閉眼睛的機率，
+ * tail 每種動作尾巴垂下來的機率
  */
 export interface DogNature {
   speed: { walk: number; sniff: number; run: number };
@@ -74,12 +75,12 @@ export interface DogNature {
   cross: number;
   drink: number;
   crossWalk: number;
-  restAfterRun: number;
+  afterRun: { lie: number; idle: number; walk: number };
   stretchAfterRest: number;
   chin: number;
   tail: Partial<Record<DogDo, number>>;
 }
-/** 一般的狗（小法現在也是）：大多走一走、停下來聞一聞，偶爾站著、發呆、坐、趴、伸懶腰，在草皮裡偶爾跑一下，跑完多半趴下來 */
+/** 一般的狗（小法現在也是）：大多走一走、停下來聞一聞，偶爾站著、發呆、坐、趴、伸懶腰，在草皮裡偶爾跑一下，跑完趴下來、發呆或改成走路 */
 export const NATURE: DogNature = {
   speed: { walk: 0.3, sniff: 0.18, run: 2.4 },
   reach: { walk: [0.8, 4], sniff: [0.5, 2.5], run: [3, 8] },
@@ -91,7 +92,7 @@ export const NATURE: DogNature = {
   cross: 0.15,
   drink: 0.06,
   crossWalk: 12,
-  restAfterRun: 0.6,
+  afterRun: { lie: 0.35, idle: 0.3, walk: 0.35 },
   stretchAfterRest: 0.4,
   chin: 0.5,
   tail: { sniff: 0.5, walk: 0.3, stand: 0.35, idle: 0.7, sit: 0.6, lie: 0.75, drink: 0.4 },
@@ -179,17 +180,25 @@ export class Dog {
       const ms = long[how] ?? 1500 + rand() * 2000;
       return { do: how, from: at, to: at, start, ms, dir0, dir: dir0, ring: s.ring, ...(how === 'lie' && rand() < N.chin ? { rest: true } : {}) };
     };
-    // 坐完、趴完常常伸個懶腰；跑完多半趴下來休息
+    // 坐完、趴完常常伸個懶腰
     if ((s.do === 'sit' || s.do === 'lie') && rand() < N.stretchAfterRest) return stay('stretch');
-    if (s.do === 'run' && rand() < N.restAfterRun) return stay('lie');
-    if (rand() < (moving ? N.stop : N.again)) {
+    // 跑完照個性：趴下來休息、停下來發呆，或改成走路（不再跑、不換草皮）
+    let walkOn = false;
+    if (s.do === 'run') {
+      const after = Object.entries(N.afterRun) as Array<['lie' | 'idle' | 'walk', number]>;
+      let r = rand() * after.reduce((a, [, w]) => a + w, 0);
+      const how = (after.find(([, w]) => (r -= w) < 0) ?? after[after.length - 1])[0];
+      if (how === 'walk') walkOn = true;
+      else return stay(how);
+    }
+    if (!walkOn && rand() < (moving ? N.stop : N.again)) {
       // 照權重抽停下來做什麼
       const ways = Object.entries(N.stays) as Array<[DogDo, number]>;
       let r = rand() * ways.reduce((a, [, w]) => a + w, 0);
       return stay((ways.find(([, w]) => (r -= w) < 0) ?? ways[ways.length - 1])[0]);
     }
     // 去附近的湖邊喝水：遠的用跑的
-    if (this.yard.water && rand() < N.drink) {
+    if (!walkOn && this.yard.water && rand() < N.drink) {
       const w = this.yard.water(at, rand);
       if (w) {
         const m = this.yard.metres(at, w.at);
@@ -198,7 +207,7 @@ export class Dog {
       }
     }
     // 經過地面到附近另一塊草皮：大多用跑的，近的偶爾用走的
-    if (rand() < N.cross) {
+    if (!walkOn && rand() < N.cross) {
       const o = this.yard.elsewhere(s.ring, at, rand);
       if (o) {
         const m = this.yard.metres(at, o.at);
@@ -207,8 +216,8 @@ export class Dog {
         return { ...seg, ms: (m / speedOf_(seg)) * 1000 };
       }
     }
-    const run = rand() < N.run;
-    const nose = !run && rand() < N.nose;
+    const run = !walkOn && rand() < N.run;
+    const nose = !run && !walkOn && rand() < N.nose;
     const [lo, hi] = N.reach[run ? 'run' : nose ? 'sniff' : 'walk'];
     let best: { to: Pt; m: number } | null = null;
     for (let i = 0; i < 12; i++) {

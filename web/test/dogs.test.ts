@@ -43,9 +43,12 @@ describe('會動的狗（dogs.ts）', () => {
       }
     }
     expect(new Set(list.map((s) => s.do))).toEqual(new Set(['stand', 'idle', 'sniff', 'sit', 'lie', 'stretch', 'drink', 'walk', 'run']));
-    // 跑完多半趴下來休息
+    // 跑完不一定休息：趴下來、停下來發呆，或改成走路（不再跑）
     const afterRun = list.filter((s, i) => i > 0 && list[i - 1].do === 'run' && !list[i - 1].goal);
-    expect(afterRun.filter((s) => s.do === 'lie').length).toBeGreaterThan(afterRun.length * 0.35);
+    expect(afterRun.length).toBeGreaterThan(10);
+    for (const how of ['lie', 'idle', 'walk'] as const) expect(afterRun.some((s) => s.do === how)).toBe(true);
+    expect(afterRun.filter((s) => s.do === 'lie' || s.do === 'idle' || s.do === 'walk').length).toBeGreaterThan(afterRun.length * 0.8);
+    expect(afterRun.some((s) => s.do === 'run')).toBe(false);
     // 走路慢慢走，大多是走一走、停下來聞一聞（也會邊走邊聞），在草皮裡偶爾才跑
     expect(NATURE.speed.walk).toBeLessThanOrEqual(0.3);
     const count = (f: (s: DogSeg) => boolean): number => list.filter(f).length;
@@ -81,7 +84,7 @@ describe('會動的狗（dogs.ts）', () => {
 
   it('follows its own nature (another dog can love running)', () => {
     const rand = seeded(3);
-    const runner = new Dog({ id: 'test-c', name: '愛跑的', look: MALTESE, yard: YARD, nature: { ...NATURE, run: 0.6, stays: { sniff: 1 } } });
+    const runner = new Dog({ id: 'test-c', name: '愛跑的', look: MALTESE, yard: YARD, nature: { ...NATURE, run: 0.6, stays: { sniff: 1 }, afterRun: { lie: 1, idle: 0, walk: 0 } } });
     runner.place(rand, 0);
     const segs = new Map<number, NonNullable<Dog['seg']>>();
     for (let t = 0; t <= 600_000; t += 500) segs.set(runner.now(t, rand).seg.start, runner.now(t, rand).seg);
