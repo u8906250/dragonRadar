@@ -1,7 +1,8 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { RADAR_GEOM } from '../src/radar';
-import { ARRIVE_MS, arriveRocket, DEPART_MS, departRocket, EARTH, earthParkSvg, HATCH_CENTER, nearPark, PARK_MIN_KM, parkGeom, parkTexture, resetRocket, rocketNow, STOW_MS, stowRocket, SUMMON_MS, summonRocket } from '../src/park';
-import { bodyBearing, spaceMarkup, toWoof } from '../src/space';
+import { ARRIVE_MS, arriveRocket, DEPART_MS, departRocket, DOG_H, dogNow, EARTH, earthParkSvg, HATCH_CENTER, moveDog, nearPark, petDog, PARK_MIN_KM, parkGeom, parkTexture, resetRocket, rocketNow, STOW_MS, stowRocket, SUMMON_MS, summonRocket } from '../src/park';
+import { ZHONGSHAN_PARK } from '../src/zhongshan';
+import { bodyBearing, spaceMarkup, toWoof, WOOF_KM } from '../src/space';
 
 const { c: C, inner: INNER } = RADAR_GEOM;
 const hall: [number, number] = [25.0400096, 121.5602923];
@@ -83,6 +84,93 @@ describe('地球的雷達上的中山公園（跟汪星共用一份）', () => {
     // 拉近到別的地方、看不到就不畫
     expect(at(0.01, hall)).not.toContain('park-statue');
     expect(at(2, hall)).not.toContain('park-statue');
+  });
+
+  it('puts a dog somewhere on a lawn, only on 汪星', () => {
+    /** 汪星正中間轉到台北的這個地方、外圈 km 公里 */
+    const woofAt = (km: number, p: [number, number]): string => {
+      const [la, ln] = toWoof(p);
+      return spaceMarkup({ center: { lat: 25.04, lng: 121.52 }, land: [], when: new Date('2026-10-28T08:00:00Z'), scaleKm: km, rg: 164, view: { focus: 'woof', yaw: (-ln * Math.PI) / 180, pitch: (la * Math.PI) / 180 } });
+    };
+    const inRing = ([y, x]: [number, number], r: Array<[number, number]>): boolean => r.reduce((on, [yi, xi], i) => {
+      const [yj, xj] = r[(i + r.length - 1) % r.length];
+      return yi > y !== yj > y && x < ((xj - xi) * (y - yi)) / (yj - yi) + xi ? !on : on;
+    }, false);
+    // 每次抽到的地方都在某一塊草皮裡面，不在發射口（約 8 公尺見方）和銅像旁邊；面向左右都有
+    let seed = 7;
+    const rand = (): number => ((seed = (seed * 16807) % 2147483647) - 1) / 2147483646;
+    const spots = Array.from({ length: 200 }, () => moveDog(rand));
+    for (const { at } of spots) {
+      expect(ZHONGSHAN_PARK.green.some((r) => inRing(at, r))).toBe(true);
+      expect(Math.hypot((at[0] - HATCH_CENTER[0]) * EARTH.my, (at[1] - HATCH_CENTER[1]) * EARTH.mx(at[0]))).toBeGreaterThan(6);
+    }
+    expect(new Set(spots.map((d) => d.left))).toEqual(new Set([true, false]));
+    // 散在很多塊草皮上
+    expect(new Set(spots.map(({ at }) => ZHONGSHAN_PARK.green.findIndex((r) => inRing(at, r)))).size).toBeGreaterThan(15);
+    // 坐著的銅像腳（腳底到膝蓋約 0.72 公尺）的一半高
+    expect(DOG_H).toBeCloseTo(0.36, 2);
+    const dog = dogNow().at;
+    // 地球的雷達上沒有
+    expect(at(0.005, dog)).not.toContain('woof-dog');
+    // 汪星：拉遠到約 500 公尺外看不到，再近是一個點，拉近到約 6 公尺內畫出整隻（照真的大小）、點得到
+    expect(woofAt(1, dog)).not.toContain('woof-dog');
+    expect(woofAt(0.3, dog)).toMatch(/class="woof-dog \w+" style="--t:-?\d+ms;--ms:\d+ms[^"]*"><g class="dog-go"><circle class="dog-dot"/);
+    expect(woofAt(0.008, dog)).toContain('dog-dot');
+    const full = woofAt(0.005, dog);
+    for (const cls of ['dog-fur', 'dog-far', 'dog-ear', 'dog-nose', 'dog-eye', 'dog-hit']) expect(full).toContain(`class="${cls}"`);
+    // 白色的馬爾濟斯：脖子上不戴東西
+    expect(full).not.toMatch(/scarf|collar/);
+    const [, ax, ay, kx, ky] = /<g data-at="([\d.]+) ([\d.]+)"><circle class="dog-hit"[^>]*\/><g transform="translate\([\d.]+ [\d.]+\) scale\(([-\d.]+) ([\d.]+)\)"/.exec(full)!.map(Number);
+    expect(Math.hypot(ax - C, ay - C)).toBeLessThan(2);
+    expect(Math.abs(kx)).toBeCloseTo(ky);
+    expect(kx < 0).toBe(dogNow().left);
+    // 在畫面外面就不畫
+    expect(woofAt(0.005, hall)).not.toContain('woof-dog');
+  });
+
+  it('lets the dog walk, run, stop, sniff and sit on its lawn, and hop and bark when tapped', () => {
+    const inRing = ([y, x]: [number, number], r: Array<[number, number]>): boolean => r.reduce((on, [yi, xi], i) => {
+      const [yj, xj] = r[(i + r.length - 1) % r.length];
+      return yi > y !== yj > y && x < ((xj - xi) * (y - yi)) / (yj - yi) + xi ? !on : on;
+    }, false);
+    let seed = 11;
+    const rand = (): number => ((seed = (seed * 16807) % 2147483647) - 1) / 2147483646;
+    // 先畫過汪星（小狗走在汪星上，走多遠照汪星的公尺算），再從頭開始
+    const [la, ln] = toWoof(hall);
+    spaceMarkup({ center: { lat: 25.04, lng: 121.52 }, land: [], when: new Date('2026-10-28T08:00:00Z'), scaleKm: 0.3, rg: 164, view: { focus: 'woof', yaw: (-ln * Math.PI) / 180, pitch: (la * Math.PI) / 180 } });
+    moveDog(rand, 0);
+    // 十分鐘，每半秒看一次：每一段都在一開始那塊草皮裡，一段接一段（沒有跳）
+    const segs = new Map<number, ReturnType<typeof dogNow>['seg']>();
+    for (let t = 0; t <= 600_000; t += 500) {
+      const d = dogNow(t, rand);
+      segs.set(d.seg.start, d.seg);
+    }
+    const list = [...segs.values()].sort((a, b) => a.start - b.start);
+    const ring = ZHONGSHAN_PARK.green[list[0].ring];
+    for (let i = 0; i < list.length; i++) {
+      const s = list[i];
+      expect(s.ring).toBe(list[0].ring);
+      expect(inRing(s.to, ring)).toBe(true);
+      if (i > 0) {
+        expect(s.start).toBeCloseTo(list[i - 1].start + list[i - 1].ms, 6);
+        expect(s.from).toEqual(list[i - 1].to);
+      }
+      // 停著的不動；走的、跑的照速度（汪星上的公尺／秒）
+      if (s.do === 'walk' || s.do === 'run') {
+        const [p, q] = [toWoof(s.from), toWoof(s.to)];
+        const my = (WOOF_KM * 1000 * Math.PI) / 180;
+        const m = Math.hypot((q[0] - p[0]) * my, (q[1] - p[1]) * my * Math.cos((p[0] * Math.PI) / 180));
+        expect(m / (s.ms / 1000)).toBeCloseTo(s.do === 'walk' ? 0.5 : 2.4, 1);
+      } else expect(s.to).toEqual(s.from);
+    }
+    expect(new Set(list.map((s) => s.do))).toEqual(new Set(['stand', 'sniff', 'sit', 'walk', 'run']));
+    // 點了：停在原地跳兩下、叫「汪！」，接著跑開
+    const before = dogNow(600_200, rand);
+    petDog(600_200);
+    const happy = dogNow(600_300, rand);
+    expect(happy.seg.do).toBe('happy');
+    expect(happy.at).toEqual(before.at);
+    expect(dogNow(600_200 + 1700, rand).seg.do).toBe('run');
   });
 
   it('summons the rocket stored under the middle lawn, parks it, flies it to 汪星 and stores it there', () => {

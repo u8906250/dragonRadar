@@ -62,6 +62,8 @@ interface Patches {
 /** 這個世界的公園：填色的圈（逆時針）、線，草地、水面攤平成公尺（O 是公園中間，x 往東、y 往北） */
 export interface ParkGeom {
   name: RocketWorld;
+  /** 台北的經緯度換成這個世界的 */
+  to: (p: Pt) => Pt;
   outline: Pt[];
   outlineLine: Pt[];
   lawns: Pt[][];
@@ -117,6 +119,7 @@ export function parkGeom(w: ParkWorld): ParkGeom {
   };
   const g: ParkGeom = {
     name: w.name,
+    to: w.to,
     outline,
     outlineLine: [...outline, outline[0]],
     lawns: ZHONGSHAN_PARK.green.map(area),
@@ -198,6 +201,241 @@ const STATUE_SVG = (() => {
     `<path class="statue-seam" d="M${at(0.04, -1.48)}L${at(0.12, -1.49)}" />`
   );
 })();
+
+/**
+ * 汪星的小狗：使用者的馬爾濟斯（照照片畫：白色捲捲的長毛、圓圓的頭、垂下來毛茸茸的長耳朵、大大的黑眼睛和黑鼻子、短短的嘴巴、
+ * 往上翹的蓬蓬尾巴、腳掌一團毛；脖子上不戴東西）。站著、側面面向右邊，左上照光（背上亮、肚子和另一邊的腳暗一點），地上一塊影子。
+ * 單位是公尺，(0, 0) 是四隻腳中間的地上，往上是負的；照真的大小畫，約 0.36 公尺高到頭頂（DOG_H，坐著的銅像腳的一半高：腳底到膝蓋約 0.72 公尺）。
+ * 腳、頭、尾巴各自一組（CSS 轉動：走路、跑步時腳前後擺，聞地上時頭低下去，尾巴搖，坐下時身體繞屁股往上轉、後腳折起來、前腳撐直），中心在連到身體的地方
+ */
+export const DOG_H = 0.36;
+const DOG_FULL = INNER / 6;
+const DOG_HIT = 16;
+const DOG_SVG = (() => {
+  const n = (v: number): number => +v.toFixed(4);
+  /** 毛茸茸的一圈：橢圓（圓心、半徑、轉幾度）的邊上一個個往外鼓的小弧（捲毛） */
+  const fluff = (cx: number, cy: number, rx: number, ry: number, bumps: number, puff: number, rot = 0): string => {
+    const [co, si] = [Math.cos(rot * RAD), Math.sin(rot * RAD)];
+    const pt = (a: number, k: number): string => {
+      const [x, y] = [rx * k * Math.cos(a), ry * k * Math.sin(a)];
+      return `${n(cx + x * co - y * si)} ${n(cy + x * si + y * co)}`;
+    };
+    let d = `M${pt(0, 1)}`;
+    for (let i = 0; i < bumps; i++) d += `Q${pt(((i + 0.5) / bumps) * 2 * Math.PI, 1 + puff)} ${pt(((i + 1) / bumps) * 2 * Math.PI, 1)}`;
+    return `${d}Z`;
+  };
+  /** 一隻腳（a、b 是對角的兩組，走路時輪流往前；f 前腳、h 後腳，坐下時動作不一樣）：蓬蓬的腳、一團毛的腳掌，(0, 0) 是連到身體的地方 */
+  const leg = (x: number, cls: string, pair: string, end: string): string =>
+    `<g transform="translate(${x} -0.15)"><g class="dog-leg leg-${pair} leg-${end}"><path class="${cls}" d="${fluff(0, 0.065, 0.03, 0.075, 8, 0.22)}" /><path class="${cls}" d="${fluff(0.008, 0.135, 0.036, 0.021, 6, 0.4)}" /></g></g>`;
+  /** 坐下時身體（連前腳、頭、尾巴）繞屁股這一點往上轉 */
+  const hip = '-0.12 -0.13';
+  const back = '0.12 0.13';
+  return (
+    `<ellipse class="dog-shadow" cx="0" cy="0.004" rx="0.2" ry="0.04" />` +
+    `<g class="dog-bob">` +
+    // 另一邊的後腳在最後面
+    leg(-0.085, 'dog-far', 'b', 'h') +
+    `<g transform="translate(${hip})"><g class="dog-sit-up"><g transform="translate(${back})">` +
+    // 另一邊的前腳、尾巴在身體後面
+    leg(0.115, 'dog-far', 'a', 'f') +
+    `<g transform="translate(-0.14 -0.23)"><g class="dog-tail"><path class="dog-fur" d="${fluff(-0.012, -0.048, 0.028, 0.066, 8, 0.35, 25)}" /></g></g>` +
+    // 身體（捲捲的毛）、背上亮的一條、肚子暗
+    `<path class="dog-fur" d="${fluff(-0.01, -0.195, 0.15, 0.075, 16, 0.16)}" />` +
+    `<path class="dog-lit" d="${fluff(-0.03, -0.238, 0.1, 0.022, 8, 0.3)}" />` +
+    `<ellipse class="dog-dark" cx="-0.01" cy="-0.14" rx="0.11" ry="0.018" />` +
+    leg(0.09, 'dog-fur', 'b', 'f') +
+    // 頭（連到脖子的地方轉）：圓圓的毛、短短的嘴巴、黑鼻子、大眼睛（一點反光）、喘氣時的舌頭，垂下來的長耳朵
+    `<g transform="translate(0.11 -0.24)"><g class="dog-head">` +
+    `<path class="dog-fur" d="${fluff(0.045, -0.05, 0.068, 0.066, 12, 0.2)}" />` +
+    `<path class="dog-tongue" d="M0.1 -0.016Q0.112 -0.002 0.122 -0.014Z" />` +
+    `<path class="dog-fur" d="${fluff(0.098, -0.03, 0.034, 0.027, 7, 0.3)}" />` +
+    `<ellipse class="dog-nose" cx="0.13" cy="-0.043" rx="0.014" ry="0.011" />` +
+    `<circle class="dog-eye" cx="0.07" cy="-0.062" r="0.015" />` +
+    `<circle class="dog-shine" cx="0.075" cy="-0.067" r="0.0045" />` +
+    `<path class="dog-ear" d="${fluff(0.008, -0.018, 0.03, 0.066, 9, 0.3, 10)}" />` +
+    `</g></g>` +
+    `</g></g></g>` +
+    // 這一邊的後腳（坐下時折起來），坐下時屁股旁邊一團圓圓的大腿
+    leg(-0.12, 'dog-fur', 'a', 'h') +
+    `<path class="dog-fur dog-haunch" d="${fluff(-0.105, -0.075, 0.068, 0.058, 10, 0.2)}" />` +
+    `</g>`
+  );
+})();
+
+/**
+ * 小狗在做什麼（一段一段的）：stand 站著搖尾巴、sniff 低頭聞一聞、sit 坐下（坐一下再站起來）、walk 走、run 跑（from 走到 to）、happy 被點了（跳兩下、叫「汪！」，接著跑開）；
+ * 地方是台北的經緯度，ring 是在哪一塊草皮（ZHONGSHAN_PARK.green），start 是 performance.now()
+ */
+type DogDo = 'stand' | 'sniff' | 'sit' | 'walk' | 'run' | 'happy';
+interface DogSeg {
+  do: DogDo;
+  from: Pt;
+  to: Pt;
+  start: number;
+  ms: number;
+  left: boolean;
+  ring: number;
+}
+/** 走路、跑步多快（汪星上的公尺／秒），走、跑多遠（公尺） */
+const DOG_SPEED = { walk: 0.5, run: 2.4 };
+const DOG_REACH = { walk: [1, 8], run: [3, 20] };
+const HAPPY_MS = 1600;
+let dog: DogSeg | null = null;
+/** 小狗在哪個世界畫（汪星；算走多遠用這個世界的公尺），還沒畫過是地球 */
+let dogWorld: ParkGeom | null = null;
+
+/** 草皮的面積（照面積抽哪一塊） */
+let lawnAreas: number[] | null = null;
+
+/** 這塊草皮裡隨機一個地方（不在發射口和銅像旁邊，火箭、銅像不會蓋住）；抽不到是 null */
+function spotIn(ring: number, rand: () => number): Pt | null {
+  const r = ZHONGSHAN_PARK.green[ring];
+  const [my, mx] = [EARTH.my, EARTH.mx(HATCH_CENTER[0])];
+  const far = (p: Pt, q: Pt, m: number): boolean => Math.abs((p[0] - q[0]) * my) > m || Math.abs((p[1] - q[1]) * mx) > m;
+  const [a0, a1] = [Math.min(...r.map((q) => q[0])), Math.max(...r.map((q) => q[0]))];
+  const [b0, b1] = [Math.min(...r.map((q) => q[1])), Math.max(...r.map((q) => q[1]))];
+  for (let i = 0; i < 40; i++) {
+    const at: Pt = [a0 + rand() * (a1 - a0), b0 + rand() * (b1 - b0)];
+    if (inRing(at, r) && far(at, HATCH_CENTER, 6) && far(at, ZHONGSHAN_PARK.statue, 2.5)) return at;
+  }
+  return null;
+}
+
+/**
+ * 小狗換到中山公園裡隨機一塊草皮上的某個地方（照面積抽一塊草皮，在那一塊裡面抽一個點），站著，面向左邊或右邊也隨機。
+ * 打開網頁第一次畫的時候抽，搭火箭到汪星時再抽一次（main.ts）
+ */
+export function moveDog(rand: () => number = Math.random, now = performance.now()): { at: Pt; left: boolean } {
+  const areas = (lawnAreas ??= ZHONGSHAN_PARK.green.map((r) => Math.abs(ringArea(r))));
+  const total = areas.reduce((a, b) => a + b, 0);
+  for (let tries = 0; tries < 1000; tries++) {
+    let pick = rand() * total;
+    const ring = Math.max(0, areas.findIndex((a) => (pick -= a) < 0));
+    const at = spotIn(ring, rand);
+    if (at) {
+      dog = { do: 'stand', from: at, to: at, start: now, ms: 1500 + rand() * 2500, left: rand() < 0.5, ring };
+      return { at, left: dog.left };
+    }
+  }
+  const at = ZHONGSHAN_PARK.green[0][0];
+  dog = { do: 'stand', from: at, to: at, start: now, ms: 3000, left: false, ring: 0 };
+  return { at, left: false };
+}
+
+/** 兩個地方（台北的經緯度）在這個世界上差幾公尺 */
+function metres(g: ParkGeom, a: Pt, b: Pt): number {
+  const [p, q] = [g.to(a), g.to(b)];
+  return Math.hypot((p[0] - q[0]) * g.O.my, (p[1] - q[1]) * g.O.mx);
+}
+
+/** 下一段：走完、跑完多半停下來（站著、聞一聞或坐下，坐比較久），停完多半再走（三成用跑的），被點完一定跑開；都在同一塊草皮裡 */
+function nextDog(s: DogSeg, g: ParkGeom, rand: () => number): DogSeg {
+  const [at, start] = [s.to, s.start + s.ms];
+  const moving = s.do === 'walk' || s.do === 'run';
+  if (s.do !== 'happy' && rand() < (moving ? 0.7 : 0.25)) {
+    const r = rand();
+    const how: DogDo = r < 0.4 ? 'stand' : r < 0.65 ? 'sniff' : 'sit';
+    return { ...s, do: how, from: at, to: at, start, ms: how === 'sit' ? 4000 + rand() * 5000 : 1500 + rand() * 3000 };
+  }
+  const how = s.do === 'happy' || rand() < 0.3 ? 'run' : 'walk';
+  const [lo, hi] = DOG_REACH[how];
+  let best: { to: Pt; m: number } | null = null;
+  for (let i = 0; i < 12; i++) {
+    const to = spotIn(s.ring, rand);
+    if (!to) break;
+    const m = metres(g, at, to);
+    if (m >= lo && m <= hi) {
+      best = { to, m };
+      break;
+    }
+    if (m >= 0.5 && (!best || Math.abs(m - hi) < Math.abs(best.m - hi))) best = { to, m };
+  }
+  if (!best) return { ...s, do: 'stand', from: at, to: at, start, ms: 2000 };
+  // 面向走的方向（往東是右邊）；幾乎正南北就維持原來的
+  const east = (g.to(best.to)[1] - g.to(at)[1]) * g.O.mx;
+  return { do: how, from: at, to: best.to, start, ms: (best.m / DOG_SPEED[how]) * 1000, left: Math.abs(east) < best.m * 0.15 ? s.left : east < 0, ring: s.ring };
+}
+
+/** 小狗現在在哪、面向哪邊、在做什麼（這一段已經過了 e 毫秒）；還沒抽過就先抽，很久沒看（分頁在背景）從停下來的地方重新開始 */
+export function dogNow(now = performance.now(), rand: () => number = Math.random): { at: Pt; left: boolean; seg: DogSeg; e: number } {
+  const g = dogWorld ?? parkGeom(EARTH);
+  let s = dog ?? (moveDog(rand, now), dog!);
+  if (now - (s.start + s.ms) > 60_000) s = { ...s, do: 'stand', from: s.to, to: s.to, start: now, ms: 2000 };
+  while (now >= s.start + s.ms) s = nextDog(s, g, rand);
+  dog = s;
+  const e = now - s.start;
+  const u = Math.min(1, e / s.ms);
+  return { at: [s.from[0] + (s.to[0] - s.from[0]) * u, s.from[1] + (s.to[1] - s.from[1]) * u], left: s.left, seg: s, e };
+}
+
+/** 點了小狗：停在原地跳兩下、叫「汪！」、尾巴搖很快（HAPPY_MS），接著跑開 */
+export function petDog(now = performance.now()): void {
+  const d = dogNow(now);
+  dog = { ...d.seg, do: 'happy', from: d.at, to: d.at, start: now, ms: HAPPY_MS };
+}
+
+/** 這一段結束時重畫（main.ts 給：重畫汪星）；只在小狗有畫的時候排 */
+let dogRedraw: (() => void) | null = null;
+let dogTimer: ReturnType<typeof setTimeout> | undefined;
+let dogWake = 0;
+export function onDogMove(redraw: () => void): void {
+  dogRedraw = redraw;
+}
+function wakeDog(at: number, now: number): void {
+  if (!dogRedraw || at === dogWake) return;
+  clearTimeout(dogTimer);
+  dogWake = at;
+  dogTimer = setTimeout(() => {
+    dogWake = 0;
+    dogRedraw?.();
+  }, Math.max(0, at - now) + 30);
+}
+
+/** 點在不在一圈裡面（射線法） */
+function inRing([y, x]: Pt, r: Pt[]): boolean {
+  let inside = false;
+  for (let i = 0, j = r.length - 1; i < r.length; j = i++) {
+    const [yi, xi] = r[i];
+    const [yj, xj] = r[j];
+    if (yi > y !== yj > y && x < ((xj - xi) * (y - yi)) / (yj - yi) + xi) inside = !inside;
+  }
+  return inside;
+}
+
+/**
+ * 汪星的小狗：這一段從哪走到哪（畫面上，CSS 照 --t、--ms 移過去，--dx、--dy），拉遠是一個點，約 6 公尺內畫出整隻、點得到（dog-hit）；
+ * 被點了頭上冒出「汪！」（只轉不翻，字不會反過來）。這一段結束時重畫（wakeDog），這一段走過的路整條都在畫面外面就不畫
+ */
+function dogPart(g: ParkGeom, c: ParkCanvas): string {
+  dogWorld = g;
+  const now = performance.now();
+  const d = dogNow(now);
+  const s = d.seg;
+  wakeDog(s.start + s.ms, now);
+  const [a, b] = [c.at(...g.to(s.from)), c.at(...g.to(s.to))];
+  const h = DOG_H * c.ppm;
+  if (!a || !b) return '';
+  // 這一段走過的路離雷達中心最近多遠（起點、終點都在畫面外面，中間可能經過畫面）
+  const [vx, vy] = [b[0] - a[0], b[1] - a[1]];
+  const u = Math.max(0, Math.min(1, ((c.rx - a[0]) * vx + (c.ry - a[1]) * vy) / (vx * vx + vy * vy || 1)));
+  if (Math.hypot(a[0] + vx * u - c.rx, a[1] + vy * u - c.ry) - h > INNER + 2) return '';
+  const f1 = (v: number): string => v.toFixed(1);
+  const [x, y] = [f1(a[0]), f1(a[1])];
+  const moving = s.do === 'walk' || s.do === 'run';
+  const style = `--t:${-Math.round(d.e)}ms;--ms:${Math.round(s.ms)}ms${moving ? `;--dx:${f1(b[0] - a[0])}px;--dy:${f1(b[1] - a[1])}px` : ''}`;
+  const open = `<g class="woof-dog ${s.do}" style="${style}"><g class="dog-go">`;
+  if (c.ppm < DOG_FULL) return `${open}<circle class="dog-dot" cx="${x}" cy="${y}" r="${Math.min(3, Math.max(1, c.ppm * 0.5)).toFixed(1)}" /></g></g>`;
+  const k = +c.ppm.toPrecision(4);
+  const bark =
+    s.do === 'happy'
+      ? `<g class="dog-bark" data-at="${x} ${y}" data-flip="no"><g transform="translate(${x} ${f1(a[1] - h - 3)})"><g class="dog-bark-pop">` +
+        `<path class="dog-bark-box" d="M-8 -20H8A8.5 8.5 0 0 1 8 -3H3L0 1L-3 -3H-8A8.5 8.5 0 0 1 -8 -20Z" /><text class="dog-bark-text" x="0" y="-7.5" text-anchor="middle">汪！</text></g></g></g>`
+      : '';
+  return (
+    `${open}<g data-at="${x} ${y}"><circle class="dog-hit" cx="${x}" cy="${f1(a[1] - h * 0.5)}" r="${f1(Math.max(DOG_HIT, h * 0.7))}" />` +
+    `<g transform="translate(${x} ${y}) scale(${s.left ? -k : k} ${k})">${DOG_SVG}</g></g>${bark}</g></g>`
+  );
+}
 
 /**
  * 火箭（地球和汪星共用一支，記得在哪一邊，存在 localStorage 的 dr.rocket，重新整理也還在；一開始收在地球的發射口底下）：
@@ -364,7 +602,7 @@ function rocketPart(g: ParkGeom, c: ParkCanvas, phase: RocketPhase, e: number): 
 
 /**
  * 中山公園：範圍淡淡填色、虛線的邊；拉近到 1.8 km 內再畫草地花圃（淡淡的草綠色、點線的邊）、水面（淡淡的水藍色、虛線的邊）、
- * 步道（跟街道的細線一樣）、建築（實線）、孫中山銅像（點了叫出火箭）、火箭，拉近到幾百公尺內草地長出一叢叢的草、水面有一道道的水波
+ * 步道（跟街道的細線一樣）、建築（實線）、孫中山銅像（點了叫出火箭）、火箭、汪星的小狗，拉近到幾百公尺內草地長出一叢叢的草、水面有一道道的水波
  */
 export function parkSvg(g: ParkGeom, c: ParkCanvas): string {
   if (c.ppm < FILL_PPM) return '';
@@ -387,6 +625,8 @@ export function parkSvg(g: ParkGeom, c: ParkCanvas): string {
   out += `<path class="park-water" d="${c.lines(g.water)}" />`;
   out += `<path class="park-path street-minor" d="${c.lines(g.paths)}" />`;
   out += `<path class="park-building" d="${c.lines(g.buildings)}" />`;
+  // 小狗只在汪星，畫在火箭、銅像後面（在它們後面一點時被擋住）
+  if (g.name === 'woof' && c.ppm >= STATUE_FROM) out += dogPart(g, c);
   const r = rocketNow();
   if (r.world === g.name && r.phase !== 'away' && r.phase !== 'stored' && r.e >= 0) out += rocketPart(g, c, r.phase, r.e);
   const s = c.ppm >= STATUE_FROM ? c.at(...g.statue) : null;

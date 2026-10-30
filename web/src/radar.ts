@@ -276,6 +276,8 @@ export class Radar {
   /** 點了中山公園的銅像、停著的火箭（地球或汪星，拉近到畫出來時才點得到）：哪個世界的 */
   onStatue: ((world: 'earth' | 'woof') => void) | null = null;
   onRocket: ((world: 'earth' | 'woof') => void) | null = null;
+  /** 點了汪星的小狗（拉近到畫出整隻時才點得到） */
+  onDog: (() => void) | null = null;
   /** 火箭飛行中畫在正中間的那一層（不跟著指北針轉） */
   private readonly tripLayer: SVGGElement;
   private bottles: RadarBottle[] = [];
@@ -404,10 +406,11 @@ export class Radar {
       const g = (e.target as Element).closest('.landmark') as SVGGElement | null;
       if (g?.dataset.id) onLandmark?.(g.dataset.id);
     });
-    /** 點到中山公園的銅像、停著的火箭了沒（點到就交給 main.ts） */
+    /** 點到中山公園的銅像、停著的火箭、汪星的小狗了沒（點到就交給 main.ts） */
     const parkTap = (e: Event, world: 'earth' | 'woof'): boolean => {
       const t = e.target as Element;
-      if (t.closest('.rocket-hit')) this.onRocket?.(world);
+      if (t.closest('.dog-hit')) this.onDog?.();
+      else if (t.closest('.rocket-hit')) this.onRocket?.(world);
       else if (t.closest('.park-statue')) this.onStatue?.(world);
       else return false;
       return true;
@@ -817,7 +820,7 @@ export class Radar {
 
   /**
    * 畫成立體、站著的東西（中山公園的銅像，data-at 是它站的地方，面向東邊）：整層跟著指北針轉了 -heading，它自己轉回來，在畫面上一直站著；
-   * 東邊轉到畫面左邊時左右翻過來，還是面向東邊
+   * 東邊轉到畫面左邊時左右翻過來，還是面向東邊（data-flip="no" 的只轉不翻：小狗頭上的「汪！」）
    */
   private standUp(layer: SVGGElement): void {
     if (!this.heading) return;
@@ -825,7 +828,7 @@ export class Radar {
     for (const el of layer.querySelectorAll<SVGGElement>('[data-at]')) {
       const at = el.dataset.at ?? '0 0';
       const back = at.split(' ').map((v) => -Number(v)).join(' ');
-      el.setAttribute('transform', `rotate(${this.heading.toFixed(1)} ${at})${flip ? ` translate(${at}) scale(-1 1) translate(${back})` : ''}`);
+      el.setAttribute('transform', `rotate(${this.heading.toFixed(1)} ${at})${flip && el.dataset.flip !== 'no' ? ` translate(${at}) scale(-1 1) translate(${back})` : ''}`);
     }
   }
 
