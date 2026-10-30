@@ -541,7 +541,7 @@ export class Radar {
 
   /**
    * 全螢幕：雷達的地圖鋪滿整個長方形（不裁成圓、沒有外框），只留地圖和光點（距離圈、掃描線不畫，styles.css；看比例尺）；
-   * 範圍外、還在畫面裡的光點畫在真的位置，畫面外的貼在邊上
+   * 範圍外、還在畫面裡的光點畫在真的位置，畫面外的不畫
    */
   setFill(on: boolean): void {
     if (on === this.fill) return;
@@ -1236,7 +1236,7 @@ export class Radar {
       // 範圍外（鋪滿時是畫面外）的瓶子不畫，免得外圈擠滿；只有方向提示的那一個貼在外圈（太空不畫）
       const lim = this.edgeR(angle);
       const beyond = ratio * (R - 8) > lim;
-      if (this.earthHidden || (beyond && (!b.hint || this.inSpace))) continue;
+      if (this.earthHidden || (beyond && (!b.hint || this.inSpace || this.fill))) continue;
       const r = Math.min(ratio * (R - 8), lim);
       const p = polar(angle, r);
       if (beyond) {
@@ -1304,7 +1304,8 @@ export class Radar {
       const ratio = this.ratio(lm.distanceKm);
       const lim = this.edgeR(lm.bearing - this.heading);
       const out = ratio * (R - 8) > lim;
-      if (this.inSpace && (out || this.earthHidden)) continue;
+      // 太空裡範圍外的不畫；全螢幕鋪滿時畫面外的也不畫
+      if ((this.inSpace || this.fill) && (out || this.earthHidden)) continue;
       const lr = Math.min(ratio * (R - 8), lim);
       const p = polar(lm.bearing - this.heading, lr);
       const g = el('g', { class: `landmark${out ? ' out' : ''}${lm.selected ? ' selected' : ''}`, transform: `translate(${p.x.toFixed(1)} ${p.y.toFixed(1)})`, tabindex: 0, role: 'button' });
@@ -1683,15 +1684,18 @@ export class Radar {
     this.blipLayer.replaceChildren();
     const pos = new Map<number, { x: number; y: number; out: boolean; angle: number; r: number }>();
     // 太空：地球另一面的不畫；地球太小時都擠在一起，不畫
-    const items = this.earthHidden ? [] : this.inSpace ? this.items.filter((it) => it.distanceKm <= HORIZON_KM) : this.items;
-    for (const it of items) {
+    const all = this.earthHidden ? [] : this.inSpace ? this.items.filter((it) => it.distanceKm <= HORIZON_KM) : this.items;
+    for (const it of all) {
       const ratio = this.ratio(it.distanceKm);
       const angle = it.bearing - this.heading;
-      // 範圍外（鋪滿時是畫面外）的貼在邊上
+      // 範圍外的貼在外圈；全螢幕鋪滿時畫面外的不畫（選取的也不畫：詳細資料寫了多遠、哪個方向）
       const lim = this.edgeR(angle);
+      const beyond = ratio * (R - 8) > lim;
+      if (this.fill && beyond) continue;
       const r = Math.min(ratio * (R - 8), lim);
-      pos.set(it.id, { ...polar(angle, r), out: ratio * (R - 8) > lim || !!it.outside, angle, r });
+      pos.set(it.id, { ...polar(angle, r), out: beyond || !!it.outside, angle, r });
     }
+    const items = all.filter((it) => pos.has(it.id));
     // 疊在一起（12 px 內）的光點合成一群：選取的、要顯示標籤的優先當代表，標籤加「+N」，
     // 點下去先列出同一群讓人選，不然被蓋住的點不到
     const groups: RadarItem[][] = [];
