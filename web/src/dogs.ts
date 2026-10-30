@@ -6,8 +6,8 @@
  * walk 走（四隻腳輪流，有時候邊走邊低頭聞 nose）、run 跑（真的跑：前腳一起伸、後腳一起蹬，偶爾才跑），from 走到 to；
  * 大多在同一塊草皮裡走一走、停下來聞一聞，偶爾站著、坐下；有時候經過地面到附近另一塊草皮（大多用跑的，近的才用走的；DogYard 決定能去哪）；
  * 偶爾去附近的湖邊（池塘岸邊）喝水：走或跑到岸上、面向水低頭一口一口舔，喝完走回原來的地方；
- * 點了（pet）轉過來面向你（往南）坐下。
- * 每一段開始時慢慢轉到要走的方向（dir0 → dir，緯經度的方向）。拉近畫出整隻時每一格畫面重畫（animateDogs：照這一段在畫面上從哪到哪、
+ * 點了（pet）有時候只轉頭看你，其他時候轉過來面向你（往南）坐下：先站好、頭先轉過來，身體以後腳附近為支點、四隻腳一步一步踏著轉過來，轉好了才坐下。
+ * 每一段開始時慢慢轉到要走的方向（dir0 → dir，緯經度的方向；原地轉身的照 turn 踏步轉）。拉近畫出整隻時每一格畫面重畫（animateDogs：照這一段在畫面上從哪到哪、
  * 面向哪邊，用 dog.ts 畫 3D 的狗），這一段結束時重畫整層（onDogMove 給的 redraw，算下一段在畫面上的位置）
  */
 import { dogHeight, dogSvg, STILL, type DogLook, type DogPose } from './dog';
@@ -43,6 +43,14 @@ export interface DogSeg {
   goal?: 'drink';
   face?: Pt;
   back?: Pt[];
+  /**
+   * 原地轉身（被點了轉過來、走到湖邊轉向水）：這一段開始後幾毫秒開始轉、轉多久（轉越多越久），
+   * 頭先轉過去、身體跟著一步一步踏著轉，以後腳附近為支點（from 繞到 to）
+   */
+  turn?: [number, number];
+  /** 被點的時候是什麼姿勢、幾毫秒慢慢站好（趴著、坐著先站起來，低著頭的先抬起來） */
+  pose0?: DogPose;
+  rise?: number;
 }
 
 /**
@@ -129,6 +137,20 @@ const WAKE_MS = 1600;
 const DRINK_MS = 5500;
 /** 往南（點了轉過來面向你） */
 const SOUTH: Pt = [-1e-5, 0];
+/**
+ * 原地轉身：轉一點點約 0.35 秒，每多轉 1 度多 5.3 毫秒（轉半圈約 1.25 秒），轉不到 8 度不用踏步；
+ * 以後腳附近為支點（在身體中間後面幾公尺，照 size；dog.ts 的後腳在 0.095）
+ */
+const SPIN_MS = 300;
+const SPIN_PER_DEG = 5.3;
+const SPIN_MIN = 8;
+const PIVOT = 0.08;
+/** 被點了先站好要多久（照原本在做什麼；站著、發呆的不用） */
+const RISE: Partial<Record<DogDo, number>> = { lie: 900, sit: 600, stretch: 700, drink: 500, sniff: 350, walk: 250, run: 400, stand: 0, idle: 0 };
+
+/** 角度換到 -180～180（轉最少的那一邊） */
+const wrap = (deg: number): number => ((((deg % 360) + 540) % 360) - 180);
+const clamp01 = (t: number): number => Math.max(0, Math.min(1, t));
 
 /**
  * 記住每隻狗在做什麼（localStorage 的 dr.dog.<id>，這一段開始的時間存成真正的時刻）：重新整理網頁還在同一個地方，接著做
@@ -149,6 +171,9 @@ function loadSeg(id: string): DogSeg | null {
     const v = JSON.parse(localStorage.getItem(LS_DOG + id) ?? 'null') as DogSeg | null;
     const pt = (p: unknown): boolean => Array.isArray(p) && p.length === 2 && p.every(Number.isFinite);
     if (!v || typeof v.do !== 'string' || !pt(v.from) || !pt(v.to) || !pt(v.dir) || !pt(v.dir0) || !Number.isFinite(v.start) || !(v.ms > 0) || !Number.isInteger(v.ring)) return null;
+    // 轉身、站好的資料不對就不管（直接轉過去）
+    if (v.turn && !(pt(v.turn) && v.turn[1] > 0)) v.turn = undefined;
+    if (v.pose0 && !(Array.isArray(v.pose0.legs) && v.pose0.legs.length === 4 && Number.isFinite(v.rise))) [v.pose0, v.rise] = [undefined, undefined];
     return { ...v, start: v.start - origin() };
   } catch {
     return null;
@@ -199,11 +224,12 @@ export class Dog {
   /** 現在在哪、在做什麼（這一段已經過了 e 毫秒）；還沒放就先放，很久沒看（分頁在背景）從停下來的地方重新開始 */
   now(now = performance.now(), rand: () => number = Math.random): { at: Pt; seg: DogSeg; e: number } {
     let s = this.seg ?? this.place(rand, now);
-    if (now - (s.start + s.ms) > 60_000) s = { ...s, do: 'stand', from: s.to, to: s.to, start: now, ms: 2000, dir0: s.dir, goal: undefined, back: undefined, via: undefined };
+    if (now - (s.start + s.ms) > 60_000) s = { ...s, do: 'stand', from: s.to, to: s.to, start: now, ms: 2000, dir0: s.dir, goal: undefined, back: undefined, via: undefined, turn: undefined, pose0: undefined, rise: undefined };
     while (now >= s.start + s.ms) s = this.next(s, rand);
     this.set(s);
     const e = now - s.start;
-    const u = Math.max(0, Math.min(1, e / s.ms));
+    // 原地轉身的照轉到哪（繞著後腳，從 from 慢慢到 to）
+    const u = s.turn ? turned(s, e) : clamp01(e / s.ms);
     return { at: [s.from[0] + (s.to[0] - s.from[0]) * u, s.from[1] + (s.to[1] - s.from[1]) * u], seg: s, e };
   }
 
@@ -230,14 +256,70 @@ export class Dog {
       return;
     }
     if (d.seg.pet && d.e < d.seg.ms - 600) {
-      this.set({ ...d.seg, ms: d.e + PET_MS });
+      this.set({ ...d.seg, ms: Math.max(d.seg.ms, d.e + PET_MS) });
       return;
     }
     if (rand() < this.nature.glance) {
       this.glance = { start: now, ms: GLANCE_MS };
       return;
     }
-    this.set({ ...d.seg, do: 'sit', from: d.at, to: d.at, start: now, ms: PET_MS, dir0: d.seg.dir, dir: SOUTH, pet: true, tail0: tailNow(d.seg, d.e), tail: 0, goal: undefined, back: undefined, via: undefined });
+    // 轉過來坐下：先站好（趴著、坐著先站起來，低著頭的先抬起來），頭先轉過來、身體跟著一步一步踏著轉（以後腳附近為支點），轉好了才坐下；
+    // 正在轉頭看你的話頭慢慢轉回去，接著轉身
+    const g = this.glance;
+    if (g) g.ms = Math.min(g.ms, now - g.start + 350);
+    const rise = RISE[d.seg.do] ?? 300;
+    const dir0 = this.facing(d.seg, d.e, d.at);
+    const { to, turn } = this.spin(d.at, dir0, SOUTH, rise * 0.7);
+    this.set({
+      ...d.seg,
+      do: 'sit',
+      from: d.at,
+      to,
+      start: now,
+      ms: PET_MS + (turn ? turn[0] + turn[1] : rise),
+      dir0,
+      dir: SOUTH,
+      pet: true,
+      tail0: tailNow(d.seg, d.e),
+      tail: 0,
+      goal: undefined,
+      back: undefined,
+      via: undefined,
+      turn,
+      pose0: rise ? dogPose(d.seg, d.e) : undefined,
+      rise: rise || undefined,
+    });
+  }
+
+  /** 緯經度的方向在這裡是哪個方位（度，順時針、0 是北；照這裡的公尺，緯度、經度一度不一樣長） */
+  private bearing(at: Pt, dir: Pt): number {
+    const [my, mx] = [this.yard.metres(at, [at[0] + 1e-4, at[1]]), this.yard.metres(at, [at[0], at[1] + 1e-4])];
+    return (Math.atan2(dir[1] * mx, dir[0] * my) * 180) / Math.PI;
+  }
+
+  /** 從 at 往 deg 方位走 m 公尺 */
+  private offset(at: Pt, deg: number, m: number): Pt {
+    const [my, mx] = [this.yard.metres(at, [at[0] + 1e-4, at[1]]) / 1e-4 || 1, this.yard.metres(at, [at[0], at[1] + 1e-4]) / 1e-4 || 1];
+    const r = (deg * Math.PI) / 180;
+    return [at[0] + (Math.cos(r) * m) / my, at[1] + (Math.sin(r) * m) / mx];
+  }
+
+  /** 現在身體面向哪（緯經度的方向；轉身轉到一半的照轉到哪） */
+  private facing(s: DogSeg, e: number, at: Pt): Pt {
+    const t = turned(s, e);
+    if (t >= 1) return s.dir;
+    const b0 = this.bearing(at, s.dir0);
+    const p = this.offset(at, b0 + wrap(this.bearing(at, s.dir) - b0) * t, 1);
+    return [p[0] - at[0], p[1] - at[1]];
+  }
+
+  /** 原地從面向 dir0 轉到 dir（begin 毫秒開始，轉越多越久）：以後腳附近為支點，轉完站在哪；轉一點點的不用踏步 */
+  private spin(at: Pt, dir0: Pt, dir: Pt, begin: number): { to: Pt; turn?: [number, number] } {
+    const b0 = this.bearing(at, dir0);
+    const deg = wrap(this.bearing(at, dir) - b0);
+    if (Math.abs(deg) < SPIN_MIN) return { to: at };
+    const r = PIVOT * this.look.size;
+    return { to: this.offset(this.offset(at, b0, -r), b0 + deg, r), turn: [begin, SPIN_MS + Math.abs(deg) * SPIN_PER_DEG] };
   }
 
   /** 這一段的尾巴（照個性）：跑步、伸懶腰時翹著；聞的時候一半垂下來，走路、站著有時候垂下來，坐著、趴著多半垂在後面 */
@@ -269,8 +351,12 @@ export class Dog {
       const { cross, goal, face, back, nose } = s;
       return this.legs(s.do, at, s.via, start, dir0, s.ring, { cross, goal, face, back, nose });
     }
-    // 走到湖邊了：面向水低頭喝；喝完照原路走回去
-    if (s.goal === 'drink' && s.face) return { do: 'drink', from: at, to: at, start, ms: DRINK_MS, dir0, dir: [s.face[0] - at[0], s.face[1] - at[1]], ring: s.ring, back: s.back };
+    // 走到湖邊了：一步一步轉向水，低頭喝；喝完照原路走回去
+    if (s.goal === 'drink' && s.face) {
+      const dir: Pt = [s.face[0] - at[0], s.face[1] - at[1]];
+      const { to, turn } = this.spin(at, dir0, dir, 0);
+      return { do: 'drink', from: at, to, start, ms: DRINK_MS + (turn?.[1] ?? 0), dir0, dir, ring: s.ring, back: s.back, turn };
+    }
     if (s.do === 'drink' && s.back?.length) return this.legs('walk', at, s.back, start, dir0, s.ring);
     const moving = s.do === 'walk' || s.do === 'run';
     const h = this.hour(start);
@@ -352,6 +438,11 @@ export class Dog {
 /** 0～1 頭尾慢 */
 const smooth = (t: number): number => t * t * (3 - 2 * t);
 
+/** 身體轉到哪（0 還是 dir0～1 轉到 dir）：原地轉身照 turn，其他的一開始 0.45 秒轉過去（走路、跑步邊走邊轉） */
+const turned = (s: DogSeg, e: number): number => smooth(clamp01(s.turn ? (e - s.turn[0]) / s.turn[1] : e / TURN_MS));
+/** 什麼時候站好、轉好了（毫秒；之後才坐下、低頭喝水） */
+const settled = (s: DogSeg): number => (s.turn ? s.turn[0] + s.turn[1] : (s.rise ?? 0));
+
 /** 尾巴現在放下來多少（每一段一開始 0.6 秒慢慢放下或翹起來） */
 const tailNow = (s: DogSeg, e: number): number => {
   const [a, b] = [s.tail0 ?? 0, s.tail ?? 0];
@@ -368,14 +459,68 @@ const tailNow = (s: DogSeg, e: number): number => {
  * - 趴著：身體整個貼地，前腳往前伸平、後腳收在兩側，頭抬著看看四周（下巴靠在前腳上休息的閉著眼睛），最後站起來；
  * - 睡覺：慢慢趴下、身體捲成一圈（頭靠到尾巴旁邊，前腳收在胸口下面），閉上眼睛，身體跟著呼吸慢慢起伏；醒來慢慢打開、站起來；
  * - 發呆：站著一動也不動，頭低一點、慢慢轉去盯著旁邊某個方向（每一段左邊或右邊），尾巴不搖，慢慢眨眼；
- * - 尾巴有時候垂下來（每一段決定，tailFor），一開始慢慢放下或翹起來；平常每 4 秒左右眨一下眼睛；站著、走路時畫嘴唇線
+ * - 尾巴有時候垂下來（每一段決定，tailFor），一開始慢慢放下或翹起來；平常每 4 秒左右眨一下眼睛；站著、走路時畫嘴唇線；
+ * - 被點了：從原本的姿勢慢慢站好（pose0、rise），原地轉身時（turn，身體要轉 deg 度，順時針是正的）頭先轉過去、四隻腳一步一步踏著轉
  */
-export function dogPose(s: DogSeg, e: number): DogPose {
-  const p = motion(s, e);
+export function dogPose(s: DogSeg, e: number, deg = 0): DogPose {
+  let p = motion(s, e);
+  if (s.pose0 && s.rise && e < s.rise) p = blend(s.pose0, p, smooth(clamp01(e / s.rise)));
+  if (s.turn && Math.abs(deg) >= 1) p = spinning(p, s.turn, e, deg);
   // 眨眼：每 4 秒左右一下（每一段的節奏錯開一點）
   const blink = (e + (s.start % 1700)) % 4100 < 140 ? 1 : 0;
   // 嘴唇線只在站著（包括發呆）、走路時畫
   return { ...p, tail: tailNow(s, e), blink: Math.max(p.blink, blink), lips: s.do === 'stand' || s.do === 'idle' || s.do === 'walk' };
+}
+
+/** 從姿勢 a 慢慢變成 b（t 0～1） */
+function blend(a: DogPose, b: DogPose, t: number): DogPose {
+  const m = (x: number | undefined, y: number): number => (x ?? 0) + (y - (x ?? 0)) * t;
+  return {
+    ...b,
+    legs: b.legs.map(([deg, lift], i): [number, number] => [m(a.legs[i]?.[0], deg), m(a.legs[i]?.[1], lift)]),
+    bob: m(a.bob, b.bob),
+    sit: m(a.sit, b.sit),
+    lean: m(a.lean, b.lean),
+    nod: m(a.nod, b.nod),
+    look: m(a.look, b.look),
+    ear: m(a.ear, b.ear),
+    wag: m(a.wag, b.wag),
+    lie: m(a.lie, b.lie),
+    blink: m(a.blink, b.blink),
+    curl: m(a.curl, b.curl),
+    tongue: t < 0.5 ? !!a.tongue : b.tongue,
+  };
+}
+
+/**
+ * 原地轉身（turn：幾毫秒開始轉、轉多久，身體要轉 deg 度，順時針是正的）：
+ * 頭先轉過去（比身體早、快一點，脖子最多轉 80 度），身體跟著轉；轉的時候四隻腳一隻一隻抬起來踏一步（每轉 60 度左右四隻腳各踏一步，
+ * 往右轉右前腳先踏，往左轉左前腳先踏，前腳踏比較大步、後腳在原地小步），身體跟著腳步輕輕上下
+ */
+function spinning(p: DogPose, [t0, ms]: [number, number], e: number, deg: number): DogPose {
+  const tau = (e - t0) / ms;
+  // 頭：身體開始轉前 0.2 就開始轉（不早於被點的時候），身體轉到 0.35 時頭已經轉好
+  const h0 = Math.max(0, t0 - 0.2 * ms);
+  if (e <= h0 || tau >= 1) return p;
+  const head = smooth(clamp01((e - h0) / (t0 + 0.35 * ms - h0)));
+  const look = p.look + Math.max(-80, Math.min(80, -(head - smooth(clamp01(tau))) * deg));
+  const legs = p.legs.map((l): [number, number] => [l[0], l[1]]);
+  let bob = p.bob;
+  if (tau > 0) {
+    // 腳的順序（0 左前、1 右前、2 左後、3 右後）：對角輪流
+    const order = deg > 0 ? [1, 2, 0, 3] : [0, 3, 1, 2];
+    const beats = 4 * Math.max(1, Math.round(Math.abs(deg) / 60));
+    for (let j = 0; j < beats; j++) {
+      // 第 j 步：1/(beats+1) 開始，踏 1.8 拍（前一步還沒踩下去下一步就抬起來）
+      const q = (tau - j / (beats + 1)) / (1.8 / (beats + 1));
+      if (q <= 0 || q >= 1) continue;
+      const i = order[j % 4];
+      const up = Math.sin(Math.PI * q);
+      legs[i] = [legs[i][0] + (i < 2 ? 12 : 5) * up, Math.max(legs[i][1], (i < 2 ? 0.022 : 0.012) * up)];
+      bob = Math.max(bob, 0.002 * up);
+    }
+  }
+  return { ...p, look, legs, bob };
 }
 
 /** 尾巴以外的動作 */
@@ -421,7 +566,8 @@ function motion(s: DogSeg, e: number): DogPose {
       return { ...STILL, nod: (50 + 4 * wave(380)) * r, lean: 12 * r, look: 12 * wave(1800) * r, wag: 6 * wave(900) };
     }
     case 'sit':
-      return { ...STILL, sit: ramp(550, s.pet ? TURN_MS * 0.6 : 0), wag: 12 * wave(650) };
+      // 被點的：站好、轉好了才坐下
+      return { ...STILL, sit: ramp(550, s.pet ? Math.max(0, settled(s) - 100) : 0), wag: 12 * wave(650) };
     case 'sleep': {
       const r = ramp(1500);
       const shut = smooth(Math.max(0, Math.min(1, (e - 1100) / 800, (s.ms - e - 300) / 500)));
@@ -449,7 +595,8 @@ function motion(s: DogSeg, e: number): DogPose {
       };
     }
     case 'drink': {
-      const r = ramp(500);
+      // 轉向水了才低頭
+      const r = ramp(500, settled(s));
       const lap = Math.sin((2 * Math.PI * e) / 300);
       return { ...STILL, lean: 15 * r, nod: (58 + 5 * lap) * r, wag: 8 * wave(800), tongue: r > 0.8 && lap > 0 };
     }
@@ -494,13 +641,23 @@ export function lookAtViewer(yaw: number): number {
 /** 狗在畫面上這一格：在哪（像素）、面向哪（扣掉指北針轉的角度）、點得到的範圍、3D 的狗（點了轉頭看你的話頭轉過來、抬起來） */
 function frame(dog: Dog, d: { seg: DogSeg; e: number }, p: DogPath, heading: number, now = performance.now()): { x: number; y: number; hit: [number, number, number]; svg: string } {
   const s = d.seg;
-  const u = s.do === 'walk' || s.do === 'run' ? Math.max(0, Math.min(1, d.e / s.ms)) : 0;
-  const [x, y] = [p.ax + (p.bx - p.ax) * u, p.ay + (p.by - p.ay) * u];
-  const t = smooth(Math.max(0, Math.min(1, d.e / TURN_MS)));
-  const turn = ((((p.b1 - p.b0) % 360) + 540) % 360) - 180;
+  const t = turned(s, d.e);
+  const turn = wrap(p.b1 - p.b0);
+  let [x, y] = [p.ax, p.ay];
+  if (s.do === 'walk' || s.do === 'run') {
+    const u = clamp01(d.e / s.ms);
+    [x, y] = [p.ax + (p.bx - p.ax) * u, p.ay + (p.by - p.ay) * u];
+  } else if (s.turn && t > 0) {
+    // 原地轉身：繞著後腳附近轉（支點在一開始身體中間的後面），轉到最後剛好在 to
+    const r = PIVOT * dog.look.size * p.k;
+    const fwd = (b: number): Pt => [Math.sin((b * Math.PI) / 180), -Math.cos((b * Math.PI) / 180)];
+    const [f0, f1, f] = [fwd(p.b0), fwd(p.b1), fwd(p.b0 + turn * t)];
+    const [cx, cy] = [p.ax - r * f0[0], p.ay - r * f0[1]];
+    [x, y] = [cx + r * f[0] + (p.bx - cx - r * f1[0]) * t, cy + r * f[1] + (p.by - cy - r * f1[1]) * t];
+  }
   const yaw = p.b0 + turn * t - heading;
   const h = dogHeight(dog.look) * p.k;
-  let pose = dogPose(s, d.e);
+  let pose = dogPose(s, d.e, turn);
   const g = dog.glancing(now);
   if (g > 0) pose = { ...pose, look: pose.look * (1 - g) + lookAtViewer(yaw) * g, nod: pose.nod * (1 - g) - 6 * g, blink: g > 0.9 ? 0 : pose.blink };
   return { x, y, hit: [x, y - h * 0.5, Math.max(DOG_HIT, h * 0.7)], svg: dogSvg(dog.look, pose, yaw, p.k) };

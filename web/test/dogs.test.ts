@@ -39,6 +39,10 @@ describe('會動的狗（dogs.ts）', () => {
       if (s.do === 'walk' || s.do === 'run') {
         expect(YARD.metres(s.from, s.to) / (s.ms / 1000)).toBeCloseTo(speedOf(s), 6);
         expect(s.dir).toEqual([s.to[0] - s.from[0], s.to[1] - s.from[1]]);
+      } else if (s.turn) {
+        // 走到湖邊一步一步轉向水：以後腳附近為支點，只挪一點點
+        expect(s.do).toBe('drink');
+        expect(YARD.metres(s.from, s.to)).toBeLessThanOrEqual(2 * 0.08 * MALTESE.size + 1e-9);
       } else {
         expect(s.to).toEqual(s.from);
         // 停著的面向不變（喝水的轉向水）
@@ -227,18 +231,72 @@ describe('會動的狗（dogs.ts）', () => {
     const d = dog.now(20_100, rand);
     expect(d.seg.do).toBe('sit');
     expect(d.seg.pet).toBe(true);
-    expect(d.at).toEqual(before.at);
+    expect(d.seg.from).toEqual(before.at);
     expect(d.seg.dir[0]).toBeLessThan(0);
     expect(d.seg.dir[1]).toBe(0);
     // 先轉身再坐下，坐好時搖尾巴（不吐舌頭、嘴巴不畫出來），最後站起來
     expect(dogPose(d.seg, 100).sit).toBe(0);
-    expect(dogPose(d.seg, 2000).sit).toBe(1);
-    expect(dogPose(d.seg, 2000).tongue).toBe(false);
+    expect(dogPose(d.seg, 2500).sit).toBe(1);
+    expect(dogPose(d.seg, 2500).tongue).toBe(false);
     expect(dogPose(d.seg, d.seg.ms).sit).toBe(0);
     const end = d.seg.start + d.seg.ms;
     dog.pet(23_000);
     expect(dog.now(23_100, rand).seg.start).toBe(20_000);
     expect(dog.seg!.start + dog.seg!.ms).toBeGreaterThan(end);
+  });
+
+  it('turns around step by step when tapped: head first, paws stepping, pivoting on the hind legs, then sits', () => {
+    /** 站在 (20, 20) 面向 dir（1 度 = 1 公尺），被點了轉過來坐下 */
+    const tap = (id: string, dir: [number, number], how: DogSeg['do'] = 'stand'): DogSeg => {
+      const dog = new Dog({ id, name: '測試', look: MALTESE, yard: YARD, hour: noon });
+      dog.seg = { do: how, from: [20, 20], to: [20, 20], start: 0, ms: 60_000, dir0: dir, dir, ring: 0 };
+      dog.pet(1000, () => 0.99);
+      return dog.seg!;
+    };
+    // 背對你（面向北）：轉半圈約 1.25 秒；轉越少越快，轉一點點的不用踏步
+    const back = tap('test-spin-a', [1, 0]);
+    expect(back.turn![1]).toBeCloseTo(300 + 180 * 5.3, 0);
+    expect(tap('test-spin-b', [-1, -1]).turn![1]).toBeCloseTo(300 + 45 * 5.3, 0);
+    expect(tap('test-spin-c', [-1, 0.05]).turn).toBeUndefined();
+    expect(tap('test-spin-c2', [-1, 0.05]).to).toEqual([20, 20]);
+    // 以後腳附近為支點：轉完往前挪了兩倍支點的距離（面向北，轉半圈後在南邊 0.16 公尺），坐下的地方就是轉完的地方
+    expect(back.from).toEqual([20, 20]);
+    expect(back.to[0]).toBeCloseTo(20 - 2 * 0.08 * MALTESE.size, 6);
+    expect(back.to[1]).toBeCloseTo(20, 6);
+    // 面向東：往右轉 90 度到南，支點在西邊 0.08 公尺，轉完在支點南邊
+    const east = tap('test-spin-d', [0, 1]);
+    expect(east.to[0]).toBeCloseTo(20 - 0.08 * MALTESE.size, 6);
+    expect(east.to[1]).toBeCloseTo(20 - 0.08 * MALTESE.size, 6);
+    const [t0, ms] = back.turn!;
+    // 頭先轉：剛開始轉時頭已經轉過去一大半（往右轉，look 是負的），轉完頭擺正
+    const deg = 180;
+    expect(dogPose(back, t0 + ms * 0.15, deg).look).toBeLessThan(-30);
+    expect(dogPose(back, t0 + ms + 50, deg).look).toBe(0);
+    // 轉的時候四隻腳輪流抬起來踏步（往右轉右前腳先踏），前腳踏得比後腳高；轉之前、轉完都站在地上
+    const lifts = Array.from({ length: 60 }, (_, i) => dogPose(back, t0 + (ms * i) / 60, deg).legs.map(([, lift]) => lift));
+    for (const leg of [0, 1, 2, 3]) expect(lifts.filter((l) => l[leg] > 0.005).length).toBeGreaterThan(5);
+    expect(lifts.find((l) => l.some((v) => v > 0))!.indexOf(Math.max(...lifts.find((l) => l.some((v) => v > 0))!))).toBe(1);
+    expect(Math.max(...lifts.map((l) => l[1]))).toBeGreaterThan(Math.max(...lifts.map((l) => l[3])));
+    for (const e of [t0 - 10, t0 + ms + 10]) for (const [, lift] of dogPose(back, e, deg).legs) expect(lift).toBe(0);
+    // 轉好了才坐下
+    expect(dogPose(back, t0 + ms - 200, deg).sit).toBe(0);
+    expect(dogPose(back, t0 + ms + 700, deg).sit).toBe(1);
+    expect(back.ms).toBeCloseTo(6000 + t0 + ms, 6);
+    // 趴著被點：從趴著慢慢站起來再轉身（不會一下子跳起來）
+    const lying = tap('test-spin-e', [1, 0], 'lie');
+    expect(lying.pose0!.lie).toBe(1);
+    expect(dogPose(lying, 0).lie).toBe(1);
+    expect(dogPose(lying, 450).lie).toBeGreaterThan(0.3);
+    expect(dogPose(lying, 450).lie).toBeLessThan(0.7);
+    expect(dogPose(lying, 900).lie).toBe(0);
+    expect(lying.turn![0]).toBeCloseTo(900 * 0.7, 6);
+    // 站著被點：不用先站好，馬上開始轉
+    expect(back.pose0).toBeUndefined();
+    expect(t0).toBe(0);
+    // 轉身的時候，現在在哪照轉到哪（從 from 慢慢到 to）
+    const dog = dogById('test-spin-a')!;
+    expect(dog.now(1000 + 1, () => 0.5).at[0]).toBeCloseTo(20, 3);
+    expect(dog.now(1000 + ms + 1, () => 0.5).at).toEqual(back.to);
   });
 });
 
