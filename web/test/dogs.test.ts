@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { dogSvg, MALTESE, STILL, dogHeight, type DogLook } from '../src/dog';
 import { Dog, dogById, dogPose, NATURE, speedOf, type DogSeg, type DogYard } from '../src/dogs';
 
@@ -111,6 +111,31 @@ describe('會動的狗（dogs.ts）', () => {
     expect(runs).toBeGreaterThan(walks * 0.8);
     // 停下來只會聞（跑完趴下、趴完伸懶腰照樣有；第一段是剛放下來站著）
     expect(list.slice(1).some((s) => s.do === 'stand' || s.do === 'sit' || s.do === 'idle')).toBe(false);
+  });
+
+  it('stays where it was after reloading the page', () => {
+    const store = new Map<string, string>();
+    vi.stubGlobal('localStorage', { getItem: (k: string) => store.get(k) ?? null, setItem: (k: string, v: string) => void store.set(k, v), removeItem: (k: string) => void store.delete(k) });
+    try {
+      const rand = seeded(9);
+      const a = new Dog({ id: 'test-reload', name: '測試', look: MALTESE, yard: YARD });
+      a.place(rand, 1000);
+      const before = a.now(20_000, rand);
+      expect(store.has('dr.dog.test-reload')).toBe(true);
+      // 重新整理：同一隻狗（同一個 id）接著同一段，在同一個地方
+      const b = new Dog({ id: 'test-reload', name: '測試', look: MALTESE, yard: YARD });
+      expect(b.seg?.start).toBeCloseTo(before.seg.start, 3);
+      expect(b.now(20_000, rand).at).toEqual(before.at);
+      // 離開很久了：停在上次那一段的終點
+      const c = new Dog({ id: 'test-reload', name: '測試', look: MALTESE, yard: YARD });
+      const later = c.now(before.seg.start + before.seg.ms + 600_000, rand);
+      expect(later.seg.from).toEqual(before.seg.to);
+      // 存的東西壞掉：重新放
+      store.set('dr.dog.test-reload', '{"do":1}');
+      expect(new Dog({ id: 'test-reload', name: '測試', look: MALTESE, yard: YARD }).seg).toBeNull();
+    } finally {
+      vi.unstubAllGlobals();
+    }
   });
 
   it('turns to face you (south) and sits when tapped, and sits longer when tapped again', () => {

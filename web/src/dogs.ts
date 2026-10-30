@@ -116,6 +116,31 @@ const DRINK_MS = 5500;
 /** 往南（點了轉過來面向你） */
 const SOUTH: Pt = [-1e-5, 0];
 
+/**
+ * 記住每隻狗在做什麼（localStorage 的 dr.dog.<id>，這一段開始的時間存成真正的時刻）：重新整理網頁還在同一個地方，接著做
+ * （走到一半的接著走；離開很久了就停在上次那一段的終點）。每換一段記一次
+ */
+const LS_DOG = 'dr.dog.';
+/** performance.now() 的 0 是什麼時刻（換算存起來的時間） */
+const origin = (): number => (typeof performance !== 'undefined' && performance.timeOrigin) || 0;
+function saveSeg(id: string, s: DogSeg): void {
+  try {
+    localStorage.setItem(LS_DOG + id, JSON.stringify({ ...s, start: s.start + origin() }));
+  } catch {
+    // 沒有 localStorage（測試、私密瀏覽）：不記
+  }
+}
+function loadSeg(id: string): DogSeg | null {
+  try {
+    const v = JSON.parse(localStorage.getItem(LS_DOG + id) ?? 'null') as DogSeg | null;
+    const pt = (p: unknown): boolean => Array.isArray(p) && p.length === 2 && p.every(Number.isFinite);
+    if (!v || typeof v.do !== 'string' || !pt(v.from) || !pt(v.to) || !pt(v.dir) || !pt(v.dir0) || !Number.isFinite(v.start) || !(v.ms > 0) || !Number.isInteger(v.ring)) return null;
+    return { ...v, start: v.start - origin() };
+  } catch {
+    return null;
+  }
+}
+
 /** 所有的狗（id → 狗）：畫面上的 data-dog 找得到是哪一隻 */
 const DOGS = new Map<string, Dog>();
 export const dogById = (id: string): Dog | undefined => DOGS.get(id);
@@ -131,6 +156,14 @@ export class Dog {
   constructor(o: { id: string; name: string; look: DogLook; yard: DogYard; nature?: DogNature }) {
     [this.id, this.name, this.look, this.yard, this.nature] = [o.id, o.name, o.look, o.yard, o.nature ?? NATURE];
     DOGS.set(this.id, this);
+    // 上次在哪、在做什麼（重新整理網頁還在同一個地方）
+    this.seg = loadSeg(this.id);
+  }
+
+  /** 換到新的一段（記起來） */
+  private set(s: DogSeg): DogSeg {
+    if (this.seg?.start !== s.start || this.seg?.ms !== s.ms || this.seg?.do !== s.do) saveSeg(this.id, s);
+    return (this.seg = s);
   }
 
   /** 換到隨機一塊草皮的隨機一處，站著，面向隨機的方向 */
@@ -138,7 +171,7 @@ export class Dog {
     const got = this.yard.anywhere(rand) ?? { ring: 0, at: [0, 0] as Pt };
     const a = rand() * 2 * Math.PI;
     const dir: Pt = [Math.cos(a) * 1e-5, Math.sin(a) * 1e-5];
-    return (this.seg = { do: 'stand', from: got.at, to: got.at, start: now, ms: 1500 + rand() * 2500, dir0: dir, dir, ring: got.ring });
+    return this.set({ do: 'stand', from: got.at, to: got.at, start: now, ms: 1500 + rand() * 2500, dir0: dir, dir, ring: got.ring });
   }
 
   /** 現在在哪、在做什麼（這一段已經過了 e 毫秒）；還沒放就先放，很久沒看（分頁在背景）從停下來的地方重新開始 */
@@ -146,7 +179,7 @@ export class Dog {
     let s = this.seg ?? this.place(rand, now);
     if (now - (s.start + s.ms) > 60_000) s = { ...s, do: 'stand', from: s.to, to: s.to, start: now, ms: 2000, dir0: s.dir, goal: undefined, back: undefined, via: undefined };
     while (now >= s.start + s.ms) s = this.next(s, rand);
-    this.seg = s;
+    this.set(s);
     const e = now - s.start;
     const u = Math.max(0, Math.min(1, e / s.ms));
     return { at: [s.from[0] + (s.to[0] - s.from[0]) * u, s.from[1] + (s.to[1] - s.from[1]) * u], seg: s, e };
@@ -156,10 +189,10 @@ export class Dog {
   pet(now = performance.now()): void {
     const d = this.now(now);
     if (d.seg.pet && d.e < d.seg.ms - 600) {
-      this.seg = { ...d.seg, ms: d.e + PET_MS };
+      this.set({ ...d.seg, ms: d.e + PET_MS });
       return;
     }
-    this.seg = { ...d.seg, do: 'sit', from: d.at, to: d.at, start: now, ms: PET_MS, dir0: d.seg.dir, dir: SOUTH, pet: true, tail0: tailNow(d.seg, d.e), tail: 0, goal: undefined, back: undefined, via: undefined };
+    this.set({ ...d.seg, do: 'sit', from: d.at, to: d.at, start: now, ms: PET_MS, dir0: d.seg.dir, dir: SOUTH, pet: true, tail0: tailNow(d.seg, d.e), tail: 0, goal: undefined, back: undefined, via: undefined });
   }
 
   /** 這一段的尾巴（照個性）：跑步、伸懶腰時翹著；聞的時候一半垂下來，走路、站著有時候垂下來，坐著、趴著多半垂在後面 */
