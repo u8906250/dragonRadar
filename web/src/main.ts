@@ -841,6 +841,22 @@ function loadStreets(): void {
 }
 
 /** 汪星拉近時的台北街道（space.ts 用）：跟雷達一樣的圖磚，抓到了重畫太空 */
+/** 汪星的山（terrain.ts，等高線、山頂）：第一次看汪星的地圖才載入，載好了重畫太空 */
+let terrainMod: typeof import('./terrain') | null = null;
+let terrainLoading = false;
+const woofTerrain = (): typeof import('./terrain') | null => {
+  if (terrainMod || terrainLoading) return terrainMod;
+  terrainLoading = true;
+  void import('./terrain')
+    .then((m) => {
+      terrainMod = m;
+      radar.redrawSpace();
+    })
+    .finally(() => {
+      terrainLoading = false;
+    });
+  return null;
+};
 const woofStreets: import('./space').WoofStreets = (lat, lng, km, rangeKm) => {
   if (!streetsMod) {
     loadStreets();
@@ -1084,7 +1100,7 @@ function updateSpace(): void {
   const you = youOn;
   // 汪星的狗走完一段：重畫汪星（下一段）；每一格照指北針轉回來
   void import('./park').then((p) => p.onDogMove(() => radar.redrawPark(), () => radar.headingDeg));
-  radar.setSpace((km, rg, view) => mod.spaceMarkup({ center, land, when, scaleKm: km, rg, view, streets: woofStreets, you, woofMap: map }), mod.bodyRadiusKm);
+  radar.setSpace((km, rg, view) => mod.spaceMarkup({ center, land, when, scaleKm: km, rg, view, streets: woofStreets, terrain: woofTerrain, you, woofMap: map }), mod.bodyRadiusKm);
 }
 
 /**

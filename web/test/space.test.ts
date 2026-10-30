@@ -248,6 +248,45 @@ describe('汪星', () => {
     expect(at([25.02, 121.487], 3)).not.toContain('woof-ripple');
   });
 
+  it('draws the mountains: contour lines (200 m far, 100 m, then 50 m close) and peaks with names when close', async () => {
+    const T = await import('../src/terrain');
+    // 資料：每 50 公尺一條，都在台北附近；山頂有七星山、象山，從高排到低
+    for (const c of T.TAIPEI_CONTOURS) {
+      expect(c.ele % 50).toBe(0);
+      for (const [lat, lng] of c.line) {
+        expect(lat).toBeGreaterThan(24.95);
+        expect(lat).toBeLessThan(25.22);
+        expect(lng).toBeGreaterThan(121.45);
+        expect(lng).toBeLessThan(121.68);
+      }
+    }
+    expect(T.TAIPEI_PEAKS[0][0]).toBe('七星山');
+    expect(T.TAIPEI_PEAKS.find((p) => p[0] === '象山')?.[1]).toBe(184);
+    const at = (p: [number, number], km: number, terrain: (() => typeof T | null) | undefined = () => T): string => {
+      const [la, ln] = toWoof(p);
+      return spaceMarkup({ ...base, scaleKm: km, rg: 164, view: { focus: 'woof', yaw: (-ln * Math.PI) / 180, pitch: (la * Math.PI) / 180 }, terrain });
+    };
+    const yms: [number, number] = [25.16, 121.545];
+    const step = (m: string): string | undefined => /class="woof-contours" data-step="(\d+)"/.exec(m)?.[1];
+    expect(step(at(yms, WOOF_KM))).toBe('200');
+    expect(step(at(yms, 3))).toBe('100');
+    expect(step(at(yms, 1))).toBe('50');
+    expect(at(yms, 1)).toMatch(/class="woof-contour index" d="M/);
+    // 山頂：拉遠只有 ▲，拉近寫名字和高度（站著，只轉不翻）
+    const far = at(yms, WOOF_KM);
+    expect(far).toContain('class="woof-peak" data-at=');
+    expect(far).not.toMatch(/class="woof-peak"[^>]*>[^<]*<path[^>]*\/><text/);
+    expect(at([25.1707, 121.55344], 1)).toMatch(/<g class="woof-peak" data-at="[\d.]+ [\d.]+" data-flip="no"><path[^>]*\/><text[^>]*>七星山 1118<\/text>/);
+    expect(at([25.02654, 121.57554], 1)).toContain('>象山 184<');
+    // 拉遠時山頂不擠在一起
+    const pts = [...far.matchAll(/class="woof-peak" data-at="([\d.]+) ([\d.]+)"/g)].map((m) => [Number(m[1]), Number(m[2])]);
+    for (let i = 0; i < pts.length; i++) for (let j = 0; j < i; j++) expect(Math.hypot(pts[i][0] - pts[j][0], pts[i][1] - pts[j][1])).toBeGreaterThanOrEqual(44);
+    // 還沒載入、沒給：不畫山（也不會壞）
+    expect(at(yms, 1, () => null)).not.toContain('woof-contour');
+    const [la, ln] = toWoof(yms);
+    expect(spaceMarkup({ ...base, scaleKm: 1, rg: 164, view: { focus: 'woof', yaw: (-ln * Math.PI) / 180, pitch: (la * Math.PI) / 180 } })).not.toContain('woof-peak');
+  });
+
   it('wraps Taipei City around the whole planet, with the sea outside the city', () => {
     // 市界最西南、最東北的角落
     const sw = toWoof([24.9605, 121.4571]);
