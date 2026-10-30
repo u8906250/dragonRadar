@@ -184,8 +184,11 @@ describe('地球的雷達上的中山公園（跟汪星共用一份）', () => {
     expect(at(0.005, dog)).not.toContain('woof-dog');
     // 汪星：拉遠到約 500 公尺外看不到，再近是一個點，拉近到約 30 公尺內畫出整隻 3D 的狗、點得到（名字不顯示）
     expect(woofAt(1, dog)).not.toContain('woof-dog');
-    expect(woofAt(0.3, dog)).toMatch(/class="woof-dog stand" data-dog="xiaofa" style="--t:-?\d+ms;--ms:\d+ms"><g class="dog-go"><circle class="dog-dot-edge" [^>]*\/><circle class="dog-dot"/);
+    expect(woofAt(0.3, dog)).toMatch(/class="woof-dog stand" data-dog="xiaofa" style="--t:-?\d+ms;--ms:\d+ms"><g class="dog-go"><circle class="dog-dot"/);
     expect(woofAt(0.04, dog)).toContain('dog-dot');
+    // 點跟銅像的點一樣大
+    const dotR = (svg: string, cls: string): number => Number(new RegExp(`class="${cls}" cx="[\\d.]+" cy="[\\d.]+" r="([\\d.]+)"`).exec(svg)![1]);
+    expect(dotR(woofAt(0.3, dog), 'dog-dot')).toBe(dotR(woofAt(0.3, [25.040048, 121.5594]), 'statue-dot'));
     expect(woofAt(0.028, dog)).toContain('woof-dog full');
     const full = woofAt(0.005, dog);
     expect(full).not.toContain('小法');

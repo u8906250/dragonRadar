@@ -492,9 +492,8 @@ a.chip { display: inline-flex; align-items: center; text-decoration: none; }
 .radar .woof-dog { pointer-events: none; }
 .radar .woof-dog .dog-hit { fill: transparent; pointer-events: all; cursor: pointer; }
 .radar .woof-dog .dog-shadow { fill-opacity: 0.18; }
-/* 遠遠的白點（還有整隻很小的時候墊在後面）：白點外面加 4.5 像素、深色的邊再加 7 像素（照螢幕像素，不跟著縮放），手機上也看得到 */
-.radar .woof-dog .dog-dot-edge { fill: none; stroke: #3f362c; stroke-width: 7px; stroke-opacity: 0.7; vector-effect: non-scaling-stroke; }
-.radar .woof-dog .dog-dot { fill: #fff; stroke: #fff; stroke-width: 4.5px; vector-effect: non-scaling-stroke; }
+/* 遠遠的白點：跟銅像的點一樣大，淡淡的邊（仔細看找得到，不會一眼就看到） */
+.radar .woof-dog .dog-dot { fill: #fbf8f2; stroke: #8f846f; stroke-width: 0.5; }
 .radar .woof-dog.walk .dog-go, .radar .woof-dog.run .dog-go { animation: dog-go var(--ms) linear var(--t) both; }
 @keyframes dog-go { from { transform: none; } to { transform: translate(var(--dx), var(--dy)); } }
 /*

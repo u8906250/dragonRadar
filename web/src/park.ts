@@ -544,9 +544,8 @@ function dogPart(g: ParkGeom, c: ParkCanvas, dog: Dog): string {
   const moving = s.do === 'walk' || s.do === 'run';
   if (c.ppm < DOG_FULL) {
     const style = `--t:${-Math.round(d.e)}ms;--ms:${Math.round(s.ms)}ms${moving ? `;--dx:${f1(vx)}px;--dy:${f1(vy)}px` : ''}`;
-    // 遠遠的白點：外面一圈深色的邊，大小照螢幕像素加（styles.css，手機上雷達小也看得到）
-    const dot = `cx="${f1(a[0])}" cy="${f1(a[1])}" r="${Math.min(3, Math.max(1, c.ppm * 0.5)).toFixed(1)}"`;
-    return `<g class="woof-dog ${s.do}" data-dog="${dog.id}" style="${style}"><g class="dog-go"><circle class="dog-dot-edge" ${dot} /><circle class="dog-dot" ${dot} /></g></g>`;
+    // 遠遠的白點：跟銅像的點一樣大，淡淡的邊（不會一眼就看到）
+    return `<g class="woof-dog ${s.do}" data-dog="${dog.id}" style="${style}"><g class="dog-go"><circle class="dog-dot" cx="${f1(a[0])}" cy="${f1(a[1])}" r="${Math.min(4, Math.max(1.2, c.ppm * 0.75)).toFixed(1)}" /></g></g>`;
   }
   // 面向哪：從起點往這個方向 1 公尺的那一點在畫面上的方向（順時針、0 是上）
   const face = (dir: Pt): number => {
