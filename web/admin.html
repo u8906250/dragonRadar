@@ -18,6 +18,7 @@
     .msg.err { color: #b3261e; font-weight: 700; }
     .tabs { display: flex; gap: 8px; margin: 20px 0 12px; }
     .tabs .btn[aria-selected='true'] { background: var(--ink); color: var(--cream); }
+    .tabs #clear-resolved { margin-left: auto; }
     .list { list-style: none; margin: 0; padding: 0; display: grid; gap: 12px; }
     .fb { background: #fff; border: 2px solid var(--ink); border-radius: 12px; padding: 12px 14px; }
     .fb-head { display: flex; justify-content: space-between; gap: 8px; font-size: 13px; color: #5d5850; }
@@ -71,6 +72,7 @@
       <div class="tabs" role="tablist">
         <button type="button" class="btn" role="tab" data-status="open" aria-selected="true">未處理</button>
         <button type="button" class="btn" role="tab" data-status="resolved" aria-selected="false">已處理</button>
+        <button type="button" class="btn" id="clear-resolved" hidden>清空</button>
       </div>
       <div id="result" class="result" hidden aria-live="polite"></div>
       <ul id="list" class="list" aria-live="polite"></ul>
@@ -162,6 +164,8 @@
       for (const p of pickers.values()) void p.then((x) => x.remove());
       pickers.clear();
       rowsById = new Map(rows.map((f) => [String(f.id), f]));
+      // 「清空」只在已處理、有東西的時候出現
+      $('#clear-resolved').hidden = status !== 'resolved' || !rows.length;
       if (!rows.length) {
         list.innerHTML = `<li class="empty">${status === 'open' ? '沒有未處理的回報' : '還沒有已處理的回報'}</li>`;
         return;
@@ -469,6 +473,27 @@
       e.preventDefault();
       const btn = document.querySelector(`button[data-find="${input.dataset.place}"]`);
       if (btn && !btn.disabled) void findPlace(input.dataset.place, btn);
+    });
+
+    // 清空已處理：只清畫面上看到的（標成已處理的時間不晚於列表裡最後一筆），清完重新載入
+    $('#clear-resolved').addEventListener('click', async (e) => {
+      const btn = e.currentTarget;
+      const rows = [...rowsById.values()];
+      if (status !== 'resolved' || !rows.length) return;
+      const count = rows.length >= 200 ? '200 筆以上' : `${rows.length} 筆`;
+      if (!confirm(`清空已處理的回報（${count}）？清空後這裡不再列出，也不能改回未處理。`)) return;
+      const upTo = Math.max(...rows.map((f) => f.resolved_at || 0));
+      btn.disabled = true;
+      try {
+        const r = await api('/api/admin/feedback/clear', { method: 'POST', body: JSON.stringify({ upTo }) });
+        showResult(`已清空 ${r.cleared} 筆已處理的回報。`);
+        await load();
+      } catch (err) {
+        if (err.auth) return void load();
+        showResult(esc(err.message), true);
+      } finally {
+        btn.disabled = false;
+      }
     });
 
     for (const t of document.querySelectorAll('[role="tab"]')) {

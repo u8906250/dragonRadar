@@ -414,6 +414,17 @@ export async function setFeedbackStatus(env: Env, id: number, body: unknown, now
   return { ok: true, id, status };
 }
 
+/**
+ * 清空已處理：{ upTo } 是管理頁看到的最後標成已處理的時間，那之後才標的（別的手機剛處理的）不清。
+ * 不刪掉，改成 cleared（管理頁不再列出，也不能改回未處理）：同一個人重複回報同一件事、回報太頻繁照樣擋得住，30 天後照常刪掉
+ */
+export async function clearResolvedFeedback(env: Env, body: unknown): Promise<{ ok: true; cleared: number }> {
+  const upTo = (body as { upTo?: unknown } | null)?.upTo;
+  if (typeof upTo !== 'number' || !Number.isFinite(upTo)) throw new PushError(400, 'upTo is required');
+  const r = await env.DB.prepare("UPDATE event_feedback SET status = 'cleared' WHERE status = 'resolved' AND COALESCE(resolved_at, 0) <= ?").bind(upTo).run();
+  return { ok: true, cleared: r.meta.changes ?? 0 };
+}
+
 /** 管理者在自己手機上開回報通知：{ subscription } */
 export async function saveAdminSubscription(env: Env, body: unknown, now: number): Promise<{ ok: true; created: boolean; sub: { endpoint: string; p256dh: string; auth: string } }> {
   const sub = parseSubscription((body as { subscription?: unknown } | null)?.subscription);

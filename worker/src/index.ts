@@ -10,7 +10,7 @@ import { CURRENT_MAP_URL } from './sources/currentmap';
 import { mergeIntoOfficial } from './sources/merge';
 import { apifyTrial } from './sources/apify';
 import { fetchThreadsPost, resolveThreadsLink, shortcodeToUnix } from './sources/link';
-import { adminLocate, applyFeedback, deleteAdminSubscription, listFeedback, locateForFeedback, notifyAdmins, purgeFeedback, saveAdminSubscription, setFeedbackStatus, submitFeedback } from './feedback';
+import { adminLocate, applyFeedback, clearResolvedFeedback, deleteAdminSubscription, listFeedback, locateForFeedback, notifyAdmins, purgeFeedback, saveAdminSubscription, setFeedbackStatus, submitFeedback } from './feedback';
 import { SESSION_SPEC } from './badminton';
 import { FOOD_SPEC } from './food';
 import { JOB_SPEC } from './jobs';
@@ -392,6 +392,10 @@ async function handleAdmin(req: Request, env: Env, ctx: ExecutionContext, path: 
   // 管理頁的小地圖查地點：{ place }
   if (req.method === 'POST' && path === '/api/admin/locate') {
     return jsonResponse(await adminLocate(env, await readJson(req)));
+  }
+  // 清空已處理：{ upTo }（管理頁看到的最後標成已處理的時間）
+  if (req.method === 'POST' && path === '/api/admin/feedback/clear') {
+    return jsonResponse(await clearResolvedFeedback(env, await readJson(req)));
   }
   const fbStatus = /^\/api\/admin\/feedback\/(\d+)$/.exec(path);
   if (req.method === 'POST' && fbStatus) {
