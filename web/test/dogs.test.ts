@@ -156,7 +156,7 @@ describe('會動的狗（dogs.ts）', () => {
     expect(lookAtViewer(180)).toBe(0);
     expect(lookAtViewer(135)).toBe(-45);
     expect(Math.abs(lookAtViewer(0))).toBe(80);
-    // 照個性：大概四成只轉頭看
+    // 照個性：大概六成只轉頭看、四成轉過來坐下
     let looks = 0;
     for (let i = 0; i < 200; i++) {
       const d = new Dog({ id: `test-glance-${i}`, name: '測試', look: MALTESE, yard: YARD });
@@ -164,8 +164,8 @@ describe('會動的狗（dogs.ts）', () => {
       d.pet(1000, rand);
       if (d.glance) looks++;
     }
-    expect(looks).toBeGreaterThan(50);
-    expect(looks).toBeLessThan(110);
+    expect(looks).toBeGreaterThan(95);
+    expect(looks).toBeLessThan(145);
   });
 
   it('turns to face you (south) and sits when tapped, and sits longer when tapped again', () => {

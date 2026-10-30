@@ -105,7 +105,7 @@ export const NATURE: DogNature = {
   afterRun: { lie: 0.35, idle: 0.3, walk: 0.35 },
   stretchAfterRest: 0.4,
   chin: 0.5,
-  glance: 0.4,
+  glance: 0.6,
   tail: { sniff: 0.5, walk: 0.3, stand: 0.35, idle: 0.7, sit: 0.6, lie: 0.75, drink: 0.4 },
   last: { stand: [1500, 3500], sniff: [2000, 5000], idle: [3500, 8500], sit: [6000, 14000], lie: [15000, 35000] },
 };
