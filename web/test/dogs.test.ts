@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { dogSvg, MALTESE, STILL, dogHeight, type DogLook } from '../src/dog';
-import { Dog, DOG_SPEED, dogById, dogPose, speedOf, type DogSeg, type DogYard } from '../src/dogs';
+import { Dog, dogById, dogPose, NATURE, speedOf, type DogSeg, type DogYard } from '../src/dogs';
 
 /** 兩塊 40 公尺見方的草皮，中間隔 20 公尺的地面（緯經度當公尺用，1 度 = 1 公尺） */
 const lawn = (ring: number, rand: () => number): [number, number] => [rand() * 40, ring * 60 + rand() * 40];
@@ -18,7 +18,7 @@ const seeded = (seed: number) => (): number => ((seed = (seed * 16807) % 2147483
 describe('會動的狗（dogs.ts）', () => {
   it('walks slowly, runs, stops, sniffs and sits, one piece after another', () => {
     const rand = seeded(11);
-    const dog = new Dog('test-a', MALTESE, YARD);
+    const dog = new Dog({ id: 'test-a', name: '測試', look: MALTESE, yard: YARD });
     expect(dogById('test-a')).toBe(dog);
     dog.place(rand, 0);
     // 三十分鐘，每半秒看一次：一段接一段（沒有跳），停著的不動，走、跑照速度，每一段一開始面向上一段的方向
@@ -42,15 +42,17 @@ describe('會動的狗（dogs.ts）', () => {
         if (s.do !== 'drink') expect(s.dir).toEqual(s.dir0);
       }
     }
-    expect(new Set(list.map((s) => s.do))).toEqual(new Set(['stand', 'sniff', 'sit', 'lie', 'stretch', 'drink', 'walk', 'run']));
+    expect(new Set(list.map((s) => s.do))).toEqual(new Set(['stand', 'idle', 'sniff', 'sit', 'lie', 'stretch', 'drink', 'walk', 'run']));
     // 跑完多半趴下來休息
     const afterRun = list.filter((s, i) => i > 0 && list[i - 1].do === 'run' && !list[i - 1].goal);
     expect(afterRun.filter((s) => s.do === 'lie').length).toBeGreaterThan(afterRun.length * 0.35);
     // 走路慢慢走，大多是走一走、停下來聞一聞（也會邊走邊聞），在草皮裡偶爾才跑
-    expect(DOG_SPEED.walk).toBeLessThanOrEqual(0.3);
+    expect(NATURE.speed.walk).toBeLessThanOrEqual(0.3);
     const count = (f: (s: DogSeg) => boolean): number => list.filter(f).length;
     expect(count((s) => s.do === 'sniff') + count((s) => !!s.nose)).toBeGreaterThan(count((s) => s.do === 'stand') + count((s) => s.do === 'sit'));
-    expect(count((s) => s.do === 'walk' && !s.cross)).toBeGreaterThan(count((s) => s.do === 'run' && !s.cross) * 5);
+    expect(count((s) => s.do === 'walk' && !s.cross && !s.goal)).toBeGreaterThan(count((s) => s.do === 'run' && !s.cross && !s.goal) * 5);
+    // 在草皮裡跑一下就好（8 公尺內，約 3 秒）
+    for (const s of list) if (s.do === 'run' && !s.cross && !s.goal) expect(YARD.metres(s.from, s.to)).toBeLessThanOrEqual(8 + 1e-9);
     expect(count((s) => !!s.nose)).toBeGreaterThan(0);
     // 待在一塊草皮裡；換草皮時經過地面跑過去（大多用跑的）
     // 喝水：先走或跑到岸上，面向水喝，喝完走回原來的地方（其他時候都在草皮上）
@@ -77,9 +79,23 @@ describe('會動的狗（dogs.ts）', () => {
     });
   });
 
+  it('follows its own nature (another dog can love running)', () => {
+    const rand = seeded(3);
+    const runner = new Dog({ id: 'test-c', name: '愛跑的', look: MALTESE, yard: YARD, nature: { ...NATURE, run: 0.6, stays: { sniff: 1 } } });
+    runner.place(rand, 0);
+    const segs = new Map<number, NonNullable<Dog['seg']>>();
+    for (let t = 0; t <= 600_000; t += 500) segs.set(runner.now(t, rand).seg.start, runner.now(t, rand).seg);
+    const list = [...segs.values()];
+    const runs = list.filter((s) => s.do === 'run' && !s.cross && !s.goal).length;
+    const walks = list.filter((s) => s.do === 'walk' && !s.cross && !s.goal).length;
+    expect(runs).toBeGreaterThan(walks * 0.8);
+    // 停下來只會聞（跑完趴下、趴完伸懶腰照樣有；第一段是剛放下來站著）
+    expect(list.slice(1).some((s) => s.do === 'stand' || s.do === 'sit' || s.do === 'idle')).toBe(false);
+  });
+
   it('turns to face you (south) and sits when tapped, and sits longer when tapped again', () => {
     const rand = seeded(5);
-    const dog = new Dog('test-b', MALTESE, YARD);
+    const dog = new Dog({ id: 'test-b', name: '測試', look: MALTESE, yard: YARD });
     dog.place(rand, 0);
     const before = dog.now(20_000, rand);
     dog.pet(20_000);
@@ -147,7 +163,7 @@ describe('姿勢（dogPose）', () => {
   it('shows the lip line only when standing or walking', () => {
     const k = 400;
     const face = (d: DogSeg['do'], e = 2000): string => dogSvg(MALTESE, dogPose(seg(d, { ms: 9000 }), e), 180, k);
-    for (const d of ['stand', 'walk'] as const) {
+    for (const d of ['stand', 'idle', 'walk'] as const) {
       expect(dogPose(seg(d), 2000).lips).toBe(true);
       for (const part of ['philtrum', 'lip1', 'lip-1']) expect(face(d)).toContain(`data-part="${part}"`);
     }
@@ -157,6 +173,18 @@ describe('姿勢（dogPose）', () => {
     }
     // 從背後看不到
     expect(dogSvg(MALTESE, dogPose(seg('stand'), 2000), 0, k)).not.toContain('data-part="lip1"');
+  });
+
+  it('zones out: stands still staring to one side, tail still, blinking slowly', () => {
+    const s = seg('idle', { ms: 8000 });
+    const ps = Array.from({ length: 40 }, (_, i) => dogPose(s, 1500 + i * 100));
+    for (const p of ps) {
+      expect(Math.abs(p.look)).toBeCloseTo(22);
+      expect(p.wag).toBe(0);
+      expect(p.legs.every(([d]) => d === 0)).toBe(true);
+    }
+    // 慢慢眨眼：閉到一半的時候也有
+    expect(ps.some((p) => p.blink > 0.3 && p.blink < 0.9)).toBe(true);
   });
 
   it('blinks now and then', () => {

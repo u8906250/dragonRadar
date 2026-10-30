@@ -106,7 +106,7 @@ describe('地球的雷達上的中山公園（跟汪星共用一份）', () => {
       expect(Math.hypot((at[0] - HATCH_CENTER[0]) * EARTH.my, (at[1] - HATCH_CENTER[1]) * EARTH.mx(at[0]))).toBeGreaterThan(6);
     }
     expect(new Set(spots.map((s) => s.ring)).size).toBeGreaterThan(15);
-    // 經過地面到附近另一塊草皮：60 公尺內，路上不經過水池（翠湖、映池）和建築，不出公園
+    // 經過地面到附近另一塊草皮：20 公尺內（跑步不要跑太久），路上不經過水池（翠湖、映池）和建築，不出公園
     let crossed = 0;
     for (const { ring, at } of spots.slice(0, 60)) {
       const o = PARK_YARD.elsewhere(ring, at, rand);
@@ -114,7 +114,7 @@ describe('地球的雷達上的中山公園（跟汪星共用一份）', () => {
       crossed++;
       expect(o.ring).not.toBe(ring);
       expect(inRing(o.at, ZHONGSHAN_PARK.green[o.ring])).toBe(true);
-      expect(Math.hypot((o.at[0] - at[0]) * EARTH.my, (o.at[1] - at[1]) * EARTH.mx(at[0]))).toBeLessThanOrEqual(60);
+      expect(Math.hypot((o.at[0] - at[0]) * EARTH.my, (o.at[1] - at[1]) * EARTH.mx(at[0]))).toBeLessThanOrEqual(20);
       for (let i = 1; i < 50; i++) {
         const p: [number, number] = [at[0] + ((o.at[0] - at[0]) * i) / 50, at[1] + ((o.at[1] - at[1]) * i) / 50];
         expect(inRing(p, ZHONGSHAN_PARK.outline)).toBe(true);
@@ -122,9 +122,9 @@ describe('地球的雷達上的中山公園（跟汪星共用一份）', () => {
       }
     }
     expect(crossed).toBeGreaterThan(40);
-    // 去湖邊喝水：站在岸上（不在水裡、離水不到半公尺），面向水裡，路上不經過水池
+    // 去 20 公尺內的湖邊喝水：站在岸上（不在水裡、離水不到半公尺），面向水裡，路上不經過水池
     let drank = 0;
-    for (const { at } of spots.slice(0, 80)) {
+    for (const { at } of spots) {
       const w = PARK_YARD.water!(at, rand);
       if (!w) continue;
       drank++;
@@ -132,24 +132,27 @@ describe('地球的雷達上的中山公園（跟汪星共用一份）', () => {
       expect(pond).toBeDefined();
       expect(ZHONGSHAN_PARK.water.some((p) => inRing(w.at, p[0]))).toBe(false);
       expect(Math.hypot((w.face[0] - w.at[0]) * EARTH.my, (w.face[1] - w.at[1]) * EARTH.mx(at[0]))).toBeLessThan(0.8);
+      expect(Math.hypot((w.at[0] - at[0]) * EARTH.my, (w.at[1] - at[1]) * EARTH.mx(at[0]))).toBeLessThanOrEqual(20);
       for (let i = 1; i < 50; i++) {
         const p: [number, number] = [at[0] + ((w.at[0] - at[0]) * i) / 50, at[1] + ((w.at[1] - at[1]) * i) / 50];
         expect(ZHONGSHAN_PARK.water.some((q) => inRing(p, q[0]))).toBe(false);
       }
     }
     expect(drank).toBeGreaterThan(10);
-    // 現在是使用者的馬爾濟斯，約 0.38 公尺高（坐著的銅像腳的一半高）
-    expect(PARK_DOGS.map((d) => d.look.name)).toEqual(['馬爾濟斯']);
+    // 現在是使用者的馬爾濟斯小法，約 0.38 公尺高（坐著的銅像腳的一半高）
+    expect(PARK_DOGS.map((d) => [d.name, d.look.name])).toEqual([['小法', '馬爾濟斯']]);
     expect(dogHeight(PARK_DOGS[0].look)).toBeCloseTo(0.38, 2);
     const dog = PARK_DOGS[0].place(rand).from;
     // 地球的雷達上沒有
     expect(at(0.005, dog)).not.toContain('woof-dog');
-    // 汪星：拉遠到約 500 公尺外看不到，再近是一個點，拉近到約 6 公尺內畫出整隻 3D 的狗、點得到
+    // 汪星：拉遠到約 500 公尺外看不到，再近是一個點，拉近到約 30 公尺內畫出整隻 3D 的狗、點得到（名字不顯示）
     expect(woofAt(1, dog)).not.toContain('woof-dog');
-    expect(woofAt(0.3, dog)).toMatch(/class="woof-dog stand" data-dog="maltese" style="--t:-?\d+ms;--ms:\d+ms"><g class="dog-go"><circle class="dog-dot"/);
-    expect(woofAt(0.008, dog)).toContain('dog-dot');
+    expect(woofAt(0.3, dog)).toMatch(/class="woof-dog stand" data-dog="xiaofa" style="--t:-?\d+ms;--ms:\d+ms"><g class="dog-go"><circle class="dog-dot"/);
+    expect(woofAt(0.04, dog)).toContain('dog-dot');
+    expect(woofAt(0.028, dog)).toContain('woof-dog full');
     const full = woofAt(0.005, dog);
-    expect(full).toMatch(/class="woof-dog full stand" data-dog="maltese" data-path="[-\d. ]+" data-at="[\d.]+ [\d.]+" data-flip="no"><circle class="dog-hit"/);
+    expect(full).not.toContain('小法');
+    expect(full).toMatch(/class="woof-dog full stand" data-dog="xiaofa" data-path="[-\d. ]+" data-at="[\d.]+ [\d.]+" data-flip="no"><circle class="dog-hit"/);
     for (const part of ['body', 'head', 'muzzle', 'nose', 'ear1', 'ear-1', 'tail0', 'legfl', 'leghrpaw']) expect(full).toContain(`data-part="${part}"`);
     const [ax, ay] = /data-at="([\d.]+) ([\d.]+)"/.exec(full)!.slice(1).map(Number);
     expect(Math.hypot(ax - C, ay - C)).toBeLessThan(2);
