@@ -390,8 +390,9 @@ const pathOf = (attr: string): DogPath => {
   return { ax, ay, bx, by, b0, b1, k, start };
 };
 
-/** 點得到的範圍（至少 DOG_HIT 像素半徑） */
+/** 點得到的範圍（至少 DOG_HIT 像素半徑）；整隻狗比 DOG_DOT_UNTIL 個 SVG 單位矮時後面墊一個白點（手機上約 8 像素） */
 const DOG_HIT = 16;
+const DOG_DOT_UNTIL = 9;
 
 /** 狗在畫面上這一格：在哪（像素）、面向哪（扣掉指北針轉的角度）、點得到的範圍、3D 的狗 */
 function frame(dog: Dog, d: { seg: DogSeg; e: number }, p: DogPath, heading: number): { x: number; y: number; hit: [number, number, number]; svg: string } {
@@ -402,7 +403,10 @@ function frame(dog: Dog, d: { seg: DogSeg; e: number }, p: DogPath, heading: num
   const turn = ((((p.b1 - p.b0) % 360) + 540) % 360) - 180;
   const yaw = p.b0 + turn * t - heading;
   const h = dogHeight(dog.look) * p.k;
-  return { x, y, hit: [x, y - h * 0.5, Math.max(DOG_HIT, h * 0.7)], svg: dogSvg(dog.look, dogPose(s, d.e), yaw, p.k) };
+  // 狗在畫面上還很小（拉遠、手機）：後面墊一個跟遠遠的點一樣的白點和深色的邊，看得出在哪
+  const n = (v: number): string => v.toFixed(1);
+  const dot = h < DOG_DOT_UNTIL ? `<circle class="dog-dot-edge" cx="0" cy="${n(-h * 0.45)}" r="${n(h * 0.3)}" /><circle class="dog-dot" cx="0" cy="${n(-h * 0.45)}" r="${n(h * 0.3)}" />` : '';
+  return { x, y, hit: [x, y - h * 0.5, Math.max(DOG_HIT, h * 0.7)], svg: dot + dogSvg(dog.look, dogPose(s, d.e), yaw, p.k) };
 }
 
 /**
