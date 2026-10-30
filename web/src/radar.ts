@@ -241,7 +241,7 @@ export class Radar {
   /** 汪星的地形圖（雷達底色上面、掃描下面的 canvas，正方形對齊 SVG）、雷達的正方形幾像素、畫地形圖的（main.ts 給） */
   private readonly reliefCanvas: HTMLCanvasElement;
   private squarePx = 0;
-  private reliefPaint: ((out: Uint8ClampedArray, n: number, view: SpaceView, scaleKm: number, heading: number) => number) | null = null;
+  private reliefPaint: ((out: Uint8ClampedArray, n: number, view: SpaceView, scaleKm: number, heading: number, j0?: number, j1?: number) => number) | null = null;
   private reliefImage: ImageData | null = null;
   private flashOf = new WeakMap<SVGGElement, HTMLDivElement>();
   /** 主圖層的瓶子 → 特效層裡同位置、同 class（顏色照舊）的那一組 */
@@ -458,7 +458,10 @@ export class Radar {
       // 地形圖照新的大小重畫
       const was = this.squarePx;
       this.squarePx = size;
-      if (Math.abs(was - size) > 1) this.paintRelief();
+      if (Math.abs(was - size) > 1) {
+        this.reliefKey = '';
+        this.paintRelief();
+      }
     }).observe(stack);
     this.setStyle(this.style);
     this.setScale(this.scaleKm);
@@ -754,6 +757,7 @@ export class Radar {
    */
   followSpace(view: SpaceView): void {
     this.spaceView = { ...view };
+    this.followUntil = performance.now() + 1500;
     const d = this.drawnView;
     const km = view.focus && this.spaceBodyKm ? this.spaceBodyKm(view.focus) : 0;
     if (!d || d.focus !== view.focus || !km || performance.now() - this.drawnAt > 1000) {
@@ -776,30 +780,88 @@ export class Radar {
   }
 
   /** 汪星的地形圖怎麼畫（main.ts：地形圖載好了、看得到汪星的地圖才畫；回傳要多不透明，0 是不畫）；null 是不畫 */
-  setRelief(paint: ((out: Uint8ClampedArray, n: number, view: SpaceView, scaleKm: number, heading: number) => number) | null): void {
+  setRelief(paint: ((out: Uint8ClampedArray, n: number, view: SpaceView, scaleKm: number, heading: number, j0?: number, j1?: number) => number) | null): void {
     this.reliefPaint = paint;
+    this.reliefKey = '';
     this.paintRelief();
   }
 
-  /** 畫汪星的地形圖：太空、有畫法才畫；canvas 最多 480 像素見方（拖曳時 200，CSS 放大到雷達的大小，地形本來就是模糊的） */
-  private paintRelief(): void {
+  /** 地形圖現在畫的是哪個看法（沒變就不重畫）、畫好細的了沒；停下來之後畫細的計時器、正在畫的是第幾次；鎖定跟著狗走到什麼時候 */
+  private reliefKey = '';
+  private reliefFine = false;
+  private reliefTimer = 0;
+  private reliefJob = 0;
+  private followUntil = 0;
+
+  /**
+   * 畫汪星的地形圖：太空、有畫法才畫；看法沒變就不重畫（例如狗走完一段重畫整層）。canvas 照雷達的像素（CSS 放大到雷達的大小）：
+   * 每次先馬上畫粗的（最多 220 見方，拖曳、縮放、火箭飛行時每一格都這樣），停下來 0.2 秒再畫細的（最多 800 見方）：
+   * 細的分好幾格畫（每一格最多算 10 毫秒，算好再整張換上去，慢手機也不會卡），鎖定跟著狗走時先不畫細的
+   */
+  private paintRelief(fine = false): void {
     const c = this.reliefCanvas;
     const hide = (): void => {
       c.style.display = 'none';
+      this.reliefKey = '';
     };
+    window.clearTimeout(this.reliefTimer);
     if (!this.inSpace || !this.reliefPaint || !this.squarePx) return hide();
-    const n = Math.max(64, Math.round(Math.min(this.squarePx * (window.devicePixelRatio || 1), this.panning ? 200 : 480)));
-    if (!this.reliefImage || this.reliefImage.width !== n) this.reliefImage = new ImageData(n, n);
-    const alpha = this.reliefPaint(this.reliefImage.data, n, this.spaceView, this.scaleKm, this.heading);
-    if (alpha <= 0) return hide();
-    if (c.width !== n) {
-      c.width = n;
-      c.height = n;
+    const v = this.spaceView;
+    const key = `${v.focus},${v.yaw},${v.pitch},${v.toward},${v.u},${this.scaleKm},${this.heading},${this.squarePx}`;
+    const job = ++this.reliefJob;
+    const paint = this.reliefPaint;
+    const [view, km, heading] = [{ ...v }, this.scaleKm, this.heading];
+    const show = (img: ImageData, alpha: number): void => {
+      if (c.width !== img.width) {
+        c.width = img.width;
+        c.height = img.width;
+      }
+      c.getContext('2d')?.putImageData(img, 0, 0);
+      c.style.opacity = alpha.toFixed(2);
+      c.style.transform = '';
+      c.style.display = '';
+    };
+    const later = (): void => {
+      this.reliefTimer = window.setTimeout(() => this.paintRelief(true), Math.max(200, this.followUntil - performance.now()));
+    };
+    const px = this.squarePx * (window.devicePixelRatio || 1);
+    if (!fine) {
+      if (key === this.reliefKey && c.style.display !== 'none') {
+        c.style.transform = '';
+        if (!this.reliefFine) later();
+        return;
+      }
+      const n = Math.max(64, Math.round(Math.min(px, 220)));
+      if (!this.reliefImage || this.reliefImage.width !== n) this.reliefImage = new ImageData(n, n);
+      const alpha = paint(this.reliefImage.data, n, view, km, heading);
+      if (alpha <= 0) return hide();
+      show(this.reliefImage, alpha);
+      this.reliefKey = key;
+      this.reliefFine = n >= px;
+      if (!this.reliefFine) later();
+      return;
     }
-    c.getContext('2d')?.putImageData(this.reliefImage, 0, 0);
-    c.style.opacity = alpha.toFixed(2);
-    c.style.transform = '';
-    c.style.display = '';
+    // 細的：鎖定跟著狗走時晚一點再畫；看法變了（又重畫了）就不畫這一張
+    if (performance.now() < this.followUntil) return later();
+    const n = Math.max(64, Math.round(Math.min(px, 800)));
+    const img = new ImageData(n, n);
+    let [j, alpha] = [0, 0];
+    const run = (): void => {
+      if (job !== this.reliefJob || key !== this.reliefKey) return;
+      const t0 = performance.now();
+      while (j < n && performance.now() - t0 < 10) {
+        const j1 = Math.min(n, j + 16);
+        alpha = paint(img.data, n, view, km, heading, j, j1);
+        j = j1;
+      }
+      if (j < n) {
+        requestAnimationFrame(run);
+        return;
+      }
+      if (alpha > 0) show(img, alpha);
+      this.reliefFine = true;
+    };
+    run();
   }
 
   setSpaceView(view: SpaceView, quiet = false): void {

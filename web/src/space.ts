@@ -612,10 +612,12 @@ export function bodyBearing(from: string, to: string, when = new Date()): number
 }
 
 /**
- * 中心換到這顆時最多放大到多少（雷達外圈幾公里）：剛好看得到整顆；汪星可以放大到 1 km 看地表，正中間在中山公園附近可以到 0.5 公尺
+ * 中心換到這顆時最多放大到多少（雷達外圈幾公里）：剛好看得到整顆；汪星可以放大到 100 公尺看地表（海上的水波），正中間在中山公園附近可以到 0.5 公尺
  * （woofMap 是 false：還沒搭火箭過去、看不到地圖，跟別的星球一樣只到整顆）
  */
-export const focusMinKm = (key: string, view?: SpaceView, woofMap = true): number => (key === 'woof' && woofMap ? (view && atPark(view) ? PARK_MIN_KM : 1) : bodyRadiusKm(key) * 1.3);
+export const focusMinKm = (key: string, view?: SpaceView, woofMap = true): number => (key === 'woof' && woofMap ? (view && atPark(view) ? PARK_MIN_KM : WOOF_MIN_KM) : bodyRadiusKm(key) * 1.3);
+/** 汪星（公園以外）最多拉近到多少：外圈 100 公尺（海上的水波外圈約 500 公尺內才長出來） */
+export const WOOF_MIN_KM = 0.1;
 
 /** 圓裡面一條水平的弦（木星的條紋）：離圓心 dy，畫在圓裡面那一段 */
 function chord(x: number, y: number, r: number, dy: number): string {
@@ -678,7 +680,7 @@ const sub = (a: Vec3, b: Vec3): Vec3 => [a[0] - b[0], a[1] - b[1], a[2] - b[2]];
  * 汪星畫成跟地球一樣的球：正射投影，地表是台北市（WOOF_LAND）：陸地淡淡填色，外面是海（淡淡的水色），
  * 道路（國道、快速道路粗線，主要幹道細線，夠大才畫）；山是另外一層的地形圖（paintWoofRelief）；不畫虛線（經緯線、海岸線、區界、球的邊），
  * 海岸和球的邊看陸地、海的顏色；夜晚那一半照太陽真正的方向（toSun：看的人的座標）。
- * 正中間的經緯度跟著視角轉：左右拖轉經度、上下拖轉緯度。中心是汪星時可以放大到 1 km（focusMinKm），
+ * 正中間的經緯度跟著視角轉：左右拖轉經度、上下拖轉緯度。中心是汪星時可以放大到 100 公尺（focusMinKm），
  * 拉近到畫面上的台北半徑 2 km 內換成大街小巷（streets：跟雷達一樣的圖磚）；中山公園描繪出來（草地花圃草綠色、映池和翠湖水藍色，拉近長出一叢叢的草、一道道的水波），那裡可以放大到 0.5 公尺，看得到的那一小塊線切細
  */
 function woofGlobe(x: number, y: number, r: number, view: SpaceView, toSun: Vec3, streets?: WoofStreets): string {
@@ -752,7 +754,7 @@ export interface ReliefTexture {
  * 取顏色時附近四格照距離混在一起（拉近不會一格一格的）。中心要是汪星才畫；拉近慢慢變淡（外圈約 3 公里內開始，約 400 公尺內不畫），
  * 讓道路、公園清楚。回傳這一層要多不透明（0 是不用畫）
  */
-export function paintWoofRelief(out: Uint8ClampedArray, n: number, tex: ReliefTexture, view: SpaceView, scaleKm: number, heading: number): number {
+export function paintWoofRelief(out: Uint8ClampedArray, n: number, tex: ReliefTexture, view: SpaceView, scaleKm: number, heading: number, j0 = 0, j1 = n): number {
   if (view.focus !== 'woof') return 0;
   const r = (WOOF_KM * INNER) / scaleKm;
   const ppm = r / (WOOF_KM * 1000);
@@ -780,13 +782,15 @@ export function paintWoofRelief(out: Uint8ClampedArray, n: number, tex: ReliefTe
     return [lat, lng];
   };
   // 經緯度每 B 個像素精算一次（反三角函數很慢），中間照比例內插；四個角有一個在球外面、跨過經度 180 度就每一點都精算（球的邊、接縫）
+  // 只畫 j0～j1 那幾列（radar.ts 畫細的時候分好幾次畫，不會卡住畫面）
   const B = 4;
   const m = Math.ceil(n / B) + 1;
+  const g0 = Math.floor(j0 / B);
   const nodes: Array<[number, number] | null> = [];
-  for (let gj = 0; gj < m; gj++) for (let gi = 0; gi < m; gi++) nodes.push(geo(gi * B + 0.5, gj * B + 0.5));
-  for (let j = 0; j < n; j++) {
-    const gj = Math.floor(j / B);
-    const fj = (j - gj * B) / B;
+  for (let gj = g0; gj <= Math.floor((j1 - 1) / B) + 1; gj++) for (let gi = 0; gi < m; gi++) nodes.push(geo(gi * B + 0.5, gj * B + 0.5));
+  for (let j = j0; j < j1; j++) {
+    const gj = Math.floor(j / B) - g0;
+    const fj = (j - (gj + g0) * B) / B;
     for (let i = 0; i < n; i++) {
       const o = (j * n + i) * 4;
       const gi = Math.floor(i / B);

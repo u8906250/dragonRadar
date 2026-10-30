@@ -869,10 +869,10 @@ function woofRelief(): import('./space').ReliefTexture | null {
     });
   return null;
 }
-radar.setRelief((out, n, view, km, heading) => {
+radar.setRelief((out, n, view, km, heading, j0, j1) => {
   if (!spaceMod || !woofMap()) return 0;
   const t = view.focus === 'woof' ? woofRelief() : null;
-  return t ? spaceMod.paintWoofRelief(out, n, t, view, km, heading) : 0;
+  return t ? spaceMod.paintWoofRelief(out, n, t, view, km, heading, j0, j1) : 0;
 });
 const woofStreets: import('./space').WoofStreets = (lat, lng, km, rangeKm) => {
   if (!streetsMod) {

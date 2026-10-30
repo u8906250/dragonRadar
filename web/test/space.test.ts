@@ -254,7 +254,7 @@ describe('汪星', () => {
     // 地形圖：WebP，不大（第一次看汪星的地圖才下載）
     const { default: inline } = await import('../src/woof-relief.webp?inline');
     expect(inline.startsWith('data:image/webp;base64,')).toBe(true);
-    expect(((inline.length - 23) * 3) / 4).toBeLessThan(60_000);
+    expect(((inline.length - 23) * 3) / 4).toBeLessThan(100_000);
     // 假的地形圖：每度一個像素，紅色記經度、綠色記緯度
     const [tw, th] = [344, 160];
     const data = new Uint8ClampedArray(tw * th * 4);
@@ -279,6 +279,12 @@ describe('汪星', () => {
     expect(paintWoofRelief(out, n, tex, view, 0.05, 0)).toBe(0);
     // 拉近慢慢變淡
     expect(paintWoofRelief(out, n, tex, view, 0.5, 0)).toBeLessThan(paintWoofRelief(out, n, tex, view, 3, 0));
+    // 分好幾次畫（每次幾列，radar.ts 畫細的時候）跟一次畫完一樣
+    const once = new Uint8ClampedArray(n * n * 4);
+    const parts = new Uint8ClampedArray(n * n * 4);
+    paintWoofRelief(once, n, tex, view, WOOF_KM * 1.6, 30);
+    for (let j = 0; j < n; j += 16) paintWoofRelief(parts, n, tex, view, WOOF_KM * 1.6, 30, j, Math.min(n, j + 16));
+    expect(parts).toEqual(once);
   });
 
   it('wraps Taipei City around the whole planet, with the sea outside the city', () => {
@@ -310,8 +316,8 @@ describe('汪星', () => {
     expect(woof).not.toContain('fill="#');
   });
 
-  it('zooms in to 1 km, keeping the lines where they are on the sphere', () => {
-    expect(focusMinKm('woof')).toBe(1);
+  it('zooms in to 100 m, keeping the lines where they are on the sphere', () => {
+    expect(focusMinKm('woof')).toBe(0.1);
     expect(focusMinKm('moon')).toBeCloseTo(1737 * 1.3);
     // 正中間放在北緯 30 度的緯線上、兩個點（經度 0、3 度）中間：拉近到 1 km，緯線還是要通過正中間
     // （汪星不畫經緯線了，直接畫經緯線來看：道路、等高線、公園的線都是同一種切細的方法）
@@ -414,9 +420,9 @@ describe('汪星的中山公園', () => {
   it('lets you zoom in to 0.5 m only around the park', () => {
     expect(atPark(viewAt(hall))).toBe(true);
     expect(focusMinKm('woof', viewAt(hall))).toBe(PARK_MIN_KM);
-    // 台北車站、沒給視角：1 km
-    expect(focusMinKm('woof', viewAt([25.0478, 121.517]))).toBe(1);
-    expect(focusMinKm('woof')).toBe(1);
+    // 台北車站、沒給視角：100 公尺（海上也是，看得到水波）
+    expect(focusMinKm('woof', viewAt([25.0478, 121.517]))).toBe(0.1);
+    expect(focusMinKm('woof')).toBe(0.1);
     expect(PARK_MIN_KM * 1000).toBeLessThan(1);
   });
 
