@@ -130,7 +130,7 @@ button, select, a { touch-action: manipulation; }
 #app { height: 100dvh; display: grid; grid-template-rows: auto minmax(0, 1fr) auto; overflow: hidden; }
 
 .topbar {
-  display: flex; align-items: center; justify-content: space-between; gap: 8px;
+  display: flex; align-items: center; justify-content: space-between; gap: 8px; min-width: 0;
   min-height: var(--topbar-h);
   padding: 6px 14px 6px 16px;
   padding-top: calc(6px + env(safe-area-inset-top));
@@ -156,9 +156,23 @@ button, select, a { touch-action: manipulation; }
 :root[data-theme='neon'] .brand-text { text-shadow: 0 0 10px var(--highlight); }
 .badge { font-size: 11px; padding: 3px 8px; border-radius: 999px; background: var(--badge-bg); color: var(--badge-text); font-weight: 600; margin-left: 4px; }
 .badge.mock { background: var(--badge-mock-bg); color: var(--badge-mock-text); }
-.controls { display: flex; align-items: center; gap: 6px; }
+.controls { display: flex; align-items: center; gap: 6px; flex: 0 0 auto; }
+/* 標題太長（窄手機、模組名稱長）時名稱變成「…」，右邊的按鈕不會被擠出畫面 */
+.brand { min-width: 0; }
+.brand-btn { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+/* 主題、通知、說明：平常照樣排在標題列，全螢幕時收進「⋯」 */
+.controls-more { display: contents; }
+#more-btn, #list-btn { display: none; }
+/* 只有圖示的按鈕（全螢幕、⋯） */
+.controls .chip.icon-chip { display: inline-flex; align-items: center; justify-content: center; width: 40px; padding: 0; }
+.icon-chip svg { flex: 0 0 auto; width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width: 2.4; stroke-linecap: round; stroke-linejoin: round; }
+#more-btn svg { fill: currentColor; stroke: none; }
+.ic-shrink, #app.full .ic-expand { display: none; }
+#app.full .ic-shrink { display: block; }
 /* 標題多了切換雷達的 ▾：400 寬以下就精簡，不然右上的按鈕會擠到邊 */
-@media (max-width: 400px) { .controls { gap: 4px; } .controls .chip { padding: 8px 10px; font-size: 13px; } :root[data-theme='current'] .brand-wave { display: none; } }
+@media (max-width: 400px) { .controls { gap: 4px; } .controls .chip { padding: 8px 10px; font-size: 13px; } .controls .chip.icon-chip { width: 36px; } :root[data-theme='current'] .brand-wave { display: none; } }
+/* 360 寬的手機：多了全螢幕按鈕，再擠一點，「洋流雷達」才不會變成「洋流…」 */
+@media (max-width: 380px) { .topbar { padding-left: 12px; padding-right: 10px; } .brand { font-size: 16px; } .controls .chip { padding: 8px 8px; } .controls .chip.icon-chip { width: 34px; } }
 
 .chip {
   font: inherit; font-size: 14px; font-weight: 600; color: var(--chip-text);
@@ -326,6 +340,47 @@ a.chip { display: inline-flex; align-items: center; text-decoration: none; }
 .panel.collapsed .kw-bar, .panel.collapsed .filter-row, .panel.collapsed .event-list, .panel.collapsed .hint { visibility: hidden; }
 .panel.collapsed .panel-head .right, .panel.collapsed #origin-label, .panel.collapsed #use-gps { display: none; }
 .panel.expanded .panel-handle span { opacity: 0.9; }
+/* ========== 全螢幕（像 Google 地圖）==========
+ * 地圖、雷達鋪滿：標題列收成浮在上面的按鈕（左上「洋流雷達▾」、右上「⋯」和縮小），地圖外面的框和留白拿掉；
+ * 手機的清單照樣在下面可以拉上拉下，上緣的圓角疊在地圖上；電腦的清單在右邊，可以收起來（#app.list-off）
+ */
+#app.full { position: relative; grid-template-rows: minmax(0, 1fr) auto; }
+#app.full .topbar {
+  position: absolute; top: 0; left: 0; right: 0; z-index: 25; min-height: 0;
+  padding: calc(8px + env(safe-area-inset-top)) 10px 0; align-items: flex-start;
+  background: transparent; border: 0; pointer-events: none;
+}
+#app.full .topbar > * { pointer-events: auto; }
+#app.full .brand {
+  min-height: 40px; padding: 0 12px; border-radius: var(--radius); font-size: 16px;
+  color: var(--chip-text); background: var(--chip-bg); border: var(--border-w) solid var(--chip-border); box-shadow: var(--chip-shadow);
+  backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px);
+}
+#app.full .brand-wave, #app.full .brand-dot { display: none; }
+#app.full .controls #more-btn { display: inline-flex; }
+#app.full .controls { position: relative; }
+#app.full .controls-more { display: none; }
+#app.full .controls.open .controls-more { display: flex; flex-direction: column; align-items: stretch; gap: 6px; position: absolute; top: calc(100% + 6px); right: 0; }
+#app.full .controls.open .controls-more .chip { justify-content: center; }
+#app.full #stage { grid-row: 1; padding: 0; }
+#app.full #map-view { border: 0; border-radius: 0; }
+#app.full .overlay-tr, #app.full .overlay-tl { top: calc(56px + env(safe-area-inset-top)); }
+#app.full .overlay-tr { right: 10px; }
+#app.full .overlay-tl, #app.full .overlay-bl { left: 10px; }
+#app.full .leaflet-top { top: calc(46px + env(safe-area-inset-top)); }
+#app.full #stage[data-view="radar"] .overlay-bl { padding: 6px 10px 0; }
+#app.full #stage[data-view="radar"] #radar-view { padding-top: calc(100px + env(safe-area-inset-top)); box-sizing: border-box; }
+#app.full .panel { grid-row: 2; position: relative; z-index: 22; }
+#app.full .banner { top: calc(56px + env(safe-area-inset-top)); }
+@media (max-width: 899px) {
+  /* 清單上緣的圓角疊在地圖上（地圖畫到清單後面），地圖上的按鈕、出處往上讓開 */
+  #app.full .panel { margin-top: -18px; }
+  #app.full #stage { padding-bottom: 18px; }
+  #app.full #stage[data-view="map"] { padding-bottom: 0; }
+  #app.full #stage[data-view="map"] .overlay-bl { bottom: 28px; }
+  #app.full .leaflet-bottom { bottom: 18px; }
+}
+
 .panel-handle { display: block; width: 100%; height: 28px; border: 0; background: transparent; cursor: grab; padding: 0; touch-action: none; }
 .panel-head { touch-action: none; }
 .panel-handle span { display: block; width: 40px; height: 5px; margin: 0 auto; border-radius: 3px; background: var(--muted); opacity: 0.6; }
@@ -634,6 +689,16 @@ a.chip { display: inline-flex; align-items: center; text-decoration: none; }
   .panel-head { padding-top: 12px; }
   .sheet { left: auto; width: 440px; right: 16px; bottom: 16px; border-radius: 16px; border: var(--border-w) solid var(--line); }
   .banner { left: auto; right: 16px; width: 440px; }
+  /* 全螢幕：清單在右邊從最上面到最下面，標題列的按鈕浮在地圖那一欄；「清單」可以收起來，地圖鋪滿整個寬 */
+  #app.full { grid-template-rows: minmax(0, 1fr); }
+  #app.full .topbar { right: 380px; }
+  #app.full #list-btn { display: inline-flex; align-items: center; }
+  #app.full .panel { grid-row: 1; }
+  #app.full .overlay-tr { top: calc(8px + env(safe-area-inset-top)); right: 196px; }
+  #app.full #stage[data-view="radar"] #radar-view { padding-top: 56px; }
+  #app.full.list-off { grid-template-columns: minmax(0, 1fr); }
+  #app.full.list-off .panel { display: none; }
+  #app.full.list-off .topbar { right: 0; }
 }
 
 /* 回報貼文 */

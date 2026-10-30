@@ -42,6 +42,9 @@ const LS_ORIGIN = 'dr.origin';
 /** 移動成手動位置之前的位置（「回到我的位置」還沒收到 GPS 時直接回這裡，不用等重新定位） */
 const LS_HOME = 'dr.home';
 const LS_THEME = 'dr.theme';
+/** 全螢幕（像 Google 地圖）：'1' 是開著；電腦全螢幕時收起清單：'1' */
+const LS_FULL = 'dr.full';
+const LS_LIST_OFF = 'dr.listOff';
 const LS_BASE = 'dr.base';
 const BASES: BaseMap[] = ['nlsc', 'osm'];
 const LS_KEYWORDS = 'dr.keywords';
@@ -367,6 +370,7 @@ const pickBtn = $<HTMLButtonElement>('#pick-origin');
 const viewBtn = $<HTMLButtonElement>('#view-btn');
 const compassBtn = $<HTMLButtonElement>('#compass-btn');
 const panelEl = $('#panel');
+const appEl = $('#app');
 const themeBtn = $<HTMLButtonElement>('#theme-btn');
 const themeSheet = $('#theme-sheet');
 const themeList = $<HTMLUListElement>('#theme-list');
@@ -4675,6 +4679,62 @@ function wirePanelDrag(): void {
   );
 }
 
+/**
+ * 全螢幕（像 Google 地圖）：地圖、雷達鋪滿，標題列收成浮動按鈕，再按一次回到原本的樣子；瀏覽器記住開著還是關著。
+ * 電腦全螢幕時「清單」收起右邊的清單（也記住）。不是瀏覽器的全螢幕（網址列不會不見，重新整理也不能自己再開）
+ */
+function wireFullScreen(): void {
+  const fullBtn = $<HTMLButtonElement>('#full-btn');
+  const listBtn = $<HTMLButtonElement>('#list-btn');
+  const moreBtn = $<HTMLButtonElement>('#more-btn');
+  const controls = moreBtn.parentElement as HTMLElement;
+  const setMore = (open: boolean): void => {
+    controls.classList.toggle('open', open);
+    moreBtn.setAttribute('aria-expanded', String(open));
+  };
+  // 版面變了：地圖重算尺寸（雷達、清單自己會跟著）
+  const relayout = (): void => {
+    requestAnimationFrame(() => {
+      if (view === 'map') map.invalidate();
+    });
+  };
+  const setFull = (on: boolean): void => {
+    appEl.classList.toggle('full', on);
+    fullBtn.setAttribute('aria-pressed', String(on));
+    fullBtn.title = on ? '離開全螢幕' : '全螢幕';
+    fullBtn.setAttribute('aria-label', fullBtn.title);
+    setMore(false);
+    relayout();
+  };
+  const setListOff = (off: boolean): void => {
+    appEl.classList.toggle('list-off', off);
+    listBtn.setAttribute('aria-pressed', String(!off));
+    listBtn.title = off ? '打開清單' : '收起清單';
+    relayout();
+  };
+  setFull(lsGet(LS_FULL) === '1');
+  setListOff(lsGet(LS_LIST_OFF) === '1');
+  fullBtn.addEventListener('click', () => {
+    const on = !appEl.classList.contains('full');
+    lsSet(LS_FULL, on ? '1' : null);
+    setFull(on);
+  });
+  listBtn.addEventListener('click', () => {
+    const off = !appEl.classList.contains('list-off');
+    lsSet(LS_LIST_OFF, off ? '1' : null);
+    setListOff(off);
+  });
+  moreBtn.addEventListener('click', () => setMore(!controls.classList.contains('open')));
+  // 點了裡面的按鈕、點其他地方、按 Esc 就收起來
+  $('#controls-more').addEventListener('click', () => setMore(false));
+  document.addEventListener('pointerdown', (e) => {
+    if (controls.classList.contains('open') && !controls.contains(e.target as Node)) setMore(false);
+  });
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') setMore(false);
+  });
+}
+
 function wireControls(): void {
   // 按範圍按鈕：太空裡轉過的視角、換過的中心都回到你；你在汪星就回到汪星（鏡頭在汪星上就留在原地），用汪星的範圍
   for (const b of scaleChips) {
@@ -4891,6 +4951,7 @@ async function boot(): Promise<void> {
   if (lab === 'bottles') lsSet(LS_LAB_BOTTLES, '1');
   if (lab === 'off') lsSet(LS_LAB_BOTTLES, null);
   wireControls();
+  wireFullScreen();
   updateNotifyBtn();
   // 點手機推播的通知、網頁已經開著：選到那一則
   await registerServiceWorker((id) => void reveal(id));
