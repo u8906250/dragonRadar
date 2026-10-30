@@ -880,6 +880,7 @@ radar.setRelief((out, n, view, km, heading, j0, j1, span) => {
 });
 // 全螢幕鋪滿時看得到的範圍變了（換方向、改視窗大小）：道路抓到畫面的角
 radar.onView = () => updateStreets();
+radar.setScaleBar($('#scale-bar'));
 const woofStreets: import('./space').WoofStreets = (lat, lng, km, rangeKm) => {
   if (!streetsMod) {
     loadStreets();
@@ -4685,7 +4686,7 @@ function wirePanelDrag(): void {
 
 /**
  * 全螢幕（像 Google 地圖）：地圖、雷達鋪滿，標題列收成浮動按鈕；雷達的地圖也鋪滿整個長方形（不裁成圓、沒有外框，radar.setFill），
- * 距離圈、掃描線照樣疊在上面。再按一次回到原本的樣子；瀏覽器記住開著還是關著。
+ * 只留地圖和光點（距離圈、掃描線不畫，看比例尺）。再按一次回到原本的樣子；瀏覽器記住開著還是關著。
  * 電腦全螢幕時「清單」收起右邊的清單（也記住）。不是瀏覽器的全螢幕（網址列不會不見，重新整理也不能自己再開）
  */
 function wireFullScreen(): void {

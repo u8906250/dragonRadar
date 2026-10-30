@@ -285,6 +285,8 @@ export class Radar {
   private blinkStep = -1;
   private readonly blipLayer: SVGGElement;
   private readonly scaleLabels: SVGGElement;
+  /** 全螢幕鋪滿時的比例尺（main.ts 給的，放在左下的按鈕上面）；沒有是 null */
+  private scaleBarEl: HTMLElement | null = null;
   private readonly rings: SVGGElement;
   private readonly roseLayer: SVGGElement;
   private readonly routeLayer: SVGGElement;
@@ -536,7 +538,7 @@ export class Radar {
   }
 
   /**
-   * 全螢幕：雷達的地圖鋪滿整個長方形（不裁成圓、沒有外框），距離圈、掃描線照樣疊在上面；
+   * 全螢幕：雷達的地圖鋪滿整個長方形（不裁成圓、沒有外框），只留地圖和光點（距離圈、掃描線不畫，styles.css；看比例尺）；
    * 範圍外、還在畫面裡的光點畫在真的位置，畫面外的貼在邊上
    */
   setFill(on: boolean): void {
@@ -593,6 +595,30 @@ export class Radar {
     const [sx, sy] = [Math.abs(Math.sin(a)), Math.abs(Math.cos(a))];
     const [hx, hy] = [RADAR_VIEW.hx - inset, RADAR_VIEW.hy - inset];
     return Math.min(sx > 1e-9 ? hx / sx : Infinity, sy > 1e-9 ? hy / sy : Infinity);
+  }
+
+  /** 全螢幕鋪滿時的比例尺放在哪（main.ts 的 #scale-bar，裡面的 span 寫距離） */
+  setScaleBar(el: HTMLElement): void {
+    this.scaleBarEl = el;
+    this.drawScaleBar();
+  }
+
+  /**
+   * 全螢幕鋪滿時的比例尺（距離圈、掃描線拿掉了，看這個知道多遠）：最長約 70 像素，取 1、2、5 開頭的整數距離。
+   * 看整顆地球、太陽系時不畫（球面上各處比例不一樣）；中心換到汪星照比例畫
+   */
+  private drawScaleBar(): void {
+    const bar = this.scaleBarEl;
+    if (!bar) return;
+    bar.hidden = !this.fill || !this.squarePx || (this.inSpace && this.spaceView.focus === null);
+    if (bar.hidden) return;
+    const pxPerKm = ((R - 8) / this.scaleKm) * (this.squarePx / SIZE);
+    const want = 70 / pxPerKm;
+    const p = 10 ** Math.floor(Math.log10(want));
+    const km = [5, 2, 1].map((m) => m * p).find((v) => v <= want) ?? p;
+    bar.style.width = `${(km * pxPerKm).toFixed(1)}px`;
+    const label = bar.firstElementChild ?? bar.appendChild(document.createElement('span'));
+    label.textContent = fmtKm(km);
   }
 
   /** 掃描線、波紋畫多長：平常到外圈，鋪滿時到畫面的角 */
@@ -1501,6 +1527,11 @@ export class Radar {
       this.flashDirty = false;
       this.flashTargets = Array.from(this.svg.querySelectorAll<SVGGElement>('[data-hit]'), (g) => ({ g, at: Number(g.dataset.hit) }));
     }
+    // 全螢幕鋪滿時沒有掃描線：掃到時亮一下也不用
+    if (this.fill) {
+      this.lastSweepMs = -1;
+      return;
+    }
     const periodMs = SWEEP_SEC[this.style.sweep] * 1000;
     const t = Number(this.sweepClock.currentTime ?? 0) % periodMs;
     const prev = this.lastSweepMs;
@@ -1627,6 +1658,7 @@ export class Radar {
     this.drawOutline();
     this.drawSpace();
     this.drawRoutes();
+    this.drawScaleBar();
     this.drawBottles();
     this.drawLandmarks();
     this.drawCars();

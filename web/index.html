@@ -45,6 +45,8 @@
         <section id="map-view" class="view" hidden aria-label="地圖"><div id="map"></div></section>
 
         <div class="overlay overlay-bl">
+          <!-- 全螢幕時雷達的比例尺（距離圈拿掉了） -->
+          <div id="scale-bar" class="scale-bar" hidden><span></span></div>
           <div class="chips" id="base-chips" role="radiogroup" aria-label="底圖" hidden>
             <button type="button" class="chip" data-base="nlsc" role="radio" aria-checked="false" title="內政部國土測繪中心 台灣通用電子地圖">台灣電子地圖</button>
             <button type="button" class="chip" data-base="osm" role="radio" aria-checked="false">OSM</button>

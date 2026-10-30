@@ -244,6 +244,13 @@ a.chip { display: inline-flex; align-items: center; text-decoration: none; }
 .radar-stack.fill .radar .bezel, .radar-stack.fill .radar .face { display: none; }
 .radar-stack.fill .radar-sweep { overflow: visible; }
 .radar-stack.fill > .radar-relief { clip-path: none; }
+/* 鋪滿時只留地圖和光點：距離圈、刻度、掃描線不畫（看右下角的比例尺）；方位字只在指北針轉的時候留著，看得出北在哪 */
+.radar-stack.fill .radar .grid, .radar-stack.fill .radar .scale-labels, .radar-stack.fill .radar-sweep-box { display: none; }
+.radar-stack.fill .radar:not(.heading-live) .rose { display: none; }
+/* 比例尺：左下按鈕的上面，一條兩端翹起來的線，距離寫在上面（radar.ts 的 drawScaleBar 決定多長） */
+.scale-bar { position: relative; height: 6px; margin: 16px 0 2px 4px; color: var(--radar-text); border: 2px solid currentColor; border-top: 0; box-sizing: border-box; pointer-events: none; }
+.scale-bar span { position: absolute; bottom: 7px; left: 50%; transform: translateX(-50%); font-size: 12px; font-weight: 700; white-space: nowrap; }
+.scale-bar[hidden], #stage[data-view="map"] .scale-bar { display: none; }
 .radar .grid circle, .radar .grid line { fill: none; stroke: var(--radar-grid); stroke-opacity: var(--radar-grid-op); stroke-width: 1; }
 .radar .grid .outer { stroke-opacity: var(--radar-outer-op); }
 :root[data-theme='treasure'] .radar .grid circle, :root[data-theme='treasure'] .radar .grid line { stroke-dasharray: 4 4; }
