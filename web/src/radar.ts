@@ -157,6 +157,12 @@ const BODY_FLASH_MS_CALM = 600;
 const FLASH_PARTS_CALM: typeof FLASH_PARTS = [
   { sel: '.fx-glow', ms: 600, from: { opacity: 0.6, transform: 'scale(1.6)' }, to: { opacity: 0, transform: 'scale(1.6)' } },
 ];
+/** 會動的點（汪星的狗遠遠的白點）掃到時亮一下：淡淡的光暈，比光點的閃光淡、慢一點淡掉（減少動態效果時不放大） */
+const GLINT: Keyframe[] = [{ opacity: 0.5, transform: 'scale(1.6)' }, { opacity: 0, transform: 'scale(2.6)' }];
+const GLINT_CALM: Keyframe[] = [{ opacity: 0.5, transform: 'scale(2)' }, { opacity: 0, transform: 'scale(2)' }];
+const GLINT_MS = 900;
+/** 光暈至少多大（螢幕像素；手機上白點只有 2 像素左右，光暈跟著那麼小會看不出來） */
+const GLINT_MIN_PX = 2.5;
 
 /** 光點距離小於這個像素就合成一群 */
 const GROUP_PX = 12;
@@ -238,6 +244,9 @@ export class Radar {
    */
   private readonly flashBox: HTMLDivElement;
   private readonly flashSquare: HTMLDivElement;
+  /** 會動的點（汪星的狗遠遠的白點）掃到時的光暈：疊在主圖層上面（閃光層在主圖層下面，會被汪星的陸地、公園蓋住） */
+  private readonly glintBox: HTMLDivElement;
+  private readonly glintSquare: HTMLDivElement;
   /** 汪星的地形圖（雷達底色上面、掃描下面的 canvas，正方形對齊 SVG）、雷達的正方形幾像素、畫地形圖的（main.ts 給） */
   private readonly reliefCanvas: HTMLCanvasElement;
   private squarePx = 0;
@@ -360,6 +369,11 @@ export class Radar {
     this.flashSquare = document.createElement('div');
     this.flashSquare.className = 'radar-square radar-flash-square';
     this.flashBox.appendChild(this.flashSquare);
+    this.glintBox = document.createElement('div');
+    this.glintBox.className = 'radar radar-layer radar-flashes';
+    this.glintSquare = document.createElement('div');
+    this.glintSquare.className = 'radar-square radar-flash-square';
+    this.glintBox.appendChild(this.glintSquare);
     this.fxLayer = el('g', { class: 'fx' }) as SVGGElement;
     this.fx.appendChild(this.fxLayer);
     this.svg = el('svg', { viewBox: `0 0 ${SIZE} ${SIZE}`, class: 'radar radar-main', role: 'img', 'aria-label': '雷達畫面' });
@@ -444,14 +458,14 @@ export class Radar {
     const stack = document.createElement('div');
     stack.className = 'radar-stack';
     this.stack = stack;
-    stack.append(this.base, this.reliefCanvas, this.sweepBox, this.fx, this.flashBox, this.svg);
+    stack.append(this.base, this.reliefCanvas, this.sweepBox, this.fx, this.flashBox, this.svg, this.glintBox);
     container.appendChild(stack);
     new ResizeObserver(([e]) => {
       const { width: w, height: h } = e.contentRect;
       this.shown = w > 0;
       // SVG 照比例縮放、置中（viewBox 是正方形）：閃光層的正方形跟著對齊
       const size = Math.min(w, h);
-      for (const sq of [this.flashSquare, this.sweepSquare, this.reliefCanvas]) {
+      for (const sq of [this.flashSquare, this.glintSquare, this.sweepSquare, this.reliefCanvas]) {
         Object.assign(sq.style, { width: `${size}px`, height: `${size}px`, left: `${(w - size) / 2}px`, top: `${(h - size) / 2}px` });
         sq.style.setProperty('--u', `${size / SIZE}px`);
       }
@@ -480,6 +494,7 @@ export class Radar {
     this.sweepSvg.setAttribute('class', `${cls} radar-sweep`);
     this.fx.setAttribute('class', `${cls} radar-layer radar-fx`);
     this.flashBox.setAttribute('class', `${cls} radar-layer radar-flashes`);
+    this.glintBox.setAttribute('class', `${cls} radar-layer radar-flashes`);
     this.buildSweep();
     this.lastSweepMs = -1;
     this.blinkStep = -1;
@@ -1376,7 +1391,39 @@ export class Radar {
       // 跨過一圈的起點時分成兩段看
       if (prev <= t ? f.at > prev && f.at <= t : f.at > prev || f.at <= t) this.flash(f.g);
     }
+    this.sweepMovers(prev, t, periodMs);
   };
+
+  /**
+   * 會動的點（`.sweep-lit`，汪星的狗遠遠的白點）：每次看它現在在畫面哪裡（照著走的動畫、指北針、鎖定跟著走），
+   * 掃描線從上一次到這一次之間掃過它就淡淡地亮一下
+   */
+  private sweepMovers(prev: number, t: number, periodMs: number): void {
+    const dots = this.svg.querySelectorAll<SVGGraphicsElement>('.sweep-lit');
+    if (!dots.length) return;
+    const rect = this.svg.getBoundingClientRect();
+    const unit = SIZE / Math.max(1, Math.min(rect.width, rect.height));
+    for (const dot of dots) {
+      const b = dot.getBoundingClientRect();
+      const x = C + (b.x + b.width / 2 - rect.x - rect.width / 2) * unit;
+      const y = C + (b.y + b.height / 2 - rect.y - rect.height / 2) * unit;
+      const at = (((this.sweepHitSec((Math.atan2(x - C, C - y) * 180) / Math.PI, Math.hypot(x - C, y - C)) * 1000) % periodMs) + periodMs) % periodMs;
+      if (prev <= t ? at > prev && at <= t : at > prev || at <= t) this.glint(x, y, Math.max(b.width / 2, GLINT_MIN_PX) * unit);
+    }
+  }
+
+  /** 會動的點亮一下：主圖層上面那一層在它現在的位置放一團淡淡的光暈，慢慢放大變淡（比光點的閃光淡、不擴散亮環），閃完拿掉 */
+  private glint(x: number, y: number, r: number): void {
+    const at = document.createElement('div');
+    at.className = 'sweep-glint';
+    Object.assign(at.style, { left: `calc(${x.toFixed(1)} * var(--u))`, top: `calc(${y.toFixed(1)} * var(--u))` });
+    const glow = this.fxSpan('fx-glow', Math.max(1, r));
+    at.appendChild(glow);
+    this.glintSquare.appendChild(at);
+    if (typeof glow.animate !== 'function') return void at.remove();
+    const frames = this.calm?.matches ? GLINT_CALM : GLINT;
+    glow.animate(frames, { duration: GLINT_MS, easing: 'ease-out' }).onfinish = () => at.remove();
+  }
 
   /**
    * 掃到時閃一下：光暈、亮環在閃光層用動畫放大變淡；光點本體在主圖層，只分兩段變亮再回原樣

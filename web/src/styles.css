@@ -203,6 +203,9 @@ a.chip { display: inline-flex; align-items: center; text-decoration: none; }
 .radar-flash-square span { position: absolute; border-radius: 50%; opacity: 0; box-sizing: border-box; }
 .radar-flash-square .fx-glow { background: currentColor; box-shadow: 0 0 calc(6 * var(--u)) currentColor; }
 .radar-flash-square .fx-ring { border: 1.5px solid currentColor; }
+/* 會動的點（汪星的狗遠遠的白點）掃到時：白白的、光暈小一點（radar.ts 的 glint） */
+.radar-flash-square .sweep-glint { color: #fffdf4; }
+.radar-flash-square .sweep-glint .fx-glow { box-shadow: 0 0 calc(2.5 * var(--u)) currentColor; }
 /* Leaflet 圖層 z-index 到 1000，用 isolation 把它關在自己的堆疊層裡，浮動按鈕才不會被蓋掉 */
 #map-view { position: relative; isolation: isolate; z-index: 0; border-radius: 14px; overflow: hidden; border: var(--border-w) solid var(--line); }
 #map { width: 100%; height: 100%; background: var(--panel); }
