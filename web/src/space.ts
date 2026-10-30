@@ -596,8 +596,11 @@ export function bodyBearing(from: string, to: string, when = new Date()): number
   return Math.atan2(b[0] - a[0], b[1] - a[1]) / RAD;
 }
 
-/** 中心換到這顆時最多放大到多少（雷達外圈幾公里）：剛好看得到整顆；汪星可以放大到 1 km 看地表，正中間在中山公園附近可以到 0.5 公尺 */
-export const focusMinKm = (key: string, view?: SpaceView): number => (key === 'woof' ? (view && atPark(view) ? PARK_MIN_KM : 1) : bodyRadiusKm(key) * 1.3);
+/**
+ * 中心換到這顆時最多放大到多少（雷達外圈幾公里）：剛好看得到整顆；汪星可以放大到 1 km 看地表，正中間在中山公園附近可以到 0.5 公尺
+ * （woofMap 是 false：還沒搭火箭過去、看不到地圖，跟別的星球一樣只到整顆）
+ */
+export const focusMinKm = (key: string, view?: SpaceView, woofMap = true): number => (key === 'woof' && woofMap ? (view && atPark(view) ? PARK_MIN_KM : 1) : bodyRadiusKm(key) * 1.3);
 
 /** 圓裡面一條水平的弦（木星的條紋）：離圓心 dy，畫在圓裡面那一段 */
 function chord(x: number, y: number, r: number, dy: number): string {
@@ -732,6 +735,8 @@ export interface SpaceOpts {
   streets?: WoofStreets;
   /** 你在哪一顆（搭火箭到汪星就在汪星，點別的星球只是看過去，不會回到地球）；沒給是地球 */
   you?: 'earth' | 'woof';
+  /** 汪星的地圖（台北的陸地、道路、中山公園）看不看得到：false 是你在地球、火箭還沒飛過去，汪星畫成普通的星球；沒給是看得到 */
+  woofMap?: boolean;
 }
 
 /** 太陽系的天體在這一刻的位置（以地球為中心的黃道座標，公里） */
@@ -812,8 +817,8 @@ export function spaceMarkup(o: SpaceOpts): string {
   // 你在哪一顆（中心是你在的地球時，雷達中間的圓點就是你，不另外標）
   const you = o.you === 'woof' ? 'woof' : view.focus ? 'earth' : null;
   for (const b of list) {
-    // 汪星大到看得出形狀：跟地球一樣畫成球
-    const look = b.key === 'woof' && b.r >= TINY_EARTH ? woofGlobe(b.x, b.y, b.r, view, rot(sub(sun, pos.get('woof')!)), o.streets) : bodySvg(b.key, b.x, b.y, b.r, b.key === 'sun' ? null : sunAt);
+    // 汪星大到看得出形狀：跟地球一樣畫成球（地圖要搭火箭飛過去才看得到，之前是普通的星球）
+    const look = b.key === 'woof' && b.r >= TINY_EARTH && o.woofMap !== false ? woofGlobe(b.x, b.y, b.r, view, rot(sub(sun, pos.get('woof')!)), o.streets) : bodySvg(b.key, b.x, b.y, b.r, b.key === 'sun' ? null : sunAt);
     // 點星球飛過去：點擊範圍至少半徑 12
     bodies += `<g class="space-hit" data-body="${b.key}"><circle class="hit" cx="${f1(b.x)}" cy="${f1(b.y)}" r="${f1(Math.max(b.r + 3, 12))}" />${look}</g>`;
     // 中心換到別的星球：雷達中間的圓點不是你，你畫在你在的那一顆（地球；在汪星上是汪星，汪星大到畫成球時不畫）

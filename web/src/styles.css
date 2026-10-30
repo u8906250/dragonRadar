@@ -250,6 +250,8 @@ a.chip { display: inline-flex; align-items: center; text-decoration: none; }
 .radar-attrib[hidden] { display: none; }
 .radar .route-live { opacity: 0.9; }
 .radar .scale-label { fill: var(--radar-text); font-size: 11px; }
+/* 刻度的字不擋點擊（蓋在火箭、光點上時點得到底下的） */
+.radar .scale-labels { pointer-events: none; }
 .radar .rose-letter { fill: var(--radar-rose); font-size: 13px; font-weight: 800; }
 .radar:not(.has-rose) .rose-letter:not(.rose-n) { display: none; }
 .radar.heading-live .rose-n { fill: var(--highlight); }

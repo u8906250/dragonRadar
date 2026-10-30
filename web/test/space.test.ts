@@ -210,6 +210,25 @@ describe('汪星', () => {
     expect(grat(turned)).not.toBe(grat(near));
   });
 
+  it('hides its map until you ride the rocket there', () => {
+    const at = { focus: 'woof', ...((): { yaw: number; pitch: number } => {
+      const [lat, lng] = toWoof([25.0400096, 121.5602923]);
+      return { yaw: (-lng * Math.PI) / 180, pitch: (lat * Math.PI) / 180 };
+    })() };
+    const plain = spaceMarkup({ ...base, scaleKm: WOOF_KM * 1.3, rg: 164, view: at, woofMap: false });
+    const woof = plain.slice(plain.indexOf('data-body="woof"'));
+    // 普通的星球：淡淡的顏色、背對太陽的一半變暗，沒有台北、道路、中山公園
+    expect(woof).toMatch(/class="space-planet"[^>]*fill="#c98f55"/);
+    expect(woof).toContain('space-shade');
+    for (const cls of ['space-globe', 'woof-land', 'county-line', 'woof-road', 'park-']) expect(woof).not.toContain(cls);
+    expect(plain).toContain('>汪星<');
+    // 看得到地圖（你在汪星、火箭飛過去）才畫成球
+    expect(spaceMarkup({ ...base, scaleKm: WOOF_KM * 1.3, rg: 164, view: at, woofMap: true })).toContain('space-globe');
+    // 看不到地圖：跟別的星球一樣只能放大到看得到整顆
+    expect(focusMinKm('woof', at, false)).toBeCloseTo(WOOF_KM * 1.3);
+    expect(focusMinKm('woof', at, true)).toBe(PARK_MIN_KM);
+  });
+
   it('wraps Taipei City around the whole planet, with the sea outside the city', () => {
     // 市界最西南、最東北的角落
     const sw = toWoof([24.9605, 121.4571]);
