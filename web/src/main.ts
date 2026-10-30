@@ -1732,7 +1732,7 @@ function renderRouteDetail(r: RouteOut, items: Item[], now: number): void {
       ${relatedHtml(routeRelated(r, items))}
       <div class="sheet-actions">
         ${r.claimUrl ? `<a class="btn primary" href="${esc(r.claimUrl)}" target="_blank" rel="noopener">到車掃地圖認領路段</a>` : ''}
-        <button type="button" class="btn" data-act="route-map">在地圖上看路線</button>
+        ${onWoofView() ? '' : '<button type="button" class="btn" data-act="route-map">在地圖上看路線</button>'}
         ${isReported(r) && mine[0] ? '<button type="button" class="btn" data-act="route-feedback">回報問題</button>' : ''}
         ${isReported(r) && myReportIds.has(r.postId) ? '<button type="button" class="btn" data-act="route-withdraw">刪除我的回報</button>' : ''}
       </div>
@@ -2956,8 +2956,14 @@ function followDog(): void {
   dogFollow = requestAnimationFrame(followDog);
 }
 
-/** 「回到我的位置」：手動位置（拖曳雷達、在地圖上設定）、太陽系那幾層移開了視野時，雷達上才出現 */
+/** 雷達在汪星上（你在汪星，或鏡頭轉到汪星）：不提供地圖（地圖是地球的） */
+function onWoofView(): boolean {
+  return youOn === 'woof' || radar.spaceFocusKey === 'woof';
+}
+
+/** 「回到我的位置」：手動位置（拖曳雷達、在地圖上設定）、太陽系那幾層移開了視野時，雷達上才出現；在汪星上「地圖」按鈕藏起來 */
 function updateHomeBtn(): void {
+  viewBtn.hidden = view === 'radar' && onWoofView();
   // 你在汪星：鏡頭正對著汪星的發射口就不用出現
   const v = radar.spaceViewNow;
   const home = youOn === 'woof' ? !!woofHome && v.focus === 'woof' && Math.abs(v.yaw - woofHome.yaw) < 1e-5 && Math.abs(v.pitch - woofHome.pitch) < 1e-5 : origin.source !== 'manual' && !radar.spaceMoved;
@@ -3030,6 +3036,8 @@ async function refresh(): Promise<void> {
 }
 
 function switchView(v: 'radar' | 'map'): void {
+  // 在汪星上不切到地圖
+  if (v === 'map' && onWoofView()) return;
   // 雷達藏起來前先量外圈多大，地圖照同樣的比例
   const rangePx = radar.rangePx();
   const from = view;
