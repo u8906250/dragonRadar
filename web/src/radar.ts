@@ -158,8 +158,8 @@ const FLASH_PARTS_CALM: typeof FLASH_PARTS = [
   { sel: '.fx-glow', ms: 600, from: { opacity: 0.6, transform: 'scale(1.6)' }, to: { opacity: 0, transform: 'scale(1.6)' } },
 ];
 /** 會動的點（汪星的狗遠遠的白點）掃到時亮一下：淡淡的光暈，比光點的閃光淡、慢一點淡掉（減少動態效果時不放大） */
-const GLINT: Keyframe[] = [{ opacity: 0.5, transform: 'scale(1.6)' }, { opacity: 0, transform: 'scale(2.6)' }];
-const GLINT_CALM: Keyframe[] = [{ opacity: 0.5, transform: 'scale(2)' }, { opacity: 0, transform: 'scale(2)' }];
+const GLINT: Keyframe[] = [{ opacity: 0.5, transform: 'scale(1.2)' }, { opacity: 0, transform: 'scale(1.7)' }];
+const GLINT_CALM: Keyframe[] = [{ opacity: 0.5, transform: 'scale(1.4)' }, { opacity: 0, transform: 'scale(1.4)' }];
 const GLINT_MS = 900;
 /** 光暈至少多大（螢幕像素；手機上白點只有 2 像素左右，光暈跟著那麼小會看不出來） */
 const GLINT_MIN_PX = 2.5;
