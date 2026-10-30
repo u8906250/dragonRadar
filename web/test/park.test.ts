@@ -106,6 +106,22 @@ describe('地球的雷達上的中山公園（跟汪星共用一份）', () => {
       expect(Math.hypot((at[0] - HATCH_CENTER[0]) * EARTH.my, (at[1] - HATCH_CENTER[1]) * EARTH.mx(at[0]))).toBeGreaterThan(6);
     }
     expect(new Set(spots.map((s) => s.ring)).size).toBeGreaterThan(15);
+    // 經過地面到附近另一塊草皮：60 公尺內，路上不經過水池（翠湖、映池）和建築，不出公園
+    let crossed = 0;
+    for (const { ring, at } of spots.slice(0, 60)) {
+      const o = PARK_YARD.elsewhere(ring, at, rand);
+      if (!o) continue;
+      crossed++;
+      expect(o.ring).not.toBe(ring);
+      expect(inRing(o.at, ZHONGSHAN_PARK.green[o.ring])).toBe(true);
+      expect(Math.hypot((o.at[0] - at[0]) * EARTH.my, (o.at[1] - at[1]) * EARTH.mx(at[0]))).toBeLessThanOrEqual(60);
+      for (let i = 1; i < 50; i++) {
+        const p: [number, number] = [at[0] + ((o.at[0] - at[0]) * i) / 50, at[1] + ((o.at[1] - at[1]) * i) / 50];
+        expect(inRing(p, ZHONGSHAN_PARK.outline)).toBe(true);
+        expect(ZHONGSHAN_PARK.water.some((w) => inRing(p, w[0]))).toBe(false);
+      }
+    }
+    expect(crossed).toBeGreaterThan(40);
     // 現在是使用者的馬爾濟斯，約 0.38 公尺高（坐著的銅像腳的一半高）
     expect(PARK_DOGS.map((d) => d.look.name)).toEqual(['馬爾濟斯']);
     expect(dogHeight(PARK_DOGS[0].look)).toBeCloseTo(0.38, 2);

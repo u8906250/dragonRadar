@@ -207,7 +207,8 @@ const STATUE_SVG = (() => {
 
 /**
  * 汪星的狗（dog.ts 畫 3D 的狗、dogs.ts 讓牠動）：PARK_DOGS 是公園裡有哪幾隻（現在是使用者的馬爾濟斯，之後可以加），
- * 只在汪星，在中山公園的草皮上（PARK_YARD：照面積抽一塊草皮，不在發射口和銅像旁邊，火箭、銅像不會蓋住；走多遠照汪星的公尺算）。
+ * 只在汪星，在中山公園的草皮上（PARK_YARD：照面積抽一塊草皮，不在發射口和銅像旁邊，火箭、銅像不會蓋住；走多遠照汪星的公尺算；
+ * 有時候經過地面到 60 公尺內另一塊草皮，路上不經過水池、建築、不出公園）。
  * 打開網頁第一次畫、搭火箭到汪星時（main.ts 的 moveDogs）換到隨機一塊草皮。跟銅像一樣：雷達外圈約 500 公尺內（STATUE_FROM）先是一個點
  * （照這一段 CSS 移過去，styles.css 的 dog-go），約 6 公尺內（DOG_FULL，整隻約 10 像素高）畫出整隻、點得到（dog-hit，點了坐下）
  */
@@ -231,6 +232,24 @@ function spotIn(ring: number, rand: () => number): Pt | null {
   return null;
 }
 
+/** 每塊草皮的中心（找附近的草皮） */
+let lawnMids: Pt[] | null = null;
+/** 台北的經緯度差幾公尺（地球上，挑附近的草皮、看路上經過哪裡） */
+const earthMetres = (a: Pt, b: Pt): number => Math.hypot((a[0] - b[0]) * EARTH.my, (a[1] - b[1]) * EARTH.mx(a[0]));
+/** 換到另一塊草皮最遠幾公尺 */
+const CROSS_MAX_M = 60;
+
+/** 從 a 直直走到 b 一路都在公園裡、不經過水池和建築（每 0.8 公尺看一次） */
+function clearPath(a: Pt, b: Pt): boolean {
+  const n = Math.max(1, Math.ceil(earthMetres(a, b) / 0.8));
+  for (let i = 1; i < n; i++) {
+    const p: Pt = [a[0] + ((b[0] - a[0]) * i) / n, a[1] + ((b[1] - a[1]) * i) / n];
+    if (!inRing(p, ZHONGSHAN_PARK.outline)) return false;
+    if (ZHONGSHAN_PARK.water.some((w) => inRing(p, w[0])) || ZHONGSHAN_PARK.buildings.some((r) => inRing(p, r))) return false;
+  }
+  return true;
+}
+
 /** 中山公園的草皮（狗待的地方） */
 export const PARK_YARD: DogYard = {
   anywhere: (rand) => {
@@ -245,6 +264,20 @@ export const PARK_YARD: DogYard = {
     return null;
   },
   within: spotIn,
+  // 附近（CROSS_MAX_M 內）的其他草皮，照面積抽，路上不經過水池、建築
+  elsewhere: (ring, at, rand) => {
+    const areas = (lawnAreas ??= ZHONGSHAN_PARK.green.map((r) => Math.abs(ringArea(r))));
+    const mids = (lawnMids ??= ZHONGSHAN_PARK.green.map((r): Pt => [r.reduce((a, p) => a + p[0], 0) / r.length, r.reduce((a, p) => a + p[1], 0) / r.length]));
+    const near = mids.map((m, i) => i).filter((i) => i !== ring && earthMetres(at, mids[i]) < CROSS_MAX_M);
+    const total = near.reduce((a, i) => a + areas[i], 0);
+    for (let tries = 0; tries < 20 && near.length; tries++) {
+      let pick = rand() * total;
+      const i = near.find((j) => (pick -= areas[j]) < 0) ?? near[near.length - 1];
+      const to = spotIn(i, rand);
+      if (to && earthMetres(at, to) <= CROSS_MAX_M && clearPath(at, to)) return { ring: i, at: to };
+    }
+    return null;
+  },
   metres: (a, b) => {
     const g = dogWorld ?? parkGeom(EARTH);
     const [p, q] = [g.to(a), g.to(b)];

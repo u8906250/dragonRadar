@@ -2,12 +2,15 @@ import { describe, expect, it } from 'vitest';
 import { dogSvg, MALTESE, STILL, dogHeight, type DogLook } from '../src/dog';
 import { Dog, DOG_SPEED, dogById, dogPose, speedOf, type DogSeg, type DogYard } from '../src/dogs';
 
-/** 一塊 40 公尺見方的草皮（緯經度當公尺用，1 度 = 1 公尺） */
+/** 兩塊 40 公尺見方的草皮，中間隔 20 公尺的地面（緯經度當公尺用，1 度 = 1 公尺） */
+const lawn = (ring: number, rand: () => number): [number, number] => [rand() * 40, ring * 60 + rand() * 40];
 const YARD: DogYard = {
-  anywhere: (rand) => ({ ring: 0, at: [rand() * 40, rand() * 40] }),
-  within: (_ring, rand) => [rand() * 40, rand() * 40],
+  anywhere: (rand) => ({ ring: 0, at: lawn(0, rand) }),
+  within: (ring, rand) => lawn(ring, rand),
+  elsewhere: (ring, _at, rand) => ({ ring: 1 - ring, at: lawn(1 - ring, rand) }),
   metres: (a, b) => Math.hypot(a[0] - b[0], a[1] - b[1]),
 };
+const onLawn = (ring: number, [y, x]: [number, number]): boolean => y >= 0 && y <= 40 && x >= ring * 60 && x <= ring * 60 + 40;
 const seeded = (seed: number) => (): number => ((seed = (seed * 16807) % 2147483647) - 1) / 2147483646;
 
 describe('會動的狗（dogs.ts）', () => {
@@ -36,13 +39,20 @@ describe('會動的狗（dogs.ts）', () => {
         expect(s.dir).toEqual(s.dir0);
       }
     }
-    expect(new Set(list.map((s) => s.do))).toEqual(new Set(['stand', 'sniff', 'sit', 'walk', 'run']));
-    // 走路慢慢走，大多是走一走、停下來聞一聞（也會邊走邊聞），偶爾才跑
+    expect(new Set(list.map((s) => s.do))).toEqual(new Set(['stand', 'sniff', 'sit', 'stretch', 'walk', 'run']));
+    // 走路慢慢走，大多是走一走、停下來聞一聞（也會邊走邊聞），在草皮裡偶爾才跑
     expect(DOG_SPEED.walk).toBeLessThanOrEqual(0.3);
     const count = (f: (s: DogSeg) => boolean): number => list.filter(f).length;
     expect(count((s) => s.do === 'sniff') + count((s) => !!s.nose)).toBeGreaterThan(count((s) => s.do === 'stand') + count((s) => s.do === 'sit'));
-    expect(count((s) => s.do === 'walk')).toBeGreaterThan(count((s) => s.do === 'run') * 5);
+    expect(count((s) => s.do === 'walk' && !s.cross)).toBeGreaterThan(count((s) => s.do === 'run' && !s.cross) * 5);
     expect(count((s) => !!s.nose)).toBeGreaterThan(0);
+    // 待在一塊草皮裡；換草皮時經過地面跑過去（大多用跑的）
+    for (const s of list) expect(onLawn(s.ring, s.to)).toBe(true);
+    const cross = list.filter((s) => s.cross);
+    expect(cross.length).toBeGreaterThan(2);
+    for (const s of cross) expect(onLawn(s.ring, s.from)).toBe(false);
+    expect(cross.filter((s) => s.do === 'run').length).toBeGreaterThan(cross.length / 2);
+    for (const s of list.filter((x) => !x.cross)) if (s.do === 'walk' || s.do === 'run') expect(onLawn(s.ring, s.from)).toBe(true);
   });
 
   it('turns to face you (south) and sits when tapped, and sits longer when tapped again', () => {
@@ -57,10 +67,10 @@ describe('會動的狗（dogs.ts）', () => {
     expect(d.at).toEqual(before.at);
     expect(d.seg.dir[0]).toBeLessThan(0);
     expect(d.seg.dir[1]).toBe(0);
-    // 先轉身再坐下，坐好時吐舌頭搖尾巴，最後站起來
+    // 先轉身再坐下，坐好時搖尾巴（不吐舌頭、嘴巴不畫出來），最後站起來
     expect(dogPose(d.seg, 100).sit).toBe(0);
     expect(dogPose(d.seg, 2000).sit).toBe(1);
-    expect(dogPose(d.seg, 2000).tongue).toBe(true);
+    expect(dogPose(d.seg, 2000).tongue).toBe(false);
     expect(dogPose(d.seg, d.seg.ms).sit).toBe(0);
     const end = d.seg.start + d.seg.ms;
     dog.pet(23_000);
@@ -89,6 +99,31 @@ describe('姿勢（dogPose）', () => {
       expect(p.ear).toBeGreaterThan(20);
       expect(p.tongue).toBe(true);
     }
+  });
+
+  it('stretches like a downward dog: front legs forward on the ground, chest down, rump up', () => {
+    const s = seg('stretch', { ms: 3400 });
+    const p = dogPose(s, 1700);
+    expect(p.lean).toBeGreaterThan(20);
+    for (const [deg, lift] of p.legs.slice(0, 2)) {
+      expect(deg).toBeGreaterThan(60);
+      expect(lift).toBeLessThan(0);
+    }
+    const k = 400;
+    /** 這個部位的橢圓中心（畫面像素） */
+    const at = (svg: string, part: string): [number, number] => {
+      const m = new RegExp(`data-part="${part}"><ellipse cx="([-\\d.]+)" cy="([-\\d.]+)"`).exec(svg)!;
+      return [Number(m[1]), Number(m[2])];
+    };
+    const side = dogSvg(MALTESE, p, 90, k);
+    // 前腳掌貼在地上（腳掌中心離地 2 公分，另一邊的腳在畫面上高一點）、在胸口前面；胸口比屁股低
+    expect(at(side, 'legflpaw')[0]).toBeGreaterThan(at(side, 'chest')[0] + 0.05 * k);
+    expect(at(side, 'legflpaw')[1]).toBeGreaterThan(-0.05 * k);
+    expect(at(side, 'legfrpaw')[1]).toBeGreaterThan(-0.03 * k);
+    expect(at(side, 'chest')[1]).toBeGreaterThan(at(side, 'rump')[1] + 0.03 * k);
+    // 一開始、最後是站著
+    expect(dogPose(s, 0).lean).toBe(0);
+    expect(dogPose(s, 3400).lean).toBe(0);
   });
 
   it('puts its nose down to the ground when sniffing', () => {

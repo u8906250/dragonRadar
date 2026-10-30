@@ -1,15 +1,17 @@
 /**
  * 會動的狗（dog.ts 畫、park.ts 放在汪星的中山公園；之後可以有很多隻，每隻一個 Dog，長相是 DogLook）：
  * 每隻狗一段一段地動（DogSeg）：stand 站著搖尾巴、sniff 低頭聞一聞（鼻子湊到地上、左右聞）、sit 坐下（坐一下再站起來）、
+ * stretch 伸懶腰（下犬式：前腳往前伸、胸口壓低貼地、屁股翹高，停一下再站起來；坐完常常伸一下）、
  * walk 走（四隻腳輪流，有時候邊走邊低頭聞 nose）、run 跑（真的跑：前腳一起伸、後腳一起蹬，偶爾才跑），from 走到 to；
- * 在同一塊草皮裡（DogYard 決定能去哪），大多是走一走、停下來聞一聞，偶爾站著、坐下；點了（pet）轉過來面向你（往南）坐下。
+ * 大多在同一塊草皮裡走一走、停下來聞一聞，偶爾站著、坐下；有時候經過地面到附近另一塊草皮（大多用跑的，近的才用走的；DogYard 決定能去哪）；
+ * 點了（pet）轉過來面向你（往南）坐下。
  * 每一段開始時慢慢轉到要走的方向（dir0 → dir，緯經度的方向）。拉近畫出整隻時每一格畫面重畫（animateDogs：照這一段在畫面上從哪到哪、
  * 面向哪邊，用 dog.ts 畫 3D 的狗），這一段結束時重畫整層（onDogMove 給的 redraw，算下一段在畫面上的位置）
  */
 import { dogHeight, dogSvg, STILL, type DogLook, type DogPose } from './dog';
 
 type Pt = [number, number];
-export type DogDo = 'stand' | 'sniff' | 'sit' | 'walk' | 'run';
+export type DogDo = 'stand' | 'sniff' | 'sit' | 'stretch' | 'walk' | 'run';
 export interface DogSeg {
   do: DogDo;
   from: Pt;
@@ -26,23 +28,33 @@ export interface DogSeg {
   pet?: boolean;
   /** 邊走邊低頭聞 */
   nose?: boolean;
+  /** 經過地面到另一塊草皮 */
+  cross?: boolean;
 }
 
-/** 狗待的地方：隨機一塊的隨機一處、這一塊裡隨機一處（抽不到是 null）、兩點差幾公尺（狗走在哪個世界就照那裡的公尺） */
+/**
+ * 狗待的地方：隨機一塊的隨機一處、這一塊裡隨機一處、從這裡到附近另一塊草皮的隨機一處（路上不經過水、建築；抽不到是 null）、
+ * 兩點差幾公尺（狗走在哪個世界就照那裡的公尺）
+ */
 export interface DogYard {
   anywhere(rand: () => number): { ring: number; at: Pt } | null;
   within(ring: number, rand: () => number): Pt | null;
+  elsewhere(ring: number, at: Pt, rand: () => number): { ring: number; at: Pt } | null;
   metres(a: Pt, b: Pt): number;
 }
 
 /** 走路、邊走邊聞、跑步多快（公尺／秒），走多遠（公尺） */
 export const DOG_SPEED = { walk: 0.3, sniff: 0.18, run: 2.4 };
 const REACH = { walk: [0.8, 4], sniff: [0.5, 2.5], run: [4, 20] };
+/** 換到另一塊草皮：多常、多遠以內用走的（其他都用跑的） */
+const CROSS = 0.15;
+const CROSS_WALK_M = 15;
 /** 這一段走多快 */
 export const speedOf = (s: DogSeg): number => DOG_SPEED[s.do === 'run' ? 'run' : s.nose ? 'sniff' : 'walk'];
-/** 轉身多久、點了坐多久 */
+/** 轉身多久、點了坐多久、伸懶腰多久 */
 const TURN_MS = 450;
 const PET_MS = 6000;
+const STRETCH_MS = 3400;
 /** 往南（點了轉過來面向你） */
 const SOUTH: Pt = [-1e-5, 0];
 
@@ -93,11 +105,25 @@ export class Dog {
   private next(s: DogSeg, rand: () => number): DogSeg {
     const [at, start, dir0] = [s.to, s.start + s.ms, s.dir];
     const moving = s.do === 'walk' || s.do === 'run';
+    const stay = (how: DogDo): DogSeg => {
+      const ms = how === 'sit' ? 4000 + rand() * 5000 : how === 'sniff' ? 2000 + rand() * 3000 : how === 'stretch' ? STRETCH_MS : 1500 + rand() * 2000;
+      return { do: how, from: at, to: at, start, ms, dir0, dir: dir0, ring: s.ring };
+    };
+    // 坐完常常伸個懶腰
+    if (s.do === 'sit' && rand() < 0.4) return stay('stretch');
     if (rand() < (moving ? 0.8 : 0.15)) {
       const r = rand();
-      const how: DogDo = r < 0.65 ? 'sniff' : r < 0.82 ? 'stand' : 'sit';
-      const ms = how === 'sit' ? 4000 + rand() * 5000 : how === 'sniff' ? 2000 + rand() * 3000 : 1500 + rand() * 2000;
-      return { do: how, from: at, to: at, start, ms, dir0, dir: dir0, ring: s.ring };
+      return stay(r < 0.6 ? 'sniff' : r < 0.75 ? 'stand' : r < 0.88 ? 'sit' : 'stretch');
+    }
+    // 經過地面到附近另一塊草皮：大多用跑的，近的偶爾用走的
+    if (rand() < CROSS) {
+      const o = this.yard.elsewhere(s.ring, at, rand);
+      if (o) {
+        const m = this.yard.metres(at, o.at);
+        const how = m > CROSS_WALK_M || rand() < 0.75 ? 'run' : 'walk';
+        const seg: DogSeg = { do: how, from: at, to: o.at, start, ms: 0, dir0, dir: [o.at[0] - at[0], o.at[1] - at[1]], ring: o.ring, cross: true };
+        return { ...seg, ms: (m / speedOf(seg)) * 1000 };
+      }
     }
     const run = rand() < 0.08;
     const nose = !run && rand() < 0.4;
@@ -129,7 +155,8 @@ const smooth = (t: number): number => t * t * (3 - 2 * t);
  * 這一段的姿勢（已經過了 e 毫秒）：
  * - 走路：四隻腳輪流（左後、左前、右後、右前各差四分之一步），往前擺時抬起來；邊走邊聞的走得慢、頭低下去左右聞；
  * - 跑步：兩隻前腳一起往前伸、兩隻後腳一起往後蹬（身體拉長、離地），再一起收到肚子下面；身體前後搖、上下彈，耳朵往後飛，吐舌頭；
- * - 聞：身體前面往下、頭低到鼻子湊到地上，左右慢慢聞；坐下一開始坐下最後站起來；站著搖尾巴
+ * - 聞：身體前面往下、頭低到鼻子湊到地上，左右慢慢聞；坐下一開始坐下最後站起來（不吐舌頭）；站著搖尾巴；
+ * - 伸懶腰（下犬式）：兩隻前腳往前伸、貼在地上，身體前面往下壓（胸口貼地）、屁股翹高、後腳直直的，頭抬起來看前面、尾巴搖，停一下再站起來
  */
 export function dogPose(s: DogSeg, e: number): DogPose {
   const ramp = (r: number, from = 0): number => smooth(Math.max(0, Math.min(1, (e - from) / r, (s.ms - e) / r)));
@@ -173,7 +200,11 @@ export function dogPose(s: DogSeg, e: number): DogPose {
       return { ...STILL, nod: (50 + 4 * wave(380)) * r, lean: 12 * r, look: 12 * wave(1800) * r, wag: 6 * wave(900) };
     }
     case 'sit':
-      return { ...STILL, sit: ramp(550, s.pet ? TURN_MS * 0.6 : 0), wag: 12 * wave(650), tongue: !!s.pet };
+      return { ...STILL, sit: ramp(550, s.pet ? TURN_MS * 0.6 : 0), wag: 12 * wave(650) };
+    case 'stretch': {
+      const r = ramp(750);
+      return { ...STILL, legs: [[74 * r, -0.2 * r], [72 * r, -0.2 * r], [-8 * r, 0], [-8 * r, 0]], lean: 27 * r, nod: -20 * r, wag: 14 * wave(500) * r };
+    }
     default:
       return { ...STILL, wag: 14 * wave(900) };
   }

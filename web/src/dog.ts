@@ -29,16 +29,16 @@ export interface DogLook {
 }
 
 /**
- * 使用者的馬爾濟斯（照照片）：白色捲捲的長毛（耳朵、背上一點點米白），大大圓圓毛茸茸的頭，短短的嘴巴藏在毛裡，
- * 又大又圓的黑眼睛、黑鼻子，又寬又長、垂到下巴下面的耳朵，腳像穿了毛褲、腳掌圓圓一團，尾巴長毛往上捲
+ * 使用者的馬爾濟斯（照相簿）：幾乎全白的捲毛（暗的地方也只有一點點米白，耳朵尾端一點點米色），頭和耳朵連成一顆大大圓圓毛茸茸的球，
+ * 耳朵垂到下巴旁邊，短短的嘴巴藏在一團圓圓的毛裡，又大又圓的黑眼睛、大大的黑鼻子，腳像穿了毛褲、腳掌圓圓一團，尾巴長毛往上捲
  */
-export const MALTESE: DogLook = { name: '馬爾濟斯', size: 1, fur: ['#ffffff', '#f4efe6', '#ddd4c4'], ear: '#f0e6d2', hair: 0.024, curl: 1, ears: 'drop', tail: 'plume', muzzle: 0.02 };
+export const MALTESE: DogLook = { name: '馬爾濟斯', size: 1, fur: ['#ffffff', '#fbf9f4', '#ece6db'], ear: '#f8f3ea', hair: 0.024, curl: 1, ears: 'drop', tail: 'plume', muzzle: 0.02 };
 
 /** 頭頂多高（公尺） */
 export const dogHeight = (look: DogLook): number => 0.38 * look.size;
 
 /**
- * 姿勢：legs 四隻腳（左前、右前、左後、右後）往前擺幾度、腳抬多高（公尺），bob 身體往上幾公尺，sit 坐下多少（0 站著～1 坐好），
+ * 姿勢：legs 四隻腳（左前、右前、左後、右後）往前擺幾度、腳抬多高（公尺，負的是往下壓、貼在地上），bob 身體往上幾公尺，sit 坐下多少（0 站著～1 坐好），
  * lean 身體前面往下幾度（跑步時前後搖、聞的時候前面低下去），nod 脖子和頭往下低幾度，look 頭往左轉幾度，
  * ear 耳朵往後飛幾度（跑步），wag 尾巴往左右搖幾度，tongue 吐舌頭
  */
@@ -111,7 +111,7 @@ function parts(look: DogLook, pose: DogPose): Part[] {
   const s = look.size;
   const S = (v: V): V => mul(v, s);
   const fur = look.fur;
-  const earTones: [string, string, string] = [shade(look.ear, 0.5), look.ear, shade(look.ear, -0.1)];
+  const earTones: [string, string, string] = [shade(look.ear, 0.6), look.ear, shade(look.ear, -0.05)];
   const sit = pose.sit;
   // 身體繞後腳連到身體的地方轉：坐下前面往上、聞和跑步時前面往下（lean），整個往下坐；走、跑時一上一下
   const P = S([-0.1, 0, 0.16]);
@@ -125,9 +125,9 @@ function parts(look: DogLook, pose: DogPose): Part[] {
   const H = look.hair;
   const out: Part[] = [];
   const furry = (key: string, e: Ell, hair = H, tones = fur, fill = fur[1]): void => void out.push({ key, e, fill, hair, tones });
-  furry('body', move(ell(S([0, 0, 0.205]), 0.135 * s, 0.09 * s, 0.08 * s), body));
-  furry('rump', move(ell(S([-0.095, 0, 0.205]), 0.078 * s, 0.087 * s, 0.082 * s), body));
-  furry('chest', move(ell(S([0.09, 0, 0.2]), 0.078 * s, 0.084 * s, 0.09 * s), body), H * 1.1);
+  furry('body', move(ell(S([0, 0, 0.205]), 0.135 * s, 0.096 * s, 0.08 * s), body));
+  furry('rump', move(ell(S([-0.095, 0, 0.205]), 0.078 * s, 0.093 * s, 0.082 * s), body));
+  furry('chest', move(ell(S([0.09, 0, 0.2]), 0.08 * s, 0.096 * s, 0.092 * s), body), H * 1.15);
   furry('neck', move(ell(S([0.13, 0, 0.255]), 0.05 * s, 0.06 * s, 0.066 * s), neck));
   // 頭（大大圓圓、毛茸茸）、嘴巴（短短的，藏在毛裡）、鼻子、眼睛（又大又圓的黑眼睛、一點反光，下面淡淡的淚痕）、舌頭
   const Hc = S([0.175, 0, 0.292]);
@@ -135,9 +135,9 @@ function parts(look: DogLook, pose: DogPose): Part[] {
   furry('head', move(ell(Hc, 0.079 * s, 0.085 * s, 0.079 * s), neck), H * 0.95);
   const mu = look.muzzle + 0.006;
   const M = add(Hc, S([0.058 + look.muzzle * 0.5, 0, -0.026]));
-  furry('muzzle', move(ell(M, mu * s, 0.032 * s, 0.027 * s), neck), H * 0.5);
+  furry('muzzle', move(ell(M, mu * s, 0.038 * s, 0.029 * s), neck), H * 0.55);
   const solid = (key: string, e: Ell, fill: string, bias = 0.004): void => void out.push({ key, e, fill, hair: 0, tones: [fill, fill, fill], bias: bias * s });
-  solid('nose', move(ell(add(M, S([mu * 0.95, 0, 0.01])), 0.012 * s, 0.014 * s, 0.011 * s), neck), '#1d1a17');
+  solid('nose', move(ell(add(M, S([mu * 0.95, 0, 0.01])), 0.013 * s, 0.016 * s, 0.012 * s), neck), '#1d1a17');
   if (pose.tongue) solid('tongue', move(ell(add(M, S([mu * 0.55, 0, -0.026])), 0.013 * s, 0.011 * s, 0.005 * s), neck), '#e8828c', 0.002);
   for (const side of [1, -1]) {
     const n = norm([0.86, 0.4 * side, 0.2]);
@@ -145,17 +145,17 @@ function parts(look: DogLook, pose: DogPose): Part[] {
     const t2 = cross(n, t1);
     const eye = add(Hc, mul(n, rH * 0.98));
     const disc = (c: V, r: number): Ell => ({ c, a: [mul(n, 0.003 * s), mul(t1, r * s), mul(t2, r * s)] });
-    solid(`stain${side}`, move(disc(add(eye, S([0, 0, -0.016])), 0.009), neck), '#ead9bd', 0.003);
-    solid(`eye${side}`, move(disc(eye, 0.019), neck), '#1d1a17', 0.006);
+    solid(`stain${side}`, move(disc(add(eye, S([0, 0, -0.016])), 0.007), neck), '#f1e6d2', 0.003);
+    solid(`eye${side}`, move(disc(eye, 0.02), neck), '#1d1a17', 0.006);
     solid(`shine${side}`, move(disc(add(add(eye, mul(t2, -0.008 * s)), mul(n, 0.002 * s)), 0.0055), neck), '#ffffff', 0.009);
   }
   // 耳朵：又寬又長、垂到下巴下面（跑步時往後飛），或豎起來的
   for (const side of [1, -1]) {
     if (look.ears === 'drop') {
-      // 又寬又長，下面往外張開一點（正面看把臉框起來）
-      const c = add(Hc, S([-0.015, 0.08 * side, -0.055]));
-      const ear = joint(neck, add(c, S([0, 0, 0.08])), -pose.ear * RAD);
-      furry(`ear${side}`, move({ c, a: [[0.042 * s, 0, 0], [0, 0.03 * s, 0], [0, 0.024 * s * side, 0.094 * s]] }, ear), H * 1.3, earTones, look.ear);
+      // 寬寬的、垂到下巴旁邊，下面往外張開一點（跟頭連成一顆圓球，正面看把臉框起來）
+      const c = add(Hc, S([-0.015, 0.078 * side, -0.035]));
+      const ear = joint(neck, add(c, S([0, 0, 0.06])), -pose.ear * RAD);
+      furry(`ear${side}`, move({ c, a: [[0.042 * s, 0, 0], [0, 0.032 * s, 0], [0, 0.016 * s * side, 0.068 * s]] }, ear), H * 1.2, earTones, look.ear);
     } else furry(`ear${side}`, move(ell(add(Hc, S([-0.005, 0.042 * side, 0.072])), 0.02 * s, 0.012 * s, 0.045 * s), neck), H * 0.5, earTones, look.ear);
   }
   // 尾巴：一串長毛往上捲過背，或直直往後翹
@@ -170,9 +170,10 @@ function parts(look: DogLook, pose: DogPose): Part[] {
   hips.forEach(([u, v, front], i) => {
     const [deg, lift] = pose.legs[i] ?? [0, 0];
     const hip = body.p(S([u, v, 0.16]));
-    const L = Math.max(0.02 * s, hip[2]);
     const th = deg * RAD;
-    const step: V = [hip[0] + L * Math.sin(th), hip[1], Math.max(0, hip[2] - L * Math.cos(th)) + lift * s];
+    // 腳從連到身體的地方到地上；往前伸很多時（伸懶腰）照腳的長度伸出去，腳往下壓（lift 是負的）就貼在地上
+    const L = Math.max(0.02 * s, hip[2], 0.17 * s * Math.abs(Math.sin(th)));
+    const step: V = [hip[0] + L * Math.sin(th), hip[1], Math.max(0, hip[2] - L * Math.cos(th) + lift * s)];
     const sat: V = [hip[0] + (front ? 0.015 : 0.1) * s, hip[1], 0];
     const foot = mix(step, sat, sit);
     const end: V = [foot[0], foot[1], foot[2] + 0.02 * s];
@@ -280,7 +281,7 @@ export function dogSvg(look: DogLook, pose: DogPose, yaw: number, k: number): st
         const nv = view(nr);
         if (nv[2] < -0.25) continue;
         const L = dot(nv, LIGHT);
-        const tone = L > 0.3 ? 0 : L > -0.35 ? 1 : 2;
+        const tone = L > 0.2 ? 0 : L > -0.55 ? 1 : 2;
         const len = p.hair * h.len;
         const side = norm(Math.abs(nr[2]) > 0.95 ? cross(nr, [1, 0, 0]) : cross(nr, [0, 0, 1]));
         // 捲的毛彎成 C 字（往旁邊彎），直的毛往外長再往下垂
