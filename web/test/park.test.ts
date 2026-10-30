@@ -1,14 +1,16 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { RADAR_GEOM } from '../src/radar';
-import { ARRIVE_MS, arriveRocket, DEPART_MS, departRocket, EARTH, earthParkSvg, HATCH_CENTER, nearPark, PARK_DOGS, PARK_YARD, PARK_MIN_KM, XIAOFA_AVOID, parkGeom, parkTexture, resetRocket, rocketNow, STOW_MS, stowRocket, SUMMON_MS, summonRocket } from '../src/park';
+import { ARRIVE_MS, arriveRocket, DEPART_MS, departRocket, EARTH, earthParkSvg, HATCH_CENTER, nearPark, PARK_DOGS, PARK_YARD, PARK_MIN_KM, XIAOFA_AVOID, XIAOFA_NATURE, parkGeom, parkTexture, resetRocket, rocketNow, STOW_MS, stowRocket, SUMMON_MS, summonRocket } from '../src/park';
 import { ZHONGSHAN_PARK } from '../src/zhongshan';
 import { bodyBearing, spaceMarkup, toWoof } from '../src/space';
 import { dogHeight, MALTESE } from '../src/dog';
-import { Dog } from '../src/dogs';
+import { Dog, NATURE, type DogNature, type DogSeg } from '../src/dogs';
 
 const { c: C, inner: INNER } = RADAR_GEOM;
 /** 白天（中午 12 點）：不受跑測試是幾點影響 */
 const noon = (): number => 12;
+/** 固定的亂數：每次跑測試結果一樣 */
+const seeded = (seed: number) => (): number => ((seed = (seed * 16807) % 2147483647) - 1) / 2147483646;
 const hall: [number, number] = [25.0400096, 121.5602923];
 const lawn: [number, number] = [25.0383215, 121.5608674];
 const pond: [number, number] = [25.039066, 121.56026];
@@ -200,6 +202,38 @@ describe('地球的雷達上的中山公園（跟汪星共用一份）', () => {
     expect(Math.hypot(ax - C, ay - C)).toBeLessThan(2);
     // 在畫面外面就不畫
     expect(woofAt(0.005, hall)).not.toContain('woof-dog');
+  });
+
+  it('小法 loves walking and sniffing more than a plain dog (sleep, drinking and running stay the same)', () => {
+    expect(PARK_DOGS[0].nature).toBe(XIAOFA_NATURE);
+    for (const k of ['speed', 'reach', 'stop', 'again', 'run', 'cross', 'crossRun', 'drink', 'afterRun', 'glance', 'sleep', 'night', 'nap'] as const) expect(XIAOFA_NATURE[k]).toEqual(NATURE[k]);
+    // 停下來時睡覺的權重跟一般的狗一樣比例：其他停下來的權重加起來不變
+    const sum = (n: DogNature): number => Object.values(n.stays).reduce((a, w) => a + (w ?? 0), 0);
+    expect(sum(XIAOFA_NATURE)).toBeCloseTo(sum(NATURE), 6);
+    // 同一塊公園中午各走三小時：小法邊走邊聞、停下來聞的比例都比較高，聞得比較久
+    const day = (nature: DogNature): DogSeg[] => {
+      const rand = seeded(5);
+      const dog = new Dog({ id: `sniff-${nature === NATURE ? 'plain' : 'xiaofa'}`, name: '測試', look: MALTESE, yard: PARK_DOGS[0].yard, nature, hour: noon });
+      dog.place(rand, 0);
+      const segs = new Map<number, DogSeg>();
+      for (let t = 0; t <= 3 * 3_600_000; t += 500) {
+        const d = dog.now(t, rand);
+        segs.set(d.seg.start, d.seg);
+      }
+      return [...segs.values()];
+    };
+    const share = (list: DogSeg[]) => {
+      const walks = list.filter((s) => s.do === 'walk' && !s.cross && !s.goal && !s.via?.length);
+      const stops = list.filter((s) => ['sniff', 'stand', 'idle', 'sit', 'lie'].includes(s.do));
+      const sniffs = list.filter((s) => s.do === 'sniff');
+      return { nose: walks.filter((s) => s.nose).length / walks.length, sniff: sniffs.length / stops.length, ms: sniffs.reduce((a, s) => a + s.ms, 0) / sniffs.length };
+    };
+    const [plain, xiaofa] = [share(day(NATURE)), share(day(XIAOFA_NATURE))];
+    expect(xiaofa.nose).toBeGreaterThan(0.6);
+    expect(xiaofa.nose).toBeGreaterThan(plain.nose + 0.2);
+    expect(xiaofa.sniff).toBeGreaterThan(0.65);
+    expect(xiaofa.sniff).toBeGreaterThan(plain.sniff + 0.1);
+    expect(xiaofa.ms).toBeGreaterThan(plain.ms + 1000);
   });
 
   it('summons the rocket stored under the middle lawn, parks it, flies it to 汪星 and stores it there', () => {

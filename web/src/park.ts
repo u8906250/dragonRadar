@@ -8,7 +8,7 @@ import type { LatLng } from './geo';
 import { RADAR_GEOM, type TripAt } from './radar';
 import { ZHONGSHAN_PARK } from './zhongshan';
 import { MALTESE, dogHeight } from './dog';
-import { animateDogs, Dog, dogById, dogHeading, dogMarkup, wakeDogs, type DogYard } from './dogs';
+import { animateDogs, Dog, dogById, dogHeading, dogMarkup, NATURE, wakeDogs, type DogNature, type DogYard } from './dogs';
 export { onDogMove } from './dogs';
 
 const { c: C, inner: INNER, size: SIZE } = RADAR_GEOM;
@@ -495,8 +495,20 @@ export const PARK_YARD: DogYard = parkYard();
 /** 小法不去的地方：公園最右上那一區（國父紀念館東邊那條南北向步道以東、橫過整個公園那條東西向步道以北，東北角那一排草皮） */
 export const XIAOFA_AVOID: Pt[] = [[25.03932, 121.56098], [25.0413, 121.56098], [25.0413, 121.5618], [25.03932, 121.5618]];
 
-/** 公園裡的狗：小法（使用者的馬爾濟斯；不去公園最右上那一區；之後可能單獨給他其他動作和個性，就給他自己的 nature） */
-export const PARK_DOGS: Dog[] = [new Dog({ id: 'xiaofa', name: '小法', look: MALTESE, yard: parkYard({ avoid: [XIAOFA_AVOID] }) })];
+/**
+ * 小法的個性：特別喜歡走走聞聞——在草皮裡走路大多邊走邊聞（約七成，一般的狗約四成），
+ * 停下來大多低頭聞（白天約七成，一般的狗約一半）、每次聞久一點（3～7 秒）；站著、發呆、坐、趴、伸懶腰相對少，
+ * 睡覺（停下來時睡的機率）、喝水、跑步、換草皮跟一般的狗一樣
+ */
+export const XIAOFA_NATURE: DogNature = {
+  ...NATURE,
+  nose: 0.7,
+  stays: { sniff: 0.7, stand: 0.06, idle: 0.07, sit: 0.05, lie: 0.06, stretch: 0.06 },
+  last: { ...NATURE.last, sniff: [3000, 7000] },
+};
+
+/** 公園裡的狗：小法（使用者的馬爾濟斯；不去公園最右上那一區；特別喜歡走走聞聞） */
+export const PARK_DOGS: Dog[] = [new Dog({ id: 'xiaofa', name: '小法', look: MALTESE, yard: parkYard({ avoid: [XIAOFA_AVOID] }), nature: XIAOFA_NATURE })];
 
 /** 搭火箭到汪星：每隻狗換到隨機一塊草皮 */
 export function moveDogs(): void {

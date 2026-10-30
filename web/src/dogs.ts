@@ -101,7 +101,7 @@ export interface DogNature {
   tail: Partial<Record<DogDo, number>>;
   last: Partial<Record<DogDo, [number, number]>>;
 }
-/** 一般的狗（小法現在也是）：大多走一走、停下來聞一聞，偶爾站著、發呆、坐、趴（趴比較久）、伸懶腰，偶爾才跑一下，跑完趴下來、發呆或改成走路 */
+/** 一般的狗：大多走一走、停下來聞一聞，偶爾站著、發呆、坐、趴（趴比較久）、伸懶腰，偶爾才跑一下，跑完趴下來、發呆或改成走路 */
 export const NATURE: DogNature = {
   speed: { walk: 0.3, sniff: 0.18, run: 2.4 },
   reach: { walk: [0.8, 4], sniff: [0.5, 2.5], run: [3, 8] },
