@@ -7,7 +7,7 @@ import type { LatLng } from './geo';
 import { RADAR_GEOM, TINY_EARTH } from './radar';
 import type { StreetClass, StreetLine } from './streets';
 import { nearPark, PARK_MIN_KM, parkGeom, parkSvg, ringArea, scatter } from './park';
-import { TAIPEI_DISTRICT_LINES, TAIPEI_MAJOR_ROADS, TAIPEI_MINOR_ROADS, TAIPEI_OUTLINE } from './taipei';
+import { TAIPEI_MAJOR_ROADS, TAIPEI_MINOR_ROADS, TAIPEI_OUTLINE } from './taipei';
 
 const { c: C, inner: INNER, size: SIZE } = RADAR_GEOM;
 const RAD = Math.PI / 180;
@@ -125,7 +125,7 @@ interface Near {
   lng1: number;
   step: number;
 }
-function nearOf(center: LatLng, rg: number): Near | null {
+export function nearOf(center: LatLng, rg: number): Near | null {
   const a = Math.asin(Math.min(1, (INNER * 1.5) / rg)) / RAD;
   if (a / 16 >= 1) return null;
   // 切到弦離球面不到 0.05 像素就好（弦長 L 弧度離球面約 rg L² / 8）：放大很多時比看得到的範圍的 1/16 粗很多
@@ -206,7 +206,7 @@ function linesPath(center: LatLng, lines: Array<Array<[number, number]>>, rg: nu
 }
 
 /** 經緯線：每 30 度一條，另一面的不畫 */
-function graticule(center: LatLng, rg: number, box?: [number, number, number, number], near: Near | null = null): string {
+export function graticule(center: LatLng, rg: number, box?: [number, number, number, number], near: Near | null = null): string {
   const lines: Array<Array<[number, number]>> = [];
   const steps = (from: number, to: number, step: number): number[] => Array.from({ length: Math.round((to - from) / step) + 1 }, (_, i) => from + i * step);
   for (let lng = -180; lng < 180; lng += 30) lines.push(steps(-90, 90, 3).map((lat) => [lat, lng]));
@@ -379,7 +379,6 @@ function terrainOf(t: WoofTerrain): { contours: Contour[]; peaks: Array<{ name: 
 }
 /** 等高線、山頂：汪星在畫面上多大以上才畫（跟道路一樣） */
 const TERRAIN_FROM_R = 60;
-const WOOF_DISTRICT_LINES = woofLines(TAIPEI_DISTRICT_LINES);
 const WOOF_MAJOR_ROADS = woofLines(TAIPEI_MAJOR_ROADS);
 const WOOF_MINOR_ROADS = woofLines(TAIPEI_MINOR_ROADS);
 
@@ -698,9 +697,9 @@ function bodySvg(key: string, x: number, y: number, r: number, sun: { x: number;
 const sub = (a: Vec3, b: Vec3): Vec3 => [a[0] - b[0], a[1] - b[1], a[2] - b[2]];
 
 /**
- * 汪星畫成跟地球一樣的球：正射投影，地表是台北市（WOOF_LAND），跟雷達畫台北一樣只用線條：
- * 市界是海岸（虛線，陸地淡淡填色，外面空白是海；只畫畫面裡的那一段）、區界、道路（國道、快速道路粗線，主要幹道細線），夠大才畫道路；
- * 經緯線每 30 度（夠大才畫）、虛線的邊，夜晚那一半照太陽真正的方向（toSun：看的人的座標）。
+ * 汪星畫成跟地球一樣的球：正射投影，地表是台北市（WOOF_LAND）：陸地淡淡填色，外面是海（淡淡的水色），
+ * 道路（國道、快速道路粗線，主要幹道細線，夠大才畫）、山（等高線、山頂）；不畫虛線（經緯線、海岸線、區界、球的邊），
+ * 海岸和球的邊看陸地、海的顏色；夜晚那一半照太陽真正的方向（toSun：看的人的座標）。
  * 正中間的經緯度跟著視角轉：左右拖轉經度、上下拖轉緯度。中心是汪星時可以放大到 1 km（focusMinKm），
  * 拉近到畫面上的台北半徑 2 km 內換成大街小巷（streets：跟雷達一樣的圖磚）；中山公園描繪出來（草地花圃草綠色、映池和翠湖水藍色，拉近長出一叢叢的草、一道道的水波），那裡可以放大到 0.5 公尺，看得到的那一小塊線切細
  */
@@ -722,10 +721,8 @@ function woofGlobe(x: number, y: number, r: number, view: SpaceView, toSun: Vec3
       ? `M${f1(box[0])} ${f1(box[1])}H${f1(box[2])}V${f1(box[3])}H${f1(box[0])}Z`
       : `M${f1(C - r)} ${f1(C)}A${f1(r)} ${f1(r)} 0 1 0 ${f1(C + r)} ${f1(C)}A${f1(r)} ${f1(r)} 0 1 0 ${f1(C - r)} ${f1(C)}Z`;
   out += `<path class="woof-sea" d="${disc}${land}" />`;
-  if (r >= 30) out += `<path class="space-grat" d="${graticule(center, r, box, near)}" />`;
+  // 汪星不畫虛線（經緯線、海岸線、區界、球的邊都不畫）：海岸和球的邊看陸地、海的顏色就看得出來
   if (land) out += `<path class="region-outline woof-land" d="${land}" />`;
-  out += `<path class="region-outline open" d="${lines(WOOF_LAND.map((ring) => [...ring, ring[0]]))}" />`;
-  if (r >= 30) out += `<path class="region-outline open county-line" d="${lines(WOOF_DISTRICT_LINES)}" />`;
   // 山的等高線：拉遠每 200 公尺一條，拉近每 100、50 公尺一條；200 公尺的倍數畫粗一點
   const T = r >= TERRAIN_FROM_R && terrain ? terrain() : null;
   const ppm = r / (WOOF_KM * 1000);
@@ -793,8 +790,6 @@ function woofGlobe(x: number, y: number, r: number, view: SpaceView, toSun: Vec3
     },
   });
   out += `<path class="space-night" d="${nightFrom([toSun[0] / n, toSun[1] / n, toSun[2] / n], r)}" />`;
-  // 球的邊在雷達外面就不畫
-  if (r - Math.hypot(ox, oy) < INNER + 20) out += `<circle class="region-outline open space-limb" cx="${f1(C)}" cy="${f1(C)}" r="${f1(r)}" />`;
   return `<g class="space-globe" transform="translate(${f1(ox)} ${f1(oy)})">${out}</g>`;
 }
 

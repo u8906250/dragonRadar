@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { fmtKm, globeFrac, RADAR_GEOM, SPACE_FROM_KM } from '../src/radar';
 import { PARK_MIN_KM } from '../src/park';
 import type { StreetLine } from '../src/streets';
-import { atPark, focusMinKm, hemiPath, WOOF_KM, landPath, moonPosition, nightPath, onWoofLand, ortho, planetPositions, spaceMarkup, subsolar, toWoof } from '../src/space';
+import { atPark, focusMinKm, graticule, hemiPath, nearOf, WOOF_KM, landPath, moonPosition, nightPath, onWoofLand, ortho, planetPositions, spaceMarkup, subsolar, toWoof } from '../src/space';
 
 const diff = (a: number, b: number): number => Math.abs(((((a - b) % 360) + 540) % 360) - 180);
 const lonOf = (when: string, key: string): number => planetPositions(new Date(when)).find((p) => p.key === key)!.lon;
@@ -201,13 +201,15 @@ describe('汪星', () => {
     expect(inner).toContain('data-body="woof"');
     const near = spaceMarkup({ ...base, scaleKm: (WOOF_KM * 164) / 39, rg: 164, view: { focus: 'woof', yaw: 0, pitch: 0 } });
     const woof = near.slice(near.indexOf('data-body="woof"'));
-    for (const cls of ['space-globe', 'space-grat', 'space-night', 'space-limb', 'region-outline', 'county-line']) expect(woof).toContain(cls);
+    for (const cls of ['space-globe', 'space-night', 'woof-sea', 'woof-land']) expect(woof).toContain(cls);
+    // 汪星不畫虛線：經緯線、海岸線、區界、球的邊
+    for (const cls of ['space-grat', 'space-limb', 'county-line', 'region-outline open']) expect(woof).not.toContain(cls);
     // 還小：道路先不畫
     expect(woof).not.toContain('woof-road');
     // 拖曳轉視角：球跟著轉
     const turned = spaceMarkup({ ...base, scaleKm: (WOOF_KM * 164) / 39, rg: 164, view: { focus: 'woof', yaw: 0.5, pitch: 0.3 } });
-    const grat = (m: string): string => /space-grat" d="([^"]+)"/.exec(m.slice(m.indexOf('data-body="woof"')))![1];
-    expect(grat(turned)).not.toBe(grat(near));
+    const land = (m: string): string => /woof-land" d="([^"]+)"/.exec(m.slice(m.indexOf('data-body="woof"')))![1];
+    expect(land(turned)).not.toBe(land(near));
   });
 
   it('hides its map until you ride the rocket there', () => {
@@ -307,7 +309,7 @@ describe('汪星', () => {
     const woof = near.slice(near.indexOf('data-body="woof"'));
     // 陸地淡淡填色、海岸線虛線分開畫
     expect(woof).toMatch(/class="region-outline woof-land" d="M[\d. L]+Z"/);
-    expect(woof).toMatch(/class="region-outline open" d="M[\d. LM]+"/);
+    expect(woof).not.toContain('region-outline open');
     expect(woof).toMatch(/class="woof-road street-major" d="M/);
     expect(woof).toMatch(/class="woof-road street-minor" d="M/);
     // 區名不寫
@@ -320,13 +322,20 @@ describe('汪星', () => {
     expect(focusMinKm('woof')).toBe(1);
     expect(focusMinKm('moon')).toBeCloseTo(1737 * 1.3);
     // 正中間放在北緯 30 度的緯線上、兩個點（經度 0、3 度）中間：拉近到 1 km，緯線還是要通過正中間
+    // （汪星不畫經緯線了，直接畫經緯線來看：道路、等高線、公園的線都是同一種切細的方法）
     const view = { focus: 'woof', yaw: (-1.5 * Math.PI) / 180, pitch: (30 * Math.PI) / 180 };
     const m = spaceMarkup({ ...base, scaleKm: 1, rg: 164, view });
     const woof = m.slice(m.indexOf('data-body="woof"'));
     const C = RADAR_GEOM.c;
+    const S = RADAR_GEOM.size;
+    /** 中心是汪星、外圈 km 公里時的經緯線 */
+    const grid = (km: number): string => {
+      const center = { lat: 30, lng: 1.5 };
+      const r = (WOOF_KM * RADAR_GEOM.inner) / km;
+      return graticule(center, r, [-20, -20, S + 20, S + 20], nearOf(center, r));
+    };
     /** 經緯線離正中間最近多遠 */
-    const gap = (markup: string): number => {
-      const grat = /space-grat" d="([^"]+)"/.exec(markup)![1];
+    const gap = (grat: string): number => {
       let best = Infinity;
       for (const part of grat.split('M').filter(Boolean)) {
         const pts = [...part.matchAll(/(-?[\d.]+) (-?[\d.]+)/g)].map((x) => [Number(x[1]), Number(x[2])]);
@@ -338,9 +347,9 @@ describe('汪星', () => {
       }
       return best;
     };
-    expect(gap(woof)).toBeLessThan(2);
+    expect(gap(grid(1))).toBeLessThan(2);
     // 放大到 0.5 公尺（中山公園那種）：每 3 度一點的弦在這裡差將近 1 公尺，要切細才會通過正中間
-    expect(gap(spaceMarkup({ ...base, scaleKm: PARK_MIN_KM, rg: 164, view }))).toBeLessThan(2);
+    expect(gap(grid(PARK_MIN_KM))).toBeLessThan(2);
     // 放大很多：畫面外的線、球的邊不畫（虛線整圈有幾百萬公里長，要畫好幾秒）
     expect(m.length).toBeLessThan(40_000);
     expect(woof).not.toContain('space-limb');
