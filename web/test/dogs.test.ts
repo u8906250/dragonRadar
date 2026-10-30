@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { dogSvg, MALTESE, STILL, dogHeight, type DogLook } from '../src/dog';
-import { Dog, dogById, dogPose, NATURE, speedOf, type DogSeg, type DogYard } from '../src/dogs';
+import { Dog, dogById, dogPose, lookAtViewer, NATURE, speedOf, type DogSeg, type DogYard } from '../src/dogs';
 
 /** 兩塊 40 公尺見方的草皮，中間隔 20 公尺的地面（緯經度當公尺用，1 度 = 1 公尺） */
 const lawn = (ring: number, rand: () => number): [number, number] => [rand() * 40, ring * 60 + rand() * 40];
@@ -138,12 +138,43 @@ describe('會動的狗（dogs.ts）', () => {
     }
   });
 
+  it('sometimes just turns its head to look at you when tapped, and carries on', () => {
+    const rand = seeded(4);
+    const dog = new Dog({ id: 'test-glance', name: '測試', look: MALTESE, yard: YARD });
+    dog.place(rand, 0);
+    const before = dog.now(10_000, rand);
+    dog.pet(10_000, () => 0);
+    // 原本在做的事照舊（沒有坐下），頭轉過來看你 2.6 秒，頭尾慢慢轉
+    expect(dog.now(10_100, rand).seg).toBe(before.seg);
+    expect(dog.glancing(10_000)).toBe(0);
+    expect(dog.glancing(11_000)).toBe(1);
+    expect(dog.glancing(12_600)).toBe(0);
+    expect(dog.glance).toBeNull();
+    // 頭往你那邊轉：面向右邊往右轉、面向左邊往左轉、朝你不用轉，背對你最多轉 80 度（從肩膀回頭看）
+    expect(lookAtViewer(90)).toBe(-80);
+    expect(lookAtViewer(270)).toBe(80);
+    expect(lookAtViewer(180)).toBe(0);
+    expect(lookAtViewer(135)).toBe(-45);
+    expect(Math.abs(lookAtViewer(0))).toBe(80);
+    // 照個性：大概四成只轉頭看
+    let looks = 0;
+    for (let i = 0; i < 200; i++) {
+      const d = new Dog({ id: `test-glance-${i}`, name: '測試', look: MALTESE, yard: YARD });
+      d.place(rand, 0);
+      d.pet(1000, rand);
+      if (d.glance) looks++;
+    }
+    expect(looks).toBeGreaterThan(50);
+    expect(looks).toBeLessThan(110);
+  });
+
   it('turns to face you (south) and sits when tapped, and sits longer when tapped again', () => {
     const rand = seeded(5);
     const dog = new Dog({ id: 'test-b', name: '測試', look: MALTESE, yard: YARD });
     dog.place(rand, 0);
     const before = dog.now(20_000, rand);
-    dog.pet(20_000);
+    // （不要只轉頭看）
+    dog.pet(20_000, () => 0.99);
     const d = dog.now(20_100, rand);
     expect(d.seg.do).toBe('sit');
     expect(d.seg.pet).toBe(true);

@@ -67,6 +67,7 @@ export interface DogYard {
  * run 在草皮裡用跑的、nose 邊走邊聞、cross 換到另一塊草皮、crossRun 換草皮時用跑的、drink 去湖邊喝水的機率，crossWalk 幾公尺內去喝水偶爾用走的（再遠用跑的），
  * last 每種停下來的動作停多久（毫秒，最短～最長），
  * afterRun 跑完做什麼（權重：趴下來休息、停下來發呆、改成走路），stretchAfterRest 坐完趴完伸懶腰、chin 趴著下巴靠下去閉眼睛的機率，
+ * glance 點了只轉頭看你（繼續做原本的事）的機率（其他時候轉過來坐下），
  * tail 每種動作尾巴垂下來的機率
  */
 export interface DogNature {
@@ -84,6 +85,7 @@ export interface DogNature {
   afterRun: { lie: number; idle: number; walk: number };
   stretchAfterRest: number;
   chin: number;
+  glance: number;
   tail: Partial<Record<DogDo, number>>;
   last: Partial<Record<DogDo, [number, number]>>;
 }
@@ -103,6 +105,7 @@ export const NATURE: DogNature = {
   afterRun: { lie: 0.35, idle: 0.3, walk: 0.35 },
   stretchAfterRest: 0.4,
   chin: 0.5,
+  glance: 0.4,
   tail: { sniff: 0.5, walk: 0.3, stand: 0.35, idle: 0.7, sit: 0.6, lie: 0.75, drink: 0.4 },
   last: { stand: [1500, 3500], sniff: [2000, 5000], idle: [3500, 8500], sit: [6000, 14000], lie: [15000, 35000] },
 };
@@ -111,6 +114,8 @@ export const speedOf = (s: DogSeg, nature: DogNature = NATURE): number => nature
 /** 轉身多久、點了坐多久、伸懶腰多久、喝水多久 */
 const TURN_MS = 450;
 const PET_MS = 6000;
+/** 點了只轉頭看你：看多久 */
+const GLANCE_MS = 2600;
 const STRETCH_MS = 3400;
 const DRINK_MS = 5500;
 /** 往南（點了轉過來面向你） */
@@ -185,11 +190,30 @@ export class Dog {
     return { at: [s.from[0] + (s.to[0] - s.from[0]) * u, s.from[1] + (s.to[1] - s.from[1]) * u], seg: s, e };
   }
 
-  /** 點了：轉過來面向你（往南）坐下；已經坐著就再多坐一下 */
-  pet(now = performance.now()): void {
+  /** 點了只轉頭看你：什麼時候開始、看多久（不記起來） */
+  glance: { start: number; ms: number } | null = null;
+
+  /** 轉頭看你看到哪（0 沒有～1 頭轉過來了；頭尾 0.35 秒慢慢轉） */
+  glancing(now = performance.now()): number {
+    const g = this.glance;
+    if (!g) return 0;
+    const t = now - g.start;
+    if (t >= g.ms || t < 0) {
+      this.glance = null;
+      return 0;
+    }
+    return smooth(Math.max(0, Math.min(1, t / 350, (g.ms - t) / 350)));
+  }
+
+  /** 點了：有時候（照個性）只轉頭看你、繼續做原本的事，其他時候轉過來面向你（往南）坐下；已經坐著就再多坐一下 */
+  pet(now = performance.now(), rand: () => number = Math.random): void {
     const d = this.now(now);
     if (d.seg.pet && d.e < d.seg.ms - 600) {
       this.set({ ...d.seg, ms: d.e + PET_MS });
+      return;
+    }
+    if (rand() < this.nature.glance) {
+      this.glance = { start: now, ms: GLANCE_MS };
       return;
     }
     this.set({ ...d.seg, do: 'sit', from: d.at, to: d.at, start: now, ms: PET_MS, dir0: d.seg.dir, dir: SOUTH, pet: true, tail0: tailNow(d.seg, d.e), tail: 0, goal: undefined, back: undefined, via: undefined });
@@ -426,8 +450,17 @@ const pathOf = (attr: string): DogPath => {
 /** 點得到的範圍（至少 DOG_HIT 像素半徑） */
 const DOG_HIT = 16;
 
-/** 狗在畫面上這一格：在哪（像素）、面向哪（扣掉指北針轉的角度）、點得到的範圍、3D 的狗 */
-function frame(dog: Dog, d: { seg: DogSeg; e: number }, p: DogPath, heading: number): { x: number; y: number; hit: [number, number, number]; svg: string } {
+/**
+ * 轉頭看你：頭要往左轉幾度（dog.ts 的 look）才看向畫面下方（你在的地方）；yaw 是牠在畫面上面向哪邊（順時針、0 是往上、180 是朝你），
+ * 脖子最多轉 80 度（背對你就從肩膀回頭看）
+ */
+export function lookAtViewer(yaw: number): number {
+  const rel = ((((180 - yaw) % 360) + 540) % 360) - 180;
+  return Math.max(-80, Math.min(80, -rel)) || 0;
+}
+
+/** 狗在畫面上這一格：在哪（像素）、面向哪（扣掉指北針轉的角度）、點得到的範圍、3D 的狗（點了轉頭看你的話頭轉過來、抬起來） */
+function frame(dog: Dog, d: { seg: DogSeg; e: number }, p: DogPath, heading: number, now = performance.now()): { x: number; y: number; hit: [number, number, number]; svg: string } {
   const s = d.seg;
   const u = s.do === 'walk' || s.do === 'run' ? Math.max(0, Math.min(1, d.e / s.ms)) : 0;
   const [x, y] = [p.ax + (p.bx - p.ax) * u, p.ay + (p.by - p.ay) * u];
@@ -435,7 +468,10 @@ function frame(dog: Dog, d: { seg: DogSeg; e: number }, p: DogPath, heading: num
   const turn = ((((p.b1 - p.b0) % 360) + 540) % 360) - 180;
   const yaw = p.b0 + turn * t - heading;
   const h = dogHeight(dog.look) * p.k;
-  return { x, y, hit: [x, y - h * 0.5, Math.max(DOG_HIT, h * 0.7)], svg: dogSvg(dog.look, dogPose(s, d.e), yaw, p.k) };
+  let pose = dogPose(s, d.e);
+  const g = dog.glancing(now);
+  if (g > 0) pose = { ...pose, look: pose.look * (1 - g) + lookAtViewer(yaw) * g, nod: pose.nod * (1 - g) - 6 * g, blink: g > 0.9 ? 0 : pose.blink };
+  return { x, y, hit: [x, y - h * 0.5, Math.max(DOG_HIT, h * 0.7)], svg: dogSvg(dog.look, pose, yaw, p.k) };
 }
 
 /**
@@ -513,7 +549,7 @@ function tick(now: number): void {
       stale = true;
       continue;
     }
-    const f = frame(dog, d, p, heading);
+    const f = frame(dog, d, p, heading, now);
     const n = (v: number): string => v.toFixed(1);
     if (heading) el.setAttribute('transform', `rotate(${heading.toFixed(1)} ${n(f.x)} ${n(f.y)})`);
     else el.removeAttribute('transform');
