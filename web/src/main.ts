@@ -1418,6 +1418,9 @@ function render(): void {
   );
   map.setBottles(bottleViews.map((v) => ({ id: v.b.id, lat: v.b.lat, lng: v.b.lng, state: v.state, mine: v.b.mine, picked: v.b.picked })));
   updateBottleBadge(bottleViews);
+  // 全螢幕鋪滿時你的 GPS 位置（像 Google 地圖的藍點）：拖曳、設定位置移開了也畫在 GPS 的地方
+  const fix = origin.source === 'gps' ? { at: origin, acc: gpsAccuracy } : lastGps ? { at: lastGps, acc: lastGpsAccuracy } : null;
+  radar.setYou(fix ? { bearing: bearingDeg(origin, fix.at), distanceKm: haversineKm(origin, fix.at), accuracyKm: fix.acc ? fix.acc / 1000 : null } : null);
   radar.setLandmarks(
     (mod.current ? LANDMARKS : []).map((lm) => ({ id: lm.id, label: lm.name, bearing: bearingDeg(origin, lm), distanceKm: haversineKm(origin, lm), selected: lm.id === selectedLandmark })),
   );
@@ -3217,7 +3220,9 @@ function locateMe(): void {
       locateBtn.textContent = '定位';
       lsSet(LS_ORIGIN, null);
       gpsAccuracy = pos.coords.accuracy;
-      setOrigin({ lat: pos.coords.latitude, lng: pos.coords.longitude, source: 'gps' });
+      lastGps = { lat: pos.coords.latitude, lng: pos.coords.longitude, source: 'gps' };
+      lastGpsAccuracy = pos.coords.accuracy;
+      setOrigin(lastGps);
       map.setOrigin(origin, true, gpsAccuracy);
       showBanner(bannerEl, `已定位，誤差約 ${Math.round(pos.coords.accuracy)} 公尺`, 2000);
     },

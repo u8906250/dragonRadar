@@ -75,6 +75,20 @@ const BOTTLE_PATH = 'M-1.8 -8 h3.6 v3 l2.4 3 v8.2 a1.6 1.6 0 0 1 -1.6 1.6 h-5.2 
 /** 遠的瓶子模糊成這麼大一團（公里），讓人只知道大概的方向和距離 */
 const BOTTLE_FOG_KM = 0.15;
 
+/** 全螢幕鋪滿時你的 GPS 位置（像 Google 地圖的藍點）：手動移動了位置時不在正中間；accuracyKm 是 GPS 誤差 */
+export interface RadarYou {
+  bearing: number;
+  distanceKm: number;
+  accuracyKm: number | null;
+}
+
+/** 點兩下放大：兩下的間隔、相距多少內才算，放大的動畫多久 */
+const DOUBLE_TAP_MS = 300;
+const DOUBLE_TAP_PX = 30;
+const TAP_ZOOM_MS = 250;
+/** 點在這些東西上是點它（選光點、飛到星球…），不算點兩下放大 */
+const TAP_TARGETS = '.blip, .landmark, .bottle, .dog-hit, .rocket-hit, .park-statue, .space-hit, [role="button"]';
+
 export interface RadarStyle {
   sweep: SweepStyle;
   blip: BlipStyle;
@@ -84,6 +98,11 @@ export interface RadarStyle {
 const SIZE = 400;
 const C = SIZE / 2;
 const R = 172;
+/** 定位點多大（螢幕像素，跟 Google 地圖一樣不管螢幕多大都一樣大）：白邊、藍點、方向光束多長；光束張多開（度） */
+const YOU_RING_PX = 9;
+const YOU_DOT_PX = 6;
+const YOU_BEAM_PX = 42;
+const YOU_BEAM_DEG = 32;
 /** 雷達的大小（space.ts 畫太空用）：inner 是光點最遠擺到哪 */
 export const RADAR_GEOM = { size: SIZE, c: C, r: R, inner: R - 8 };
 /**
@@ -331,6 +350,11 @@ export class Radar {
   private panning = false;
   /** 剛拖完：放開時瀏覽器還會送一個 click，不要當成點光點 */
   private justPanned = false;
+  /** 點兩下放大的動畫（requestAnimationFrame 的編號） */
+  private tapZoom = 0;
+  private you: RadarYou | null = null;
+  private youKey = '';
+  private readonly youLayer: SVGGElement;
   private heading = 0;
   private items: RadarItem[] = [];
   private style: RadarStyle = { sweep: 'wedge', blip: 'dot', rose: false };
@@ -402,6 +426,10 @@ export class Radar {
       <defs>
         <clipPath id="rg-clip"><circle cx="${C}" cy="${C}" r="${R}" /></clipPath>
         <filter id="rg-fog" x="-100%" y="-100%" width="300%" height="300%"><feGaussianBlur stdDeviation="5" /></filter>
+        <radialGradient id="rg-you-beam" gradientUnits="userSpaceOnUse" cx="0" cy="0" r="${YOU_BEAM_PX}">
+          <stop offset="0" class="you-beam-stop-1" />
+          <stop offset="1" class="you-beam-stop-2" />
+        </radialGradient>
       </defs>
       <g class="grid">
         <g class="rings"></g>
@@ -417,6 +445,7 @@ export class Radar {
       <g class="routes" clip-path="url(#rg-clip)"></g>
       <g class="bottles"></g>
       <circle class="me" cx="${C}" cy="${C}" r="5" />
+      <g class="you"></g>
       <g class="blips"></g>
       <!-- 地標（星星）放在光點上面，疊在一起時也點得到 -->
       <g class="landmarks"></g>
@@ -434,6 +463,7 @@ export class Radar {
     this.parkLayer = this.svg.querySelector('.park') as SVGGElement;
     this.tripLayer = this.svg.querySelector('.trip') as SVGGElement;
     this.landmarkLayer = this.svg.querySelector('.landmarks') as SVGGElement;
+    this.youLayer = this.svg.querySelector('.you') as SVGGElement;
     this.bottleLayer = this.svg.querySelector('.bottles') as SVGGElement;
     this.bottleLayer.addEventListener('click', (e) => {
       const g = (e.target as Element).closest('.bottle') as SVGGElement | null;
@@ -687,6 +717,22 @@ export class Radar {
     };
     // 網頁版用滑鼠拖曳時不要選到雷達上的字（公里數），選到之後瀏覽器會改成拖那段字，雷達就拖不動
     svg.addEventListener('dragstart', (e) => e.preventDefault());
+    // 點兩下放大（像 Google 地圖；手機、滑鼠都可以）：這次按下的時間、有沒有用到兩根手指，上一次短短點一下在哪
+    let downAt = 0;
+    let multi = false;
+    let lastTap: { t: number; x: number; y: number } | null = null;
+    const tap = (e: PointerEvent): void => {
+      if ((e.target as Element).closest(TAP_TARGETS)) {
+        lastTap = null;
+        return;
+      }
+      const prev = lastTap;
+      lastTap = { t: e.timeStamp, x: e.clientX, y: e.clientY };
+      if (prev && e.timeStamp - prev.t < DOUBLE_TAP_MS && Math.hypot(e.clientX - prev.x, e.clientY - prev.y) < DOUBLE_TAP_PX) {
+        lastTap = null;
+        this.zoomInStep(onZoom);
+      }
+    };
     svg.addEventListener('pointerdown', (e) => {
       if (e.pointerType === 'mouse' && e.button !== 0) return;
       if (e.pointerType === 'mouse') e.preventDefault();
@@ -694,11 +740,14 @@ export class Radar {
       if (this.pointers.size === 1) {
         this.panStart = { x: e.clientX, y: e.clientY };
         this.panLast = this.panStart;
+        downAt = e.timeStamp;
+        multi = false;
       }
       if (this.pointers.size === 2) {
         // 拖到一半放第二根手指：改成縮放
         this.endPan();
         this.pinchDist = dist();
+        multi = true;
       }
     });
     svg.addEventListener('pointermove', (e) => {
@@ -715,12 +764,15 @@ export class Radar {
     });
     const end = (e: PointerEvent): void => {
       if (!this.pointers.delete(e.pointerId)) return;
+      // 短短點一下（沒拖、沒捏合）
+      const tapped = e.type === 'pointerup' && this.pointers.size === 0 && !this.panning && !multi && e.timeStamp - downAt < DOUBLE_TAP_MS;
       if (this.pointers.size === 0) this.endPan();
       if (this.pointers.size === 1 && this.pinchDist > 0) onZoom(1, true);
       if (this.pointers.size < 2) this.pinchDist = 0;
       // 縮放完剩一根手指：不接著拖
       this.panStart = null;
       this.panLast = null;
+      if (tapped) tap(e);
     };
     // 剛拖完放開時的 click 不要選到光點、瓶子
     svg.addEventListener(
@@ -748,6 +800,32 @@ export class Radar {
       },
       { passive: false },
     );
+  }
+
+  /** 點兩下放大：範圍縮成一半（以正中間為準，跟捏合、滾輪一樣），0.25 秒慢慢拉近；減少動態效果時直接跳過去 */
+  private zoomInStep(onZoom: (factor: number, done: boolean) => void): void {
+    if (this.tapZoom) return;
+    const total = Math.log(0.5);
+    if (this.calm?.matches) {
+      onZoom(0.5, false);
+      onZoom(1, true);
+      return;
+    }
+    const t0 = performance.now();
+    let done = 0;
+    const step = (now: number): void => {
+      const k = Math.min(1, (now - t0) / TAP_ZOOM_MS);
+      const eased = 1 - (1 - k) ** 3;
+      onZoom(Math.exp(total * (eased - done)), false);
+      done = eased;
+      if (k < 1) {
+        this.tapZoom = requestAnimationFrame(step);
+        return;
+      }
+      this.tapZoom = 0;
+      onZoom(1, true);
+    };
+    this.tapZoom = requestAnimationFrame(step);
   }
 
   /** 單指拖曳：移動超過 8 像素才開始；畫面上往哪拖，內容就往哪移，中心（你的位置）往反方向 */
@@ -1285,6 +1363,48 @@ export class Radar {
     }
   }
 
+  /** 你的 GPS 位置（全螢幕鋪滿時才畫）；null 是不知道（還沒定位、定位被拒） */
+  setYou(you: RadarYou | null): void {
+    const key = JSON.stringify(you);
+    if (key === this.youKey) return;
+    this.youKey = key;
+    this.you = you;
+    this.drawYou();
+  }
+
+  /**
+   * 全螢幕鋪滿時（正中間的點拿掉了）像 Google 地圖一樣畫你的位置：白邊的藍點、淡藍的誤差圈，
+   * 開了指北針再加一道朝手機方向的光（雷達跟著轉，所以一直朝上）。拖曳、設定位置移開了就跟著地圖走，畫面外不畫；太空裡不畫
+   */
+  private drawYou(): void {
+    this.youLayer.replaceChildren();
+    const you = this.you;
+    if (!you || !this.fill || this.inSpace) return;
+    const angle = you.bearing - this.heading;
+    const r = this.ratio(you.distanceKm) * (R - 8);
+    if (r > this.edgeR(angle, -10)) return;
+    const p = r > 0 ? polar(angle, r) : { x: C, y: C };
+    // 點、光束照螢幕像素畫（一個 SVG 單位是幾像素：短邊 = SIZE），裡面的形狀用 scale 縮回來
+    const px = this.squarePx > 0 ? this.squarePx / SIZE : 1;
+    const g = el('g', { transform: `translate(${p.x.toFixed(1)} ${p.y.toFixed(1)}) scale(${(1 / px).toFixed(4)})` });
+    // 誤差圈（像素）比白邊還小就不畫
+    const acc = you.accuracyKm ? (you.accuracyKm / this.scaleKm) * (R - 8) * px : 0;
+    if (acc > YOU_RING_PX + 1) g.appendChild(el('circle', { class: 'you-accuracy', r: acc.toFixed(1) }));
+    if (this.svg.classList.contains('heading-live')) {
+      const a = polar(-YOU_BEAM_DEG, YOU_BEAM_PX);
+      const b = polar(YOU_BEAM_DEG, YOU_BEAM_PX);
+      const [ax, ay, bx, by] = [a.x - C, a.y - C, b.x - C, b.y - C].map((v) => v.toFixed(1));
+      // 光束從點往外越來越淡（漸層的圓心在點上，照這一層的像素座標）
+      g.appendChild(el('path', { class: 'you-beam', fill: 'url(#rg-you-beam)', d: `M 0 0 L ${ax} ${ay} A ${YOU_BEAM_PX} ${YOU_BEAM_PX} 0 0 1 ${bx} ${by} Z` }));
+    }
+    g.appendChild(el('circle', { class: 'you-ring', r: YOU_RING_PX }));
+    g.appendChild(el('circle', { class: 'you-dot', r: YOU_DOT_PX }));
+    const title = el('title');
+    title.textContent = '你的位置';
+    g.appendChild(title);
+    this.youLayer.appendChild(g);
+  }
+
   private pathOf(points: Array<{ bearing: number; distanceKm: number }>, close = false): string {
     const d = points
       .map((pt, i) => {
@@ -1649,6 +1769,7 @@ export class Radar {
     this.drawScaleBar();
     this.drawBottles();
     this.drawLandmarks();
+    this.drawYou();
     this.blipLayer.replaceChildren();
     const pos = new Map<number, { x: number; y: number; out: boolean; angle: number; r: number }>();
     // 太空：地球另一面的不畫；地球太小時都擠在一起，不畫

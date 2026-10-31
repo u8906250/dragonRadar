@@ -246,8 +246,14 @@ a.chip { display: inline-flex; align-items: center; text-decoration: none; }
 .radar-stack.fill > .radar-relief { clip-path: none; }
 /* 鋪滿時只留地圖和光點：距離圈、刻度、掃描線、方位字、中間的點不畫（看比例尺；指北針轉的時候北在哪看右上角的小指北針） */
 .radar-stack.fill .radar .grid, .radar-stack.fill .radar .scale-labels, .radar-stack.fill .radar .rose, .radar-stack.fill .radar-sweep-box { display: none; }
-/* 中間代表你的那個點也不畫 */
+/* 中間代表你的那個點也不畫，改成像 Google 地圖的藍點（radar.ts 的 drawYou：GPS 位置，手動移開了就跟著地圖走） */
 .radar-stack.fill .radar .me { display: none; }
+.radar .you { pointer-events: none; }
+.radar .you-accuracy { fill: #1a73e8; fill-opacity: 0.14; stroke: #1a73e8; stroke-opacity: 0.4; stroke-width: 1; }
+.radar .you-beam-stop-1 { stop-color: #1a73e8; stop-opacity: 0.55; }
+.radar .you-beam-stop-2 { stop-color: #1a73e8; stop-opacity: 0; }
+.radar .you-ring { fill: #ffffff; filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.4)); }
+.radar .you-dot { fill: #1a73e8; }
 /* 小指北針：右上角按鈕下面，圓圓的、跟按鈕一樣的底，紅色那頭指北 */
 .mini-compass {
   position: absolute; z-index: 20; right: 10px; top: calc(104px + env(safe-area-inset-top)); width: 40px; height: 40px; border-radius: 50%; pointer-events: none;
