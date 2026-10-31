@@ -1,4 +1,5 @@
 import type * as Leaflet from 'leaflet';
+import { flowOut, RAINBOW_FLOW_TOTAL, RAINBOW_STAGGER_MS } from './flow';
 import type { LatLng } from './geo';
 import type { EventKind, Phase } from './types';
 import { LANDMARKS } from './landmarks';
@@ -35,6 +36,8 @@ export interface MapRoute {
   source?: 'official' | 'report';
   /** 畫成彩虹（同志遊行）：每一段是一條路線（from 是名稱、to 是經過的路） */
   rainbow?: boolean;
+  /** 彩虹從出發的地方流出：開始流的時間（Date.now() 的毫秒）；沒有是不流 */
+  flowAt?: number;
   segments: Array<{ seq: number; from: string; to: string; path: Array<[number, number]>; people: number; target: number; passed?: boolean }>;
   /** 車掃進行中：照各站預計時間推算的車子位置（不是實際位置），note 是點了顯示的說明 */
   car?: { lat: number; lng: number; note: string };
@@ -481,7 +484,7 @@ export class MapView {
 
   setRoutes(routes: MapRoute[]): void {
     const sig = (rs: MapRoute[]): string =>
-      JSON.stringify(rs.map((r) => [r.id, r.state, r.segments.map((x) => [x.people, x.target, x.path.length, !!x.passed]), r.car ? [r.car.lat.toFixed(5), r.car.lng.toFixed(5), r.car.note] : null]));
+      JSON.stringify(rs.map((r) => [r.id, r.state, r.flowAt ?? null, r.segments.map((x) => [x.people, x.target, x.path.length, !!x.passed]), r.car ? [r.car.lat.toFixed(5), r.car.lng.toFixed(5), r.car.note] : null]));
     if (sig(routes) === sig(this.routes)) return;
     this.routes = routes;
     this.pushRoutes();
@@ -512,12 +515,16 @@ export class MapView {
         layer.addLayer(car);
       }
       if (r.rainbow) {
-        // 遊行：六條由粗到細疊成彩虹（紅在最外、紫在中間），還沒出發的淡一點；點了看是哪一條路線
+        // 遊行：六條由粗到細疊成彩虹（紅在最外、紫在中間），還沒出發的淡一點；點了看是哪一條路線。
+        // 剛出發時每一條路線同時從出發的地方流到終點（重畫時接著流）
+        const ago = r.flowAt !== undefined ? Date.now() - r.flowAt : Infinity;
         for (const seg of r.segments) {
           RAINBOW.forEach((color, i) => {
             const line = L.polyline(seg.path, { color, weight: 13 - i * 2, opacity: r.state === 'planned' ? 0.55 : 0.9, lineCap: 'round', lineJoin: 'round' });
             line.bindPopup(`<strong>${escapeHtml(r.title)}・${escapeHtml(seg.from)}</strong><br>${escapeHtml(seg.to)}<br>主辦單位公布的路線，以現場為準`, { closeButton: false });
             layer.addLayer(line);
+            const path = line.getElement();
+            if (ago < RAINBOW_FLOW_TOTAL && path instanceof SVGPathElement) flowOut(path, ago - i * RAINBOW_STAGGER_MS);
           });
         }
         continue;

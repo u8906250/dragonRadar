@@ -1180,6 +1180,20 @@ const reportedStop = (ev: EventOut): RouteStop | undefined => {
 };
 /** 遊行（同志遊行）：彩虹路線，從同一個地方出發再回來，沒有車子 */
 const isParade = (r: RouteOut): boolean => r.style === 'rainbow';
+
+/** 遊行開始流出彩虹的時間（Date.now() 的毫秒），雷達、地圖各記各的 */
+const rainbowFlowAt = { radar: new Map<string, number>(), map: new Map<string, number>() };
+const calmMotion = window.matchMedia?.('(prefers-reduced-motion: reduce)');
+/**
+ * 遊行出發了（還沒抵達）：第一次在雷達、地圖上看到它（那個畫面開著、網頁在前景）就從出發的地方流出彩虹，各流一次；
+ * 出發時網頁開著就是出發那一刻（每 5 秒重算一次），出發後才打開的是一打開就流。減少動態效果時不流
+ */
+function rainbowFlow(r: RouteOut, now: number, where: 'radar' | 'map'): number | undefined {
+  if (routeState(r, now) !== 'live' || calmMotion?.matches) return undefined;
+  const seen = rainbowFlowAt[where];
+  if (!seen.has(r.id) && view === where && !document.hidden) seen.set(r.id, Date.now());
+  return seen.get(r.id);
+}
 const stopLabel = (r: RouteOut, kind: RouteStop['kind']): string => ({ start: '出發', cheer: isReported(r) ? '應援點' : '加油點', end: isParade(r) ? '回到' : '抵達' })[kind];
 /** 車掃的起點、終點像賽車一樣插旗；遊行插彩虹旗 */
 const STOP_FLAG: Partial<Record<RouteStop['kind'], string>> = { start: '🚩', end: '🏁' };
@@ -1397,12 +1411,16 @@ function render(): void {
       // 回報的車掃：寫還有多久經過（不是前 10 分鐘的開始）
       ...(isUpcoming(it) ? { badge: startsInShort(reportedStop(it.ev)?.at ?? it.ev.startAt, now), ...(it.phase === 'later' ? { fade: clarityOf(it.ev, now) } : {}) } : {}),
     })),
-    drawnRoutes(timed, now, focused).map((r) => ({
-      id: r.id,
-      state: routeState(r, now),
-      ...(isParade(r) ? { rainbow: true } : {}),
-      points: r.segments.flatMap((sg) => sg.path).map(([lat, lng]) => ({ bearing: bearingDeg(origin, { lat, lng }), distanceKm: haversineKm(origin, { lat, lng }) })),
-    })),
+    drawnRoutes(timed, now, focused).map((r) => {
+      const toRadar = ([lat, lng]: [number, number]): { bearing: number; distanceKm: number } => ({ bearing: bearingDeg(origin, { lat, lng }), distanceKm: haversineKm(origin, { lat, lng }) });
+      return {
+        id: r.id,
+        state: routeState(r, now),
+        // 遊行：北、南兩條路線分開畫（同時從出發的地方流出彩虹）
+        ...(isParade(r) ? { rainbow: true, parts: r.segments.map((sg) => sg.path.map(toRadar)), flowAt: rainbowFlow(r, now, 'radar') } : {}),
+        points: r.segments.flatMap((sg) => sg.path).map(toRadar),
+      };
+    }),
   );
   // 車掃進行中：車子畫在推算的位置（點了打開時間表）
   const cars = drawnRoutes(timed, now, focused).flatMap((r) => {
@@ -1437,7 +1455,7 @@ function render(): void {
       state: routeState(r, now),
       claimUrl: r.claimUrl,
       source: r.source,
-      ...(isParade(r) ? { rainbow: true } : {}),
+      ...(isParade(r) ? { rainbow: true, flowAt: rainbowFlow(r, now, 'map') } : {}),
       // 回報的車掃：已經經過的那段畫淡
       segments: r.segments.map((sg) => ({ ...sg, passed: !!sg.toAt && sg.toAt <= now })),
       ...((): { car?: { lat: number; lng: number; note: string } } => {
@@ -3072,6 +3090,8 @@ function switchView(v: 'radar' | 'map'): void {
   const kmPerPx = map.kmPerPx();
   const px = radar.rangePx();
   if (v === 'radar' && from === 'map' && kmPerPx && px > 0) zoomRadar((kmPerPx * px) / scaleKm, true);
+  // 切到地圖：遊行進行中第一次在地圖上看到就流出彩虹（不用等下一次每 5 秒的重算）
+  if (v === 'map') render();
 }
 
 /** 要抓多遠的：範圍超過 600 km 就抓全世界 */

@@ -1,4 +1,5 @@
 import type { BlipStyle, EventKind, Phase, SweepStyle } from './types';
+import { flowOut, RAINBOW_FLOW_TOTAL, RAINBOW_STAGGER_MS } from './flow';
 
 export interface RadarItem {
   id: number;
@@ -33,6 +34,10 @@ export interface RadarRoute {
   /** 畫成彩虹（同志遊行） */
   rainbow?: boolean;
   points: Array<{ bearing: number; distanceKm: number }>;
+  /** 分開畫的幾段（遊行的北、南兩條路線同時走，各自從出發流到終點）；沒有就整條 points 一段 */
+  parts?: Array<Array<{ bearing: number; distanceKm: number }>>;
+  /** 彩虹從出發的地方流出：開始流的時間（Date.now() 的毫秒）；沒有是不流 */
+  flowAt?: number;
 }
 
 /** 放大時畫的街道：每條線是 [往東 km, 往北 km, 往東 km, …]（相對於圓心）；major 大路、minor 其他街道 */
@@ -1452,11 +1457,16 @@ export class Radar {
       // 太空：有一段在地球另一面就不畫（直線會穿過地球）
       if (this.inSpace && r.points.some((pt) => pt.distanceKm > HORIZON_KM)) continue;
       const d = this.pathOf(r.points);
-      // 彩虹：六條由粗到細疊起來（紅在最外、紫在中間）
+      // 彩虹：六條由粗到細疊起來（紅在最外、紫在中間）；遊行剛出發時從出發的地方流到終點（每一段同時流，重畫時接著流）
       if (r.rainbow) {
-        const g = el('g', { class: `route-rainbow route-${r.state}` });
-        for (let i = 0; i < 6; i++) g.appendChild(el('path', { class: `rainbow-${i}`, d }));
-        this.routeLayer.appendChild(g);
+        const ago = r.flowAt !== undefined ? Date.now() - r.flowAt : Infinity;
+        for (const part of r.parts ?? [r.points]) {
+          const g = el('g', { class: `route-rainbow route-${r.state}` });
+          const pd = r.parts ? this.pathOf(part) : d;
+          for (let i = 0; i < 6; i++) g.appendChild(el('path', { class: `rainbow-${i}`, d: pd }));
+          this.routeLayer.appendChild(g);
+          if (ago < RAINBOW_FLOW_TOTAL) [...g.children].forEach((p, i) => flowOut(p as SVGPathElement, ago - i * RAINBOW_STAGGER_MS));
+        }
         continue;
       }
       const path = el('path', { class: `route route-${r.state}`, d });
