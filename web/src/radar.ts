@@ -722,7 +722,9 @@ export class Radar {
     let multi = false;
     let lastTap: { t: number; x: number; y: number } | null = null;
     const tap = (e: PointerEvent): void => {
-      if ((e.target as Element).closest(TAP_TARGETS)) {
+      const hit = (e.target as Element).closest(TAP_TARGETS) as SVGElement | null;
+      // 點在正中間那顆星球上（例如在汪星上）：點了也不會飛到哪，算點在空白的地方
+      if (hit && !(hit.matches('.space-hit') && this.isFocus(hit.dataset.body ?? ''))) {
         lastTap = null;
         return;
       }
@@ -1155,10 +1157,15 @@ export class Radar {
     return { x: m.e, y: m.f, k: Math.hypot(m.a, m.b) };
   }
 
+  /** 這顆星球就是中心（點了 focusOn 不會變） */
+  private isFocus(key: string): boolean {
+    return (key === 'earth' && this.youOn === 'earth' ? null : key) === this.spaceView.focus;
+  }
+
   /** 點了星球：飛過去當中心（你在地球時點地球就回到你），視角維持 */
   private focusOn(key: string): void {
+    if (this.isFocus(key)) return;
     const focus = key === 'earth' && this.youOn === 'earth' ? null : key;
-    if (focus === this.spaceView.focus) return;
     this.spaceView = { ...this.spaceView, focus };
     this.setScale(this.scaleKm);
     this.onSpaceMove?.();

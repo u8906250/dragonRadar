@@ -427,6 +427,8 @@ const categoryToggles = Array.from(document.querySelectorAll<HTMLButtonElement>(
 const activeToggle = $<HTMLButtonElement>('#active-toggle');
 const onlyGroup = $('#only-group');
 const timeChips = Array.from(document.querySelectorAll<HTMLButtonElement>('#time-chips [data-time]'));
+const timeChipsEl = $('#time-chips');
+const timeToggle = $('#time-toggle') as HTMLButtonElement;
 const baseChipsEl = $('#base-chips');
 const baseChips = Array.from(document.querySelectorAll<HTMLButtonElement>('#base-chips [data-base]'));
 let baseMap: BaseMap = (BASES as string[]).includes(lsGet(LS_BASE) ?? '') ? (lsGet(LS_BASE) as BaseMap) : 'nlsc';
@@ -3181,8 +3183,20 @@ function setTime(setting: TimeSetting): void {
     const on = b.dataset.time === setting;
     b.classList.toggle('on', on);
     b.setAttribute('aria-checked', String(on));
+    if (on) timeToggle.lastElementChild!.textContent = b.textContent;
   }
+  // 選了「全部」以外的（有篩掉東西）：收起來的那顆亮著提醒
+  timeToggle.classList.toggle('on', setting !== 'all');
+  timeToggle.setAttribute('aria-label', `時間範圍：${timeToggle.textContent ?? ''}，點了選別的`);
+  setTimeOpen(false);
   render();
+}
+
+/** 時間範圍平常收起來（不太會用到）：只顯示現在選的那顆，點了展開五個，選好、點其他地方就收起來 */
+function setTimeOpen(open: boolean): void {
+  timeChipsEl.hidden = !open;
+  timeToggle.hidden = open;
+  timeToggle.setAttribute('aria-expanded', String(open));
 }
 
 function setScale(setting: ScaleSetting): void {
@@ -4851,6 +4865,13 @@ function wireControls(): void {
     });
   }
   for (const b of timeChips) b.addEventListener('click', () => setTime((b.dataset.time as TimeSetting) ?? 'all'));
+  timeToggle.addEventListener('click', () => {
+    setTimeOpen(true);
+    timeChips.find((b) => b.classList.contains('on'))?.focus();
+  });
+  document.addEventListener('pointerdown', (e) => {
+    if (!timeChipsEl.hidden && !(e.target instanceof Element && e.target.closest('#time-chips'))) setTimeOpen(false);
+  }, true);
   reportSheet.querySelector('[data-act="close"]')?.addEventListener('click', () => openReportSheet(false));
   myReportsMore.addEventListener('click', () => {
     myReportsExpanded = !myReportsExpanded;

@@ -188,11 +188,15 @@ a.chip { display: inline-flex; align-items: center; text-decoration: none; }
 .chips { display: flex; gap: 6px; }
 #scale-chips .chip { padding: 8px 11px; }
 /* 時間範圍：跟距離範圍同一組，小一點、疊在距離上面 */
-#time-chips .chip { min-height: 30px; padding: 4px 10px; font-size: 13px; }
+#time-chips .chip, #time-toggle { min-height: 30px; padding: 4px 10px; font-size: 13px; }
+/* 時間範圍平常收起來：只有一顆「🕒 全部」，選了別的時間（有篩掉東西）亮起來提醒 */
+#time-toggle { display: inline-flex; align-items: center; gap: 4px; }
+#time-toggle[hidden], #time-chips[hidden] { display: none; }
+#time-toggle svg { width: 15px; height: 15px; flex: 0 0 auto; fill: none; stroke: currentColor; stroke-width: 2.2; stroke-linecap: round; stroke-linejoin: round; }
 /* 範圍有 6 個（多了「全球」）：手機上縮小一點才放得下一排；再窄的手機換到第二排，不要撐寬整頁 */
 #scale-chips { flex-wrap: wrap; }
 @media (max-width: 440px) { #scale-chips { gap: 4px; } #scale-chips .chip { padding: 8px 8px; font-size: 13px; } }
-@media (max-width: 380px) { #scale-chips, #time-chips { gap: 4px; } #scale-chips .chip { padding: 8px 6px; font-size: 12px; } #time-chips .chip { padding: 4px 8px; font-size: 12px; } }
+@media (max-width: 380px) { #scale-chips, #time-chips { gap: 4px; } #scale-chips .chip { padding: 8px 6px; font-size: 12px; } #time-chips .chip, #time-toggle { padding: 4px 8px; font-size: 12px; } }
 .link-btn { font: inherit; font-size: 13px; border: 0; background: transparent; color: var(--accent); padding: 4px; text-decoration: underline; cursor: pointer; }
 
 #stage { position: relative; min-height: 0; padding: 8px 12px; display: grid; grid-template-rows: minmax(0, 1fr) auto; }

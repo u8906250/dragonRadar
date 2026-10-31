@@ -51,7 +51,9 @@
             <button type="button" class="chip" data-base="nlsc" role="radio" aria-checked="false" title="內政部國土測繪中心 台灣通用電子地圖">台灣電子地圖</button>
             <button type="button" class="chip" data-base="osm" role="radio" aria-checked="false">OSM</button>
           </div>
-          <div class="chips" id="time-chips" role="radiogroup" aria-label="時間範圍">
+          <!-- 時間範圍平常收起來（不太會用到）：只顯示現在選的，點了展開，選好再收起來 -->
+          <button type="button" id="time-toggle" class="chip" aria-expanded="false" aria-controls="time-chips" title="時間範圍"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8.5"/><path d="M12 7.5V12l3 2"/></svg><span>全部</span></button>
+          <div class="chips" id="time-chips" role="radiogroup" aria-label="時間範圍" hidden>
             <button type="button" class="chip" data-time="now" role="radio" aria-checked="false" title="只看現在進行中、開放中的">現在</button>
             <button type="button" class="chip" data-time="3h" role="radio" aria-checked="false" title="3 小時內開始的">3 小時</button>
             <button type="button" class="chip" data-time="24h" role="radio" aria-checked="false" title="24 小時內開始的">24 小時</button>
