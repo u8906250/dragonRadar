@@ -1,4 +1,5 @@
 import './styles.css';
+import { RAINBOW_EVERY_MS } from './flow';
 import { addKeyword, collectLetter, deletePushSubscription, locateFeedbackPlace, sendFeedback, type FeedbackKind, fetchPushKey, savePushSubscription, confirmReport, editReport, locatePlace, rejectReport, supplementReport, deleteBottle, dropBottle, recycleBottle, fetchBottles, fetchEvents, fetchHealth, fetchKeywords, fetchMyBottles, fetchMyReports, fetchRoutes, pickBottle, reportBottle, reportEnded, submitLink, withdrawReport } from './api';
 import { compassSupported, startCompass } from './compass';
 import { bearingDeg, compassLabel, destination, formatKm, haversineKm, taiwanRadiusKm, type LatLng } from './geo';
@@ -1185,13 +1186,15 @@ const isParade = (r: RouteOut): boolean => r.style === 'rainbow';
 const rainbowFlowAt = { radar: new Map<string, number>(), map: new Map<string, number>() };
 const calmMotion = window.matchMedia?.('(prefers-reduced-motion: reduce)');
 /**
- * 遊行出發了（還沒抵達）：第一次在雷達、地圖上看到它（那個畫面開著、網頁在前景）就從出發的地方流出彩虹，各流一次；
+ * 遊行出發了（還沒抵達）：在雷達、地圖上看到它（那個畫面開著、網頁在前景）就從出發的地方流出彩虹，之後每隔約一分鐘再流一次
+ * （RAINBOW_EVERY_MS，雷達、地圖各算各的；從別的畫面切過來、回到網頁時已經超過一分鐘就馬上流）。
  * 出發時網頁開著就是出發那一刻（每 5 秒重算一次），出發後才打開的是一打開就流。減少動態效果時不流
  */
 function rainbowFlow(r: RouteOut, now: number, where: 'radar' | 'map'): number | undefined {
   if (routeState(r, now) !== 'live' || calmMotion?.matches) return undefined;
   const seen = rainbowFlowAt[where];
-  if (!seen.has(r.id) && view === where && !document.hidden) seen.set(r.id, Date.now());
+  const last = seen.get(r.id);
+  if ((last === undefined || Date.now() - last >= RAINBOW_EVERY_MS) && view === where && !document.hidden) seen.set(r.id, Date.now());
   return seen.get(r.id);
 }
 const stopLabel = (r: RouteOut, kind: RouteStop['kind']): string => ({ start: '出發', cheer: isReported(r) ? '應援點' : '加油點', end: isParade(r) ? '回到' : '抵達' })[kind];
