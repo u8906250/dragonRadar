@@ -833,7 +833,7 @@ async function planActivities(env: Env, post: PostRow, extracted: ExtractedEvent
   const fixes = await manualFixesOf(env, post.id);
   // 車掃的站：照貼文一行一站的清單補上模型漏掉的、改正套錯的地名
   const events = reconcileRouteStops(extracted, text);
-  for (const [group, ex] of events.entries()) {
+  for (const ex of events) {
     // 國外的：時間換成當地時區的時間點；台灣的貼文沒寫哪天、補充寫了，用補充的日期（模型有時會忽略補充）
     if (ex.country) localizeTimes(ex);
     else {
@@ -841,6 +841,10 @@ async function planActivities(env: Env, post: PostRow, extracted: ExtractedEvent
       // 「今天14:45前我都在」：從現在到 14:45（不然 14:45 會被當成開始、再往後排）
       startNowForDeadline(ex, text, now);
     }
+  }
+  // 整則都沒寫幾點開始：從發文的時間開始
+  startAtPostTime(events, text, post.posted_at);
+  for (const [group, ex] of events.entries()) {
     // 只寫「本店」沒寫店名：當成沒寫地點（記下原本寫的，回報結果講「只寫了本店」）
     const rawPlace = ex.place_text ?? ex.place_query;
     const selfPlace = dropSelfPlace(ex) ? rawPlace : null;
@@ -874,6 +878,37 @@ async function planActivities(env: Env, post: PostRow, extracted: ExtractedEvent
     items.push({ group, ...r, ...(fail ? { fail } : {}), ...manual });
   }
   return markRoutes(items, text, routeTitle, now);
+}
+
+/**
+ * 沒寫幾點開始的就從發文的時間開始（沒寫結束照樣排兩小時）。只在整則貼文的每一場都沒寫幾點開始時套用
+ * （只寫日期的算沒寫幾點，但只有發文當天的日期才套用，寫了以後哪天的還是要回報的人補時間）；
+ * 有的場寫了時間、有的沒寫的不猜；車掃、掃街、車隊（每一站要有預計經過的時間）不套用；
+ * 寫了結束、發文時已經結束的不套用（照樣說缺開始時間）。回傳套用了幾場
+ */
+export function startAtPostTime(events: ExtractedEvent[], text: string, postedAt: number): number {
+  if (ROUTE_RE.test(text) || events.length === 0) return 0;
+  const info = events.map((ex) => {
+    const start = parseIsoToUnix(ex.start_at);
+    const tz = ex.country ? timeZoneOf(ex) : null;
+    return { start, tz, dateOnly: start !== null && guessedMidnight(start, tz, text) };
+  });
+  if (info.some((x) => x.start !== null && !x.dateOnly)) return 0;
+  let n = 0;
+  events.forEach((ex, i) => {
+    const { start, tz, dateOnly } = info[i];
+    if (dateOnly && start !== null && localDate(start, tz) !== localDate(postedAt, tz)) return;
+    const end = parseIsoToUnix(ex.end_at);
+    if (end !== null && end <= postedAt) return;
+    ex.start_at = new Date(postedAt * 1000).toISOString();
+    n++;
+  });
+  return n;
+}
+
+/** 這個時間點在當地（台灣，或國外活動的時區）是哪一天「2026-10-31」 */
+function localDate(unix: number, tz: string | null): string {
+  return new Intl.DateTimeFormat('en-CA', { timeZone: tz ?? 'Asia/Taipei', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date(unix * 1000));
 }
 
 /** 地點查不到的那一場的時間（回報的人修改資料時不用重填） */

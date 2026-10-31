@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { cleanTopic, guessedMidnight, missingActivityParts, normalizeActivities, reconcileRouteStops, routeStopLines, type ExtractedEvent } from '../src/extract';
-import { applyManualFixes, atLocalTimes, markRoutes, profilePlanBetter, sortStops, stopNameOf, withoutStop, type ManualFix, type PlanItem } from '../src/events';
+import { applyManualFixes, atLocalTimes, markRoutes, startAtPostTime, profilePlanBetter, sortStops, stopNameOf, withoutStop, type ManualFix, type PlanItem } from '../src/events';
 import { parseIsoToUnix } from '../src/util';
 import type { Env } from '../src/env';
 import { editItemsOf, editSummary, notListedWhy, parseEditItems, ReportError, reportModules, routePreviews } from '../src/reports';
@@ -484,5 +484,38 @@ describe('sortStops', () => {
     const st = (title: string, at: number | null) => ({ kind: 'cheer' as const, title, at });
     expect(sortStops([st('A', 100), st('B', 400), st('C', 300)]).map((s) => `${s.title}:${s.kind}`)).toEqual(['A:start', 'C:cheer', 'B:end']);
     expect(sortStops([st('A', null), st('B', 100)]).map((s) => s.title)).toEqual(['B', 'A']);
+  });
+});
+
+describe('startAtPostTime', () => {
+  // 2026-10-31 15:20（台北）發文
+  const POSTED = Date.UTC(2026, 9, 31, 7, 20) / 1000;
+  const iso = (t: number): string => new Date(t * 1000).toISOString();
+  const ev = (start: string | null, end: string | null = null): ExtractedEvent => ({
+    kind: 'activity', title: '市集', item: null, start_at: start, end_at: end, place_text: '華山', place_query: '台北市 華山1914', confidence: 0.9, spot: false, until: null,
+  });
+  it('starts at the post time when the post gives no start time at all', () => {
+    const list = [ev(null), ev(null, '2026-10-31T18:00:00+08:00')];
+    expect(startAtPostTime(list, '華山、松菸都有市集，歡迎來逛', POSTED)).toBe(2);
+    expect(list.map((e) => e.start_at)).toEqual([iso(POSTED), iso(POSTED)]);
+    // 結束照寫的（沒寫結束的之後照樣排兩小時）
+    expect(list[1].end_at).toBe('2026-10-31T18:00:00+08:00');
+  });
+  it('treats a date-only start (00:00) as no time, but only on the posting day', () => {
+    const today = [ev('2026-10-31T00:00:00+08:00')];
+    expect(startAtPostTime(today, '今天在華山有市集', POSTED)).toBe(1);
+    expect(today[0].start_at).toBe(iso(POSTED));
+    const later = [ev('2026-11-02T00:00:00+08:00')];
+    expect(startAtPostTime(later, '11/2 在華山有市集', POSTED)).toBe(0);
+    expect(later[0].start_at).toBe('2026-11-02T00:00:00+08:00');
+  });
+  it('does not guess when some events have times, for routes, or when it already ended', () => {
+    const mixed = [ev('2026-10-31T14:00:00+08:00'), ev(null)];
+    expect(startAtPostTime(mixed, '14:00 在華山，松菸也有', POSTED)).toBe(0);
+    expect(mixed[1].start_at).toBeNull();
+    expect(startAtPostTime([ev(null)], '今天下午車掃，經過華山', POSTED)).toBe(0);
+    const over = [ev(null, '2026-10-31T15:00:00+08:00')];
+    expect(startAtPostTime(over, '市集到 15:00', POSTED)).toBe(0);
+    expect(over[0].start_at).toBeNull();
   });
 });
