@@ -444,8 +444,6 @@ const radar = new Radar(
   (id) => selectBottle(id),
   (bearing, km, done) => panRadar(bearing, km, done),
 );
-// 點了車掃的車子：打開那條車掃的時間表
-radar.onCar = (id) => selectRoute(id);
 // 點了中山公園的銅像（地球或汪星）：發射口打開、升起火箭、關上，火箭停在那邊；點火箭問要不要飛到另一邊（rocketTrip）
 // （火箭記得在哪一邊；不在這一邊、已經出來了就沒有反應）
 // 火箭停在草皮上時再點銅像：收回井裡
@@ -1179,7 +1177,7 @@ const reportedStop = (ev: EventOut): RouteStop | undefined => {
   const r = routeOf(ev);
   return r && isReported(r) ? stopOf(ev) : undefined;
 };
-/** 遊行（同志遊行）：彩虹路線，從同一個地方出發再回來，沒有車子 */
+/** 遊行（同志遊行）：彩虹路線，從同一個地方出發再回來 */
 const isParade = (r: RouteOut): boolean => r.style === 'rainbow';
 /** 洋流車掃：台北大洋流官方的車掃（不是遊行、不是回報的），進行中畫洋流的特效 */
 const isOceanRoute = (r: RouteOut): boolean => !isParade(r) && r.source !== 'report';
@@ -1213,52 +1211,6 @@ const flagOf = (ev: EventOut): string | undefined => {
 const stopLabelHtml = (r: RouteOut, kind: RouteStop['kind']): string => `${stopFlag(r, kind) ? `${stopFlag(r, kind)} ` : ''}${stopLabel(r, kind)}`;
 /** 遊行的每一條路線：「北路線 3.6 km」 */
 const paradeWays = (r: RouteOut): string => r.segments.map((s) => `${s.from} ${(s.lengthM / 1000).toFixed(1)} km`).join('、');
-
-/**
- * 車掃進行中，車隊大概在哪（不是實際位置）：照各站的預計時間，在前後兩站之間按時間比例推算（直線）。
- * 官方的車掃有實際路徑：照出發、抵達的時間等速沿著路線走（各站的預計時間也是這樣推算的），不會走直線穿過房子。
- * 還沒到第一站的時間在起點，過了最後一站在終點；沒有確切位置的站跳過
- */
-function carOf(r: RouteOut, now: number): { lat: number; lng: number; from: RouteStop; to: RouteStop | null } | null {
-  // 遊行從同一個地方出發再回來，隊伍很長，不推算位置
-  if (isParade(r) || routeState(r, now) !== 'live') return null;
-  const pts = r.stops.filter((s): s is RouteStop & { lat: number; lng: number; at: number } => s.lat !== null && s.lng !== null && s.at !== null);
-  if (pts.length === 0) return null;
-  const along = isOceanRoute(r) && r.departAt && r.arriveAt && r.arriveAt > r.departAt ? alongPath(r, (now - r.departAt) / (r.arriveAt - r.departAt)) : null;
-  if (now <= pts[0].at) return { ...(along ?? { lat: pts[0].lat, lng: pts[0].lng }), from: pts[0], to: pts[1] ?? null };
-  for (let i = 0; i + 1 < pts.length; i++) {
-    const a = pts[i];
-    const b = pts[i + 1];
-    if (now < b.at) {
-      const t = b.at > a.at ? (now - a.at) / (b.at - a.at) : 1;
-      return { ...(along ?? { lat: a.lat + (b.lat - a.lat) * t, lng: a.lng + (b.lng - a.lng) * t }), from: a, to: b };
-    }
-  }
-  const last = pts[pts.length - 1];
-  return { ...(along ?? { lat: last.lat, lng: last.lng }), from: last, to: null };
-}
-
-/** 整條路線（各路段接起來）走了 frac（0～1）的地方；路段沒有路徑是 null */
-function alongPath(r: RouteOut, frac: number): LatLng | null {
-  const pts = r.segments.flatMap((sg) => sg.path).map(([lat, lng]) => ({ lat, lng }));
-  if (pts.length < 2) return null;
-  const legs = pts.slice(1).map((p, i) => haversineKm(pts[i], p));
-  const total = legs.reduce((a, b) => a + b, 0);
-  if (!(total > 0)) return null;
-  let left = Math.max(0, Math.min(1, frac)) * total;
-  for (let i = 0; i < legs.length; i++) {
-    if (left <= legs[i] || i === legs.length - 1) {
-      const t = legs[i] > 0 ? Math.min(1, left / legs[i]) : 1;
-      return { lat: pts[i].lat + (pts[i + 1].lat - pts[i].lat) * t, lng: pts[i].lng + (pts[i + 1].lng - pts[i].lng) * t };
-    }
-    left -= legs[i];
-  }
-  return null;
-}
-/** 車子位置的說明：一定要講不是實際位置 */
-const carNote = (car: NonNullable<ReturnType<typeof carOf>>): string =>
-  car.to ? `車隊預估在「${car.from.name}」到「${car.to.name}」之間` : `車隊預估已到「${car.from.name}」`;
-const CAR_DISCLAIMER = '照各站的預計時間推算，不是實際位置';
 
 function routeState(r: RouteOut, now: number): RadarRoute['state'] {
   if (!r.departAt || now < r.departAt) return 'planned';
@@ -1449,12 +1401,6 @@ function render(): void {
       };
     }),
   );
-  // 車掃進行中：車子畫在推算的位置（點了打開時間表）
-  const cars = drawnRoutes(timed, now, focused).flatMap((r) => {
-    const car = carOf(r, now);
-    return car ? [{ r, car }] : [];
-  });
-  radar.setCars(cars.map(({ r, car }) => ({ id: r.id, bearing: bearingDeg(origin, car), distanceKm: haversineKm(origin, car), title: `${r.title}：${carNote(car)}（${CAR_DISCLAIMER}）` })));
   // 撿走的瓶子不畫（伺服器也不會回傳，這裡再擋一次）
   const bottleViews = bottles.filter((b) => !b.picked).map((b) => ({ b, distanceKm: haversineKm(origin, b), bearing: bearingDeg(origin, b), state: bottleState(b) }));
   const hint = nearestHint(bottleViews);
@@ -1486,10 +1432,6 @@ function render(): void {
       ...(isOceanRoute(r) ? { ocean: true, flowAt: rainbowFlow(r, now, 'map') } : {}),
       // 回報的車掃：已經經過的那段畫淡
       segments: r.segments.map((sg) => ({ ...sg, passed: !!sg.toAt && sg.toAt <= now })),
-      ...((): { car?: { lat: number; lng: number; note: string } } => {
-        const car = carOf(r, now);
-        return car ? { car: { lat: car.lat, lng: car.lng, note: `${carNote(car)}<br>${CAR_DISCLAIMER}` } } : {};
-      })(),
     })),
   );
   map.render(
@@ -1737,7 +1679,6 @@ function renderRouteDetail(r: RouteOut, items: Item[], now: number): void {
   const planned = routeState(r, now) === 'planned';
   // 回報的車掃：標出離你最近、還沒經過的那一站
   const nearestStop = isReported(r) ? [...mine].filter((x) => x.ev.endAt > now).sort((a, b) => a.distanceKm - b.distanceKm)[0] : undefined;
-  const car = carOf(r, now);
   const people = r.segments.reduce((n, s) => n + s.people, 0);
   const target = r.segments.reduce((n, s) => n + s.target, 0);
   const needy = [...r.segments].filter((sg) => crowdOf(sg.people, sg.target) === 'empty' || crowdOf(sg.people, sg.target) === 'low').length;
@@ -1775,7 +1716,6 @@ function renderRouteDetail(r: RouteOut, items: Item[], now: number): void {
             ? `<p>${esc(routeTimeLine(r, items, now))}<br><span class="muted">${r.departAt ? `${dateFmt.format(new Date(r.departAt * 1000))}・` : ''}共 ${r.stops.length} 站</span></p>`
             : `<p>${esc(routeTimeLine(r, items, now))}<br><span class="muted">全長 ${routeKm(r).toFixed(1)} km・沿線認領 ${people.toLocaleString()} / 目標 ${target.toLocaleString()} 人${needy > 0 ? `・還有 ${needy} 段缺人` : ''}（${fmtTime(r.updatedAt)} 更新）</span></p>`
       }
-      ${car ? `<p class="route-car">🚗 ${esc(carNote(car))}<br><small class="muted">${CAR_DISCLAIMER}；雷達和地圖上的車子畫在這個位置</small></p>` : ''}
       <ol class="route-stops">${rows}</ol>
       ${planned ? `<p class="muted sheet-note">還沒出發：平常雷達和地圖上只顯示起點，點開這個${isParade(r) ? '遊行' : '車掃'}時才畫出整條路線，出發後一直顯示。</p>` : ''}
       <p class="muted sheet-note">${

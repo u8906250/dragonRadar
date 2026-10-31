@@ -41,8 +41,6 @@ export interface MapRoute {
   /** 彩虹從出發的地方流出、洋流湧過去：開始的時間（Date.now() 的毫秒）；沒有是不流 */
   flowAt?: number;
   segments: Array<{ seq: number; from: string; to: string; path: Array<[number, number]>; people: number; target: number; passed?: boolean }>;
-  /** 車掃進行中：照各站預計時間推算的車子位置（不是實際位置），note 是點了顯示的說明 */
-  car?: { lat: number; lng: number; note: string };
 }
 
 /** 彩虹旗的六個顏色（紅、橙、黃、綠、藍、紫） */
@@ -486,7 +484,7 @@ export class MapView {
 
   setRoutes(routes: MapRoute[]): void {
     const sig = (rs: MapRoute[]): string =>
-      JSON.stringify(rs.map((r) => [r.id, r.state, r.flowAt ?? null, r.segments.map((x) => [x.people, x.target, x.path.length, !!x.passed]), r.car ? [r.car.lat.toFixed(5), r.car.lng.toFixed(5), r.car.note] : null]));
+      JSON.stringify(rs.map((r) => [r.id, r.state, r.flowAt ?? null, r.segments.map((x) => [x.people, x.target, x.path.length, !!x.passed])]));
     if (sig(routes) === sig(this.routes)) return;
     this.routes = routes;
     this.pushRoutes();
@@ -510,12 +508,6 @@ export class MapView {
     layer.clearLayers();
     for (const r of this.routes) {
       if (r.state === 'done') continue;
-      if (r.car) {
-        const icon = L.divIcon({ className: 'map-car', html: '<span>🚗</span><small>預估位置</small>', iconSize: [56, 40], iconAnchor: [28, 14] });
-        const car = L.marker([r.car.lat, r.car.lng], { icon, keyboard: false, zIndexOffset: 800, title: '車隊預估位置（不是實際位置）' });
-        car.bindPopup(`<strong>${escapeHtml(r.title)}</strong><br>${r.car.note}`, { closeButton: false });
-        layer.addLayer(car);
-      }
       if (r.rainbow) {
         // 遊行：六條由粗到細疊成彩虹（紅在最外、紫在中間），還沒出發的淡一點；點了看是哪一條路線。
         // 剛出發時每一條路線同時從出發的地方流到終點（重畫時接著流）

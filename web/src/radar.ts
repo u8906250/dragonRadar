@@ -48,15 +48,6 @@ export interface RadarStreets {
   minor: Float64Array[];
 }
 
-/** 車掃進行中的車子：照各站預計時間推算的位置（不是實際位置） */
-export interface RadarCar {
-  id: string;
-  bearing: number;
-  distanceKm: number;
-  /** 滑鼠移上去、讀螢幕的說明（要講是推算的） */
-  title: string;
-}
-
 /** 固定的地標（例如洋流總部），畫成星星 */
 export interface RadarLandmark {
   id: string;
@@ -310,11 +301,6 @@ export class Radar {
   private parkDraw: ((scaleKm: number) => string) | null = null;
   private readonly parkLayer: SVGGElement;
   private landmarks: RadarLandmark[] = [];
-  private cars: RadarCar[] = [];
-  private carsKey = '';
-  private readonly carLayer: SVGGElement;
-  /** 點了車子：打開那條車掃的時間表 */
-  onCar: ((routeId: string) => void) | null = null;
   /** 你在哪一顆（搭火箭到汪星就在汪星）：在汪星時點地球只是看過去（跟別的星球一樣），不會回到你在地球的位置 */
   youOn: 'earth' | 'woof' = 'earth';
   /** 點了中山公園的銅像、停著的火箭（地球或汪星，拉近到畫出來時才點得到）：哪個世界的 */
@@ -432,7 +418,6 @@ export class Radar {
       <g class="bottles"></g>
       <circle class="me" cx="${C}" cy="${C}" r="5" />
       <g class="blips"></g>
-      <g class="cars"></g>
       <!-- 地標（星星）放在光點上面，疊在一起時也點得到 -->
       <g class="landmarks"></g>
       <g class="trip"></g>
@@ -449,11 +434,6 @@ export class Radar {
     this.parkLayer = this.svg.querySelector('.park') as SVGGElement;
     this.tripLayer = this.svg.querySelector('.trip') as SVGGElement;
     this.landmarkLayer = this.svg.querySelector('.landmarks') as SVGGElement;
-    this.carLayer = this.svg.querySelector('.cars') as SVGGElement;
-    this.carLayer.addEventListener('click', (e) => {
-      const g = (e.target as Element).closest('.car') as SVGGElement | null;
-      if (g?.dataset.id) this.onCar?.(g.dataset.id);
-    });
     this.bottleLayer = this.svg.querySelector('.bottles') as SVGGElement;
     this.bottleLayer.addEventListener('click', (e) => {
       const g = (e.target as Element).closest('.bottle') as SVGGElement | null;
@@ -1181,38 +1161,6 @@ export class Radar {
     this.draw();
   }
 
-  /** 車掃進行中的車子：位置每 5 秒跟著時間變，只重畫車子這一層（不重畫整個雷達） */
-  setCars(list: RadarCar[]): void {
-    const key = JSON.stringify(list);
-    if (key === this.carsKey) return;
-    this.carsKey = key;
-    this.cars = list;
-    this.drawCars();
-  }
-
-  private drawCars(): void {
-    this.carLayer.replaceChildren();
-    for (const c of this.cars) {
-      const ratio = this.ratio(c.distanceKm);
-      if (ratio * (R - 8) > this.edgeR(c.bearing - this.heading) || this.earthHidden) continue;
-      const p = polar(c.bearing - this.heading, ratio * (R - 8));
-      const g = el('g', { class: 'car', transform: `translate(${p.x.toFixed(1)} ${p.y.toFixed(1)})`, tabindex: 0, role: 'button' });
-      g.dataset.id = c.id;
-      g.appendChild(el('circle', { class: 'hit', r: 16 }));
-      const icon = el('text', { class: 'car-icon' });
-      icon.textContent = '🚗';
-      g.appendChild(icon);
-      // 一定要讓人知道這不是實際位置
-      const note = el('text', { class: 'car-note', y: 17 });
-      note.textContent = '預估位置';
-      g.appendChild(note);
-      const title = el('title');
-      title.textContent = c.title;
-      g.appendChild(title);
-      this.carLayer.appendChild(g);
-    }
-  }
-
   /** 放大時的街道；null 不畫 */
   setStreets(s: RadarStreets | null): void {
     this.streets = s;
@@ -1701,7 +1649,6 @@ export class Radar {
     this.drawScaleBar();
     this.drawBottles();
     this.drawLandmarks();
-    this.drawCars();
     this.blipLayer.replaceChildren();
     const pos = new Map<number, { x: number; y: number; out: boolean; angle: number; r: number }>();
     // 太空：地球另一面的不畫；地球太小時都擠在一起，不畫
