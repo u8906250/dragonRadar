@@ -1215,7 +1215,8 @@ const stopLabelHtml = (r: RouteOut, kind: RouteStop['kind']): string => `${stopF
 const paradeWays = (r: RouteOut): string => r.segments.map((s) => `${s.from} ${(s.lengthM / 1000).toFixed(1)} km`).join('、');
 
 /**
- * 車掃進行中，車隊大概在哪：照各站的預計時間，在前後兩站之間按時間比例推算（直線），不是實際位置。
+ * 車掃進行中，車隊大概在哪（不是實際位置）：照各站的預計時間，在前後兩站之間按時間比例推算（直線）。
+ * 官方的車掃有實際路徑：照出發、抵達的時間等速沿著路線走（各站的預計時間也是這樣推算的），不會走直線穿過房子。
  * 還沒到第一站的時間在起點，過了最後一站在終點；沒有確切位置的站跳過
  */
 function carOf(r: RouteOut, now: number): { lat: number; lng: number; from: RouteStop; to: RouteStop | null } | null {
@@ -1223,17 +1224,36 @@ function carOf(r: RouteOut, now: number): { lat: number; lng: number; from: Rout
   if (isParade(r) || routeState(r, now) !== 'live') return null;
   const pts = r.stops.filter((s): s is RouteStop & { lat: number; lng: number; at: number } => s.lat !== null && s.lng !== null && s.at !== null);
   if (pts.length === 0) return null;
-  if (now <= pts[0].at) return { lat: pts[0].lat, lng: pts[0].lng, from: pts[0], to: pts[1] ?? null };
+  const along = isOceanRoute(r) && r.departAt && r.arriveAt && r.arriveAt > r.departAt ? alongPath(r, (now - r.departAt) / (r.arriveAt - r.departAt)) : null;
+  if (now <= pts[0].at) return { ...(along ?? { lat: pts[0].lat, lng: pts[0].lng }), from: pts[0], to: pts[1] ?? null };
   for (let i = 0; i + 1 < pts.length; i++) {
     const a = pts[i];
     const b = pts[i + 1];
     if (now < b.at) {
       const t = b.at > a.at ? (now - a.at) / (b.at - a.at) : 1;
-      return { lat: a.lat + (b.lat - a.lat) * t, lng: a.lng + (b.lng - a.lng) * t, from: a, to: b };
+      return { ...(along ?? { lat: a.lat + (b.lat - a.lat) * t, lng: a.lng + (b.lng - a.lng) * t }), from: a, to: b };
     }
   }
   const last = pts[pts.length - 1];
-  return { lat: last.lat, lng: last.lng, from: last, to: null };
+  return { ...(along ?? { lat: last.lat, lng: last.lng }), from: last, to: null };
+}
+
+/** 整條路線（各路段接起來）走了 frac（0～1）的地方；路段沒有路徑是 null */
+function alongPath(r: RouteOut, frac: number): LatLng | null {
+  const pts = r.segments.flatMap((sg) => sg.path).map(([lat, lng]) => ({ lat, lng }));
+  if (pts.length < 2) return null;
+  const legs = pts.slice(1).map((p, i) => haversineKm(pts[i], p));
+  const total = legs.reduce((a, b) => a + b, 0);
+  if (!(total > 0)) return null;
+  let left = Math.max(0, Math.min(1, frac)) * total;
+  for (let i = 0; i < legs.length; i++) {
+    if (left <= legs[i] || i === legs.length - 1) {
+      const t = legs[i] > 0 ? Math.min(1, left / legs[i]) : 1;
+      return { lat: pts[i].lat + (pts[i + 1].lat - pts[i].lat) * t, lng: pts[i].lng + (pts[i + 1].lng - pts[i].lng) * t };
+    }
+    left -= legs[i];
+  }
+  return null;
 }
 /** 車子位置的說明：一定要講不是實際位置 */
 const carNote = (car: NonNullable<ReturnType<typeof carOf>>): string =>

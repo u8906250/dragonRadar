@@ -76,8 +76,9 @@ interface RawSegment {
   target?: number;
 }
 
-export async function fetchCurrentMap(): Promise<CurrentMapRoute | null> {
-  const page = await fetch(CURRENT_MAP_URL, { headers: { 'user-agent': UA, accept: 'text/html' } });
+/** url：車掃地圖的哪一頁（首頁是最近的一場；每一場自己的頁面是 /e/2026-11-01-daan-wenshan 這種，可以先抓之後的場次） */
+export async function fetchCurrentMap(url = CURRENT_MAP_URL): Promise<CurrentMapRoute | null> {
+  const page = await fetch(url, { headers: { 'user-agent': UA, accept: 'text/html' } });
   if (!page.ok) throw new Error(`current-map HTTP ${page.status}`);
   const info = parseMapPage(await page.text());
   if (!info) return null;
