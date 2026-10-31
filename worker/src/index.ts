@@ -6,7 +6,7 @@ import { ACTIVITY_SPEC, normalizeExtraction, runModel } from './extract';
 import { geocode } from './geocode';
 import { ingestNews, NEWS_FEEDS } from './sources/news';
 import { listRoutes, syncVoyage, VOYAGE_PAGE } from './sources/voyage';
-import { CURRENT_MAP_URL } from './sources/currentmap';
+import { CURRENT_MAP_URL, type CurrentMapRoute } from './sources/currentmap';
 import { mergeIntoOfficial } from './sources/merge';
 import { apifyTrial } from './sources/apify';
 import { fetchThreadsPost, resolveThreadsLink, shortcodeToUnix } from './sources/link';
@@ -446,11 +446,16 @@ async function handleAdmin(req: Request, env: Env, ctx: ExecutionContext, path: 
     return jsonResponse({ link, postedAt, fetched: await fetchThreadsPost(link.code) });
   }
 
-  // 只同步某一天的官方車掃（不抓新聞、不合併）：{ date: 'YYYY-MM-DD' }
+  // 只同步某一天的官方車掃（不抓新聞、不合併）：{ date: 'YYYY-MM-DD', map? }。
+  // 車掃地圖擋 Cloudflare 的機器（Worker 抓會 403）：管理者可以自己抓好（fetchCurrentMap 的結果）放在 map 帶進來
   if (req.method === 'POST' && path === '/api/admin/voyage') {
-    const body = await readJson<{ date?: string }>(req);
+    const body = await readJson<{ date?: string; map?: CurrentMapRoute }>(req);
     if (!/^\d{4}-\d{2}-\d{2}$/.test(body.date ?? '')) throw new HttpError(400, 'date is required (YYYY-MM-DD)');
-    return jsonResponse(await syncVoyage(env, now, { date: body.date! }));
+    const m = body.map;
+    if (m && !(m.date === body.date && typeof m.slug === 'string' && typeof m.name === 'string' && Array.isArray(m.segments) && m.segments.every((s) => Array.isArray(s.path) && s.path.length >= 2))) {
+      throw new HttpError(400, 'map must be a current-map route of that date');
+    }
+    return jsonResponse(await syncVoyage(env, now, { date: body.date!, map: m ?? null }));
   }
 
   // 立刻同步官方航線與新聞

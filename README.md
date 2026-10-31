@@ -260,7 +260,7 @@ Cloudflare D1 偶爾回「D1_ERROR: internal error」這類暫時性錯誤。`sr
 | POST | `/api/admin/extract` | 只判讀不存檔，可指定 models 比較，`module` 指定用哪個模組的判讀（`dog`、`badminton`） |
 | GET | `/api/admin/feedback?status=open\|resolved` | 問題回報列表（含事件現在的狀態、位置、原文連結） |
 | POST | `/api/admin/feedback/:id` | 標成已處理或改回未處理 `{ status: 'resolved' \| 'open' }` |
-| POST | `/api/admin/voyage` | 只同步某一天的台北大洋流官方車掃 `{ date: 'YYYY-MM-DD' }`（官網航線加車掃地圖的時間、實際路徑、認領人數：出發點、加油點、終點之後的活動放上雷達，路線寫進 `routes`；不抓新聞、不合併。改版中自動抓資料停了，管理者手動放當天的車掃用） |
+| POST | `/api/admin/voyage` | 只同步某一天的台北大洋流官方車掃 `{ date: 'YYYY-MM-DD', map? }`（車掃地圖擋 Cloudflare 的機器、Worker 抓會 403，`map` 可以帶管理者自己抓好的 `fetchCurrentMap` 結果；官網航線加車掃地圖的時間、實際路徑、認領人數：出發點、加油點、終點之後的活動放上雷達，路線寫進 `routes`；不抓新聞、不合併。改版中自動抓資料停了，管理者手動放當天的車掃用） |
 | POST | `/api/admin/feedback/clear` | 清空已處理 `{ upTo }`（管理頁看到的最後標成已處理的時間，之後才標的不清）：改成 `cleared`，管理頁不再列出、不能改回未處理；不刪掉，同一個人重複回報、回報太頻繁照樣擋得住，30 天後照常刪掉 |
 | POST | `/api/admin/feedback/:id/apply` | 套用回報：`{ action: 'title', title }` 直接改標題、`{ action: 'supplement', note }` 補充後重新判讀，`{ action: 'takedown', scope: 'event' \| 'post' }` 從雷達下架，車掃指定了站的 `{ action: 'remove_stop' }` 刪除這一站、`{ action: 'stop_place', place, lat?, lng? }` 改這一站的地點（有 `lat`、`lng` 就用，`place` 當地點名稱；沒有就照 `place` 查）、`{ action: 'stop_time', start }` 改這一站的預計經過時間；不是車掃的 `{ action: 'event_place', place, lat?, lng? }` 改地點、`{ action: 'event_time', start, end? }` 改時間（unix 秒）；手動改的地點、時間重新判讀也保留；完成後標成已處理 |
 | POST | `/api/admin/locate` | 管理頁小地圖查地點 `{ place }`，回 `{ found, lat, lng, name, approxArea }`（也收「緯度, 經度」） |

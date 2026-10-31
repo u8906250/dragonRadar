@@ -94,8 +94,11 @@ export interface VoyageResult {
   errors: string[];
 }
 
-/** only.date：只同步這一天（YYYY-MM-DD）的航線（改版中自動抓資料停了，管理者手動放當天的車掃） */
-export async function syncVoyage(env: Env, now = nowSec(), only?: { date: string }): Promise<VoyageResult> {
+/**
+ * only.date：只同步這一天（YYYY-MM-DD）的航線（改版中自動抓資料停了，管理者手動放當天的車掃）；
+ * only.map：管理者自己抓好的車掃地圖資料（車掃地圖擋 Cloudflare 的機器，Worker 抓會 403），有就不抓
+ */
+export async function syncVoyage(env: Env, now = nowSec(), only?: { date: string; map?: CurrentMapRoute | null }): Promise<VoyageResult> {
   const out: VoyageResult = { stops: 0, updated: 0, events: 0, routes: 0, errors: [] };
   let stops: Stop[] = [];
   let config: VoyageConfig = {};
@@ -104,10 +107,12 @@ export async function syncVoyage(env: Env, now = nowSec(), only?: { date: string
     const [v, c, m] = await Promise.all([
       fetch(VOYAGE_URL, { headers: { 'user-agent': UA, accept: 'application/json' } }),
       fetch(CONFIG_URL, { headers: { 'user-agent': UA, accept: 'application/json' } }),
-      fetchCurrentMap().catch((e) => {
-        out.errors.push(String(e));
-        return null;
-      }),
+      only?.map
+        ? Promise.resolve(only.map)
+        : fetchCurrentMap().catch((e) => {
+            out.errors.push(String(e));
+            return null;
+          }),
     ]);
     if (!v.ok) throw new Error(`voyage HTTP ${v.status}`);
     stops = ((await v.json()) as { stops?: Stop[] }).stops ?? [];
