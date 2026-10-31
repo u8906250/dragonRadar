@@ -1186,8 +1186,8 @@ const isParade = (r: RouteOut): boolean => r.style === 'rainbow';
 const rainbowFlowAt = { radar: new Map<string, number>(), map: new Map<string, number>() };
 const calmMotion = window.matchMedia?.('(prefers-reduced-motion: reduce)');
 /**
- * 遊行出發了（還沒抵達）：在雷達、地圖上看到它（那個畫面開著、網頁在前景）就從出發的地方流出彩虹，之後每隔約一分鐘再流一次
- * （RAINBOW_EVERY_MS，雷達、地圖各算各的；從別的畫面切過來、回到網頁時已經超過一分鐘就馬上流）。
+ * 遊行出發了（還沒抵達）：在雷達、地圖上看到它（那個畫面開著、網頁在前景）就從出發的地方流出彩虹，之後每隔約 30 秒再流一次
+ * （RAINBOW_EVERY_MS，雷達、地圖各算各的；從別的畫面切過來、回到網頁時已經超過 30 秒就馬上流）。
  * 出發時網頁開著就是出發那一刻（每 5 秒重算一次），出發後才打開的是一打開就流。減少動態效果時不流
  */
 function rainbowFlow(r: RouteOut, now: number, where: 'radar' | 'map'): number | undefined {

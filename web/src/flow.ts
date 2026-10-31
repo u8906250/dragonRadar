@@ -6,8 +6,8 @@ export const RAINBOW_FLOW_MS = 4000;
 export const RAINBOW_STAGGER_MS = 120;
 /** 六條都流完要多久 */
 export const RAINBOW_FLOW_TOTAL = RAINBOW_FLOW_MS + 5 * RAINBOW_STAGGER_MS;
-/** 遊行進行中每隔多久再流一次（main.ts 每 5 秒重算一次，實際約 60～65 秒） */
-export const RAINBOW_EVERY_MS = 60_000;
+/** 遊行進行中每隔多久再流一次（main.ts 每 5 秒重算一次，實際約 30～35 秒） */
+export const RAINBOW_EVERY_MS = 30_000;
 
 /**
  * 一條線（SVG path，要已經放進畫面）從頭畫到尾：ago 是這一條已經流了多久（毫秒，負的是還沒輪到它），
