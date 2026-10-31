@@ -446,6 +446,13 @@ async function handleAdmin(req: Request, env: Env, ctx: ExecutionContext, path: 
     return jsonResponse({ link, postedAt, fetched: await fetchThreadsPost(link.code) });
   }
 
+  // 只同步某一天的官方車掃（不抓新聞、不合併）：{ date: 'YYYY-MM-DD' }
+  if (req.method === 'POST' && path === '/api/admin/voyage') {
+    const body = await readJson<{ date?: string }>(req);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(body.date ?? '')) throw new HttpError(400, 'date is required (YYYY-MM-DD)');
+    return jsonResponse(await syncVoyage(env, now, { date: body.date! }));
+  }
+
   // 立刻同步官方航線與新聞
   if (req.method === 'POST' && path === '/api/admin/sources') {
     const voyage = await syncVoyage(env, now);

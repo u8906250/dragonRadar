@@ -270,6 +270,18 @@ a.chip { display: inline-flex; align-items: center; text-decoration: none; }
 .radar .route { fill: none; stroke: var(--accent); stroke-width: 3.5; stroke-linecap: round; stroke-linejoin: round; opacity: 0.7; pointer-events: none; }
 /* 遊行的彩虹路線：六條由粗到細疊起來（紅在最外、紫在中間），還沒出發（點開才畫）淡一點 */
 .radar .route-rainbow path { fill: none; stroke-linecap: round; stroke-linejoin: round; pointer-events: none; }
+/* 洋流車掃進行中（radar.ts、map.ts）：浪花（一顆一顆的點）沿著路線一直往前流；深藍、淺藍的浪平常看不到，湧過去時才出現（flow.ts 的 surge） */
+.radar .route-ocean path { fill: none; stroke-linecap: round; stroke-linejoin: round; pointer-events: none; }
+.radar .route-ocean .ocean-deep { stroke: #0d6ea8; stroke-width: 9; stroke-opacity: 0.45; }
+.radar .route-ocean .ocean-light { stroke: #3fd0e0; stroke-width: 5; stroke-opacity: 0.6; }
+.radar .route-ocean .ocean-current { stroke: #effdff; stroke-width: 2.4; stroke-dasharray: 0.1 9; }
+.ocean-surge { opacity: 0; }
+/* 浪花往前流：一次移一個間隔（雷達 0.1 + 9 個 SVG 單位，地圖 0.1 + 14 像素），接起來看不出跳 */
+.radar .route-ocean .ocean-current { animation: ocean-current-radar 1.2s linear infinite; }
+@keyframes ocean-current-radar { to { stroke-dashoffset: -9.1; } }
+path.ocean-current { animation: ocean-current-map 1.4s linear infinite; }
+@keyframes ocean-current-map { to { stroke-dashoffset: -14.1; } }
+@media (prefers-reduced-motion: reduce) { .radar .route-ocean .ocean-current, path.ocean-current { animation: none; } }
 .radar .route-rainbow { opacity: 0.9; }
 .radar .route-rainbow.route-planned { opacity: 0.55; }
 .radar .route-rainbow .rainbow-0 { stroke: #e40303; stroke-width: 6.6; }

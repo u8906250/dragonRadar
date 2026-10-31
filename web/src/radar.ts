@@ -1,5 +1,5 @@
 import type { BlipStyle, EventKind, Phase, SweepStyle } from './types';
-import { flowOut, RAINBOW_FLOW_TOTAL, RAINBOW_STAGGER_MS } from './flow';
+import { flowOut, RAINBOW_FLOW_TOTAL, RAINBOW_STAGGER_MS, surge, SURGE_TOTAL } from './flow';
 
 export interface RadarItem {
   id: number;
@@ -36,7 +36,9 @@ export interface RadarRoute {
   points: Array<{ bearing: number; distanceKm: number }>;
   /** 分開畫的幾段（遊行的北、南兩條路線同時走，各自從出發流到終點）；沒有就整條 points 一段 */
   parts?: Array<Array<{ bearing: number; distanceKm: number }>>;
-  /** 彩虹從出發的地方流出：開始流的時間（Date.now() 的毫秒）；沒有是不流 */
+  /** 洋流車掃（台北大洋流官方的）：進行中畫洋流的特效（沿著路線一直往前流的浪花，每隔一段時間湧一次） */
+  ocean?: boolean;
+  /** 彩虹從出發的地方流出、洋流湧過去：開始的時間（Date.now() 的毫秒）；沒有是不流 */
   flowAt?: number;
 }
 
@@ -1471,6 +1473,15 @@ export class Radar {
       }
       const path = el('path', { class: `route route-${r.state}`, d });
       this.routeLayer.appendChild(path);
+      // 洋流車掃進行中：浪花沿著路線一直往前流；剛出發、之後每隔一段時間，深藍、淺藍的浪從出發的地方湧到終點再淡掉
+      if (r.ocean && r.state === 'live') {
+        const g = el('g', { class: 'route-ocean' });
+        const waves = [el('path', { class: 'ocean-surge ocean-deep', d }), el('path', { class: 'ocean-surge ocean-light', d })];
+        g.append(...waves, el('path', { class: 'ocean-current', d }));
+        this.routeLayer.appendChild(g);
+        const ago = r.flowAt !== undefined ? Date.now() - r.flowAt : Infinity;
+        if (ago < SURGE_TOTAL) waves.forEach((w, i) => surge(w as SVGPathElement, ago - i * RAINBOW_STAGGER_MS));
+      }
     }
   }
 

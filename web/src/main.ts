@@ -1181,12 +1181,14 @@ const reportedStop = (ev: EventOut): RouteStop | undefined => {
 };
 /** 遊行（同志遊行）：彩虹路線，從同一個地方出發再回來，沒有車子 */
 const isParade = (r: RouteOut): boolean => r.style === 'rainbow';
+/** 洋流車掃：台北大洋流官方的車掃（不是遊行、不是回報的），進行中畫洋流的特效 */
+const isOceanRoute = (r: RouteOut): boolean => !isParade(r) && r.source !== 'report';
 
-/** 遊行開始流出彩虹的時間（Date.now() 的毫秒），雷達、地圖各記各的 */
+/** 遊行開始流出彩虹、洋流車掃湧浪的時間（Date.now() 的毫秒），雷達、地圖各記各的 */
 const rainbowFlowAt = { radar: new Map<string, number>(), map: new Map<string, number>() };
 const calmMotion = window.matchMedia?.('(prefers-reduced-motion: reduce)');
 /**
- * 遊行出發了（還沒抵達）：在雷達、地圖上看到它（那個畫面開著、網頁在前景）就從出發的地方流出彩虹，之後每隔約 30 秒再流一次
+ * 遊行、洋流車掃出發了（還沒抵達）：在雷達、地圖上看到它（那個畫面開著、網頁在前景）就從出發的地方流出彩虹、湧出洋流的浪，之後每隔約 30 秒再流一次
  * （RAINBOW_EVERY_MS，雷達、地圖各算各的；從別的畫面切過來、回到網頁時已經超過 30 秒就馬上流）。
  * 出發時網頁開著就是出發那一刻（每 5 秒重算一次），出發後才打開的是一打開就流。減少動態效果時不流
  */
@@ -1421,6 +1423,8 @@ function render(): void {
         state: routeState(r, now),
         // 遊行：北、南兩條路線分開畫（同時從出發的地方流出彩虹）
         ...(isParade(r) ? { rainbow: true, parts: r.segments.map((sg) => sg.path.map(toRadar)), flowAt: rainbowFlow(r, now, 'radar') } : {}),
+        // 洋流車掃：進行中畫洋流的特效
+        ...(isOceanRoute(r) ? { ocean: true, flowAt: rainbowFlow(r, now, 'radar') } : {}),
         points: r.segments.flatMap((sg) => sg.path).map(toRadar),
       };
     }),
@@ -1459,6 +1463,7 @@ function render(): void {
       claimUrl: r.claimUrl,
       source: r.source,
       ...(isParade(r) ? { rainbow: true, flowAt: rainbowFlow(r, now, 'map') } : {}),
+      ...(isOceanRoute(r) ? { ocean: true, flowAt: rainbowFlow(r, now, 'map') } : {}),
       // 回報的車掃：已經經過的那段畫淡
       segments: r.segments.map((sg) => ({ ...sg, passed: !!sg.toAt && sg.toAt <= now })),
       ...((): { car?: { lat: number; lng: number; note: string } } => {

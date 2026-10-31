@@ -94,7 +94,8 @@ export interface VoyageResult {
   errors: string[];
 }
 
-export async function syncVoyage(env: Env, now = nowSec()): Promise<VoyageResult> {
+/** only.date：只同步這一天（YYYY-MM-DD）的航線（改版中自動抓資料停了，管理者手動放當天的車掃） */
+export async function syncVoyage(env: Env, now = nowSec(), only?: { date: string }): Promise<VoyageResult> {
   const out: VoyageResult = { stops: 0, updated: 0, events: 0, routes: 0, errors: [] };
   let stops: Stop[] = [];
   let config: VoyageConfig = {};
@@ -118,6 +119,7 @@ export async function syncVoyage(env: Env, now = nowSec()): Promise<VoyageResult
   }
 
   for (const stop of stops) {
+    if (only && stop.date !== only.date) continue;
     const day = taipeiMidnight(stop.date);
     if (!stop.id || Number.isNaN(day) || stop.ended || day + DAY <= now || day > now + LOOKAHEAD_DAYS * DAY) continue;
     out.stops++;
@@ -169,7 +171,8 @@ export async function syncVoyage(env: Env, now = nowSec()): Promise<VoyageResult
 
     // 起點：車掃地圖第一段的起點，沒有就用官網路線的第一站
     const firstStep = (stop.route ?? []).find((r): r is string => typeof r === 'string');
-    const startName = map?.segments[0].from.replace(/^起點/, '').trim() || firstStep || '';
+    // 車掃地圖寫「起點：南福宮」「起點 南福宮」
+  const startName = map?.segments[0].from.replace(/^起點\s*[:：]?\s*/, '').trim() || firstStep || '';
     if (startName) {
       let p: { lat: number; lng: number } | null = map ? { lat: map.segments[0].path[0][0], lng: map.segments[0].path[0][1] } : null;
       if (!p) p = await geocodeFirst(env, [`台北市 ${startName}`]);

@@ -1,5 +1,5 @@
 import type * as Leaflet from 'leaflet';
-import { flowOut, RAINBOW_FLOW_TOTAL, RAINBOW_STAGGER_MS } from './flow';
+import { flowOut, RAINBOW_FLOW_TOTAL, RAINBOW_STAGGER_MS, surge, SURGE_TOTAL } from './flow';
 import type { LatLng } from './geo';
 import type { EventKind, Phase } from './types';
 import { LANDMARKS } from './landmarks';
@@ -36,7 +36,9 @@ export interface MapRoute {
   source?: 'official' | 'report';
   /** 畫成彩虹（同志遊行）：每一段是一條路線（from 是名稱、to 是經過的路） */
   rainbow?: boolean;
-  /** 彩虹從出發的地方流出：開始流的時間（Date.now() 的毫秒）；沒有是不流 */
+  /** 洋流車掃（台北大洋流官方的）：進行中畫洋流的特效 */
+  ocean?: boolean;
+  /** 彩虹從出發的地方流出、洋流湧過去：開始的時間（Date.now() 的毫秒）；沒有是不流 */
   flowAt?: number;
   segments: Array<{ seq: number; from: string; to: string; path: Array<[number, number]>; people: number; target: number; passed?: boolean }>;
   /** 車掃進行中：照各站預計時間推算的車子位置（不是實際位置），note 是點了顯示的說明 */
@@ -556,6 +558,22 @@ export class MapView {
         );
         layer.addLayer(line);
         line.bringToBack();
+      }
+      // 洋流車掃進行中：整條路線上浪花一直往前流（疊在認領顏色上面、點不到，點的還是下面的路段）；
+      // 剛出發、之後每隔一段時間，深藍、淺藍的浪從出發的地方湧到終點再淡掉
+      if (r.ocean && r.state === 'live') {
+        const whole = r.segments.flatMap((sg) => sg.path);
+        const ago = r.flowAt !== undefined ? Date.now() - r.flowAt : Infinity;
+        [
+          { color: '#0d6ea8', weight: 18, opacity: 0.45 },
+          { color: '#3fd0e0', weight: 10, opacity: 0.6 },
+        ].forEach((o, i) => {
+          const wave = L.polyline(whole, { ...o, lineCap: 'round', lineJoin: 'round', interactive: false, className: 'ocean-surge' });
+          layer.addLayer(wave);
+          const el = wave.getElement();
+          if (ago < SURGE_TOTAL && el instanceof SVGPathElement) surge(el, ago - i * RAINBOW_STAGGER_MS);
+        });
+        layer.addLayer(L.polyline(whole, { color: '#effdff', weight: 4, opacity: 0.95, dashArray: '0.1 14', lineCap: 'round', interactive: false, className: 'ocean-current' }));
       }
     }
   }
