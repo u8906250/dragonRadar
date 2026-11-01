@@ -89,7 +89,7 @@ export interface RadarYou {
 /** 點兩下放大：兩下的間隔、相距多少內才算，放大的動畫多久 */
 const DOUBLE_TAP_MS = 300;
 const DOUBLE_TAP_PX = 30;
-const TAP_ZOOM_MS = 250;
+const TAP_ZOOM_MS = 500;
 /**
  * 雙指縮放放開時手指還在快速捏合、張開：照當時的速度繼續縮放、慢慢停下（像 Google 地圖，捏越快滑越遠）。
  * 速度是 ln(倍數)／毫秒：量放開前多久的、快過多少才滑、放開前停多久就不滑、減速快慢（總共多滑 速度 × FLING_TAU_MS）、
@@ -949,7 +949,7 @@ export class Radar {
     );
   }
 
-  /** 點兩下放大：範圍縮成一半（以正中間為準，跟捏合、滾輪一樣），0.25 秒慢慢拉近；減少動態效果時直接跳過去 */
+  /** 點兩下放大：範圍縮成一半（以正中間為準，跟捏合、滾輪一樣），0.5 秒慢慢拉近；減少動態效果時直接跳過去 */
   private zoomInStep(onZoom: (factor: number, done: boolean) => void): void {
     if (this.tapZoom) return;
     const total = Math.log(0.5);
