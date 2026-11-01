@@ -101,6 +101,14 @@ const FLING_IDLE_MS = 60;
 const FLING_TAU_MS = 150;
 const FLING_STOP_SPEED = 0.0001;
 const FLING_MAX = Math.log(3);
+/**
+ * 單指拖曳放開時手指還在快速移動：照當時的方向、速度繼續滑、慢慢停下（像 Google 地圖，甩越快滑越遠）。
+ * 速度是螢幕像素／毫秒：量放開前多久的、快過多少才滑、最快算多少（總共最多滑 速度 × PAN_TAU_MS 像素）、減速快慢、慢到多少就停
+ */
+const PAN_FLING_MIN = 0.3;
+const PAN_FLING_MAX = 3.5;
+const PAN_TAU_MS = 250;
+const PAN_STOP_SPEED = 0.02;
 /** 滑鼠滾輪：一格約 0.2 秒滑過去（減速快慢），連續滾會疊上去（最多先疊幾格的量）；停了多久算縮放結束 */
 const WHEEL_TAU_MS = 60;
 const WHEEL_MAX = 1.5;
@@ -375,6 +383,9 @@ export class Radar {
   private panning = false;
   /** 剛拖完：放開時瀏覽器還會送一個 click，不要當成點光點 */
   private justPanned = false;
+  /** 最近 FLING_SAMPLE_MS 拖到哪（螢幕像素），放開時算速度；放開後繼續滑（requestAnimationFrame 的編號） */
+  private panTrail: Array<{ t: number; x: number; y: number }> = [];
+  private panFling = 0;
   /** 點兩下放大的動畫（requestAnimationFrame 的編號） */
   private tapZoom = 0;
   private you: RadarYou | null = null;
@@ -844,7 +855,8 @@ export class Radar {
       if (!this.pointers.delete(e.pointerId)) return;
       // 短短點一下（沒拖、沒捏合）
       const tapped = e.type === 'pointerup' && this.pointers.size === 0 && !this.panning && !multi && e.timeStamp - downAt < DOUBLE_TAP_MS;
-      if (this.pointers.size === 0) this.endPan();
+      // 放開時手指還在快速移動：繼續滑（減少動態效果、用過兩根手指時不滑）
+      if (this.pointers.size === 0) this.endPan(e.type === 'pointerup' && !multi && !this.calm?.matches ? this.panSpeed(e.timeStamp) : null);
       if (this.pointers.size === 1 && this.pinchDist > 0) {
         // 放開第一根手指時還在快速捏合、張開：繼續滑（減少動態效果時不滑）
         const v = e.type === 'pointerup' ? pinchSpeed(e.timeStamp) : 0;
@@ -908,6 +920,7 @@ export class Radar {
       () => {
         stopFling();
         stopWheel();
+        this.stopPanFling();
       },
       true,
     );
@@ -916,6 +929,7 @@ export class Radar {
       (e) => {
         e.preventDefault();
         stopFling();
+        this.stopPanFling();
         // 一格滾輪約 100 像素；有的瀏覽器用「行」「頁」當單位
         const px = e.deltaY * (e.deltaMode === 1 ? 33 : e.deltaMode === 2 ? 800 : 1);
         const step = Math.max(-100, Math.min(100, px)) * 0.003;
@@ -967,6 +981,7 @@ export class Radar {
     if (!this.panning) {
       if (Math.hypot(e.clientX - this.panStart.x, e.clientY - this.panStart.y) < 8) return;
       this.panning = true;
+      this.panTrail = [];
       this.svg.classList.add('panning');
       try {
         this.svg.setPointerCapture(e.pointerId);
@@ -974,12 +989,22 @@ export class Radar {
         /* 有些瀏覽器拿不到 capture，照樣拖 */
       }
     }
+    const [px, py] = [e.clientX - this.panLast.x, e.clientY - this.panLast.y];
+    this.panLast = { x: e.clientX, y: e.clientY };
+    // 留一筆比 FLING_SAMPLE_MS 早的，速度才算得到整段
+    this.panTrail.push({ t: e.timeStamp, x: e.clientX, y: e.clientY });
+    while (this.panTrail.length > 2 && e.timeStamp - this.panTrail[1].t >= FLING_SAMPLE_MS) this.panTrail.shift();
+    this.panBy(px, py);
+  }
+
+  /** 拖了（或放開後滑了）螢幕上 (px, py) 像素：移動你的位置，太空裡轉地球、轉視角 */
+  private panBy(px: number, py: number): void {
+    if (!this.onPan) return;
     const rect = this.svg.getBoundingClientRect();
     // 螢幕像素換成 SVG 座標（viewBox 是正方形，照短邊縮放）
     const unit = SIZE / Math.max(1, Math.min(rect.width, rect.height));
-    const dx = (e.clientX - this.panLast.x) * unit;
-    const dy = (e.clientY - this.panLast.y) * unit;
-    this.panLast = { x: e.clientX, y: e.clientY };
+    const dx = px * unit;
+    const dy = py * unit;
     const r = Math.hypot(dx, dy);
     if (r === 0) return;
     // 地球只剩一個點（太陽系那幾層）或中心換到別的星球：3D 轉視角（左右拖繞中心轉、上下拖傾斜），不動你的位置。
@@ -1004,7 +1029,20 @@ export class Radar {
     this.onPan(((screen + this.heading + 180) % 360 + 360) % 360, km, false);
   }
 
-  private endPan(): void {
+  /** 放開時的速度（螢幕像素／毫秒，太快的照最快算）；慢慢拖、停住再放開是 null */
+  private panSpeed(t: number): { vx: number; vy: number } | null {
+    const first = this.panTrail[0];
+    const last = this.panTrail[this.panTrail.length - 1];
+    if (!first || last === first || t - last.t > FLING_IDLE_MS || t - first.t < 16) return null;
+    const [vx, vy] = [(last.x - first.x) / (t - first.t), (last.y - first.y) / (t - first.t)];
+    const speed = Math.hypot(vx, vy);
+    if (speed < PAN_FLING_MIN) return null;
+    const k = Math.min(1, PAN_FLING_MAX / speed);
+    return { vx: vx * k, vy: vy * k };
+  }
+
+  /** 放開：fling 是放開時的速度，有就繼續滑、停了才算拖完（放開兩根手指之一、慢慢放開都是 null） */
+  private endPan(fling: { vx: number; vy: number } | null = null): void {
     if (!this.panning) return;
     this.panning = false;
     this.svg.classList.remove('panning');
@@ -1012,8 +1050,41 @@ export class Radar {
     window.setTimeout(() => {
       this.justPanned = false;
     }, 80);
+    if (!fling) {
+      this.panDone();
+      return;
+    }
+    let { vx, vy } = fling;
+    let last = performance.now();
+    const step = (now: number): void => {
+      const dt = Math.min(50, Math.max(0, now - last));
+      last = now;
+      const decay = Math.exp(-dt / PAN_TAU_MS);
+      const k = PAN_TAU_MS * (1 - decay);
+      this.panBy(vx * k, vy * k);
+      vx *= decay;
+      vy *= decay;
+      if (Math.hypot(vx, vy) < PAN_STOP_SPEED) {
+        this.panFling = 0;
+        this.panDone();
+        return;
+      }
+      this.panFling = requestAnimationFrame(step);
+    };
+    this.panFling = requestAnimationFrame(step);
+  }
+
+  /** 放開後還在滑：停在這裡（手指碰到畫面、滾滾輪） */
+  private stopPanFling(): void {
+    if (!this.panFling) return;
+    cancelAnimationFrame(this.panFling);
+    this.panFling = 0;
+    this.panDone();
+  }
+
+  /** 拖完（滑完）：外面重抓資料；拖曳時地形圖畫粗一點（快），停了再畫細 */
+  private panDone(): void {
     this.onPan?.(0, 0, true);
-    // 拖曳時地形圖畫粗一點（快），放開再畫細
     this.paintRelief();
   }
 
