@@ -17,6 +17,9 @@ const pond: [number, number] = [25.039066, 121.56026];
 const lake: [number, number] = [25.0384268, 121.5593159];
 const island: [number, number] = [25.0383369, 121.558924];
 const at = (km: number, [lat, lng]: [number, number]): string => earthParkSvg({ lat, lng }, km);
+/** 這個 class 的每一條 path 加起來有幾個 M（幾塊） */
+const countAll = (m: string, cls: string): number =>
+  [...m.matchAll(new RegExp(`class="${cls}"[^>]* d="([^"]*)"`, 'g'))].reduce((n, x) => n + (x[1].match(/M/g) ?? []).length, 0);
 /** 點在不在一圈裡面（射線法） */
 const ringHas = (r: Array<[number, number]>, y: number, x: number): boolean =>
   r.reduce((on, [yi, xi], i) => {
@@ -52,29 +55,31 @@ describe('地球的雷達上的中山公園（跟汪星共用一份）', () => {
     const layers = (m: string): string[] => [...m.matchAll(/class="(park-[^"]*)"/g)].map((x) => x[1]);
     expect(layers(at(1, hall))).toEqual(layers(woof));
     const roof = /^park-(roof|ridge|tile)/;
-    expect(layers(at(1, hall)).filter((x) => !roof.test(x))).toEqual(['park-area', 'park-edge', 'park-lawn', 'park-pond', 'park-green', 'park-water', 'park-rim-edge', 'park-rim', 'park-path street-minor', 'park-flag-base', 'park-bridge-rail', 'park-bridge', 'park-tree', 'park-building']);
-    // 樹：外圈 1 km 每一棵都是一個圓點；拉近（外圈 40 公尺）樹冠有影子、亮的一塊和一叢叢葉子
-    expect(count(at(1, hall), 'park-tree')).toBe(ZHONGSHAN_PARK.trees.length);
-    expect(ZHONGSHAN_PARK.trees.length).toBeGreaterThan(500);
+    expect(layers(at(1, hall)).filter((x) => !roof.test(x))).toEqual(['park-area', 'park-edge', 'park-lawn', 'park-pond', 'park-green', 'park-water', 'park-rim-edge', 'park-rim', 'park-rim-outer', 'park-path street-minor', 'park-flag-base', 'park-bridge-rail', 'park-bridge', 'park-canopy-shade', 'park-canopy', 'park-building']);
+    // 樹冠（照正射影像描的範圍）：一圈圈，幾乎都在公園裡；拉近（外圈 40 公尺）樹冠裡長出一叢叢葉子的記號
+    expect(ZHONGSHAN_PARK.canopy.length).toBeGreaterThan(50);
+    expect(countAll(at(1, hall), 'park-canopy')).toBe(ZHONGSHAN_PARK.canopy.length);
+    const pts = ZHONGSHAN_PARK.canopy.flat();
+    expect(pts.filter(([lat, lng]) => ringHas(ZHONGSHAN_PARK.outline, lat, lng)).length / pts.length).toBeGreaterThan(0.95);
     const grove: [number, number] = [25.0388, 121.5609];
-    expect(layers(at(0.04, grove))).toEqual(expect.arrayContaining(['park-tree-shade', 'park-tree', 'park-tree-lit', 'park-tree-clump']));
-    // 樹都在公園裡、不在建築和水裡（橋接到的小島可以）
-    for (const [lat, lng] of ZHONGSHAN_PARK.trees) {
-      expect(ringHas(ZHONGSHAN_PARK.outline, lat, lng)).toBe(true);
-      expect(ZHONGSHAN_PARK.buildings.some((r) => ringHas(r, lat, lng))).toBe(false);
-    }
+    expect(layers(at(0.04, grove))).toEqual(expect.arrayContaining(['park-canopy-shade', 'park-canopy', 'park-leaf']));
+    // 旗台：旗桿正中間約 6 公尺見方（照正射影像量的）
+    const fb = ZHONGSHAN_PARK.flagBase.map(([lat, lng]) => [(lng - 121.5602) * EARTH.mx(25.0385), (lat - 25.0385) * EARTH.my]);
+    for (let k = 0; k < 4; k++) expect(Math.hypot(fb[(k + 1) % 4][0] - fb[k][0], fb[(k + 1) % 4][1] - fb[k][1])).toBeCloseTo(6, 0);
     // 映池旁邊那一圈可以坐的石頭邊：拉近（外圈 20 公尺）有一塊塊石頭的接縫
     const pool: [number, number] = [25.039066, 121.56026];
     expect(layers(at(0.02, pool))).toEqual(expect.arrayContaining(['park-rim-edge', 'park-rim', 'park-rim-joint']));
     // 翠湖的曲橋：拉近到橋上（外圈 20 公尺）有石板、欄杆柱
     const bridge: [number, number] = [25.0385, 121.55899];
     expect(layers(at(0.02, bridge))).toEqual(expect.arrayContaining(['park-bridge-rail', 'park-bridge', 'park-bridge-slab', 'park-bridge-post']));
-    // 屋頂：每一棟都填色，國父紀念館是黃色琉璃瓦、有屋脊；外圈 1 km 還沒有瓦溝
+    // 屋頂（照正射影像的顏色、樣子）：國父紀念館是黃色琉璃瓦、有屋脊，其他照屋頂的顏色填（同一個顏色合成一條），整棟被樹蓋住的不畫；外圈 1 km 還沒有瓦溝
     const roofs = layers(at(1, hall)).filter((x) => roof.test(x));
-    expect(roofs.filter((x) => /^park-roof( hall)?$/.test(x))).toEqual(['park-roof hall', 'park-roof']);
+    expect(roofs.filter((x) => x === 'park-roof hall')).toHaveLength(1);
+    expect(roofs.filter((x) => x === 'park-roof').length).toBeGreaterThan(5);
     // 國父紀念館中間紅褐色的平頂（照正射影像）
     expect(roofs).toContain('park-roof-flat');
-    expect(count(at(1, hall), 'park-roof')).toBe(ZHONGSHAN_PARK.buildings.length - 1);
+    const under = ZHONGSHAN_PARK.roofStyle.filter(([, st]) => st === 'under').length;
+    expect(countAll(at(1, hall), 'park-roof')).toBe(ZHONGSHAN_PARK.buildings.length - 1 - under);
     expect(roofs).toContain('park-ridge hall');
     expect(roofs.some((x) => x.startsWith('park-tile'))).toBe(false);
     // 拉近到國父紀念館上面（外圈 20 公尺）：正中間是平頂的分格和天窗，旁邊斜的黃色琉璃瓦有一條條瓦溝
