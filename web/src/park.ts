@@ -5,7 +5,7 @@
  * 汪星是球面（ParkWorld 把台北的經緯度換成汪星的，space.ts）。地球上第一次在公園附近才載入
  */
 import type { LatLng } from './geo';
-import { RADAR_GEOM, viewReach, viewRect, type TripAt } from './radar';
+import { RADAR_GEOM, RADAR_VIEW, viewReach, viewRect, type TripAt } from './radar';
 import { ZHONGSHAN_PARK } from './zhongshan';
 import { MALTESE, dogHeight } from './dog';
 import { animateDogs, Dog, dogById, dogHeading, dogMarkup, NATURE, wakeDogs, type DogNature, type DogYard } from './dogs';
@@ -919,6 +919,24 @@ export function scatter(
   const w = Math.min(t.width[2], Math.max(t.width[1], t.width[0] * ppm));
   const reach = (viewReach() + 2) ** 2;
   const [bx0, by0, bx1, by1] = t.box.map((v) => v * big);
+  // 全螢幕鋪滿時看得到的是畫面的長方形（雷達的圓比它大一倍多，撒在畫面外面的會把上限用完）：記號佔的範圍（中心、半徑）
+  // 轉回畫面的方向（這一層跟著指北針轉）再比；鎖定跟著狗走時整層先平移最多 16 個單位才重畫，多留一點
+  const [mx, my, mr] = [(bx0 + bx1) / 2, (by0 + by1) / 2, Math.hypot(bx1 - bx0, by1 - by0) / 2 + 18];
+  const turn = (-RADAR_VIEW.heading * Math.PI) / 180;
+  const [cos, sin] = [Math.cos(turn), Math.sin(turn)];
+  const [hx, hy] = [RADAR_VIEW.hx + mr, RADAR_VIEW.hy + mr];
+  const shows = (bx: number, by: number): boolean => {
+    if (RADAR_VIEW.fill) {
+      const [dx, dy] = [bx + mx - c.rx, by + my - c.ry];
+      return Math.abs(dx * cos - dy * sin) <= hx && Math.abs(dx * sin + dy * cos) <= hy;
+    }
+    // 平常：記號佔的範圍碰得到雷達的圓（草往上長：底在雷達下緣外面、草尖伸得進來的也要畫）
+    const ex = Math.min(bx + bx1, Math.max(bx + bx0, c.rx)) - c.rx;
+    const ey = Math.min(by + by1, Math.max(by + by0, c.ry)) - c.ry;
+    return ex * ex + ey * ey <= reach;
+  };
+  // 萬一算錯也不會多到拖不動：看得到的範圍整片都是草地時大約幾個（每 p² × 3/4 一個）的 1.5 倍
+  const cap = Math.max(1500, (1.5 * (RADAR_VIEW.fill ? 4 * hx * hy : Math.PI * reach)) / (p * p * 0.75));
   // 座標乘 10 寫成整數（小數轉字串慢好幾倍），畫的時候縮回 0.1 倍
   const r1 = (v: number): number => Math.round(v * 10);
   let d = '';
@@ -934,13 +952,10 @@ export function scatter(
         const at = c.at(O.lat + y / O.my, O.lng + x / O.mx);
         if (!at) continue;
         const [bx, by] = at;
-        // 記號佔的範圍碰得到雷達才畫（草往上長：底在雷達下緣外面、草尖伸得進來的也要畫）；在不在範圍裡比較慢，最後才看
-        const ex = Math.min(bx + bx1, Math.max(bx + bx0, c.rx)) - c.rx;
-        const ey = Math.min(by + by1, Math.max(by + by0, c.ry)) - c.ry;
-        if (ex * ex + ey * ey > reach || !inside(x, y)) continue;
+        // 記號佔的範圍看得到才畫；在不在範圍裡比較慢，最後才看
+        if (!shows(bx, by) || !inside(x, y)) continue;
         d += t.draw(bx, by, big, ppm, w, (n) => cellRand(i, j, kk, n), r1);
-        // 萬一算錯也不會多到拖不動
-        if (++count >= 1500) return { d, w };
+        if (++count >= cap) return { d, w };
       }
     }
   }

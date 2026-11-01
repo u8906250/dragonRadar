@@ -123,9 +123,9 @@ export const RADAR_GEOM = { size: SIZE, c: C, r: R, inner: R - 8 };
 /**
  * 雷達看得到的範圍（SVG 單位，以圓心為中心的半寬 hx、半高 hy）：平常只看圓裡面（fill = false）；
  * 全螢幕時雷達的地圖鋪滿整個長方形（fill = true，短邊的一半是 C，比例跟平常一樣），
- * space.ts、park.ts 照這個決定畫到多遠（viewReach、viewRect）
+ * space.ts、park.ts 照這個決定畫到多遠（viewReach、viewRect）；heading 是太空、中山公園那幾層跟著指北針轉了幾度（畫的時候北在上，整層再轉）
  */
-export const RADAR_VIEW = { fill: false, hx: C, hy: C };
+export const RADAR_VIEW = { fill: false, hx: C, hy: C, heading: 0 };
 /** 看得到的最遠（離圓心，SVG 單位）：平常是光點範圍（inner），鋪滿時是長方形的角 */
 export const viewReach = (): number => (RADAR_VIEW.fill ? Math.hypot(RADAR_VIEW.hx, RADAR_VIEW.hy) : R - 8);
 /** 看得到的方框（SVG 座標 [左, 上, 右, 下]，四周多留 m）：平常是整個正方形 */
@@ -1341,6 +1341,7 @@ export class Radar {
   /** 手機朝向（0 = 北，順時針）。null 代表關閉指北針，恢復北在上 */
   setHeading(deg: number | null): void {
     this.heading = deg === null ? 0 : ((deg % 360) + 360) % 360;
+    RADAR_VIEW.heading = this.heading;
     this.svg.classList.toggle('heading-live', deg !== null);
     this.placeRose();
     this.draw();
