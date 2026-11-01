@@ -85,11 +85,8 @@ export interface ParkGeom {
   /** 映池前面的國旗旗桿（底座的中心）、旗台（填色的圈，從上面看） */
   flagpole: Pt;
   flagBase: Pt[];
-  /** 樹冠的範圍（照正射影像描的，一圈圈，有洞的用 evenodd）、撒葉子記號用的範圍 */
-  canopy: Pt[][];
-  /** 這一圈是不是樹冠裡面的空地（被奇數圈包住） */
-  canopyHole: boolean[];
-  canopyPatches: Patches;
+  /** 樹：樹冠中心（這個世界的經緯度）、樹冠半徑（公尺），小的在前 */
+  trees: Array<{ at: Pt; r: number }>;
   /** 國父紀念館中間紅褐色平頂的四個角 */
   hallFlat: Pt[];
   /** 映池（填色的圈）：旁邊那一圈石頭邊照它裁 */
@@ -158,9 +155,7 @@ export function parkGeom(w: ParkWorld): ParkGeom {
     statue: w.to(ZHONGSHAN_PARK.statue),
     flagpole: w.to(ZHONGSHAN_PARK.flagpole),
     flagBase: area(ZHONGSHAN_PARK.flagBase),
-    canopy: ZHONGSHAN_PARK.canopy.map(area),
-    canopyHole: ZHONGSHAN_PARK.canopy.map((r, i) => ZHONGSHAN_PARK.canopy.filter((o, j) => j !== i && inRing(r[0], o)).length % 2 === 1),
-    canopyPatches: patches([ZHONGSHAN_PARK.canopy]),
+    trees: ZHONGSHAN_PARK.trees.map(([lat, lng, r]) => ({ at: w.to([lat, lng]), r })),
     hallFlat: ZHONGSHAN_PARK.hallFlat.map(w.to),
     rimArea: area(ZHONGSHAN_PARK.water[0][0]),
     hatch: ZHONGSHAN_PARK.hatch.map(w.to),
@@ -901,7 +896,7 @@ export function parkSvg(g: ParkGeom, c: ParkCanvas): string {
   const flagBase = c.area([g.flagBase]);
   if (flagBase) out += `<path class="park-flag-base" d="${flagBase}" />`;
   out += bridgesSvg(g, c);
-  out += canopySvg(g, c);
+  out += treesSvg(g, c);
   out += roofsSvg(g, c);
   out += `<path class="park-building" d="${c.lines(g.buildings)}" />`;
   // 狗只在汪星，畫在火箭、銅像後面（在它們後面一點時被擋住）
@@ -1041,55 +1036,78 @@ function alongLines(g: ParkGeom, c: ParkCanvas, lines: Pt[][], each: (x: number,
 }
 
 /**
- * 樹冠（從上面看，ZHONGSHAN_PARK.canopy：照正射影像描出來的範圍，樹是自己畫的）：一整片深一點的草綠、深色的邊，右下一塊影子
- * （跟銅像一樣左上照光，往右下移 CANOPY_SHADE_M）；很密的樹林連成一片，不硬切成一棵棵，單獨的樹（棕櫚樹）是一小團。
- * 拉近跟草一樣長出一叢叢葉子的記號（scatter 的 'leaf'，汪星要飛過去當中心才畫）
+ * 樹（從上面看，ZHONGSHAN_PARK.trees：照正射影像描的樹冠範圍排出一棵棵的位置和大小，樹是自己畫的）：一團圓圓、邊緣有點起伏的樹冠，
+ * 左上亮一塊、右下一塊影子（跟銅像一樣左上照光），拉近再畫樹冠裡一叢叢的葉子（TREE_CLUMP_PX，跟草一樣汪星要飛過去當中心才畫）。
+ * 先畫 TREE_SHAPES 種樣子（半徑 1，放在 defs），每一棵用 <use> 照它的位置、大小擺（每一棵照編號固定用哪一種；不轉，影子都在右下），
+ * 小的先畫、大的蓋在上面；畫面上的樹冠太小（TREE_LOBE_PX）就只是一個圓點，全部合成一條 path
  */
-const CANOPY_SHADE_M: Pt = [0.7, 0.9];
-/**
- * 樹冠的邊：每一段往外鼓一點（像一叢叢葉子的邊）：長的段（例如公園邊上切齊的）切成每段約 CANOPY_BUMP_M，
- * 每一小段鼓出段長的 CANOPY_BULGE 倍；畫面上比 CANOPY_BULGE_PX 短的直接連
- */
-const CANOPY_BUMP_M = 2.5;
-const CANOPY_BULGE = 0.28;
-const CANOPY_BULGE_PX = 4;
-function canopySvg(g: ParkGeom, c: ParkCanvas): string {
-  const f1 = (n: number): string => n.toFixed(1);
-  const reach = viewReach() + 10;
-  let d = '';
-  g.canopy.forEach((ring, i) => {
-    const pts = ring.map(([lat, lng]) => c.at(lat, lng)).filter((p): p is Pt => !!p);
-    if (pts.length < 3) return;
-    const xs = pts.map((p) => p[0]);
-    const ys = pts.map((p) => p[1]);
-    if (Math.max(...xs) < c.rx - reach || Math.min(...xs) > c.rx + reach || Math.max(...ys) < c.ry - reach || Math.min(...ys) > c.ry + reach) return;
-    // 畫面上這一圈的方向：往外（離開樹冠）是哪一邊；樹冠裡的空地反過來
-    let area2 = 0;
-    for (let k = 0; k < pts.length; k++) area2 += pts[k][0] * pts[(k + 1) % pts.length][1] - pts[(k + 1) % pts.length][0] * pts[k][1];
-    const out = (area2 > 0 ? -1 : 1) * (g.canopyHole[i] ? -1 : 1);
-    d += `M${f1(pts[0][0])} ${f1(pts[0][1])}`;
-    for (let k = 0; k < pts.length; k++) {
-      const [p, q] = [pts[k], pts[(k + 1) % pts.length]];
-      const n = Math.max(1, Math.round(Math.hypot(q[0] - p[0], q[1] - p[1]) / c.ppm / CANOPY_BUMP_M));
-      const [dx, dy] = [(q[0] - p[0]) / n, (q[1] - p[1]) / n];
-      if (Math.hypot(dx, dy) < CANOPY_BULGE_PX) {
-        d += `L${f1(q[0])} ${f1(q[1])}`;
-        continue;
-      }
-      for (let j = 1; j <= n; j++) {
-        const [ex, ey] = [p[0] + dx * j, p[1] + dy * j];
-        d += `Q${f1(ex - dx / 2 - dy * out * CANOPY_BULGE)} ${f1(ey - dy / 2 + dx * out * CANOPY_BULGE)} ${f1(ex)} ${f1(ey)}`;
-      }
+const TREE_SHAPES = 12;
+const TREE_LOBE_PX = 4;
+const TREE_CLUMP_PX = 10;
+/** 樹的樣子（半徑 1）：影子、樹冠、亮的一塊、一叢叢葉子的 path（第 k 種，固定的） */
+const TREE_PATHS = (() => {
+  const f = (n: number): string => n.toFixed(3).replace(/\.?0+$/, '');
+  const blob = (x: number, y: number, r: number, n: number, rnd: (k: number) => number, salt: number): string => {
+    const turn = rnd(salt) * Math.PI * 2;
+    const pts = Array.from({ length: n }, (_, k) => {
+      const a = turn + (k / n) * Math.PI * 2;
+      const rr = r * (0.84 + 0.12 * rnd(salt + 1 + k));
+      return [x + Math.cos(a) * rr, y + Math.sin(a) * rr];
+    });
+    let d = `M${f(pts[0][0])} ${f(pts[0][1])}`;
+    for (let k = 0; k < n; k++) {
+      const a = turn + ((k + 0.5) / n) * Math.PI * 2;
+      const rc = r * (1.1 + 0.08 * rnd(salt + 20 + k));
+      const q = pts[(k + 1) % n];
+      d += `Q${f(x + Math.cos(a) * rc)} ${f(y + Math.sin(a) * rc)} ${f(q[0])} ${f(q[1])}`;
     }
-    d += 'Z';
+    return `${d}Z`;
+  };
+  return Array.from({ length: TREE_SHAPES }, (_, s) => {
+    const rnd = (k: number): number => cellRand(s, 7, 99, k);
+    const n = 7 + (s % 4);
+    let clump = '';
+    const m = 4 + Math.floor(rnd(70) * 4);
+    for (let j = 0; j < m; j++) {
+      const a = rnd(71 + j) * Math.PI * 2;
+      const d = Math.sqrt(rnd(80 + j)) * 0.55;
+      clump += blob(Math.cos(a) * d, Math.sin(a) * d, 0.2 + 0.12 * rnd(90 + j), 6, rnd, 100 + j * 10);
+    }
+    return { shade: blob(0.22, 0.26, 1, n, rnd, 1), crown: blob(0, 0, 1, n, rnd, 1), lit: blob(-0.26, -0.3, 0.5, Math.max(5, n - 2), rnd, 40), clump };
   });
-  if (!d) return '';
-  const leaves = c.textures ? parkTexture(g, 'leaf', c) : null;
-  return (
-    `<path class="park-canopy-shade" transform="translate(${f1(CANOPY_SHADE_M[0] * c.ppm)} ${f1(CANOPY_SHADE_M[1] * c.ppm)})" d="${d}" />` +
-    `<path class="park-canopy" d="${d}" />` +
-    (leaves ? `<path class="park-leaf" transform="scale(0.1)" stroke-width="${(leaves.w * 10).toFixed(1)}" d="${leaves.d}" />` : '')
-  );
+})();
+function treesSvg(g: ParkGeom, c: ParkCanvas): string {
+  const reach = viewReach() + 4;
+  const f1 = (n: number): string => n.toFixed(1);
+  let dots = '';
+  let uses = '';
+  let clumps = false;
+  g.trees.forEach(({ at, r: rm }, i) => {
+    const p = c.at(at[0], at[1]);
+    if (!p) return;
+    const r = rm * c.ppm;
+    if (Math.hypot(p[0] - c.rx, p[1] - c.ry) - r * 1.4 > reach) return;
+    if (r < TREE_LOBE_PX) {
+      const d = Math.max(0.6, r);
+      dots += `M${f1(p[0] - d)} ${f1(p[1])}a${f1(d)} ${f1(d)} 0 1 0 ${f1(2 * d)} 0a${f1(d)} ${f1(d)} 0 1 0 ${f1(-2 * d)} 0Z`;
+      return;
+    }
+    const k = Math.floor(cellRand(i, 3, 99, 0) * TREE_SHAPES);
+    const leaves = c.textures && r >= TREE_CLUMP_PX;
+    clumps ||= leaves;
+    uses += `<use href="#park-tree-${g.name}-${k}${leaves ? 'c' : ''}" transform="translate(${f1(p[0])} ${f1(p[1])}) scale(${f1(r)})" />`;
+  });
+  if (!dots && !uses) return '';
+  const defs = uses
+    ? '<defs>' +
+      TREE_PATHS.map(
+        (t, k) =>
+          `<g id="park-tree-${g.name}-${k}"><path class="park-tree-shade" d="${t.shade}" /><path class="park-tree" d="${t.crown}" /><path class="park-tree-lit" d="${t.lit}" /></g>` +
+          (clumps ? `<g id="park-tree-${g.name}-${k}c"><use href="#park-tree-${g.name}-${k}" /><path class="park-tree-clump" d="${t.clump}" /></g>` : ''),
+      ).join('') +
+      '</defs>'
+    : '';
+  return defs + (dots ? `<path class="park-tree" d="${dots}" />` : '') + (uses ? `<g class="park-trees">${uses}</g>` : '');
 }
 
 /**
@@ -1380,23 +1398,6 @@ const RIPPLES: Texture = {
     return d;
   },
 };
-/** 葉子：樹冠裡一叢一叢的葉子（兩三個往上鼓的小弧），真的寬約 0.7～1.2 公尺；太小畫成固定大小的記號 */
-const LEAVES: Texture = {
-  px: 11,
-  size: 1,
-  min: 7,
-  dense: 1.6,
-  box: [-0.6, -0.6, 0.6, 0.05],
-  width: [0.03, 0.6, 1.4],
-  draw: (x, y, big, _ppm, _w, rnd, r1) => {
-    const half = big * (0.35 + 0.25 * rnd(4));
-    const n = 2 + Math.floor(rnd(5) * 2);
-    const step = (2 * half) / n;
-    let d = `M${r1(x - half)} ${r1(y)}`;
-    for (let k = 0; k < n; k++) d += `q${r1(step / 2)} ${r1(-step * (0.8 + 0.3 * rnd(6 + k)))} ${r1(step)} 0`;
-    return d;
-  },
-};
 /** 格子 (i, j)、第 k 層的第 n 個亂數（0～1，每次都一樣） */
 function cellRand(i: number, j: number, k: number, n: number): number {
   let h = Math.imul(i, 0x27d4eb2d) ^ Math.imul(j, 0x165667b1) ^ Math.imul(k * 16 + n + 1, 0x9e3779b1);
@@ -1405,8 +1406,8 @@ function cellRand(i: number, j: number, k: number, n: number): number {
   return ((h ^ (h >>> 16)) >>> 0) / 4294967296;
 }
 /** 畫面上的草或水波（畫的座標乘 10）和線的粗細；太遠、畫面上沒有草地（水面）就是 null；only 是只長在這幾塊裡（跟長滿時同一叢一叢） */
-export function parkTexture(g: ParkGeom, kind: 'grass' | 'ripple' | 'leaf', c: Pick<ParkCanvas, 'ppm' | 'center' | 'rx' | 'ry' | 'at'>, only?: Patches): { d: string; w: number } | null {
-  const [all, salt] = kind === 'grass' ? [g.lawnPatches, 0] : kind === 'leaf' ? [g.canopyPatches, 3] : [g.pondPatches, 1];
+export function parkTexture(g: ParkGeom, kind: 'grass' | 'ripple', c: Pick<ParkCanvas, 'ppm' | 'center' | 'rx' | 'ry' | 'at'>, only?: Patches): { d: string; w: number } | null {
+  const [all, salt] = kind === 'grass' ? [g.lawnPatches, 0] : [g.pondPatches, 1];
   // only：只長這幾塊（發射口的門上），位置跟長滿草地時一樣
   const area = only ?? all;
   const box: Box = [area.box[0], area.box[1], area.box[2], area.box[3]];
@@ -1443,7 +1444,7 @@ export function parkTexture(g: ParkGeom, kind: 'grass' | 'ripple' | 'leaf', c: P
  * near 是知道看得到的範圍後先篩一次（沒有東西就不畫）；salt 讓不同的地方亂數不一樣（汪星的海用自己的）
  */
 export function scatter(
-  kind: 'grass' | 'ripple' | 'leaf',
+  kind: 'grass' | 'ripple',
   c: Pick<ParkCanvas, 'ppm' | 'center' | 'rx' | 'ry' | 'at'>,
   O: { lat: number; lng: number; mx: number; my: number },
   box: Box,
@@ -1451,7 +1452,7 @@ export function scatter(
   salt: number,
   near?: (x0: number, y0: number, x1: number, y1: number) => boolean,
 ): { d: string; w: number } | null {
-  const t = kind === 'grass' ? GRASS : kind === 'leaf' ? LEAVES : RIPPLES;
+  const t = kind === 'grass' ? GRASS : RIPPLES;
   const area = { box };
   const ppm = c.ppm;
   if (ppm < TEXTURE_FROM) return null;

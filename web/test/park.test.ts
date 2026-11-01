@@ -55,14 +55,14 @@ describe('地球的雷達上的中山公園（跟汪星共用一份）', () => {
     const layers = (m: string): string[] => [...m.matchAll(/class="(park-[^"]*)"/g)].map((x) => x[1]);
     expect(layers(at(1, hall))).toEqual(layers(woof));
     const roof = /^park-(roof|ridge|tile)/;
-    expect(layers(at(1, hall)).filter((x) => !roof.test(x))).toEqual(['park-area', 'park-edge', 'park-lawn', 'park-pond', 'park-green', 'park-water', 'park-rim-edge', 'park-rim', 'park-rim-outer', 'park-path street-minor', 'park-flag-base', 'park-bridge-rail', 'park-bridge', 'park-canopy-shade', 'park-canopy', 'park-building']);
-    // 樹冠（照正射影像描的範圍）：一圈圈，幾乎都在公園裡；拉近（外圈 40 公尺）樹冠裡長出一叢叢葉子的記號
-    expect(ZHONGSHAN_PARK.canopy.length).toBeGreaterThan(50);
-    expect(countAll(at(1, hall), 'park-canopy')).toBe(ZHONGSHAN_PARK.canopy.length);
-    const pts = ZHONGSHAN_PARK.canopy.flat();
-    expect(pts.filter(([lat, lng]) => ringHas(ZHONGSHAN_PARK.outline, lat, lng)).length / pts.length).toBeGreaterThan(0.95);
+    expect(layers(at(1, hall)).filter((x) => !roof.test(x))).toEqual(['park-area', 'park-edge', 'park-lawn', 'park-pond', 'park-green', 'park-water', 'park-rim-edge', 'park-rim', 'park-rim-outer', 'park-path street-minor', 'park-flag-base', 'park-bridge-rail', 'park-bridge', 'park-tree', 'park-building']);
+    // 樹（照正射影像的樹冠範圍排的）：外圈 1 km 每一棵都是一個圓點；拉近（外圈 40 公尺）樹冠有影子、亮的一塊和一叢叢葉子
+    expect(countAll(at(1, hall), 'park-tree')).toBe(ZHONGSHAN_PARK.trees.length);
+    expect(ZHONGSHAN_PARK.trees.length).toBeGreaterThan(500);
     const grove: [number, number] = [25.0388, 121.5609];
-    expect(layers(at(0.04, grove))).toEqual(expect.arrayContaining(['park-canopy-shade', 'park-canopy', 'park-leaf']));
+    expect(layers(at(0.04, grove))).toEqual(expect.arrayContaining(['park-tree-shade', 'park-tree', 'park-tree-lit', 'park-tree-clump']));
+    // 樹都在公園裡
+    for (const [lat, lng] of ZHONGSHAN_PARK.trees) expect(ringHas(ZHONGSHAN_PARK.outline, lat, lng)).toBe(true);
     // 旗台：旗桿正中間約 6 公尺見方（照正射影像量的）
     const fb = ZHONGSHAN_PARK.flagBase.map(([lat, lng]) => [(lng - 121.5602) * EARTH.mx(25.0385), (lat - 25.0385) * EARTH.my]);
     for (let k = 0; k < 4; k++) expect(Math.hypot(fb[(k + 1) % 4][0] - fb[k][0], fb[(k + 1) % 4][1] - fb[k][1])).toBeCloseTo(6, 0);
