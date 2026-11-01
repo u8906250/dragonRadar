@@ -77,6 +77,8 @@ export interface ParkGeom {
   water: Pt[][];
   green: Pt[][];
   paths: Pt[][];
+  /** 翠湖的曲橋（步道那樣的線，bridgesSvg 畫成有欄杆的橋面） */
+  bridges: Pt[][];
   statue: Pt;
   hatch: Pt[];
   O: { lat: number; lng: number; mx: number; my: number };
@@ -135,6 +137,7 @@ export function parkGeom(w: ParkWorld): ParkGeom {
     water: ZHONGSHAN_PARK.water.flat().map(loop),
     green: ZHONGSHAN_PARK.green.map(loop),
     paths: ZHONGSHAN_PARK.paths.map((l) => dense(l.map(w.to))),
+    bridges: ZHONGSHAN_PARK.bridges.map((l) => dense(l.map(w.to))),
     statue: w.to(ZHONGSHAN_PARK.statue),
     hatch: ZHONGSHAN_PARK.hatch.map(w.to),
     O,
@@ -760,6 +763,7 @@ export function parkSvg(g: ParkGeom, c: ParkCanvas): string {
   out += `<path class="park-green" d="${c.lines(g.green)}" />`;
   out += `<path class="park-water" d="${c.lines(g.water)}" />`;
   out += `<path class="park-path street-minor" d="${c.lines(g.paths)}" />`;
+  out += bridgesSvg(g, c);
   out += roofsSvg(g, c);
   out += `<path class="park-building" d="${c.lines(g.buildings)}" />`;
   // 狗只在汪星，畫在火箭、銅像後面（在它們後面一點時被擋住）
@@ -779,6 +783,66 @@ export function parkSvg(g: ParkGeom, c: ParkCanvas): string {
         : `<g class="park-statue" data-at="${x} ${y}"><circle class="statue-hit" cx="${x}" cy="${(s[1] - h * 0.4).toFixed(1)}" r="${Math.max(STATUE_HIT, h * 0.6).toFixed(1)}" />` +
           `<g transform="translate(${x} ${y}) scale(${+c.ppm.toPrecision(4)})">${STATUE_SVG}</g></g>`;
   }
+  return out;
+}
+
+/**
+ * 翠湖的曲橋（從上面看）：淺色的石頭橋面約 BRIDGE_W_M 寬，兩邊深一點的欄杆（先畫寬一點的深色、再畫橋面，兩頭接岸邊不封起來，
+ * 轉角是尖的）；拉近慢慢畫出一塊塊石板（真的間隔 BRIDGE_SLAB_M，畫面上太密就隔一塊畫一塊）和兩邊的欄杆柱（每 BRIDGE_POST_M 一根，轉角也有）。
+ * 寬度照真的大小，太細就畫成最細
+ */
+const BRIDGE_W_M = 1.8;
+const BRIDGE_SLAB_M = 0.6;
+const BRIDGE_POST_M = 2;
+function bridgesSvg(g: ParkGeom, c: ParkCanvas): string {
+  const d = c.lines(g.bridges);
+  if (!d) return '';
+  const { O } = g;
+  const ppm = c.ppm;
+  const w = Math.max(1.6, BRIDGE_W_M * ppm);
+  const rail = Math.max(0.5, 0.12 * ppm);
+  const reach = viewReach() + 4;
+  const f1 = (n: number): string => n.toFixed(1);
+  let out = `<path class="park-bridge-rail" stroke-width="${f1(w + 2 * rail)}" d="${d}" /><path class="park-bridge" stroke-width="${f1(w)}" d="${d}" />`;
+  // 石板：畫的這一層間隔 step（畫面上至少 5 像素），外圈約 60 公尺內才淡入；欄杆柱：畫面上間隔 8 像素以上才畫
+  const f = Math.log2(5 / (ppm * BRIDGE_SLAB_M));
+  const step = BRIDGE_SLAB_M * 2 ** Math.max(0, Math.ceil(f));
+  const slabs = c.textures ? Math.max(0, Math.min(1, 2 - f)) : 0;
+  const posts = c.textures && BRIDGE_POST_M * ppm >= 8;
+  if (!slabs && !posts) return out;
+  let slab = '';
+  let post = '';
+  const r = Math.max(0.6, 0.09 * ppm);
+  for (const line of g.bridges) {
+    // 每一段：兩頭換到畫面上，沿著段每隔 step 公尺一塊石板（橫跨橋面）、每隔 BRIDGE_POST_M 兩邊各一根柱子
+    const pts = line.map(([lat, lng]) => c.at(lat, lng));
+    for (let i = 1; i < line.length; i++) {
+      const p = pts[i - 1];
+      const q = pts[i];
+      if (!p || !q) continue;
+      const m = Math.hypot((line[i][1] - line[i - 1][1]) * O.mx, (line[i][0] - line[i - 1][0]) * O.my);
+      const [dx, dy] = [q[0] - p[0], q[1] - p[1]];
+      const len = Math.hypot(dx, dy);
+      if (!(m > 0) || !(len > 0)) continue;
+      const [nx, ny] = [(-dy / len) * (w / 2), (dx / len) * (w / 2)];
+      const near = (x: number, y: number): boolean => Math.hypot(x - c.rx, y - c.ry) <= reach;
+      if (slabs) {
+        for (let s = step; s < m; s += step) {
+          const [x, y] = [p[0] + (dx * s) / m, p[1] + (dy * s) / m];
+          if (near(x, y)) slab += `M${f1(x - nx)} ${f1(y - ny)}L${f1(x + nx)} ${f1(y + ny)}`;
+        }
+      }
+      if (posts) {
+        const n = Math.max(1, Math.round(m / BRIDGE_POST_M));
+        for (let k = 0; k <= n; k++) {
+          const [x, y] = [p[0] + (dx * k) / n, p[1] + (dy * k) / n];
+          if (near(x, y)) for (const sd of [-1, 1]) post += `M${f1(x + sd * nx - r)} ${f1(y + sd * ny)}a${f1(r)} ${f1(r)} 0 1 0 ${f1(2 * r)} 0a${f1(r)} ${f1(r)} 0 1 0 ${f1(-2 * r)} 0`;
+        }
+      }
+    }
+  }
+  if (slab) out += `<path class="park-bridge-slab" stroke-width="${f1(Math.max(0.3, 0.04 * ppm))}" stroke-opacity="${(0.8 * slabs).toFixed(2)}" d="${slab}" />`;
+  if (post) out += `<path class="park-bridge-post" d="${post}" />`;
   return out;
 }
 

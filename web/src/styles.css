@@ -600,6 +600,12 @@ path.map-water-glint { animation: water-flow-map 1.1s linear infinite; }
 .radar .park-area { fill: var(--accent); fill-opacity: 0.1; stroke: none; pointer-events: none; }
 .radar .park-edge { fill: none; stroke: var(--accent); stroke-width: 1.2; stroke-opacity: 0.6; stroke-dasharray: 2 2; pointer-events: none; }
 .radar .park-building { fill: none; stroke: var(--radar-grid); stroke-width: 1; stroke-opacity: 0.55; stroke-linejoin: round; pointer-events: none; }
+/* 翠湖的曲橋（park.ts 的 bridgesSvg）：淺色的石頭橋面、兩邊深一點的欄杆，拉近有一塊塊石板、欄杆柱；兩頭接岸邊不封起來，轉角是尖的 */
+.radar .park-bridge-rail, .radar .park-bridge { fill: none; stroke-linejoin: miter; stroke-linecap: butt; pointer-events: none; }
+.radar .park-bridge-rail { stroke: #7d6b55; }
+.radar .park-bridge { stroke: #efe7d8; }
+.radar .park-bridge-slab { fill: none; stroke: #a8977c; pointer-events: none; }
+.radar .park-bridge-post { fill: #5f5040; stroke: none; pointer-events: none; }
 /* 建築的屋頂（park.ts 的 roofsSvg）：國父紀念館黃色琉璃瓦，其他紅褐色的瓦；屋脊、斜脊深一點，拉近有一條條瓦溝 */
 .radar .park-roof { fill: #c98a64; fill-opacity: 0.75; stroke: none; pointer-events: none; }
 .radar .park-roof.hall { fill: #e8b545; fill-opacity: 0.85; }
