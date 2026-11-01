@@ -2938,6 +2938,8 @@ let panFrame = 0;
  * 放開才存下來、重抓附近的資料（雙北、全台的範圍也這時照新位置重算）
  */
 function panRadar(bearing: number, km: number, done: boolean): void {
+  // 「定位」「回到我的位置」飛到一半就拖：先到目的地，從那裡開始拖
+  if (flight) landFlight();
   if (!panFrom) panFrom = origin;
   if (km > 0) {
     const p = destination(origin, bearing, km);
@@ -3009,11 +3011,12 @@ function goHome(): void {
   if (radar.spaceMoved) radar.resetSpace();
   lsSet(LS_ORIGIN, null);
   gpsAccuracy = to.source === 'gps' ? to.accuracy : null;
-  setOrigin({ lat: to.lat, lng: to.lng, source: to.source });
-  map.setOrigin(origin, true, gpsAccuracy);
   const km = locateKm(earthMinKm());
-  zoomToKm(km);
-  if (view === 'map') map.showRange(km, 0);
+  zoomToKm(km, { lat: to.lat, lng: to.lng, source: to.source });
+  if (view === 'map') {
+    map.setOrigin(origin, true, gpsAccuracy);
+    map.showRange(km, 0);
+  }
 }
 
 // ---- 汪星的狗：點了出現「鎖定」，按了雷達正中間跟著牠（鏡頭慢慢追上），再按、自己拖曳、換星球、回到我的位置、搭火箭、切到地圖就解除 ----
@@ -3246,40 +3249,68 @@ function setBase(b: BaseMap): void {
 let zoomFrame = 0;
 
 /**
- * 「定位」「回到我的位置」：範圍慢慢縮放到外圈 km 公里（頭尾慢，照倍數取對數走；差越多走越久，ZOOM_TO_MS 之間），
- * 不在雷達畫面（地圖）、減少動態效果時直接換；縮放到一半自己捏合、滾滾輪就停在那裡
+ * 「定位」「回到我的位置」：範圍慢慢縮放到外圈 km 公里、中心同時慢慢移到 to（像 Google 地圖飛過去；頭尾慢，縮放照倍數取對數走、
+ * 位置照經緯度內插，差越多、移越遠走越久，ZOOM_TO_MS 之間；移的時候只重畫，到了才 setOrigin：存下來、重抓一次）。
+ * 不在雷達畫面（地圖）、減少動態效果時直接換；飛到一半自己捏合、滾滾輪、拖曳：位置直接到 to、範圍停在那裡；
+ * 飛的時候新的 GPS 位置來了就改飛到那裡（flight.to）
  */
-const ZOOM_TO_MS: [number, number] = [500, 1500];
-let zoomToFrame = 0;
-function zoomToKm(km: number): void {
-  cancelAnimationFrame(zoomToFrame);
-  zoomToFrame = 0;
+const ZOOM_TO_MS: [number, number] = [500, 1600];
+let flight: { frame: number; from: Origin; to: Origin | null } | null = null;
+function zoomToKm(km: number, to: Origin | null = null): void {
+  landFlight();
   const total = Math.log(km / scaleKm);
-  if (view !== 'radar' || calmMotion?.matches || Math.abs(total) < 0.01) {
+  const from = origin;
+  const dist = to ? haversineKm(from, to) : 0;
+  if (view !== 'radar' || calmMotion?.matches || (Math.abs(total) < 0.01 && dist < 0.001)) {
+    if (to) setOrigin(to);
     zoomRadar(km / scaleKm, true);
     return;
   }
-  const ms = Math.min(ZOOM_TO_MS[1], Math.max(ZOOM_TO_MS[0], 500 + 120 * Math.abs(total)));
+  // 移了幾個雷達半徑（照比較近的範圍算）
+  const radii = dist / Math.min(scaleKm, km);
+  const ms = Math.min(ZOOM_TO_MS[1], Math.max(ZOOM_TO_MS[0], 500 + 120 * Math.abs(total) + 250 * Math.min(radii, 4)));
   const t0 = performance.now();
   let went = 0;
+  const f: NonNullable<typeof flight> = { frame: 0, from, to };
+  flight = f;
   const step = (now: number): void => {
     const k = Math.min(1, (now - t0) / ms);
     const eased = easeInOut(k);
-    zoomRadar(Math.exp(total * (eased - went)), k >= 1);
+    if (f.to) origin = { lat: from.lat + (f.to.lat - from.lat) * eased, lng: from.lng + (f.to.lng - from.lng) * eased, source: 'manual' };
+    // 縮放（每一格畫面重畫一次，移動也跟著畫）
+    zoomRadar(Math.exp(total * (eased - went)), false);
     went = eased;
-    zoomToFrame = k < 1 ? requestAnimationFrame(step) : 0;
+    if (k < 1) {
+      f.frame = requestAnimationFrame(step);
+      return;
+    }
+    flight = null;
+    if (f.to) {
+      origin = from;
+      setOrigin(f.to);
+    }
+    zoomRadar(1, true);
   };
-  zoomToFrame = requestAnimationFrame(step);
+  f.frame = requestAnimationFrame(step);
+}
+/** 飛到一半被打斷（自己縮放、拖曳、又按了一次）：位置直接到目的地，範圍停在那裡 */
+function landFlight(): void {
+  const f = flight;
+  if (!f) return;
+  cancelAnimationFrame(f.frame);
+  flight = null;
+  if (f.to) {
+    origin = f.from;
+    setOrigin(f.to);
+  }
+  zoomRadar(1, true);
 }
 
 /** 雙指縮放、滾輪：連續調整範圍；放開時接近某個按鈕的範圍（差 6% 以內）就對齊那個按鈕 */
 /** gesture：雙指、滾輪（太空裡幅度加大）；從地圖切回來是直接換成地圖的比例，不加大 */
 function zoomRadar(factor: number, done: boolean, gesture = false): void {
-  // 自己縮放：「定位」的慢慢縮放停在這裡
-  if (gesture && zoomToFrame) {
-    cancelAnimationFrame(zoomToFrame);
-    zoomToFrame = 0;
-  }
+  // 自己縮放：「定位」「回到我的位置」飛到一半，位置直接到、範圍停在這裡
+  if (gesture && flight) landFlight();
   // 太空（比全球再遠）一次縮放的幅度大一點：從全球到整個太陽系差了幾十萬倍
   const f = gesture && (scaleKm > WORLD_KM || (scaleKm >= WORLD_KM && factor > 1)) ? factor ** 2 : factor;
   // 太空裡中心換到別的星球（月球、木星…）：最多放大到剛好看得到整顆，汪星可以放大到 1 km，中山公園附近到 0.5 公尺；
@@ -3378,13 +3409,14 @@ function locateMe(): void {
   if (known) {
     lsSet(LS_ORIGIN, null);
     gpsAccuracy = known.accuracy;
-    setOrigin({ lat: known.lat, lng: known.lng, source: 'gps' });
-    map.setOrigin(origin, true, gpsAccuracy);
   }
   if (radar.spaceMoved) radar.resetSpace();
   const km = locateKm(earthMinKm());
-  zoomToKm(km);
-  if (view === 'map') map.showRange(km, 0);
+  zoomToKm(km, known ? { lat: known.lat, lng: known.lng, source: 'gps' } : null);
+  if (view === 'map') {
+    map.setOrigin(origin, true, gpsAccuracy);
+    map.showRange(km, 0);
+  }
   locateBtn.classList.add('on');
   locateBtn.textContent = '定位中…';
   navigator.geolocation.getCurrentPosition(
@@ -3395,8 +3427,12 @@ function locateMe(): void {
       gpsAccuracy = pos.coords.accuracy;
       lastGps = { lat: pos.coords.latitude, lng: pos.coords.longitude, source: 'gps' };
       lastGpsAccuracy = pos.coords.accuracy;
-      setOrigin(lastGps);
-      map.setOrigin(origin, true, gpsAccuracy);
+      // 還在飛過去：改飛到新的位置；不然直接移過去
+      if (flight?.to) flight.to = lastGps;
+      else {
+        setOrigin(lastGps);
+        map.setOrigin(origin, true, gpsAccuracy);
+      }
       showBanner(bannerEl, `已定位，誤差約 ${Math.round(pos.coords.accuracy)} 公尺`, 2000);
     },
     (e) => {
