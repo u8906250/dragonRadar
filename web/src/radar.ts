@@ -86,6 +86,21 @@ export interface RadarYou {
 const DOUBLE_TAP_MS = 300;
 const DOUBLE_TAP_PX = 30;
 const TAP_ZOOM_MS = 250;
+/**
+ * 雙指縮放放開時手指還在快速捏合、張開：照當時的速度繼續縮放、慢慢停下（像 Google 地圖，捏越快滑越遠）。
+ * 速度是 ln(倍數)／毫秒：量放開前多久的、快過多少才滑、放開前停多久就不滑、減速快慢（總共多滑 速度 × FLING_TAU_MS）、
+ * 慢到多少就停、最多多滑幾倍
+ */
+const FLING_SAMPLE_MS = 100;
+const FLING_MIN_SPEED = 0.0015;
+const FLING_IDLE_MS = 60;
+const FLING_TAU_MS = 150;
+const FLING_STOP_SPEED = 0.0001;
+const FLING_MAX = Math.log(3);
+/** 滑鼠滾輪：一格約 0.2 秒滑過去（減速快慢），連續滾會疊上去（最多先疊幾格的量）；停了多久算縮放結束 */
+const WHEEL_TAU_MS = 60;
+const WHEEL_MAX = 1.5;
+const WHEEL_DONE_MS = 200;
 /** 點在這些東西上是點它（選光點、飛到星球…），不算點兩下放大 */
 const TAP_TARGETS = '.blip, .landmark, .bottle, .dog-hit, .rocket-hit, .park-statue, .space-hit, [role="button"]';
 
@@ -721,6 +736,45 @@ export class Radar {
     let downAt = 0;
     let multi = false;
     let lastTap: { t: number; x: number; y: number } | null = null;
+    // 雙指縮放到現在縮了多少（ln），最近 FLING_SAMPLE_MS 的紀錄拿來算放開時的速度
+    let pinchLog = 0;
+    let pinchSamples: Array<{ t: number; z: number }> = [];
+    const pinchSpeed = (t: number): number => {
+      const first = pinchSamples[0];
+      const last = pinchSamples[pinchSamples.length - 1];
+      if (!first || last === first || t - last.t > FLING_IDLE_MS) return 0;
+      return t - first.t >= 16 ? (last.z - first.z) / (t - first.t) : 0;
+    };
+    // 放開後繼續滑（requestAnimationFrame 的編號）：手指一碰到畫面（任何地方）或滾滾輪就停在那裡
+    let fling = 0;
+    const stopFling = (): void => {
+      if (!fling) return;
+      cancelAnimationFrame(fling);
+      fling = 0;
+      onZoom(1, true);
+    };
+    const startFling = (speed: number): void => {
+      // 太空裡外面會把倍數平方：上限減半，一甩最多也是多滑 3 倍
+      const max = (this.scaleKm >= SPACE_FROM_KM ? FLING_MAX / 2 : FLING_MAX) / FLING_TAU_MS;
+      let v = Math.max(-max, Math.min(max, speed));
+      let last = performance.now();
+      const step = (now: number): void => {
+        const dt = Math.min(50, Math.max(0, now - last));
+        last = now;
+        const decay = Math.exp(-dt / FLING_TAU_MS);
+        const before = this.scaleKm;
+        onZoom(Math.exp(v * FLING_TAU_MS * (1 - decay)), false);
+        v *= decay;
+        // 慢到看不出來，或已經到最近、最遠的限制
+        if (Math.abs(v) < FLING_STOP_SPEED || (dt > 0 && this.scaleKm === before)) {
+          fling = 0;
+          onZoom(1, true);
+          return;
+        }
+        fling = requestAnimationFrame(step);
+      };
+      fling = requestAnimationFrame(step);
+    };
     const tap = (e: PointerEvent): void => {
       const hit = (e.target as Element).closest(TAP_TARGETS) as SVGElement | null;
       // 點在正中間那顆星球上（例如在汪星上）：點了也不會飛到哪，算點在空白的地方
@@ -750,6 +804,8 @@ export class Radar {
         this.endPan();
         this.pinchDist = dist();
         multi = true;
+        pinchLog = 0;
+        pinchSamples = [{ t: e.timeStamp, z: 0 }];
       }
     });
     svg.addEventListener('pointermove', (e) => {
@@ -761,7 +817,13 @@ export class Radar {
       }
       if (this.pointers.size !== 2) return;
       const d = dist();
-      if (this.pinchDist > 0 && d > 0) onZoom(this.pinchDist / d, false);
+      if (this.pinchDist > 0 && d > 0) {
+        onZoom(this.pinchDist / d, false);
+        pinchLog += Math.log(this.pinchDist / d);
+        pinchSamples.push({ t: e.timeStamp, z: pinchLog });
+        // 留一筆比 FLING_SAMPLE_MS 早的，速度才算得到整段
+        while (pinchSamples.length > 2 && e.timeStamp - pinchSamples[1].t >= FLING_SAMPLE_MS) pinchSamples.shift();
+      }
       this.pinchDist = d;
     });
     const end = (e: PointerEvent): void => {
@@ -769,7 +831,12 @@ export class Radar {
       // 短短點一下（沒拖、沒捏合）
       const tapped = e.type === 'pointerup' && this.pointers.size === 0 && !this.panning && !multi && e.timeStamp - downAt < DOUBLE_TAP_MS;
       if (this.pointers.size === 0) this.endPan();
-      if (this.pointers.size === 1 && this.pinchDist > 0) onZoom(1, true);
+      if (this.pointers.size === 1 && this.pinchDist > 0) {
+        // 放開第一根手指時還在快速捏合、張開：繼續滑（減少動態效果時不滑）
+        const v = e.type === 'pointerup' ? pinchSpeed(e.timeStamp) : 0;
+        if (Math.abs(v) >= FLING_MIN_SPEED && !this.calm?.matches) startFling(v);
+        else onZoom(1, true);
+      }
       if (this.pointers.size < 2) this.pinchDist = 0;
       // 縮放完剩一根手指：不接著拖
       this.panStart = null;
@@ -791,14 +858,64 @@ export class Radar {
     svg.addEventListener('pointerleave', end);
     // iOS Safari 的整頁縮放
     svg.addEventListener('gesturestart', (e) => e.preventDefault());
+    // 滾輪滑順：每次滾的量先疊到 wheelLeft（ln），每一格畫面走剩下的一部分；走完、停了 WHEEL_DONE_MS 算縮放結束
     let wheelTimer = 0;
+    let wheelLeft = 0;
+    let wheelFrame = 0;
+    let wheelLast = 0;
+    const wheelDone = (): void => {
+      window.clearTimeout(wheelTimer);
+      wheelTimer = window.setTimeout(() => onZoom(1, true), WHEEL_DONE_MS);
+    };
+    const wheelStep = (now: number): void => {
+      const dt = Math.min(50, Math.max(0, now - wheelLast));
+      wheelLast = now;
+      let move = wheelLeft * (1 - Math.exp(-dt / WHEEL_TAU_MS));
+      if (Math.abs(wheelLeft - move) < 0.002) move = wheelLeft;
+      wheelLeft -= move;
+      onZoom(Math.exp(move), false);
+      if (wheelLeft) {
+        wheelFrame = requestAnimationFrame(wheelStep);
+        return;
+      }
+      wheelFrame = 0;
+      wheelDone();
+    };
+    const stopWheel = (): void => {
+      if (!wheelFrame) return;
+      cancelAnimationFrame(wheelFrame);
+      wheelFrame = 0;
+      wheelLeft = 0;
+      window.clearTimeout(wheelTimer);
+      onZoom(1, true);
+    };
+    document.addEventListener(
+      'pointerdown',
+      () => {
+        stopFling();
+        stopWheel();
+      },
+      true,
+    );
     svg.addEventListener(
       'wheel',
       (e) => {
         e.preventDefault();
-        onZoom(Math.exp(Math.max(-100, Math.min(100, e.deltaY)) * 0.003), false);
+        stopFling();
+        // 一格滾輪約 100 像素；有的瀏覽器用「行」「頁」當單位
+        const px = e.deltaY * (e.deltaMode === 1 ? 33 : e.deltaMode === 2 ? 800 : 1);
+        const step = Math.max(-100, Math.min(100, px)) * 0.003;
         window.clearTimeout(wheelTimer);
-        wheelTimer = window.setTimeout(() => onZoom(1, true), 250);
+        if (this.calm?.matches) {
+          onZoom(Math.exp(step), false);
+          wheelDone();
+          return;
+        }
+        wheelLeft = Math.max(-WHEEL_MAX, Math.min(WHEEL_MAX, wheelLeft + step));
+        if (!wheelFrame) {
+          wheelLast = performance.now();
+          wheelFrame = requestAnimationFrame(wheelStep);
+        }
       },
       { passive: false },
     );
