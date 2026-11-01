@@ -80,6 +80,9 @@ export interface ParkGeom {
   /** 翠湖的曲橋（步道那樣的線，bridgesSvg 畫成有欄杆的橋面） */
   bridges: Pt[][];
   statue: Pt;
+  /** 映池前面的國旗旗桿（底座的中心）、旗台（填色的圈，從上面看） */
+  flagpole: Pt;
+  flagBase: Pt[];
   hatch: Pt[];
   O: { lat: number; lng: number; mx: number; my: number };
   lawnPatches: Patches;
@@ -139,6 +142,8 @@ export function parkGeom(w: ParkWorld): ParkGeom {
     paths: ZHONGSHAN_PARK.paths.map((l) => dense(l.map(w.to))),
     bridges: ZHONGSHAN_PARK.bridges.map((l) => dense(l.map(w.to))),
     statue: w.to(ZHONGSHAN_PARK.statue),
+    flagpole: w.to(ZHONGSHAN_PARK.flagpole),
+    flagBase: area(ZHONGSHAN_PARK.flagBase),
     hatch: ZHONGSHAN_PARK.hatch.map(w.to),
     O,
     lawnPatches: patches(ZHONGSHAN_PARK.green.map((r) => [r])),
@@ -225,11 +230,13 @@ let dogWorld: ParkGeom | null = null;
 let lawnAreas: number[] | null = null;
 
 /**
- * 狗走得到的地方（照使用者說的：只有草地和步道可以走）：在草皮裡（不在建築、水裡），或離步道 PATH_W 公尺內；
+ * 狗走得到的地方（照使用者說的：草地、步道和橋可以走）：在草皮裡（不在建築、水裡），或離步道 PATH_W 公尺內；翠湖的曲橋上（橋面 BRIDGE_W_M 寬，
+ * 離橋中線 BRIDGE_WALK_M 內）水上也走得到，橋接到的小島不算水（沒有橋的小島還是去不了）；
  * 一段直直走過去的路每 0.5 公尺都要走得到（不穿過建築、不橫越廣場）。換草皮、去湖邊照步道走（像導航：步道每 3 公尺一點、
  * 接在一起的步道連起來，最短的走法，再把看得到的點之間拉直）。算的時候換成公園附近的公尺（往東、往北）
  */
 const PATH_W = 1.2;
+const BRIDGE_WALK_M = 0.7;
 const WALK_M0: Pt = [25.0394, 121.5596];
 const WALK_MY = 110_574;
 const WALK_MX = 111_320 * Math.cos(WALK_M0[0] * RAD);
@@ -255,10 +262,11 @@ function segDist([px, py]: Pt, [ax, ay]: Pt, [bx, by]: Pt): number {
   return Math.hypot(ax + dx * t - px, ay + dy * t - py);
 }
 
-/** 公園裡走得到的地方（第一次用到才算）：草皮、擋住的（建築、水池）、步道的每一段（5 公尺一格的索引）、步道的路網 */
+/** 公園裡走得到的地方（第一次用到才算）：草皮、擋住的（建築、水池；holes 是水池裡橋接到的小島）、橋上、步道的每一段（5 公尺一格的索引）、步道的路網 */
 interface Walk {
   lawns: Array<{ ring: Pt[]; box: Box }>;
-  blocks: Array<{ ring: Pt[]; box: Box }>;
+  blocks: Array<{ ring: Pt[]; box: Box; holes: Pt[][] }>;
+  onBridge: (p: Pt) => boolean;
   segs: Array<[Pt, Pt]>;
   grid: Map<string, number[]>;
   nodes: Pt[];
@@ -282,8 +290,15 @@ function walkOf(): Walk {
     return { ring, box: boxOf(ring) };
   };
   const lawns = ZHONGSHAN_PARK.green.map(ringM);
-  const blocks = [...ZHONGSHAN_PARK.buildings.map(ringM), ...ZHONGSHAN_PARK.water.map((w) => ringM(w[0]))];
-  const blocked = (p: Pt): boolean => blocks.some((b) => inBox(p, b.box) && inRingM(p, b.ring));
+  const bridges = ZHONGSHAN_PARK.bridges.map((l) => l.map(toM));
+  const onBridge = (p: Pt): boolean => bridges.some((l) => l.some((q, i) => i > 0 && segDist(p, l[i - 1], q) <= BRIDGE_WALK_M));
+  // 水池裡的小島：橋的一頭在島上（或離島邊 1.5 公尺內）才走得到
+  const linked = (r: Pt[]): boolean => bridges.some((l) => [l[0], l[l.length - 1]].some((q) => inRingM(q, r) || r.some((a, i) => segDist(q, a, r[(i + 1) % r.length]) < 1.5)));
+  const blocks = [
+    ...ZHONGSHAN_PARK.buildings.map((r) => ({ ...ringM(r), holes: [] })),
+    ...ZHONGSHAN_PARK.water.map(([outer, ...islands]) => ({ ...ringM(outer), holes: islands.map((r) => r.map(toM)).filter(linked) })),
+  ];
+  const blocked = (p: Pt): boolean => !onBridge(p) && blocks.some((b) => inBox(p, b.box) && inRingM(p, b.ring) && !b.holes.some((h) => inRingM(p, h)));
   const segs: Array<[Pt, Pt]> = [];
   const grid = new Map<string, number[]>();
   const nodes: Pt[] = [];
@@ -339,7 +354,7 @@ function walkOf(): Walk {
       }
     }
   });
-  return (walkData = { lawns, blocks, segs, grid, nodes, nodeGrid, adj });
+  return (walkData = { lawns, blocks, onBridge, segs, grid, nodes, nodeGrid, adj });
 }
 
 /**
@@ -351,11 +366,12 @@ export function parkYard(o: { avoid?: Pt[][] } = {}): DogYard {
     const ring = r.map(toM);
     return { ring, box: boxOf(ring) };
   });
-  /** 這一點走得到嗎（公尺座標）：不在建築、水裡、不去的地方，在草皮裡或離步道 PATH_W 內 */
+  /** 這一點走得到嗎（公尺座標）：不去的地方不行；橋上可以；不在建築、水裡（橋接到的小島可以），在草皮裡或離步道 PATH_W 內 */
   const okM = (p: Pt): boolean => {
     const w = walkOf();
-    if (w.blocks.some((b) => inBox(p, b.box) && inRingM(p, b.ring))) return false;
     if (avoid.some((b) => inBox(p, b.box) && inRingM(p, b.ring))) return false;
+    if (w.onBridge(p)) return true;
+    if (w.blocks.some((b) => inBox(p, b.box) && inRingM(p, b.ring) && !b.holes.some((h) => inRingM(p, h)))) return false;
     if (w.lawns.some((l) => inBox(p, l.box) && inRingM(p, l.ring))) return true;
     return nearby(w.grid, p, PATH_W).some((i) => segDist(p, ...w.segs[i]) <= PATH_W);
   };
@@ -763,6 +779,9 @@ export function parkSvg(g: ParkGeom, c: ParkCanvas): string {
   out += `<path class="park-green" d="${c.lines(g.green)}" />`;
   out += `<path class="park-water" d="${c.lines(g.water)}" />`;
   out += `<path class="park-path street-minor" d="${c.lines(g.paths)}" />`;
+  // 旗台：映池前面的旗桿底下那一塊石頭鋪的平台（從上面看），旗桿站在中間
+  const flagBase = c.area([g.flagBase]);
+  if (flagBase) out += `<path class="park-flag-base" d="${flagBase}" />`;
   out += bridgesSvg(g, c);
   out += roofsSvg(g, c);
   out += `<path class="park-building" d="${c.lines(g.buildings)}" />`;
@@ -773,6 +792,17 @@ export function parkSvg(g: ParkGeom, c: ParkCanvas): string {
   }
   const r = rocketNow();
   if (r.world === g.name && r.phase !== 'away' && r.phase !== 'stored' && r.e >= 0) out += rocketPart(g, c, r.phase, r.e);
+  // 映池前面的旗桿：跟銅像一樣站著畫，先是一個點，畫面上夠高才畫出底座和整根旗桿
+  const fp = c.ppm >= STATUE_FROM ? c.at(...g.flagpole) : null;
+  if (fp && Math.hypot(fp[0] - c.rx, fp[1] - c.ry) - FLAG_TOP * c.ppm < viewReach() + 2) {
+    const [x, y] = fp.map((v) => v.toFixed(1));
+    out +=
+      `<g class="park-flagpole" data-at="${x} ${y}" data-flip="no">` +
+      (c.ppm < FLAG_FULL
+        ? `<circle class="flag-dot" cx="${x}" cy="${y}" r="${Math.min(4, Math.max(1.2, c.ppm * 0.9)).toFixed(1)}" />`
+        : `<g transform="translate(${x} ${y}) scale(${+c.ppm.toPrecision(4)})">${FLAGPOLE_SVG}</g>`) +
+      '</g>';
+  }
   const s = c.ppm >= STATUE_FROM ? c.at(...g.statue) : null;
   const h = STATUE_H * c.ppm;
   if (s && Math.hypot(s[0] - c.rx, s[1] - c.ry) - h < viewReach() + 2) {
@@ -785,6 +815,48 @@ export function parkSvg(g: ParkGeom, c: ParkCanvas): string {
   }
   return out;
 }
+
+/**
+ * 映池前面的國旗旗桿：立體的，跟銅像一樣看得到上面和右邊、左上照光（地上一塊影子、旗桿的影子往右下拉長），不管指北針怎麼轉都站著（不左右翻）。
+ * 站在旗台（parkSvg 從上面畫的那一塊）正中間，兩層石頭底座（下層約 2.4 公尺見方、上層 1.4 公尺，各高 0.35 公尺），上面一根往上變細的金屬旗桿（約 15 公尺，左邊亮右邊暗），
+ * 頂上一顆金色的圓球，旁邊一條升旗的繩子。旗桿、底座的大小 OSM 沒有，是估的。單位是公尺，(0, 0) 是底座的中心（地上），往上是負的；
+ * 雷達外圈約 500 公尺內（STATUE_FROM）先是一個點，畫面上旗桿有 10 個單位高（FLAG_FULL，外圈約 260 公尺內）才畫出整根
+ */
+const FLAG_POLE_H = 15;
+const FLAG_TOP = FLAG_POLE_H + 1.4;
+const FLAG_FULL = 10 / FLAG_TOP;
+const FLAGPOLE_SVG = (() => {
+  const n = (v: number): number => +v.toFixed(3);
+  const p = (pts: Array<[number, number]>): string => pts.map(([x, y], i) => `${i ? 'L' : 'M'}${n(x)} ${n(y)}`).join('') + 'Z';
+  // 往後（往裡面）每公尺在畫面上斜斜的往右上
+  const [ox, oy] = [0.156, -0.203];
+  const tier = (cls: string, x0: number, y0: number, w: number, h: number, d: number): string => {
+    const [dx, dy] = [ox * d, oy * d];
+    return (
+      `<path class="${cls}-front" d="${p([[x0, y0 - h], [x0 + w, y0 - h], [x0 + w, y0], [x0, y0]])}" />` +
+      `<path class="${cls}-side" d="${p([[x0 + w, y0 - h], [x0 + w + dx, y0 - h + dy], [x0 + w + dx, y0 + dy], [x0 + w, y0]])}" />` +
+      `<path class="${cls}-top" d="${p([[x0, y0 - h], [x0 + w, y0 - h], [x0 + w + dx, y0 - h + dy], [x0 + dx, y0 - h + dy]])}" />`
+    );
+  };
+  // 上層在下層上面的正中間（往裡面退 0.5 公尺），旗桿在上層上面的正中間
+  const [ux, uy] = [-0.7 + ox * 0.5, -0.35 + oy * 0.5];
+  const [px, py] = [ux + 0.7 + ox * 0.7, uy - 0.35 + oy * 0.7];
+  const [b, t] = [0.11, 0.06];
+  const top = py - FLAG_POLE_H;
+  return (
+    `<ellipse class="flag-shadow" cx="0.7" cy="0.05" rx="1.9" ry="0.42" />` +
+    `<path class="flag-shadow" d="${p([[px, py + 0.2], [px + 7, 0.75], [px + 7, 0.9], [px - 0.1, py + 0.45]])}" />` +
+    tier('flag-stone', -1.2, 0, 2.4, 0.35, 2.4) +
+    tier('flag-stone', ux, uy, 1.4, 0.35, 1.4) +
+    `<path class="flag-rope" d="M${n(px + 0.1)} ${n(top + 0.25)}Q${n(px + 0.32)} ${n(py - FLAG_POLE_H / 2)} ${n(px + 0.18)} ${n(py - 1.1)}" />` +
+    `<path class="flag-pole" d="${p([[px - b, py], [px - t, top], [px + t, top], [px + b, py]])}" />` +
+    `<path class="flag-pole-dark" d="${p([[px + b * 0.25, py], [px + t * 0.25, top], [px + t, top], [px + b, py]])}" />` +
+    `<path class="flag-pole-lit" d="${p([[px - b * 0.7, py], [px - t * 0.7, top], [px - t * 0.25, top], [px - b * 0.25, py]])}" />` +
+    `<path class="flag-cleat" d="${p([[px + b, py - 1.2], [px + 0.24, py - 1.2], [px + 0.24, py - 1.0], [px + b, py - 1.0]])}" />` +
+    `<circle class="flag-ball" cx="${n(px)}" cy="${n(top - 0.18)}" r="0.2" />` +
+    `<circle class="flag-ball-lit" cx="${n(px - 0.07)}" cy="${n(top - 0.25)}" r="0.06" />`
+  );
+})();
 
 /**
  * 翠湖的曲橋（從上面看）：淺色的石頭橋面約 BRIDGE_W_M 寬，兩邊深一點的欄杆（先畫寬一點的深色、再畫橋面，兩頭接岸邊不封起來，

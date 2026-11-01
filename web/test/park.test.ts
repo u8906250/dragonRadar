@@ -46,7 +46,7 @@ describe('地球的雷達上的中山公園（跟汪星共用一份）', () => {
     const layers = (m: string): string[] => [...m.matchAll(/class="(park-[^"]*)"/g)].map((x) => x[1]);
     expect(layers(at(1, hall))).toEqual(layers(woof));
     const roof = /^park-(roof|ridge|tile)/;
-    expect(layers(at(1, hall)).filter((x) => !roof.test(x))).toEqual(['park-area', 'park-edge', 'park-lawn', 'park-pond', 'park-green', 'park-water', 'park-path street-minor', 'park-bridge-rail', 'park-bridge', 'park-building']);
+    expect(layers(at(1, hall)).filter((x) => !roof.test(x))).toEqual(['park-area', 'park-edge', 'park-lawn', 'park-pond', 'park-green', 'park-water', 'park-path street-minor', 'park-flag-base', 'park-bridge-rail', 'park-bridge', 'park-building']);
     // 翠湖的曲橋：拉近到橋上（外圈 20 公尺）有石板、欄杆柱
     const bridge: [number, number] = [25.0385, 121.55899];
     expect(layers(at(0.02, bridge))).toEqual(expect.arrayContaining(['park-bridge-rail', 'park-bridge', 'park-bridge-slab', 'park-bridge-post']));
@@ -123,21 +123,27 @@ describe('地球的雷達上的中山公園（跟汪星共用一份）', () => {
       expect(Math.hypot((at[0] - HATCH_CENTER[0]) * EARTH.my, (at[1] - HATCH_CENTER[1]) * EARTH.mx(at[0]))).toBeGreaterThan(6);
     }
     expect(new Set(spots.map((s) => s.ring)).size).toBeGreaterThan(15);
-    /** 這一點狗走得到嗎：不在建築、水裡，在草皮裡或在步道上 */
+    /** 這一點狗走得到嗎：在翠湖的曲橋上；或不在建築、水裡（橋接到的小島不算水），在草皮裡或在步道上 */
     const m = (p: [number, number]): [number, number] => [(p[1] - 121.5596) * EARTH.mx(25.0394), (p[0] - 25.0394) * EARTH.my];
-    const nearPath = (p: [number, number]): boolean => {
+    /** 離這些線（公尺）多近 */
+    const near = (p: [number, number], lines: Array<Array<[number, number]>>, d: number): boolean => {
       const [x, y] = m(p);
-      return ZHONGSHAN_PARK.paths.some((l) => l.some((q, i) => {
+      return lines.some((l) => l.some((q, i) => {
         if (!i) return false;
         const [ax, ay] = m(l[i - 1]);
         const [bx, by] = m(q);
         const t = Math.max(0, Math.min(1, ((x - ax) * (bx - ax) + (y - ay) * (by - ay)) / ((bx - ax) ** 2 + (by - ay) ** 2 || 1)));
-        // 步道兩邊 1.2 公尺（每 0.5 公尺看一次，草皮和步道之間不到半公尺的縫多留一點）
-        return Math.hypot(ax + (bx - ax) * t - x, ay + (by - ay) * t - y) <= 1.5;
+        return Math.hypot(ax + (bx - ax) * t - x, ay + (by - ay) * t - y) <= d;
       }));
     };
+    // 步道兩邊 1.2 公尺（每 0.5 公尺看一次，草皮和步道之間不到半公尺的縫多留一點）；橋面中線兩邊 0.7 公尺
+    const nearPath = (p: [number, number]): boolean => near(p, ZHONGSHAN_PARK.paths, 1.5);
+    const onBridge = (p: [number, number]): boolean => near(p, ZHONGSHAN_PARK.bridges, 0.75);
+    const linked = (island: Array<[number, number]>): boolean =>
+      ZHONGSHAN_PARK.bridges.some((l) => [l[0], l[l.length - 1]].some((q) => inRing(q, island) || near(q, [[...island, island[0]]], 1.5)));
+    const inWater = (p: [number, number]): boolean => ZHONGSHAN_PARK.water.some(([outer, ...islands]) => inRing(p, outer) && !islands.some((r) => linked(r) && inRing(p, r)));
     const walkable = (p: [number, number]): boolean =>
-      !ZHONGSHAN_PARK.buildings.some((r) => inRing(p, r)) && !ZHONGSHAN_PARK.water.some((w) => inRing(p, w[0])) && (ZHONGSHAN_PARK.green.some((r) => inRing(p, r)) || nearPath(p));
+      onBridge(p) || (!ZHONGSHAN_PARK.buildings.some((r) => inRing(p, r)) && !inWater(p) && (ZHONGSHAN_PARK.green.some((r) => inRing(p, r)) || nearPath(p)));
     /** 照轉折點走過去，每 0.5 公尺都走得到 */
     const walkedOk = (from: [number, number], path: Array<[number, number]>): boolean =>
       path.every((to, i) => {
@@ -150,6 +156,14 @@ describe('地球的雷達上的中山公園（跟汪星共用一份）', () => {
     // 直直走：穿過紀念館（建築）、橫越廣場走不到；同一塊草皮裡走得到
     expect(PARK_YARD.canWalk!([25.0402, 121.5597], [25.0402, 121.5606])).toBe(false);
     expect(PARK_YARD.canWalk!([25.0391, 121.5594], [25.0391, 121.5609])).toBe(false);
+    // 翠湖的曲橋：橋上（水上）走得到，旁邊的水裡走不到；從北岸過橋、走過小島、再過另一座橋到南岸
+    const [north, south] = ZHONGSHAN_PARK.bridges;
+    for (const l of ZHONGSHAN_PARK.bridges) l.forEach((q, i) => i && expect(PARK_YARD.canWalk!(l[i - 1], q)).toBe(true));
+    expect(PARK_YARD.canWalk!(north[1], [north[1][0], north[1][1] + 0.00004])).toBe(false);
+    const shore = north[north.length - 1];
+    const across = PARK_YARD.route!(shore, south[south.length - 1], 80);
+    expect(across).not.toBeNull();
+    expect(walkedOk(shore, across!)).toBe(true);
     // 照步道走到附近另一塊草皮（最多 32 公尺）：每 0.5 公尺都在草地或步道上，不穿過建築、水池、廣場
     let crossed = 0;
     for (const { ring, at } of spots.slice(0, 80)) {
@@ -246,6 +260,16 @@ describe('地球的雷達上的中山公園（跟汪星共用一份）', () => {
     expect(xiaofa.sniff).toBeGreaterThan(0.65);
     expect(xiaofa.sniff).toBeGreaterThan(plain.sniff + 0.1);
     expect(xiaofa.ms).toBeGreaterThan(plain.ms + 1000);
+  });
+
+  it('draws the flagpole in front of (south of) 映池: a dot from afar, then the stone base and the pole', () => {
+    const fp = ZHONGSHAN_PARK.flagpole;
+    expect(fp[0]).toBeLessThan(25.039066);
+    expect(at(0.4, fp)).toContain('class="flag-dot"');
+    const close = at(0.1, fp);
+    for (const cls of ['flag-stone-top', 'flag-stone-front', 'flag-pole', 'flag-ball', 'flag-rope']) expect(close).toContain(`class="${cls}"`);
+    // 遠的看不到
+    expect(at(1, fp)).not.toContain('park-flagpole');
   });
 
   it('summons the rocket stored under the middle lawn, parks it, flies it to 汪星 and stores it there', () => {
