@@ -322,7 +322,8 @@ let onlyActive = lsGet(LS_ONLY_ACTIVE) === '1';
 /** 時間範圍（跟距離範圍對應）：雷達、地圖只畫這段時間內會開始的，進行中、開放中的一定畫 */
 type TimeSetting = 'now' | '3h' | '24h' | '3d' | 'all';
 const TIME_SEC: Record<TimeSetting, number> = { now: 0, '3h': 3 * 3600, '24h': 24 * 3600, '3d': 3 * 86400, all: Infinity };
-let timeSetting: TimeSetting = (lsGet(LS_TIME) ?? '') in TIME_SEC ? (lsGet(LS_TIME) as TimeSetting) : 'all';
+// 時間範圍的按鈕先拿掉看看：固定「全部」，之前選過別的也不管（只看進行中用清單上的「進行中」）
+let timeSetting: TimeSetting = 'all';
 /** 這台裝置已經回報過「已發完」的事件 */
 const endedReported = new Set<number>(loadIdList(LS_ENDED));
 /** 用這個瀏覽器回報過的貼文（伺服器認裝置代碼）；詳細資料看到自己回報的可以刪除 */

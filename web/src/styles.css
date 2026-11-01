@@ -197,6 +197,8 @@ a.chip { display: inline-flex; align-items: center; text-decoration: none; }
 #scale-chips { flex-wrap: wrap; }
 @media (max-width: 440px) { #scale-chips { gap: 4px; } #scale-chips .chip { padding: 8px 8px; font-size: 13px; } }
 @media (max-width: 380px) { #scale-chips, #time-chips { gap: 4px; } #scale-chips .chip { padding: 8px 6px; font-size: 12px; } #time-chips .chip, #time-toggle { padding: 4px 8px; font-size: 12px; } }
+/* 先拿掉看看：雷達下面的時間範圍、距離範圍按鈕不顯示（縮放用雙指、滾輪、點兩下，時間固定全部） */
+#time-toggle, #time-chips, #scale-chips { display: none; }
 .link-btn { font: inherit; font-size: 13px; border: 0; background: transparent; color: var(--accent); padding: 4px; text-decoration: underline; cursor: pointer; }
 
 #stage { position: relative; min-height: 0; padding: 8px 12px; display: grid; grid-template-rows: minmax(0, 1fr) auto; }
