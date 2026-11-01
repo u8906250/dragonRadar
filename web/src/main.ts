@@ -1496,6 +1496,7 @@ function render(): void {
   );
   renderList(items, now);
   renderDetail(items, now);
+  if (detailEl.hidden) setPeek(false);
 
   // 新變成進行中且在雷達範圍內的事件 → 嗶聲、震動、通知。第一次載入不吵。搜尋只影響畫面，通知照樣看全部
   const notifyPool = searchTerms.length > 0 ? fetched.filter((it) => shown[categoryOf(it)] && (!onlyActive || activeNow(it, now))) : items;
@@ -2337,11 +2338,92 @@ function setDetailHtml(key: string, html: string): void {
   const open = same ? new Set([...detailEl.querySelectorAll('details[open]')].map(summaryKey)) : new Set<string>();
   const top = detailEl.scrollTop;
   detailEl.dataset.key = key;
-  detailEl.innerHTML = html;
-  if (!same) return;
+  // 最上面一條把手：往下拖收起來（wireSheetDrag）
+  detailEl.innerHTML = `<div class="sheet-grab" aria-hidden="true"><span></span></div>${html}`;
+  if (!same) {
+    setPeek(false);
+    return;
+  }
   for (const d of detailEl.querySelectorAll<HTMLDetailsElement>('details')) if (open.has(summaryKey(d))) d.open = true;
   // 抽屜本身會捲動：展開的區塊放回去之後再還原位置
   detailEl.scrollTop = top;
+}
+
+/**
+ * 詳細資料的卡片可以往下拖（從最上面的把手、標題那一列）：拖一點放開收成只露出標題的一條（看得到後面的雷達、地圖），
+ * 拖到底或用力往下滑就關掉（跟按「關閉」一樣，取消選取）；收起來時點標題或往上拖打開，再往下拖關掉
+ */
+function setPeek(on: boolean): void {
+  if (on) {
+    const head = detailEl.querySelector<HTMLElement>('.sheet-head');
+    detailEl.scrollTop = 0;
+    detailEl.style.setProperty('--peek', `${head ? head.offsetTop + head.offsetHeight + 10 : 72}px`);
+  }
+  detailEl.classList.toggle('peek', on);
+}
+
+/** 拖下去關掉：先滑出畫面再按「關閉」（減少動態效果時直接關） */
+function closeDetail(): void {
+  const close = (): void => {
+    detailEl.style.transform = '';
+    setPeek(false);
+    detailEl.querySelector<HTMLButtonElement>('[data-act="close"]')?.click();
+  };
+  if (calmMotion?.matches) return close();
+  detailEl.style.transform = `translateY(${detailEl.offsetHeight + 24}px)`;
+  window.setTimeout(close, 200);
+}
+
+function wireSheetDrag(): void {
+  let drag: { id: number; y: number; peek: boolean; base: number; last: { y: number; t: number }; v: number } | null = null;
+  let dy = 0;
+  let moved = false;
+  detailEl.addEventListener('pointerdown', (e) => {
+    const t = e.target instanceof Element ? e.target : null;
+    if (!t || (e.pointerType === 'mouse' && e.button !== 0) || t.closest('button, a, input, select, textarea, label') || !t.closest('.sheet-grab, .sheet-head')) return;
+    const peek = detailEl.classList.contains('peek');
+    const peekPx = parseFloat(detailEl.style.getPropertyValue('--peek')) || 72;
+    drag = { id: e.pointerId, y: e.clientY, peek, base: peek ? Math.max(0, detailEl.offsetHeight - peekPx) : 0, last: { y: e.clientY, t: e.timeStamp }, v: 0 };
+    dy = 0;
+    moved = false;
+    detailEl.setPointerCapture(e.pointerId);
+  });
+  detailEl.addEventListener('pointermove', (e) => {
+    if (!drag || e.pointerId !== drag.id) return;
+    dy = e.clientY - drag.y;
+    if (!moved && Math.abs(dy) < 6) return;
+    moved = true;
+    const dt = e.timeStamp - drag.last.t;
+    if (dt > 0) drag.v = (e.clientY - drag.last.y) / dt;
+    drag.last = { y: e.clientY, t: e.timeStamp };
+    detailEl.classList.add('dragging');
+    detailEl.style.transform = `translateY(${Math.max(0, drag.base + dy).toFixed(1)}px)`;
+  });
+  const end = (e: PointerEvent): void => {
+    if (!drag || e.pointerId !== drag.id) return;
+    const d = drag;
+    drag = null;
+    detailEl.classList.remove('dragging');
+    detailEl.style.transform = '';
+    // 收起來時點一下標題：打開
+    if (!moved) {
+      if (d.peek && e.type === 'pointerup') setPeek(false);
+      return;
+    }
+    // 放開前還在快速滑（像素／毫秒）
+    const v = e.timeStamp - d.last.t < 80 ? d.v : 0;
+    if (d.peek) {
+      if (dy < -30 || v < -0.5) setPeek(false);
+      else if (dy > 30 || v > 0.5) closeDetail();
+      else setPeek(true);
+      return;
+    }
+    const off = d.base + dy;
+    if (off > detailEl.offsetHeight * 0.7 || v > 1.2) closeDetail();
+    else if (off > 60 || v > 0.4) setPeek(true);
+  };
+  detailEl.addEventListener('pointerup', end);
+  detailEl.addEventListener('pointercancel', end);
 }
 
 function renderDetail(items: Item[], now: number): void {
@@ -2369,10 +2451,6 @@ function renderDetail(items: Item[], now: number): void {
     selectedRoute = null;
     selectedLandmark = null;
     selectedBottle = null;
-    detailEl.hidden = true;
-    return;
-  }
-  if (dismissedId === selectedId) {
     detailEl.hidden = true;
     return;
   }
@@ -2748,8 +2826,6 @@ async function sendEnded(ev: EventOut, btn: HTMLButtonElement): Promise<void> {
 let selectedGroup: number[] = [];
 /** 點了疊在一起的一群、還沒選是哪一個 */
 let choosing: number[] | null = null;
-/** 點其他地方收起詳細資料的那一則：雷達、地圖、清單上照樣選著，再點它（光點、標記、清單）重新打開 */
-let dismissedId: number | null = null;
 
 const sameGroup = (a: number[] | null, b: number[]): boolean => !!a && [...a].sort().join() === [...b].sort().join();
 
@@ -2787,9 +2863,6 @@ function selectRoute(id: string | null): void {
 }
 
 function select(id: number | null, group: number[] = []): void {
-  // 收起詳細資料、還選著的這一則：再點它是打開，不是取消選取
-  const reopen = id !== null && id === selectedId && id === dismissedId;
-  dismissedId = null;
   feedbackSheet.hidden = true;
   routeOnMap = null;
   selectedRoute = null;
@@ -2812,7 +2885,7 @@ function select(id: number | null, group: number[] = []): void {
   choosing = null;
   // 從同一群切換到另一個時保留整群，其他情況（點清單）就清掉
   selectedGroup = id !== null && selectedGroup.includes(id) ? selectedGroup : [];
-  selectedId = reopen || selectedId !== id ? id : null;
+  selectedId = selectedId !== id ? id : null;
   if (selectedId !== null) {
     themeSheet.hidden = true;
     kwSheet.hidden = true;
@@ -2862,8 +2935,7 @@ async function reveal(id: number): Promise<void> {
     if (!inTime(it, now)) setTime('all');
   }
   const target = it?.ev.id ?? id;
-  // select 再點同一個會取消選取，這裡一定要選上（收起了詳細資料的也打開）
-  dismissedId = null;
+  // select 再點同一個會取消選取，這裡一定要選上
   if (selectedId === target) render();
   else select(target);
 }
@@ -4179,14 +4251,9 @@ function wireTapOutside(): void {
       down = null;
       const t = e.target instanceof Element ? e.target : null;
       if (moved || !t || t.closest(KEEP_OPEN)) return;
+      // 詳細資料跟按「關閉」一樣：收起來、取消選取（雷達、地圖、清單上不再標著）
       for (const sheet of [detailEl, themeSheet, moduleSheet, kwSheet]) {
-        if (sheet.hidden) continue;
-        if (sheet === detailEl && selectedId !== null && detailEl.dataset.key === `ev:${selectedId}`) {
-          dismissedId = selectedId;
-          detailEl.hidden = true;
-          continue;
-        }
-        sheet.querySelector<HTMLButtonElement>('[data-act="close"]')?.click();
+        if (!sheet.hidden) sheet.querySelector<HTMLButtonElement>('[data-act="close"]')?.click();
       }
       // 車掃出發前按「在地圖上看路線」畫出來的路線：點其他地方收起，回到只顯示起點
       if (routeOnMap) {
@@ -4943,6 +5010,7 @@ function wireControls(): void {
   bottleBtn.addEventListener('click', () => openBottleSheet(bottleSheet.hidden));
   bottleSheet.querySelector('[data-act="close"]')?.addEventListener('click', () => openBottleSheet(false));
   wireTapOutside();
+  wireSheetDrag();
   bottleText.addEventListener('input', () => {
     const over = updateBottleCount();
     bottleDropBtn.disabled = origin.source !== 'gps' || over;
