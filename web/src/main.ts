@@ -2986,31 +2986,33 @@ let home: Home | null = loadHome();
 
 /**
  * 「回到我的位置」：有 GPS 位置就馬上回去；還沒收到 GPS（剛開頁面）就先回到上次知道的位置
- * （最後一次的 GPS 或移動前的位置），不用等重新定位，之後 GPS 回來照常更新。都沒有才重新定位
+ * （最後一次的 GPS 或移動前的位置），不用等重新定位，之後 GPS 回來照常更新。都沒有才重新定位（「定位」）。
+ * 跟「定位」一樣，範圍拉到外圈 LOCATE_KM（太空裡、轉過視角的先拉回地球；在汪星是回到發射口）
  */
 function goHome(): void {
   if (tripping) return;
   lockDog(null);
   // 你在汪星：回到汪星的發射口（點別的星球只是看過去，坐火箭回來才回到地球）
   if (youOn === 'woof') {
-    void woofHomeView().then((v) => radar.setSpaceView(v));
+    void woofHomeView().then((v) => {
+      radar.setSpaceView(v);
+      zoomToKm(LOCATE_KM);
+    });
     return;
-  }
-  // 太陽系那幾層移開了視野：先拉回地球；位置本來就不是手動的就到這裡為止
-  if (radar.spaceMoved) {
-    radar.resetSpace();
-    if (origin.source !== 'manual') return;
   }
   const to: Home | null = lastGps ? { ...lastGps, source: 'gps', accuracy: lastGpsAccuracy } : home;
   if (!to) {
     locateMe();
     return;
   }
+  // 太陽系那幾層移開了視野：先拉回地球
+  if (radar.spaceMoved) radar.resetSpace();
   lsSet(LS_ORIGIN, null);
   gpsAccuracy = to.source === 'gps' ? to.accuracy : null;
   setOrigin({ lat: to.lat, lng: to.lng, source: to.source });
   map.setOrigin(origin, true, gpsAccuracy);
-  fitEarthZoom();
+  zoomToKm(LOCATE_KM);
+  if (view === 'map') map.showRange(LOCATE_KM, 0);
 }
 
 // ---- 汪星的狗：點了出現「鎖定」，按了雷達正中間跟著牠（鏡頭慢慢追上），再按、自己拖曳、換星球、回到我的位置、搭火箭、切到地圖就解除 ----
@@ -3242,9 +3244,41 @@ function setBase(b: BaseMap): void {
 
 let zoomFrame = 0;
 
+/**
+ * 「定位」「回到我的位置」：範圍慢慢縮放到外圈 km 公里（頭尾慢，照倍數取對數走；差越多走越久，ZOOM_TO_MS 之間），
+ * 不在雷達畫面（地圖）、減少動態效果時直接換；縮放到一半自己捏合、滾滾輪就停在那裡
+ */
+const ZOOM_TO_MS: [number, number] = [300, 900];
+let zoomToFrame = 0;
+function zoomToKm(km: number): void {
+  cancelAnimationFrame(zoomToFrame);
+  zoomToFrame = 0;
+  const total = Math.log(km / scaleKm);
+  if (view !== 'radar' || calmMotion?.matches || Math.abs(total) < 0.01) {
+    zoomRadar(km / scaleKm, true);
+    return;
+  }
+  const ms = Math.min(ZOOM_TO_MS[1], Math.max(ZOOM_TO_MS[0], 300 + 60 * Math.abs(total)));
+  const t0 = performance.now();
+  let went = 0;
+  const step = (now: number): void => {
+    const k = Math.min(1, (now - t0) / ms);
+    const eased = easeInOut(k);
+    zoomRadar(Math.exp(total * (eased - went)), k >= 1);
+    went = eased;
+    zoomToFrame = k < 1 ? requestAnimationFrame(step) : 0;
+  };
+  zoomToFrame = requestAnimationFrame(step);
+}
+
 /** 雙指縮放、滾輪：連續調整範圍；放開時接近某個按鈕的範圍（差 6% 以內）就對齊那個按鈕 */
 /** gesture：雙指、滾輪（太空裡幅度加大）；從地圖切回來是直接換成地圖的比例，不加大 */
 function zoomRadar(factor: number, done: boolean, gesture = false): void {
+  // 自己縮放：「定位」的慢慢縮放停在這裡
+  if (gesture && zoomToFrame) {
+    cancelAnimationFrame(zoomToFrame);
+    zoomToFrame = 0;
+  }
   // 太空（比全球再遠）一次縮放的幅度大一點：從全球到整個太陽系差了幾十萬倍
   const f = gesture && (scaleKm > WORLD_KM || (scaleKm >= WORLD_KM && factor > 1)) ? factor ** 2 : factor;
   // 太空裡中心換到別的星球（月球、木星…）：最多放大到剛好看得到整顆，汪星可以放大到 1 km，中山公園附近到 0.5 公尺；
@@ -3346,8 +3380,8 @@ function locateMe(): void {
     map.setOrigin(origin, true, gpsAccuracy);
   }
   if (radar.spaceMoved) radar.resetSpace();
-  zoomRadar(LOCATE_KM / scaleKm, true);
-  if (view === 'map') map.showRange(scaleKm, 0);
+  zoomToKm(LOCATE_KM);
+  if (view === 'map') map.showRange(LOCATE_KM, 0);
   locateBtn.classList.add('on');
   locateBtn.textContent = '定位中…';
   navigator.geolocation.getCurrentPosition(
