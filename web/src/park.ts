@@ -226,17 +226,52 @@ const STATUE_SVG = (() => {
 const DOG_FULL = INNER / 30;
 /** 狗在哪個世界畫（汪星；算走多遠用這個世界的公尺），還沒畫過是地球 */
 let dogWorld: ParkGeom | null = null;
-/** 草皮的面積（照面積抽哪一塊） */
-let lawnAreas: number[] | null = null;
+/**
+ * 狗待的地方（照面積抽、在裡面走來走去、停下來休息；編號就是狗的 ring）：先是草皮（ZHONGSHAN_PARK.green 的編號），
+ * 再來每一條步道（中線兩邊各 PATH_SPOT_M，太短的不算），最後是旗台。edges 是邊（公尺座標，找附近的地方用）
+ */
+interface ParkArea {
+  kind: 'lawn' | 'path' | 'deck';
+  m2: number;
+  edges: Array<[Pt, Pt]>;
+  /** 草皮、旗台：一圈台北的經緯度 */
+  ring?: Pt[];
+  /** 步道：中線（公尺座標）、每一點走了多遠 */
+  line?: Pt[];
+  cum: number[];
+}
+const PATH_SPOT_M = 0.8;
+/** 在步道上走來走去：只在現在這裡前後幾公尺抽 */
+const WITHIN_PATH_M = 15;
+/** 不太會去的地方：抽到那裡的只留這麼多 */
+const RARE_KEEP = 0.12;
+let areaList: ParkArea[] | null = null;
+export function parkAreas(): ParkArea[] {
+  if (areaList) return areaList;
+  const fromRing = (r: Pt[]): ParkArea => {
+    const m = r.map(toM);
+    return { kind: 'lawn', ring: r, m2: Math.abs(ringArea(m)), edges: m.map((p, i): [Pt, Pt] => [p, m[(i + 1) % m.length]]), cum: [] };
+  };
+  const paths = ZHONGSHAN_PARK.paths.flatMap((l): ParkArea[] => {
+    const line = l.map(toM);
+    const cum = line.map(() => 0);
+    for (let i = 1; i < line.length; i++) cum[i] = cum[i - 1] + Math.hypot(line[i][0] - line[i - 1][0], line[i][1] - line[i - 1][1]);
+    const len = cum[cum.length - 1];
+    return len < 2 ? [] : [{ kind: 'path', line, cum, m2: len * 2 * PATH_SPOT_M, edges: line.slice(1).map((p, i): [Pt, Pt] => [line[i], p]) }];
+  });
+  return (areaList = [...ZHONGSHAN_PARK.green.map(fromRing), ...paths, { ...fromRing(ZHONGSHAN_PARK.flagBase), kind: 'deck' }]);
+}
 
 /**
- * 狗走得到的地方（照使用者說的：草地、步道和橋可以走）：在草皮裡（不在建築、水裡），或離步道 PATH_W 公尺內；翠湖的曲橋上（橋面 BRIDGE_W_M 寬，
+ * 狗走得到的地方（照使用者說的：草地、步道、橋和旗台可以走）：在草皮、旗台上（不在建築、水裡，不上旗桿的底座），或離步道 PATH_W 公尺內；翠湖的曲橋上（橋面 BRIDGE_W_M 寬，
  * 離橋中線 BRIDGE_WALK_M 內）水上也走得到，橋接到的小島不算水（沒有橋的小島還是去不了）；
  * 一段直直走過去的路每 0.5 公尺都要走得到（不穿過建築、不橫越廣場）。換草皮、去湖邊照步道走（像導航：步道每 3 公尺一點、
  * 接在一起的步道連起來，最短的走法，再把看得到的點之間拉直）。算的時候換成公園附近的公尺（往東、往北）
  */
 const PATH_W = 1.2;
 const BRIDGE_WALK_M = 0.7;
+/** 旗台上旗桿的底座（離旗桿這麼近）上不去 */
+const POLE_BLOCK_M = 1.5;
 const WALK_M0: Pt = [25.0394, 121.5596];
 const WALK_MY = 110_574;
 const WALK_MX = 111_320 * Math.cos(WALK_M0[0] * RAD);
@@ -262,9 +297,11 @@ function segDist([px, py]: Pt, [ax, ay]: Pt, [bx, by]: Pt): number {
   return Math.hypot(ax + dx * t - px, ay + dy * t - py);
 }
 
-/** 公園裡走得到的地方（第一次用到才算）：草皮、擋住的（建築、水池；holes 是水池裡橋接到的小島）、橋上、步道的每一段（5 公尺一格的索引）、步道的路網 */
+/** 公園裡走得到的地方（第一次用到才算）：草皮、旗台、擋住的（建築、水池；holes 是水池裡橋接到的小島）、旗桿底座、橋上、步道的每一段（5 公尺一格的索引）、步道的路網 */
 interface Walk {
   lawns: Array<{ ring: Pt[]; box: Box }>;
+  deck: { ring: Pt[]; box: Box };
+  pole: Pt;
   blocks: Array<{ ring: Pt[]; box: Box; holes: Pt[][] }>;
   onBridge: (p: Pt) => boolean;
   segs: Array<[Pt, Pt]>;
@@ -290,6 +327,8 @@ function walkOf(): Walk {
     return { ring, box: boxOf(ring) };
   };
   const lawns = ZHONGSHAN_PARK.green.map(ringM);
+  const deck = ringM(ZHONGSHAN_PARK.flagBase);
+  const pole = toM(ZHONGSHAN_PARK.flagpole);
   const bridges = ZHONGSHAN_PARK.bridges.map((l) => l.map(toM));
   const onBridge = (p: Pt): boolean => bridges.some((l) => l.some((q, i) => i > 0 && segDist(p, l[i - 1], q) <= BRIDGE_WALK_M));
   // 水池裡的小島：橋的一頭在島上（或離島邊 1.5 公尺內）才走得到
@@ -354,25 +393,33 @@ function walkOf(): Walk {
       }
     }
   });
-  return (walkData = { lawns, blocks, onBridge, segs, grid, nodes, nodeGrid, adj });
+  return (walkData = { lawns, deck, pole, blocks, onBridge, segs, grid, nodes, nodeGrid, adj });
 }
 
 /**
- * 中山公園給一隻狗待的地方（DogYard）：草皮和步道上，照面積抽一塊草皮，不在發射口和銅像旁邊（火箭、銅像不會蓋住）；
- * avoid 是這隻狗不去的地方（一圈圈台北的經緯度，例如小法不去公園最右上那一區）；走多遠照汪星的公尺算
+ * 中山公園給一隻狗待的地方（DogYard）：照面積抽一塊待的地方（parkAreas：草皮、每一條步道、旗台，跟草皮一樣可以走來走去、停下來休息），
+ * 在公園裡、不在發射口和銅像旁邊（火箭、銅像不會蓋住）；avoid 是這隻狗不去的地方（一圈圈台北的經緯度，例如小法不去公園最右上那一區），
+ * rare 是不太會去的地方（抽到那裡的只留 RARE_KEEP 的機會，路過可以）；走多遠照汪星的公尺算
  */
-export function parkYard(o: { avoid?: Pt[][] } = {}): DogYard {
-  const avoid = (o.avoid ?? []).map((r) => {
-    const ring = r.map(toM);
-    return { ring, box: boxOf(ring) };
-  });
-  /** 這一點走得到嗎（公尺座標）：不去的地方不行；橋上可以；不在建築、水裡（橋接到的小島可以），在草皮裡或離步道 PATH_W 內 */
+export function parkYard(o: { avoid?: Pt[][]; rare?: Pt[][] } = {}): DogYard {
+  const zone = (rs: Pt[][]): Array<{ ring: Pt[]; box: Box }> =>
+    rs.map((r) => {
+      const ring = r.map(toM);
+      return { ring, box: boxOf(ring) };
+    });
+  const avoid = zone(o.avoid ?? []);
+  const rare = zone(o.rare ?? []);
+  /** 不太會去的地方：要去那裡的只留 RARE_KEEP 的機會（換地方、一開始放在哪時用；已經在那裡就照常走） */
+  const keep = (at: Pt, rand: () => number): boolean => !rare.some((b) => inBox(toM(at), b.box) && inRingM(toM(at), b.ring)) || rand() < RARE_KEEP;
+  /** 這一點走得到嗎（公尺座標）：不去的地方、旗桿底座不行；橋上可以；不在建築、水裡（橋接到的小島可以），在草皮、旗台上或離步道 PATH_W 內 */
   const okM = (p: Pt): boolean => {
     const w = walkOf();
     if (avoid.some((b) => inBox(p, b.box) && inRingM(p, b.ring))) return false;
+    if (Math.hypot(p[0] - w.pole[0], p[1] - w.pole[1]) < POLE_BLOCK_M) return false;
     if (w.onBridge(p)) return true;
     if (w.blocks.some((b) => inBox(p, b.box) && inRingM(p, b.ring) && !b.holes.some((h) => inRingM(p, h)))) return false;
     if (w.lawns.some((l) => inBox(p, l.box) && inRingM(p, l.ring))) return true;
+    if (inBox(p, w.deck.box) && inRingM(p, w.deck.ring)) return true;
     return nearby(w.grid, p, PATH_W).some((i) => segDist(p, ...w.segs[i]) <= PATH_W);
   };
   /** 從 a 直直走到 b 一路都走得到（每 0.5 公尺看一次，公尺座標） */
@@ -434,11 +481,54 @@ export function parkYard(o: { avoid?: Pt[][] } = {}): DogYard {
     return out;
   };
   const len = (from: Pt, path: Pt[]): number => path.reduce((s, p, i) => s + Math.hypot(p[0] - (i ? path[i - 1] : from)[0], p[1] - (i ? path[i - 1] : from)[1]), 0);
-  /** 這塊草皮裡隨機一個走得到的地方（不在發射口和銅像旁邊）；near 是只在這一點附近幾公尺內抽；抽不到是 null */
+  /**
+   * 這一塊待的地方裡隨機一個走得到的地方（在公園裡，不在發射口和銅像旁邊，不太會去的地方大多不要）；near 是只在這一點附近幾公尺內抽；抽不到是 null。
+   * 草皮、旗台在範圍裡抽；步道沿著中線抽（near 時只抽投影到中線那一點前後幾公尺），往兩邊最多 PATH_SPOT_M
+   */
   const spotIn = (ring: number, rand: () => number, near?: { at: Pt; m: number }): Pt | null => {
-    const r = ZHONGSHAN_PARK.green[ring];
+    const area = parkAreas()[ring];
+    if (!area) return null;
     const [my, mx] = [EARTH.my, EARTH.mx(HATCH_CENTER[0])];
     const far = (p: Pt, q: Pt, m: number): boolean => Math.abs((p[0] - q[0]) * my) > m || Math.abs((p[1] - q[1]) * mx) > m;
+    const good = (at: Pt): boolean =>
+      inRing(at, ZHONGSHAN_PARK.outline) &&
+      far(at, HATCH_CENTER, 6) &&
+      far(at, ZHONGSHAN_PARK.statue, 2.5) &&
+      okM(toM(at)) &&
+      keep(at, rand);
+    if (area.line) {
+      const { line, cum } = area;
+      const total = cum[cum.length - 1];
+      let [s0, s1] = [0, total];
+      if (near) {
+        // 投影到中線最近的那一點，前後 near.m 公尺
+        const a = toM(near.at);
+        let best = { d: Infinity, s: 0 };
+        for (let k = 1; k < line.length; k++) {
+          const d = segDist(a, line[k - 1], line[k]);
+          if (d < best.d) {
+            const [dx, dy] = [line[k][0] - line[k - 1][0], line[k][1] - line[k - 1][1]];
+            const t = Math.max(0, Math.min(1, ((a[0] - line[k - 1][0]) * dx + (a[1] - line[k - 1][1]) * dy) / (dx * dx + dy * dy || 1)));
+            best = { d, s: cum[k - 1] + t * (cum[k] - cum[k - 1]) };
+          }
+        }
+        if (best.d > near.m) return null;
+        [s0, s1] = [Math.max(0, best.s - near.m), Math.min(total, best.s + near.m)];
+      }
+      for (let i = 0; i < 40; i++) {
+        const sAt = s0 + rand() * (s1 - s0);
+        let k = 1;
+        while (k < cum.length - 1 && cum[k] < sAt) k++;
+        const len = cum[k] - cum[k - 1] || 1;
+        const t = (sAt - cum[k - 1]) / len;
+        const [dx, dy] = [(line[k][0] - line[k - 1][0]) / len, (line[k][1] - line[k - 1][1]) / len];
+        const side = (rand() * 2 - 1) * PATH_SPOT_M;
+        const at = fromM([line[k - 1][0] + (line[k][0] - line[k - 1][0]) * t - dy * side, line[k - 1][1] + (line[k][1] - line[k - 1][1]) * t + dx * side]);
+        if (good(at)) return at;
+      }
+      return null;
+    }
+    const r = area.ring!;
     let [a0, a1] = [Math.min(...r.map((q) => q[0])), Math.max(...r.map((q) => q[0]))];
     let [b0, b1] = [Math.min(...r.map((q) => q[1])), Math.max(...r.map((q) => q[1]))];
     if (near) {
@@ -448,32 +538,37 @@ export function parkYard(o: { avoid?: Pt[][] } = {}): DogYard {
     }
     for (let i = 0; i < 40; i++) {
       const at: Pt = [a0 + rand() * (a1 - a0), b0 + rand() * (b1 - b0)];
-      if (inRing(at, r) && far(at, HATCH_CENTER, 6) && far(at, ZHONGSHAN_PARK.statue, 2.5) && okM(toM(at))) return at;
+      if (inRing(at, r) && good(at)) return at;
     }
     return null;
   };
   return {
     anywhere: (rand) => {
-      const areas = (lawnAreas ??= ZHONGSHAN_PARK.green.map((r) => Math.abs(ringArea(r))));
-      const total = areas.reduce((a, b) => a + b, 0);
+      const areas = parkAreas();
+      const total = areas.reduce((a, b) => a + b.m2, 0);
       for (let tries = 0; tries < 1000; tries++) {
         let pick = rand() * total;
-        const ring = Math.max(0, areas.findIndex((a) => (pick -= a) < 0));
+        const ring = Math.max(0, areas.findIndex((a) => (pick -= a.m2) < 0));
         const at = spotIn(ring, rand);
-        if (at) return { ring, at };
+        if (at && keep(at, rand)) return { ring, at };
       }
       return null;
     },
-    within: (ring, rand) => spotIn(ring, rand),
+    // 步道很長：只在現在這裡前後幾公尺抽（草皮、旗台整塊抽）
+    within: (ring, rand, near) => (near && parkAreas()[ring]?.line ? spotIn(ring, rand, { at: near, m: WITHIN_PATH_M }) : spotIn(ring, rand)),
     canWalk: (a, b) => lineM(toM(a), toM(b)),
     route: (a, b, maxM = CROSS_MAX_M) => routeM(toM(a), toM(b), maxM)?.map(fromM) ?? null,
-    // 附近的其他草皮（邊離這裡 CROSS_NEAR_M 內，在離這裡 CROSS_NEAR_M 內的那一部分抽一處），照步道走過去，最多 CROSS_MAX_M 公尺
+    // 附近的其他地方（草皮、步道、旗台，邊離這裡 CROSS_NEAR_M 內，照面積抽，在離這裡 CROSS_NEAR_M 內的那一部分抽一處），照步道走過去，最多 CROSS_MAX_M 公尺
     elsewhere: (ring, at, rand) => {
       const a = toM(at);
-      const near = walkOf().lawns.map((l, i) => i).filter((i) => i !== ring && walkOf().lawns[i].ring.some((p, j, r) => segDist(a, p, r[(j + 1) % r.length]) < CROSS_NEAR_M));
+      const areas = parkAreas();
+      const near = areas.flatMap((x, i) => (i !== ring && x.edges.some(([p, q]) => segDist(a, p, q) < CROSS_NEAR_M) ? [i] : []));
+      const total = near.reduce((t, i) => t + areas[i].m2, 0);
       for (let tries = 0; tries < 12 && near.length; tries++) {
-        const i = near[Math.floor(rand() * near.length)];
+        let pick = rand() * total;
+        const i = near.find((k) => (pick -= areas[k].m2) < 0) ?? near[near.length - 1];
         const to = spotIn(i, rand, { at, m: CROSS_NEAR_M });
+        if (to && !keep(to, rand)) continue;
         const path = to ? routeM(a, toM(to), CROSS_MAX_M) : null;
         if (to && path) return { ring: i, path: path.map(fromM) };
       }
@@ -516,6 +611,8 @@ export const PARK_YARD: DogYard = parkYard();
 
 /** 小法不去的地方：公園最右上那一區（國父紀念館東邊那條南北向步道以東、橫過整個公園那條東西向步道以北，東北角那一排草皮） */
 export const XIAOFA_AVOID: Pt[] = [[25.03932, 121.56098], [25.0413, 121.56098], [25.0413, 121.5618], [25.03932, 121.5618]];
+/** 小法不太會去的地方：國父紀念館後面（北邊，紀念館北牆以北、紀念館西牆到不去的那一區之間）；正面是映池、旗桿那邊（南邊） */
+export const XIAOFA_RARE: Pt[] = [[25.04053, 121.55974], [25.0413, 121.55974], [25.0413, 121.56098], [25.04053, 121.56098]];
 
 /**
  * 小法的個性：特別喜歡走走聞聞——在草皮裡走路大多邊走邊聞（約七成，一般的狗約四成），
@@ -529,8 +626,8 @@ export const XIAOFA_NATURE: DogNature = {
   last: { ...NATURE.last, sniff: [3000, 7000] },
 };
 
-/** 公園裡的狗：小法（使用者的馬爾濟斯；不去公園最右上那一區；特別喜歡走走聞聞） */
-export const PARK_DOGS: Dog[] = [new Dog({ id: 'xiaofa', name: '小法', look: MALTESE, yard: parkYard({ avoid: [XIAOFA_AVOID] }), nature: XIAOFA_NATURE })];
+/** 公園裡的狗：小法（使用者的馬爾濟斯；不去公園最右上那一區、不太會去國父紀念館後面；特別喜歡走走聞聞） */
+export const PARK_DOGS: Dog[] = [new Dog({ id: 'xiaofa', name: '小法', look: MALTESE, yard: parkYard({ avoid: [XIAOFA_AVOID], rare: [XIAOFA_RARE] }), nature: XIAOFA_NATURE })];
 
 /** 搭火箭到汪星：每隻狗換到隨機一塊草皮 */
 export function moveDogs(): void {

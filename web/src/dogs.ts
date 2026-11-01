@@ -59,7 +59,8 @@ export interface DogSeg {
  */
 export interface DogYard {
   anywhere(rand: () => number): { ring: number; at: Pt } | null;
-  within(ring: number, rand: () => number): Pt | null;
+  /** near：現在在哪（很長的地方，例如步道，只在附近抽） */
+  within(ring: number, rand: () => number, near?: Pt): Pt | null;
   canWalk?(a: Pt, b: Pt): boolean;
   route?(a: Pt, b: Pt, maxM?: number): Pt[] | null;
   elsewhere(ring: number, at: Pt, rand: () => number): { ring: number; path: Pt[] } | null;
@@ -408,7 +409,7 @@ export class Dog {
     let best: { to: Pt; m: number } | null = null;
     let detour: Pt | null = null;
     for (let i = 0; i < 12; i++) {
-      const to = this.yard.within(s.ring, rand);
+      const to = this.yard.within(s.ring, rand, at);
       if (!to) break;
       if (this.yard.canWalk && !this.yard.canWalk(at, to)) {
         detour ??= to;
