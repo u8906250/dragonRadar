@@ -3249,7 +3249,7 @@ let zoomFrame = 0;
  * 「定位」「回到我的位置」：範圍慢慢縮放到外圈 km 公里（頭尾慢，照倍數取對數走；差越多走越久，ZOOM_TO_MS 之間），
  * 不在雷達畫面（地圖）、減少動態效果時直接換；縮放到一半自己捏合、滾滾輪就停在那裡
  */
-const ZOOM_TO_MS: [number, number] = [300, 900];
+const ZOOM_TO_MS: [number, number] = [500, 1500];
 let zoomToFrame = 0;
 function zoomToKm(km: number): void {
   cancelAnimationFrame(zoomToFrame);
@@ -3259,7 +3259,7 @@ function zoomToKm(km: number): void {
     zoomRadar(km / scaleKm, true);
     return;
   }
-  const ms = Math.min(ZOOM_TO_MS[1], Math.max(ZOOM_TO_MS[0], 300 + 60 * Math.abs(total)));
+  const ms = Math.min(ZOOM_TO_MS[1], Math.max(ZOOM_TO_MS[0], 500 + 120 * Math.abs(total)));
   const t0 = performance.now();
   let went = 0;
   const step = (now: number): void => {
