@@ -40,7 +40,8 @@
       <main id="stage" data-view="radar">
         <section id="radar-view" class="view" aria-label="雷達">
           <!-- 放大到 2 km 內畫街道時才顯示：OpenFreeMap 的使用條件要標出處 -->
-          <small id="radar-attrib" class="radar-attrib" hidden><a href="https://openfreemap.org" target="_blank" rel="noopener">OpenFreeMap</a> © <a href="https://www.openmaptiles.org/" target="_blank" rel="noopener">OpenMapTiles</a> © <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a></small>
+          <!-- 中山公園的樹畫出來時：樹的位置是照國土測繪中心的正射影像判讀的 -->
+          <small id="radar-attrib" class="radar-attrib" hidden><span id="street-attrib"><a href="https://openfreemap.org" target="_blank" rel="noopener">OpenFreeMap</a> © <a href="https://www.openmaptiles.org/" target="_blank" rel="noopener">OpenMapTiles</a> © <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a></span><span id="tree-attrib" hidden> 樹的位置：<a href="https://www.nlsc.gov.tw/" target="_blank" rel="noopener">內政部國土測繪中心</a>正射影像判讀</span></small>
         </section>
         <section id="map-view" class="view" hidden aria-label="地圖"><div id="map"></div></section>
 

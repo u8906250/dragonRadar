@@ -17,6 +17,12 @@ const pond: [number, number] = [25.039066, 121.56026];
 const lake: [number, number] = [25.0384268, 121.5593159];
 const island: [number, number] = [25.0383369, 121.558924];
 const at = (km: number, [lat, lng]: [number, number]): string => earthParkSvg({ lat, lng }, km);
+/** 點在不在一圈裡面（射線法） */
+const ringHas = (r: Array<[number, number]>, y: number, x: number): boolean =>
+  r.reduce((on, [yi, xi], i) => {
+    const [yj, xj] = r[(i + r.length - 1) % r.length];
+    return yi > y !== yj > y && x < ((xj - xi) * (y - yi)) / (yj - yi) + xi ? !on : on;
+  }, false);
 const count = (m: string, cls: string): number => (new RegExp(`class="${cls}"[^>]* d="([^"]*)"`).exec(m)?.[1].match(/M/g) ?? []).length;
 /** 地球的雷達上的畫法（北在上，跟 earthParkSvg 一樣） */
 const earthCanvas = (km: number, [lat, lng]: [number, number]) => {
@@ -46,7 +52,17 @@ describe('地球的雷達上的中山公園（跟汪星共用一份）', () => {
     const layers = (m: string): string[] => [...m.matchAll(/class="(park-[^"]*)"/g)].map((x) => x[1]);
     expect(layers(at(1, hall))).toEqual(layers(woof));
     const roof = /^park-(roof|ridge|tile)/;
-    expect(layers(at(1, hall)).filter((x) => !roof.test(x))).toEqual(['park-area', 'park-edge', 'park-lawn', 'park-pond', 'park-green', 'park-water', 'park-rim-edge', 'park-rim', 'park-path street-minor', 'park-flag-base', 'park-bridge-rail', 'park-bridge', 'park-building']);
+    expect(layers(at(1, hall)).filter((x) => !roof.test(x))).toEqual(['park-area', 'park-edge', 'park-lawn', 'park-pond', 'park-green', 'park-water', 'park-rim-edge', 'park-rim', 'park-path street-minor', 'park-flag-base', 'park-bridge-rail', 'park-bridge', 'park-tree', 'park-building']);
+    // 樹：外圈 1 km 每一棵都是一個圓點；拉近（外圈 40 公尺）樹冠有影子、亮的一塊和一叢叢葉子
+    expect(count(at(1, hall), 'park-tree')).toBe(ZHONGSHAN_PARK.trees.length);
+    expect(ZHONGSHAN_PARK.trees.length).toBeGreaterThan(500);
+    const grove: [number, number] = [25.0388, 121.5609];
+    expect(layers(at(0.04, grove))).toEqual(expect.arrayContaining(['park-tree-shade', 'park-tree', 'park-tree-lit', 'park-tree-clump']));
+    // 樹都在公園裡、不在建築和水裡（橋接到的小島可以）
+    for (const [lat, lng] of ZHONGSHAN_PARK.trees) {
+      expect(ringHas(ZHONGSHAN_PARK.outline, lat, lng)).toBe(true);
+      expect(ZHONGSHAN_PARK.buildings.some((r) => ringHas(r, lat, lng))).toBe(false);
+    }
     // 映池旁邊那一圈可以坐的石頭邊：拉近（外圈 20 公尺）有一塊塊石頭的接縫
     const pool: [number, number] = [25.039066, 121.56026];
     expect(layers(at(0.02, pool))).toEqual(expect.arrayContaining(['park-rim-edge', 'park-rim', 'park-rim-joint']));

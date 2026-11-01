@@ -898,7 +898,11 @@ const woofStreets: import('./space').WoofStreets = (lat, lng, km, rangeKm) => {
 function updateStreets(): void {
   // 選「雙北」、範圍再大的只畫縣市界、海岸線的虛線
   const show = scaleSetting !== 'region' && scaleKm <= outlineKm() && !radar.spaceFocused;
-  $('#radar-attrib').hidden = !show;
+  // 中山公園的樹（外圈約 1.8 km 內才畫）：地球上公園在附近、汪星上，註明樹的位置是照國土測繪中心的正射影像判讀的
+  const trees = scaleKm <= PARK_TREES_KM && (radar.spaceFocused ? radar.spaceFocusKey === 'woof' : haversineKm(origin, PARK_NEAR) < scaleKm * 1.5 + 0.5);
+  $('#radar-attrib').hidden = !show && !trees;
+  $('#street-attrib').hidden = !show;
+  $('#tree-attrib').hidden = !trees;
   if (!show) {
     if (streetsFor) radar.setStreets(null);
     streetsFor = '';
@@ -938,6 +942,8 @@ let parkMod: typeof import('./park') | null = null;
 let parkLoading = false;
 /** 中山公園大約在哪裡：只用來決定要不要載入 park.ts（畫的位置、範圍、可以放大到多近都在 park.ts） */
 const PARK_NEAR = { lat: 25.0395, lng: 121.5596 };
+/** 外圈幾公里內畫得出中山公園的樹（park.ts 的 DETAIL_PPM：每公尺 0.09 像素） */
+const PARK_TREES_KM = 1.8;
 
 /** 地球上雷達正中間可以放大到多近：中山公園附近 0.5 公尺（park.ts 載入了才知道），其他地方 MIN_ZOOM_KM */
 function earthMinKm(): number {
