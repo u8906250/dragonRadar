@@ -45,7 +45,16 @@ describe('地球的雷達上的中山公園（跟汪星共用一份）', () => {
     const woof = spaceMarkup({ center: { lat: 25.04, lng: 121.52 }, land: [], when: new Date('2026-10-28T08:00:00Z'), scaleKm: 1, rg: 164, view: { focus: 'woof', yaw: (-ln * Math.PI) / 180, pitch: (la * Math.PI) / 180 } });
     const layers = (m: string): string[] => [...m.matchAll(/class="(park-[^"]*)"/g)].map((x) => x[1]);
     expect(layers(at(1, hall))).toEqual(layers(woof));
-    expect(layers(at(1, hall))).toEqual(['park-area', 'park-edge', 'park-lawn', 'park-pond', 'park-green', 'park-water', 'park-path street-minor', 'park-building']);
+    const roof = /^park-(roof|ridge|tile)/;
+    expect(layers(at(1, hall)).filter((x) => !roof.test(x))).toEqual(['park-area', 'park-edge', 'park-lawn', 'park-pond', 'park-green', 'park-water', 'park-path street-minor', 'park-building']);
+    // 屋頂：每一棟都填色，國父紀念館是黃色琉璃瓦、有屋脊；外圈 1 km 還沒有瓦溝
+    const roofs = layers(at(1, hall)).filter((x) => roof.test(x));
+    expect(roofs.filter((x) => x.startsWith('park-roof'))).toEqual(['park-roof hall', 'park-roof']);
+    expect(count(at(1, hall), 'park-roof')).toBe(ZHONGSHAN_PARK.buildings.length - 1);
+    expect(roofs).toContain('park-ridge hall');
+    expect(roofs.some((x) => x.startsWith('park-tile'))).toBe(false);
+    // 拉近到國父紀念館上面（外圈 20 公尺）：黃色琉璃瓦有一條條瓦溝
+    expect(count(at(0.02, hall), 'park-tile hall')).toBeGreaterThan(50);
     // 拉近到銅像旁邊（25 公尺）：兩邊都有草和整座銅像
     const statue: [number, number] = [25.040048, 121.5594];
     const [sa, sn] = toWoof(statue);
