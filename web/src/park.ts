@@ -79,6 +79,8 @@ export interface ParkGeom {
   paths: Pt[][];
   /** 翠湖的曲橋（步道那樣的線，bridgesSvg 畫成有欄杆的橋面） */
   bridges: Pt[][];
+  /** 映池旁邊那一圈可以坐的石頭邊（池子外框接回起點的線） */
+  rim: Pt[];
   statue: Pt;
   /** 映池前面的國旗旗桿（底座的中心）、旗台（填色的圈，從上面看） */
   flagpole: Pt;
@@ -141,6 +143,7 @@ export function parkGeom(w: ParkWorld): ParkGeom {
     green: ZHONGSHAN_PARK.green.map(loop),
     paths: ZHONGSHAN_PARK.paths.map((l) => dense(l.map(w.to))),
     bridges: ZHONGSHAN_PARK.bridges.map((l) => dense(l.map(w.to))),
+    rim: loop(ZHONGSHAN_PARK.water[0][0]),
     statue: w.to(ZHONGSHAN_PARK.statue),
     flagpole: w.to(ZHONGSHAN_PARK.flagpole),
     flagBase: area(ZHONGSHAN_PARK.flagBase),
@@ -875,6 +878,8 @@ export function parkSvg(g: ParkGeom, c: ParkCanvas): string {
   out += texture('park-ripple', 'ripple');
   out += `<path class="park-green" d="${c.lines(g.green)}" />`;
   out += `<path class="park-water" d="${c.lines(g.water)}" />`;
+  // 映池的邊是一圈石頭（蓋在水的虛線邊上）
+  out += rimSvg(g, c);
   out += `<path class="park-path street-minor" d="${c.lines(g.paths)}" />`;
   // 旗台：映池前面的旗桿底下那一塊石頭鋪的平台（從上面看），旗桿站在中間
   const flagBase = c.area([g.flagBase]);
@@ -966,11 +971,9 @@ const BRIDGE_POST_M = 2;
 function bridgesSvg(g: ParkGeom, c: ParkCanvas): string {
   const d = c.lines(g.bridges);
   if (!d) return '';
-  const { O } = g;
   const ppm = c.ppm;
   const w = Math.max(1.6, BRIDGE_W_M * ppm);
   const rail = Math.max(0.5, 0.12 * ppm);
-  const reach = viewReach() + 4;
   const f1 = (n: number): string => n.toFixed(1);
   let out = `<path class="park-bridge-rail" stroke-width="${f1(w + 2 * rail)}" d="${d}" /><path class="park-bridge" stroke-width="${f1(w)}" d="${d}" />`;
   // 石板：畫的這一層間隔 step（畫面上至少 5 像素），外圈約 60 公尺內才淡入；欄杆柱：畫面上間隔 8 像素以上才畫
@@ -979,39 +982,64 @@ function bridgesSvg(g: ParkGeom, c: ParkCanvas): string {
   const slabs = c.textures ? Math.max(0, Math.min(1, 2 - f)) : 0;
   const posts = c.textures && BRIDGE_POST_M * ppm >= 8;
   if (!slabs && !posts) return out;
-  let slab = '';
-  let post = '';
+  const slab = slabs ? alongLines(g, c, g.bridges, (x, y, nx, ny, k) => (k > 0 ? `M${f1(x - (nx * w) / 2)} ${f1(y - (ny * w) / 2)}L${f1(x + (nx * w) / 2)} ${f1(y + (ny * w) / 2)}` : ''), step) : '';
   const r = Math.max(0.6, 0.09 * ppm);
-  for (const line of g.bridges) {
-    // 每一段：兩頭換到畫面上，沿著段每隔 step 公尺一塊石板（橫跨橋面）、每隔 BRIDGE_POST_M 兩邊各一根柱子
+  const dot = (x: number, y: number): string => `M${f1(x - r)} ${f1(y)}a${f1(r)} ${f1(r)} 0 1 0 ${f1(2 * r)} 0a${f1(r)} ${f1(r)} 0 1 0 ${f1(-2 * r)} 0`;
+  // 欄杆柱：每一段平均分（轉角也有一根）
+  const post = posts ? alongLines(g, c, g.bridges, (x, y, nx, ny) => dot(x + (nx * w) / 2, y + (ny * w) / 2) + dot(x - (nx * w) / 2, y - (ny * w) / 2), BRIDGE_POST_M, true) : '';
+  if (slab) out += `<path class="park-bridge-slab" stroke-width="${f1(Math.max(0.3, 0.04 * ppm))}" stroke-opacity="${(0.8 * slabs).toFixed(2)}" d="${slab}" />`;
+  if (post) out += `<path class="park-bridge-post" d="${post}" />`;
+  return out;
+}
+
+/**
+ * 沿著線（台北的經緯度換到這個世界的）每隔 every 公尺放一個東西：each(畫面上的 x, y, 垂直於線的單位向量 nx, ny, 這一段的第幾個) 回傳畫的 path；
+ * 每一段從頭開始數（k = 0 是段的起點），split 是每一段平均分（段長不是 every 的倍數也頭尾都有）；只畫看得到的
+ */
+function alongLines(g: ParkGeom, c: ParkCanvas, lines: Pt[][], each: (x: number, y: number, nx: number, ny: number, k: number) => string, every: number, split = false): string {
+  const { O } = g;
+  const reach = viewReach() + 4;
+  let d = '';
+  for (const line of lines) {
     const pts = line.map(([lat, lng]) => c.at(lat, lng));
     for (let i = 1; i < line.length; i++) {
-      const p = pts[i - 1];
-      const q = pts[i];
+      const [p, q] = [pts[i - 1], pts[i]];
       if (!p || !q) continue;
       const m = Math.hypot((line[i][1] - line[i - 1][1]) * O.mx, (line[i][0] - line[i - 1][0]) * O.my);
       const [dx, dy] = [q[0] - p[0], q[1] - p[1]];
       const len = Math.hypot(dx, dy);
       if (!(m > 0) || !(len > 0)) continue;
-      const [nx, ny] = [(-dy / len) * (w / 2), (dx / len) * (w / 2)];
-      const near = (x: number, y: number): boolean => Math.hypot(x - c.rx, y - c.ry) <= reach;
-      if (slabs) {
-        for (let s = step; s < m; s += step) {
-          const [x, y] = [p[0] + (dx * s) / m, p[1] + (dy * s) / m];
-          if (near(x, y)) slab += `M${f1(x - nx)} ${f1(y - ny)}L${f1(x + nx)} ${f1(y + ny)}`;
-        }
-      }
-      if (posts) {
-        const n = Math.max(1, Math.round(m / BRIDGE_POST_M));
-        for (let k = 0; k <= n; k++) {
-          const [x, y] = [p[0] + (dx * k) / n, p[1] + (dy * k) / n];
-          if (near(x, y)) for (const sd of [-1, 1]) post += `M${f1(x + sd * nx - r)} ${f1(y + sd * ny)}a${f1(r)} ${f1(r)} 0 1 0 ${f1(2 * r)} 0a${f1(r)} ${f1(r)} 0 1 0 ${f1(-2 * r)} 0`;
-        }
+      const [nx, ny] = [-dy / len, dx / len];
+      const n = split ? Math.max(1, Math.round(m / every)) : Math.ceil(m / every);
+      for (let k = 0; k <= n; k++) {
+        const s = split ? (m * k) / n : k * every;
+        if (s > m) break;
+        const [x, y] = [p[0] + (dx * s) / m, p[1] + (dy * s) / m];
+        if (Math.hypot(x - c.rx, y - c.ry) <= reach) d += each(x, y, nx, ny, k);
       }
     }
   }
-  if (slab) out += `<path class="park-bridge-slab" stroke-width="${f1(Math.max(0.3, 0.04 * ppm))}" stroke-opacity="${(0.8 * slabs).toFixed(2)}" d="${slab}" />`;
-  if (post) out += `<path class="park-bridge-post" d="${post}" />`;
+  return d;
+}
+
+/**
+ * 映池旁邊那一圈可以坐的石頭邊（從上面看）：沿著池邊一圈約 POOL_RIM_M 寬的淺色石頭，外面一條深一點的邊；
+ * 拉近（外圈約 60 公尺內，跟草一樣汪星要飛過去當中心才畫）慢慢畫出一塊塊石頭的接縫（每 POOL_RIM_BLOCK_M 一條）。寬度 OSM 沒有，是估的
+ */
+const POOL_RIM_M = 0.6;
+const POOL_RIM_BLOCK_M = 1.2;
+function rimSvg(g: ParkGeom, c: ParkCanvas): string {
+  const d = c.lines([g.rim]);
+  if (!d) return '';
+  const ppm = c.ppm;
+  const f1 = (n: number): string => n.toFixed(1);
+  const w = Math.max(1.2, POOL_RIM_M * ppm);
+  let out = `<path class="park-rim-edge" stroke-width="${f1(w + 2 * Math.max(0.4, 0.06 * ppm))}" d="${d}" /><path class="park-rim" stroke-width="${f1(w)}" d="${d}" />`;
+  // 接縫：畫面上間隔 5 像素以上、外圈約 60 公尺內才淡入
+  const joints = c.textures ? Math.max(0, Math.min(1, 2 - Math.log2(5 / (ppm * POOL_RIM_BLOCK_M)))) : 0;
+  if (!joints) return out;
+  const j = alongLines(g, c, [g.rim], (x, y, nx, ny) => `M${f1(x - (nx * w) / 2)} ${f1(y - (ny * w) / 2)}L${f1(x + (nx * w) / 2)} ${f1(y + (ny * w) / 2)}`, POOL_RIM_BLOCK_M, true);
+  if (j) out += `<path class="park-rim-joint" stroke-width="${f1(Math.max(0.3, 0.04 * ppm))}" stroke-opacity="${(0.8 * joints).toFixed(2)}" d="${j}" />`;
   return out;
 }
 

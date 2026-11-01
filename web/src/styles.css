@@ -600,6 +600,11 @@ path.map-water-glint { animation: water-flow-map 1.1s linear infinite; }
 .radar .park-area { fill: var(--accent); fill-opacity: 0.1; stroke: none; pointer-events: none; }
 .radar .park-edge { fill: none; stroke: var(--accent); stroke-width: 1.2; stroke-opacity: 0.6; stroke-dasharray: 2 2; pointer-events: none; }
 .radar .park-building { fill: none; stroke: var(--radar-grid); stroke-width: 1; stroke-opacity: 0.55; stroke-linejoin: round; pointer-events: none; }
+/* 映池旁邊那一圈可以坐的石頭邊（park.ts 的 rimSvg）：淺色石頭、外面一條深一點的邊，拉近有一塊塊石頭的接縫 */
+.radar .park-rim-edge, .radar .park-rim { fill: none; stroke-linejoin: round; stroke-linecap: round; pointer-events: none; }
+.radar .park-rim-edge { stroke: #8f8676; }
+.radar .park-rim { stroke: #ebe6dc; }
+.radar .park-rim-joint { fill: none; stroke: #a59b88; pointer-events: none; }
 /* 翠湖的曲橋（park.ts 的 bridgesSvg）：淺色的石頭橋面、兩邊深一點的欄杆，拉近有一塊塊石板、欄杆柱；兩頭接岸邊不封起來，轉角是尖的 */
 .radar .park-bridge-rail, .radar .park-bridge { fill: none; stroke-linejoin: miter; stroke-linecap: butt; pointer-events: none; }
 .radar .park-bridge-rail { stroke: #7d6b55; }
