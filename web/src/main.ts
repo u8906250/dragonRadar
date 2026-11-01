@@ -3326,12 +3326,28 @@ function geoErrorText(e: GeolocationPositionError): string {
   return '目前無法取得位置，請稍後再試，或切到地圖用「設定位置」手動選。';
 }
 
-/** 「定位」按鈕：清掉手動位置，重新抓一次 GPS 並移到我的位置 */
+/** 按「定位」定位好之後，雷達、地圖的範圍拉到外圈幾公里 */
+const LOCATE_KM = 2;
+
+/**
+ * 「定位」按鈕：清掉手動位置，先馬上回到我的位置（上次知道的 GPS 位置，跟「回到我的位置」一樣不用等），範圍拉到外圈 LOCATE_KM
+ * （太空裡、轉過視角的先拉回地球）；再重新抓一次 GPS，抓到了移到新的位置（範圍不再動，等的時候自己縮放的照舊）
+ */
 function locateMe(): void {
   if (!('geolocation' in navigator)) {
     showBanner(bannerEl, '此瀏覽器不支援定位，可切到地圖用「設定位置」手動選。', 4000);
     return;
   }
+  const known = lastGps ? { ...lastGps, accuracy: lastGpsAccuracy } : home?.source === 'gps' ? home : null;
+  if (known) {
+    lsSet(LS_ORIGIN, null);
+    gpsAccuracy = known.accuracy;
+    setOrigin({ lat: known.lat, lng: known.lng, source: 'gps' });
+    map.setOrigin(origin, true, gpsAccuracy);
+  }
+  if (radar.spaceMoved) radar.resetSpace();
+  zoomRadar(LOCATE_KM / scaleKm, true);
+  if (view === 'map') map.showRange(scaleKm, 0);
   locateBtn.classList.add('on');
   locateBtn.textContent = '定位中…';
   navigator.geolocation.getCurrentPosition(
