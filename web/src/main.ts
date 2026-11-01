@@ -2350,40 +2350,32 @@ function setDetailHtml(key: string, html: string): void {
 }
 
 /**
- * 詳細資料的卡片可以往下拖（從最上面的把手、標題那一列）：拖一點放開收成只露出標題的一條（看得到後面的雷達、地圖），
- * 拖到底或用力往下滑就關掉（跟按「關閉」一樣，取消選取）；收起來時點標題或往上拖打開，再往下拖關掉
+ * 詳細資料的卡片可以往下拖（從最上面的把手、標題那一列）：拖一點或往下滑一下放開，收成只露出標題的一條（看得到後面的雷達、地圖）；
+ * 往下滑再用力也不會關掉（關掉是按「關閉」或點其他地方）；收起來時點標題或往上拖打開
  */
+const peekPx = (): number => {
+  const head = detailEl.querySelector<HTMLElement>('.sheet-head');
+  return head ? head.offsetTop + head.offsetHeight + 10 : 72;
+};
 function setPeek(on: boolean): void {
   if (on) {
-    const head = detailEl.querySelector<HTMLElement>('.sheet-head');
     detailEl.scrollTop = 0;
-    detailEl.style.setProperty('--peek', `${head ? head.offsetTop + head.offsetHeight + 10 : 72}px`);
+    detailEl.style.setProperty('--peek', `${peekPx()}px`);
   }
   detailEl.classList.toggle('peek', on);
 }
 
-/** 拖下去關掉：先滑出畫面再按「關閉」（減少動態效果時直接關） */
-function closeDetail(): void {
-  const close = (): void => {
-    detailEl.style.transform = '';
-    setPeek(false);
-    detailEl.querySelector<HTMLButtonElement>('[data-act="close"]')?.click();
-  };
-  if (calmMotion?.matches) return close();
-  detailEl.style.transform = `translateY(${detailEl.offsetHeight + 24}px)`;
-  window.setTimeout(close, 200);
-}
-
 function wireSheetDrag(): void {
-  let drag: { id: number; y: number; peek: boolean; base: number; last: { y: number; t: number }; v: number } | null = null;
+  let drag: { id: number; y: number; peek: boolean; base: number; low: number; last: { y: number; t: number }; v: number } | null = null;
   let dy = 0;
   let moved = false;
   detailEl.addEventListener('pointerdown', (e) => {
     const t = e.target instanceof Element ? e.target : null;
     if (!t || (e.pointerType === 'mouse' && e.button !== 0) || t.closest('button, a, input, select, textarea, label') || !t.closest('.sheet-grab, .sheet-head')) return;
     const peek = detailEl.classList.contains('peek');
-    const peekPx = parseFloat(detailEl.style.getPropertyValue('--peek')) || 72;
-    drag = { id: e.pointerId, y: e.clientY, peek, base: peek ? Math.max(0, detailEl.offsetHeight - peekPx) : 0, last: { y: e.clientY, t: e.timeStamp }, v: 0 };
+    // 最低拖到收起來的位置再多一點點（放開彈回收起來的位置）
+    const low = Math.max(0, detailEl.offsetHeight - peekPx());
+    drag = { id: e.pointerId, y: e.clientY, peek, base: peek ? low : 0, low: low + 24, last: { y: e.clientY, t: e.timeStamp }, v: 0 };
     dy = 0;
     moved = false;
     detailEl.setPointerCapture(e.pointerId);
@@ -2397,7 +2389,7 @@ function wireSheetDrag(): void {
     if (dt > 0) drag.v = (e.clientY - drag.last.y) / dt;
     drag.last = { y: e.clientY, t: e.timeStamp };
     detailEl.classList.add('dragging');
-    detailEl.style.transform = `translateY(${Math.max(0, drag.base + dy).toFixed(1)}px)`;
+    detailEl.style.transform = `translateY(${Math.min(drag.low, Math.max(0, drag.base + dy)).toFixed(1)}px)`;
   });
   const end = (e: PointerEvent): void => {
     if (!drag || e.pointerId !== drag.id) return;
@@ -2412,15 +2404,8 @@ function wireSheetDrag(): void {
     }
     // 放開前還在快速滑（像素／毫秒）
     const v = e.timeStamp - d.last.t < 80 ? d.v : 0;
-    if (d.peek) {
-      if (dy < -30 || v < -0.5) setPeek(false);
-      else if (dy > 30 || v > 0.5) closeDetail();
-      else setPeek(true);
-      return;
-    }
-    const off = d.base + dy;
-    if (off > detailEl.offsetHeight * 0.7 || v > 1.2) closeDetail();
-    else if (off > 60 || v > 0.4) setPeek(true);
+    if (d.peek) setPeek(!(dy < -30 || v < -0.5));
+    else if (dy > 60 || v > 0.4) setPeek(true);
   };
   detailEl.addEventListener('pointerup', end);
   detailEl.addEventListener('pointercancel', end);
