@@ -71,12 +71,15 @@ describe('地球的雷達上的中山公園（跟汪星共用一份）', () => {
     expect(layers(at(0.02, bridge))).toEqual(expect.arrayContaining(['park-bridge-rail', 'park-bridge', 'park-bridge-slab', 'park-bridge-post']));
     // 屋頂：每一棟都填色，國父紀念館是黃色琉璃瓦、有屋脊；外圈 1 km 還沒有瓦溝
     const roofs = layers(at(1, hall)).filter((x) => roof.test(x));
-    expect(roofs.filter((x) => x.startsWith('park-roof'))).toEqual(['park-roof hall', 'park-roof']);
+    expect(roofs.filter((x) => /^park-roof( hall)?$/.test(x))).toEqual(['park-roof hall', 'park-roof']);
+    // 國父紀念館中間紅褐色的平頂（照正射影像）
+    expect(roofs).toContain('park-roof-flat');
     expect(count(at(1, hall), 'park-roof')).toBe(ZHONGSHAN_PARK.buildings.length - 1);
     expect(roofs).toContain('park-ridge hall');
     expect(roofs.some((x) => x.startsWith('park-tile'))).toBe(false);
-    // 拉近到國父紀念館上面（外圈 20 公尺）：黃色琉璃瓦有一條條瓦溝
-    expect(count(at(0.02, hall), 'park-tile hall')).toBeGreaterThan(50);
+    // 拉近到國父紀念館上面（外圈 20 公尺）：正中間是平頂的分格和天窗，旁邊斜的黃色琉璃瓦有一條條瓦溝
+    expect(layers(at(0.02, hall))).toEqual(expect.arrayContaining(['park-roof-flat', 'park-roof-grid', 'park-roof-sky']));
+    expect(count(at(0.02, [hall[0], hall[1] - 0.0004]), 'park-tile hall')).toBeGreaterThan(50);
     // 拉近到銅像旁邊（25 公尺）：兩邊都有草和整座銅像
     const statue: [number, number] = [25.040048, 121.5594];
     const [sa, sn] = toWoof(statue);

@@ -1123,7 +1123,7 @@ function rimSvg(g: ParkGeom, c: ParkCanvas): string {
 }
 
 /**
- * 建築的屋頂（從上面看）：國父紀念館（最大的那棟）是黃色琉璃瓦，其他是紅褐色的瓦。每一棟用最小的外接長方形當成四坡頂（廡殿頂）：
+ * 建築的屋頂（從上面看）：國父紀念館（最大的那棟）是黃色琉璃瓦、中間紅褐色的平頂（照正射影像，HALL_FLAT），其他是紅褐色的瓦。每一棟用最小的外接長方形當成四坡頂（廡殿頂）：
  * 長邊方向一條屋脊、四個角的斜脊接到屋脊兩頭，照建築的形狀裁掉外面的；拉近（外圈約 150 公尺內）慢慢畫出一條條瓦溝，
  * 從屋簷往上到斜脊、屋脊（長邊那兩面直的、短邊那兩面橫的），真的間隔 ROOF_TILE_M，畫面上比 ROOF_TILE_PX 密就隔一條畫一條，
  * 細一層照拉近的程度慢慢淡入（拉近只會多、不會跳）。屋脊、瓦溝的粗細照真的寬度，太細就畫成最細
@@ -1134,6 +1134,13 @@ const ROOF_TILE_PX = 4;
 const ROOF_TILE_FROM = 4;
 /** 太小的（柱子、小亭子：在台北短邊不到 2 公尺，地球、汪星同一批）只填色 */
 const ROOF_MIN_M = 1;
+/**
+ * 國父紀念館的屋頂照正射影像：外圈四面斜下來的金黃色琉璃瓦，中間一大塊紅褐色的平頂（約寬度的 HALL_FLAT 倍，四周一圈淺色的矮牆），
+ * 四條斜脊從外圈的角接到平頂的角；拉近平頂上有分格（每 HALL_GRID_M 一條）、正中間一塊亮的方形（天窗，HALL_SKY_M 見方）
+ */
+const HALL_FLAT = 0.49;
+const HALL_GRID_M = 6;
+const HALL_SKY_M = 12;
 interface RoofBox {
   /** 中心、長邊方向（單位向量），長、短邊的一半（公尺，攤平的） */
   cx: number;
@@ -1225,6 +1232,7 @@ function roofsSvg(g: ParkGeom, c: ParkCanvas): string {
   const blank = (): Record<(typeof kinds)[number], string> => ({ hall: '', other: '' });
   const [fill, ridge, main, half] = [blank(), blank(), blank(), blank()];
   let clip = '';
+  let [flat, grid, skylight] = ['', '', ''];
   roofOf(g).forEach((r, i) => {
     const d = c.area([g.roofs[i]]);
     if (!d) return;
@@ -1252,20 +1260,35 @@ function roofsSvg(g: ParkGeom, c: ParkCanvas): string {
       return `M${f1(p[0])} ${f1(p[1])}L${f1(q[0])} ${f1(q[1])}`;
     };
     const { a, b } = r;
-    ridge[kind] += seg(-(a - b), 0, a - b, 0) + [-1, 1].flatMap((ss) => [-1, 1].map((tt) => seg(ss * a, tt * b, ss * (a - b), 0))).join('');
-    // 瓦溝：長邊那兩面（沿 s 每隔 every 一條，從屋簷 t = ±b 往上到斜脊或屋脊）、短邊那兩面（沿 t，從 s = ±a 往上）
+    // 屋頂最上面那一塊（ai、bi 是它的一半）：一般的四坡頂是一條屋脊（bi = 0），國父紀念館是中間的平頂
+    const [ai, bi] = r.hall ? [a * HALL_FLAT, b * HALL_FLAT] : [a - b, 0];
+    const hips = [-1, 1].flatMap((ss) => [-1, 1].map((tt) => seg(ss * a, tt * b, ss * ai, tt * bi))).join('');
+    ridge[kind] += (r.hall ? '' : seg(-ai, 0, ai, 0)) + hips;
+    // 瓦溝：長邊那兩面（沿 s 每隔 every 一條，從屋簷 t = ±b 往上到斜脊或最上面那一塊）、短邊那兩面（沿 t，從 s = ±a 往上）
     const grooves = (from: number, every: number): string => {
       let dd = '';
       for (let s = Math.ceil((-a - from) / every) * every + from; s < a; s += every) {
-        const up = Math.max(0, b - (a - Math.abs(s)));
+        const up = Math.abs(s) <= ai ? bi : bi + ((b - bi) * (Math.abs(s) - ai)) / (a - ai);
         dd += seg(s, b, s, up) + seg(s, -b, s, -up);
       }
       for (let t = Math.ceil((-b - from) / every) * every + from; t < b; t += every) {
-        const up = a - (b - Math.abs(t));
+        const up = Math.abs(t) <= bi ? ai : ai + ((a - ai) * (Math.abs(t) - bi)) / (b - bi);
         dd += seg(a, t, up, t) + seg(-a, t, -up, t);
       }
       return dd;
     };
+    // 國父紀念館中間的平頂：紅褐色、四周淺色的矮牆，拉近有分格、正中間的天窗
+    if (r.hall) {
+      const corners = [at(-ai, -bi), at(ai, -bi), at(ai, bi), at(-ai, bi)];
+      if (corners.every(Boolean)) flat += `M${corners.map((q) => `${f1(q![0])} ${f1(q![1])}`).join('L')}Z`;
+      const sk = HALL_SKY_M / 2;
+      const sky = [at(-sk, -sk), at(sk, -sk), at(sk, sk), at(-sk, sk)];
+      if (tiles > 0 && sky.every(Boolean)) {
+        skylight += `M${sky.map((q) => `${f1(q![0])} ${f1(q![1])}`).join('L')}Z`;
+        for (let s = Math.ceil(-ai / HALL_GRID_M) * HALL_GRID_M; s < ai; s += HALL_GRID_M) grid += seg(s, -bi, s, bi);
+        for (let t = Math.ceil(-bi / HALL_GRID_M) * HALL_GRID_M; t < bi; t += HALL_GRID_M) grid += seg(-ai, t, ai, t);
+      }
+    }
     if (tiles > 0) main[kind] += grooves(0, step);
     if (tiles > 0 && fine > 0.02) half[kind] += grooves(step / 2, step);
   });
@@ -1277,6 +1300,9 @@ function roofsSvg(g: ParkGeom, c: ParkCanvas): string {
     if (main[kind]) lines += `<path class="park-tile${cls}" stroke-width="${tileW.toFixed(2)}" stroke-opacity="${(0.5 * tiles).toFixed(2)}" d="${main[kind]}" />`;
     if (half[kind]) lines += `<path class="park-tile${cls}" stroke-width="${tileW.toFixed(2)}" stroke-opacity="${(0.5 * tiles * fine).toFixed(2)}" d="${half[kind]}" />`;
   }
+  if (flat) lines += `<path class="park-roof-flat" stroke-width="${Math.max(0.8, 0.6 * ppm).toFixed(2)}" d="${flat}" />`;
+  if (grid) lines += `<path class="park-roof-grid" stroke-width="${tileW.toFixed(2)}" stroke-opacity="${(0.6 * tiles).toFixed(2)}" d="${grid}" />`;
+  if (skylight) lines += `<path class="park-roof-sky" d="${skylight}" />`;
   for (const kind of kinds) if (ridge[kind]) lines += `<path class="park-ridge${kind === 'hall' ? ' hall' : ''}" stroke-width="${ridgeW.toFixed(2)}" d="${ridge[kind]}" />`;
   if (lines) out += `<clipPath id="park-roofs-${g.name}"><path d="${clip}" /></clipPath><g clip-path="url(#park-roofs-${g.name})">${lines}</g>`;
   return out;
