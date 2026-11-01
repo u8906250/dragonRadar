@@ -2987,7 +2987,7 @@ let home: Home | null = loadHome();
 /**
  * 「回到我的位置」：有 GPS 位置就馬上回去；還沒收到 GPS（剛開頁面）就先回到上次知道的位置
  * （最後一次的 GPS 或移動前的位置），不用等重新定位，之後 GPS 回來照常更新。都沒有才重新定位（「定位」）。
- * 跟「定位」一樣，範圍拉到外圈 LOCATE_KM（太空裡、轉過視角的先拉回地球；在汪星是回到發射口）
+ * 跟「定位」一樣，範圍拉到外圈 LOCATE_KM（本來就比較近的不動；太空裡、轉過視角的先拉回地球；在汪星是回到發射口）
  */
 function goHome(): void {
   if (tripping) return;
@@ -2996,7 +2996,7 @@ function goHome(): void {
   if (youOn === 'woof') {
     void woofHomeView().then((v) => {
       radar.setSpaceView(v);
-      zoomToKm(LOCATE_KM);
+      zoomToKm(locateKm(0));
     });
     return;
   }
@@ -3011,8 +3011,9 @@ function goHome(): void {
   gpsAccuracy = to.source === 'gps' ? to.accuracy : null;
   setOrigin({ lat: to.lat, lng: to.lng, source: to.source });
   map.setOrigin(origin, true, gpsAccuracy);
-  zoomToKm(LOCATE_KM);
-  if (view === 'map') map.showRange(LOCATE_KM, 0);
+  const km = locateKm(earthMinKm());
+  zoomToKm(km);
+  if (view === 'map') map.showRange(km, 0);
 }
 
 // ---- 汪星的狗：點了出現「鎖定」，按了雷達正中間跟著牠（鏡頭慢慢追上），再按、自己拖曳、換星球、回到我的位置、搭火箭、切到地圖就解除 ----
@@ -3360,11 +3361,12 @@ function geoErrorText(e: GeolocationPositionError): string {
   return '目前無法取得位置，請稍後再試，或切到地圖用「設定位置」手動選。';
 }
 
-/** 按「定位」定位好之後，雷達、地圖的範圍拉到外圈幾公里 */
+/** 按「定位」「回到我的位置」，雷達、地圖的範圍拉到外圈幾公里（本來就比較近的維持原本的，不拉遠；min 是最近可以到多近） */
 const LOCATE_KM = 2;
+const locateKm = (min: number): number => Math.max(min, Math.min(scaleKm, LOCATE_KM));
 
 /**
- * 「定位」按鈕：清掉手動位置，先馬上回到我的位置（上次知道的 GPS 位置，跟「回到我的位置」一樣不用等），範圍拉到外圈 LOCATE_KM
+ * 「定位」按鈕：清掉手動位置，先馬上回到我的位置（上次知道的 GPS 位置，跟「回到我的位置」一樣不用等），範圍拉到外圈 LOCATE_KM（本來就比較近的不動）
  * （太空裡、轉過視角的先拉回地球）；再重新抓一次 GPS，抓到了移到新的位置（範圍不再動，等的時候自己縮放的照舊）
  */
 function locateMe(): void {
@@ -3380,8 +3382,9 @@ function locateMe(): void {
     map.setOrigin(origin, true, gpsAccuracy);
   }
   if (radar.spaceMoved) radar.resetSpace();
-  zoomToKm(LOCATE_KM);
-  if (view === 'map') map.showRange(LOCATE_KM, 0);
+  const km = locateKm(earthMinKm());
+  zoomToKm(km);
+  if (view === 'map') map.showRange(km, 0);
   locateBtn.classList.add('on');
   locateBtn.textContent = '定位中…';
   navigator.geolocation.getCurrentPosition(
