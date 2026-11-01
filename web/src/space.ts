@@ -8,6 +8,7 @@ import { RADAR_GEOM, RADAR_VIEW, TINY_EARTH, viewReach, viewRect } from './radar
 import type { StreetClass, StreetLine } from './streets';
 import { nearPark, PARK_MIN_KM, parkGeom, parkSvg, ringArea, scatter } from './park';
 import { TAIPEI_MAJOR_ROADS, TAIPEI_MINOR_ROADS, TAIPEI_OUTLINE } from './taipei';
+import { ZHONGSHAN_PARK } from './zhongshan';
 
 const { c: C, inner: INNER, size: SIZE } = RADAR_GEOM;
 const RAD = Math.PI / 180;
@@ -313,11 +314,106 @@ const TP = {
   lng0: Math.min(...TAIPEI_OUTLINE.map((p) => p[1])),
   lng1: Math.max(...TAIPEI_OUTLINE.map((p) => p[1])),
 };
-/** 台北市的經緯度 → 汪星的經緯度 */
-export const toWoof = ([lat, lng]: [number, number]): [number, number] => [
+/** 台北市的經緯度 → 汪星的經緯度（平的：整個市界照經緯度攤開） */
+const toWoofFlat = ([lat, lng]: [number, number]): [number, number] => [
   -80 + (160 * (lat - TP.lat0)) / (TP.lat1 - TP.lat0),
   -172 + (344 * (lng - TP.lng0)) / (TP.lng1 - TP.lng0),
 ];
+/** 汪星的經緯度 → 台北市的經緯度（平的） */
+const fromWoofFlat = (lat: number, lng: number): [number, number] => [
+  TP.lat0 + ((lat + 80) * (TP.lat1 - TP.lat0)) / 160,
+  TP.lng0 + ((lng + 172) * (TP.lng1 - TP.lng0)) / 344,
+];
+
+/**
+ * 中山公園附近不要被拉長（使用者要的：跟地球的差不多）：平的攤法在公園那裡東西向是真的 1.6 倍、南北向 0.66 倍，
+ * 所以換到汪星之前，先把公園附近的台北經緯度像放大鏡一樣校正：公園中心 WARP_R0 公尺內東西向縮 WARP_X、南北向放大 WARP_Y
+ * （兩個相乘是 1，面積不變），汪星上就跟地球一樣的比例（約真實的 1.04 倍）；WARP_R0～WARP_R1 之間慢慢回到平的（smoothstep，
+ * 這一圈的街道會有一點彎），更遠的跟以前一樣。汪星上的東西都經過 toWoof、fromWoof（地形圖取顏色也是），所以一樣對得齊
+ */
+const WARP_C: [number, number] = [
+  (Math.min(...ZHONGSHAN_PARK.outline.map((p) => p[0])) + Math.max(...ZHONGSHAN_PARK.outline.map((p) => p[0]))) / 2,
+  (Math.min(...ZHONGSHAN_PARK.outline.map((p) => p[1])) + Math.max(...ZHONGSHAN_PARK.outline.map((p) => p[1]))) / 2,
+];
+const WARP_R0 = 600;
+const WARP_R1 = 2600;
+const WARP_KX = 111_320 * Math.cos(WARP_C[0] * RAD);
+const WARP_KY = 110_574;
+/** 平的攤法在公園那裡東西、南北每公尺換到汪星上的比例（只要兩個的比，跟汪星多大無關），校正成一樣 */
+const [WARP_X, WARP_Y] = (() => {
+  const sx = ((344 / (TP.lng1 - TP.lng0)) * Math.cos(toWoofFlat(WARP_C)[0] * RAD)) / WARP_KX;
+  const sy = 160 / (TP.lat1 - TP.lat0) / WARP_KY;
+  return [Math.sqrt(sy / sx), Math.sqrt(sx / sy)];
+})();
+/** 校正的程度（離公園中心 r 公尺）：WARP_R0 內是 1，到 WARP_R1 慢慢變 0；和它對 r 的微分 */
+const warpW = (r: number): number => {
+  if (r <= WARP_R0) return 1;
+  if (r >= WARP_R1) return 0;
+  const t = (r - WARP_R0) / (WARP_R1 - WARP_R0);
+  return 1 - t * t * (3 - 2 * t);
+};
+const warpDW = (r: number): number => {
+  if (r <= WARP_R0 || r >= WARP_R1) return 0;
+  const t = (r - WARP_R0) / (WARP_R1 - WARP_R0);
+  return (6 * t * t - 6 * t) / (WARP_R1 - WARP_R0);
+};
+/** 校正：台北的經緯度 → 換到汪星之前的台北經緯度 */
+function warp([lat, lng]: [number, number]): [number, number] {
+  const [x, y] = [(lng - WARP_C[1]) * WARP_KX, (lat - WARP_C[0]) * WARP_KY];
+  const w = warpW(Math.hypot(x, y));
+  if (w === 0) return [lat, lng];
+  return [WARP_C[0] + (y * (1 + w * (WARP_Y - 1))) / WARP_KY, WARP_C[1] + (x * (1 + w * (WARP_X - 1))) / WARP_KX];
+}
+/** 校正倒回去（牛頓法，幾次就收斂；校正碰不到的地方原樣） */
+function unwarp(p: [number, number]): [number, number] {
+  const [lat, lng] = p;
+  const [u, v] = [(lng - WARP_C[1]) * WARP_KX, (lat - WARP_C[0]) * WARP_KY];
+  if (Math.hypot(u, v) >= WARP_R1 * Math.max(WARP_X, WARP_Y, 1)) return p;
+  let [x, y] = [u / WARP_X, v / WARP_Y];
+  for (let k = 0; k < 12; k++) {
+    const r = Math.hypot(x, y) || 1e-9;
+    const [w, dw] = [warpW(r), warpDW(r)];
+    const [gx, gy] = [1 + w * (WARP_X - 1), 1 + w * (WARP_Y - 1)];
+    const [fx, fy] = [x * gx - u, y * gy - v];
+    if (Math.abs(fx) < 1e-6 && Math.abs(fy) < 1e-6) break;
+    const [ax, ay] = [(x * (WARP_X - 1) * dw) / r, (y * (WARP_Y - 1) * dw) / r];
+    const [j11, j12, j21, j22] = [gx + ax * x, ax * y, ay * x, gy + ay * y];
+    const det = j11 * j22 - j12 * j21 || 1e-9;
+    x -= (fx * j22 - fy * j12) / det;
+    y -= (fy * j11 - fx * j21) / det;
+  }
+  return [WARP_C[0] + y / WARP_KY, WARP_C[1] + x / WARP_KX];
+}
+/** 台北市的經緯度 → 汪星的經緯度（公園附近校正過） */
+export const toWoof = (p: [number, number]): [number, number] => toWoofFlat(warp(p));
+/** 汪星的經緯度 → 台北市的經緯度 */
+export const fromWoof = (lat: number, lng: number): [number, number] => unwarp(fromWoofFlat(lat, lng));
+/** 汪星上這一點在地形圖（照平的攤法）上的經緯度：公園附近校正過的地方要倒回去找 */
+const reliefAt = (lat: number, lng: number): [number, number] => {
+  const p = fromWoofFlat(lat, lng);
+  const q = unwarp(p);
+  return q === p ? [lat, lng] : toWoofFlat(q);
+};
+
+/** 校正那一圈裡的線先在台北的經緯度上切細（每段 WARP_STEP_M 公尺內），換到汪星上才會跟著彎；closed 是一圈 */
+const WARP_STEP_M = 50;
+function warpDense(pts: Array<[number, number]>, closed = false): Array<[number, number]> {
+  const m = (p: [number, number]): [number, number] => [(p[1] - WARP_C[1]) * WARP_KX, (p[0] - WARP_C[0]) * WARP_KY];
+  const out: Array<[number, number]> = [];
+  const n = closed ? pts.length : pts.length - 1;
+  for (let i = 0; i < n; i++) {
+    const [a, b] = [pts[i], pts[(i + 1) % pts.length]];
+    out.push(a);
+    const [[ax, ay], [bx, by]] = [m(a), m(b)];
+    const [dx, dy] = [bx - ax, by - ay];
+    const t = Math.max(0, Math.min(1, -(ax * dx + ay * dy) / (dx * dx + dy * dy || 1)));
+    if (Math.hypot(ax + dx * t, ay + dy * t) >= WARP_R1) continue;
+    const k = Math.ceil(Math.hypot(dx, dy) / WARP_STEP_M);
+    for (let j = 1; j < k; j++) out.push([a[0] + ((b[0] - a[0]) * j) / k, a[1] + ((b[1] - a[1]) * j) / k]);
+  }
+  if (!closed && pts.length) out.push(pts[pts.length - 1]);
+  return out;
+}
 
 /** 每段切到 2 度以內（轉到另一面的地方才算得準）；closed 是一圈，最後一點接回第一點 */
 function densify(pts: Array<[number, number]>, closed = false): Array<[number, number]> {
@@ -335,7 +431,7 @@ function densify(pts: Array<[number, number]>, closed = false): Array<[number, n
 
 /** 汪星的陸地（市界）：逆時針，陸地在海岸線的左手邊 */
 export const WOOF_LAND: Array<Array<[number, number]>> = [TAIPEI_OUTLINE].map((r) => {
-  const ring = densify(r.map(toWoof), true);
+  const ring = densify(warpDense(r, true).map(toWoof), true);
   return ringArea(ring) < 0 ? ring.reverse() : ring;
 });
 /** 台北市的面積（平方公里，平面近似） */
@@ -356,7 +452,7 @@ export const WOOF_KM = (() => {
   }
   return Math.sqrt(TAIPEI_KM2 / Math.abs(unit));
 })();
-const woofLines = (lines: Array<Array<[number, number]>>): Array<Array<[number, number]>> => lines.map((l) => densify(l.map(toWoof)));
+const woofLines = (lines: Array<Array<[number, number]>>): Array<Array<[number, number]>> => lines.map((l) => densify(warpDense(l).map(toWoof)));
 
 const WOOF_MAJOR_ROADS = woofLines(TAIPEI_MAJOR_ROADS);
 const WOOF_MINOR_ROADS = woofLines(TAIPEI_MINOR_ROADS);
@@ -401,11 +497,6 @@ function bandEdges(): number[][] {
   return bands;
 }
 
-/** 汪星的經緯度 → 台北市的經緯度 */
-const fromWoof = (lat: number, lng: number): [number, number] => [
-  TP.lat0 + ((lat + 80) * (TP.lat1 - TP.lat0)) / 160,
-  TP.lng0 + ((lng + 172) * (TP.lng1 - TP.lng0)) / 344,
-];
 
 /** 台北市的經緯度在不在市界裡面 */
 function inTaipei(lat: number, lng: number): boolean {
@@ -458,9 +549,10 @@ function woofStreetLines(center: LatLng, r: number, streets: WoofStreets): Recor
   const a = Math.asin(Math.min(1, (viewReach() * 1.1) / r)) / RAD;
   const ring = Math.asin(Math.min(1, INNER / r)) / RAD;
   const top = Math.min(89, Math.abs(center.lat) + a);
-  // 看得到的那一塊換成台北的經緯度範圍
-  const [la0, ln0] = fromWoof(center.lat - a, center.lng - a / Math.cos(top * RAD));
-  const [la1, ln1] = fromWoof(center.lat + a, center.lng + a / Math.cos(top * RAD));
+  // 看得到的那一塊換成台北的經緯度範圍（公園附近校正過不是直的：看九個點）
+  const grid = [-1, 0, 1].flatMap((i) => [-1, 0, 1].map((j) => fromWoof(center.lat + i * a, center.lng + (j * a) / Math.cos(top * RAD))));
+  const [la0, la1] = [Math.min(...grid.map((q) => q[0])), Math.max(...grid.map((q) => q[0]))];
+  const [ln0, ln1] = [Math.min(...grid.map((q) => q[1])), Math.max(...grid.map((q) => q[1]))];
   const kx = 111.32 * Math.cos(((TP.lat0 + TP.lat1) / 2) * RAD);
   const [hy, hx] = [((la1 - la0) / 2) * 110.574, ((ln1 - ln0) / 2) * kx];
   // 南北壓扁、東西拉寬：用兩個方向的平均決定畫多細（跟雷達的範圍一樣），抓的範圍要涵蓋比較大的那個方向
@@ -782,7 +874,8 @@ export function paintWoofRelief(out: Uint8ClampedArray, n: number, tex: ReliefTe
     let lng = center.lng + Math.atan2(x, z * cp0 - y * sp0) / RAD;
     if (lng > 180) lng -= 360;
     else if (lng < -180) lng += 360;
-    return [lat, lng];
+    // 公園附近校正過：倒回地形圖（平的攤法）上的經緯度
+    return reliefAt(lat, lng);
   };
   // 經緯度每 B 個像素精算一次（反三角函數很慢），中間照比例內插；四個角有一個在球外面、跨過經度 180 度就每一點都精算（球的邊、接縫）
   // 只畫 j0～j1 那幾列（radar.ts 畫細的時候分好幾次畫，不會卡住畫面）

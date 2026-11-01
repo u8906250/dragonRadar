@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { fmtKm, globeFrac, RADAR_GEOM, RADAR_VIEW, SPACE_FROM_KM, viewReach, viewRect } from '../src/radar';
 import { PARK_MIN_KM } from '../src/park';
 import type { StreetLine } from '../src/streets';
-import { atPark, focusMinKm, graticule, hemiPath, nearOf, paintWoofRelief, WOOF_KM, landPath, moonPosition, nightPath, onWoofLand, ortho, planetPositions, spaceMarkup, subsolar, toWoof } from '../src/space';
+import { atPark, focusMinKm, fromWoof, graticule, hemiPath, nearOf, paintWoofRelief, WOOF_KM, landPath, moonPosition, nightPath, onWoofLand, ortho, planetPositions, spaceMarkup, subsolar, toWoof } from '../src/space';
 
 const diff = (a: number, b: number): number => Math.abs(((((a - b) % 360) + 540) % 360) - 180);
 const lonOf = (when: string, key: string): number => planetPositions(new Date(when)).find((p) => p.key === key)!.lon;
@@ -263,17 +263,18 @@ describe('汪星', () => {
     const n = 101;
     const out = new Uint8ClampedArray(n * n * 4);
     const px = (i: number, j: number): number[] => [...out.subarray((j * n + i) * 4, (j * n + i) * 4 + 4)];
-    const view = { focus: 'woof', yaw: (-20 * Math.PI) / 180, pitch: (10 * Math.PI) / 180 };
-    // 整顆汪星看得到：正中間是北緯 10 度、東經 20 度那一格，角落是球外面（透明）
+    // 看離中山公園很遠的那一面（公園附近校正過，經線會彎一點）
+    const view = { focus: 'woof', yaw: (-100 * Math.PI) / 180, pitch: (10 * Math.PI) / 180 };
+    // 整顆汪星看得到：正中間是北緯 10 度、東經 100 度那一格，角落是球外面（透明）
     expect(paintWoofRelief(out, n, tex, view, WOOF_KM * 1.6, 0)).toBeGreaterThan(0.5);
-    expect(px(50, 50)).toEqual([(20 + 172) % 256, 80 - 10, 7, 255]);
+    expect(px(50, 50)).toEqual([(100 + 172) % 256, 80 - 10, 7, 255]);
     expect(px(0, 0)[3]).toBe(0);
     // 往右是東邊（經度變大）、往上是北邊；指北針轉了 90 度，往右變成南邊
     expect(px(70, 50)[0]).toBeGreaterThan(px(50, 50)[0]);
     expect(px(50, 30)[1]).toBeLessThan(px(50, 50)[1]);
     paintWoofRelief(out, n, tex, view, WOOF_KM * 1.6, 90);
     expect(px(70, 50)[1]).toBeGreaterThan(80 - 10);
-    expect(px(70, 50)[0]).toBe((20 + 172) % 256);
+    expect(px(70, 50)[0]).toBe((100 + 172) % 256);
     // 中心不是汪星、拉得很近（外圈 50 公尺）：不畫
     expect(paintWoofRelief(out, n, tex, { ...view, focus: 'mars' }, WOOF_KM * 1.6, 0)).toBe(0);
     expect(paintWoofRelief(out, n, tex, view, 0.05, 0)).toBe(0);
@@ -285,6 +286,39 @@ describe('汪星', () => {
     paintWoofRelief(once, n, tex, view, WOOF_KM * 1.6, 30);
     for (let j = 0; j < n; j += 16) paintWoofRelief(parts, n, tex, view, WOOF_KM * 1.6, 30, j, Math.min(n, j + 16));
     expect(parts).toEqual(once);
+  });
+
+  it('keeps 中山公園 and the streets around it in proportion (like on Earth), the rest of the planet as before', () => {
+    const RAD = Math.PI / 180;
+    /** 台北這一點在汪星上東西、南北每公尺各是汪星上幾公尺 */
+    const scales = (p: [number, number]): [number, number] => {
+      const d = 1e-5;
+      const [a, b] = toWoof(p);
+      const [a1] = toWoof([p[0] + d, p[1]]);
+      const [, b1] = toWoof([p[0], p[1] + d]);
+      const k = WOOF_KM * 1000 * RAD;
+      return [((b1 - b) * k * Math.cos(a * RAD)) / (d * 111_320 * Math.cos(p[0] * RAD)), ((a1 - a) * k) / (d * 110_574)];
+    };
+    // 國父紀念館、翠湖、公園外面幾百公尺：東西、南北一樣（以前東西 1.6 倍、南北 0.66 倍），大約是真的大小
+    for (const p of [[25.04001, 121.56029], [25.03843, 121.55932], [25.0425, 121.5640], [25.0360, 121.5560]] as Array<[number, number]>) {
+      const [sx, sy] = scales(p);
+      expect(sx / sy).toBeGreaterThan(0.96);
+      expect(sx / sy).toBeLessThan(1.04);
+      expect(Math.sqrt(sx * sy)).toBeGreaterThan(0.95);
+      expect(Math.sqrt(sx * sy)).toBeLessThan(1.15);
+    }
+    // 遠的地方（台北車站、北投）照舊：東西拉寬、南北壓扁
+    for (const p of [[25.0478, 121.517], [25.132, 121.501]] as Array<[number, number]>) {
+      const [sx, sy] = scales(p);
+      expect(sx / sy).toBeGreaterThan(1.8);
+    }
+    // 換到汪星再換回來是同一點（公園附近、過渡的那一圈、遠的）
+    for (let dy = -3000; dy <= 3000; dy += 250)
+      for (let dx = -3000; dx <= 3000; dx += 250) {
+        const p: [number, number] = [25.0395 + dy / 110_574, 121.5603 + dx / 101_000];
+        const back = fromWoof(...toWoof(p));
+        expect(Math.abs(back[0] - p[0]) + Math.abs(back[1] - p[1])).toBeLessThan(1e-8);
+      }
   });
 
   it('wraps Taipei City around the whole planet, with the sea outside the city', () => {
