@@ -447,6 +447,8 @@ const radar = new Radar(
   (id) => selectBottle(id),
   (bearing, km, done) => panRadar(bearing, km, done),
 );
+// 點了車掃的中間點：打開那條車掃的時間表
+radar.onRoute = (id) => selectRoute(id);
 // 點了中山公園的銅像（地球或汪星）：發射口打開、升起火箭、關上，火箭停在那邊；點火箭問要不要飛到另一邊（rocketTrip）
 // （火箭記得在哪一邊；不在這一邊、已經出來了就沒有反應）
 // 火箭停在草皮上時再點銅像：收回井裡
@@ -1212,6 +1214,39 @@ const flagOf = (ev: EventOut): string | undefined => {
 };
 /** 時間表、清單上的「🚩 出發」「🏁 抵達」 */
 const stopLabelHtml = (r: RouteOut, kind: RouteStop['kind']): string => `${stopFlag(r, kind) ? `${stopFlag(r, kind)} ` : ''}${stopLabel(r, kind)}`;
+/**
+ * 官方車掃的中間點（轉彎的地方）：車掃地圖的路段名稱是「右轉 興隆路四段（直走三、二段）（2/6）」，去掉（k/n）跟前一段不一樣就是換一條路，
+ * 在那一段的起點；經過的時間跟加油點一樣，照出發、抵達的時間等速沿著路線推算
+ */
+interface RouteTurn {
+  name: string;
+  lat: number;
+  lng: number;
+  at: number | null;
+}
+function routeTurns(r: RouteOut): RouteTurn[] {
+  if (!isOceanRoute(r)) return [];
+  const road = (name: string): string => name.replace(/（\d+\/\d+）$/, '').trim();
+  const found: Array<{ name: string; lat: number; lng: number; km: number }> = [];
+  let km = 0;
+  let last: LatLng | null = null;
+  r.segments.forEach((sg, i) => {
+    if (i > 0 && sg.path.length > 0 && road(sg.from) !== road(r.segments[i - 1].from)) found.push({ name: road(sg.from), lat: sg.path[0][0], lng: sg.path[0][1], km });
+    for (const [lat, lng] of sg.path) {
+      if (last) km += haversineKm(last, { lat, lng });
+      last = { lat, lng };
+    }
+  });
+  const { departAt, arriveAt } = r;
+  return found.map((t) => ({ name: t.name, lat: t.lat, lng: t.lng, at: departAt && arriveAt && km > 0 ? Math.round(departAt + ((arriveAt - departAt) * t.km) / km) : null }));
+}
+/** 「右轉 興隆路四段（直走三、二段）」分成「右轉」和路名 */
+const turnParts = (name: string): { verb: string; road: string } => {
+  const m = /^(右轉|左轉|迴轉|直走)\s*(.*)$/.exec(name);
+  return m ? { verb: m[1], road: m[2] } : { verb: '經過', road: name };
+};
+const turnLabel = (t: RouteTurn): string => `${t.at ? `約 ${fmtTime(t.at)} ` : ''}${t.name}`;
+
 /** 遊行的每一條路線：「北路線 3.6 km」 */
 const paradeWays = (r: RouteOut): string => r.segments.map((s) => `${s.from} ${(s.lengthM / 1000).toFixed(1)} km`).join('、');
 
@@ -1398,8 +1433,10 @@ function render(): void {
         state: routeState(r, now),
         // 遊行：北、南兩條路線分開畫（同時從出發的地方流出彩虹）
         ...(isParade(r) ? { rainbow: true, parts: r.segments.map((sg) => sg.path.map(toRadar)), flowAt: rainbowFlow(r, now, 'radar') } : {}),
-        // 洋流車掃：進行中畫洋流的特效
-        ...(isOceanRoute(r) ? { ocean: true, flowAt: rainbowFlow(r, now, 'radar') } : {}),
+        // 洋流車掃：進行中畫洋流的特效；中間點、一直重複開的洋流號（減少動態效果時不開）
+        ...(isOceanRoute(r)
+          ? { ocean: true, flowAt: rainbowFlow(r, now, 'radar'), marks: routeTurns(r).map((t) => ({ ...toRadar([t.lat, t.lng]), title: turnLabel(t) })), car: !calmMotion?.matches }
+          : {}),
         points: r.segments.flatMap((sg) => sg.path).map(toRadar),
       };
     }),
@@ -1435,7 +1472,7 @@ function render(): void {
       claimUrl: r.claimUrl,
       source: r.source,
       ...(isParade(r) ? { rainbow: true, flowAt: rainbowFlow(r, now, 'map') } : {}),
-      ...(isOceanRoute(r) ? { ocean: true, flowAt: rainbowFlow(r, now, 'map') } : {}),
+      ...(isOceanRoute(r) ? { ocean: true, flowAt: rainbowFlow(r, now, 'map'), turns: routeTurns(r).map((t) => ({ lat: t.lat, lng: t.lng, label: turnLabel(t) })), car: !calmMotion?.matches } : {}),
       // 回報的車掃：已經經過的那段畫淡
       segments: r.segments.map((sg) => ({ ...sg, passed: !!sg.toAt && sg.toAt <= now })),
     })),
@@ -1688,7 +1725,7 @@ function renderRouteDetail(r: RouteOut, items: Item[], now: number): void {
   const people = r.segments.reduce((n, s) => n + s.people, 0);
   const target = r.segments.reduce((n, s) => n + s.target, 0);
   const needy = [...r.segments].filter((sg) => crowdOf(sg.people, sg.target) === 'empty' || crowdOf(sg.people, sg.target) === 'low').length;
-  const rows = r.stops
+  const stopRows = r.stops
     .map((st, i) => {
       const it = mine.find((x) => (isReported(r) ? stopMatches(st, x.ev) : x.ev.title === st.title));
       const time = st.at ? `${st.kind === 'cheer' || (isReported(r) && st.kind === 'end') ? '約 ' : ''}${fmtTime(st.at)}` : '—';
@@ -1704,8 +1741,19 @@ function renderRouteDetail(r: RouteOut, items: Item[], now: number): void {
       // 回報的人地點填地址的：站名下面另外列地址
       const place = st.place ? `<small class="stop-place">${esc(shortAddress(st.place))}</small>` : '';
       const body = `<span class="stop-time">${time}</span><span class="stop-name"><b>${stopLabelHtml(r, st.kind)}</b>${esc(st.name)}${place}${extra}${dist}</span>`;
-      return `<li class="stop stop-${st.kind}${passed ? ' passed' : ''}${near ? ' nearest' : ''}">${it ? `<button type="button" data-select="${it.ev.id}">${body}</button>` : `<div>${body}</div>`}</li>`;
-    })
+      return { at: st.at, html: `<li class="stop stop-${st.kind}${passed ? ' passed' : ''}${near ? ' nearest' : ''}">${it ? `<button type="button" data-select="${it.ev.id}">${body}</button>` : `<div>${body}</div>`}</li>` };
+    });
+  // 中間點（官方車掃轉彎的地方）照時間排進去；沒有時間的放在起點後面
+  const turnRows = routeTurns(r).map((t) => {
+    const { verb, road } = turnParts(t.name);
+    const passed = t.at !== null && t.at <= now;
+    const body = `<span class="stop-time">${t.at ? `約 ${fmtTime(t.at)}` : '—'}</span><span class="stop-name"><b>${verb}</b>${esc(road)}<small>${formatKm(haversineKm(origin, t))} ${compassLabel(bearingDeg(origin, t))}</small></span>`;
+    return { at: t.at, html: `<li class="stop stop-turn${passed ? ' passed' : ''}"><div>${body}</div></li>` };
+  });
+  const rows = (
+    [...stopRows, ...turnRows].every((x) => x.at !== null) ? [...stopRows, ...turnRows].sort((a, b) => (a.at ?? 0) - (b.at ?? 0)) : [...stopRows.slice(0, 1), ...turnRows, ...stopRows.slice(1)]
+  )
+    .map((x) => x.html)
     .join('');
   detailEl.hidden = false;
   setDetailHtml(`route:${r.id}`, `
@@ -1729,7 +1777,7 @@ function renderRouteDetail(r: RouteOut, items: Item[], now: number): void {
           ? '時間和路線是主辦單位公布的（回到市民廣場的時間是警方預估），以現場為準。雷達和地圖上的彩虹照公布的道路畫。'
           : isReported(r)
           ? '時間是貼文寫的預計時間，僅供參考，以現場為準。雷達上每一站從預計經過前 10 分鐘顯示到經過後 15 分鐘；地圖上各站用直線連起來，不是實際走的路。'
-          : '加油點的時間是用路線長度平均推算的，實際以現場為準。官方提醒：不跟車，在沿線等車隊經過；不放鞭炮。'
+          : '中間點、加油點的時間是用路線長度平均推算的，實際以現場為準。雷達和地圖上跑的洋流號是動畫（約 24 秒開完一趟、重複播放），不是車隊的實際位置。官方提醒：不跟車，在沿線等車隊經過；不放鞭炮。'
       }</p>
       ${isReported(r) && mine[0]?.ev.post.permalink ? `<p class="muted sheet-note">來源：<a href="${esc(mine[0].ev.post.permalink)}" target="_blank" rel="noopener">${esc(mine[0].ev.post.username ? `@${mine[0].ev.post.username} 的貼文` : '原貼文')}</a></p>` : ''}
       ${isParade(r) && mine[0]?.ev.post.permalink ? `<p class="muted sheet-note">來源：<a href="${esc(mine[0].ev.post.permalink)}" target="_blank" rel="noopener">${esc(mine[0].ev.post.username ?? '主辦單位')}官網</a></p>` : ''}

@@ -302,6 +302,21 @@ path.ocean-current { animation: ocean-current-map 1.4s linear infinite; }
 .radar .route-rainbow .rainbow-3 { stroke: #008026; stroke-width: 3.3; }
 .radar .route-rainbow .rainbow-4 { stroke: #004dff; stroke-width: 2.2; }
 .radar .route-rainbow .rainbow-5 { stroke: #750787; stroke-width: 1.1; }
+/* 車掃的中間點（轉彎的地方）：路線上白色的小圓點，點的範圍大一點（手指點得到），點了打開時間表 */
+.radar .route-mark { fill: #fff; stroke: #0d6ea8; stroke-width: 1.6; pointer-events: none; }
+.radar .route-mark-hit { fill: transparent; pointer-events: all; cursor: pointer; }
+/* 洋流號（雷達、地圖共用，flow.ts 的 CAR_SVG）：深藍小巴、淺藍窗、一道浪花，開的時候上下彈一點點；點不到 */
+.radar .route-car { pointer-events: none; }
+.car-body { fill: #0d6ea8; stroke: #08466b; stroke-width: 1; stroke-linejoin: round; }
+.car-glass { fill: #d6f3fb; }
+.car-wave { fill: none; stroke: #8be8f2; stroke-width: 1.4; stroke-linecap: round; }
+.car-wheel { fill: #1f2937; stroke: #fff; stroke-width: 1.1; }
+.car-label { font-size: 10px; font-weight: 800; fill: #08466b; stroke: #fff; stroke-width: 3px; stroke-linejoin: round; paint-order: stroke; }
+.car-bob { animation: car-bob 0.45s ease-in-out infinite alternate; }
+@keyframes car-bob { to { transform: translateY(-0.8px); } }
+.map-car { background: none; border: 0; pointer-events: none; }
+.map-car svg { display: block; overflow: visible; }
+.map-car.left .car-flip { transform: scaleX(-1); }
 .radar .route-planned { stroke-dasharray: 6 5; }
 /* 「雙北」範圍的縣市界輪廓 */
 .radar .region-outline { fill: var(--accent); fill-opacity: 0.05; stroke: var(--accent); stroke-width: 1.5; stroke-opacity: 0.45; stroke-dasharray: 3 3; pointer-events: none; }
@@ -847,6 +862,8 @@ path.ocean-current { animation: ocean-current-map 1.4s linear infinite; }
 .route-stops .stop:last-child::before { bottom: calc(100% - 16px); }
 .route-stops .stop::after { content: ''; position: absolute; left: 0; top: 11px; width: 11px; height: 11px; border-radius: 50%; background: var(--card); border: 3px solid var(--accent); box-sizing: border-box; }
 .route-stops .stop-start::after, .route-stops .stop-end::after { background: var(--accent); }
+/* 中間點（轉彎的地方）：小一點的圓 */
+.route-stops .stop-turn::after { left: 1px; top: 13px; width: 9px; height: 9px; border-width: 2px; }
 .route-stops .passed { opacity: 0.55; }
 .route-stops button, .route-stops .stop > div { display: flex; gap: 10px; width: 100%; text-align: left; font: inherit; font-size: 14px; color: var(--text); background: transparent; border: 0; padding: 7px 4px; cursor: pointer; }
 .route-stops .stop > div { cursor: default; }

@@ -62,3 +62,35 @@ export function surge(path: SVGPathElement, ago: number): void {
     { duration: total, delay: -ago, fill: 'both' },
   );
 }
+
+/**
+ * 洋流號：官方車掃的路線上一直重複開的車（雷達、地圖照同一個時鐘，位置一樣）。動畫，不是車隊的實際位置。
+ * 一趟 CAR_LAP_MS：前 9 成從起點等速開到終點，停在終點慢慢淡掉，再從起點淡入重來
+ */
+export const CAR_LAP_MS = 24_000;
+export function carPhase(ms: number): { at: number; alpha: number } {
+  const p = (ms % CAR_LAP_MS) / CAR_LAP_MS;
+  return { at: Math.min(1, p / 0.9), alpha: p < 0.03 ? p / 0.03 : p > 0.94 ? (1 - p) / 0.06 : 1 };
+}
+/** 洋流號的樣子（螢幕像素）：深藍的小巴、淺藍的窗、一道浪花，車頭朝右，輪子底在 (0, 0)；car-flip 那一組左右翻（往左開）；名字寫在上面 */
+export const CAR_SVG =
+  '<g class="car-flip"><g class="car-bob">' +
+  '<path class="car-body" d="M-14 -3.5V-12.5Q-14 -15 -11.5 -15H5Q7.5 -15 9 -12.8L12.6 -8Q14 -7.2 14 -5.6V-3.5Z"/>' +
+  '<path class="car-glass" d="M-11.5 -12.6H-4.2V-8.6H-11.5ZM-2.4 -12.6H4.6Q6 -12.6 7 -11.2L9.2 -8.6H-2.4Z"/>' +
+  '<path class="car-wave" d="M-12.6 -5.8q1.6 -1.5 3.2 0t3.2 0t3.2 0t3.2 0t3.2 0t3.2 0t3.2 0"/>' +
+  '</g><circle class="car-wheel" cx="-8" cy="-3.4" r="3.2"/><circle class="car-wheel" cx="8" cy="-3.4" r="3.2"/></g>' +
+  '<text class="car-label" x="0" y="-19" text-anchor="middle">洋流號</text>';
+export const CAR_TITLE = '洋流號：沿著路線重複播放的動畫，不是車隊的實際位置';
+
+/** 沿著折線（xs、ys，cum 是每一點走了多遠）走到 at（0～1）的位置，和那一段往左還是往右（差不多直上直下是 null） */
+export function alongLine(xs: ArrayLike<number>, ys: ArrayLike<number>, cum: ArrayLike<number>, at: number): { x: number; y: number; left: boolean | null } {
+  const n = cum.length;
+  const want = at * cum[n - 1];
+  let i = 1;
+  while (i < n - 1 && cum[i] < want) i++;
+  const seg = cum[i] - cum[i - 1];
+  const k = seg > 0 ? Math.min(1, Math.max(0, (want - cum[i - 1]) / seg)) : 0;
+  const dx = xs[i] - xs[i - 1];
+  const dy = ys[i] - ys[i - 1];
+  return { x: xs[i - 1] + dx * k, y: ys[i - 1] + dy * k, left: Math.abs(dx) < Math.abs(dy) * 0.15 ? null : dx < 0 };
+}

@@ -1,5 +1,5 @@
 import type { BlipStyle, EventKind, Phase, SweepStyle } from './types';
-import { flowOut, RAINBOW_FLOW_TOTAL, RAINBOW_STAGGER_MS, surge, SURGE_TOTAL } from './flow';
+import { alongLine, CAR_SVG, CAR_TITLE, carPhase, flowOut, RAINBOW_FLOW_TOTAL, RAINBOW_STAGGER_MS, surge, SURGE_TOTAL } from './flow';
 
 export interface RadarItem {
   id: number;
@@ -40,6 +40,10 @@ export interface RadarRoute {
   ocean?: boolean;
   /** 彩虹從出發的地方流出、洋流湧過去：開始的時間（Date.now() 的毫秒）；沒有是不流 */
   flowAt?: number;
+  /** 中間點（官方車掃轉彎的地方）：路線上的小圓點，title 是預計經過的時間和名稱；點了打開時間表 */
+  marks?: Array<{ bearing: number; distanceKm: number; title: string }>;
+  /** 洋流號：沿著路線一直重複開的車（動畫，不是車隊的實際位置） */
+  car?: boolean;
 }
 
 /** 放大時畫的街道：每條線是 [往東 km, 往北 km, 往東 km, …]（相對於圓心）；major 大路、minor 其他街道 */
@@ -102,7 +106,7 @@ const WHEEL_TAU_MS = 60;
 const WHEEL_MAX = 1.5;
 const WHEEL_DONE_MS = 200;
 /** 點在這些東西上是點它（選光點、飛到星球…），不算點兩下放大 */
-const TAP_TARGETS = '.blip, .landmark, .bottle, .dog-hit, .rocket-hit, .park-statue, .space-hit, [role="button"]';
+const TAP_TARGETS = '.blip, .landmark, .bottle, .dog-hit, .rocket-hit, .park-statue, .space-hit, .route-mark-hit, [role="button"]';
 
 export interface RadarStyle {
   sweep: SweepStyle;
@@ -356,6 +360,12 @@ export class Radar {
   private spaceView: SpaceView = { focus: null, yaw: 0, pitch: 0 };
   /** 看法變了、拉回地球時通知外面（「回到我的位置」要不要顯示） */
   onSpaceMove: (() => void) | null = null;
+  /** 點了車掃的中間點：打開那條車掃的時間表 */
+  onRoute: ((id: string) => void) | null = null;
+  /** 洋流號：路線在畫面上的折線（SVG 座標，cum 是每一點走了多遠）和車子，每一格畫面照現在的時間擺；往哪邊開記在 carLeft（重畫時接著用） */
+  private carTracks: Array<{ id: string; g: SVGGElement; flip: SVGGElement; xs: Float64Array; ys: Float64Array; cum: Float64Array }> = [];
+  private readonly carLeft = new Map<string, boolean>();
+  private carFrame = 0;
   private readonly stack: HTMLDivElement;
   private readonly pointers = new Map<number, { x: number; y: number }>();
   private pinchDist = 0;
@@ -472,6 +482,10 @@ export class Radar {
     this.rings = this.svg.querySelector('.rings') as SVGGElement;
     this.roseLayer = this.svg.querySelector('.rose') as SVGGElement;
     this.routeLayer = this.svg.querySelector('.routes') as SVGGElement;
+    this.routeLayer.addEventListener('click', (e) => {
+      const id = (e.target as Element).closest<SVGElement>('.route-marks')?.dataset.route;
+      if (id) this.onRoute?.(id);
+    });
     this.outlineLayer = this.svg.querySelector('.outline') as SVGGElement;
     this.spaceLayer = this.svg.querySelector('.space') as SVGGElement;
     this.streetLayer = this.svg.querySelector('.streets') as SVGGElement;
@@ -1647,6 +1661,7 @@ export class Radar {
   /** 路線畫在光點下面；超出範圍的部分被外圈裁掉 */
   private drawRoutes(): void {
     this.routeLayer.replaceChildren();
+    this.carTracks = [];
     for (const r of this.routes) {
       if (r.state === 'done' || r.points.length < 2 || this.earthHidden) continue;
       // 太空：有一段在地球另一面就不畫（直線會穿過地球）
@@ -1675,8 +1690,60 @@ export class Radar {
         const ago = r.flowAt !== undefined ? Date.now() - r.flowAt : Infinity;
         if (ago < SURGE_TOTAL) waves.forEach((w, i) => surge(w as SVGPathElement, ago - i * RAINBOW_STAGGER_MS));
       }
+      // 中間點：路線上的小圓點（點的範圍大一點，手指點得到）
+      if (r.marks?.length) {
+        const g = el('g', { class: 'route-marks', 'data-route': r.id });
+        for (const m of r.marks) {
+          const p = polar(m.bearing - this.heading, this.ratio(m.distanceKm) * (R - 8));
+          const [cx, cy] = [p.x.toFixed(1), p.y.toFixed(1)];
+          const hit = el('circle', { class: 'route-mark-hit', cx, cy, r: 9 });
+          const t = el('title');
+          t.textContent = m.title;
+          hit.appendChild(t);
+          g.append(el('circle', { class: 'route-mark', cx, cy, r: 2.6 }), hit);
+        }
+        this.routeLayer.appendChild(g);
+      }
+      if (r.car) this.addCar(r);
     }
+    this.moveCars();
   }
+
+  /** 洋流號：照畫面上的路線（跟 pathOf 一樣的座標）記下折線，車子畫成螢幕像素的大小（moveCars 擺位置） */
+  private addCar(r: RadarRoute): void {
+    const n = r.points.length;
+    const [xs, ys, cum] = [new Float64Array(n), new Float64Array(n), new Float64Array(n)];
+    r.points.forEach((pt, i) => {
+      const p = polar(pt.bearing - this.heading, this.ratio(pt.distanceKm) * (R - 8));
+      [xs[i], ys[i]] = [p.x, p.y];
+      cum[i] = i > 0 ? cum[i - 1] + Math.hypot(xs[i] - xs[i - 1], ys[i] - ys[i - 1]) : 0;
+    });
+    if (!(cum[n - 1] > 0)) return;
+    const g = el('g', { class: 'route-car' }) as SVGGElement;
+    g.innerHTML = `<title>${CAR_TITLE}</title>${CAR_SVG}`;
+    this.routeLayer.appendChild(g);
+    this.carTracks.push({ id: r.id, g, flip: g.querySelector('.car-flip') as SVGGElement, xs, ys, cum });
+  }
+
+  /** 每一格畫面把洋流號擺到現在的位置（雷達藏起來時不擺，回來接著開）；沒有車就停 */
+  private moveCars = (): void => {
+    cancelAnimationFrame(this.carFrame);
+    this.carFrame = 0;
+    if (this.carTracks.length === 0) return;
+    if (this.squarePx > 0 && this.stack.offsetWidth > 0) {
+      const { at, alpha } = carPhase(Date.now());
+      const k = (SIZE / this.squarePx).toFixed(4);
+      for (const t of this.carTracks) {
+        const p = alongLine(t.xs, t.ys, t.cum, at);
+        if (p.left !== null) this.carLeft.set(t.id, p.left);
+        t.g.setAttribute('transform', `translate(${p.x.toFixed(1)} ${p.y.toFixed(1)}) scale(${k})`);
+        t.g.style.opacity = alpha.toFixed(2);
+        if (this.carLeft.get(t.id)) t.flip.setAttribute('transform', 'scale(-1 1)');
+        else t.flip.removeAttribute('transform');
+      }
+    }
+    this.carFrame = requestAnimationFrame(this.moveCars);
+  };
 
   private placeRose(): void {
     this.placeCompass();

@@ -1,6 +1,6 @@
 import type * as Leaflet from 'leaflet';
-import { flowOut, RAINBOW_FLOW_TOTAL, RAINBOW_STAGGER_MS, surge, SURGE_TOTAL } from './flow';
-import type { LatLng } from './geo';
+import { alongLine, CAR_SVG, carPhase, flowOut, RAINBOW_FLOW_TOTAL, RAINBOW_STAGGER_MS, surge, SURGE_TOTAL } from './flow';
+import { haversineKm, type LatLng } from './geo';
 import type { EventKind, Phase } from './types';
 import { LANDMARKS } from './landmarks';
 
@@ -41,6 +41,10 @@ export interface MapRoute {
   /** 彩虹從出發的地方流出、洋流湧過去：開始的時間（Date.now() 的毫秒）；沒有是不流 */
   flowAt?: number;
   segments: Array<{ seq: number; from: string; to: string; path: Array<[number, number]>; people: number; target: number; passed?: boolean }>;
+  /** 中間點（官方車掃轉彎的地方）：路線上的小圓點，點了寫預計經過的時間和名稱 */
+  turns?: Array<{ lat: number; lng: number; label: string }>;
+  /** 洋流號：沿著路線一直重複開的車（動畫，不是車隊的實際位置） */
+  car?: boolean;
 }
 
 /** 彩虹旗的六個顏色（紅、橙、黃、綠、藍、紫） */
@@ -126,6 +130,10 @@ export class MapView {
   private landmarkGroup: Leaflet.LayerGroup | null = null;
   private landmarksOn = true;
   private routes: MapRoute[] = [];
+  /** 洋流號：路線的經緯度（cum 是每一點走了幾公里）和車子，每一格畫面照現在的時間擺；往哪邊開記在 carLeft */
+  private carTracks: Array<{ id: string; marker: Leaflet.Marker; lat: Float64Array; lng: Float64Array; cum: Float64Array }> = [];
+  private readonly carLeft = new Map<string, boolean>();
+  private carFrame = 0;
   private bottleLayer: Leaflet.LayerGroup | null = null;
   private bottles: MapBottle[] = [];
   /** 座標一樣合成一個點時，每個項目對應到畫出來的那個標記 */
@@ -152,6 +160,7 @@ export class MapView {
   invalidate(): void {
     if (this.map) {
       this.map.invalidateSize();
+      this.moveCars();
       return;
     }
     void this.ensure();
@@ -484,7 +493,7 @@ export class MapView {
 
   setRoutes(routes: MapRoute[]): void {
     const sig = (rs: MapRoute[]): string =>
-      JSON.stringify(rs.map((r) => [r.id, r.state, r.flowAt ?? null, r.segments.map((x) => [x.people, x.target, x.path.length, !!x.passed])]));
+      JSON.stringify(rs.map((r) => [r.id, r.state, r.flowAt ?? null, r.segments.map((x) => [x.people, x.target, x.path.length, !!x.passed]), r.turns ?? [], !!r.car]));
     if (sig(routes) === sig(this.routes)) return;
     this.routes = routes;
     this.pushRoutes();
@@ -506,6 +515,7 @@ export class MapView {
     const layer = this.routeLayer;
     if (!L || !layer) return;
     layer.clearLayers();
+    this.carTracks = [];
     for (const r of this.routes) {
       if (r.state === 'done') continue;
       if (r.rainbow) {
@@ -567,8 +577,57 @@ export class MapView {
         });
         layer.addLayer(L.polyline(whole, { color: '#effdff', weight: 4, opacity: 0.95, dashArray: '0.1 14', lineCap: 'round', interactive: false, className: 'ocean-current' }));
       }
+      // 中間點：路線上的小圓點，點了寫預計經過的時間和名稱
+      for (const t of r.turns ?? []) {
+        const dot = L.circleMarker([t.lat, t.lng], { radius: 5, color: '#0d6ea8', weight: 2.5, fillColor: '#ffffff', fillOpacity: 1 });
+        dot.bindPopup(`<strong>${escapeHtml(r.title)}・中間點</strong><br>${escapeHtml(t.label)}<br>時間用路線長度平均推算，以現場為準`, { closeButton: false });
+        layer.addLayer(dot);
+      }
+      if (r.car) this.addCar(r);
     }
+    this.moveCars();
   }
+
+  /** 洋流號：路線的經緯度照實際距離記下來，車子是點不到的標記（在其他標記下面） */
+  private addCar(r: MapRoute): void {
+    const L = this.L;
+    const layer = this.routeLayer;
+    const pts = r.segments.flatMap((sg) => sg.path);
+    const n = pts.length;
+    if (!L || !layer || n < 2) return;
+    const [lat, lng, cum] = [new Float64Array(n), new Float64Array(n), new Float64Array(n)];
+    pts.forEach(([a, b], i) => {
+      [lat[i], lng[i]] = [a, b];
+      cum[i] = i > 0 ? cum[i - 1] + haversineKm({ lat: lat[i - 1], lng: lng[i - 1] }, { lat: a, lng: b }) : 0;
+    });
+    if (!(cum[n - 1] > 0)) return;
+    const icon = L.divIcon({ className: 'map-car', html: `<svg viewBox="-24 -30 48 32" width="48" height="32" aria-hidden="true">${CAR_SVG}</svg>`, iconSize: [48, 32], iconAnchor: [24, 30] });
+    const marker = L.marker([lat[0], lng[0]], { icon, interactive: false, keyboard: false, zIndexOffset: -1000 });
+    layer.addLayer(marker);
+    this.carTracks.push({ id: r.id, marker, lat, lng, cum });
+  }
+
+  /** 每一格畫面把洋流號擺到現在的位置（跟雷達同一個時鐘；地圖藏起來時不擺，回來接著開）；沒有車就停 */
+  private moveCars = (): void => {
+    cancelAnimationFrame(this.carFrame);
+    this.carFrame = 0;
+    if (this.carTracks.length === 0) return;
+    if (this.el.offsetWidth > 0) {
+      const { at, alpha } = carPhase(Date.now());
+      for (const t of this.carTracks) {
+        // 經度往東是畫面的右邊
+        const p = alongLine(t.lng, t.lat, t.cum, at);
+        if (p.left !== null) this.carLeft.set(t.id, p.left);
+        t.marker.setLatLng([p.y, p.x]);
+        const box = t.marker.getElement();
+        if (box) {
+          box.style.opacity = alpha.toFixed(2);
+          box.classList.toggle('left', !!this.carLeft.get(t.id));
+        }
+      }
+    }
+    this.carFrame = requestAnimationFrame(this.moveCars);
+  };
 }
 
 /** 標位置用的小地圖：點地圖或拖標記改位置，每次改都呼叫 onPick */
