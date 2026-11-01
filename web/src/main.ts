@@ -1435,7 +1435,7 @@ function render(): void {
         ...(isParade(r) ? { rainbow: true, parts: r.segments.map((sg) => sg.path.map(toRadar)), flowAt: rainbowFlow(r, now, 'radar') } : {}),
         // 洋流車掃：進行中畫洋流的特效；中間點、一直重複開的洋流號（減少動態效果時不開）
         ...(isOceanRoute(r)
-          ? { ocean: true, flowAt: rainbowFlow(r, now, 'radar'), marks: routeTurns(r).map((t) => ({ ...toRadar([t.lat, t.lng]), title: turnLabel(t) })), car: !calmMotion?.matches }
+          ? { ocean: true, flowAt: rainbowFlow(r, now, 'radar'), marks: routeTurns(r).map((t) => ({ ...toRadar([t.lat, t.lng]), title: turnLabel(t) })), boat: !calmMotion?.matches }
           : {}),
         points: r.segments.flatMap((sg) => sg.path).map(toRadar),
       };
@@ -1472,7 +1472,7 @@ function render(): void {
       claimUrl: r.claimUrl,
       source: r.source,
       ...(isParade(r) ? { rainbow: true, flowAt: rainbowFlow(r, now, 'map') } : {}),
-      ...(isOceanRoute(r) ? { ocean: true, flowAt: rainbowFlow(r, now, 'map'), turns: routeTurns(r).map((t) => ({ lat: t.lat, lng: t.lng, label: turnLabel(t) })), car: !calmMotion?.matches } : {}),
+      ...(isOceanRoute(r) ? { ocean: true, flowAt: rainbowFlow(r, now, 'map'), turns: routeTurns(r).map((t) => ({ lat: t.lat, lng: t.lng, label: turnLabel(t) })), boat: !calmMotion?.matches } : {}),
       // 回報的車掃：已經經過的那段畫淡
       segments: r.segments.map((sg) => ({ ...sg, passed: !!sg.toAt && sg.toAt <= now })),
     })),

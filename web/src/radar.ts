@@ -1,5 +1,5 @@
 import type { BlipStyle, EventKind, Phase, SweepStyle } from './types';
-import { alongLine, CAR_SVG, CAR_TITLE, carPhase, flowOut, RAINBOW_FLOW_TOTAL, RAINBOW_STAGGER_MS, surge, SURGE_TOTAL } from './flow';
+import { alongLine, BOAT_SVG, BOAT_TITLE, boatPhase, flowOut, RAINBOW_FLOW_TOTAL, RAINBOW_STAGGER_MS, surge, SURGE_TOTAL } from './flow';
 
 export interface RadarItem {
   id: number;
@@ -36,14 +36,14 @@ export interface RadarRoute {
   points: Array<{ bearing: number; distanceKm: number }>;
   /** 分開畫的幾段（遊行的北、南兩條路線同時走，各自從出發流到終點）；沒有就整條 points 一段 */
   parts?: Array<Array<{ bearing: number; distanceKm: number }>>;
-  /** 洋流車掃（台北大洋流官方的）：進行中畫洋流的特效（沿著路線一直往前流的浪花，每隔一段時間湧一次） */
+  /** 洋流車掃（台北大洋流官方的）：路線畫成一道往前流的水（水紋、浪花），進行中再加每隔一段時間湧一次的浪 */
   ocean?: boolean;
   /** 彩虹從出發的地方流出、洋流湧過去：開始的時間（Date.now() 的毫秒）；沒有是不流 */
   flowAt?: number;
   /** 中間點（官方車掃轉彎的地方）：路線上的小圓點，title 是預計經過的時間和名稱；點了打開時間表 */
   marks?: Array<{ bearing: number; distanceKm: number; title: string }>;
-  /** 洋流號：沿著路線一直重複開的車（動畫，不是車隊的實際位置） */
-  car?: boolean;
+  /** 洋流號：沿著路線一直重複開的船（動畫，不是車隊的實際位置） */
+  boat?: boolean;
 }
 
 /** 放大時畫的街道：每條線是 [往東 km, 往北 km, 往東 km, …]（相對於圓心）；major 大路、minor 其他街道 */
@@ -362,10 +362,10 @@ export class Radar {
   onSpaceMove: (() => void) | null = null;
   /** 點了車掃的中間點：打開那條車掃的時間表 */
   onRoute: ((id: string) => void) | null = null;
-  /** 洋流號：路線在畫面上的折線（SVG 座標，cum 是每一點走了多遠）和車子，每一格畫面照現在的時間擺；往哪邊開記在 carLeft（重畫時接著用） */
-  private carTracks: Array<{ id: string; g: SVGGElement; flip: SVGGElement; xs: Float64Array; ys: Float64Array; cum: Float64Array }> = [];
-  private readonly carLeft = new Map<string, boolean>();
-  private carFrame = 0;
+  /** 洋流號：路線在畫面上的折線（SVG 座標，cum 是每一點走了多遠）和船，每一格畫面照現在的時間擺；往哪邊開記在 boatLeft（重畫時接著用） */
+  private boatTracks: Array<{ id: string; g: SVGGElement; flip: SVGGElement; xs: Float64Array; ys: Float64Array; cum: Float64Array }> = [];
+  private readonly boatLeft = new Map<string, boolean>();
+  private boatFrame = 0;
   private readonly stack: HTMLDivElement;
   private readonly pointers = new Map<number, { x: number; y: number }>();
   private pinchDist = 0;
@@ -1661,7 +1661,7 @@ export class Radar {
   /** 路線畫在光點下面；超出範圍的部分被外圈裁掉 */
   private drawRoutes(): void {
     this.routeLayer.replaceChildren();
-    this.carTracks = [];
+    this.boatTracks = [];
     for (const r of this.routes) {
       if (r.state === 'done' || r.points.length < 2 || this.earthHidden) continue;
       // 太空：有一段在地球另一面就不畫（直線會穿過地球）
@@ -1679,13 +1679,14 @@ export class Radar {
         }
         continue;
       }
-      const path = el('path', { class: `route route-${r.state}`, d });
-      this.routeLayer.appendChild(path);
-      // 洋流車掃進行中：浪花沿著路線一直往前流；剛出發、之後每隔一段時間，深藍、淺藍的浪從出發的地方湧到終點再淡掉
-      if (r.ocean && r.state === 'live') {
+      // 洋流車掃：整條路線是一道水流（路線下面淡藍的水，上面深藍的水紋、白色的浪花用不同的速度往前流）；
+      // 進行中剛出發、之後每隔一段時間，深藍、淺藍的浪從出發的地方湧到終點再淡掉
+      if (r.ocean) this.routeLayer.appendChild(el('path', { class: 'route-water', d }));
+      this.routeLayer.appendChild(el('path', { class: `route route-${r.state}${r.ocean ? ' route-ocean-line' : ''}`, d }));
+      if (r.ocean) {
         const g = el('g', { class: 'route-ocean' });
-        const waves = [el('path', { class: 'ocean-surge ocean-deep', d }), el('path', { class: 'ocean-surge ocean-light', d })];
-        g.append(...waves, el('path', { class: 'ocean-current', d }));
+        const waves = r.state === 'live' ? [el('path', { class: 'ocean-surge ocean-deep', d }), el('path', { class: 'ocean-surge ocean-light', d })] : [];
+        g.append(...waves, el('path', { class: 'water-flow', d }), el('path', { class: 'water-glint', d }));
         this.routeLayer.appendChild(g);
         const ago = r.flowAt !== undefined ? Date.now() - r.flowAt : Infinity;
         if (ago < SURGE_TOTAL) waves.forEach((w, i) => surge(w as SVGPathElement, ago - i * RAINBOW_STAGGER_MS));
@@ -1704,13 +1705,13 @@ export class Radar {
         }
         this.routeLayer.appendChild(g);
       }
-      if (r.car) this.addCar(r);
+      if (r.boat) this.addBoat(r);
     }
-    this.moveCars();
+    this.moveBoats();
   }
 
-  /** 洋流號：照畫面上的路線（跟 pathOf 一樣的座標）記下折線，車子畫成螢幕像素的大小（moveCars 擺位置） */
-  private addCar(r: RadarRoute): void {
+  /** 洋流號：照畫面上的路線（跟 pathOf 一樣的座標）記下折線，船畫成螢幕像素的大小（moveBoats 擺位置） */
+  private addBoat(r: RadarRoute): void {
     const n = r.points.length;
     const [xs, ys, cum] = [new Float64Array(n), new Float64Array(n), new Float64Array(n)];
     r.points.forEach((pt, i) => {
@@ -1719,30 +1720,30 @@ export class Radar {
       cum[i] = i > 0 ? cum[i - 1] + Math.hypot(xs[i] - xs[i - 1], ys[i] - ys[i - 1]) : 0;
     });
     if (!(cum[n - 1] > 0)) return;
-    const g = el('g', { class: 'route-car' }) as SVGGElement;
-    g.innerHTML = `<title>${CAR_TITLE}</title>${CAR_SVG}`;
+    const g = el('g', { class: 'route-boat' }) as SVGGElement;
+    g.innerHTML = `<title>${BOAT_TITLE}</title>${BOAT_SVG}`;
     this.routeLayer.appendChild(g);
-    this.carTracks.push({ id: r.id, g, flip: g.querySelector('.car-flip') as SVGGElement, xs, ys, cum });
+    this.boatTracks.push({ id: r.id, g, flip: g.querySelector('.boat-flip') as SVGGElement, xs, ys, cum });
   }
 
-  /** 每一格畫面把洋流號擺到現在的位置（雷達藏起來時不擺，回來接著開）；沒有車就停 */
-  private moveCars = (): void => {
-    cancelAnimationFrame(this.carFrame);
-    this.carFrame = 0;
-    if (this.carTracks.length === 0) return;
+  /** 每一格畫面把洋流號擺到現在的位置（雷達藏起來時不擺，回來接著開）；沒有船就停 */
+  private moveBoats = (): void => {
+    cancelAnimationFrame(this.boatFrame);
+    this.boatFrame = 0;
+    if (this.boatTracks.length === 0) return;
     if (this.squarePx > 0 && this.stack.offsetWidth > 0) {
-      const { at, alpha } = carPhase(Date.now());
+      const { at, alpha } = boatPhase(Date.now());
       const k = (SIZE / this.squarePx).toFixed(4);
-      for (const t of this.carTracks) {
+      for (const t of this.boatTracks) {
         const p = alongLine(t.xs, t.ys, t.cum, at);
-        if (p.left !== null) this.carLeft.set(t.id, p.left);
+        if (p.left !== null) this.boatLeft.set(t.id, p.left);
         t.g.setAttribute('transform', `translate(${p.x.toFixed(1)} ${p.y.toFixed(1)}) scale(${k})`);
         t.g.style.opacity = alpha.toFixed(2);
-        if (this.carLeft.get(t.id)) t.flip.setAttribute('transform', 'scale(-1 1)');
+        if (this.boatLeft.get(t.id)) t.flip.setAttribute('transform', 'scale(-1 1)');
         else t.flip.removeAttribute('transform');
       }
     }
-    this.carFrame = requestAnimationFrame(this.moveCars);
+    this.boatFrame = requestAnimationFrame(this.moveBoats);
   };
 
   private placeRose(): void {

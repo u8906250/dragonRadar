@@ -1,5 +1,5 @@
 import type * as Leaflet from 'leaflet';
-import { alongLine, CAR_SVG, carPhase, flowOut, RAINBOW_FLOW_TOTAL, RAINBOW_STAGGER_MS, surge, SURGE_TOTAL } from './flow';
+import { alongLine, BOAT_SVG, boatPhase, flowOut, RAINBOW_FLOW_TOTAL, RAINBOW_STAGGER_MS, surge, SURGE_TOTAL } from './flow';
 import { haversineKm, type LatLng } from './geo';
 import type { EventKind, Phase } from './types';
 import { LANDMARKS } from './landmarks';
@@ -36,15 +36,15 @@ export interface MapRoute {
   source?: 'official' | 'report';
   /** 畫成彩虹（同志遊行）：每一段是一條路線（from 是名稱、to 是經過的路） */
   rainbow?: boolean;
-  /** 洋流車掃（台北大洋流官方的）：進行中畫洋流的特效 */
+  /** 洋流車掃（台北大洋流官方的）：路線畫成一道往前流的水，進行中再加湧過去的浪 */
   ocean?: boolean;
   /** 彩虹從出發的地方流出、洋流湧過去：開始的時間（Date.now() 的毫秒）；沒有是不流 */
   flowAt?: number;
   segments: Array<{ seq: number; from: string; to: string; path: Array<[number, number]>; people: number; target: number; passed?: boolean }>;
   /** 中間點（官方車掃轉彎的地方）：路線上的小圓點，點了寫預計經過的時間和名稱 */
   turns?: Array<{ lat: number; lng: number; label: string }>;
-  /** 洋流號：沿著路線一直重複開的車（動畫，不是車隊的實際位置） */
-  car?: boolean;
+  /** 洋流號：沿著路線一直重複開的船（動畫，不是車隊的實際位置） */
+  boat?: boolean;
 }
 
 /** 彩虹旗的六個顏色（紅、橙、黃、綠、藍、紫） */
@@ -130,10 +130,10 @@ export class MapView {
   private landmarkGroup: Leaflet.LayerGroup | null = null;
   private landmarksOn = true;
   private routes: MapRoute[] = [];
-  /** 洋流號：路線的經緯度（cum 是每一點走了幾公里）和車子，每一格畫面照現在的時間擺；往哪邊開記在 carLeft */
-  private carTracks: Array<{ id: string; marker: Leaflet.Marker; lat: Float64Array; lng: Float64Array; cum: Float64Array }> = [];
-  private readonly carLeft = new Map<string, boolean>();
-  private carFrame = 0;
+  /** 洋流號：路線的經緯度（cum 是每一點走了幾公里）和船，每一格畫面照現在的時間擺；往哪邊開記在 boatLeft */
+  private boatTracks: Array<{ id: string; marker: Leaflet.Marker; lat: Float64Array; lng: Float64Array; cum: Float64Array }> = [];
+  private readonly boatLeft = new Map<string, boolean>();
+  private boatFrame = 0;
   private bottleLayer: Leaflet.LayerGroup | null = null;
   private bottles: MapBottle[] = [];
   /** 座標一樣合成一個點時，每個項目對應到畫出來的那個標記 */
@@ -160,7 +160,7 @@ export class MapView {
   invalidate(): void {
     if (this.map) {
       this.map.invalidateSize();
-      this.moveCars();
+      this.moveBoats();
       return;
     }
     void this.ensure();
@@ -493,7 +493,7 @@ export class MapView {
 
   setRoutes(routes: MapRoute[]): void {
     const sig = (rs: MapRoute[]): string =>
-      JSON.stringify(rs.map((r) => [r.id, r.state, r.flowAt ?? null, r.segments.map((x) => [x.people, x.target, x.path.length, !!x.passed]), r.turns ?? [], !!r.car]));
+      JSON.stringify(rs.map((r) => [r.id, r.state, r.flowAt ?? null, r.segments.map((x) => [x.people, x.target, x.path.length, !!x.passed]), r.turns ?? [], !!r.boat]));
     if (sig(routes) === sig(this.routes)) return;
     this.routes = routes;
     this.pushRoutes();
@@ -515,7 +515,7 @@ export class MapView {
     const layer = this.routeLayer;
     if (!L || !layer) return;
     layer.clearLayers();
-    this.carTracks = [];
+    this.boatTracks = [];
     for (const r of this.routes) {
       if (r.state === 'done') continue;
       if (r.rainbow) {
@@ -561,21 +561,28 @@ export class MapView {
         layer.addLayer(line);
         line.bringToBack();
       }
-      // 洋流車掃進行中：整條路線上浪花一直往前流（疊在認領顏色上面、點不到，點的還是下面的路段）；
-      // 剛出發、之後每隔一段時間，深藍、淺藍的浪從出發的地方湧到終點再淡掉
-      if (r.ocean && r.state === 'live') {
+      // 洋流車掃：整條路線是一道水流（認領顏色下面淡藍的水，上面深藍的水紋、白色的浪花用不同的速度往前流；點不到，點的還是路段）；
+      // 進行中剛出發、之後每隔一段時間，深藍、淺藍的浪從出發的地方湧到終點再淡掉
+      if (r.ocean) {
         const whole = r.segments.flatMap((sg) => sg.path);
-        const ago = r.flowAt !== undefined ? Date.now() - r.flowAt : Infinity;
-        [
-          { color: '#0d6ea8', weight: 18, opacity: 0.45 },
-          { color: '#3fd0e0', weight: 10, opacity: 0.6 },
-        ].forEach((o, i) => {
-          const wave = L.polyline(whole, { ...o, lineCap: 'round', lineJoin: 'round', interactive: false, className: 'ocean-surge' });
-          layer.addLayer(wave);
-          const el = wave.getElement();
-          if (ago < SURGE_TOTAL && el instanceof SVGPathElement) surge(el, ago - i * RAINBOW_STAGGER_MS);
-        });
-        layer.addLayer(L.polyline(whole, { color: '#effdff', weight: 4, opacity: 0.95, dashArray: '0.1 14', lineCap: 'round', interactive: false, className: 'ocean-current' }));
+        const line = { lineCap: 'round', lineJoin: 'round', interactive: false } as const;
+        const water = L.polyline(whole, { ...line, color: '#4cc3e6', weight: 18, opacity: 0.35 });
+        layer.addLayer(water);
+        water.bringToBack();
+        if (r.state === 'live') {
+          const ago = r.flowAt !== undefined ? Date.now() - r.flowAt : Infinity;
+          [
+            { color: '#0d6ea8', weight: 18, opacity: 0.45 },
+            { color: '#3fd0e0', weight: 10, opacity: 0.6 },
+          ].forEach((o, i) => {
+            const wave = L.polyline(whole, { ...o, ...line, className: 'ocean-surge' });
+            layer.addLayer(wave);
+            const el = wave.getElement();
+            if (ago < SURGE_TOTAL && el instanceof SVGPathElement) surge(el, ago - i * RAINBOW_STAGGER_MS);
+          });
+        }
+        layer.addLayer(L.polyline(whole, { ...line, color: '#1784b8', weight: 3, opacity: 0.85, dashArray: '10 20', className: 'map-water-flow' }));
+        layer.addLayer(L.polyline(whole, { ...line, color: '#ffffff', weight: 3, opacity: 0.95, dashArray: '3 27', className: 'map-water-glint' }));
       }
       // 中間點：路線上的小圓點，點了寫預計經過的時間和名稱
       for (const t of r.turns ?? []) {
@@ -583,13 +590,13 @@ export class MapView {
         dot.bindPopup(`<strong>${escapeHtml(r.title)}・中間點</strong><br>${escapeHtml(t.label)}<br>時間用路線長度平均推算，以現場為準`, { closeButton: false });
         layer.addLayer(dot);
       }
-      if (r.car) this.addCar(r);
+      if (r.boat) this.addBoat(r);
     }
-    this.moveCars();
+    this.moveBoats();
   }
 
-  /** 洋流號：路線的經緯度照實際距離記下來，車子是點不到的標記（在其他標記下面） */
-  private addCar(r: MapRoute): void {
+  /** 洋流號：路線的經緯度照實際距離記下來，船是點不到的標記（在其他標記下面） */
+  private addBoat(r: MapRoute): void {
     const L = this.L;
     const layer = this.routeLayer;
     const pts = r.segments.flatMap((sg) => sg.path);
@@ -601,32 +608,32 @@ export class MapView {
       cum[i] = i > 0 ? cum[i - 1] + haversineKm({ lat: lat[i - 1], lng: lng[i - 1] }, { lat: a, lng: b }) : 0;
     });
     if (!(cum[n - 1] > 0)) return;
-    const icon = L.divIcon({ className: 'map-car', html: `<svg viewBox="-24 -30 48 32" width="48" height="32" aria-hidden="true">${CAR_SVG}</svg>`, iconSize: [48, 32], iconAnchor: [24, 30] });
+    const icon = L.divIcon({ className: 'map-boat', html: `<svg viewBox="-24 -46 48 50" width="48" height="50" aria-hidden="true">${BOAT_SVG}</svg>`, iconSize: [48, 50], iconAnchor: [24, 46] });
     const marker = L.marker([lat[0], lng[0]], { icon, interactive: false, keyboard: false, zIndexOffset: -1000 });
     layer.addLayer(marker);
-    this.carTracks.push({ id: r.id, marker, lat, lng, cum });
+    this.boatTracks.push({ id: r.id, marker, lat, lng, cum });
   }
 
-  /** 每一格畫面把洋流號擺到現在的位置（跟雷達同一個時鐘；地圖藏起來時不擺，回來接著開）；沒有車就停 */
-  private moveCars = (): void => {
-    cancelAnimationFrame(this.carFrame);
-    this.carFrame = 0;
-    if (this.carTracks.length === 0) return;
+  /** 每一格畫面把洋流號擺到現在的位置（跟雷達同一個時鐘；地圖藏起來時不擺，回來接著開）；沒有船就停 */
+  private moveBoats = (): void => {
+    cancelAnimationFrame(this.boatFrame);
+    this.boatFrame = 0;
+    if (this.boatTracks.length === 0) return;
     if (this.el.offsetWidth > 0) {
-      const { at, alpha } = carPhase(Date.now());
-      for (const t of this.carTracks) {
+      const { at, alpha } = boatPhase(Date.now());
+      for (const t of this.boatTracks) {
         // 經度往東是畫面的右邊
         const p = alongLine(t.lng, t.lat, t.cum, at);
-        if (p.left !== null) this.carLeft.set(t.id, p.left);
+        if (p.left !== null) this.boatLeft.set(t.id, p.left);
         t.marker.setLatLng([p.y, p.x]);
         const box = t.marker.getElement();
         if (box) {
           box.style.opacity = alpha.toFixed(2);
-          box.classList.toggle('left', !!this.carLeft.get(t.id));
+          box.classList.toggle('left', !!this.boatLeft.get(t.id));
         }
       }
     }
-    this.carFrame = requestAnimationFrame(this.moveCars);
+    this.boatFrame = requestAnimationFrame(this.moveBoats);
   };
 }
 
