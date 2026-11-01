@@ -72,6 +72,8 @@ export interface ParkGeom {
   lawns: Pt[][];
   ponds: Pt[][];
   buildings: Pt[][];
+  /** 建築的屋頂：填色的圈（逆時針），和每一棟當成四坡頂的長方形（roofOf） */
+  roofs: Pt[][];
   water: Pt[][];
   green: Pt[][];
   paths: Pt[][];
@@ -129,6 +131,7 @@ export function parkGeom(w: ParkWorld): ParkGeom {
     // 水面的小島疊在外框上面，填色用 evenodd 挖掉
     ponds: ZHONGSHAN_PARK.water.flat().map(area),
     buildings: ZHONGSHAN_PARK.buildings.map(loop),
+    roofs: ZHONGSHAN_PARK.buildings.map(area),
     water: ZHONGSHAN_PARK.water.flat().map(loop),
     green: ZHONGSHAN_PARK.green.map(loop),
     paths: ZHONGSHAN_PARK.paths.map((l) => dense(l.map(w.to))),
@@ -757,6 +760,7 @@ export function parkSvg(g: ParkGeom, c: ParkCanvas): string {
   out += `<path class="park-green" d="${c.lines(g.green)}" />`;
   out += `<path class="park-water" d="${c.lines(g.water)}" />`;
   out += `<path class="park-path street-minor" d="${c.lines(g.paths)}" />`;
+  out += roofsSvg(g, c);
   out += `<path class="park-building" d="${c.lines(g.buildings)}" />`;
   // 狗只在汪星，畫在火箭、銅像後面（在它們後面一點時被擋住）
   if (g.name === 'woof' && c.ppm >= STATUE_FROM) {
@@ -775,6 +779,147 @@ export function parkSvg(g: ParkGeom, c: ParkCanvas): string {
         : `<g class="park-statue" data-at="${x} ${y}"><circle class="statue-hit" cx="${x}" cy="${(s[1] - h * 0.4).toFixed(1)}" r="${Math.max(STATUE_HIT, h * 0.6).toFixed(1)}" />` +
           `<g transform="translate(${x} ${y}) scale(${+c.ppm.toPrecision(4)})">${STATUE_SVG}</g></g>`;
   }
+  return out;
+}
+
+/**
+ * 建築的屋頂（從上面看）：國父紀念館（最大的那棟）是黃色琉璃瓦，其他是紅褐色的瓦。每一棟用最小的外接長方形當成四坡頂（廡殿頂）：
+ * 長邊方向一條屋脊、四個角的斜脊接到屋脊兩頭，照建築的形狀裁掉外面的；拉近（外圈約 150 公尺內）慢慢畫出一條條瓦溝，
+ * 從屋簷往上到斜脊、屋脊（長邊那兩面直的、短邊那兩面橫的），真的間隔 ROOF_TILE_M，畫面上比 ROOF_TILE_PX 密就隔一條畫一條，
+ * 細一層照拉近的程度慢慢淡入（拉近只會多、不會跳）。屋脊、瓦溝的粗細照真的寬度，太細就畫成最細
+ */
+const ROOF_TILE_M = 0.3;
+const ROOF_TILE_PX = 4;
+/** 瓦溝從畫面上的間隔約 ROOF_TILE_PX × 2^4 開始淡入 */
+const ROOF_TILE_FROM = 4;
+/** 太小的（柱子、小亭子短邊不到 2 公尺）只填色 */
+const ROOF_MIN_M = 1;
+interface RoofBox {
+  /** 中心、長邊方向（單位向量），長、短邊的一半（公尺，攤平的） */
+  cx: number;
+  cy: number;
+  ux: number;
+  uy: number;
+  a: number;
+  b: number;
+  hall: boolean;
+}
+const roofBoxes = new WeakMap<ParkGeom, RoofBox[]>();
+/** 每一棟的最小外接長方形（凸包每一條邊的方向試一次，面積最小的） */
+function roofOf(g: ParkGeom): RoofBox[] {
+  const had = roofBoxes.get(g);
+  if (had) return had;
+  const rings = g.roofs.map((r) => r.map(([lat, lng]): Pt => [(lng - g.O.lng) * g.O.mx, (lat - g.O.lat) * g.O.my]));
+  const areas = rings.map((r) => Math.abs(ringArea(r)));
+  const biggest = areas.indexOf(Math.max(...areas));
+  const boxes = rings.map((pts, i): RoofBox => {
+    const hull = convexHull(pts);
+    let best: RoofBox | null = null;
+    let bestArea = Infinity;
+    for (let k = 0; k < hull.length; k++) {
+      const [x1, y1] = hull[k];
+      const [x2, y2] = hull[(k + 1) % hull.length];
+      const len = Math.hypot(x2 - x1, y2 - y1);
+      if (len === 0) continue;
+      const [ux, uy] = [(x2 - x1) / len, (y2 - y1) / len];
+      let [s0, s1, t0, t1] = [Infinity, -Infinity, Infinity, -Infinity];
+      for (const [x, y] of hull) {
+        const s = x * ux + y * uy;
+        const t = -x * uy + y * ux;
+        [s0, s1, t0, t1] = [Math.min(s0, s), Math.max(s1, s), Math.min(t0, t), Math.max(t1, t)];
+      }
+      if ((s1 - s0) * (t1 - t0) >= bestArea) continue;
+      bestArea = (s1 - s0) * (t1 - t0);
+      const [sm, tm] = [(s0 + s1) / 2, (t0 + t1) / 2];
+      const [cx, cy] = [sm * ux - tm * uy, sm * uy + tm * ux];
+      // 長邊當 u
+      best = s1 - s0 >= t1 - t0 ? { cx, cy, ux, uy, a: (s1 - s0) / 2, b: (t1 - t0) / 2, hall: i === biggest } : { cx, cy, ux: -uy, uy: ux, a: (t1 - t0) / 2, b: (s1 - s0) / 2, hall: i === biggest };
+    }
+    return best ?? { cx: 0, cy: 0, ux: 1, uy: 0, a: 0, b: 0, hall: false };
+  });
+  roofBoxes.set(g, boxes);
+  return boxes;
+}
+
+/** 凸包（Andrew monotone chain） */
+function convexHull(pts: Pt[]): Pt[] {
+  const p = [...pts].sort((m, n) => m[0] - n[0] || m[1] - n[1]);
+  const cross = (o: Pt, m: Pt, n: Pt): number => (m[0] - o[0]) * (n[1] - o[1]) - (m[1] - o[1]) * (n[0] - o[0]);
+  const half = (list: Pt[]): Pt[] => {
+    const h: Pt[] = [];
+    for (const q of list) {
+      while (h.length >= 2 && cross(h[h.length - 2], h[h.length - 1], q) <= 0) h.pop();
+      h.push(q);
+    }
+    h.pop();
+    return h;
+  };
+  return [...half(p), ...half([...p].reverse())];
+}
+
+function roofsSvg(g: ParkGeom, c: ParkCanvas): string {
+  const { O } = g;
+  const ppm = c.ppm;
+  const reach = viewReach() + 2;
+  const f1 = (n: number): string => n.toFixed(1);
+  // 瓦溝：畫的這一層間隔 step（畫面上至少 ROOF_TILE_PX），細一層（中間那條）的淡入程度，整個瓦溝的淡入程度
+  const f = Math.log2(ROOF_TILE_PX / (ppm * ROOF_TILE_M));
+  const k = Math.max(0, Math.ceil(f));
+  const step = ROOF_TILE_M * 2 ** k;
+  const fine = k > 0 ? Math.min(1, k - f) : 0;
+  const tiles = c.textures ? Math.max(0, Math.min(1, ROOF_TILE_FROM - f)) : 0;
+  const ridgeW = Math.min(6, Math.max(0.9, 0.4 * ppm));
+  const tileW = Math.min(2, Math.max(0.35, 0.08 * ppm));
+  let out = '';
+  roofOf(g).forEach((r, i) => {
+    const d = c.area([g.roofs[i]]);
+    if (!d) return;
+    const cls = r.hall ? ' hall' : '';
+    out += `<path class="park-roof${cls}" d="${d}" />`;
+    if (r.b < ROOF_MIN_M) return;
+    // 長方形裡 (s, t)：沿長邊 s、沿短邊 t，換回經緯度再換到畫面上
+    const at = (s: number, t: number): Pt | null => {
+      const x = r.cx + s * r.ux - t * r.uy;
+      const y = r.cy + s * r.uy + t * r.ux;
+      return c.at(O.lat + y / O.my, O.lng + x / O.mx);
+    };
+    // 整棟都在畫面外面就不畫屋脊、瓦溝
+    const mid = at(0, 0);
+    if (!mid || Math.hypot(mid[0] - c.rx, mid[1] - c.ry) - Math.hypot(r.a, r.b) * ppm > reach) return;
+    const seg = (s1: number, t1: number, s2: number, t2: number): string => {
+      const p = at(s1, t1);
+      const q = at(s2, t2);
+      if (!p || !q) return '';
+      // 線段離圓心最近的地方在看得到的範圍外面就不畫
+      const [dx, dy] = [q[0] - p[0], q[1] - p[1]];
+      const u = Math.max(0, Math.min(1, ((c.rx - p[0]) * dx + (c.ry - p[1]) * dy) / (dx * dx + dy * dy || 1)));
+      if (Math.hypot(p[0] + dx * u - c.rx, p[1] + dy * u - c.ry) > reach) return '';
+      return `M${f1(p[0])} ${f1(p[1])}L${f1(q[0])} ${f1(q[1])}`;
+    };
+    const { a, b } = r;
+    const ridge = seg(-(a - b), 0, a - b, 0) + [-1, 1].flatMap((ss) => [-1, 1].map((tt) => seg(ss * a, tt * b, ss * (a - b), 0))).join('');
+    // 瓦溝：長邊那兩面（沿 s 每隔 step 一條，從屋簷 t = ±b 往上到斜脊或屋脊）、短邊那兩面（沿 t，從 s = ±a 往上）
+    const grooves = (from: number, every: number): string => {
+      let dd = '';
+      for (let s = Math.ceil((-a - from) / every) * every + from; s < a; s += every) {
+        const up = Math.max(0, b - (a - Math.abs(s)));
+        dd += seg(s, b, s, up) + seg(s, -b, s, -up);
+      }
+      for (let t = Math.ceil((-b - from) / every) * every + from; t < b; t += every) {
+        const up = a - (b - Math.abs(t));
+        dd += seg(a, t, up, t) + seg(-a, t, -up, t);
+      }
+      return dd;
+    };
+    const main = tiles > 0 ? grooves(0, step) : '';
+    const half = tiles > 0 && fine > 0.02 ? grooves(step / 2, step) : '';
+    out +=
+      `<clipPath id="park-roof-${g.name}-${i}"><path d="${d}" /></clipPath><g clip-path="url(#park-roof-${g.name}-${i})">` +
+      (main ? `<path class="park-tile${cls}" stroke-width="${tileW.toFixed(2)}" stroke-opacity="${(0.5 * tiles).toFixed(2)}" d="${main}" />` : '') +
+      (half ? `<path class="park-tile${cls}" stroke-width="${tileW.toFixed(2)}" stroke-opacity="${(0.5 * tiles * fine).toFixed(2)}" d="${half}" />` : '') +
+      (ridge ? `<path class="park-ridge${cls}" stroke-width="${ridgeW.toFixed(2)}" d="${ridge}" />` : '') +
+      '</g>';
+  });
   return out;
 }
 
