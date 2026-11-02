@@ -1,6 +1,7 @@
 name: Deploy web to Cloudflare Pages
 
 # 主要網址：https://current-radar.pages.dev（免費，與後端同一個 Cloudflare 帳號）
+# 偶爾部署顯示成功、網站卻還是舊版（2026-11-03 v1.419 遇過）：到 Actions 手動重跑這個流程（workflow_dispatch）
 on:
   push:
     branches: [main]
