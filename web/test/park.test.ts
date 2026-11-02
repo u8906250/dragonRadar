@@ -245,6 +245,12 @@ describe('地球的雷達上的中山公園（跟汪星共用一份）', () => {
     expect(plain).toBeGreaterThan(40);
     expect(xiaofaBehind).toBeGreaterThan(0);
     expect(xiaofaBehind).toBeLessThan(plain * 0.3);
+    // 樹下少停：公園大半在樹冠底下，抽要待在哪的大多是空地（樹下只留約 15%），但不是完全不去
+    const shaded = ([lat, lng]: [number, number]): boolean => ZHONGSHAN_PARK.trees.some(([y, x, r]) => Math.hypot((lng - x) * 111_320 * Math.cos((25.0394 * Math.PI) / 180), (lat - y) * 110_574) < r);
+    const stops = Array.from({ length: 1000 }, () => PARK_YARD.anywhere(rand)!);
+    const shadeShare = stops.filter(({ at }) => shaded(at)).length / stops.length;
+    expect(shadeShare).toBeGreaterThan(0.01);
+    expect(shadeShare).toBeLessThan(0.2);
     // 待在步道、旗台上的：抽得到、走得到，旗台上的不在旗桿底座上
     const kinds = parkAreas().map((x) => x.kind);
     const many = Array.from({ length: 2000 }, () => PARK_YARD.anywhere(rand)!);
@@ -285,6 +291,10 @@ describe('地球的雷達上的中山公園（跟汪星共用一份）', () => {
     expect(full).not.toContain('小法');
     expect(full).toMatch(/class="woof-dog full stand" data-dog="xiaofa" data-path="[-\d. ]+" data-at="[\d.]+ [\d.]+" data-flip="no"><circle class="dog-hit"/);
     for (const part of ['body', 'head', 'muzzle', 'nose', 'ear1', 'ear-1', 'tail0', 'legfl', 'leghrpaw']) expect(full).toContain(`data-part="${part}"`);
+    // 狗畫在樹的下面（走到樹下被樹冠蓋住）、橋的上面
+    const wide = woofAt(0.3, dog);
+    expect(wide.indexOf('woof-dog')).toBeLessThan(wide.indexOf('park-tree'));
+    expect(wide.indexOf('woof-dog')).toBeGreaterThan(wide.indexOf('park-bridge'));
     const [ax, ay] = /data-at="([\d.]+) ([\d.]+)"/.exec(full)!.slice(1).map(Number);
     expect(Math.hypot(ax - C, ay - C)).toBeLessThan(2);
     // 在畫面外面就不畫

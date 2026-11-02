@@ -259,6 +259,8 @@ const PATH_SPOT_M = 0.8;
 const WITHIN_PATH_M = 15;
 /** 不太會去的地方：抽到那裡的只留這麼多 */
 const RARE_KEEP = 0.12;
+/** 樹下（樹冠底下）：可以走過去，但抽到那裡停下來、休息的只留這麼多（大多在空地停留） */
+const SHADE_KEEP = 0.15;
 let areaList: ParkArea[] | null = null;
 export function parkAreas(): ParkArea[] {
   if (areaList) return areaList;
@@ -311,7 +313,7 @@ function segDist([px, py]: Pt, [ax, ay]: Pt, [bx, by]: Pt): number {
   return Math.hypot(ax + dx * t - px, ay + dy * t - py);
 }
 
-/** 公園裡走得到的地方（第一次用到才算）：草皮、旗台、擋住的（建築、水池；holes 是水池裡橋接到的小島）、旗桿底座、橋上、步道的每一段（5 公尺一格的索引）、步道的路網 */
+/** 公園裡走得到的地方（第一次用到才算）：草皮、旗台、擋住的（建築、水池；holes 是水池裡橋接到的小島）、旗桿底座、橋上、步道的每一段（5 公尺一格的索引）、步道的路網、樹冠底下 */
 interface Walk {
   lawns: Array<{ ring: Pt[]; box: Box }>;
   deck: { ring: Pt[]; box: Box };
@@ -323,6 +325,8 @@ interface Walk {
   nodes: Pt[];
   nodeGrid: Map<string, number[]>;
   adj: Array<Array<[number, number]>>;
+  /** 在不在樹冠底下（公尺座標） */
+  shade: (p: Pt) => boolean;
 }
 let walkData: Walk | null = null;
 const CELL = 5;
@@ -407,13 +411,21 @@ function walkOf(): Walk {
       }
     }
   });
-  return (walkData = { lawns, deck, pole, blocks, onBridge, segs, grid, nodes, nodeGrid, adj });
+  // 樹冠：每一棵記在樹冠蓋到的格子裡
+  const crowns = ZHONGSHAN_PARK.trees.map(([lat, lng, r]) => ({ at: toM([lat, lng]), r }));
+  const crownGrid = new Map<string, number[]>();
+  crowns.forEach(({ at: [x, y], r }, i) => {
+    for (let a = Math.floor((x - r) / CELL); a <= Math.floor((x + r) / CELL); a++)
+      for (let b = Math.floor((y - r) / CELL); b <= Math.floor((y + r) / CELL); b++) crownGrid.set(`${a},${b}`, [...(crownGrid.get(`${a},${b}`) ?? []), i]);
+  });
+  const shade = (p: Pt): boolean => (crownGrid.get(cellKey(...p)) ?? []).some((i) => Math.hypot(p[0] - crowns[i].at[0], p[1] - crowns[i].at[1]) < crowns[i].r);
+  return (walkData = { lawns, deck, pole, blocks, onBridge, segs, grid, nodes, nodeGrid, adj, shade });
 }
 
 /**
  * 中山公園給一隻狗待的地方（DogYard）：照面積抽一塊待的地方（parkAreas：草皮、每一條步道、旗台，跟草皮一樣可以走來走去、停下來休息），
  * 在公園裡、不在發射口和銅像旁邊（火箭、銅像不會蓋住）；avoid 是這隻狗不去的地方（一圈圈台北的經緯度，例如小法不去公園最右上那一區），
- * rare 是不太會去的地方（抽到那裡的只留 RARE_KEEP 的機會，路過可以）；走多遠照汪星的公尺算
+ * rare 是不太會去的地方（抽到那裡的只留 RARE_KEEP 的機會，路過可以）；樹下也少停（抽到樹冠底下的只留 SHADE_KEEP 的機會，走過去可以）；走多遠照汪星的公尺算
  */
 export function parkYard(o: { avoid?: Pt[][]; rare?: Pt[][] } = {}): DogYard {
   const zone = (rs: Pt[][]): Array<{ ring: Pt[]; box: Box }> =>
@@ -423,8 +435,12 @@ export function parkYard(o: { avoid?: Pt[][]; rare?: Pt[][] } = {}): DogYard {
     });
   const avoid = zone(o.avoid ?? []);
   const rare = zone(o.rare ?? []);
-  /** 不太會去的地方：要去那裡的只留 RARE_KEEP 的機會（換地方、一開始放在哪時用；已經在那裡就照常走） */
-  const keep = (at: Pt, rand: () => number): boolean => !rare.some((b) => inBox(toM(at), b.box) && inRingM(toM(at), b.ring)) || rand() < RARE_KEEP;
+  /**
+   * 不太會去的地方：要去那裡的只留 RARE_KEEP 的機會；樹冠底下的只留 SHADE_KEEP 的機會（抽要走到哪、換地方、一開始放在哪時用，
+   * 所以大多停在空地；走過去、已經在那裡就照常走）
+   */
+  const keep = (at: Pt, rand: () => number): boolean =>
+    (!rare.some((b) => inBox(toM(at), b.box) && inRingM(toM(at), b.ring)) || rand() < RARE_KEEP) && (!walkOf().shade(toM(at)) || rand() < SHADE_KEEP);
   /** 這一點走得到嗎（公尺座標）：不去的地方、旗桿底座不行；橋上可以；不在建築、水裡（橋接到的小島可以），在草皮、旗台上或離步道 PATH_W 內 */
   const okM = (p: Pt): boolean => {
     const w = walkOf();
@@ -896,14 +912,14 @@ export function parkSvg(g: ParkGeom, c: ParkCanvas): string {
   const flagBase = c.area([g.flagBase]);
   if (flagBase) out += `<path class="park-flag-base" d="${flagBase}" />`;
   out += bridgesSvg(g, c);
-  out += treesSvg(g, c);
-  out += roofsSvg(g, c);
-  out += `<path class="park-building" d="${c.lines(g.buildings)}" />`;
-  // 狗只在汪星，畫在火箭、銅像後面（在它們後面一點時被擋住）
+  // 狗只在汪星：畫在樹的下面（走到樹下被樹冠蓋住），也在火箭、銅像後面（在它們後面一點時被擋住）
   if (g.name === 'woof' && c.ppm >= STATUE_FROM) {
     dogWorld = g;
     for (const dog of PARK_DOGS) out += dogPart(g, c, dog);
   }
+  out += treesSvg(g, c);
+  out += roofsSvg(g, c);
+  out += `<path class="park-building" d="${c.lines(g.buildings)}" />`;
   const r = rocketNow();
   if (r.world === g.name && r.phase !== 'away' && r.phase !== 'stored' && r.e >= 0) out += rocketPart(g, c, r.phase, r.e);
   // 映池前面的旗桿：跟銅像一樣站著畫，先是一個點，畫面上夠高才畫出底座和整根旗桿
