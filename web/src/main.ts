@@ -1708,7 +1708,7 @@ function itemCard(it: Item, now: number): HTMLLIElement {
 }
 
 /**
- * 點清單上的一則：雷達像「定位」一樣飛到那裡（中心慢慢移過去、範圍拉到外圈 LOCATE_KM 內，本來就比較近的不動；變成手動位置，
+ * 點清單上的一則：雷達像「定位」一樣飛到那裡（中心慢慢移過去，範圍維持原本的；變成手動位置，
  * 「回到我的位置」回來）；地圖移到看得到；太空裡看別的星球時只選取
  */
 function goToItem(it: Item): void {
@@ -1720,7 +1720,7 @@ function goToItem(it: Item): void {
   }
   if (radar.spaceFocused) return;
   if (radar.spaceMoved) radar.resetSpace();
-  zoomToKm(locateKm(earthMinKm()), { lat, lng, source: 'manual' });
+  zoomToKm(scaleKm, { lat, lng, source: 'manual' });
 }
 
 function routeCard(r: RouteOut, phase: Phase, items: Item[], now: number): HTMLLIElement {
