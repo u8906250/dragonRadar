@@ -1,0 +1,21 @@
+name: Labels
+
+# repo 的 issue 標籤：改了這個檔就跑一次（已經有的照這裡更新顏色、說明），也可以到 Actions 手動跑
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/labels.yml'
+  workflow_dispatch:
+
+permissions:
+  issues: write
+
+jobs:
+  labels:
+    runs-on: ubuntu-latest
+    steps:
+      # 卡片提案：使用說明頁的「到 GitHub 提案一張卡」（.github/ISSUE_TEMPLATE/card-idea.yml）送出的 issue 會自動加上
+      - run: gh label create "卡片提案" --color "F2B84B" --description "卡冊的卡片提案（prompt 或企劃）" --force --repo "$GITHUB_REPOSITORY"
+        env:
+          GH_TOKEN: ${{ github.token }}
