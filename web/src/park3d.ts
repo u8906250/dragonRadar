@@ -74,6 +74,8 @@ const PATH_W = 2;
 const SAKURA_W = 3.6;
 const SAKURA_LINE_OFF = 0.4;
 const SAKURA_LINE_W = 0.15;
+/** 櫻花步道兩邊補草地：離路邊這麼多公尺內有草地，就補到草地為止 */
+const SAKURA_GRASS_M = 6;
 /** 樹多高（估的：照樹冠大小，最高 20 公尺）、樹幹多粗 */
 const treeH = (r: number): number => Math.min(20, 2.5 + 1.9 * r);
 const trunkR = (r: number): number => Math.max(0.1, Math.min(0.4, r * 0.06));
@@ -159,7 +161,7 @@ function prismGeo(shape: THREE.Shape, y0: number, h: number): THREE.BufferGeomet
   g.translate(0, y0, 0);
   return g;
 }
-/** 一條線兩邊各 w/2 的帶子（頭尾各多 w/2，轉角接起來），放在 y 高 */
+/** 一條線兩邊各 w/2 的帶子（中間的轉角每一段多 w/2 接起來，頭尾不多），放在 y 高 */
 function stripGeo(lines: Pt[][], w: number, y: number): THREE.BufferGeometry {
   const pos: number[] = [];
   for (const l of lines)
@@ -171,8 +173,8 @@ function stripGeo(lines: Pt[][], w: number, y: number): THREE.BufferGeometry {
       const [ux, uy] = [dx / len, dy / len];
       const [nx, ny] = [-uy * (w / 2), ux * (w / 2)];
       const [ex, ey] = [ux * (w / 2), uy * (w / 2)];
-      const p0: Pt = [a[0] - ex, a[1] - ey];
-      const p1: Pt = [b[0] + ex, b[1] + ey];
+      const p0: Pt = i > 1 ? [a[0] - ex, a[1] - ey] : a;
+      const p1: Pt = i < l.length - 1 ? [b[0] + ex, b[1] + ey] : b;
       const q = [
         [p0[0] + nx, p0[1] + ny],
         [p0[0] - nx, p0[1] - ny],
@@ -392,8 +394,98 @@ export function openPark3D(o: Park3DOptions): () => void {
     if (cur.length > 1) out.push(cur);
     return out;
   };
-  const pathLines = Z.paths.flatMap((l, i) => (i === Z.sakuraLane ? [] : splitWet(l.map(en))));
-  const sakura = splitWet(Z.paths[Z.sakuraLane].map(en));
+  /** 一條線只留公園外框裡面的部分（穿過外框的地方切開） */
+  const clipIn = (l: Pt[]): Pt[][] => {
+    const out: Pt[][] = [];
+    let cur: Pt[] = [];
+    for (let i = 1; i < l.length; i++) {
+      const [a, b] = [l[i - 1], l[i]];
+      // 這一段跟外框的交點（0～1）
+      const ts = [0, 1];
+      for (let k = 0; k < outline.length; k++) {
+        const [c, d] = [outline[k], outline[(k + 1) % outline.length]];
+        const [rx, ry, sx, sy] = [b[0] - a[0], b[1] - a[1], d[0] - c[0], d[1] - c[1]];
+        const den = rx * sy - ry * sx;
+        if (Math.abs(den) < 1e-9) continue;
+        const t = ((c[0] - a[0]) * sy - (c[1] - a[1]) * sx) / den;
+        const u = ((c[0] - a[0]) * ry - (c[1] - a[1]) * rx) / den;
+        if (t > 0 && t < 1 && u >= 0 && u <= 1) ts.push(t);
+      }
+      ts.sort((x, y) => x - y);
+      for (let k = 1; k < ts.length; k++) {
+        const at = (t: number): Pt => [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t];
+        const [p, q] = [at(ts[k - 1]), at(ts[k])];
+        if (inside(at((ts[k - 1] + ts[k]) / 2), outline)) {
+          if (!cur.length) cur.push(p);
+          cur.push(q);
+        } else if (cur.length) {
+          if (cur.length > 1) out.push(cur);
+          cur = [];
+        }
+      }
+    }
+    if (cur.length > 1) out.push(cur);
+    return out;
+  };
+  const pathLines = Z.paths.flatMap((l, i) => (i === Z.sakuraLane ? [] : clipIn(l.map(en)).flatMap(splitWet)));
+  const sakura = clipIn(Z.paths[Z.sakuraLane].map(en)).flatMap(splitWet);
+  // 櫻花步道兩邊旁邊是草地的地方（離路邊 SAKURA_GRASS_M 內有草地），路邊到草地之間補成草地（灰色的路直接接到草地）；
+  // 超出公園外框、碰到水的點拉回外框、水邊
+  {
+    const lawns = Z.green.map(ringEN);
+    const onLawn = (p: Pt): boolean => lawns.some((r) => inside(p, r));
+    const nearestOn = (p: Pt, r: Pt[]): Pt => {
+      let best: Pt = p;
+      let bd = Infinity;
+      for (let k = 0; k < r.length; k++) {
+        const [a, b] = [r[k], r[(k + 1) % r.length]];
+        const [dx, dy] = [b[0] - a[0], b[1] - a[1]];
+        const t = Math.max(0, Math.min(1, ((p[0] - a[0]) * dx + (p[1] - a[1]) * dy) / (dx * dx + dy * dy || 1)));
+        const q: Pt = [a[0] + dx * t, a[1] + dy * t];
+        const d = Math.hypot(q[0] - p[0], q[1] - p[1]);
+        if (d < bd) [best, bd] = [q, d];
+      }
+      return best;
+    };
+    const keepIn = (p: Pt): Pt => {
+      if (!inside(p, outline)) p = nearestOn(p, outline);
+      const w = waters.find((x) => inside(p, x.outer));
+      return w ? nearestOn(p, w.outer) : p;
+    };
+    const pos: number[] = [];
+    /** 一組線（半寬 half）兩邊補草地 */
+    const fillBeside = (lines: Pt[][], half: number): void => {
+    for (const l of lines)
+      for (let i = 1; i < l.length; i++) {
+        const [a, b] = [l[i - 1], l[i]];
+        const len = Math.hypot(b[0] - a[0], b[1] - a[1]);
+        if (len < 0.01) continue;
+        const [nx, ny] = [-(b[1] - a[1]) / len, (b[0] - a[0]) / len];
+        // 一段太長就分幾小段看
+        const n = Math.ceil(len / 3);
+        for (let k = 0; k < n; k++)
+          for (const side of [1, -1]) {
+            // 前後各多 0.8 公尺（轉彎外側才不會有縫）
+            const pad = 0.8 / len;
+            const [t0, t1] = [k / n - pad, (k + 1) / n + pad];
+            const at = (t: number, off: number): Pt => [a[0] + (b[0] - a[0]) * t + nx * off * side, a[1] + (b[1] - a[1]) * t + ny * off * side];
+            // 往外看 SAKURA_GRASS_M 內第一個是草地的地方，補到那裡（再多 0.3 公尺疊上草地）
+            const reach = [0.5, 1, 1.5, 2, 2.5, 3, 3.5, 4, 4.5, 5, 5.5, 6].find((m) => m <= SAKURA_GRASS_M && onLawn(at((t0 + t1) / 2, half + m)));
+            if (reach === undefined) continue;
+            const far = half + reach + 0.3;
+            const q = [at(t0, half - 0.05), at(t1, half - 0.05), at(t1, far), at(t0, far)].map(keepIn);
+            for (const v of [0, 1, 2, 0, 2, 3]) pos.push(q[v][0], 0.02, -q[v][1]);
+          }
+      }
+    };
+    fillBeside(sakura, SAKURA_W / 2);
+    // 西南角入口那條沙土路（paths 最後一條，接到櫻花步道）兩邊也一樣
+    fillBeside(clipIn(Z.paths[Z.paths.length - 1].map(en)), PATH_W / 2);
+    const g = new THREE.BufferGeometry();
+    g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+    g.computeVertexNormals();
+    add(g, new THREE.MeshLambertMaterial({ color: 0x86ad66, side: THREE.DoubleSide }));
+  }
   add(stripGeo(pathLines, PATH_W, 0.035), mat(0xd8cdb8));
   // 櫻花步道：深灰色、比較寬，上面兩條淺色的線（中線往兩邊平移）
   add(stripGeo(sakura, SAKURA_W, 0.04), mat(0x9d9b96));
@@ -406,6 +498,21 @@ export function openPark3D(o: Park3DOptions): () => void {
       return [p[0] - (dy / len) * d, p[1] + (dx / len) * d];
     });
   add(stripGeo(sakura.flatMap((l) => [shift(l, SAKURA_LINE_OFF), shift(l, -SAKURA_LINE_OFF)]), SAKURA_LINE_W, 0.045), mat(0xf0ede6));
+  // 路中間的小草地（像起點那一塊：OSM 的草地，中心在櫻花步道上或旁邊 1 公尺內、不到 150 平方公尺）蓋在路面上面，看得到整塊
+  {
+    const segs = sakura.flatMap((l) => l.slice(1).map((q, i): [Pt, Pt] => [l[i], q]));
+    const dist = (p: Pt, a: Pt, b: Pt): number => {
+      const [dx, dy] = [b[0] - a[0], b[1] - a[1]];
+      const t = Math.max(0, Math.min(1, ((p[0] - a[0]) * dx + (p[1] - a[1]) * dy) / (dx * dx + dy * dy || 1)));
+      return Math.hypot(a[0] + dx * t - p[0], a[1] + dy * t - p[1]);
+    };
+    const islands = Z.green.map(ringEN).filter((r) => {
+      const area = Math.abs(r.reduce((s, [x, y], i) => s + x * r[(i + 1) % r.length][1] - r[(i + 1) % r.length][0] * y, 0)) / 2;
+      const c: Pt = [r.reduce((s, p) => s + p[0], 0) / r.length, r.reduce((s, p) => s + p[1], 0) / r.length];
+      return area < 150 && segs.some(([a, b]) => dist(c, a, b) < SAKURA_W / 2 + 1);
+    });
+    if (islands.length) add(flatGeo(islands.map((r) => shapeOf(r)), 0.05), grass);
+  }
 
   // ---- 水：翠湖（水面低一點、岸是石頭）、映池（水面高一點、一圈可以坐的石頭邊）
   const stone = mat(0xb9b1a2);
