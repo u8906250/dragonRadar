@@ -174,9 +174,13 @@ describe('地球的雷達上的中山公園（跟汪星共用一份）', () => {
     const inWater = (p: [number, number]): boolean => ZHONGSHAN_PARK.water.some(([outer, ...islands]) => inRing(p, outer) && !islands.some((r) => linked(r) && inRing(p, r)));
     // 旗台上去得了，旗桿的底座（離旗桿 1.5 公尺內）上不去
     const onPole = (p: [number, number]): boolean => Math.hypot(...([0, 1] as const).map((k) => m(p)[k] - m(ZHONGSHAN_PARK.flagpole)[k]) as [number, number]) < 1.45;
+    // 碑林的花台不進去；碑林的平台石板地走得到（銅像旁邊 1.3 公尺內不行）
+    const inBed = (p: [number, number]): boolean => ZHONGSHAN_PARK.flowerBeds.some((i) => inRing(p, ZHONGSHAN_PARK.green[i]));
+    const onPlaza = (p: [number, number]): boolean => inRing(p, ZHONGSHAN_PARK.statuePlaza) && Math.hypot(m(p)[0] - m(ZHONGSHAN_PARK.statue)[0], m(p)[1] - m(ZHONGSHAN_PARK.statue)[1]) >= 1.3;
     const walkable = (p: [number, number]): boolean =>
       !onPole(p) &&
-      (onBridge(p) || (!ZHONGSHAN_PARK.buildings.some((r) => inRing(p, r)) && !inWater(p) && (ZHONGSHAN_PARK.green.some((r) => inRing(p, r)) || inRing(p, ZHONGSHAN_PARK.flagBase) || nearPath(p))));
+      (onBridge(p) ||
+        (!ZHONGSHAN_PARK.buildings.some((r) => inRing(p, r)) && !inWater(p) && !inBed(p) && (ZHONGSHAN_PARK.green.some((r) => inRing(p, r)) || inRing(p, ZHONGSHAN_PARK.flagBase) || onPlaza(p) || nearPath(p))));
     /** 照轉折點走過去，每 0.5 公尺都走得到 */
     const walkedOk = (from: [number, number], path: Array<[number, number]>): boolean =>
       path.every((to, i) => {
@@ -245,6 +249,11 @@ describe('地球的雷達上的中山公園（跟汪星共用一份）', () => {
     expect(plain).toBeGreaterThan(40);
     expect(xiaofaBehind).toBeGreaterThan(0);
     expect(xiaofaBehind).toBeLessThan(plain * 0.3);
+    // 小法常出現在碑林（銅像廣場的平台）：一開始放在哪抽到碑林的比一般的狗多很多
+    const atPlaza = (yard: typeof PARK_YARD): number => Array.from({ length: 600 }, () => yard.anywhere(rand)!).filter(({ at }) => inRing(at, ZHONGSHAN_PARK.statuePlaza)).length;
+    const [plainPlaza, xiaofaPlaza] = [atPlaza(PARK_YARD), atPlaza(PARK_DOGS[0].yard)];
+    expect(xiaofaPlaza).toBeGreaterThan(40);
+    expect(xiaofaPlaza).toBeGreaterThan(plainPlaza * 5);
     // 樹下少停：公園大半在樹冠底下，抽要待在哪的大多是空地（樹下只留約 15%），但不是完全不去
     const shaded = ([lat, lng]: [number, number]): boolean => ZHONGSHAN_PARK.trees.some(([y, x, r]) => Math.hypot((lng - x) * 111_320 * Math.cos((25.0394 * Math.PI) / 180), (lat - y) * 110_574) < r);
     const stops = Array.from({ length: 1000 }, () => PARK_YARD.anywhere(rand)!);

@@ -1098,6 +1098,8 @@ body.letters-open { overflow: hidden; }
 .p3d-cross { position: absolute; left: 50%; top: 50%; width: 18px; height: 18px; margin: -9px 0 0 -9px; pointer-events: none; background: linear-gradient(#fff, #fff) center / 2px 100% no-repeat, linear-gradient(#fff, #fff) center / 100% 2px no-repeat; filter: drop-shadow(0 0 1px #000); opacity: 0.75; }
 .p3d-stick { position: absolute; left: calc(20px + env(safe-area-inset-left)); bottom: calc(24px + env(safe-area-inset-bottom)); width: 120px; height: 120px; border-radius: 50%; background: rgba(255, 255, 255, 0.28); border: 2px solid rgba(21, 23, 28, 0.45); touch-action: none; }
 .p3d-knob { position: absolute; left: 50%; top: 50%; width: 52px; height: 52px; margin: -26px 0 0 -26px; border-radius: 50%; background: rgba(244, 239, 230, 0.92); border: 2px solid #15171c; pointer-events: none; }
+/* 搖桿推到底在快走：圓鈕變橘色 */
+.p3d-knob.run { background: #ea611d; }
 .p3d-panel { position: absolute; right: calc(12px + env(safe-area-inset-right)); bottom: calc(16px + env(safe-area-inset-bottom)); width: min(360px, calc(100% - 24px)); padding: 10px; border: 2px solid #15171c; border-radius: 14px; background: rgba(244, 239, 230, 0.95); box-shadow: 3px 3px 0 #15171c; color: #15171c; display: flex; flex-direction: column; gap: 8px; }
 .p3d-panel[hidden], .p3d-edit[hidden] { display: none; }
 .p3d-kinds, .p3d-row { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }

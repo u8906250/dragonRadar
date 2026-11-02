@@ -16,7 +16,7 @@ import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js
 import { deleteParkMark, fetchParkMarks, saveParkMark, type ParkMark, type ParkMarkIn, type ParkMarkKind } from './api';
 import { dogHairRoots, dogPartArea, dogParts } from './dog';
 import { dogPose, dogTurned } from './dogs';
-import { arriveRocket, ARRIVE_MS, DEPART_MS, departRocket, HATCH_CENTER, moveDogs, PARK_DOGS, personOk, rocketNow, stowRocket, STOW_MS, summonRocket, SUMMON_MS } from './park';
+import { arriveRocket, ARRIVE_MS, DEPART_MS, departRocket, HATCH_CENTER, moveDogs, PARK_DOGS, personOk, petDog, rocketNow, stowRocket, STOW_MS, summonRocket, SUMMON_MS } from './park';
 import { cloudLayer, puffTexture, rocketModel, ROCKET_H, ROCKET_WINDOW_Y, spaceScene, type SpaceTrip } from './rocket3d';
 import { toWoof } from './space';
 import { ZHONGSHAN_PARK as Z } from './zhongshan';
@@ -134,6 +134,8 @@ const TURN_RAMP_S = 0.35;
 const TURN_DRAG = 0.0028;
 const LOOK_DRAG = 0.0045;
 const FAST = 2.5;
+/** 手機搖桿推到底多久開始加速（秒） */
+const STICK_RUN_S = 0.5;
 const TAP_MAX_M = 150;
 
 const KIND_NAME: Record<ParkMarkKind, string> = { lamp: '路燈', bench: '長椅', bin: '垃圾桶', stele: '石碑', other: '其他' };
@@ -351,7 +353,7 @@ function saveSpot(at: Pt, yaw: number, pitch: number): void {
  */
 const FUR_PUFF = 0.7;
 const FUR_BASE = 0.3;
-const DOG_HAIRS = 2600;
+const DOG_HAIRS = 3600;
 /** 一根毛分幾段畫（二次曲線） */
 const HAIR_SEGS = 3;
 const DOG_FAR_M = 120;
@@ -1602,19 +1604,25 @@ export function openPark3D(o: Park3DOptions): () => void {
   scene.add(dogRoot);
   const dogBall = new THREE.SphereGeometry(1, 18, 12);
   const dogMeshes = new Map<string, THREE.Mesh>();
-  const dogMats = new Map<string, THREE.MeshLambertMaterial>();
+  // 身體的底、眼睛鼻子：跟雷達上一樣是平平的顏色（亮暗看毛）
+  const dogMats = new Map<string, THREE.MeshBasicMaterial>();
   const dogShadow = new THREE.Mesh(new THREE.CircleGeometry(1, 24).rotateX(-Math.PI / 2), new THREE.MeshBasicMaterial({ color: 0x000000, transparent: true, opacity: 0.22, depthWrite: false }));
   dogShadow.scale.set(0.16, 1, 0.26);
   dogRoot.add(dogShadow);
-  // 一根根的毛（線段，每一格重算位置，顏色照亮中暗）
-  const hairPos = new Float32Array(DOG_HAIRS * 1.3 * HAIR_SEGS * 2 * 3);
+  // 一根根的毛（跟雷達上一樣有粗細：每一段是一條朝著鏡頭的窄帶子，每一格重算位置，顏色照亮中暗）
+  const HAIR_MAX = Math.ceil(DOG_HAIRS * 1.3);
+  const hairPos = new Float32Array(HAIR_MAX * HAIR_SEGS * 4 * 3);
   const hairCol = new Float32Array(hairPos.length);
+  const hairIdx = new Uint32Array(HAIR_MAX * HAIR_SEGS * 6);
+  for (let q = 0; q < HAIR_MAX * HAIR_SEGS; q++) hairIdx.set([q * 4, q * 4 + 1, q * 4 + 2, q * 4 + 1, q * 4 + 3, q * 4 + 2], q * 6);
   const hairGeo = new THREE.BufferGeometry();
+  hairGeo.setIndex(new THREE.BufferAttribute(hairIdx, 1));
   hairGeo.setAttribute('position', new THREE.BufferAttribute(hairPos, 3).setUsage(THREE.DynamicDrawUsage));
   hairGeo.setAttribute('color', new THREE.BufferAttribute(hairCol, 3).setUsage(THREE.DynamicDrawUsage));
-  const hairLines = new THREE.LineSegments(hairGeo, new THREE.LineBasicMaterial({ vertexColors: true }));
-  hairLines.frustumCulled = false;
-  dogRoot.add(hairLines);
+  const hairMesh = new THREE.Mesh(hairGeo, new THREE.MeshBasicMaterial({ vertexColors: true, side: THREE.DoubleSide }));
+  hairMesh.frustumCulled = false;
+  dogRoot.add(hairMesh);
+  const dogInv = new THREE.Matrix4();
   const toneRGB = new Map<string, [number, number, number]>();
   const rgbOf = (hex: string): [number, number, number] => {
     let c = toneRGB.get(hex);
@@ -1644,58 +1652,79 @@ export function openPark3D(o: Park3DOptions): () => void {
     const bearing = (dir: Pt): number => (Math.atan2(dir[1] * MX, dir[0] * MY) * 180) / Math.PI;
     const [b0, b1] = [bearing(s.dir0), bearing(s.dir)];
     const turn = wrap(b1 - b0);
-    const B = ((b0 + turn * dogTurned(s, d.e)) * Math.PI) / 180;
+    const headDeg = b0 + turn * dogTurned(s, d.e);
+    const B = (headDeg * Math.PI) / 180;
     // 狗自己的座標（往前、往左、往上）→ 公園（x 往東、y 往上、z 往南）
     const fwd = new THREE.Vector3(Math.sin(B), 0, -Math.cos(B));
     const left = new THREE.Vector3(-Math.cos(B), 0, -Math.sin(B));
     dogRoot.matrix.makeBasis(fwd, left, new THREE.Vector3(0, 1, 0)).setPosition(p[0], floorAt(p), -p[1]);
     dogRoot.matrixWorldNeedsUpdate = true;
-    const all = dogParts(xiaofa.look, dogPose(s, d.e, turn));
-    // 毛：照面積分 DOG_HAIRS 根（臉附近密一點），每一根從表面往外長、捲成 C 字、往下垂
+    // 點了轉頭看你：頭轉向你站的地方（最多 80 度）、抬起來一點，跟雷達上一樣
+    let pose = dogPose(s, d.e, turn);
+    const g = xiaofa.glancing(now);
+    if (g > 0) {
+      const toYou = (Math.atan2(pos[0] - p[0], pos[1] - p[1]) * 180) / Math.PI;
+      const look = Math.max(-80, Math.min(80, -wrap(toYou - headDeg)));
+      pose = { ...pose, look: pose.look * (1 - g) + look * g, nod: pose.nod * (1 - g) - 6 * g, blink: g > 0.9 ? 0 : pose.blink };
+    }
+    const all = dogParts(xiaofa.look, pose);
+    // 毛：照面積分 DOG_HAIRS 根（臉附近密一點），每一根從表面往外長、捲成 C 字、往下垂；跟雷達上一樣：
+    // 背對你的不畫，照「左上前方」的光（照你看過去的方向，不是太陽）分亮中暗，粗細照畫面上約 0.6 公分、最細 0.6 像素、最粗 2 像素
     {
       const look = xiaofa.look;
       const furred = all.filter((x) => x.hair > 0);
       const total = furred.reduce((t, x) => t + dogPartArea(x.a) * x.dense, 0) || 1;
-      const sunLocal: [number, number, number] = [SUN_DIR.dot(fwd), SUN_DIR.dot(left), SUN_DIR.y];
-      let k = 0;
-      const cap = hairPos.length / (HAIR_SEGS * 6);
       const dotv = (a: number[], b: number[]): number => a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+      const norm3 = (a: number[]): number[] => {
+        const l = Math.hypot(a[0], a[1], a[2]) || 1;
+        return [a[0] / l, a[1] / l, a[2] / l];
+      };
+      const cross3 = (a: number[], b: number[]): number[] => [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]];
+      // 鏡頭在狗自己的座標裡在哪，看過去的方向、畫面的右邊和上面
+      dogInv.copy(dogRoot.matrix).invert();
+      const cam = camera.position.clone().applyMatrix4(dogInv);
+      const toward = norm3([cam.x, cam.y, cam.z - 0.25]);
+      const right = norm3(cross3([0, 0, 1], toward));
+      const upS = cross3(toward, right);
+      const light = norm3([0, 1, 2].map((j) => -0.5 * right[j] + 0.7 * upS[j] + 0.5 * toward[j]));
+      const dist = Math.hypot(cam.x, cam.y, cam.z - 0.25);
+      const pxPerM = root.clientHeight / (2 * dist * Math.tan((camera.fov * Math.PI) / 360));
+      const half = Math.max(0.6, Math.min(2, 0.006 * pxPerM)) / pxPerM / 2;
+      let k = 0;
+      const cap = HAIR_MAX * HAIR_SEGS;
       for (const part of furred) {
         const n = Math.round((DOG_HAIRS * dogPartArea(part.a) * part.dense) / total);
         const hs = dogHairRoots(part.key, n);
         const [a0, a1, a2] = part.a;
         const r2 = [dotv(a0, a0), dotv(a1, a1), dotv(a2, a2)];
         const tones = part.tones.map(rgbOf);
-        for (let i = 0; i < n && k < cap; i++) {
+        for (let i = 0; i < n && k < cap - HAIR_SEGS; i++) {
           const h = hs[i];
-          const root = [0, 1, 2].map((j) => part.c[j] + a0[j] * h.s[0] + a1[j] * h.s[1] + a2[j] * h.s[2]);
-          let nr = [0, 1, 2].map((j) => (a0[j] * h.s[0]) / r2[0] + (a1[j] * h.s[1]) / r2[1] + (a2[j] * h.s[2]) / r2[2]);
-          const nl = Math.hypot(nr[0], nr[1], nr[2]) || 1;
-          nr = nr.map((v) => v / nl);
-          const L = dotv(nr, sunLocal);
-          const col = tones[L > 0.2 ? 0 : L > -0.35 ? 1 : 2];
+          const nr = norm3([0, 1, 2].map((j) => (a0[j] * h.s[0]) / r2[0] + (a1[j] * h.s[1]) / r2[1] + (a2[j] * h.s[2]) / r2[2]));
+          if (dotv(nr, toward) < -0.25) continue;
+          const root0 = [0, 1, 2].map((j) => part.c[j] + a0[j] * h.s[0] + a1[j] * h.s[1] + a2[j] * h.s[2]);
+          const L = dotv(nr, light);
+          const col = tones[L > 0.2 ? 0 : L > -0.55 ? 1 : 2];
           const len = part.hair * h.len;
           // 旁邊的方向（捲的方向）
-          let side = Math.abs(nr[2]) > 0.95 ? [0, nr[2], -nr[1]] : [nr[1], -nr[0], 0];
-          const sl = Math.hypot(side[0], side[1], side[2]) || 1;
-          side = side.map((v) => v / sl);
-          const A = root.map((v, j) => v - nr[j] * len * 0.25);
-          const Cc = root.map((v, j) => v + nr[j] * len * (0.6 + 0.3 * look.curl) + side[j] * len * look.curl * 0.9 * h.curl);
-          const T = root.map((v, j) => v + nr[j] * len * (0.65 - 0.25 * look.curl) + (j === 2 ? -len * (0.45 - 0.15 * look.curl) * part.droop : 0));
+          const side = norm3(Math.abs(nr[2]) > 0.95 ? cross3(nr, [1, 0, 0]) : cross3(nr, [0, 0, 1]));
+          const A = root0.map((v, j) => v - nr[j] * len * 0.25);
+          const Cc = root0.map((v, j) => v + nr[j] * len * (0.6 + 0.3 * look.curl) + side[j] * len * look.curl * 0.9 * h.curl);
+          const T = root0.map((v, j) => v + nr[j] * len * (0.65 - 0.25 * look.curl) + (j === 2 ? -len * (0.45 - 0.15 * look.curl) * part.droop : 0));
           let prev = A;
           for (let g = 1; g <= HAIR_SEGS; g++) {
             const t = g / HAIR_SEGS;
             const q = [0, 1, 2].map((j) => (1 - t) * (1 - t) * A[j] + 2 * (1 - t) * t * Cc[j] + t * t * T[j]);
-            const o = (k * HAIR_SEGS + g - 1) * 6;
-            // 狗自己的座標（往前、往左、往上）就是 dogRoot 這一層的座標
-            hairPos.set([prev[0], prev[1], prev[2], q[0], q[1], q[2]], o);
-            hairCol.set([...col, ...col], o);
+            // 朝著鏡頭的窄帶子：往這一段和看過去的方向都垂直的方向各推半個寬
+            const w = norm3(cross3([q[0] - prev[0], q[1] - prev[1], q[2] - prev[2]], toward)).map((v) => v * half);
+            hairPos.set([prev[0] - w[0], prev[1] - w[1], prev[2] - w[2], prev[0] + w[0], prev[1] + w[1], prev[2] + w[2], q[0] - w[0], q[1] - w[1], q[2] - w[2], q[0] + w[0], q[1] + w[1], q[2] + w[2]], k * 12);
+            hairCol.set([...col, ...col, ...col, ...col], k * 12);
             prev = q;
+            k++;
           }
-          k++;
         }
       }
-      hairGeo.setDrawRange(0, k * HAIR_SEGS * 2);
+      hairGeo.setDrawRange(0, k * 6);
       hairGeo.attributes.position.needsUpdate = true;
       hairGeo.attributes.color.needsUpdate = true;
     }
@@ -1707,15 +1736,15 @@ export function openPark3D(o: Park3DOptions): () => void {
       let mesh = dogMeshes.get(part.key);
       if (!mesh) {
         let m = dogMats.get(part.fill);
-        if (!m) dogMats.set(part.fill, (m = mat(part.fill)));
+        if (!m) dogMats.set(part.fill, (m = new THREE.MeshBasicMaterial({ color: part.fill })));
         mesh = new THREE.Mesh(dogBall, m);
         mesh.matrixAutoUpdate = false;
         dogMeshes.set(part.key, mesh);
         dogRoot.add(mesh);
       }
-      if ((mesh.material as THREE.MeshLambertMaterial).color.getHexString() !== part.fill.slice(1)) {
+      if ((mesh.material as THREE.MeshBasicMaterial).color.getHexString() !== part.fill.slice(1)) {
         let m = dogMats.get(part.fill);
-        if (!m) dogMats.set(part.fill, (m = mat(part.fill)));
+        if (!m) dogMats.set(part.fill, (m = new THREE.MeshBasicMaterial({ color: part.fill })));
         mesh.material = m;
       }
       used.add(part.key);
@@ -1755,6 +1784,8 @@ export function openPark3D(o: Park3DOptions): () => void {
   const keys = new Set<string>();
   /** 方向鍵左右按了多久（秒） */
   let turnHeld = 0;
+  /** 手機搖桿推到底多久了（秒）：超過 STICK_RUN_S 慢慢加速到快走 */
+  let stickHeld = 0;
   const stick = { x: 0, y: 0, id: -1 };
   let dirty = true;
   let shadowAt: Pt = [Infinity, Infinity];
@@ -1790,8 +1821,13 @@ export function openPark3D(o: Park3DOptions): () => void {
       s += stick.x;
     }
     const l = Math.hypot(f, s);
+    // 手機：搖桿推到底超過 STICK_RUN_S 秒，再 0.6 秒慢慢加速到快走（跟電腦按 Shift 一樣快），圓鈕變橘色
+    const full = stick.id >= 0 && Math.hypot(stick.x, stick.y) > 0.92;
+    stickHeld = full ? stickHeld + dt : 0;
+    const boost = 1 + (FAST - 1) * Math.min(1, Math.max(0, (stickHeld - STICK_RUN_S) / 0.6));
+    knob.classList.toggle('run', boost > 1.05);
     if (l < 0.05) return !!turn;
-    const k = (Math.min(1, l) / l) * WALK * (keys.has('shift') ? FAST : 1) * dt;
+    const k = (Math.min(1, l) / l) * WALK * (keys.has('shift') ? FAST : boost) * dt;
     const [fx, fy] = [Math.sin(yaw), Math.cos(yaw)];
     const d: Pt = [(fx * f + fy * s) * k, (fy * f - fx * s) * k];
     // 撞到了就沿著牆滑過去
@@ -1812,10 +1848,21 @@ export function openPark3D(o: Park3DOptions): () => void {
   function tapScene(cx: number, cy: number): void {
     const r = renderer.domElement.getBoundingClientRect();
     ray.setFromCamera(new THREE.Vector2(((cx - r.left) / r.width) * 2 - 1, -((cy - r.top) / r.height) * 2 + 1), camera);
-    const hit = ray.intersectObjects(rk.group.visible ? [statue, rk.group] : [statue], true)[0];
+    const targets: THREE.Object3D[] = [statue];
+    if (rk.group.visible) targets.push(rk.group);
+    if (dogRoot.visible) targets.push(dogRoot);
+    const hit = ray.intersectObjects(targets, true).find((h) => !(h.object instanceof THREE.LineSegments));
     if (!hit || hit.distance > 80) return;
     let g: THREE.Object3D | null = hit.object;
-    while (g && g !== statue && g !== rk.group) g = g.parent;
+    while (g && g !== statue && g !== rk.group && g !== dogRoot) g = g.parent;
+    if (g === dogRoot) {
+      // 點小法：轉頭看你，或轉過來面向你坐下（跟雷達上一樣，「你」是你站的地方）
+      const at = xiaofa.now().at;
+      const you = ll(pos[0], pos[1]);
+      petDog(xiaofa.id, [you[0] - at[0], you[1] - at[1]]);
+      dirty = true;
+      return;
+    }
     if (g === statue) {
       const now = rocketNow();
       if (now.world !== world) return msg(`火箭現在在${now.world === 'woof' ? '汪星' : '地球'}`);
@@ -2194,7 +2241,7 @@ export function openPark3D(o: Park3DOptions): () => void {
   });
   $('.p3d-del').addEventListener('click', () => void remove());
   const hint = $<HTMLElement>('.p3d-hint');
-  hint.textContent = touch ? '左下搖桿走路、拖曳畫面轉頭' : '拖曳轉頭、WASD 走路（方向鍵也可以）、Shift 快走';
+  hint.textContent = touch ? '左下搖桿走路（推到底一下下變快走）、拖曳畫面轉頭' : '拖曳轉頭、WASD 走路（方向鍵也可以）、Shift 快走';
   const hintTimer = setTimeout(() => (hint.hidden = true), 7000);
 
   // ---- 畫

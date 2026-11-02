@@ -249,8 +249,11 @@ export class Dog {
     return smooth(Math.max(0, Math.min(1, t / 350, (g.ms - t) / 350)));
   }
 
-  /** 點了：睡覺的話醒過來（慢慢站起來、伸懶腰）；有時候（照個性）只轉頭看你、繼續做原本的事，其他時候轉過來面向你（往南）坐下；已經坐著就再多坐一下 */
-  pet(now = performance.now(), rand: () => number = Math.random): void {
+  /**
+   * 點了：睡覺的話醒過來（慢慢站起來、伸懶腰）；有時候（照個性）只轉頭看你、繼續做原本的事，其他時候轉過來面向你坐下；已經坐著就再多坐一下。
+   * face 是你在哪個方向（緯經度的方向，雷達上是往南（畫面下面）；3D 國館是你站的地方）
+   */
+  pet(now = performance.now(), rand: () => number = Math.random, face: Pt = SOUTH): void {
     const d = this.now(now);
     if (d.seg.do === 'sleep') {
       if (d.e < d.seg.ms - WAKE_MS) this.set({ ...d.seg, ms: d.e + WAKE_MS });
@@ -270,7 +273,7 @@ export class Dog {
     if (g) g.ms = Math.min(g.ms, now - g.start + 350);
     const rise = RISE[d.seg.do] ?? 300;
     const dir0 = this.facing(d.seg, d.e, d.at);
-    const { to, turn } = this.spin(d.at, dir0, SOUTH, rise * 0.7);
+    const { to, turn } = this.spin(d.at, dir0, face, rise * 0.7);
     this.set({
       ...d.seg,
       do: 'sit',
@@ -279,7 +282,7 @@ export class Dog {
       start: now,
       ms: PET_MS + (turn ? turn[0] + turn[1] : rise),
       dir0,
-      dir: SOUTH,
+      dir: face,
       pet: true,
       tail0: tailNow(d.seg, d.e),
       tail: 0,

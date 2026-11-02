@@ -279,7 +279,10 @@ export function parkAreas(): ParkArea[] {
     const len = cum[cum.length - 1];
     return len < 2 ? [] : [{ kind: 'path', line, cum, m2: len * 2 * PATH_SPOT_M, edges: line.slice(1).map((p, i): [Pt, Pt] => [line[i], p]) }];
   });
-  return (areaList = [...ZHONGSHAN_PARK.green.map(fromRing), ...paths, { ...fromRing(ZHONGSHAN_PARK.flagBase), kind: 'deck' }]);
+  // 碑林的花台（flowerBeds）不是草皮：編號留著（狗的 ring 對得上），面積當 0、抽不到
+  const beds = new Set(ZHONGSHAN_PARK.flowerBeds);
+  const lawns = ZHONGSHAN_PARK.green.map((r, i) => (beds.has(i) ? { ...fromRing(r), m2: 0 } : fromRing(r)));
+  return (areaList = [...lawns, ...paths, { ...fromRing(ZHONGSHAN_PARK.flagBase), kind: 'deck' }]);
 }
 
 /**
@@ -290,6 +293,8 @@ export function parkAreas(): ParkArea[] {
  */
 const PATH_W = 1.2;
 const BRIDGE_WALK_M = 0.7;
+/** 碑林的銅像（台座 2 公尺寬）旁邊多近走不過去 */
+const STATUE_BLOCK_M = 1.3;
 /** 旗台上旗桿的底座（離旗桿這麼近）上不去 */
 const POLE_BLOCK_M = 1.5;
 const WALK_M0: Pt = [25.0394, 121.5596];
@@ -355,6 +360,9 @@ interface Walk {
   lawns: Array<{ ring: Pt[]; box: Box }>;
   deck: { ring: Pt[]; box: Box };
   pole: Pt;
+  /** 碑林（銅像廣場）的平台：石板地也走得到；銅像（中心）旁邊 STATUE_BLOCK_M 內走不過去 */
+  plaza: { ring: Pt[]; box: Box };
+  statue: Pt;
   blocks: Array<{ ring: Pt[]; box: Box; holes: Pt[][] }>;
   onBridge: (p: Pt) => boolean;
   segs: Array<[Pt, Pt]>;
@@ -381,7 +389,8 @@ function walkOf(): Walk {
     const ring = r.map(toM);
     return { ring, box: boxOf(ring) };
   };
-  const lawns = ZHONGSHAN_PARK.green.map(ringM);
+  // 走得到的草皮（碑林的花台不算，狗不進花台）
+  const lawns = ZHONGSHAN_PARK.green.filter((_, i) => !ZHONGSHAN_PARK.flowerBeds.includes(i)).map(ringM);
   const deck = ringM(ZHONGSHAN_PARK.flagBase);
   const pole = toM(ZHONGSHAN_PARK.flagpole);
   const bridges = ZHONGSHAN_PARK.bridges.map((l) => l.map(toM));
@@ -390,6 +399,8 @@ function walkOf(): Walk {
   const linked = (r: Pt[]): boolean => bridges.some((l) => [l[0], l[l.length - 1]].some((q) => inRingM(q, r) || r.some((a, i) => segDist(q, a, r[(i + 1) % r.length]) < 1.5)));
   const blocks = [
     ...ZHONGSHAN_PARK.buildings.map((r) => ({ ...ringM(r), holes: [] })),
+    // 碑林的花台（墊高、種滿花）不進去
+    ...ZHONGSHAN_PARK.flowerBeds.map((i) => ({ ...ringM(ZHONGSHAN_PARK.green[i]), holes: [] })),
     ...ZHONGSHAN_PARK.water.map(([outer, ...islands]) => ({ ...ringM(outer), holes: islands.map((r) => r.map(toM)).filter(linked) })),
   ];
   const blocked = (p: Pt): boolean => !onBridge(p) && blocks.some((b) => inBox(p, b.box) && inRingM(p, b.ring) && !b.holes.some((h) => inRingM(p, h)));
@@ -456,7 +467,7 @@ function walkOf(): Walk {
       for (let b = Math.floor((y - r) / CELL); b <= Math.floor((y + r) / CELL); b++) crownGrid.set(`${a},${b}`, [...(crownGrid.get(`${a},${b}`) ?? []), i]);
   });
   const shade = (p: Pt): boolean => (crownGrid.get(cellKey(...p)) ?? []).some((i) => Math.hypot(p[0] - crowns[i].at[0], p[1] - crowns[i].at[1]) < crowns[i].r);
-  return (walkData = { lawns, deck, pole, blocks, onBridge, segs, grid, nodes, nodeGrid, adj, shade });
+  return (walkData = { lawns, deck, pole, plaza: ringM(ZHONGSHAN_PARK.statuePlaza), statue: toM(ZHONGSHAN_PARK.statue), blocks, onBridge, segs, grid, nodes, nodeGrid, adj, shade });
 }
 
 /**
@@ -464,7 +475,7 @@ function walkOf(): Walk {
  * 在公園裡、不在發射口和銅像旁邊（火箭、銅像不會蓋住）；avoid 是這隻狗不去的地方（一圈圈台北的經緯度，例如小法不去公園最右上那一區），
  * rare 是不太會去的地方（抽到那裡的只留 RARE_KEEP 的機會，路過可以）；樹下也少停（抽到樹冠底下的只留 SHADE_KEEP 的機會，走過去可以）；走多遠照汪星的公尺算
  */
-export function parkYard(o: { avoid?: Pt[][]; rare?: Pt[][] } = {}): DogYard {
+export function parkYard(o: { avoid?: Pt[][]; rare?: Pt[][]; fav?: { rings: Pt[][]; weight: number } } = {}): DogYard {
   const zone = (rs: Pt[][]): Array<{ ring: Pt[]; box: Box }> =>
     rs.map((r) => {
       const ring = r.map(toM);
@@ -472,6 +483,18 @@ export function parkYard(o: { avoid?: Pt[][]; rare?: Pt[][] } = {}): DogYard {
     });
   const avoid = zone(o.avoid ?? []);
   const rare = zone(o.rare ?? []);
+  // 喜歡的地方：待的地方（草皮、步道、旗台）一半以上在裡面的，照面積抽的時候機會乘上 fav.weight
+  const fav = zone(o.fav?.rings ?? []);
+  let weights: number[] | null = null;
+  const weightOf = (i: number): number => {
+    if (!weights)
+      weights = parkAreas().map((a) => {
+        const pts = a.line ?? (a.ring ?? []).map(toM);
+        const inside = pts.filter((p) => fav.some((b) => inBox(p, b.box) && inRingM(p, b.ring))).length;
+        return a.m2 * (o.fav && pts.length && inside / pts.length >= 0.5 ? o.fav.weight : 1);
+      });
+    return weights[i] ?? 0;
+  };
   /**
    * 不太會去的地方：要去那裡的只留 RARE_KEEP 的機會；樹冠底下的只留 SHADE_KEEP 的機會（抽要走到哪、換地方、一開始放在哪時用，
    * 所以大多停在空地；走過去、已經在那裡就照常走）
@@ -487,6 +510,8 @@ export function parkYard(o: { avoid?: Pt[][]; rare?: Pt[][] } = {}): DogYard {
     if (w.blocks.some((b) => inBox(p, b.box) && inRingM(p, b.ring) && !b.holes.some((h) => inRingM(p, h)))) return false;
     if (w.lawns.some((l) => inBox(p, l.box) && inRingM(p, l.ring))) return true;
     if (inBox(p, w.deck.box) && inRingM(p, w.deck.ring)) return true;
+    // 碑林的平台：石板地也走得到，銅像擋住
+    if (inBox(p, w.plaza.box) && inRingM(p, w.plaza.ring)) return Math.hypot(p[0] - w.statue[0], p[1] - w.statue[1]) >= STATUE_BLOCK_M;
     return nearby(w.grid, p, PATH_W).some((i) => segDist(p, ...w.segs[i]) <= PATH_W);
   };
   /** 從 a 直直走到 b 一路都走得到（每 0.5 公尺看一次，公尺座標） */
@@ -612,10 +637,10 @@ export function parkYard(o: { avoid?: Pt[][]; rare?: Pt[][] } = {}): DogYard {
   return {
     anywhere: (rand) => {
       const areas = parkAreas();
-      const total = areas.reduce((a, b) => a + b.m2, 0);
+      const total = areas.reduce((t, _, i) => t + weightOf(i), 0);
       for (let tries = 0; tries < 1000; tries++) {
         let pick = rand() * total;
-        const ring = Math.max(0, areas.findIndex((a) => (pick -= a.m2) < 0));
+        const ring = Math.max(0, areas.findIndex((_, i) => (pick -= weightOf(i)) < 0));
         const at = spotIn(ring, rand);
         if (at && keep(at, rand)) return { ring, at };
       }
@@ -630,10 +655,10 @@ export function parkYard(o: { avoid?: Pt[][]; rare?: Pt[][] } = {}): DogYard {
       const a = toM(at);
       const areas = parkAreas();
       const near = areas.flatMap((x, i) => (i !== ring && x.edges.some(([p, q]) => segDist(a, p, q) < CROSS_NEAR_M) ? [i] : []));
-      const total = near.reduce((t, i) => t + areas[i].m2, 0);
+      const total = near.reduce((t, i) => t + weightOf(i), 0);
       for (let tries = 0; tries < 12 && near.length; tries++) {
         let pick = rand() * total;
-        const i = near.find((k) => (pick -= areas[k].m2) < 0) ?? near[near.length - 1];
+        const i = near.find((k) => (pick -= weightOf(k)) < 0) ?? near[near.length - 1];
         const to = spotIn(i, rand, { at, m: CROSS_NEAR_M });
         if (to && !keep(to, rand)) continue;
         const path = to ? routeM(a, toM(to), CROSS_MAX_M) : null;
@@ -695,6 +720,12 @@ export const PARK_YARD: DogYard = parkYard();
 export const XIAOFA_AVOID: Pt[] = [[25.03932, 121.56098], [25.0413, 121.56098], [25.0413, 121.5618], [25.03932, 121.5618]];
 /** 小法不太會去的地方：國父紀念館後面（北邊，紀念館北牆以北、紀念館西牆到不去的那一區之間）；正面是映池、旗桿那邊（南邊） */
 export const XIAOFA_RARE: Pt[] = [[25.04053, 121.55974], [25.0413, 121.55974], [25.0413, 121.56098], [25.04053, 121.56098]];
+/**
+ * 小法常出現的地方：碑林（銅像廣場的平台，使用者說的）——待的地方一半以上在這裡面的（平台上的草皮、步道），照面積抽的時候機會乘上 XIAOFA_FAV_WEIGHT
+ * （一開始放在哪、換地方時都是；模擬小法：約三到四成的時間在碑林，其他時間照舊在公園各處）
+ */
+export const XIAOFA_FAV: Pt[] = ZHONGSHAN_PARK.statuePlaza;
+export const XIAOFA_FAV_WEIGHT = 40;
 
 /**
  * 小法的個性：特別喜歡走走聞聞——在草皮裡走路大多邊走邊聞（約七成，一般的狗約四成），
@@ -709,7 +740,7 @@ export const XIAOFA_NATURE: DogNature = {
 };
 
 /** 公園裡的狗：小法（使用者的馬爾濟斯；不去公園最右上那一區、不太會去國父紀念館後面；特別喜歡走走聞聞） */
-export const PARK_DOGS: Dog[] = [new Dog({ id: 'xiaofa', name: '小法', look: MALTESE, yard: parkYard({ avoid: [XIAOFA_AVOID], rare: [XIAOFA_RARE] }), nature: XIAOFA_NATURE })];
+export const PARK_DOGS: Dog[] = [new Dog({ id: 'xiaofa', name: '小法', look: MALTESE, yard: parkYard({ avoid: [XIAOFA_AVOID], rare: [XIAOFA_RARE], fav: { rings: [XIAOFA_FAV], weight: XIAOFA_FAV_WEIGHT } }), nature: XIAOFA_NATURE })];
 
 /** 搭火箭到汪星：每隻狗換到隨機一塊草皮 */
 export function moveDogs(): void {
@@ -722,8 +753,8 @@ export function dogAt(id: string): Pt | null {
 }
 
 /** 點了這隻狗：轉過來面向你坐下（或只轉頭看你） */
-export function petDog(id: string): void {
-  dogById(id)?.pet();
+export function petDog(id: string, face?: Pt): void {
+  dogById(id)?.pet(undefined, undefined, face);
 }
 
 /** 點在不在一圈裡面（射線法） */
