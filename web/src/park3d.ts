@@ -357,6 +357,8 @@ const DOG_HAIRS = 3600;
 /** 一根毛分幾段畫（二次曲線） */
 const HAIR_SEGS = 3;
 const DOG_FAR_M = 120;
+/** 小法的頭（眼睛）大概多高（抬頭看你時照這個算往上看幾度） */
+const DOG_HEAD_Y = 0.3;
 const wrap = (deg: number): number => ((((deg % 360) + 540) % 360) - 180);
 
 /** 打開 3D 公園（蓋在整個畫面上面），回傳關掉的函式 */
@@ -1659,13 +1661,16 @@ export function openPark3D(o: Park3DOptions): () => void {
     const left = new THREE.Vector3(-Math.cos(B), 0, -Math.sin(B));
     dogRoot.matrix.makeBasis(fwd, left, new THREE.Vector3(0, 1, 0)).setPosition(p[0], floorAt(p), -p[1]);
     dogRoot.matrixWorldNeedsUpdate = true;
-    // 點了轉頭看你：頭轉向你站的地方（最多 80 度）、抬起來一點，跟雷達上一樣
+    // 點了轉頭看你：頭轉向你站的地方（最多 80 度）、抬頭看著你的眼睛（照你們之間多遠、你的眼睛多高，6～35 度）；
+    // 轉過來面向你坐下的時候，轉好了也抬頭看你
     let pose = dogPose(s, d.e, turn);
-    const g = xiaofa.glancing(now);
+    const g = Math.max(xiaofa.glancing(now), s.pet ? dogTurned(s, d.e) : 0);
     if (g > 0) {
       const toYou = (Math.atan2(pos[0] - p[0], pos[1] - p[1]) * 180) / Math.PI;
       const look = Math.max(-80, Math.min(80, -wrap(toYou - headDeg)));
-      pose = { ...pose, look: pose.look * (1 - g) + look * g, nod: pose.nod * (1 - g) - 6 * g, blink: g > 0.9 ? 0 : pose.blink };
+      const up = (Math.atan2(floorAt(pos) + EYE - (floorAt(p) + DOG_HEAD_Y), Math.hypot(pos[0] - p[0], pos[1] - p[1])) * 180) / Math.PI;
+      const lift = Math.max(6, Math.min(35, up));
+      pose = { ...pose, look: pose.look * (1 - g) + look * g, nod: pose.nod * (1 - g) - lift * g, blink: g > 0.9 ? 0 : pose.blink };
     }
     const all = dogParts(xiaofa.look, pose);
     // 毛：照面積分 DOG_HAIRS 根（臉附近密一點），每一根從表面往外長、捲成 C 字、往下垂；跟雷達上一樣：
