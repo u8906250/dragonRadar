@@ -903,6 +903,7 @@ function updateStreets(): void {
   $('#radar-attrib').hidden = !show && !trees;
   $('#street-attrib').hidden = !show;
   $('#tree-attrib').hidden = !trees;
+  $('#park3d-btn').hidden = !trees || !lsGet(LS_ADMIN_TOKEN);
   if (!show) {
     if (streetsFor) radar.setStreets(null);
     streetsFor = '';
@@ -5041,6 +5042,20 @@ function wireControls(): void {
     if (taps.length >= 5) location.href = 'admin.html';
   });
   $('#admin-link').hidden = !lsGet(LS_ADMIN_TOKEN);
+  // 3D 的中山公園（測試中，只有存了管理 token 的看得到）：地球上雷達中心在公園裡就從那裡、照雷達的方向開始走，不然站在映池南邊
+  $('#park3d-btn').addEventListener('click', () => {
+    const token = lsGet(LS_ADMIN_TOKEN);
+    if (!token) return;
+    const at: [number, number] | undefined = radar.spaceFocused ? undefined : [origin.lat, origin.lng];
+    const btn = $<HTMLButtonElement>('#park3d-btn');
+    btn.disabled = true;
+    void import('./park3d')
+      .then((m) => m.openPark3D({ token, at, heading: radar.headingDeg, onExit: () => (btn.disabled = false) }))
+      .catch(() => {
+        btn.disabled = false;
+        showBanner(bannerEl, '3D 公園載入失敗，請再試一次');
+      });
+  });
   kwForm.addEventListener('submit', (e) => {
     e.preventDefault();
     void submitKeyword(kwInput.value);

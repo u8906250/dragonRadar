@@ -202,3 +202,35 @@ export const withdrawReport = (postId: string): Promise<Result<{ ok: true; remov
   deviceJson<{ ok: true; removed: number }>(`/api/reports/${encodeURIComponent(postId)}`, 'DELETE');
 
 export const reportEnded = (eventId: number): Promise<Result<EndedReportResult>> => postJson<EndedReportResult>(`/api/events/${eventId}/ended`, {});
+
+/** 中山公園的標記（管理者在 3D 公園裡標的路燈、長椅等）：種類、經緯度、面向（度，0 是北、順時針，長椅坐的人面向哪）、備註 */
+export type ParkMarkKind = 'lamp' | 'bench' | 'bin' | 'other';
+export interface ParkMarkIn {
+  kind: ParkMarkKind;
+  lat: number;
+  lng: number;
+  heading: number;
+  note: string | null;
+}
+export interface ParkMark extends ParkMarkIn {
+  id: number;
+  created_at: number;
+  updated_at: number;
+}
+async function adminJson<T>(token: string, path: string, init: RequestInit = {}): Promise<T> {
+  const r = await fetch(`${API_BASE}${path}`, { ...init, headers: { ...(init.body ? { 'content-type': 'application/json' } : {}), authorization: `Bearer ${token}` } });
+  const j = (await r.json().catch(() => ({}))) as T & { error?: string };
+  if (!r.ok) throw new Error(r.status === 401 ? '管理 token 不對或已經換了' : (j.error ?? `API ${r.status}`));
+  return j;
+}
+/** 列出公園的標記（要管理 token） */
+export async function fetchParkMarks(token: string): Promise<ParkMark[]> {
+  return (await adminJson<{ marks: ParkMark[] }>(token, '/api/admin/park-marks')).marks;
+}
+/** 新增（沒有 id）或改一個標記（整個換掉） */
+export async function saveParkMark(token: string, m: ParkMarkIn, id?: number): Promise<ParkMark> {
+  return (await adminJson<{ mark: ParkMark }>(token, `/api/admin/park-marks${id ? `/${id}` : ''}`, { method: 'POST', body: JSON.stringify(m) })).mark;
+}
+export async function deleteParkMark(token: string, id: number): Promise<void> {
+  await adminJson<{ ok: true }>(token, `/api/admin/park-marks/${id}`, { method: 'DELETE' });
+}

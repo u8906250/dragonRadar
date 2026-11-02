@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { RADAR_GEOM } from '../src/radar';
-import { ARRIVE_MS, arriveRocket, DEPART_MS, departRocket, EARTH, earthParkSvg, HATCH_CENTER, nearPark, PARK_DOGS, PARK_YARD, PARK_MIN_KM, parkAreas, parkYard, XIAOFA_AVOID, XIAOFA_NATURE, XIAOFA_RARE, parkGeom, parkTexture, resetRocket, rocketNow, STOW_MS, stowRocket, SUMMON_MS, summonRocket } from '../src/park';
+import { personOk, ARRIVE_MS, arriveRocket, DEPART_MS, departRocket, EARTH, earthParkSvg, HATCH_CENTER, nearPark, PARK_DOGS, PARK_YARD, PARK_MIN_KM, parkAreas, parkYard, XIAOFA_AVOID, XIAOFA_NATURE, XIAOFA_RARE, parkGeom, parkTexture, resetRocket, rocketNow, STOW_MS, stowRocket, SUMMON_MS, summonRocket } from '../src/park';
 import { ZHONGSHAN_PARK } from '../src/zhongshan';
 import { bodyBearing, spaceMarkup, toWoof } from '../src/space';
 import { dogHeight, MALTESE } from '../src/dog';
@@ -503,5 +503,19 @@ describe('地球的雷達上的中山公園（跟汪星共用一份）', () => {
     // 水波跟草用不同的亂數：位置不會跟草一樣
     const c = earthCanvas(0.03, pond);
     expect(parkTexture(g, 'ripple', c)!.d.slice(0, 40)).not.toBe(parkTexture(g, 'grass', c)?.d.slice(0, 40));
+  });
+});
+
+describe('3D 公園的人走得到哪裡', () => {
+  it('walks on plazas, lawns, paths and bridges, not into buildings, water or the flagpole', () => {
+    expect(personOk([25.03838, 121.56024])).toBe(true); // 旗台南邊的廣場
+    expect(personOk(lawn)).toBe(true);
+    expect(personOk(hall)).toBe(false); // 國父紀念館裡面
+    expect(personOk(pond)).toBe(false); // 映池
+    expect(personOk(lake)).toBe(false); // 翠湖
+    expect(personOk(ZHONGSHAN_PARK.flagpole)).toBe(false);
+    expect(personOk([25.0478, 121.517])).toBe(false); // 公園外面
+    // 曲橋上（橋的中線上每一點）
+    for (const l of ZHONGSHAN_PARK.bridges) for (let i = 1; i < l.length; i++) expect(personOk([(l[i - 1][0] + l[i][0]) / 2, (l[i - 1][1] + l[i][1]) / 2])).toBe(true);
   });
 });

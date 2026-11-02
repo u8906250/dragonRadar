@@ -10,6 +10,7 @@ import { CURRENT_MAP_URL, type CurrentMapRoute } from './sources/currentmap';
 import { mergeIntoOfficial } from './sources/merge';
 import { apifyTrial } from './sources/apify';
 import { fetchThreadsPost, resolveThreadsLink, shortcodeToUnix } from './sources/link';
+import { addParkMark, deleteParkMark, listParkMarks, parseParkMark, updateParkMark } from './parkmarks';
 import { adminLocate, applyFeedback, clearResolvedFeedback, deleteAdminSubscription, listFeedback, locateForFeedback, notifyAdmins, purgeFeedback, saveAdminSubscription, setFeedbackStatus, submitFeedback } from './feedback';
 import { SESSION_SPEC } from './badminton';
 import { FOOD_SPEC } from './food';
@@ -444,6 +445,30 @@ async function handleAdmin(req: Request, env: Env, ctx: ExecutionContext, path: 
     if (!link) throw new HttpError(400, 'not a Threads post URL');
     const postedAt = shortcodeToUnix(link.code, now);
     return jsonResponse({ link, postedAt, fetched: await fetchThreadsPost(link.code) });
+  }
+
+  // 中山公園的標記（路燈、長椅等，管理者在 3D 公園裡標的）：列出、新增、改（POST 到 /:id，整個換掉）、刪除
+  if (path === '/api/admin/park-marks') {
+    if (req.method === 'GET') return jsonResponse({ marks: await listParkMarks(env) });
+    if (req.method === 'POST') {
+      const m = parseParkMark(await readJson<unknown>(req));
+      if (typeof m === 'string') throw new HttpError(400, m);
+      const mark = await addParkMark(env, m, now);
+      if (!mark) throw new HttpError(409, 'too many marks');
+      return jsonResponse({ mark });
+    }
+  }
+  const pmMatch = /^\/api\/admin\/park-marks\/(\d+)$/.exec(path);
+  if (pmMatch && req.method === 'POST') {
+    const m = parseParkMark(await readJson<unknown>(req));
+    if (typeof m === 'string') throw new HttpError(400, m);
+    const mark = await updateParkMark(env, Number(pmMatch[1]), m, now);
+    if (!mark) throw new HttpError(404, 'not found');
+    return jsonResponse({ mark });
+  }
+  if (pmMatch && req.method === 'DELETE') {
+    if (!(await deleteParkMark(env, Number(pmMatch[1])))) throw new HttpError(404, 'not found');
+    return jsonResponse({ ok: true });
   }
 
   // 只同步某一天的官方車掃（不抓新聞、不合併）：{ date: 'YYYY-MM-DD', map? }。

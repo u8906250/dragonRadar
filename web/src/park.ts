@@ -632,6 +632,21 @@ export function parkYard(o: { avoid?: Pt[][]; rare?: Pt[][] } = {}): DogYard {
   };
 }
 
+/**
+ * 3D 公園裡的人站得到這裡嗎（台北的經緯度）：在公園裡，不進建築、不下水（橋上（離橋中線 PERSON_BRIDGE_M 內）、橋接到的小島可以），
+ * 不穿過旗桿（PERSON_POLE_M 內）；廣場、草地、步道都可以走（樹幹在 park3d.ts 擋）
+ */
+const PERSON_BRIDGE_M = 1.0;
+const PERSON_POLE_M = 0.4;
+export function personOk(at: Pt): boolean {
+  if (!inRing(at, ZHONGSHAN_PARK.outline)) return false;
+  const w = walkOf();
+  const p = toM(at);
+  if (Math.hypot(p[0] - w.pole[0], p[1] - w.pole[1]) < PERSON_POLE_M) return false;
+  if (ZHONGSHAN_PARK.bridges.some((l) => l.some((q, i) => i > 0 && segDist(p, toM(l[i - 1]), toM(q)) <= PERSON_BRIDGE_M))) return true;
+  return !w.blocks.some((b) => inBox(p, b.box) && inRingM(p, b.ring) && !b.holes.some((h) => inRingM(p, h)));
+}
+
 /** 換草皮、去湖邊：找邊離這裡多近的草皮、湖岸（直線，公尺），照步道走最多幾公尺（跑步不要跑太久） */
 const CROSS_NEAR_M = 20;
 const CROSS_MAX_M = 32;
