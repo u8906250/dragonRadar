@@ -65,6 +65,11 @@ const LAMP_H = 3.6;
 /** 眼睛多高、走多快（公尺／秒，Shift 快走 2.5 倍）、點地面最遠多遠 */
 const EYE = 1.6;
 const WALK = 1.4;
+/** 轉頭多快：方向鍵左右每秒最多幾弧度（約 52 度，按下去 TURN_RAMP_S 秒慢慢加速）、拖曳左右每像素幾弧度（上下看照 LOOK_DRAG） */
+const TURN_KEY = 0.9;
+const TURN_RAMP_S = 0.35;
+const TURN_DRAG = 0.0028;
+const LOOK_DRAG = 0.0045;
 const FAST = 2.5;
 const TAP_MAX_M = 150;
 
@@ -685,6 +690,8 @@ export function openPark3D(o: Park3DOptions): () => void {
   let yaw = (START_HEADING * Math.PI) / 180;
   let pitch = -0.05;
   const keys = new Set<string>();
+  /** 方向鍵左右按了多久（秒） */
+  let turnHeld = 0;
   const stick = { x: 0, y: 0, id: -1 };
   let dirty = true;
   let shadowAt: Pt = [Infinity, Infinity];
@@ -711,9 +718,10 @@ export function openPark3D(o: Park3DOptions): () => void {
     if (keys.has('s') || keys.has('arrowdown')) f -= 1;
     if (keys.has('d')) s += 1;
     if (keys.has('a')) s -= 1;
-    // 方向鍵左右轉頭
+    // 方向鍵左右轉頭（按下去慢慢加速）
     const turn = (keys.has('arrowright') ? 1 : 0) - (keys.has('arrowleft') ? 1 : 0);
-    if (turn) yaw += turn * dt * 1.6;
+    turnHeld = turn ? turnHeld + dt : 0;
+    if (turn) yaw += turn * dt * TURN_KEY * Math.min(1, 0.25 + turnHeld / TURN_RAMP_S);
     if (stick.id >= 0) {
       f += -stick.y;
       s += stick.x;
@@ -819,8 +827,8 @@ export function openPark3D(o: Park3DOptions): () => void {
     const [dx, dy] = [e.clientX - drag.x, e.clientY - drag.y];
     if (!drag.moved && Math.hypot(dx, dy) < 6) return;
     drag.moved = true;
-    yaw -= dx * 0.0045;
-    pitch = Math.max(-1.3, Math.min(1.2, pitch - dy * 0.0045));
+    yaw -= dx * TURN_DRAG;
+    pitch = Math.max(-1.3, Math.min(1.2, pitch - dy * LOOK_DRAG));
     [drag.x, drag.y] = [e.clientX, e.clientY];
     dirty = true;
   };
