@@ -1370,7 +1370,7 @@ function searchable(it: Item): string {
   if (t === undefined) {
     const ev = it.ev;
     t = foldText(
-      [ev.title, titleOf(ev), ev.item, ev.placeText, ev.approxArea, ev.keyword, ev.post.username, ev.post.text, ev.post.supplement, kindLabel(ev), it.spot ? '固定據點' : '', routeOf(ev)?.title]
+      [ev.title, titleOf(ev), ev.item, ev.placeText, ev.approxArea, ev.keyword, ev.post.username, ev.post.text, ev.post.supplement, kindLabel(ev), it.spot ? '固定據點' : '', routeOf(ev)?.title, tagsOf(ev).join(' ')]
         .filter(Boolean)
         .join(' '),
     );
@@ -1393,6 +1393,7 @@ function render(): void {
   viewBtn.hidden = view === 'radar' && noMapView();
   const now = nowSec();
   const fetched = computeItems(now);
+  renderSearchTags(fetched);
   // 搜尋時雷達、地圖、清單、各類的數量都只算符合的
   const all = searchTerms.length > 0 ? fetched.filter(matchesSearch) : fetched;
   // 發放、活動、據點的開關是洋流的，其他模組不篩
@@ -1620,6 +1621,13 @@ function listRows(items: Item[], now: number): Row[] {
 
 const PHASE_TITLE: Partial<Record<Phase, string>> = { active: '進行中', soon: '即將開始', later: '稍後開始' };
 
+/** 清單上一則一則的順序（事件 id） */
+let listOrder: number[] = [];
+/**
+ * 活動卡片的「上一個」「下一個」照的順序：打開卡片時記下清單當時的順序，切的時候不變（雷達飛過去以後清單照距離重排，
+ * 不會跟著亂跳）；關掉卡片、從清單再點一則時重新記
+ */
+let stepOrder: number[] | null = null;
 function renderList(items: Item[], now: number): void {
   // 摘要和清單用同一套「列」來算：車掃路線的起點、加油點、終點合成一張卡片，只算一個
   const rows = listRows(items, now);
@@ -1673,6 +1681,8 @@ function renderList(items: Item[], now: number): void {
         : `${emptyText()}。點清單上方的「↻ 更新」看有沒有新的，或在旁邊打開自動更新。`;
   listEl.replaceChildren();
   emptyEl.hidden = items.length > 0;
+  // 清單上的順序（活動卡片的上一個、下一個照這個；車掃路線的卡片不算）
+  listOrder = sections.flatMap((sec) => sec.rows.flatMap((r) => (r.route ? [] : [r.it.ev.id])));
   // 每一段的標題寫上數量，跟上面的摘要對得起來
   for (const sec of sections) {
     if (sec.rows.length === 0) continue;
@@ -1699,8 +1709,9 @@ function itemCard(it: Item, now: number): HTMLLIElement {
   li.innerHTML = `
     <div class="ev-title"><span class="dot"></span><span class="kind-tag">${tagLabel(it)}</span>${esc(titleOf(it.ev))}${it.ev.item ? ` <span class="muted">· ${esc(it.ev.item)}</span>` : ''}${it.ev.kind === 'job' && jobRisky(it.ev) ? '<span class="risk-tag">⚠️ 注意</span>' : ''}${followed().length > 1 && it.ev.keyword ? `<span class="ev-kw">#${esc(it.ev.keyword)}</span>` : ''}</div>
     <div class="ev-meta">${esc(placeLine(it.ev))} · ${it.ev.approxArea ? '約 ' : ''}${formatKm(it.distanceKm)} ${compassLabel(it.bearing)}</div>
-    <div class="ev-time">${it.spot ? `${esc(spotHours(it.spot.sessions))}・` : ''}${timeLineHtml(it, now)}</div>`;
+    <div class="ev-time">${it.spot ? `${esc(spotHours(it.spot.sessions))}・` : ''}${timeLineHtml(it, now)}</div>${tagsOf(it.ev).length > 0 ? `<div class="ev-tagline">${tagsHtml(tagsOf(it.ev))}</div>` : ''}`;
   li.addEventListener('click', () => {
+    stepOrder = [...listOrder];
     select(it.ev.id);
     if (selectedId === it.ev.id) goToItem(it);
   });
@@ -2454,6 +2465,7 @@ function renderDetail(items: Item[], now: number): void {
   }
   if (selectedId === null) {
     detailEl.hidden = true;
+    stepOrder = null;
     return;
   }
   const it = items.find((x) => x.ev.id === selectedId);
@@ -2467,15 +2479,26 @@ function renderDetail(items: Item[], now: number): void {
   }
   const { ev } = it;
   detailEl.hidden = false;
-  setDetailHtml(`ev:${ev.id}`, `
+  // 清單上的上一個、下一個（照打開卡片時清單的順序；不在清單上的不顯示）
+  if (!stepOrder?.includes(ev.id)) stepOrder = [...listOrder];
+  const order = stepOrder;
+  const at = order.indexOf(ev.id);
+  const [prevId, nextId] = at < 0 ? [undefined, undefined] : [order[at - 1], order[at + 1]];
+  const stepBtns =
+    at < 0 || order.length < 2
+      ? ''
+      : `<span class="sheet-steps"><button type="button" class="chip" data-step="${prevId ?? ''}" aria-label="上一個活動" title="上一個活動"${prevId === undefined ? ' disabled' : ''}>▲</button><button type="button" class="chip" data-step="${nextId ?? ''}" aria-label="下一個活動" title="下一個活動"${nextId === undefined ? ' disabled' : ''}>▼</button></span>`;
+  setDetailHtml(`ev:${ev.id}:${prevId ?? ''}:${nextId ?? ''}`, `
     <div class="sheet-head">
       <strong>${esc(titleOf(ev))}</strong>
+      ${stepBtns}
       <button type="button" class="chip" data-act="close" aria-label="關閉">關閉</button>
     </div>
     <div class="sheet-body">
       ${nearbyHtml(it, items)}
       ${routeBoxHtml(ev, items, now)}
       ${ev.kind === 'job' ? jobDetailHtml(it, now) : ev.kind === 'session' ? sessionDetailHtml(it, now) : ev.kind === 'food' ? foodDetailHtml(it, now) : `<p>類型：${it.spot ? `固定據點（${kindLabel(ev)}）` : kindLabel(ev)}<br>${ev.item ? `${ev.kind === 'activity' ? '物品' : '發放'}：${esc(ev.item)}<br>` : ''}${ev.keyword ? `關鍵字：#${esc(ev.keyword)}<br>` : ''}地點：${esc(placeOf(ev))}${ev.approxArea ? `<br><span class="approx-note">約略位置：只知道在${esc(ev.approxArea)}，地圖上是${esc(ev.approxArea)}的中心點，實際地點請看原文</span>` : ''}<br>時間：${it.spot ? esc(spotSchedule(it)) : ev.allDay ? `${dateFmt.format(new Date(ev.startAt * 1000))} ${allDayText(ev, false)}` : esc(eventTimeText(ev))}<br>距離：${ev.approxArea ? '約 ' : ''}${formatKm(it.distanceKm)}，${compassLabel(it.bearing)}方 · ${esc(timeLine(it, now))}</p>`}
+      ${tagsOf(ev).length > 0 ? `<p class="detail-tags">${tagsHtml(tagsOf(ev), true)}</p>` : ''}
       <blockquote class="post-excerpt" title="原文摘錄，完整內容請看原文">${esc(ev.post.source === 'news' ? ev.post.text.split('\n')[0] : ev.post.text)}</blockquote>
       ${ev.post.supplement ? `<p class="muted supplement-line">回報的人補充：${esc(ev.post.supplement)}</p>` : ''}
       <p class="muted source-line">來源：${esc(sourceLabel(ev))}</p>
@@ -2493,6 +2516,17 @@ function renderDetail(items: Item[], now: number): void {
   detailEl.querySelector('[data-act="close"]')?.addEventListener('click', () => select(null));
   for (const b of detailEl.querySelectorAll<HTMLButtonElement>('[data-select]')) {
     b.addEventListener('click', () => select(Number(b.dataset.select)));
+  }
+  for (const b of detailEl.querySelectorAll<HTMLButtonElement>('[data-tag]')) b.addEventListener('click', () => searchTag(b.dataset.tag ?? ''));
+  // 上一個、下一個活動：選它，雷達像點清單一樣飛過去
+  for (const b of detailEl.querySelectorAll<HTMLButtonElement>('[data-step]')) {
+    b.addEventListener('click', () => {
+      const id = Number(b.dataset.step);
+      const to = items.find((x) => x.ev.id === id);
+      if (!b.dataset.step || !to) return;
+      select(id);
+      goToItem(to);
+    });
   }
   // 車掃的上一站、下一站：地圖上那一站不在畫面裡就移過去
   for (const b of detailEl.querySelectorAll<HTMLButtonElement>('[data-stop-go]')) {
@@ -3277,7 +3311,7 @@ let zoomFrame = 0;
 /**
  * 「定位」「回到我的位置」：範圍慢慢縮放到外圈 km 公里、中心同時慢慢移到 to（像 Google 地圖飛過去；頭尾慢，縮放照倍數取對數走、
  * 位置照經緯度內插，差越多、移越遠走越久，ZOOM_TO_MS 之間；移的時候只重畫，到了才 setOrigin：存下來、重抓一次）。
- * 不在雷達畫面（地圖）、減少動態效果時直接換；飛到一半自己捏合、滾滾輪、拖曳：位置直接到 to、範圍停在那裡；
+ * 不在雷達畫面（地圖）時直接換（減少動態效果的也照樣飛）；飛到一半自己捏合、滾滾輪、拖曳：位置直接到 to、範圍停在那裡；
  * 飛的時候新的 GPS 位置來了就改飛到那裡（flight.to）
  */
 const ZOOM_TO_MS: [number, number] = [500, 1600];
@@ -3287,7 +3321,8 @@ function zoomToKm(km: number, to: Origin | null = null): void {
   const total = Math.log(km / scaleKm);
   const from = origin;
   const dist = to ? haversineKm(from, to) : 0;
-  if (view !== 'radar' || calmMotion?.matches || (Math.abs(total) < 0.01 && dist < 0.001)) {
+  // 減少動態效果的電腦也照樣飛過去（使用者要看得到移動、縮放）
+  if (view !== 'radar' || (Math.abs(total) < 0.01 && dist < 0.001)) {
     if (to) setOrigin(to);
     zoomRadar(km / scaleKm, true);
     return;
@@ -3834,6 +3869,57 @@ function kindLabel(ev: EventOut): string {
 function topicOf(ev: { extra?: Record<string, unknown> | null }): string | null {
   const t = ev.extra?.topic;
   return typeof t === 'string' && /^[\p{L}\p{N}]{1,8}$/u.test(t) ? t : null;
+}
+
+/**
+ * 回報時抽的關鍵字（伺服器存在 extra.tags：貼文寫到的常見詞、AI 抽的、hashtag）；舊資料沒有的，照貼文找常見詞、hashtag。
+ * 只收文字、數字，最多 8 個
+ */
+const COMMON_TAGS = ['洋流', '飄帶', '彩虹', '徽章', '貼紙', '小物', '扇子', '手環', '旗子', '帽子', '車掃', '掃街', '開講', '市集', '遊行', '講座', '造勢', '應援', '同志', '淨灘', '志工', '發放'];
+const tagCache = new WeakMap<object, string[]>();
+function tagsOf(ev: { extra?: Record<string, unknown> | null; post?: { text: string; supplement?: string | null } }): string[] {
+  const had = tagCache.get(ev);
+  if (had) return had;
+  const ok = (t: unknown): t is string => typeof t === 'string' && /^[\p{L}\p{N}]{2,10}$/u.test(t);
+  let tags = Array.isArray(ev.extra?.tags) ? (ev.extra.tags as unknown[]).filter(ok) : [];
+  if (tags.length === 0 && ev.post) {
+    const text = `${ev.post.text}\n${ev.post.supplement ?? ''}`;
+    const body = text.replace(/\s+/g, '').replace(/漂帶/g, '飄帶');
+    tags = COMMON_TAGS.filter((t) => body.includes(t));
+    for (const m of text.matchAll(/#([\p{L}\p{N}]{2,10})/gu)) if (!tags.includes(m[1])) tags.push(m[1]);
+  }
+  tags = tags.slice(0, 8);
+  tagCache.set(ev, tags);
+  return tags;
+}
+/** 關鍵字標籤（#洋流 #飄帶）；asButtons 是點了就搜尋 */
+const tagsHtml = (tags: string[], asButtons = false): string =>
+  tags.length === 0 ? '' : `<span class="ev-tags">${tags.map((t) => (asButtons ? `<button type="button" class="tag" data-tag="${esc(t)}">#${esc(t)}</button>` : `<span class="tag">#${esc(t)}</span>`)).join('')}</span>`;
+/** 點關鍵字：搜尋它（同一個再點一次就清掉） */
+function searchTag(tag: string): void {
+  const same = searchInput.value.trim() === tag;
+  searchInput.value = same ? '' : tag;
+  searchClear.hidden = searchInput.value === '';
+  setSearch(searchInput.value);
+}
+/** 搜尋框下面的常見關鍵字：目前抓到的發放、活動裡最多的標籤（最多 8 個），不夠就補常見的 */
+function renderSearchTags(items: Item[]): void {
+  const box = $<HTMLElement>('#search-tags');
+  if (!mod.current) {
+    box.hidden = true;
+    return;
+  }
+  const count = new Map<string, number>();
+  for (const it of items) for (const t of tagsOf(it.ev)) count.set(t, (count.get(t) ?? 0) + 1);
+  const top = [...count.entries()].sort((a, b) => b[1] - a[1] || COMMON_TAGS.indexOf(a[0]) - COMMON_TAGS.indexOf(b[0])).map(([t]) => t).slice(0, 8);
+  for (const t of ['洋流', '飄帶', '彩虹', '徽章', '貼紙', '車掃', '開講', '市集']) if (top.length < 8 && !top.includes(t)) top.push(t);
+  const now = searchInput.value.trim();
+  const html = top.map((t) => `<button type="button" class="chip small${t === now ? ' on' : ''}" data-tag="${esc(t)}" aria-pressed="${t === now}">#${esc(t)}</button>`).join('');
+  if (box.dataset.html !== html) {
+    box.innerHTML = html;
+    box.dataset.html = html;
+  }
+  box.hidden = false;
 }
 
 /** 服務處、競選總部（候選人、議員、政黨的）：固定據點用房子圖示、標「服務處」，跟店家、餐廳分開 */
@@ -4430,6 +4516,7 @@ function renderPreview(r: SubmitResult): void {
           <b>${p.kind === 'food' ? ({ vendor: '出攤', recommend: '推薦', meetup: '揪團' }[foodRole(p) ?? 'recommend'] ?? '推薦') : p.kind === 'session' ? (isSeek(p) ? '找臨打' : '招臨打') : p.kind === 'job' ? (isOffer(p) ? '可照顧' : '徵人') : p.kind === 'activity' ? esc(topicOf(p) ?? '活動') : '發放'}${p.spot ? (p.kind === 'session' ? '・每週固定場' : p.kind === 'food' ? '・每週固定擺攤' : '・固定據點') : ''}｜${esc(p.title)}</b>
           ${p.kind === 'job' && (jobOf(p).risks ?? []).some((r) => r !== 'no_employer') ? `<small class="preview-warn">⚠️ ${esc((jobOf(p).risks ?? []).map((r) => JOB_RISK_TEXT[r]).filter(Boolean).join('；'))}</small>` : ''}
           ${p.item ? `<small>${esc(p.item)}</small>` : ''}
+          ${tagsOf(p).length > 0 ? `<small>關鍵字：${tagsHtml(tagsOf(p))}</small>` : ''}
           <small>時間：${esc(previewWhen(p))}</small>
           <small>地點：${esc(shortAddress(p.placeText.replace(/\s*\n\s*/g, ' ')))}</small>
           <small>${previewWhere(p)}</small>
@@ -5037,6 +5124,11 @@ function wireControls(): void {
     searchClear.hidden = true;
     setSearch('');
     searchInput.focus();
+  });
+  // 常見關鍵字：點了搜尋（再點一次清掉）
+  $('#search-tags').addEventListener('click', (e) => {
+    const b = (e.target as Element).closest<HTMLButtonElement>('[data-tag]');
+    if (b) searchTag(b.dataset.tag ?? '');
   });
   kwSheet.querySelector('[data-act="close"]')?.addEventListener('click', () => openKwSheet(false));
   feedbackSheet.querySelector('[data-act="close"]')?.addEventListener('click', () => {

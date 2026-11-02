@@ -1,6 +1,6 @@
 import type { Env } from './env';
 import { fetchThreadsProfile, profileCandidates, profileHintText, type ThreadsProfile } from './sources/profile';
-import { ACTIVITY_SPEC, applySupplementDate, reconcileRouteStops, closedWeekdays, slotWeekdays, dropBroughtItem, dropSelfPlace, extractFromPost, localizeTimes, missingActivityParts, openWeekdaysFromText, splitDropTimes, splitMultiDay, splitWeekdayWeekend, spotHoursFromText, startNowForDeadline, guessedMidnight, localToUnix, regionTimeZone, timeZoneOf, topicExtra, untilInText, weekdaysInText, type ActivityPart, type EventKind, type ExtractedEvent } from './extract';
+import { ACTIVITY_SPEC, applySupplementDate, reconcileRouteStops, closedWeekdays, slotWeekdays, dropBroughtItem, dropSelfPlace, extractFromPost, localizeTimes, missingActivityParts, openWeekdaysFromText, splitDropTimes, splitMultiDay, splitWeekdayWeekend, spotHoursFromText, startNowForDeadline, guessedMidnight, localToUnix, postTags, regionTimeZone, timeZoneOf, topicExtra, untilInText, weekdaysInText, type ActivityPart, type EventKind, type ExtractedEvent } from './extract';
 import { cityOfHouse, geocodeAddress, parseTwAddress, type TwAddress } from './address';
 import { SESSION_SPEC } from './badminton';
 import { FOOD_SPEC } from './food';
@@ -747,7 +747,12 @@ async function planPostWith(env: Env, post: PostRow, now: number, profileHint: s
   if (!extraction.is_event) return { items: [], early: 'not_event', note: extraction.reason ?? null };
   if (extraction.events.length === 0) return { items: [], early: 'no_events' };
   if (module === 'dog') return { items: await planJobs(env, post, extraction.events, now), early: null };
-  if (module === 'current') return { items: await planActivities(env, post, extraction.events, text, now, extraction.route_title ?? null), early: null };
+  if (module === 'current') {
+    // 關鍵字（標籤）：貼文、補充寫到的常見詞、AI 抽的、hashtag，每一場都記一份（events.extra.tags）
+    const tags = postTags(extraction.tags, base);
+    if (tags.length > 0) for (const e of extraction.events) e.extra = { ...(e.extra ?? {}), tags };
+    return { items: await planActivities(env, post, extraction.events, text, now, extraction.route_title ?? null), early: null };
+  }
   // 模型常把付款的 Line Pay 當成用 LINE 聯絡：貼文只有 Line Pay 的不算
   if (!/(?:line|賴)(?!\s*pay)/i.test(text)) for (const e of extraction.events) if (e.extra?.contact === 'line') e.extra.contact = null;
   // 刊登（找臨打、網友推薦、揪團吃飯）不是場次：從發文起顯示一段時間；招臨打、出攤照場次排
@@ -968,7 +973,7 @@ export async function atLocalTimes(env: Env, acts: ManualActivity[]): Promise<Ma
  * 回報的人直接修改的活動：不再問 AI，照填的資料排（有標位置就用標的，沒標照地點查），
  * 一樣檢查時間（已經過了、太久以後）和雷達上有沒有同一場
  */
-export async function planManual(env: Env, acts: ManualActivity[], now: number, text = '', routeTitle: string | null = null): Promise<PlanItem[]> {
+export async function planManual(env: Env, acts: ManualActivity[], now: number, text = '', routeTitle: string | null = null, tags: string[] = []): Promise<PlanItem[]> {
   const deadline = Date.now() + ADDRESS_BUDGET_MS;
   const items: PlanItem[] = [];
   for (const [group, a] of acts.entries()) {
@@ -992,7 +997,8 @@ export async function planManual(env: Env, acts: ManualActivity[], now: number, 
       // 時間是表單送來的時間點，不用換算，時區只用來顯示當地時間
       country: found.country,
       timezone: found.tz,
-      extra: topicExtra(a.topic),
+      // 關鍵字沿用判讀出來的（改資料不重新判讀）
+      extra: tags.length > 0 ? { ...(topicExtra(a.topic) ?? {}), tags } : topicExtra(a.topic),
     };
     const located = { point: found.point, approxArea: found.approxArea };
     const r = await planEvent(env, ex, now, deadline, undefined, located, undefined, OPEN_END_SEC);
@@ -1790,6 +1796,12 @@ async function planPostings(env: Env, post: PostRow, list: ExtractedEvent[], now
 }
 
 /** extra 欄位（JSON）讀出來；壞掉的當沒有 */
+/** 洋流的活動的關鍵字（events.extra 的 tags）；沒有是空的 */
+export function tagsOf(extra: Record<string, unknown> | string | null | undefined): string[] {
+  const o = typeof extra === 'string' ? parseExtra(extra) : extra;
+  return Array.isArray(o?.tags) ? o.tags.filter((t): t is string => typeof t === 'string') : [];
+}
+
 /** 洋流的活動的主題（events.extra 的 topic）；沒有是 null */
 export function topicOf(extra: Record<string, unknown> | string | null | undefined): string | null {
   const o = typeof extra === 'string' ? parseExtra(extra) : extra;

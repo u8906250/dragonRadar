@@ -55,6 +55,8 @@ export interface Extraction {
   reason?: string | null;
   /** 洋流的活動判讀：車掃、掃街、車隊這種一天依序經過好幾個點的，整場的名稱（「蘇巧慧報告號次大車掃」） */
   route_title?: string | null;
+  /** 洋流的活動判讀：這則貼文的關鍵字（「洋流」「飄帶」「彩虹」「徽章」，不含 #，cleanTag 過） */
+  tags?: string[] | null;
 }
 
 const MAX_EVENTS_PER_POST = 6;
@@ -171,6 +173,7 @@ const ACTIVITY_SCHEMA = {
     is_event: { type: 'boolean' },
     reason: { type: ['string', 'null'] },
     route_title: { type: ['string', 'null'] },
+    tags: { type: 'array', maxItems: 8, items: { type: 'string' } },
     events: {
       type: 'array',
       maxItems: MAX_ACTIVITY_EVENTS,
@@ -191,7 +194,7 @@ const ACTIVITY_SCHEMA = {
       },
     },
   },
-  required: ['is_event', 'reason', 'events'],
+  required: ['is_event', 'reason', 'tags', 'events'],
 };
 
 const ACTIVITY_PROMPT = `你是「洋流雷達」的活動判讀器。你會收到一則台灣 Threads 貼文，請判斷它是否在宣告「民眾可以到場參加的實體活動」，照貼文內容判斷每一場是什麼主題，並抽出每一場的活動內容、地點、開始時間、結束時間。
@@ -203,6 +206,7 @@ const ACTIVITY_PROMPT = `你是「洋流雷達」的活動判讀器。你會收�
   "is_event": 是否宣告了至少一場可到場的實體活動（布林值）,
   "reason": is_event 為 false 時，依這則貼文的內容用一句話（20 字以內）說明為什麼不算，例如「是線上直播」「在販售商品」「只是詢問哪裡有發」「在講昨天的活動心得」；is_event 為 true 則 null,
   "route_title": 車掃、掃街、車隊這種一天依序經過好幾個點的，整場活動的名稱，20 字以內、不含站名，要寫出是誰的，例如「蘇巧慧報告號次大車掃」「吳怡農中正萬華掃街」；不是則 null,
+  "tags": 這則貼文的關鍵字 3～6 個，每個 2～4 字、不含 #，讓人搜尋得到，例如「洋流」「飄帶」「彩虹」「徽章」「貼紙」「車掃」「開講」「市集」：主辦或相關的團體、活動名稱，會發、可以拿或買的東西，主題、特色（例如同志遊行的「彩虹」）；不要寫地名、日期、時間、人名以外的長句，貼文裡的 hashtag 也可以用,
   "events": [ 每一個「地點 + 時段」一筆，最多 ${MAX_ACTIVITY_EVENTS} 筆 ]
 }
 
@@ -303,6 +307,34 @@ export function cleanTopic(v: unknown): string | null {
   return topic && topic !== '活動' && [...topic].length <= 6 ? topic : null;
 }
 
+/**
+ * 關鍵字（標籤）：常見的寫在這裡，貼文寫到就標上（同一個意思寫法不一樣的合成一個：漂帶 → 飄帶）；
+ * 其他的照 AI 抽的、貼文裡的 hashtag
+ */
+export const COMMON_TAGS = ['洋流', '飄帶', '彩虹', '徽章', '貼紙', '小物', '扇子', '手環', '旗子', '帽子', '車掃', '掃街', '開講', '市集', '遊行', '講座', '造勢', '應援', '同志', '淨灘', '志工', '發放'];
+const TAG_ALIASES: Record<string, string> = { 漂帶: '飄帶', 洋流飄帶: '飄帶', 洋流漂帶: '飄帶', 彩虹旗: '彩虹', 胸章: '徽章', 別針: '徽章', 旗幟: '旗子', 小旗子: '旗子', 團扇: '扇子', 貼貼: '貼紙', 掃街拜票: '掃街', 市政開講: '開講' };
+/** 一個關鍵字：拿掉 #、符號、空白，同義的換成一個寫法；太長（不是一個詞）、只有數字的不要 */
+export function cleanTag(v: unknown): string | null {
+  const t = (str(v) ?? '').replace(/^#+/, '').replace(/[\s\p{P}\p{S}\p{Extended_Pictographic}\uFE0F]/gu, '');
+  const tag = TAG_ALIASES[t] ?? t;
+  return tag && [...tag].length >= 2 && [...tag].length <= 10 && !/^\d+$/.test(tag) ? tag : null;
+}
+const MAX_TAGS = 8;
+/** 一則貼文的關鍵字：常見的（內文寫到的）在前，再來 AI 抽的、貼文裡的 hashtag，不重複，最多 MAX_TAGS 個 */
+export function postTags(ai: unknown, text: string): string[] {
+  const out: string[] = [];
+  const add = (v: unknown): void => {
+    const t = cleanTag(v);
+    if (t && !out.includes(t) && out.length < MAX_TAGS) out.push(t);
+  };
+  const body = text.replace(/\s+/g, '');
+  for (const t of COMMON_TAGS) if (body.includes(t)) add(t);
+  for (const [alias, t] of Object.entries(TAG_ALIASES)) if (body.includes(alias)) add(t);
+  for (const v of Array.isArray(ai) ? ai : []) add(v);
+  for (const m of text.matchAll(/#([^\s#＃,，。、！!？?]{2,10})/gu)) add(m[1]);
+  return out;
+}
+
 /** 洋流的活動的主題，存在 events.extra（{ topic }） */
 export const topicExtra = (topic: string | null | undefined): Record<string, unknown> | null => (topic ? { topic } : null);
 
@@ -335,6 +367,7 @@ export function normalizeActivities(raw: unknown): Extraction | null {
     events: isEvent ? events : [],
     reason: isEvent ? null : (str(o.reason)?.slice(0, 60) ?? null),
     route_title: isEvent ? ([...(str(o.route_title) ?? '')].slice(0, 30).join('') || null) : null,
+    tags: isEvent && Array.isArray(o.tags) ? o.tags.map(cleanTag).filter((t): t is string => !!t).slice(0, MAX_TAGS) : null,
   };
 }
 

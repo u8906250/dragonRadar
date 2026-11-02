@@ -934,11 +934,7 @@ export class Radar {
         const px = e.deltaY * (e.deltaMode === 1 ? 33 : e.deltaMode === 2 ? 800 : 1);
         const step = Math.max(-100, Math.min(100, px)) * 0.003;
         window.clearTimeout(wheelTimer);
-        if (this.calm?.matches) {
-          onZoom(Math.exp(step), false);
-          wheelDone();
-          return;
-        }
+        // 減少動態效果的電腦也照樣慢慢縮放（使用者要看得到縮放）
         wheelLeft = Math.max(-WHEEL_MAX, Math.min(WHEEL_MAX, wheelLeft + step));
         if (!wheelFrame) {
           wheelLast = performance.now();
@@ -949,15 +945,10 @@ export class Radar {
     );
   }
 
-  /** 點兩下放大：範圍縮成一半（以正中間為準，跟捏合、滾輪一樣），0.5 秒慢慢拉近；減少動態效果時直接跳過去 */
+  /** 點兩下放大：範圍縮成一半（以正中間為準，跟捏合、滾輪一樣），0.5 秒慢慢拉近（減少動態效果的也一樣） */
   private zoomInStep(onZoom: (factor: number, done: boolean) => void): void {
     if (this.tapZoom) return;
     const total = Math.log(0.5);
-    if (this.calm?.matches) {
-      onZoom(0.5, false);
-      onZoom(1, true);
-      return;
-    }
     const t0 = performance.now();
     let done = 0;
     const step = (now: number): void => {

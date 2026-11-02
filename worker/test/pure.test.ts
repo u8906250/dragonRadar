@@ -962,3 +962,19 @@ describe('etagMatches', () => {
     expect(etagMatches('W/"abd"', 'W/"abc"')).toBe(false);
   });
 });
+
+describe('postTags（回報抽的關鍵字）', () => {
+  it('takes common words in the post, AI tags and hashtags, merges spellings and drops junk', async () => {
+    const { postTags, cleanTag, normalizeActivities } = await import('../src/extract');
+    // 常見詞（內文、hashtag 裡寫到的）在前，漂帶算飄帶；再來 AI 的（數字不要）、hashtag；最多 8 個
+    expect(postTags(['彩虹', '#徽章', '台北市', '2026'], '今天下午在凱道發洋流漂帶，還有徽章 #同志遊行 #台北大洋流')).toEqual(['洋流', '徽章', '遊行', '同志', '飄帶', '彩虹', '台北市', '同志遊行']);
+    expect(postTags(null, '沒有關鍵字的貼文')).toEqual([]);
+    expect(cleanTag('#漂帶')).toBe('飄帶');
+    expect(cleanTag('a')).toBeNull();
+    expect(cleanTag('12345')).toBeNull();
+    expect(cleanTag('這是一個很長很長的句子不是關鍵字')).toBeNull();
+    const ex = normalizeActivities({ is_event: true, reason: null, tags: ['飄帶', '#彩虹', ''], events: [] });
+    expect(ex?.tags).toEqual(['飄帶', '彩虹']);
+    expect(normalizeActivities({ is_event: false, reason: '心得', tags: ['飄帶'], events: [] })?.tags).toBeNull();
+  });
+});

@@ -6,7 +6,7 @@
  */
 import type { Env } from './env';
 import { DEFAULT_MODULE, isModule, MODULE_IDS, moduleOf, type ModuleId } from './modules';
-import { ADDRESS_BUDGET_MS, atLocalTimes, commitPlan, detectEnded, getEvent, getPost, locateTypedPlace, MAX_FUTURE_SEC, planManual, planPost, processPost, storePost, topicOf, type EventOut, type FailedItem, type ManualActivity, type PlanItem, type PostRow } from './events';
+import { ADDRESS_BUDGET_MS, atLocalTimes, commitPlan, detectEnded, getEvent, getPost, locateTypedPlace, MAX_FUTURE_SEC, planManual, planPost, processPost, storePost, tagsOf, topicOf, type EventOut, type FailedItem, type ManualActivity, type PlanItem, type PostRow } from './events';
 import { cleanTopic, type ActivityPart, type EventKind } from './extract';
 import { fetchThreadsPost, resolveThreadsLink, shortcodeToUnix, withLocationTag } from './sources/link';
 import { sha1Hex } from './sources/text';
@@ -293,7 +293,7 @@ export function notListedWhy(items: PlanItem[]): NotListedWhy | undefined {
  * 判讀規則的版本：規則改了（例如結束時間改成不用寫）就加一。
  * 還沒確認的回報再貼一次時，存的是舊版的判讀結果就重新判讀，不沿用（舊的原因可能已經不成立，畫面也講不出原因）
  */
-export const PLAN_VERSION = 9;
+export const PLAN_VERSION = 10;
 
 /** 判讀好、還沒寫進雷達的資料，存在 posts.confirm_plan */
 interface StoredPlan {
@@ -670,7 +670,9 @@ export async function editLink(env: Env, body: { postId?: unknown; token?: unkno
   const stored = readPlan(post);
   // 車掃：路線名稱沿用判讀出來的
   const routeTitle = stored?.items.find((it) => it.route)?.route?.title ?? null;
-  const items = await planManual(env, acts, now, post.text, routeTitle);
+  // 關鍵字沿用判讀出來的
+  const tags = stored?.items.map((it) => tagsOf(it.plan?.extra)).find((t) => t.length > 0) ?? [];
+  const items = await planManual(env, acts, now, post.text, routeTitle, tags);
   const tzs = items.map((it) => it.plan?.tz ?? it.fail?.tz ?? null);
   const note = editSummary(stored ? editItemsOf(stored.items) : [], acts, items.map((it) => !!it.plan), items.some((it) => it.route) ? '站' : '場', tzs) ?? post.supplement ?? null;
   const plan: StoredPlan = { items, early: null };
