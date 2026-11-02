@@ -109,3 +109,27 @@ export const PATH_WIDTHS: number[][] = [
   [2,2,2],
   [2,2,2,2,2,2,2,2]
 ];
+
+/** 第 i 條步道（公尺座標的點）照 PATH_STEP 公尺加密（跟量寬的時候一樣），每一點帶著寬度（數目對不上就都用 fallback） */
+export function withWidths(i: number, pts: Array<[number, number]>, fallback: number): Array<[number, number, number]> {
+  const out: Array<[number, number]> = [];
+  for (let k = 1; k < pts.length; k++) {
+    const [a, b] = [pts[k - 1], pts[k]];
+    const n = Math.max(1, Math.floor(Math.hypot(b[0] - a[0], b[1] - a[1]) / PATH_STEP));
+    for (let j = 0; j < n; j++) out.push([a[0] + ((b[0] - a[0]) * j) / n, a[1] + ((b[1] - a[1]) * j) / n]);
+  }
+  out.push(pts[pts.length - 1]);
+  const ws = PATH_WIDTHS[i];
+  return out.map(([x, y], j) => [x, y, ws && ws.length === out.length ? ws[j] : fallback]);
+}
+
+/** 一條帶寬度的線變成一圈：左邊往前、右邊往回（每一點照前後兩段的方向平均，往兩邊各一半的寬） */
+export function widthRing(l: Array<[number, number, number]>): Array<[number, number]> {
+  const side = l.map((p, i) => {
+    const [a, b] = [l[Math.max(0, i - 1)], l[Math.min(l.length - 1, i + 1)]];
+    const [dx, dy] = [b[0] - a[0], b[1] - a[1]];
+    const len = Math.hypot(dx, dy) || 1;
+    return [(-dy / len) * (p[2] / 2), (dx / len) * (p[2] / 2)];
+  });
+  return [...l.map((p, i): [number, number] => [p[0] + side[i][0], p[1] + side[i][1]]), ...l.map((p, i): [number, number] => [p[0] - side[i][0], p[1] - side[i][1]]).reverse()];
+}

@@ -7,6 +7,7 @@
 import type { LatLng } from './geo';
 import { RADAR_GEOM, RADAR_VIEW, viewReach, viewRect, type TripAt } from './radar';
 import { ZHONGSHAN_PARK } from './zhongshan';
+import { widthRing, withWidths } from './zhongshan-widths';
 import { MALTESE, dogHeight } from './dog';
 import { animateDogs, Dog, dogById, dogHeading, dogMarkup, NATURE, wakeDogs, type DogNature, type DogYard } from './dogs';
 export { onDogMove } from './dogs';
@@ -77,6 +78,8 @@ export interface ParkGeom {
   water: Pt[][];
   green: Pt[][];
   paths: Pt[][];
+  /** 步道的路面（一圈圈，照配置圖量的寬；經過水面的地方斷開） */
+  pathAreas: Pt[][];
   /** 翠湖的曲橋（步道那樣的線，bridgesSvg 畫成有欄杆的橋面） */
   bridges: Pt[][];
   /** 映池旁邊那一圈可以坐的石頭邊（池子外框接回起點的線） */
@@ -150,6 +153,7 @@ export function parkGeom(w: ParkWorld): ParkGeom {
     water: ZHONGSHAN_PARK.water.flat().map(loop),
     green: ZHONGSHAN_PARK.green.map(loop),
     paths: ZHONGSHAN_PARK.paths.map((l) => dense(l.map(w.to))),
+    pathAreas: pathAreaRings().map(area),
     bridges: ZHONGSHAN_PARK.bridges.map((l) => dense(l.map(w.to))),
     rim: loop(ZHONGSHAN_PARK.water[0][0]),
     statue: w.to(ZHONGSHAN_PARK.statue),
@@ -293,6 +297,32 @@ const WALK_MY = 110_574;
 const WALK_MX = 111_320 * Math.cos(WALK_M0[0] * RAD);
 const toM = ([a, b]: Pt): Pt => [(b - WALK_M0[1]) * WALK_MX, (a - WALK_M0[0]) * WALK_MY];
 const fromM = ([x, y]: Pt): Pt => [WALK_M0[0] + y / WALK_MY, WALK_M0[1] + x / WALK_MX];
+/**
+ * 步道的路面（台北的經緯度，一圈圈）：每一條照 PATH_STEP 公尺加密、帶著配置圖量的寬（zhongshan-widths.ts，量不到 2 公尺），
+ * 經過水面（中間那一點在水裡、不在小島上）的地方斷開（橋另外畫），每一段變成一圈（左邊往前、右邊往回）
+ */
+let pathRings: Pt[][] | null = null;
+function pathAreaRings(): Pt[][] {
+  if (pathRings) return pathRings;
+  const wet = ([a, b]: Pt): boolean => ZHONGSHAN_PARK.water.some(([outer, ...islands]) => inRing([a, b], outer) && !islands.some((r) => inRing([a, b], r)));
+  const out: Pt[][] = [];
+  ZHONGSHAN_PARK.paths.forEach((l, i) => {
+    const pts = withWidths(i, l.map(toM), 2);
+    let cur: Array<[number, number, number]> = [];
+    const flush = (): void => {
+      if (cur.length > 1) out.push(widthRing(cur).map(fromM));
+      cur = [];
+    };
+    pts.forEach((p, k) => {
+      if (k > 0 && wet(fromM([(pts[k - 1][0] + p[0]) / 2, (pts[k - 1][1] + p[1]) / 2]))) {
+        flush();
+        cur = [p];
+      } else cur.push(p);
+    });
+    flush();
+  });
+  return (pathRings = out);
+}
 type Box = [number, number, number, number];
 const boxOf = (r: Pt[]): Box => [Math.min(...r.map((p) => p[0])), Math.min(...r.map((p) => p[1])), Math.max(...r.map((p) => p[0])), Math.max(...r.map((p) => p[1]))];
 const inBox = ([x, y]: Pt, b: Box, pad = 0): boolean => x >= b[0] - pad && x <= b[2] + pad && y >= b[1] - pad && y <= b[3] + pad;
@@ -901,6 +931,8 @@ function rocketPart(g: ParkGeom, c: ParkCanvas, phase: RocketPhase, e: number): 
  * 中山公園：範圍淡淡填色、虛線的邊；拉近到 1.8 km 內再畫草地花圃（淡淡的草綠色、點線的邊）、水面（淡淡的水藍色、虛線的邊）、
  * 步道（跟街道的細線一樣）、建築（實線）、孫中山銅像（點了叫出火箭）、火箭、汪星的狗，拉近到幾百公尺內草地長出一叢叢的草、水面有一道道的水波
  */
+/** 步道畫成路面（照寬度）從畫面上幾像素寬開始（2 公尺寬的路） */
+const PATH_AREA_PX = 1.5;
 export function parkSvg(g: ParkGeom, c: ParkCanvas): string {
   if (c.ppm < FILL_PPM) return '';
   let out = '';
@@ -922,7 +954,11 @@ export function parkSvg(g: ParkGeom, c: ParkCanvas): string {
   out += `<path class="park-water" d="${c.lines(g.water)}" />`;
   // 映池的邊是一圈石頭（蓋在水的虛線邊上）
   out += rimSvg(g, c);
-  out += `<path class="park-path street-minor" d="${c.lines(g.paths)}" />`;
+  // 步道：拉近（2 公尺寬的路畫面上有 PATH_AREA_PX 以上）照配置圖的寬畫成路面（裁在公園外框裡面），拉遠是細線
+  if (c.ppm * 2 >= PATH_AREA_PX) {
+    const d = c.area(g.pathAreas);
+    if (d) out += `<clipPath id="park-paths-${g.name}"><path d="${c.area([g.outline])}" /></clipPath><path class="park-path-area" clip-path="url(#park-paths-${g.name})" d="${d}" />`;
+  } else out += `<path class="park-path street-minor" d="${c.lines(g.paths)}" />`;
   // 旗台：映池前面的旗桿底下那一塊石頭鋪的平台（從上面看），旗桿站在中間
   const flagBase = c.area([g.flagBase]);
   if (flagBase) out += `<path class="park-flag-base" d="${flagBase}" />`;

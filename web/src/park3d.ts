@@ -17,7 +17,7 @@ import { dogParts } from './dog';
 import { dogPose, dogTurned } from './dogs';
 import { PARK_DOGS, personOk } from './park';
 import { ZHONGSHAN_PARK as Z } from './zhongshan';
-import { PATH_STEP, PATH_WIDTHS } from './zhongshan-widths';
+import { withWidths as alongWidths } from './zhongshan-widths';
 
 type Pt = [number, number];
 /** 線上的一點和那裡的寬（公尺） */
@@ -499,18 +499,7 @@ export function openPark3D(o: Park3DOptions): () => void {
     return out;
   };
   /** 一條步道照 PATH_STEP 公尺一點加密，每一點帶著配置圖量的寬（zhongshan-widths.ts；對不上就用 PATH_W） */
-  const withWidths = (i: number): WP[] => {
-    const l = Z.paths[i].map(en);
-    const out: Pt[] = [];
-    for (let k = 1; k < l.length; k++) {
-      const [a, b] = [l[k - 1], l[k]];
-      const n = Math.max(1, Math.floor(Math.hypot(b[0] - a[0], b[1] - a[1]) / PATH_STEP));
-      for (let j = 0; j < n; j++) out.push([a[0] + ((b[0] - a[0]) * j) / n, a[1] + ((b[1] - a[1]) * j) / n]);
-    }
-    out.push(l[l.length - 1]);
-    const ws = PATH_WIDTHS[i];
-    return out.map(([x, y], j) => [x, y, ws && ws.length === out.length ? ws[j] : PATH_W]);
-  };
+  const withWidths = (i: number): WP[] => alongWidths(i, Z.paths[i].map(en), PATH_W);
   const flat = (ls: WP[][]): Pt[][] => ls.map((l) => l.map(([x, y]): Pt => [x, y]));
   const pathLines = Z.paths.flatMap((_, i) => (i === Z.sakuraLane ? [] : clipIn(withWidths(i)).flatMap(splitWet)));
   const sakura = flat(clipIn(Z.paths[Z.sakuraLane].map(([a, b]): WP => [...en([a, b]), SAKURA_W])).flatMap(splitWet));

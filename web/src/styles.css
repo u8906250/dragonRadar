@@ -633,6 +633,8 @@ path.map-water-glint { animation: water-flow-map 1.1s linear infinite; }
 .radar .park-water { fill: none; stroke: var(--water); stroke-width: 1; stroke-opacity: 0.7; stroke-dasharray: 3 2; pointer-events: none; }
 .radar .park-green { fill: none; stroke: var(--grass); stroke-width: 0.6; stroke-opacity: 0.55; stroke-dasharray: 1 2; pointer-events: none; }
 .radar .park-path { fill: none; stroke: var(--radar-grid); stroke-linejoin: round; stroke-linecap: round; pointer-events: none; }
+/* 步道的路面（拉近才畫，照配置圖量的寬；一條 path，重疊的地方不會比較深） */
+.radar .park-path-area { fill: var(--radar-grid); fill-opacity: 0.15; stroke: none; pointer-events: none; }
 /* 草地花圃淡淡的草綠色；拉近長出一叢叢的草（線的粗細跟著放大，寫在 stroke-width） */
 .radar .park-lawn { fill: var(--grass); fill-opacity: 0.2; stroke: none; pointer-events: none; }
 .radar .park-grass { fill: none; stroke: var(--grass); stroke-opacity: 0.55; stroke-linecap: round; pointer-events: none; }
