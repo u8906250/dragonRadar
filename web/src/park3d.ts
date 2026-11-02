@@ -1661,7 +1661,7 @@ export function openPark3D(o: Park3DOptions): () => void {
     const left = new THREE.Vector3(-Math.cos(B), 0, -Math.sin(B));
     dogRoot.matrix.makeBasis(fwd, left, new THREE.Vector3(0, 1, 0)).setPosition(p[0], floorAt(p), -p[1]);
     dogRoot.matrixWorldNeedsUpdate = true;
-    // 點了轉頭看你：頭轉向你站的地方（最多 80 度）、抬頭看你（照你們之間多遠、你的眼睛多高，抬一半：4～16 度，坐著再少一半）；
+    // 點了轉頭看你：頭轉向你站的地方（最多 80 度）、抬頭看你（照你們之間多遠、你的眼睛多高，抬六成五：6～22 度，坐著再少三成五）；
     // 轉過來面向你坐下的時候，轉好了也抬頭看你
     let pose = dogPose(s, d.e, turn);
     const g = Math.max(xiaofa.glancing(now), s.pet ? dogTurned(s, d.e) : 0);
@@ -1669,8 +1669,8 @@ export function openPark3D(o: Park3DOptions): () => void {
       const toYou = (Math.atan2(pos[0] - p[0], pos[1] - p[1]) * 180) / Math.PI;
       const look = Math.max(-80, Math.min(80, -wrap(toYou - headDeg)));
       const up = (Math.atan2(floorAt(pos) + EYE - (floorAt(p) + DOG_HEAD_Y), Math.hypot(pos[0] - p[0], pos[1] - p[1])) * 180) / Math.PI;
-      // 抬一半就有在看你的感覺（抬太多頭會仰到天上）；坐下時身體已經仰起來，頭再少抬一點
-      const lift = Math.max(4, Math.min(16, up * 0.5)) * (s.do === 'sit' ? 0.5 : 1);
+      // 抬六成五就有在看你的感覺（抬太多頭會仰到天上）；坐下時身體已經仰起來，頭再少抬一點
+      const lift = Math.max(6, Math.min(22, up * 0.65)) * (s.do === 'sit' ? 0.65 : 1);
       // 尾巴翹起來開心地搖
       pose = { ...pose, look: pose.look * (1 - g) + look * g, nod: pose.nod * (1 - g) - lift * g, blink: g > 0.9 ? 0 : pose.blink, wag: pose.wag * (1 - g) + happyWag(now) * g, tail: pose.tail * (1 - g) };
     }
