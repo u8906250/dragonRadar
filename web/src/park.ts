@@ -1003,7 +1003,9 @@ export function parkSvg(g: ParkGeom, c: ParkCanvas): string {
   const fill = c.area([g.outline]);
   if (fill) out += `<path class="park-area" d="${fill}" />`;
   out += `<path class="park-edge" d="${c.lines([g.outlineLine])}" />`;
-  if (c.ppm < DETAIL_PPM) return out;
+  // 小法發光（找不到牠的時候看得到）：光暈畫在最上面（樹、屋頂、銅像的上面），最後才加；看得到公園輪廓就有
+  const glows = g.name === 'woof' ? PARK_DOGS.map((dog) => dogGlow(g, c, dog)).join('') : '';
+  if (c.ppm < DETAIL_PPM) return out + glows;
   const texture = (cls: string, kind: 'grass' | 'ripple'): string => {
     const t = c.textures ? parkTexture(g, kind, c) : null;
     return t ? `<path class="${cls}" transform="scale(0.1)" stroke-width="${(t.w * 10).toFixed(1)}" d="${t.d}" />` : '';
@@ -1059,7 +1061,36 @@ export function parkSvg(g: ParkGeom, c: ParkCanvas): string {
         : `<g class="park-statue" data-at="${x} ${y}"><circle class="statue-hit" cx="${x}" cy="${(s[1] - h * 0.4).toFixed(1)}" r="${Math.max(STATUE_HIT, h * 0.6).toFixed(1)}" />` +
           `<g transform="translate(${x} ${y}) scale(${+c.ppm.toPrecision(4)})">${STATUE_SVG}</g></g>`;
   }
-  return out;
+  return out + glows;
+}
+
+/**
+ * 狗身上一閃一閃的光暈（使用者說找不到小法，先讓牠發光）：畫在樹、屋頂上面，不用等雷達掃、全螢幕也看得到；
+ * 跟著這一段從起點走到終點（跟遠遠的白點一樣用 CSS 的 dog-go 移過去），點不到（點狗照舊點牠本身）。
+ * 拉遠時光暈至少 GLOW_MIN 大，拉近時蓋住整隻狗
+ */
+const GLOW_MIN = 9;
+function dogGlow(g: ParkGeom, c: ParkCanvas, dog: Dog): string {
+  const now = performance.now();
+  const d = dog.now(now);
+  const s = d.seg;
+  // 拉遠到還沒畫狗的時候也要在這一段走完時重畫（光暈換到下一段）
+  wakeDogs(s.start + s.ms, now);
+  const [a, b] = [c.at(...g.to(s.from)), c.at(...g.to(s.to))];
+  if (!a || !b) return '';
+  const h = dogHeight(dog.look) * c.ppm;
+  const r = Math.max(GLOW_MIN, h * 1.2);
+  const [vx, vy] = [b[0] - a[0], b[1] - a[1]];
+  const u = Math.max(0, Math.min(1, ((c.rx - a[0]) * vx + (c.ry - a[1]) * vy) / (vx * vx + vy * vy || 1)));
+  if (Math.hypot(a[0] + vx * u - c.rx, a[1] + vy * u - c.ry) - r * 1.9 > viewReach() + 2) return '';
+  const f1 = (v: number): string => v.toFixed(1);
+  const moving = s.do === 'walk' || s.do === 'run';
+  const style = `--t:${-Math.round(d.e)}ms;--ms:${Math.round(s.ms)}ms${moving ? `;--dx:${f1(vx)}px;--dy:${f1(vy)}px` : ''}`;
+  const o = moving ? a : b;
+  // 整隻畫出來的時候光暈在身體中間（腳在 o，往上半個身高）
+  const y = o[1] - (c.ppm >= DOG_FULL ? h / 2 : 0);
+  const [x, yy] = [f1(o[0]), f1(y)];
+  return `<g class="dog-glow-g${moving ? ' moving' : ''}" style="${style}"><g class="dog-go"><circle class="dog-halo" cx="${x}" cy="${yy}" r="${f1(r * 1.9)}" /><circle class="dog-glow" cx="${x}" cy="${yy}" r="${f1(r)}" /></g></g>`;
 }
 
 /**

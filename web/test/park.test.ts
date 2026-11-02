@@ -318,6 +318,12 @@ describe('地球的雷達上的中山公園（跟汪星共用一份）', () => {
     expect(woofAt(0.3, tree)).toMatch(/<circle class="dog-dot sweep-lit" data-glint="strong"/);
     expect(woofAt(0.005, tree)).toContain('<g data-glint="strong" class="sweep-lit woof-dog full ');
     PARK_DOGS[0].seg = keep;
+    // 小法發光：光暈畫在樹、屋頂上面，拉遠到看得到公園輪廓就有；地球上沒有
+    expect(wide.indexOf('dog-glow')).toBeGreaterThan(wide.lastIndexOf('park-tree'));
+    expect(wide.indexOf('dog-glow')).toBeGreaterThan(wide.lastIndexOf('park-building'));
+    expect(woofAt(3, dog)).toContain('class="dog-glow"');
+    expect(at(0.005, dog)).not.toContain('dog-glow');
+    expect(woofAt(0.005, hall)).not.toContain('dog-glow');
   });
 
   it('小法 loves walking and sniffing more than a plain dog (sleep, drinking and running stay the same)', () => {
