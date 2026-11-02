@@ -529,6 +529,9 @@ function spinning(p: DogPose, [t0, ms]: [number, number], e: number, deg: number
   return { ...p, look, legs, bob };
 }
 
+/** 被點了開心地搖尾巴：快快地左右搖（約一秒三下、左右各 26 度）；t 是毫秒 */
+export const happyWag = (t: number): number => 26 * Math.sin((2 * Math.PI * t) / 320);
+
 /** 尾巴以外的動作 */
 function motion(s: DogSeg, e: number): DogPose {
   const ramp = (r: number, from = 0): number => smooth(Math.max(0, Math.min(1, (e - from) / r, (s.ms - e) / r)));
@@ -573,7 +576,8 @@ function motion(s: DogSeg, e: number): DogPose {
     }
     case 'sit':
       // 被點的：站好、轉好了才坐下
-      return { ...STILL, sit: ramp(550, s.pet ? Math.max(0, settled(s) - 100) : 0), wag: 12 * wave(650) };
+      // 被點的：開心地快快搖尾巴
+      return { ...STILL, sit: ramp(550, s.pet ? Math.max(0, settled(s) - 100) : 0), wag: s.pet ? happyWag(e) : 12 * wave(650) };
     case 'sleep': {
       const r = ramp(1500);
       const shut = smooth(Math.max(0, Math.min(1, (e - 1100) / 800, (s.ms - e - 300) / 500)));
@@ -665,7 +669,8 @@ function frame(dog: Dog, d: { seg: DogSeg; e: number }, p: DogPath, heading: num
   const h = dogHeight(dog.look) * p.k;
   let pose = dogPose(s, d.e, turn);
   const g = dog.glancing(now);
-  if (g > 0) pose = { ...pose, look: pose.look * (1 - g) + lookAtViewer(yaw) * g, nod: pose.nod * (1 - g) - 6 * g, blink: g > 0.9 ? 0 : pose.blink };
+  // 轉頭看你：頭轉過來、抬起來，尾巴翹起來開心地搖
+  if (g > 0) pose = { ...pose, look: pose.look * (1 - g) + lookAtViewer(yaw) * g, nod: pose.nod * (1 - g) - 6 * g, blink: g > 0.9 ? 0 : pose.blink, wag: pose.wag * (1 - g) + happyWag(now) * g, tail: pose.tail * (1 - g) };
   return { x, y, hit: [x, y - h * 0.5, Math.max(DOG_HIT, h * 0.7)], svg: dogSvg(dog.look, pose, yaw, p.k) };
 }
 
