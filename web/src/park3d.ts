@@ -84,8 +84,8 @@ const SAKURA_GRASS_M = 6;
  * 草（像雷達上一叢叢的草）：草地上每 GRASS_CELL 公尺一格，大多長一叢（2～4 根往上長、往兩邊散開一點的草葉，7～16 公分），
  * 只長在你附近 GRASS_NEAR 公尺內（遠的本來就小到看不到），每走 GRASS_CHUNK 公尺重排一次；路上不長
  */
-const GRASS_CELL = 0.3;
-const GRASS_NEAR = 18;
+const GRASS_CELL = 0.2;
+const GRASS_NEAR = 12;
 const GRASS_CHUNK = 5;
 const GRASS_MAX = 20000;
 /** 草地上那張一叢叢草的圖多大（公尺見方，重複鋪） */
@@ -397,9 +397,10 @@ export function openPark3D(o: Park3DOptions): () => void {
   scene.fog = new THREE.Fog(0xcfe0ea, 140, 700);
   const camera = new THREE.PerspectiveCamera(65, 1, 0.1, 1500);
   camera.rotation.order = 'YXZ';
-  scene.add(new THREE.HemisphereLight(0xe8f2ff, 0x8d8a6e, 1.6));
+  // 天空光、地面反光（帶一點草地的綠）亮一點：樹蔭下的草還是綠的
+  scene.add(new THREE.HemisphereLight(0xeef6ff, 0x7f9a58, 1.7));
   // 太陽從西南邊高高的地方照下來（台北的太陽在南邊；下午），影子往東北
-  const sun = new THREE.DirectionalLight(0xfff6e6, 1.8);
+  const sun = new THREE.DirectionalLight(0xfff6e6, 1.9);
   const SUN_DIR = new THREE.Vector3(-0.5, 1.1, 0.6).normalize();
   sun.castShadow = true;
   sun.shadow.mapSize.set(touch ? 1024 : 2048, touch ? 1024 : 2048);
@@ -407,6 +408,9 @@ export function openPark3D(o: Park3DOptions): () => void {
   Object.assign(sun.shadow.camera, { left: -SH, right: SH, top: SH, bottom: -SH, near: 1, far: 300 });
   sun.shadow.camera.updateProjectionMatrix();
   sun.shadow.bias = -0.0005;
+  // 影子淡一點、邊緣柔和（像真的樹蔭，不是一塊黑）
+  sun.shadow.intensity = 0.72;
+
   scene.add(sun, sun.target);
 
   const mat = (color: number | string, more: THREE.MeshLambertMaterialParameters = {}): THREE.MeshLambertMaterial => new THREE.MeshLambertMaterial({ color, ...more });
@@ -427,29 +431,41 @@ export function openPark3D(o: Park3DOptions): () => void {
   add(flatGeo([shapeOf(outline, waters.map((w) => w.outer))], 0), mat(0xe2dccf));
   // 草地：淡綠色上面一叢叢密密的草（畫在一張 GRASS_TILE 公尺見方、重複鋪的圖上，遠處也看得到草；近的還有立體的草）
   const grassTex = (() => {
+    // 滿滿的草：深淺不一的綠底，上面幾千根短短的草葉（亮的、暗的、偏黃的），一塊塊淡淡的明暗（不會一整片一樣）
+    const S = 512;
     const cv = document.createElement('canvas');
-    [cv.width, cv.height] = [256, 256];
+    [cv.width, cv.height] = [S, S];
     const g = cv.getContext('2d')!;
-    g.fillStyle = '#ffffff';
-    g.fillRect(0, 0, 256, 256);
+    g.fillStyle = '#5d9440';
+    g.fillRect(0, 0, S, S);
+    const wrapDraw = (f: (dx: number, dy: number) => void): void => {
+      for (const dx of [-S, 0, S]) for (const dy of [-S, 0, S]) f(dx, dy);
+    };
+    for (let k = 0; k < 60; k++) {
+      const [x, y, r] = [hash(k * 5 + 1) * S, hash(k * 5 + 2) * S, 30 + hash(k * 5 + 3) * 70];
+      g.fillStyle = hash(k * 5 + 4) < 0.5 ? 'rgba(130, 180, 80, 0.18)' : 'rgba(40, 90, 30, 0.16)';
+      wrapDraw((dx, dy) => {
+        g.beginPath();
+        g.arc(x + dx, y + dy, r, 0, Math.PI * 2);
+        g.fill();
+      });
+    }
     g.lineCap = 'round';
-    for (let k = 0; k < 520; k++) {
-      const [x, y] = [hash(k * 3 + 1) * 256, hash(k * 3 + 2) * 256];
-      const n = 2 + Math.floor(hash(k * 3 + 3) * 3);
-      g.strokeStyle = `rgba(${70 + Math.floor(hash(k + 900) * 40)}, ${110 + Math.floor(hash(k + 901) * 30)}, ${60 + Math.floor(hash(k + 902) * 20)}, 0.85)`;
-      g.lineWidth = 1.3;
-      for (let b = 0; b < n; b++) {
-        const h = hash(k * 7 + b);
-        const len = 5 + 6 * h;
-        const a = (b - (n - 1) / 2) * 0.35 + (h - 0.5) * 0.4;
-        // 畫的時候四周都畫一次，接縫才看不出來
-        for (const [dx, dy] of [[0, 0], [256, 0], [-256, 0], [0, 256], [0, -256]]) {
-          g.beginPath();
-          g.moveTo(x + dx + (b - (n - 1) / 2) * 1.2, y + dy);
-          g.quadraticCurveTo(x + dx + Math.sin(a) * len * 0.25, y + dy - Math.cos(a) * len * 0.6, x + dx + Math.sin(a) * len * 1.2, y + dy - Math.cos(a) * len);
-          g.stroke();
-        }
-      }
+    for (let k = 0; k < 9000; k++) {
+      const [x, y] = [hash(k * 3 + 11) * S, hash(k * 3 + 12) * S];
+      const h = hash(k * 3 + 13);
+      const len = 5 + 9 * hash(k + 7000);
+      const a = (h - 0.5) * 0.9;
+      const tone = hash(k + 9000);
+      g.strokeStyle = tone < 0.35 ? `rgba(${120 + Math.floor(h * 40)}, ${175 + Math.floor(h * 30)}, ${70 + Math.floor(h * 20)}, 0.9)` : tone < 0.75 ? `rgba(${70 + Math.floor(h * 30)}, ${130 + Math.floor(h * 30)}, ${45 + Math.floor(h * 20)}, 0.9)` : `rgba(${40 + Math.floor(h * 20)}, ${85 + Math.floor(h * 25)}, ${30 + Math.floor(h * 15)}, 0.9)`;
+      g.lineWidth = 1 + hash(k + 8000) * 1.2;
+      wrapDraw((dx, dy) => {
+        if (x + dx < -20 || x + dx > S + 20 || y + dy < -20 || y + dy > S + 20) return;
+        g.beginPath();
+        g.moveTo(x + dx, y + dy);
+        g.quadraticCurveTo(x + dx + Math.sin(a) * len * 0.3, y + dy - len * 0.6, x + dx + Math.sin(a) * len, y + dy - Math.cos(a) * len);
+        g.stroke();
+      });
     }
     const t = new THREE.CanvasTexture(cv);
     t.wrapS = t.wrapT = THREE.RepeatWrapping;
@@ -458,7 +474,7 @@ export function openPark3D(o: Park3DOptions): () => void {
     t.anisotropy = renderer.capabilities.getMaxAnisotropy();
     return t;
   })();
-  const grass = mat(0x93b973, { map: grassTex });
+  const grass = mat(0xffffff, { map: grassTex });
   add(flatGeo(Z.green.map((r) => shapeOf(ringEN(r))), 0.02), grass);
   const inWater = (p: Pt): boolean => waters.some((w) => inside(p, w.outer) && !w.islands.some((i) => inside(p, i)));
   // 步道：經過水面的那幾段不畫（橋另外蓋）
@@ -573,7 +589,7 @@ export function openPark3D(o: Park3DOptions): () => void {
     // 草的圖照公園的座標鋪（跟草地一樣）
     g.setAttribute('uv', new THREE.Float32BufferAttribute(pos.flatMap((v, k) => (k % 3 === 0 ? [v] : k % 3 === 2 ? [-v] : [])), 2));
     g.computeVertexNormals();
-    add(g, new THREE.MeshLambertMaterial({ color: 0x93b973, map: grassTex, side: THREE.DoubleSide }));
+    add(g, new THREE.MeshLambertMaterial({ color: 0xffffff, map: grassTex, side: THREE.DoubleSide }));
   }
   add(varStripGeo(pathLines, 0.035), mat(0xd8cdb8));
   // 櫻花步道：深灰色、比較寬，上面兩條淺色的線（中線往兩邊平移）
@@ -846,6 +862,24 @@ export function openPark3D(o: Park3DOptions): () => void {
   const crownGeo = new THREE.IcosahedronGeometry(1, 1);
   const trunks = new THREE.InstancedMesh(trunkGeo, mat(0x6e5640), trees.length);
   const crowns = new THREE.InstancedMesh(crownGeo, mat(0xffffff, { flatShading: true }), trees.length);
+  // 樹影有葉縫透光：樹冠算影子時用一張有很多小洞的圖（白的擋光、黑的透光）
+  {
+    const S = 128;
+    const cv = document.createElement('canvas');
+    [cv.width, cv.height] = [S, S];
+    const g = cv.getContext('2d')!;
+    g.fillStyle = '#ffffff';
+    g.fillRect(0, 0, S, S);
+    g.fillStyle = '#000000';
+    for (let k = 0; k < 70; k++) {
+      g.beginPath();
+      g.arc(hash(k * 3 + 501) * S, hash(k * 3 + 502) * S, 2 + hash(k * 3 + 503) * 5, 0, Math.PI * 2);
+      g.fill();
+    }
+    const holes = new THREE.CanvasTexture(cv);
+    holes.wrapS = holes.wrapT = THREE.RepeatWrapping;
+    crowns.customDepthMaterial = new THREE.MeshDepthMaterial({ depthPacking: THREE.RGBADepthPacking, alphaMap: holes, alphaTest: 0.5 });
+  }
   const m4 = new THREE.Matrix4();
   const q4 = new THREE.Quaternion();
   const col = new THREE.Color();
@@ -870,36 +904,50 @@ export function openPark3D(o: Park3DOptions): () => void {
   }
   // ---- 一叢叢的草（只長在你附近，走到別的地方重排）
   const tuftMesh = (() => {
-    // 三種：2、3、4 根草葉；每根是一片彎彎的、越往上越細的葉子（高 1，照每一叢的大小放大），轉不同的方向（哪邊看都看得到）
-    const variants = [2, 3, 4].map((n) => {
+    // 一小片一小片的草叢：兩片交叉的板子（寬 1、高 0.5，照每一叢的大小放大），貼著一張透明底、幾十根草葉的圖（三種），
+    // 法線朝上（跟地面一樣受光，不會一片亮一片暗）
+    const cardTex = (seed: number): THREE.CanvasTexture => {
+      const [W, H] = [256, 128];
+      const cv = document.createElement('canvas');
+      [cv.width, cv.height] = [W, H];
+      const g = cv.getContext('2d')!;
+      g.lineCap = 'round';
+      for (let k = 0; k < 70; k++) {
+        const r = (n: number): number => hash(seed * 1000 + k * 7 + n);
+        const x = 10 + r(1) * (W - 20);
+        const len = H * (0.45 + 0.5 * r(2));
+        const lean = (r(3) - 0.5) * 0.8;
+        const tone = r(4);
+        g.strokeStyle = tone < 0.3 ? '#8cbf55' : tone < 0.7 ? '#5f9a3c' : '#3f7a2a';
+        g.lineWidth = 2.5 + r(5) * 2.5;
+        g.beginPath();
+        g.moveTo(x, H);
+        g.quadraticCurveTo(x + Math.sin(lean) * len * 0.3, H - len * 0.6, x + Math.sin(lean) * len, H - Math.cos(lean) * len);
+        g.stroke();
+      }
+      const t = new THREE.CanvasTexture(cv);
+      t.colorSpace = THREE.SRGBColorSpace;
+      return t;
+    };
+    const geo = (() => {
       const pos: number[] = [];
-      for (let b = 0; b < n; b++) {
-        const lean = (b - (n - 1) / 2) * 0.35 + (hash(n * 7 + b) - 0.5) * 0.4;
-        const face = (b / n) * Math.PI + hash(n * 3 + b) * 0.6;
-        const [cf, sf] = [Math.cos(face), Math.sin(face)];
-        const base = (b - (n - 1) / 2) * 0.12;
-        // 從底到尖 4 點：往旁邊彎（二次曲線），寬 0.09 → 0
-        const pt = (t: number): [number, number, number] => {
-          const side = base + Math.sin(lean) * (0.25 * t + 0.95 * t * t);
-          return [side * cf, Math.cos(lean) * t, side * sf];
-        };
-        const ts = [0, 0.4, 0.75, 1];
-        for (let k = 1; k < ts.length; k++) {
-          const [a, c] = [pt(ts[k - 1]), pt(ts[k])];
-          const [wa, wc] = [0.045 * (1 - ts[k - 1]), 0.045 * (1 - ts[k])];
-          const off = (p: [number, number, number], w: number): number[] => [p[0] - sf * w, p[1], p[2] + cf * w];
-          const offm = (p: [number, number, number], w: number): number[] => [p[0] + sf * w, p[1], p[2] - cf * w];
-          pos.push(...off(a, wa), ...offm(a, wa), ...offm(c, wc), ...off(a, wa), ...offm(c, wc), ...off(c, wc));
+      const uv: number[] = [];
+      for (const ang of [0, Math.PI / 2]) {
+        const [c, sn] = [Math.cos(ang) * 0.5, Math.sin(ang) * 0.5];
+        const q = [[-c, 0, -sn, 0, 0], [c, 0, sn, 1, 0], [c, 0.5, sn, 1, 1], [-c, 0.5, -sn, 0, 1]];
+        for (const k of [0, 1, 2, 0, 2, 3]) {
+          pos.push(q[k][0], q[k][1], q[k][2]);
+          uv.push(q[k][3], q[k][4]);
         }
       }
       const g = new THREE.BufferGeometry();
       g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
-      g.computeVertexNormals();
+      g.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2));
+      g.setAttribute('normal', new THREE.Float32BufferAttribute(pos.map((_, i) => (i % 3 === 1 ? 1 : 0)), 3));
       return g;
-    });
-    const m = mat(0x4a8a32, { side: THREE.DoubleSide });
-    return variants.map((g) => {
-      const im = new THREE.InstancedMesh(g, m, GRASS_MAX);
+    })();
+    return [1, 2, 3].map((seed) => {
+      const im = new THREE.InstancedMesh(geo, new THREE.MeshLambertMaterial({ map: cardTex(seed), alphaTest: 0.5, side: THREE.DoubleSide }), GRASS_MAX);
       im.count = 0;
       im.receiveShadow = true;
       im.frustumCulled = false;
@@ -954,14 +1002,15 @@ export function openPark3D(o: Park3DOptions): () => void {
     const [j0, j1] = [Math.floor((pos[1] - GRASS_NEAR) / GRASS_CELL), Math.floor((pos[1] + GRASS_NEAR) / GRASS_CELL)];
     for (let i = i0; i <= i1; i++)
       for (let j = j0; j <= j1; j++) {
-        if (cellRnd(i, j, 0) < 0.15) continue;
+        if (cellRnd(i, j, 0) < 0.1) continue;
         const p: Pt = [(i + cellRnd(i, j, 1)) * GRASS_CELL, (j + cellRnd(i, j, 2)) * GRASS_CELL];
         if (Math.hypot(p[0] - pos[0], p[1] - pos[1]) > GRASS_NEAR || !onLawn(p) || onPath(p)) continue;
         const v = Math.floor(cellRnd(i, j, 3) * 3);
         if (counts[v] >= GRASS_MAX) continue;
-        const size = 0.07 + 0.09 * cellRnd(i, j, 4);
+        // 草叢 0.28～0.42 公尺寬、高一半（14～21 公分）
+        const size = 0.28 + 0.14 * cellRnd(i, j, 4);
         q.setFromAxisAngle(up, cellRnd(i, j, 5) * Math.PI * 2);
-        m.compose(new THREE.Vector3(p[0], 0.02, -p[1]), q, new THREE.Vector3(size, size, size));
+        m.compose(new THREE.Vector3(p[0], 0.02, -p[1]), q, new THREE.Vector3(size, size * (0.8 + 0.4 * cellRnd(i, j, 6)), size));
         tuftMesh[v].setMatrixAt(counts[v]++, m);
       }
     tuftMesh.forEach((im, v) => {
