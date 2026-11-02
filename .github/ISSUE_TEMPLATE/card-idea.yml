@@ -1,0 +1,41 @@
+name: 卡片提案（卡冊）
+description: 想讓洋流雷達的卡冊多一張卡？寫下你的想法，一段 prompt 或一份企劃都可以，審核過會放上去
+title: "卡片提案："
+labels: ["卡片提案"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        謝謝你想幫卡冊加一張卡！
+        可以只寫一段 prompt（例如「在翠湖的橋上找到一隻戴帽子的柴犬」），也可以寫一份完整的企劃。審核過會放上卡冊。
+  - type: input
+    id: name
+    attributes:
+      label: 卡片名稱
+      placeholder: 例如：翠湖的柴柴
+    validations:
+      required: true
+  - type: textarea
+    id: idea
+    attributes:
+      label: 想法（prompt 或企劃）
+      description: 卡片上是誰、是什麼、在哪裡，想到多少寫多少
+    validations:
+      required: true
+  - type: textarea
+    id: find
+    attributes:
+      label: 怎麼拿到這張卡（選填）
+      placeholder: 例如：晚上在映池旁邊點到牠
+  - type: textarea
+    id: image
+    attributes:
+      label: 圖片（選填）
+      description: 可以直接把圖片拖進來。請用自己拍的、自己畫的，或有授權的圖片
+  - type: checkboxes
+    id: agree
+    attributes:
+      label: 確認
+      options:
+        - label: 我提供的文字、圖片可以用在洋流雷達的卡冊；圖片是我自己的，或我有權使用
+          required: true
