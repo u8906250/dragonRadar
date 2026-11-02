@@ -77,13 +77,15 @@ const SAKURA_LINE_W = 0.15;
 /** 櫻花步道兩邊補草地：離路邊這麼多公尺內有草地，就補到草地為止 */
 const SAKURA_GRASS_M = 6;
 /**
- * 草（像雷達上一叢叢的草）：草地上每 GRASS_CELL 公尺一格，大多長一叢（2～4 根往上長、往兩邊散開一點的草葉，5～12 公分），
+ * 草（像雷達上一叢叢的草）：草地上每 GRASS_CELL 公尺一格，大多長一叢（2～4 根往上長、往兩邊散開一點的草葉，7～16 公分），
  * 只長在你附近 GRASS_NEAR 公尺內（遠的本來就小到看不到），每走 GRASS_CHUNK 公尺重排一次；路上不長
  */
-const GRASS_CELL = 0.55;
-const GRASS_NEAR = 22;
-const GRASS_CHUNK = 6;
-const GRASS_MAX = 9000;
+const GRASS_CELL = 0.3;
+const GRASS_NEAR = 18;
+const GRASS_CHUNK = 5;
+const GRASS_MAX = 20000;
+/** 草地上那張一叢叢草的圖多大（公尺見方，重複鋪） */
+const GRASS_TILE = 2;
 /** 樹多高（估的：照樹冠大小，最高 20 公尺）、樹幹多粗 */
 const treeH = (r: number): number => Math.min(20, 2.5 + 1.9 * r);
 const trunkR = (r: number): number => Math.max(0.1, Math.min(0.4, r * 0.06));
@@ -386,7 +388,40 @@ export function openPark3D(o: Park3DOptions): () => void {
   add(flatGeo([shapeOf(far, [outline])], -0.01), mat(0xc4c0b6));
   const waters = Z.water.map(([outer, ...islands]) => ({ outer: ringEN(outer), islands: islands.map(ringEN) }));
   add(flatGeo([shapeOf(outline, waters.map((w) => w.outer))], 0), mat(0xe2dccf));
-  const grass = mat(0x8fb56f);
+  // 草地：淡綠色上面一叢叢密密的草（畫在一張 GRASS_TILE 公尺見方、重複鋪的圖上，遠處也看得到草；近的還有立體的草）
+  const grassTex = (() => {
+    const cv = document.createElement('canvas');
+    [cv.width, cv.height] = [256, 256];
+    const g = cv.getContext('2d')!;
+    g.fillStyle = '#ffffff';
+    g.fillRect(0, 0, 256, 256);
+    g.lineCap = 'round';
+    for (let k = 0; k < 520; k++) {
+      const [x, y] = [hash(k * 3 + 1) * 256, hash(k * 3 + 2) * 256];
+      const n = 2 + Math.floor(hash(k * 3 + 3) * 3);
+      g.strokeStyle = `rgba(${70 + Math.floor(hash(k + 900) * 40)}, ${110 + Math.floor(hash(k + 901) * 30)}, ${60 + Math.floor(hash(k + 902) * 20)}, 0.85)`;
+      g.lineWidth = 1.3;
+      for (let b = 0; b < n; b++) {
+        const h = hash(k * 7 + b);
+        const len = 5 + 6 * h;
+        const a = (b - (n - 1) / 2) * 0.35 + (h - 0.5) * 0.4;
+        // 畫的時候四周都畫一次，接縫才看不出來
+        for (const [dx, dy] of [[0, 0], [256, 0], [-256, 0], [0, 256], [0, -256]]) {
+          g.beginPath();
+          g.moveTo(x + dx + (b - (n - 1) / 2) * 1.2, y + dy);
+          g.quadraticCurveTo(x + dx + Math.sin(a) * len * 0.25, y + dy - Math.cos(a) * len * 0.6, x + dx + Math.sin(a) * len * 1.2, y + dy - Math.cos(a) * len);
+          g.stroke();
+        }
+      }
+    }
+    const t = new THREE.CanvasTexture(cv);
+    t.wrapS = t.wrapT = THREE.RepeatWrapping;
+    t.repeat.set(1 / GRASS_TILE, 1 / GRASS_TILE);
+    t.colorSpace = THREE.SRGBColorSpace;
+    t.anisotropy = renderer.capabilities.getMaxAnisotropy();
+    return t;
+  })();
+  const grass = mat(0x93b973, { map: grassTex });
   add(flatGeo(Z.green.map((r) => shapeOf(ringEN(r))), 0.02), grass);
   const inWater = (p: Pt): boolean => waters.some((w) => inside(p, w.outer) && !w.islands.some((i) => inside(p, i)));
   // 步道：經過水面的那幾段不畫（橋另外蓋）
@@ -494,8 +529,10 @@ export function openPark3D(o: Park3DOptions): () => void {
     fillBeside(clipIn(Z.paths[Z.paths.length - 1].map(en)), PATH_W / 2);
     const g = new THREE.BufferGeometry();
     g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+    // 草的圖照公園的座標鋪（跟草地一樣）
+    g.setAttribute('uv', new THREE.Float32BufferAttribute(pos.flatMap((v, k) => (k % 3 === 0 ? [v] : k % 3 === 2 ? [-v] : [])), 2));
     g.computeVertexNormals();
-    add(g, new THREE.MeshLambertMaterial({ color: 0x8fb56f, side: THREE.DoubleSide }));
+    add(g, new THREE.MeshLambertMaterial({ color: 0x93b973, map: grassTex, side: THREE.DoubleSide }));
   }
   add(stripGeo(pathLines, PATH_W, 0.035), mat(0xd8cdb8));
   // 櫻花步道：深灰色、比較寬，上面兩條淺色的線（中線往兩邊平移）
@@ -881,7 +918,7 @@ export function openPark3D(o: Park3DOptions): () => void {
         if (Math.hypot(p[0] - pos[0], p[1] - pos[1]) > GRASS_NEAR || !onLawn(p) || onPath(p)) continue;
         const v = Math.floor(cellRnd(i, j, 3) * 3);
         if (counts[v] >= GRASS_MAX) continue;
-        const size = 0.05 + 0.07 * cellRnd(i, j, 4);
+        const size = 0.07 + 0.09 * cellRnd(i, j, 4);
         q.setFromAxisAngle(up, cellRnd(i, j, 5) * Math.PI * 2);
         m.compose(new THREE.Vector3(p[0], 0.02, -p[1]), q, new THREE.Vector3(size, size, size));
         tuftMesh[v].setMatrixAt(counts[v]++, m);
