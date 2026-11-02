@@ -290,9 +290,16 @@ function parts(look: DogLook, pose: DogPose): Part[] {
  * 3D 公園用：照姿勢擺好的每個部位（狗自己的座標：往前、往左、往上，公尺）：橢球的中心和三個半軸、顏色、毛多長、
  * 貼在表面上的往外多少（bias）、朝哪邊（facing，眼睛、鼻孔、淚痕、嘴唇）
  */
-export function dogParts(look: DogLook, pose: DogPose): Array<{ key: string; c: V; a: [V, V, V]; fill: string; hair: number; bias: number; facing?: V }> {
-  return parts(look, pose).map((p) => ({ key: p.key, c: p.e.c, a: p.e.a, fill: p.fill, hair: p.hair, bias: p.bias ?? 0, facing: p.facing }));
+export function dogParts(
+  look: DogLook,
+  pose: DogPose,
+): Array<{ key: string; c: V; a: [V, V, V]; fill: string; hair: number; bias: number; facing?: V; tones: [string, string, string]; droop: number; dense: number }> {
+  return parts(look, pose).map((p) => ({ key: p.key, c: p.e.c, a: p.e.a, fill: p.fill, hair: p.hair, bias: p.bias ?? 0, facing: p.facing, tones: p.tones, droop: p.droop ?? 1, dense: p.dense ?? 1 }));
 }
+/** 3D 公園用：每個部位的毛長在哪（跟雷達上的同一批：單位球上的方向、捲的方向、長短） */
+export const dogHairRoots = (key: string, n: number): Array<{ s: V; curl: number; len: number }> => hairsOf(key, n);
+/** 3D 公園用：橢球的表面積（照面積分配毛） */
+export const dogPartArea = (a: [V, V, V]): number => area({ c: [0, 0, 0], a });
 
 /** 固定的亂數（同一根毛每一格都在同一個地方） */
 function mulberry(seed: number): () => number {

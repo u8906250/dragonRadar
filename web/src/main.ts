@@ -1700,8 +1700,27 @@ function itemCard(it: Item, now: number): HTMLLIElement {
     <div class="ev-title"><span class="dot"></span><span class="kind-tag">${tagLabel(it)}</span>${esc(titleOf(it.ev))}${it.ev.item ? ` <span class="muted">· ${esc(it.ev.item)}</span>` : ''}${it.ev.kind === 'job' && jobRisky(it.ev) ? '<span class="risk-tag">⚠️ 注意</span>' : ''}${followed().length > 1 && it.ev.keyword ? `<span class="ev-kw">#${esc(it.ev.keyword)}</span>` : ''}</div>
     <div class="ev-meta">${esc(placeLine(it.ev))} · ${it.ev.approxArea ? '約 ' : ''}${formatKm(it.distanceKm)} ${compassLabel(it.bearing)}</div>
     <div class="ev-time">${it.spot ? `${esc(spotHours(it.spot.sessions))}・` : ''}${timeLineHtml(it, now)}</div>`;
-  li.addEventListener('click', () => select(it.ev.id));
+  li.addEventListener('click', () => {
+    select(it.ev.id);
+    if (selectedId === it.ev.id) goToItem(it);
+  });
   return li;
+}
+
+/**
+ * 點清單上的一則：雷達像「定位」一樣飛到那裡（中心慢慢移過去、範圍拉到外圈 LOCATE_KM 內，本來就比較近的不動；變成手動位置，
+ * 「回到我的位置」回來）；地圖移到看得到；太空裡看別的星球時只選取
+ */
+function goToItem(it: Item): void {
+  const { lat, lng } = it.ev;
+  if (lat == null || lng == null) return;
+  if (view === 'map') {
+    map.panIntoView({ lat, lng }, sheetCover());
+    return;
+  }
+  if (radar.spaceFocused) return;
+  if (radar.spaceMoved) radar.resetSpace();
+  zoomToKm(locateKm(earthMinKm()), { lat, lng, source: 'manual' });
 }
 
 function routeCard(r: RouteOut, phase: Phase, items: Item[], now: number): HTMLLIElement {
@@ -3404,8 +3423,9 @@ const LOCATE_KM = 2;
 const locateKm = (min: number): number => Math.max(min, Math.min(scaleKm, LOCATE_KM));
 
 /**
- * 「定位」按鈕：清掉手動位置，先馬上回到我的位置（上次知道的 GPS 位置，跟「回到我的位置」一樣不用等），範圍拉到外圈 LOCATE_KM（本來就比較近的不動）
- * （太空裡、轉過視角的先拉回地球）；再重新抓一次 GPS，抓到了移到新的位置（範圍不再動，等的時候自己縮放的照舊）
+ * 「定位」按鈕：清掉手動位置，先馬上飛回我的位置（上次知道的 GPS 位置，跟「回到我的位置」一樣不用等），範圍拉到外圈 LOCATE_KM（本來就比較近的不動）
+ * （太空裡、轉過視角的先拉回地球）；再重新抓一次 GPS，抓到了移到新的位置（範圍不再動，等的時候自己縮放的照舊）。
+ * 不知道上次的位置（電腦常常還沒有 GPS）：等抓到了才飛過去（移動、縮放一起，不會先縮放、再一下跳過去）
  */
 function locateMe(): void {
   if (!('geolocation' in navigator)) {
@@ -3418,11 +3438,14 @@ function locateMe(): void {
     gpsAccuracy = known.accuracy;
   }
   if (radar.spaceMoved) radar.resetSpace();
-  const km = locateKm(earthMinKm());
-  zoomToKm(km, known ? { lat: known.lat, lng: known.lng, source: 'gps' } : null);
-  if (view === 'map') {
-    map.setOrigin(origin, true, gpsAccuracy);
-    map.showRange(km, 0);
+  // 知道上次的位置：馬上飛過去（移動、縮放一起）；不知道（電腦常常還沒有 GPS）：等抓到再一起飛過去
+  if (known) {
+    const km = locateKm(earthMinKm());
+    zoomToKm(km, { lat: known.lat, lng: known.lng, source: 'gps' });
+    if (view === 'map') {
+      map.setOrigin(origin, true, gpsAccuracy);
+      map.showRange(km, 0);
+    }
   }
   locateBtn.classList.add('on');
   locateBtn.textContent = '定位中…';
@@ -3434,9 +3457,16 @@ function locateMe(): void {
       gpsAccuracy = pos.coords.accuracy;
       lastGps = { lat: pos.coords.latitude, lng: pos.coords.longitude, source: 'gps' };
       lastGpsAccuracy = pos.coords.accuracy;
-      // 還在飛過去：改飛到新的位置；不然直接移過去
+      // 還在飛過去：改飛到新的位置；一開始不知道位置：現在才飛過去（移動、縮放一起）；不然直接移過去（只差一點點）
       if (flight?.to) flight.to = lastGps;
-      else {
+      else if (!known) {
+        const km = locateKm(earthMinKm());
+        zoomToKm(km, lastGps);
+        if (view === 'map') {
+          map.setOrigin(origin, true, gpsAccuracy);
+          map.showRange(km, 0);
+        }
+      } else {
         setOrigin(lastGps);
         map.setOrigin(origin, true, gpsAccuracy);
       }
@@ -5049,7 +5079,7 @@ function wireControls(): void {
     const btn = $<HTMLButtonElement>('#park3d-btn');
     btn.disabled = true;
     void import('./park3d')
-      .then((m) => m.openPark3D({ token, onExit: () => (btn.disabled = false) }))
+      .then((m) => m.openPark3D({ token, world: radar.spaceFocused && radar.spaceFocusKey === 'woof' ? 'woof' : 'earth', onExit: () => (btn.disabled = false) }))
       .catch(() => {
         btn.disabled = false;
         showBanner(bannerEl, '3D 國館載入失敗，請再試一次');

@@ -5,7 +5,8 @@
  * 記得上次站哪、面向哪（這個瀏覽器的 dr.park3d），下次接著走；第一次（或那裡現在站不到）從左下（西南角，光復南路那邊）的入口進去，面向南邊那條步道往東。
  * 電腦：拖曳轉頭、WASD 或方向鍵走路（Shift 快走）；手機：左下的搖桿走路、拖曳畫面轉頭。人走得到哪裡照 park.ts 的 personOk
  * （公園裡、不進建築、不下水，橋上可以），樹幹也擋。
- * 小法也在：跟汪星同一隻（PARK_DOGS，同一個時間在同一個地方做同一件事），用 dog.ts 同一組橢球照姿勢擺出來，毛畫成撐胖一點的橢球。
+ * 小法只在從汪星進來的時候在（地球的中山公園沒有）：跟汪星同一隻（PARK_DOGS，同一個時間在同一個地方做同一件事），
+ * 照雷達上的畫法：dog.ts 同一組橢球照姿勢擺出來，表面長出一根根的毛（同一批位置）。
  * 標記（右上「標記」打開）：選種類（路燈、長椅、垃圾桶、其他），點地面放一個，可以轉方向、寫備註，按「儲存」存到伺服器
  * （/api/admin/park-marks，只有管理 token 能讀寫）；點已經標的可以移動、轉向、改備註、刪除。
  * three.js 只在打開時才載入（main.ts 用 import()），平常的雷達不會變大
@@ -13,7 +14,7 @@
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { deleteParkMark, fetchParkMarks, saveParkMark, type ParkMark, type ParkMarkIn, type ParkMarkKind } from './api';
-import { dogParts } from './dog';
+import { dogHairRoots, dogPartArea, dogParts } from './dog';
 import { dogPose, dogTurned } from './dogs';
 import { PARK_DOGS, personOk } from './park';
 import { ZHONGSHAN_PARK as Z } from './zhongshan';
@@ -303,6 +304,8 @@ const hash = (i: number): number => {
 export interface Park3DOptions {
   /** 管理 token（讀寫標記） */
   token: string;
+  /** 從哪一邊進來：地球的中山公園沒有小法，汪星的才有 */
+  world: 'earth' | 'woof';
   onExit: () => void;
 }
 
@@ -330,8 +333,15 @@ function saveSpot(at: Pt, yaw: number, pitch: number): void {
     /* 存不了就算了 */
   }
 }
-/** 小法：毛畫成把橢球撐胖（毛長的幾倍）；離你多遠以外不畫 */
+/**
+ * 小法（照雷達上的畫法）：每個部位一個橢球（毛底下的身體，撐胖一點點 FUR_BASE 倍的毛長），表面長出一根根的毛（跟雷達上同一批位置：
+ * 從表面往外長、捲成 C 字、往下垂，照太陽分亮中暗三種顏色），整隻 DOG_HAIRS 根照面積分；眼睛、鼻子、嘴唇往外推 FUR_PUFF 倍的毛長（在毛的外面）
+ */
 const FUR_PUFF = 0.7;
+const FUR_BASE = 0.3;
+const DOG_HAIRS = 2600;
+/** 一根毛分幾段畫（二次曲線） */
+const HAIR_SEGS = 3;
 const DOG_FAR_M = 120;
 const wrap = (deg: number): number => ((((deg % 360) + 540) % 360) - 180);
 
@@ -1101,9 +1111,32 @@ export function openPark3D(o: Park3DOptions): () => void {
   const dogShadow = new THREE.Mesh(new THREE.CircleGeometry(1, 24).rotateX(-Math.PI / 2), new THREE.MeshBasicMaterial({ color: 0x000000, transparent: true, opacity: 0.22, depthWrite: false }));
   dogShadow.scale.set(0.16, 1, 0.26);
   dogRoot.add(dogShadow);
+  // 一根根的毛（線段，每一格重算位置，顏色照亮中暗）
+  const hairPos = new Float32Array(DOG_HAIRS * 1.3 * HAIR_SEGS * 2 * 3);
+  const hairCol = new Float32Array(hairPos.length);
+  const hairGeo = new THREE.BufferGeometry();
+  hairGeo.setAttribute('position', new THREE.BufferAttribute(hairPos, 3).setUsage(THREE.DynamicDrawUsage));
+  hairGeo.setAttribute('color', new THREE.BufferAttribute(hairCol, 3).setUsage(THREE.DynamicDrawUsage));
+  const hairLines = new THREE.LineSegments(hairGeo, new THREE.LineBasicMaterial({ vertexColors: true }));
+  hairLines.frustumCulled = false;
+  dogRoot.add(hairLines);
+  const toneRGB = new Map<string, [number, number, number]>();
+  const rgbOf = (hex: string): [number, number, number] => {
+    let c = toneRGB.get(hex);
+    if (!c) {
+      const k = new THREE.Color(hex);
+      toneRGB.set(hex, (c = [k.r, k.g, k.b]));
+    }
+    return c;
+  };
   const v3 = (q: [number, number, number]): THREE.Vector3 => new THREE.Vector3(q[0], q[1], q[2]);
   /** 擺好小法（離你太遠就藏起來）；回傳要不要一直重畫 */
   function drawDog(now: number): boolean {
+    // 地球的中山公園沒有小法（小法只在汪星）
+    if (o.world !== 'woof') {
+      dogRoot.visible = false;
+      return false;
+    }
     const d = xiaofa.now(now);
     const p = en(d.at);
     if (Math.hypot(p[0] - pos[0], p[1] - pos[1]) > DOG_FAR_M) {
@@ -1123,6 +1156,54 @@ export function openPark3D(o: Park3DOptions): () => void {
     dogRoot.matrix.makeBasis(fwd, left, new THREE.Vector3(0, 1, 0)).setPosition(p[0], floorAt(p), -p[1]);
     dogRoot.matrixWorldNeedsUpdate = true;
     const all = dogParts(xiaofa.look, dogPose(s, d.e, turn));
+    // 毛：照面積分 DOG_HAIRS 根（臉附近密一點），每一根從表面往外長、捲成 C 字、往下垂
+    {
+      const look = xiaofa.look;
+      const furred = all.filter((x) => x.hair > 0);
+      const total = furred.reduce((t, x) => t + dogPartArea(x.a) * x.dense, 0) || 1;
+      const sunLocal: [number, number, number] = [SUN_DIR.dot(fwd), SUN_DIR.dot(left), SUN_DIR.y];
+      let k = 0;
+      const cap = hairPos.length / (HAIR_SEGS * 6);
+      const dotv = (a: number[], b: number[]): number => a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+      for (const part of furred) {
+        const n = Math.round((DOG_HAIRS * dogPartArea(part.a) * part.dense) / total);
+        const hs = dogHairRoots(part.key, n);
+        const [a0, a1, a2] = part.a;
+        const r2 = [dotv(a0, a0), dotv(a1, a1), dotv(a2, a2)];
+        const tones = part.tones.map(rgbOf);
+        for (let i = 0; i < n && k < cap; i++) {
+          const h = hs[i];
+          const root = [0, 1, 2].map((j) => part.c[j] + a0[j] * h.s[0] + a1[j] * h.s[1] + a2[j] * h.s[2]);
+          let nr = [0, 1, 2].map((j) => (a0[j] * h.s[0]) / r2[0] + (a1[j] * h.s[1]) / r2[1] + (a2[j] * h.s[2]) / r2[2]);
+          const nl = Math.hypot(nr[0], nr[1], nr[2]) || 1;
+          nr = nr.map((v) => v / nl);
+          const L = dotv(nr, sunLocal);
+          const col = tones[L > 0.2 ? 0 : L > -0.35 ? 1 : 2];
+          const len = part.hair * h.len;
+          // 旁邊的方向（捲的方向）
+          let side = Math.abs(nr[2]) > 0.95 ? [0, nr[2], -nr[1]] : [nr[1], -nr[0], 0];
+          const sl = Math.hypot(side[0], side[1], side[2]) || 1;
+          side = side.map((v) => v / sl);
+          const A = root.map((v, j) => v - nr[j] * len * 0.25);
+          const Cc = root.map((v, j) => v + nr[j] * len * (0.6 + 0.3 * look.curl) + side[j] * len * look.curl * 0.9 * h.curl);
+          const T = root.map((v, j) => v + nr[j] * len * (0.65 - 0.25 * look.curl) + (j === 2 ? -len * (0.45 - 0.15 * look.curl) * part.droop : 0));
+          let prev = A;
+          for (let g = 1; g <= HAIR_SEGS; g++) {
+            const t = g / HAIR_SEGS;
+            const q = [0, 1, 2].map((j) => (1 - t) * (1 - t) * A[j] + 2 * (1 - t) * t * Cc[j] + t * t * T[j]);
+            const o = (k * HAIR_SEGS + g - 1) * 6;
+            // 狗自己的座標（往前、往左、往上）就是 dogRoot 這一層的座標
+            hairPos.set([prev[0], prev[1], prev[2], q[0], q[1], q[2]], o);
+            hairCol.set([...col, ...col], o);
+            prev = q;
+          }
+          k++;
+        }
+      }
+      hairGeo.setDrawRange(0, k * HAIR_SEGS * 2);
+      hairGeo.attributes.position.needsUpdate = true;
+      hairGeo.attributes.color.needsUpdate = true;
+    }
     const puff = (key: string): number => (all.find((x) => x.key === key)?.hair ?? 0) * FUR_PUFF;
     const [headPuff, mouthPuff] = [puff('head'), puff('muzzle')];
     const muzzle = all.find((x) => x.key === 'muzzle');
@@ -1146,8 +1227,8 @@ export function openPark3D(o: Park3DOptions): () => void {
       let c = v3(part.c);
       let axes = part.a.map(v3);
       if (part.hair > 0) {
-        // 毛：每個半軸加長毛的 FUR_PUFF 倍
-        const h = part.hair * FUR_PUFF;
+        // 毛底下的身體：每個半軸加長一點點（FUR_BASE 倍的毛長），毛從這裡長出來
+        const h = part.hair * FUR_BASE;
         axes = axes.map((a) => a.multiplyScalar(1 + h / (a.length() || 1)));
       } else {
         // 貼在臉上的（眼睛、鼻子、嘴唇）：往外推到毛的外面
