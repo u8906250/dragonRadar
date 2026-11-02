@@ -694,14 +694,6 @@ path.map-water-glint { animation: water-flow-map 1.1s linear infinite; }
 .radar .woof-dog .dog-dot.far { opacity: 0; }
 .radar .woof-dog.walk .dog-go, .radar .woof-dog.run .dog-go { animation: dog-go var(--ms) linear var(--t) both; }
 @keyframes dog-go { from { transform: none; } to { transform: translate(var(--dx), var(--dy)); } }
-/* 小法發光（park.ts 的 dogGlow，畫在樹、屋頂上面）：淡黃的光暈一閃一閃，跟著牠走 */
-.radar .dog-glow-g { pointer-events: none; }
-.radar .dog-glow-g.moving .dog-go { animation: dog-go var(--ms) linear var(--t) both; }
-.radar .dog-glow, .radar .dog-halo { transform-box: fill-box; transform-origin: center; animation: dog-glow 1.6s ease-in-out infinite; }
-.radar .dog-glow { fill: #fff7c2; fill-opacity: 0.75; stroke: #ffbf00; stroke-width: 2; }
-.radar .dog-halo { fill: #ffe066; fill-opacity: 0.3; stroke: none; }
-@keyframes dog-glow { 0%, 100% { opacity: 0.55; transform: scale(0.85); } 50% { opacity: 1; transform: scale(1.2); } }
-@media (prefers-reduced-motion: reduce) { .radar .dog-glow, .radar .dog-halo { animation: none; opacity: 0.9; } }
 /*
  * 火箭（park.ts 的 rocketPart，--t 是這一段已經過了多久）：
  * summon 5 秒：0～1.2 秒發射口的兩片門帶著草往兩邊滑進地底、1.2～3.6 秒火箭從井裡升上來、3.8～5 秒門滑回來關上；parked 停著（點得到）；
