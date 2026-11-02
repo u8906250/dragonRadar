@@ -1,5 +1,5 @@
 /**
- * 3D 的中山公園（第一人稱走走看；測試中，只有存了管理 token 的瀏覽器看得到「3D 公園」）：
+ * 3D 的中山公園（「3D 國館」，第一人稱走走看；測試中，只有存了管理 token 的瀏覽器看得到）：
  * 照雷達同一份資料（zhongshan.ts：OpenStreetMap 的範圍、草地、步道、水面、橋、建築，正射影像判讀的樹冠、屋頂顏色、橋寬、映池石頭邊、旗台）
  * 蓋出來，平面的位置都是真的；高度大多沒有資料，是估的（下面的常數註明哪些是估的，找到資料再改）。
  * 一開始從左下（西南角，光復南路那邊）的入口進去，面向南邊那條步道往東。
@@ -276,7 +276,7 @@ export function openPark3D(o: Park3DOptions): () => void {
   root.innerHTML = `
     <div class="p3d-top">
       <button type="button" class="chip p3d-exit">離開</button>
-      <span class="p3d-title">3D 中山公園<small>測試中・高度大多是估的</small></span>
+      <span class="p3d-title">3D 國館<small>測試中・高度大多是估的</small></span>
       <button type="button" class="chip p3d-mark-toggle" aria-pressed="false">標記</button>
     </div>
     <div class="p3d-hint"></div>

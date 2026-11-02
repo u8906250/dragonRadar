@@ -5052,7 +5052,7 @@ function wireControls(): void {
       .then((m) => m.openPark3D({ token, onExit: () => (btn.disabled = false) }))
       .catch(() => {
         btn.disabled = false;
-        showBanner(bannerEl, '3D 公園載入失敗，請再試一次');
+        showBanner(bannerEl, '3D 國館載入失敗，請再試一次');
       });
   });
   kwForm.addEventListener('submit', (e) => {
