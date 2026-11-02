@@ -76,6 +76,14 @@ const SAKURA_LINE_OFF = 0.4;
 const SAKURA_LINE_W = 0.15;
 /** 櫻花步道兩邊補草地：離路邊這麼多公尺內有草地，就補到草地為止 */
 const SAKURA_GRASS_M = 6;
+/**
+ * 草（像雷達上一叢叢的草）：草地上每 GRASS_CELL 公尺一格，大多長一叢（2～4 根往上長、往兩邊散開一點的草葉，5～12 公分），
+ * 只長在你附近 GRASS_NEAR 公尺內（遠的本來就小到看不到），每走 GRASS_CHUNK 公尺重排一次；路上不長
+ */
+const GRASS_CELL = 0.55;
+const GRASS_NEAR = 22;
+const GRASS_CHUNK = 6;
+const GRASS_MAX = 9000;
 /** 樹多高（估的：照樹冠大小，最高 20 公尺）、樹幹多粗 */
 const treeH = (r: number): number => Math.min(20, 2.5 + 1.9 * r);
 const trunkR = (r: number): number => Math.max(0.1, Math.min(0.4, r * 0.06));
@@ -378,7 +386,7 @@ export function openPark3D(o: Park3DOptions): () => void {
   add(flatGeo([shapeOf(far, [outline])], -0.01), mat(0xc4c0b6));
   const waters = Z.water.map(([outer, ...islands]) => ({ outer: ringEN(outer), islands: islands.map(ringEN) }));
   add(flatGeo([shapeOf(outline, waters.map((w) => w.outer))], 0), mat(0xe2dccf));
-  const grass = mat(0x86ad66);
+  const grass = mat(0x8fb56f);
   add(flatGeo(Z.green.map((r) => shapeOf(ringEN(r))), 0.02), grass);
   const inWater = (p: Pt): boolean => waters.some((w) => inside(p, w.outer) && !w.islands.some((i) => inside(p, i)));
   // 步道：經過水面的那幾段不畫（橋另外蓋）
@@ -429,6 +437,8 @@ export function openPark3D(o: Park3DOptions): () => void {
   };
   const pathLines = Z.paths.flatMap((l, i) => (i === Z.sakuraLane ? [] : clipIn(l.map(en)).flatMap(splitWet)));
   const sakura = clipIn(Z.paths[Z.sakuraLane].map(en)).flatMap(splitWet);
+  /** 補的草地（一塊塊四邊形，草也長在上面） */
+  const fillQuads: Pt[][] = [];
   // 櫻花步道兩邊旁邊是草地的地方（離路邊 SAKURA_GRASS_M 內有草地），路邊到草地之間補成草地（灰色的路直接接到草地）；
   // 超出公園外框、碰到水的點拉回外框、水邊
   {
@@ -475,6 +485,7 @@ export function openPark3D(o: Park3DOptions): () => void {
             const far = half + reach + 0.3;
             const q = [at(t0, half - 0.05), at(t1, half - 0.05), at(t1, far), at(t0, far)].map(keepIn);
             for (const v of [0, 1, 2, 0, 2, 3]) pos.push(q[v][0], 0.02, -q[v][1]);
+            fillQuads.push(q);
           }
       }
     };
@@ -484,7 +495,7 @@ export function openPark3D(o: Park3DOptions): () => void {
     const g = new THREE.BufferGeometry();
     g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
     g.computeVertexNormals();
-    add(g, new THREE.MeshLambertMaterial({ color: 0x86ad66, side: THREE.DoubleSide }));
+    add(g, new THREE.MeshLambertMaterial({ color: 0x8fb56f, side: THREE.DoubleSide }));
   }
   add(stripGeo(pathLines, PATH_W, 0.035), mat(0xd8cdb8));
   // 櫻花步道：深灰色、比較寬，上面兩條淺色的線（中線往兩邊平移）
@@ -779,6 +790,108 @@ export function openPark3D(o: Park3DOptions): () => void {
     m.computeBoundingSphere();
     scene.add(m);
   }
+  // ---- 一叢叢的草（只長在你附近，走到別的地方重排）
+  const tuftMesh = (() => {
+    // 三種：2、3、4 根草葉；每根是一片彎彎的、越往上越細的葉子（高 1，照每一叢的大小放大），轉不同的方向（哪邊看都看得到）
+    const variants = [2, 3, 4].map((n) => {
+      const pos: number[] = [];
+      for (let b = 0; b < n; b++) {
+        const lean = (b - (n - 1) / 2) * 0.35 + (hash(n * 7 + b) - 0.5) * 0.4;
+        const face = (b / n) * Math.PI + hash(n * 3 + b) * 0.6;
+        const [cf, sf] = [Math.cos(face), Math.sin(face)];
+        const base = (b - (n - 1) / 2) * 0.12;
+        // 從底到尖 4 點：往旁邊彎（二次曲線），寬 0.09 → 0
+        const pt = (t: number): [number, number, number] => {
+          const side = base + Math.sin(lean) * (0.25 * t + 0.95 * t * t);
+          return [side * cf, Math.cos(lean) * t, side * sf];
+        };
+        const ts = [0, 0.4, 0.75, 1];
+        for (let k = 1; k < ts.length; k++) {
+          const [a, c] = [pt(ts[k - 1]), pt(ts[k])];
+          const [wa, wc] = [0.045 * (1 - ts[k - 1]), 0.045 * (1 - ts[k])];
+          const off = (p: [number, number, number], w: number): number[] => [p[0] - sf * w, p[1], p[2] + cf * w];
+          const offm = (p: [number, number, number], w: number): number[] => [p[0] + sf * w, p[1], p[2] - cf * w];
+          pos.push(...off(a, wa), ...offm(a, wa), ...offm(c, wc), ...off(a, wa), ...offm(c, wc), ...off(c, wc));
+        }
+      }
+      const g = new THREE.BufferGeometry();
+      g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+      g.computeVertexNormals();
+      return g;
+    });
+    const m = mat(0x4a8a32, { side: THREE.DoubleSide });
+    return variants.map((g) => {
+      const im = new THREE.InstancedMesh(g, m, GRASS_MAX);
+      im.count = 0;
+      im.receiveShadow = true;
+      im.frustumCulled = false;
+      scene.add(im);
+      return im;
+    });
+  })();
+  const lawnRings = Z.green.map(ringEN).map((r) => {
+    const xs = r.map((p) => p[0]);
+    const ys = r.map((p) => p[1]);
+    return { r, box: [Math.min(...xs), Math.min(...ys), Math.max(...xs), Math.max(...ys)] };
+  });
+  for (const r of fillQuads) {
+    const xs = r.map((p) => p[0]);
+    const ys = r.map((p) => p[1]);
+    lawnRings.push({ r, box: [Math.min(...xs), Math.min(...ys), Math.max(...xs), Math.max(...ys)] });
+  }
+  const onLawn = (p: Pt): boolean => lawnRings.some(({ r, box }) => p[0] >= box[0] && p[0] <= box[2] && p[1] >= box[1] && p[1] <= box[3] && inside(p, r));
+  // 步道（含櫻花步道）5 公尺一格的索引：草不長在路上
+  const segGrid = new Map<string, Array<[Pt, Pt, number]>>();
+  for (const sg of pathSegs) {
+    const [a, b] = sg;
+    const n = Math.max(1, Math.ceil(Math.hypot(b[0] - a[0], b[1] - a[1]) / 2));
+    const keys = new Set<string>();
+    for (let t = 0; t <= n; t++) keys.add(`${Math.floor((a[0] + ((b[0] - a[0]) * t) / n) / 5)},${Math.floor((a[1] + ((b[1] - a[1]) * t) / n) / 5)}`);
+    for (const k of keys) segGrid.set(k, [...(segGrid.get(k) ?? []), sg]);
+  }
+  const onPath = (p: Pt): boolean => {
+    for (let i = Math.floor(p[0] / 5) - 1; i <= Math.floor(p[0] / 5) + 1; i++)
+      for (let j = Math.floor(p[1] / 5) - 1; j <= Math.floor(p[1] / 5) + 1; j++)
+        for (const [a, b, half] of segGrid.get(`${i},${j}`) ?? []) if (segDist(p, a, b) < half + 0.1) return true;
+    return false;
+  };
+  /** 格子 (i, j) 的第 n 個亂數（0～1，每次都一樣） */
+  const cellRnd = (i: number, j: number, n: number): number => {
+    let h = Math.imul(i, 0x27d4eb2d) ^ Math.imul(j, 0x165667b1) ^ Math.imul(n + 1, 0x9e3779b1);
+    h = Math.imul(h ^ (h >>> 15), 0x85ebca6b);
+    h = Math.imul(h ^ (h >>> 13), 0xc2b2ae35);
+    return ((h ^ (h >>> 16)) >>> 0) / 4294967296;
+  };
+  let grassAt = '';
+  /** 人走到別的一塊（GRASS_CHUNK 公尺）就重排附近的草 */
+  function placeGrass(): void {
+    const key = `${Math.floor(pos[0] / GRASS_CHUNK)},${Math.floor(pos[1] / GRASS_CHUNK)}`;
+    if (key === grassAt) return;
+    grassAt = key;
+    const counts = [0, 0, 0];
+    const m = new THREE.Matrix4();
+    const q = new THREE.Quaternion();
+    const up = new THREE.Vector3(0, 1, 0);
+    const [i0, i1] = [Math.floor((pos[0] - GRASS_NEAR) / GRASS_CELL), Math.floor((pos[0] + GRASS_NEAR) / GRASS_CELL)];
+    const [j0, j1] = [Math.floor((pos[1] - GRASS_NEAR) / GRASS_CELL), Math.floor((pos[1] + GRASS_NEAR) / GRASS_CELL)];
+    for (let i = i0; i <= i1; i++)
+      for (let j = j0; j <= j1; j++) {
+        if (cellRnd(i, j, 0) < 0.15) continue;
+        const p: Pt = [(i + cellRnd(i, j, 1)) * GRASS_CELL, (j + cellRnd(i, j, 2)) * GRASS_CELL];
+        if (Math.hypot(p[0] - pos[0], p[1] - pos[1]) > GRASS_NEAR || !onLawn(p) || onPath(p)) continue;
+        const v = Math.floor(cellRnd(i, j, 3) * 3);
+        if (counts[v] >= GRASS_MAX) continue;
+        const size = 0.05 + 0.07 * cellRnd(i, j, 4);
+        q.setFromAxisAngle(up, cellRnd(i, j, 5) * Math.PI * 2);
+        m.compose(new THREE.Vector3(p[0], 0.02, -p[1]), q, new THREE.Vector3(size, size, size));
+        tuftMesh[v].setMatrixAt(counts[v]++, m);
+      }
+    tuftMesh.forEach((im, v) => {
+      im.count = counts[v];
+      im.instanceMatrix.needsUpdate = true;
+    });
+  }
+
   // 樹幹擋路：5 公尺一格的索引
   const trunkGrid = new Map<string, number[]>();
   trees.forEach(({ at }, i) => {
@@ -1276,6 +1389,7 @@ export function openPark3D(o: Park3DOptions): () => void {
     if (!dirty) return;
     dirty = false;
     updateCamera();
+    placeGrass();
     renderer.render(scene, camera);
   };
   frame = requestAnimationFrame(loop);
