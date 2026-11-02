@@ -749,13 +749,18 @@ export function openPark3D(o: Park3DOptions): () => void {
   };
   const onUp = (e: PointerEvent): void => {
     if (!drag || e.pointerId !== drag.id) return;
-    if (!drag.moved && performance.now() - drag.t < 600) tap(e.clientX, e.clientY);
+    // 只有左鍵（手機是手指）點一下才算點地面；右鍵拖曳一樣轉頭
+    if (!drag.moved && e.button === 0 && performance.now() - drag.t < 600) tap(e.clientX, e.clientY);
     drag = null;
   };
   canvas.addEventListener('pointerdown', onDown);
   canvas.addEventListener('pointermove', onMove);
   canvas.addEventListener('pointerup', onUp);
   canvas.addEventListener('pointercancel', () => (drag = null));
+  // 右鍵不跳出瀏覽器的選單（畫布會有「另存圖片」）；備註欄照常可以按右鍵貼上
+  root.addEventListener('contextmenu', (e) => {
+    if (!(e.target instanceof HTMLInputElement)) e.preventDefault();
+  });
   // 搖桿（手機）
   const stickEl = $<HTMLElement>('.p3d-stick');
   const knob = $<HTMLElement>('.p3d-knob');
