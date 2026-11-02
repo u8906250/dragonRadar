@@ -92,6 +92,16 @@ const GRASS_CHUNK = 5;
 const GRASS_MAX = 20000;
 /** 草地上那張一叢叢草的圖多大（公尺見方，重複鋪） */
 const GRASS_TILE = 2;
+/**
+ * 銅像廣場（碑林，Z.statuePlaza）：位置照正射影像，樣子照使用者給的照片看的、大小是估的——墊高的灰色石頭平台、東邊幾階石階下到人行道
+ * （南邊一道不鏽鋼扶手、北邊一排圓圓的矮樹叢），花台是石頭邊框、種滿紅色粉紅色的花，西邊一道長長的黑色石牆（碑林），銅像坐在中間面向東邊的紀念館
+ */
+const PLAZA_H = 0.7;
+const PLAZA_STEPS = 5;
+const STEP_DEPTH = 0.32;
+const STELE_WALL_H = 2.1;
+const STELE_WALL_T = 0.45;
+const BED_H = 0.35;
 /** 站在鋪面上的樹，移到多近以內的草地（再遠的是廣場上種的，留著） */
 const TREE_TO_LAWN_M = 5;
 /** 樹多高（估的：照樹冠大小，最高 20 公尺）、樹幹多粗 */
@@ -121,7 +131,7 @@ const LOOK_DRAG = 0.0045;
 const FAST = 2.5;
 const TAP_MAX_M = 150;
 
-const KIND_NAME: Record<ParkMarkKind, string> = { lamp: '路燈', bench: '長椅', bin: '垃圾桶', other: '其他' };
+const KIND_NAME: Record<ParkMarkKind, string> = { lamp: '路燈', bench: '長椅', bin: '垃圾桶', stele: '石碑', other: '其他' };
 const KINDS = Object.keys(KIND_NAME) as ParkMarkKind[];
 
 /** 一圈經緯度在不在裡面（公尺座標，射線法） */
@@ -472,7 +482,9 @@ export function openPark3D(o: Park3DOptions): () => void {
     return t;
   })();
   const grass = mat(0xffffff, { map: grassTex });
-  add(flatGeo(Z.green.map((r) => shapeOf(ringEN(r))), 0.02), grass);
+  // 草地（花台另外畫）
+  const bedSet = new Set(Z.flowerBeds);
+  add(flatGeo(Z.green.flatMap((r, i) => (bedSet.has(i) ? [] : [shapeOf(ringEN(r))])), 0.02), grass);
   const inWater = (p: Pt): boolean => waters.some((w) => inside(p, w.outer) && !w.islands.some((i) => inside(p, i)));
   // 步道：經過水面的那幾段不畫（橋另外蓋）
   const splitWet = (l: WP[]): WP[][] => {
@@ -801,17 +813,187 @@ export function openPark3D(o: Park3DOptions): () => void {
     flagGroup.add(m);
   }
   scene.add(flagGroup);
+  // ---- 銅像廣場（碑林）：墊高的石頭平台、東邊的石階、花台、西邊的黑色石牆
+  const plazaRing = ringEN(Z.statuePlaza);
+  const canvasTex = (S: number, draw: (g: CanvasRenderingContext2D) => void, repeat: number): THREE.CanvasTexture => {
+    const cv = document.createElement('canvas');
+    [cv.width, cv.height] = [S, S];
+    draw(cv.getContext('2d')!);
+    const t = new THREE.CanvasTexture(cv);
+    t.wrapS = t.wrapT = THREE.RepeatWrapping;
+    t.repeat.set(1 / repeat, 1 / repeat);
+    t.colorSpace = THREE.SRGBColorSpace;
+    t.anisotropy = renderer.capabilities.getMaxAnisotropy();
+    return t;
+  };
+  // 灰色的石板：一塊 0.6 公尺見方，深淺有一點不一樣、細細的縫（一張 2.4 公尺見方）
+  const paving = mat(0xffffff, {
+    map: canvasTex(
+      256,
+      (g) => {
+        for (let i = 0; i < 4; i++)
+          for (let j = 0; j < 4; j++) {
+            const v = 172 + Math.floor(hash(i * 7 + j * 13 + 901) * 22);
+            g.fillStyle = `rgb(${v}, ${v - 2}, ${v - 6})`;
+            g.fillRect(i * 64, j * 64, 64, 64);
+          }
+        g.strokeStyle = 'rgba(90, 88, 84, 0.55)';
+        g.lineWidth = 2;
+        for (let k = 0; k <= 4; k++) {
+          g.beginPath();
+          g.moveTo(k * 64, 0);
+          g.lineTo(k * 64, 256);
+          g.moveTo(0, k * 64);
+          g.lineTo(256, k * 64);
+          g.stroke();
+        }
+      },
+      2.4,
+    ),
+  });
+  const plazaSide = mat(0x8f8b84);
+  add(prismGeo(shapeOf(plazaRing), 0, PLAZA_H), [paving, plazaSide], true);
+  // 東邊的石階：平台邊上 plazaSteps 那一段，一階一階往外（往人行道）
+  const [stepA, stepB] = Z.plazaSteps.map(en);
+  const stepLen = Math.hypot(stepB[0] - stepA[0], stepB[1] - stepA[1]);
+  const along: Pt = [(stepB[0] - stepA[0]) / stepLen, (stepB[1] - stepA[1]) / stepLen];
+  const plazaC: Pt = [plazaRing.reduce((t, p) => t + p[0], 0) / plazaRing.length, plazaRing.reduce((t, p) => t + p[1], 0) / plazaRing.length];
+  // 往外（離開平台中心）的方向
+  let out: Pt = [along[1], -along[0]];
+  if ((stepA[0] - plazaC[0]) * out[0] + (stepA[1] - plazaC[1]) * out[1] < 0) out = [-out[0], -out[1]];
+  const stepMid: Pt = [(stepA[0] + stepB[0]) / 2, (stepA[1] + stepB[1]) / 2];
+  const stepAng = Math.atan2(along[1], along[0]);
+  for (let k = 0; k < PLAZA_STEPS; k++) {
+    const h = (PLAZA_H * (PLAZA_STEPS - k)) / PLAZA_STEPS;
+    const d = (k + 0.5) * STEP_DEPTH;
+    const st = add(new THREE.BoxGeometry(stepLen, h, STEP_DEPTH), [plazaSide, plazaSide, paving, plazaSide, plazaSide, plazaSide], true);
+    st.position.set(stepMid[0] + out[0] * d, h / 2, -(stepMid[1] + out[1] * d));
+    st.rotation.y = stepAng;
+  }
+  // 南邊一道不鏽鋼扶手（從平台上沿著台階斜下來）
+  {
+    const steel = mat(0xd3d7da);
+    const run = PLAZA_STEPS * STEP_DEPTH;
+    const base: Pt = [stepA[0] + along[0] * 0.25, stepA[1] + along[1] * 0.25];
+    const top = new THREE.Vector3(base[0] - out[0] * 0.3, PLAZA_H + 0.9, -(base[1] - out[1] * 0.3));
+    const bot = new THREE.Vector3(base[0] + out[0] * (run + 0.3), 0.9, -(base[1] + out[1] * (run + 0.3)));
+    const rail = add(new THREE.CylinderGeometry(0.025, 0.025, top.distanceTo(bot), 8), steel, true);
+    rail.position.copy(top).add(bot).multiplyScalar(0.5);
+    rail.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), bot.clone().sub(top).normalize());
+    for (const t of [0, 0.5, 1]) {
+      const at = top.clone().lerp(bot, t);
+      const post = add(new THREE.CylinderGeometry(0.02, 0.02, 0.9, 8), steel, true);
+      post.position.set(at.x, at.y - 0.45, at.z);
+    }
+  }
+  // 北邊一排圓圓的矮樹叢（人行道上，台階旁邊到平台的角）
+  {
+    const bushMat = mat(0x5f9a3c, { flatShading: true });
+    const north = plazaRing.reduce((b, p) => ((p[0] - plazaC[0]) * out[0] + (p[1] - plazaC[1]) * out[1] > 0 && (p[0] - stepB[0]) * along[0] + (p[1] - stepB[1]) * along[1] > 0 ? p : b), stepB);
+    const len = (north[0] - stepB[0]) * along[0] + (north[1] - stepB[1]) * along[1];
+    for (let t = 0.8; t < len - 0.4; t += 1.15) {
+      const b = add(new THREE.IcosahedronGeometry(0.58, 1), bushMat, true);
+      b.position.set(stepB[0] + along[0] * t + out[0] * 0.75, 0.45, -(stepB[1] + along[1] * t + out[1] * 0.75));
+      b.scale.set(1, 0.85, 1);
+      b.rotation.y = hash(Math.round(t * 10)) * 3;
+    }
+  }
+  // 花台：石頭邊框、上面種滿紅色粉紅色的花（中間的方塊、四個角的 L 形）
+  const flowers = mat(0xffffff, {
+    map: canvasTex(
+      128,
+      (g) => {
+        g.fillStyle = '#3d6b33';
+        g.fillRect(0, 0, 128, 128);
+        for (let k = 0; k < 520; k++) {
+          const t = hash(k + 4000);
+          g.fillStyle = t < 0.55 ? '#d8344a' : t < 0.85 ? '#f07a98' : t < 0.93 ? '#fbd2dc' : '#2f5a2a';
+          g.beginPath();
+          g.arc(hash(k * 2 + 4100) * 128, hash(k * 2 + 4101) * 128, 1.6 + hash(k + 4300) * 2.2, 0, Math.PI * 2);
+          g.fill();
+        }
+      },
+      1.2,
+    ),
+  });
+  const bedStone = mat(0xa9a59c);
+  for (const i of Z.flowerBeds) {
+    const r = ringEN(Z.green[i]);
+    add(prismGeo(shapeOf(r), PLAZA_H, BED_H), [flowers, bedStone], true);
+  }
+  const bedRings = Z.flowerBeds.map((i) => ringEN(Z.green[i]));
+  // 碑林：西邊一道長長的黑色石牆（一塊塊黑色的石碑排成一道，上面刻字），站在平台上
+  const [wallA, wallB] = Z.steleWall.map(en);
+  const wallLen = Math.hypot(wallB[0] - wallA[0], wallB[1] - wallA[1]);
+  {
+    const wallMid: Pt = [(wallA[0] + wallB[0]) / 2, (wallA[1] + wallB[1]) / 2];
+    const ang = Math.atan2(wallB[1] - wallA[1], wallB[0] - wallA[0]);
+    const black = mat(0x26282b);
+    const body = add(new THREE.BoxGeometry(wallLen, STELE_WALL_H, STELE_WALL_T), black, true);
+    body.position.set(wallMid[0], PLAZA_H + STELE_WALL_H / 2, -wallMid[1]);
+    body.rotation.y = ang;
+    const cap = add(new THREE.BoxGeometry(wallLen + 0.1, 0.08, STELE_WALL_T + 0.1), mat(0x3a3c40), true);
+    cap.position.set(wallMid[0], PLAZA_H + STELE_WALL_H + 0.04, -wallMid[1]);
+    cap.rotation.y = ang;
+    // 朝廣場那一面：一塊塊石碑（1.2 公尺寬）的縫、淡淡的刻字
+    const slabs = Math.max(1, Math.round(wallLen / 1.2));
+    const face = canvasTex(
+      256,
+      (g) => {
+        g.fillStyle = '#26282b';
+        g.fillRect(0, 0, 256, 256);
+        g.fillStyle = 'rgba(190, 188, 180, 0.5)';
+        for (let c = 0; c < 9; c++)
+          for (let r = 0; r < 14; r++) {
+            if (hash(c * 31 + r + 7000) < 0.25) continue;
+            g.fillRect(40 + c * 20, 30 + r * 14, 10 + hash(c * 17 + r + 7100) * 5, 8);
+          }
+        g.fillStyle = 'rgba(10, 10, 12, 0.9)';
+        g.fillRect(0, 0, 4, 256);
+      },
+      1,
+    );
+    face.repeat.set(slabs, 1);
+    const toward = (plazaC[0] - wallMid[0]) * Math.cos(ang + Math.PI / 2) + (plazaC[1] - wallMid[1]) * Math.sin(ang + Math.PI / 2) > 0 ? 1 : -1;
+    const n: Pt = [Math.cos(ang + Math.PI / 2) * toward, Math.sin(ang + Math.PI / 2) * toward];
+    const front = new THREE.Mesh(new THREE.PlaneGeometry(wallLen, STELE_WALL_H - 0.1), mat(0xffffff, { map: face }));
+    front.position.set(wallMid[0] + n[0] * (STELE_WALL_T / 2 + 0.005), PLAZA_H + STELE_WALL_H / 2, -(wallMid[1] + n[1] * (STELE_WALL_T / 2 + 0.005)));
+    // 平面本來朝 +z（南）：轉到朝 n（公園座標的東、北 → three 的 x、-z）
+    front.rotation.y = Math.atan2(n[0], -n[1]);
+    front.receiveShadow = true;
+    scene.add(front);
+  }
+  /** 撞到碑林的牆、花台、銅像 */
+  const hitPlaza = (p: Pt): boolean => {
+    const [dx, dy] = [wallB[0] - wallA[0], wallB[1] - wallA[1]];
+    const t = Math.max(0, Math.min(1, ((p[0] - wallA[0]) * dx + (p[1] - wallA[1]) * dy) / (dx * dx + dy * dy || 1)));
+    if (Math.hypot(wallA[0] + dx * t - p[0], wallA[1] + dy * t - p[1]) < STELE_WALL_T / 2 + 0.3) return true;
+    if (bedRings.some((r) => inside(p, r))) return true;
+    const s0 = en(Z.statue);
+    return Math.hypot(p[0] - s0[0], p[1] - s0[1]) < 1.1;
+  };
+  /** 平台、石階的高度（不在上面是 0） */
+  const plazaFloor = (p: Pt): number => {
+    if (inside(p, plazaRing)) return PLAZA_H;
+    const a = (p[0] - stepA[0]) * along[0] + (p[1] - stepA[1]) * along[1];
+    const d = (p[0] - stepA[0]) * out[0] + (p[1] - stepA[1]) * out[1];
+    if (a < 0 || a > stepLen || d < 0 || d > PLAZA_STEPS * STEP_DEPTH) return 0;
+    return (PLAZA_H * (PLAZA_STEPS - Math.floor(d / STEP_DEPTH))) / PLAZA_STEPS;
+  };
+
+  // 孫中山銅像：在平台上、面向東邊的紀念館（深色石頭台座上坐著）
   const sp = en(Z.statue);
   const statue = new THREE.Group();
-  statue.position.set(sp[0], 0, -sp[1]);
+  statue.position.set(sp[0], PLAZA_H, -sp[1]);
+  statue.rotation.y = Math.PI / 2;
   const bronze = mat(0x6b5636);
   const parts: Array<[THREE.BufferGeometry, THREE.Material, number, number, number]> = [
-    [new THREE.BoxGeometry(2, 0.3, 2), flagStone, 0, 0.15, 0],
-    [new THREE.BoxGeometry(1.0, 1.55, 0.25), bronze, 0, 1.08, -0.35],
-    [new THREE.BoxGeometry(0.95, 0.5, 0.75), bronze, 0, 0.75, 0],
-    [new THREE.BoxGeometry(0.7, 0.55, 0.3), bronze, 0, 0.58, 0.45],
-    [new THREE.CylinderGeometry(0.24, 0.32, 0.75, 12), bronze, 0, 1.38, -0.12],
-    [new THREE.SphereGeometry(0.16, 14, 10), bronze, 0, 1.92, -0.1],
+    [new THREE.BoxGeometry(1.7, 0.45, 1.7), mat(0x45474a), 0, 0.225, 0],
+    [new THREE.BoxGeometry(1.0, 1.55, 0.25), bronze, 0, 1.23, -0.35],
+    [new THREE.BoxGeometry(0.95, 0.5, 0.75), bronze, 0, 0.9, 0],
+    [new THREE.BoxGeometry(0.7, 0.55, 0.3), bronze, 0, 0.73, 0.45],
+    [new THREE.CylinderGeometry(0.24, 0.32, 0.75, 12), bronze, 0, 1.53, -0.12],
+    [new THREE.SphereGeometry(0.16, 14, 10), bronze, 0, 2.07, -0.1],
   ];
   for (const [g, m, x, y, z] of parts) {
     const mesh = new THREE.Mesh(g, m);
@@ -880,7 +1062,9 @@ export function openPark3D(o: Park3DOptions): () => void {
   };
   const trees = Z.trees.flatMap(([lat, lng, r]) => {
     const at = offPath(en([lat, lng]), r);
-    return at ? [{ at: toLawn(at), r }] : [];
+    const p = at ? toLawn(at) : null;
+    // 銅像廣場的平台上沒有樹（旁邊的樹冠蓋過來，樹幹在外面）
+    return p && !inside(p, plazaRing) ? [{ at: p, r }] : [];
   });
   const trunkGeo = new THREE.CylinderGeometry(0.75, 1, 1, 7);
   trunkGeo.translate(0, 0.5, 0);
@@ -1013,7 +1197,7 @@ export function openPark3D(o: Park3DOptions): () => void {
       return im;
     });
   })();
-  const lawnRings = Z.green.map(ringEN).map((r) => {
+  const lawnRings = Z.green.flatMap((r, i) => (bedSet.has(i) ? [] : [ringEN(r)])).map((r) => {
     const xs = r.map((p) => p[0]);
     const ys = r.map((p) => p[1]);
     return { r, box: [Math.min(...xs), Math.min(...ys), Math.max(...xs), Math.max(...ys)] };
@@ -1065,7 +1249,7 @@ export function openPark3D(o: Park3DOptions): () => void {
         if (cellRnd(i, j, 0) < 0.1) continue;
         const p: Pt = [(i + cellRnd(i, j, 1)) * GRASS_CELL, (j + cellRnd(i, j, 2)) * GRASS_CELL];
         const dist = Math.hypot(p[0] - pos[0], p[1] - pos[1]);
-        if (dist > R || !onLawn(p) || onPath(p)) continue;
+        if (dist > R || !onLawn(p) || onPath(p) || inside(p, plazaRing)) continue;
         const v = Math.floor(cellRnd(i, j, 3) * 3);
         if (counts[v] >= GRASS_MAX) continue;
         // 草叢 0.18～0.26 公尺寬、高一半（9～13 公分）；越遠越矮在畫的時候算（fadeByDistance）
@@ -1092,9 +1276,9 @@ export function openPark3D(o: Park3DOptions): () => void {
         for (const k of trunkGrid.get(`${i},${j}`) ?? []) if (Math.hypot(p[0] - trees[k].at[0], p[1] - trees[k].at[1]) < trunkR(trees[k].r) + 0.25) return true;
     return false;
   };
-  const canStand = (p: Pt): boolean => personOk(ll(p[0], p[1])) && !hitTrunk(p) && !hitWall(p);
+  const canStand = (p: Pt): boolean => personOk(ll(p[0], p[1])) && !hitTrunk(p) && !hitWall(p) && !hitPlaza(p);
   /** 腳下多高：橋上是橋面、旗台上是旗台 */
-  const floorAt = (p: Pt): number => (onBridge(p) ? BRIDGE_TOP : inside(p, flagBaseRing) ? FLAG_BASE_H : 0);
+  const floorAt = (p: Pt): number => (onBridge(p) ? BRIDGE_TOP : inside(p, flagBaseRing) ? FLAG_BASE_H : plazaFloor(p));
 
   // ---- 標記：路燈、長椅、垃圾桶、其他（伺服器上的，加上正在放、正在改的那一個）
   const markGroup = new THREE.Group();
@@ -1104,6 +1288,7 @@ export function openPark3D(o: Park3DOptions): () => void {
     black: mat(0x1f2124),
     glass: mat(0xfbf6ea, { emissive: 0xffe6b8, emissiveIntensity: 0.45 }),
     granite: mat(0xc9c7c1),
+    stele: mat(0x9a978f),
     bin: mat(0x3e6b4c),
     pin: mat(0xd2483b),
   };
@@ -1140,6 +1325,11 @@ export function openPark3D(o: Park3DOptions): () => void {
       geo.rotateY(-Math.PI / 2);
       geo.translate((BENCH_LEN - 0.06) / 2, 0, 0);
       put(geo, markMats.granite, 0, 0, 0);
+    } else if (kind === 'stele') {
+      // 灰色的石碑：方形的底座、高高的碑身（照使用者給的照片，大小估的），刻字的那面朝 -z
+      put(new THREE.BoxGeometry(0.95, 0.35, 0.75), markMats.granite, 0, 0.175, 0);
+      put(new THREE.BoxGeometry(0.62, 2.3, 0.42), markMats.stele, 0, 0.35 + 1.15, 0);
+      put(new THREE.BoxGeometry(0.7, 0.12, 0.5), markMats.granite, 0, 0.35 + 2.3 + 0.06, 0);
     } else if (kind === 'bin') {
       put(new THREE.CylinderGeometry(0.25, 0.22, 0.85, 14), markMats.bin, 0, 0.425, 0);
     } else {
@@ -1187,7 +1377,7 @@ export function openPark3D(o: Park3DOptions): () => void {
     if (draft) {
       const p = en([draft.lat, draft.lng]);
       const d = Math.hypot(p[0] - pos[0], p[1] - pos[1]);
-      el.textContent = `${draft.id ? `改 #${draft.id} ` : '新的'}${KIND_NAME[draft.kind]}・離你 ${d.toFixed(1)} 公尺・${draft.lat.toFixed(7)}, ${draft.lng.toFixed(7)}${draft.kind === 'bench' ? `・面向 ${Math.round(draft.heading)}°` : ''}`;
+      el.textContent = `${draft.id ? `改 #${draft.id} ` : '新的'}${KIND_NAME[draft.kind]}・離你 ${d.toFixed(1)} 公尺・${draft.lat.toFixed(7)}, ${draft.lng.toFixed(7)}${draft.kind === 'bench' || draft.kind === 'stele' ? `・面向 ${Math.round(draft.heading)}°` : ''}`;
     } else el.textContent = `點地面放一個${KIND_NAME[kind]}，點已經標的可以改；已經標了 ${marks.length} 個`;
   };
   function panel(): void {
@@ -1412,7 +1602,8 @@ export function openPark3D(o: Park3DOptions): () => void {
     // 撞到了就沿著牆滑過去
     for (const step of [d, [d[0], 0] as Pt, [0, d[1]] as Pt]) {
       const next: Pt = [pos[0] + step[0], pos[1] + step[1]];
-      if (canStand(next)) {
+      // 一下子高低差太多（平台的邊、不是石階的地方）上不去、下不來
+      if (canStand(next) && Math.abs(floorAt(next) - floorAt(pos)) < 0.3) {
         pos = next;
         break;
       }
@@ -1447,6 +1638,13 @@ export function openPark3D(o: Park3DOptions): () => void {
     let p: Pt = [ray.ray.origin.x + d.x * t, -(ray.ray.origin.z + d.z * t)];
     if (onBridge(p)) {
       t = (BRIDGE_TOP - oy) / d.y;
+      p = [ray.ray.origin.x + d.x * t, -(ray.ray.origin.z + d.z * t)];
+    }
+    // 銅像廣場的平台上：照平台的高度再算一次
+    for (let k = 0; k < 2; k++) {
+      const h = floorAt(p);
+      if (!h) break;
+      t = (h - oy) / d.y;
       p = [ray.ray.origin.x + d.x * t, -(ray.ray.origin.z + d.z * t)];
     }
     if (t > TAP_MAX_M) return msg('太遠了，走近一點再放');

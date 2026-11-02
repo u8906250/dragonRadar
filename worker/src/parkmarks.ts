@@ -7,6 +7,7 @@ export const PARK_MARK_KINDS = {
   lamp: '路燈',
   bench: '長椅',
   bin: '垃圾桶',
+  stele: '石碑',
   other: '其他',
 } as const;
 export type ParkMarkKind = keyof typeof PARK_MARK_KINDS;
