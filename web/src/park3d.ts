@@ -2,7 +2,7 @@
  * 3D 的中山公園（「3D 國館」，第一人稱走走看；測試中，只有存了管理 token 的瀏覽器看得到）：
  * 照雷達同一份資料（zhongshan.ts：OpenStreetMap 的範圍、草地、步道、水面、橋、建築，正射影像判讀的樹冠、屋頂顏色、橋寬、映池石頭邊、旗台）
  * 蓋出來，平面的位置都是真的；高度大多沒有資料，是估的（下面的常數註明哪些是估的，找到資料再改）。
- * 一開始從左下（西南角，光復南路那邊）的入口進去，面向南邊那條步道往東。
+ * 記得上次站哪、面向哪（這個瀏覽器的 dr.park3d），下次接著走；第一次（或那裡現在站不到）從左下（西南角，光復南路那邊）的入口進去，面向南邊那條步道往東。
  * 電腦：拖曳轉頭、WASD 或方向鍵走路（Shift 快走）；手機：左下的搖桿走路、拖曳畫面轉頭。人走得到哪裡照 park.ts 的 personOk
  * （公園裡、不進建築、不下水，橋上可以），樹幹也擋。
  * 小法也在：跟汪星同一隻（PARK_DOGS，同一個時間在同一個地方做同一件事），用 dog.ts 同一組橢球照姿勢擺出來，毛畫成撐胖一點的橢球。
@@ -264,6 +264,24 @@ export interface Park3DOptions {
  */
 const START: Pt = [25.0381268, 121.5577984];
 const START_HEADING = 109;
+/** 上次在 3D 國館站哪、面向哪（localStorage 的 dr.park3d，只記在這個瀏覽器；每 2 秒有動就記一次、離開時記）；讀不到、現在站不到就從入口開始 */
+const LS_SPOT = 'dr.park3d';
+function loadSpot(): { at: Pt; yaw: number; pitch: number } | null {
+  try {
+    const v = JSON.parse(localStorage.getItem(LS_SPOT) ?? 'null') as { lat?: unknown; lng?: unknown; yaw?: unknown; pitch?: unknown } | null;
+    if (v && [v.lat, v.lng, v.yaw, v.pitch].every((x) => typeof x === 'number' && Number.isFinite(x))) return { at: [v.lat as number, v.lng as number], yaw: v.yaw as number, pitch: v.pitch as number };
+  } catch {
+    /* 沒有 localStorage（隱私模式）就從入口開始 */
+  }
+  return null;
+}
+function saveSpot(at: Pt, yaw: number, pitch: number): void {
+  try {
+    localStorage.setItem(LS_SPOT, JSON.stringify({ lat: +at[0].toFixed(7), lng: +at[1].toFixed(7), yaw: +yaw.toFixed(3), pitch: +pitch.toFixed(3) }));
+  } catch {
+    /* 存不了就算了 */
+  }
+}
 /** 小法：毛畫成把橢球撐胖（毛長的幾倍）；離你多遠以外不畫 */
 const FUR_PUFF = 0.7;
 const DOG_FAR_M = 120;
@@ -804,6 +822,16 @@ export function openPark3D(o: Park3DOptions): () => void {
   let pos: Pt = en(START);
   let yaw = (START_HEADING * Math.PI) / 180;
   let pitch = -0.05;
+  const lastSpot = loadSpot();
+  if (lastSpot && canStand(en(lastSpot.at))) [pos, yaw, pitch] = [en(lastSpot.at), lastSpot.yaw, lastSpot.pitch];
+  let saved = '';
+  const remember = (): void => {
+    const key = `${pos[0].toFixed(2)},${pos[1].toFixed(2)},${yaw.toFixed(2)},${pitch.toFixed(2)}`;
+    if (key === saved) return;
+    saved = key;
+    saveSpot(ll(pos[0], pos[1]), yaw, pitch);
+  };
+  let rememberedAt = 0;
   const keys = new Set<string>();
   /** 方向鍵左右按了多久（秒） */
   let turnHeld = 0;
@@ -1013,6 +1041,9 @@ export function openPark3D(o: Park3DOptions): () => void {
   window.addEventListener('keyup', onKey, true);
   const onBlur = (): void => keys.clear();
   window.addEventListener('blur', onBlur);
+  // 直接關掉分頁也記住站哪
+  const onHide = (): void => remember();
+  window.addEventListener('pagehide', onHide);
 
   $('.p3d-exit').addEventListener('click', () => close());
   $('.p3d-mark-toggle').addEventListener('click', () => {
@@ -1075,6 +1106,10 @@ export function openPark3D(o: Park3DOptions): () => void {
     }
     // 小法在附近就每一格都畫（會動）
     if (drawDog(now)) dirty = true;
+    if (now - rememberedAt > 2000) {
+      rememberedAt = now;
+      remember();
+    }
     if (!dirty) return;
     dirty = false;
     updateCamera();
@@ -1094,6 +1129,8 @@ export function openPark3D(o: Park3DOptions): () => void {
     window.removeEventListener('keydown', onKey, true);
     window.removeEventListener('keyup', onKey, true);
     window.removeEventListener('blur', onBlur);
+    window.removeEventListener('pagehide', onHide);
+    remember();
     scene.traverse((x) => {
       if (x instanceof THREE.Mesh) {
         x.geometry.dispose();
