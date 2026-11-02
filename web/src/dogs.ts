@@ -753,7 +753,8 @@ function tick(now: number): void {
     const n = (v: number): string => v.toFixed(1);
     if (heading) el.setAttribute('transform', `rotate(${heading.toFixed(1)} ${n(f.x)} ${n(f.y)})`);
     else el.removeAttribute('transform');
-    el.setAttribute('class', `woof-dog full ${d.seg.do}`);
+    // 走到樹下的（data-glint，park.ts 的 dogPart）留著 sweep-lit：雷達掃到時亮一下
+    el.setAttribute('class', `${el.dataset.glint ? 'sweep-lit ' : ''}woof-dog full ${d.seg.do}`);
     const hit = el.querySelector('.dog-hit');
     hit?.setAttribute('cx', n(f.hit[0]));
     hit?.setAttribute('cy', n(f.hit[1]));

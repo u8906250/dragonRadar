@@ -226,6 +226,8 @@ a.chip { display: inline-flex; align-items: center; text-decoration: none; }
 /* 會動的點（汪星的狗遠遠的白點）掃到時：白白的、光暈小一點（radar.ts 的 glint） */
 .radar-flash-square .sweep-glint { color: #fffdf4; }
 .radar-flash-square .sweep-glint .fx-glow { box-shadow: 0 0 calc(1.2 * var(--u)) currentColor; }
+/* 汪星的狗在樹冠底下、拉遠到還沒畫出狗：雷達掃到時明顯一點（光暈加一圈亮環，畫在樹上面） */
+.radar-flash-square .sweep-glint.strong .fx-glow { opacity: 0.9; box-shadow: 0 0 calc(3 * var(--u)) currentColor; }
 /* Leaflet 圖層 z-index 到 1000，用 isolation 把它關在自己的堆疊層裡，浮動按鈕才不會被蓋掉 */
 #map-view { position: relative; isolation: isolate; z-index: 0; border-radius: 14px; overflow: hidden; border: var(--border-w) solid var(--line); }
 #map { width: 100%; height: 100%; background: var(--panel); }
@@ -688,6 +690,8 @@ path.map-water-glint { animation: water-flow-map 1.1s linear infinite; }
 .radar .woof-dog .dog-shadow { fill-opacity: 0.18; }
 /* 遠遠的白點：跟銅像的點一樣大，淡淡的邊（仔細看找得到，不會一眼就看到） */
 .radar .woof-dog .dog-dot { fill: #fbf8f2; stroke: #8f846f; stroke-width: 0.5; }
+/* 拉遠到還沒畫出狗：看不到，只讓雷達掃到時亮一下（park.ts 的 dogPart） */
+.radar .woof-dog .dog-dot.far { opacity: 0; }
 .radar .woof-dog.walk .dog-go, .radar .woof-dog.run .dog-go { animation: dog-go var(--ms) linear var(--t) both; }
 @keyframes dog-go { from { transform: none; } to { transform: translate(var(--dx), var(--dy)); } }
 /*
@@ -1162,7 +1166,6 @@ body.letters-open { overflow: hidden; }
 .p3d.p3d-flying .p3d-top, .p3d.p3d-flying .p3d-panel, .p3d.p3d-flying .p3d-stick, .p3d.p3d-flying .p3d-hint, .p3d.p3d-flying .p3d-cross, .p3d.p3d-flying .p3d-msg { display: none; }
 
 /* ---- 收集卡（尋找小法，cards.ts）：卡片是一張實體卡的樣子，不跟主題換顏色；蓋在 3D 國館上面也看得到 ---- */
-.cards-count { margin-left: 2px; font-size: 12px; font-weight: 700; opacity: 0.7; }
 .tc-overlay { position: fixed; inset: 0; z-index: 1050; display: flex; padding: 16px; overflow-y: auto; overscroll-behavior: contain; background: rgba(10, 14, 20, 0.84); backdrop-filter: blur(4px); -webkit-backdrop-filter: blur(4px); font-family: var(--font); }
 .tc-box { display: flex; flex-direction: column; align-items: center; gap: 12px; width: 100%; max-width: 360px; margin: auto; }
 .tc-title { margin: 0; color: #fff; font-size: 22px; font-weight: 800; text-shadow: 0 2px 8px rgba(0, 0, 0, 0.45); }

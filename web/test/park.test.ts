@@ -288,8 +288,10 @@ describe('地球的雷達上的中山公園（跟汪星共用一份）', () => {
     const dog = PARK_DOGS[0].place(rand).from;
     // 地球的雷達上沒有
     expect(at(0.005, dog)).not.toContain('woof-dog');
-    // 汪星：拉遠到約 500 公尺外看不到，再近是一個點，拉近到約 30 公尺內畫出整隻 3D 的狗、點得到（名字不顯示）
-    expect(woofAt(1, dog)).not.toContain('woof-dog');
+    // 汪星：拉遠到約 500 公尺外看不到（約 2 km 內有一個看不到的點，只讓雷達掃到時明顯地亮一下，再遠就沒有），
+    // 再近是一個點，拉近到約 30 公尺內畫出整隻 3D 的狗、點得到（名字不顯示）
+    expect(woofAt(1, dog)).toMatch(/<circle class="dog-dot sweep-lit far" data-glint="strong"/);
+    expect(woofAt(3, dog)).not.toContain('woof-dog');
     expect(woofAt(0.3, dog)).toMatch(/class="woof-dog stand" data-dog="xiaofa" style="--t:-?\d+ms;--ms:\d+ms"><g class="dog-go"><circle class="dog-dot sweep-lit"/);
     expect(woofAt(0.04, dog)).toContain('dog-dot');
     // 點跟銅像的點一樣大
@@ -308,6 +310,14 @@ describe('地球的雷達上的中山公園（跟汪星共用一份）', () => {
     expect(Math.hypot(ax - C, ay - C)).toBeLessThan(2);
     // 在畫面外面就不畫
     expect(woofAt(0.005, hall)).not.toContain('woof-dog');
+    // 走到樹下（被樹冠蓋住）：雷達掃到時還是亮得出來（點、整隻都是），空地上的點照舊淡淡地亮
+    expect(woofAt(0.3, dog)).not.toContain('data-glint');
+    const keep = PARK_DOGS[0].seg;
+    const tree: [number, number] = [25.03992, 121.559261];
+    PARK_DOGS[0].seg = { ...keep!, from: tree, to: tree };
+    expect(woofAt(0.3, tree)).toMatch(/<circle class="dog-dot sweep-lit" data-glint="strong"/);
+    expect(woofAt(0.005, tree)).toContain('<g data-glint="strong" class="sweep-lit woof-dog full ');
+    PARK_DOGS[0].seg = keep;
   });
 
   it('小法 loves walking and sniffing more than a plain dog (sleep, drinking and running stay the same)', () => {

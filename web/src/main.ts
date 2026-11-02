@@ -11,7 +11,7 @@ import { X_MAX_WEIGHT, xLength } from './xcount';
 import { shortAddress, splitPlace } from './place';
 import { crowdOf, MapView, pinPicker, type BaseMap, type PinPicker } from './map';
 import { beep, ensureNotificationPermission, iosNeedsHomeScreen, notificationState, pushSubscription, pushSupported, registerServiceWorker, showBanner, systemNotify, unlockAudio, unsubscribePush } from './notify';
-import { cardCount, findCard, onCardsChange, openAlbum } from './cards';
+import { findCard, openAlbum } from './cards';
 import { Radar, SPACE_FROM_KM, type RadarRoute, type RadarStreets, type SpaceView } from './radar';
 import { DEFAULT_THEME_ID, getTheme, THEMES, type Theme } from './themes';
 import type { BottleOut, EventOut, Item, KeywordInfo, KeywordRules, MyBottles, MyReport, Origin, Phase, PickedBottle, RelatedPost, RouteOut, PreviewItem, RouteStop, RoutePreview, SubmitResult, FailedItem, EditItem, EditInput } from './types';
@@ -5285,15 +5285,8 @@ function wireControls(): void {
     if (taps.length >= 5) location.href = 'admin.html';
   });
   $('#admin-link').hidden = !lsGet(LS_ADMIN_TOKEN);
-  // 卡冊（尋找小法）：在選單裡（主題、通知旁邊），一開始就在，讓人知道可以去收集；按鈕上寫收集了幾張
-  const cardsBtn = $<HTMLButtonElement>('#cards-btn');
-  const showCardCount = (): void => {
-    const n = cardsBtn.querySelector('.cards-count');
-    if (n) n.textContent = cardCount();
-  };
-  onCardsChange(showCardCount);
-  showCardCount();
-  cardsBtn.addEventListener('click', () => openAlbum());
+  // 卡冊（尋找小法）：在選單裡（主題、通知旁邊），一開始就在，讓人知道可以去收集
+  $('#cards-btn').addEventListener('click', () => openAlbum());
   // 3D 的中山公園（測試中，大家都進得來；存了管理 token 的才能標記路燈、長椅）
   $('#park3d-btn').addEventListener('click', () => {
     const token = lsGet(LS_ADMIN_TOKEN) ?? undefined;

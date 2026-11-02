@@ -242,6 +242,8 @@ const STATUE_SVG = (() => {
  * （照這一段 CSS 移過去，styles.css 的 dog-go），約 30 公尺內（DOG_FULL，整隻約 2 個 SVG 單位高：電腦約 7 像素、手機約 2 像素）畫出整隻、點得到（dog-hit，點了坐下）
  */
 const DOG_FULL = INNER / 30;
+/** 拉遠到多少還有狗（畫出公園裡面的時候，外圈約 2 km 內）：比銅像的點還遠（STATUE_FROM）時看不到牠，只讓雷達掃到時亮一下 */
+const DOG_BLIP_FROM = DETAIL_PPM;
 /** 狗在哪個世界畫（汪星；算走多遠用這個世界的公尺），還沒畫過是地球 */
 let dogWorld: ParkGeom | null = null;
 /**
@@ -803,11 +805,16 @@ function dogPart(g: ParkGeom, c: ParkCanvas, dog: Dog): string {
   if (Math.hypot(a[0] + vx * u - c.rx, a[1] + vy * u - c.ry) - h > viewReach() + 2) return '';
   const f1 = (v: number): string => v.toFixed(1);
   const moving = s.do === 'walk' || s.do === 'run';
+  // 被樹冠蓋住（這一段的起點、中間、終點有在樹冠底下）、拉遠到還沒畫出狗：雷達掃到時亮得明顯一點（radar.ts 的 glint，畫在樹上面）
+  const far = c.ppm < STATUE_FROM;
+  const shaded = [s.from, s.to, [(s.from[0] + s.to[0]) / 2, (s.from[1] + s.to[1]) / 2] as Pt].some((q) => walkOf().shade(toM(q)));
+  const strong = far || shaded ? ' data-glint="strong"' : '';
   if (c.ppm < DOG_FULL) {
     const style = `--t:${-Math.round(d.e)}ms;--ms:${Math.round(s.ms)}ms${moving ? `;--dx:${f1(vx)}px;--dy:${f1(vy)}px` : ''}`;
-    // 遠遠的白點：跟銅像的點一樣大，淡淡的邊（不會一眼就看到），雷達掃過時淡淡地亮一下（sweep-lit，radar.ts 的 glint）；原地轉身的（以後腳為支點挪一點點）放在轉完的地方
+    // 遠遠的白點：跟銅像的點一樣大，淡淡的邊（不會一眼就看到），雷達掃過時淡淡地亮一下（sweep-lit，radar.ts 的 glint）；原地轉身的（以後腳為支點挪一點點）放在轉完的地方；
+    // 比銅像的點還遠的不畫點（far），只有掃到時亮一下
     const o = moving ? a : b;
-    return `<g class="woof-dog ${s.do}" data-dog="${dog.id}" style="${style}"><g class="dog-go"><circle class="dog-dot sweep-lit" cx="${f1(o[0])}" cy="${f1(o[1])}" r="${Math.min(4, Math.max(1.2, c.ppm * 0.75)).toFixed(1)}" /></g></g>`;
+    return `<g class="woof-dog ${s.do}" data-dog="${dog.id}" style="${style}"><g class="dog-go"><circle class="dog-dot sweep-lit${far ? ' far' : ''}"${strong} cx="${f1(o[0])}" cy="${f1(o[1])}" r="${Math.min(4, Math.max(1.2, c.ppm * 0.75)).toFixed(1)}" /></g></g>`;
   }
   // 面向哪：從起點往這個方向 1 公尺的那一點在畫面上的方向（順時針、0 是上）
   const face = (dir: Pt): number => {
@@ -816,7 +823,9 @@ function dogPart(g: ParkGeom, c: ParkCanvas, dog: Dog): string {
     return q ? (Math.atan2(q[0] - a[0], -(q[1] - a[1])) * 180) / Math.PI : 0;
   };
   animateDogs();
-  return dogMarkup(dog, d, { ax: a[0], ay: a[1], bx: b[0], by: b[1], b0: face(s.dir0), b1: face(s.dir), k: c.ppm, start: s.start }, dogHeading());
+  const html = dogMarkup(dog, d, { ax: a[0], ay: a[1], bx: b[0], by: b[1], b0: face(s.dir0), b1: face(s.dir), k: c.ppm, start: s.start }, dogHeading());
+  // 整隻畫出來的走到樹下：一樣讓雷達掃到時亮一下（整隻跟著走，光暈在牠現在的位置）
+  return shaded ? html.replace('<g class="woof-dog full ', `<g${strong} class="sweep-lit woof-dog full `) : html;
 }
 
 /**
@@ -1018,8 +1027,9 @@ export function parkSvg(g: ParkGeom, c: ParkCanvas): string {
   const flagBase = c.area([g.flagBase]);
   if (flagBase) out += `<path class="park-flag-base" d="${flagBase}" />`;
   out += bridgesSvg(g, c);
-  // 狗只在汪星：畫在樹的下面（走到樹下被樹冠蓋住），也在火箭、銅像後面（在它們後面一點時被擋住）
-  if (g.name === 'woof' && c.ppm >= STATUE_FROM) {
+  // 狗只在汪星：畫在樹的下面（走到樹下被樹冠蓋住，雷達掃到時還是亮得出來），也在火箭、銅像後面（在它們後面一點時被擋住）；
+  // 拉遠到外圈約 2 km 內就有（還沒畫出狗的時候只有雷達掃到時亮一下）
+  if (g.name === 'woof' && c.ppm >= DOG_BLIP_FROM) {
     dogWorld = g;
     for (const dog of PARK_DOGS) out += dogPart(g, c, dog);
   }

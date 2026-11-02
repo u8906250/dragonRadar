@@ -218,6 +218,12 @@ const FLASH_PARTS_CALM: typeof FLASH_PARTS = [
 const GLINT: Keyframe[] = [{ opacity: 0.5, transform: 'scale(1.2)' }, { opacity: 0, transform: 'scale(1.7)' }];
 const GLINT_CALM: Keyframe[] = [{ opacity: 0.5, transform: 'scale(1.4)' }, { opacity: 0, transform: 'scale(1.4)' }];
 const GLINT_MS = 900;
+/** 汪星的狗在樹冠底下、拉遠到還沒畫出狗（data-glint="strong"）：掃到時亮得明顯一點、多一圈亮環，看得出牠在哪 */
+const GLINT_STRONG: Keyframe[] = [{ opacity: 0.95, transform: 'scale(1)' }, { opacity: 0, transform: 'scale(2.4)' }];
+const GLINT_STRONG_CALM: Keyframe[] = [{ opacity: 0.9, transform: 'scale(1.6)' }, { opacity: 0, transform: 'scale(1.6)' }];
+const GLINT_STRONG_MS = 1300;
+/** 明顯的光暈多大（SVG 單位，最小、最大：拉近時整隻狗很大，光暈不跟著那麼大） */
+const GLINT_STRONG_R = [2.2, 6] as const;
 /** 光暈至少多大（螢幕像素；手機上白點只有 2 像素左右，光暈跟著那麼小會看不出來） */
 const GLINT_MIN_PX = 2.5;
 
@@ -1890,7 +1896,7 @@ export class Radar {
       this.flashDirty = false;
       this.flashTargets = Array.from(this.svg.querySelectorAll<SVGGElement>('[data-hit]'), (g) => ({ g, at: Number(g.dataset.hit) }));
     }
-    // 全螢幕鋪滿時沒有掃描線：掃到時亮一下也不用
+    // 全螢幕鋪滿時沒有掃描線：掃到時亮一下也不用（汪星的狗在樹下也不亮）
     if (this.fill) {
       this.lastSweepMs = -1;
       return;
@@ -1909,7 +1915,7 @@ export class Radar {
 
   /**
    * 會動的點（`.sweep-lit`，汪星的狗遠遠的白點）：每次看它現在在畫面哪裡（照著走的動畫、指北針、鎖定跟著走），
-   * 掃描線從上一次到這一次之間掃過它就淡淡地亮一下
+   * 掃描線從上一次到這一次之間掃過它就淡淡地亮一下（data-glint="strong"：樹下、拉遠看不到的狗，亮得明顯一點）
    */
   private sweepMovers(prev: number, t: number, periodMs: number): void {
     const dots = this.svg.querySelectorAll<SVGGraphicsElement>('.sweep-lit');
@@ -1921,21 +1927,27 @@ export class Radar {
       const x = C + (b.x + b.width / 2 - rect.x - rect.width / 2) * unit;
       const y = C + (b.y + b.height / 2 - rect.y - rect.height / 2) * unit;
       const at = (((this.sweepHitSec((Math.atan2(x - C, C - y) * 180) / Math.PI, Math.hypot(x - C, y - C)) * 1000) % periodMs) + periodMs) % periodMs;
-      if (prev <= t ? at > prev && at <= t : at > prev || at <= t) this.glint(x, y, Math.max(b.width / 2, GLINT_MIN_PX) * unit);
+      if (!(prev <= t ? at > prev && at <= t : at > prev || at <= t)) continue;
+      if (dot.dataset.glint === 'strong') this.glint(x, y, Math.max(GLINT_STRONG_R[0], Math.min(GLINT_STRONG_R[1], (b.width / 2) * unit)), true);
+      else this.glint(x, y, Math.max(b.width / 2, GLINT_MIN_PX) * unit);
     }
   }
 
   /** 會動的點亮一下：主圖層上面那一層在它現在的位置放一團淡淡的光暈，慢慢放大變淡（比光點的閃光淡、不擴散亮環），閃完拿掉 */
-  private glint(x: number, y: number, r: number): void {
+  private glint(x: number, y: number, r: number, strong = false): void {
     const at = document.createElement('div');
-    at.className = 'sweep-glint';
+    at.className = strong ? 'sweep-glint strong' : 'sweep-glint';
     Object.assign(at.style, { left: `calc(${x.toFixed(1)} * var(--u))`, top: `calc(${y.toFixed(1)} * var(--u))` });
     const glow = this.fxSpan('fx-glow', Math.max(1, r));
-    at.appendChild(glow);
+    const ring = strong ? this.fxSpan('fx-ring', Math.max(1, r)) : null;
+    at.append(glow, ...(ring ? [ring] : []));
     this.glintSquare.appendChild(at);
     if (typeof glow.animate !== 'function') return void at.remove();
-    const frames = this.calm?.matches ? GLINT_CALM : GLINT;
-    glow.animate(frames, { duration: GLINT_MS, easing: 'ease-out' }).onfinish = () => at.remove();
+    const calm = this.calm?.matches;
+    const frames = strong ? (calm ? GLINT_STRONG_CALM : GLINT_STRONG) : calm ? GLINT_CALM : GLINT;
+    const duration = strong ? GLINT_STRONG_MS : GLINT_MS;
+    ring?.animate(frames, { duration, easing: 'ease-out' });
+    glow.animate(frames, { duration, easing: 'ease-out' }).onfinish = () => at.remove();
   }
 
   /**

@@ -37,23 +37,13 @@ export function myCards(): CardClaim[] {
   }
 }
 
-let changed: (() => void) | null = null;
-/** 拿到的卡變了（卡冊按鈕上的數字跟著變） */
-export function onCardsChange(fn: () => void): void {
-  changed = fn;
-}
-
 function saveCards(list: CardClaim[]): void {
   try {
     localStorage.setItem(LS_CARDS, JSON.stringify(list));
   } catch {
     // 不能存：這次開著的期間還是看得到（卡在伺服器）
   }
-  changed?.();
 }
-
-/** 卡冊按鈕上的「1/1」 */
-export const cardCount = (): string => `${CARD_DEFS.filter((d) => myCards().some((c) => c.card === d.id)).length}/${CARD_DEFS.length}`;
 
 const esc = (s: string): string => s.replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
 const noText = (d: CardDef): string => `No.${String(d.no).padStart(3, '0')}`;
