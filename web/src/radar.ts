@@ -218,12 +218,15 @@ const FLASH_PARTS_CALM: typeof FLASH_PARTS = [
 const GLINT: Keyframe[] = [{ opacity: 0.5, transform: 'scale(1.2)' }, { opacity: 0, transform: 'scale(1.7)' }];
 const GLINT_CALM: Keyframe[] = [{ opacity: 0.5, transform: 'scale(1.4)' }, { opacity: 0, transform: 'scale(1.4)' }];
 const GLINT_MS = 900;
-/** 汪星的狗在樹冠底下、拉遠到還沒畫出狗（data-glint="strong"）：掃到時亮得明顯一點、多一圈亮環，看得出牠在哪 */
-const GLINT_STRONG: Keyframe[] = [{ opacity: 0.95, transform: 'scale(1)' }, { opacity: 0, transform: 'scale(2.4)' }];
-const GLINT_STRONG_CALM: Keyframe[] = [{ opacity: 0.9, transform: 'scale(1.6)' }, { opacity: 0, transform: 'scale(1.6)' }];
-const GLINT_STRONG_MS = 1300;
-/** 明顯的光暈多大（SVG 單位，最小、最大：拉近時整隻狗很大，光暈不跟著那麼大） */
-const GLINT_STRONG_R = [3.5, 7] as const;
+/**
+ * 汪星的狗（data-glint="strong"）：掃到時亮一下，比一般會動的點亮一點、多一圈淡淡的亮環（樹下、拉遠也看得出來），
+ * 但不刺眼：使用者要「稍微要找一下，但不能完全不亮」
+ */
+const GLINT_STRONG: Keyframe[] = [{ opacity: 0.6, transform: 'scale(1)' }, { opacity: 0, transform: 'scale(1.9)' }];
+const GLINT_STRONG_CALM: Keyframe[] = [{ opacity: 0.55, transform: 'scale(1.4)' }, { opacity: 0, transform: 'scale(1.4)' }];
+const GLINT_STRONG_MS = 1100;
+/** 狗的光暈多大（SVG 單位，最小、最大：拉近時整隻狗很大，光暈不跟著那麼大） */
+const GLINT_STRONG_R = [2.6, 5] as const;
 /** 光暈至少多大（螢幕像素；手機上白點只有 2 像素左右，光暈跟著那麼小會看不出來） */
 const GLINT_MIN_PX = 2.5;
 

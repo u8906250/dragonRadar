@@ -226,8 +226,9 @@ a.chip { display: inline-flex; align-items: center; text-decoration: none; }
 /* 會動的點（汪星的狗遠遠的白點）掃到時：白白的、光暈小一點（radar.ts 的 glint） */
 .radar-flash-square .sweep-glint { color: #fffdf4; }
 .radar-flash-square .sweep-glint .fx-glow { box-shadow: 0 0 calc(1.2 * var(--u)) currentColor; }
-/* 汪星的狗在樹冠底下、拉遠到還沒畫出狗：雷達掃到時明顯一點（光暈加一圈亮環，畫在樹上面） */
-.radar-flash-square .sweep-glint.strong .fx-glow { opacity: 0.9; box-shadow: 0 0 calc(3 * var(--u)) currentColor; }
+/* 汪星的狗：雷達掃到時亮一下（光暈加一圈淡淡的亮環，畫在樹上面；不刺眼，稍微要找一下） */
+.radar-flash-square .sweep-glint.strong .fx-glow { opacity: 0.8; box-shadow: 0 0 calc(2 * var(--u)) currentColor; }
+.radar-flash-square .sweep-glint.strong .fx-ring { border-width: 1px; opacity: 0.6; }
 /* Leaflet 圖層 z-index 到 1000，用 isolation 把它關在自己的堆疊層裡，浮動按鈕才不會被蓋掉 */
 #map-view { position: relative; isolation: isolate; z-index: 0; border-radius: 14px; overflow: hidden; border: var(--border-w) solid var(--line); }
 #map { width: 100%; height: 100%; background: var(--panel); }
