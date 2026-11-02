@@ -85,9 +85,9 @@ const SAKURA_GRASS_M = 6;
  * 只長在你附近 GRASS_NEAR 公尺內（遠的本來就小到看不到），每走 GRASS_CHUNK 公尺重排一次；路上不長
  */
 const GRASS_CELL = 0.22;
-const GRASS_NEAR = 10;
+const GRASS_NEAR = 14;
 /** 立體的草叢從離你多遠開始越來越矮，到 GRASS_NEAR 沒入地面（跟遠處的平面草接起來） */
-const GRASS_FADE = 5;
+const GRASS_FADE = 6;
 const GRASS_CHUNK = 5;
 const GRASS_MAX = 20000;
 /** 草地上那張一叢叢草的圖多大（公尺見方，重複鋪） */
@@ -438,14 +438,15 @@ export function openPark3D(o: Park3DOptions): () => void {
     const cv = document.createElement('canvas');
     [cv.width, cv.height] = [S, S];
     const g = cv.getContext('2d')!;
-    g.fillStyle = '#5d9440';
+    // 跟長出來的草（淺草綠）差不多的顏色，遠的、近的接得起來
+    g.fillStyle = '#78ab50';
     g.fillRect(0, 0, S, S);
     const wrapDraw = (f: (dx: number, dy: number) => void): void => {
       for (const dx of [-S, 0, S]) for (const dy of [-S, 0, S]) f(dx, dy);
     };
     for (let k = 0; k < 60; k++) {
       const [x, y, r] = [hash(k * 5 + 1) * S, hash(k * 5 + 2) * S, 30 + hash(k * 5 + 3) * 70];
-      g.fillStyle = hash(k * 5 + 4) < 0.5 ? 'rgba(130, 180, 80, 0.18)' : 'rgba(40, 90, 30, 0.16)';
+      g.fillStyle = hash(k * 5 + 4) < 0.5 ? 'rgba(160, 205, 105, 0.18)' : 'rgba(70, 120, 50, 0.14)';
       wrapDraw((dx, dy) => {
         g.beginPath();
         g.arc(x + dx, y + dy, r, 0, Math.PI * 2);
@@ -459,7 +460,7 @@ export function openPark3D(o: Park3DOptions): () => void {
       const len = 5 + 9 * hash(k + 7000);
       const a = (h - 0.5) * 0.9;
       const tone = hash(k + 9000);
-      g.strokeStyle = tone < 0.35 ? `rgba(${120 + Math.floor(h * 40)}, ${175 + Math.floor(h * 30)}, ${70 + Math.floor(h * 20)}, 0.9)` : tone < 0.75 ? `rgba(${70 + Math.floor(h * 30)}, ${130 + Math.floor(h * 30)}, ${45 + Math.floor(h * 20)}, 0.9)` : `rgba(${40 + Math.floor(h * 20)}, ${85 + Math.floor(h * 25)}, ${30 + Math.floor(h * 15)}, 0.9)`;
+      g.strokeStyle = tone < 0.45 ? `rgba(${150 + Math.floor(h * 30)}, ${195 + Math.floor(h * 20)}, ${95 + Math.floor(h * 20)}, 0.9)` : tone < 0.85 ? `rgba(${110 + Math.floor(h * 30)}, ${160 + Math.floor(h * 25)}, ${70 + Math.floor(h * 20)}, 0.9)` : `rgba(${75 + Math.floor(h * 20)}, ${120 + Math.floor(h * 20)}, ${50 + Math.floor(h * 15)}, 0.9)`;
       g.lineWidth = 1 + hash(k + 8000) * 1.2;
       wrapDraw((dx, dy) => {
         if (x + dx < -20 || x + dx > S + 20 || y + dy < -20 || y + dy > S + 20) return;
@@ -908,7 +909,7 @@ export function openPark3D(o: Park3DOptions): () => void {
   const tuftMesh = (() => {
     // 一小片一小片的草叢：兩片交叉的板子（寬 1、高 0.5，照每一叢的大小放大），貼著一張透明底、幾十根草葉的圖（三種），
     // 法線朝上（跟地面一樣受光，不會一片亮一片暗）
-    const cardTex = (seed: number): THREE.CanvasTexture => {
+    const cardTex = (seed: number): THREE.DataTexture => {
       const [W, H] = [256, 128];
       const cv = document.createElement('canvas');
       [cv.width, cv.height] = [W, H];
@@ -921,15 +922,31 @@ export function openPark3D(o: Park3DOptions): () => void {
         const lean = (r(3) - 0.5) * 0.8;
         const tone = r(4);
         // 跟地面的草差不多的綠（少一點深綠），近的、遠的接得起來
-        g.strokeStyle = tone < 0.45 ? '#a2cf6a' : tone < 0.9 ? '#8cbf58' : '#72aa48';
+        g.strokeStyle = tone < 0.45 ? '#b4db7c' : tone < 0.9 ? '#9ecc68' : '#86ba56';
         g.lineWidth = 2.5 + r(5) * 2;
         g.beginPath();
         g.moveTo(x, H);
         g.quadraticCurveTo(x + Math.sin(lean) * len * 0.3, H - len * 0.6, x + Math.sin(lean) * len, H - Math.cos(lean) * len);
         g.stroke();
       }
-      const t = new THREE.CanvasTexture(cv);
+      // 透明的地方也填草綠（只是看不到）：縮小的時候草葉邊緣混到的是綠色，不會混到黑色變暗；上下顛倒放進貼圖（貼圖的第一列在下面）
+      const src = g.getImageData(0, 0, W, H).data;
+      const out = new Uint8Array(W * H * 4);
+      for (let y = 0; y < H; y++)
+        for (let x = 0; x < W; x++) {
+          const [i, o] = [(y * W + x) * 4, ((H - 1 - y) * W + x) * 4];
+          const on = src[i + 3] >= 128;
+          out[o] = on ? src[i] : 0x9e;
+          out[o + 1] = on ? src[i + 1] : 0xcc;
+          out[o + 2] = on ? src[i + 2] : 0x68;
+          out[o + 3] = on ? 255 : 0;
+        }
+      const t = new THREE.DataTexture(out, W, H, THREE.RGBAFormat);
       t.colorSpace = THREE.SRGBColorSpace;
+      t.generateMipmaps = true;
+      t.minFilter = THREE.LinearMipmapLinearFilter;
+      t.magFilter = THREE.LinearFilter;
+      t.needsUpdate = true;
       return t;
     };
     const geo = (() => {
