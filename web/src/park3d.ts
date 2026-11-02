@@ -84,7 +84,7 @@ const SAKURA_GRASS_M = 6;
  * 草（像雷達上一叢叢的草）：草地上每 GRASS_CELL 公尺一格，大多長一叢（2～4 根往上長、往兩邊散開一點的草葉，7～16 公分），
  * 只長在你附近 GRASS_NEAR 公尺內（遠的本來就小到看不到），每走 GRASS_CHUNK 公尺重排一次；路上不長
  */
-const GRASS_CELL = 0.3;
+const GRASS_CELL = 0.22;
 const GRASS_NEAR = 10;
 /** 立體的草叢從離你多遠開始越來越矮，到 GRASS_NEAR 沒入地面（跟遠處的平面草接起來） */
 const GRASS_FADE = 5;
@@ -914,14 +914,14 @@ export function openPark3D(o: Park3DOptions): () => void {
       [cv.width, cv.height] = [W, H];
       const g = cv.getContext('2d')!;
       g.lineCap = 'round';
-      for (let k = 0; k < 35; k++) {
+      for (let k = 0; k < 45; k++) {
         const r = (n: number): number => hash(seed * 1000 + k * 7 + n);
         const x = 10 + r(1) * (W - 20);
         const len = H * (0.45 + 0.5 * r(2));
         const lean = (r(3) - 0.5) * 0.8;
         const tone = r(4);
         // 跟地面的草差不多的綠（少一點深綠），近的、遠的接得起來
-        g.strokeStyle = tone < 0.4 ? '#7fb24c' : tone < 0.85 ? '#68a243' : '#4f8a36';
+        g.strokeStyle = tone < 0.45 ? '#a2cf6a' : tone < 0.9 ? '#8cbf58' : '#72aa48';
         g.lineWidth = 2.5 + r(5) * 2;
         g.beginPath();
         g.moveTo(x, H);
