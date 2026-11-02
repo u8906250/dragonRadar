@@ -266,3 +266,13 @@ export function claimCard(card: string, place: string): Promise<Result<{ claim: 
 export function fetchMyCards(): Promise<Result<{ cards: CardClaim[] }>> {
   return deviceJson('/api/cards/mine');
 }
+
+/** 引繼碼（換手機）：舊手機產生，24 小時內在新手機輸入（只搬卡片） */
+export function makeTransferCode(): Promise<Result<{ code: string; expiresAt: number }>> {
+  return deviceJson('/api/cards/transfer', 'POST', {});
+}
+
+/** 新手機輸入引繼碼：舊手機的卡搬過來，回傳這台現在的卡 */
+export function redeemTransferCode(code: string): Promise<Result<{ cards: CardClaim[]; moved: number }>> {
+  return deviceJson('/api/cards/redeem', 'POST', { code });
+}

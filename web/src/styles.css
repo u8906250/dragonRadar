@@ -1198,4 +1198,18 @@ body.letters-open { overflow: hidden; }
 .tc-list { display: flex; flex-direction: column; align-items: center; gap: 18px; }
 .tc-slot { display: flex; flex-direction: column; align-items: center; gap: 10px; }
 .tc-slot.missing .tc-face { filter: saturate(0.6); }
+/* 換手機（引繼碼）：卡冊下面，深色的底上用淺色的字 */
+.tc-move { align-self: stretch; display: flex; flex-direction: column; align-items: center; gap: 10px; color: #f3eee4; }
+.tc-move-box { align-self: stretch; display: flex; flex-direction: column; gap: 8px; padding: 12px; background: rgba(18, 22, 28, 0.94); border: 1px solid rgba(243, 238, 228, 0.3); border-radius: var(--card-radius, 12px); font-size: 13px; line-height: 1.55; }
+.tc-move-box[hidden] { display: none; }
+.tc-move-box p { margin: 0; }
+.tc-move-box > .chip { align-self: flex-start; }
+.tc-code { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.tc-code[hidden] { display: none; }
+.tc-code-text { font-size: 24px; font-weight: 800; letter-spacing: 0.12em; font-variant-numeric: tabular-nums; user-select: all; }
+.tc-code-until { flex: 1 1 100%; opacity: 0.8; }
+.tc-redeem { display: flex; gap: 6px; }
+.tc-redeem input { flex: 1; min-width: 0; font: inherit; font-size: 16px; letter-spacing: 0.08em; text-transform: uppercase; padding: 8px 10px; border-radius: var(--card-radius, 12px); border: 1px solid rgba(243, 238, 228, 0.5); background: rgba(255, 255, 255, 0.95); color: #222; }
+.tc-move-msg { min-height: 1.2em; font-weight: 700; }
+.tc-move-msg.bad { color: #ffb4a2; }
 @media (prefers-reduced-motion: reduce) { .tc-inner { transition: none; } }

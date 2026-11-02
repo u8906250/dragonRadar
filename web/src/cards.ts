@@ -3,7 +3,7 @@
  * 卡片的內容寫在這裡（照片在 public/cards/），拿到的卡存在伺服器（裝置代碼，worker/src/cards.ts），
  * 這個瀏覽器另外記一份（dr.cards）：點小法時拿過的就不再問伺服器
  */
-import { claimCard, fetchMyCards, type CardClaim } from './api';
+import { claimCard, fetchMyCards, makeTransferCode, redeemTransferCode, type CardClaim } from './api';
 
 export interface CardDef {
   /** 跟伺服器的 CARDS 一樣 */
@@ -136,8 +136,8 @@ export async function findCard(id: string, place: string, onError: (msg: string)
 }
 
 /**
- * 卡冊：拿到的卡、還沒拿到的（背面加問號和一點點提示）。
- * 打開時再跟伺服器對一次（這個瀏覽器的紀錄被清掉、伺服器還有的補回來）
+ * 卡冊：拿到的卡、還沒拿到的（背面加問號和一點點提示），下面是「換手機」（引繼碼，只搬卡片）。
+ * 打開時再跟伺服器對一次（這個瀏覽器的紀錄被清掉、伺服器還有的補回來；搬到別台的拿掉）
  */
 export function openAlbum(): void {
   const list = (): string => {
@@ -150,13 +150,77 @@ export function openAlbum(): void {
     return `<div class="tc-head"><h2>卡冊</h2><span class="tc-count">已收集 ${got} / ${CARD_DEFS.length}</span><button type="button" class="chip" data-close>關閉</button></div>
       <div class="tc-list">${slots.join('')}</div>`;
   };
-  const el = overlay('tc-album', `<div class="tc-box">${list()}</div>`);
+  const move = `<div class="tc-move">
+      <button type="button" class="chip" data-move aria-expanded="false">換手機</button>
+      <div class="tc-move-box" hidden>
+        <p><b>舊手機</b>：產生引繼碼，24 小時內在新手機輸入，卡片會搬過去（這台就沒有了）。只搬卡片。</p>
+        <button type="button" class="chip" data-make>產生引繼碼</button>
+        <div class="tc-code" hidden><span class="tc-code-text"></span><button type="button" class="chip" data-copy>複製</button><small class="tc-code-until"></small></div>
+        <p><b>新手機</b>：輸入舊手機產生的引繼碼。</p>
+        <form class="tc-redeem" novalidate><input name="code" maxlength="12" placeholder="例如 KX7P-4M2Q" autocomplete="off" autocapitalize="characters" spellcheck="false" aria-label="引繼碼"><button type="submit" class="chip primary">搬過來</button></form>
+        <p class="tc-move-msg" role="status"></p>
+      </div>
+    </div>`;
+  const el = overlay('tc-album', `<div class="tc-box"><div class="tc-main">${list()}</div>${move}</div>`);
+  const redraw = (): void => {
+    const main = el.querySelector('.tc-main');
+    if (main) main.innerHTML = list();
+  };
+  const msg = (text: string, bad = false): void => {
+    const m = el.querySelector<HTMLElement>('.tc-move-msg');
+    if (!m) return;
+    m.textContent = text;
+    m.classList.toggle('bad', bad);
+  };
+  const box = el.querySelector<HTMLElement>('.tc-move-box')!;
+  el.querySelector<HTMLButtonElement>('[data-move]')?.addEventListener('click', (e) => {
+    box.hidden = !box.hidden;
+    (e.currentTarget as HTMLElement).setAttribute('aria-expanded', String(!box.hidden));
+  });
+  // 舊手機：產生引繼碼
+  const make = el.querySelector<HTMLButtonElement>('[data-make]')!;
+  make.addEventListener('click', async () => {
+    make.disabled = true;
+    msg('');
+    const r = await makeTransferCode();
+    make.disabled = false;
+    if (!r.ok) return msg(r.message, true);
+    const code = el.querySelector<HTMLElement>('.tc-code')!;
+    code.hidden = false;
+    code.querySelector('.tc-code-text')!.textContent = r.data.code;
+    const until = new Intl.DateTimeFormat('zh-TW', { timeZone: 'Asia/Taipei', month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).format(new Date(r.data.expiresAt * 1000));
+    code.querySelector('.tc-code-until')!.textContent = `${until} 前有效，用過一次就失效；再按一次產生新的，舊的就不能用了`;
+    make.textContent = '重新產生';
+  });
+  el.querySelector('[data-copy]')?.addEventListener('click', () => {
+    const t = el.querySelector('.tc-code-text')?.textContent ?? '';
+    void navigator.clipboard?.writeText(t).then(
+      () => msg('已複製引繼碼'),
+      () => msg('複製不了，請自己記下來', true),
+    );
+  });
+  // 新手機：輸入引繼碼
+  const form = el.querySelector<HTMLFormElement>('.tc-redeem')!;
+  form.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const input = form.querySelector<HTMLInputElement>('input')!;
+    const btn = form.querySelector<HTMLButtonElement>('button')!;
+    if (!input.value.trim()) return msg('請輸入引繼碼', true);
+    btn.disabled = true;
+    msg('搬卡片中…');
+    const r = await redeemTransferCode(input.value);
+    btn.disabled = false;
+    if (!r.ok) return msg(r.message, true);
+    saveCards(r.data.cards.filter(isClaim));
+    redraw();
+    input.value = '';
+    msg(r.data.moved > 0 ? `搬好了，${r.data.moved} 張卡搬到這台` : '搬好了（這台原本就有比較早拿到的卡）');
+  });
   void fetchMyCards().then((r) => {
     if (!r.ok || !el.isConnected) return;
     const local = myCards();
-    if (r.data.cards.length === local.length && r.data.cards.every((c) => local.some((x) => x.card === c.card))) return;
+    if (r.data.cards.length === local.length && r.data.cards.every((c) => local.some((x) => x.card === c.card && x.serial === c.serial))) return;
     saveCards(r.data.cards.filter(isClaim));
-    const box = el.querySelector('.tc-box');
-    if (box) box.innerHTML = list();
+    redraw();
   });
 }
