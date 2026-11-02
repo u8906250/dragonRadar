@@ -17,8 +17,11 @@ import { dogParts } from './dog';
 import { dogPose, dogTurned } from './dogs';
 import { PARK_DOGS, personOk } from './park';
 import { ZHONGSHAN_PARK as Z } from './zhongshan';
+import { PATH_STEP, PATH_WIDTHS } from './zhongshan-widths';
 
 type Pt = [number, number];
+/** 線上的一點和那裡的寬（公尺） */
+type WP = [number, number, number];
 
 /** 公尺座標的原點（跟 park.ts 走路的一樣）：x 往東、z 往南（北是 -z）、y 往上 */
 const O: Pt = [25.0394, 121.5596];
@@ -65,7 +68,7 @@ const FENCE_H = 1.0;
 const FENCE_PANEL = 2.4;
 /** 入口兩邊再多拿掉幾公尺的牆（入口大一點） */
 const GATE_CLEAR = 3;
-/** 步道寬（估的；OSM 只有中線） */
+/** 步道寬：照配置圖量的（zhongshan-widths.ts）；量不到、對不上的用這個（估的；OSM 只有中線） */
 const PATH_W = 2;
 /**
  * 南邊的櫻花步道（預設入口那一條，Z.sakuraLane）照使用者給的照片畫：深灰色的鋪面約 3.6 公尺寬，中間兩條淺色的磁磚線
@@ -193,6 +196,30 @@ function stripGeo(lines: Pt[][], w: number, y: number): THREE.BufferGeometry {
       ];
       for (const k of [0, 1, 2, 0, 2, 3]) pos.push(q[k][0], y, -q[k][1]);
     }
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+  g.computeVertexNormals();
+  return g;
+}
+/** 寬度一段段不一樣的帶子（每一點照前後兩段的方向平均往兩邊各 w/2），放在 y 高 */
+function varStripGeo(lines: WP[][], y: number): THREE.BufferGeometry {
+  const pos: number[] = [];
+  for (const l of lines) {
+    const side = l.map((p, i) => {
+      const [a, b] = [l[Math.max(0, i - 1)], l[Math.min(l.length - 1, i + 1)]];
+      const [dx, dy] = [b[0] - a[0], b[1] - a[1]];
+      const len = Math.hypot(dx, dy) || 1;
+      const [nx, ny] = [(-dy / len) * (p[2] / 2), (dx / len) * (p[2] / 2)];
+      return [
+        [p[0] + nx, p[1] + ny],
+        [p[0] - nx, p[1] - ny],
+      ];
+    });
+    for (let i = 1; i < l.length; i++) {
+      const q = [side[i - 1][0], side[i - 1][1], side[i][1], side[i][0]];
+      for (const k of [0, 1, 2, 0, 2, 3]) pos.push(q[k][0], y, -q[k][1]);
+    }
+  }
   const g = new THREE.BufferGeometry();
   g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
   g.computeVertexNormals();
@@ -425,9 +452,9 @@ export function openPark3D(o: Park3DOptions): () => void {
   add(flatGeo(Z.green.map((r) => shapeOf(ringEN(r))), 0.02), grass);
   const inWater = (p: Pt): boolean => waters.some((w) => inside(p, w.outer) && !w.islands.some((i) => inside(p, i)));
   // 步道：經過水面的那幾段不畫（橋另外蓋）
-  const splitWet = (l: Pt[]): Pt[][] => {
-    const out: Pt[][] = [];
-    let cur: Pt[] = [];
+  const splitWet = (l: WP[]): WP[][] => {
+    const out: WP[][] = [];
+    let cur: WP[] = [];
     for (let i = 0; i < l.length; i++) {
       if (i > 0 && inWater([(l[i - 1][0] + l[i][0]) / 2, (l[i - 1][1] + l[i][1]) / 2])) {
         if (cur.length > 1) out.push(cur);
@@ -438,9 +465,9 @@ export function openPark3D(o: Park3DOptions): () => void {
     return out;
   };
   /** 一條線只留公園外框裡面的部分（穿過外框的地方切開） */
-  const clipIn = (l: Pt[]): Pt[][] => {
-    const out: Pt[][] = [];
-    let cur: Pt[] = [];
+  const clipIn = (l: WP[]): WP[][] => {
+    const out: WP[][] = [];
+    let cur: WP[] = [];
     for (let i = 1; i < l.length; i++) {
       const [a, b] = [l[i - 1], l[i]];
       // 這一段跟外框的交點（0～1）
@@ -456,9 +483,10 @@ export function openPark3D(o: Park3DOptions): () => void {
       }
       ts.sort((x, y) => x - y);
       for (let k = 1; k < ts.length; k++) {
-        const at = (t: number): Pt => [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t];
+        const at = (t: number): WP => [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t, a[2] + (b[2] - a[2]) * t];
         const [p, q] = [at(ts[k - 1]), at(ts[k])];
-        if (inside(at((ts[k - 1] + ts[k]) / 2), outline)) {
+        const mid = at((ts[k - 1] + ts[k]) / 2);
+        if (inside([mid[0], mid[1]], outline)) {
           if (!cur.length) cur.push(p);
           cur.push(q);
         } else if (cur.length) {
@@ -470,8 +498,22 @@ export function openPark3D(o: Park3DOptions): () => void {
     if (cur.length > 1) out.push(cur);
     return out;
   };
-  const pathLines = Z.paths.flatMap((l, i) => (i === Z.sakuraLane ? [] : clipIn(l.map(en)).flatMap(splitWet)));
-  const sakura = clipIn(Z.paths[Z.sakuraLane].map(en)).flatMap(splitWet);
+  /** 一條步道照 PATH_STEP 公尺一點加密，每一點帶著配置圖量的寬（zhongshan-widths.ts；對不上就用 PATH_W） */
+  const withWidths = (i: number): WP[] => {
+    const l = Z.paths[i].map(en);
+    const out: Pt[] = [];
+    for (let k = 1; k < l.length; k++) {
+      const [a, b] = [l[k - 1], l[k]];
+      const n = Math.max(1, Math.floor(Math.hypot(b[0] - a[0], b[1] - a[1]) / PATH_STEP));
+      for (let j = 0; j < n; j++) out.push([a[0] + ((b[0] - a[0]) * j) / n, a[1] + ((b[1] - a[1]) * j) / n]);
+    }
+    out.push(l[l.length - 1]);
+    const ws = PATH_WIDTHS[i];
+    return out.map(([x, y], j) => [x, y, ws && ws.length === out.length ? ws[j] : PATH_W]);
+  };
+  const flat = (ls: WP[][]): Pt[][] => ls.map((l) => l.map(([x, y]): Pt => [x, y]));
+  const pathLines = Z.paths.flatMap((_, i) => (i === Z.sakuraLane ? [] : clipIn(withWidths(i)).flatMap(splitWet)));
+  const sakura = flat(clipIn(Z.paths[Z.sakuraLane].map(([a, b]): WP => [...en([a, b]), SAKURA_W])).flatMap(splitWet));
   /** 補的草地（一塊塊四邊形，草也長在上面） */
   const fillQuads: Pt[][] = [];
   // 櫻花步道兩邊旁邊是草地的地方（離路邊 SAKURA_GRASS_M 內有草地），路邊到草地之間補成草地（灰色的路直接接到草地）；
@@ -526,7 +568,7 @@ export function openPark3D(o: Park3DOptions): () => void {
     };
     fillBeside(sakura, SAKURA_W / 2);
     // 西南角入口那條沙土路（paths 最後一條，接到櫻花步道）兩邊也一樣
-    fillBeside(clipIn(Z.paths[Z.paths.length - 1].map(en)), PATH_W / 2);
+    fillBeside(flat(clipIn(Z.paths[Z.paths.length - 1].map(([a, b]): WP => [...en([a, b]), PATH_W]))), PATH_W / 2);
     const g = new THREE.BufferGeometry();
     g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
     // 草的圖照公園的座標鋪（跟草地一樣）
@@ -534,7 +576,7 @@ export function openPark3D(o: Park3DOptions): () => void {
     g.computeVertexNormals();
     add(g, new THREE.MeshLambertMaterial({ color: 0x93b973, map: grassTex, side: THREE.DoubleSide }));
   }
-  add(stripGeo(pathLines, PATH_W, 0.035), mat(0xd8cdb8));
+  add(varStripGeo(pathLines, 0.035), mat(0xd8cdb8));
   // 櫻花步道：深灰色、比較寬，上面兩條淺色的線（中線往兩邊平移）
   add(stripGeo(sakura, SAKURA_W, 0.04), mat(0x9d9b96));
   /** 一條線往左（正）或往右平移 d 公尺（每一點照前後兩段的方向平均） */
@@ -768,7 +810,7 @@ export function openPark3D(o: Park3DOptions): () => void {
   // 樹幹不長在步道上：樹的中心（樹幹）離步道中線不到半個步道寬（櫻花步道比較寬）加樹幹、0.3 公尺的，整棵往旁邊推到步道外面
   // （樹冠是航照的範圍，樹幹在哪本來就是照樹冠中心估的；推了還在步道上就再推，最多 4 次；推到水裡、建築裡的不畫）
   const pathSegs = [
-    ...pathLines.flatMap((l) => l.slice(1).map((q, i): [Pt, Pt, number] => [l[i], q, PATH_W / 2])),
+    ...pathLines.flatMap((l) => l.slice(1).map((q, i): [Pt, Pt, number] => [[l[i][0], l[i][1]], [q[0], q[1]], (l[i][2] + q[2]) / 4])),
     ...sakura.flatMap((l) => l.slice(1).map((q, i): [Pt, Pt, number] => [l[i], q, SAKURA_W / 2])),
   ];
   const offPath = (at: Pt, r: number): Pt | null => {
