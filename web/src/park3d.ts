@@ -59,8 +59,18 @@ const PATH_W = 2;
 /** 樹多高（估的：照樹冠大小，最高 20 公尺）、樹幹多粗 */
 const treeH = (r: number): number => Math.min(20, 2.5 + 1.9 * r);
 const trunkR = (r: number): number => Math.max(0.1, Math.min(0.4, r * 0.06));
-/** 標記畫出來的大小（估的）：路燈多高 */
-const LAMP_H = 3.6;
+/**
+ * 標記畫出來的樣子照使用者給的公園照片（南邊那條步道）：路燈是黑色的細燈桿（底下一段粗一點的座），上面方形、上寬下窄的白玻璃燈箱，
+ * 黑色的框和尖頂蓋、頂上一顆小圓頭；長椅（第二張照片看得清楚）是一整塊淺灰色、細細點點的花崗石，側面看像一張椅子：前面坐的地方、
+ * 後面圓圓往上翹的靠背，底下往內收成比較窄的腳（BENCH_PROFILE 沿著長邊拉長）。大小是看照片估的：路燈約 4 公尺高，長椅約 1.6 公尺長
+ */
+const LAMP_POLE_H = 3.3;
+const BENCH_LEN = 1.6;
+/** 石椅的側面（往後、往上，公尺；前面是 -）：從腳的前面往後繞一圈 */
+const BENCH_PROFILE: Pt[] = [
+  [-0.07, 0], [0.11, 0], [0.19, 0.14], [0.25, 0.34], [0.27, 0.55], [0.25, 0.71], [0.19, 0.79], [0.12, 0.79], [0.07, 0.73],
+  [0.04, 0.6], [0.0, 0.49], [-0.07, 0.44], [-0.19, 0.43], [-0.26, 0.41], [-0.29, 0.37], [-0.27, 0.31], [-0.2, 0.22], [-0.12, 0.1],
+];
 
 /** 眼睛多高、走多快（公尺／秒，Shift 快走 2.5 倍）、點地面最遠多遠 */
 const EYE = 1.6;
@@ -520,9 +530,9 @@ export function openPark3D(o: Park3DOptions): () => void {
   scene.add(markGroup);
   const markMats = {
     pole: mat(0x4a4f55),
-    light: mat(0xfff0c8, { emissive: 0xffd98a, emissiveIntensity: 0.6 }),
-    wood: mat(0x9a6b45),
-    iron: mat(0x3f4448),
+    black: mat(0x1f2124),
+    glass: mat(0xfbf6ea, { emissive: 0xffe6b8, emissiveIntensity: 0.45 }),
+    granite: mat(0xc9c7c1),
     bin: mat(0x3e6b4c),
     pin: mat(0xd2483b),
   };
@@ -530,19 +540,35 @@ export function openPark3D(o: Park3DOptions): () => void {
   /** 一個標記的樣子（原點在地上，往北是 -z；長椅坐的人面向 -z） */
   function markModel(kind: ParkMarkKind, ghost: boolean): THREE.Group {
     const g = new THREE.Group();
-    const put = (geo: THREE.BufferGeometry, m: THREE.Material, x: number, y: number, z: number): void => {
+    const put = (geo: THREE.BufferGeometry, m: THREE.Material, x: number, y: number, z: number, turn?: { x?: number; y?: number; z?: number }): void => {
       const mesh = new THREE.Mesh(geo, ghost ? ghostMat : m);
       mesh.position.set(x, y, z);
+      if (turn) mesh.rotation.set(turn.x ?? 0, turn.y ?? 0, turn.z ?? 0);
       mesh.castShadow = !ghost;
       g.add(mesh);
     };
+    /** 方形、上下不一樣寬（四個角朝斜的方向轉 45 度，邊才是正的） */
+    const square = (top: number, bottom: number, h: number): THREE.BufferGeometry => new THREE.CylinderGeometry(top, bottom, h, 4).rotateY(Math.PI / 4);
     if (kind === 'lamp') {
-      put(new THREE.CylinderGeometry(0.05, 0.08, LAMP_H, 10), markMats.pole, 0, LAMP_H / 2, 0);
-      put(new THREE.SphereGeometry(0.22, 14, 10), markMats.light, 0, LAMP_H + 0.15, 0);
+      const H = LAMP_POLE_H;
+      put(new THREE.CylinderGeometry(0.09, 0.12, 0.6, 12), markMats.black, 0, 0.3, 0);
+      put(new THREE.CylinderGeometry(0.045, 0.06, H - 0.6, 10), markMats.black, 0, 0.6 + (H - 0.6) / 2, 0);
+      put(new THREE.CylinderGeometry(0.07, 0.07, 0.08, 10), markMats.black, 0, H + 0.04, 0);
+      put(square(0.13, 0.07, 0.1), markMats.black, 0, H + 0.13, 0);
+      put(square(0.2, 0.14, 0.34), markMats.glass, 0, H + 0.35, 0);
+      put(square(0.215, 0.215, 0.04), markMats.black, 0, H + 0.54, 0);
+      put(new THREE.ConeGeometry(0.27, 0.2, 4).rotateY(Math.PI / 4), markMats.black, 0, H + 0.66, 0);
+      put(new THREE.SphereGeometry(0.035, 10, 8), markMats.black, 0, H + 0.79, 0);
     } else if (kind === 'bench') {
-      put(new THREE.BoxGeometry(1.8, 0.07, 0.45), markMats.wood, 0, 0.45, 0);
-      put(new THREE.BoxGeometry(1.8, 0.4, 0.06), markMats.wood, 0, 0.72, 0.22);
-      for (const x of [-0.75, 0.75]) put(new THREE.BoxGeometry(0.07, 0.45, 0.45), markMats.iron, x, 0.22, 0);
+      // 一整塊花崗石：側面照 BENCH_PROFILE 圓圓的（曲線），沿著長邊拉長、兩頭邊緣磨圓；坐的人面向 -z
+      const side = new THREE.Shape();
+      side.moveTo(...BENCH_PROFILE[0]);
+      side.splineThru(BENCH_PROFILE.slice(1).map(([u, v]) => new THREE.Vector2(u, v)));
+      side.closePath();
+      const geo = new THREE.ExtrudeGeometry(side, { depth: BENCH_LEN - 0.06, bevelEnabled: true, bevelThickness: 0.03, bevelSize: 0.02, bevelSegments: 3, curveSegments: 6 });
+      geo.rotateY(-Math.PI / 2);
+      geo.translate((BENCH_LEN - 0.06) / 2, 0, 0);
+      put(geo, markMats.granite, 0, 0, 0);
     } else if (kind === 'bin') {
       put(new THREE.CylinderGeometry(0.25, 0.22, 0.85, 14), markMats.bin, 0, 0.425, 0);
     } else {
