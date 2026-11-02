@@ -84,8 +84,10 @@ const SAKURA_GRASS_M = 6;
  * 草（像雷達上一叢叢的草）：草地上每 GRASS_CELL 公尺一格，大多長一叢（2～4 根往上長、往兩邊散開一點的草葉，7～16 公分），
  * 只長在你附近 GRASS_NEAR 公尺內（遠的本來就小到看不到），每走 GRASS_CHUNK 公尺重排一次；路上不長
  */
-const GRASS_CELL = 0.2;
-const GRASS_NEAR = 12;
+const GRASS_CELL = 0.3;
+const GRASS_NEAR = 10;
+/** 立體的草叢從離你多遠開始越來越矮，到 GRASS_NEAR 沒入地面（跟遠處的平面草接起來） */
+const GRASS_FADE = 5;
 const GRASS_CHUNK = 5;
 const GRASS_MAX = 20000;
 /** 草地上那張一叢叢草的圖多大（公尺見方，重複鋪） */
@@ -912,14 +914,15 @@ export function openPark3D(o: Park3DOptions): () => void {
       [cv.width, cv.height] = [W, H];
       const g = cv.getContext('2d')!;
       g.lineCap = 'round';
-      for (let k = 0; k < 70; k++) {
+      for (let k = 0; k < 35; k++) {
         const r = (n: number): number => hash(seed * 1000 + k * 7 + n);
         const x = 10 + r(1) * (W - 20);
         const len = H * (0.45 + 0.5 * r(2));
         const lean = (r(3) - 0.5) * 0.8;
         const tone = r(4);
-        g.strokeStyle = tone < 0.3 ? '#8cbf55' : tone < 0.7 ? '#5f9a3c' : '#3f7a2a';
-        g.lineWidth = 2.5 + r(5) * 2.5;
+        // 跟地面的草差不多的綠（少一點深綠），近的、遠的接得起來
+        g.strokeStyle = tone < 0.4 ? '#7fb24c' : tone < 0.85 ? '#68a243' : '#4f8a36';
+        g.lineWidth = 2.5 + r(5) * 2;
         g.beginPath();
         g.moveTo(x, H);
         g.quadraticCurveTo(x + Math.sin(lean) * len * 0.3, H - len * 0.6, x + Math.sin(lean) * len, H - Math.cos(lean) * len);
@@ -1004,13 +1007,17 @@ export function openPark3D(o: Park3DOptions): () => void {
       for (let j = j0; j <= j1; j++) {
         if (cellRnd(i, j, 0) < 0.1) continue;
         const p: Pt = [(i + cellRnd(i, j, 1)) * GRASS_CELL, (j + cellRnd(i, j, 2)) * GRASS_CELL];
-        if (Math.hypot(p[0] - pos[0], p[1] - pos[1]) > GRASS_NEAR || !onLawn(p) || onPath(p)) continue;
+        const dist = Math.hypot(p[0] - pos[0], p[1] - pos[1]);
+        if (dist > GRASS_NEAR || !onLawn(p) || onPath(p)) continue;
+        // 越遠越矮，到 GRASS_NEAR 沒入地面
+        const fade = Math.min(1, Math.max(0, (GRASS_NEAR - dist) / (GRASS_NEAR - GRASS_FADE)));
+        if (fade < 0.08) continue;
         const v = Math.floor(cellRnd(i, j, 3) * 3);
         if (counts[v] >= GRASS_MAX) continue;
-        // 草叢 0.28～0.42 公尺寬、高一半（14～21 公分）
-        const size = 0.28 + 0.14 * cellRnd(i, j, 4);
+        // 草叢 0.18～0.26 公尺寬、高一半（9～13 公分），越遠越矮
+        const size = 0.18 + 0.08 * cellRnd(i, j, 4);
         q.setFromAxisAngle(up, cellRnd(i, j, 5) * Math.PI * 2);
-        m.compose(new THREE.Vector3(p[0], 0.02, -p[1]), q, new THREE.Vector3(size, size * (0.8 + 0.4 * cellRnd(i, j, 6)), size));
+        m.compose(new THREE.Vector3(p[0], 0.02, -p[1]), q, new THREE.Vector3(size, size * (0.8 + 0.4 * cellRnd(i, j, 6)) * fade, size));
         tuftMesh[v].setMatrixAt(counts[v]++, m);
       }
     tuftMesh.forEach((im, v) => {
