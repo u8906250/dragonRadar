@@ -488,6 +488,8 @@ export interface FailedItem {
   place: string | null;
   /** 判讀出來的主題（「遊行」「講座」），修改資料時帶回表單 */
   topic?: string | null;
+  /** 關鍵字（修改資料時帶回表單）；沒有就不記 */
+  tags?: string[];
   reason: 'incomplete' | 'unlocated' | 'approximate' | 'already_over' | 'too_far_in_future' | 'low_confidence';
   missing?: ActivityPart[];
   /** reason = 'approximate'（車掃的站只定位到鄉鎮區、路）：定位到哪裡 */
@@ -865,7 +867,8 @@ async function planActivities(env: Env, post: PostRow, extracted: ExtractedEvent
     if (dateOnly) missing.push('start');
     // 跨過午夜、模型把結束寫成同一天（22:00–02:00）：結束是隔天；差更多的是讀錯，當成沒寫結束
     if (start !== null && end !== null && end <= start) ex.end_at = end + DAY_SEC > start ? new Date((end + DAY_SEC) * 1000).toISOString() : null;
-    const which = { title: ex.title.trim() || null, place: ex.place_text ?? ex.place_query ?? selfPlace ?? null, topic: topicOf(ex.extra) };
+    const exTags = tagsOf(ex.extra);
+    const which = { title: ex.title.trim() || null, place: ex.place_text ?? ex.place_query ?? selfPlace ?? null, topic: topicOf(ex.extra), ...(exTags.length > 0 ? { tags: exTags } : {}) };
     if (missing.length > 0) {
       // 讀得到的時間也帶著，回報的人修改資料時不用重填
       const fixedEnd = parseIsoToUnix(ex.end_at);
@@ -924,6 +927,8 @@ export interface ManualActivity {
   title: string;
   /** 主題（「遊行」「講座」）；沒填是 null */
   topic?: string | null;
+  /** 回報的人填的關鍵字（全部拿掉是空的）；舊版網頁沒送是 undefined（沿用判讀出來的） */
+  tags?: string[];
   startAt: number;
   endAt: number | null;
   place: string;
@@ -997,12 +1002,13 @@ export async function planManual(env: Env, acts: ManualActivity[], now: number, 
       // 時間是表單送來的時間點，不用換算，時區只用來顯示當地時間
       country: found.country,
       timezone: found.tz,
-      // 關鍵字沿用判讀出來的（改資料不重新判讀）
-      extra: tags.length > 0 ? { ...(topicExtra(a.topic) ?? {}), tags } : topicExtra(a.topic),
+      // 關鍵字：回報的人填的（全部拿掉也記下來），舊版網頁沒送的沿用判讀出來的（改資料不重新判讀）
+      extra: a.tags !== undefined || tags.length > 0 ? { ...(topicExtra(a.topic) ?? {}), tags: a.tags ?? tags } : topicExtra(a.topic),
     };
     const located = { point: found.point, approxArea: found.approxArea };
     const r = await planEvent(env, ex, now, deadline, undefined, located, undefined, OPEN_END_SEC);
-    const which = { title: a.title, place: a.place, topic: a.topic ?? null };
+    const kept = a.tags ?? tags;
+    const which = { title: a.title, place: a.place, topic: a.topic ?? null, ...(kept.length > 0 ? { tags: kept } : {}) };
     if (r.plan && r.plan.lat === null) {
       items.push({ group, plan: null, reason: 'unlocated', fail: { ...which, reason: 'unlocated', ...planWhen(r.plan) } });
       continue;
@@ -1566,7 +1572,7 @@ async function saveRoutes(env: Env, postId: string, items: PlanItem[], now: numb
 }
 
 /** planEvent 沒排上去的原因換成回報結果用的說明；重複的不算（回報結果會列出雷達上的那一場） */
-function failOf(r: { reason: string; start?: number; end?: number; tz?: string | null }, which: Pick<FailedItem, 'title' | 'place' | 'topic'>, endOpen: boolean): FailedItem | undefined {
+function failOf(r: { reason: string; start?: number; end?: number; tz?: string | null }, which: Pick<FailedItem, 'title' | 'place' | 'topic' | 'tags'>, endOpen: boolean): FailedItem | undefined {
   if (r.reason === 'low_confidence') return { ...which, reason: 'low_confidence' };
   if (r.reason !== 'already_over' && r.reason !== 'too_far_in_future') return undefined;
   return {
@@ -1798,8 +1804,13 @@ async function planPostings(env: Env, post: PostRow, list: ExtractedEvent[], now
 /** extra 欄位（JSON）讀出來；壞掉的當沒有 */
 /** 洋流的活動的關鍵字（events.extra 的 tags）；沒有是空的 */
 export function tagsOf(extra: Record<string, unknown> | string | null | undefined): string[] {
+  return savedTagsOf(extra) ?? [];
+}
+
+/** 記下來的關鍵字（回報的人全部拿掉的是空的）；從來沒記過是 null */
+export function savedTagsOf(extra: Record<string, unknown> | string | null | undefined): string[] | null {
   const o = typeof extra === 'string' ? parseExtra(extra) : extra;
-  return Array.isArray(o?.tags) ? o.tags.filter((t): t is string => typeof t === 'string') : [];
+  return Array.isArray(o?.tags) ? o.tags.filter((t): t is string => typeof t === 'string') : null;
 }
 
 /** 洋流的活動的主題（events.extra 的 topic）；沒有是 null */

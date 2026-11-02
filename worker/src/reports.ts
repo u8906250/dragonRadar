@@ -6,8 +6,8 @@
  */
 import type { Env } from './env';
 import { DEFAULT_MODULE, isModule, MODULE_IDS, moduleOf, type ModuleId } from './modules';
-import { ADDRESS_BUDGET_MS, atLocalTimes, commitPlan, detectEnded, getEvent, getPost, locateTypedPlace, MAX_FUTURE_SEC, planManual, planPost, processPost, storePost, tagsOf, topicOf, type EventOut, type FailedItem, type ManualActivity, type PlanItem, type PostRow } from './events';
-import { cleanTopic, type ActivityPart, type EventKind } from './extract';
+import { ADDRESS_BUDGET_MS, atLocalTimes, commitPlan, detectEnded, getEvent, getPost, locateTypedPlace, MAX_FUTURE_SEC, planManual, planPost, processPost, savedTagsOf, storePost, tagsOf, topicOf, type EventOut, type FailedItem, type ManualActivity, type PlanItem, type PostRow } from './events';
+import { cleanTags, cleanTopic, type ActivityPart, type EventKind } from './extract';
 import { fetchThreadsPost, resolveThreadsLink, shortcodeToUnix, withLocationTag } from './sources/link';
 import { sha1Hex } from './sources/text';
 
@@ -205,6 +205,8 @@ export interface EditItem {
   title: string;
   /** 主題（「遊行」「講座」）；判讀不出來是 null */
   topic?: string | null;
+  /** 關鍵字（#洋流 #飄帶，不含 #）；沒有就不帶 */
+  tags?: string[];
   startAt: number | null;
   dateOnly?: boolean;
   endAt: number | null;
@@ -219,18 +221,24 @@ export interface EditItem {
 
 /** 判讀結果換成表單的每一場；重複的（雷達上已經有）不列 */
 export function editItemsOf(items: PlanItem[]): EditItem[] {
+  // 每一場自己記的關鍵字；沒記的（車掃的站、舊的判讀結果）用這則貼文的
+  const own = (it: PlanItem): string[] | null => (it.plan ? savedTagsOf(it.plan.extra) : (it.fail?.tags ?? null));
+  const common = items.map(own).find((t) => t && t.length > 0) ?? [];
   return items.flatMap((it): EditItem[] => {
+    const t = own(it) ?? common;
+    const tags = t.length > 0 ? { tags: t } : {};
     const p = it.plan;
     // 車掃的站：時間是預計經過的時間，沒有結束
     const r = it.route;
-    if (p) return [{ title: p.title, topic: topicOf(p.extra), startAt: r?.at ?? p.start_at, endAt: r || p.end_open ? null : p.end_at, place: p.place_text, lat: p.lat, lng: p.lng, approxArea: p.approx_area, ...(p.tz ? { tz: p.tz } : {}) }];
+    if (p) return [{ title: p.title, topic: topicOf(p.extra), ...tags, startAt: r?.at ?? p.start_at, endAt: r || p.end_open ? null : p.end_at, place: p.place_text, lat: p.lat, lng: p.lng, approxArea: p.approx_area, ...(p.tz ? { tz: p.tz } : {}) }];
     const f = it.fail;
     // 車隊已經經過的站
-    if (!f) return r ? [{ title: r.stopTitle, startAt: r.at, endAt: null, place: r.name, lat: r.lat, lng: r.lng }] : [];
+    if (!f) return r ? [{ title: r.stopTitle, ...tags, startAt: r.at, endAt: null, place: r.name, lat: r.lat, lng: r.lng }] : [];
     return [
       {
         title: f.title ?? '',
         topic: f.topic ?? null,
+        ...tags,
         startAt: r?.at ?? f.startAt ?? f.dateOnly ?? null,
         ...(f.dateOnly && f.startAt === undefined ? { dateOnly: true } : {}),
         endAt: !r && f.endOpen === false ? (f.endAt ?? null) : null,
@@ -616,7 +624,9 @@ export function parseEditItems(raw: unknown): ManualActivity[] {
     if (endAt !== null && !(endAt > startAt && endAt - startAt <= MAX_EDIT_SPAN_SEC)) throw new ReportError(400, `${at}結束時間要在開始之後的 24 小時內`);
     const lat = coord(o.lat, 90);
     const lng = coord(o.lng, 180);
-    return { title, topic: cleanTopic(text(o.topic, 12)), startAt, endAt, place, lat: lat !== null && lng !== null ? lat : null, lng: lat !== null && lng !== null ? lng : null };
+    // 關鍵字：新版網頁一定送（全部拿掉是空的），舊版沒送就沿用判讀出來的
+    const tags = Array.isArray(o.tags) ? { tags: cleanTags(o.tags.slice(0, 20)) } : {};
+    return { title, topic: cleanTopic(text(o.topic, 12)), ...tags, startAt, endAt, place, lat: lat !== null && lng !== null ? lat : null, lng: lat !== null && lng !== null ? lng : null };
   });
 }
 
@@ -647,6 +657,7 @@ export function editSummary(before: EditItem[], after: ManualActivity[], listed:
     }
     if (!b || b.place !== a.place) changes.push(`地點「${a.place}」`);
     if (a.lat !== null) changes.push('在地圖上標了位置');
+    if (a.tags && a.tags.join(' ') !== (b?.tags ?? []).join(' ')) changes.push(a.tags.length > 0 ? `關鍵字 ${a.tags.map((t) => `#${t}`).join(' ')}` : '關鍵字（全部拿掉）');
     return changes.length > 0 ? [`${shown > 1 ? `第 ${no} ${unit}` : ''}${changes.join('、')}`] : [];
   });
   return parts.length > 0 ? [...`改了${parts.join('；')}`].slice(0, 200).join('') : null;
@@ -670,8 +681,8 @@ export async function editLink(env: Env, body: { postId?: unknown; token?: unkno
   const stored = readPlan(post);
   // 車掃：路線名稱沿用判讀出來的
   const routeTitle = stored?.items.find((it) => it.route)?.route?.title ?? null;
-  // 關鍵字沿用判讀出來的
-  const tags = stored?.items.map((it) => tagsOf(it.plan?.extra)).find((t) => t.length > 0) ?? [];
+  // 舊版網頁沒送關鍵字：沿用判讀出來的
+  const tags = stored?.items.map((it) => (it.plan ? tagsOf(it.plan.extra) : (it.fail?.tags ?? []))).find((t) => t.length > 0) ?? [];
   const items = await planManual(env, acts, now, post.text, routeTitle, tags);
   const tzs = items.map((it) => it.plan?.tz ?? it.fail?.tz ?? null);
   const note = editSummary(stored ? editItemsOf(stored.items) : [], acts, items.map((it) => !!it.plan), items.some((it) => it.route) ? '站' : '場', tzs) ?? post.supplement ?? null;

@@ -319,7 +319,16 @@ export function cleanTag(v: unknown): string | null {
   const tag = TAG_ALIASES[t] ?? t;
   return tag && [...tag].length >= 2 && [...tag].length <= 10 && !/^\d+$/.test(tag) ? tag : null;
 }
-const MAX_TAGS = 8;
+export const MAX_TAGS = 8;
+/** 回報的人填的關鍵字：一個個清過、不重複，最多 MAX_TAGS 個 */
+export function cleanTags(v: unknown[]): string[] {
+  const out: string[] = [];
+  for (const x of v) {
+    const t = cleanTag(x);
+    if (t && !out.includes(t) && out.length < MAX_TAGS) out.push(t);
+  }
+  return out;
+}
 /** 一則貼文的關鍵字：常見的（內文寫到的）在前，再來 AI 抽的、貼文裡的 hashtag，不重複，最多 MAX_TAGS 個 */
 export function postTags(ai: unknown, text: string): string[] {
   const out: string[] = [];

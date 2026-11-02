@@ -4250,13 +4250,91 @@ function editCardHtml(it: EditItem | null): string {
       <label>地點<input name="place" maxlength="80" value="${esc(it?.place ?? '')}" placeholder="店名或地址，例如：厝邊咖啡 台北市萬華區○○路○號"></label>
       <div class="edit-pin"><small class="edit-pin-state"></small><button type="button" class="chip" data-act="locate">查地點</button><button type="button" class="chip" data-act="pin">在地圖上標位置</button><button type="button" class="chip" data-act="unpin" hidden>不用標的位置</button></div>
       <div class="edit-map" hidden></div>
+      <div class="edit-tags">
+        <span class="edit-tags-label">關鍵字<small>（讓人搜尋得到，按 × 拿掉）</small></span>
+        <div class="edit-tag-list"></div>
+        <input name="tag" maxlength="12" autocomplete="off" enterkeyhint="done" placeholder="加關鍵字，打完按 Enter，例如：彩虹">
+        <div class="edit-tag-common"></div>
+      </div>
     </fieldset>`;
+}
+
+/** 補充資料每一場的關鍵字（不含 #） */
+const editTags = new Map<HTMLElement, string[]>();
+const MAX_EDIT_TAGS = 8;
+/** 填的關鍵字：拿掉 #、符號、空白；2～10 個字、不是只有數字 */
+function cleanEditTag(v: string): string | null {
+  const t = v.replace(/^#+/, '').replace(/[\s\p{P}\p{S}\p{Extended_Pictographic}\uFE0F]/gu, '').replace(/^漂帶$/, '飄帶');
+  return [...t].length >= 2 && [...t].length <= 10 && !/^\d+$/.test(t) ? t : null;
+}
+const BAD_TAG = '關鍵字要 2～10 個字（中文、英文或數字）';
+
+/** 關鍵字欄：已經有的（按了拿掉）、常見的（按了加上） */
+function renderEditTags(card: HTMLElement): void {
+  const tags = editTags.get(card) ?? [];
+  const list = card.querySelector<HTMLElement>('.edit-tag-list');
+  const common = card.querySelector<HTMLElement>('.edit-tag-common');
+  const input = card.querySelector<HTMLInputElement>('[name="tag"]');
+  const full = tags.length >= MAX_EDIT_TAGS;
+  if (list) list.innerHTML = tags.map((t) => `<button type="button" class="chip on" data-del="${esc(t)}" aria-label="拿掉 #${esc(t)}">#${esc(t)} <span aria-hidden="true">×</span></button>`).join('');
+  if (common) {
+    common.innerHTML = COMMON_TAGS.filter((t) => !tags.includes(t)).map((t) => `<button type="button" class="chip" data-add="${esc(t)}" aria-label="加上 #${esc(t)}">＋${esc(t)}</button>`).join('');
+    common.hidden = full;
+  }
+  if (input) {
+    input.disabled = full;
+    input.placeholder = full ? `最多 ${MAX_EDIT_TAGS} 個，要加請先拿掉一個` : '加關鍵字，打完按 Enter，例如：彩虹';
+  }
+}
+
+/** 加一個關鍵字；看不懂的回傳 false */
+function addEditTag(card: HTMLElement, v: string): boolean {
+  const t = cleanEditTag(v);
+  if (!t) return false;
+  const tags = editTags.get(card) ?? [];
+  if (!tags.includes(t) && tags.length < MAX_EDIT_TAGS) editTags.set(card, [...tags, t]);
+  renderEditTags(card);
+  return true;
+}
+
+function wireEditTags(card: HTMLElement, tags: string[]): void {
+  editTags.set(card, tags.slice(0, MAX_EDIT_TAGS));
+  renderEditTags(card);
+  const box = card.querySelector<HTMLElement>('.edit-tags');
+  const input = card.querySelector<HTMLInputElement>('[name="tag"]');
+  box?.addEventListener('click', (e) => {
+    const b = (e.target as HTMLElement).closest<HTMLElement>('[data-del], [data-add]');
+    if (!b) return;
+    if (b.dataset.del !== undefined) {
+      editTags.set(card, (editTags.get(card) ?? []).filter((t) => t !== b.dataset.del));
+      renderEditTags(card);
+      input?.focus();
+    } else if (b.dataset.add) addEditTag(card, b.dataset.add);
+  });
+  // 打完按 Enter（不要送出表單）；打了空白、逗號也算打完一個
+  const take = (all: boolean): void => {
+    if (!input) return;
+    const parts = input.value.split(/[\s,，、]+|(?=#)/);
+    const rest = all ? '' : (parts.pop() ?? '');
+    const bad = parts.filter((p) => p.replace(/#/g, '') !== '' && !addEditTag(card, p));
+    input.value = bad.length > 0 ? `${bad.join(' ')} ${rest}`.trim() : rest;
+    if (bad.length > 0) showBanner(bannerEl, BAD_TAG, 2500);
+  };
+  input?.addEventListener('keydown', (e) => {
+    if (e.key !== 'Enter' || e.isComposing) return;
+    e.preventDefault();
+    take(true);
+  });
+  input?.addEventListener('input', (e) => {
+    // 注音、拼音還在選字時不切
+    if (!(e as InputEvent).isComposing && /[\s,，、]|.#/.test(input.value)) take(false);
+  });
 }
 
 function editFormHtml(items: EditItem[], hidden: boolean): string {
   const list = items.length > 0 ? items.slice(0, MAX_EDIT_ITEMS) : [null];
   return `<form class="preview-more edit-form"${hidden ? ' hidden' : ''} novalidate>
-      <p class="muted sheet-note">直接改每一場的主題、活動內容、時間、地點；位置不對可以按「在地圖上標位置」，點地圖或拖標記。</p>
+      <p class="muted sheet-note">直接改每一場的主題、活動內容、時間、地點、關鍵字；位置不對可以按「在地圖上標位置」，點地圖或拖標記。</p>
       <div class="edit-items">${list.map(editCardHtml).join('')}</div>
       <button type="button" class="btn" data-act="add">再加一場</button>
       <div class="sheet-actions"><button type="submit" class="btn primary">用這些資料預覽</button>${hidden ? '<button type="button" class="btn" data-act="less">回上一步</button>' : ''}</div>
@@ -4296,6 +4374,9 @@ function wireEditCard(c: { postId: string; token: string }, card: HTMLElement, i
   const found = it && it.lat !== null && it.lng !== null ? { lat: it.lat, lng: it.lng } : null;
   const pin: EditPin = { found, foundPlace: it?.place ?? '', approxArea: it?.approxArea ?? null, foundName: null, missed: null, pinned: null, picker: null };
   editPins.set(card, pin);
+  // 關鍵字：判讀出來的；再加一場的先帶第一場的
+  const first = form.querySelector<HTMLElement>('.edit-item');
+  wireEditTags(card, it ? (it.tags ?? []) : first && first !== card ? (editTags.get(first) ?? []) : []);
   const mapEl = card.querySelector<HTMLElement>('.edit-map');
   const pinBtn = card.querySelector<HTMLButtonElement>('[data-act="pin"]');
   const placeInput = card.querySelector<HTMLInputElement>('[name="place"]');
@@ -4364,6 +4445,7 @@ function wireEditCard(c: { postId: string; token: string }, card: HTMLElement, i
   card.querySelector('[data-act="drop"]')?.addEventListener('click', () => {
     pin.picker?.remove();
     editPins.delete(card);
+    editTags.delete(card);
     card.remove();
     renumberEdit(form);
   });
@@ -4402,7 +4484,15 @@ function readEditForm(form: HTMLFormElement): EditInput[] | string {
     // 結束比開始早：跨過午夜，是隔天
     if (endAt !== null && endAt <= startAt) endAt += 86400;
     const pinned = editPins.get(card)?.pinned ?? null;
-    out.push({ title, topic, startAt, endAt, place, lat: pinned?.lat ?? null, lng: pinned?.lng ?? null });
+    // 關鍵字欄打了還沒按 Enter 的也算
+    const typed = val('tag').split(/[\s,，、]+|(?=#)/).filter((p) => p.replace(/#/g, '') !== '');
+    const tags = [...(editTags.get(card) ?? [])];
+    for (const p of typed) {
+      const t = cleanEditTag(p);
+      if (!t) return `${at}${BAD_TAG}`;
+      if (!tags.includes(t) && tags.length < MAX_EDIT_TAGS) tags.push(t);
+    }
+    out.push({ title, topic, tags, startAt, endAt, place, lat: pinned?.lat ?? null, lng: pinned?.lng ?? null });
   }
   return out.length > 0 ? out : '至少要填一場活動';
 }
@@ -4413,6 +4503,7 @@ function wireEdit(c: { postId: string; token: string }, items: EditItem[], actio
   // 換了一個表單：舊的小地圖拿掉
   for (const pin of editPins.values()) pin.picker?.remove();
   editPins.clear();
+  editTags.clear();
   const list = form.querySelector<HTMLElement>('.edit-items');
   [...form.querySelectorAll<HTMLElement>('.edit-item')].forEach((card, i) => wireEditCard(c, card, items[i] ?? null, form));
   renumberEdit(form);

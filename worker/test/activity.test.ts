@@ -159,6 +159,13 @@ describe('parseEditItems', () => {
     expect(parseEditItems([{ title: 'x', place: 'y', startAt: T18, lat: 25.02 }])[0]).toMatchObject({ lat: null, lng: null });
     expect(parseEditItems([{ title: 'x', place: 'y', startAt: T18, lat: 95, lng: 121 }])[0]).toMatchObject({ lat: null, lng: null });
   });
+  it('cleans the keywords the reporter typed, keeping an empty list', () => {
+    expect(parseEditItems([{ title: 'x', place: 'y', startAt: T18, tags: ['#洋流', '漂帶', '洋流', ' 彩虹！', '1', 3, '一二三四五六七八九十一'] }])[0].tags).toEqual(['洋流', '飄帶', '彩虹']);
+    expect(parseEditItems([{ title: 'x', place: 'y', startAt: T18, tags: [] }])[0].tags).toEqual([]);
+    // 舊版網頁沒送：沿用判讀出來的
+    expect(parseEditItems([{ title: 'x', place: 'y', startAt: T18 }])[0]).not.toHaveProperty('tags');
+    expect(parseEditItems([{ title: 'x', place: 'y', startAt: T18, tags: Array.from({ length: 12 }, (_, i) => `標籤${'一二三四五六七八九十甲乙'[i]}`) }])[0].tags).toHaveLength(8);
+  });
 });
 
 describe('editItemsOf', () => {
@@ -176,6 +183,16 @@ describe('editItemsOf', () => {
       { title: '講座', topic: null, startAt: T18 - 10 * 3600, dateOnly: true, endAt: null, place: '公館', lat: null, lng: null },
     ]);
   });
+  it('carries each activity\'s keywords, falling back to the post\'s', () => {
+    const plan = { kind: 'activity', title: '發飄帶', item: null, start_at: T18, end_at: T20, place_text: 'P', place_query: 'P', lat: 25.02, lng: 121.53, confidence: 1, all_day: false, spot: false, approx_area: null, end_open: true, until_open: false } as const;
+    const items: PlanItem[] = [
+      { group: 0, plan: { ...plan, extra: JSON.stringify({ tags: ['洋流', '飄帶'] }) }, reason: 'planned' },
+      { group: 1, plan: { ...plan, extra: JSON.stringify({ tags: [] }) }, reason: 'planned' },
+      { group: 2, plan: null, reason: 'incomplete:place', fail: { title: '市集', place: null, tags: ['市集'], reason: 'incomplete', missing: ['place'] } },
+      { group: 3, plan: null, reason: 'incomplete:place', fail: { title: '講座', place: null, reason: 'incomplete', missing: ['place'] } },
+    ];
+    expect(editItemsOf(items).map((it) => it.tags)).toEqual([['洋流', '飄帶'], undefined, ['市集'], ['洋流', '飄帶']]);
+  });
 });
 
 describe('editSummary', () => {
@@ -183,6 +200,13 @@ describe('editSummary', () => {
   it('lists only what the reporter changed', () => {
     expect(editSummary(before, [{ title: '發飄帶', startAt: T18, endAt: null, place: 'PEG coffee', lat: null, lng: null }])).toBeNull();
     expect(editSummary(before, [{ title: '發飄帶', startAt: T18, endAt: T20, place: 'PEG coffee', lat: 25.03, lng: 121.54 }])).toBe('改了時間 10/26 18:00–20:00、在地圖上標了位置');
+  });
+  it('mentions changed keywords', () => {
+    const judged = [{ ...before[0], tags: ['洋流'] }];
+    expect(editSummary(judged, [{ ...judged[0], lat: null, lng: null }])).toBeNull();
+    expect(editSummary(judged, [{ ...judged[0], tags: ['洋流'], lat: null, lng: null }])).toBeNull();
+    expect(editSummary(judged, [{ ...judged[0], tags: ['洋流', '彩虹'], lat: null, lng: null }])).toBe('改了關鍵字 #洋流 #彩虹');
+    expect(editSummary(judged, [{ ...judged[0], tags: [], lat: null, lng: null }])).toBe('改了關鍵字（全部拿掉）');
   });
   it('mentions a changed topic', () => {
     const judged = [{ ...before[0], topic: '發放' }];

@@ -305,6 +305,8 @@ export interface EditItem {
   title: string;
   /** 主題（「遊行」「講座」）；判讀不出來是 null */
   topic?: string | null;
+  /** 關鍵字（#洋流 #飄帶，不含 #）；沒有就不帶 */
+  tags?: string[];
   startAt: number | null;
   dateOnly?: boolean;
   endAt: number | null;
@@ -322,6 +324,8 @@ export interface EditInput {
   title: string;
   /** 主題；沒填是 null */
   topic: string | null;
+  /** 關鍵字（不含 #）；全部拿掉是空的 */
+  tags: string[];
   startAt: number;
   endAt: number | null;
   place: string;

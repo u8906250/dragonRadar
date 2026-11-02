@@ -874,6 +874,18 @@ path.map-water-glint { animation: water-flow-map 1.1s linear infinite; }
 .feedback-find { flex-wrap: nowrap; }
 .feedback-find input { flex: 1 1 auto; min-width: 0; font: inherit; font-size: 16px; color: var(--text); background: var(--card); border: var(--border-w) solid var(--line); border-radius: var(--card-radius); padding: 6px 10px; }
 .edit-map[hidden], .edit-item [hidden] { display: none; }
+.edit-tags { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.edit-tags-label { font-size: 13px; color: var(--muted); }
+.edit-tags-label small { font-size: 12px; }
+.edit-tag-list { display: flex; flex-wrap: wrap; gap: 6px; }
+.edit-tag-list:empty { display: none; }
+.edit-tag-list .chip { min-height: 32px; padding: 4px 10px; font-size: 13px; box-shadow: none; }
+.edit-item input:disabled { opacity: 0.6; }
+.edit-tag-common { display: flex; gap: 6px; overflow-x: auto; overflow-y: hidden; padding-bottom: 2px; scrollbar-width: none; -webkit-overflow-scrolling: touch; }
+.edit-tag-common::-webkit-scrollbar { display: none; }
+/* 滑鼠不好左右捲：電腦上常見的換行全部列出來 */
+@media (hover: hover) and (pointer: fine) { .edit-tag-common { flex-wrap: wrap; overflow: visible; } }
+.edit-tag-common .chip { flex: none; min-height: 30px; padding: 3px 10px; font-size: 13px; font-weight: 400; box-shadow: none; }
 /* 送出中：標位置的小地圖也鎖住，表單變淡 */
 #report-result.busy .edit-map { pointer-events: none; }
 #report-result.busy .edit-items, #report-result.busy .preview-more textarea { opacity: 0.6; }
