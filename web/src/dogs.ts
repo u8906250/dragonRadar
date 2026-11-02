@@ -441,6 +441,8 @@ const smooth = (t: number): number => t * t * (3 - 2 * t);
 
 /** 身體轉到哪（0 還是 dir0～1 轉到 dir）：原地轉身照 turn，其他的一開始 0.45 秒轉過去（走路、跑步邊走邊轉） */
 const turned = (s: DogSeg, e: number): number => smooth(clamp01(s.turn ? (e - s.turn[0]) / s.turn[1] : e / TURN_MS));
+/** 這一段轉身轉到哪（0～1，3D 公園照這個算面向哪） */
+export const dogTurned = turned;
 /** 什麼時候站好、轉好了（毫秒；之後才坐下、低頭喝水） */
 const settled = (s: DogSeg): number => (s.turn ? s.turn[0] + s.turn[1] : (s.rise ?? 0));
 

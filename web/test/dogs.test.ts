@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
-import { dogSvg, MALTESE, STILL, dogHeight, type DogLook } from '../src/dog';
-import { Dog, dogById, dogPose, lookAtViewer, NATURE, speedOf, type DogSeg, type DogYard } from '../src/dogs';
+import { dogParts, dogSvg, MALTESE, STILL, dogHeight, type DogLook } from '../src/dog';
+import { Dog, dogById, dogPose, dogTurned, lookAtViewer, NATURE, speedOf, type DogSeg, type DogYard } from '../src/dogs';
 
 /** 兩塊 40 公尺見方的草皮，中間隔 20 公尺的地面（緯經度當公尺用，1 度 = 1 公尺） */
 const lawn = (ring: number, rand: () => number): [number, number] => [rand() * 40, ring * 60 + rand() * 40];
@@ -494,5 +494,25 @@ describe('3D 的狗（dog.ts）', () => {
     expect(svg).not.toContain('#f1ece2');
     expect(dogHeight(shiba)).toBeCloseTo(dogHeight(MALTESE) * 1.4);
     expect(box(svg)[1]).toBeLessThan(box(dogSvg(MALTESE, STILL, 90, 300))[1]);
+  });
+});
+
+describe('3D 公園的小法', () => {
+  it('gives the same posed parts as the radar dog: furry ellipsoids and face patches that face somewhere', () => {
+    const all = dogParts(MALTESE, STILL);
+    const keys = all.map((p) => p.key);
+    for (const k of ['body', 'head', 'muzzle', 'nose', 'eye1', 'eye-1', 'tail0', 'legfl', 'leghrpaw']) expect(keys).toContain(k);
+    expect(all.find((p) => p.key === 'body')!.hair).toBeGreaterThan(0);
+    expect(all.find((p) => p.key === 'eye1')).toMatchObject({ hair: 0 });
+    expect(all.find((p) => p.key === 'eye1')!.facing).toBeDefined();
+    // 頭頂差不多 0.38 公尺高（跟雷達一樣）
+    const top = Math.max(...all.map((p) => p.c[2] + Math.hypot(p.a[0][2], p.a[1][2], p.a[2][2])));
+    expect(top).toBeGreaterThan(0.3);
+    expect(top).toBeLessThan(0.45);
+  });
+  it('turns from the last direction to the new one at the start of a segment', () => {
+    const seg: DogSeg = { do: 'walk', from: [25.04, 121.56], to: [25.0401, 121.56], start: 0, ms: 5000, dir0: [0, 1e-5], dir: [1e-5, 0], ring: 0 };
+    expect(dogTurned(seg, 0)).toBe(0);
+    expect(dogTurned(seg, 5000)).toBe(1);
   });
 });

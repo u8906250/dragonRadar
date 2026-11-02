@@ -286,6 +286,14 @@ function parts(look: DogLook, pose: DogPose): Part[] {
   return out;
 }
 
+/**
+ * 3D 公園用：照姿勢擺好的每個部位（狗自己的座標：往前、往左、往上，公尺）：橢球的中心和三個半軸、顏色、毛多長、
+ * 貼在表面上的往外多少（bias）、朝哪邊（facing，眼睛、鼻孔、淚痕、嘴唇）
+ */
+export function dogParts(look: DogLook, pose: DogPose): Array<{ key: string; c: V; a: [V, V, V]; fill: string; hair: number; bias: number; facing?: V }> {
+  return parts(look, pose).map((p) => ({ key: p.key, c: p.e.c, a: p.e.a, fill: p.fill, hair: p.hair, bias: p.bias ?? 0, facing: p.facing }));
+}
+
 /** 固定的亂數（同一根毛每一格都在同一個地方） */
 function mulberry(seed: number): () => number {
   let a = seed >>> 0;

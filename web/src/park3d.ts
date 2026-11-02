@@ -2,15 +2,19 @@
  * 3D 的中山公園（第一人稱走走看；測試中，只有存了管理 token 的瀏覽器看得到「3D 公園」）：
  * 照雷達同一份資料（zhongshan.ts：OpenStreetMap 的範圍、草地、步道、水面、橋、建築，正射影像判讀的樹冠、屋頂顏色、橋寬、映池石頭邊、旗台）
  * 蓋出來，平面的位置都是真的；高度大多沒有資料，是估的（下面的常數註明哪些是估的，找到資料再改）。
+ * 一開始從左下（西南角，光復南路那邊）的入口進去，面向南邊那條步道往東。
  * 電腦：拖曳轉頭、WASD 或方向鍵走路（Shift 快走）；手機：左下的搖桿走路、拖曳畫面轉頭。人走得到哪裡照 park.ts 的 personOk
  * （公園裡、不進建築、不下水，橋上可以），樹幹也擋。
+ * 小法也在：跟汪星同一隻（PARK_DOGS，同一個時間在同一個地方做同一件事），用 dog.ts 同一組橢球照姿勢擺出來，毛畫成撐胖一點的橢球。
  * 標記（右上「標記」打開）：選種類（路燈、長椅、垃圾桶、其他），點地面放一個，可以轉方向、寫備註，按「儲存」存到伺服器
  * （/api/admin/park-marks，只有管理 token 能讀寫）；點已經標的可以移動、轉向、改備註、刪除。
  * three.js 只在打開時才載入（main.ts 用 import()），平常的雷達不會變大
  */
 import * as THREE from 'three';
 import { deleteParkMark, fetchParkMarks, saveParkMark, type ParkMark, type ParkMarkIn, type ParkMarkKind } from './api';
-import { personOk } from './park';
+import { dogParts } from './dog';
+import { dogPose, dogTurned } from './dogs';
+import { PARK_DOGS, personOk } from './park';
 import { ZHONGSHAN_PARK as Z } from './zhongshan';
 
 type Pt = [number, number];
@@ -227,14 +231,19 @@ const hash = (i: number): number => {
 export interface Park3DOptions {
   /** 管理 token（讀寫標記） */
   token: string;
-  /** 一開始站哪（台北的經緯度；站不到就站映池南邊）、面向哪（度，0 是北、順時針） */
-  at?: Pt;
-  heading?: number;
   onExit: () => void;
 }
 
-/** 一開始站的地方：旗台南邊，面向北（看得到旗桿、映池、紀念館） */
-const START: Pt = [25.03838, 121.56024];
+/**
+ * 一開始站的地方：左下（西南角）的入口——公園南邊那條步道（OSM）從光復南路那邊進來、穿過公園外框的地方往裡面一點，
+ * 面向步道往裡面走的方向（東南東）
+ */
+const START: Pt = [25.0381268, 121.5577984];
+const START_HEADING = 109;
+/** 小法：毛畫成把橢球撐胖（毛長的幾倍）；離你多遠以外不畫 */
+const FUR_PUFF = 0.7;
+const DOG_FAR_M = 120;
+const wrap = (deg: number): number => ((((deg % 360) + 540) % 360) - 180);
 
 /** 打開 3D 公園（蓋在整個畫面上面），回傳關掉的函式 */
 export function openPark3D(o: Park3DOptions): () => void {
@@ -599,14 +608,82 @@ export function openPark3D(o: Park3DOptions): () => void {
     }
   }
 
+  // ---- 小法（跟汪星同一隻）：每一格照牠現在在哪、在做什麼擺好每個部位；地上一塊淡淡的影子（不重畫太陽的影子）
+  const xiaofa = PARK_DOGS[0];
+  const dogRoot = new THREE.Group();
+  dogRoot.matrixAutoUpdate = false;
+  scene.add(dogRoot);
+  const dogBall = new THREE.SphereGeometry(1, 18, 12);
+  const dogMeshes = new Map<string, THREE.Mesh>();
+  const dogMats = new Map<string, THREE.MeshLambertMaterial>();
+  const dogShadow = new THREE.Mesh(new THREE.CircleGeometry(1, 24).rotateX(-Math.PI / 2), new THREE.MeshBasicMaterial({ color: 0x000000, transparent: true, opacity: 0.22, depthWrite: false }));
+  dogShadow.scale.set(0.16, 1, 0.26);
+  dogRoot.add(dogShadow);
+  const v3 = (q: [number, number, number]): THREE.Vector3 => new THREE.Vector3(q[0], q[1], q[2]);
+  /** 擺好小法（離你太遠就藏起來）；回傳要不要一直重畫 */
+  function drawDog(now: number): boolean {
+    const d = xiaofa.now(now);
+    const p = en(d.at);
+    if (Math.hypot(p[0] - pos[0], p[1] - pos[1]) > DOG_FAR_M) {
+      dogRoot.visible = false;
+      return false;
+    }
+    dogRoot.visible = true;
+    const s = d.seg;
+    // 面向哪（度，0 是北、順時針）：從上一段的方向轉到這一段的方向
+    const bearing = (dir: Pt): number => (Math.atan2(dir[1] * MX, dir[0] * MY) * 180) / Math.PI;
+    const [b0, b1] = [bearing(s.dir0), bearing(s.dir)];
+    const turn = wrap(b1 - b0);
+    const B = ((b0 + turn * dogTurned(s, d.e)) * Math.PI) / 180;
+    // 狗自己的座標（往前、往左、往上）→ 公園（x 往東、y 往上、z 往南）
+    const fwd = new THREE.Vector3(Math.sin(B), 0, -Math.cos(B));
+    const left = new THREE.Vector3(-Math.cos(B), 0, -Math.sin(B));
+    dogRoot.matrix.makeBasis(fwd, left, new THREE.Vector3(0, 1, 0)).setPosition(p[0], floorAt(p), -p[1]);
+    dogRoot.matrixWorldNeedsUpdate = true;
+    const all = dogParts(xiaofa.look, dogPose(s, d.e, turn));
+    const puff = (key: string): number => (all.find((x) => x.key === key)?.hair ?? 0) * FUR_PUFF;
+    const [headPuff, mouthPuff] = [puff('head'), puff('muzzle')];
+    const muzzle = all.find((x) => x.key === 'muzzle');
+    const used = new Set<string>();
+    for (const part of all) {
+      let mesh = dogMeshes.get(part.key);
+      if (!mesh) {
+        let m = dogMats.get(part.fill);
+        if (!m) dogMats.set(part.fill, (m = mat(part.fill)));
+        mesh = new THREE.Mesh(dogBall, m);
+        mesh.matrixAutoUpdate = false;
+        dogMeshes.set(part.key, mesh);
+        dogRoot.add(mesh);
+      }
+      if ((mesh.material as THREE.MeshLambertMaterial).color.getHexString() !== part.fill.slice(1)) {
+        let m = dogMats.get(part.fill);
+        if (!m) dogMats.set(part.fill, (m = mat(part.fill)));
+        mesh.material = m;
+      }
+      used.add(part.key);
+      let c = v3(part.c);
+      let axes = part.a.map(v3);
+      if (part.hair > 0) {
+        // 毛：每個半軸加長毛的 FUR_PUFF 倍
+        const h = part.hair * FUR_PUFF;
+        axes = axes.map((a) => a.multiplyScalar(1 + h / (a.length() || 1)));
+      } else {
+        // 貼在臉上的（眼睛、鼻子、嘴唇）：往外推到毛的外面
+        const onMouth = /^(nose|nostril|noseshine|philtrum|lip|tongue)/.test(part.key);
+        const dir = part.facing ? v3(part.facing).normalize() : muzzle ? c.clone().sub(v3(muzzle.c)).normalize() : new THREE.Vector3(1, 0, 0);
+        c = c.addScaledVector(dir, (onMouth ? mouthPuff : headPuff) + part.bias + 0.003);
+      }
+      mesh.matrix.makeBasis(axes[0], axes[1], axes[2]).setPosition(c);
+      mesh.visible = true;
+    }
+    for (const [k, m] of dogMeshes) if (!used.has(k)) m.visible = false;
+    return true;
+  }
+
   // ---- 走路、轉頭
   let pos: Pt = en(START);
-  let yaw = 0;
+  let yaw = (START_HEADING * Math.PI) / 180;
   let pitch = -0.05;
-  if (o.at && personOk(o.at)) {
-    pos = en(o.at);
-    yaw = ((o.heading ?? 0) * Math.PI) / 180;
-  }
   const keys = new Set<string>();
   const stick = { x: 0, y: 0, id: -1 };
   let dirty = true;
@@ -873,6 +950,8 @@ export function openPark3D(o: Park3DOptions): () => void {
       dirty = true;
       if (draft) status();
     }
+    // 小法在附近就每一格都畫（會動）
+    if (drawDog(now)) dirty = true;
     if (!dirty) return;
     dirty = false;
     updateCamera();
