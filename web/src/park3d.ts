@@ -102,6 +102,9 @@ const STEP_DEPTH = 0.32;
 const STELE_WALL_H = 2.1;
 const STELE_WALL_T = 0.45;
 const BED_H = 0.35;
+/** 花台中間那一塊米色石板（從中間花台的中心往外幾公尺）、平台上草皮邊上的石條多寬 */
+const PINK_HALF = 9.7;
+const LAWN_EDGE = 0.22;
 /** 站在鋪面上的樹，移到多近以內的草地（再遠的是廣場上種的，留著） */
 const TREE_TO_LAWN_M = 5;
 /** 樹多高（估的：照樹冠大小，最高 20 公尺）、樹幹多粗 */
@@ -484,7 +487,9 @@ export function openPark3D(o: Park3DOptions): () => void {
   const grass = mat(0xffffff, { map: grassTex });
   // 草地（花台另外畫）
   const bedSet = new Set(Z.flowerBeds);
-  add(flatGeo(Z.green.flatMap((r, i) => (bedSet.has(i) ? [] : [shapeOf(ringEN(r))])), 0.02), grass);
+  // 銅像廣場平台上的草皮另外畫（在平台上面）
+  const onPlazaLawn = new Set(Z.plazaLawns);
+  add(flatGeo(Z.green.flatMap((r, i) => (bedSet.has(i) || onPlazaLawn.has(i) ? [] : [shapeOf(ringEN(r))])), 0.02), grass);
   const inWater = (p: Pt): boolean => waters.some((w) => inside(p, w.outer) && !w.islands.some((i) => inside(p, i)));
   // 步道：經過水面的那幾段不畫（橋另外蓋）
   const splitWet = (l: WP[]): WP[][] => {
@@ -922,6 +927,43 @@ export function openPark3D(o: Park3DOptions): () => void {
     add(prismGeo(shapeOf(r), PLAZA_H, BED_H), [flowers, bedStone], true);
   }
   const bedRings = Z.flowerBeds.map((i) => ringEN(Z.green[i]));
+  // 花台中間那一大塊：米色偏粉的大石板（照使用者給的照片；範圍是四個角 L 形花台裡面）
+  const centerBed = ringEN(Z.green[Z.flowerBeds[0]]);
+  const bedC: Pt = [centerBed.reduce((t, p) => t + p[0], 0) / centerBed.length, centerBed.reduce((t, p) => t + p[1], 0) / centerBed.length];
+  {
+    const [ux, uy] = [(stepB[0] - stepA[0]) / stepLen, (stepB[1] - stepA[1]) / stepLen];
+    const sq = (h: number): Pt[] => [[-1, -1], [1, -1], [1, 1], [-1, 1]].map(([a, b]): Pt => [bedC[0] + out[0] * a * h + ux * b * h, bedC[1] + out[1] * a * h + uy * b * h]);
+    const pink = mat(0xffffff, {
+      map: canvasTex(
+        256,
+        (g) => {
+          for (let i = 0; i < 4; i++)
+            for (let j = 0; j < 4; j++) {
+              const v = hash(i * 5 + j * 11 + 977) * 16;
+              g.fillStyle = `rgb(${214 + v}, ${188 + v}, ${172 + v})`;
+              g.fillRect(i * 64, j * 64, 64, 64);
+            }
+          g.strokeStyle = 'rgba(120, 104, 96, 0.5)';
+          g.lineWidth = 2;
+          for (let k = 0; k <= 4; k++) {
+            g.beginPath();
+            g.moveTo(k * 64, 0);
+            g.lineTo(k * 64, 256);
+            g.moveTo(0, k * 64);
+            g.lineTo(256, k * 64);
+            g.stroke();
+          }
+        },
+        3.2,
+      ),
+    });
+    add(flatGeo([shapeOf(sq(PINK_HALF))], PLAZA_H + 0.004), pink);
+  }
+  // 平台上的草皮：灰色細點點的石條圍一圈，裡面是草（跟草地一樣的草圖，也長立體的草）
+  const plazaLawnRings = Z.plazaLawns.map((i) => ringEN(Z.green[i]));
+  add(flatGeo(plazaLawnRings.map((r) => shapeOf(r)), PLAZA_H + 0.008), mat(0x9d9a94));
+  const plazaLawnInner = plazaLawnRings.map((r) => inset(r, LAWN_EDGE));
+  add(flatGeo(plazaLawnInner.map((r) => shapeOf(r)), PLAZA_H + 0.012), grass);
   // 碑林：西邊一道長長的黑色石牆（一塊塊黑色的石碑排成一道，上面刻字），站在平台上
   const [wallA, wallB] = Z.steleWall.map(en);
   const wallLen = Math.hypot(wallB[0] - wallA[0], wallB[1] - wallA[1]);
@@ -970,7 +1012,7 @@ export function openPark3D(o: Park3DOptions): () => void {
     if (Math.hypot(wallA[0] + dx * t - p[0], wallA[1] + dy * t - p[1]) < STELE_WALL_T / 2 + 0.3) return true;
     if (bedRings.some((r) => inside(p, r))) return true;
     const s0 = en(Z.statue);
-    return Math.hypot(p[0] - s0[0], p[1] - s0[1]) < 1.1;
+    return Math.hypot(p[0] - s0[0], p[1] - s0[1]) < 1.25;
   };
   /** 平台、石階的高度（不在上面是 0） */
   const plazaFloor = (p: Pt): number => {
@@ -981,25 +1023,64 @@ export function openPark3D(o: Park3DOptions): () => void {
     return (PLAZA_H * (PLAZA_STEPS - Math.floor(d / STEP_DEPTH))) / PLAZA_STEPS;
   };
 
-  // 孫中山銅像：在平台上、面向東邊的紀念館（深色石頭台座上坐著）
+  // 孫中山銅像（照雷達上的畫法，用一樣的大小）：白色的石頭台座（2 公尺寬、0.3 公尺高）上，坐在高椅背、圓圓扶手的椅子上，
+  // 大腿平放、小腿垂下來、手從肩膀垂下來放在膝蓋上，頭朝前（鼻子、耳朵、鬍子），面向東邊的紀念館。在自己的座標裡 +x 是前面、+y 是上面
   const sp = en(Z.statue);
   const statue = new THREE.Group();
   statue.position.set(sp[0], PLAZA_H, -sp[1]);
-  statue.rotation.y = Math.PI / 2;
-  const bronze = mat(0x6b5636);
-  const parts: Array<[THREE.BufferGeometry, THREE.Material, number, number, number]> = [
-    [new THREE.BoxGeometry(1.7, 0.45, 1.7), mat(0x45474a), 0, 0.225, 0],
-    [new THREE.BoxGeometry(1.0, 1.55, 0.25), bronze, 0, 1.23, -0.35],
-    [new THREE.BoxGeometry(0.95, 0.5, 0.75), bronze, 0, 0.9, 0],
-    [new THREE.BoxGeometry(0.7, 0.55, 0.3), bronze, 0, 0.73, 0.45],
-    [new THREE.CylinderGeometry(0.24, 0.32, 0.75, 12), bronze, 0, 1.53, -0.12],
-    [new THREE.SphereGeometry(0.16, 14, 10), bronze, 0, 2.07, -0.1],
-  ];
-  for (const [g, m, x, y, z] of parts) {
-    const mesh = new THREE.Mesh(g, m);
-    mesh.position.set(x, y, z);
-    mesh.castShadow = mesh.receiveShadow = true;
-    statue.add(mesh);
+  statue.rotation.y = Math.atan2(out[1], out[0]);
+  {
+    const body = mat(0x8a5a24);
+    const dark = mat(0x5e3c18);
+    const stoneTop = mat(0xd8d2c6);
+    const put = (g: THREE.BufferGeometry, m: THREE.Material, x: number, y: number, z: number, sc?: [number, number, number]): THREE.Mesh => {
+      const mesh = new THREE.Mesh(g, m);
+      mesh.position.set(x, y, z);
+      if (sc) mesh.scale.set(...sc);
+      mesh.castShadow = mesh.receiveShadow = true;
+      statue.add(mesh);
+      return mesh;
+    };
+    /** 兩點之間的一節（手腳），半徑 r */
+    const limb = (a: [number, number, number], b: [number, number, number], r: number, m: THREE.Material): void => {
+      const [va, vb] = [new THREE.Vector3(...a), new THREE.Vector3(...b)];
+      const mesh = put(new THREE.CapsuleGeometry(r, Math.max(0.01, va.distanceTo(vb)), 4, 10), m, 0, 0, 0);
+      mesh.position.copy(va).add(vb).multiplyScalar(0.5);
+      mesh.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), vb.clone().sub(va).normalize());
+    };
+    // 雷達上的座標（往前 x、往上是負的 y）→ 這裡（往前 X、高度 H）
+    const X = (x: number): number => 0.175 + x;
+    const H = (y: number): number => 0.3 - y;
+    put(new THREE.BoxGeometry(2, 0.3, 1.6), stoneTop, 0, 0.15, 0);
+    // 椅子：椅座、椅背（上面圓圓的）、兩邊圓圓的扶手
+    put(new THREE.BoxGeometry(0.72, 0.5, 1.0), dark, (X(-0.5) + X(0.22)) / 2, (H(0) + H(-0.5)) / 2, 0);
+    put(new THREE.BoxGeometry(0.18, H(-1.42) - H(-0.45), 1.0), dark, (X(-0.5) + X(-0.32)) / 2, (H(-0.45) + H(-1.42)) / 2, 0);
+    limb([X(-0.41), H(-1.44), -0.46], [X(-0.41), H(-1.44), 0.46], 0.09, dark);
+    for (const z of [-0.43, 0.43]) limb([X(-0.42), H(-0.72), z], [X(0.16), H(-0.72), z], 0.11, dark);
+    // 上身：肩膀寬一點、腰窄一點
+    put(new THREE.CylinderGeometry(0.26, 0.22, H(-1.38) - H(-0.5), 16), body, X(-0.11), (H(-0.5) + H(-1.38)) / 2, 0, [0.85, 1, 1.05]);
+    put(new THREE.SphereGeometry(0.26, 16, 10), body, X(-0.11), H(-1.3), 0, [0.85, 0.45, 1.05]);
+    // 大腿（平放）、小腿（垂下來、往前一點）、鞋子
+    for (const z of [-0.12, 0.12]) {
+      limb([X(-0.15), H(-0.64), z], [X(0.4), H(-0.64), z], 0.13, body);
+      limb([X(0.36), H(-0.6), z], [X(0.4), H(-0.12), z], 0.085, body);
+      put(new THREE.SphereGeometry(1, 12, 8), dark, X(0.46), H(-0.04), z, [0.15, 0.06, 0.07]);
+    }
+    // 手：從肩膀垂下來到手肘、再往前放在膝蓋上
+    for (const z of [-1, 1]) {
+      limb([X(-0.14), H(-1.28), z * 0.3], [X(-0.08), H(-0.92), z * 0.31], 0.075, body);
+      limb([X(-0.08), H(-0.92), z * 0.31], [X(0.3), H(-0.82), z * 0.2], 0.068, body);
+      put(new THREE.SphereGeometry(0.065, 10, 8), body, X(0.33), H(-0.81), z * 0.19);
+    }
+    // 脖子、頭（鼻子朝前、兩邊耳朵、鬍子）
+    limb([X(-0.05), H(-1.36), 0], [X(-0.05), H(-1.46), 0], 0.065, dark);
+    put(new THREE.SphereGeometry(0.15, 18, 12), body, X(-0.05), H(-1.56), 0, [0.95, 1.08, 0.9]);
+    const nose = put(new THREE.ConeGeometry(0.022, 0.05, 8), body, X(0.105), H(-1.545), 0);
+    nose.rotation.z = -Math.PI / 2;
+    // 眼睛（淺淺的凹下去，深色）、兩邊耳朵、八字鬍（鼻子下面往兩邊斜下來）
+    for (const z of [-0.05, 0.05]) put(new THREE.SphereGeometry(0.018, 8, 6), dark, X(0.085), H(-1.59), z);
+    for (const z of [-0.14, 0.14]) put(new THREE.SphereGeometry(0.035, 8, 6), body, X(-0.07), H(-1.56), z);
+    for (const z of [-1, 1]) limb([X(0.09), H(-1.505), z * 0.008], [X(0.075), H(-1.485), z * 0.06], 0.011, dark);
   }
   scene.add(statue);
 
@@ -1249,13 +1330,13 @@ export function openPark3D(o: Park3DOptions): () => void {
         if (cellRnd(i, j, 0) < 0.1) continue;
         const p: Pt = [(i + cellRnd(i, j, 1)) * GRASS_CELL, (j + cellRnd(i, j, 2)) * GRASS_CELL];
         const dist = Math.hypot(p[0] - pos[0], p[1] - pos[1]);
-        if (dist > R || !onLawn(p) || onPath(p) || inside(p, plazaRing)) continue;
+        if (dist > R || !onLawn(p) || onPath(p) || (inside(p, plazaRing) && !plazaLawnInner.some((r) => inside(p, r)))) continue;
         const v = Math.floor(cellRnd(i, j, 3) * 3);
         if (counts[v] >= GRASS_MAX) continue;
         // 草叢 0.18～0.26 公尺寬、高一半（9～13 公分）；越遠越矮在畫的時候算（fadeByDistance）
         const size = 0.18 + 0.08 * cellRnd(i, j, 4);
         q.setFromAxisAngle(up, cellRnd(i, j, 5) * Math.PI * 2);
-        m.compose(new THREE.Vector3(p[0], 0.02, -p[1]), q, new THREE.Vector3(size, size * (0.8 + 0.4 * cellRnd(i, j, 6)), size));
+        m.compose(new THREE.Vector3(p[0], plazaFloor(p) + 0.02, -p[1]), q, new THREE.Vector3(size, size * (0.8 + 0.4 * cellRnd(i, j, 6)), size));
         tuftMesh[v].setMatrixAt(counts[v]++, m);
       }
     tuftMesh.forEach((im, v) => {
