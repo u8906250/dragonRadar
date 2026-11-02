@@ -18,7 +18,7 @@ import { dogHairRoots, dogPartArea, dogParts } from './dog';
 import { dogPose, dogTurned } from './dogs';
 import { PARK_DOGS, personOk } from './park';
 import { ZHONGSHAN_PARK as Z } from './zhongshan';
-import { withWidths as alongWidths } from './zhongshan-widths';
+import { MIN_HALF, widthSides, withWidths as alongWidths } from './zhongshan-widths';
 
 type Pt = [number, number];
 /** 線上的一點和那裡的寬（公尺） */
@@ -92,6 +92,8 @@ const GRASS_CHUNK = 5;
 const GRASS_MAX = 20000;
 /** 草地上那張一叢叢草的圖多大（公尺見方，重複鋪） */
 const GRASS_TILE = 2;
+/** 站在鋪面上的樹，移到多近以內的草地（再遠的是廣場上種的，留著） */
+const TREE_TO_LAWN_M = 5;
 /** 樹多高（估的：照樹冠大小，最高 20 公尺）、樹幹多粗 */
 const treeH = (r: number): number => Math.min(20, 2.5 + 1.9 * r);
 const trunkR = (r: number): number => Math.max(0.1, Math.min(0.4, r * 0.06));
@@ -204,20 +206,11 @@ function stripGeo(lines: Pt[][], w: number, y: number): THREE.BufferGeometry {
   g.computeVertexNormals();
   return g;
 }
-/** 寬度一段段不一樣的帶子（每一點照前後兩段的方向平均往兩邊各 w/2），放在 y 高 */
-function varStripGeo(lines: WP[][], y: number): THREE.BufferGeometry {
+/** 寬度一段段不一樣的帶子（每一點照前後兩段的方向平均往兩邊各 w/2，碰到 blocked 的地方停），放在 y 高 */
+function varStripGeo(lines: WP[][], y: number, blocked?: (p: Pt, m: number) => boolean): THREE.BufferGeometry {
   const pos: number[] = [];
   for (const l of lines) {
-    const side = l.map((p, i) => {
-      const [a, b] = [l[Math.max(0, i - 1)], l[Math.min(l.length - 1, i + 1)]];
-      const [dx, dy] = [b[0] - a[0], b[1] - a[1]];
-      const len = Math.hypot(dx, dy) || 1;
-      const [nx, ny] = [(-dy / len) * (p[2] / 2), (dx / len) * (p[2] / 2)];
-      return [
-        [p[0] + nx, p[1] + ny],
-        [p[0] - nx, p[1] - ny],
-      ];
-    });
+    const side = widthSides(l, blocked).map((s) => [s.left, s.right]);
     for (let i = 1; i < l.length; i++) {
       const q = [side[i - 1][0], side[i - 1][1], side[i][1], side[i][0]];
       for (const k of [0, 1, 2, 0, 2, 3]) pos.push(q[k][0], y, -q[k][1]);
@@ -595,7 +588,10 @@ export function openPark3D(o: Park3DOptions): () => void {
     g.computeVertexNormals();
     add(g, new THREE.MeshLambertMaterial({ color: 0xffffff, map: grassTex, side: THREE.DoubleSide }));
   }
-  add(varStripGeo(pathLines, 0.035), mat(0xd8cdb8));
+  // 路往旁邊鋪的時候碰到湖面、公園外面就停（不會蓋到湖、超出外框），碰到草地也停（離中線 MIN_HALF 以外，路至少留這麼寬）
+  const lawnEN = Z.green.map(ringEN).map((r) => ({ r, box: [Math.min(...r.map((p) => p[0])), Math.min(...r.map((p) => p[1])), Math.max(...r.map((p) => p[0])), Math.max(...r.map((p) => p[1]))] }));
+  const onLawnEN = (p: Pt): boolean => lawnEN.some(({ r, box }) => p[0] >= box[0] && p[0] <= box[2] && p[1] >= box[1] && p[1] <= box[3] && inside(p, r));
+  add(varStripGeo(pathLines, 0.035, (p, m) => inWater(p) || !inside(p, outline) || (m > MIN_HALF && onLawnEN(p))), mat(0xd8cdb8));
   // 櫻花步道：深灰色、比較寬，上面兩條淺色的線（中線往兩邊平移）
   add(stripGeo(sakura, SAKURA_W, 0.04), mat(0x9d9b96));
   /** 一條線往左（正）或往右平移 d 公尺（每一點照前後兩段的方向平均） */
@@ -857,9 +853,34 @@ export function openPark3D(o: Park3DOptions): () => void {
     }
     return null;
   };
+  // 站在鋪面上（不在草地、步道、建築）的樹：TREE_TO_LAWN_M 內有草地的，移到最近的草地上（離邊 0.6 公尺、不在步道上）；
+  // 附近沒有草地的（廣場上種的大樹）留著
+  const lawnEdges = lawnEN.flatMap(({ r }) => r.map((a, i): [Pt, Pt] => [a, r[(i + 1) % r.length]]));
+  const blds = Z.buildings.map(ringEN);
+  const onAnyPath = (p: Pt): boolean => pathSegs.some(([a, b, half]) => segDist(p, a, b) < half + 0.3);
+  const toLawn = (p: Pt): Pt => {
+    if (onLawnEN(p) || blds.some((b) => inside(p, b))) return p;
+    let best: { d: number; q: Pt } | null = null;
+    for (const [a, b] of lawnEdges) {
+      const [dx, dy] = [b[0] - a[0], b[1] - a[1]];
+      const L = Math.hypot(dx, dy) || 1;
+      const t = Math.max(0, Math.min(1, ((p[0] - a[0]) * dx + (p[1] - a[1]) * dy) / (L * L)));
+      const c: Pt = [a[0] + dx * t, a[1] + dy * t];
+      const d = Math.hypot(c[0] - p[0], c[1] - p[1]);
+      if (d > TREE_TO_LAWN_M || (best && d >= best.d)) continue;
+      for (const s of [0.6, -0.6]) {
+        const q: Pt = [c[0] - (dy / L) * s, c[1] + (dx / L) * s];
+        if (onLawnEN(q) && !onAnyPath(q)) {
+          best = { d, q };
+          break;
+        }
+      }
+    }
+    return best ? best.q : p;
+  };
   const trees = Z.trees.flatMap(([lat, lng, r]) => {
     const at = offPath(en([lat, lng]), r);
-    return at ? [{ at, r }] : [];
+    return at ? [{ at: toLawn(at), r }] : [];
   });
   const trunkGeo = new THREE.CylinderGeometry(0.75, 1, 1, 7);
   trunkGeo.translate(0, 0.5, 0);

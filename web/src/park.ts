@@ -7,7 +7,7 @@
 import type { LatLng } from './geo';
 import { RADAR_GEOM, RADAR_VIEW, viewReach, viewRect, type TripAt } from './radar';
 import { ZHONGSHAN_PARK } from './zhongshan';
-import { widthRing, withWidths } from './zhongshan-widths';
+import { MIN_HALF, widthRing, withWidths } from './zhongshan-widths';
 import { MALTESE, dogHeight } from './dog';
 import { animateDogs, Dog, dogById, dogHeading, dogMarkup, NATURE, wakeDogs, type DogNature, type DogYard } from './dogs';
 export { onDogMove } from './dogs';
@@ -305,12 +305,19 @@ let pathRings: Pt[][] | null = null;
 function pathAreaRings(): Pt[][] {
   if (pathRings) return pathRings;
   const wet = ([a, b]: Pt): boolean => ZHONGSHAN_PARK.water.some(([outer, ...islands]) => inRing([a, b], outer) && !islands.some((r) => inRing([a, b], r)));
+  // 路往旁邊鋪的時候碰到湖面、公園外面就停（不會蓋到湖、超出外框），碰到草地也停（離中線 MIN_HALF 以外，路至少留這麼寬）
+  const lawns = ZHONGSHAN_PARK.green.map((r) => ({ r, box: [Math.min(...r.map((p) => p[0])), Math.min(...r.map((p) => p[1])), Math.max(...r.map((p) => p[0])), Math.max(...r.map((p) => p[1]))] }));
+  const onLawn = ([a, b]: Pt): boolean => lawns.some(({ r, box }) => a >= box[0] && a <= box[2] && b >= box[1] && b <= box[3] && inRing([a, b], r));
+  const blocked = (m: Pt, off: number): boolean => {
+    const q = fromM(m);
+    return wet(q) || !inRing(q, ZHONGSHAN_PARK.outline) || (off > MIN_HALF && onLawn(q));
+  };
   const out: Pt[][] = [];
   ZHONGSHAN_PARK.paths.forEach((l, i) => {
     const pts = withWidths(i, l.map(toM), 2);
     let cur: Array<[number, number, number]> = [];
     const flush = (): void => {
-      if (cur.length > 1) out.push(widthRing(cur).map(fromM));
+      if (cur.length > 1) out.push(widthRing(cur, blocked).map(fromM));
       cur = [];
     };
     pts.forEach((p, k) => {

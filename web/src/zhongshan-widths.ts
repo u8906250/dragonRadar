@@ -123,13 +123,36 @@ export function withWidths(i: number, pts: Array<[number, number]>, fallback: nu
   return out.map(([x, y], j) => [x, y, ws && ws.length === out.length ? ws[j] : fallback]);
 }
 
-/** 一條帶寬度的線變成一圈：左邊往前、右邊往回（每一點照前後兩段的方向平均，往兩邊各一半的寬） */
-export function widthRing(l: Array<[number, number, number]>): Array<[number, number]> {
-  const side = l.map((p, i) => {
+/**
+ * 一條帶寬度的線每一點往左、往右的邊（每一點照前後兩段的方向平均，往兩邊各一半的寬）；blocked 是不能鋪路的地方：
+ * 往旁邊每 0.25 公尺看一次，碰到了就停在那裡（兩邊可以不一樣寬）。blocked(p, m) 的 m 是離中線多遠（草地：離中線 MIN_HALF 內不算，
+ * 有的草地畫到路中間；湖面、公園外面一碰到就停）
+ */
+export const MIN_HALF = 0.6;
+export function widthSides(l: Array<[number, number, number]>, blocked?: (p: [number, number], m: number) => boolean): Array<{ left: [number, number]; right: [number, number] }> {
+  return l.map((p, i) => {
     const [a, b] = [l[Math.max(0, i - 1)], l[Math.min(l.length - 1, i + 1)]];
     const [dx, dy] = [b[0] - a[0], b[1] - a[1]];
     const len = Math.hypot(dx, dy) || 1;
-    return [(-dy / len) * (p[2] / 2), (dx / len) * (p[2] / 2)];
+    const [nx, ny] = [-dy / len, dx / len];
+    const reach = (sign: number): number => {
+      const half = p[2] / 2;
+      if (!blocked) return half;
+      let m = 0;
+      while (m < half) {
+        const next = Math.min(half, m + 0.25);
+        if (blocked([p[0] + nx * next * sign, p[1] + ny * next * sign], next)) break;
+        m = next;
+      }
+      return m;
+    };
+    const [l1, r1] = [reach(1), reach(-1)];
+    return { left: [p[0] + nx * l1, p[1] + ny * l1], right: [p[0] - nx * r1, p[1] - ny * r1] };
   });
-  return [...l.map((p, i): [number, number] => [p[0] + side[i][0], p[1] + side[i][1]]), ...l.map((p, i): [number, number] => [p[0] - side[i][0], p[1] - side[i][1]]).reverse()];
+}
+
+/** 一條帶寬度的線變成一圈：左邊往前、右邊往回（widthSides，blocked 的地方不鋪） */
+export function widthRing(l: Array<[number, number, number]>, blocked?: (p: [number, number], m: number) => boolean): Array<[number, number]> {
+  const sides = widthSides(l, blocked);
+  return [...sides.map((s) => s.left), ...sides.map((s) => s.right).reverse()];
 }
