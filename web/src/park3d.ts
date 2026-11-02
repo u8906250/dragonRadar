@@ -359,6 +359,8 @@ const DOG_HAIRS = 3600;
 /** 一根毛分幾段畫（二次曲線） */
 const HAIR_SEGS = 3;
 const DOG_FAR_M = 120;
+/** 點小法的範圍（看不到的球的半徑，公尺；5 公尺外照距離放大） */
+const DOG_HIT_M = 0.45;
 /** 小法的頭（眼睛）大概多高（抬頭看你時照這個算往上看幾度） */
 const DOG_HEAD_Y = 0.3;
 const wrap = (deg: number): number => ((((deg % 360) + 540) % 360) - 180);
@@ -1607,6 +1609,10 @@ export function openPark3D(o: Park3DOptions): () => void {
   dogRoot.matrixAutoUpdate = false;
   scene.add(dogRoot);
   const dogBall = new THREE.SphereGeometry(1, 18, 12);
+  // 點小法的範圍：看不到的一顆球，比小法大一點、離越遠越大（小法 0.38 公尺高，手機上離遠一點只剩幾個像素，點不到就拿不到卡）
+  const dogHit = new THREE.Mesh(dogBall, new THREE.MeshBasicMaterial({ visible: false }));
+  dogHit.matrixAutoUpdate = false;
+  dogRoot.add(dogHit);
   const dogMeshes = new Map<string, THREE.Mesh>();
   // 身體的底、眼睛鼻子：跟雷達上一樣是平平的顏色（亮暗看毛）
   const dogMats = new Map<string, THREE.MeshBasicMaterial>();
@@ -1663,6 +1669,10 @@ export function openPark3D(o: Park3DOptions): () => void {
     const left = new THREE.Vector3(-Math.cos(B), 0, -Math.sin(B));
     dogRoot.matrix.makeBasis(fwd, left, new THREE.Vector3(0, 1, 0)).setPosition(p[0], floorAt(p), -p[1]);
     dogRoot.matrixWorldNeedsUpdate = true;
+    // 點的範圍：身體中間，半徑 DOG_HIT_M，5 公尺外照距離放大（15 公尺外約 1.35 公尺）
+    const hr = DOG_HIT_M * Math.max(1, Math.hypot(p[0] - pos[0], p[1] - pos[1]) / 5);
+    dogHit.matrix.makeScale(hr, hr, hr).setPosition(0, 0, DOG_HEAD_Y * 0.6);
+    dogHit.matrixWorldNeedsUpdate = true;
     // 點了轉頭看你：頭轉向你站的地方（最多 80 度）、抬頭看你（照你們之間多遠、你的眼睛多高，抬六成五，越近抬越高：3～40 度，坐著少 8 度）；
     // 轉過來面向你坐下的時候，轉好了也抬頭看你
     let pose = dogPose(s, d.e, turn);
@@ -2132,10 +2142,10 @@ export function openPark3D(o: Park3DOptions): () => void {
 
   // ---- 輸入
   const canvas = renderer.domElement;
-  let drag: { id: number; x: number; y: number; t: number; moved: boolean } | null = null;
+  let drag: { id: number; x: number; y: number; moved: boolean } | null = null;
   const onDown = (e: PointerEvent): void => {
     if (drag) return;
-    drag = { id: e.pointerId, x: e.clientX, y: e.clientY, t: performance.now(), moved: false };
+    drag = { id: e.pointerId, x: e.clientX, y: e.clientY, moved: false };
     canvas.setPointerCapture(e.pointerId);
   };
   const onMove = (e: PointerEvent): void => {
@@ -2150,8 +2160,9 @@ export function openPark3D(o: Park3DOptions): () => void {
   };
   const onUp = (e: PointerEvent): void => {
     if (!drag || e.pointerId !== drag.id) return;
-    // 只有左鍵（手機是手指）點一下才算點地面；右鍵拖曳一樣轉頭
-    if (!drag.moved && e.button === 0 && performance.now() - drag.t < 600) tap(e.clientX, e.clientY);
+    // 只有左鍵（手機是手指）點一下才算點地面；右鍵拖曳一樣轉頭。
+    // 沒拖動就算點一下，不看按了多久：3D 畫得慢的電腦、手機，放開的事件會晚一秒多才處理，限時間的話點小法常常沒反應
+    if (!drag.moved && e.button === 0) tap(e.clientX, e.clientY);
     drag = null;
   };
   canvas.addEventListener('pointerdown', onDown);
