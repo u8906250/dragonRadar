@@ -1102,6 +1102,29 @@ async function rocketTrip(m: typeof import('./park'), from: 'earth' | 'woof'): P
   tripTo = null;
 }
 
+/**
+ * 在 3D 國館裡搭火箭到了另一邊（3D 自己飛、自己降落）：你換到那一邊，雷達跟著換（汪星轉到中山公園；回地球時雷達正中間換到發射口），
+ * 跟雷達上搭火箭到了一樣
+ */
+async function landIn3D(to: 'earth' | 'woof'): Promise<void> {
+  const m = await import('./park');
+  parkMod = m;
+  lockDog(null);
+  youOn = to;
+  radar.youOn = to;
+  if (to === 'woof') radar.setSpaceView(await woofHomeView(), true);
+  else {
+    const [lat, lng] = m.HATCH_CENTER;
+    setOrigin({ lat, lng, source: 'manual' });
+    radar.resetSpace();
+  }
+  saveSpaceView();
+  updateScaleChips();
+  updateHomeBtn();
+  updateSpace();
+  radar.redrawPark();
+}
+
 // ---- 太空：比「全球」再拉遠，畫地球、月球、太陽、行星（space.ts，第一次用到才載入；陸地用全世界的海岸線） ----
 let spaceMod: typeof import('./space') | null = null;
 let spaceLoading = false;
@@ -5171,7 +5194,9 @@ function wireControls(): void {
     const btn = $<HTMLButtonElement>('#park3d-btn');
     btn.disabled = true;
     void import('./park3d')
-      .then((m) => m.openPark3D({ token, world: radar.spaceFocused && radar.spaceFocusKey === 'woof' ? 'woof' : 'earth', onExit: () => (btn.disabled = false) }))
+      .then((m) =>
+        m.openPark3D({ token, world: radar.spaceFocused && radar.spaceFocusKey === 'woof' ? 'woof' : 'earth', onExit: () => (btn.disabled = false), onWorld: (to) => void landIn3D(to) }),
+      )
       .catch(() => {
         btn.disabled = false;
         showBanner(bannerEl, '3D 國館載入失敗，請再試一次');

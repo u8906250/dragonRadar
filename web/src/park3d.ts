@@ -16,7 +16,9 @@ import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js
 import { deleteParkMark, fetchParkMarks, saveParkMark, type ParkMark, type ParkMarkIn, type ParkMarkKind } from './api';
 import { dogHairRoots, dogPartArea, dogParts } from './dog';
 import { dogPose, dogTurned } from './dogs';
-import { PARK_DOGS, personOk } from './park';
+import { arriveRocket, ARRIVE_MS, DEPART_MS, departRocket, HATCH_CENTER, moveDogs, PARK_DOGS, personOk, rocketNow, stowRocket, STOW_MS, summonRocket, SUMMON_MS } from './park';
+import { cloudLayer, puffTexture, rocketModel, ROCKET_H, ROCKET_WINDOW_Y, spaceScene, type SpaceTrip } from './rocket3d';
+import { toWoof } from './space';
 import { ZHONGSHAN_PARK as Z } from './zhongshan';
 import { MIN_HALF, widthSides, withWidths as alongWidths } from './zhongshan-widths';
 
@@ -314,6 +316,8 @@ export interface Park3DOptions {
   token: string;
   /** 從哪一邊進來：地球的中山公園沒有小法，汪星的才有 */
   world: 'earth' | 'woof';
+  /** 在 3D 裡搭火箭到了另一邊（main.ts：你換到那一邊、雷達跟著換） */
+  onWorld?: (to: 'earth' | 'woof') => void;
   onExit: () => void;
 }
 
@@ -374,8 +378,12 @@ export function openPark3D(o: Park3DOptions): () => void {
       </div>
       <div class="p3d-status"></div>
     </div>
-    <div class="p3d-msg" hidden></div>`;
+    <div class="p3d-msg" hidden></div>
+    <div class="p3d-cockpit" hidden><div class="p3d-porthole"></div><div class="p3d-gauge"></div></div>
+    <div class="p3d-flash"></div>`;
   document.body.appendChild(root);
+  /** 現在在哪一邊（搭火箭會換） */
+  let world = o.world;
   const $ = <T extends Element>(s: string): T => root.querySelector(s) as T;
   const msg = (text: string, ms = 3500): void => {
     const m = $<HTMLElement>('.p3d-msg');
@@ -433,8 +441,31 @@ export function openPark3D(o: Park3DOptions): () => void {
   // ---- 地面：公園外面、公園（廣場，挖掉水面）、草地、步道
   // 公園外面一大圈（挖掉公園，不然會蓋住比地面低的翠湖）
   const outline = ringEN(Z.outline);
-  const far = Array.from({ length: 48 }, (_, i): Pt => [Math.cos((i / 48) * Math.PI * 2) * 1500, Math.sin((i / 48) * Math.PI * 2) * 1500]);
-  add(flatGeo([shapeOf(far, [outline])], -0.01), mat(0xc4c0b6));
+  const far = Array.from({ length: 64 }, (_, i): Pt => [Math.cos((i / 64) * Math.PI * 2) * 5000, Math.sin((i / 64) * Math.PI * 2) * 5000]);
+  // 公園外面：從高處看像城市（一塊塊深淺不一的街廓、淺色的馬路，一張 400 公尺見方重複鋪）
+  const city = (() => {
+    const cv = document.createElement('canvas');
+    [cv.width, cv.height] = [512, 512];
+    const g = cv.getContext('2d')!;
+    g.fillStyle = '#d4d0c6';
+    g.fillRect(0, 0, 512, 512);
+    for (let i = 0; i < 6; i++)
+      for (let j = 0; j < 6; j++) {
+        const [x, y] = [i * 85 + 8, j * 85 + 8];
+        for (let k = 0; k < 6; k++) {
+          const v = 150 + Math.floor(hash(i * 61 + j * 17 + k * 5 + 300) * 50);
+          g.fillStyle = hash(i * 7 + j * 13 + k + 800) < 0.12 ? `rgb(${v - 40}, ${v - 5}, ${v - 50})` : `rgb(${v}, ${v - 3}, ${v - 8})`;
+          g.fillRect(x + (k % 3) * 24 + 1, y + Math.floor(k / 3) * 36 + 1, 22, 34);
+        }
+      }
+    const t = new THREE.CanvasTexture(cv);
+    t.wrapS = t.wrapT = THREE.RepeatWrapping;
+    t.repeat.set(1 / 400, 1 / 400);
+    t.colorSpace = THREE.SRGBColorSpace;
+    t.anisotropy = renderer.capabilities.getMaxAnisotropy();
+    return t;
+  })();
+  add(flatGeo([shapeOf(far, [outline])], -0.01), mat(0xffffff, { map: city }));
   const waters = Z.water.map(([outer, ...islands]) => ({ outer: ringEN(outer), islands: islands.map(ringEN) }));
   add(flatGeo([shapeOf(outline, waters.map((w) => w.outer))], 0), mat(0xe2dccf));
   // 草地：淡綠色上面一叢叢密密的草（畫在一張 GRASS_TILE 公尺見方、重複鋪的圖上，遠處也看得到草；近的還有立體的草）
@@ -922,7 +953,8 @@ export function openPark3D(o: Park3DOptions): () => void {
     ),
   });
   const bedStone = mat(0xa9a59c);
-  for (const i of Z.flowerBeds) {
+  // 中間的花台是發射口（下面另外做成兩扇門）
+  for (const i of Z.flowerBeds.slice(1)) {
     const r = ringEN(Z.green[i]);
     add(prismGeo(shapeOf(r), PLAZA_H, BED_H), [flowers, bedStone], true);
   }
@@ -964,6 +996,71 @@ export function openPark3D(o: Park3DOptions): () => void {
   add(flatGeo(plazaLawnRings.map((r) => shapeOf(r)), PLAZA_H + 0.008), mat(0x9d9a94));
   const plazaLawnInner = plazaLawnRings.map((r) => inset(r, LAWN_EDGE));
   add(flatGeo(plazaLawnInner.map((r) => shapeOf(r)), PLAZA_H + 0.012), grass);
+
+  // ---- 發射口（中間的花台）和火箭：跟雷達共用同一支（在哪一邊、停著還是收著記在 park.ts 的 rocketNow）
+  // 花台分成南北兩扇門：打開時先往下沉、再往兩邊滑進平台底下，底下是黑黑的井
+  const bedST = centerBed.map((q): Pt => [(q[0] - bedC[0]) * out[0] + (q[1] - bedC[1]) * out[1], (q[0] - bedC[0]) * along[0] + (q[1] - bedC[1]) * along[1]]);
+  const [bedHS, bedHT] = [Math.max(...bedST.map((q) => Math.abs(q[0]))), Math.max(...bedST.map((q) => Math.abs(q[1])))];
+  const bedAt = (a: number, b: number): Pt => [bedC[0] + out[0] * a + along[0] * b, bedC[1] + out[1] * a + along[1] * b];
+  const doors = [1, -1].map((sign) => {
+    const ring: Pt[] = [bedAt(-bedHS, 0), bedAt(bedHS, 0), bedAt(bedHS, sign * bedHT), bedAt(-bedHS, sign * bedHT)];
+    const m = new THREE.Mesh(prismGeo(shapeOf(sign > 0 ? ring : [...ring].reverse()), PLAZA_H, BED_H), [flowers, bedStone]);
+    m.castShadow = m.receiveShadow = true;
+    scene.add(m);
+    return { m, sign };
+  });
+  scene.add(new THREE.Mesh(flatGeo([shapeOf(inset(centerBed, 0.12))], PLAZA_H + 0.006), new THREE.MeshBasicMaterial({ color: 0x050505 })));
+  /** 門開到哪（0 關、1 開）：前一半往下沉，後一半往兩邊滑開 */
+  const setDoors = (k: number): void => {
+    const sink = Math.min(1, k * 2) * (BED_H + 0.06);
+    const slide = Math.max(0, k * 2 - 1) * (bedHT + 0.3);
+    for (const d of doors) d.m.position.set(along[0] * slide * d.sign, -sink, -along[1] * slide * d.sign);
+  };
+  const rk = rocketModel();
+  // 圓窗朝東（朝石階、紀念館）
+  rk.group.rotation.y = Math.atan2(out[0], -out[1]);
+  rk.group.visible = false;
+  scene.add(rk.group);
+  const ROCKET_TOP = PLAZA_H + BED_H;
+  const ROCKET_HIDE = PLAZA_H - ROCKET_H - 0.5;
+  const ease = (x: number): number => {
+    const t = Math.min(1, Math.max(0, x));
+    return t * t * (3 - 2 * t);
+  };
+  const lerp = (a: number, b: number, t: number): number => a + (b - a) * t;
+  /** 火箭在 (高度 y) 的樣子；回傳要不要一直重畫 */
+  const placeRocket = (y: number, k: number, fire: boolean, now: number): void => {
+    rk.group.position.set(bedC[0], y, -bedC[1]);
+    rk.group.visible = y > ROCKET_HIDE + 0.01;
+    rk.flame.visible = fire;
+    if (fire) rk.flame.scale.set(1, 0.85 + 0.3 * Math.abs(Math.sin(now / 37)), 1);
+    setDoors(k);
+  };
+  /** 照 park.ts 的火箭擺好火箭和發射口（叫出來、收回去、從另一邊飛來降進井裡）；回傳要不要一直重畫 */
+  function updateRocket(now: number): boolean {
+    const r = rocketNow(now);
+    if (r.world !== world || r.phase === 'stored' || r.phase === 'away' || r.phase === 'depart') {
+      placeRocket(ROCKET_HIDE, 0, false, now);
+      return false;
+    }
+    if (r.phase === 'parked') {
+      placeRocket(ROCKET_TOP, 0, false, now);
+      return false;
+    }
+    if (r.phase === 'summon') {
+      const u = r.e / SUMMON_MS;
+      placeRocket(u < 0.2 ? ROCKET_HIDE : lerp(ROCKET_HIDE, ROCKET_TOP, ease((u - 0.2) / 0.55)), u < 0.2 ? ease(u / 0.2) : u < 0.78 ? 1 : 1 - ease((u - 0.78) / 0.22), false, now);
+    } else if (r.phase === 'stow') {
+      const u = r.e / STOW_MS;
+      placeRocket(u < 0.22 ? ROCKET_TOP : lerp(ROCKET_TOP, ROCKET_HIDE, ease((u - 0.22) / 0.55)), u < 0.22 ? ease(u / 0.22) : u < 0.8 ? 1 : 1 - ease((u - 0.8) / 0.2), false, now);
+    } else {
+      // 從另一邊飛來：門打開，火箭噴著火從上面降下來、降進井裡，門關上
+      const u = r.e / ARRIVE_MS;
+      const y = u < 0.6 ? lerp(ROCKET_TOP + 40, ROCKET_TOP, 1 - Math.pow(1 - u / 0.6, 2.2)) : lerp(ROCKET_TOP, ROCKET_HIDE, ease((u - 0.6) / 0.22));
+      placeRocket(y, u < 0.15 ? ease(u / 0.15) : u < 0.85 ? 1 : 1 - ease((u - 0.85) / 0.15), u < 0.6, now);
+    }
+    return true;
+  }
   // 碑林：西邊一道長長的黑色石牆（一塊塊黑色的石碑排成一道，上面刻字），站在平台上
   const [wallA, wallB] = Z.steleWall.map(en);
   const wallLen = Math.hypot(wallB[0] - wallA[0], wallB[1] - wallA[1]);
@@ -1531,7 +1628,7 @@ export function openPark3D(o: Park3DOptions): () => void {
   /** 擺好小法（離你太遠就藏起來）；回傳要不要一直重畫 */
   function drawDog(now: number): boolean {
     // 地球的中山公園沒有小法（小法只在汪星）
-    if (o.world !== 'woof') {
+    if (world !== 'woof') {
       dogRoot.visible = false;
       return false;
     }
@@ -1711,8 +1808,196 @@ export function openPark3D(o: Park3DOptions): () => void {
 
   // ---- 點一下：標記模式下點地面放、點標記改
   const ray = new THREE.Raycaster();
+  /** 不是在標記：點銅像叫出、收回火箭，點停著的火箭問要不要飛到另一邊 */
+  function tapScene(cx: number, cy: number): void {
+    const r = renderer.domElement.getBoundingClientRect();
+    ray.setFromCamera(new THREE.Vector2(((cx - r.left) / r.width) * 2 - 1, -((cy - r.top) / r.height) * 2 + 1), camera);
+    const hit = ray.intersectObjects(rk.group.visible ? [statue, rk.group] : [statue], true)[0];
+    if (!hit || hit.distance > 80) return;
+    let g: THREE.Object3D | null = hit.object;
+    while (g && g !== statue && g !== rk.group) g = g.parent;
+    if (g === statue) {
+      const now = rocketNow();
+      if (now.world !== world) return msg(`火箭現在在${now.world === 'woof' ? '汪星' : '地球'}`);
+      if (summonRocket(world)) msg('發射口打開了，火箭升上來');
+      else if (stowRocket(world)) msg('火箭收回發射口');
+      dirty = true;
+    } else if (g === rk.group && rocketNow().phase === 'parked' && window.confirm(world === 'earth' ? '是否要到汪星球？' : '是否要回地球？')) startFlight();
+  }
+
+  // ---- 搭火箭：鏡頭在火箭裡、從圓窗看出去——點火、往上飛（公園越來越小、穿過雲）、太空（回頭看著出發的那一顆變小、轉向另一顆越來越大）、
+  // 降到另一邊的中山公園（穿過雲、看著公園越來越近），快到的時候走出火箭、站在石階前面看火箭降進井裡；整趟不能走、不能點
+  type World = 'earth' | 'woof';
+  interface Flight {
+    t0: number;
+    to: World;
+    space: SpaceTrip;
+    clouds: THREE.Group;
+    departed: boolean;
+    switched: boolean;
+  }
+  let flight: Flight | null = null;
+  const F_BOARD = 700;
+  const F_UP = 6000;
+  const F_SPACE = 8000;
+  const F_DOWN = 6000;
+  const F_TOP = 1500;
+  const flightCam = new THREE.PerspectiveCamera(55, 1, 0.5, 9000);
+  const SKY = new THREE.Color(0xbcd6ea);
+  const DARK = new THREE.Color(0x0b1a33);
+  const fog = scene.fog as THREE.Fog;
+  const cockpit = $<HTMLElement>('.p3d-cockpit');
+  const gauge = $<HTMLElement>('.p3d-gauge');
+  const flash = $<HTMLElement>('.p3d-flash');
+  /** 畫面蓋一層白的（穿過雲、大氣）或黑的（走進、走出火箭） */
+  const cover = (color: 'white' | 'black', a: number): void => {
+    flash.style.background = color === 'white' ? '#ffffff' : '#000000';
+    flash.style.opacity = String(Math.max(0, Math.min(1, a)));
+  };
+  // 點火時底下冒出來的白煙
+  const smokeTex = puffTexture();
+  const smoke = Array.from({ length: 18 }, () => {
+    const sp = new THREE.Sprite(new THREE.SpriteMaterial({ map: smokeTex, color: 0xeeeeee, transparent: true, depthWrite: false }));
+    sp.visible = false;
+    scene.add(sp);
+    return sp;
+  });
+  const showSmoke = (t: number, base: THREE.Vector3): void =>
+    smoke.forEach((sp, k) => {
+      const age = (t - k * 90) / 1800;
+      sp.visible = age > 0 && age < 1;
+      if (!sp.visible) return;
+      const a = k * 2.4;
+      const r = 1.5 + age * 6;
+      sp.position.set(base.x + Math.cos(a) * r, base.y + 0.5 + age * 3, base.z + Math.sin(a) * r);
+      sp.scale.setScalar(2 + age * 7);
+      (sp.material as THREE.SpriteMaterial).opacity = 0.85 * (1 - age);
+    });
+  const parkAt = (w: World): [number, number] => (w === 'woof' ? toWoof(HATCH_CENTER) : HATCH_CENTER);
+  function startFlight(): void {
+    const to: World = world === 'earth' ? 'woof' : 'earth';
+    flight = { t0: performance.now(), to, space: spaceScene(world, parkAt(world), parkAt(to)), clouds: cloudLayer(bedC[0], -bedC[1], 850, 1250), departed: false, switched: false };
+    scene.add(flight.clouds);
+    keys.clear();
+    [stick.x, stick.y, stick.id] = [0, 0, -1];
+    if (marking) {
+      marking = false;
+      draft = null;
+      drawMarks();
+      panel();
+    }
+    root.classList.add('p3d-flying');
+  }
+  /** 鏡頭在火箭裡（離地 alt 公尺）從圓窗（朝東）看出去，看著底下的公園（越高看得越正下方、越遠），震動 amp 公尺 */
+  const inRocket = (alt: number, amp: number, now: number): void => {
+    const win = new THREE.Vector3(out[0], 0, -out[1]);
+    flightCam.position.set(bedC[0], ROCKET_TOP + alt + ROCKET_WINDOW_Y, -bedC[1]).addScaledVector(win, 0.3);
+    flightCam.position.x += Math.sin(now / 23) * amp;
+    flightCam.position.y += Math.sin(now / 31) * amp;
+    flightCam.up.set(0, 1, 0);
+    const reach = Math.min(170, 30 + alt * 0.12);
+    flightCam.lookAt(new THREE.Vector3(bedC[0], PLAZA_H, -bedC[1]).addScaledVector(win, reach));
+  };
+  /** 天空、霧照高度變暗、變遠 */
+  const skyAt = (alt: number): void => {
+    const a = Math.min(1, alt / F_TOP);
+    (scene.background as THREE.Color).copy(SKY).lerp(DARK, a);
+    fog.color.copy(scene.background as THREE.Color);
+    fog.near = 140 + alt * 1.5;
+    fog.far = 700 + alt * 4;
+  };
+  const altText = (alt: number): string => `高度 ${Math.round(alt).toLocaleString('zh-TW')} 公尺`;
+  /** 搭火箭的這一格：鏡頭擺好，回傳要畫哪一個場景 */
+  function flightStep(now: number): THREE.Scene {
+    const f = flight!;
+    const dest = f.to === 'woof' ? '汪星' : '地球';
+    let t = now - f.t0;
+    if (t < F_BOARD) {
+      // 走進火箭：畫面慢慢變黑
+      cover('black', t / F_BOARD);
+      return scene;
+    }
+    if (!f.departed) {
+      f.departed = true;
+      departRocket(now);
+      if (f.to === 'woof') moveDogs();
+      rk.group.visible = false;
+      cockpit.hidden = false;
+    }
+    t -= F_BOARD;
+    const base = new THREE.Vector3(bedC[0], ROCKET_TOP, -bedC[1]);
+    if (t < DEPART_MS) {
+      // 點火：震動、底下冒白煙
+      cover('black', 1 - t / 400);
+      showSmoke(t, base);
+      inRocket(0, 0.04 * (t / DEPART_MS), now);
+      skyAt(0);
+      gauge.textContent = `點火・前往${dest}`;
+      return scene;
+    }
+    t -= DEPART_MS;
+    if (t < F_UP) {
+      const u = t / F_UP;
+      const alt = F_TOP * Math.pow(u, 2.4);
+      showSmoke(t + DEPART_MS, base);
+      inRocket(alt, 0.04 * (1 - u), now);
+      skyAt(alt);
+      cover('white', (u - 0.9) / 0.1);
+      gauge.textContent = `${altText(alt)}・前往${dest}`;
+      return scene;
+    }
+    t -= F_UP;
+    if (t < F_SPACE) {
+      f.space.at(t / F_SPACE, flightCam);
+      cover('white', 1 - t / 700);
+      gauge.textContent = `太空・前往${dest}`;
+      return f.space.scene;
+    }
+    t -= F_SPACE;
+    if (!f.switched) {
+      // 到了另一邊的上空（汪星的中山公園有小法）
+      f.switched = true;
+      world = f.to;
+      for (const sp of smoke) sp.visible = false;
+    }
+    if (t < F_DOWN) {
+      const u = t / F_DOWN;
+      const alt = 40 + (F_TOP - 40) * Math.pow(1 - u, 2.5);
+      inRocket(alt, 0.015, now);
+      skyAt(alt);
+      cover('white', 1 - t / 700);
+      gauge.textContent = `${altText(alt)}・降落${dest}`;
+      return scene;
+    }
+    land(now);
+    return scene;
+  }
+  /** 到了：走出火箭、站在石階前面看火箭降進井裡，雷達那邊也換到這一邊 */
+  let fadeIn = 0;
+  function land(now: number): void {
+    const f = flight!;
+    flight = null;
+    scene.remove(f.clouds);
+    arriveRocket(world, now);
+    o.onWorld?.(world);
+    skyAt(0);
+    cockpit.hidden = true;
+    root.classList.remove('p3d-flying');
+    const run = PLAZA_STEPS * STEP_DEPTH + 4;
+    const front: Pt = [stepMid[0] + out[0] * run, stepMid[1] + out[1] * run];
+    if (canStand(front)) pos = front;
+    yaw = Math.atan2(-out[0], -out[1]);
+    pitch = 0.32;
+    grassAt = '';
+    fadeIn = now;
+    dirty = true;
+    remember();
+  }
+
   function tap(cx: number, cy: number): void {
-    if (!marking || busy) return;
+    if (flight) return;
+    if (!marking) return tapScene(cx, cy);
+    if (busy) return;
     const r = renderer.domElement.getBoundingClientRect();
     ray.setFromCamera(new THREE.Vector2(((cx - r.left) / r.width) * 2 - 1, -((cy - r.top) / r.height) * 2 + 1), camera);
     const hit = ray.intersectObjects(markGroup.children.filter((c) => c.userData.markId), true)[0];
@@ -1920,6 +2205,8 @@ export function openPark3D(o: Park3DOptions): () => void {
     // 直的手機畫面：左右至少看得到約 70 度（照左右算上下的視角，最多 95 度）
     camera.fov = Math.min(95, Math.max(65, (2 * Math.atan(Math.tan((70 / 2) * (Math.PI / 180)) / camera.aspect) * 180) / Math.PI));
     camera.updateProjectionMatrix();
+    flightCam.aspect = w / h;
+    flightCam.updateProjectionMatrix();
     dirty = true;
   };
   const ro = new ResizeObserver(resize);
@@ -1931,6 +2218,22 @@ export function openPark3D(o: Park3DOptions): () => void {
     frame = requestAnimationFrame(loop);
     const dt = Math.min(0.1, (now - last) / 1000);
     last = now;
+    if (flight) {
+      const sc = flightStep(now);
+      if (flight) {
+        drawDog(now);
+        renderer.render(sc, flightCam);
+        return;
+      }
+    }
+    // 走出火箭：畫面從黑慢慢亮起來
+    if (fadeIn) {
+      const a = 1 - (now - fadeIn) / 600;
+      cover('black', a);
+      if (a <= 0) fadeIn = 0;
+      dirty = true;
+    }
+    if (updateRocket(now)) dirty = true;
     if (move(dt)) {
       dirty = true;
       if (draft) status();
