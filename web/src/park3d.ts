@@ -11,6 +11,7 @@
  * three.js 只在打開時才載入（main.ts 用 import()），平常的雷達不會變大
  */
 import * as THREE from 'three';
+import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { deleteParkMark, fetchParkMarks, saveParkMark, type ParkMark, type ParkMarkIn, type ParkMarkKind } from './api';
 import { dogParts } from './dog';
 import { dogPose, dogTurned } from './dogs';
@@ -54,6 +55,14 @@ const BANK_DEPTH = 0.7;
 const BRIDGE_W = 2.6;
 const BRIDGE_TOP = 0.3;
 const RAIL_H = 0.9;
+/**
+ * 外圍一圈（公園外框，入口 Z.gates 斷開）：淺灰色的水泥矮牆，上面黑色的鐵欄杆（照使用者給的南邊步道照片：上下兩道橫桿、
+ * 一根根尖頭的直桿、下面一帶一圈圈的花紋，每一片中間一根粗一點、頂上圓頭的柱子）；高度、寬度看照片估的
+ */
+const WALL_H = 0.5;
+const WALL_T = 0.3;
+const FENCE_H = 1.0;
+const FENCE_PANEL = 2.4;
 /** 步道寬（估的；OSM 只有中線） */
 const PATH_W = 2;
 /** 樹多高（估的：照樹冠大小，最高 20 公尺）、樹幹多粗 */
@@ -406,6 +415,86 @@ export function openPark3D(o: Park3DOptions): () => void {
       }),
     );
 
+  // ---- 外圍的矮牆、鐵欄杆：外框每一邊扣掉入口（入口投影到邊上、離邊 1.5 公尺內，前後各半個寬），剩下的一段段蓋牆
+  const gates = Z.gates.map(([lat, lng, w]) => ({ at: en([lat, lng]), w }));
+  const walls: Array<[Pt, Pt]> = [];
+  outline.forEach((a, i) => {
+    const b = outline[(i + 1) % outline.length];
+    const len = Math.hypot(b[0] - a[0], b[1] - a[1]);
+    if (len < 0.05) return;
+    const [ux, uy] = [(b[0] - a[0]) / len, (b[1] - a[1]) / len];
+    const at = (t: number): Pt => [a[0] + ux * t, a[1] + uy * t];
+    const cuts = gates
+      .flatMap(({ at: [gx, gy], w }) => {
+        const t = (gx - a[0]) * ux + (gy - a[1]) * uy;
+        const off = Math.abs((gx - a[0]) * uy - (gy - a[1]) * ux);
+        return off < 1.5 && t > -w / 2 && t < len + w / 2 ? [[t - w / 2, t + w / 2] as Pt] : [];
+      })
+      .sort((p, q) => p[0] - q[0]);
+    let from = 0;
+    for (const [c0, c1] of cuts) {
+      if (c0 > from + 0.1) walls.push([at(from), at(Math.min(len, c0))]);
+      from = Math.max(from, c1);
+    }
+    if (len > from + 0.1) walls.push([at(from), at(len)]);
+  });
+  {
+    // 欄杆的圖（一片 FENCE_PANEL 公尺寬、FENCE_H 高，透明的地方看得過去）
+    const cv = document.createElement('canvas');
+    [cv.width, cv.height] = [512, 256];
+    const g = cv.getContext('2d')!;
+    const Y = (m: number): number => 256 - (m / FENCE_H) * 256;
+    g.fillStyle = g.strokeStyle = '#151618';
+    for (const [m, h] of [[0.05, 7], [0.34, 6], [0.84, 8]] as const) g.fillRect(0, Y(m) - h / 2, 512, h);
+    for (let x = 24; x < 500; x += 22) {
+      g.fillRect(x - 2, Y(0.9), 4, Y(0) - Y(0.9));
+      g.beginPath();
+      g.moveTo(x - 5, Y(0.88));
+      g.lineTo(x, Y(0.96));
+      g.lineTo(x + 5, Y(0.88));
+      g.fill();
+    }
+    g.lineWidth = 4;
+    for (let x = 35; x < 500; x += 44) {
+      g.beginPath();
+      g.arc(x, Y(0.2), 13, 0, Math.PI * 2);
+      g.stroke();
+    }
+    g.fillRect(0, Y(0.94), 10, Y(0) - Y(0.94));
+    g.beginPath();
+    g.arc(5, Y(0.95), 7, 0, Math.PI * 2);
+    g.fill();
+    const tex = new THREE.CanvasTexture(cv);
+    tex.wrapS = THREE.RepeatWrapping;
+    tex.colorSpace = THREE.SRGBColorSpace;
+    tex.anisotropy = renderer.capabilities.getMaxAnisotropy();
+    const wallGeos: THREE.BufferGeometry[] = [];
+    const capGeos: THREE.BufferGeometry[] = [];
+    const fenceGeos: THREE.BufferGeometry[] = [];
+    for (const [a, b] of walls) {
+      const len = Math.hypot(b[0] - a[0], b[1] - a[1]);
+      const m = new THREE.Matrix4().makeRotationY(Math.atan2(b[1] - a[1], b[0] - a[0])).setPosition((a[0] + b[0]) / 2, 0, -(a[1] + b[1]) / 2);
+      wallGeos.push(new THREE.BoxGeometry(len + WALL_T, WALL_H, WALL_T).translate(0, WALL_H / 2, 0).applyMatrix4(m));
+      capGeos.push(new THREE.BoxGeometry(len + WALL_T + 0.04, 0.05, WALL_T + 0.06).translate(0, WALL_H + 0.025, 0).applyMatrix4(m));
+      const f = new THREE.PlaneGeometry(len, FENCE_H).translate(0, WALL_H + 0.05 + FENCE_H / 2, 0);
+      const uv = f.getAttribute('uv') as THREE.BufferAttribute;
+      for (let k = 0; k < uv.count; k++) uv.setX(k, uv.getX(k) * (len / FENCE_PANEL));
+      fenceGeos.push(f.applyMatrix4(m));
+    }
+    if (walls.length) {
+      add(mergeGeometries(wallGeos), mat(0xbdb8ae), true);
+      add(mergeGeometries(capGeos), mat(0xd3cec4), true);
+      add(mergeGeometries(fenceGeos), new THREE.MeshLambertMaterial({ map: tex, alphaTest: 0.5, alphaToCoverage: true, side: THREE.DoubleSide }), true);
+    }
+  }
+  const segDist = (p: Pt, a: Pt, b: Pt): number => {
+    const [dx, dy] = [b[0] - a[0], b[1] - a[1]];
+    const t = Math.max(0, Math.min(1, ((p[0] - a[0]) * dx + (p[1] - a[1]) * dy) / (dx * dx + dy * dy || 1)));
+    return Math.hypot(a[0] + dx * t - p[0], a[1] + dy * t - p[1]);
+  };
+  /** 撞到外圍的牆 */
+  const hitWall = (p: Pt): boolean => walls.some(([a, b]) => segDist(p, a, b) < WALL_T / 2 + 0.25);
+
   // ---- 建築：紀念館（牆、四面斜的黃色琉璃瓦、中間紅褐色平頂），亭子（柱子、尖屋頂），其他照屋頂顏色的平頂方塊
   const wallMat = mat(0xd9d0c2);
   Z.buildings.forEach((b, i) => {
@@ -521,7 +610,7 @@ export function openPark3D(o: Park3DOptions): () => void {
         for (const k of trunkGrid.get(`${i},${j}`) ?? []) if (Math.hypot(p[0] - trees[k].at[0], p[1] - trees[k].at[1]) < trunkR(trees[k].r) + 0.25) return true;
     return false;
   };
-  const canStand = (p: Pt): boolean => personOk(ll(p[0], p[1])) && !hitTrunk(p);
+  const canStand = (p: Pt): boolean => personOk(ll(p[0], p[1])) && !hitTrunk(p) && !hitWall(p);
   /** 腳下多高：橋上是橋面、旗台上是旗台 */
   const floorAt = (p: Pt): number => (onBridge(p) ? BRIDGE_TOP : inside(p, flagBaseRing) ? FLAG_BASE_H : 0);
 
