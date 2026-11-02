@@ -223,7 +223,7 @@ const GLINT_STRONG: Keyframe[] = [{ opacity: 0.95, transform: 'scale(1)' }, { op
 const GLINT_STRONG_CALM: Keyframe[] = [{ opacity: 0.9, transform: 'scale(1.6)' }, { opacity: 0, transform: 'scale(1.6)' }];
 const GLINT_STRONG_MS = 1300;
 /** 明顯的光暈多大（SVG 單位，最小、最大：拉近時整隻狗很大，光暈不跟著那麼大） */
-const GLINT_STRONG_R = [2.2, 6] as const;
+const GLINT_STRONG_R = [3.5, 7] as const;
 /** 光暈至少多大（螢幕像素；手機上白點只有 2 像素左右，光暈跟著那麼小會看不出來） */
 const GLINT_MIN_PX = 2.5;
 

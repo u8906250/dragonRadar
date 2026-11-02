@@ -295,12 +295,12 @@ describe('地球的雷達上的中山公園（跟汪星共用一份）', () => {
     expect(woofAt(0.3, dog)).toMatch(/class="woof-dog stand" data-dog="xiaofa" style="--t:-?\d+ms;--ms:\d+ms"><g class="dog-go"><circle class="dog-dot sweep-lit"/);
     expect(woofAt(0.04, dog)).toContain('dog-dot');
     // 點跟銅像的點一樣大
-    const dotR = (svg: string, cls: string): number => Number(new RegExp(`class="${cls}" cx="[\\d.]+" cy="[\\d.]+" r="([\\d.]+)"`).exec(svg)![1]);
+    const dotR = (svg: string, cls: string): number => Number(new RegExp(`class="${cls}"[^>]*? cx="[\\d.]+" cy="[\\d.]+" r="([\\d.]+)"`).exec(svg)![1]);
     expect(dotR(woofAt(0.3, dog), 'dog-dot sweep-lit')).toBe(dotR(woofAt(0.3, [25.040048, 121.5594]), 'statue-dot'));
     expect(woofAt(0.028, dog)).toContain('woof-dog full');
     const full = woofAt(0.005, dog);
     expect(full).not.toContain('小法');
-    expect(full).toMatch(/class="woof-dog full stand" data-dog="xiaofa" data-path="[-\d. ]+" data-at="[\d.]+ [\d.]+" data-flip="no"><circle class="dog-hit"/);
+    expect(full).toMatch(/<g data-glint="strong" class="sweep-lit woof-dog full stand" data-dog="xiaofa" data-path="[-\d. ]+" data-at="[\d.]+ [\d.]+" data-flip="no"><circle class="dog-hit"/);
     for (const part of ['body', 'head', 'muzzle', 'nose', 'ear1', 'ear-1', 'tail0', 'legfl', 'leghrpaw']) expect(full).toContain(`data-part="${part}"`);
     // 狗畫在樹的下面（走到樹下被樹冠蓋住）、橋的上面
     const wide = woofAt(0.3, dog);
@@ -310,8 +310,8 @@ describe('地球的雷達上的中山公園（跟汪星共用一份）', () => {
     expect(Math.hypot(ax - C, ay - C)).toBeLessThan(2);
     // 在畫面外面就不畫
     expect(woofAt(0.005, hall)).not.toContain('woof-dog');
-    // 走到樹下（被樹冠蓋住）：雷達掃到時還是亮得出來（點、整隻都是），空地上的點照舊淡淡地亮
-    expect(woofAt(0.3, dog)).not.toContain('data-glint');
+    // 雷達掃到時明顯地亮一下：空地上、走到樹下（被樹冠蓋住）都是，點、整隻都是
+    expect(woofAt(0.3, dog)).toMatch(/<circle class="dog-dot sweep-lit" data-glint="strong"/);
     const keep = PARK_DOGS[0].seg;
     const tree: [number, number] = [25.03992, 121.559261];
     PARK_DOGS[0].seg = { ...keep!, from: tree, to: tree };

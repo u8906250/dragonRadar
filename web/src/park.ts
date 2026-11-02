@@ -805,13 +805,13 @@ function dogPart(g: ParkGeom, c: ParkCanvas, dog: Dog): string {
   if (Math.hypot(a[0] + vx * u - c.rx, a[1] + vy * u - c.ry) - h > viewReach() + 2) return '';
   const f1 = (v: number): string => v.toFixed(1);
   const moving = s.do === 'walk' || s.do === 'run';
-  // 被樹冠蓋住（這一段的起點、中間、終點有在樹冠底下）、拉遠到還沒畫出狗：雷達掃到時亮得明顯一點（radar.ts 的 glint，畫在樹上面）
+  // 雷達掃到狗就明顯地亮一下（radar.ts 的 glint，畫在樹上面：走到樹下被樹冠蓋住也看得出牠在哪）；
+  // 拉遠到還沒畫出狗（far）的時候只有掃到時亮一下
   const far = c.ppm < STATUE_FROM;
-  const shaded = [s.from, s.to, [(s.from[0] + s.to[0]) / 2, (s.from[1] + s.to[1]) / 2] as Pt].some((q) => walkOf().shade(toM(q)));
-  const strong = far || shaded ? ' data-glint="strong"' : '';
+  const strong = ' data-glint="strong"';
   if (c.ppm < DOG_FULL) {
     const style = `--t:${-Math.round(d.e)}ms;--ms:${Math.round(s.ms)}ms${moving ? `;--dx:${f1(vx)}px;--dy:${f1(vy)}px` : ''}`;
-    // 遠遠的白點：跟銅像的點一樣大，淡淡的邊（不會一眼就看到），雷達掃過時淡淡地亮一下（sweep-lit，radar.ts 的 glint）；原地轉身的（以後腳為支點挪一點點）放在轉完的地方；
+    // 遠遠的白點：跟銅像的點一樣大，淡淡的邊（不會一眼就看到），雷達掃過時亮一下（sweep-lit，radar.ts 的 glint）；原地轉身的（以後腳為支點挪一點點）放在轉完的地方；
     // 比銅像的點還遠的不畫點（far），只有掃到時亮一下
     const o = moving ? a : b;
     return `<g class="woof-dog ${s.do}" data-dog="${dog.id}" style="${style}"><g class="dog-go"><circle class="dog-dot sweep-lit${far ? ' far' : ''}"${strong} cx="${f1(o[0])}" cy="${f1(o[1])}" r="${Math.min(4, Math.max(1.2, c.ppm * 0.75)).toFixed(1)}" /></g></g>`;
@@ -824,8 +824,8 @@ function dogPart(g: ParkGeom, c: ParkCanvas, dog: Dog): string {
   };
   animateDogs();
   const html = dogMarkup(dog, d, { ax: a[0], ay: a[1], bx: b[0], by: b[1], b0: face(s.dir0), b1: face(s.dir), k: c.ppm, start: s.start }, dogHeading());
-  // 整隻畫出來的走到樹下：一樣讓雷達掃到時亮一下（整隻跟著走，光暈在牠現在的位置）
-  return shaded ? html.replace('<g class="woof-dog full ', `<g${strong} class="sweep-lit woof-dog full `) : html;
+  // 整隻畫出來的也一樣讓雷達掃到時亮一下（整隻跟著走，光暈在牠現在的位置）
+  return html.replace('<g class="woof-dog full ', `<g${strong} class="sweep-lit woof-dog full `);
 }
 
 /**
