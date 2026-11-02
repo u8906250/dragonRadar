@@ -1057,21 +1057,38 @@ export function openPark3D(o: Park3DOptions): () => void {
     put(new THREE.BoxGeometry(0.18, H(-1.42) - H(-0.45), 1.0), dark, (X(-0.5) + X(-0.32)) / 2, (H(-0.45) + H(-1.42)) / 2, 0);
     limb([X(-0.41), H(-1.44), -0.46], [X(-0.41), H(-1.44), 0.46], 0.09, dark);
     for (const z of [-0.43, 0.43]) limb([X(-0.42), H(-0.72), z], [X(0.16), H(-0.72), z], 0.11, dark);
-    // 上身：肩膀寬一點、腰窄一點
-    put(new THREE.CylinderGeometry(0.26, 0.22, H(-1.38) - H(-0.5), 16), body, X(-0.11), (H(-0.5) + H(-1.38)) / 2, 0, [0.85, 1, 1.05]);
-    put(new THREE.SphereGeometry(0.26, 16, 10), body, X(-0.11), H(-1.3), 0, [0.85, 0.45, 1.05]);
+    // 上身（中山裝）：圓圓有厚度的身體、圓圓的肩膀，立領、前面一排扣子、胸前和下面各兩個口袋蓋
+    const seam = mat(0x6a4419);
+    put(new THREE.CapsuleGeometry(0.2, 0.48, 8, 18), body, X(-0.12), (H(-0.5) + H(-1.38)) / 2 + 0.02, 0, [0.82, 1, 1.25]);
+    for (const z of [-1, 1]) put(new THREE.SphereGeometry(0.085, 12, 8), body, X(-0.14), H(-1.28), z * 0.28);
+    put(new THREE.CylinderGeometry(0.075, 0.085, 0.07, 16), body, X(-0.05), H(-1.4), 0);
+    const front = X(-0.12) + 0.2 * 0.82;
+    for (const h of [-1.3, -1.15, -1.0, -0.85, -0.7]) put(new THREE.SphereGeometry(0.013, 8, 6), seam, front + 0.004, H(h), 0);
+    for (const z of [-1, 1]) {
+      put(new THREE.BoxGeometry(0.012, 0.035, 0.1), seam, front, H(-1.18), z * 0.12);
+      put(new THREE.BoxGeometry(0.012, 0.04, 0.13), seam, front, H(-0.74), z * 0.13);
+    }
+    // 衣襬蓋在大腿上
+    put(new THREE.BoxGeometry(0.26, 0.06, 0.5), body, X(-0.02), H(-0.62), 0);
     // 大腿（平放）、小腿（垂下來、往前一點）、鞋子
     for (const z of [-0.12, 0.12]) {
-      limb([X(-0.15), H(-0.64), z], [X(0.4), H(-0.64), z], 0.13, body);
-      limb([X(0.36), H(-0.6), z], [X(0.4), H(-0.12), z], 0.085, body);
+      limb([X(-0.15), H(-0.64), z], [X(0.4), H(-0.64), z], 0.12, body);
+      limb([X(0.36), H(-0.6), z], [X(0.4), H(-0.14), z], 0.085, body);
+      // 褲腳、鞋子
+      put(new THREE.CylinderGeometry(0.095, 0.095, 0.03, 12), seam, X(0.4), H(-0.15), z);
       put(new THREE.SphereGeometry(1, 12, 8), dark, X(0.46), H(-0.04), z, [0.15, 0.06, 0.07]);
     }
     // 手：從肩膀垂下來到手肘、再往前放在膝蓋上
     for (const z of [-1, 1]) {
-      limb([X(-0.14), H(-1.28), z * 0.3], [X(-0.08), H(-0.92), z * 0.31], 0.075, body);
-      limb([X(-0.08), H(-0.92), z * 0.31], [X(0.3), H(-0.82), z * 0.2], 0.068, body);
-      put(new THREE.SphereGeometry(0.065, 10, 8), body, X(0.33), H(-0.81), z * 0.19);
+      limb([X(-0.14), H(-1.28), z * 0.29], [X(-0.08), H(-0.92), z * 0.31], 0.075, body);
+      limb([X(-0.08), H(-0.92), z * 0.31], [X(0.27), H(-0.83), z * 0.21], 0.068, body);
+      // 袖口
+      const cuff = put(new THREE.CylinderGeometry(0.075, 0.075, 0.03, 12), seam, X(0.27), H(-0.83), z * 0.21);
+      cuff.rotation.z = Math.PI / 2 - 0.25;
+      put(new THREE.SphereGeometry(0.06, 10, 8), body, X(0.33), H(-0.81), z * 0.19);
     }
+    // 右手拿著一捲紙（放在膝蓋上）
+    limb([X(0.24), H(-0.79), -0.19], [X(0.4), H(-0.79), -0.19], 0.028, body);
     // 脖子、頭（鼻子朝前、兩邊耳朵、鬍子）
     limb([X(-0.05), H(-1.36), 0], [X(-0.05), H(-1.46), 0], 0.065, dark);
     put(new THREE.SphereGeometry(0.15, 18, 12), body, X(-0.05), H(-1.56), 0, [0.95, 1.08, 0.9]);
