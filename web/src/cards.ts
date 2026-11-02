@@ -13,10 +13,12 @@ export interface CardDef {
   img: string;
   /** 卡片上的介紹 */
   about: string;
+  /** 還沒拿到時卡冊裡的提示（只給一點點） */
+  hint: string;
 }
 
 export const CARD_DEFS: CardDef[] = [
-  { id: 'xiaofa', no: 1, name: '小法', img: `${import.meta.env.BASE_URL}cards/xiaofa.webp`, about: '白色馬爾濟斯。愛邊走邊聞，常在碑林出現。' },
+  { id: 'xiaofa', no: 1, name: '小法', img: `${import.meta.env.BASE_URL}cards/xiaofa.webp`, about: '白色馬爾濟斯。愛邊走邊聞，常在碑林出現。', hint: '國館' },
 ];
 
 const LS_CARDS = 'dr.cards';
@@ -70,12 +72,13 @@ function frontHtml(d: CardDef, c: CardClaim): string {
     </div>`;
 }
 
-/** 卡片背面；還沒拿到的在卡冊裡畫背面加一個問號 */
+/** 卡片背面；還沒拿到的在卡冊裡畫背面加一個問號和提示 */
 function backHtml(d: CardDef, missing = false): string {
   return `<div class="tc-face tc-back">
       <div class="tc-paw">${PAW}</div>
       <div class="tc-back-title">${missing ? '？？？' : '尋找小法'}</div>
       <div class="tc-back-no">${noText(d)}</div>
+      ${missing ? `<div class="tc-back-hint">提示：${esc(d.hint)}</div>` : ''}
     </div>`;
 }
 
@@ -112,7 +115,7 @@ function showReveal(d: CardDef, c: CardClaim): void {
     `<div class="tc-box">
       <h2 class="tc-title">找到${esc(d.name)}了！</h2>
       <div class="tc-flip"><div class="tc-inner">${frontHtml(d, c)}${backHtml(d)}</div></div>
-      <p class="tc-note">收進卡冊了，雷達左上角的「卡冊」隨時看得到。</p>
+      <p class="tc-note">收進卡冊了，選單裡的「卡冊」隨時看得到。</p>
       <button type="button" class="chip primary" data-close>好</button>
     </div>`,
   );
@@ -143,30 +146,21 @@ export async function findCard(id: string, place: string, onError: (msg: string)
 }
 
 /**
- * 卡冊：拿到的卡、還沒拿到的（背面加問號，寫怎麼拿）。
+ * 卡冊：拿到的卡、還沒拿到的（背面加問號和一點點提示）。
  * 打開時再跟伺服器對一次（這個瀏覽器的紀錄被清掉、伺服器還有的補回來）
  */
-export function openAlbum(o: { onWoof: boolean; goPark: () => void }): void {
+export function openAlbum(): void {
   const list = (): string => {
     const mine = myCards();
     const got = CARD_DEFS.filter((d) => mine.some((c) => c.card === d.id)).length;
     const slots = CARD_DEFS.map((d) => {
       const c = mine.find((x) => x.card === d.id);
-      if (c) return `<div class="tc-slot"><div class="tc-card">${frontHtml(d, c)}</div></div>`;
-      const how = o.onWoof
-        ? `${esc(d.name)}就在汪星的中山公園裡。在雷達上找找白色的小點，或進「3D 國館」找牠，點到牠就拿得到這張卡。`
-        : `${esc(d.name)}住在汪星的中山公園。到地球的中山公園（國父紀念館）點孫中山銅像叫出火箭，搭火箭到汪星，在雷達上或「3D 國館」裡點到牠就拿得到這張卡。`;
-      return `<div class="tc-slot missing"><div class="tc-card">${backHtml(d, true)}</div><p class="tc-hint">${how}</p>${o.onWoof ? '' : '<button type="button" class="chip primary" data-go>帶我去中山公園的銅像</button>'}</div>`;
+      return `<div class="tc-slot${c ? '' : ' missing'}"><div class="tc-card">${c ? frontHtml(d, c) : backHtml(d, true)}</div></div>`;
     });
     return `<div class="tc-head"><h2>卡冊</h2><span class="tc-count">已收集 ${got} / ${CARD_DEFS.length}</span><button type="button" class="chip" data-close>關閉</button></div>
       <div class="tc-list">${slots.join('')}</div>`;
   };
   const el = overlay('tc-album', `<div class="tc-box">${list()}</div>`);
-  el.addEventListener('click', (e) => {
-    if (!(e.target as HTMLElement).closest('[data-go]')) return;
-    el.querySelector<HTMLElement>('[data-close]')?.click();
-    o.goPark();
-  });
   void fetchMyCards().then((r) => {
     if (!r.ok || !el.isConnected) return;
     const local = myCards();
