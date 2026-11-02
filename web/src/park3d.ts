@@ -63,8 +63,17 @@ const WALL_H = 0.5;
 const WALL_T = 0.3;
 const FENCE_H = 1.0;
 const FENCE_PANEL = 2.4;
+/** 入口兩邊再多拿掉幾公尺的牆（入口大一點） */
+const GATE_CLEAR = 3;
 /** 步道寬（估的；OSM 只有中線） */
 const PATH_W = 2;
+/**
+ * 南邊的櫻花步道（預設入口那一條，Z.sakuraLane）照使用者給的照片畫：深灰色的鋪面約 3.6 公尺寬，中間兩條淺色的磁磚線
+ * （各 0.15 公尺寬、離中線 0.4 公尺）；寬度、線的位置看照片估的
+ */
+const SAKURA_W = 3.6;
+const SAKURA_LINE_OFF = 0.4;
+const SAKURA_LINE_W = 0.15;
 /** 樹多高（估的：照樹冠大小，最高 20 公尺）、樹幹多粗 */
 const treeH = (r: number): number => Math.min(20, 2.5 + 1.9 * r);
 const trunkR = (r: number): number => Math.max(0.1, Math.min(0.4, r * 0.06));
@@ -371,7 +380,7 @@ export function openPark3D(o: Park3DOptions): () => void {
   add(flatGeo(Z.green.map((r) => shapeOf(ringEN(r))), 0.02), grass);
   const inWater = (p: Pt): boolean => waters.some((w) => inside(p, w.outer) && !w.islands.some((i) => inside(p, i)));
   // 步道：經過水面的那幾段不畫（橋另外蓋）
-  const pathLines = Z.paths.map((l) => l.map(en)).flatMap((l) => {
+  const splitWet = (l: Pt[]): Pt[][] => {
     const out: Pt[][] = [];
     let cur: Pt[] = [];
     for (let i = 0; i < l.length; i++) {
@@ -382,8 +391,21 @@ export function openPark3D(o: Park3DOptions): () => void {
     }
     if (cur.length > 1) out.push(cur);
     return out;
-  });
+  };
+  const pathLines = Z.paths.flatMap((l, i) => (i === Z.sakuraLane ? [] : splitWet(l.map(en))));
+  const sakura = splitWet(Z.paths[Z.sakuraLane].map(en));
   add(stripGeo(pathLines, PATH_W, 0.035), mat(0xd8cdb8));
+  // 櫻花步道：深灰色、比較寬，上面兩條淺色的線（中線往兩邊平移）
+  add(stripGeo(sakura, SAKURA_W, 0.04), mat(0x9d9b96));
+  /** 一條線往左（正）或往右平移 d 公尺（每一點照前後兩段的方向平均） */
+  const shift = (l: Pt[], d: number): Pt[] =>
+    l.map((p, i) => {
+      const [a, b] = [l[Math.max(0, i - 1)], l[Math.min(l.length - 1, i + 1)]];
+      const [dx, dy] = [b[0] - a[0], b[1] - a[1]];
+      const len = Math.hypot(dx, dy) || 1;
+      return [p[0] - (dy / len) * d, p[1] + (dx / len) * d];
+    });
+  add(stripGeo(sakura.flatMap((l) => [shift(l, SAKURA_LINE_OFF), shift(l, -SAKURA_LINE_OFF)]), SAKURA_LINE_W, 0.045), mat(0xf0ede6));
 
   // ---- 水：翠湖（水面低一點、岸是石頭）、映池（水面高一點、一圈可以坐的石頭邊）
   const stone = mat(0xb9b1a2);
@@ -433,8 +455,8 @@ export function openPark3D(o: Park3DOptions): () => void {
       }),
     );
 
-  // ---- 外圍的矮牆、鐵欄杆：外框每一邊扣掉入口（入口投影到邊上、離邊 1.5 公尺內，前後各半個寬），剩下的一段段蓋牆
-  const gates = Z.gates.map(([lat, lng, w]) => ({ at: en([lat, lng]), w }));
+  // ---- 外圍的矮牆、鐵欄杆：外框每一邊扣掉入口（入口投影到邊上、離邊 1.5 公尺內，前後各半個寬，兩邊再多 GATE_CLEAR），剩下的一段段蓋牆
+  const gates = Z.gates.map(([lat, lng, w]) => ({ at: en([lat, lng]), w: w + 2 * GATE_CLEAR }));
   const walls: Array<[Pt, Pt]> = [];
   outline.forEach((a, i) => {
     const b = outline[(i + 1) % outline.length];
@@ -588,7 +610,41 @@ export function openPark3D(o: Park3DOptions): () => void {
   scene.add(statue);
 
   // ---- 樹：樹幹、樹冠（一團低多邊形，照樹冠半徑；高度是估的），全部用 InstancedMesh 一次畫
-  const trees = Z.trees.map(([lat, lng, r]) => ({ at: en([lat, lng]), r }));
+  // 樹幹不長在步道上：樹的中心（樹幹）離步道中線不到半個步道寬（櫻花步道比較寬）加樹幹、0.3 公尺的，整棵往旁邊推到步道外面
+  // （樹冠是航照的範圍，樹幹在哪本來就是照樹冠中心估的；推了還在步道上就再推，最多 4 次；推到水裡、建築裡的不畫）
+  const pathSegs = [
+    ...pathLines.flatMap((l) => l.slice(1).map((q, i): [Pt, Pt, number] => [l[i], q, PATH_W / 2])),
+    ...sakura.flatMap((l) => l.slice(1).map((q, i): [Pt, Pt, number] => [l[i], q, SAKURA_W / 2])),
+  ];
+  const offPath = (at: Pt, r: number): Pt | null => {
+    let p = at;
+    let moved = false;
+    for (let k = 0; k < 4; k++) {
+      let best: { d: number; a: Pt; b: Pt; clear: number } | null = null;
+      for (const [a, b, half] of pathSegs) {
+        if (Math.abs(p[0] - a[0]) > 60 && Math.abs(p[0] - b[0]) > 60) continue;
+        const d = segDist(p, a, b);
+        const clear = half + trunkR(r) + 0.3;
+        if (d < clear && (!best || d - clear < best.d - best.clear)) best = { d, a, b, clear };
+      }
+      if (!best) return moved && !personOk(ll(p[0], p[1])) ? null : p;
+      const { a, b, clear } = best;
+      const [dx, dy] = [b[0] - a[0], b[1] - a[1]];
+      const t = Math.max(0, Math.min(1, ((p[0] - a[0]) * dx + (p[1] - a[1]) * dy) / (dx * dx + dy * dy || 1)));
+      const c: Pt = [a[0] + dx * t, a[1] + dy * t];
+      let [nx, ny] = [p[0] - c[0], p[1] - c[1]];
+      let l = Math.hypot(nx, ny);
+      // 剛好在中線上：往步道的左邊推
+      if (l < 1e-6) [nx, ny, l] = [-dy, dx, Math.hypot(dx, dy) || 1];
+      p = [c[0] + (nx / l) * (clear + 0.05), c[1] + (ny / l) * (clear + 0.05)];
+      moved = true;
+    }
+    return null;
+  };
+  const trees = Z.trees.flatMap(([lat, lng, r]) => {
+    const at = offPath(en([lat, lng]), r);
+    return at ? [{ at, r }] : [];
+  });
   const trunkGeo = new THREE.CylinderGeometry(0.75, 1, 1, 7);
   trunkGeo.translate(0, 0.5, 0);
   const crownGeo = new THREE.IcosahedronGeometry(1, 1);
