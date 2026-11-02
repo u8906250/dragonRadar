@@ -46,6 +46,12 @@ export function parseParkMark(body: unknown): ParkMarkInput | string {
   return { kind: b.kind, lat: Math.round(lat * 1e7) / 1e7, lng: Math.round(lng * 1e7) / 1e7, heading: Math.round((((h % 360) + 360) % 360) * 10) / 10, note };
 }
 
+/** 大家都看得到的標記（3D 國館畫出路燈、長椅…）：只有種類、位置、面向，不給備註 */
+export async function listPublicParkMarks(env: Env): Promise<Array<Pick<ParkMark, 'id' | 'kind' | 'lat' | 'lng' | 'heading'>>> {
+  const { results } = await env.DB.prepare('SELECT id, kind, lat, lng, heading FROM park_marks ORDER BY id').all<Pick<ParkMark, 'id' | 'kind' | 'lat' | 'lng' | 'heading'>>();
+  return results ?? [];
+}
+
 export async function listParkMarks(env: Env): Promise<ParkMark[]> {
   const { results } = await env.DB.prepare('SELECT id, kind, lat, lng, heading, note, created_at, updated_at FROM park_marks ORDER BY id').all<ParkMark>();
   return results ?? [];

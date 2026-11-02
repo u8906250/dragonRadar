@@ -10,7 +10,7 @@ import { CURRENT_MAP_URL, type CurrentMapRoute } from './sources/currentmap';
 import { mergeIntoOfficial } from './sources/merge';
 import { apifyTrial } from './sources/apify';
 import { fetchThreadsPost, resolveThreadsLink, shortcodeToUnix } from './sources/link';
-import { addParkMark, deleteParkMark, listParkMarks, parseParkMark, updateParkMark } from './parkmarks';
+import { addParkMark, deleteParkMark, listParkMarks, listPublicParkMarks, parseParkMark, updateParkMark } from './parkmarks';
 import { adminLocate, applyFeedback, clearResolvedFeedback, deleteAdminSubscription, listFeedback, locateForFeedback, notifyAdmins, purgeFeedback, saveAdminSubscription, setFeedbackStatus, submitFeedback } from './feedback';
 import { SESSION_SPEC } from './badminton';
 import { FOOD_SPEC } from './food';
@@ -151,6 +151,11 @@ async function handle(req: Request, env: Env, ctx: ExecutionContext): Promise<Re
   }
   if (req.method === 'POST' && path === '/api/push/unsubscribe') {
     return jsonResponse(await deleteSubscription(env, await readJson<{ endpoint?: string }>(req)));
+  }
+
+  // 3D 國館的標記（管理者標的路燈、長椅…）：大家都看得到，只有種類、位置、面向
+  if (req.method === 'GET' && path === '/api/park-marks') {
+    return jsonResponse({ marks: await listPublicParkMarks(env) });
   }
 
   // 今天的車掃路線（實際路徑、各站預計時間、各路段認領人數）

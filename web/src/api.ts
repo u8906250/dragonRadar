@@ -223,6 +223,17 @@ async function adminJson<T>(token: string, path: string, init: RequestInit = {})
   if (!r.ok) throw new Error(r.status === 401 ? '管理 token 不對或已經換了' : (j.error ?? `API ${r.status}`));
   return j;
 }
+/** 大家都看得到的公園標記（3D 國館畫出來；沒有備註），讀不到就當沒有 */
+export async function fetchPublicParkMarks(): Promise<ParkMark[]> {
+  try {
+    const r = await fetch(`${API_BASE}/api/park-marks`);
+    if (!r.ok) return [];
+    const j = (await r.json()) as { marks?: Array<Pick<ParkMark, 'id' | 'kind' | 'lat' | 'lng' | 'heading'>> };
+    return (j.marks ?? []).map((m) => ({ ...m, note: null, created_at: 0, updated_at: 0 }));
+  } catch {
+    return [];
+  }
+}
 /** 列出公園的標記（要管理 token） */
 export async function fetchParkMarks(token: string): Promise<ParkMark[]> {
   return (await adminJson<{ marks: ParkMark[] }>(token, '/api/admin/park-marks')).marks;

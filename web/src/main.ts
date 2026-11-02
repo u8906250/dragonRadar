@@ -903,7 +903,7 @@ function updateStreets(): void {
   $('#radar-attrib').hidden = !show && !trees;
   $('#street-attrib').hidden = !show;
   $('#tree-attrib').hidden = !trees;
-  $('#park3d-btn').hidden = !trees || !lsGet(LS_ADMIN_TOKEN);
+  $('#park3d-btn').hidden = !trees;
   if (!show) {
     if (streetsFor) radar.setStreets(null);
     streetsFor = '';
@@ -5187,10 +5187,9 @@ function wireControls(): void {
     if (taps.length >= 5) location.href = 'admin.html';
   });
   $('#admin-link').hidden = !lsGet(LS_ADMIN_TOKEN);
-  // 3D 的中山公園（測試中，只有存了管理 token 的看得到）：從左下（西南角）的入口進去
+  // 3D 的中山公園（測試中，大家都進得來；存了管理 token 的才能標記路燈、長椅）
   $('#park3d-btn').addEventListener('click', () => {
-    const token = lsGet(LS_ADMIN_TOKEN);
-    if (!token) return;
+    const token = lsGet(LS_ADMIN_TOKEN) ?? undefined;
     const btn = $<HTMLButtonElement>('#park3d-btn');
     btn.disabled = true;
     void import('./park3d')

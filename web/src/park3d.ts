@@ -1,5 +1,5 @@
 /**
- * 3D 的中山公園（「3D 國館」，第一人稱走走看；測試中，只有存了管理 token 的瀏覽器看得到）：
+ * 3D 的中山公園（「3D 國館」，第一人稱走走看；測試中，大家都進得來，標記路燈、長椅要有管理 token）：
  * 照雷達同一份資料（zhongshan.ts：OpenStreetMap 的範圍、草地、步道、水面、橋、建築，正射影像判讀的樹冠、屋頂顏色、橋寬、映池石頭邊、旗台）
  * 蓋出來，平面的位置都是真的；高度大多沒有資料，是估的（下面的常數註明哪些是估的，找到資料再改）。
  * 記得上次站哪、面向哪（這個瀏覽器的 dr.park3d），下次接著走；第一次（或那裡現在站不到）從左下（西南角，光復南路那邊）的入口進去，面向南邊那條步道往東。
@@ -13,7 +13,7 @@
  */
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
-import { deleteParkMark, fetchParkMarks, saveParkMark, type ParkMark, type ParkMarkIn, type ParkMarkKind } from './api';
+import { deleteParkMark, fetchParkMarks, fetchPublicParkMarks, saveParkMark, type ParkMark, type ParkMarkIn, type ParkMarkKind } from './api';
 import { dogHairRoots, dogPartArea, dogParts } from './dog';
 import { dogPose, dogTurned, happyWag } from './dogs';
 import { arriveRocket, ARRIVE_MS, DEPART_MS, departRocket, HATCH_CENTER, moveDogs, PARK_DOGS, personOk, petDog, rocketNow, stowRocket, STOW_MS, summonRocket, SUMMON_MS } from './park';
@@ -314,8 +314,8 @@ const hash = (i: number): number => {
 };
 
 export interface Park3DOptions {
-  /** 管理 token（讀寫標記） */
-  token: string;
+  /** 管理 token（標記路燈、長椅要有；大家都進得來，沒有 token 只看得到標好的） */
+  token?: string;
   /** 從哪一邊進來：地球的中山公園沒有小法，汪星的才有 */
   world: 'earth' | 'woof';
   /** 在 3D 裡搭火箭到了另一邊（main.ts：你換到那一邊、雷達跟著換） */
@@ -1591,7 +1591,7 @@ export function openPark3D(o: Park3DOptions): () => void {
   }
   async function loadMarks(): Promise<void> {
     try {
-      marks = await fetchParkMarks(o.token);
+      marks = o.token ? await fetchParkMarks(o.token) : await fetchPublicParkMarks();
       drawMarks();
       panel();
     } catch (e) {
@@ -2100,7 +2100,7 @@ export function openPark3D(o: Park3DOptions): () => void {
     busy = true;
     const d: ParkMarkIn = { kind: draft.kind, lat: draft.lat, lng: draft.lng, heading: draft.heading, note: $<HTMLInputElement>('.p3d-note').value.trim() || null };
     try {
-      const saved = await saveParkMark(o.token, d, draft.id);
+      const saved = await saveParkMark(o.token ?? '', d, draft.id);
       marks = draft.id ? marks.map((m) => (m.id === saved.id ? saved : m)) : [...marks, saved];
       draft = null;
       msg(`存好了：${KIND_NAME[saved.kind]} #${saved.id}`);
@@ -2115,7 +2115,7 @@ export function openPark3D(o: Park3DOptions): () => void {
     if (!draft?.id || busy || !confirm(`刪除這個${KIND_NAME[draft.kind]}（#${draft.id}）？`)) return;
     busy = true;
     try {
-      await deleteParkMark(o.token, draft.id);
+      await deleteParkMark(o.token ?? '', draft.id);
       marks = marks.filter((m) => m.id !== draft?.id);
       msg('刪掉了');
       draft = null;
@@ -2216,6 +2216,8 @@ export function openPark3D(o: Park3DOptions): () => void {
   window.addEventListener('pagehide', onHide);
 
   $('.p3d-exit').addEventListener('click', () => close());
+  // 沒有管理 token：只看得到標好的，不能標
+  $<HTMLElement>('.p3d-mark-toggle').hidden = !o.token;
   $('.p3d-mark-toggle').addEventListener('click', () => {
     marking = !marking;
     if (!marking && draft) {
