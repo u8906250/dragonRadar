@@ -320,6 +320,8 @@ export interface Park3DOptions {
   world: 'earth' | 'woof';
   /** 在 3D 裡搭火箭到了另一邊（main.ts：你換到那一邊、雷達跟著換） */
   onWorld?: (to: 'earth' | 'woof') => void;
+  /** 點到小法（main.ts：還沒有小法卡就拿一張） */
+  onPetDog?: (id: string) => void;
   onExit: () => void;
 }
 
@@ -1867,6 +1869,7 @@ export function openPark3D(o: Park3DOptions): () => void {
       const at = xiaofa.now().at;
       const you = ll(pos[0], pos[1]);
       petDog(xiaofa.id, [you[0] - at[0], you[1] - at[1]]);
+      o.onPetDog?.(xiaofa.id);
       dirty = true;
       return;
     }

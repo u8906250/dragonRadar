@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { RADAR_GEOM } from '../src/radar';
-import { personOk, ARRIVE_MS, arriveRocket, DEPART_MS, departRocket, EARTH, earthParkSvg, HATCH_CENTER, nearPark, PARK_DOGS, PARK_YARD, PARK_MIN_KM, parkAreas, parkYard, XIAOFA_AVOID, XIAOFA_NATURE, XIAOFA_RARE, parkGeom, parkTexture, resetRocket, rocketNow, STOW_MS, stowRocket, SUMMON_MS, summonRocket } from '../src/park';
+import { parkPlaceName, personOk, ARRIVE_MS, arriveRocket, DEPART_MS, departRocket, EARTH, earthParkSvg, HATCH_CENTER, nearPark, PARK_DOGS, PARK_YARD, PARK_MIN_KM, parkAreas, parkYard, XIAOFA_AVOID, XIAOFA_NATURE, XIAOFA_RARE, parkGeom, parkTexture, resetRocket, rocketNow, STOW_MS, stowRocket, SUMMON_MS, summonRocket } from '../src/park';
 import { ZHONGSHAN_PARK } from '../src/zhongshan';
 import { bodyBearing, spaceMarkup, toWoof } from '../src/space';
 import { dogHeight, MALTESE } from '../src/dog';
@@ -526,5 +526,17 @@ describe('3D 公園的人走得到哪裡', () => {
     expect(personOk([25.0478, 121.517])).toBe(false); // 公園外面
     // 曲橋上（橋的中線上每一點）
     for (const l of ZHONGSHAN_PARK.bridges) for (let i = 1; i < l.length; i++) expect(personOk([(l[i - 1][0] + l[i][0]) / 2, (l[i - 1][1] + l[i][1]) / 2])).toBe(true);
+  });
+});
+
+describe('parkPlaceName', () => {
+  it('names where in the park a spot is (for the card)', () => {
+    const P = ZHONGSHAN_PARK;
+    expect(parkPlaceName(P.statue)).toBe('碑林');
+    expect(parkPlaceName(P.water[1][0][0])).toBe('翠湖');
+    expect(parkPlaceName(P.water[0][0][0])).toBe('映池');
+    expect(parkPlaceName([25.0400355, 121.5602386])).toBe('國父紀念館');
+    expect(P.paths[P.sakuraLane].map(parkPlaceName)).toContain('櫻花步道');
+    expect(parkPlaceName([25.0412, 121.5615])).toBe('中山公園');
   });
 });

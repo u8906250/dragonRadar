@@ -10,6 +10,7 @@ import { CURRENT_MAP_URL, type CurrentMapRoute } from './sources/currentmap';
 import { mergeIntoOfficial } from './sources/merge';
 import { apifyTrial } from './sources/apify';
 import { fetchThreadsPost, resolveThreadsLink, shortcodeToUnix } from './sources/link';
+import { claimCard, myCards, purgeCardIps } from './cards';
 import { addParkMark, deleteParkMark, listParkMarks, listPublicParkMarks, parseParkMark, updateParkMark } from './parkmarks';
 import { adminLocate, applyFeedback, clearResolvedFeedback, deleteAdminSubscription, listFeedback, locateForFeedback, notifyAdmins, purgeFeedback, saveAdminSubscription, setFeedbackStatus, submitFeedback } from './feedback';
 import { SESSION_SPEC } from './badminton';
@@ -263,6 +264,10 @@ async function handle(req: Request, env: Env, ctx: ExecutionContext): Promise<Re
   if (req.method === 'POST' && path === '/api/spot-requests') {
     throw new HttpError(410, '固定據點回報已經合併到「回報 Threads 貼文」，直接貼連結就好，會自動判斷成固定據點。請重新整理頁面');
   }
+
+  // ---- 收集卡（尋找小法，裝置代碼放在 x-device 標頭）----
+  if (req.method === 'GET' && path === '/api/cards/mine') return jsonResponse(await myCards(env, await deviceId(env, req)));
+  if (req.method === 'POST' && path === '/api/cards/claim') return jsonResponse(await claimCard(env, await deviceId(env, req), await ipHash(env, req), await readJson<unknown>(req), now));
 
   // ---- 漂流瓶（裝置代碼放在 x-device 標頭）----
   if (path === '/api/bottles' || path.startsWith('/api/bottles/')) {
@@ -769,7 +774,7 @@ async function purgeOldData(env: Env, now: number): Promise<number> {
     // 手動改的地點、時間跟著貼文
     env.DB.prepare('DELETE FROM manual_fixes WHERE post_id NOT IN (SELECT id FROM posts)'),
   ]);
-  return r.reduce((n, x) => n + (x.meta.changes ?? 0), 0) + (await purgeReports(env, cutoff)) + (await purgeBottles(env, cutoff)) + (await purgeSubscriptions(env, cutoff)) + (await purgeFeedback(env, cutoff));
+  return r.reduce((n, x) => n + (x.meta.changes ?? 0), 0) + (await purgeReports(env, cutoff)) + (await purgeBottles(env, cutoff)) + (await purgeCardIps(env, cutoff)) + (await purgeSubscriptions(env, cutoff)) + (await purgeFeedback(env, cutoff));
 }
 
 async function refreshTokenJob(env: Env): Promise<void> {

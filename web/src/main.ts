@@ -11,6 +11,7 @@ import { X_MAX_WEIGHT, xLength } from './xcount';
 import { shortAddress, splitPlace } from './place';
 import { crowdOf, MapView, pinPicker, type BaseMap, type PinPicker } from './map';
 import { beep, ensureNotificationPermission, iosNeedsHomeScreen, notificationState, pushSubscription, pushSupported, registerServiceWorker, showBanner, systemNotify, unlockAudio, unsubscribePush } from './notify';
+import { cardCount, findCard, onCardsChange, openAlbum } from './cards';
 import { Radar, SPACE_FROM_KM, type RadarRoute, type RadarStreets, type SpaceView } from './radar';
 import { DEFAULT_THEME_ID, getTheme, THEMES, type Theme } from './themes';
 import type { BottleOut, EventOut, Item, KeywordInfo, KeywordRules, MyBottles, MyReport, Origin, Phase, PickedBottle, RelatedPost, RouteOut, PreviewItem, RouteStop, RoutePreview, SubmitResult, FailedItem, EditItem, EditInput } from './types';
@@ -473,8 +474,29 @@ radar.onDog = (id) => {
     m.petDog(id);
     radar.redrawPark();
     offerDogLock(id);
+    foundDog(m, id);
   });
 };
+/** 尋找小法：點到小法（雷達或 3D）還沒有小法卡就拿一張，卡上寫在公園哪裡找到的（小法當時的位置） */
+function foundDog(m: typeof import('./park'), id: string): void {
+  const at = m.dogAt(id);
+  void findCard(id, at ? m.parkPlaceName(at) : '中山公園', (msg) => showBanner(bannerEl, msg, 4000));
+}
+/**
+ * 卡冊裡「帶我去中山公園的銅像」：雷達飛到地球的銅像、拉近到看得到整座銅像（點了叫出火箭）。
+ * 先照現在的範圍飛過去，到了再拉近（公園附近才能放大到 0.5 km 以內，邊飛邊拉近會卡在 0.5 km）
+ */
+async function goStatue(): Promise<void> {
+  parkMod ??= await import('./park');
+  if (view !== 'radar') switchView('radar');
+  if (radar.spaceMoved) radar.resetSpace();
+  zoomToKm(scaleKm, { lat: 25.040048, lng: 121.5594, source: 'manual' });
+  const tick = (): void => {
+    if (flight) requestAnimationFrame(tick);
+    else zoomToKm(0.012);
+  };
+  requestAnimationFrame(tick);
+}
 // 太陽系那幾層拖曳移開了視野、拉回地球：「回到我的位置」跟著出現、消失；自己移動了就不再跟著狗
 radar.onSpaceMove = () => {
   if (dogLocked || dogOffer) lockDog(null);
@@ -5278,6 +5300,15 @@ function wireControls(): void {
     if (taps.length >= 5) location.href = 'admin.html';
   });
   $('#admin-link').hidden = !lsGet(LS_ADMIN_TOKEN);
+  // 卡冊（尋找小法）：一開始就在，讓人知道可以去收集；按鈕上寫收集了幾張
+  const cardsBtn = $<HTMLButtonElement>('#cards-btn');
+  const showCardCount = (): void => {
+    const n = cardsBtn.querySelector('.cards-count');
+    if (n) n.textContent = cardCount();
+  };
+  onCardsChange(showCardCount);
+  showCardCount();
+  cardsBtn.addEventListener('click', () => openAlbum({ onWoof: youOn === 'woof', goPark: () => void goStatue() }));
   // 3D 的中山公園（測試中，大家都進得來；存了管理 token 的才能標記路燈、長椅）
   $('#park3d-btn').addEventListener('click', () => {
     const token = lsGet(LS_ADMIN_TOKEN) ?? undefined;
@@ -5285,7 +5316,13 @@ function wireControls(): void {
     btn.disabled = true;
     void import('./park3d')
       .then((m) =>
-        m.openPark3D({ token, world: radar.spaceFocused && radar.spaceFocusKey === 'woof' ? 'woof' : 'earth', onExit: () => (btn.disabled = false), onWorld: (to) => void landIn3D(to) }),
+        m.openPark3D({
+          token,
+          world: radar.spaceFocused && radar.spaceFocusKey === 'woof' ? 'woof' : 'earth',
+          onExit: () => (btn.disabled = false),
+          onWorld: (to) => void landIn3D(to),
+          onPetDog: (id) => void import('./park').then((p) => foundDog(p, id)),
+        }),
       )
       .catch(() => {
         btn.disabled = false;

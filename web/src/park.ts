@@ -757,6 +757,23 @@ export function petDog(id: string, face?: Pt): void {
   dogById(id)?.pet(undefined, undefined, face);
 }
 
+/** 公園裡這一點在哪一區（收集卡寫在哪裡找到的）：碑林、翠湖、映池、國父紀念館、櫻花步道，其他的是中山公園（名字要跟 worker/src/cards.ts 的 CARDS 一樣） */
+export function parkPlaceName(at: Pt): string {
+  const P = ZHONGSHAN_PARK;
+  const p = toM(at);
+  const near = (ring: Pt[], m: number): boolean => {
+    const r = ring.map(toM);
+    return inRingM(p, r) || r.some((a, i) => segDist(p, a, r[(i + 1) % r.length]) <= m);
+  };
+  if (near(P.statuePlaza, 0)) return '碑林';
+  if (near(P.water[1][0], 12)) return '翠湖';
+  if (near(P.water[0][0], 12)) return '映池';
+  if (near(P.buildings[0], 15)) return '國父紀念館';
+  const lane = P.paths[P.sakuraLane].map(toM);
+  if (lane.some((a, i) => i > 0 && segDist(p, lane[i - 1], a) <= 5)) return '櫻花步道';
+  return '中山公園';
+}
+
 /** 點在不在一圈裡面（射線法） */
 function inRing([y, x]: Pt, r: Pt[]): boolean {
   let inside = false;

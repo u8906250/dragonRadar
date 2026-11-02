@@ -245,3 +245,24 @@ export async function saveParkMark(token: string, m: ParkMarkIn, id?: number): P
 export async function deleteParkMark(token: string, id: number): Promise<void> {
   await adminJson<{ ok: true }>(token, `/api/admin/park-marks/${id}`, { method: 'DELETE' });
 }
+
+// ---- 收集卡（尋找小法）：一樣用裝置代碼認人，不用登入 ----
+export interface CardClaim {
+  card: string;
+  /** 在公園哪裡找到的（碑林、翠湖…） */
+  place: string;
+  /** 拿到的時間（秒） */
+  at: number;
+  /** 第幾位拿到這張卡 */
+  serial: number;
+}
+
+/** 拿一張卡（拿過的回傳原本那張，fresh = false） */
+export function claimCard(card: string, place: string): Promise<Result<{ claim: CardClaim; fresh: boolean }>> {
+  return deviceJson('/api/cards/claim', 'POST', { card, place });
+}
+
+/** 這個瀏覽器拿到的卡 */
+export function fetchMyCards(): Promise<Result<{ cards: CardClaim[] }>> {
+  return deviceJson('/api/cards/mine');
+}
