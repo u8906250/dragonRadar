@@ -460,7 +460,8 @@ export function openPark3D(o: Park3DOptions): () => void {
       const len = 5 + 9 * hash(k + 7000);
       const a = (h - 0.5) * 0.9;
       const tone = hash(k + 9000);
-      g.strokeStyle = tone < 0.45 ? `rgba(${150 + Math.floor(h * 30)}, ${195 + Math.floor(h * 20)}, ${95 + Math.floor(h * 20)}, 0.9)` : tone < 0.85 ? `rgba(${110 + Math.floor(h * 30)}, ${160 + Math.floor(h * 25)}, ${70 + Math.floor(h * 20)}, 0.9)` : `rgba(${75 + Math.floor(h * 20)}, ${120 + Math.floor(h * 20)}, ${50 + Math.floor(h * 15)}, 0.9)`;
+      // 深淺差小一點（中間距離不會一圈特別花），深的少一點
+      g.strokeStyle = tone < 0.5 ? `rgba(${140 + Math.floor(h * 25)}, ${188 + Math.floor(h * 18)}, ${90 + Math.floor(h * 18)}, 0.85)` : tone < 0.94 ? `rgba(${112 + Math.floor(h * 25)}, ${162 + Math.floor(h * 20)}, ${72 + Math.floor(h * 18)}, 0.85)` : `rgba(${92 + Math.floor(h * 18)}, ${140 + Math.floor(h * 18)}, ${60 + Math.floor(h * 12)}, 0.85)`;
       g.lineWidth = 1 + hash(k + 8000) * 1.2;
       wrapDraw((dx, dy) => {
         if (x + dx < -20 || x + dx > S + 20 || y + dy < -20 || y + dy > S + 20) return;
@@ -922,7 +923,8 @@ export function openPark3D(o: Park3DOptions): () => void {
         const lean = (r(3) - 0.5) * 0.8;
         const tone = r(4);
         // 跟地面的草差不多的綠（少一點深綠），近的、遠的接得起來
-        g.strokeStyle = tone < 0.45 ? '#b4db7c' : tone < 0.9 ? '#9ecc68' : '#86ba56';
+        // 跟地面的草幾乎同色（亮一點點），遠的、近的接得起來
+        g.strokeStyle = tone < 0.45 ? '#a3cd6c' : tone < 0.9 ? '#8dbf5c' : '#78ad4d';
         g.lineWidth = 2.5 + r(5) * 2;
         g.beginPath();
         g.moveTo(x, H);
@@ -955,7 +957,8 @@ export function openPark3D(o: Park3DOptions): () => void {
       for (const ang of [0, Math.PI / 2]) {
         const [c, sn] = [Math.cos(ang) * 0.5, Math.sin(ang) * 0.5];
         const q = [[-c, 0, -sn, 0, 0], [c, 0, sn, 1, 0], [c, 0.5, sn, 1, 1], [-c, 0.5, -sn, 0, 1]];
-        for (const k of [0, 1, 2, 0, 2, 3]) {
+        // 正反兩面各一份（只畫正面）：雙面材質的背面法線會翻過來朝下、變暗，這樣兩面都朝上受光
+        for (const k of [0, 1, 2, 0, 2, 3, 0, 2, 1, 0, 3, 2]) {
           pos.push(q[k][0], q[k][1], q[k][2]);
           uv.push(q[k][3], q[k][4]);
         }
@@ -966,8 +969,22 @@ export function openPark3D(o: Park3DOptions): () => void {
       g.setAttribute('normal', new THREE.Float32BufferAttribute(pos.map((_, i) => (i % 3 === 1 ? 1 : 0)), 3));
       return g;
     })();
+    // 每一格照這一叢離鏡頭多遠變矮（GRASS_FADE～GRASS_NEAR 平順地沒入地面，走路時不會一圈圈跳）
+    const fadeByDistance = (m: THREE.Material): THREE.Material => {
+      m.onBeforeCompile = (sh) => {
+        sh.vertexShader = sh.vertexShader.replace(
+          '#include <begin_vertex>',
+          `#include <begin_vertex>
+          #ifdef USE_INSTANCING
+            vec4 grassAt = modelMatrix * instanceMatrix * vec4(0.0, 0.0, 0.0, 1.0);
+            transformed.y *= 1.0 - smoothstep(${GRASS_FADE.toFixed(1)}, ${GRASS_NEAR.toFixed(1)}, distance(grassAt.xz, cameraPosition.xz));
+          #endif`,
+        );
+      };
+      return m;
+    };
     return [1, 2, 3].map((seed) => {
-      const im = new THREE.InstancedMesh(geo, new THREE.MeshLambertMaterial({ map: cardTex(seed), alphaTest: 0.5, side: THREE.DoubleSide }), GRASS_MAX);
+      const im = new THREE.InstancedMesh(geo, fadeByDistance(new THREE.MeshLambertMaterial({ map: cardTex(seed), alphaTest: 0.5 })), GRASS_MAX);
       im.count = 0;
       im.receiveShadow = true;
       im.frustumCulled = false;
@@ -1018,23 +1035,22 @@ export function openPark3D(o: Park3DOptions): () => void {
     const m = new THREE.Matrix4();
     const q = new THREE.Quaternion();
     const up = new THREE.Vector3(0, 1, 0);
-    const [i0, i1] = [Math.floor((pos[0] - GRASS_NEAR) / GRASS_CELL), Math.floor((pos[0] + GRASS_NEAR) / GRASS_CELL)];
-    const [j0, j1] = [Math.floor((pos[1] - GRASS_NEAR) / GRASS_CELL), Math.floor((pos[1] + GRASS_NEAR) / GRASS_CELL)];
+    // 排到 GRASS_NEAR 再多一塊（走到下一塊重排之前，邊上的也都有草，畫的時候照距離變矮）
+    const R = GRASS_NEAR + GRASS_CHUNK;
+    const [i0, i1] = [Math.floor((pos[0] - R) / GRASS_CELL), Math.floor((pos[0] + R) / GRASS_CELL)];
+    const [j0, j1] = [Math.floor((pos[1] - R) / GRASS_CELL), Math.floor((pos[1] + R) / GRASS_CELL)];
     for (let i = i0; i <= i1; i++)
       for (let j = j0; j <= j1; j++) {
         if (cellRnd(i, j, 0) < 0.1) continue;
         const p: Pt = [(i + cellRnd(i, j, 1)) * GRASS_CELL, (j + cellRnd(i, j, 2)) * GRASS_CELL];
         const dist = Math.hypot(p[0] - pos[0], p[1] - pos[1]);
-        if (dist > GRASS_NEAR || !onLawn(p) || onPath(p)) continue;
-        // 越遠越矮，到 GRASS_NEAR 沒入地面
-        const fade = Math.min(1, Math.max(0, (GRASS_NEAR - dist) / (GRASS_NEAR - GRASS_FADE)));
-        if (fade < 0.08) continue;
+        if (dist > R || !onLawn(p) || onPath(p)) continue;
         const v = Math.floor(cellRnd(i, j, 3) * 3);
         if (counts[v] >= GRASS_MAX) continue;
-        // 草叢 0.18～0.26 公尺寬、高一半（9～13 公分），越遠越矮
+        // 草叢 0.18～0.26 公尺寬、高一半（9～13 公分）；越遠越矮在畫的時候算（fadeByDistance）
         const size = 0.18 + 0.08 * cellRnd(i, j, 4);
         q.setFromAxisAngle(up, cellRnd(i, j, 5) * Math.PI * 2);
-        m.compose(new THREE.Vector3(p[0], 0.02, -p[1]), q, new THREE.Vector3(size, size * (0.8 + 0.4 * cellRnd(i, j, 6)) * fade, size));
+        m.compose(new THREE.Vector3(p[0], 0.02, -p[1]), q, new THREE.Vector3(size, size * (0.8 + 0.4 * cellRnd(i, j, 6)), size));
         tuftMesh[v].setMatrixAt(counts[v]++, m);
       }
     tuftMesh.forEach((im, v) => {
