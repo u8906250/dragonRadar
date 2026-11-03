@@ -50,9 +50,9 @@ export interface DogFace {
 }
 
 /**
- * 使用者的馬爾濟斯（照相簿）：幾乎全白的捲毛（暗的地方也只有一點點米白，耳朵尾端一點點米色），頭和耳朵連成一顆大大圓圓毛茸茸的球，
- * 耳朵垂到下巴旁邊，腳像穿了毛褲、腳掌圓圓一團，尾巴長毛往上捲。
- * 臉：平平的，又大又圓、很黑的眼睛（深色的眼眶、亮亮的反光），兩眼分得比較開；大大的黑鼻子離眼睛很近（嘴巴很短）；
+ * 使用者的馬爾濟斯（照相簿，v1.451 再照使用者給的影片調）：幾乎全白的捲毛（暗的地方也只有一點點米白，耳朵尾端一點點米色），頭毛茸茸圓圓的，
+ * 耳朵從頭頂兩側貼著頭長長垂下來、到鼻子的高度（不到下巴），腳像穿了毛褲、腳掌圓圓一團，尾巴長毛往上捲。
+ * 臉：平平的，很黑的眼睛（深色的眼眶、亮亮的反光），不會太大（影片裡不像卡通那麼大）；黑鼻子，側面看得出一小截嘴巴；
  * 眼睛內側往下淡淡的杏色淚痕；鼻子兩旁長長往下垂的鬍子（嘴邊一點米色）；臉頰的毛蓬蓬的、臉看起來寬
  */
 export const MALTESE: DogLook = {
@@ -64,8 +64,8 @@ export const MALTESE: DogLook = {
   curl: 1,
   ears: 'drop',
   tail: 'plume',
-  muzzle: 0.02,
-  face: { eye: 0.0175, gap: 32, up: 11, iris: '#1f150e', rim: '#2b211d', nose: 0.02, noseColor: '#1e1917', stain: '#f0e0cb', beard: 1.6, beardColor: '#f4eadb', cheek: 1 },
+  muzzle: 0.046,
+  face: { eye: 0.013, gap: 27, up: 11, iris: '#1f150e', rim: '#2b211d', nose: 0.016, noseColor: '#1e1917', stain: '#f0e0cb', beard: 1.6, beardColor: '#f4eadb', cheek: 1 },
 };
 
 /** 頭頂多高（公尺） */
@@ -245,16 +245,16 @@ function parts(look: DogLook, pose: DogPose): Part[] {
       solid(`glint${side}`, move(patch(on(0.32 * r, 0.36 * r * open), n, r * 0.12), neck), '#ffffff', 0.009, toward);
     }
   }
-  // 耳朵：又寬又長、垂到下巴下面（跑步時往後飛），或豎起來的
+  // 耳朵：垂下來的（跑步時往後飛、往外甩），或豎起來的
   for (const side of [1, -1]) {
     if (look.ears === 'drop') {
-      // 寬寬的、垂到下巴旁邊，下面往外張開一點（跟頭連成一顆圓球，正面看把臉框起來）
-      const c = add(Hc, S([-0.015, 0.078 * side, -0.035]));
+      // 從頭頂兩側（眼睛後面）長出來，貼著頭長長垂下來，毛垂到鼻子的高度（不到下巴；使用者說的），下面往外張開一點點
+      const c = add(Hc, S([-0.03, 0.07 * side, 0.014]));
       // 以耳朵上緣為支點：往後飛（ear）、往外往上甩（flap，左耳往左、右耳往右）
-      const pivot = add(c, S([0, 0, 0.06]));
+      const pivot = add(c, S([0, 0, 0.045]));
       const out = (q: V): V => rotUW(rotVW(q, side * pose.flap * RAD), -pose.ear * RAD);
       const ear: Xf = { p: (q) => neck.p(add(out(sub(q, pivot)), pivot)), d: (q) => neck.d(out(q)) };
-      furry(`ear${side}`, move({ c, a: [[0.042 * s, 0, 0], [0, 0.032 * s, 0], [0, 0.016 * s * side, 0.068 * s]] }, ear), H * 1.2, earTones, look.ear);
+      furry(`ear${side}`, move({ c, a: [[0.029 * s, 0, 0], [0, 0.024 * s, 0], [0, 0.01 * s * side, 0.052 * s]] }, ear), H * 1.2, earTones, look.ear);
     } else furry(`ear${side}`, move(ell(add(Hc, S([-0.005, 0.042 * side, 0.072])), 0.02 * s, 0.012 * s, 0.045 * s), neck), H * 0.5, earTones, look.ear);
   }
   // 尾巴：一串長毛往上捲過背，或直直往後翹
