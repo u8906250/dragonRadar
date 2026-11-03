@@ -1618,8 +1618,11 @@ export function openPark3D(o: Park3DOptions): () => void {
   const dogMeshes = new Map<string, THREE.Mesh>();
   // 身體的底、眼睛鼻子：跟雷達上一樣是平平的顏色（亮暗看毛）
   const dogMats = new Map<string, THREE.MeshBasicMaterial>();
-  const dogShadow = new THREE.Mesh(new THREE.CircleGeometry(1, 24).rotateX(-Math.PI / 2), new THREE.MeshBasicMaterial({ color: 0x000000, transparent: true, opacity: 0.22, depthWrite: false }));
-  dogShadow.scale.set(0.16, 1, 0.26);
+  // 地上的影子：小法自己的座標是（往前、往左、往上），圓本來就躺在「前、左」那一面（不用轉；以前轉成直立的，影子立在身體正中間，
+  // 站著被毛蓋住看不到，趴下來身體變矮就從背上露出來，像身上一塊黑黑的），前後長、左右窄，離地 3 公釐不跟地面搶
+  const dogShadow = new THREE.Mesh(new THREE.CircleGeometry(1, 24), new THREE.MeshBasicMaterial({ color: 0x000000, transparent: true, opacity: 0.22, depthWrite: false }));
+  dogShadow.scale.set(0.26, 0.16, 1);
+  dogShadow.position.set(0, 0, 0.003);
   dogRoot.add(dogShadow);
   // 一根根的毛（跟雷達上一樣有粗細：每一段是一條朝著鏡頭的窄帶子，每一格重算位置，顏色照亮中暗）
   const HAIR_MAX = Math.ceil(DOG_HAIRS * 1.3);
