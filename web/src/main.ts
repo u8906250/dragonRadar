@@ -2394,12 +2394,18 @@ async function submitBottle(): Promise<void> {
   render();
 }
 
+/** 詳細資料上次畫的內容 */
+let detailHtml = '';
 /**
  * 詳細資料每 5 秒重畫一次（倒數、狀態）：同一個選取還在時，保留展開的區塊（「其他貼文」「相關報導」）和捲動位置，
- * 不然點開沒多久就自己收回去
+ * 不然點開沒多久就自己收回去。
+ * steady（活動卡片）：雷達飛過去的途中（每一格畫面都會重畫）、內容跟上次一樣時不換掉，回傳 false（呼叫的人不用再接一次按鈕）——
+ * 按鈕被換掉時按下、放開不是同一顆，點了不算，「上一個」「下一個」原本要等飛完、重抓完才點得動
  */
-function setDetailHtml(key: string, html: string): void {
+function setDetailHtml(key: string, html: string, steady = false): boolean {
   const same = detailEl.dataset.key === key;
+  if (steady && same && (flight !== null || html === detailHtml)) return false;
+  detailHtml = html;
   const summaryKey = (d: Element): string => (d.querySelector('summary')?.textContent ?? '').replace(/（\d+）$/, '');
   const open = same ? new Set([...detailEl.querySelectorAll('details[open]')].map(summaryKey)) : new Set<string>();
   const top = detailEl.scrollTop;
@@ -2408,11 +2414,12 @@ function setDetailHtml(key: string, html: string): void {
   detailEl.innerHTML = `<div class="sheet-grab" aria-hidden="true"><span></span></div>${html}`;
   if (!same) {
     setPeek(false);
-    return;
+    return true;
   }
   for (const d of detailEl.querySelectorAll<HTMLDetailsElement>('details')) if (open.has(summaryKey(d))) d.open = true;
   // 抽屜本身會捲動：展開的區塊放回去之後再還原位置
   detailEl.scrollTop = top;
+  return true;
 }
 
 /**
@@ -2517,7 +2524,7 @@ function renderDetail(items: Item[], now: number): void {
     at < 0 || order.length < 2
       ? ''
       : `<span class="sheet-steps"><button type="button" class="chip" data-step="${prevId ?? ''}" aria-label="上一個活動" title="上一個活動"${prevId === undefined ? ' disabled' : ''}>▲</button><button type="button" class="chip" data-step="${nextId ?? ''}" aria-label="下一個活動" title="下一個活動"${nextId === undefined ? ' disabled' : ''}>▼</button></span>`;
-  setDetailHtml(`ev:${ev.id}:${prevId ?? ''}:${nextId ?? ''}`, `
+  const replaced = setDetailHtml(`ev:${ev.id}:${prevId ?? ''}:${nextId ?? ''}`, `
     <div class="sheet-head">
       <strong>${esc(titleOf(ev))}</strong>
       ${stepBtns}
@@ -2541,7 +2548,8 @@ function renderDetail(items: Item[], now: number): void {
         <button type="button" class="btn" data-act="feedback">回報問題</button>
       </div>
       ${ev.endedReports ? `<p class="muted ended-note">已有 ${ev.endedReports} 人回報${endedWord(ev)}${neededText()}</p>` : ''}
-    </div>`);
+    </div>`, true);
+  if (!replaced) return;
   detailEl.querySelector('[data-act="close"]')?.addEventListener('click', () => select(null));
   for (const b of detailEl.querySelectorAll<HTMLButtonElement>('[data-select]')) {
     b.addEventListener('click', () => select(Number(b.dataset.select)));
