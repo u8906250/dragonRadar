@@ -1142,6 +1142,8 @@ body.letters-open { overflow: hidden; }
 .search-tags { display: flex; flex: none; gap: 6px; overflow-x: auto; overflow-y: hidden; min-height: 40px; padding: 6px 2px 4px; margin-bottom: 4px; scrollbar-width: none; -webkit-overflow-scrolling: touch; }
 .search-tags::-webkit-scrollbar { display: none; }
 .search-tags[hidden] { display: none; }
+/* 電腦（滑鼠拉不動橫的捲動）：排不下就換行，全部看得到 */
+@media (hover: hover) and (pointer: fine) { .search-tags { flex-wrap: wrap; overflow: visible; margin-inline: 10px; } }
 .search-tags .chip { flex: none; min-height: 30px; padding: 4px 10px; font-size: 13px; box-shadow: none; }
 
 /* 活動卡片的上一個、下一個（標題右邊、關閉的左邊） */

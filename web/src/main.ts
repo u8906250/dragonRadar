@@ -3931,7 +3931,11 @@ function searchTag(tag: string): void {
   searchClear.hidden = searchInput.value === '';
   setSearch(searchInput.value);
 }
-/** 搜尋框下面的常見關鍵字：目前抓到的發放、活動裡最多的標籤（最多 8 個），不夠就補常見的 */
+/** 目前抓到、還沒結束的發放、活動裡每個關鍵字用了幾次（renderSearchTags 算的）：搜尋框下面、補充資料的常見關鍵字照這個排，用得多的在前面 */
+let tagUse = new Map<string, number>();
+const commonRank = (t: string): number => (COMMON_TAGS.includes(t) ? COMMON_TAGS.indexOf(t) : COMMON_TAGS.length);
+const byTagUse = (a: string, b: string): number => (tagUse.get(b) ?? 0) - (tagUse.get(a) ?? 0) || commonRank(a) - commonRank(b);
+/** 搜尋框下面的關鍵字：目前活動裡實際用到的，用得多的在前面（最多 8 個）；都沒有就不顯示 */
 function renderSearchTags(items: Item[]): void {
   const box = $<HTMLElement>('#search-tags');
   if (!mod.current) {
@@ -3940,8 +3944,12 @@ function renderSearchTags(items: Item[]): void {
   }
   const count = new Map<string, number>();
   for (const it of items) for (const t of tagsOf(it.ev)) count.set(t, (count.get(t) ?? 0) + 1);
-  const top = [...count.entries()].sort((a, b) => b[1] - a[1] || COMMON_TAGS.indexOf(a[0]) - COMMON_TAGS.indexOf(b[0])).map(([t]) => t).slice(0, 8);
-  for (const t of ['洋流', '飄帶', '彩虹', '徽章', '貼紙', '車掃', '開講', '市集']) if (top.length < 8 && !top.includes(t)) top.push(t);
+  tagUse = count;
+  const top = [...count.keys()].sort(byTagUse).slice(0, 8);
+  if (top.length === 0) {
+    box.hidden = true;
+    return;
+  }
   const now = searchInput.value.trim();
   const html = top.map((t) => `<button type="button" class="chip small${t === now ? ' on' : ''}" data-tag="${esc(t)}" aria-pressed="${t === now}">#${esc(t)}</button>`).join('');
   if (box.dataset.html !== html) {
@@ -4275,7 +4283,7 @@ function cleanEditTag(v: string): string | null {
 }
 const BAD_TAG = '關鍵字要 2～10 個字（中文、英文或數字）';
 
-/** 關鍵字欄：已經有的（按了拿掉）、常見的（按了加上） */
+/** 關鍵字欄：已經有的（按了拿掉）、常見的（按了加上；目前活動用得多的在前面） */
 function renderEditTags(card: HTMLElement): void {
   const tags = editTags.get(card) ?? [];
   const list = card.querySelector<HTMLElement>('.edit-tag-list');
@@ -4284,7 +4292,10 @@ function renderEditTags(card: HTMLElement): void {
   const full = tags.length >= MAX_EDIT_TAGS;
   if (list) list.innerHTML = tags.map((t) => `<button type="button" class="chip on" data-del="${esc(t)}" aria-label="拿掉 #${esc(t)}">#${esc(t)} <span aria-hidden="true">×</span></button>`).join('');
   if (common) {
-    common.innerHTML = COMMON_TAGS.filter((t) => !tags.includes(t)).map((t) => `<button type="button" class="chip" data-add="${esc(t)}" aria-label="加上 #${esc(t)}">＋${esc(t)}</button>`).join('');
+    // 常見的加上目前活動裡兩場以上用到的，用得多的在前面
+    const used = [...tagUse].filter(([t, n]) => n >= 2 && cleanEditTag(t) === t).map(([t]) => t);
+    const offer = [...new Set([...COMMON_TAGS, ...used])].sort(byTagUse);
+    common.innerHTML = offer.filter((t) => !tags.includes(t)).map((t) => `<button type="button" class="chip" data-add="${esc(t)}" aria-label="加上 #${esc(t)}">＋${esc(t)}</button>`).join('');
     common.hidden = full;
   }
   if (input) {
