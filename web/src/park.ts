@@ -10,6 +10,7 @@ import { ZHONGSHAN_PARK } from './zhongshan';
 import { MIN_HALF, widthRing, withWidths } from './zhongshan-widths';
 import { MALTESE, dogHeight } from './dog';
 import { animateDogs, Dog, dogById, dogHeading, dogMarkup, NATURE, wakeDogs, type DogNature, type DogYard } from './dogs';
+import { fetchPublicParkMarks, type ParkMark, type ParkMarkKind } from './api';
 export { onDogMove } from './dogs';
 
 const { c: C, inner: INNER } = RADAR_GEOM;
@@ -574,6 +575,16 @@ export function parkYard(o: { avoid?: Pt[][]; rare?: Pt[][]; fav?: { rings: Pt[]
     }
     return out;
   };
+  /** 這一點（公尺座標）在哪一塊待的地方（狗的 ring）：在草皮、旗台裡面的，不然離得最近的那一塊（步道照中線） */
+  const areaAt = (q: Pt): number => {
+    let best = { i: 0, d: Infinity };
+    parkAreas().forEach((x, i) => {
+      if (x.kind !== 'path' && x.m2 === 0) return;
+      const d = x.ring && inRing(fromM(q), x.ring) ? 0 : Math.min(...x.edges.map(([p0, p1]) => segDist(q, p0, p1)));
+      if (d < best.d) best = { i, d };
+    });
+    return best.i;
+  };
   const len = (from: Pt, path: Pt[]): number => path.reduce((s, p, i) => s + Math.hypot(p[0] - (i ? path[i - 1] : from)[0], p[1] - (i ? path[i - 1] : from)[1]), 0);
   /**
    * 這一塊待的地方裡隨機一個走得到的地方（在公園裡，不在發射口和銅像旁邊，不太會去的地方大多不要）；near 是只在這一點附近幾公尺內抽；抽不到是 null。
@@ -688,6 +699,32 @@ export function parkYard(o: { avoid?: Pt[][]; rare?: Pt[][]; fav?: { rings: Pt[]
       }
       return null;
     },
+    // 附近的路燈、長椅、樹…（SNIFF_NEAR_M 內，不是 skip 那一個）：站在它旁邊（先試朝這裡那一邊，再往兩邊轉，長椅只站前面、後面），照步道走過去
+    sniff: (at, rand, skip) => {
+      const a = toM(at);
+      const sk = skip ? toM(skip) : null;
+      const near = sniffSpots().filter((p) => {
+        const d = Math.hypot(p.at[0] - a[0], p.at[1] - a[1]);
+        return d <= SNIFF_NEAR_M && d > p.r + SNIFF_GAP_M + 0.3 && !(sk && Math.hypot(p.at[0] - sk[0], p.at[1] - sk[1]) < 1);
+      });
+      for (let tries = 0; tries < 8 && near.length; tries++) {
+        const p = near.splice(Math.floor(rand() * near.length), 1)[0];
+        if (rare.some((b) => inBox(p.at, b.box) && inRingM(p.at, b.ring)) && rand() >= RARE_KEEP) continue;
+        const d = Math.hypot(a[0] - p.at[0], a[1] - p.at[1]);
+        const [ux, uy] = [(a[0] - p.at[0]) / d, (a[1] - p.at[1]) / d];
+        const sides = p.sides ?? [0, 1, -1, 2, -2, 3].map((k): Pt => {
+          const t = (k * Math.PI) / 3;
+          return [ux * Math.cos(t) - uy * Math.sin(t), ux * Math.sin(t) + uy * Math.cos(t)];
+        });
+        for (const [sx, sy] of sides) {
+          const q: Pt = [p.at[0] + sx * (p.r + SNIFF_GAP_M), p.at[1] + sy * (p.r + SNIFF_GAP_M)];
+          if (!okM(q)) continue;
+          const path = routeM(a, q, SNIFF_MAX_M);
+          if (path) return { path: path.map(fromM), face: fromM(p.at), ring: areaAt(q) };
+        }
+      }
+      return null;
+    },
     metres: (a, b) => {
       const g = dogWorld ?? parkGeom(EARTH);
       const [p, q] = [g.to(a), g.to(b)];
@@ -711,6 +748,56 @@ export function personOk(at: Pt): boolean {
   return !w.blocks.some((b) => inBox(p, b.box) && inRingM(p, b.ring) && !b.holes.some((h) => inRingM(p, h)));
 }
 
+/**
+ * 狗走過去聞的東西（公尺座標）：3D 國館標好的路燈、長椅、垃圾桶、石碑…（伺服器上的，setSniffMarks）和樹。
+ * 樹只用跟旁邊的樹冠重疊不到 SNIFF_TREE_OVERLAP_M 的（樹冠中心是樹幹；很密的樹林在航照上分不出一棵棵，中心不一定是樹幹，不用），
+ * 樹幹多粗跟 3D 國館一樣（樹冠半徑的 6%，0.1～0.4 公尺）。r 是東西多粗（站在離它 r + SNIFF_GAP_M 的地方，鼻子湊到底下），
+ * sides 是只能站哪幾邊（長椅：前面、後面）
+ */
+interface SniffSpot {
+  at: Pt;
+  r: number;
+  sides?: Pt[];
+}
+const SNIFF_TREE_OVERLAP_M = 0.5;
+const SNIFF_GAP_M = 0.32;
+/** 走去聞：離這裡多遠（直線）以內的、照步道最多走幾公尺 */
+const SNIFF_NEAR_M = 20;
+const SNIFF_MAX_M = 32;
+const MARK_R: Record<ParkMarkKind, number> = { lamp: 0.12, bench: 0.3, bin: 0.25, stele: 0.4, other: 0.3 };
+let sniffTrees: SniffSpot[] | null = null;
+let sniffMarks: SniffSpot[] = [];
+let sniffAll: SniffSpot[] | null = null;
+function sniffSpots(): SniffSpot[] {
+  if (sniffAll) return sniffAll;
+  if (!sniffTrees) {
+    const t = ZHONGSHAN_PARK.trees.map(([lat, lng, r]) => ({ at: toM([lat, lng]), r }));
+    sniffTrees = t
+      .filter((a, i) => t.every((b, j) => i === j || Math.hypot(a.at[0] - b.at[0], a.at[1] - b.at[1]) - a.r - b.r >= -SNIFF_TREE_OVERLAP_M))
+      .map((a) => ({ at: a.at, r: Math.max(0.1, Math.min(0.4, a.r * 0.06)) }));
+  }
+  return (sniffAll = [...sniffMarks, ...sniffTrees]);
+}
+/** 3D 國館標好的東西（路燈、長椅…）：狗會走過去聞 */
+export function setSniffMarks(marks: ParkMark[]): void {
+  sniffMarks = marks.map((m) => {
+    const at = toM([m.lat, m.lng]);
+    if (m.kind !== 'bench') return { at, r: MARK_R[m.kind] ?? 0.3 };
+    // 長椅：坐的人面向 heading（0 是北、順時針），站在前面或後面
+    const h = ((m.heading ?? 0) * Math.PI) / 180;
+    const front: Pt = [Math.sin(h), Math.cos(h)];
+    return { at, r: MARK_R.bench, sides: [front, [-front[0], -front[1]]] };
+  });
+  sniffAll = null;
+}
+let marksAsked = false;
+/** 雷達第一次畫汪星：跟伺服器拿 3D 國館標好的東西（公開的；拿不到就只聞樹） */
+export function loadSniffMarks(): void {
+  if (marksAsked) return;
+  marksAsked = true;
+  void fetchPublicParkMarks().then(setSniffMarks, () => (marksAsked = false));
+}
+
 /** 換草皮、去湖邊：找邊離這裡多近的草皮、湖岸（直線，公尺），照步道走最多幾公尺（跑步不要跑太久） */
 const CROSS_NEAR_M = 20;
 const CROSS_MAX_M = 32;
@@ -730,18 +817,18 @@ export const XIAOFA_FAV: Pt[] = ZHONGSHAN_PARK.statuePlaza;
 export const XIAOFA_FAV_WEIGHT = 40;
 
 /**
- * 小法的個性：特別喜歡走走聞聞——在草皮裡走路大多邊走邊聞（約七成，一般的狗約四成），
- * 停下來大多低頭聞（白天約七成，一般的狗約一半）、每次聞久一點（3～7 秒）；站著、發呆、坐、趴、伸懶腰相對少，
- * 睡覺（停下來時睡的機率）、喝水、跑步、換草皮跟一般的狗一樣
+ * 小法的個性（使用者說的）：不邊走邊聞，而是走到一個地方——路燈、長椅、垃圾桶、石碑（3D 國館標好的）、樹下——停下來聞，聞完就走：
+ * 走的時候約六成走去附近的（SNIFF_NEAR_M 內，照步道走），每次聞久一點（3～7 秒）；
+ * 停下來做什麼、睡覺、喝水、跑步、換草皮跟一般的狗一樣
  */
 export const XIAOFA_NATURE: DogNature = {
   ...NATURE,
-  nose: 0.7,
-  stays: { sniff: 0.7, stand: 0.06, idle: 0.07, sit: 0.05, lie: 0.06, stretch: 0.06 },
+  nose: 0,
+  spot: 0.65,
   last: { ...NATURE.last, sniff: [3000, 7000] },
 };
 
-/** 公園裡的狗：小法（使用者的馬爾濟斯；不去公園最右上那一區、不太會去國父紀念館後面；特別喜歡走走聞聞） */
+/** 公園裡的狗：小法（使用者的馬爾濟斯；不去公園最右上那一區、不太會去國父紀念館後面；喜歡走到路燈、樹下停下來聞） */
 export const PARK_DOGS: Dog[] = [new Dog({ id: 'xiaofa', name: '小法', look: MALTESE, yard: parkYard({ avoid: [XIAOFA_AVOID], rare: [XIAOFA_RARE], fav: { rings: [XIAOFA_FAV], weight: XIAOFA_FAV_WEIGHT } }), nature: XIAOFA_NATURE })];
 
 /** 搭火箭到汪星：每隻狗換到隨機一塊草皮 */

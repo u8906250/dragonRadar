@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { RADAR_GEOM } from '../src/radar';
-import { parkPlaceName, personOk, ARRIVE_MS, arriveRocket, DEPART_MS, departRocket, EARTH, earthParkSvg, HATCH_CENTER, nearPark, PARK_DOGS, PARK_YARD, PARK_MIN_KM, parkAreas, parkYard, XIAOFA_AVOID, XIAOFA_NATURE, XIAOFA_RARE, parkGeom, parkTexture, resetRocket, rocketNow, STOW_MS, stowRocket, SUMMON_MS, summonRocket } from '../src/park';
+import { parkPlaceName, personOk, ARRIVE_MS, arriveRocket, DEPART_MS, departRocket, EARTH, earthParkSvg, HATCH_CENTER, nearPark, PARK_DOGS, PARK_YARD, PARK_MIN_KM, parkAreas, parkYard, setSniffMarks, XIAOFA_AVOID, XIAOFA_NATURE, XIAOFA_RARE, parkGeom, parkTexture, resetRocket, rocketNow, STOW_MS, stowRocket, SUMMON_MS, summonRocket } from '../src/park';
 import { ZHONGSHAN_PARK } from '../src/zhongshan';
 import { bodyBearing, spaceMarkup, toWoof } from '../src/space';
 import { dogHeight, MALTESE } from '../src/dog';
@@ -320,37 +320,75 @@ describe('地球的雷達上的中山公園（跟汪星共用一份）', () => {
     PARK_DOGS[0].seg = keep;
   });
 
-  it('小法 loves walking and sniffing more than a plain dog (sleep, drinking and running stay the same)', () => {
+  it('小法 walks to a lamp, bench or tree and stops there to sniff, then walks on (no sniffing while walking)', () => {
     expect(PARK_DOGS[0].nature).toBe(XIAOFA_NATURE);
-    for (const k of ['speed', 'reach', 'stop', 'again', 'run', 'cross', 'crossRun', 'drink', 'afterRun', 'glance', 'sleep', 'night', 'nap'] as const) expect(XIAOFA_NATURE[k]).toEqual(NATURE[k]);
-    // 停下來時睡覺的權重跟一般的狗一樣比例：其他停下來的權重加起來不變
-    const sum = (n: DogNature): number => Object.values(n.stays).reduce((a, w) => a + (w ?? 0), 0);
-    expect(sum(XIAOFA_NATURE)).toBeCloseTo(sum(NATURE), 6);
-    // 同一塊公園中午各走三小時：小法邊走邊聞、停下來聞的比例都比較高，聞得比較久
-    const day = (nature: DogNature): DogSeg[] => {
-      const rand = seeded(5);
-      const dog = new Dog({ id: `sniff-${nature === NATURE ? 'plain' : 'xiaofa'}`, name: '測試', look: MALTESE, yard: PARK_DOGS[0].yard, nature, hour: noon });
-      dog.place(rand, 0);
-      const segs = new Map<number, DogSeg>();
-      for (let t = 0; t <= 3 * 3_600_000; t += 500) {
-        const d = dog.now(t, rand);
-        segs.set(d.seg.start, d.seg);
-      }
-      return [...segs.values()];
-    };
-    const share = (list: DogSeg[]) => {
-      const walks = list.filter((s) => s.do === 'walk' && !s.cross && !s.goal && !s.via?.length);
-      const stops = list.filter((s) => ['sniff', 'stand', 'idle', 'sit', 'lie'].includes(s.do));
-      const sniffs = list.filter((s) => s.do === 'sniff');
-      return { nose: walks.filter((s) => s.nose).length / walks.length, sniff: sniffs.length / stops.length, ms: sniffs.reduce((a, s) => a + s.ms, 0) / sniffs.length };
-    };
-    const [plain, xiaofa] = [share(day(NATURE)), share(day(XIAOFA_NATURE))];
-    expect(xiaofa.nose).toBeGreaterThan(0.6);
-    expect(xiaofa.nose).toBeGreaterThan(plain.nose + 0.2);
-    expect(xiaofa.sniff).toBeGreaterThan(0.65);
-    expect(xiaofa.sniff).toBeGreaterThan(plain.sniff + 0.1);
-    expect(xiaofa.ms).toBeGreaterThan(plain.ms + 1000);
-  });
+    expect(XIAOFA_NATURE.nose).toBe(0);
+    expect(XIAOFA_NATURE.spot).toBeGreaterThan(0.5);
+    expect(NATURE.spot).toBe(0);
+    for (const k of ['speed', 'reach', 'stop', 'again', 'stays', 'run', 'cross', 'crossRun', 'drink', 'afterRun', 'glance', 'sleep', 'night', 'nap'] as const) expect(XIAOFA_NATURE[k]).toEqual(NATURE[k]);
+    // 中午走三小時
+    const rand = seeded(5);
+    const dog = new Dog({ id: 'sniff-spots', name: '測試', look: MALTESE, yard: PARK_DOGS[0].yard, nature: XIAOFA_NATURE, hour: noon });
+    dog.place(rand, 0);
+    const byStart = new Map<number, DogSeg>();
+    for (let t = 0; t <= 3 * 3_600_000; t += 500) {
+      const d = dog.now(t, rand);
+      byStart.set(d.seg.start, d.seg);
+    }
+    const segs = [...byStart.values()].sort((a, b) => a.start - b.start);
+    const m = (a: [number, number], b: [number, number]): number => dog.yard.metres(a, b);
+    // 不邊走邊聞
+    expect(segs.some((x) => x.nose)).toBe(false);
+    // 走到樹旁邊（樹幹 0.1～0.4 公尺粗，站在離樹幹 0.32 公尺）、轉向它停下來聞，每次 3～7 秒
+    const spots = segs.map((x, i) => [x, i] as const).filter(([x]) => x.do === 'sniff' && x.goal === 'sniff');
+    expect(spots.length).toBeGreaterThan(20);
+    const trees = ZHONGSHAN_PARK.trees.map(([lat, lng]): [number, number] => [lat, lng]);
+    for (const [x, i] of spots) {
+      expect(trees.some((t) => m(t, x.face!) < 0.01)).toBe(true);
+      expect(m(x.from, x.face!)).toBeGreaterThan(0.4);
+      expect(m(x.from, x.face!)).toBeLessThan(0.75);
+      expect(x.ms).toBeGreaterThanOrEqual(3000);
+      // 前一段是走過去的
+      expect(segs[i - 1]).toMatchObject({ goal: 'sniff', face: x.face });
+      expect(['walk', 'run']).toContain(segs[i - 1].do);
+    }
+    // 聞完就走（不在樹下坐、趴、睡），同一棵不會連著去兩次
+    const after = spots.map(([, i]) => segs[i + 1]).filter(Boolean);
+    expect(after.filter((x) => x.do === 'walk').length / after.length).toBeGreaterThan(0.9);
+    for (let k = 1; k < spots.length; k++) expect(m(spots[k][0].face!, spots[k - 1][0].face!)).toBeGreaterThan(0.5);
+    // 坐、趴、睡、站著、發呆大多還是在空地（樹下少停）
+    const shaded = ([lat, lng]: [number, number]): boolean => ZHONGSHAN_PARK.trees.some(([y, x, r]) => Math.hypot((lng - x) * 111_320 * Math.cos((25.0394 * Math.PI) / 180), (lat - y) * 110_574) < r);
+    const rests = segs.filter((x) => ['stand', 'idle', 'sit', 'lie', 'sleep'].includes(x.do));
+    const restMs = rests.reduce((a, x) => a + x.ms, 0);
+    expect(rests.filter((x) => shaded(x.to)).reduce((a, x) => a + x.ms, 0) / restMs).toBeLessThan(0.2);
+  }, 30_000);
+
+  it('小法 also walks to the lamps and benches marked in 3D 國館 (in front of or behind a bench)', () => {
+    const rand = seeded(11);
+    const yard = PARK_DOGS[0].yard;
+    const { at } = yard.anywhere(rand)!;
+    const east = (p: [number, number], mE: number, mN = 0): [number, number] => [p[0] + mN / 110_574, p[1] + mE / (111_320 * Math.cos((25.0394 * Math.PI) / 180))];
+    // 台北的公尺（yard.metres 是照汪星算的，差一點點）
+    const tm = (a: [number, number], b: [number, number]): number => Math.hypot((a[1] - b[1]) * 111_320 * Math.cos((25.0394 * Math.PI) / 180), (a[0] - b[0]) * 110_574);
+    // 草皮裡、旁邊 4 公尺的地方放一盞路燈：會挑到它
+    const lamp = east(at, 4);
+    setSniffMarks([{ id: 1, kind: 'lamp', lat: lamp[0], lng: lamp[1], heading: 0, note: null, created_at: 0, updated_at: 0 }]);
+    const picks = Array.from({ length: 120 }, () => yard.sniff!(at, rand)).filter((x) => x && yard.metres(x.face, lamp) < 0.01);
+    expect(picks.length).toBeGreaterThan(0);
+    for (const x of picks) expect(tm(x!.path[x!.path.length - 1], lamp)).toBeCloseTo(0.12 + 0.32, 2);
+    // 上次聞過的那一盞不再去
+    expect(Array.from({ length: 120 }, () => yard.sniff!(at, rand, lamp)).some((x) => x && yard.metres(x.face, lamp) < 0.01)).toBe(false);
+    // 長椅面向東：站在東邊或西邊（前面、後面），不站在兩頭
+    setSniffMarks([{ id: 2, kind: 'bench', lat: lamp[0], lng: lamp[1], heading: 90, note: null, created_at: 0, updated_at: 0 }]);
+    const benches = Array.from({ length: 160 }, () => yard.sniff!(at, rand)).filter((x) => x && yard.metres(x.face, lamp) < 0.01);
+    expect(benches.length).toBeGreaterThan(0);
+    for (const x of benches) {
+      const end = x!.path[x!.path.length - 1];
+      expect(Math.abs(end[0] - lamp[0]) * 110_574).toBeLessThan(0.02);
+      expect(tm(end, lamp)).toBeCloseTo(0.3 + 0.32, 2);
+    }
+    setSniffMarks([]);
+  }, 30_000);
 
   it('draws the flagpole in front of (south of) 映池: a dot from afar, then the stone base and the pole', () => {
     const fp = ZHONGSHAN_PARK.flagpole;

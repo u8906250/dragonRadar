@@ -1165,7 +1165,11 @@ function updateSpace(): void {
   const when = new Date();
   const you = youOn;
   // 汪星的狗走完一段：重畫汪星（下一段）；每一格照指北針轉回來
-  void import('./park').then((p) => p.onDogMove(() => radar.redrawPark(), () => radar.headingDeg));
+  // 3D 國館標好的路燈、長椅…（小法會走過去聞）
+  void import('./park').then((p) => {
+    p.onDogMove(() => radar.redrawPark(), () => radar.headingDeg);
+    p.loadSniffMarks();
+  });
   radar.setSpace((km, rg, view) => mod.spaceMarkup({ center, land, when, scaleKm: km, rg, view, streets: woofStreets, you, woofMap: map }), mod.bodyRadiusKm);
 }
 

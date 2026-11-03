@@ -16,7 +16,7 @@ import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js
 import { deleteParkMark, fetchParkMarks, fetchPublicParkMarks, saveParkMark, type ParkMark, type ParkMarkIn, type ParkMarkKind } from './api';
 import { dogHairRoots, dogPartArea, dogParts } from './dog';
 import { dogPose, dogTurned, happyWag } from './dogs';
-import { arriveRocket, ARRIVE_MS, DEPART_MS, departRocket, HATCH_CENTER, moveDogs, PARK_DOGS, personOk, petDog, rocketNow, stowRocket, STOW_MS, summonRocket, SUMMON_MS } from './park';
+import { arriveRocket, ARRIVE_MS, DEPART_MS, departRocket, HATCH_CENTER, moveDogs, PARK_DOGS, personOk, petDog, rocketNow, setSniffMarks, stowRocket, STOW_MS, summonRocket, SUMMON_MS } from './park';
 import { cloudLayer, puffTexture, rocketModel, ROCKET_H, ROCKET_WINDOW_Y, spaceScene, type SpaceTrip } from './rocket3d';
 import { toWoof } from './space';
 import { ZHONGSHAN_PARK as Z } from './zhongshan';
@@ -1549,6 +1549,8 @@ export function openPark3D(o: Park3DOptions): () => void {
   let busy = false;
   const ring = new THREE.Mesh(new THREE.RingGeometry(0.55, 0.75, 32).rotateX(-Math.PI / 2), new THREE.MeshBasicMaterial({ color: 0x3aa0ff, transparent: true, opacity: 0.8, depthWrite: false }));
   function drawMarks(): void {
+    // 小法會走過去聞（汪星的雷達也是同一隻）
+    setSniffMarks(marks);
     for (const c of [...markGroup.children]) {
       markGroup.remove(c);
       c.traverse((x) => x instanceof THREE.Mesh && x.geometry.dispose());
