@@ -2508,10 +2508,12 @@ function setDetailHtml(key: string, html: string, steady = false): boolean {
 }
 
 /**
- * 活動卡片有 ▲ ▼ 時高度固定：打開時量一次（至少半個畫面高，最高照 CSS 的 max-height），切上一個、下一個都照這個高度、內容多的在卡片裡捲，
- * ▲ ▼ 才不會跟著卡片長短上下跑（連按點得到）；從清單重新點一則（stepOrder 重新記）時重量
+ * 活動卡片有 ▲ ▼ 時高度固定：切上一個、下一個都照這個高度、內容多的在卡片裡捲，▲ ▼ 才不會跟著卡片長短上下跑（連按點得到）；
+ * 從清單重新點一則（stepOrder 重新記）時重量。電腦：打開時量一次（至少半個畫面高，最高照 CSS 的 max-height）；
+ * 手機：卡片從下面蓋住雷達，固定 PHONE_SHEET 個畫面高（使用者要矮一點，雷達露出來多一點，選到的不用拉太遠才看得到）
  */
 let stepLockPx = 0;
+const PHONE_SHEET = 0.42;
 function lockStepHeight(on: boolean): void {
   if (!on) {
     detailEl.style.height = '';
@@ -2519,7 +2521,8 @@ function lockStepHeight(on: boolean): void {
   }
   if (!stepLockPx) {
     detailEl.style.height = '';
-    stepLockPx = Math.round(Math.max(detailEl.offsetHeight, window.innerHeight * 0.5));
+    const phone = !window.matchMedia('(min-width: 900px)').matches;
+    stepLockPx = Math.round(phone ? window.innerHeight * PHONE_SHEET : Math.max(detailEl.offsetHeight, window.innerHeight * 0.5));
   }
   detailEl.style.height = `${stepLockPx}px`;
 }
