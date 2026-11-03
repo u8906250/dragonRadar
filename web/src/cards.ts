@@ -1,5 +1,5 @@
 /**
- * 收集卡（尋找小法）：卡冊、拿到卡時翻開的畫面，卡冊下面是道具欄。
+ * 收集卡（尋找小法）：卡冊、拿到卡時翻開的畫面；道具欄（選單裡的「道具」，跟卡冊分開，之後會有更多道具）。
  * 卡片的內容寫在這裡（照片在 public/cards/），拿到的卡、道具存在伺服器（裝置代碼，worker/src/cards.ts），
  * 這個瀏覽器另外記一份（dr.cards、dr.items）：點小法時拿過的就不再問伺服器
  */
@@ -86,7 +86,7 @@ function saveCards(list: CardClaim[]): void {
   }
 }
 
-/** 這個瀏覽器的道具（伺服器的一份副本，打開卡冊時再對一次） */
+/** 這個瀏覽器的道具（伺服器的一份副本，打開卡冊、道具欄時再對一次） */
 export function myItems(): ItemCount[] {
   try {
     const v: unknown = JSON.parse(localStorage.getItem(LS_ITEMS) ?? '[]');
@@ -100,7 +100,7 @@ function saveItems(list: ItemCount[]): void {
   try {
     localStorage.setItem(LS_ITEMS, JSON.stringify(list));
   } catch {
-    // 不能存：打開卡冊時再跟伺服器拿
+    // 不能存：打開卡冊、道具欄時再跟伺服器拿
   }
 }
 
@@ -226,23 +226,13 @@ export async function gotReward(r: { card?: CardClaim; items: ItemCount[]; cappe
     const img = new Image();
     img.src = d.img;
     await Promise.race([img.decode().catch(() => undefined), new Promise((ok) => window.setTimeout(ok, 1500))]);
-    showReveal(d, r.card, got ? `還拿到${got}，放在卡冊下面的道具欄。` : '');
-  } else if (got) notify(`拿到${got}！放在卡冊下面的道具欄`);
-}
-
-/** 道具欄：有的道具和數量（用法之後再設計） */
-function itemsHtml(): string {
-  const have = myItems().filter((x) => ITEM_DEFS.some((d) => d.id === x.item));
-  const rows = have.map((x) => {
-    const d = ITEM_DEFS.find((y) => y.id === x.item)!;
-    return `<li class="tc-item"><img src="${d.img}" alt="" draggable="false"><span class="tc-item-name">${esc(d.name)}</span><span class="tc-item-count">× ${x.count} ${esc(d.unit)}</span></li>`;
-  });
-  return `<div class="tc-items"><h3>道具</h3>${rows.length ? `<ul>${rows.join('')}</ul>` : '<p class="tc-items-empty">還沒有道具</p>'}</div>`;
+    showReveal(d, r.card, got ? `還拿到${got}，放在選單裡的「道具」。` : '');
+  } else if (got) notify(`拿到${got}！放在選單裡的「道具」`);
 }
 
 /**
- * 卡冊：拿到的卡、還沒拿到的（背面加問號和一點點提示），下面是道具欄、「換手機」（引繼碼，卡片和道具一起搬）。
- * 打開時再跟伺服器對一次（這個瀏覽器的紀錄被清掉、伺服器還有的補回來；搬到別台的拿掉）
+ * 卡冊：拿到的卡、還沒拿到的（背面加問號和一點點提示），下面是「換手機」（引繼碼，卡片和道具一起搬）。
+ * 打開時再跟伺服器對一次（syncMine）
  */
 export function openAlbum(): void {
   const list = (): string => {
@@ -253,7 +243,7 @@ export function openAlbum(): void {
       return `<div class="tc-slot${c ? '' : ' missing'}"><div class="tc-card">${c ? frontHtml(d, c) : backHtml(d, true)}</div></div>`;
     });
     return `<div class="tc-head"><h2>卡冊</h2><span class="tc-count">已收集 ${got} / ${CARD_DEFS.length}</span><button type="button" class="chip" data-close>關閉</button></div>
-      <div class="tc-list">${slots.join('')}</div>${itemsHtml()}`;
+      <div class="tc-list">${slots.join('')}</div>`;
   };
   const move = `<div class="tc-move">
       <button type="button" class="chip" data-move aria-expanded="false">換手機</button>
@@ -322,6 +312,13 @@ export function openAlbum(): void {
     input.value = '';
     msg(r.data.moved > 0 ? `搬好了，${r.data.moved} 張卡搬到這台` : '搬好了（這台原本就有比較早拿到的卡）');
   });
+  syncMine(el, redraw);
+}
+
+/**
+ * 打開卡冊、道具欄時再跟伺服器對一次（這個瀏覽器的紀錄被清掉、伺服器還有的補回來；搬到別台的拿掉），不一樣就重畫
+ */
+function syncMine(el: HTMLElement, redraw: () => void): void {
   void fetchMyCards().then((r) => {
     if (!r.ok || !el.isConnected) return;
     const local = myCards();
@@ -333,5 +330,23 @@ export function openAlbum(): void {
     saveCards(r.data.cards.filter(isClaim));
     saveItems(items);
     redraw();
+  });
+}
+
+/** 道具欄（選單裡的「道具」）：有的道具一格一格排、寫有幾個（用法之後再設計）；沒有寫「還沒有道具」 */
+export function openItems(): void {
+  const list = (): string => {
+    const have = myItems().filter((x) => ITEM_DEFS.some((d) => d.id === x.item));
+    const cells = have.map((x) => {
+      const d = ITEM_DEFS.find((y) => y.id === x.item)!;
+      return `<li class="tc-item"><img src="${d.img}" alt="" draggable="false"><span class="tc-item-name">${esc(d.name)}</span><span class="tc-item-count">× ${x.count} ${esc(d.unit)}</span></li>`;
+    });
+    return `<div class="tc-head"><h2>道具</h2><button type="button" class="chip" data-close>關閉</button></div>
+      ${cells.length ? `<ul class="tc-items">${cells.join('')}</ul>` : '<p class="tc-items-empty">還沒有道具</p>'}`;
+  };
+  const el = overlay('tc-bag', `<div class="tc-box"><div class="tc-main">${list()}</div></div>`);
+  syncMine(el, () => {
+    const main = el.querySelector('.tc-main');
+    if (main) main.innerHTML = list();
   });
 }
