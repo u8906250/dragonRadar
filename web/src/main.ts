@@ -1801,9 +1801,11 @@ function itemCard(it: Item, now: number): HTMLLIElement {
 }
 
 /**
- * 點清單上的一則：雷達像「定位」一樣飛到那裡（中心慢慢移過去，範圍維持原本的；變成手動位置，
- * 「回到我的位置」回來）；地圖移到看得到；太空裡看別的星球時只選取
+ * 點清單上的一則（或活動卡片的 ▲ ▼）：不改位置（雷達中心還是原本的），縮放到看得到這一則（使用者說的）——
+ * 在外圈外面、或手機上會被下面的卡片蓋住的就拉遠，擠在正中間的就拉近，讓它落在半徑的七成（手機往下的照卡片蓋到哪算）；其他照舊。
+ * 選到的那一則雷達、地圖上都有一圈亮環。地圖移到看得到；太空裡看別的星球時只選取
  */
+const FIT_IN = 0.12;
 function goToItem(it: Item): void {
   const { lat, lng } = it.ev;
   if (lat == null || lng == null) return;
@@ -1813,7 +1815,20 @@ function goToItem(it: Item): void {
   }
   if (radar.spaceFocused) return;
   if (radar.spaceMoved) radar.resetSpace();
-  zoomToKm(scaleKm, { lat, lng, source: 'manual' });
+  // 手機的卡片從下面蓋住雷達：照卡片上緣和這一則在哪個方向，算往這個方向最多到半徑的多少看得到（光點、亮環留 24 像素）；電腦的卡片在右邊，不蓋雷達
+  let [fitOut, fitAt] = [0.85, 0.7];
+  if (!window.matchMedia('(min-width: 900px)').matches && !detailEl.hidden) {
+    const c = radar.screenCenter();
+    const rpx = radar.rangePx();
+    const south = -Math.cos(((bearingDeg(origin, { lat, lng }) - radar.headingDeg) * Math.PI) / 180);
+    if (south > 0 && rpx > 0) {
+      fitOut = Math.min(fitOut, Math.max(0.15, (detailEl.getBoundingClientRect().top - 24 - c.y) / (rpx * south)));
+      fitAt = Math.min(fitAt, fitOut * 0.85);
+    }
+  }
+  const d = haversineKm(origin, { lat, lng });
+  const target = d > scaleKm * fitOut || d < scaleKm * FIT_IN ? Math.max(d / fitAt, earthMinKm(), 0.3) : scaleKm;
+  if (Math.abs(target / scaleKm - 1) > 0.02) zoomToKm(target);
 }
 
 function routeCard(r: RouteOut, phase: Phase, items: Item[], now: number): HTMLLIElement {

@@ -1122,6 +1122,12 @@ export class Radar {
   }
 
   /** 外圈（範圍）在螢幕上的半徑像素；雷達沒顯示時回傳 0 */
+  /** 雷達正中間在畫面上的哪裡（像素） */
+  screenCenter(): { x: number; y: number } {
+    const r = this.svg.getBoundingClientRect();
+    return { x: r.left + r.width / 2, y: r.top + r.height / 2 };
+  }
+
   rangePx(): number {
     const w = this.svg.getBoundingClientRect().width;
     return w > 0 ? (R * Math.min(w, this.svg.getBoundingClientRect().height)) / SIZE : 0;
@@ -2112,6 +2118,8 @@ export class Radar {
         node.dataset.id = String(lead.id);
         node.dataset.group = ids;
         node.appendChild(el('circle', { class: 'hit', r: 22 }));
+        // 選到的那一則：外面一圈亮環（慢慢一明一暗），一眼看得出是哪一個
+        if (it.selected) node.appendChild(el('circle', { class: 'sel-ring', r: 13 }));
         const body = el('g', { class: 'body' });
         if (it.flag) {
           const f = el('text', { class: 'flag' });

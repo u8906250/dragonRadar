@@ -122,6 +122,8 @@ export class MapView {
   private readonly markers = new Map<number, Leaflet.CircleMarker | Leaflet.Marker>();
   /** 房子圖示目前的樣子，沒變就不重畫（每 5 秒更新一次） */
   private readonly iconKeys = new Map<number, string>();
+  /** 選到的那一則外面的亮環 */
+  private selRing: Leaflet.CircleMarker | null = null;
   private routeLayer: Leaflet.LayerGroup | null = null;
   /** 「雙北」範圍時的縣市界 */
   private outline: Leaflet.Polygon | null = null;
@@ -337,6 +339,20 @@ export class MapView {
         else m.bindTooltip(`+${g.length - 1}`, { permanent: true, direction: 'right', className: 'map-count', offset: [8, 0] });
       } else if (m.getTooltip()) m.unbindTooltip();
       for (const x of g) this.leaderOf.set(x.id, it.id);
+    }
+    // 選到的那一則：外面一圈亮環（慢慢一明一暗），點不到、不擋點擊
+    const sel = this.items.find((x) => x.selected);
+    if (sel) {
+      const r = sel.approx ? 22 : 17;
+      if (!this.selRing) {
+        this.selRing = L.circleMarker([sel.lat, sel.lng], { radius: r, interactive: false, className: 'map-sel-ring', color: cssVar('--accent', '#0f766e'), weight: 3, fill: false });
+        layer.addLayer(this.selRing);
+      }
+      this.selRing.setLatLng([sel.lat, sel.lng]);
+      this.selRing.setRadius(r);
+    } else if (this.selRing) {
+      layer.removeLayer(this.selRing);
+      this.selRing = null;
     }
     for (const [id, m] of this.markers) {
       if (!keep.has(id)) {
