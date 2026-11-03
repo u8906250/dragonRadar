@@ -835,6 +835,7 @@ export const XIAOFA_FAV_WEIGHT = 40;
  * 所以停下來站著、發呆、坐、趴、睡覺、伸懶腰的機會跟一般的狗一樣，多走的多半走去下一個路燈、樹下；
  * 喝水、跑步、換草皮跟一般的狗一樣
  */
+const ZOOMIES = 0.22;
 export const XIAOFA_NATURE: DogNature = {
   ...NATURE,
   nose: 0,
@@ -842,6 +843,8 @@ export const XIAOFA_NATURE: DogNature = {
   stop: NATURE.stop * (1 - (NATURE.stays.sniff ?? 0) / Object.values(NATURE.stays).reduce((a, w) => a + w, 0)),
   stays: { ...NATURE.stays, sniff: 0 },
   last: { ...NATURE.last, sniff: [6000, 12000] },
+  // 白天偶爾在草皮上暴衝繞圈（使用者的影片前五秒），約每 10～15 分鐘一次
+  zoomies: ZOOMIES,
 };
 
 /** 公園裡的狗：小法（使用者的馬爾濟斯；不去公園最右上那一區、不太會去國父紀念館後面；喜歡走到路燈、樹下停下來聞） */

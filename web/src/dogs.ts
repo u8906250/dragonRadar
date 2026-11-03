@@ -35,6 +35,10 @@ export interface DogSeg {
   nose?: boolean;
   /** 經過地面到另一塊草皮 */
   cross?: boolean;
+  /** 在草皮上暴衝繞圈（照小法的影片：連續衝刺約 5 秒、中間轉彎）的其中一段 */
+  zoom?: boolean;
+  /** 跑完站著喘（吐舌頭、呼吸快） */
+  pant?: boolean;
   /** 尾巴：一開始（上一段的）、這一段放下來多少（0 往上捲過背～1 垂在後面） */
   tail0?: number;
   tail?: number;
@@ -84,7 +88,7 @@ export interface DogYard {
  * speed 走路、邊走邊聞、快走、跑步多快（公尺／秒），reach 一次走、聞著走、快走、在草皮裡跑多遠（公尺），
  * stop 走完停下來、again 停完再停一下的機率，stays 停下來做什麼（權重：聞、站著、發呆、坐、趴、伸懶腰），
  * run 在草皮裡用跑的、trot 在草皮裡用快走的、nose 邊走邊聞、cross 換到另一塊草皮、crossRun 換草皮時用跑的、drink 去湖邊喝水、spot 走去附近的路燈、長椅、樹…旁邊停下來聞（聞完就走）的機率，
- * trotTo 要去哪裡（去聞、去喝水、換草皮）本來用走的改成快走的機率，
+ * trotTo 要去哪裡（去聞、去喝水、換草皮）本來用走的改成快走的機率，zoomies 白天在草皮上暴衝繞圈（連續衝刺約 5 秒、中間轉彎，跑完喘一下）的機率，
  * crossWalk 幾公尺內去喝水偶爾用走的（再遠用跑的），
  * last 每種停下來的動作停多久（毫秒，最短～最長），
  * afterRun 跑完做什麼（權重：趴下來休息、停下來發呆、改成走路），stretchAfter 自己坐完、趴完站起來伸懶腰（被點了坐下的不伸，睡醒一定伸）、chin 趴著下巴靠下去閉眼睛的機率，
@@ -101,6 +105,7 @@ export interface DogNature {
   run: number;
   trot: number;
   trotTo: number;
+  zoomies: number;
   nose: number;
   cross: number;
   crossRun: number;
@@ -127,6 +132,7 @@ export const NATURE: DogNature = {
   run: 0.04,
   trot: 0.06,
   trotTo: 0.4,
+  zoomies: 0,
   nose: 0.4,
   cross: 0.1,
   crossRun: 0.5,
@@ -148,6 +154,12 @@ export const NATURE: DogNature = {
 export const speedOf = (s: DogSeg, nature: DogNature = NATURE): number => nature.speed[s.do === 'run' ? 'run' : s.do === 'trot' ? 'trot' : s.nose ? 'sniff' : 'walk'];
 /** 走去聞完（路燈、樹下）走開：最多走多遠（樹冠最大半徑約 8 公尺，走得出去） */
 const LEAVE_M = 10;
+/** 暴衝繞圈：每一段直直衝幾公尺、最多幾段、總共跑多遠就停（影片：約 5 秒，2.4 m/s 約 12 公尺）、兩段之間轉幾度，跑完喘多久 */
+const ZOOM_LEG_M: [number, number] = [3, 6];
+const ZOOM_LEGS = 4;
+const ZOOM_TOTAL_M = 11;
+const ZOOM_TURN: [number, number] = [30, 150];
+const PANT_MS: [number, number] = [3000, 5000];
 /** 轉身多久、點了坐多久、伸懶腰多久、喝水多久 */
 const TURN_MS = 450;
 const PET_MS = 6000;
@@ -371,14 +383,43 @@ export class Dog {
     return { ...seg, ms: (Math.max(0.2, this.yard.metres(at, to)) / speedOf(seg, this.nature)) * 1000 };
   }
 
+  /**
+   * 暴衝繞圈的轉折點（照小法的影片）：在這一塊草皮裡一段一段直直衝（每段 ZOOM_LEG_M，直直跑得到），
+   * 兩段之間轉 ZOOM_TURN 度，跑到 ZOOM_TOTAL_M 或 ZOOM_LEGS 段就停；不到兩段（地方太小）是 null
+   */
+  private zoomPath(at: Pt, ring: number, dir0: Pt, rand: () => number): Pt[] | null {
+    const path: Pt[] = [];
+    let [cur, dir, total] = [at, dir0, 0];
+    for (let leg = 0; leg < ZOOM_LEGS && total < ZOOM_TOTAL_M; leg++) {
+      let pick: { to: Pt; m: number } | null = null;
+      for (let i = 0; i < 24 && !pick; i++) {
+        const to = this.yard.within(ring, rand, cur);
+        if (!to) continue;
+        const m = this.yard.metres(cur, to);
+        const lim = Math.min(ZOOM_LEG_M[1], ZOOM_TOTAL_M - total + 2);
+        if (m < ZOOM_LEG_M[0] || (this.yard.canWalk && !this.yard.canWalk(cur, to))) continue;
+        // 太遠的只衝一段
+        const end: Pt = m > lim ? [cur[0] + ((to[0] - cur[0]) * lim) / m, cur[1] + ((to[1] - cur[1]) * lim) / m] : to;
+        const turn = Math.abs(wrap(this.bearing(cur, [end[0] - cur[0], end[1] - cur[1]]) - this.bearing(cur, dir)));
+        if (leg > 0 && (turn < ZOOM_TURN[0] || turn > ZOOM_TURN[1])) continue;
+        pick = { to: end, m: Math.min(m, lim) };
+      }
+      if (!pick) break;
+      path.push(pick.to);
+      total += pick.m;
+      [dir, cur] = [[pick.to[0] - cur[0], pick.to[1] - cur[1]], pick.to];
+    }
+    return path.length >= 2 ? path : null;
+  }
+
   private step(s: DogSeg, rand: () => number): DogSeg {
     const [at, start, dir0] = [s.to, s.start + s.ms, s.dir];
     const N = this.nature;
     const speedOf_ = (x: DogSeg): number => speedOf(x, N);
     // 照步道走：接著走到下一個轉折點
     if (s.via?.length && (s.do === 'walk' || s.do === 'trot' || s.do === 'run')) {
-      const { cross, goal, face, back, nose } = s;
-      return this.legs(s.do, at, s.via, start, dir0, s.ring, { cross, goal, face, back, nose });
+      const { cross, goal, face, back, nose, zoom } = s;
+      return this.legs(s.do, at, s.via, start, dir0, s.ring, { cross, goal, face, back, nose, zoom });
     }
     // 走到湖邊了：一步一步轉向水，低頭喝；喝完照原路走回去
     if (s.goal === 'drink' && s.face) {
@@ -411,7 +452,12 @@ export class Dog {
     // 聞完就走（不在路燈、樹下坐、趴）：走去哪照樣大多是空地，可以走遠一點（LEAVE_M 內），走出樹冠才停
     const leaving = s.do === 'sniff' && s.goal === 'sniff';
     let walkOn = leaving;
-    if (s.do === 'run') {
+    // 暴衝完：站著喘一下（吐舌頭），喘完照跑完的做
+    if (s.do === 'run' && s.zoom) {
+      const [lo, hi] = PANT_MS;
+      return { do: 'stand', from: at, to: at, start, ms: lo + rand() * (hi - lo), dir0, dir: dir0, ring: s.ring, pant: true };
+    }
+    if (s.do === 'run' || s.pant) {
       const after = Object.entries(N.afterRun) as Array<['lie' | 'idle' | 'walk', number]>;
       let r = rand() * after.reduce((a, [, w]) => a + w, 0);
       const how = (after.find(([, w]) => (r -= w) < 0) ?? after[after.length - 1])[0];
@@ -446,6 +492,11 @@ export class Dog {
     if (!walkOn && this.yard.sniff && rand() < N.spot) {
       const o = this.yard.sniff(at, rand, s.seen);
       if (o) return this.legs(brisk('walk'), at, o.path, start, dir0, o.ring, { goal: 'sniff', face: o.face });
+    }
+    // 白天偶爾在草皮上暴衝繞圈
+    if (!walkOn && !night && N.zoomies > 0 && rand() < N.zoomies) {
+      const path = this.zoomPath(at, s.ring, dir0, rand);
+      if (path) return this.legs('run', at, path, start, dir0, s.ring, { zoom: true });
     }
     const run = !walkOn && rand() < N.run;
     const trot = !run && !walkOn && rand() < N.trot;
@@ -529,7 +580,7 @@ export function dogPose(s: DogSeg, e: number, deg = 0): DogPose {
   // 嘴唇線只在站著（包括發呆）、走路、快走時畫（嘴巴閉著）
   // 跑步時尾巴捲在背上跟著一步一步彈（往後放一點點再捲回來）
   const bounce = s.do === 'run' ? 0.12 * Math.max(0, -Math.sin((2 * Math.PI * e) / 370)) : 0;
-  return { ...p, tail: Math.min(1, tailNow(s, e) + bounce), blink: Math.max(p.blink, blink), lips: s.do === 'stand' || s.do === 'idle' || s.do === 'walk' || s.do === 'trot' };
+  return { ...p, tail: Math.min(1, tailNow(s, e) + bounce), blink: Math.max(p.blink, blink), lips: (s.do === 'stand' && !s.pant) || s.do === 'idle' || s.do === 'walk' || s.do === 'trot' };
 }
 
 /** 從姿勢 a 慢慢變成 b（t 0～1） */
@@ -693,6 +744,8 @@ function motion(s: DogSeg, e: number): DogPose {
       return { ...STILL, legs: [[74 * r, -0.2 * r], [72 * r, -0.2 * r], [-8 * r, 0], [-8 * r, 0]], lean: 27 * r, nod: -20 * r, wag: 14 * wave(500) * r };
     }
     default:
+      // 暴衝完站著喘：吐舌頭、張嘴，身體跟著很快的呼吸一起一伏，尾巴快快地搖
+      if (s.pant) return { ...STILL, tongue: true, bob: 0.002 * Math.abs(wave(380)), nod: -2 + 2 * Math.abs(wave(380)), wag: 18 * wave(500) };
       return { ...STILL, wag: 14 * wave(900) };
   }
 }

@@ -114,6 +114,62 @@ describe('會動的狗（dogs.ts）', () => {
     for (const s of list) if (s.do === 'trot' && !s.cross && !s.goal) expect(YARD.metres(s.from, s.to)).toBeLessThanOrEqual(6 + 1e-9);
   });
 
+  it('does zoomies now and then like 小法 in the video: sprints about 5 s with turns, then stands panting', () => {
+    const rand = seeded(21);
+    const dog = new Dog({ id: 'test-zoom', name: '測試', look: MALTESE, yard: YARD, nature: { ...NATURE, zoomies: 0.3 }, hour: noon });
+    dog.place(rand, 0);
+    const segs = new Map<number, DogSeg>();
+    for (let t = 0; t <= 2 * 3_600_000; t += 500) {
+      const d = dog.now(t, rand);
+      segs.set(d.seg.start, d.seg);
+    }
+    const list = [...segs.values()].sort((a, b) => a.start - b.start);
+    const starts = list.map((s, i) => [s, i] as const).filter(([s, i]) => s.zoom && !list[i - 1]?.zoom);
+    expect(starts.length).toBeGreaterThan(5);
+    const bearing = (s: DogSeg): number => Math.atan2(s.to[1] - s.from[1], s.to[0] - s.from[0]);
+    for (const [, i] of starts) {
+      let j = i;
+      let m = 0;
+      while (list[j]?.zoom) {
+        const leg = list[j];
+        expect(leg.do).toBe('run');
+        expect(onLawn(leg.ring, leg.from) && onLawn(leg.ring, leg.to)).toBe(true);
+        m += YARD.metres(leg.from, leg.to);
+        // 兩段之間轉 30～150 度
+        if (j > i) {
+          const turn = Math.abs((((bearing(leg) - bearing(list[j - 1])) * 180) / Math.PI + 540) % 360 - 180);
+          expect(turn).toBeGreaterThanOrEqual(30 - 1e-6);
+          expect(turn).toBeLessThanOrEqual(150 + 1e-6);
+        }
+        j++;
+      }
+      // 至少兩段、約 5 秒（2.4 m/s 約 12 公尺）
+      expect(j - i).toBeGreaterThanOrEqual(2);
+      expect(m).toBeGreaterThan(6);
+      expect(m).toBeLessThan(15);
+      // 跑完站著喘：吐舌頭、不畫嘴唇線，3～5 秒
+      const pant = list[j];
+      if (!pant) continue;
+      expect(pant).toMatchObject({ do: 'stand', pant: true });
+      expect(pant.ms).toBeGreaterThanOrEqual(3000);
+      expect(pant.ms).toBeLessThanOrEqual(5000);
+      const p = dogPose(pant, 1000);
+      expect(p.tongue).toBe(true);
+      expect(p.lips).toBe(false);
+    }
+    // 一般的狗不暴衝；晚上也不暴衝
+    expect(NATURE.zoomies).toBe(0);
+    const owl = new Dog({ id: 'test-zoom-night', name: '測試', look: MALTESE, yard: YARD, nature: { ...NATURE, zoomies: 0.3, sleep: { day: 0, night: 0 } }, hour: () => 23 });
+    owl.place(rand, 0);
+    let moved = 0;
+    for (let t = 0; t <= 3_600_000; t += 500) {
+      const d = owl.now(t, rand);
+      expect(d.seg.zoom).toBeFalsy();
+      if (d.seg.do === 'walk') moved++;
+    }
+    expect(moved).toBeGreaterThan(0);
+  });
+
   it('follows its own nature (another dog can love running)', () => {
     const rand = seeded(3);
     const runner = new Dog({ id: 'test-c', name: '愛跑的', look: MALTESE, yard: YARD, nature: { ...NATURE, run: 0.6, stays: { sniff: 1 }, afterRun: { lie: 1, idle: 0, walk: 0 } }, hour: noon });

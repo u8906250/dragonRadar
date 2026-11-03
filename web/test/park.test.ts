@@ -330,6 +330,8 @@ describe('地球的雷達上的中山公園（跟汪星共用一份）', () => {
     expect(XIAOFA_NATURE.stays.sniff).toBe(0);
     for (const k of ['stand', 'idle', 'sit', 'lie', 'stretch'] as const) expect(XIAOFA_NATURE.stays[k]).toBe(NATURE.stays[k]);
     expect(XIAOFA_NATURE.stop).toBeCloseTo(NATURE.stop / 2, 6);
+    // 白天偶爾暴衝繞圈（影片前五秒）
+    expect(XIAOFA_NATURE.zoomies).toBeGreaterThan(0);
     // 中午走三小時
     const rand = seeded(5);
     const dog = new Dog({ id: 'sniff-spots', name: '測試', look: MALTESE, yard: PARK_DOGS[0].yard, nature: XIAOFA_NATURE, hour: noon });
