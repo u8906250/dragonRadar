@@ -43,7 +43,7 @@ export const CARD_DEFS: CardDef[] = [
     no: 2,
     name: '古錐媽的肉乾',
     img: `${BASE}cards/jerky.webp`,
-    about: '一包五條雞肉乾。又香又好吃，狗友一致好評。',
+    about: '挑食狗也無法抗拒的限量手工雞肉乾，狗友一致好評推薦，只送不賣。',
     hints: ['多貼一些活動'],
     series: '古錐媽',
     found: () => '貼了 5 個活動',
