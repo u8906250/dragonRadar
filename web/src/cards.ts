@@ -13,12 +13,12 @@ export interface CardDef {
   img: string;
   /** 卡片上的介紹 */
   about: string;
-  /** 還沒拿到時卡冊裡的提示（只給一點點） */
-  hint: string;
+  /** 還沒拿到時卡冊裡的提示（只給一點點，一句一行） */
+  hints: string[];
 }
 
 export const CARD_DEFS: CardDef[] = [
-  { id: 'xiaofa', no: 1, name: '小法', img: `${import.meta.env.BASE_URL}cards/xiaofa.webp`, about: '白色馬爾濟斯。個性活潑，喜歡探險，常在碑林出現。', hint: '國館的小法' },
+  { id: 'xiaofa', no: 1, name: '小法', img: `${import.meta.env.BASE_URL}cards/xiaofa.webp`, about: '白色馬爾濟斯。個性活潑，喜歡探險，常在碑林出現。', hints: ['國館的小法', '來汪星找我'] },
 ];
 
 const LS_CARDS = 'dr.cards';
@@ -68,7 +68,7 @@ function backHtml(d: CardDef, missing = false): string {
       <div class="tc-paw">${PAW}</div>
       <div class="tc-back-title">${missing ? '？？？' : '尋找小法'}</div>
       <div class="tc-back-no">${noText(d)}</div>
-      ${missing ? `<div class="tc-back-hint">提示：${esc(d.hint)}</div>` : ''}
+      ${missing ? `<div class="tc-back-hint">提示：${d.hints.map(esc).join('<br>')}</div>` : ''}
     </div>`;
 }
 
