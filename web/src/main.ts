@@ -2406,6 +2406,7 @@ function setDetailHtml(key: string, html: string, steady = false): boolean {
   const same = detailEl.dataset.key === key;
   if (steady && same && (flight !== null || html === detailHtml)) return false;
   detailHtml = html;
+  if (!steady) detailEl.style.height = '';
   const summaryKey = (d: Element): string => (d.querySelector('summary')?.textContent ?? '').replace(/（\d+）$/, '');
   const open = same ? new Set([...detailEl.querySelectorAll('details[open]')].map(summaryKey)) : new Set<string>();
   const top = detailEl.scrollTop;
@@ -2413,6 +2414,8 @@ function setDetailHtml(key: string, html: string, steady = false): boolean {
   // 最上面一條把手：往下拖收起來（wireSheetDrag）
   detailEl.innerHTML = `<div class="sheet-grab" aria-hidden="true"><span></span></div>${html}`;
   if (!same) {
+    // 換了一則：從最上面看起
+    detailEl.scrollTop = 0;
     setPeek(false);
     return true;
   }
@@ -2420,6 +2423,23 @@ function setDetailHtml(key: string, html: string, steady = false): boolean {
   // 抽屜本身會捲動：展開的區塊放回去之後再還原位置
   detailEl.scrollTop = top;
   return true;
+}
+
+/**
+ * 活動卡片有 ▲ ▼ 時高度固定：打開時量一次（至少半個畫面高，最高照 CSS 的 max-height），切上一個、下一個都照這個高度、內容多的在卡片裡捲，
+ * ▲ ▼ 才不會跟著卡片長短上下跑（連按點得到）；從清單重新點一則（stepOrder 重新記）時重量
+ */
+let stepLockPx = 0;
+function lockStepHeight(on: boolean): void {
+  if (!on) {
+    detailEl.style.height = '';
+    return;
+  }
+  if (!stepLockPx) {
+    detailEl.style.height = '';
+    stepLockPx = Math.round(Math.max(detailEl.offsetHeight, window.innerHeight * 0.5));
+  }
+  detailEl.style.height = `${stepLockPx}px`;
 }
 
 /**
@@ -2516,7 +2536,10 @@ function renderDetail(items: Item[], now: number): void {
   const { ev } = it;
   detailEl.hidden = false;
   // 清單上的上一個、下一個（照打開卡片時清單的順序；不在清單上的不顯示）
-  if (!stepOrder?.includes(ev.id)) stepOrder = [...listOrder];
+  if (!stepOrder?.includes(ev.id)) {
+    stepOrder = [...listOrder];
+    stepLockPx = 0;
+  }
   const order = stepOrder;
   const at = order.indexOf(ev.id);
   const [prevId, nextId] = at < 0 ? [undefined, undefined] : [order[at - 1], order[at + 1]];
@@ -2550,6 +2573,7 @@ function renderDetail(items: Item[], now: number): void {
       ${ev.endedReports ? `<p class="muted ended-note">已有 ${ev.endedReports} 人回報${endedWord(ev)}${neededText()}</p>` : ''}
     </div>`, true);
   if (!replaced) return;
+  lockStepHeight(stepBtns !== '');
   detailEl.querySelector('[data-act="close"]')?.addEventListener('click', () => select(null));
   for (const b of detailEl.querySelectorAll<HTMLButtonElement>('[data-select]')) {
     b.addEventListener('click', () => select(Number(b.dataset.select)));
