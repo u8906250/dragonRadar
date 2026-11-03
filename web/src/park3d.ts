@@ -44,9 +44,23 @@ const HALL_WALL_IN = 4;
 /** 一般建築、很小的（短邊不到 2 公尺的柱子、小亭）多高（估的） */
 const HOUSE_H = 4;
 const SMALL_H = 2.6;
-/** 翠湖小島上的亭子：柱子多高、屋頂尖多高（估的） */
-const PAVILION_EAVE = 2.8;
-const PAVILION_TOP = 4.6;
+/**
+ * 翠湖小島上的翠亨亭（照使用者給的照片估的，屋頂外框照 OSM）：台基多高、從屋簷往內縮多少；台基邊上的矮牆多高、多厚，短邊中間留多寬上台階；
+ * 柱子從屋簷往內縮多少、多粗，橫樑頂多高；屋簷（長邊中間）、正脊多高，屋面多厚，四個角往上翹多少、往外多少（比例）
+ */
+const PAV_BASE_H = 0.6;
+const PAV_BASE_IN = 0.55;
+const PAV_SEAT_H = 0.45;
+const PAV_SEAT_T = 0.28;
+const PAV_GATE = 1.2;
+const PAV_COL_IN = 1.1;
+const PAV_COL_R = 0.17;
+const PAV_BEAM_TOP = 3.05;
+const PAV_EAVE = 3.35;
+const PAV_RIDGE = 4.5;
+const PAV_ROOF_T = 0.22;
+const PAV_CORNER_UP = 0.4;
+const PAV_FLARE = 0.05;
 /** 旗桿多高（估的，跟雷達一樣）、旗台多高（估的）；台座兩層（跟雷達一樣，估的） */
 const FLAG_POLE_H = 15;
 const FLAG_BASE_H = 0.3;
@@ -57,10 +71,21 @@ const POOL_WATER = 0.2;
 /** 翠湖的水面、岸多深（估的） */
 const LAKE_WATER = -0.35;
 const BANK_DEPTH = 0.7;
-/** 橋：寬（量的）、橋面多高、欄杆多高（估的） */
+/**
+ * 橋（照使用者給的翠亨亭旁曲橋的照片）：寬（正射影像量的）、橋面多高、多厚；兩邊淺色的邊多寬；白色方石柱多粗、多高、頂上石球的半徑，
+ * 柱子中心離橋邊多遠、大約幾公尺一根；朱紅色欄杆最上面那道圓橫桿多高（橋面算起）、多粗（寬度以外都是看照片估的）
+ */
 const BRIDGE_W = 2.6;
 const BRIDGE_TOP = 0.3;
-const RAIL_H = 0.9;
+const BRIDGE_DECK_T = 0.3;
+const BRIDGE_EDGE = 0.3;
+const BRIDGE_POST_W = 0.26;
+const BRIDGE_POST_H = 1.0;
+const BRIDGE_BALL_R = 0.13;
+const BRIDGE_POST_IN = 0.15;
+const BRIDGE_PANEL = 2;
+const BRIDGE_RAIL_H = 0.85;
+const BRIDGE_RAIL_T = 0.07;
 /**
  * 外圍一圈（公園外框，入口 Z.gates 斷開）：淺灰色的水泥矮牆，上面黑色的鐵欄杆（照使用者給的南邊步道照片：上下兩道橫桿、
  * 一根根尖頭的直桿、下面一帶一圈圈的花紋，每一片中間一根粗一點、頂上圓頭的柱子）；高度、寬度看照片估的
@@ -222,6 +247,22 @@ function stripGeo(lines: Pt[][], w: number, y: number): THREE.BufferGeometry {
   g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
   g.computeVertexNormals();
   return g;
+}
+/** 一條線往左（d > 0）或往右平移 d 公尺（轉角斜接） */
+function offsetLine(l: Pt[], d: number): Pt[] {
+  const dir = (a: Pt, b: Pt): Pt => {
+    const n = Math.hypot(b[0] - a[0], b[1] - a[1]) || 1;
+    return [(b[0] - a[0]) / n, (b[1] - a[1]) / n];
+  };
+  return l.map((p, i) => {
+    const u0 = dir(l[Math.max(0, i - 1)], l[Math.max(1, i)]);
+    const u1 = dir(l[Math.min(l.length - 2, i)], l[Math.min(l.length - 1, i + 1)]);
+    const [mx, my] = [u0[0] + u1[0], u0[1] + u1[1]];
+    const m = Math.hypot(mx, my) || 1;
+    // 兩段方向的平均往左轉 90 度，長度 d / cos(轉角的一半)
+    const k = d / Math.max(0.3, (mx / m) * u1[0] + (my / m) * u1[1]);
+    return [p[0] - (my / m) * k, p[1] + (mx / m) * k];
+  });
 }
 /** 寬度一段段不一樣的帶子（每一點照前後兩段的方向平均往兩邊各 w/2，碰到 blocked 的地方停），放在 y 高 */
 function varStripGeo(lines: WP[][], y: number, blocked?: (p: Pt, m: number) => boolean): THREE.BufferGeometry {
@@ -691,27 +732,84 @@ export function openPark3D(o: Park3DOptions): () => void {
     if (pool) add(prismGeo(shapeOf(w.outer, [inner]), -BANK_DEPTH, BANK_DEPTH + RIM_H), mat(0xe6e0d4), true);
   });
 
-  // ---- 橋：石頭橋面、兩邊欄杆
-  const deckMat = mat(0xeee6d6);
-  const railMat = mat(0x7d6b55);
+  // ---- 橋（照使用者給的照片）：灰色水泥橋面、兩邊淺色的邊，白色方石柱頂上一顆石球（約每 BRIDGE_PANEL 公尺一根、轉角都有），
+  // 柱子之間朱紅色的透空欄杆（最上面一道圓橫桿，下面是橫桿、直桿和中間方格「回」字的花紋，畫在圖上、透空的地方看得到水）；轉角底下一個橋墩
   const bridges = Z.bridges.map((l) => l.map(en));
-  for (const l of bridges)
-    for (let i = 1; i < l.length; i++) {
-      const [a, b] = [l[i - 1], l[i]];
-      const len = Math.hypot(b[0] - a[0], b[1] - a[1]);
-      if (len < 0.05) continue;
-      const ang = Math.atan2(b[1] - a[1], b[0] - a[0]);
-      const mid = new THREE.Vector3((a[0] + b[0]) / 2, 0, -(a[1] + b[1]) / 2);
-      const deck = add(new THREE.BoxGeometry(len + BRIDGE_W * 0.5, 0.25, BRIDGE_W), deckMat, true);
-      deck.position.set(mid.x, BRIDGE_TOP - 0.125, mid.z);
-      deck.rotation.y = ang;
-      for (const side of [-1, 1]) {
-        const rail = add(new THREE.BoxGeometry(len + 0.1, RAIL_H, 0.1), railMat, true);
-        const off = (BRIDGE_W / 2 - 0.05) * side;
-        rail.position.set(mid.x - Math.sin(ang) * off, BRIDGE_TOP + RAIL_H / 2, mid.z - Math.cos(ang) * off);
-        rail.rotation.y = ang;
+  {
+    // 欄杆的花紋（一片從柱子到柱子、從橋邊到最上面的圓橫桿底下；u 往右、v 往上都是 0～1）
+    const cv = document.createElement('canvas');
+    [cv.width, cv.height] = [512, 192];
+    const g = cv.getContext('2d')!;
+    g.fillStyle = '#c4452c';
+    const bar = (u0: number, v0: number, u1: number, v1: number): void => {
+      const [x0, x1] = [Math.min(u0, u1) * 512, Math.max(u0, u1) * 512];
+      const [y0, y1] = [(1 - Math.max(v0, v1)) * 192, (1 - Math.min(v0, v1)) * 192];
+      g.fillRect(x0 - 5, y0 - 5, x1 - x0 + 10, y1 - y0 + 10);
+    };
+    bar(0, 0.13, 1, 0.13);
+    bar(0, 0.8, 1, 0.8);
+    bar(0, 0.47, 0.3, 0.47);
+    bar(0.7, 0.47, 1, 0.47);
+    for (const u of [0.01, 0.12, 0.21, 0.79, 0.88, 0.99]) bar(u, 0.13, u, 1);
+    // 中間的「回」：外框、裡面的小方塊、上下左右接起來
+    for (const [u0, v0, u1, v1] of [[0.3, 0.22, 0.7, 0.72], [0.43, 0.36, 0.57, 0.58]])
+      for (const [a, b, c, d] of [[u0, v0, u1, v0], [u0, v1, u1, v1], [u0, v0, u0, v1], [u1, v0, u1, v1]]) bar(a, b, c, d);
+    bar(0.5, 0.13, 0.5, 0.36);
+    bar(0.5, 0.58, 0.5, 0.8);
+    bar(0.3, 0.47, 0.43, 0.47);
+    bar(0.57, 0.47, 0.7, 0.47);
+    const tex = new THREE.CanvasTexture(cv);
+    tex.colorSpace = THREE.SRGBColorSpace;
+    tex.anisotropy = renderer.capabilities.getMaxAnisotropy();
+    const [deckTop, deckSide] = [mat(0xa6a9ab), mat(0xc9c7c1)];
+    const edgeGeos: THREE.BufferGeometry[] = [];
+    const pierGeos: THREE.BufferGeometry[] = [];
+    const postGeos: THREE.BufferGeometry[] = [];
+    const railGeos: THREE.BufferGeometry[] = [];
+    const panelGeos: THREE.BufferGeometry[] = [];
+    const ball = new THREE.SphereGeometry(BRIDGE_BALL_R, 12, 8);
+    const floor = BRIDGE_TOP + 0.04;
+    /** 轉成 p 到 q 的方向、放在 o（高 y）；at 是放在 p、q 中間 */
+    const turn = (p: Pt, q: Pt, o: Pt, y: number): THREE.Matrix4 => new THREE.Matrix4().makeRotationY(Math.atan2(q[1] - p[1], q[0] - p[0])).setPosition(o[0], y, -o[1]);
+    const at = (p: Pt, q: Pt, y: number): THREE.Matrix4 => turn(p, q, [(p[0] + q[0]) / 2, (p[1] + q[1]) / 2], y);
+    const band = (l: Pt[], d0: number, d1: number): THREE.Shape => shapeOf([...offsetLine(l, d0), ...offsetLine(l, d1).reverse()]);
+    for (const l of bridges) {
+      const half = BRIDGE_W / 2;
+      add(prismGeo(band(l, half, -half), BRIDGE_TOP - BRIDGE_DECK_T, BRIDGE_DECK_T), [deckTop, deckSide], true);
+      edgeGeos.push(prismGeo(band(l, half, half - BRIDGE_EDGE), BRIDGE_TOP, 0.04), prismGeo(band(l, -half + BRIDGE_EDGE, -half), BRIDGE_TOP, 0.04));
+      // 轉角底下的橋墩
+      for (let i = 1; i < l.length - 1; i++)
+        pierGeos.push(new THREE.BoxGeometry(0.7, 1, 0.7 * BRIDGE_W).translate(0, -0.5, 0).applyMatrix4(turn(l[i - 1], l[i + 1], l[i], BRIDGE_TOP - BRIDGE_DECK_T)));
+      for (const side of [1, -1]) {
+        const line = offsetLine(l, side * (half - BRIDGE_POST_IN));
+        // 柱子：每一段平均分（轉角也有一根）
+        const posts: Array<[Pt, Pt]> = [];
+        for (let i = 1; i < line.length; i++) {
+          const [a, b] = [line[i - 1], line[i]];
+          const n = Math.max(1, Math.round(Math.hypot(b[0] - a[0], b[1] - a[1]) / BRIDGE_PANEL));
+          for (let k = 0; k < n; k++) posts.push([[a[0] + ((b[0] - a[0]) * k) / n, a[1] + ((b[1] - a[1]) * k) / n], [a[0] + ((b[0] - a[0]) * (k + 1)) / n, a[1] + ((b[1] - a[1]) * (k + 1)) / n]]);
+        }
+        const last = posts[posts.length - 1];
+        for (const [o, [p, q]] of [...posts.map((x): [Pt, [Pt, Pt]] => [x[0], x]), [last[1], last] as [Pt, [Pt, Pt]]]) {
+          postGeos.push(new THREE.BoxGeometry(BRIDGE_POST_W, BRIDGE_POST_H, BRIDGE_POST_W).translate(0, BRIDGE_POST_H / 2, 0).applyMatrix4(turn(p, q, o, floor)));
+          postGeos.push(ball.clone().translate(o[0], floor + BRIDGE_POST_H + BRIDGE_BALL_R * 0.85, -o[1]));
+        }
+        for (const [p, q] of posts) {
+          const len = Math.hypot(q[0] - p[0], q[1] - p[1]);
+          railGeos.push(new THREE.BoxGeometry(len, BRIDGE_RAIL_T, BRIDGE_RAIL_T).applyMatrix4(at(p, q, floor + BRIDGE_RAIL_H)));
+          const h = BRIDGE_RAIL_H - BRIDGE_RAIL_T / 2;
+          panelGeos.push(new THREE.PlaneGeometry(Math.max(0.1, len - BRIDGE_POST_W), h).translate(0, h / 2, 0).applyMatrix4(at(p, q, floor)));
+        }
       }
     }
+    if (edgeGeos.length) {
+      add(mergeGeometries(edgeGeos), mat(0xd8d6d0), true);
+      if (pierGeos.length) add(mergeGeometries(pierGeos), mat(0x8e8c86));
+      add(mergeGeometries(postGeos), mat(0xdedcd5), true);
+      add(mergeGeometries(railGeos), mat(0xc4452c), true);
+      add(mergeGeometries(panelGeos), new THREE.MeshLambertMaterial({ map: tex, alphaTest: 0.5, alphaToCoverage: true, side: THREE.DoubleSide }), true);
+    }
+  }
   const onBridge = (p: Pt): boolean =>
     bridges.some((l) =>
       l.some((q, i) => {
@@ -803,7 +901,121 @@ export function openPark3D(o: Park3DOptions): () => void {
   /** 撞到外圍的牆 */
   const hitWall = (p: Pt): boolean => walls.some(([a, b]) => segDist(p, a, b) < WALL_T / 2 + 0.25);
 
-  // ---- 建築：紀念館（牆、四面斜的黃色琉璃瓦、中間紅褐色平頂），亭子（柱子、尖屋頂），其他照屋頂顏色的平頂方塊
+  /**
+   * 翠亨亭（照使用者給的照片）：整座灰色水泥。墊高的台基，邊上一圈矮牆（可以坐、靠），兩個短邊中間留缺口、外面三階台階；
+   * 四根灰色圓柱，上面一圈橫樑、柱頭一塊斗栱；四坡頂：長邊方向一條正脊（兩頭翹起來），屋面往裡凹、四個角往上往外翹，簷下白色。
+   * 屋頂外框照 OSM（屋簷），台基、柱子、高度看照片估的（PAV_*）
+   */
+  const pavilion = (ring: Pt[], color: string): void => {
+    const r = rectOf(ring);
+    // s 沿著長邊、q 沿著短邊；a、b 是一半長
+    const [ax, a, b]: [Pt, number, number] = r.a >= r.b ? [r.ax, r.a, r.b] : [[-r.ax[1], r.ax[0]], r.b, r.a];
+    const ay: Pt = [-ax[1], ax[0]];
+    const P = (s: number, q: number): Pt => [r.c[0] + s * ax[0] + q * ay[0], r.c[1] + s * ax[1] + q * ay[1]];
+    const rot = Math.atan2(ax[1], ax[0]);
+    /** 長方塊：沿 s 長 ls、沿 q 長 lq、高 h，底的中間在 (s, q, y) */
+    const block = (ls: number, lq: number, h: number, s: number, q: number, y: number): THREE.BufferGeometry => {
+      const o = P(s, q);
+      return new THREE.BoxGeometry(ls, h, lq).translate(0, h / 2, 0).applyMatrix4(new THREE.Matrix4().makeRotationY(rot).setPosition(o[0], y, -o[1]));
+    };
+    const concrete: THREE.BufferGeometry[] = [];
+    // 台基、矮牆（短邊中間留 PAV_GATE 的缺口）、台階（四階一樣高，最上面一階是台基）
+    const [ba, bb] = [a - PAV_BASE_IN, b - PAV_BASE_IN];
+    concrete.push(block(2 * ba, 2 * bb, PAV_BASE_H, 0, 0, 0));
+    for (const sg of [1, -1]) {
+      concrete.push(block(2 * ba, PAV_SEAT_T, PAV_SEAT_H, 0, sg * (bb - PAV_SEAT_T / 2), PAV_BASE_H));
+      const piece = bb - PAV_GATE / 2;
+      for (const qg of [1, -1]) concrete.push(block(PAV_SEAT_T, piece, PAV_SEAT_H, sg * (ba - PAV_SEAT_T / 2), qg * (bb - piece / 2), PAV_BASE_H));
+      const rise = PAV_BASE_H / 4;
+      for (let k = 1; k <= 3; k++) concrete.push(block(0.3, PAV_GATE, rise * k, sg * (ba + 0.15 + 0.3 * (3 - k)), 0, 0));
+    }
+    // 屋面的高度：離最近的屋簷 d（到正脊 d = b），往裡凹（t 的 1.5 次方），四個角往上翹；flare 是四個角往外推多少
+    const near = (s: number, q: number): number => Math.min(Math.abs(s) / a, Math.abs(q) / b);
+    const roofY = (s: number, q: number): number => {
+      const t = Math.max(0, Math.min(1, Math.min(a - Math.abs(s), b - Math.abs(q)) / b));
+      return PAV_EAVE + (PAV_RIDGE - PAV_EAVE) * t ** 1.5 + PAV_CORNER_UP * near(s, q) ** 3 * (1 - t) ** 2;
+    };
+    const flare = (s: number, q: number): Pt => {
+      const t = Math.max(0, Math.min(1, Math.min(a - Math.abs(s), b - Math.abs(q)) / b));
+      const k = 1 + PAV_FLARE * near(s, q) ** 3 * (1 - t) ** 2;
+      return P(s * k, q * k);
+    };
+    // 柱子、橫樑、柱頭的斗栱（頂到屋面底下）
+    const [cs, cq] = [a - PAV_COL_IN, b - PAV_COL_IN];
+    const colH = PAV_BEAM_TOP - PAV_BASE_H;
+    const cols: THREE.BufferGeometry[] = [];
+    for (const sg of [1, -1])
+      for (const qg of [1, -1]) {
+        const o = P(sg * cs, qg * cq);
+        cols.push(new THREE.CylinderGeometry(PAV_COL_R, PAV_COL_R, colH, 14).translate(o[0], PAV_BASE_H + colH / 2, -o[1]));
+        concrete.push(block(0.44, 0.44, roofY(sg * cs, qg * cq) - PAV_ROOF_T - PAV_BEAM_TOP + 0.05, sg * cs, qg * cq, PAV_BEAM_TOP));
+      }
+    for (const sg of [1, -1]) {
+      concrete.push(block(2 * cs + 0.3, 0.22, 0.32, 0, sg * cq, PAV_BEAM_TOP - 0.32));
+      concrete.push(block(0.22, 2 * cq + 0.3, 0.32, sg * cs, 0, PAV_BEAM_TOP - 0.32));
+    }
+    // 屋面：四片（兩片梯形在長邊、兩片三角形在短邊），每片 (s, q) 照 u（沿著屋簷）、t（屋簷到屋脊）排成網格；上面屋瓦、下面往下 PAV_ROOF_T 是白色的簷下，屋簷那一圈接起來
+    const NU = 16;
+    const NT = 10;
+    const top: number[] = [];
+    const under: number[] = [];
+    const rim: number[] = [];
+    const quad = (out: number[], p: number[], q: number[], r: number[], w: number[]): void => void out.push(...p, ...q, ...r, ...p, ...r, ...w);
+    const faces: Array<(u: number, t: number) => [number, number]> = [];
+    for (const sg of [1, -1]) {
+      faces.push((u, t) => [(2 * u - 1) * (a - t * b) * sg, sg * (b - t * b)]);
+      faces.push((u, t) => [sg * (a - t * b), (1 - 2 * u) * (b - t * b) * sg]);
+    }
+    for (const f of faces) {
+      const v = (u: number, t: number, dy: number): number[] => {
+        const [s, q] = f(u, t);
+        const o = flare(s, q);
+        return [o[0], roofY(s, q) - dy, -o[1]];
+      };
+      for (let j = 0; j < NT; j++)
+        for (let i = 0; i < NU; i++) {
+          const [u0, u1, t0, t1] = [i / NU, (i + 1) / NU, j / NT, (j + 1) / NT];
+          quad(top, v(u0, t0, 0), v(u1, t0, 0), v(u1, t1, 0), v(u0, t1, 0));
+          quad(under, v(u0, t0, PAV_ROOF_T), v(u0, t1, PAV_ROOF_T), v(u1, t1, PAV_ROOF_T), v(u1, t0, PAV_ROOF_T));
+        }
+      for (let i = 0; i < NU; i++) quad(rim, v(i / NU, 0, PAV_ROOF_T), v((i + 1) / NU, 0, PAV_ROOF_T), v((i + 1) / NU, 0, 0), v(i / NU, 0, 0));
+    }
+    const geo = (pos: number[]): THREE.BufferGeometry => {
+      const g = new THREE.BufferGeometry();
+      g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+      g.computeVertexNormals();
+      return g;
+    };
+    add(geo(top), mat(color, { side: THREE.DoubleSide }), true);
+    // 簷下：從下面看只照得到草地反射的綠光（HemisphereLight 的地面色），照片上是白的，所以不照光、直接用淺灰白
+    add(geo(under), new THREE.MeshBasicMaterial({ color: 0xd8d6d0, side: THREE.DoubleSide }));
+    add(geo(rim), mat(0x8f8b82, { side: THREE.DoubleSide }), true);
+    // 正脊（兩頭一塊往上翹的）、四條垂脊（沿著屋面的斜角到翹起來的角）
+    const ridge: THREE.BufferGeometry[] = [block(2 * (a - b) + 0.3, 0.24, 0.22, 0, 0, PAV_RIDGE - 0.04)];
+    for (const sg of [1, -1]) {
+      const o = P(sg * (a - b + 0.12), 0);
+      ridge.push(
+        new THREE.BoxGeometry(0.26, 0.32, 0.24)
+          .translate(0, 0.16, 0)
+          .applyMatrix4(new THREE.Matrix4().makeRotationZ(-sg * 0.25))
+          .applyMatrix4(new THREE.Matrix4().makeRotationY(rot).setPosition(o[0], PAV_RIDGE + 0.1, -o[1])),
+      );
+      for (const qg of [1, -1]) {
+        const pts = Array.from({ length: 13 }, (_, k) => {
+          const t = 1 - k / 12;
+          const [s, q] = [sg * (a - t * b), qg * (b - t * b)];
+          const o2 = flare(s, q);
+          return new THREE.Vector3(o2[0], roofY(s, q) + 0.06, -o2[1]);
+        });
+        ridge.push(new THREE.TubeGeometry(new THREE.CatmullRomCurve3(pts), 24, 0.07, 6).toNonIndexed());
+      }
+    }
+    add(mergeGeometries(ridge.map((g) => (g.index ? g.toNonIndexed() : g))), mat(0x7b766c), true);
+    add(mergeGeometries(concrete), mat(0xa5a39c), true);
+    add(mergeGeometries(cols), mat(0x9c9a93), true);
+  };
+
+  // ---- 建築：紀念館（牆、四面斜的黃色琉璃瓦、中間紅褐色平頂），翠亨亭（pavilion），其他照屋頂顏色的平頂方塊
   const wallMat = mat(0xd9d0c2);
   Z.buildings.forEach((b, i) => {
     const ring = ringEN(b);
@@ -823,13 +1035,7 @@ export function openPark3D(o: Park3DOptions): () => void {
       return;
     }
     if (style === 'hip') {
-      // 亭子：四個角往內一點的柱子、尖尖的屋頂
-      for (const p of inset(ring, 0.3)) {
-        const post = add(new THREE.CylinderGeometry(0.12, 0.12, PAVILION_EAVE, 8), mat(0x8a3b2c), true);
-        post.position.set(p[0], PAVILION_EAVE / 2, -p[1]);
-      }
-      const c: Pt = [ring.reduce((s, p) => s + p[0], 0) / ring.length, ring.reduce((s, p) => s + p[1], 0) / ring.length];
-      add(roofGeo(ring, c, [1, 0], 0, 0, PAVILION_EAVE, PAVILION_TOP), mat(color, { side: THREE.DoubleSide, flatShading: true }), true);
+      pavilion(ring, color);
       return;
     }
     const box = rectOf(ring.length >= 4 ? ring : [...ring, ring[0]]);

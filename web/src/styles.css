@@ -631,11 +631,12 @@ path.map-water-glint { animation: water-flow-map 1.1s linear infinite; }
 .radar .park-rim-joint { fill: none; stroke: #a59b88; pointer-events: none; }
 .radar .park-rim-outer { fill: none; stroke: #8f8676; stroke-width: 0.6; stroke-linejoin: round; pointer-events: none; }
 /* 翠湖的曲橋（park.ts 的 bridgesSvg）：淺色的石頭橋面、兩邊深一點的欄杆，拉近有一塊塊石板、欄杆柱；兩頭接岸邊不封起來，轉角是尖的 */
-.radar .park-bridge-rail, .radar .park-bridge { fill: none; stroke-linejoin: miter; stroke-linecap: butt; pointer-events: none; }
-.radar .park-bridge-rail { stroke: #7d6b55; }
-.radar .park-bridge { stroke: #efe7d8; }
-.radar .park-bridge-slab { fill: none; stroke: #a8977c; pointer-events: none; }
-.radar .park-bridge-post { fill: #5f5040; stroke: none; pointer-events: none; }
+/* 翠湖的曲橋（照使用者給的照片）：淺色的邊、朱紅色欄杆、灰色水泥橋面、白色石柱 */
+.radar .park-bridge-edge, .radar .park-bridge-rail, .radar .park-bridge { fill: none; stroke-linejoin: miter; stroke-linecap: butt; pointer-events: none; }
+.radar .park-bridge-edge { stroke: #dcdad4; }
+.radar .park-bridge-rail { stroke: #c4452c; }
+.radar .park-bridge { stroke: #a9acae; }
+.radar .park-bridge-post { fill: #f1efe9; stroke: #8a857c; pointer-events: none; }
 /* 建築的屋頂（park.ts 的 roofsSvg）：國父紀念館黃色琉璃瓦，其他紅褐色的瓦；屋脊、斜脊深一點，拉近有一條條瓦溝 */
 .radar .park-roof { fill: #c98a64; fill-opacity: 0.75; stroke: none; pointer-events: none; }
 .radar .park-roof.hall { fill: #e2b357; fill-opacity: 0.88; }
@@ -1216,6 +1217,7 @@ body.letters-open { overflow: hidden; }
 .tc-item { display: flex; flex-direction: column; align-items: center; gap: 4px; padding: 10px 10px 12px; border-radius: 14px; border: 3px solid #d9a441; background: linear-gradient(160deg, #fffaf0, #f4e6cb); color: #4a3826; text-align: center; }
 .tc-item img { display: block; width: 100%; aspect-ratio: 1; border-radius: 10px; object-fit: cover; object-position: 50% 55%; border: 2px solid #ead7b0; user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; }
 .tc-item-name { margin-top: 2px; font-size: 14px; font-weight: 800; line-height: 1.3; }
+.tc-item-about { font-size: 12px; line-height: 1.45; color: #6b5640; text-wrap: pretty; }
 .tc-item-count { font-size: 13px; font-weight: 800; color: #b5651d; white-space: nowrap; }
 .tc-items-empty { margin: 24px 0; color: #f3eee4; font-size: 14px; text-align: center; opacity: 0.85; }
 /* 換手機（引繼碼）：卡冊下面，深色的底上用淺色的字 */

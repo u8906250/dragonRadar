@@ -55,7 +55,7 @@ describe('地球的雷達上的中山公園（跟汪星共用一份）', () => {
     const layers = (m: string): string[] => [...m.matchAll(/class="(park-[^"]*)"/g)].map((x) => x[1]);
     expect(layers(at(1, hall))).toEqual(layers(woof));
     const roof = /^park-(roof|ridge|tile)/;
-    expect(layers(at(1, hall)).filter((x) => !roof.test(x))).toEqual(['park-area', 'park-edge', 'park-lawn', 'park-pond', 'park-green', 'park-water', 'park-rim-edge', 'park-rim', 'park-rim-outer', 'park-path street-minor', 'park-flag-base', 'park-bridge-rail', 'park-bridge', 'park-tree', 'park-building']);
+    expect(layers(at(1, hall)).filter((x) => !roof.test(x))).toEqual(['park-area', 'park-edge', 'park-lawn', 'park-pond', 'park-green', 'park-water', 'park-rim-edge', 'park-rim', 'park-rim-outer', 'park-path street-minor', 'park-flag-base', 'park-bridge-edge', 'park-bridge-rail', 'park-bridge', 'park-tree', 'park-building']);
     // 樹（照正射影像的樹冠範圍排的）：外圈 1 km 每一棵都是一個圓點；拉近（外圈 40 公尺）樹冠有影子、亮的一塊和一叢叢葉子
     expect(countAll(at(1, hall), 'park-tree')).toBe(ZHONGSHAN_PARK.trees.length);
     expect(ZHONGSHAN_PARK.trees.length).toBeGreaterThan(500);
@@ -69,9 +69,10 @@ describe('地球的雷達上的中山公園（跟汪星共用一份）', () => {
     // 映池旁邊那一圈可以坐的石頭邊：拉近（外圈 20 公尺）有一塊塊石頭的接縫
     const pool: [number, number] = [25.039066, 121.56026];
     expect(layers(at(0.02, pool))).toEqual(expect.arrayContaining(['park-rim-edge', 'park-rim', 'park-rim-joint']));
-    // 翠湖的曲橋：拉近到橋上（外圈 20 公尺）有石板、欄杆柱
+    // 翠湖的曲橋（照使用者給的照片）：淺色的邊、紅色欄杆、灰色橋面，拉近到橋上（外圈 20 公尺）有白色石柱；整片水泥沒有石板
     const bridge: [number, number] = [25.0385, 121.55899];
-    expect(layers(at(0.02, bridge))).toEqual(expect.arrayContaining(['park-bridge-rail', 'park-bridge', 'park-bridge-slab', 'park-bridge-post']));
+    expect(layers(at(0.02, bridge))).toEqual(expect.arrayContaining(['park-bridge-edge', 'park-bridge-rail', 'park-bridge', 'park-bridge-post']));
+    expect(layers(at(0.02, bridge))).not.toContain('park-bridge-slab');
     // 屋頂（照正射影像的顏色、樣子）：國父紀念館是黃色琉璃瓦、有屋脊，其他照屋頂的顏色填（同一個顏色合成一條），整棟被樹蓋住的不畫；外圈 1 km 還沒有瓦溝
     const roofs = layers(at(1, hall)).filter((x) => roof.test(x));
     expect(roofs.filter((x) => x === 'park-roof hall')).toHaveLength(1);

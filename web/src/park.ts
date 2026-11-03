@@ -1209,35 +1209,32 @@ const FLAGPOLE_SVG = (() => {
 })();
 
 /**
- * 翠湖的曲橋（從上面看）：淺色的石頭橋面約 BRIDGE_W_M 寬，兩邊深一點的欄杆（先畫寬一點的深色、再畫橋面，兩頭接岸邊不封起來，
- * 轉角是尖的）；拉近慢慢畫出一塊塊石板（真的間隔 BRIDGE_SLAB_M，畫面上太密就隔一塊畫一塊）和兩邊的欄杆柱（每 BRIDGE_POST_M 一根，轉角也有）。
- * 寬度照真的大小，太細就畫成最細
+ * 翠湖的曲橋（從上面看，照使用者給的照片）：灰色水泥橋面，兩邊淺色的邊上站著朱紅色的欄杆（離橋邊 BRIDGE_POST_IN），
+ * 先畫整個寬的淺色、再畫欄杆那麼寬的紅色、裡面再畫灰色的橋面，留下兩條紅線（兩頭接岸邊不封起來，轉角是尖的）；
+ * 拉近畫出欄杆上的白色石柱（頂上的石球，每 BRIDGE_POST_M 一根，轉角也有）。寬度照真的大小，太細就畫成最細
  */
-/** 橋面寬：從正射影像量的（垂直於橋量亮的那一段，半高寬，兩座都約 2.6 公尺） */
+/** 橋面寬：從正射影像量的（垂直於橋量亮的那一段，半高寬，兩座都約 2.6 公尺）；欄杆離橋邊多遠、多粗（看照片估的） */
 const BRIDGE_W_M = 2.6;
-const BRIDGE_SLAB_M = 0.6;
+const BRIDGE_POST_IN = 0.15;
+const BRIDGE_RAIL_M = 0.07;
 const BRIDGE_POST_M = 2;
 function bridgesSvg(g: ParkGeom, c: ParkCanvas): string {
   const d = c.lines(g.bridges);
   if (!d) return '';
   const ppm = c.ppm;
-  const w = Math.max(1.6, BRIDGE_W_M * ppm);
-  const rail = Math.max(0.5, 0.12 * ppm);
+  const rail = Math.max(0.5, BRIDGE_RAIL_M * ppm);
+  const span = Math.max(1.6, (BRIDGE_W_M - 2 * BRIDGE_POST_IN) * ppm);
+  const w = Math.max(BRIDGE_W_M * ppm, span + rail + 0.6);
   const f1 = (n: number): string => n.toFixed(1);
-  let out = `<path class="park-bridge-rail" stroke-width="${f1(w + 2 * rail)}" d="${d}" /><path class="park-bridge" stroke-width="${f1(w)}" d="${d}" />`;
-  // 石板：畫的這一層間隔 step（畫面上至少 5 像素），外圈約 60 公尺內才淡入；欄杆柱：畫面上間隔 8 像素以上才畫
-  const f = Math.log2(5 / (ppm * BRIDGE_SLAB_M));
-  const step = BRIDGE_SLAB_M * 2 ** Math.max(0, Math.ceil(f));
-  const slabs = c.textures ? Math.max(0, Math.min(1, 2 - f)) : 0;
-  const posts = c.textures && BRIDGE_POST_M * ppm >= 8;
-  if (!slabs && !posts) return out;
-  const slab = slabs ? alongLines(g, c, g.bridges, (x, y, nx, ny, k) => (k > 0 ? `M${f1(x - (nx * w) / 2)} ${f1(y - (ny * w) / 2)}L${f1(x + (nx * w) / 2)} ${f1(y + (ny * w) / 2)}` : ''), step) : '';
-  const r = Math.max(0.6, 0.09 * ppm);
+  let out =
+    `<path class="park-bridge-edge" stroke-width="${f1(w)}" d="${d}" />` +
+    `<path class="park-bridge-rail" stroke-width="${f1(span + rail)}" d="${d}" /><path class="park-bridge" stroke-width="${f1(span - rail)}" d="${d}" />`;
+  // 石柱：畫面上間隔 8 像素以上才畫；每一段平均分（轉角也有一根）
+  if (!c.textures || BRIDGE_POST_M * ppm < 8) return out;
+  const r = Math.max(0.6, 0.13 * ppm);
   const dot = (x: number, y: number): string => `M${f1(x - r)} ${f1(y)}a${f1(r)} ${f1(r)} 0 1 0 ${f1(2 * r)} 0a${f1(r)} ${f1(r)} 0 1 0 ${f1(-2 * r)} 0`;
-  // 欄杆柱：每一段平均分（轉角也有一根）
-  const post = posts ? alongLines(g, c, g.bridges, (x, y, nx, ny) => dot(x + (nx * w) / 2, y + (ny * w) / 2) + dot(x - (nx * w) / 2, y - (ny * w) / 2), BRIDGE_POST_M, true) : '';
-  if (slab) out += `<path class="park-bridge-slab" stroke-width="${f1(Math.max(0.3, 0.04 * ppm))}" stroke-opacity="${(0.8 * slabs).toFixed(2)}" d="${slab}" />`;
-  if (post) out += `<path class="park-bridge-post" d="${post}" />`;
+  const post = alongLines(g, c, g.bridges, (x, y, nx, ny) => dot(x + (nx * span) / 2, y + (ny * span) / 2) + dot(x - (nx * span) / 2, y - (ny * span) / 2), BRIDGE_POST_M, true);
+  if (post) out += `<path class="park-bridge-post" stroke-width="${f1(Math.max(0.3, 0.03 * ppm))}" d="${post}" />`;
   return out;
 }
 
