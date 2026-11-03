@@ -509,7 +509,8 @@ const tailNow = (s: DogSeg, e: number): number => {
  * - 走路：四隻腳輪流（左後、左前、右後、右前各差四分之一步），往前擺時抬起來；邊走邊聞的走得慢、頭低下去左右聞；
  * - 快走（小跑步）：對角的兩隻腳一起（左前和右後、右前和左後），一步比走路快、跨大一點、腳抬高一點；頭抬著、身體穩穩的（一步小小彈兩下），
  *   耳朵一跳一跳、尾巴翹著小小搖，嘴巴閉著（不吐舌頭、耳朵不往後飛，跟跑步不一樣）；
- * - 跑步：兩隻前腳一起往前伸、兩隻後腳一起往後蹬（身體拉長、離地），再一起收到肚子下面；身體前後搖、上下彈，耳朵往後飛，吐舌頭；
+ * - 跑步（照小法的影片）：一步約 0.37 秒，兩隻前腳一起往前伸、兩隻後腳一起往後蹬（身體拉長、離地），再一起收到肚子下面；身體前後搖、上下彈，
+ *   耳朵跟著一跳一跳往外、往上甩（身體彈起來時甩最高），尾巴捲在背上跟著彈，吐舌頭；
  * - 聞：身體前面往下、頭低到鼻子湊到地上，左右慢慢聞；坐下一開始坐下最後站起來（不吐舌頭）；站著搖尾巴；
  * - 伸懶腰（下犬式）：兩隻前腳往前伸、貼在地上，身體前面往下壓（胸口貼地）、屁股翹高、後腳直直的，頭抬起來看前面、尾巴搖，停一下再站起來；
  * - 喝水：身體前面往下、頭低到水面，頭一點一點、舌頭一伸一縮地舔；
@@ -526,7 +527,9 @@ export function dogPose(s: DogSeg, e: number, deg = 0): DogPose {
   // 眨眼：每 4 秒左右一下（每一段的節奏錯開一點）
   const blink = (e + (s.start % 1700)) % 4100 < 140 ? 1 : 0;
   // 嘴唇線只在站著（包括發呆）、走路、快走時畫（嘴巴閉著）
-  return { ...p, tail: tailNow(s, e), blink: Math.max(p.blink, blink), lips: s.do === 'stand' || s.do === 'idle' || s.do === 'walk' || s.do === 'trot' };
+  // 跑步時尾巴捲在背上跟著一步一步彈（往後放一點點再捲回來）
+  const bounce = s.do === 'run' ? 0.12 * Math.max(0, -Math.sin((2 * Math.PI * e) / 370)) : 0;
+  return { ...p, tail: Math.min(1, tailNow(s, e) + bounce), blink: Math.max(p.blink, blink), lips: s.do === 'stand' || s.do === 'idle' || s.do === 'walk' || s.do === 'trot' };
 }
 
 /** 從姿勢 a 慢慢變成 b（t 0～1） */
@@ -541,6 +544,7 @@ function blend(a: DogPose, b: DogPose, t: number): DogPose {
     nod: m(a.nod, b.nod),
     look: m(a.look, b.look),
     ear: m(a.ear, b.ear),
+    flap: m(a.flap, b.flap),
     wag: m(a.wag, b.wag),
     lie: m(a.lie, b.lie),
     blink: m(a.blink, b.blink),
@@ -624,17 +628,21 @@ function motion(s: DogSeg, e: number): DogPose {
       };
     }
     case 'run': {
-      const ms = 260;
+      // 小法的影片：前腳伸最遠到下一次伸最遠約 0.33～0.42 秒
+      const ms = 370;
       const t = (off: number): number => 2 * Math.PI * (e / ms - off);
       const front = (off: number): [number, number] => [42 * Math.sin(t(off)), 0.05 * Math.max(0, Math.cos(t(off)))];
       const hind = (off: number): [number, number] => [-42 * Math.sin(t(off)), 0.05 * Math.max(0, -Math.cos(t(off)))];
+      // 身體彈起來（bob 最高）之後一點點耳朵甩到最高，落地時垂回來
+      const up = Math.max(0, Math.sin(t(0.04)));
       return {
         ...STILL,
         legs: [front(0), front(0.07), hind(0.05), hind(0.12)],
         bob: 0.008 + 0.03 * Math.max(0, Math.sin(t(0))),
         lean: 7 * Math.cos(t(0)),
         nod: 6 - 6 * Math.cos(t(0)),
-        ear: 40,
+        ear: 12 + 18 * up,
+        flap: 8 + 34 * up,
         wag: 6 * wave(ms),
         tongue: true,
       };

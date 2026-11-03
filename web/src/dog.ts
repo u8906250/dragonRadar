@@ -74,7 +74,7 @@ export const dogHeight = (look: DogLook): number => 0.38 * look.size;
 /**
  * 姿勢：legs 四隻腳（左前、右前、左後、右後）往前擺幾度、腳抬多高（公尺，負的是往下壓、貼在地上），bob 身體往上幾公尺，sit 坐下多少（0 站著～1 坐好），
  * lean 身體前面往下幾度（跑步時前後搖、聞的時候前面低下去），nod 脖子和頭往下低幾度，look 頭往左轉幾度，
- * ear 耳朵往後飛幾度（跑步），wag 尾巴往左右搖幾度，tail 尾巴放下來多少（0 往上捲過背～1 垂在後面），tongue 吐舌頭，
+ * ear 耳朵往後飛幾度（跑步），flap 耳朵往外、往上甩幾度（跑步時一跳一甩），wag 尾巴往左右搖幾度，tail 尾巴放下來多少（0 往上捲過背～1 垂在後面），tongue 吐舌頭，
  * lie 趴下多少（0 站著～1 整個貼地：前腳往前伸平、後腳收在身體兩側），blink 眼睛閉起來多少（眨眼、趴著睡覺），
  * lips 畫嘴唇線（站著、走路時），curl 身體捲起來多少（0～1，睡覺：前半身和屁股往左彎成一圈，頭靠到尾巴旁邊）
  */
@@ -86,6 +86,7 @@ export interface DogPose {
   nod: number;
   look: number;
   ear: number;
+  flap: number;
   wag: number;
   tail: number;
   tongue: boolean;
@@ -94,7 +95,7 @@ export interface DogPose {
   lips: boolean;
   curl: number;
 }
-export const STILL: DogPose = { legs: [[0, 0], [0, 0], [0, 0], [0, 0]], bob: 0, sit: 0, lean: 0, nod: 0, look: 0, ear: 0, wag: 0, tail: 0, tongue: false, lie: 0, blink: 0, lips: false, curl: 0 };
+export const STILL: DogPose = { legs: [[0, 0], [0, 0], [0, 0], [0, 0]], bob: 0, sit: 0, lean: 0, nod: 0, look: 0, ear: 0, flap: 0, wag: 0, tail: 0, tongue: false, lie: 0, blink: 0, lips: false, curl: 0 };
 
 const RAD = Math.PI / 180;
 /** 從水平往下看幾度（跟銅像、火箭差不多，看得到背） */
@@ -137,6 +138,7 @@ interface Part {
 /** 轉動：繞 v 軸（u-w 平面，正的是前面往上）、繞 w 軸（u-v 平面，正的是往左） */
 const rotUW = (q: V, ang: number): V => [q[0] * Math.cos(ang) - q[2] * Math.sin(ang), q[1], q[0] * Math.sin(ang) + q[2] * Math.cos(ang)];
 const rotUV = (q: V, ang: number): V => [q[0] * Math.cos(ang) - q[1] * Math.sin(ang), q[0] * Math.sin(ang) + q[1] * Math.cos(ang), q[2]];
+const rotVW = (q: V, ang: number): V => [q[0], q[1] * Math.cos(ang) - q[2] * Math.sin(ang), q[1] * Math.sin(ang) + q[2] * Math.cos(ang)];
 interface Xf {
   p: (q: V) => V;
   d: (q: V) => V;
@@ -248,7 +250,10 @@ function parts(look: DogLook, pose: DogPose): Part[] {
     if (look.ears === 'drop') {
       // 寬寬的、垂到下巴旁邊，下面往外張開一點（跟頭連成一顆圓球，正面看把臉框起來）
       const c = add(Hc, S([-0.015, 0.078 * side, -0.035]));
-      const ear = joint(neck, add(c, S([0, 0, 0.06])), -pose.ear * RAD);
+      // 以耳朵上緣為支點：往後飛（ear）、往外往上甩（flap，左耳往左、右耳往右）
+      const pivot = add(c, S([0, 0, 0.06]));
+      const out = (q: V): V => rotUW(rotVW(q, side * pose.flap * RAD), -pose.ear * RAD);
+      const ear: Xf = { p: (q) => neck.p(add(out(sub(q, pivot)), pivot)), d: (q) => neck.d(out(q)) };
       furry(`ear${side}`, move({ c, a: [[0.042 * s, 0, 0], [0, 0.032 * s, 0], [0, 0.016 * s * side, 0.068 * s]] }, ear), H * 1.2, earTones, look.ear);
     } else furry(`ear${side}`, move(ell(add(Hc, S([-0.005, 0.042 * side, 0.072])), 0.02 * s, 0.012 * s, 0.045 * s), neck), H * 0.5, earTones, look.ear);
   }

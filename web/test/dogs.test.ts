@@ -353,17 +353,27 @@ describe('姿勢（dogPose）', () => {
       const legs = dogPose(seg('walk'), e).legs;
       expect(new Set(legs.map(([d]) => d.toFixed(3))).size).toBeGreaterThanOrEqual(3);
     }
-    // 跑步：前腳差不多一起、後腳差不多一起，前後相反（伸長、收起來），身體離地、耳朵往後飛、吐舌頭
-    for (let e = 0; e < 260; e += 20) {
+    // 跑步（照小法的影片）：前腳差不多一起、後腳差不多一起，前後相反（伸長、收起來），身體離地、吐舌頭；
+    // 一步約 0.37 秒，耳朵一跳一跳往外、往上甩，尾巴捲在背上跟著彈
+    const flaps: number[] = [];
+    const tails: number[] = [];
+    for (let e = 0; e < 370; e += 10) {
       const p = dogPose(seg('run'), e);
       const [fl, fr, hl, hr] = p.legs.map(([d]) => d);
       expect(Math.abs(fl - fr)).toBeLessThan(20);
       expect(Math.abs(hl - hr)).toBeLessThan(20);
       if (Math.abs(fl) > 30) expect(Math.sign(hl)).toBe(-Math.sign(fl));
       expect(p.bob).toBeGreaterThan(0);
-      expect(p.ear).toBeGreaterThan(20);
+      expect(p.ear).toBeGreaterThan(5);
       expect(p.tongue).toBe(true);
+      flaps.push(p.flap);
+      tails.push(p.tail);
     }
+    expect(Math.max(...flaps)).toBeGreaterThan(35);
+    expect(Math.min(...flaps)).toBeLessThan(12);
+    expect(Math.max(...tails)).toBeGreaterThan(0.08);
+    expect(Math.max(...tails)).toBeLessThan(0.2);
+    expect(dogPose(seg('run'), 370).legs[0][0]).toBeCloseTo(dogPose(seg('run'), 0).legs[0][0], 6);
   });
 
   it('trots briskly, unlike running: diagonal legs together, head up, mouth closed, ears bouncing', () => {
