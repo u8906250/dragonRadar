@@ -173,6 +173,42 @@ describe('會動的狗（dogs.ts）', () => {
     expect(naps).toBeLessThan(stays * 0.1);
   });
 
+  it('stretches after waking up and often after lying down, but rarely after sitting and never after sitting for a pat', () => {
+    // 三小時、每 2 分鐘點一下（像在 3D 國館摸牠），幾隻不同亂數的狗合起來算
+    const after: Record<string, [number, number]> = {};
+    const note = (k: string, stretched: boolean): void => {
+      after[k] ??= [0, 0];
+      after[k][0]++;
+      if (stretched) after[k][1]++;
+    };
+    for (const seed of [1, 2, 3, 5]) {
+      const rand = seeded(seed);
+      const dog = new Dog({ id: `test-stretch-${seed}`, name: '測試', look: MALTESE, yard: YARD, hour: noon });
+      dog.place(rand, 0);
+      const segs = new Map<number, DogSeg>();
+      for (let t = 0; t <= 3 * 3_600_000; t += 500) {
+        if (t > 0 && t % 120_000 === 0) dog.pet(t, rand);
+        const d = dog.now(t, rand);
+        segs.set(d.seg.start, d.seg);
+      }
+      const list = [...segs.values()].sort((a, b) => a.start - b.start);
+      list.forEach((s, i) => {
+        const next = list[i + 1];
+        if (!next || !(s.do === 'sit' || s.do === 'lie' || s.do === 'sleep')) return;
+        // 被點了又被點（再多坐一下）的還沒站起來，不算
+        if (next.pet || next.start < s.start + s.ms - 1) return;
+        note(s.pet ? 'pat' : s.do, next.do === 'stretch');
+      });
+    }
+    const rate = (k: string): number => after[k][1] / after[k][0];
+    expect(after.pat[0]).toBeGreaterThan(50);
+    expect(rate('pat')).toBe(0);
+    expect(after.sit[0]).toBeGreaterThan(50);
+    expect(rate('sit')).toBeLessThan(0.2);
+    expect(rate('lie')).toBeGreaterThan(0.25);
+    expect(rate('sleep')).toBe(1);
+  });
+
   it('stays where it was after reloading the page', () => {
     const store = new Map<string, string>();
     vi.stubGlobal('localStorage', { getItem: (k: string) => store.get(k) ?? null, setItem: (k: string, v: string) => void store.set(k, v), removeItem: (k: string) => void store.delete(k) });

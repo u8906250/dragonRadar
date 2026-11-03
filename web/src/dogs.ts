@@ -87,7 +87,7 @@ export interface DogYard {
  * trotTo 要去哪裡（去聞、去喝水、換草皮）本來用走的改成快走的機率，
  * crossWalk 幾公尺內去喝水偶爾用走的（再遠用跑的），
  * last 每種停下來的動作停多久（毫秒，最短～最長），
- * afterRun 跑完做什麼（權重：趴下來休息、停下來發呆、改成走路），stretchAfterRest 坐完趴完伸懶腰、chin 趴著下巴靠下去閉眼睛的機率，
+ * afterRun 跑完做什麼（權重：趴下來休息、停下來發呆、改成走路），stretchAfter 自己坐完、趴完站起來伸懶腰（被點了坐下的不伸，睡醒一定伸）、chin 趴著下巴靠下去閉眼睛的機率，
  * glance 點了只轉頭看你（繼續做原本的事）的機率（其他時候轉過來坐下），
  * sleep 停下來捲成一圈睡覺的權重（白天、晚上不一樣，晚上是 night 那幾點：晚上一睡就睡到早上，白天打個盹 nap 毫秒），
  * tail 每種動作尾巴垂下來的機率
@@ -108,7 +108,7 @@ export interface DogNature {
   spot: number;
   crossWalk: number;
   afterRun: { lie: number; idle: number; walk: number };
-  stretchAfterRest: number;
+  stretchAfter: { sit: number; lie: number };
   chin: number;
   glance: number;
   sleep: { day: number; night: number };
@@ -134,7 +134,8 @@ export const NATURE: DogNature = {
   spot: 0,
   crossWalk: 12,
   afterRun: { lie: 0.35, idle: 0.3, walk: 0.35 },
-  stretchAfterRest: 0.4,
+  // 坐一下站起來很少伸懶腰（使用者說不是每次都要），趴久了常常伸
+  stretchAfter: { sit: 0.1, lie: 0.4 },
   chin: 0.5,
   glance: 0.6,
   sleep: { day: 0.03, night: 0.6 },
@@ -400,9 +401,9 @@ export class Dog {
       const ms = how === 'stretch' ? STRETCH_MS : how === 'sleep' && night ? Math.max(600_000, toMorning * 3_600_000) : lo + rand() * (hi - lo);
       return { do: how, from: at, to: at, start, ms, dir0, dir: dir0, ring: s.ring, ...(how === 'lie' && rand() < N.chin ? { rest: true } : {}) };
     };
-    // 睡醒一定伸個懶腰；坐完、趴完常常伸個懶腰
+    // 睡醒一定伸個懶腰；趴完常常伸個懶腰，自己坐完偶爾，被點了坐下的（坐一下下）不伸
     if (s.do === 'sleep') return stay('stretch');
-    if ((s.do === 'sit' || s.do === 'lie') && rand() < N.stretchAfterRest) return stay('stretch');
+    if ((s.do === 'sit' || s.do === 'lie') && !s.pet && rand() < N.stretchAfter[s.do]) return stay('stretch');
     // 跑完照個性：趴下來休息、停下來發呆，或改成走路（不再跑、不換草皮）
     // 聞完就走（不在路燈、樹下坐、趴）：走去哪照樣大多是空地，可以走遠一點（LEAVE_M 內），走出樹冠才停
     const leaving = s.do === 'sniff' && s.goal === 'sniff';
