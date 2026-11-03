@@ -474,10 +474,9 @@ radar.onDog = (id) => {
     m.petDog(id);
     radar.redrawPark();
     offerDogLock(id);
-    foundDog(m, id);
   });
 };
-/** 尋找小法：點到小法（雷達或 3D）還沒有小法卡就拿一張，卡上寫在公園哪裡找到的（小法當時的位置） */
+/** 尋找小法：在 3D 國館點到小法（雷達上點到不算）還沒有小法卡就拿一張，卡上寫在公園哪裡找到的（小法當時的位置） */
 function foundDog(m: typeof import('./park'), id: string): void {
   const at = m.dogAt(id);
   void findCard(id, at ? m.parkPlaceName(at) : '中山公園', (msg) => showBanner(bannerEl, msg, 4000));

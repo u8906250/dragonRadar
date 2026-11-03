@@ -113,7 +113,7 @@ function showReveal(d: CardDef, c: CardClaim): void {
 }
 
 let claiming = false;
-/** 點到小法（雷達或 3D）：還沒有這張卡就跟伺服器拿，翻開給你看；拿過的不做什麼 */
+/** 在 3D 國館點到小法（雷達上點到不算）：還沒有這張卡就跟伺服器拿，翻開給你看；拿過的不做什麼 */
 export async function findCard(id: string, place: string, onError: (msg: string) => void): Promise<void> {
   const d = CARD_DEFS.find((x) => x.id === id);
   if (!d || claiming || myCards().some((c) => c.card === id)) return;
