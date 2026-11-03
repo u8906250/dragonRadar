@@ -860,8 +860,10 @@ function shuangbeiKm(): number {
   return sbRadius.km;
 }
 
-// ---- 道路：比雙北小、50 km 內才畫（streets.ts，OpenFreeMap 的向量圖磚，第一次用到才載入；範圍越大畫的路越少） ----
+// ---- 道路：範圍到全台都畫（streets.ts，OpenFreeMap 的向量圖磚，第一次用到才載入；範圍越大畫的路越少，比全台大的不畫） ----
 const STREET_KM = 50;
+/** 道路畫到多大的範圍：這個位置選「全台」的範圍（在國外時全台很遠，最多 600 km） */
+const roadsKm = (): number => Math.max(STREET_KM, Math.min(600, taiwanRadiusKm(origin)));
 let streetsMod: typeof import('./streets') | null = null;
 let streetsLoading = false;
 /** 上次畫的位置、範圍、抓到第幾張圖磚，沒變就不重算 */
@@ -869,7 +871,7 @@ let streetsFor = '';
 let streetTiles = 0;
 
 /**
- * 比這個範圍大就畫海岸線、縣市界的虛線，不畫道路：雙北的半徑（依位置算），最多 50 km
+ * 比這個範圍大就畫海岸線、縣市界的虛線（道路照畫）：雙北的半徑（依位置算），最多 50 km
  * （人在雙北以外時雙北的半徑很大，例如新竹約 110 km，不能讓道路和虛線中間空一段）
  */
 const outlineKm = (): number => Math.min(STREET_KM, shuangbeiKm());
@@ -936,8 +938,8 @@ const woofStreets: import('./space').WoofStreets = (lat, lng, km, rangeKm) => {
 
 /** 範圍內的道路換成相對於圓心的公里數（範圍不大，用平面近似就夠準，拖曳時每一幀都要算） */
 function updateStreets(): void {
-  // 選「雙北」、範圍再大的只畫縣市界、海岸線的虛線
-  const show = scaleSetting !== 'region' && scaleKm <= outlineKm() && !radar.spaceFocused;
+  // 比全台大的只畫海岸線的虛線
+  const show = scaleKm <= roadsKm() && !radar.spaceFocused;
   // 中山公園拉近（外圈約 1.8 km 內畫樹冠、屋頂）：地球上公園在附近、汪星上，註明樹冠、屋頂、橋寬是照國土測繪中心的正射影像判讀的
   const trees = scaleKm <= PARK_TREES_KM && (radar.spaceFocused ? radar.spaceFocusKey === 'woof' : haversineKm(origin, PARK_NEAR) < scaleKm * 1.5 + 0.5);
   $('#radar-attrib').hidden = !show && !trees;

@@ -1,5 +1,5 @@
-import { describe, expect, it } from 'vitest';
-import { decodeStreets, STREET_TIERS, tileOf } from '../src/streets';
+import { describe, expect, it, vi } from 'vitest';
+import { decodeStreets, onTaiwan, STREET_TIERS, streetTiles, tileOf, type StreetLine } from '../src/streets';
 
 /** 組一張只有 transportation 圖層的小圖磚（protobuf） */
 function varint(n: number): number[] {
@@ -66,10 +66,45 @@ describe('decodeStreets', () => {
 });
 
 describe('STREET_TIERS', () => {
+  it('draws only Taiwan roads beyond 65 km, with z7 tiles', () => {
+    const last = STREET_TIERS[STREET_TIERS.length - 1];
+    expect(last).toMatchObject({ maxKm: Infinity, zoom: 7, taiwan: true });
+    expect(last.classes).toMatchObject({ motorway: 'major', trunk: 'major', primary: 'minor' });
+  });
   it('fits the radar in at most 2 x 2 tiles', () => {
     // 圖磚寬度（緯度 25 度）要大於畫面直徑
     for (const t of STREET_TIERS.filter((t) => t.maxKm !== Infinity)) {
       expect((40075 * Math.cos((25 * Math.PI) / 180)) / 2 ** t.zoom).toBeGreaterThan(t.maxKm * 2 * 1.05);
+    }
+  });
+});
+
+describe('onTaiwan', () => {
+  const line = (...pts: Array<[number, number]>): StreetLine => ({ cls: 'major', pts: Float64Array.from(pts.flat()), box: [0, 0, 0, 0] });
+  it('keeps roads on Taiwan and its islands', () => {
+    expect(onTaiwan(line([25.0478, 121.517], [25.05, 121.52]))).toBe(true); // 台北車站
+    expect(onTaiwan(line([22.98, 121.15], [22.75, 121.14]))).toBe(true); // 台東的台 11 線
+    expect(onTaiwan(line([23.57, 119.58], [23.56, 119.6]))).toBe(true); // 澎湖馬公
+    expect(onTaiwan(line([24.44, 118.27], [24.44, 118.31]))).toBe(true); // 金門大橋
+    expect(onTaiwan(line([26.16, 119.94], [26.15, 119.95]))).toBe(true); // 馬祖南竿
+  });
+  it('drops roads across the strait', () => {
+    expect(onTaiwan(line([24.48, 118.09], [24.5, 118.15]))).toBe(false); // 廈門
+    expect(onTaiwan(line([26.07, 119.3], [26.1, 119.28]))).toBe(false); // 福州
+    expect(onTaiwan(line([25.5, 119.78], [25.52, 119.8]))).toBe(false); // 平潭
+  });
+});
+
+describe('streetTiles', () => {
+  it('fetches only the Taiwan tiles when zoomed out to all of Taiwan', () => {
+    vi.stubGlobal('fetch', () => new Promise(() => {}));
+    try {
+      // 台北選「全台」（約 400 km）：z7 只抓台灣那六張，對岸、海上的不抓
+      expect(streetTiles(25.0418, 121.5654, 420, 400, () => {}).pending).toBe(6);
+      // 在國外（東京）範圍跟全台一樣大：圈內沒有台灣，一張都不抓
+      expect(streetTiles(35.68, 139.77, 600, 600, () => {}).pending).toBe(0);
+    } finally {
+      vi.unstubAllGlobals();
     }
   });
 });

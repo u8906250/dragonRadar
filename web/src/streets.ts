@@ -1,9 +1,11 @@
 /**
- * 雷達範圍比雙北小、50 km 內畫的道路：OpenFreeMap 的向量圖磚（OpenMapTiles 格式，資料來自 OpenStreetMap），
+ * 雷達上的道路（範圍到全台）：OpenFreeMap 的向量圖磚（OpenMapTiles 格式，資料來自 OpenStreetMap），
  * 只取 transportation 圖層的道路（不含隧道、步道、服務道路、鐵路），第一次用到才載入。
  * 範圍越大用越粗一級的圖磚（OpenMapTiles 已經簡化過，越粗的只留越大的路），畫的路也越少。
  * 圖磚是 Mapbox Vector Tile（protobuf），這裡只解讀用得到的欄位，不另外加函式庫。
  */
+
+import { TAIWAN_RINGS } from './taiwan';
 
 /** 粗線、細線 */
 export type StreetClass = 'major' | 'minor';
@@ -22,16 +24,46 @@ const HIGHWAYS: Classes = { motorway: 'major', trunk: 'major' };
 
 /**
  * 雷達範圍（半徑）→ 用哪一級圖磚、畫哪些路。一張圖磚的寬度（台灣約緯度 25 度）要大於畫面直徑，最多才四張：
- * z13 約 4.4 km、z11 約 18 km、z10 約 35 km、z9 約 71 km、z8 約 142 km。
- * 2 km 內大街小巷都畫（z14 多了建築、門牌、店家，市區一張壓縮後就六百多 KB，用不到）
+ * z13 約 4.4 km、z11 約 18 km、z10 約 35 km、z9 約 71 km、z8 約 142 km、z7 約 284 km。
+ * 2 km 內大街小巷都畫（z14 多了建築、門牌、店家，市區一張壓縮後就六百多 KB，用不到）。
+ * 再大（到全台）都用 z7（z6 只剩國道、快速道路，東部的台 9 線沒有）：taiwan 只畫台灣（本島、離島）的路、
+ * 只抓台灣那六張圖磚（共約 460 KB；全台的範圍對岸也在圈內）
  */
-export const STREET_TIERS: Array<{ maxKm: number; zoom: number; classes: Classes }> = [
+export const STREET_TIERS: Array<{ maxKm: number; zoom: number; classes: Classes; taiwan?: boolean }> = [
   { maxKm: 2, zoom: 13, classes: { motorway: 'major', trunk: 'major', primary: 'major', secondary: 'major', tertiary: 'minor', minor: 'minor' } },
   { maxKm: 8, zoom: 11, classes: { ...HIGHWAYS, primary: 'minor', secondary: 'minor' } },
   { maxKm: 16, zoom: 10, classes: { ...HIGHWAYS, primary: 'minor' } },
   { maxKm: 33, zoom: 9, classes: { ...HIGHWAYS, primary: 'minor' } },
-  { maxKm: Infinity, zoom: 8, classes: HIGHWAYS },
+  { maxKm: 65, zoom: 8, classes: { ...HIGHWAYS, primary: 'minor' } },
+  { maxKm: Infinity, zoom: 7, classes: { ...HIGHWAYS, primary: 'minor' }, taiwan: true },
 ];
+/** 台灣（含金門、馬祖、澎湖）的範圍：taiwan 那一級只抓這裡面的圖磚 */
+const TAIWAN_BOX = { s: 21.88, w: 118.2, n: 26.45, e: 122.1 };
+/** 馬祖（TAIWAN_RINGS 沒有馬祖）：對岸的黃岐半島在東經 119.9 以西 */
+const MATSU_BOX = { s: 25.9, w: 119.9, n: 26.45, e: 120.55 };
+const RING_BOXES = TAIWAN_RINGS.map((r) => ({
+  r,
+  s: Math.min(...r.map((p) => p[0])),
+  n: Math.max(...r.map((p) => p[0])),
+  w: Math.min(...r.map((p) => p[1])),
+  e: Math.max(...r.map((p) => p[1])),
+}));
+const inRing = (lat: number, lng: number, r: Array<[number, number]>): boolean => {
+  let inside = false;
+  for (let i = 0, j = r.length - 1; i < r.length; j = i++) {
+    if (r[i][0] > lat !== r[j][0] > lat && lng < ((r[j][1] - r[i][1]) * (lat - r[i][0])) / (r[j][0] - r[i][0]) + r[i][1]) inside = !inside;
+  }
+  return inside;
+};
+/** 這條路有一點在台灣的陸地上（海岸線簡化過，沿海的路不一定每一點都在裡面） */
+export function onTaiwan(l: StreetLine): boolean {
+  for (let i = 0; i < l.pts.length; i += 2) {
+    const [lat, lng] = [l.pts[i], l.pts[i + 1]];
+    if (lat >= MATSU_BOX.s && lat <= MATSU_BOX.n && lng >= MATSU_BOX.w && lng <= MATSU_BOX.e) return true;
+    for (const b of RING_BOXES) if (lat >= b.s && lat <= b.n && lng >= b.w && lng <= b.e && inRing(lat, lng, b.r)) return true;
+  }
+  return false;
+}
 const tierOf = (km: number): (typeof STREET_TIERS)[number] => STREET_TIERS.find((t) => km <= t.maxKm) ?? STREET_TIERS[STREET_TIERS.length - 1];
 const TILEJSON = 'https://tiles.openfreemap.org/planet';
 /** 最多記住幾張圖磚（拖來拖去不要一直重抓） */
@@ -227,11 +259,14 @@ export function streetsAround(lat: number, lng: number, km: number, rangeKm: num
 
 /** 跟 streetsAround 一樣，多回傳還有幾張圖磚沒抓到（汪星等全部抓到才換掉原本的道路） */
 export function streetTiles(lat: number, lng: number, km: number, rangeKm: number, onLoad: () => void): { lines: StreetLine[]; pending: number } {
-  const { zoom, classes } = tierOf(rangeKm);
+  const { zoom, classes, taiwan } = tierOf(rangeKm);
   const dLat = km / 110.574;
   const dLng = km / (111.32 * Math.cos((lat * Math.PI) / 180));
-  const a = tileOf(lat + dLat, lng - dLng, zoom);
-  const b = tileOf(lat - dLat, lng + dLng, zoom);
+  let [s, w, n, e] = [lat - dLat, lng - dLng, lat + dLat, lng + dLng];
+  if (taiwan) [s, w, n, e] = [Math.max(s, TAIWAN_BOX.s), Math.max(w, TAIWAN_BOX.w), Math.min(n, TAIWAN_BOX.n), Math.min(e, TAIWAN_BOX.e)];
+  if (s > n || w > e) return { lines: [], pending: 0 };
+  const a = tileOf(n, w, zoom);
+  const b = tileOf(s, e, zoom);
   const out: StreetLine[] = [];
   let pending = 0;
   for (let x = a.x; x <= b.x; x++) {
@@ -256,7 +291,8 @@ export function streetTiles(lat: number, lng: number, km: number, rangeKm: numbe
         .then((r) => (r?.ok ? r.arrayBuffer() : null))
         .then((ab) => {
           if (!ab) throw new Error('no tile');
-          tiles.set(key, decodeStreets(new Uint8Array(ab), x, y, zoom, classes));
+          const got = decodeStreets(new Uint8Array(ab), x, y, zoom, classes);
+          tiles.set(key, taiwan ? got.filter(onTaiwan) : got);
           while (tiles.size > MAX_TILES) tiles.delete(tiles.keys().next().value as string);
           onLoad();
         })
