@@ -351,6 +351,11 @@ export class Radar {
   private outlineLines: Array<Array<{ bearing: number; distanceKm: number }>> = [];
   private readonly outlineLayer: SVGGElement;
   private streets: RadarStreets | null = null;
+  /** 道路從算的那一點（main.ts 的錨點）到正中間的位移（公里，東、北）：拖曳時不重算道路，只移過去 */
+  private streetShift: [number, number] = [0, 0];
+  private streetLoose = false;
+  /** 上次建好的道路：拖曳時只位移了，平移整層就好，超出多畫的那一圈（margin，公里）才重建 */
+  private streetsBuilt: { s: RadarStreets; k: number; heading: number; lim: number; sx: number; sy: number; margin: number } | null = null;
   private readonly streetLayer: SVGGElement;
   /** 地球上的中山公園（park.ts，跟汪星共用）：照雷達外圈的公里數畫成 SVG（北在上）；不在附近是 null */
   private parkDraw: ((scaleKm: number) => string) | null = null;
@@ -482,7 +487,7 @@ export class Radar {
         <line x1="${C}" y1="${C - R}" x2="${C}" y2="${C + R}" />
         <line x1="${C - R}" y1="${C}" x2="${C + R}" y2="${C}" />
       </g>
-      <g class="streets" clip-path="url(#rg-clip)"></g>
+      <g class="streets" clip-path="url(#rg-clip)"><g></g></g>
       <g class="park" clip-path="url(#rg-clip)"></g>
       <g class="scale-labels"></g>
       <g class="outline" clip-path="url(#rg-clip)"></g>
@@ -508,7 +513,8 @@ export class Radar {
     });
     this.outlineLayer = this.svg.querySelector('.outline') as SVGGElement;
     this.spaceLayer = this.svg.querySelector('.space') as SVGGElement;
-    this.streetLayer = this.svg.querySelector('.streets') as SVGGElement;
+    // 裡面再一層：拖曳時平移這一層，裁切的圓（外面那層）不跟著動
+    this.streetLayer = this.svg.querySelector('.streets > g') as SVGGElement;
     this.parkLayer = this.svg.querySelector('.park') as SVGGElement;
     this.tripLayer = this.svg.querySelector('.trip') as SVGGElement;
     this.landmarkLayer = this.svg.querySelector('.landmarks') as SVGGElement;
@@ -1455,9 +1461,14 @@ export class Radar {
     this.draw();
   }
 
-  /** 放大時的街道；null 不畫 */
-  setStreets(s: RadarStreets | null): void {
+  /**
+   * 放大時的街道；null 不畫。shift：道路的座標原點到正中間的位移（公里，東、北），拖曳時只改這個；
+   * loose：拖曳中，多畫外面一圈，接下來只平移
+   */
+  setStreets(s: RadarStreets | null, shift: [number, number] = [0, 0], loose = false): void {
     this.streets = s;
+    this.streetShift = shift;
+    this.streetLoose = loose;
     this.draw();
   }
 
@@ -1631,33 +1642,52 @@ export class Radar {
     return close ? `${d} Z` : d;
   }
 
-  /** 街道：大路、其他街道各合成一條 path（線很多，一條一個元素太慢） */
+  /**
+   * 街道：大路、其他街道各合成一條 path（線很多，一條一個元素太慢）。
+   * 拖曳時（loose）多畫外面一圈（範圍的 1/4），之後只平移整層，移出那一圈才重建（16 km 內的街道很多，每一格重建手機會卡）
+   */
   private drawStreets(): void {
-    this.streetLayer.replaceChildren();
     const s = this.streets;
-    if (!s || this.inSpace) return;
+    if (!s || this.inSpace) {
+      this.streetLayer.replaceChildren();
+      this.streetsBuilt = null;
+      return;
+    }
     const k = (R - 8) / this.scaleKm;
     const h = (this.heading * Math.PI) / 180;
     const cos = Math.cos(h);
     const sin = Math.sin(h);
-    const lim2 = (this.scaleKm * this.reach * 1.05) ** 2;
+    const lim = this.scaleKm * this.reach * 1.05;
+    const [sx, sy] = this.streetShift;
+    const b = this.streetsBuilt;
+    if (b && b.s === s && b.k === k && b.heading === this.heading && b.lim === lim && Math.hypot(sx - b.sx, sy - b.sy) <= b.margin) {
+      const [dx, dy] = [sx - b.sx, sy - b.sy];
+      if (dx === 0 && dy === 0) this.streetLayer.removeAttribute('transform');
+      else this.streetLayer.setAttribute('transform', `translate(${(-k * (dx * cos - dy * sin)).toFixed(1)} ${(k * (dy * cos + dx * sin)).toFixed(1)})`);
+      return;
+    }
+    const margin = this.streetLoose ? lim / 4 : 0;
+    const lim2 = (lim + margin) ** 2;
+    this.streetLayer.replaceChildren();
+    this.streetLayer.removeAttribute('transform');
     for (const [cls, lines] of [
       ['street-minor', s.minor],
       ['street-major', s.major],
     ] as const) {
       let d = '';
-      for (const l of lines) d += this.streetPath(l, k, cos, sin, lim2);
+      for (const l of lines) d += this.streetPath(l, k, cos, sin, lim2, sx, sy);
       if (d) this.streetLayer.appendChild(el('path', { class: cls, d }));
     }
+    this.streetsBuilt = { s, k, heading: this.heading, lim, sx, sy, margin };
   }
 
   /**
    * 一條街：外圈外面的點，前後一點在圈內的才留（線畫到外圈再被裁掉），都在外面的斷開；
    * 畫面上離上一點不到 1.5 像素的省略。手機朝向轉了就跟著轉
    */
-  private streetPath(l: Float64Array, k: number, cos: number, sin: number, lim2: number): string {
+  private streetPath(l: Float64Array, k: number, cos: number, sin: number, lim2: number, sx: number, sy: number): string {
     const n = l.length / 2;
-    const near = (i: number): boolean => i >= 0 && i < n && l[2 * i] ** 2 + l[2 * i + 1] ** 2 <= lim2;
+    const near = (i: number): boolean => i >= 0 && i < n && (l[2 * i] - sx) ** 2 + (l[2 * i + 1] - sy) ** 2 <= lim2;
     let d = '';
     let pen = false;
     let px = 0;
@@ -1667,8 +1697,8 @@ export class Radar {
         pen = false;
         continue;
       }
-      const dx = l[2 * i];
-      const dy = l[2 * i + 1];
+      const dx = l[2 * i] - sx;
+      const dy = l[2 * i + 1] - sy;
       const x = C + k * (dx * cos - dy * sin);
       const y = C - k * (dy * cos + dx * sin);
       if (pen && i < n - 1 && Math.abs(x - px) + Math.abs(y - py) < 1.5) continue;

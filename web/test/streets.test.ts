@@ -71,14 +71,16 @@ describe('STREET_TIERS', () => {
     expect(last).toMatchObject({ maxKm: Infinity, zoom: 7, taiwan: true });
     expect(last.classes).toMatchObject({ motorway: 'major', trunk: 'major', primary: 'minor' });
   });
-  it('draws tertiary roads within 8 km, like secondary ones (other cities tag their arterials tertiary)', () => {
-    const t = STREET_TIERS.find((t) => t.maxKm === 8)!;
+  it('draws tertiary roads within 16 km, like secondary ones (other cities tag their arterials tertiary)', () => {
+    const t = STREET_TIERS.find((t) => t.maxKm === 16)!;
+    expect(t.zoom).toBe(11);
     expect(t.classes).toMatchObject({ secondary: 'minor', tertiary: 'minor' });
   });
-  it('fits the radar in at most 2 x 2 tiles', () => {
-    // 圖磚寬度（緯度 25 度）要大於畫面直徑
+  it('fits the radar in at most 2 x 2 tiles (3 x 3 within 16 km)', () => {
+    // 圖磚寬度（緯度 25 度）要大於畫面直徑（16 km 那一級是直徑的一半）
     for (const t of STREET_TIERS.filter((t) => t.maxKm !== Infinity)) {
-      expect((40075 * Math.cos((25 * Math.PI) / 180)) / 2 ** t.zoom).toBeGreaterThan(t.maxKm * 2 * 1.05);
+      const per = t.maxKm === 16 ? 2 : 1;
+      expect(((40075 * Math.cos((25 * Math.PI) / 180)) / 2 ** t.zoom) * per).toBeGreaterThan(t.maxKm * 2 * 1.05);
     }
   });
 });

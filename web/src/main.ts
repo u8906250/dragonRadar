@@ -852,6 +852,14 @@ let streetsLoading = false;
 /** 上次畫的位置、範圍、抓到第幾張圖磚，沒變就不重算 */
 let streetsFor = '';
 let streetTiles = 0;
+/**
+ * 道路換成公里數時的原點（錨點）：拖曳時正中間離它不到範圍的 1/4 就不重算，只告訴雷達位移了多少
+ * （streetLoose：換算時多留了外面一圈，拖曳中才這樣）
+ */
+let streetAnchor: LatLng | null = null;
+let streetLines: RadarStreets | null = null;
+let streetLoose = false;
+/** 拖曳開始時的位置（拖曳中才有，panRadar） */
 
 /** 比這個範圍大就畫海岸線、縣市界的虛線（道路照畫），台灣哪裡都一樣 */
 const OUTLINE_KM = 50;
@@ -929,6 +937,7 @@ function updateStreets(): void {
   if (!show) {
     if (streetsFor) radar.setStreets(null);
     streetsFor = '';
+    streetLines = null;
     return;
   }
   if (!streetsMod) {
@@ -936,17 +945,32 @@ function updateStreets(): void {
     return;
   }
   // 全螢幕鋪滿時抓到畫面的角（radar.reach 是範圍的幾倍，平常是 1）
-  const key = `${origin.lat},${origin.lng}|${scaleKm}|${streetTiles}|${radar.reach.toFixed(2)}`;
-  if (key === streetsFor) return;
-  streetsFor = key;
   const reach = scaleKm * radar.reach * 1.05;
-  const lines = streetsMod.streetsAround(origin.lat, origin.lng, reach, scaleKm, () => {
+  const ky = 110.574;
+  // 拖曳中：範圍、圖磚沒變，正中間離錨點不到範圍的 1/4（換算時多留的那一圈）就只給位移
+  const key = `${scaleKm}|${streetTiles}|${radar.reach.toFixed(2)}`;
+  if (streetLines && streetAnchor && streetsFor === key) {
+    if (!panFrom && origin.lat === streetAnchor.lat && origin.lng === streetAnchor.lng) return;
+    if (panFrom && streetLoose) {
+      const kx = 111.32 * Math.cos((streetAnchor.lat * Math.PI) / 180);
+      const shift: [number, number] = [(origin.lng - streetAnchor.lng) * kx, (origin.lat - streetAnchor.lat) * ky];
+      if (Math.hypot(...shift) <= reach / 4) {
+        radar.setStreets(streetLines, shift, true);
+        return;
+      }
+    }
+  }
+  streetsFor = key;
+  streetAnchor = { lat: origin.lat, lng: origin.lng };
+  // 拖曳中多換算外面一圈，接下來拖一點都不用重算
+  streetLoose = !!panFrom;
+  const get = streetLoose ? reach * 1.25 : reach;
+  const lines = streetsMod.streetsAround(origin.lat, origin.lng, get, scaleKm, () => {
     streetTiles++;
     updateStreets();
   });
   const kx = 111.32 * Math.cos((origin.lat * Math.PI) / 180);
-  const ky = 110.574;
-  const box = [origin.lat - reach / ky, origin.lng - reach / kx, origin.lat + reach / ky, origin.lng + reach / kx];
+  const box = [origin.lat - get / ky, origin.lng - get / kx, origin.lat + get / ky, origin.lng + get / kx];
   const out: RadarStreets = { major: [], minor: [] };
   for (const l of lines) {
     if (l.box[0] > box[2] || l.box[2] < box[0] || l.box[1] > box[3] || l.box[3] < box[1]) continue;
@@ -957,7 +981,8 @@ function updateStreets(): void {
     }
     out[l.cls].push(xy);
   }
-  radar.setStreets(out);
+  streetLines = out;
+  radar.setStreets(out, [0, 0], streetLoose);
 }
 
 // ---- 中山公園（park.ts，跟汪星共用一份）：地球的雷達上第一次在公園附近才載入 ----

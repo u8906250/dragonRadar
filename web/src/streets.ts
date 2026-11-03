@@ -23,7 +23,7 @@ type Classes = Record<string, StreetClass>;
 const HIGHWAYS: Classes = { motorway: 'major', trunk: 'major' };
 
 /**
- * 雷達範圍（半徑）→ 用哪一級圖磚、畫哪些路。一張圖磚的寬度（台灣約緯度 25 度）要大於畫面直徑，最多才四張：
+ * 雷達範圍（半徑）→ 用哪一級圖磚、畫哪些路。一張圖磚的寬度（台灣約緯度 25 度）要大於畫面直徑，最多才四張（16 km 那一級例外，最多九張）：
  * z13 約 4.4 km、z11 約 18 km、z10 約 35 km、z9 約 71 km、z8 約 142 km、z7 約 284 km。
  * 2 km 內大街小巷都畫（z14 多了建築、門牌、店家，市區一張壓縮後就六百多 KB，用不到）。
  * 再大（到全台）都用 z7（z6 只剩國道、快速道路，東部的台 9 線沒有）：taiwan 只畫台灣（本島、離島）的路、
@@ -31,9 +31,9 @@ const HIGHWAYS: Classes = { motorway: 'major', trunk: 'major' };
  */
 export const STREET_TIERS: Array<{ maxKm: number; zoom: number; classes: Classes; taiwan?: boolean }> = [
   { maxKm: 2, zoom: 13, classes: { motorway: 'major', trunk: 'major', primary: 'major', secondary: 'major', tertiary: 'minor', minor: 'minor' } },
-  // 市區的幹道台北多半標 secondary，其他縣市很多標 tertiary（新竹 8 km 內 secondary 約 90 km、tertiary 約 400 km）：都畫，各地一樣細
-  { maxKm: 8, zoom: 11, classes: { ...HIGHWAYS, primary: 'minor', secondary: 'minor', tertiary: 'minor' } },
-  { maxKm: 16, zoom: 10, classes: { ...HIGHWAYS, primary: 'minor' } },
+  // 市區的幹道台北多半標 secondary，其他縣市很多標 tertiary（新竹 8 km 內 secondary 約 90 km、tertiary 約 400 km）：都畫，各地一樣細；
+  // 16 km 內也是（z10 沒有 tertiary，所以用 z11，一張約 18 km 寬，最多九張）
+  { maxKm: 16, zoom: 11, classes: { ...HIGHWAYS, primary: 'minor', secondary: 'minor', tertiary: 'minor' } },
   { maxKm: 33, zoom: 9, classes: { ...HIGHWAYS, primary: 'minor' } },
   { maxKm: 65, zoom: 8, classes: { ...HIGHWAYS, primary: 'minor' } },
   { maxKm: Infinity, zoom: 7, classes: { ...HIGHWAYS, primary: 'minor' }, taiwan: true },
