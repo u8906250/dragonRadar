@@ -5450,7 +5450,7 @@ function wireControls(): void {
   $('#admin-link').hidden = !lsGet(LS_ADMIN_TOKEN);
   // 卡冊（尋找小法）：在選單裡（主題、通知旁邊），一開始就在，讓人知道可以去收集
   $('#cards-btn').addEventListener('click', () => openAlbum());
-  // 3D 的中山公園（測試中，大家都進得來；存了管理 token 的才能標記路燈、長椅）
+  // 3D 的中山公園（大家都進得來；存了管理 token 的才能標記路燈、長椅）
   $('#park3d-btn').addEventListener('click', () => {
     const token = lsGet(LS_ADMIN_TOKEN) ?? undefined;
     const btn = $<HTMLButtonElement>('#park3d-btn');
