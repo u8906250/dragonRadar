@@ -275,7 +275,7 @@ function seekWhen(ev: { kind: string; extra?: Record<string, unknown> | null }):
   return ev.kind === 'food' ? '時間可討論' : `可以打 ${x.available ?? '時間可討論'}`;
 }
 
-// ---- 等一下吃什麼：出攤（店家發布）照時間排；網友推薦、揪團吃飯是刊登 ----
+// ---- 脆友推薦hito美食：出攤（店家發布）照時間排；網友推薦、揪團吃飯是刊登 ----
 interface FoodExtra {
   role?: 'vendor' | 'recommend' | 'meetup';
   shop?: string | null;
@@ -309,7 +309,7 @@ function moduleSummary(singles: Row[], spotsIn: Row[], postings: Map<string, Row
   return singles.length ? dogSummary(singles) : '';
 }
 
-/** 等一下吃什麼的詳細資料：出攤寫時間、攤名、賣什麼、價位；推薦寫店名、推薦什麼、營業時間；揪團寫時間、缺幾人、怎麼報名，加上安全提醒 */
+/** 脆友推薦hito美食的詳細資料：出攤寫時間、攤名、賣什麼、價位；推薦寫店名、推薦什麼、營業時間；揪團寫時間、缺幾人、怎麼報名，加上安全提醒 */
 function foodDetailHtml(it: Item, now: number): string {
   const { ev } = it;
   const x = foodOf(ev);
@@ -1598,7 +1598,7 @@ function render(): void {
     const msg = `${titleOf(it.ev)}｜${it.ev.placeText}｜${formatKm(it.distanceKm)} ${compassLabel(it.bearing)}`;
     const head =
       it.ev.kind === 'food'
-        ? ({ vendor: '附近的攤位出攤了', recommend: '附近有網友推薦的店', meetup: '附近有人揪吃飯' }[foodRole(it.ev) ?? 'recommend'] ?? '等一下吃什麼')
+        ? ({ vendor: '附近的攤位出攤了', recommend: '附近有網友推薦的店', meetup: '附近有人揪吃飯' }[foodRole(it.ev) ?? 'recommend'] ?? '脆友推薦hito美食')
         : it.ev.kind === 'session'
         ? isSeek(it.ev)
           ? '附近有人找臨打'

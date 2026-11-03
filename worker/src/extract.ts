@@ -2,7 +2,7 @@ import type { Env } from './env';
 import { isAdminOnly } from './geocode';
 import { formatTaipei, parseIsoToUnix } from './util';
 
-/** giveaway 發放、activity 活動（洋流）；job 職缺（狗狗陪伴）；session 臨打（羽球臨打）；food 吃的（等一下吃什麼） */
+/** giveaway 發放、activity 活動（洋流）；job 職缺（狗狗陪伴）；session 臨打（羽球臨打）；food 吃的（脆友推薦hito美食） */
 export type EventKind = 'giveaway' | 'activity' | 'job' | 'session' | 'food';
 
 /** 職缺（狗狗陪伴模組）：工作期間、每天時段、薪資、雇主、怎麼應徵 */

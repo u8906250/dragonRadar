@@ -94,13 +94,13 @@ MODULES.push({
 
 MODULES.push({
   id: 'food',
-  name: '等一下吃什麼',
-  short: '吃什麼',
+  name: '脆友推薦hito美食',
+  short: '脆友推薦hito美食',
   tagline: '附近的餐車、市集攤位，網友推薦的店，揪團吃飯',
   emoji: '🍜',
   current: false,
   unit: '個',
-  emptyText: '附近還沒有等一下吃什麼的資料',
+  emptyText: '附近還沒有脆友推薦的hito美食',
   searchPlaceholder: '搜尋店名、吃什麼、地點…',
   reportIntro: '看到餐車、市集攤位出攤，網友推薦的店，或揪團吃飯的 Threads 貼文？貼上連結，雷達會判讀地點、時間、吃什麼、價位，標到地圖上。',
   reportTips: [

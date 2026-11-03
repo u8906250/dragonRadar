@@ -1,5 +1,5 @@
 /**
- * 等一下吃什麼模組：判讀三種貼文
+ * 脆友推薦hito美食模組（原本叫「等一下吃什麼」，判讀說明裡的名字沒改，免得影響判讀）：判讀三種貼文
  * - vendor 出攤（店家發布）：餐車、市集攤位、快閃攤位公告哪天幾點在哪裡擺攤；照洋流的場次排（每週固定的當成固定擺攤）
  * - recommend 推薦（網友）：推薦某家店、某個攤位好吃；當成刊登（events.ts 的 planPostings）
  * - meetup 揪團（網友）：揪人一起吃飯；當成刊登，寫了約的時間就到那個時段結束
@@ -98,7 +98,7 @@ export function normalizeFood(raw: unknown): Extraction | null {
     const vendor = role === 'vendor';
     return {
       kind: 'food',
-      title: str(e.title) ?? str(e.shop) ?? '等一下吃什麼',
+      title: str(e.title) ?? str(e.shop) ?? '脆友推薦hito美食',
       item: str(e.food),
       // 推薦沒有時間；出攤、揪團才有
       start_at: role === 'recommend' ? null : str(e.start_at),
@@ -123,5 +123,5 @@ export function normalizeFood(raw: unknown): Extraction | null {
   return { is_event: isEvent, events: isEvent ? events : [], tags: aiTags(o, isEvent) };
 }
 
-/** 等一下吃什麼的判讀 */
+/** 脆友推薦hito美食的判讀 */
 export const FOOD_SPEC: ExtractSpec = { system: FOOD_PROMPT, schema: FOOD_SCHEMA, normalize: normalizeFood };
