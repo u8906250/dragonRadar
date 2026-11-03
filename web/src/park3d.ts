@@ -72,11 +72,11 @@ const POOL_WATER = 0.2;
 const LAKE_WATER = -0.35;
 const BANK_DEPTH = 0.7;
 /**
- * 橋（照使用者給的翠亨亭旁曲橋的照片）：寬（正射影像量的）、橋面多高、多厚；兩邊淺色的邊多寬；白色方石柱多粗、多高、頂上石球的半徑，
+ * 橋（照使用者給的翠亨亭旁曲橋的照片）：寬（正射影像量的）、橋面多高（照片上兩頭跟岸上的路差不多平，比地面高一點點，走得上去）、多厚；兩邊淺色的邊多寬；白色方石柱多粗、多高、頂上石球的半徑，
  * 柱子中心離橋邊多遠、大約幾公尺一根；朱紅色欄杆最上面那道圓橫桿多高（橋面算起）、多粗（寬度以外都是看照片估的）
  */
 const BRIDGE_W = 2.6;
-const BRIDGE_TOP = 0.3;
+const BRIDGE_TOP = 0.1;
 const BRIDGE_DECK_T = 0.3;
 const BRIDGE_EDGE = 0.3;
 const BRIDGE_POST_W = 0.26;
@@ -1325,6 +1325,14 @@ export function openPark3D(o: Park3DOptions): () => void {
     const s0 = en(Z.statue);
     return Math.hypot(p[0] - s0[0], p[1] - s0[1]) < 1.25;
   };
+  /** 平台往外（東西）的範圍：在這中間、平台外面的就是左右兩邊（南北） */
+  const plazaU = plazaRing.map((q) => (q[0] - plazaC[0]) * out[0] + (q[1] - plazaC[1]) * out[1]);
+  /** 從平台走到左右兩邊（南北的邊，不是前面的石階、後面的石牆那邊）的外面：可以直接跳下去（上不來，上去走前面的石階） */
+  const plazaSideDrop = (from: Pt, to: Pt): boolean => {
+    if (!inside(from, plazaRing) || inside(to, plazaRing)) return false;
+    const u = (to[0] - plazaC[0]) * out[0] + (to[1] - plazaC[1]) * out[1];
+    return u > Math.min(...plazaU) + 0.3 && u < Math.max(...plazaU) - 0.3;
+  };
   /** 平台、石階的高度（不在上面是 0） */
   const plazaFloor = (p: Pt): number => {
     if (inside(p, plazaRing)) return PLAZA_H;
@@ -2019,8 +2027,12 @@ export function openPark3D(o: Park3DOptions): () => void {
   const stick = { x: 0, y: 0, id: -1 };
   let dirty = true;
   let shadowAt: Pt = [Infinity, Infinity];
-  function updateCamera(): void {
-    camera.position.set(pos[0], floorAt(pos) + EYE, -pos[1]);
+  /** 腳下的高度（眼睛跟著慢慢變：跳下碑林、上下石階不會一下子跳） */
+  let eyeFloor = NaN;
+  function updateCamera(dt = 1): boolean {
+    const floor = floorAt(pos);
+    eyeFloor = Number.isFinite(eyeFloor) && Math.abs(floor - eyeFloor) > 0.005 ? eyeFloor + (floor - eyeFloor) * Math.min(1, dt * 9) : floor;
+    camera.position.set(pos[0], eyeFloor + EYE, -pos[1]);
     camera.rotation.set(pitch, -yaw, 0);
     // 現在站哪、面向哪（測試看得到）
     const [lat, lng] = ll(pos[0], pos[1]);
@@ -2034,6 +2046,7 @@ export function openPark3D(o: Park3DOptions): () => void {
       sun.target.updateMatrixWorld();
       renderer.shadowMap.needsUpdate = true;
     }
+    return eyeFloor !== floor;
   }
   function move(dt: number): boolean {
     let f = 0;
@@ -2063,8 +2076,9 @@ export function openPark3D(o: Park3DOptions): () => void {
     // 撞到了就沿著牆滑過去
     for (const step of [d, [d[0], 0] as Pt, [0, d[1]] as Pt]) {
       const next: Pt = [pos[0] + step[0], pos[1] + step[1]];
-      // 一下子高低差太多（平台的邊、不是石階的地方）上不去、下不來
-      if (canStand(next) && Math.abs(floorAt(next) - floorAt(pos)) < 0.3) {
+      // 一下子高低差太多（平台的邊、不是石階的地方）上不去、下不來；碑林左右兩邊可以直接跳下去
+      const dh = floorAt(next) - floorAt(pos);
+      if (canStand(next) && (Math.abs(dh) < 0.3 || (dh < 0 && plazaSideDrop(pos, next)))) {
         pos = next;
         break;
       }
@@ -2526,8 +2540,8 @@ export function openPark3D(o: Park3DOptions): () => void {
       remember();
     }
     if (!dirty) return;
-    dirty = false;
-    updateCamera();
+    // 眼睛的高度還在跟上：下一格再畫
+    dirty = updateCamera(dt);
     placeGrass();
     renderer.render(scene, camera);
   };
