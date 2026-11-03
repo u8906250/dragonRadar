@@ -6,7 +6,7 @@ import { bearingDeg, compassLabel, destination, formatKm, haversineKm, taiwanRad
 import { inShuangbei, SHUANGBEI_RINGS, shuangbeiRadiusKm } from './shuangbei';
 import { TAIWAN_RINGS } from './taiwan';
 import { LANDMARKS } from './landmarks';
-import { getModule, JOB_RISK_TEXT, JOB_SAFETY_TIPS, MEETUP_SAFETY_TIPS, MODULES, OFFER_SAFETY_TIPS, type ModuleDef, type ModuleId } from './modules';
+import { getModule, JOB_RISK_TEXT, JOB_SAFETY_TIPS, MEETUP_SAFETY_TIPS, MODULES, OFFER_SAFETY_TIPS, SEEK_SAFETY_TIPS, type ModuleDef, type ModuleId } from './modules';
 import { X_MAX_WEIGHT, xLength } from './xcount';
 import { shortAddress, splitPlace } from './place';
 import { crowdOf, MapView, pinPicker, type BaseMap, type PinPicker } from './map';
@@ -209,9 +209,9 @@ const categoryOf = (it: Item): Category => (it.ev.kind === 'job' ? 'job' : it.sp
 const LS_MODULE = 'dr.module';
 let mod: ModuleDef = getModule(new URLSearchParams(location.search).get('module') ?? lsGet(LS_MODULE));
 
-// ---- 職缺（狗狗陪伴）----
+// ---- 職缺（狗狗陪伴、找工作）----
 interface JobExtra {
-  /** hire 徵人；offer 可照顧（個人說可以幫忙照顧） */
+  /** hire 徵人；offer 可照顧（狗狗陪伴：個人說可以幫忙照顧）、求職（找工作：個人想找工作） */
   role?: 'hire' | 'offer';
   work_from?: string | null;
   work_to?: string | null;
@@ -224,6 +224,25 @@ interface JobExtra {
 }
 const jobOf = (ev: { extra?: Record<string, unknown> | null }): JobExtra => (ev.extra ?? {}) as JobExtra;
 const isOffer = (ev: { extra?: Record<string, unknown> | null }): boolean => jobOf(ev).role === 'offer';
+/** 職缺的說法照模組：狗狗陪伴是徵人、可照顧，找工作是徵人、求職 */
+interface JobWords {
+  offer: string;
+  hireType: string;
+  offerType: string;
+  offerPay: string;
+  offerPeriod: string;
+  offerNeeds: string;
+  offerEnded: string;
+  offerTipsTitle: string;
+  offerTips: string[];
+  /** 可照顧寫提供者（店家或個人）；求職是個人，不寫 */
+  offerWho: boolean;
+}
+const JOB_WORDS: Record<'dog' | 'work', JobWords> = {
+  dog: { offer: '可照顧', hireType: '徵人（找人照顧狗狗）', offerType: '可照顧（有人可以幫忙照顧狗狗）', offerPay: '費用', offerPeriod: '可照顧期間', offerNeeds: '條件', offerEnded: '已不提供', offerTipsTitle: '把狗狗交給別人前', offerTips: OFFER_SAFETY_TIPS, offerWho: true },
+  work: { offer: '求職', hireType: '徵人（短期、兼職、工讀）', offerType: '求職（想找短期、兼職、工讀）', offerPay: '希望薪資', offerPeriod: '可以工作的時間', offerNeeds: '想做的工作', offerEnded: '已找到工作', offerTipsTitle: '聯絡前', offerTips: SEEK_SAFETY_TIPS, offerWho: false },
+};
+const jobWords = (): JobWords => JOB_WORDS[mod.id === 'work' ? 'work' : 'dog'];
 
 // ---- 羽球臨打：招臨打（提供）照場次排，找臨打（需求）是刊登 ----
 interface SessionExtra {
@@ -309,11 +328,12 @@ function jobPeriod(j: JobExtra): string {
 }
 /** 有防詐提醒的職缺 */
 const jobRisky = (ev: { extra?: Record<string, unknown> | null }): boolean => (jobOf(ev).risks ?? []).some((r) => r !== 'no_employer');
-/** 職缺的防詐提醒：這則的可疑之處，加上每則都提醒的（可照顧的是給飼主的安全提醒） */
+/** 職缺的防詐提醒：這則的可疑之處，加上每則都提醒的（可照顧的是給飼主的安全提醒，求職的是聯絡前的提醒） */
 function fraudBoxHtml(ev: { extra?: Record<string, unknown> | null }): string {
   const risks = (jobOf(ev).risks ?? []).map((r) => JOB_RISK_TEXT[r]).filter(Boolean);
   const offer = isOffer(ev);
-  return `<div class="fraud-box"><b>⚠️ ${offer ? '把狗狗交給別人前' : '防詐提醒'}</b>${risks.length ? `<ul>${risks.map((r) => `<li class="risk">${esc(r)}</li>`).join('')}</ul>` : ''}<ul>${(offer ? OFFER_SAFETY_TIPS : JOB_SAFETY_TIPS).map((t) => `<li>${esc(t)}</li>`).join('')}</ul></div>`;
+  const w = jobWords();
+  return `<div class="fraud-box"><b>⚠️ ${offer ? w.offerTipsTitle : '防詐提醒'}</b>${risks.length ? `<ul>${risks.map((r) => `<li class="risk">${esc(r)}</li>`).join('')}</ul>` : ''}<ul>${(offer ? w.offerTips : JOB_SAFETY_TIPS).map((t) => `<li>${esc(t)}</li>`).join('')}</ul></div>`;
 }
 /**
  * 只看進行中：跟發放、活動、據點開關一起用，有打開的那幾類裡，只留現在就能去的
@@ -707,7 +727,7 @@ function timeLine(it: Item, now: number): string {
   if (fr === 'recommend') return `網友推薦${foodOf(it.ev).hours ? `・營業 ${foodOf(it.ev).hours}` : ''}`;
   if (it.ev.kind === 'job') {
     const period = jobPeriod(jobOf(it.ev));
-    return isOffer(it.ev) ? `可照顧 ${period === '沒寫工作期間' ? '時間可討論' : period}` : `工作 ${period}`;
+    return isOffer(it.ev) ? `${jobWords().offer} ${period === '沒寫工作期間' ? '時間可討論' : period}` : `工作 ${period}`;
   }
   if (it.spot) return spotLine(it, now);
   const { ev } = it;
@@ -2677,11 +2697,11 @@ function spotSchedule(it: Item): string {
 }
 
 /** 官方行程以官網為準；還沒開始的也不能回報 */
-/** 「回報已發完」的說法：活動「已結束」、徵人「已徵到」、可照顧「已不提供」 */
+/** 「回報已發完」的說法：活動「已結束」、徵人「已徵到」、可照顧「已不提供」、求職「已找到工作」 */
 const endedWord = (ev: EventOut): string =>
   ev.kind === 'food'
     ? ({ vendor: '已收攤', recommend: '已歇業', meetup: '已揪滿' }[foodRole(ev) ?? 'recommend'] ?? '已結束')
-    : ev.kind === 'session' ? (isSeek(ev) ? '已找到' : '已額滿') : ev.kind === 'job' ? (isOffer(ev) ? '已不提供' : '已徵到') : ev.kind === 'activity' ? '已結束' : '已發完';
+    : ev.kind === 'session' ? (isSeek(ev) ? '已找到' : '已額滿') : ev.kind === 'job' ? (isOffer(ev) ? jobWords().offerEnded : '已徵到') : ev.kind === 'activity' ? '已結束' : '已發完';
 
 /** 羽球臨打的詳細資料：招臨打寫時段、費用、程度、缺幾位、用球、球團；找臨打寫程度、可以打的時間、地區 */
 function sessionDetailHtml(it: Item, now: number): string {
@@ -2697,11 +2717,11 @@ function sessionDetailHtml(it: Item, now: number): string {
   return `<p>類型：${it.spot ? '招臨打・每週固定場' : '招臨打'}<br>時間：${esc(time)}<br>${line('費用', x.fee ?? ev.item)}${line('程度', x.level)}${line('缺幾位', x.slots)}${line('用球', x.shuttle)}${line('球團', x.team)}${line('報名方式', contact)}${where} · ${esc(timeLine(it, now))}</p>`;
 }
 
-/** 狗狗陪伴的摘要：「2 個徵人、1 個可照顧」 */
+/** 狗狗陪伴、找工作的摘要：「2 個徵人、1 個可照顧」「2 個徵人、1 個求職」 */
 function dogSummary(rows: Array<{ it?: Item }>): string {
   const offers = rows.filter((r) => r.it && isOffer(r.it.ev)).length;
   const hires = rows.length - offers;
-  return [hires ? `${hires} 個徵人` : '', offers ? `${offers} 個可照顧` : ''].filter(Boolean).join('、');
+  return [hires ? `${hires} 個徵人` : '', offers ? `${offers} 個${jobWords().offer}` : ''].filter(Boolean).join('、');
 }
 
 /** 職缺的詳細資料：薪資、工作期間、雇主、怎麼應徵、內容，加上防詐提醒 */
@@ -2709,9 +2729,10 @@ function jobDetailHtml(it: Item, now: number): string {
   const { ev } = it;
   const j = jobOf(ev);
   const offer = isOffer(ev);
+  const w = jobWords();
   const period = jobPeriod(j);
-  const who = offer ? `提供者：${j.employer ? esc(j.employer) : '個人'}<br>` : `雇主：${j.employer ? esc(j.employer) : '<span class="risk">沒寫</span>'}<br>`;
-  return `${fraudBoxHtml(ev)}<p>類型：${offer ? '可照顧（有人可以幫忙照顧狗狗）' : '徵人（找人照顧狗狗）'}<br>${j.pay ? `${offer ? '費用' : '薪資'}：${esc(j.pay)}<br>` : ''}${offer ? '可照顧期間' : '工作期間'}：${esc(offer && period === '沒寫工作期間' ? '時間可討論' : period)}<br>${who}${j.contact ? `${offer ? '聯絡方式' : '應徵方式'}：${esc(CONTACT_TEXT[j.contact] ?? j.contact)}<br>` : ''}${j.requirements ? `${offer ? '條件' : '內容'}：${esc(j.requirements)}<br>` : ''}地點：${esc(placeOf(ev))}${ev.approxArea ? `<br><span class="approx-note">約略位置：只知道在${esc(ev.approxArea)}</span>` : ''}<br>距離：${ev.approxArea ? '約 ' : ''}${formatKm(it.distanceKm)}，${compassLabel(it.bearing)}方${ev.endOpen ? '' : ` · 刊登到 ${dateFmt.format(new Date((ev.endAt - 1) * 1000))}`}${now ? '' : ''}</p>`;
+  const who = offer ? (w.offerWho ? `提供者：${j.employer ? esc(j.employer) : '個人'}<br>` : '') : `雇主：${j.employer ? esc(j.employer) : '<span class="risk">沒寫</span>'}<br>`;
+  return `${fraudBoxHtml(ev)}<p>類型：${offer ? w.offerType : w.hireType}<br>${j.pay ? `${offer ? w.offerPay : '薪資'}：${esc(j.pay)}<br>` : ''}${offer ? w.offerPeriod : '工作期間'}：${esc(offer && period === '沒寫工作期間' ? '時間可討論' : period)}<br>${who}${j.contact ? `${offer ? '聯絡方式' : '應徵方式'}：${esc(CONTACT_TEXT[j.contact] ?? j.contact)}<br>` : ''}${j.requirements ? `${offer ? w.offerNeeds : '內容'}：${esc(j.requirements)}<br>` : ''}地點：${esc(placeOf(ev))}${ev.approxArea ? `<br><span class="approx-note">約略位置：只知道在${esc(ev.approxArea)}</span>` : ''}<br>距離：${ev.approxArea ? '約 ' : ''}${formatKm(it.distanceKm)}，${compassLabel(it.bearing)}方${ev.endOpen ? '' : ` · 刊登到 ${dateFmt.format(new Date((ev.endAt - 1) * 1000))}`}${now ? '' : ''}</p>`;
 }
 
 function canReportEnded(ev: EventOut, now: number): boolean {
@@ -3924,7 +3945,7 @@ function placeLine(ev: EventOut): string {
 function kindLabel(ev: EventOut): string {
   if (ev.kind === 'session') return isSeek(ev) ? '找臨打' : '招臨打';
   if (ev.kind === 'food') return { vendor: '出攤', recommend: '推薦', meetup: '揪團' }[foodRole(ev) ?? 'recommend'] ?? '推薦';
-  return ev.kind === 'job' ? (isOffer(ev) ? '可照顧' : '徵人') : ev.kind === 'activity' ? (topicOf(ev) ?? '活動') : '發放';
+  return ev.kind === 'job' ? (isOffer(ev) ? jobWords().offer : '徵人') : ev.kind === 'activity' ? (topicOf(ev) ?? '活動') : '發放';
 }
 
 /**
@@ -4168,7 +4189,7 @@ function setReportBusy(busy: boolean, label = '判讀中…', trigger?: Element 
 
 /** 預覽上的時間：固定據點寫每天幾點、從哪天起排幾天；一般的寫哪天幾點到幾點 */
 function previewWhen(p: PreviewItem): string {
-  if (p.kind === 'job') return `${isOffer(p) ? '可照顧' : '工作'} ${jobPeriod(jobOf(p))}`;
+  if (p.kind === 'job') return `${isOffer(p) ? jobWords().offer : '工作'} ${jobPeriod(jobOf(p))}`;
   if (isSeek(p) || foodRole(p) === 'meetup') return seekWhen(p);
   if (foodRole(p) === 'recommend') return `網友推薦${foodOf(p).hours ? `・營業 ${foodOf(p).hours}` : ''}`;
   const day = (t: number): string => dateFmt.format(new Date(t * 1000));
@@ -4680,7 +4701,7 @@ function renderPreview(r: SubmitResult): void {
     <ul class="report-preview">${(r.routes ?? []).map(routePreviewHtml).join('')}${items
       .map(
         (p) => `<li>
-          <b>${p.kind === 'food' ? ({ vendor: '出攤', recommend: '推薦', meetup: '揪團' }[foodRole(p) ?? 'recommend'] ?? '推薦') : p.kind === 'session' ? (isSeek(p) ? '找臨打' : '招臨打') : p.kind === 'job' ? (isOffer(p) ? '可照顧' : '徵人') : p.kind === 'activity' ? esc(topicOf(p) ?? '活動') : '發放'}${p.spot ? (p.kind === 'session' ? '・每週固定場' : p.kind === 'food' ? '・每週固定擺攤' : '・固定據點') : ''}｜${esc(p.title)}</b>
+          <b>${p.kind === 'food' ? ({ vendor: '出攤', recommend: '推薦', meetup: '揪團' }[foodRole(p) ?? 'recommend'] ?? '推薦') : p.kind === 'session' ? (isSeek(p) ? '找臨打' : '招臨打') : p.kind === 'job' ? (isOffer(p) ? jobWords().offer : '徵人') : p.kind === 'activity' ? esc(topicOf(p) ?? '活動') : '發放'}${p.spot ? (p.kind === 'session' ? '・每週固定場' : p.kind === 'food' ? '・每週固定擺攤' : '・固定據點') : ''}｜${esc(p.title)}</b>
           ${p.kind === 'job' && (jobOf(p).risks ?? []).some((r) => r !== 'no_employer') ? `<small class="preview-warn">⚠️ ${esc((jobOf(p).risks ?? []).map((r) => JOB_RISK_TEXT[r]).filter(Boolean).join('；'))}</small>` : ''}
           ${p.item ? `<small>${esc(p.item)}</small>` : ''}
           ${tagsOf(p).length > 0 ? `<small>關鍵字：${tagsHtml(tagsOf(p))}</small>` : ''}

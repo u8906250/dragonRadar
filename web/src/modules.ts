@@ -2,7 +2,7 @@
  * 模組：同一套雷達、地圖、清單、回報，換不同主題的資料（跟伺服器的 worker/src/modules.ts 對應）。
  * 洋流有自己的官方航線、車掃、漂流瓶、地標、搜尋關鍵字；其他模組只有大家回報的貼文。
  */
-export type ModuleId = 'current' | 'dog' | 'badminton' | 'food';
+export type ModuleId = 'current' | 'dog' | 'badminton' | 'food' | 'work';
 
 export interface ModuleDef {
   id: ModuleId;
@@ -113,6 +113,27 @@ MODULES.push({
   helpPage: 'help-food.html',
 });
 
+MODULES.push({
+  id: 'work',
+  name: '找工作雷達',
+  short: '找工作',
+  tagline: '附近的短期、兼職、工讀，和想找這類工作的人（請注意安全）',
+  emoji: '💼',
+  current: false,
+  unit: '個刊登',
+  emptyText: '附近還沒有找工作的刊登',
+  searchPlaceholder: '搜尋地點、工作內容、時薪…',
+  reportIntro: '看到徵短期、兼職、工讀，或有人想找這類工作的 Threads 貼文？貼上連結，雷達會判讀工作內容、地點、期間、時段、薪資、怎麼應徵，標到地圖上。⚠️ 網路上常有假職缺，雷達會標出可疑的地方，但不保證是真的。',
+  reportTips: [
+    '收兩種：徵人（選舉、活動、展場、店家的工讀、兼職、臨時工）、求職（個人想找短期、兼職、工讀）。正職、人力銀行或派遣的職缺廣告、沒有薪水的志工招募不收。',
+    '貼文要寫出地點，最好有門牌或區；只寫到區或城市的會標成約略位置（例如「主要在大安區」）。',
+    '會顯示到工作期間最後一天；沒寫期間的顯示 30 天。原貼文刪除或改成「已徵到」「已找到」會自動下架。',
+  ],
+  notEventText: '這則看起來不是短期、兼職、工讀的徵人，也不是想找這類工作的貼文。要寫出在哪裡、做什麼，雷達才會收。',
+  noPlaceText: '看得出是找工作的刊登，但貼文沒寫地點（或查不到），所以還沒放上雷達。知道在哪裡的話，可以在下面補充地點再判讀一次。',
+  helpPage: 'help-work.html',
+});
+
 export const DEFAULT_MODULE: ModuleId = 'current';
 export const getModule = (id: string | null | undefined): ModuleDef => MODULES.find((m) => m.id === id) ?? (MODULES[0] as ModuleDef);
 
@@ -130,6 +151,14 @@ export const OFFER_SAFETY_TIPS = [
   '先說好照顧方式、時間、緊急時的處理和就醫，留下狗狗的病歷、晶片資料。',
   '不要預付費用或保證金；說是免費的，中途要求收費要特別小心。',
   '照顧期間請對方定時傳照片、影片回報；覺得不對勁就提早接回。',
+];
+
+/** 求職（找工作：個人想找工作）：聯絡前的安全提醒（看的人可能是要找人的，也可能是想找工作的） */
+export const SEEK_SAFETY_TIPS = [
+  '要找人：私訊說清楚單位名稱、工作內容、時薪、地點和時間。',
+  '想找工作：說要先付保證金、訓練費，或要你給提款卡、帳戶的都是詐騙。',
+  '第一次見面約在公開場所，告訴家人朋友去哪裡、跟誰。',
+  '不要在公開的留言寫電話、身分證字號、住址。',
 ];
 
 /** 揪團吃飯：跟網友吃飯前的安全提醒 */

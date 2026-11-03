@@ -103,8 +103,8 @@ describe('notListedWhy incomplete', () => {
 
 describe('reportModules', () => {
   it('opens every module by default or with "true"', () => {
-    expect(reportModules(undefined)).toEqual(['current', 'dog', 'badminton', 'food']);
-    expect(reportModules('true')).toEqual(['current', 'dog', 'badminton', 'food']);
+    expect(reportModules(undefined)).toEqual(['current', 'dog', 'badminton', 'food', 'work']);
+    expect(reportModules('true')).toEqual(['current', 'dog', 'badminton', 'food', 'work']);
   });
   it('locks everything with "false"', () => {
     expect(reportModules('false')).toEqual([]);

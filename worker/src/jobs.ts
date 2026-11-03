@@ -1,4 +1,5 @@
 /**
+ * 職缺的判讀：狗狗陪伴（JOB_SPEC）和找工作（WORK_SPEC）用同一套欄位（JobInfo）。
  * 狗狗陪伴模組：判讀兩種刊登：徵人（飼主、店家找人照顧、陪伴、遛狗）、可照顧（個人說可以幫忙照顧、寄宿、遛狗），
  * 抽出地點、期間、每天時段、薪資或費用、雇主、怎麼聯絡。
  * 這類徵才常有假職缺（只留表單、要加 LINE、要先付錢），判讀時順便標出風險，畫面上提醒。
@@ -83,7 +84,15 @@ export function normalizeSlot(v: unknown): string | null {
   return `${hm(m[1], m[2])}-${hm(m[3], m[4])}`;
 }
 
-export function normalizeJobs(raw: unknown): Extraction | null {
+/** 模型沒給標題時用的：徵人、可照顧（找工作是求職） */
+interface JobTitles {
+  hire: string;
+  offer: string;
+}
+const DOG_TITLES: JobTitles = { hire: '狗狗陪伴員', offer: '可幫忙照顧狗狗' };
+const WORK_TITLES: JobTitles = { hire: '工讀', offer: '找工作' };
+
+export function normalizeJobs(raw: unknown, titles: JobTitles = DOG_TITLES): Extraction | null {
   const obj = parseLoose(raw);
   if (!obj || typeof obj !== 'object' || Array.isArray(obj)) return null;
   const o = obj as Record<string, unknown>;
@@ -103,7 +112,7 @@ export function normalizeJobs(raw: unknown): Extraction | null {
     };
     return {
       kind: 'job',
-      title: str(j.title) ?? (str(j.role)?.toLowerCase() === 'offer' ? '可幫忙照顧狗狗' : '狗狗陪伴員'),
+      title: str(j.title) ?? (job.role === 'offer' ? titles.offer : titles.hire),
       item: job.pay,
       start_at: null,
       end_at: null,
@@ -119,7 +128,40 @@ export function normalizeJobs(raw: unknown): Extraction | null {
 }
 
 /** 狗狗陪伴的判讀 */
-export const JOB_SPEC: ExtractSpec = { system: JOB_PROMPT, schema: JOB_SCHEMA, normalize: normalizeJobs };
+export const JOB_SPEC: ExtractSpec = { system: JOB_PROMPT, schema: JOB_SCHEMA, normalize: (raw) => normalizeJobs(raw) };
+
+const WORK_PROMPT = `你是「找工作雷達」的資料抽取器。你會收到一則台灣 Threads 貼文，判斷它是不是下面兩種刊登之一，並抽出資訊：
+- hire（徵人）：在找短期、兼職、工讀、臨時工、計時人員的有薪工作（例如競選總部徵工讀生發文宣、活動或展場工作人員、店家或餐廳的兼職、臨時搬運、發傳單）。
+- offer（求職）：個人說自己想找短期、兼職、工讀、打工、臨時工作（例如「大學生想找週末打工，大安區附近」）。
+
+只輸出 JSON：
+{
+  "is_job": 是否是上面兩種刊登之一（布林值）,
+  "jobs": [ 每個工作地點一筆，最多 ${MAX_JOBS} 筆 ]
+}
+
+jobs 每筆的欄位：
+- role: "hire" 或 "offer"
+- title: 16 字以內的短標題，地點加工作，例如「大安區選舉工讀生」「信義區展場工讀」「中山區餐廳兼職」「大安區找週末打工」
+- place_text: 貼文原文中的工作地點（offer 是想工作的地區）
+- place_query: 給地圖搜尋用。有門牌就用門牌並補上縣市（例如「台北市大安區忠孝東路三段268號」）；只寫區就寫「台北市 大安區」（「依當日行程，主要在大安區」也是）；沒寫地點則 null
+- work_from: 工作期間第一天，YYYY-MM-DD；「11/20-11/30」的第一天是 11/20；相對日期以發文時間換算；沒寫則 null
+- work_to: 工作期間最後一天，YYYY-MM-DD；沒寫則 null
+- slots: 每天的工作時段，24 小時制，例如「早上 09:00-19:00」→ ["09:00-19:00"]；沒寫則 []
+- pay: 薪資原文，例如「時薪 200 元」「日薪 1500」；offer 是希望的薪資；沒寫則 null
+- employer: hire 填雇主、店家、公司、單位或團隊的名稱（例如「大安文山議員競選總部」）；offer 填 null；只寫「我們」「本店」沒寫名字則 null
+- contact: 怎麼應徵、聯絡：form（填表單、Google 表單）、line（加 LINE、LINE ID）、dm（私訊、留言）、phone（打電話）、email、other；沒寫則 null
+- requirements: 工作內容與條件的摘要（offer 是想做的工作、可以工作的時間），30 字以內，例如「發文宣，時段可彈性排班」；不要抄電話、身分證、地址、年齡等個人資料；沒寫則 null
+- confidence: 0 到 1 的信心分數
+
+規則：
+- 正職（全職、月薪的正式員工）、人力銀行或人力派遣的職缺彙整廣告、招生、課程、加盟、直銷、投資理財、沒有薪水的志工招募、心得分享，is_job 為 false，jobs 為空陣列。
+- 時段可以彈性排班、可以單次或多次配合的工讀也收；沒寫薪水也收（pay 為 null）。
+- offer 只寫到城市或區也可以：place_query 填最具體的地名。
+- 不要編造貼文裡沒有的資訊。`;
+
+/** 找工作的判讀（短期、兼職、工讀；徵人 hire、求職 offer） */
+export const WORK_SPEC: ExtractSpec = { system: WORK_PROMPT, schema: JOB_SCHEMA, normalize: (raw) => normalizeJobs(raw, WORK_TITLES) };
 
 /**
  * 防詐提醒：從判讀結果和貼文看出的可疑之處（畫面上列出來提醒，不擋）

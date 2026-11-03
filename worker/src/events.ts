@@ -1,10 +1,10 @@
 import type { Env } from './env';
 import { fetchThreadsProfile, profileCandidates, profileHintText, type ThreadsProfile } from './sources/profile';
-import { ACTIVITY_SPEC, applySupplementDate, reconcileRouteStops, closedWeekdays, slotWeekdays, dropBroughtItem, dropSelfPlace, extractFromPost, localizeTimes, missingActivityParts, openWeekdaysFromText, splitDropTimes, splitMultiDay, splitWeekdayWeekend, spotHoursFromText, startNowForDeadline, guessedMidnight, localToUnix, postTags, regionTimeZone, timeZoneOf, topicExtra, untilInText, weekdaysInText, type ActivityPart, type EventKind, type ExtractedEvent } from './extract';
+import { ACTIVITY_SPEC, applySupplementDate, reconcileRouteStops, closedWeekdays, slotWeekdays, dropBroughtItem, dropSelfPlace, extractFromPost, localizeTimes, missingActivityParts, openWeekdaysFromText, splitDropTimes, splitMultiDay, splitWeekdayWeekend, spotHoursFromText, startNowForDeadline, guessedMidnight, localToUnix, postTags, regionTimeZone, timeZoneOf, topicExtra, untilInText, weekdaysInText, type ActivityPart, type EventKind, type ExtractedEvent, type ExtractSpec } from './extract';
 import { cityOfHouse, geocodeAddress, parseTwAddress, type TwAddress } from './address';
 import { SESSION_SPEC } from './badminton';
 import { FOOD_SPEC } from './food';
-import { JOB_SPEC, jobRisks } from './jobs';
+import { JOB_SPEC, jobRisks, WORK_SPEC } from './jobs';
 import { DEFAULT_MODULE, moduleOf, type ModuleId } from './modules';
 import { adminArea, cityLevel, cityOfDistrict, cityOfRoad, countryOfPlace, geocode, geocodeFirst, geocodeStreet, geocodeWorld, isAreaOnly, placeCandidates, regionOfPlace, type GeoPoint } from './geocode';
 import { listActiveKeywords, type KeywordRow } from './keywords';
@@ -734,13 +734,18 @@ export interface PlanResult {
   note?: string | null;
 }
 
+/** 每個模組用哪一套判讀（洋流改版後只判斷活動） */
+export function moduleSpec(module: ModuleId): ExtractSpec {
+  return module === 'dog' ? JOB_SPEC : module === 'work' ? WORK_SPEC : module === 'badminton' ? SESSION_SPEC : module === 'food' ? FOOD_SPEC : ACTIVITY_SPEC;
+}
+
 async function planPostWith(env: Env, post: PostRow, now: number, profileHint: string | null): Promise<PlanResult> {
   const base = post.supplement ? `${post.text}\n\n【回報的人補充】${post.supplement}` : post.text;
   const text = profileHint ? `${base}\n\n【帳號簡介】${profileHint}` : base;
   const module = moduleOf(post.module);
   // 使用者貼連結回報的，主要模型說不是活動時再問備用模型（只多等一下，量不大）
   // 洋流改版後只判斷活動（不再分發放、固定據點）
-  const spec = module === 'dog' ? JOB_SPEC : module === 'badminton' ? SESSION_SPEC : module === 'food' ? FOOD_SPEC : ACTIVITY_SPEC;
+  const spec = moduleSpec(module);
   const { extraction, raw, garbled } = await extractFromPost(env, text, post.posted_at, now, { secondOpinion: post.source === 'link', spec });
   await env.DB.prepare('UPDATE posts SET processed_at = ?, extraction = ? WHERE id = ?').bind(now, raw, post.id).run();
 
@@ -748,7 +753,7 @@ async function planPostWith(env: Env, post: PostRow, now: number, profileHint: s
   if (!extraction) return { items: [], early: 'extraction_failed' };
   if (!extraction.is_event) return { items: [], early: 'not_event', note: extraction.reason ?? null };
   if (extraction.events.length === 0) return { items: [], early: 'no_events' };
-  if (module === 'dog') return { items: await planJobs(env, post, extraction.events, now), early: null };
+  if (module === 'dog' || module === 'work') return { items: await planJobs(env, post, extraction.events, now, JOB_DAYS[module]), early: null };
   if (module === 'current') {
     // 關鍵字（標籤）：貼文、補充寫到的常見詞、AI 抽的、hashtag，每一場都記一份（events.extra.tags）
     const tags = postTags(extraction.tags, base);
@@ -1668,17 +1673,17 @@ export async function takeDown(env: Env, eventId: number, scope: 'event' | 'post
 }
 
 /** 職缺沒寫工作期間時，在雷達上留幾天；有寫也最多留到發文後幾天（貼文最多存 30 天） */
-const JOB_DEFAULT_DAYS = 14;
-const JOB_MAX_DAYS = 30;
+/** 職缺沒寫工作期間時留幾天、最多留幾天：狗狗陪伴 14、30 天，找工作 30、60 天（使用者定的） */
+const JOB_DAYS: Record<'dog' | 'work', { default: number; max: number }> = { dog: { default: 14, max: 30 }, work: { default: 30, max: 60 } };
 
 /** 「2026-11-30」台北時間那天 00:00 */
 const taipeiDayOf = (d: string | null): number | null => (d && /^\d{4}-\d{2}-\d{2}$/.test(d) ? Date.parse(`${d}T00:00:00+08:00`) / 1000 : null);
 
 /**
- * 狗狗陪伴：每個工作地點一筆。從發文開始就算「徵才中」，到工作期間最後一天結束（沒寫就留 JOB_DEFAULT_DAYS 天），
+ * 狗狗陪伴、找工作：每個工作地點一筆。從發文開始就算「徵才中」，到工作期間最後一天結束（沒寫就留 days.default 天，最多 days.max 天），
  * 工作期間、每天時段、薪資、雇主、怎麼應徵、防詐提醒放在 extra
  */
-async function planJobs(env: Env, post: PostRow, jobs: ExtractedEvent[], now: number): Promise<PlanItem[]> {
+async function planJobs(env: Env, post: PostRow, jobs: ExtractedEvent[], now: number, days: { default: number; max: number }): Promise<PlanItem[]> {
   const items: PlanItem[] = [];
   const deadline = Date.now() + ADDRESS_BUDGET_MS;
   for (const [group, ex] of jobs.entries()) {
@@ -1689,7 +1694,7 @@ async function planJobs(env: Env, post: PostRow, jobs: ExtractedEvent[], now: nu
     const job = ex.job ?? { role: 'hire' as const, work_from: null, work_to: null, slots: [], pay: null, employer: null, contact: null, requirements: null };
     const start = Math.min(post.posted_at, now);
     const lastDay = taipeiDayOf(job.work_to) ?? taipeiDayOf(job.work_from);
-    const end = Math.min(lastDay !== null ? lastDay + DAY_SEC : post.posted_at + JOB_DEFAULT_DAYS * DAY_SEC, post.posted_at + JOB_MAX_DAYS * DAY_SEC);
+    const end = Math.min(lastDay !== null ? lastDay + DAY_SEC : post.posted_at + days.default * DAY_SEC, post.posted_at + days.max * DAY_SEC);
     if (end <= now) {
       items.push({ group, plan: null, reason: 'already_over', start, end });
       continue;

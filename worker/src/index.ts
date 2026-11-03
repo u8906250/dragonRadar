@@ -1,8 +1,8 @@
 import { getAccessToken, makeClient, saveAccessToken } from './client';
 import type { Env } from './env';
 import { fetchThreadsProfile } from './sources/profile';
-import { DEFAULT_DURATION_SEC, ENDED_WORDS, MAX_FUTURE_SEC, MIN_CONFIDENCE, SPOT_MAX_DAYS, extendOpenSpots, getEvent, getPost, ingestAll, ingestKeyword, clearEventSnapshots, listEvents, locatePlaceForEvent, processBacklog, processPost, relocateApprox, relocateRouteStops, planPost, reprocessPost, setManualTitle, storePost, updateLifecycle, type EventRow, type PostRow } from './events';
-import { ACTIVITY_SPEC, normalizeExtraction, runModel } from './extract';
+import { DEFAULT_DURATION_SEC, ENDED_WORDS, MAX_FUTURE_SEC, MIN_CONFIDENCE, SPOT_MAX_DAYS, extendOpenSpots, getEvent, getPost, ingestAll, ingestKeyword, clearEventSnapshots, listEvents, locatePlaceForEvent, moduleSpec, processBacklog, processPost, relocateApprox, relocateRouteStops, planPost, reprocessPost, setManualTitle, storePost, updateLifecycle, type EventRow, type PostRow } from './events';
+import { normalizeExtraction, runModel } from './extract';
 import { geocode } from './geocode';
 import { ingestNews, NEWS_FEEDS } from './sources/news';
 import { listRoutes, syncVoyage, VOYAGE_PAGE } from './sources/voyage';
@@ -13,9 +13,6 @@ import { fetchThreadsPost, resolveThreadsLink, shortcodeToUnix } from './sources
 import { claimCard, makeTransfer, myCards, purgeCards, redeemTransfer } from './cards';
 import { addParkMark, deleteParkMark, listParkMarks, listPublicParkMarks, parseParkMark, updateParkMark } from './parkmarks';
 import { adminLocate, applyFeedback, clearResolvedFeedback, deleteAdminSubscription, listFeedback, locateForFeedback, notifyAdmins, purgeFeedback, saveAdminSubscription, setFeedbackStatus, submitFeedback } from './feedback';
-import { SESSION_SPEC } from './badminton';
-import { FOOD_SPEC } from './food';
-import { JOB_SPEC } from './jobs';
 import { moduleOf } from './modules';
 import { PUSH_RADIUS_KM, PushError, b64urlEncode, deleteSubscription, encryptPayload, purgeSubscriptions, pushStarted, saveSubscription, sendPush, vapidKeys } from './push';
 import { assertEventReportsOpen, confirmLink, editLink, ENDED_REPORTS_NEEDED, locateForEdit, MAX_LINK_AGE_SEC, ReportError, REPORTS_LOCKED, ipHash, myReports, purgeReports, recheckLinks, rejectLink, reportEnded, reportModules, submitLink, supplementLink, withdrawReport } from './reports';
@@ -372,7 +369,7 @@ async function handleAdmin(req: Request, env: Env, ctx: ExecutionContext, path: 
     if (!body.text?.trim()) throw new HttpError(400, 'text is required');
     // module：用哪個模組的判讀（dog、badminton），沒給是洋流
     const mod = moduleOf(body.module);
-    const spec = mod === 'dog' ? JOB_SPEC : mod === 'badminton' ? SESSION_SPEC : mod === 'food' ? FOOD_SPEC : ACTIVITY_SPEC;
+    const spec = moduleSpec(mod);
     const postedAt = typeof body.posted_at === 'number' ? body.posted_at : parseIsoToUnix(body.posted_at) ?? now;
     const models = (body.models?.length ? body.models : [env.AI_MODEL, env.AI_MODEL_FALLBACK]).filter((m): m is string => !!m).slice(0, 6);
     const results = [];

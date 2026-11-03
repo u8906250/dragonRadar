@@ -97,3 +97,36 @@ describe('offers to look after dogs', () => {
     expect(job && jobRisks(job, '照顧前要先匯保證金')).toEqual(['money']);
   });
 });
+
+import { WORK_SPEC } from '../src/jobs';
+import { moduleSpec } from '../src/events';
+import { reportModules } from '../src/reports';
+
+describe('找工作 (work module)', () => {
+  it('is its own module with its own prompt: short-term and part-time jobs, not full-time', () => {
+    expect(moduleOf('work')).toBe('work');
+    expect(moduleSpec('work')).toBe(WORK_SPEC);
+    expect(WORK_SPEC.system).toContain('找工作雷達');
+    expect(WORK_SPEC.system).toMatch(/正職.*is_job 為 false/);
+    expect(reportModules('current,work')).toEqual(['current', 'work']);
+  });
+  it('reads a campaign office hiring part-timers to hand out flyers (no pay, area only, DM)', () => {
+    const r = WORK_SPEC.normalize({
+      is_job: true,
+      jobs: [{ role: 'hire', title: '大安區選舉工讀生', place_text: '依當日行程而有所不同（主要在大安區）', place_query: '台北市 大安區', work_from: null, work_to: null, slots: ['09:00-19:00'], pay: null, employer: '大安文山議員競選總部', contact: 'dm', requirements: '發文宣，時段可彈性排班', confidence: 0.9 }],
+    });
+    expect(r?.is_event).toBe(true);
+    expect(r?.events[0]).toMatchObject({ kind: 'job', title: '大安區選舉工讀生', item: null, place_query: '台北市 大安區' });
+    expect(r?.events[0].job).toMatchObject({ role: 'hire', slots: ['09:00-19:00'], pay: null, employer: '大安文山議員競選總部', contact: 'dm' });
+    // 有寫單位、私訊應徵：不標可疑
+    expect(jobRisks(r!.events[0].job!, '有興趣歡迎直接私訊我')).toEqual([]);
+  });
+  it('reads someone looking for a part-time job, and names untitled ones for this module', () => {
+    const r = WORK_SPEC.normalize({ is_job: true, jobs: [{ role: 'offer', title: '', place_text: '大安區', place_query: '台北市 大安區', work_from: null, work_to: null, slots: [], pay: null, employer: null, contact: 'dm', requirements: '週末打工', confidence: 0.8 }] });
+    expect(r?.events[0]).toMatchObject({ title: '找工作' });
+    expect(r?.events[0].job?.role).toBe('offer');
+    expect(WORK_SPEC.normalize({ is_job: true, jobs: [{ role: 'hire', place_text: 'x', confidence: 0.8 }] })?.events[0].title).toBe('工讀');
+    // 狗狗陪伴照舊
+    expect(normalizeJobs({ is_job: true, jobs: [{ role: 'offer', place_text: 'x', confidence: 0.8 }] })?.events[0].title).toBe('可幫忙照顧狗狗');
+  });
+});
