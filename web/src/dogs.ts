@@ -344,7 +344,10 @@ export class Dog {
     const deg = wrap(this.bearing(at, dir) - b0);
     if (Math.abs(deg) < SPIN_MIN) return { to: at };
     const r = PIVOT * this.look.size;
-    return { to: this.offset(this.offset(at, b0, -r), b0 + deg, r), turn: [begin, SPIN_MS + Math.abs(deg) * SPIN_PER_DEG] };
+    const to = this.offset(this.offset(at, b0, -r), b0 + deg, r);
+    // 轉完往前挪的那一點不能走（路燈、樹旁邊剛好在步道邊上）：原地轉，不挪（挪出去會卡在那裡走不出來）
+    const ok = !this.yard.canWalk || this.yard.canWalk(to, to) || !this.yard.canWalk(at, at);
+    return { to: ok ? to : at, turn: [begin, SPIN_MS + Math.abs(deg) * SPIN_PER_DEG] };
   }
 
   /** 這一段的尾巴（照個性）：跑步、伸懶腰時翹著；聞的時候一半垂下來，走路、站著有時候垂下來，坐著、趴著多半垂在後面 */
@@ -416,8 +419,9 @@ export class Dog {
       else return stay(how);
     }
     if (!walkOn && rand() < (moving ? N.stop : N.again)) {
-      // 照權重抽停下來做什麼（晚上比較常睡覺）
-      const ways = Object.entries({ ...N.stays, sleep: night ? N.sleep.night : N.sleep.day }) as Array<[DogDo, number]>;
+      // 照權重抽停下來做什麼（晚上比較常睡覺）；剛坐完、趴完站起來的要不要伸懶腰上面已經決定了（stretchAfter），這裡不再抽伸懶腰
+      const rested = s.do === 'sit' || s.do === 'lie';
+      const ways = (Object.entries({ ...N.stays, sleep: night ? N.sleep.night : N.sleep.day }) as Array<[DogDo, number]>).filter(([k]) => !(rested && k === 'stretch'));
       let r = rand() * ways.reduce((a, [, w]) => a + w, 0);
       return stay((ways.find(([, w]) => (r -= w) < 0) ?? ways[ways.length - 1])[0]);
     }
@@ -451,9 +455,10 @@ export class Dog {
     // 在草皮裡走：直直走過去要走得到（不穿過建築、廣場）
     let best: { to: Pt; m: number } | null = null;
     let detour: Pt | null = null;
+    // 抽不到（例如樹冠底下少停，這次沒抽到空地）就再抽，不要整段放棄停在原地
     for (let i = 0; i < 12; i++) {
       const to = this.yard.within(s.ring, rand, at);
-      if (!to) break;
+      if (!to) continue;
       if (this.yard.canWalk && !this.yard.canWalk(at, to)) {
         detour ??= to;
         continue;
@@ -469,7 +474,11 @@ export class Dog {
       // 不在草皮上直直走不到（例如走到一半被點了坐在步道上）：照步道走回草皮
       const path = detour && this.yard.route ? this.yard.route(at, detour) : null;
       if (path) return this.legs('walk', at, path, start, dir0, s.ring);
-      return { do: 'sniff', from: at, to: at, start, ms: 2500, dir0, dir: dir0, ring: s.ring };
+      // 這一塊找不到走得過去的地方：照步道走到附近另一塊
+      const o = this.yard.elsewhere(s.ring, at, rand);
+      if (o) return this.legs('walk', at, o.path, start, dir0, o.ring, { cross: true });
+      // 停一下再找：會在原地聞的狗聞一聞，不在空地上聞的（小法）站一下
+      return { do: N.stays.sniff ? 'sniff' : 'stand', from: at, to: at, start, ms: 2500, dir0, dir: dir0, ring: s.ring };
     }
     // 走太遠的只走一段（走到一半停下來聞）
     const to: Pt = best.m > hi ? [at[0] + ((best.to[0] - at[0]) * hi) / best.m, at[1] + ((best.to[1] - at[1]) * hi) / best.m] : best.to;

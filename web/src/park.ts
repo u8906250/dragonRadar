@@ -295,6 +295,8 @@ export function parkAreas(): ParkArea[] {
  * 接在一起的步道連起來，最短的走法，再把看得到的點之間拉直）。算的時候換成公園附近的公尺（往東、往北）
  */
 const PATH_W = 1.2;
+/** 狗站在走不到的地方（步道外面一點點）時，這麼近的可以直接走回來 */
+const UNSTICK_M = 1;
 const BRIDGE_WALK_M = 0.7;
 /** 碑林的銅像（台座 2 公尺寬）旁邊多近走不過去 */
 const STATUE_BLOCK_M = 1.3;
@@ -517,10 +519,20 @@ export function parkYard(o: { avoid?: Pt[][]; rare?: Pt[][]; fav?: { rings: Pt[]
     if (inBox(p, w.plaza.box) && inRingM(p, w.plaza.ring)) return Math.hypot(p[0] - w.statue[0], p[1] - w.statue[1]) >= STATUE_BLOCK_M;
     return nearby(w.grid, p, PATH_W).some((i) => segDist(p, ...w.segs[i]) <= PATH_W);
   };
-  /** 從 a 直直走到 b 一路都走得到（每 0.5 公尺看一次，公尺座標） */
+  /**
+   * 從 a 直直走到 b 一路都走得到（每 0.5 公尺看一次，公尺座標）。
+   * a 自己走不到（例如以前轉身挪到步道外面一點點、存在瀏覽器裡）：離 a UNSTICK_M 內的那一段不管，讓狗走回來，不會卡在原地一直停
+   */
   const lineM = (a: Pt, b: Pt): boolean => {
-    const n = Math.max(1, Math.ceil(Math.hypot(b[0] - a[0], b[1] - a[1]) / 0.5));
-    for (let i = 0; i <= n; i++) if (!okM([a[0] + ((b[0] - a[0]) * i) / n, a[1] + ((b[1] - a[1]) * i) / n])) return false;
+    const d = Math.hypot(b[0] - a[0], b[1] - a[1]);
+    // 同一點：這一點本身走不走得到（轉身挪過去的地方用這個檢查）
+    if (d === 0) return okM(a);
+    const n = Math.max(1, Math.ceil(d / 0.5));
+    const free = okM(a) ? 0 : UNSTICK_M;
+    for (let i = 0; i <= n; i++) {
+      if ((d * i) / n <= free) continue;
+      if (!okM([a[0] + ((b[0] - a[0]) * i) / n, a[1] + ((b[1] - a[1]) * i) / n])) return false;
+    }
     return true;
   };
   /** 路網上這隻狗不去的點 */
@@ -818,14 +830,18 @@ export const XIAOFA_FAV_WEIGHT = 40;
 
 /**
  * 小法的個性（使用者說的）：不邊走邊聞，而是走到一個地方——路燈、長椅、垃圾桶、石碑（3D 國館標好的）、樹下——停下來聞，聞完就走：
- * 走的時候約六成走去附近的（SNIFF_NEAR_M 內，照步道走），每次聞久一點（3～7 秒）；
- * 停下來做什麼、睡覺、喝水、跑步、換草皮跟一般的狗一樣
+ * 走的時候約六成走去附近的（SNIFF_NEAR_M 內，照步道走），每次聞久一點（6～12 秒）；
+ * 不在空地上停下來聞（不要一直聞一下、抬頭、又聞一下）：一般的狗走完一半停下來是聞，小法改成接著走（stop 減半），
+ * 所以停下來站著、發呆、坐、趴、睡覺、伸懶腰的機會跟一般的狗一樣，多走的多半走去下一個路燈、樹下；
+ * 喝水、跑步、換草皮跟一般的狗一樣
  */
 export const XIAOFA_NATURE: DogNature = {
   ...NATURE,
   nose: 0,
   spot: 0.65,
-  last: { ...NATURE.last, sniff: [3000, 7000] },
+  stop: NATURE.stop * (1 - (NATURE.stays.sniff ?? 0) / Object.values(NATURE.stays).reduce((a, w) => a + w, 0)),
+  stays: { ...NATURE.stays, sniff: 0 },
+  last: { ...NATURE.last, sniff: [6000, 12000] },
 };
 
 /** 公園裡的狗：小法（使用者的馬爾濟斯；不去公園最右上那一區、不太會去國父紀念館後面；喜歡走到路燈、樹下停下來聞） */

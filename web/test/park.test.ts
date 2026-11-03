@@ -325,7 +325,11 @@ describe('地球的雷達上的中山公園（跟汪星共用一份）', () => {
     expect(XIAOFA_NATURE.nose).toBe(0);
     expect(XIAOFA_NATURE.spot).toBeGreaterThan(0.5);
     expect(NATURE.spot).toBe(0);
-    for (const k of ['speed', 'reach', 'stop', 'again', 'stays', 'run', 'cross', 'crossRun', 'drink', 'afterRun', 'glance', 'sleep', 'night', 'nap'] as const) expect(XIAOFA_NATURE[k]).toEqual(NATURE[k]);
+    for (const k of ['speed', 'reach', 'again', 'run', 'cross', 'crossRun', 'drink', 'afterRun', 'glance', 'sleep', 'night', 'nap'] as const) expect(XIAOFA_NATURE[k]).toEqual(NATURE[k]);
+    // 不在空地上停下來聞：一般的狗停下來聞的那一半改成接著走，其他停下來做的事比例不變
+    expect(XIAOFA_NATURE.stays.sniff).toBe(0);
+    for (const k of ['stand', 'idle', 'sit', 'lie', 'stretch'] as const) expect(XIAOFA_NATURE.stays[k]).toBe(NATURE.stays[k]);
+    expect(XIAOFA_NATURE.stop).toBeCloseTo(NATURE.stop / 2, 6);
     // 中午走三小時
     const rand = seeded(5);
     const dog = new Dog({ id: 'sniff-spots', name: '測試', look: MALTESE, yard: PARK_DOGS[0].yard, nature: XIAOFA_NATURE, hour: noon });
@@ -339,7 +343,7 @@ describe('地球的雷達上的中山公園（跟汪星共用一份）', () => {
     const m = (a: [number, number], b: [number, number]): number => dog.yard.metres(a, b);
     // 不邊走邊聞
     expect(segs.some((x) => x.nose)).toBe(false);
-    // 走到樹旁邊（樹幹 0.1～0.4 公尺粗，站在離樹幹 0.32 公尺）、轉向它停下來聞，每次 3～7 秒
+    // 走到樹旁邊（樹幹 0.1～0.4 公尺粗，站在離樹幹 0.32 公尺）、轉向它停下來聞，每次 6～12 秒（聞久一點）
     const spots = segs.map((x, i) => [x, i] as const).filter(([x]) => x.do === 'sniff' && x.goal === 'sniff');
     expect(spots.length).toBeGreaterThan(20);
     const trees = ZHONGSHAN_PARK.trees.map(([lat, lng]): [number, number] => [lat, lng]);
@@ -347,7 +351,7 @@ describe('地球的雷達上的中山公園（跟汪星共用一份）', () => {
       expect(trees.some((t) => m(t, x.face!) < 0.01)).toBe(true);
       expect(m(x.from, x.face!)).toBeGreaterThan(0.4);
       expect(m(x.from, x.face!)).toBeLessThan(0.75);
-      expect(x.ms).toBeGreaterThanOrEqual(3000);
+      expect(x.ms).toBeGreaterThanOrEqual(6000);
       // 前一段是走過去的
       expect(segs[i - 1]).toMatchObject({ goal: 'sniff', face: x.face });
       expect(['walk', 'trot', 'run']).toContain(segs[i - 1].do);
@@ -356,11 +360,43 @@ describe('地球的雷達上的中山公園（跟汪星共用一份）', () => {
     const after = spots.map(([, i]) => segs[i + 1]).filter(Boolean);
     expect(after.filter((x) => x.do === 'walk').length / after.length).toBeGreaterThan(0.9);
     for (let k = 1; k < spots.length; k++) expect(m(spots[k][0].face!, spots[k - 1][0].face!)).toBeGreaterThan(0.5);
+    // 只在路燈、樹…旁邊聞：不在空地上聞，不會聞一下、抬頭、又聞一下（兩段聞的中間一定走開過）
+    for (const [x, i] of segs.map((x, i) => [x, i] as const)) {
+      if (x.do !== 'sniff') continue;
+      expect(x.goal).toBe('sniff');
+      expect(segs[i - 1]?.do).not.toBe('sniff');
+    }
+    // 不會卡住：一直站在走得到的地方（轉身往前挪不會挪到步道外面），找不到地方走、原地站一下再找的很少（以前一成以上，會卡在原地一直聞）
+    for (const x of segs) expect(dog.yard.canWalk!(x.to, x.to)).toBe(true);
+    const stuck = segs.filter((x) => x.ms === 2500 && !x.goal && x.do === 'stand' && x.from === x.to);
+    expect(stuck.length).toBeLessThan(segs.length * 0.01);
     // 坐、趴、睡、站著、發呆大多還是在空地（樹下少停）
     const shaded = ([lat, lng]: [number, number]): boolean => ZHONGSHAN_PARK.trees.some(([y, x, r]) => Math.hypot((lng - x) * 111_320 * Math.cos((25.0394 * Math.PI) / 180), (lat - y) * 110_574) < r);
     const rests = segs.filter((x) => ['stand', 'idle', 'sit', 'lie', 'sleep'].includes(x.do));
     const restMs = rests.reduce((a, x) => a + x.ms, 0);
     expect(rests.filter((x) => shaded(x.to)).reduce((a, x) => a + x.ms, 0) / restMs).toBeLessThan(0.2);
+  }, 30_000);
+
+  it('小法 can step back from just outside the walkable ground (a position saved before the fix)', () => {
+    const rand = seeded(17);
+    const yard = PARK_DOGS[0].yard;
+    let found = 0;
+    for (let k = 0; k < 40 && found < 5; k++) {
+      const { at } = yard.anywhere(rand)!;
+      // 往東一點一點走，走到剛好走不到的地方（0.2～0.8 公尺外）
+      const step = 0.1 / (111_320 * Math.cos((25.0394 * Math.PI) / 180));
+      let p: [number, number] = at;
+      let last: [number, number] = at;
+      for (let i = 0; i < 400 && yard.canWalk!(p, p); i++) [last, p] = [p, [p[0], p[1] + step]];
+      if (yard.canWalk!(p, p)) continue;
+      const out: [number, number] = [p[0], p[1] + 3 * step];
+      if (yard.canWalk!(out, out)) continue;
+      found++;
+      // 站在外面：可以直直走回剛剛那一點，也走得到附近的地方
+      expect(yard.canWalk!(out, last)).toBe(true);
+      expect(Array.from({ length: 24 }, () => yard.within(yard.anywhere(rand)!.ring, rand, out)).length).toBeGreaterThan(0);
+    }
+    expect(found).toBeGreaterThan(0);
   }, 30_000);
 
   it('小法 also walks to the lamps and benches marked in 3D 國館 (in front of or behind a bench)', () => {
