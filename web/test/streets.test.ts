@@ -71,6 +71,10 @@ describe('STREET_TIERS', () => {
     expect(last).toMatchObject({ maxKm: Infinity, zoom: 7, taiwan: true });
     expect(last.classes).toMatchObject({ motorway: 'major', trunk: 'major', primary: 'minor' });
   });
+  it('draws tertiary roads within 8 km, like secondary ones (other cities tag their arterials tertiary)', () => {
+    const t = STREET_TIERS.find((t) => t.maxKm === 8)!;
+    expect(t.classes).toMatchObject({ secondary: 'minor', tertiary: 'minor' });
+  });
   it('fits the radar in at most 2 x 2 tiles', () => {
     // 圖磚寬度（緯度 25 度）要大於畫面直徑
     for (const t of STREET_TIERS.filter((t) => t.maxKm !== Infinity)) {

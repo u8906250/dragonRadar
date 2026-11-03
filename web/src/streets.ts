@@ -31,7 +31,8 @@ const HIGHWAYS: Classes = { motorway: 'major', trunk: 'major' };
  */
 export const STREET_TIERS: Array<{ maxKm: number; zoom: number; classes: Classes; taiwan?: boolean }> = [
   { maxKm: 2, zoom: 13, classes: { motorway: 'major', trunk: 'major', primary: 'major', secondary: 'major', tertiary: 'minor', minor: 'minor' } },
-  { maxKm: 8, zoom: 11, classes: { ...HIGHWAYS, primary: 'minor', secondary: 'minor' } },
+  // 市區的幹道台北多半標 secondary，其他縣市很多標 tertiary（新竹 8 km 內 secondary 約 90 km、tertiary 約 400 km）：都畫，各地一樣細
+  { maxKm: 8, zoom: 11, classes: { ...HIGHWAYS, primary: 'minor', secondary: 'minor', tertiary: 'minor' } },
   { maxKm: 16, zoom: 10, classes: { ...HIGHWAYS, primary: 'minor' } },
   { maxKm: 33, zoom: 9, classes: { ...HIGHWAYS, primary: 'minor' } },
   { maxKm: 65, zoom: 8, classes: { ...HIGHWAYS, primary: 'minor' } },
