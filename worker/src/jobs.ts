@@ -4,7 +4,7 @@
  * 抽出地點、期間、每天時段、薪資或費用、雇主、怎麼聯絡。
  * 這類徵才常有假職缺（只留表單、要加 LINE、要先付錢），判讀時順便標出風險，畫面上提醒。
  */
-import { conf, parseLoose, str, type ExtractedEvent, type Extraction, type ExtractSpec, type JobInfo } from './extract';
+import { aiTags, conf, parseLoose, str, TAGS_SCHEMA, type ExtractedEvent, type Extraction, type ExtractSpec, type JobInfo } from './extract';
 
 const MAX_JOBS = 6;
 
@@ -15,6 +15,7 @@ const JOB_PROMPT = `你是「狗狗陪伴雷達」的資料抽取器。你會收
 只輸出 JSON：
 {
   "is_job": 是否是上面兩種刊登之一（布林值）,
+  "tags": 這則貼文的關鍵字 3～6 個，每個 2～4 字、不含 #，讓人搜尋得到，例如「遛狗」「寄宿」「到府」「陪伴」「免費」：工作內容、照顧方式、特色；不要寫地名、日期、時間、人名，貼文裡的 hashtag 也可以用,
   "jobs": [ 每個地點一筆，最多 ${MAX_JOBS} 筆 ]
 }
 
@@ -41,6 +42,7 @@ const JOB_SCHEMA = {
   type: 'object',
   properties: {
     is_job: { type: 'boolean' },
+    tags: TAGS_SCHEMA,
     jobs: {
       type: 'array',
       maxItems: MAX_JOBS,
@@ -64,7 +66,7 @@ const JOB_SCHEMA = {
       },
     },
   },
-  required: ['is_job', 'jobs'],
+  required: ['is_job', 'tags', 'jobs'],
 };
 
 const CONTACTS = new Set(['form', 'line', 'dm', 'phone', 'email', 'other']);
@@ -124,7 +126,7 @@ export function normalizeJobs(raw: unknown, titles: JobTitles = DOG_TITLES): Ext
       job,
     };
   });
-  return { is_event: isJob, events: isJob ? events : [] };
+  return { is_event: isJob, events: isJob ? events : [], tags: aiTags(o, isJob) };
 }
 
 /** 狗狗陪伴的判讀 */
@@ -137,6 +139,7 @@ const WORK_PROMPT = `你是「找工作雷達」的資料抽取器。你會收�
 只輸出 JSON：
 {
   "is_job": 是否是上面兩種刊登之一（布林值）,
+  "tags": 這則貼文的關鍵字 3～6 個，每個 2～4 字、不含 #，讓人搜尋得到，例如「發文宣」「選舉」「工讀」「兼職」「時薪」：工作內容、行業、特色；不要寫地名、日期、時間、人名，貼文裡的 hashtag 也可以用,
   "jobs": [ 每個工作地點一筆，最多 ${MAX_JOBS} 筆 ]
 }
 

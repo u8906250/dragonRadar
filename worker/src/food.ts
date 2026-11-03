@@ -5,7 +5,7 @@
  * - meetup 揪團（網友）：揪人一起吃飯；當成刊登，寫了約的時間就到那個時段結束
  * 店名、吃什麼、價位、營業時間、缺幾人、怎麼報名放在 extra。店家自己的優惠、限量、新開幕廣告不收。
  */
-import { conf, normalizeWeekdays, parseLoose, str, type ExtractedEvent, type Extraction, type ExtractSpec } from './extract';
+import { aiTags, conf, normalizeWeekdays, parseLoose, str, TAGS_SCHEMA, type ExtractedEvent, type Extraction, type ExtractSpec } from './extract';
 
 const MAX_FOOD = 6;
 
@@ -17,6 +17,7 @@ const FOOD_PROMPT = `你是「等一下吃什麼」雷達的資料抽取器。�
 只輸出 JSON：
 {
   "is_event": 是否是上面三種之一（布林值）,
+  "tags": 這則貼文的關鍵字 3～6 個，每個 2～4 字、不含 #，讓人搜尋得到，例如「餐車」「咖啡」「甜點」「便當」「素食」：吃什麼、特色；不要寫地名、日期、時間、人名，貼文裡的 hashtag 也可以用,
   "events": [ vendor 每個「地點 + 時段」一筆；recommend 每家店一筆；meetup 每則一筆；最多 ${MAX_FOOD} 筆 ]
 }
 
@@ -49,6 +50,7 @@ const FOOD_SCHEMA = {
   type: 'object',
   properties: {
     is_event: { type: 'boolean' },
+    tags: TAGS_SCHEMA,
     events: {
       type: 'array',
       maxItems: MAX_FOOD,
@@ -76,7 +78,7 @@ const FOOD_SCHEMA = {
       },
     },
   },
-  required: ['is_event', 'events'],
+  required: ['is_event', 'tags', 'events'],
 };
 
 const ROLES = new Set(['vendor', 'recommend', 'meetup']);
@@ -118,7 +120,7 @@ export function normalizeFood(raw: unknown): Extraction | null {
       },
     };
   });
-  return { is_event: isEvent, events: isEvent ? events : [] };
+  return { is_event: isEvent, events: isEvent ? events : [], tags: aiTags(o, isEvent) };
 }
 
 /** 等一下吃什麼的判讀 */

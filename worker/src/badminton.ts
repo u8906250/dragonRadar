@@ -5,7 +5,7 @@
  * - seek 找臨打（需求）：球友想找地方打，抽出程度、可以打的時間、地區、怎麼聯絡；當成刊登（events.ts 的 planPostings）
  * 臨打自己的欄位放在 extra。
  */
-import { conf, normalizeWeekdays, parseLoose, str, type ExtractedEvent, type Extraction, type ExtractSpec } from './extract';
+import { aiTags, conf, normalizeWeekdays, parseLoose, str, TAGS_SCHEMA, type ExtractedEvent, type Extraction, type ExtractSpec } from './extract';
 
 const MAX_SESSIONS = 6;
 
@@ -16,6 +16,7 @@ const SESSION_PROMPT = `你是「羽球臨打雷達」的資料抽取器。你�
 只輸出 JSON：
 {
   "is_event": 是否是上面兩種之一（布林值）,
+  "tags": 這則貼文的關鍵字 3～6 個，每個 2～4 字、不含 #，讓人搜尋得到，例如「臨打」「新手」「雙打」「週末」：程度、打法、特色；不要寫地名、日期、時間、人名，貼文裡的 hashtag 也可以用,
   "events": [ offer 每個「球館 + 時段」一筆；seek 每則一筆；最多 ${MAX_SESSIONS} 筆 ]
 }
 
@@ -51,6 +52,7 @@ const SESSION_SCHEMA = {
   type: 'object',
   properties: {
     is_event: { type: 'boolean' },
+    tags: TAGS_SCHEMA,
     events: {
       type: 'array',
       maxItems: MAX_SESSIONS,
@@ -79,7 +81,7 @@ const SESSION_SCHEMA = {
       },
     },
   },
-  required: ['is_event', 'events'],
+  required: ['is_event', 'tags', 'events'],
 };
 
 const CONTACTS = new Set(['form', 'line', 'dm', 'phone', 'email', 'other']);
@@ -119,7 +121,7 @@ export function normalizeSessions(raw: unknown): Extraction | null {
       },
     };
   });
-  return { is_event: isEvent, events: isEvent ? events : [] };
+  return { is_event: isEvent, events: isEvent ? events : [], tags: aiTags(o, isEvent) };
 }
 
 /** 羽球臨打的判讀 */

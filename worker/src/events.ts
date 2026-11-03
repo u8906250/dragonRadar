@@ -1,6 +1,6 @@
 import type { Env } from './env';
 import { fetchThreadsProfile, profileCandidates, profileHintText, type ThreadsProfile } from './sources/profile';
-import { ACTIVITY_SPEC, applySupplementDate, reconcileRouteStops, closedWeekdays, slotWeekdays, dropBroughtItem, dropSelfPlace, extractFromPost, localizeTimes, missingActivityParts, openWeekdaysFromText, splitDropTimes, splitMultiDay, splitWeekdayWeekend, spotHoursFromText, startNowForDeadline, guessedMidnight, localToUnix, postTags, regionTimeZone, timeZoneOf, topicExtra, untilInText, weekdaysInText, type ActivityPart, type EventKind, type ExtractedEvent, type ExtractSpec } from './extract';
+import { ACTIVITY_SPEC, applySupplementDate, reconcileRouteStops, closedWeekdays, slotWeekdays, dropBroughtItem, dropSelfPlace, extractFromPost, localizeTimes, missingActivityParts, openWeekdaysFromText, splitDropTimes, splitMultiDay, splitWeekdayWeekend, spotHoursFromText, startNowForDeadline, guessedMidnight, localToUnix, MODULE_TAGS, postTags, regionTimeZone, timeZoneOf, topicExtra, untilInText, weekdaysInText, type ActivityPart, type EventKind, type ExtractedEvent, type ExtractSpec } from './extract';
 import { cityOfHouse, geocodeAddress, parseTwAddress, type TwAddress } from './address';
 import { SESSION_SPEC } from './badminton';
 import { FOOD_SPEC } from './food';
@@ -753,11 +753,11 @@ async function planPostWith(env: Env, post: PostRow, now: number, profileHint: s
   if (!extraction) return { items: [], early: 'extraction_failed' };
   if (!extraction.is_event) return { items: [], early: 'not_event', note: extraction.reason ?? null };
   if (extraction.events.length === 0) return { items: [], early: 'no_events' };
+  // 關鍵字（標籤）：貼文、補充寫到的常見詞（每個雷達自己的 MODULE_TAGS）、AI 抽的、hashtag，每一場都記一份（events.extra.tags）
+  const tags = postTags(extraction.tags, base, MODULE_TAGS[module]);
+  if (tags.length > 0) for (const e of extraction.events) e.extra = { ...(e.extra ?? {}), tags };
   if (module === 'dog' || module === 'work') return { items: await planJobs(env, post, extraction.events, now, JOB_DAYS[module]), early: null };
   if (module === 'current') {
-    // 關鍵字（標籤）：貼文、補充寫到的常見詞、AI 抽的、hashtag，每一場都記一份（events.extra.tags）
-    const tags = postTags(extraction.tags, base);
-    if (tags.length > 0) for (const e of extraction.events) e.extra = { ...(e.extra ?? {}), tags };
     return { items: await planActivities(env, post, extraction.events, text, now, extraction.route_title ?? null), early: null };
   }
   // 模型常把付款的 Line Pay 當成用 LINE 聯絡：貼文只有 Line Pay 的不算
@@ -1727,7 +1727,7 @@ async function planJobs(env: Env, post: PostRow, jobs: ExtractedEvent[], now: nu
         until_open: false,
         weekdays: null,
         tz: null,
-        extra: JSON.stringify({ ...job, risks: jobRisks(job, post.text) }),
+        extra: JSON.stringify({ ...job, risks: jobRisks(job, post.text), ...(Array.isArray(ex.extra?.tags) ? { tags: ex.extra.tags } : {}) }),
       },
     });
   }

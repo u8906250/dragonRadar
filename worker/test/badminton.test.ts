@@ -18,7 +18,7 @@ describe('normalizeSessions', () => {
     expect(r?.events[0]).toMatchObject({ spot: false, extra: { role: 'seek', available: '週末下午', level: '中階' } });
   });
   it('drops everything when it is not about drop-in games', () => {
-    expect(normalizeSessions('{"is_event":false,"events":[{"title":"賣球拍"}]}')).toEqual({ is_event: false, events: [] });
+    expect(normalizeSessions('{"is_event":false,"tags":["球拍"],"events":[{"title":"賣球拍"}]}')).toEqual({ is_event: false, events: [], tags: null });
   });
 });
 

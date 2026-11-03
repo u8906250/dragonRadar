@@ -38,7 +38,7 @@ describe('normalizeJobs', () => {
     expect(r?.events[0].job).toEqual({ role: 'hire', work_from: '2026-11-20', work_to: '2026-11-30', slots: ['09:00-12:00', '15:00-18:00'], pay: 'NT$300/時', employer: null, contact: 'form', requirements: '陪狗狗散步、玩耍' });
   });
   it('drops jobs when it is not a job post', () => {
-    expect(normalizeJobs('{"is_job":false,"jobs":[{"title":"x"}]}')).toEqual({ is_event: false, events: [] });
+    expect(normalizeJobs('{"is_job":false,"tags":["x"],"jobs":[{"title":"x"}]}')).toEqual({ is_event: false, events: [], tags: null });
   });
 });
 
@@ -128,5 +128,20 @@ describe('找工作 (work module)', () => {
     expect(WORK_SPEC.normalize({ is_job: true, jobs: [{ role: 'hire', place_text: 'x', confidence: 0.8 }] })?.events[0].title).toBe('工讀');
     // 狗狗陪伴照舊
     expect(normalizeJobs({ is_job: true, jobs: [{ role: 'offer', place_text: 'x', confidence: 0.8 }] })?.events[0].title).toBe('可幫忙照顧狗狗');
+  });
+});
+
+import { MODULE_TAGS, postTags } from '../src/extract';
+
+describe('tags on the other radars', () => {
+  it('reads the model tags for jobs, and uses each radar’s own common words', () => {
+    const r = WORK_SPEC.normalize({ is_job: true, tags: ['#發文宣', '選舉', '工讀生', '時段彈性'], jobs: [{ role: 'hire', title: '大安區選舉工讀生', place_text: '大安區', confidence: 0.9 }] });
+    expect(r?.tags).toEqual(['發文宣', '選舉', '工讀生', '時段彈性']);
+    // 找工作：內文寫到的常見詞（發送文宣算發文宣）在前，再來 AI 抽的；洋流的常見詞不會跑進來
+    const text = '競選總部徵工讀生，一起發送文宣，時段可彈性排班，有興趣歡迎私訊（不發放物品）';
+    expect(postTags(r?.tags, text, MODULE_TAGS.work)).toEqual(['工讀', '發文宣', '選舉', '工讀生', '時段彈性']);
+    expect(postTags([], text, MODULE_TAGS.work)).not.toContain('發放');
+    // 洋流照舊
+    expect(postTags([], '今天發放洋流飄帶')).toEqual(['洋流', '飄帶', '發放']);
   });
 });

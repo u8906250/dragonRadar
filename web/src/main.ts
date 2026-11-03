@@ -4015,7 +4015,8 @@ function tagsOf(ev: { extra?: Record<string, unknown> | null; post?: { text: str
   if (tags.length === 0 && ev.post) {
     const text = `${ev.post.text}\n${ev.post.supplement ?? ''}`;
     const body = text.replace(/\s+/g, '').replace(/漂帶/g, '飄帶');
-    tags = COMMON_TAGS.filter((t) => body.includes(t));
+    // 常見詞是洋流的；其他雷達的舊資料只照 hashtag
+    tags = mod.current ? COMMON_TAGS.filter((t) => body.includes(t)) : [];
     for (const m of text.matchAll(/#([\p{L}\p{N}]{2,10})/gu)) if (!tags.includes(m[1])) tags.push(m[1]);
   }
   tags = tags.slice(0, 8);
@@ -4036,13 +4037,9 @@ function searchTag(tag: string): void {
 let tagUse = new Map<string, number>();
 const commonRank = (t: string): number => (COMMON_TAGS.includes(t) ? COMMON_TAGS.indexOf(t) : COMMON_TAGS.length);
 const byTagUse = (a: string, b: string): number => (tagUse.get(b) ?? 0) - (tagUse.get(a) ?? 0) || commonRank(a) - commonRank(b);
-/** 搜尋框下面的關鍵字：目前活動裡實際用到的，用得多的在前面（最多 8 個）；都沒有就不顯示 */
+/** 搜尋框下面的關鍵字（每個雷達都有，例如找工作的 #發文宣）：目前抓到的刊登、活動裡實際用到的，用得多的在前面（最多 8 個）；都沒有就不顯示 */
 function renderSearchTags(items: Item[]): void {
   const box = $<HTMLElement>('#search-tags');
-  if (!mod.current) {
-    box.hidden = true;
-    return;
-  }
   const count = new Map<string, number>();
   for (const it of items) for (const t of tagsOf(it.ev)) count.set(t, (count.get(t) ?? 0) + 1);
   tagUse = count;

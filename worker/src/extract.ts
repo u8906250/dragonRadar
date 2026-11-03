@@ -312,7 +312,7 @@ export function cleanTopic(v: unknown): string | null {
  * 其他的照 AI 抽的、貼文裡的 hashtag
  */
 export const COMMON_TAGS = ['洋流', '飄帶', '彩虹', '徽章', '貼紙', '小物', '扇子', '手環', '旗子', '帽子', '車掃', '掃街', '開講', '市集', '遊行', '講座', '造勢', '應援', '同志', '淨灘', '志工', '發放'];
-const TAG_ALIASES: Record<string, string> = { 漂帶: '飄帶', 洋流飄帶: '飄帶', 洋流漂帶: '飄帶', 彩虹旗: '彩虹', 胸章: '徽章', 別針: '徽章', 旗幟: '旗子', 小旗子: '旗子', 團扇: '扇子', 貼貼: '貼紙', 掃街拜票: '掃街', 市政開講: '開講' };
+const TAG_ALIASES: Record<string, string> = { 發送文宣: '發文宣', 發宣傳單: '發傳單', 漂帶: '飄帶', 洋流飄帶: '飄帶', 洋流漂帶: '飄帶', 彩虹旗: '彩虹', 胸章: '徽章', 別針: '徽章', 旗幟: '旗子', 小旗子: '旗子', 團扇: '扇子', 貼貼: '貼紙', 掃街拜票: '掃街', 市政開講: '開講' };
 /** 一個關鍵字：拿掉 #、符號、空白，同義的換成一個寫法；太長（不是一個詞）、只有數字的不要 */
 export function cleanTag(v: unknown): string | null {
   const t = (str(v) ?? '').replace(/^#+/, '').replace(/[\s\p{P}\p{S}\p{Extended_Pictographic}\uFE0F]/gu, '');
@@ -329,16 +329,27 @@ export function cleanTags(v: unknown[]): string[] {
   }
   return out;
 }
-/** 一則貼文的關鍵字：常見的（內文寫到的）在前，再來 AI 抽的、貼文裡的 hashtag，不重複，最多 MAX_TAGS 個 */
-export function postTags(ai: unknown, text: string): string[] {
+/** 其他雷達的常見詞（內文寫到就標上）：找工作、狗狗陪伴、羽球臨打、吃什麼；洋流是 COMMON_TAGS */
+export const MODULE_TAGS: Record<string, string[]> = {
+  current: COMMON_TAGS,
+  work: ['工讀', '兼職', '臨時工', '發文宣', '發傳單', '選舉', '展場', '餐飲', '日薪', '時薪', '週末'],
+  dog: ['遛狗', '寄宿', '到府', '陪伴', '免費', '短期'],
+  badminton: ['臨打', '新手', '雙打', '平日', '週末'],
+  food: ['餐車', '市集', '咖啡', '甜點', '便當', '素食', '宵夜', '早午餐'],
+};
+/** 判讀結果裡的關鍵字（各雷達的 schema 共用） */
+export const TAGS_SCHEMA = { type: 'array', maxItems: 8, items: { type: 'string' } };
+export const aiTags = (o: Record<string, unknown>, ok: boolean): string[] | null => (ok && Array.isArray(o.tags) ? cleanTags(o.tags) : null);
+/** 一則貼文的關鍵字：常見的（內文寫到的，common 是這個雷達的常見詞）在前，再來 AI 抽的、貼文裡的 hashtag，不重複，最多 MAX_TAGS 個 */
+export function postTags(ai: unknown, text: string, common: string[] = COMMON_TAGS): string[] {
   const out: string[] = [];
   const add = (v: unknown): void => {
     const t = cleanTag(v);
     if (t && !out.includes(t) && out.length < MAX_TAGS) out.push(t);
   };
   const body = text.replace(/\s+/g, '');
-  for (const t of COMMON_TAGS) if (body.includes(t)) add(t);
-  for (const [alias, t] of Object.entries(TAG_ALIASES)) if (body.includes(alias)) add(t);
+  for (const t of common) if (body.includes(t)) add(t);
+  for (const [alias, t] of Object.entries(TAG_ALIASES)) if (common.includes(t) && body.includes(alias)) add(t);
   for (const v of Array.isArray(ai) ? ai : []) add(v);
   for (const m of text.matchAll(/#([^\s#＃,，。、！!？?]{2,10})/gu)) add(m[1]);
   return out;
