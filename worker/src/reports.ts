@@ -758,18 +758,22 @@ export interface MyReport {
  * 回報紀錄 30 天後刪除，更早的就認不出來了。
  */
 export async function myReports(env: Env, device: string): Promise<MyReport[]> {
+  // 先把這個裝置的回報照貼文合起來（同一則補充、修改會有好幾筆；idx_submissions_device_post 不用回表），每一則貼文只查一次 posts、events。
+  // CROSS JOIN、+p.source：一定從這個裝置的回報找貼文（照 source 的索引會把所有回報的貼文讀一遍）
   const { results: posts } = await env.DB.prepare(
-    `SELECT p.id, p.permalink, p.username, p.text, p.confirm_state, p.link_role, p.module, MAX(s.created_at) AS reported_at
-       FROM submissions s JOIN posts p ON p.id = s.post_id
-      WHERE s.device = ? AND p.source = 'link' AND p.confirm_state = 'confirmed'
+    `SELECT p.id, p.permalink, p.username, p.text, p.confirm_state, p.link_role, p.module, m.reported_at
+       FROM (SELECT post_id, MAX(created_at) AS reported_at FROM submissions WHERE device = ? GROUP BY post_id) m
+       CROSS JOIN posts p ON p.id = m.post_id
+      WHERE +p.source = 'link' AND p.confirm_state = 'confirmed'
         AND (p.link_role = 'related' OR EXISTS (SELECT 1 FROM events e WHERE e.post_id = p.id))
-      GROUP BY p.id ORDER BY reported_at DESC LIMIT 30`,
+      ORDER BY m.reported_at DESC LIMIT 30`,
   )
     .bind(device)
     .all<{ id: string; permalink: string | null; username: string | null; text: string; confirm_state: string | null; link_role: string | null; module: string; reported_at: number }>();
   if (posts.length === 0) return [];
   const { results: evs } = await env.DB.prepare(
-    `SELECT id, post_id, title FROM events WHERE status IN ('upcoming', 'active') AND post_id IN (${posts.map(() => '?').join(',')}) ORDER BY start_at`,
+    // +status：照 post_id 的索引找這幾則（用 status 的索引會把雷達上所有進行中、即將開始的都讀一遍）
+    `SELECT id, post_id, title FROM events WHERE +status IN ('upcoming', 'active') AND post_id IN (${posts.map(() => '?').join(',')}) ORDER BY start_at`,
   )
     .bind(...posts.map((p) => p.id))
     .all<{ id: number; post_id: string; title: string }>();

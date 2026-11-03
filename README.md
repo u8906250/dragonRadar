@@ -254,7 +254,7 @@ Cloudflare D1 偶爾回「D1_ERROR: internal error」這類暫時性錯誤。`sr
 | POST | `/api/reports/supplement` | 補充地點或時間後再判讀一次 `{ postId, token, note }`，回傳新的預覽 |
 | POST | `/api/reports/edit` | 洋流的活動：直接改每一場 `{ postId, token, items: [{ title, topic, tags, startAt, endAt, place, lat, lng }] }`（不問 AI，有標位置用標的），回傳新的預覽 |
 | POST | `/api/reports/reject` | 判讀錯了，不放 `{ postId, token, note? }` |
-| GET | `/api/reports/mine` | 我的回報（`x-device` 標頭）：30 天內用這個瀏覽器回報、有放上雷達（或附在據點）的貼文與狀態 |
+| GET | `/api/reports/mine` | 我的回報（`x-device` 標頭）：30 天內用這個瀏覽器回報、有放上雷達（或附在據點）的貼文與狀態。先把這個裝置的回報照貼文合起來（`idx_submissions_device_post`，不用回表），從回報找貼文（`CROSS JOIN`、`+p.source`，不照 source 的索引讀所有回報的貼文），雷達上的場次照 `post_id` 的索引找（`+status`，不讀雷達上所有進行中的）；v1.445 起本機 150 筆回報、雷達上 400 場時一次從 1,122 列降到 390 列 |
 | DELETE | `/api/reports/:postId` | 刪除自己的回報（`x-device` 要跟回報時一樣）：雷達上這則的事件都刪掉，`confirm_state = 'withdrawn'`；取代過的舊據點放回雷達 |
 | POST | `/api/events/:id/ended` | 回報已發完／已結束 |
 | POST | `/api/events/:id/feedback` | 回報問題 `{ kind: location \| time \| content \| not_event \| duplicate \| remove_stop \| other, note?, stop?, stopAt? }`（`x-device` 標頭；車掃的 `stop` 是那一站的標題、`stopAt` 預計經過時間，`remove_stop` 一定要有），推到管理者手機；同一個人同一則（同一站）同一種只算一次 |
