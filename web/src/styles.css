@@ -1210,15 +1210,15 @@ body.letters-open { overflow: hidden; }
 .tc-list { display: flex; flex-direction: column; align-items: center; gap: 18px; }
 .tc-slot { display: flex; flex-direction: column; align-items: center; gap: 10px; }
 .tc-slot.missing .tc-face { filter: saturate(0.6); }
-/* 道具欄（選單裡的「道具」，openItems）：一格一格排，之後道具多了往下排 */
+/* 道具欄（選單裡的「道具」，openItems）：像背包一格一格排（一排三格，多了往下排），跟卡片（金邊、米色底）分開：深色的格子、右下角有幾個、下面名字 */
 .tc-head [data-close] { margin-left: auto; }
 .tc-bag .tc-main { align-self: stretch; display: flex; flex-direction: column; gap: 14px; }
-.tc-items { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
-.tc-item { display: flex; flex-direction: column; align-items: center; gap: 4px; padding: 10px 10px 12px; border-radius: 14px; border: 3px solid #d9a441; background: linear-gradient(160deg, #fffaf0, #f4e6cb); color: #4a3826; text-align: center; }
-.tc-item img { display: block; width: 100%; aspect-ratio: 1; border-radius: 10px; object-fit: cover; object-position: 50% 55%; border: 2px solid #ead7b0; user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; }
-.tc-item-name { margin-top: 2px; font-size: 14px; font-weight: 800; line-height: 1.3; }
-.tc-item-about { font-size: 12px; line-height: 1.45; color: #6b5640; text-wrap: pretty; }
-.tc-item-count { font-size: 13px; font-weight: 800; color: #b5651d; white-space: nowrap; }
+.tc-items { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px 12px; }
+.tc-item { display: flex; flex-direction: column; align-items: center; gap: 6px; color: #f3eee4; text-align: center; }
+.tc-item-icon { position: relative; display: block; width: 100%; aspect-ratio: 1; border-radius: 14px; overflow: hidden; background: #2a3038; border: 2px solid rgba(243, 238, 228, 0.35); box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.35); }
+.tc-item-icon img { display: block; width: 100%; height: 100%; object-fit: cover; user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; }
+.tc-item-count { position: absolute; right: 5px; bottom: 5px; min-width: 22px; padding: 1px 7px; border-radius: 999px; background: rgba(18, 22, 28, 0.86); color: #fff; font-size: 13px; font-weight: 800; line-height: 1.5; }
+.tc-item-name { font-size: 13px; font-weight: 700; line-height: 1.3; }
 .tc-items-empty { margin: 24px 0; color: #f3eee4; font-size: 14px; text-align: center; opacity: 0.85; }
 /* 換手機（引繼碼）：卡冊下面，深色的底上用淺色的字 */
 .tc-move { align-self: stretch; display: flex; flex-direction: column; align-items: center; gap: 10px; color: #f3eee4; }

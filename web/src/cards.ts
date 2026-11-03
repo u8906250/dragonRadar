@@ -52,16 +52,15 @@ export const CARD_DEFS: CardDef[] = [
   },
 ];
 
-/** 道具（用法之後再設計） */
+/** 道具（用法之後再設計）：跟卡片分開，道具欄只寫名字、有幾個，不寫說明；圖在 public/items/ */
 export interface ItemDef {
   id: string;
   name: string;
   img: string;
   unit: string;
-  /** 道具欄裡寫在名字下面的說明 */
-  about: string;
 }
-export const ITEM_DEFS: ItemDef[] = [{ id: 'jerky', name: '古錐媽的肉乾', img: `${BASE}cards/jerky.webp`, unit: '包', about: '一包五條雞肉乾。又香又好吃，狗友一致好評。' }];
+/** 古錐媽的肉乾（No.002 卡）給的道具：袋子裝的五條雞肉乾 */
+export const ITEM_DEFS: ItemDef[] = [{ id: 'jerky', name: '五條雞肉乾', img: `${BASE}items/jerky.webp`, unit: '包' }];
 
 const LS_CARDS = 'dr.cards';
 const LS_ITEMS = 'dr.items';
@@ -335,13 +334,13 @@ function syncMine(el: HTMLElement, redraw: () => void): void {
   });
 }
 
-/** 道具欄（選單裡的「道具」）：有的道具一格一格排、寫說明和有幾個（用法之後再設計）；沒有寫「還沒有道具」 */
+/** 道具欄（選單裡的「道具」）：像遊戲的背包一格一格排（跟卡片長得不一樣），圖、右下角有幾個、下面名字（用法之後再設計）；沒有寫「還沒有道具」 */
 export function openItems(): void {
   const list = (): string => {
     const have = myItems().filter((x) => ITEM_DEFS.some((d) => d.id === x.item));
     const cells = have.map((x) => {
       const d = ITEM_DEFS.find((y) => y.id === x.item)!;
-      return `<li class="tc-item"><img src="${d.img}" alt="" draggable="false"><span class="tc-item-name">${esc(d.name)}</span><span class="tc-item-about">${esc(d.about)}</span><span class="tc-item-count">× ${x.count} ${esc(d.unit)}</span></li>`;
+      return `<li class="tc-item"><span class="tc-item-icon"><img src="${d.img}" alt="" draggable="false"><span class="tc-item-count" aria-label="${x.count} ${esc(d.unit)}">×${x.count}</span></span><span class="tc-item-name">${esc(d.name)}</span></li>`;
     });
     return `<div class="tc-head"><h2>道具</h2><button type="button" class="chip" data-close>關閉</button></div>
       ${cells.length ? `<ul class="tc-items">${cells.join('')}</ul>` : '<p class="tc-items-empty">還沒有道具</p>'}`;
