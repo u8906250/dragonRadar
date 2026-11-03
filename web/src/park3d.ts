@@ -121,7 +121,7 @@ const GRASS_MAX = 20000;
 const GRASS_TILE = 2;
 /**
  * 銅像廣場（碑林，Z.statuePlaza）：位置照正射影像，樣子照使用者給的照片看的、大小是估的——墊高的灰色石頭平台、東邊幾階石階下到人行道
- * （南邊一道不鏽鋼扶手、北邊一排圓圓的矮樹叢），花台是石頭邊框、種滿紅色粉紅色的花，西邊一道長長的黑色石牆（碑林），銅像坐在中間面向東邊的紀念館
+ * （南邊一道不鏽鋼扶手、兩邊各一排圓圓的矮樹叢：北邊照照片，南邊使用者說跟北邊一樣），花台是石頭邊框、種滿紅色粉紅色的花，西邊一道長長的黑色石牆（碑林），銅像坐在中間面向東邊的紀念館
  */
 const PLAZA_H = 0.7;
 const PLAZA_STEPS = 5;
@@ -1136,16 +1136,22 @@ export function openPark3D(o: Park3DOptions): () => void {
       post.position.set(at.x, at.y - 0.45, at.z);
     }
   }
-  // 北邊一排圓圓的矮樹叢（人行道上，台階旁邊到平台的角）
+  // 台階兩邊各一排圓圓的矮樹叢（人行道上，台階旁邊到平台的角）：北邊照照片，南邊使用者說要跟北邊一樣
   {
     const bushMat = mat(0x5f9a3c, { flatShading: true });
-    const north = plazaRing.reduce((b, p) => ((p[0] - plazaC[0]) * out[0] + (p[1] - plazaC[1]) * out[1] > 0 && (p[0] - stepB[0]) * along[0] + (p[1] - stepB[1]) * along[1] > 0 ? p : b), stepB);
-    const len = (north[0] - stepB[0]) * along[0] + (north[1] - stepB[1]) * along[1];
-    for (let t = 0.8; t < len - 0.4; t += 1.15) {
-      const b = add(new THREE.IcosahedronGeometry(0.58, 1), bushMat, true);
-      b.position.set(stepB[0] + along[0] * t + out[0] * 0.75, 0.45, -(stepB[1] + along[1] * t + out[1] * 0.75));
-      b.scale.set(1, 0.85, 1);
-      b.rotation.y = hash(Math.round(t * 10)) * 3;
+    const sides: Array<[Pt, Pt, number]> = [
+      [stepB, along, 0],
+      [stepA, [-along[0], -along[1]], 500],
+    ];
+    for (const [from, dir, seed] of sides) {
+      const corner = plazaRing.reduce((b, p) => ((p[0] - plazaC[0]) * out[0] + (p[1] - plazaC[1]) * out[1] > 0 && (p[0] - from[0]) * dir[0] + (p[1] - from[1]) * dir[1] > 0 ? p : b), from);
+      const len = (corner[0] - from[0]) * dir[0] + (corner[1] - from[1]) * dir[1];
+      for (let t = 0.8; t < len - 0.4; t += 1.15) {
+        const b = add(new THREE.IcosahedronGeometry(0.58, 1), bushMat, true);
+        b.position.set(from[0] + dir[0] * t + out[0] * 0.75, 0.45, -(from[1] + dir[1] * t + out[1] * 0.75));
+        b.scale.set(1, 0.85, 1);
+        b.rotation.y = hash(Math.round(t * 10) + seed) * 3;
+      }
     }
   }
   // 花台：石頭邊框、上面種滿紅色粉紅色的花（中間的方塊、四個角的 L 形）
