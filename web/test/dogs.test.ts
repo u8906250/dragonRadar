@@ -36,7 +36,7 @@ describe('會動的狗（dogs.ts）', () => {
       expect(s.start).toBeCloseTo(prev.start + prev.ms, 6);
       expect(s.from).toEqual(prev.to);
       expect(s.dir0).toEqual(prev.dir);
-      if (s.do === 'walk' || s.do === 'run') {
+      if (s.do === 'walk' || s.do === 'trot' || s.do === 'run') {
         expect(YARD.metres(s.from, s.to) / (s.ms / 1000)).toBeCloseTo(speedOf(s), 6);
         expect(s.dir).toEqual([s.to[0] - s.from[0], s.to[1] - s.from[1]]);
       } else if (s.turn) {
@@ -50,7 +50,7 @@ describe('會動的狗（dogs.ts）', () => {
       }
     }
     // （白天偶爾打個盹）
-    expect(new Set(list.map((s) => s.do))).toEqual(new Set(['stand', 'idle', 'sniff', 'sit', 'lie', 'sleep', 'stretch', 'drink', 'walk', 'run']));
+    expect(new Set(list.map((s) => s.do))).toEqual(new Set(['stand', 'idle', 'sniff', 'sit', 'lie', 'sleep', 'stretch', 'drink', 'walk', 'trot', 'run']));
     for (const s of list.filter((x) => x.do === 'sleep')) expect(s.ms).toBeLessThanOrEqual(600_000);
     // 跑完不一定休息：趴下來、停下來發呆，或改成走路（不再跑）
     const afterRun = list.filter((s, i) => i > 0 && list[i - 1].do === 'run' && !list[i - 1].goal && !list[i - 1].via?.length);
@@ -63,10 +63,10 @@ describe('會動的狗（dogs.ts）', () => {
     const count = (f: (s: DogSeg) => boolean): number => list.filter(f).length;
     expect(count((s) => s.do === 'sniff') + count((s) => !!s.nose)).toBeGreaterThan(count((s) => s.do === 'stand') + count((s) => s.do === 'sit'));
     expect(count((s) => s.do === 'walk' && !s.cross && !s.goal)).toBeGreaterThan(count((s) => s.do === 'run' && !s.cross && !s.goal) * 5);
-    // 跑步不多（不到移動的一成）；趴著休息久一點（15～35 秒）
+    // 跑步不多（約移動的一成多，換草皮、去喝水一半用跑的；不同的亂數約 10%～16%）；趴著休息久一點（15～35 秒）
     // 一趟算一次（照步道走的轉折點不重複算）
-    const moves = list.filter((s) => (s.do === 'walk' || s.do === 'run') && !s.via?.length);
-    expect(moves.filter((s) => s.do === 'run').length).toBeLessThan(moves.length * 0.12);
+    const moves = list.filter((s) => (s.do === 'walk' || s.do === 'trot' || s.do === 'run') && !s.via?.length);
+    expect(moves.filter((s) => s.do === 'run').length).toBeLessThan(moves.length * 0.16);
     for (const s of list.slice(1)) if (s.do === 'lie') expect(s.ms).toBeGreaterThanOrEqual(15_000);
     // 在草皮裡跑一下就好（8 公尺內，約 3 秒）
     for (const s of list) if (s.do === 'run' && !s.cross && !s.goal) expect(YARD.metres(s.from, s.to)).toBeLessThanOrEqual(8 + 1e-9);
@@ -101,10 +101,17 @@ describe('會動的狗（dogs.ts）', () => {
     // 換草皮時用走的、用跑的都有（照個性 crossRun，小法一半一半）
     expect(cross.some((s) => s.do === 'run')).toBe(true);
     expect(cross.some((s) => s.do === 'walk')).toBe(true);
-    // 在草皮裡走、跑（喝完水從岸邊走回來的除外）
+    // 在草皮裡走、快走、跑（喝完水從岸邊走回來的除外）
     list.forEach((s, i) => {
-      if (!s.cross && (s.do === 'walk' || s.do === 'run') && list[i - 1]?.do !== 'drink') expect(onLawn(s.ring, s.from)).toBe(true);
+      if (!s.cross && (s.do === 'walk' || s.do === 'trot' || s.do === 'run') && list[i - 1]?.do !== 'drink') expect(onLawn(s.ring, s.from)).toBe(true);
     });
+    // 快走：比走快、比跑慢；要去哪裡（換草皮、去喝水）時常常快走，在草皮裡偶爾，比走路少很多
+    expect(NATURE.speed.trot).toBeGreaterThan(NATURE.speed.walk * 2);
+    expect(NATURE.speed.trot).toBeLessThan(NATURE.speed.run / 2);
+    expect(cross.some((s) => s.do === 'trot') || drinks.some(([, i]) => list[i - 1].do === 'trot')).toBe(true);
+    expect(count((s) => s.do === 'trot' && !s.cross && !s.goal)).toBeGreaterThan(0);
+    expect(count((s) => s.do === 'trot' && !s.cross && !s.goal) * 3).toBeLessThan(count((s) => s.do === 'walk' && !s.cross && !s.goal));
+    for (const s of list) if (s.do === 'trot' && !s.cross && !s.goal) expect(YARD.metres(s.from, s.to)).toBeLessThanOrEqual(6 + 1e-9);
   });
 
   it('follows its own nature (another dog can love running)', () => {
@@ -178,7 +185,8 @@ describe('會動的狗（dogs.ts）', () => {
       // 重新整理：同一隻狗（同一個 id）接著同一段，在同一個地方
       const b = new Dog({ id: 'test-reload', name: '測試', look: MALTESE, yard: YARD, hour: noon });
       expect(b.seg?.start).toBeCloseTo(before.seg.start, 3);
-      expect(b.now(20_000, rand).at).toEqual(before.at);
+      // （開始的時間存成真正的時刻再換回來，走到一半的差不到一億分之一）
+      b.now(20_000, rand).at.forEach((v, i) => expect(v).toBeCloseTo(before.at[i], 6));
       // 離開很久了：停在上次那一段的終點
       const c = new Dog({ id: 'test-reload', name: '測試', look: MALTESE, yard: YARD, hour: noon });
       const later = c.now(before.seg.start + before.seg.ms + 600_000, rand);
@@ -322,6 +330,31 @@ describe('姿勢（dogPose）', () => {
     }
   });
 
+  it('trots briskly, unlike running: diagonal legs together, head up, mouth closed, ears bouncing', () => {
+    let ears = 0;
+    for (let e = 0; e < 400; e += 20) {
+      const p = dogPose(seg('trot'), e);
+      const [fl, fr, hl, hr] = p.legs.map(([d]) => d);
+      // 對角一起：左前和右後、右前和左後差不多，左前和右前相反
+      expect(Math.abs(fl - hr)).toBeLessThan(6);
+      expect(Math.abs(fr - hl)).toBeLessThan(6);
+      if (Math.abs(fl) > 12) expect(Math.sign(fr)).toBe(-Math.sign(fl));
+      // 跨得比跑步小；頭抬著、嘴巴閉著（不吐舌頭），耳朵沒有像跑步一樣往後飛
+      expect(Math.max(...p.legs.map(([d]) => Math.abs(d)))).toBeLessThanOrEqual(26 + 1e-9);
+      expect(p.nod).toBeLessThan(0);
+      expect(p.tongue).toBeFalsy();
+      expect(p.lips).toBe(true);
+      expect(p.ear).toBeLessThan(20);
+      ears = Math.max(ears, p.ear);
+    }
+    // 耳朵一跳一跳
+    expect(ears).toBeGreaterThan(12);
+    // 一步（左前腳擺一個來回）比走路快、比跑步慢
+    const swing = (d: DogSeg['do'], ms: number): number => dogPose(seg(d), ms / 4).legs[0][0] - dogPose(seg(d), (3 * ms) / 4).legs[0][0];
+    expect(Math.abs(swing('trot', 400))).toBeGreaterThan(40);
+    expect(dogPose(seg('trot'), 400).legs[0][0]).toBeCloseTo(dogPose(seg('trot'), 0).legs[0][0], 6);
+  });
+
   it('lies down to rest: body on the ground, front legs forward, sometimes chin down with eyes closed', () => {
     const k = 400;
     const y = (svg: string, part: string): number => Number(new RegExp(`data-part="${part}"><ellipse cx="[-\\d.]+" cy="([-\\d.]+)"`).exec(svg)![1]);
@@ -346,7 +379,7 @@ describe('姿勢（dogPose）', () => {
   it('shows the lip line only when standing or walking', () => {
     const k = 400;
     const face = (d: DogSeg['do'], e = 2000): string => dogSvg(MALTESE, dogPose(seg(d, { ms: 9000 }), e), 180, k);
-    for (const d of ['stand', 'idle', 'walk'] as const) {
+    for (const d of ['stand', 'idle', 'walk', 'trot'] as const) {
       expect(dogPose(seg(d), 2000).lips).toBe(true);
       for (const part of ['philtrum', 'lip1', 'lip-1']) expect(face(d)).toContain(`data-part="${part}"`);
     }

@@ -9,7 +9,7 @@ import { RADAR_GEOM, RADAR_VIEW, viewReach, viewRect, type TripAt } from './rada
 import { ZHONGSHAN_PARK } from './zhongshan';
 import { MIN_HALF, widthRing, withWidths } from './zhongshan-widths';
 import { MALTESE, dogHeight } from './dog';
-import { animateDogs, Dog, dogById, dogHeading, dogMarkup, NATURE, wakeDogs, type DogNature, type DogYard } from './dogs';
+import { animateDogs, Dog, dogById, dogHeading, dogMarkup, isMoving, NATURE, wakeDogs, type DogNature, type DogYard } from './dogs';
 import { fetchPublicParkMarks, type ParkMark, type ParkMarkKind } from './api';
 export { onDogMove } from './dogs';
 
@@ -891,7 +891,7 @@ function dogPart(g: ParkGeom, c: ParkCanvas, dog: Dog): string {
   const u = Math.max(0, Math.min(1, ((c.rx - a[0]) * vx + (c.ry - a[1]) * vy) / (vx * vx + vy * vy || 1)));
   if (Math.hypot(a[0] + vx * u - c.rx, a[1] + vy * u - c.ry) - h > viewReach() + 2) return '';
   const f1 = (v: number): string => v.toFixed(1);
-  const moving = s.do === 'walk' || s.do === 'run';
+  const moving = isMoving(s.do);
   // 雷達外圈 0.5 km 內，掃到狗就亮一下（radar.ts 的 glint，畫在樹上面：走到樹下被樹冠蓋住也看得出牠在哪）；
   // 再遠就不亮（要自己拉近找）
   const lit = c.ppm >= DOG_GLINT_FROM;

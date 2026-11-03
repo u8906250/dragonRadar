@@ -350,7 +350,7 @@ describe('地球的雷達上的中山公園（跟汪星共用一份）', () => {
       expect(x.ms).toBeGreaterThanOrEqual(3000);
       // 前一段是走過去的
       expect(segs[i - 1]).toMatchObject({ goal: 'sniff', face: x.face });
-      expect(['walk', 'run']).toContain(segs[i - 1].do);
+      expect(['walk', 'trot', 'run']).toContain(segs[i - 1].do);
     }
     // 聞完就走（不在樹下坐、趴、睡），同一棵不會連著去兩次
     const after = spots.map(([, i]) => segs[i + 1]).filter(Boolean);

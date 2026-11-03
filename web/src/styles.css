@@ -697,7 +697,7 @@ path.map-water-glint { animation: water-flow-map 1.1s linear infinite; }
 .radar .woof-dog .dog-shadow { fill-opacity: 0.18; }
 /* 遠遠的白點：跟銅像的點一樣大，淡淡的邊（仔細看找得到，不會一眼就看到） */
 .radar .woof-dog .dog-dot { fill: #fbf8f2; stroke: #8f846f; stroke-width: 0.5; }
-.radar .woof-dog.walk .dog-go, .radar .woof-dog.run .dog-go { animation: dog-go var(--ms) linear var(--t) both; }
+.radar .woof-dog.walk .dog-go, .radar .woof-dog.trot .dog-go, .radar .woof-dog.run .dog-go { animation: dog-go var(--ms) linear var(--t) both; }
 @keyframes dog-go { from { transform: none; } to { transform: translate(var(--dx), var(--dy)); } }
 /*
  * 火箭（park.ts 的 rocketPart，--t 是這一段已經過了多久）：
