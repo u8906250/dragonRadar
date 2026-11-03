@@ -308,7 +308,7 @@ function foodDetailHtml(it: Item, now: number): string {
   const x = foodOf(ev);
   const role = foodRole(ev);
   const line = (k: string, v: string | null | undefined): string => (v ? `${k}：${esc(v)}<br>` : '');
-  const where = `地點：${esc(placeOf(ev))}${ev.approxArea ? `<br><span class="approx-note">約略位置：只知道在${esc(ev.approxArea)}</span>` : ''}<br>距離：${ev.approxArea ? '約 ' : ''}${formatKm(it.distanceKm)}，${compassLabel(it.bearing)}方`;
+  const where = `地點：${esc(placeOf(ev))}${ev.approxArea ? `<br><span class="approx-note">約略位置：只知道在${esc(ev.approxArea)}</span>` : ''}<br>距離：${ev.approxArea ? '約 ' : ''}${stepDistance(it)}`;
   if (role === 'meetup') {
     return `<div class="fraud-box"><b>⚠️ 跟網友吃飯前</b><ul>${MEETUP_SAFETY_TIPS.map((t) => `<li>${esc(t)}</li>`).join('')}</ul></div><p>類型：揪團吃飯<br>${line('吃什麼', x.food)}時間：${esc(seekWhen(ev))}<br>${line('缺幾人', x.slots)}${line('預算', x.price)}${line('報名方式', x.contact ? (CONTACT_TEXT[x.contact] ?? x.contact) : null)}${where}</p>`;
   }
@@ -445,6 +445,20 @@ const lettersPage = $('#letters-page');
 const lettersPicked = $('#letters-picked');
 const lettersList = $('#letters-list');
 const filterRow = $('#filter-row');
+const catGroup = $('#cat-group');
+const sortGroup = $('#sort-group');
+const sortChips = Array.from(document.querySelectorAll<HTMLButtonElement>('#sort-group [data-sort]'));
+/** 清單（和活動卡片的 ▲ ▼）怎麼排：time 照開始時間（分進行中、即將開始、稍後開始），distance 不分段、全部由近到遠；記在 localStorage */
+const LS_SORT = 'dr.sort';
+let sortBy: 'time' | 'distance' = lsGet(LS_SORT) === 'distance' ? 'distance' : 'time';
+/** 換了排序：打開著的活動卡片的 ▲ ▼ 照新的順序（距離還是從打開卡片時的地方算） */
+let stepResort = false;
+function setSort(v: 'time' | 'distance'): void {
+  sortBy = v;
+  lsSet(LS_SORT, v);
+  stepResort = true;
+  render();
+}
 const categoryToggles = Array.from(document.querySelectorAll<HTMLButtonElement>('#filter-row [data-cat]'));
 const activeToggle = $<HTMLButtonElement>('#active-toggle');
 const onlyGroup = $('#only-group');
@@ -1621,7 +1635,6 @@ function updateActiveToggle(items: Item[], now: number): void {
   activeToggle.textContent = `進行中（${n}）`;
   activeToggle.classList.toggle('on', onlyActive);
   activeToggle.setAttribute('aria-pressed', String(onlyActive));
-  if (!onlyGroup.hidden) filterRow.hidden = false;
 }
 
 /** 開關上寫各有幾個（車掃一條路線算一個），沒有的那一類不顯示開關；關掉的照樣列出數量 */
@@ -1641,7 +1654,7 @@ function updateCategoryToggles(all: Item[]): void {
     b.classList.toggle('on', shown[cat]);
     b.setAttribute('aria-pressed', String(shown[cat]));
   }
-  filterRow.hidden = !mod.current || categoryToggles.every((b) => b.hidden);
+  catGroup.hidden = !mod.current || categoryToggles.every((b) => b.hidden);
 }
 
 /** 清單上的一列：一般事件，或合成一張卡片的車掃路線 */
@@ -1681,6 +1694,12 @@ let listOrder: number[] = [];
  * 不會跟著亂跳）；關掉卡片、從清單再點一則時重新記
  */
 let stepOrder: number[] | null = null;
+/** 打開卡片時雷達的中心：活動卡片標題下的距離從這裡算（跟清單上寫的一樣；飛過去以後中心就是那一則，從中心算都是 0） */
+let stepFrom: LatLng | null = null;
+function beginSteps(): void {
+  stepOrder = [...listOrder];
+  stepFrom = { lat: origin.lat, lng: origin.lng };
+}
 function renderList(items: Item[], now: number): void {
   // 摘要和清單用同一套「列」來算：車掃路線的起點、加油點、終點合成一張卡片，只算一個
   const rows = listRows(items, now);
@@ -1698,18 +1717,20 @@ function renderList(items: Item[], now: number): void {
   const posted = new Set([...postingRows.values()].flat());
   const singles = inRange.filter((r) => !r.spot && !posted.has(r));
   const spotsIn = inRange.filter((r) => r.spot);
-  const byPhase = (ph: Phase): Row[] =>
-    singles
-      .filter((r) => r.phase === ph)
-      // 進行中照距離，還沒開始的照開始時間
-      .sort((a, b) => (ph === 'active' ? a.distanceKm - b.distanceKm : a.sortAt - b.sortAt || a.distanceKm - b.distanceKm));
+  // 排序：時間照開始時間（同時間再照距離），距離由近到遠
+  const near = (a: Row, b: Row): number => a.distanceKm - b.distanceKm;
+  const byPhase = (ph: Phase): Row[] => singles.filter((r) => r.phase === ph).sort((a, b) => a.sortAt - b.sortAt || near(a, b));
+  const byDistance = sortBy === 'distance';
+  const sorted = (list: Row[]): Row[] => (byDistance ? [...list].sort(near) : list);
   const sections: Array<{ title: string; rows: Row[] }> = [
-    // 職缺從刊登起都算「徵才中」
-    ...(['active', 'soon', 'later'] as const).map((ph) => ({ title: !mod.current && ph === 'active' ? '刊登中' : (PHASE_TITLE[ph] as string), rows: byPhase(ph) })),
-    { title: SPOT_SECTION[mod.id] ?? '固定據點', rows: spotsIn },
-    ...Object.entries(POSTING_SECTION).map(([role, title]) => ({ title, rows: postingRows.get(role) ?? [] })),
-    { title: laterLabel(), rows: laterRows },
-    { title: outLabel(), rows: outRange },
+    // 照距離：進行中、即將開始、稍後開始合在一起；職缺從刊登起都算「徵才中」
+    ...(byDistance
+      ? [{ title: '由近到遠', rows: sorted(singles) }]
+      : (['active', 'soon', 'later'] as const).map((ph) => ({ title: !mod.current && ph === 'active' ? '刊登中' : (PHASE_TITLE[ph] as string), rows: byPhase(ph) }))),
+    { title: SPOT_SECTION[mod.id] ?? '固定據點', rows: sorted(spotsIn) },
+    ...Object.entries(POSTING_SECTION).map(([role, title]) => ({ title, rows: sorted(postingRows.get(role) ?? []) })),
+    { title: laterLabel(), rows: sorted(laterRows) },
+    { title: outLabel(), rows: sorted(outRange) },
   ];
   const counts = { active: byPhase('active').length, soon: byPhase('soon').length, later: byPhase('later').length };
   const none = mod.current && followed().length === 0;
@@ -1736,6 +1757,14 @@ function renderList(items: Item[], now: number): void {
   emptyEl.hidden = items.length > 0;
   // 清單上的順序（活動卡片的上一個、下一個照這個；車掃路線的卡片不算）
   listOrder = sections.flatMap((sec) => sec.rows.flatMap((r) => (r.route ? [] : [r.it.ev.id])));
+  // 排序：清單有兩則以上才顯示
+  sortGroup.hidden = rows.length < 2;
+  for (const b of sortChips) {
+    const on = b.dataset.sort === sortBy;
+    b.classList.toggle('on', on);
+    b.setAttribute('aria-checked', String(on));
+  }
+  filterRow.hidden = catGroup.hidden && onlyGroup.hidden && sortGroup.hidden;
   // 每一段的標題寫上數量，跟上面的摘要對得起來
   for (const sec of sections) {
     if (sec.rows.length === 0) continue;
@@ -1764,7 +1793,7 @@ function itemCard(it: Item, now: number): HTMLLIElement {
     <div class="ev-meta">${esc(placeLine(it.ev))} · ${it.ev.approxArea ? '約 ' : ''}${formatKm(it.distanceKm)} ${compassLabel(it.bearing)}</div>
     <div class="ev-time">${it.spot ? `${esc(spotHours(it.spot.sessions))}・` : ''}${timeLineHtml(it, now)}</div>${tagsOf(it.ev).length > 0 ? `<div class="ev-tagline">${tagsHtml(tagsOf(it.ev))}</div>` : ''}`;
   li.addEventListener('click', () => {
-    stepOrder = [...listOrder];
+    beginSteps();
     select(it.ev.id);
     if (selectedId === it.ev.id) goToItem(it);
   });
@@ -2418,6 +2447,20 @@ async function submitBottle(): Promise<void> {
   render();
 }
 
+/** 活動卡片標題下面：「還有 4 小時・1.2 km」（進行中寫「進行中」；職缺、刊登沒有開始時間，只寫距離）；距離從打開卡片時雷達的中心算 */
+function headMeta(it: Item, now: number): string {
+  const { ev } = it;
+  const when = ev.kind === 'job' || postingRole(ev) ? '' : isUpcoming(it) ? startsIn(reportedStop(ev)?.at ?? ev.startAt, now) : it.phase === 'active' ? '進行中' : '';
+  const km = haversineKm(stepFrom ?? origin, ev);
+  return [when, `${ev.approxArea ? '約 ' : ''}${formatKm(km)}`].filter(Boolean).join('・');
+}
+
+/** 詳細資料的「距離」：「1.2 km，北方」，跟標題下面一樣從打開卡片時雷達的中心算 */
+function stepDistance(it: Item): string {
+  const from = stepFrom ?? origin;
+  return `${formatKm(haversineKm(from, it.ev))}，${compassLabel(bearingDeg(from, it.ev))}方`;
+}
+
 /** 詳細資料上次畫的內容 */
 let detailHtml = '';
 /**
@@ -2561,10 +2604,11 @@ function renderDetail(items: Item[], now: number): void {
   detailEl.hidden = false;
   // 清單上的上一個、下一個（照打開卡片時清單的順序；不在清單上的不顯示）
   if (!stepOrder?.includes(ev.id)) {
-    stepOrder = [...listOrder];
+    beginSteps();
     stepLockPx = 0;
-  }
-  const order = stepOrder;
+  } else if (stepResort) stepOrder = [...listOrder];
+  stepResort = false;
+  const order = stepOrder ?? listOrder;
   const at = order.indexOf(ev.id);
   const [prevId, nextId] = at < 0 ? [undefined, undefined] : [order[at - 1], order[at + 1]];
   const stepBtns =
@@ -2573,14 +2617,14 @@ function renderDetail(items: Item[], now: number): void {
       : `<span class="sheet-steps"><button type="button" class="chip" data-step="${prevId ?? ''}" aria-label="上一個活動" title="上一個活動"${prevId === undefined ? ' disabled' : ''}>▲</button><button type="button" class="chip" data-step="${nextId ?? ''}" aria-label="下一個活動" title="下一個活動"${nextId === undefined ? ' disabled' : ''}>▼</button></span>`;
   const replaced = setDetailHtml(`ev:${ev.id}:${prevId ?? ''}:${nextId ?? ''}`, `
     <div class="sheet-head">
-      <strong>${esc(titleOf(ev))}</strong>
+      <div class="sheet-title"><strong>${esc(titleOf(ev))}</strong><span class="sheet-meta">${esc(headMeta(it, now))}</span></div>
       ${stepBtns}
       <button type="button" class="chip" data-act="close" aria-label="關閉">關閉</button>
     </div>
     <div class="sheet-body">
       ${nearbyHtml(it, items)}
       ${routeBoxHtml(ev, items, now)}
-      ${ev.kind === 'job' ? jobDetailHtml(it, now) : ev.kind === 'session' ? sessionDetailHtml(it, now) : ev.kind === 'food' ? foodDetailHtml(it, now) : `<p>類型：${it.spot ? `固定據點（${kindLabel(ev)}）` : kindLabel(ev)}<br>${ev.item ? `${ev.kind === 'activity' ? '物品' : '發放'}：${esc(ev.item)}<br>` : ''}${ev.keyword ? `關鍵字：#${esc(ev.keyword)}<br>` : ''}地點：${esc(placeOf(ev))}${ev.approxArea ? `<br><span class="approx-note">約略位置：只知道在${esc(ev.approxArea)}，地圖上是${esc(ev.approxArea)}的中心點，實際地點請看原文</span>` : ''}<br>時間：${it.spot ? esc(spotSchedule(it)) : ev.allDay ? `${dateFmt.format(new Date(ev.startAt * 1000))} ${allDayText(ev, false)}` : esc(eventTimeText(ev))}<br>距離：${ev.approxArea ? '約 ' : ''}${formatKm(it.distanceKm)}，${compassLabel(it.bearing)}方 · ${esc(timeLine(it, now))}</p>`}
+      ${ev.kind === 'job' ? jobDetailHtml(it, now) : ev.kind === 'session' ? sessionDetailHtml(it, now) : ev.kind === 'food' ? foodDetailHtml(it, now) : `<p>類型：${it.spot ? `固定據點（${kindLabel(ev)}）` : kindLabel(ev)}<br>${ev.item ? `${ev.kind === 'activity' ? '物品' : '發放'}：${esc(ev.item)}<br>` : ''}${ev.keyword ? `關鍵字：#${esc(ev.keyword)}<br>` : ''}地點：${esc(placeOf(ev))}${ev.approxArea ? `<br><span class="approx-note">約略位置：只知道在${esc(ev.approxArea)}，地圖上是${esc(ev.approxArea)}的中心點，實際地點請看原文</span>` : ''}<br>時間：${it.spot ? esc(spotSchedule(it)) : ev.allDay ? `${dateFmt.format(new Date(ev.startAt * 1000))} ${allDayText(ev, false)}` : esc(eventTimeText(ev))}<br>距離：${ev.approxArea ? '約 ' : ''}${stepDistance(it)} · ${esc(timeLine(it, now))}</p>`}
       ${tagsOf(ev).length > 0 ? `<p class="detail-tags">${tagsHtml(tagsOf(ev), true)}</p>` : ''}
       <blockquote class="post-excerpt" title="原文摘錄，完整內容請看原文">${esc(ev.post.source === 'news' ? ev.post.text.split('\n')[0] : ev.post.text)}</blockquote>
       ${ev.post.supplement ? `<p class="muted supplement-line">回報的人補充：${esc(ev.post.supplement)}</p>` : ''}
@@ -2708,7 +2752,7 @@ function sessionDetailHtml(it: Item, now: number): string {
   const { ev } = it;
   const x = sessionOf(ev);
   const line = (k: string, v: string | null | undefined): string => (v ? `${k}：${esc(v)}<br>` : '');
-  const where = `地點：${esc(placeOf(ev))}${ev.approxArea ? `<br><span class="approx-note">約略位置：只知道在${esc(ev.approxArea)}</span>` : ''}<br>距離：${ev.approxArea ? '約 ' : ''}${formatKm(it.distanceKm)}，${compassLabel(it.bearing)}方`;
+  const where = `地點：${esc(placeOf(ev))}${ev.approxArea ? `<br><span class="approx-note">約略位置：只知道在${esc(ev.approxArea)}</span>` : ''}<br>距離：${ev.approxArea ? '約 ' : ''}${stepDistance(it)}`;
   const contact = x.contact ? (CONTACT_TEXT[x.contact] ?? x.contact) : null;
   if (isSeek(ev)) {
     return `<p>類型：找臨打（球友想找地方打）<br>${line('程度', x.level)}時間：${esc(seekWhen(ev))}<br>${line('聯絡方式', contact)}${where}</p>`;
@@ -2732,7 +2776,7 @@ function jobDetailHtml(it: Item, now: number): string {
   const w = jobWords();
   const period = jobPeriod(j);
   const who = offer ? (w.offerWho ? `提供者：${j.employer ? esc(j.employer) : '個人'}<br>` : '') : `雇主：${j.employer ? esc(j.employer) : '<span class="risk">沒寫</span>'}<br>`;
-  return `${fraudBoxHtml(ev)}<p>類型：${offer ? w.offerType : w.hireType}<br>${j.pay ? `${offer ? w.offerPay : '薪資'}：${esc(j.pay)}<br>` : ''}${offer ? w.offerPeriod : '工作期間'}：${esc(offer && period === '沒寫工作期間' ? '時間可討論' : period)}<br>${who}${j.contact ? `${offer ? '聯絡方式' : '應徵方式'}：${esc(CONTACT_TEXT[j.contact] ?? j.contact)}<br>` : ''}${j.requirements ? `${offer ? w.offerNeeds : '內容'}：${esc(j.requirements)}<br>` : ''}地點：${esc(placeOf(ev))}${ev.approxArea ? `<br><span class="approx-note">約略位置：只知道在${esc(ev.approxArea)}</span>` : ''}<br>距離：${ev.approxArea ? '約 ' : ''}${formatKm(it.distanceKm)}，${compassLabel(it.bearing)}方${ev.endOpen ? '' : ` · 刊登到 ${dateFmt.format(new Date((ev.endAt - 1) * 1000))}`}${now ? '' : ''}</p>`;
+  return `${fraudBoxHtml(ev)}<p>類型：${offer ? w.offerType : w.hireType}<br>${j.pay ? `${offer ? w.offerPay : '薪資'}：${esc(j.pay)}<br>` : ''}${offer ? w.offerPeriod : '工作期間'}：${esc(offer && period === '沒寫工作期間' ? '時間可討論' : period)}<br>${who}${j.contact ? `${offer ? '聯絡方式' : '應徵方式'}：${esc(CONTACT_TEXT[j.contact] ?? j.contact)}<br>` : ''}${j.requirements ? `${offer ? w.offerNeeds : '內容'}：${esc(j.requirements)}<br>` : ''}地點：${esc(placeOf(ev))}${ev.approxArea ? `<br><span class="approx-note">約略位置：只知道在${esc(ev.approxArea)}</span>` : ''}<br>距離：${ev.approxArea ? '約 ' : ''}${stepDistance(it)}${ev.endOpen ? '' : ` · 刊登到 ${dateFmt.format(new Date((ev.endAt - 1) * 1000))}`}${now ? '' : ''}</p>`;
 }
 
 function canReportEnded(ev: EventOut, now: number): boolean {
@@ -5393,6 +5437,7 @@ function wireControls(): void {
       render();
     });
   }
+  for (const b of sortChips) b.addEventListener('click', () => setSort(b.dataset.sort === 'distance' ? 'distance' : 'time'));
   for (const b of timeChips) b.addEventListener('click', () => setTime((b.dataset.time as TimeSetting) ?? 'all'));
   timeToggle.addEventListener('click', () => {
     setTimeOpen(true);

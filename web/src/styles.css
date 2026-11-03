@@ -1148,6 +1148,9 @@ body.letters-open { overflow: hidden; }
 
 /* 活動卡片的上一個、下一個（標題右邊、關閉的左邊） */
 .sheet-steps { display: inline-flex; gap: 6px; margin-left: auto; flex: none; }
+/* 活動卡片的標題和下面一行：還有多久、多遠 */
+.sheet-title { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.sheet-meta { font-size: 13px; font-weight: 700; color: var(--accent); }
 .sheet-steps .chip { min-width: 40px; padding: 8px 10px; }
 .sheet-steps .chip:disabled { opacity: 0.35; cursor: default; }
 
