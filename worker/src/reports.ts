@@ -10,6 +10,7 @@ import { ADDRESS_BUDGET_MS, atLocalTimes, commitPlan, detectEnded, getEvent, get
 import { cleanTags, cleanTopic, type ActivityPart, type EventKind } from './extract';
 import { fetchThreadsPost, resolveThreadsLink, shortcodeToUnix, withLocationTag } from './sources/link';
 import { sha1Hex } from './sources/text';
+import { creditReport, uncreditReport, type ReportReward } from './cards';
 
 /** 只收這麼新的貼文，太舊的公告通常已經過期 */
 export const MAX_LINK_AGE_SEC = 7 * 86400;
@@ -162,6 +163,8 @@ export interface SubmitResult {
   edit?: EditItem[];
   /** 車掃、掃街、車隊：合成路線的（每一站的時間、會不會放上雷達），這些站不在 preview、failures 裡 */
   routes?: RoutePreview[];
+  /** 確認後放上雷達了：回報的累計（滿 5 則拿到肉乾卡、每 5 則一包肉乾；今天算滿了 capped） */
+  reward?: ReportReward;
 }
 
 /** 預覽上的一條車掃路線 */
@@ -567,7 +570,10 @@ export async function confirmLink(env: Env, body: { postId?: unknown; token?: un
     // 寫在這則最後一筆回報上；補充資料的紀錄不動（不然補充會被當成回報、補充次數也少算）
     env.DB.prepare(`UPDATE submissions SET result = ?, device = COALESCE(device, ?) WHERE id = (SELECT MAX(id) FROM submissions WHERE post_id = ? AND ${NOT_SUPPLEMENT})`).bind(JSON.stringify(result.reasons), device, post.id),
   ]);
-  return { existed: false, outcome: summarize(result.reasons), reasons: result.reasons, events: await eventsForResult(env, post.id, result.reasons, now), permalink };
+  const outcome = summarize(result.reasons);
+  // 放上雷達了：算一則回報（收集卡、道具）；算失敗不影響回報
+  const reward = outcome === 'added' ? await creditReport(env, device, post.id, now).catch((e) => (console.warn('credit failed', e), null)) : null;
+  return { existed: false, outcome, reasons: result.reasons, events: await eventsForResult(env, post.id, result.reasons, now), permalink, ...(reward ? { reward } : {}) };
 }
 
 /** 一則貼文最多補充幾次（每次都要再跑一次 AI） */
@@ -824,6 +830,8 @@ export async function withdrawReport(env: Env, postId: string, device: string, n
     env.DB.prepare("UPDATE posts SET linked_to = NULL, link_role = NULL WHERE linked_to = ? AND link_role = 'previous'").bind(postId),
     env.DB.prepare("UPDATE posts SET confirm_state = 'withdrawn', confirm_plan = NULL, linked_to = NULL, link_role = NULL WHERE id = ?").bind(postId),
   ]);
+  // 自己刪掉的回報不算進累計（已經給的卡、道具不收回）
+  await uncreditReport(env, postId);
   return { ok: true, removed };
 }
 

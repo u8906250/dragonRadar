@@ -1210,6 +1210,14 @@ body.letters-open { overflow: hidden; }
 .tc-slot { display: flex; flex-direction: column; align-items: center; gap: 10px; }
 .tc-slot.missing .tc-face { filter: saturate(0.6); }
 /* 換手機（引繼碼）：卡冊下面，深色的底上用淺色的字 */
+.tc-items { align-self: stretch; margin-top: 18px; padding: 12px 14px; border-radius: 14px; background: #fbf4e6; color: #4a3826; }
+.tc-items h3 { margin: 0 0 8px; font-size: 16px; }
+.tc-items ul { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+.tc-item { display: flex; align-items: center; gap: 10px; }
+.tc-item img { width: 44px; height: 44px; border-radius: 10px; object-fit: cover; object-position: 50% 55%; border: 2px solid #ead7b0; flex: none; }
+.tc-item-name { flex: 1 1 auto; font-weight: 700; }
+.tc-item-count { font-weight: 800; color: #b5651d; white-space: nowrap; }
+.tc-items-empty { margin: 0; font-size: 13px; color: #7a6650; }
 .tc-move { align-self: stretch; display: flex; flex-direction: column; align-items: center; gap: 10px; color: #f3eee4; }
 .tc-move-box { align-self: stretch; display: flex; flex-direction: column; gap: 8px; padding: 12px; background: rgba(18, 22, 28, 0.94); border: 1px solid rgba(243, 238, 228, 0.3); border-radius: var(--card-radius, 12px); font-size: 13px; line-height: 1.55; }
 .tc-move-box[hidden] { display: none; }

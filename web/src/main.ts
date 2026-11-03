@@ -10,7 +10,7 @@ import { X_MAX_WEIGHT, xLength } from './xcount';
 import { shortAddress, splitPlace } from './place';
 import { crowdOf, MapView, pinPicker, type BaseMap, type PinPicker } from './map';
 import { beep, ensureNotificationPermission, iosNeedsHomeScreen, notificationState, pushSubscription, pushSupported, registerServiceWorker, showBanner, systemNotify, unlockAudio, unsubscribePush } from './notify';
-import { findCard, openAlbum } from './cards';
+import { findCard, gotReward, openAlbum } from './cards';
 import { Radar, SPACE_FROM_KM, type RadarRoute, type RadarStreets, type SpaceView } from './radar';
 import { DEFAULT_THEME_ID, getTheme, THEMES, type Theme } from './themes';
 import type { BottleOut, EventOut, Item, KeywordInfo, KeywordRules, MyBottles, MyReport, Origin, Phase, PickedBottle, RelatedPost, RouteOut, PreviewItem, RouteStop, RoutePreview, SubmitResult, FailedItem, EditItem, EditInput } from './types';
@@ -4822,6 +4822,8 @@ function renderPreview(r: SubmitResult): void {
     }
     await showReportResult(res.data);
     void loadMyReports();
+    // 回報累計：滿 5 則拿到古錐媽的肉乾卡、每 5 則一包肉乾（道具）
+    void gotReward(res.data.reward, (msg) => showBanner(bannerEl, msg, 4500));
   });
   if (mod.current) wireEdit(c, r.edit ?? [], actions);
   else wireSupplement(c, actions);

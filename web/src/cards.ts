@@ -1,9 +1,9 @@
 /**
- * 收集卡（尋找小法）：卡冊、拿到卡時翻開的畫面。
- * 卡片的內容寫在這裡（照片在 public/cards/），拿到的卡存在伺服器（裝置代碼，worker/src/cards.ts），
- * 這個瀏覽器另外記一份（dr.cards）：點小法時拿過的就不再問伺服器
+ * 收集卡（尋找小法）：卡冊、拿到卡時翻開的畫面，卡冊下面是道具欄。
+ * 卡片的內容寫在這裡（照片在 public/cards/），拿到的卡、道具存在伺服器（裝置代碼，worker/src/cards.ts），
+ * 這個瀏覽器另外記一份（dr.cards、dr.items）：點小法時拿過的就不再問伺服器
  */
-import { claimCard, fetchMyCards, makeTransferCode, redeemTransferCode, type CardClaim } from './api';
+import { claimCard, fetchMyCards, makeTransferCode, redeemTransferCode, type CardClaim, type ItemCount } from './api';
 
 export interface CardDef {
   /** 跟伺服器的 CARDS 一樣 */
@@ -15,13 +15,54 @@ export interface CardDef {
   about: string;
   /** 還沒拿到時卡冊裡的提示（只給一點點）：一句一條，「提示 1」「提示 2」… */
   hints: string[];
+  /** 卡片右上角（哪一系列） */
+  series: string;
+  /** 卡片下面：怎麼拿到的、第幾位 */
+  found: (c: CardClaim) => string;
+  serial: (c: CardClaim) => string;
+  /** 拿到時翻開的標題 */
+  got: string;
 }
 
+const BASE = import.meta.env.BASE_URL;
 export const CARD_DEFS: CardDef[] = [
-  { id: 'xiaofa', no: 1, name: '小法', img: `${import.meta.env.BASE_URL}cards/xiaofa.webp`, about: '白色馬爾濟斯。個性活潑，喜歡探險，常在碑林出現。', hints: ['國館的小法', '來汪星找我'] },
+  {
+    id: 'xiaofa',
+    no: 1,
+    name: '小法',
+    img: `${BASE}cards/xiaofa.webp`,
+    about: '白色馬爾濟斯。個性活潑，喜歡探險，常在碑林出現。',
+    hints: ['國館的小法', '來汪星找我'],
+    series: '汪星・中山公園',
+    found: (c) => `在${c.place}找到`,
+    serial: (c) => `第 ${c.serial} 位找到小法的人`,
+    got: '找到小法了！',
+  },
+  {
+    id: 'jerky',
+    no: 2,
+    name: '古錐媽的肉乾',
+    img: `${BASE}cards/jerky.webp`,
+    about: '一包五條雞肉乾。',
+    hints: ['多貼一些活動'],
+    series: '古錐媽',
+    found: () => '貼了 5 個活動',
+    serial: (c) => `第 ${c.serial} 位拿到的人`,
+    got: '拿到古錐媽的肉乾了！',
+  },
 ];
 
+/** 道具（用法之後再設計） */
+export interface ItemDef {
+  id: string;
+  name: string;
+  img: string;
+  unit: string;
+}
+export const ITEM_DEFS: ItemDef[] = [{ id: 'jerky', name: '古錐媽的肉乾', img: `${BASE}cards/jerky.webp`, unit: '包' }];
+
 const LS_CARDS = 'dr.cards';
+const LS_ITEMS = 'dr.items';
 const isClaim = (v: unknown): v is CardClaim => {
   const c = v as CardClaim;
   return !!c && typeof c.card === 'string' && typeof c.place === 'string' && Number.isFinite(c.at) && Number.isFinite(c.serial);
@@ -45,6 +86,24 @@ function saveCards(list: CardClaim[]): void {
   }
 }
 
+/** 這個瀏覽器的道具（伺服器的一份副本，打開卡冊時再對一次） */
+export function myItems(): ItemCount[] {
+  try {
+    const v: unknown = JSON.parse(localStorage.getItem(LS_ITEMS) ?? '[]');
+    return Array.isArray(v) ? v.filter((x: ItemCount) => !!x && typeof x.item === 'string' && Number.isFinite(x.count) && x.count > 0) : [];
+  } catch {
+    return [];
+  }
+}
+
+function saveItems(list: ItemCount[]): void {
+  try {
+    localStorage.setItem(LS_ITEMS, JSON.stringify(list));
+  } catch {
+    // 不能存：打開卡冊時再跟伺服器拿
+  }
+}
+
 const esc = (s: string): string => s.replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
 const noText = (d: CardDef): string => `No.${String(d.no).padStart(3, '0')}`;
 const dateText = (t: number): string => new Intl.DateTimeFormat('zh-TW', { timeZone: 'Asia/Taipei', year: 'numeric', month: 'numeric', day: 'numeric' }).format(new Date(t * 1000));
@@ -53,12 +112,12 @@ const PAW =
 
 function frontHtml(d: CardDef, c: CardClaim): string {
   return `<div class="tc-face tc-front">
-      <div class="tc-top"><span>${noText(d)}</span><span>汪星・中山公園</span></div>
+      <div class="tc-top"><span>${noText(d)}</span><span>${esc(d.series)}</span></div>
       <div class="tc-photo"><img src="${d.img}" alt="${esc(d.name)}的照片" draggable="false"></div>
       <div class="tc-name">${esc(d.name)}</div>
       <p class="tc-about">${esc(d.about)}</p>
-      <div class="tc-meta"><span>在${esc(c.place)}找到</span><span>${dateText(c.at)}</span></div>
-      <div class="tc-serial">第 ${c.serial} 位找到${esc(d.name)}的人</div>
+      <div class="tc-meta"><span>${esc(d.found(c))}</span><span>${dateText(c.at)}</span></div>
+      <div class="tc-serial">${esc(d.serial(c))}</div>
     </div>`;
 }
 
@@ -98,14 +157,14 @@ function overlay(cls: string, html: string): HTMLElement {
   return el;
 }
 
-/** 拿到卡：卡片背面朝上出現，翻過來 */
-function showReveal(d: CardDef, c: CardClaim): void {
+/** 拿到卡：卡片背面朝上出現，翻過來；extra 是一起拿到的道具（寫在下面） */
+function showReveal(d: CardDef, c: CardClaim, extra = ''): void {
   const el = overlay(
     'tc-reveal',
     `<div class="tc-box">
-      <h2 class="tc-title">找到${esc(d.name)}了！</h2>
+      <h2 class="tc-title">${esc(d.got)}</h2>
       <div class="tc-flip"><div class="tc-inner">${frontHtml(d, c)}${backHtml(d)}</div></div>
-      <p class="tc-note">收進卡冊了，選單裡的「卡冊」隨時看得到。</p>
+      <p class="tc-note">收進卡冊了，選單裡的「卡冊」隨時看得到。${extra ? `<br>${esc(extra)}` : ''}</p>
       <button type="button" class="chip primary" data-close>好</button>
     </div>`,
   );
@@ -135,8 +194,54 @@ export async function findCard(id: string, place: string, onError: (msg: string)
   }
 }
 
+/** 道具這次拿到幾個的說法：「一包古錐媽的肉乾」 */
+const itemText = (it: ItemCount): string => {
+  const d = ITEM_DEFS.find((x) => x.id === it.item);
+  return d ? `${it.count === 1 ? '一' : it.count}${d.unit}${d.name}` : '';
+};
+
 /**
- * 卡冊：拿到的卡、還沒拿到的（背面加問號和一點點提示），下面是「換手機」（引繼碼，只搬卡片）。
+ * 回報確認、放上雷達後（main.ts）：伺服器說拿到肉乾卡就翻開給你看，拿到道具寫在下面（沒有卡時另外跳一則訊息）；
+ * 今天算滿了也跳訊息。notify 是 main.ts 的橫幅
+ */
+export async function gotReward(r: { card?: CardClaim; items: ItemCount[]; capped?: boolean } | undefined, notify: (msg: string) => void): Promise<void> {
+  if (!r) return;
+  if (r.capped) {
+    notify('今天的回報已經算滿 20 則，明天再貼的才會算進收集');
+    return;
+  }
+  if (r.items.length > 0) {
+    const have = myItems();
+    for (const it of r.items) {
+      const cur = have.find((x) => x.item === it.item);
+      if (cur) cur.count += it.count;
+      else have.push({ ...it });
+    }
+    saveItems(have);
+  }
+  const got = r.items.map(itemText).filter(Boolean).join('、');
+  const d = r.card ? CARD_DEFS.find((x) => x.id === r.card!.card) : undefined;
+  if (d && r.card) {
+    saveCards([...myCards().filter((c) => c.card !== d.id), r.card]);
+    const img = new Image();
+    img.src = d.img;
+    await Promise.race([img.decode().catch(() => undefined), new Promise((ok) => window.setTimeout(ok, 1500))]);
+    showReveal(d, r.card, got ? `還拿到${got}，放在卡冊下面的道具欄。` : '');
+  } else if (got) notify(`拿到${got}！放在卡冊下面的道具欄`);
+}
+
+/** 道具欄：有的道具和數量（用法之後再設計） */
+function itemsHtml(): string {
+  const have = myItems().filter((x) => ITEM_DEFS.some((d) => d.id === x.item));
+  const rows = have.map((x) => {
+    const d = ITEM_DEFS.find((y) => y.id === x.item)!;
+    return `<li class="tc-item"><img src="${d.img}" alt="" draggable="false"><span class="tc-item-name">${esc(d.name)}</span><span class="tc-item-count">× ${x.count} ${esc(d.unit)}</span></li>`;
+  });
+  return `<div class="tc-items"><h3>道具</h3>${rows.length ? `<ul>${rows.join('')}</ul>` : '<p class="tc-items-empty">還沒有道具</p>'}</div>`;
+}
+
+/**
+ * 卡冊：拿到的卡、還沒拿到的（背面加問號和一點點提示），下面是道具欄、「換手機」（引繼碼，卡片和道具一起搬）。
  * 打開時再跟伺服器對一次（這個瀏覽器的紀錄被清掉、伺服器還有的補回來；搬到別台的拿掉）
  */
 export function openAlbum(): void {
@@ -148,12 +253,12 @@ export function openAlbum(): void {
       return `<div class="tc-slot${c ? '' : ' missing'}"><div class="tc-card">${c ? frontHtml(d, c) : backHtml(d, true)}</div></div>`;
     });
     return `<div class="tc-head"><h2>卡冊</h2><span class="tc-count">已收集 ${got} / ${CARD_DEFS.length}</span><button type="button" class="chip" data-close>關閉</button></div>
-      <div class="tc-list">${slots.join('')}</div>`;
+      <div class="tc-list">${slots.join('')}</div>${itemsHtml()}`;
   };
   const move = `<div class="tc-move">
       <button type="button" class="chip" data-move aria-expanded="false">換手機</button>
       <div class="tc-move-box" hidden>
-        <p><b>舊手機</b>：產生引繼碼，24 小時內在新手機輸入，卡片會搬過去（這台就沒有了）。只搬卡片。</p>
+        <p><b>舊手機</b>：產生引繼碼，24 小時內在新手機輸入，卡片和道具會搬過去（這台就沒有了）。</p>
         <button type="button" class="chip" data-make>產生引繼碼</button>
         <div class="tc-code" hidden><span class="tc-code-text"></span><button type="button" class="chip" data-copy>複製</button><small class="tc-code-until"></small></div>
         <p><b>新手機</b>：輸入舊手機產生的引繼碼。</p>
@@ -212,6 +317,7 @@ export function openAlbum(): void {
     btn.disabled = false;
     if (!r.ok) return msg(r.message, true);
     saveCards(r.data.cards.filter(isClaim));
+    if (r.data.items) saveItems(r.data.items);
     redraw();
     input.value = '';
     msg(r.data.moved > 0 ? `搬好了，${r.data.moved} 張卡搬到這台` : '搬好了（這台原本就有比較早拿到的卡）');
@@ -219,8 +325,13 @@ export function openAlbum(): void {
   void fetchMyCards().then((r) => {
     if (!r.ok || !el.isConnected) return;
     const local = myCards();
-    if (r.data.cards.length === local.length && r.data.cards.every((c) => local.some((x) => x.card === c.card && x.serial === c.serial))) return;
+    const localItems = myItems();
+    const items = r.data.items ?? localItems;
+    const sameCards = r.data.cards.length === local.length && r.data.cards.every((c) => local.some((x) => x.card === c.card && x.serial === c.serial));
+    const sameItems = items.length === localItems.length && items.every((i) => localItems.some((x) => x.item === i.item && x.count === i.count));
+    if (sameCards && sameItems) return;
     saveCards(r.data.cards.filter(isClaim));
+    saveItems(items);
     redraw();
   });
 }

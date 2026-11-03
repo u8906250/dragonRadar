@@ -1,14 +1,23 @@
 /**
- * 收集卡（尋找小法）：在汪星的 3D 國館點到小法就拿到一張卡（雷達上點到不算，前端決定）。
- * 不用登入，用瀏覽器的裝置代碼（加鹽雜湊）認人；伺服器記哪張卡、什麼時候、在公園哪裡找到，第幾位找到照拿到的順序算（id 由小到大）
+ * 收集卡（尋找小法）：在汪星的 3D 國館點到小法就拿到 No.001（雷達上點到不算，前端決定）；
+ * 回報、確認、放上雷達的活動累計滿 5 則拿到 No.002「古錐媽的肉乾」，每滿 5 則再給一包道具「古錐媽的肉乾」（用法之後再設計）。
+ * 不用登入，用瀏覽器的裝置代碼（加鹽雜湊）認人；伺服器記哪張卡、什麼時候、在哪裡拿到，第幾位拿到照拿到的順序算（id 由小到大）
  */
 import type { Env } from './env';
 import { hashSalt, ReportError } from './reports';
 import { sha1Hex } from './sources/text';
 
-/** 有哪些卡，每張卡可以寫的地點（前端照小法當時的位置判斷，伺服器只收這幾個，其他的寫最後一個） */
-export const CARDS = { xiaofa: ['碑林', '翠湖', '映池', '國父紀念館', '櫻花步道', '中山公園'] } as const;
+/** 有哪些卡，每張卡可以寫的地點（小法：前端照小法當時的位置判斷，伺服器只收這幾個，其他的寫最後一個；肉乾：回報拿到的） */
+export const CARDS = { xiaofa: ['碑林', '翠湖', '映池', '國父紀念館', '櫻花步道', '中山公園'], jerky: ['回報'] } as const;
 export type CardId = keyof typeof CARDS;
+/** 點到就拿得到的卡（/api/cards/claim）；其他的照規則由伺服器給（肉乾：回報累計） */
+const TAP_CARDS: readonly CardId[] = ['xiaofa'];
+/** 道具 */
+export const ITEMS = { jerky: '古錐媽的肉乾' } as const;
+export type ItemId = keyof typeof ITEMS;
+/** 回報累計幾則拿到肉乾卡、每幾則給一包肉乾；一台一天（台灣時間）最多算幾則 */
+export const REPORTS_PER_JERKY = 5;
+export const CREDITS_PER_DAY = 20;
 /** 同一個 IP 一小時最多拿幾張（一直清掉瀏覽器資料重拿，「第幾位」會被灌） */
 export const CLAIMS_PER_IP_HOUR = 20;
 
@@ -26,17 +35,68 @@ export function parseClaim(body: unknown): { card: CardId; place: string } | str
   const b = (body ?? {}) as Record<string, unknown>;
   if (typeof b.card !== 'string' || !Object.prototype.hasOwnProperty.call(CARDS, b.card)) return '沒有這張卡';
   const card = b.card as CardId;
+  if (!TAP_CARDS.includes(card)) return '這張卡要照規則拿，不能直接拿';
   const places: readonly string[] = CARDS[card];
   return { card, place: typeof b.place === 'string' && places.includes(b.place) ? b.place : places[places.length - 1] };
 }
 
 const SELECT = 'SELECT c.card, c.place, c.created_at AS at, (SELECT COUNT(*) FROM card_claims c2 WHERE c2.card = c.card AND c2.id <= c.id) AS serial FROM card_claims c';
 
-/** 這個瀏覽器拿到的卡 */
-export async function myCards(env: Env, device: string | null): Promise<{ cards: CardClaim[] }> {
-  if (!device) return { cards: [] };
-  const r = await env.DB.prepare(`${SELECT} WHERE c.device_id = ? ORDER BY c.id`).bind(device).all<CardClaim>();
-  return { cards: r.results ?? [] };
+/** 道具有幾個（還沒用掉的） */
+export interface ItemCount {
+  item: ItemId;
+  count: number;
+}
+
+/** 這個瀏覽器拿到的卡、道具 */
+export async function myCards(env: Env, device: string | null): Promise<{ cards: CardClaim[]; items: ItemCount[] }> {
+  if (!device) return { cards: [], items: [] };
+  const [c, i] = await env.DB.batch([
+    env.DB.prepare(`${SELECT} WHERE c.device_id = ? ORDER BY c.id`).bind(device),
+    env.DB.prepare('SELECT item, COUNT(*) AS count FROM item_grants WHERE device_id = ? AND used_at IS NULL GROUP BY item ORDER BY MIN(id)').bind(device),
+  ]);
+  return { cards: (c.results ?? []) as CardClaim[], items: ((i.results ?? []) as ItemCount[]).filter((x) => Object.prototype.hasOwnProperty.call(ITEMS, x.item)) };
+}
+
+/** 回報累計拿到的東西：這次新拿到的卡、這次新拿到幾個道具；今天已經算滿（capped）的這則不算 */
+export interface ReportReward {
+  credits: number;
+  card?: CardClaim;
+  items: ItemCount[];
+  capped?: boolean;
+}
+
+/** 台灣時間今天 0 點（秒） */
+export const taipeiDayStart = (now: number): number => Math.floor((now + 8 * 3600) / 86400) * 86400 - 8 * 3600;
+/** 累計 n 則時最近的一個門檻（5、10、15…；不到 5 是 0） */
+export const jerkyMilestone = (n: number): number => Math.floor(n / REPORTS_PER_JERKY) * REPORTS_PER_JERKY;
+
+/**
+ * 回報、確認、放上雷達了：記一則（同一則只記一次；這台今天已經記滿 CREDITS_PER_DAY 則就不記），
+ * 累計滿 5 則拿到肉乾卡，每滿 5 則給一包肉乾（同一個門檻只給一次：刪掉再貼回到同一個數字不會再給）
+ */
+export async function creditReport(env: Env, device: string | null, postId: string, now: number): Promise<ReportReward | null> {
+  if (!device) return null;
+  const today = await env.DB.prepare('SELECT COUNT(*) AS n FROM report_credits WHERE device_id = ? AND created_at >= ?').bind(device, taipeiDayStart(now)).first<{ n: number }>();
+  const total = async (): Promise<number> => (await env.DB.prepare('SELECT COUNT(*) AS n FROM report_credits WHERE device_id = ?').bind(device).first<{ n: number }>())?.n ?? 0;
+  if ((today?.n ?? 0) >= CREDITS_PER_DAY) return { credits: await total(), items: [], capped: true };
+  await env.DB.prepare('INSERT OR IGNORE INTO report_credits (post_id, device_id, created_at) VALUES (?, ?, ?)').bind(postId, device, now).run();
+  const credits = await total();
+  const reward: ReportReward = { credits, items: [] };
+  const m = jerkyMilestone(credits);
+  if (m === 0) return reward;
+  const [card, item] = await env.DB.batch([
+    env.DB.prepare("INSERT OR IGNORE INTO card_claims (card, device_id, place, created_at) VALUES ('jerky', ?, '回報', ?)").bind(device, now),
+    env.DB.prepare("INSERT OR IGNORE INTO item_grants (device_id, item, reason, created_at) VALUES (?, 'jerky', ?, ?)").bind(device, `reports:${m}`, now),
+  ]);
+  if (card.meta.changes) reward.card = (await env.DB.prepare(`${SELECT} WHERE c.device_id = ? AND c.card = 'jerky'`).bind(device).first<CardClaim>()) ?? undefined;
+  if (item.meta.changes) reward.items = [{ item: 'jerky', count: item.meta.changes }];
+  return reward;
+}
+
+/** 回報的人自己刪掉：這則不算了（已經給的卡、道具不收回） */
+export async function uncreditReport(env: Env, postId: string): Promise<void> {
+  await env.DB.prepare('DELETE FROM report_credits WHERE post_id = ?').bind(postId).run();
 }
 
 /** 拿一張卡：拿過的回傳原本那張（fresh = false） */
@@ -65,7 +125,7 @@ export async function purgeCards(env: Env, cutoff: number): Promise<number> {
   return r.reduce((n, x) => n + (x.meta.changes ?? 0), 0);
 }
 
-// ---- 引繼碼（換手機）：舊手機產生、新手機輸入，卡片從舊的裝置搬到新的裝置（只搬卡片，回報、漂流瓶不動） ----
+// ---- 引繼碼（換手機）：舊手機產生、新手機輸入，卡片、道具、回報的累計從舊的裝置搬到新的裝置（回報本身、漂流瓶不動） ----
 
 /** 引繼碼用的字：大寫英文和數字，拿掉容易看錯的 0、O、1、I（32 個字，8 個字約一兆多種） */
 const CODE_CHARS = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
@@ -101,8 +161,8 @@ async function countTry(env: Env, ip: string, kind: 'make' | 'redeem', now: numb
 /** 舊手機：產生引繼碼（同一台之前產生、還沒用的作廢） */
 export async function makeTransfer(env: Env, device: string | null, ip: string, now: number): Promise<{ code: string; expiresAt: number }> {
   if (!device) throw new ReportError(400, '缺少裝置代碼，請重新整理頁面');
-  const has = await env.DB.prepare('SELECT COUNT(*) AS n FROM card_claims WHERE device_id = ?').bind(device).first<{ n: number }>();
-  if (!has?.n) throw new ReportError(400, '這台還沒有收集到卡，沒有可以搬的');
+  const has = await env.DB.prepare('SELECT (SELECT COUNT(*) FROM card_claims WHERE device_id = ?) + (SELECT COUNT(*) FROM item_grants WHERE device_id = ?) AS n').bind(device, device).first<{ n: number }>();
+  if (!has?.n) throw new ReportError(400, '這台還沒有收集到卡、道具，沒有可以搬的');
   await countTry(env, ip, 'make', now);
   const code = makeCode();
   const expiresAt = now + TRANSFER_TTL_SEC;
@@ -114,9 +174,10 @@ export async function makeTransfer(env: Env, device: string | null, ip: string, 
 }
 
 /**
- * 新手機：輸入引繼碼，舊手機的卡搬過來（舊手機就沒有了）。兩台都有同一張卡的，留比較早拿到的那張（第幾位比較前面）
+ * 新手機：輸入引繼碼，舊手機的卡、道具、回報的累計搬過來（舊手機就沒有了）。兩台都有同一張卡的，留比較早拿到的那張（第幾位比較前面）；
+ * 道具兩台的都留著（同一個原因兩台都拿過的，舊手機那個的原因後面加 :moved:id）
  */
-export async function redeemTransfer(env: Env, device: string | null, ip: string, body: unknown, now: number): Promise<{ cards: CardClaim[]; moved: number }> {
+export async function redeemTransfer(env: Env, device: string | null, ip: string, body: unknown, now: number): Promise<{ cards: CardClaim[]; items: ItemCount[]; moved: number }> {
   if (!device) throw new ReportError(400, '缺少裝置代碼，請重新整理頁面');
   await countTry(env, ip, 'redeem', now);
   const code = cleanCode((body as { code?: unknown } | null)?.code);
@@ -136,6 +197,10 @@ export async function redeemTransfer(env: Env, device: string | null, ip: string
     // 新手機已經有（比較早拿到）的：舊手機的那張不要
     env.DB.prepare("UPDATE card_claims SET device_id = 'merged:' || id WHERE device_id = ? AND card IN (SELECT card FROM card_claims WHERE device_id = ?)").bind(old, device),
     env.DB.prepare('UPDATE card_claims SET device_id = ? WHERE device_id = ?').bind(device, old),
+    env.DB.prepare("UPDATE item_grants SET reason = reason || ':moved:' || id WHERE device_id = ? AND EXISTS (SELECT 1 FROM item_grants o WHERE o.device_id = ? AND o.item = item_grants.item AND o.reason = item_grants.reason)").bind(old, device),
+    env.DB.prepare('UPDATE item_grants SET device_id = ? WHERE device_id = ?').bind(device, old),
+    env.DB.prepare('UPDATE report_credits SET device_id = ? WHERE device_id = ?').bind(device, old),
   ]);
-  return { cards: (await myCards(env, device)).cards, moved: r[2].meta.changes ?? 0 };
+  const mine = await myCards(env, device);
+  return { cards: mine.cards, items: mine.items, moved: r[2].meta.changes ?? 0 };
 }

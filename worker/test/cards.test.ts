@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { cleanCode, makeCode, parseClaim } from '../src/cards';
+import { cleanCode, CREDITS_PER_DAY, jerkyMilestone, makeCode, parseClaim, REPORTS_PER_JERKY, taipeiDayStart } from '../src/cards';
 
 describe('parseClaim', () => {
   it('takes a known card and one of its places', () => {
@@ -11,6 +11,8 @@ describe('parseClaim', () => {
   it('refuses unknown cards', () => {
     expect(parseClaim({ card: 'toString' })).toBe('沒有這張卡');
     expect(parseClaim({ card: 'lucky' })).toBe('沒有這張卡');
+    // 肉乾卡要回報累計才拿得到，不能直接拿
+    expect(parseClaim({ card: 'jerky', place: '回報' })).toBe('這張卡要照規則拿，不能直接拿');
     expect(parseClaim(null)).toBe('沒有這張卡');
   });
 });
@@ -32,5 +34,21 @@ describe('transfer codes', () => {
     expect(cleanCode('KX7P-4M2')).toBeNull();
     expect(cleanCode('KX7P-4M2QQ')).toBeNull();
     expect(cleanCode(12345678)).toBeNull();
+  });
+});
+
+describe('回報累計（古錐媽的肉乾）', () => {
+  it('gives the card and a pack of jerky every 5 reports, at most 20 a day', () => {
+    expect(REPORTS_PER_JERKY).toBe(5);
+    expect(CREDITS_PER_DAY).toBe(20);
+    expect([0, 4, 5, 9, 10, 14, 15, 23].map(jerkyMilestone)).toEqual([0, 0, 5, 5, 10, 10, 15, 20]);
+  });
+  it('counts a day in Taiwan time (00:00 +08:00)', () => {
+    // 2026-11-03 23:59:59 和 2026-11-04 00:00:00（台灣時間）
+    const late = Date.UTC(2026, 10, 3, 15, 59, 59) / 1000;
+    const next = late + 1;
+    expect(taipeiDayStart(late)).toBe(Date.UTC(2026, 10, 2, 16) / 1000);
+    expect(taipeiDayStart(next)).toBe(next);
+    expect(taipeiDayStart(next + 3600)).toBe(next);
   });
 });

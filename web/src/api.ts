@@ -249,7 +249,7 @@ export async function deleteParkMark(token: string, id: number): Promise<void> {
 // ---- 收集卡（尋找小法）：一樣用裝置代碼認人，不用登入 ----
 export interface CardClaim {
   card: string;
-  /** 在公園哪裡找到的（碑林、翠湖…） */
+  /** 在公園哪裡找到的（碑林、翠湖…）；肉乾卡是「回報」 */
   place: string;
   /** 拿到的時間（秒） */
   at: number;
@@ -263,7 +263,13 @@ export function claimCard(card: string, place: string): Promise<Result<{ claim: 
 }
 
 /** 這個瀏覽器拿到的卡 */
-export function fetchMyCards(): Promise<Result<{ cards: CardClaim[] }>> {
+/** 道具有幾個（還沒用掉的） */
+export interface ItemCount {
+  item: string;
+  count: number;
+}
+
+export function fetchMyCards(): Promise<Result<{ cards: CardClaim[]; items?: ItemCount[] }>> {
   return deviceJson('/api/cards/mine');
 }
 
@@ -273,6 +279,6 @@ export function makeTransferCode(): Promise<Result<{ code: string; expiresAt: nu
 }
 
 /** 新手機輸入引繼碼：舊手機的卡搬過來，回傳這台現在的卡 */
-export function redeemTransferCode(code: string): Promise<Result<{ cards: CardClaim[]; moved: number }>> {
+export function redeemTransferCode(code: string): Promise<Result<{ cards: CardClaim[]; items?: ItemCount[]; moved: number }>> {
   return deviceJson('/api/cards/redeem', 'POST', { code });
 }
