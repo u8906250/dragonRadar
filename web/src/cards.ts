@@ -18,7 +18,7 @@ export interface CardDef {
 }
 
 export const CARD_DEFS: CardDef[] = [
-  { id: 'xiaofa', no: 1, name: '小法', img: `${import.meta.env.BASE_URL}cards/xiaofa.webp`, about: '白色馬爾濟斯。愛邊走邊聞，常在碑林出現。', hint: '國館的小法' },
+  { id: 'xiaofa', no: 1, name: '小法', img: `${import.meta.env.BASE_URL}cards/xiaofa.webp`, about: '白色馬爾濟斯。個性活潑，喜歡探險，常在碑林出現。', hint: '國館的小法' },
 ];
 
 const LS_CARDS = 'dr.cards';
