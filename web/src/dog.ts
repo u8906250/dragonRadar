@@ -51,9 +51,9 @@ export interface DogFace {
 
 /**
  * 使用者的馬爾濟斯（照相簿，v1.451 再照使用者給的影片調）：幾乎全白的捲毛（暗的地方也只有一點點米白，耳朵尾端一點點米色），頭毛茸茸圓圓的，
- * 耳朵從頭頂兩側貼著頭長長垂下來、到鼻子的高度（不到下巴），腳像穿了毛褲、腳掌圓圓一團，尾巴長毛往上捲。
+ * 耳朵從頭頂兩側貼著頭長長垂下來、又寬又蓬，垂到嘴巴、下巴的高度，腳像穿了毛褲、腳掌圓圓一團，尾巴長毛往上捲。
  * 臉：平平的，很黑的眼睛（深色的眼眶、亮亮的反光），不會太大（影片裡不像卡通那麼大）；黑鼻子，側面看得出一小截嘴巴（不要太長，使用者說的）；
- * 眼睛內側往下淡淡的杏色淚痕；鼻子兩旁長長往下垂的鬍子（嘴邊的毛跟身體一樣白，使用者說的）；臉頰的毛蓬蓬的、臉看起來寬
+ * 眼睛內側往下沿著鼻子一道淡淡的米色淚痕；鼻子旁邊的毛蓬蓬的、長長往兩邊往下垂（嘴邊的毛跟身體一樣白，使用者說的）；臉頰的毛蓬蓬的、臉看起來寬
  */
 export const MALTESE: DogLook = {
   name: '馬爾濟斯',
@@ -65,7 +65,7 @@ export const MALTESE: DogLook = {
   ears: 'drop',
   tail: 'plume',
   muzzle: 0.033,
-  face: { eye: 0.013, gap: 27, up: 11, iris: '#1f150e', rim: '#2b211d', nose: 0.016, noseColor: '#1e1917', stain: '#f0e0cb', beard: 1.6, beardColor: '#fbf9f4', cheek: 1 },
+  face: { eye: 0.013, gap: 27, up: 11, iris: '#1f150e', rim: '#2b211d', nose: 0.016, noseColor: '#1e1917', stain: '#ecdcc2', beard: 2.1, beardColor: '#fbf9f4', cheek: 1 },
 };
 
 /** 頭頂多高（公尺） */
@@ -196,7 +196,8 @@ function parts(look: DogLook, pose: DogPose): Part[] {
   const M = add(Hc, S([0.058 + look.muzzle * 0.5, 0, -0.026]));
   const beardTones: [string, string, string] = [shade(F.beardColor, 0.5), F.beardColor, shade(F.beardColor, -0.06)];
   const beard = (key: string, e: Ell, hair: number): void => void out.push({ key, e, fill: F.beardColor, hair, droop: 1.8, dense: FACE, tones: beardTones });
-  beard('muzzle', move(ell(M, mu * s, 0.038 * s, 0.029 * s), neck), H * 0.55 * F.beard);
+  // 鼻子旁邊的毛蓬蓬的（鬍子往兩邊、往下張開，鼻子像埋在一團毛裡；使用者給的照片）
+  beard('muzzle', move(ell(M, mu * s, 0.052 * s, 0.035 * s), neck), H * 0.55 * F.beard);
   if (F.cheek > 0)
     for (const side of [1, -1]) furry(`cheek${side}`, move(ell(add(Hc, S([0.03, 0.044 * side, -0.036])), 0.034 * s * F.cheek, 0.03 * s * F.cheek, 0.032 * s * F.cheek), neck), H * 0.9 * F.beard, fur, fur[1], FACE);
   beard('chin', move(ell(add(M, S([-0.006, 0, -0.024])), 0.022 * s, 0.026 * s, 0.014 * s), neck), H * 0.7 * F.beard);
@@ -232,7 +233,8 @@ function parts(look: DogLook, pose: DogPose): Part[] {
     const on = (du: number, dv: number): V => add(add(eye, mul(t1, du * s)), mul(t2, dv * s));
     const r = F.eye;
     const toward = neck.d(n);
-    if (F.stain) solid(`stain${side}`, move(patch(on(0.45 * r * side, 1.35 * r), n, r * 0.4, 0.7, 1.6, 0.35 * side), neck), F.stain, 0.003, toward);
+    // 淚痕：眼睛內側往下、沿著鼻子旁邊一道淡淡的米色
+    if (F.stain) solid(`stain${side}`, move(patch(on(0.6 * r * side, 1.4 * r), n, r * 0.55, 0.95, 1.8, 0.35 * side), neck), F.stain, 0.003, toward);
     // 閉眼睛（眨眼、睡覺）：眼睛壓扁成一條，看不到眼珠的反光
     // 閉起來時外側往下斜一點（睏睏的，不會像在生氣）
     const open = 1 - 0.85 * pose.blink;
@@ -248,13 +250,14 @@ function parts(look: DogLook, pose: DogPose): Part[] {
   // 耳朵：垂下來的（跑步時往後飛、往外甩），或豎起來的
   for (const side of [1, -1]) {
     if (look.ears === 'drop') {
-      // 從頭頂兩側（眼睛後面）長出來，貼著頭長長垂下來，毛垂到鼻子的高度（不到下巴；使用者說的），下面往外張開一點點
-      const c = add(Hc, S([-0.03, 0.07 * side, 0.014]));
+      // 從頭頂兩側（眼睛後面）長出來，貼著頭長長垂下來，又寬又蓬的捲毛垂到嘴巴、下巴的高度，下面往外張開一點（使用者給的照片）
+      const c = add(Hc, S([-0.028, 0.078 * side, -0.004]));
       // 以耳朵上緣為支點：往後飛（ear）、往外往上甩（flap，左耳往左、右耳往右）
-      const pivot = add(c, S([0, 0, 0.045]));
+      const pivot = add(c, S([0, 0, 0.062]));
       const out = (q: V): V => rotUW(rotVW(q, side * pose.flap * RAD), -pose.ear * RAD);
       const ear: Xf = { p: (q) => neck.p(add(out(sub(q, pivot)), pivot)), d: (q) => neck.d(out(q)) };
-      furry(`ear${side}`, move({ c, a: [[0.029 * s, 0, 0], [0, 0.024 * s, 0], [0, 0.01 * s * side, 0.052 * s]] }, ear), H * 1.2, earTones, look.ear);
+      // 長軸往上是往頭裡面靠（上面貼著頭），往下是往外（下面像鐘一樣散開）
+      furry(`ear${side}`, move({ c, a: [[0.034 * s, 0, 0], [0, 0.03 * s, 0], [0, -0.026 * s * side, 0.066 * s]] }, ear), H * 1.35, earTones, look.ear);
     } else furry(`ear${side}`, move(ell(add(Hc, S([-0.005, 0.042 * side, 0.072])), 0.02 * s, 0.012 * s, 0.045 * s), neck), H * 0.5, earTones, look.ear);
   }
   // 尾巴：一串長毛往上捲過背，或直直往後翹
