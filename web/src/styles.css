@@ -1202,7 +1202,8 @@ body.letters-open { overflow: hidden; }
 .tc-paw svg { display: block; width: 84px; height: 84px; fill: currentColor; opacity: 0.9; }
 .tc-back-title { font-size: 22px; font-weight: 800; letter-spacing: 0.12em; }
 .tc-back-no { font-size: 13px; opacity: 0.8; letter-spacing: 0.06em; }
-.tc-back-hint { margin-top: 10px; padding: 4px 14px; border: 1px solid rgba(246, 231, 196, 0.5); border-radius: 14px; font-size: 14px; font-weight: 700; line-height: 1.6; text-align: center; }
+.tc-back-hints { display: flex; flex-direction: column; align-items: center; gap: 6px; margin-top: 10px; }
+.tc-back-hint { padding: 4px 14px; border: 1px solid rgba(246, 231, 196, 0.5); border-radius: 999px; font-size: 14px; font-weight: 700; }
 .tc-head { align-self: stretch; display: flex; align-items: center; gap: 10px; color: #fff; }
 .tc-head h2 { margin: 0; font-size: 20px; }
 .tc-count { flex: 1; font-size: 13px; opacity: 0.85; }
