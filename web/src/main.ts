@@ -1802,9 +1802,28 @@ function itemCard(it: Item, now: number): HTMLLIElement {
   li.addEventListener('click', () => {
     beginSteps();
     select(it.ev.id);
-    if (selectedId === it.ev.id) goToItem(it);
+    if (selectedId !== it.ev.id) return;
+    // 手機：清單往下縮一段，縮好（雷達變大）才照新的大小算縮放
+    if (shrinkPanel()) afterPanel(() => selectedId === it.ev.id && goToItem(it));
+    else goToItem(it);
   });
   return li;
+}
+
+/** 清單的高度動畫（0.25 秒）結束再做；減少動態效果時沒有動畫，最多等 0.4 秒 */
+function afterPanel(fn: () => void): void {
+  let done = false;
+  const run = (): void => {
+    if (done) return;
+    done = true;
+    panelEl.removeEventListener('transitionend', onEnd);
+    fn();
+  };
+  const onEnd = (e: TransitionEvent): void => {
+    if (e.target === panelEl && e.propertyName === 'max-height') run();
+  };
+  panelEl.addEventListener('transitionend', onEnd);
+  window.setTimeout(run, 400);
 }
 
 /**
@@ -1853,7 +1872,10 @@ function routeCard(r: RouteOut, phase: Phase, items: Item[], now: number): HTMLL
         : `🚩 ${esc(start?.name ?? '')} → 🏁 ${esc(end?.name ?? '')}${isReported(r) ? '' : ` · 全長 ${routeKm(r).toFixed(1)} km`}`
     }${nearest ? ` · ${isReported(r) ? '離你最近' : '最近'} ${formatKm(nearest.distanceKm)}` : ''}</div>
     <div class="ev-time">${esc(routeTimeLine(r, items, now))}</div>`;
-  li.addEventListener('click', () => selectRoute(r.id));
+  li.addEventListener('click', () => {
+    selectRoute(r.id);
+    if (selectedRoute === r.id) shrinkPanel();
+  });
   return li;
 }
 
@@ -5158,6 +5180,11 @@ async function toggleNotify(): Promise<void> {
 
 type PanelState = 'collapsed' | 'default' | 'expanded';
 const PANEL_ORDER: PanelState[] = ['collapsed', 'default', 'expanded'];
+/**
+ * 手機點清單上的一則：清單往下縮一段（展開 → 預設 → 收合；卡片從下面蓋住清單，雷達露出來多一點）。
+ * 有縮回傳 true；已經收合、電腦版回傳 false（wirePanelDrag 接上）
+ */
+let shrinkPanel = (): boolean => false;
 
 /**
  * 下方清單三段高度：collapsed 只留橫條與摘要、default 預設、expanded 展開。
@@ -5191,6 +5218,11 @@ function wirePanelDrag(): void {
     panelEl.classList.toggle('expanded', s === 'expanded');
     panelEl.classList.toggle('collapsed', s === 'collapsed');
     handle.setAttribute('aria-label', s === 'collapsed' ? '展開清單' : s === 'expanded' ? '縮小清單' : '展開或收合清單');
+  };
+  shrinkPanel = (): boolean => {
+    if (desktop.matches || state === 'collapsed') return false;
+    setState(PANEL_ORDER[PANEL_ORDER.indexOf(state) - 1]);
+    return true;
   };
   // 清單高度變了，地圖要重算尺寸（雷達是 SVG 會自己縮放）
   panelEl.addEventListener('transitionend', (e) => {
