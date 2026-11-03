@@ -3,7 +3,6 @@ import { RAINBOW_EVERY_MS } from './flow';
 import { addKeyword, collectLetter, deletePushSubscription, locateFeedbackPlace, sendFeedback, type FeedbackKind, fetchPushKey, savePushSubscription, confirmReport, editReport, locatePlace, rejectReport, supplementReport, deleteBottle, dropBottle, recycleBottle, fetchBottles, fetchEvents, fetchHealth, fetchKeywords, fetchMyBottles, fetchMyReports, fetchRoutes, pickBottle, reportBottle, reportEnded, submitLink, withdrawReport } from './api';
 import { compassSupported, startCompass } from './compass';
 import { bearingDeg, compassLabel, destination, formatKm, haversineKm, taiwanRadiusKm, type LatLng } from './geo';
-import { inShuangbei, SHUANGBEI_RINGS, shuangbeiRadiusKm } from './shuangbei';
 import { TAIWAN_RINGS } from './taiwan';
 import { LANDMARKS } from './landmarks';
 import { getModule, JOB_RISK_TEXT, JOB_SAFETY_TIPS, MEETUP_SAFETY_TIPS, MODULES, OFFER_SAFETY_TIPS, SEEK_SAFETY_TIPS, type ModuleDef, type ModuleId } from './modules';
@@ -147,10 +146,14 @@ let bottleMsg = '';
 let myBottlesData: MyBottles | null = null;
 /** 這次打開網頁已經提示過「瓶子被撿走了」 */
 let bottleNewsShown = false;
-type ScaleSetting = '1' | '5' | '20' | 'region' | 'taiwan' | 'world' | 'custom';
-/** 下方按鈕的範圍；custom 是雙指縮放或滾輪調出來的（從「全球」再拉遠就是太空） */
-const SCALE_SETTINGS: ScaleSetting[] = ['1', '5', '20', 'region', 'taiwan', 'world'];
-const isAutoScale = (s: ScaleSetting): boolean => s === 'region' || s === 'taiwan' || s === 'world';
+type ScaleSetting = '1' | '5' | '20' | 'taiwan' | 'world' | 'custom';
+/**
+ * 下方按鈕的範圍；custom 是雙指縮放或滾輪調出來的（從「全球」再拉遠就是太空）。
+ * 台灣哪裡都一樣：預設 50 km（DEFAULT_KM，沒有按鈕），「全台」「全球」才照位置算到涵蓋整個台灣、地球
+ */
+const SCALE_SETTINGS: ScaleSetting[] = ['1', '5', '20', 'taiwan', 'world'];
+const DEFAULT_KM = 50;
+const isAutoScale = (s: ScaleSetting): boolean => s === 'taiwan' || s === 'world';
 /** 「全球」的範圍：半個地球（地球另一面最遠約 20,000 km） */
 const WORLD_KM = SPACE_FROM_KM;
 /** 太空最遠拉到哪：整個太陽系（海王星的軌道離地球最遠約 31 AU） */
@@ -182,8 +185,12 @@ let tripTo: 'earth' | 'woof' | null = null;
 /** 汪星的地圖（台北的陸地、道路、中山公園）看不看得到：你在汪星，或火箭正飛過去；你在地球時汪星是普通的星球、只能看整顆 */
 const woofMap = (): boolean => youOn === 'woof' || tripTo === 'woof';
 // 汪星的中山公園可以放大到 1 公尺以內：重新整理後還在汪星就照存的範圍（最近 0.5 公尺，跟 park.ts 的 PARK_MIN_KM 一樣），回到地球至少是雷達平常的最小範圍
-let customKm = Math.max(youOn === 'woof' ? 0.0005 : MIN_ZOOM_KM, Number(lsGet(LS_SCALE_KM)) || 10);
-let scaleSetting: ScaleSetting = ([...SCALE_SETTINGS, 'custom'] as string[]).includes(lsGet(LS_SCALE) ?? '') ? (lsGet(LS_SCALE) as ScaleSetting) : 'region';
+// 第一次打開、以前選「雙北」（已經拿掉）的：50 km
+const savedScale = lsGet(LS_SCALE);
+const scaleKnown = ([...SCALE_SETTINGS, 'custom'] as string[]).includes(savedScale ?? '');
+let customKm = Math.max(youOn === 'woof' ? 0.0005 : MIN_ZOOM_KM, (scaleKnown && Number(lsGet(LS_SCALE_KM))) || DEFAULT_KM);
+let scaleSetting: ScaleSetting = scaleKnown ? (savedScale as ScaleSetting) : 'custom';
+if (!scaleKnown) lsSet(LS_SCALE_KM, String(DEFAULT_KM));
 let scaleKm = 5;
 let view: 'radar' | 'map' = 'radar';
 let selectedId: number | null = null;
@@ -823,27 +830,13 @@ function inTime(it: Item, now: number): boolean {
 const laterLabel = (): string => (timeSetting === 'now' ? '還沒開始、休息中' : `${{ '3h': '3 小時', '24h': '24 小時', '3d': '3 天' }[timeSetting as '3h' | '24h' | '3d']}以後才開始`);
 
 // ---- 雷達範圍 ----
-const scopeCache = new Map<string, boolean>();
-
-/** 在不在雷達範圍內：距離在範圍內（「全球」都算）；選「雙北」時還要在台北市或新北市裡（基隆、桃園、宜蘭不算） */
-function inScope(ev: EventOut, distanceKm: number): boolean {
-  if (distanceKm > scaleKm) return false;
-  if (scaleSetting !== 'region') return true;
-  const key = `${ev.lat},${ev.lng}`;
-  let v = scopeCache.get(key);
-  if (v === undefined) {
-    v = inShuangbei(ev);
-    scopeCache.set(key, v);
-  }
-  return v;
-}
-
-const outLabel = (): string => (scaleSetting === 'region' ? '雙北以外' : '雷達範圍外');
+/** 在不在雷達範圍內：距離在範圍內（「全球」都算） */
+const inScope = (distanceKm: number): boolean => distanceKm <= scaleKm;
 
 let outlineFor = '';
 let radarOutline: Array<Array<{ bearing: number; distanceKm: number }>> = [];
 
-/** 範圍比雙北大時畫的海岸線：台灣用詳細的，加上全世界的（約 30 KB，第一次用到才載入；世界資料裡的台灣只有幾個點，換掉） */
+/** 範圍比 50 km 大時畫的海岸線：台灣用詳細的，加上全世界的（約 30 KB，第一次用到才載入；世界資料裡的台灣只有幾個點，換掉） */
 let landRings: Array<Array<[number, number]>> = TAIWAN_RINGS;
 /** 縣市在陸地上的交界（counties.ts，跟世界海岸線一起載入），範圍 1000 km 內才畫（「全球」時台灣只剩幾個像素） */
 let countyLines: Array<Array<[number, number]>> = [];
@@ -852,29 +845,16 @@ let worldLoaded = false;
 let worldLoading = false;
 const inTaiwanBox = (ring: Array<[number, number]>): boolean => ring.every(([lat, lng]) => lat > 21 && lat < 26.5 && lng > 118 && lng < 123);
 
-/** 雙北的半徑（能涵蓋整個雙北）只跟位置有關，拖曳時每一幀都要用，記住上一次的 */
-let sbRadius = { key: '', km: 0 };
-function shuangbeiKm(): number {
-  const key = `${origin.lat},${origin.lng}`;
-  if (sbRadius.key !== key) sbRadius = { key, km: shuangbeiRadiusKm(origin) };
-  return sbRadius.km;
-}
-
-// ---- 道路：範圍到全台都畫（streets.ts，OpenFreeMap 的向量圖磚，第一次用到才載入；範圍越大畫的路越少，比全台大的不畫） ----
-const STREET_KM = 50;
-/** 道路畫到多大的範圍：這個位置選「全台」的範圍（在國外時全台很遠，最多 600 km） */
-const roadsKm = (): number => Math.max(STREET_KM, Math.min(600, taiwanRadiusKm(origin)));
+// ---- 道路：600 km 內都畫（台灣哪裡選「全台」都在這裡面；streets.ts，OpenFreeMap 的向量圖磚，第一次用到才載入；範圍越大畫的路越少） ----
+const ROADS_KM = 600;
 let streetsMod: typeof import('./streets') | null = null;
 let streetsLoading = false;
 /** 上次畫的位置、範圍、抓到第幾張圖磚，沒變就不重算 */
 let streetsFor = '';
 let streetTiles = 0;
 
-/**
- * 比這個範圍大就畫海岸線、縣市界的虛線（道路照畫）：雙北的半徑（依位置算），最多 50 km
- * （人在雙北以外時雙北的半徑很大，例如新竹約 110 km，不能讓道路和虛線中間空一段）
- */
-const outlineKm = (): number => Math.min(STREET_KM, shuangbeiKm());
+/** 比這個範圍大就畫海岸線、縣市界的虛線（道路照畫），台灣哪裡都一樣 */
+const OUTLINE_KM = 50;
 
 /** streets.ts 第一次用到才載入：載好了重畫雷達的道路和汪星的街道 */
 function loadStreets(): void {
@@ -938,8 +918,8 @@ const woofStreets: import('./space').WoofStreets = (lat, lng, km, rangeKm) => {
 
 /** 範圍內的道路換成相對於圓心的公里數（範圍不大，用平面近似就夠準，拖曳時每一幀都要算） */
 function updateStreets(): void {
-  // 比全台大的只畫海岸線的虛線
-  const show = scaleKm <= roadsKm() && !radar.spaceFocused;
+  // 再大的只畫海岸線的虛線
+  const show = scaleKm <= ROADS_KM && !radar.spaceFocused;
   // 中山公園拉近（外圈約 1.8 km 內畫樹冠、屋頂）：地球上公園在附近、汪星上，註明樹冠、屋頂、橋寬是照國土測繪中心的正射影像判讀的
   const trees = scaleKm <= PARK_TREES_KM && (radar.spaceFocused ? radar.spaceFocusKey === 'woof' : haversineKm(origin, PARK_NEAR) < scaleKm * 1.5 + 0.5);
   $('#radar-attrib').hidden = !show && !trees;
@@ -1210,11 +1190,11 @@ function updateSpace(): void {
 }
 
 /**
- * 「雙北」畫雙北的縣市界；範圍比雙北大（雙北以外的地方是比 50 km 大；全台、全球、縮放到更遠）一律畫海岸線（台灣加上全世界），1000 km 內再畫縣市交界，
- * 比這個小的不畫（畫道路）；位置變了才重算
+ * 範圍比 50 km 大（全台、全球、縮放到更遠）畫海岸線（台灣加上全世界），1000 km 內再畫縣市交界，
+ * 比這個小的不畫（只有道路）；位置變了才重算
  */
 function updateOutline(): void {
-  const kind = scaleSetting === 'region' ? 'region' : scaleKm > outlineKm() ? 'land' : 'none';
+  const kind = scaleKm > OUTLINE_KM ? 'land' : 'none';
   if (kind === 'land' && !worldLoaded && !worldLoading) {
     worldLoading = true;
     void Promise.all([import('./world'), import('./counties')])
@@ -1230,7 +1210,7 @@ function updateOutline(): void {
         worldLoading = false;
       });
   }
-  const rings = kind === 'region' ? SHUANGBEI_RINGS : kind === 'land' ? landRings : null;
+  const rings = kind === 'land' ? landRings : null;
   const lines = kind === 'land' && scaleKm <= COUNTY_MAX_KM ? countyLines : [];
   const key = rings ? `${kind}|${worldLoaded}|${lines.length > 0}|${origin.lat},${origin.lng}` : '';
   if (key === outlineFor) return;
@@ -1480,7 +1460,7 @@ function render(): void {
   updateCategoryToggles(all);
   updateActiveToggle(byCategory, now);
 
-  // 稍後才開始的也畫（虛線框、淡色）；「雙北」時雙北以外的也畫，跟超出範圍的一樣畫小、畫淡
+  // 稍後才開始的也畫（虛線框、淡色）
   radar.render(
     drawn.map((it) => ({
       id: it.ev.id,
@@ -1488,8 +1468,8 @@ function render(): void {
       spot: !!it.spot,
       office: !!it.spot && isOffice(it.ev),
       approx: !!it.ev.approxArea,
-      // 全螢幕鋪滿時範圍外、還在畫面裡的照真的位置畫（雷達自己把畫面外的貼在邊上），「雙北」時雙北以外的照樣畫淡
-      outside: !inScope(it.ev, radar.filling ? 0 : it.distanceKm),
+      // 全螢幕鋪滿時範圍外、還在畫面裡的照真的位置畫（雷達自己把畫面外的貼在邊上）
+      outside: !inScope(radar.filling ? 0 : it.distanceKm),
       distanceKm: it.distanceKm,
       bearing: it.bearing,
       // 還沒出發的官方車掃路線點用「即將開始」的淡色畫；還沒開的據點跟休息中的一樣淡；其他稍後開始的（回報的車掃的站也是）畫虛線框
@@ -1583,7 +1563,7 @@ function render(): void {
     if (seenActive.has(seenKey)) continue;
     seenActive.add(seenKey);
     // 整天的沒有「開始」的時間點，不然半夜 12 點會一起響；固定據點每天都開，不主動提醒
-    if (!notifiedOnce || !notifyOn() || !inScope(it.ev, it.distanceKm) || it.ev.allDay || it.spot) continue;
+    if (!notifiedOnce || !notifyOn() || !inScope(it.distanceKm) || it.ev.allDay || it.spot) continue;
     beep(theme.sound);
     try {
       navigator.vibrate?.([120, 80, 160]);
@@ -1676,13 +1656,13 @@ function listRows(items: Item[], now: number): Row[] {
   for (const it of items) {
     const r = routeOf(it.ev);
     if (!r) {
-      rows.push({ it, phase: it.phase, distanceKm: it.distanceKm, inScope: inScope(it.ev, it.distanceKm), inTime: inTime(it, now), spot: !!it.spot, sortAt: it.ev.startAt });
+      rows.push({ it, phase: it.phase, distanceKm: it.distanceKm, inScope: inScope(it.distanceKm), inTime: inTime(it, now), spot: !!it.spot, sortAt: it.ev.startAt });
       continue;
     }
     if (seen.has(r.id)) continue;
     seen.add(r.id);
     const members = routeItems(r, items);
-    rows.push({ route: r, phase: routePhase(r, members, now), distanceKm: Math.min(...members.map((m) => m.distanceKm)), inScope: members.some((m) => inScope(m.ev, m.distanceKm)), inTime: members.some((m) => inTime(m, now)), spot: false, sortAt: r.departAt ?? it.ev.startAt });
+    rows.push({ route: r, phase: routePhase(r, members, now), distanceKm: Math.min(...members.map((m) => m.distanceKm)), inScope: members.some((m) => inScope(m.distanceKm)), inTime: members.some((m) => inTime(m, now)), spot: false, sortAt: r.departAt ?? it.ev.startAt });
   }
   return rows;
 }
@@ -1732,11 +1712,11 @@ function renderList(items: Item[], now: number): void {
     { title: SPOT_SECTION[mod.id] ?? '固定據點', rows: sorted(spotsIn) },
     ...Object.entries(POSTING_SECTION).map(([role, title]) => ({ title, rows: sorted(postingRows.get(role) ?? []) })),
     { title: laterLabel(), rows: sorted(laterRows) },
-    { title: outLabel(), rows: sorted(outRange) },
+    { title: '雷達範圍外', rows: sorted(outRange) },
   ];
   const counts = { active: byPhase('active').length, soon: byPhase('soon').length, later: byPhase('later').length };
   const none = mod.current && followed().length === 0;
-  const outText = outRange.length > 0 ? `・${scaleSetting === 'region' ? '雙北以外' : '範圍外'} ${outRange.length} 個` : '';
+  const outText = outRange.length > 0 ? `・範圍外 ${outRange.length} 個` : '';
   const spotText = spotsIn.length > 0 ? `・據點 ${spotsIn.length} 個` : '';
   const laterText = laterRows.length > 0 ? `・${timeSetting === 'now' ? '還沒開始' : laterLabel().replace('才開始', '')} ${laterRows.length} 個` : '';
   const searching = searchTerms.length > 0 ? `搜尋「${searchInput.value.trim()}」・` : '';
@@ -1788,7 +1768,7 @@ function timeLineHtml(it: Item, now: number): string {
 
 function itemCard(it: Item, now: number): HTMLLIElement {
   const li = document.createElement('li');
-  li.className = `ev phase-${it.phase} kind-${it.ev.kind}${it.spot ? ' spot' : ''}${it.spot && isOffice(it.ev) ? ' office' : ''}${inScope(it.ev, it.distanceKm) ? '' : ' out-of-range'}${it.ev.id === selectedId ? ' selected' : ''}`;
+  li.className = `ev phase-${it.phase} kind-${it.ev.kind}${it.spot ? ' spot' : ''}${it.spot && isOffice(it.ev) ? ' office' : ''}${inScope(it.distanceKm) ? '' : ' out-of-range'}${it.ev.id === selectedId ? ' selected' : ''}`;
   li.dataset.id = String(it.ev.id);
   li.innerHTML = `
     <div class="ev-title"><span class="dot"></span><span class="kind-tag">${tagLabel(it)}</span>${esc(titleOf(it.ev))}${it.ev.item ? ` <span class="muted">· ${esc(it.ev.item)}</span>` : ''}${it.ev.kind === 'job' && jobRisky(it.ev) ? '<span class="risk-tag">⚠️ 注意</span>' : ''}${followed().length > 1 && it.ev.keyword ? `<span class="ev-kw">#${esc(it.ev.keyword)}</span>` : ''}</div>
@@ -1839,7 +1819,7 @@ function routeCard(r: RouteOut, phase: Phase, items: Item[], now: number): HTMLL
   const start = r.stops.find((s) => s.kind === 'start');
   const end = r.stops.find((s) => s.kind === 'end');
   const li = document.createElement('li');
-  li.className = `ev route-card phase-${phase} kind-activity${mine.some((m) => inScope(m.ev, m.distanceKm)) ? '' : ' out-of-range'}${selectedRoute === r.id ? ' selected' : ''}`;
+  li.className = `ev route-card phase-${phase} kind-activity${mine.some((m) => inScope(m.distanceKm)) ? '' : ' out-of-range'}${selectedRoute === r.id ? ' selected' : ''}`;
   li.innerHTML = `
     <div class="ev-title"><span class="dot"></span><span class="kind-tag">${isParade(r) ? '遊行' : '車掃'}</span>${esc(r.title)}${isParade(r) ? '' : ` <span class="muted">· ${r.stops.length} 站</span>`}</div>
     <div class="ev-meta">${
@@ -3145,7 +3125,7 @@ let panFrame = 0;
 
 /**
  * 在雷達上拖曳＝移動你的位置（變成手動位置）。拖的時候只重畫雷達、清單，範圍維持原本的公里數；
- * 放開才存下來、重抓附近的資料（雙北、全台的範圍也這時照新位置重算）
+ * 放開才存下來、重抓附近的資料（全台的範圍也這時照新位置重算）
  */
 function panRadar(bearing: number, km: number, done: boolean): void {
   // 「定位」「回到我的位置」飛到一半就拖：先到目的地，從那裡開始拖
@@ -3395,14 +3375,13 @@ const fetchRadiusKm = (km: number): number => (km > FETCH_RADIUS_KM ? WORLD_KM :
 /** 你在汪星（搭火箭過去，坐火箭回來為止） */
 const onWoof = (): boolean => youOn === 'woof';
 /**
- * 汪星上的範圍按鈕：汪星半徑只有約 6.6 km、陸地（台北）幾乎包住整顆，地球的 20 km、雙北、全台、全球都比整顆大，
- * 換成 1～5 km 和全球（整顆汪星剛好填滿雷達）
+ * 汪星上的範圍按鈕：汪星半徑只有約 6.6 km、陸地（台北）幾乎包住整顆，地球的 20 km、全台、全球都比整顆大，
+ * 換成 1、2、3、5 km 和全球（整顆汪星剛好填滿雷達）
  */
 const WOOF_CHIPS: Record<string, { km: number | 'all'; text: string; title: string }> = {
   '1': { km: 1, text: '1 km', title: '' },
   '5': { km: 2, text: '2 km', title: '' },
   '20': { km: 3, text: '3 km', title: '' },
-  region: { km: 4, text: '4 km', title: '' },
   taiwan: { km: 5, text: '5 km', title: '' },
   world: { km: 'all', text: '全球', title: '整顆汪星' },
 };
@@ -3439,7 +3418,6 @@ function scaleKmFor(setting: ScaleSetting): number {
   if (wc) return wc.km === 'all' ? woofKm() : wc.km;
   // 中心在別的星球（汪星）：範圍照存的，最近多少由 zoomRadar 照那顆星球管
   if (setting === 'custom') return Math.min(radar.spaceFocused ? customKm : Math.max(customKm, earthMinKm()), SPACE_MAX_KM);
-  if (setting === 'region') return shuangbeiRadiusKm(origin);
   if (setting === 'taiwan') return taiwanRadiusKm(origin);
   if (setting === 'world') return WORLD_KM;
   return Number(setting);
@@ -3926,7 +3904,7 @@ function renderRules(): void {
     <h3>多久找一次</h3>
     <ul>
       <li>Threads 每 ${r.intervalMin} 分鐘、新聞每 30 分鐘、官方行程每小時。</li>
-      <li>收${esc(r.region)}的發放和活動。雷達選「雙北」看台北市加新北市，選「全台」看全台灣與離島。</li>
+      <li>收${esc(r.region)}的發放和活動。雷達預設看方圓 50 km，拉遠到「全台」看全台灣與離島。</li>
     </ul>
     <h3>找哪些東西</h3>
     <ul>
@@ -5325,7 +5303,7 @@ function wireControls(): void {
   for (const b of scaleChips) {
     b.addEventListener('click', () => {
       if (tripping) return;
-      const st = (b.dataset.scale as ScaleSetting) ?? 'region';
+      const st = (b.dataset.scale as ScaleSetting) ?? 'custom';
       if (!onWoof()) {
         radar.resetSpace();
         setScale(st);

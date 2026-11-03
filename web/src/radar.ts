@@ -13,7 +13,7 @@ export interface RadarItem {
   office?: boolean;
   /** 約略位置，畫成空心 */
   approx?: boolean;
-  /** 在圓圈裡但不在範圍內（選「雙北」時的基隆、桃園）：跟超出範圍的一樣畫小、畫淡 */
+  /** 不在範圍內（全螢幕鋪滿時畫面角落、外圈外面的）：畫小、畫淡 */
   outside?: boolean;
   /** 還沒開始的清楚程度：1 快開始了（清楚）… 0 一週以上（淡、模糊）；沒給就照原樣 */
   fade?: number;
@@ -1448,7 +1448,7 @@ export class Radar {
     this.draw();
   }
 
-  /** 範圍的實際形狀（例如雙北的縣市界），畫成淡淡的輪廓；空陣列就不畫 */
+  /** 海岸線、縣市交界（範圍比 50 km 大時），畫成淡淡的虛線；空陣列就不畫 */
   setOutline(rings: Array<Array<{ bearing: number; distanceKm: number }>>, lines: Array<Array<{ bearing: number; distanceKm: number }>> = []): void {
     this.outline = rings;
     this.outlineLines = lines;

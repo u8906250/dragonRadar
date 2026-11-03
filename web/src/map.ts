@@ -125,7 +125,7 @@ export class MapView {
   /** 選到的那一則外面的亮環 */
   private selRing: Leaflet.CircleMarker | null = null;
   private routeLayer: Leaflet.LayerGroup | null = null;
-  /** 「雙北」範圍時的縣市界 */
+  /** 範圍比 50 km 大時的海岸線 */
   private outline: Leaflet.Polygon | null = null;
   private outlineRings: Array<Array<[number, number]>> = [];
   /** 洋流的地標（★）：其他模組不顯示 */
@@ -460,7 +460,7 @@ export class MapView {
     else this.landmarkGroup.remove();
   }
 
-  /** 範圍的實際形狀（雙北的縣市界）；空陣列就不畫 */
+  /** 海岸線（範圍比 50 km 大時）；空陣列就不畫 */
   setOutline(rings: Array<Array<[number, number]>>): void {
     if (rings === this.outlineRings) return;
     this.outlineRings = rings;
