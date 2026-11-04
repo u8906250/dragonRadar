@@ -3406,8 +3406,8 @@ const HQ_SERVICE_NEAR_M = 300;
  * （使用者說「學校、圖書館或親子的圖可以留幾個可以點的，其他改成更小的圖、不能點，因為內容都差不多」）
  */
 const HQ_SERVICE_REPS = 2;
-/** 衛福（健康服務中心）、運動中心只留 1 個（使用者說的） */
-const HQ_SERVICE_REPS_OF: Record<string, number> = { 健: 1, 動: 1 };
+/** 衛福（健康服務中心）、運動中心、親子館只留 1 個（使用者說的） */
+const HQ_SERVICE_REPS_OF: Record<string, number> = { 健: 1, 動: 1, 親: 1 };
 let hqServiceReps: Set<string> | null = null;
 function hqIsRep(sv: { kind: string; name: string }): boolean {
   if (!hq) return false;
