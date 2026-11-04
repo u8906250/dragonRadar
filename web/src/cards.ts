@@ -58,7 +58,7 @@ export const CARD_DEFS: CardDef[] = [
     no: 3,
     name: '你的市長',
     img: `${BASE}cards/mayor.webp`,
-    about: '你的市長沈伯洋。看完了洋流總部的政策：洋流號繞台北一圈，文化網、教育・午餐、通學區、親子、衛福都看過了。',
+    about: '你的市長沈伯洋',
     hints: ['洋流總部看完政策'],
     series: '洋流總部',
     found: () => '看完洋流總部的政策',
