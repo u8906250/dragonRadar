@@ -3583,7 +3583,7 @@ function hqHits(t0: number): Array<{ lat: number; lng: number; at: number; title
     }
   }
   const big = hq.HQ_STARS.find((st) => st.big);
-  if (big) hits.push({ lat: big.lat, lng: big.lng, at: hqNearestAt(t0, big), title: '北士科星群計畫', intro: I['北士科星群'] ?? '', r: 22 });
+  if (big) hits.push({ lat: big.lat, lng: big.lng, at: hqNearestAt(t0, big), title: '北士科星群計畫・台北研究院', intro: I['北士科星群'] ?? '', r: 22 });
   const br = hq.HQ_BRIDGE;
   hits.push({ lat: (br.from[0] + br.to[0]) / 2, lng: (br.from[1] + br.to[1]) / 2, at: hqStopAt(t0, br.stop), title: br.name, intro: I[br.name] ?? '', r: 12 });
   for (const c of hq.HQ_CANALS) {
@@ -3598,7 +3598,7 @@ function hqHits(t0: number): Array<{ lat: number; lng: number; at: number; title
     hits.push({ lat, lng, at: hqStopAt(t0, pd.stop), title: pd.name, intro: I[pd.name] ?? '', r: 16 });
   }
   const cityHall = hq.HQ_TOUR[hq.HQ_TOUR.length - 1];
-  hits.push({ lat: cityHall.lat, lng: cityHall.lng, at: t0 + HQ_SAIL_MS, title: '臺北市政府（公務員政策）', intro: I['臺北市政府'] ?? '', r: 18 });
+  hits.push({ lat: cityHall.lat, lng: cityHall.lng, at: t0 + HQ_SAIL_MS, title: '臺北市政府（公務員減壓）', intro: I['臺北市政府'] ?? '', r: 18 });
   for (const ar of hqAreas(t0)) hits.push({ lat: ar.center[0], lng: ar.center[1], at: ar.at, title: `${ar.label}`, intro: I[ar.label] ?? '', r: 26 });
   for (const b of hq.HQ_BOATS) hits.push({ lat: b.lat, lng: b.lng, at: hqNearestAt(t0, b), title: `水上活動（${b.kind === 'sup' ? 'SUP' : '龍舟'}）`, intro: I['水上活動'] ?? '', r: 12 });
   return hits;
