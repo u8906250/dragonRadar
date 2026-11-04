@@ -53,6 +53,8 @@ export interface MapRoute {
   stops?: Array<{ lat: number; lng: number; label: string; at: number; keep?: boolean }>;
   /** 終點用虛線畫出來的外框（台北市政府） */
   outline?: Array<[number, number]>;
+  /** 畫成一條河（洋流總部的特效）：跟著船（voyage）從起點長出來，河面上一道道波光往下游流 */
+  river?: boolean;
 }
 
 /** 彩虹旗的六個顏色（紅、橙、黃、綠、藍、紫） */
@@ -142,6 +144,8 @@ export class MapView {
   private routes: MapRoute[] = [];
   /** 洋流號：路線的經緯度（cum 是每一點走了幾公里）和船，每一格畫面照現在的時間擺；往哪邊開記在 boatLeft */
   private boatTracks: Array<{ id: string; marker: Leaflet.Marker; lat: Float64Array; lng: Float64Array; cum: Float64Array; voyage?: number }> = [];
+  /** 河流：整條的經緯度（cum 是每一點走了幾公里）、河岸、河面、亮的那道、兩道波光，畫到哪（at，沒變就不重畫） */
+  private riverTracks: Array<{ pts: Array<[number, number]>; cum: Float64Array; voyage: number; at: number; lines: Leaflet.Polyline[] }> = [];
   private readonly boatLeft = new Map<string, boolean>();
   private boatFrame = 0;
   private bottleLayer: Leaflet.LayerGroup | null = null;
@@ -564,6 +568,7 @@ export class MapView {
     if (!L || !layer) return;
     layer.clearLayers();
     this.boatTracks = [];
+    this.riverTracks = [];
     for (const r of this.routes) {
       if (r.state === 'done') continue;
       if (r.rainbow) {
@@ -597,6 +602,8 @@ export class MapView {
         }
         continue;
       }
+      // 河流（洋流總部的特效）：跟著船長出來的一條河，不畫路段
+      if (r.river && r.voyage !== undefined) this.addRiver(r, r.voyage);
       // 只開一趟的（洋流總部的特效）只畫水，不分段上色
       for (const seg of r.voyage !== undefined ? [] : r.segments) {
         const c = CROWD[crowdOf(seg.people, seg.target)];
@@ -612,7 +619,7 @@ export class MapView {
       }
       // 洋流車掃：整條路線是一道水流（認領顏色下面淡藍的水，上面深藍的水紋、白色的浪花用不同的速度往前流；點不到，點的還是路段）；
       // 進行中剛出發、之後每隔一段時間，深藍、淺藍的浪從出發的地方湧到終點再淡掉
-      if (r.ocean) {
+      if (r.ocean && !r.river) {
         const whole = r.segments.flatMap((sg) => sg.path);
         const line = { lineCap: 'round', lineJoin: 'round', interactive: false } as const;
         const water = L.polyline(whole, { ...line, color: '#4cc3e6', weight: 18, opacity: 0.35 });
@@ -672,6 +679,48 @@ export class MapView {
     this.moveBoats();
   }
 
+  /** 河流（洋流總部的特效）：河岸淺色寬一點、河面、中間一道亮的、兩道往下游流的波光（地圖上寬度固定，螢幕像素），每一格照船開到哪畫到哪 */
+  private addRiver(r: MapRoute, voyage: number): void {
+    const L = this.L;
+    const layer = this.routeLayer;
+    const pts = r.segments.flatMap((sg) => sg.path);
+    if (!L || !layer || pts.length < 2) return;
+    const cum = new Float64Array(pts.length);
+    for (let i = 1; i < pts.length; i++) cum[i] = cum[i - 1] + haversineKm({ lat: pts[i - 1][0], lng: pts[i - 1][1] }, { lat: pts[i][0], lng: pts[i][1] });
+    const o = { lineCap: 'round', lineJoin: 'round', interactive: false } as const;
+    const lines = [
+      L.polyline([], { ...o, color: '#bfe8f5', weight: 15, opacity: 0.9 }),
+      L.polyline([], { ...o, color: '#3fa9dc', weight: 9, opacity: 0.92 }),
+      L.polyline([], { ...o, color: '#a6e6fa', weight: 2, opacity: 0.85 }),
+      L.polyline([], { ...o, color: '#ffffff', weight: 1.6, opacity: 0.85, className: 'map-river-flow' }),
+    ];
+    for (const l of lines) {
+      layer.addLayer(l);
+      // 跟著淡入、放完煙火淡掉
+      const e = l.getElement() as SVGElement | undefined;
+      if (e) Object.assign(e.style, { animationDuration: `${HQ_VOYAGE_MS}ms`, animationDelay: `${voyage - Date.now()}ms` });
+      e?.classList.add('map-voyage');
+    }
+    const t = { pts, cum, voyage, at: -1, lines };
+    this.riverTracks.push(t);
+    this.drawRiver(t, voyagePhase(Date.now() - voyage).at);
+  }
+
+  private drawRiver(t: (typeof this.riverTracks)[number], at: number): void {
+    if (Math.abs(at - t.at) < 1e-4) return;
+    t.at = at;
+    const { pts, cum } = t;
+    const want = at * cum[cum.length - 1];
+    let i = 0;
+    while (i < pts.length && cum[i] <= want) i++;
+    const shown = pts.slice(0, i);
+    if (i > 0 && i < pts.length) {
+      const w = (want - cum[i - 1]) / (cum[i] - cum[i - 1] || 1);
+      shown.push([pts[i - 1][0] + (pts[i][0] - pts[i - 1][0]) * w, pts[i - 1][1] + (pts[i][1] - pts[i - 1][1]) * w]);
+    }
+    for (const l of t.lines) l.setLatLngs(shown.length > 1 ? shown : []);
+  }
+
   /** 洋流號：路線的經緯度照實際距離記下來，船是點不到的標記（在其他標記下面） */
   private addBoat(r: MapRoute): void {
     const L = this.L;
@@ -699,6 +748,8 @@ export class MapView {
     if (this.el.offsetWidth > 0) {
       const now = Date.now();
       const lap = boatPhase(now);
+      // 河流跟著船長出來
+      for (const t of this.riverTracks) this.drawRiver(t, voyagePhase(now - t.voyage).at);
       for (const t of this.boatTracks) {
         // 只開一趟的（洋流總部的特效）照出發的時間走，其他的一直重複開
         const { at, alpha } = t.voyage !== undefined ? voyagePhase(now - t.voyage) : lap;

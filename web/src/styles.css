@@ -333,6 +333,16 @@ path.map-water-glint { animation: water-flow-map 1.1s linear infinite; }
 /* 那一趟的水：跟著淡入、放完煙火淡掉（animation-duration、delay 寫在元素上，照 HQ_VOYAGE_MS） */
 .route-voyage, .map-voyage { animation-name: route-voyage; animation-timing-function: linear; animation-fill-mode: both; }
 @keyframes route-voyage { 0% { opacity: 0; } 2% { opacity: 1; } 96% { opacity: 1; } 100% { opacity: 0; } }
+/* 河流（洋流總部的特效，radar.ts 的 addRiver）：淺色的河岸、藍色的河面、中間一道亮的，兩道白色的波光照不同的速度往下游流（像河面的反光，不是車道線） */
+.radar .route-river { pointer-events: none; }
+.radar .river-bank { fill: #bfe8f5; fill-opacity: 0.9; stroke: none; }
+.radar .river-body { fill: #3fa9dc; fill-opacity: 0.92; stroke: none; }
+.radar .river-shine { fill: none; stroke: #a6e6fa; stroke-width: 1.4; stroke-opacity: 0.8; stroke-linecap: round; stroke-linejoin: round; vector-effect: non-scaling-stroke; }
+.radar .river-flow, .map-river-flow { fill: none; stroke: #fff; stroke-linecap: round; stroke-linejoin: round; stroke-dasharray: 2 7 5 12 3 9; animation: river-flow 1.8s linear infinite; }
+.radar .river-flow { stroke-width: 1.1; stroke-opacity: 0.85; vector-effect: non-scaling-stroke; }
+.radar .river-flow.b { stroke-dasharray: 4 11 2 8 6 14; stroke-opacity: 0.6; animation-name: river-flow-b; animation-duration: 2.6s; }
+@keyframes river-flow { to { stroke-dashoffset: -38; } }
+@keyframes river-flow-b { to { stroke-dashoffset: -45; } }
 /* 終點（台北市政府）的外框：虛線；經過的區名船經過時出現一下再淡掉，終點的名字一直寫著 */
 .radar .voyage-outline { fill: #ffd43b; fill-opacity: 0.18; stroke: #15171c; stroke-width: 1.4; stroke-dasharray: 4 3; stroke-linejoin: round; vector-effect: non-scaling-stroke; pointer-events: none; }
 .voyage-stop { pointer-events: none; }

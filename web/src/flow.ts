@@ -100,10 +100,16 @@ export const BOAT_SVG =
 export const BOAT_TITLE = '洋流號：沿著路線重複播放的動畫，不是車隊的實際位置';
 
 /**
- * 洋流總部的特效（點了洋流總部）：洋流號只開一趟，HQ_SAIL_MS 像一道海流流過台北 12 個區、流進台北市政府（起步、到站慢慢加速減速，中間等速），
+ * 河流（洋流總部的特效）在整條線上走到 f（0～1）那裡的半寬（螢幕像素）：源頭窄、越往下游越寬，
+ * 中間自然地忽寬忽窄（照 f 算，放大縮小都一樣）
+ */
+export const riverHalfWidth = (f: number): number => (2 + 4.5 * f) * (1 + 0.22 * Math.sin(2 * Math.PI * 17 * f) + 0.12 * Math.sin(2 * Math.PI * 41 * f + 1.3));
+
+/**
+ * 洋流總部的特效（點了洋流總部）：洋流號只開一趟，HQ_SAIL_MS 沿著真的路像一條河流繞過台北 12 個區、流到台北市政府（起步、到站慢慢加速減速，中間等速），
  * 到了先停 HQ_ARRIVE_MS（雷達拉近市政府），再放 FIREWORKS_MS 的煙火，放完船、水一起淡掉；雷達、地圖照同一個時鐘（Date.now()）
  */
-export const HQ_SAIL_MS = 45_000;
+export const HQ_SAIL_MS = 75_000;
 export const HQ_ARRIVE_MS = 1800;
 export const FIREWORKS_MS = 4400;
 export const HQ_VOYAGE_MS = HQ_SAIL_MS + HQ_ARRIVE_MS + FIREWORKS_MS;

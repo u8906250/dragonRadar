@@ -1,5 +1,5 @@
 import type { BlipStyle, EventKind, Phase, SweepStyle } from './types';
-import { alongLine, BOAT_SVG, BOAT_TITLE, boatPhase, fireworksSvg, FIREWORKS_MS, flowOut, HQ_VOYAGE_MS, RAINBOW_FLOW_TOTAL, RAINBOW_STAGGER_MS, surge, SURGE_TOTAL, voyagePhase } from './flow';
+import { alongLine, BOAT_SVG, BOAT_TITLE, boatPhase, fireworksSvg, FIREWORKS_MS, flowOut, HQ_VOYAGE_MS, RAINBOW_FLOW_TOTAL, RAINBOW_STAGGER_MS, riverHalfWidth, surge, SURGE_TOTAL, voyagePhase } from './flow';
 
 export interface RadarItem {
   id: number;
@@ -52,6 +52,8 @@ export interface RadarRoute {
   stops?: Array<{ bearing: number; distanceKm: number; label: string; at: number; keep?: boolean }>;
   /** 終點用虛線畫出來的外框（台北市政府） */
   outline?: Array<{ bearing: number; distanceKm: number }>;
+  /** 畫成一條河（洋流總部的特效）：跟著船（voyage）從起點長出來，寬度自然變化、越往下游越寬，河面上一道道波光往下游流 */
+  river?: boolean;
 }
 
 /** 放大時畫的街道：每條線是 [往東 km, 往北 km, 往東 km, …]（相對於圓心）；major 大路、minor 其他街道 */
@@ -391,6 +393,8 @@ export class Radar {
   onRoute: ((id: string) => void) | null = null;
   /** 洋流號：路線在畫面上的折線（SVG 座標，cum 是每一點走了多遠）和船，每一格畫面照現在的時間擺；往哪邊開記在 boatLeft（重畫時接著用） */
   private boatTracks: Array<{ id: string; g: SVGGElement; flip: SVGGElement; xs: Float64Array; ys: Float64Array; cum: Float64Array; voyage?: number }> = [];
+  /** 河流：畫面上的折線（cum 是每一點走了多遠）、每一點往左的法線和半寬（SVG 單位）、畫到哪（at，沒變就不重畫） */
+  private riverTracks: Array<{ xs: Float64Array; ys: Float64Array; nx: Float64Array; ny: Float64Array; hw: Float64Array; cum: Float64Array; voyage: number; at: number; paths: SVGPathElement[] }> = [];
   private readonly boatLeft = new Map<string, boolean>();
   private boatFrame = 0;
   private readonly stack: HTMLDivElement;
@@ -1654,6 +1658,7 @@ export class Radar {
   private drawRoutes(): void {
     this.routeLayer.replaceChildren();
     this.boatTracks = [];
+    this.riverTracks = [];
     for (const r of this.routes) {
       if (r.state === 'done' || r.points.length < 2 || this.earthHidden) continue;
       // 太空：有一段在地球另一面就不畫（直線會穿過地球）
@@ -1676,9 +1681,11 @@ export class Radar {
       }
       // 洋流車掃：整條路線是一道水流（路線下面淡藍的水，上面深藍的水紋、白色的浪花用不同的速度往前流）；
       // 進行中剛出發、之後每隔一段時間，深藍、淺藍的浪從出發的地方湧到終點再淡掉
-      if (r.ocean) this.routeLayer.appendChild(el('path', { class: 'route-water', d }));
-      this.routeLayer.appendChild(el('path', { class: `route route-${r.state}${r.ocean ? ' route-ocean-line' : ''}`, d }));
-      if (r.ocean) {
+      // 河流（洋流總部的特效）：不畫路線的線，畫一條跟著船長出來的河（addRiver）
+      if (r.river) this.addRiver(r);
+      else if (r.ocean) this.routeLayer.appendChild(el('path', { class: 'route-water', d }));
+      if (!r.river) this.routeLayer.appendChild(el('path', { class: `route route-${r.state}${r.ocean ? ' route-ocean-line' : ''}`, d }));
+      if (r.ocean && !r.river) {
         const g = el('g', { class: 'route-ocean' });
         const waves = r.state === 'live' ? [el('path', { class: 'ocean-surge ocean-deep', d }), el('path', { class: 'ocean-surge ocean-light', d })] : [];
         g.append(...waves, el('path', { class: 'water-flow', d }), el('path', { class: 'water-glint', d }));
@@ -1749,6 +1756,74 @@ export class Radar {
     this.boatTracks.push({ id: r.id, g, flip: g.querySelector('.boat-flip') as SVGGElement, xs, ys, cum, voyage: r.voyage });
   }
 
+  /**
+   * 河流（洋流總部的特效）：照畫面上的路線記下折線，每一點的法線、半寬（riverHalfWidth，螢幕像素換成 SVG 單位）；
+   * 河岸（淺色、寬一點）、河面、中間一道亮的、兩道往下游流的波光，每一格照船開到哪畫到哪（drawRiver）
+   */
+  private addRiver(r: RadarRoute): void {
+    const n = r.points.length;
+    const [xs, ys, cum] = [new Float64Array(n), new Float64Array(n), new Float64Array(n)];
+    r.points.forEach((pt, i) => {
+      const p = polar(pt.bearing - this.heading, this.ratio(pt.distanceKm) * (R - 8));
+      [xs[i], ys[i]] = [p.x, p.y];
+      cum[i] = i > 0 ? cum[i - 1] + Math.hypot(xs[i] - xs[i - 1], ys[i] - ys[i - 1]) : 0;
+    });
+    const total = cum[n - 1];
+    if (!(total > 0) || r.voyage === undefined) return;
+    const k = this.squarePx > 0 ? SIZE / this.squarePx : 1;
+    const [nx, ny, hw] = [new Float64Array(n), new Float64Array(n), new Float64Array(n)];
+    for (let i = 0; i < n; i++) {
+      const [a, b] = [Math.max(0, i - 1), Math.min(n - 1, i + 1)];
+      const [dx, dy] = [xs[b] - xs[a], ys[b] - ys[a]];
+      const len = Math.hypot(dx, dy) || 1;
+      [nx[i], ny[i]] = [-dy / len, dx / len];
+      hw[i] = riverHalfWidth(cum[i] / total) * k;
+    }
+    const g = el('g', { class: 'route-river' });
+    const paths = ['river-bank', 'river-body', 'river-shine', 'river-flow', 'river-flow b'].map((c) => el('path', { class: c }) as SVGPathElement);
+    g.append(...paths);
+    this.routeLayer.appendChild(g);
+    const t = { xs, ys, nx, ny, hw, cum, voyage: r.voyage, at: -1, paths };
+    this.riverTracks.push(t);
+    this.drawRiver(t, voyagePhase(Date.now() - r.voyage).at);
+  }
+
+  /** 河流畫到 at（0～1）：兩岸照法線、半寬往外推圍成一塊，波光是河面中間偏左、偏右的兩條線 */
+  private drawRiver(t: (typeof this.riverTracks)[number], at: number): void {
+    if (Math.abs(at - t.at) < 1e-4) return;
+    t.at = at;
+    const { xs, ys, nx, ny, hw, cum } = t;
+    const n = cum.length;
+    const want = at * cum[n - 1];
+    const k = this.squarePx > 0 ? SIZE / this.squarePx : 1;
+    // 畫到哪：整點，再加最前面那一點（內插）
+    const idx: Array<[number, number, number]> = [];
+    for (let i = 0; i < n && cum[i] <= want; i++) idx.push([xs[i], ys[i], i]);
+    if (idx.length && idx.length < n) {
+      const i = idx.length;
+      const w = (want - cum[i - 1]) / (cum[i] - cum[i - 1] || 1);
+      idx.push([xs[i - 1] + (xs[i] - xs[i - 1]) * w, ys[i - 1] + (ys[i] - ys[i - 1]) * w, i - 1]);
+    }
+    if (idx.length < 2) {
+      for (const p of t.paths) p.removeAttribute('d');
+      return;
+    }
+    const f1 = (v: number): string => v.toFixed(1);
+    const side = (off: (i: number) => number): string[] => idx.map(([x, y, i]) => `${f1(x + nx[i] * off(i))} ${f1(y + ny[i] * off(i))}`);
+    const ribbon = (extra: number): string => {
+      const left = side((i) => hw[i] + extra);
+      const right = side((i) => -(hw[i] + extra)).reverse();
+      return `M${left.join('L')}L${right.join('L')}Z`;
+    };
+    const line = (frac: number): string => `M${side((i) => hw[i] * frac).join('L')}`;
+    const [bank, body, shine, flowA, flowB] = t.paths;
+    bank.setAttribute('d', ribbon(2.2 * k));
+    body.setAttribute('d', ribbon(0));
+    shine.setAttribute('d', line(0));
+    flowA.setAttribute('d', line(0.45));
+    flowB.setAttribute('d', line(-0.4));
+  }
+
   /** 每一格畫面把洋流號擺到現在的位置（雷達藏起來時不擺，回來接著開）；沒有船就停 */
   private moveBoats = (): void => {
     cancelAnimationFrame(this.boatFrame);
@@ -1758,6 +1833,8 @@ export class Radar {
       const now = Date.now();
       const lap = boatPhase(now);
       const k = (SIZE / this.squarePx).toFixed(4);
+      // 河流跟著船長出來
+      for (const t of this.riverTracks) this.drawRiver(t, voyagePhase(now - t.voyage).at);
       for (const t of this.boatTracks) {
         // 只開一趟的（洋流總部的特效）照出發的時間走，其他的一直重複開
         const { at, alpha } = t.voyage !== undefined ? voyagePhase(now - t.voyage) : lap;

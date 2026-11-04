@@ -4,7 +4,7 @@ import { addKeyword, collectLetter, deletePushSubscription, locateFeedbackPlace,
 import { compassSupported, startCompass } from './compass';
 import { bearingDeg, compassLabel, destination, formatKm, haversineKm, taiwanRadiusKm, type LatLng } from './geo';
 import { TAIWAN_RINGS } from './taiwan';
-import { CITY_HALL_OUTLINE, HQ_TOUR, HQ_TOUR_AT, HQ_VOYAGE, LANDMARKS } from './landmarks';
+import { LANDMARKS } from './landmarks';
 import { getModule, JOB_RISK_TEXT, JOB_SAFETY_TIPS, MEETUP_SAFETY_TIPS, MODULES, OFFER_SAFETY_TIPS, SEEK_SAFETY_TIPS, type ModuleDef, type ModuleId } from './modules';
 import { X_MAX_WEIGHT, xLength } from './xcount';
 import { shortAddress, splitPlace } from './place';
@@ -1493,19 +1493,18 @@ function render(): void {
       };
     }).concat(
       // 洋流總部的特效：洋流號只開一趟到台北市政府、到了放煙火（跟車掃一樣的水）
-      hqVoyageAt === null
+      hqVoyageAt === null || !hq
         ? []
         : [
             {
               id: 'hq-voyage',
               state: 'live' as const,
-              ocean: true,
-              flowAt: hqVoyageAt,
+              river: true,
               voyage: hqVoyageAt,
               fireworks: hqVoyageAt + HQ_SAIL_MS + HQ_ARRIVE_MS,
-              points: HQ_VOYAGE.map(toRadarAt),
+              points: hq.HQ_VOYAGE.map(toRadarAt),
               stops: hqTourStops(hqVoyageAt).map((st) => ({ ...st, ...toRadarAt([st.lat, st.lng]) })),
-              outline: CITY_HALL_OUTLINE.map(toRadarAt),
+              outline: hq.CITY_HALL_OUTLINE.map(toRadarAt),
             },
           ],
     ),
@@ -1545,7 +1544,7 @@ function render(): void {
       // 回報的車掃：已經經過的那段畫淡
       segments: r.segments.map((sg) => ({ ...sg, passed: !!sg.toAt && sg.toAt <= now })),
     })).concat(
-      hqVoyageAt === null
+      hqVoyageAt === null || !hq
         ? []
         : [
             {
@@ -1553,13 +1552,12 @@ function render(): void {
               title: '洋流號',
               state: 'live' as const,
               claimUrl: null,
-              ocean: true,
-              flowAt: hqVoyageAt,
+              river: true,
               voyage: hqVoyageAt,
               fireworks: hqVoyageAt + HQ_SAIL_MS + HQ_ARRIVE_MS,
-              segments: [{ seq: 1, from: '洋流總部', to: '台北市政府', path: HQ_VOYAGE, people: 0, target: 0 }],
+              segments: [{ seq: 1, from: '洋流總部', to: '台北市政府', path: hq.HQ_VOYAGE, people: 0, target: 0 }],
               stops: hqTourStops(hqVoyageAt),
-              outline: CITY_HALL_OUTLINE,
+              outline: hq.CITY_HALL_OUTLINE,
             },
           ],
     ),
@@ -3074,34 +3072,44 @@ function selectLandmark(id: string | null): void {
 }
 
 /**
- * 點了洋流總部：洋流號從總部像一道海流流過台北 12 個區、流進台北市政府（只開一趟，landmarks.ts 的 HQ_VOYAGE），經過每一區寫一下區名，
- * 終點的市政府用虛線畫出來；到了雷達（地圖）拉近市政府，放煙火（flow.ts 的 fireworksSvg）。
+ * 點了洋流總部：洋流號從總部沿著真的路，像一條河流繞過整個台北市 12 個區、流到台北市政府（只開一趟；路線在 hq-voyage.ts，
+ * 第一次點才載入），河跟著船長出來，經過每一區寫一下區名，終點的市政府用虛線畫出來；到了雷達（地圖）拉近市政府，放煙火（flow.ts 的 fireworksSvg）。
  * 雷達先飛到看得到整條（變成手動位置，按「定位」回來；本來就看得到整條就不動）；中途自己拖、縮放過，到了就不拉近。
  * hqVoyageAt 是出發的時間（Date.now() 的毫秒），放完拿掉；你在汪星、火箭飛行中沒有
  */
+let hq: typeof import('./hq-voyage') | null = null;
 let hqVoyageAt: number | null = null;
 let hqVoyageTimers: number[] = [];
-/** 看得到整條的範圍：正中間（整條線的範圍中間）、外圈幾公里（離正中間最遠的點再多一成） */
-const HQ_TOUR_VIEW = ((): LatLng & { km: number } => {
-  const lats = HQ_VOYAGE.map(([a]) => a);
-  const lngs = HQ_VOYAGE.map(([, b]) => b);
-  const mid = { lat: (Math.min(...lats) + Math.max(...lats)) / 2, lng: (Math.min(...lngs) + Math.max(...lngs)) / 2 };
-  return { ...mid, km: Math.ceil(Math.max(...HQ_VOYAGE.map(([lat, lng]) => haversineKm(mid, { lat, lng }))) * 1.1 * 2) / 2 };
-})();
 /** 到了拉近到外圈幾公里（看得到市政府的虛線外框和煙火） */
 const HQ_END_KM = 0.7;
-const CITY_HALL = HQ_TOUR[HQ_TOUR.length - 1];
+/** 看得到整條的範圍：正中間（整條線的範圍中間）、外圈幾公里（離正中間最遠的點再多一成，取到 0.5 km） */
+function hqTourView(path: Array<[number, number]>): LatLng & { km: number } {
+  const lats = path.map(([a]) => a);
+  const lngs = path.map(([, b]) => b);
+  const mid = { lat: (Math.min(...lats) + Math.max(...lats)) / 2, lng: (Math.min(...lngs) + Math.max(...lngs)) / 2 };
+  return { ...mid, km: Math.ceil(Math.max(...path.map(([lat, lng]) => haversineKm(mid, { lat, lng }))) * 1.1 * 2) / 2 };
+}
 function startHqVoyage(): void {
   if (youOn === 'woof' || tripping || !mod.current) return;
+  if (!hq) {
+    void import('./hq-voyage').then((m) => {
+      hq = m;
+      startHqVoyage();
+    });
+    return;
+  }
+  const { HQ_VOYAGE, HQ_TOUR } = hq;
+  const cityHall = HQ_TOUR[HQ_TOUR.length - 1];
   for (const t of hqVoyageTimers) window.clearTimeout(t);
   let wait = 0;
   const started = Date.now();
   if (view === 'map') map.focusPath(HQ_VOYAGE);
   else {
+    const whole = hqTourView(HQ_VOYAGE);
     const far = Math.max(...HQ_VOYAGE.map(([lat, lng]) => haversineKm(origin, { lat, lng })));
-    if (radar.spaceMoved || scaleKm > SPACE_FROM_KM || far > scaleKm * 0.92 || scaleKm > HQ_TOUR_VIEW.km * 2) {
+    if (radar.spaceMoved || scaleKm > SPACE_FROM_KM || far > scaleKm * 0.92 || scaleKm > whole.km * 2) {
       if (radar.spaceMoved) radar.resetSpace();
-      zoomToKm(HQ_TOUR_VIEW.km, { lat: HQ_TOUR_VIEW.lat, lng: HQ_TOUR_VIEW.lng, source: 'manual' });
+      zoomToKm(whole.km, { lat: whole.lat, lng: whole.lng, source: 'manual' });
       wait = 1200;
     }
   }
@@ -3112,9 +3120,9 @@ function startHqVoyage(): void {
     window.setTimeout(() => (tour = { lat: origin.lat, lng: origin.lng, km: scaleKm }), wait + 400),
     window.setTimeout(() => {
       if (view === 'map') {
-        if (map.userMovedAt < started + 300) map.flyToLatLng(CITY_HALL, 17);
+        if (map.userMovedAt < started + 300) map.flyToLatLng(cityHall, 17);
       } else if (tour && haversineKm(origin, tour) < 0.05 && Math.abs(scaleKm / tour.km - 1) < 0.05) {
-        zoomToKm(HQ_END_KM, { lat: CITY_HALL.lat, lng: CITY_HALL.lng, source: 'manual' });
+        zoomToKm(HQ_END_KM, { lat: cityHall.lat, lng: cityHall.lng, source: 'manual' });
       }
     }, wait + HQ_SAIL_MS),
     window.setTimeout(() => {
@@ -3124,11 +3132,19 @@ function startHqVoyage(): void {
   ];
   render();
 }
-/** 經過的區名（總部那一站有星星不用寫）、終點一直寫著「臺北市政府」 */
+/** 經過的區名（每一區寫第一次經過的那一站；總部那一站有星星不用寫）、終點一直寫著「臺北市政府」 */
 function hqTourStops(t0: number): Array<{ lat: number; lng: number; label: string; at: number; keep?: boolean }> {
+  if (!hq) return [];
+  const { HQ_TOUR, HQ_TOUR_AT } = hq;
+  const seen = new Set([HQ_TOUR[0].district]);
+  const end = HQ_TOUR[HQ_TOUR.length - 1];
   return [
-    ...HQ_TOUR.slice(1).map((st, i) => ({ lat: st.lat, lng: st.lng, label: st.district, at: t0 + voyageTimeOf(HQ_TOUR_AT[i + 1]) })),
-    { lat: CITY_HALL.lat, lng: CITY_HALL.lng, label: CITY_HALL.place, at: t0, keep: true },
+    ...HQ_TOUR.flatMap((st, i) => {
+      if (seen.has(st.district)) return [];
+      seen.add(st.district);
+      return [{ lat: st.lat, lng: st.lng, label: st.district, at: t0 + voyageTimeOf(HQ_TOUR_AT[i]) }];
+    }),
+    { lat: end.lat, lng: end.lng, label: end.place, at: t0, keep: true },
   ];
 }
 
