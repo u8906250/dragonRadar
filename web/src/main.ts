@@ -3402,12 +3402,12 @@ type HqIcon = { lat: number; lng: number; at: number; kind: 'hut' | 'stadium' | 
 /** 其他政見的地方：離路線多近才沿路冒出來 */
 const HQ_SERVICE_NEAR_M = 300;
 /**
- * 每一種地方只留幾個大的、能點的（有介紹）：沿路最先出現的 2 個（沿路不夠就從清單補）；其他畫小圓點、不能點
+ * 每一種地方只留幾個大的、能點的（有介紹）：沿路最先出現的 1～2 個（沿路不夠就從清單補）；其他畫小圓點、不能點
  * （使用者說「學校、圖書館或親子的圖可以留幾個可以點的，其他改成更小的圖、不能點，因為內容都差不多」）
  */
-const HQ_SERVICE_REPS = 2;
-/** 衛福（健康服務中心）、運動中心、親子館只留 1 個（使用者說的） */
-const HQ_SERVICE_REPS_OF: Record<string, number> = { 健: 1, 動: 1, 親: 1 };
+const HQ_SERVICE_REPS = 1;
+/** 國小、國中各留 2 個；健康服務中心、運動中心、親子館、圖書館使用者一個一個說只留 1 個 */
+const HQ_SERVICE_REPS_OF: Record<string, number> = { 小: 2, 中: 2 };
 let hqServiceReps: Set<string> | null = null;
 function hqIsRep(sv: { kind: string; name: string }): boolean {
   if (!hq) return false;
