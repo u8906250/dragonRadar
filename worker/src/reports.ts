@@ -11,6 +11,7 @@ import { cleanTags, cleanTopic, type ActivityPart, type EventKind } from './extr
 import { fetchThreadsPost, resolveThreadsLink, shortcodeToUnix, withLocationTag } from './sources/link';
 import { sha1Hex } from './sources/text';
 import { creditReport, uncreditReport, type ReportReward } from './cards';
+import { learnTags, manualTags } from './learnedTags';
 
 /** 只收這麼新的貼文，太舊的公告通常已經過期 */
 export const MAX_LINK_AGE_SEC = 7 * 86400;
@@ -315,6 +316,8 @@ interface StoredPlan {
   note?: string | null;
   /** 用哪一版規則判讀的（PLAN_VERSION），舊資料沒有 */
   v?: number;
+  /** 判讀出來的關鍵字（回報的人直接修改過才記）：放上雷達時跟最後的比，多出來的是手動加的（learnedTags.ts 記成候選） */
+  judgedTags?: string[];
 }
 
 /** 存進 posts.confirm_plan：記下判讀規則的版本 */
@@ -573,6 +576,13 @@ export async function confirmLink(env: Env, body: { postId?: unknown; token?: un
   const outcome = summarize(result.reasons);
   // 放上雷達了：算一則回報（收集卡、道具）；算失敗不影響回報
   const reward = outcome === 'added' ? await creditReport(env, device, post.id, now).catch((e) => (console.warn('credit failed', e), null)) : null;
+  // 回報的人直接修改時手動加的關鍵字：記成候選，管理者採用了之後的判讀才用（記失敗不影響回報）
+  if (outcome === 'added' && plan.judgedTags) {
+    const module = moduleOf(post.module);
+    const final = plan.items.flatMap((it) => (it.plan ? tagsOf(it.plan.extra) : []));
+    const added = manualTags(module, final, plan.judgedTags);
+    if (added.length > 0) await learnTags(env, module, added, post.id, now).catch((e) => console.warn('learn tags failed', e));
+  }
   return { existed: false, outcome, reasons: result.reasons, events: await eventsForResult(env, post.id, result.reasons, now), permalink, ...(reward ? { reward } : {}) };
 }
 
@@ -693,7 +703,8 @@ export async function editLink(env: Env, body: { postId?: unknown; token?: unkno
   const items = await planManual(env, acts, now, post.text, routeTitle, tags);
   const tzs = items.map((it) => it.plan?.tz ?? it.fail?.tz ?? null);
   const note = editSummary(stored ? editItemsOf(stored.items) : [], acts, items.map((it) => !!it.plan), items.some((it) => it.route) ? '站' : '場', tzs) ?? post.supplement ?? null;
-  const plan: StoredPlan = { items, early: null };
+  // 判讀出來的關鍵字：改過好幾次的，照第一次改之前的
+  const plan: StoredPlan = { items, early: null, judgedTags: stored?.judgedTags ?? tags };
   await env.DB.prepare("UPDATE posts SET supplement = ?, confirm_plan = ?, confirm_state = 'pending' WHERE id = ?").bind(note, storePlan(plan), post.id).run();
   return previewResult(env, { ...post, supplement: note }, plan, false, now);
 }

@@ -43,6 +43,10 @@
     .pin-msg.err { color: #b3261e; font-weight: 700; }
     .pin-msg:empty { display: none; }
     .pin-marker span { display: block; width: 18px; height: 18px; margin: 2px 0 0 5px; border-radius: 50% 50% 50% 0; background: #dc2626; border: 3px solid #fff; box-shadow: 0 1px 4px rgba(0, 0, 0, 0.45); transform: rotate(-45deg); box-sizing: border-box; }
+    .tags-off-row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+    #tags-off { margin-top: 12px; }
+    #tags-off summary { cursor: pointer; font-size: 14px; color: #5d5850; }
+    #tags-off .list { margin-top: 8px; }
     .pin-mark-label { font-size: 12px; font-weight: 700; padding: 0 6px; }
     [hidden] { display: none !important; }
   </style>
@@ -77,6 +81,12 @@
       <div id="result" class="result" hidden aria-live="polite"></div>
       <ul id="list" class="list" aria-live="polite"></ul>
       <p id="list-msg" class="msg err" aria-live="polite"></p>
+
+      <h2>手動加的關鍵字</h2>
+      <p class="meta">回報的人直接修改時加的關鍵字（判讀沒抽到的），放上雷達後列在這裡。按「採用」後，同一個雷達之後的貼文內文寫到就自動標上（只影響關鍵字，其他判讀不變）。</p>
+      <ul id="tags" class="list" aria-live="polite"></ul>
+      <details id="tags-off" hidden><summary>不要的關鍵字</summary><ul class="list"></ul></details>
+      <p id="tags-msg" class="msg err" aria-live="polite"></p>
     </section>
   </article>
 </main>
@@ -137,7 +147,45 @@
       $('#panel').hidden = !loggedIn;
     }
 
+    /** 手動加的關鍵字：候選（採用、不要）、採用的（拿掉）、不要的（收在下面，可以改回採用） */
+    const MODULE_NAMES = { current: '洋流雷達', dog: '狗狗陪伴', badminton: '羽球臨打', food: '美食品味', work: '找工作' };
+    const TAG_STATUS = { pending: '候選', adopted: '採用中', rejected: '不要' };
+    function tagRow(t) {
+      const btn = (to, label, primary = false) => `<button type="button" class="btn${primary ? ' primary' : ''}" data-tag-status="${to}" data-module="${esc(t.module)}" data-tag="${esc(t.tag)}">${label}</button>`;
+      const acts = t.status === 'pending' ? btn('adopted', '採用', true) + btn('rejected', '不要') : t.status === 'adopted' ? btn('rejected', '拿掉') : btn('adopted', '改成採用');
+      return `<li class="fb"><div class="fb-head"><span><span class="tag">${esc(MODULE_NAMES[t.module] || t.module)}</span> ${TAG_STATUS[t.status] || esc(t.status)}</span><span>${t.posts} 則回報加過・${when(t.updatedAt)}</span></div>
+        <b>#${esc(t.tag)}</b><div class="row">${acts}</div></li>`;
+    }
+    function renderTags(tags) {
+      const on = tags.filter((t) => t.status !== 'rejected');
+      const off = tags.filter((t) => t.status === 'rejected');
+      $('#tags').innerHTML = on.length ? on.map(tagRow).join('') : '<li class="empty">還沒有手動加的關鍵字</li>';
+      $('#tags-off').hidden = !off.length;
+      $('#tags-off .list').innerHTML = off.map(tagRow).join('');
+    }
+    async function loadTags() {
+      $('#tags-msg').textContent = '';
+      try {
+        renderTags((await api('/api/admin/learned-tags')).tags);
+      } catch (e) {
+        if (!e.auth) $('#tags-msg').textContent = e.message;
+      }
+    }
+    $('#panel').addEventListener('click', async (e) => {
+      const b = e.target.closest('[data-tag-status]');
+      if (!b) return;
+      b.disabled = true;
+      $('#tags-msg').textContent = '';
+      try {
+        renderTags((await api('/api/admin/learned-tags', { method: 'POST', body: JSON.stringify({ module: b.dataset.module, tag: b.dataset.tag, status: b.dataset.tagStatus }) })).tags);
+      } catch (err) {
+        b.disabled = false;
+        $('#tags-msg').textContent = err.message;
+      }
+    });
+
     async function load() {
+      void loadTags();
       $('#list-msg').textContent = '';
       try {
         const { feedback } = await api(`/api/admin/feedback?status=${status}`);

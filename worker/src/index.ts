@@ -21,6 +21,7 @@ import { addressCacheKey, geocodeAddress, parseTwAddress } from './address';
 import { adminListBottles, adminSetBottle, BOTTLE_MAX_WEIGHT, BOTTLE_TTL_SEC, bottlesEnabled, collectLetter, deleteBottle, deviceId, DRIFT_EVERY_SEC, driftBottles, dropBottle, listBottles, myBottles, PER_DEVICE_PER_DAY, PICK_RADIUS_M, pickBottle, purgeBottles, recycleBottle, reportBottle } from './bottles';
 import { approveSpotRequest, autoReview, cancelSpotRequest, listSpotRequests, locatePlace, rejectSpotRequest, SPOT_MAX_AGE_SEC, spotRequestStatus, type ApproveBody, type SpotRequestRow } from './spots';
 import { addUserKeyword, listActiveKeywords, listAllKeywords, MAX_ACTIVE_KEYWORDS, normalizeKeyword, parseKeywordList, toKeywordOut, touchKeywords } from './keywords';
+import { listLearnedTags, setLearnedTag } from './learnedTags';
 import { CALLBACK_PATH, DELETE_PATH, DELETION_STATUS_PATH, UNINSTALL_PATH, deletionStatus, handleCallback, handleDelete, handleUninstall, startAuth } from './oauth';
 import { etagMatches, jsonResponse, nowSec, parseIsoToUnix } from './util';
 
@@ -714,6 +715,17 @@ async function handleAdmin(req: Request, env: Env, ctx: ExecutionContext, path: 
       ? await env.DB.prepare('SELECT * FROM posts WHERE confirm_state = ? ORDER BY fetched_at DESC LIMIT 100').bind(confirm).all()
       : await env.DB.prepare('SELECT * FROM posts ORDER BY fetched_at DESC LIMIT 100').all();
     return jsonResponse({ posts: r.results.map((p) => ({ ...p, extraction: safeParse(p.extraction as string | null) })) });
+  }
+
+  // 手動加的關鍵字：回報的人直接修改時加的候選，管理者採用了之後的判讀才用（learnedTags.ts）
+  if (path === '/api/admin/learned-tags') {
+    if (req.method === 'POST') {
+      const body = await readJson<{ module?: unknown; tag?: unknown; status?: unknown }>(req);
+      const status = body.status === 'adopted' || body.status === 'rejected' || body.status === 'pending' ? body.status : null;
+      if (typeof body.module !== 'string' || typeof body.tag !== 'string' || !status) throw new HttpError(400, 'module, tag, status (adopted / rejected / pending) are required');
+      if (!(await setLearnedTag(env, body.module, body.tag, status, now))) throw new HttpError(404, 'no such tag');
+    } else if (req.method !== 'GET') throw new HttpError(405, 'method not allowed');
+    return jsonResponse({ tags: await listLearnedTags(env) });
   }
 
   if (req.method === 'GET' && path === '/api/admin/keywords') {
