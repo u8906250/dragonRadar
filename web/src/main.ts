@@ -1508,6 +1508,10 @@ function render(): void {
               // 水域「把水找回來」：船到那一站時老水路浮出來、注水；都市微森林「把樹種回來」：船經過砍樹的地方、要加強種樹的地方長出樹
               canals: hq.HQ_CANALS.map((c) => ({ points: c.points.map(toRadarAt), at: hqStopAt(hqVoyageAt!, c.stop), label: c.label })),
               plantings: hqPlantings(hqVoyageAt).map((p) => ({ ...p, ...toRadarAt([p.lat, p.lng]) })),
+              // 水域「親水」：船沿河走時真的河亮起來；水上活動：船經過時河上出現 SUP、龍舟
+              roads: hq.HQ_ROADS,
+              rivers: hq.HQ_RIVERS.map((rv) => ({ ring: rv.ring.map(toRadarAt), at: hqStopAt(hqVoyageAt!, rv.stop) })),
+              boats: hq.HQ_BOATS.map((b) => ({ ...toRadarAt([b.lat, b.lng]), at: hqNearestAt(hqVoyageAt!, b), kind: b.kind, heading: b.heading })),
             },
           ],
     ),
@@ -1563,6 +1567,9 @@ function render(): void {
               outline: hq.CITY_HALL_OUTLINE,
               canals: hq.HQ_CANALS.map((c) => ({ path: c.points, at: hqStopAt(hqVoyageAt!, c.stop), label: c.label })),
               plantings: hqPlantings(hqVoyageAt),
+              roads: hq.HQ_ROADS,
+              rivers: hq.HQ_RIVERS.map((rv) => ({ ring: rv.ring, at: hqStopAt(hqVoyageAt!, rv.stop) })),
+              boats: hq.HQ_BOATS.map((b) => ({ lat: b.lat, lng: b.lng, at: hqNearestAt(hqVoyageAt!, b), kind: b.kind, heading: b.heading })),
             },
           ],
     ),
@@ -3178,8 +3185,11 @@ function hqTourStops(t0: number): Array<{ lat: number; lng: number; label: strin
   const seen = new Set([HQ_TOUR[0].district]);
   const end = HQ_TOUR[HQ_TOUR.length - 1];
   const firstCut = hqPlantings(t0).find((p) => p.kind === 'cut');
+  // 「水上活動」寫在最早出現的那艘船上面，出現後留著
+  const firstBoat = hq.HQ_BOATS.map((b) => ({ ...b, at: hqNearestAt(t0, b) })).sort((a, b) => a.at - b.at)[0];
   return [
     ...(firstCut ? [{ lat: firstCut.lat, lng: firstCut.lng, label: '把樹種回來', at: firstCut.at + 300, stay: true, dy: -36 }] : []),
+    ...(firstBoat ? [{ lat: firstBoat.lat, lng: firstBoat.lng, label: '水上活動', at: firstBoat.at + 600, stay: true, dy: -26 }] : []),
     ...HQ_TOUR.flatMap((st, i) => {
       if (seen.has(st.district)) return [];
       seen.add(st.district);

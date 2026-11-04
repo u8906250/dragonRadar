@@ -1,5 +1,5 @@
 import type * as Leaflet from 'leaflet';
-import { alongLine, BOAT_SVG, boatPhase, fireworksSvg, FIREWORKS_MS, flowOut, HQ_VOYAGE_MS, RAINBOW_FLOW_TOTAL, RAINBOW_STAGGER_MS, surge, SURGE_TOTAL, voyagePhase } from './flow';
+import { alongLine, BOAT_SVG, boatPhase, fireworksSvg, FIREWORKS_MS, flowOut, HQ_VOYAGE_MS, RAINBOW_FLOW_TOTAL, RAINBOW_STAGGER_MS, surge, SURGE_TOTAL, voyagePhase, voyageTimeOf } from './flow';
 import { haversineKm, type LatLng } from './geo';
 import type { EventKind, Phase } from './types';
 import { LANDMARKS } from './landmarks';
@@ -59,12 +59,39 @@ export interface MapRoute {
   canals?: Array<{ path: Array<[number, number]>; at: number; label: string }>;
   /** 種樹的地方（都市微森林）：船經過時在那裡長出一叢樹；cut 是有砍樹爭議的地方（多一點、光環、寫名字），plant 是政見說要加強種樹的地方 */
   plantings?: Array<{ lat: number; lng: number; at: number; kind: 'cut' | 'plant'; label?: string }>;
+  /** 路樹（都市微森林）：路線走到 from～to（0～1）那一段是市區的馬路，船經過時路的兩邊長出一排排的樹 */
+  roads?: Array<{ from: number; to: number }>;
+  /** 真的河（水域政策「親水」）：船沿河走時（at）水面亮成藍色、留著 */
+  rivers?: Array<{ ring: Array<[number, number]>; at: number }>;
+  /** 水上活動：船經過時（at）河上出現 SUP、龍舟；heading 是船頭朝哪（度，0 是上、順時針） */
+  boats?: Array<{ lat: number; lng: number; at: number; kind: 'sup' | 'dragon'; heading: number }>;
 }
 
 /** 種樹的地方長幾棵（砍樹的地方多一點）、老水路的鬼影在船到之前幾毫秒浮出來（洋流總部的特效，跟 radar.ts 一樣） */
-const MAP_PLANT_CUT_TREES = 28;
-const MAP_PLANT_TREES = 14;
+const MAP_PLANT_CUT_TREES = 22;
+const MAP_PLANT_TREES = 10;
+/** 路樹每隔幾公里一棵 */
+const MAP_ROAD_TREE_KM = 0.09;
 const MAP_CANAL_GHOST_MS = 2500;
+/** 水上活動的船（跟 radar.ts 一樣的畫法，顏色在 styles.css） */
+const MAP_SUP_SVG =
+  '<path class="wb-wake" d="M-14 2.5q-4 0 -7 1.6"/>' +
+  '<path class="wb-board" d="M-11 -2.6H9q4 0 5.5 2.6Q13 2.6 9 2.6H-11q-3.5 0 -3.5 -2.6Q-14.5 -2.6 -11 -2.6Z"/>' +
+  '<path class="wb-stripe" d="M-9 0H9"/>' +
+  '<path class="wb-paddle" d="M-2 -9.5L6 5.5"/>' +
+  '<circle class="wb-head" cx="-1" cy="-7.8" r="2.2"/>' +
+  '<path class="wb-body" d="M-1 -5.6V-1"/>';
+const MAP_DRAGON_SVG =
+  '<path class="wb-wake" d="M-24 3q-6 0 -10 2"/>' +
+  '<path class="wb-hull" d="M-22 -3.2H18Q26 -3.2 29 0Q26 3.2 18 3.2H-22Q-26 3.2 -26 0Q-26 -3.2 -22 -3.2Z"/>' +
+  '<path class="wb-stripe" d="M-21 0H18"/>' +
+  '<path class="wb-dragon" d="M23 -3.4q6 -3 6 -8q2 3 0 6q4 1 2 5.4Z"/>' +
+  '<circle class="wb-eye" cx="25.6" cy="-7.4" r="0.9"/>' +
+  '<path class="wb-tail" d="M-26 0q-4 -4 -2 -8q1 3 4 5Z"/>' +
+  Array.from({ length: 6 }, (_, i) => {
+    const x = -16 + i * 6;
+    return `<path class="wb-paddle" d="M${x} -4.5L${x + 3} -9"/><circle class="wb-head" cx="${x}" cy="-1.2" r="1.6"/>`;
+  }).join('');
 /** 0～1 的固定亂數（照編號，重畫一樣） */
 const mapHash = (n: number): number => {
   const x = Math.sin(n * 12.9898 + 78.233) * 43758.5453;
@@ -705,9 +732,10 @@ export class MapView {
     for (let i = 1; i < pts.length; i++) cum[i] = cum[i - 1] + haversineKm({ lat: pts[i - 1][0], lng: pts[i - 1][1] }, { lat: pts[i][0], lng: pts[i][1] });
     const o = { lineCap: 'round', lineJoin: 'round', interactive: false } as const;
     const lines = [
-      L.polyline([], { ...o, color: '#bfe8f5', weight: 15, opacity: 0.9 }),
-      L.polyline([], { ...o, color: '#3fa9dc', weight: 9, opacity: 0.92 }),
-      L.polyline([], { ...o, color: '#a6e6fa', weight: 2, opacity: 0.85 }),
+      // 洋流號的水流是橘色的（真的河是藍色）
+      L.polyline([], { ...o, color: '#ffd8b0', weight: 15, opacity: 0.9 }),
+      L.polyline([], { ...o, color: '#f0812e', weight: 9, opacity: 0.92 }),
+      L.polyline([], { ...o, color: '#ffc78f', weight: 2, opacity: 0.85 }),
       L.polyline([], { ...o, color: '#ffffff', weight: 1.6, opacity: 0.85, className: 'map-river-flow' }),
     ];
     for (const l of lines) {
@@ -749,22 +777,57 @@ export class MapView {
       const icon = L.divIcon({ className: 'map-voyage-stop stay', html: `<span style="animation-delay:${Math.round(c.at + 1200 - now)}ms">${escapeHtml(c.label)}</span>`, iconSize: [96, 18], iconAnchor: [48, 30] });
       layer.addLayer(L.marker(mid, { icon, interactive: false, keyboard: false, zIndexOffset: 1500 }));
     }
+    // 路樹：市區馬路那幾段，路的兩邊每隔 MAP_ROAD_TREE_KM 公里一棵（離路的距離照現在的縮放算成像素），船經過才長
+    if (r.roads?.length && r.voyage !== undefined) {
+      const pts = r.segments.flatMap((sg) => sg.path);
+      const cum = new Float64Array(pts.length);
+      for (let i = 1; i < pts.length; i++) cum[i] = cum[i - 1] + haversineKm({ lat: pts[i - 1][0], lng: pts[i - 1][1] }, { lat: pts[i][0], lng: pts[i][1] });
+      const total = cum[cum.length - 1];
+      let i = 1;
+      let j = 0;
+      for (const rd of r.roads) {
+        for (let km = rd.from * total; km < rd.to * total; km += MAP_ROAD_TREE_KM, j++) {
+          while (i < pts.length - 1 && cum[i] < km) i++;
+          const w = (km - cum[i - 1]) / (cum[i] - cum[i - 1] || 1);
+          const a = map.latLngToLayerPoint(pts[i - 1]);
+          const b = map.latLngToLayerPoint(pts[i]);
+          const [dx, dy] = [b.x - a.x, b.y - a.y];
+          const len = Math.hypot(dx, dy) || 1;
+          const side = j % 2 === 0 ? 1 : -1;
+          const off = (9 + 4 + mapHash(j * 7 + 11) * 4) * side;
+          const p = L.point(a.x + dx * w + (-dy / len) * off, a.y + dy * w + (dx / len) * off);
+          const m = L.circleMarker(map.layerPointToLatLng(p), { radius: 2.6 + mapHash(j * 13 + 5) * 1.6, color: cssVar('--grass', '#3f8f2f'), weight: 1, fillColor: cssVar('--grass', '#3f8f2f'), fillOpacity: 0.95, interactive: false, className: 'map-tree' });
+          layer.addLayer(m);
+          const e = m.getElement() as SVGElement | undefined;
+          if (e) e.style.animationDelay = `${Math.round(r.voyage + voyageTimeOf(km / total) - now)}ms`;
+        }
+      }
+    }
+    // 真的河：船沿河走時亮起來（畫在最下面）
+    for (const rv of r.rivers ?? []) {
+      if (rv.ring.length < 3) continue;
+      const poly = L.polygon(rv.ring, { color: '#3fa9dc', weight: 1, fillColor: '#4cc3e6', fillOpacity: 0.55, interactive: false, className: 'map-voyage-river' });
+      layer.addLayer(poly);
+      poly.bringToBack();
+      const e = poly.getElement() as SVGElement | undefined;
+      if (e) e.style.animationDelay = `${Math.round(rv.at - now)}ms`;
+    }
+    // 水上活動：SUP、龍舟（螢幕像素的大小，船頭朝 heading）
+    for (const b of r.boats ?? []) {
+      const svg = `<svg viewBox="-34 -16 68 32" width="68" height="32" aria-hidden="true"><g transform="rotate(${(b.heading - 90).toFixed(1)})"><g class="boat-bob" style="animation-delay:${Math.round(-mapHash(b.at) * 1600)}ms">${b.kind === 'sup' ? MAP_SUP_SVG : MAP_DRAGON_SVG}</g></g></svg>`;
+      const icon = L.divIcon({ className: `map-voyage-boat ${b.kind}`, html: `<div class="boat-pop" style="animation-delay:${Math.round(b.at - now)}ms">${svg}</div>`, iconSize: [68, 32], iconAnchor: [34, 16] });
+      layer.addLayer(L.marker([b.lat, b.lng], { icon, interactive: false, keyboard: false, zIndexOffset: 1200 }));
+    }
     for (const pl of r.plantings ?? []) {
       const cut = pl.kind === 'cut';
       // 一叢樹：以那一點為中心、照現在的縮放換成像素散開（砍樹的地方多一點、散開一點），一棵接一棵長
-      const [count, spread] = cut ? [MAP_PLANT_CUT_TREES, 26] : [MAP_PLANT_TREES, 17];
+      const [count, spread] = cut ? [MAP_PLANT_CUT_TREES, 22] : [MAP_PLANT_TREES, 15];
       const seed = Math.round(pl.lat * 1000 + pl.lng * 7);
       const c = map.latLngToLayerPoint([pl.lat, pl.lng]);
-      if (cut) {
-        const ping = L.circleMarker([pl.lat, pl.lng], { radius: 36, color: cssVar('--grass', '#3f8f2f'), weight: 3, fill: false, interactive: false, className: 'map-ping' });
-        layer.addLayer(ping);
-        const pg = ping.getElement() as SVGElement | undefined;
-        if (pg) pg.style.animationDelay = `${Math.round(pl.at - now)}ms`;
-      }
       for (let j = 0; j < count; j++) {
         const a = mapHash(seed + j * 3 + 1) * 2 * Math.PI;
         const d = Math.sqrt(mapHash(seed + j * 3 + 2)) * spread;
-        const m = L.circleMarker(map.layerPointToLatLng(L.point(c.x + Math.cos(a) * d, c.y + Math.sin(a) * d)), { radius: 5 + mapHash(seed + j * 3 + 3) * 4, color: cssVar('--grass', '#3f8f2f'), weight: 1.2, fillColor: cssVar('--grass', '#3f8f2f'), fillOpacity: 0.95, interactive: false, className: 'map-tree' });
+        const m = L.circleMarker(map.layerPointToLatLng(L.point(c.x + Math.cos(a) * d, c.y + Math.sin(a) * d)), { radius: (cut ? 4 : 3.5) + mapHash(seed + j * 3 + 3) * 3, color: cssVar('--grass', '#3f8f2f'), weight: 1.2, fillColor: cssVar('--grass', '#3f8f2f'), fillOpacity: 0.95, interactive: false, className: 'map-tree' });
         layer.addLayer(m);
         const e = m.getElement() as SVGElement | undefined;
         if (e) e.style.animationDelay = `${Math.round(pl.at + j * 45 - now)}ms`;
