@@ -49,8 +49,8 @@ export interface MapRoute {
   voyage?: number;
   /** 終點放煙火：開始放的時間（Date.now() 的毫秒） */
   fireworks?: number;
-  /** 經過的地方：船經過時（at，Date.now() 的毫秒）寫一下名字再淡掉；keep 的一直寫著（終點） */
-  stops?: Array<{ lat: number; lng: number; label: string; at: number; keep?: boolean }>;
+  /** 經過的地方：船經過時（at，Date.now() 的毫秒）寫一下名字再淡掉；keep 的一直寫著（終點）；stay 的出現後留著；dy 是字離那一點多高（螢幕像素，預設 -10） */
+  stops?: Array<{ lat: number; lng: number; label: string; at: number; keep?: boolean; stay?: boolean; dy?: number }>;
   /** 終點用虛線畫出來的外框（台北市政府） */
   outline?: Array<[number, number]>;
   /** 畫成一條河（洋流總部的特效）：跟著船（voyage）從起點長出來，河面上一道道波光往下游流；河岸兩邊跟著長出一棵棵樹 */
@@ -62,8 +62,8 @@ export interface MapRoute {
 }
 
 /** 種樹的地方長幾棵（砍樹的地方多一點）、老水路的鬼影在船到之前幾毫秒浮出來（洋流總部的特效，跟 radar.ts 一樣） */
-const MAP_PLANT_CUT_TREES = 16;
-const MAP_PLANT_TREES = 7;
+const MAP_PLANT_CUT_TREES = 28;
+const MAP_PLANT_TREES = 14;
 const MAP_CANAL_GHOST_MS = 2500;
 /** 0～1 的固定亂數（照編號，重畫一樣） */
 const mapHash = (n: number): number => {
@@ -680,7 +680,7 @@ export class MapView {
       }
       for (const st of r.stops ?? []) {
         const delay = st.keep ? '' : ` style="animation-delay:${st.at - Date.now()}ms"`;
-        const icon = L.divIcon({ className: `map-voyage-stop${st.keep ? ' keep' : ''}`, html: `<span${delay}>${escapeHtml(st.label)}</span>`, iconSize: [96, 18], iconAnchor: [48, st.keep ? -10 : 30] });
+        const icon = L.divIcon({ className: `map-voyage-stop${st.keep ? ' keep' : st.stay ? ' stay' : ''}`, html: `<span${delay}>${escapeHtml(st.label)}</span>`, iconSize: [96, 18], iconAnchor: [48, st.keep ? -10 : 20 - (st.dy ?? -10)] });
         layer.addLayer(L.marker([st.lat, st.lng], { icon, interactive: false, keyboard: false, zIndexOffset: 1500 }));
       }
       if (r.boat || r.voyage !== undefined) this.addBoat(r);
@@ -745,17 +745,18 @@ export class MapView {
         (e as SVGElement).style.animationDelay = `${Math.round(c.at - (i === 0 ? MAP_CANAL_GHOST_MS : 0) - now)}ms`;
       });
       const mid = c.path[Math.floor(c.path.length / 2)];
-      const icon = L.divIcon({ className: 'map-voyage-stop', html: `<span style="animation-delay:${Math.round(c.at + 1200 - now)}ms">${escapeHtml(c.label)}</span>`, iconSize: [96, 18], iconAnchor: [48, 30] });
+      // 名字出現後留著
+      const icon = L.divIcon({ className: 'map-voyage-stop stay', html: `<span style="animation-delay:${Math.round(c.at + 1200 - now)}ms">${escapeHtml(c.label)}</span>`, iconSize: [96, 18], iconAnchor: [48, 30] });
       layer.addLayer(L.marker(mid, { icon, interactive: false, keyboard: false, zIndexOffset: 1500 }));
     }
     for (const pl of r.plantings ?? []) {
       const cut = pl.kind === 'cut';
       // 一叢樹：以那一點為中心、照現在的縮放換成像素散開（砍樹的地方多一點、散開一點），一棵接一棵長
-      const [count, spread] = cut ? [MAP_PLANT_CUT_TREES, 17] : [MAP_PLANT_TREES, 11];
+      const [count, spread] = cut ? [MAP_PLANT_CUT_TREES, 26] : [MAP_PLANT_TREES, 17];
       const seed = Math.round(pl.lat * 1000 + pl.lng * 7);
       const c = map.latLngToLayerPoint([pl.lat, pl.lng]);
       if (cut) {
-        const ping = L.circleMarker([pl.lat, pl.lng], { radius: 24, color: cssVar('--grass', '#3f8f2f'), weight: 3, fill: false, interactive: false, className: 'map-ping' });
+        const ping = L.circleMarker([pl.lat, pl.lng], { radius: 36, color: cssVar('--grass', '#3f8f2f'), weight: 3, fill: false, interactive: false, className: 'map-ping' });
         layer.addLayer(ping);
         const pg = ping.getElement() as SVGElement | undefined;
         if (pg) pg.style.animationDelay = `${Math.round(pl.at - now)}ms`;
@@ -763,10 +764,10 @@ export class MapView {
       for (let j = 0; j < count; j++) {
         const a = mapHash(seed + j * 3 + 1) * 2 * Math.PI;
         const d = Math.sqrt(mapHash(seed + j * 3 + 2)) * spread;
-        const m = L.circleMarker(map.layerPointToLatLng(L.point(c.x + Math.cos(a) * d, c.y + Math.sin(a) * d)), { radius: 3 + mapHash(seed + j * 3 + 3) * 2.5, color: cssVar('--grass', '#3f8f2f'), weight: 1.2, fillColor: cssVar('--grass', '#3f8f2f'), fillOpacity: 0.95, interactive: false, className: 'map-tree' });
+        const m = L.circleMarker(map.layerPointToLatLng(L.point(c.x + Math.cos(a) * d, c.y + Math.sin(a) * d)), { radius: 5 + mapHash(seed + j * 3 + 3) * 4, color: cssVar('--grass', '#3f8f2f'), weight: 1.2, fillColor: cssVar('--grass', '#3f8f2f'), fillOpacity: 0.95, interactive: false, className: 'map-tree' });
         layer.addLayer(m);
         const e = m.getElement() as SVGElement | undefined;
-        if (e) e.style.animationDelay = `${Math.round(pl.at + j * 70 - now)}ms`;
+        if (e) e.style.animationDelay = `${Math.round(pl.at + j * 45 - now)}ms`;
       }
       if (pl.label) {
         const icon = L.divIcon({ className: 'map-voyage-stop', html: `<span style="animation-delay:${Math.round(pl.at + 300 - now)}ms">${escapeHtml(pl.label)}</span>`, iconSize: [120, 18], iconAnchor: [60, 34] });

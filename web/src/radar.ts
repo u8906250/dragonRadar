@@ -48,8 +48,8 @@ export interface RadarRoute {
   voyage?: number;
   /** 終點放煙火：開始放的時間（Date.now() 的毫秒） */
   fireworks?: number;
-  /** 經過的地方：船經過時（at，Date.now() 的毫秒）寫一下名字再淡掉；keep 的一直寫著（終點） */
-  stops?: Array<{ bearing: number; distanceKm: number; label: string; at: number; keep?: boolean }>;
+  /** 經過的地方：船經過時（at，Date.now() 的毫秒）寫一下名字再淡掉；keep 的一直寫著（終點）；stay 的出現後留著；dy 是字離那一點多高（螢幕像素，預設 -10） */
+  stops?: Array<{ bearing: number; distanceKm: number; label: string; at: number; keep?: boolean; stay?: boolean; dy?: number }>;
   /** 終點用虛線畫出來的外框（台北市政府） */
   outline?: Array<{ bearing: number; distanceKm: number }>;
   /** 畫成一條河（洋流總部的特效）：跟著船（voyage）從起點長出來，寬度自然變化、越往下游越寬，河面上一道道波光往下游流；河岸兩邊跟著長出一棵棵樹 */
@@ -74,10 +74,10 @@ const hash = (n: number): number => {
   const x = Math.sin(n * 12.9898 + 78.233) * 43758.5453;
   return x - Math.floor(x);
 };
-/** 種樹的地方長幾棵（砍樹的地方多一點）、一棵接一棵隔幾毫秒；老水路的鬼影在船到之前幾毫秒浮出來（洋流總部的特效） */
-const PLANT_CUT_TREES = 16;
-const PLANT_TREES = 7;
-const PLANT_STAGGER_MS = 70;
+/** 種樹的地方長幾棵（砍樹的地方多一點）、一棵接一棵隔幾毫秒；老水路的鬼影在船到之前幾毫秒浮出來（洋流總部的特效）。樹故意畫大、畫密（使用者說要強調政策，不用管比例） */
+const PLANT_CUT_TREES = 28;
+const PLANT_TREES = 14;
+const PLANT_STAGGER_MS = 45;
 const CANAL_GHOST_MS = 2500;
 /** 固定的地標（例如洋流總部），畫成星星 */
 export interface RadarLandmark {
@@ -1732,8 +1732,8 @@ export class Radar {
         const k = this.squarePx > 0 ? SIZE / this.squarePx : 1;
         for (const st of r.stops) {
           const p = polar(st.bearing - this.heading, this.ratio(st.distanceKm) * (R - 8));
-          const g = el('g', { class: `voyage-stop${st.keep ? ' keep' : ''}`, transform: `translate(${p.x.toFixed(1)} ${p.y.toFixed(1)}) scale(${k.toFixed(4)})` });
-          const t = el('text', { y: st.keep ? 18 : -10, 'text-anchor': 'middle', style: st.keep ? '' : `animation-delay:${st.at - Date.now()}ms` });
+          const g = el('g', { class: `voyage-stop${st.keep ? ' keep' : st.stay ? ' stay' : ''}`, transform: `translate(${p.x.toFixed(1)} ${p.y.toFixed(1)}) scale(${k.toFixed(4)})` });
+          const t = el('text', { y: st.keep ? 18 : (st.dy ?? -10), 'text-anchor': 'middle', style: st.keep ? '' : `animation-delay:${st.at - Date.now()}ms` });
           t.textContent = st.label;
           g.appendChild(t);
           this.routeLayer.appendChild(g);
@@ -1870,7 +1870,8 @@ export class Radar {
       // 名字寫在中間那一點
       const mid = c.points[Math.floor(c.points.length / 2)];
       const p = polar(mid.bearing - this.heading, this.ratio(mid.distanceKm) * (R - 8));
-      const lg = el('g', { class: 'voyage-stop', transform: `translate(${p.x.toFixed(1)} ${p.y.toFixed(1)}) scale(${k.toFixed(4)})` });
+      // 名字出現後留著（使用者說「把水找回來」出現後可以留在上面）
+      const lg = el('g', { class: 'voyage-stop stay', transform: `translate(${p.x.toFixed(1)} ${p.y.toFixed(1)}) scale(${k.toFixed(4)})` });
       const tx = el('text', { y: -10, 'text-anchor': 'middle', style: `animation-delay:${Math.round(c.at + 1200 - now)}ms` });
       tx.textContent = c.label;
       lg.appendChild(tx);
@@ -1882,13 +1883,13 @@ export class Radar {
       const g = el('g', { class: `voyage-planting ${pl.kind}`, transform: `translate(${c.x.toFixed(1)} ${c.y.toFixed(1)})` });
       const cut = pl.kind === 'cut';
       // 一叢樹：砍樹的地方種多一點、散開一點（螢幕像素），一棵接一棵長；照編號固定的亂數，重畫一樣
-      const [count, spread] = cut ? [PLANT_CUT_TREES, 17] : [PLANT_TREES, 11];
+      const [count, spread] = cut ? [PLANT_CUT_TREES, 26] : [PLANT_TREES, 17];
       const seed = Math.round(pl.bearing * 7 + pl.distanceKm * 131);
-      if (cut) g.appendChild(el('circle', { class: 'voyage-ping', r: (24 * k).toFixed(1), style: `animation-delay:${Math.round(pl.at - now)}ms` }));
+      if (cut) g.appendChild(el('circle', { class: 'voyage-ping', r: (36 * k).toFixed(1), style: `animation-delay:${Math.round(pl.at - now)}ms` }));
       for (let j = 0; j < count; j++) {
         const a = hash(seed + j * 3 + 1) * 2 * Math.PI;
         const d = Math.sqrt(hash(seed + j * 3 + 2)) * spread * k;
-        g.appendChild(this.tree(Math.cos(a) * d, Math.sin(a) * d, k * (0.7 + hash(seed + j * 3 + 3) * 0.7), pl.at + j * PLANT_STAGGER_MS - now));
+        g.appendChild(this.tree(Math.cos(a) * d, Math.sin(a) * d, k * (1.3 + hash(seed + j * 3 + 3) * 1.0), pl.at + j * PLANT_STAGGER_MS - now));
       }
       if (pl.label) {
         const lg = el('g', { class: 'voyage-stop', transform: `scale(${k.toFixed(4)})` });

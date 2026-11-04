@@ -3161,23 +3161,25 @@ function hqNearestAt(t0: number, p: LatLng): number {
   return t0 + voyageTimeOf(hqCum[bi] / hqCum[hqCum.length - 1]);
 }
 /**
- * 種樹的地方（都市微森林「把樹種回來」）：船離它最近時長出一叢樹。砍樹的地方（cut）寫名字、第一個再多寫一句「把樹種回來」；
+ * 種樹的地方（都市微森林「把樹種回來」）：船離它最近時長出一叢樹。砍樹的地方（cut）寫名字（「把樹種回來」那一句另外寫在第一個上面、留著，hqTourStops）；
  * 政見說要加強種樹的公園、商圈、公有建築（plant）只長樹
  */
 function hqPlantings(t0: number): Array<{ lat: number; lng: number; at: number; kind: 'cut' | 'plant'; label?: string }> {
   if (!hq) return [];
-  const list = hq.HQ_PLANTINGS.map((p) => ({ lat: p.lat, lng: p.lng, at: hqNearestAt(t0, p), kind: p.kind, ...(p.kind === 'cut' ? { label: p.name } : {}) })).sort((a, b) => a.at - b.at);
-  const first = list.find((p) => p.kind === 'cut');
-  if (first) first.label = `把樹種回來・${first.label}`;
-  return list;
+  return hq.HQ_PLANTINGS.map((p) => ({ lat: p.lat, lng: p.lng, at: hqNearestAt(t0, p), kind: p.kind, ...(p.kind === 'cut' ? { label: p.name } : {}) })).sort((a, b) => a.at - b.at);
 }
-/** 經過的區名（每一區寫第一次經過的那一站；總部那一站有星星不用寫）、終點一直寫著「臺北市政府」 */
-function hqTourStops(t0: number): Array<{ lat: number; lng: number; label: string; at: number; keep?: boolean }> {
+/**
+ * 經過的區名（每一區寫第一次經過的那一站；總部那一站有星星不用寫）、終點一直寫著「臺北市政府」；
+ * 「把樹種回來」寫在第一個砍樹的地方上面（地名的上面一行），出現後留著（使用者說出現文字後可以留在上面）
+ */
+function hqTourStops(t0: number): Array<{ lat: number; lng: number; label: string; at: number; keep?: boolean; stay?: boolean; dy?: number }> {
   if (!hq) return [];
   const { HQ_TOUR, HQ_TOUR_AT } = hq;
   const seen = new Set([HQ_TOUR[0].district]);
   const end = HQ_TOUR[HQ_TOUR.length - 1];
+  const firstCut = hqPlantings(t0).find((p) => p.kind === 'cut');
   return [
+    ...(firstCut ? [{ lat: firstCut.lat, lng: firstCut.lng, label: '把樹種回來', at: firstCut.at + 300, stay: true, dy: -36 }] : []),
     ...HQ_TOUR.flatMap((st, i) => {
       if (seen.has(st.district)) return [];
       seen.add(st.district);
