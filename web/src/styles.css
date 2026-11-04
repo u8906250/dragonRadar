@@ -211,8 +211,6 @@ a.chip { display: inline-flex; align-items: center; text-decoration: none; }
 /* 雷達分四層疊在一起（radar.ts）：外框底色、掃描、特效在下面，主圖層（光點、文字，接觸控）在最上面 */
 .radar-stack { position: relative; place-self: stretch; min-width: 0; min-height: 0; }
 .radar-stack > .radar-layer { position: absolute; inset: 0; pointer-events: none; }
-/* 汪星的地形圖（radar.ts 的 paintRelief，canvas 對齊 SVG 的正方形）：裁成雷達的圓，CSS 放大，地形本來就是模糊的 */
-.radar-stack > .radar-relief { position: absolute; pointer-events: none; clip-path: circle(43% at 50% 50%); }
 .radar-stack > .radar-main { position: relative; }
 /* 一直在動的兩層不加光暈濾鏡（每一格都要重算） */
 .radar.radar-sweep, .radar.radar-fx, .radar.radar-flashes { filter: none; }
@@ -238,7 +236,6 @@ a.chip { display: inline-flex; align-items: center; text-decoration: none; }
 .overlay-tr { right: 16px; top: 12px; }
 /* 雷達拖曳過（手動位置）才出現的「回到我的位置」，放在左上，不跟右上的按鈕擠；汪星的狗的「鎖定」排在它下面（手機上排在旁邊會被右上的「定位」蓋住） */
 .overlay-tl { left: 16px; top: 12px; flex-direction: column; align-items: flex-start; }
-@media (max-width: 380px) { #home-btn { padding: 8px 8px; font-size: 12px; } }
 .radar.panning { cursor: grabbing; }
 
 /* ========== 雷達 ========== */
@@ -252,7 +249,6 @@ a.chip { display: inline-flex; align-items: center; text-decoration: none; }
 .radar-stack.fill .radar .face-fill { display: inline; }
 .radar-stack.fill .radar .bezel, .radar-stack.fill .radar .face { display: none; }
 .radar-stack.fill .radar-sweep { overflow: visible; }
-.radar-stack.fill > .radar-relief { clip-path: none; }
 /* 鋪滿時只留地圖和光點：距離圈、刻度、掃描線、方位字、中間的點不畫（看比例尺；指北針轉的時候北在哪看右上角的小指北針） */
 .radar-stack.fill .radar .grid, .radar-stack.fill .radar .scale-labels, .radar-stack.fill .radar .rose, .radar-stack.fill .radar-sweep-box { display: none; }
 /* 中間代表你的那個點也不畫，改成像 Google 地圖的藍點（radar.ts 的 drawYou：GPS 位置，手動移開了就跟著地圖走） */
@@ -608,8 +604,15 @@ path.map-water-glint { animation: water-flow-map 1.1s linear infinite; }
 .radar .space-cap { fill: #ffffff; fill-opacity: 0.85; stroke: none; }
 .radar .space-shade { fill: #000000; fill-opacity: 0.32; stroke: none; }
 .radar .space-mare { fill: #6f6b64; fill-opacity: 0.35; stroke: none; }
-/* 汪星的地表（台北市）：道路跟雷達的街道一樣（粗細、深淺照 street-major、street-minor） */
-.radar .region-outline.woof-land { stroke: none; }
+/* 汪星的地表（台北市）：大多鋪滿草地（主題的草綠色），道路跟雷達的街道一樣（粗細、深淺照 street-major、street-minor） */
+.radar .region-outline.woof-land { fill: var(--grass); fill-opacity: 0.42; stroke: none; }
+/* 汪星的山（space.ts 的 WOOF_HILLS）：一層一層疊上去，越高越深，最高的兩層偏土黃（山頂草少、露出土）；線條畫的，放大縮小都清楚 */
+.radar .woof-hill { stroke: none; pointer-events: none; }
+.radar .woof-hill.h1 { fill: color-mix(in srgb, var(--grass), #1d3612 22%); fill-opacity: 0.45; }
+.radar .woof-hill.h2 { fill: color-mix(in srgb, var(--grass), #1d3612 40%); fill-opacity: 0.45; }
+.radar .woof-hill.h3 { fill: color-mix(in srgb, var(--grass), #1d3612 55%); fill-opacity: 0.45; }
+.radar .woof-hill.h4 { fill: color-mix(in srgb, var(--grass), #8a6f3e 65%); fill-opacity: 0.6; }
+.radar .woof-hill.h5 { fill: color-mix(in srgb, var(--grass), #b49a6a 75%); fill-opacity: 0.7; }
 /* 汪星的海：整顆挖掉陸地（evenodd），深一點的海藍色，拉近時一道道淡色的水波（space.ts 的 woofGlobe） */
 .radar .woof-sea { fill: color-mix(in srgb, var(--water), #0a2440 30%); fill-opacity: 0.42; fill-rule: evenodd; stroke: none; pointer-events: none; }
 .radar .woof-ripple { fill: none; stroke: color-mix(in srgb, var(--water), #fff 65%); stroke-opacity: 0.75; stroke-linecap: round; pointer-events: none; }

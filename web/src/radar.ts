@@ -313,8 +313,7 @@ export class Radar {
   /** 會動的點（汪星的狗遠遠的白點）掃到時的光暈：疊在主圖層上面（閃光層在主圖層下面，會被汪星的陸地、公園蓋住） */
   private readonly glintBox: HTMLDivElement;
   private readonly glintSquare: HTMLDivElement;
-  /** 汪星的地形圖（雷達底色上面、掃描下面的 canvas，正方形對齊 SVG）、雷達的正方形幾像素、畫地形圖的（main.ts 給） */
-  private readonly reliefCanvas: HTMLCanvasElement;
+  /** 雷達的正方形幾像素 */
   private squarePx = 0;
   /** 雷達這一塊的大小（像素）：鋪滿時換算長方形 */
   private boxPx = { w: 0, h: 0 };
@@ -322,8 +321,6 @@ export class Radar {
   private fill = false;
   /** 鋪滿時看得到的範圍變了（換方向、改視窗大小）：main.ts 重抓道路 */
   onView?: () => void;
-  private reliefPaint: ((out: Uint8ClampedArray, n: number, view: SpaceView, scaleKm: number, heading: number, j0?: number, j1?: number, span?: number) => number) | null = null;
-  private reliefImage: ImageData | null = null;
   private flashOf = new WeakMap<SVGGElement, HTMLDivElement>();
   /** 主圖層的瓶子 → 特效層裡同位置、同 class（顏色照舊）的那一組 */
   private fxOf = new WeakMap<SVGGElement, SVGGElement>();
@@ -380,7 +377,7 @@ export class Radar {
   private readonly spaceLayer: SVGGElement;
   /** 太陽系那幾層的 3D 看法：拖曳繞中心轉、點星球換中心 */
   private spaceView: SpaceView = { focus: null, yaw: 0, pitch: 0 };
-  /** 看法變了、拉回地球時通知外面（「回到我的位置」要不要顯示） */
+  /** 看法變了、拉回地球時通知外面（「地圖」按鈕要不要顯示） */
   onSpaceMove: (() => void) | null = null;
   /** 點了車掃的中間點：打開那條車掃的時間表 */
   onRoute: ((id: string) => void) | null = null;
@@ -449,9 +446,6 @@ export class Radar {
       <rect class="face-fill" fill="url(#rg-face-fill)" />
       <circle class="bezel" cx="${C}" cy="${C}" r="${R + 16}" />
       <circle class="face" cx="${C}" cy="${C}" r="${R}" fill="url(#rg-face)" />`;
-    this.reliefCanvas = document.createElement('canvas');
-    this.reliefCanvas.className = 'radar-relief';
-    this.reliefCanvas.setAttribute('aria-hidden', 'true');
     this.sweepSvg = layer('radar radar-sweep');
     this.sweepBox = document.createElement('div');
     this.sweepBox.className = 'radar-layer radar-sweep-box';
@@ -558,7 +552,7 @@ export class Radar {
     const stack = document.createElement('div');
     stack.className = 'radar-stack';
     this.stack = stack;
-    stack.append(this.base, this.reliefCanvas, this.sweepBox, this.fx, this.flashBox, this.svg, this.glintBox);
+    stack.append(this.base, this.sweepBox, this.fx, this.flashBox, this.svg, this.glintBox);
     container.appendChild(stack);
     new ResizeObserver(([e]) => {
       const { width: w, height: h } = e.contentRect;
@@ -570,17 +564,10 @@ export class Radar {
         sq.style.setProperty('--u', `${size / SIZE}px`);
       }
       this.boxPx = { w, h };
-      // 地形圖照新的大小重畫
-      const was = this.squarePx;
       this.squarePx = size;
       const [hx, hy] = [RADAR_VIEW.hx, RADAR_VIEW.hy];
       this.measureView();
       const moved = Math.abs(hx - RADAR_VIEW.hx) > 1 || Math.abs(hy - RADAR_VIEW.hy) > 1;
-      this.placeRelief();
-      if (Math.abs(was - size) > 1 || (this.fill && moved)) {
-        this.reliefKey = '';
-        this.paintRelief();
-      }
       // 鋪滿時長方形變了：viewBox、掃描、光點擺到哪都要重算
       if (this.fill && moved) {
         this.applyView();
@@ -622,10 +609,7 @@ export class Radar {
     this.stack.classList.toggle('fill', on);
     this.placeCompass();
     this.measureView();
-    this.placeRelief();
-    this.reliefKey = '';
     this.applyView();
-    this.paintRelief();
   }
 
   /** 鋪滿了沒（main.ts：範圍外的光點照真的位置畫） */
@@ -1088,10 +1072,9 @@ export class Radar {
     this.panDone();
   }
 
-  /** 拖完（滑完）：外面重抓資料；拖曳時地形圖畫粗一點（快），停了再畫細 */
+  /** 拖完（滑完）：外面重抓資料 */
   private panDone(): void {
     this.onPan?.(0, 0, true);
-    this.paintRelief();
   }
 
   /** 照比例畫：外圈是範圍，裡面三圈是 1/4、1/2、3/4 */
@@ -1197,7 +1180,6 @@ export class Radar {
    */
   followSpace(view: SpaceView): void {
     this.spaceView = { ...view };
-    this.followUntil = performance.now() + 1500;
     const d = this.drawnView;
     const km = view.focus && this.spaceBodyKm ? this.spaceBodyKm(view.focus) : 0;
     if (!d || d.focus !== view.focus || !km || performance.now() - this.drawnAt > 1000) {
@@ -1210,111 +1192,8 @@ export class Radar {
       this.drawSpace();
       return;
     }
-    // 平移裡面那一層（外面那一層有圓形的裁切、跟著指北針轉，裁切不能跟著移）；地形圖那一層一起移（照指北針轉過的方向、換成像素）
+    // 平移裡面那一層（外面那一層有圓形的裁切、跟著指北針轉，裁切不能跟著移）
     this.spaceLayer.querySelector('.space-shift')?.setAttribute('transform', `translate(${dx.toFixed(2)} ${dy.toFixed(2)})`);
-    if (this.reliefCanvas.style.display !== 'none') {
-      const h = (-this.heading * Math.PI) / 180;
-      const u = this.squarePx / SIZE;
-      this.reliefCanvas.style.transform = `translate(${((dx * Math.cos(h) - dy * Math.sin(h)) * u).toFixed(1)}px, ${((dx * Math.sin(h) + dy * Math.cos(h)) * u).toFixed(1)}px)`;
-    }
-  }
-
-  /** 汪星的地形圖怎麼畫（main.ts：地形圖載好了、看得到汪星的地圖才畫；回傳要多不透明，0 是不畫）；null 是不畫 */
-  setRelief(paint: ((out: Uint8ClampedArray, n: number, view: SpaceView, scaleKm: number, heading: number, j0?: number, j1?: number, span?: number) => number) | null): void {
-    this.reliefPaint = paint;
-    this.reliefKey = '';
-    this.paintRelief();
-  }
-
-  /** 地形圖現在畫的是哪個看法（沒變就不重畫）、畫好細的了沒；停下來之後畫細的計時器、正在畫的是第幾次；鎖定跟著狗走到什麼時候 */
-  private reliefKey = '';
-  private reliefFine = false;
-  private reliefTimer = 0;
-  private reliefJob = 0;
-  private followUntil = 0;
-
-  /**
-   * 畫汪星的地形圖：太空、有畫法才畫；看法沒變就不重畫（例如狗走完一段重畫整層）。canvas 照雷達的像素（CSS 放大到雷達的大小）：
-   * 每次先馬上畫粗的（最多 220 見方，拖曳、縮放、火箭飛行時每一格都這樣），停下來 0.2 秒再畫細的（最多 800 見方）：
-   * 細的分好幾格畫（每一格最多算 10 毫秒，算好再整張換上去，慢手機也不會卡），鎖定跟著狗走時先不畫細的
-   */
-  /** 地形圖畫多大一塊（SVG 單位，以圓心為中心的正方形）：平常是整個正方形，鋪滿時蓋住整個長方形 */
-  private get reliefSpan(): number {
-    return this.fill ? 2 * Math.max(RADAR_VIEW.hx, RADAR_VIEW.hy) : SIZE;
-  }
-
-  /** 地形圖那一層的位置：圓心對齊，大小是 reliefSpan */
-  private placeRelief(): void {
-    const { w, h } = this.boxPx;
-    const px = (this.reliefSpan * this.squarePx) / SIZE;
-    Object.assign(this.reliefCanvas.style, { width: `${px}px`, height: `${px}px`, left: `${(w - px) / 2}px`, top: `${(h - px) / 2}px` });
-  }
-
-  private paintRelief(fine = false): void {
-    const c = this.reliefCanvas;
-    const hide = (): void => {
-      c.style.display = 'none';
-      this.reliefKey = '';
-    };
-    window.clearTimeout(this.reliefTimer);
-    if (!this.inSpace || !this.reliefPaint || !this.squarePx) return hide();
-    const v = this.spaceView;
-    const span = this.reliefSpan;
-    const key = `${v.focus},${v.yaw},${v.pitch},${v.toward},${v.u},${this.scaleKm},${this.heading},${this.squarePx},${span.toFixed(0)}`;
-    const job = ++this.reliefJob;
-    const paint = this.reliefPaint;
-    const [view, km, heading] = [{ ...v }, this.scaleKm, this.heading];
-    const show = (img: ImageData, alpha: number): void => {
-      if (c.width !== img.width) {
-        c.width = img.width;
-        c.height = img.width;
-      }
-      c.getContext('2d')?.putImageData(img, 0, 0);
-      c.style.opacity = alpha.toFixed(2);
-      c.style.transform = '';
-      c.style.display = '';
-    };
-    const later = (): void => {
-      this.reliefTimer = window.setTimeout(() => this.paintRelief(true), Math.max(200, this.followUntil - performance.now()));
-    };
-    const px = ((this.squarePx * span) / SIZE) * (window.devicePixelRatio || 1);
-    if (!fine) {
-      if (key === this.reliefKey && c.style.display !== 'none') {
-        c.style.transform = '';
-        if (!this.reliefFine) later();
-        return;
-      }
-      const n = Math.max(64, Math.round(Math.min(px, 220)));
-      if (!this.reliefImage || this.reliefImage.width !== n) this.reliefImage = new ImageData(n, n);
-      const alpha = paint(this.reliefImage.data, n, view, km, heading, 0, n, span);
-      if (alpha <= 0) return hide();
-      show(this.reliefImage, alpha);
-      this.reliefKey = key;
-      this.reliefFine = n >= px;
-      if (!this.reliefFine) later();
-      return;
-    }
-    // 細的：鎖定跟著狗走時晚一點再畫；看法變了（又重畫了）就不畫這一張
-    if (performance.now() < this.followUntil) return later();
-    const n = Math.max(64, Math.round(Math.min(px, 800)));
-    const img = new ImageData(n, n);
-    let [j, alpha] = [0, 0];
-    const run = (): void => {
-      if (job !== this.reliefJob || key !== this.reliefKey) return;
-      const t0 = performance.now();
-      while (j < n && performance.now() - t0 < 10) {
-        const j1 = Math.min(n, j + 16);
-        alpha = paint(img.data, n, view, km, heading, j, j1, span);
-        j = j1;
-      }
-      if (j < n) {
-        requestAnimationFrame(run);
-        return;
-      }
-      if (alpha > 0) show(img, alpha);
-      this.reliefFine = true;
-    };
-    run();
   }
 
   setSpaceView(view: SpaceView, quiet = false): void {
@@ -1409,7 +1288,6 @@ export class Radar {
     this.stack.classList.toggle('space-moved', this.inSpace && this.spaceView.focus !== null);
     if (!this.inSpace || !this.spaceDraw) {
       if (this.spaceLayer.firstChild) this.spaceLayer.replaceChildren();
-      this.paintRelief();
       return;
     }
     this.spaceLayer.innerHTML = `<g class="space-shift">${this.spaceDraw(this.scaleKm, globeFrac(this.scaleKm) * (R - 8), this.spaceView)}</g>`;
@@ -1417,7 +1295,6 @@ export class Radar {
     else this.spaceLayer.removeAttribute('transform');
     this.drawnView = { ...this.spaceView };
     this.drawnAt = performance.now();
-    this.paintRelief();
     this.standUp(this.spaceLayer);
   }
 

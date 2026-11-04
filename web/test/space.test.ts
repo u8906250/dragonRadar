@@ -2,7 +2,9 @@ import { describe, expect, it } from 'vitest';
 import { fmtKm, globeFrac, RADAR_GEOM, RADAR_VIEW, SPACE_FROM_KM, viewReach, viewRect } from '../src/radar';
 import { PARK_MIN_KM } from '../src/park';
 import type { StreetLine } from '../src/streets';
-import { atPark, focusMinKm, fromWoof, graticule, hemiPath, nearOf, paintWoofRelief, WOOF_KM, landPath, moonPosition, nightPath, onWoofLand, ortho, planetPositions, spaceMarkup, subsolar, toWoof } from '../src/space';
+import { atPark, focusMinKm, fromWoof, graticule, hemiPath, nearOf, WOOF_HILLS, WOOF_KM, landPath, moonPosition, nightPath, onWoofLand, ortho, planetPositions, spaceMarkup, subsolar, toWoof } from '../src/space';
+import { TAIPEI_OUTLINE } from '../src/taipei';
+import { TAIPEI_HILLS } from '../src/taipei-hills';
 
 const diff = (a: number, b: number): number => Math.abs(((((a - b) % 360) + 540) % 360) - 180);
 const lonOf = (when: string, key: string): number => planetPositions(new Date(when)).find((p) => p.key === key)!.lon;
@@ -220,7 +222,7 @@ describe('汪星', () => {
     const plain = spaceMarkup({ ...base, scaleKm: WOOF_KM * 1.3, rg: 164, view: at, woofMap: false });
     const woof = plain.slice(plain.indexOf('data-body="woof"'));
     // 普通的星球：淡淡的顏色、背對太陽的一半變暗，沒有台北、道路、中山公園
-    expect(woof).toMatch(/class="space-planet"[^>]*fill="#c98f55"/);
+    expect(woof).toMatch(/class="space-planet"[^>]*fill="#6fa34f"/);
     expect(woof).toContain('space-shade');
     for (const cls of ['space-globe', 'woof-land', 'county-line', 'woof-road', 'park-']) expect(woof).not.toContain(cls);
     expect(plain).toContain('>汪星<');
@@ -250,42 +252,41 @@ describe('汪星', () => {
     expect(at([25.02, 121.487], 3)).not.toContain('woof-ripple');
   });
 
-  it('paints the real terrain (heights in colour, light and shadow) onto the globe', async () => {
-    // 地形圖：WebP，不大（第一次看汪星的地圖才下載）
-    const { default: inline } = await import('../src/woof-relief.webp?inline');
-    expect(inline.startsWith('data:image/webp;base64,')).toBe(true);
-    expect(((inline.length - 23) * 3) / 4).toBeLessThan(100_000);
-    // 假的地形圖：每度一個像素，紅色記經度、綠色記緯度
-    const [tw, th] = [344, 160];
-    const data = new Uint8ClampedArray(tw * th * 4);
-    for (let v = 0; v < th; v++) for (let u = 0; u < tw; u++) data.set([u % 256, v, 7, 255], (v * tw + u) * 4);
-    const tex = { w: tw, h: th, data };
-    const n = 101;
-    const out = new Uint8ClampedArray(n * n * 4);
-    const px = (i: number, j: number): number[] => [...out.subarray((j * n + i) * 4, (j * n + i) * 4 + 4)];
-    // 看離中山公園很遠的那一面（公園附近校正過，經線會彎一點）
-    const view = { focus: 'woof', yaw: (-100 * Math.PI) / 180, pitch: (10 * Math.PI) / 180 };
-    // 整顆汪星看得到：正中間是北緯 10 度、東經 100 度那一格，角落是球外面（透明）
-    expect(paintWoofRelief(out, n, tex, view, WOOF_KM * 1.6, 0)).toBeGreaterThan(0.5);
-    expect(px(50, 50)).toEqual([(100 + 172) % 256, 80 - 10, 7, 255]);
-    expect(px(0, 0)[3]).toBe(0);
-    // 往右是東邊（經度變大）、往上是北邊；指北針轉了 90 度，往右變成南邊
-    expect(px(70, 50)[0]).toBeGreaterThan(px(50, 50)[0]);
-    expect(px(50, 30)[1]).toBeLessThan(px(50, 50)[1]);
-    paintWoofRelief(out, n, tex, view, WOOF_KM * 1.6, 90);
-    expect(px(70, 50)[1]).toBeGreaterThan(80 - 10);
-    expect(px(70, 50)[0]).toBe((100 + 172) % 256);
-    // 中心不是汪星、拉得很近（外圈 50 公尺）：不畫
-    expect(paintWoofRelief(out, n, tex, { ...view, focus: 'mars' }, WOOF_KM * 1.6, 0)).toBe(0);
-    expect(paintWoofRelief(out, n, tex, view, 0.05, 0)).toBe(0);
-    // 拉近慢慢變淡
-    expect(paintWoofRelief(out, n, tex, view, 0.5, 0)).toBeLessThan(paintWoofRelief(out, n, tex, view, 3, 0));
-    // 分好幾次畫（每次幾列，radar.ts 畫細的時候）跟一次畫完一樣
-    const once = new Uint8ClampedArray(n * n * 4);
-    const parts = new Uint8ClampedArray(n * n * 4);
-    paintWoofRelief(once, n, tex, view, WOOF_KM * 1.6, 30);
-    for (let j = 0; j < n; j += 16) paintWoofRelief(parts, n, tex, view, WOOF_KM * 1.6, 30, j, Math.min(n, j + 16));
-    expect(parts).toEqual(once);
+  it('draws the hills as a few smooth height bands (vector, crisp at any zoom) on grassy land', () => {
+    // 五層：越高的範圍越小；每一圈都是逆時針（hemiPath 要的），點不多（不用畫很細）
+    expect(WOOF_HILLS.length).toBe(5);
+    const RAD = Math.PI / 180;
+    const areaOf = (ring: Array<[number, number]>): number => {
+      let a = 0;
+      for (let i = 0; i < ring.length; i++) {
+        const [p, q] = [ring[i], ring[(i + 1) % ring.length]];
+        a -= ((Math.sin(p[0] * RAD) + Math.sin(q[0] * RAD)) / 2) * (q[1] - p[1]) * RAD;
+      }
+      return a;
+    };
+    const areas = WOOF_HILLS.map((band) => band.reduce((t, h) => t + areaOf(h.ring), 0));
+    for (let i = 1; i < areas.length; i++) expect(areas[i]).toBeLessThan(areas[i - 1]);
+    for (const band of WOOF_HILLS) for (const h of band) expect(areaOf(h.ring)).toBeGreaterThan(0);
+    expect(TAIPEI_HILLS.reduce((t, b) => t + b.rings.reduce((u, r) => u + r.length, 0), 0)).toBeLessThan(4000);
+    // 台北的山都在市界裡面（陸地上；裁過的邊剛好壓在市界上，那幾點不算）
+    const onLine = ([y, x]: [number, number]): boolean =>
+      TAIPEI_OUTLINE.some(([ya, xa], i) => {
+        const [yb, xb] = TAIPEI_OUTLINE[(i + 1) % TAIPEI_OUTLINE.length];
+        const t = Math.max(0, Math.min(1, ((y - ya) * (yb - ya) + (x - xa) * (xb - xa)) / ((yb - ya) ** 2 + (xb - xa) ** 2 || 1)));
+        return Math.hypot(y - ya - t * (yb - ya), x - xa - t * (xb - xa)) < 2e-5;
+      });
+    for (const p of TAIPEI_HILLS.flatMap((b) => b.rings.flat())) expect(onWoofLand(...toWoof(p)) || onLine(p)).toBe(true);
+    const at = (p: [number, number], km: number): string => {
+      const [la, ln] = toWoof(p);
+      return spaceMarkup({ ...base, scaleKm: km, rg: 164, view: { focus: 'woof', yaw: (-ln * Math.PI) / 180, pitch: (la * Math.PI) / 180 } });
+    };
+    // 七星山附近：每一層都有；拉近到山頂（最高那一層的裡面）也畫得出來
+    const north = at([25.1717, 121.5548], 4);
+    expect(north).toContain('class="region-outline woof-land"');
+    for (let i = 1; i <= 5; i++) expect(north).toContain(`class="woof-hill h${i}"`);
+    expect(at([25.1717, 121.5548], 0.2)).toContain('class="woof-hill h5"');
+    // 盆地（台北車站）拉近：沒有山
+    expect(at([25.0478, 121.517], 0.3)).not.toContain('woof-hill');
   });
 
   it('keeps 中山公園 and the streets around it in proportion (like on Earth), the rest of the planet as before', () => {

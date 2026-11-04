@@ -491,8 +491,9 @@ export function openPark3D(o: Park3DOptions): () => void {
   // 公園外面一大圈（挖掉公園，不然會蓋住比地面低的翠湖）
   const outline = ringEN(Z.outline);
   const far = Array.from({ length: 64 }, (_, i): Pt => [Math.cos((i / 64) * Math.PI * 2) * 5000, Math.sin((i / 64) * Math.PI * 2) * 5000]);
-  // 公園外面：從高處看像城市（一塊塊深淺不一的街廓、淺色的馬路，一張 400 公尺見方重複鋪）
-  const city = (() => {
+  // 公園外面：從高處看像城市（一塊塊深淺不一的街廓、淺色的馬路，一張 400 公尺見方重複鋪）；
+  // 汪星的地面大多鋪滿草地（跟雷達一樣）：街廓換成深淺不一的草地，馬路照舊
+  const cityTex = (grassy: boolean): THREE.CanvasTexture => {
     const cv = document.createElement('canvas');
     [cv.width, cv.height] = [512, 512];
     const g = cv.getContext('2d')!;
@@ -503,7 +504,8 @@ export function openPark3D(o: Park3DOptions): () => void {
         const [x, y] = [i * 85 + 8, j * 85 + 8];
         for (let k = 0; k < 6; k++) {
           const v = 150 + Math.floor(hash(i * 61 + j * 17 + k * 5 + 300) * 50);
-          g.fillStyle = hash(i * 7 + j * 13 + k + 800) < 0.12 ? `rgb(${v - 40}, ${v - 5}, ${v - 50})` : `rgb(${v}, ${v - 3}, ${v - 8})`;
+          if (grassy) g.fillStyle = `rgb(${v - 50}, ${v + 5}, ${v - 85})`;
+          else g.fillStyle = hash(i * 7 + j * 13 + k + 800) < 0.12 ? `rgb(${v - 40}, ${v - 5}, ${v - 50})` : `rgb(${v}, ${v - 3}, ${v - 8})`;
           g.fillRect(x + (k % 3) * 24 + 1, y + Math.floor(k / 3) * 36 + 1, 22, 34);
         }
       }
@@ -513,8 +515,10 @@ export function openPark3D(o: Park3DOptions): () => void {
     t.colorSpace = THREE.SRGBColorSpace;
     t.anisotropy = renderer.capabilities.getMaxAnisotropy();
     return t;
-  })();
-  add(flatGeo([shapeOf(far, [outline])], -0.01), mat(0xffffff, { map: city }));
+  };
+  const outside = { earth: cityTex(false), woof: cityTex(true) };
+  const outsideMat = mat(0xffffff, { map: outside[world] });
+  add(flatGeo([shapeOf(far, [outline])], -0.01), outsideMat);
   const waters = Z.water.map(([outer, ...islands]) => ({ outer: ringEN(outer), islands: islands.map(ringEN) }));
   add(flatGeo([shapeOf(outline, waters.map((w) => w.outer))], 0), mat(0xe2dccf));
   // 草地：淡綠色上面一叢叢密密的草（畫在一張 GRASS_TILE 公尺見方、重複鋪的圖上，遠處也看得到草；近的還有立體的草）
@@ -2256,6 +2260,7 @@ export function openPark3D(o: Park3DOptions): () => void {
       // 到了另一邊的上空（汪星的中山公園有小法）
       f.switched = true;
       world = f.to;
+      outsideMat.map = outside[world];
       for (const sp of smoke) sp.visible = false;
     }
     if (t < F_DOWN) {

@@ -3,14 +3,13 @@
  * - rocketModel：跟雷達上同一支火箭的樣子做成立體的（約 8.5 公尺高，白色機身、紅色鼻錐、紅色腰帶、四片紅色尾翼、一個圓窗，
  *   底下會閃的火焰），原點在底下（尾翼的底），圓窗朝 +z；
  * - spaceScene：飛到另一顆星球的路上看到的：滿天的星星、地球（全世界的海岸線畫的陸地、一層雲、藍色的大氣）、
- *   汪星（雷達同一張地形圖：台北的陸地攤在整顆星球上、周圍是海，暖色的大氣），火箭從出發那一顆的中山公園飛到另一顆的中山公園；
+ *   汪星（跟雷達一樣：台北的陸地攤在整顆星球上、鋪滿草地，山一層一層的色塊，周圍是海，暖色的大氣），火箭從出發那一顆的中山公園飛到另一顆的中山公園；
  * - cloudLayer：火箭往上飛、往下降時穿過的一層雲。
  * 星球的大小、距離不是真的（看起來像在飛就好）
  */
 import * as THREE from 'three';
-import { WOOF_LAND } from './space';
+import { WOOF_HILLS, WOOF_LAND } from './space';
 import { WORLD_RINGS } from './world';
-import reliefUrl from './woof-relief.webp';
 
 /** 火箭多高、窗戶在多高（跟雷達上的一樣） */
 export const ROCKET_H = 8.5;
@@ -187,22 +186,17 @@ function cloudTexture(): THREE.CanvasTexture {
   return t;
 }
 
-/** 汪星的貼圖：跟雷達一樣——海（汪星的海色），陸地是台北市的範圍攤在整顆星球上（WOOF_LAND），山再鋪雷達同一張地形圖（經度 -172～172、緯度 80～-80） */
+/** 汪星的貼圖：跟雷達一樣——海（汪星的海色），陸地是台北市的範圍攤在整顆星球上（WOOF_LAND），鋪滿草地的綠色；山一層一層疊上去（WOOF_HILLS，越高越深、最高的偏土黃） */
+const WOOF_GRASS = '#6fa34f';
+const WOOF_HILL_COLORS = ['#5f9445', '#50823b', '#456f33', '#77744f', '#8d8262'];
 function woofTexture(): THREE.CanvasTexture {
   const { cv, g, xy } = equirect(2048, 1024);
   g.fillStyle = '#2a6496';
   g.fillRect(0, 0, 2048, 1024);
-  fillRings(g, xy, WOOF_LAND, () => '#b7b48a');
+  fillRings(g, xy, WOOF_LAND, () => WOOF_GRASS);
+  WOOF_HILLS.forEach((band, i) => fillRings(g, xy, band.map((h) => h.ring), () => WOOF_HILL_COLORS[i] ?? WOOF_HILL_COLORS[WOOF_HILL_COLORS.length - 1]));
   const t = new THREE.CanvasTexture(cv);
   t.colorSpace = THREE.SRGBColorSpace;
-  const img = new Image();
-  img.onload = (): void => {
-    const [x0, y0] = xy(80, -172);
-    const [x1, y1] = xy(-80, 172);
-    g.drawImage(img, x0, y0, x1 - x0, y1 - y0);
-    t.needsUpdate = true;
-  };
-  img.src = reliefUrl;
   return t;
 }
 

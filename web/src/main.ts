@@ -14,7 +14,6 @@ import { findCard, gotReward, openAlbum, openHelp, openItems } from './cards';
 import { Radar, SPACE_FROM_KM, type RadarRoute, type RadarStreets, type SpaceView } from './radar';
 import { DEFAULT_THEME_ID, getTheme, THEMES, type Theme } from './themes';
 import type { BottleOut, EventOut, Item, KeywordInfo, KeywordRules, MyBottles, MyReport, Origin, Phase, PickedBottle, RelatedPost, RouteOut, PreviewItem, RouteStop, RoutePreview, SubmitResult, FailedItem, EditItem, EditInput } from './types';
-import reliefUrl from './woof-relief.webp';
 
 const DEFAULT_ORIGIN: Origin = { lat: 25.0478, lng: 121.517, source: 'default' }; // 台北車站
 const SOON_SEC = 30 * 60;
@@ -40,7 +39,7 @@ const LS_SCALE_KM = 'dr.scaleKm';
 /** 在汪星上（點汪星飛過去、搭火箭過去）：中心、轉的角度，重新整理也回到汪星同一個地方；離開汪星就清掉 */
 const LS_SPACE = 'dr.space';
 const LS_ORIGIN = 'dr.origin';
-/** 移動成手動位置之前的位置（「回到我的位置」還沒收到 GPS 時直接回這裡，不用等重新定位） */
+/** 移動成手動位置之前的位置（「定位」還沒收到 GPS 時先回這裡，不用等重新定位） */
 const LS_HOME = 'dr.home';
 const LS_THEME = 'dr.theme';
 /** 全螢幕（像 Google 地圖）：'1' 是開著；電腦全螢幕時收起清單：'1' */
@@ -161,7 +160,7 @@ const SPACE_MAX_KM = 5e9;
 const MIN_ZOOM_KM = 0.5;
 /**
  * 你在哪一顆：火箭在哪一邊你就在哪一邊（park.ts 存在 dr.rocket；搭火箭到汪星就在汪星，點別的星球只是看過去，坐火箭回來才回到地球）。
- * 在汪星時：太陽系寫「汪星（你）」、「回到我的位置」回到汪星的發射口、「定位」沒有反應、範圍按鈕是汪星的
+ * 在汪星時：太陽系寫「汪星（你）」、「定位」回到汪星的發射口、範圍按鈕是汪星的
  */
 let youOn: 'earth' | 'woof' = ((): 'earth' | 'woof' => {
   try {
@@ -179,7 +178,7 @@ const savedWoof = ((): SpaceView | null => {
     return null;
   }
 })();
-/** 火箭飛行中（整趟不接受範圍按鈕、定位、回到我的位置）；tripTo 是要去哪一顆 */
+/** 火箭飛行中（整趟不接受範圍按鈕、定位）；tripTo 是要去哪一顆 */
 let tripping = false;
 let tripTo: 'earth' | 'woof' | null = null;
 /** 汪星的地圖（台北的陸地、道路、中山公園）看不看得到：你在汪星，或火箭正飛過去；你在地球時汪星是普通的星球、只能看整顆 */
@@ -366,7 +365,6 @@ const detailEl = $('#detail');
 const countLabel = $('#count-label');
 const originLabel = $('#origin-label');
 const useGpsBtn = $<HTMLButtonElement>('#use-gps');
-const homeBtn = $<HTMLButtonElement>('#home-btn');
 /** 汪星的狗：「鎖定」按鈕、點過可以鎖定的狗（10 秒沒按就收起來）、鎖定中的狗 */
 const dogLockBtn = $<HTMLButtonElement>('#dog-lock-btn');
 let dogOffer: string | null = null;
@@ -522,10 +520,10 @@ function foundDog(m: typeof import('./park'), id: string): void {
   const at = m.dogAt(id);
   void findCard(id, at ? m.parkPlaceName(at) : '中山公園', (msg) => showBanner(bannerEl, msg, 4000));
 }
-// 太陽系那幾層拖曳移開了視野、拉回地球：「回到我的位置」跟著出現、消失；自己移動了就不再跟著狗
+// 太陽系那幾層拖曳移開了視野、拉回地球：「地圖」按鈕跟著出現、消失；自己移動了就不再跟著狗
 radar.onSpaceMove = () => {
   if (dogLocked || dogOffer) lockDog(null);
-  updateHomeBtn();
+  updateViewBtn();
   saveSpaceView();
   updateScaleChips();
   // 從汪星的中山公園（可以放大到 1 公尺以內）回到地球：地球上不在中山公園附近就拉遠到雷達平常的最小範圍
@@ -879,39 +877,6 @@ function loadStreets(): void {
     });
 }
 
-/** 汪星拉近時的台北街道（space.ts 用）：跟雷達一樣的圖磚，抓到了重畫太空 */
-/**
- * 汪星的地形圖（woof-relief.webp，約 34 KB：台北真實的高度上色、山的光影，攤在汪星的經緯度上）：
- * 第一次看汪星的地圖才下載、解開成像素，好了重畫；radar.ts 畫在雷達下面那一層，space.ts 的 paintWoofRelief 貼到球上
- */
-let relief: import('./space').ReliefTexture | null = null;
-let reliefLoading = false;
-function woofRelief(): import('./space').ReliefTexture | null {
-  if (relief || reliefLoading) return relief;
-  reliefLoading = true;
-  const img = new Image();
-  img.src = reliefUrl;
-  void img
-    .decode()
-    .then(() => {
-      const c = document.createElement('canvas');
-      [c.width, c.height] = [img.naturalWidth, img.naturalHeight];
-      const ctx = c.getContext('2d');
-      if (!ctx) return;
-      ctx.drawImage(img, 0, 0);
-      relief = { w: c.width, h: c.height, data: ctx.getImageData(0, 0, c.width, c.height).data };
-      radar.redrawSpace();
-    })
-    .finally(() => {
-      reliefLoading = false;
-    });
-  return null;
-}
-radar.setRelief((out, n, view, km, heading, j0, j1, span) => {
-  if (!spaceMod || !woofMap()) return 0;
-  const t = view.focus === 'woof' ? woofRelief() : null;
-  return t ? spaceMod.paintWoofRelief(out, n, t, view, km, heading, j0, j1, span) : 0;
-});
 // 全螢幕鋪滿時看得到的範圍變了（換方向、改視窗大小）：道路抓到畫面的角
 radar.onView = () => updateStreets();
 radar.setScaleBar($('#scale-bar'));
@@ -998,7 +963,7 @@ function earthMinKm(): number {
   return parkMod?.nearPark(origin.lat, origin.lng) ? parkMod.PARK_MIN_KM : MIN_ZOOM_KM;
 }
 
-/** 換了位置（回到我的位置、在地圖上設定、從汪星回來）不在中山公園附近了：拉遠到雷達平常的最小範圍 */
+/** 換了位置（定位、在地圖上設定、從汪星回來）不在中山公園附近了：拉遠到雷達平常的最小範圍 */
 function fitEarthZoom(): void {
   if (!radar.spaceFocused && scaleKm < earthMinKm()) zoomRadar(earthMinKm() / scaleKm, true);
 }
@@ -1138,7 +1103,7 @@ async function rocketTrip(m: typeof import('./park'), from: 'earth' | 'woof'): P
   radar.youOn = to;
   saveSpaceView();
   updateScaleChips();
-  updateHomeBtn();
+  updateViewBtn();
   updateSpace();
   radar.redrawPark();
   radar.setTrip('', true);
@@ -1167,7 +1132,7 @@ async function landIn3D(to: 'earth' | 'woof'): Promise<void> {
   }
   saveSpaceView();
   updateScaleChips();
-  updateHomeBtn();
+  updateViewBtn();
   updateSpace();
   radar.redrawPark();
 }
@@ -3175,7 +3140,7 @@ let panFrame = 0;
  * 放開才存下來、重抓附近的資料（全台的範圍也這時照新位置重算）
  */
 function panRadar(bearing: number, km: number, done: boolean): void {
-  // 「定位」「回到我的位置」飛到一半就拖：先到目的地，從那裡開始拖
+  // 「定位」飛到一半就拖：先到目的地，從那裡開始拖
   if (flight) landFlight();
   if (!panFrom) panFrom = origin;
   if (km > 0) {
@@ -3224,11 +3189,10 @@ function loadHome(): Home | null {
 let home: Home | null = loadHome();
 
 /**
- * 「回到我的位置」：有 GPS 位置就馬上回去；還沒收到 GPS（剛開頁面）就先回到上次知道的位置
- * （最後一次的 GPS 或移動前的位置），不用等重新定位，之後 GPS 回來照常更新。都沒有才重新定位（「定位」）。
- * 跟「定位」一樣，範圍拉到外圈 LOCATE_KM（本來就比較近的不動；太空裡、轉過視角的先拉回地球；在汪星是回到發射口）
+ * 「定位」（v1.468 起「回到我的位置」拿掉，統一用「定位」）：你在汪星就回到汪星的發射口（範圍拉到外圈 LOCATE_KM，本來就比較近的不動）；
+ * 在地球照 locateMe（先馬上飛回我的位置，再重新抓一次 GPS）。火箭飛行中沒有反應
  */
-function goHome(): void {
+function locate(): void {
   if (tripping) return;
   lockDog(null);
   // 你在汪星：回到汪星的發射口（點別的星球只是看過去，坐火箭回來才回到地球）
@@ -3239,24 +3203,10 @@ function goHome(): void {
     });
     return;
   }
-  const to: Home | null = lastGps ? { ...lastGps, source: 'gps', accuracy: lastGpsAccuracy } : home;
-  if (!to) {
-    locateMe();
-    return;
-  }
-  // 太陽系那幾層移開了視野：先拉回地球
-  if (radar.spaceMoved) radar.resetSpace();
-  lsSet(LS_ORIGIN, null);
-  gpsAccuracy = to.source === 'gps' ? to.accuracy : null;
-  const km = locateKm(earthMinKm());
-  zoomToKm(km, { lat: to.lat, lng: to.lng, source: to.source });
-  if (view === 'map') {
-    map.setOrigin(origin, true, gpsAccuracy);
-    map.showRange(km, 0);
-  }
+  locateMe();
 }
 
-// ---- 汪星的狗：點了出現「鎖定」，按了雷達正中間跟著牠（鏡頭慢慢追上），再按、自己拖曳、換星球、回到我的位置、搭火箭、切到地圖就解除 ----
+// ---- 汪星的狗：點了出現「鎖定」，按了雷達正中間跟著牠（鏡頭慢慢追上），再按、自己拖曳、換星球、定位、搭火箭、切到地圖就解除 ----
 
 function updateDogLockBtn(): void {
   dogLockBtn.hidden = !(dogLocked || dogOffer) || view !== 'radar';
@@ -3277,7 +3227,7 @@ function offerDogLock(id: string): void {
   updateDogLockBtn();
 }
 
-/** 鎖定這隻狗（null 是解除：記住現在的看法、「回到我的位置」照常） */
+/** 鎖定這隻狗（null 是解除：記住現在的看法） */
 function lockDog(id: string | null): void {
   const was = dogLocked;
   dogLocked = id;
@@ -3287,7 +3237,7 @@ function lockDog(id: string | null): void {
   if (id && !dogFollow) dogFollow = requestAnimationFrame(followDog);
   if (!id && was) {
     saveSpaceView();
-    updateHomeBtn();
+    updateViewBtn();
   }
 }
 
@@ -3316,18 +3266,14 @@ function noMapView(): boolean {
   return youOn === 'woof' || radar.spaceFocused || scaleKm > SPACE_FROM_KM;
 }
 
-/** 「回到我的位置」：手動位置（拖曳雷達、在地圖上設定）、太陽系那幾層移開了視野時，雷達上才出現；在汪星上、超過全球「地圖」按鈕藏起來 */
-function updateHomeBtn(): void {
+/** 在汪星上、超過全球「地圖」按鈕藏起來 */
+function updateViewBtn(): void {
   viewBtn.hidden = view === 'radar' && noMapView();
-  // 你在汪星：鏡頭正對著汪星的發射口就不用出現
-  const v = radar.spaceViewNow;
-  const home = youOn === 'woof' ? !!woofHome && v.focus === 'woof' && Math.abs(v.yaw - woofHome.yaw) < 1e-5 && Math.abs(v.pitch - woofHome.pitch) < 1e-5 : origin.source !== 'manual' && !radar.spaceMoved;
-  homeBtn.hidden = home || view !== 'radar';
 }
 
 function setOrigin(o: Origin): void {
   const moved = haversineKm(origin, o) > 0.2;
-  // 記住不是手動的位置：之後拖曳、在地圖上設定，「回到我的位置」可以直接回來
+  // 記住不是手動的位置：之後拖曳、在地圖上設定，「定位」可以直接回來
   // （預設位置不蓋掉上次的 GPS 位置）
   if (o.source === 'gps' || (o.source === 'default' && home?.source !== 'gps')) {
     home = { lat: o.lat, lng: o.lng, source: o.source, accuracy: o.source === 'gps' ? gpsAccuracy : null };
@@ -3338,7 +3284,7 @@ function setOrigin(o: Origin): void {
   map.setOrigin(o, moved, o.source === 'gps' ? gpsAccuracy : null);
   originLabel.textContent = o.source === 'gps' ? 'GPS 定位' : o.source === 'manual' ? '手動位置' : '預設：台北車站';
   useGpsBtn.hidden = o.source !== 'manual';
-  updateHomeBtn();
+  updateViewBtn();
   if (isAutoScale(scaleSetting) && scaleKmFor(scaleSetting) !== scaleKm) {
     scaleKm = scaleKmFor(scaleSetting);
     radar.setScale(scaleKm);
@@ -3400,7 +3346,7 @@ function switchView(v: 'radar' | 'map'): void {
   $('#radar-view').hidden = v !== 'radar';
   $('#map-view').hidden = v !== 'map';
   if (v !== 'radar') lockDog(null);
-  updateHomeBtn();
+  updateViewBtn();
   $('#stage').dataset.view = v;
   viewBtn.textContent = v === 'radar' ? '地圖' : '雷達';
   pickBtn.hidden = v !== 'map';
@@ -3484,7 +3430,7 @@ function setBase(b: BaseMap): void {
 let zoomFrame = 0;
 
 /**
- * 「定位」「回到我的位置」：範圍慢慢縮放到外圈 km 公里、中心同時慢慢移到 to（像 Google 地圖飛過去；頭尾慢，縮放照倍數取對數走、
+ * 「定位」：範圍慢慢縮放到外圈 km 公里、中心同時慢慢移到 to（像 Google 地圖飛過去；頭尾慢，縮放照倍數取對數走、
  * 位置照經緯度內插，差越多、移越遠走越久，ZOOM_TO_MS 之間；移的時候只重畫，到了才 setOrigin：存下來、重抓一次）。
  * 不在雷達畫面（地圖）時直接換（減少動態效果的也照樣飛）；飛到一半自己捏合、滾滾輪、拖曳：位置直接到 to、範圍停在那裡；
  * 飛的時候新的 GPS 位置來了就改飛到那裡（flight.to）
@@ -3545,7 +3491,7 @@ function landFlight(): void {
 /** 雙指縮放、滾輪：連續調整範圍；放開時接近某個按鈕的範圍（差 6% 以內）就對齊那個按鈕 */
 /** gesture：雙指、滾輪（太空裡幅度加大）；從地圖切回來是直接換成地圖的比例，不加大 */
 function zoomRadar(factor: number, done: boolean, gesture = false): void {
-  // 自己縮放：「定位」「回到我的位置」飛到一半，位置直接到、範圍停在這裡
+  // 自己縮放：「定位」飛到一半，位置直接到、範圍停在這裡
   if (gesture && flight) landFlight();
   // 太空（比全球再遠）一次縮放的幅度大一點：從全球到整個太陽系差了幾十萬倍
   const f = gesture && (scaleKm > WORLD_KM || (scaleKm >= WORLD_KM && factor > 1)) ? factor ** 2 : factor;
@@ -3628,34 +3574,36 @@ function geoErrorText(e: GeolocationPositionError): string {
   return '目前無法取得位置，請稍後再試，或切到地圖用「設定位置」手動選。';
 }
 
-/** 按「定位」「回到我的位置」，雷達、地圖的範圍拉到外圈幾公里（本來就比較近的維持原本的，不拉遠；min 是最近可以到多近） */
+/** 按「定位」，雷達、地圖的範圍拉到外圈幾公里（本來就比較近的維持原本的，不拉遠；min 是最近可以到多近） */
 const LOCATE_KM = 2;
 const locateKm = (min: number): number => Math.max(min, Math.min(scaleKm, LOCATE_KM));
 
 /**
- * 「定位」按鈕：清掉手動位置，先馬上飛回我的位置（上次知道的 GPS 位置，跟「回到我的位置」一樣不用等），範圍拉到外圈 LOCATE_KM（本來就比較近的不動）
+ * 「定位」按鈕：清掉手動位置，先馬上飛回我的位置（上次知道的 GPS 位置，不用等；沒有 GPS、移到了手動位置就回到移動之前的位置），範圍拉到外圈 LOCATE_KM（本來就比較近的不動）
  * （太空裡、轉過視角的先拉回地球）；再重新抓一次 GPS，抓到了移到新的位置（範圍不再動，等的時候自己縮放的照舊）。
  * 不知道上次的位置（電腦常常還沒有 GPS）：等抓到了才飛過去（移動、縮放一起，不會先縮放、再一下跳過去）
  */
 function locateMe(): void {
-  if (!('geolocation' in navigator)) {
-    showBanner(bannerEl, '此瀏覽器不支援定位，可切到地圖用「設定位置」手動選。', 4000);
-    return;
-  }
   const known = lastGps ? { ...lastGps, accuracy: lastGpsAccuracy } : home?.source === 'gps' ? home : null;
-  if (known) {
+  // 沒有 GPS 但移到了手動位置：先回到移動之前的位置（以前「回到我的位置」做的，例如電腦沒有 GPS 時的預設位置）
+  const back = known ?? (origin.source === 'manual' ? home : null);
+  if (back) {
     lsSet(LS_ORIGIN, null);
-    gpsAccuracy = known.accuracy;
+    gpsAccuracy = known ? known.accuracy : null;
   }
   if (radar.spaceMoved) radar.resetSpace();
   // 知道上次的位置：馬上飛過去（移動、縮放一起）；不知道（電腦常常還沒有 GPS）：等抓到再一起飛過去
-  if (known) {
+  if (back) {
     const km = locateKm(earthMinKm());
-    zoomToKm(km, { lat: known.lat, lng: known.lng, source: 'gps' });
+    zoomToKm(km, { lat: back.lat, lng: back.lng, source: known ? 'gps' : back.source });
     if (view === 'map') {
       map.setOrigin(origin, true, gpsAccuracy);
       map.showRange(km, 0);
     }
+  }
+  if (!('geolocation' in navigator)) {
+    showBanner(bannerEl, '此瀏覽器不支援定位，可切到地圖用「設定位置」手動選。', 4000);
+    return;
   }
   locateBtn.classList.add('on');
   locateBtn.textContent = '定位中…';
@@ -3698,11 +3646,11 @@ function startGeolocation(): void {
   }
   navigator.geolocation.watchPosition(
     (pos) => {
-      // 手動位置時也記著最新的 GPS 位置，「回到我的位置」可以馬上回來
+      // 手動位置時也記著最新的 GPS 位置，「定位」可以馬上回來
       lastGps = { lat: pos.coords.latitude, lng: pos.coords.longitude, source: 'gps' };
       lastGpsAccuracy = pos.coords.accuracy;
       if (origin.source === 'manual') {
-        // 手動位置時也存下來：下次開頁面還沒定位到，「回到我的位置」也能馬上回到這裡
+        // 手動位置時也存下來：下次開頁面還沒定位到，「定位」也能馬上回到這裡
         home = { ...lastGps, source: 'gps', accuracy: lastGpsAccuracy };
         lsSet(LS_HOME, JSON.stringify(home));
         return;
@@ -5373,11 +5321,7 @@ function wireControls(): void {
     });
   }
   viewBtn.addEventListener('click', () => switchView(view === 'radar' ? 'map' : 'radar'));
-  // 定位：你在汪星、火箭飛行中沒有反應
-  locateBtn.addEventListener('click', () => {
-    if (!onWoof() && !tripping) locateMe();
-  });
-  homeBtn.addEventListener('click', goHome);
+  locateBtn.addEventListener('click', locate);
   dogLockBtn.addEventListener('click', () => lockDog(dogLocked ? null : dogOffer));
   for (const b of baseChips) b.addEventListener('click', () => setBase(b.dataset.base as BaseMap));
   compassBtn.addEventListener('click', () => void toggleCompass());
@@ -5629,7 +5573,7 @@ async function boot(): Promise<void> {
   if (youOn === 'woof')
     void woofHomeView().then((v) => {
       if (!savedWoof && radar.spaceFocusKey !== 'woof') radar.setSpaceView(v);
-      updateHomeBtn();
+      updateViewBtn();
     });
   setOrigin(origin);
   startGeolocation();
