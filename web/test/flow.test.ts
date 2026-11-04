@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { fireworksSvg, HQ_SAIL_MS, HQ_VOYAGE_MS, voyagePhase, voyageTimeOf } from '../src/flow';
-import { HQ_BLOOMS, HQ_BOATS, HQ_BRIDGE, HQ_CANALS, HQ_CULTURE, HQ_CULTURE_THEMES, HQ_INTROS, HQ_PLANTINGS, HQ_PONDS, HQ_SPRINGS, HQ_STARS, HQ_TOUR, HQ_TOUR_AT, HQ_TRAILS, HQ_VENUES, HQ_VOYAGE } from '../src/hq-voyage';
+import { HQ_BLOOMS, HQ_BOATS, HQ_BRIDGE, HQ_CANALS, HQ_CULTURE, HQ_CULTURE_LINES, HQ_CULTURE_THEMES, HQ_INTROS, HQ_TAIPEI_RING, HQ_PLANTINGS, HQ_PONDS, HQ_SPRINGS, HQ_STARS, HQ_TOUR, HQ_TOUR_AT, HQ_TRAILS, HQ_VENUES, HQ_VOYAGE } from '../src/hq-voyage';
 import { LANDMARKS } from '../src/landmarks';
 import { haversineKm } from '../src/geo';
 
@@ -79,6 +79,26 @@ describe('洋流總部的特效', () => {
     }
     for (const name of [...HQ_TRAILS.map((t) => t.name), HQ_BRIDGE.name, ...HQ_VENUES.map((v) => v.name), ...HQ_CANALS.map((c) => c.name), ...HQ_SPRINGS.map((x) => x.name), ...HQ_PONDS.map((x) => x.name), '北士科星群', '水上活動', '綠覆率']) expect(HQ_INTROS[name]?.length ?? 0).toBeGreaterThan(10);
     for (const p of HQ_PLANTINGS.filter((x) => x.kind === 'cut')) expect(p.why.length).toBeGreaterThan(5);
+    // 文化徑的線：每一站都是文化徑的點、線走過每一站（100 公尺內）
+    for (const ln of HQ_CULTURE_LINES) {
+      for (const n of ln.stops) {
+        const c = HQ_CULTURE.find((x) => x.name === n);
+        expect(c, n).toBeTruthy();
+        expect(Math.min(...ln.pts.map(([lat, lng]) => haversineKm({ lat, lng }, c!)))).toBeLessThan(0.1);
+      }
+    }
+    // 台北市界：圈得住市政府、總部、所有文化徑的點
+    const inside = (lat: number, lng: number): boolean => {
+      let ok = false;
+      for (let i = 0, j = HQ_TAIPEI_RING.length - 1; i < HQ_TAIPEI_RING.length; j = i++) {
+        const [ya, xa] = HQ_TAIPEI_RING[i];
+        const [yb, xb] = HQ_TAIPEI_RING[j];
+        if (ya > lat !== yb > lat && lng < xa + ((lat - ya) * (xb - xa)) / (yb - ya)) ok = !ok;
+      }
+      return ok;
+    };
+    expect(HQ_TAIPEI_RING.length).toBeGreaterThan(100);
+    for (const p of [...HQ_TOUR, ...HQ_CULTURE]) expect(inside(p.lat, p.lng), 'place' in p ? p.place : p.name).toBe(true);
     for (const v of [...HQ_VENUES, ...HQ_STARS]) expect(nearRoute(v)).toBeLessThan(2.5);
     // 街道的路樹：中心離路線 200～700 公尺（不是在路線上），每個中心至少 3 條街、街都在中心 500 公尺內
     expect(HQ_BLOOMS.length).toBeGreaterThan(30);

@@ -403,21 +403,40 @@ path.map-water-glint { animation: water-flow-map 1.1s linear infinite; }
 .radar .intro-hit, .map-intro-hit { fill: transparent; stroke: none; cursor: help; visibility: hidden; animation: intro-on 1ms linear both; }
 .radar .intro-hit { pointer-events: visibleFill; }
 @keyframes intro-on { to { visibility: visible; } }
-.hq-intro-tip { position: fixed; z-index: 3000; max-width: 260px; padding: 8px 10px; background: var(--card); color: var(--text); border: 1.5px solid #15171c; border-radius: 10px; box-shadow: 3px 3px 0 #15171c; font-size: 12.5px; line-height: 1.55; pointer-events: none; }
+.hq-intro-tip { white-space: pre-line; position: fixed; z-index: 3000; max-width: 260px; padding: 8px 10px; background: var(--card); color: var(--text); border: 1.5px solid #15171c; border-radius: 10px; box-shadow: 3px 3px 0 #15171c; font-size: 12.5px; line-height: 1.55; pointer-events: none; }
 .hq-intro-tip b { display: block; margin-bottom: 2px; font-size: 13.5px; }
 .leaflet-tooltip.hq-intro-tip-map { width: 240px; white-space: normal; font-size: 12.5px; line-height: 1.55; border: 1.5px solid #15171c; box-shadow: 3px 3px 0 #15171c; }
 /* 洋流號播放中：右上角的綠覆率儀表、關閉按鈕 */
 .hq-panel { position: absolute; top: calc(100% + 8px); right: 0; z-index: 900; display: flex; flex-direction: column; align-items: flex-end; gap: 6px; pointer-events: none; }
-.hq-panel[hidden] { display: none; }
+.hq-panel[hidden], .hq-panel [hidden] { display: none; }
 .hq-panel > * { pointer-events: auto; }
-.hq-gauge { background: var(--card); color: var(--text); border: 1.5px solid #15171c; border-radius: 10px; box-shadow: 3px 3px 0 #15171c; padding: 6px 10px; display: grid; grid-template-columns: auto auto; column-gap: 8px; align-items: center; cursor: help; }
-.hq-gauge-label { font-size: 12px; color: var(--muted); }
-.hq-gauge-num { font-size: 18px; font-weight: 800; color: #2f7a25; text-align: right; font-variant-numeric: tabular-nums; }
-.hq-gauge-bar { grid-column: 1 / 3; position: relative; width: 120px; height: 7px; border-radius: 4px; background: rgba(63, 143, 47, 0.18); overflow: hidden; }
-.hq-gauge-bar i { position: absolute; inset: 0 auto 0 0; background: #3f8f2f; border-radius: 4px; transition: width 0.6s ease-out; }
-.hq-gauge small { grid-column: 1 / 3; font-size: 10.5px; color: var(--muted); }
-.hq-gauge.bump .hq-gauge-num { animation: gauge-bump 0.6s ease-out; }
-@keyframes gauge-bump { 40% { transform: scale(1.25); } }
+/* 一塊地方（社子島）：淡淡的土色、虛線外框，淡入後留著 */
+.radar .voyage-area { pointer-events: none; animation: area-in 1.2s ease-out both; }
+.radar .area-fill { fill: #f1dd9a; fill-opacity: 0.55; stroke: #8a6a2a; stroke-linejoin: round; }
+.map-voyage-area { animation: area-in 1.2s ease-out both; }
+@keyframes area-in { from { opacity: 0; } to { opacity: 1; } }
+.radar .voyage-stop.area text { font-size: 13px; font-weight: 800; fill: #6b5216; }
+/* 綠覆率：整個台北市一層一層變很淡的綠（每長回一棵樹一層，2.5 秒慢慢淡入） */
+.radar .green-step { fill: #3f8f2f; fill-opacity: 0.025; stroke: none; pointer-events: none; animation: green-step 2.5s ease-in-out both; }
+.map-green-step { animation: green-step 2.5s ease-in-out both; }
+@keyframes green-step { from { opacity: 0; } to { opacity: 1; } }
+/* 文化網（點 —— 線 —— 面）：點一圈圈亮 → 線沿路亮 → 每條線、每個點往外暈開連成一片 */
+.radar .voyage-net { pointer-events: none; }
+.radar .net-face, .map-net-face { fill: none; stroke-linecap: round; stroke-linejoin: round; stroke-opacity: 0.2; animation: net-face 1.8s ease-out both; }
+@keyframes net-face { from { stroke-width: 0; stroke-opacity: 0; } }
+.radar .net-face-dot, .map-net-face-dot { fill-opacity: 0.18; transform-box: fill-box; transform-origin: center; animation: net-face-dot 1.8s ease-out both; }
+@keyframes net-face-dot { from { transform: scale(0); fill-opacity: 0; } }
+.radar .net-line, .map-net-line { fill: none; stroke-linecap: round; stroke-linejoin: round; stroke-opacity: 0.55; stroke-dasharray: 1; stroke-dashoffset: 1; animation: voyage-fill 1.2s ease-in-out both; }
+.radar .net-dot, .map-net-dot { fill: none; stroke-opacity: 0.9; transform-box: fill-box; transform-origin: center; animation: net-dot 0.9s ease-out both; }
+@keyframes net-dot { from { transform: scale(0); opacity: 0; } 60% { transform: scale(1.5); opacity: 1; } to { transform: scale(1); opacity: 1; } }
+.hq-net-caption { background: var(--card); color: var(--text); border: 1.5px solid #15171c; border-radius: 10px; box-shadow: 3px 3px 0 #15171c; padding: 7px 11px; max-width: 230px; }
+.hq-net-caption b { display: block; font-size: 17px; letter-spacing: 1px; }
+.hq-net-caption b span { opacity: 0; }
+.hq-net-caption.play b span { animation: net-word 0.6s ease-out both; }
+.hq-net-caption.play b span:nth-child(2) { animation-delay: 0.9s; }
+.hq-net-caption.play b span:nth-child(3) { animation-delay: 2.1s; }
+@keyframes net-word { from { opacity: 0; } to { opacity: 1; } }
+.hq-net-caption small { display: block; font-size: 11.5px; color: var(--muted); line-height: 1.45; margin-top: 2px; }
 /* 湧泉（堀仔頭）：藍色的小點、三圈漣漪一直往外冒；老水塘（雙連陂）：鬼影之後填成水 */
 .radar .voyage-spring, .map-voyage-spring { pointer-events: none; }
 .map-voyage-spring { background: none; border: 0; }

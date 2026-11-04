@@ -69,8 +69,17 @@ export interface RadarRoute {
   blooms?: Array<{ center: { bearing: number; distanceKm: number }; at: number; streets: Array<{ pts: Array<{ bearing: number; distanceKm: number }>; mid: number }> }>;
   /** 真的河（水域政策「親水」）：船沿河走時（at）水面亮成藍色、留著（OpenStreetMap 的淡水河、基隆河、新店溪） */
   rivers?: Array<{ ring: Array<{ bearing: number; distanceKm: number }>; at: number }>;
-  /** 一條線從頭長到尾（at 開始、REVEAL_MS 長完）：trail 山林徑（土色虛線）、bridge 自行車橋（粗的雙線，長完有腳踏車的點在上面跑）、stars 星座（金色細線）；label 寫在尾端、留著 */
-  reveals?: Array<{ points: Array<{ bearing: number; distanceKm: number }>; at: number; kind: 'trail' | 'bridge' | 'stars'; label?: string }>;
+  /**
+   * 一條線從頭長到尾（at 開始、REVEAL_MS 長完）：trail 山林徑（土色）、bridge 自行車橋（粗的雙線，長完有腳踏車的點在上面跑）、stars 星座（金色細線）、
+   * culture 文化徑的線（color）；label 寫在尾端（文化徑寫在中間）、留著
+   */
+  reveals?: Array<{ points: Array<{ bearing: number; distanceKm: number }>; at: number; kind: 'trail' | 'bridge' | 'stars' | 'culture'; label?: string; color?: string }>;
+  /** 綠覆率：整個台北市（ring）在 steps 的每個時間再鋪一層很淡的綠 */
+  green?: { ring: Array<{ bearing: number; distanceKm: number }>; steps: number[] };
+  /** 一塊地方（社子島）：at 時淡入、留著，虛線外框、名字寫在中間 */
+  areas?: Array<{ ring: Array<{ bearing: number; distanceKm: number }>; center: { bearing: number; distanceKm: number }; at: number; label: string }>;
+  /** 文化網（點 —— 線 —— 面）：at 開始；先點亮 dots、再沿 lines 亮起來、最後每條線、每個點往外暈開連成一片 */
+  network?: { at: number; lines: Array<{ points: Array<{ bearing: number; distanceKm: number }>; color: string }>; dots: Array<{ bearing: number; distanceKm: number; color: string }> };
   /**
    * 一個東西冒出來（at）：hut 登山中心、stadium 足球場、dome 運動中心、star 星星、regrow 樹樁（grow 時長回大樹）、culture 文化徑的點（char、color）；
    * label 留著（small 是寫在下面的小字，跟別的小字重疊就不寫）
@@ -119,6 +128,9 @@ const ICON_SVG: Record<'hut' | 'stadium' | 'dome' | 'star', string> = {
 };
 /** 線從頭長到尾要幾毫秒 */
 const REVEAL_MS = 2200;
+/** 文化網：點亮之後多久線亮、多久暈開成面 */
+const NET_LINE_MS = 900;
+const NET_FACE_MS = 2100;
 /** 星星轉走要幾毫秒（flow.ts 的 HQ_STAR_MS 一樣） */
 const STAR_SPIN_MS = 1100;
 /** 0～1 的固定亂數（照編號，重畫一樣） */
@@ -2076,15 +2088,49 @@ export class Radar {
       }
       this.routeLayer.appendChild(g);
     }
+    // 綠覆率：整個台北市一層一層變很淡的綠（插在路線那一層最下面，河、船都在上面）
+    if (r.green && r.green.ring.length > 2) {
+      const d = `${this.pathOf(r.green.ring)}Z`;
+      const g = el('g', { class: 'voyage-green' });
+      for (const at of r.green.steps) g.appendChild(el('path', { class: 'green-step', d, style: `animation-delay:${Math.round(at - now)}ms` }));
+      this.routeLayer.insertBefore(g, this.routeLayer.firstChild);
+    }
+    // 一塊地方（社子島）：淡淡的土色、虛線外框
+    for (const ar of r.areas ?? []) {
+      if (ar.ring.length < 3) continue;
+      const g = el('g', { class: 'voyage-area', style: `animation-delay:${Math.round(ar.at - now)}ms` });
+      g.appendChild(el('path', { class: 'area-fill', d: `${this.pathOf(ar.ring)}Z`, style: `stroke-width:${(1.6 * k).toFixed(2)};stroke-dasharray:${(5 * k).toFixed(1)} ${(4 * k).toFixed(1)}` }));
+      this.routeLayer.appendChild(g);
+      const c = polar(ar.center.bearing - this.heading, this.ratio(ar.center.distanceKm) * (R - 8));
+      const lg = this.stayLabel(c.x, c.y, k, ar.label, ar.at + 300 - now, 4);
+      lg.classList.add('area');
+      this.routeLayer.appendChild(lg);
+    }
+    // 文化網（點 —— 線 —— 面）：畫在線、冒出來的東西下面
+    if (r.network) {
+      const nw = r.network;
+      const d0 = nw.at - now;
+      const g = el('g', { class: 'voyage-net' });
+      const paths = nw.lines.filter((ln) => ln.points.length > 1).map((ln) => ({ d: this.pathOf(ln.points), color: ln.color }));
+      const dots = nw.dots.map((dt) => ({ ...polar(dt.bearing - this.heading, this.ratio(dt.distanceKm) * (R - 8)), color: dt.color }));
+      // 面：很粗、很淡的光暈，最後才暈開，重疊的地方連成一片
+      for (const pa of paths) g.appendChild(el('path', { class: 'net-face', d: pa.d, style: `stroke:${pa.color};stroke-width:${(34 * k).toFixed(1)};animation-delay:${Math.round(d0 + NET_FACE_MS)}ms` }));
+      for (const dt of dots) g.appendChild(el('circle', { class: 'net-face-dot', cx: dt.x.toFixed(1), cy: dt.y.toFixed(1), r: (24 * k).toFixed(1), style: `fill:${dt.color};animation-delay:${Math.round(d0 + NET_FACE_MS)}ms` }));
+      // 線：亮一點的粗線沿路長出來
+      for (const pa of paths) g.appendChild(el('path', { class: 'net-line', d: pa.d, pathLength: '1', style: `stroke:${pa.color};stroke-width:${(6 * k).toFixed(1)};animation-delay:${Math.round(d0 + NET_LINE_MS)}ms` }));
+      // 點：一圈一圈亮起來
+      for (const dt of dots) g.appendChild(el('circle', { class: 'net-dot', cx: dt.x.toFixed(1), cy: dt.y.toFixed(1), r: (9 * k).toFixed(1), style: `stroke:${dt.color};stroke-width:${(2.5 * k).toFixed(1)};animation-delay:${Math.round(d0)}ms` }));
+      this.routeLayer.appendChild(g);
+    }
     // 線從頭長到尾（步道、自行車橋、星座）、冒出來的東西：畫在樹的上面才不會被樹蓋住
     for (const rv of r.reveals ?? []) {
       if (rv.points.length < 2) continue;
       const d = this.pathOf(rv.points);
       const g = el('g', { class: `voyage-reveal ${rv.kind}` });
-      const widths: Record<string, number> = { trail: 3, bridge: 8, stars: 1 };
+      const widths: Record<string, number> = { trail: 3, bridge: 8, stars: 1, culture: 2.6 };
       // 橋、步道下面墊一條淺色的邊，壓在樹、河上面才看得到
       if (rv.kind !== 'stars') g.appendChild(el('path', { class: 'reveal-line under', d, pathLength: '1', style: `stroke-width:${(widths[rv.kind] * k + 2 * k).toFixed(2)};animation-delay:${Math.round(rv.at - now)}ms` }));
-      g.appendChild(el('path', { class: 'reveal-line', d, pathLength: '1', style: `stroke-width:${(widths[rv.kind] * k).toFixed(2)};animation-delay:${Math.round(rv.at - now)}ms` }));
+      g.appendChild(el('path', { class: 'reveal-line', d, pathLength: '1', style: `stroke-width:${(widths[rv.kind] * k).toFixed(2)};animation-delay:${Math.round(rv.at - now)}ms${rv.color ? `;stroke:${rv.color}` : ''}` }));
       if (rv.kind === 'bridge') {
         // 腳踏車：一排點沿著橋跑（長完才出現；dash 用螢幕像素，pathLength 設成橋在畫面上幾像素）
         const bikes = el('path', { class: 'reveal-bikes', d, style: `stroke-width:${(2.4 * k).toFixed(2)};animation-delay:${Math.round(rv.at + REVEAL_MS - now)}ms` }) as SVGPathElement;
@@ -2093,7 +2139,7 @@ export class Radar {
         bikes.setAttribute('pathLength', (bikes.getTotalLength() / k).toFixed(1));
       } else this.routeLayer.appendChild(g);
       if (rv.label) {
-        const end = rv.points[rv.points.length - 1];
+        const end = rv.points[rv.kind === 'culture' ? Math.floor(rv.points.length / 2) : rv.points.length - 1];
         const p = polar(end.bearing - this.heading, this.ratio(end.distanceKm) * (R - 8));
         g.appendChild(this.stayLabel(p.x, p.y, k, rv.label, rv.at + REVEAL_MS - now, -12));
       }

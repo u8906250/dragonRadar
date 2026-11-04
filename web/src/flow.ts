@@ -100,10 +100,11 @@ export const BOAT_SVG =
 export const BOAT_TITLE = '洋流號：沿著路線重複播放的動畫，不是車隊的實際位置';
 
 /**
- * 河流（洋流總部的特效）在整條線上走到 f（0～1）那裡的半寬（螢幕像素）：源頭窄、越往下游越寬，
+ * 河流（洋流總部的特效）在整條線上走到 f（0～1）那裡的半寬（螢幕像素）：整條差不多一樣寬，
  * 中間自然地忽寬忽窄（照 f 算，放大縮小都一樣）
  */
-export const riverHalfWidth = (f: number): number => (2 + 4.5 * f) * (1 + 0.22 * Math.sin(2 * Math.PI * 17 * f) + 0.12 * Math.sin(2 * Math.PI * 41 * f + 1.3));
+// 整條一樣寬（以前往下游越來越寬，到終點是起點的三倍多；v1.485 使用者說「洋流號的海流後面變粗了」），只留一點自然的寬窄起伏
+export const riverHalfWidth = (f: number): number => 3.4 * (1 + 0.16 * Math.sin(2 * Math.PI * 17 * f) + 0.08 * Math.sin(2 * Math.PI * 41 * f + 1.3));
 
 /**
  * 洋流總部的特效（點了洋流總部）：洋流號只開一趟，HQ_SAIL_MS 沿著真的路像一條河流繞過台北 12 個區、流到台北市政府（起步、到站慢慢加速減速，中間等速），

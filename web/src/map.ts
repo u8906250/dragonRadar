@@ -67,8 +67,14 @@ export interface MapRoute {
   blooms?: Array<{ center: [number, number]; at: number; streets: Array<{ pts: Array<[number, number]>; mid: number }> }>;
   /** 真的河（水域政策「親水」）：船沿河走時（at）水面亮成藍色、留著 */
   rivers?: Array<{ ring: Array<[number, number]>; at: number }>;
-  /** 一條線從頭長到尾：trail 山林徑、bridge 自行車橋、stars 星座；label 寫在尾端 */
-  reveals?: Array<{ path: Array<[number, number]>; at: number; kind: 'trail' | 'bridge' | 'stars'; label?: string }>;
+  /** 一條線從頭長到尾：trail 山林徑、bridge 自行車橋、stars 星座、culture 文化徑的線（color）；label 寫在尾端（文化徑寫在中間） */
+  reveals?: Array<{ path: Array<[number, number]>; at: number; kind: 'trail' | 'bridge' | 'stars' | 'culture'; label?: string; color?: string }>;
+  /** 綠覆率：整個台北市（ring）在 steps 的每個時間再鋪一層很淡的綠 */
+  green?: { ring: Array<[number, number]>; steps: number[] };
+  /** 一塊地方（社子島）：at 時淡入、留著，虛線外框、名字寫在中間 */
+  areas?: Array<{ ring: Array<[number, number]>; center: [number, number]; at: number; label: string }>;
+  /** 文化網（點 —— 線 —— 面） */
+  network?: { at: number; lines: Array<{ path: Array<[number, number]>; color: string }>; dots: Array<{ lat: number; lng: number; color: string }> };
   /** 一個東西冒出來：hut 登山中心、stadium 足球場、dome 運動中心、star 星星、regrow 樹樁（grow 時長回大樹）、culture 文化徑的點（small 的名字地圖上不寫，滑鼠移過去看介紹） */
   icons?: Array<{ lat: number; lng: number; at: number; kind: 'hut' | 'stadium' | 'dome' | 'star' | 'regrow' | 'culture'; label?: string; scale?: number; grow?: number; char?: string; color?: string; small?: boolean }>;
   /** 滑鼠移過去的介紹（at 之後才感應；dy 是往上移幾像素） */
@@ -902,13 +908,50 @@ export class MapView {
         }
       }
     }
-    // 線從頭長到尾（步道、自行車橋、星座）
+    // 綠覆率：整個台北市一層一層變很淡的綠（放到最下面）
+    if (r.green && r.green.ring.length > 2) {
+      for (const at of r.green.steps) {
+        const poly = L.polygon(r.green.ring, { stroke: false, fillColor: '#3f8f2f', fillOpacity: 0.025, interactive: false, className: 'map-green-step' });
+        layer.addLayer(poly);
+        poly.bringToBack();
+        const e = poly.getElement() as SVGElement | undefined;
+        if (e) e.style.animationDelay = `${Math.round(at - now)}ms`;
+      }
+    }
+    // 一塊地方（社子島）：淡淡的土色、虛線外框
+    for (const ar of r.areas ?? []) {
+      if (ar.ring.length < 3) continue;
+      const poly = L.polygon(ar.ring, { color: '#8a6a2a', weight: 2, dashArray: '6 4', fillColor: '#f1dd9a', fillOpacity: 0.55, interactive: false, className: 'map-voyage-area' });
+      layer.addLayer(poly);
+      const e = poly.getElement() as SVGElement | undefined;
+      if (e) e.style.animationDelay = `${Math.round(ar.at - now)}ms`;
+      this.stayLabel(ar.center, ar.label, ar.at + 300 - now, 9);
+    }
+    // 文化網（點 —— 線 —— 面）：面（很粗很淡的光暈）→ 線 → 點，照時間亮
+    if (r.network) {
+      const nw = r.network;
+      const d0 = nw.at - now;
+      const add = (l: Leaflet.Path, cls: string, delay: number, len1 = false): void => {
+        layer.addLayer(l);
+        const e = l.getElement() as SVGElement | undefined;
+        if (!e) return;
+        e.classList.add(cls);
+        if (len1) e.setAttribute('pathLength', '1');
+        e.style.animationDelay = `${Math.round(delay)}ms`;
+      };
+      for (const ln of nw.lines) add(L.polyline(ln.path, { color: ln.color, weight: 34, opacity: 0.2, lineCap: 'round', lineJoin: 'round', interactive: false }), 'map-net-face', d0 + 2100);
+      for (const dt of nw.dots) add(L.circleMarker([dt.lat, dt.lng], { radius: 24, stroke: false, fillColor: dt.color, fillOpacity: 0.18, interactive: false }), 'map-net-face-dot', d0 + 2100);
+      for (const ln of nw.lines) add(L.polyline(ln.path, { color: ln.color, weight: 6, opacity: 0.55, lineCap: 'round', lineJoin: 'round', interactive: false }), 'map-net-line', d0 + 900, true);
+      for (const dt of nw.dots) add(L.circleMarker([dt.lat, dt.lng], { radius: 9, color: dt.color, weight: 2.5, fill: false, interactive: false }), 'map-net-dot', d0);
+    }
+    // 線從頭長到尾（步道、自行車橋、星座、文化徑）
     for (const rv of r.reveals ?? []) {
       if (rv.path.length < 2) continue;
       const style: Record<string, Leaflet.PolylineOptions> = {
         trail: { color: '#8a5a24', weight: 3, dashArray: '6 5' },
         bridge: { color: '#5b6b7a', weight: 7 },
         stars: { color: '#f2b544', weight: 1.5 },
+        culture: { color: rv.color ?? '#555', weight: 3, opacity: 0.9 },
       };
       const lines = rv.kind === 'bridge' ? [L.polyline(rv.path, { color: '#e8eef3', weight: 11, interactive: false }), L.polyline(rv.path, { ...style.bridge, interactive: false })] : [L.polyline(rv.path, { ...style[rv.kind], interactive: false })];
       for (const l of lines) {
@@ -925,7 +968,7 @@ export class MapView {
         const e = bikes.getElement() as SVGElement | undefined;
         if (e) e.style.animationDelay = `${Math.round(rv.at + 2200 - now)}ms`;
       }
-      if (rv.label) this.stayLabel(rv.path[rv.path.length - 1], rv.label, rv.at + 2200 - now, 32);
+      if (rv.label) this.stayLabel(rv.path[rv.kind === 'culture' ? Math.floor(rv.path.length / 2) : rv.path.length - 1], rv.label, rv.at + 2200 - now, rv.kind === 'culture' ? 22 : 32);
     }
     // 冒出來的東西：登山中心、足球場、運動中心、星星
     for (const ic of r.icons ?? []) {
@@ -939,7 +982,7 @@ export class MapView {
     for (const h of r.hits ?? []) {
       const c = map.latLngToLayerPoint([h.lat, h.lng]);
       const m = L.circleMarker(map.layerPointToLatLng(L.point(c.x, c.y - (h.dy ?? 0))), { radius: h.r ?? 12, stroke: false, fillOpacity: 0, className: 'map-intro-hit' });
-      m.bindTooltip(`<b>${escapeHtml(h.title)}</b><br>${escapeHtml(h.intro)}`, { direction: 'top', className: 'hq-intro-tip-map', offset: [0, -8] });
+      m.bindTooltip(`<b>${escapeHtml(h.title)}</b><br>${escapeHtml(h.intro).replace(/\n/g, '<br>')}`, { direction: 'top', className: 'hq-intro-tip-map', offset: [0, -8] });
       layer.addLayer(m);
       const e = m.getElement() as SVGElement | undefined;
       if (e) e.style.animationDelay = `${Math.round(h.at - now)}ms`;
