@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { fireworksSvg, HQ_SAIL_MS, HQ_VOYAGE_MS, voyagePhase, voyageTimeOf } from '../src/flow';
-import { HQ_TOUR, HQ_TOUR_AT, HQ_VOYAGE } from '../src/hq-voyage';
+import { HQ_CANALS, HQ_GROVES, HQ_TOUR, HQ_TOUR_AT, HQ_VOYAGE } from '../src/hq-voyage';
 import { LANDMARKS } from '../src/landmarks';
 import { haversineKm } from '../src/geo';
 
@@ -36,6 +36,26 @@ describe('洋流總部的特效', () => {
     expect(Math.max(...HQ_VOYAGE.map(([lat]) => lat))).toBeLessThan(25.15);
     // 經過那一站的時間：照速度倒推回去
     for (const at of [0.1, 0.5, 0.9]) expect(voyagePhase(voyageTimeOf(at)).at).toBeCloseTo(at, 4);
+  });
+  it('has the policy props: the old canal branches off the river at its stop, the park ring holds its stop', () => {
+    for (const c of HQ_CANALS) {
+      const stop = HQ_TOUR.find((st) => st.place === c.stop)!;
+      expect(stop).toBeDefined();
+      // 源頭（第一點）接在河流的那一站上
+      expect(haversineKm(stop, { lat: c.points[0][0], lng: c.points[0][1] })).toBeLessThan(0.05);
+      expect(c.points.length).toBeGreaterThan(10);
+      expect(c.label).toBe('把水找回來');
+    }
+    for (const g of HQ_GROVES) {
+      const stop = HQ_TOUR.find((st) => st.place === g.stop)!;
+      expect(stop).toBeDefined();
+      const inside = g.ring.reduce((ok, [ya, xa], a) => {
+        const [yb, xb] = g.ring[(a + g.ring.length - 1) % g.ring.length];
+        return ya > stop.lat !== yb > stop.lat && stop.lng < xa + ((stop.lat - ya) * (xb - xa)) / (yb - ya) ? !ok : ok;
+      }, false);
+      expect(inside).toBe(true);
+      expect(g.ring.length).toBeGreaterThan(20);
+    }
   });
   it('keeps the fireworks going when redrawn (negative delays for what already started)', () => {
     expect(fireworksSvg(0)).toContain('animation-delay:0ms');

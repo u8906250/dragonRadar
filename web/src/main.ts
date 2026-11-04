@@ -1505,6 +1505,9 @@ function render(): void {
               points: hq.HQ_VOYAGE.map(toRadarAt),
               stops: hqTourStops(hqVoyageAt).map((st) => ({ ...st, ...toRadarAt([st.lat, st.lng]) })),
               outline: hq.CITY_HALL_OUTLINE.map(toRadarAt),
+              // 水域「把水找回來」：船到那一站時老水路浮出來、注水；都市微森林：船到公園前一點整片長滿樹
+              canals: hq.HQ_CANALS.map((c) => ({ points: c.points.map(toRadarAt), at: hqStopAt(hqVoyageAt!, c.stop), label: c.label })),
+              groves: hq.HQ_GROVES.map((g) => ({ ring: g.ring.map(toRadarAt), at: hqStopAt(hqVoyageAt!, g.stop) - HQ_GROVE_LEAD_MS })),
             },
           ],
     ),
@@ -1558,6 +1561,8 @@ function render(): void {
               segments: [{ seq: 1, from: '洋流總部', to: '台北市政府', path: hq.HQ_VOYAGE, people: 0, target: 0 }],
               stops: hqTourStops(hqVoyageAt),
               outline: hq.CITY_HALL_OUTLINE,
+              canals: hq.HQ_CANALS.map((c) => ({ path: c.points, at: hqStopAt(hqVoyageAt!, c.stop), label: c.label })),
+              groves: hq.HQ_GROVES.map((g) => ({ ring: g.ring, at: hqStopAt(hqVoyageAt!, g.stop) - HQ_GROVE_LEAD_MS })),
             },
           ],
     ),
@@ -3082,6 +3087,8 @@ let hqVoyageAt: number | null = null;
 let hqVoyageTimers: number[] = [];
 /** 到了拉近到外圈幾公里（看得到市政府的虛線外框和煙火） */
 const HQ_END_KM = 0.7;
+/** 公園在船到之前幾毫秒開始長滿樹（船到時剛好滿） */
+const HQ_GROVE_LEAD_MS = 1800;
 /** 看得到整條的範圍：正中間（整條線的範圍中間）、外圈幾公里（離正中間最遠的點再多一成，取到 0.5 km） */
 function hqTourView(path: Array<[number, number]>): LatLng & { km: number } {
   const lats = path.map(([a]) => a);
@@ -3132,13 +3139,22 @@ function startHqVoyage(): void {
   ];
   render();
 }
-/** 經過的區名（每一區寫第一次經過的那一站；總部那一站有星星不用寫）、終點一直寫著「臺北市政府」 */
+/** 船到某一站的時間（出發 t0 之後幾毫秒；沒有這一站就是出發時） */
+function hqStopAt(t0: number, place: string): number {
+  if (!hq) return t0;
+  const i = hq.HQ_TOUR.findIndex((st) => st.place === place);
+  return i < 0 ? t0 : t0 + voyageTimeOf(hq.HQ_TOUR_AT[i]);
+}
+/** 經過的區名（每一區寫第一次經過的那一站；總部那一站有星星不用寫）、出發時寫「把樹種回來」（河岸開始長樹）、終點一直寫著「臺北市政府」 */
 function hqTourStops(t0: number): Array<{ lat: number; lng: number; label: string; at: number; keep?: boolean }> {
   if (!hq) return [];
-  const { HQ_TOUR, HQ_TOUR_AT } = hq;
+  const { HQ_TOUR, HQ_TOUR_AT, HQ_VOYAGE } = hq;
   const seen = new Set([HQ_TOUR[0].district]);
   const end = HQ_TOUR[HQ_TOUR.length - 1];
+  // 「把樹種回來」寫在離總部約 1 公里的河岸（第一批樹旁邊），出發後 5 秒才寫（船已經開到 4 公里外，不會疊到船的名字）
+  const [tl, tn] = HQ_VOYAGE[Math.min(12, HQ_VOYAGE.length - 1)];
   return [
+    { lat: tl, lng: tn, label: '把樹種回來', at: t0 + 5000 },
     ...HQ_TOUR.flatMap((st, i) => {
       if (seen.has(st.district)) return [];
       seen.add(st.district);
