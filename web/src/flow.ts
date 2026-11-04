@@ -207,9 +207,7 @@ export function cultureSvg(char: string, color: string): string {
 }
 
 /** 其他政見對到的地方（學校、圖書館、運動中心、親子館、健康服務中心）：圓角方塊、裡面寫一個字（文化徑是圓的，分得開） */
-export function serviceSvg(char: string, color: string, focus = false): string {
-  // focus：按了政策圖層、是那幾種地方——外圍一圈光圈一直往外擴，畫面上明顯（使用者說「據點要在畫面上明顯顯示出來」）
-  const ring = focus ? `<circle class="sv-ring" r="10" style="stroke:${color}"/>` : '';
-  return `${ring}<rect class="sv-dot" x="-7" y="-7" width="14" height="14" rx="3.5" style="fill:${color}"/><text class="cu-char" y="3.1" text-anchor="middle">${char}</text>`;
+export function serviceSvg(char: string, color: string): string {
+  return `<rect class="sv-dot" x="-7" y="-7" width="14" height="14" rx="3.5" style="fill:${color}"/><text class="cu-char" y="3.1" text-anchor="middle">${char}</text>`;
 }
 

@@ -427,12 +427,10 @@ path.map-water-glint { animation: water-flow-map 1.1s linear infinite; }
 @keyframes zone-lit { 0% { fill-opacity: 0; stroke-opacity: 0; } 25% { fill-opacity: 0.5; stroke-opacity: 0.7; } 100% { fill-opacity: 0; stroke-opacity: 0.3; } }
 /* 其他政見的地方（圓角方塊）、通學區（國小四周 150 公尺） */
 .sv-dot { stroke: #fff; stroke-width: 1.4; }
-/* 政策圖層開著：那幾種地方外圍一圈光圈一直往外擴、方塊加黑邊；其他特效變淡 */
-.sv-ring { fill: none; stroke-width: 2.2; transform-box: fill-box; transform-origin: center; animation: sv-ring 1.8s ease-out infinite; }
-@keyframes sv-ring { from { transform: scale(0.8); opacity: 0.9; } to { transform: scale(2.1); opacity: 0; } }
+/* 政策圖層開著：那幾種地方放大（main.ts）、方塊加黑邊；其他特效變淡（v1.498 使用者說不要光圈） */
 .voyage-icon.service.focus .sv-dot, .map-voyage-icon.service.focus .sv-dot { stroke: #15171c; stroke-width: 1.3; }
-.radar .routes.hq-focus .route-voyage > :not(.focus):not(.school-zone):not(.voyage-green):not(.intro-hits), .radar .routes.hq-focus > .route-river { opacity: 0.28; transition: opacity 0.6s; }
-.hq-focus .leaflet-overlay-pane path:not(.map-school-zone):not(.map-green-step) { opacity: 0.28; }
+.radar .routes.hq-focus .route-voyage > :not(.focus):not(.school-zone):not(.voyage-green):not(.intro-hits):not(.voyage-net), .radar .routes.hq-focus > .route-river { opacity: 0.28; transition: opacity 0.6s; }
+.hq-focus .leaflet-overlay-pane path:not(.map-school-zone):not(.map-green-step):not(.map-net-face):not(.map-net-face-dot):not(.map-net-line):not(.map-net-dot) { opacity: 0.28; }
 .hq-focus .leaflet-marker-pane .leaflet-marker-icon:not(.focus):not(.map-star) { opacity: 0.28; }
 .radar .school-zone { fill: #2a6fd6; fill-opacity: 0.12; stroke: #2a6fd6; pointer-events: none; animation: area-in 0.8s ease-out both; }
 .map-school-zone { animation: area-in 0.8s ease-out both; }

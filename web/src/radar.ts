@@ -81,7 +81,7 @@ export interface RadarRoute {
   /** 一塊地方（社子島）：at 時淡入、留著，虛線外框、名字寫在中間 */
   areas?: Array<{ ring: Array<{ bearing: number; distanceKm: number }>; center: { bearing: number; distanceKm: number }; at: number; label: string; zones?: Array<Array<{ bearing: number; distanceKm: number }>>; zonesAt?: number }>;
   /** 文化網（點 —— 線 —— 面）：at 開始；先點亮 dots、再沿 lines 亮起來、最後每條線、每個點往外暈開連成一片 */
-  network?: { at: number; lines: Array<{ points: Array<{ bearing: number; distanceKm: number }>; color: string }>; dots: Array<{ bearing: number; distanceKm: number; color: string }> };
+  network?: { at: number; lines: Array<{ points: Array<{ bearing: number; distanceKm: number }>; color: string }>; dots: Array<{ bearing: number; distanceKm: number; color: string }>; noFace?: boolean; faceR?: number };
   /**
    * 一個東西冒出來（at）：hut 登山中心、stadium 足球場、dome 運動中心、star 星星、regrow 樹樁（grow 時長回大樹）、culture 文化徑的點（char、color）；
    * label 留著（small 是寫在下面的小字，跟別的小字重疊就不寫）
@@ -2133,7 +2133,7 @@ export class Radar {
       const dots = nw.dots.map((dt) => ({ ...polar(dt.bearing - this.heading, this.ratio(dt.distanceKm) * (R - 8)), color: dt.color }));
       // 面：很粗、很淡的光暈，最後才暈開，重疊的地方連成一片
       for (const pa of paths) g.appendChild(el('path', { class: 'net-face', d: pa.d, style: `stroke:${pa.color};stroke-width:${(34 * k).toFixed(1)};animation-delay:${Math.round(d0 + NET_FACE_MS)}ms` }));
-      for (const dt of dots) g.appendChild(el('circle', { class: 'net-face-dot', cx: dt.x.toFixed(1), cy: dt.y.toFixed(1), r: (24 * k).toFixed(1), style: `fill:${dt.color};animation-delay:${Math.round(d0 + NET_FACE_MS)}ms` }));
+      if (!nw.noFace) for (const dt of dots) g.appendChild(el('circle', { class: 'net-face-dot', cx: dt.x.toFixed(1), cy: dt.y.toFixed(1), r: ((nw.faceR ?? 24) * k).toFixed(1), style: `fill:${dt.color};animation-delay:${Math.round(d0 + NET_FACE_MS)}ms` }));
       // 線：亮一點的粗線沿路長出來
       for (const pa of paths) g.appendChild(el('path', { class: 'net-line', d: pa.d, pathLength: '1', style: `stroke:${pa.color};stroke-width:${(6 * k).toFixed(1)};animation-delay:${Math.round(d0 + NET_LINE_MS)}ms` }));
       // 點：一圈一圈亮起來
@@ -2167,7 +2167,7 @@ export class Radar {
     for (const ic of r.icons ?? []) {
       const p = polar(ic.bearing - this.heading, this.ratio(ic.distanceKm) * (R - 8));
       const g = el('g', { class: `voyage-icon ${ic.kind}${ic.focus ? ' focus' : ''}`, transform: `translate(${p.x.toFixed(1)} ${p.y.toFixed(1)}) scale(${(k * (ic.scale ?? 1)).toFixed(4)})` });
-      const body = ic.kind === 'regrow' ? regrowSvg((ic.grow ?? ic.at) - now) : ic.kind === 'culture' ? cultureSvg(ic.char ?? '', ic.color ?? '#555') : ic.kind === 'service' ? serviceSvg(ic.char ?? '', ic.color ?? '#555', ic.focus) : ICON_SVG[ic.kind];
+      const body = ic.kind === 'regrow' ? regrowSvg((ic.grow ?? ic.at) - now) : ic.kind === 'culture' ? cultureSvg(ic.char ?? '', ic.color ?? '#555') : ic.kind === 'service' ? serviceSvg(ic.char ?? '', ic.color ?? '#555') : ICON_SVG[ic.kind];
       g.innerHTML = `<g class="boat-pop" style="animation-delay:${Math.round(ic.at - now)}ms">${body}</g>`;
       this.routeLayer.appendChild(g);
       if (!ic.label) continue;

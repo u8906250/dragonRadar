@@ -76,7 +76,7 @@ export interface MapRoute {
   /** 洋流號的河什麼時候淡掉（到終點後拿掉，政策的東西才看得清楚） */
   riverOut?: number;
   /** 文化網（點 —— 線 —— 面） */
-  network?: { at: number; lines: Array<{ path: Array<[number, number]>; color: string }>; dots: Array<{ lat: number; lng: number; color: string }> };
+  network?: { at: number; lines: Array<{ path: Array<[number, number]>; color: string }>; dots: Array<{ lat: number; lng: number; color: string }>; noFace?: boolean; faceR?: number };
   /** 一個東西冒出來：hut 登山中心、stadium 足球場、dome 運動中心、star 星星、regrow 樹樁（grow 時長回大樹）、culture 文化徑的點（small 的名字地圖上不寫，滑鼠移過去看介紹） */
   icons?: Array<{ lat: number; lng: number; at: number; kind: 'hut' | 'stadium' | 'dome' | 'star' | 'regrow' | 'culture' | 'service'; label?: string; scale?: number; grow?: number; char?: string; color?: string; small?: boolean; focus?: boolean }>;
   /** 政策圖層開著：其他特效變淡，只有 focus 的地方、通學區的圈清楚 */
@@ -973,7 +973,7 @@ export class MapView {
         e.style.animationDelay = `${Math.round(delay)}ms`;
       };
       for (const ln of nw.lines) add(L.polyline(ln.path, { color: ln.color, weight: 34, opacity: 0.2, lineCap: 'round', lineJoin: 'round', interactive: false }), 'map-net-face', d0 + 2100);
-      for (const dt of nw.dots) add(L.circleMarker([dt.lat, dt.lng], { radius: 24, stroke: false, fillColor: dt.color, fillOpacity: 0.18, interactive: false }), 'map-net-face-dot', d0 + 2100);
+      if (!nw.noFace) for (const dt of nw.dots) add(L.circleMarker([dt.lat, dt.lng], { radius: nw.faceR ?? 24, stroke: false, fillColor: dt.color, fillOpacity: 0.18, interactive: false }), 'map-net-face-dot', d0 + 2100);
       for (const ln of nw.lines) add(L.polyline(ln.path, { color: ln.color, weight: 6, opacity: 0.55, lineCap: 'round', lineJoin: 'round', interactive: false }), 'map-net-line', d0 + 900, true);
       for (const dt of nw.dots) add(L.circleMarker([dt.lat, dt.lng], { radius: 9, color: dt.color, weight: 2.5, fill: false, interactive: false }), 'map-net-dot', d0);
     }
@@ -1006,7 +1006,7 @@ export class MapView {
     // 冒出來的東西：登山中心、足球場、運動中心、星星
     for (const ic of r.icons ?? []) {
       const sc = ic.scale ?? 1;
-      const body = ic.kind === 'regrow' ? regrowSvg((ic.grow ?? ic.at) - now) : ic.kind === 'culture' ? cultureSvg(ic.char ?? '', ic.color ?? '#555') : ic.kind === 'service' ? serviceSvg(ic.char ?? '', ic.color ?? '#555', ic.focus) : MAP_ICON_SVG[ic.kind];
+      const body = ic.kind === 'regrow' ? regrowSvg((ic.grow ?? ic.at) - now) : ic.kind === 'culture' ? cultureSvg(ic.char ?? '', ic.color ?? '#555') : ic.kind === 'service' ? serviceSvg(ic.char ?? '', ic.color ?? '#555') : MAP_ICON_SVG[ic.kind];
       const icon = L.divIcon({ className: `map-voyage-icon ${ic.kind}${ic.focus ? ' focus' : ''}`, html: `<svg viewBox="-20 -20 40 40" width="${40 * sc}" height="${40 * sc}" aria-hidden="true"><g class="boat-pop" style="animation-delay:${Math.round(ic.at - now)}ms">${body}</g></svg>`, iconSize: [40 * sc, 40 * sc], iconAnchor: [20 * sc, 20 * sc] });
       layer.addLayer(L.marker([ic.lat, ic.lng], { icon, interactive: false, keyboard: false, zIndexOffset: 1300 }));
       if (ic.label && !ic.small) this.stayLabel([ic.lat, ic.lng], ic.label, (ic.grow ?? ic.at) + 500 - now, 20 * sc + 16);

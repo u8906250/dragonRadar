@@ -1460,6 +1460,8 @@ function render(): void {
   const inView = (p: { lat: number; lng: number }): boolean => haversineKm(origin, p) < scaleKm * 1.5;
   const anyInView = (pts: Array<[number, number]>): boolean => pts.some(([lat, lng], i) => i % 4 === 0 && inView({ lat, lng }));
   const hqEx = hqVoyageAt !== null && hqDrawing() ? hqExtras(hqVoyageAt) : { reveals: [], icons: [] };
+  // 文化網（點 —— 線 —— 面）或政策圖層的「點 —— 面」，一次只有一個
+  const hqNetNow = hqVoyageAt === null ? null : hqNetAt !== null ? hqNetwork(hqNetAt) : hqLayerNetwork();
   // 稍後才開始的也畫（虛線框、淡色）
   radar.render(
     drawn.map((it) => ({
@@ -1530,7 +1532,7 @@ function render(): void {
               areas: hqAreas(hqVoyageAt).filter((ar) => anyInView(ar.ring)).map((ar) => ({ ring: ar.ring.map(toRadarAt), center: toRadarAt(ar.center), at: ar.at, label: ar.label, zones: ar.zones?.map((z) => z.map(toRadarAt)), zonesAt: ar.zonesAt })),
               circles: hqCircles().filter(inView).map((c) => ({ ring: c.ring.map(toRadarAt), at: c.at })),
               focus: hqLayer !== null,
-              ...(hqNetAt !== null ? { network: (({ at, lines, dots }) => ({ at, lines: lines.filter((ln) => anyInView(ln.path)).map((ln) => ({ points: ln.path.map(toRadarAt), color: ln.color })), dots: dots.filter(inView).map((dt) => ({ ...toRadarAt([dt.lat, dt.lng]), color: dt.color })) }))(hqNetwork(hqNetAt)) } : {}),
+              ...(hqNetNow ? { network: { at: hqNetNow.at, noFace: hqNetNow.noFace, faceR: hqNetNow.faceR, lines: hqNetNow.lines.filter((ln) => anyInView(ln.path)).map((ln) => ({ points: ln.path.map(toRadarAt), color: ln.color })), dots: hqNetNow.dots.filter(inView).map((dt) => ({ ...toRadarAt([dt.lat, dt.lng]), color: dt.color })) } } : {}),
             },
           ],
     ),
@@ -1598,7 +1600,7 @@ function render(): void {
               areas: hqAreas(hqVoyageAt),
               circles: hqCircles().map(({ lat, lng, radiusM, at }) => ({ lat, lng, radiusM, at })),
               focus: hqLayer !== null,
-              ...(hqNetAt !== null ? { network: hqNetwork(hqNetAt) } : {}),
+              ...(hqNetNow ? { network: hqNetNow } : {}),
             },
           ],
     ),
@@ -3507,7 +3509,7 @@ function hqGreenSteps(t0: number): number[] {
   return hqExtras(t0).icons.filter((ic) => ic.kind === 'regrow').map((ic) => (ic.grow ?? t0) + 600);
 }
 /** 文化網：文化徑的線（主題色）、登山步道（土色）、老水路（藍）；點是文化徑的點、長回來的樹、登山中心、湧泉、水塘 */
-function hqNetwork(at: number): { at: number; lines: Array<{ path: Array<[number, number]>; color: string }>; dots: Array<{ lat: number; lng: number; color: string }> } {
+function hqNetwork(at: number): { at: number; lines: Array<{ path: Array<[number, number]>; color: string }>; dots: Array<{ lat: number; lng: number; color: string }>; noFace?: boolean; faceR?: number } {
   if (!hq) return { at, lines: [], dots: [] };
   const T = hq.HQ_CULTURE_THEMES;
   const lines = [
@@ -3523,6 +3525,17 @@ function hqNetwork(at: number): { at: number; lines: Array<{ path: Array<[number
     ...hq.HQ_PONDS.map((pd) => ({ lat: pd.ring[0][0], lng: pd.ring[0][1], color: '#2b8fd6' })),
   ];
   return { at, lines, dots };
+}
+/**
+ * 政策圖層的「點 —— 面」（使用者說「點到也可以做類似文化網點線面那種特效」）：那幾種地方一個個點亮，再往外暈開連成一片（服務涵蓋到哪裡）；
+ * 這些地方之間沒有路線可以連，所以沒有「線」。通學區已經畫了真的 150 公尺圈，只點亮、不暈開
+ */
+function hqLayerNetwork(): { at: number; lines: Array<{ path: Array<[number, number]>; color: string }>; dots: Array<{ lat: number; lng: number; color: string }>; noFace?: boolean; faceR?: number } | null {
+  if (!hq || !hqLayer) return null;
+  const ly = hq.HQ_POLICY_LAYERS.find((x) => x.id === hqLayer!.id);
+  if (!ly) return null;
+  const dots = hq.HQ_SERVICES.filter((sv) => ly.kinds.includes(sv.kind)).map((sv) => ({ lat: sv.lat, lng: sv.lng, color: hq!.HQ_SERVICE_KINDS[sv.kind].color }));
+  return { at: hqLayer.at, lines: [], dots, noFace: !!ly.zone, faceR: ly.faceR };
 }
 /** 報導的出處（介紹裡寫） */
 const hqOutlet = (url?: string): string => (!url ? '' : url.includes('mirrordaily') ? '鏡報' : url.includes('newtalk') ? '新頭殼' : url.includes('pts.org') ? '公視' : url.includes('udn.com') ? '聯合報' : '');
