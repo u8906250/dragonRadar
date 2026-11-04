@@ -7,9 +7,8 @@ export interface Landmark {
   address: string;
   lat: number;
   lng: number;
-  /** 官方網站 */
-  url: string;
-  urlName: string;
+  /** 相關網站（照順序排成按鈕） */
+  links: Array<{ url: string; name: string }>;
 }
 
 export const LANDMARKS: Landmark[] = [
@@ -21,7 +20,9 @@ export const LANDMARKS: Landmark[] = [
     // OSM 門牌「北平東路30之1號」
     lat: 25.0456,
     lng: 121.5263,
-    url: 'https://current.puma.taipei/',
-    urlName: '台北大洋流官網',
+    links: [
+      { url: 'https://current.puma.taipei/', name: '台北大洋流官網' },
+      { url: 'https://puma.taipei/', name: '沈伯洋官網' },
+    ],
   },
 ];

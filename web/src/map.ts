@@ -238,7 +238,7 @@ export class MapView {
           .bindPopup(
             `<strong>★ ${escapeHtml(lm.name)}</strong><br>${escapeHtml(lm.address)}<br>${escapeHtml(lm.about)}<br>` +
               `<a href="https://www.google.com/maps/dir/?api=1&destination=${lm.lat},${lm.lng}&travelmode=walking" target="_blank" rel="noopener">導航</a>・` +
-              `<a href="${escapeHtml(lm.url)}" target="_blank" rel="noopener">${escapeHtml(lm.urlName)}</a>`,
+              lm.links.map((l) => `<a href="${escapeHtml(l.url)}" target="_blank" rel="noopener">${escapeHtml(l.name)}</a>`).join('・'),
             { closeButton: false },
           )
           // 點了洋流總部：洋流號開到台北市政府、放煙火（main.ts）

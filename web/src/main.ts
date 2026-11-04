@@ -2025,7 +2025,7 @@ function renderLandmarkDetail(id: string): boolean {
       <p>${esc(lm.about)}</p>
       <div class="sheet-actions">
         <a class="btn primary" href="https://www.google.com/maps/dir/?api=1&destination=${lm.lat},${lm.lng}&travelmode=walking" target="_blank" rel="noopener">導航</a>
-        <a class="btn" href="${esc(lm.url)}" target="_blank" rel="noopener">${esc(lm.urlName)}</a>
+        ${lm.links.map((l) => `<a class="btn" href="${esc(l.url)}" target="_blank" rel="noopener">${esc(l.name)}</a>`).join('')}
         <a class="btn" href="${googleMapsUrl(lm)}" target="_blank" rel="noopener">在 Google 地圖上看</a>
       </div>
     </div>`);
