@@ -1445,7 +1445,9 @@ function render(): void {
   const timed = items.filter((it) => inTime(it, now));
   // 雷達、地圖上畫的：車掃還沒出發的只畫起點（點開的那條整條畫）
   const focused = focusedRoute(items);
-  const drawn = timed.filter((it) => !beforeDeparture(it, now, focused));
+  // 洋流總部的特效播放中（到按「關閉洋流號」為止），附近的活動光點、車掃路線先藏起來，畫面只留特效（使用者說的）；清單照樣列
+  const onMap = hqVoyageAt !== null ? [] : timed;
+  const drawn = onMap.filter((it) => !beforeDeparture(it, now, focused));
   updateOutline();
   updateStreets();
   updatePark();
@@ -1481,7 +1483,7 @@ function render(): void {
       // 回報的車掃：寫還有多久經過（不是前 10 分鐘的開始）
       ...(isUpcoming(it) ? { badge: startsInShort(reportedStop(it.ev)?.at ?? it.ev.startAt, now), ...(it.phase === 'later' ? { fade: clarityOf(it.ev, now) } : {}) } : {}),
     })),
-    drawnRoutes(timed, now, focused).map((r): RadarRoute => {
+    drawnRoutes(onMap, now, focused).map((r): RadarRoute => {
       const toRadar = ([lat, lng]: [number, number]): { bearing: number; distanceKm: number } => ({ bearing: bearingDeg(origin, { lat, lng }), distanceKm: haversineKm(origin, { lat, lng }) });
       return {
         id: r.id,
@@ -1555,7 +1557,7 @@ function render(): void {
     (mod.current ? LANDMARKS : []).map((lm) => ({ id: lm.id, label: lm.name, bearing: bearingDeg(origin, lm), distanceKm: haversineKm(origin, lm), selected: lm.id === selectedLandmark })),
   );
   map.setRoutes(
-    drawnRoutes(timed, now, focused).map((r): MapRoute => ({
+    drawnRoutes(onMap, now, focused).map((r): MapRoute => ({
       id: r.id,
       title: r.title,
       state: routeState(r, now),
