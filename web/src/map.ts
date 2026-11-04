@@ -57,10 +57,14 @@ export interface MapRoute {
   river?: boolean;
   /** 老水路（水域政策「把水找回來」）：船到 at 前先浮出虛線的鬼影，到了從第一點（源頭）注水填滿；label 寫在中間 */
   canals?: Array<{ path: Array<[number, number]>; at: number; label: string }>;
+  /** 湧泉（堀仔頭）：船到 at 時一圈圈漣漪冒出來、留著 */
+  springs?: Array<{ lat: number; lng: number; at: number; label: string }>;
+  /** 老水塘（雙連陂）：船到 at 前先浮出虛線的鬼影，到了填成水、留著 */
+  ponds?: Array<{ ring: Array<[number, number]>; at: number; label: string }>;
   /** 種樹的地方（都市微森林）：船經過時在那裡長出一叢樹；cut 是有砍樹爭議的地方（多一點、光環、寫名字），plant 是政見說要加強種樹的地方 */
   plantings?: Array<{ lat: number; lng: number; at: number; kind: 'cut' | 'plant'; label?: string }>;
-  /** 路樹（都市微森林）：路線走到 from～to（0～1）那一段是市區的馬路，船經過時路的兩邊長出一排排的樹 */
-  roads?: Array<{ from: number; to: number }>;
+  /** 街道的路樹（都市微森林）：船經過市區時附近的街道從離路線最近的那一點（mid）往兩頭長出一排排的樹 */
+  streets?: Array<{ pts: Array<[number, number]>; mid: number; at: number }>;
   /** 真的河（水域政策「親水」）：船沿河走時（at）水面亮成藍色、留著 */
   rivers?: Array<{ ring: Array<[number, number]>; at: number }>;
   /** 水上活動：船經過時（at）河上出現 SUP、龍舟；heading 是船頭朝哪（度，0 是上、順時針） */
@@ -70,8 +74,8 @@ export interface MapRoute {
 /** 種樹的地方長幾棵（砍樹的地方多一點）、老水路的鬼影在船到之前幾毫秒浮出來（洋流總部的特效，跟 radar.ts 一樣） */
 const MAP_PLANT_CUT_TREES = 22;
 const MAP_PLANT_TREES = 10;
-/** 路樹每隔幾公里一棵 */
-const MAP_ROAD_TREE_KM = 0.09;
+/** 街道的路樹每隔幾公里一棵 */
+const MAP_STREET_TREE_KM = 0.1;
 const MAP_CANAL_GHOST_MS = 2500;
 /** 水上活動的船（跟 radar.ts 一樣的畫法，顏色在 styles.css） */
 const MAP_SUP_SVG =
@@ -750,6 +754,14 @@ export class MapView {
     this.drawRiver(t, voyagePhase(Date.now() - voyage).at);
   }
 
+  /** 出現後留著的字（洋流總部的特效）；anchorY 是字在那一點上面幾像素 */
+  private stayLabel(at: Leaflet.LatLngExpression, text: string, delayMs: number, anchorY: number): void {
+    const L = this.L;
+    if (!L || !this.routeLayer) return;
+    const icon = L.divIcon({ className: 'map-voyage-stop stay', html: `<span style="animation-delay:${Math.round(delayMs)}ms">${escapeHtml(text)}</span>`, iconSize: [120, 18], iconAnchor: [60, anchorY] });
+    this.routeLayer.addLayer(L.marker(at, { icon, interactive: false, keyboard: false, zIndexOffset: 1500 }));
+  }
+
   /** 老水路、種樹的地方（洋流總部的特效）：照時間用 CSS 的 delay 排好 */
   private addVoyageExtras(r: MapRoute): void {
     const L = this.L;
@@ -773,34 +785,48 @@ export class MapView {
         (e as SVGElement).style.animationDelay = `${Math.round(c.at - (i === 0 ? MAP_CANAL_GHOST_MS : 0) - now)}ms`;
       });
       const mid = c.path[Math.floor(c.path.length / 2)];
-      // 名字出現後留著
-      const icon = L.divIcon({ className: 'map-voyage-stop stay', html: `<span style="animation-delay:${Math.round(c.at + 1200 - now)}ms">${escapeHtml(c.label)}</span>`, iconSize: [96, 18], iconAnchor: [48, 30] });
-      layer.addLayer(L.marker(mid, { icon, interactive: false, keyboard: false, zIndexOffset: 1500 }));
+      this.stayLabel(mid, c.label, c.at + 1200 - now, 30);
     }
-    // 路樹：市區馬路那幾段，路的兩邊每隔 MAP_ROAD_TREE_KM 公里一棵（離路的距離照現在的縮放算成像素），船經過才長
-    if (r.roads?.length && r.voyage !== undefined) {
-      const pts = r.segments.flatMap((sg) => sg.path);
-      const cum = new Float64Array(pts.length);
-      for (let i = 1; i < pts.length; i++) cum[i] = cum[i - 1] + haversineKm({ lat: pts[i - 1][0], lng: pts[i - 1][1] }, { lat: pts[i][0], lng: pts[i][1] });
-      const total = cum[cum.length - 1];
+    // 湧泉：藍色的小點、三圈漣漪一直往外冒
+    for (const sp of r.springs ?? []) {
+      const icon = L.divIcon({ className: 'map-voyage-spring', html: `<svg viewBox="-20 -20 40 40" width="40" height="40" aria-hidden="true"><g class="spring-pop" style="animation-delay:${Math.round(sp.at - now)}ms"><circle class="spring-ring" r="4" style="animation-delay:${Math.round(sp.at - now)}ms"/><circle class="spring-ring" r="4" style="animation-delay:${Math.round(sp.at + 900 - now)}ms"/><circle class="spring-ring" r="4" style="animation-delay:${Math.round(sp.at + 1800 - now)}ms"/><circle class="spring-dot" r="3.2"/></g></svg>`, iconSize: [40, 40], iconAnchor: [20, 20] });
+      layer.addLayer(L.marker([sp.lat, sp.lng], { icon, interactive: false, keyboard: false, zIndexOffset: 1300 }));
+      this.stayLabel([sp.lat, sp.lng], sp.label, sp.at + 600 - now, 32);
+    }
+    // 老水塘：先虛線的鬼影，到了填成水
+    for (const pd of r.ponds ?? []) {
+      if (pd.ring.length < 3) continue;
+      const ghost = L.polygon(pd.ring, { color: '#15171c', weight: 1.5, opacity: 0.6, fill: false, interactive: false, className: 'map-canal-ghost' });
+      const fill = L.polygon(pd.ring, { color: '#3fa9dc', weight: 1, fillColor: '#4cc3e6', fillOpacity: 0.55, interactive: false, className: 'map-voyage-river' });
+      for (const [l, delay] of [[ghost, pd.at - MAP_CANAL_GHOST_MS - now], [fill, pd.at - now]] as const) {
+        layer.addLayer(l);
+        const e = l.getElement() as SVGElement | undefined;
+        if (!e) continue;
+        if (l === ghost) e.setAttribute('pathLength', '1');
+        e.style.animationDelay = `${Math.round(delay)}ms`;
+      }
+      this.stayLabel(fill.getBounds().getCenter(), pd.label, pd.at + 800 - now, 30);
+    }
+    // 街道的路樹：船經過市區時附近的街道從離路線最近的那一點往兩頭長（每 MAP_STREET_TREE_KM 公里一棵、左右輪流、離街的距離照現在的縮放算成像素），越遠越晚長
+    for (const [si, st] of (r.streets ?? []).entries()) {
+      const cum = new Float64Array(st.pts.length);
+      for (let i = 1; i < st.pts.length; i++) cum[i] = cum[i - 1] + haversineKm({ lat: st.pts[i - 1][0], lng: st.pts[i - 1][1] }, { lat: st.pts[i][0], lng: st.pts[i][1] });
+      const mid = cum[Math.max(0, Math.min(st.pts.length - 1, st.mid))];
       let i = 1;
-      let j = 0;
-      for (const rd of r.roads) {
-        for (let km = rd.from * total; km < rd.to * total; km += MAP_ROAD_TREE_KM, j++) {
-          while (i < pts.length - 1 && cum[i] < km) i++;
-          const w = (km - cum[i - 1]) / (cum[i] - cum[i - 1] || 1);
-          const a = map.latLngToLayerPoint(pts[i - 1]);
-          const b = map.latLngToLayerPoint(pts[i]);
-          const [dx, dy] = [b.x - a.x, b.y - a.y];
-          const len = Math.hypot(dx, dy) || 1;
-          const side = j % 2 === 0 ? 1 : -1;
-          const off = (9 + 4 + mapHash(j * 7 + 11) * 4) * side;
-          const p = L.point(a.x + dx * w + (-dy / len) * off, a.y + dy * w + (dx / len) * off);
-          const m = L.circleMarker(map.layerPointToLatLng(p), { radius: 2.6 + mapHash(j * 13 + 5) * 1.6, color: cssVar('--grass', '#3f8f2f'), weight: 1, fillColor: cssVar('--grass', '#3f8f2f'), fillOpacity: 0.95, interactive: false, className: 'map-tree' });
-          layer.addLayer(m);
-          const e = m.getElement() as SVGElement | undefined;
-          if (e) e.style.animationDelay = `${Math.round(r.voyage + voyageTimeOf(km / total) - now)}ms`;
-        }
+      for (let km = MAP_STREET_TREE_KM / 2, j = 0; km < cum[cum.length - 1]; km += MAP_STREET_TREE_KM, j++) {
+        while (i < st.pts.length - 1 && cum[i] < km) i++;
+        const w = (km - cum[i - 1]) / (cum[i] - cum[i - 1] || 1);
+        const a = map.latLngToLayerPoint(st.pts[i - 1]);
+        const b = map.latLngToLayerPoint(st.pts[i]);
+        const [dx, dy] = [b.x - a.x, b.y - a.y];
+        const len = Math.hypot(dx, dy) || 1;
+        const side = j % 2 === 0 ? 1 : -1;
+        const off = (3 + mapHash(si * 31 + j * 7) * 2) * side;
+        const p = L.point(a.x + dx * w + (-dy / len) * off, a.y + dy * w + (dx / len) * off);
+        const m = L.circleMarker(map.layerPointToLatLng(p), { radius: 2.4 + mapHash(si * 17 + j * 13) * 1.4, color: cssVar('--grass', '#3f8f2f'), weight: 1, fillColor: cssVar('--grass', '#3f8f2f'), fillOpacity: 0.95, interactive: false, className: 'map-tree' });
+        layer.addLayer(m);
+        const e = m.getElement() as SVGElement | undefined;
+        if (e) e.style.animationDelay = `${Math.round(st.at + Math.abs(km - mid) * 1000 * 2.4 - now)}ms`;
       }
     }
     // 真的河：船沿河走時亮起來（畫在最下面）
@@ -814,7 +840,8 @@ export class MapView {
     }
     // 水上活動：SUP、龍舟（螢幕像素的大小，船頭朝 heading）
     for (const b of r.boats ?? []) {
-      const svg = `<svg viewBox="-34 -16 68 32" width="68" height="32" aria-hidden="true"><g transform="rotate(${(b.heading - 90).toFixed(1)})"><g class="boat-bob" style="animation-delay:${Math.round(-mapHash(b.at) * 1600)}ms">${b.kind === 'sup' ? MAP_SUP_SVG : MAP_DRAGON_SVG}</g></g></svg>`;
+      const sc = b.kind === 'dragon' ? 0.65 : 0.8;
+      const svg = `<svg viewBox="-34 -16 68 32" width="68" height="32" aria-hidden="true"><g transform="rotate(${(b.heading - 90).toFixed(1)}) scale(${sc})"><g class="boat-glide" style="animation-delay:${Math.round(b.at - mapHash(b.at) * 3000 - now)}ms"><g class="boat-bob" style="animation-delay:${Math.round(-mapHash(b.at) * 1600)}ms">${b.kind === 'sup' ? MAP_SUP_SVG : MAP_DRAGON_SVG}</g></g></g></svg>`;
       const icon = L.divIcon({ className: `map-voyage-boat ${b.kind}`, html: `<div class="boat-pop" style="animation-delay:${Math.round(b.at - now)}ms">${svg}</div>`, iconSize: [68, 32], iconAnchor: [34, 16] });
       layer.addLayer(L.marker([b.lat, b.lng], { icon, interactive: false, keyboard: false, zIndexOffset: 1200 }));
     }

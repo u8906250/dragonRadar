@@ -54,15 +54,19 @@ export interface RadarRoute {
   outline?: Array<{ bearing: number; distanceKm: number }>;
   /** 畫成一條河（洋流總部的特效）：跟著船（voyage）從起點長出來，寬度自然變化、越往下游越寬，河面上一道道波光往下游流；河岸兩邊跟著長出一棵棵樹 */
   river?: boolean;
-  /** 老水路（水域政策「把水找回來」）：船到 at（Date.now() 的毫秒）前先浮出虛線的鬼影，到了從第一點（源頭，接在河流上）注水填滿；label 寫在中間 */
+  /** 老水路（水域政策「把水找回來」）：船到 at（Date.now() 的毫秒）前先浮出虛線的鬼影，到了從第一點（源頭）注水填滿；label（名字）寫在中間、留著 */
   canals?: Array<{ points: Array<{ bearing: number; distanceKm: number }>; at: number; label: string }>;
+  /** 湧泉（堀仔頭）：船到 at 時一圈圈漣漪冒出來、留著；label 寫在旁邊 */
+  springs?: Array<{ bearing: number; distanceKm: number; at: number; label: string }>;
+  /** 老水塘（雙連陂）：船到 at 前先浮出虛線的鬼影，到了填成水、留著；label 寫在中間 */
+  ponds?: Array<{ ring: Array<{ bearing: number; distanceKm: number }>; at: number; label: string }>;
   /**
    * 種樹的地方（都市微森林）：船經過時（at，Date.now() 的毫秒）在那裡長出一叢樹。cut 是有砍樹爭議的地方（「把樹種回來」：多一點、一圈光環、寫名字），
    * plant 是政見說要加強種樹的公園、商圈、公有建築（長幾棵就好）
    */
   plantings?: Array<{ bearing: number; distanceKm: number; at: number; kind: 'cut' | 'plant'; label?: string }>;
-  /** 路樹（都市微森林）：路線走到 from～to（0～1）那一段是市區的馬路，船經過時路的兩邊長出一排排的樹（照 voyage 的時間） */
-  roads?: Array<{ from: number; to: number }>;
+  /** 街道的路樹（都市微森林）：船經過市區時（at，Date.now() 的毫秒）附近的街道從離路線最近的那一點（mid）往兩頭長出一排排的樹 */
+  streets?: Array<{ pts: Array<{ bearing: number; distanceKm: number }>; mid: number; at: number }>;
   /** 真的河（水域政策「親水」）：船沿河走時（at）水面亮成藍色、留著（OpenStreetMap 的淡水河、基隆河、新店溪） */
   rivers?: Array<{ ring: Array<{ bearing: number; distanceKm: number }>; at: number }>;
   /** 水上活動：船經過時（at）河上出現 SUP、龍舟，留著在水上搖；heading 是船頭朝哪（度，0 是上、順時針） */
@@ -106,8 +110,9 @@ const hash = (n: number): number => {
 const PLANT_CUT_TREES = 22;
 const PLANT_TREES = 10;
 const PLANT_STAGGER_MS = 45;
-/** 路樹每隔幾個螢幕像素一棵 */
-const ROAD_TREE_STEP = 13;
+/** 街道的路樹每隔幾個螢幕像素一棵、往外延伸每公尺晚幾毫秒長 */
+const ROAD_TREE_STEP = 14;
+const STREET_GROW_MS_PER_M = 2.4;
 const CANAL_GHOST_MS = 2500;
 /** 固定的地標（例如洋流總部），畫成星星 */
 export interface RadarLandmark {
@@ -1845,6 +1850,15 @@ export class Radar {
     this.drawRiver(t, voyagePhase(Date.now() - r.voyage).at);
   }
 
+  /** 出現後留著的字（螢幕像素；x、y 是 SVG 座標，k 是螢幕像素換成 SVG 單位，dy 是字離那一點多高） */
+  private stayLabel(x: number, y: number, k: number, text: string, delayMs: number, dy: number): SVGGElement {
+    const lg = el('g', { class: 'voyage-stop stay', transform: `translate(${x.toFixed(1)} ${y.toFixed(1)}) scale(${k.toFixed(4)})` }) as SVGGElement;
+    const tx = el('text', { y: dy, 'text-anchor': 'middle', style: `animation-delay:${Math.round(delayMs)}ms` });
+    tx.textContent = text;
+    lg.appendChild(tx);
+    return lg;
+  }
+
   /** 一棵樹（螢幕像素，中心在 0,0，scale 是大小）：右下影子、圓圓的樹冠、左上亮一點；長出來時從小變大（delay 是什麼時候長） */
   private tree(x: number, y: number, scale: number, delayMs: number): SVGGElement {
     const g = el('g', { transform: `translate(${x.toFixed(1)} ${y.toFixed(1)}) scale(${scale.toFixed(3)})` }) as SVGGElement;
@@ -1907,33 +1921,52 @@ export class Radar {
       // 名字寫在中間那一點
       const mid = c.points[Math.floor(c.points.length / 2)];
       const p = polar(mid.bearing - this.heading, this.ratio(mid.distanceKm) * (R - 8));
-      // 名字出現後留著（使用者說「把水找回來」出現後可以留在上面）
-      const lg = el('g', { class: 'voyage-stop stay', transform: `translate(${p.x.toFixed(1)} ${p.y.toFixed(1)}) scale(${k.toFixed(4)})` });
-      const tx = el('text', { y: -10, 'text-anchor': 'middle', style: `animation-delay:${Math.round(c.at + 1200 - now)}ms` });
-      tx.textContent = c.label;
-      lg.appendChild(tx);
-      g.appendChild(lg);
+      // 名字出現後留著
+      g.appendChild(this.stayLabel(p.x, p.y, k, c.label, c.at + 1200 - now, -10));
       this.routeLayer.appendChild(g);
     }
-    // 路樹：市區馬路那幾段，路的兩邊每隔 ROAD_TREE_STEP 螢幕像素一棵（左右輪流、離路邊遠近和大小隨機一點），船經過才長
-    if (r.roads?.length && r.voyage !== undefined) {
-      const { xs, ys, nx, ny, cum } = this.screenPath(r.points);
-      const n = cum.length;
-      const total = cum[n - 1];
+    // 湧泉：藍色的小點、三圈漣漪一直往外冒
+    for (const sp of r.springs ?? []) {
+      const p = polar(sp.bearing - this.heading, this.ratio(sp.distanceKm) * (R - 8));
+      const g = el('g', { class: 'voyage-spring', transform: `translate(${p.x.toFixed(1)} ${p.y.toFixed(1)}) scale(${k.toFixed(4)})` });
+      g.innerHTML = `<g class="spring-pop" style="animation-delay:${Math.round(sp.at - now)}ms"><circle class="spring-ring" r="4" style="animation-delay:${Math.round(sp.at - now)}ms"/><circle class="spring-ring" r="4" style="animation-delay:${Math.round(sp.at + 900 - now)}ms"/><circle class="spring-ring" r="4" style="animation-delay:${Math.round(sp.at + 1800 - now)}ms"/><circle class="spring-dot" r="3.2"/></g>`;
+      g.appendChild(this.stayLabel(0, 0, 1, sp.label, sp.at + 600 - now, -12));
+      this.routeLayer.appendChild(g);
+    }
+    // 老水塘：先虛線的鬼影，到了填成水
+    for (const pd of r.ponds ?? []) {
+      if (pd.ring.length < 3) continue;
+      const d = this.pathOf(pd.ring, true);
+      const g = el('g', { class: 'voyage-pond' });
+      g.append(
+        el('path', { class: 'voyage-canal-ghost', d, pathLength: '1', style: `animation-delay:${Math.round(pd.at - CANAL_GHOST_MS - now)}ms` }),
+        el('path', { class: 'voyage-pond-fill', d, style: `animation-delay:${Math.round(pd.at - now)}ms` }),
+      );
+      const pts = pd.ring.map((pt) => polar(pt.bearing - this.heading, this.ratio(pt.distanceKm) * (R - 8)));
+      g.appendChild(this.stayLabel(pts.reduce((a, q) => a + q.x, 0) / pts.length, pts.reduce((a, q) => a + q.y, 0) / pts.length, k, pd.label, pd.at + 800 - now, -10));
+      this.routeLayer.appendChild(g);
+    }
+    // 街道的路樹：船經過市區時，附近的街道從離路線最近的那一點往兩頭長出樹（每隔 ROAD_TREE_STEP 螢幕像素一棵、左右輪流），越遠越晚長（像往外延伸）
+    if (r.streets?.length) {
       const g = el('g', { class: 'voyage-planting road' });
-      let i = 1;
-      let j = 0;
-      for (const rd of r.roads) {
-        for (let d = rd.from * total; d < rd.to * total; d += ROAD_TREE_STEP * k, j++) {
+      // 一個 SVG 單位幾公尺（延伸的速度照公尺算，放大縮小一樣）
+      const mpu = (this.scaleKm * 1000) / (R - 8);
+      r.streets.forEach((st, si) => {
+        const { xs, ys, nx, ny, cum } = this.screenPath(st.pts);
+        const n = cum.length;
+        if (n < 2) return;
+        const mid = cum[Math.max(0, Math.min(n - 1, st.mid))];
+        let i = 1;
+        for (let d = (ROAD_TREE_STEP * k) / 2, j = 0; d < cum[n - 1]; d += ROAD_TREE_STEP * k, j++) {
           while (i < n - 1 && cum[i] < d) i++;
           const w = (d - cum[i - 1]) / (cum[i] - cum[i - 1] || 1);
           const [x, y] = [xs[i - 1] + (xs[i] - xs[i - 1]) * w, ys[i - 1] + (ys[i] - ys[i - 1]) * w];
           const [tx, ty] = [nx[i - 1] + (nx[i] - nx[i - 1]) * w, ny[i - 1] + (ny[i] - ny[i - 1]) * w];
           const side = j % 2 === 0 ? 1 : -1;
-          const off = riverHalfWidth(d / total) * k + (2.2 + 3 + hash(j * 7 + 11) * 3) * k;
-          g.appendChild(this.tree(x + tx * off * side, y + ty * off * side, k * (0.75 + hash(j * 13 + 5) * 0.4), r.voyage + voyageTimeOf(d / total) - now));
+          const off = (3 + hash(si * 31 + j * 7) * 2) * k;
+          g.appendChild(this.tree(x + tx * off * side, y + ty * off * side, k * (0.7 + hash(si * 17 + j * 13) * 0.4), st.at + Math.abs(d - mid) * mpu * STREET_GROW_MS_PER_M - now));
         }
-      }
+      });
       this.routeLayer.appendChild(g);
     }
     // 真的河：船沿河走時亮起來（畫在最下面）
@@ -1944,8 +1977,9 @@ export class Radar {
     // 水上活動：SUP、龍舟（螢幕像素的大小，船頭朝 heading；出現時從小彈大，之後在水上輕輕搖）
     for (const b of r.boats ?? []) {
       const c = polar(b.bearing - this.heading, this.ratio(b.distanceKm) * (R - 8));
-      const g = el('g', { class: `voyage-boat ${b.kind}`, transform: `translate(${c.x.toFixed(1)} ${c.y.toFixed(1)}) scale(${k.toFixed(4)}) rotate(${(b.heading - this.heading - 90).toFixed(1)})` });
-      g.innerHTML = `<g class="boat-pop" style="animation-delay:${Math.round(b.at - now)}ms"><g class="boat-bob" style="animation-delay:${Math.round(-hash(b.at) * 1600)}ms">${b.kind === 'sup' ? SUP_SVG : DRAGON_SVG}</g></g>`;
+      // 船縮小一點（龍舟 0.65、SUP 0.8）才放得進河裡；出現後慢慢往前滑（boat-glide）、輕輕搖（boat-bob）
+      const g = el('g', { class: `voyage-boat ${b.kind}`, transform: `translate(${c.x.toFixed(1)} ${c.y.toFixed(1)}) scale(${(k * (b.kind === 'dragon' ? 0.65 : 0.8)).toFixed(4)}) rotate(${(b.heading - this.heading - 90).toFixed(1)})` });
+      g.innerHTML = `<g class="boat-pop" style="animation-delay:${Math.round(b.at - now)}ms"><g class="boat-glide" style="animation-delay:${Math.round(b.at - hash(b.at) * 3000 - now)}ms"><g class="boat-bob" style="animation-delay:${Math.round(-hash(b.at) * 1600)}ms">${b.kind === 'sup' ? SUP_SVG : DRAGON_SVG}</g></g></g>`;
       this.routeLayer.appendChild(g);
     }
     for (const pl of r.plantings ?? []) {

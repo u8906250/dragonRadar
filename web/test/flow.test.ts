@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { fireworksSvg, HQ_SAIL_MS, HQ_VOYAGE_MS, voyagePhase, voyageTimeOf } from '../src/flow';
-import { HQ_CANALS, HQ_PLANTINGS, HQ_TOUR, HQ_TOUR_AT, HQ_VOYAGE } from '../src/hq-voyage';
+import { HQ_BOATS, HQ_CANALS, HQ_PLANTINGS, HQ_PONDS, HQ_SPRINGS, HQ_STREETS, HQ_TOUR, HQ_TOUR_AT, HQ_VOYAGE } from '../src/hq-voyage';
 import { LANDMARKS } from '../src/landmarks';
 import { haversineKm } from '../src/geo';
 
@@ -37,25 +37,35 @@ describe('洋流總部的特效', () => {
     // 經過那一站的時間：照速度倒推回去
     for (const at of [0.1, 0.5, 0.9]) expect(voyagePhase(voyageTimeOf(at)).at).toBeCloseTo(at, 4);
   });
-  it('has the policy props: the old canal branches off the river at its stop, the planting sites sit by the route', () => {
+  it('has the policy props: the old canals start near their stops, the sites, boats and streets sit by the route', () => {
+    const nearRoute = (p: { lat: number; lng: number }): number => Math.min(...HQ_VOYAGE.map(([lat, lng]) => haversineKm(p, { lat, lng })));
     for (const c of HQ_CANALS) {
       const stop = HQ_TOUR.find((st) => st.place === c.stop)!;
       expect(stop).toBeDefined();
-      // 源頭（第一點）接在河流的那一站上
-      expect(haversineKm(stop, { lat: c.points[0][0], lng: c.points[0][1] })).toBeLessThan(0.05);
+      // 源頭（第一點）在那一站附近（大灣的源頭在六張犁山區，離嘉興街幾百公尺）
+      expect(haversineKm(stop, { lat: c.points[0][0], lng: c.points[0][1] })).toBeLessThan(1);
       expect(c.points.length).toBeGreaterThan(10);
-      expect(c.label).toBe('把水找回來');
+      expect(c.name.length).toBeGreaterThan(1);
     }
     // 種樹的地方都在路線附近（船經過才長）；砍樹的地方有名字和來源
     for (const p of HQ_PLANTINGS) {
-      const near = Math.min(...HQ_VOYAGE.map(([lat, lng]) => haversineKm(p, { lat, lng })));
-      expect(near).toBeLessThan(1.2);
+      expect(nearRoute(p)).toBeLessThan(1.2);
       expect(['cut', 'plant']).toContain(p.kind);
       expect(p.name.length).toBeGreaterThan(1);
       if (p.kind === 'cut') expect(p.source).toMatch(/^https?:/);
     }
     expect(HQ_PLANTINGS.filter((p) => p.kind === 'cut').length).toBeGreaterThanOrEqual(5);
+    // 湧泉、水塘、船、街道都在路線附近；船都在夠寬的河段（整艘在水上）
+    for (const p of [...HQ_SPRINGS, ...HQ_BOATS]) expect(nearRoute(p)).toBeLessThan(1.5);
+    for (const b of HQ_BOATS) expect(b.width).toBeGreaterThanOrEqual(b.kind === 'dragon' ? 200 : 140);
+    for (const pd of HQ_PONDS) expect(pd.ring.length).toBeGreaterThanOrEqual(6);
+    expect(HQ_STREETS.length).toBeGreaterThan(200);
+    for (const st of HQ_STREETS.filter((_, i) => i % 25 === 0)) {
+      expect(st.mid).toBeLessThan(st.pts.length);
+      expect(nearRoute({ lat: st.pts[st.mid][0], lng: st.pts[st.mid][1] })).toBeLessThan(0.45);
+    }
   });
+
   it('keeps the fireworks going when redrawn (negative delays for what already started)', () => {
     expect(fireworksSvg(0)).toContain('animation-delay:0ms');
     const later = fireworksSvg(1000);

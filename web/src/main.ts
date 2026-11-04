@@ -1506,10 +1506,12 @@ function render(): void {
               stops: hqTourStops(hqVoyageAt).map((st) => ({ ...st, ...toRadarAt([st.lat, st.lng]) })),
               outline: hq.CITY_HALL_OUTLINE.map(toRadarAt),
               // 水域「把水找回來」：船到那一站時老水路浮出來、注水；都市微森林「把樹種回來」：船經過砍樹的地方、要加強種樹的地方長出樹
-              canals: hq.HQ_CANALS.map((c) => ({ points: c.points.map(toRadarAt), at: hqStopAt(hqVoyageAt!, c.stop), label: c.label })),
+              canals: hq.HQ_CANALS.map((c) => ({ points: c.points.map(toRadarAt), at: hqStopAt(hqVoyageAt!, c.stop), label: c.name })),
+              springs: hq.HQ_SPRINGS.map((sp) => ({ ...toRadarAt([sp.lat, sp.lng]), at: hqStopAt(hqVoyageAt!, sp.stop), label: sp.name })),
+              ponds: hq.HQ_PONDS.map((pd) => ({ ring: pd.ring.map(toRadarAt), at: hqStopAt(hqVoyageAt!, pd.stop), label: pd.name })),
               plantings: hqPlantings(hqVoyageAt).map((p) => ({ ...p, ...toRadarAt([p.lat, p.lng]) })),
               // 水域「親水」：船沿河走時真的河亮起來；水上活動：船經過時河上出現 SUP、龍舟
-              roads: hq.HQ_ROADS,
+              streets: hq.HQ_STREETS.map((st) => ({ pts: st.pts.map(toRadarAt), mid: st.mid, at: hqVoyageAt! + voyageTimeOf(st.frac) })),
               rivers: hq.HQ_RIVERS.map((rv) => ({ ring: rv.ring.map(toRadarAt), at: hqStopAt(hqVoyageAt!, rv.stop) })),
               boats: hq.HQ_BOATS.map((b) => ({ ...toRadarAt([b.lat, b.lng]), at: hqNearestAt(hqVoyageAt!, b), kind: b.kind, heading: b.heading })),
             },
@@ -1565,9 +1567,11 @@ function render(): void {
               segments: [{ seq: 1, from: '洋流總部', to: '台北市政府', path: hq.HQ_VOYAGE, people: 0, target: 0 }],
               stops: hqTourStops(hqVoyageAt),
               outline: hq.CITY_HALL_OUTLINE,
-              canals: hq.HQ_CANALS.map((c) => ({ path: c.points, at: hqStopAt(hqVoyageAt!, c.stop), label: c.label })),
+              canals: hq.HQ_CANALS.map((c) => ({ path: c.points, at: hqStopAt(hqVoyageAt!, c.stop), label: c.name })),
+              springs: hq.HQ_SPRINGS.map((sp) => ({ lat: sp.lat, lng: sp.lng, at: hqStopAt(hqVoyageAt!, sp.stop), label: sp.name })),
+              ponds: hq.HQ_PONDS.map((pd) => ({ ring: pd.ring, at: hqStopAt(hqVoyageAt!, pd.stop), label: pd.name })),
               plantings: hqPlantings(hqVoyageAt),
-              roads: hq.HQ_ROADS,
+              streets: hq.HQ_STREETS.map((st) => ({ pts: st.pts, mid: st.mid, at: hqVoyageAt! + voyageTimeOf(st.frac) })),
               rivers: hq.HQ_RIVERS.map((rv) => ({ ring: rv.ring, at: hqStopAt(hqVoyageAt!, rv.stop) })),
               boats: hq.HQ_BOATS.map((b) => ({ lat: b.lat, lng: b.lng, at: hqNearestAt(hqVoyageAt!, b), kind: b.kind, heading: b.heading })),
             },
@@ -3187,7 +3191,14 @@ function hqTourStops(t0: number): Array<{ lat: number; lng: number; label: strin
   const firstCut = hqPlantings(t0).find((p) => p.kind === 'cut');
   // 「水上活動」寫在最早出現的那艘船上面，出現後留著
   const firstBoat = hq.HQ_BOATS.map((b) => ({ ...b, at: hqNearestAt(t0, b) })).sort((a, b) => a.at - b.at)[0];
+  // 「把水找回來」寫在最早找回來的那一條老水路（或湧泉、水塘）上面，出現後留著；各自的名字另外寫
+  const waters = [
+    ...hq.HQ_CANALS.map((c) => ({ at: hqStopAt(t0, c.stop), lat: c.points[Math.floor(c.points.length / 2)][0], lng: c.points[Math.floor(c.points.length / 2)][1] })),
+    ...hq.HQ_SPRINGS.map((sp) => ({ at: hqStopAt(t0, sp.stop), lat: sp.lat, lng: sp.lng })),
+    ...hq.HQ_PONDS.map((pd) => ({ at: hqStopAt(t0, pd.stop), lat: pd.ring[0][0], lng: pd.ring[0][1] })),
+  ].sort((a, b) => a.at - b.at)[0];
   return [
+    ...(waters ? [{ lat: waters.lat, lng: waters.lng, label: '把水找回來', at: waters.at + 1400, stay: true, dy: -36 }] : []),
     ...(firstCut ? [{ lat: firstCut.lat, lng: firstCut.lng, label: '把樹種回來', at: firstCut.at + 300, stay: true, dy: -36 }] : []),
     ...(firstBoat ? [{ lat: firstBoat.lat, lng: firstBoat.lng, label: '水上活動', at: firstBoat.at + 600, stay: true, dy: -26 }] : []),
     ...HQ_TOUR.flatMap((st, i) => {
