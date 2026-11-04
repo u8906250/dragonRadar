@@ -1,5 +1,5 @@
 import type * as Leaflet from 'leaflet';
-import { alongLine, BOAT_SVG, boatPhase, flowOut, RAINBOW_FLOW_TOTAL, RAINBOW_STAGGER_MS, surge, SURGE_TOTAL } from './flow';
+import { alongLine, BOAT_SVG, boatPhase, fireworksSvg, FIREWORKS_MS, flowOut, HQ_VOYAGE_MS, RAINBOW_FLOW_TOTAL, RAINBOW_STAGGER_MS, surge, SURGE_TOTAL, voyagePhase } from './flow';
 import { haversineKm, type LatLng } from './geo';
 import type { EventKind, Phase } from './types';
 import { LANDMARKS } from './landmarks';
@@ -45,6 +45,10 @@ export interface MapRoute {
   turns?: Array<{ lat: number; lng: number; label: string }>;
   /** 洋流號：沿著路線一直重複開的船（動畫，不是車隊的實際位置） */
   boat?: boolean;
+  /** 只開一趟的洋流號（點了洋流總部，開到台北市政府）：出發的時間（Date.now() 的毫秒）；只畫水、不分段上色，跟著淡入淡出 */
+  voyage?: number;
+  /** 終點放煙火：開始放的時間（Date.now() 的毫秒） */
+  fireworks?: number;
 }
 
 /** 彩虹旗的六個顏色（紅、橙、黃、綠、藍、紫） */
@@ -133,7 +137,7 @@ export class MapView {
   private landmarksOn = true;
   private routes: MapRoute[] = [];
   /** 洋流號：路線的經緯度（cum 是每一點走了幾公里）和船，每一格畫面照現在的時間擺；往哪邊開記在 boatLeft */
-  private boatTracks: Array<{ id: string; marker: Leaflet.Marker; lat: Float64Array; lng: Float64Array; cum: Float64Array }> = [];
+  private boatTracks: Array<{ id: string; marker: Leaflet.Marker; lat: Float64Array; lng: Float64Array; cum: Float64Array; voyage?: number }> = [];
   private readonly boatLeft = new Map<string, boolean>();
   private boatFrame = 0;
   private bottleLayer: Leaflet.LayerGroup | null = null;
@@ -151,7 +155,7 @@ export class MapView {
   constructor(
     private readonly el: HTMLElement,
     origin: LatLng,
-    private readonly handlers: { onSelect: (id: number, group: number[]) => void; onPickOrigin: (p: LatLng) => void; onBottle?: (id: number) => void },
+    private readonly handlers: { onSelect: (id: number, group: number[]) => void; onPickOrigin: (p: LatLng) => void; onBottle?: (id: number) => void; onLandmark?: (id: string) => void },
     base: BaseMap = 'nlsc',
   ) {
     this.origin = origin;
@@ -226,6 +230,8 @@ export class MapView {
               `<a href="${escapeHtml(lm.url)}" target="_blank" rel="noopener">${escapeHtml(lm.urlName)}</a>`,
             { closeButton: false },
           )
+          // 點了洋流總部：洋流號開到台北市政府、放煙火（main.ts）
+          .on('click', () => this.handlers.onLandmark?.(lm.id))
           .addTo(this.landmarkGroup);
       }
       this.applyBase();
@@ -509,10 +515,18 @@ export class MapView {
 
   setRoutes(routes: MapRoute[]): void {
     const sig = (rs: MapRoute[]): string =>
-      JSON.stringify(rs.map((r) => [r.id, r.state, r.flowAt ?? null, r.segments.map((x) => [x.people, x.target, x.path.length, !!x.passed]), r.turns ?? [], !!r.boat]));
+      JSON.stringify(rs.map((r) => [r.id, r.state, r.flowAt ?? null, r.segments.map((x) => [x.people, x.target, x.path.length, !!x.passed]), r.turns ?? [], !!r.boat, r.voyage ?? null]));
     if (sig(routes) === sig(this.routes)) return;
     this.routes = routes;
     this.pushRoutes();
+  }
+
+  /** 地圖移到看得到整條線（洋流總部的特效：總部到台北市政府） */
+  focusPath(pts: Array<[number, number]>): void {
+    void this.ensure().then(() => {
+      // 煙火在終點上面、往兩邊炸開（台北市政府在東邊）：上面、右邊多留一點
+      if (this.L && this.map && pts.length > 1) this.map.fitBounds(this.L.latLngBounds(pts), { paddingTopLeft: [40, 220], paddingBottomRight: [150, 40] });
+    });
   }
 
   /** 地圖移到整條路線 */
@@ -565,7 +579,8 @@ export class MapView {
         }
         continue;
       }
-      for (const seg of r.segments) {
+      // 只開一趟的（洋流總部的特效）只畫水，不分段上色
+      for (const seg of r.voyage !== undefined ? [] : r.segments) {
         const c = CROWD[crowdOf(seg.people, seg.target)];
         const line = L.polyline(seg.path, { color: c.color, weight: 6, opacity: 0.85, lineCap: 'round', lineJoin: 'round' });
         line.bindPopup(
@@ -597,8 +612,18 @@ export class MapView {
             if (ago < SURGE_TOTAL && el instanceof SVGPathElement) surge(el, ago - i * RAINBOW_STAGGER_MS);
           });
         }
-        layer.addLayer(L.polyline(whole, { ...line, color: '#1784b8', weight: 3, opacity: 0.85, dashArray: '10 20', className: 'map-water-flow' }));
-        layer.addLayer(L.polyline(whole, { ...line, color: '#ffffff', weight: 3, opacity: 0.95, dashArray: '3 27', className: 'map-water-glint' }));
+        const flow = L.polyline(whole, { ...line, color: '#1784b8', weight: 3, opacity: 0.85, dashArray: '10 20', className: 'map-water-flow' });
+        const glint = L.polyline(whole, { ...line, color: '#ffffff', weight: 3, opacity: 0.95, dashArray: '3 27', className: 'map-water-glint' });
+        layer.addLayer(flow);
+        layer.addLayer(glint);
+        // 只開一趟的：水跟著淡入、放完煙火淡掉
+        if (r.voyage !== undefined) {
+          for (const p of [water, flow, glint]) {
+            const e = p.getElement() as SVGElement | undefined;
+            if (e) Object.assign(e.style, { animationDuration: `${HQ_VOYAGE_MS}ms`, animationDelay: `${r.voyage - Date.now()}ms` });
+            e?.classList.add('map-voyage');
+          }
+        }
       }
       // 中間點：路線上的小圓點，點了寫預計經過的時間和名稱
       for (const t of r.turns ?? []) {
@@ -606,7 +631,14 @@ export class MapView {
         dot.bindPopup(`<strong>${escapeHtml(r.title)}・中間點</strong><br>${escapeHtml(t.label)}<br>時間用路線長度平均推算，以現場為準`, { closeButton: false });
         layer.addLayer(dot);
       }
-      if (r.boat) this.addBoat(r);
+      if (r.boat || r.voyage !== undefined) this.addBoat(r);
+      // 終點放煙火（螢幕像素的大小）
+      const fw = r.fireworks !== undefined ? Date.now() - r.fireworks : Infinity;
+      const end = r.segments[r.segments.length - 1]?.path.at(-1);
+      if (fw < FIREWORKS_MS && end) {
+        const icon = L.divIcon({ className: 'map-fireworks', html: `<svg viewBox="-130 -230 260 250" width="260" height="250" aria-hidden="true">${fireworksSvg(fw)}</svg>`, iconSize: [260, 250], iconAnchor: [130, 230] });
+        layer.addLayer(L.marker(end, { icon, interactive: false, keyboard: false, zIndexOffset: 2000 }));
+      }
     }
     this.moveBoats();
   }
@@ -627,7 +659,7 @@ export class MapView {
     const icon = L.divIcon({ className: 'map-boat', html: `<svg viewBox="-24 -46 48 50" width="48" height="50" aria-hidden="true">${BOAT_SVG}</svg>`, iconSize: [48, 50], iconAnchor: [24, 46] });
     const marker = L.marker([lat[0], lng[0]], { icon, interactive: false, keyboard: false, zIndexOffset: -1000 });
     layer.addLayer(marker);
-    this.boatTracks.push({ id: r.id, marker, lat, lng, cum });
+    this.boatTracks.push({ id: r.id, marker, lat, lng, cum, voyage: r.voyage });
   }
 
   /** 每一格畫面把洋流號擺到現在的位置（跟雷達同一個時鐘；地圖藏起來時不擺，回來接著開）；沒有船就停 */
@@ -636,8 +668,11 @@ export class MapView {
     this.boatFrame = 0;
     if (this.boatTracks.length === 0) return;
     if (this.el.offsetWidth > 0) {
-      const { at, alpha } = boatPhase(Date.now());
+      const now = Date.now();
+      const lap = boatPhase(now);
       for (const t of this.boatTracks) {
+        // 只開一趟的（洋流總部的特效）照出發的時間走，其他的一直重複開
+        const { at, alpha } = t.voyage !== undefined ? voyagePhase(now - t.voyage) : lap;
         // 經度往東是畫面的右邊
         const p = alongLine(t.lng, t.lat, t.cum, at);
         if (p.left !== null) this.boatLeft.set(t.id, p.left);

@@ -1,14 +1,14 @@
 import './styles.css';
-import { RAINBOW_EVERY_MS } from './flow';
+import { HQ_SAIL_MS, HQ_VOYAGE_MS, RAINBOW_EVERY_MS } from './flow';
 import { addKeyword, collectLetter, deletePushSubscription, locateFeedbackPlace, sendFeedback, type FeedbackKind, fetchPushKey, savePushSubscription, confirmReport, editReport, locatePlace, rejectReport, supplementReport, deleteBottle, dropBottle, recycleBottle, fetchBottles, fetchEvents, fetchHealth, fetchKeywords, fetchMyBottles, fetchMyReports, fetchRoutes, pickBottle, reportBottle, reportEnded, submitLink, withdrawReport } from './api';
 import { compassSupported, startCompass } from './compass';
 import { bearingDeg, compassLabel, destination, formatKm, haversineKm, taiwanRadiusKm, type LatLng } from './geo';
 import { TAIWAN_RINGS } from './taiwan';
-import { LANDMARKS } from './landmarks';
+import { HQ_VOYAGE, LANDMARKS } from './landmarks';
 import { getModule, JOB_RISK_TEXT, JOB_SAFETY_TIPS, MEETUP_SAFETY_TIPS, MODULES, OFFER_SAFETY_TIPS, SEEK_SAFETY_TIPS, type ModuleDef, type ModuleId } from './modules';
 import { X_MAX_WEIGHT, xLength } from './xcount';
 import { shortAddress, splitPlace } from './place';
-import { crowdOf, MapView, pinPicker, type BaseMap, type PinPicker } from './map';
+import { crowdOf, MapView, pinPicker, type BaseMap, type MapRoute, type PinPicker } from './map';
 import { beep, ensureNotificationPermission, iosNeedsHomeScreen, notificationState, pushSubscription, pushSupported, registerServiceWorker, showBanner, systemNotify, unlockAudio, unsubscribePush } from './notify';
 import { findCard, gotReward, openAlbum, openHelp, openItems } from './cards';
 import { Radar, SPACE_FROM_KM, type RadarRoute, type RadarStreets, type SpaceView } from './radar';
@@ -535,6 +535,9 @@ const map = new MapView(
   {
     onSelect: select,
     onBottle: (id) => selectBottle(id),
+    onLandmark: (id) => {
+      if (id === 'hq') startHqVoyage();
+    },
     onPickOrigin: (p) => {
       gpsAccuracy = null;
       setOrigin({ ...p, source: 'manual' });
@@ -1473,7 +1476,7 @@ function render(): void {
       // 回報的車掃：寫還有多久經過（不是前 10 分鐘的開始）
       ...(isUpcoming(it) ? { badge: startsInShort(reportedStop(it.ev)?.at ?? it.ev.startAt, now), ...(it.phase === 'later' ? { fade: clarityOf(it.ev, now) } : {}) } : {}),
     })),
-    drawnRoutes(timed, now, focused).map((r) => {
+    drawnRoutes(timed, now, focused).map((r): RadarRoute => {
       const toRadar = ([lat, lng]: [number, number]): { bearing: number; distanceKm: number } => ({ bearing: bearingDeg(origin, { lat, lng }), distanceKm: haversineKm(origin, { lat, lng }) });
       return {
         id: r.id,
@@ -1486,7 +1489,12 @@ function render(): void {
           : {}),
         points: r.segments.flatMap((sg) => sg.path).map(toRadar),
       };
-    }),
+    }).concat(
+      // 洋流總部的特效：洋流號只開一趟到台北市政府、到了放煙火（跟車掃一樣的水）
+      hqVoyageAt === null
+        ? []
+        : [{ id: 'hq-voyage', state: 'live' as const, ocean: true, flowAt: hqVoyageAt, voyage: hqVoyageAt, fireworks: hqVoyageAt + HQ_SAIL_MS, points: HQ_VOYAGE.map(([lat, lng]) => ({ bearing: bearingDeg(origin, { lat, lng }), distanceKm: haversineKm(origin, { lat, lng }) })) }],
+    ),
   );
   // 撿走的瓶子不畫（伺服器也不會回傳，這裡再擋一次）
   const bottleViews = bottles.filter((b) => !b.picked).map((b) => ({ b, distanceKm: haversineKm(origin, b), bearing: bearingDeg(origin, b), state: bottleState(b) }));
@@ -1512,7 +1520,7 @@ function render(): void {
     (mod.current ? LANDMARKS : []).map((lm) => ({ id: lm.id, label: lm.name, bearing: bearingDeg(origin, lm), distanceKm: haversineKm(origin, lm), selected: lm.id === selectedLandmark })),
   );
   map.setRoutes(
-    drawnRoutes(timed, now, focused).map((r) => ({
+    drawnRoutes(timed, now, focused).map((r): MapRoute => ({
       id: r.id,
       title: r.title,
       state: routeState(r, now),
@@ -1522,7 +1530,11 @@ function render(): void {
       ...(isOceanRoute(r) ? { ocean: true, flowAt: rainbowFlow(r, now, 'map'), turns: routeTurns(r).map((t) => ({ lat: t.lat, lng: t.lng, label: turnLabel(t) })), boat: !calmMotion?.matches } : {}),
       // 回報的車掃：已經經過的那段畫淡
       segments: r.segments.map((sg) => ({ ...sg, passed: !!sg.toAt && sg.toAt <= now })),
-    })),
+    })).concat(
+      hqVoyageAt === null
+        ? []
+        : [{ id: 'hq-voyage', title: '洋流號', state: 'live' as const, claimUrl: null, ocean: true, flowAt: hqVoyageAt, voyage: hqVoyageAt, fireworks: hqVoyageAt + HQ_SAIL_MS, segments: [{ seq: 1, from: '洋流總部', to: '台北市政府', path: HQ_VOYAGE, people: 0, target: 0 }] }],
+    ),
   );
   map.render(
     drawn.map((it) => ({
@@ -3018,6 +3030,7 @@ const sameGroup = (a: number[] | null, b: number[]): boolean => !!a && [...a].so
 
 function selectLandmark(id: string | null): void {
   selectedLandmark = selectedLandmark === id ? null : id;
+  if (selectedLandmark === 'hq') startHqVoyage();
   selectedBottle = null;
   selectedRoute = null;
   selectedId = null;
@@ -3029,6 +3042,41 @@ function selectLandmark(id: string | null): void {
     reportSheet.hidden = true;
     bottleSheet.hidden = true;
   }
+  render();
+}
+
+/**
+ * 點了洋流總部：洋流號從總部沿著路開到台北市政府（只開一趟，landmarks.ts 的 HQ_VOYAGE），到了放煙火（flow.ts 的 fireworksSvg）。
+ * 雷達上看不清楚（整條線太小、超出雷達）就先飛過去、範圍拉到看得到整條（變成手動位置，按「定位」回來）；地圖移到看得到整條。
+ * hqVoyageAt 是出發的時間（Date.now() 的毫秒），放完拿掉；你在汪星沒有
+ */
+let hqVoyageAt: number | null = null;
+let hqVoyageTimer = 0;
+/** 飛過去時外圈幾公里、正中間在哪（整條線的範圍中間） */
+const HQ_VOYAGE_KM = 3;
+const HQ_VOYAGE_MID = ((): LatLng => {
+  const lats = HQ_VOYAGE.map(([a]) => a);
+  const lngs = HQ_VOYAGE.map(([, b]) => b);
+  return { lat: (Math.min(...lats) + Math.max(...lats)) / 2, lng: (Math.min(...lngs) + Math.max(...lngs)) / 2 };
+})();
+function startHqVoyage(): void {
+  if (youOn === 'woof' || tripping || !mod.current) return;
+  let wait = 0;
+  if (view === 'map') map.focusPath(HQ_VOYAGE);
+  else {
+    const far = Math.max(...HQ_VOYAGE.map(([lat, lng]) => haversineKm(origin, { lat, lng })));
+    if (radar.spaceMoved || scaleKm > SPACE_FROM_KM || far > scaleKm * 0.92 || scaleKm > HQ_VOYAGE_KM * 3) {
+      if (radar.spaceMoved) radar.resetSpace();
+      zoomToKm(HQ_VOYAGE_KM, { ...HQ_VOYAGE_MID, source: 'manual' });
+      wait = 1200;
+    }
+  }
+  hqVoyageAt = Date.now() + wait;
+  window.clearTimeout(hqVoyageTimer);
+  hqVoyageTimer = window.setTimeout(() => {
+    hqVoyageAt = null;
+    render();
+  }, wait + HQ_VOYAGE_MS + 100);
   render();
 }
 

@@ -99,6 +99,57 @@ export const BOAT_SVG =
   '<text class="boat-label" x="0" y="-33" text-anchor="middle">洋流號</text>';
 export const BOAT_TITLE = '洋流號：沿著路線重複播放的動畫，不是車隊的實際位置';
 
+/**
+ * 洋流總部的特效（點了洋流總部）：洋流號只開一趟，HQ_SAIL_MS 從總部開到台北市政府（頭尾慢），到了放 FIREWORKS_MS 的煙火，
+ * 放完船、水一起淡掉；雷達、地圖照同一個時鐘（Date.now()）
+ */
+export const HQ_SAIL_MS = 9000;
+export const FIREWORKS_MS = 4400;
+export const HQ_VOYAGE_MS = HQ_SAIL_MS + FIREWORKS_MS;
+/** 出發後 ago 毫秒：開到哪（0～1）、多不透明（出發時淡入，煙火放完淡掉；還沒出發是 0） */
+export function voyagePhase(ago: number): { at: number; alpha: number } {
+  const k = Math.min(1, Math.max(0, ago / HQ_SAIL_MS));
+  const at = k < 0.5 ? 2 * k * k : 1 - 2 * (1 - k) ** 2;
+  const alpha = ago < 0 ? 0 : Math.max(0, Math.min(1, ago / 400, (HQ_VOYAGE_MS - ago) / 600));
+  return { at, alpha };
+}
+
+/** 一發煙火：在終點上方哪裡炸開（螢幕像素，終點是 0,0）、什麼時候（開始放之後幾毫秒）、什麼顏色（淺色、深色主題都看得到）、多大 */
+const FIREWORKS: Array<{ x: number; y: number; at: number; color: string; r: number }> = [
+  { x: 0, y: -110, at: 0, color: '#ffb800', r: 46 },
+  { x: -62, y: -80, at: 500, color: '#ff5a1f', r: 36 },
+  { x: 60, y: -88, at: 950, color: '#14a8d6', r: 40 },
+  { x: -26, y: -148, at: 1450, color: '#ff3d8b', r: 42 },
+  { x: 40, y: -136, at: 1950, color: '#8b5cf6', r: 36 },
+  { x: 0, y: -100, at: 2500, color: '#ffb800', r: 54 },
+];
+/** 從終點升上去幾毫秒才炸開 */
+const RISE_MS = 380;
+/** 一發有幾道火花（外圈），裡面再一圈短一點的 */
+const SPARKS = 18;
+
+/**
+ * 煙火（螢幕像素，終點在 0,0）：每一發先從終點升上去一道光，在上面炸開兩圈一道道的火花往外飛、往下掉一點再淡掉，中間亮一下；
+ * ago 是開始放了多久（雷達每次重畫都重建，照 ago 接著放；還沒開始是負的，等一下才放）
+ */
+export function fireworksSvg(ago: number): string {
+  const d = (ms: number): string => `animation-delay:${Math.round(ms - ago)}ms`;
+  return FIREWORKS.map((f) => {
+    const len = Math.hypot(f.x, f.y).toFixed(1);
+    const rise = `<path class="fw-rise" d="M0 0L${f.x} ${f.y}" stroke="${f.color}" style="stroke-dasharray:${len};--len:${len};${d(f.at)}"/>`;
+    const flash = `<circle class="fw-flash" cx="${f.x}" cy="${f.y}" r="${(f.r * 0.45).toFixed(1)}" fill="${f.color}" style="${d(f.at + RISE_MS)}"/>`;
+    const ring = (n: number, r: number, len: number, turn: number): string =>
+      Array.from({ length: n }, (_, i) => {
+        const a = (i / n) * 2 * Math.PI + turn;
+        const [ux, uy] = [Math.cos(a), Math.sin(a)];
+        // 一道火花：朝外的短線，飛到 r 那麼遠、往下掉一點
+        return `<path class="fw-spark" d="M${f.x} ${f.y}l${(ux * len).toFixed(1)} ${(uy * len).toFixed(1)}" stroke="${f.color}" style="--dx:${(ux * r).toFixed(1)}px;--dy:${(uy * r + r * 0.3).toFixed(1)}px;${d(f.at + RISE_MS)}"/>`;
+      }).join('');
+    const sparks = ring(SPARKS, f.r, 7, f.at) + ring(Math.round(SPARKS * 0.6), f.r * 0.55, 5, f.at + 0.3);
+    return rise + flash + sparks;
+  }).join('');
+}
+
 /** 沿著折線（xs、ys，cum 是每一點走了多遠）走到 at（0～1）的位置，和那一段往左還是往右（差不多直上直下是 null） */
 export function alongLine(xs: ArrayLike<number>, ys: ArrayLike<number>, cum: ArrayLike<number>, at: number): { x: number; y: number; left: boolean | null } {
   const n = cum.length;

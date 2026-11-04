@@ -1,5 +1,5 @@
 import type { BlipStyle, EventKind, Phase, SweepStyle } from './types';
-import { alongLine, BOAT_SVG, BOAT_TITLE, boatPhase, flowOut, RAINBOW_FLOW_TOTAL, RAINBOW_STAGGER_MS, surge, SURGE_TOTAL } from './flow';
+import { alongLine, BOAT_SVG, BOAT_TITLE, boatPhase, fireworksSvg, FIREWORKS_MS, flowOut, HQ_VOYAGE_MS, RAINBOW_FLOW_TOTAL, RAINBOW_STAGGER_MS, surge, SURGE_TOTAL, voyagePhase } from './flow';
 
 export interface RadarItem {
   id: number;
@@ -44,6 +44,10 @@ export interface RadarRoute {
   marks?: Array<{ bearing: number; distanceKm: number; title: string }>;
   /** 洋流號：沿著路線一直重複開的船（動畫，不是車隊的實際位置） */
   boat?: boolean;
+  /** 只開一趟的洋流號（點了洋流總部，開到台北市政府）：出發的時間（Date.now() 的毫秒）；路線跟著淡入淡出 */
+  voyage?: number;
+  /** 終點放煙火：開始放的時間（Date.now() 的毫秒） */
+  fireworks?: number;
 }
 
 /** 放大時畫的街道：每條線是 [往東 km, 往北 km, 往東 km, …]（相對於圓心）；major 大路、minor 其他街道 */
@@ -382,7 +386,7 @@ export class Radar {
   /** 點了車掃的中間點：打開那條車掃的時間表 */
   onRoute: ((id: string) => void) | null = null;
   /** 洋流號：路線在畫面上的折線（SVG 座標，cum 是每一點走了多遠）和船，每一格畫面照現在的時間擺；往哪邊開記在 boatLeft（重畫時接著用） */
-  private boatTracks: Array<{ id: string; g: SVGGElement; flip: SVGGElement; xs: Float64Array; ys: Float64Array; cum: Float64Array }> = [];
+  private boatTracks: Array<{ id: string; g: SVGGElement; flip: SVGGElement; xs: Float64Array; ys: Float64Array; cum: Float64Array; voyage?: number }> = [];
   private readonly boatLeft = new Map<string, boolean>();
   private boatFrame = 0;
   private readonly stack: HTMLDivElement;
@@ -1651,6 +1655,7 @@ export class Radar {
       // 太空：有一段在地球另一面就不畫（直線會穿過地球）
       if (this.inSpace && r.points.some((pt) => pt.distanceKm > HORIZON_KM)) continue;
       const d = this.pathOf(r.points);
+      const start = this.routeLayer.childElementCount;
       // 彩虹：六條由粗到細疊起來（紅在最外、紫在中間）；遊行剛出發時從出發的地方流到終點（每一段同時流，重畫時接著流）
       if (r.rainbow) {
         const ago = r.flowAt !== undefined ? Date.now() - r.flowAt : Infinity;
@@ -1689,7 +1694,23 @@ export class Radar {
         }
         this.routeLayer.appendChild(g);
       }
-      if (r.boat) this.addBoat(r);
+      // 只開一趟的（洋流總部的特效）：這條路線的水跟著淡入、放完煙火淡掉
+      if (r.voyage !== undefined) {
+        const wrap = el('g', { class: 'route-voyage', style: `animation-duration:${HQ_VOYAGE_MS}ms;animation-delay:${r.voyage - Date.now()}ms` });
+        wrap.append(...Array.from(this.routeLayer.children).slice(start));
+        this.routeLayer.appendChild(wrap);
+      }
+      if (r.boat || r.voyage !== undefined) this.addBoat(r);
+      // 終點放煙火（螢幕像素的大小，跟船一樣）
+      const fw = r.fireworks !== undefined ? Date.now() - r.fireworks : Infinity;
+      if (fw < FIREWORKS_MS) {
+        const end = r.points[r.points.length - 1];
+        const p = polar(end.bearing - this.heading, this.ratio(end.distanceKm) * (R - 8));
+        const k = this.squarePx > 0 ? SIZE / this.squarePx : 1;
+        const g = el('g', { class: 'route-fireworks', transform: `translate(${p.x.toFixed(1)} ${p.y.toFixed(1)}) scale(${k.toFixed(4)})` });
+        g.innerHTML = fireworksSvg(fw);
+        this.routeLayer.appendChild(g);
+      }
     }
     this.moveBoats();
   }
@@ -1707,7 +1728,7 @@ export class Radar {
     const g = el('g', { class: 'route-boat' }) as SVGGElement;
     g.innerHTML = `<title>${BOAT_TITLE}</title>${BOAT_SVG}`;
     this.routeLayer.appendChild(g);
-    this.boatTracks.push({ id: r.id, g, flip: g.querySelector('.boat-flip') as SVGGElement, xs, ys, cum });
+    this.boatTracks.push({ id: r.id, g, flip: g.querySelector('.boat-flip') as SVGGElement, xs, ys, cum, voyage: r.voyage });
   }
 
   /** 每一格畫面把洋流號擺到現在的位置（雷達藏起來時不擺，回來接著開）；沒有船就停 */
@@ -1716,9 +1737,12 @@ export class Radar {
     this.boatFrame = 0;
     if (this.boatTracks.length === 0) return;
     if (this.squarePx > 0 && this.stack.offsetWidth > 0) {
-      const { at, alpha } = boatPhase(Date.now());
+      const now = Date.now();
+      const lap = boatPhase(now);
       const k = (SIZE / this.squarePx).toFixed(4);
       for (const t of this.boatTracks) {
+        // 只開一趟的（洋流總部的特效）照出發的時間走，其他的一直重複開
+        const { at, alpha } = t.voyage !== undefined ? voyagePhase(now - t.voyage) : lap;
         const p = alongLine(t.xs, t.ys, t.cum, at);
         if (p.left !== null) this.boatLeft.set(t.id, p.left);
         t.g.setAttribute('transform', `translate(${p.x.toFixed(1)} ${p.y.toFixed(1)}) scale(${k})`);
