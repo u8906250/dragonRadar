@@ -1,10 +1,10 @@
 import './styles.css';
-import { HQ_SAIL_MS, HQ_VOYAGE_MS, RAINBOW_EVERY_MS } from './flow';
+import { HQ_ARRIVE_MS, HQ_SAIL_MS, HQ_VOYAGE_MS, RAINBOW_EVERY_MS, voyageTimeOf } from './flow';
 import { addKeyword, collectLetter, deletePushSubscription, locateFeedbackPlace, sendFeedback, type FeedbackKind, fetchPushKey, savePushSubscription, confirmReport, editReport, locatePlace, rejectReport, supplementReport, deleteBottle, dropBottle, recycleBottle, fetchBottles, fetchEvents, fetchHealth, fetchKeywords, fetchMyBottles, fetchMyReports, fetchRoutes, pickBottle, reportBottle, reportEnded, submitLink, withdrawReport } from './api';
 import { compassSupported, startCompass } from './compass';
 import { bearingDeg, compassLabel, destination, formatKm, haversineKm, taiwanRadiusKm, type LatLng } from './geo';
 import { TAIWAN_RINGS } from './taiwan';
-import { HQ_VOYAGE, LANDMARKS } from './landmarks';
+import { CITY_HALL_OUTLINE, HQ_TOUR, HQ_TOUR_AT, HQ_VOYAGE, LANDMARKS } from './landmarks';
 import { getModule, JOB_RISK_TEXT, JOB_SAFETY_TIPS, MEETUP_SAFETY_TIPS, MODULES, OFFER_SAFETY_TIPS, SEEK_SAFETY_TIPS, type ModuleDef, type ModuleId } from './modules';
 import { X_MAX_WEIGHT, xLength } from './xcount';
 import { shortAddress, splitPlace } from './place';
@@ -1453,6 +1453,8 @@ function render(): void {
   updateCategoryToggles(all);
   updateActiveToggle(byCategory, now);
 
+  /** 經緯度 → 雷達上的方位、距離（洋流總部的特效用） */
+  const toRadarAt = ([lat, lng]: [number, number]): { bearing: number; distanceKm: number } => ({ bearing: bearingDeg(origin, { lat, lng }), distanceKm: haversineKm(origin, { lat, lng }) });
   // 稍後才開始的也畫（虛線框、淡色）
   radar.render(
     drawn.map((it) => ({
@@ -1493,7 +1495,19 @@ function render(): void {
       // 洋流總部的特效：洋流號只開一趟到台北市政府、到了放煙火（跟車掃一樣的水）
       hqVoyageAt === null
         ? []
-        : [{ id: 'hq-voyage', state: 'live' as const, ocean: true, flowAt: hqVoyageAt, voyage: hqVoyageAt, fireworks: hqVoyageAt + HQ_SAIL_MS, points: HQ_VOYAGE.map(([lat, lng]) => ({ bearing: bearingDeg(origin, { lat, lng }), distanceKm: haversineKm(origin, { lat, lng }) })) }],
+        : [
+            {
+              id: 'hq-voyage',
+              state: 'live' as const,
+              ocean: true,
+              flowAt: hqVoyageAt,
+              voyage: hqVoyageAt,
+              fireworks: hqVoyageAt + HQ_SAIL_MS + HQ_ARRIVE_MS,
+              points: HQ_VOYAGE.map(toRadarAt),
+              stops: hqTourStops(hqVoyageAt).map((st) => ({ ...st, ...toRadarAt([st.lat, st.lng]) })),
+              outline: CITY_HALL_OUTLINE.map(toRadarAt),
+            },
+          ],
     ),
   );
   // 撿走的瓶子不畫（伺服器也不會回傳，這裡再擋一次）
@@ -1533,7 +1547,21 @@ function render(): void {
     })).concat(
       hqVoyageAt === null
         ? []
-        : [{ id: 'hq-voyage', title: '洋流號', state: 'live' as const, claimUrl: null, ocean: true, flowAt: hqVoyageAt, voyage: hqVoyageAt, fireworks: hqVoyageAt + HQ_SAIL_MS, segments: [{ seq: 1, from: '洋流總部', to: '台北市政府', path: HQ_VOYAGE, people: 0, target: 0 }] }],
+        : [
+            {
+              id: 'hq-voyage',
+              title: '洋流號',
+              state: 'live' as const,
+              claimUrl: null,
+              ocean: true,
+              flowAt: hqVoyageAt,
+              voyage: hqVoyageAt,
+              fireworks: hqVoyageAt + HQ_SAIL_MS + HQ_ARRIVE_MS,
+              segments: [{ seq: 1, from: '洋流總部', to: '台北市政府', path: HQ_VOYAGE, people: 0, target: 0 }],
+              stops: hqTourStops(hqVoyageAt),
+              outline: CITY_HALL_OUTLINE,
+            },
+          ],
     ),
   );
   map.render(
@@ -3046,38 +3074,62 @@ function selectLandmark(id: string | null): void {
 }
 
 /**
- * 點了洋流總部：洋流號從總部沿著路開到台北市政府（只開一趟，landmarks.ts 的 HQ_VOYAGE），到了放煙火（flow.ts 的 fireworksSvg）。
- * 雷達上看不清楚（整條線太小、超出雷達）就先飛過去、範圍拉到看得到整條（變成手動位置，按「定位」回來）；地圖移到看得到整條。
- * hqVoyageAt 是出發的時間（Date.now() 的毫秒），放完拿掉；你在汪星沒有
+ * 點了洋流總部：洋流號從總部像一道海流流過台北 12 個區、流進台北市政府（只開一趟，landmarks.ts 的 HQ_VOYAGE），經過每一區寫一下區名，
+ * 終點的市政府用虛線畫出來；到了雷達（地圖）拉近市政府，放煙火（flow.ts 的 fireworksSvg）。
+ * 雷達先飛到看得到整條（變成手動位置，按「定位」回來；本來就看得到整條就不動）；中途自己拖、縮放過，到了就不拉近。
+ * hqVoyageAt 是出發的時間（Date.now() 的毫秒），放完拿掉；你在汪星、火箭飛行中沒有
  */
 let hqVoyageAt: number | null = null;
-let hqVoyageTimer = 0;
-/** 飛過去時外圈幾公里、正中間在哪（整條線的範圍中間） */
-const HQ_VOYAGE_KM = 3;
-const HQ_VOYAGE_MID = ((): LatLng => {
+let hqVoyageTimers: number[] = [];
+/** 看得到整條的範圍：正中間（整條線的範圍中間）、外圈幾公里（離正中間最遠的點再多一成） */
+const HQ_TOUR_VIEW = ((): LatLng & { km: number } => {
   const lats = HQ_VOYAGE.map(([a]) => a);
   const lngs = HQ_VOYAGE.map(([, b]) => b);
-  return { lat: (Math.min(...lats) + Math.max(...lats)) / 2, lng: (Math.min(...lngs) + Math.max(...lngs)) / 2 };
+  const mid = { lat: (Math.min(...lats) + Math.max(...lats)) / 2, lng: (Math.min(...lngs) + Math.max(...lngs)) / 2 };
+  return { ...mid, km: Math.ceil(Math.max(...HQ_VOYAGE.map(([lat, lng]) => haversineKm(mid, { lat, lng }))) * 1.1 * 2) / 2 };
 })();
+/** 到了拉近到外圈幾公里（看得到市政府的虛線外框和煙火） */
+const HQ_END_KM = 0.7;
+const CITY_HALL = HQ_TOUR[HQ_TOUR.length - 1];
 function startHqVoyage(): void {
   if (youOn === 'woof' || tripping || !mod.current) return;
+  for (const t of hqVoyageTimers) window.clearTimeout(t);
   let wait = 0;
+  const started = Date.now();
   if (view === 'map') map.focusPath(HQ_VOYAGE);
   else {
     const far = Math.max(...HQ_VOYAGE.map(([lat, lng]) => haversineKm(origin, { lat, lng })));
-    if (radar.spaceMoved || scaleKm > SPACE_FROM_KM || far > scaleKm * 0.92 || scaleKm > HQ_VOYAGE_KM * 3) {
+    if (radar.spaceMoved || scaleKm > SPACE_FROM_KM || far > scaleKm * 0.92 || scaleKm > HQ_TOUR_VIEW.km * 2) {
       if (radar.spaceMoved) radar.resetSpace();
-      zoomToKm(HQ_VOYAGE_KM, { ...HQ_VOYAGE_MID, source: 'manual' });
+      zoomToKm(HQ_TOUR_VIEW.km, { lat: HQ_TOUR_VIEW.lat, lng: HQ_TOUR_VIEW.lng, source: 'manual' });
       wait = 1200;
     }
   }
-  hqVoyageAt = Date.now() + wait;
-  window.clearTimeout(hqVoyageTimer);
-  hqVoyageTimer = window.setTimeout(() => {
-    hqVoyageAt = null;
-    render();
-  }, wait + HQ_VOYAGE_MS + 100);
+  hqVoyageAt = started + wait;
+  // 雷達飛過去之後的看法：到了還是這樣（中途沒自己移動）才拉近
+  let tour: (LatLng & { km: number }) | null = null;
+  hqVoyageTimers = [
+    window.setTimeout(() => (tour = { lat: origin.lat, lng: origin.lng, km: scaleKm }), wait + 400),
+    window.setTimeout(() => {
+      if (view === 'map') {
+        if (map.userMovedAt < started + 300) map.flyToLatLng(CITY_HALL, 17);
+      } else if (tour && haversineKm(origin, tour) < 0.05 && Math.abs(scaleKm / tour.km - 1) < 0.05) {
+        zoomToKm(HQ_END_KM, { lat: CITY_HALL.lat, lng: CITY_HALL.lng, source: 'manual' });
+      }
+    }, wait + HQ_SAIL_MS),
+    window.setTimeout(() => {
+      hqVoyageAt = null;
+      render();
+    }, wait + HQ_VOYAGE_MS + 100),
+  ];
   render();
+}
+/** 經過的區名（總部那一站有星星不用寫）、終點一直寫著「臺北市政府」 */
+function hqTourStops(t0: number): Array<{ lat: number; lng: number; label: string; at: number; keep?: boolean }> {
+  return [
+    ...HQ_TOUR.slice(1).map((st, i) => ({ lat: st.lat, lng: st.lng, label: st.district, at: t0 + voyageTimeOf(HQ_TOUR_AT[i + 1]) })),
+    { lat: CITY_HALL.lat, lng: CITY_HALL.lng, label: CITY_HALL.place, at: t0, keep: true },
+  ];
 }
 
 function selectRoute(id: string | null): void {

@@ -48,6 +48,10 @@ export interface RadarRoute {
   voyage?: number;
   /** 終點放煙火：開始放的時間（Date.now() 的毫秒） */
   fireworks?: number;
+  /** 經過的地方：船經過時（at，Date.now() 的毫秒）寫一下名字再淡掉；keep 的一直寫著（終點） */
+  stops?: Array<{ bearing: number; distanceKm: number; label: string; at: number; keep?: boolean }>;
+  /** 終點用虛線畫出來的外框（台北市政府） */
+  outline?: Array<{ bearing: number; distanceKm: number }>;
 }
 
 /** 放大時畫的街道：每條線是 [往東 km, 往北 km, 往東 km, …]（相對於圓心）；major 大路、minor 其他街道 */
@@ -1656,6 +1660,8 @@ export class Radar {
       if (this.inSpace && r.points.some((pt) => pt.distanceKm > HORIZON_KM)) continue;
       const d = this.pathOf(r.points);
       const start = this.routeLayer.childElementCount;
+      // 終點的外框（虛線），畫在水下面
+      if (r.outline && r.outline.length > 2) this.routeLayer.appendChild(el('path', { class: 'voyage-outline', d: this.pathOf(r.outline, true) }));
       // 彩虹：六條由粗到細疊起來（紅在最外、紫在中間）；遊行剛出發時從出發的地方流到終點（每一段同時流，重畫時接著流）
       if (r.rainbow) {
         const ago = r.flowAt !== undefined ? Date.now() - r.flowAt : Infinity;
@@ -1693,6 +1699,18 @@ export class Radar {
           g.append(el('circle', { class: 'route-mark', cx, cy, r: 2.6 }), hit);
         }
         this.routeLayer.appendChild(g);
+      }
+      // 經過的地方：船經過時寫一下名字（螢幕像素的大小，寫在點的上面）
+      if (r.stops?.length) {
+        const k = this.squarePx > 0 ? SIZE / this.squarePx : 1;
+        for (const st of r.stops) {
+          const p = polar(st.bearing - this.heading, this.ratio(st.distanceKm) * (R - 8));
+          const g = el('g', { class: `voyage-stop${st.keep ? ' keep' : ''}`, transform: `translate(${p.x.toFixed(1)} ${p.y.toFixed(1)}) scale(${k.toFixed(4)})` });
+          const t = el('text', { y: st.keep ? 18 : -10, 'text-anchor': 'middle', style: st.keep ? '' : `animation-delay:${st.at - Date.now()}ms` });
+          t.textContent = st.label;
+          g.appendChild(t);
+          this.routeLayer.appendChild(g);
+        }
       }
       // 只開一趟的（洋流總部的特效）：這條路線的水跟著淡入、放完煙火淡掉
       if (r.voyage !== undefined) {

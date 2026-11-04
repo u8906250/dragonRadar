@@ -49,6 +49,10 @@ export interface MapRoute {
   voyage?: number;
   /** 終點放煙火：開始放的時間（Date.now() 的毫秒） */
   fireworks?: number;
+  /** 經過的地方：船經過時（at，Date.now() 的毫秒）寫一下名字再淡掉；keep 的一直寫著（終點） */
+  stops?: Array<{ lat: number; lng: number; label: string; at: number; keep?: boolean }>;
+  /** 終點用虛線畫出來的外框（台北市政府） */
+  outline?: Array<[number, number]>;
 }
 
 /** 彩虹旗的六個顏色（紅、橙、黃、綠、藍、紫） */
@@ -214,6 +218,9 @@ export class MapView {
       map.on('click', (e: Leaflet.LeafletMouseEvent) => {
         if (this.pickMode) this.handlers.onPickOrigin({ lat: e.latlng.lat, lng: e.latlng.lng });
       });
+      // 自己拖、滾輪、雙指縮放：記下時間（程式移動地圖不算）
+      map.on('dragstart', () => (this.lastUserMove = Date.now()));
+      for (const ev of ['wheel', 'touchstart'] as const) map.getContainer().addEventListener(ev, () => (this.lastUserMove = Date.now()), { passive: true });
       this.landmarkGroup = L.layerGroup();
       if (this.landmarksOn) this.landmarkGroup.addTo(map);
       for (const lm of LANDMARKS) {
@@ -521,6 +528,17 @@ export class MapView {
     this.pushRoutes();
   }
 
+  /** 使用者最後一次自己拖、縮放地圖的時間（Date.now() 的毫秒）：洋流總部的特效到站時沒動過才拉近 */
+  get userMovedAt(): number {
+    return this.lastUserMove;
+  }
+  private lastUserMove = 0;
+
+  /** 地圖慢慢飛到這個點、拉到這個縮放（洋流總部的特效到站：拉近台北市政府） */
+  flyToLatLng(p: LatLng, zoom: number): void {
+    void this.ensure().then(() => this.map?.flyTo([p.lat, p.lng], zoom, { duration: 1.4 }));
+  }
+
   /** 地圖移到看得到整條線（洋流總部的特效：總部到台北市政府） */
   focusPath(pts: Array<[number, number]>): void {
     void this.ensure().then(() => {
@@ -630,6 +648,17 @@ export class MapView {
         const dot = L.circleMarker([t.lat, t.lng], { radius: 5, color: '#0d6ea8', weight: 2.5, fillColor: '#ffffff', fillOpacity: 1 });
         dot.bindPopup(`<strong>${escapeHtml(r.title)}・中間點</strong><br>${escapeHtml(t.label)}<br>時間用路線長度平均推算，以現場為準`, { closeButton: false });
         layer.addLayer(dot);
+      }
+      // 終點的外框（虛線）、經過的區名
+      if (r.outline && r.outline.length > 2) {
+        const box = L.polygon(r.outline, { color: '#15171c', weight: 2, dashArray: '6 5', fillColor: '#ffd43b', fillOpacity: 0.2, interactive: false });
+        layer.addLayer(box);
+        box.bringToBack();
+      }
+      for (const st of r.stops ?? []) {
+        const delay = st.keep ? '' : ` style="animation-delay:${st.at - Date.now()}ms"`;
+        const icon = L.divIcon({ className: `map-voyage-stop${st.keep ? ' keep' : ''}`, html: `<span${delay}>${escapeHtml(st.label)}</span>`, iconSize: [96, 18], iconAnchor: [48, st.keep ? -10 : 30] });
+        layer.addLayer(L.marker([st.lat, st.lng], { icon, interactive: false, keyboard: false, zIndexOffset: 1500 }));
       }
       if (r.boat || r.voyage !== undefined) this.addBoat(r);
       // 終點放煙火（螢幕像素的大小）

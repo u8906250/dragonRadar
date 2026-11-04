@@ -100,18 +100,37 @@ export const BOAT_SVG =
 export const BOAT_TITLE = '洋流號：沿著路線重複播放的動畫，不是車隊的實際位置';
 
 /**
- * 洋流總部的特效（點了洋流總部）：洋流號只開一趟，HQ_SAIL_MS 從總部開到台北市政府（頭尾慢），到了放 FIREWORKS_MS 的煙火，
- * 放完船、水一起淡掉；雷達、地圖照同一個時鐘（Date.now()）
+ * 洋流總部的特效（點了洋流總部）：洋流號只開一趟，HQ_SAIL_MS 像一道海流流過台北 12 個區、流進台北市政府（起步、到站慢慢加速減速，中間等速），
+ * 到了先停 HQ_ARRIVE_MS（雷達拉近市政府），再放 FIREWORKS_MS 的煙火，放完船、水一起淡掉；雷達、地圖照同一個時鐘（Date.now()）
  */
-export const HQ_SAIL_MS = 9000;
+export const HQ_SAIL_MS = 45_000;
+export const HQ_ARRIVE_MS = 1800;
 export const FIREWORKS_MS = 4400;
-export const HQ_VOYAGE_MS = HQ_SAIL_MS + FIREWORKS_MS;
+export const HQ_VOYAGE_MS = HQ_SAIL_MS + HQ_ARRIVE_MS + FIREWORKS_MS;
+/** 起步、到站各花幾毫秒加速、減速 */
+const RAMP_MS = 2500;
+/** 開到哪（0～1）：速度是梯形（起步加速、中間等速、到站減速） */
+function sailAt(ago: number): number {
+  const t = Math.min(HQ_SAIL_MS, Math.max(0, ago));
+  const v = 1 / (HQ_SAIL_MS - RAMP_MS);
+  if (t < RAMP_MS) return (v * t * t) / (2 * RAMP_MS);
+  if (t > HQ_SAIL_MS - RAMP_MS) return 1 - (v * (HQ_SAIL_MS - t) ** 2) / (2 * RAMP_MS);
+  return v * (t - RAMP_MS / 2);
+}
 /** 出發後 ago 毫秒：開到哪（0～1）、多不透明（出發時淡入，煙火放完淡掉；還沒出發是 0） */
 export function voyagePhase(ago: number): { at: number; alpha: number } {
-  const k = Math.min(1, Math.max(0, ago / HQ_SAIL_MS));
-  const at = k < 0.5 ? 2 * k * k : 1 - 2 * (1 - k) ** 2;
   const alpha = ago < 0 ? 0 : Math.max(0, Math.min(1, ago / 400, (HQ_VOYAGE_MS - ago) / 600));
-  return { at, alpha };
+  return { at: sailAt(ago), alpha };
+}
+/** 開到 at（0～1）是出發後幾毫秒（經過每一區時寫區名用） */
+export function voyageTimeOf(at: number): number {
+  let [lo, hi] = [0, HQ_SAIL_MS];
+  for (let i = 0; i < 40; i++) {
+    const mid = (lo + hi) / 2;
+    if (sailAt(mid) < at) lo = mid;
+    else hi = mid;
+  }
+  return (lo + hi) / 2;
 }
 
 /** 一發煙火：在終點上方哪裡炸開（螢幕像素，終點是 0,0）、什麼時候（開始放之後幾毫秒）、什麼顏色（淺色、深色主題都看得到）、多大 */
