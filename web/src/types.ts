@@ -1,4 +1,4 @@
-/** giveaway 發放、activity 活動（洋流）；job 職缺（狗狗陪伴）；session 臨打（羽球臨打）；food 吃的（脆友推薦hito美食） */
+/** giveaway 發放、activity 活動（洋流）；job 職缺（狗狗陪伴）；session 臨打（羽球臨打）；food 吃的（美食品味） */
 export type EventKind = 'giveaway' | 'activity' | 'job' | 'session' | 'food';
 
 export interface RelatedPost {

@@ -51,7 +51,7 @@ export const MODULES: ModuleDef[] = [
   },
   {
     id: 'dog',
-    name: '狗狗陪伴雷達',
+    name: '狗狗陪伴',
     short: '狗狗陪伴',
     tagline: '附近徵人照顧狗狗的工作，和可以幫忙照顧狗狗的人（請注意安全）',
     emoji: '🐶',
@@ -73,7 +73,7 @@ export const MODULES: ModuleDef[] = [
 
 MODULES.push({
   id: 'badminton',
-  name: '羽球臨打雷達',
+  name: '羽球臨打',
   short: '羽球臨打',
   tagline: '附近開放臨打的球團，和想找臨打的球友',
   emoji: '🏸',
@@ -94,13 +94,13 @@ MODULES.push({
 
 MODULES.push({
   id: 'food',
-  name: '脆友推薦hito美食',
-  short: '脆友推薦hito美食',
+  name: '美食品味',
+  short: '美食品味',
   tagline: '附近的餐車、市集攤位，網友推薦的店，揪團吃飯',
   emoji: '🍜',
   current: false,
   unit: '個',
-  emptyText: '附近還沒有脆友推薦的hito美食',
+  emptyText: '附近還沒有美食品味的資料',
   searchPlaceholder: '搜尋店名、吃什麼、地點…',
   reportIntro: '看到餐車、市集攤位出攤，網友推薦的店，或揪團吃飯的 Threads 貼文？貼上連結，雷達會判讀地點、時間、吃什麼、價位，標到地圖上。',
   reportTips: [
@@ -115,7 +115,7 @@ MODULES.push({
 
 MODULES.push({
   id: 'work',
-  name: '找工作雷達',
+  name: '找工作',
   short: '找工作',
   tagline: '附近的短期、兼職、工讀，和想找這類工作的人（請注意安全）',
   emoji: '💼',
