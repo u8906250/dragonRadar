@@ -1,5 +1,6 @@
 /**
- * 收集卡（尋找小法）：卡冊、拿到卡時翻開的畫面；道具欄（選單裡的「道具」，跟卡冊分開，之後會有更多道具）。
+ * 收集卡（尋找小法）：卡冊、拿到卡時翻開的畫面；道具欄（選單裡的「道具」，跟卡冊分開，之後會有更多道具）；
+ * 選單的「說明」（使用說明、換裝置的引繼碼）。
  * 卡片的內容寫在這裡（照片在 public/cards/），拿到的卡、道具存在伺服器（裝置代碼，worker/src/cards.ts），
  * 這個瀏覽器另外記一份（dr.cards、dr.items）：點小法時拿過的就不再問伺服器
  */
@@ -232,8 +233,8 @@ export async function gotReward(r: { card?: CardClaim; items: ItemCount[]; cappe
 }
 
 /**
- * 卡冊：拿到的卡、還沒拿到的（背面加問號和一點點提示），下面是「換手機」（引繼碼，卡片和道具一起搬）。
- * 打開時再跟伺服器對一次（syncMine）
+ * 卡冊：拿到的卡、還沒拿到的（背面加問號和一點點提示）。打開時再跟伺服器對一次（syncMine）；
+ * 換裝置（引繼碼）在選單的「說明」裡（openHelp）
  */
 export function openAlbum(): void {
   const list = (): string => {
@@ -246,22 +247,33 @@ export function openAlbum(): void {
     return `<div class="tc-head"><h2>卡冊</h2><span class="tc-count">已收集 ${got} / ${CARD_DEFS.length}</span><button type="button" class="chip" data-close>關閉</button></div>
       <div class="tc-list">${slots.join('')}</div>`;
   };
-  const move = `<div class="tc-move">
-      <button type="button" class="chip" data-move aria-expanded="false">換手機</button>
-      <div class="tc-move-box" hidden>
-        <p><b>舊手機</b>：產生引繼碼，24 小時內在新手機輸入，卡片和道具會搬過去（這台就沒有了）。</p>
+  const el = overlay('tc-album', `<div class="tc-box"><div class="tc-main">${list()}</div></div>`);
+  syncMine(el, () => {
+    const main = el.querySelector('.tc-main');
+    if (main) main.innerHTML = list();
+  });
+}
+
+/**
+ * 選單的「說明」：使用說明（照目前的雷達，helpPage）和「換裝置」（引繼碼，卡冊和道具一起搬；v1.467 起從卡冊搬過來，原本叫「換手機」）
+ */
+export function openHelp(helpPage: string): void {
+  const el = overlay(
+    'tc-help',
+    `<div class="tc-box">
+      <div class="tc-head"><h2>說明</h2><button type="button" class="chip" data-close>關閉</button></div>
+      <div class="tc-help-row"><a class="chip" href="${esc(helpPage)}">使用說明</a><span>怎麼回報活動、卡冊的小趣味</span></div>
+      <div class="tc-help-row"><button type="button" class="chip" data-move aria-expanded="false" aria-controls="tc-move-box">換裝置</button><span>可轉移卡冊及道具</span></div>
+      <div class="tc-move-box" id="tc-move-box" hidden>
+        <p><b>舊裝置</b>：產生引繼碼，24 小時內在新裝置輸入，卡冊和道具會搬過去（這台就沒有了）。</p>
         <button type="button" class="chip" data-make>產生引繼碼</button>
         <div class="tc-code" hidden><span class="tc-code-text"></span><button type="button" class="chip" data-copy>複製</button><small class="tc-code-until"></small></div>
-        <p><b>新手機</b>：輸入舊手機產生的引繼碼。</p>
+        <p><b>新裝置</b>：輸入舊裝置產生的引繼碼。</p>
         <form class="tc-redeem" novalidate><input name="code" maxlength="12" placeholder="例如 KX7P-4M2Q" autocomplete="off" autocapitalize="characters" spellcheck="false" aria-label="引繼碼"><button type="submit" class="chip primary">搬過來</button></form>
         <p class="tc-move-msg" role="status"></p>
       </div>
-    </div>`;
-  const el = overlay('tc-album', `<div class="tc-box"><div class="tc-main">${list()}</div>${move}</div>`);
-  const redraw = (): void => {
-    const main = el.querySelector('.tc-main');
-    if (main) main.innerHTML = list();
-  };
+    </div>`,
+  );
   const msg = (text: string, bad = false): void => {
     const m = el.querySelector<HTMLElement>('.tc-move-msg');
     if (!m) return;
@@ -273,7 +285,7 @@ export function openAlbum(): void {
     box.hidden = !box.hidden;
     (e.currentTarget as HTMLElement).setAttribute('aria-expanded', String(!box.hidden));
   });
-  // 舊手機：產生引繼碼
+  // 舊裝置：產生引繼碼
   const make = el.querySelector<HTMLButtonElement>('[data-make]')!;
   make.addEventListener('click', async () => {
     make.disabled = true;
@@ -295,7 +307,7 @@ export function openAlbum(): void {
       () => msg('複製不了，請自己記下來', true),
     );
   });
-  // 新手機：輸入引繼碼
+  // 新裝置：輸入引繼碼
   const form = el.querySelector<HTMLFormElement>('.tc-redeem')!;
   form.addEventListener('submit', async (e) => {
     e.preventDefault();
@@ -303,17 +315,17 @@ export function openAlbum(): void {
     const btn = form.querySelector<HTMLButtonElement>('button')!;
     if (!input.value.trim()) return msg('請輸入引繼碼', true);
     btn.disabled = true;
-    msg('搬卡片中…');
+    msg('搬過來中…');
     const r = await redeemTransferCode(input.value);
     btn.disabled = false;
     if (!r.ok) return msg(r.message, true);
-    saveCards(r.data.cards.filter(isClaim));
+    const cards = r.data.cards.filter(isClaim);
+    saveCards(cards);
     if (r.data.items) saveItems(r.data.items);
-    redraw();
     input.value = '';
-    msg(r.data.moved > 0 ? `搬好了，${r.data.moved} 張卡搬到這台` : '搬好了（這台原本就有比較早拿到的卡）');
+    const items = myItems().reduce((n, x) => n + x.count, 0);
+    msg(`搬好了，這台現在有 ${cards.length} 張卡、${items} 個道具`);
   });
-  syncMine(el, redraw);
 }
 
 /**

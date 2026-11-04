@@ -273,12 +273,12 @@ export function fetchMyCards(): Promise<Result<{ cards: CardClaim[]; items?: Ite
   return deviceJson('/api/cards/mine');
 }
 
-/** 引繼碼（換手機）：舊手機產生，24 小時內在新手機輸入（只搬卡片） */
+/** 引繼碼（換裝置）：舊裝置產生，24 小時內在新裝置輸入（卡、道具一起搬） */
 export function makeTransferCode(): Promise<Result<{ code: string; expiresAt: number }>> {
   return deviceJson('/api/cards/transfer', 'POST', {});
 }
 
-/** 新手機輸入引繼碼：舊手機的卡搬過來，回傳這台現在的卡 */
+/** 新裝置輸入引繼碼：舊裝置的卡、道具搬過來，回傳這台現在的卡、道具 */
 export function redeemTransferCode(code: string): Promise<Result<{ cards: CardClaim[]; items?: ItemCount[]; moved: number }>> {
   return deviceJson('/api/cards/redeem', 'POST', { code });
 }

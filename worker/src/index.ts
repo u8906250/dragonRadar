@@ -265,7 +265,7 @@ async function handle(req: Request, env: Env, ctx: ExecutionContext): Promise<Re
   // ---- 收集卡（尋找小法，裝置代碼放在 x-device 標頭）----
   if (req.method === 'GET' && path === '/api/cards/mine') return jsonResponse(await myCards(env, await deviceId(env, req)));
   if (req.method === 'POST' && path === '/api/cards/claim') return jsonResponse(await claimCard(env, await deviceId(env, req), await ipHash(env, req), await readJson<unknown>(req), now));
-  // 引繼碼（換手機）：舊手機產生、新手機輸入，卡片搬過去
+  // 引繼碼（換裝置，選單的「說明」裡）：舊裝置產生、新裝置輸入，卡片、道具搬過去
   if (req.method === 'POST' && path === '/api/cards/transfer') return jsonResponse(await makeTransfer(env, await deviceId(env, req), await ipHash(env, req), now));
   if (req.method === 'POST' && path === '/api/cards/redeem') return jsonResponse(await redeemTransfer(env, await deviceId(env, req), await ipHash(env, req), await readJson<unknown>(req), now));
 

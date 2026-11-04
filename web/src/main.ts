@@ -10,7 +10,7 @@ import { X_MAX_WEIGHT, xLength } from './xcount';
 import { shortAddress, splitPlace } from './place';
 import { crowdOf, MapView, pinPicker, type BaseMap, type PinPicker } from './map';
 import { beep, ensureNotificationPermission, iosNeedsHomeScreen, notificationState, pushSubscription, pushSupported, registerServiceWorker, showBanner, systemNotify, unlockAudio, unsubscribePush } from './notify';
-import { findCard, gotReward, openAlbum, openItems } from './cards';
+import { findCard, gotReward, openAlbum, openHelp, openItems } from './cards';
 import { Radar, SPACE_FROM_KM, type RadarRoute, type RadarStreets, type SpaceView } from './radar';
 import { DEFAULT_THEME_ID, getTheme, THEMES, type Theme } from './themes';
 import type { BottleOut, EventOut, Item, KeywordInfo, KeywordRules, MyBottles, MyReport, Origin, Phase, PickedBottle, RelatedPost, RouteOut, PreviewItem, RouteStop, RoutePreview, SubmitResult, FailedItem, EditItem, EditInput } from './types';
@@ -3749,8 +3749,6 @@ function applyModule(): void {
   document.title = mod.current ? theme.name : mod.name;
   brandText.textContent = mod.current ? theme.name : mod.short;
   searchInput.placeholder = mod.searchPlaceholder;
-  // 說明照目前的雷達打開
-  $<HTMLAnchorElement>('#help-btn').href = mod.helpPage;
   reportIntro.textContent = mod.current ? CURRENT_REPORT_INTRO : mod.reportIntro;
   map.setLandmarksVisible(mod.current);
   if (!mod.current) bottleBtn.hidden = true;
@@ -5454,6 +5452,8 @@ function wireControls(): void {
   $('#cards-btn').addEventListener('click', () => openAlbum());
   // 道具欄：跟卡冊分開，也在選單裡（之後會有更多道具）
   $('#items-btn').addEventListener('click', () => openItems());
+  // 說明：使用說明（照目前的雷達）、換裝置（引繼碼）
+  $('#help-btn').addEventListener('click', () => openHelp(mod.helpPage));
   // 3D 的中山公園（大家都進得來；存了管理 token 的才能標記路燈、長椅）
   $('#park3d-btn').addEventListener('click', () => {
     const token = lsGet(LS_ADMIN_TOKEN) ?? undefined;

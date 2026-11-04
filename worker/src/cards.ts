@@ -125,7 +125,7 @@ export async function purgeCards(env: Env, cutoff: number): Promise<number> {
   return r.reduce((n, x) => n + (x.meta.changes ?? 0), 0);
 }
 
-// ---- 引繼碼（換手機）：舊手機產生、新手機輸入，卡片、道具、回報的累計從舊的裝置搬到新的裝置（回報本身、漂流瓶不動） ----
+// ---- 引繼碼（換裝置）：舊裝置產生、新裝置輸入，卡片、道具、回報的累計從舊的裝置搬到新的裝置（回報本身、漂流瓶不動） ----
 
 /** 引繼碼用的字：大寫英文和數字，拿掉容易看錯的 0、O、1、I（32 個字，8 個字約一兆多種） */
 const CODE_CHARS = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
@@ -158,7 +158,7 @@ async function countTry(env: Env, ip: string, kind: 'make' | 'redeem', now: numb
   await env.DB.prepare('INSERT INTO card_transfer_tries (ip_hash, kind, created_at) VALUES (?, ?, ?)').bind(ip, kind, now).run();
 }
 
-/** 舊手機：產生引繼碼（同一台之前產生、還沒用的作廢） */
+/** 舊裝置：產生引繼碼（同一台之前產生、還沒用的作廢） */
 export async function makeTransfer(env: Env, device: string | null, ip: string, now: number): Promise<{ code: string; expiresAt: number }> {
   if (!device) throw new ReportError(400, '缺少裝置代碼，請重新整理頁面');
   const has = await env.DB.prepare('SELECT (SELECT COUNT(*) FROM card_claims WHERE device_id = ?) + (SELECT COUNT(*) FROM item_grants WHERE device_id = ?) AS n').bind(device, device).first<{ n: number }>();
@@ -174,8 +174,8 @@ export async function makeTransfer(env: Env, device: string | null, ip: string, 
 }
 
 /**
- * 新手機：輸入引繼碼，舊手機的卡、道具、回報的累計搬過來（舊手機就沒有了）。兩台都有同一張卡的，留比較早拿到的那張（第幾位比較前面）；
- * 道具兩台的都留著（同一個原因兩台都拿過的，舊手機那個的原因後面加 :moved:id）
+ * 新裝置：輸入引繼碼，舊裝置的卡、道具、回報的累計搬過來（舊裝置就沒有了）。兩台都有同一張卡的，留比較早拿到的那張（第幾位比較前面）；
+ * 道具兩台的都留著（同一個原因兩台都拿過的，舊裝置那個的原因後面加 :moved:id）
  */
 export async function redeemTransfer(env: Env, device: string | null, ip: string, body: unknown, now: number): Promise<{ cards: CardClaim[]; items: ItemCount[]; moved: number }> {
   if (!device) throw new ReportError(400, '缺少裝置代碼，請重新整理頁面');
@@ -184,17 +184,17 @@ export async function redeemTransfer(env: Env, device: string | null, ip: string
   if (!code) throw new ReportError(400, '引繼碼是 8 個英文字母和數字，例如 KX7P-4M2Q');
   const hash = await codeHash(env, code);
   const row = await env.DB.prepare('SELECT device_id FROM card_transfers WHERE code_hash = ? AND used_at IS NULL AND expires_at > ?').bind(hash, now).first<{ device_id: string }>();
-  if (!row) throw new ReportError(400, '引繼碼不對、已經用過或過期了，請在舊手機重新產生');
-  if (row.device_id === device) throw new ReportError(400, '這是這台自己產生的引繼碼，請在新手機輸入');
+  if (!row) throw new ReportError(400, '引繼碼不對、已經用過或過期了，請在舊裝置重新產生');
+  if (row.device_id === device) throw new ReportError(400, '這是這台自己產生的引繼碼，請在新裝置輸入');
   // 先標成用過（兩台同時輸入同一組，只有一台搬得到）
   const used = await env.DB.prepare('UPDATE card_transfers SET used_at = ? WHERE code_hash = ? AND used_at IS NULL').bind(now, hash).run();
-  if (!used.meta.changes) throw new ReportError(400, '引繼碼已經用過了，請在舊手機重新產生');
+  if (!used.meta.changes) throw new ReportError(400, '引繼碼已經用過了，請在舊裝置重新產生');
   const old = row.device_id;
   // 不要的那張不刪掉、改成不屬於任何裝置（merged:id）：還是算在「第幾位」裡，其他人的第幾位不會變
   const r = await env.DB.batch([
-    // 新手機已經有、但舊手機的比較早拿到：新手機的那張不要
+    // 新裝置已經有、但舊裝置的比較早拿到：新裝置的那張不要
     env.DB.prepare("UPDATE card_claims SET device_id = 'merged:' || id WHERE device_id = ? AND EXISTS (SELECT 1 FROM card_claims o WHERE o.device_id = ? AND o.card = card_claims.card AND o.id < card_claims.id)").bind(device, old),
-    // 新手機已經有（比較早拿到）的：舊手機的那張不要
+    // 新裝置已經有（比較早拿到）的：舊裝置的那張不要
     env.DB.prepare("UPDATE card_claims SET device_id = 'merged:' || id WHERE device_id = ? AND card IN (SELECT card FROM card_claims WHERE device_id = ?)").bind(old, device),
     env.DB.prepare('UPDATE card_claims SET device_id = ? WHERE device_id = ?').bind(device, old),
     env.DB.prepare("UPDATE item_grants SET reason = reason || ':moved:' || id WHERE device_id = ? AND EXISTS (SELECT 1 FROM item_grants o WHERE o.device_id = ? AND o.item = item_grants.item AND o.reason = item_grants.reason)").bind(old, device),
