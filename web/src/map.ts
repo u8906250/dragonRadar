@@ -1,5 +1,5 @@
 import type * as Leaflet from 'leaflet';
-import { alongLine, BOAT_SVG, boatPhase, fireworksSvg, FIREWORKS_MS, flowOut, HQ_VOYAGE_MS, RAINBOW_FLOW_TOTAL, RAINBOW_STAGGER_MS, surge, SURGE_TOTAL, voyagePhase, voyageTimeOf } from './flow';
+import { alongLine, BOAT_SVG, boatPhase, fireworksSvg, FIREWORKS_MS, flowOut, HQ_VOYAGE_MS, RAINBOW_FLOW_TOTAL, RAINBOW_STAGGER_MS, surge, SURGE_TOTAL, voyagePhase } from './flow';
 import { haversineKm, type LatLng } from './geo';
 import type { EventKind, Phase } from './types';
 import { LANDMARKS } from './landmarks';
@@ -57,13 +57,13 @@ export interface MapRoute {
   river?: boolean;
   /** 老水路（水域政策「把水找回來」）：船到 at 前先浮出虛線的鬼影，到了從第一點（源頭）注水填滿；label 寫在中間 */
   canals?: Array<{ path: Array<[number, number]>; at: number; label: string }>;
-  /** 公園一口氣長滿樹（都市微森林「把樹種回來」） */
-  groves?: Array<{ ring: Array<[number, number]>; at: number }>;
+  /** 種樹的地方（都市微森林）：船經過時在那裡長出一叢樹；cut 是有砍樹爭議的地方（多一點、光環、寫名字），plant 是政見說要加強種樹的地方 */
+  plantings?: Array<{ lat: number; lng: number; at: number; kind: 'cut' | 'plant'; label?: string }>;
 }
 
-/** 河岸的樹每隔幾公里一棵、公園裡撒幾棵、老水路的鬼影在船到之前幾毫秒浮出來（洋流總部的特效，跟 radar.ts 一樣） */
-const MAP_TREE_KM = 0.45;
-const MAP_GROVE_TREES = 42;
+/** 種樹的地方長幾棵（砍樹的地方多一點）、老水路的鬼影在船到之前幾毫秒浮出來（洋流總部的特效，跟 radar.ts 一樣） */
+const MAP_PLANT_CUT_TREES = 16;
+const MAP_PLANT_TREES = 7;
 const MAP_CANAL_GHOST_MS = 2500;
 /** 0～1 的固定亂數（照編號，重畫一樣） */
 const mapHash = (n: number): number => {
@@ -158,7 +158,7 @@ export class MapView {
   /** 洋流號：路線的經緯度（cum 是每一點走了幾公里）和船，每一格畫面照現在的時間擺；往哪邊開記在 boatLeft */
   private boatTracks: Array<{ id: string; marker: Leaflet.Marker; lat: Float64Array; lng: Float64Array; cum: Float64Array; voyage?: number }> = [];
   /** 河流：整條的經緯度（cum 是每一點走了幾公里）、河岸、河面、亮的那道、兩道波光，畫到哪（at，沒變就不重畫） */
-  private riverTracks: Array<{ pts: Array<[number, number]>; cum: Float64Array; voyage: number; at: number; lines: Leaflet.Polyline[]; treeNext: number }> = [];
+  private riverTracks: Array<{ pts: Array<[number, number]>; cum: Float64Array; voyage: number; at: number; lines: Leaflet.Polyline[] }> = [];
   private readonly boatLeft = new Map<string, boolean>();
   private boatFrame = 0;
   private bottleLayer: Leaflet.LayerGroup | null = null;
@@ -717,35 +717,12 @@ export class MapView {
       if (e) Object.assign(e.style, { animationDuration: `${HQ_VOYAGE_MS}ms`, animationDelay: `${voyage - Date.now()}ms` });
       e?.classList.add('map-voyage');
     }
-    const t = { pts, cum, voyage, at: -1, lines, treeNext: 0 };
+    const t = { pts, cum, voyage, at: -1, lines };
     this.riverTracks.push(t);
     this.drawRiver(t, voyagePhase(Date.now() - voyage).at);
   }
 
-  /** 河岸的樹（都市微森林）：每隔 MAP_TREE_KM 公里一棵、左右岸輪流，離河的距離照現在的縮放算成像素（河的寬度是固定的像素） */
-  private addTree(t: (typeof this.riverTracks)[number], km: number, j: number): void {
-    const L = this.L;
-    const map = this.map;
-    if (!L || !map || !this.routeLayer) return;
-    const { pts, cum } = t;
-    let i = 1;
-    while (i < pts.length - 1 && cum[i] < km) i++;
-    const w = (km - cum[i - 1]) / (cum[i] - cum[i - 1] || 1);
-    const a = map.latLngToLayerPoint(pts[i - 1]);
-    const b = map.latLngToLayerPoint(pts[i]);
-    const [dx, dy] = [b.x - a.x, b.y - a.y];
-    const len = Math.hypot(dx, dy) || 1;
-    const side = j % 2 === 0 ? 1 : -1;
-    const off = (9 + 4 + mapHash(j * 7 + 11) * 6) * side;
-    const p = L.point(a.x + dx * w + (-dy / len) * off, a.y + dy * w + (dx / len) * off);
-    const r = 3 + mapHash(j * 13 + 5) * 2.2;
-    const m = L.circleMarker(map.layerPointToLatLng(p), { radius: r, color: cssVar('--grass', '#3f8f2f'), weight: 1.2, fillColor: cssVar('--grass', '#3f8f2f'), fillOpacity: 0.95, interactive: false, className: 'map-tree' });
-    this.routeLayer.addLayer(m);
-    const e = m.getElement() as SVGElement | undefined;
-    if (e) e.style.animationDelay = `${Math.round(t.voyage + voyageTimeOf(km / cum[cum.length - 1]) - Date.now())}ms`;
-  }
-
-  /** 老水路、公園長滿樹（洋流總部的特效）：照時間用 CSS 的 delay 排好 */
+  /** 老水路、種樹的地方（洋流總部的特效）：照時間用 CSS 的 delay 排好 */
   private addVoyageExtras(r: MapRoute): void {
     const L = this.L;
     const layer = this.routeLayer;
@@ -771,41 +748,34 @@ export class MapView {
       const icon = L.divIcon({ className: 'map-voyage-stop', html: `<span style="animation-delay:${Math.round(c.at + 1200 - now)}ms">${escapeHtml(c.label)}</span>`, iconSize: [96, 18], iconAnchor: [48, 30] });
       layer.addLayer(L.marker(mid, { icon, interactive: false, keyboard: false, zIndexOffset: 1500 }));
     }
-    for (const gv of r.groves ?? []) {
-      if (gv.ring.length < 3) continue;
-      const poly = L.polygon(gv.ring, { color: cssVar('--grass', '#3f8f2f'), weight: 1, fillColor: cssVar('--grass', '#3f8f2f'), fillOpacity: 0.35, interactive: false, className: 'map-grove' });
-      layer.addLayer(poly);
-      const pe = poly.getElement();
-      if (pe) (pe as SVGElement).style.animationDelay = `${Math.round(gv.at - now)}ms`;
-      // 開始長的時候一圈綠色的光環從公園中間擴散出去
-      const ping = L.circleMarker(poly.getBounds().getCenter(), { radius: 28, color: cssVar('--grass', '#3f8f2f'), weight: 3, fill: false, interactive: false, className: 'map-ping' });
-      layer.addLayer(ping);
-      const pg = ping.getElement() as SVGElement | undefined;
-      if (pg) pg.style.animationDelay = `${Math.round(gv.at - now)}ms`;
-      const lats = gv.ring.map(([a]) => a);
-      const lngs = gv.ring.map(([, b]) => b);
-      const inside = (lat: number, lng: number): boolean => {
-        let ok = false;
-        for (let a = 0, b = gv.ring.length - 1; a < gv.ring.length; b = a++) {
-          const [ya, xa] = gv.ring[a];
-          const [yb, xb] = gv.ring[b];
-          if (ya > lat !== yb > lat && lng < xa + ((lat - ya) * (xb - xa)) / (yb - ya)) ok = !ok;
-        }
-        return ok;
-      };
-      let placed = 0;
-      for (let j = 0; j < MAP_GROVE_TREES * 6 && placed < MAP_GROVE_TREES; j++) {
-        const [lat, lng] = [Math.min(...lats) + mapHash(j * 3 + 1) * (Math.max(...lats) - Math.min(...lats)), Math.min(...lngs) + mapHash(j * 3 + 2) * (Math.max(...lngs) - Math.min(...lngs))];
-        if (!inside(lat, lng)) continue;
-        const m = L.circleMarker([lat, lng], { radius: 3 + mapHash(j * 3 + 3) * 2.5, color: cssVar('--grass', '#3f8f2f'), weight: 1.2, fillColor: cssVar('--grass', '#3f8f2f'), fillOpacity: 0.95, interactive: false, className: 'map-tree' });
+    for (const pl of r.plantings ?? []) {
+      const cut = pl.kind === 'cut';
+      // 一叢樹：以那一點為中心、照現在的縮放換成像素散開（砍樹的地方多一點、散開一點），一棵接一棵長
+      const [count, spread] = cut ? [MAP_PLANT_CUT_TREES, 17] : [MAP_PLANT_TREES, 11];
+      const seed = Math.round(pl.lat * 1000 + pl.lng * 7);
+      const c = map.latLngToLayerPoint([pl.lat, pl.lng]);
+      if (cut) {
+        const ping = L.circleMarker([pl.lat, pl.lng], { radius: 24, color: cssVar('--grass', '#3f8f2f'), weight: 3, fill: false, interactive: false, className: 'map-ping' });
+        layer.addLayer(ping);
+        const pg = ping.getElement() as SVGElement | undefined;
+        if (pg) pg.style.animationDelay = `${Math.round(pl.at - now)}ms`;
+      }
+      for (let j = 0; j < count; j++) {
+        const a = mapHash(seed + j * 3 + 1) * 2 * Math.PI;
+        const d = Math.sqrt(mapHash(seed + j * 3 + 2)) * spread;
+        const m = L.circleMarker(map.layerPointToLatLng(L.point(c.x + Math.cos(a) * d, c.y + Math.sin(a) * d)), { radius: 3 + mapHash(seed + j * 3 + 3) * 2.5, color: cssVar('--grass', '#3f8f2f'), weight: 1.2, fillColor: cssVar('--grass', '#3f8f2f'), fillOpacity: 0.95, interactive: false, className: 'map-tree' });
         layer.addLayer(m);
         const e = m.getElement() as SVGElement | undefined;
-        if (e) e.style.animationDelay = `${Math.round(gv.at + placed * 45 - now)}ms`;
-        placed++;
+        if (e) e.style.animationDelay = `${Math.round(pl.at + j * 70 - now)}ms`;
+      }
+      if (pl.label) {
+        const icon = L.divIcon({ className: 'map-voyage-stop', html: `<span style="animation-delay:${Math.round(pl.at + 300 - now)}ms">${escapeHtml(pl.label)}</span>`, iconSize: [120, 18], iconAnchor: [60, 34] });
+        layer.addLayer(L.marker([pl.lat, pl.lng], { icon, interactive: false, keyboard: false, zIndexOffset: 1500 }));
       }
     }
   }
 
+  /** 河流畫到 at（0～1）：整點，再加最前面那一點（內插） */
   private drawRiver(t: (typeof this.riverTracks)[number], at: number): void {
     if (Math.abs(at - t.at) < 1e-4) return;
     t.at = at;
@@ -819,8 +789,6 @@ export class MapView {
       shown.push([pts[i - 1][0] + (pts[i][0] - pts[i - 1][0]) * w, pts[i - 1][1] + (pts[i][1] - pts[i - 1][1]) * w]);
     }
     for (const l of t.lines) l.setLatLngs(shown.length > 1 ? shown : []);
-    // 船經過的岸邊長出樹
-    for (let km = (t.treeNext + 0.5) * MAP_TREE_KM; km <= want; km = (t.treeNext + 0.5) * MAP_TREE_KM) this.addTree(t, km, t.treeNext++);
   }
 
   /** 洋流號：路線的經緯度照實際距離記下來，船是點不到的標記（在其他標記下面） */

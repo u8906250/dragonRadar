@@ -1,5 +1,5 @@
 import type { BlipStyle, EventKind, Phase, SweepStyle } from './types';
-import { alongLine, BOAT_SVG, BOAT_TITLE, boatPhase, fireworksSvg, FIREWORKS_MS, flowOut, HQ_VOYAGE_MS, RAINBOW_FLOW_TOTAL, RAINBOW_STAGGER_MS, riverHalfWidth, surge, SURGE_TOTAL, voyagePhase, voyageTimeOf } from './flow';
+import { alongLine, BOAT_SVG, BOAT_TITLE, boatPhase, fireworksSvg, FIREWORKS_MS, flowOut, HQ_VOYAGE_MS, RAINBOW_FLOW_TOTAL, RAINBOW_STAGGER_MS, riverHalfWidth, surge, SURGE_TOTAL, voyagePhase } from './flow';
 
 export interface RadarItem {
   id: number;
@@ -56,8 +56,11 @@ export interface RadarRoute {
   river?: boolean;
   /** 老水路（水域政策「把水找回來」）：船到 at（Date.now() 的毫秒）前先浮出虛線的鬼影，到了從第一點（源頭，接在河流上）注水填滿；label 寫在中間 */
   canals?: Array<{ points: Array<{ bearing: number; distanceKm: number }>; at: number; label: string }>;
-  /** 公園一口氣長滿樹（都市微森林「把樹種回來」）：ring 是外框，at 是開始的時間（Date.now() 的毫秒） */
-  groves?: Array<{ ring: Array<{ bearing: number; distanceKm: number }>; at: number }>;
+  /**
+   * 種樹的地方（都市微森林）：船經過時（at，Date.now() 的毫秒）在那裡長出一叢樹。cut 是有砍樹爭議的地方（「把樹種回來」：多一點、一圈光環、寫名字），
+   * plant 是政見說要加強種樹的公園、商圈、公有建築（長幾棵就好）
+   */
+  plantings?: Array<{ bearing: number; distanceKm: number; at: number; kind: 'cut' | 'plant'; label?: string }>;
 }
 
 /** 放大時畫的街道：每條線是 [往東 km, 往北 km, 往東 km, …]（相對於圓心）；major 大路、minor 其他街道 */
@@ -71,10 +74,10 @@ const hash = (n: number): number => {
   const x = Math.sin(n * 12.9898 + 78.233) * 43758.5453;
   return x - Math.floor(x);
 };
-/** 河岸的樹每隔幾個螢幕像素一棵、公園裡撒幾棵、一棵接一棵隔幾毫秒；老水路的鬼影在船到之前幾毫秒浮出來（洋流總部的特效） */
-const TREE_STEP = 15;
-const GROVE_TREES = 42;
-const GROVE_STAGGER_MS = 45;
+/** 種樹的地方長幾棵（砍樹的地方多一點）、一棵接一棵隔幾毫秒；老水路的鬼影在船到之前幾毫秒浮出來（洋流總部的特效） */
+const PLANT_CUT_TREES = 16;
+const PLANT_TREES = 7;
+const PLANT_STAGGER_MS = 70;
 const CANAL_GHOST_MS = 2500;
 /** 固定的地標（例如洋流總部），畫成星星 */
 export interface RadarLandmark {
@@ -408,7 +411,7 @@ export class Radar {
   /** 洋流號：路線在畫面上的折線（SVG 座標，cum 是每一點走了多遠）和船，每一格畫面照現在的時間擺；往哪邊開記在 boatLeft（重畫時接著用） */
   private boatTracks: Array<{ id: string; g: SVGGElement; flip: SVGGElement; xs: Float64Array; ys: Float64Array; cum: Float64Array; voyage?: number }> = [];
   /** 河流：畫面上的折線（cum 是每一點走了多遠）、每一點往左的法線和半寬（SVG 單位）、畫到哪（at，沒變就不重畫） */
-  private riverTracks: Array<{ xs: Float64Array; ys: Float64Array; nx: Float64Array; ny: Float64Array; hw: Float64Array; cum: Float64Array; voyage: number; at: number; paths: SVGPathElement[]; trees: Array<{ x: number; y: number; frac: number; s: number }>; treeNext: number; treeG: SVGGElement }> = [];
+  private riverTracks: Array<{ xs: Float64Array; ys: Float64Array; nx: Float64Array; ny: Float64Array; hw: Float64Array; cum: Float64Array; voyage: number; at: number; paths: SVGPathElement[] }> = [];
   private readonly boatLeft = new Map<string, boolean>();
   private boatFrame = 0;
   private readonly stack: HTMLDivElement;
@@ -1800,21 +1803,7 @@ export class Radar {
     const paths = ['river-bank', 'river-body', 'river-shine', 'river-flow', 'river-flow b'].map((c) => el('path', { class: c }) as SVGPathElement);
     g.append(...paths);
     this.routeLayer.appendChild(g);
-    // 河岸兩邊的樹（都市微森林）：沿著河每隔 TREE_STEP 螢幕像素一棵，左右岸輪流、離岸邊遠近和大小隨機一點（照走了多遠算，重畫一樣）
-    const trees: Array<{ x: number; y: number; frac: number; s: number }> = [];
-    let i = 1;
-    for (let d = TREE_STEP * k * 0.5, j = 0; d < total; d += TREE_STEP * k, j++) {
-      while (i < n - 1 && cum[i] < d) i++;
-      const w = (d - cum[i - 1]) / (cum[i] - cum[i - 1] || 1);
-      const [x, y] = [xs[i - 1] + (xs[i] - xs[i - 1]) * w, ys[i - 1] + (ys[i] - ys[i - 1]) * w];
-      const [tx, ty] = [nx[i - 1] + (nx[i] - nx[i - 1]) * w, ny[i - 1] + (ny[i] - ny[i - 1]) * w];
-      const side = j % 2 === 0 ? 1 : -1;
-      const off = hw[i] + (2.2 + 4 + hash(j * 7 + 11) * 5) * k;
-      trees.push({ x: x + tx * off * side, y: y + ty * off * side, frac: d / total, s: 0.75 + hash(j * 13 + 5) * 0.6 });
-    }
-    const treeG = el('g', { class: 'voyage-trees' }) as SVGGElement;
-    this.routeLayer.appendChild(treeG);
-    const t = { xs, ys, nx, ny, hw, cum, voyage: r.voyage, at: -1, paths, trees, treeNext: 0, treeG };
+    const t = { xs, ys, nx, ny, hw, cum, voyage: r.voyage, at: -1, paths };
     this.riverTracks.push(t);
     this.drawRiver(t, voyagePhase(Date.now() - r.voyage).at);
   }
@@ -1860,16 +1849,10 @@ export class Radar {
     shine.setAttribute('d', line(0));
     flowA.setAttribute('d', line(0.45));
     flowB.setAttribute('d', line(-0.4));
-    // 船經過的岸邊長出樹（重畫時已經經過的一次補上，照它該長的時間算 delay）
-    const now = Date.now();
-    while (t.treeNext < t.trees.length && t.trees[t.treeNext].frac <= at) {
-      const tr = t.trees[t.treeNext++];
-      t.treeG.appendChild(this.tree(tr.x, tr.y, k * tr.s, t.voyage + voyageTimeOf(tr.frac) - now));
-    }
   }
 
   /**
-   * 老水路（水域政策「把水找回來」）、公園長滿樹（都市微森林「把樹種回來」）：照時間用 CSS 的 delay 排好（重畫時已經過的用負的 delay 接著播）。
+   * 老水路（水域政策「把水找回來」）、種樹的地方（都市微森林「把樹種回來」）：照時間用 CSS 的 delay 排好（重畫時已經過的用負的 delay 接著播）。
    * 老水路先浮出虛線的鬼影（CANAL_GHOST_MS 前），到了從源頭注水：路線的 pathLength 設成 1，dashoffset 從 1 走到 0
    */
   private drawVoyageExtras(r: RadarRoute): void {
@@ -1894,29 +1877,25 @@ export class Radar {
       g.appendChild(lg);
       this.routeLayer.appendChild(g);
     }
-    for (const gv of r.groves ?? []) {
-      if (gv.ring.length < 3) continue;
-      const pts = gv.ring.map((pt) => polar(pt.bearing - this.heading, this.ratio(pt.distanceKm) * (R - 8)));
-      const g = el('g', { class: 'voyage-grove-box' });
-      g.appendChild(el('path', { class: 'voyage-grove', d: this.pathOf(gv.ring, true), style: `animation-delay:${Math.round(gv.at - now)}ms` }));
-      // 開始長的時候一圈綠色的光環從公園中間擴散出去（公園在整個台北的畫面上很小，提醒看這裡）
-      const cx = pts.reduce((a, p) => a + p.x, 0) / pts.length;
-      const cy = pts.reduce((a, p) => a + p.y, 0) / pts.length;
-      g.appendChild(el('circle', { class: 'voyage-ping', cx: cx.toFixed(1), cy: cy.toFixed(1), r: (28 * k).toFixed(1), style: `animation-delay:${Math.round(gv.at - now)}ms` }));
-      // 裡面撒 GROVE_TREES 棵樹（照編號固定的亂數，重畫一樣），一棵接一棵長
-      const [x0, x1] = [Math.min(...pts.map((p) => p.x)), Math.max(...pts.map((p) => p.x))];
-      const [y0, y1] = [Math.min(...pts.map((p) => p.y)), Math.max(...pts.map((p) => p.y))];
-      const inside = (x: number, y: number): boolean => {
-        let ok = false;
-        for (let a = 0, b = pts.length - 1; a < pts.length; b = a++) if (pts[a].y > y !== pts[b].y > y && x < pts[a].x + ((y - pts[a].y) * (pts[b].x - pts[a].x)) / (pts[b].y - pts[a].y)) ok = !ok;
-        return ok;
-      };
-      let placed = 0;
-      for (let j = 0; j < GROVE_TREES * 6 && placed < GROVE_TREES; j++) {
-        const [x, y] = [x0 + hash(j * 3 + 1) * (x1 - x0), y0 + hash(j * 3 + 2) * (y1 - y0)];
-        if (!inside(x, y)) continue;
-        g.appendChild(this.tree(x, y, k * (0.7 + hash(j * 3 + 3) * 0.7), gv.at + placed * GROVE_STAGGER_MS - now));
-        placed++;
+    for (const pl of r.plantings ?? []) {
+      const c = polar(pl.bearing - this.heading, this.ratio(pl.distanceKm) * (R - 8));
+      const g = el('g', { class: `voyage-planting ${pl.kind}`, transform: `translate(${c.x.toFixed(1)} ${c.y.toFixed(1)})` });
+      const cut = pl.kind === 'cut';
+      // 一叢樹：砍樹的地方種多一點、散開一點（螢幕像素），一棵接一棵長；照編號固定的亂數，重畫一樣
+      const [count, spread] = cut ? [PLANT_CUT_TREES, 17] : [PLANT_TREES, 11];
+      const seed = Math.round(pl.bearing * 7 + pl.distanceKm * 131);
+      if (cut) g.appendChild(el('circle', { class: 'voyage-ping', r: (24 * k).toFixed(1), style: `animation-delay:${Math.round(pl.at - now)}ms` }));
+      for (let j = 0; j < count; j++) {
+        const a = hash(seed + j * 3 + 1) * 2 * Math.PI;
+        const d = Math.sqrt(hash(seed + j * 3 + 2)) * spread * k;
+        g.appendChild(this.tree(Math.cos(a) * d, Math.sin(a) * d, k * (0.7 + hash(seed + j * 3 + 3) * 0.7), pl.at + j * PLANT_STAGGER_MS - now));
+      }
+      if (pl.label) {
+        const lg = el('g', { class: 'voyage-stop', transform: `scale(${k.toFixed(4)})` });
+        const tx = el('text', { y: -22, 'text-anchor': 'middle', style: `animation-delay:${Math.round(pl.at + 300 - now)}ms` });
+        tx.textContent = pl.label;
+        lg.appendChild(tx);
+        g.appendChild(lg);
       }
       this.routeLayer.appendChild(g);
     }
