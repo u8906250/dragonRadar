@@ -211,3 +211,8 @@ export function serviceSvg(char: string, color: string): string {
   return `<rect class="sv-dot" x="-7" y="-7" width="14" height="14" rx="3.5" style="fill:${color}"/><text class="cu-char" y="3.1" text-anchor="middle">${char}</text>`;
 }
 
+/** 其他政見的地方，不是代表的那些：小圓點、不能點（同一種地方的介紹都一樣，使用者說留幾個能點的就好） */
+export function serviceDotSvg(color: string): string {
+  return `<circle class="sv-mini" r="3.2" style="fill:${color}"/>`;
+}
+

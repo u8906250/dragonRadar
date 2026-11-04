@@ -426,6 +426,7 @@ path.map-water-glint { animation: water-flow-map 1.1s linear infinite; }
 @keyframes zone-lit { 0% { fill-opacity: 0; stroke-opacity: 0; } 25% { fill-opacity: 0.5; stroke-opacity: 0.7; } 100% { fill-opacity: 0; stroke-opacity: 0.3; } }
 /* 其他政見的地方（圓角方塊）、通學區（國小四周 150 公尺） */
 .sv-dot { stroke: #fff; stroke-width: 1.4; }
+.sv-mini { stroke: #fff; stroke-width: 1; fill-opacity: 0.85; }
 .radar .school-zone { fill: #2a6fd6; fill-opacity: 0.12; stroke: #2a6fd6; pointer-events: none; animation: area-in 0.8s ease-out both; }
 .map-school-zone { animation: area-in 0.8s ease-out both; }
 .hq-layers { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 4px; max-width: 240px; }

@@ -1,5 +1,5 @@
 import type { BlipStyle, EventKind, Phase, SweepStyle } from './types';
-import { alongLine, BOAT_SVG, cultureSvg, regrowSvg, serviceSvg, BOAT_TITLE, boatPhase, fireworksSvg, FIREWORKS_MS, flowOut, HQ_VOYAGE_MS, RAINBOW_FLOW_TOTAL, RAINBOW_STAGGER_MS, riverHalfWidth, surge, SURGE_TOTAL, voyagePhase, voyageTimeOf } from './flow';
+import { alongLine, BOAT_SVG, cultureSvg, regrowSvg, serviceDotSvg, serviceSvg, BOAT_TITLE, boatPhase, fireworksSvg, FIREWORKS_MS, flowOut, HQ_VOYAGE_MS, RAINBOW_FLOW_TOTAL, RAINBOW_STAGGER_MS, riverHalfWidth, surge, SURGE_TOTAL, voyagePhase, voyageTimeOf } from './flow';
 
 export interface RadarItem {
   id: number;
@@ -86,7 +86,7 @@ export interface RadarRoute {
    * 一個東西冒出來（at）：hut 登山中心、stadium 足球場、dome 運動中心、star 星星、regrow 樹樁（grow 時長回大樹）、culture 文化徑的點（char、color）；
    * label 留著（small 是寫在下面的小字，跟別的小字重疊就不寫）
    */
-  icons?: Array<{ bearing: number; distanceKm: number; at: number; kind: 'hut' | 'stadium' | 'dome' | 'star' | 'regrow' | 'culture' | 'service'; label?: string; scale?: number; grow?: number; char?: string; color?: string; small?: boolean }>;
+  icons?: Array<{ bearing: number; distanceKm: number; at: number; kind: 'hut' | 'stadium' | 'dome' | 'star' | 'regrow' | 'culture' | 'service' | 'svdot'; label?: string; scale?: number; grow?: number; char?: string; color?: string; small?: boolean }>;
   /** 通學區：國小四周 150 公尺（ring 是圓的折線），at 時淡入 */
   circles?: Array<{ ring: Array<{ bearing: number; distanceKm: number }>; at: number }>;
   /** 滑鼠移過去的介紹：看不見的感應圈（at 之後才感應，dy 是往上移幾像素） */
@@ -2164,7 +2164,7 @@ export class Radar {
     for (const ic of r.icons ?? []) {
       const p = polar(ic.bearing - this.heading, this.ratio(ic.distanceKm) * (R - 8));
       const g = el('g', { class: `voyage-icon ${ic.kind}`, transform: `translate(${p.x.toFixed(1)} ${p.y.toFixed(1)}) scale(${(k * (ic.scale ?? 1)).toFixed(4)})` });
-      const body = ic.kind === 'regrow' ? regrowSvg((ic.grow ?? ic.at) - now) : ic.kind === 'culture' ? cultureSvg(ic.char ?? '', ic.color ?? '#555') : ic.kind === 'service' ? serviceSvg(ic.char ?? '', ic.color ?? '#555') : ICON_SVG[ic.kind];
+      const body = ic.kind === 'regrow' ? regrowSvg((ic.grow ?? ic.at) - now) : ic.kind === 'culture' ? cultureSvg(ic.char ?? '', ic.color ?? '#555') : ic.kind === 'service' ? serviceSvg(ic.char ?? '', ic.color ?? '#555') : ic.kind === 'svdot' ? serviceDotSvg(ic.color ?? '#555') : ICON_SVG[ic.kind];
       g.innerHTML = `<g class="boat-pop" style="animation-delay:${Math.round(ic.at - now)}ms">${body}</g>`;
       this.routeLayer.appendChild(g);
       if (!ic.label) continue;

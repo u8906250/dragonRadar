@@ -3398,9 +3398,33 @@ function hqStarPoints(st: { lat: number; lng: number; count: number; radiusM: nu
 /** 樹樁比長樹早幾毫秒冒出來 */
 const HQ_STUMP_LEAD_MS = 1500;
 type HqReveal = { path: Array<[number, number]>; at: number; kind: 'trail' | 'bridge' | 'stars' | 'culture'; label?: string; color?: string };
-type HqIcon = { lat: number; lng: number; at: number; kind: 'hut' | 'stadium' | 'dome' | 'star' | 'regrow' | 'culture' | 'service'; label?: string; scale?: number; grow?: number; char?: string; color?: string; small?: boolean; hint?: { title: string; intro: string } };
+type HqIcon = { lat: number; lng: number; at: number; kind: 'hut' | 'stadium' | 'dome' | 'star' | 'regrow' | 'culture' | 'service' | 'svdot'; label?: string; scale?: number; grow?: number; char?: string; color?: string; small?: boolean; hint?: { title: string; intro: string } };
 /** 其他政見的地方：離路線多近才沿路冒出來 */
 const HQ_SERVICE_NEAR_M = 300;
+/**
+ * 每一種地方只留幾個大的、能點的（有介紹）：沿路最先出現的 2 個（沿路不夠就從清單補）；其他畫小圓點、不能點
+ * （使用者說「學校、圖書館或親子的圖可以留幾個可以點的，其他改成更小的圖、不能點，因為內容都差不多」）
+ */
+const HQ_SERVICE_REPS = 2;
+let hqServiceReps: Set<string> | null = null;
+function hqIsRep(sv: { kind: string; name: string }): boolean {
+  if (!hq) return false;
+  if (!hqServiceReps) {
+    hqServiceReps = new Set();
+    const byKind = new Map<string, Array<{ name: string; at: number; near: boolean }>>();
+    for (const x of hq.HQ_SERVICES) {
+      const near = hqDistM(x) <= HQ_SERVICE_NEAR_M;
+      const list = byKind.get(x.kind) ?? [];
+      list.push({ name: x.name, at: near ? hqNearestAt(0, x) : Infinity, near });
+      byKind.set(x.kind, list);
+    }
+    for (const [kind, list] of byKind) {
+      list.sort((a, b) => a.at - b.at);
+      for (const x of list.slice(0, HQ_SERVICE_REPS)) hqServiceReps.add(`${kind}|${x.name}`);
+    }
+  }
+  return hqServiceReps.has(`${sv.kind}|${sv.name}`);
+}
 /** 離路線幾公尺（路線載入後不會變，記起來） */
 const hqDistCache = new Map<string, number>();
 function hqDistM(p: LatLng): number {
@@ -3458,7 +3482,8 @@ function hqExtras(t0: number): { reveals: HqReveal[]; icons: HqIcon[] } {
     const near = hqDistM(sv) <= HQ_SERVICE_NEAR_M;
     if (!near && !(ly && hqLayer && ly.kinds.includes(sv.kind))) continue;
     const at = near ? hqNearestAt(t0, sv) : hqLayer!.at + Math.min(li++ * 8, 1600);
-    icons.push({ lat: sv.lat, lng: sv.lng, at, kind: 'service', char: K.char, color: K.color, scale: 0.85, hint: { title: `${sv.name}（${K.name}）`, intro: K.intro } });
+    if (hqIsRep(sv)) icons.push({ lat: sv.lat, lng: sv.lng, at, kind: 'service', char: K.char, color: K.color, scale: 0.85, hint: { title: `${sv.name}（${K.name}）`, intro: K.intro } });
+    else icons.push({ lat: sv.lat, lng: sv.lng, at, kind: 'svdot', color: K.color });
   }
   // 文化徑的線（點 —— 線）：同一條路線的點都冒出來後，用那條路線的顏色沿街道連起來
   for (const ln of hq.HQ_CULTURE_LINES) {
