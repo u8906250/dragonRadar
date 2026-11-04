@@ -3342,6 +3342,8 @@ function hqStarPoints(st: { lat: number; lng: number; count: number; radiusM: nu
   }
   return pts;
 }
+/** 樹樁比長樹早幾毫秒冒出來 */
+const HQ_STUMP_LEAD_MS = 1500;
 type HqReveal = { path: Array<[number, number]>; at: number; kind: 'trail' | 'bridge' | 'stars' | 'culture'; label?: string; color?: string };
 type HqIcon = { lat: number; lng: number; at: number; kind: 'hut' | 'stadium' | 'dome' | 'star' | 'regrow' | 'culture'; label?: string; scale?: number; grow?: number; char?: string; color?: string; small?: boolean };
 /** 其他政見的東西：步道（山林徑）、自行車橋、球場和運動中心、星群——線和冒出來的東西（照船到那一站或離它最近的時間） */
@@ -3363,10 +3365,12 @@ function hqExtras(t0: number): { reveals: HqReveal[]; icons: HqIcon[] } {
     pts.forEach(([lat, lng], i) => icons.push({ lat, lng, at: at + i * 160, kind: 'star', scale: st.big ? 1 : 0.7 }));
     if (st.big) reveals.push({ path: [...pts, pts[0]], at: at + pts.length * 160, kind: 'stars', label: st.name });
   }
-  // 都市微森林「把樹種回來」（v1.484 使用者選的呈現）：有報導的砍樹地方一開始是樹樁，船離它最近時長回一棵大樹
+  // 都市微森林「把樹種回來」（v1.484 使用者選的呈現）：有報導的砍樹地方，船快到時（1.5 秒前）才冒出樹樁，船離它最近時長回一棵大樹
+  // （v1.487 使用者說「樹不用一開始砍掉，接近的時候出現再長出來」）
   for (const p of hq.HQ_PLANTINGS) {
     if (p.kind !== 'cut') continue;
-    icons.push({ lat: p.lat, lng: p.lng, at: t0, grow: hqNearestAt(t0, p), kind: 'regrow', label: p.hideName ? undefined : p.name, scale: 1.5 });
+    const grow = hqNearestAt(t0, p);
+    icons.push({ lat: p.lat, lng: p.lng, at: grow - HQ_STUMP_LEAD_MS, grow, kind: 'regrow', label: p.hideName ? undefined : p.name, scale: 1.5 });
   }
   // 文化徑的點：船離它最近時冒出來，名字寫在下面（重疊的不寫）
   const seen = new Map<string, number>();
