@@ -1519,7 +1519,8 @@ function render(): void {
               boats: hq.HQ_BOATS.filter(inView).map((b) => ({ ...toRadarAt([b.lat, b.lng]), at: hqNearestAt(hqVoyageAt!, b), kind: b.kind, heading: b.heading })),
               // 其他政見：山林徑的步道和登山中心、自行車橋、球場和運動中心、星群
               reveals: hqEx.reveals.filter((rv) => anyInView(rv.path)).map((rv) => ({ points: rv.path.map(toRadarAt), at: rv.at, kind: rv.kind, label: rv.label })),
-              icons: hqEx.icons.filter(inView).map((ic) => ({ ...toRadarAt([ic.lat, ic.lng]), at: ic.at, kind: ic.kind, label: ic.label, scale: ic.scale })),
+              icons: hqEx.icons.filter(inView).map((ic) => ({ ...ic, ...toRadarAt([ic.lat, ic.lng]) })),
+              hits: hqHits(hqVoyageAt).filter(inView).map((h) => ({ ...h, ...toRadarAt([h.lat, h.lng]) })),
             },
           ],
     ),
@@ -1580,6 +1581,7 @@ function render(): void {
               rivers: hq.HQ_RIVERS.map((rv) => ({ ring: rv.ring, at: hqStopAt(hqVoyageAt!, rv.stop) })),
               boats: hq.HQ_BOATS.map((b) => ({ lat: b.lat, lng: b.lng, at: hqNearestAt(hqVoyageAt!, b), kind: b.kind, heading: b.heading })),
               ...hqEx,
+              hits: hqHits(hqVoyageAt),
             },
           ],
     ),
@@ -3097,7 +3099,7 @@ function selectLandmark(id: string | null): void {
  * 點了洋流總部：洋流號從總部沿著真的路，像一條河流繞過整個台北市 12 個區、流到台北市政府（只開一趟；路線在 hq-voyage.ts，
  * 第一次點才載入），河跟著船長出來，經過每一區寫一下區名，終點的市政府用虛線畫出來；到了雷達（地圖）拉近市政府，放煙火（flow.ts 的 fireworksSvg）。
  * 雷達先飛到看得到整條（變成手動位置，按「定位」回來；本來就看得到整條就不動）；中途自己拖、縮放過，到了就不拉近。
- * hqVoyageAt 是出發的時間（Date.now() 的毫秒），放完拿掉；你在汪星、火箭飛行中沒有
+ * hqVoyageAt 是出發的時間（Date.now() 的毫秒），按「關閉洋流號」才拿掉（stopHqVoyage）；你在汪星、火箭飛行中沒有
  */
 let hq: typeof import('./hq-voyage') | null = null;
 let hqVoyageAt: number | null = null;
@@ -3138,6 +3140,7 @@ function startHqVoyage(spinAt = Date.now()): void {
   const cityHall = HQ_TOUR[HQ_TOUR.length - 1];
   for (const t of hqVoyageTimers) window.clearTimeout(t);
   window.clearInterval(hqFollowTimer);
+  window.clearInterval(hqGaugeTimer);
   hqUserMoved = false;
   let wait = 0;
   const started = Date.now();
@@ -3173,16 +3176,100 @@ function startHqVoyage(spinAt = Date.now()): void {
         if (map.userMovedAt < started + 300) map.flyToLatLng(cityHall, 17);
       } else if (!hqUserMoved) zoomToKm(HQ_END_KM, { lat: cityHall.lat, lng: cityHall.lng, source: 'manual' });
     }, wait + HQ_SAIL_MS),
-    window.setTimeout(() => {
-      hqVoyageAt = null;
-      window.clearInterval(hqFollowTimer);
-      radar.setStarSpin(null);
-      map.setStarSpin(null);
-      render();
-    }, wait + HQ_VOYAGE_MS + 100),
   ];
+  // 綠覆率儀表：每把一處砍樹的地方種回來加 2%（18% → 30%），到了不會自己消失，按「關閉洋流號」才收
+  const grows = hqExtras(t0).icons.filter((ic) => ic.kind === 'regrow').map((ic) => ic.grow ?? t0);
+  let shownPct = -1;
+  const updateGauge = (): void => {
+    const pct = HQ_GREEN_FROM + HQ_GREEN_STEP * grows.filter((g) => g <= Date.now()).length;
+    if (pct === shownPct) return;
+    const bump = shownPct >= 0;
+    shownPct = pct;
+    hqGaugeNum.textContent = `${pct}%`;
+    hqGaugeBar.style.width = `${(pct / HQ_GREEN_TO) * 100}%`;
+    if (bump) {
+      hqGauge.classList.remove('bump');
+      void hqGauge.offsetWidth;
+      hqGauge.classList.add('bump');
+    }
+  };
+  updateGauge();
+  hqGaugeTimer = window.setInterval(updateGauge, 250);
+  hqGauge.setAttribute('data-intro', hq.HQ_INTROS['綠覆率'] ?? '');
+  hqPanel.hidden = false;
   render();
 }
+/** 關閉洋流號（按鈕、Esc）：特效收起來、星星彈回來 */
+function stopHqVoyage(): void {
+  if (hqVoyageAt === null) return;
+  for (const t of hqVoyageTimers) window.clearTimeout(t);
+  window.clearInterval(hqFollowTimer);
+  window.clearInterval(hqGaugeTimer);
+  hqVoyageAt = null;
+  hqPanel.hidden = true;
+  introTip.hidden = true;
+  radar.setStarSpin(null);
+  map.setStarSpin(null);
+  render();
+}
+/** 綠覆率（政見：台北約 18%，林試所 2021；目標 3-30-300 的 30%）：6 處砍樹的地方各加 2%，是示意 */
+const HQ_GREEN_FROM = 18;
+const HQ_GREEN_STEP = 2;
+const HQ_GREEN_TO = 30;
+let hqGaugeTimer = 0;
+/** 右上角按鈕下面：綠覆率儀表、關閉按鈕（洋流號播放中、播完都在，按了才收） */
+const hqPanel = document.createElement('div');
+hqPanel.className = 'hq-panel';
+hqPanel.hidden = true;
+hqPanel.innerHTML =
+  '<div class="hq-gauge" data-title="台北綠覆率"><span class="hq-gauge-label">台北綠覆率</span><b class="hq-gauge-num">18%</b><span class="hq-gauge-bar"><i></i></span><small>目標 30%（3-30-300）</small></div>' +
+  '<button type="button" class="chip hq-close">✕ 關閉洋流號</button>';
+// 放在右上那排按鈕（定位、地圖／雷達切換）的下面，不蓋住按鈕；全螢幕時那排按鈕往下移，這裡跟著
+document.querySelector('#stage .overlay-tr')!.appendChild(hqPanel);
+const hqGauge = hqPanel.querySelector('.hq-gauge') as HTMLElement;
+const hqGaugeNum = hqPanel.querySelector('.hq-gauge-num') as HTMLElement;
+const hqGaugeBar = hqPanel.querySelector('.hq-gauge-bar i') as HTMLElement;
+hqPanel.querySelector('.hq-close')!.addEventListener('click', stopHqVoyage);
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape' && hqVoyageAt !== null) stopHqVoyage();
+});
+/**
+ * 滑鼠移過去的介紹（使用者說「我想在一些地方滑鼠一過去可以介紹」）：有 data-intro 的東西（雷達上的感應圈、儀表），
+ * 滑鼠移過去就在旁邊顯示；手機沒有滑鼠，點一下顯示、點別的地方收起來。地圖用 Leaflet 自己的 tooltip
+ */
+const introTip = document.createElement('div');
+introTip.className = 'hq-intro-tip';
+introTip.hidden = true;
+document.body.appendChild(introTip);
+function showIntro(t: Element, x: number, y: number): void {
+  const title = t.getAttribute('data-title') ?? '';
+  const intro = t.getAttribute('data-intro') ?? '';
+  const b = document.createElement('b');
+  b.textContent = title;
+  introTip.replaceChildren(b, document.createTextNode(intro));
+  introTip.hidden = false;
+  const w = introTip.offsetWidth;
+  const h = introTip.offsetHeight;
+  introTip.style.left = `${Math.max(8, Math.min(x + 14, window.innerWidth - w - 8))}px`;
+  introTip.style.top = `${y + 16 + h > window.innerHeight - 8 ? Math.max(8, y - h - 12) : y + 16}px`;
+}
+document.addEventListener('pointerover', (e) => {
+  if (e.pointerType === 'touch') return;
+  const t = (e.target as Element | null)?.closest?.('[data-intro]');
+  if (t) showIntro(t, e.clientX, e.clientY);
+  else introTip.hidden = true;
+});
+document.addEventListener('pointermove', (e) => {
+  if (e.pointerType === 'touch' || introTip.hidden) return;
+  const t = (e.target as Element | null)?.closest?.('[data-intro]');
+  if (t) showIntro(t, e.clientX, e.clientY);
+});
+document.addEventListener('click', (e) => {
+  if ((e as PointerEvent).pointerType === 'mouse') return;
+  const t = (e.target as Element | null)?.closest?.('[data-intro]');
+  if (t) showIntro(t, (e as MouseEvent).clientX, (e as MouseEvent).clientY);
+  else introTip.hidden = true;
+});
 /**
  * 「把樹種回來」的樹（砍樹的地方、公園、行道樹）先不畫：v1.483 使用者說「樹先不要畫，有其他想法針對把樹種回來怎麼呈現嗎」。
  * 資料（HQ_PLANTINGS、HQ_BLOOMS）和畫法（radar.ts、map.ts 的 plantings、blooms）都留著，改成 true 就回來
@@ -3235,7 +3322,7 @@ function hqStarPoints(st: { lat: number; lng: number; count: number; radiusM: nu
   return pts;
 }
 type HqReveal = { path: Array<[number, number]>; at: number; kind: 'trail' | 'bridge' | 'stars'; label?: string };
-type HqIcon = { lat: number; lng: number; at: number; kind: 'hut' | 'stadium' | 'dome' | 'star'; label?: string; scale?: number };
+type HqIcon = { lat: number; lng: number; at: number; kind: 'hut' | 'stadium' | 'dome' | 'star' | 'regrow' | 'culture'; label?: string; scale?: number; grow?: number; char?: string; color?: string; small?: boolean };
 /** 其他政見的東西：步道（山林徑）、自行車橋、球場和運動中心、星群——線和冒出來的東西（照船到那一站或離它最近的時間） */
 function hqExtras(t0: number): { reveals: HqReveal[]; icons: HqIcon[] } {
   if (!hq) return { reveals: [], icons: [] };
@@ -3255,7 +3342,62 @@ function hqExtras(t0: number): { reveals: HqReveal[]; icons: HqIcon[] } {
     pts.forEach(([lat, lng], i) => icons.push({ lat, lng, at: at + i * 160, kind: 'star', scale: st.big ? 1 : 0.7 }));
     if (st.big) reveals.push({ path: [...pts, pts[0]], at: at + pts.length * 160, kind: 'stars', label: st.name });
   }
+  // 都市微森林「把樹種回來」（v1.484 使用者選的呈現）：有報導的砍樹地方一開始是樹樁，船離它最近時長回一棵大樹
+  for (const p of hq.HQ_PLANTINGS) {
+    if (p.kind !== 'cut') continue;
+    icons.push({ lat: p.lat, lng: p.lng, at: t0, grow: hqNearestAt(t0, p), kind: 'regrow', label: p.hideName ? undefined : p.name, scale: 1.5 });
+  }
+  // 文化徑的點：船離它最近時冒出來，名字寫在下面（重疊的不寫）
+  for (const c of hq.HQ_CULTURE) {
+    const th = hq.HQ_CULTURE_THEMES[c.theme];
+    icons.push({ lat: c.lat, lng: c.lng, at: hqNearestAt(t0, c), kind: 'culture', char: c.theme, color: th.color, label: c.name, small: true });
+  }
   return { reveals, icons };
+}
+/** 報導的出處（介紹裡寫） */
+const hqOutlet = (url?: string): string => (!url ? '' : url.includes('mirrordaily') ? '鏡報' : url.includes('newtalk') ? '新頭殼' : url.includes('pts.org') ? '公視' : url.includes('udn.com') ? '聯合報' : '');
+/** 滑鼠移過去的介紹：哪裡、什麼時候開始感應（東西出現了才感應）、標題、內容 */
+function hqHits(t0: number): Array<{ lat: number; lng: number; at: number; title: string; intro: string; dy?: number; r?: number }> {
+  if (!hq) return [];
+  const I = hq.HQ_INTROS;
+  const hits: ReturnType<typeof hqHits> = [];
+  const ex = hqExtras(t0);
+  for (const ic of ex.icons) {
+    if (ic.kind === 'regrow') {
+      const p = hq.HQ_PLANTINGS.find((x) => x.lat === ic.lat && x.lng === ic.lng);
+      if (!p) continue;
+      const outlet = hqOutlet(p.source);
+      hits.push({ lat: ic.lat, lng: ic.lng, at: ic.grow ?? ic.at, title: p.hideName ? '南港的老樹' : p.name, intro: `${p.why}${outlet ? `（${outlet}報導）` : ''}。都市微森林：把樹種回來；移除路樹前，市府、居民、樹木專家、保險業者、都計或樹管委員至少五方一起討論。`, dy: 14, r: 16 });
+    } else if (ic.kind === 'culture') {
+      const c = hq.HQ_CULTURE.find((x) => x.lat === ic.lat && x.lng === ic.lng);
+      if (!c) continue;
+      const th = hq.HQ_CULTURE_THEMES[c.theme];
+      hits.push({ lat: c.lat, lng: c.lng, at: ic.at, title: c.name, intro: `文化徑「${th.name}」：${th.intro}${c.note ?? ''}`, r: 9 });
+    } else if (ic.kind === 'hut') {
+      const tr = hq.HQ_TRAILS.find((x) => x.head[0] === ic.lat && x.head[1] === ic.lng);
+      if (tr) hits.push({ lat: ic.lat, lng: ic.lng, at: ic.at, title: `${tr.name}登山觀光中心`, intro: I[tr.name] ?? '', dy: 3, r: 14 });
+    } else if (ic.kind === 'stadium' || ic.kind === 'dome') {
+      const v = hq.HQ_VENUES.find((x) => x.lat === ic.lat && x.lng === ic.lng);
+      if (v) hits.push({ lat: v.lat, lng: v.lng, at: ic.at, title: v.name, intro: I[v.name] ?? '', r: 16 });
+    }
+  }
+  const big = hq.HQ_STARS.find((st) => st.big);
+  if (big) hits.push({ lat: big.lat, lng: big.lng, at: hqNearestAt(t0, big), title: '北士科星群計畫', intro: I['北士科星群'] ?? '', r: 22 });
+  const br = hq.HQ_BRIDGE;
+  hits.push({ lat: (br.from[0] + br.to[0]) / 2, lng: (br.from[1] + br.to[1]) / 2, at: hqStopAt(t0, br.stop), title: br.name, intro: I[br.name] ?? '', r: 12 });
+  for (const c of hq.HQ_CANALS) {
+    const mid = c.points[Math.floor(c.points.length / 2)];
+    hits.push({ lat: mid[0], lng: mid[1], at: hqStopAt(t0, c.stop), title: c.name, intro: I[c.name] ?? '', r: 16 });
+  }
+  for (const sp of hq.HQ_SPRINGS) hits.push({ lat: sp.lat, lng: sp.lng, at: hqStopAt(t0, sp.stop), title: `${sp.name}（湧泉）`, intro: I[sp.name] ?? '', r: 14 });
+  for (const pd of hq.HQ_PONDS) {
+    const n = pd.ring.length;
+    const lat = pd.ring.reduce((t, q) => t + q[0], 0) / n;
+    const lng = pd.ring.reduce((t, q) => t + q[1], 0) / n;
+    hits.push({ lat, lng, at: hqStopAt(t0, pd.stop), title: pd.name, intro: I[pd.name] ?? '', r: 16 });
+  }
+  for (const b of hq.HQ_BOATS) hits.push({ lat: b.lat, lng: b.lng, at: hqNearestAt(t0, b), title: `水上活動（${b.kind === 'sup' ? 'SUP' : '龍舟'}）`, intro: I['水上活動'] ?? '', r: 12 });
+  return hits;
 }
 /**
  * 經過的區名（每一區寫第一次經過的那一站；總部那一站有星星不用寫）、終點一直寫著「臺北市政府」；
@@ -3269,6 +3411,7 @@ function hqTourStops(t0: number): Array<{ lat: number; lng: number; label: strin
   const firstCut = hqPlantings(t0).find((p) => p.kind === 'cut');
   // 「水上活動」寫在最早出現的那艘船上面，出現後留著
   const firstBoat = hq.HQ_BOATS.map((b) => ({ ...b, at: hqNearestAt(t0, b) })).sort((a, b) => a.at - b.at)[0];
+  const firstCulture = hq.HQ_CULTURE.map((c) => ({ ...c, at: hqNearestAt(t0, c) })).sort((a, b) => a.at - b.at)[0];
   // 「把水找回來」寫在最早找回來的那一條老水路（或湧泉、水塘）上面，出現後留著；各自的名字另外寫
   const waters = [
     ...hq.HQ_CANALS.map((c) => ({ at: hqStopAt(t0, c.stop), lat: c.points[Math.floor(c.points.length / 2)][0], lng: c.points[Math.floor(c.points.length / 2)][1] })),
@@ -3277,7 +3420,8 @@ function hqTourStops(t0: number): Array<{ lat: number; lng: number; label: strin
   ].sort((a, b) => a.at - b.at)[0];
   return [
     ...(waters ? [{ lat: waters.lat, lng: waters.lng, label: '把水找回來', at: waters.at + 1400, stay: true, dy: -36 }] : []),
-    ...(HQ_TREES && firstCut ? [{ lat: firstCut.lat, lng: firstCut.lng, label: '把樹種回來', at: firstCut.at + 300, stay: true, dy: -36 }] : []),
+    ...(firstCut ? [{ lat: firstCut.lat, lng: firstCut.lng, label: '把樹種回來', at: firstCut.at + 300, stay: true, dy: HQ_TREES ? -36 : -58 }] : []),
+    ...(firstCulture ? [{ lat: firstCulture.lat, lng: firstCulture.lng, label: '文化徑', at: firstCulture.at + 300, stay: true, dy: -14 }] : []),
     ...(firstBoat ? [{ lat: firstBoat.lat, lng: firstBoat.lng, label: '水上活動', at: firstBoat.at + 600, stay: true, dy: -26 }] : []),
     ...HQ_TOUR.flatMap((st, i) => {
       if (seen.has(st.district)) return [];

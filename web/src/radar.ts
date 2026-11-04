@@ -1,5 +1,5 @@
 import type { BlipStyle, EventKind, Phase, SweepStyle } from './types';
-import { alongLine, BOAT_SVG, BOAT_TITLE, boatPhase, fireworksSvg, FIREWORKS_MS, flowOut, HQ_VOYAGE_MS, RAINBOW_FLOW_TOTAL, RAINBOW_STAGGER_MS, riverHalfWidth, surge, SURGE_TOTAL, voyagePhase, voyageTimeOf } from './flow';
+import { alongLine, BOAT_SVG, cultureSvg, regrowSvg, BOAT_TITLE, boatPhase, fireworksSvg, FIREWORKS_MS, flowOut, HQ_VOYAGE_MS, RAINBOW_FLOW_TOTAL, RAINBOW_STAGGER_MS, riverHalfWidth, surge, SURGE_TOTAL, voyagePhase, voyageTimeOf } from './flow';
 
 export interface RadarItem {
   id: number;
@@ -71,8 +71,13 @@ export interface RadarRoute {
   rivers?: Array<{ ring: Array<{ bearing: number; distanceKm: number }>; at: number }>;
   /** 一條線從頭長到尾（at 開始、REVEAL_MS 長完）：trail 山林徑（土色虛線）、bridge 自行車橋（粗的雙線，長完有腳踏車的點在上面跑）、stars 星座（金色細線）；label 寫在尾端、留著 */
   reveals?: Array<{ points: Array<{ bearing: number; distanceKm: number }>; at: number; kind: 'trail' | 'bridge' | 'stars'; label?: string }>;
-  /** 一個東西冒出來（at）：hut 登山中心、stadium 足球場、dome 運動中心、star 星星；label 留著 */
-  icons?: Array<{ bearing: number; distanceKm: number; at: number; kind: 'hut' | 'stadium' | 'dome' | 'star'; label?: string; scale?: number }>;
+  /**
+   * 一個東西冒出來（at）：hut 登山中心、stadium 足球場、dome 運動中心、star 星星、regrow 樹樁（grow 時長回大樹）、culture 文化徑的點（char、color）；
+   * label 留著（small 是寫在下面的小字，跟別的小字重疊就不寫）
+   */
+  icons?: Array<{ bearing: number; distanceKm: number; at: number; kind: 'hut' | 'stadium' | 'dome' | 'star' | 'regrow' | 'culture'; label?: string; scale?: number; grow?: number; char?: string; color?: string; small?: boolean }>;
+  /** 滑鼠移過去的介紹：看不見的感應圈（at 之後才感應，dy 是往上移幾像素） */
+  hits?: Array<{ bearing: number; distanceKm: number; at: number; title: string; intro: string; dy?: number; r?: number }>;
   /** 水上活動：船經過時（at）河上出現 SUP、龍舟，留著在水上搖；heading 是船頭朝哪（度，0 是上、順時針） */
   boats?: Array<{ bearing: number; distanceKm: number; at: number; kind: 'sup' | 'dragon'; heading: number }>;
 }
@@ -2093,14 +2098,37 @@ export class Radar {
         g.appendChild(this.stayLabel(p.x, p.y, k, rv.label, rv.at + REVEAL_MS - now, -12));
       }
     }
-    // 冒出來的東西：登山中心、足球場、運動中心、星星（螢幕像素的大小）
+    // 冒出來的東西：登山中心、足球場、運動中心、星星、樹樁長回大樹、文化徑的點（螢幕像素的大小）
+    const placed: Array<[number, number, number]> = [];
     for (const ic of r.icons ?? []) {
       const p = polar(ic.bearing - this.heading, this.ratio(ic.distanceKm) * (R - 8));
       const g = el('g', { class: `voyage-icon ${ic.kind}`, transform: `translate(${p.x.toFixed(1)} ${p.y.toFixed(1)}) scale(${(k * (ic.scale ?? 1)).toFixed(4)})` });
-      g.innerHTML = `<g class="boat-pop" style="animation-delay:${Math.round(ic.at - now)}ms">${ICON_SVG[ic.kind]}</g>`;
+      const body = ic.kind === 'regrow' ? regrowSvg((ic.grow ?? ic.at) - now) : ic.kind === 'culture' ? cultureSvg(ic.char ?? '', ic.color ?? '#555') : ICON_SVG[ic.kind];
+      g.innerHTML = `<g class="boat-pop" style="animation-delay:${Math.round(ic.at - now)}ms">${body}</g>`;
       this.routeLayer.appendChild(g);
-      // 名字寫在上面（放在縮放過的 g 外面，字才是一般的大小、離圖案夠遠）
-      if (ic.label) this.routeLayer.appendChild(this.stayLabel(p.x, p.y, k, ic.label, ic.at + 500 - now, -26 * (ic.scale ?? 1)));
+      if (!ic.label) continue;
+      const shown = (ic.grow ?? ic.at) + 500 - now;
+      if (ic.small) {
+        // 文化徑的名字寫在圓的下面；跟已經寫的重疊就不寫（拉近就分得開，滑鼠移過去也有介紹）
+        const w = ic.label.length * 9.5 * k;
+        if (placed.some(([x, y, pw]) => Math.abs(x - p.x) < (w + pw) / 2 + 2 * k && Math.abs(y - p.y) < 13 * k)) continue;
+        placed.push([p.x, p.y, w]);
+        const lg = this.stayLabel(p.x, p.y, k, ic.label, shown, 19);
+        lg.classList.add('small');
+        this.routeLayer.appendChild(lg);
+      } else {
+        // 名字寫在上面（放在縮放過的 g 外面，字才是一般的大小、離圖案夠遠）
+        this.routeLayer.appendChild(this.stayLabel(p.x, p.y, k, ic.label, shown, -26 * (ic.scale ?? 1)));
+      }
+    }
+    // 滑鼠移過去的介紹：看不見的感應圈，放在最上面（main.ts 照 data-title、data-intro 顯示）
+    if (r.hits?.length) {
+      const hg = el('g', { class: 'intro-hits' });
+      for (const h of r.hits) {
+        const p = polar(h.bearing - this.heading, this.ratio(h.distanceKm) * (R - 8));
+        hg.appendChild(el('circle', { class: 'intro-hit', cx: p.x.toFixed(1), cy: (p.y - (h.dy ?? 0) * k).toFixed(1), r: ((h.r ?? 12) * k).toFixed(2), 'data-title': h.title, 'data-intro': h.intro, style: `animation-delay:${Math.round(h.at - now)}ms` }));
+      }
+      this.routeLayer.appendChild(hg);
     }
   }
 

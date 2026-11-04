@@ -114,9 +114,8 @@ export const HQ_ARRIVE_MS = 3000;
 export const FIREWORKS_MS = 4400;
 /** 點下去星星轉走要幾毫秒（轉完洋流號才出來） */
 export const HQ_STAR_MS = 1100;
-/** 到站、畫面停好之後再留幾毫秒才淡掉（煙火先不放，使用者說有其他想法；fireworksSvg 留著） */
-export const HQ_LINGER_MS = 2500;
-export const HQ_VOYAGE_MS = HQ_SAIL_MS + HQ_ARRIVE_MS + HQ_LINGER_MS;
+/** 開到、畫面停好為止（之後不會自己消失，要按「關閉洋流號」：使用者說改成手動關閉，好讓滑鼠移過去看介紹；煙火先不放，fireworksSvg 留著） */
+export const HQ_VOYAGE_MS = HQ_SAIL_MS + HQ_ARRIVE_MS;
 /** 起步、到站各花幾毫秒加速、減速 */
 const RAMP_MS = 2500;
 /** 開到哪（0～1）：速度是梯形（起步加速、中間等速、到站減速） */
@@ -129,7 +128,8 @@ function sailAt(ago: number): number {
 }
 /** 出發後 ago 毫秒：開到哪（0～1）、多不透明（出發時淡入，煙火放完淡掉；還沒出發是 0） */
 export function voyagePhase(ago: number): { at: number; alpha: number } {
-  const alpha = ago < 0 ? 0 : Math.max(0, Math.min(1, ago / 400, (HQ_VOYAGE_MS - ago) / 600));
+  // 一開始淡入，之後一直留著（手動關閉）
+  const alpha = ago < 0 ? 0 : Math.min(1, ago / 400);
   return { at: sailAt(ago), alpha };
 }
 /** 開到 at（0～1）是出發後幾毫秒（經過每一區時寫區名用） */
@@ -191,3 +191,17 @@ export function alongLine(xs: ArrayLike<number>, ys: ArrayLike<number>, cum: Arr
   const dy = ys[i] - ys[i - 1];
   return { x: xs[i - 1] + dx * k, y: ys[i - 1] + dy * k, left: Math.abs(dx) < Math.abs(dy) * 0.15 ? null : dx < 0 };
 }
+
+/** 樹樁長回大樹（把樹種回來；中心在 0,0 是樹根，螢幕像素）：一開始是砍掉的樹樁，growMs 後長出樹冠（從下往上彈出來） */
+export function regrowSvg(growMs: number): string {
+  return (
+    '<path class="rg-trunk" d="M-2.6 -2L-3.2 6H3.2L2.6 -2Z"/><ellipse class="rg-cut" cy="-2" rx="2.6" ry="1.1"/>' +
+    `<g class="rg-crown" style="animation-delay:${Math.round(growMs)}ms"><circle cx="-5.5" cy="-8" r="6"/><circle cx="5.5" cy="-8" r="6"/><circle cx="0" cy="-13" r="7"/><circle class="rg-lit" cx="-2.5" cy="-15" r="2.4"/></g>`
+  );
+}
+
+/** 文化徑的點：主題顏色的圓、裡面寫主題的字 */
+export function cultureSvg(char: string, color: string): string {
+  return `<circle class="cu-dot" r="7" style="fill:${color}"/><text class="cu-char" y="3.1" text-anchor="middle">${char}</text>`;
+}
+

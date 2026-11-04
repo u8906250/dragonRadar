@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { fireworksSvg, HQ_SAIL_MS, HQ_VOYAGE_MS, voyagePhase, voyageTimeOf } from '../src/flow';
-import { HQ_BLOOMS, HQ_BOATS, HQ_BRIDGE, HQ_CANALS, HQ_PLANTINGS, HQ_PONDS, HQ_SPRINGS, HQ_STARS, HQ_TOUR, HQ_TOUR_AT, HQ_TRAILS, HQ_VENUES, HQ_VOYAGE } from '../src/hq-voyage';
+import { HQ_BLOOMS, HQ_BOATS, HQ_BRIDGE, HQ_CANALS, HQ_CULTURE, HQ_CULTURE_THEMES, HQ_INTROS, HQ_PLANTINGS, HQ_PONDS, HQ_SPRINGS, HQ_STARS, HQ_TOUR, HQ_TOUR_AT, HQ_TRAILS, HQ_VENUES, HQ_VOYAGE } from '../src/hq-voyage';
 import { LANDMARKS } from '../src/landmarks';
 import { haversineKm } from '../src/geo';
 
@@ -10,10 +10,11 @@ describe('洋流總部的特效', () => {
     expect(voyagePhase(0).at).toBe(0);
     expect(voyagePhase(HQ_SAIL_MS / 2).at).toBeCloseTo(0.5);
     expect(voyagePhase(HQ_SAIL_MS * 0.1).at).toBeLessThan(0.1);
-    // 到了停在終點，煙火放完淡掉
+    // 到了停在終點
     expect(voyagePhase(HQ_SAIL_MS + 1000)).toEqual({ at: 1, alpha: 1 });
-    expect(voyagePhase(HQ_VOYAGE_MS - 300).alpha).toBeCloseTo(0.5);
-    expect(voyagePhase(HQ_VOYAGE_MS + 10).alpha).toBe(0);
+    // 播完不會自己淡掉（手動關閉）
+    expect(voyagePhase(HQ_VOYAGE_MS - 300).alpha).toBe(1);
+    expect(voyagePhase(HQ_VOYAGE_MS + 60_000).alpha).toBe(1);
   });
   it('starts at the HQ landmark and ends at 台北市政府', () => {
     const hq = LANDMARKS.find((l) => l.id === 'hq')!;
@@ -67,6 +68,17 @@ describe('洋流總部的特效', () => {
       expect(nearRoute({ lat: tr.station[0], lng: tr.station[1] })).toBeLessThan(2.5);
     }
     expect(nearRoute({ lat: HQ_BRIDGE.from[0], lng: HQ_BRIDGE.from[1] })).toBeLessThan(2);
+    // 文化徑的點：政見四大主題裡點名的（現代台北沒點名），都在台北市裡、每個主題都有；介紹都寫了
+    expect(HQ_CULTURE.length).toBeGreaterThanOrEqual(28);
+    for (const th of Object.keys(HQ_CULTURE_THEMES)) expect(HQ_CULTURE.some((c) => c.theme === th)).toBe(true);
+    for (const c of HQ_CULTURE) {
+      expect(c.lat).toBeGreaterThan(24.96);
+      expect(c.lat).toBeLessThan(25.21);
+      expect(c.lng).toBeGreaterThan(121.45);
+      expect(c.lng).toBeLessThan(121.67);
+    }
+    for (const name of [...HQ_TRAILS.map((t) => t.name), HQ_BRIDGE.name, ...HQ_VENUES.map((v) => v.name), ...HQ_CANALS.map((c) => c.name), ...HQ_SPRINGS.map((x) => x.name), ...HQ_PONDS.map((x) => x.name), '北士科星群', '水上活動', '綠覆率']) expect(HQ_INTROS[name]?.length ?? 0).toBeGreaterThan(10);
+    for (const p of HQ_PLANTINGS.filter((x) => x.kind === 'cut')) expect(p.why.length).toBeGreaterThan(5);
     for (const v of [...HQ_VENUES, ...HQ_STARS]) expect(nearRoute(v)).toBeLessThan(2.5);
     // 街道的路樹：中心離路線 200～700 公尺（不是在路線上），每個中心至少 3 條街、街都在中心 500 公尺內
     expect(HQ_BLOOMS.length).toBeGreaterThan(30);

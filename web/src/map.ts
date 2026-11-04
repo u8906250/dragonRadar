@@ -1,5 +1,5 @@
 import type * as Leaflet from 'leaflet';
-import { alongLine, BOAT_SVG, boatPhase, fireworksSvg, FIREWORKS_MS, flowOut, HQ_VOYAGE_MS, RAINBOW_FLOW_TOTAL, RAINBOW_STAGGER_MS, surge, SURGE_TOTAL, voyagePhase, voyageTimeOf } from './flow';
+import { alongLine, BOAT_SVG, cultureSvg, regrowSvg, boatPhase, fireworksSvg, FIREWORKS_MS, flowOut, HQ_VOYAGE_MS, RAINBOW_FLOW_TOTAL, RAINBOW_STAGGER_MS, surge, SURGE_TOTAL, voyagePhase, voyageTimeOf } from './flow';
 import { haversineKm, type LatLng } from './geo';
 import type { EventKind, Phase } from './types';
 import { LANDMARKS } from './landmarks';
@@ -69,8 +69,10 @@ export interface MapRoute {
   rivers?: Array<{ ring: Array<[number, number]>; at: number }>;
   /** 一條線從頭長到尾：trail 山林徑、bridge 自行車橋、stars 星座；label 寫在尾端 */
   reveals?: Array<{ path: Array<[number, number]>; at: number; kind: 'trail' | 'bridge' | 'stars'; label?: string }>;
-  /** 一個東西冒出來：hut 登山中心、stadium 足球場、dome 運動中心、star 星星 */
-  icons?: Array<{ lat: number; lng: number; at: number; kind: 'hut' | 'stadium' | 'dome' | 'star'; label?: string; scale?: number }>;
+  /** 一個東西冒出來：hut 登山中心、stadium 足球場、dome 運動中心、star 星星、regrow 樹樁（grow 時長回大樹）、culture 文化徑的點（small 的名字地圖上不寫，滑鼠移過去看介紹） */
+  icons?: Array<{ lat: number; lng: number; at: number; kind: 'hut' | 'stadium' | 'dome' | 'star' | 'regrow' | 'culture'; label?: string; scale?: number; grow?: number; char?: string; color?: string; small?: boolean }>;
+  /** 滑鼠移過去的介紹（at 之後才感應；dy 是往上移幾像素） */
+  hits?: Array<{ lat: number; lng: number; at: number; title: string; intro: string; dy?: number; r?: number }>;
   /** 水上活動：船經過時（at）河上出現 SUP、龍舟；heading 是船頭朝哪（度，0 是上、順時針） */
   boats?: Array<{ lat: number; lng: number; at: number; kind: 'sup' | 'dragon'; heading: number }>;
 }
@@ -928,9 +930,19 @@ export class MapView {
     // 冒出來的東西：登山中心、足球場、運動中心、星星
     for (const ic of r.icons ?? []) {
       const sc = ic.scale ?? 1;
-      const icon = L.divIcon({ className: `map-voyage-icon ${ic.kind}`, html: `<svg viewBox="-20 -20 40 40" width="${40 * sc}" height="${40 * sc}" aria-hidden="true"><g class="boat-pop" style="animation-delay:${Math.round(ic.at - now)}ms">${MAP_ICON_SVG[ic.kind]}</g></svg>`, iconSize: [40 * sc, 40 * sc], iconAnchor: [20 * sc, 20 * sc] });
+      const body = ic.kind === 'regrow' ? regrowSvg((ic.grow ?? ic.at) - now) : ic.kind === 'culture' ? cultureSvg(ic.char ?? '', ic.color ?? '#555') : MAP_ICON_SVG[ic.kind];
+      const icon = L.divIcon({ className: `map-voyage-icon ${ic.kind}`, html: `<svg viewBox="-20 -20 40 40" width="${40 * sc}" height="${40 * sc}" aria-hidden="true"><g class="boat-pop" style="animation-delay:${Math.round(ic.at - now)}ms">${body}</g></svg>`, iconSize: [40 * sc, 40 * sc], iconAnchor: [20 * sc, 20 * sc] });
       layer.addLayer(L.marker([ic.lat, ic.lng], { icon, interactive: false, keyboard: false, zIndexOffset: 1300 }));
-      if (ic.label) this.stayLabel([ic.lat, ic.lng], ic.label, ic.at + 500 - now, 20 * sc + 16);
+      if (ic.label && !ic.small) this.stayLabel([ic.lat, ic.lng], ic.label, (ic.grow ?? ic.at) + 500 - now, 20 * sc + 16);
+    }
+    // 滑鼠移過去的介紹：看不見的感應圈，到時間才感應（visibility），Leaflet 的 tooltip 顯示
+    for (const h of r.hits ?? []) {
+      const c = map.latLngToLayerPoint([h.lat, h.lng]);
+      const m = L.circleMarker(map.layerPointToLatLng(L.point(c.x, c.y - (h.dy ?? 0))), { radius: h.r ?? 12, stroke: false, fillOpacity: 0, className: 'map-intro-hit' });
+      m.bindTooltip(`<b>${escapeHtml(h.title)}</b><br>${escapeHtml(h.intro)}`, { direction: 'top', className: 'hq-intro-tip-map', offset: [0, -8] });
+      layer.addLayer(m);
+      const e = m.getElement() as SVGElement | undefined;
+      if (e) e.style.animationDelay = `${Math.round(h.at - now)}ms`;
     }
     // 真的河：船沿河走時亮起來（畫在最下面）
     for (const rv of r.rivers ?? []) {
