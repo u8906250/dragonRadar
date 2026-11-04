@@ -1529,6 +1529,7 @@ function render(): void {
               green: { ring: hq.HQ_TAIPEI_RING.map(toRadarAt), steps: hqGreenSteps(hqVoyageAt) },
               areas: hqAreas(hqVoyageAt).filter((ar) => anyInView(ar.ring)).map((ar) => ({ ring: ar.ring.map(toRadarAt), center: toRadarAt(ar.center), at: ar.at, label: ar.label, zones: ar.zones?.map((z) => z.map(toRadarAt)), zonesAt: ar.zonesAt })),
               circles: hqCircles().filter(inView).map((c) => ({ ring: c.ring.map(toRadarAt), at: c.at })),
+              focus: hqLayer !== null,
               ...(hqNetAt !== null ? { network: (({ at, lines, dots }) => ({ at, lines: lines.filter((ln) => anyInView(ln.path)).map((ln) => ({ points: ln.path.map(toRadarAt), color: ln.color })), dots: dots.filter(inView).map((dt) => ({ ...toRadarAt([dt.lat, dt.lng]), color: dt.color })) }))(hqNetwork(hqNetAt)) } : {}),
             },
           ],
@@ -1596,6 +1597,7 @@ function render(): void {
               green: { ring: hq.HQ_TAIPEI_RING, steps: hqGreenSteps(hqVoyageAt) },
               areas: hqAreas(hqVoyageAt),
               circles: hqCircles().map(({ lat, lng, radiusM, at }) => ({ lat, lng, radiusM, at })),
+              focus: hqLayer !== null,
               ...(hqNetAt !== null ? { network: hqNetwork(hqNetAt) } : {}),
             },
           ],
@@ -3294,11 +3296,15 @@ hqLayersBox.addEventListener('click', (e) => {
     hqFlyTo(ly.zone ? { lat: origin.lat, lng: origin.lng } : HQ_NET_CENTER, ly.km, ly.zone ? 15 : 12);
     hqLayer = { id: ly.id, at: Date.now() + 1300 };
     btn.classList.add('on');
+    // 說明卡：標題、有幾處、方塊的字代表什麼、政見的細項（原本放在每個方塊上的介紹）
     const b = document.createElement('b');
     b.textContent = ly.title;
     const sm = document.createElement('small');
-    sm.textContent = ly.note;
-    hqCaption.replaceChildren(b, sm);
+    sm.textContent = `${ly.note}｜${ly.legend}`;
+    const intro = document.createElement('small');
+    intro.className = 'intro';
+    intro.textContent = ly.intro;
+    hqCaption.replaceChildren(b, sm, intro);
     hqCaption.classList.add('play');
     hqCaption.hidden = false;
   }
@@ -3398,35 +3404,9 @@ function hqStarPoints(st: { lat: number; lng: number; count: number; radiusM: nu
 /** 樹樁比長樹早幾毫秒冒出來 */
 const HQ_STUMP_LEAD_MS = 1500;
 type HqReveal = { path: Array<[number, number]>; at: number; kind: 'trail' | 'bridge' | 'stars' | 'culture'; label?: string; color?: string };
-type HqIcon = { lat: number; lng: number; at: number; kind: 'hut' | 'stadium' | 'dome' | 'star' | 'regrow' | 'culture' | 'service' | 'svdot'; label?: string; scale?: number; grow?: number; char?: string; color?: string; small?: boolean; hint?: { title: string; intro: string } };
+type HqIcon = { lat: number; lng: number; at: number; kind: 'hut' | 'stadium' | 'dome' | 'star' | 'regrow' | 'culture' | 'service'; label?: string; scale?: number; grow?: number; char?: string; color?: string; small?: boolean; focus?: boolean; hint?: { title: string; intro: string } };
 /** 其他政見的地方：離路線多近才沿路冒出來 */
 const HQ_SERVICE_NEAR_M = 300;
-/**
- * 每一種地方只留 1 個大的、能點的（有介紹）：沿路最先出現的那個（沿路沒有就從清單補）；其他畫小圓點、不能點
- * （使用者說「學校、圖書館或親子的圖可以留幾個可以點的，其他改成更小的圖、不能點，因為內容都差不多」）
- */
-const HQ_SERVICE_REPS = 1;
-/** 個別種類要留幾個（現在每一種都 1 個：使用者一個一個說只留 1 個） */
-const HQ_SERVICE_REPS_OF: Record<string, number> = {};
-let hqServiceReps: Set<string> | null = null;
-function hqIsRep(sv: { kind: string; name: string }): boolean {
-  if (!hq) return false;
-  if (!hqServiceReps) {
-    hqServiceReps = new Set();
-    const byKind = new Map<string, Array<{ name: string; at: number; near: boolean }>>();
-    for (const x of hq.HQ_SERVICES) {
-      const near = hqDistM(x) <= HQ_SERVICE_NEAR_M;
-      const list = byKind.get(x.kind) ?? [];
-      list.push({ name: x.name, at: near ? hqNearestAt(0, x) : Infinity, near });
-      byKind.set(x.kind, list);
-    }
-    for (const [kind, list] of byKind) {
-      list.sort((a, b) => a.at - b.at);
-      for (const x of list.slice(0, HQ_SERVICE_REPS_OF[kind] ?? HQ_SERVICE_REPS)) hqServiceReps.add(`${kind}|${x.name}`);
-    }
-  }
-  return hqServiceReps.has(`${sv.kind}|${sv.name}`);
-}
 /** 離路線幾公尺（路線載入後不會變，記起來） */
 const hqDistCache = new Map<string, number>();
 function hqDistM(p: LatLng): number {
@@ -3484,8 +3464,9 @@ function hqExtras(t0: number): { reveals: HqReveal[]; icons: HqIcon[] } {
     const near = hqDistM(sv) <= HQ_SERVICE_NEAR_M;
     if (!near && !(ly && hqLayer && ly.kinds.includes(sv.kind))) continue;
     const at = near ? hqNearestAt(t0, sv) : hqLayer!.at + Math.min(li++ * 8, 1600);
-    if (hqIsRep(sv)) icons.push({ lat: sv.lat, lng: sv.lng, at, kind: 'service', char: K.char, color: K.color, scale: 0.85, hint: { title: `${sv.name}（${K.name}）`, intro: K.intro } });
-    else icons.push({ lat: sv.lat, lng: sv.lng, at, kind: 'svdot', color: K.color });
+    // 方塊都不能點（v1.497 使用者說的；介紹寫在政策圖層的說明卡）；圖層開著時那幾種放大、外圍有光圈
+    const focus = !!ly && ly.kinds.includes(sv.kind);
+    icons.push({ lat: sv.lat, lng: sv.lng, at, kind: 'service', char: K.char, color: K.color, scale: focus ? 1.25 : 0.85, focus });
   }
   // 文化徑的線（點 —— 線）：同一條路線的點都冒出來後，用那條路線的顏色沿街道連起來
   for (const ln of hq.HQ_CULTURE_LINES) {

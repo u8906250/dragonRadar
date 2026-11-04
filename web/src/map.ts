@@ -1,5 +1,5 @@
 import type * as Leaflet from 'leaflet';
-import { alongLine, BOAT_SVG, cultureSvg, regrowSvg, serviceDotSvg, serviceSvg, boatPhase, fireworksSvg, FIREWORKS_MS, flowOut, HQ_VOYAGE_MS, RAINBOW_FLOW_TOTAL, RAINBOW_STAGGER_MS, surge, SURGE_TOTAL, voyagePhase, voyageTimeOf } from './flow';
+import { alongLine, BOAT_SVG, cultureSvg, regrowSvg, serviceSvg, boatPhase, fireworksSvg, FIREWORKS_MS, flowOut, HQ_VOYAGE_MS, RAINBOW_FLOW_TOTAL, RAINBOW_STAGGER_MS, surge, SURGE_TOTAL, voyagePhase, voyageTimeOf } from './flow';
 import { haversineKm, type LatLng } from './geo';
 import type { EventKind, Phase } from './types';
 import { LANDMARKS } from './landmarks';
@@ -78,7 +78,9 @@ export interface MapRoute {
   /** 文化網（點 —— 線 —— 面） */
   network?: { at: number; lines: Array<{ path: Array<[number, number]>; color: string }>; dots: Array<{ lat: number; lng: number; color: string }> };
   /** 一個東西冒出來：hut 登山中心、stadium 足球場、dome 運動中心、star 星星、regrow 樹樁（grow 時長回大樹）、culture 文化徑的點（small 的名字地圖上不寫，滑鼠移過去看介紹） */
-  icons?: Array<{ lat: number; lng: number; at: number; kind: 'hut' | 'stadium' | 'dome' | 'star' | 'regrow' | 'culture' | 'service' | 'svdot'; label?: string; scale?: number; grow?: number; char?: string; color?: string; small?: boolean }>;
+  icons?: Array<{ lat: number; lng: number; at: number; kind: 'hut' | 'stadium' | 'dome' | 'star' | 'regrow' | 'culture' | 'service'; label?: string; scale?: number; grow?: number; char?: string; color?: string; small?: boolean; focus?: boolean }>;
+  /** 政策圖層開著：其他特效變淡，只有 focus 的地方、通學區的圈清楚 */
+  focus?: boolean;
   /** 通學區：國小四周 radiusM 公尺，at 時淡入 */
   circles?: Array<{ lat: number; lng: number; radiusM: number; at: number }>;
   /** 滑鼠移過去的介紹（at 之後才感應；dy 是往上移幾像素） */
@@ -601,7 +603,7 @@ export class MapView {
   setRoutes(routes: MapRoute[]): void {
     const sig = (rs: MapRoute[]): string =>
       // 洋流總部的特效：文化網、政策圖層（多出來的地方、通學區的圈）開關時也要重畫
-      JSON.stringify(rs.map((r) => [r.id, r.state, r.flowAt ?? null, r.segments.map((x) => [x.people, x.target, x.path.length, !!x.passed]), r.turns ?? [], !!r.boat, r.voyage ?? null, r.network?.at ?? null, r.icons?.length ?? 0, r.circles?.length ?? 0]));
+      JSON.stringify(rs.map((r) => [r.id, r.state, r.flowAt ?? null, r.segments.map((x) => [x.people, x.target, x.path.length, !!x.passed]), r.turns ?? [], !!r.boat, r.voyage ?? null, r.network?.at ?? null, r.icons?.length ?? 0, r.circles?.length ?? 0, !!r.focus]));
     if (sig(routes) === sig(this.routes)) return;
     this.routes = routes;
     this.pushRoutes();
@@ -853,6 +855,7 @@ export class MapView {
 
   /** 老水路、種樹的地方（洋流總部的特效）：照時間用 CSS 的 delay 排好 */
   private addVoyageExtras(r: MapRoute): void {
+    this.map?.getContainer().classList.toggle('hq-focus', !!r.focus);
     const L = this.L;
     const layer = this.routeLayer;
     const map = this.map;
@@ -1003,8 +1006,8 @@ export class MapView {
     // 冒出來的東西：登山中心、足球場、運動中心、星星
     for (const ic of r.icons ?? []) {
       const sc = ic.scale ?? 1;
-      const body = ic.kind === 'regrow' ? regrowSvg((ic.grow ?? ic.at) - now) : ic.kind === 'culture' ? cultureSvg(ic.char ?? '', ic.color ?? '#555') : ic.kind === 'service' ? serviceSvg(ic.char ?? '', ic.color ?? '#555') : ic.kind === 'svdot' ? serviceDotSvg(ic.color ?? '#555') : MAP_ICON_SVG[ic.kind];
-      const icon = L.divIcon({ className: `map-voyage-icon ${ic.kind}`, html: `<svg viewBox="-20 -20 40 40" width="${40 * sc}" height="${40 * sc}" aria-hidden="true"><g class="boat-pop" style="animation-delay:${Math.round(ic.at - now)}ms">${body}</g></svg>`, iconSize: [40 * sc, 40 * sc], iconAnchor: [20 * sc, 20 * sc] });
+      const body = ic.kind === 'regrow' ? regrowSvg((ic.grow ?? ic.at) - now) : ic.kind === 'culture' ? cultureSvg(ic.char ?? '', ic.color ?? '#555') : ic.kind === 'service' ? serviceSvg(ic.char ?? '', ic.color ?? '#555', ic.focus) : MAP_ICON_SVG[ic.kind];
+      const icon = L.divIcon({ className: `map-voyage-icon ${ic.kind}${ic.focus ? ' focus' : ''}`, html: `<svg viewBox="-20 -20 40 40" width="${40 * sc}" height="${40 * sc}" aria-hidden="true"><g class="boat-pop" style="animation-delay:${Math.round(ic.at - now)}ms">${body}</g></svg>`, iconSize: [40 * sc, 40 * sc], iconAnchor: [20 * sc, 20 * sc] });
       layer.addLayer(L.marker([ic.lat, ic.lng], { icon, interactive: false, keyboard: false, zIndexOffset: 1300 }));
       if (ic.label && !ic.small) this.stayLabel([ic.lat, ic.lng], ic.label, (ic.grow ?? ic.at) + 500 - now, 20 * sc + 16);
     }
@@ -1012,7 +1015,7 @@ export class MapView {
     for (const h of r.hits ?? []) {
       const c = map.latLngToLayerPoint([h.lat, h.lng]);
       const m = L.circleMarker(map.layerPointToLatLng(L.point(c.x, c.y - (h.dy ?? 0))), { radius: h.r ?? 12, stroke: false, fillOpacity: 0, className: 'map-intro-hit' });
-      m.bindTooltip(`<b>${escapeHtml(h.title)}</b><br>${escapeHtml(h.intro).replace(/\n/g, '<br>')}`, { direction: 'top', className: 'hq-intro-tip-map', offset: [0, -8] });
+      m.bindTooltip(`<b>${escapeHtml(h.title)}</b>${h.intro ? `<br>${escapeHtml(h.intro).replace(/\n/g, '<br>')}` : ''}`, { direction: 'top', className: 'hq-intro-tip-map', offset: [0, -8] });
       layer.addLayer(m);
       const e = m.getElement() as SVGElement | undefined;
       if (e) e.style.animationDelay = `${Math.round(h.at - now)}ms`;
