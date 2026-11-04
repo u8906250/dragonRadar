@@ -1171,13 +1171,13 @@ export const HQ_SERVICES: Array<{ kind: ServiceKind; name: string; lat: number; 
   { kind: '親', name: '文山親子館', lat: 25.0004, lng: 121.54944 },
 ];
 
-/** 到站後的政策圖層（按鈕）：哪幾種地方、說明、拉到多遠（zone 是國小四周 150 公尺的通學區，要拉近才看得到） */
+/** 到站後的政策圖層（按鈕）：哪幾種地方、說明（zone 是國小四周 150 公尺的通學區）；按了保持目前的位置、範圍，不拉遠 */
 /**
  * intro 是按了之後左上角說明卡寫的內容（v1.496 使用者說方塊都不能點，「把介紹放到例如通學區的介紹」）：照政策島的細項寫；
  * legend 是方塊裡的字代表什麼
  */
 /** faceR：「點 —— 面」暈開的半徑（螢幕像素），點少、離得遠的暈大一點才連得成一片 */
-export const HQ_POLICY_LAYERS: Array<{ id: string; label: string; kinds: ServiceKind[]; title: string; note: string; intro: string; legend: string; km: number; zone?: boolean; faceR?: number }> = [
+export const HQ_POLICY_LAYERS: Array<{ id: string; label: string; kinds: ServiceKind[]; title: string; note: string; intro: string; legend: string; zone?: boolean; faceR?: number }> = [
   {
     id: 'edu',
     label: '教育・午餐',
@@ -1186,7 +1186,6 @@ export const HQ_POLICY_LAYERS: Array<{ id: string; label: string; kinds: Service
     note: '全市 130 所公立國小、58 所國中',
     intro: '教育：117 學年度國小每班 24 人、國中 25 人（減生不減師）；國小雙導師與導師行政助理；教師 EAP；校園反毒四層策略；AI 教學工具（校管帳號、限定課堂時段、教師在場）。\n營養午餐：借鏡東京經驗促進在地小農與校園合作、食農教育、彈性餐費；全校決定加價提升品質時，市府補足弱勢學生價差。',
     legend: '學＝國小（淺藍）、國中（深藍）',
-    km: 13,
     faceR: 16,
   },
   {
@@ -1197,7 +1196,6 @@ export const HQ_POLICY_LAYERS: Array<{ id: string; label: string; kinds: Service
     note: '每所國小四周 150 公尺（虛線圈）',
     intro: '交通政見：學校四周 150 公尺用全市統一工程規格改善——車道縮減、抬升行穿線、減速丘、行人庇護島、上下學時段性速限，先用低成本設施試辦；第 3–4 年累計 50 所，第 5–8 年完成全市 150 多所國小，目標通學區零死亡。',
     legend: '學＝國小',
-    km: 2.5,
     zone: true,
   },
   {
@@ -1208,7 +1206,6 @@ export const HQ_POLICY_LAYERS: Array<{ id: string; label: string; kinds: Service
     note: '圖書館 56、運動中心 12、親子館與家庭教育中心 8',
     intro: '親子同行卡（設籍台北 0–18 歲，每人每月 600 點）：分齡閱讀禮袋（0 歲出生閱讀袋、2 歲語言探索袋、5 歲入學準備袋）搭配圖書館借閱證；文化幣看展、劇場、讀物；運動幣游泳、球類、舞蹈、滑冰。\n家庭一站通：擴大家庭教育中心、朝每區都有據點，擴充親子館量能；滿 6 個月至 6 歲每週免費臨托；單一育兒專線、到宅育兒指導 6 次。',
     legend: '書＝圖書館、動＝運動中心、親＝親子館',
-    km: 13,
     faceR: 22,
   },
   {
@@ -1219,7 +1216,6 @@ export const HQ_POLICY_LAYERS: Array<{ id: string; label: string; kinds: Service
     note: '12 區健康服務中心',
     intro: '15–65 歲免費心理諮商（產後媽媽加碼）、50 歲以上皮蛇疫苗補助、0–6 歲免費腸病毒疫苗、臨時托老券、在宅醫療、敬老卡升級。各區健康服務中心是現在打疫苗、做社區心理諮商的地方，政見沒有指定在這裡辦。',
     legend: '健＝健康服務中心',
-    km: 13,
     faceR: 46,
   },
 ];

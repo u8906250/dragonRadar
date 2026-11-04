@@ -1889,6 +1889,8 @@ export class Radar {
   }
 
   private addRiver(r: RadarRoute): void {
+    // 到終點後河淡完了就不畫（看不見的波光一直在動很吃 CPU）
+    if (r.riverOut !== undefined && Date.now() > r.riverOut + 1600) return;
     const { xs, ys, nx, ny, cum } = this.screenPath(r.points);
     const n = cum.length;
     const total = cum[n - 1];

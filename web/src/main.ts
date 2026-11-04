@@ -3123,6 +3123,8 @@ function selectLandmark(id: string | null): void {
 let hq: typeof import('./hq-voyage') | null = null;
 let hqVoyageAt: number | null = null;
 let hqVoyageTimers: number[] = [];
+/** 到站後河幾毫秒淡完（styles.css 的 river-out 1.5 秒） */
+const HQ_RIVER_FADE_MS = 1500;
 /** 到了拉近到外圈幾公里（看得到市政府的虛線外框和煙火） */
 const HQ_END_KM = 0.7;
 /** 一開始外圈幾公里、正中間在總部；船快出畫面（離正中間超過外圈的幾成）就把畫面移到船那裡（使用者說「一開始距離可以拉到 5 km，超過畫面再移動位置」） */
@@ -3188,6 +3190,8 @@ function startHqVoyage(spinAt = Date.now()): void {
   hqVoyageTimers = [
     // 星星轉完（出發前 0.2 秒）才開始畫
     window.setTimeout(() => render(), Math.max(0, wait - 200)),
+    // 河淡掉（到站 0.6 秒後、1.5 秒淡完）之後重畫一次，把看不見但波光還在動的河拿掉
+    window.setTimeout(() => render(), wait + HQ_SAIL_MS + 600 + HQ_RIVER_FADE_MS + 100),
     window.setTimeout(() => {
       // 到了：拉近市政府（使用者自己動過就不拉）
       if (view === 'map') {
@@ -3295,8 +3299,8 @@ hqLayersBox.addEventListener('click', (e) => {
   const wasOn = hqLayer?.id === ly.id;
   hqShowOff();
   if (!wasOn) {
-    hqFlyTo(ly.zone ? { lat: origin.lat, lng: origin.lng } : HQ_NET_CENTER, ly.km, ly.zone ? 15 : 12);
-    hqLayer = { id: ly.id, at: Date.now() + 1300 };
+    // 保持目前的位置、範圍（使用者說「點選按鈕不用縮放到全部都看得到，保持目前位置就好」）
+    hqLayer = { id: ly.id, at: Date.now() + 100 };
     btn.classList.add('on');
     // 說明卡：標題、有幾處、方塊的字代表什麼、政見的細項（原本放在每個方塊上的介紹）
     const b = document.createElement('b');
@@ -3377,13 +3381,21 @@ function hqNearestAt(t0: number, p: LatLng): number {
     hqCum = new Float64Array(path.length);
     for (let i = 1; i < path.length; i++) hqCum[i] = hqCum[i - 1] + haversineKm({ lat: path[i - 1][0], lng: path[i - 1][1] }, { lat: path[i][0], lng: path[i][1] });
   }
-  let [best, bi] = [Infinity, 0];
-  path.forEach(([lat, lng], i) => {
-    const d = haversineKm(p, { lat, lng });
-    if (d < best) [best, bi] = [d, i];
-  });
-  return t0 + voyageTimeOf(hqCum[bi] / hqCum[hqCum.length - 1]);
+  // 出發後幾毫秒到最近的那一點，跟 t0 無關：每個地方算一次就記起來（以前每次重畫都把整條路線掃一遍，幾百個地方很吃 CPU）
+  const key = `${p.lat},${p.lng}`;
+  let off = hqNearestCache.get(key);
+  if (off === undefined) {
+    let [best, bi] = [Infinity, 0];
+    path.forEach(([lat, lng], i) => {
+      const d = haversineKm(p, { lat, lng });
+      if (d < best) [best, bi] = [d, i];
+    });
+    off = voyageTimeOf(hqCum[bi] / hqCum[hqCum.length - 1]);
+    hqNearestCache.set(key, off);
+  }
+  return t0 + off;
 }
+const hqNearestCache = new Map<string, number>();
 /**
  * 種樹的地方（都市微森林「把樹種回來」）：船離它最近時長出一叢樹。砍樹的地方（cut）寫名字（「把樹種回來」那一句另外寫在第一個上面、留著，hqTourStops）；
  * 政見說要加強種樹的公園、商圈、公有建築（plant）只長樹

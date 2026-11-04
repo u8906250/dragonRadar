@@ -603,7 +603,7 @@ export class MapView {
   setRoutes(routes: MapRoute[]): void {
     const sig = (rs: MapRoute[]): string =>
       // 洋流總部的特效：文化網、政策圖層（多出來的地方、通學區的圈）開關時也要重畫
-      JSON.stringify(rs.map((r) => [r.id, r.state, r.flowAt ?? null, r.segments.map((x) => [x.people, x.target, x.path.length, !!x.passed]), r.turns ?? [], !!r.boat, r.voyage ?? null, r.network?.at ?? null, r.icons?.length ?? 0, r.circles?.length ?? 0, !!r.focus]));
+      JSON.stringify(rs.map((r) => [r.id, r.state, r.flowAt ?? null, r.segments.map((x) => [x.people, x.target, x.path.length, !!x.passed]), r.turns ?? [], !!r.boat, r.voyage ?? null, r.network?.at ?? null, r.icons?.length ?? 0, r.circles?.length ?? 0, !!r.focus, r.riverOut !== undefined && Date.now() > r.riverOut + 1600]));
     if (sig(routes) === sig(this.routes)) return;
     this.routes = routes;
     this.pushRoutes();
@@ -790,6 +790,8 @@ export class MapView {
     const L = this.L;
     const layer = this.routeLayer;
     const riverOut = r.riverOut;
+    // 到終點後河淡完了就不畫
+    if (riverOut !== undefined && Date.now() > riverOut + 1600) return;
     const pts = r.segments.flatMap((sg) => sg.path);
     if (!L || !layer || pts.length < 2) return;
     const cum = new Float64Array(pts.length);
