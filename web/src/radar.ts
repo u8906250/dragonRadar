@@ -110,10 +110,13 @@ const hash = (n: number): number => {
 const PLANT_CUT_TREES = 22;
 const PLANT_TREES = 10;
 const PLANT_STAGGER_MS = 45;
-/** 街道的路樹每隔幾個螢幕像素一棵、往外延伸每公尺晚幾毫秒長 */
-const ROAD_TREE_STEP = 14;
+/** 街道的路樹每隔幾個螢幕像素一棵、離路中線幾個螢幕像素（兩邊各一排）、往外延伸每公尺晚幾毫秒長；老水路的鬼影在船到之前幾毫秒浮出來（接近才畫） */
+const ROAD_TREE_STEP = 12;
+const ROAD_TREE_SIDE = 3.2;
+/** 河流每幾個點固定成一段 */
+const RIVER_CHUNK = 24;
 const STREET_GROW_MS_PER_M = 2.4;
-const CANAL_GHOST_MS = 2500;
+const CANAL_GHOST_MS = 1200;
 /** 固定的地標（例如洋流總部），畫成星星 */
 export interface RadarLandmark {
   id: string;
@@ -446,7 +449,7 @@ export class Radar {
   /** 洋流號：路線在畫面上的折線（SVG 座標，cum 是每一點走了多遠）和船，每一格畫面照現在的時間擺；往哪邊開記在 boatLeft（重畫時接著用） */
   private boatTracks: Array<{ id: string; g: SVGGElement; flip: SVGGElement; xs: Float64Array; ys: Float64Array; cum: Float64Array; voyage?: number }> = [];
   /** 河流：畫面上的折線（cum 是每一點走了多遠）、每一點往左的法線和半寬（SVG 單位）、畫到哪（at，沒變就不重畫） */
-  private riverTracks: Array<{ xs: Float64Array; ys: Float64Array; nx: Float64Array; ny: Float64Array; hw: Float64Array; cum: Float64Array; voyage: number; at: number; paths: SVGPathElement[] }> = [];
+  private riverTracks: Array<{ xs: Float64Array; ys: Float64Array; nx: Float64Array; ny: Float64Array; hw: Float64Array; cum: Float64Array; voyage: number; at: number; g: SVGGElement; tip: SVGPathElement[]; chunkStart: number; chunkEnd: number }> = [];
   private readonly boatLeft = new Map<string, boolean>();
   private boatFrame = 0;
   private readonly stack: HTMLDivElement;
@@ -1841,13 +1844,45 @@ export class Radar {
     const k = this.squarePx > 0 ? SIZE / this.squarePx : 1;
     const hw = new Float64Array(n);
     for (let i = 0; i < n; i++) hw[i] = riverHalfWidth(cum[i] / total) * k;
-    const g = el('g', { class: 'route-river' });
-    const paths = ['river-bank', 'river-body', 'river-shine', 'river-flow', 'river-flow b'].map((c) => el('path', { class: c }) as SVGPathElement);
-    g.append(...paths);
+    const g = el('g', { class: 'route-river' }) as SVGGElement;
+    // 河分段畫：流過的部分一段一段固定下來（riverChunk），每一格只重畫最前面正在長的那一小段（tip）；不然 2,000 個點的緞帶每一格重畫會卡
+    const tip = ['river-bank', 'river-body', 'river-shine', 'river-flow', 'river-flow b'].map((c) => el('path', { class: c }) as SVGPathElement);
+    g.append(...tip);
     this.routeLayer.appendChild(g);
-    const t = { xs, ys, nx, ny, hw, cum, voyage: r.voyage, at: -1, paths };
+    const t = { xs, ys, nx, ny, hw, cum, voyage: r.voyage, at: -1, g, tip, chunkStart: 0, chunkEnd: Math.min(n - 1, RIVER_CHUNK) };
     this.riverTracks.push(t);
     this.drawRiver(t, voyagePhase(Date.now() - r.voyage).at);
+  }
+
+  /** 河的一段（點 a～b，最後一點可以是內插的）：河岸、河面、中間亮的、兩道波光的 path 字串 */
+  private riverPaths(t: (typeof this.riverTracks)[number], idx: Array<[number, number, number]>, k: number): [string, string, string, string, string] {
+    const { nx, ny, hw } = t;
+    const f1 = (v: number): string => v.toFixed(1);
+    const side = (off: (i: number) => number): string[] => idx.map(([x, y, i]) => `${f1(x + nx[i] * off(i))} ${f1(y + ny[i] * off(i))}`);
+    const ribbon = (extra: number): string => {
+      const left = side((i) => hw[i] + extra);
+      const right = side((i) => -(hw[i] + extra)).reverse();
+      return `M${left.join('L')}L${right.join('L')}Z`;
+    };
+    const line = (frac: number): string => `M${side((i) => hw[i] * frac).join('L')}`;
+    return [ribbon(2.2 * k), ribbon(0), line(0), line(0.45), line(-0.4)];
+  }
+
+  /** 流過的一段固定下來（自己的 5 條 path；波光的相位照走了多遠接上，兩段之間才不會斷） */
+  private riverChunk(t: (typeof this.riverTracks)[number], a: number, b: number, k: number): void {
+    const idx: Array<[number, number, number]> = [];
+    for (let i = a; i <= b; i++) idx.push([t.xs[i], t.ys[i], i]);
+    const d = this.riverPaths(t, idx, k);
+    const g = el('g', { class: 'river-chunk' });
+    const phase = (period: number, ms: number): string => `animation-delay:${Math.round(-((t.cum[a] % period) / period) * ms)}ms`;
+    g.append(
+      el('path', { class: 'river-bank', d: d[0] }),
+      el('path', { class: 'river-body', d: d[1] }),
+      el('path', { class: 'river-shine', d: d[2] }),
+      el('path', { class: 'river-flow', d: d[3], style: phase(38, 1800) }),
+      el('path', { class: 'river-flow b', d: d[4], style: phase(45, 2600) }),
+    );
+    t.g.insertBefore(g, t.tip[0]);
   }
 
   /** 出現後留著的字（螢幕像素；x、y 是 SVG 座標，k 是螢幕像素換成 SVG 單位，dy 是字離那一點多高） */
@@ -1859,47 +1894,40 @@ export class Radar {
     return lg;
   }
 
-  /** 一棵樹（螢幕像素，中心在 0,0，scale 是大小）：右下影子、圓圓的樹冠、左上亮一點；長出來時從小變大（delay 是什麼時候長） */
-  private tree(x: number, y: number, scale: number, delayMs: number): SVGGElement {
-    const g = el('g', { transform: `translate(${x.toFixed(1)} ${y.toFixed(1)}) scale(${scale.toFixed(3)})` }) as SVGGElement;
-    g.innerHTML = `<g class="voyage-tree" style="animation-delay:${Math.round(delayMs)}ms"><circle class="tree-shade" cx="1.1" cy="1.1" r="3.4"/><circle class="tree-crown" r="3.4"/><circle class="tree-lit" cx="-1" cy="-1.1" r="1.3"/></g>`;
-    return g;
+  /** 一棵樹（螢幕像素；scale 是大小）：一個圓就好（幾千棵，影子、亮點在這個大小看不出來，畫了會卡），長出來時從小彈大（delay 是什麼時候長） */
+  private tree(x: number, y: number, scale: number, delayMs: number): SVGCircleElement {
+    return el('circle', { class: 'tree-dot', cx: x.toFixed(1), cy: y.toFixed(1), r: (3.4 * scale).toFixed(2), style: `animation-delay:${Math.round(delayMs)}ms` }) as SVGCircleElement;
   }
 
-  /** 河流畫到 at（0～1）：兩岸照法線、半寬往外推圍成一塊，波光是河面中間偏左、偏右的兩條線 */
+  /** 河流畫到 at（0～1）：流過整段的固定下來，最前面正在長的那一段每一格重畫（兩岸照法線、半寬往外推圍成一塊，波光是河面中間偏左、偏右的兩條線） */
   private drawRiver(t: (typeof this.riverTracks)[number], at: number): void {
     if (Math.abs(at - t.at) < 1e-4) return;
     t.at = at;
-    const { xs, ys, nx, ny, hw, cum } = t;
+    const { xs, ys, cum } = t;
     const n = cum.length;
     const want = at * cum[n - 1];
     const k = this.squarePx > 0 ? SIZE / this.squarePx : 1;
-    // 畫到哪：整點，再加最前面那一點（內插）
+    // 流過的整段固定下來
+    while (t.chunkStart < n - 1 && cum[t.chunkEnd] <= want) {
+      this.riverChunk(t, t.chunkStart, t.chunkEnd, k);
+      t.chunkStart = t.chunkEnd;
+      t.chunkEnd = Math.min(n - 1, t.chunkEnd + RIVER_CHUNK);
+      if (t.chunkStart >= n - 1) break;
+    }
+    // 最前面那一段：從固定好的地方到現在的位置（整點，再加最前面那一點內插）
     const idx: Array<[number, number, number]> = [];
-    for (let i = 0; i < n && cum[i] <= want; i++) idx.push([xs[i], ys[i], i]);
-    if (idx.length && idx.length < n) {
-      const i = idx.length;
-      const w = (want - cum[i - 1]) / (cum[i] - cum[i - 1] || 1);
-      idx.push([xs[i - 1] + (xs[i] - xs[i - 1]) * w, ys[i - 1] + (ys[i] - ys[i - 1]) * w, i - 1]);
+    for (let i = t.chunkStart; i < n && cum[i] <= want; i++) idx.push([xs[i], ys[i], i]);
+    const next = t.chunkStart + idx.length;
+    if (idx.length && next < n) {
+      const w = (want - cum[next - 1]) / (cum[next] - cum[next - 1] || 1);
+      idx.push([xs[next - 1] + (xs[next] - xs[next - 1]) * w, ys[next - 1] + (ys[next] - ys[next - 1]) * w, next - 1]);
     }
     if (idx.length < 2) {
-      for (const p of t.paths) p.removeAttribute('d');
+      for (const p of t.tip) p.removeAttribute('d');
       return;
     }
-    const f1 = (v: number): string => v.toFixed(1);
-    const side = (off: (i: number) => number): string[] => idx.map(([x, y, i]) => `${f1(x + nx[i] * off(i))} ${f1(y + ny[i] * off(i))}`);
-    const ribbon = (extra: number): string => {
-      const left = side((i) => hw[i] + extra);
-      const right = side((i) => -(hw[i] + extra)).reverse();
-      return `M${left.join('L')}L${right.join('L')}Z`;
-    };
-    const line = (frac: number): string => `M${side((i) => hw[i] * frac).join('L')}`;
-    const [bank, body, shine, flowA, flowB] = t.paths;
-    bank.setAttribute('d', ribbon(2.2 * k));
-    body.setAttribute('d', ribbon(0));
-    shine.setAttribute('d', line(0));
-    flowA.setAttribute('d', line(0.45));
-    flowB.setAttribute('d', line(-0.4));
+    const d = this.riverPaths(t, idx, k);
+    t.tip.forEach((p, i) => p.setAttribute('d', d[i]));
   }
 
   /**
@@ -1913,10 +1941,11 @@ export class Radar {
       if (c.points.length < 2) continue;
       const d = this.pathOf(c.points);
       const g = el('g', { class: 'voyage-canal' });
+      // 筆畫的粗細照縮放算（螢幕像素換成 SVG 單位）：不能用 vector-effect non-scaling-stroke，Chrome 那樣會忽略 pathLength，虛線、注水都會壞
       g.append(
-        el('path', { class: 'voyage-canal-ghost', d, pathLength: '1', style: `animation-delay:${Math.round(c.at - CANAL_GHOST_MS - now)}ms` }),
-        el('path', { class: 'voyage-canal-fill bank', d, pathLength: '1', style: `animation-delay:${Math.round(c.at - now)}ms` }),
-        el('path', { class: 'voyage-canal-fill body', d, pathLength: '1', style: `animation-delay:${Math.round(c.at - now)}ms` }),
+        el('path', { class: 'voyage-canal-ghost', d, pathLength: '1', style: `stroke-width:${(1.2 * k).toFixed(2)};animation-delay:${Math.round(c.at - CANAL_GHOST_MS - now)}ms` }),
+        el('path', { class: 'voyage-canal-fill bank', d, pathLength: '1', style: `stroke-width:${(7 * k).toFixed(2)};animation-delay:${Math.round(c.at - now)}ms` }),
+        el('path', { class: 'voyage-canal-fill body', d, pathLength: '1', style: `stroke-width:${(4 * k).toFixed(2)};animation-delay:${Math.round(c.at - now)}ms` }),
       );
       // 名字寫在中間那一點
       const mid = c.points[Math.floor(c.points.length / 2)];
@@ -1939,7 +1968,7 @@ export class Radar {
       const d = this.pathOf(pd.ring, true);
       const g = el('g', { class: 'voyage-pond' });
       g.append(
-        el('path', { class: 'voyage-canal-ghost', d, pathLength: '1', style: `animation-delay:${Math.round(pd.at - CANAL_GHOST_MS - now)}ms` }),
+        el('path', { class: 'voyage-canal-ghost', d, pathLength: '1', style: `stroke-width:${(1.2 * k).toFixed(2)};animation-delay:${Math.round(pd.at - CANAL_GHOST_MS - now)}ms` }),
         el('path', { class: 'voyage-pond-fill', d, style: `animation-delay:${Math.round(pd.at - now)}ms` }),
       );
       const pts = pd.ring.map((pt) => polar(pt.bearing - this.heading, this.ratio(pt.distanceKm) * (R - 8)));
@@ -1960,15 +1989,20 @@ export class Radar {
           const mi = Math.max(0, Math.min(n - 1, st.mid));
           // 這條街離中心最近的那一點離中心多遠（先長到那裡，再沿街往兩頭）
           const base = Math.hypot(xs[mi] - c.x, ys[mi] - c.y);
+          // 像行道樹：路的兩邊各一排、整齊地排過去（使用者說的）
           let i = 1;
           for (let d = (ROAD_TREE_STEP * k) / 2, j = 0; d < cum[n - 1]; d += ROAD_TREE_STEP * k, j++) {
             while (i < n - 1 && cum[i] < d) i++;
             const w = (d - cum[i - 1]) / (cum[i] - cum[i - 1] || 1);
             const [x, y] = [xs[i - 1] + (xs[i] - xs[i - 1]) * w, ys[i - 1] + (ys[i] - ys[i - 1]) * w];
             const [tx, ty] = [nx[i - 1] + (nx[i] - nx[i - 1]) * w, ny[i - 1] + (ny[i] - ny[i - 1]) * w];
-            const side = j % 2 === 0 ? 1 : -1;
-            const off = (3 + hash(bi * 97 + si * 31 + j * 7) * 2) * k;
-            g.appendChild(this.tree(x + tx * off * side, y + ty * off * side, k * (0.7 + hash(bi * 59 + si * 17 + j * 13) * 0.4), bl.at + (base + Math.abs(d - cum[mi])) * mpu * STREET_GROW_MS_PER_M - now));
+            const off = ROAD_TREE_SIDE * k;
+            const delay = bl.at + (base + Math.abs(d - cum[mi])) * mpu * STREET_GROW_MS_PER_M - now;
+            // 行道樹很多（幾千棵），一棵只畫一個圓（不畫影子、亮點），畫面才不會重
+            for (const side of [1, -1]) {
+              const r = (2.1 + hash(bi * 59 + si * 17 + j * 13 + side) * 0.6) * k;
+              g.appendChild(el('circle', { class: 'tree-dot', cx: (x + tx * off * side).toFixed(1), cy: (y + ty * off * side).toFixed(1), r: r.toFixed(2), style: `animation-delay:${Math.round(delay)}ms` }));
+            }
           }
         });
       });

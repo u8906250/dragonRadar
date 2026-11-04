@@ -1,5 +1,5 @@
 import './styles.css';
-import { HQ_ARRIVE_MS, HQ_SAIL_MS, HQ_VOYAGE_MS, RAINBOW_EVERY_MS, voyageTimeOf } from './flow';
+import { HQ_SAIL_MS, HQ_VOYAGE_MS, RAINBOW_EVERY_MS, voyagePhase, voyageTimeOf } from './flow';
 import { addKeyword, collectLetter, deletePushSubscription, locateFeedbackPlace, sendFeedback, type FeedbackKind, fetchPushKey, savePushSubscription, confirmReport, editReport, locatePlace, rejectReport, supplementReport, deleteBottle, dropBottle, recycleBottle, fetchBottles, fetchEvents, fetchHealth, fetchKeywords, fetchMyBottles, fetchMyReports, fetchRoutes, pickBottle, reportBottle, reportEnded, submitLink, withdrawReport } from './api';
 import { compassSupported, startCompass } from './compass';
 import { bearingDeg, compassLabel, destination, formatKm, haversineKm, taiwanRadiusKm, type LatLng } from './geo';
@@ -1453,8 +1453,10 @@ function render(): void {
   updateCategoryToggles(all);
   updateActiveToggle(byCategory, now);
 
-  /** 經緯度 → 雷達上的方位、距離（洋流總部的特效用） */
+  /** 經緯度 → 雷達上的方位、距離（洋流總部的特效用）；inView 是離正中間不到外圈的 1.5 倍（畫面附近才畫，不然幾千個元素每一格重畫會卡；畫面跟著船移動，進到畫面時已經長好的直接畫） */
   const toRadarAt = ([lat, lng]: [number, number]): { bearing: number; distanceKm: number } => ({ bearing: bearingDeg(origin, { lat, lng }), distanceKm: haversineKm(origin, { lat, lng }) });
+  const inView = (p: { lat: number; lng: number }): boolean => haversineKm(origin, p) < scaleKm * 1.5;
+  const anyInView = (pts: Array<[number, number]>): boolean => pts.some(([lat, lng], i) => i % 4 === 0 && inView({ lat, lng }));
   // 稍後才開始的也畫（虛線框、淡色）
   radar.render(
     drawn.map((it) => ({
@@ -1501,19 +1503,19 @@ function render(): void {
               state: 'live' as const,
               river: true,
               voyage: hqVoyageAt,
-              fireworks: hqVoyageAt + HQ_SAIL_MS + HQ_ARRIVE_MS,
               points: hq.HQ_VOYAGE.map(toRadarAt),
-              stops: hqTourStops(hqVoyageAt).map((st) => ({ ...st, ...toRadarAt([st.lat, st.lng]) })),
+              stops: hqTourStops(hqVoyageAt).filter(inView).map((st) => ({ ...st, ...toRadarAt([st.lat, st.lng]) })),
               outline: hq.CITY_HALL_OUTLINE.map(toRadarAt),
               // 水域「把水找回來」：船到那一站時老水路浮出來、注水；都市微森林「把樹種回來」：船經過砍樹的地方、要加強種樹的地方長出樹
-              canals: hq.HQ_CANALS.map((c) => ({ points: c.points.map(toRadarAt), at: hqStopAt(hqVoyageAt!, c.stop), label: c.name })),
-              springs: hq.HQ_SPRINGS.map((sp) => ({ ...toRadarAt([sp.lat, sp.lng]), at: hqStopAt(hqVoyageAt!, sp.stop), label: sp.name })),
-              ponds: hq.HQ_PONDS.map((pd) => ({ ring: pd.ring.map(toRadarAt), at: hqStopAt(hqVoyageAt!, pd.stop), label: pd.name })),
-              plantings: hqPlantings(hqVoyageAt).map((p) => ({ ...p, ...toRadarAt([p.lat, p.lng]) })),
+              canals: hq.HQ_CANALS.filter((c) => anyInView(c.points)).map((c) => ({ points: c.points.map(toRadarAt), at: hqStopAt(hqVoyageAt!, c.stop), label: c.name })),
+              springs: hq.HQ_SPRINGS.filter(inView).map((sp) => ({ ...toRadarAt([sp.lat, sp.lng]), at: hqStopAt(hqVoyageAt!, sp.stop), label: sp.name })),
+              ponds: hq.HQ_PONDS.filter((pd) => anyInView(pd.ring)).map((pd) => ({ ring: pd.ring.map(toRadarAt), at: hqStopAt(hqVoyageAt!, pd.stop), label: pd.name })),
+              plantings: hqPlantings(hqVoyageAt).filter(inView).map((p) => ({ ...p, ...toRadarAt([p.lat, p.lng]) })),
               // 水域「親水」：船沿河走時真的河亮起來；水上活動：船經過時河上出現 SUP、龍舟
-              blooms: hq.HQ_BLOOMS.map((bl) => ({ center: toRadarAt(bl.center), at: hqVoyageAt! + voyageTimeOf(bl.frac), streets: bl.streets.map((st) => ({ pts: st.pts.map(toRadarAt), mid: st.mid })) })),
-              rivers: hq.HQ_RIVERS.map((rv) => ({ ring: rv.ring.map(toRadarAt), at: hqStopAt(hqVoyageAt!, rv.stop) })),
-              boats: hq.HQ_BOATS.map((b) => ({ ...toRadarAt([b.lat, b.lng]), at: hqNearestAt(hqVoyageAt!, b), kind: b.kind, heading: b.heading })),
+              // 行道樹只畫畫面附近的街區（離正中間不到外圈的 1.5 倍；畫面跟著船移動，出現在畫面裡時已經長好的就直接畫），不然幾千棵每一格重畫會卡
+              blooms: hq.HQ_BLOOMS.filter((bl) => inView({ lat: bl.center[0], lng: bl.center[1] })).map((bl) => ({ center: toRadarAt(bl.center), at: hqVoyageAt! + voyageTimeOf(bl.frac), streets: bl.streets.map((st) => ({ pts: st.pts.map(toRadarAt), mid: st.mid })) })),
+              rivers: hq.HQ_RIVERS.filter((rv) => anyInView(rv.ring)).map((rv) => ({ ring: rv.ring.map(toRadarAt), at: hqStopAt(hqVoyageAt!, rv.stop) })),
+              boats: hq.HQ_BOATS.filter(inView).map((b) => ({ ...toRadarAt([b.lat, b.lng]), at: hqNearestAt(hqVoyageAt!, b), kind: b.kind, heading: b.heading })),
             },
           ],
     ),
@@ -1563,7 +1565,6 @@ function render(): void {
               claimUrl: null,
               river: true,
               voyage: hqVoyageAt,
-              fireworks: hqVoyageAt + HQ_SAIL_MS + HQ_ARRIVE_MS,
               segments: [{ seq: 1, from: '洋流總部', to: '台北市政府', path: hq.HQ_VOYAGE, people: 0, target: 0 }],
               stops: hqTourStops(hqVoyageAt),
               outline: hq.CITY_HALL_OUTLINE,
@@ -3098,12 +3099,22 @@ let hqVoyageAt: number | null = null;
 let hqVoyageTimers: number[] = [];
 /** 到了拉近到外圈幾公里（看得到市政府的虛線外框和煙火） */
 const HQ_END_KM = 0.7;
-/** 看得到整條的範圍：正中間（整條線的範圍中間）、外圈幾公里（離正中間最遠的點再多一成，取到 0.5 km） */
-function hqTourView(path: Array<[number, number]>): LatLng & { km: number } {
-  const lats = path.map(([a]) => a);
-  const lngs = path.map(([, b]) => b);
-  const mid = { lat: (Math.min(...lats) + Math.max(...lats)) / 2, lng: (Math.min(...lngs) + Math.max(...lngs)) / 2 };
-  return { ...mid, km: Math.ceil(Math.max(...path.map(([lat, lng]) => haversineKm(mid, { lat, lng }))) * 1.1 * 2) / 2 };
+/** 一開始外圈幾公里、正中間在總部；船快出畫面（離正中間超過外圈的幾成）就把畫面移到船那裡（使用者說「一開始距離可以拉到 5 km，超過畫面再移動位置」） */
+const HQ_START_KM = 5;
+const HQ_FOLLOW_EDGE = 0.78;
+/** 播放中使用者自己拖、縮放過（之後就不跟著船移動、到了也不拉近） */
+let hqUserMoved = false;
+let hqFollowTimer = 0;
+/** 船現在在哪（照出發多久、路線的累計距離） */
+function hqBoatNow(t0: number): LatLng | null {
+  if (!hq) return null;
+  const path = hq.HQ_VOYAGE;
+  hqNearestAt(t0, { lat: path[0][0], lng: path[0][1] });
+  const want = voyagePhase(Date.now() - t0).at * hqCum![hqCum!.length - 1];
+  let i = 1;
+  while (i < path.length - 1 && hqCum![i] < want) i++;
+  const w = (want - hqCum![i - 1]) / (hqCum![i] - hqCum![i - 1] || 1);
+  return { lat: path[i - 1][0] + (path[i][0] - path[i - 1][0]) * w, lng: path[i - 1][1] + (path[i][1] - path[i - 1][1]) * w };
 }
 function startHqVoyage(): void {
   if (youOn === 'woof' || tripping || !mod.current) return;
@@ -3114,35 +3125,46 @@ function startHqVoyage(): void {
     });
     return;
   }
-  const { HQ_VOYAGE, HQ_TOUR } = hq;
+  const { HQ_TOUR } = hq;
+  const start = HQ_TOUR[0];
   const cityHall = HQ_TOUR[HQ_TOUR.length - 1];
   for (const t of hqVoyageTimers) window.clearTimeout(t);
+  window.clearInterval(hqFollowTimer);
+  hqUserMoved = false;
   let wait = 0;
   const started = Date.now();
-  if (view === 'map') map.focusPath(HQ_VOYAGE);
-  else {
-    const whole = hqTourView(HQ_VOYAGE);
-    const far = Math.max(...HQ_VOYAGE.map(([lat, lng]) => haversineKm(origin, { lat, lng })));
-    if (radar.spaceMoved || scaleKm > SPACE_FROM_KM || far > scaleKm * 0.92 || scaleKm > whole.km * 2) {
-      if (radar.spaceMoved) radar.resetSpace();
-      zoomToKm(whole.km, { lat: whole.lat, lng: whole.lng, source: 'manual' });
-      wait = 1200;
-    }
+  // 一開始：雷達外圈 HQ_START_KM、正中間在總部（本來就差不多就不動）；地圖拉到縮放 13、正中間在總部
+  if (view === 'map') map.flyToLatLng(start, 13);
+  else if (radar.spaceMoved || scaleKm > SPACE_FROM_KM || haversineKm(origin, start) > 0.3 || Math.abs(scaleKm / HQ_START_KM - 1) > 0.15) {
+    if (radar.spaceMoved) radar.resetSpace();
+    zoomToKm(HQ_START_KM, { lat: start.lat, lng: start.lng, source: 'manual' });
+    wait = 1200;
   }
   hqVoyageAt = started + wait;
-  // 雷達飛過去之後的看法：到了還是這樣（中途沒自己移動）才拉近
-  let tour: (LatLng & { km: number }) | null = null;
+  const t0 = hqVoyageAt;
+  // 跟著船：每 0.25 秒看船在哪，快出畫面就把畫面直接移到船那裡（一次重畫，不用飛的：飛的每一格都要整層重建，慢手機會掉到 2～3 fps）；
+  // 使用者自己動過就不跟
+  hqFollowTimer = window.setInterval(() => {
+    if (hqUserMoved || hqVoyageAt === null || Date.now() < t0 + 400 || Date.now() > t0 + HQ_SAIL_MS) return;
+    const boat = hqBoatNow(t0);
+    if (!boat) return;
+    if (view === 'map') {
+      if (map.userMovedAt < started + 300) map.keepInView(boat);
+    } else if (!flight && haversineKm(origin, boat) > scaleKm * HQ_FOLLOW_EDGE) {
+      setOrigin({ lat: boat.lat, lng: boat.lng, source: 'manual' });
+      render();
+    }
+  }, 250);
   hqVoyageTimers = [
-    window.setTimeout(() => (tour = { lat: origin.lat, lng: origin.lng, km: scaleKm }), wait + 400),
     window.setTimeout(() => {
+      // 到了：拉近市政府（使用者自己動過就不拉）
       if (view === 'map') {
         if (map.userMovedAt < started + 300) map.flyToLatLng(cityHall, 17);
-      } else if (tour && haversineKm(origin, tour) < 0.05 && Math.abs(scaleKm / tour.km - 1) < 0.05) {
-        zoomToKm(HQ_END_KM, { lat: cityHall.lat, lng: cityHall.lng, source: 'manual' });
-      }
+      } else if (!hqUserMoved) zoomToKm(HQ_END_KM, { lat: cityHall.lat, lng: cityHall.lng, source: 'manual' });
     }, wait + HQ_SAIL_MS),
     window.setTimeout(() => {
       hqVoyageAt = null;
+      window.clearInterval(hqFollowTimer);
       render();
     }, wait + HQ_VOYAGE_MS + 100),
   ];
@@ -3177,7 +3199,7 @@ function hqNearestAt(t0: number, p: LatLng): number {
  */
 function hqPlantings(t0: number): Array<{ lat: number; lng: number; at: number; kind: 'cut' | 'plant'; label?: string }> {
   if (!hq) return [];
-  return hq.HQ_PLANTINGS.map((p) => ({ lat: p.lat, lng: p.lng, at: hqNearestAt(t0, p), kind: p.kind, ...(p.kind === 'cut' ? { label: p.name } : {}) })).sort((a, b) => a.at - b.at);
+  return hq.HQ_PLANTINGS.map((p) => ({ lat: p.lat, lng: p.lng, at: hqNearestAt(t0, p), kind: p.kind, ...(p.kind === 'cut' && !p.hideName ? { label: p.name } : {}) })).sort((a, b) => a.at - b.at);
 }
 /**
  * 經過的區名（每一區寫第一次經過的那一站；總部那一站有星星不用寫）、終點一直寫著「臺北市政府」；
@@ -3318,8 +3340,9 @@ let panFrame = 0;
  * 放開才存下來、重抓附近的資料（全台的範圍也這時照新位置重算）
  */
 function panRadar(bearing: number, km: number, done: boolean): void {
-  // 「定位」飛到一半就拖：先到目的地，從那裡開始拖
+  // 「定位」飛到一半就拖：先到目的地，從那裡開始拖；洋流總部的特效播放中自己拖了就不再跟著船
   if (flight) landFlight();
+  if (hqVoyageAt !== null && km > 0) hqUserMoved = true;
   if (!panFrom) panFrom = origin;
   if (km > 0) {
     const p = destination(origin, bearing, km);
@@ -3669,8 +3692,9 @@ function landFlight(): void {
 /** 雙指縮放、滾輪：連續調整範圍；放開時接近某個按鈕的範圍（差 6% 以內）就對齊那個按鈕 */
 /** gesture：雙指、滾輪（太空裡幅度加大）；從地圖切回來是直接換成地圖的比例，不加大 */
 function zoomRadar(factor: number, done: boolean, gesture = false): void {
-  // 自己縮放：「定位」飛到一半，位置直接到、範圍停在這裡
+  // 自己縮放：「定位」飛到一半，位置直接到、範圍停在這裡；洋流總部的特效播放中就不再跟著船
   if (gesture && flight) landFlight();
+  if (gesture && hqVoyageAt !== null) hqUserMoved = true;
   // 太空（比全球再遠）一次縮放的幅度大一點：從全球到整個太陽系差了幾十萬倍
   const f = gesture && (scaleKm > WORLD_KM || (scaleKm >= WORLD_KM && factor > 1)) ? factor ** 2 : factor;
   // 太空裡中心換到別的星球（月球、木星…）：最多放大到剛好看得到整顆，汪星可以放大到 1 km，中山公園附近到 0.5 公尺；

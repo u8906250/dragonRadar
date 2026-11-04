@@ -246,13 +246,14 @@ export const HQ_PONDS: Array<{ name: string; stop: string; ring: Array<[number, 
  * plant：政見說要加強種樹的公園、商圈、公有建築、校園（kind 後面的 why），路線剛好經過的；只長幾棵。
  * 大安森林公園使用者說不用特別種。地點的經緯度照 OpenStreetMap（Nominatim 查的）
  */
-export const HQ_PLANTINGS: Array<{ name: string; kind: 'cut' | 'plant'; why: string; lat: number; lng: number; source?: string }> = [
+export const HQ_PLANTINGS: Array<{ name: string; kind: 'cut' | 'plant'; why: string; lat: number; lng: number; source?: string; hideName?: boolean }> = [
   { name: '東門市場', kind: 'cut', why: '40 年老茄苳原定移植、2026 年 5 月被廠商誤砍', lat: 25.03489, lng: 121.52691, source: 'https://www.mirrordaily.news/story/88050' },
   { name: '天母圓環', kind: 'cut', why: '路樹斬頭式移除；中山北路七段 175 號老樹以褐根病移除', lat: 25.1247, lng: 121.5327, source: 'https://www.mirrordaily.news/story/88050' },
   { name: '松山文創園區', kind: 'cut', why: '編號 3917 的受保護雀榕 2026 年 8 月以褐根病移除', lat: 25.0437, lng: 121.5608, source: 'https://www.mirrordaily.news/story/88050' },
   { name: '富民生態公園', kind: 'cut', why: '整建工程計畫砍樹、大量水泥，七成以上寫不當修剪、癒合不良', lat: 25.0603, lng: 121.56495, source: 'https://newtalk.tw/news/view/2026-07-09/1046239' },
   { name: '撫遠公園', kind: 'cut', why: '景觀改善工程要砍公園內外 77 棵樹（32 棵榕樹在公園裡、45 棵在周邊道路）', lat: 25.06418, lng: 121.56697, source: 'https://news.pts.org.tw/article/687371' },
-  { name: '研究院路二段 180 巷', kind: 'cut', why: '私有地上超過 50 年的老樹被地主剷除，居民、樹保團體抗議', lat: 25.04315, lng: 121.61663, source: 'https://udn.com/news/story/7323/9129293' },
+  // 巷子的位置只是約略，使用者說名字可以不用寫出來（hideName）
+  { name: '研究院路二段 180 巷', kind: 'cut', why: '私有地上超過 50 年的老樹被地主剷除，居民、樹保團體抗議', lat: 25.04315, lng: 121.61663, source: 'https://udn.com/news/story/7323/9129293', hideName: true },
   { name: '艋舺龍山寺', kind: 'plant', why: '商圈', lat: 25.03725, lng: 121.49988 },
   { name: '青年公園', kind: 'plant', why: '公園', lat: 25.02319, lng: 121.50559 },
   { name: '中央研究院', kind: 'plant', why: '公有建築、校園', lat: 25.04207, lng: 121.61405 },
@@ -425,6 +426,9 @@ export const HQ_BOATS: Array<{ place: string; kind: 'sup' | 'dragon'; lat: numbe
   { place: '關渡（基隆河口）', kind: 'dragon', lat: 25.11134, lng: 121.47633, heading: 250, width: 300, stop: '關渡宮' },
   { place: '社子島（基隆河）', kind: 'sup', lat: 25.09678, lng: 121.50034, heading: 280, width: 240, stop: '社子' },
   { place: '大稻埕外（淡水河）', kind: 'dragon', lat: 25.05495, lng: 121.50308, heading: 15, width: 690, stop: '大稻埕' },
+  // 內湖、南港那段基隆河也放 SUP（使用者說的）：成功橋、南湖大橋附近
+  { place: '成功橋（基隆河，內湖）', kind: 'sup', lat: 25.06035, lng: 121.59389, heading: 230, width: 130, stop: '輝達（玉成廣場）' },
+  { place: '南湖大橋（基隆河，南港）', kind: 'sup', lat: 25.06472, lng: 121.613, heading: 290, width: 170, stop: '南港展覽館' },
 ];
 
 /**

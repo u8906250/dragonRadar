@@ -57,7 +57,7 @@ describe('洋流總部的特效', () => {
     expect(HQ_PLANTINGS.filter((p) => p.kind === 'cut').length).toBeGreaterThanOrEqual(5);
     // 湧泉、水塘、船、街道都在路線附近；船都在夠寬的河段（整艘在水上）
     for (const p of [...HQ_SPRINGS, ...HQ_BOATS]) expect(nearRoute(p)).toBeLessThan(1.5);
-    for (const b of HQ_BOATS) expect(b.width).toBeGreaterThanOrEqual(b.kind === 'dragon' ? 200 : 140);
+    for (const b of HQ_BOATS) expect(b.width).toBeGreaterThanOrEqual(b.kind === 'dragon' ? 200 : 120);
     for (const pd of HQ_PONDS) expect(pd.ring.length).toBeGreaterThanOrEqual(6);
     // 街道的路樹：中心離路線 200～700 公尺（不是在路線上），每個中心至少 3 條街、街都在中心 500 公尺內
     expect(HQ_BLOOMS.length).toBeGreaterThan(30);

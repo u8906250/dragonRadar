@@ -74,9 +74,10 @@ export interface MapRoute {
 /** 種樹的地方長幾棵（砍樹的地方多一點）、老水路的鬼影在船到之前幾毫秒浮出來（洋流總部的特效，跟 radar.ts 一樣） */
 const MAP_PLANT_CUT_TREES = 22;
 const MAP_PLANT_TREES = 10;
-/** 街道的路樹每隔幾公里一棵 */
-const MAP_STREET_TREE_KM = 0.1;
-const MAP_CANAL_GHOST_MS = 2500;
+/** 街道的路樹每隔幾公里一棵；河流每幾個點固定成一段 */
+const MAP_STREET_TREE_KM = 0.07;
+const MAP_RIVER_CHUNK = 24;
+const MAP_CANAL_GHOST_MS = 1200;
 /** 水上活動的船（跟 radar.ts 一樣的畫法，顏色在 styles.css） */
 const MAP_SUP_SVG =
   '<path class="wb-wake" d="M-14 2.5q-4 0 -7 1.6"/>' +
@@ -189,7 +190,7 @@ export class MapView {
   /** 洋流號：路線的經緯度（cum 是每一點走了幾公里）和船，每一格畫面照現在的時間擺；往哪邊開記在 boatLeft */
   private boatTracks: Array<{ id: string; marker: Leaflet.Marker; lat: Float64Array; lng: Float64Array; cum: Float64Array; voyage?: number }> = [];
   /** 河流：整條的經緯度（cum 是每一點走了幾公里）、河岸、河面、亮的那道、兩道波光，畫到哪（at，沒變就不重畫） */
-  private riverTracks: Array<{ pts: Array<[number, number]>; cum: Float64Array; voyage: number; at: number; lines: Leaflet.Polyline[] }> = [];
+  private riverTracks: Array<{ pts: Array<[number, number]>; cum: Float64Array; voyage: number; at: number; lines: Leaflet.Polyline[]; chunkStart: number; chunkEnd: number }> = [];
   private readonly boatLeft = new Map<string, boolean>();
   private boatFrame = 0;
   private bottleLayer: Leaflet.LayerGroup | null = null;
@@ -587,6 +588,14 @@ export class MapView {
     void this.ensure().then(() => this.map?.flyTo([p.lat, p.lng], zoom, { duration: 1.4 }));
   }
 
+  /** 這個點快出畫面（離邊不到 12%）就把地圖移過去（洋流總部的特效跟著船） */
+  keepInView(p: LatLng): void {
+    const map = this.map;
+    if (!map) return;
+    const b = map.getBounds().pad(-0.12);
+    if (!b.contains([p.lat, p.lng])) map.panTo([p.lat, p.lng], { animate: true, duration: 0.8 });
+  }
+
   /** 地圖移到看得到整條線（洋流總部的特效：總部到台北市政府） */
   focusPath(pts: Array<[number, number]>): void {
     void this.ensure().then(() => {
@@ -749,9 +758,30 @@ export class MapView {
       if (e) Object.assign(e.style, { animationDuration: `${HQ_VOYAGE_MS}ms`, animationDelay: `${voyage - Date.now()}ms` });
       e?.classList.add('map-voyage');
     }
-    const t = { pts, cum, voyage, at: -1, lines };
+    // 河分段畫：流過的部分一段一段固定成自己的線，每一格只動最前面正在長的那一段（lines）
+    const t = { pts, cum, voyage, at: -1, lines, chunkStart: 0, chunkEnd: Math.min(pts.length - 1, MAP_RIVER_CHUNK) };
     this.riverTracks.push(t);
     this.drawRiver(t, voyagePhase(Date.now() - voyage).at);
+  }
+
+  /** 河流過的一段固定下來（跟最前面那一段同樣的 4 條線） */
+  private riverChunk(t: (typeof this.riverTracks)[number], a: number, b: number): void {
+    const L = this.L;
+    const layer = this.routeLayer;
+    if (!L || !layer) return;
+    const seg = t.pts.slice(a, b + 1);
+    const o = { lineCap: 'round', lineJoin: 'round', interactive: false } as const;
+    for (const [opt, i] of [[{ color: '#ffd8b0', weight: 15, opacity: 0.9 }, 0], [{ color: '#f0812e', weight: 9, opacity: 0.92 }, 1], [{ color: '#ffc78f', weight: 2, opacity: 0.85 }, 2], [{ color: '#ffffff', weight: 1.6, opacity: 0.85, className: 'map-river-flow' }, 3]] as const) {
+      const l = L.polyline(seg, { ...o, ...opt });
+      layer.addLayer(l);
+      const e = l.getElement() as SVGElement | undefined;
+      if (e) {
+        Object.assign(e.style, { animationDuration: `${HQ_VOYAGE_MS}ms`, animationDelay: `${t.voyage - Date.now()}ms` });
+        e.classList.add('map-voyage');
+      }
+      // 最前面那一段要在固定的上面
+      t.lines[i].bringToFront();
+    }
   }
 
   /** 出現後留著的字（洋流總部的特效）；anchorY 是字在那一點上面幾像素 */
@@ -823,13 +853,15 @@ export class MapView {
           const b = map.latLngToLayerPoint(st.pts[i]);
           const [dx, dy] = [b.x - a.x, b.y - a.y];
           const len = Math.hypot(dx, dy) || 1;
-          const side = j % 2 === 0 ? 1 : -1;
-          const off = (3 + mapHash(bi * 97 + si * 31 + j * 7) * 2) * side;
-          const p = L.point(a.x + dx * w + (-dy / len) * off, a.y + dy * w + (dx / len) * off);
-          const m = L.circleMarker(map.layerPointToLatLng(p), { radius: 2.4 + mapHash(bi * 59 + si * 17 + j * 13) * 1.4, color: cssVar('--grass', '#3f8f2f'), weight: 1, fillColor: cssVar('--grass', '#3f8f2f'), fillOpacity: 0.95, interactive: false, className: 'map-tree' });
-          layer.addLayer(m);
-          const e = m.getElement() as SVGElement | undefined;
-          if (e) e.style.animationDelay = `${Math.round(bl.at + (base + Math.abs(km - cum[mi])) * 1000 * 2.4 - now)}ms`;
+          // 像行道樹：路的兩邊各一排
+          for (const side of [1, -1]) {
+            const off = 4 * side;
+            const p = L.point(a.x + dx * w + (-dy / len) * off, a.y + dy * w + (dx / len) * off);
+            const m = L.circleMarker(map.layerPointToLatLng(p), { radius: 2.2 + mapHash(bi * 59 + si * 17 + j * 13 + side) * 0.8, color: cssVar('--grass', '#3f8f2f'), weight: 1, fillColor: cssVar('--grass', '#3f8f2f'), fillOpacity: 0.95, interactive: false, className: 'map-tree' });
+            layer.addLayer(m);
+            const e = m.getElement() as SVGElement | undefined;
+            if (e) e.style.animationDelay = `${Math.round(bl.at + (base + Math.abs(km - cum[mi])) * 1000 * 2.4 - now)}ms`;
+          }
         }
       }
     }
@@ -870,16 +902,23 @@ export class MapView {
     }
   }
 
-  /** 河流畫到 at（0～1）：整點，再加最前面那一點（內插） */
+  /** 河流畫到 at（0～1）：流過整段的固定下來，最前面那一段從固定好的地方到現在的位置（整點，再加最前面那一點內插） */
   private drawRiver(t: (typeof this.riverTracks)[number], at: number): void {
     if (Math.abs(at - t.at) < 1e-4) return;
     t.at = at;
     const { pts, cum } = t;
-    const want = at * cum[cum.length - 1];
-    let i = 0;
-    while (i < pts.length && cum[i] <= want) i++;
-    const shown = pts.slice(0, i);
-    if (i > 0 && i < pts.length) {
+    const n = pts.length;
+    const want = at * cum[n - 1];
+    while (t.chunkStart < n - 1 && cum[t.chunkEnd] <= want) {
+      this.riverChunk(t, t.chunkStart, t.chunkEnd);
+      t.chunkStart = t.chunkEnd;
+      t.chunkEnd = Math.min(n - 1, t.chunkEnd + MAP_RIVER_CHUNK);
+      if (t.chunkStart >= n - 1) break;
+    }
+    let i = t.chunkStart;
+    while (i < n && cum[i] <= want) i++;
+    const shown = pts.slice(t.chunkStart, i);
+    if (i > t.chunkStart && i < n) {
       const w = (want - cum[i - 1]) / (cum[i] - cum[i - 1] || 1);
       shown.push([pts[i - 1][0] + (pts[i][0] - pts[i - 1][0]) * w, pts[i - 1][1] + (pts[i][1] - pts[i - 1][1]) * w]);
     }

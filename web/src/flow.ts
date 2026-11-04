@@ -107,12 +107,14 @@ export const riverHalfWidth = (f: number): number => (2 + 4.5 * f) * (1 + 0.22 *
 
 /**
  * 洋流總部的特效（點了洋流總部）：洋流號只開一趟，HQ_SAIL_MS 沿著真的路像一條河流繞過台北 12 個區、流到台北市政府（起步、到站慢慢加速減速，中間等速），
- * 到了先停 HQ_ARRIVE_MS（雷達拉近市政府），再放 FIREWORKS_MS 的煙火，放完船、水一起淡掉；雷達、地圖照同一個時鐘（Date.now()）
+ * 到了先停 HQ_ARRIVE_MS（雷達拉近市政府、畫面停好），再放 FIREWORKS_MS 的煙火，放完船、水一起淡掉；雷達、地圖照同一個時鐘（Date.now()）
  */
 export const HQ_SAIL_MS = 75_000;
-export const HQ_ARRIVE_MS = 1800;
+export const HQ_ARRIVE_MS = 3000;
 export const FIREWORKS_MS = 4400;
-export const HQ_VOYAGE_MS = HQ_SAIL_MS + HQ_ARRIVE_MS + FIREWORKS_MS;
+/** 到站、畫面停好之後再留幾毫秒才淡掉（煙火先不放，使用者說有其他想法；fireworksSvg 留著） */
+export const HQ_LINGER_MS = 2500;
+export const HQ_VOYAGE_MS = HQ_SAIL_MS + HQ_ARRIVE_MS + HQ_LINGER_MS;
 /** 起步、到站各花幾毫秒加速、減速 */
 const RAMP_MS = 2500;
 /** 開到哪（0～1）：速度是梯形（起步加速、中間等速、到站減速） */
