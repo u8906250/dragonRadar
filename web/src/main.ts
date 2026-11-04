@@ -3464,7 +3464,7 @@ function hqExtras(t0: number): { reveals: HqReveal[]; icons: HqIcon[] } {
     const near = hqDistM(sv) <= HQ_SERVICE_NEAR_M;
     if (!near && !(ly && hqLayer && ly.kinds.includes(sv.kind))) continue;
     const at = near ? hqNearestAt(t0, sv) : hqLayer!.at + Math.min(li++ * 8, 1600);
-    // 方塊都不能點（v1.497 使用者說的；介紹寫在政策圖層的說明卡）；圖層開著時那幾種放大、外圍有光圈
+    // 方塊都不能點（v1.496 使用者說的；介紹寫在政策圖層的說明卡）；圖層開著時那幾種放大、外圍有光圈
     const focus = !!ly && ly.kinds.includes(sv.kind);
     icons.push({ lat: sv.lat, lng: sv.lng, at, kind: 'service', char: K.char, color: K.color, scale: focus ? 1.25 : 0.85, focus });
   }

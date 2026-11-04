@@ -1173,7 +1173,7 @@ export const HQ_SERVICES: Array<{ kind: ServiceKind; name: string; lat: number; 
 
 /** 到站後的政策圖層（按鈕）：哪幾種地方、說明、拉到多遠（zone 是國小四周 150 公尺的通學區，要拉近才看得到） */
 /**
- * intro 是按了之後左上角說明卡寫的內容（v1.497 使用者說方塊都不能點，「把介紹放到例如通學區的介紹」）：照政策島的細項寫；
+ * intro 是按了之後左上角說明卡寫的內容（v1.496 使用者說方塊都不能點，「把介紹放到例如通學區的介紹」）：照政策島的細項寫；
  * legend 是方塊裡的字代表什麼
  */
 export const HQ_POLICY_LAYERS: Array<{ id: string; label: string; kinds: ServiceKind[]; title: string; note: string; intro: string; legend: string; km: number; zone?: boolean }> = [
