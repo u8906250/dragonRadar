@@ -73,6 +73,8 @@ export interface MapRoute {
   green?: { ring: Array<[number, number]>; steps: number[] };
   /** 一塊地方（社子島）：at 時淡入、留著，虛線外框、名字寫在中間 */
   areas?: Array<{ ring: Array<[number, number]>; center: [number, number]; at: number; label: string }>;
+  /** 洋流號的河什麼時候淡掉（到終點後拿掉，政策的東西才看得清楚） */
+  riverOut?: number;
   /** 文化網（點 —— 線 —— 面） */
   network?: { at: number; lines: Array<{ path: Array<[number, number]>; color: string }>; dots: Array<{ lat: number; lng: number; color: string }> };
   /** 一個東西冒出來：hut 登山中心、stadium 足球場、dome 運動中心、star 星星、regrow 樹樁（grow 時長回大樹）、culture 文化徑的點（small 的名字地圖上不寫，滑鼠移過去看介紹） */
@@ -211,7 +213,7 @@ export class MapView {
   /** 洋流號：路線的經緯度（cum 是每一點走了幾公里）和船，每一格畫面照現在的時間擺；往哪邊開記在 boatLeft */
   private boatTracks: Array<{ id: string; marker: Leaflet.Marker; lat: Float64Array; lng: Float64Array; cum: Float64Array; voyage?: number }> = [];
   /** 河流：整條的經緯度（cum 是每一點走了幾公里）、河岸、河面、亮的那道、兩道波光，畫到哪（at，沒變就不重畫） */
-  private riverTracks: Array<{ pts: Array<[number, number]>; cum: Float64Array; voyage: number; at: number; lines: Leaflet.Polyline[]; chunkStart: number; chunkEnd: number }> = [];
+  private riverTracks: Array<{ pts: Array<[number, number]>; cum: Float64Array; voyage: number; at: number; lines: Leaflet.Polyline[]; chunkStart: number; chunkEnd: number; riverOut?: number }> = [];
   private readonly boatLeft = new Map<string, boolean>();
   private boatFrame = 0;
   private bottleLayer: Leaflet.LayerGroup | null = null;
@@ -782,6 +784,7 @@ export class MapView {
   private addRiver(r: MapRoute, voyage: number): void {
     const L = this.L;
     const layer = this.routeLayer;
+    const riverOut = r.riverOut;
     const pts = r.segments.flatMap((sg) => sg.path);
     if (!L || !layer || pts.length < 2) return;
     const cum = new Float64Array(pts.length);
@@ -796,15 +799,24 @@ export class MapView {
     ];
     for (const l of lines) {
       layer.addLayer(l);
-      // 跟著淡入、放完煙火淡掉
+      // 跟著淡入；到終點後淡掉（riverOut）
       const e = l.getElement() as SVGElement | undefined;
       if (e) Object.assign(e.style, { animationDuration: `${HQ_VOYAGE_MS}ms`, animationDelay: `${voyage - Date.now()}ms` });
       e?.classList.add('map-voyage');
+      this.riverFade(e, riverOut);
     }
     // 河分段畫：流過的部分一段一段固定成自己的線，每一格只動最前面正在長的那一段（lines）
-    const t = { pts, cum, voyage, at: -1, lines, chunkStart: 0, chunkEnd: Math.min(pts.length - 1, MAP_RIVER_CHUNK) };
+    const t = { pts, cum, voyage, at: -1, lines, chunkStart: 0, chunkEnd: Math.min(pts.length - 1, MAP_RIVER_CHUNK), riverOut };
     this.riverTracks.push(t);
     this.drawRiver(t, voyagePhase(Date.now() - voyage).at);
+  }
+
+  /** 洋流號的河到終點後淡掉（map-river-out：stroke-opacity 慢慢變 0）；已經過了就直接藏 */
+  private riverFade(e: Element | undefined, outAt: number | undefined): void {
+    if (!e || outAt === undefined) return;
+    const wait = outAt - Date.now();
+    if (wait <= 0) e.classList.add('map-river-out', 'done');
+    else window.setTimeout(() => e.classList.add('map-river-out'), wait);
   }
 
   /** 河流過的一段固定下來（跟最前面那一段同樣的 4 條線） */
@@ -821,6 +833,7 @@ export class MapView {
       if (e) {
         Object.assign(e.style, { animationDuration: `${HQ_VOYAGE_MS}ms`, animationDelay: `${t.voyage - Date.now()}ms` });
         e.classList.add('map-voyage');
+        this.riverFade(e, t.riverOut);
       }
       // 最前面那一段要在固定的上面
       t.lines[i].bringToFront();
@@ -921,7 +934,7 @@ export class MapView {
     // 一塊地方（社子島）：淡淡的土色、虛線外框
     for (const ar of r.areas ?? []) {
       if (ar.ring.length < 3) continue;
-      const poly = L.polygon(ar.ring, { color: '#8a6a2a', weight: 2, dashArray: '6 4', fillColor: '#f1dd9a', fillOpacity: 0.55, interactive: false, className: 'map-voyage-area' });
+      const poly = L.polygon(ar.ring, { color: '#7d6a45', weight: 1.8, dashArray: '6 4', fill: false, interactive: false, className: 'map-voyage-area' });
       layer.addLayer(poly);
       const e = poly.getElement() as SVGElement | undefined;
       if (e) e.style.animationDelay = `${Math.round(ar.at - now)}ms`;

@@ -1504,6 +1504,8 @@ function render(): void {
               state: 'live' as const,
               river: true,
               voyage: hqVoyageAt,
+              // 到終點 0.6 秒後河淡掉，政策的東西才看得清楚（使用者說「到終點把洋流路徑拿掉」）
+              riverOut: hqVoyageAt + HQ_SAIL_MS + 600,
               points: hq.HQ_VOYAGE.map(toRadarAt),
               stops: hqTourStops(hqVoyageAt).filter(inView).map((st) => ({ ...st, ...toRadarAt([st.lat, st.lng]) })),
               outline: hq.CITY_HALL_OUTLINE.map(toRadarAt),
@@ -1574,6 +1576,8 @@ function render(): void {
               claimUrl: null,
               river: true,
               voyage: hqVoyageAt,
+              // 到終點 0.6 秒後河淡掉，政策的東西才看得清楚（使用者說「到終點把洋流路徑拿掉」）
+              riverOut: hqVoyageAt + HQ_SAIL_MS + 600,
               segments: [{ seq: 1, from: '洋流總部', to: '台北市政府', path: hq.HQ_VOYAGE, people: 0, target: 0 }],
               stops: hqTourStops(hqVoyageAt),
               outline: hq.CITY_HALL_OUTLINE,

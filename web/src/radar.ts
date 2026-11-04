@@ -76,6 +76,8 @@ export interface RadarRoute {
   reveals?: Array<{ points: Array<{ bearing: number; distanceKm: number }>; at: number; kind: 'trail' | 'bridge' | 'stars' | 'culture'; label?: string; color?: string }>;
   /** 綠覆率：整個台北市（ring）在 steps 的每個時間再鋪一層很淡的綠 */
   green?: { ring: Array<{ bearing: number; distanceKm: number }>; steps: number[] };
+  /** 洋流號的河什麼時候淡掉（到終點後拿掉，政策的東西才看得清楚；使用者說的） */
+  riverOut?: number;
   /** 一塊地方（社子島）：at 時淡入、留著，虛線外框、名字寫在中間 */
   areas?: Array<{ ring: Array<{ bearing: number; distanceKm: number }>; center: { bearing: number; distanceKm: number }; at: number; label: string }>;
   /** 文化網（點 —— 線 —— 面）：at 開始；先點亮 dots、再沿 lines 亮起來、最後每條線、每個點往外暈開連成一片 */
@@ -1888,7 +1890,8 @@ export class Radar {
     const k = this.squarePx > 0 ? SIZE / this.squarePx : 1;
     const hw = new Float64Array(n);
     for (let i = 0; i < n; i++) hw[i] = riverHalfWidth(cum[i] / total) * k;
-    const g = el('g', { class: 'route-river' }) as SVGGElement;
+    const g = el('g', { class: `route-river${r.riverOut ? ' fade-out' : ''}` }) as SVGGElement;
+    if (r.riverOut) g.style.animationDelay = `${Math.round(r.riverOut - Date.now())}ms`;
     // 河分段畫：流過的部分一段一段固定下來（riverChunk），每一格只重畫最前面正在長的那一小段（tip）；不然 2,000 個點的緞帶每一格重畫會卡
     const tip = ['river-bank', 'river-body', 'river-shine', 'river-flow', 'river-flow b'].map((c) => el('path', { class: c }) as SVGPathElement);
     g.append(...tip);
