@@ -1511,7 +1511,7 @@ function render(): void {
               ponds: hq.HQ_PONDS.map((pd) => ({ ring: pd.ring.map(toRadarAt), at: hqStopAt(hqVoyageAt!, pd.stop), label: pd.name })),
               plantings: hqPlantings(hqVoyageAt).map((p) => ({ ...p, ...toRadarAt([p.lat, p.lng]) })),
               // 水域「親水」：船沿河走時真的河亮起來；水上活動：船經過時河上出現 SUP、龍舟
-              streets: hq.HQ_STREETS.map((st) => ({ pts: st.pts.map(toRadarAt), mid: st.mid, at: hqVoyageAt! + voyageTimeOf(st.frac) })),
+              blooms: hq.HQ_BLOOMS.map((bl) => ({ center: toRadarAt(bl.center), at: hqVoyageAt! + voyageTimeOf(bl.frac), streets: bl.streets.map((st) => ({ pts: st.pts.map(toRadarAt), mid: st.mid })) })),
               rivers: hq.HQ_RIVERS.map((rv) => ({ ring: rv.ring.map(toRadarAt), at: hqStopAt(hqVoyageAt!, rv.stop) })),
               boats: hq.HQ_BOATS.map((b) => ({ ...toRadarAt([b.lat, b.lng]), at: hqNearestAt(hqVoyageAt!, b), kind: b.kind, heading: b.heading })),
             },
@@ -1571,7 +1571,7 @@ function render(): void {
               springs: hq.HQ_SPRINGS.map((sp) => ({ lat: sp.lat, lng: sp.lng, at: hqStopAt(hqVoyageAt!, sp.stop), label: sp.name })),
               ponds: hq.HQ_PONDS.map((pd) => ({ ring: pd.ring, at: hqStopAt(hqVoyageAt!, pd.stop), label: pd.name })),
               plantings: hqPlantings(hqVoyageAt),
-              streets: hq.HQ_STREETS.map((st) => ({ pts: st.pts, mid: st.mid, at: hqVoyageAt! + voyageTimeOf(st.frac) })),
+              blooms: hq.HQ_BLOOMS.map((bl) => ({ center: bl.center, at: hqVoyageAt! + voyageTimeOf(bl.frac), streets: bl.streets })),
               rivers: hq.HQ_RIVERS.map((rv) => ({ ring: rv.ring, at: hqStopAt(hqVoyageAt!, rv.stop) })),
               boats: hq.HQ_BOATS.map((b) => ({ lat: b.lat, lng: b.lng, at: hqNearestAt(hqVoyageAt!, b), kind: b.kind, heading: b.heading })),
             },

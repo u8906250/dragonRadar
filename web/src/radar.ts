@@ -65,8 +65,8 @@ export interface RadarRoute {
    * plant 是政見說要加強種樹的公園、商圈、公有建築（長幾棵就好）
    */
   plantings?: Array<{ bearing: number; distanceKm: number; at: number; kind: 'cut' | 'plant'; label?: string }>;
-  /** 街道的路樹（都市微森林）：船經過市區時（at，Date.now() 的毫秒）附近的街道從離路線最近的那一點（mid）往兩頭長出一排排的樹 */
-  streets?: Array<{ pts: Array<{ bearing: number; distanceKm: number }>; mid: number; at: number }>;
+  /** 街道的路樹（都市微森林）：船經過市區時（at，Date.now() 的毫秒）離路線稍遠的一個中心（在街道上）往四周的街道長出一排排的樹，離中心越遠越晚長 */
+  blooms?: Array<{ center: { bearing: number; distanceKm: number }; at: number; streets: Array<{ pts: Array<{ bearing: number; distanceKm: number }>; mid: number }> }>;
   /** 真的河（水域政策「親水」）：船沿河走時（at）水面亮成藍色、留著（OpenStreetMap 的淡水河、基隆河、新店溪） */
   rivers?: Array<{ ring: Array<{ bearing: number; distanceKm: number }>; at: number }>;
   /** 水上活動：船經過時（at）河上出現 SUP、龍舟，留著在水上搖；heading 是船頭朝哪（度，0 是上、順時針） */
@@ -1946,26 +1946,31 @@ export class Radar {
       g.appendChild(this.stayLabel(pts.reduce((a, q) => a + q.x, 0) / pts.length, pts.reduce((a, q) => a + q.y, 0) / pts.length, k, pd.label, pd.at + 800 - now, -10));
       this.routeLayer.appendChild(g);
     }
-    // 街道的路樹：船經過市區時，附近的街道從離路線最近的那一點往兩頭長出樹（每隔 ROAD_TREE_STEP 螢幕像素一棵、左右輪流），越遠越晚長（像往外延伸）
-    if (r.streets?.length) {
+    // 街道的路樹：船經過市區時，離路線稍遠的中心（在街道上）往四周的街道長出樹（每隔 ROAD_TREE_STEP 螢幕像素一棵、左右輪流），離中心越遠越晚長（像從那裡長出去）
+    if (r.blooms?.length) {
       const g = el('g', { class: 'voyage-planting road' });
       // 一個 SVG 單位幾公尺（延伸的速度照公尺算，放大縮小一樣）
       const mpu = (this.scaleKm * 1000) / (R - 8);
-      r.streets.forEach((st, si) => {
-        const { xs, ys, nx, ny, cum } = this.screenPath(st.pts);
-        const n = cum.length;
-        if (n < 2) return;
-        const mid = cum[Math.max(0, Math.min(n - 1, st.mid))];
-        let i = 1;
-        for (let d = (ROAD_TREE_STEP * k) / 2, j = 0; d < cum[n - 1]; d += ROAD_TREE_STEP * k, j++) {
-          while (i < n - 1 && cum[i] < d) i++;
-          const w = (d - cum[i - 1]) / (cum[i] - cum[i - 1] || 1);
-          const [x, y] = [xs[i - 1] + (xs[i] - xs[i - 1]) * w, ys[i - 1] + (ys[i] - ys[i - 1]) * w];
-          const [tx, ty] = [nx[i - 1] + (nx[i] - nx[i - 1]) * w, ny[i - 1] + (ny[i] - ny[i - 1]) * w];
-          const side = j % 2 === 0 ? 1 : -1;
-          const off = (3 + hash(si * 31 + j * 7) * 2) * k;
-          g.appendChild(this.tree(x + tx * off * side, y + ty * off * side, k * (0.7 + hash(si * 17 + j * 13) * 0.4), st.at + Math.abs(d - mid) * mpu * STREET_GROW_MS_PER_M - now));
-        }
+      r.blooms.forEach((bl, bi) => {
+        const c = polar(bl.center.bearing - this.heading, this.ratio(bl.center.distanceKm) * (R - 8));
+        bl.streets.forEach((st, si) => {
+          const { xs, ys, nx, ny, cum } = this.screenPath(st.pts);
+          const n = cum.length;
+          if (n < 2) return;
+          const mi = Math.max(0, Math.min(n - 1, st.mid));
+          // 這條街離中心最近的那一點離中心多遠（先長到那裡，再沿街往兩頭）
+          const base = Math.hypot(xs[mi] - c.x, ys[mi] - c.y);
+          let i = 1;
+          for (let d = (ROAD_TREE_STEP * k) / 2, j = 0; d < cum[n - 1]; d += ROAD_TREE_STEP * k, j++) {
+            while (i < n - 1 && cum[i] < d) i++;
+            const w = (d - cum[i - 1]) / (cum[i] - cum[i - 1] || 1);
+            const [x, y] = [xs[i - 1] + (xs[i] - xs[i - 1]) * w, ys[i - 1] + (ys[i] - ys[i - 1]) * w];
+            const [tx, ty] = [nx[i - 1] + (nx[i] - nx[i - 1]) * w, ny[i - 1] + (ny[i] - ny[i - 1]) * w];
+            const side = j % 2 === 0 ? 1 : -1;
+            const off = (3 + hash(bi * 97 + si * 31 + j * 7) * 2) * k;
+            g.appendChild(this.tree(x + tx * off * side, y + ty * off * side, k * (0.7 + hash(bi * 59 + si * 17 + j * 13) * 0.4), bl.at + (base + Math.abs(d - cum[mi])) * mpu * STREET_GROW_MS_PER_M - now));
+          }
+        });
       });
       this.routeLayer.appendChild(g);
     }

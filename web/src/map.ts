@@ -63,8 +63,8 @@ export interface MapRoute {
   ponds?: Array<{ ring: Array<[number, number]>; at: number; label: string }>;
   /** 種樹的地方（都市微森林）：船經過時在那裡長出一叢樹；cut 是有砍樹爭議的地方（多一點、光環、寫名字），plant 是政見說要加強種樹的地方 */
   plantings?: Array<{ lat: number; lng: number; at: number; kind: 'cut' | 'plant'; label?: string }>;
-  /** 街道的路樹（都市微森林）：船經過市區時附近的街道從離路線最近的那一點（mid）往兩頭長出一排排的樹 */
-  streets?: Array<{ pts: Array<[number, number]>; mid: number; at: number }>;
+  /** 街道的路樹（都市微森林）：船經過市區時離路線稍遠的一個中心（在街道上）往四周的街道長出一排排的樹，離中心越遠越晚長 */
+  blooms?: Array<{ center: [number, number]; at: number; streets: Array<{ pts: Array<[number, number]>; mid: number }> }>;
   /** 真的河（水域政策「親水」）：船沿河走時（at）水面亮成藍色、留著 */
   rivers?: Array<{ ring: Array<[number, number]>; at: number }>;
   /** 水上活動：船經過時（at）河上出現 SUP、龍舟；heading 是船頭朝哪（度，0 是上、順時針） */
@@ -807,26 +807,30 @@ export class MapView {
       }
       this.stayLabel(fill.getBounds().getCenter(), pd.label, pd.at + 800 - now, 30);
     }
-    // 街道的路樹：船經過市區時附近的街道從離路線最近的那一點往兩頭長（每 MAP_STREET_TREE_KM 公里一棵、左右輪流、離街的距離照現在的縮放算成像素），越遠越晚長
-    for (const [si, st] of (r.streets ?? []).entries()) {
-      const cum = new Float64Array(st.pts.length);
-      for (let i = 1; i < st.pts.length; i++) cum[i] = cum[i - 1] + haversineKm({ lat: st.pts[i - 1][0], lng: st.pts[i - 1][1] }, { lat: st.pts[i][0], lng: st.pts[i][1] });
-      const mid = cum[Math.max(0, Math.min(st.pts.length - 1, st.mid))];
-      let i = 1;
-      for (let km = MAP_STREET_TREE_KM / 2, j = 0; km < cum[cum.length - 1]; km += MAP_STREET_TREE_KM, j++) {
-        while (i < st.pts.length - 1 && cum[i] < km) i++;
-        const w = (km - cum[i - 1]) / (cum[i] - cum[i - 1] || 1);
-        const a = map.latLngToLayerPoint(st.pts[i - 1]);
-        const b = map.latLngToLayerPoint(st.pts[i]);
-        const [dx, dy] = [b.x - a.x, b.y - a.y];
-        const len = Math.hypot(dx, dy) || 1;
-        const side = j % 2 === 0 ? 1 : -1;
-        const off = (3 + mapHash(si * 31 + j * 7) * 2) * side;
-        const p = L.point(a.x + dx * w + (-dy / len) * off, a.y + dy * w + (dx / len) * off);
-        const m = L.circleMarker(map.layerPointToLatLng(p), { radius: 2.4 + mapHash(si * 17 + j * 13) * 1.4, color: cssVar('--grass', '#3f8f2f'), weight: 1, fillColor: cssVar('--grass', '#3f8f2f'), fillOpacity: 0.95, interactive: false, className: 'map-tree' });
-        layer.addLayer(m);
-        const e = m.getElement() as SVGElement | undefined;
-        if (e) e.style.animationDelay = `${Math.round(st.at + Math.abs(km - mid) * 1000 * 2.4 - now)}ms`;
+    // 街道的路樹：船經過市區時離路線稍遠的中心（在街道上）往四周的街道長（每 MAP_STREET_TREE_KM 公里一棵、左右輪流、離街的距離照現在的縮放算成像素），離中心越遠越晚長
+    for (const [bi, bl] of (r.blooms ?? []).entries()) {
+      const center = { lat: bl.center[0], lng: bl.center[1] };
+      for (const [si, st] of bl.streets.entries()) {
+        const cum = new Float64Array(st.pts.length);
+        for (let i = 1; i < st.pts.length; i++) cum[i] = cum[i - 1] + haversineKm({ lat: st.pts[i - 1][0], lng: st.pts[i - 1][1] }, { lat: st.pts[i][0], lng: st.pts[i][1] });
+        const mi = Math.max(0, Math.min(st.pts.length - 1, st.mid));
+        const base = haversineKm({ lat: st.pts[mi][0], lng: st.pts[mi][1] }, center);
+        let i = 1;
+        for (let km = MAP_STREET_TREE_KM / 2, j = 0; km < cum[cum.length - 1]; km += MAP_STREET_TREE_KM, j++) {
+          while (i < st.pts.length - 1 && cum[i] < km) i++;
+          const w = (km - cum[i - 1]) / (cum[i] - cum[i - 1] || 1);
+          const a = map.latLngToLayerPoint(st.pts[i - 1]);
+          const b = map.latLngToLayerPoint(st.pts[i]);
+          const [dx, dy] = [b.x - a.x, b.y - a.y];
+          const len = Math.hypot(dx, dy) || 1;
+          const side = j % 2 === 0 ? 1 : -1;
+          const off = (3 + mapHash(bi * 97 + si * 31 + j * 7) * 2) * side;
+          const p = L.point(a.x + dx * w + (-dy / len) * off, a.y + dy * w + (dx / len) * off);
+          const m = L.circleMarker(map.layerPointToLatLng(p), { radius: 2.4 + mapHash(bi * 59 + si * 17 + j * 13) * 1.4, color: cssVar('--grass', '#3f8f2f'), weight: 1, fillColor: cssVar('--grass', '#3f8f2f'), fillOpacity: 0.95, interactive: false, className: 'map-tree' });
+          layer.addLayer(m);
+          const e = m.getElement() as SVGElement | undefined;
+          if (e) e.style.animationDelay = `${Math.round(bl.at + (base + Math.abs(km - cum[mi])) * 1000 * 2.4 - now)}ms`;
+        }
       }
     }
     // 真的河：船沿河走時亮起來（畫在最下面）

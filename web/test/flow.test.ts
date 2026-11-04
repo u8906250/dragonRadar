@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { fireworksSvg, HQ_SAIL_MS, HQ_VOYAGE_MS, voyagePhase, voyageTimeOf } from '../src/flow';
-import { HQ_BOATS, HQ_CANALS, HQ_PLANTINGS, HQ_PONDS, HQ_SPRINGS, HQ_STREETS, HQ_TOUR, HQ_TOUR_AT, HQ_VOYAGE } from '../src/hq-voyage';
+import { HQ_BLOOMS, HQ_BOATS, HQ_CANALS, HQ_PLANTINGS, HQ_PONDS, HQ_SPRINGS, HQ_TOUR, HQ_TOUR_AT, HQ_VOYAGE } from '../src/hq-voyage';
 import { LANDMARKS } from '../src/landmarks';
 import { haversineKm } from '../src/geo';
 
@@ -59,10 +59,17 @@ describe('洋流總部的特效', () => {
     for (const p of [...HQ_SPRINGS, ...HQ_BOATS]) expect(nearRoute(p)).toBeLessThan(1.5);
     for (const b of HQ_BOATS) expect(b.width).toBeGreaterThanOrEqual(b.kind === 'dragon' ? 200 : 140);
     for (const pd of HQ_PONDS) expect(pd.ring.length).toBeGreaterThanOrEqual(6);
-    expect(HQ_STREETS.length).toBeGreaterThan(200);
-    for (const st of HQ_STREETS.filter((_, i) => i % 25 === 0)) {
-      expect(st.mid).toBeLessThan(st.pts.length);
-      expect(nearRoute({ lat: st.pts[st.mid][0], lng: st.pts[st.mid][1] })).toBeLessThan(0.45);
+    // 街道的路樹：中心離路線 200～700 公尺（不是在路線上），每個中心至少 3 條街、街都在中心 500 公尺內
+    expect(HQ_BLOOMS.length).toBeGreaterThan(30);
+    for (const bl of HQ_BLOOMS.filter((_, i) => i % 4 === 0)) {
+      const d = nearRoute({ lat: bl.center[0], lng: bl.center[1] });
+      expect(d).toBeGreaterThan(0.2);
+      expect(d).toBeLessThan(0.9);
+      expect(bl.streets.length).toBeGreaterThanOrEqual(3);
+      for (const st of bl.streets) {
+        expect(st.mid).toBeLessThan(st.pts.length);
+        expect(haversineKm({ lat: st.pts[st.mid][0], lng: st.pts[st.mid][1] }, { lat: bl.center[0], lng: bl.center[1] })).toBeLessThan(0.5);
+      }
     }
   });
 
