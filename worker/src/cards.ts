@@ -8,10 +8,11 @@ import { hashSalt, ReportError } from './reports';
 import { sha1Hex } from './sources/text';
 
 /** 有哪些卡，每張卡可以寫的地點（小法：前端照小法當時的位置判斷，伺服器只收這幾個，其他的寫最後一個；肉乾：回報拿到的） */
-export const CARDS = { xiaofa: ['碑林', '翠湖', '映池', '國父紀念館', '櫻花步道', '中山公園'], jerky: ['回報'] } as const;
+export const CARDS = { xiaofa: ['碑林', '翠湖', '映池', '國父紀念館', '櫻花步道', '中山公園'], jerky: ['回報'], mayor: ['洋流總部'] } as const;
 export type CardId = keyof typeof CARDS;
 /** 點到就拿得到的卡（/api/cards/claim）；其他的照規則由伺服器給（肉乾：回報累計） */
-const TAP_CARDS: readonly CardId[] = ['xiaofa'];
+// 你的市長（No.003）：在瀏覽器裡看完洋流總部的動畫、點完五個政策按鈕才領（跟小法一樣是瀏覽器判斷的）
+const TAP_CARDS: readonly CardId[] = ['xiaofa', 'mayor'];
 /** 道具 */
 export const ITEMS = { jerky: '古錐媽的肉乾' } as const;
 export type ItemId = keyof typeof ITEMS;

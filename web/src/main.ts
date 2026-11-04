@@ -10,7 +10,7 @@ import { X_MAX_WEIGHT, xLength } from './xcount';
 import { shortAddress, splitPlace } from './place';
 import { crowdOf, MapView, pinPicker, type BaseMap, type MapRoute, type PinPicker } from './map';
 import { beep, ensureNotificationPermission, iosNeedsHomeScreen, notificationState, pushSubscription, pushSupported, registerServiceWorker, showBanner, systemNotify, unlockAudio, unsubscribePush } from './notify';
-import { findCard, gotReward, openAlbum, openHelp, openItems } from './cards';
+import { findCard, gotReward, myCards, openAlbum, openHelp, openItems } from './cards';
 import { Radar, SPACE_FROM_KM, type RadarRoute, type RadarStreets, type SpaceView } from './radar';
 import { DEFAULT_THEME_ID, getTheme, THEMES, type Theme } from './themes';
 import type { BottleOut, EventOut, Item, KeywordInfo, KeywordRules, MyBottles, MyReport, Origin, Phase, PickedBottle, RelatedPost, RouteOut, PreviewItem, RouteStop, RoutePreview, SubmitResult, FailedItem, EditItem, EditInput } from './types';
@@ -3198,10 +3198,11 @@ function startHqVoyage(spinAt = Date.now()): void {
         if (map.userMovedAt < started + 300) map.flyToLatLng(cityHall, 17);
       } else if (!hqUserMoved) zoomToKm(HQ_END_KM, { lat: cityHall.lat, lng: cityHall.lng, source: 'manual' });
     }, wait + HQ_SAIL_MS),
-    // 到了、畫面停好：「看整個文化網」和政策圖層的按鈕出來（點、線都長完了）
+    // 到了、畫面停好：「看整個文化網」和政策圖層的按鈕出來（點、線都長完了）；也算「看完動畫」（中途關掉的不算，計時器被清掉了）
     window.setTimeout(() => {
       hqNetBtn.hidden = false;
       hqLayersBox.hidden = false;
+      mayorProgress('watched');
     }, wait + HQ_VOYAGE_MS),
   ];
   hqShowOff();
@@ -3232,6 +3233,29 @@ function stopHqVoyage(): void {
   radar.setStarSpin(null);
   map.setStarSpin(null);
   render();
+}
+/**
+ * 收集卡 No.003「你的市長」：點洋流總部看完動畫（到站、按鈕出來）、再把上面五個政策按鈕（看整個文化網、教育・午餐、通學區、親子、衛福）都點過，
+ * 就跟伺服器領卡（findCard，跟小法一樣是瀏覽器判斷的）。進度記在這個瀏覽器（dr.mayorQuest），分好幾次看完也算
+ */
+const LS_MAYOR = 'dr.mayorQuest';
+const MAYOR_STEPS = ['watched', 'net', 'edu', 'zone', 'family', 'health'];
+function mayorProgress(step: string): void {
+  if (myCards().some((c) => c.card === 'mayor')) return;
+  let done: string[] = [];
+  try {
+    const v: unknown = JSON.parse(localStorage.getItem(LS_MAYOR) ?? '[]');
+    if (Array.isArray(v)) done = v.filter((x): x is string => typeof x === 'string');
+  } catch {
+    // 讀不到就從頭算
+  }
+  if (!done.includes(step)) done.push(step);
+  try {
+    localStorage.setItem(LS_MAYOR, JSON.stringify(done));
+  } catch {
+    // 存不了也照樣算這一次
+  }
+  if (MAYOR_STEPS.every((x) => done.includes(x))) void findCard('mayor', '洋流總部', (msg) => showBanner(bannerEl, msg, 4000));
 }
 /** 右上角按鈕下面：「看整個文化網」（到了才出來）、「關閉洋流號」（播放中、播完都在，按了才收） */
 const hqPanel = document.createElement('div');
@@ -3281,6 +3305,7 @@ hqNetBtn.addEventListener('click', () => {
   const wasOn = hqNetAt !== null;
   hqShowOff();
   if (!wasOn) {
+    mayorProgress('net');
     hqFlyTo(HQ_NET_CENTER, HQ_NET_KM, 12);
     hqNetAt = Date.now() + 1300;
     hqNetBtn.textContent = '收起文化網';
@@ -3299,6 +3324,7 @@ hqLayersBox.addEventListener('click', (e) => {
   const wasOn = hqLayer?.id === ly.id;
   hqShowOff();
   if (!wasOn) {
+    mayorProgress(ly.id);
     // 保持目前的位置、範圍（使用者說「點選按鈕不用縮放到全部都看得到，保持目前位置就好」）
     hqLayer = { id: ly.id, at: Date.now() + 100 };
     btn.classList.add('on');

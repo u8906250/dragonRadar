@@ -23,6 +23,8 @@ export interface CardDef {
   serial: (c: CardClaim) => string;
   /** 拿到時翻開的標題 */
   got: string;
+  /** 照片的出處、授權（寫在卡片介紹下面的小字） */
+  credit?: string;
 }
 
 const BASE = import.meta.env.BASE_URL;
@@ -50,6 +52,20 @@ export const CARD_DEFS: CardDef[] = [
     found: () => '貼了 5 個活動',
     serial: (c) => `第 ${c.serial} 位拿到的人`,
     got: '拿到古錐媽的肉乾了！',
+  },
+  {
+    id: 'mayor',
+    no: 3,
+    name: '你的市長',
+    img: `${BASE}cards/mayor.webp`,
+    about: '你的市長沈伯洋。看完了洋流總部的政策：洋流號繞台北一圈，文化網、教育・午餐、通學區、親子、衛福都看過了。',
+    hints: ['洋流總部看完政策'],
+    series: '洋流總部',
+    found: () => '看完洋流總部的政策',
+    serial: (c) => `第 ${c.serial} 位看完的人`,
+    got: '你的市長沈伯洋！',
+    // 照片從官網政策專區（公務員政策的代表圖）裁出來，政策專區圖文採用 CC BY 4.0，要標出處、授權、有修改
+    credit: '照片：沈伯洋台北市長競選官網政策專區（puma.taipei），CC BY 4.0，經裁切',
   },
 ];
 
@@ -118,6 +134,7 @@ function frontHtml(d: CardDef, c: CardClaim): string {
       <div class="tc-photo"><img src="${d.img}" alt="${esc(d.name)}的照片" draggable="false"></div>
       <div class="tc-name">${esc(d.name)}</div>
       <p class="tc-about">${esc(d.about)}</p>
+      ${d.credit ? `<p class="tc-credit">${esc(d.credit)}</p>` : ''}
       <div class="tc-meta"><span>${esc(d.found(c))}</span><span>${dateText(c.at)}</span></div>
       <div class="tc-serial">${esc(d.serial(c))}</div>
     </div>`;

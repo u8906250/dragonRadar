@@ -13,6 +13,9 @@ describe('parseClaim', () => {
     expect(parseClaim({ card: 'lucky' })).toBe('沒有這張卡');
     // 肉乾卡要回報累計才拿得到，不能直接拿
     expect(parseClaim({ card: 'jerky', place: '回報' })).toBe('這張卡要照規則拿，不能直接拿');
+    // 你的市長：瀏覽器判斷看完、點完才領，地點只有洋流總部
+    expect(parseClaim({ card: 'mayor', place: '洋流總部' })).toEqual({ card: 'mayor', place: '洋流總部' });
+    expect(parseClaim({ card: 'mayor' })).toEqual({ card: 'mayor', place: '洋流總部' });
     expect(parseClaim(null)).toBe('沒有這張卡');
   });
 });
