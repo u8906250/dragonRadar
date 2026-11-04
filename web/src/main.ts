@@ -3478,9 +3478,11 @@ function hqExtras(t0: number): { reveals: HqReveal[]; icons: HqIcon[] } {
     const near = hqDistM(sv) <= HQ_SERVICE_NEAR_M;
     if (!near && !(ly && hqLayer && ly.kinds.includes(sv.kind))) continue;
     const at = near ? hqNearestAt(t0, sv) : hqLayer!.at + Math.min(li++ * 8, 1600);
-    // 方塊都不能點（v1.496 使用者說的；介紹寫在政策圖層的說明卡）；圖層開著時那幾種放大、外圍有光圈
+    // 介紹寫在政策圖層的說明卡（v1.496）；點方塊（滑鼠移過去）只顯示名稱（v1.500 使用者說「把點選顯示名稱加回來」），
+    // 名字裡沒寫是什麼地方的（圖書館的「中山分館」）後面補上；圖層開著時那幾種放大
     const focus = !!ly && ly.kinds.includes(sv.kind);
-    icons.push({ lat: sv.lat, lng: sv.lng, at, kind: 'service', char: K.char, color: K.color, scale: focus ? 1.25 : 0.85, focus });
+    const title = /國小|國中|親子館|家庭教育中心|運動中心|健康服務中心|圖書館/.test(sv.name) ? sv.name : `${sv.name}（${K.name}）`;
+    icons.push({ lat: sv.lat, lng: sv.lng, at, kind: 'service', char: K.char, color: K.color, scale: focus ? 1.25 : 0.85, focus, hint: { title, intro: '' } });
   }
   // 文化徑的線（點 —— 線）：同一條路線的點都冒出來後，用那條路線的顏色沿街道連起來
   for (const ln of hq.HQ_CULTURE_LINES) {
