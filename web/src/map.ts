@@ -1,5 +1,5 @@
 import type * as Leaflet from 'leaflet';
-import { alongLine, BOAT_SVG, cultureSvg, regrowSvg, boatPhase, fireworksSvg, FIREWORKS_MS, flowOut, HQ_VOYAGE_MS, RAINBOW_FLOW_TOTAL, RAINBOW_STAGGER_MS, surge, SURGE_TOTAL, voyagePhase, voyageTimeOf } from './flow';
+import { alongLine, BOAT_SVG, cultureSvg, regrowSvg, serviceSvg, boatPhase, fireworksSvg, FIREWORKS_MS, flowOut, HQ_VOYAGE_MS, RAINBOW_FLOW_TOTAL, RAINBOW_STAGGER_MS, surge, SURGE_TOTAL, voyagePhase, voyageTimeOf } from './flow';
 import { haversineKm, type LatLng } from './geo';
 import type { EventKind, Phase } from './types';
 import { LANDMARKS } from './landmarks';
@@ -72,13 +72,15 @@ export interface MapRoute {
   /** 綠覆率：整個台北市（ring）在 steps 的每個時間再鋪一層很淡的綠 */
   green?: { ring: Array<[number, number]>; steps: number[] };
   /** 一塊地方（社子島）：at 時淡入、留著，虛線外框、名字寫在中間 */
-  areas?: Array<{ ring: Array<[number, number]>; center: [number, number]; at: number; label: string }>;
+  areas?: Array<{ ring: Array<[number, number]>; center: [number, number]; at: number; label: string; zones?: Array<Array<[number, number]>>; zonesAt?: number }>;
   /** 洋流號的河什麼時候淡掉（到終點後拿掉，政策的東西才看得清楚） */
   riverOut?: number;
   /** 文化網（點 —— 線 —— 面） */
   network?: { at: number; lines: Array<{ path: Array<[number, number]>; color: string }>; dots: Array<{ lat: number; lng: number; color: string }> };
   /** 一個東西冒出來：hut 登山中心、stadium 足球場、dome 運動中心、star 星星、regrow 樹樁（grow 時長回大樹）、culture 文化徑的點（small 的名字地圖上不寫，滑鼠移過去看介紹） */
-  icons?: Array<{ lat: number; lng: number; at: number; kind: 'hut' | 'stadium' | 'dome' | 'star' | 'regrow' | 'culture'; label?: string; scale?: number; grow?: number; char?: string; color?: string; small?: boolean }>;
+  icons?: Array<{ lat: number; lng: number; at: number; kind: 'hut' | 'stadium' | 'dome' | 'star' | 'regrow' | 'culture' | 'service'; label?: string; scale?: number; grow?: number; char?: string; color?: string; small?: boolean }>;
+  /** 通學區：國小四周 radiusM 公尺，at 時淡入 */
+  circles?: Array<{ lat: number; lng: number; radiusM: number; at: number }>;
   /** 滑鼠移過去的介紹（at 之後才感應；dy 是往上移幾像素） */
   hits?: Array<{ lat: number; lng: number; at: number; title: string; intro: string; dy?: number; r?: number }>;
   /** 水上活動：船經過時（at）河上出現 SUP、龍舟；heading 是船頭朝哪（度，0 是上、順時針） */
@@ -598,7 +600,8 @@ export class MapView {
 
   setRoutes(routes: MapRoute[]): void {
     const sig = (rs: MapRoute[]): string =>
-      JSON.stringify(rs.map((r) => [r.id, r.state, r.flowAt ?? null, r.segments.map((x) => [x.people, x.target, x.path.length, !!x.passed]), r.turns ?? [], !!r.boat, r.voyage ?? null]));
+      // 洋流總部的特效：文化網、政策圖層（多出來的地方、通學區的圈）開關時也要重畫
+      JSON.stringify(rs.map((r) => [r.id, r.state, r.flowAt ?? null, r.segments.map((x) => [x.people, x.target, x.path.length, !!x.passed]), r.turns ?? [], !!r.boat, r.voyage ?? null, r.network?.at ?? null, r.icons?.length ?? 0, r.circles?.length ?? 0]));
     if (sig(routes) === sig(this.routes)) return;
     this.routes = routes;
     this.pushRoutes();
@@ -938,7 +941,21 @@ export class MapView {
       layer.addLayer(poly);
       const e = poly.getElement() as SVGElement | undefined;
       if (e) e.style.animationDelay = `${Math.round(ar.at - now)}ms`;
+      // 分區一區一區亮起來
+      (ar.zones ?? []).forEach((z, i) => {
+        const zp = L.polygon(z, { color: '#7d6a45', weight: 1.2, opacity: 0.5, fillColor: '#f2b544', fillOpacity: 0, interactive: false, className: 'map-area-zone' });
+        layer.addLayer(zp);
+        const ze = zp.getElement() as SVGElement | undefined;
+        if (ze) ze.style.animationDelay = `${Math.round((ar.zonesAt ?? ar.at) + i * 450 - now)}ms`;
+      });
       this.stayLabel(ar.center, ar.label, ar.at + 300 - now, 9);
+    }
+    // 通學區：國小四周 150 公尺
+    for (const c of r.circles ?? []) {
+      const ci = L.circle([c.lat, c.lng], { radius: c.radiusM, color: '#2a6fd6', weight: 1.3, dashArray: '4 3', fillColor: '#2a6fd6', fillOpacity: 0.12, interactive: false, className: 'map-school-zone' });
+      layer.addLayer(ci);
+      const e = ci.getElement() as SVGElement | undefined;
+      if (e) e.style.animationDelay = `${Math.round(c.at - now)}ms`;
     }
     // 文化網（點 —— 線 —— 面）：面（很粗很淡的光暈）→ 線 → 點，照時間亮
     if (r.network) {
@@ -986,7 +1003,7 @@ export class MapView {
     // 冒出來的東西：登山中心、足球場、運動中心、星星
     for (const ic of r.icons ?? []) {
       const sc = ic.scale ?? 1;
-      const body = ic.kind === 'regrow' ? regrowSvg((ic.grow ?? ic.at) - now) : ic.kind === 'culture' ? cultureSvg(ic.char ?? '', ic.color ?? '#555') : MAP_ICON_SVG[ic.kind];
+      const body = ic.kind === 'regrow' ? regrowSvg((ic.grow ?? ic.at) - now) : ic.kind === 'culture' ? cultureSvg(ic.char ?? '', ic.color ?? '#555') : ic.kind === 'service' ? serviceSvg(ic.char ?? '', ic.color ?? '#555') : MAP_ICON_SVG[ic.kind];
       const icon = L.divIcon({ className: `map-voyage-icon ${ic.kind}`, html: `<svg viewBox="-20 -20 40 40" width="${40 * sc}" height="${40 * sc}" aria-hidden="true"><g class="boat-pop" style="animation-delay:${Math.round(ic.at - now)}ms">${body}</g></svg>`, iconSize: [40 * sc, 40 * sc], iconAnchor: [20 * sc, 20 * sc] });
       layer.addLayer(L.marker([ic.lat, ic.lng], { icon, interactive: false, keyboard: false, zIndexOffset: 1300 }));
       if (ic.label && !ic.small) this.stayLabel([ic.lat, ic.lng], ic.label, (ic.grow ?? ic.at) + 500 - now, 20 * sc + 16);

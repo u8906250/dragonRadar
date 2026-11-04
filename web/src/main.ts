@@ -1527,7 +1527,8 @@ function render(): void {
               hits: hqHits(hqVoyageAt).filter(inView).map((h) => ({ ...h, ...toRadarAt([h.lat, h.lng]) })),
               // 綠覆率：每長回一棵樹，整個台北市再鋪一層很淡的綠
               green: { ring: hq.HQ_TAIPEI_RING.map(toRadarAt), steps: hqGreenSteps(hqVoyageAt) },
-              areas: hqAreas(hqVoyageAt).filter((ar) => anyInView(ar.ring)).map((ar) => ({ ring: ar.ring.map(toRadarAt), center: toRadarAt(ar.center), at: ar.at, label: ar.label })),
+              areas: hqAreas(hqVoyageAt).filter((ar) => anyInView(ar.ring)).map((ar) => ({ ring: ar.ring.map(toRadarAt), center: toRadarAt(ar.center), at: ar.at, label: ar.label, zones: ar.zones?.map((z) => z.map(toRadarAt)), zonesAt: ar.zonesAt })),
+              circles: hqCircles().filter(inView).map((c) => ({ ring: c.ring.map(toRadarAt), at: c.at })),
               ...(hqNetAt !== null ? { network: (({ at, lines, dots }) => ({ at, lines: lines.filter((ln) => anyInView(ln.path)).map((ln) => ({ points: ln.path.map(toRadarAt), color: ln.color })), dots: dots.filter(inView).map((dt) => ({ ...toRadarAt([dt.lat, dt.lng]), color: dt.color })) }))(hqNetwork(hqNetAt)) } : {}),
             },
           ],
@@ -1594,6 +1595,7 @@ function render(): void {
               hits: hqHits(hqVoyageAt),
               green: { ring: hq.HQ_TAIPEI_RING, steps: hqGreenSteps(hqVoyageAt) },
               areas: hqAreas(hqVoyageAt),
+              circles: hqCircles().map(({ lat, lng, radiusM, at }) => ({ lat, lng, radiusM, at })),
               ...(hqNetAt !== null ? { network: hqNetwork(hqNetAt) } : {}),
             },
           ],
@@ -3188,13 +3190,25 @@ function startHqVoyage(spinAt = Date.now()): void {
         if (map.userMovedAt < started + 300) map.flyToLatLng(cityHall, 17);
       } else if (!hqUserMoved) zoomToKm(HQ_END_KM, { lat: cityHall.lat, lng: cityHall.lng, source: 'manual' });
     }, wait + HQ_SAIL_MS),
-    // 到了、畫面停好：「看整個文化網」的按鈕出來（點、線都長完了）
-    window.setTimeout(() => (hqNetBtn.hidden = false), wait + HQ_VOYAGE_MS),
+    // 到了、畫面停好：「看整個文化網」和政策圖層的按鈕出來（點、線都長完了）
+    window.setTimeout(() => {
+      hqNetBtn.hidden = false;
+      hqLayersBox.hidden = false;
+    }, wait + HQ_VOYAGE_MS),
   ];
-  hqNetAt = null;
+  hqShowOff();
   hqNetBtn.hidden = true;
-  hqNetBtn.textContent = HQ_NET_SHOW;
-  hqCaption.hidden = true;
+  hqLayersBox.hidden = true;
+  if (!hqLayersBox.childElementCount) {
+    for (const ly of hq.HQ_POLICY_LAYERS) {
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.className = 'chip';
+      b.dataset.id = ly.id;
+      b.textContent = ly.label;
+      hqLayersBox.appendChild(b);
+    }
+  }
   hqPanel.hidden = false;
   render();
 }
@@ -3204,9 +3218,8 @@ function stopHqVoyage(): void {
   for (const t of hqVoyageTimers) window.clearTimeout(t);
   window.clearInterval(hqFollowTimer);
   hqVoyageAt = null;
-  hqNetAt = null;
+  hqShowOff();
   hqPanel.hidden = true;
-  hqCaption.hidden = true;
   introTip.hidden = true;
   radar.setStarSpin(null);
   map.setStarSpin(null);
@@ -3232,25 +3245,63 @@ let hqNetAt: number | null = null;
 const hqCaption = document.createElement('div');
 hqCaption.className = 'hq-net-caption';
 hqCaption.hidden = true;
-hqCaption.innerHTML = '<b><span>點</span><span> —— 線</span><span> —— 面</span></b><small>多元的台北文化生態系</small><small>政策島：水路串起都市微森林、山徑與文化徑</small>';
+const HQ_NET_CAPTION = '<b><span>點</span><span> —— 線</span><span> —— 面</span></b><small>多元的台北文化生態系</small><small>政策島：水路串起都市微森林、山徑與文化徑</small>';
 document.querySelector('#stage .overlay-tl')!.appendChild(hqCaption);
+/**
+ * 到站後的政策圖層（使用者選「沿路冒出來＋到站後的政策圖層」）：教育・午餐、通學區、親子、衛福，按了拉遠看全台北那幾種地方（通學區拉近到 2.5 km 才看得到 150 公尺的圈）；
+ * 跟「看整個文化網」一次只開一個，再按一次收起來
+ */
+let hqLayer: { id: string; at: number } | null = null;
+const hqLayersBox = document.createElement('div');
+hqLayersBox.className = 'hq-layers';
+hqLayersBox.hidden = true;
+hqPanel.insertBefore(hqLayersBox, hqPanel.querySelector('.hq-close'));
+function hqShowOff(): void {
+  hqNetAt = null;
+  hqLayer = null;
+  hqNetBtn.textContent = HQ_NET_SHOW;
+  for (const b of hqLayersBox.children) b.classList.remove('on');
+  hqCaption.hidden = true;
+}
+/** 拉到 km、正中間在 center（飛 1.2 秒，飛到了才開始亮） */
+function hqFlyTo(center: LatLng, km: number, mapZoom: number): void {
+  if (view === 'map') map.flyToLatLng(center, mapZoom);
+  else zoomToKm(km, { ...center, source: 'manual' });
+}
 hqNetBtn.addEventListener('click', () => {
   if (hqVoyageAt === null) return;
-  if (hqNetAt !== null) {
-    hqNetAt = null;
-    hqNetBtn.textContent = HQ_NET_SHOW;
-    hqCaption.hidden = true;
-    render();
-    return;
+  const wasOn = hqNetAt !== null;
+  hqShowOff();
+  if (!wasOn) {
+    hqFlyTo(HQ_NET_CENTER, HQ_NET_KM, 12);
+    hqNetAt = Date.now() + 1300;
+    hqNetBtn.textContent = '收起文化網';
+    hqCaption.innerHTML = HQ_NET_CAPTION;
+    hqCaption.hidden = false;
+    hqCaption.classList.remove('play');
+    window.setTimeout(() => hqCaption.classList.add('play'), 1300);
   }
-  // 先拉遠（飛 1.2 秒），飛到了才開始亮
-  if (view === 'map') map.flyToLatLng(HQ_NET_CENTER, 12);
-  else zoomToKm(HQ_NET_KM, { ...HQ_NET_CENTER, source: 'manual' });
-  hqNetAt = Date.now() + 1300;
-  hqNetBtn.textContent = '收起文化網';
-  hqCaption.hidden = false;
-  hqCaption.classList.remove('play');
-  window.setTimeout(() => hqCaption.classList.add('play'), 1300);
+  render();
+});
+hqLayersBox.addEventListener('click', (e) => {
+  const btn = (e.target as Element).closest('button[data-id]') as HTMLButtonElement | null;
+  if (!btn || hqVoyageAt === null || !hq) return;
+  const ly = hq.HQ_POLICY_LAYERS.find((x) => x.id === btn.dataset.id);
+  if (!ly) return;
+  const wasOn = hqLayer?.id === ly.id;
+  hqShowOff();
+  if (!wasOn) {
+    hqFlyTo(ly.zone ? { lat: origin.lat, lng: origin.lng } : HQ_NET_CENTER, ly.km, ly.zone ? 15 : 12);
+    hqLayer = { id: ly.id, at: Date.now() + 1300 };
+    btn.classList.add('on');
+    const b = document.createElement('b');
+    b.textContent = ly.title;
+    const sm = document.createElement('small');
+    sm.textContent = ly.note;
+    hqCaption.replaceChildren(b, sm);
+    hqCaption.classList.add('play');
+    hqCaption.hidden = false;
+  }
   render();
 });
 document.addEventListener('keydown', (e) => {
@@ -3347,7 +3398,23 @@ function hqStarPoints(st: { lat: number; lng: number; count: number; radiusM: nu
 /** 樹樁比長樹早幾毫秒冒出來 */
 const HQ_STUMP_LEAD_MS = 1500;
 type HqReveal = { path: Array<[number, number]>; at: number; kind: 'trail' | 'bridge' | 'stars' | 'culture'; label?: string; color?: string };
-type HqIcon = { lat: number; lng: number; at: number; kind: 'hut' | 'stadium' | 'dome' | 'star' | 'regrow' | 'culture'; label?: string; scale?: number; grow?: number; char?: string; color?: string; small?: boolean };
+type HqIcon = { lat: number; lng: number; at: number; kind: 'hut' | 'stadium' | 'dome' | 'star' | 'regrow' | 'culture' | 'service'; label?: string; scale?: number; grow?: number; char?: string; color?: string; small?: boolean; hint?: { title: string; intro: string } };
+/** 其他政見的地方：離路線多近才沿路冒出來 */
+const HQ_SERVICE_NEAR_M = 300;
+/** 離路線幾公尺（路線載入後不會變，記起來） */
+const hqDistCache = new Map<string, number>();
+function hqDistM(p: LatLng): number {
+  if (!hq) return Infinity;
+  const key = `${p.lat},${p.lng}`;
+  let d = hqDistCache.get(key);
+  if (d === undefined) {
+    d = Infinity;
+    const path = hq.HQ_VOYAGE;
+    for (let i = 0; i < path.length; i += 2) d = Math.min(d, haversineKm(p, { lat: path[i][0], lng: path[i][1] }) * 1000);
+    hqDistCache.set(key, d);
+  }
+  return d;
+}
 /** 其他政見的東西：步道（山林徑）、自行車橋、球場和運動中心、星群——線和冒出來的東西（照船到那一站或離它最近的時間） */
 function hqExtras(t0: number): { reveals: HqReveal[]; icons: HqIcon[] } {
   if (!hq) return { reveals: [], icons: [] };
@@ -3382,6 +3449,17 @@ function hqExtras(t0: number): { reveals: HqReveal[]; icons: HqIcon[] } {
     seen.set(c.name, at);
     icons.push({ lat: c.lat, lng: c.lng, at, kind: 'culture', char: c.theme, color: th.color, label: c.name, small: true });
   }
+  // 其他政見的地方（學校、圖書館、運動中心、親子館、健康服務中心）：路線 300 公尺內的，船離它最近時冒出來；
+  // 政策圖層開著時，那幾種的全部都畫（離路線遠的照順序很快冒出來）
+  const ly = hqLayer ? hq.HQ_POLICY_LAYERS.find((x) => x.id === hqLayer!.id) : undefined;
+  let li = 0;
+  for (const sv of hq.HQ_SERVICES) {
+    const K = hq.HQ_SERVICE_KINDS[sv.kind];
+    const near = hqDistM(sv) <= HQ_SERVICE_NEAR_M;
+    if (!near && !(ly && hqLayer && ly.kinds.includes(sv.kind))) continue;
+    const at = near ? hqNearestAt(t0, sv) : hqLayer!.at + Math.min(li++ * 8, 1600);
+    icons.push({ lat: sv.lat, lng: sv.lng, at, kind: 'service', char: K.char, color: K.color, scale: 0.85, hint: { title: `${sv.name}（${K.name}）`, intro: K.intro } });
+  }
   // 文化徑的線（點 —— 線）：同一條路線的點都冒出來後，用那條路線的顏色沿街道連起來
   for (const ln of hq.HQ_CULTURE_LINES) {
     const at = Math.max(...ln.stops.map((n) => seen.get(n) ?? t0)) + 400;
@@ -3390,13 +3468,31 @@ function hqExtras(t0: number): { reveals: HqReveal[]; icons: HqIcon[] } {
   return { reveals, icons };
 }
 /** 一塊地方（社子島）：船快到那一站前 6 秒淡入、留著；名字寫在中間（範圍的平均點） */
-function hqAreas(t0: number): Array<{ ring: Array<[number, number]>; center: [number, number]; at: number; label: string }> {
+function hqAreas(t0: number): Array<{ ring: Array<[number, number]>; center: [number, number]; at: number; label: string; zones?: Array<Array<[number, number]>>; zonesAt?: number }> {
   if (!hq) return [];
   return hq.HQ_AREAS.map((ar) => {
     const n = ar.ring.length;
     const center: [number, number] = [ar.ring.reduce((t, q) => t + q[0], 0) / n, ar.ring.reduce((t, q) => t + q[1], 0) / n];
-    return { ring: ar.ring, center, at: hqStopAt(t0, ar.stop) - 6000, label: ar.name };
+    // 分區：船到島頭時從西往東一區一區亮
+    return { ring: ar.ring, center, at: hqStopAt(t0, ar.stop) - 6000, label: ar.name, zones: ar.zones, zonesAt: hqStopAt(t0, ar.stop) + 200 };
   });
+}
+/** 通學區（政策圖層）：每所國小四周 150 公尺的圈（雷達用 20 邊形） */
+function hqCircles(): Array<{ lat: number; lng: number; radiusM: number; at: number; ring: Array<[number, number]> }> {
+  if (!hq || !hqLayer) return [];
+  const ly = hq.HQ_POLICY_LAYERS.find((x) => x.id === hqLayer!.id);
+  if (!ly?.zone) return [];
+  const at0 = hqLayer.at;
+  return hq.HQ_SERVICES.filter((sv) => sv.kind === '小').map((sv, i) => ({
+    lat: sv.lat,
+    lng: sv.lng,
+    radiusM: 150,
+    at: at0 + Math.min(i * 8, 1600),
+    ring: Array.from({ length: 20 }, (_, j): [number, number] => {
+      const q = destination(sv, j * 18, 0.15);
+      return [q.lat, q.lng];
+    }),
+  }));
 }
 /** 綠覆率：每長回一棵樹（時間）就再鋪一層 */
 function hqGreenSteps(t0: number): number[] {
@@ -3429,6 +3525,10 @@ function hqHits(t0: number): Array<{ lat: number; lng: number; at: number; title
   const hits: ReturnType<typeof hqHits> = [];
   const ex = hqExtras(t0);
   for (const ic of ex.icons) {
+    if (ic.hint) {
+      hits.push({ lat: ic.lat, lng: ic.lng, at: ic.at, title: ic.hint.title, intro: ic.hint.intro, r: 9 });
+      continue;
+    }
     if (ic.kind === 'regrow') {
       const p = hq.HQ_PLANTINGS.find((x) => x.lat === ic.lat && x.lng === ic.lng);
       if (!p) continue;
@@ -3462,6 +3562,8 @@ function hqHits(t0: number): Array<{ lat: number; lng: number; at: number; title
     const lng = pd.ring.reduce((t, q) => t + q[1], 0) / n;
     hits.push({ lat, lng, at: hqStopAt(t0, pd.stop), title: pd.name, intro: I[pd.name] ?? '', r: 16 });
   }
+  const cityHall = hq.HQ_TOUR[hq.HQ_TOUR.length - 1];
+  hits.push({ lat: cityHall.lat, lng: cityHall.lng, at: t0 + HQ_SAIL_MS, title: '臺北市政府（公務員政策）', intro: I['臺北市政府'] ?? '', r: 18 });
   for (const ar of hqAreas(t0)) hits.push({ lat: ar.center[0], lng: ar.center[1], at: ar.at, title: `${ar.label}`, intro: I[ar.label] ?? '', r: 26 });
   for (const b of hq.HQ_BOATS) hits.push({ lat: b.lat, lng: b.lng, at: hqNearestAt(t0, b), title: `水上活動（${b.kind === 'sup' ? 'SUP' : '龍舟'}）`, intro: I['水上活動'] ?? '', r: 12 });
   return hits;

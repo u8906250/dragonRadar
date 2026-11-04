@@ -206,3 +206,8 @@ export function cultureSvg(char: string, color: string): string {
   return `<circle class="cu-dot" r="7" style="fill:${color}"/><text class="cu-char" y="3.1" text-anchor="middle">${char}</text>`;
 }
 
+/** 其他政見對到的地方（學校、圖書館、運動中心、親子館、健康服務中心）：圓角方塊、裡面寫一個字（文化徑是圓的，分得開） */
+export function serviceSvg(char: string, color: string): string {
+  return `<rect class="sv-dot" x="-7" y="-7" width="14" height="14" rx="3.5" style="fill:${color}"/><text class="cu-char" y="3.1" text-anchor="middle">${char}</text>`;
+}
+

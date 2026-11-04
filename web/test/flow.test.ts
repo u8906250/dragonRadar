@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { fireworksSvg, HQ_SAIL_MS, HQ_VOYAGE_MS, voyagePhase, voyageTimeOf } from '../src/flow';
-import { HQ_BLOOMS, HQ_BOATS, HQ_BRIDGE, HQ_CANALS, HQ_CULTURE, HQ_CULTURE_LINES, HQ_CULTURE_THEMES, HQ_INTROS, HQ_TAIPEI_RING, HQ_PLANTINGS, HQ_PONDS, HQ_SPRINGS, HQ_STARS, HQ_TOUR, HQ_TOUR_AT, HQ_TRAILS, HQ_VENUES, HQ_VOYAGE } from '../src/hq-voyage';
+import { HQ_BLOOMS, HQ_BOATS, HQ_BRIDGE, HQ_CANALS, HQ_AREAS, HQ_CULTURE, HQ_CULTURE_LINES, HQ_CULTURE_THEMES, HQ_INTROS, HQ_POLICY_LAYERS, HQ_SERVICE_KINDS, HQ_SERVICES, HQ_TAIPEI_RING, HQ_PLANTINGS, HQ_PONDS, HQ_SPRINGS, HQ_STARS, HQ_TOUR, HQ_TOUR_AT, HQ_TRAILS, HQ_VENUES, HQ_VOYAGE } from '../src/hq-voyage';
 import { LANDMARKS } from '../src/landmarks';
 import { haversineKm } from '../src/geo';
 
@@ -98,7 +98,16 @@ describe('洋流總部的特效', () => {
       return ok;
     };
     expect(HQ_TAIPEI_RING.length).toBeGreaterThan(100);
-    for (const p of [...HQ_TOUR, ...HQ_CULTURE]) expect(inside(p.lat, p.lng), 'place' in p ? p.place : p.name).toBe(true);
+    for (const p of [...HQ_TOUR, ...HQ_CULTURE, ...HQ_SERVICES]) expect(inside(p.lat, p.lng), 'place' in p ? p.place : p.name).toBe(true);
+    // 其他政見的地方：每一種都有、國小 100 所以上、12 區運動中心和健康服務中心，政策圖層用到的種類都有資料
+    expect(HQ_SERVICES.filter((x) => x.kind === '小').length).toBeGreaterThan(100);
+    expect(HQ_SERVICES.filter((x) => x.kind === '動').length).toBe(12);
+    expect(HQ_SERVICES.filter((x) => x.kind === '健').length).toBe(12);
+    for (const k of Object.keys(HQ_SERVICE_KINDS)) expect(HQ_SERVICES.some((x) => x.kind === k), k).toBe(true);
+    for (const ly of HQ_POLICY_LAYERS) for (const k of ly.kinds) expect(HQ_SERVICE_KINDS[k].intro.length).toBeGreaterThan(20);
+    // 社子島分 9 區（示意）
+    expect(HQ_AREAS[0].zones?.length).toBe(9);
+    expect(HQ_INTROS['臺北市政府']?.length ?? 0).toBeGreaterThan(20);
     for (const v of [...HQ_VENUES, ...HQ_STARS]) expect(nearRoute(v)).toBeLessThan(2.5);
     // 街道的路樹：中心離路線 200～700 公尺（不是在路線上），每個中心至少 3 條街、街都在中心 500 公尺內
     expect(HQ_BLOOMS.length).toBeGreaterThan(30);

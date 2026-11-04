@@ -1,5 +1,5 @@
 import type { BlipStyle, EventKind, Phase, SweepStyle } from './types';
-import { alongLine, BOAT_SVG, cultureSvg, regrowSvg, BOAT_TITLE, boatPhase, fireworksSvg, FIREWORKS_MS, flowOut, HQ_VOYAGE_MS, RAINBOW_FLOW_TOTAL, RAINBOW_STAGGER_MS, riverHalfWidth, surge, SURGE_TOTAL, voyagePhase, voyageTimeOf } from './flow';
+import { alongLine, BOAT_SVG, cultureSvg, regrowSvg, serviceSvg, BOAT_TITLE, boatPhase, fireworksSvg, FIREWORKS_MS, flowOut, HQ_VOYAGE_MS, RAINBOW_FLOW_TOTAL, RAINBOW_STAGGER_MS, riverHalfWidth, surge, SURGE_TOTAL, voyagePhase, voyageTimeOf } from './flow';
 
 export interface RadarItem {
   id: number;
@@ -79,14 +79,16 @@ export interface RadarRoute {
   /** 洋流號的河什麼時候淡掉（到終點後拿掉，政策的東西才看得清楚；使用者說的） */
   riverOut?: number;
   /** 一塊地方（社子島）：at 時淡入、留著，虛線外框、名字寫在中間 */
-  areas?: Array<{ ring: Array<{ bearing: number; distanceKm: number }>; center: { bearing: number; distanceKm: number }; at: number; label: string }>;
+  areas?: Array<{ ring: Array<{ bearing: number; distanceKm: number }>; center: { bearing: number; distanceKm: number }; at: number; label: string; zones?: Array<Array<{ bearing: number; distanceKm: number }>>; zonesAt?: number }>;
   /** 文化網（點 —— 線 —— 面）：at 開始；先點亮 dots、再沿 lines 亮起來、最後每條線、每個點往外暈開連成一片 */
   network?: { at: number; lines: Array<{ points: Array<{ bearing: number; distanceKm: number }>; color: string }>; dots: Array<{ bearing: number; distanceKm: number; color: string }> };
   /**
    * 一個東西冒出來（at）：hut 登山中心、stadium 足球場、dome 運動中心、star 星星、regrow 樹樁（grow 時長回大樹）、culture 文化徑的點（char、color）；
    * label 留著（small 是寫在下面的小字，跟別的小字重疊就不寫）
    */
-  icons?: Array<{ bearing: number; distanceKm: number; at: number; kind: 'hut' | 'stadium' | 'dome' | 'star' | 'regrow' | 'culture'; label?: string; scale?: number; grow?: number; char?: string; color?: string; small?: boolean }>;
+  icons?: Array<{ bearing: number; distanceKm: number; at: number; kind: 'hut' | 'stadium' | 'dome' | 'star' | 'regrow' | 'culture' | 'service'; label?: string; scale?: number; grow?: number; char?: string; color?: string; small?: boolean }>;
+  /** 通學區：國小四周 150 公尺（ring 是圓的折線），at 時淡入 */
+  circles?: Array<{ ring: Array<{ bearing: number; distanceKm: number }>; at: number }>;
   /** 滑鼠移過去的介紹：看不見的感應圈（at 之後才感應，dy 是往上移幾像素） */
   hits?: Array<{ bearing: number; distanceKm: number; at: number; title: string; intro: string; dy?: number; r?: number }>;
   /** 水上活動：船經過時（at）河上出現 SUP、龍舟，留著在水上搖；heading 是船頭朝哪（度，0 是上、順時針） */
@@ -130,6 +132,8 @@ const ICON_SVG: Record<'hut' | 'stadium' | 'dome' | 'star', string> = {
 };
 /** 線從頭長到尾要幾毫秒 */
 const REVEAL_MS = 2200;
+/** 社子島分區：一區接一區亮，隔幾毫秒 */
+const ZONE_STEP_MS = 450;
 /** 文化網：點亮之後多久線亮、多久暈開成面 */
 const NET_LINE_MS = 900;
 const NET_FACE_MS = 2100;
@@ -2103,11 +2107,19 @@ export class Radar {
       if (ar.ring.length < 3) continue;
       const g = el('g', { class: 'voyage-area', style: `animation-delay:${Math.round(ar.at - now)}ms` });
       g.appendChild(el('path', { class: 'area-fill', d: `${this.pathOf(ar.ring)}Z`, style: `stroke-width:${(1.6 * k).toFixed(2)};stroke-dasharray:${(5 * k).toFixed(1)} ${(4 * k).toFixed(1)}` }));
+      // 分區一區一區亮起來（亮一下就退回去，只留很淡的分區線）
+      (ar.zones ?? []).forEach((z, i) => {
+        if (z.length > 2) g.appendChild(el('path', { class: 'area-zone', d: `${this.pathOf(z)}Z`, style: `stroke-width:${(1.2 * k).toFixed(2)};animation-delay:${Math.round((ar.zonesAt ?? ar.at) + i * ZONE_STEP_MS - now)}ms` }));
+      });
       this.routeLayer.appendChild(g);
       const c = polar(ar.center.bearing - this.heading, this.ratio(ar.center.distanceKm) * (R - 8));
       const lg = this.stayLabel(c.x, c.y, k, ar.label, ar.at + 300 - now, 4);
       lg.classList.add('area');
       this.routeLayer.appendChild(lg);
+    }
+    // 通學區：國小四周 150 公尺
+    for (const c of r.circles ?? []) {
+      if (c.ring.length > 2) this.routeLayer.appendChild(el('path', { class: 'school-zone', d: `${this.pathOf(c.ring)}Z`, style: `stroke-width:${(1.3 * k).toFixed(2)};stroke-dasharray:${(4 * k).toFixed(1)} ${(3 * k).toFixed(1)};animation-delay:${Math.round(c.at - now)}ms` }));
     }
     // 文化網（點 —— 線 —— 面）：畫在線、冒出來的東西下面
     if (r.network) {
@@ -2152,7 +2164,7 @@ export class Radar {
     for (const ic of r.icons ?? []) {
       const p = polar(ic.bearing - this.heading, this.ratio(ic.distanceKm) * (R - 8));
       const g = el('g', { class: `voyage-icon ${ic.kind}`, transform: `translate(${p.x.toFixed(1)} ${p.y.toFixed(1)}) scale(${(k * (ic.scale ?? 1)).toFixed(4)})` });
-      const body = ic.kind === 'regrow' ? regrowSvg((ic.grow ?? ic.at) - now) : ic.kind === 'culture' ? cultureSvg(ic.char ?? '', ic.color ?? '#555') : ICON_SVG[ic.kind];
+      const body = ic.kind === 'regrow' ? regrowSvg((ic.grow ?? ic.at) - now) : ic.kind === 'culture' ? cultureSvg(ic.char ?? '', ic.color ?? '#555') : ic.kind === 'service' ? serviceSvg(ic.char ?? '', ic.color ?? '#555') : ICON_SVG[ic.kind];
       g.innerHTML = `<g class="boat-pop" style="animation-delay:${Math.round(ic.at - now)}ms">${body}</g>`;
       this.routeLayer.appendChild(g);
       if (!ic.label) continue;
