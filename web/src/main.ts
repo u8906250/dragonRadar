@@ -1,5 +1,5 @@
 import './styles.css';
-import { HQ_SAIL_MS, HQ_VOYAGE_MS, RAINBOW_EVERY_MS, voyagePhase, voyageTimeOf } from './flow';
+import { HQ_SAIL_MS, HQ_STAR_MS, HQ_VOYAGE_MS, RAINBOW_EVERY_MS, voyagePhase, voyageTimeOf } from './flow';
 import { addKeyword, collectLetter, deletePushSubscription, locateFeedbackPlace, sendFeedback, type FeedbackKind, fetchPushKey, savePushSubscription, confirmReport, editReport, locatePlace, rejectReport, supplementReport, deleteBottle, dropBottle, recycleBottle, fetchBottles, fetchEvents, fetchHealth, fetchKeywords, fetchMyBottles, fetchMyReports, fetchRoutes, pickBottle, reportBottle, reportEnded, submitLink, withdrawReport } from './api';
 import { compassSupported, startCompass } from './compass';
 import { bearingDeg, compassLabel, destination, formatKm, haversineKm, taiwanRadiusKm, type LatLng } from './geo';
@@ -1457,6 +1457,7 @@ function render(): void {
   const toRadarAt = ([lat, lng]: [number, number]): { bearing: number; distanceKm: number } => ({ bearing: bearingDeg(origin, { lat, lng }), distanceKm: haversineKm(origin, { lat, lng }) });
   const inView = (p: { lat: number; lng: number }): boolean => haversineKm(origin, p) < scaleKm * 1.5;
   const anyInView = (pts: Array<[number, number]>): boolean => pts.some(([lat, lng], i) => i % 4 === 0 && inView({ lat, lng }));
+  const hqEx = hqVoyageAt !== null && hqDrawing() ? hqExtras(hqVoyageAt) : { reveals: [], icons: [] };
   // 稍後才開始的也畫（虛線框、淡色）
   radar.render(
     drawn.map((it) => ({
@@ -1495,7 +1496,7 @@ function render(): void {
       };
     }).concat(
       // 洋流總部的特效：洋流號只開一趟到台北市政府、到了放煙火（跟車掃一樣的水）
-      hqVoyageAt === null || !hq
+      hqVoyageAt === null || !hqDrawing() || !hq
         ? []
         : [
             {
@@ -1510,12 +1511,15 @@ function render(): void {
               canals: hq.HQ_CANALS.filter((c) => anyInView(c.points)).map((c) => ({ points: c.points.map(toRadarAt), at: hqStopAt(hqVoyageAt!, c.stop), label: c.name })),
               springs: hq.HQ_SPRINGS.filter(inView).map((sp) => ({ ...toRadarAt([sp.lat, sp.lng]), at: hqStopAt(hqVoyageAt!, sp.stop), label: sp.name })),
               ponds: hq.HQ_PONDS.filter((pd) => anyInView(pd.ring)).map((pd) => ({ ring: pd.ring.map(toRadarAt), at: hqStopAt(hqVoyageAt!, pd.stop), label: pd.name })),
-              plantings: hqPlantings(hqVoyageAt).filter(inView).map((p) => ({ ...p, ...toRadarAt([p.lat, p.lng]) })),
+              plantings: HQ_TREES ? hqPlantings(hqVoyageAt).filter(inView).map((p) => ({ ...p, ...toRadarAt([p.lat, p.lng]) })) : [],
               // 水域「親水」：船沿河走時真的河亮起來；水上活動：船經過時河上出現 SUP、龍舟
               // 行道樹只畫畫面附近的街區（離正中間不到外圈的 1.5 倍；畫面跟著船移動，出現在畫面裡時已經長好的就直接畫），不然幾千棵每一格重畫會卡
-              blooms: hq.HQ_BLOOMS.filter((bl) => inView({ lat: bl.center[0], lng: bl.center[1] })).map((bl) => ({ center: toRadarAt(bl.center), at: hqVoyageAt! + voyageTimeOf(bl.frac), streets: bl.streets.map((st) => ({ pts: st.pts.map(toRadarAt), mid: st.mid })) })),
+              blooms: (HQ_TREES ? hq.HQ_BLOOMS : []).filter((bl) => inView({ lat: bl.center[0], lng: bl.center[1] })).map((bl) => ({ center: toRadarAt(bl.center), at: hqVoyageAt! + voyageTimeOf(bl.frac), streets: bl.streets.map((st) => ({ pts: st.pts.map(toRadarAt), mid: st.mid })) })),
               rivers: hq.HQ_RIVERS.filter((rv) => anyInView(rv.ring)).map((rv) => ({ ring: rv.ring.map(toRadarAt), at: hqStopAt(hqVoyageAt!, rv.stop) })),
               boats: hq.HQ_BOATS.filter(inView).map((b) => ({ ...toRadarAt([b.lat, b.lng]), at: hqNearestAt(hqVoyageAt!, b), kind: b.kind, heading: b.heading })),
+              // 其他政見：山林徑的步道和登山中心、自行車橋、球場和運動中心、星群
+              reveals: hqEx.reveals.filter((rv) => anyInView(rv.path)).map((rv) => ({ points: rv.path.map(toRadarAt), at: rv.at, kind: rv.kind, label: rv.label })),
+              icons: hqEx.icons.filter(inView).map((ic) => ({ ...toRadarAt([ic.lat, ic.lng]), at: ic.at, kind: ic.kind, label: ic.label, scale: ic.scale })),
             },
           ],
     ),
@@ -1555,7 +1559,7 @@ function render(): void {
       // 回報的車掃：已經經過的那段畫淡
       segments: r.segments.map((sg) => ({ ...sg, passed: !!sg.toAt && sg.toAt <= now })),
     })).concat(
-      hqVoyageAt === null || !hq
+      hqVoyageAt === null || !hqDrawing() || !hq
         ? []
         : [
             {
@@ -1571,10 +1575,11 @@ function render(): void {
               canals: hq.HQ_CANALS.map((c) => ({ path: c.points, at: hqStopAt(hqVoyageAt!, c.stop), label: c.name })),
               springs: hq.HQ_SPRINGS.map((sp) => ({ lat: sp.lat, lng: sp.lng, at: hqStopAt(hqVoyageAt!, sp.stop), label: sp.name })),
               ponds: hq.HQ_PONDS.map((pd) => ({ ring: pd.ring, at: hqStopAt(hqVoyageAt!, pd.stop), label: pd.name })),
-              plantings: hqPlantings(hqVoyageAt),
-              blooms: hq.HQ_BLOOMS.map((bl) => ({ center: bl.center, at: hqVoyageAt! + voyageTimeOf(bl.frac), streets: bl.streets })),
+              plantings: HQ_TREES ? hqPlantings(hqVoyageAt) : [],
+              blooms: (HQ_TREES ? hq.HQ_BLOOMS : []).map((bl) => ({ center: bl.center, at: hqVoyageAt! + voyageTimeOf(bl.frac), streets: bl.streets })),
               rivers: hq.HQ_RIVERS.map((rv) => ({ ring: rv.ring, at: hqStopAt(hqVoyageAt!, rv.stop) })),
               boats: hq.HQ_BOATS.map((b) => ({ lat: b.lat, lng: b.lng, at: hqNearestAt(hqVoyageAt!, b), kind: b.kind, heading: b.heading })),
+              ...hqEx,
             },
           ],
     ),
@@ -3116,12 +3121,15 @@ function hqBoatNow(t0: number): LatLng | null {
   const w = (want - hqCum![i - 1]) / (hqCum![i] - hqCum![i - 1] || 1);
   return { lat: path[i - 1][0] + (path[i][0] - path[i - 1][0]) * w, lng: path[i - 1][1] + (path[i][1] - path[i - 1][1]) * w };
 }
-function startHqVoyage(): void {
+function startHqVoyage(spinAt = Date.now()): void {
   if (youOn === 'woof' || tripping || !mod.current) return;
+  // 星星先快速旋轉、縮小不見（使用者說的），洋流號才出來：點下去馬上轉，載入路線資料的時間也算在轉的時間裡
+  radar.setStarSpin({ id: 'hq', at: spinAt });
+  map.setStarSpin({ id: 'hq', at: spinAt });
   if (!hq) {
     void import('./hq-voyage').then((m) => {
       hq = m;
-      startHqVoyage();
+      startHqVoyage(spinAt);
     });
     return;
   }
@@ -3140,6 +3148,7 @@ function startHqVoyage(): void {
     zoomToKm(HQ_START_KM, { lat: start.lat, lng: start.lng, source: 'manual' });
     wait = 1200;
   }
+  wait = Math.max(wait, HQ_STAR_MS - (started - spinAt));
   hqVoyageAt = started + wait;
   const t0 = hqVoyageAt;
   // 跟著船：每 0.25 秒看船在哪，快出畫面就把畫面直接移到船那裡（一次重畫，不用飛的：飛的每一格都要整層重建，慢手機會掉到 2～3 fps）；
@@ -3156,6 +3165,8 @@ function startHqVoyage(): void {
     }
   }, 250);
   hqVoyageTimers = [
+    // 星星轉完（出發前 0.2 秒）才開始畫
+    window.setTimeout(() => render(), Math.max(0, wait - 200)),
     window.setTimeout(() => {
       // 到了：拉近市政府（使用者自己動過就不拉）
       if (view === 'map') {
@@ -3165,10 +3176,21 @@ function startHqVoyage(): void {
     window.setTimeout(() => {
       hqVoyageAt = null;
       window.clearInterval(hqFollowTimer);
+      radar.setStarSpin(null);
+      map.setStarSpin(null);
       render();
     }, wait + HQ_VOYAGE_MS + 100),
   ];
   render();
+}
+/**
+ * 「把樹種回來」的樹（砍樹的地方、公園、行道樹）先不畫：v1.483 使用者說「樹先不要畫，有其他想法針對把樹種回來怎麼呈現嗎」。
+ * 資料（HQ_PLANTINGS、HQ_BLOOMS）和畫法（radar.ts、map.ts 的 plantings、blooms）都留著，改成 true 就回來
+ */
+const HQ_TREES = false;
+/** 洋流號的特效要不要畫：星星還在轉的時候先不畫（地圖上幾千棵樹一次畫要 0.7 秒，會讓星星卡住），出發前 0.2 秒才畫 */
+function hqDrawing(): boolean {
+  return hqVoyageAt !== null && Date.now() >= hqVoyageAt - 200;
 }
 /** 船到某一站的時間（出發 t0 之後幾毫秒；沒有這一站就是出發時） */
 function hqStopAt(t0: number, place: string): number {
@@ -3197,9 +3219,43 @@ function hqNearestAt(t0: number, p: LatLng): number {
  * 種樹的地方（都市微森林「把樹種回來」）：船離它最近時長出一叢樹。砍樹的地方（cut）寫名字（「把樹種回來」那一句另外寫在第一個上面、留著，hqTourStops）；
  * 政見說要加強種樹的公園、商圈、公有建築（plant）只長樹
  */
-function hqPlantings(t0: number): Array<{ lat: number; lng: number; at: number; kind: 'cut' | 'plant'; label?: string }> {
+function hqPlantings(t0: number): Array<{ lat: number; lng: number; at: number; kind: 'cut' | 'plant'; label?: string; spreadM?: number }> {
   if (!hq) return [];
-  return hq.HQ_PLANTINGS.map((p) => ({ lat: p.lat, lng: p.lng, at: hqNearestAt(t0, p), kind: p.kind, ...(p.kind === 'cut' && !p.hideName ? { label: p.name } : {}) })).sort((a, b) => a.at - b.at);
+  return hq.HQ_PLANTINGS.map((p) => ({ lat: p.lat, lng: p.lng, at: hqNearestAt(t0, p), kind: p.kind, spreadM: p.spreadM, ...(p.kind === 'cut' && !p.hideName ? { label: p.name } : {}) })).sort((a, b) => a.at - b.at);
+}
+/** 星群：一個中心四周幾顆星（照固定的亂數散開）、連成一圈的星座線 */
+function hqStarPoints(st: { lat: number; lng: number; count: number; radiusM: number }): Array<[number, number]> {
+  const KX = 111_320 * Math.cos((st.lat * Math.PI) / 180);
+  const pts: Array<[number, number]> = [];
+  for (let i = 0; i < st.count; i++) {
+    const a = (i / st.count) * 2 * Math.PI + (((st.lat * 7919 + i * 977) % 1) - 0.5) * 0.6;
+    const r = st.radiusM * (0.45 + ((st.lng * 6271 + i * 311) % 1) * 0.55);
+    pts.push([st.lat + (Math.cos(a) * r) / 110_574, st.lng + (Math.sin(a) * r) / KX]);
+  }
+  return pts;
+}
+type HqReveal = { path: Array<[number, number]>; at: number; kind: 'trail' | 'bridge' | 'stars'; label?: string };
+type HqIcon = { lat: number; lng: number; at: number; kind: 'hut' | 'stadium' | 'dome' | 'star'; label?: string; scale?: number };
+/** 其他政見的東西：步道（山林徑）、自行車橋、球場和運動中心、星群——線和冒出來的東西（照船到那一站或離它最近的時間） */
+function hqExtras(t0: number): { reveals: HqReveal[]; icons: HqIcon[] } {
+  if (!hq) return { reveals: [], icons: [] };
+  const reveals: HqReveal[] = [];
+  const icons: HqIcon[] = [];
+  hq.HQ_TRAILS.forEach((tr, i) => {
+    const at = hqStopAt(t0, tr.stop);
+    reveals.push({ path: tr.pts, at, kind: 'trail' });
+    icons.push({ lat: tr.head[0], lng: tr.head[1], at: at + 600, kind: 'hut', label: i === 0 ? `山林徑・${tr.name}` : tr.name });
+  });
+  const br = hq.HQ_BRIDGE;
+  reveals.push({ path: [br.from, br.to], at: hqStopAt(t0, br.stop), kind: 'bridge', label: '自行車橋' });
+  for (const v of hq.HQ_VENUES) icons.push({ lat: v.lat, lng: v.lng, at: hqStopAt(t0, v.stop) + 400, kind: v.kind, label: v.name, scale: 1.1 });
+  for (const st of hq.HQ_STARS) {
+    const at = hqNearestAt(t0, st);
+    const pts = hqStarPoints(st);
+    pts.forEach(([lat, lng], i) => icons.push({ lat, lng, at: at + i * 160, kind: 'star', scale: st.big ? 1 : 0.7 }));
+    if (st.big) reveals.push({ path: [...pts, pts[0]], at: at + pts.length * 160, kind: 'stars', label: st.name });
+  }
+  return { reveals, icons };
 }
 /**
  * 經過的區名（每一區寫第一次經過的那一站；總部那一站有星星不用寫）、終點一直寫著「臺北市政府」；
@@ -3221,7 +3277,7 @@ function hqTourStops(t0: number): Array<{ lat: number; lng: number; label: strin
   ].sort((a, b) => a.at - b.at)[0];
   return [
     ...(waters ? [{ lat: waters.lat, lng: waters.lng, label: '把水找回來', at: waters.at + 1400, stay: true, dy: -36 }] : []),
-    ...(firstCut ? [{ lat: firstCut.lat, lng: firstCut.lng, label: '把樹種回來', at: firstCut.at + 300, stay: true, dy: -36 }] : []),
+    ...(HQ_TREES && firstCut ? [{ lat: firstCut.lat, lng: firstCut.lng, label: '把樹種回來', at: firstCut.at + 300, stay: true, dy: -36 }] : []),
     ...(firstBoat ? [{ lat: firstBoat.lat, lng: firstBoat.lng, label: '水上活動', at: firstBoat.at + 600, stay: true, dy: -26 }] : []),
     ...HQ_TOUR.flatMap((st, i) => {
       if (seen.has(st.district)) return [];

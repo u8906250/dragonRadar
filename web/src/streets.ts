@@ -15,6 +15,8 @@ export interface StreetLine {
   cls: StreetClass;
   pts: Float64Array;
   box: [number, number, number, number];
+  /** 橋（brunnel=bridge）：畫街道照畫，洋流總部的行道樹不長在橋上 */
+  bridge?: boolean;
 }
 
 /** OpenMapTiles 的道路種類 → 畫法；沒列的（service、track、path、rail、ferry、施工中…）不畫 */
@@ -71,7 +73,7 @@ const TILEJSON = 'https://tiles.openfreemap.org/planet';
 const MAX_TILES = 64;
 
 /** protobuf 讀取：只需要 varint 和長度前綴 */
-class Pbf {
+export class Pbf {
   pos = 0;
   constructor(
     private readonly buf: Uint8Array,
@@ -174,11 +176,13 @@ export function decodeStreets(buf: Uint8Array, x: number, y: number, z: number, 
       if (type !== 2) continue;
       let cls: StreetClass | undefined;
       let tunnel = false;
+      let bridge = false;
       for (let i = 0; i + 1 < tags.length; i += 2) {
         const tk = keys[tags[i]];
         const tv = values[tags[i + 1]];
         if (tk === 'class' && tv) cls = classes[tv];
         else if (tk === 'brunnel' && tv === 'tunnel') tunnel = true;
+        else if (tk === 'brunnel' && tv === 'bridge') bridge = true;
       }
       // 地下道、隧道在地面上看不到，不畫
       if (!cls || tunnel) continue;
@@ -199,7 +203,7 @@ export function decodeStreets(buf: Uint8Array, x: number, y: number, z: number, 
             minLng = Math.min(minLng, pts[i + 1]);
             maxLng = Math.max(maxLng, pts[i + 1]);
           }
-          out.push({ cls: cls!, pts, box: [minLat, minLng, maxLat, maxLng] });
+          out.push({ cls: cls!, pts, box: [minLat, minLng, maxLat, maxLng], ...(bridge ? { bridge: true } : {}) });
         }
         line = [];
       };

@@ -62,11 +62,15 @@ export interface MapRoute {
   /** 老水塘（雙連陂）：船到 at 前先浮出虛線的鬼影，到了填成水、留著 */
   ponds?: Array<{ ring: Array<[number, number]>; at: number; label: string }>;
   /** 種樹的地方（都市微森林）：船經過時在那裡長出一叢樹；cut 是有砍樹爭議的地方（多一點、光環、寫名字），plant 是政見說要加強種樹的地方 */
-  plantings?: Array<{ lat: number; lng: number; at: number; kind: 'cut' | 'plant'; label?: string }>;
+  plantings?: Array<{ lat: number; lng: number; at: number; kind: 'cut' | 'plant'; label?: string; spreadM?: number }>;
   /** 街道的路樹（都市微森林）：船經過市區時離路線稍遠的一個中心（在街道上）往四周的街道長出一排排的樹，離中心越遠越晚長 */
   blooms?: Array<{ center: [number, number]; at: number; streets: Array<{ pts: Array<[number, number]>; mid: number }> }>;
   /** 真的河（水域政策「親水」）：船沿河走時（at）水面亮成藍色、留著 */
   rivers?: Array<{ ring: Array<[number, number]>; at: number }>;
+  /** 一條線從頭長到尾：trail 山林徑、bridge 自行車橋、stars 星座；label 寫在尾端 */
+  reveals?: Array<{ path: Array<[number, number]>; at: number; kind: 'trail' | 'bridge' | 'stars'; label?: string }>;
+  /** 一個東西冒出來：hut 登山中心、stadium 足球場、dome 運動中心、star 星星 */
+  icons?: Array<{ lat: number; lng: number; at: number; kind: 'hut' | 'stadium' | 'dome' | 'star'; label?: string; scale?: number }>;
   /** 水上活動：船經過時（at）河上出現 SUP、龍舟；heading 是船頭朝哪（度，0 是上、順時針） */
   boats?: Array<{ lat: number; lng: number; at: number; kind: 'sup' | 'dragon'; heading: number }>;
 }
@@ -97,6 +101,13 @@ const MAP_DRAGON_SVG =
     const x = -16 + i * 6;
     return `<path class="wb-paddle" d="M${x} -4.5L${x + 3} -9"/><circle class="wb-head" cx="${x}" cy="-1.2" r="1.6"/>`;
   }).join('');
+/** 冒出來的東西（跟 radar.ts 一樣的畫法，顏色在 styles.css） */
+const MAP_ICON_SVG: Record<'hut' | 'stadium' | 'dome' | 'star', string> = {
+  hut: '<path class="ic-roof" d="M-9 -1L0 -11L9 -1Z"/><path class="ic-wall" d="M-7 -1H7V7H-7Z"/><path class="ic-door" d="M-2 7V2H2V7Z"/><path class="ic-flag" d="M0 -11V-17M0 -17H5L3.5 -15L5 -13H0"/>',
+  stadium: '<ellipse class="ic-stand" rx="16" ry="10"/><ellipse class="ic-field" rx="11" ry="6"/><path class="ic-lines" d="M0 -6V6M-11 0A11 6 0 0 0 11 0M-11 0A11 6 0 0 1 11 0"/><circle class="ic-lines" r="2"/>',
+  dome: '<path class="ic-base" d="M-14 4H14V7H-14Z"/><path class="ic-dome" d="M-13 4A13 13 0 0 1 13 4Z"/><path class="ic-rib" d="M0 -9V4M-7 -7Q0 -4 7 -7"/>',
+  star: '<path class="ic-star" d="M0 -7L2 -2.2L7 -2.2L3 0.9L4.4 5.8L0 2.9L-4.4 5.8L-3 0.9L-7 -2.2L-2 -2.2Z"/>',
+};
 /** 0～1 的固定亂數（照編號，重畫一樣） */
 const mapHash = (n: number): number => {
   const x = Math.sin(n * 12.9898 + 78.233) * 43758.5453;
@@ -185,6 +196,8 @@ export class MapView {
   private outlineRings: Array<Array<[number, number]>> = [];
   /** 洋流的地標（★）：其他模組不顯示 */
   private landmarkGroup: Leaflet.LayerGroup | null = null;
+  /** 地標的星星標記（照 id），星星轉走的動畫要找得到 */
+  private starMarkers = new Map<string, Leaflet.Marker>();
   private landmarksOn = true;
   private routes: MapRoute[] = [];
   /** 洋流號：路線的經緯度（cum 是每一點走了幾公里）和船，每一格畫面照現在的時間擺；往哪邊開記在 boatLeft */
@@ -274,7 +287,8 @@ export class MapView {
       if (this.landmarksOn) this.landmarkGroup.addTo(map);
       for (const lm of LANDMARKS) {
         L.marker([lm.lat, lm.lng], {
-          icon: L.divIcon({ className: 'map-star', html: '★', iconSize: [26, 26], iconAnchor: [13, 14] }),
+          // 星星包在 span 裡：轉走的動畫動的是 span，Leaflet 定位用的 transform 在外面的 div 才不會被蓋掉
+          icon: L.divIcon({ className: 'map-star', html: '<span>★</span>', iconSize: [26, 26], iconAnchor: [13, 14] }),
           title: lm.name,
           keyboard: false,
           // 放在所有標記上面，疊在一起時也點得到
@@ -289,7 +303,10 @@ export class MapView {
           // 點了洋流總部：洋流號開到台北市政府、放煙火（main.ts）
           .on('click', () => this.handlers.onLandmark?.(lm.id))
           .addTo(this.landmarkGroup);
+        this.starMarkers.set(lm.id, this.landmarkGroup.getLayers()[this.landmarkGroup.getLayers().length - 1] as Leaflet.Marker);
       }
+      // 地圖還沒建好時星星就開始轉了：建好後補上
+      if (this.starSpin) this.applyStarSpin(this.starSpin, null);
       this.applyBase();
       this.pushOrigin();
       this.pushOutline();
@@ -582,6 +599,24 @@ export class MapView {
     return this.lastUserMove;
   }
   private lastUserMove = 0;
+  /** 星星轉走（洋流總部點下去：快速旋轉、縮小不見）：哪一顆、什麼時候開始；null 是彈回來 */
+  private starSpin: { id: string; at: number } | null = null;
+  setStarSpin(spin: { id: string; at: number } | null): void {
+    const prev = this.starSpin;
+    // 同一次的轉（載入資料後再叫一次）不要重設，不然動畫會跳
+    if (spin && prev && spin.id === prev.id && spin.at === prev.at) return;
+    this.starSpin = spin;
+    this.applyStarSpin(spin, prev);
+  }
+
+  private applyStarSpin(spin: { id: string; at: number } | null, prev: { id: string; at: number } | null): void {
+    const e = this.starMarkers.get((spin ?? prev)?.id ?? '')?.getElement();
+    if (!e) return;
+    e.classList.toggle('spin-away', !!spin);
+    e.classList.toggle('star-back', !spin && !!prev);
+    const sp = e.querySelector('span');
+    if (sp) sp.style.animationDelay = spin ? `${Math.round(spin.at - Date.now())}ms` : '0ms';
+  }
 
   /** 地圖慢慢飛到這個點、拉到這個縮放（洋流總部的特效到站：拉近台北市政府） */
   flyToLatLng(p: LatLng, zoom: number): void {
@@ -865,6 +900,38 @@ export class MapView {
         }
       }
     }
+    // 線從頭長到尾（步道、自行車橋、星座）
+    for (const rv of r.reveals ?? []) {
+      if (rv.path.length < 2) continue;
+      const style: Record<string, Leaflet.PolylineOptions> = {
+        trail: { color: '#8a5a24', weight: 3, dashArray: '6 5' },
+        bridge: { color: '#5b6b7a', weight: 7 },
+        stars: { color: '#f2b544', weight: 1.5 },
+      };
+      const lines = rv.kind === 'bridge' ? [L.polyline(rv.path, { color: '#e8eef3', weight: 11, interactive: false }), L.polyline(rv.path, { ...style.bridge, interactive: false })] : [L.polyline(rv.path, { ...style[rv.kind], interactive: false })];
+      for (const l of lines) {
+        layer.addLayer(l);
+        const e = l.getElement() as SVGElement | undefined;
+        if (!e) continue;
+        e.classList.add('map-reveal');
+        e.setAttribute('pathLength', '1');
+        e.style.animationDelay = `${Math.round(rv.at - now)}ms`;
+      }
+      if (rv.kind === 'bridge') {
+        const bikes = L.polyline(rv.path, { color: '#15171c', weight: 3, dashArray: '3 12', interactive: false, className: 'map-reveal-bikes' });
+        layer.addLayer(bikes);
+        const e = bikes.getElement() as SVGElement | undefined;
+        if (e) e.style.animationDelay = `${Math.round(rv.at + 2200 - now)}ms`;
+      }
+      if (rv.label) this.stayLabel(rv.path[rv.path.length - 1], rv.label, rv.at + 2200 - now, 32);
+    }
+    // 冒出來的東西：登山中心、足球場、運動中心、星星
+    for (const ic of r.icons ?? []) {
+      const sc = ic.scale ?? 1;
+      const icon = L.divIcon({ className: `map-voyage-icon ${ic.kind}`, html: `<svg viewBox="-20 -20 40 40" width="${40 * sc}" height="${40 * sc}" aria-hidden="true"><g class="boat-pop" style="animation-delay:${Math.round(ic.at - now)}ms">${MAP_ICON_SVG[ic.kind]}</g></svg>`, iconSize: [40 * sc, 40 * sc], iconAnchor: [20 * sc, 20 * sc] });
+      layer.addLayer(L.marker([ic.lat, ic.lng], { icon, interactive: false, keyboard: false, zIndexOffset: 1300 }));
+      if (ic.label) this.stayLabel([ic.lat, ic.lng], ic.label, ic.at + 500 - now, 20 * sc + 16);
+    }
     // 真的河：船沿河走時亮起來（畫在最下面）
     for (const rv of r.rivers ?? []) {
       if (rv.ring.length < 3) continue;
@@ -885,11 +952,14 @@ export class MapView {
       const cut = pl.kind === 'cut';
       // 一叢樹：以那一點為中心、照現在的縮放換成像素散開（砍樹的地方多一點、散開一點），一棵接一棵長
       const [count, spread] = cut ? [MAP_PLANT_CUT_TREES, 22] : [MAP_PLANT_TREES, 15];
+      // 離水近的散開不能超過 spreadM 公尺（照現在的縮放換成像素），樹才不會長到河上
+      const mPerPx = (40_075_016.686 * Math.cos((pl.lat * Math.PI) / 180)) / 2 ** (map.getZoom() + 8);
+      const maxD = Math.min(spread, pl.spreadM ? pl.spreadM / mPerPx : Infinity);
       const seed = Math.round(pl.lat * 1000 + pl.lng * 7);
       const c = map.latLngToLayerPoint([pl.lat, pl.lng]);
       for (let j = 0; j < count; j++) {
         const a = mapHash(seed + j * 3 + 1) * 2 * Math.PI;
-        const d = Math.sqrt(mapHash(seed + j * 3 + 2)) * spread;
+        const d = Math.sqrt(mapHash(seed + j * 3 + 2)) * maxD;
         const m = L.circleMarker(map.layerPointToLatLng(L.point(c.x + Math.cos(a) * d, c.y + Math.sin(a) * d)), { radius: (cut ? 4 : 3.5) + mapHash(seed + j * 3 + 3) * 3, color: cssVar('--grass', '#3f8f2f'), weight: 1.2, fillColor: cssVar('--grass', '#3f8f2f'), fillOpacity: 0.95, interactive: false, className: 'map-tree' });
         layer.addLayer(m);
         const e = m.getElement() as SVGElement | undefined;

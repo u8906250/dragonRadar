@@ -112,6 +112,8 @@ export const riverHalfWidth = (f: number): number => (2 + 4.5 * f) * (1 + 0.22 *
 export const HQ_SAIL_MS = 75_000;
 export const HQ_ARRIVE_MS = 3000;
 export const FIREWORKS_MS = 4400;
+/** 點下去星星轉走要幾毫秒（轉完洋流號才出來） */
+export const HQ_STAR_MS = 1100;
 /** 到站、畫面停好之後再留幾毫秒才淡掉（煙火先不放，使用者說有其他想法；fireworksSvg 留著） */
 export const HQ_LINGER_MS = 2500;
 export const HQ_VOYAGE_MS = HQ_SAIL_MS + HQ_ARRIVE_MS + HQ_LINGER_MS;

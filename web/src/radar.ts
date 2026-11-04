@@ -64,11 +64,15 @@ export interface RadarRoute {
    * 種樹的地方（都市微森林）：船經過時（at，Date.now() 的毫秒）在那裡長出一叢樹。cut 是有砍樹爭議的地方（「把樹種回來」：多一點、一圈光環、寫名字），
    * plant 是政見說要加強種樹的公園、商圈、公有建築（長幾棵就好）
    */
-  plantings?: Array<{ bearing: number; distanceKm: number; at: number; kind: 'cut' | 'plant'; label?: string }>;
+  plantings?: Array<{ bearing: number; distanceKm: number; at: number; kind: 'cut' | 'plant'; label?: string; spreadM?: number }>;
   /** 街道的路樹（都市微森林）：船經過市區時（at，Date.now() 的毫秒）離路線稍遠的一個中心（在街道上）往四周的街道長出一排排的樹，離中心越遠越晚長 */
   blooms?: Array<{ center: { bearing: number; distanceKm: number }; at: number; streets: Array<{ pts: Array<{ bearing: number; distanceKm: number }>; mid: number }> }>;
   /** 真的河（水域政策「親水」）：船沿河走時（at）水面亮成藍色、留著（OpenStreetMap 的淡水河、基隆河、新店溪） */
   rivers?: Array<{ ring: Array<{ bearing: number; distanceKm: number }>; at: number }>;
+  /** 一條線從頭長到尾（at 開始、REVEAL_MS 長完）：trail 山林徑（土色虛線）、bridge 自行車橋（粗的雙線，長完有腳踏車的點在上面跑）、stars 星座（金色細線）；label 寫在尾端、留著 */
+  reveals?: Array<{ points: Array<{ bearing: number; distanceKm: number }>; at: number; kind: 'trail' | 'bridge' | 'stars'; label?: string }>;
+  /** 一個東西冒出來（at）：hut 登山中心、stadium 足球場、dome 運動中心、star 星星；label 留著 */
+  icons?: Array<{ bearing: number; distanceKm: number; at: number; kind: 'hut' | 'stadium' | 'dome' | 'star'; label?: string; scale?: number }>;
   /** 水上活動：船經過時（at）河上出現 SUP、龍舟，留著在水上搖；heading 是船頭朝哪（度，0 是上、順時針） */
   boats?: Array<{ bearing: number; distanceKm: number; at: number; kind: 'sup' | 'dragon'; heading: number }>;
 }
@@ -101,6 +105,17 @@ const DRAGON_SVG =
     const x = -16 + i * 6;
     return `<path class="wb-paddle" d="M${x} -4.5L${x + 3} -9"/><circle class="wb-head" cx="${x}" cy="-1.2" r="1.6"/>`;
   }).join('');
+/** 冒出來的東西（螢幕像素，中心在 0,0；顏色在 styles.css）：登山中心是一間小屋、足球場是橢圓的場加草皮條紋、運動中心是圓頂、星星是五角星 */
+const ICON_SVG: Record<'hut' | 'stadium' | 'dome' | 'star', string> = {
+  hut: '<path class="ic-roof" d="M-9 -1L0 -11L9 -1Z"/><path class="ic-wall" d="M-7 -1H7V7H-7Z"/><path class="ic-door" d="M-2 7V2H2V7Z"/><path class="ic-flag" d="M0 -11V-17M0 -17H5L3.5 -15L5 -13H0"/>',
+  stadium: '<ellipse class="ic-stand" rx="16" ry="10"/><ellipse class="ic-field" rx="11" ry="6"/><path class="ic-lines" d="M0 -6V6M-11 0A11 6 0 0 0 11 0M-11 0A11 6 0 0 1 11 0"/><circle class="ic-lines" r="2"/>',
+  dome: '<path class="ic-base" d="M-14 4H14V7H-14Z"/><path class="ic-dome" d="M-13 4A13 13 0 0 1 13 4Z"/><path class="ic-rib" d="M0 -9V4M-7 -7Q0 -4 7 -7"/>',
+  star: '<path class="ic-star" d="M0 -7L2 -2.2L7 -2.2L3 0.9L4.4 5.8L0 2.9L-4.4 5.8L-3 0.9L-7 -2.2L-2 -2.2Z"/>',
+};
+/** 線從頭長到尾要幾毫秒 */
+const REVEAL_MS = 2200;
+/** 星星轉走要幾毫秒（flow.ts 的 HQ_STAR_MS 一樣） */
+const STAR_SPIN_MS = 1100;
 /** 0～1 的固定亂數（照編號，重畫一樣） */
 const hash = (n: number): number => {
   const x = Math.sin(n * 12.9898 + 78.233) * 43758.5453;
@@ -1493,6 +1508,15 @@ export class Radar {
     return g;
   }
 
+  /** 星星轉走（洋流總部點下去：快速旋轉、縮小不見，洋流號才出來）：哪一顆、什麼時候開始；null 是沒有（轉走過的彈回來） */
+  private starSpin: { id: string; at: number } | null = null;
+  private starBackAt = 0;
+  setStarSpin(spin: { id: string; at: number } | null): void {
+    if (!spin && this.starSpin) this.starBackAt = Date.now();
+    this.starSpin = spin;
+    this.drawLandmarks();
+  }
+
   /** 固定地標（星星），畫在光點上面，超出範圍時貼在外圈 */
   setLandmarks(list: RadarLandmark[]): void {
     const key = JSON.stringify(list);
@@ -1518,6 +1542,9 @@ export class Radar {
       g.appendChild(el('circle', { class: 'hit', r: 13 }));
       const body = el('g', { class: 'body' });
       body.appendChild(el('path', { class: 'star', d: starPath(out ? 7 : 10) }));
+      // 轉走中（或轉走後藏著）；剛彈回來的那半秒從小變大
+      if (this.starSpin?.id === lm.id) body.setAttribute('style', `animation:star-spin-away ${STAR_SPIN_MS}ms ease-in both;animation-delay:${Math.round(this.starSpin.at - Date.now())}ms`);
+      else if (Date.now() - this.starBackAt < 600) body.setAttribute('style', `animation:star-back 0.5s ease-out both;animation-delay:${Math.round(this.starBackAt - Date.now())}ms`);
       g.appendChild(body);
       this.addFlash(g, lm.bearing - this.heading, lr, out ? 6 : 9);
       // 平常不寫名稱，點了（選取中）才在星星下面顯示
@@ -2027,10 +2054,12 @@ export class Radar {
       const cut = pl.kind === 'cut';
       // 一叢樹：砍樹的地方種多一點、散開一點（螢幕像素），一棵接一棵長；照編號固定的亂數，重畫一樣
       const [count, spread] = cut ? [PLANT_CUT_TREES, 22] : [PLANT_TREES, 15];
+      // 離水近的散開不能超過 spreadM 公尺（換成畫面上的長度），樹才不會長到河上
+      const maxD = Math.min(spread * k, pl.spreadM ? this.ratio(pl.spreadM / 1000) * (R - 8) : Infinity);
       const seed = Math.round(pl.bearing * 7 + pl.distanceKm * 131);
       for (let j = 0; j < count; j++) {
         const a = hash(seed + j * 3 + 1) * 2 * Math.PI;
-        const d = Math.sqrt(hash(seed + j * 3 + 2)) * spread * k;
+        const d = Math.sqrt(hash(seed + j * 3 + 2)) * maxD;
         g.appendChild(this.tree(Math.cos(a) * d, Math.sin(a) * d, k * (cut ? 1.0 + hash(seed + j * 3 + 3) * 0.6 : 0.85 + hash(seed + j * 3 + 3) * 0.55), pl.at + j * PLANT_STAGGER_MS - now));
       }
       if (pl.label) {
@@ -2041,6 +2070,37 @@ export class Radar {
         g.appendChild(lg);
       }
       this.routeLayer.appendChild(g);
+    }
+    // 線從頭長到尾（步道、自行車橋、星座）、冒出來的東西：畫在樹的上面才不會被樹蓋住
+    for (const rv of r.reveals ?? []) {
+      if (rv.points.length < 2) continue;
+      const d = this.pathOf(rv.points);
+      const g = el('g', { class: `voyage-reveal ${rv.kind}` });
+      const widths: Record<string, number> = { trail: 3, bridge: 8, stars: 1 };
+      // 橋、步道下面墊一條淺色的邊，壓在樹、河上面才看得到
+      if (rv.kind !== 'stars') g.appendChild(el('path', { class: 'reveal-line under', d, pathLength: '1', style: `stroke-width:${(widths[rv.kind] * k + 2 * k).toFixed(2)};animation-delay:${Math.round(rv.at - now)}ms` }));
+      g.appendChild(el('path', { class: 'reveal-line', d, pathLength: '1', style: `stroke-width:${(widths[rv.kind] * k).toFixed(2)};animation-delay:${Math.round(rv.at - now)}ms` }));
+      if (rv.kind === 'bridge') {
+        // 腳踏車：一排點沿著橋跑（長完才出現；dash 用螢幕像素，pathLength 設成橋在畫面上幾像素）
+        const bikes = el('path', { class: 'reveal-bikes', d, style: `stroke-width:${(2.4 * k).toFixed(2)};animation-delay:${Math.round(rv.at + REVEAL_MS - now)}ms` }) as SVGPathElement;
+        g.appendChild(bikes);
+        this.routeLayer.appendChild(g);
+        bikes.setAttribute('pathLength', (bikes.getTotalLength() / k).toFixed(1));
+      } else this.routeLayer.appendChild(g);
+      if (rv.label) {
+        const end = rv.points[rv.points.length - 1];
+        const p = polar(end.bearing - this.heading, this.ratio(end.distanceKm) * (R - 8));
+        g.appendChild(this.stayLabel(p.x, p.y, k, rv.label, rv.at + REVEAL_MS - now, -12));
+      }
+    }
+    // 冒出來的東西：登山中心、足球場、運動中心、星星（螢幕像素的大小）
+    for (const ic of r.icons ?? []) {
+      const p = polar(ic.bearing - this.heading, this.ratio(ic.distanceKm) * (R - 8));
+      const g = el('g', { class: `voyage-icon ${ic.kind}`, transform: `translate(${p.x.toFixed(1)} ${p.y.toFixed(1)}) scale(${(k * (ic.scale ?? 1)).toFixed(4)})` });
+      g.innerHTML = `<g class="boat-pop" style="animation-delay:${Math.round(ic.at - now)}ms">${ICON_SVG[ic.kind]}</g>`;
+      this.routeLayer.appendChild(g);
+      // 名字寫在上面（放在縮放過的 g 外面，字才是一般的大小、離圖案夠遠）
+      if (ic.label) this.routeLayer.appendChild(this.stayLabel(p.x, p.y, k, ic.label, ic.at + 500 - now, -26 * (ic.scale ?? 1)));
     }
   }
 

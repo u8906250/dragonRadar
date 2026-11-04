@@ -333,7 +333,7 @@ path.map-water-glint { animation: water-flow-map 1.1s linear infinite; }
 /* 那一趟的水：跟著淡入、放完煙火淡掉（animation-duration、delay 寫在元素上，照 HQ_VOYAGE_MS） */
 .route-voyage, .map-voyage { animation-name: route-voyage; animation-timing-function: linear; animation-fill-mode: both; }
 /* 煙火放完最後 0.6 秒才淡掉（整趟 81 秒） */
-@keyframes route-voyage { 0% { opacity: 0; } 2% { opacity: 1; } 99.3% { opacity: 1; } 100% { opacity: 0; } }
+@keyframes route-voyage { 0% { opacity: 0; } 1% { opacity: 1; } 99.3% { opacity: 1; } 100% { opacity: 0; } }
 /* 河流（洋流總部的特效，radar.ts 的 addRiver）：洋流號的水流是橘色的（跟洋流號、洋流的品牌色一樣，真的河是藍色的才分得開；v1.479 使用者改的）：淺橘的河岸、橘色的河面、中間一道亮的，兩道白色的波光照不同的速度往下游流 */
 .radar .route-river { pointer-events: none; }
 .radar .river-bank { fill: #ffd8b0; stroke: none; }
@@ -362,6 +362,31 @@ path.map-water-glint { animation: water-flow-map 1.1s linear infinite; }
 .radar .voyage-canal-fill.bank { stroke: #bfe8f5; }
 .radar .voyage-canal-fill.body { stroke: #3fa9dc; }
 @keyframes voyage-fill { to { stroke-dashoffset: 0; } }
+/* 線從頭長到尾（radar.ts 的 reveals）：步道土色虛線、自行車橋灰色粗線（下面一條淺色的邊）、星座金色細線；pathLength 是 1，dashoffset 從 1 走到 0。橋長完一排腳踏車的點在上面跑 */
+.radar .voyage-reveal { pointer-events: none; }
+.radar .reveal-line, .map-reveal { fill: none; stroke-linecap: round; stroke-linejoin: round; stroke-dasharray: 1; stroke-dashoffset: 1; animation: voyage-fill 2.2s ease-in-out both; }
+.radar .voyage-reveal.trail .reveal-line { stroke: #7a4a1a; }
+.radar .voyage-reveal.trail .reveal-line.under { stroke: #fff2d6; }
+.radar .voyage-reveal.bridge .reveal-line { stroke: #5b6b7a; }
+.radar .voyage-reveal.bridge .reveal-line.under { stroke: #e8eef3; }
+.radar .voyage-reveal.stars .reveal-line { stroke: #f2b544; stroke-opacity: 0.9; }
+.radar .reveal-bikes, .map-reveal-bikes { fill: none; stroke: #15171c; stroke-linecap: round; stroke-dasharray: 3 12; opacity: 0; animation: reveal-bikes 1.6s linear infinite, voyage-stay 0.5s ease-out both; }
+@keyframes reveal-bikes { to { stroke-dashoffset: -15; } }
+/* 冒出來的東西（radar.ts 的 icons） */
+.radar .voyage-icon, .map-voyage-icon { pointer-events: none; }
+.map-voyage-icon { background: none; border: 0; }
+.map-voyage-icon svg { display: block; overflow: visible; }
+.ic-roof { fill: #c4452c; stroke: #15171c; stroke-width: 0.8; stroke-linejoin: round; }
+.ic-wall { fill: #f4e6cb; stroke: #15171c; stroke-width: 0.8; }
+.ic-door { fill: #8a5a24; }
+.ic-flag { fill: #ffd43b; stroke: #15171c; stroke-width: 0.8; stroke-linejoin: round; }
+.ic-stand { fill: #d9d4cb; stroke: #15171c; stroke-width: 0.9; }
+.ic-field { fill: #4a9d3f; stroke: #15171c; stroke-width: 0.7; }
+.ic-lines { fill: none; stroke: #fff; stroke-width: 0.8; }
+.ic-base { fill: #9aa3ad; stroke: #15171c; stroke-width: 0.8; }
+.ic-dome { fill: #4cc3e6; stroke: #15171c; stroke-width: 0.9; }
+.ic-rib { fill: none; stroke: #fff; stroke-width: 0.8; stroke-opacity: 0.8; }
+.ic-star { fill: #ffd43b; stroke: #a0702a; stroke-width: 0.7; stroke-linejoin: round; }
 /* 湧泉（堀仔頭）：藍色的小點、三圈漣漪一直往外冒；老水塘（雙連陂）：鬼影之後填成水 */
 .radar .voyage-spring, .map-voyage-spring { pointer-events: none; }
 .map-voyage-spring { background: none; border: 0; }
@@ -1093,6 +1118,13 @@ path.map-water-glint { animation: water-flow-map 1.1s linear infinite; }
 .map-flag { background: none; border: none; display: grid; place-items: center; line-height: 1; filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.35)); }
 .map-flag .selected { border-radius: 50%; box-shadow: 0 0 0 3px var(--blip-selected); }
 .map-star { background: none; border: none; color: #ffc531; font-size: 26px; line-height: 26px; text-align: center; -webkit-text-stroke: 1.5px #5c3d00; filter: drop-shadow(0 0 3px rgba(0, 0, 0, 0.35)); }
+/* 洋流總部點下去：星星快速旋轉、縮小不見（洋流號才出來），動畫結束彈回來（radar.ts 的 setStarSpin 用 style 寫、地圖用 class） */
+.radar .landmark .body { transform-box: fill-box; transform-origin: center; }
+.map-star span { display: inline-block; }
+.map-star.spin-away span { animation: star-spin-away 1.1s ease-in both; }
+.map-star.star-back span { animation: star-back 0.5s ease-out both; }
+@keyframes star-spin-away { 0% { transform: rotate(0) scale(1); opacity: 1; } 55% { transform: rotate(900deg) scale(1.25); opacity: 1; } 100% { transform: rotate(1800deg) scale(0); opacity: 0; } }
+@keyframes star-back { from { transform: scale(0); } 60% { transform: scale(1.3); } to { transform: scale(1); } }
 
 /* 回報：發放或活動／固定據點 */
 .spot-mine-title { font-size: 14px; margin: 14px 0 6px; }

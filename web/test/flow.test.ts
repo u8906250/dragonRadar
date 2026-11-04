@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { fireworksSvg, HQ_SAIL_MS, HQ_VOYAGE_MS, voyagePhase, voyageTimeOf } from '../src/flow';
-import { HQ_BLOOMS, HQ_BOATS, HQ_CANALS, HQ_PLANTINGS, HQ_PONDS, HQ_SPRINGS, HQ_TOUR, HQ_TOUR_AT, HQ_VOYAGE } from '../src/hq-voyage';
+import { HQ_BLOOMS, HQ_BOATS, HQ_BRIDGE, HQ_CANALS, HQ_PLANTINGS, HQ_PONDS, HQ_SPRINGS, HQ_STARS, HQ_TOUR, HQ_TOUR_AT, HQ_TRAILS, HQ_VENUES, HQ_VOYAGE } from '../src/hq-voyage';
 import { LANDMARKS } from '../src/landmarks';
 import { haversineKm } from '../src/geo';
 
@@ -59,6 +59,15 @@ describe('洋流總部的特效', () => {
     for (const p of [...HQ_SPRINGS, ...HQ_BOATS]) expect(nearRoute(p)).toBeLessThan(1.5);
     for (const b of HQ_BOATS) expect(b.width).toBeGreaterThanOrEqual(b.kind === 'dragon' ? 200 : 120);
     for (const pd of HQ_PONDS) expect(pd.ring.length).toBeGreaterThanOrEqual(6);
+    // 其他政見：步道從捷運站開始、登山口在步道上，橋兩端在路線附近，球場、運動中心、星群都在路線附近
+    for (const tr of HQ_TRAILS) {
+      expect(HQ_TOUR.some((st) => st.place === tr.stop)).toBe(true);
+      expect(haversineKm({ lat: tr.pts[0][0], lng: tr.pts[0][1] }, { lat: tr.station[0], lng: tr.station[1] })).toBeLessThan(0.1);
+      expect(Math.min(...tr.pts.map(([lat, lng]) => haversineKm({ lat, lng }, { lat: tr.head[0], lng: tr.head[1] })))).toBeLessThan(0.02);
+      expect(nearRoute({ lat: tr.station[0], lng: tr.station[1] })).toBeLessThan(2.5);
+    }
+    expect(nearRoute({ lat: HQ_BRIDGE.from[0], lng: HQ_BRIDGE.from[1] })).toBeLessThan(2);
+    for (const v of [...HQ_VENUES, ...HQ_STARS]) expect(nearRoute(v)).toBeLessThan(2.5);
     // 街道的路樹：中心離路線 200～700 公尺（不是在路線上），每個中心至少 3 條街、街都在中心 500 公尺內
     expect(HQ_BLOOMS.length).toBeGreaterThan(30);
     for (const bl of HQ_BLOOMS.filter((_, i) => i % 4 === 0)) {
