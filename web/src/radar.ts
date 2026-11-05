@@ -89,6 +89,8 @@ export interface RadarRoute {
   icons?: Array<{ bearing: number; distanceKm: number; at: number; kind: 'hut' | 'stadium' | 'dome' | 'star' | 'regrow' | 'culture' | 'service'; label?: string; scale?: number; grow?: number; char?: string; color?: string; small?: boolean; focus?: boolean }>;
   /** 政策圖層開著：其他特效變淡，只有 focus 的地方、通學區的圈清楚 */
   focus?: boolean;
+  /** 都更的基地範圍（at 時淡入） */
+  sites?: Array<{ rings: Array<Array<{ bearing: number; distanceKm: number }>>; at: number }>;
   /** 通學區：國小四周 150 公尺（ring 是圓的折線），at 時淡入 */
   circles?: Array<{ ring: Array<{ bearing: number; distanceKm: number }>; at: number }>;
   /** 滑鼠移過去的介紹：看不見的感應圈（at 之後才感應，dy 是往上移幾像素） */
@@ -2121,6 +2123,11 @@ export class Radar {
       const lg = this.stayLabel(c.x, c.y, k, ar.label, ar.at + 300 - now, 4);
       lg.classList.add('area');
       this.routeLayer.appendChild(lg);
+    }
+    // 都更：基地範圍（紅框）
+    for (const st of r.sites ?? []) {
+      const d = st.rings.filter((rg) => rg.length > 2).map((rg) => `${this.pathOf(rg)}Z`).join('');
+      if (d) this.routeLayer.appendChild(el('path', { class: 'renewal-site focus', d, style: `stroke-width:${(1.6 * k).toFixed(2)};animation-delay:${Math.round(st.at - now)}ms` }));
     }
     // 通學區：國小四周 150 公尺
     for (const c of r.circles ?? []) {

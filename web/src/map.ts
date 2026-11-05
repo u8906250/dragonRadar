@@ -81,6 +81,8 @@ export interface MapRoute {
   icons?: Array<{ lat: number; lng: number; at: number; kind: 'hut' | 'stadium' | 'dome' | 'star' | 'regrow' | 'culture' | 'service'; label?: string; scale?: number; grow?: number; char?: string; color?: string; small?: boolean; focus?: boolean }>;
   /** 政策圖層開著：其他特效變淡，只有 focus 的地方、通學區的圈清楚 */
   focus?: boolean;
+  /** 都更的基地範圍（at 時淡入） */
+  sites?: Array<{ rings: Array<Array<[number, number]>>; at: number }>;
   /** 通學區：國小四周 radiusM 公尺，at 時淡入 */
   circles?: Array<{ lat: number; lng: number; radiusM: number; at: number }>;
   /** 滑鼠移過去的介紹（at 之後才感應；dy 是往上移幾像素） */
@@ -603,7 +605,7 @@ export class MapView {
   setRoutes(routes: MapRoute[]): void {
     const sig = (rs: MapRoute[]): string =>
       // 洋流總部的特效：文化網、政策圖層（多出來的地方、通學區的圈）開關時也要重畫
-      JSON.stringify(rs.map((r) => [r.id, r.state, r.flowAt ?? null, r.segments.map((x) => [x.people, x.target, x.path.length, !!x.passed]), r.turns ?? [], !!r.boat, r.voyage ?? null, r.network?.at ?? null, r.icons?.length ?? 0, r.circles?.length ?? 0, !!r.focus, r.riverOut !== undefined && Date.now() > r.riverOut + 1600]));
+      JSON.stringify(rs.map((r) => [r.id, r.state, r.flowAt ?? null, r.segments.map((x) => [x.people, x.target, x.path.length, !!x.passed]), r.turns ?? [], !!r.boat, r.voyage ?? null, r.network?.at ?? null, r.icons?.length ?? 0, r.circles?.length ?? 0, r.sites?.length ?? 0, !!r.focus, r.riverOut !== undefined && Date.now() > r.riverOut + 1600]));
     if (sig(routes) === sig(this.routes)) return;
     this.routes = routes;
     this.pushRoutes();
@@ -954,6 +956,13 @@ export class MapView {
         if (ze) ze.style.animationDelay = `${Math.round((ar.zonesAt ?? ar.at) + i * 450 - now)}ms`;
       });
       this.stayLabel(ar.center, ar.label, ar.at + 300 - now, 9);
+    }
+    // 都更：基地範圍（紅框）
+    for (const st of r.sites ?? []) {
+      const poly = L.polygon(st.rings, { color: '#b03030', weight: 1.6, fillColor: '#d64545', fillOpacity: 0.3, interactive: false, className: 'map-renewal-site' });
+      layer.addLayer(poly);
+      const e = poly.getElement() as SVGElement | undefined;
+      if (e) e.style.animationDelay = `${Math.round(st.at - now)}ms`;
     }
     // 通學區：國小四周 150 公尺
     for (const c of r.circles ?? []) {

@@ -1531,6 +1531,7 @@ function render(): void {
               green: { ring: hq.HQ_TAIPEI_RING.map(toRadarAt), steps: hqGreenSteps(hqVoyageAt) },
               areas: hqAreas(hqVoyageAt).filter((ar) => anyInView(ar.ring)).map((ar) => ({ ring: ar.ring.map(toRadarAt), center: toRadarAt(ar.center), at: ar.at, label: ar.label, zones: ar.zones?.map((z) => z.map(toRadarAt)), zonesAt: ar.zonesAt })),
               circles: hqCircles().filter(inView).map((c) => ({ ring: c.ring.map(toRadarAt), at: c.at })),
+              sites: hqSites().filter((st) => inView({ lat: st.center[0], lng: st.center[1] })).map((st) => ({ rings: st.rings.map((rg) => rg.map(toRadarAt)), at: st.at })),
               focus: hqLayer !== null,
               ...(hqNetNow ? { network: { at: hqNetNow.at, noFace: hqNetNow.noFace, faceR: hqNetNow.faceR, lines: hqNetNow.lines.filter((ln) => anyInView(ln.path)).map((ln) => ({ points: ln.path.map(toRadarAt), color: ln.color })), dots: hqNetNow.dots.filter(inView).map((dt) => ({ ...toRadarAt([dt.lat, dt.lng]), color: dt.color })) } } : {}),
             },
@@ -1599,6 +1600,7 @@ function render(): void {
               green: { ring: hq.HQ_TAIPEI_RING, steps: hqGreenSteps(hqVoyageAt) },
               areas: hqAreas(hqVoyageAt),
               circles: hqCircles().map(({ lat, lng, radiusM, at }) => ({ lat, lng, radiusM, at })),
+              sites: hqSites().map(({ rings, at }) => ({ rings, at })),
               focus: hqLayer !== null,
               ...(hqNetNow ? { network: hqNetNow } : {}),
             },
@@ -3235,11 +3237,12 @@ function stopHqVoyage(): void {
   render();
 }
 /**
- * 收集卡 No.003「你的市長」：點洋流總部看完動畫（到站、按鈕出來）、再把上面五個政策按鈕（看整個文化網、教育・午餐、通學區、親子、衛福）都點過，
+ * 收集卡 No.003「你的市長」：點洋流總部看完動畫（到站、按鈕出來）、再把上面的政策按鈕（看整個文化網、教育・午餐、通學區、親子、都更、衛福）都點過，
  * 就跟伺服器領卡（findCard，跟小法一樣是瀏覽器判斷的）。進度記在這個瀏覽器（dr.mayorQuest），分好幾次看完也算
  */
 const LS_MAYOR = 'dr.mayorQuest';
-const MAYOR_STEPS = ['watched', 'net', 'edu', 'zone', 'family', 'health'];
+// v1.505 使用者說「你的市長完成條件加上這顆按鈕」：都更也要點過（六顆）
+const MAYOR_STEPS = ['watched', 'net', 'edu', 'zone', 'family', 'health', 'renewal'];
 function mayorProgress(step: string): void {
   if (myCards().some((c) => c.card === 'mayor')) return;
   let done: string[] = [];
@@ -3527,6 +3530,12 @@ function hqAreas(t0: number): Array<{ ring: Array<[number, number]>; center: [nu
     return { ring: ar.ring, center, at: hqStopAt(t0, ar.stop) - 6000, label: ar.name, zones: ar.zones, zonesAt: hqStopAt(t0, ar.stop) + 200 };
   });
 }
+/** 都更（政策圖層）：核定滿 5 年未開工的基地範圍 */
+function hqSites(): Array<{ rings: Array<Array<[number, number]>>; at: number; center: [number, number] }> {
+  if (!hq || hqLayer?.id !== 'renewal') return [];
+  const at0 = hqLayer.at;
+  return hq.HQ_RENEWAL.map((rn, i) => ({ rings: rn.rings, center: rn.center, at: at0 + Math.min(i * 15, 1000) }));
+}
 /** 通學區（政策圖層）：每所國小四周 150 公尺的圈（雷達用 20 邊形） */
 function hqCircles(): Array<{ lat: number; lng: number; radiusM: number; at: number; ring: Array<[number, number]> }> {
   if (!hq || !hqLayer) return [];
@@ -3574,6 +3583,7 @@ function hqLayerNetwork(): { at: number; lines: Array<{ path: Array<[number, num
   if (!hq || !hqLayer) return null;
   const ly = hq.HQ_POLICY_LAYERS.find((x) => x.id === hqLayer!.id);
   if (!ly) return null;
+  if (ly.id === 'renewal') return { at: hqLayer.at, lines: [], dots: hq.HQ_RENEWAL.map((rn) => ({ lat: rn.center[0], lng: rn.center[1], color: '#d64545' })), noFace: true };
   const dots = hq.HQ_SERVICES.filter((sv) => ly.kinds.includes(sv.kind)).map((sv) => ({ lat: sv.lat, lng: sv.lng, color: hq!.HQ_SERVICE_KINDS[sv.kind].color }));
   return { at: hqLayer.at, lines: [], dots, noFace: !!ly.zone, faceR: ly.faceR };
 }
@@ -3622,6 +3632,9 @@ function hqHits(t0: number): Array<{ lat: number; lng: number; at: number; title
     const lat = pd.ring.reduce((t, q) => t + q[0], 0) / n;
     const lng = pd.ring.reduce((t, q) => t + q[1], 0) / n;
     hits.push({ lat, lng, at: hqStopAt(t0, pd.stop), title: pd.name, intro: I[pd.name] ?? '', r: 16 });
+  }
+  if (hqLayer?.id === 'renewal') {
+    for (const rn of hq.HQ_RENEWAL) hits.push({ lat: rn.center[0], lng: rn.center[1], at: hqLayer.at, title: rn.name, intro: `${rn.approved} 核定${rn.blic ? '，已拿到建照' : ''}；都市更新審議平台上沒有開工紀錄（2026-11-05 查）。`, r: 10 });
   }
   const cityHall = hq.HQ_TOUR[hq.HQ_TOUR.length - 1];
   hits.push({ lat: cityHall.lat, lng: cityHall.lng, at: t0 + HQ_SAIL_MS, title: '臺北市政府（公務員減壓・都更陪伴）', intro: I['臺北市政府'] ?? '', r: 18 });
