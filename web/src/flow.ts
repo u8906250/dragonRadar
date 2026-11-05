@@ -220,10 +220,6 @@ export function stitchSvg(delayMs: number): string {
 }
 
 /**
- * 健身小巴（洋流總部的特效）：每一站停 FITBUS_STOP_MS，站和站之間照距離開（一圈開 FITBUS_DRIVE_MS），一直繞。
- * 一圈 FITBUS_DRIVE_MS + 站數 × FITBUS_STOP_MS（三站 24.6 秒）；styles.css 的 fit-show、fit-pt 照「停的時間 ÷ 一圈」= 13% 排，改時間要一起改
- */
-/**
  * 一直動的東西（健身小巴開、人流、登山客、腳踏車、圖示的待機小動作…）拉近到雷達外圈 HQ_MOTION_KM 以內、地圖縮放 HQ_MOTION_ZOOM 以上才動（v1.531 起 5 km、縮放 14：使用者說「所有動畫都跟隨 5km 的原則」；v1.535 起 2 km、縮放 15.3：使用者說「所有動畫都改到 2km 以下啟動」），
  * 拉遠就停下來或收起來，畫面不要太亂（v1.528 使用者說「所有會動的都建議拉近到一定程度才開始動」「不希望整體畫面太亂」）；洋流號、河、冒出來的動畫照舊
  */
@@ -280,33 +276,38 @@ export const BIKE_SVG =
   '<path class="bk-body" d="M-2.6 -9.2L0.4 -13.8L2.8 -9.6"/>' +
   '<circle class="bk-head" cx="1.4" cy="-15.8" r="2"/><path class="bk-helmet" d="M-0.7 -15.9A2.1 2.1 0 0 1 3.5 -15.9Z"/></g>';
 export const HQ_MOTION_ZOOM = 15.3;
-export const FITBUS_DRIVE_MS = 15_000;
+/**
+ * 健身小巴（洋流總部的特效）：每一站停 FITBUS_STOP_MS，站和站之間照距離開，一直繞（來回開的路線接上倒回來那段）。
+ * 開車的時間照路線長度：每公尺 FITBUS_MS_PER_M 毫秒（v1.540 使用者說「健身小巴開慢一點」：原本一圈固定 15 秒，萬華 5.5 km 太快）。
+ * 停在哪一站、那一站的長輩才冒出來：moveBoats 照 fitbusPhase 的 stop 在那一站加 on（不再用 CSS 照固定比例排）
+ */
+export const FITBUS_MS_PER_M = 5;
 export const FITBUS_STOP_MS = 3_200;
-export const fitbusLapMs = (stops: number): number => FITBUS_DRIVE_MS + stops * FITBUS_STOP_MS;
+export const fitbusLapMs = (stops: number, driveMs: number): number => driveMs + stops * FITBUS_STOP_MS;
 /** 各站開始停的時間（從出發算）：先在第一站停，再開到下一站… */
-export function fitbusStopOffsets(stopAt: number[]): number[] {
+export function fitbusStopOffsets(stopAt: number[], driveMs: number): number[] {
   const out: number[] = [];
   let t = 0;
   stopAt.forEach((f, i) => {
     out.push(t);
-    t += FITBUS_STOP_MS + FITBUS_DRIVE_MS * ((i + 1 < stopAt.length ? stopAt[i + 1] : 1) - f);
+    t += FITBUS_STOP_MS + driveMs * ((i + 1 < stopAt.length ? stopAt[i + 1] : 1) - f);
   });
   return out;
 }
-/** 健身小巴在路線上的哪裡（0～1，1 回到起點）；出發前看不到，出發後 0.6 秒淡入 */
-export function fitbusPhase(ms: number, stopAt: number[]): { at: number; alpha: number } {
-  if (ms < 0 || stopAt.length === 0) return { at: 0, alpha: 0 };
+/** 健身小巴在路線上的哪裡（0～1，1 回到起點）、停在第幾站（開車中是 null）；出發前看不到，出發後 0.6 秒淡入 */
+export function fitbusPhase(ms: number, stopAt: number[], driveMs: number): { at: number; alpha: number; stop: number | null } {
+  if (ms < 0 || stopAt.length === 0) return { at: 0, alpha: 0, stop: null };
   const alpha = Math.min(1, ms / 600);
-  let t = ms % fitbusLapMs(stopAt.length);
+  let t = ms % fitbusLapMs(stopAt.length, driveMs);
   for (let i = 0; i < stopAt.length; i++) {
-    if (t < FITBUS_STOP_MS) return { at: stopAt[i], alpha };
+    if (t < FITBUS_STOP_MS) return { at: stopAt[i], alpha, stop: i };
     t -= FITBUS_STOP_MS;
     const next = i + 1 < stopAt.length ? stopAt[i + 1] : 1;
-    const drive = FITBUS_DRIVE_MS * (next - stopAt[i]);
-    if (t < drive) return { at: stopAt[i] + (next - stopAt[i]) * (t / drive), alpha };
+    const drive = driveMs * (next - stopAt[i]);
+    if (t < drive) return { at: stopAt[i] + (next - stopAt[i]) * (t / drive), alpha, stop: null };
     t -= drive;
   }
-  return { at: 0, alpha };
+  return { at: 0, alpha, stop: null };
 }
 /** 健身小巴的樣子（螢幕像素，路面在 y = 0、車頭朝右）：白色電動小巴、綠色腰線上一個白色啞鈴、車頂電池（閃電）、深色車窗 */
 export const FITBUS_BODY =
@@ -321,18 +322,17 @@ export const FITBUS_BODY =
 /** 開來開去的健身小巴：名字寫在上面（不跟著左右翻），車身在 boat-flip 裡（往左開時翻過來，跟洋流號一樣） */
 export const FITBUS_SVG = `<text class="boat-label fb-name" y="-22" text-anchor="middle">健身小巴</text><g class="boat-flip">${FITBUS_BODY}</g>`;
 /**
- * 健身小巴停站時：車子下面冒出三個長輩，兩個舉啞鈴、一個拉彈力帶，右邊飄一個「敬老卡 +1」；跟小巴同一個時鐘，
- * 每一圈只在停這一站的時候出現（delayMs 是第一次停這一站的時間，lapMs 是一圈多久）
+ * 健身小巴停站時：車子下面冒出三個長輩，兩個舉啞鈴、一個拉彈力帶，右邊飄一個「敬老卡 +1」；
+ * 小巴停在這一站時（moveBoats 加 on）才出來
  */
-export function fitbusStopSvg(delayMs: number, lapMs: number): string {
+export function fitbusStopSvg(): string {
   const person = (x: number, kind: 'db' | 'band', d: number): string =>
     `<g transform="translate(${x} 0)"><circle class="fp-head" cy="-10.6" r="2.2"/><path class="fp-body" d="M0 -8.4V-3.6M0 -3.6L-1.9 0M0 -3.6L1.9 0"/>` +
     (kind === 'db'
       ? `<g class="fp-arms" style="animation-delay:${d}ms"><path class="fp-arm" d="M0 -7.4L-3 -10.4M0 -7.4L3 -10.4"/><path class="fp-db" d="M-4.3 -11.5L-1.8 -9.4M1.8 -9.4L4.3 -11.5"/></g>`
       : `<g class="fp-band" style="animation-delay:${d}ms"><path class="fp-arm" d="M0 -7.4L-3.8 -7.6M0 -7.4L3.8 -7.6"/><path class="fp-elastic" d="M-3.8 -7.6H3.8"/></g>`) +
     '</g>';
-  const style = `animation-duration:${lapMs}ms;animation-delay:${Math.round(delayMs)}ms`;
-  return `<g class="fit-pop" style="${style}"><g transform="translate(0 17)">${person(-9, 'db', 0)}${person(0, 'band', -300)}${person(9, 'db', -450)}</g><text class="fit-pt" x="16" y="12" style="${style}">敬老卡 +1</text></g>`;
+  return `<g class="fit-pop"><g transform="translate(0 17)">${person(-9, 'db', 0)}${person(0, 'band', -300)}${person(9, 'db', -450)}</g><text class="fit-pt" x="16" y="12">敬老卡 +1</text></g>`;
 }
 
 /**

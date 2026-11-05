@@ -126,11 +126,14 @@ describe('洋流總部的特效', () => {
     expect(haversineKm({ lat: HQ_FITBUS.path[0][0], lng: HQ_FITBUS.path[0][1] }, HQ_FITBUS.stops[0])).toBeLessThan(0.05);
     expect(HQ_INTROS['健身小巴']?.length ?? 0).toBeGreaterThan(20);
     expect(HQ_INTROS['健身小巴結合']?.length ?? 0).toBeGreaterThan(20);
-    const [o1, o2] = fitbusStopOffsets(HQ_FITBUS.stopAt).slice(1);
-    expect(fitbusPhase(o1 + 100, HQ_FITBUS.stopAt).at).toBeCloseTo(HQ_FITBUS.stopAt[1]);
-    expect(fitbusPhase(o1 + FITBUS_STOP_MS + 500, HQ_FITBUS.stopAt).at).toBeGreaterThan(HQ_FITBUS.stopAt[1]);
-    expect(fitbusPhase(o2 + 100, HQ_FITBUS.stopAt).at).toBeCloseTo(HQ_FITBUS.stopAt[2]);
-    expect(fitbusPhase(-10, HQ_FITBUS.stopAt).alpha).toBe(0);
+    const D = 27000;
+    const [o1, o2] = fitbusStopOffsets(HQ_FITBUS.stopAt, D).slice(1);
+    expect(fitbusPhase(o1 + 100, HQ_FITBUS.stopAt, D)).toMatchObject({ stop: 1 });
+    expect(fitbusPhase(o1 + 100, HQ_FITBUS.stopAt, D).at).toBeCloseTo(HQ_FITBUS.stopAt[1]);
+    expect(fitbusPhase(o1 + FITBUS_STOP_MS + 500, HQ_FITBUS.stopAt, D)).toMatchObject({ stop: null });
+    expect(fitbusPhase(o1 + FITBUS_STOP_MS + 500, HQ_FITBUS.stopAt, D).at).toBeGreaterThan(HQ_FITBUS.stopAt[1]);
+    expect(fitbusPhase(o2 + 100, HQ_FITBUS.stopAt, D).at).toBeCloseTo(HQ_FITBUS.stopAt[2]);
+    expect(fitbusPhase(-10, HQ_FITBUS.stopAt, D).alpha).toBe(0);
     // 縫合市民大道：三個縫線都有介紹；人流小點真的跨過高架（SOGO 在南、微風在北）；北流在台北市裡
     const civic = HQ_VIADUCTS.find((v) => v.name.startsWith('市民'))!.pts;
     const civicLat = (lng: number): number => {

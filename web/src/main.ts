@@ -1,5 +1,5 @@
 import './styles.css';
-import { HQ_MOTION_KM, HQ_NET_LABEL_KM, HQ_SAIL_MS, HQ_STAR_MS, HQ_VOYAGE_MS, RAINBOW_EVERY_MS, voyagePhase, voyageTimeOf } from './flow';
+import { FITBUS_MS_PER_M, HQ_MOTION_KM, HQ_NET_LABEL_KM, HQ_SAIL_MS, HQ_STAR_MS, HQ_VOYAGE_MS, RAINBOW_EVERY_MS, voyagePhase, voyageTimeOf } from './flow';
 import { addKeyword, collectLetter, deletePushSubscription, locateFeedbackPlace, sendFeedback, type FeedbackKind, fetchPushKey, savePushSubscription, confirmReport, editReport, locatePlace, rejectReport, supplementReport, deleteBottle, dropBottle, recycleBottle, fetchBottles, fetchEvents, fetchHealth, fetchKeywords, fetchMyBottles, fetchMyReports, fetchRoutes, pickBottle, reportBottle, reportEnded, submitLink, withdrawReport } from './api';
 import { compassSupported, startCompass } from './compass';
 import { bearingDeg, compassLabel, destination, formatKm, haversineKm, taiwanRadiusKm, type LatLng } from './geo';
@@ -3760,20 +3760,23 @@ const hqZoomScale = (): number => Math.min(1.6, Math.max(0.45, Math.sqrt(5 / sca
 /** 健身小巴在雷達上的大小：跟著縮放（hqZoomScale）；看整個文化網時最小（v1.528 使用者說主軸還是以文化網為主） */
 // 小台一點（v1.538 使用者說「健身小巴可以小台一點」）：跟縫線一樣是七成
 const hqFitSize = (): number => (hqNetAt !== null ? 0.35 : 0.7 * hqZoomScale());
-type HqFitbus = { path: Array<[number, number]>; start: number; lineAt: number; stopAt: number[]; stops: Array<{ at: [number, number]; label: string }>; focus: boolean; dim: boolean; intro: string };
+type HqFitbus = { path: Array<[number, number]>; start: number; lineAt: number; stopAt: number[]; stops: Array<{ at: [number, number]; label: string }>; focus: boolean; dim: boolean; intro: string; driveMs: number };
 function hqFitbuses(t0: number): HqFitbus[] {
   if (!hq) return [];
   const F = hq.HQ_FITBUS;
   const focus = hqLayer?.id === 'health';
   const dim = hqNetAt !== null;
   const lineAt = hqNearestAt(t0, F.stops[0]);
-  const out: HqFitbus[] = [{ path: F.path, start: lineAt + 2400, lineAt, stopAt: F.stopAt, stops: F.stops.map((st) => ({ at: [st.lat, st.lng] as [number, number], label: st.name })), focus, dim, intro: '健身小巴' }];
+  // 開車的時間照路線長度（每公尺 FITBUS_MS_PER_M 毫秒，v1.540 使用者說「開慢一點」）
+  const driveOf = (pts: Array<[number, number]>): number => Math.max(12000, pts.reduce((t, q, i) => (i ? t + haversineKm({ lat: pts[i - 1][0], lng: pts[i - 1][1] }, { lat: q[0], lng: q[1] }) * 1000 : 0), 0) * FITBUS_MS_PER_M);
+  const out: HqFitbus[] = [{ path: F.path, start: lineAt + 2400, lineAt, stopAt: F.stopAt, stops: F.stops.map((st) => ({ at: [st.lat, st.lng] as [number, number], label: st.name })), focus, dim, intro: '健身小巴', driveMs: driveOf(F.path) }];
   // 河濱、山林徑來回開：路線接上倒回來那一段，兩頭各停一下
   for (const sh of F.shuttles) {
     const a = sh.path[0];
     const b = sh.path[sh.path.length - 1];
     const at = hqNearestAt(t0, { lat: a[0], lng: a[1] });
-    out.push({ path: [...sh.path, ...sh.path.slice(0, -1).reverse()], start: at + 1500, lineAt: at, stopAt: [0, 0.5], stops: [{ at: a, label: sh.from }, { at: b, label: sh.to }], focus, dim, intro: '健身小巴結合' });
+    const path = [...sh.path, ...sh.path.slice(0, -1).reverse()];
+    out.push({ path, start: at + 1500, lineAt: at, stopAt: [0, 0.5], stops: [{ at: a, label: sh.from }, { at: b, label: sh.to }], focus, dim, intro: '健身小巴結合', driveMs: driveOf(path) });
   }
   return out;
 }

@@ -1,5 +1,5 @@
 import type * as Leaflet from 'leaflet';
-import { alongLine, BOAT_SVG, crackSvg, FITBUS_BODY, FITBUS_SVG, fitbusLapMs, HQ_MOTION_ZOOM, HQ_LABEL_ZOOM, HQ_NET_LABEL_KM, BIKE_SVG, HIKER_SVG, PETWALK_SVG, FISH_SVG, WETLAND_BIRDS, MUSIC_NOTES, bikePhase, fitbusPhase, fitbusStopOffsets, fitbusStopSvg, cultureSvg, regrowSvg, serviceSvg, stitchSvg, boatPhase, fireworksSvg, FIREWORKS_MS, flowOut, HQ_VOYAGE_MS, RAINBOW_FLOW_TOTAL, RAINBOW_STAGGER_MS, surge, SURGE_TOTAL, voyagePhase, voyageTimeOf } from './flow';
+import { alongLine, BOAT_SVG, crackSvg, FITBUS_BODY, FITBUS_SVG, HQ_MOTION_ZOOM, HQ_LABEL_ZOOM, HQ_NET_LABEL_KM, BIKE_SVG, HIKER_SVG, PETWALK_SVG, FISH_SVG, WETLAND_BIRDS, MUSIC_NOTES, bikePhase, fitbusPhase, fitbusStopSvg, cultureSvg, regrowSvg, serviceSvg, stitchSvg, boatPhase, fireworksSvg, FIREWORKS_MS, flowOut, HQ_VOYAGE_MS, RAINBOW_FLOW_TOTAL, RAINBOW_STAGGER_MS, surge, SURGE_TOTAL, voyagePhase, voyageTimeOf } from './flow';
 import { haversineKm, type LatLng } from './geo';
 import type { EventKind, Phase } from './types';
 import { LANDMARKS } from './landmarks';
@@ -72,7 +72,7 @@ export interface MapRoute {
   /** 騎自行車的人：跟雷達一樣（經緯度） */
   bikes?: Array<{ path: Array<[number, number]>; start: number; lap: number; kind?: 'bike' | 'hiker' | 'pet'; loop?: boolean; color?: string }>;
   /** 健身小巴：跟雷達一樣（經緯度） */
-  fitbuses?: Array<{ path: Array<[number, number]>; start: number; lineAt: number; stopAt: number[]; stops: Array<{ at: [number, number]; label: string }>; focus?: boolean; dim?: boolean }>;
+  fitbuses?: Array<{ path: Array<[number, number]>; start: number; lineAt: number; stopAt: number[]; stops: Array<{ at: [number, number]; label: string }>; focus?: boolean; dim?: boolean; driveMs: number }>;
   /** 縫合（市民大道）：跟雷達一樣（經緯度） */
   seams?: Array<{
     path: Array<[number, number]>;
@@ -249,7 +249,7 @@ export class MapView {
   private landmarksOn = true;
   private routes: MapRoute[] = [];
   /** 洋流號：路線的經緯度（cum 是每一點走了幾公里）和船，每一格畫面照現在的時間擺；往哪邊開記在 boatLeft */
-  private boatTracks: Array<{ id: string; marker: Leaflet.Marker; lat: Float64Array; lng: Float64Array; cum: Float64Array; voyage?: number; bus?: { start: number; stopAt: number[] }; ride?: { start: number; lap: number; loop?: boolean } }> = [];
+  private boatTracks: Array<{ id: string; marker: Leaflet.Marker; lat: Float64Array; lng: Float64Array; cum: Float64Array; voyage?: number; bus?: { start: number; stopAt: number[]; driveMs: number; stops: Leaflet.Marker[] }; ride?: { start: number; lap: number; loop?: boolean } }> = [];
   /** 河流：整條的經緯度（cum 是每一點走了幾公里）、河岸、河面、亮的那道、兩道波光，畫到哪（at，沒變就不重畫） */
   private riverTracks: Array<{ pts: Array<[number, number]>; cum: Float64Array; voyage: number; at: number; lines: Leaflet.Polyline[]; chunkStart: number; chunkEnd: number; riverOut?: number }> = [];
   private readonly boatLeft = new Map<string, boolean>();
@@ -1126,11 +1126,13 @@ export class MapView {
           e.style.animationDelay = `${Math.round(fb.lineAt - now)}ms`;
         }
       }
-      const offs = fitbusStopOffsets(fb.stopAt);
-      const lap = fitbusLapMs(fb.stopAt.length);
-      fb.stops.forEach((st, i) => {
-        const icon = L.divIcon({ className: `map-voyage-icon fitbus-stop${on}`, html: `<svg viewBox="-30 -20 60 50" width="60" height="50" aria-hidden="true">${fitbusStopSvg(fb.start + offs[i] - now, lap)}</svg>`, iconSize: [60, 50], iconAnchor: [30, 20] });
-        layer.addLayer(L.marker(st.at, { icon, interactive: false, keyboard: false, zIndexOffset: 1250 }));
+      // 停站的長輩：小巴停在這一站時（moveBoats 加 on）才冒出來
+      const stopMarkers: Leaflet.Marker[] = [];
+      fb.stops.forEach((st) => {
+        const icon = L.divIcon({ className: `map-voyage-icon fitbus-stop${on}`, html: `<svg viewBox="-30 -20 60 50" width="60" height="50" aria-hidden="true">${fitbusStopSvg()}</svg>`, iconSize: [60, 50], iconAnchor: [30, 20] });
+        const sm = L.marker(st.at, { icon, interactive: false, keyboard: false, zIndexOffset: 1250 });
+        layer.addLayer(sm);
+        stopMarkers.push(sm);
         this.stayLabel(st.at, st.label, fb.lineAt + 1200 - now, -24, 'fit-label');
       });
       const n = fb.path.length;
@@ -1143,7 +1145,7 @@ export class MapView {
         const icon = L.divIcon({ className: `map-boat map-fitbus${on}`, html: `<svg viewBox="-24 -30 48 34" width="48" height="34" aria-hidden="true">${FITBUS_SVG}</svg>`, iconSize: [48, 34], iconAnchor: [24, 30] });
         const marker = L.marker([lat[0], lng[0]], { icon, interactive: false, keyboard: false, zIndexOffset: 1260 });
         layer.addLayer(marker);
-        this.boatTracks.push({ id: `hq-fitbus-${bi}`, marker, lat, lng, cum, bus: { start: fb.start, stopAt: fb.stopAt } });
+        this.boatTracks.push({ id: `hq-fitbus-${bi}`, marker, lat, lng, cum, bus: { start: fb.start, stopAt: fb.stopAt, driveMs: fb.driveMs, stops: stopMarkers } });
       }
     }
     // 騎自行車的人（河濱自行車道、迎風—港墘橋）：沿著路騎（moveBoats 擺位置），拉遠收起來
@@ -1273,9 +1275,11 @@ export class MapView {
           if (box) box.style.display = this.motionFar ? 'none' : '';
           if (this.motionFar) continue;
         }
-        const ph = t.bus ? fitbusPhase(now - t.bus.start, t.bus.stopAt) : t.ride ? bikePhase(now - t.ride.start, t.ride.lap, t.ride.loop) : null;
+        const ph = t.bus ? fitbusPhase(now - t.bus.start, t.bus.stopAt, t.bus.driveMs) : t.ride ? bikePhase(now - t.ride.start, t.ride.lap, t.ride.loop) : null;
         // 拉遠了，健身小巴停在第一站不開
         const { at, alpha } = t.bus && ph ? (this.motionFar ? { at: t.bus.stopAt[0], alpha: ph.alpha } : ph) : ph ?? (t.voyage !== undefined ? voyagePhase(now - t.voyage) : lap);
+        // 停在哪一站，那一站的長輩才出來
+        if (t.bus && ph && 'stop' in ph) t.bus.stops.forEach((m, i) => m.getElement()?.classList.toggle('on', !this.motionFar && ph.stop === i));
         // 經度往東是畫面的右邊
         const p = alongLine(t.lng, t.lat, t.cum, at);
         if (p.left !== null) this.boatLeft.set(t.id, p.left);

@@ -1,5 +1,5 @@
 import type { BlipStyle, EventKind, Phase, SweepStyle } from './types';
-import { alongLine, BOAT_SVG, crackSvg, FITBUS_BODY, FITBUS_SVG, fitbusLapMs, HQ_MOTION_KM, HQ_NET_LABEL_KM, BIKE_SVG, HIKER_SVG, PETWALK_SVG, FISH_SVG, WETLAND_BIRDS, MUSIC_NOTES, bikePhase, fitbusPhase, fitbusStopOffsets, fitbusStopSvg, cultureSvg, regrowSvg, serviceSvg, stitchSvg, BOAT_TITLE, boatPhase, fireworksSvg, FIREWORKS_MS, flowOut, HQ_VOYAGE_MS, RAINBOW_FLOW_TOTAL, RAINBOW_STAGGER_MS, riverHalfWidth, surge, SURGE_TOTAL, voyagePhase, voyageTimeOf } from './flow';
+import { alongLine, BOAT_SVG, crackSvg, FITBUS_BODY, FITBUS_SVG, HQ_MOTION_KM, HQ_NET_LABEL_KM, BIKE_SVG, HIKER_SVG, PETWALK_SVG, FISH_SVG, WETLAND_BIRDS, MUSIC_NOTES, bikePhase, fitbusPhase, fitbusStopSvg, cultureSvg, regrowSvg, serviceSvg, stitchSvg, BOAT_TITLE, boatPhase, fireworksSvg, FIREWORKS_MS, flowOut, HQ_VOYAGE_MS, RAINBOW_FLOW_TOTAL, RAINBOW_STAGGER_MS, riverHalfWidth, surge, SURGE_TOTAL, voyagePhase, voyageTimeOf } from './flow';
 
 export interface RadarItem {
   id: number;
@@ -77,7 +77,7 @@ export interface RadarRoute {
   /** 騎自行車的人：沿著 points 從頭騎到尾（start 開始、一趟 lap 毫秒），拉遠收起來 */
   bikes?: Array<{ points: Array<{ bearing: number; distanceKm: number }>; start: number; lap: number; kind?: 'bike' | 'hiker' | 'pet'; loop?: boolean; color?: string }>;
   /** 健身小巴：沿著 points 繞圈（start 出發、stopAt 是各站在路線上的位置），停站時那一站冒出運動的長輩；lineAt 路線畫出來；focus 是政策按鈕（衛福）亮著 */
-  fitbuses?: Array<{ points: Array<{ bearing: number; distanceKm: number }>; start: number; lineAt: number; stopAt: number[]; stops: Array<{ point: { bearing: number; distanceKm: number }; label: string }>; focus?: boolean; size?: number; dim?: boolean }>;
+  fitbuses?: Array<{ points: Array<{ bearing: number; distanceKm: number }>; start: number; lineAt: number; stopAt: number[]; stops: Array<{ point: { bearing: number; distanceKm: number }; label: string }>; focus?: boolean; size?: number; dim?: boolean; driveMs: number }>;
   /** 縫合（市民大道）：at 裂縫畫出來、healAt 縫完變淡；stitches 一個一個縫（along 是路上的下一點，算方向）；walkers 人流小點從 from 走到 to */
   seams?: Array<{
     points: Array<{ bearing: number; distanceKm: number }>;
@@ -519,7 +519,7 @@ export class Radar {
   /** 點了車掃的中間點：打開那條車掃的時間表 */
   onRoute: ((id: string) => void) | null = null;
   /** 洋流號：路線在畫面上的折線（SVG 座標，cum 是每一點走了多遠）和船，每一格畫面照現在的時間擺；往哪邊開記在 boatLeft（重畫時接著用） */
-  private boatTracks: Array<{ id: string; g: SVGGElement; flip: SVGGElement; xs: Float64Array; ys: Float64Array; cum: Float64Array; voyage?: number; bus?: { start: number; stopAt: number[] }; ride?: { start: number; lap: number; loop?: boolean }; scale?: number }> = [];
+  private boatTracks: Array<{ id: string; g: SVGGElement; flip: SVGGElement; xs: Float64Array; ys: Float64Array; cum: Float64Array; voyage?: number; bus?: { start: number; stopAt: number[]; driveMs: number; stopEls: Element[] }; ride?: { start: number; lap: number; loop?: boolean }; scale?: number }> = [];
   /** 河流：畫面上的折線（cum 是每一點走了多遠）、每一點往左的法線和半寬（SVG 單位）、畫到哪（at，沒變就不重畫） */
   private riverTracks: Array<{ xs: Float64Array; ys: Float64Array; nx: Float64Array; ny: Float64Array; hw: Float64Array; cum: Float64Array; voyage: number; at: number; g: SVGGElement; tip: SVGPathElement[]; chunkStart: number; chunkEnd: number }> = [];
   private readonly boatLeft = new Map<string, boolean>();
@@ -2322,14 +2322,15 @@ export class Radar {
         el('path', { class: 'reveal-line', d, pathLength: '1', style: `stroke-width:${(2.4 * k * Math.min(1, fs)).toFixed(2)};animation-delay:${Math.round(fb.lineAt - now)}ms;stroke:#2f9e6a` }),
       );
       this.routeLayer.appendChild(lg);
-      const offs = fitbusStopOffsets(fb.stopAt);
-      const lap = fitbusLapMs(fb.stopAt.length);
-      fb.stops.forEach((st, i) => {
+      // 停站的長輩：小巴停在這一站時（moveBoats 加 on）才冒出來
+      const stopEls: Element[] = [];
+      fb.stops.forEach((st) => {
         if (!near) return;
         const p = polar(st.point.bearing - this.heading, this.ratio(st.point.distanceKm) * (R - 8));
         const sg = el('g', { class: `fitbus-stop${on}`, transform: `translate(${p.x.toFixed(1)} ${p.y.toFixed(1)}) scale(${k.toFixed(4)})` });
-        sg.innerHTML = fitbusStopSvg(fb.start + offs[i] - now, lap);
+        sg.innerHTML = fitbusStopSvg();
         this.routeLayer.appendChild(sg);
+        stopEls.push(sg);
         const lb = this.stayLabel(p.x, p.y, k, st.label, fb.lineAt + 1200 - now, 30);
         lb.classList.add('small');
         if (fb.focus) lb.classList.add('focus');
@@ -2348,7 +2349,7 @@ export class Radar {
         // 裡面再包一層：moveBoats 會改外層的 opacity（淡入），政策按鈕（不是衛福）亮著時變淡用裡面這層
         g.innerHTML = `<g class="fb-dim">${FITBUS_SVG}</g>`;
         this.routeLayer.appendChild(g);
-        this.boatTracks.push({ id: `hq-fitbus-${bi}`, g, flip: g.querySelector('.boat-flip') as SVGGElement, xs, ys, cum, bus: { start: fb.start, stopAt: fb.stopAt }, scale: fs });
+        this.boatTracks.push({ id: `hq-fitbus-${bi}`, g, flip: g.querySelector('.boat-flip') as SVGGElement, xs, ys, cum, bus: { start: fb.start, stopAt: fb.stopAt, driveMs: fb.driveMs, stopEls }, scale: fs });
       }
     }
     // 騎自行車的人（河濱自行車道、迎風—港墘橋）：沿著路騎（moveBoats 擺位置），拉遠收起來
@@ -2399,9 +2400,11 @@ export class Radar {
           t.g.style.display = this.motionFar ? 'none' : '';
           if (this.motionFar) continue;
         }
-        const ph = t.bus ? fitbusPhase(now - t.bus.start, t.bus.stopAt) : t.ride ? bikePhase(now - t.ride.start, t.ride.lap, t.ride.loop) : null;
+        const ph = t.bus ? fitbusPhase(now - t.bus.start, t.bus.stopAt, t.bus.driveMs) : t.ride ? bikePhase(now - t.ride.start, t.ride.lap, t.ride.loop) : null;
         // 拉遠了，健身小巴停在第一站不開
         const { at, alpha } = t.bus && ph ? (this.motionFar ? { at: t.bus.stopAt[0], alpha: ph.alpha } : ph) : ph ?? (t.voyage !== undefined ? voyagePhase(now - t.voyage) : lap);
+        // 停在哪一站，那一站的長輩才出來
+        if (t.bus && ph && 'stop' in ph) t.bus.stopEls.forEach((e, i) => e.classList.toggle('on', !this.motionFar && ph.stop === i));
         const p = alongLine(t.xs, t.ys, t.cum, at);
         if (p.left !== null) this.boatLeft.set(t.id, p.left);
         t.g.setAttribute('transform', `translate(${p.x.toFixed(1)} ${p.y.toFixed(1)}) scale(${t.scale !== undefined ? (Number(k) * t.scale).toFixed(4) : k})`);

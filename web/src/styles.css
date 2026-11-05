@@ -328,7 +328,7 @@ path.map-water-glint { animation: water-flow-map 1.1s linear infinite; }
 .map-boat { background: none; border: 0; pointer-events: none; }
 .map-boat svg { display: block; overflow: visible; }
 .map-boat.left .boat-flip { transform: scaleX(-1); }
-/* 健身小巴（v1.525）：白色電動小巴、綠色腰線上的白啞鈴、車頂電池；停站時冒出運動的長輩（fit-show、fit-pt 的 13% 是「停 3.2 秒 ÷ 一圈 24.6 秒」，flow.ts 的時間改了要一起改） */
+/* 健身小巴（v1.525）：白色電動小巴、綠色腰線上的白啞鈴、車頂電池；停站時（moveBoats 加 on）冒出運動的長輩 */
 .fb-shadow { fill: #000; fill-opacity: 0.15; }
 /* 騎自行車的人（v1.529）：黃色車架、橘色安全帽、綠色上衣 */
 .bk-shadow { fill: #000; fill-opacity: 0.12; }
@@ -371,10 +371,11 @@ path.map-water-glint { animation: water-flow-map 1.1s linear infinite; }
 .fb-hub { fill: #c9cdd2; }
 .fb-lamp { fill: #ffd43b; }
 .fb-name { fill: #1f6b47; }
-.fit-pop { opacity: 0; transform-origin: 0 0; animation-name: fit-show; animation-timing-function: linear; animation-iteration-count: infinite; }
-@keyframes fit-show { 0% { opacity: 0; transform: scale(0.4); } 2% { opacity: 1; transform: scale(1); } 11.5% { opacity: 1; transform: scale(1); } 13% { opacity: 0; transform: scale(0.7); } 100% { opacity: 0; transform: scale(0.7); } }
-.fit-pt { font-size: 7.5px; font-weight: 800; fill: #1f6b47; stroke: #fff; stroke-width: 2.4px; stroke-linejoin: round; paint-order: stroke; opacity: 0; animation-name: fit-pt; animation-timing-function: linear; animation-iteration-count: infinite; }
-@keyframes fit-pt { 0% { opacity: 0; transform: translateY(2px); } 3% { opacity: 1; transform: translateY(0); } 11% { opacity: 1; transform: translateY(-5px); } 13% { opacity: 0; transform: translateY(-6px); } 100% { opacity: 0; } }
+.fit-pop { opacity: 0; transform-origin: 0 0; transform: scale(0.4); transition: opacity 0.35s ease-out, transform 0.35s cubic-bezier(0.3, 1.5, 0.5, 1); }
+.fitbus-stop.on .fit-pop { opacity: 1; transform: scale(1); }
+.fit-pt { font-size: 7.5px; font-weight: 800; fill: #1f6b47; stroke: #fff; stroke-width: 2.4px; stroke-linejoin: round; paint-order: stroke; opacity: 0; }
+.fitbus-stop.on .fit-pt { animation: fit-pt 2.4s ease-out infinite; }
+@keyframes fit-pt { 0% { opacity: 0; transform: translateY(2px); } 15% { opacity: 1; transform: translateY(0); } 80% { opacity: 1; transform: translateY(-5px); } 100% { opacity: 0; transform: translateY(-6px); } }
 .fp-head { fill: #f3d9bd; stroke: #5a4636; stroke-width: 0.7; }
 .fp-body, .fp-arm { fill: none; stroke: #3b3b3b; stroke-width: 1.3; stroke-linecap: round; }
 .fp-db { fill: none; stroke: #6a7480; stroke-width: 1.9; stroke-linecap: round; }
