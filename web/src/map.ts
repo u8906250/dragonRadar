@@ -1,5 +1,5 @@
 import type * as Leaflet from 'leaflet';
-import { alongLine, BOAT_SVG, crackSvg, FITBUS_BODY, FITBUS_SVG, fitbusLapMs, HQ_MOTION_ZOOM, HQ_LABEL_ZOOM, HQ_NET_LABEL_KM, BIKE_SVG, HIKER_SVG, PETWALK_SVG, FETCH_SVG, bikePhase, fitbusPhase, fitbusStopOffsets, fitbusStopSvg, cultureSvg, regrowSvg, serviceSvg, stitchSvg, boatPhase, fireworksSvg, FIREWORKS_MS, flowOut, HQ_VOYAGE_MS, RAINBOW_FLOW_TOTAL, RAINBOW_STAGGER_MS, surge, SURGE_TOTAL, voyagePhase, voyageTimeOf } from './flow';
+import { alongLine, BOAT_SVG, crackSvg, FITBUS_BODY, FITBUS_SVG, fitbusLapMs, HQ_MOTION_ZOOM, HQ_LABEL_ZOOM, HQ_NET_LABEL_KM, BIKE_SVG, HIKER_SVG, PETWALK_SVG, FISH_SVG, WETLAND_BIRDS, MUSIC_NOTES, bikePhase, fitbusPhase, fitbusStopOffsets, fitbusStopSvg, cultureSvg, regrowSvg, serviceSvg, stitchSvg, boatPhase, fireworksSvg, FIREWORKS_MS, flowOut, HQ_VOYAGE_MS, RAINBOW_FLOW_TOTAL, RAINBOW_STAGGER_MS, surge, SURGE_TOTAL, voyagePhase, voyageTimeOf } from './flow';
 import { haversineKm, type LatLng } from './geo';
 import type { EventKind, Phase } from './types';
 import { LANDMARKS } from './landmarks';
@@ -92,7 +92,7 @@ export interface MapRoute {
   /** 文化網（點 —— 線 —— 面） */
   network?: { at: number; lines: Array<{ path: Array<[number, number]>; color: string }>; dots: Array<{ lat: number; lng: number; color: string }>; noFace?: boolean; faceR?: number };
   /** 一個東西冒出來：hut 登山中心、stadium 足球場、dome 運動中心、star 星星、regrow 樹樁（grow 時長回大樹）、culture 文化徑的點（small 的名字地圖上不寫，滑鼠移過去看介紹） */
-  icons?: Array<{ lat: number; lng: number; at: number; kind: 'hut' | 'stadium' | 'dome' | 'bigdome' | 'star' | 'regrow' | 'culture' | 'service' | 'wetland' | 'archbridge' | 'chest' | 'chestlock' | 'paw' | 'umusic' | 'uart' | 'uexhibit' | 'uyouth' | 'ushop' | 'fitbus' | 'fetch'; label?: string; hideKm?: number; scale?: number; grow?: number; char?: string; color?: string; small?: boolean; focus?: boolean }>;
+  icons?: Array<{ lat: number; lng: number; at: number; kind: 'hut' | 'stadium' | 'dome' | 'bigdome' | 'star' | 'regrow' | 'culture' | 'service' | 'wetland' | 'archbridge' | 'chest' | 'chestlock' | 'paw' | 'umusic' | 'uart' | 'uexhibit' | 'uyouth' | 'ushop' | 'fitbus'; label?: string; hideKm?: number; scale?: number; grow?: number; char?: string; color?: string; small?: boolean; focus?: boolean }>;
   /** 政策圖層開著：其他特效變淡，只有 focus 的地方、通學區的圈清楚 */
   focus?: boolean;
   /** 都更的基地範圍（at 時淡入） */
@@ -132,10 +132,10 @@ const MAP_DRAGON_SVG =
     return `<path class="wb-paddle" d="M${x} -4.5L${x + 3} -9"/><circle class="wb-head" cx="${x}" cy="-1.2" r="1.6"/>`;
   }).join('');
 /** 冒出來的東西（跟 radar.ts 一樣的畫法，顏色在 styles.css） */
-const MAP_ICON_SVG: Record<'hut' | 'stadium' | 'dome' | 'bigdome' | 'star' | 'wetland' | 'archbridge' | 'chest' | 'chestlock' | 'paw' | 'umusic' | 'uart' | 'uexhibit' | 'uyouth' | 'ushop' | 'fitbus' | 'fetch', string> = {
+const MAP_ICON_SVG: Record<'hut' | 'stadium' | 'dome' | 'bigdome' | 'star' | 'wetland' | 'archbridge' | 'chest' | 'chestlock' | 'paw' | 'umusic' | 'uart' | 'uexhibit' | 'uyouth' | 'ushop' | 'fitbus', string> = {
   fitbus: `<g transform="translate(0 9)">${FITBUS_BODY}</g>`,
-  fetch: FETCH_SVG,
-  umusic: '<circle class="ud-bg" r="9"/><path class="ud-ink" d="M-1.5 4V-5.5L5 -7.5V2"/><ellipse class="ud-fill" cx="-3.6" cy="4.2" rx="2.6" ry="2"/><ellipse class="ud-fill" cx="2.9" cy="2.2" rx="2.6" ry="2"/>',
+  // 音樂的圖示飄出小音符（v1.534）
+  umusic: '<circle class="ud-bg" r="9"/><path class="ud-ink" d="M-1.5 4V-5.5L5 -7.5V2"/><ellipse class="ud-fill" cx="-3.6" cy="4.2" rx="2.6" ry="2"/><ellipse class="ud-fill" cx="2.9" cy="2.2" rx="2.6" ry="2"/>' + MUSIC_NOTES,
   uart: '<circle class="ud-bg" r="9"/><path class="ud-pal" d="M-6 2Q-8 -6 0 -6.5Q7 -6.5 6.5 -1Q6 2 3 1.5Q1 1.2 1 3.5Q1 6 -2 5.5Q-5 5 -6 2Z"/><circle class="ud-c1" cx="-3" cy="-2.6" r="1.3"/><circle class="ud-c2" cx="0.8" cy="-4" r="1.3"/><circle class="ud-c3" cx="4" cy="-2" r="1.3"/>',
   uexhibit: '<circle class="ud-bg" r="9"/><rect class="ud-frame" x="-6" y="-5" width="12" height="9.5" rx="1"/><path class="ud-mtn" d="M-4.5 3L-1.5 -1L0.8 1.6L2.4 0L4.5 3Z"/><circle class="ud-c3" cx="2.4" cy="-2.6" r="1.2"/>',
   uyouth: '<circle class="ud-bg" r="9"/><path class="ud-bub" d="M-7 -5H1.5V1H-3L-5.2 3.2V1H-7Z"/><path class="ud-bub2" d="M-1.5 -1.5H7V4.5H5.2V6.6L3 4.5H-1.5Z"/>',
@@ -144,7 +144,8 @@ const MAP_ICON_SVG: Record<'hut' | 'stadium' | 'dome' | 'bigdome' | 'star' | 'we
   chestlock: '<path class="ch-lid-c" d="M-12 -4Q-12 -14.5 0 -14.5Q12 -14.5 12 -4Z"/><path class="ch-lid-hi" d="M-8.5 -7Q-8 -12 -2 -12.6"/><rect class="ch-box" x="-12" y="-4" width="24" height="12" rx="3"/><path class="ch-dark" d="M-11.3 3.5H11.3V5.2Q11.3 7.3 9 7.3H-9Q-11.3 7.3 -11.3 5.2Z"/><rect class="ch-trim" x="-12" y="-5" width="24" height="2.4"/><rect class="ch-trim" x="-8.4" y="-13" width="2.6" height="21" rx="1"/><rect class="ch-trim" x="5.8" y="-13" width="2.6" height="21" rx="1"/><path class="ch-shackle" d="M-2.4 -2V-5A2.4 2.4 0 0 1 2.4 -5V-2"/><rect class="ch-lockbody" x="-4" y="-2.4" width="8" height="6.6" rx="1.6"/><circle class="ch-key" cx="0" cy="0.2" r="1"/><path class="ch-keyline" d="M0 0.6V2.6"/><path class="ch-shine" d="M-9.4 -1.6V2"/><path class="kira k2" d="M13.5 -14.4L14.2 -12.7L15.9 -12.0L14.2 -11.3L13.5 -9.6L12.8 -11.3L11.1 -12.0L12.8 -12.7Z"/>',
   paw: '<ellipse class="pw" cx="0" cy="4" rx="6.5" ry="5.5"/><ellipse class="pw" cx="-8" cy="-3" rx="2.8" ry="3.6" transform="rotate(-20 -8 -3)"/><ellipse class="pw" cx="-3" cy="-8" rx="2.8" ry="3.8" transform="rotate(-6 -3 -8)"/><ellipse class="pw" cx="3" cy="-8" rx="2.8" ry="3.8" transform="rotate(6 3 -8)"/><ellipse class="pw" cx="8" cy="-3" rx="2.8" ry="3.6" transform="rotate(20 8 -3)"/>',
   archbridge: '<path class="ic-stone" d="M-16 -3H16V6H11A6 6 0 0 0 1 6H-1A6 6 0 0 0 -11 6H-16Z"/><path class="ic-stone-line" d="M-16 0H16M-6 -3V0M6 -3V0"/><path class="ic-lamp" d="M-13 -3V-8M0 -3V-8M13 -3V-8"/><circle class="ic-lamp-top" cx="-13" cy="-9" r="1.6"/><circle class="ic-lamp-top" cx="0" cy="-9" r="1.6"/><circle class="ic-lamp-top" cx="13" cy="-9" r="1.6"/>',
-  wetland: '<ellipse class="ic-pond" cx="0" cy="4" rx="11" ry="4.5"/><path class="ic-reed" d="M-6 4V-7M-2 4V-11M2 4V-6M6 4V-9"/><path class="ic-reed-top" d="M-6 -7l1 -3.5M-2 -11l1 -3.5M2 -6l1 -3.5M6 -9l1 -3.5"/>',
+  // 濕地上兩隻小鳥飛起來繞一圈再降落（v1.534）
+  wetland: '<ellipse class="ic-pond" cx="0" cy="4" rx="11" ry="4.5"/><path class="ic-reed" d="M-6 4V-7M-2 4V-11M2 4V-6M6 4V-9"/><path class="ic-reed-top" d="M-6 -7l1 -3.5M-2 -11l1 -3.5M2 -6l1 -3.5M6 -9l1 -3.5"/>' + WETLAND_BIRDS,
   hut: '<path class="ic-roof" d="M-9 -1L0 -11L9 -1Z"/><path class="ic-wall" d="M-7 -1H7V7H-7Z"/><path class="ic-door" d="M-2 7V2H2V7Z"/><path class="ic-flag" d="M0 -11V-17M0 -17H5L3.5 -15L5 -13H0"/>',
   stadium: '<ellipse class="ic-stand" rx="16" ry="10"/><ellipse class="ic-field" rx="11" ry="6"/><path class="ic-lines" d="M0 -6V6M-11 0A11 6 0 0 0 11 0M-11 0A11 6 0 0 1 11 0"/><circle class="ic-lines" r="2"/>',
   dome: '<path class="ic-base" d="M-14 4H14V7H-14Z"/><path class="ic-dome" d="M-13 4A13 13 0 0 1 13 4Z"/><path class="ic-rib" d="M0 -9V4M-7 -7Q0 -4 7 -7"/>',
@@ -337,6 +338,8 @@ export class MapView {
       const fitScale = (): void => {
         const s = Math.min(1, Math.max(0.45, 2 ** ((map.getZoom() - 15) / 2)));
         this.el.style.setProperty('--fit-scale', s.toFixed(3));
+        // 縫線拉近時跟著變小（v1.535）：縮放 14 原來的大小，每拉近一級小一點（最小 0.45）
+        this.el.style.setProperty('--stitch-scale', Math.min(1, Math.max(0.45, 2 ** (14 - map.getZoom()))).toFixed(3));
         // 拉遠了，一直動的停下來或收起來（hq-far）
         this.motionFar = map.getZoom() < HQ_MOTION_ZOOM;
         this.el.classList.toggle('hq-far', this.motionFar);
@@ -934,6 +937,21 @@ export class MapView {
         if (!e) return;
         e.setAttribute('pathLength', '1');
         (e as SVGElement).style.animationDelay = `${Math.round(c.at - (i === 0 ? MAP_CANAL_GHOST_MS : 0) - now)}ms`;
+        if (i === lines.length - 1) {
+          // 注水完（3 秒）淡淡的波紋一直往下游流、兩條小錦鯉跳出水面（v1.534）
+          const flow = L.polyline(c.path, { ...o, color: '#fff', weight: 1.5, opacity: 0.75, dashArray: '2 12', className: 'map-canal-flow' });
+          layer.addLayer(flow);
+          const fe = flow.getElement() as SVGElement | undefined;
+          if (fe) fe.style.animationDelay = `${Math.round(c.at + 3000 - now)}ms,${Math.round(c.at + 3000 - now)}ms`;
+          [0.3, 0.7].forEach((f, fi) => {
+            const j = Math.min(c.path.length - 2, Math.floor((c.path.length - 1) * f));
+            const left = c.path[j + 1][1] < c.path[j][1];
+            const d = Math.round(c.at + 4000 + fi * 2600 - now);
+            const svg = FISH_SVG.replace('class="cf-jump"', `class="cf-jump" style="animation-delay:${d}ms"`).replace('class="cf-splash"', `class="cf-splash" style="animation-delay:${d}ms"`);
+            const icon = L.divIcon({ className: 'map-canal-fish', html: `<svg viewBox="-10 -10 20 14" width="26" height="18" aria-hidden="true"><g transform="scale(${left ? -1 : 1} 1)">${svg}</g></svg>`, iconSize: [26, 18], iconAnchor: [13, 13] });
+            layer.addLayer(L.marker(c.path[j], { icon, interactive: false, keyboard: false, zIndexOffset: 1100 }));
+          });
+        }
       });
       const mid = c.path[Math.floor(c.path.length / 2)];
       this.stayLabel(mid, c.label, c.at + 1200 - now, 30);
@@ -1166,7 +1184,8 @@ export class MapView {
     for (const b of r.boats ?? []) {
       const sc = b.kind === 'dragon' ? 0.65 : 0.8;
       const svg = `<svg viewBox="-34 -16 68 32" width="68" height="32" aria-hidden="true"><g transform="rotate(${(b.heading - 90).toFixed(1)}) scale(${sc})"><g class="boat-glide" style="animation-delay:${Math.round(b.at - mapHash(b.at) * 3000 - now)}ms"><g class="boat-bob" style="animation-delay:${Math.round(-mapHash(b.at) * 1600)}ms">${b.kind === 'sup' ? MAP_SUP_SVG : MAP_DRAGON_SVG}</g></g></g></svg>`;
-      const icon = L.divIcon({ className: `map-voyage-boat ${b.kind}`, html: `<div class="boat-pop" style="animation-delay:${Math.round(b.at - now)}ms">${svg}</div>`, iconSize: [68, 32], iconAnchor: [34, 16] });
+      // SUP、龍舟拉遠（縮放 13 以下，雷達 10 km）就不畫（v1.535）
+      const icon = L.divIcon({ className: `map-voyage-boat ${b.kind} far-label-10`, html: `<div class="boat-pop" style="animation-delay:${Math.round(b.at - now)}ms">${svg}</div>`, iconSize: [68, 32], iconAnchor: [34, 16] });
       layer.addLayer(L.marker([b.lat, b.lng], { icon, interactive: false, keyboard: false, zIndexOffset: 1200 }));
     }
     for (const pl of r.plantings ?? []) {

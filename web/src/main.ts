@@ -3539,7 +3539,7 @@ type HqSeam = {
   stitches: Array<{ at: number; center: [number, number]; along: [number, number]; label: string; below?: boolean }>;
   walkers: Array<{ from: [number, number]; to: [number, number]; at: number; south?: boolean }>;
 };
-type HqIcon = { lat: number; lng: number; at: number; kind: 'hut' | 'stadium' | 'dome' | 'bigdome' | 'star' | 'regrow' | 'culture' | 'service' | 'wetland' | 'archbridge' | 'chest' | 'chestlock' | 'paw' | 'umusic' | 'uart' | 'uexhibit' | 'uyouth' | 'ushop' | 'fitbus' | 'fetch'; label?: string; hideKm?: number; scale?: number; grow?: number; char?: string; color?: string; small?: boolean; focus?: boolean; hint?: { title: string; intro: string } };
+type HqIcon = { lat: number; lng: number; at: number; kind: 'hut' | 'stadium' | 'dome' | 'bigdome' | 'star' | 'regrow' | 'culture' | 'service' | 'wetland' | 'archbridge' | 'chest' | 'chestlock' | 'paw' | 'umusic' | 'uart' | 'uexhibit' | 'uyouth' | 'ushop' | 'fitbus'; label?: string; hideKm?: number; scale?: number; grow?: number; char?: string; color?: string; small?: boolean; focus?: boolean; hint?: { title: string; intro: string } };
 /** 其他政見的地方：離路線多近才沿路冒出來 */
 const HQ_SERVICE_NEAR_M = 300;
 /** 離路線幾公尺（路線載入後不會變，記起來） */
@@ -3623,8 +3623,6 @@ function hqExtras(t0: number): { reveals: HqReveal[]; icons: HqIcon[]; seams: Hq
   }
   icons.push({ lat: hq.HQ_DOME.lat, lng: hq.HQ_DOME.lng, at: hqNearestAt(t0, hq.HQ_DOME), kind: 'bigdome', label: hq.HQ_DOME.name, hideKm: 5, scale: 1.35, hint: { title: hq.HQ_DOME.name, intro: I['大巨蛋好鄰居計畫'] ?? '' } });
   icons.push({ lat: hq.HQ_PAW.lat, lng: hq.HQ_PAW.lng, at: hqNearestAt(t0, hq.HQ_PAW) + 400, kind: 'paw', label: hq.HQ_PAW.name, hideKm: 5, scale: 0.9, hint: { title: hq.HQ_PAW.name, intro: I['毛孩安心養'] ?? '' } });
-  // 大安森林公園的草地上丟球（人丟、狗叼回來；v1.533），拉近才動
-  icons.push({ lat: hq.HQ_PARKPLAY.fetch.lat, lng: hq.HQ_PARKPLAY.fetch.lng, at: hqNearestAt(t0, hq.HQ_PAW) + 800, kind: 'fetch', scale: 1.6, hint: { title: `${hq.HQ_PAW.name}（大安森林公園）`, intro: I['毛孩安心養'] ?? '' } });
   // 高架橋下空間：沿市民大道高架、建國高架畫一條線（船離中間最近時長出來）
   // 兩條在中間交叉（建國南北路 × 市民大道），名字和圖示都避開交叉口（v1.515 使用者說重疊了）；
   // 沿線畫橋下的用途：音樂、藝文、展覽、青年交流、特色商業（使用者說「幫我稍微畫圖出來」）

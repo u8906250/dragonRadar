@@ -233,6 +233,21 @@ export const HQ_LABEL_KM = 5;
 export const HQ_LABEL_ZOOM = 14;
 /** 看整個文化網的距離（約 13 km、地圖縮放 12）縫合、北士科星群、把樹種回來的字不寫（v1.533 使用者說的；把水找回來跟文化徑有關，留著），文化網當主角 */
 export const HQ_NET_LABEL_KM = 12;
+/**
+ * 新的小動畫（v1.534 使用者選「1 2 5 先做看看」），都照 5 km 原則（styles.css 的 .hq-far）：
+ * 老水路跳出水面的小錦鯉（每 5.5 秒跳一次、落水濺一圈水花；delay 錯開）
+ */
+export const FISH_SVG =
+  '<g class="cf-jump"><path class="cf-body" d="M-3 0Q0 -2.2 3 0Q0 2.2 -3 0Z"/><path class="cf-tail" d="M-2.8 0L-5 -1.7V1.7Z"/><circle class="cf-eye" cx="1.6" cy="-0.4" r="0.35"/></g>' +
+  '<circle class="cf-splash" cx="3.4" cy="1" r="2.4"/>';
+/** 濕地上的兩隻小鳥：從水邊飛起來、在上空繞一圈再降落，翅膀一直拍（接在濕地圖示後面） */
+export const WETLAND_BIRDS =
+  '<g class="wl-bird b1"><path class="wl-wing" d="M-1.8 0Q-0.9 -1.2 0 0Q0.9 -1.2 1.8 0"/></g>' +
+  '<g class="wl-bird b2"><path class="wl-wing" d="M-1.5 0Q-0.75 -1 0 0Q0.75 -1 1.5 0"/></g>';
+/** 音樂的圖示上輪流飄出兩個小音符（北流、橋下空間的音樂） */
+export const MUSIC_NOTES =
+  '<g transform="translate(6 -7)"><g class="mn-f"><path class="mn-stem" d="M0 0V-4.2L2.6 -5V-1"/><ellipse class="mn-head" cx="-1" cy="0.2" rx="1.2" ry="0.85"/></g></g>' +
+  '<g transform="translate(-6 -8)"><g class="mn-f n2"><path class="mn-stem" d="M0 0V-4"/><ellipse class="mn-head" cx="-1" cy="0.2" rx="1.2" ry="0.85"/></g></g>';
 /** 騎自行車的人：一趟 lapMs 從頭騎到尾，頭尾淡入淡出（另一台反方向騎） */
 export function bikePhase(ms: number, lapMs: number, loop = false): { at: number; alpha: number } {
   if (ms < 0) return { at: 0, alpha: 0 };
@@ -249,17 +264,6 @@ export const PETWALK_SVG =
   '<path class="pw-leash" d="M0.6 -7.8Q4 -5.6 6.8 -3.6"/>' +
   '<g class="pw-dog"><path class="pw-dtail" d="M6.2 -3Q5 -4.8 5.6 -6"/><ellipse class="pw-dbody" cx="8.4" cy="-2.4" rx="2.6" ry="1.5"/>' +
   '<circle class="pw-dhead" cx="10.8" cy="-3.8" r="1.4"/><circle class="pw-deye" cx="11.3" cy="-4.1" r="0.3"/><path class="pw-dleg" d="M7 -1.2V0M9.6 -1.2V0"/></g></g>';
-/**
- * 草地上丟球（大安森林公園，v1.533）：左邊的人揮手丟球，球飛出去，狗跑去叼、轉身叼回來，一直重複（3.6 秒一次）；
- * 圖示的中心是草地中間，拉近（5 km）才動
- */
-export const FETCH_SVG =
-  '<ellipse class="ft-grass" cx="0" cy="3" rx="19" ry="4.5"/>' +
-  '<g transform="translate(-13 4)"><path class="hk-leg" d="M0 -5.6L-1.4 0M0 -5.6L1.4 0"/><path class="ft-body" d="M0 -11.4V-5.6"/>' +
-  '<path class="ft-arm" d="M0 -10L2.8 -12.6"/><circle class="hk-head" cx="0" cy="-13.2" r="1.7"/></g>' +
-  '<g class="ft-ball"><circle class="ft-b" cx="0" cy="0" r="1.2"/></g>' +
-  '<g class="ft-dog"><g class="ft-flip"><path class="pw-dtail" d="M-2.2 -3Q-3.4 -4.8 -2.8 -6"/><ellipse class="pw-dbody" cx="0" cy="-2.4" rx="2.6" ry="1.5"/>' +
-  '<circle class="pw-dhead" cx="2.4" cy="-3.8" r="1.4"/><circle class="pw-deye" cx="2.9" cy="-4.1" r="0.3"/><path class="pw-dleg" d="M-1.4 -1.2V0M1.2 -1.2V0"/></g></g>';
 
 /** 騎自行車的人（螢幕像素，路面在 y = 0、往右騎）：黃色車架、橘色安全帽、綠色上衣，往左騎時翻過來（boat-flip） */
 /** 登山客（山林徑，v1.531 使用者說「山林徑可以畫登山人」）：帽子、背包、登山杖，往右走（往左時翻過來） */

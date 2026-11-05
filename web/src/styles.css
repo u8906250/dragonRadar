@@ -349,7 +349,7 @@ path.map-water-glint { animation: water-flow-map 1.1s linear infinite; }
 .hk-stick { fill: none; stroke: #8a5a24; stroke-width: 0.9; stroke-linecap: round; }
 .hk-hat { fill: #f2b544; stroke: #8a5a24; stroke-width: 0.4; }
 .walk-bob { animation: walk-bob 0.4s ease-in-out infinite alternate; }
-/* 大安森林公園裡牽狗散步、丟球（v1.533）：白色小狗一跳一跳、尾巴搖；丟球 3.6 秒一次（揮手 → 球飛出去 → 狗跑去叼 → 轉身叼回來） */
+/* 大安森林公園裡牽狗散步（v1.533）：白色小狗一跳一跳、尾巴搖（草地上丟球 v1.535 使用者說清真寺旁邊的人拿掉） */
 .pw-body { fill: none; stroke: var(--c, #e05a5a); stroke-width: 2.2; stroke-linecap: round; }
 .pw-leash { fill: none; stroke: #8a5a24; stroke-width: 0.5; }
 .pw-dbody, .pw-dhead { fill: #fff; stroke: #8a7a6a; stroke-width: 0.6; }
@@ -359,19 +359,6 @@ path.map-water-glint { animation: water-flow-map 1.1s linear infinite; }
 .pw-dtail { transform-box: fill-box; transform-origin: 100% 100%; animation: pw-wag 0.25s ease-in-out infinite alternate; }
 @keyframes pw-trot { to { transform: translateY(-0.6px); } }
 @keyframes pw-wag { from { transform: rotate(-20deg); } to { transform: rotate(20deg); } }
-.ft-grass { fill: #9bd27a; fill-opacity: 0.45; }
-.ft-body { fill: none; stroke: #2f9e6a; stroke-width: 2.2; stroke-linecap: round; }
-.ft-arm { fill: none; stroke: #4a3a2a; stroke-width: 1; stroke-linecap: round; transform-origin: 0 -10px; animation: ft-throw 3.6s ease-in-out infinite; }
-@keyframes ft-throw { 0% { transform: rotate(70deg); } 8% { transform: rotate(-25deg); } 20%, 100% { transform: rotate(0deg); } }
-.ft-b { fill: #ff5a5a; stroke: #fff; stroke-width: 0.5; }
-.ft-ball { animation: ft-ball 3.6s linear infinite; }
-@keyframes ft-ball { 0%, 6% { transform: translate(-10px, -8.6px); opacity: 1; } 24% { transform: translate(1px, -15px); } 40%, 51% { transform: translate(12px, 3px); } 52% { transform: translate(7.2px, 0.6px); } 88% { transform: translate(-9.8px, 0.6px); opacity: 1; } 92% { transform: translate(-9.8px, 0.6px); opacity: 0; } 100% { transform: translate(-10px, -8.6px); opacity: 0; } }
-.ft-dog { animation: ft-dog 3.6s ease-in-out infinite; }
-@keyframes ft-dog { 0%, 14% { transform: translate(-6px, 4px); } 40%, 52% { transform: translate(11px, 4px); } 88%, 100% { transform: translate(-6px, 4px); } }
-.ft-flip { animation: ft-flip 3.6s step-end infinite; }
-@keyframes ft-flip { 0% { transform: scaleX(1); } 51% { transform: scaleX(-1); } 90% { transform: scaleX(1); } }
-.ft-dog .pw-dbody, .ft-dog .pw-dhead { fill: #e39a4f; stroke: #8a5a2a; }
-.ft-dog .pw-dleg, .ft-dog .pw-dtail { stroke: #8a5a2a; }
 @keyframes walk-bob { to { transform: translateY(-0.6px); } }
 .fb-body { fill: #fff; stroke: #1f2a24; stroke-width: 0.9; stroke-linejoin: round; }
 .fb-stripe { fill: #2f9e6a; }
@@ -485,10 +472,10 @@ path.map-water-glint { animation: water-flow-map 1.1s linear infinite; }
 #map.label-far12 .far-label-12 { display: none; }
 /* 划槳的規則寫在後面、一樣具體，拉遠停不下來：這裡寫得更具體（v1.531 使用者說「划船的動畫超過 5km 也要停止」） */
 .radar .routes.hq-far .voyage-boat .wb-paddle, #map.hq-far .map-voyage-boat .wb-paddle, .radar .routes.hq-far .walk-bob, #map.hq-far .walk-bob { animation: none; }
-.hq-far .pw-dog, .hq-far .pw-dtail, .hq-far .ft-arm, .hq-far .ft-ball, .hq-far .ft-dog, .hq-far .ft-flip { animation: none; }
+.hq-far .pw-dog, .hq-far .pw-dtail { animation: none; }
 .hq-far .seam-walkers, .hq-far path.map-seam-walkers, .hq-far .reveal-bikes, .hq-far path.map-reveal-bikes, .hq-far .map-voyage-icon.fitbus-stop, .hq-far .fit-label { display: none; }
 @media (prefers-reduced-motion: reduce) {
-  .wb-paddle, .walk-bob, .pw-dog, .pw-dtail, .ft-arm, .ft-ball, .ft-dog, .ft-flip,
+  .wb-paddle, .walk-bob, .pw-dog, .pw-dtail,
   .idle-star, .idle-wetland .ic-reed, .idle-wetland .ic-reed-top, .idle-hut .ic-flag, .idle-stadium, .idle-uyouth, .idle-umusic, .idle-uart, .idle-bigdome .dm-hi, .idle-fitbus { animation: none; }
 }
 /* 縫合市民大道（v1.520）：出發時深灰的裂縫從西畫到東，洋流號經過才縫（v1.521）、縫完變淡；橘色的交叉針腳一筆一筆縫；縫好後三處都有往北、往南的人流小點（白邊，橘色的河經過那裡也看得到） */
@@ -512,6 +499,7 @@ path.map-water-glint { animation: water-flow-map 1.1s linear infinite; }
 @keyframes st-heart { 0% { opacity: 0; transform: translateY(2px) scale(0.3); } 18% { opacity: 1; transform: translateY(0) scale(1.15); } 30% { transform: scale(1); } 75% { opacity: 1; transform: translateY(-3px); } 100% { opacity: 0; transform: translateY(-5px); } }
 .radar .seam-stitch, .map-seam-stitch { pointer-events: none; }
 .map-seam-stitch { background: none; border: 0; }
+.map-seam-stitch svg { transform: scale(var(--stitch-scale, 1)); }
 /* 縫好後兩邊互通（v1.526）：往北藍點、往南珊瑚色點；地圖的顏色用 Leaflet 的屬性（這裡不寫 stroke，不然會蓋過去） */
 .radar .seam-walkers, path.map-seam-walkers { fill: none; stroke-linecap: round; opacity: 0; animation: seam-walk-in 0.6s ease-out forwards, seam-walk 1.4s linear infinite; }
 .radar .seam-walkers { stroke: #3a6fd8; }
@@ -1657,3 +1645,38 @@ body.letters-open { overflow: hidden; }
 .tc-move-msg { min-height: 1.2em; font-weight: 700; }
 .tc-move-msg.bad { color: #ffb4a2; }
 @media (prefers-reduced-motion: reduce) { .tc-inner { transition: none; } }
+
+/*
+ * 新的小動畫（v1.534 使用者選「1 2 5 先做看看」）：老水路的波紋和跳出水面的小錦鯉、濕地的小鳥、音樂的小音符。
+ * 拉近（5 km）才動：拉遠時波紋不畫、魚和音符收起來、鳥停在水邊（.hq-far 的規則寫在後面）
+ */
+.radar .voyage-canal-flow, path.map-canal-flow { fill: none; stroke: #fff; stroke-opacity: 0.75; stroke-linecap: round; opacity: 0; animation: canal-flow 1.8s linear infinite, voyage-stay 0.5s ease-out both; }
+path.map-canal-flow { --p: 14px; }
+@keyframes canal-flow { to { stroke-dashoffset: calc(var(--p) * -1); } }
+.canal-fish, .map-canal-fish { pointer-events: none; }
+.map-canal-fish { background: none; border: 0; }
+.map-canal-fish svg { display: block; overflow: visible; }
+.cf-jump { opacity: 0; animation: cf-jump 5.5s ease-in-out infinite; }
+.cf-body { fill: #ff8a5c; stroke: #fff; stroke-width: 0.5; }
+.cf-tail { fill: #ff6a3c; }
+.cf-eye { fill: #222; }
+.cf-splash { fill: none; stroke: #fff; stroke-width: 0.8; opacity: 0; transform-box: fill-box; transform-origin: center; animation: cf-splash 5.5s ease-out infinite; }
+@keyframes cf-jump { 0%, 76% { opacity: 0; transform: translate(-2px, 2px) rotate(-40deg); } 80% { opacity: 1; transform: translate(-1px, -4px) rotate(-30deg); } 86% { opacity: 1; transform: translate(1px, -7px) rotate(0deg); } 93% { opacity: 1; transform: translate(3px, -2px) rotate(35deg); } 96%, 100% { opacity: 0; transform: translate(3.5px, 1px) rotate(40deg); } }
+@keyframes cf-splash { 0%, 93% { opacity: 0; transform: scale(0.3); } 95% { opacity: 0.9; } 100% { opacity: 0; transform: scale(1.5); } }
+.wl-wing { fill: none; stroke: #2b3a4a; stroke-width: 0.8; stroke-linecap: round; stroke-linejoin: round; }
+.wl-bird.b1 { transform: translate(-8px, 2px); animation: wl-fly-1 7s ease-in-out infinite; }
+.wl-bird.b2 { transform: translate(8px, 3px); animation: wl-fly-2 7s ease-in-out infinite; animation-delay: -2.5s; }
+.wl-bird .wl-wing { transform-box: fill-box; transform-origin: center bottom; animation: wl-flap 0.22s ease-in-out infinite alternate; }
+@keyframes wl-fly-1 { 0%, 18% { transform: translate(-8px, 2px); } 35% { transform: translate(-5px, -13px); } 50% { transform: translate(5px, -17px); } 65% { transform: translate(9px, -10px); } 82%, 100% { transform: translate(-8px, 2px); } }
+@keyframes wl-fly-2 { 0%, 18% { transform: translate(8px, 3px); } 35% { transform: translate(4px, -12px); } 50% { transform: translate(-6px, -16px); } 65% { transform: translate(-9px, -9px); } 82%, 100% { transform: translate(8px, 3px); } }
+@keyframes wl-flap { to { transform: scaleY(0.35); } }
+.mn-stem { fill: none; stroke: #8a6fd0; stroke-width: 0.9; stroke-linecap: round; }
+.mn-head { fill: #8a6fd0; }
+.mn-f { opacity: 0; animation: mn-float 2.6s ease-out infinite; }
+.mn-f.n2 { animation-delay: -1.3s; }
+@keyframes mn-float { 0% { opacity: 0; transform: translateY(2px); } 20% { opacity: 1; } 75% { opacity: 0.8; } 100% { opacity: 0; transform: translateY(-8px); } }
+.hq-far .voyage-canal-flow, .hq-far path.map-canal-flow { display: none; }
+.hq-far .cf-jump, .hq-far .cf-splash, .hq-far .mn-f, .hq-far .wl-bird, .hq-far .wl-bird .wl-wing { animation: none; }
+@media (prefers-reduced-motion: reduce) {
+  .voyage-canal-flow, path.map-canal-flow, .cf-jump, .cf-splash, .mn-f, .wl-bird, .wl-bird .wl-wing { animation: none; }
+}

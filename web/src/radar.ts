@@ -1,5 +1,5 @@
 import type { BlipStyle, EventKind, Phase, SweepStyle } from './types';
-import { alongLine, BOAT_SVG, crackSvg, FITBUS_BODY, FITBUS_SVG, fitbusLapMs, HQ_MOTION_KM, HQ_NET_LABEL_KM, BIKE_SVG, HIKER_SVG, PETWALK_SVG, FETCH_SVG, bikePhase, fitbusPhase, fitbusStopOffsets, fitbusStopSvg, cultureSvg, regrowSvg, serviceSvg, stitchSvg, BOAT_TITLE, boatPhase, fireworksSvg, FIREWORKS_MS, flowOut, HQ_VOYAGE_MS, RAINBOW_FLOW_TOTAL, RAINBOW_STAGGER_MS, riverHalfWidth, surge, SURGE_TOTAL, voyagePhase, voyageTimeOf } from './flow';
+import { alongLine, BOAT_SVG, crackSvg, FITBUS_BODY, FITBUS_SVG, fitbusLapMs, HQ_MOTION_KM, HQ_NET_LABEL_KM, BIKE_SVG, HIKER_SVG, PETWALK_SVG, FISH_SVG, WETLAND_BIRDS, MUSIC_NOTES, bikePhase, fitbusPhase, fitbusStopOffsets, fitbusStopSvg, cultureSvg, regrowSvg, serviceSvg, stitchSvg, BOAT_TITLE, boatPhase, fireworksSvg, FIREWORKS_MS, flowOut, HQ_VOYAGE_MS, RAINBOW_FLOW_TOTAL, RAINBOW_STAGGER_MS, riverHalfWidth, surge, SURGE_TOTAL, voyagePhase, voyageTimeOf } from './flow';
 
 export interface RadarItem {
   id: number;
@@ -100,7 +100,7 @@ export interface RadarRoute {
    * 一個東西冒出來（at）：hut 登山中心、stadium 足球場、dome 運動中心、star 星星、regrow 樹樁（grow 時長回大樹）、culture 文化徑的點（char、color）；
    * label 留著（small 是寫在下面的小字，跟別的小字重疊就不寫）
    */
-  icons?: Array<{ bearing: number; distanceKm: number; at: number; kind: 'hut' | 'stadium' | 'dome' | 'bigdome' | 'star' | 'regrow' | 'culture' | 'service' | 'wetland' | 'archbridge' | 'chest' | 'chestlock' | 'paw' | 'umusic' | 'uart' | 'uexhibit' | 'uyouth' | 'ushop' | 'fitbus' | 'fetch'; label?: string; hideKm?: number; scale?: number; grow?: number; char?: string; color?: string; small?: boolean; focus?: boolean }>;
+  icons?: Array<{ bearing: number; distanceKm: number; at: number; kind: 'hut' | 'stadium' | 'dome' | 'bigdome' | 'star' | 'regrow' | 'culture' | 'service' | 'wetland' | 'archbridge' | 'chest' | 'chestlock' | 'paw' | 'umusic' | 'uart' | 'uexhibit' | 'uyouth' | 'ushop' | 'fitbus'; label?: string; hideKm?: number; scale?: number; grow?: number; char?: string; color?: string; small?: boolean; focus?: boolean }>;
   /** 政策圖層開著：其他特效變淡，只有 focus 的地方、通學區的圈清楚 */
   focus?: boolean;
   /** 都更的基地範圍（at 時淡入） */
@@ -142,11 +142,11 @@ const DRAGON_SVG =
     return `<path class="wb-paddle" d="M${x} -4.5L${x + 3} -9"/><circle class="wb-head" cx="${x}" cy="-1.2" r="1.6"/>`;
   }).join('');
 /** 冒出來的東西（螢幕像素，中心在 0,0；顏色在 styles.css）：登山中心是一間小屋、足球場是橢圓的場加草皮條紋、運動中心是圓頂、星星是五角星 */
-const ICON_SVG: Record<'hut' | 'stadium' | 'dome' | 'bigdome' | 'star' | 'wetland' | 'archbridge' | 'chest' | 'chestlock' | 'paw' | 'umusic' | 'uart' | 'uexhibit' | 'uyouth' | 'ushop' | 'fitbus' | 'fetch', string> = {
+const ICON_SVG: Record<'hut' | 'stadium' | 'dome' | 'bigdome' | 'star' | 'wetland' | 'archbridge' | 'chest' | 'chestlock' | 'paw' | 'umusic' | 'uart' | 'uexhibit' | 'uyouth' | 'ushop' | 'fitbus', string> = {
   // 健身小巴停著（河濱、山林徑）：車身往上移，圖案的中心在車子中間
   fitbus: `<g transform="translate(0 9)">${FITBUS_BODY}</g>`,
-  fetch: FETCH_SVG,
-  umusic: '<circle class="ud-bg" r="9"/><path class="ud-ink" d="M-1.5 4V-5.5L5 -7.5V2"/><ellipse class="ud-fill" cx="-3.6" cy="4.2" rx="2.6" ry="2"/><ellipse class="ud-fill" cx="2.9" cy="2.2" rx="2.6" ry="2"/>',
+  // 音樂的圖示飄出小音符（v1.534）
+  umusic: '<circle class="ud-bg" r="9"/><path class="ud-ink" d="M-1.5 4V-5.5L5 -7.5V2"/><ellipse class="ud-fill" cx="-3.6" cy="4.2" rx="2.6" ry="2"/><ellipse class="ud-fill" cx="2.9" cy="2.2" rx="2.6" ry="2"/>' + MUSIC_NOTES,
   uart: '<circle class="ud-bg" r="9"/><path class="ud-pal" d="M-6 2Q-8 -6 0 -6.5Q7 -6.5 6.5 -1Q6 2 3 1.5Q1 1.2 1 3.5Q1 6 -2 5.5Q-5 5 -6 2Z"/><circle class="ud-c1" cx="-3" cy="-2.6" r="1.3"/><circle class="ud-c2" cx="0.8" cy="-4" r="1.3"/><circle class="ud-c3" cx="4" cy="-2" r="1.3"/>',
   uexhibit: '<circle class="ud-bg" r="9"/><rect class="ud-frame" x="-6" y="-5" width="12" height="9.5" rx="1"/><path class="ud-mtn" d="M-4.5 3L-1.5 -1L0.8 1.6L2.4 0L4.5 3Z"/><circle class="ud-c3" cx="2.4" cy="-2.6" r="1.2"/>',
   uyouth: '<circle class="ud-bg" r="9"/><path class="ud-bub" d="M-7 -5H1.5V1H-3L-5.2 3.2V1H-7Z"/><path class="ud-bub2" d="M-1.5 -1.5H7V4.5H5.2V6.6L3 4.5H-1.5Z"/>',
@@ -155,7 +155,8 @@ const ICON_SVG: Record<'hut' | 'stadium' | 'dome' | 'bigdome' | 'star' | 'wetlan
   chestlock: '<path class="ch-lid-c" d="M-12 -4Q-12 -14.5 0 -14.5Q12 -14.5 12 -4Z"/><path class="ch-lid-hi" d="M-8.5 -7Q-8 -12 -2 -12.6"/><rect class="ch-box" x="-12" y="-4" width="24" height="12" rx="3"/><path class="ch-dark" d="M-11.3 3.5H11.3V5.2Q11.3 7.3 9 7.3H-9Q-11.3 7.3 -11.3 5.2Z"/><rect class="ch-trim" x="-12" y="-5" width="24" height="2.4"/><rect class="ch-trim" x="-8.4" y="-13" width="2.6" height="21" rx="1"/><rect class="ch-trim" x="5.8" y="-13" width="2.6" height="21" rx="1"/><path class="ch-shackle" d="M-2.4 -2V-5A2.4 2.4 0 0 1 2.4 -5V-2"/><rect class="ch-lockbody" x="-4" y="-2.4" width="8" height="6.6" rx="1.6"/><circle class="ch-key" cx="0" cy="0.2" r="1"/><path class="ch-keyline" d="M0 0.6V2.6"/><path class="ch-shine" d="M-9.4 -1.6V2"/><path class="kira k2" d="M13.5 -14.4L14.2 -12.7L15.9 -12.0L14.2 -11.3L13.5 -9.6L12.8 -11.3L11.1 -12.0L12.8 -12.7Z"/>',
   paw: '<ellipse class="pw" cx="0" cy="4" rx="6.5" ry="5.5"/><ellipse class="pw" cx="-8" cy="-3" rx="2.8" ry="3.6" transform="rotate(-20 -8 -3)"/><ellipse class="pw" cx="-3" cy="-8" rx="2.8" ry="3.8" transform="rotate(-6 -3 -8)"/><ellipse class="pw" cx="3" cy="-8" rx="2.8" ry="3.8" transform="rotate(6 3 -8)"/><ellipse class="pw" cx="8" cy="-3" rx="2.8" ry="3.6" transform="rotate(20 8 -3)"/>',
   archbridge: '<path class="ic-stone" d="M-16 -3H16V6H11A6 6 0 0 0 1 6H-1A6 6 0 0 0 -11 6H-16Z"/><path class="ic-stone-line" d="M-16 0H16M-6 -3V0M6 -3V0"/><path class="ic-lamp" d="M-13 -3V-8M0 -3V-8M13 -3V-8"/><circle class="ic-lamp-top" cx="-13" cy="-9" r="1.6"/><circle class="ic-lamp-top" cx="0" cy="-9" r="1.6"/><circle class="ic-lamp-top" cx="13" cy="-9" r="1.6"/>',
-  wetland: '<ellipse class="ic-pond" cx="0" cy="4" rx="11" ry="4.5"/><path class="ic-reed" d="M-6 4V-7M-2 4V-11M2 4V-6M6 4V-9"/><path class="ic-reed-top" d="M-6 -7l1 -3.5M-2 -11l1 -3.5M2 -6l1 -3.5M6 -9l1 -3.5"/>',
+  // 濕地上兩隻小鳥飛起來繞一圈再降落（v1.534）
+  wetland: '<ellipse class="ic-pond" cx="0" cy="4" rx="11" ry="4.5"/><path class="ic-reed" d="M-6 4V-7M-2 4V-11M2 4V-6M6 4V-9"/><path class="ic-reed-top" d="M-6 -7l1 -3.5M-2 -11l1 -3.5M2 -6l1 -3.5M6 -9l1 -3.5"/>' + WETLAND_BIRDS,
   hut: '<path class="ic-roof" d="M-9 -1L0 -11L9 -1Z"/><path class="ic-wall" d="M-7 -1H7V7H-7Z"/><path class="ic-door" d="M-2 7V2H2V7Z"/><path class="ic-flag" d="M0 -11V-17M0 -17H5L3.5 -15L5 -13H0"/>',
   stadium: '<ellipse class="ic-stand" rx="16" ry="10"/><ellipse class="ic-field" rx="11" ry="6"/><path class="ic-lines" d="M0 -6V6M-11 0A11 6 0 0 0 11 0M-11 0A11 6 0 0 1 11 0"/><circle class="ic-lines" r="2"/>',
   dome: '<path class="ic-base" d="M-14 4H14V7H-14Z"/><path class="ic-dome" d="M-13 4A13 13 0 0 1 13 4Z"/><path class="ic-rib" d="M0 -9V4M-7 -7Q0 -4 7 -7"/>',
@@ -2048,7 +2049,18 @@ export class Radar {
         el('path', { class: 'voyage-canal-ghost', d, pathLength: '1', style: `stroke-width:${(1.2 * k).toFixed(2)};animation-delay:${Math.round(c.at - CANAL_GHOST_MS - now)}ms` }),
         el('path', { class: 'voyage-canal-fill bank', d, pathLength: '1', style: `stroke-width:${(7 * k).toFixed(2)};animation-delay:${Math.round(c.at - now)}ms` }),
         el('path', { class: 'voyage-canal-fill body', d, pathLength: '1', style: `stroke-width:${(4 * k).toFixed(2)};animation-delay:${Math.round(c.at - now)}ms` }),
+        // 注水完（3 秒）淡淡的波紋一直往下游流（v1.534）
+        el('path', { class: 'voyage-canal-flow', d, style: `stroke-width:${(1.3 * k).toFixed(2)};stroke-dasharray:${(2 * k).toFixed(2)} ${(12 * k).toFixed(2)};--p:${(14 * k).toFixed(2)}px;animation-delay:${Math.round(c.at + 3000 - now)}ms,${Math.round(c.at + 3000 - now)}ms` }),
       );
+      // 小錦鯉：水路三成、七成的地方各一條，錯開時間跳出水面（頭朝下游）
+      [0.3, 0.7].forEach((f, fi) => {
+        const n = c.points.length;
+        const i = Math.min(n - 2, Math.floor((n - 1) * f));
+        const [a, b] = [c.points[i], c.points[i + 1]].map((q) => polar(q.bearing - this.heading, this.ratio(q.distanceKm) * (R - 8)));
+        const fg = el('g', { class: 'canal-fish', transform: `translate(${a.x.toFixed(1)} ${a.y.toFixed(1)}) scale(${(b.x < a.x ? -k : k).toFixed(4)} ${k.toFixed(4)})` });
+        fg.innerHTML = FISH_SVG.replace('class="cf-jump"', `class="cf-jump" style="animation-delay:${Math.round(c.at + 4000 + fi * 2600 - now)}ms"`).replace('class="cf-splash"', `class="cf-splash" style="animation-delay:${Math.round(c.at + 4000 + fi * 2600 - now)}ms"`);
+        g.appendChild(fg);
+      });
       // 名字寫在中間那一點
       const mid = c.points[Math.floor(c.points.length / 2)];
       const p = polar(mid.bearing - this.heading, this.ratio(mid.distanceKm) * (R - 8));
@@ -2116,7 +2128,8 @@ export class Radar {
       this.routeLayer.prepend(el('path', { class: 'voyage-river', d: this.pathOf(rv.ring, true), style: `animation-delay:${Math.round(rv.at - now)}ms` }));
     }
     // 水上活動：SUP、龍舟（螢幕像素的大小，船頭朝 heading；出現時從小彈大，之後在水上輕輕搖）
-    for (const b of r.boats ?? []) {
+    // SUP、龍舟拉遠到 10 km 就不畫（v1.535 使用者說的）
+    for (const b of this.scaleKm >= 9.95 ? [] : (r.boats ?? [])) {
       const c = polar(b.bearing - this.heading, this.ratio(b.distanceKm) * (R - 8));
       // 船縮小一點（龍舟 0.65、SUP 0.8）才放得進河裡；出現後慢慢往前滑（boat-glide）、輕輕搖（boat-bob）
       const g = el('g', { class: `voyage-boat ${b.kind}`, transform: `translate(${c.x.toFixed(1)} ${c.y.toFixed(1)}) scale(${(k * (b.kind === 'dragon' ? 0.65 : 0.8)).toFixed(4)}) rotate(${(b.heading - this.heading - 90).toFixed(1)})` });
@@ -2212,7 +2225,9 @@ export class Radar {
       for (const st of sm.stitches) {
         const [c, a] = [xy(st.center), xy(st.along)];
         const ang = (Math.atan2(a.y - c.y, a.x - c.x) * 180) / Math.PI;
-        const sg = el('g', { class: 'seam-stitch', transform: `translate(${c.x.toFixed(1)} ${c.y.toFixed(1)}) rotate(${ang.toFixed(1)}) scale(${k.toFixed(4)})` });
+        // 拉近時縫線跟著變小，不然很明顯（v1.535 使用者說的）：外圈 5 km 原來的大小，越近越小（最小 0.45）
+        const ss = Math.min(1, Math.max(0.45, this.scaleKm / 5));
+        const sg = el('g', { class: 'seam-stitch', transform: `translate(${c.x.toFixed(1)} ${c.y.toFixed(1)}) rotate(${ang.toFixed(1)}) scale(${(k * ss).toFixed(4)})` });
         // 還沒縫的地方先是裂縫（一開始就有），洋流號經過時縫上、裂縫淡掉
         sg.innerHTML = crackSvg(sm.at + 600 - now, st.at + 900 - now) + stitchSvg(st.at - now);
         g.appendChild(sg);
