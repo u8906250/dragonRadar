@@ -1,5 +1,5 @@
 import type { BlipStyle, EventKind, Phase, SweepStyle } from './types';
-import { alongLine, BOAT_SVG, cultureSvg, regrowSvg, serviceSvg, BOAT_TITLE, boatPhase, fireworksSvg, FIREWORKS_MS, flowOut, HQ_VOYAGE_MS, RAINBOW_FLOW_TOTAL, RAINBOW_STAGGER_MS, riverHalfWidth, surge, SURGE_TOTAL, voyagePhase, voyageTimeOf } from './flow';
+import { alongLine, BOAT_SVG, cultureSvg, regrowSvg, serviceSvg, stitchSvg, BOAT_TITLE, boatPhase, fireworksSvg, FIREWORKS_MS, flowOut, HQ_VOYAGE_MS, RAINBOW_FLOW_TOTAL, RAINBOW_STAGGER_MS, riverHalfWidth, surge, SURGE_TOTAL, voyagePhase, voyageTimeOf } from './flow';
 
 export interface RadarItem {
   id: number;
@@ -74,6 +74,16 @@ export interface RadarRoute {
    * culture 文化徑的線（color）；label 寫在尾端（文化徑寫在中間）、留著
    */
   reveals?: Array<{ points: Array<{ bearing: number; distanceKm: number }>; at: number; kind: 'trail' | 'bridge' | 'stars' | 'culture'; label?: string; color?: string; labelAt?: number }>;
+  /** 縫合（市民大道）：at 裂縫畫出來、healAt 縫完變淡；stitches 一個一個縫（along 是路上的下一點，算方向）；walkers 人流小點從 from 走到 to */
+  seams?: Array<{
+    points: Array<{ bearing: number; distanceKm: number }>;
+    at: number;
+    healAt: number;
+    label: string;
+    labelAt: number;
+    stitches: Array<{ at: number; center: { bearing: number; distanceKm: number }; along: { bearing: number; distanceKm: number }; label: string; below?: boolean }>;
+    walkers: Array<{ from: { bearing: number; distanceKm: number }; to: { bearing: number; distanceKm: number }; at: number }>;
+  }>;
   /** 綠覆率：整個台北市（ring）在 steps 的每個時間再鋪一層很淡的綠 */
   green?: { ring: Array<{ bearing: number; distanceKm: number }>; steps: number[] };
   /** 洋流號的河什麼時候淡掉（到終點後拿掉，政策的東西才看得清楚；使用者說的） */
@@ -2157,6 +2167,36 @@ export class Radar {
       for (const pa of paths) g.appendChild(el('path', { class: 'net-line', d: pa.d, pathLength: '1', style: `stroke:${pa.color};stroke-width:${(6 * k).toFixed(1)};animation-delay:${Math.round(d0 + NET_LINE_MS)}ms` }));
       // 點：一圈一圈亮起來
       for (const dt of dots) g.appendChild(el('circle', { class: 'net-dot', cx: dt.x.toFixed(1), cy: dt.y.toFixed(1), r: (9 * k).toFixed(1), style: `stroke:${dt.color};stroke-width:${(2.5 * k).toFixed(1)};animation-delay:${Math.round(d0)}ms` }));
+      this.routeLayer.appendChild(g);
+    }
+    // 縫合市民大道：高架先變成一道把南北切開的深灰色裂縫，幾個地方一針一針縫起來（橘色的交叉針腳），縫完裂縫變淡；
+    // SOGO 走到微風的人流：一排小點一直往北走（畫在橋下空間的線下面）
+    for (const sm of r.seams ?? []) {
+      if (sm.points.length < 2) continue;
+      const xy = (q: { bearing: number; distanceKm: number }): { x: number; y: number } => polar(q.bearing - this.heading, this.ratio(q.distanceKm) * (R - 8));
+      const g = el('g', { class: 'voyage-seam' });
+      g.appendChild(el('path', { class: 'seam-band', d: this.pathOf(sm.points), pathLength: '1', style: `stroke-width:${(9 * k).toFixed(2)};animation-delay:${Math.round(sm.at - now)}ms,${Math.round(sm.healAt - now)}ms` }));
+      for (const w of sm.walkers) {
+        const [a, b] = [xy(w.from), xy(w.to)];
+        const d = `M${a.x.toFixed(1)} ${a.y.toFixed(1)}L${b.x.toFixed(1)} ${b.y.toFixed(1)}`;
+        const gap = (12 * k).toFixed(2);
+        const delay = `animation-delay:${Math.round(w.at - now)}ms,${Math.round(w.at - now)}ms`;
+        g.appendChild(el('path', { class: 'seam-walkers under', d, style: `stroke-width:${(6.4 * k).toFixed(2)};stroke-dasharray:0 ${gap};--p:${gap}px;${delay}` }));
+        g.appendChild(el('path', { class: 'seam-walkers', d, style: `stroke-width:${(4.4 * k).toFixed(2)};stroke-dasharray:0 ${gap};--p:${gap}px;${delay}` }));
+      }
+      for (const st of sm.stitches) {
+        const [c, a] = [xy(st.center), xy(st.along)];
+        const ang = (Math.atan2(a.y - c.y, a.x - c.x) * 180) / Math.PI;
+        const sg = el('g', { class: 'seam-stitch', transform: `translate(${c.x.toFixed(1)} ${c.y.toFixed(1)}) rotate(${ang.toFixed(1)}) scale(${k.toFixed(4)})` });
+        sg.innerHTML = stitchSvg(st.at - now);
+        g.appendChild(sg);
+        // 兩個縫線離不到 1 公里，名字一上一下才不會連在一起
+        const lg = this.stayLabel(c.x, c.y, k, st.label, st.at + 900 - now, st.below ? 22 : -14);
+        lg.classList.add('small');
+        g.appendChild(lg);
+      }
+      const lp = xy(sm.points[Math.floor((sm.points.length - 1) * sm.labelAt)]);
+      g.appendChild(this.stayLabel(lp.x, lp.y, k, sm.label, sm.at + 1400 - now, -12));
       this.routeLayer.appendChild(g);
     }
     // 線從頭長到尾（步道、自行車橋、星座）、冒出來的東西：畫在樹的上面才不會被樹蓋住

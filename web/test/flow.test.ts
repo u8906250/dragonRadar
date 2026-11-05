@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { fireworksSvg, HQ_SAIL_MS, HQ_VOYAGE_MS, voyagePhase, voyageTimeOf } from '../src/flow';
-import { HQ_BLOOMS, HQ_BOATS, HQ_BRIDGE, HQ_CANALS, HQ_AREAS, HQ_CULTURE, HQ_CULTURE_LINES, HQ_CULTURE_THEMES, HQ_INTROS, HQ_POLICY_LAYERS, HQ_RENEWAL, HQ_SERVICE_KINDS, HQ_SERVICES, HQ_CHESTS, HQ_DOME, HQ_MEIJI, HQ_PAW, HQ_TAIPEI_RING, HQ_VIADUCTS, HQ_WETLANDS, HQ_PLANTINGS, HQ_PONDS, HQ_SPRINGS, HQ_STARS, HQ_TOUR, HQ_TOUR_AT, HQ_TRAILS, HQ_VENUES, HQ_VOYAGE } from '../src/hq-voyage';
+import { HQ_BLOOMS, HQ_BOATS, HQ_BRIDGE, HQ_CANALS, HQ_AREAS, HQ_CULTURE, HQ_CULTURE_LINES, HQ_CULTURE_THEMES, HQ_INTROS, HQ_POLICY_LAYERS, HQ_RENEWAL, HQ_SEAM, HQ_SERVICE_KINDS, HQ_SERVICES, HQ_CHESTS, HQ_DOME, HQ_MEIJI, HQ_PAW, HQ_TAIPEI_RING, HQ_VIADUCTS, HQ_WETLANDS, HQ_PLANTINGS, HQ_PONDS, HQ_SPRINGS, HQ_STARS, HQ_TOUR, HQ_TOUR_AT, HQ_TRAILS, HQ_VENUES, HQ_VOYAGE } from '../src/hq-voyage';
 import { LANDMARKS } from '../src/landmarks';
 import { haversineKm } from '../src/geo';
 
@@ -113,6 +113,22 @@ describe('洋流總部的特效', () => {
       for (let i = 1; i < vd.pts.length; i++) L += haversineKm({ lat: vd.pts[i - 1][0], lng: vd.pts[i - 1][1] }, { lat: vd.pts[i][0], lng: vd.pts[i][1] });
       expect(L, vd.name).toBeGreaterThan(3);
     }
+    // 縫合市民大道：三個縫線都有介紹；人流小點真的跨過高架（SOGO 在南、微風在北）；北流在台北市裡
+    const civic = HQ_VIADUCTS.find((v) => v.name.startsWith('市民'))!.pts;
+    const civicLat = (lng: number): number => {
+      for (let i = 1; i < civic.length; i++) {
+        const [a, b] = [civic[i - 1], civic[i]];
+        if ((a[1] - lng) * (b[1] - lng) <= 0) return a[0] + ((b[0] - a[0]) * (lng - a[1])) / (b[1] - a[1] || 1);
+      }
+      return NaN;
+    };
+    expect(HQ_SEAM.stitches.length).toBe(3);
+    for (const st of HQ_SEAM.stitches) expect(HQ_INTROS[st.intro]?.length ?? 0, st.intro).toBeGreaterThan(20);
+    expect(HQ_INTROS['縫合市民大道']?.length ?? 0).toBeGreaterThan(20);
+    const walk = HQ_SEAM.stitches.find((st) => st.walk)!.walk!;
+    expect(walk[0][0]).toBeLessThan(civicLat(walk[0][1]));
+    expect(walk[1][0]).toBeGreaterThan(civicLat(walk[1][1]));
+    expect(inside(HQ_SEAM.beiliu.lat, HQ_SEAM.beiliu.lng)).toBe(true);
     // 明治橋：在台北市裡、離路線 2 公里內、有介紹
     expect(inside(HQ_MEIJI.lat, HQ_MEIJI.lng)).toBe(true);
     expect(nearRoute(HQ_MEIJI)).toBeLessThan(2);

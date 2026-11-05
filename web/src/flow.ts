@@ -202,6 +202,22 @@ export function regrowSvg(growMs: number): string {
 }
 
 /** 文化徑的點：主題顏色的圓、裡面寫主題的字 */
+/**
+ * 縫線（縫合市民大道）：沿著路（x 軸）三個交叉的針腳，一筆一筆縫上去（白邊、橘線；delayMs 是開始縫的時間）。
+ * 用 path 不用 line（pathLength 在 line 上不是每個瀏覽器都有）
+ */
+export function stitchSvg(delayMs: number): string {
+  let out = '';
+  [-11, 0, 11].forEach((x, j) => {
+    [[x - 3.5, -7.5, x + 3.5, 7.5], [x - 3.5, 7.5, x + 3.5, -7.5]].forEach(([x1, y1, x2, y2], m) => {
+      const d = `M${x1} ${y1}L${x2} ${y2}`;
+      const style = `animation-delay:${Math.round(delayMs + (j * 2 + m) * 150)}ms`;
+      out += `<path class="st-u" d="${d}" pathLength="1" style="${style}"/><path class="st-t" d="${d}" pathLength="1" style="${style}"/>`;
+    });
+  });
+  return out;
+}
+
 export function cultureSvg(char: string, color: string): string {
   return `<circle class="cu-dot" r="7" style="fill:${color}"/><text class="cu-char" y="3.1" text-anchor="middle">${char}</text>`;
 }

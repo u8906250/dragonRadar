@@ -1,5 +1,5 @@
 import type * as Leaflet from 'leaflet';
-import { alongLine, BOAT_SVG, cultureSvg, regrowSvg, serviceSvg, boatPhase, fireworksSvg, FIREWORKS_MS, flowOut, HQ_VOYAGE_MS, RAINBOW_FLOW_TOTAL, RAINBOW_STAGGER_MS, surge, SURGE_TOTAL, voyagePhase, voyageTimeOf } from './flow';
+import { alongLine, BOAT_SVG, cultureSvg, regrowSvg, serviceSvg, stitchSvg, boatPhase, fireworksSvg, FIREWORKS_MS, flowOut, HQ_VOYAGE_MS, RAINBOW_FLOW_TOTAL, RAINBOW_STAGGER_MS, surge, SURGE_TOTAL, voyagePhase, voyageTimeOf } from './flow';
 import { haversineKm, type LatLng } from './geo';
 import type { EventKind, Phase } from './types';
 import { LANDMARKS } from './landmarks';
@@ -69,6 +69,16 @@ export interface MapRoute {
   rivers?: Array<{ ring: Array<[number, number]>; at: number }>;
   /** 一條線從頭長到尾：trail 山林徑、bridge 自行車橋、stars 星座、culture 文化徑的線（color）；label 寫在尾端（文化徑寫在中間） */
   reveals?: Array<{ path: Array<[number, number]>; at: number; kind: 'trail' | 'bridge' | 'stars' | 'culture'; label?: string; color?: string; labelAt?: number }>;
+  /** 縫合（市民大道）：跟雷達一樣（經緯度） */
+  seams?: Array<{
+    path: Array<[number, number]>;
+    at: number;
+    healAt: number;
+    label: string;
+    labelAt: number;
+    stitches: Array<{ at: number; center: [number, number]; along: [number, number]; label: string; below?: boolean }>;
+    walkers: Array<{ from: [number, number]; to: [number, number]; at: number }>;
+  }>;
   /** 綠覆率：整個台北市（ring）在 steps 的每個時間再鋪一層很淡的綠 */
   green?: { ring: Array<[number, number]>; steps: number[] };
   /** 一塊地方（社子島）：at 時淡入、留著，虛線外框、名字寫在中間 */
@@ -615,7 +625,7 @@ export class MapView {
   setRoutes(routes: MapRoute[]): void {
     const sig = (rs: MapRoute[]): string =>
       // 洋流總部的特效：文化網、政策圖層（多出來的地方、通學區的圈）開關時也要重畫
-      JSON.stringify(rs.map((r) => [r.id, r.state, r.flowAt ?? null, r.segments.map((x) => [x.people, x.target, x.path.length, !!x.passed]), r.turns ?? [], !!r.boat, r.voyage ?? null, r.network?.at ?? null, r.icons?.length ?? 0, r.circles?.length ?? 0, r.sites?.length ?? 0, !!r.focus, r.riverOut !== undefined && Date.now() > r.riverOut + 1600]));
+      JSON.stringify(rs.map((r) => [r.id, r.state, r.flowAt ?? null, r.segments.map((x) => [x.people, x.target, x.path.length, !!x.passed]), r.turns ?? [], !!r.boat, r.voyage ?? null, r.network?.at ?? null, r.icons?.length ?? 0, r.seams?.length ?? 0, r.circles?.length ?? 0, r.sites?.length ?? 0, !!r.focus, r.riverOut !== undefined && Date.now() > r.riverOut + 1600]));
     if (sig(routes) === sig(this.routes)) return;
     this.routes = routes;
     this.pushRoutes();
@@ -999,6 +1009,34 @@ export class MapView {
       for (const dt of nw.dots) add(L.circleMarker([dt.lat, dt.lng], { radius: 9, color: dt.color, weight: 2.5, fill: false, interactive: false }), 'map-net-dot', d0);
     }
     // 線從頭長到尾（步道、自行車橋、星座、文化徑）
+    // 縫合市民大道：深灰色的裂縫、橘色的交叉針腳一針一針縫、縫完變淡；SOGO 走到微風的人流小點（畫在橋下空間的線下面）
+    for (const sm of r.seams ?? []) {
+      if (sm.path.length < 2) continue;
+      const band = L.polyline(sm.path, { color: '#4b4440', weight: 9, opacity: 1, lineCap: 'round', interactive: false, className: 'map-seam' });
+      layer.addLayer(band);
+      const be = band.getElement() as SVGElement | undefined;
+      if (be) {
+        be.setAttribute('pathLength', '1');
+        be.style.animationDelay = `${Math.round(sm.at - now)}ms,${Math.round(sm.healAt - now)}ms`;
+      }
+      for (const w of sm.walkers) {
+        for (const [color, weight] of [['#fff', 6.4], ['#233a5e', 4.4]] as const) {
+          const l = L.polyline([w.from, w.to], { color, weight, opacity: 1, lineCap: 'round', dashArray: '0 12', interactive: false, className: 'map-seam-walkers' });
+          layer.addLayer(l);
+          const e = l.getElement() as SVGElement | undefined;
+          if (e) e.style.animationDelay = `${Math.round(w.at - now)}ms,${Math.round(w.at - now)}ms`;
+        }
+      }
+      for (const st of sm.stitches) {
+        const [c, a] = [map.latLngToLayerPoint(st.center), map.latLngToLayerPoint(st.along)];
+        const ang = (Math.atan2(a.y - c.y, a.x - c.x) * 180) / Math.PI;
+        const icon = L.divIcon({ className: 'map-seam-stitch', html: `<svg viewBox="-20 -20 40 40" width="40" height="40" aria-hidden="true"><g transform="rotate(${ang.toFixed(1)})">${stitchSvg(st.at - now)}</g></svg>`, iconSize: [40, 40], iconAnchor: [20, 20] });
+        layer.addLayer(L.marker(st.center, { icon, interactive: false, keyboard: false, zIndexOffset: 1200 }));
+        // 兩個縫線離不到 1 公里，名字一上一下才不會連在一起
+        this.stayLabel(st.center, st.label, st.at + 900 - now, st.below ? -12 : 24);
+      }
+      this.stayLabel(sm.path[Math.floor((sm.path.length - 1) * sm.labelAt)], sm.label, sm.at + 1400 - now, 22);
+    }
     for (const rv of r.reveals ?? []) {
       if (rv.path.length < 2) continue;
       const style: Record<string, Leaflet.PolylineOptions> = {

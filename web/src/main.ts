@@ -1459,7 +1459,7 @@ function render(): void {
   const toRadarAt = ([lat, lng]: [number, number]): { bearing: number; distanceKm: number } => ({ bearing: bearingDeg(origin, { lat, lng }), distanceKm: haversineKm(origin, { lat, lng }) });
   const inView = (p: { lat: number; lng: number }): boolean => haversineKm(origin, p) < scaleKm * 1.5;
   const anyInView = (pts: Array<[number, number]>): boolean => pts.some(([lat, lng], i) => i % 4 === 0 && inView({ lat, lng }));
-  const hqEx = hqVoyageAt !== null && hqDrawing() ? hqExtras(hqVoyageAt) : { reveals: [], icons: [] };
+  const hqEx = hqVoyageAt !== null && hqDrawing() ? hqExtras(hqVoyageAt) : { reveals: [], icons: [], seams: [] };
   // 文化網（點 —— 線 —— 面）或政策圖層的「點 —— 面」，一次只有一個
   const hqNetNow = hqVoyageAt === null ? null : hqNetAt !== null ? hqNetwork(hqNetAt) : hqLayerNetwork();
   // 稍後才開始的也畫（虛線框、淡色）
@@ -1526,6 +1526,14 @@ function render(): void {
               // 其他政見：山林徑的步道和登山中心、自行車橋、球場和運動中心、星群
               reveals: hqEx.reveals.filter((rv) => anyInView(rv.path)).map((rv) => ({ points: rv.path.map(toRadarAt), at: rv.at, kind: rv.kind, label: rv.label, color: rv.color, labelAt: rv.labelAt })),
               icons: hqEx.icons.filter(inView).map((ic) => ({ ...ic, ...toRadarAt([ic.lat, ic.lng]) })),
+              seams: hqEx.seams
+                .filter((sm) => anyInView(sm.path))
+                .map((sm) => ({
+                  ...sm,
+                  points: sm.path.map(toRadarAt),
+                  stitches: sm.stitches.map((st) => ({ ...st, center: toRadarAt(st.center), along: toRadarAt(st.along) })),
+                  walkers: sm.walkers.map((w) => ({ ...w, from: toRadarAt(w.from), to: toRadarAt(w.to) })),
+                })),
               hits: hqHits(hqVoyageAt).filter(inView).map((h) => ({ ...h, ...toRadarAt([h.lat, h.lng]) })),
               // 綠覆率：每長回一棵樹，整個台北市再鋪一層很淡的綠
               green: { ring: hq.HQ_TAIPEI_RING.map(toRadarAt), steps: hqGreenSteps(hqVoyageAt) },
@@ -3442,6 +3450,15 @@ function hqStarPoints(st: { lat: number; lng: number; count: number; radiusM: nu
 /** 樹樁比長樹早幾毫秒冒出來 */
 const HQ_STUMP_LEAD_MS = 1500;
 type HqReveal = { path: Array<[number, number]>; at: number; kind: 'trail' | 'bridge' | 'stars' | 'culture'; label?: string; color?: string; labelAt?: number };
+type HqSeam = {
+  path: Array<[number, number]>;
+  at: number;
+  healAt: number;
+  label: string;
+  labelAt: number;
+  stitches: Array<{ at: number; center: [number, number]; along: [number, number]; label: string; below?: boolean }>;
+  walkers: Array<{ from: [number, number]; to: [number, number]; at: number }>;
+};
 type HqIcon = { lat: number; lng: number; at: number; kind: 'hut' | 'stadium' | 'dome' | 'star' | 'regrow' | 'culture' | 'service' | 'wetland' | 'archbridge' | 'chest' | 'chestlock' | 'paw' | 'umusic' | 'uart' | 'uexhibit' | 'uyouth' | 'ushop'; label?: string; scale?: number; grow?: number; char?: string; color?: string; small?: boolean; focus?: boolean; hint?: { title: string; intro: string } };
 /** 其他政見的地方：離路線多近才沿路冒出來 */
 const HQ_SERVICE_NEAR_M = 300;
@@ -3460,10 +3477,11 @@ function hqDistM(p: LatLng): number {
   return d;
 }
 /** 其他政見的東西：步道（山林徑）、自行車橋、球場和運動中心、星群——線和冒出來的東西（照船到那一站或離它最近的時間） */
-function hqExtras(t0: number): { reveals: HqReveal[]; icons: HqIcon[] } {
-  if (!hq) return { reveals: [], icons: [] };
+function hqExtras(t0: number): { reveals: HqReveal[]; icons: HqIcon[]; seams: HqSeam[] } {
+  if (!hq) return { reveals: [], icons: [], seams: [] };
   const reveals: HqReveal[] = [];
   const icons: HqIcon[] = [];
+  const seams: HqSeam[] = [];
   hq.HQ_TRAILS.forEach((tr, i) => {
     const at = hqStopAt(t0, tr.stop);
     reveals.push({ path: tr.pts, at, kind: 'trail' });
@@ -3525,13 +3543,25 @@ function hqExtras(t0: number): { reveals: HqReveal[]; icons: HqIcon[] } {
   // 高架橋下空間：沿市民大道高架、建國高架畫一條線（船離中間最近時長出來）
   // 兩條在中間交叉（建國南北路 × 市民大道），名字和圖示都避開交叉口（v1.515 使用者說重疊了）；
   // 沿線畫橋下的用途：音樂、藝文、展覽、青年交流、特色商業（使用者說「幫我稍微畫圖出來」）
+  // 市民大道先「縫合」（v1.520 使用者說「先做 1+2 看看」）：裂縫畫出來 → 三個地方一個一個縫 → 縫完變淡，橋下空間的線、圖示才長出來
   for (const vd of hq.HQ_VIADUCTS) {
     const mid = vd.pts[Math.floor(vd.pts.length / 2)];
-    const at = hqNearestAt(t0, { lat: mid[0], lng: mid[1] });
     const west = vd.name.startsWith('市民');
-    reveals.push({ path: vd.pts, at, kind: 'culture', label: `橋下空間（${vd.name}）`, color: '#8a6fd0', labelAt: west ? 0.66 : 0.1 });
+    // 船從總部出發的前 2 秒就沿著市民大道往西開，出發就開始縫（離中間最近是 68 秒、快到市政府，到了畫面拉近，縫完的樣子會看不到）
+    let at = west ? t0 + 600 : hqNearestAt(t0, { lat: mid[0], lng: mid[1] });
+    if (west) {
+      const seam = hqSeam(vd.pts, at);
+      seams.push(seam);
+      at = seam.healAt + 300;
+      // 北流（音樂廊道往南港方向接到這裡）
+      const east = seam.stitches[seam.stitches.length - 1];
+      icons.push({ lat: hq.HQ_SEAM.beiliu.lat, lng: hq.HQ_SEAM.beiliu.lng, at: east.at + 900, kind: 'umusic', label: hq.HQ_SEAM.beiliu.name, small: true, scale: 0.85, hint: { title: '臺北流行音樂中心（北流）', intro: I['音樂廊道'] ?? '' } });
+    }
+    // 市民大道的名字寫「縫合市民大道」（裂縫那邊），這裡不重複
+    reveals.push({ path: vd.pts, at, kind: 'culture', label: west ? undefined : `橋下空間（${vd.name}）`, color: '#8a6fd0', labelAt: west ? 0.4 : 0.1 });
+    // 只有音樂知道在哪一段（「往南港方向可與北流結合做音樂廊道」），放東段；其他的沒說哪一段，避開縫線排開
     const uses: Array<[number, 'umusic' | 'uart' | 'uexhibit' | 'uyouth' | 'ushop', string]> = west
-      ? [[0.12, 'umusic', '音樂'], [0.3, 'uart', '藝文'], [0.78, 'uexhibit', '展覽'], [0.93, 'ushop', '特色商業']]
+      ? [[0.1, 'uart', '藝文'], [0.28, 'uexhibit', '展覽'], [0.8, 'ushop', '特色商業'], [0.92, 'umusic', '音樂']]
       : [[0.3, 'uyouth', '青年交流'], [0.82, 'ushop', '特色商業']];
     uses.forEach(([k, kind, name], i) => {
       const q = vd.pts[Math.floor((vd.pts.length - 1) * k)];
@@ -3543,7 +3573,30 @@ function hqExtras(t0: number): { reveals: HqReveal[]; icons: HqIcon[] } {
     const at = Math.max(...ln.stops.map((n) => seen.get(n) ?? t0)) + 400;
     reveals.push({ path: ln.pts, at, kind: 'culture', label: ln.name, color: hq.HQ_CULTURE_THEMES[ln.theme].color });
   }
-  return { reveals, icons };
+  return { reveals, icons, seams };
+}
+/** 縫合市民大道的時間：裂縫畫 1.4 秒，之後每 1.1 秒縫一個地方，縫完 0.2 秒開始變淡 */
+const SEAM_FIRST_MS = 1500;
+const SEAM_STEP_MS = 1100;
+/** 縫合市民大道：縫線放在離指定地點最近的高架那一點（'end' 是東端），方向用旁邊那一點算；SOGO ↔ 微風縫好後人流小點開始走 */
+function hqSeam(pts: Array<[number, number]>, at: number): HqSeam {
+  const S = hq!.HQ_SEAM;
+  const stitches = S.stitches.map((st, i) => {
+    let j = pts.length - 1;
+    if (st.near !== 'end') {
+      const [la, ln] = st.near;
+      let best = Infinity;
+      pts.forEach((q, n) => {
+        const d = (q[0] - la) ** 2 + ((q[1] - ln) * 0.9) ** 2;
+        if (d < best) [best, j] = [d, n];
+      });
+    }
+    const along = pts[j === pts.length - 1 ? j - 1 : j + 1];
+    // 十字主軸的名字寫在下面（SOGO ↔ 微風的人流往南走，名字寫上面）
+    return { at: at + SEAM_FIRST_MS + i * SEAM_STEP_MS, center: pts[j], along, label: st.label, below: i === 0 };
+  });
+  const walkers = S.stitches.flatMap((st, i) => (st.walk ? [{ from: st.walk[0], to: st.walk[1], at: stitches[i].at + 900 }] : []));
+  return { path: pts, at, healAt: at + SEAM_FIRST_MS + S.stitches.length * SEAM_STEP_MS + 200, label: '縫合市民大道', labelAt: 0.06, stitches, walkers };
 }
 /** 一塊地方（社子島）：船快到那一站前 6 秒淡入、留著；名字寫在中間（範圍的平均點） */
 function hqAreas(t0: number): Array<{ ring: Array<[number, number]>; center: [number, number]; at: number; label: string; zones?: Array<Array<[number, number]>>; zonesAt?: number }> {
@@ -3620,6 +3673,13 @@ function hqHits(t0: number): Array<{ lat: number; lng: number; at: number; title
   const I = hq.HQ_INTROS;
   const hits: ReturnType<typeof hqHits> = [];
   const ex = hqExtras(t0);
+  // 縫合市民大道：縫線的地方、「縫合市民大道」那幾個字
+  for (const sm of ex.seams) {
+    const S = hq.HQ_SEAM;
+    sm.stitches.forEach((st, i) => hits.push({ lat: st.center[0], lng: st.center[1], at: st.at, title: S.stitches[i].title, intro: I[S.stitches[i].intro] ?? '', r: 13 }));
+    const lp = sm.path[Math.floor((sm.path.length - 1) * sm.labelAt)];
+    hits.push({ lat: lp[0], lng: lp[1], at: sm.at + 1400, title: '縫合市民大道', intro: I['縫合市民大道'] ?? '', dy: 10, r: 14 });
+  }
   for (const ic of ex.icons) {
     if (ic.hint) {
       hits.push({ lat: ic.lat, lng: ic.lng, at: ic.at, title: ic.hint.title, intro: ic.hint.intro, r: 9 });
