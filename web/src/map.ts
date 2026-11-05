@@ -1014,13 +1014,7 @@ export class MapView {
     // 縫合市民大道：深灰色的裂縫、橘色的交叉針腳一針一針縫、縫完變淡；SOGO 走到微風的人流小點（畫在橋下空間的線下面）
     for (const sm of r.seams ?? []) {
       if (sm.path.length < 2) continue;
-      const band = L.polyline(sm.path, { color: '#4b4440', weight: 9, opacity: 1, lineCap: 'round', interactive: false, className: 'map-seam' });
-      layer.addLayer(band);
-      const be = band.getElement() as SVGElement | undefined;
-      if (be) {
-        be.setAttribute('pathLength', '1');
-        be.style.animationDelay = `${Math.round(sm.at - now)}ms,${Math.round(sm.healAt - now)}ms`;
-      }
+      // 不畫整條深色的帶子（v1.523 使用者說有點可怕），只在要縫的地方畫淡淡的裂縫
       for (const w of sm.walkers) {
         for (const [color, weight] of [['#fff', 6.4], ['#233a5e', 4.4]] as const) {
           const l = L.polyline([w.from, w.to], { color, weight, opacity: 1, lineCap: 'round', dashArray: '0 12', interactive: false, className: 'map-seam-walkers' });
@@ -1037,7 +1031,7 @@ export class MapView {
         // 兩個縫線離不到 1 公里，名字一上一下才不會連在一起
         this.stayLabel(st.center, st.label, sm.at + 1400 - now, st.below ? -12 : 24);
       }
-      this.stayLabel(sm.path[Math.floor((sm.path.length - 1) * sm.labelAt)], sm.label, sm.at + 1400 - now, 22);
+      this.stayLabel(sm.path[Math.floor((sm.path.length - 1) * sm.labelAt)], sm.label, sm.healAt - now, 22);
     }
     for (const rv of r.reveals ?? []) {
       if (rv.path.length < 2) continue;

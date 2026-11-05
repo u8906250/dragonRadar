@@ -3696,7 +3696,7 @@ function hqHits(t0: number): Array<{ lat: number; lng: number; at: number; title
     // 裂縫出來就可以看介紹
     sm.stitches.forEach((st, i) => hits.push({ lat: st.center[0], lng: st.center[1], at: sm.at + 1400, title: S.stitches[i].title, intro: I[S.stitches[i].intro] ?? '', r: 13 }));
     const lp = sm.path[Math.floor((sm.path.length - 1) * sm.labelAt)];
-    hits.push({ lat: lp[0], lng: lp[1], at: sm.at + 1400, title: '縫合市民大道', intro: I['縫合市民大道'] ?? '', dy: 10, r: 14 });
+    hits.push({ lat: lp[0], lng: lp[1], at: sm.healAt, title: '縫合市民大道', intro: I['縫合市民大道'] ?? '', dy: 10, r: 14 });
   }
   for (const ic of ex.icons) {
     if (ic.hint) {

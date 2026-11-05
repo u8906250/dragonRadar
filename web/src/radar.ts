@@ -2177,7 +2177,7 @@ export class Radar {
       if (sm.points.length < 2) continue;
       const xy = (q: { bearing: number; distanceKm: number }): { x: number; y: number } => polar(q.bearing - this.heading, this.ratio(q.distanceKm) * (R - 8));
       const g = el('g', { class: 'voyage-seam' });
-      g.appendChild(el('path', { class: 'seam-band', d: this.pathOf(sm.points), pathLength: '1', style: `stroke-width:${(9 * k).toFixed(2)};animation-delay:${Math.round(sm.at - now)}ms,${Math.round(sm.healAt - now)}ms` }));
+      // 不畫整條深色的帶子（v1.523 使用者說「一開始不用整條弄成黑的，有點可怕，在裂痕那邊稍微畫一下就可以」），只在要縫的地方畫淡淡的裂縫
       for (const w of sm.walkers) {
         const [a, b] = [xy(w.from), xy(w.to)];
         const d = `M${a.x.toFixed(1)} ${a.y.toFixed(1)}L${b.x.toFixed(1)} ${b.y.toFixed(1)}`;
@@ -2199,7 +2199,7 @@ export class Radar {
         g.appendChild(lg);
       }
       const lp = xy(sm.points[Math.floor((sm.points.length - 1) * sm.labelAt)]);
-      g.appendChild(this.stayLabel(lp.x, lp.y, k, sm.label, sm.at + 1400 - now, -12));
+      g.appendChild(this.stayLabel(lp.x, lp.y, k, sm.label, sm.healAt - now, -12));
       this.routeLayer.appendChild(g);
     }
     // 線從頭長到尾（步道、自行車橋、星座）、冒出來的東西：畫在樹的上面才不會被樹蓋住
