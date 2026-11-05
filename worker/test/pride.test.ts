@@ -24,10 +24,12 @@ function fakeEnv(rows: object[]): { env: Env; sql: () => string } {
 const row = (id: string, style: string | null) => ({ id, post_id: id, title: id, depart_at: 1, arrive_at: 2, show_until: 3, claim_url: null, stops: '[]', segments: '[]', updated_at: 0, style });
 
 describe('同志遊行（彩虹路線）', () => {
-  it('lists routes with a style before their day, and passes the rainbow style on', async () => {
+  it('lists routes before their day (official too), and passes the rainbow style on', async () => {
     const f = fakeEnv([row('pride-2026', 'rainbow'), row('2026-10-18-x', null)]);
     const out = await listRoutes(f.env, 0);
-    expect(f.sql()).toContain('style IS NOT NULL');
+    // 官方車掃放上去就列出來，不再等到當天（v1.519）
+    expect(f.sql()).not.toContain('day_start');
+    expect(f.sql()).toContain('show_until > ?');
     expect(out[0]).toMatchObject({ id: 'pride-2026', source: 'official', style: 'rainbow' });
     expect(out[1].style).toBeUndefined();
   });

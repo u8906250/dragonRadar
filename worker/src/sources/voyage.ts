@@ -274,8 +274,10 @@ export interface RouteOut {
  * 清單才合成一張卡片
  */
 export async function listRoutes(env: Env, now = nowSec()): Promise<RouteOut[]> {
-  const { results } = await env.DB.prepare("SELECT * FROM routes WHERE (day_start <= ? OR id LIKE 'link-%' OR style IS NOT NULL) AND show_until > ? ORDER BY depart_at")
-    .bind(now, now)
+  // 官方車掃放上去就列出來（跟回報的車掃一樣合成一張車掃卡片、起終點 🚩🏁、加油點是路線上的站；出發前只畫起點，點開才畫整條）。
+  // 以前要到當天才列，提早放的那幾天各站變成一個個獨立的活動（v1.519 使用者說內湖南港跟中正萬華的做法不同）
+  const { results } = await env.DB.prepare('SELECT * FROM routes WHERE show_until > ? ORDER BY depart_at')
+    .bind(now)
     .all<{ id: string; post_id: string; title: string; depart_at: number | null; arrive_at: number | null; show_until: number; claim_url: string | null; stops: string; segments: string; updated_at: number; style: string | null }>();
   return results.map((r) => ({
     id: r.id,
