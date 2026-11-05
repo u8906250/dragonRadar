@@ -218,6 +218,16 @@ export function stitchSvg(delayMs: number): string {
   return out;
 }
 
+/**
+ * 裂縫（縫合市民大道還沒縫的地方）：沿著路（x 軸）一道鋸齒狀的裂縫、幾條分岔，底下一層暗暗的光一直忽明忽暗；
+ * showMs 出現、healMs 淡掉（縫好以後）
+ */
+export function crackSvg(showMs: number, healMs: number): string {
+  const main = 'M-17 0.6L-12.5 -2.4L-8.5 1.9L-4.2 -3.1L0 2.3L4.1 -2.2L8.3 2.7L12.4 -1.7L17 0.9';
+  const branches = 'M-8.5 1.9L-10.2 5.8M0 2.3L1.6 6.3M4.1 -2.2L5.2 -6.2M-4.2 -3.1L-5.8 -6.6M12.4 -1.7L14.1 -5.2';
+  return `<g class="crack" style="animation-delay:${Math.round(showMs)}ms,${Math.round(healMs)}ms"><path class="cr-glow" d="${main}"/><path class="cr-hi" d="${main}" transform="translate(0.6 0.9)"/><path class="cr-line" d="${main}"/><path class="cr-br" d="${branches}"/></g>`;
+}
+
 export function cultureSvg(char: string, color: string): string {
   return `<circle class="cu-dot" r="7" style="fill:${color}"/><text class="cu-char" y="3.1" text-anchor="middle">${char}</text>`;
 }

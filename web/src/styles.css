@@ -373,7 +373,7 @@ path.map-water-glint { animation: water-flow-map 1.1s linear infinite; }
 .radar .voyage-reveal.stars .reveal-line { stroke: #f2b544; stroke-opacity: 0.9; }
 .radar .reveal-bikes, .map-reveal-bikes { fill: none; stroke: #15171c; stroke-linecap: round; stroke-dasharray: 3 12; opacity: 0; animation: reveal-bikes 1.6s linear infinite, voyage-stay 0.5s ease-out both; }
 @keyframes reveal-bikes { to { stroke-dashoffset: -15; } }
-/* 縫合市民大道（v1.520）：深灰的裂縫從西畫到東、縫完變淡；橘色的交叉針腳一筆一筆縫；SOGO 走到微風的人流小點（深藍、白邊，橘色的河經過那裡也看得到）一直往北走 */
+/* 縫合市民大道（v1.520）：出發時深灰的裂縫從西畫到東，洋流號經過才縫（v1.521）、縫完變淡；橘色的交叉針腳一筆一筆縫；SOGO 走到微風的人流小點（深藍、白邊，橘色的河經過那裡也看得到）一直往北走 */
 .radar .seam-band, path.map-seam { fill: none; stroke: #4b4440; stroke-linecap: round; stroke-dasharray: 1; stroke-dashoffset: 1; opacity: 0.82; animation: seam-cut 1.4s ease-out both, seam-heal 1.6s ease forwards; }
 @keyframes seam-cut { to { stroke-dashoffset: 0; } }
 @keyframes seam-heal { to { opacity: 0.16; } }
@@ -381,6 +381,17 @@ path.map-water-glint { animation: water-flow-map 1.1s linear infinite; }
 .st-u { stroke: #fff; stroke-width: 4.2; }
 .st-t { stroke: #ff7a1a; stroke-width: 2.4; }
 @keyframes st-draw { to { stroke-dashoffset: 0; } }
+/* 還沒縫的地方：鋸齒狀的裂縫（深色、亮邊、分岔），底下暗暗的光一直忽明忽暗；縫好後淡掉（v1.521） */
+.crack { opacity: 0; animation: crack-in 0.6s ease-out forwards, crack-out 1.2s ease forwards; }
+@keyframes crack-in { to { opacity: 1; } }
+@keyframes crack-out { from { opacity: 1; } to { opacity: 0; } }
+.cr-glow, .cr-hi, .cr-line, .cr-br { fill: none; stroke-linecap: round; stroke-linejoin: round; }
+.cr-glow { stroke: #1d1612; stroke-width: 7; stroke-opacity: 0.25; animation: crack-throb 1.8s ease-in-out infinite; }
+.cr-hi { stroke: #fff; stroke-width: 1.1; stroke-opacity: 0.7; }
+.cr-line { stroke: #1d1612; stroke-width: 2.4; }
+.cr-br { stroke: #1d1612; stroke-width: 1.3; }
+@keyframes crack-throb { 50% { stroke-opacity: 0.55; } }
+@media (prefers-reduced-motion: reduce) { .cr-glow { animation: none; } }
 .radar .seam-stitch, .map-seam-stitch { pointer-events: none; }
 .map-seam-stitch { background: none; border: 0; }
 .radar .seam-walkers, path.map-seam-walkers { fill: none; stroke: #233a5e; stroke-linecap: round; opacity: 0; animation: seam-walk-in 0.6s ease-out forwards, seam-walk 1.4s linear infinite; }

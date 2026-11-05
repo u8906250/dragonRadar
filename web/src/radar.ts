@@ -1,5 +1,5 @@
 import type { BlipStyle, EventKind, Phase, SweepStyle } from './types';
-import { alongLine, BOAT_SVG, cultureSvg, regrowSvg, serviceSvg, stitchSvg, BOAT_TITLE, boatPhase, fireworksSvg, FIREWORKS_MS, flowOut, HQ_VOYAGE_MS, RAINBOW_FLOW_TOTAL, RAINBOW_STAGGER_MS, riverHalfWidth, surge, SURGE_TOTAL, voyagePhase, voyageTimeOf } from './flow';
+import { alongLine, BOAT_SVG, crackSvg, cultureSvg, regrowSvg, serviceSvg, stitchSvg, BOAT_TITLE, boatPhase, fireworksSvg, FIREWORKS_MS, flowOut, HQ_VOYAGE_MS, RAINBOW_FLOW_TOTAL, RAINBOW_STAGGER_MS, riverHalfWidth, surge, SURGE_TOTAL, voyagePhase, voyageTimeOf } from './flow';
 
 export interface RadarItem {
   id: number;
@@ -2188,10 +2188,11 @@ export class Radar {
         const [c, a] = [xy(st.center), xy(st.along)];
         const ang = (Math.atan2(a.y - c.y, a.x - c.x) * 180) / Math.PI;
         const sg = el('g', { class: 'seam-stitch', transform: `translate(${c.x.toFixed(1)} ${c.y.toFixed(1)}) rotate(${ang.toFixed(1)}) scale(${k.toFixed(4)})` });
-        sg.innerHTML = stitchSvg(st.at - now);
+        // 還沒縫的地方先是裂縫（一開始就有），洋流號經過時縫上、裂縫淡掉
+        sg.innerHTML = crackSvg(sm.at + 600 - now, st.at + 900 - now) + stitchSvg(st.at - now);
         g.appendChild(sg);
-        // 兩個縫線離不到 1 公里，名字一上一下才不會連在一起
-        const lg = this.stayLabel(c.x, c.y, k, st.label, st.at + 900 - now, st.below ? 22 : -14);
+        // 名字跟裂縫一起出來；兩個縫線離不到 1 公里，名字一上一下才不會連在一起
+        const lg = this.stayLabel(c.x, c.y, k, st.label, sm.at + 1400 - now, st.below ? 22 : -14);
         lg.classList.add('small');
         g.appendChild(lg);
       }

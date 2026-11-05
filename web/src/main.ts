@@ -3543,26 +3543,30 @@ function hqExtras(t0: number): { reveals: HqReveal[]; icons: HqIcon[]; seams: Hq
   // 高架橋下空間：沿市民大道高架、建國高架畫一條線（船離中間最近時長出來）
   // 兩條在中間交叉（建國南北路 × 市民大道），名字和圖示都避開交叉口（v1.515 使用者說重疊了）；
   // 沿線畫橋下的用途：音樂、藝文、展覽、青年交流、特色商業（使用者說「幫我稍微畫圖出來」）
-  // 市民大道先「縫合」（v1.520 使用者說「先做 1+2 看看」）：裂縫畫出來 → 三個地方一個一個縫 → 縫完變淡，橋下空間的線、圖示才長出來
+  // 市民大道先「縫合」（v1.520 使用者說「先做 1+2 看看」）：出發就畫出裂縫，洋流號經過才縫（v1.521），縫完變淡，橋下空間的線、圖示才長出來
   for (const vd of hq.HQ_VIADUCTS) {
-    const mid = vd.pts[Math.floor(vd.pts.length / 2)];
-    const west = vd.name.startsWith('市民');
-    // 船從總部出發的前 2 秒就沿著市民大道往西開，出發就開始縫（離中間最近是 68 秒、快到市政府，到了畫面拉近，縫完的樣子會看不到）
-    let at = west ? t0 + 600 : hqNearestAt(t0, { lat: mid[0], lng: mid[1] });
-    if (west) {
-      const seam = hqSeam(vd.pts, at);
+    if (vd.name.startsWith('市民')) {
+      // 船前 2 秒沿著市民大道往西開，出發就有裂縫；68 秒在復興南路口跨過去時縫
+      const seam = hqSeam(vd.pts, t0 + 600, t0);
       seams.push(seam);
-      at = seam.healAt + 300;
-      // 北流（音樂廊道往南港方向接到這裡）
-      const east = seam.stitches[seam.stitches.length - 1];
+      // 北流（音樂廊道往南港方向接到這裡）：東端縫好時
+      const east = seam.stitches.find((st) => st.center === vd.pts[vd.pts.length - 1]) ?? seam.stitches[seam.stitches.length - 1];
       icons.push({ lat: hq.HQ_SEAM.beiliu.lat, lng: hq.HQ_SEAM.beiliu.lng, at: east.at + 900, kind: 'umusic', label: hq.HQ_SEAM.beiliu.name, small: true, scale: 0.85, hint: { title: '臺北流行音樂中心（北流）', intro: I['音樂廊道'] ?? '' } });
+      // 名字寫「縫合市民大道」（裂縫那邊），這條不寫；縫完才長，圖示快一點冒出來（75 秒到市政府、畫面拉近之前）
+      const at = seam.healAt + 300;
+      reveals.push({ path: vd.pts, at, kind: 'culture', color: '#8a6fd0' });
+      // 只有音樂知道在哪一段（「往南港方向可與北流結合做音樂廊道」），放東段；其他的沒說哪一段，避開縫線排開
+      const uses: Array<[number, 'umusic' | 'uart' | 'uexhibit' | 'ushop', string]> = [[0.1, 'uart', '藝文'], [0.28, 'uexhibit', '展覽'], [0.8, 'ushop', '特色商業'], [0.92, 'umusic', '音樂']];
+      uses.forEach(([k, kind, name], i) => {
+        const q = vd.pts[Math.floor((vd.pts.length - 1) * k)];
+        icons.push({ lat: q[0], lng: q[1], at: at + 600 + i * 200, kind, label: name, small: true, scale: 0.85, hint: { title: `橋下空間：${name}（${vd.name}）`, intro: I['橋下空間'] ?? '' } });
+      });
+      continue;
     }
-    // 市民大道的名字寫「縫合市民大道」（裂縫那邊），這裡不重複
-    reveals.push({ path: vd.pts, at, kind: 'culture', label: west ? undefined : `橋下空間（${vd.name}）`, color: '#8a6fd0', labelAt: west ? 0.4 : 0.1 });
-    // 只有音樂知道在哪一段（「往南港方向可與北流結合做音樂廊道」），放東段；其他的沒說哪一段，避開縫線排開
-    const uses: Array<[number, 'umusic' | 'uart' | 'uexhibit' | 'uyouth' | 'ushop', string]> = west
-      ? [[0.1, 'uart', '藝文'], [0.28, 'uexhibit', '展覽'], [0.8, 'ushop', '特色商業'], [0.92, 'umusic', '音樂']]
-      : [[0.3, 'uyouth', '青年交流'], [0.82, 'ushop', '特色商業']];
+    const mid = vd.pts[Math.floor(vd.pts.length / 2)];
+    const at = hqNearestAt(t0, { lat: mid[0], lng: mid[1] });
+    reveals.push({ path: vd.pts, at, kind: 'culture', label: `橋下空間（${vd.name}）`, color: '#8a6fd0', labelAt: 0.1 });
+    const uses: Array<[number, 'uyouth' | 'ushop', string]> = [[0.3, 'uyouth', '青年交流'], [0.82, 'ushop', '特色商業']];
     uses.forEach(([k, kind, name], i) => {
       const q = vd.pts[Math.floor((vd.pts.length - 1) * k)];
       icons.push({ lat: q[0], lng: q[1], at: at + 2200 + i * 250, kind, label: name, small: true, scale: 0.85, hint: { title: `橋下空間：${name}（${vd.name}）`, intro: I['橋下空間'] ?? '' } });
@@ -3575,13 +3579,16 @@ function hqExtras(t0: number): { reveals: HqReveal[]; icons: HqIcon[]; seams: Hq
   }
   return { reveals, icons, seams };
 }
-/** 縫合市民大道的時間：裂縫畫 1.4 秒，之後每 1.1 秒縫一個地方，縫完 0.2 秒開始變淡 */
-const SEAM_FIRST_MS = 1500;
-const SEAM_STEP_MS = 1100;
-/** 縫合市民大道：縫線放在離指定地點最近的高架那一點（'end' 是東端），方向用旁邊那一點算；SOGO ↔ 微風縫好後人流小點開始走 */
-function hqSeam(pts: Array<[number, number]>, at: number): HqSeam {
+/** 縫合市民大道：洋流號經過後，從船最靠近的那一處開始，往兩邊每 0.9 秒縫一處；縫完 0.9 秒整條變淡 */
+const SEAM_STEP_MS = 900;
+/**
+ * 縫合市民大道：出發就畫出裂縫（at），縫線放在離指定地點最近的高架那一點（'end' 是東端），方向用旁邊那一點算；
+ * 洋流號最靠近哪一處（68 秒在復興南路口跨過市民大道，就是 SOGO ↔ 微風）就在那時從那裡縫，再照離它遠近往兩邊縫（v1.521 使用者說「一直到洋流號經過才出現縫合的效果」）；
+ * SOGO ↔ 微風縫好後人流小點開始走
+ */
+function hqSeam(pts: Array<[number, number]>, at: number, t0: number): HqSeam {
   const S = hq!.HQ_SEAM;
-  const stitches = S.stitches.map((st, i) => {
+  const idx = S.stitches.map((st) => {
     let j = pts.length - 1;
     if (st.near !== 'end') {
       const [la, ln] = st.near;
@@ -3591,12 +3598,22 @@ function hqSeam(pts: Array<[number, number]>, at: number): HqSeam {
         if (d < best) [best, j] = [d, n];
       });
     }
-    const along = pts[j === pts.length - 1 ? j - 1 : j + 1];
-    // 十字主軸的名字寫在下面（SOGO ↔ 微風的人流往南走，名字寫上面）
-    return { at: at + SEAM_FIRST_MS + i * SEAM_STEP_MS, center: pts[j], along, label: st.label, below: i === 0 };
+    return j;
   });
+  const ll = (j: number): LatLng => ({ lat: pts[j][0], lng: pts[j][1] });
+  const first = idx.reduce((b, j) => (hqDistM(ll(j)) < hqDistM(ll(b)) ? j : b));
+  const start = hqNearestAt(t0, ll(first));
+  const order = [...idx].sort((a, b) => Math.abs(a - first) - Math.abs(b - first));
+  const stitches = idx.map((j, i) => ({
+    at: start + order.indexOf(j) * SEAM_STEP_MS,
+    center: pts[j],
+    along: pts[j === pts.length - 1 ? j - 1 : j + 1],
+    label: S.stitches[i].label,
+    // 十字主軸的名字寫在下面（SOGO ↔ 微風的人流往南走，名字寫上面）
+    below: i === 0,
+  }));
   const walkers = S.stitches.flatMap((st, i) => (st.walk ? [{ from: st.walk[0], to: st.walk[1], at: stitches[i].at + 900 }] : []));
-  return { path: pts, at, healAt: at + SEAM_FIRST_MS + S.stitches.length * SEAM_STEP_MS + 200, label: '縫合市民大道', labelAt: 0.06, stitches, walkers };
+  return { path: pts, at, healAt: Math.max(...stitches.map((st) => st.at)) + 900, label: '縫合市民大道', labelAt: 0.06, stitches, walkers };
 }
 /** 一塊地方（社子島）：船快到那一站前 6 秒淡入、留著；名字寫在中間（範圍的平均點） */
 function hqAreas(t0: number): Array<{ ring: Array<[number, number]>; center: [number, number]; at: number; label: string; zones?: Array<Array<[number, number]>>; zonesAt?: number }> {
@@ -3676,7 +3693,8 @@ function hqHits(t0: number): Array<{ lat: number; lng: number; at: number; title
   // 縫合市民大道：縫線的地方、「縫合市民大道」那幾個字
   for (const sm of ex.seams) {
     const S = hq.HQ_SEAM;
-    sm.stitches.forEach((st, i) => hits.push({ lat: st.center[0], lng: st.center[1], at: st.at, title: S.stitches[i].title, intro: I[S.stitches[i].intro] ?? '', r: 13 }));
+    // 裂縫出來就可以看介紹
+    sm.stitches.forEach((st, i) => hits.push({ lat: st.center[0], lng: st.center[1], at: sm.at + 1400, title: S.stitches[i].title, intro: I[S.stitches[i].intro] ?? '', r: 13 }));
     const lp = sm.path[Math.floor((sm.path.length - 1) * sm.labelAt)];
     hits.push({ lat: lp[0], lng: lp[1], at: sm.at + 1400, title: '縫合市民大道', intro: I['縫合市民大道'] ?? '', dy: 10, r: 14 });
   }

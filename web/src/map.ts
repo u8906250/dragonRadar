@@ -1,5 +1,5 @@
 import type * as Leaflet from 'leaflet';
-import { alongLine, BOAT_SVG, cultureSvg, regrowSvg, serviceSvg, stitchSvg, boatPhase, fireworksSvg, FIREWORKS_MS, flowOut, HQ_VOYAGE_MS, RAINBOW_FLOW_TOTAL, RAINBOW_STAGGER_MS, surge, SURGE_TOTAL, voyagePhase, voyageTimeOf } from './flow';
+import { alongLine, BOAT_SVG, crackSvg, cultureSvg, regrowSvg, serviceSvg, stitchSvg, boatPhase, fireworksSvg, FIREWORKS_MS, flowOut, HQ_VOYAGE_MS, RAINBOW_FLOW_TOTAL, RAINBOW_STAGGER_MS, surge, SURGE_TOTAL, voyagePhase, voyageTimeOf } from './flow';
 import { haversineKm, type LatLng } from './geo';
 import type { EventKind, Phase } from './types';
 import { LANDMARKS } from './landmarks';
@@ -1030,10 +1030,10 @@ export class MapView {
       for (const st of sm.stitches) {
         const [c, a] = [map.latLngToLayerPoint(st.center), map.latLngToLayerPoint(st.along)];
         const ang = (Math.atan2(a.y - c.y, a.x - c.x) * 180) / Math.PI;
-        const icon = L.divIcon({ className: 'map-seam-stitch', html: `<svg viewBox="-20 -20 40 40" width="40" height="40" aria-hidden="true"><g transform="rotate(${ang.toFixed(1)})">${stitchSvg(st.at - now)}</g></svg>`, iconSize: [40, 40], iconAnchor: [20, 20] });
+        const icon = L.divIcon({ className: 'map-seam-stitch', html: `<svg viewBox="-20 -20 40 40" width="40" height="40" aria-hidden="true"><g transform="rotate(${ang.toFixed(1)})">${crackSvg(sm.at + 600 - now, st.at + 900 - now)}${stitchSvg(st.at - now)}</g></svg>`, iconSize: [40, 40], iconAnchor: [20, 20] });
         layer.addLayer(L.marker(st.center, { icon, interactive: false, keyboard: false, zIndexOffset: 1200 }));
         // 兩個縫線離不到 1 公里，名字一上一下才不會連在一起
-        this.stayLabel(st.center, st.label, st.at + 900 - now, st.below ? -12 : 24);
+        this.stayLabel(st.center, st.label, sm.at + 1400 - now, st.below ? -12 : 24);
       }
       this.stayLabel(sm.path[Math.floor((sm.path.length - 1) * sm.labelAt)], sm.label, sm.at + 1400 - now, 22);
     }
