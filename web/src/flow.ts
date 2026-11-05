@@ -231,12 +231,36 @@ export const HQ_MOTION_KM = 5;
 /** 拉遠到雷達外圈 5 km、地圖縮放 14 以下，寶箱、橋下空間、大巨蛋、毛孩安心養的字不寫（v1.529 使用者說「以 5 公里為基礎，拉遠到 5 公里後…文字可以拿掉，其他留著」） */
 export const HQ_LABEL_KM = 5;
 export const HQ_LABEL_ZOOM = 14;
+/** 看整個文化網的距離（約 13 km、地圖縮放 12）縫合、北士科星群、把樹種回來的字不寫（v1.533 使用者說的；把水找回來跟文化徑有關，留著），文化網當主角 */
+export const HQ_NET_LABEL_KM = 12;
 /** 騎自行車的人：一趟 lapMs 從頭騎到尾，頭尾淡入淡出（另一台反方向騎） */
-export function bikePhase(ms: number, lapMs: number): { at: number; alpha: number } {
+export function bikePhase(ms: number, lapMs: number, loop = false): { at: number; alpha: number } {
   if (ms < 0) return { at: 0, alpha: 0 };
   const p = (ms % lapMs) / lapMs;
+  // 繞圈的（公園步道）頭尾接在一起，不用淡入淡出
+  if (loop) return { at: p, alpha: Math.min(1, ms / 600) };
   return { at: p, alpha: p < 0.06 ? p / 0.06 : p > 0.94 ? (1 - p) / 0.06 : 1 };
 }
+/** 牽狗散步的人（大安森林公園，v1.533）：上衣顏色照 --c，狗走在前面、牽繩連著，狗一跳一跳、尾巴搖 */
+export const PETWALK_SVG =
+  '<g class="boat-flip"><ellipse class="bk-shadow" cx="3" cy="0.4" rx="8" ry="1"/><g class="walk-bob">' +
+  '<path class="hk-leg" d="M-2 -5.6L-3.4 0M-2 -5.6L-0.6 0"/><path class="pw-body" d="M-2 -11.4V-5.6"/>' +
+  '<path class="hk-arm" d="M-2 -10L0.6 -7.8"/><circle class="hk-head" cx="-2" cy="-13.2" r="1.7"/></g>' +
+  '<path class="pw-leash" d="M0.6 -7.8Q4 -5.6 6.8 -3.6"/>' +
+  '<g class="pw-dog"><path class="pw-dtail" d="M6.2 -3Q5 -4.8 5.6 -6"/><ellipse class="pw-dbody" cx="8.4" cy="-2.4" rx="2.6" ry="1.5"/>' +
+  '<circle class="pw-dhead" cx="10.8" cy="-3.8" r="1.4"/><circle class="pw-deye" cx="11.3" cy="-4.1" r="0.3"/><path class="pw-dleg" d="M7 -1.2V0M9.6 -1.2V0"/></g></g>';
+/**
+ * 草地上丟球（大安森林公園，v1.533）：左邊的人揮手丟球，球飛出去，狗跑去叼、轉身叼回來，一直重複（3.6 秒一次）；
+ * 圖示的中心是草地中間，拉近（5 km）才動
+ */
+export const FETCH_SVG =
+  '<ellipse class="ft-grass" cx="0" cy="3" rx="19" ry="4.5"/>' +
+  '<g transform="translate(-13 4)"><path class="hk-leg" d="M0 -5.6L-1.4 0M0 -5.6L1.4 0"/><path class="ft-body" d="M0 -11.4V-5.6"/>' +
+  '<path class="ft-arm" d="M0 -10L2.8 -12.6"/><circle class="hk-head" cx="0" cy="-13.2" r="1.7"/></g>' +
+  '<g class="ft-ball"><circle class="ft-b" cx="0" cy="0" r="1.2"/></g>' +
+  '<g class="ft-dog"><g class="ft-flip"><path class="pw-dtail" d="M-2.2 -3Q-3.4 -4.8 -2.8 -6"/><ellipse class="pw-dbody" cx="0" cy="-2.4" rx="2.6" ry="1.5"/>' +
+  '<circle class="pw-dhead" cx="2.4" cy="-3.8" r="1.4"/><circle class="pw-deye" cx="2.9" cy="-4.1" r="0.3"/><path class="pw-dleg" d="M-1.4 -1.2V0M1.2 -1.2V0"/></g></g>';
+
 /** 騎自行車的人（螢幕像素，路面在 y = 0、往右騎）：黃色車架、橘色安全帽、綠色上衣，往左騎時翻過來（boat-flip） */
 /** 登山客（山林徑，v1.531 使用者說「山林徑可以畫登山人」）：帽子、背包、登山杖，往右走（往左時翻過來） */
 export const HIKER_SVG =

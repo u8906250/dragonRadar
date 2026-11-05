@@ -349,6 +349,29 @@ path.map-water-glint { animation: water-flow-map 1.1s linear infinite; }
 .hk-stick { fill: none; stroke: #8a5a24; stroke-width: 0.9; stroke-linecap: round; }
 .hk-hat { fill: #f2b544; stroke: #8a5a24; stroke-width: 0.4; }
 .walk-bob { animation: walk-bob 0.4s ease-in-out infinite alternate; }
+/* 大安森林公園裡牽狗散步、丟球（v1.533）：白色小狗一跳一跳、尾巴搖；丟球 3.6 秒一次（揮手 → 球飛出去 → 狗跑去叼 → 轉身叼回來） */
+.pw-body { fill: none; stroke: var(--c, #e05a5a); stroke-width: 2.2; stroke-linecap: round; }
+.pw-leash { fill: none; stroke: #8a5a24; stroke-width: 0.5; }
+.pw-dbody, .pw-dhead { fill: #fff; stroke: #8a7a6a; stroke-width: 0.6; }
+.pw-deye { fill: #222; }
+.pw-dleg, .pw-dtail { fill: none; stroke: #8a7a6a; stroke-width: 0.8; stroke-linecap: round; }
+.pw-dog { animation: pw-trot 0.28s ease-in-out infinite alternate; }
+.pw-dtail { transform-box: fill-box; transform-origin: 100% 100%; animation: pw-wag 0.25s ease-in-out infinite alternate; }
+@keyframes pw-trot { to { transform: translateY(-0.6px); } }
+@keyframes pw-wag { from { transform: rotate(-20deg); } to { transform: rotate(20deg); } }
+.ft-grass { fill: #9bd27a; fill-opacity: 0.45; }
+.ft-body { fill: none; stroke: #2f9e6a; stroke-width: 2.2; stroke-linecap: round; }
+.ft-arm { fill: none; stroke: #4a3a2a; stroke-width: 1; stroke-linecap: round; transform-origin: 0 -10px; animation: ft-throw 3.6s ease-in-out infinite; }
+@keyframes ft-throw { 0% { transform: rotate(70deg); } 8% { transform: rotate(-25deg); } 20%, 100% { transform: rotate(0deg); } }
+.ft-b { fill: #ff5a5a; stroke: #fff; stroke-width: 0.5; }
+.ft-ball { animation: ft-ball 3.6s linear infinite; }
+@keyframes ft-ball { 0%, 6% { transform: translate(-10px, -8.6px); opacity: 1; } 24% { transform: translate(1px, -15px); } 40%, 51% { transform: translate(12px, 3px); } 52% { transform: translate(7.2px, 0.6px); } 88% { transform: translate(-9.8px, 0.6px); opacity: 1; } 92% { transform: translate(-9.8px, 0.6px); opacity: 0; } 100% { transform: translate(-10px, -8.6px); opacity: 0; } }
+.ft-dog { animation: ft-dog 3.6s ease-in-out infinite; }
+@keyframes ft-dog { 0%, 14% { transform: translate(-6px, 4px); } 40%, 52% { transform: translate(11px, 4px); } 88%, 100% { transform: translate(-6px, 4px); } }
+.ft-flip { animation: ft-flip 3.6s step-end infinite; }
+@keyframes ft-flip { 0% { transform: scaleX(1); } 51% { transform: scaleX(-1); } 90% { transform: scaleX(1); } }
+.ft-dog .pw-dbody, .ft-dog .pw-dhead { fill: #e39a4f; stroke: #8a5a2a; }
+.ft-dog .pw-dleg, .ft-dog .pw-dtail { stroke: #8a5a2a; }
 @keyframes walk-bob { to { transform: translateY(-0.6px); } }
 .fb-body { fill: #fff; stroke: #1f2a24; stroke-width: 0.9; stroke-linejoin: round; }
 .fb-stripe { fill: #2f9e6a; }
@@ -459,11 +482,13 @@ path.map-water-glint { animation: water-flow-map 1.1s linear infinite; }
 /* 拉遠（地圖縮放 14 以下）寶箱、橋下空間、大巨蛋、毛孩安心養的字不寫（雷達在 radar.ts 照 5 km 判斷） */
 #map.label-far .far-label { display: none; }
 #map.label-far10 .far-label-10 { display: none; }
+#map.label-far12 .far-label-12 { display: none; }
 /* 划槳的規則寫在後面、一樣具體，拉遠停不下來：這裡寫得更具體（v1.531 使用者說「划船的動畫超過 5km 也要停止」） */
 .radar .routes.hq-far .voyage-boat .wb-paddle, #map.hq-far .map-voyage-boat .wb-paddle, .radar .routes.hq-far .walk-bob, #map.hq-far .walk-bob { animation: none; }
+.hq-far .pw-dog, .hq-far .pw-dtail, .hq-far .ft-arm, .hq-far .ft-ball, .hq-far .ft-dog, .hq-far .ft-flip { animation: none; }
 .hq-far .seam-walkers, .hq-far path.map-seam-walkers, .hq-far .reveal-bikes, .hq-far path.map-reveal-bikes, .hq-far .map-voyage-icon.fitbus-stop, .hq-far .fit-label { display: none; }
 @media (prefers-reduced-motion: reduce) {
-  .wb-paddle,
+  .wb-paddle, .walk-bob, .pw-dog, .pw-dtail, .ft-arm, .ft-ball, .ft-dog, .ft-flip,
   .idle-star, .idle-wetland .ic-reed, .idle-wetland .ic-reed-top, .idle-hut .ic-flag, .idle-stadium, .idle-uyouth, .idle-umusic, .idle-uart, .idle-bigdome .dm-hi, .idle-fitbus { animation: none; }
 }
 /* 縫合市民大道（v1.520）：出發時深灰的裂縫從西畫到東，洋流號經過才縫（v1.521）、縫完變淡；橘色的交叉針腳一筆一筆縫；縫好後三處都有往北、往南的人流小點（白邊，橘色的河經過那裡也看得到） */

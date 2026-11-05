@@ -1,5 +1,5 @@
 import './styles.css';
-import { HQ_MOTION_KM, HQ_SAIL_MS, HQ_STAR_MS, HQ_VOYAGE_MS, RAINBOW_EVERY_MS, voyagePhase, voyageTimeOf } from './flow';
+import { HQ_MOTION_KM, HQ_NET_LABEL_KM, HQ_SAIL_MS, HQ_STAR_MS, HQ_VOYAGE_MS, RAINBOW_EVERY_MS, voyagePhase, voyageTimeOf } from './flow';
 import { addKeyword, collectLetter, deletePushSubscription, locateFeedbackPlace, sendFeedback, type FeedbackKind, fetchPushKey, savePushSubscription, confirmReport, editReport, locatePlace, rejectReport, supplementReport, deleteBottle, dropBottle, recycleBottle, fetchBottles, fetchEvents, fetchHealth, fetchKeywords, fetchMyBottles, fetchMyReports, fetchRoutes, pickBottle, reportBottle, reportEnded, submitLink, withdrawReport } from './api';
 import { compassSupported, startCompass } from './compass';
 import { bearingDeg, compassLabel, destination, formatKm, haversineKm, taiwanRadiusKm, type LatLng } from './geo';
@@ -1533,7 +1533,7 @@ function render(): void {
                 .map((fb) => ({ ...fb, size: hqFitSize(), points: fb.path.map(toRadarAt), stops: fb.stops.map((st) => ({ point: toRadarAt(st.at), label: st.label })) })),
               bikes: hqBikes(hqVoyageAt!)
                 .filter((bk) => anyInView(bk.path))
-                .map((bk) => ({ points: bk.path.map(toRadarAt), start: bk.start, lap: bk.lap, kind: bk.kind, color: bk.color })),
+                .map((bk) => ({ points: bk.path.map(toRadarAt), start: bk.start, lap: bk.lap, kind: bk.kind, color: bk.color, loop: bk.loop })),
               seams: hqEx.seams
                 .filter((sm) => anyInView(sm.path))
                 .map((sm) => ({
@@ -3539,7 +3539,7 @@ type HqSeam = {
   stitches: Array<{ at: number; center: [number, number]; along: [number, number]; label: string; below?: boolean }>;
   walkers: Array<{ from: [number, number]; to: [number, number]; at: number; south?: boolean }>;
 };
-type HqIcon = { lat: number; lng: number; at: number; kind: 'hut' | 'stadium' | 'dome' | 'bigdome' | 'star' | 'regrow' | 'culture' | 'service' | 'wetland' | 'archbridge' | 'chest' | 'chestlock' | 'paw' | 'umusic' | 'uart' | 'uexhibit' | 'uyouth' | 'ushop' | 'fitbus'; label?: string; hideKm?: number; scale?: number; grow?: number; char?: string; color?: string; small?: boolean; focus?: boolean; hint?: { title: string; intro: string } };
+type HqIcon = { lat: number; lng: number; at: number; kind: 'hut' | 'stadium' | 'dome' | 'bigdome' | 'star' | 'regrow' | 'culture' | 'service' | 'wetland' | 'archbridge' | 'chest' | 'chestlock' | 'paw' | 'umusic' | 'uart' | 'uexhibit' | 'uyouth' | 'ushop' | 'fitbus' | 'fetch'; label?: string; hideKm?: number; scale?: number; grow?: number; char?: string; color?: string; small?: boolean; focus?: boolean; hint?: { title: string; intro: string } };
 /** 其他政見的地方：離路線多近才沿路冒出來 */
 const HQ_SERVICE_NEAR_M = 300;
 /** 離路線幾公尺（路線載入後不會變，記起來） */
@@ -3575,14 +3575,15 @@ function hqExtras(t0: number): { reveals: HqReveal[]; icons: HqIcon[]; seams: Hq
     const at = hqNearestAt(t0, st);
     const pts = hqStarPoints(st);
     pts.forEach(([lat, lng], i) => icons.push({ lat, lng, at: at + i * 160, kind: 'star', scale: st.big ? 1 : 0.7 }));
-    if (st.big) reveals.push({ path: [...pts, pts[0]], at: at + pts.length * 160, kind: 'stars', label: st.name });
+    // 北士科星群的字看整個文化網時不寫（v1.533）
+    if (st.big) reveals.push({ path: [...pts, pts[0]], at: at + pts.length * 160, kind: 'stars', label: st.name, hideKm: HQ_NET_LABEL_KM });
   }
   // 都市微森林「把樹種回來」（v1.484 使用者選的呈現）：有報導的砍樹地方，船快到時（1.5 秒前）才冒出樹樁，船離它最近時長回一棵大樹
   // （v1.487 使用者說「樹不用一開始砍掉，接近的時候出現再長出來」）
   for (const p of hq.HQ_PLANTINGS) {
     if (p.kind !== 'cut') continue;
     const grow = hqNearestAt(t0, p);
-    icons.push({ lat: p.lat, lng: p.lng, at: grow - HQ_STUMP_LEAD_MS, grow, kind: 'regrow', label: p.hideName ? undefined : p.name, ...(p.name.includes('公園') ? { hideKm: 10 } : {}), scale: 1.5 });
+    icons.push({ lat: p.lat, lng: p.lng, at: grow - HQ_STUMP_LEAD_MS, grow, kind: 'regrow', label: p.hideName ? undefined : p.name, hideKm: p.name.includes('公園') ? 10 : HQ_NET_LABEL_KM, scale: 1.5 });
   }
   // 文化徑的點：船離它最近時冒出來，名字寫在下面（重疊的不寫）
   const seen = new Map<string, number>();
@@ -3622,6 +3623,8 @@ function hqExtras(t0: number): { reveals: HqReveal[]; icons: HqIcon[]; seams: Hq
   }
   icons.push({ lat: hq.HQ_DOME.lat, lng: hq.HQ_DOME.lng, at: hqNearestAt(t0, hq.HQ_DOME), kind: 'bigdome', label: hq.HQ_DOME.name, hideKm: 5, scale: 1.35, hint: { title: hq.HQ_DOME.name, intro: I['大巨蛋好鄰居計畫'] ?? '' } });
   icons.push({ lat: hq.HQ_PAW.lat, lng: hq.HQ_PAW.lng, at: hqNearestAt(t0, hq.HQ_PAW) + 400, kind: 'paw', label: hq.HQ_PAW.name, hideKm: 5, scale: 0.9, hint: { title: hq.HQ_PAW.name, intro: I['毛孩安心養'] ?? '' } });
+  // 大安森林公園的草地上丟球（人丟、狗叼回來；v1.533），拉近才動
+  icons.push({ lat: hq.HQ_PARKPLAY.fetch.lat, lng: hq.HQ_PARKPLAY.fetch.lng, at: hqNearestAt(t0, hq.HQ_PAW) + 800, kind: 'fetch', scale: 1.6, hint: { title: `${hq.HQ_PAW.name}（大安森林公園）`, intro: I['毛孩安心養'] ?? '' } });
   // 高架橋下空間：沿市民大道高架、建國高架畫一條線（船離中間最近時長出來）
   // 兩條在中間交叉（建國南北路 × 市民大道），名字和圖示都避開交叉口（v1.515 使用者說重疊了）；
   // 沿線畫橋下的用途：音樂、藝文、展覽、青年交流、特色商業（使用者說「幫我稍微畫圖出來」）
@@ -3665,7 +3668,7 @@ function hqExtras(t0: number): { reveals: HqReveal[]; icons: HqIcon[]; seams: Hq
  * 騎自行車的人（v1.529）：迎風—港墘自行車橋上兩台（橋畫好後）、河濱自行車道（大佳河濱、大稻埕）各兩台（船經過時），一去一回、錯開半趟；
  * 一趟的時間照長度（每公尺 14 毫秒、最少 8 秒）
  */
-function hqBikes(t0: number): Array<{ path: Array<[number, number]>; start: number; lap: number; kind?: 'bike' | 'hiker'; color?: string }> {
+function hqBikes(t0: number): Array<{ path: Array<[number, number]>; start: number; lap: number; kind?: 'bike' | 'hiker' | 'pet'; loop?: boolean; color?: string }> {
   if (!hq) return [];
   const br = hq.HQ_BRIDGE;
   const lapOf = (m: number): number => Math.max(8000, m * 14);
@@ -3687,6 +3690,17 @@ function hqBikes(t0: number): Array<{ path: Array<[number, number]>; start: numb
     const lap = Math.max(14000, lenM(tr.pts) * 30);
     for (let k = 0; k < 3; k++) out.push({ path: tr.pts, start: at + (k * lap) / 3, lap, kind: 'hiker' as const });
   }
+  // 大安森林公園裡牽狗散步的人（v1.533 使用者說「畫人跟毛孩在大安森林公園裡面玩」）：慢跑道兩組（反方向）、主步道一組，一直繞圈；船經過時出現
+  const P = hq.HQ_PARKPLAY;
+  const parkAt = hqNearestAt(t0, hq.HQ_PAW) + 600;
+  const [jog, main] = P.loops;
+  const jogLap = Math.max(30000, jog.lengthM * 28);
+  const mainLap = Math.max(18000, main.lengthM * 28);
+  out.push(
+    { path: jog.path, start: parkAt, lap: jogLap, kind: 'pet', loop: true, color: '#e05a5a' },
+    { path: [...jog.path].reverse(), start: parkAt - jogLap / 3, lap: jogLap, kind: 'pet', loop: true, color: '#3a6fd8' },
+    { path: main.path, start: parkAt - mainLap / 2, lap: mainLap, kind: 'pet', loop: true, color: '#f2b544' },
+  );
   return out;
 }
 /**
@@ -3910,7 +3924,7 @@ function hqHits(t0: number): Array<{ lat: number; lng: number; at: number; title
  * 經過的區名（每一區寫第一次經過的那一站；總部那一站有星星不用寫）、終點一直寫著「臺北市政府」；
  * 「把樹種回來」寫在第一個砍樹的地方上面（地名的上面一行），出現後留著（使用者說出現文字後可以留在上面）
  */
-function hqTourStops(t0: number): Array<{ lat: number; lng: number; label: string; at: number; keep?: boolean; stay?: boolean; dy?: number }> {
+function hqTourStops(t0: number): Array<{ lat: number; lng: number; label: string; at: number; keep?: boolean; stay?: boolean; dy?: number; hideKm?: number }> {
   if (!hq) return [];
   const { HQ_TOUR, HQ_TOUR_AT } = hq;
   const seen = new Set([HQ_TOUR[0].district]);
@@ -3927,7 +3941,7 @@ function hqTourStops(t0: number): Array<{ lat: number; lng: number; label: strin
   ].sort((a, b) => a.at - b.at)[0];
   return [
     ...(waters ? [{ lat: waters.lat, lng: waters.lng, label: '把水找回來', at: waters.at + 1400, stay: true, dy: -36 }] : []),
-    ...(firstCut ? [{ lat: firstCut.lat, lng: firstCut.lng, label: '把樹種回來', at: firstCut.at + 300, stay: true, dy: HQ_TREES ? -36 : -58 }] : []),
+    ...(firstCut ? [{ lat: firstCut.lat, lng: firstCut.lng, label: '把樹種回來', at: firstCut.at + 300, stay: true, dy: HQ_TREES ? -36 : -58, hideKm: HQ_NET_LABEL_KM }] : []),
     ...(firstCulture ? [{ lat: firstCulture.lat, lng: firstCulture.lng, label: '文化徑', at: firstCulture.at + 300, stay: true, dy: -14 }] : []),
     ...(firstBoat ? [{ lat: firstBoat.lat, lng: firstBoat.lng, label: '水上活動', at: firstBoat.at + 600, stay: true, dy: -26 }] : []),
     ...HQ_TOUR.flatMap((st, i) => {
