@@ -3512,7 +3512,7 @@ function hqExtras(t0: number): { reveals: HqReveal[]; icons: HqIcon[] } {
   // 各區的政見大秘寶：開箱地點放寶箱（開過的打開、還沒開的鎖著），船離它最近時冒出來；大巨蛋好鄰居計畫、毛孩安心養（大安森林公園寶箱旁的狗掌）
   const I = hq.HQ_INTROS;
   for (const ch of hq.HQ_CHESTS) {
-    icons.push({ lat: ch.lat, lng: ch.lng, at: hqNearestAt(t0, ch), kind: ch.opened ? 'chest' : 'chestlock', label: ch.opened ? `${ch.district}大秘寶` : `${ch.district}大秘寶（${ch.date} 晚上開箱）`, scale: 1.2, hint: { title: `${ch.district}政見大秘寶（${ch.date} ${ch.venue}${ch.opened ? '開箱' : '，晚上才開箱'}）`, intro: ch.intro } });
+    icons.push({ lat: ch.lat, lng: ch.lng, at: hqNearestAt(t0, ch), kind: ch.opened ? 'chest' : 'chestlock', label: ch.opened ? `${ch.district}大秘寶` : `${ch.district}大秘寶（${ch.date} 晚上開箱）`, scale: 0.8, hint: { title: `${ch.district}政見大秘寶（${ch.date} ${ch.venue}${ch.opened ? '開箱' : '，晚上才開箱'}）`, intro: ch.intro } });
   }
   icons.push({ lat: hq.HQ_DOME.lat, lng: hq.HQ_DOME.lng, at: hqNearestAt(t0, hq.HQ_DOME), kind: 'dome', label: hq.HQ_DOME.name, scale: 1.1, hint: { title: hq.HQ_DOME.name, intro: I['大巨蛋好鄰居計畫'] ?? '' } });
   icons.push({ lat: hq.HQ_PAW.lat, lng: hq.HQ_PAW.lng, at: hqNearestAt(t0, hq.HQ_PAW) + 400, kind: 'paw', label: hq.HQ_PAW.name, scale: 0.9, hint: { title: hq.HQ_PAW.name, intro: I['毛孩安心養'] ?? '' } });
