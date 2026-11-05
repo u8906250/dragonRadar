@@ -1226,6 +1226,16 @@ const stopOf = (ev: EventOut): RouteStop | undefined => {
   const r = routeOf(ev);
   return r?.stops.find((s) => (isReported(r) ? stopMatches(s, ev) : s.title === ev.title));
 };
+/**
+ * 官方車掃的一站還沒經過：預計經過的時間（起點是出發、加油點是車隊預計經過、終點是抵達），光點下寫還有多久（v1.539 使用者說內湖南港車掃一樣要顯示還有多久）。
+ * 加油點當天整天都算在進行中，所以不看 phase，看這一站經過了沒
+ */
+const officialStopAt = (ev: EventOut, now: number): number | null => {
+  const r = routeOf(ev);
+  if (!r || isReported(r)) return null;
+  const at = stopOf(ev)?.at ?? null;
+  return at !== null && at > now ? at : null;
+};
 /** 回報的車掃的一站（時間是預計經過的時間，不是開始） */
 const reportedStop = (ev: EventOut): RouteStop | undefined => {
   const r = routeOf(ev);
@@ -1485,7 +1495,11 @@ function render(): void {
       selected: it.ev.id === selectedId,
       // 稍後開始的越久越淡；還沒開始的都在光點下寫還有多久
       // 回報的車掃：寫還有多久經過（不是前 10 分鐘的開始）
-      ...(isUpcoming(it) ? { badge: startsInShort(reportedStop(it.ev)?.at ?? it.ev.startAt, now), ...(it.phase === 'later' ? { fade: clarityOf(it.ev, now) } : {}) } : {}),
+      ...(isUpcoming(it)
+        ? { badge: startsInShort(reportedStop(it.ev)?.at ?? it.ev.startAt, now), ...(it.phase === 'later' ? { fade: clarityOf(it.ev, now) } : {}) }
+        : officialStopAt(it.ev, now) !== null
+          ? { badge: startsInShort(officialStopAt(it.ev, now)!, now) }
+          : {}),
     })),
     drawnRoutes(onMap, now, focused).map((r): RadarRoute => {
       const toRadar = ([lat, lng]: [number, number]): { bearing: number; distanceKm: number } => ({ bearing: bearingDeg(origin, { lat, lng }), distanceKm: haversineKm(origin, { lat, lng }) });
