@@ -330,6 +330,42 @@ path.map-water-glint { animation: water-flow-map 1.1s linear infinite; }
 .map-boat.left .boat-flip { transform: scaleX(-1); }
 /* 健身小巴（v1.525）：白色電動小巴、綠色腰線上的白啞鈴、車頂電池；停站時冒出運動的長輩（fit-show、fit-pt 的 13% 是「停 3.2 秒 ÷ 一圈 24.6 秒」，flow.ts 的時間改了要一起改） */
 .fb-shadow { fill: #000; fill-opacity: 0.15; }
+/* 騎自行車的人（v1.529）：黃色車架、橘色安全帽、綠色上衣 */
+.bk-shadow { fill: #000; fill-opacity: 0.12; }
+.bk-wheel { fill: none; stroke: #333; stroke-width: 1.1; }
+.bk-frame { fill: none; stroke: #f59e0b; stroke-width: 1.3; stroke-linejoin: round; stroke-linecap: round; }
+.bk-bar { fill: none; stroke: #333; stroke-width: 1.1; stroke-linecap: round; }
+.bk-leg { fill: none; stroke: #2b4c7e; stroke-width: 1.3; stroke-linecap: round; stroke-linejoin: round; }
+.bk-body { fill: none; stroke: #2f9e6a; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
+.bk-head { fill: #f3d9bd; stroke: #5a4636; stroke-width: 0.6; }
+.bk-helmet { fill: #ff7a1a; }
+.map-bike svg { display: block; overflow: visible; }
+/* 毛孩安心養的三隻狗（v1.529）：白色小狗、柴犬丟球，黑白小狗歪頭看；尾巴搖。拉近才動（.hq-far） */
+.dg-grass { fill: #9bd27a; fill-opacity: 0.45; }
+.dg-body, .dg-head { stroke-width: 0.7; }
+.dg-leg { fill: none; stroke-width: 1.1; stroke-linecap: round; }
+.dg-tail { fill: none; stroke-width: 1.2; stroke-linecap: round; transform-origin: -4.4px -4.6px; animation: dg-wag 0.28s ease-in-out infinite alternate; }
+.dg-eye, .dg-nose { fill: #222; }
+.dg-a .dg-body, .dg-a .dg-head { fill: #fff; stroke: #8a7a6a; }
+.dg-a .dg-leg, .dg-a .dg-tail { stroke: #8a7a6a; }
+.dg-a .dg-ear { fill: #f1e3cf; }
+.dg-b .dg-body, .dg-b .dg-head { fill: #e39a4f; stroke: #8a5a2a; }
+.dg-b .dg-leg, .dg-b .dg-tail { stroke: #8a5a2a; }
+.dg-b .dg-ear { fill: #c97a35; }
+.dg-c .dg-body, .dg-c .dg-head { fill: #3a3a3a; stroke: #222; }
+.dg-c .dg-leg, .dg-c .dg-tail { stroke: #222; }
+.dg-c .dg-ear { fill: #222; }
+.dg-c .dg-eye { fill: #fff; }
+.dg-ball { fill: #ff5a5a; stroke: #fff; stroke-width: 0.6; }
+.dg-ballp { animation: dg-ball 2.4s ease-in-out infinite; }
+@keyframes dg-ball { 0% { transform: translate(-4px, 0.5px); } 25% { transform: translate(0, -6px); } 50% { transform: translate(4px, 0.5px); } 75% { transform: translate(0, -6px); } 100% { transform: translate(-4px, 0.5px); } }
+.dg-a .dg-hop { animation: dg-hop-a 2.4s ease-in-out infinite; }
+.dg-b .dg-hop { animation: dg-hop-b 2.4s ease-in-out infinite; }
+@keyframes dg-hop-a { 0%, 12%, 88%, 100% { transform: translateY(0); } 4% { transform: translateY(-2.2px); } 96% { transform: translateY(-1.2px); } }
+@keyframes dg-hop-b { 0%, 38%, 62%, 100% { transform: translateY(0); } 46% { transform: translateY(-1.2px); } 54% { transform: translateY(-2.2px); } }
+.dg-c .dg-headg { transform-origin: 4.4px -6.6px; animation: dg-tilt 1.6s ease-in-out infinite alternate; }
+@keyframes dg-wag { from { transform: rotate(-18deg); } to { transform: rotate(18deg); } }
+@keyframes dg-tilt { from { transform: rotate(-10deg); } to { transform: rotate(10deg); } }
 .fb-body { fill: #fff; stroke: #1f2a24; stroke-width: 0.9; stroke-linejoin: round; }
 .fb-stripe { fill: #2f9e6a; }
 .fb-win { fill: #35546a; }
@@ -421,7 +457,6 @@ path.map-water-glint { animation: water-flow-map 1.1s linear infinite; }
  */
 .hq-idle .idle-star { transform-origin: 0 0; animation: idle-twinkle 2.6s ease-in-out infinite; animation-delay: var(--d); }
 @keyframes idle-twinkle { 50% { transform: scale(1.14); opacity: 0.75; } }
-.hq-idle .idle-regrow { transform-origin: 0 6px; animation: idle-sway 3.4s ease-in-out infinite alternate; animation-delay: var(--d); }
 @keyframes idle-sway { from { transform: rotate(-2.5deg); } to { transform: rotate(2.5deg); } }
 .hq-idle .idle-wetland .ic-reed, .hq-idle .idle-wetland .ic-reed-top { transform-origin: 0 4px; animation: idle-reed 2.8s ease-in-out infinite alternate; animation-delay: var(--d); }
 @keyframes idle-reed { from { transform: rotate(-4deg); } to { transform: rotate(4deg); } }
@@ -432,8 +467,6 @@ path.map-water-glint { animation: water-flow-map 1.1s linear infinite; }
 .hq-idle .idle-umusic { transform-origin: 0 0; animation: idle-dance 1.4s ease-in-out infinite alternate; animation-delay: var(--d); }
 @keyframes idle-dance { from { transform: rotate(-8deg) translateY(0.5px); } to { transform: rotate(8deg) translateY(-1px); } }
 .hq-idle .idle-uart { transform-origin: 0 0; animation: idle-sway 2.4s ease-in-out infinite alternate; animation-delay: var(--d); }
-.hq-idle .idle-paw { transform-origin: 0 6px; animation: idle-hop 1.8s ease-in-out infinite; animation-delay: var(--d); }
-@keyframes idle-hop { 0%, 60%, 100% { transform: translateY(0) rotate(0); } 70% { transform: translateY(-2.5px) rotate(-6deg); } 80% { transform: translateY(0) rotate(0); } 88% { transform: translateY(-1.2px) rotate(4deg); } }
 .hq-idle .idle-bigdome .dm-hi { animation: idle-shine 3.2s ease-in-out infinite; animation-delay: var(--d); }
 @keyframes idle-shine { 50% { fill-opacity: 0.35; } }
 .hq-idle .idle-fitbus { animation: idle-engine 0.5s ease-in-out infinite alternate; animation-delay: var(--d); }
@@ -442,10 +475,13 @@ path.map-water-glint { animation: water-flow-map 1.1s linear infinite; }
  * 拉遠（雷達外圈 3 km 以上、地圖縮放 15 以下，flow.ts 的 HQ_MOTION_KM／ZOOM）一直動的都停下來或收起來，畫面不要太亂
  * （v1.528 使用者說「所有會動的都建議拉近到一定程度才開始動」「不希望整體畫面太亂」）；洋流號、河、冒出來的動畫照舊
  */
-.hq-far .idle-star, .hq-far .idle-regrow, .hq-far .idle-wetland .ic-reed, .hq-far .idle-wetland .ic-reed-top, .hq-far .idle-hut .ic-flag, .hq-far .idle-stadium, .hq-far .idle-uyouth, .hq-far .idle-umusic, .hq-far .idle-uart, .hq-far .idle-paw, .hq-far .idle-bigdome .dm-hi, .hq-far .idle-fitbus, .hq-far .kira, .hq-far .cr-glow, .hq-far .boat-bob, .hq-far .boat-glide, .hq-far .spring-ring { animation: none; }
+.hq-far .idle-star, .hq-far .idle-wetland .ic-reed, .hq-far .idle-wetland .ic-reed-top, .hq-far .idle-hut .ic-flag, .hq-far .idle-stadium, .hq-far .idle-uyouth, .hq-far .idle-umusic, .hq-far .idle-uart, .hq-far .idle-bigdome .dm-hi, .hq-far .idle-fitbus, .hq-far .kira, .hq-far .cr-glow, .hq-far .boat-bob, .hq-far .boat-glide, .hq-far .spring-ring, .hq-far .wb-paddle, .hq-far .dg-tail, .hq-far .dg-ballp, .hq-far .dg-hop, .hq-far .dg-headg { animation: none; }
+/* 拉遠（地圖縮放 14 以下）寶箱、橋下空間、大巨蛋、毛孩安心養的字不寫（雷達在 radar.ts 照 5 km 判斷） */
+#map.label-far .far-label { display: none; }
 .hq-far .seam-walkers, .hq-far path.map-seam-walkers, .hq-far .reveal-hikers, .hq-far path.map-reveal-hikers, .hq-far .reveal-bikes, .hq-far path.map-reveal-bikes, .hq-far .map-voyage-icon.fitbus-stop, .hq-far .fit-label { display: none; }
 @media (prefers-reduced-motion: reduce) {
-  .idle-star, .idle-regrow, .idle-wetland .ic-reed, .idle-wetland .ic-reed-top, .idle-hut .ic-flag, .idle-stadium, .idle-uyouth, .idle-umusic, .idle-uart, .idle-paw, .idle-bigdome .dm-hi, .idle-fitbus { animation: none; }
+  .wb-paddle, .dg-tail, .dg-ballp, .dg-hop, .dg-headg,
+  .idle-star, .idle-wetland .ic-reed, .idle-wetland .ic-reed-top, .idle-hut .ic-flag, .idle-stadium, .idle-uyouth, .idle-umusic, .idle-uart, .idle-bigdome .dm-hi, .idle-fitbus { animation: none; }
   .radar .reveal-hikers, path.map-reveal-hikers { animation: voyage-stay 0.5s ease-out both; }
 }
 /* 縫合市民大道（v1.520）：出發時深灰的裂縫從西畫到東，洋流號經過才縫（v1.521）、縫完變淡；橘色的交叉針腳一筆一筆縫；縫好後三處都有往北、往南的人流小點（白邊，橘色的河經過那裡也看得到） */
@@ -655,8 +691,13 @@ path.map-seam-walkers { --p: 12px; }
 .map-voyage-boat { background: none; border: 0; }
 .map-voyage-boat svg { display: block; overflow: visible; }
 .boat-pop { transform-box: fill-box; transform-origin: center; animation: voyage-tree 0.7s cubic-bezier(0.3, 1.5, 0.5, 1) both; }
-.boat-glide { animation: boat-glide 7s linear infinite; }
-@keyframes boat-glide { 0% { transform: translateX(-14px); opacity: 0; } 8% { opacity: 1; } 92% { opacity: 1; } 100% { transform: translateX(14px); opacity: 0; } }
+.boat-glide { animation: boat-glide 9s linear infinite; }
+@keyframes boat-glide { 0% { transform: translateX(-22px); opacity: 0; } 8% { opacity: 1; } 92% { opacity: 1; } 100% { transform: translateX(22px); opacity: 0; } }
+/* 划槳（v1.529 使用者說「幫我加動起來的部分 SUP 龍舟 自行車」）：SUP 一下一下划，龍舟六支槳一起快划 */
+.voyage-boat.sup .wb-paddle, .map-voyage-boat.sup .wb-paddle { transform-box: fill-box; transform-origin: 0% 0%; animation: sup-stroke 1.1s ease-in-out infinite alternate; }
+@keyframes sup-stroke { from { transform: rotate(-16deg); } to { transform: rotate(14deg); } }
+.voyage-boat.dragon .wb-paddle, .map-voyage-boat.dragon .wb-paddle { transform-box: fill-box; transform-origin: 0% 100%; animation: dragon-row 0.5s ease-in-out infinite alternate; }
+@keyframes dragon-row { from { transform: rotate(-28deg); } to { transform: rotate(22deg); } }
 .boat-bob { transform-box: fill-box; transform-origin: center; animation: boat-bob 1.8s ease-in-out infinite alternate; }
 @keyframes boat-bob { from { transform: translate(-2px, 0) rotate(-3deg); } to { transform: translate(2px, 0.6px) rotate(3deg); } }
 .wb-wake { fill: none; stroke: #fff; stroke-width: 1.2; stroke-linecap: round; stroke-opacity: 0.9; }

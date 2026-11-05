@@ -1526,12 +1526,15 @@ function render(): void {
               rivers: hq.HQ_RIVERS.filter((rv) => anyInView(rv.ring)).map((rv) => ({ ring: rv.ring.map(toRadarAt), at: hqStopAt(hqVoyageAt!, rv.stop) })),
               boats: hq.HQ_BOATS.filter(inView).map((b) => ({ ...toRadarAt([b.lat, b.lng]), at: hqNearestAt(hqVoyageAt!, b), kind: b.kind, heading: b.heading })),
               // 其他政見：山林徑的步道和登山中心、自行車橋、球場和運動中心、星群
-              reveals: hqEx.reveals.filter((rv) => anyInView(rv.path)).map((rv) => ({ points: rv.path.map(toRadarAt), at: rv.at, kind: rv.kind, label: rv.label, color: rv.color, labelAt: rv.labelAt })),
+              reveals: hqEx.reveals.filter((rv) => anyInView(rv.path)).map((rv) => ({ points: rv.path.map(toRadarAt), at: rv.at, kind: rv.kind, label: rv.label, color: rv.color, labelAt: rv.labelAt, farLabel: rv.farLabel })),
               icons: hqEx.icons.filter(inView).map((ic) => ({ ...ic, ...toRadarAt([ic.lat, ic.lng]) })),
               fitbus: (() => {
                 const fb = hqFitbus(hqVoyageAt!);
                 return fb && anyInView(fb.path) ? { ...fb, size: hqFitSize(), points: fb.path.map(toRadarAt), stops: fb.stops.map((st) => ({ point: toRadarAt(st.at), label: st.label })) } : undefined;
               })(),
+              bikes: hqBikes(hqVoyageAt!)
+                .filter((bk) => anyInView(bk.path))
+                .map((bk) => ({ points: bk.path.map(toRadarAt), start: bk.start, lap: bk.lap })),
               seams: hqEx.seams
                 .filter((sm) => anyInView(sm.path))
                 .map((sm) => ({
@@ -1611,6 +1614,7 @@ function render(): void {
               boats: hq.HQ_BOATS.map((b) => ({ lat: b.lat, lng: b.lng, at: hqNearestAt(hqVoyageAt!, b), kind: b.kind, heading: b.heading })),
               ...hqEx,
               fitbus: hqFitbus(hqVoyageAt) ?? undefined,
+              bikes: hqBikes(hqVoyageAt),
               hits: hqHits(hqVoyageAt),
               green: { ring: hq.HQ_TAIPEI_RING, steps: hqGreenSteps(hqVoyageAt) },
               areas: hqAreas(hqVoyageAt),
@@ -3220,6 +3224,8 @@ function startHqVoyage(spinAt = Date.now()): void {
       fn: () => {
         hqNetBtn.hidden = false;
         hqLayersBox.hidden = false;
+        // 暫停、繼續只在洋流號跑的時候有，跑完收起來（v1.529 使用者說的）
+        hqPauseBtn.hidden = true;
         mayorProgress('watched');
       },
     },
@@ -3238,6 +3244,7 @@ function startHqVoyage(spinAt = Date.now()): void {
       hqLayersBox.appendChild(b);
     }
   }
+  hqPauseBtn.hidden = false;
   hqPanel.hidden = false;
   render();
 }
@@ -3523,7 +3530,7 @@ function hqStarPoints(st: { lat: number; lng: number; count: number; radiusM: nu
 }
 /** 樹樁比長樹早幾毫秒冒出來 */
 const HQ_STUMP_LEAD_MS = 1500;
-type HqReveal = { path: Array<[number, number]>; at: number; kind: 'trail' | 'bridge' | 'stars' | 'culture'; label?: string; color?: string; labelAt?: number };
+type HqReveal = { path: Array<[number, number]>; at: number; kind: 'trail' | 'bridge' | 'stars' | 'culture'; label?: string; color?: string; labelAt?: number; farLabel?: boolean };
 type HqSeam = {
   path: Array<[number, number]>;
   at: number;
@@ -3533,7 +3540,7 @@ type HqSeam = {
   stitches: Array<{ at: number; center: [number, number]; along: [number, number]; label: string; below?: boolean }>;
   walkers: Array<{ from: [number, number]; to: [number, number]; at: number; south?: boolean }>;
 };
-type HqIcon = { lat: number; lng: number; at: number; kind: 'hut' | 'stadium' | 'dome' | 'bigdome' | 'star' | 'regrow' | 'culture' | 'service' | 'wetland' | 'archbridge' | 'chest' | 'chestlock' | 'paw' | 'umusic' | 'uart' | 'uexhibit' | 'uyouth' | 'ushop' | 'fitbus'; label?: string; scale?: number; grow?: number; char?: string; color?: string; small?: boolean; focus?: boolean; hint?: { title: string; intro: string } };
+type HqIcon = { lat: number; lng: number; at: number; kind: 'hut' | 'stadium' | 'dome' | 'bigdome' | 'star' | 'regrow' | 'culture' | 'service' | 'wetland' | 'archbridge' | 'chest' | 'chestlock' | 'paw' | 'umusic' | 'uart' | 'uexhibit' | 'uyouth' | 'ushop' | 'fitbus' | 'dogs'; label?: string; farLabel?: boolean; scale?: number; grow?: number; char?: string; color?: string; small?: boolean; focus?: boolean; hint?: { title: string; intro: string } };
 /** 其他政見的地方：離路線多近才沿路冒出來 */
 const HQ_SERVICE_NEAR_M = 300;
 /** 離路線幾公尺（路線載入後不會變，記起來） */
@@ -3610,14 +3617,16 @@ function hqExtras(t0: number): { reveals: HqReveal[]; icons: HqIcon[]; seams: Hq
   // 各區的政見開箱（使用者說不要寫「大秘寶」）：開箱地點放寶箱（開過的打開、還沒開的鎖著），船離它最近時冒出來；大巨蛋好鄰居計畫、毛孩安心養（大安森林公園寶箱旁的狗掌）
   const I = hq.HQ_INTROS;
   for (const ch of hq.HQ_CHESTS) {
-    icons.push({ lat: ch.lat, lng: ch.lng, at: hqNearestAt(t0, ch), kind: ch.opened ? 'chest' : 'chestlock', label: ch.opened ? `${ch.district}政見開箱` : `${ch.district}政見開箱（${ch.date}）`, scale: 0.8, hint: { title: `${ch.district}政見開箱（${ch.date} ${ch.venue}${ch.opened ? '' : '，還沒開箱'}）`, intro: ch.intro } });
+    icons.push({ lat: ch.lat, lng: ch.lng, at: hqNearestAt(t0, ch), kind: ch.opened ? 'chest' : 'chestlock', label: ch.opened ? `${ch.district}政見開箱` : `${ch.district}政見開箱（${ch.date}）`, farLabel: true, scale: 0.8, hint: { title: `${ch.district}政見開箱（${ch.date} ${ch.venue}${ch.opened ? '' : '，還沒開箱'}）`, intro: ch.intro } });
   }
-  icons.push({ lat: hq.HQ_DOME.lat, lng: hq.HQ_DOME.lng, at: hqNearestAt(t0, hq.HQ_DOME), kind: 'bigdome', label: hq.HQ_DOME.name, scale: 1.35, hint: { title: hq.HQ_DOME.name, intro: I['大巨蛋好鄰居計畫'] ?? '' } });
+  icons.push({ lat: hq.HQ_DOME.lat, lng: hq.HQ_DOME.lng, at: hqNearestAt(t0, hq.HQ_DOME), kind: 'bigdome', label: hq.HQ_DOME.name, farLabel: true, scale: 1.35, hint: { title: hq.HQ_DOME.name, intro: I['大巨蛋好鄰居計畫'] ?? '' } });
   // 健身小巴停在河濱、山林徑旁（辯論說小巴可以結合河濱、山林徑；示意）；衛福按鈕亮著時一起亮
   for (const pk of hq.HQ_FITBUS.parked) {
     icons.push({ lat: pk.lat, lng: pk.lng, at: hqNearestAt(t0, pk) + 300, kind: 'fitbus', label: view === 'radar' && scaleKm > HQ_MOTION_KM ? undefined : `健身小巴（${pk.name}）`, small: true, scale: 0.9 * (view === 'map' ? 1 : hqFitSize()), focus: hqLayer?.id === 'health', hint: { title: `健身小巴：結合${pk.name}（示意）`, intro: I['健身小巴結合'] ?? '' } });
   }
-  icons.push({ lat: hq.HQ_PAW.lat, lng: hq.HQ_PAW.lng, at: hqNearestAt(t0, hq.HQ_PAW) + 400, kind: 'paw', label: hq.HQ_PAW.name, scale: 0.9, hint: { title: hq.HQ_PAW.name, intro: I['毛孩安心養'] ?? '' } });
+  icons.push({ lat: hq.HQ_PAW.lat, lng: hq.HQ_PAW.lng, at: hqNearestAt(t0, hq.HQ_PAW) + 400, kind: 'paw', label: hq.HQ_PAW.name, farLabel: true, scale: 0.9, hint: { title: hq.HQ_PAW.name, intro: I['毛孩安心養'] ?? '' } });
+  // 毛孩安心養：狗掌旁邊三隻狗在玩（白色小狗和柴犬丟球、黑白小狗歪頭看；v1.529 使用者說「毛孩安心養不用搖，幫我做幾隻狗在互動」），拉近才動
+  icons.push({ lat: hq.HQ_PAW.lat - 0.0009, lng: hq.HQ_PAW.lng + 0.0003, at: hqNearestAt(t0, hq.HQ_PAW) + 800, kind: 'dogs', scale: 1.8, hint: { title: hq.HQ_PAW.name, intro: I['毛孩安心養'] ?? '' } });
   // 高架橋下空間：沿市民大道高架、建國高架畫一條線（船離中間最近時長出來）
   // 兩條在中間交叉（建國南北路 × 市民大道），名字和圖示都避開交叉口（v1.515 使用者說重疊了）；
   // 沿線畫橋下的用途：音樂、藝文、展覽、青年交流、特色商業（使用者說「幫我稍微畫圖出來」）
@@ -3637,17 +3646,17 @@ function hqExtras(t0: number): { reveals: HqReveal[]; icons: HqIcon[]; seams: Hq
       const uses: Array<[number, 'umusic' | 'uart' | 'uexhibit' | 'ushop', string]> = [[0.1, 'uart', '藝文'], [0.28, 'uexhibit', '展覽'], [0.8, 'ushop', '特色商業'], [0.92, 'umusic', '音樂']];
       uses.forEach(([k, kind, name], i) => {
         const q = vd.pts[Math.floor((vd.pts.length - 1) * k)];
-        icons.push({ lat: q[0], lng: q[1], at: at + 600 + i * 200, kind, label: name, small: true, scale: 0.85, hint: { title: `橋下空間：${name}（${vd.name}）`, intro: I['橋下空間'] ?? '' } });
+        icons.push({ lat: q[0], lng: q[1], at: at + 600 + i * 200, kind, label: name, farLabel: true, small: true, scale: 0.85, hint: { title: `橋下空間：${name}（${vd.name}）`, intro: I['橋下空間'] ?? '' } });
       });
       continue;
     }
     const mid = vd.pts[Math.floor(vd.pts.length / 2)];
     const at = hqNearestAt(t0, { lat: mid[0], lng: mid[1] });
-    reveals.push({ path: vd.pts, at, kind: 'culture', label: `橋下空間（${vd.name}）`, color: '#8a6fd0', labelAt: 0.1 });
+    reveals.push({ path: vd.pts, at, kind: 'culture', label: `橋下空間（${vd.name}）`, farLabel: true, color: '#8a6fd0', labelAt: 0.1 });
     const uses: Array<[number, 'uyouth' | 'ushop', string]> = [[0.3, 'uyouth', '青年交流'], [0.82, 'ushop', '特色商業']];
     uses.forEach(([k, kind, name], i) => {
       const q = vd.pts[Math.floor((vd.pts.length - 1) * k)];
-      icons.push({ lat: q[0], lng: q[1], at: at + 2200 + i * 250, kind, label: name, small: true, scale: 0.85, hint: { title: `橋下空間：${name}（${vd.name}）`, intro: I['橋下空間'] ?? '' } });
+      icons.push({ lat: q[0], lng: q[1], at: at + 2200 + i * 250, kind, label: name, farLabel: true, small: true, scale: 0.85, hint: { title: `橋下空間：${name}（${vd.name}）`, intro: I['橋下空間'] ?? '' } });
     });
   }
   // 文化徑的線（點 —— 線）：同一條路線的點都冒出來後，用那條路線的顏色沿街道連起來
@@ -3656,6 +3665,27 @@ function hqExtras(t0: number): { reveals: HqReveal[]; icons: HqIcon[]; seams: Hq
     reveals.push({ path: ln.pts, at, kind: 'culture', label: ln.name, color: hq.HQ_CULTURE_THEMES[ln.theme].color });
   }
   return { reveals, icons, seams };
+}
+/**
+ * 騎自行車的人（v1.529）：迎風—港墘自行車橋上兩台（橋畫好後）、河濱自行車道（大佳河濱、大稻埕）各兩台（船經過時），一去一回、錯開半趟；
+ * 一趟的時間照長度（每公尺 14 毫秒、最少 8 秒）
+ */
+function hqBikes(t0: number): Array<{ path: Array<[number, number]>; start: number; lap: number }> {
+  if (!hq) return [];
+  const br = hq.HQ_BRIDGE;
+  const lapOf = (m: number): number => Math.max(8000, m * 14);
+  const bridgeAt = hqStopAt(t0, br.stop) + 2600;
+  const out = [
+    { path: [br.from, br.to] as Array<[number, number]>, start: bridgeAt, lap: 8000 },
+    { path: [br.to, br.from] as Array<[number, number]>, start: bridgeAt + 4000, lap: 8000 },
+  ];
+  for (const bk of hq.HQ_BIKES) {
+    const mid = bk.path[Math.floor(bk.path.length / 2)];
+    const at = hqNearestAt(t0, { lat: mid[0], lng: mid[1] }) + 500;
+    const lap = lapOf(bk.lengthM);
+    out.push({ path: bk.path, start: at, lap }, { path: [...bk.path].reverse(), start: at + lap / 2, lap });
+  }
+  return out;
 }
 /**
  * 健身小巴（v1.525）：萬華繞一圈（龍山寺前 → 南機場社區 → 青年公園，示意）；洋流號經過龍山寺時路線畫出來，2.4 秒後小巴出發，一直繞；
