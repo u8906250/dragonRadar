@@ -3176,19 +3176,7 @@ function startHqVoyage(spinAt = Date.now()): void {
   wait = Math.max(wait, HQ_STAR_MS - (started - spinAt));
   hqVoyageAt = started + wait;
   const t0 = hqVoyageAt;
-  // 跟著船：每 0.25 秒看船在哪，快出畫面就把畫面直接移到船那裡（一次重畫，不用飛的：飛的每一格都要整層重建，慢手機會掉到 2～3 fps）；
-  // 使用者自己動過就不跟
-  hqFollowTimer = window.setInterval(() => {
-    if (hqUserMoved || hqVoyageAt === null || Date.now() < t0 + 400 || Date.now() > t0 + HQ_SAIL_MS) return;
-    const boat = hqBoatNow(t0);
-    if (!boat) return;
-    if (view === 'map') {
-      if (map.userMovedAt < started + 300) map.keepInView(boat);
-    } else if (!flight && haversineKm(origin, boat) > scaleKm * HQ_FOLLOW_EDGE) {
-      setOrigin({ lat: boat.lat, lng: boat.lng, source: 'manual' });
-      render();
-    }
-  }, 250);
+  // 畫面不跟著船移動（v1.507 使用者說「畫面改成不要跟著洋流號移動」；以前船快出畫面就把畫面移到船那裡）
   hqVoyageTimers = [
     // 星星轉完（出發前 0.2 秒）才開始畫
     window.setTimeout(() => render(), Math.max(0, wait - 200)),
@@ -3637,7 +3625,7 @@ function hqHits(t0: number): Array<{ lat: number; lng: number; at: number; title
     for (const rn of hq.HQ_RENEWAL) hits.push({ lat: rn.center[0], lng: rn.center[1], at: hqLayer.at, title: rn.name, intro: `${rn.approved} 核定${rn.blic ? '，已拿到建照' : ''}；都市更新審議平台上沒有開工紀錄（2026-11-05 查）。`, r: 10 });
   }
   const cityHall = hq.HQ_TOUR[hq.HQ_TOUR.length - 1];
-  hits.push({ lat: cityHall.lat, lng: cityHall.lng, at: t0 + HQ_SAIL_MS, title: '臺北市政府（公務員減壓・都更陪伴）', intro: I['臺北市政府'] ?? '', r: 18 });
+  hits.push({ lat: cityHall.lat, lng: cityHall.lng, at: t0 + HQ_SAIL_MS, title: '臺北市政府（公務員減壓）', intro: I['臺北市政府'] ?? '', r: 18 });
   for (const ar of hqAreas(t0)) hits.push({ lat: ar.center[0], lng: ar.center[1], at: ar.at, title: `${ar.label}`, intro: I[ar.label] ?? '', r: 26 });
   for (const b of hq.HQ_BOATS) hits.push({ lat: b.lat, lng: b.lng, at: hqNearestAt(t0, b), title: `水上活動（${b.kind === 'sup' ? 'SUP' : '龍舟'}）`, intro: I['水上活動'] ?? '', r: 12 });
   return hits;
