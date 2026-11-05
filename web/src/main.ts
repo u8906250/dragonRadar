@@ -5745,7 +5745,7 @@ function renderPreview(r: SubmitResult): void {
     }
     await showReportResult(res.data);
     void loadMyReports();
-    // 回報累計：滿 5 則拿到古錐媽的肉乾卡、每 5 則一包肉乾（道具）
+    // 回報累計：滿 5 則拿到古錐媽的肉乾卡、每 5 則一份獎勵（選一包肉乾或一枚順幣）
     void gotReward(res.data.reward, (msg) => showBanner(bannerEl, msg, 4500));
   });
   if (mod.current) wireEdit(c, r.edit ?? [], actions);

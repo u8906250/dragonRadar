@@ -273,11 +273,12 @@ export interface SubmitResult {
     /** 太久以後才開始的：這天之後再貼就收得到 */
     reportFrom?: number;
   };
-  /** 確認後放上雷達了：回報的累計（滿 5 則拿到肉乾卡、每 5 則一包肉乾；今天算滿了 capped） */
+  /** 確認後放上雷達了：回報的累計（滿 5 則拿到肉乾卡、每 5 則一份獎勵 picks 自己選肉乾或順幣；今天算滿了 capped） */
   reward?: {
     credits: number;
     card?: import('./api').CardClaim;
     items: import('./api').ItemCount[];
+    picks?: number;
     capped?: boolean;
   };
 }

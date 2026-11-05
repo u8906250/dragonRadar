@@ -1,10 +1,11 @@
 /**
  * 收集卡（尋找小法）：卡冊、拿到卡時翻開的畫面；道具欄（選單裡的「道具」，跟卡冊分開，之後會有更多道具）；
+ * 回報滿 5 則的獎勵自己選（一包肉乾或一枚順幣，openPick）；
  * 選單的「說明」（使用說明、換裝置的引繼碼）。
  * 卡片的內容寫在這裡（照片在 public/cards/），拿到的卡、道具存在伺服器（裝置代碼，worker/src/cards.ts），
- * 這個瀏覽器另外記一份（dr.cards、dr.items）：點小法時拿過的就不再問伺服器
+ * 這個瀏覽器另外記一份（dr.cards、dr.items、dr.picks）：點小法時拿過的就不再問伺服器
  */
-import { claimCard, fetchMyCards, makeTransferCode, redeemTransferCode, type CardClaim, type ItemCount } from './api';
+import { claimCard, fetchMyCards, makeTransferCode, pickReward, redeemTransferCode, type CardClaim, type ItemCount } from './api';
 
 export interface CardDef {
   /** 跟伺服器的 CARDS 一樣 */
@@ -77,11 +78,23 @@ export interface ItemDef {
   img: string;
   unit: string;
 }
-/** 古錐媽的肉乾（No.002 卡）給的道具：袋子裝的五條雞肉乾 */
-export const ITEM_DEFS: ItemDef[] = [{ id: 'jerky', name: '五條雞肉乾', img: `${BASE}items/jerky.webp`, unit: '包' }];
+/**
+ * 古錐媽的肉乾（No.002 卡）給的道具：袋子裝的五條雞肉乾；
+ * 順幣：金幣中間一個「順」、下面一道橘色的小浪（順著洋流），圖是 SVG 畫好轉成 webp 的（v1.542）
+ */
+export const ITEM_DEFS: ItemDef[] = [
+  { id: 'jerky', name: '五條雞肉乾', img: `${BASE}items/jerky.webp`, unit: '包' },
+  { id: 'coin', name: '順幣', img: `${BASE}items/coin.webp`, unit: '枚' },
+];
+/** 回報滿 5 則的獎勵可以選哪些（跟伺服器的 PICKABLE 一樣）：選項上寫的名字、一句話 */
+const PICK_OPTS: Array<{ id: string; label: string; sub: string }> = [
+  { id: 'jerky', label: '一包古錐媽的肉乾', sub: '五條手工雞肉乾' },
+  { id: 'coin', label: '一枚順幣', sub: '順著洋流的金幣' },
+];
 
 const LS_CARDS = 'dr.cards';
 const LS_ITEMS = 'dr.items';
+const LS_PICKS = 'dr.picks';
 const isClaim = (v: unknown): v is CardClaim => {
   const c = v as CardClaim;
   return !!c && typeof c.card === 'string' && typeof c.place === 'string' && Number.isFinite(c.at) && Number.isFinite(c.serial);
@@ -123,6 +136,25 @@ function saveItems(list: ItemCount[]): void {
   }
 }
 
+/** 還沒選的獎勵有幾份（伺服器的一份副本） */
+export function myPicks(): number {
+  try {
+    const n = Number(localStorage.getItem(LS_PICKS) ?? 0);
+    return Number.isFinite(n) && n > 0 ? Math.floor(n) : 0;
+  } catch {
+    return 0;
+  }
+}
+
+function savePicks(n: number): void {
+  try {
+    if (n > 0) localStorage.setItem(LS_PICKS, String(n));
+    else localStorage.removeItem(LS_PICKS);
+  } catch {
+    // 不能存：打開道具欄時再跟伺服器拿
+  }
+}
+
 const esc = (s: string): string => s.replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
 const noText = (d: CardDef): string => `No.${String(d.no).padStart(3, '0')}`;
 const dateText = (t: number): string => new Intl.DateTimeFormat('zh-TW', { timeZone: 'Asia/Taipei', year: 'numeric', month: 'numeric', day: 'numeric' }).format(new Date(t * 1000));
@@ -151,8 +183,8 @@ function backHtml(d: CardDef, missing = false): string {
     </div>`;
 }
 
-/** 蓋在畫面上的一層（3D 國館上面也看得到）：點外面、按 Esc、按「關閉」收起來 */
-function overlay(cls: string, html: string): HTMLElement {
+/** 蓋在畫面上的一層（3D 國館上面也看得到）：點外面、按 Esc、按「關閉」收起來；收起來後 onClose */
+function overlay(cls: string, html: string, onClose?: () => void): HTMLElement {
   const back = document.activeElement as HTMLElement | null;
   const el = document.createElement('div');
   el.className = `tc-overlay ${cls}`;
@@ -163,9 +195,11 @@ function overlay(cls: string, html: string): HTMLElement {
     el.remove();
     document.removeEventListener('keydown', onKey);
     back?.focus?.();
+    onClose?.();
   };
+  // 疊了兩層（道具欄上面打開選獎勵）：Esc 只收最上面那層
   const onKey = (e: KeyboardEvent): void => {
-    if (e.key === 'Escape') close();
+    if (e.key === 'Escape' && el === [...document.querySelectorAll('.tc-overlay')].pop()) close();
   };
   document.addEventListener('keydown', onKey);
   el.addEventListener('click', (e) => {
@@ -177,16 +211,17 @@ function overlay(cls: string, html: string): HTMLElement {
   return el;
 }
 
-/** 拿到卡：卡片背面朝上出現，翻過來；extra 是一起拿到的道具（寫在下面） */
-function showReveal(d: CardDef, c: CardClaim, extra = ''): void {
+/** 拿到卡：卡片背面朝上出現，翻過來；extra 是一起拿到的道具（寫在下面）；按「好」收起來後 onClose（接著選獎勵） */
+function showReveal(d: CardDef, c: CardClaim, extra = '', onClose?: () => void, ok = '好'): void {
   const el = overlay(
     'tc-reveal',
     `<div class="tc-box">
       <h2 class="tc-title">${esc(d.got)}</h2>
       <div class="tc-flip"><div class="tc-inner">${frontHtml(d, c)}${backHtml(d)}</div></div>
       <p class="tc-note">收進卡冊了，選單裡的「卡冊」隨時看得到。${extra ? `<br>${esc(extra)}` : ''}</p>
-      <button type="button" class="chip primary" data-close>好</button>
+      <button type="button" class="chip primary" data-close>${esc(ok)}</button>
     </div>`,
+    onClose,
   );
   window.setTimeout(() => el.querySelector('.tc-flip')?.classList.add('open'), 450);
 }
@@ -222,9 +257,9 @@ const itemText = (it: ItemCount): string => {
 
 /**
  * 回報確認、放上雷達後（main.ts）：伺服器說拿到肉乾卡就翻開給你看，拿到道具寫在下面（沒有卡時另外跳一則訊息）；
- * 今天算滿了也跳訊息。notify 是 main.ts 的橫幅
+ * 滿 5 則的獎勵（picks）接著跳出來選肉乾或順幣（有卡的話卡片按「選獎勵」後）。今天算滿了也跳訊息。notify 是 main.ts 的橫幅
  */
-export async function gotReward(r: { card?: CardClaim; items: ItemCount[]; capped?: boolean } | undefined, notify: (msg: string) => void): Promise<void> {
+export async function gotReward(r: { card?: CardClaim; items: ItemCount[]; picks?: number; capped?: boolean } | undefined, notify: (msg: string) => void): Promise<void> {
   if (!r) return;
   if (r.capped) {
     notify('今天的回報已經算滿 20 則，明天再貼的才會算進收集');
@@ -239,6 +274,8 @@ export async function gotReward(r: { card?: CardClaim; items: ItemCount[]; cappe
     }
     saveItems(have);
   }
+  const picks = r.picks ?? 0;
+  if (picks > 0) savePicks(myPicks() + picks);
   const got = r.items.map(itemText).filter(Boolean).join('、');
   const d = r.card ? CARD_DEFS.find((x) => x.id === r.card!.card) : undefined;
   if (d && r.card) {
@@ -246,8 +283,82 @@ export async function gotReward(r: { card?: CardClaim; items: ItemCount[]; cappe
     const img = new Image();
     img.src = d.img;
     await Promise.race([img.decode().catch(() => undefined), new Promise((ok) => window.setTimeout(ok, 1500))]);
-    showReveal(d, r.card, got ? `還拿到${got}，放在選單裡的「道具」。` : '');
-  } else if (got) notify(`拿到${got}！放在選單裡的「道具」`);
+    const extra = [got ? `還拿到${got}，放在選單裡的「道具」。` : '', picks > 0 ? '還有一份獎勵可以選：一包肉乾或一枚順幣。' : ''].join('');
+    showReveal(d, r.card, extra, picks > 0 ? () => openPick() : undefined, picks > 0 ? '選獎勵' : '好');
+  } else {
+    if (got) notify(`拿到${got}！放在選單裡的「道具」`);
+    if (picks > 0) openPick();
+  }
+}
+
+/** 選獎勵畫面裡的兩個選項（肉乾、順幣） */
+const pickHtml = (n: number, fresh: boolean): string => `<div class="tc-box tc-pick-box">
+      <h2 class="tc-title">${fresh ? '貼滿 5 個活動了！' : `還有 ${n} 份獎勵可以選`}</h2>
+      <p class="tc-note">${fresh ? '選一份獎勵帶走：' : '每份選一個：'}</p>
+      <div class="tc-pick-opts">${PICK_OPTS.map((o) => {
+        const d = ITEM_DEFS.find((x) => x.id === o.id)!;
+        return `<button type="button" class="tc-pick-opt" data-pick="${o.id}"><span class="tc-item-icon"><img src="${d.img}" alt="" draggable="false"></span><b>${esc(o.label)}</b><small>${esc(o.sub)}</small></button>`;
+      }).join('')}</div>
+      <p class="tc-pick-msg" role="status"></p>
+      <button type="button" class="chip" data-close>之後再選</button>
+      <p class="tc-note tc-pick-later">沒選的留在選單裡的「道具」，隨時可以回來選。</p>
+    </div>`;
+
+/** 選完了：選到的道具跳一下 */
+const pickedHtml = (id: string, left: number): string => {
+  const d = ITEM_DEFS.find((x) => x.id === id)!;
+  const o = PICK_OPTS.find((x) => x.id === id)!;
+  return `<div class="tc-box tc-pick-box">
+      <h2 class="tc-title">拿到${esc(o.label)}了！</h2>
+      <span class="tc-item-icon tc-picked"><img src="${d.img}" alt="${esc(d.name)}" draggable="false"></span>
+      <p class="tc-note">放在選單裡的「道具」。${left > 0 ? `<br>還有 ${left} 份獎勵可以選。` : ''}</p>
+      <div class="tc-pick-btns">${left > 0 ? '<button type="button" class="chip primary" data-again>再選一份</button><button type="button" class="chip" data-close>之後再選</button>' : '<button type="button" class="chip primary" data-close>好</button>'}</div>
+    </div>`;
+};
+
+let pickOpen = false;
+/**
+ * 選獎勵（回報滿 5 則給一份）：一包古錐媽的肉乾或一枚順幣，選了就改不了；按「之後再選」收起來、留在道具欄。
+ * fresh：剛拿到時（標題寫「貼滿 5 個活動了！」），從道具欄打開的寫還有幾份；onClose 收起來後（道具欄重畫）
+ */
+export function openPick(fresh = true, onClose?: () => void): void {
+  if (pickOpen || myPicks() <= 0) return;
+  pickOpen = true;
+  const el = overlay('tc-pick', pickHtml(myPicks(), fresh), () => {
+    pickOpen = false;
+    onClose?.();
+  });
+  let busy = false;
+  el.addEventListener('click', async (e) => {
+    const t = e.target as HTMLElement;
+    if (t.closest('[data-again]')) {
+      el.innerHTML = pickHtml(myPicks(), false);
+      el.querySelector<HTMLElement>('[data-pick]')?.focus();
+      return;
+    }
+    const btn = t.closest<HTMLButtonElement>('[data-pick]');
+    if (!btn || busy) return;
+    busy = true;
+    el.querySelectorAll<HTMLButtonElement>('[data-pick]').forEach((b) => (b.disabled = true));
+    const msg = el.querySelector<HTMLElement>('.tc-pick-msg');
+    if (msg) msg.textContent = '';
+    const id = btn.dataset.pick!;
+    const r = await pickReward(id);
+    busy = false;
+    if (!r.ok) {
+      el.querySelectorAll<HTMLButtonElement>('[data-pick]').forEach((b) => (b.disabled = false));
+      if (msg) msg.textContent = r.message;
+      // 伺服器說沒有可以選的了（別的分頁選過）：再對一次
+      void fetchMyCards().then((m) => {
+        if (m.ok) savePicks(m.data.picks ?? 0);
+      });
+      return;
+    }
+    saveItems(r.data.items);
+    savePicks(r.data.picks);
+    el.innerHTML = pickedHtml(id, r.data.picks);
+    el.querySelector<HTMLElement>('[data-again], [data-close]')?.focus();
+  });
 }
 
 /**
@@ -340,6 +451,7 @@ export function openHelp(helpPage: string): void {
     const cards = r.data.cards.filter(isClaim);
     saveCards(cards);
     if (r.data.items) saveItems(r.data.items);
+    if (r.data.picks !== undefined) savePicks(r.data.picks);
     input.value = '';
     const items = myItems().reduce((n, x) => n + x.count, 0);
     msg(`搬好了，這台現在有 ${cards.length} 張卡、${items} 個道具`);
@@ -355,29 +467,41 @@ function syncMine(el: HTMLElement, redraw: () => void): void {
     const local = myCards();
     const localItems = myItems();
     const items = r.data.items ?? localItems;
+    const picks = r.data.picks ?? myPicks();
     const sameCards = r.data.cards.length === local.length && r.data.cards.every((c) => local.some((x) => x.card === c.card && x.serial === c.serial));
     const sameItems = items.length === localItems.length && items.every((i) => localItems.some((x) => x.item === i.item && x.count === i.count));
-    if (sameCards && sameItems) return;
+    if (sameCards && sameItems && picks === myPicks()) return;
     saveCards(r.data.cards.filter(isClaim));
     saveItems(items);
+    savePicks(picks);
     redraw();
   });
 }
 
-/** 道具欄（選單裡的「道具」）：像遊戲的背包一格一格排（跟卡片長得不一樣），圖、右下角有幾個、下面名字（用法之後再設計）；沒有寫「還沒有道具」 */
+/**
+ * 道具欄（選單裡的「道具」）：像遊戲的背包一格一格排（跟卡片長得不一樣），圖、右下角有幾個、下面名字（用法之後再設計）；沒有寫「還沒有道具」。
+ * 還有沒選的獎勵寫在最上面，按「選獎勵」打開 openPick
+ */
 export function openItems(): void {
   const list = (): string => {
+    const picks = myPicks();
+    const pickRow = picks > 0 ? `<div class="tc-pick-row"><span>還有 <b>${picks}</b> 份獎勵可以選（肉乾或順幣）</span><button type="button" class="chip primary" data-open-pick>選獎勵</button></div>` : '';
     const have = myItems().filter((x) => ITEM_DEFS.some((d) => d.id === x.item));
     const cells = have.map((x) => {
       const d = ITEM_DEFS.find((y) => y.id === x.item)!;
       return `<li class="tc-item"><span class="tc-item-icon"><img src="${d.img}" alt="" draggable="false"><span class="tc-item-count" aria-label="${x.count} ${esc(d.unit)}">×${x.count}</span></span><span class="tc-item-name">${esc(d.name)}</span></li>`;
     });
     return `<div class="tc-head"><h2>道具</h2><button type="button" class="chip" data-close>關閉</button></div>
-      ${cells.length ? `<ul class="tc-items">${cells.join('')}</ul>` : '<p class="tc-items-empty">還沒有道具</p>'}`;
+      ${pickRow}
+      ${cells.length ? `<ul class="tc-items">${cells.join('')}</ul>` : picks > 0 ? '' : '<p class="tc-items-empty">還沒有道具</p>'}`;
   };
   const el = overlay('tc-bag', `<div class="tc-box"><div class="tc-main">${list()}</div></div>`);
-  syncMine(el, () => {
+  const redraw = (): void => {
     const main = el.querySelector('.tc-main');
-    if (main) main.innerHTML = list();
+    if (main && el.isConnected) main.innerHTML = list();
+  };
+  el.addEventListener('click', (e) => {
+    if ((e.target as HTMLElement).closest('[data-open-pick]')) openPick(false, redraw);
   });
+  syncMine(el, redraw);
 }

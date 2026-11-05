@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { cleanCode, CREDITS_PER_DAY, jerkyMilestone, makeCode, parseClaim, REPORTS_PER_JERKY, taipeiDayStart } from '../src/cards';
+import { cleanCode, CREDITS_PER_DAY, jerkyMilestone, makeCode, parseClaim, parsePick, REPORTS_PER_JERKY, taipeiDayStart } from '../src/cards';
 
 describe('parseClaim', () => {
   it('takes a known card and one of its places', () => {
@@ -53,5 +53,15 @@ describe('回報累計（古錐媽的肉乾）', () => {
     expect(taipeiDayStart(late)).toBe(Date.UTC(2026, 10, 2, 16) / 1000);
     expect(taipeiDayStart(next)).toBe(next);
     expect(taipeiDayStart(next + 3600)).toBe(next);
+  });
+});
+
+describe('選獎勵（肉乾或順幣）', () => {
+  it('takes jerky or a 順幣 only', () => {
+    expect(parsePick({ item: 'jerky' })).toBe('jerky');
+    expect(parsePick({ item: 'coin' })).toBe('coin');
+    expect(parsePick({ item: 'pick' })).toBe('只能選古錐媽的肉乾或順幣');
+    expect(parsePick({})).toBe('只能選古錐媽的肉乾或順幣');
+    expect(parsePick(null)).toBe('只能選古錐媽的肉乾或順幣');
   });
 });

@@ -10,7 +10,7 @@ import { CURRENT_MAP_URL, type CurrentMapRoute } from './sources/currentmap';
 import { mergeIntoOfficial } from './sources/merge';
 import { apifyTrial } from './sources/apify';
 import { fetchThreadsPost, resolveThreadsLink, shortcodeToUnix } from './sources/link';
-import { claimCard, makeTransfer, myCards, purgeCards, redeemTransfer } from './cards';
+import { claimCard, makeTransfer, myCards, pickReward, purgeCards, redeemTransfer } from './cards';
 import { addParkMark, deleteParkMark, listParkMarks, listPublicParkMarks, parseParkMark, updateParkMark } from './parkmarks';
 import { adminLocate, applyFeedback, clearResolvedFeedback, deleteAdminSubscription, listFeedback, locateForFeedback, notifyAdmins, purgeFeedback, saveAdminSubscription, setFeedbackStatus, submitFeedback } from './feedback';
 import { moduleOf } from './modules';
@@ -266,6 +266,8 @@ async function handle(req: Request, env: Env, ctx: ExecutionContext): Promise<Re
   // ---- 收集卡（尋找小法，裝置代碼放在 x-device 標頭）----
   if (req.method === 'GET' && path === '/api/cards/mine') return jsonResponse(await myCards(env, await deviceId(env, req)));
   if (req.method === 'POST' && path === '/api/cards/claim') return jsonResponse(await claimCard(env, await deviceId(env, req), await ipHash(env, req), await readJson<unknown>(req), now));
+  // 回報滿 5 則的獎勵：選一包肉乾或一枚順幣
+  if (req.method === 'POST' && path === '/api/cards/pick') return jsonResponse(await pickReward(env, await deviceId(env, req), await readJson<unknown>(req)));
   // 引繼碼（換裝置，選單的「說明」裡）：舊裝置產生、新裝置輸入，卡片、道具搬過去
   if (req.method === 'POST' && path === '/api/cards/transfer') return jsonResponse(await makeTransfer(env, await deviceId(env, req), await ipHash(env, req), now));
   if (req.method === 'POST' && path === '/api/cards/redeem') return jsonResponse(await redeemTransfer(env, await deviceId(env, req), await ipHash(env, req), await readJson<unknown>(req), now));

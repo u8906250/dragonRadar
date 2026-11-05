@@ -269,8 +269,14 @@ export interface ItemCount {
   count: number;
 }
 
-export function fetchMyCards(): Promise<Result<{ cards: CardClaim[]; items?: ItemCount[] }>> {
+/** picks：回報滿 5 則還沒選的獎勵有幾份（肉乾或順幣） */
+export function fetchMyCards(): Promise<Result<{ cards: CardClaim[]; items?: ItemCount[]; picks?: number }>> {
   return deviceJson('/api/cards/mine');
+}
+
+/** 選一份獎勵（最早的那份）：jerky 一包肉乾、coin 一枚順幣；回傳這台現在的道具、還有幾份沒選 */
+export function pickReward(item: string): Promise<Result<{ item: string; items: ItemCount[]; picks: number }>> {
+  return deviceJson('/api/cards/pick', 'POST', { item });
 }
 
 /** 引繼碼（換裝置）：舊裝置產生，24 小時內在新裝置輸入（卡、道具一起搬） */
@@ -279,6 +285,6 @@ export function makeTransferCode(): Promise<Result<{ code: string; expiresAt: nu
 }
 
 /** 新裝置輸入引繼碼：舊裝置的卡、道具搬過來，回傳這台現在的卡、道具 */
-export function redeemTransferCode(code: string): Promise<Result<{ cards: CardClaim[]; items?: ItemCount[]; moved: number }>> {
+export function redeemTransferCode(code: string): Promise<Result<{ cards: CardClaim[]; items?: ItemCount[]; picks?: number; moved: number }>> {
   return deviceJson('/api/cards/redeem', 'POST', { code });
 }

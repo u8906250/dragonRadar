@@ -1,6 +1,6 @@
 /**
  * 收集卡（尋找小法）：在汪星的 3D 國館點到小法就拿到 No.001（雷達上點到不算，前端決定）；
- * 回報、確認、放上雷達的活動累計滿 5 則拿到 No.002「古錐媽的肉乾」，每滿 5 則再給一包道具「古錐媽的肉乾」（用法之後再設計）。
+ * 回報、確認、放上雷達的活動累計滿 5 則拿到 No.002「古錐媽的肉乾」，每滿 5 則再給一份獎勵，自己選一包肉乾或一枚順幣（道具，用法之後再設計）。
  * 不用登入，用瀏覽器的裝置代碼（加鹽雜湊）認人；伺服器記哪張卡、什麼時候、在哪裡拿到，第幾位拿到照拿到的順序算（id 由小到大）
  */
 import type { Env } from './env';
@@ -13,9 +13,13 @@ export type CardId = keyof typeof CARDS;
 /** 點到就拿得到的卡（/api/cards/claim）；其他的照規則由伺服器給（肉乾：回報累計） */
 // 你的市長（No.003）：在瀏覽器裡看完洋流總部的動畫、點完五個政策按鈕才領（跟小法一樣是瀏覽器判斷的）
 const TAP_CARDS: readonly CardId[] = ['xiaofa', 'mayor'];
-/** 道具 */
-export const ITEMS = { jerky: '古錐媽的肉乾' } as const;
+/** 道具（順幣：順著洋流的金幣，v1.542 起每滿 5 則可以選肉乾或順幣） */
+export const ITEMS = { jerky: '古錐媽的肉乾', coin: '順幣' } as const;
 export type ItemId = keyof typeof ITEMS;
+/** 還沒選的獎勵：item_grants 先記成 pick，選了改成那個道具（同一個原因只有一筆，所以不會選兩次） */
+export const PICK = 'pick';
+/** 滿 5 則的獎勵可以選哪些 */
+export const PICKABLE: readonly ItemId[] = ['jerky', 'coin'];
 /** 回報累計幾則拿到肉乾卡、每幾則給一包肉乾；一台一天（台灣時間）最多算幾則 */
 export const REPORTS_PER_JERKY = 5;
 export const CREDITS_PER_DAY = 20;
@@ -49,21 +53,27 @@ export interface ItemCount {
   count: number;
 }
 
-/** 這個瀏覽器拿到的卡、道具 */
-export async function myCards(env: Env, device: string | null): Promise<{ cards: CardClaim[]; items: ItemCount[] }> {
-  if (!device) return { cards: [], items: [] };
+/** 這個瀏覽器拿到的卡、道具、還有幾份獎勵沒選（picks） */
+export async function myCards(env: Env, device: string | null): Promise<{ cards: CardClaim[]; items: ItemCount[]; picks: number }> {
+  if (!device) return { cards: [], items: [], picks: 0 };
   const [c, i] = await env.DB.batch([
     env.DB.prepare(`${SELECT} WHERE c.device_id = ? ORDER BY c.id`).bind(device),
     env.DB.prepare('SELECT item, COUNT(*) AS count FROM item_grants WHERE device_id = ? AND used_at IS NULL GROUP BY item ORDER BY MIN(id)').bind(device),
   ]);
-  return { cards: (c.results ?? []) as CardClaim[], items: ((i.results ?? []) as ItemCount[]).filter((x) => Object.prototype.hasOwnProperty.call(ITEMS, x.item)) };
+  const all = (i.results ?? []) as Array<{ item: string; count: number }>;
+  return {
+    cards: (c.results ?? []) as CardClaim[],
+    items: all.filter((x): x is ItemCount => Object.prototype.hasOwnProperty.call(ITEMS, x.item)),
+    picks: all.find((x) => x.item === PICK)?.count ?? 0,
+  };
 }
 
-/** 回報累計拿到的東西：這次新拿到的卡、這次新拿到幾個道具；今天已經算滿（capped）的這則不算 */
+/** 回報累計拿到的東西：這次新拿到的卡、這次新拿到幾個道具、這次多了幾份可以選的獎勵（picks）；今天已經算滿（capped）的這則不算 */
 export interface ReportReward {
   credits: number;
   card?: CardClaim;
   items: ItemCount[];
+  picks?: number;
   capped?: boolean;
 }
 
@@ -74,7 +84,8 @@ export const jerkyMilestone = (n: number): number => Math.floor(n / REPORTS_PER_
 
 /**
  * 回報、確認、放上雷達了：記一則（同一則只記一次；這台今天已經記滿 CREDITS_PER_DAY 則就不記），
- * 累計滿 5 則拿到肉乾卡，每滿 5 則給一包肉乾（同一個門檻只給一次：刪掉再貼回到同一個數字不會再給）
+ * 累計滿 5 則拿到肉乾卡，每滿 5 則給一份獎勵讓他選（肉乾或順幣，pickReward）；同一個門檻只給一次：刪掉再貼回到同一個數字不會再給
+ * （v1.541 以前直接給肉乾，原因一樣是 reports:5、reports:10…，所以照原因判斷、不管是哪個道具）
  */
 export async function creditReport(env: Env, device: string | null, postId: string, now: number): Promise<ReportReward | null> {
   if (!device) return null;
@@ -88,11 +99,30 @@ export async function creditReport(env: Env, device: string | null, postId: stri
   if (m === 0) return reward;
   const [card, item] = await env.DB.batch([
     env.DB.prepare("INSERT OR IGNORE INTO card_claims (card, device_id, place, created_at) VALUES ('jerky', ?, '回報', ?)").bind(device, now),
-    env.DB.prepare("INSERT OR IGNORE INTO item_grants (device_id, item, reason, created_at) VALUES (?, 'jerky', ?, ?)").bind(device, `reports:${m}`, now),
+    env.DB.prepare('INSERT OR IGNORE INTO item_grants (device_id, item, reason, created_at) SELECT ?, ?, ?, ? WHERE NOT EXISTS (SELECT 1 FROM item_grants WHERE device_id = ? AND reason = ?)').bind(device, PICK, `reports:${m}`, now, device, `reports:${m}`),
   ]);
   if (card.meta.changes) reward.card = (await env.DB.prepare(`${SELECT} WHERE c.device_id = ? AND c.card = 'jerky'`).bind(device).first<CardClaim>()) ?? undefined;
-  if (item.meta.changes) reward.items = [{ item: 'jerky', count: item.meta.changes }];
+  if (item.meta.changes) reward.picks = item.meta.changes;
   return reward;
+}
+
+/** 選獎勵要選哪個道具；不對回傳錯誤訊息 */
+export function parsePick(body: unknown): ItemId | string {
+  const item = (body as { item?: unknown } | null)?.item;
+  return typeof item === 'string' && (PICKABLE as readonly string[]).includes(item) ? (item as ItemId) : '只能選古錐媽的肉乾或順幣';
+}
+
+/** 選一份獎勵（最早的那份）：改成選的道具，回傳這台現在的道具、還有幾份沒選 */
+export async function pickReward(env: Env, device: string | null, body: unknown): Promise<{ item: ItemId; items: ItemCount[]; picks: number }> {
+  if (!device) throw new ReportError(400, '缺少裝置代碼，請重新整理頁面');
+  const item = parsePick(body);
+  if (!(PICKABLE as readonly string[]).includes(item)) throw new ReportError(400, item);
+  const r = await env.DB.prepare(`UPDATE item_grants SET item = ? WHERE id = (SELECT id FROM item_grants WHERE device_id = ? AND item = '${PICK}' AND used_at IS NULL ORDER BY id LIMIT 1) AND item = '${PICK}'`)
+    .bind(item, device)
+    .run();
+  if (!r.meta.changes) throw new ReportError(400, '沒有可以選的獎勵了');
+  const mine = await myCards(env, device);
+  return { item: item as ItemId, items: mine.items, picks: mine.picks };
 }
 
 /** 回報的人自己刪掉：這則不算了（已經給的卡、道具不收回） */
@@ -176,9 +206,9 @@ export async function makeTransfer(env: Env, device: string | null, ip: string, 
 
 /**
  * 新裝置：輸入引繼碼，舊裝置的卡、道具、回報的累計搬過來（舊裝置就沒有了）。兩台都有同一張卡的，留比較早拿到的那張（第幾位比較前面）；
- * 道具兩台的都留著（同一個原因兩台都拿過的，舊裝置那個的原因後面加 :moved:id）
+ * 道具、還沒選的獎勵兩台的都留著（同一個原因兩台都拿過的，舊裝置那個的原因後面加 :moved:id；不管是哪個道具，之後選獎勵才不會撞到）
  */
-export async function redeemTransfer(env: Env, device: string | null, ip: string, body: unknown, now: number): Promise<{ cards: CardClaim[]; items: ItemCount[]; moved: number }> {
+export async function redeemTransfer(env: Env, device: string | null, ip: string, body: unknown, now: number): Promise<{ cards: CardClaim[]; items: ItemCount[]; picks: number; moved: number }> {
   if (!device) throw new ReportError(400, '缺少裝置代碼，請重新整理頁面');
   await countTry(env, ip, 'redeem', now);
   const code = cleanCode((body as { code?: unknown } | null)?.code);
@@ -198,10 +228,10 @@ export async function redeemTransfer(env: Env, device: string | null, ip: string
     // 新裝置已經有（比較早拿到）的：舊裝置的那張不要
     env.DB.prepare("UPDATE card_claims SET device_id = 'merged:' || id WHERE device_id = ? AND card IN (SELECT card FROM card_claims WHERE device_id = ?)").bind(old, device),
     env.DB.prepare('UPDATE card_claims SET device_id = ? WHERE device_id = ?').bind(device, old),
-    env.DB.prepare("UPDATE item_grants SET reason = reason || ':moved:' || id WHERE device_id = ? AND EXISTS (SELECT 1 FROM item_grants o WHERE o.device_id = ? AND o.item = item_grants.item AND o.reason = item_grants.reason)").bind(old, device),
+    env.DB.prepare("UPDATE item_grants SET reason = reason || ':moved:' || id WHERE device_id = ? AND EXISTS (SELECT 1 FROM item_grants o WHERE o.device_id = ? AND o.reason = item_grants.reason)").bind(old, device),
     env.DB.prepare('UPDATE item_grants SET device_id = ? WHERE device_id = ?').bind(device, old),
     env.DB.prepare('UPDATE report_credits SET device_id = ? WHERE device_id = ?').bind(device, old),
   ]);
   const mine = await myCards(env, device);
-  return { cards: mine.cards, items: mine.items, moved: r[2].meta.changes ?? 0 };
+  return { cards: mine.cards, items: mine.items, picks: mine.picks, moved: r[2].meta.changes ?? 0 };
 }
