@@ -3459,7 +3459,7 @@ type HqSeam = {
   stitches: Array<{ at: number; center: [number, number]; along: [number, number]; label: string; below?: boolean }>;
   walkers: Array<{ from: [number, number]; to: [number, number]; at: number }>;
 };
-type HqIcon = { lat: number; lng: number; at: number; kind: 'hut' | 'stadium' | 'dome' | 'star' | 'regrow' | 'culture' | 'service' | 'wetland' | 'archbridge' | 'chest' | 'chestlock' | 'paw' | 'umusic' | 'uart' | 'uexhibit' | 'uyouth' | 'ushop'; label?: string; scale?: number; grow?: number; char?: string; color?: string; small?: boolean; focus?: boolean; hint?: { title: string; intro: string } };
+type HqIcon = { lat: number; lng: number; at: number; kind: 'hut' | 'stadium' | 'dome' | 'bigdome' | 'star' | 'regrow' | 'culture' | 'service' | 'wetland' | 'archbridge' | 'chest' | 'chestlock' | 'paw' | 'umusic' | 'uart' | 'uexhibit' | 'uyouth' | 'ushop'; label?: string; scale?: number; grow?: number; char?: string; color?: string; small?: boolean; focus?: boolean; hint?: { title: string; intro: string } };
 /** 其他政見的地方：離路線多近才沿路冒出來 */
 const HQ_SERVICE_NEAR_M = 300;
 /** 離路線幾公尺（路線載入後不會變，記起來） */
@@ -3538,7 +3538,7 @@ function hqExtras(t0: number): { reveals: HqReveal[]; icons: HqIcon[]; seams: Hq
   for (const ch of hq.HQ_CHESTS) {
     icons.push({ lat: ch.lat, lng: ch.lng, at: hqNearestAt(t0, ch), kind: ch.opened ? 'chest' : 'chestlock', label: ch.opened ? `${ch.district}政見開箱` : `${ch.district}政見開箱（${ch.date}）`, scale: 0.8, hint: { title: `${ch.district}政見開箱（${ch.date} ${ch.venue}${ch.opened ? '' : '，還沒開箱'}）`, intro: ch.intro } });
   }
-  icons.push({ lat: hq.HQ_DOME.lat, lng: hq.HQ_DOME.lng, at: hqNearestAt(t0, hq.HQ_DOME), kind: 'dome', label: hq.HQ_DOME.name, scale: 1.1, hint: { title: hq.HQ_DOME.name, intro: I['大巨蛋好鄰居計畫'] ?? '' } });
+  icons.push({ lat: hq.HQ_DOME.lat, lng: hq.HQ_DOME.lng, at: hqNearestAt(t0, hq.HQ_DOME), kind: 'bigdome', label: hq.HQ_DOME.name, scale: 1.35, hint: { title: hq.HQ_DOME.name, intro: I['大巨蛋好鄰居計畫'] ?? '' } });
   icons.push({ lat: hq.HQ_PAW.lat, lng: hq.HQ_PAW.lng, at: hqNearestAt(t0, hq.HQ_PAW) + 400, kind: 'paw', label: hq.HQ_PAW.name, scale: 0.9, hint: { title: hq.HQ_PAW.name, intro: I['毛孩安心養'] ?? '' } });
   // 高架橋下空間：沿市民大道高架、建國高架畫一條線（船離中間最近時長出來）
   // 兩條在中間交叉（建國南北路 × 市民大道），名字和圖示都避開交叉口（v1.515 使用者說重疊了）；

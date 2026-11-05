@@ -285,7 +285,7 @@ describe('normalizeExtraction with reasoning output', () => {
 });
 
 import { extractArticleText, parseRss } from '../src/sources/text';
-import { parseTicketTime, sameFleet, taipeiMidnight } from '../src/sources/voyage';
+import { parseTicketTime, sameFleet, shortStopName, taipeiMidnight } from '../src/sources/voyage';
 
 describe('parseRss', () => {
   it('reads CDATA titles, links and dates', () => {
@@ -1003,5 +1003,14 @@ describe('門牌拆成路名和門牌', () => {
   it('沒有門牌的不拆', () => {
     expect(splitHouse('大湖公園')).toBeNull();
     expect(splitHouse('民權東路六段')).toBeNull();
+  });
+});
+
+describe('車掃起點的短名字', () => {
+  it('只寫地方', () => {
+    expect(shortStopName('民進黨台北市黨部加油點 - 樂活公園延伸段(康寧街61巷)')).toBe('樂活公園延伸段');
+    expect(shortStopName('南福宮')).toBe('南福宮');
+    expect(shortStopName('木柵集應廟停車場')).toBe('木柵集應廟停車場');
+    expect(shortStopName('五分埔公園（松山路）')).toBe('五分埔公園');
   });
 });

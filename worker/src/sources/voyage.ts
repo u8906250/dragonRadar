@@ -102,6 +102,16 @@ export interface VoyageResult {
  * 官網航線的艦隊和車掃地圖是不是同一場：艦隊名稱是兩個區名（「內湖南港」），車掃地圖可能倒過來寫（「南港內湖車掃」），
  * 兩個區名都出現就算同一場，跟順序無關。
  */
+/**
+ * 起點名稱太長（車掃地圖寫「民進黨台北市黨部加油點 - 樂活公園延伸段(康寧街61巷)」）：標題、時間表的站名只寫地方
+ * （「 - 」後面那段、拿掉最後的括號），完整的名字留在地點（v1.522 使用者說內湖南港車掃起點的標題有點長）
+ */
+export function shortStopName(name: string): string {
+  const parts = name.split(/\s+[-－–—]\s+/);
+  const s = parts[parts.length - 1].replace(/\s*[（(][^（）()]*[）)]\s*$/, '').trim();
+  return s || name;
+}
+
 export function sameFleet(fleet: string, mapName: string): boolean {
   if (!fleet) return true;
   if (mapName.includes(fleet)) return true;
@@ -193,8 +203,9 @@ export async function syncVoyage(env: Env, now = nowSec(), only?: { date: string
     if (startName) {
       let p: { lat: number; lng: number } | null = map ? { lat: map.segments[0].path[0][0], lng: map.segments[0].path[0][1] } : null;
       if (!p) p = await geocodeFirst(env, [`台北市 ${startName}`]);
-      const title = `${fleet}出發・${startName}`;
-      routeStops.push({ kind: 'start', title, name: startName, lat: p?.lat ?? null, lng: p?.lng ?? null, at: depart });
+      const short = shortStopName(startName);
+      const title = `${fleet}出發・${short}`;
+      routeStops.push({ kind: 'start', title, name: short, ...(short !== startName ? { place: startName } : {}), lat: p?.lat ?? null, lng: p?.lng ?? null, at: depart });
       stmts.push(depart ? insert(title, startName, `台北市 ${startName}`, p?.lat ?? null, p?.lng ?? null, depart, depart + DEPART_KEEP_SEC, false) : insert(title, startName, `台北市 ${startName}`, p?.lat ?? null, p?.lng ?? null, day, dayEnd, true));
     }
 

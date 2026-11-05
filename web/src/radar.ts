@@ -96,7 +96,7 @@ export interface RadarRoute {
    * 一個東西冒出來（at）：hut 登山中心、stadium 足球場、dome 運動中心、star 星星、regrow 樹樁（grow 時長回大樹）、culture 文化徑的點（char、color）；
    * label 留著（small 是寫在下面的小字，跟別的小字重疊就不寫）
    */
-  icons?: Array<{ bearing: number; distanceKm: number; at: number; kind: 'hut' | 'stadium' | 'dome' | 'star' | 'regrow' | 'culture' | 'service' | 'wetland' | 'archbridge' | 'chest' | 'chestlock' | 'paw' | 'umusic' | 'uart' | 'uexhibit' | 'uyouth' | 'ushop'; label?: string; scale?: number; grow?: number; char?: string; color?: string; small?: boolean; focus?: boolean }>;
+  icons?: Array<{ bearing: number; distanceKm: number; at: number; kind: 'hut' | 'stadium' | 'dome' | 'bigdome' | 'star' | 'regrow' | 'culture' | 'service' | 'wetland' | 'archbridge' | 'chest' | 'chestlock' | 'paw' | 'umusic' | 'uart' | 'uexhibit' | 'uyouth' | 'ushop'; label?: string; scale?: number; grow?: number; char?: string; color?: string; small?: boolean; focus?: boolean }>;
   /** 政策圖層開著：其他特效變淡，只有 focus 的地方、通學區的圈清楚 */
   focus?: boolean;
   /** 都更的基地範圍（at 時淡入） */
@@ -138,7 +138,7 @@ const DRAGON_SVG =
     return `<path class="wb-paddle" d="M${x} -4.5L${x + 3} -9"/><circle class="wb-head" cx="${x}" cy="-1.2" r="1.6"/>`;
   }).join('');
 /** 冒出來的東西（螢幕像素，中心在 0,0；顏色在 styles.css）：登山中心是一間小屋、足球場是橢圓的場加草皮條紋、運動中心是圓頂、星星是五角星 */
-const ICON_SVG: Record<'hut' | 'stadium' | 'dome' | 'star' | 'wetland' | 'archbridge' | 'chest' | 'chestlock' | 'paw' | 'umusic' | 'uart' | 'uexhibit' | 'uyouth' | 'ushop', string> = {
+const ICON_SVG: Record<'hut' | 'stadium' | 'dome' | 'bigdome' | 'star' | 'wetland' | 'archbridge' | 'chest' | 'chestlock' | 'paw' | 'umusic' | 'uart' | 'uexhibit' | 'uyouth' | 'ushop', string> = {
   umusic: '<circle class="ud-bg" r="9"/><path class="ud-ink" d="M-1.5 4V-5.5L5 -7.5V2"/><ellipse class="ud-fill" cx="-3.6" cy="4.2" rx="2.6" ry="2"/><ellipse class="ud-fill" cx="2.9" cy="2.2" rx="2.6" ry="2"/>',
   uart: '<circle class="ud-bg" r="9"/><path class="ud-pal" d="M-6 2Q-8 -6 0 -6.5Q7 -6.5 6.5 -1Q6 2 3 1.5Q1 1.2 1 3.5Q1 6 -2 5.5Q-5 5 -6 2Z"/><circle class="ud-c1" cx="-3" cy="-2.6" r="1.3"/><circle class="ud-c2" cx="0.8" cy="-4" r="1.3"/><circle class="ud-c3" cx="4" cy="-2" r="1.3"/>',
   uexhibit: '<circle class="ud-bg" r="9"/><rect class="ud-frame" x="-6" y="-5" width="12" height="9.5" rx="1"/><path class="ud-mtn" d="M-4.5 3L-1.5 -1L0.8 1.6L2.4 0L4.5 3Z"/><circle class="ud-c3" cx="2.4" cy="-2.6" r="1.2"/>',
@@ -152,6 +152,8 @@ const ICON_SVG: Record<'hut' | 'stadium' | 'dome' | 'star' | 'wetland' | 'archbr
   hut: '<path class="ic-roof" d="M-9 -1L0 -11L9 -1Z"/><path class="ic-wall" d="M-7 -1H7V7H-7Z"/><path class="ic-door" d="M-2 7V2H2V7Z"/><path class="ic-flag" d="M0 -11V-17M0 -17H5L3.5 -15L5 -13H0"/>',
   stadium: '<ellipse class="ic-stand" rx="16" ry="10"/><ellipse class="ic-field" rx="11" ry="6"/><path class="ic-lines" d="M0 -6V6M-11 0A11 6 0 0 0 11 0M-11 0A11 6 0 0 1 11 0"/><circle class="ic-lines" r="2"/>',
   dome: '<path class="ic-base" d="M-14 4H14V7H-14Z"/><path class="ic-dome" d="M-13 4A13 13 0 0 1 13 4Z"/><path class="ic-rib" d="M0 -9V4M-7 -7Q0 -4 7 -7"/>',
+  // 大巨蛋：扁扁的銀灰色金屬屋頂（屋頂接縫、頂上一圈）、深色玻璃帶、淺灰外牆的直條（v1.522 使用者說外殼改成灰色比較貼近原本的樣子；花博旗艦運動中心照舊用 dome）
+  bigdome: '<ellipse class="dm-shadow" cx="0" cy="7.4" rx="16.5" ry="2.1"/><path class="dm-base" d="M-16 6.6L-15 1H15L16 6.6Z"/><path class="dm-fin" d="M-12.5 2.6V6.2M-9.5 2.6V6.4M-6.5 2.6V6.4M-3.5 2.6V6.4M-0.5 2.6V6.4M2.5 2.6V6.4M5.5 2.6V6.4M8.5 2.6V6.4M11.5 2.6V6.4M14.2 2.6V6"/><path class="dm-glass" d="M-15 1H15L15.3 2.6H-15.3Z"/><path class="dm-roof" d="M-15 1C-12 -9 12 -9 15 1Z"/><path class="dm-sh" d="M15 1C13.2 -4.2 9 -6.1 4 -6.4C8.8 -4.6 11.8 -2 12.6 1Z"/><path class="dm-hi" d="M-12.6 -0.6C-10.4 -5 -5 -6.3 -0.5 -6.5C-5.2 -5.5 -8.8 -3.4 -10.4 0.2Z"/><path class="dm-rib" d="M0 -6.5V1M-5.2 -5.9Q-6.8 -2.6 -7.6 1M5.2 -5.9Q6.8 -2.6 7.6 1M-9.6 -3.9Q-11.4 -1.6 -12.2 1M9.6 -3.9Q11.4 -1.6 12.2 1"/><path class="dm-ring" d="M-6.2 -5.1Q0 -7.6 6.2 -5.1"/>',
   star: '<path class="ic-star" d="M0 -7L2 -2.2L7 -2.2L3 0.9L4.4 5.8L0 2.9L-4.4 5.8L-3 0.9L-7 -2.2L-2 -2.2Z"/>',
 };
 /** 線從頭長到尾要幾毫秒 */

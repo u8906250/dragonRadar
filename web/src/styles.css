@@ -414,6 +414,16 @@ path.map-seam-walkers { --p: 12px; }
 .ic-base { fill: #9aa3ad; stroke: #15171c; stroke-width: 0.8; }
 .ic-dome { fill: #4cc3e6; stroke: #15171c; stroke-width: 0.9; }
 .ic-rib { fill: none; stroke: #fff; stroke-width: 0.8; stroke-opacity: 0.8; }
+/* 大巨蛋（v1.522）：銀灰色屋頂、左上亮面、右邊陰影、深灰接縫，深色玻璃帶、淺灰外牆 */
+.dm-shadow { fill: #000; fill-opacity: 0.16; }
+.dm-base { fill: #dde1e6; stroke: #15171c; stroke-width: 0.8; stroke-linejoin: round; }
+.dm-fin { fill: none; stroke: #9aa3ad; stroke-width: 0.6; }
+.dm-glass { fill: #3d4955; }
+.dm-roof { fill: #b7bec6; stroke: #15171c; stroke-width: 0.9; stroke-linejoin: round; }
+.dm-sh { fill: #8a929b; fill-opacity: 0.55; }
+.dm-hi { fill: #f1f3f5; fill-opacity: 0.85; }
+.dm-rib { fill: none; stroke: #79818b; stroke-width: 0.55; }
+.dm-ring { fill: none; stroke: #fff; stroke-width: 0.7; stroke-opacity: 0.75; }
 /* 政見開箱的寶箱（動漫風：粗深色外框、圓角、亮面、金幣和光、會閃的星星；v1.513 使用者說「可以小一點、更有動漫風」） */
 .ud-bg { fill: #fff; stroke: #8a6fd0; stroke-width: 1.4; }
 .ud-ink { fill: none; stroke: #2a1a0e; stroke-width: 1.4; stroke-linejoin: round; }
