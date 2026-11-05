@@ -3436,7 +3436,7 @@ function hqStarPoints(st: { lat: number; lng: number; count: number; radiusM: nu
 /** 樹樁比長樹早幾毫秒冒出來 */
 const HQ_STUMP_LEAD_MS = 1500;
 type HqReveal = { path: Array<[number, number]>; at: number; kind: 'trail' | 'bridge' | 'stars' | 'culture'; label?: string; color?: string };
-type HqIcon = { lat: number; lng: number; at: number; kind: 'hut' | 'stadium' | 'dome' | 'star' | 'regrow' | 'culture' | 'service' | 'wetland' | 'archbridge'; label?: string; scale?: number; grow?: number; char?: string; color?: string; small?: boolean; focus?: boolean; hint?: { title: string; intro: string } };
+type HqIcon = { lat: number; lng: number; at: number; kind: 'hut' | 'stadium' | 'dome' | 'star' | 'regrow' | 'culture' | 'service' | 'wetland' | 'archbridge' | 'chest' | 'chestlock' | 'paw'; label?: string; scale?: number; grow?: number; char?: string; color?: string; small?: boolean; focus?: boolean; hint?: { title: string; intro: string } };
 /** 其他政見的地方：離路線多近才沿路冒出來 */
 const HQ_SERVICE_NEAR_M = 300;
 /** 離路線幾公尺（路線載入後不會變，記起來） */
@@ -3509,6 +3509,18 @@ function hqExtras(t0: number): { reveals: HqReveal[]; icons: HqIcon[] } {
   // 重建明治橋（受訪時的主張）：船離原址最近時冒出一座石拱橋
   const mj = hq.HQ_MEIJI;
   icons.push({ lat: mj.lat, lng: mj.lng, at: hqNearestAt(t0, mj), kind: 'archbridge', label: '明治橋（重建）', scale: 1.1, hint: { title: '明治橋（重建）', intro: hq.HQ_INTROS['明治橋'] ?? '' } });
+  // 各區的政見大秘寶：開箱地點放寶箱（開過的打開、還沒開的鎖著），船離它最近時冒出來；大巨蛋好鄰居計畫、毛孩安心養（大安森林公園寶箱旁的狗掌）
+  const I = hq.HQ_INTROS;
+  for (const ch of hq.HQ_CHESTS) {
+    icons.push({ lat: ch.lat, lng: ch.lng, at: hqNearestAt(t0, ch), kind: ch.opened ? 'chest' : 'chestlock', label: ch.opened ? `${ch.district}大秘寶` : `${ch.district}大秘寶（${ch.date} 晚上開箱）`, scale: 1.2, hint: { title: `${ch.district}政見大秘寶（${ch.date} ${ch.venue}${ch.opened ? '開箱' : '，晚上才開箱'}）`, intro: ch.intro } });
+  }
+  icons.push({ lat: hq.HQ_DOME.lat, lng: hq.HQ_DOME.lng, at: hqNearestAt(t0, hq.HQ_DOME), kind: 'dome', label: hq.HQ_DOME.name, scale: 1.1, hint: { title: hq.HQ_DOME.name, intro: I['大巨蛋好鄰居計畫'] ?? '' } });
+  icons.push({ lat: hq.HQ_PAW.lat, lng: hq.HQ_PAW.lng, at: hqNearestAt(t0, hq.HQ_PAW) + 400, kind: 'paw', label: hq.HQ_PAW.name, scale: 0.9, hint: { title: hq.HQ_PAW.name, intro: I['毛孩安心養'] ?? '' } });
+  // 高架橋下空間：沿市民大道高架、建國高架畫一條線（船離中間最近時長出來）
+  for (const vd of hq.HQ_VIADUCTS) {
+    const mid = vd.pts[Math.floor(vd.pts.length / 2)];
+    reveals.push({ path: vd.pts, at: hqNearestAt(t0, { lat: mid[0], lng: mid[1] }), kind: 'culture', label: `橋下空間（${vd.name}）`, color: '#8a6fd0' });
+  }
   // 文化徑的線（點 —— 線）：同一條路線的點都冒出來後，用那條路線的顏色沿街道連起來
   for (const ln of hq.HQ_CULTURE_LINES) {
     const at = Math.max(...ln.stops.map((n) => seen.get(n) ?? t0)) + 400;
@@ -3634,6 +3646,12 @@ function hqHits(t0: number): Array<{ lat: number; lng: number; at: number; title
   }
   const cityHall = hq.HQ_TOUR[hq.HQ_TOUR.length - 1];
   hits.push({ lat: cityHall.lat, lng: cityHall.lng, at: t0 + HQ_SAIL_MS, title: '臺北市政府（公務員減壓）', intro: I['臺北市政府'] ?? '', r: 18 });
+  for (const vd of hq.HQ_VIADUCTS) {
+    for (const k of [0.25, 0.5, 0.75]) {
+      const q = vd.pts[Math.floor(vd.pts.length * k)];
+      hits.push({ lat: q[0], lng: q[1], at: hqNearestAt(t0, { lat: vd.pts[Math.floor(vd.pts.length / 2)][0], lng: vd.pts[Math.floor(vd.pts.length / 2)][1] }), title: `橋下空間（${vd.name}）`, intro: I['橋下空間'] ?? '', r: 12 });
+    }
+  }
   for (const ar of hqAreas(t0)) hits.push({ lat: ar.center[0], lng: ar.center[1], at: ar.at, title: `${ar.label}`, intro: I[ar.label] ?? '', r: 26 });
   for (const b of hq.HQ_BOATS) hits.push({ lat: b.lat, lng: b.lng, at: hqNearestAt(t0, b), title: `水上活動（${b.kind === 'sup' ? 'SUP' : '龍舟'}）`, intro: I['水上活動'] ?? '', r: 12 });
   return hits;

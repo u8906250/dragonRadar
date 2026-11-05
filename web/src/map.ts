@@ -78,7 +78,7 @@ export interface MapRoute {
   /** 文化網（點 —— 線 —— 面） */
   network?: { at: number; lines: Array<{ path: Array<[number, number]>; color: string }>; dots: Array<{ lat: number; lng: number; color: string }>; noFace?: boolean; faceR?: number };
   /** 一個東西冒出來：hut 登山中心、stadium 足球場、dome 運動中心、star 星星、regrow 樹樁（grow 時長回大樹）、culture 文化徑的點（small 的名字地圖上不寫，滑鼠移過去看介紹） */
-  icons?: Array<{ lat: number; lng: number; at: number; kind: 'hut' | 'stadium' | 'dome' | 'star' | 'regrow' | 'culture' | 'service' | 'wetland' | 'archbridge'; label?: string; scale?: number; grow?: number; char?: string; color?: string; small?: boolean; focus?: boolean }>;
+  icons?: Array<{ lat: number; lng: number; at: number; kind: 'hut' | 'stadium' | 'dome' | 'star' | 'regrow' | 'culture' | 'service' | 'wetland' | 'archbridge' | 'chest' | 'chestlock' | 'paw'; label?: string; scale?: number; grow?: number; char?: string; color?: string; small?: boolean; focus?: boolean }>;
   /** 政策圖層開著：其他特效變淡，只有 focus 的地方、通學區的圈清楚 */
   focus?: boolean;
   /** 都更的基地範圍（at 時淡入） */
@@ -118,7 +118,10 @@ const MAP_DRAGON_SVG =
     return `<path class="wb-paddle" d="M${x} -4.5L${x + 3} -9"/><circle class="wb-head" cx="${x}" cy="-1.2" r="1.6"/>`;
   }).join('');
 /** 冒出來的東西（跟 radar.ts 一樣的畫法，顏色在 styles.css） */
-const MAP_ICON_SVG: Record<'hut' | 'stadium' | 'dome' | 'star' | 'wetland' | 'archbridge', string> = {
+const MAP_ICON_SVG: Record<'hut' | 'stadium' | 'dome' | 'star' | 'wetland' | 'archbridge' | 'chest' | 'chestlock' | 'paw', string> = {
+  chest: '<path class="ch-glow" d="M-7 -15l1.6 -4.5M0 -16V-21M7 -15l-1.6 -4.5"/><path class="ch-lid" d="M-11 -4L-9 -12H9L11 -4Z"/><path class="ch-body" d="M-12 -4H12V8H-12Z"/><path class="ch-band" d="M-12 0H12M-7 -4V8M7 -4V8"/><circle class="ch-gem" cx="0" cy="-8" r="2.6"/>',
+  chestlock: '<path class="ch-lid" d="M-12 -4Q-12 -12 0 -12Q12 -12 12 -4Z"/><path class="ch-body" d="M-12 -4H12V8H-12Z"/><path class="ch-band" d="M-12 -4H12M-7 -10.5V8M7 -10.5V8"/><path class="ch-lock" d="M-3 -3H3V3.5H-3Z"/><path class="ch-shackle" d="M-1.8 -3V-5.5A1.8 1.8 0 0 1 1.8 -5.5V-3"/>',
+  paw: '<ellipse class="pw" cx="0" cy="4" rx="6.5" ry="5.5"/><ellipse class="pw" cx="-8" cy="-3" rx="2.8" ry="3.6" transform="rotate(-20 -8 -3)"/><ellipse class="pw" cx="-3" cy="-8" rx="2.8" ry="3.8" transform="rotate(-6 -3 -8)"/><ellipse class="pw" cx="3" cy="-8" rx="2.8" ry="3.8" transform="rotate(6 3 -8)"/><ellipse class="pw" cx="8" cy="-3" rx="2.8" ry="3.6" transform="rotate(20 8 -3)"/>',
   archbridge: '<path class="ic-stone" d="M-16 -3H16V6H11A6 6 0 0 0 1 6H-1A6 6 0 0 0 -11 6H-16Z"/><path class="ic-stone-line" d="M-16 0H16M-6 -3V0M6 -3V0"/><path class="ic-lamp" d="M-13 -3V-8M0 -3V-8M13 -3V-8"/><circle class="ic-lamp-top" cx="-13" cy="-9" r="1.6"/><circle class="ic-lamp-top" cx="0" cy="-9" r="1.6"/><circle class="ic-lamp-top" cx="13" cy="-9" r="1.6"/>',
   wetland: '<ellipse class="ic-pond" cx="0" cy="4" rx="11" ry="4.5"/><path class="ic-reed" d="M-6 4V-7M-2 4V-11M2 4V-6M6 4V-9"/><path class="ic-reed-top" d="M-6 -7l1 -3.5M-2 -11l1 -3.5M2 -6l1 -3.5M6 -9l1 -3.5"/>',
   hut: '<path class="ic-roof" d="M-9 -1L0 -11L9 -1Z"/><path class="ic-wall" d="M-7 -1H7V7H-7Z"/><path class="ic-door" d="M-2 7V2H2V7Z"/><path class="ic-flag" d="M0 -11V-17M0 -17H5L3.5 -15L5 -13H0"/>',
