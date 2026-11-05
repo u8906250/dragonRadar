@@ -1,7 +1,7 @@
 import type { Env } from './env';
 import { fetchThreadsProfile, profileCandidates, profileHintText, type ThreadsProfile } from './sources/profile';
 import { adoptedTags } from './learnedTags';
-import { ACTIVITY_SPEC, applySupplementDate, reconcileRouteStops, closedWeekdays, slotWeekdays, dropBroughtItem, dropSelfPlace, extractFromPost, localizeTimes, missingActivityParts, openWeekdaysFromText, splitDropTimes, splitMultiDay, splitWeekdayWeekend, spotHoursFromText, startNowForDeadline, guessedMidnight, localToUnix, MODULE_TAGS, postTags, regionTimeZone, timeZoneOf, topicExtra, untilInText, weekdaysInText, type ActivityPart, type EventKind, type ExtractedEvent, type ExtractSpec } from './extract';
+import { ACTIVITY_SPEC, applySupplementDate, reconcileRouteStops, ROUTE_WORDS, closedWeekdays, slotWeekdays, dropBroughtItem, dropSelfPlace, extractFromPost, localizeTimes, missingActivityParts, openWeekdaysFromText, splitDropTimes, splitMultiDay, splitWeekdayWeekend, spotHoursFromText, startNowForDeadline, guessedMidnight, localToUnix, MODULE_TAGS, postTags, regionTimeZone, timeZoneOf, topicExtra, untilInText, weekdaysInText, type ActivityPart, type EventKind, type ExtractedEvent, type ExtractSpec } from './extract';
 import { cityOfHouse, geocodeAddress, parseTwAddress, type TwAddress } from './address';
 import { SESSION_SPEC } from './badminton';
 import { FOOD_SPEC } from './food';
@@ -1028,7 +1028,7 @@ export async function planManual(env: Env, acts: ManualActivity[], now: number, 
 }
 
 /** 車掃、掃街、車隊：貼文有這些字、同一天讀出好幾站的，合成一條路線 */
-export const ROUTE_RE = /車掃|掃街|車隊/;
+export const ROUTE_RE = ROUTE_WORDS;
 /** 車掃的每一站：預計經過前 10 分鐘到經過後 15 分鐘算「經過中」 */
 export const ROUTE_LEAD_SEC = 10 * 60;
 export const ROUTE_KEEP_SEC = 15 * 60;
@@ -1062,6 +1062,8 @@ export function markRoutes(items: PlanItem[], text: string, routeTitle: string |
   for (const [key, list] of days) {
     if (list.length < 2) continue;
     list.sort((a, b) => a.at - b.at);
+    // 各站都是同一個時間（貼文只寫出發時間）：照順序和距離推算預計經過的時間（v1.538 使用者選「A 推算」）
+    if (list.length >= 3 && list.every((st) => st.at === list[0].at)) estimateStopTimes(list, kw);
     // 兩個不同的站定位在同一點（40 m 內）：其中一站多半查錯了（模型把別站的地名套過來）。
     // 查詢沒寫到自己站名的那站不放上雷達，請回報的人標位置；分不出來就算後面那站
     const core = (name: string): string => [...name].slice(-3).join('');
@@ -1125,10 +1127,34 @@ export function markRoutes(items: PlanItem[], text: string, routeTitle: string |
         Object.assign(p, { title: stopTitle, start_at: at - ROUTE_LEAD_SEC, end_at: at + ROUTE_KEEP_SEC, end_open: false });
         return;
       }
-      if (it.fail) it.fail = { ...it.fail, title: stopTitle };
+      if (it.fail) it.fail = { ...it.fail, title: stopTitle, ...(it.fail.startAt !== undefined ? { startAt: at } : {}) };
     });
   }
   return items;
+}
+
+/** 推算各站時間：騎車時速 12 km、健走 4 km、其他（車掃、掃街、車隊）15 km；直線距離乘 1.3 當作路上的距離，每一站停 10 分鐘；沒有位置的站當作 1.5 km */
+const ROUTE_KMH = (kw: string): number => (/順騎|騎車|單車|騎行|鐵馬/.test(kw) ? 12 : /健走/.test(kw) ? 4 : 15);
+const ROUTE_DWELL_SEC = 10 * 60;
+/**
+ * 路線各站都只寫了出發時間：第一站是出發時間，後面照順序、距離推算預計經過的時間（時間表上寫「約 08:35」）。
+ * 第一站以外沒有位置的站（查不到、只定位到鄉鎮區）也推算時間，距離當作 1.5 km
+ */
+export function estimateStopTimes(list: Array<{ it: PlanItem; at: number }>, kw: string): void {
+  const kmh = ROUTE_KMH(kw);
+  const ll = (it: PlanItem): { lat: number; lng: number } | null => {
+    const p = it.plan;
+    return p && p.lat !== null && p.lng !== null && !p.approx_area ? { lat: p.lat, lng: p.lng } : null;
+  };
+  let t = list[0].at;
+  let prev = ll(list[0].it);
+  for (let i = 1; i < list.length; i++) {
+    const cur = ll(list[i].it);
+    const km = prev && cur ? (distM(prev, cur) / 1000) * 1.3 : 1.5;
+    t += Math.round((km / kmh) * 3600) + (i > 1 ? ROUTE_DWELL_SEC : 0);
+    list[i].at = t;
+    if (cur) prev = cur;
+  }
 }
 
 /**

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { cleanTopic, guessedMidnight, missingActivityParts, normalizeActivities, reconcileRouteStops, routeStopLines, type ExtractedEvent } from '../src/extract';
-import { applyManualFixes, atLocalTimes, markRoutes, startAtPostTime, profilePlanBetter, sortStops, stopNameOf, withoutStop, type ManualFix, type PlanItem } from '../src/events';
+import { applyManualFixes, atLocalTimes, estimateStopTimes, markRoutes, startAtPostTime, profilePlanBetter, sortStops, stopNameOf, withoutStop, type ManualFix, type PlanItem } from '../src/events';
 import { parseIsoToUnix } from '../src/util';
 import type { Env } from '../src/env';
 import { editItemsOf, editSummary, notListedWhy, parseEditItems, ReportError, reportModules, routePreviews } from '../src/reports';
@@ -237,6 +237,41 @@ describe('atLocalTimes', () => {
     expect(us.endAt).toBe(Date.UTC(2026, 9, 28, 20, 0) / 1000);
     const tw = { title: 'B', startAt: tpe(11), endAt: null, place: '台北市中正區忠孝東路二段94號', lat: null, lng: null };
     expect(await atLocalTimes(env, [tw])).toEqual([tw]);
+  });
+});
+
+describe('順騎：各站只寫出發時間，照距離推算', () => {
+  // 2026-11-08 08:00（台北）
+  const T8 = Date.UTC(2026, 10, 8, 0) / 1000;
+  const at = (title: string, lat: number, lng: number): PlanItem => ({
+    group: 0,
+    plan: { kind: 'activity', title, item: null, start_at: T8, end_at: T8 + 7200, place_text: title, place_query: title, lat, lng, confidence: 1, all_day: false, spot: false, approx_area: null, end_open: true, until_open: false },
+    reason: 'planned',
+  });
+  const ride = (): PlanItem[] => [at('敦化公園', 25.0601, 121.5486), at('松山機場', 25.0631, 121.5519), at('微風南京', 25.0519, 121.5444), at('臺北大巨蛋', 25.0436, 121.5597)];
+  it('makes one route and spreads the times by distance (bike 12 km/h, 10 minutes a stop)', () => {
+    const items = markRoutes(ride(), '台北順順騎｜萬安市政遺跡 11/8 08:00 出發', '台北順順騎市政之旅', T8 - 86400);
+    expect(items.every((it) => it.route)).toBe(true);
+    const times = items.map((it) => it.route!.at);
+    expect(times[0]).toBe(T8);
+    for (let i = 1; i < times.length; i++) expect(times[i]).toBeGreaterThan(times[i - 1]);
+    // 第二站：直線約 450 m × 1.3 ÷ 12 km/h ≈ 3 分鐘、出發站不停
+    expect(times[1] - T8).toBeGreaterThan(120);
+    expect(times[1] - T8).toBeLessThan(300);
+    // 第三站開始每站多停 10 分鐘
+    expect(times[2] - times[1]).toBeGreaterThan(600);
+  });
+  it('leaves stops that already have their own times alone', () => {
+    const items = ride().map((it, i) => ({ ...it, plan: { ...it.plan!, start_at: T8 + i * 1800 } }));
+    const out = markRoutes(items, '順騎', null, T8 - 86400);
+    expect(out.map((it) => it.route!.at)).toEqual([T8, T8 + 1800, T8 + 3600, T8 + 5400]);
+  });
+  it('walks slower than it rides', () => {
+    const mk = () => ride().map((it) => ({ it, at: T8 }));
+    const [bike, walk] = [mk(), mk()];
+    estimateStopTimes(bike, '順騎');
+    estimateStopTimes(walk, '健走');
+    expect(walk[3].at).toBeGreaterThan(bike[3].at);
   });
 });
 

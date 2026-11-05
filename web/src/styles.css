@@ -385,11 +385,11 @@ path.map-water-glint { animation: water-flow-map 1.1s linear infinite; }
 @keyframes fp-pull { to { transform: scaleX(1.3); } }
 .radar .routes.hq-focus .route-boat.fitbus:not(.focus) .fb-dim, .hq-focus .map-fitbus:not(.focus) svg { opacity: 0.28; }
 /* 健身小巴跟著縮放（地圖照縮放的 --zoom-scale；雷達在 main.ts 的 hqFitSize），看整個文化網時退到後面（v1.528） */
-.map-fitbus svg { transform: scale(var(--zoom-scale, 1)); transform-origin: 50% 88%; }
+.map-fitbus svg { transform: scale(calc(var(--zoom-scale, 1) * 0.7)); transform-origin: 50% 88%; }
 /* 寶箱拉近變大、拉遠變小（v1.536） */
 .map-voyage-icon.chest svg, .map-voyage-icon.chestlock svg { transform: scale(var(--zoom-scale, 1)); }
 #map.fit-dim .map-voyage-icon.fitbus-stop { display: none; }
-#map.fit-dim .map-fitbus svg { transform: scale(0.45); transform-origin: 50% 88%; opacity: 0.5; }
+#map.fit-dim .map-fitbus svg { transform: scale(0.35); transform-origin: 50% 88%; opacity: 0.5; }
 #map.fit-dim path.map-fitbus-line { opacity: 0.35; }
 .radar .fitbus-route.net-dim { opacity: 0.35; }
 .radar .route-boat.fitbus.net-dim .fb-dim { opacity: 0.5; }

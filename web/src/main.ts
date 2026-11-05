@@ -3744,7 +3744,8 @@ function hqBikes(t0: number): Array<{ path: Array<[number, number]>; start: numb
 /** 拉近變大、拉遠變小（雷達）：外圈 5 km 原來的大小，0.45～1.6 倍（v1.536 使用者說「寶箱、巴士也是拉近變大、拉遠變小」；縫線也是同一個比例） */
 const hqZoomScale = (): number => Math.min(1.6, Math.max(0.45, Math.sqrt(5 / scaleKm)));
 /** 健身小巴在雷達上的大小：跟著縮放（hqZoomScale）；看整個文化網時最小（v1.528 使用者說主軸還是以文化網為主） */
-const hqFitSize = (): number => (hqNetAt !== null ? 0.45 : hqZoomScale());
+// 小台一點（v1.538 使用者說「健身小巴可以小台一點」）：跟縫線一樣是七成
+const hqFitSize = (): number => (hqNetAt !== null ? 0.35 : 0.7 * hqZoomScale());
 type HqFitbus = { path: Array<[number, number]>; start: number; lineAt: number; stopAt: number[]; stops: Array<{ at: [number, number]; label: string }>; focus: boolean; dim: boolean; intro: string };
 function hqFitbuses(t0: number): HqFitbus[] {
   if (!hq) return [];
@@ -5131,7 +5132,7 @@ function renderReportTips(): void {
     share,
     `只收${l ? ` ${l.maxAgeDays} 天內` : ''}的公開貼文。每一場活動都要讀得到做什麼、在哪裡、哪天幾點開始，缺一個就不會放上雷達。`,
     '結束時間可以不寫：沒寫的只寫幾點開始，雷達上顯示到開始後兩小時。',
-    '貼文寫了車掃、掃街或車隊，同一天又列了好幾站的，會合成一條路線：每一站從預計經過前 10 分鐘顯示到經過後 15 分鐘。只定位到鄉鎮區的站，要在地圖上標出位置才會放上雷達。',
+    '貼文寫了車掃、掃街、車隊，或騎車（順騎、單車）、健走，同一天又列了好幾站的，會合成一條路線：每一站從預計經過前 10 分鐘顯示到經過後 15 分鐘。各站沒寫時間、只寫出發時間的，照順序和距離推算（騎車時速 12 公里、健走 4 公里，每站停 10 分鐘），時間表寫「約」。只定位到鄉鎮區的站，要在地圖上標出位置才會放上雷達。',
     '貼文沒寫或判讀錯的，可以在判讀結果按「補充資料」直接改活動內容、時間、地點，位置不對可以在地圖上標。連續好幾天的活動每天各算一場（最多 6 場）。貼文最好寫出門牌地址，定位才準。',
     `原貼文刪除或改成「結束了」，雷達${l ? ` ${l.recheckMin} 分鐘內` : ''}會自動下架。`,
   ];

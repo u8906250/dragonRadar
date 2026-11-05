@@ -306,7 +306,8 @@ export function notListedWhy(items: PlanItem[]): NotListedWhy | undefined {
  * 還沒確認的回報再貼一次時，存的是舊版的判讀結果就重新判讀，不沿用（舊的原因可能已經不成立，畫面也講不出原因）
  */
 // 11：其他雷達（找工作…）也抽關鍵字（2026-11-03，之前回報、還沒確認的再貼一次要重新判讀才有）
-export const PLAN_VERSION = 11;
+// 12：騎車（順騎、單車）、健走也算路線，各站沒寫時間的填出發時間、程式照距離推算（2026-11-05）
+export const PLAN_VERSION = 12;
 
 /** 判讀好、還沒寫進雷達的資料，存在 posts.confirm_plan */
 interface StoredPlan {
