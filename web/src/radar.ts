@@ -1,5 +1,5 @@
 import type { BlipStyle, EventKind, Phase, SweepStyle } from './types';
-import { alongLine, BOAT_SVG, crackSvg, FITBUS_BODY, FITBUS_SVG, fitbusLapMs, HQ_MOTION_KM, HQ_LABEL_KM, BIKE_SVG, bikePhase, fitbusPhase, fitbusStopOffsets, fitbusStopSvg, cultureSvg, regrowSvg, serviceSvg, stitchSvg, BOAT_TITLE, boatPhase, fireworksSvg, FIREWORKS_MS, flowOut, HQ_VOYAGE_MS, RAINBOW_FLOW_TOTAL, RAINBOW_STAGGER_MS, riverHalfWidth, surge, SURGE_TOTAL, voyagePhase, voyageTimeOf } from './flow';
+import { alongLine, BOAT_SVG, crackSvg, FITBUS_BODY, FITBUS_SVG, fitbusLapMs, HQ_MOTION_KM, BIKE_SVG, HIKER_SVG, VISITOR_SVG, bikePhase, fitbusPhase, fitbusStopOffsets, fitbusStopSvg, cultureSvg, regrowSvg, serviceSvg, stitchSvg, BOAT_TITLE, boatPhase, fireworksSvg, FIREWORKS_MS, flowOut, HQ_VOYAGE_MS, RAINBOW_FLOW_TOTAL, RAINBOW_STAGGER_MS, riverHalfWidth, surge, SURGE_TOTAL, voyagePhase, voyageTimeOf } from './flow';
 
 export interface RadarItem {
   id: number;
@@ -73,11 +73,11 @@ export interface RadarRoute {
    * 一條線從頭長到尾（at 開始、REVEAL_MS 長完）：trail 山林徑（土色）、bridge 自行車橋（粗的雙線，長完有腳踏車的點在上面跑）、stars 星座（金色細線）、
    * culture 文化徑的線（color）；label 寫在尾端（文化徑寫在中間）、留著
    */
-  reveals?: Array<{ points: Array<{ bearing: number; distanceKm: number }>; at: number; kind: 'trail' | 'bridge' | 'stars' | 'culture'; label?: string; color?: string; labelAt?: number; farLabel?: boolean }>;
+  reveals?: Array<{ points: Array<{ bearing: number; distanceKm: number }>; at: number; kind: 'trail' | 'bridge' | 'stars' | 'culture'; label?: string; color?: string; labelAt?: number; hideKm?: number }>;
   /** 騎自行車的人：沿著 points 從頭騎到尾（start 開始、一趟 lap 毫秒），拉遠收起來 */
-  bikes?: Array<{ points: Array<{ bearing: number; distanceKm: number }>; start: number; lap: number }>;
+  bikes?: Array<{ points: Array<{ bearing: number; distanceKm: number }>; start: number; lap: number; kind?: 'bike' | 'hiker' | 'visitor'; color?: string }>;
   /** 健身小巴：沿著 points 繞圈（start 出發、stopAt 是各站在路線上的位置），停站時那一站冒出運動的長輩；lineAt 路線畫出來；focus 是政策按鈕（衛福）亮著 */
-  fitbus?: { points: Array<{ bearing: number; distanceKm: number }>; start: number; lineAt: number; stopAt: number[]; stops: Array<{ point: { bearing: number; distanceKm: number }; label: string }>; focus?: boolean; size?: number; dim?: boolean };
+  fitbuses?: Array<{ points: Array<{ bearing: number; distanceKm: number }>; start: number; lineAt: number; stopAt: number[]; stops: Array<{ point: { bearing: number; distanceKm: number }; label: string }>; focus?: boolean; size?: number; dim?: boolean }>;
   /** 縫合（市民大道）：at 裂縫畫出來、healAt 縫完變淡；stitches 一個一個縫（along 是路上的下一點，算方向）；walkers 人流小點從 from 走到 to */
   seams?: Array<{
     points: Array<{ bearing: number; distanceKm: number }>;
@@ -100,7 +100,7 @@ export interface RadarRoute {
    * 一個東西冒出來（at）：hut 登山中心、stadium 足球場、dome 運動中心、star 星星、regrow 樹樁（grow 時長回大樹）、culture 文化徑的點（char、color）；
    * label 留著（small 是寫在下面的小字，跟別的小字重疊就不寫）
    */
-  icons?: Array<{ bearing: number; distanceKm: number; at: number; kind: 'hut' | 'stadium' | 'dome' | 'bigdome' | 'star' | 'regrow' | 'culture' | 'service' | 'wetland' | 'archbridge' | 'chest' | 'chestlock' | 'paw' | 'umusic' | 'uart' | 'uexhibit' | 'uyouth' | 'ushop' | 'fitbus'; label?: string; farLabel?: boolean; scale?: number; grow?: number; char?: string; color?: string; small?: boolean; focus?: boolean }>;
+  icons?: Array<{ bearing: number; distanceKm: number; at: number; kind: 'hut' | 'stadium' | 'dome' | 'bigdome' | 'star' | 'regrow' | 'culture' | 'service' | 'wetland' | 'archbridge' | 'chest' | 'chestlock' | 'paw' | 'umusic' | 'uart' | 'uexhibit' | 'uyouth' | 'ushop' | 'fitbus'; label?: string; hideKm?: number; scale?: number; grow?: number; char?: string; color?: string; small?: boolean; focus?: boolean }>;
   /** 政策圖層開著：其他特效變淡，只有 focus 的地方、通學區的圈清楚 */
   focus?: boolean;
   /** 都更的基地範圍（at 時淡入） */
@@ -2198,10 +2198,11 @@ export class Radar {
       for (const w of sm.walkers) {
         const [a, b] = [xy(w.from), xy(w.to)];
         const d = `M${a.x.toFixed(1)} ${a.y.toFixed(1)}L${b.x.toFixed(1)} ${b.y.toFixed(1)}`;
-        const gap = (12 * k).toFixed(2);
+        // 點大一點、隔開一點，5 km 也看得出在走（v1.531 使用者說「縫合的人流動畫看不出來」）
+        const gap = (15 * k).toFixed(2);
         const delay = `animation-delay:${Math.round(w.at - now)}ms,${Math.round(w.at - now)}ms`;
-        g.appendChild(el('path', { class: 'seam-walkers under', d, style: `stroke-width:${(6.4 * k).toFixed(2)};stroke-dasharray:0 ${gap};--p:${gap}px;${delay}` }));
-        g.appendChild(el('path', { class: `seam-walkers${w.south ? ' south' : ''}`, d, style: `stroke-width:${(4.4 * k).toFixed(2)};stroke-dasharray:0 ${gap};--p:${gap}px;${delay}` }));
+        g.appendChild(el('path', { class: 'seam-walkers under', d, style: `stroke-width:${(8.4 * k).toFixed(2)};stroke-dasharray:0 ${gap};--p:${gap}px;${delay}` }));
+        g.appendChild(el('path', { class: `seam-walkers${w.south ? ' south' : ''}`, d, style: `stroke-width:${(6 * k).toFixed(2)};stroke-dasharray:0 ${gap};--p:${gap}px;${delay}` }));
       }
       for (const st of sm.stitches) {
         const [c, a] = [xy(st.center), xy(st.along)];
@@ -2228,15 +2229,10 @@ export class Radar {
       // 橋、步道下面墊一條淺色的邊，壓在樹、河上面才看得到
       if (rv.kind !== 'stars') g.appendChild(el('path', { class: 'reveal-line under', d, pathLength: '1', style: `stroke-width:${(widths[rv.kind] * k + 2 * k).toFixed(2)};animation-delay:${Math.round(rv.at - now)}ms` }));
       g.appendChild(el('path', { class: 'reveal-line', d, pathLength: '1', style: `stroke-width:${(widths[rv.kind] * k).toFixed(2)};animation-delay:${Math.round(rv.at - now)}ms${rv.color ? `;stroke:${rv.color}` : ''}` }));
-      if (rv.kind === 'trail') {
-        // 登山客：一排小點沿著步道慢慢往上走（長完才出現，跟自行車橋的腳踏車一樣的畫法；v1.527）
-        const hikers = el('path', { class: 'reveal-hikers', d, style: `stroke-width:${(2.6 * k).toFixed(2)};animation-delay:${Math.round(rv.at + REVEAL_MS - now)}ms` }) as SVGPathElement;
-        g.appendChild(hikers);
-      }
       // 自行車橋上的腳踏車改成騎自行車的人（bikes，v1.529），不畫小點
       this.routeLayer.appendChild(g);
-      // 橋下空間的字拉遠（5 km）就不寫
-      if (rv.label && !(rv.farLabel && this.scaleKm >= HQ_LABEL_KM - 0.05)) {
+      // 字拉遠就不寫（hideKm）
+      if (rv.label && !(rv.hideKm !== undefined && this.scaleKm >= rv.hideKm - 0.05)) {
         const end = rv.points[rv.labelAt !== undefined ? Math.floor((rv.points.length - 1) * rv.labelAt) : rv.kind === 'culture' ? Math.floor(rv.points.length / 2) : rv.points.length - 1];
         const p = polar(end.bearing - this.heading, this.ratio(end.distanceKm) * (R - 8));
         g.appendChild(this.stayLabel(p.x, p.y, k, rv.label, rv.at + REVEAL_MS - now, -12));
@@ -2251,8 +2247,8 @@ export class Radar {
       // 待機的小動作（v1.527 使用者說「其他地方也可以動起來，以不影響效能為主」）：包一層 idle，CSS 照種類動，相位照位置錯開
       g.innerHTML = `<g class="boat-pop" style="animation-delay:${Math.round(ic.at - now)}ms"><g class="idle idle-${ic.kind}" style="--d:-${Math.round(hash(ic.at) * 4000)}ms">${body}</g></g>`;
       this.routeLayer.appendChild(g);
-      // 寶箱、橋下空間、大巨蛋、毛孩安心養的字拉遠（5 km）就不寫
-      if (!ic.label || (ic.farLabel && this.scaleKm >= HQ_LABEL_KM - 0.05)) continue;
+      // 字拉遠就不寫（hideKm：寶箱、橋下空間、大巨蛋、毛孩 5 km；公園、運動中心、大型建築 10 km）
+      if (!ic.label || (ic.hideKm !== undefined && this.scaleKm >= ic.hideKm - 0.05)) continue;
       const shown = (ic.grow ?? ic.at) + 500 - now;
       if (ic.small) {
         // 文化徑的名字寫在圓的下面；跟已經寫的重疊就不寫（拉近就分得開，滑鼠移過去也有介紹）
@@ -2268,8 +2264,9 @@ export class Radar {
       }
     }
     // 健身小巴：綠色的巡迴路線（示意）、每一站停車時冒出運動的長輩、一台小巴沿著路線繞（moveBoats 擺位置）
-    if (r.fitbus && r.fitbus.points.length > 1) {
-      const fb = r.fitbus;
+    // 三台：萬華繞圈、河濱和山林徑來回（v1.531 使用者說「5km 內所有巴士都可以移動」）
+    for (const [bi, fb] of (r.fitbuses ?? []).entries()) {
+      if (fb.points.length < 2) continue;
       // 拉遠小台一點、看整個文化網時退到後面（v1.528 使用者說「健身小巴拉遠可以小台一點，主軸還是以文化網為主」）；太小就不畫各站運動的長輩
       const fs = fb.size ?? 1;
       const near = !this.motionFar && !fb.dim;
@@ -2307,7 +2304,7 @@ export class Radar {
         // 裡面再包一層：moveBoats 會改外層的 opacity（淡入），政策按鈕（不是衛福）亮著時變淡用裡面這層
         g.innerHTML = `<g class="fb-dim">${FITBUS_SVG}</g>`;
         this.routeLayer.appendChild(g);
-        this.boatTracks.push({ id: 'hq-fitbus', g, flip: g.querySelector('.boat-flip') as SVGGElement, xs, ys, cum, bus: { start: fb.start, stopAt: fb.stopAt }, scale: fs });
+        this.boatTracks.push({ id: `hq-fitbus-${bi}`, g, flip: g.querySelector('.boat-flip') as SVGGElement, xs, ys, cum, bus: { start: fb.start, stopAt: fb.stopAt }, scale: fs });
       }
     }
     // 騎自行車的人（河濱自行車道、迎風—港墘橋）：沿著路騎（moveBoats 擺位置），拉遠收起來
@@ -2321,10 +2318,12 @@ export class Radar {
         cum[j] = j > 0 ? cum[j - 1] + Math.hypot(xs[j] - xs[j - 1], ys[j] - ys[j - 1]) : 0;
       });
       if (!(cum[n - 1] > 0)) return;
-      const g = el('g', { class: 'route-boat hq-bike' }) as SVGGElement;
-      g.innerHTML = BIKE_SVG;
+      // 騎自行車的人、登山客（山林徑）、參觀的人（歷史記憶徑），衣服顏色照 color
+      const kind = bk.kind ?? 'bike';
+      const g = el('g', { class: `route-boat hq-bike ${kind}`, ...(bk.color ? { style: `--c:${bk.color}` } : {}) }) as SVGGElement;
+      g.innerHTML = kind === 'hiker' ? HIKER_SVG : kind === 'visitor' ? VISITOR_SVG : BIKE_SVG;
       this.routeLayer.appendChild(g);
-      this.boatTracks.push({ id: `hq-bike-${i}`, g, flip: g.querySelector('.boat-flip') as SVGGElement, xs, ys, cum, ride: { start: bk.start, lap: bk.lap }, scale: 1.1 });
+      this.boatTracks.push({ id: `hq-bike-${i}`, g, flip: g.querySelector('.boat-flip') as SVGGElement, xs, ys, cum, ride: { start: bk.start, lap: bk.lap }, scale: kind === 'bike' ? 1.1 : 1.2 });
     });
     // 滑鼠移過去的介紹：看不見的感應圈，放在最上面（main.ts 照 data-title、data-intro 顯示）
     if (r.hits?.length) {

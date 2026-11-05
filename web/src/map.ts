@@ -1,5 +1,5 @@
 import type * as Leaflet from 'leaflet';
-import { alongLine, BOAT_SVG, crackSvg, FITBUS_BODY, FITBUS_SVG, fitbusLapMs, HQ_MOTION_ZOOM, HQ_LABEL_ZOOM, BIKE_SVG, bikePhase, fitbusPhase, fitbusStopOffsets, fitbusStopSvg, cultureSvg, regrowSvg, serviceSvg, stitchSvg, boatPhase, fireworksSvg, FIREWORKS_MS, flowOut, HQ_VOYAGE_MS, RAINBOW_FLOW_TOTAL, RAINBOW_STAGGER_MS, surge, SURGE_TOTAL, voyagePhase, voyageTimeOf } from './flow';
+import { alongLine, BOAT_SVG, crackSvg, FITBUS_BODY, FITBUS_SVG, fitbusLapMs, HQ_MOTION_ZOOM, HQ_LABEL_ZOOM, BIKE_SVG, HIKER_SVG, VISITOR_SVG, bikePhase, fitbusPhase, fitbusStopOffsets, fitbusStopSvg, cultureSvg, regrowSvg, serviceSvg, stitchSvg, boatPhase, fireworksSvg, FIREWORKS_MS, flowOut, HQ_VOYAGE_MS, RAINBOW_FLOW_TOTAL, RAINBOW_STAGGER_MS, surge, SURGE_TOTAL, voyagePhase, voyageTimeOf } from './flow';
 import { haversineKm, type LatLng } from './geo';
 import type { EventKind, Phase } from './types';
 import { LANDMARKS } from './landmarks';
@@ -68,11 +68,11 @@ export interface MapRoute {
   /** 真的河（水域政策「親水」）：船沿河走時（at）水面亮成藍色、留著 */
   rivers?: Array<{ ring: Array<[number, number]>; at: number }>;
   /** 一條線從頭長到尾：trail 山林徑、bridge 自行車橋、stars 星座、culture 文化徑的線（color）；label 寫在尾端（文化徑寫在中間） */
-  reveals?: Array<{ path: Array<[number, number]>; at: number; kind: 'trail' | 'bridge' | 'stars' | 'culture'; label?: string; color?: string; labelAt?: number; farLabel?: boolean }>;
+  reveals?: Array<{ path: Array<[number, number]>; at: number; kind: 'trail' | 'bridge' | 'stars' | 'culture'; label?: string; color?: string; labelAt?: number; hideKm?: number }>;
   /** 騎自行車的人：跟雷達一樣（經緯度） */
-  bikes?: Array<{ path: Array<[number, number]>; start: number; lap: number }>;
+  bikes?: Array<{ path: Array<[number, number]>; start: number; lap: number; kind?: 'bike' | 'hiker' | 'visitor'; color?: string }>;
   /** 健身小巴：跟雷達一樣（經緯度） */
-  fitbus?: { path: Array<[number, number]>; start: number; lineAt: number; stopAt: number[]; stops: Array<{ at: [number, number]; label: string }>; focus?: boolean; dim?: boolean };
+  fitbuses?: Array<{ path: Array<[number, number]>; start: number; lineAt: number; stopAt: number[]; stops: Array<{ at: [number, number]; label: string }>; focus?: boolean; dim?: boolean }>;
   /** 縫合（市民大道）：跟雷達一樣（經緯度） */
   seams?: Array<{
     path: Array<[number, number]>;
@@ -92,7 +92,7 @@ export interface MapRoute {
   /** 文化網（點 —— 線 —— 面） */
   network?: { at: number; lines: Array<{ path: Array<[number, number]>; color: string }>; dots: Array<{ lat: number; lng: number; color: string }>; noFace?: boolean; faceR?: number };
   /** 一個東西冒出來：hut 登山中心、stadium 足球場、dome 運動中心、star 星星、regrow 樹樁（grow 時長回大樹）、culture 文化徑的點（small 的名字地圖上不寫，滑鼠移過去看介紹） */
-  icons?: Array<{ lat: number; lng: number; at: number; kind: 'hut' | 'stadium' | 'dome' | 'bigdome' | 'star' | 'regrow' | 'culture' | 'service' | 'wetland' | 'archbridge' | 'chest' | 'chestlock' | 'paw' | 'umusic' | 'uart' | 'uexhibit' | 'uyouth' | 'ushop' | 'fitbus'; label?: string; farLabel?: boolean; scale?: number; grow?: number; char?: string; color?: string; small?: boolean; focus?: boolean }>;
+  icons?: Array<{ lat: number; lng: number; at: number; kind: 'hut' | 'stadium' | 'dome' | 'bigdome' | 'star' | 'regrow' | 'culture' | 'service' | 'wetland' | 'archbridge' | 'chest' | 'chestlock' | 'paw' | 'umusic' | 'uart' | 'uexhibit' | 'uyouth' | 'ushop' | 'fitbus'; label?: string; hideKm?: number; scale?: number; grow?: number; char?: string; color?: string; small?: boolean; focus?: boolean }>;
   /** 政策圖層開著：其他特效變淡，只有 focus 的地方、通學區的圈清楚 */
   focus?: boolean;
   /** 都更的基地範圍（at 時淡入） */
@@ -338,6 +338,8 @@ export class MapView {
         this.el.classList.toggle('hq-far', this.motionFar);
         // 寶箱、橋下空間、大巨蛋、毛孩安心養的字拉遠（縮放 14 以下）不寫
         this.el.classList.toggle('label-far', map.getZoom() < HQ_LABEL_ZOOM);
+        // 公園、運動中心、大型建築的字拉得更遠（縮放 13 以下，雷達 10 km）才不寫
+        this.el.classList.toggle('label-far10', map.getZoom() < HQ_LABEL_ZOOM - 1);
       };
       map.on('zoomend', fitScale);
       fitScale();
@@ -648,7 +650,7 @@ export class MapView {
   setRoutes(routes: MapRoute[]): void {
     const sig = (rs: MapRoute[]): string =>
       // 洋流總部的特效：文化網、政策圖層（多出來的地方、通學區的圈）開關時也要重畫
-      JSON.stringify(rs.map((r) => [r.id, r.state, r.flowAt ?? null, r.segments.map((x) => [x.people, x.target, x.path.length, !!x.passed]), r.turns ?? [], !!r.boat, r.voyage ?? null, r.network?.at ?? null, r.icons?.length ?? 0, r.seams?.length ?? 0, r.fitbus?.focus ?? null, r.circles?.length ?? 0, r.sites?.length ?? 0, !!r.focus, r.riverOut !== undefined && Date.now() > r.riverOut + 1600]));
+      JSON.stringify(rs.map((r) => [r.id, r.state, r.flowAt ?? null, r.segments.map((x) => [x.people, x.target, x.path.length, !!x.passed]), r.turns ?? [], !!r.boat, r.voyage ?? null, r.network?.at ?? null, r.icons?.length ?? 0, r.seams?.length ?? 0, r.fitbuses?.[0]?.focus ?? null, r.circles?.length ?? 0, r.sites?.length ?? 0, !!r.focus, r.riverOut !== undefined && Date.now() > r.riverOut + 1600]));
     if (sig(routes) === sig(this.routes)) return;
     this.routes = routes;
     this.pushRoutes();
@@ -905,7 +907,7 @@ export class MapView {
     this.map?.getContainer().classList.toggle('hq-focus', !!r.focus);
     // 待機的小動作等洋流號到了、河淡掉才開始（v1.527）
     // 看整個文化網時健身小巴退到後面（小、淡，各站不畫）
-    this.el.classList.toggle('fit-dim', !!r.fitbus?.dim);
+    this.el.classList.toggle('fit-dim', !!r.fitbuses?.some((f) => f.dim));
     this.map?.getContainer().classList.toggle('hq-idle', r.riverOut !== undefined && Date.now() > r.riverOut + 1000);
     const L = this.L;
     const layer = this.routeLayer;
@@ -1041,8 +1043,8 @@ export class MapView {
       if (sm.path.length < 2) continue;
       // 不畫整條深色的帶子（v1.523 使用者說有點可怕），只在要縫的地方畫淡淡的裂縫
       for (const w of sm.walkers) {
-        for (const [color, weight] of [['#fff', 6.4], [w.south ? '#ff8a5c' : '#3a6fd8', 4.4]] as const) {
-          const l = L.polyline([w.from, w.to], { color, weight, opacity: 1, lineCap: 'round', dashArray: '0 12', interactive: false, className: 'map-seam-walkers' });
+        for (const [color, weight] of [['#fff', 8.4], [w.south ? '#ff8a5c' : '#3a6fd8', 6]] as const) {
+          const l = L.polyline([w.from, w.to], { color, weight, opacity: 1, lineCap: 'round', dashArray: '0 15', interactive: false, className: 'map-seam-walkers' });
           layer.addLayer(l);
           const e = l.getElement() as SVGElement | undefined;
           if (e) e.style.animationDelay = `${Math.round(w.at - now)}ms,${Math.round(w.at - now)}ms`;
@@ -1075,15 +1077,8 @@ export class MapView {
         e.setAttribute('pathLength', '1');
         e.style.animationDelay = `${Math.round(rv.at - now)}ms`;
       }
-      if (rv.kind === 'trail') {
-        // 登山客：一排小點沿著步道慢慢往上走（v1.527）
-        const hikers = L.polyline(rv.path, { color: '#7a4a1a', weight: 3.4, dashArray: '0 14', lineCap: 'round', interactive: false, className: 'map-reveal-hikers' });
-        layer.addLayer(hikers);
-        const e = hikers.getElement() as SVGElement | undefined;
-        if (e) e.style.animationDelay = `${Math.round(rv.at + 2200 - now)}ms`;
-      }
       // 自行車橋上的腳踏車改成騎自行車的人（bikes，v1.529），不畫小點
-      if (rv.label) this.stayLabel(rv.path[rv.labelAt !== undefined ? Math.floor((rv.path.length - 1) * rv.labelAt) : rv.kind === 'culture' ? Math.floor(rv.path.length / 2) : rv.path.length - 1], rv.label, rv.at + 2200 - now, rv.kind === 'culture' ? 22 : 32, rv.farLabel ? 'far-label' : '');
+      if (rv.label) this.stayLabel(rv.path[rv.labelAt !== undefined ? Math.floor((rv.path.length - 1) * rv.labelAt) : rv.kind === 'culture' ? Math.floor(rv.path.length / 2) : rv.path.length - 1], rv.label, rv.at + 2200 - now, rv.kind === 'culture' ? 22 : 32, rv.hideKm ? (rv.hideKm >= 10 ? 'far-label-10' : 'far-label') : '');
     }
     // 冒出來的東西：登山中心、足球場、運動中心、星星
     for (const ic of r.icons ?? []) {
@@ -1091,11 +1086,11 @@ export class MapView {
       const body = ic.kind === 'regrow' ? regrowSvg((ic.grow ?? ic.at) - now) : ic.kind === 'culture' ? cultureSvg(ic.char ?? '', ic.color ?? '#555') : ic.kind === 'service' ? serviceSvg(ic.char ?? '', ic.color ?? '#555') : MAP_ICON_SVG[ic.kind];
       const icon = L.divIcon({ className: `map-voyage-icon ${ic.kind}${ic.focus ? ' focus' : ''}`, html: `<svg viewBox="-20 -20 40 40" width="${40 * sc}" height="${40 * sc}" aria-hidden="true"><g class="boat-pop" style="animation-delay:${Math.round(ic.at - now)}ms"><g class="idle idle-${ic.kind}" style="--d:-${Math.round((((ic.at * 0.618) % 1) + 1) % 1 * 4000)}ms">${body}</g></g></svg>`, iconSize: [40 * sc, 40 * sc], iconAnchor: [20 * sc, 20 * sc] });
       layer.addLayer(L.marker([ic.lat, ic.lng], { icon, interactive: false, keyboard: false, zIndexOffset: 1300 }));
-      if (ic.label && !ic.small) this.stayLabel([ic.lat, ic.lng], ic.label, (ic.grow ?? ic.at) + 500 - now, 20 * sc + 16, ic.farLabel ? 'far-label' : '');
+      if (ic.label && !ic.small) this.stayLabel([ic.lat, ic.lng], ic.label, (ic.grow ?? ic.at) + 500 - now, 20 * sc + 16, ic.hideKm ? (ic.hideKm >= 10 ? 'far-label-10' : 'far-label') : '');
     }
     // 健身小巴：綠色的巡迴路線（示意）、停站時冒出運動的長輩、一台小巴沿著路線繞（moveBoats 擺位置）
-    if (r.fitbus && r.fitbus.path.length > 1) {
-      const fb = r.fitbus;
+    for (const [bi, fb] of (r.fitbuses ?? []).entries()) {
+      if (fb.path.length < 2) continue;
       const on = fb.focus ? ' focus' : '';
       for (const [color, weight] of [['#e8f5ee', 6], ['#2f9e6a', 3]] as const) {
         const l = L.polyline(fb.path, { color, weight, opacity: 1, lineCap: 'round', lineJoin: 'round', interactive: false, className: `map-reveal map-fitbus-line${on}` });
@@ -1123,7 +1118,7 @@ export class MapView {
         const icon = L.divIcon({ className: `map-boat map-fitbus${on}`, html: `<svg viewBox="-24 -30 48 34" width="48" height="34" aria-hidden="true">${FITBUS_SVG}</svg>`, iconSize: [48, 34], iconAnchor: [24, 30] });
         const marker = L.marker([lat[0], lng[0]], { icon, interactive: false, keyboard: false, zIndexOffset: 1260 });
         layer.addLayer(marker);
-        this.boatTracks.push({ id: 'hq-fitbus', marker, lat, lng, cum, bus: { start: fb.start, stopAt: fb.stopAt } });
+        this.boatTracks.push({ id: `hq-fitbus-${bi}`, marker, lat, lng, cum, bus: { start: fb.start, stopAt: fb.stopAt } });
       }
     }
     // 騎自行車的人（河濱自行車道、迎風—港墘橋）：沿著路騎（moveBoats 擺位置），拉遠收起來
@@ -1136,7 +1131,9 @@ export class MapView {
         cum[j] = j > 0 ? cum[j - 1] + haversineKm({ lat: lat[j - 1], lng: lng[j - 1] }, { lat: a, lng: b }) : 0;
       });
       if (!(cum[n - 1] > 0)) return;
-      const icon = L.divIcon({ className: 'map-boat map-bike', html: `<svg viewBox="-12 -20 24 22" width="27" height="25" aria-hidden="true">${BIKE_SVG}</svg>`, iconSize: [27, 25], iconAnchor: [13.5, 22.5] });
+      // 騎自行車的人、登山客（山林徑）、參觀的人（歷史記憶徑）
+      const kind = bk.kind ?? 'bike';
+      const icon = L.divIcon({ className: `map-boat map-bike ${kind}`, html: `<svg viewBox="-12 -20 24 22" width="27" height="25" aria-hidden="true"${bk.color ? ` style="--c:${bk.color}"` : ''}>${kind === 'hiker' ? HIKER_SVG : kind === 'visitor' ? VISITOR_SVG : BIKE_SVG}</svg>`, iconSize: [27, 25], iconAnchor: [13.5, 22.5] });
       const marker = L.marker([lat[0], lng[0]], { icon, interactive: false, keyboard: false, zIndexOffset: 1240 });
       layer.addLayer(marker);
       this.boatTracks.push({ id: `hq-bike-${i}`, marker, lat, lng, cum, ride: { start: bk.start, lap: bk.lap } });

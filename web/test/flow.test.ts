@@ -115,7 +115,12 @@ describe('洋流總部的特效', () => {
     }
     // 健身小巴：三站、停著的兩台都在台北市裡；各站照順序排在路線上、路線從第一站出發；有介紹；停站時不動、開車時往前
     expect(HQ_FITBUS.stops.length).toBe(3);
-    for (const p of [...HQ_FITBUS.stops, ...HQ_FITBUS.parked]) expect(inside(p.lat, p.lng)).toBe(true);
+    for (const p of HQ_FITBUS.stops) expect(inside(p.lat, p.lng)).toBe(true);
+    // 河濱、山林徑來回開的兩台：路線兩頭都在台北市裡、至少 500 公尺
+    for (const sh of HQ_FITBUS.shuttles) {
+      for (const q of [sh.path[0], sh.path[sh.path.length - 1]]) expect(inside(q[0], q[1]), sh.name).toBe(true);
+      expect(sh.lengthM).toBeGreaterThan(500);
+    }
     expect(HQ_FITBUS.stopAt[0]).toBe(0);
     for (let i = 1; i < HQ_FITBUS.stopAt.length; i++) expect(HQ_FITBUS.stopAt[i]).toBeGreaterThan(HQ_FITBUS.stopAt[i - 1]);
     expect(haversineKm({ lat: HQ_FITBUS.path[0][0], lng: HQ_FITBUS.path[0][1] }, HQ_FITBUS.stops[0])).toBeLessThan(0.05);

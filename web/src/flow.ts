@@ -224,10 +224,10 @@ export function stitchSvg(delayMs: number): string {
  * 一圈 FITBUS_DRIVE_MS + 站數 × FITBUS_STOP_MS（三站 24.6 秒）；styles.css 的 fit-show、fit-pt 照「停的時間 ÷ 一圈」= 13% 排，改時間要一起改
  */
 /**
- * 一直動的東西（健身小巴開、人流、登山客、腳踏車、圖示的待機小動作…）拉近到雷達外圈 HQ_MOTION_KM 以內、地圖縮放 HQ_MOTION_ZOOM 以上才動，
+ * 一直動的東西（健身小巴開、人流、登山客、腳踏車、圖示的待機小動作…）拉近到雷達外圈 HQ_MOTION_KM 以內、地圖縮放 HQ_MOTION_ZOOM 以上才動（v1.531 起 5 km、縮放 14：使用者說「所有動畫都跟隨 5km 的原則」），
  * 拉遠就停下來或收起來，畫面不要太亂（v1.528 使用者說「所有會動的都建議拉近到一定程度才開始動」「不希望整體畫面太亂」）；洋流號、河、冒出來的動畫照舊
  */
-export const HQ_MOTION_KM = 3;
+export const HQ_MOTION_KM = 5;
 /** 拉遠到雷達外圈 5 km、地圖縮放 14 以下，寶箱、橋下空間、大巨蛋、毛孩安心養的字不寫（v1.529 使用者說「以 5 公里為基礎，拉遠到 5 公里後…文字可以拿掉，其他留著」） */
 export const HQ_LABEL_KM = 5;
 export const HQ_LABEL_ZOOM = 14;
@@ -238,6 +238,18 @@ export function bikePhase(ms: number, lapMs: number): { at: number; alpha: numbe
   return { at: p, alpha: p < 0.06 ? p / 0.06 : p > 0.94 ? (1 - p) / 0.06 : 1 };
 }
 /** 騎自行車的人（螢幕像素，路面在 y = 0、往右騎）：黃色車架、橘色安全帽、綠色上衣，往左騎時翻過來（boat-flip） */
+/** 登山客（山林徑，v1.531 使用者說「山林徑可以畫登山人」）：帽子、背包、登山杖，往右走（往左時翻過來） */
+export const HIKER_SVG =
+  '<g class="boat-flip"><ellipse class="bk-shadow" cx="0" cy="0.4" rx="4" ry="0.9"/><g class="walk-bob">' +
+  '<path class="hk-leg" d="M-0.6 -6L-2.2 0M-0.6 -6L1.4 0"/><path class="hk-pack" d="M-3.8 -11.6H-1.2V-6.6H-3.8Z"/>' +
+  '<path class="hk-body" d="M-0.6 -11.8V-6"/><path class="hk-arm" d="M-0.6 -10.4L2 -7.6"/><path class="hk-stick" d="M2.4 -9.8L3.8 0"/>' +
+  '<circle class="hk-head" cx="-0.2" cy="-13.6" r="1.7"/><path class="hk-hat" d="M-2.4 -14H2L1.2 -15.6H-1.6Z"/></g></g>';
+/** 參觀的人（歷史記憶徑，v1.531 使用者說「歷史徑可以畫幾個參觀人」）：衣服顏色照 --c，手上拿相機 */
+export const VISITOR_SVG =
+  '<g class="boat-flip"><ellipse class="bk-shadow" cx="0" cy="0.4" rx="3.6" ry="0.9"/><g class="walk-bob">' +
+  '<path class="vs-leg" d="M0 -5.6L-1.6 0M0 -5.6L1.6 0"/><path class="vs-body" d="M0 -11.4V-5.6"/>' +
+  '<path class="vs-arm" d="M0 -10.2L2.4 -9.4"/><rect class="vs-cam" x="2.2" y="-10.6" width="2.4" height="1.7" rx="0.3"/>' +
+  '<circle class="hk-head" cx="0" cy="-13.2" r="1.7"/></g></g>';
 export const BIKE_SVG =
   '<g class="boat-flip"><ellipse class="bk-shadow" cx="0" cy="0.4" rx="8" ry="1.1"/>' +
   '<circle class="bk-wheel" cx="-5" cy="-3" r="3"/><circle class="bk-wheel" cx="5.2" cy="-3" r="3"/>' +
@@ -245,7 +257,7 @@ export const BIKE_SVG =
   '<path class="bk-bar" d="M-4.2 -8.8H-1.8M1.4 -9.4H3.6"/><path class="bk-leg" d="M-2.6 -9L0.2 -6L-1.2 -3"/>' +
   '<path class="bk-body" d="M-2.6 -9.2L0.4 -13.8L2.8 -9.6"/>' +
   '<circle class="bk-head" cx="1.4" cy="-15.8" r="2"/><path class="bk-helmet" d="M-0.7 -15.9A2.1 2.1 0 0 1 3.5 -15.9Z"/></g>';
-export const HQ_MOTION_ZOOM = 15;
+export const HQ_MOTION_ZOOM = 14;
 export const FITBUS_DRIVE_MS = 15_000;
 export const FITBUS_STOP_MS = 3_200;
 export const fitbusLapMs = (stops: number): number => FITBUS_DRIVE_MS + stops * FITBUS_STOP_MS;
