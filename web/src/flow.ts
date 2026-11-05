@@ -207,7 +207,8 @@ export function regrowSvg(growMs: number): string {
  * 用 path 不用 line（pathLength 在 line 上不是每個瀏覽器都有）
  */
 export function stitchSvg(delayMs: number): string {
-  let out = '';
+  // 縫好後上面冒一顆小愛心、慢慢淡掉（可愛風，v1.524）
+  let out = `<path class="st-heart" d="M0 -9.6C-1.7 -11.1 -3.8 -12.3 -3.8 -14.2C-3.8 -15.5 -2.8 -16.4 -1.6 -16.4C-0.8 -16.4 -0.2 -16 0 -15.4C0.2 -16 0.8 -16.4 1.6 -16.4C2.8 -16.4 3.8 -15.5 3.8 -14.2C3.8 -12.3 1.7 -11.1 0 -9.6Z" style="animation-delay:${Math.round(delayMs + 900)}ms"/>`;
   [-11, 0, 11].forEach((x, j) => {
     [[x - 3.5, -7.5, x + 3.5, 7.5], [x - 3.5, 7.5, x + 3.5, -7.5]].forEach(([x1, y1, x2, y2], m) => {
       const d = `M${x1} ${y1}L${x2} ${y2}`;
@@ -219,13 +220,12 @@ export function stitchSvg(delayMs: number): string {
 }
 
 /**
- * 裂縫（縫合市民大道還沒縫的地方）：沿著路（x 軸）一道鋸齒狀的裂縫、幾條分岔，底下一層暗暗的光一直忽明忽暗；
- * showMs 出現、healMs 淡掉（縫好以後）
+ * 還沒縫的地方（縫合市民大道）：可愛風，粉色的小虛線鋸齒（像布上「準備縫」的記號），旁邊一根小針帶著粉紅色的線；
+ * 底下淡淡的粉色光忽明忽暗（v1.524 使用者說裂痕再淡一點、走可愛風格，不要有可怕的感覺）。showMs 出現、healMs 縫好後淡掉
  */
 export function crackSvg(showMs: number, healMs: number): string {
-  const main = 'M-17 0.6L-12.5 -2.4L-8.5 1.9L-4.2 -3.1L0 2.3L4.1 -2.2L8.3 2.7L12.4 -1.7L17 0.9';
-  const branches = 'M-8.5 1.9L-10.2 5.8M0 2.3L1.6 6.3M4.1 -2.2L5.2 -6.2M-4.2 -3.1L-5.8 -6.6M12.4 -1.7L14.1 -5.2';
-  return `<g class="crack" style="animation-delay:${Math.round(showMs)}ms,${Math.round(healMs)}ms"><path class="cr-glow" d="${main}"/><path class="cr-hi" d="${main}" transform="translate(0.6 0.9)"/><path class="cr-line" d="${main}"/><path class="cr-br" d="${branches}"/></g>`;
+  const main = 'M-15 0.4L-11.2 -1.9L-7.5 1.6L-3.7 -2.1L0 1.8L3.7 -1.8L7.5 2L11.2 -1.6L15 0.6';
+  return `<g class="crack" style="animation-delay:${Math.round(showMs)}ms,${Math.round(healMs)}ms"><path class="cr-glow" d="${main}"/><path class="cr-line" d="${main}"/><g class="cr-needle" transform="translate(18.5 -3) rotate(-35)"><path class="cr-thread" d="M-5.6 0C-8 2.4 -6.2 5 -3.6 3.6"/><path class="cr-pin" d="M-5.8 0H5.2L6.6 0.0L5.2 0.6H-5.8Z"/><ellipse class="cr-eye" cx="-4.4" cy="0.3" rx="0.9" ry="0.35"/></g></g>`;
 }
 
 export function cultureSvg(char: string, color: string): string {
