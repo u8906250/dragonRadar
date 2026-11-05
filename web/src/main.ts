@@ -3269,7 +3269,13 @@ let hqNetAt: number | null = null;
 const hqCaption = document.createElement('div');
 hqCaption.className = 'hq-net-caption';
 hqCaption.hidden = true;
-const HQ_NET_CAPTION = '<b><span>點</span><span> —— 線</span><span> —— 面</span></b><small>多元的台北文化生態系</small><small>政策島：水路串起都市微森林、山徑與文化徑</small>';
+// 點、線、面各一段，跟著動畫一段一段出現（v1.516 使用者說「文化網的點線面介紹可以豐富一點」；內容照官網「台北文化徑×山林徑」）
+const HQ_NET_CAPTION =
+  '<b><span>點</span><span> —— 線</span><span> —— 面</span></b><small>多元的台北文化生態系</small>' +
+  '<small class="net-step s1"><em>點</em>一個個文化點：城市歷史記憶（艋舺、大稻埕、城內）、產業文化遺跡（茶葉、煤礦、溫泉）、多元族群、人權記憶共 30 處，加上北劍潭、東象山、南貓空三座登山觀光中心。</small>' +
+  '<small class="net-step s2"><em>線</em>延伸成「大家看得懂、走得到，也能持續經營」的文化線：6 條文化徑沿街道連起來，三條山林徑從捷運站走到登山口再上山，霧裡薛圳、大灣古河道這些老水路也串進來。</small>' +
+  '<small class="net-step s3"><em>面</em>最後交織成一面文化網絡：搭配登山觀光中心、運動驛站、文化場館、步道標示和交通票券，串起文化旅遊、生態步道、地方商圈和公共服務。對外地人，是認識台北的文化地圖；對台北人，是讓日常凝聚成城市力量的文化網絡。</small>' +
+  '<small class="net-src">政策島：水路串起都市微森林、山徑與文化徑</small>';
 document.querySelector('#stage .overlay-tl')!.appendChild(hqCaption);
 /**
  * 到站後的政策圖層（使用者選「沿路冒出來＋到站後的政策圖層」）：教育・午餐、通學區、親子、衛福，按了拉遠看全台北那幾種地方（通學區拉近到 2.5 km 才看得到 150 公尺的圈）；

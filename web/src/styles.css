@@ -501,6 +501,20 @@ path.map-water-glint { animation: water-flow-map 1.1s linear infinite; }
 .hq-net-caption.play b span:nth-child(3) { animation-delay: 2.1s; }
 @keyframes net-word { from { opacity: 0; } to { opacity: 1; } }
 .hq-net-caption small { display: block; font-size: 11.5px; color: var(--muted); line-height: 1.45; margin-top: 2px; }
+.hq-net-caption .net-step { color: var(--text); margin-top: 5px; opacity: 0; }
+.hq-net-caption .net-step em { font-style: normal; font-weight: 800; color: #b5452f; margin-right: 4px; }
+.hq-net-caption.play .net-step { animation: net-word 0.6s ease-out both; }
+.hq-net-caption.play .net-step.s2 { animation-delay: 0.9s; }
+.hq-net-caption.play .net-step.s3 { animation-delay: 2.1s; }
+.hq-net-caption .net-src { margin-top: 5px; font-size: 10.5px; }
+/* 手機：右上那排按鈕和政策按鈕會蓋住說明卡——說明卡移到上面那排按鈕下面、讓出右邊按鈕的寬度，政策按鈕縮小一點 */
+@media (max-width: 520px) {
+  .hq-net-caption { max-width: calc(100vw - 196px); margin-top: 44px; padding: 6px 8px; }
+  .hq-net-caption b { font-size: 15px; letter-spacing: 0; }
+  .hq-net-caption small { font-size: 11px; }
+  .hq-layers { max-width: 156px; }
+  .hq-panel .chip { padding: 5px 9px; font-size: 12px; }
+}
 /* 湧泉（堀仔頭）：藍色的小點、三圈漣漪一直往外冒；老水塘（雙連陂）：鬼影之後填成水 */
 .radar .voyage-spring, .map-voyage-spring { pointer-events: none; }
 .map-voyage-spring { background: none; border: 0; }
