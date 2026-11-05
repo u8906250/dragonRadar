@@ -1860,7 +1860,8 @@ export class Radar {
           // 拉遠就不寫（把樹種回來：看整個文化網時）
           if (st.hideKm !== undefined && this.scaleKm >= st.hideKm - 0.05) continue;
           const p = polar(st.bearing - this.heading, this.ratio(st.distanceKm) * (R - 8));
-          const g = el('g', { class: `voyage-stop${st.keep ? ' keep' : st.stay ? ' stay' : ''}`, transform: `translate(${p.x.toFixed(1)} ${p.y.toFixed(1)}) scale(${k.toFixed(4)})` });
+          // 區名、政策標題（把水找回來、文化徑…）最重要：手機上字疊在一起時先留這些（declutter）
+          const g = el('g', { class: `voyage-stop${st.keep ? ' keep' : st.stay ? ' stay' : ''}`, 'data-pri': '3', transform: `translate(${p.x.toFixed(1)} ${p.y.toFixed(1)}) scale(${k.toFixed(4)})` });
           const t = el('text', { y: st.keep ? 18 : (st.dy ?? -10), 'text-anchor': 'middle', style: st.keep ? '' : `animation-delay:${st.at - Date.now()}ms` });
           t.textContent = st.label;
           g.appendChild(t);
@@ -1887,7 +1888,28 @@ export class Radar {
         this.routeLayer.appendChild(g);
       }
     }
+    // 手機（窄螢幕）上字疊在一起的拿掉，畫面清爽一點（v1.537 使用者說手機縮小後特別擠）
+    if (window.matchMedia('(max-width: 600px)').matches) this.declutter();
     this.moveBoats();
+  }
+
+  /**
+   * 字不疊在一起：照重要程度（data-pri：區名、政策標題 3，地名 2，文化徑點名這類小字 1）由高到低放，跟已經放的疊到就不寫
+   * （點到、滑鼠移過去照樣有介紹）。只在手機上做，電腦的雷達大、不用
+   */
+  private declutter(): void {
+    const labels = Array.from(this.routeLayer.querySelectorAll<SVGGElement>('.voyage-stop'));
+    const pri = (g: SVGGElement): number => (g.dataset.pri ? Number(g.dataset.pri) : g.classList.contains('small') ? 1 : 2);
+    const items = labels.map((g, i) => ({ g, i, p: pri(g), r: g.getBoundingClientRect() })).filter((x) => x.r.width > 0);
+    items.sort((a, b) => b.p - a.p || a.i - b.i);
+    const placed: DOMRect[] = [];
+    const pad = 2;
+    for (const it of items) {
+      const r = it.r;
+      const hit = placed.some((q) => r.left < q.right + pad && r.right > q.left - pad && r.top < q.bottom + pad && r.bottom > q.top - pad);
+      it.g.classList.toggle('lbl-off', hit);
+      if (!hit) placed.push(r);
+    }
   }
 
   /** 洋流號：照畫面上的路線（跟 pathOf 一樣的座標）記下折線，船畫成螢幕像素的大小（moveBoats 擺位置） */

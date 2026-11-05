@@ -666,6 +666,18 @@ path.map-seam-walkers { --p: 15px; }
   .hq-layers { max-width: 156px; }
   .hq-panel .chip { padding: 5px 9px; font-size: 12px; }
 }
+/*
+ * 手機（600 以下）清爽一點（v1.537 使用者說「手機版本縮小後特別會擠在一起」）：雷達上疊在一起的字拿掉（radar.ts 的 declutter 加 lbl-off）；
+ * 說明卡先只顯示標題，按「說明 ▾」才展開；政策按鈕收成一顆「政策 ▾」，點了才展開。電腦照舊
+ */
+.radar .voyage-stop.lbl-off { display: none; }
+.hq-net-caption .cap-more, .hq-layers > .hq-layers-toggle { display: none; }
+@media (max-width: 600px) {
+  .hq-net-caption .cap-more { display: inline-block; margin-top: 4px; padding: 2px 9px; font: inherit; font-size: 11.5px; font-weight: 700; color: var(--text); background: var(--chip, #fff); border: 1.5px solid #15171c; border-radius: 999px; cursor: pointer; pointer-events: auto; }
+  .hq-net-caption:not(.open) .net-step, .hq-net-caption:not(.open) .net-src, .hq-net-caption:not(.open) .intro { display: none; }
+  .hq-layers > .hq-layers-toggle { display: inline-flex; }
+  .hq-layers:not(.open) > .chip:not(.hq-layers-toggle) { display: none; }
+}
 /* 湧泉（堀仔頭）：藍色的小點、三圈漣漪一直往外冒；老水塘（雙連陂）：鬼影之後填成水 */
 .radar .voyage-spring, .map-voyage-spring { pointer-events: none; }
 .map-voyage-spring { background: none; border: 0; }
