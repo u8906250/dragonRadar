@@ -338,8 +338,8 @@ export class MapView {
       const fitScale = (): void => {
         const s = Math.min(1, Math.max(0.45, 2 ** ((map.getZoom() - 15) / 2)));
         this.el.style.setProperty('--fit-scale', s.toFixed(3));
-        // 縫線拉近時跟著變小（v1.535）：縮放 14 原來的大小，每拉近一級小一點（最小 0.45）
-        this.el.style.setProperty('--stitch-scale', Math.min(1, Math.max(0.45, 2 ** (14 - map.getZoom()))).toFixed(3));
+        // 縫線跟著縮放：拉近變大、拉遠變小（v1.535 使用者說「縫線的放大縮小要反過來」）；縮放 14 原來的大小，0.45～1.6 倍
+        this.el.style.setProperty('--stitch-scale', Math.min(1.6, Math.max(0.45, 2 ** ((map.getZoom() - 14) / 2))).toFixed(3));
         // 拉遠了，一直動的停下來或收起來（hq-far）
         this.motionFar = map.getZoom() < HQ_MOTION_ZOOM;
         this.el.classList.toggle('hq-far', this.motionFar);
