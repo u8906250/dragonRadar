@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { fireworksSvg, HQ_SAIL_MS, HQ_VOYAGE_MS, voyagePhase, voyageTimeOf } from '../src/flow';
-import { HQ_BLOOMS, HQ_BOATS, HQ_BRIDGE, HQ_CANALS, HQ_AREAS, HQ_CULTURE, HQ_CULTURE_LINES, HQ_CULTURE_THEMES, HQ_INTROS, HQ_POLICY_LAYERS, HQ_RENEWAL, HQ_SEAM, HQ_SERVICE_KINDS, HQ_SERVICES, HQ_CHESTS, HQ_DOME, HQ_MEIJI, HQ_PAW, HQ_TAIPEI_RING, HQ_VIADUCTS, HQ_WETLANDS, HQ_PLANTINGS, HQ_PONDS, HQ_SPRINGS, HQ_STARS, HQ_TOUR, HQ_TOUR_AT, HQ_TRAILS, HQ_VENUES, HQ_VOYAGE } from '../src/hq-voyage';
+import { fireworksSvg, FITBUS_STOP_MS, fitbusPhase, fitbusStopOffsets, HQ_SAIL_MS, HQ_VOYAGE_MS, voyagePhase, voyageTimeOf } from '../src/flow';
+import { HQ_BLOOMS, HQ_BOATS, HQ_BRIDGE, HQ_CANALS, HQ_AREAS, HQ_CULTURE, HQ_CULTURE_LINES, HQ_CULTURE_THEMES, HQ_INTROS, HQ_POLICY_LAYERS, HQ_RENEWAL, HQ_SEAM, HQ_FITBUS, HQ_SERVICE_KINDS, HQ_SERVICES, HQ_CHESTS, HQ_DOME, HQ_MEIJI, HQ_PAW, HQ_TAIPEI_RING, HQ_VIADUCTS, HQ_WETLANDS, HQ_PLANTINGS, HQ_PONDS, HQ_SPRINGS, HQ_STARS, HQ_TOUR, HQ_TOUR_AT, HQ_TRAILS, HQ_VENUES, HQ_VOYAGE } from '../src/hq-voyage';
 import { LANDMARKS } from '../src/landmarks';
 import { haversineKm } from '../src/geo';
 
@@ -113,6 +113,19 @@ describe('洋流總部的特效', () => {
       for (let i = 1; i < vd.pts.length; i++) L += haversineKm({ lat: vd.pts[i - 1][0], lng: vd.pts[i - 1][1] }, { lat: vd.pts[i][0], lng: vd.pts[i][1] });
       expect(L, vd.name).toBeGreaterThan(3);
     }
+    // 健身小巴：三站、停著的兩台都在台北市裡；各站照順序排在路線上、路線從第一站出發；有介紹；停站時不動、開車時往前
+    expect(HQ_FITBUS.stops.length).toBe(3);
+    for (const p of [...HQ_FITBUS.stops, ...HQ_FITBUS.parked]) expect(inside(p.lat, p.lng)).toBe(true);
+    expect(HQ_FITBUS.stopAt[0]).toBe(0);
+    for (let i = 1; i < HQ_FITBUS.stopAt.length; i++) expect(HQ_FITBUS.stopAt[i]).toBeGreaterThan(HQ_FITBUS.stopAt[i - 1]);
+    expect(haversineKm({ lat: HQ_FITBUS.path[0][0], lng: HQ_FITBUS.path[0][1] }, HQ_FITBUS.stops[0])).toBeLessThan(0.05);
+    expect(HQ_INTROS['健身小巴']?.length ?? 0).toBeGreaterThan(20);
+    expect(HQ_INTROS['健身小巴結合']?.length ?? 0).toBeGreaterThan(20);
+    const [o1, o2] = fitbusStopOffsets(HQ_FITBUS.stopAt).slice(1);
+    expect(fitbusPhase(o1 + 100, HQ_FITBUS.stopAt).at).toBeCloseTo(HQ_FITBUS.stopAt[1]);
+    expect(fitbusPhase(o1 + FITBUS_STOP_MS + 500, HQ_FITBUS.stopAt).at).toBeGreaterThan(HQ_FITBUS.stopAt[1]);
+    expect(fitbusPhase(o2 + 100, HQ_FITBUS.stopAt).at).toBeCloseTo(HQ_FITBUS.stopAt[2]);
+    expect(fitbusPhase(-10, HQ_FITBUS.stopAt).alpha).toBe(0);
     // 縫合市民大道：三個縫線都有介紹；人流小點真的跨過高架（SOGO 在南、微風在北）；北流在台北市裡
     const civic = HQ_VIADUCTS.find((v) => v.name.startsWith('市民'))!.pts;
     const civicLat = (lng: number): number => {

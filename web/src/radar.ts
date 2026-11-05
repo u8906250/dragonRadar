@@ -1,5 +1,5 @@
 import type { BlipStyle, EventKind, Phase, SweepStyle } from './types';
-import { alongLine, BOAT_SVG, crackSvg, cultureSvg, regrowSvg, serviceSvg, stitchSvg, BOAT_TITLE, boatPhase, fireworksSvg, FIREWORKS_MS, flowOut, HQ_VOYAGE_MS, RAINBOW_FLOW_TOTAL, RAINBOW_STAGGER_MS, riverHalfWidth, surge, SURGE_TOTAL, voyagePhase, voyageTimeOf } from './flow';
+import { alongLine, BOAT_SVG, crackSvg, FITBUS_BODY, FITBUS_SVG, fitbusLapMs, fitbusPhase, fitbusStopOffsets, fitbusStopSvg, cultureSvg, regrowSvg, serviceSvg, stitchSvg, BOAT_TITLE, boatPhase, fireworksSvg, FIREWORKS_MS, flowOut, HQ_VOYAGE_MS, RAINBOW_FLOW_TOTAL, RAINBOW_STAGGER_MS, riverHalfWidth, surge, SURGE_TOTAL, voyagePhase, voyageTimeOf } from './flow';
 
 export interface RadarItem {
   id: number;
@@ -74,6 +74,8 @@ export interface RadarRoute {
    * culture 文化徑的線（color）；label 寫在尾端（文化徑寫在中間）、留著
    */
   reveals?: Array<{ points: Array<{ bearing: number; distanceKm: number }>; at: number; kind: 'trail' | 'bridge' | 'stars' | 'culture'; label?: string; color?: string; labelAt?: number }>;
+  /** 健身小巴：沿著 points 繞圈（start 出發、stopAt 是各站在路線上的位置），停站時那一站冒出運動的長輩；lineAt 路線畫出來；focus 是政策按鈕（衛福）亮著 */
+  fitbus?: { points: Array<{ bearing: number; distanceKm: number }>; start: number; lineAt: number; stopAt: number[]; stops: Array<{ point: { bearing: number; distanceKm: number }; label: string }>; focus?: boolean };
   /** 縫合（市民大道）：at 裂縫畫出來、healAt 縫完變淡；stitches 一個一個縫（along 是路上的下一點，算方向）；walkers 人流小點從 from 走到 to */
   seams?: Array<{
     points: Array<{ bearing: number; distanceKm: number }>;
@@ -96,7 +98,7 @@ export interface RadarRoute {
    * 一個東西冒出來（at）：hut 登山中心、stadium 足球場、dome 運動中心、star 星星、regrow 樹樁（grow 時長回大樹）、culture 文化徑的點（char、color）；
    * label 留著（small 是寫在下面的小字，跟別的小字重疊就不寫）
    */
-  icons?: Array<{ bearing: number; distanceKm: number; at: number; kind: 'hut' | 'stadium' | 'dome' | 'bigdome' | 'star' | 'regrow' | 'culture' | 'service' | 'wetland' | 'archbridge' | 'chest' | 'chestlock' | 'paw' | 'umusic' | 'uart' | 'uexhibit' | 'uyouth' | 'ushop'; label?: string; scale?: number; grow?: number; char?: string; color?: string; small?: boolean; focus?: boolean }>;
+  icons?: Array<{ bearing: number; distanceKm: number; at: number; kind: 'hut' | 'stadium' | 'dome' | 'bigdome' | 'star' | 'regrow' | 'culture' | 'service' | 'wetland' | 'archbridge' | 'chest' | 'chestlock' | 'paw' | 'umusic' | 'uart' | 'uexhibit' | 'uyouth' | 'ushop' | 'fitbus'; label?: string; scale?: number; grow?: number; char?: string; color?: string; small?: boolean; focus?: boolean }>;
   /** 政策圖層開著：其他特效變淡，只有 focus 的地方、通學區的圈清楚 */
   focus?: boolean;
   /** 都更的基地範圍（at 時淡入） */
@@ -138,7 +140,9 @@ const DRAGON_SVG =
     return `<path class="wb-paddle" d="M${x} -4.5L${x + 3} -9"/><circle class="wb-head" cx="${x}" cy="-1.2" r="1.6"/>`;
   }).join('');
 /** 冒出來的東西（螢幕像素，中心在 0,0；顏色在 styles.css）：登山中心是一間小屋、足球場是橢圓的場加草皮條紋、運動中心是圓頂、星星是五角星 */
-const ICON_SVG: Record<'hut' | 'stadium' | 'dome' | 'bigdome' | 'star' | 'wetland' | 'archbridge' | 'chest' | 'chestlock' | 'paw' | 'umusic' | 'uart' | 'uexhibit' | 'uyouth' | 'ushop', string> = {
+const ICON_SVG: Record<'hut' | 'stadium' | 'dome' | 'bigdome' | 'star' | 'wetland' | 'archbridge' | 'chest' | 'chestlock' | 'paw' | 'umusic' | 'uart' | 'uexhibit' | 'uyouth' | 'ushop' | 'fitbus', string> = {
+  // 健身小巴停著（河濱、山林徑）：車身往上移，圖案的中心在車子中間
+  fitbus: `<g transform="translate(0 9)">${FITBUS_BODY}</g>`,
   umusic: '<circle class="ud-bg" r="9"/><path class="ud-ink" d="M-1.5 4V-5.5L5 -7.5V2"/><ellipse class="ud-fill" cx="-3.6" cy="4.2" rx="2.6" ry="2"/><ellipse class="ud-fill" cx="2.9" cy="2.2" rx="2.6" ry="2"/>',
   uart: '<circle class="ud-bg" r="9"/><path class="ud-pal" d="M-6 2Q-8 -6 0 -6.5Q7 -6.5 6.5 -1Q6 2 3 1.5Q1 1.2 1 3.5Q1 6 -2 5.5Q-5 5 -6 2Z"/><circle class="ud-c1" cx="-3" cy="-2.6" r="1.3"/><circle class="ud-c2" cx="0.8" cy="-4" r="1.3"/><circle class="ud-c3" cx="4" cy="-2" r="1.3"/>',
   uexhibit: '<circle class="ud-bg" r="9"/><rect class="ud-frame" x="-6" y="-5" width="12" height="9.5" rx="1"/><path class="ud-mtn" d="M-4.5 3L-1.5 -1L0.8 1.6L2.4 0L4.5 3Z"/><circle class="ud-c3" cx="2.4" cy="-2.6" r="1.2"/>',
@@ -511,7 +515,7 @@ export class Radar {
   /** 點了車掃的中間點：打開那條車掃的時間表 */
   onRoute: ((id: string) => void) | null = null;
   /** 洋流號：路線在畫面上的折線（SVG 座標，cum 是每一點走了多遠）和船，每一格畫面照現在的時間擺；往哪邊開記在 boatLeft（重畫時接著用） */
-  private boatTracks: Array<{ id: string; g: SVGGElement; flip: SVGGElement; xs: Float64Array; ys: Float64Array; cum: Float64Array; voyage?: number }> = [];
+  private boatTracks: Array<{ id: string; g: SVGGElement; flip: SVGGElement; xs: Float64Array; ys: Float64Array; cum: Float64Array; voyage?: number; bus?: { start: number; stopAt: number[] } }> = [];
   /** 河流：畫面上的折線（cum 是每一點走了多遠）、每一點往左的法線和半寬（SVG 單位）、畫到哪（at，沒變就不重畫） */
   private riverTracks: Array<{ xs: Float64Array; ys: Float64Array; nx: Float64Array; ny: Float64Array; hw: Float64Array; cum: Float64Array; voyage: number; at: number; g: SVGGElement; tip: SVGPathElement[]; chunkStart: number; chunkEnd: number }> = [];
   private readonly boatLeft = new Map<string, boolean>();
@@ -1858,6 +1862,8 @@ export class Radar {
         const wrap = el('g', { class: 'route-voyage', style: `animation-duration:${HQ_VOYAGE_MS}ms;animation-delay:${r.voyage - Date.now()}ms` });
         wrap.append(...Array.from(this.routeLayer.children).slice(start));
         this.routeLayer.appendChild(wrap);
+        // 健身小巴放在河的上面（經過河的時候才不會被蓋住）
+        for (const t of this.boatTracks) if (t.bus) this.routeLayer.appendChild(t.g);
       }
       if (r.boat || r.voyage !== undefined) this.addBoat(r);
       // 終點放煙火（螢幕像素的大小，跟船一樣）
@@ -2247,6 +2253,44 @@ export class Radar {
         this.routeLayer.appendChild(this.stayLabel(p.x, p.y, k, ic.label, shown, -26 * (ic.scale ?? 1)));
       }
     }
+    // 健身小巴：綠色的巡迴路線（示意）、每一站停車時冒出運動的長輩、一台小巴沿著路線繞（moveBoats 擺位置）
+    if (r.fitbus && r.fitbus.points.length > 1) {
+      const fb = r.fitbus;
+      const on = fb.focus ? ' focus' : '';
+      const d = this.pathOf(fb.points);
+      const lg = el('g', { class: `voyage-reveal culture fitbus-route${on}` });
+      lg.append(
+        el('path', { class: 'reveal-line under', d, pathLength: '1', style: `stroke-width:${(4.4 * k).toFixed(2)};animation-delay:${Math.round(fb.lineAt - now)}ms` }),
+        el('path', { class: 'reveal-line', d, pathLength: '1', style: `stroke-width:${(2.4 * k).toFixed(2)};animation-delay:${Math.round(fb.lineAt - now)}ms;stroke:#2f9e6a` }),
+      );
+      this.routeLayer.appendChild(lg);
+      const offs = fitbusStopOffsets(fb.stopAt);
+      const lap = fitbusLapMs(fb.stopAt.length);
+      fb.stops.forEach((st, i) => {
+        const p = polar(st.point.bearing - this.heading, this.ratio(st.point.distanceKm) * (R - 8));
+        const sg = el('g', { class: `fitbus-stop${on}`, transform: `translate(${p.x.toFixed(1)} ${p.y.toFixed(1)}) scale(${k.toFixed(4)})` });
+        sg.innerHTML = fitbusStopSvg(fb.start + offs[i] - now, lap);
+        this.routeLayer.appendChild(sg);
+        const lb = this.stayLabel(p.x, p.y, k, st.label, fb.lineAt + 1200 - now, 30);
+        lb.classList.add('small');
+        if (fb.focus) lb.classList.add('focus');
+        this.routeLayer.appendChild(lb);
+      });
+      const n = fb.points.length;
+      const [xs, ys, cum] = [new Float64Array(n), new Float64Array(n), new Float64Array(n)];
+      fb.points.forEach((pt, i) => {
+        const q = polar(pt.bearing - this.heading, this.ratio(pt.distanceKm) * (R - 8));
+        [xs[i], ys[i]] = [q.x, q.y];
+        cum[i] = i > 0 ? cum[i - 1] + Math.hypot(xs[i] - xs[i - 1], ys[i] - ys[i - 1]) : 0;
+      });
+      if (cum[n - 1] > 0) {
+        const g = el('g', { class: `route-boat fitbus${on}` }) as SVGGElement;
+        // 裡面再包一層：moveBoats 會改外層的 opacity（淡入），政策按鈕（不是衛福）亮著時變淡用裡面這層
+        g.innerHTML = `<g class="fb-dim">${FITBUS_SVG}</g>`;
+        this.routeLayer.appendChild(g);
+        this.boatTracks.push({ id: 'hq-fitbus', g, flip: g.querySelector('.boat-flip') as SVGGElement, xs, ys, cum, bus: { start: fb.start, stopAt: fb.stopAt } });
+      }
+    }
     // 滑鼠移過去的介紹：看不見的感應圈，放在最上面（main.ts 照 data-title、data-intro 顯示）
     if (r.hits?.length) {
       const hg = el('g', { class: 'intro-hits' });
@@ -2271,7 +2315,8 @@ export class Radar {
       for (const t of this.riverTracks) this.drawRiver(t, voyagePhase(now - t.voyage).at);
       for (const t of this.boatTracks) {
         // 只開一趟的（洋流總部的特效）照出發的時間走，其他的一直重複開
-        const { at, alpha } = t.voyage !== undefined ? voyagePhase(now - t.voyage) : lap;
+        // 健身小巴照自己的時間表繞圈（停站、開車）
+        const { at, alpha } = t.bus ? fitbusPhase(now - t.bus.start, t.bus.stopAt) : t.voyage !== undefined ? voyagePhase(now - t.voyage) : lap;
         const p = alongLine(t.xs, t.ys, t.cum, at);
         if (p.left !== null) this.boatLeft.set(t.id, p.left);
         t.g.setAttribute('transform', `translate(${p.x.toFixed(1)} ${p.y.toFixed(1)}) scale(${k})`);

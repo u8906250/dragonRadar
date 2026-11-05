@@ -220,6 +220,65 @@ export function stitchSvg(delayMs: number): string {
 }
 
 /**
+ * 健身小巴（洋流總部的特效）：每一站停 FITBUS_STOP_MS，站和站之間照距離開（一圈開 FITBUS_DRIVE_MS），一直繞。
+ * 一圈 FITBUS_DRIVE_MS + 站數 × FITBUS_STOP_MS（三站 24.6 秒）；styles.css 的 fit-show、fit-pt 照「停的時間 ÷ 一圈」= 13% 排，改時間要一起改
+ */
+export const FITBUS_DRIVE_MS = 15_000;
+export const FITBUS_STOP_MS = 3_200;
+export const fitbusLapMs = (stops: number): number => FITBUS_DRIVE_MS + stops * FITBUS_STOP_MS;
+/** 各站開始停的時間（從出發算）：先在第一站停，再開到下一站… */
+export function fitbusStopOffsets(stopAt: number[]): number[] {
+  const out: number[] = [];
+  let t = 0;
+  stopAt.forEach((f, i) => {
+    out.push(t);
+    t += FITBUS_STOP_MS + FITBUS_DRIVE_MS * ((i + 1 < stopAt.length ? stopAt[i + 1] : 1) - f);
+  });
+  return out;
+}
+/** 健身小巴在路線上的哪裡（0～1，1 回到起點）；出發前看不到，出發後 0.6 秒淡入 */
+export function fitbusPhase(ms: number, stopAt: number[]): { at: number; alpha: number } {
+  if (ms < 0 || stopAt.length === 0) return { at: 0, alpha: 0 };
+  const alpha = Math.min(1, ms / 600);
+  let t = ms % fitbusLapMs(stopAt.length);
+  for (let i = 0; i < stopAt.length; i++) {
+    if (t < FITBUS_STOP_MS) return { at: stopAt[i], alpha };
+    t -= FITBUS_STOP_MS;
+    const next = i + 1 < stopAt.length ? stopAt[i + 1] : 1;
+    const drive = FITBUS_DRIVE_MS * (next - stopAt[i]);
+    if (t < drive) return { at: stopAt[i] + (next - stopAt[i]) * (t / drive), alpha };
+    t -= drive;
+  }
+  return { at: 0, alpha };
+}
+/** 健身小巴的樣子（螢幕像素，路面在 y = 0、車頭朝右）：白色電動小巴、綠色腰線上一個白色啞鈴、車頂電池（閃電）、深色車窗 */
+export const FITBUS_BODY =
+  '<ellipse class="fb-shadow" cx="0.4" cy="0.6" rx="14.5" ry="1.8"/>' +
+  '<path class="fb-body" d="M-14.5 -2.4V-14.6Q-14.5 -16.6 -12.5 -16.6H8.6Q11.2 -16.6 12.6 -14L14.8 -9.4Q15.4 -8.3 15.4 -7.1V-2.4Q15.4 -1 14 -1H-13.1Q-14.5 -1 -14.5 -2.4Z"/>' +
+  '<path class="fb-stripe" d="M-14.5 -8.2H15.3V-5.4H-14.5Z"/>' +
+  '<path class="fb-win" d="M-12.2 -14.6H-6.6V-10.4H-12.2ZM-5 -14.6H0.6V-10.4H-5ZM2.2 -14.6H8.4L10.6 -10.4H2.2Z"/>' +
+  '<path class="fb-db" d="M-9.4 -6.8H-3.2"/><rect class="fb-plate" x="-10.8" y="-8" width="1.6" height="2.4" rx="0.4"/><rect class="fb-plate" x="-3.6" y="-8" width="1.6" height="2.4" rx="0.4"/>' +
+  '<path class="fb-roof" d="M-8 -16.6V-18.4Q-8 -18.8 -7.6 -18.8H1.6Q2 -18.8 2 -18.4V-16.6Z"/><path class="fb-bolt" d="M-2.2 -18.3L-3.8 -17.2H-2.4L-3.6 -16.9"/>' +
+  '<circle class="fb-wheel" cx="-8.4" cy="-1.2" r="2.7"/><circle class="fb-wheel" cx="9" cy="-1.2" r="2.7"/><circle class="fb-hub" cx="-8.4" cy="-1.2" r="1"/><circle class="fb-hub" cx="9" cy="-1.2" r="1"/>' +
+  '<circle class="fb-lamp" cx="14.6" cy="-4" r="0.8"/>';
+/** 開來開去的健身小巴：名字寫在上面（不跟著左右翻），車身在 boat-flip 裡（往左開時翻過來，跟洋流號一樣） */
+export const FITBUS_SVG = `<text class="boat-label fb-name" y="-22" text-anchor="middle">健身小巴</text><g class="boat-flip">${FITBUS_BODY}</g>`;
+/**
+ * 健身小巴停站時：車子下面冒出三個長輩，兩個舉啞鈴、一個拉彈力帶，右邊飄一個「敬老卡 +1」；跟小巴同一個時鐘，
+ * 每一圈只在停這一站的時候出現（delayMs 是第一次停這一站的時間，lapMs 是一圈多久）
+ */
+export function fitbusStopSvg(delayMs: number, lapMs: number): string {
+  const person = (x: number, kind: 'db' | 'band', d: number): string =>
+    `<g transform="translate(${x} 0)"><circle class="fp-head" cy="-10.6" r="2.2"/><path class="fp-body" d="M0 -8.4V-3.6M0 -3.6L-1.9 0M0 -3.6L1.9 0"/>` +
+    (kind === 'db'
+      ? `<g class="fp-arms" style="animation-delay:${d}ms"><path class="fp-arm" d="M0 -7.4L-3 -10.4M0 -7.4L3 -10.4"/><path class="fp-db" d="M-4.3 -11.5L-1.8 -9.4M1.8 -9.4L4.3 -11.5"/></g>`
+      : `<g class="fp-band" style="animation-delay:${d}ms"><path class="fp-arm" d="M0 -7.4L-3.8 -7.6M0 -7.4L3.8 -7.6"/><path class="fp-elastic" d="M-3.8 -7.6H3.8"/></g>`) +
+    '</g>';
+  const style = `animation-duration:${lapMs}ms;animation-delay:${Math.round(delayMs)}ms`;
+  return `<g class="fit-pop" style="${style}"><g transform="translate(0 17)">${person(-9, 'db', 0)}${person(0, 'band', -300)}${person(9, 'db', -450)}</g><text class="fit-pt" x="16" y="12" style="${style}">敬老卡 +1</text></g>`;
+}
+
+/**
  * 還沒縫的地方（縫合市民大道）：可愛風，粉色的小虛線鋸齒（像布上「準備縫」的記號），旁邊一根小針帶著粉紅色的線；
  * 底下淡淡的粉色光忽明忽暗（v1.524 使用者說裂痕再淡一點、走可愛風格，不要有可怕的感覺）。showMs 出現、healMs 縫好後淡掉
  */
