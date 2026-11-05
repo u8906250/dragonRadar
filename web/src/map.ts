@@ -78,7 +78,7 @@ export interface MapRoute {
   /** 文化網（點 —— 線 —— 面） */
   network?: { at: number; lines: Array<{ path: Array<[number, number]>; color: string }>; dots: Array<{ lat: number; lng: number; color: string }>; noFace?: boolean; faceR?: number };
   /** 一個東西冒出來：hut 登山中心、stadium 足球場、dome 運動中心、star 星星、regrow 樹樁（grow 時長回大樹）、culture 文化徑的點（small 的名字地圖上不寫，滑鼠移過去看介紹） */
-  icons?: Array<{ lat: number; lng: number; at: number; kind: 'hut' | 'stadium' | 'dome' | 'star' | 'regrow' | 'culture' | 'service'; label?: string; scale?: number; grow?: number; char?: string; color?: string; small?: boolean; focus?: boolean }>;
+  icons?: Array<{ lat: number; lng: number; at: number; kind: 'hut' | 'stadium' | 'dome' | 'star' | 'regrow' | 'culture' | 'service' | 'wetland'; label?: string; scale?: number; grow?: number; char?: string; color?: string; small?: boolean; focus?: boolean }>;
   /** 政策圖層開著：其他特效變淡，只有 focus 的地方、通學區的圈清楚 */
   focus?: boolean;
   /** 都更的基地範圍（at 時淡入） */
@@ -118,7 +118,8 @@ const MAP_DRAGON_SVG =
     return `<path class="wb-paddle" d="M${x} -4.5L${x + 3} -9"/><circle class="wb-head" cx="${x}" cy="-1.2" r="1.6"/>`;
   }).join('');
 /** 冒出來的東西（跟 radar.ts 一樣的畫法，顏色在 styles.css） */
-const MAP_ICON_SVG: Record<'hut' | 'stadium' | 'dome' | 'star', string> = {
+const MAP_ICON_SVG: Record<'hut' | 'stadium' | 'dome' | 'star' | 'wetland', string> = {
+  wetland: '<ellipse class="ic-pond" cx="0" cy="4" rx="11" ry="4.5"/><path class="ic-reed" d="M-6 4V-7M-2 4V-11M2 4V-6M6 4V-9"/><path class="ic-reed-top" d="M-6 -7l1 -3.5M-2 -11l1 -3.5M2 -6l1 -3.5M6 -9l1 -3.5"/>',
   hut: '<path class="ic-roof" d="M-9 -1L0 -11L9 -1Z"/><path class="ic-wall" d="M-7 -1H7V7H-7Z"/><path class="ic-door" d="M-2 7V2H2V7Z"/><path class="ic-flag" d="M0 -11V-17M0 -17H5L3.5 -15L5 -13H0"/>',
   stadium: '<ellipse class="ic-stand" rx="16" ry="10"/><ellipse class="ic-field" rx="11" ry="6"/><path class="ic-lines" d="M0 -6V6M-11 0A11 6 0 0 0 11 0M-11 0A11 6 0 0 1 11 0"/><circle class="ic-lines" r="2"/>',
   dome: '<path class="ic-base" d="M-14 4H14V7H-14Z"/><path class="ic-dome" d="M-13 4A13 13 0 0 1 13 4Z"/><path class="ic-rib" d="M0 -9V4M-7 -7Q0 -4 7 -7"/>',

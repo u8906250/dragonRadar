@@ -3435,7 +3435,7 @@ function hqStarPoints(st: { lat: number; lng: number; count: number; radiusM: nu
 /** 樹樁比長樹早幾毫秒冒出來 */
 const HQ_STUMP_LEAD_MS = 1500;
 type HqReveal = { path: Array<[number, number]>; at: number; kind: 'trail' | 'bridge' | 'stars' | 'culture'; label?: string; color?: string };
-type HqIcon = { lat: number; lng: number; at: number; kind: 'hut' | 'stadium' | 'dome' | 'star' | 'regrow' | 'culture' | 'service'; label?: string; scale?: number; grow?: number; char?: string; color?: string; small?: boolean; focus?: boolean; hint?: { title: string; intro: string } };
+type HqIcon = { lat: number; lng: number; at: number; kind: 'hut' | 'stadium' | 'dome' | 'star' | 'regrow' | 'culture' | 'service' | 'wetland'; label?: string; scale?: number; grow?: number; char?: string; color?: string; small?: boolean; focus?: boolean; hint?: { title: string; intro: string } };
 /** 其他政見的地方：離路線多近才沿路冒出來 */
 const HQ_SERVICE_NEAR_M = 300;
 /** 離路線幾公尺（路線載入後不會變，記起來） */
@@ -3501,6 +3501,10 @@ function hqExtras(t0: number): { reveals: HqReveal[]; icons: HqIcon[] } {
     const title = /國小|國中|親子館|家庭教育中心|運動中心|健康服務中心|圖書館/.test(sv.name) ? sv.name : `${sv.name}（${K.name}）`;
     icons.push({ lat: sv.lat, lng: sv.lng, at, kind: 'service', char: K.char, color: K.color, scale: focus ? 1.25 : 0.85, focus, hint: { title, intro: '' } });
   }
+  // 濕地風廊（水域政見）：船離它最近時冒出來，第一個寫「濕地風廊」
+  hq.HQ_WETLANDS.map((w) => ({ ...w, at: hqNearestAt(t0, w) }))
+    .sort((a, b) => a.at - b.at)
+    .forEach((w, i) => icons.push({ lat: w.lat, lng: w.lng, at: w.at, kind: 'wetland', label: i === 0 ? `濕地風廊・${w.name}` : w.name, scale: 1.1, hint: { title: `${w.name}（濕地風廊）`, intro: hq!.HQ_INTROS['濕地風廊'] ?? '' } }));
   // 文化徑的線（點 —— 線）：同一條路線的點都冒出來後，用那條路線的顏色沿街道連起來
   for (const ln of hq.HQ_CULTURE_LINES) {
     const at = Math.max(...ln.stops.map((n) => seen.get(n) ?? t0)) + 400;
@@ -3592,7 +3596,7 @@ function hqHits(t0: number): Array<{ lat: number; lng: number; at: number; title
       const p = hq.HQ_PLANTINGS.find((x) => x.lat === ic.lat && x.lng === ic.lng);
       if (!p) continue;
       const outlet = hqOutlet(p.source);
-      hits.push({ lat: ic.lat, lng: ic.lng, at: ic.grow ?? ic.at, title: p.hideName ? '南港的老樹' : p.name, intro: `${p.why}${outlet ? `（${outlet}報導）` : ''}。\n綠覆率：${I['綠覆率'] ?? ''}\n都市微森林：把樹種回來；移除路樹前，市府、居民、樹木專家、保險業者、都計或樹管委員至少五方一起討論。`, dy: 14, r: 16 });
+      hits.push({ lat: ic.lat, lng: ic.lng, at: ic.grow ?? ic.at, title: p.hideName ? '南港的老樹' : p.name, intro: `${p.why}${outlet ? `（${outlet}報導）` : ''}。\n綠覆率：${I['綠覆率'] ?? ''}\n都市微森林：把樹種回來；移除路樹前，市府、居民、樹木專家、保險業者、都計或樹管委員至少五方一起討論。\n都市林治理：${I['都市林治理'] ?? ''}`, dy: 14, r: 16 });
     } else if (ic.kind === 'culture') {
       const c = hq.HQ_CULTURE.find((x) => x.lat === ic.lat && x.lng === ic.lng);
       if (!c) continue;

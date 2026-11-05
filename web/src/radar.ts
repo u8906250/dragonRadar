@@ -86,7 +86,7 @@ export interface RadarRoute {
    * 一個東西冒出來（at）：hut 登山中心、stadium 足球場、dome 運動中心、star 星星、regrow 樹樁（grow 時長回大樹）、culture 文化徑的點（char、color）；
    * label 留著（small 是寫在下面的小字，跟別的小字重疊就不寫）
    */
-  icons?: Array<{ bearing: number; distanceKm: number; at: number; kind: 'hut' | 'stadium' | 'dome' | 'star' | 'regrow' | 'culture' | 'service'; label?: string; scale?: number; grow?: number; char?: string; color?: string; small?: boolean; focus?: boolean }>;
+  icons?: Array<{ bearing: number; distanceKm: number; at: number; kind: 'hut' | 'stadium' | 'dome' | 'star' | 'regrow' | 'culture' | 'service' | 'wetland'; label?: string; scale?: number; grow?: number; char?: string; color?: string; small?: boolean; focus?: boolean }>;
   /** 政策圖層開著：其他特效變淡，只有 focus 的地方、通學區的圈清楚 */
   focus?: boolean;
   /** 都更的基地範圍（at 時淡入） */
@@ -128,7 +128,8 @@ const DRAGON_SVG =
     return `<path class="wb-paddle" d="M${x} -4.5L${x + 3} -9"/><circle class="wb-head" cx="${x}" cy="-1.2" r="1.6"/>`;
   }).join('');
 /** 冒出來的東西（螢幕像素，中心在 0,0；顏色在 styles.css）：登山中心是一間小屋、足球場是橢圓的場加草皮條紋、運動中心是圓頂、星星是五角星 */
-const ICON_SVG: Record<'hut' | 'stadium' | 'dome' | 'star', string> = {
+const ICON_SVG: Record<'hut' | 'stadium' | 'dome' | 'star' | 'wetland', string> = {
+  wetland: '<ellipse class="ic-pond" cx="0" cy="4" rx="11" ry="4.5"/><path class="ic-reed" d="M-6 4V-7M-2 4V-11M2 4V-6M6 4V-9"/><path class="ic-reed-top" d="M-6 -7l1 -3.5M-2 -11l1 -3.5M2 -6l1 -3.5M6 -9l1 -3.5"/>',
   hut: '<path class="ic-roof" d="M-9 -1L0 -11L9 -1Z"/><path class="ic-wall" d="M-7 -1H7V7H-7Z"/><path class="ic-door" d="M-2 7V2H2V7Z"/><path class="ic-flag" d="M0 -11V-17M0 -17H5L3.5 -15L5 -13H0"/>',
   stadium: '<ellipse class="ic-stand" rx="16" ry="10"/><ellipse class="ic-field" rx="11" ry="6"/><path class="ic-lines" d="M0 -6V6M-11 0A11 6 0 0 0 11 0M-11 0A11 6 0 0 1 11 0"/><circle class="ic-lines" r="2"/>',
   dome: '<path class="ic-base" d="M-14 4H14V7H-14Z"/><path class="ic-dome" d="M-13 4A13 13 0 0 1 13 4Z"/><path class="ic-rib" d="M0 -9V4M-7 -7Q0 -4 7 -7"/>',

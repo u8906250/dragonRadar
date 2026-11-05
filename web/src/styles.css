@@ -387,6 +387,9 @@ path.map-water-glint { animation: water-flow-map 1.1s linear infinite; }
 .ic-base { fill: #9aa3ad; stroke: #15171c; stroke-width: 0.8; }
 .ic-dome { fill: #4cc3e6; stroke: #15171c; stroke-width: 0.9; }
 .ic-rib { fill: none; stroke: #fff; stroke-width: 0.8; stroke-opacity: 0.8; }
+.ic-pond { fill: #4cc3e6; stroke: #15171c; stroke-width: 0.8; }
+.ic-reed { fill: none; stroke: #3f8a3a; stroke-width: 1.5; stroke-linecap: round; }
+.ic-reed-top { fill: none; stroke: #8a5a24; stroke-width: 2.2; stroke-linecap: round; }
 .ic-star { fill: #ffd43b; stroke: #a0702a; stroke-width: 0.7; stroke-linejoin: round; }
 /* 樹樁長回大樹（flow.ts 的 regrowSvg）：一開始是樹樁，船經過時樹冠從下往上彈出來 */
 .rg-trunk { fill: #8a6a4a; stroke: #15171c; stroke-width: 0.6; stroke-linejoin: round; }

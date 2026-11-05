@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { fireworksSvg, HQ_SAIL_MS, HQ_VOYAGE_MS, voyagePhase, voyageTimeOf } from '../src/flow';
-import { HQ_BLOOMS, HQ_BOATS, HQ_BRIDGE, HQ_CANALS, HQ_AREAS, HQ_CULTURE, HQ_CULTURE_LINES, HQ_CULTURE_THEMES, HQ_INTROS, HQ_POLICY_LAYERS, HQ_RENEWAL, HQ_SERVICE_KINDS, HQ_SERVICES, HQ_TAIPEI_RING, HQ_PLANTINGS, HQ_PONDS, HQ_SPRINGS, HQ_STARS, HQ_TOUR, HQ_TOUR_AT, HQ_TRAILS, HQ_VENUES, HQ_VOYAGE } from '../src/hq-voyage';
+import { HQ_BLOOMS, HQ_BOATS, HQ_BRIDGE, HQ_CANALS, HQ_AREAS, HQ_CULTURE, HQ_CULTURE_LINES, HQ_CULTURE_THEMES, HQ_INTROS, HQ_POLICY_LAYERS, HQ_RENEWAL, HQ_SERVICE_KINDS, HQ_SERVICES, HQ_TAIPEI_RING, HQ_WETLANDS, HQ_PLANTINGS, HQ_PONDS, HQ_SPRINGS, HQ_STARS, HQ_TOUR, HQ_TOUR_AT, HQ_TRAILS, HQ_VENUES, HQ_VOYAGE } from '../src/hq-voyage';
 import { LANDMARKS } from '../src/landmarks';
 import { haversineKm } from '../src/geo';
 
@@ -105,6 +105,12 @@ describe('洋流總部的特效', () => {
     expect(HQ_SERVICES.filter((x) => x.kind === '健').length).toBe(12);
     for (const k of Object.keys(HQ_SERVICE_KINDS)) expect(HQ_SERVICES.some((x) => x.kind === k), k).toBe(true);
     for (const ly of HQ_POLICY_LAYERS) for (const k of ly.kinds) expect(HQ_SERVICE_KINDS[k].intro.length).toBeGreaterThan(20);
+    // 青年：大學 20 所以上；濕地都在台北市裡、離路線 2 公里內
+    expect(HQ_SERVICES.filter((x) => x.kind === '大').length).toBeGreaterThanOrEqual(20);
+    for (const w of HQ_WETLANDS) {
+      expect(inside(w.lat, w.lng), w.name).toBe(true);
+      expect(nearRoute(w)).toBeLessThan(2);
+    }
     // 核定滿 5 年未開工的都更案：都在台北市裡、2021-11-05 以前核定、都有基地範圍
     expect(HQ_RENEWAL.length).toBe(66);
     for (const rn of HQ_RENEWAL) {
