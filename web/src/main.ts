@@ -3436,7 +3436,7 @@ function hqStarPoints(st: { lat: number; lng: number; count: number; radiusM: nu
 /** 樹樁比長樹早幾毫秒冒出來 */
 const HQ_STUMP_LEAD_MS = 1500;
 type HqReveal = { path: Array<[number, number]>; at: number; kind: 'trail' | 'bridge' | 'stars' | 'culture'; label?: string; color?: string };
-type HqIcon = { lat: number; lng: number; at: number; kind: 'hut' | 'stadium' | 'dome' | 'star' | 'regrow' | 'culture' | 'service' | 'wetland'; label?: string; scale?: number; grow?: number; char?: string; color?: string; small?: boolean; focus?: boolean; hint?: { title: string; intro: string } };
+type HqIcon = { lat: number; lng: number; at: number; kind: 'hut' | 'stadium' | 'dome' | 'star' | 'regrow' | 'culture' | 'service' | 'wetland' | 'archbridge'; label?: string; scale?: number; grow?: number; char?: string; color?: string; small?: boolean; focus?: boolean; hint?: { title: string; intro: string } };
 /** 其他政見的地方：離路線多近才沿路冒出來 */
 const HQ_SERVICE_NEAR_M = 300;
 /** 離路線幾公尺（路線載入後不會變，記起來） */
@@ -3506,6 +3506,9 @@ function hqExtras(t0: number): { reveals: HqReveal[]; icons: HqIcon[] } {
   hq.HQ_WETLANDS.map((w) => ({ ...w, at: hqNearestAt(t0, w) }))
     .sort((a, b) => a.at - b.at)
     .forEach((w, i) => icons.push({ lat: w.lat, lng: w.lng, at: w.at, kind: 'wetland', label: i === 0 ? `濕地風廊・${w.name}` : w.name, scale: 1.1, hint: { title: `${w.name}（濕地風廊）`, intro: hq!.HQ_INTROS['濕地風廊'] ?? '' } }));
+  // 重建明治橋（受訪時的主張）：船離原址最近時冒出一座石拱橋
+  const mj = hq.HQ_MEIJI;
+  icons.push({ lat: mj.lat, lng: mj.lng, at: hqNearestAt(t0, mj), kind: 'archbridge', label: '明治橋（重建）', scale: 1.1, hint: { title: '明治橋（重建）', intro: hq.HQ_INTROS['明治橋'] ?? '' } });
   // 文化徑的線（點 —— 線）：同一條路線的點都冒出來後，用那條路線的顏色沿街道連起來
   for (const ln of hq.HQ_CULTURE_LINES) {
     const at = Math.max(...ln.stops.map((n) => seen.get(n) ?? t0)) + 400;
