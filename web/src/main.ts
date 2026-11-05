@@ -1,5 +1,5 @@
 import './styles.css';
-import { HQ_SAIL_MS, HQ_STAR_MS, HQ_VOYAGE_MS, RAINBOW_EVERY_MS, voyagePhase, voyageTimeOf } from './flow';
+import { HQ_MOTION_KM, HQ_SAIL_MS, HQ_STAR_MS, HQ_VOYAGE_MS, RAINBOW_EVERY_MS, voyagePhase, voyageTimeOf } from './flow';
 import { addKeyword, collectLetter, deletePushSubscription, locateFeedbackPlace, sendFeedback, type FeedbackKind, fetchPushKey, savePushSubscription, confirmReport, editReport, locatePlace, rejectReport, supplementReport, deleteBottle, dropBottle, recycleBottle, fetchBottles, fetchEvents, fetchHealth, fetchKeywords, fetchMyBottles, fetchMyReports, fetchRoutes, pickBottle, reportBottle, reportEnded, submitLink, withdrawReport } from './api';
 import { compassSupported, startCompass } from './compass';
 import { bearingDeg, compassLabel, destination, formatKm, haversineKm, taiwanRadiusKm, type LatLng } from './geo';
@@ -1431,6 +1431,8 @@ function setSearch(q: string): void {
 }
 
 function render(): void {
+  // 洋流號暫停中：時間往後挪，畫出來的停在按暫停那一刻
+  hqCatchUp();
   // 拉遠超過全球（太空）「地圖」按鈕藏起來，拉回全球以內再出現
   viewBtn.hidden = view === 'radar' && noMapView();
   const now = nowSec();
@@ -1528,7 +1530,7 @@ function render(): void {
               icons: hqEx.icons.filter(inView).map((ic) => ({ ...ic, ...toRadarAt([ic.lat, ic.lng]) })),
               fitbus: (() => {
                 const fb = hqFitbus(hqVoyageAt!);
-                return fb && anyInView(fb.path) ? { ...fb, points: fb.path.map(toRadarAt), stops: fb.stops.map((st) => ({ point: toRadarAt(st.at), label: st.label })) } : undefined;
+                return fb && anyInView(fb.path) ? { ...fb, size: hqFitSize(), points: fb.path.map(toRadarAt), stops: fb.stops.map((st) => ({ point: toRadarAt(st.at), label: st.label })) } : undefined;
               })(),
               seams: hqEx.seams
                 .filter((sm) => anyInView(sm.path))
@@ -3138,6 +3140,12 @@ function selectLandmark(id: string | null): void {
 let hq: typeof import('./hq-voyage') | null = null;
 let hqVoyageAt: number | null = null;
 let hqVoyageTimers: number[] = [];
+/**
+ * 洋流號的時間表（離出發多久做什麼）：暫停時把計時器清掉，繼續時照剩下的時間重排（v1.528 使用者說「關閉洋流號按鈕新增暫停、繼續功能」）
+ */
+let hqEvents: Array<{ rel: number; fn: () => void; done: boolean }> = [];
+/** 暫停的時間（null 是沒暫停）：重畫、繼續時把洋流號的時間往後挪暫停了多久，畫出來的都停在按暫停那一刻 */
+let hqPausedAt: number | null = null;
 /** 到站後河幾毫秒淡完（styles.css 的 river-out 1.5 秒） */
 const HQ_RIVER_FADE_MS = 1500;
 /** 到了拉近到外圈幾公里（看得到市政府的虛線外框和煙火） */
@@ -3177,6 +3185,7 @@ function startHqVoyage(spinAt = Date.now()): void {
   for (const t of hqVoyageTimers) window.clearTimeout(t);
   window.clearInterval(hqFollowTimer);
   hqUserMoved = false;
+  hqSetPaused(false);
   let wait = 0;
   const started = Date.now();
   // 一開始：雷達外圈 HQ_START_KM、正中間在總部（本來就差不多就不動）；地圖拉到縮放 13、正中間在總部
@@ -3190,24 +3199,32 @@ function startHqVoyage(spinAt = Date.now()): void {
   hqVoyageAt = started + wait;
   const t0 = hqVoyageAt;
   // 畫面不跟著船移動（v1.507 使用者說「畫面改成不要跟著洋流號移動」；以前船快出畫面就把畫面移到船那裡）
-  hqVoyageTimers = [
+  // 時間都是離出發多久（暫停、繼續時照剩下的時間重排）
+  hqEvents = [
     // 星星轉完（出發前 0.2 秒）才開始畫
-    window.setTimeout(() => render(), Math.max(0, wait - 200)),
+    { rel: -200, fn: () => render() },
     // 河淡掉（到站 0.6 秒後、1.5 秒淡完）之後重畫一次，把看不見但波光還在動的河拿掉
-    window.setTimeout(() => render(), wait + HQ_SAIL_MS + 600 + HQ_RIVER_FADE_MS + 100),
-    window.setTimeout(() => {
-      // 到了：拉近市政府（使用者自己動過就不拉）
-      if (view === 'map') {
-        if (map.userMovedAt < started + 300) map.flyToLatLng(cityHall, 17);
-      } else if (!hqUserMoved) zoomToKm(HQ_END_KM, { lat: cityHall.lat, lng: cityHall.lng, source: 'manual' });
-    }, wait + HQ_SAIL_MS),
+    { rel: HQ_SAIL_MS + 600 + HQ_RIVER_FADE_MS + 100, fn: () => render() },
+    {
+      rel: HQ_SAIL_MS,
+      fn: () => {
+        // 到了：拉近市政府（使用者自己動過就不拉）
+        if (view === 'map') {
+          if (map.userMovedAt < started + 300) map.flyToLatLng(cityHall, 17);
+        } else if (!hqUserMoved) zoomToKm(HQ_END_KM, { lat: cityHall.lat, lng: cityHall.lng, source: 'manual' });
+      },
+    },
     // 到了、畫面停好：「看整個文化網」和政策圖層的按鈕出來（點、線都長完了）；也算「看完動畫」（中途關掉的不算，計時器被清掉了）
-    window.setTimeout(() => {
-      hqNetBtn.hidden = false;
-      hqLayersBox.hidden = false;
-      mayorProgress('watched');
-    }, wait + HQ_VOYAGE_MS),
-  ];
+    {
+      rel: HQ_VOYAGE_MS,
+      fn: () => {
+        hqNetBtn.hidden = false;
+        hqLayersBox.hidden = false;
+        mayorProgress('watched');
+      },
+    },
+  ].map((e) => ({ ...e, done: false }));
+  hqScheduleEvents();
   hqShowOff();
   hqNetBtn.hidden = true;
   hqLayersBox.hidden = true;
@@ -3224,9 +3241,56 @@ function startHqVoyage(spinAt = Date.now()): void {
   hqPanel.hidden = false;
   render();
 }
+/** 照洋流號的時間表排計時器（暫停中不排） */
+function hqScheduleEvents(): void {
+  for (const t of hqVoyageTimers) window.clearTimeout(t);
+  hqVoyageTimers = [];
+  if (hqVoyageAt === null || hqPausedAt !== null) return;
+  const t0 = hqVoyageAt;
+  for (const e of hqEvents) {
+    if (e.done) continue;
+    hqVoyageTimers.push(
+      window.setTimeout(() => {
+        e.done = true;
+        e.fn();
+      }, Math.max(0, t0 + e.rel - Date.now())),
+    );
+  }
+}
+/** 暫停中：洋流號的時間（出發、文化網、政策圖層）往後挪暫停了多久，畫出來的就停在按暫停那一刻 */
+function hqCatchUp(): void {
+  if (hqPausedAt === null || hqVoyageAt === null) return;
+  const d = Date.now() - hqPausedAt;
+  if (d <= 0) return;
+  hqVoyageAt += d;
+  if (hqNetAt !== null) hqNetAt += d;
+  if (hqLayer) hqLayer = { ...hqLayer, at: hqLayer.at + d };
+  hqPausedAt += d;
+}
+/** 暫停、繼續：CSS 動畫停住（雷達、地圖加 hq-paused），船、河、小巴不再每一格擺位置，計時器清掉；繼續時接著播 */
+function hqSetPaused(on: boolean): void {
+  if (on === (hqPausedAt !== null)) return;
+  if (on) {
+    hqPausedAt = Date.now();
+    for (const t of hqVoyageTimers) window.clearTimeout(t);
+    hqVoyageTimers = [];
+  } else {
+    hqCatchUp();
+    hqPausedAt = null;
+  }
+  radar.setPaused(on);
+  map.setPaused(on);
+  hqPauseBtn.textContent = on ? '▶ 繼續' : '⏸ 暫停';
+  hqPauseBtn.classList.toggle('on', on);
+  if (!on && hqVoyageAt !== null) {
+    hqScheduleEvents();
+    render();
+  }
+}
 /** 關閉洋流號（按鈕、Esc）：特效收起來、星星彈回來 */
 function stopHqVoyage(): void {
   if (hqVoyageAt === null) return;
+  hqSetPaused(false);
   for (const t of hqVoyageTimers) window.clearTimeout(t);
   window.clearInterval(hqFollowTimer);
   hqVoyageAt = null;
@@ -3266,11 +3330,13 @@ function mayorProgress(step: string): void {
 const hqPanel = document.createElement('div');
 hqPanel.className = 'hq-panel';
 hqPanel.hidden = true;
-hqPanel.innerHTML = '<button type="button" class="chip hq-net" hidden></button><button type="button" class="chip hq-close">✕ 關閉洋流號</button>';
+hqPanel.innerHTML = '<button type="button" class="chip hq-net" hidden></button><div class="hq-ctl"><button type="button" class="chip hq-pause">⏸ 暫停</button><button type="button" class="chip hq-close">✕ 關閉洋流號</button></div>';
 // 放在右上那排按鈕（定位、地圖／雷達切換）的下面，不蓋住按鈕；全螢幕時那排按鈕往下移，這裡跟著
 document.querySelector('#stage .overlay-tr')!.appendChild(hqPanel);
 const hqNetBtn = hqPanel.querySelector('.hq-net') as HTMLButtonElement;
 hqPanel.querySelector('.hq-close')!.addEventListener('click', stopHqVoyage);
+const hqPauseBtn = hqPanel.querySelector('.hq-pause') as HTMLButtonElement;
+hqPauseBtn.addEventListener('click', () => hqSetPaused(hqPausedAt === null));
 /**
  * 文化網（「點 —— 線 —— 面」的「面」，使用者選按鈕的做法）：按了拉遠看整個台北，文化徑的點一圈圈亮 → 線沿路亮 → 每條線、每個點往外暈開連成一片；
  * 老水路、登山步道、長回來的樹也一起（政策島：「水路串起都市微森林、山徑與文化徑」）。再按一次收起來
@@ -3298,7 +3364,7 @@ let hqLayer: { id: string; at: number } | null = null;
 const hqLayersBox = document.createElement('div');
 hqLayersBox.className = 'hq-layers';
 hqLayersBox.hidden = true;
-hqPanel.insertBefore(hqLayersBox, hqPanel.querySelector('.hq-close'));
+hqPanel.insertBefore(hqLayersBox, hqPanel.querySelector('.hq-ctl'));
 function hqShowOff(): void {
   hqNetAt = null;
   hqLayer = null;
@@ -3313,6 +3379,8 @@ function hqFlyTo(center: LatLng, km: number, mapZoom: number): void {
 }
 hqNetBtn.addEventListener('click', () => {
   if (hqVoyageAt === null) return;
+  // 暫停中按了就接著播（不然新的動畫也停在一開始）
+  hqSetPaused(false);
   const wasOn = hqNetAt !== null;
   hqShowOff();
   if (!wasOn) {
@@ -3332,6 +3400,7 @@ hqLayersBox.addEventListener('click', (e) => {
   if (!btn || hqVoyageAt === null || !hq) return;
   const ly = hq.HQ_POLICY_LAYERS.find((x) => x.id === btn.dataset.id);
   if (!ly) return;
+  hqSetPaused(false);
   const wasOn = hqLayer?.id === ly.id;
   hqShowOff();
   if (!wasOn) {
@@ -3546,7 +3615,7 @@ function hqExtras(t0: number): { reveals: HqReveal[]; icons: HqIcon[]; seams: Hq
   icons.push({ lat: hq.HQ_DOME.lat, lng: hq.HQ_DOME.lng, at: hqNearestAt(t0, hq.HQ_DOME), kind: 'bigdome', label: hq.HQ_DOME.name, scale: 1.35, hint: { title: hq.HQ_DOME.name, intro: I['大巨蛋好鄰居計畫'] ?? '' } });
   // 健身小巴停在河濱、山林徑旁（辯論說小巴可以結合河濱、山林徑；示意）；衛福按鈕亮著時一起亮
   for (const pk of hq.HQ_FITBUS.parked) {
-    icons.push({ lat: pk.lat, lng: pk.lng, at: hqNearestAt(t0, pk) + 300, kind: 'fitbus', label: `健身小巴（${pk.name}）`, small: true, scale: 0.9, focus: hqLayer?.id === 'health', hint: { title: `健身小巴：結合${pk.name}（示意）`, intro: I['健身小巴結合'] ?? '' } });
+    icons.push({ lat: pk.lat, lng: pk.lng, at: hqNearestAt(t0, pk) + 300, kind: 'fitbus', label: view === 'radar' && scaleKm > HQ_MOTION_KM ? undefined : `健身小巴（${pk.name}）`, small: true, scale: 0.9 * (view === 'map' ? 1 : hqFitSize()), focus: hqLayer?.id === 'health', hint: { title: `健身小巴：結合${pk.name}（示意）`, intro: I['健身小巴結合'] ?? '' } });
   }
   icons.push({ lat: hq.HQ_PAW.lat, lng: hq.HQ_PAW.lng, at: hqNearestAt(t0, hq.HQ_PAW) + 400, kind: 'paw', label: hq.HQ_PAW.name, scale: 0.9, hint: { title: hq.HQ_PAW.name, intro: I['毛孩安心養'] ?? '' } });
   // 高架橋下空間：沿市民大道高架、建國高架畫一條線（船離中間最近時長出來）
@@ -3592,11 +3661,13 @@ function hqExtras(t0: number): { reveals: HqReveal[]; icons: HqIcon[]; seams: Hq
  * 健身小巴（v1.525）：萬華繞一圈（龍山寺前 → 南機場社區 → 青年公園，示意）；洋流號經過龍山寺時路線畫出來，2.4 秒後小巴出發，一直繞；
  * 健身小巴分在運動政策，目的是長者健康，所以衛福按鈕亮著時一起亮（使用者問「健身小巴應該算衛福的政策？」）
  */
-function hqFitbus(t0: number): { path: Array<[number, number]>; start: number; lineAt: number; stopAt: number[]; stops: Array<{ at: [number, number]; label: string }>; focus: boolean } | null {
+/** 健身小巴在雷達上的大小：外圈 3 km 以內原來的大小，拉遠慢慢變小（最小 0.45）；看整個文化網時最小（v1.528 使用者說主軸還是以文化網為主） */
+const hqFitSize = (): number => (hqNetAt !== null ? 0.45 : Math.min(1, Math.max(0.45, Math.sqrt(3 / scaleKm))));
+function hqFitbus(t0: number): { path: Array<[number, number]>; start: number; lineAt: number; stopAt: number[]; stops: Array<{ at: [number, number]; label: string }>; focus: boolean; dim: boolean } | null {
   if (!hq) return null;
   const F = hq.HQ_FITBUS;
   const lineAt = hqNearestAt(t0, F.stops[0]);
-  return { path: F.path, start: lineAt + 2400, lineAt, stopAt: F.stopAt, stops: F.stops.map((st) => ({ at: [st.lat, st.lng] as [number, number], label: st.name })), focus: hqLayer?.id === 'health' };
+  return { path: F.path, start: lineAt + 2400, lineAt, stopAt: F.stopAt, stops: F.stops.map((st) => ({ at: [st.lat, st.lng] as [number, number], label: st.name })), focus: hqLayer?.id === 'health', dim: hqNetAt !== null };
 }
 /** 縫合市民大道：洋流號經過後，從船最靠近的那一處開始，往兩邊每 0.9 秒縫一處；縫完 0.9 秒整條變淡 */
 const SEAM_STEP_MS = 900;

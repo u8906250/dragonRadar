@@ -1,5 +1,5 @@
 import type * as Leaflet from 'leaflet';
-import { alongLine, BOAT_SVG, crackSvg, FITBUS_BODY, FITBUS_SVG, fitbusLapMs, fitbusPhase, fitbusStopOffsets, fitbusStopSvg, cultureSvg, regrowSvg, serviceSvg, stitchSvg, boatPhase, fireworksSvg, FIREWORKS_MS, flowOut, HQ_VOYAGE_MS, RAINBOW_FLOW_TOTAL, RAINBOW_STAGGER_MS, surge, SURGE_TOTAL, voyagePhase, voyageTimeOf } from './flow';
+import { alongLine, BOAT_SVG, crackSvg, FITBUS_BODY, FITBUS_SVG, fitbusLapMs, HQ_MOTION_ZOOM, fitbusPhase, fitbusStopOffsets, fitbusStopSvg, cultureSvg, regrowSvg, serviceSvg, stitchSvg, boatPhase, fireworksSvg, FIREWORKS_MS, flowOut, HQ_VOYAGE_MS, RAINBOW_FLOW_TOTAL, RAINBOW_STAGGER_MS, surge, SURGE_TOTAL, voyagePhase, voyageTimeOf } from './flow';
 import { haversineKm, type LatLng } from './geo';
 import type { EventKind, Phase } from './types';
 import { LANDMARKS } from './landmarks';
@@ -70,7 +70,7 @@ export interface MapRoute {
   /** 一條線從頭長到尾：trail 山林徑、bridge 自行車橋、stars 星座、culture 文化徑的線（color）；label 寫在尾端（文化徑寫在中間） */
   reveals?: Array<{ path: Array<[number, number]>; at: number; kind: 'trail' | 'bridge' | 'stars' | 'culture'; label?: string; color?: string; labelAt?: number }>;
   /** 健身小巴：跟雷達一樣（經緯度） */
-  fitbus?: { path: Array<[number, number]>; start: number; lineAt: number; stopAt: number[]; stops: Array<{ at: [number, number]; label: string }>; focus?: boolean };
+  fitbus?: { path: Array<[number, number]>; start: number; lineAt: number; stopAt: number[]; stops: Array<{ at: [number, number]; label: string }>; focus?: boolean; dim?: boolean };
   /** 縫合（市民大道）：跟雷達一樣（經緯度） */
   seams?: Array<{
     path: Array<[number, number]>;
@@ -247,6 +247,10 @@ export class MapView {
   private riverTracks: Array<{ pts: Array<[number, number]>; cum: Float64Array; voyage: number; at: number; lines: Leaflet.Polyline[]; chunkStart: number; chunkEnd: number; riverOut?: number }> = [];
   private readonly boatLeft = new Map<string, boolean>();
   private boatFrame = 0;
+  /** 洋流號暫停：船、河、小巴不再每一格擺位置（重畫時擺一次），CSS 動畫停住 */
+  private paused = false;
+  /** 拉遠了：一直動的停下來（健身小巴停在第一站） */
+  private motionFar = false;
   private bottleLayer: Leaflet.LayerGroup | null = null;
   private bottles: MapBottle[] = [];
   /** 座標一樣合成一個點時，每個項目對應到畫出來的那個標記 */
@@ -323,6 +327,16 @@ export class MapView {
       });
       // 自己拖、滾輪、雙指縮放：記下時間（程式移動地圖不算）
       map.on('dragstart', () => (this.lastUserMove = Date.now()));
+      // 健身小巴拉遠小台一點（v1.528）：照縮放算大小放在 CSS 變數，不用整個重畫；太小就藏起各站運動的長輩
+      const fitScale = (): void => {
+        const s = Math.min(1, Math.max(0.45, 2 ** ((map.getZoom() - 15) / 2)));
+        this.el.style.setProperty('--fit-scale', s.toFixed(3));
+        // 拉遠了，一直動的停下來或收起來（hq-far）
+        this.motionFar = map.getZoom() < HQ_MOTION_ZOOM;
+        this.el.classList.toggle('hq-far', this.motionFar);
+      };
+      map.on('zoomend', fitScale);
+      fitScale();
       for (const ev of ['wheel', 'touchstart'] as const) map.getContainer().addEventListener(ev, () => (this.lastUserMove = Date.now()), { passive: true });
       this.landmarkGroup = L.layerGroup();
       if (this.landmarksOn) this.landmarkGroup.addTo(map);
@@ -875,10 +889,10 @@ export class MapView {
   }
 
   /** 出現後留著的字（洋流總部的特效）；anchorY 是字在那一點上面幾像素 */
-  private stayLabel(at: Leaflet.LatLngExpression, text: string, delayMs: number, anchorY: number): void {
+  private stayLabel(at: Leaflet.LatLngExpression, text: string, delayMs: number, anchorY: number, extra = ''): void {
     const L = this.L;
     if (!L || !this.routeLayer) return;
-    const icon = L.divIcon({ className: 'map-voyage-stop stay', html: `<span style="animation-delay:${Math.round(delayMs)}ms">${escapeHtml(text)}</span>`, iconSize: [120, 18], iconAnchor: [60, anchorY] });
+    const icon = L.divIcon({ className: `map-voyage-stop stay${extra ? ` ${extra}` : ''}`, html: `<span style="animation-delay:${Math.round(delayMs)}ms">${escapeHtml(text)}</span>`, iconSize: [120, 18], iconAnchor: [60, anchorY] });
     this.routeLayer.addLayer(L.marker(at, { icon, interactive: false, keyboard: false, zIndexOffset: 1500 }));
   }
 
@@ -886,6 +900,8 @@ export class MapView {
   private addVoyageExtras(r: MapRoute): void {
     this.map?.getContainer().classList.toggle('hq-focus', !!r.focus);
     // 待機的小動作等洋流號到了、河淡掉才開始（v1.527）
+    // 看整個文化網時健身小巴退到後面（小、淡，各站不畫）
+    this.el.classList.toggle('fit-dim', !!r.fitbus?.dim);
     this.map?.getContainer().classList.toggle('hq-idle', r.riverOut !== undefined && Date.now() > r.riverOut + 1000);
     const L = this.L;
     const layer = this.routeLayer;
@@ -1096,7 +1112,7 @@ export class MapView {
       fb.stops.forEach((st, i) => {
         const icon = L.divIcon({ className: `map-voyage-icon fitbus-stop${on}`, html: `<svg viewBox="-30 -20 60 50" width="60" height="50" aria-hidden="true">${fitbusStopSvg(fb.start + offs[i] - now, lap)}</svg>`, iconSize: [60, 50], iconAnchor: [30, 20] });
         layer.addLayer(L.marker(st.at, { icon, interactive: false, keyboard: false, zIndexOffset: 1250 }));
-        this.stayLabel(st.at, st.label, fb.lineAt + 1200 - now, -24);
+        this.stayLabel(st.at, st.label, fb.lineAt + 1200 - now, -24, 'fit-label');
       });
       const n = fb.path.length;
       const [lat, lng, cum] = [new Float64Array(n), new Float64Array(n), new Float64Array(n)];
@@ -1214,7 +1230,9 @@ export class MapView {
       for (const t of this.riverTracks) this.drawRiver(t, voyagePhase(now - t.voyage).at);
       for (const t of this.boatTracks) {
         // 只開一趟的（洋流總部的特效）照出發的時間走，其他的一直重複開
-        const { at, alpha } = t.bus ? fitbusPhase(now - t.bus.start, t.bus.stopAt) : t.voyage !== undefined ? voyagePhase(now - t.voyage) : lap;
+        const ph = t.bus ? fitbusPhase(now - t.bus.start, t.bus.stopAt) : null;
+        // 拉遠了，健身小巴停在第一站不開
+        const { at, alpha } = t.bus && ph ? (this.motionFar ? { at: t.bus.stopAt[0], alpha: ph.alpha } : ph) : t.voyage !== undefined ? voyagePhase(now - t.voyage) : lap;
         // 經度往東是畫面的右邊
         const p = alongLine(t.lng, t.lat, t.cum, at);
         if (p.left !== null) this.boatLeft.set(t.id, p.left);
@@ -1226,8 +1244,15 @@ export class MapView {
         }
       }
     }
-    this.boatFrame = requestAnimationFrame(this.moveBoats);
+    if (!this.paused) this.boatFrame = requestAnimationFrame(this.moveBoats);
   };
+
+  /** 洋流號暫停、繼續：跟雷達一樣（地圖的容器加 hq-paused，CSS 動畫停住） */
+  setPaused(on: boolean): void {
+    this.paused = on;
+    this.el.classList.toggle('hq-paused', on);
+    if (!on) this.moveBoats();
+  }
 }
 
 /** 標位置用的小地圖：點地圖或拖標記改位置，每次改都呼叫 onPick */

@@ -223,6 +223,12 @@ export function stitchSvg(delayMs: number): string {
  * 健身小巴（洋流總部的特效）：每一站停 FITBUS_STOP_MS，站和站之間照距離開（一圈開 FITBUS_DRIVE_MS），一直繞。
  * 一圈 FITBUS_DRIVE_MS + 站數 × FITBUS_STOP_MS（三站 24.6 秒）；styles.css 的 fit-show、fit-pt 照「停的時間 ÷ 一圈」= 13% 排，改時間要一起改
  */
+/**
+ * 一直動的東西（健身小巴開、人流、登山客、腳踏車、圖示的待機小動作…）拉近到雷達外圈 HQ_MOTION_KM 以內、地圖縮放 HQ_MOTION_ZOOM 以上才動，
+ * 拉遠就停下來或收起來，畫面不要太亂（v1.528 使用者說「所有會動的都建議拉近到一定程度才開始動」「不希望整體畫面太亂」）；洋流號、河、冒出來的動畫照舊
+ */
+export const HQ_MOTION_KM = 3;
+export const HQ_MOTION_ZOOM = 15;
 export const FITBUS_DRIVE_MS = 15_000;
 export const FITBUS_STOP_MS = 3_200;
 export const fitbusLapMs = (stops: number): number => FITBUS_DRIVE_MS + stops * FITBUS_STOP_MS;

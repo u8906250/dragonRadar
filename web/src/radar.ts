@@ -1,5 +1,5 @@
 import type { BlipStyle, EventKind, Phase, SweepStyle } from './types';
-import { alongLine, BOAT_SVG, crackSvg, FITBUS_BODY, FITBUS_SVG, fitbusLapMs, fitbusPhase, fitbusStopOffsets, fitbusStopSvg, cultureSvg, regrowSvg, serviceSvg, stitchSvg, BOAT_TITLE, boatPhase, fireworksSvg, FIREWORKS_MS, flowOut, HQ_VOYAGE_MS, RAINBOW_FLOW_TOTAL, RAINBOW_STAGGER_MS, riverHalfWidth, surge, SURGE_TOTAL, voyagePhase, voyageTimeOf } from './flow';
+import { alongLine, BOAT_SVG, crackSvg, FITBUS_BODY, FITBUS_SVG, fitbusLapMs, HQ_MOTION_KM, fitbusPhase, fitbusStopOffsets, fitbusStopSvg, cultureSvg, regrowSvg, serviceSvg, stitchSvg, BOAT_TITLE, boatPhase, fireworksSvg, FIREWORKS_MS, flowOut, HQ_VOYAGE_MS, RAINBOW_FLOW_TOTAL, RAINBOW_STAGGER_MS, riverHalfWidth, surge, SURGE_TOTAL, voyagePhase, voyageTimeOf } from './flow';
 
 export interface RadarItem {
   id: number;
@@ -75,7 +75,7 @@ export interface RadarRoute {
    */
   reveals?: Array<{ points: Array<{ bearing: number; distanceKm: number }>; at: number; kind: 'trail' | 'bridge' | 'stars' | 'culture'; label?: string; color?: string; labelAt?: number }>;
   /** 健身小巴：沿著 points 繞圈（start 出發、stopAt 是各站在路線上的位置），停站時那一站冒出運動的長輩；lineAt 路線畫出來；focus 是政策按鈕（衛福）亮著 */
-  fitbus?: { points: Array<{ bearing: number; distanceKm: number }>; start: number; lineAt: number; stopAt: number[]; stops: Array<{ point: { bearing: number; distanceKm: number }; label: string }>; focus?: boolean };
+  fitbus?: { points: Array<{ bearing: number; distanceKm: number }>; start: number; lineAt: number; stopAt: number[]; stops: Array<{ point: { bearing: number; distanceKm: number }; label: string }>; focus?: boolean; size?: number; dim?: boolean };
   /** 縫合（市民大道）：at 裂縫畫出來、healAt 縫完變淡；stitches 一個一個縫（along 是路上的下一點，算方向）；walkers 人流小點從 from 走到 to */
   seams?: Array<{
     points: Array<{ bearing: number; distanceKm: number }>;
@@ -515,11 +515,15 @@ export class Radar {
   /** 點了車掃的中間點：打開那條車掃的時間表 */
   onRoute: ((id: string) => void) | null = null;
   /** 洋流號：路線在畫面上的折線（SVG 座標，cum 是每一點走了多遠）和船，每一格畫面照現在的時間擺；往哪邊開記在 boatLeft（重畫時接著用） */
-  private boatTracks: Array<{ id: string; g: SVGGElement; flip: SVGGElement; xs: Float64Array; ys: Float64Array; cum: Float64Array; voyage?: number; bus?: { start: number; stopAt: number[] } }> = [];
+  private boatTracks: Array<{ id: string; g: SVGGElement; flip: SVGGElement; xs: Float64Array; ys: Float64Array; cum: Float64Array; voyage?: number; bus?: { start: number; stopAt: number[] }; scale?: number }> = [];
   /** 河流：畫面上的折線（cum 是每一點走了多遠）、每一點往左的法線和半寬（SVG 單位）、畫到哪（at，沒變就不重畫） */
   private riverTracks: Array<{ xs: Float64Array; ys: Float64Array; nx: Float64Array; ny: Float64Array; hw: Float64Array; cum: Float64Array; voyage: number; at: number; g: SVGGElement; tip: SVGPathElement[]; chunkStart: number; chunkEnd: number }> = [];
   private readonly boatLeft = new Map<string, boolean>();
   private boatFrame = 0;
+  /** 洋流號暫停：船、河、小巴不再每一格擺位置（重畫時擺一次），CSS 動畫停住 */
+  private paused = false;
+  /** 拉遠了：一直動的停下來（健身小巴停在第一站） */
+  private motionFar = false;
   private readonly stack: HTMLDivElement;
   private readonly pointers = new Map<number, { x: number; y: number }>();
   private pinchDist = 0;
@@ -2021,6 +2025,9 @@ export class Radar {
    */
   private drawVoyageExtras(r: RadarRoute): void {
     this.routeLayer.classList.toggle('hq-focus', !!r.focus);
+    // 拉遠了，一直動的停下來或收起來（hq-far）
+    this.motionFar = this.scaleKm > HQ_MOTION_KM;
+    this.routeLayer.classList.toggle('hq-far', this.motionFar);
     // 待機的小動作等洋流號到了、河淡掉才開始（航行中每一格都在重畫，再加會掉格，v1.527）
     this.routeLayer.classList.toggle('hq-idle', r.riverOut !== undefined && Date.now() > r.riverOut + 1000);
     const now = Date.now();
@@ -2264,17 +2271,21 @@ export class Radar {
     // 健身小巴：綠色的巡迴路線（示意）、每一站停車時冒出運動的長輩、一台小巴沿著路線繞（moveBoats 擺位置）
     if (r.fitbus && r.fitbus.points.length > 1) {
       const fb = r.fitbus;
-      const on = fb.focus ? ' focus' : '';
+      // 拉遠小台一點、看整個文化網時退到後面（v1.528 使用者說「健身小巴拉遠可以小台一點，主軸還是以文化網為主」）；太小就不畫各站運動的長輩
+      const fs = fb.size ?? 1;
+      const near = !this.motionFar && !fb.dim;
+      const on = `${fb.focus ? ' focus' : ''}${fb.dim ? ' net-dim' : ''}`;
       const d = this.pathOf(fb.points);
       const lg = el('g', { class: `voyage-reveal culture fitbus-route${on}` });
       lg.append(
-        el('path', { class: 'reveal-line under', d, pathLength: '1', style: `stroke-width:${(4.4 * k).toFixed(2)};animation-delay:${Math.round(fb.lineAt - now)}ms` }),
-        el('path', { class: 'reveal-line', d, pathLength: '1', style: `stroke-width:${(2.4 * k).toFixed(2)};animation-delay:${Math.round(fb.lineAt - now)}ms;stroke:#2f9e6a` }),
+        el('path', { class: 'reveal-line under', d, pathLength: '1', style: `stroke-width:${(4.4 * k * fs).toFixed(2)};animation-delay:${Math.round(fb.lineAt - now)}ms` }),
+        el('path', { class: 'reveal-line', d, pathLength: '1', style: `stroke-width:${(2.4 * k * fs).toFixed(2)};animation-delay:${Math.round(fb.lineAt - now)}ms;stroke:#2f9e6a` }),
       );
       this.routeLayer.appendChild(lg);
       const offs = fitbusStopOffsets(fb.stopAt);
       const lap = fitbusLapMs(fb.stopAt.length);
       fb.stops.forEach((st, i) => {
+        if (!near) return;
         const p = polar(st.point.bearing - this.heading, this.ratio(st.point.distanceKm) * (R - 8));
         const sg = el('g', { class: `fitbus-stop${on}`, transform: `translate(${p.x.toFixed(1)} ${p.y.toFixed(1)}) scale(${k.toFixed(4)})` });
         sg.innerHTML = fitbusStopSvg(fb.start + offs[i] - now, lap);
@@ -2292,11 +2303,12 @@ export class Radar {
         cum[i] = i > 0 ? cum[i - 1] + Math.hypot(xs[i] - xs[i - 1], ys[i] - ys[i - 1]) : 0;
       });
       if (cum[n - 1] > 0) {
-        const g = el('g', { class: `route-boat fitbus${on}` }) as SVGGElement;
+        // 拉遠（或看文化網）不寫「健身小巴」，畫面不要太亂（v1.528 使用者說「拉遠就不要顯示文字」）
+        const g = el('g', { class: `route-boat fitbus${on}${near ? '' : ' far'}` }) as SVGGElement;
         // 裡面再包一層：moveBoats 會改外層的 opacity（淡入），政策按鈕（不是衛福）亮著時變淡用裡面這層
         g.innerHTML = `<g class="fb-dim">${FITBUS_SVG}</g>`;
         this.routeLayer.appendChild(g);
-        this.boatTracks.push({ id: 'hq-fitbus', g, flip: g.querySelector('.boat-flip') as SVGGElement, xs, ys, cum, bus: { start: fb.start, stopAt: fb.stopAt } });
+        this.boatTracks.push({ id: 'hq-fitbus', g, flip: g.querySelector('.boat-flip') as SVGGElement, xs, ys, cum, bus: { start: fb.start, stopAt: fb.stopAt }, scale: fs });
       }
     }
     // 滑鼠移過去的介紹：看不見的感應圈，放在最上面（main.ts 照 data-title、data-intro 顯示）
@@ -2324,17 +2336,26 @@ export class Radar {
       for (const t of this.boatTracks) {
         // 只開一趟的（洋流總部的特效）照出發的時間走，其他的一直重複開
         // 健身小巴照自己的時間表繞圈（停站、開車）
-        const { at, alpha } = t.bus ? fitbusPhase(now - t.bus.start, t.bus.stopAt) : t.voyage !== undefined ? voyagePhase(now - t.voyage) : lap;
+        const ph = t.bus ? fitbusPhase(now - t.bus.start, t.bus.stopAt) : null;
+        // 拉遠了，健身小巴停在第一站不開
+        const { at, alpha } = t.bus && ph ? (this.motionFar ? { at: t.bus.stopAt[0], alpha: ph.alpha } : ph) : t.voyage !== undefined ? voyagePhase(now - t.voyage) : lap;
         const p = alongLine(t.xs, t.ys, t.cum, at);
         if (p.left !== null) this.boatLeft.set(t.id, p.left);
-        t.g.setAttribute('transform', `translate(${p.x.toFixed(1)} ${p.y.toFixed(1)}) scale(${k})`);
+        t.g.setAttribute('transform', `translate(${p.x.toFixed(1)} ${p.y.toFixed(1)}) scale(${t.scale !== undefined ? (Number(k) * t.scale).toFixed(4) : k})`);
         t.g.style.opacity = alpha.toFixed(2);
         if (this.boatLeft.get(t.id)) t.flip.setAttribute('transform', 'scale(-1 1)');
         else t.flip.removeAttribute('transform');
       }
     }
-    this.boatFrame = requestAnimationFrame(this.moveBoats);
+    if (!this.paused) this.boatFrame = requestAnimationFrame(this.moveBoats);
   };
+
+  /** 洋流號暫停、繼續（main.ts 暫停時把時間往後挪，重畫時照新的時間擺一次就是停住的樣子） */
+  setPaused(on: boolean): void {
+    this.paused = on;
+    this.routeLayer.classList.toggle('hq-paused', on);
+    if (!on) this.moveBoats();
+  }
 
   private placeRose(): void {
     this.placeCompass();
