@@ -1524,7 +1524,7 @@ function render(): void {
               rivers: hq.HQ_RIVERS.filter((rv) => anyInView(rv.ring)).map((rv) => ({ ring: rv.ring.map(toRadarAt), at: hqStopAt(hqVoyageAt!, rv.stop) })),
               boats: hq.HQ_BOATS.filter(inView).map((b) => ({ ...toRadarAt([b.lat, b.lng]), at: hqNearestAt(hqVoyageAt!, b), kind: b.kind, heading: b.heading })),
               // 其他政見：山林徑的步道和登山中心、自行車橋、球場和運動中心、星群
-              reveals: hqEx.reveals.filter((rv) => anyInView(rv.path)).map((rv) => ({ points: rv.path.map(toRadarAt), at: rv.at, kind: rv.kind, label: rv.label, color: rv.color })),
+              reveals: hqEx.reveals.filter((rv) => anyInView(rv.path)).map((rv) => ({ points: rv.path.map(toRadarAt), at: rv.at, kind: rv.kind, label: rv.label, color: rv.color, labelAt: rv.labelAt })),
               icons: hqEx.icons.filter(inView).map((ic) => ({ ...ic, ...toRadarAt([ic.lat, ic.lng]) })),
               hits: hqHits(hqVoyageAt).filter(inView).map((h) => ({ ...h, ...toRadarAt([h.lat, h.lng]) })),
               // 綠覆率：每長回一棵樹，整個台北市再鋪一層很淡的綠
@@ -3435,8 +3435,8 @@ function hqStarPoints(st: { lat: number; lng: number; count: number; radiusM: nu
 }
 /** 樹樁比長樹早幾毫秒冒出來 */
 const HQ_STUMP_LEAD_MS = 1500;
-type HqReveal = { path: Array<[number, number]>; at: number; kind: 'trail' | 'bridge' | 'stars' | 'culture'; label?: string; color?: string };
-type HqIcon = { lat: number; lng: number; at: number; kind: 'hut' | 'stadium' | 'dome' | 'star' | 'regrow' | 'culture' | 'service' | 'wetland' | 'archbridge' | 'chest' | 'chestlock' | 'paw'; label?: string; scale?: number; grow?: number; char?: string; color?: string; small?: boolean; focus?: boolean; hint?: { title: string; intro: string } };
+type HqReveal = { path: Array<[number, number]>; at: number; kind: 'trail' | 'bridge' | 'stars' | 'culture'; label?: string; color?: string; labelAt?: number };
+type HqIcon = { lat: number; lng: number; at: number; kind: 'hut' | 'stadium' | 'dome' | 'star' | 'regrow' | 'culture' | 'service' | 'wetland' | 'archbridge' | 'chest' | 'chestlock' | 'paw' | 'umusic' | 'uart' | 'uexhibit' | 'uyouth' | 'ushop'; label?: string; scale?: number; grow?: number; char?: string; color?: string; small?: boolean; focus?: boolean; hint?: { title: string; intro: string } };
 /** 其他政見的地方：離路線多近才沿路冒出來 */
 const HQ_SERVICE_NEAR_M = 300;
 /** 離路線幾公尺（路線載入後不會變，記起來） */
@@ -3517,9 +3517,20 @@ function hqExtras(t0: number): { reveals: HqReveal[]; icons: HqIcon[] } {
   icons.push({ lat: hq.HQ_DOME.lat, lng: hq.HQ_DOME.lng, at: hqNearestAt(t0, hq.HQ_DOME), kind: 'dome', label: hq.HQ_DOME.name, scale: 1.1, hint: { title: hq.HQ_DOME.name, intro: I['大巨蛋好鄰居計畫'] ?? '' } });
   icons.push({ lat: hq.HQ_PAW.lat, lng: hq.HQ_PAW.lng, at: hqNearestAt(t0, hq.HQ_PAW) + 400, kind: 'paw', label: hq.HQ_PAW.name, scale: 0.9, hint: { title: hq.HQ_PAW.name, intro: I['毛孩安心養'] ?? '' } });
   // 高架橋下空間：沿市民大道高架、建國高架畫一條線（船離中間最近時長出來）
+  // 兩條在中間交叉（建國南北路 × 市民大道），名字和圖示都避開交叉口（v1.515 使用者說重疊了）；
+  // 沿線畫橋下的用途：音樂、藝文、展覽、青年交流、特色商業（使用者說「幫我稍微畫圖出來」）
   for (const vd of hq.HQ_VIADUCTS) {
     const mid = vd.pts[Math.floor(vd.pts.length / 2)];
-    reveals.push({ path: vd.pts, at: hqNearestAt(t0, { lat: mid[0], lng: mid[1] }), kind: 'culture', label: `橋下空間（${vd.name}）`, color: '#8a6fd0' });
+    const at = hqNearestAt(t0, { lat: mid[0], lng: mid[1] });
+    const west = vd.name.startsWith('市民');
+    reveals.push({ path: vd.pts, at, kind: 'culture', label: `橋下空間（${vd.name}）`, color: '#8a6fd0', labelAt: west ? 0.66 : 0.1 });
+    const uses: Array<[number, 'umusic' | 'uart' | 'uexhibit' | 'uyouth' | 'ushop', string]> = west
+      ? [[0.12, 'umusic', '音樂'], [0.3, 'uart', '藝文'], [0.78, 'uexhibit', '展覽'], [0.93, 'ushop', '特色商業']]
+      : [[0.3, 'uyouth', '青年交流'], [0.82, 'ushop', '特色商業']];
+    uses.forEach(([k, kind, name], i) => {
+      const q = vd.pts[Math.floor((vd.pts.length - 1) * k)];
+      icons.push({ lat: q[0], lng: q[1], at: at + 2200 + i * 250, kind, label: name, small: true, scale: 0.85, hint: { title: `橋下空間：${name}（${vd.name}）`, intro: I['橋下空間'] ?? '' } });
+    });
   }
   // 文化徑的線（點 —— 線）：同一條路線的點都冒出來後，用那條路線的顏色沿街道連起來
   for (const ln of hq.HQ_CULTURE_LINES) {
@@ -3646,12 +3657,6 @@ function hqHits(t0: number): Array<{ lat: number; lng: number; at: number; title
   }
   const cityHall = hq.HQ_TOUR[hq.HQ_TOUR.length - 1];
   hits.push({ lat: cityHall.lat, lng: cityHall.lng, at: t0 + HQ_SAIL_MS, title: '臺北市政府（公務員減壓）', intro: I['臺北市政府'] ?? '', r: 18 });
-  for (const vd of hq.HQ_VIADUCTS) {
-    for (const k of [0.25, 0.5, 0.75]) {
-      const q = vd.pts[Math.floor(vd.pts.length * k)];
-      hits.push({ lat: q[0], lng: q[1], at: hqNearestAt(t0, { lat: vd.pts[Math.floor(vd.pts.length / 2)][0], lng: vd.pts[Math.floor(vd.pts.length / 2)][1] }), title: `橋下空間（${vd.name}）`, intro: I['橋下空間'] ?? '', r: 12 });
-    }
-  }
   for (const ar of hqAreas(t0)) hits.push({ lat: ar.center[0], lng: ar.center[1], at: ar.at, title: `${ar.label}`, intro: I[ar.label] ?? '', r: 26 });
   for (const b of hq.HQ_BOATS) hits.push({ lat: b.lat, lng: b.lng, at: hqNearestAt(t0, b), title: `水上活動（${b.kind === 'sup' ? 'SUP' : '龍舟'}）`, intro: I['水上活動'] ?? '', r: 12 });
   return hits;

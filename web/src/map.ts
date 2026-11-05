@@ -68,7 +68,7 @@ export interface MapRoute {
   /** 真的河（水域政策「親水」）：船沿河走時（at）水面亮成藍色、留著 */
   rivers?: Array<{ ring: Array<[number, number]>; at: number }>;
   /** 一條線從頭長到尾：trail 山林徑、bridge 自行車橋、stars 星座、culture 文化徑的線（color）；label 寫在尾端（文化徑寫在中間） */
-  reveals?: Array<{ path: Array<[number, number]>; at: number; kind: 'trail' | 'bridge' | 'stars' | 'culture'; label?: string; color?: string }>;
+  reveals?: Array<{ path: Array<[number, number]>; at: number; kind: 'trail' | 'bridge' | 'stars' | 'culture'; label?: string; color?: string; labelAt?: number }>;
   /** 綠覆率：整個台北市（ring）在 steps 的每個時間再鋪一層很淡的綠 */
   green?: { ring: Array<[number, number]>; steps: number[] };
   /** 一塊地方（社子島）：at 時淡入、留著，虛線外框、名字寫在中間 */
@@ -78,7 +78,7 @@ export interface MapRoute {
   /** 文化網（點 —— 線 —— 面） */
   network?: { at: number; lines: Array<{ path: Array<[number, number]>; color: string }>; dots: Array<{ lat: number; lng: number; color: string }>; noFace?: boolean; faceR?: number };
   /** 一個東西冒出來：hut 登山中心、stadium 足球場、dome 運動中心、star 星星、regrow 樹樁（grow 時長回大樹）、culture 文化徑的點（small 的名字地圖上不寫，滑鼠移過去看介紹） */
-  icons?: Array<{ lat: number; lng: number; at: number; kind: 'hut' | 'stadium' | 'dome' | 'star' | 'regrow' | 'culture' | 'service' | 'wetland' | 'archbridge' | 'chest' | 'chestlock' | 'paw'; label?: string; scale?: number; grow?: number; char?: string; color?: string; small?: boolean; focus?: boolean }>;
+  icons?: Array<{ lat: number; lng: number; at: number; kind: 'hut' | 'stadium' | 'dome' | 'star' | 'regrow' | 'culture' | 'service' | 'wetland' | 'archbridge' | 'chest' | 'chestlock' | 'paw' | 'umusic' | 'uart' | 'uexhibit' | 'uyouth' | 'ushop'; label?: string; scale?: number; grow?: number; char?: string; color?: string; small?: boolean; focus?: boolean }>;
   /** 政策圖層開著：其他特效變淡，只有 focus 的地方、通學區的圈清楚 */
   focus?: boolean;
   /** 都更的基地範圍（at 時淡入） */
@@ -118,7 +118,12 @@ const MAP_DRAGON_SVG =
     return `<path class="wb-paddle" d="M${x} -4.5L${x + 3} -9"/><circle class="wb-head" cx="${x}" cy="-1.2" r="1.6"/>`;
   }).join('');
 /** 冒出來的東西（跟 radar.ts 一樣的畫法，顏色在 styles.css） */
-const MAP_ICON_SVG: Record<'hut' | 'stadium' | 'dome' | 'star' | 'wetland' | 'archbridge' | 'chest' | 'chestlock' | 'paw', string> = {
+const MAP_ICON_SVG: Record<'hut' | 'stadium' | 'dome' | 'star' | 'wetland' | 'archbridge' | 'chest' | 'chestlock' | 'paw' | 'umusic' | 'uart' | 'uexhibit' | 'uyouth' | 'ushop', string> = {
+  umusic: '<circle class="ud-bg" r="9"/><path class="ud-ink" d="M-1.5 4V-5.5L5 -7.5V2"/><ellipse class="ud-fill" cx="-3.6" cy="4.2" rx="2.6" ry="2"/><ellipse class="ud-fill" cx="2.9" cy="2.2" rx="2.6" ry="2"/>',
+  uart: '<circle class="ud-bg" r="9"/><path class="ud-pal" d="M-6 2Q-8 -6 0 -6.5Q7 -6.5 6.5 -1Q6 2 3 1.5Q1 1.2 1 3.5Q1 6 -2 5.5Q-5 5 -6 2Z"/><circle class="ud-c1" cx="-3" cy="-2.6" r="1.3"/><circle class="ud-c2" cx="0.8" cy="-4" r="1.3"/><circle class="ud-c3" cx="4" cy="-2" r="1.3"/>',
+  uexhibit: '<circle class="ud-bg" r="9"/><rect class="ud-frame" x="-6" y="-5" width="12" height="9.5" rx="1"/><path class="ud-mtn" d="M-4.5 3L-1.5 -1L0.8 1.6L2.4 0L4.5 3Z"/><circle class="ud-c3" cx="2.4" cy="-2.6" r="1.2"/>',
+  uyouth: '<circle class="ud-bg" r="9"/><path class="ud-bub" d="M-7 -5H1.5V1H-3L-5.2 3.2V1H-7Z"/><path class="ud-bub2" d="M-1.5 -1.5H7V4.5H5.2V6.6L3 4.5H-1.5Z"/>',
+  ushop: '<circle class="ud-bg" r="9"/><rect class="ud-shop" x="-5.5" y="-2.5" width="11" height="8" rx="0.6"/><path class="ud-awn" d="M-7 -2.5L-5.5 -6.5H5.5L7 -2.5Z"/><path class="ud-awn-s" d="M-3.5 -6.5L-4.2 -2.5M0 -6.5V-2.5M3.5 -6.5L4.2 -2.5"/><rect class="ud-door" x="-1.6" y="0.6" width="3.2" height="4.9"/>',
   chest: '<path class="ch-beam" d="M-8 -7L-13 -21H13L8 -7Z"/><path class="ch-lid-o" d="M-11 -6Q-12 -17 0 -18Q12 -17 11 -6Z"/><path class="ch-lid-in" d="M-8.5 -6.5Q-9 -14 0 -14.8Q9 -14 8.5 -6.5Z"/><path class="ch-gold" d="M-10.5 -4.5Q-8 -9.5 -4 -6.5Q-1 -11 3 -7Q6 -10 10.5 -4.5Z"/><circle class="ch-coin" cx="-4.5" cy="-7.5" r="1.6"/><circle class="ch-coin" cx="3" cy="-8.6" r="1.6"/><rect class="ch-box" x="-12" y="-5" width="24" height="13" rx="3"/><path class="ch-dark" d="M-11.3 3.5H11.3V5.2Q11.3 7.3 9 7.3H-9Q-11.3 7.3 -11.3 5.2Z"/><rect class="ch-trim" x="-12" y="-1.6" width="24" height="2.6"/><rect class="ch-trim" x="-2.6" y="-5" width="5.2" height="13" rx="1"/><path class="ch-gem" d="M0 -2.6L2.4 0.2L0 3L-2.4 0.2Z"/><circle class="ch-hi" cx="-0.7" cy="-0.6" r="0.6"/><path class="ch-shine" d="M-9.4 -3V1.8"/><path class="kira k1" d="M-14.0 -17.2L-13.1 -14.9L-10.8 -14.0L-13.1 -13.1L-14.0 -10.8L-14.9 -13.1L-17.2 -14.0L-14.9 -14.9Z"/><path class="kira k2" d="M13.5 -13.6L14.2 -11.7L16.1 -11.0L14.2 -10.3L13.5 -8.4L12.8 -10.3L10.9 -11.0L12.8 -11.7Z"/><path class="kira k3" d="M8.0 -23.0L8.6 -21.6L10.0 -21.0L8.6 -20.4L8.0 -19.0L7.4 -20.4L6.0 -21.0L7.4 -21.6Z"/>',
   chestlock: '<path class="ch-lid-c" d="M-12 -4Q-12 -14.5 0 -14.5Q12 -14.5 12 -4Z"/><path class="ch-lid-hi" d="M-8.5 -7Q-8 -12 -2 -12.6"/><rect class="ch-box" x="-12" y="-4" width="24" height="12" rx="3"/><path class="ch-dark" d="M-11.3 3.5H11.3V5.2Q11.3 7.3 9 7.3H-9Q-11.3 7.3 -11.3 5.2Z"/><rect class="ch-trim" x="-12" y="-5" width="24" height="2.4"/><rect class="ch-trim" x="-8.4" y="-13" width="2.6" height="21" rx="1"/><rect class="ch-trim" x="5.8" y="-13" width="2.6" height="21" rx="1"/><path class="ch-shackle" d="M-2.4 -2V-5A2.4 2.4 0 0 1 2.4 -5V-2"/><rect class="ch-lockbody" x="-4" y="-2.4" width="8" height="6.6" rx="1.6"/><circle class="ch-key" cx="0" cy="0.2" r="1"/><path class="ch-keyline" d="M0 0.6V2.6"/><path class="ch-shine" d="M-9.4 -1.6V2"/><path class="kira k2" d="M13.5 -14.4L14.2 -12.7L15.9 -12.0L14.2 -11.3L13.5 -9.6L12.8 -11.3L11.1 -12.0L12.8 -12.7Z"/>',
   paw: '<ellipse class="pw" cx="0" cy="4" rx="6.5" ry="5.5"/><ellipse class="pw" cx="-8" cy="-3" rx="2.8" ry="3.6" transform="rotate(-20 -8 -3)"/><ellipse class="pw" cx="-3" cy="-8" rx="2.8" ry="3.8" transform="rotate(-6 -3 -8)"/><ellipse class="pw" cx="3" cy="-8" rx="2.8" ry="3.8" transform="rotate(6 3 -8)"/><ellipse class="pw" cx="8" cy="-3" rx="2.8" ry="3.6" transform="rotate(20 8 -3)"/>',
@@ -1017,7 +1022,7 @@ export class MapView {
         const e = bikes.getElement() as SVGElement | undefined;
         if (e) e.style.animationDelay = `${Math.round(rv.at + 2200 - now)}ms`;
       }
-      if (rv.label) this.stayLabel(rv.path[rv.kind === 'culture' ? Math.floor(rv.path.length / 2) : rv.path.length - 1], rv.label, rv.at + 2200 - now, rv.kind === 'culture' ? 22 : 32);
+      if (rv.label) this.stayLabel(rv.path[rv.labelAt !== undefined ? Math.floor((rv.path.length - 1) * rv.labelAt) : rv.kind === 'culture' ? Math.floor(rv.path.length / 2) : rv.path.length - 1], rv.label, rv.at + 2200 - now, rv.kind === 'culture' ? 22 : 32);
     }
     // 冒出來的東西：登山中心、足球場、運動中心、星星
     for (const ic of r.icons ?? []) {
