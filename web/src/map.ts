@@ -1,5 +1,5 @@
 import type * as Leaflet from 'leaflet';
-import { alongLine, BOAT_SVG, crackSvg, FITBUS_BODY, FITBUS_SVG, fitbusLapMs, HQ_MOTION_ZOOM, HQ_LABEL_ZOOM, BIKE_SVG, bikePhase, DOGS_SVG, fitbusPhase, fitbusStopOffsets, fitbusStopSvg, cultureSvg, regrowSvg, serviceSvg, stitchSvg, boatPhase, fireworksSvg, FIREWORKS_MS, flowOut, HQ_VOYAGE_MS, RAINBOW_FLOW_TOTAL, RAINBOW_STAGGER_MS, surge, SURGE_TOTAL, voyagePhase, voyageTimeOf } from './flow';
+import { alongLine, BOAT_SVG, crackSvg, FITBUS_BODY, FITBUS_SVG, fitbusLapMs, HQ_MOTION_ZOOM, HQ_LABEL_ZOOM, BIKE_SVG, bikePhase, fitbusPhase, fitbusStopOffsets, fitbusStopSvg, cultureSvg, regrowSvg, serviceSvg, stitchSvg, boatPhase, fireworksSvg, FIREWORKS_MS, flowOut, HQ_VOYAGE_MS, RAINBOW_FLOW_TOTAL, RAINBOW_STAGGER_MS, surge, SURGE_TOTAL, voyagePhase, voyageTimeOf } from './flow';
 import { haversineKm, type LatLng } from './geo';
 import type { EventKind, Phase } from './types';
 import { LANDMARKS } from './landmarks';
@@ -92,7 +92,7 @@ export interface MapRoute {
   /** 文化網（點 —— 線 —— 面） */
   network?: { at: number; lines: Array<{ path: Array<[number, number]>; color: string }>; dots: Array<{ lat: number; lng: number; color: string }>; noFace?: boolean; faceR?: number };
   /** 一個東西冒出來：hut 登山中心、stadium 足球場、dome 運動中心、star 星星、regrow 樹樁（grow 時長回大樹）、culture 文化徑的點（small 的名字地圖上不寫，滑鼠移過去看介紹） */
-  icons?: Array<{ lat: number; lng: number; at: number; kind: 'hut' | 'stadium' | 'dome' | 'bigdome' | 'star' | 'regrow' | 'culture' | 'service' | 'wetland' | 'archbridge' | 'chest' | 'chestlock' | 'paw' | 'umusic' | 'uart' | 'uexhibit' | 'uyouth' | 'ushop' | 'fitbus' | 'dogs'; label?: string; farLabel?: boolean; scale?: number; grow?: number; char?: string; color?: string; small?: boolean; focus?: boolean }>;
+  icons?: Array<{ lat: number; lng: number; at: number; kind: 'hut' | 'stadium' | 'dome' | 'bigdome' | 'star' | 'regrow' | 'culture' | 'service' | 'wetland' | 'archbridge' | 'chest' | 'chestlock' | 'paw' | 'umusic' | 'uart' | 'uexhibit' | 'uyouth' | 'ushop' | 'fitbus'; label?: string; farLabel?: boolean; scale?: number; grow?: number; char?: string; color?: string; small?: boolean; focus?: boolean }>;
   /** 政策圖層開著：其他特效變淡，只有 focus 的地方、通學區的圈清楚 */
   focus?: boolean;
   /** 都更的基地範圍（at 時淡入） */
@@ -132,9 +132,8 @@ const MAP_DRAGON_SVG =
     return `<path class="wb-paddle" d="M${x} -4.5L${x + 3} -9"/><circle class="wb-head" cx="${x}" cy="-1.2" r="1.6"/>`;
   }).join('');
 /** 冒出來的東西（跟 radar.ts 一樣的畫法，顏色在 styles.css） */
-const MAP_ICON_SVG: Record<'hut' | 'stadium' | 'dome' | 'bigdome' | 'star' | 'wetland' | 'archbridge' | 'chest' | 'chestlock' | 'paw' | 'umusic' | 'uart' | 'uexhibit' | 'uyouth' | 'ushop' | 'fitbus' | 'dogs', string> = {
+const MAP_ICON_SVG: Record<'hut' | 'stadium' | 'dome' | 'bigdome' | 'star' | 'wetland' | 'archbridge' | 'chest' | 'chestlock' | 'paw' | 'umusic' | 'uart' | 'uexhibit' | 'uyouth' | 'ushop' | 'fitbus', string> = {
   fitbus: `<g transform="translate(0 9)">${FITBUS_BODY}</g>`,
-  dogs: DOGS_SVG,
   umusic: '<circle class="ud-bg" r="9"/><path class="ud-ink" d="M-1.5 4V-5.5L5 -7.5V2"/><ellipse class="ud-fill" cx="-3.6" cy="4.2" rx="2.6" ry="2"/><ellipse class="ud-fill" cx="2.9" cy="2.2" rx="2.6" ry="2"/>',
   uart: '<circle class="ud-bg" r="9"/><path class="ud-pal" d="M-6 2Q-8 -6 0 -6.5Q7 -6.5 6.5 -1Q6 2 3 1.5Q1 1.2 1 3.5Q1 6 -2 5.5Q-5 5 -6 2Z"/><circle class="ud-c1" cx="-3" cy="-2.6" r="1.3"/><circle class="ud-c2" cx="0.8" cy="-4" r="1.3"/><circle class="ud-c3" cx="4" cy="-2" r="1.3"/>',
   uexhibit: '<circle class="ud-bg" r="9"/><rect class="ud-frame" x="-6" y="-5" width="12" height="9.5" rx="1"/><path class="ud-mtn" d="M-4.5 3L-1.5 -1L0.8 1.6L2.4 0L4.5 3Z"/><circle class="ud-c3" cx="2.4" cy="-2.6" r="1.2"/>',

@@ -245,22 +245,6 @@ export const BIKE_SVG =
   '<path class="bk-bar" d="M-4.2 -8.8H-1.8M1.4 -9.4H3.6"/><path class="bk-leg" d="M-2.6 -9L0.2 -6L-1.2 -3"/>' +
   '<path class="bk-body" d="M-2.6 -9.2L0.4 -13.8L2.8 -9.6"/>' +
   '<circle class="bk-head" cx="1.4" cy="-15.8" r="2"/><path class="bk-helmet" d="M-0.7 -15.9A2.1 2.1 0 0 1 3.5 -15.9Z"/></g>';
-/**
- * 毛孩安心養旁邊三隻狗在玩（v1.529 使用者說「毛孩安心養不用搖，幫我做幾隻狗在互動」）：白色小狗和柴犬丟球（球在中間彈來彈去，
- * 丟出去、接到時跳一下），黑白小狗在後面歪頭看；尾巴都在搖。拉近才動（styles.css 的 .hq-far）
- */
-const dogSvg = (cls: string, tf: string): string =>
-  `<g class="dog ${cls}" transform="${tf}"><g class="dg-hop">` +
-  '<path class="dg-tail" d="M-4.4 -4.6Q-6.6 -6.4 -6 -8.6"/><ellipse class="dg-body" cx="0" cy="-3.8" rx="4.6" ry="2.8"/>' +
-  '<path class="dg-leg" d="M-3 -1.6V0M-1.3 -1.4V0M1.6 -1.4V0M3.1 -1.6V0"/>' +
-  '<g class="dg-headg"><circle class="dg-head" cx="4.4" cy="-6.6" r="2.6"/><ellipse class="dg-ear" cx="3.4" cy="-6.2" rx="1.1" ry="1.8"/><circle class="dg-eye" cx="5.4" cy="-7.1" r="0.45"/><circle class="dg-nose" cx="6.9" cy="-6.2" r="0.55"/></g>' +
-  '</g></g>';
-export const DOGS_SVG =
-  '<ellipse class="dg-grass" cx="0" cy="6.6" rx="18" ry="3.2"/>' +
-  dogSvg('dg-c', 'translate(0 -1) scale(0.78)') +
-  dogSvg('dg-a', 'translate(-11 7)') +
-  dogSvg('dg-b', 'translate(11 7) scale(-1 1)') +
-  '<g class="dg-ballp"><circle class="dg-ball" r="1.5"/></g>';
 export const HQ_MOTION_ZOOM = 15;
 export const FITBUS_DRIVE_MS = 15_000;
 export const FITBUS_STOP_MS = 3_200;

@@ -340,32 +340,6 @@ path.map-water-glint { animation: water-flow-map 1.1s linear infinite; }
 .bk-head { fill: #f3d9bd; stroke: #5a4636; stroke-width: 0.6; }
 .bk-helmet { fill: #ff7a1a; }
 .map-bike svg { display: block; overflow: visible; }
-/* 毛孩安心養的三隻狗（v1.529）：白色小狗、柴犬丟球，黑白小狗歪頭看；尾巴搖。拉近才動（.hq-far） */
-.dg-grass { fill: #9bd27a; fill-opacity: 0.45; }
-.dg-body, .dg-head { stroke-width: 0.7; }
-.dg-leg { fill: none; stroke-width: 1.1; stroke-linecap: round; }
-.dg-tail { fill: none; stroke-width: 1.2; stroke-linecap: round; transform-origin: -4.4px -4.6px; animation: dg-wag 0.28s ease-in-out infinite alternate; }
-.dg-eye, .dg-nose { fill: #222; }
-.dg-a .dg-body, .dg-a .dg-head { fill: #fff; stroke: #8a7a6a; }
-.dg-a .dg-leg, .dg-a .dg-tail { stroke: #8a7a6a; }
-.dg-a .dg-ear { fill: #f1e3cf; }
-.dg-b .dg-body, .dg-b .dg-head { fill: #e39a4f; stroke: #8a5a2a; }
-.dg-b .dg-leg, .dg-b .dg-tail { stroke: #8a5a2a; }
-.dg-b .dg-ear { fill: #c97a35; }
-.dg-c .dg-body, .dg-c .dg-head { fill: #3a3a3a; stroke: #222; }
-.dg-c .dg-leg, .dg-c .dg-tail { stroke: #222; }
-.dg-c .dg-ear { fill: #222; }
-.dg-c .dg-eye { fill: #fff; }
-.dg-ball { fill: #ff5a5a; stroke: #fff; stroke-width: 0.6; }
-.dg-ballp { animation: dg-ball 2.4s ease-in-out infinite; }
-@keyframes dg-ball { 0% { transform: translate(-4px, 0.5px); } 25% { transform: translate(0, -6px); } 50% { transform: translate(4px, 0.5px); } 75% { transform: translate(0, -6px); } 100% { transform: translate(-4px, 0.5px); } }
-.dg-a .dg-hop { animation: dg-hop-a 2.4s ease-in-out infinite; }
-.dg-b .dg-hop { animation: dg-hop-b 2.4s ease-in-out infinite; }
-@keyframes dg-hop-a { 0%, 12%, 88%, 100% { transform: translateY(0); } 4% { transform: translateY(-2.2px); } 96% { transform: translateY(-1.2px); } }
-@keyframes dg-hop-b { 0%, 38%, 62%, 100% { transform: translateY(0); } 46% { transform: translateY(-1.2px); } 54% { transform: translateY(-2.2px); } }
-.dg-c .dg-headg { transform-origin: 4.4px -6.6px; animation: dg-tilt 1.6s ease-in-out infinite alternate; }
-@keyframes dg-wag { from { transform: rotate(-18deg); } to { transform: rotate(18deg); } }
-@keyframes dg-tilt { from { transform: rotate(-10deg); } to { transform: rotate(10deg); } }
 .fb-body { fill: #fff; stroke: #1f2a24; stroke-width: 0.9; stroke-linejoin: round; }
 .fb-stripe { fill: #2f9e6a; }
 .fb-win { fill: #35546a; }
@@ -475,12 +449,12 @@ path.map-water-glint { animation: water-flow-map 1.1s linear infinite; }
  * 拉遠（雷達外圈 3 km 以上、地圖縮放 15 以下，flow.ts 的 HQ_MOTION_KM／ZOOM）一直動的都停下來或收起來，畫面不要太亂
  * （v1.528 使用者說「所有會動的都建議拉近到一定程度才開始動」「不希望整體畫面太亂」）；洋流號、河、冒出來的動畫照舊
  */
-.hq-far .idle-star, .hq-far .idle-wetland .ic-reed, .hq-far .idle-wetland .ic-reed-top, .hq-far .idle-hut .ic-flag, .hq-far .idle-stadium, .hq-far .idle-uyouth, .hq-far .idle-umusic, .hq-far .idle-uart, .hq-far .idle-bigdome .dm-hi, .hq-far .idle-fitbus, .hq-far .kira, .hq-far .cr-glow, .hq-far .boat-bob, .hq-far .boat-glide, .hq-far .spring-ring, .hq-far .wb-paddle, .hq-far .dg-tail, .hq-far .dg-ballp, .hq-far .dg-hop, .hq-far .dg-headg { animation: none; }
+.hq-far .idle-star, .hq-far .idle-wetland .ic-reed, .hq-far .idle-wetland .ic-reed-top, .hq-far .idle-hut .ic-flag, .hq-far .idle-stadium, .hq-far .idle-uyouth, .hq-far .idle-umusic, .hq-far .idle-uart, .hq-far .idle-bigdome .dm-hi, .hq-far .idle-fitbus, .hq-far .kira, .hq-far .cr-glow, .hq-far .boat-bob, .hq-far .boat-glide, .hq-far .spring-ring, .hq-far .wb-paddle { animation: none; }
 /* 拉遠（地圖縮放 14 以下）寶箱、橋下空間、大巨蛋、毛孩安心養的字不寫（雷達在 radar.ts 照 5 km 判斷） */
 #map.label-far .far-label { display: none; }
 .hq-far .seam-walkers, .hq-far path.map-seam-walkers, .hq-far .reveal-hikers, .hq-far path.map-reveal-hikers, .hq-far .reveal-bikes, .hq-far path.map-reveal-bikes, .hq-far .map-voyage-icon.fitbus-stop, .hq-far .fit-label { display: none; }
 @media (prefers-reduced-motion: reduce) {
-  .wb-paddle, .dg-tail, .dg-ballp, .dg-hop, .dg-headg,
+  .wb-paddle,
   .idle-star, .idle-wetland .ic-reed, .idle-wetland .ic-reed-top, .idle-hut .ic-flag, .idle-stadium, .idle-uyouth, .idle-umusic, .idle-uart, .idle-bigdome .dm-hi, .idle-fitbus { animation: none; }
   .radar .reveal-hikers, path.map-reveal-hikers { animation: voyage-stay 0.5s ease-out both; }
 }

@@ -3540,7 +3540,7 @@ type HqSeam = {
   stitches: Array<{ at: number; center: [number, number]; along: [number, number]; label: string; below?: boolean }>;
   walkers: Array<{ from: [number, number]; to: [number, number]; at: number; south?: boolean }>;
 };
-type HqIcon = { lat: number; lng: number; at: number; kind: 'hut' | 'stadium' | 'dome' | 'bigdome' | 'star' | 'regrow' | 'culture' | 'service' | 'wetland' | 'archbridge' | 'chest' | 'chestlock' | 'paw' | 'umusic' | 'uart' | 'uexhibit' | 'uyouth' | 'ushop' | 'fitbus' | 'dogs'; label?: string; farLabel?: boolean; scale?: number; grow?: number; char?: string; color?: string; small?: boolean; focus?: boolean; hint?: { title: string; intro: string } };
+type HqIcon = { lat: number; lng: number; at: number; kind: 'hut' | 'stadium' | 'dome' | 'bigdome' | 'star' | 'regrow' | 'culture' | 'service' | 'wetland' | 'archbridge' | 'chest' | 'chestlock' | 'paw' | 'umusic' | 'uart' | 'uexhibit' | 'uyouth' | 'ushop' | 'fitbus'; label?: string; farLabel?: boolean; scale?: number; grow?: number; char?: string; color?: string; small?: boolean; focus?: boolean; hint?: { title: string; intro: string } };
 /** 其他政見的地方：離路線多近才沿路冒出來 */
 const HQ_SERVICE_NEAR_M = 300;
 /** 離路線幾公尺（路線載入後不會變，記起來） */
@@ -3625,8 +3625,6 @@ function hqExtras(t0: number): { reveals: HqReveal[]; icons: HqIcon[]; seams: Hq
     icons.push({ lat: pk.lat, lng: pk.lng, at: hqNearestAt(t0, pk) + 300, kind: 'fitbus', label: view === 'radar' && scaleKm > HQ_MOTION_KM ? undefined : `健身小巴（${pk.name}）`, small: true, scale: 0.9 * (view === 'map' ? 1 : hqFitSize()), focus: hqLayer?.id === 'health', hint: { title: `健身小巴：結合${pk.name}（示意）`, intro: I['健身小巴結合'] ?? '' } });
   }
   icons.push({ lat: hq.HQ_PAW.lat, lng: hq.HQ_PAW.lng, at: hqNearestAt(t0, hq.HQ_PAW) + 400, kind: 'paw', label: hq.HQ_PAW.name, farLabel: true, scale: 0.9, hint: { title: hq.HQ_PAW.name, intro: I['毛孩安心養'] ?? '' } });
-  // 毛孩安心養：狗掌旁邊三隻狗在玩（白色小狗和柴犬丟球、黑白小狗歪頭看；v1.529 使用者說「毛孩安心養不用搖，幫我做幾隻狗在互動」），拉近才動
-  icons.push({ lat: hq.HQ_PAW.lat - 0.0009, lng: hq.HQ_PAW.lng + 0.0003, at: hqNearestAt(t0, hq.HQ_PAW) + 800, kind: 'dogs', scale: 1.8, hint: { title: hq.HQ_PAW.name, intro: I['毛孩安心養'] ?? '' } });
   // 高架橋下空間：沿市民大道高架、建國高架畫一條線（船離中間最近時長出來）
   // 兩條在中間交叉（建國南北路 × 市民大道），名字和圖示都避開交叉口（v1.515 使用者說重疊了）；
   // 沿線畫橋下的用途：音樂、藝文、展覽、青年交流、特色商業（使用者說「幫我稍微畫圖出來」）
