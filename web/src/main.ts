@@ -3462,7 +3462,7 @@ type HqSeam = {
   label: string;
   labelAt: number;
   stitches: Array<{ at: number; center: [number, number]; along: [number, number]; label: string; below?: boolean }>;
-  walkers: Array<{ from: [number, number]; to: [number, number]; at: number }>;
+  walkers: Array<{ from: [number, number]; to: [number, number]; at: number; south?: boolean }>;
 };
 type HqIcon = { lat: number; lng: number; at: number; kind: 'hut' | 'stadium' | 'dome' | 'bigdome' | 'star' | 'regrow' | 'culture' | 'service' | 'wetland' | 'archbridge' | 'chest' | 'chestlock' | 'paw' | 'umusic' | 'uart' | 'uexhibit' | 'uyouth' | 'ushop' | 'fitbus'; label?: string; scale?: number; grow?: number; char?: string; color?: string; small?: boolean; focus?: boolean; hint?: { title: string; intro: string } };
 /** 其他政見的地方：離路線多近才沿路冒出來 */
@@ -3600,6 +3600,9 @@ function hqFitbus(t0: number): { path: Array<[number, number]>; start: number; l
 }
 /** 縫合市民大道：洋流號經過後，從船最靠近的那一處開始，往兩邊每 0.9 秒縫一處；縫完 0.9 秒整條變淡 */
 const SEAM_STEP_MS = 900;
+/** 縫好後的人流：橫跨市民大道往南北各延伸幾公尺（沒有指定兩點的地方）、往北往南兩條相隔幾公尺 */
+const SEAM_CROSS_M = 230;
+const SEAM_LANE_M = 14;
 /**
  * 縫合市民大道：出發就畫出裂縫（at），縫線放在離指定地點最近的高架那一點（'end' 是東端），方向用旁邊那一點算；
  * 洋流號最靠近哪一處（68 秒在復興南路口跨過市民大道，就是 SOGO ↔ 微風）就在那時從那裡縫，再照離它遠近往兩邊縫（v1.521 使用者說「一直到洋流號經過才出現縫合的效果」）；
@@ -3631,8 +3634,31 @@ function hqSeam(pts: Array<[number, number]>, at: number, t0: number): HqSeam {
     // 十字主軸的名字寫在下面（SOGO ↔ 微風的人流往南走，名字寫上面）
     below: i === 0,
   }));
-  const walkers = S.stitches.flatMap((st, i) => (st.walk ? [{ from: st.walk[0], to: st.walk[1], at: stitches[i].at + 900 }] : []));
-  return { path: pts, at, healAt: Math.max(...stitches.map((st) => st.at)) + 900, label: '縫合市民大道', labelAt: 0.06, stitches, walkers };
+  // 縫好後兩邊開始互通（v1.526 使用者說「縫合之後可以做一個感覺兩邊開始互通的感覺」）：每一處橫跨市民大道兩條小點流，
+  // 一條往北、一條往南（並排、相隔 2 × SEAM_LANE_M）；SOGO ↔ 微風走真的兩點，其他兩處往南北各延伸 SEAM_CROSS_M
+  const walkers = stitches.flatMap((st, i) => {
+    const kx = Math.cos((st.center[0] * Math.PI) / 180);
+    const toM = (q: [number, number]): [number, number] => [(q[1] - st.center[1]) * 111320 * kx, (q[0] - st.center[0]) * 111320];
+    const toLL = ([x, y]: [number, number]): [number, number] => [st.center[0] + y / 111320, st.center[1] + x / (111320 * kx)];
+    let [south, north] = S.stitches[i].walk ?? [st.center, st.center];
+    if (!S.stitches[i].walk) {
+      // 跟路垂直、北邊那一頭
+      const [dx, dy] = toM(st.along);
+      const len = Math.hypot(dx, dy) || 1;
+      let [px, py] = [-dy / len, dx / len];
+      if (py < 0) [px, py] = [-px, -py];
+      [south, north] = [toLL([-px * SEAM_CROSS_M, -py * SEAM_CROSS_M]), toLL([px * SEAM_CROSS_M, py * SEAM_CROSS_M])];
+    }
+    const [sx, sy] = toM(south);
+    const [nx, ny] = toM(north);
+    const len = Math.hypot(nx - sx, ny - sy) || 1;
+    const [ox, oy] = [((ny - sy) / len) * SEAM_LANE_M, (-(nx - sx) / len) * SEAM_LANE_M];
+    return [
+      { from: toLL([sx + ox, sy + oy]), to: toLL([nx + ox, ny + oy]), at: st.at + 1200 },
+      { from: toLL([nx - ox, ny - oy]), to: toLL([sx - ox, sy - oy]), at: st.at + 1500, south: true },
+    ];
+  });
+  return { path: pts, at, healAt: Math.max(...stitches.map((st) => st.at)) + 900, label: '縫合市民大道・南北互通', labelAt: 0.06, stitches, walkers };
 }
 /** 一塊地方（社子島）：船快到那一站前 6 秒淡入、留著；名字寫在中間（範圍的平均點） */
 function hqAreas(t0: number): Array<{ ring: Array<[number, number]>; center: [number, number]; at: number; label: string; zones?: Array<Array<[number, number]>>; zonesAt?: number }> {

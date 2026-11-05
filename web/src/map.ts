@@ -79,7 +79,7 @@ export interface MapRoute {
     label: string;
     labelAt: number;
     stitches: Array<{ at: number; center: [number, number]; along: [number, number]; label: string; below?: boolean }>;
-    walkers: Array<{ from: [number, number]; to: [number, number]; at: number }>;
+    walkers: Array<{ from: [number, number]; to: [number, number]; at: number; south?: boolean }>;
   }>;
   /** 綠覆率：整個台北市（ring）在 steps 的每個時間再鋪一層很淡的綠 */
   green?: { ring: Array<[number, number]>; steps: number[] };
@@ -1019,7 +1019,7 @@ export class MapView {
       if (sm.path.length < 2) continue;
       // 不畫整條深色的帶子（v1.523 使用者說有點可怕），只在要縫的地方畫淡淡的裂縫
       for (const w of sm.walkers) {
-        for (const [color, weight] of [['#fff', 6.4], ['#233a5e', 4.4]] as const) {
+        for (const [color, weight] of [['#fff', 6.4], [w.south ? '#ff8a5c' : '#3a6fd8', 4.4]] as const) {
           const l = L.polyline([w.from, w.to], { color, weight, opacity: 1, lineCap: 'round', dashArray: '0 12', interactive: false, className: 'map-seam-walkers' });
           layer.addLayer(l);
           const e = l.getElement() as SVGElement | undefined;

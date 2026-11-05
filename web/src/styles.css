@@ -400,7 +400,7 @@ path.map-water-glint { animation: water-flow-map 1.1s linear infinite; }
 .radar .voyage-reveal.stars .reveal-line { stroke: #f2b544; stroke-opacity: 0.9; }
 .radar .reveal-bikes, .map-reveal-bikes { fill: none; stroke: #15171c; stroke-linecap: round; stroke-dasharray: 3 12; opacity: 0; animation: reveal-bikes 1.6s linear infinite, voyage-stay 0.5s ease-out both; }
 @keyframes reveal-bikes { to { stroke-dashoffset: -15; } }
-/* 縫合市民大道（v1.520）：出發時深灰的裂縫從西畫到東，洋流號經過才縫（v1.521）、縫完變淡；橘色的交叉針腳一筆一筆縫；SOGO 走到微風的人流小點（深藍、白邊，橘色的河經過那裡也看得到）一直往北走 */
+/* 縫合市民大道（v1.520）：出發時深灰的裂縫從西畫到東，洋流號經過才縫（v1.521）、縫完變淡；橘色的交叉針腳一筆一筆縫；縫好後三處都有往北、往南的人流小點（白邊，橘色的河經過那裡也看得到） */
 .st-u, .st-t { fill: none; stroke-linecap: round; stroke-dasharray: 1; stroke-dashoffset: 1; animation: st-draw 0.16s ease-out both; }
 .st-u { stroke: #fff; stroke-width: 4.2; }
 .st-t { stroke: #ff7a1a; stroke-width: 2.4; }
@@ -421,7 +421,10 @@ path.map-water-glint { animation: water-flow-map 1.1s linear infinite; }
 @keyframes st-heart { 0% { opacity: 0; transform: translateY(2px) scale(0.3); } 18% { opacity: 1; transform: translateY(0) scale(1.15); } 30% { transform: scale(1); } 75% { opacity: 1; transform: translateY(-3px); } 100% { opacity: 0; transform: translateY(-5px); } }
 .radar .seam-stitch, .map-seam-stitch { pointer-events: none; }
 .map-seam-stitch { background: none; border: 0; }
-.radar .seam-walkers, path.map-seam-walkers { fill: none; stroke: #233a5e; stroke-linecap: round; opacity: 0; animation: seam-walk-in 0.6s ease-out forwards, seam-walk 1.4s linear infinite; }
+/* 縫好後兩邊互通（v1.526）：往北藍點、往南珊瑚色點；地圖的顏色用 Leaflet 的屬性（這裡不寫 stroke，不然會蓋過去） */
+.radar .seam-walkers, path.map-seam-walkers { fill: none; stroke-linecap: round; opacity: 0; animation: seam-walk-in 0.6s ease-out forwards, seam-walk 1.4s linear infinite; }
+.radar .seam-walkers { stroke: #3a6fd8; }
+.radar .seam-walkers.south { stroke: #ff8a5c; }
 .radar .seam-walkers.under { stroke: #fff; }
 path.map-seam-walkers { --p: 12px; }
 @keyframes seam-walk-in { to { opacity: 1; } }

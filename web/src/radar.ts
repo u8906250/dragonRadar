@@ -84,7 +84,7 @@ export interface RadarRoute {
     label: string;
     labelAt: number;
     stitches: Array<{ at: number; center: { bearing: number; distanceKm: number }; along: { bearing: number; distanceKm: number }; label: string; below?: boolean }>;
-    walkers: Array<{ from: { bearing: number; distanceKm: number }; to: { bearing: number; distanceKm: number }; at: number }>;
+    walkers: Array<{ from: { bearing: number; distanceKm: number }; to: { bearing: number; distanceKm: number }; at: number; south?: boolean }>;
   }>;
   /** 綠覆率：整個台北市（ring）在 steps 的每個時間再鋪一層很淡的綠 */
   green?: { ring: Array<{ bearing: number; distanceKm: number }>; steps: number[] };
@@ -2190,7 +2190,7 @@ export class Radar {
         const gap = (12 * k).toFixed(2);
         const delay = `animation-delay:${Math.round(w.at - now)}ms,${Math.round(w.at - now)}ms`;
         g.appendChild(el('path', { class: 'seam-walkers under', d, style: `stroke-width:${(6.4 * k).toFixed(2)};stroke-dasharray:0 ${gap};--p:${gap}px;${delay}` }));
-        g.appendChild(el('path', { class: 'seam-walkers', d, style: `stroke-width:${(4.4 * k).toFixed(2)};stroke-dasharray:0 ${gap};--p:${gap}px;${delay}` }));
+        g.appendChild(el('path', { class: `seam-walkers${w.south ? ' south' : ''}`, d, style: `stroke-width:${(4.4 * k).toFixed(2)};stroke-dasharray:0 ${gap};--p:${gap}px;${delay}` }));
       }
       for (const st of sm.stitches) {
         const [c, a] = [xy(st.center), xy(st.along)];
