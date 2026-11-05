@@ -474,6 +474,59 @@ export async function geocodeStreet(env: Env, city: string, district: string | n
   return null;
 }
 
+/** 地址拆成路名和門牌（「民權東路六段423號」→ 民權東路六段、423）；「133-1號」另外給「133」當退路 */
+export function splitHouse(addr: string): { road: string; numbers: string[] } | null {
+  const m = /^(?:臺北市|台北市)?(?:\S{1,3}區)?(.*?(?:路|街|大道)(?:[一二三四五六七八九十]段)?(?:\d+巷)?(?:\d+弄)?)(\d+)(?:[-之](\d+))?號/.exec(addr.trim());
+  if (!m) return null;
+  return { road: m[1], numbers: m[3] ? [`${m[2]}-${m[3]}`, m[2]] : [m[2]] };
+}
+
+/**
+ * 門牌用結構化查詢（路名、門牌分開給 Nominatim）：自由文字「台北市民權東路六段423號」常查不到，分開就查得到。
+ * 要對到同一條路、同一個門牌才算；快取鍵「house:縣市|路名|門牌」
+ */
+export async function geocodeHouse(env: Env, city: string, addr: string): Promise<GeoPoint | null> {
+  const h = splitHouse(addr);
+  if (!h) return null;
+  const now = nowSec();
+  for (const num of h.numbers) {
+    const key = `house:${city}|${h.road}|${num}`;
+    const cached = await env.DB.prepare('SELECT lat, lng, display_name, resolved_at FROM geocode_cache WHERE query = ?').bind(key).first<CacheRow>();
+    if (cached && (cached.lat !== null || cached.resolved_at > now - NEGATIVE_TTL_SEC)) {
+      if (cached.lat !== null && cached.lng !== null) return { lat: cached.lat, lng: cached.lng, displayName: cached.display_name ?? key };
+      continue;
+    }
+    await politeDelay();
+    const url = new URL('https://nominatim.openstreetmap.org/search');
+    url.searchParams.set('format', 'jsonv2');
+    url.searchParams.set('limit', '3');
+    url.searchParams.set('countrycodes', 'tw');
+    url.searchParams.set('accept-language', 'zh-TW');
+    url.searchParams.set('street', `${num}號 ${h.road}`);
+    url.searchParams.set('city', city);
+    const res = await fetch(url.toString(), { headers: { 'user-agent': env.NOMINATIM_USER_AGENT, accept: 'application/json' } });
+    if (!res.ok) {
+      console.warn(`nominatim ${res.status} for ${key}`);
+      continue;
+    }
+    const arr = (await res.json()) as Array<{ lat: string; lon: string; display_name?: string }>;
+    const hit = arr.find((x) => {
+      const parts = (x.display_name ?? '').split(', ');
+      return parts[0] === `${num}號` && foldName(parts[1] ?? '') === foldName(h.road);
+    });
+    const lat = Number(hit?.lat);
+    const lng = Number(hit?.lon);
+    const point = hit && Number.isFinite(lat) && Number.isFinite(lng) ? { lat, lng, displayName: hit.display_name ?? key } : null;
+    await env.DB.prepare(
+      'INSERT INTO geocode_cache (query, lat, lng, display_name, resolved_at) VALUES (?, ?, ?, ?, ?) ON CONFLICT(query) DO UPDATE SET lat = excluded.lat, lng = excluded.lng, display_name = excluded.display_name, resolved_at = excluded.resolved_at',
+    )
+      .bind(key, point?.lat ?? null, point?.lng ?? null, point?.displayName ?? null, now)
+      .run();
+    if (point) return point;
+  }
+  return null;
+}
+
 /** 依序嘗試候選地點，回傳第一個查得到的 */
 export async function geocodeFirst(env: Env, candidates: string[]): Promise<GeoPoint | null> {
   for (const c of candidates) {

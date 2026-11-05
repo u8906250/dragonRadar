@@ -93,7 +93,7 @@ describe('buildMessages', () => {
   });
 });
 
-import { adminArea, citiesOfDistrict, citiesOfRoad, cityLevel, isRoadHit, cityMatches, sharesName, pickHit, placeCandidates, streetFallbacks, worldCandidates, cleanWorldAddress, countryOfPlace, regionOfPlace } from '../src/geocode';
+import { adminArea, citiesOfDistrict, citiesOfRoad, cityLevel, isRoadHit, cityMatches, sharesName, pickHit, placeCandidates, streetFallbacks, worldCandidates, cleanWorldAddress, countryOfPlace, regionOfPlace, splitHouse } from '../src/geocode';
 import { normalizeKeyword, parseKeywordList } from '../src/keywords';
 
 describe('normalizeKeyword', () => {
@@ -989,5 +989,19 @@ describe('官網艦隊對車掃地圖', () => {
   it('不同區不算', () => {
     expect(sameFleet('內湖南港', '大安文山車掃')).toBe(false);
     expect(sameFleet('內湖南港', '南港車掃')).toBe(false);
+  });
+});
+
+describe('門牌拆成路名和門牌', () => {
+  it('車掃加油點的地址', () => {
+    expect(splitHouse('民權東路六段423號')).toEqual({ road: '民權東路六段', numbers: ['423'] });
+    expect(splitHouse('民權東路六段133-1號')).toEqual({ road: '民權東路六段', numbers: ['133-1', '133'] });
+    expect(splitHouse('康寧路三段169號周邊')).toEqual({ road: '康寧路三段', numbers: ['169'] });
+    expect(splitHouse('台北市內湖區成功路三段174巷5號')).toEqual({ road: '成功路三段174巷', numbers: ['5'] });
+    expect(splitHouse('金龍路11號')).toEqual({ road: '金龍路', numbers: ['11'] });
+  });
+  it('沒有門牌的不拆', () => {
+    expect(splitHouse('大湖公園')).toBeNull();
+    expect(splitHouse('民權東路六段')).toBeNull();
   });
 });

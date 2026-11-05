@@ -1,5 +1,5 @@
 import type { Env } from '../env';
-import { geocodeFirst } from '../geocode';
+import { geocodeFirst, geocodeHouse } from '../geocode';
 import { nowSec } from '../util';
 import { CURRENT_MAP_URL, fetchCurrentMap, projectOnRoute, routeLine, type CurrentMapRoute, type LatLngPair } from './currentmap';
 
@@ -109,7 +109,7 @@ export function sameFleet(fleet: string, mapName: string): boolean {
   return parts.length >= 2 && fleet.length % 2 === 0 && parts.every((d) => mapName.includes(d));
 }
 
-export async function syncVoyage(env: Env, now = nowSec(), only?: { date: string; map?: CurrentMapRoute | null }): Promise<VoyageResult> {
+export async function syncVoyage(env: Env, now = nowSec(), only?: { date: string; map?: CurrentMapRoute | null; force?: boolean }): Promise<VoyageResult> {
   const out: VoyageResult = { stops: 0, updated: 0, events: 0, routes: 0, errors: [] };
   let stops: Stop[] = [];
   let config: VoyageConfig = {};
@@ -150,7 +150,8 @@ export async function syncVoyage(env: Env, now = nowSec(), only?: { date: string
     const postId = `voyage-${stop.id}`;
     const existing = await env.DB.prepare('SELECT text FROM posts WHERE id = ?').bind(postId).first<{ text: string }>();
     const route = map ? await env.DB.prepare('SELECT id FROM routes WHERE id = ?').bind(map.slug).first<{ id: string }>() : null;
-    if (existing?.text === text && (!map || route)) {
+    // force：管理者重送時整批重建（例如查地址的方式改了，加油點要重新定位）
+    if (!only?.force && existing?.text === text && (!map || route)) {
       // 時間和路線都沒變：只更新各路段的認領人數
       if (map) {
         await env.DB.prepare('UPDATE routes SET segments = ?, updated_at = ? WHERE id = ?').bind(JSON.stringify(map.segments), now, map.slug).run();
@@ -208,7 +209,8 @@ export async function syncVoyage(env: Env, now = nowSec(), only?: { date: string
       if (!p) {
         // OpenStreetMap 常沒有台灣門牌，查不到就退到路段（位置是大概的）
         const street = r.addr.replace(/\d+(-\d+)?號.*$/, '').replace(/\d+巷.*$/, '').trim();
-        const g = await geocodeFirst(env, [`台北市 ${r.addr}`, `台北市 ${r.cheer}`, street ? `台北市 ${street}` : ''].filter(Boolean));
+        // 門牌先拆成路名、門牌查（自由文字常查不到，退到整條路時，路線經過同一條路兩次就會放錯趟）
+        const g = (await geocodeHouse(env, '臺北市', r.addr)) ?? (await geocodeFirst(env, [`台北市 ${r.addr}`, `台北市 ${r.cheer}`, street ? `台北市 ${street}` : ''].filter(Boolean)));
         if (g) p = [g.lat, g.lng];
       }
       const proj = line && p ? projectOnRoute(line, p, fromM) : null;

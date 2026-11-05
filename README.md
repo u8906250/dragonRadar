@@ -32,6 +32,7 @@ worker/   Cloudflare Worker（API、排程、資料庫）
 
 - 車掃地圖的頁面寫出車掃時間（例如「車掃 17:30–18:30」）與抵達後的活動（「市政開講 18:30–20:30 · 民權公園」），路段 API 給實際路徑與各段認領人數。官網的船票時間是出發時間，車掃地圖讀不到時才用它。
 - 事件：起點（出發後保留 15 分鐘）、加油點（整天，到預計經過後 15 分鐘）、終點（抵達後的活動，沒有就保留 1 小時）。
+- 加油點的地址先拆成路名、門牌用 Nominatim 結構化查詢（`street=423號 民權東路六段`、`city=臺北市`；「133-1號」查不到退「133號」），自由文字「台北市民權東路六段423號」常查不到；退到整條路時，路線經過同一條路兩次會放錯趟（v1.518，內湖南港的民權東路六段）。
 - 加油點的預計經過時間：投影到路線上，用累計距離在出發到抵達之間等速推算。路段名稱有寫到的加油點直接用車掃地圖的座標，地址查到的離路線超過 60 m 就移到路線上。
 - 官網航線的艦隊和車掃地圖的場次：同一天、兩個區名都出現就算同一場，區名順序不同也對得上（官網「內湖南港艦隊」、車掃地圖「南港內湖車掃」，v1.517 前對不上，路線沒寫進去）。
 - 新聞、Threads、使用者貼的連結講的是同一場車掃就併進官方那一場（`events.merged_into`）：類型是活動、提到車掃／掃街／洋流號／市政開講、同一天、提到同一區（松山、信義、松信）或路線上的地名，或在路線 1.5 km 內。每次排程重新比對，前端只在官方那一場列「相關報導」。
@@ -284,7 +285,7 @@ Cloudflare D1 偶爾回「D1_ERROR: internal error」這類暫時性錯誤。`sr
 | POST | `/api/admin/park-marks` | 新增一個標記 `{ kind: 'lamp' \| 'bench' \| 'bin' \| 'stele' \| 'other', lat, lng, heading?, note? }`（經緯度要在公園附近；面向是度，0 是北、順時針；備註最多 60 字；最多 3000 個） |
 | POST | `/api/admin/park-marks/:id` | 改一個標記（整個換掉，欄位同上） |
 | DELETE | `/api/admin/park-marks/:id` | 刪除一個標記 |
-| POST | `/api/admin/voyage` | 只同步某一天的台北大洋流官方車掃 `{ date: 'YYYY-MM-DD', map? }`（車掃地圖擋 Cloudflare 的機器、Worker 抓會 403，`map` 可以帶管理者自己抓好的 `fetchCurrentMap` 結果；官網航線加車掃地圖的時間、實際路徑、認領人數：出發點、加油點、終點之後的活動放上雷達，路線寫進 `routes`；不抓新聞、不合併。改版中自動抓資料停了，管理者手動放當天的車掃用） |
+| POST | `/api/admin/voyage` | 只同步某一天的台北大洋流官方車掃 `{ date: 'YYYY-MM-DD', map?, force? }`（`force: true` 整批重建，加油點重新定位；沒帶的話時間、路線沒變只更新認領人數）（車掃地圖擋 Cloudflare 的機器、Worker 抓會 403，`map` 可以帶管理者自己抓好的 `fetchCurrentMap` 結果；官網航線加車掃地圖的時間、實際路徑、認領人數：出發點、加油點、終點之後的活動放上雷達，路線寫進 `routes`；不抓新聞、不合併。改版中自動抓資料停了，管理者手動放當天的車掃用） |
 | POST | `/api/admin/feedback/clear` | 清空已處理 `{ upTo }`（管理頁看到的最後標成已處理的時間，之後才標的不清）：改成 `cleared`，管理頁不再列出、不能改回未處理；不刪掉，同一個人重複回報、回報太頻繁照樣擋得住，30 天後照常刪掉 |
 | POST | `/api/admin/feedback/:id/apply` | 套用回報：`{ action: 'title', title }` 直接改標題、`{ action: 'supplement', note }` 補充後重新判讀，`{ action: 'takedown', scope: 'event' \| 'post' }` 從雷達下架，車掃指定了站的 `{ action: 'remove_stop' }` 刪除這一站、`{ action: 'stop_place', place, lat?, lng? }` 改這一站的地點（有 `lat`、`lng` 就用，`place` 當地點名稱；沒有就照 `place` 查）、`{ action: 'stop_time', start }` 改這一站的預計經過時間；不是車掃的 `{ action: 'event_place', place, lat?, lng? }` 改地點、`{ action: 'event_time', start, end? }` 改時間（unix 秒）；手動改的地點、時間重新判讀也保留；完成後標成已處理 |
 | POST | `/api/admin/locate` | 管理頁小地圖查地點 `{ place }`，回 `{ found, lat, lng, name, approxArea }`（也收「緯度, 經度」） |
