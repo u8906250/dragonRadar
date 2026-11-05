@@ -244,12 +244,6 @@ export const HIKER_SVG =
   '<path class="hk-leg" d="M-0.6 -6L-2.2 0M-0.6 -6L1.4 0"/><path class="hk-pack" d="M-3.8 -11.6H-1.2V-6.6H-3.8Z"/>' +
   '<path class="hk-body" d="M-0.6 -11.8V-6"/><path class="hk-arm" d="M-0.6 -10.4L2 -7.6"/><path class="hk-stick" d="M2.4 -9.8L3.8 0"/>' +
   '<circle class="hk-head" cx="-0.2" cy="-13.6" r="1.7"/><path class="hk-hat" d="M-2.4 -14H2L1.2 -15.6H-1.6Z"/></g></g>';
-/** 參觀的人（歷史記憶徑，v1.531 使用者說「歷史徑可以畫幾個參觀人」）：衣服顏色照 --c，手上拿相機 */
-export const VISITOR_SVG =
-  '<g class="boat-flip"><ellipse class="bk-shadow" cx="0" cy="0.4" rx="3.6" ry="0.9"/><g class="walk-bob">' +
-  '<path class="vs-leg" d="M0 -5.6L-1.6 0M0 -5.6L1.6 0"/><path class="vs-body" d="M0 -11.4V-5.6"/>' +
-  '<path class="vs-arm" d="M0 -10.2L2.4 -9.4"/><rect class="vs-cam" x="2.2" y="-10.6" width="2.4" height="1.7" rx="0.3"/>' +
-  '<circle class="hk-head" cx="0" cy="-13.2" r="1.7"/></g></g>';
 export const BIKE_SVG =
   '<g class="boat-flip"><ellipse class="bk-shadow" cx="0" cy="0.4" rx="8" ry="1.1"/>' +
   '<circle class="bk-wheel" cx="-5" cy="-3" r="3"/><circle class="bk-wheel" cx="5.2" cy="-3" r="3"/>' +

@@ -3665,7 +3665,7 @@ function hqExtras(t0: number): { reveals: HqReveal[]; icons: HqIcon[]; seams: Hq
  * 騎自行車的人（v1.529）：迎風—港墘自行車橋上兩台（橋畫好後）、河濱自行車道（大佳河濱、大稻埕）各兩台（船經過時），一去一回、錯開半趟；
  * 一趟的時間照長度（每公尺 14 毫秒、最少 8 秒）
  */
-function hqBikes(t0: number): Array<{ path: Array<[number, number]>; start: number; lap: number; kind?: 'bike' | 'hiker' | 'visitor'; color?: string }> {
+function hqBikes(t0: number): Array<{ path: Array<[number, number]>; start: number; lap: number; kind?: 'bike' | 'hiker'; color?: string }> {
   if (!hq) return [];
   const br = hq.HQ_BRIDGE;
   const lapOf = (m: number): number => Math.max(8000, m * 14);
@@ -3686,19 +3686,6 @@ function hqBikes(t0: number): Array<{ path: Array<[number, number]>; start: numb
     const at = hqStopAt(t0, tr.stop) + 2600;
     const lap = Math.max(14000, lenM(tr.pts) * 30);
     for (let k = 0; k < 3; k++) out.push({ path: tr.pts, start: at + (k * lap) / 3, lap, kind: 'hiker' as const });
-  }
-  // 參觀的人（歷史記憶徑，v1.531 使用者說「歷史徑可以畫幾個參觀人」）：四個人慢慢逛（兩個往前、兩個往回），衣服顏色不一樣
-  const hist = hq.HQ_CULTURE_LINES.find((ln) => ln.name.startsWith('歷史'));
-  if (hist) {
-    // 線畫好以後（跟文化徑的線一樣：那條線的點都冒出來後 0.4 秒開始畫、畫 2.2 秒）
-    const pointAt = (n: string): number => {
-      const c = hq!.HQ_CULTURE.find((x) => x.name === n);
-      return c ? hqNearestAt(t0, c) : t0;
-    };
-    const at = Math.max(...hist.stops.map(pointAt)) + 400 + 2600;
-    const lap = Math.max(20000, lenM(hist.pts) * 35);
-    const colors = ['#e05a5a', '#3a6fd8', '#f2b544', '#8a6fd0'];
-    colors.forEach((color, k) => out.push({ path: k % 2 ? [...hist.pts].reverse() : hist.pts, start: at + (k * lap) / 4, lap, kind: 'visitor' as const, color }));
   }
   return out;
 }

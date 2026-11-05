@@ -340,16 +340,14 @@ path.map-water-glint { animation: water-flow-map 1.1s linear infinite; }
 .bk-head { fill: #f3d9bd; stroke: #5a4636; stroke-width: 0.6; }
 .bk-helmet { fill: #ff7a1a; }
 .map-bike svg { display: block; overflow: visible; }
-/* 登山客、參觀的人（v1.531）：走路時一上一下；參觀的人衣服顏色照 --c */
-.hk-leg, .hk-body, .hk-arm, .vs-leg, .vs-arm { fill: none; stroke-linecap: round; stroke-linejoin: round; }
-.hk-leg, .vs-leg { stroke: #4a3a2a; stroke-width: 1.2; }
+/* 登山客（v1.531）：走路時一上一下 */
+.hk-leg, .hk-body, .hk-arm { fill: none; stroke-linecap: round; stroke-linejoin: round; }
+.hk-leg { stroke: #4a3a2a; stroke-width: 1.2; }
 .hk-body { stroke: #c0392b; stroke-width: 1.8; }
-.hk-arm, .vs-arm { stroke: #4a3a2a; stroke-width: 1; }
+.hk-arm { stroke: #4a3a2a; stroke-width: 1; }
 .hk-pack { fill: #2f9e6a; stroke: #1f5a3c; stroke-width: 0.5; }
 .hk-stick { fill: none; stroke: #8a5a24; stroke-width: 0.9; stroke-linecap: round; }
 .hk-hat { fill: #f2b544; stroke: #8a5a24; stroke-width: 0.4; }
-.vs-body { fill: none; stroke: var(--c, #3a6fd8); stroke-width: 2.2; stroke-linecap: round; }
-.vs-cam { fill: #333; }
 .walk-bob { animation: walk-bob 0.4s ease-in-out infinite alternate; }
 @keyframes walk-bob { to { transform: translateY(-0.6px); } }
 .fb-body { fill: #fff; stroke: #1f2a24; stroke-width: 0.9; stroke-linejoin: round; }
