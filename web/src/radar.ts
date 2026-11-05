@@ -2021,6 +2021,8 @@ export class Radar {
    */
   private drawVoyageExtras(r: RadarRoute): void {
     this.routeLayer.classList.toggle('hq-focus', !!r.focus);
+    // 待機的小動作等洋流號到了、河淡掉才開始（航行中每一格都在重畫，再加會掉格，v1.527）
+    this.routeLayer.classList.toggle('hq-idle', r.riverOut !== undefined && Date.now() > r.riverOut + 1000);
     const now = Date.now();
     const k = this.squarePx > 0 ? SIZE / this.squarePx : 1;
     for (const c of r.canals ?? []) {
@@ -2217,6 +2219,11 @@ export class Radar {
       // 橋、步道下面墊一條淺色的邊，壓在樹、河上面才看得到
       if (rv.kind !== 'stars') g.appendChild(el('path', { class: 'reveal-line under', d, pathLength: '1', style: `stroke-width:${(widths[rv.kind] * k + 2 * k).toFixed(2)};animation-delay:${Math.round(rv.at - now)}ms` }));
       g.appendChild(el('path', { class: 'reveal-line', d, pathLength: '1', style: `stroke-width:${(widths[rv.kind] * k).toFixed(2)};animation-delay:${Math.round(rv.at - now)}ms${rv.color ? `;stroke:${rv.color}` : ''}` }));
+      if (rv.kind === 'trail') {
+        // 登山客：一排小點沿著步道慢慢往上走（長完才出現，跟自行車橋的腳踏車一樣的畫法；v1.527）
+        const hikers = el('path', { class: 'reveal-hikers', d, style: `stroke-width:${(2.6 * k).toFixed(2)};animation-delay:${Math.round(rv.at + REVEAL_MS - now)}ms` }) as SVGPathElement;
+        g.appendChild(hikers);
+      }
       if (rv.kind === 'bridge') {
         // 腳踏車：一排點沿著橋跑（長完才出現；dash 用螢幕像素，pathLength 設成橋在畫面上幾像素）
         const bikes = el('path', { class: 'reveal-bikes', d, style: `stroke-width:${(2.4 * k).toFixed(2)};animation-delay:${Math.round(rv.at + REVEAL_MS - now)}ms` }) as SVGPathElement;
@@ -2236,7 +2243,8 @@ export class Radar {
       const p = polar(ic.bearing - this.heading, this.ratio(ic.distanceKm) * (R - 8));
       const g = el('g', { class: `voyage-icon ${ic.kind}${ic.focus ? ' focus' : ''}`, transform: `translate(${p.x.toFixed(1)} ${p.y.toFixed(1)}) scale(${(k * (ic.scale ?? 1)).toFixed(4)})` });
       const body = ic.kind === 'regrow' ? regrowSvg((ic.grow ?? ic.at) - now) : ic.kind === 'culture' ? cultureSvg(ic.char ?? '', ic.color ?? '#555') : ic.kind === 'service' ? serviceSvg(ic.char ?? '', ic.color ?? '#555') : ICON_SVG[ic.kind];
-      g.innerHTML = `<g class="boat-pop" style="animation-delay:${Math.round(ic.at - now)}ms">${body}</g>`;
+      // 待機的小動作（v1.527 使用者說「其他地方也可以動起來，以不影響效能為主」）：包一層 idle，CSS 照種類動，相位照位置錯開
+      g.innerHTML = `<g class="boat-pop" style="animation-delay:${Math.round(ic.at - now)}ms"><g class="idle idle-${ic.kind}" style="--d:-${Math.round(hash(ic.at) * 4000)}ms">${body}</g></g>`;
       this.routeLayer.appendChild(g);
       if (!ic.label) continue;
       const shown = (ic.grow ?? ic.at) + 500 - now;

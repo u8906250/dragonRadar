@@ -885,6 +885,8 @@ export class MapView {
   /** 老水路、種樹的地方（洋流總部的特效）：照時間用 CSS 的 delay 排好 */
   private addVoyageExtras(r: MapRoute): void {
     this.map?.getContainer().classList.toggle('hq-focus', !!r.focus);
+    // 待機的小動作等洋流號到了、河淡掉才開始（v1.527）
+    this.map?.getContainer().classList.toggle('hq-idle', r.riverOut !== undefined && Date.now() > r.riverOut + 1000);
     const L = this.L;
     const layer = this.routeLayer;
     const map = this.map;
@@ -1053,6 +1055,13 @@ export class MapView {
         e.setAttribute('pathLength', '1');
         e.style.animationDelay = `${Math.round(rv.at - now)}ms`;
       }
+      if (rv.kind === 'trail') {
+        // 登山客：一排小點沿著步道慢慢往上走（v1.527）
+        const hikers = L.polyline(rv.path, { color: '#7a4a1a', weight: 3.4, dashArray: '0 14', lineCap: 'round', interactive: false, className: 'map-reveal-hikers' });
+        layer.addLayer(hikers);
+        const e = hikers.getElement() as SVGElement | undefined;
+        if (e) e.style.animationDelay = `${Math.round(rv.at + 2200 - now)}ms`;
+      }
       if (rv.kind === 'bridge') {
         const bikes = L.polyline(rv.path, { color: '#15171c', weight: 3, dashArray: '3 12', interactive: false, className: 'map-reveal-bikes' });
         layer.addLayer(bikes);
@@ -1065,7 +1074,7 @@ export class MapView {
     for (const ic of r.icons ?? []) {
       const sc = ic.scale ?? 1;
       const body = ic.kind === 'regrow' ? regrowSvg((ic.grow ?? ic.at) - now) : ic.kind === 'culture' ? cultureSvg(ic.char ?? '', ic.color ?? '#555') : ic.kind === 'service' ? serviceSvg(ic.char ?? '', ic.color ?? '#555') : MAP_ICON_SVG[ic.kind];
-      const icon = L.divIcon({ className: `map-voyage-icon ${ic.kind}${ic.focus ? ' focus' : ''}`, html: `<svg viewBox="-20 -20 40 40" width="${40 * sc}" height="${40 * sc}" aria-hidden="true"><g class="boat-pop" style="animation-delay:${Math.round(ic.at - now)}ms">${body}</g></svg>`, iconSize: [40 * sc, 40 * sc], iconAnchor: [20 * sc, 20 * sc] });
+      const icon = L.divIcon({ className: `map-voyage-icon ${ic.kind}${ic.focus ? ' focus' : ''}`, html: `<svg viewBox="-20 -20 40 40" width="${40 * sc}" height="${40 * sc}" aria-hidden="true"><g class="boat-pop" style="animation-delay:${Math.round(ic.at - now)}ms"><g class="idle idle-${ic.kind}" style="--d:-${Math.round((((ic.at * 0.618) % 1) + 1) % 1 * 4000)}ms">${body}</g></g></svg>`, iconSize: [40 * sc, 40 * sc], iconAnchor: [20 * sc, 20 * sc] });
       layer.addLayer(L.marker([ic.lat, ic.lng], { icon, interactive: false, keyboard: false, zIndexOffset: 1300 }));
       if (ic.label && !ic.small) this.stayLabel([ic.lat, ic.lng], ic.label, (ic.grow ?? ic.at) + 500 - now, 20 * sc + 16);
     }
