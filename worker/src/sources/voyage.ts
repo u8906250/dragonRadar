@@ -98,6 +98,17 @@ export interface VoyageResult {
  * only.date：只同步這一天（YYYY-MM-DD）的航線（改版中自動抓資料停了，管理者手動放當天的車掃）；
  * only.map：管理者自己抓好的車掃地圖資料（車掃地圖擋 Cloudflare 的機器，Worker 抓會 403），有就不抓
  */
+/**
+ * 官網航線的艦隊和車掃地圖是不是同一場：艦隊名稱是兩個區名（「內湖南港」），車掃地圖可能倒過來寫（「南港內湖車掃」），
+ * 兩個區名都出現就算同一場，跟順序無關。
+ */
+export function sameFleet(fleet: string, mapName: string): boolean {
+  if (!fleet) return true;
+  if (mapName.includes(fleet)) return true;
+  const parts = fleet.match(/.{2}/g) ?? [];
+  return parts.length >= 2 && fleet.length % 2 === 0 && parts.every((d) => mapName.includes(d));
+}
+
 export async function syncVoyage(env: Env, now = nowSec(), only?: { date: string; map?: CurrentMapRoute | null }): Promise<VoyageResult> {
   const out: VoyageResult = { stops: 0, updated: 0, events: 0, routes: 0, errors: [] };
   let stops: Stop[] = [];
@@ -129,7 +140,7 @@ export async function syncVoyage(env: Env, now = nowSec(), only?: { date: string
     if (!stop.id || Number.isNaN(day) || stop.ended || day + DAY <= now || day > now + LOOKAHEAD_DAYS * DAY) continue;
     out.stops++;
     const fleet = (stop.area ?? '').replace(/艦隊$/, '');
-    const map = cmap && cmap.date === stop.date && (!fleet || cmap.name.includes(fleet)) ? cmap : null;
+    const map = cmap && cmap.date === stop.date && sameFleet(fleet, cmap.name) ? cmap : null;
     // 官網的船票時間是車掃出發時間（車掃地圖寫「車掃 17:30–18:30」）。以車掃地圖為準，沒有才用船票時間
     const ticket = config.ticketPlace === stop.place ? parseTicketTime(config.ticketTime, stop.date.slice(0, 4)) : null;
     const depart = map?.depart ?? ticket;

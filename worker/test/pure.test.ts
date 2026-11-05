@@ -285,7 +285,7 @@ describe('normalizeExtraction with reasoning output', () => {
 });
 
 import { extractArticleText, parseRss } from '../src/sources/text';
-import { parseTicketTime, taipeiMidnight } from '../src/sources/voyage';
+import { parseTicketTime, sameFleet, taipeiMidnight } from '../src/sources/voyage';
 
 describe('parseRss', () => {
   it('reads CDATA titles, links and dates', () => {
@@ -976,5 +976,18 @@ describe('postTags（回報抽的關鍵字）', () => {
     const ex = normalizeActivities({ is_event: true, reason: null, tags: ['飄帶', '#彩虹', ''], events: [] });
     expect(ex?.tags).toEqual(['飄帶', '彩虹']);
     expect(normalizeActivities({ is_event: false, reason: '心得', tags: ['飄帶'], events: [] })?.tags).toBeNull();
+  });
+});
+
+describe('官網艦隊對車掃地圖', () => {
+  it('區名順序不同也算同一場', () => {
+    expect(sameFleet('中正萬華', '中正萬華車掃')).toBe(true);
+    expect(sameFleet('內湖南港', '南港內湖車掃')).toBe(true);
+    expect(sameFleet('北投士林', '士林北投車掃')).toBe(true);
+    expect(sameFleet('', '南港內湖車掃')).toBe(true);
+  });
+  it('不同區不算', () => {
+    expect(sameFleet('內湖南港', '大安文山車掃')).toBe(false);
+    expect(sameFleet('內湖南港', '南港車掃')).toBe(false);
   });
 });
