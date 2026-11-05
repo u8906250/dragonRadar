@@ -105,8 +105,8 @@ describe('洋流總部的特效', () => {
     expect(HQ_SERVICES.filter((x) => x.kind === '健').length).toBe(12);
     for (const k of Object.keys(HQ_SERVICE_KINDS)) expect(HQ_SERVICES.some((x) => x.kind === k), k).toBe(true);
     for (const ly of HQ_POLICY_LAYERS) for (const k of ly.kinds) expect(HQ_SERVICE_KINDS[k].intro.length).toBeGreaterThan(20);
-    // 各區政見大秘寶、大巨蛋、狗掌、橋下空間：都在台北市裡，橋下空間每條至少 3 公里
-    expect(HQ_CHESTS.length).toBeGreaterThanOrEqual(5);
+    // 各區政見開箱、大巨蛋、狗掌、橋下空間：都在台北市裡，橋下空間每條至少 3 公里
+    expect(HQ_CHESTS.length).toBeGreaterThanOrEqual(6);
     for (const p of [...HQ_CHESTS, HQ_DOME, HQ_PAW]) expect(inside(p.lat, p.lng)).toBe(true);
     for (const vd of HQ_VIADUCTS) {
       let L = 0;
