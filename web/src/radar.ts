@@ -2225,8 +2225,8 @@ export class Radar {
       for (const st of sm.stitches) {
         const [c, a] = [xy(st.center), xy(st.along)];
         const ang = (Math.atan2(a.y - c.y, a.x - c.x) * 180) / Math.PI;
-        // 縫線跟著地圖縮放：拉近變大、拉遠變小（v1.535 使用者說「縫線的放大縮小要反過來」）；外圈 5 km 原來的大小，0.45～1.6 倍
-        const ss = Math.min(1.6, Math.max(0.45, Math.sqrt(5 / this.scaleKm)));
+        // 縫線跟著地圖縮放：拉近變大、拉遠變小（v1.535 使用者說「縫線的放大縮小要反過來」），再小一點（v1.536）：外圈 5 km 是 0.7 倍，0.35～1.1 倍
+        const ss = Math.min(1.1, Math.max(0.35, 0.7 * Math.sqrt(5 / this.scaleKm)));
         const sg = el('g', { class: 'seam-stitch', transform: `translate(${c.x.toFixed(1)} ${c.y.toFixed(1)}) rotate(${ang.toFixed(1)}) scale(${(k * ss).toFixed(4)})` });
         // 還沒縫的地方先是裂縫（一開始就有），洋流號經過時縫上、裂縫淡掉
         sg.innerHTML = crackSvg(sm.at + 600 - now, st.at + 900 - now) + stitchSvg(st.at - now);
@@ -2296,8 +2296,8 @@ export class Radar {
       const d = this.pathOf(fb.points);
       const lg = el('g', { class: `voyage-reveal culture fitbus-route${on}` });
       lg.append(
-        el('path', { class: 'reveal-line under', d, pathLength: '1', style: `stroke-width:${(4.4 * k * fs).toFixed(2)};animation-delay:${Math.round(fb.lineAt - now)}ms` }),
-        el('path', { class: 'reveal-line', d, pathLength: '1', style: `stroke-width:${(2.4 * k * fs).toFixed(2)};animation-delay:${Math.round(fb.lineAt - now)}ms;stroke:#2f9e6a` }),
+        el('path', { class: 'reveal-line under', d, pathLength: '1', style: `stroke-width:${(4.4 * k * Math.min(1, fs)).toFixed(2)};animation-delay:${Math.round(fb.lineAt - now)}ms` }),
+        el('path', { class: 'reveal-line', d, pathLength: '1', style: `stroke-width:${(2.4 * k * Math.min(1, fs)).toFixed(2)};animation-delay:${Math.round(fb.lineAt - now)}ms;stroke:#2f9e6a` }),
       );
       this.routeLayer.appendChild(lg);
       const offs = fitbusStopOffsets(fb.stopAt);

@@ -334,12 +334,13 @@ export class MapView {
       });
       // 自己拖、滾輪、雙指縮放：記下時間（程式移動地圖不算）
       map.on('dragstart', () => (this.lastUserMove = Date.now()));
-      // 健身小巴拉遠小台一點（v1.528）：照縮放算大小放在 CSS 變數，不用整個重畫；太小就藏起各站運動的長輩
+      // 縮放時要跟著變的大小、要收起來的東西：放在 CSS 變數和 class，不用整個重畫
       const fitScale = (): void => {
-        const s = Math.min(1, Math.max(0.45, 2 ** ((map.getZoom() - 15) / 2)));
-        this.el.style.setProperty('--fit-scale', s.toFixed(3));
-        // 縫線跟著縮放：拉近變大、拉遠變小（v1.535 使用者說「縫線的放大縮小要反過來」）；縮放 14 原來的大小，0.45～1.6 倍
-        this.el.style.setProperty('--stitch-scale', Math.min(1.6, Math.max(0.45, 2 ** ((map.getZoom() - 14) / 2))).toFixed(3));
+        // 縫線跟著縮放：拉近變大、拉遠變小（v1.535），再小一點（v1.536）：縮放 14 是 0.7 倍，0.35～1.1 倍
+        const zs = 2 ** ((map.getZoom() - 14) / 2);
+        this.el.style.setProperty('--stitch-scale', Math.min(1.1, Math.max(0.35, 0.7 * zs)).toFixed(3));
+        // 寶箱、健身小巴也跟著縮放（v1.536 使用者說「寶箱、巴士也是拉近變大、拉遠變小」）：縮放 14 原來的大小，0.45～1.6 倍
+        this.el.style.setProperty('--zoom-scale', Math.min(1.6, Math.max(0.45, zs)).toFixed(3));
         // 拉遠了，一直動的停下來或收起來（hq-far）
         this.motionFar = map.getZoom() < HQ_MOTION_ZOOM;
         this.el.classList.toggle('hq-far', this.motionFar);

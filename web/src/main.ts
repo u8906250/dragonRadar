@@ -3619,7 +3619,7 @@ function hqExtras(t0: number): { reveals: HqReveal[]; icons: HqIcon[]; seams: Hq
   // 各區的政見開箱（使用者說不要寫「大秘寶」）：開箱地點放寶箱（開過的打開、還沒開的鎖著），船離它最近時冒出來；大巨蛋好鄰居計畫、毛孩安心養（大安森林公園寶箱旁的狗掌）
   const I = hq.HQ_INTROS;
   for (const ch of hq.HQ_CHESTS) {
-    icons.push({ lat: ch.lat, lng: ch.lng, at: hqNearestAt(t0, ch), kind: ch.opened ? 'chest' : 'chestlock', label: ch.opened ? `${ch.district}政見開箱` : `${ch.district}政見開箱（${ch.date}）`, hideKm: 5, scale: 0.8, hint: { title: `${ch.district}政見開箱（${ch.date} ${ch.venue}${ch.opened ? '' : '，還沒開箱'}）`, intro: ch.intro } });
+    icons.push({ lat: ch.lat, lng: ch.lng, at: hqNearestAt(t0, ch), kind: ch.opened ? 'chest' : 'chestlock', label: ch.opened ? `${ch.district}政見開箱` : `${ch.district}政見開箱（${ch.date}）`, hideKm: 5, scale: 0.8 * (view === 'radar' ? hqZoomScale() : 1), hint: { title: `${ch.district}政見開箱（${ch.date} ${ch.venue}${ch.opened ? '' : '，還沒開箱'}）`, intro: ch.intro } });
   }
   icons.push({ lat: hq.HQ_DOME.lat, lng: hq.HQ_DOME.lng, at: hqNearestAt(t0, hq.HQ_DOME), kind: 'bigdome', label: hq.HQ_DOME.name, hideKm: 5, scale: 1.35, hint: { title: hq.HQ_DOME.name, intro: I['大巨蛋好鄰居計畫'] ?? '' } });
   icons.push({ lat: hq.HQ_PAW.lat, lng: hq.HQ_PAW.lng, at: hqNearestAt(t0, hq.HQ_PAW) + 400, kind: 'paw', label: hq.HQ_PAW.name, hideKm: 5, scale: 0.9, hint: { title: hq.HQ_PAW.name, intro: I['毛孩安心養'] ?? '' } });
@@ -3705,8 +3705,10 @@ function hqBikes(t0: number): Array<{ path: Array<[number, number]>; start: numb
  * 健身小巴（v1.525）：萬華繞一圈（龍山寺前 → 南機場社區 → 青年公園，示意）；洋流號經過龍山寺時路線畫出來，2.4 秒後小巴出發，一直繞；
  * 健身小巴分在運動政策，目的是長者健康，所以衛福按鈕亮著時一起亮（使用者問「健身小巴應該算衛福的政策？」）
  */
-/** 健身小巴在雷達上的大小：外圈 3 km 以內原來的大小，拉遠慢慢變小（最小 0.45）；看整個文化網時最小（v1.528 使用者說主軸還是以文化網為主） */
-const hqFitSize = (): number => (hqNetAt !== null ? 0.45 : Math.min(1, Math.max(0.45, Math.sqrt(3 / scaleKm))));
+/** 拉近變大、拉遠變小（雷達）：外圈 5 km 原來的大小，0.45～1.6 倍（v1.536 使用者說「寶箱、巴士也是拉近變大、拉遠變小」；縫線也是同一個比例） */
+const hqZoomScale = (): number => Math.min(1.6, Math.max(0.45, Math.sqrt(5 / scaleKm)));
+/** 健身小巴在雷達上的大小：跟著縮放（hqZoomScale）；看整個文化網時最小（v1.528 使用者說主軸還是以文化網為主） */
+const hqFitSize = (): number => (hqNetAt !== null ? 0.45 : hqZoomScale());
 type HqFitbus = { path: Array<[number, number]>; start: number; lineAt: number; stopAt: number[]; stops: Array<{ at: [number, number]; label: string }>; focus: boolean; dim: boolean; intro: string };
 function hqFitbuses(t0: number): HqFitbus[] {
   if (!hq) return [];
