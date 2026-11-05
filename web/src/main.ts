@@ -3225,12 +3225,13 @@ function stopHqVoyage(): void {
   render();
 }
 /**
- * 收集卡 No.003「你的市長」：點洋流總部看完動畫（到站、按鈕出來）、再把上面的政策按鈕（看整個文化網、教育・午餐、通學區、親子、都更、衛福）都點過，
+ * 收集卡 No.003「你的市長」：點洋流總部看完動畫（到站、按鈕出來）、再把上面的政策按鈕（看整個文化網、教育・午餐、通學區、親子、青年、都更、衛福）都點過，
  * 就跟伺服器領卡（findCard，跟小法一樣是瀏覽器判斷的）。進度記在這個瀏覽器（dr.mayorQuest），分好幾次看完也算
  */
 const LS_MAYOR = 'dr.mayorQuest';
 // v1.505 使用者說「你的市長完成條件加上這顆按鈕」：都更也要點過（六顆）
-const MAYOR_STEPS = ['watched', 'net', 'edu', 'zone', 'family', 'health', 'renewal'];
+// v1.509 使用者說「青年加進去」：七顆都要點過
+const MAYOR_STEPS = ['watched', 'net', 'edu', 'zone', 'family', 'youth', 'health', 'renewal'];
 function mayorProgress(step: string): void {
   if (myCards().some((c) => c.card === 'mayor')) return;
   let done: string[] = [];
