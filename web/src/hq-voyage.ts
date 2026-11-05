@@ -567,7 +567,8 @@ export const HQ_TRAILS: Array<{ name: string; stop: string; station: [number, nu
  * 位置照新聞（自由時報 2026-09 等）：從迎風河濱公園跨基隆河，落在內湖「港墘抽水站旁的市有地」，全長約 340 公尺（跨河約 220、跨堤頂道路約 120）。
  * 北端是港墘抽水站（OpenStreetMap），往西南找最短的跨河方向（基隆河水面 OSM），量 340 公尺到迎風河濱公園；確切的橋位政見沒有公布（v1.510 使用者說要找可能位置）
  */
-export const HQ_BRIDGE: { name: string; stop: string; from: [number, number]; to: [number, number] } = { name: '迎風—港墘自行車橋', stop: '民生社區', from: [25.0726, 121.57015], to: [25.07441, 121.57288] };
+// 經過內湖（大湖公園）就畫出來（v1.541 使用者說「自行車橋在經過內湖就可以畫出來了」；原本經過民生社區才畫）
+export const HQ_BRIDGE: { name: string; stop: string; from: [number, number]; to: [number, number] } = { name: '迎風—港墘自行車橋', stop: '大湖公園', from: [25.0726, 121.57015], to: [25.07441, 121.57288] };
 
 /**
  * 運動政見的「城市主場」：關渡國際足球場（確切基地政見沒寫，先放在關渡平原、關渡宮東北邊，約略）、花博旗艦運動中心（花博公園）。船到那一站時冒出來
