@@ -1815,6 +1815,9 @@ path.map-seam-walkers { --p: 15px; }
 /* 主題窄窄的（2～4 字），活動內容寬 */
 .edit-what { display: grid; grid-template-columns: minmax(0, 6.5em) minmax(0, 1fr); gap: 6px; }
 .edit-row label:first-child { grid-column: 1 / -1; }
+/* 結束日期（跨好幾天才填）：一整行 */
+.edit-row .edit-enddate { grid-column: 1 / -1; }
+.edit-row .edit-enddate small { font-weight: 400; opacity: 0.75; }
 .edit-item > small { color: var(--muted); font-size: 12px; margin-top: -4px; }
 .edit-pin { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
 .edit-pin-state { flex: 1 1 100%; font-size: 13px; color: var(--muted); }

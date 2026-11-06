@@ -154,7 +154,9 @@ describe('parseEditItems', () => {
 
   it('checks the end and keeps a pin only with both coordinates', () => {
     expect(() => parseEditItems([{ title: 'x', place: 'y', startAt: T18, endAt: T18 }])).toThrow('結束時間');
-    expect(() => parseEditItems([{ title: 'x', place: 'y', startAt: T18, endAt: T18 + 25 * 3600 }])).toThrow('結束時間');
+    // 一場最長 3 天（v1.567：兩天的市集要填得進去）
+    expect(parseEditItems([{ title: 'x', place: 'y', startAt: T18, endAt: T18 + 36 * 3600 }])[0]).toMatchObject({ endAt: T18 + 36 * 3600 });
+    expect(() => parseEditItems([{ title: 'x', place: 'y', startAt: T18, endAt: T18 + 3 * 86400 + 60 }])).toThrow('結束時間');
     expect(parseEditItems([{ title: 'x', place: 'y', startAt: T18, endAt: T20, lat: 25.02, lng: 121.53 }])[0]).toMatchObject({ endAt: T20, lat: 25.02, lng: 121.53 });
     expect(parseEditItems([{ title: 'x', place: 'y', startAt: T18, lat: 25.02 }])[0]).toMatchObject({ lat: null, lng: null });
     expect(parseEditItems([{ title: 'x', place: 'y', startAt: T18, lat: 95, lng: 121 }])[0]).toMatchObject({ lat: null, lng: null });

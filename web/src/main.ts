@@ -5565,6 +5565,8 @@ function tpeUnix(date: string, time: string): number | null {
 
 // 車掃的站最多 20 個（跟判讀一樣）
 const MAX_EDIT_ITEMS = 20;
+/** 一場活動最長多久（跟 worker 的 MAX_EDIT_SPAN_SEC 一樣，v1.567 起 3 天） */
+const MAX_EDIT_SPAN_SEC = 3 * 86400;
 
 /** 補充資料表單的一場：判讀出來的位置、回報的人標的位置、小地圖 */
 interface EditPin {
@@ -5585,7 +5587,11 @@ const editPins = new Map<HTMLElement, EditPin>();
 function editCardHtml(it: EditItem | null): string {
   const tz = it ? localTz(it) : null;
   const start = it?.startAt ? wallInput(it.startAt, tz) : null;
-  const end = it?.endAt ? wallInput(it.endAt, tz).time : '';
+  const endWall = it?.endAt ? wallInput(it.endAt, tz) : null;
+  const end = endWall?.time ?? '';
+  // 跨天的（兩天的市集、跨夜到隔天早上的）結束日期跟開始不同才填；同一天、只跨過午夜到隔天清晨的留空（照舊自動算隔天）
+  const overnight = !!(it?.startAt && it.endAt && it.endAt - it.startAt < 86400 && endWall && start && endWall.time <= start.time);
+  const endDate = endWall && start && endWall.date !== start.date && !overnight ? endWall.date : '';
   return `<fieldset class="edit-item">
       <legend><span class="edit-no"></span><button type="button" class="chip" data-act="drop">不要這場</button></legend>
       <div class="edit-what">
@@ -5596,6 +5602,7 @@ function editCardHtml(it: EditItem | null): string {
         <label>日期<input type="date" name="date" value="${start?.date ?? ''}"></label>
         <label>開始<input type="time" name="start" value="${it?.dateOnly ? '' : (start?.time ?? '')}"></label>
         <label>結束<input type="time" name="end" value="${end}"></label>
+        <label class="edit-enddate">結束日期<small>（跨好幾天才填，最多 3 天）</small><input type="date" name="enddate" value="${endDate}"></label>
       </div>
       <small class="muted">結束可以不填：只寫幾點開始，雷達上顯示到開始後兩小時。國外的活動填當地時間。</small>
       <label>地點<input name="place" maxlength="80" value="${esc(it?.place ?? '')}" placeholder="店名或地址，例如：厝邊咖啡 台北市萬華區○○路○號"></label>
@@ -5834,9 +5841,13 @@ function readEditForm(form: HTMLFormElement): EditInput[] | string {
     if (!place) return `${at}請填地點`;
     const startAt = tpeUnix(val('date'), val('start'));
     if (startAt === null) return `${at}日期或時間看不懂，請重新選`;
-    let endAt = val('end') ? tpeUnix(val('date'), val('end')) : null;
-    // 結束比開始早：跨過午夜，是隔天
-    if (endAt !== null && endAt <= startAt) endAt += 86400;
+    // 跨好幾天的（v1.567 使用者說「活動持續三天以內」都要收）：照填的結束日期；沒填結束日期、結束比開始早：跨過午夜，是隔天
+    const endDate = val('enddate');
+    if (endDate && !val('end')) return `${at}填了結束日期，也請填幾點結束`;
+    let endAt = val('end') ? tpeUnix(endDate || val('date'), val('end')) : null;
+    if (endAt !== null && !endDate && endAt <= startAt) endAt += 86400;
+    if (endAt !== null && endAt <= startAt) return `${at}結束要在開始之後`;
+    if (endAt !== null && endAt - startAt > MAX_EDIT_SPAN_SEC) return `${at}一場活動最長 3 天，再長的請分成幾場`;
     const pinned = editPins.get(card)?.pinned ?? null;
     // 關鍵字欄打了還沒按 Enter 的也算
     const typed = val('tag').split(/[\s,，、]+|(?=#)/).filter((p) => p.replace(/#/g, '') !== '');

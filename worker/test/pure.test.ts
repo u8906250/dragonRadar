@@ -1,5 +1,5 @@
 import type { ExtractedEvent } from '../src/extract';
-import { applySupplementDate, closedWeekdays, dropBroughtItem, dropSelfPlace, openWeekdaysFromText, splitDropTimes, splitMultiDay, slotWeekdays, spotHoursFromText, splitWeekdayWeekend, startNowForDeadline, untilInText, weekdaysFromText, weekdaysInText } from '../src/extract';
+import { applySupplementDate, closedWeekdays, dropBroughtItem, dropSelfPlace, openWeekdaysFromText, splitDropTimes, splitDailyActivity, splitMultiDay, slotWeekdays, spotHoursFromText, splitWeekdayWeekend, startNowForDeadline, untilInText, weekdaysFromText, weekdaysInText } from '../src/extract';
 import { isAreaOnly } from '../src/geocode';
 import { existedOutcome, notListedWhy, previewOf } from '../src/reports';
 import { describe, expect, it } from 'vitest';
@@ -537,6 +537,24 @@ describe('applySupplementDate', () => {
     expect(ex.start_at).toBe('2026-10-21T12:00:00+08:00');
     applySupplementDate(ex, '10/26 或 10/27', post, posted);
     expect(ex.start_at).toBe('2026-10-21T12:00:00+08:00');
+  });
+});
+
+describe('splitDailyActivity（洋流的活動，v1.567）', () => {
+  const base = { kind: 'activity', title: '2026浪人祭市集', item: null, place_text: '台南安平觀夕平台旁大草皮', place_query: '台南安平觀夕平台', confidence: 0.9, all_day: false, spot: false, approx_area: null, end_open: false, until_open: false, tz: null, extra: null } as unknown as ExtractedEvent;
+  it('splits a two-day market with daily hours into one session per day', () => {
+    const text = '⊹ 日期｜11 / 07（六）- 11 / 08（日）\n⊹ 時間｜10:30～22:00\n⊹ 地點｜台南安平觀夕平台旁大草皮';
+    const out = splitDailyActivity({ ...base, start_at: '2026-11-07T10:30:00+08:00', end_at: '2026-11-08T22:00:00+08:00' }, text);
+    expect(out.map((e) => [e.start_at, e.end_at])).toEqual([
+      ['2026-11-07T10:30:00+08:00', '2026-11-07T22:00:00+08:00'],
+      ['2026-11-08T10:30:00+08:00', '2026-11-08T22:00:00+08:00'],
+    ]);
+  });
+  it('keeps a continuous multi-day camp and short events as they are', () => {
+    const camp = { ...base, start_at: '2026-11-07T10:00:00+08:00', end_at: '2026-11-09T16:00:00+08:00' };
+    expect(splitDailyActivity(camp, '三天兩夜營隊 11/7 10:00 至 11/9 16:00')).toEqual([camp]);
+    const evening = { ...base, start_at: '2026-11-07T18:00:00+08:00', end_at: '2026-11-07T21:00:00+08:00' };
+    expect(splitDailyActivity(evening, '11/7 18:00～21:00')).toEqual([evening]);
   });
 });
 

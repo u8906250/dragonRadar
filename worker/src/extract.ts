@@ -638,6 +638,32 @@ export function dropBroughtItem(ex: Pick<ExtractedEvent, 'kind' | 'item'>, text:
   return true;
 }
 
+/** 洋流的活動：連續幾天、每天同一個時段的，最多拆成幾天 */
+const MAX_DAILY_DAYS = 7;
+
+/**
+ * 洋流的活動（v1.567）：「11/07（六）- 11/08（日）、10:30～22:00」被模型讀成從 11/7 10:30 一路到 11/8 22:00（半夜也算進行中）：
+ * 拆成每天一場（每天 10:30～22:00）。要貼文寫了最後一天、也寫了「10:30～22:00」這樣的每天時段才拆
+ * （「11/7 10:00 至 11/9 16:00」這種連續好幾天的營隊照一整段，不拆）；國外的不拆（時區）
+ */
+export function splitDailyActivity(ex: ExtractedEvent, text: string): ExtractedEvent[] {
+  if (ex.country) return [ex];
+  const start = parseIsoToUnix(ex.start_at);
+  const end = parseIsoToUnix(ex.end_at);
+  if (start === null || end === null || end - start < 20 * 3600) return [ex];
+  const days = taipeiDay(end) - taipeiDay(start) + 1;
+  const tod = (t: number): number => (t + 8 * 3600) % DAY_SEC;
+  if (days < 2 || days > MAX_DAILY_DAYS || tod(end) <= tod(start)) return [ex];
+  if (!untilInText(taipeiIso(end).slice(0, 10), text)) return [ex];
+  const hm = (t: number): string => {
+    const m = Math.floor(tod(t) / 60);
+    return `0?${Math.floor(m / 60)}\\s*[:：]\\s*${String(m % 60).padStart(2, '0')}`;
+  };
+  if (!new RegExp(`(?<!\\d)${hm(start)}\\s*(?:[~～至到\\-－–—]|\\s)\\s*${hm(end)}(?!\\d)`).test(halfWidth(text))) return [ex];
+  const len = tod(end) - tod(start);
+  return Array.from({ length: days }, (_, i) => ({ ...ex, start_at: taipeiIso(start + i * DAY_SEC), end_at: taipeiIso(start + i * DAY_SEC + len) }));
+}
+
 /**
  * 「10/24～10/26 12:00～18:30」被模型讀成從 10/24 12:00 一路到 10/26 18:30（半夜也算進行中）：
  * 跨了好幾天、每天幾點到幾點的，改成固定據點每天一個時段，最後一天要貼文有寫。改了回傳 true。

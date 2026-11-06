@@ -307,7 +307,8 @@ export function notListedWhy(items: PlanItem[]): NotListedWhy | undefined {
  */
 // 11：其他雷達（找工作…）也抽關鍵字（2026-11-03，之前回報、還沒確認的再貼一次要重新判讀才有）
 // 12：騎車（順騎、單車）、健走也算路線，各站沒寫時間的填出發時間、程式照距離推算（2026-11-05）
-export const PLAN_VERSION = 12;
+// 13：連續幾天、每天幾點到幾點的活動（市集、祭典）拆成每天一場，不再一整段連到半夜（2026-11-06）
+export const PLAN_VERSION = 13;
 
 /** 判讀好、還沒寫進雷達的資料，存在 posts.confirm_plan */
 interface StoredPlan {
@@ -620,8 +621,8 @@ export async function supplementLink(env: Env, body: { postId?: unknown; token?:
 const EDITS_PER_POST = 10;
 // 車掃的站最多 20 個（跟判讀一樣）
 const MAX_EDIT_ITEMS = 20;
-/** 一場活動最長多久（開始到結束） */
-const MAX_EDIT_SPAN_SEC = 24 * 3600;
+/** 一場活動最長多久（開始到結束）：v1.567 使用者說「活動持續三天以內」都要收（原本 24 小時，兩天的市集填不進去） */
+export const MAX_EDIT_SPAN_SEC = 3 * 86400;
 
 /** 表單送來的每一場：標題、地點、開始時間一定要有；結束可以不填；有標地圖位置才帶座標 */
 export function parseEditItems(raw: unknown): ManualActivity[] {
@@ -639,7 +640,7 @@ export function parseEditItems(raw: unknown): ManualActivity[] {
     if (!Number.isSafeInteger(o.startAt)) throw new ReportError(400, `${at}請填哪天幾點開始`);
     const startAt = o.startAt as number;
     const endAt = o.endAt === null || o.endAt === undefined ? null : Number.isSafeInteger(o.endAt) ? (o.endAt as number) : NaN;
-    if (endAt !== null && !(endAt > startAt && endAt - startAt <= MAX_EDIT_SPAN_SEC)) throw new ReportError(400, `${at}結束時間要在開始之後的 24 小時內`);
+    if (endAt !== null && !(endAt > startAt && endAt - startAt <= MAX_EDIT_SPAN_SEC)) throw new ReportError(400, `${at}結束時間要在開始之後的 3 天內`);
     const lat = coord(o.lat, 90);
     const lng = coord(o.lng, 180);
     // 關鍵字：新版網頁一定送（全部拿掉是空的），舊版沒送就沿用判讀出來的
