@@ -1,4 +1,5 @@
 import type { BlipStyle, EventKind, Phase, SweepStyle } from './types';
+import { DOME_SVG, isSceneKind, sceneSvg, SOCCER_SVG, TRUCK_SVG, windSvg, type SceneKind } from './hq-scenes';
 import { alongLine, BOAT_SVG, crackSvg, FITBUS_BODY, FITBUS_SVG, hqMotionKm, HQ_NET_LABEL_KM, BIKE_SVG, HIKER_SVG, PETWALK_SVG, FISH_SVG, WETLAND_BIRDS, MUSIC_NOTES, bikePhase, fitbusPhase, fitbusStopSvg, cultureSvg, regrowSvg, serviceSvg, stitchSvg, BOAT_TITLE, boatPhase, fireworksSvg, FIREWORKS_MS, flowOut, HQ_VOYAGE_MS, RAINBOW_FLOW_TOTAL, RAINBOW_STAGGER_MS, riverHalfWidth, surge, SURGE_TOTAL, voyagePhase, voyageTimeOf } from './flow';
 
 export interface RadarItem {
@@ -75,7 +76,7 @@ export interface RadarRoute {
    */
   reveals?: Array<{ points: Array<{ bearing: number; distanceKm: number }>; at: number; kind: 'trail' | 'bridge' | 'stars' | 'culture'; label?: string; color?: string; labelAt?: number; hideKm?: number }>;
   /** 騎自行車的人：沿著 points 從頭騎到尾（start 開始、一趟 lap 毫秒），拉遠收起來 */
-  bikes?: Array<{ points: Array<{ bearing: number; distanceKm: number }>; start: number; lap: number; kind?: 'bike' | 'hiker' | 'pet'; loop?: boolean; color?: string }>;
+  bikes?: Array<{ points: Array<{ bearing: number; distanceKm: number }>; start: number; lap: number; kind?: 'bike' | 'hiker' | 'pet' | 'truck'; loop?: boolean; color?: string }>;
   /** 健身小巴：沿著 points 繞圈（start 出發、stopAt 是各站在路線上的位置），停站時那一站冒出運動的長輩；lineAt 路線畫出來；focus 是政策按鈕（衛福）亮著 */
   fitbuses?: Array<{ points: Array<{ bearing: number; distanceKm: number }>; start: number; lineAt: number; stopAt: number[]; stops: Array<{ point: { bearing: number; distanceKm: number }; label: string }>; focus?: boolean; size?: number; dim?: boolean; driveMs: number }>;
   /** 縫合（市民大道）：at 裂縫畫出來、healAt 縫完變淡；stitches 一個一個縫（along 是路上的下一點，算方向）；walkers 人流小點從 from 走到 to */
@@ -100,7 +101,7 @@ export interface RadarRoute {
    * 一個東西冒出來（at）：hut 登山中心、stadium 足球場、dome 運動中心、star 星星、regrow 樹樁（grow 時長回大樹）、culture 文化徑的點（char、color）；
    * label 留著（small 是寫在下面的小字，跟別的小字重疊就不寫）
    */
-  icons?: Array<{ bearing: number; distanceKm: number; at: number; kind: 'hut' | 'stadium' | 'dome' | 'bigdome' | 'star' | 'regrow' | 'culture' | 'service' | 'wetland' | 'archbridge' | 'chest' | 'chestlock' | 'paw' | 'umusic' | 'uart' | 'uexhibit' | 'uyouth' | 'ushop' | 'fitbus'; label?: string; hideKm?: number; scale?: number; grow?: number; char?: string; color?: string; small?: boolean; focus?: boolean }>;
+  icons?: Array<{ bearing: number; distanceKm: number; at: number; kind: 'hut' | 'stadium' | 'dome' | 'bigdome' | 'star' | 'regrow' | 'culture' | 'service' | 'wetland' | 'archbridge' | 'chest' | 'chestlock' | 'paw' | 'umusic' | 'uart' | 'uexhibit' | 'uyouth' | 'ushop' | 'fitbus' | SceneKind; label?: string; hideKm?: number; scale?: number; grow?: number; char?: string; color?: string; small?: boolean; focus?: boolean; rot?: number }>;
   /** 政策圖層開著：其他特效變淡，只有 focus 的地方、通學區的圈清楚 */
   focus?: boolean;
   /** 都更的基地範圍（at 時淡入） */
@@ -158,8 +159,9 @@ const ICON_SVG: Record<'hut' | 'stadium' | 'dome' | 'bigdome' | 'star' | 'wetlan
   // 濕地上兩隻小鳥飛起來繞一圈再降落（v1.534）
   wetland: '<ellipse class="ic-pond" cx="0" cy="4" rx="11" ry="4.5"/><path class="ic-reed" d="M-6 4V-7M-2 4V-11M2 4V-6M6 4V-9"/><path class="ic-reed-top" d="M-6 -7l1 -3.5M-2 -11l1 -3.5M2 -6l1 -3.5M6 -9l1 -3.5"/>' + WETLAND_BIRDS,
   hut: '<path class="ic-roof" d="M-9 -1L0 -11L9 -1Z"/><path class="ic-wall" d="M-7 -1H7V7H-7Z"/><path class="ic-door" d="M-2 7V2H2V7Z"/><path class="ic-flag" d="M0 -11V-17M0 -17H5L3.5 -15L5 -13H0"/>',
-  stadium: '<ellipse class="ic-stand" rx="16" ry="10"/><ellipse class="ic-field" rx="11" ry="6"/><path class="ic-lines" d="M0 -6V6M-11 0A11 6 0 0 0 11 0M-11 0A11 6 0 0 1 11 0"/><circle class="ic-lines" r="2"/>',
-  dome: '<path class="ic-base" d="M-14 4H14V7H-14Z"/><path class="ic-dome" d="M-13 4A13 13 0 0 1 13 4Z"/><path class="ic-rib" d="M0 -9V4M-7 -7Q0 -4 7 -7"/>',
+  // 關渡國際足球場射門、看台波浪；花博運動中心的無障礙坡道（v1.545，hq-scenes.ts）
+  stadium: SOCCER_SVG,
+  dome: DOME_SVG,
   // 大巨蛋：扁扁的銀灰色金屬屋頂（屋頂接縫、頂上一圈）、深色玻璃帶、淺灰外牆的直條（v1.522 使用者說外殼改成灰色比較貼近原本的樣子；花博旗艦運動中心照舊用 dome）
   bigdome: '<ellipse class="dm-shadow" cx="0" cy="7.4" rx="16.5" ry="2.1"/><path class="dm-base" d="M-16 6.6L-15 1H15L16 6.6Z"/><path class="dm-fin" d="M-12.5 2.6V6.2M-9.5 2.6V6.4M-6.5 2.6V6.4M-3.5 2.6V6.4M-0.5 2.6V6.4M2.5 2.6V6.4M5.5 2.6V6.4M8.5 2.6V6.4M11.5 2.6V6.4M14.2 2.6V6"/><path class="dm-glass" d="M-15 1H15L15.3 2.6H-15.3Z"/><path class="dm-roof" d="M-15 1C-12 -9 12 -9 15 1Z"/><path class="dm-sh" d="M15 1C13.2 -4.2 9 -6.1 4 -6.4C8.8 -4.6 11.8 -2 12.6 1Z"/><path class="dm-hi" d="M-12.6 -0.6C-10.4 -5 -5 -6.3 -0.5 -6.5C-5.2 -5.5 -8.8 -3.4 -10.4 0.2Z"/><path class="dm-rib" d="M0 -6.5V1M-5.2 -5.9Q-6.8 -2.6 -7.6 1M5.2 -5.9Q6.8 -2.6 7.6 1M-9.6 -3.9Q-11.4 -1.6 -12.2 1M9.6 -3.9Q11.4 -1.6 12.2 1"/><path class="dm-ring" d="M-6.2 -5.1Q0 -7.6 6.2 -5.1"/>',
   star: '<path class="ic-star" d="M0 -7L2 -2.2L7 -2.2L3 0.9L4.4 5.8L0 2.9L-4.4 5.8L-3 0.9L-7 -2.2L-2 -2.2Z"/>',
@@ -2287,7 +2289,17 @@ export class Radar {
     for (const ic of r.icons ?? []) {
       const p = polar(ic.bearing - this.heading, this.ratio(ic.distanceKm) * (R - 8));
       const g = el('g', { class: `voyage-icon ${ic.kind}${ic.focus ? ' focus' : ''}`, transform: `translate(${p.x.toFixed(1)} ${p.y.toFixed(1)}) scale(${(k * (ic.scale ?? 1)).toFixed(4)})` });
-      const body = ic.kind === 'regrow' ? regrowSvg((ic.grow ?? ic.at) - now) : ic.kind === 'culture' ? cultureSvg(ic.char ?? '', ic.color ?? '#555') : ic.kind === 'service' ? serviceSvg(ic.char ?? '', ic.color ?? '#555') : ICON_SVG[ic.kind];
+      // 方向（rot 是地理方位）轉成螢幕角度：0 往右；雷達跟著指北針轉
+      const deg = (ic.rot ?? 90) - this.heading - 90;
+      const body = isSceneKind(ic.kind)
+        ? sceneSvg(ic.kind, deg)
+        : ic.kind === 'regrow'
+          ? regrowSvg((ic.grow ?? ic.at) - now)
+          : ic.kind === 'culture'
+            ? cultureSvg(ic.char ?? '', ic.color ?? '#555')
+            : ic.kind === 'service'
+              ? serviceSvg(ic.char ?? '', ic.color ?? '#555')
+              : ICON_SVG[ic.kind] + (ic.kind === 'wetland' && ic.rot !== undefined ? windSvg(deg) : '');
       // 待機的小動作（v1.527 使用者說「其他地方也可以動起來，以不影響效能為主」）：包一層 idle，CSS 照種類動，相位照位置錯開
       g.innerHTML = `<g class="boat-pop" style="animation-delay:${Math.round(ic.at - now)}ms"><g class="idle idle-${ic.kind}" style="--d:-${Math.round(hash(ic.at) * 4000)}ms">${body}</g></g>`;
       this.routeLayer.appendChild(g);
@@ -2366,7 +2378,7 @@ export class Radar {
       // 騎自行車的人、登山客（山林徑）、牽狗散步的人（大安森林公園）
       const kind = bk.kind ?? 'bike';
       const g = el('g', { class: `route-boat hq-bike ${kind}`, ...(bk.color ? { style: `--c:${bk.color}` } : {}) }) as SVGGElement;
-      g.innerHTML = kind === 'hiker' ? HIKER_SVG : kind === 'pet' ? PETWALK_SVG : BIKE_SVG;
+      g.innerHTML = kind === 'hiker' ? HIKER_SVG : kind === 'pet' ? PETWALK_SVG : kind === 'truck' ? TRUCK_SVG : BIKE_SVG;
       this.routeLayer.appendChild(g);
       this.boatTracks.push({ id: `hq-bike-${i}`, g, flip: g.querySelector('.boat-flip') as SVGGElement, xs, ys, cum, ride: { start: bk.start, lap: bk.lap, loop: bk.loop }, scale: kind === 'bike' ? 1.1 : kind === 'pet' ? 1.4 : 1.2 });
     });

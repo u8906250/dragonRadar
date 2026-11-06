@@ -4,6 +4,7 @@ import { addKeyword, collectLetter, deletePushSubscription, locateFeedbackPlace,
 import { compassSupported, startCompass } from './compass';
 import { bearingDeg, compassLabel, destination, formatKm, haversineKm, taiwanRadiusKm, type LatLng } from './geo';
 import { TAIWAN_RINGS } from './taiwan';
+import type { SceneKind } from './hq-scenes';
 import { LANDMARKS } from './landmarks';
 import { getModule, JOB_RISK_TEXT, JOB_SAFETY_TIPS, MEETUP_SAFETY_TIPS, MODULES, OFFER_SAFETY_TIPS, SEEK_SAFETY_TIPS, type ModuleDef, type ModuleId } from './modules';
 import { X_MAX_WEIGHT, xLength } from './xcount';
@@ -3595,7 +3596,7 @@ type HqSeam = {
   stitches: Array<{ at: number; center: [number, number]; along: [number, number]; label: string; below?: boolean }>;
   walkers: Array<{ from: [number, number]; to: [number, number]; at: number; south?: boolean }>;
 };
-type HqIcon = { lat: number; lng: number; at: number; kind: 'hut' | 'stadium' | 'dome' | 'bigdome' | 'star' | 'regrow' | 'culture' | 'service' | 'wetland' | 'archbridge' | 'chest' | 'chestlock' | 'paw' | 'umusic' | 'uart' | 'uexhibit' | 'uyouth' | 'ushop' | 'fitbus'; label?: string; hideKm?: number; scale?: number; grow?: number; char?: string; color?: string; small?: boolean; focus?: boolean; hint?: { title: string; intro: string } };
+type HqIcon = { lat: number; lng: number; at: number; kind: 'hut' | 'stadium' | 'dome' | 'bigdome' | 'star' | 'regrow' | 'culture' | 'service' | 'wetland' | 'archbridge' | 'chest' | 'chestlock' | 'paw' | 'umusic' | 'uart' | 'uexhibit' | 'uyouth' | 'ushop' | 'fitbus' | SceneKind; label?: string; hideKm?: number; scale?: number; grow?: number; char?: string; color?: string; small?: boolean; focus?: boolean; hint?: { title: string; intro: string }; rot?: number };
 /** 其他政見的地方：離路線多近才沿路冒出來 */
 const HQ_SERVICE_NEAR_M = 300;
 /** 離路線幾公尺（路線載入後不會變，記起來） */
@@ -3668,7 +3669,8 @@ function hqExtras(t0: number): { reveals: HqReveal[]; icons: HqIcon[]; seams: Hq
   // 濕地風廊（水域政見）：船離它最近時冒出來，第一個寫「濕地風廊」
   hq.HQ_WETLANDS.map((w) => ({ ...w, at: hqNearestAt(t0, w) }))
     .sort((a, b) => a.at - b.at)
-    .forEach((w, i) => icons.push({ lat: w.lat, lng: w.lng, at: w.at, kind: 'wetland', label: i === 0 ? `濕地風廊・${w.name}` : w.name, hideKm: 10, scale: 1.1, hint: { title: `${w.name}（濕地風廊）`, intro: hq!.HQ_INTROS['濕地風廊'] ?? '' } }));
+    // 涼風往市區（台北車站的方向）吹（v1.545）
+    .forEach((w, i) => icons.push({ lat: w.lat, lng: w.lng, at: w.at, kind: 'wetland', rot: bearingDeg(w, HQ_WIND_TO), label: i === 0 ? `濕地風廊・${w.name}` : w.name, hideKm: 10, scale: 1.1, hint: { title: `${w.name}（濕地風廊）`, intro: hq!.HQ_INTROS['濕地風廊'] ?? '' } }));
   // 重建明治橋（受訪時的主張）：船離原址最近時冒出一座石拱橋
   const mj = hq.HQ_MEIJI;
   icons.push({ lat: mj.lat, lng: mj.lng, at: hqNearestAt(t0, mj), kind: 'archbridge', label: '明治橋（重建）', hideKm: 10, scale: 1.1, hint: { title: '明治橋（重建）', intro: hq.HQ_INTROS['明治橋'] ?? '' } });
@@ -3716,13 +3718,61 @@ function hqExtras(t0: number): { reveals: HqReveal[]; icons: HqIcon[]; seams: Hq
     const at = Math.max(...ln.stops.map((n) => seen.get(n) ?? t0)) + 400;
     reveals.push({ path: ln.pts, at, kind: 'culture', label: ln.name, color: hq.HQ_CULTURE_THEMES[ln.theme].color });
   }
+  icons.push(...hqScenes(t0));
   return { reveals, icons, seams };
+}
+/** 濕地風廊的涼風往哪裡吹：市區（台北車站） */
+const HQ_WIND_TO = { lat: 25.0478, lng: 121.517 };
+/** 運動驛站設在山林徑起點的捷運站 */
+const HQ_HUB_STATION: Record<string, string> = { 北劍潭: '劍潭', 東象山: '象山', 南貓空: '動物園' };
+/**
+ * 更貼近政策的小動畫（v1.545 使用者選「1 3 4 7 8 9 10 11 13 14 15」，畫法在 hq-scenes.ts）：運動驛站、口袋公園、微型滯洪、水圳淨水沿路冒出來；
+ * 通學區（小朋友過馬路）、教育・午餐（便當冒熱氣，小貨車在 hqBikes）、青年（小豬撲滿）按了政策按鈕才有。樹醫生、濕地的涼風、足球場、花博坡道畫在原本的圖示裡
+ */
+function hqScenes(t0: number): HqIcon[] {
+  if (!hq) return [];
+  const I = hq.HQ_INTROS;
+  const out: HqIcon[] = [];
+  // 跟寶箱一樣拉近變大、拉遠變小（雷達照 hqZoomScale；地圖在 styles.css 照 --zoom-scale）
+  const zs = view === 'radar' ? hqZoomScale() : 1;
+  const scale = 0.9 * zs;
+  for (const tr of hq.HQ_TRAILS) {
+    const st = HQ_HUB_STATION[tr.name] ?? tr.name;
+    out.push({ lat: tr.station[0], lng: tr.station[1], at: hqStopAt(t0, tr.stop) + 300, kind: 'sporthub', scale, hint: { title: `運動驛站（捷運${st}站旁）`, intro: I['運動驛站'] ?? '' } });
+  }
+  for (const p of hq.HQ_POCKETPARKS) out.push({ lat: p.lat, lng: p.lng, at: hqNearestAt(t0, p) + 300, kind: 'pocketpark', scale, hint: { title: `口袋公園（示意：${p.name}）`, intro: I['口袋公園'] ?? '' } });
+  for (const d of hq.HQ_DETENTION) out.push({ lat: d.lat, lng: d.lng, at: hqNearestAt(t0, d) + 300, kind: 'detention', scale, hint: { title: `微型社區滯洪（${d.name}）`, intro: I['微型社區滯洪'] ?? '' } });
+  // 水圳淨水：水路四成的地方（水注滿 3 秒後），照那一段水流的方向
+  for (const c of hq.HQ_CANALS) {
+    const n = c.points.length;
+    const k = Math.floor(n * 0.4);
+    const [a, b] = [c.points[Math.max(0, k - 2)], c.points[Math.min(n - 1, k + 2)]];
+    const p = c.points[k];
+    out.push({ lat: p[0], lng: p[1], at: hqStopAt(t0, c.stop) + 3000, kind: 'cleanwater', scale, rot: bearingDeg({ lat: a[0], lng: a[1] }, { lat: b[0], lng: b[1] }), hint: { title: `${c.name}：植生淨水（示意）`, intro: I['水圳淨水'] ?? '' } });
+  }
+  if (!hqLayer) return out;
+  const at0 = hqLayer.at;
+  if (hqLayer.id === 'zone') {
+    // 通學區：每所國小南邊 150 公尺（圈的邊上）畫斑馬線，示意；畫小一點，不要蓋到學校
+    hq.HQ_SERVICES.filter((sv) => sv.kind === '小').forEach((sv, i) => {
+      const q = destination(sv, 180, 0.15);
+      out.push({ lat: q.lat, lng: q.lng, at: at0 + Math.min(i * 8, 1600) + 500, kind: 'schoolwalk', focus: true, scale: 0.4 * zs });
+    });
+  } else if (hqLayer.id === 'edu') {
+    for (const tk of hq.HQ_FARM_TRUCKS) {
+      const sv = hq.HQ_SERVICES.find((x) => x.name === tk.school);
+      if (sv) out.push({ lat: sv.lat, lng: sv.lng, at: at0 + 800, kind: 'lunch', focus: true, scale: zs, hint: { title: `在地小農進校園（${tk.farm} → ${tk.school}，示意）`, intro: I['在地小農'] ?? '' } });
+    }
+  } else if (hqLayer.id === 'youth') {
+    hq.HQ_SERVICES.filter((sv) => sv.kind === '大').forEach((sv, i) => out.push({ lat: sv.lat, lng: sv.lng, at: at0 + Math.min(i * 8, 1600) + 300, kind: 'piggy', focus: true, scale: zs }));
+  }
+  return out;
 }
 /**
  * 騎自行車的人（v1.529）：迎風—港墘自行車橋上兩台（橋畫好後）、河濱自行車道（大佳河濱、大稻埕）各兩台（船經過時），一去一回、錯開半趟；
  * 一趟的時間照長度（每公尺 14 毫秒、最少 8 秒）
  */
-function hqBikes(t0: number): Array<{ path: Array<[number, number]>; start: number; lap: number; kind?: 'bike' | 'hiker' | 'pet'; loop?: boolean; color?: string }> {
+function hqBikes(t0: number): Array<{ path: Array<[number, number]>; start: number; lap: number; kind?: 'bike' | 'hiker' | 'pet' | 'truck'; loop?: boolean; color?: string }> {
   if (!hq) return [];
   const br = hq.HQ_BRIDGE;
   const lapOf = (m: number): number => Math.max(8000, m * 14);
@@ -3755,6 +3805,8 @@ function hqBikes(t0: number): Array<{ path: Array<[number, number]>; start: numb
     { path: [...jog.path].reverse(), start: parkAt - jogLap / 3, lap: jogLap, kind: 'pet', loop: true, color: '#3a6fd8' },
     { path: main.path, start: parkAt - mainLap / 2, lap: mainLap, kind: 'pet', loop: true, color: '#f2b544' },
   );
+  // 在地小農進校園（「教育・午餐」按鈕開著，v1.545）：小貨車從農地開到學校，開車的速度跟健身小巴一樣（每公尺 5 毫秒）
+  if (hqLayer?.id === 'edu') for (const tk of hq.HQ_FARM_TRUCKS) out.push({ path: tk.path, start: hqLayer.at + 600, lap: Math.max(9000, tk.lengthM * FITBUS_MS_PER_M), kind: 'truck' });
   return out;
 }
 /**
@@ -3942,7 +3994,7 @@ function hqHits(t0: number): Array<{ lat: number; lng: number; at: number; title
       const p = hq.HQ_PLANTINGS.find((x) => x.lat === ic.lat && x.lng === ic.lng);
       if (!p) continue;
       const outlet = hqOutlet(p.source);
-      hits.push({ lat: ic.lat, lng: ic.lng, at: ic.grow ?? ic.at, title: p.hideName ? '南港的老樹' : p.name, intro: `${p.why}${outlet ? `（${outlet}報導）` : ''}。\n綠覆率：${I['綠覆率'] ?? ''}\n都市微森林：把樹種回來；移除路樹前，市府、居民、樹木專家、保險業者、都計或樹管委員至少五方一起討論。\n都市林治理：${I['都市林治理'] ?? ''}`, dy: 14, r: 16 });
+      hits.push({ lat: ic.lat, lng: ic.lng, at: ic.grow ?? ic.at, title: p.hideName ? '南港的老樹' : p.name, intro: `${p.why}${outlet ? `（${outlet}報導）` : ''}。\n綠覆率：${I['綠覆率'] ?? ''}\n都市微森林：把樹種回來；移除路樹前，市府、居民、樹木專家、保險業者、都計或樹管委員至少五方一起討論。\n都市林治理：${I['都市林治理'] ?? ''}\n樹醫生（拉近看得到來看診）：${I['樹醫生'] ?? ''}`, dy: 14, r: 16 });
     } else if (ic.kind === 'culture') {
       const c = hq.HQ_CULTURE.find((x) => x.lat === ic.lat && x.lng === ic.lng);
       if (!c) continue;

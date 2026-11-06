@@ -1,3 +1,5 @@
+import { TREE_DOCTOR } from './hq-scenes';
+
 /**
  * 彩虹流出（同志遊行出發時，雷達、地圖上的路線從出發的地方一路流到終點）：每一條線從頭慢慢畫到尾。
  * 六個顏色一個比一個晚一點（紅色帶頭），整條流完約 4.6 秒
@@ -195,9 +197,11 @@ export function alongLine(xs: ArrayLike<number>, ys: ArrayLike<number>, cum: Arr
 
 /** 樹樁長回大樹（把樹種回來；中心在 0,0 是樹根，螢幕像素）：一開始是砍掉的樹樁，growMs 後長出樹冠（從下往上彈出來） */
 export function regrowSvg(growMs: number): string {
+  // 長好後樹醫生來看診（v1.545，hq-scenes.ts）
   return (
     '<path class="rg-trunk" d="M-2.6 -2L-3.2 6H3.2L2.6 -2Z"/><ellipse class="rg-cut" cy="-2" rx="2.6" ry="1.1"/>' +
-    `<g class="rg-crown" style="animation-delay:${Math.round(growMs)}ms"><circle cx="-5.5" cy="-8" r="6"/><circle cx="5.5" cy="-8" r="6"/><circle cx="0" cy="-13" r="7"/><circle class="rg-lit" cx="-2.5" cy="-15" r="2.4"/></g>`
+    `<g class="rg-crown" style="animation-delay:${Math.round(growMs)}ms"><circle cx="-5.5" cy="-8" r="6"/><circle cx="5.5" cy="-8" r="6"/><circle cx="0" cy="-13" r="7"/><circle class="rg-lit" cx="-2.5" cy="-15" r="2.4"/></g>` +
+    TREE_DOCTOR
   );
 }
 

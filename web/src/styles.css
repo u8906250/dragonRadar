@@ -389,6 +389,10 @@ path.map-water-glint { animation: water-flow-map 1.1s linear infinite; }
 .map-fitbus svg { transform: scale(calc(var(--zoom-scale, 1) * 0.7)); transform-origin: 50% 88%; }
 /* 寶箱拉近變大、拉遠變小（v1.536） */
 .map-voyage-icon.chest svg, .map-voyage-icon.chestlock svg { transform: scale(var(--zoom-scale, 1)); }
+/* 更貼近政策的小動畫（v1.545）也跟著縮放；通學區的斑馬線小一點，不要蓋到學校 */
+.map-voyage-icon.sporthub svg, .map-voyage-icon.pocketpark svg, .map-voyage-icon.detention svg, .map-voyage-icon.cleanwater svg { transform: scale(calc(var(--zoom-scale, 1) * 0.9)); }
+.map-voyage-icon.lunch svg, .map-voyage-icon.piggy svg { transform: scale(var(--zoom-scale, 1)); }
+.map-voyage-icon.schoolwalk svg { transform: scale(calc(var(--zoom-scale, 1) * 0.45)); }
 #map.fit-dim .map-voyage-icon.fitbus-stop { display: none; }
 #map.fit-dim .map-fitbus svg { transform: scale(0.35); transform-origin: 50% 88%; opacity: 0.5; }
 #map.fit-dim path.map-fitbus-line { opacity: 0.35; }
@@ -453,7 +457,8 @@ path.map-water-glint { animation: water-flow-map 1.1s linear infinite; }
 @keyframes idle-reed { from { transform: rotate(-4deg); } to { transform: rotate(4deg); } }
 .hq-idle .idle-hut .ic-flag { transform-origin: 0 -11px; animation: idle-flag 1.3s ease-in-out infinite alternate; animation-delay: var(--d); }
 @keyframes idle-flag { to { transform: scaleX(0.7) skewY(-6deg); } }
-.hq-idle .idle-stadium, .hq-idle .idle-uyouth { transform-origin: 0 0; animation: idle-pulse 2.2s ease-in-out infinite; animation-delay: var(--d); }
+/* 足球場不再整個跳（v1.545 改成射門、看台波浪，寫在後面） */
+.hq-idle .idle-uyouth { transform-origin: 0 0; animation: idle-pulse 2.2s ease-in-out infinite; animation-delay: var(--d); }
 @keyframes idle-pulse { 50% { transform: scale(1.06); } }
 .hq-idle .idle-umusic { transform-origin: 0 0; animation: idle-dance 1.4s ease-in-out infinite alternate; animation-delay: var(--d); }
 @keyframes idle-dance { from { transform: rotate(-8deg) translateY(0.5px); } to { transform: rotate(8deg) translateY(-1px); } }
@@ -478,6 +483,195 @@ path.map-water-glint { animation: water-flow-map 1.1s linear infinite; }
 @media (prefers-reduced-motion: reduce) {
   .wb-paddle, .walk-bob, .pw-dog, .pw-dtail,
   .idle-star, .idle-wetland .ic-reed, .idle-wetland .ic-reed-top, .idle-hut .ic-flag, .idle-stadium, .idle-uyouth, .idle-umusic, .idle-uart, .idle-bigdome .dm-hi, .idle-fitbus { animation: none; }
+}
+/*
+ * 更貼近政策的小動畫（v1.545，hq-scenes.ts）：洋流號到了（.hq-idle）、拉近（不是 .hq-far）才動；不動的時候走路的人、硬幣、雨滴、涼風收起來（opacity 0），只留場景。
+ * 相位 --d 照圖示錯開；transform 寫在 CSS 的元素外面都包一層 g（SVG 的 transform 屬性會被 CSS 蓋掉）
+ */
+.sc-head { fill: #f3d9bd; stroke: #5a4636; stroke-width: 0.5; }
+.sc-leg { fill: none; stroke: #4a3a2a; stroke-width: 1.1; stroke-linecap: round; }
+.sc-shadow { fill: #000; fill-opacity: 0.12; }
+.hq-idle:not(.hq-far) .sc-bob { animation: walk-bob 0.4s ease-in-out infinite alternate; }
+/* 1. 通學區：人行道、馬路、斑馬線、停止線，車子停著；戴黃帽的小朋友過馬路、導護舉旗 */
+.sw-side { fill: #ece5d6; stroke: #b9ae98; stroke-width: 0.4; }
+.sw-road { fill: #8e979f; }
+.sw-lane { fill: none; stroke: #f4f1ea; stroke-width: 0.7; stroke-dasharray: 2 2; }
+.sw-zebra { fill: none; stroke: #fff; stroke-width: 1.5; }
+.sw-stop { fill: none; stroke: #fff; stroke-width: 0.9; }
+.sw-carbody { fill: #5b8fd8; stroke: #1f2a3a; stroke-width: 0.5; }
+.sw-carwin { fill: #d7ebf7; }
+.sw-uni { fill: #e05a5a; stroke: #7a2a2a; stroke-width: 0.3; }
+.sw-uni.b { fill: #3a6fd8; stroke: #1f3a7a; }
+.sw-hat { fill: #f7d117; stroke: #8a6d00; stroke-width: 0.3; }
+.sw-vest { fill: none; stroke: #2f9e6a; stroke-width: 2.2; stroke-linecap: round; }
+.sw-pole { fill: none; stroke: #6b5a3a; stroke-width: 0.7; stroke-linecap: round; }
+.sw-cloth { fill: #f7d117; stroke: #8a6d00; stroke-width: 0.3; }
+.sw-kid { opacity: 0; }
+.hq-idle:not(.hq-far) .sw-kid { animation: sw-kid 7.5s linear infinite; animation-delay: var(--d); }
+.hq-idle:not(.hq-far) .sw-kid.k2 { animation-delay: calc(var(--d) + 0.9s); }
+.hq-idle:not(.hq-far) .sw-kid.k3 { animation-delay: calc(var(--d) + 1.8s); }
+@keyframes sw-kid { 0% { transform: translateY(-8px); opacity: 0; } 5% { opacity: 1; } 50% { transform: translateY(10px); opacity: 1; } 56%, 100% { transform: translateY(10px); opacity: 0; } }
+.hq-idle:not(.hq-far) .sw-flag { transform-origin: -0.4px -6.4px; animation: sw-flag 7.5s ease-in-out infinite; animation-delay: var(--d); }
+@keyframes sw-flag { 0%, 2% { transform: rotate(0); } 7%, 68% { transform: rotate(-80deg); } 76%, 100% { transform: rotate(0); } }
+.hq-idle:not(.hq-far) .sw-car { animation: idle-engine 0.5s ease-in-out infinite alternate; }
+/* 3. 運動驛站：穿西裝走進去、換運動服出來，門開的時候亮一下 */
+.sh-wall { fill: #f4e6cb; stroke: #15171c; stroke-width: 0.8; }
+.sh-roof { fill: #2f9e6a; stroke: #15171c; stroke-width: 0.8; stroke-linejoin: round; }
+.sh-win { fill: #d7ebf7; stroke: #15171c; stroke-width: 0.5; }
+.sh-drop { fill: #3aa0e8; }
+.sh-lock { fill: #c9cdd2; stroke: #6a7480; stroke-width: 0.5; }
+.sh-door { fill: #35546a; }
+.sh-suit { fill: none; stroke: #3b3f47; stroke-width: 2.2; stroke-linecap: round; }
+.sh-tie { fill: none; stroke: #e05a5a; stroke-width: 0.7; }
+.sh-case { fill: #6b4a2a; }
+.sh-sport { fill: none; stroke: #ff7a1a; stroke-width: 2.2; stroke-linecap: round; }
+.sh-cap { fill: #2f9e6a; }
+.sh-towel { fill: none; stroke: #fff; stroke-width: 0.8; }
+.sh-in, .sh-out { opacity: 0; }
+.hq-idle:not(.hq-far) .sh-in { animation: sh-in 8s linear infinite; animation-delay: var(--d); }
+.hq-idle:not(.hq-far) .sh-out { animation: sh-out 8s linear infinite; animation-delay: var(--d); }
+.hq-idle:not(.hq-far) .sh-door { animation: sh-door 8s step-end infinite; animation-delay: var(--d); }
+@keyframes sh-in { 0% { transform: translateX(-20px); opacity: 0; } 5% { opacity: 1; } 36% { transform: translateX(0); opacity: 1; } 42%, 100% { transform: translateX(0); opacity: 0; } }
+@keyframes sh-out { 0%, 50% { transform: translateX(0); opacity: 0; } 55% { opacity: 1; } 90% { transform: translateX(20px); opacity: 1; } 96%, 100% { transform: translateX(20px); opacity: 0; } }
+@keyframes sh-door { 0% { fill: #35546a; } 35% { fill: #ffd98a; } 43% { fill: #35546a; } 50% { fill: #ffd98a; } 57% { fill: #35546a; } }
+/* 4. 在地小農進校園：便當冒熱氣、偶爾一顆愛心；小貨車 */
+.ln-box { fill: #e9b56a; stroke: #8a5a24; stroke-width: 0.6; }
+.ln-rice { fill: #fffdf6; stroke: #d9cbb3; stroke-width: 0.3; }
+.ln-egg { fill: #fff; stroke: #d9cbb3; stroke-width: 0.3; }
+.ln-yolk { fill: #f7c94e; }
+.ln-veg { fill: #4a9d3f; }
+.ln-steam { fill: none; stroke: #9aa6b2; stroke-width: 0.9; stroke-linecap: round; opacity: 0; }
+.ln-heart { fill: #ff6b8a; opacity: 0; }
+.hq-idle:not(.hq-far) .ln-steam { animation: ln-steam 2.4s ease-out infinite; animation-delay: var(--d); }
+.hq-idle:not(.hq-far) .ln-steam.s2 { animation-delay: calc(var(--d) + 0.8s); }
+.hq-idle:not(.hq-far) .ln-steam.s3 { animation-delay: calc(var(--d) + 1.6s); }
+@keyframes ln-steam { 0% { transform: translateY(1px); opacity: 0; } 30% { opacity: 0.9; } 100% { transform: translateY(-4px); opacity: 0; } }
+.hq-idle:not(.hq-far) .ln-heart { transform-box: fill-box; transform-origin: center; animation: ln-heart 6s ease-out infinite; animation-delay: var(--d); }
+@keyframes ln-heart { 0% { transform: scale(0); opacity: 0; } 8% { transform: scale(1.2); opacity: 1; } 14% { transform: scale(1); opacity: 1; } 30%, 100% { transform: translateY(-3px); opacity: 0; } }
+.tk-bed { fill: #c98b4a; stroke: #6b4a2a; stroke-width: 0.5; }
+.tk-veg { fill: #4a9d3f; stroke: #2f6e2a; stroke-width: 0.4; }
+.tk-carrot { fill: #ff8a3c; stroke: #c2611a; stroke-width: 0.4; }
+.tk-leaf { fill: none; stroke: #4a9d3f; stroke-width: 0.7; stroke-linecap: round; }
+.tk-cab { fill: #2f9e6a; stroke: #1f2a24; stroke-width: 0.6; stroke-linejoin: round; }
+.tk-win { fill: #d7ebf7; }
+.tk-chassis { fill: #3b3f47; }
+.tk-wheel { fill: #2b2b2b; }
+.tk-hub { fill: #c9cdd2; }
+.hq-idle:not(.hq-far) .tk-bob { animation: idle-engine 0.35s ease-in-out infinite alternate; }
+/* 7. 口袋公園：空地一格一格鋪草皮、長樹、放長椅，蝴蝶飛來；不動的時候是蓋好的樣子 */
+.pp-lot { fill: #efe7d7; stroke: #b9a98b; stroke-width: 0.7; stroke-dasharray: 1.6 1.2; }
+.pp-t { fill: #8cd17a; stroke: #4a9d3f; stroke-width: 0.4; }
+.pp-trunk { fill: none; stroke: #8a5a24; stroke-width: 1.4; stroke-linecap: round; }
+.pp-crown { fill: #4a9d3f; stroke: #2f6e2a; stroke-width: 0.5; }
+.pp-lit { fill: #7cc06a; }
+.pp-wood { fill: none; stroke: #b0701d; stroke-width: 1.1; stroke-linecap: round; }
+.pp-leg { fill: none; stroke: #6b4a2a; stroke-width: 0.8; }
+.pp-wing { fill: #ff9ec4; stroke: #c2577f; stroke-width: 0.3; }
+.pp-fly { opacity: 0; }
+.hq-idle:not(.hq-far) .pp-t, .hq-idle:not(.hq-far) .pp-tree, .hq-idle:not(.hq-far) .pp-bench { transform-box: fill-box; transform-origin: 50% 100%; animation: pp-pop 12s ease-out infinite both; animation-delay: var(--d); }
+.hq-idle:not(.hq-far) .pp-t.t2 { animation-delay: calc(var(--d) + 0.35s); }
+.hq-idle:not(.hq-far) .pp-t.t3 { animation-delay: calc(var(--d) + 0.7s); }
+.hq-idle:not(.hq-far) .pp-t.t4 { animation-delay: calc(var(--d) + 1.05s); }
+.hq-idle:not(.hq-far) .pp-tree { animation-delay: calc(var(--d) + 1.7s); }
+.hq-idle:not(.hq-far) .pp-bench { animation-delay: calc(var(--d) + 2.4s); }
+@keyframes pp-pop { 0% { transform: scale(0); opacity: 1; } 3% { transform: scale(1.15); } 5%, 78% { transform: scale(1); opacity: 1; } 84% { transform: scale(1); opacity: 0; } 100% { transform: scale(0); opacity: 0; } }
+.hq-idle:not(.hq-far) .pp-fly { animation: pp-fly 12s ease-in-out infinite; animation-delay: var(--d); }
+@keyframes pp-fly { 0%, 30% { transform: translate(-14px, -12px); opacity: 0; } 36% { opacity: 1; } 46% { transform: translate(-2px, -10px); } 56% { transform: translate(4px, -3px); } 66% { transform: translate(-3px, -12px); } 74% { transform: translate(0, -8px); opacity: 1; } 80%, 100% { transform: translate(6px, -14px); opacity: 0; } }
+.hq-idle:not(.hq-far) .pp-flap { transform-box: fill-box; transform-origin: center; animation: pp-flap 0.25s ease-in-out infinite alternate; }
+@keyframes pp-flap { to { transform: scaleX(0.35); } }
+/* 9. 微型社區滯洪：下雨時地下的池子水位升、雨停慢慢退 */
+.dt-tank { fill: #e3d6bf; stroke: #8a7a5f; stroke-width: 0.6; stroke-dasharray: 1.4 1; }
+.dt-water { fill: #4fa8e0; fill-opacity: 0.85; transform-box: fill-box; transform-origin: 50% 100%; transform: scaleY(0.45); }
+.dt-grass { fill: #7cc06a; stroke: #4a9d3f; stroke-width: 0.5; }
+.dt-grate { fill: none; stroke: #555; stroke-width: 0.5; }
+.dt-drop { fill: none; stroke: #3aa0e8; stroke-width: 1; stroke-linecap: round; }
+.dt-cloud { fill: #fff; stroke: #8a96a3; stroke-width: 0.6; }
+.dt-rain { opacity: 0; }
+.hq-idle:not(.hq-far) .dt-rain { animation: dt-rain 10s linear infinite; animation-delay: var(--d); }
+@keyframes dt-rain { 0%, 46% { opacity: 1; } 52%, 100% { opacity: 0; } }
+.hq-idle:not(.hq-far) .dt-drop { animation: dt-drop 0.7s linear infinite; }
+.hq-idle:not(.hq-far) .dt-drop.r2 { animation-delay: -0.25s; }
+.hq-idle:not(.hq-far) .dt-drop.r3 { animation-delay: -0.48s; }
+@keyframes dt-drop { 0% { transform: translateY(0); opacity: 0; } 20% { opacity: 1; } 100% { transform: translateY(6px); opacity: 0; } }
+.hq-idle:not(.hq-far) .dt-water { animation: dt-water 10s ease-in-out infinite; animation-delay: var(--d); }
+@keyframes dt-water { 0% { transform: scaleY(0.15); } 50% { transform: scaleY(0.92); } 100% { transform: scaleY(0.15); } }
+.hq-idle:not(.hq-far) .dt-cloud { animation: dt-cloud 10s ease-in-out infinite; animation-delay: var(--d); }
+@keyframes dt-cloud { 0%, 46% { fill: #cfd8e0; transform: translateX(0); } 60% { fill: #fff; } 80% { transform: translateX(1.5px); } 100% { fill: #cfd8e0; transform: translateX(0); } }
+/* 10. 水圳淨水：小點從灰濁流過蘆葦變清澈的藍色 */
+.cw-band { fill: none; stroke: #9fd8f5; stroke-width: 5; stroke-opacity: 0.55; stroke-linecap: round; }
+.cw-dot { fill: #9b8a6a; opacity: 0; }
+.cw-spark { fill: #fff; stroke: #3aa0e8; stroke-width: 0.3; opacity: 0; }
+.hq-idle:not(.hq-far) .cw-dot { animation: cw-dot 3.2s linear infinite; animation-delay: var(--d); }
+.hq-idle:not(.hq-far) .cw-dot.d2 { animation-delay: calc(var(--d) + 0.8s); }
+.hq-idle:not(.hq-far) .cw-dot.d3 { animation-delay: calc(var(--d) + 1.6s); }
+.hq-idle:not(.hq-far) .cw-dot.d4 { animation-delay: calc(var(--d) + 2.4s); }
+@keyframes cw-dot { 0% { transform: translateX(-16px); fill: #9b8a6a; opacity: 0; } 10% { opacity: 1; } 42% { fill: #9b8a6a; } 58% { fill: #2f8fe0; } 90% { transform: translateX(16px); opacity: 1; } 100% { transform: translateX(16px); fill: #2f8fe0; opacity: 0; } }
+.hq-idle:not(.hq-far) .cw-spark { transform-box: fill-box; transform-origin: center; animation: cw-spark 1.6s ease-in-out infinite; animation-delay: var(--d); }
+@keyframes cw-spark { 0%, 100% { opacity: 0; transform: scale(0.4); } 50% { opacity: 1; transform: scale(1); } }
+.hq-idle:not(.hq-far) .cw-reeds .ic-reed, .hq-idle:not(.hq-far) .cw-reeds .ic-reed-top { transform-origin: 0 2px; animation: idle-reed 2.8s ease-in-out infinite alternate; animation-delay: var(--d); }
+/* 11. 濕地風廊：三縷淡藍的涼風往市區飄 */
+.wd-line { fill: none; stroke: #7cc8ee; stroke-width: 1.3; stroke-linecap: round; stroke-dasharray: 5 9; opacity: 0; }
+.hq-idle:not(.hq-far) .wd-line { animation: wd-flow 1.6s linear infinite, wd-in 0.8s ease-out forwards; animation-delay: var(--d), 0s; }
+.hq-idle:not(.hq-far) .wd-line.l2 { animation-delay: calc(var(--d) - 0.5s), 0s; }
+.hq-idle:not(.hq-far) .wd-line.l3 { animation-delay: calc(var(--d) - 1s), 0s; }
+@keyframes wd-flow { to { stroke-dashoffset: -14; } }
+@keyframes wd-in { to { opacity: 0.85; } }
+/* 13. 城市青年基金：金色（自己存）、橘色（市府配合）的硬幣輪流掉進小豬撲滿，小豬彈一下 */
+.pg-body { fill: #f7a8b8; stroke: #c86b80; stroke-width: 0.6; }
+.pg-ear, .pg-snout { fill: #f39aae; stroke: #c86b80; stroke-width: 0.5; }
+.pg-nose { fill: #c86b80; }
+.pg-eye { fill: #3b2f2f; }
+.pg-slot { fill: none; stroke: #8a3d52; stroke-width: 0.8; stroke-linecap: round; }
+.pg-tail { fill: none; stroke: #c86b80; stroke-width: 0.6; stroke-linecap: round; }
+.pg-leg { fill: none; stroke: #c86b80; stroke-width: 1.4; stroke-linecap: round; }
+.pg-gold { fill: #f7c94e; stroke: #b5821f; stroke-width: 0.5; }
+.pg-orange { fill: #ff9a3c; stroke: #c2611a; stroke-width: 0.5; }
+.pg-mark { fill: none; stroke: #fff; stroke-width: 0.6; stroke-linecap: round; }
+.pg-coin { opacity: 0; }
+.hq-idle:not(.hq-far) .pg-coin { animation: pg-coin 3.6s ease-in infinite; animation-delay: var(--d); }
+.hq-idle:not(.hq-far) .pg-coin.c2 { animation-delay: calc(var(--d) + 1.8s); }
+@keyframes pg-coin { 0% { transform: translateY(-7px); opacity: 0; } 10% { opacity: 1; } 30% { transform: translateY(0); opacity: 1; } 36%, 100% { transform: translateY(2px); opacity: 0; } }
+.hq-idle:not(.hq-far) .pg-pig { transform-box: fill-box; transform-origin: 50% 100%; animation: pg-bounce 1.8s ease-out infinite; animation-delay: var(--d); }
+@keyframes pg-bounce { 0%, 58% { transform: none; } 66% { transform: scale(1.06, 0.94); } 76%, 100% { transform: none; } }
+/* 8. 樹醫生：走到樹旁聽一聽、樹上冒綠色打勾、再走開（樹不動） */
+.rg-coat { fill: none; stroke: #c3d8e8; stroke-width: 2.4; stroke-linecap: round; }
+.rg-cap { fill: #2f9e6a; }
+.rg-steth { fill: none; stroke: #6a7480; stroke-width: 0.5; }
+.rg-steth-end { fill: #6a7480; }
+.rg-ok circle { fill: #2f9e6a; stroke: #fff; stroke-width: 0.6; }
+.rg-ok path { fill: none; stroke: #fff; stroke-width: 1; stroke-linecap: round; stroke-linejoin: round; }
+.rg-doc, .rg-ok { opacity: 0; }
+.hq-idle:not(.hq-far) .rg-doc { animation: rg-doc 9s linear infinite; animation-delay: var(--d); }
+@keyframes rg-doc { 0% { transform: translateX(-20px); opacity: 0; } 6% { opacity: 1; } 30% { transform: translateX(-6.5px); } 62% { transform: translateX(-6.5px) scaleX(1); } 64% { transform: translateX(-6.5px) scaleX(-1); } 92% { transform: translateX(-20px) scaleX(-1); opacity: 1; } 98%, 100% { transform: translateX(-20px) scaleX(-1); opacity: 0; } }
+.hq-idle:not(.hq-far) .rg-ok { transform-box: fill-box; transform-origin: center; animation: rg-ok 9s ease-out infinite; animation-delay: var(--d); }
+@keyframes rg-ok { 0%, 40% { transform: scale(0); opacity: 0; } 44% { transform: scale(1.25); opacity: 1; } 48%, 62% { transform: scale(1); opacity: 1; } 68%, 100% { transform: scale(1); opacity: 0; } }
+/* 14. 關渡國際足球場：射門、球進網、看台波浪 */
+.sc-fan.f0 { fill: #e05a5a; }
+.sc-fan.f1 { fill: #3a6fd8; }
+.sc-fan.f2 { fill: #f2b544; }
+.sc-goal { fill: none; stroke: #fff; stroke-width: 0.8; }
+.sc-mesh { fill: none; stroke: #fff; stroke-width: 0.4; stroke-opacity: 0.7; }
+.sc-shirt { fill: none; stroke: #e05a5a; stroke-width: 2.2; stroke-linecap: round; }
+.sc-ball { fill: #fff; stroke: #15171c; stroke-width: 0.4; }
+.hq-idle:not(.hq-far) .sc-ball { animation: sc-shot 4s ease-in infinite; animation-delay: var(--d); }
+@keyframes sc-shot { 0% { transform: none; opacity: 0; } 6%, 22% { transform: none; opacity: 1; } 46%, 56% { transform: translate(12.4px, -1.6px); opacity: 1; } 62%, 100% { transform: translate(12.4px, -1.6px); opacity: 0; } }
+.hq-idle:not(.hq-far) .sc-net { animation: sc-net 4s ease-out infinite; animation-delay: var(--d); }
+@keyframes sc-net { 0%, 45% { transform: none; } 49% { transform: translateX(1.2px); } 58%, 100% { transform: none; } }
+.hq-idle:not(.hq-far) .sc-fan { animation: sc-wave 4s ease-in-out infinite; animation-delay: calc(var(--d) + var(--i) * 0.12s); }
+@keyframes sc-wave { 0%, 48% { transform: none; } 54% { transform: translateY(-2px); } 60%, 100% { transform: none; } }
+/* 15. 花博運動中心：無障礙坡道，坐輪椅的人推上去、進門 */
+.dm-door { fill: #35546a; }
+.dm-ramp { fill: #c9cdd2; stroke: #6a7480; stroke-width: 0.5; stroke-linejoin: round; }
+.dm-rail { fill: none; stroke: #6a7480; stroke-width: 0.5; }
+.dm-wheel { fill: #fff; stroke: #3b3f47; stroke-width: 0.7; }
+.dm-chair { fill: none; stroke: #3b3f47; stroke-width: 0.8; stroke-linecap: round; }
+.dm-body { fill: none; stroke: #3a6fd8; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+.dm-roll { opacity: 0; }
+.hq-idle:not(.hq-far) .dm-roll { animation: dm-roll 7s ease-in-out infinite; animation-delay: var(--d); }
+@keyframes dm-roll { 0% { transform: translate(28px, 7px) rotate(13deg) scaleX(-1); opacity: 0; } 6% { transform: translate(26.5px, 6.7px) rotate(13deg) scaleX(-1); opacity: 1; } 48% { transform: translate(14.5px, 4px) rotate(13deg) scaleX(-1); } 52% { transform: translate(13.4px, 4px) rotate(0deg) scaleX(-1); } 62% { transform: translate(9.2px, 4px) rotate(0deg) scaleX(-1); opacity: 1; } 68%, 100% { transform: translate(9.2px, 4px) rotate(0deg) scaleX(-1); opacity: 0; } }
+@media (prefers-reduced-motion: reduce) {
+  .sc-bob, .sw-kid, .sw-flag, .sw-car, .sh-in, .sh-out, .sh-door, .ln-steam, .ln-heart, .tk-bob, .pp-t, .pp-tree, .pp-bench, .pp-fly, .pp-flap, .dt-rain, .dt-drop, .dt-water, .dt-cloud,
+  .cw-dot, .cw-spark, .cw-reeds .ic-reed, .cw-reeds .ic-reed-top, .wd-line, .pg-coin, .pg-pig, .rg-doc, .rg-ok, .sc-ball, .sc-net, .sc-fan, .dm-roll { animation: none !important; }
 }
 /* 縫合市民大道（v1.520）：出發時深灰的裂縫從西畫到東，洋流號經過才縫（v1.521）、縫完變淡；橘色的交叉針腳一筆一筆縫；縫好後三處都有往北、往南的人流小點（白邊，橘色的河經過那裡也看得到） */
 .st-u, .st-t { fill: none; stroke-linecap: round; stroke-dasharray: 1; stroke-dashoffset: 1; animation: st-draw 0.16s ease-out both; }
