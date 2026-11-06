@@ -229,14 +229,28 @@ export function stitchSvg(delayMs: number): string {
  * 拉遠就停下來或收起來，畫面不要太亂（v1.528 使用者說「所有會動的都建議拉近到一定程度才開始動」「不希望整體畫面太亂」）；洋流號、河、冒出來的動畫照舊
  */
 export const HQ_MOTION_KM = 2;
-/** 電腦版拉近到 3 km（地圖縮放 14.7）就動（v1.544 使用者說「電腦版動畫可以 3km 就開始」）；手機（600 px 以下）照舊 2 km、縮放 15.3 */
-export const HQ_MOTION_KM_DESK = 3;
-export const HQ_MOTION_ZOOM_DESK = 14.7;
+/**
+ * 電腦版拉近到 5 km（地圖縮放 14）就動、小場景就畫（v1.544 使用者說「電腦版動畫可以 3km 就開始」；v1.564 說「電腦版的動畫可以拉到 5km 以內顯示」）；
+ * 手機（600 px 以下）照舊 2 km、縮放 15.3
+ */
+// 比 5 km 近才算：洋流號出發、跟著船時雷達外圈剛好 5 km，算進來的話整趟航行都在畫、在動小場景，
+// CPU 降速 4 倍時從每秒 44 格掉到 15 格（v1.564 量的）；拉近一格（3.7 km）就開始
+export const HQ_MOTION_KM_DESK = 4.9;
+export const HQ_MOTION_ZOOM_DESK = 14;
+/**
+ * 很密的東西（條通的樹、燈籠、夜色、巷子，通學區的斑馬線）電腦版還是 3 km（地圖縮放 14.7）以內才畫：條通整區只有 700 公尺寬，5 km 時擠成一團；
+ * 通學區 150 公尺的圈 5 km 時看不到、一次快 80 所學校在動（v1.564）
+ */
+export const HQ_DENSE_KM_DESK = 3;
+export const HQ_DENSE_ZOOM_DESK = 14.7;
 const hqNarrow = (): boolean => typeof window !== 'undefined' && !!window.matchMedia?.('(max-width: 600px)').matches;
 /** 現在這個螢幕拉近到幾 km 以內才動 */
 export const hqMotionKm = (): number => (hqNarrow() ? HQ_MOTION_KM : HQ_MOTION_KM_DESK);
 /** 地圖縮放到多少以上才動 */
 export const hqMotionZoom = (): number => (hqNarrow() ? HQ_MOTION_ZOOM : HQ_MOTION_ZOOM_DESK);
+/** 很密的東西拉近到幾 km、地圖縮放到多少以上才畫（手機跟動畫一樣 2 km） */
+export const hqDenseKm = (): number => (hqNarrow() ? HQ_MOTION_KM : HQ_DENSE_KM_DESK);
+export const hqDenseZoom = (): number => (hqNarrow() ? HQ_MOTION_ZOOM : HQ_DENSE_ZOOM_DESK);
 /** 拉遠到雷達外圈 5 km、地圖縮放 14 以下，寶箱、橋下空間、大巨蛋、毛孩安心養的字不寫（v1.529 使用者說「以 5 公里為基礎，拉遠到 5 公里後…文字可以拿掉，其他留著」） */
 export const HQ_LABEL_KM = 5;
 export const HQ_LABEL_ZOOM = 14;

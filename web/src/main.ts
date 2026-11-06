@@ -1,5 +1,5 @@
 import './styles.css';
-import { FITBUS_MS_PER_M, hqMotionKm, HQ_NET_LABEL_KM, HQ_SAIL_MS, HQ_STAR_MS, HQ_VOYAGE_MS, RAINBOW_EVERY_MS, voyagePhase, voyageTimeOf } from './flow';
+import { FITBUS_MS_PER_M, hqDenseKm, hqMotionKm, HQ_NET_LABEL_KM, HQ_SAIL_MS, HQ_STAR_MS, HQ_VOYAGE_MS, RAINBOW_EVERY_MS, voyagePhase, voyageTimeOf } from './flow';
 import { addKeyword, collectLetter, deletePushSubscription, locateFeedbackPlace, sendFeedback, type FeedbackKind, fetchPushKey, savePushSubscription, confirmReport, editReport, locatePlace, rejectReport, supplementReport, deleteBottle, dropBottle, recycleBottle, fetchBottles, fetchEvents, fetchHealth, fetchKeywords, fetchMyBottles, fetchMyReports, fetchRoutes, pickBottle, reportBottle, reportEnded, submitLink, withdrawReport } from './api';
 import { compassSupported, startCompass } from './compass';
 import { bearingDeg, compassLabel, destination, formatKm, haversineKm, taiwanRadiusKm, type LatLng } from './geo';
@@ -3722,10 +3722,10 @@ function hqExtras(t0: number): { reveals: HqReveal[]; icons: HqIcon[]; seams: Hq
     reveals.push({ path: ln.pts, at, kind: 'culture', label: ln.name, color: hq.HQ_CULTURE_THEMES[ln.theme].color });
   }
   icons.push(...hqScenes(t0));
-  // 條通的巷子（v1.552）：淡淡的綠色線（步行者特區），樹沿著巷子種；拉近才畫（跟樹一樣）
-  if (view !== 'radar' || scaleKm <= hqMotionKm()) {
+  // 條通的巷子（v1.552）：淡淡的綠色線（步行者特區），樹沿著巷子種；拉近才畫（跟樹一樣，很密的東西電腦版 3 km）
+  if (view !== 'radar' || scaleKm <= hqDenseKm()) {
     const tiaoAt = hqNearestAt(t0, HQ_TIAO_CENTER);
-    hq.HQ_TIAOTONG.forEach((ln, li) => ln.ways.forEach((w) => reveals.push({ path: w.pts, at: tiaoAt + li * 350, kind: 'culture', color: '#8cc47a', hideKm: hqMotionKm() + 0.05 })));
+    hq.HQ_TIAOTONG.forEach((ln, li) => ln.ways.forEach((w) => reveals.push({ path: w.pts, at: tiaoAt + li * 350, kind: 'culture', color: '#8cc47a', hideKm: hqDenseKm() + 0.05 })));
   }
   return { reveals, icons, seams };
 }
@@ -3733,7 +3733,7 @@ function hqExtras(t0: number): { reveals: HqReveal[]; icons: HqIcon[]; seams: Hq
 const HQ_WIND_TO = { lat: 25.0478, lng: 121.517 };
 /** 條通的夜色（拉近才畫，跟樹、車架一樣）：船離條通最近時慢慢暗下來 */
 function hqNights(t0: number): Array<{ ring: Array<[number, number]>; at: number }> {
-  if (!hq || (view === 'radar' && scaleKm > hqMotionKm())) return [];
+  if (!hq || (view === 'radar' && scaleKm > hqDenseKm())) return [];
   return [{ ring: hq.HQ_TIAO_NIGHT, at: hqNearestAt(t0, HQ_TIAO_CENTER) - 400 }];
 }
 /** 條通的中間（船離這裡最近時樹、車架冒出來）、夜市長協調的地方（七條通，中山北路一段 121 巷） */
@@ -3837,7 +3837,7 @@ function hqScenesAll(t0: number): HqIcon[] {
   // 巷子南北只隔 40 公尺，太密會擠成一團）；林森北路交叉口（熱點）放腳踏車架；七條通的夜市長協調。樹、車架拉近（電腦版 3 km、手機 2 km 以內）才畫
   const tiaoAt = hqNearestAt(t0, HQ_TIAO_CENTER);
   const tiaoHint = { title: '條通：樹木與車架・步行者特區・夜市長（示意）', intro: I['條通'] ?? '' };
-  if (view !== 'radar' || scaleKm <= hqMotionKm()) {
+  if (view !== 'radar' || scaleKm <= hqDenseKm()) {
     hq.HQ_TIAOTONG.forEach((ln, li) => {
       let j = 0;
       for (const w of ln.ways) for (const q of hqAlong(w.pts, 70, 15)) out.push({ lat: q[0], lng: q[1], at: tiaoAt + li * 350 + j++ * 120, kind: 'streettree', scale: 0.6 * zs });
@@ -3887,7 +3887,8 @@ function hqScenesAll(t0: number): HqIcon[] {
   if (!hqLayer) return out;
   const at0 = hqLayer.at;
   if (hqLayer.id === 'zone') {
-    // 通學區：每所國小南邊 150 公尺（圈的邊上）畫斑馬線，示意；畫小一點，不要蓋到學校
+    // 通學區：每所國小南邊 150 公尺（圈的邊上）畫斑馬線，示意；畫小一點，不要蓋到學校；很密，電腦版 3 km 以內才畫
+    if (view === 'radar' && scaleKm > hqDenseKm()) return out;
     hq.HQ_SERVICES.filter((sv) => sv.kind === '小').forEach((sv, i) => {
       const q = destination(sv, 180, 0.15);
       out.push({ lat: q.lat, lng: q.lng, at: at0 + Math.min(i * 8, 1600) + 500, kind: 'schoolwalk', focus: true, scale: 0.4 * zs });

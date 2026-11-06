@@ -1,6 +1,6 @@
 import type * as Leaflet from 'leaflet';
 import { DOME_SVG, idlePhase, isSceneKind, PATROL_SVG, sceneSvg, SCOOTER_SVG, SOCCER_SVG, TRUCK_SVG, WALKER_SVG, windSvg, type SceneKind } from './hq-scenes';
-import { alongLine, BOAT_SVG, crackSvg, FITBUS_BODY, FITBUS_SVG, hqMotionZoom, HQ_LABEL_ZOOM, HQ_NET_LABEL_KM, BIKE_SVG, HIKER_SVG, PETWALK_SVG, FISH_SVG, WETLAND_BIRDS, MUSIC_NOTES, bikePhase, fitbusPhase, fitbusStopSvg, cultureSvg, regrowSvg, serviceSvg, stitchSvg, boatPhase, fireworksSvg, FIREWORKS_MS, flowOut, HQ_VOYAGE_MS, RAINBOW_FLOW_TOTAL, RAINBOW_STAGGER_MS, surge, SURGE_TOTAL, voyagePhase, voyageTimeOf } from './flow';
+import { alongLine, BOAT_SVG, crackSvg, FITBUS_BODY, FITBUS_SVG, hqDenseZoom, hqMotionZoom, HQ_LABEL_ZOOM, HQ_NET_LABEL_KM, BIKE_SVG, HIKER_SVG, PETWALK_SVG, FISH_SVG, WETLAND_BIRDS, MUSIC_NOTES, bikePhase, fitbusPhase, fitbusStopSvg, cultureSvg, regrowSvg, serviceSvg, stitchSvg, boatPhase, fireworksSvg, FIREWORKS_MS, flowOut, HQ_VOYAGE_MS, RAINBOW_FLOW_TOTAL, RAINBOW_STAGGER_MS, surge, SURGE_TOTAL, voyagePhase, voyageTimeOf } from './flow';
 import { haversineKm, type LatLng } from './geo';
 import type { EventKind, Phase } from './types';
 import { LANDMARKS } from './landmarks';
@@ -351,6 +351,8 @@ export class MapView {
         this.motionFar = map.getZoom() < hqMotionZoom();
         this.el.classList.toggle('hq-far', this.motionFar);
         this.el.classList.toggle('hq-near', !this.motionFar);
+        // 很密的東西（條通、通學區的斑馬線）電腦版拉近到縮放 14.7 才畫
+        this.el.classList.toggle('hq-dense-far', map.getZoom() < hqDenseZoom());
         // 寶箱、橋下空間、大巨蛋、毛孩安心養的字拉遠（縮放 14 以下）不寫
         this.el.classList.toggle('label-far', map.getZoom() < HQ_LABEL_ZOOM);
         // 公園、運動中心、大型建築的字拉得更遠（縮放 13 以下，雷達 10 km）才不寫
@@ -359,7 +361,7 @@ export class MapView {
         this.el.classList.toggle('label-far12', map.getZoom() < 12.5);
         // 藏起來（display: none）的 CSS 動畫再出現時會從頭播、用畫的時候的 delay（例如還要等 70 秒），人流、腳踏車道、字就一直不出來、不動：
         // 跨過門檻時整層重畫一次，delay 照現在的時間重新算（v1.544 使用者說「電腦版的裂縫人流沒有在動」）
-        const key = ['hq-far', 'label-far', 'label-far10', 'label-far12'].map((c) => +this.el.classList.contains(c)).join('');
+        const key = ['hq-far', 'hq-dense-far', 'label-far', 'label-far10', 'label-far12'].map((c) => +this.el.classList.contains(c)).join('');
         if (farKey && key !== farKey && this.routes.some((r) => r.voyage !== undefined)) this.pushRoutes();
         farKey = key;
       };

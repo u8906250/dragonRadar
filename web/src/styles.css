@@ -395,8 +395,8 @@ path.map-water-glint { animation: water-flow-map 1.1s linear infinite; }
 .map-voyage-icon.nightsky svg { transform: scale(calc(var(--zoom-scale, 1) * 0.8)); }
 /* 小場景（hq-scenes.ts）拉近才畫：地圖縮放到 hq-far 就藏起來（雷達在 main.ts 照公里數不加；v1.555 使用者說拉遠時房子、車子變很大） */
 #map.hq-far .map-voyage-icon:is(.sporthub, .workhub, .ridehub, .pocketpark, .detention, .cleanwater, .schoolwalk, .lunch, .piggy, .aiteam, .oldhouse, .nightmayor, .buscharge, .library24, .tpassgo, .tpasspark, .busterminal) { display: none; }
-/* 條通的樹、車架拉近才畫（雷達在 main.ts 照公里數不加） */
-#map.hq-far .map-voyage-icon.streettree, #map.hq-far .map-voyage-icon.bikerack, #map.hq-far .map-voyage-icon.lantern, #map.hq-far .map-voyage-icon.nightsky, #map.hq-far path.map-night-area { display: none; }
+/* 條通的樹、車架、燈籠、夜色，通學區的斑馬線：很密，電腦版拉近到縮放 14.7 才畫（hq-dense-far；雷達在 main.ts 照 hqDenseKm 不加） */
+#map.hq-dense-far .map-voyage-icon.streettree, #map.hq-dense-far .map-voyage-icon.bikerack, #map.hq-dense-far .map-voyage-icon.lantern, #map.hq-dense-far .map-voyage-icon.nightsky, #map.hq-dense-far .map-voyage-icon.schoolwalk, #map.hq-dense-far path.map-night-area { display: none; }
 .map-voyage-icon.sporthub svg, .map-voyage-icon.pocketpark svg, .map-voyage-icon.detention svg, .map-voyage-icon.cleanwater svg, .map-voyage-icon.aiteam svg, .map-voyage-icon.workhub svg, .map-voyage-icon.ridehub svg, .map-voyage-icon.oldhouse svg, .map-voyage-icon.nightmayor svg, .map-voyage-icon.buscharge svg, .map-voyage-icon.library24 svg, .map-voyage-icon.tpassgo svg, .map-voyage-icon.tpasspark svg, .map-voyage-icon.busterminal svg { transform: scale(calc(var(--zoom-scale, 1) * 0.9)); }
 .map-voyage-icon.lunch svg, .map-voyage-icon.piggy svg { transform: scale(var(--zoom-scale, 1)); }
 .map-voyage-icon.schoolwalk svg { transform: scale(calc(var(--zoom-scale, 1) * 0.45)); }
