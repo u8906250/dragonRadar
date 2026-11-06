@@ -3235,7 +3235,8 @@ function startHqVoyage(spinAt = Date.now()): void {
     // 星星轉完（出發前 0.2 秒）才開始畫
     { rel: -200, fn: () => render() },
     // 河淡掉（到站 0.6 秒後、1.5 秒淡完）之後重畫一次，把看不見但波光還在動的河拿掉
-    { rel: HQ_SAIL_MS + 600 + HQ_RIVER_FADE_MS + 100, fn: () => render() },
+    // 多等 0.5 秒：剛好卡在「淡完」的邊界上時，那次重畫不會拿掉河（v1.568）
+    { rel: HQ_SAIL_MS + 600 + HQ_RIVER_FADE_MS + 500, fn: () => render() },
     {
       rel: HQ_SAIL_MS,
       fn: () => {
@@ -3650,7 +3651,7 @@ type HqSeam = {
   stitches: Array<{ at: number; center: [number, number]; along: [number, number]; label: string; below?: boolean }>;
   walkers: Array<{ from: [number, number]; to: [number, number]; at: number; south?: boolean }>;
 };
-type HqIcon = { lat: number; lng: number; at: number; kind: 'hut' | 'stadium' | 'dome' | 'bigdome' | 'star' | 'regrow' | 'culture' | 'service' | 'wetland' | 'archbridge' | 'chest' | 'chestlock' | 'paw' | 'umusic' | 'uart' | 'uexhibit' | 'uyouth' | 'ushop' | 'fitbus' | SceneKind; label?: string; hideKm?: number; scale?: number; grow?: number; char?: string; color?: string; small?: boolean; focus?: boolean; hint?: { title: string; intro: string }; rot?: number };
+type HqIcon = { lat: number; lng: number; at: number; kind: 'hut' | 'stadium' | 'dome' | 'bigdome' | 'star' | 'regrow' | 'culture' | 'service' | 'wetland' | 'archbridge' | 'chest' | 'chestlock' | 'paw' | 'umusic' | 'uart' | 'uexhibit' | 'uyouth' | 'ushop' | 'fitbus' | SceneKind; label?: string; hideKm?: number; scale?: number; grow?: number; char?: string; color?: string; small?: boolean; focus?: boolean; hint?: { title: string; intro: string }; rot?: number; calm?: boolean };
 /** 其他政見的地方：離路線多近才沿路冒出來 */
 const HQ_SERVICE_NEAR_M = 300;
 /** 離路線幾公尺（路線載入後不會變，記起來） */
@@ -3839,6 +3840,8 @@ const HQ_NORTH_CHARGE = { lat: 25.0999, lng: 121.5152 };
 const HQ_NORTH_LIBRARY = { lat: 25.1015, lng: 121.5172 };
 /** 臺北市政府的 AI 支援小隊：市府大樓東南側（不擋「臺北市政府」的字、煙火） */
 const HQ_AI_TEAM = { lat: 25.0369, lng: 121.5655 };
+/** 通學區的斑馬線一次最多幾所在動（畫面正中間最近的） */
+const HQ_WALK_ANIMATED = 10;
 /** 運動驛站設在山林徑起點的捷運站 */
 const HQ_HUB_STATION: Record<string, string> = { 北劍潭: '劍潭', 東象山: '象山', 南貓空: '動物園' };
 /**
@@ -3944,9 +3947,12 @@ function hqScenesAll(t0: number): HqIcon[] {
   if (hqLayer.id === 'zone') {
     // 通學區：每所國小南邊 150 公尺（圈的邊上）畫斑馬線，示意；畫小一點，不要蓋到學校；很密，電腦版 3 km 以內才畫
     if (view === 'radar' && scaleKm > hqDenseKm()) return out;
-    hq.HQ_SERVICES.filter((sv) => sv.kind === '小').forEach((sv, i) => {
+    // 只有雷達正中間最近的 HQ_WALK_ANIMATED 所在動，其他的停著（v1.568 效能：畫面附近三十幾所同時在動很吃效能；地圖在 map.ts 照地圖正中間挑）
+    const schools = hq.HQ_SERVICES.filter((sv) => sv.kind === '小');
+    const near = new Set(view === 'radar' ? [...schools].sort((a, b) => haversineKm(origin, a) - haversineKm(origin, b)).slice(0, HQ_WALK_ANIMATED) : schools);
+    schools.forEach((sv, i) => {
       const q = destination(sv, 180, 0.15);
-      out.push({ lat: q.lat, lng: q.lng, at: at0 + Math.min(i * 8, 1600) + 500, kind: 'schoolwalk', focus: true, scale: 0.4 * zs });
+      out.push({ lat: q.lat, lng: q.lng, at: at0 + Math.min(i * 8, 1600) + 500, kind: 'schoolwalk', focus: true, scale: 0.4 * zs, ...(near.has(sv) ? {} : { calm: true }) });
     });
   } else if (hqLayer.id === 'edu') {
     for (const tk of hq.HQ_FARM_TRUCKS) {

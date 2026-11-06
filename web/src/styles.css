@@ -393,6 +393,8 @@ path.map-water-glint { animation: water-flow-map 1.1s linear infinite; }
 .map-voyage-icon.streettree svg, .map-voyage-icon.bikerack svg { transform: scale(calc(var(--zoom-scale, 1) * 0.6)); }
 .map-voyage-icon.lantern svg { transform: scale(calc(var(--zoom-scale, 1) * 0.55)); }
 .map-voyage-icon.nightsky svg { transform: scale(calc(var(--zoom-scale, 1) * 0.8)); }
+/* 停著的小場景（通學區離畫面中間遠的學校，v1.568 效能）：不動，走路的小朋友收著 */
+.radar .voyage-icon.calm .idle *, .map-voyage-icon.calm .idle * { animation: none !important; }
 /* 小場景（hq-scenes.ts）拉近才畫：地圖縮放到 hq-far 就藏起來（雷達在 main.ts 照公里數不加；v1.555 使用者說拉遠時房子、車子變很大） */
 #map.hq-far .map-voyage-icon:is(.sporthub, .workhub, .ridehub, .pocketpark, .detention, .cleanwater, .schoolwalk, .lunch, .piggy, .aiteam, .oldhouse, .nightmayor, .buscharge, .library24, .tpassgo, .tpasspark, .busterminal, .cyclerenew) { display: none; }
 /* 條通的樹、車架、燈籠、夜色，通學區的斑馬線：很密，電腦版拉近到縮放 14.7 才畫（hq-dense-far；雷達在 main.ts 照 hqDenseKm 不加） */
@@ -1110,9 +1112,9 @@ path.map-seam-walkers { --p: 15px; }
 .cu-char { fill: #fff; font-size: 8.5px; font-weight: 700; pointer-events: none; }
 .radar .voyage-stop.small text { font-size: 9px; }
 /* 滑鼠移過去的介紹：看不見的感應圈，東西出現了（visibility 到時間才 visible）才感應得到 */
-.radar .intro-hit, .map-intro-hit { fill: transparent; stroke: none; cursor: help; visibility: hidden; animation: intro-on 1ms linear both; }
+/* 到時間才感應：radar.ts、map.ts 的 armHits 照時間把 visibility 打開（v1.568 起不用 CSS 動畫） */
+.radar .intro-hit, .map-intro-hit { fill: transparent; stroke: none; cursor: help; }
 .radar .intro-hit { pointer-events: visibleFill; }
-@keyframes intro-on { to { visibility: visible; } }
 .hq-intro-tip { white-space: pre-line; position: fixed; z-index: 3000; max-width: 260px; padding: 8px 10px; background: var(--card); color: var(--text); border: 1.5px solid #15171c; border-radius: 10px; box-shadow: 3px 3px 0 #15171c; font-size: 12.5px; line-height: 1.55; pointer-events: none; }
 .hq-intro-tip b { display: block; margin-bottom: 2px; font-size: 13.5px; }
 .hq-intro-tip b:only-child { margin-bottom: 0; }

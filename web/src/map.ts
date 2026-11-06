@@ -97,7 +97,7 @@ export interface MapRoute {
   /** 文化網（點 —— 線 —— 面） */
   network?: { at: number; lines: Array<{ path: Array<[number, number]>; color: string }>; dots: Array<{ lat: number; lng: number; color: string }>; noFace?: boolean; faceR?: number };
   /** 一個東西冒出來：hut 登山中心、stadium 足球場、dome 運動中心、star 星星、regrow 樹樁（grow 時長回大樹）、culture 文化徑的點（small 的名字地圖上不寫，滑鼠移過去看介紹） */
-  icons?: Array<{ lat: number; lng: number; at: number; kind: 'hut' | 'stadium' | 'dome' | 'bigdome' | 'star' | 'regrow' | 'culture' | 'service' | 'wetland' | 'archbridge' | 'chest' | 'chestlock' | 'paw' | 'umusic' | 'uart' | 'uexhibit' | 'uyouth' | 'ushop' | 'fitbus' | SceneKind; label?: string; hideKm?: number; scale?: number; grow?: number; char?: string; color?: string; small?: boolean; focus?: boolean; rot?: number }>;
+  icons?: Array<{ lat: number; lng: number; at: number; kind: 'hut' | 'stadium' | 'dome' | 'bigdome' | 'star' | 'regrow' | 'culture' | 'service' | 'wetland' | 'archbridge' | 'chest' | 'chestlock' | 'paw' | 'umusic' | 'uart' | 'uexhibit' | 'uyouth' | 'ushop' | 'fitbus' | SceneKind; label?: string; hideKm?: number; scale?: number; grow?: number; char?: string; color?: string; small?: boolean; focus?: boolean; rot?: number; calm?: boolean }>;
   /** 政策圖層開著：其他特效變淡，只有 focus 的地方、通學區的圈清楚 */
   focus?: boolean;
   /** 都更的基地範圍（at 時淡入） */
@@ -117,6 +117,8 @@ const MAP_PLANT_TREES = 10;
 const MAP_STREET_TREE_KM = 0.07;
 const MAP_RIVER_CHUNK = 24;
 const MAP_CANAL_GHOST_MS = 1200;
+/** 河到終點後多久拿掉（淡出 1.5 秒，多留一點） */
+const MAP_RIVER_GONE_MS = 1700;
 /** 水上活動的船（跟 radar.ts 一樣的畫法，顏色在 styles.css） */
 const MAP_SUP_SVG =
   '<path class="wb-wake" d="M-14 2.5q-4 0 -7 1.6"/>' +
@@ -256,13 +258,27 @@ export class MapView {
   /** 洋流號：路線的經緯度（cum 是每一點走了幾公里）和船，每一格畫面照現在的時間擺；往哪邊開記在 boatLeft */
   private boatTracks: Array<{ id: string; marker: Leaflet.Marker; lat: Float64Array; lng: Float64Array; cum: Float64Array; voyage?: number; bus?: { start: number; stopAt: number[]; driveMs: number; stops: Leaflet.Marker[] }; ride?: { start: number; lap: number; loop?: boolean } }> = [];
   /** 河流：整條的經緯度（cum 是每一點走了幾公里）、河岸、河面、亮的那道、兩道波光，畫到哪（at，沒變就不重畫） */
-  private riverTracks: Array<{ pts: Array<[number, number]>; cum: Float64Array; voyage: number; at: number; lines: Leaflet.Polyline[]; chunkStart: number; chunkEnd: number; riverOut?: number }> = [];
+  private riverTracks: Array<{ pts: Array<[number, number]>; cum: Float64Array; voyage: number; at: number; lines: Leaflet.Polyline[]; all: Leaflet.Polyline[]; chunkStart: number; chunkEnd: number; riverOut?: number }> = [];
   private readonly boatLeft = new Map<string, boolean>();
   private boatFrame = 0;
   /** 洋流號暫停：船、河、小巴不再每一格擺位置（重畫時擺一次），CSS 動畫停住 */
   private paused = false;
   /** 拉遠了：一直動的停下來（健身小巴停在第一站） */
   private motionFar = false;
+  /** 洋流總部滑鼠介紹的感應圈：還沒到時間的（armHits 照時間打開） */
+  private hitPending: Array<{ el: SVGElement; at: number }> = [];
+  private hitTimer = 0;
+  /** 時間到的感應圈打開，再排下一個（加速時 shiftClock 也叫） */
+  private armHits = (): void => {
+    window.clearTimeout(this.hitTimer);
+    const now = Date.now();
+    this.hitPending = this.hitPending.filter((h) => {
+      if (h.at > now) return true;
+      h.el.style.visibility = 'visible';
+      return false;
+    });
+    if (this.hitPending.length) this.hitTimer = window.setTimeout(this.armHits, Math.max(16, Math.min(...this.hitPending.map((h) => h.at)) - now));
+  };
   /** 畫通學區小朋友時地圖的正中間（離開 1.5 km 重畫） */
   private sceneCenter: Leaflet.LatLng | null = null;
   private bottleLayer: Leaflet.LayerGroup | null = null;
@@ -699,6 +715,8 @@ export class MapView {
       t.voyage -= d;
       if (t.riverOut !== undefined) t.riverOut -= d;
     }
+    for (const h of this.hitPending) h.at -= d;
+    this.armHits();
   }
 
   /** 已經畫好的 CSS 動畫往前推 d 毫秒（跟 radar.ts 的 shiftCss 一樣） */
@@ -769,6 +787,7 @@ export class MapView {
     layer.clearLayers();
     this.boatTracks = [];
     this.riverTracks = [];
+    this.hitPending = [];
     for (const r of this.routes) {
       if (r.state === 'done') continue;
       if (r.rainbow) {
@@ -911,7 +930,7 @@ export class MapView {
       this.riverFade(e, riverOut);
     }
     // 河分段畫：流過的部分一段一段固定成自己的線，每一格只動最前面正在長的那一段（lines）
-    const t = { pts, cum, voyage, at: -1, lines, chunkStart: 0, chunkEnd: Math.min(pts.length - 1, MAP_RIVER_CHUNK), riverOut };
+    const t = { pts, cum, voyage, at: -1, lines, all: [...lines], chunkStart: 0, chunkEnd: Math.min(pts.length - 1, MAP_RIVER_CHUNK), riverOut };
     this.riverTracks.push(t);
     this.drawRiver(t, voyagePhase(Date.now() - voyage).at);
   }
@@ -934,6 +953,7 @@ export class MapView {
     for (const [opt, i] of [[{ color: '#ffd8b0', weight: 15, opacity: 0.9 }, 0], [{ color: '#f0812e', weight: 9, opacity: 0.92 }, 1], [{ color: '#ffc78f', weight: 2, opacity: 0.85 }, 2], [{ color: '#ffffff', weight: 1.6, opacity: 0.85, className: 'map-river-flow' }, 3]] as const) {
       const l = L.polyline(seg, { ...o, ...opt });
       layer.addLayer(l);
+      t.all.push(l);
       const e = l.getElement() as SVGElement | undefined;
       if (e) {
         Object.assign(e.style, { animationDuration: `${HQ_VOYAGE_MS}ms`, animationDelay: `${t.voyage - Date.now()}ms` });
@@ -1157,8 +1177,12 @@ export class MapView {
     // 冒出來的東西：登山中心、足球場、運動中心、星星
     // 通學區過馬路的小朋友（一百多所國小）只畫地圖正中間 3 km 內的，移動超過 1.5 km 再重畫（moveend）
     this.sceneCenter = map.getCenter();
+    // 通學區的斑馬線只有地圖正中間最近的 10 所在動，其他的停著（v1.568 效能）
+    const c0 = this.sceneCenter;
+    const walking = new Set((r.icons ?? []).filter((ic) => ic.kind === 'schoolwalk').sort((a, b) => map.distance(c0, [a.lat, a.lng]) - map.distance(c0, [b.lat, b.lng])).slice(0, 10));
     for (const ic of r.icons ?? []) {
       if (ic.kind === 'schoolwalk' && map.distance(this.sceneCenter, [ic.lat, ic.lng]) > 3000) continue;
+      const calm = ic.calm || (ic.kind === 'schoolwalk' && !walking.has(ic));
       const sc = ic.scale ?? 1;
       // 方向（rot 是地理方位）轉成螢幕角度：0 往右
       const deg = (ic.rot ?? 90) - 90;
@@ -1171,7 +1195,7 @@ export class MapView {
             : ic.kind === 'service'
               ? serviceSvg(ic.char ?? '', ic.color ?? '#555')
               : MAP_ICON_SVG[ic.kind] + (ic.kind === 'wetland' && ic.rot !== undefined ? windSvg(deg) : '');
-      const icon = L.divIcon({ className: `map-voyage-icon ${ic.kind}${ic.focus ? ' focus' : ''}`, html: `<svg viewBox="-20 -20 40 40" width="${40 * sc}" height="${40 * sc}" aria-hidden="true"><g class="boat-pop" style="animation-delay:${Math.round(ic.at - now)}ms"><g class="idle idle-${ic.kind}" style="--d:-${idlePhase(now, ((((ic.at * 0.618) % 1) + 1) % 1) * 4000)}ms">${body}</g></g></svg>`, iconSize: [40 * sc, 40 * sc], iconAnchor: [20 * sc, 20 * sc] });
+      const icon = L.divIcon({ className: `map-voyage-icon ${ic.kind}${ic.focus ? ' focus' : ''}${calm ? ' calm' : ''}`, html: `<svg viewBox="-20 -20 40 40" width="${40 * sc}" height="${40 * sc}" aria-hidden="true"><g class="boat-pop" style="animation-delay:${Math.round(ic.at - now)}ms"><g class="idle idle-${ic.kind}" style="--d:-${idlePhase(now, ((((ic.at * 0.618) % 1) + 1) % 1) * 4000)}ms">${body}</g></g></svg>`, iconSize: [40 * sc, 40 * sc], iconAnchor: [20 * sc, 20 * sc] });
       layer.addLayer(L.marker([ic.lat, ic.lng], { icon, interactive: false, keyboard: false, zIndexOffset: 1300 }));
       if (ic.label && !ic.small) this.stayLabel([ic.lat, ic.lng], ic.label, (ic.grow ?? ic.at) + 500 - now, 20 * sc + 16, ic.hideKm ? farCls(ic.hideKm) : '');
     }
@@ -1234,9 +1258,14 @@ export class MapView {
       const m = L.circleMarker(map.layerPointToLatLng(L.point(c.x, c.y - (h.dy ?? 0))), { radius: h.r ?? 12, stroke: false, fillOpacity: 0, className: 'map-intro-hit' });
       m.bindTooltip(`<b>${escapeHtml(h.title)}</b>${h.intro ? `<br>${escapeHtml(h.intro).replace(/\n/g, '<br>')}` : ''}`, { direction: 'top', className: 'hq-intro-tip-map', offset: [0, -8] });
       layer.addLayer(m);
+      // 到時間才感應：一個計時器照順序打開（v1.568：原本每個圈各掛一個等著開始的 CSS 動畫）
       const e = m.getElement() as SVGElement | undefined;
-      if (e) e.style.animationDelay = `${Math.round(h.at - now)}ms`;
+      if (e) {
+        e.style.visibility = h.at <= now ? 'visible' : 'hidden';
+        if (h.at > now) this.hitPending.push({ el: e, at: h.at });
+      }
     }
+    this.armHits();
     // 真的河：船沿河走時亮起來（畫在最下面）
     for (const rv of r.rivers ?? []) {
       if (rv.ring.length < 3) continue;
@@ -1328,7 +1357,12 @@ export class MapView {
     if (this.el.offsetWidth > 0) {
       const now = Date.now();
       const lap = boatPhase(now);
-      // 河流跟著船長出來
+      // 河流跟著船長出來；到終點淡完就整條拿掉（v1.568）
+      this.riverTracks = this.riverTracks.filter((t) => {
+        if (t.riverOut === undefined || now < t.riverOut + MAP_RIVER_GONE_MS) return true;
+        for (const l of t.all) this.routeLayer?.removeLayer(l);
+        return false;
+      });
       for (const t of this.riverTracks) this.drawRiver(t, voyagePhase(now - t.voyage).at);
       for (const t of this.boatTracks) {
         // 只開一趟的（洋流總部的特效）照出發的時間走，其他的一直重複開

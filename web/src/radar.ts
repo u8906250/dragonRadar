@@ -103,7 +103,7 @@ export interface RadarRoute {
    * 一個東西冒出來（at）：hut 登山中心、stadium 足球場、dome 運動中心、star 星星、regrow 樹樁（grow 時長回大樹）、culture 文化徑的點（char、color）；
    * label 留著（small 是寫在下面的小字，跟別的小字重疊就不寫）
    */
-  icons?: Array<{ bearing: number; distanceKm: number; at: number; kind: 'hut' | 'stadium' | 'dome' | 'bigdome' | 'star' | 'regrow' | 'culture' | 'service' | 'wetland' | 'archbridge' | 'chest' | 'chestlock' | 'paw' | 'umusic' | 'uart' | 'uexhibit' | 'uyouth' | 'ushop' | 'fitbus' | SceneKind; label?: string; hideKm?: number; scale?: number; grow?: number; char?: string; color?: string; small?: boolean; focus?: boolean; rot?: number }>;
+  icons?: Array<{ bearing: number; distanceKm: number; at: number; kind: 'hut' | 'stadium' | 'dome' | 'bigdome' | 'star' | 'regrow' | 'culture' | 'service' | 'wetland' | 'archbridge' | 'chest' | 'chestlock' | 'paw' | 'umusic' | 'uart' | 'uexhibit' | 'uyouth' | 'ushop' | 'fitbus' | SceneKind; label?: string; hideKm?: number; scale?: number; grow?: number; char?: string; color?: string; small?: boolean; focus?: boolean; rot?: number; calm?: boolean }>;
   /** 政策圖層開著：其他特效變淡，只有 focus 的地方、通學區的圈清楚 */
   focus?: boolean;
   /** 都更的基地範圍（at 時淡入） */
@@ -193,6 +193,8 @@ const ROAD_TREE_SIDE = 3.2;
 const RIVER_CHUNK = 24;
 const STREET_GROW_MS_PER_M = 2.4;
 const CANAL_GHOST_MS = 1200;
+/** 河到終點後多久拿掉（淡出 1.5 秒，多留一點） */
+const RIVER_GONE_MS = 1700;
 /** 固定的地標（例如洋流總部），畫成星星 */
 export interface RadarLandmark {
   id: string;
@@ -525,13 +527,16 @@ export class Radar {
   /** 洋流號：路線在畫面上的折線（SVG 座標，cum 是每一點走了多遠）和船，每一格畫面照現在的時間擺；往哪邊開記在 boatLeft（重畫時接著用） */
   private boatTracks: Array<{ id: string; g: SVGGElement; flip: SVGGElement; xs: Float64Array; ys: Float64Array; cum: Float64Array; voyage?: number; bus?: { start: number; stopAt: number[]; driveMs: number; stopEls: Element[] }; ride?: { start: number; lap: number; loop?: boolean }; scale?: number }> = [];
   /** 河流：畫面上的折線（cum 是每一點走了多遠）、每一點往左的法線和半寬（SVG 單位）、畫到哪（at，沒變就不重畫） */
-  private riverTracks: Array<{ xs: Float64Array; ys: Float64Array; nx: Float64Array; ny: Float64Array; hw: Float64Array; cum: Float64Array; voyage: number; at: number; g: SVGGElement; tip: SVGPathElement[]; chunkStart: number; chunkEnd: number }> = [];
+  private riverTracks: Array<{ xs: Float64Array; ys: Float64Array; nx: Float64Array; ny: Float64Array; hw: Float64Array; cum: Float64Array; voyage: number; at: number; g: SVGGElement; tip: SVGPathElement[]; chunkStart: number; chunkEnd: number; riverOut?: number }> = [];
   private readonly boatLeft = new Map<string, boolean>();
   private boatFrame = 0;
   /** 洋流號暫停：船、河、小巴不再每一格擺位置（重畫時擺一次），CSS 動畫停住 */
   private paused = false;
   /** 拉遠了：一直動的停下來（健身小巴停在第一站） */
   private motionFar = false;
+  /** 洋流總部滑鼠介紹的感應圈：還沒到時間的（armHits 照時間打開） */
+  private hitPending: Array<{ el: SVGElement; at: number }> = [];
+  private hitTimer = 0;
   private readonly stack: HTMLDivElement;
   private readonly pointers = new Map<number, { x: number; y: number }>();
   private pinchDist = 0;
@@ -1972,7 +1977,7 @@ export class Radar {
     const tip = ['river-bank', 'river-body', 'river-shine', 'river-flow', 'river-flow b'].map((c) => el('path', { class: c }) as SVGPathElement);
     g.append(...tip);
     this.routeLayer.appendChild(g);
-    const t = { xs, ys, nx, ny, hw, cum, voyage: r.voyage, at: -1, g, tip, chunkStart: 0, chunkEnd: Math.min(n - 1, RIVER_CHUNK) };
+    const t = { xs, ys, nx, ny, hw, cum, voyage: r.voyage, at: -1, g, tip, chunkStart: 0, chunkEnd: Math.min(n - 1, RIVER_CHUNK), riverOut: r.riverOut };
     this.riverTracks.push(t);
     this.drawRiver(t, voyagePhase(Date.now() - r.voyage).at);
   }
@@ -2299,7 +2304,7 @@ export class Radar {
     const placed: Array<[number, number, number]> = [];
     for (const ic of r.icons ?? []) {
       const p = polar(ic.bearing - this.heading, this.ratio(ic.distanceKm) * (R - 8));
-      const g = el('g', { class: `voyage-icon ${ic.kind}${ic.focus ? ' focus' : ''}`, transform: `translate(${p.x.toFixed(1)} ${p.y.toFixed(1)}) scale(${(k * (ic.scale ?? 1)).toFixed(4)})` });
+      const g = el('g', { class: `voyage-icon ${ic.kind}${ic.focus ? ' focus' : ''}${ic.calm ? ' calm' : ''}`, transform: `translate(${p.x.toFixed(1)} ${p.y.toFixed(1)}) scale(${(k * (ic.scale ?? 1)).toFixed(4)})` });
       // 方向（rot 是地理方位）轉成螢幕角度：0 往右；雷達跟著指北針轉
       const deg = (ic.rot ?? 90) - this.heading - 90;
       const body = isSceneKind(ic.kind)
@@ -2394,15 +2399,32 @@ export class Radar {
       this.boatTracks.push({ id: `hq-bike-${i}`, g, flip: g.querySelector('.boat-flip') as SVGGElement, xs, ys, cum, ride: { start: bk.start, lap: bk.lap, loop: bk.loop }, scale: kind === 'bike' ? 1.1 : kind === 'pet' ? 1.4 : 1.2 });
     });
     // 滑鼠移過去的介紹：看不見的感應圈，放在最上面（main.ts 照 data-title、data-intro 顯示）
+    // 到時間才感應：一個計時器照順序打開（v1.568：原本每個圈各掛一個等著開始的 CSS 動畫，一百多個）
+    this.hitPending = [];
     if (r.hits?.length) {
       const hg = el('g', { class: 'intro-hits' });
       for (const h of r.hits) {
         const p = polar(h.bearing - this.heading, this.ratio(h.distanceKm) * (R - 8));
-        hg.appendChild(el('circle', { class: 'intro-hit', cx: p.x.toFixed(1), cy: (p.y - (h.dy ?? 0) * k).toFixed(1), r: ((h.r ?? 12) * k).toFixed(2), 'data-title': h.title, 'data-intro': h.intro, style: `animation-delay:${Math.round(h.at - now)}ms` }));
+        const c = el('circle', { class: 'intro-hit', cx: p.x.toFixed(1), cy: (p.y - (h.dy ?? 0) * k).toFixed(1), r: ((h.r ?? 12) * k).toFixed(2), 'data-title': h.title, 'data-intro': h.intro, style: `visibility:${h.at <= now ? 'visible' : 'hidden'}` }) as SVGElement;
+        if (h.at > now) this.hitPending.push({ el: c, at: h.at });
+        hg.appendChild(c);
       }
       this.routeLayer.appendChild(hg);
     }
+    this.armHits();
   }
+
+  /** 時間到的感應圈打開，再排下一個（加速時 shiftClock 也叫） */
+  private armHits = (): void => {
+    window.clearTimeout(this.hitTimer);
+    const now = Date.now();
+    this.hitPending = this.hitPending.filter((h) => {
+      if (h.at > now) return true;
+      h.el.style.visibility = 'visible';
+      return false;
+    });
+    if (this.hitPending.length) this.hitTimer = window.setTimeout(this.armHits, Math.max(16, Math.min(...this.hitPending.map((h) => h.at)) - now));
+  };
 
   /** 每一格畫面把洋流號擺到現在的位置（雷達藏起來時不擺，回來接著開）；沒有船就停 */
   private moveBoats = (): void => {
@@ -2413,7 +2435,12 @@ export class Radar {
       const now = Date.now();
       const lap = boatPhase(now);
       const k = (SIZE / this.squarePx).toFixed(4);
-      // 河流跟著船長出來
+      // 河流跟著船長出來；到終點淡完就整條拿掉（v1.568：原本淡完還留著，透明的水流動畫一直跑、每一格還在重算河）
+      this.riverTracks = this.riverTracks.filter((t) => {
+        if (t.riverOut === undefined || now < t.riverOut + RIVER_GONE_MS) return true;
+        t.g.remove();
+        return false;
+      });
       for (const t of this.riverTracks) this.drawRiver(t, voyagePhase(now - t.voyage).at);
       for (const t of this.boatTracks) {
         // 只開一趟的（洋流總部的特效）照出發的時間走，其他的一直重複開
@@ -2455,7 +2482,12 @@ export class Radar {
       if (t.ride) t.ride.start -= d;
       if (t.bus) t.bus.start -= d;
     }
-    for (const t of this.riverTracks) t.voyage -= d;
+    for (const t of this.riverTracks) {
+      t.voyage -= d;
+      if (t.riverOut !== undefined) t.riverOut -= d;
+    }
+    for (const h of this.hitPending) h.at -= d;
+    this.armHits();
   }
 
   /** 已經畫好的 CSS 動畫（冒出來、長出來、淡入…）往前推 d 毫秒（main.ts 每 0.2 秒推一次，每一格都推太吃效能） */
