@@ -13,8 +13,8 @@ export const IDLE_CYCLE_MS = 5_040_000;
 export const idlePhase = (now: number, offsetMs: number): number => Math.round((now + offsetMs) % IDLE_CYCLE_MS);
 
 /** 會自己畫一個小場景的圖示 */
-export type SceneKind = 'sporthub' | 'workhub' | 'ridehub' | 'pocketpark' | 'detention' | 'cleanwater' | 'schoolwalk' | 'lunch' | 'piggy' | 'aiteam' | 'oldhouse' | 'streettree' | 'bikerack' | 'nightmayor' | 'buscharge' | 'library24' | 'lantern' | 'nightsky' | 'tpassgo' | 'tpasspark' | 'busterminal';
-const SCENE_KINDS: readonly string[] = ['sporthub', 'workhub', 'ridehub', 'pocketpark', 'detention', 'cleanwater', 'schoolwalk', 'lunch', 'piggy', 'aiteam', 'oldhouse', 'streettree', 'bikerack', 'nightmayor', 'buscharge', 'library24', 'lantern', 'nightsky', 'tpassgo', 'tpasspark', 'busterminal'];
+export type SceneKind = 'sporthub' | 'workhub' | 'ridehub' | 'pocketpark' | 'detention' | 'cleanwater' | 'schoolwalk' | 'lunch' | 'piggy' | 'aiteam' | 'oldhouse' | 'streettree' | 'bikerack' | 'nightmayor' | 'buscharge' | 'library24' | 'lantern' | 'nightsky' | 'tpassgo' | 'tpasspark' | 'busterminal' | 'cyclerenew';
+const SCENE_KINDS: readonly string[] = ['sporthub', 'workhub', 'ridehub', 'pocketpark', 'detention', 'cleanwater', 'schoolwalk', 'lunch', 'piggy', 'aiteam', 'oldhouse', 'streettree', 'bikerack', 'nightmayor', 'buscharge', 'library24', 'lantern', 'nightsky', 'tpassgo', 'tpasspark', 'busterminal', 'cyclerenew'];
 export const isSceneKind = (k: string): k is SceneKind => SCENE_KINDS.includes(k);
 
 /** 站著的小人（腳在 y = 0、往右走）：身體的 class 決定衣服顏色，extra 是帽子、領帶這些 */
@@ -291,6 +291,35 @@ const BUS_TERMINAL =
   '<g transform="translate(-9 -12)"><g class="cb-ok"><circle r="2.1"/><path d="M-1 0L-0.2 0.8L1.2 -0.8"/></g></g>';
 
 /**
+ * 循環都更（v1.566 使用者選「說明文字更新＋A 循環都更」；政見「無限都更、無限陪伴」的「先換屋、再都更」）：
+ * 左邊一棟老公寓、右邊公有地上的新家，中間一個慢慢轉的循環箭頭——一家人（大人帶小孩）從老公寓走到新家（先換屋），
+ * 老公寓圍起鷹架、吊車吊、新大樓從地上長出來（再都更），蓋好閃一下，下一戶人家走進新大樓（投入下一輪）；一輪 14 秒
+ */
+const family = (cls: string, a: string, b: string): string =>
+  `<g class="${cls}">${person(a)}<g transform="translate(3.2 1.6) scale(0.7)">${person(b)}</g></g>`;
+const CYCLE_RENEW =
+  '<ellipse class="sc-shadow" cx="0" cy="6.6" rx="25" ry="1.3"/>' +
+  // 循環箭頭（中間上方）
+  '<g transform="translate(0 -16)"><g class="cr-loop"><path class="cr-arrow" d="M-4.6 -1.2A4.8 4.8 0 0 1 4.2 -2.2M4.6 1.2A4.8 4.8 0 0 1 -4.2 2.2"/><path class="cr-head" d="M4.2 -2.2L5.4 -4.4L2.6 -3.8ZM-4.2 2.2L-5.4 4.4L-2.6 3.8Z"/></g></g>' +
+  // 老公寓（左）、圍起來的鷹架、長出來的新大樓
+  '<g class="cr-old"><rect class="oh-wall" x="-23" y="-14" width="12" height="20" rx="0.5"/><path class="oh-stain" d="M-20.6 -12.6q0.6 2.6 0 4.4M-13.6 -6q-0.6 2 0 3.4"/>' +
+  [-11.4, -5.4].map((y) => [-21.6, -16.4].map((x) => `<rect class="oh-win" x="${x}" y="${y}" width="3.2" height="3" rx="0.3"/>`).join('')).join('') +
+  '<rect class="oh-door" x="-18.6" y="1" width="3.2" height="5" rx="0.3"/></g>' +
+  '<g class="cr-new"><rect class="cr-tower" x="-24" y="-20" width="14" height="26" rx="0.6"/>' +
+  [-17.6, -12, -6.4, -0.8].map((y) => [-22.4, -18.4, -14.4].map((x) => `<rect class="cr-glass" x="${x}" y="${y}" width="2.8" height="3.6" rx="0.3"/>`).join('')).join('') +
+  '<rect class="cr-tdoor" x="-18.6" y="2.2" width="3.2" height="3.8" rx="0.3"/></g>' +
+  '<g class="cr-site"><path class="cr-scaf" d="M-25 6V-16M-9 6V-16M-25 -16H-9M-25 -9H-9M-25 -2H-9M-25 6L-9 -16M-9 6L-25 -16"/>' +
+  '<path class="cr-crane" d="M-5 6V-24M-5 -24H-22M-5 -24L-2 -24M-5 -22L-8 -24"/><g class="cr-hook"><path class="cr-rope" d="M-15 -24V-18"/><rect class="cr-load" x="-16.6" y="-18" width="3.2" height="2" rx="0.3"/></g></g>' +
+  '<path class="cr-spark" d="M-6 -24l0.8 2 2 0.8 -2 0.8 -0.8 2 -0.8 -2 -2 -0.8 2 -0.8z"/>' +
+  // 公有地上的新家（右）
+  '<rect class="cr-land" x="8" y="5.2" width="17" height="1.6" rx="0.4"/><path class="cr-roof" d="M9 -6L16.5 -11.6L24 -6Z"/><rect class="cr-house" x="10" y="-6" width="13" height="11.4" rx="0.5"/>' +
+  '<rect class="cr-hwin" x="11.6" y="-3.6" width="3.4" height="3" rx="0.3"/><rect class="cr-hwin" x="18" y="-3.6" width="3.4" height="3" rx="0.3"/><rect class="cr-hdoor" x="15" y="0.6" width="3" height="4.8" rx="0.3"/>' +
+  // 一家人：先換屋（老公寓 → 新家）、下一戶（從左邊走進新大樓）
+  `<g transform="translate(-17 6)">${family('cr-fam1', 'cr-a1', 'cr-c1')}</g>` +
+  `<g transform="translate(-17 6)">${family('cr-fam2', 'cr-a2', 'cr-c2')}</g>` +
+  `<g transform="translate(16.5 -15)"><path class="cr-heart" d="${HEART}"/></g>`;
+
+/**
  * 10. 水圳淨水（「用植生過濾、濕地、礫間接觸等自然工法改善水質」）：水路上一叢蘆葦，水裡的小點從灰濁流過蘆葦變清澈的藍色；
  * deg 是水流的方向（螢幕角度，0 往右）
  */
@@ -341,6 +370,8 @@ export function sceneSvg(kind: SceneKind, deg: number): string {
       return TPASS_PARK;
     case 'busterminal':
       return BUS_TERMINAL;
+    case 'cyclerenew':
+      return CYCLE_RENEW;
 
     case 'oldhouse':
       return OLDHOUSE;

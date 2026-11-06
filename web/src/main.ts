@@ -3855,7 +3855,7 @@ const HQ_LAYER_SCENES: Record<string, SceneKind[]> = {
   zone: ['schoolwalk'],
   family: ['library24'],
   youth: ['piggy'],
-  renewal: ['oldhouse'],
+  renewal: ['oldhouse', 'cyclerenew'],
   health: ['oldhouse'],
 };
 /**
@@ -3915,6 +3915,9 @@ function hqScenesAll(t0: number): HqIcon[] {
   const bs = hq.HQ_BUS_SAFETY;
   const busHint = (where: string): { title: string; intro: string } => ({ title: `公車安全改革（${where}，示意）`, intro: I['公車安全改革'] ?? '' });
   out.push({ lat: bs.terminal.lat, lng: bs.terminal.lng, at: t0 + HQ_SAIL_MS + 1600, kind: 'busterminal', scale, hint: busHint(`${bs.terminal.name}：折返點休息、準點出發`) });
+  // 循環都更（v1.566）：萬華，船離它最近時；按「都更」時跟著亮
+  const cr = hq.HQ_CYCLE_RENEW;
+  out.push({ lat: cr.lat, lng: cr.lng, at: hqNearestAt(t0, cr) + 300, kind: 'cyclerenew', scale, hint: { title: `循環都更：先換屋、再都更（${cr.name}，示意）`, intro: I['循環都更'] ?? '' } });
   // 老宅延壽：萬華、大同各一棟老公寓，船離它最近時；按「都更」時也亮著
   for (const h of hq.HQ_OLD_HOUSES) out.push({ lat: h.lat, lng: h.lng, at: hqNearestAt(t0, h) + 300, kind: 'oldhouse', scale, hint: { title: `老宅延壽（${h.district}・${h.name}，示意）`, intro: I['老宅延壽'] ?? '' } });
   for (const p of hq.HQ_POCKETPARKS) out.push({ lat: p.lat, lng: p.lng, at: hqNearestAt(t0, p) + 300, kind: 'pocketpark', scale, hint: { title: `口袋公園（示意：${p.name}）`, intro: I['口袋公園'] ?? '' } });
