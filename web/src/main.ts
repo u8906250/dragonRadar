@@ -3723,8 +3723,8 @@ function hqExtras(t0: number): { reveals: HqReveal[]; icons: HqIcon[]; seams: Hq
 }
 /** 濕地風廊的涼風往哪裡吹：市區（台北車站） */
 const HQ_WIND_TO = { lat: 25.0478, lng: 121.517 };
-/** 水圳淨水的蘆葦另外指定的位置（大灣古河道：光復南路 692 巷） */
-const HQ_CLEAN_AT: Record<string, [number, number]> = { 大灣古河道: [25.0299, 121.5566] };
+/** 水圳淨水的蘆葦另外指定的位置（大灣古河道：河道上的文昌街 280 巷） */
+const HQ_CLEAN_AT: Record<string, [number, number]> = { 大灣古河道: [25.0318, 121.55692] };
 /** 臺北市政府的 AI 支援小隊：市府大樓東南側（不擋「臺北市政府」的字、煙火） */
 const HQ_AI_TEAM = { lat: 25.0369, lng: 121.5655 };
 /** 運動驛站設在山林徑起點的捷運站 */
@@ -3751,7 +3751,8 @@ function hqScenes(t0: number): HqIcon[] {
   for (const h of hq.HQ_OLD_HOUSES) out.push({ lat: h.lat, lng: h.lng, at: hqNearestAt(t0, h) + 300, kind: 'oldhouse', scale, focus: hqLayer?.id === 'renewal', hint: { title: `老宅延壽（${h.district}・${h.name}，示意）`, intro: I['老宅延壽'] ?? '' } });
   for (const p of hq.HQ_POCKETPARKS) out.push({ lat: p.lat, lng: p.lng, at: hqNearestAt(t0, p) + 300, kind: 'pocketpark', scale, hint: { title: `口袋公園（示意：${p.name}）`, intro: I['口袋公園'] ?? '' } });
   for (const d of hq.HQ_DETENTION) out.push({ lat: d.lat, lng: d.lng, at: hqNearestAt(t0, d) + 300, kind: 'detention', scale, hint: { title: `微型社區滯洪（${d.name}）`, intro: I['微型社區滯洪'] ?? '' } });
-  // 水圳淨水：水路四成的地方（水注滿 3 秒後），照那一段水流的方向；大灣古河道那一點在光復南路上，往左上搬到 692 巷（v1.548 使用者說不要畫在大馬路上）
+  // 水圳淨水：水路四成的地方（水注滿 3 秒後），照那一段水流的方向；大灣古河道那一點在光復南路上，搬到往北一點、河道轉進的文昌街 280 巷
+  // （v1.548 使用者說不要畫在大馬路上；v1.551 說要在河上面）
   for (const c of hq.HQ_CANALS) {
     const n = c.points.length;
     const k = Math.floor(n * 0.4);
