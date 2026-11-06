@@ -160,9 +160,11 @@ const NIGHTSKY =
   '<path class="lb-moon" d="M-2.4 -5a4.2 4.2 0 1 0 5 5a3.3 3.3 0 1 1 -5 -5Z"/>' +
   '<path class="lb-star s1" d="M-9 -6l0.6 1.5 1.5 0.6 -1.5 0.6 -0.6 1.5 -0.6 -1.5 -1.5 -0.6 1.5 -0.6z"/><path class="lb-star s2" d="M7 -9l0.5 1.2 1.2 0.5 -1.2 0.5 -0.5 1.2 -0.5 -1.2 -1.2 -0.5 1.2 -0.5z"/>' +
   '<path class="lb-star s1" d="M5 4l0.4 1 1 0.4 -1 0.4 -0.4 1 -0.4 -1 -1 -0.4 1 -0.4z"/>';
+// 條通的每一棵樹都掛一盞小燈籠（v1.556 使用者說「燈籠每棵樹都放」），從樹冠右邊垂下來
 const STREETTREE =
   '<ellipse class="sc-shadow" cy="3.8" rx="3.8" ry="0.7"/><rect class="tt-pit" x="-2.6" y="2.6" width="5.2" height="1.3" rx="0.3"/>' +
-  '<path class="pp-trunk" d="M0 3V-2"/><circle class="pp-crown" cy="-4.6" r="3.4"/><circle class="pp-lit" cx="-1.2" cy="-5.8" r="1.1"/>';
+  '<path class="pp-trunk" d="M0 3V-2"/><circle class="pp-crown" cy="-4.6" r="3.4"/><circle class="pp-lit" cx="-1.2" cy="-5.8" r="1.1"/>' +
+  `<g transform="translate(3.6 -2.2) scale(0.62)">${LANTERN}</g>`;
 const parkedBike = (x: number, cls: string): string =>
   `<g transform="translate(${x} 0)"><circle class="sh-wheel" cy="2.6" r="1.6"/><circle class="sh-wheel" cx="4.4" cy="2.6" r="1.6"/>` +
   `<path class="sh-frame${cls}" d="M0 2.6L1.8 0.2H3.6L4.4 2.6M1.8 0.2L2.2 2.6L3.6 0.2M1.5 -0.6H2.4M3.4 -0.5L3.8 0.2"/></g>`;
