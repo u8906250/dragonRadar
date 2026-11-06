@@ -48,6 +48,8 @@ export interface MapRoute {
   boat?: boolean;
   /** 只開一趟的洋流號（點了洋流總部，開到台北市政府）：出發的時間（Date.now() 的毫秒）；只畫水、不分段上色，跟著淡入淡出 */
   voyage?: number;
+  /** 這一趟洋流號的代號（出發時的時間）：加速時 voyage 一直往前挪，重畫要不要照這個判斷，不然每一格都整個重畫 */
+  voyageKey?: number;
   /** 終點放煙火：開始放的時間（Date.now() 的毫秒） */
   fireworks?: number;
   /** 經過的地方：船經過時（at，Date.now() 的毫秒）寫一下名字再淡掉；keep 的一直寫著（終點）；stay 的出現後留著；dy 是字離那一點多高（螢幕像素，預設 -10） */
@@ -678,10 +680,30 @@ export class MapView {
   setRoutes(routes: MapRoute[]): void {
     const sig = (rs: MapRoute[]): string =>
       // 洋流總部的特效：文化網、政策圖層（多出來的地方、通學區的圈）開關時也要重畫
-      JSON.stringify(rs.map((r) => [r.id, r.state, r.flowAt ?? null, r.segments.map((x) => [x.people, x.target, x.path.length, !!x.passed]), r.turns ?? [], !!r.boat, r.voyage ?? null, r.network?.at ?? null, r.icons?.length ?? 0, r.seams?.length ?? 0, r.fitbuses?.[0]?.focus ?? null, r.circles?.length ?? 0, r.sites?.length ?? 0, !!r.focus, r.riverOut !== undefined && Date.now() > r.riverOut + 1600]));
-    if (sig(routes) === sig(this.routes)) return;
+      JSON.stringify(rs.map((r) => [r.id, r.state, r.flowAt ?? null, r.segments.map((x) => [x.people, x.target, x.path.length, !!x.passed]), r.turns ?? [], !!r.boat, r.voyageKey ?? r.voyage ?? null, r.network?.at ?? null, r.icons?.length ?? 0, r.seams?.length ?? 0, r.fitbuses?.[0]?.focus ?? null, r.circles?.length ?? 0, r.sites?.length ?? 0, !!r.focus, r.riverOut !== undefined && Date.now() > r.riverOut + 1600]));
+    const same = sig(routes) === sig(this.routes);
+    // 時間往前推（加速）時不重畫，但留著新的時間，之後重畫（縮放跨過門檻）才會照新的時間排
     this.routes = routes;
+    if (same) return;
     this.pushRoutes();
+  }
+
+  /** 洋流號加速：時間往前推 d 毫秒（跟 radar.ts 的 shiftClock 一樣） */
+  shiftClock(d: number): void {
+    for (const t of this.boatTracks) {
+      if (t.voyage !== undefined) t.voyage -= d;
+      if (t.ride) t.ride.start -= d;
+      if (t.bus) t.bus.start -= d;
+    }
+    for (const t of this.riverTracks) {
+      t.voyage -= d;
+      if (t.riverOut !== undefined) t.riverOut -= d;
+    }
+  }
+
+  /** 已經畫好的 CSS 動畫往前推 d 毫秒（跟 radar.ts 的 shiftCss 一樣） */
+  shiftCss(d: number): void {
+    for (const a of this.el.getAnimations({ subtree: true })) if (a.currentTime !== null) a.currentTime = Number(a.currentTime) + d;
   }
 
   /** 使用者最後一次自己拖、縮放地圖的時間（Date.now() 的毫秒）：洋流總部的特效到站時沒動過才拉近 */

@@ -1615,6 +1615,7 @@ function render(): void {
               claimUrl: null,
               river: true,
               voyage: hqVoyageAt,
+              voyageKey: hqVoyageKey,
               // 到終點 0.6 秒後河淡掉，政策的東西才看得清楚（使用者說「到終點把洋流路徑拿掉」）
               riverOut: hqVoyageAt + HQ_SAIL_MS + 600,
               segments: [{ seq: 1, from: '洋流總部', to: '台北市政府', path: hq.HQ_VOYAGE, people: 0, target: 0 }],
@@ -3166,6 +3167,14 @@ let hqVoyageTimers: number[] = [];
 let hqEvents: Array<{ rel: number; fn: () => void; done: boolean }> = [];
 /** 暫停的時間（null 是沒暫停）：重畫、繼續時把洋流號的時間往後挪暫停了多久，畫出來的都停在按暫停那一刻 */
 let hqPausedAt: number | null = null;
+/** 這一趟的代號（出發時間，加速時 hqVoyageAt 一直往前挪，這個不變：地圖照它判斷要不要整個重畫） */
+let hqVoyageKey = 0;
+/** 加速（v1.565 使用者說「暫停旁邊多一個加速，兩倍／四倍」）：1、2、4 倍；每一格把出發時間往前挪 (倍數 − 1) × 經過的時間 */
+let hqSpeed = 1;
+let hqSpeedFrame = 0;
+let hqSpeedLast = 0;
+let hqSpeedCss = 0;
+let hqSpeedCssAt = 0;
 /** 到站後河幾毫秒淡完（styles.css 的 river-out 1.5 秒） */
 const HQ_RIVER_FADE_MS = 1500;
 /** 到了拉近到外圈幾公里（看得到市政府的虛線外框和煙火） */
@@ -3217,6 +3226,8 @@ function startHqVoyage(spinAt = Date.now()): void {
   }
   wait = Math.max(wait, HQ_STAR_MS - (started - spinAt));
   hqVoyageAt = started + wait;
+  hqVoyageKey = hqVoyageAt;
+  hqSetSpeed(1);
   const t0 = hqVoyageAt;
   // 畫面不跟著船移動（v1.507 使用者說「畫面改成不要跟著洋流號移動」；以前船快出畫面就把畫面移到船那裡）
   // 時間都是離出發多久（暫停、繼續時照剩下的時間重排）
@@ -3242,6 +3253,8 @@ function startHqVoyage(spinAt = Date.now()): void {
         hqLayersBox.hidden = false;
         // 暫停、繼續只在洋流號跑的時候有，跑完收起來（v1.529 使用者說的）
         hqPauseBtn.hidden = true;
+        hqSpeedBtn.hidden = true;
+        hqSetSpeed(1);
         mayorProgress('watched');
       },
     },
@@ -3268,6 +3281,7 @@ function startHqVoyage(spinAt = Date.now()): void {
   hqLayersBox.classList.add('open');
   hqLayersLabel('');
   hqPauseBtn.hidden = false;
+  hqSpeedBtn.hidden = false;
   hqPanel.hidden = false;
   render();
   // 手機：下面的卡片收成只露出標題的一條，雷達多出半個畫面（v1.537 使用者說手機縮小後特別擠）
@@ -3300,6 +3314,38 @@ function hqCatchUp(): void {
   hqPausedAt += d;
 }
 /** 暫停、繼續：CSS 動畫停住（雷達、地圖加 hq-paused），船、河、小巴不再每一格擺位置，計時器清掉；繼續時接著播 */
+function hqSpeedLoop(): void {
+  hqSpeedFrame = 0;
+  if (hqSpeed <= 1 || hqVoyageAt === null || hqPausedAt !== null) return;
+  const now = performance.now();
+  const dt = Math.min(100, now - hqSpeedLast);
+  hqSpeedLast = now;
+  const d = (hqSpeed - 1) * dt;
+  hqVoyageAt -= d;
+  hqSpeedCss += d;
+  radar.shiftClock(d);
+  map.shiftClock(d);
+  // CSS 動畫、計時器每 0.2 秒推一次（每一格都推太吃效能）
+  if (now - hqSpeedCssAt > 200) {
+    hqSpeedCssAt = now;
+    radar.shiftCss(hqSpeedCss);
+    map.shiftCss(hqSpeedCss);
+    hqSpeedCss = 0;
+    hqScheduleEvents();
+  }
+  hqSpeedFrame = requestAnimationFrame(hqSpeedLoop);
+}
+function hqSetSpeed(x: number): void {
+  hqSpeed = x;
+  hqSpeedBtn.textContent = x > 1 ? `⏩ ${x} 倍` : '⏩ 加速';
+  hqSpeedBtn.classList.toggle('on', x > 1);
+  cancelAnimationFrame(hqSpeedFrame);
+  hqSpeedFrame = 0;
+  if (x > 1 && hqPausedAt === null && hqVoyageAt !== null) {
+    hqSpeedLast = hqSpeedCssAt = performance.now();
+    hqSpeedFrame = requestAnimationFrame(hqSpeedLoop);
+  }
+}
 function hqSetPaused(on: boolean): void {
   if (on === (hqPausedAt !== null)) return;
   if (on) {
@@ -3314,6 +3360,8 @@ function hqSetPaused(on: boolean): void {
   map.setPaused(on);
   hqPauseBtn.textContent = on ? '▶ 繼續' : '⏸ 暫停';
   hqPauseBtn.classList.toggle('on', on);
+  // 暫停時加速也停，繼續時接著加速
+  hqSetSpeed(hqSpeed);
   if (!on && hqVoyageAt !== null) {
     hqScheduleEvents();
     render();
@@ -3323,6 +3371,7 @@ function hqSetPaused(on: boolean): void {
 function stopHqVoyage(): void {
   if (hqVoyageAt === null) return;
   hqSetPaused(false);
+  hqSetSpeed(1);
   for (const t of hqVoyageTimers) window.clearTimeout(t);
   window.clearInterval(hqFollowTimer);
   hqVoyageAt = null;
@@ -3362,13 +3411,16 @@ function mayorProgress(step: string): void {
 const hqPanel = document.createElement('div');
 hqPanel.className = 'hq-panel';
 hqPanel.hidden = true;
-hqPanel.innerHTML = '<button type="button" class="chip hq-net" hidden></button><div class="hq-ctl"><button type="button" class="chip hq-pause">⏸ 暫停</button><button type="button" class="chip hq-close">✕ 關閉洋流號</button></div>';
+hqPanel.innerHTML = '<button type="button" class="chip hq-net" hidden></button><div class="hq-ctl"><button type="button" class="chip hq-pause">⏸ 暫停</button><button type="button" class="chip hq-speed">⏩ 加速</button><button type="button" class="chip hq-close">✕ 關閉洋流號</button></div>';
 // 放在右上那排按鈕（定位、地圖／雷達切換）的下面，不蓋住按鈕；全螢幕時那排按鈕往下移，這裡跟著
 document.querySelector('#stage .overlay-tr')!.appendChild(hqPanel);
 const hqNetBtn = hqPanel.querySelector('.hq-net') as HTMLButtonElement;
 hqPanel.querySelector('.hq-close')!.addEventListener('click', stopHqVoyage);
 const hqPauseBtn = hqPanel.querySelector('.hq-pause') as HTMLButtonElement;
 hqPauseBtn.addEventListener('click', () => hqSetPaused(hqPausedAt === null));
+// 加速：按一下 2 倍、再按 4 倍、再按回原本的速度（v1.565）
+const hqSpeedBtn = hqPanel.querySelector('.hq-speed') as HTMLButtonElement;
+hqSpeedBtn.addEventListener('click', () => hqSetSpeed(hqSpeed === 1 ? 2 : hqSpeed === 2 ? 4 : 1));
 /**
  * 文化網（「點 —— 線 —— 面」的「面」，使用者選按鈕的做法）：按了拉遠看整個台北，文化徑的點一圈圈亮 → 線沿路亮 → 每條線、每個點往外暈開連成一片；
  * 老水路、登山步道、長回來的樹也一起（政策島：「水路串起都市微森林、山徑與文化徑」）。再按一次收起來

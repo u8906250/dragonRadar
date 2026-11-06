@@ -2446,6 +2446,23 @@ export class Radar {
     if (!on) this.moveBoats();
   }
 
+  /**
+   * 洋流號加速（v1.565 使用者說「暫停旁邊多一個加速，兩倍／四倍」）：時間往前推 d 毫秒——船、河、小巴、騎士的出發時間往前挪（main.ts 每一格叫）
+   */
+  shiftClock(d: number): void {
+    for (const t of this.boatTracks) {
+      if (t.voyage !== undefined) t.voyage -= d;
+      if (t.ride) t.ride.start -= d;
+      if (t.bus) t.bus.start -= d;
+    }
+    for (const t of this.riverTracks) t.voyage -= d;
+  }
+
+  /** 已經畫好的 CSS 動畫（冒出來、長出來、淡入…）往前推 d 毫秒（main.ts 每 0.2 秒推一次，每一格都推太吃效能） */
+  shiftCss(d: number): void {
+    for (const a of this.routeLayer.getAnimations({ subtree: true })) if (a.currentTime !== null) a.currentTime = Number(a.currentTime) + d;
+  }
+
   private placeRose(): void {
     this.placeCompass();
     for (const t of Array.from(this.roseLayer.children) as SVGTextElement[]) {

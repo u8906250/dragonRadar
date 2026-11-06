@@ -1081,7 +1081,7 @@ path.map-seam-walkers { --p: 15px; }
 .hq-panel > * { pointer-events: auto; }
 /* 暫停、關閉洋流號並排（v1.528） */
 .hq-ctl { display: flex; gap: 6px; }
-.hq-ctl .chip.hq-pause.on { background: #15171c; color: #fff; }
+.hq-ctl .chip.hq-pause.on, .hq-ctl .chip.hq-speed.on { background: #15171c; color: #fff; }
 /* 洋流號暫停：洋流總部特效裡的 CSS 動畫都停住（船、河、小巴是 JS 擺的，暫停時不擺） */
 .radar .routes.hq-paused, .radar .routes.hq-paused *, .hq-paused .leaflet-overlay-pane *, .hq-paused .leaflet-marker-pane * { animation-play-state: paused !important; }
 /* 一塊地方（社子島）：淡淡的土色、虛線外框，淡入後留著 */
