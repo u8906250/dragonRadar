@@ -3719,18 +3719,20 @@ function hqExtras(t0: number): { reveals: HqReveal[]; icons: HqIcon[]; seams: Hq
     reveals.push({ path: ln.pts, at, kind: 'culture', label: ln.name, color: hq.HQ_CULTURE_THEMES[ln.theme].color });
   }
   icons.push(...hqScenes(t0));
-  // 條通的巷子（v1.552）：淡淡的暖橘色線，燈籠沿著巷子排；拉近才畫（跟燈籠一樣）
+  // 條通的巷子（v1.552）：淡淡的綠色線（步行者特區），樹沿著巷子種；拉近才畫（跟樹一樣）
   if (view !== 'radar' || scaleKm <= hqMotionKm()) {
     const tiaoAt = hqNearestAt(t0, HQ_TIAO_CENTER);
-    hq.HQ_TIAOTONG.forEach((ln, li) => ln.ways.forEach((w) => reveals.push({ path: w.pts, at: tiaoAt + li * 350, kind: 'culture', color: '#f2a65a', hideKm: hqMotionKm() + 0.05 })));
+    hq.HQ_TIAOTONG.forEach((ln, li) => ln.ways.forEach((w) => reveals.push({ path: w.pts, at: tiaoAt + li * 350, kind: 'culture', color: '#8cc47a', hideKm: hqMotionKm() + 0.05 })));
   }
   return { reveals, icons, seams };
 }
 /** 濕地風廊的涼風往哪裡吹：市區（台北車站） */
 const HQ_WIND_TO = { lat: 25.0478, lng: 121.517 };
-/** 條通的中間（船離這裡最近時燈籠亮）、夜市長協調的地方（七條通，中山北路一段 121 巷） */
+/** 條通的中間（船離這裡最近時樹、車架冒出來）、夜市長協調的地方（七條通，中山北路一段 121 巷） */
 const HQ_TIAO_CENTER = { lat: 25.0498, lng: 121.5249 };
 const HQ_NIGHT_MAYOR = { lat: 25.05105, lng: 121.5236 };
+/** 林森北路在條通這一段的經度（樹木與車架放在巷子和林森北路的交叉口：條通的熱點） */
+const HQ_LINSEN_LNG = 121.5249;
 /** 兩點相距幾公尺 */
 const hqDistMeters = (a: [number, number], b: [number, number]): number => haversineKm({ lat: a[0], lng: a[1] }, { lat: b[0], lng: b[1] }) * 1000;
 /** 沿著一條線每 stepM 公尺取一點（頭尾各留 marginM） */
@@ -3778,16 +3780,18 @@ function hqScenes(t0: number): HqIcon[] {
     const what = h.mode === 'ride' ? '換上騎車的衣服出發' : '騎到了，沖澡換回上班的衣服';
     out.push({ lat: h.lat, lng: h.lng, at: bridgeAt + 1500, kind: h.mode === 'ride' ? 'ridehub' : 'workhub', scale, hint: { title: `運動驛站（${h.name}站旁：${what}）`, intro: `${I['驛站接自行車橋'] ?? ''}\n${I['運動驛站'] ?? ''}` } });
   }
-  // 條通（v1.552）：船離條通最近時，燈籠從二條通一條一條亮到九條通（每 70 公尺一盞；巷子南北只隔 40 公尺，太密會擠成一團）；
-  // 中山北路那頭的巷口放盆栽；七條通的夜市長協調。燈籠、盆栽拉近（電腦版 3 km、手機 2 km 以內）才畫，拉遠只留夜市長和字
+  // 條通（v1.552；v1.553 使用者說「不要用燈籠」，改成政見講的樹木與車架）：船離條通最近時，巷子兩側一棵棵小樹從二條通長到九條通（每 70 公尺一棵，
+  // 巷子南北只隔 40 公尺，太密會擠成一團）；林森北路交叉口（熱點）放腳踏車架；七條通的夜市長協調。樹、車架拉近（電腦版 3 km、手機 2 km 以內）才畫
   const tiaoAt = hqNearestAt(t0, HQ_TIAO_CENTER);
-  const tiaoHint = { title: '條通：安心夜路・步行者特區・夜市長（示意）', intro: I['條通'] ?? '' };
+  const tiaoHint = { title: '條通：樹木與車架・步行者特區・夜市長（示意）', intro: I['條通'] ?? '' };
   if (view !== 'radar' || scaleKm <= hqMotionKm()) {
     hq.HQ_TIAOTONG.forEach((ln, li) => {
       let j = 0;
-      for (const w of ln.ways) for (const q of hqAlong(w.pts, 70, 15)) out.push({ lat: q[0], lng: q[1], at: tiaoAt + li * 350 + j++ * 120, kind: 'lantern', scale: 0.55 * zs });
-      const m = ln.ways[0].pts[0];
-      out.push({ lat: m[0], lng: m[1], at: tiaoAt + 600 + li * 120, kind: 'planter', scale: 0.6 * zs });
+      for (const w of ln.ways) for (const q of hqAlong(w.pts, 70, 15)) out.push({ lat: q[0], lng: q[1], at: tiaoAt + li * 350 + j++ * 120, kind: 'streettree', scale: 0.6 * zs });
+      // 林森北路交叉口：這條巷子最靠近林森北路的那一頭
+      const ends = ln.ways.flatMap((w) => [w.pts[0], w.pts[w.pts.length - 1]]);
+      const hot = ends.reduce((a, b) => (Math.abs(b[1] - HQ_LINSEN_LNG) < Math.abs(a[1] - HQ_LINSEN_LNG) ? b : a));
+      out.push({ lat: hot[0], lng: hot[1], at: tiaoAt + 600 + li * 120, kind: 'bikerack', scale: 0.6 * zs });
     });
   }
   out.push({ lat: HQ_NIGHT_MAYOR.lat, lng: HQ_NIGHT_MAYOR.lng, at: tiaoAt + 1200, kind: 'nightmayor', scale, label: '條通・夜市長', hideKm: 5, hint: tiaoHint });
