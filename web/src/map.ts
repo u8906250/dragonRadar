@@ -777,9 +777,10 @@ export class MapView {
         continue;
       }
       // 河流（洋流總部的特效）：跟著船長出來的一條河，不畫路段；老水路、公園的樹照時間排好
+      // 河先畫，步道、老水路、文化徑這些線畫在河上面（v1.549；圖示、字本來就在上面那一層）
       if (r.river && r.voyage !== undefined) {
-        this.addVoyageExtras(r);
         this.addRiver(r, r.voyage);
+        this.addVoyageExtras(r);
       }
       // 只開一趟的（洋流總部的特效）只畫水，不分段上色
       for (const seg of r.voyage !== undefined ? [] : r.segments) {

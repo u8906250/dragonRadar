@@ -1827,9 +1827,11 @@ export class Radar {
       // 洋流車掃：整條路線是一道水流（路線下面淡藍的水，上面深藍的水紋、白色的浪花用不同的速度往前流）；
       // 進行中剛出發、之後每隔一段時間，深藍、淺藍的浪從出發的地方湧到終點再淡掉
       // 河流（洋流總部的特效）：不畫路線的線，畫一條跟著船長出來的河（addRiver）、老水路和公園的樹（drawVoyageExtras）
+      // 河先畫、政策的東西畫在河上面（v1.549 使用者說「洋流號的路線有辦法不要擋到政策的顯示嗎」；原本河最後畫，航行中整條蓋在圖示、字、步道上）。
+      // 綠覆率、真的河照樣插在最下面
       if (r.river) {
-        this.drawVoyageExtras(r);
         this.addRiver(r);
+        this.drawVoyageExtras(r);
       }
       else if (r.ocean) this.routeLayer.appendChild(el('path', { class: 'route-water', d }));
       if (!r.river) this.routeLayer.appendChild(el('path', { class: `route route-${r.state}${r.ocean ? ' route-ocean-line' : ''}`, d }));
