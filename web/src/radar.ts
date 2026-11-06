@@ -1,5 +1,5 @@
 import type { BlipStyle, EventKind, Phase, SweepStyle } from './types';
-import { DOME_SVG, idlePhase, isSceneKind, PATROL_SVG, sceneSvg, SOCCER_SVG, TRUCK_SVG, WALKER_SVG, windSvg, type SceneKind } from './hq-scenes';
+import { DOME_SVG, idlePhase, isSceneKind, PATROL_SVG, sceneSvg, SCOOTER_SVG, SOCCER_SVG, TRUCK_SVG, WALKER_SVG, windSvg, type SceneKind } from './hq-scenes';
 import { alongLine, BOAT_SVG, crackSvg, FITBUS_BODY, FITBUS_SVG, hqMotionKm, HQ_NET_LABEL_KM, BIKE_SVG, HIKER_SVG, PETWALK_SVG, FISH_SVG, WETLAND_BIRDS, MUSIC_NOTES, bikePhase, fitbusPhase, fitbusStopSvg, cultureSvg, regrowSvg, serviceSvg, stitchSvg, BOAT_TITLE, boatPhase, fireworksSvg, FIREWORKS_MS, flowOut, HQ_VOYAGE_MS, RAINBOW_FLOW_TOTAL, RAINBOW_STAGGER_MS, riverHalfWidth, surge, SURGE_TOTAL, voyagePhase, voyageTimeOf } from './flow';
 
 export interface RadarItem {
@@ -76,7 +76,7 @@ export interface RadarRoute {
    */
   reveals?: Array<{ points: Array<{ bearing: number; distanceKm: number }>; at: number; kind: 'trail' | 'bridge' | 'stars' | 'culture'; label?: string; color?: string; labelAt?: number; hideKm?: number }>;
   /** 騎自行車的人：沿著 points 從頭騎到尾（start 開始、一趟 lap 毫秒），拉遠收起來 */
-  bikes?: Array<{ points: Array<{ bearing: number; distanceKm: number }>; start: number; lap: number; kind?: 'bike' | 'hiker' | 'pet' | 'truck' | 'walker' | 'patrol'; loop?: boolean; color?: string }>;
+  bikes?: Array<{ points: Array<{ bearing: number; distanceKm: number }>; start: number; lap: number; kind?: 'bike' | 'hiker' | 'pet' | 'truck' | 'walker' | 'patrol' | 'scooter'; loop?: boolean; color?: string }>;
   /** 健身小巴：沿著 points 繞圈（start 出發、stopAt 是各站在路線上的位置），停站時那一站冒出運動的長輩；lineAt 路線畫出來；focus 是政策按鈕（衛福）亮著 */
   fitbuses?: Array<{ points: Array<{ bearing: number; distanceKm: number }>; start: number; lineAt: number; stopAt: number[]; stops: Array<{ point: { bearing: number; distanceKm: number }; label: string }>; focus?: boolean; size?: number; dim?: boolean; driveMs: number }>;
   /** 縫合（市民大道）：at 裂縫畫出來、healAt 縫完變淡；stitches 一個一個縫（along 是路上的下一點，算方向）；walkers 人流小點從 from 走到 to */
@@ -94,6 +94,8 @@ export interface RadarRoute {
   /** 洋流號的河什麼時候淡掉（到終點後拿掉，政策的東西才看得清楚；使用者說的） */
   riverOut?: number;
   /** 一塊地方（社子島）：at 時淡入、留著，虛線外框、名字寫在中間 */
+  /** 一塊夜色（條通）：at 慢慢暗下來 */
+  nights?: Array<{ ring: Array<{ bearing: number; distanceKm: number }>; at: number }>;
   areas?: Array<{ ring: Array<{ bearing: number; distanceKm: number }>; center: { bearing: number; distanceKm: number }; at: number; label: string; zones?: Array<Array<{ bearing: number; distanceKm: number }>>; zonesAt?: number }>;
   /** 文化網（點 —— 線 —— 面）：at 開始；先點亮 dots、再沿 lines 亮起來、最後每條線、每個點往外暈開連成一片 */
   network?: { at: number; lines: Array<{ points: Array<{ bearing: number; distanceKm: number }>; color: string }>; dots: Array<{ bearing: number; distanceKm: number; color: string }>; noFace?: boolean; faceR?: number };
@@ -2209,6 +2211,11 @@ export class Radar {
       lg.classList.add('area');
       this.routeLayer.appendChild(lg);
     }
+    // 條通的夜色（v1.555）：一塊淡淡的深藍，慢慢暗下來；樹、車架、燈籠、夜市長畫在上面
+    for (const nt of r.nights ?? []) {
+      if (nt.ring.length < 3) continue;
+      this.routeLayer.appendChild(el('path', { class: 'night-area', d: `${this.pathOf(nt.ring)}Z`, style: `animation-delay:${Math.round(nt.at - now)}ms` }));
+    }
     // 都更：基地範圍（紅框）
     for (const st of r.sites ?? []) {
       const d = st.rings.filter((rg) => rg.length > 2).map((rg) => `${this.pathOf(rg)}Z`).join('');
@@ -2382,7 +2389,7 @@ export class Radar {
       // 騎自行車的人、登山客（山林徑）、牽狗散步的人（大安森林公園）
       const kind = bk.kind ?? 'bike';
       const g = el('g', { class: `route-boat hq-bike ${kind}`, ...(bk.color ? { style: `--c:${bk.color}` } : {}) }) as SVGGElement;
-      g.innerHTML = kind === 'hiker' ? HIKER_SVG : kind === 'pet' ? PETWALK_SVG : kind === 'truck' ? TRUCK_SVG : kind === 'walker' ? WALKER_SVG : kind === 'patrol' ? PATROL_SVG : BIKE_SVG;
+      g.innerHTML = kind === 'hiker' ? HIKER_SVG : kind === 'pet' ? PETWALK_SVG : kind === 'truck' ? TRUCK_SVG : kind === 'walker' ? WALKER_SVG : kind === 'patrol' ? PATROL_SVG : kind === 'scooter' ? SCOOTER_SVG : BIKE_SVG;
       this.routeLayer.appendChild(g);
       this.boatTracks.push({ id: `hq-bike-${i}`, g, flip: g.querySelector('.boat-flip') as SVGGElement, xs, ys, cum, ride: { start: bk.start, lap: bk.lap, loop: bk.loop }, scale: kind === 'bike' ? 1.1 : kind === 'pet' ? 1.4 : 1.2 });
     });

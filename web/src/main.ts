@@ -1562,6 +1562,7 @@ function render(): void {
               green: { ring: hq.HQ_TAIPEI_RING.map(toRadarAt), steps: hqGreenSteps(hqVoyageAt) },
               areas: hqAreas(hqVoyageAt).filter((ar) => anyInView(ar.ring)).map((ar) => ({ ring: ar.ring.map(toRadarAt), center: toRadarAt(ar.center), at: ar.at, label: ar.label, zones: ar.zones?.map((z) => z.map(toRadarAt)), zonesAt: ar.zonesAt })),
               circles: hqCircles().filter(inView).map((c) => ({ ring: c.ring.map(toRadarAt), at: c.at })),
+              nights: hqNights(hqVoyageAt).filter((nt) => nt.ring.some(([lat, lng]) => inView({ lat, lng }))).map((nt) => ({ ring: nt.ring.map(toRadarAt), at: nt.at })),
               sites: hqSites().filter((st) => inView({ lat: st.center[0], lng: st.center[1] })).map((st) => ({ rings: st.rings.map((rg) => rg.map(toRadarAt)), at: st.at })),
               focus: hqLayer !== null,
               ...(hqNetNow ? { network: { at: hqNetNow.at, noFace: hqNetNow.noFace, faceR: hqNetNow.faceR, lines: hqNetNow.lines.filter((ln) => anyInView(ln.path)).map((ln) => ({ points: ln.path.map(toRadarAt), color: ln.color })), dots: hqNetNow.dots.filter(inView).map((dt) => ({ ...toRadarAt([dt.lat, dt.lng]), color: dt.color })) } } : {}),
@@ -1633,6 +1634,7 @@ function render(): void {
               green: { ring: hq.HQ_TAIPEI_RING, steps: hqGreenSteps(hqVoyageAt) },
               areas: hqAreas(hqVoyageAt),
               circles: hqCircles().map(({ lat, lng, radiusM, at }) => ({ lat, lng, radiusM, at })),
+              nights: hqNights(hqVoyageAt),
               sites: hqSites().map(({ rings, at }) => ({ rings, at })),
               focus: hqLayer !== null,
               ...(hqNetNow ? { network: hqNetNow } : {}),
@@ -3728,6 +3730,11 @@ function hqExtras(t0: number): { reveals: HqReveal[]; icons: HqIcon[]; seams: Hq
 }
 /** 濕地風廊的涼風往哪裡吹：市區（台北車站） */
 const HQ_WIND_TO = { lat: 25.0478, lng: 121.517 };
+/** 條通的夜色（拉近才畫，跟樹、車架一樣）：船離條通最近時慢慢暗下來 */
+function hqNights(t0: number): Array<{ ring: Array<[number, number]>; at: number }> {
+  if (!hq || (view === 'radar' && scaleKm > hqMotionKm())) return [];
+  return [{ ring: hq.HQ_TIAO_NIGHT, at: hqNearestAt(t0, HQ_TIAO_CENTER) - 400 }];
+}
 /** 條通的中間（船離這裡最近時樹、車架冒出來）、夜市長協調的地方（七條通，中山北路一段 121 巷） */
 const HQ_TIAO_CENTER = { lat: 25.0498, lng: 121.5249 };
 const HQ_NIGHT_MAYOR = { lat: 25.05105, lng: 121.5236 };
@@ -3770,8 +3777,11 @@ function hqScenes(t0: number): HqIcon[] {
   if (!hq) return [];
   const I = hq.HQ_INTROS;
   const out: HqIcon[] = [];
-  // 跟寶箱一樣拉近變大、拉遠變小（雷達照 hqZoomScale；地圖在 styles.css 照 --zoom-scale）
-  const zs = view === 'radar' ? hqZoomScale() : 1;
+  // 這些小場景拉近（電腦版 3 km、手機 2 km 以內，跟開始動的距離一樣）才畫：場景是固定的螢幕大小，拉遠時地圖縮小、場景不縮，
+  // 房子、車子看起來變得很大（v1.555 使用者說「北士科那邊畫面一縮小，房子跟車子就變很大」）；地圖照 styles.css 的 #map.hq-far 藏起來
+  if (view === 'radar' && scaleKm > hqMotionKm()) return [];
+  // 跟寶箱一樣拉近變大、拉遠變小（雷達照 hqZoomScale；地圖在 styles.css 照 --zoom-scale）；手機的畫面小，再小一號
+  const zs = (view === 'radar' ? hqZoomScale() : 1) * (HQ_PHONE.matches ? 0.75 : 1);
   const scale = 0.9 * zs;
   for (const tr of hq.HQ_TRAILS) {
     const st = HQ_HUB_STATION[tr.name] ?? tr.name;
@@ -3791,13 +3801,29 @@ function hqScenes(t0: number): HqIcon[] {
     hq.HQ_TIAOTONG.forEach((ln, li) => {
       let j = 0;
       for (const w of ln.ways) for (const q of hqAlong(w.pts, 70, 15)) out.push({ lat: q[0], lng: q[1], at: tiaoAt + li * 350 + j++ * 120, kind: 'streettree', scale: 0.6 * zs });
+      // 巷口（中山北路那頭）掛一盞燈籠（v1.555 使用者說「可以放一些燈籠」）
+      const mouth = ln.ways[0].pts[0];
+      out.push({ lat: mouth[0], lng: mouth[1], at: tiaoAt + li * 350, kind: 'lantern', scale: 0.55 * zs });
       // 林森北路交叉口：這條巷子最靠近林森北路的那一頭
       const ends = ln.ways.flatMap((w) => [w.pts[0], w.pts[w.pts.length - 1]]);
       const hot = ends.reduce((a, b) => (Math.abs(b[1] - HQ_LINSEN_LNG) < Math.abs(a[1] - HQ_LINSEN_LNG) ? b : a));
       out.push({ lat: hot[0], lng: hot[1], at: tiaoAt + 600 + li * 120, kind: 'bikerack', scale: 0.6 * zs });
     });
+    // 夜色的一角（東北）掛月亮、星星
+    out.push({ lat: 25.0514, lng: 121.5277, at: tiaoAt + 300, kind: 'nightsky', scale: 0.8 * zs });
   }
   out.push({ lat: HQ_NIGHT_MAYOR.lat, lng: HQ_NIGHT_MAYOR.lng, at: tiaoAt + 1200, kind: 'nightmayor', scale, label: '條通・夜市長', hideKm: 5, hint: tiaoHint });
+  // TPASS 共享機車（v1.555）：捷運南京三民站刷卡騎走、民生立體停車場停進共享機車格
+  const tp = hq.HQ_TPASS;
+  const tpAt = hqNearestAt(t0, tp.station) + 600;
+  const tpHint = (where: string): { title: string; intro: string } => ({ title: `TPASS 共享機車（${where}，示意）`, intro: I['TPASS共享機車'] ?? '' });
+  out.push({ lat: tp.station.lat, lng: tp.station.lng, at: tpAt, kind: 'tpassgo', scale, hint: tpHint(`${tp.station.name}：刷卡騎走`) });
+  out.push({ lat: tp.lot.lat, lng: tp.lot.lng, at: tpAt + 600, kind: 'tpasspark', scale, hint: tpHint(`${tp.lot.name}：停進共享機車格`) });
+  // 公車安全改革（v1.555）：市府轉運站（折返點休息、準點出發）、忠孝東路五段與松仁路口（轉彎時螢幕警示、讓行人），洋流號到市政府後
+  const bs = hq.HQ_BUS_SAFETY;
+  const busHint = (where: string): { title: string; intro: string } => ({ title: `公車安全改革（${where}，示意）`, intro: I['公車安全改革'] ?? '' });
+  out.push({ lat: bs.terminal.lat, lng: bs.terminal.lng, at: t0 + HQ_SAIL_MS + 1600, kind: 'busterminal', scale, hint: busHint(`${bs.terminal.name}：折返點休息、準點出發`) });
+  out.push({ lat: bs.turn.lat, lng: bs.turn.lng, at: t0 + HQ_SAIL_MS + 2000, kind: 'busturn', scale, hint: busHint(`${bs.turn.name}：轉彎時螢幕警示、讓行人先過`) });
   // 老宅延壽：萬華、大同各一棟老公寓，船離它最近時；按「都更」時也亮著
   for (const h of hq.HQ_OLD_HOUSES) out.push({ lat: h.lat, lng: h.lng, at: hqNearestAt(t0, h) + 300, kind: 'oldhouse', scale, focus: hqLayer?.id === 'renewal', hint: { title: `老宅延壽（${h.district}・${h.name}，示意）`, intro: I['老宅延壽'] ?? '' } });
   for (const p of hq.HQ_POCKETPARKS) out.push({ lat: p.lat, lng: p.lng, at: hqNearestAt(t0, p) + 300, kind: 'pocketpark', scale, hint: { title: `口袋公園（示意：${p.name}）`, intro: I['口袋公園'] ?? '' } });
@@ -3842,7 +3868,7 @@ function hqScenes(t0: number): HqIcon[] {
  * 騎自行車的人（v1.529）：迎風—港墘自行車橋上兩台（橋畫好後）、河濱自行車道（大佳河濱、大稻埕）各兩台（船經過時），一去一回、錯開半趟；
  * 一趟的時間照長度（每公尺 14 毫秒、最少 8 秒）
  */
-function hqBikes(t0: number): Array<{ path: Array<[number, number]>; start: number; lap: number; kind?: 'bike' | 'hiker' | 'pet' | 'truck' | 'walker' | 'patrol'; loop?: boolean; color?: string }> {
+function hqBikes(t0: number): Array<{ path: Array<[number, number]>; start: number; lap: number; kind?: 'bike' | 'hiker' | 'pet' | 'truck' | 'walker' | 'patrol' | 'scooter'; loop?: boolean; color?: string }> {
   if (!hq) return [];
   const br = hq.HQ_BRIDGE;
   const lapOf = (m: number): number => Math.max(8000, m * 14);
@@ -3895,6 +3921,9 @@ function hqBikes(t0: number): Array<{ path: Array<[number, number]>; start: numb
     const lap = Math.max(14000, lenM(whole) * 36);
     out.push({ path: [...whole, ...[...whole].reverse()], start: tiaoAt + 400, lap: lap * 2, kind: 'patrol', loop: true });
   }
+  // TPASS 共享機車（v1.555）：從捷運南京三民站騎到民生立體停車場（機車比腳踏車快，每公尺 6 毫秒）
+  const tp = hq.HQ_TPASS;
+  out.push({ path: tp.path, start: hqNearestAt(t0, tp.station) + 2400, lap: Math.max(7000, tp.lengthM * 6), kind: 'scooter' });
   // 在地小農進校園（「教育・午餐」按鈕開著，v1.545）：小貨車從農地開到學校，開車的速度跟健身小巴一樣（每公尺 5 毫秒）
   if (hqLayer?.id === 'edu') for (const tk of hq.HQ_FARM_TRUCKS) out.push({ path: tk.path, start: hqLayer.at + 600, lap: Math.max(9000, tk.lengthM * FITBUS_MS_PER_M), kind: 'truck' });
   return out;

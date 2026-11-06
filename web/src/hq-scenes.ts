@@ -13,8 +13,8 @@ export const IDLE_CYCLE_MS = 5_040_000;
 export const idlePhase = (now: number, offsetMs: number): number => Math.round((now + offsetMs) % IDLE_CYCLE_MS);
 
 /** 會自己畫一個小場景的圖示 */
-export type SceneKind = 'sporthub' | 'workhub' | 'ridehub' | 'pocketpark' | 'detention' | 'cleanwater' | 'schoolwalk' | 'lunch' | 'piggy' | 'aiteam' | 'oldhouse' | 'streettree' | 'bikerack' | 'nightmayor' | 'buscharge' | 'library24';
-const SCENE_KINDS: readonly string[] = ['sporthub', 'workhub', 'ridehub', 'pocketpark', 'detention', 'cleanwater', 'schoolwalk', 'lunch', 'piggy', 'aiteam', 'oldhouse', 'streettree', 'bikerack', 'nightmayor', 'buscharge', 'library24'];
+export type SceneKind = 'sporthub' | 'workhub' | 'ridehub' | 'pocketpark' | 'detention' | 'cleanwater' | 'schoolwalk' | 'lunch' | 'piggy' | 'aiteam' | 'oldhouse' | 'streettree' | 'bikerack' | 'nightmayor' | 'buscharge' | 'library24' | 'lantern' | 'nightsky' | 'tpassgo' | 'tpasspark' | 'busterminal' | 'busturn';
+const SCENE_KINDS: readonly string[] = ['sporthub', 'workhub', 'ridehub', 'pocketpark', 'detention', 'cleanwater', 'schoolwalk', 'lunch', 'piggy', 'aiteam', 'oldhouse', 'streettree', 'bikerack', 'nightmayor', 'buscharge', 'library24', 'lantern', 'nightsky', 'tpassgo', 'tpasspark', 'busterminal', 'busturn'];
 export const isSceneKind = (k: string): k is SceneKind => SCENE_KINDS.includes(k);
 
 /** 站著的小人（腳在 y = 0、往右走）：身體的 class 決定衣服顏色，extra 是帽子、領帶這些 */
@@ -149,6 +149,17 @@ const OLDHOUSE =
  * 巷子兩側一棵棵小樹（樹穴蓋板，樹不搖）、林森北路交叉口（熱點）放腳踏車架停兩台車；夜市長（紫色背心、黃色臂章、胸前月亮、拿板夾）來協調：
  * 店家和住戶冒出「！」的對話框，夜市長走過來站中間，對話框不見、三個人都冒愛心
  */
+/**
+ * 條通的燈籠、夜空（v1.555 使用者說「條通那邊可以放一些燈籠，那一區可以畫成晚上的感覺」；v1.553 曾經說不要燈籠，看過後改成放一些）：
+ * 每條巷子的巷口（中山北路那頭）掛一盞，拉近時輕輕晃、燈光微微閃；夜色的一角有月亮和星星
+ */
+const LANTERN =
+  '<g class="lt-sway"><path class="lt-string" d="M0 -9V-6.2"/><circle class="lt-glow" cy="-2.2" r="5.2"/><rect class="lt-cap" x="-1.6" y="-6.4" width="3.2" height="1"/>' +
+  '<ellipse class="lt-body" cy="-2.3" rx="2.7" ry="3.4"/><path class="lt-rib" d="M-2.4 -3.6H2.4M-2.7 -2.3H2.7M-2.4 -1H2.4"/><rect class="lt-cap" x="-1.6" y="0.9" width="3.2" height="1"/><path class="lt-tassel" d="M0 1.9V3.8"/></g>';
+const NIGHTSKY =
+  '<path class="lb-moon" d="M-2.4 -5a4.2 4.2 0 1 0 5 5a3.3 3.3 0 1 1 -5 -5Z"/>' +
+  '<path class="lb-star s1" d="M-9 -6l0.6 1.5 1.5 0.6 -1.5 0.6 -0.6 1.5 -0.6 -1.5 -1.5 -0.6 1.5 -0.6z"/><path class="lb-star s2" d="M7 -9l0.5 1.2 1.2 0.5 -1.2 0.5 -0.5 1.2 -0.5 -1.2 -1.2 -0.5 1.2 -0.5z"/>' +
+  '<path class="lb-star s1" d="M5 4l0.4 1 1 0.4 -1 0.4 -0.4 1 -0.4 -1 -1 -0.4 1 -0.4z"/>';
 const STREETTREE =
   '<ellipse class="sc-shadow" cy="3.8" rx="3.8" ry="0.7"/><rect class="tt-pit" x="-2.6" y="2.6" width="5.2" height="1.3" rx="0.3"/>' +
   '<path class="pp-trunk" d="M0 3V-2"/><circle class="pp-crown" cy="-4.6" r="3.4"/><circle class="pp-lit" cx="-1.2" cy="-5.8" r="1.1"/>';
@@ -167,6 +178,7 @@ const BUBBLE = (x: number, y: number): string =>
 const NIGHTMAYOR =
   '<ellipse class="sc-shadow" cy="6.6" rx="17" ry="1.2"/>' +
   '<rect class="nm-shop" x="-17" y="-6" width="9" height="12.4" rx="0.6"/><path class="nm-awn" d="M-17.6 -6L-16.4 -9H-8.6L-7.4 -6Z"/><rect class="nm-shopwin" x="-15.6" y="-3.6" width="6" height="4" rx="0.4"/>' +
+  `<g transform="translate(-11.2 -9.6) scale(0.55)">${LANTERN}</g>` +
   `<g transform="translate(-6 6)">${person('nm-apron')}</g><g transform="translate(9 6)">${person('nm-resident')}</g>` +
   BUBBLE(-6, -12) + BUBBLE(9, -12) +
   `<g transform="translate(0 6)"><g class="nm-mayor">${person('nm-vest', MAYOR_BITS)}</g></g>` +
@@ -209,6 +221,68 @@ const LIBRARY24 =
   [1, 2, 3].map((i) => `<circle class="lb-bit b${i}" cx="3.8" cy="-4" r="0.75"/>`).join('');
 
 /**
+ * TPASS 共享機車（v1.555）：共享電動機車（藍綠色車殼），騎的人戴安全帽
+ * 1. 捷運站出口（tpassgo）：有人從捷運出口走到機車旁，拿記名 TPASS 嗶一下（波紋），車上冒出綠色的「10」分鐘計時圈，騎走；一輪 9 秒
+ * 2. 合作停車場（tpasspark）：多層停車場（藍色 P）前面一排共享機車專用格，一台騎進空格停好、冒綠色打勾，人下車走開；一輪 9 秒
+ */
+const scooterBody = (cls = ''): string =>
+  `<g${cls ? ` class="${cls}"` : ''}><circle class="tk-wheel" cx="-4.4" cy="-1.6" r="1.7"/><circle class="tk-wheel" cx="4.6" cy="-1.6" r="1.7"/>` +
+  '<path class="ts-deck" d="M-6.2 -2.4H1.8L4 -6.2"/><rect class="ts-shell" x="-6.4" y="-4.6" width="5.8" height="2.4" rx="1"/><path class="ts-seat" d="M-6 -4.9H-1.4"/><path class="ts-bar" d="M3.6 -6.6H5.6"/></g>';
+const SCOOTER_RIDER =
+  '<path class="ts-arm" d="M-2.6 -8.6L4.2 -6.6"/><path class="ts-leg" d="M-2.6 -5.2L0.6 -3"/><path class="ts-torso" d="M-3.2 -9.6L-2.6 -5.2"/>' +
+  '<circle class="sc-head" cx="-3.2" cy="-11.2" r="1.5"/><path class="ts-helmet" d="M-4.8 -11.4A1.6 1.6 0 0 1 -1.6 -11.4Z"/>';
+/** 共享機車（騎著，往右；往左時翻過來） */
+export const SCOOTER_SVG = `<g class="boat-flip"><ellipse class="bk-shadow" cx="0" cy="0.4" rx="7" ry="0.9"/>${scooterBody()}${SCOOTER_RIDER}</g>`;
+const TPASS_TIMER =
+  '<g class="ts-timer"><circle class="ts-ring-bg" r="3.2"/><circle class="ts-ring" r="3.2" pathLength="1" transform="rotate(-90)"/><text class="ts-ten" y="1.1" text-anchor="middle">10</text></g>';
+const TPASS_GO =
+  '<ellipse class="sc-shadow" cx="2" cy="6.6" rx="22" ry="1.2"/>' +
+  '<path class="ts-exit" d="M-20 6V-6Q-15.5 -10.4 -11 -6V6Z"/><rect class="ts-exit-in" x="-18" y="-4" width="5" height="10" rx="0.6"/><circle class="ts-m" cx="-15.5" cy="-9.4" r="2.2"/><text class="ts-mt" x="-15.5" y="-8.5" text-anchor="middle">M</text>' +
+  `<g transform="translate(15 6)">${scooterBody()}</g>` +
+  `<g transform="translate(5 6)">${scooterBody('ts-parked')}</g>` +
+  `<g transform="translate(0 6)"><g class="ts-walker">${person('ts-coat', '<rect class="ts-card" x="1.4" y="-7.4" width="2.4" height="1.6" rx="0.3"/>')}</g></g>` +
+  '<circle class="ts-beep" cx="4" cy="-4.4" r="1.6"/>' +
+  `<g transform="translate(5 6)"><g class="ts-go">${scooterBody()}${SCOOTER_RIDER}</g></g>` +
+  `<g transform="translate(7 -12)">${TPASS_TIMER}</g>`;
+const TPASS_PARK =
+  '<ellipse class="sc-shadow" cx="2" cy="6.6" rx="24" ry="1.2"/>' +
+  '<rect class="ts-lot" x="-21" y="-17" width="19" height="23" rx="0.8"/><path class="ts-floor" d="M-21 -11.2H-2M-21 -5.4H-2M-21 0.4H-2"/><path class="ts-ramp" d="M-21 6L-15 0.4"/>' +
+  '<rect class="ts-p" x="-15.2" y="-21.4" width="6" height="6" rx="1"/><text class="ts-pt" x="-12.2" y="-16.8" text-anchor="middle">P</text>' +
+  '<path class="ts-bay" d="M1 6.4V-1M9 6.4V-1M17 6.4V-1M25 6.4V-1"/>' +
+  `<g transform="translate(5 6)">${scooterBody()}</g><g transform="translate(13 6)">${scooterBody()}</g>` +
+  `<g transform="translate(21 6)"><g class="ts-in">${scooterBody()}${SCOOTER_RIDER.replace('<path class="ts-arm"', '<g class="ts-who"><path class="ts-arm"')}</g></g></g>` +
+  `<g transform="translate(21 -4)"><g class="ts-ok"><circle r="2"/><path d="M-1 0L-0.2 0.8L1.2 -0.8"/></g></g>`;
+
+/**
+ * 公車安全改革（v1.555）：
+ * 1. 市府轉運站（busterminal）：折返點休息納入班表——司機下車走進休息室，窗戶裡喝茶冒熱氣、牆上的時鐘轉一圈，休息好了冒愛心（直接補貼駕駛薪資）走回公車，
+ *    公車頭上冒綠色打勾（準點出發、服務可靠度）；一輪 12 秒
+ * 2. 忠孝東路五段與松仁路口（busturn）：駕駛座告警——公車左轉、前面有人走斑馬線，駕駛座的螢幕跳出黃色警示，公車停下來讓人先過，再轉過去；一輪 9 秒
+ */
+const CITY_BUS =
+  '<rect class="cb-body" x="-11" y="-11" width="22" height="13" rx="2"/><rect class="cb-stripe" x="-11" y="-2.8" width="22" height="1.6"/>' +
+  [-9, -4.6, -0.2].map((x) => `<rect class="bc-win" x="${x}" y="-9.2" width="3.6" height="4.2" rx="0.6"/>`).join('') +
+  '<path class="bc-front" d="M4 -9.2H8.4Q10 -9.2 10 -7.6V-5H4Z"/><rect class="cb-door" x="5" y="-4.4" width="3" height="5.6" rx="0.4"/>' +
+  '<circle class="tk-wheel" cx="-6" cy="2.4" r="2"/><circle class="tk-wheel" cx="6" cy="2.4" r="2"/><circle class="tk-hub" cx="-6" cy="2.4" r="0.8"/><circle class="tk-hub" cx="6" cy="2.4" r="0.8"/>';
+const BUS_TERMINAL =
+  '<ellipse class="sc-shadow" cx="1" cy="6.6" rx="25" ry="1.2"/>' +
+  '<path class="cb-roof" d="M-24 -15H6L4 -13H-22Z"/><path class="cb-pillar" d="M-21 -13V6M3 -13V6"/>' +
+  `<g transform="translate(-9 4)">${CITY_BUS}</g>` +
+  '<rect class="cb-hut" x="9" y="-8" width="15" height="14" rx="0.8"/><path class="cb-hutroof" d="M8 -8L16.5 -12.6L25 -8Z"/><rect class="cb-hutwin" x="17" y="-5" width="5.4" height="4.6" rx="0.4"/>' +
+  '<rect class="cb-hutdoor" x="11" y="-1.6" width="3.6" height="7.6" rx="0.3"/>' +
+  '<g transform="translate(16.5 -10)"><circle class="cb-clock" r="1.7"/><path class="cb-hand-h" d="M0 0V-1"/><path class="cb-hand" d="M0 0V-1.4"/></g>' +
+  '<g class="cb-inside"><circle class="lb-reader" cx="19" cy="-2.6" r="1"/><rect class="cb-cup" x="20.4" y="-2.4" width="1.4" height="1.4" rx="0.2"/><path class="cb-steam" d="M21.1 -2.8q-0.6 -0.8 0 -1.6t0 -1.6"/></g>' +
+  `<g transform="translate(-2 6)"><g class="cb-driver">${person('cb-uniform', '<path class="cb-cap" d="M-1.7 -9.8A1.7 1.7 0 0 1 1.7 -9.8H2.6Z"/>')}<g transform="translate(0 -12)"><path class="cb-heart" d="${HEART}"/></g></g></g>` +
+  '<g transform="translate(-9 -12)"><g class="cb-ok"><circle r="2.1"/><path d="M-1 0L-0.2 0.8L1.2 -0.8"/></g></g>';
+const BUS_TURN =
+  '<rect class="sw-road" x="-22" y="-5" width="44" height="10"/><rect class="sw-road" x="-5" y="-22" width="10" height="44"/>' +
+  '<path class="sw-lane" d="M-22 0H-6M6 0H22M0 -22V-12M0 6V22"/>' +
+  '<path class="sw-zebra" d="M-4.2 -11H4.2M-4.2 -9H4.2M-4.2 -7H4.2" style="stroke-width:1.1"/>' +
+  '<g class="cb-turn"><rect class="cb-top" x="-6" y="-2.6" width="12" height="5.2" rx="1.2"/><rect class="cb-shield" x="3.6" y="-2.2" width="1.8" height="4.4" rx="0.5"/></g>' +
+  `<g transform="translate(-5 -7.6)"><g class="cb-ped">${person('wk-body')}</g></g>` +
+  '<g transform="translate(13 -15)"><g class="cb-screen"><rect class="cb-scr" x="-5" y="-3.4" width="10" height="6.8" rx="1"/><path class="cb-warn" d="M0 -2.2L2.4 1.8H-2.4Z"/><path class="cb-warn-mark" d="M0 -0.8V0.5M0 1.1V1.2"/></g></g>';
+
+/**
  * 10. 水圳淨水（「用植生過濾、濕地、礫間接觸等自然工法改善水質」）：水路上一叢蘆葦，水裡的小點從灰濁流過蘆葦變清澈的藍色；
  * deg 是水流的方向（螢幕角度，0 往右）
  */
@@ -249,6 +323,18 @@ export function sceneSvg(kind: SceneKind, deg: number): string {
       return BUSCHARGE;
     case 'library24':
       return LIBRARY24;
+    case 'lantern':
+      return LANTERN;
+    case 'nightsky':
+      return NIGHTSKY;
+    case 'tpassgo':
+      return TPASS_GO;
+    case 'tpasspark':
+      return TPASS_PARK;
+    case 'busterminal':
+      return BUS_TERMINAL;
+    case 'busturn':
+      return BUS_TURN;
     case 'oldhouse':
       return OLDHOUSE;
     case 'lunch':

@@ -1,5 +1,5 @@
 import type * as Leaflet from 'leaflet';
-import { DOME_SVG, idlePhase, isSceneKind, PATROL_SVG, sceneSvg, SOCCER_SVG, TRUCK_SVG, WALKER_SVG, windSvg, type SceneKind } from './hq-scenes';
+import { DOME_SVG, idlePhase, isSceneKind, PATROL_SVG, sceneSvg, SCOOTER_SVG, SOCCER_SVG, TRUCK_SVG, WALKER_SVG, windSvg, type SceneKind } from './hq-scenes';
 import { alongLine, BOAT_SVG, crackSvg, FITBUS_BODY, FITBUS_SVG, hqMotionZoom, HQ_LABEL_ZOOM, HQ_NET_LABEL_KM, BIKE_SVG, HIKER_SVG, PETWALK_SVG, FISH_SVG, WETLAND_BIRDS, MUSIC_NOTES, bikePhase, fitbusPhase, fitbusStopSvg, cultureSvg, regrowSvg, serviceSvg, stitchSvg, boatPhase, fireworksSvg, FIREWORKS_MS, flowOut, HQ_VOYAGE_MS, RAINBOW_FLOW_TOTAL, RAINBOW_STAGGER_MS, surge, SURGE_TOTAL, voyagePhase, voyageTimeOf } from './flow';
 import { haversineKm, type LatLng } from './geo';
 import type { EventKind, Phase } from './types';
@@ -71,7 +71,7 @@ export interface MapRoute {
   /** 一條線從頭長到尾：trail 山林徑、bridge 自行車橋、stars 星座、culture 文化徑的線（color）；label 寫在尾端（文化徑寫在中間） */
   reveals?: Array<{ path: Array<[number, number]>; at: number; kind: 'trail' | 'bridge' | 'stars' | 'culture'; label?: string; color?: string; labelAt?: number; hideKm?: number }>;
   /** 騎自行車的人：跟雷達一樣（經緯度） */
-  bikes?: Array<{ path: Array<[number, number]>; start: number; lap: number; kind?: 'bike' | 'hiker' | 'pet' | 'truck' | 'walker' | 'patrol'; loop?: boolean; color?: string }>;
+  bikes?: Array<{ path: Array<[number, number]>; start: number; lap: number; kind?: 'bike' | 'hiker' | 'pet' | 'truck' | 'walker' | 'patrol' | 'scooter'; loop?: boolean; color?: string }>;
   /** 健身小巴：跟雷達一樣（經緯度） */
   fitbuses?: Array<{ path: Array<[number, number]>; start: number; lineAt: number; stopAt: number[]; stops: Array<{ at: [number, number]; label: string }>; focus?: boolean; dim?: boolean; driveMs: number }>;
   /** 縫合（市民大道）：跟雷達一樣（經緯度） */
@@ -87,6 +87,8 @@ export interface MapRoute {
   /** 綠覆率：整個台北市（ring）在 steps 的每個時間再鋪一層很淡的綠 */
   green?: { ring: Array<[number, number]>; steps: number[] };
   /** 一塊地方（社子島）：at 時淡入、留著，虛線外框、名字寫在中間 */
+  /** 一塊夜色（條通）：at 慢慢暗下來 */
+  nights?: Array<{ ring: Array<[number, number]>; at: number }>;
   areas?: Array<{ ring: Array<[number, number]>; center: [number, number]; at: number; label: string; zones?: Array<Array<[number, number]>>; zonesAt?: number }>;
   /** 洋流號的河什麼時候淡掉（到終點後拿掉，政策的東西才看得清楚） */
   riverOut?: number;
@@ -1031,6 +1033,14 @@ export class MapView {
       }
     }
     // 一塊地方（社子島）：淡淡的土色、虛線外框
+    // 條通的夜色（v1.555）：一塊淡淡的深藍，慢慢暗下來
+    for (const nt of r.nights ?? []) {
+      if (nt.ring.length < 3) continue;
+      const poly = L.polygon(nt.ring, { stroke: false, fillColor: '#232a66', fillOpacity: 0.32, interactive: false, className: 'map-night-area' });
+      layer.addLayer(poly);
+      const e = poly.getElement() as SVGElement | undefined;
+      if (e) e.style.animationDelay = `${Math.round(nt.at - now)}ms`;
+    }
     for (const ar of r.areas ?? []) {
       if (ar.ring.length < 3) continue;
       const poly = L.polygon(ar.ring, { color: '#7d6a45', weight: 1.8, dashArray: '6 4', fill: false, interactive: false, className: 'map-voyage-area' });
@@ -1189,7 +1199,7 @@ export class MapView {
       // 騎自行車的人、登山客（山林徑）、牽狗散步的人（大安森林公園）
       const kind = bk.kind ?? 'bike';
       // 載菜的小貨車（「教育・午餐」按鈕開著才有）不跟著其他特效變淡（focus）
-      const icon = L.divIcon({ className: `map-boat map-bike ${kind}${kind === 'truck' ? ' focus' : ''}`, html: `<svg viewBox="-12 -20 24 22" width="27" height="25" aria-hidden="true"${bk.color ? ` style="--c:${bk.color}"` : ''}>${kind === 'hiker' ? HIKER_SVG : kind === 'pet' ? PETWALK_SVG : kind === 'truck' ? TRUCK_SVG : kind === 'walker' ? WALKER_SVG : kind === 'patrol' ? PATROL_SVG : BIKE_SVG}</svg>`, iconSize: [27, 25], iconAnchor: [13.5, 22.5] });
+      const icon = L.divIcon({ className: `map-boat map-bike ${kind}${kind === 'truck' ? ' focus' : ''}`, html: `<svg viewBox="-12 -20 24 22" width="27" height="25" aria-hidden="true"${bk.color ? ` style="--c:${bk.color}"` : ''}>${kind === 'hiker' ? HIKER_SVG : kind === 'pet' ? PETWALK_SVG : kind === 'truck' ? TRUCK_SVG : kind === 'walker' ? WALKER_SVG : kind === 'patrol' ? PATROL_SVG : kind === 'scooter' ? SCOOTER_SVG : BIKE_SVG}</svg>`, iconSize: [27, 25], iconAnchor: [13.5, 22.5] });
       const marker = L.marker([lat[0], lng[0]], { icon, interactive: false, keyboard: false, zIndexOffset: 1240 });
       layer.addLayer(marker);
       this.boatTracks.push({ id: `hq-bike-${i}`, marker, lat, lng, cum, ride: { start: bk.start, lap: bk.lap, loop: bk.loop } });
