@@ -3248,11 +3248,10 @@ function startHqVoyage(spinAt = Date.now()): void {
   hqNetBtn.hidden = true;
   hqLayersBox.hidden = true;
   if (!hqLayersBox.childElementCount) {
-    // 手機上收成一顆「政策 ▾」，點了才展開（v1.537）
+    // 手機上多一顆「政策 ▴」可以收起來（v1.537 原本預設收起，v1.543 使用者要預設展開）
     const tg = document.createElement('button');
     tg.type = 'button';
     tg.className = 'chip hq-layers-toggle';
-    tg.textContent = '政策 ▾';
     hqLayersBox.appendChild(tg);
     for (const ly of hq.HQ_POLICY_LAYERS) {
       const b = document.createElement('button');
@@ -3263,6 +3262,8 @@ function startHqVoyage(spinAt = Date.now()): void {
       hqLayersBox.appendChild(b);
     }
   }
+  hqLayersBox.classList.add('open');
+  hqLayersLabel('');
   hqPauseBtn.hidden = false;
   hqPanel.hidden = false;
   render();
@@ -3370,9 +3371,11 @@ hqPauseBtn.addEventListener('click', () => hqSetPaused(hqPausedAt === null));
  * 老水路、登山步道、長回來的樹也一起（政策島：「水路串起都市微森林、山徑與文化徑」）。再按一次收起來
  */
 const HQ_NET_SHOW = '看整個文化網';
-/** 手機（窄螢幕）：播放時卡片收起來、政策按鈕收成一顆、說明卡先只顯示標題（v1.537） */
+/**
+ * 手機（窄螢幕）：播放時卡片收起來（v1.537）；政策按鈕、說明卡多一顆收起來的按鈕，預設展開（v1.537 原本預設收起，v1.543 使用者要預設展開）
+ */
 const HQ_PHONE = window.matchMedia('(max-width: 600px)');
-const HQ_MORE_BTN = '<button type="button" class="cap-more">說明 ▾</button>';
+const HQ_MORE_BTN = '<button type="button" class="cap-more">收起 ▴</button>';
 const HQ_NET_CENTER = { lat: 25.075, lng: 121.56 };
 const HQ_NET_KM = 13;
 let hqNetAt: number | null = null;
@@ -3388,7 +3391,7 @@ const HQ_NET_CAPTION =
   '<small class="net-step s3"><em>面</em>最後交織成一面文化網絡：搭配登山觀光中心、運動驛站、文化場館、步道標示和交通票券，串起文化旅遊、生態步道、地方商圈和公共服務。對外地人，是認識台北的文化地圖；對台北人，是讓日常凝聚成城市力量的文化網絡。</small>' +
   '<small class="net-src">政策島：水路串起都市微森林、山徑與文化徑</small>';
 document.querySelector('#stage .overlay-tl')!.appendChild(hqCaption);
-// 手機上說明卡先只顯示標題，點「說明 ▾」才展開
+// 手機上說明卡預設展開，點「收起 ▴」只留標題
 hqCaption.addEventListener('click', (e) => {
   const btn = (e.target as Element).closest('.cap-more');
   if (!btn) return;
@@ -3412,10 +3415,13 @@ function hqShowOff(): void {
   hqCaption.hidden = true;
   hqLayersLabel('');
 }
-/** 手機上那顆「政策 ▾」寫現在開的是哪一個 */
+/** 手機上那顆「政策」寫現在開的是哪一個、展開（▴）還是收起來（▾） */
+let hqLayerName = '';
 function hqLayersLabel(name: string): void {
+  hqLayerName = name;
   const tg = hqLayersBox.querySelector('.hq-layers-toggle');
-  if (tg) tg.textContent = name ? `政策：${name} ▾` : '政策 ▾';
+  const arrow = hqLayersBox.classList.contains('open') ? '▴' : '▾';
+  if (tg) tg.textContent = name ? `政策：${name} ${arrow}` : `政策 ${arrow}`;
 }
 /** 拉到 km、正中間在 center（飛 1.2 秒，飛到了才開始亮） */
 function hqFlyTo(center: LatLng, km: number, mapZoom: number): void {
@@ -3434,7 +3440,7 @@ hqNetBtn.addEventListener('click', () => {
     hqNetAt = Date.now() + 1300;
     hqNetBtn.textContent = '收起文化網';
     hqCaption.innerHTML = HQ_NET_CAPTION;
-    hqCaption.classList.remove('open');
+    hqCaption.classList.add('open');
     hqCaption.hidden = false;
     hqCaption.classList.remove('play');
     window.setTimeout(() => hqCaption.classList.add('play'), 1300);
@@ -3444,6 +3450,7 @@ hqNetBtn.addEventListener('click', () => {
 hqLayersBox.addEventListener('click', (e) => {
   if ((e.target as Element).closest('.hq-layers-toggle')) {
     hqLayersBox.classList.toggle('open');
+    hqLayersLabel(hqLayerName);
     return;
   }
   const btn = (e.target as Element).closest('button[data-id]') as HTMLButtonElement | null;
@@ -3451,8 +3458,7 @@ hqLayersBox.addEventListener('click', (e) => {
   const ly = hq.HQ_POLICY_LAYERS.find((x) => x.id === btn.dataset.id);
   if (!ly) return;
   hqSetPaused(false);
-  // 手機：選好就收起來，那顆寫現在開的是哪一個
-  hqLayersBox.classList.remove('open');
+  // 手機：選好了按鈕照樣展開（v1.543 使用者要預設展開），「政策」那顆寫現在開的是哪一個
   const wasOn = hqLayer?.id === ly.id;
   hqShowOff();
   if (!wasOn) {
@@ -3472,7 +3478,7 @@ hqLayersBox.addEventListener('click', (e) => {
     const more = document.createElement('span');
     more.innerHTML = HQ_MORE_BTN;
     hqCaption.replaceChildren(b, sm, more.firstChild as Node, intro);
-    hqCaption.classList.remove('open');
+    hqCaption.classList.add('open');
     hqCaption.classList.add('play');
     hqCaption.hidden = false;
   }
