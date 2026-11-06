@@ -1,5 +1,5 @@
 import type { BlipStyle, EventKind, Phase, SweepStyle } from './types';
-import { alongLine, BOAT_SVG, crackSvg, FITBUS_BODY, FITBUS_SVG, HQ_MOTION_KM, HQ_NET_LABEL_KM, BIKE_SVG, HIKER_SVG, PETWALK_SVG, FISH_SVG, WETLAND_BIRDS, MUSIC_NOTES, bikePhase, fitbusPhase, fitbusStopSvg, cultureSvg, regrowSvg, serviceSvg, stitchSvg, BOAT_TITLE, boatPhase, fireworksSvg, FIREWORKS_MS, flowOut, HQ_VOYAGE_MS, RAINBOW_FLOW_TOTAL, RAINBOW_STAGGER_MS, riverHalfWidth, surge, SURGE_TOTAL, voyagePhase, voyageTimeOf } from './flow';
+import { alongLine, BOAT_SVG, crackSvg, FITBUS_BODY, FITBUS_SVG, hqMotionKm, HQ_NET_LABEL_KM, BIKE_SVG, HIKER_SVG, PETWALK_SVG, FISH_SVG, WETLAND_BIRDS, MUSIC_NOTES, bikePhase, fitbusPhase, fitbusStopSvg, cultureSvg, regrowSvg, serviceSvg, stitchSvg, BOAT_TITLE, boatPhase, fireworksSvg, FIREWORKS_MS, flowOut, HQ_VOYAGE_MS, RAINBOW_FLOW_TOTAL, RAINBOW_STAGGER_MS, riverHalfWidth, surge, SURGE_TOTAL, voyagePhase, voyageTimeOf } from './flow';
 
 export interface RadarItem {
   id: number;
@@ -2054,7 +2054,7 @@ export class Radar {
   private drawVoyageExtras(r: RadarRoute): void {
     this.routeLayer.classList.toggle('hq-focus', !!r.focus);
     // 拉遠了，一直動的停下來或收起來（hq-far）
-    this.motionFar = this.scaleKm > HQ_MOTION_KM;
+    this.motionFar = this.scaleKm > hqMotionKm();
     this.routeLayer.classList.toggle('hq-far', this.motionFar);
     // 待機的小動作等洋流號到了、河淡掉才開始（航行中每一格都在重畫，再加會掉格，v1.527）
     this.routeLayer.classList.toggle('hq-idle', r.riverOut !== undefined && Date.now() > r.riverOut + 1000);

@@ -224,6 +224,14 @@ export function stitchSvg(delayMs: number): string {
  * 拉遠就停下來或收起來，畫面不要太亂（v1.528 使用者說「所有會動的都建議拉近到一定程度才開始動」「不希望整體畫面太亂」）；洋流號、河、冒出來的動畫照舊
  */
 export const HQ_MOTION_KM = 2;
+/** 電腦版拉近到 3 km（地圖縮放 14.7）就動（v1.544 使用者說「電腦版動畫可以 3km 就開始」）；手機（600 px 以下）照舊 2 km、縮放 15.3 */
+export const HQ_MOTION_KM_DESK = 3;
+export const HQ_MOTION_ZOOM_DESK = 14.7;
+const hqNarrow = (): boolean => typeof window !== 'undefined' && !!window.matchMedia?.('(max-width: 600px)').matches;
+/** 現在這個螢幕拉近到幾 km 以內才動 */
+export const hqMotionKm = (): number => (hqNarrow() ? HQ_MOTION_KM : HQ_MOTION_KM_DESK);
+/** 地圖縮放到多少以上才動 */
+export const hqMotionZoom = (): number => (hqNarrow() ? HQ_MOTION_ZOOM : HQ_MOTION_ZOOM_DESK);
 /** 拉遠到雷達外圈 5 km、地圖縮放 14 以下，寶箱、橋下空間、大巨蛋、毛孩安心養的字不寫（v1.529 使用者說「以 5 公里為基礎，拉遠到 5 公里後…文字可以拿掉，其他留著」） */
 export const HQ_LABEL_KM = 5;
 export const HQ_LABEL_ZOOM = 14;

@@ -1,5 +1,5 @@
 import type * as Leaflet from 'leaflet';
-import { alongLine, BOAT_SVG, crackSvg, FITBUS_BODY, FITBUS_SVG, HQ_MOTION_ZOOM, HQ_LABEL_ZOOM, HQ_NET_LABEL_KM, BIKE_SVG, HIKER_SVG, PETWALK_SVG, FISH_SVG, WETLAND_BIRDS, MUSIC_NOTES, bikePhase, fitbusPhase, fitbusStopSvg, cultureSvg, regrowSvg, serviceSvg, stitchSvg, boatPhase, fireworksSvg, FIREWORKS_MS, flowOut, HQ_VOYAGE_MS, RAINBOW_FLOW_TOTAL, RAINBOW_STAGGER_MS, surge, SURGE_TOTAL, voyagePhase, voyageTimeOf } from './flow';
+import { alongLine, BOAT_SVG, crackSvg, FITBUS_BODY, FITBUS_SVG, hqMotionZoom, HQ_LABEL_ZOOM, HQ_NET_LABEL_KM, BIKE_SVG, HIKER_SVG, PETWALK_SVG, FISH_SVG, WETLAND_BIRDS, MUSIC_NOTES, bikePhase, fitbusPhase, fitbusStopSvg, cultureSvg, regrowSvg, serviceSvg, stitchSvg, boatPhase, fireworksSvg, FIREWORKS_MS, flowOut, HQ_VOYAGE_MS, RAINBOW_FLOW_TOTAL, RAINBOW_STAGGER_MS, surge, SURGE_TOTAL, voyagePhase, voyageTimeOf } from './flow';
 import { haversineKm, type LatLng } from './geo';
 import type { EventKind, Phase } from './types';
 import { LANDMARKS } from './landmarks';
@@ -335,6 +335,7 @@ export class MapView {
       // 自己拖、滾輪、雙指縮放：記下時間（程式移動地圖不算）
       map.on('dragstart', () => (this.lastUserMove = Date.now()));
       // 縮放時要跟著變的大小、要收起來的東西：放在 CSS 變數和 class，不用整個重畫
+      let farKey = '';
       const fitScale = (): void => {
         // 縫線跟著縮放：拉近變大、拉遠變小（v1.535），再小一點（v1.536）：縮放 14 是 0.7 倍，0.35～1.1 倍
         const zs = 2 ** ((map.getZoom() - 14) / 2);
@@ -342,7 +343,7 @@ export class MapView {
         // 寶箱、健身小巴也跟著縮放（v1.536 使用者說「寶箱、巴士也是拉近變大、拉遠變小」）：縮放 14 原來的大小，0.45～1.6 倍
         this.el.style.setProperty('--zoom-scale', Math.min(1.6, Math.max(0.45, zs)).toFixed(3));
         // 拉遠了，一直動的停下來或收起來（hq-far）
-        this.motionFar = map.getZoom() < HQ_MOTION_ZOOM;
+        this.motionFar = map.getZoom() < hqMotionZoom();
         this.el.classList.toggle('hq-far', this.motionFar);
         // 寶箱、橋下空間、大巨蛋、毛孩安心養的字拉遠（縮放 14 以下）不寫
         this.el.classList.toggle('label-far', map.getZoom() < HQ_LABEL_ZOOM);
@@ -350,6 +351,11 @@ export class MapView {
         this.el.classList.toggle('label-far10', map.getZoom() < HQ_LABEL_ZOOM - 1);
         // 看整個文化網（縮放 12）時縫合、北士科星群、把樹種回來的字不寫（把水找回來跟文化徑有關，留著）
         this.el.classList.toggle('label-far12', map.getZoom() < 12.5);
+        // 藏起來（display: none）的 CSS 動畫再出現時會從頭播、用畫的時候的 delay（例如還要等 70 秒），人流、腳踏車道、字就一直不出來、不動：
+        // 跨過門檻時整層重畫一次，delay 照現在的時間重新算（v1.544 使用者說「電腦版的裂縫人流沒有在動」）
+        const key = ['hq-far', 'label-far', 'label-far10', 'label-far12'].map((c) => +this.el.classList.contains(c)).join('');
+        if (farKey && key !== farKey && this.routes.some((r) => r.voyage !== undefined)) this.pushRoutes();
+        farKey = key;
       };
       map.on('zoomend', fitScale);
       fitScale();
