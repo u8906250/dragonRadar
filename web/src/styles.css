@@ -671,6 +671,17 @@ path.map-water-glint { animation: water-flow-map 1.1s linear infinite; }
 @keyframes tw-bar { 0%, 30% { transform: scaleX(0.3); fill: #f2b544; } 42% { transform: none; fill: #f2b544; } 44%, 90% { transform: none; fill: #2f9e6a; } 96%, 100% { transform: scaleX(0.3); fill: #f2b544; } }
 .hq-near .tw-ok { transform-box: fill-box; transform-origin: center; animation: tw-ok 9s ease-out infinite; animation-delay: var(--d); }
 @keyframes tw-ok { 0%, 43% { transform: scale(0); opacity: 0; } 46% { transform: scale(1.25); opacity: 1; } 49%, 88% { transform: none; opacity: 1; } 94%, 100% { opacity: 0; } }
+/* 北士科的城市分身（v1.561）：淡藍虛線、半透明，動畫 class 跟地上一樣所以同步；!important 蓋過動畫裡的顏色（位置、透明度的動畫照樣跑）；拉近才出現 */
+.ct { opacity: 0; }
+.hq-near .ct { opacity: 0.9; }
+.ct :is(rect, path, circle, ellipse) { fill: #5aa9e6 !important; fill-opacity: 0.08 !important; stroke: #5aa9e6 !important; stroke-width: 0.7 !important; stroke-dasharray: 1.4 0.9; }
+.ct text { fill: #5aa9e6 !important; }
+.ct .bc-batfill, .ct .lb-win { fill-opacity: 0.4 !important; }
+.ct-bit { fill: #5aa9e6; opacity: 0; }
+.hq-near .ct-bit { animation: ct-bit 1.5s ease-in-out infinite; animation-delay: var(--d); }
+.hq-near .ct-bit.c2 { animation-delay: calc(var(--d) + 0.5s); }
+.hq-near .ct-bit.c3 { animation-delay: calc(var(--d) + 1s); }
+@keyframes ct-bit { 0% { transform: translate(0, 0); opacity: 0; } 20% { opacity: 1; } 85% { transform: translate(var(--tx), var(--ty)); opacity: 1; } 100% { transform: translate(var(--tx), var(--ty)); opacity: 0; } }
 /* 14. 關渡國際足球場：射門、球進網、看台波浪 */
 .sc-fan.f0 { fill: #e05a5a; }
 .sc-fan.f1 { fill: #3a6fd8; }
