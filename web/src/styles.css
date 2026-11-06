@@ -400,7 +400,6 @@ path.map-water-glint { animation: water-flow-map 1.1s linear infinite; }
 .radar .route-boat.fitbus.net-dim .fb-dim { opacity: 0.5; }
 /* 拉遠、看文化網時不寫健身小巴的字（畫面不要太亂） */
 .radar .route-boat.fitbus.far .fb-name, #map.hq-far .map-fitbus .fb-name, #map.fit-dim .map-fitbus .fb-name, #map.fit-dim .fit-label { display: none; }
-@media (prefers-reduced-motion: reduce) { .fp-arms, .fp-band { animation: none; } }
 /* 洋流總部的特效（點了洋流總部，flow.ts 的 fireworksSvg）：到了台北市政府放煙火——先升上去一道光，炸開一圈火花往外飛、往下掉一點再淡掉，中間亮一下 */
 .route-fireworks, .map-fireworks { pointer-events: none; }
 /* 那一趟的水：跟著淡入、放完煙火淡掉（animation-duration、delay 寫在元素上，照 HQ_VOYAGE_MS） */
@@ -447,6 +446,10 @@ path.map-water-glint { animation: water-flow-map 1.1s linear infinite; }
 .radar .reveal-bikes, .map-reveal-bikes { fill: none; stroke: #15171c; stroke-linecap: round; stroke-dasharray: 3 12; opacity: 0; animation: reveal-bikes 1.6s linear infinite, voyage-stay 0.5s ease-out both; }
 @keyframes reveal-bikes { to { stroke-dashoffset: -15; } }
 /*
+ * 洋流總部的特效不管系統的「減少動態效果」一律照常播（v1.547 使用者選 A：特效是自己點了才播的、動畫就是內容；
+ * 健身小巴、自行車這些用 JavaScript 移動的本來就照常動，CSS 的也跟著動才一致）。雷達光點、車掃路線、卡片這些還是照系統設定
+ */
+/*
  * 圖示的待機小動作（v1.527 使用者說「不要只有健身小巴動，其他地方也可以動起來，以不影響效能為主」）：
  * 洋流號到了、河淡掉才開始（.hq-idle；航行中每一格都在重畫，再加會掉格）。只動幾十個主要圖示（學、書、親、文化徑那幾百個小圓點不動），都是 transform / opacity、慢慢的；--d 是每個圖示錯開的相位
  */
@@ -480,10 +483,6 @@ path.map-water-glint { animation: water-flow-map 1.1s linear infinite; }
 .radar .routes.hq-far .voyage-boat .wb-paddle, #map.hq-far .map-voyage-boat .wb-paddle, .radar .routes.hq-far .walk-bob, #map.hq-far .walk-bob { animation: none; }
 .hq-far .pw-dog, .hq-far .pw-dtail { animation: none; }
 .hq-far .seam-walkers, .hq-far path.map-seam-walkers, .hq-far .reveal-bikes, .hq-far path.map-reveal-bikes, .hq-far .map-voyage-icon.fitbus-stop, .hq-far .fit-label { display: none; }
-@media (prefers-reduced-motion: reduce) {
-  .wb-paddle, .walk-bob, .pw-dog, .pw-dtail,
-  .idle-star, .idle-wetland .ic-reed, .idle-wetland .ic-reed-top, .idle-hut .ic-flag, .idle-stadium, .idle-uyouth, .idle-umusic, .idle-uart, .idle-bigdome .dm-hi, .idle-fitbus { animation: none; }
-}
 /*
  * 更貼近政策的小動畫（v1.545，hq-scenes.ts）：拉近（.hq-near：電腦版 3 km、手機 2 km 以內）就動，不用等洋流號到站（v1.546）；
  * 不動的時候走路的人、硬幣、雨滴、涼風收起來（opacity 0），只留場景。相位 --d 照時鐘算（idlePhase，重畫後接著播）；
@@ -669,30 +668,6 @@ path.map-water-glint { animation: water-flow-map 1.1s linear infinite; }
 .dm-roll { opacity: 0; }
 .hq-near .dm-roll { animation: dm-roll 7s ease-in-out infinite; animation-delay: var(--d); }
 @keyframes dm-roll { 0% { transform: translate(28px, 7px) rotate(13deg) scaleX(-1); opacity: 0; } 6% { transform: translate(26.5px, 6.7px) rotate(13deg) scaleX(-1); opacity: 1; } 48% { transform: translate(14.5px, 4px) rotate(13deg) scaleX(-1); } 52% { transform: translate(13.4px, 4px) rotate(0deg) scaleX(-1); } 62% { transform: translate(9.2px, 4px) rotate(0deg) scaleX(-1); opacity: 1; } 68%, 100% { transform: translate(9.2px, 4px) rotate(0deg) scaleX(-1); opacity: 0; } }
-@media (prefers-reduced-motion: reduce) {
-  .sc-bob, .sw-kid, .sw-flag, .sw-car, .sh-in, .sh-out, .sh-door, .ln-steam, .ln-heart, .tk-bob, .pp-t, .pp-tree, .pp-bench, .pp-fly, .pp-flap, .dt-rain, .dt-drop, .dt-water, .dt-cloud,
-  .cw-dot, .cw-spark, .cw-reeds .ic-reed, .cw-reeds .ic-reed-top, .wd-line, .pg-coin, .pg-pig, .rg-doc, .rg-ok, .sc-ball, .sc-net, .sc-fan, .dm-roll { animation: none !important; }
-  /* 系統開了「減少動態效果」：不動，但拉近時人物、硬幣、涼風停在一個畫面上給你看（v1.546，原本整個收起來，看起來像沒出來） */
-  .hq-near .sw-kid { opacity: 1; }
-  .hq-near .sw-kid.k1 { transform: translateY(5px); }
-  .hq-near .sw-kid.k2 { transform: translateY(-0.5px); }
-  .hq-near .sw-kid.k3 { transform: translateY(-6px); }
-  .hq-near .sw-flag { transform-origin: -0.4px -6.4px; transform: rotate(-80deg); }
-  .hq-near .sh-out { opacity: 1; transform: translateX(9px); }
-  .hq-near .ln-steam { opacity: 0.8; }
-  .hq-near .pp-fly { opacity: 1; transform: translate(-1px, -11px); }
-  .hq-near .dt-rain { opacity: 1; }
-  .hq-near .cw-dot { opacity: 1; }
-  .hq-near .cw-dot.d1 { transform: translateX(-12px); }
-  .hq-near .cw-dot.d2 { transform: translateX(-6px); }
-  .hq-near .cw-dot.d3 { transform: translateX(6px); fill: #2f8fe0; }
-  .hq-near .cw-dot.d4 { transform: translateX(12px); fill: #2f8fe0; }
-  .hq-near .wd-line { opacity: 0.85; }
-  .hq-near .pg-coin.c1 { opacity: 1; transform: translateY(-3px); }
-  .hq-near .rg-doc { opacity: 1; transform: translateX(-6.5px); }
-  .hq-near .rg-ok { opacity: 1; }
-  .hq-near .dm-roll { opacity: 1; transform: translate(18px, 5px) rotate(13deg) scaleX(-1); }
-}
 /* 縫合市民大道（v1.520）：出發時深灰的裂縫從西畫到東，洋流號經過才縫（v1.521）、縫完變淡；橘色的交叉針腳一筆一筆縫；縫好後三處都有往北、往南的人流小點（白邊，橘色的河經過那裡也看得到） */
 .st-u, .st-t { fill: none; stroke-linecap: round; stroke-dasharray: 1; stroke-dashoffset: 1; animation: st-draw 0.16s ease-out both; }
 .st-u { stroke: #fff; stroke-width: 4.2; }
@@ -709,7 +684,6 @@ path.map-water-glint { animation: water-flow-map 1.1s linear infinite; }
 .cr-eye { fill: #7d8794; }
 .cr-thread { stroke: #f08a96; stroke-width: 0.9; }
 @keyframes crack-throb { 50% { stroke-opacity: 0.5; } }
-@media (prefers-reduced-motion: reduce) { .cr-glow { animation: none; } }
 .st-heart { fill: #ff6f91; stroke: #fff; stroke-width: 0.9; opacity: 0; transform-box: fill-box; transform-origin: center; animation: st-heart 2.2s ease-out both; }
 @keyframes st-heart { 0% { opacity: 0; transform: translateY(2px) scale(0.3); } 18% { opacity: 1; transform: translateY(0) scale(1.15); } 30% { transform: scale(1); } 75% { opacity: 1; transform: translateY(-3px); } 100% { opacity: 0; transform: translateY(-5px); } }
 .radar .seam-stitch, .map-seam-stitch { pointer-events: none; }
@@ -723,7 +697,6 @@ path.map-water-glint { animation: water-flow-map 1.1s linear infinite; }
 path.map-seam-walkers { --p: 15px; }
 @keyframes seam-walk-in { to { opacity: 1; } }
 @keyframes seam-walk { from { stroke-dashoffset: 0; } to { stroke-dashoffset: calc(var(--p) * -1); } }
-@media (prefers-reduced-motion: reduce) { .radar .seam-walkers, path.map-seam-walkers { animation: seam-walk-in 0.6s ease-out forwards; } }
 /* 冒出來的東西（radar.ts 的 icons） */
 .radar .voyage-icon, .map-voyage-icon { pointer-events: none; }
 .map-voyage-icon { background: none; border: 0; }
@@ -903,7 +876,6 @@ path.map-seam-walkers { --p: 15px; }
 @keyframes spring-ring { 0% { transform: scale(0.3); opacity: 0.9; } 100% { transform: scale(3.4); opacity: 0; } }
 .radar .voyage-pond { pointer-events: none; }
 .radar .voyage-pond-fill { fill: #4cc3e6; fill-opacity: 0; stroke: #3fa9dc; stroke-width: 0.8; stroke-opacity: 0; vector-effect: non-scaling-stroke; animation: voyage-river 1.4s ease-out both; }
-@media (prefers-reduced-motion: reduce) { .spring-ring { animation: none; opacity: 0.5; } }
 /* 水域「親水」（洋流總部的特效）：船沿河走時真的河（淡水河、基隆河、新店溪）亮成藍色、留著；河上出現 SUP、龍舟（出現時從小彈大，之後在水上輕輕搖） */
 .radar .voyage-river { fill: #4cc3e6; fill-opacity: 0; stroke: #3fa9dc; stroke-width: 0.6; stroke-opacity: 0; vector-effect: non-scaling-stroke; pointer-events: none; animation: voyage-river 1.4s ease-out both; }
 @keyframes voyage-river { to { fill-opacity: 0.55; stroke-opacity: 0.8; } }
@@ -931,7 +903,6 @@ path.map-seam-walkers { --p: 15px; }
 .wb-paddle { fill: none; stroke: #5b3a1e; stroke-width: 1; stroke-linecap: round; }
 .wb-head { fill: #ffe0b8; stroke: #15171c; stroke-width: 0.6; }
 .wb-body { fill: none; stroke: #15171c; stroke-width: 1.4; stroke-linecap: round; }
-@media (prefers-reduced-motion: reduce) { .boat-bob, .boat-glide { animation: none; } }
 /* 終點（台北市政府）的外框：虛線；經過的區名、地名船經過時出現、留著，終點的名字一直寫著 */
 .radar .voyage-outline { fill: #ffd43b; fill-opacity: 0.18; stroke: #15171c; stroke-width: 1.4; stroke-dasharray: 4 3; stroke-linejoin: round; vector-effect: non-scaling-stroke; pointer-events: none; }
 .voyage-stop { pointer-events: none; }
@@ -1922,6 +1893,3 @@ path.map-canal-flow { --p: 14px; }
 @keyframes mn-float { 0% { opacity: 0; transform: translateY(2px); } 20% { opacity: 1; } 75% { opacity: 0.8; } 100% { opacity: 0; transform: translateY(-8px); } }
 .hq-far .voyage-canal-flow, .hq-far path.map-canal-flow { display: none; }
 .hq-far .cf-jump, .hq-far .cf-splash, .hq-far .mn-f, .hq-far .wl-bird, .hq-far .wl-bird .wl-wing { animation: none; }
-@media (prefers-reduced-motion: reduce) {
-  .voyage-canal-flow, path.map-canal-flow, .cf-jump, .cf-splash, .mn-f, .wl-bird, .wl-bird .wl-wing { animation: none; }
-}
