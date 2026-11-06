@@ -11,6 +11,7 @@ import { mergeIntoOfficial } from './sources/merge';
 import { apifyTrial } from './sources/apify';
 import { fetchThreadsPost, resolveThreadsLink, shortcodeToUnix } from './sources/link';
 import { claimCard, makeTransfer, myCards, pickReward, purgeCards, redeemTransfer } from './cards';
+import { adminListWishes, adminSetWish, markWishesSeen, myWishes, notifyWish, purgeWishes, submitTweak, submitWish, withdrawWish } from './wishes';
 import { addParkMark, deleteParkMark, listParkMarks, listPublicParkMarks, parseParkMark, updateParkMark } from './parkmarks';
 import { adminLocate, applyFeedback, clearResolvedFeedback, deleteAdminSubscription, listFeedback, locateForFeedback, notifyAdmins, purgeFeedback, saveAdminSubscription, setFeedbackStatus, submitFeedback } from './feedback';
 import { moduleOf } from './modules';
@@ -271,6 +272,23 @@ async function handle(req: Request, env: Env, ctx: ExecutionContext): Promise<Re
   // 引繼碼（換裝置，選單的「說明」裡）：舊裝置產生、新裝置輸入，卡片、道具搬過去
   if (req.method === 'POST' && path === '/api/cards/transfer') return jsonResponse(await makeTransfer(env, await deviceId(env, req), await ipHash(env, req), now));
   if (req.method === 'POST' && path === '/api/cards/redeem') return jsonResponse(await redeemTransfer(env, await deviceId(env, req), await ipHash(env, req), await readJson<unknown>(req), now));
+
+  // ---- 許願（投順幣送想法，管理者審核，通過才做；裝置代碼放在 x-device 標頭）----
+  if (req.method === 'GET' && path === '/api/wishes/mine') return jsonResponse(await myWishes(env, await deviceId(env, req)));
+  if (req.method === 'POST' && path === '/api/wishes/seen') return jsonResponse(await markWishesSeen(env, await deviceId(env, req)));
+  if (req.method === 'POST' && path === '/api/wishes') {
+    const out = await submitWish(env, await deviceId(env, req), await ipHash(env, req), await readJson<unknown>(req), now);
+    ctx.waitUntil(notifyWish(env, out.id, now).catch((e) => console.warn('notify wish failed', e)));
+    return jsonResponse(out, 201);
+  }
+  const wishOne = /^\/api\/wishes\/(\d+)\/(tweak|withdraw)$/.exec(path);
+  if (req.method === 'POST' && wishOne) {
+    const id = Number(wishOne[1]);
+    if (wishOne[2] === 'withdraw') return jsonResponse(await withdrawWish(env, await deviceId(env, req), id, now));
+    const out = await submitTweak(env, await deviceId(env, req), await ipHash(env, req), id, await readJson<unknown>(req), now);
+    ctx.waitUntil(notifyWish(env, out.id, now).catch((e) => console.warn('notify wish failed', e)));
+    return jsonResponse(out, 201);
+  }
 
   // ---- 漂流瓶（裝置代碼放在 x-device 標頭）----
   if (path === '/api/bottles' || path.startsWith('/api/bottles/')) {
@@ -719,6 +737,11 @@ async function handleAdmin(req: Request, env: Env, ctx: ExecutionContext, path: 
     return jsonResponse({ posts: r.results.map((p) => ({ ...p, extraction: safeParse(p.extraction as string | null) })) });
   }
 
+  // 許願：列表（scope=open 待處理、done 結案的）、改進度和回覆（{ status?, reply? }，不通過、做不出來會退順幣）
+  if (req.method === 'GET' && path === '/api/admin/wishes') return jsonResponse({ wishes: await adminListWishes(env, url.searchParams.get('scope')) });
+  const adminWish = /^\/api\/admin\/wishes\/(\d+)$/.exec(path);
+  if (req.method === 'POST' && adminWish) return jsonResponse({ wish: await adminSetWish(env, Number(adminWish[1]), await readJson<unknown>(req), now) });
+
   // 手動加的關鍵字：回報的人直接修改時加的候選，管理者採用了之後的判讀才用（learnedTags.ts）
   if (path === '/api/admin/learned-tags') {
     if (req.method === 'POST') {
@@ -788,7 +811,7 @@ async function purgeOldData(env: Env, now: number): Promise<number> {
     // 手動改的地點、時間跟著貼文
     env.DB.prepare('DELETE FROM manual_fixes WHERE post_id NOT IN (SELECT id FROM posts)'),
   ]);
-  return r.reduce((n, x) => n + (x.meta.changes ?? 0), 0) + (await purgeReports(env, cutoff)) + (await purgeBottles(env, cutoff)) + (await purgeCards(env, cutoff)) + (await purgeSubscriptions(env, cutoff)) + (await purgeFeedback(env, cutoff));
+  return r.reduce((n, x) => n + (x.meta.changes ?? 0), 0) + (await purgeReports(env, cutoff)) + (await purgeBottles(env, cutoff)) + (await purgeCards(env, cutoff)) + (await purgeWishes(env, cutoff)) + (await purgeSubscriptions(env, cutoff)) + (await purgeFeedback(env, cutoff));
 }
 
 async function refreshTokenJob(env: Env): Promise<void> {

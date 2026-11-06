@@ -288,3 +288,41 @@ export function makeTransferCode(): Promise<Result<{ code: string; expiresAt: nu
 export function redeemTransferCode(code: string): Promise<Result<{ cards: CardClaim[]; items?: ItemCount[]; picks?: number; moved: number }>> {
   return deviceJson('/api/cards/redeem', 'POST', { code });
 }
+
+// ---- 許願（投順幣送想法，管理者審核，通過才做；一樣用裝置代碼認人）----
+export type WishStatus = 'pending' | 'approved' | 'building' | 'live' | 'rejected' | 'dropped' | 'withdrawn';
+export interface WishTweak {
+  id: number;
+  body: string;
+  status: WishStatus;
+  /** 投了幾枚順幣（免費的調整是 0） */
+  cost: number;
+  /** 管理者的回覆（不通過的原因、上線在哪裡看） */
+  reply: string | null;
+  /** 最新的進度看過了沒 */
+  seen: boolean;
+  createdAt: number;
+  updatedAt: number;
+}
+export interface Wish extends WishTweak {
+  nickname: string | null;
+  links: string[];
+  /** 免費調整還剩幾次、下一次調整要幾枚順幣、有沒有調整還在處理 */
+  freeLeft: number;
+  tweakCost: number;
+  tweaking: boolean;
+  tweaks: WishTweak[];
+}
+export interface MyWishes {
+  wishes: Wish[];
+  /** 有新進度還沒看的幾筆（道具按鈕的小紅點） */
+  unseen?: number;
+  /** 現在有幾枚順幣（暫扣的不算） */
+  coins: number;
+}
+
+export const fetchMyWishes = (): Promise<Result<MyWishes>> => deviceJson<MyWishes>('/api/wishes/mine');
+export const sendWish = (w: { body: string; nickname: string; links: string; agree: boolean }): Promise<Result<MyWishes & { id: number }>> => deviceJson('/api/wishes', 'POST', w);
+export const sendTweak = (id: number, body: string): Promise<Result<MyWishes & { id: number }>> => deviceJson(`/api/wishes/${id}/tweak`, 'POST', { body });
+export const withdrawWish = (id: number): Promise<Result<MyWishes>> => deviceJson(`/api/wishes/${id}/withdraw`, 'POST', {});
+export const markWishesSeen = (): Promise<Result<{ unseen: 0 }>> => deviceJson('/api/wishes/seen', 'POST', {});

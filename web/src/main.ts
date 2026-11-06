@@ -11,7 +11,7 @@ import { X_MAX_WEIGHT, xLength } from './xcount';
 import { shortAddress, splitPlace } from './place';
 import { crowdOf, MapView, pinPicker, type BaseMap, type MapRoute, type PinPicker } from './map';
 import { beep, ensureNotificationPermission, iosNeedsHomeScreen, notificationState, pushSubscription, pushSupported, registerServiceWorker, showBanner, systemNotify, unlockAudio, unsubscribePush } from './notify';
-import { findCard, gotReward, myCards, openAlbum, openHelp, openItems } from './cards';
+import { checkWishNews, findCard, gotReward, myCards, onWishNews, openAlbum, openHelp, openItems } from './cards';
 import { Radar, SPACE_FROM_KM, type RadarRoute, type RadarStreets, type SpaceView } from './radar';
 import { DEFAULT_THEME_ID, getTheme, THEMES, type Theme } from './themes';
 import type { BottleOut, EventOut, Item, KeywordInfo, KeywordRules, MyBottles, MyReport, Origin, Phase, PickedBottle, RelatedPost, RouteOut, PreviewItem, RouteStop, RoutePreview, SubmitResult, FailedItem, EditItem, EditInput } from './types';
@@ -6661,6 +6661,11 @@ function wireControls(): void {
   $('#cards-btn').addEventListener('click', () => openAlbum());
   // 道具欄：跟卡冊分開，也在選單裡（之後會有更多道具）
   $('#items-btn').addEventListener('click', () => openItems());
+  // 許願有新進度（管理者審核了、上線了）：道具按鈕亮小紅點，收進「⋯」時「⋯」也亮；許過願的瀏覽器開網頁時問一次
+  onWishNews((n) => {
+    for (const id of ['#items-btn', '#more-btn']) $(id).classList.toggle('has-news', n > 0);
+  });
+  checkWishNews();
   // 說明：使用說明（照目前的雷達）、換裝置（引繼碼）
   $('#help-btn').addEventListener('click', () => openHelp(mod.helpPage));
   // 3D 的中山公園（大家都進得來；存了管理 token 的才能標記路燈、長椅）

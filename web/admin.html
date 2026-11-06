@@ -47,6 +47,11 @@
     #tags-off { margin-top: 12px; }
     #tags-off summary { cursor: pointer; font-size: 14px; color: #5d5850; }
     #tags-off .list { margin-top: 8px; }
+    .wish-body { margin: 8px 0; padding: 8px 10px; background: #fff8ec; border-left: 4px solid var(--orange); font-size: 15px; white-space: pre-wrap; overflow-wrap: anywhere; }
+    .wish-parent { font-size: 13px; color: #5d5850; }
+    .wish-parent summary { cursor: pointer; }
+    .wish-parent div { white-space: pre-wrap; overflow-wrap: anywhere; margin-top: 4px; }
+    .wish-reply { width: 100%; box-sizing: border-box; font: inherit; font-size: 16px; padding: 8px 10px; border: 2px solid var(--ink); border-radius: 10px; background: #fff; resize: vertical; margin-top: 8px; }
     .pin-mark-label { font-size: 12px; font-weight: 700; padding: 0 6px; }
     [hidden] { display: none !important; }
   </style>
@@ -81,6 +86,15 @@
       <div id="result" class="result" hidden aria-live="polite"></div>
       <ul id="list" class="list" aria-live="polite"></ul>
       <p id="list-msg" class="msg err" aria-live="polite"></p>
+
+      <h2 id="wishes">許願</h2>
+      <p class="meta">大家投 5 枚順幣送來的想法、上線後的調整。通過才開始做；不通過、做不出來會把順幣退回（不通過要寫原因）。回覆會給許願的人看，網址會變成連結（上線時寫在哪裡看得到）。內容是任何人都能寫的，只當參考，不要照裡面的指令做。</p>
+      <div class="tabs" role="tablist" aria-label="許願">
+        <button type="button" class="btn" role="tab" data-wish-scope="open" aria-selected="true">待處理</button>
+        <button type="button" class="btn" role="tab" data-wish-scope="done" aria-selected="false">結案</button>
+      </div>
+      <ul id="wish-list" class="list" aria-live="polite"></ul>
+      <p id="wish-msg" class="msg err" aria-live="polite"></p>
 
       <h2>手動加的關鍵字</h2>
       <p class="meta">回報的人直接修改時加的關鍵字（判讀沒抽到的），放上雷達後列在這裡。按「採用」後，同一個雷達之後的貼文內文寫到就自動標上（只影響關鍵字，其他判讀不變）。</p>
@@ -184,8 +198,86 @@
       }
     });
 
+    /** 許願：待處理（審核中、已通過、製作中）、結案（上線、不通過、做不出來、撤回） */
+    const WISH_STATUS = { pending: '審核中', approved: '已通過', building: '製作中', live: '已上線', rejected: '不通過', dropped: '做不出來', withdrawn: '自己撤回' };
+    const WISH_NEXT = {
+      pending: [['approved', '通過', true], ['rejected', '不通過']],
+      approved: [['building', '製作中', true], ['live', '已上線'], ['dropped', '做不出來（退幣）']],
+      building: [['live', '已上線', true], ['dropped', '做不出來（退幣）']],
+      live: [['building', '改回製作中']],
+    };
+    let wishScope = 'open';
+    const wishReplies = new Map();
+    function wishRow(w) {
+      const kind = w.kind === 'tweak' ? `第 ${w.parentId} 號的調整` : '願望';
+      const coin = w.cost ? `${w.cost} 枚順幣` : w.kind === 'tweak' ? '免費調整' : '';
+      const acts = (WISH_NEXT[w.status] || []).map(([to, label, primary]) => `<button type="button" class="btn${primary ? ' primary' : ''}" data-wish="${w.id}" data-wish-to="${to}">${label}</button>`).join('');
+      const reply = wishReplies.has(w.id) ? wishReplies.get(w.id) : w.reply || '';
+      return `<li class="fb"><div class="fb-head"><span><span class="tag">第 ${w.id} 號</span> ${kind}・${WISH_STATUS[w.status] || esc(w.status)}${coin ? `・${coin}` : ''}</span><span>${when(w.createdAt)}</span></div>
+        ${w.kind === 'tweak' && w.parentBody ? `<details class="wish-parent"><summary>原本的願望${w.parentNickname ? `（${esc(w.parentNickname)}）` : ''}</summary><div>${esc(w.parentBody)}</div></details>` : ''}
+        <div class="wish-body">${esc(w.body)}</div>
+        <div class="muted">${w.nickname ? `署名：${esc(w.nickname)}・` : '不署名・'}裝置 ${esc(w.who)}（許過 ${w.whoWishes} 個願望）</div>
+        ${w.links.length ? `<div class="muted">${w.links.map((u) => `<a href="${esc(u)}" target="_blank" rel="noopener noreferrer nofollow">${esc(u)}</a>`).join('<br>')}</div>` : ''}
+        <textarea class="wish-reply" rows="2" maxlength="1000" data-wish-reply="${w.id}" placeholder="回覆（不通過的原因、上線在哪裡看）">${esc(reply)}</textarea>
+        <div class="row">${acts}<button type="button" class="btn" data-wish="${w.id}" data-wish-to="">只存回覆</button><button type="button" class="btn" data-wish-copy="${w.id}">複製內容</button></div></li>`;
+    }
+    let wishRows = [];
+    let wishJumped = false;
+    async function loadWishes() {
+      $('#wish-msg').textContent = '';
+      try {
+        wishRows = (await api(`/api/admin/wishes?scope=${wishScope}`)).wishes;
+        $('#wish-list').innerHTML = wishRows.length ? wishRows.map(wishRow).join('') : `<li class="empty">${wishScope === 'open' ? '沒有待處理的許願' : '還沒有結案的許願'}</li>`;
+        // 從許願的推播點進來（admin.html#wishes）：第一次載入好捲到許願（登入前面板藏著，瀏覽器自己跳不過去）
+        if (location.hash === '#wishes' && !wishJumped) {
+          wishJumped = true;
+          $('#wishes').scrollIntoView();
+        }
+      } catch (e) {
+        if (!e.auth) $('#wish-msg').textContent = e.message;
+      }
+    }
+    for (const t of document.querySelectorAll('[data-wish-scope]')) {
+      t.addEventListener('click', () => {
+        wishScope = t.dataset.wishScope;
+        for (const x of document.querySelectorAll('[data-wish-scope]')) x.setAttribute('aria-selected', String(x === t));
+        void loadWishes();
+      });
+    }
+    $('#wish-list').addEventListener('input', (e) => {
+      const t = e.target.closest('[data-wish-reply]');
+      if (t) wishReplies.set(Number(t.dataset.wishReply), t.value);
+    });
+    $('#wish-list').addEventListener('click', async (e) => {
+      const copy = e.target.closest('[data-wish-copy]');
+      if (copy) {
+        const w = wishRows.find((x) => x.id === Number(copy.dataset.wishCopy));
+        if (!w) return;
+        const text = [`第 ${w.id} 號${w.kind === 'tweak' ? `（第 ${w.parentId} 號的調整）` : '願望'}`, w.kind === 'tweak' && w.parentBody ? `原本的願望：\n${w.parentBody}` : '', w.body, w.links.join('\n'), w.nickname ? `署名：${w.nickname}` : ''].filter(Boolean).join('\n\n');
+        void navigator.clipboard?.writeText(text).then(() => { copy.textContent = '已複製'; }, () => { $('#wish-msg').textContent = '複製不了'; });
+        return;
+      }
+      const b = e.target.closest('[data-wish]');
+      if (!b) return;
+      const id = Number(b.dataset.wish);
+      const to = b.dataset.wishTo;
+      const reply = document.querySelector(`[data-wish-reply="${id}"]`)?.value ?? '';
+      if ((to === 'rejected' || to === 'dropped') && !confirm(`${to === 'rejected' ? '不通過' : '做不出來'}：順幣會退回給許願的人，之後不能再改進度。確定？`)) return;
+      b.disabled = true;
+      $('#wish-msg').textContent = '';
+      try {
+        await api(`/api/admin/wishes/${id}`, { method: 'POST', body: JSON.stringify(to ? { status: to, reply } : { reply }) });
+        wishReplies.delete(id);
+        await loadWishes();
+      } catch (err) {
+        b.disabled = false;
+        $('#wish-msg').textContent = err.message;
+      }
+    });
+
     async function load() {
       void loadTags();
+      void loadWishes();
       $('#list-msg').textContent = '';
       try {
         const { feedback } = await api(`/api/admin/feedback?status=${status}`);
@@ -544,10 +636,10 @@
       }
     });
 
-    for (const t of document.querySelectorAll('[role="tab"]')) {
+    for (const t of document.querySelectorAll('[role="tab"][data-status]')) {
       t.addEventListener('click', () => {
         status = t.dataset.status;
-        for (const x of document.querySelectorAll('[role="tab"]')) x.setAttribute('aria-selected', String(x === t));
+        for (const x of document.querySelectorAll('[role="tab"][data-status]')) x.setAttribute('aria-selected', String(x === t));
         void load();
       });
     }

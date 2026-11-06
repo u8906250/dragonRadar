@@ -2201,6 +2201,53 @@ body.letters-open { overflow: hidden; }
 .tc-redeem input { flex: 1; min-width: 0; font: inherit; font-size: 16px; letter-spacing: 0.08em; text-transform: uppercase; padding: 8px 10px; border-radius: var(--card-radius, 12px); border: 1px solid rgba(243, 238, 228, 0.5); background: rgba(255, 255, 255, 0.95); color: #222; }
 .tc-move-msg { min-height: 1.2em; font-weight: 700; }
 .tc-move-msg.bad { color: #ffb4a2; }
+/* 許願（v1.569，openWishForm、openMyWishes）：道具欄下面一塊金色虛線框；表單、我的願望疊在道具欄上面（底色深一點） */
+.tc-wish-row { display: flex; flex-direction: column; gap: 8px; padding: 12px; border-radius: 14px; border: 1px dashed rgba(247, 201, 78, 0.7); background: rgba(247, 201, 78, 0.08); color: #f3eee4; font-size: 13px; line-height: 1.5; }
+.tc-wish-row p { margin: 0; }
+.tc-wish-row b { margin-right: 6px; color: #f7c94e; font-size: 15px; }
+.tc-wish-row small { opacity: 0.8; }
+.tc-wish-btns { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.tc-wish-btns .chip:disabled { opacity: 0.5; cursor: default; }
+.tc-wishform, .tc-mywish { background: rgba(10, 14, 20, 0.95); }
+.tc-form-box { align-items: stretch; max-width: 440px; }
+.tc-wish-form, .tc-mywish .tc-main { display: flex; flex-direction: column; gap: 12px; color: #f3eee4; font-size: 13px; line-height: 1.55; }
+.tc-field { display: flex; flex-direction: column; gap: 4px; }
+.tc-field > span { font-size: 14px; font-weight: 700; }
+.tc-field small { opacity: 0.75; }
+.tc-field textarea, .tc-field input, .tc-tweak-form textarea { min-width: 0; font: inherit; font-size: 16px; line-height: 1.5; padding: 8px 10px; border-radius: var(--card-radius, 12px); border: 1px solid rgba(243, 238, 228, 0.5); background: rgba(255, 255, 255, 0.95); color: #222; resize: vertical; }
+.tc-len { align-self: flex-end; }
+.tc-rules { padding: 10px 12px; border-radius: 12px; border: 1px dashed rgba(243, 238, 228, 0.35); background: rgba(255, 255, 255, 0.06); }
+.tc-rules ul { margin: 6px 0 0; padding-left: 18px; }
+.tc-agree { display: flex; align-items: center; gap: 8px; font-size: 14px; font-weight: 700; cursor: pointer; }
+.tc-agree input { width: 18px; height: 18px; margin: 0; }
+.tc-wish-form > .chip { align-self: flex-start; }
+.tc-wishform .tc-picked { border-radius: 18px; }
+.tc-wish-coins { margin: 0; }
+.tc-wish-coins b { color: #f7c94e; font-size: 15px; }
+.tc-wishes, .tc-tweaks { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 10px; }
+.tc-wish-item { display: flex; flex-direction: column; gap: 6px; padding: 12px; border-radius: 14px; border: 1px solid rgba(243, 238, 228, 0.3); background: rgba(18, 22, 28, 0.94); }
+.tc-tweaks { padding-left: 10px; border-left: 2px solid rgba(247, 201, 78, 0.45); }
+.tc-tweaks li { display: flex; flex-direction: column; gap: 4px; }
+.tc-wish-top { display: flex; align-items: center; gap: 8px; font-size: 12px; }
+.tc-st { margin-left: auto; padding: 1px 9px; border-radius: 999px; font-size: 12px; font-weight: 800; background: rgba(243, 238, 228, 0.2); white-space: nowrap; }
+.tc-st.st-pending { background: #f7c94e; color: #3b2f22; }
+.tc-st.st-approved, .tc-st.st-building { background: #3d6fa8; color: #fff; }
+.tc-st.st-live { background: #2f8a55; color: #fff; }
+.tc-st.st-rejected, .tc-st.st-dropped { background: #9a4a3a; color: #fff; }
+.tc-new { padding: 0 6px; border-radius: 999px; background: #e5484d; color: #fff; font-size: 11px; font-weight: 800; }
+.tc-wish-body { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; display: -webkit-box; -webkit-line-clamp: 6; line-clamp: 6; -webkit-box-orient: vertical; overflow: hidden; cursor: pointer; }
+.tc-wish-body.full { display: block; }
+.tc-wish-links { display: flex; flex-direction: column; gap: 2px; margin: 0; }
+.tc-mywish a { color: #f7c94e; overflow-wrap: anywhere; }
+.tc-wish-reply { margin: 0; padding: 6px 10px; border-left: 3px solid #f7c94e; background: rgba(247, 201, 78, 0.1); white-space: pre-wrap; overflow-wrap: anywhere; }
+.tc-wish-reply b { display: block; color: #f7c94e; font-size: 12px; }
+.tc-wish-coin { opacity: 0.75; }
+.tc-wish-acts { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.tc-wish-acts .chip:disabled { opacity: 0.5; cursor: default; }
+.tc-tweak-form { flex: 1 1 100%; display: flex; flex-direction: column; gap: 6px; }
+/* 小紅點：許願有新進度還沒看（道具按鈕、收起來時的「⋯」、道具欄裡的「我的願望」） */
+.chip.has-news { position: relative; }
+.chip.has-news::after { content: ''; position: absolute; top: -3px; right: -3px; width: 10px; height: 10px; border-radius: 50%; background: #e5484d; box-shadow: 0 0 0 2px #fff; pointer-events: none; }
 @media (prefers-reduced-motion: reduce) { .tc-inner, .tc-pick-opt { transition: none; } .tc-picked { animation: none; } }
 
 /*

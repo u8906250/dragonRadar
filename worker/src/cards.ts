@@ -1,6 +1,6 @@
 /**
  * 收集卡（尋找小法）：在汪星的 3D 國館點到小法就拿到 No.001（雷達上點到不算，前端決定）；
- * 回報、確認、放上雷達的活動累計滿 5 則拿到 No.002「古錐媽的肉乾」，每滿 5 則再給一份獎勵，自己選一包肉乾或一枚順幣（道具，用法之後再設計）。
+ * 回報、確認、放上雷達的活動累計滿 5 則拿到 No.002「古錐媽的肉乾」，每滿 5 則再給一份獎勵，自己選一包肉乾或一枚順幣（順幣拿來許願，wishes.ts）。
  * 不用登入，用瀏覽器的裝置代碼（加鹽雜湊）認人；伺服器記哪張卡、什麼時候、在哪裡拿到，第幾位拿到照拿到的順序算（id 由小到大）
  */
 import type { Env } from './env';
@@ -156,7 +156,7 @@ export async function purgeCards(env: Env, cutoff: number): Promise<number> {
   return r.reduce((n, x) => n + (x.meta.changes ?? 0), 0);
 }
 
-// ---- 引繼碼（換裝置）：舊裝置產生、新裝置輸入，卡片、道具、回報的累計從舊的裝置搬到新的裝置（回報本身、漂流瓶不動） ----
+// ---- 引繼碼（換裝置）：舊裝置產生、新裝置輸入，卡片、道具、回報的累計、許願從舊的裝置搬到新的裝置（回報本身、漂流瓶不動） ----
 
 /** 引繼碼用的字：大寫英文和數字，拿掉容易看錯的 0、O、1、I（32 個字，8 個字約一兆多種） */
 const CODE_CHARS = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
@@ -192,7 +192,7 @@ async function countTry(env: Env, ip: string, kind: 'make' | 'redeem', now: numb
 /** 舊裝置：產生引繼碼（同一台之前產生、還沒用的作廢） */
 export async function makeTransfer(env: Env, device: string | null, ip: string, now: number): Promise<{ code: string; expiresAt: number }> {
   if (!device) throw new ReportError(400, '缺少裝置代碼，請重新整理頁面');
-  const has = await env.DB.prepare('SELECT (SELECT COUNT(*) FROM card_claims WHERE device_id = ?) + (SELECT COUNT(*) FROM item_grants WHERE device_id = ?) AS n').bind(device, device).first<{ n: number }>();
+  const has = await env.DB.prepare('SELECT (SELECT COUNT(*) FROM card_claims WHERE device_id = ?) + (SELECT COUNT(*) FROM item_grants WHERE device_id = ?) + (SELECT COUNT(*) FROM wishes WHERE device_id = ?) AS n').bind(device, device, device).first<{ n: number }>();
   if (!has?.n) throw new ReportError(400, '這台還沒有收集到卡、道具，沒有可以搬的');
   await countTry(env, ip, 'make', now);
   const code = makeCode();
@@ -231,6 +231,8 @@ export async function redeemTransfer(env: Env, device: string | null, ip: string
     env.DB.prepare("UPDATE item_grants SET reason = reason || ':moved:' || id WHERE device_id = ? AND EXISTS (SELECT 1 FROM item_grants o WHERE o.device_id = ? AND o.reason = item_grants.reason)").bind(old, device),
     env.DB.prepare('UPDATE item_grants SET device_id = ? WHERE device_id = ?').bind(device, old),
     env.DB.prepare('UPDATE report_credits SET device_id = ? WHERE device_id = ?').bind(device, old),
+    // 許願（v1.569）：願望、調整一起搬（暫扣的順幣在 item_grants 跟著搬了）
+    env.DB.prepare('UPDATE wishes SET device_id = ? WHERE device_id = ?').bind(device, old),
   ]);
   const mine = await myCards(env, device);
   return { cards: mine.cards, items: mine.items, picks: mine.picks, moved: r[2].meta.changes ?? 0 };
