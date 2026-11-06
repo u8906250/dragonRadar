@@ -13,8 +13,8 @@ export const IDLE_CYCLE_MS = 5_040_000;
 export const idlePhase = (now: number, offsetMs: number): number => Math.round((now + offsetMs) % IDLE_CYCLE_MS);
 
 /** 會自己畫一個小場景的圖示 */
-export type SceneKind = 'sporthub' | 'workhub' | 'ridehub' | 'pocketpark' | 'detention' | 'cleanwater' | 'schoolwalk' | 'lunch' | 'piggy' | 'aiteam' | 'oldhouse' | 'streettree' | 'bikerack' | 'nightmayor';
-const SCENE_KINDS: readonly string[] = ['sporthub', 'workhub', 'ridehub', 'pocketpark', 'detention', 'cleanwater', 'schoolwalk', 'lunch', 'piggy', 'aiteam', 'oldhouse', 'streettree', 'bikerack', 'nightmayor'];
+export type SceneKind = 'sporthub' | 'workhub' | 'ridehub' | 'pocketpark' | 'detention' | 'cleanwater' | 'schoolwalk' | 'lunch' | 'piggy' | 'aiteam' | 'oldhouse' | 'streettree' | 'bikerack' | 'nightmayor' | 'buscharge' | 'library24';
+const SCENE_KINDS: readonly string[] = ['sporthub', 'workhub', 'ridehub', 'pocketpark', 'detention', 'cleanwater', 'schoolwalk', 'lunch', 'piggy', 'aiteam', 'oldhouse', 'streettree', 'bikerack', 'nightmayor', 'buscharge', 'library24'];
 export const isSceneKind = (k: string): k is SceneKind => SCENE_KINDS.includes(k);
 
 /** 站著的小人（腳在 y = 0、往右走）：身體的 class 決定衣服顏色，extra 是帽子、領帶這些 */
@@ -177,6 +177,38 @@ export const WALKER_SVG = `<g class="boat-flip"><ellipse class="bk-shadow" cx="0
 export const PATROL_SVG = `<g class="boat-flip"><ellipse class="bk-shadow" cx="0" cy="0.4" rx="3.6" ry="0.8"/><g class="walk-bob">${person('nm-vest', MAYOR_BITS).replace('<g class="sc-bob">', '<g>')}</g></g>`;
 
 /**
+ * 北士科星群（v1.553 使用者說「北士科星群做無人公車充電站，周邊再規劃 24 小時圖書館」）：
+ * 1. 無人公車充電站（「變電站與公車充電站雙站合一」＋無人載具沙盒）：自動駕駛的電動公車（車頂光達、車頭綠色的感測眼，沒有司機）開進來，
+ *    充電弓從桿子上降到車頂，後面變電站的電一閃一閃流過去、電池一格一格充滿、冒綠色打勾，充電弓升起、公車開走；一輪 10 秒
+ * 2. 24 小時圖書館（「數位圖書館」沙盒，畫成整晚開著的圖書館）：月亮、星星下窗戶亮著、有人在看書翻頁，
+ *    書變成小光點飛到外面長椅上的人的平板；一輪 6 秒
+ */
+const BUSCHARGE =
+  '<ellipse class="sc-shadow" cx="0" cy="6.6" rx="24" ry="1.3"/><path class="bc-road" d="M-26 6.4H26"/>' +
+  '<rect class="bc-sub" x="14" y="-21" width="10" height="10" rx="0.8"/><path class="bc-fence" d="M14 -17.4H24M14 -14H24"/><path class="bc-sign" d="M19.4 -20L17.6 -16.8H19.2L18.2 -13.8L20.8 -17.4H19.2Z"/>' +
+  '<path class="bc-mast" d="M11 6.2V-17.4H-1.6"/><path class="bc-cable" d="M14 -16Q12.6 -17 11 -17.4H-0.4"/><path class="bc-spark" d="M14 -16Q12.6 -17 11 -17.4H-0.4"/>' +
+  '<g class="bc-panto"><path class="bc-arm" d="M-0.4 -17.4L-2 -13.6M-0.4 -17.4L1.2 -13.6"/><path class="bc-shoe" d="M-3 -13.3H2.2"/></g>' +
+  '<g class="bc-bus"><rect class="bc-body" x="-12" y="-10" width="23" height="13" rx="2.2"/><rect class="bc-stripe" x="-12" y="-1.6" width="23" height="1.6"/>' +
+  [-10, -5.4, -0.8].map((x) => `<rect class="bc-win" x="${x}" y="-8.2" width="3.8" height="4.2" rx="0.6"/>`).join('') +
+  '<path class="bc-front" d="M4 -8.2H8.6Q10.2 -8.2 10.2 -6.6V-4H4Z"/><circle class="bc-eye" cx="8.3" cy="-6.2" r="0.95"/>' +
+  '<rect class="bc-lidar" x="-7.4" y="-11.6" width="2.6" height="1.6" rx="0.7"/><path class="bc-scan" d="M-8.8 -13a2.8 2.8 0 0 1 5.4 0"/>' +
+  '<circle class="tk-wheel" cx="-6.4" cy="3.6" r="2.1"/><circle class="tk-wheel" cx="6" cy="3.6" r="2.1"/><circle class="tk-hub" cx="-6.4" cy="3.6" r="0.8"/><circle class="tk-hub" cx="6" cy="3.6" r="0.8"/>' +
+  '<g transform="translate(-12 -17)"><rect class="bc-bat" width="8" height="3.6" rx="0.6"/><rect class="bc-batcap" x="8" y="1.1" width="0.9" height="1.4"/><rect class="bc-batfill" x="0.6" y="0.6" width="6.8" height="2.4" rx="0.3"/></g>' +
+  '<g transform="translate(-2 -19)"><g class="bc-ok"><circle r="1.9"/><path d="M-0.9 0L-0.2 0.7L1 -0.7"/></g></g></g>';
+const LIBRARY24 =
+  '<ellipse class="sc-shadow" cx="1" cy="6.6" rx="19" ry="1.2"/>' +
+  '<path class="lb-moon" d="M-17.4 -19.4a3 3 0 1 0 3.6 3.6a2.4 2.4 0 1 1 -3.6 -3.6Z"/><path class="lb-star s1" d="M-10 -21l0.5 1.3 1.3 0.5 -1.3 0.5 -0.5 1.3 -0.5 -1.3 -1.3 -0.5 1.3 -0.5z"/><path class="lb-star s2" d="M10 -19l0.4 1 1 0.4 -1 0.4 -0.4 1 -0.4 -1 -1 -0.4 1 -0.4z"/>' +
+  '<path class="lb-roof" d="M-14.6 -10L-3 -16.4L8.6 -10Z"/><rect class="lb-wall" x="-13" y="-10" width="20" height="16.4" rx="0.8"/>' +
+  '<circle class="lb-sign" cx="-3" cy="-12.4" r="2.5"/><text class="lb-24" x="-3" y="-11.3" text-anchor="middle">24</text>' +
+  '<rect class="lb-win" x="-11.4" y="-7.4" width="7.4" height="6.2" rx="0.4"/><rect class="lb-win" x="-1.8" y="-7.4" width="7.4" height="6.2" rx="0.4"/>' +
+  '<path class="lb-shelf" d="M-11.4 -5.6H-4M-1.8 -5.6H5.6"/><circle class="lb-reader" cx="-8.6" cy="-3.7" r="1.15"/><circle class="lb-reader" cx="1.6" cy="-3.7" r="1.15"/>' +
+  '<g transform="translate(-7 -2.5)"><path class="lb-book" d="M-1.4 0.6L0 0L1.4 0.6V1.6L0 1L-1.4 1.6Z"/><path class="lb-page" d="M0 0L1.4 0.6V1.6L0 1Z"/></g>' +
+  '<rect class="lb-door" x="-4.6" y="0.6" width="3.2" height="5.8" rx="0.4"/>' +
+  '<path class="pp-wood" d="M10.6 3.4H17.8"/><path class="pp-leg" d="M11.2 3.4V5.8M17.2 3.4V5.8"/>' +
+  `<g transform="translate(14.2 3.6) scale(0.8)">${person('lb-coat', '<rect class="lb-tablet" x="1.2" y="-6.8" width="2.4" height="3.2" rx="0.4"/>')}</g>` +
+  [1, 2, 3].map((i) => `<circle class="lb-bit b${i}" cx="3.8" cy="-4" r="0.75"/>`).join('');
+
+/**
  * 10. 水圳淨水（「用植生過濾、濕地、礫間接觸等自然工法改善水質」）：水路上一叢蘆葦，水裡的小點從灰濁流過蘆葦變清澈的藍色；
  * deg 是水流的方向（螢幕角度，0 往右）
  */
@@ -213,6 +245,10 @@ export function sceneSvg(kind: SceneKind, deg: number): string {
       return BIKERACK;
     case 'nightmayor':
       return NIGHTMAYOR;
+    case 'buscharge':
+      return BUSCHARGE;
+    case 'library24':
+      return LIBRARY24;
     case 'oldhouse':
       return OLDHOUSE;
     case 'lunch':

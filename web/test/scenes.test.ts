@@ -5,7 +5,7 @@ import { haversineKm } from '../src/geo';
 
 describe('更貼近政策的小動畫', () => {
   it('draws every scene kind', () => {
-    const kinds: SceneKind[] = ['sporthub', 'pocketpark', 'detention', 'cleanwater', 'schoolwalk', 'lunch', 'piggy', 'aiteam', 'workhub', 'ridehub', 'oldhouse', 'streettree', 'bikerack', 'nightmayor'];
+    const kinds: SceneKind[] = ['sporthub', 'pocketpark', 'detention', 'cleanwater', 'schoolwalk', 'lunch', 'piggy', 'aiteam', 'workhub', 'ridehub', 'oldhouse', 'streettree', 'bikerack', 'nightmayor', 'buscharge', 'library24'];
     for (const k of kinds) {
       expect(isSceneKind(k)).toBe(true);
       expect(sceneSvg(k, 0).length).toBeGreaterThan(100);

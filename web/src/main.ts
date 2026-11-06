@@ -3755,6 +3755,9 @@ function hqAlong(pts: Array<[number, number]>, stepM: number, marginM: number): 
 }
 /** 水圳淨水的蘆葦另外指定的位置（大灣古河道：河道上的文昌街 280 巷） */
 const HQ_CLEAN_AT: Record<string, [number, number]> = { 大灣古河道: [25.0318, 121.55692] };
+/** 北士科星群的無人公車充電站（軟橋街附近）、24 小時圖書館（文林路附近）：星群圈的內側，示意 */
+const HQ_NORTH_CHARGE = { lat: 25.0999, lng: 121.5152 };
+const HQ_NORTH_LIBRARY = { lat: 25.1015, lng: 121.5172 };
 /** 臺北市政府的 AI 支援小隊：市府大樓東南側（不擋「臺北市政府」的字、煙火） */
 const HQ_AI_TEAM = { lat: 25.0369, lng: 121.5655 };
 /** 運動驛站設在山林徑起點的捷運站 */
@@ -3807,6 +3810,13 @@ function hqScenes(t0: number): HqIcon[] {
     const [a, b] = [c.points[Math.max(0, k - 2)], c.points[Math.min(n - 1, k + 2)]];
     const p = HQ_CLEAN_AT[c.name] ?? c.points[k];
     out.push({ lat: p[0], lng: p[1], at: hqStopAt(t0, c.stop) + 3000, kind: 'cleanwater', scale, rot: bearingDeg({ lat: a[0], lng: a[1] }, { lat: b[0], lng: b[1] }), hint: { title: `${c.name}：植生淨水（示意）`, intro: I['水圳淨水'] ?? '' } });
+  }
+  // 北士科星群（v1.553）：無人公車充電站（雙站合一）、24 小時圖書館（數位圖書館），星星升起時一起冒出來（星群圈內側，不擋星星）
+  const north = hq.HQ_STARS.find((st) => st.big);
+  if (north) {
+    const nAt = hqNearestAt(t0, north) + 1400;
+    out.push({ lat: HQ_NORTH_CHARGE.lat, lng: HQ_NORTH_CHARGE.lng, at: nAt, kind: 'buscharge', scale, hint: { title: '北士科：無人公車充電站（雙站合一，示意）', intro: I['北士科充電站'] ?? '' } });
+    out.push({ lat: HQ_NORTH_LIBRARY.lat, lng: HQ_NORTH_LIBRARY.lng, at: nAt + 400, kind: 'library24', scale, hint: { title: '北士科：24 小時圖書館（數位圖書館，示意）', intro: I['北士科圖書館'] ?? '' } });
   }
   // 臺北市政府的 AI 支援小隊：洋流號到市政府後（v1.548 使用者說「台北市政府的 AI 小隊畫出來」）
   out.push({ lat: HQ_AI_TEAM.lat, lng: HQ_AI_TEAM.lng, at: t0 + HQ_SAIL_MS + 1200, kind: 'aiteam', scale, hint: { title: '臺北市政府：AI 支援小隊', intro: I['AI支援小隊'] ?? '' } });
