@@ -3760,8 +3760,27 @@ function hqAlong(pts: Array<[number, number]>, stepM: number, marginM: number): 
   }
   return out;
 }
-/** 水圳淨水的蘆葦另外指定的位置（大灣古河道：河道上的文昌街 280 巷） */
-const HQ_CLEAN_AT: Record<string, [number, number]> = { 大灣古河道: [25.0318, 121.55692] };
+/** 線上離 p 最近的一點、那一段的方向（往下游，度） */
+function hqOnLine(pts: Array<[number, number]>, p: [number, number]): { at: [number, number]; bearing: number } {
+  const kx = Math.cos((p[0] * Math.PI) / 180);
+  let best = { d: Infinity, at: pts[0], bearing: 0 };
+  for (let i = 1; i < pts.length; i++) {
+    const [a, b] = [pts[i - 1], pts[i]];
+    const [dx, dy] = [(b[1] - a[1]) * kx, b[0] - a[0]];
+    const len2 = dx * dx + dy * dy;
+    if (!(len2 > 0)) continue;
+    const t = Math.max(0, Math.min(1, (((p[1] - a[1]) * kx) * dx + (p[0] - a[0]) * dy) / len2));
+    const q: [number, number] = [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t];
+    const d = hqDistMeters(q, p);
+    if (d < best.d) best = { d, at: q, bearing: bearingDeg({ lat: a[0], lng: a[1] }, { lat: b[0], lng: b[1] }) };
+  }
+  return { at: best.at, bearing: best.bearing };
+}
+/**
+ * 水圳淨水的蘆葦另外指定的位置（大灣古河道：v1.551 文昌街 280 巷；v1.559 那段河道只有 40 公尺、往北就轉彎，水流畫出來會超出河道，
+ * 改到往西一點、沿文昌街直直約 200 公尺那段的中間，水流整段貼著小河）
+ */
+const HQ_CLEAN_AT: Record<string, [number, number]> = { 大灣古河道: [25.03228, 121.55578] };
 /** 北士科星群的無人公車充電站（軟橋街附近）、24 小時圖書館（文林路附近）：星群圈的內側，示意 */
 const HQ_NORTH_CHARGE = { lat: 25.0999, lng: 121.5152 };
 const HQ_NORTH_LIBRARY = { lat: 25.1015, lng: 121.5172 };
@@ -3829,12 +3848,11 @@ function hqScenes(t0: number): HqIcon[] {
   for (const d of hq.HQ_DETENTION) out.push({ lat: d.lat, lng: d.lng, at: hqNearestAt(t0, d) + 300, kind: 'detention', scale, hint: { title: `微型社區滯洪（${d.name}）`, intro: I['微型社區滯洪'] ?? '' } });
   // 水圳淨水：水路四成的地方（水注滿 3 秒後），照那一段水流的方向；大灣古河道那一點在光復南路上，搬到往北一點、河道轉進的文昌街 280 巷
   // （v1.548 使用者說不要畫在大馬路上；v1.551 說要在河上面）
+  // 蘆葦旁的水流沿著小河畫（v1.559 使用者說「大灣古河道蘆葦旁邊的河流要沿著小河畫」）：對齊到最近的那一段河道上、照那一段的方向
   for (const c of hq.HQ_CANALS) {
-    const n = c.points.length;
-    const k = Math.floor(n * 0.4);
-    const [a, b] = [c.points[Math.max(0, k - 2)], c.points[Math.min(n - 1, k + 2)]];
-    const p = HQ_CLEAN_AT[c.name] ?? c.points[k];
-    out.push({ lat: p[0], lng: p[1], at: hqStopAt(t0, c.stop) + 3000, kind: 'cleanwater', scale, rot: bearingDeg({ lat: a[0], lng: a[1] }, { lat: b[0], lng: b[1] }), hint: { title: `${c.name}：植生淨水（示意）`, intro: I['水圳淨水'] ?? '' } });
+    const want = HQ_CLEAN_AT[c.name] ?? c.points[Math.floor(c.points.length * 0.4)];
+    const { at: p, bearing } = hqOnLine(c.points, want);
+    out.push({ lat: p[0], lng: p[1], at: hqStopAt(t0, c.stop) + 3000, kind: 'cleanwater', scale, rot: bearing, hint: { title: `${c.name}：植生淨水（示意）`, intro: I['水圳淨水'] ?? '' } });
   }
   // 北士科星群（v1.553）：無人公車充電站（雙站合一）、24 小時圖書館（數位圖書館），星星升起時一起冒出來（星群圈內側，不擋星星）
   const north = hq.HQ_STARS.find((st) => st.big);
