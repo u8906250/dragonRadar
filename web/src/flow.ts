@@ -1,4 +1,4 @@
-import { TREE_DOCTOR } from './hq-scenes';
+import { TREE_DOCTOR, TREE_TWIN } from './hq-scenes';
 
 /**
  * 彩虹流出（同志遊行出發時，雷達、地圖上的路線從出發的地方一路流到終點）：每一條線從頭慢慢畫到尾。
@@ -201,7 +201,8 @@ export function regrowSvg(growMs: number): string {
   return (
     '<path class="rg-trunk" d="M-2.6 -2L-3.2 6H3.2L2.6 -2Z"/><ellipse class="rg-cut" cy="-2" rx="2.6" ry="1.1"/>' +
     `<g class="rg-crown" style="animation-delay:${Math.round(growMs)}ms"><circle cx="-5.5" cy="-8" r="6"/><circle cx="5.5" cy="-8" r="6"/><circle cx="0" cy="-13" r="7"/><circle class="rg-lit" cx="-2.5" cy="-15" r="2.4"/></g>` +
-    TREE_DOCTOR
+    TREE_DOCTOR +
+    TREE_TWIN
   );
 }
 

@@ -355,6 +355,19 @@ export const TREE_DOCTOR =
   '<g transform="translate(0 -24)"><g class="rg-ok"><circle r="3.2"/><path d="M-1.6 0L-0.4 1.3L1.8 -1.2"/></g></g>';
 
 /**
+ * 路樹數位雙生（v1.560 使用者說「先做路樹數位雙生」；都市微森林政見「用數位雙生、監控系統與動態健康履歷管理路樹，
+ * 現有路樹分改善、更新、移除三級處理」）：長回來的大樹右邊浮一棵淡藍色線框的分身樹，上面一張健康履歷卡；
+ * 樹和分身之間的小光點一直在同步，樹醫生來聽診時（跟 TREE_DOCTOR 同一個 9 秒）履歷卡的狀態條跑一下，變綠色、打勾。拉近才出現
+ */
+export const TREE_TWIN =
+  '<g transform="translate(3 0)"><g class="tw">' +
+  '<path class="tw-line" d="M17 6V-3"/><circle class="tw-line" cx="13.4" cy="-6.6" r="4.4"/><circle class="tw-line" cx="20.6" cy="-6.6" r="4.4"/><circle class="tw-line" cx="17" cy="-10.6" r="5"/>' +
+  '<path class="tw-grid" d="M12 -6.6H22M17 -15V-2"/>' +
+  [1, 2, 3].map((i) => `<circle class="tw-bit b${i}" cx="6" cy="-12" r="0.75"/>`).join('') +
+  '<g transform="translate(17 -21)"><rect class="tw-card" x="-6" y="-3" width="12" height="6" rx="1"/><rect class="tw-track" x="-4.4" y="-0.8" width="6.4" height="1.6" rx="0.8"/>' +
+  '<rect class="tw-bar" x="-4.4" y="-0.8" width="6.4" height="1.6" rx="0.8"/><g transform="translate(3.6 0)"><g class="tw-ok"><circle r="1.4"/><path d="M-0.7 0L-0.15 0.55L0.8 -0.55"/></g></g></g></g></g>';
+
+/**
  * 14. 關渡國際足球場（「規劃符合國際賽事的關渡國際足球場，建立台北的城市主場」）：球員射門、球進網、看台的觀眾跟著做波浪
  */
 export const SOCCER_SVG =
