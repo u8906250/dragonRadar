@@ -1,5 +1,5 @@
 import type { BlipStyle, EventKind, Phase, SweepStyle } from './types';
-import { DOME_SVG, idlePhase, isSceneKind, sceneSvg, SOCCER_SVG, TRUCK_SVG, windSvg, type SceneKind } from './hq-scenes';
+import { DOME_SVG, idlePhase, isSceneKind, PATROL_SVG, sceneSvg, SOCCER_SVG, TRUCK_SVG, WALKER_SVG, windSvg, type SceneKind } from './hq-scenes';
 import { alongLine, BOAT_SVG, crackSvg, FITBUS_BODY, FITBUS_SVG, hqMotionKm, HQ_NET_LABEL_KM, BIKE_SVG, HIKER_SVG, PETWALK_SVG, FISH_SVG, WETLAND_BIRDS, MUSIC_NOTES, bikePhase, fitbusPhase, fitbusStopSvg, cultureSvg, regrowSvg, serviceSvg, stitchSvg, BOAT_TITLE, boatPhase, fireworksSvg, FIREWORKS_MS, flowOut, HQ_VOYAGE_MS, RAINBOW_FLOW_TOTAL, RAINBOW_STAGGER_MS, riverHalfWidth, surge, SURGE_TOTAL, voyagePhase, voyageTimeOf } from './flow';
 
 export interface RadarItem {
@@ -76,7 +76,7 @@ export interface RadarRoute {
    */
   reveals?: Array<{ points: Array<{ bearing: number; distanceKm: number }>; at: number; kind: 'trail' | 'bridge' | 'stars' | 'culture'; label?: string; color?: string; labelAt?: number; hideKm?: number }>;
   /** 騎自行車的人：沿著 points 從頭騎到尾（start 開始、一趟 lap 毫秒），拉遠收起來 */
-  bikes?: Array<{ points: Array<{ bearing: number; distanceKm: number }>; start: number; lap: number; kind?: 'bike' | 'hiker' | 'pet' | 'truck'; loop?: boolean; color?: string }>;
+  bikes?: Array<{ points: Array<{ bearing: number; distanceKm: number }>; start: number; lap: number; kind?: 'bike' | 'hiker' | 'pet' | 'truck' | 'walker' | 'patrol'; loop?: boolean; color?: string }>;
   /** 健身小巴：沿著 points 繞圈（start 出發、stopAt 是各站在路線上的位置），停站時那一站冒出運動的長輩；lineAt 路線畫出來；focus 是政策按鈕（衛福）亮著 */
   fitbuses?: Array<{ points: Array<{ bearing: number; distanceKm: number }>; start: number; lineAt: number; stopAt: number[]; stops: Array<{ point: { bearing: number; distanceKm: number }; label: string }>; focus?: boolean; size?: number; dim?: boolean; driveMs: number }>;
   /** 縫合（市民大道）：at 裂縫畫出來、healAt 縫完變淡；stitches 一個一個縫（along 是路上的下一點，算方向）；walkers 人流小點從 from 走到 to */
@@ -2382,7 +2382,7 @@ export class Radar {
       // 騎自行車的人、登山客（山林徑）、牽狗散步的人（大安森林公園）
       const kind = bk.kind ?? 'bike';
       const g = el('g', { class: `route-boat hq-bike ${kind}`, ...(bk.color ? { style: `--c:${bk.color}` } : {}) }) as SVGGElement;
-      g.innerHTML = kind === 'hiker' ? HIKER_SVG : kind === 'pet' ? PETWALK_SVG : kind === 'truck' ? TRUCK_SVG : BIKE_SVG;
+      g.innerHTML = kind === 'hiker' ? HIKER_SVG : kind === 'pet' ? PETWALK_SVG : kind === 'truck' ? TRUCK_SVG : kind === 'walker' ? WALKER_SVG : kind === 'patrol' ? PATROL_SVG : BIKE_SVG;
       this.routeLayer.appendChild(g);
       this.boatTracks.push({ id: `hq-bike-${i}`, g, flip: g.querySelector('.boat-flip') as SVGGElement, xs, ys, cum, ride: { start: bk.start, lap: bk.lap, loop: bk.loop }, scale: kind === 'bike' ? 1.1 : kind === 'pet' ? 1.4 : 1.2 });
     });

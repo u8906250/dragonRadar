@@ -1,5 +1,5 @@
 import './styles.css';
-import { FITBUS_MS_PER_M, HQ_NET_LABEL_KM, HQ_SAIL_MS, HQ_STAR_MS, HQ_VOYAGE_MS, RAINBOW_EVERY_MS, voyagePhase, voyageTimeOf } from './flow';
+import { FITBUS_MS_PER_M, hqMotionKm, HQ_NET_LABEL_KM, HQ_SAIL_MS, HQ_STAR_MS, HQ_VOYAGE_MS, RAINBOW_EVERY_MS, voyagePhase, voyageTimeOf } from './flow';
 import { addKeyword, collectLetter, deletePushSubscription, locateFeedbackPlace, sendFeedback, type FeedbackKind, fetchPushKey, savePushSubscription, confirmReport, editReport, locatePlace, rejectReport, supplementReport, deleteBottle, dropBottle, recycleBottle, fetchBottles, fetchEvents, fetchHealth, fetchKeywords, fetchMyBottles, fetchMyReports, fetchRoutes, pickBottle, reportBottle, reportEnded, submitLink, withdrawReport } from './api';
 import { compassSupported, startCompass } from './compass';
 import { bearingDeg, compassLabel, destination, formatKm, haversineKm, taiwanRadiusKm, type LatLng } from './geo';
@@ -3719,10 +3719,38 @@ function hqExtras(t0: number): { reveals: HqReveal[]; icons: HqIcon[]; seams: Hq
     reveals.push({ path: ln.pts, at, kind: 'culture', label: ln.name, color: hq.HQ_CULTURE_THEMES[ln.theme].color });
   }
   icons.push(...hqScenes(t0));
+  // 條通的巷子（v1.552）：淡淡的暖橘色線，燈籠沿著巷子排；拉近才畫（跟燈籠一樣）
+  if (view !== 'radar' || scaleKm <= hqMotionKm()) {
+    const tiaoAt = hqNearestAt(t0, HQ_TIAO_CENTER);
+    hq.HQ_TIAOTONG.forEach((ln, li) => ln.ways.forEach((w) => reveals.push({ path: w.pts, at: tiaoAt + li * 350, kind: 'culture', color: '#f2a65a', hideKm: hqMotionKm() + 0.05 })));
+  }
   return { reveals, icons, seams };
 }
 /** 濕地風廊的涼風往哪裡吹：市區（台北車站） */
 const HQ_WIND_TO = { lat: 25.0478, lng: 121.517 };
+/** 條通的中間（船離這裡最近時燈籠亮）、夜市長協調的地方（七條通，中山北路一段 121 巷） */
+const HQ_TIAO_CENTER = { lat: 25.0498, lng: 121.5249 };
+const HQ_NIGHT_MAYOR = { lat: 25.05105, lng: 121.5236 };
+/** 兩點相距幾公尺 */
+const hqDistMeters = (a: [number, number], b: [number, number]): number => haversineKm({ lat: a[0], lng: a[1] }, { lat: b[0], lng: b[1] }) * 1000;
+/** 沿著一條線每 stepM 公尺取一點（頭尾各留 marginM） */
+function hqAlong(pts: Array<[number, number]>, stepM: number, marginM: number): Array<[number, number]> {
+  const out: Array<[number, number]> = [];
+  let total = 0;
+  for (let i = 1; i < pts.length; i++) total += hqDistMeters(pts[i - 1], pts[i]);
+  let next = Math.min(marginM, total / 2);
+  let walked = 0;
+  for (let i = 1; i < pts.length; i++) {
+    const seg = hqDistMeters(pts[i - 1], pts[i]);
+    while (seg > 0 && next <= walked + seg && next <= total - marginM + 0.01) {
+      const f = (next - walked) / seg;
+      out.push([pts[i - 1][0] + (pts[i][0] - pts[i - 1][0]) * f, pts[i - 1][1] + (pts[i][1] - pts[i - 1][1]) * f]);
+      next += stepM;
+    }
+    walked += seg;
+  }
+  return out;
+}
 /** 水圳淨水的蘆葦另外指定的位置（大灣古河道：河道上的文昌街 280 巷） */
 const HQ_CLEAN_AT: Record<string, [number, number]> = { 大灣古河道: [25.0318, 121.55692] };
 /** 臺北市政府的 AI 支援小隊：市府大樓東南側（不擋「臺北市政府」的字、煙火） */
@@ -3744,9 +3772,25 @@ function hqScenes(t0: number): HqIcon[] {
     const st = HQ_HUB_STATION[tr.name] ?? tr.name;
     out.push({ lat: tr.station[0], lng: tr.station[1], at: hqStopAt(t0, tr.stop) + 300, kind: 'sporthub', scale, hint: { title: `運動驛站（捷運${st}站旁）`, intro: I['運動驛站'] ?? '' } });
   }
-  // 內科的運動驛站（港墘、西湖，接自行車橋）：橋畫出來後
+  // 騎車通勤的運動驛站（松山站換上騎車的衣服、港墘站換回上班的衣服，接自行車橋）：橋畫出來後
   const bridgeAt = hqStopAt(t0, hq.HQ_BRIDGE.stop);
-  for (const h of hq.HQ_WORK_HUBS) out.push({ lat: h.lat, lng: h.lng, at: bridgeAt + 1500, kind: 'workhub', scale, hint: { title: `運動驛站（捷運${h.name}站旁，接自行車橋）`, intro: `${I['驛站接自行車橋'] ?? ''}\n${I['運動驛站'] ?? ''}` } });
+  for (const h of hq.HQ_BIKE_HUBS) {
+    const what = h.mode === 'ride' ? '換上騎車的衣服出發' : '騎到了，沖澡換回上班的衣服';
+    out.push({ lat: h.lat, lng: h.lng, at: bridgeAt + 1500, kind: h.mode === 'ride' ? 'ridehub' : 'workhub', scale, hint: { title: `運動驛站（${h.name}站旁：${what}）`, intro: `${I['驛站接自行車橋'] ?? ''}\n${I['運動驛站'] ?? ''}` } });
+  }
+  // 條通（v1.552）：船離條通最近時，燈籠從二條通一條一條亮到九條通（每 70 公尺一盞；巷子南北只隔 40 公尺，太密會擠成一團）；
+  // 中山北路那頭的巷口放盆栽；七條通的夜市長協調。燈籠、盆栽拉近（電腦版 3 km、手機 2 km 以內）才畫，拉遠只留夜市長和字
+  const tiaoAt = hqNearestAt(t0, HQ_TIAO_CENTER);
+  const tiaoHint = { title: '條通：安心夜路・步行者特區・夜市長（示意）', intro: I['條通'] ?? '' };
+  if (view !== 'radar' || scaleKm <= hqMotionKm()) {
+    hq.HQ_TIAOTONG.forEach((ln, li) => {
+      let j = 0;
+      for (const w of ln.ways) for (const q of hqAlong(w.pts, 70, 15)) out.push({ lat: q[0], lng: q[1], at: tiaoAt + li * 350 + j++ * 120, kind: 'lantern', scale: 0.55 * zs });
+      const m = ln.ways[0].pts[0];
+      out.push({ lat: m[0], lng: m[1], at: tiaoAt + 600 + li * 120, kind: 'planter', scale: 0.6 * zs });
+    });
+  }
+  out.push({ lat: HQ_NIGHT_MAYOR.lat, lng: HQ_NIGHT_MAYOR.lng, at: tiaoAt + 1200, kind: 'nightmayor', scale, label: '條通・夜市長', hideKm: 5, hint: tiaoHint });
   // 老宅延壽：萬華、大同各一棟老公寓，船離它最近時；按「都更」時也亮著
   for (const h of hq.HQ_OLD_HOUSES) out.push({ lat: h.lat, lng: h.lng, at: hqNearestAt(t0, h) + 300, kind: 'oldhouse', scale, focus: hqLayer?.id === 'renewal', hint: { title: `老宅延壽（${h.district}・${h.name}，示意）`, intro: I['老宅延壽'] ?? '' } });
   for (const p of hq.HQ_POCKETPARKS) out.push({ lat: p.lat, lng: p.lng, at: hqNearestAt(t0, p) + 300, kind: 'pocketpark', scale, hint: { title: `口袋公園（示意：${p.name}）`, intro: I['口袋公園'] ?? '' } });
@@ -3784,7 +3828,7 @@ function hqScenes(t0: number): HqIcon[] {
  * 騎自行車的人（v1.529）：迎風—港墘自行車橋上兩台（橋畫好後）、河濱自行車道（大佳河濱、大稻埕）各兩台（船經過時），一去一回、錯開半趟；
  * 一趟的時間照長度（每公尺 14 毫秒、最少 8 秒）
  */
-function hqBikes(t0: number): Array<{ path: Array<[number, number]>; start: number; lap: number; kind?: 'bike' | 'hiker' | 'pet' | 'truck'; loop?: boolean; color?: string }> {
+function hqBikes(t0: number): Array<{ path: Array<[number, number]>; start: number; lap: number; kind?: 'bike' | 'hiker' | 'pet' | 'truck' | 'walker' | 'patrol'; loop?: boolean; color?: string }> {
   if (!hq) return [];
   const br = hq.HQ_BRIDGE;
   const lapOf = (m: number): number => Math.max(8000, m * 14);
@@ -3817,10 +3861,25 @@ function hqBikes(t0: number): Array<{ path: Array<[number, number]>; start: numb
     { path: [...jog.path].reverse(), start: parkAt - jogLap / 3, lap: jogLap, kind: 'pet', loop: true, color: '#3a6fd8' },
     { path: main.path, start: parkAt - mainLap / 2, lap: mainLap, kind: 'pet', loop: true, color: '#f2b544' },
   );
-  // 騎車過自行車橋去內科上班（v1.550）：從橋的南端（民生社區這邊）過橋、騎到港墘、西湖站旁的運動驛站，一台接一台
-  for (const [i, h] of hq.HQ_WORK_HUBS.entries()) {
-    const lap = lapOf(340 + h.lengthM);
-    out.push({ path: [br.from, ...h.bike], start: bridgeAt + 3000 + i * 2500, lap });
+  // 騎車通勤（v1.552 使用者說「自行車可以從松山站出發，沿著河濱，過自行車橋」）：松山站 → 基隆河左岸自行車道 → 自行車橋 → 港墘站，兩台錯開半趟
+  const cm = hq.HQ_COMMUTE;
+  const cmLap = lapOf(cm.lengthM);
+  out.push({ path: cm.path, start: bridgeAt + 3000, lap: cmLap }, { path: cm.path, start: bridgeAt + 3000 + cmLap / 2, lap: cmLap });
+  // 條通（v1.552）：巷子裡散步的人（走得慢，每公尺 30 毫秒）、巡邏的夜市長（六條通，整條來回）
+  const tiaoAt = hqNearestAt(t0, HQ_TIAO_CENTER) + 900;
+  const walkColors = ['#e05a5a', '#3a6fd8', '#2f9e6a', '#f2b544', '#8a6fd0'];
+  hq.HQ_TIAOTONG.flatMap((ln) => ln.ways)
+    .filter((w) => w.pts.length > 1 && lenM(w.pts) > 200)
+    .filter((_, i) => i % 2 === 0)
+    .forEach((w, i) => {
+      const lap = Math.max(9000, lenM(w.pts) * 30);
+      out.push({ path: i % 2 ? [...w.pts].reverse() : w.pts, start: tiaoAt + i * 700, lap, kind: 'walker', color: walkColors[i % walkColors.length] });
+    });
+  const six = hq.HQ_TIAOTONG.find((ln) => ln.name === '六條通');
+  if (six) {
+    const whole = six.ways.flatMap((w) => w.pts);
+    const lap = Math.max(14000, lenM(whole) * 36);
+    out.push({ path: [...whole, ...[...whole].reverse()], start: tiaoAt + 400, lap: lap * 2, kind: 'patrol', loop: true });
   }
   // 在地小農進校園（「教育・午餐」按鈕開著，v1.545）：小貨車從農地開到學校，開車的速度跟健身小巴一樣（每公尺 5 毫秒）
   if (hqLayer?.id === 'edu') for (const tk of hq.HQ_FARM_TRUCKS) out.push({ path: tk.path, start: hqLayer.at + 600, lap: Math.max(9000, tk.lengthM * FITBUS_MS_PER_M), kind: 'truck' });

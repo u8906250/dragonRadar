@@ -13,8 +13,8 @@ export const IDLE_CYCLE_MS = 5_040_000;
 export const idlePhase = (now: number, offsetMs: number): number => Math.round((now + offsetMs) % IDLE_CYCLE_MS);
 
 /** 會自己畫一個小場景的圖示 */
-export type SceneKind = 'sporthub' | 'workhub' | 'pocketpark' | 'detention' | 'cleanwater' | 'schoolwalk' | 'lunch' | 'piggy' | 'aiteam' | 'oldhouse';
-const SCENE_KINDS: readonly string[] = ['sporthub', 'workhub', 'pocketpark', 'detention', 'cleanwater', 'schoolwalk', 'lunch', 'piggy', 'aiteam', 'oldhouse'];
+export type SceneKind = 'sporthub' | 'workhub' | 'ridehub' | 'pocketpark' | 'detention' | 'cleanwater' | 'schoolwalk' | 'lunch' | 'piggy' | 'aiteam' | 'oldhouse' | 'lantern' | 'planter' | 'nightmayor';
+const SCENE_KINDS: readonly string[] = ['sporthub', 'workhub', 'ridehub', 'pocketpark', 'detention', 'cleanwater', 'schoolwalk', 'lunch', 'piggy', 'aiteam', 'oldhouse', 'lantern', 'planter', 'nightmayor'];
 export const isSceneKind = (k: string): k is SceneKind => SCENE_KINDS.includes(k);
 
 /** 站著的小人（腳在 y = 0、往右走）：身體的 class 決定衣服顏色，extra 是帽子、領帶這些 */
@@ -39,7 +39,8 @@ const SCHOOLWALK =
 /**
  * 3. 運動驛站（「在重點捷運站旁與登山口設運動驛站，提供盥洗、置物與租借服務」）：捷運站旁一間小驛站（窗戶畫淋浴的水滴、置物櫃）。
  * 登山口那幾站（sporthub）：穿西裝的上班族走進去、換好運動服出來去爬山；
- * 內科的港墘、西湖站（workhub，v1.550）：從民生社區騎車過自行車橋來的人戴安全帽走進去、沖完澡換好上班的衣服出來，門口停一台黃色的腳踏車
+ * 騎車通勤（v1.552）：松山站（ridehub）穿西裝走進去、戴安全帽出來騎車；港墘站（workhub）騎到了戴安全帽進去、沖完澡換好上班的衣服出來；
+ * 這兩站門口停一台黃色的腳踏車
  */
 const SUIT = ['sh-suit', '<path class="sh-tie" d="M0 -7.3V-5.4"/><rect class="sh-case" x="1.1" y="-4.6" width="2.6" height="1.9" rx="0.3"/>'] as const;
 const SPORT = ['sh-sport', '<path class="sh-cap" d="M-1.7 -9.7A1.7 1.7 0 0 1 1.7 -9.7H3Z"/><path class="sh-towel" d="M-0.9 -7.6Q0 -6.6 0.9 -7.6"/>'] as const;
@@ -48,14 +49,14 @@ const PARKED_BIKE =
   '<g class="sh-bike"><circle class="sh-wheel" cx="10.6" cy="4.7" r="1.6"/><circle class="sh-wheel" cx="15" cy="4.7" r="1.6"/>' +
   '<path class="sh-frame" d="M10.6 4.7L12.4 2.3H14.2L15 4.7M12.4 2.3L12.8 4.7L14.2 2.3M12.1 1.5H13M14 1.6L14.4 2.3"/></g>';
 const dressed = ([body, extra]: readonly [string, string]): string => person(body, extra);
-const hub = (work: boolean): string =>
+const hub = (mode: 'trail' | 'ride' | 'work'): string =>
   '<ellipse class="sc-shadow" cx="0" cy="6.6" rx="14" ry="1.4"/>' +
   '<rect class="sh-wall" x="-8" y="-6" width="16" height="12.4" rx="1"/><path class="sh-roof" d="M-9.5 -6H9.5V-9.4H-9.5Z"/>' +
   '<rect class="sh-win" x="-6.6" y="-4" width="4" height="3.8" rx="0.6"/><path class="sh-drop" d="M-4.6 -3.4Q-5.9 -1.7 -4.6 -0.9Q-3.3 -1.7 -4.6 -3.4Z"/>' +
   '<rect class="sh-win" x="2.6" y="-4" width="4" height="3.8" rx="0.6"/><path class="sh-lock" d="M3.4 -3.3H5.8V-0.9H3.4ZM4.6 -3.3V-0.9"/>' +
   '<rect class="sh-door" x="-1.9" y="0.6" width="3.8" height="5.8" rx="0.5"/>' +
-  (work ? PARKED_BIKE : '') +
-  `<g transform="translate(0 6.4)"><g class="sh-in">${dressed(work ? RIDER : SUIT)}</g><g class="sh-out">${dressed(work ? SUIT : SPORT)}</g></g>`;
+  (mode === 'trail' ? '' : PARKED_BIKE) +
+  `<g transform="translate(0 6.4)"><g class="sh-in">${dressed(mode === 'work' ? RIDER : SUIT)}</g><g class="sh-out">${dressed(mode === 'trail' ? SPORT : mode === 'ride' ? RIDER : SUIT)}</g></g>`;
 
 /**
  * 4. 在地小農進校園（營養午餐）：學校旁邊一個便當冒熱氣、偶爾跳一顆愛心（小貨車另外沿路開，TRUCK_SVG）
@@ -143,6 +144,36 @@ const OLDHOUSE =
   `<g transform="translate(0.5 6)"><g class="oh-worker">${person('oh-overall', '<path class="oh-hat" d="M-1.9 -9.6A1.9 1.9 0 0 1 1.9 -9.6H2.4Z"/><rect class="oh-box" x="1.2" y="-3.6" width="2.8" height="1.8" rx="0.3"/>')}</g></g>`;
 
 /**
+ * 條通（v1.552）：巷子裡一盞盞暖黃的燈籠（安心夜路，船經過時從二條通一條一條亮到九條通，拉近時輕輕晃、燈光微微閃）、
+ * 巷口的盆栽小樹（步行者特區）、夜市長（紫色背心、黃色臂章、胸前月亮、提燈籠）來協調：店家和住戶冒出「！」的對話框，
+ * 夜市長走過來站中間，對話框不見、三個人都冒愛心
+ */
+const LANTERN =
+  '<g class="lt-sway"><path class="lt-string" d="M0 -9V-6.2"/><circle class="lt-glow" cy="-2.2" r="5.2"/><rect class="lt-cap" x="-1.6" y="-6.4" width="3.2" height="1"/>' +
+  '<ellipse class="lt-body" cy="-2.3" rx="2.7" ry="3.4"/><path class="lt-rib" d="M-2.4 -3.6H2.4M-2.7 -2.3H2.7M-2.4 -1H2.4"/><rect class="lt-cap" x="-1.6" y="0.9" width="3.2" height="1"/><path class="lt-tassel" d="M0 1.9V3.8"/></g>';
+const PLANTER =
+  '<ellipse class="sc-shadow" cy="4.4" rx="5" ry="0.8"/><rect class="pt-box" x="-4" y="0.4" width="8" height="4" rx="0.6"/>' +
+  '<circle class="pt-bush" cx="-1.6" cy="-1" r="2.6"/><circle class="pt-bush" cx="1.8" cy="-1.5" r="2.8"/><circle class="pt-flower" cx="-2.4" cy="-2" r="0.7"/><circle class="pt-flower b" cx="2.4" cy="-2.7" r="0.7"/>';
+/** 夜市長（身上的東西，腳在 y = 0、往右）：紫色背心、黃色臂章、胸前小月亮，右手提一盞燈籠 */
+const MAYOR_BITS =
+  '<path class="nm-band" d="M-1.1 -6.6H1.1"/><path class="nm-moon" d="M-0.2 -5.4a0.9 0.9 0 1 0 0.9 -0.9a0.7 0.7 0 1 1 -0.9 0.9Z"/>' +
+  '<path class="nm-stick" d="M0.8 -6L3.4 -8.4"/><ellipse class="lt-body" cx="3.6" cy="-6.8" rx="1.1" ry="1.4"/>';
+const BUBBLE = (x: number, y: number): string =>
+  `<g transform="translate(${x} ${y})"><g class="nm-bub"><path class="nm-bubble" d="M-3 -3H3V1.6H0.8L-0.6 3.2V1.6H-3Z"/><path class="nm-mark" d="M0 -2V-0.2M0 0.7V0.8"/></g></g>`;
+const NIGHTMAYOR =
+  '<ellipse class="sc-shadow" cy="6.6" rx="17" ry="1.2"/>' +
+  '<rect class="nm-shop" x="-17" y="-6" width="9" height="12.4" rx="0.6"/><path class="nm-awn" d="M-17.6 -6L-16.4 -9H-8.6L-7.4 -6Z"/><rect class="nm-shopwin" x="-15.6" y="-3.6" width="6" height="4" rx="0.4"/>' +
+  `<g transform="translate(-11.2 -9.6) scale(0.55)">${LANTERN}</g>` +
+  `<g transform="translate(-6 6)">${person('nm-apron')}</g><g transform="translate(9 6)">${person('nm-resident')}</g>` +
+  BUBBLE(-6, -12) + BUBBLE(9, -12) +
+  `<g transform="translate(0 6)"><g class="nm-mayor">${person('nm-vest', MAYOR_BITS)}</g></g>` +
+  [-6, 0, 9].map((x, i) => `<g transform="translate(${x} -12)"><path class="nm-heart h${i + 1}" d="${HEART}"/></g>`).join('');
+/** 條通裡散步的人（往右走，往左時翻過來）：上衣顏色照 --c */
+export const WALKER_SVG = `<g class="boat-flip"><ellipse class="bk-shadow" cx="0" cy="0.4" rx="3.6" ry="0.8"/><g class="walk-bob">${person('wk-body', '<rect class="wk-bag" x="1" y="-5" width="1.8" height="2.2" rx="0.4"/>').replace('<g class="sc-bob">', '<g>')}</g></g>`;
+/** 在條通巡邏的夜市長 */
+export const PATROL_SVG = `<g class="boat-flip"><ellipse class="bk-shadow" cx="0" cy="0.4" rx="3.6" ry="0.8"/><g class="walk-bob">${person('nm-vest', MAYOR_BITS).replace('<g class="sc-bob">', '<g>')}</g></g>`;
+
+/**
  * 10. 水圳淨水（「用植生過濾、濕地、礫間接觸等自然工法改善水質」）：水路上一叢蘆葦，水裡的小點從灰濁流過蘆葦變清澈的藍色；
  * deg 是水流的方向（螢幕角度，0 往右）
  */
@@ -168,9 +199,17 @@ export function sceneSvg(kind: SceneKind, deg: number): string {
     case 'schoolwalk':
       return SCHOOLWALK;
     case 'sporthub':
-      return hub(false);
+      return hub('trail');
     case 'workhub':
-      return hub(true);
+      return hub('work');
+    case 'ridehub':
+      return hub('ride');
+    case 'lantern':
+      return LANTERN;
+    case 'planter':
+      return PLANTER;
+    case 'nightmayor':
+      return NIGHTMAYOR;
     case 'oldhouse':
       return OLDHOUSE;
     case 'lunch':
