@@ -13,8 +13,8 @@ export const IDLE_CYCLE_MS = 5_040_000;
 export const idlePhase = (now: number, offsetMs: number): number => Math.round((now + offsetMs) % IDLE_CYCLE_MS);
 
 /** 會自己畫一個小場景的圖示 */
-export type SceneKind = 'sporthub' | 'pocketpark' | 'detention' | 'cleanwater' | 'schoolwalk' | 'lunch' | 'piggy' | 'aiteam';
-const SCENE_KINDS: readonly string[] = ['sporthub', 'pocketpark', 'detention', 'cleanwater', 'schoolwalk', 'lunch', 'piggy', 'aiteam'];
+export type SceneKind = 'sporthub' | 'workhub' | 'pocketpark' | 'detention' | 'cleanwater' | 'schoolwalk' | 'lunch' | 'piggy' | 'aiteam' | 'oldhouse';
+const SCENE_KINDS: readonly string[] = ['sporthub', 'workhub', 'pocketpark', 'detention', 'cleanwater', 'schoolwalk', 'lunch', 'piggy', 'aiteam', 'oldhouse'];
 export const isSceneKind = (k: string): k is SceneKind => SCENE_KINDS.includes(k);
 
 /** 站著的小人（腳在 y = 0、往右走）：身體的 class 決定衣服顏色，extra 是帽子、領帶這些 */
@@ -37,17 +37,25 @@ const SCHOOLWALK =
   `<g transform="translate(8.6 -7.4)">${person('sw-vest')}<g class="sw-flag"><path class="sw-pole" d="M-0.4 -6.4V-12.4"/><path class="sw-cloth" d="M-0.4 -12.4H-4.6V-9.6H-0.4Z"/></g></g>`;
 
 /**
- * 3. 運動驛站（「在重點捷運站旁與登山口設運動驛站，提供盥洗、置物與租借服務」）：捷運站旁一間小驛站（窗戶畫淋浴的水滴、置物櫃），
- * 穿西裝的上班族走進去、換好運動服出來
+ * 3. 運動驛站（「在重點捷運站旁與登山口設運動驛站，提供盥洗、置物與租借服務」）：捷運站旁一間小驛站（窗戶畫淋浴的水滴、置物櫃）。
+ * 登山口那幾站（sporthub）：穿西裝的上班族走進去、換好運動服出來去爬山；
+ * 內科的港墘、西湖站（workhub，v1.550）：從民生社區騎車過自行車橋來的人戴安全帽走進去、沖完澡換好上班的衣服出來，門口停一台黃色的腳踏車
  */
-const SPORTHUB =
+const SUIT = ['sh-suit', '<path class="sh-tie" d="M0 -7.3V-5.4"/><rect class="sh-case" x="1.1" y="-4.6" width="2.6" height="1.9" rx="0.3"/>'] as const;
+const SPORT = ['sh-sport', '<path class="sh-cap" d="M-1.7 -9.7A1.7 1.7 0 0 1 1.7 -9.7H3Z"/><path class="sh-towel" d="M-0.9 -7.6Q0 -6.6 0.9 -7.6"/>'] as const;
+const RIDER = ['sh-sport', '<path class="sh-helmet" d="M-1.9 -9.6A1.9 1.9 0 0 1 1.9 -9.6Z"/>'] as const;
+const PARKED_BIKE =
+  '<g class="sh-bike"><circle class="sh-wheel" cx="10.6" cy="4.7" r="1.6"/><circle class="sh-wheel" cx="15" cy="4.7" r="1.6"/>' +
+  '<path class="sh-frame" d="M10.6 4.7L12.4 2.3H14.2L15 4.7M12.4 2.3L12.8 4.7L14.2 2.3M12.1 1.5H13M14 1.6L14.4 2.3"/></g>';
+const dressed = ([body, extra]: readonly [string, string]): string => person(body, extra);
+const hub = (work: boolean): string =>
   '<ellipse class="sc-shadow" cx="0" cy="6.6" rx="14" ry="1.4"/>' +
   '<rect class="sh-wall" x="-8" y="-6" width="16" height="12.4" rx="1"/><path class="sh-roof" d="M-9.5 -6H9.5V-9.4H-9.5Z"/>' +
   '<rect class="sh-win" x="-6.6" y="-4" width="4" height="3.8" rx="0.6"/><path class="sh-drop" d="M-4.6 -3.4Q-5.9 -1.7 -4.6 -0.9Q-3.3 -1.7 -4.6 -3.4Z"/>' +
   '<rect class="sh-win" x="2.6" y="-4" width="4" height="3.8" rx="0.6"/><path class="sh-lock" d="M3.4 -3.3H5.8V-0.9H3.4ZM4.6 -3.3V-0.9"/>' +
   '<rect class="sh-door" x="-1.9" y="0.6" width="3.8" height="5.8" rx="0.5"/>' +
-  `<g transform="translate(0 6.4)"><g class="sh-in">${person('sh-suit', '<path class="sh-tie" d="M0 -7.3V-5.4"/><rect class="sh-case" x="1.1" y="-4.6" width="2.6" height="1.9" rx="0.3"/>')}</g>` +
-  `<g class="sh-out">${person('sh-sport', '<path class="sh-cap" d="M-1.7 -9.7A1.7 1.7 0 0 1 1.7 -9.7H3Z"/><path class="sh-towel" d="M-0.9 -7.6Q0 -6.6 0.9 -7.6"/>')}</g></g>`;
+  (work ? PARKED_BIKE : '') +
+  `<g transform="translate(0 6.4)"><g class="sh-in">${dressed(work ? RIDER : SUIT)}</g><g class="sh-out">${dressed(work ? SUIT : SPORT)}</g></g>`;
 
 /**
  * 4. 在地小農進校園（營養午餐）：學校旁邊一個便當冒熱氣、偶爾跳一顆愛心（小貨車另外沿路開，TRUCK_SVG）
@@ -112,6 +120,29 @@ const AITEAM =
   `<g transform="translate(14 -10)"><path class="ai-heart" d="${'M0 -1.6C-1.2 -2.8 -2.8 -3.4 -2.8 -4.9C-2.8 -5.9 -2 -6.6 -1.2 -6.6C-0.6 -6.6 -0.2 -6.3 0 -5.8C0.2 -6.3 0.6 -6.6 1.2 -6.6C2 -6.6 2.8 -5.9 2.8 -4.9C2.8 -3.4 1.2 -2.8 0 -1.6Z'}"/></g>`;
 
 /**
+ * 老宅延壽（中山大同、中正萬華政見開箱「老宅延壽行動服務團」，政策島 HEART 頁「老宅改善」；報導：增設電梯、樓梯輔具、更換老舊管線）：
+ * 一棟頂樓有水塔的四層老公寓——服務團的小貨車開來、師傅提工具箱進門（A），外牆生鏽的水管從下往上換成藍色的新水管、水流順了（C），
+ * 旁邊長出一座電梯、長輩坐電梯上下樓、冒愛心（B）；一輪 12 秒。不動的時候是修好的樣子（v1.550）
+ */
+const OLDHOUSE =
+  '<ellipse class="sc-shadow" cx="2" cy="6.6" rx="20" ry="1.3"/>' +
+  '<rect class="oh-tank" x="-6.4" y="-24.6" width="5.4" height="3.4" rx="1.3"/><path class="oh-tankleg" d="M-5.6 -21.2V-20M-1.8 -21.2V-20"/>' +
+  '<rect class="oh-wall" x="-10" y="-20" width="15.4" height="26" rx="0.6"/><path class="oh-stain" d="M-7.4 -19q0.8 3 0 5.4M2.6 -13q-0.7 2.6 0 4.4M-3.6 -6.6q0.6 2.4 0 3.6"/>' +
+  '<path class="oh-floor" d="M-10 -13.5H5.4M-10 -7H5.4M-10 -0.5H5.4"/>' +
+  [-18.4, -11.9, -5.4].map((y) => [-8.2, -1.4].map((x) => `<rect class="oh-win" x="${x}" y="${y}" width="3.6" height="3.2" rx="0.3"/><path class="oh-grill" d="M${x + 1.2} ${y}V${y + 3.2}M${x + 2.4} ${y}V${y + 3.2}"/>`).join('')).join('') +
+  '<rect class="oh-win" x="-8.2" y="1.1" width="3.6" height="3.2" rx="0.3"/><rect class="oh-door" x="-1.2" y="1.2" width="3.4" height="4.8" rx="0.3"/>' +
+  // C. 外牆的水管：生鏽的舊管，藍色的新管從下往上換上去，換好水往下流
+  '<path class="oh-pipe-old" d="M-11.2 -19.4V6"/><path class="oh-pipe-new" d="M-11.2 6V-19.4" pathLength="1"/><path class="oh-water" d="M-11.2 -19.4V6"/>' +
+  // B. 外加的電梯：玻璃電梯井從地面長上去，電梯廂載長輩上下樓
+  '<g class="oh-lift"><rect class="oh-shaft" x="5.8" y="-21" width="5.8" height="27" rx="0.8"/>' +
+  '<g class="oh-car"><rect class="oh-carbox" x="6.3" y="0.4" width="4.8" height="5.4" rx="0.6"/><circle class="sc-head" cx="8.7" cy="2.3" r="1"/><path class="oh-hair" d="M7.7 2A1 1 0 0 1 9.7 2"/><path class="oh-elder" d="M8.7 3.4V5.4"/></g></g>' +
+  `<g transform="translate(9.6 -27)"><path class="oh-heart" d="${HEART}"/></g>` +
+  // A. 服務團的小貨車（白車、藍條、板手）、戴黃色安全帽提工具箱的師傅
+  '<g class="oh-van"><path class="oh-vanbody" d="M14 5.2V-1.6H22.4L25.2 1.4V5.2Z"/><path class="oh-vanstripe" d="M14 2H25.2"/><path class="oh-vanwin" d="M22.6 -0.8L24.6 1.4H22.6Z"/>' +
+  '<path class="oh-wrench" d="M16.4 0.4l2.4 -1.6M18.6 -1.6a0.9 0.9 0 1 0 0.6 0.4"/><circle class="tk-wheel" cx="16.6" cy="5.4" r="1.3"/><circle class="tk-wheel" cx="22.6" cy="5.4" r="1.3"/></g>' +
+  `<g transform="translate(0.5 6)"><g class="oh-worker">${person('oh-overall', '<path class="oh-hat" d="M-1.9 -9.6A1.9 1.9 0 0 1 1.9 -9.6H2.4Z"/><rect class="oh-box" x="1.2" y="-3.6" width="2.8" height="1.8" rx="0.3"/>')}</g></g>`;
+
+/**
  * 10. 水圳淨水（「用植生過濾、濕地、礫間接觸等自然工法改善水質」）：水路上一叢蘆葦，水裡的小點從灰濁流過蘆葦變清澈的藍色；
  * deg 是水流的方向（螢幕角度，0 往右）
  */
@@ -137,7 +168,11 @@ export function sceneSvg(kind: SceneKind, deg: number): string {
     case 'schoolwalk':
       return SCHOOLWALK;
     case 'sporthub':
-      return SPORTHUB;
+      return hub(false);
+    case 'workhub':
+      return hub(true);
+    case 'oldhouse':
+      return OLDHOUSE;
     case 'lunch':
       return LUNCH;
     case 'pocketpark':

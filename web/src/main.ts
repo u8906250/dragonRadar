@@ -3744,6 +3744,11 @@ function hqScenes(t0: number): HqIcon[] {
     const st = HQ_HUB_STATION[tr.name] ?? tr.name;
     out.push({ lat: tr.station[0], lng: tr.station[1], at: hqStopAt(t0, tr.stop) + 300, kind: 'sporthub', scale, hint: { title: `運動驛站（捷運${st}站旁）`, intro: I['運動驛站'] ?? '' } });
   }
+  // 內科的運動驛站（港墘、西湖，接自行車橋）：橋畫出來後
+  const bridgeAt = hqStopAt(t0, hq.HQ_BRIDGE.stop);
+  for (const h of hq.HQ_WORK_HUBS) out.push({ lat: h.lat, lng: h.lng, at: bridgeAt + 1500, kind: 'workhub', scale, hint: { title: `運動驛站（捷運${h.name}站旁，接自行車橋）`, intro: `${I['驛站接自行車橋'] ?? ''}\n${I['運動驛站'] ?? ''}` } });
+  // 老宅延壽：萬華、大同各一棟老公寓，船離它最近時；按「都更」時也亮著
+  for (const h of hq.HQ_OLD_HOUSES) out.push({ lat: h.lat, lng: h.lng, at: hqNearestAt(t0, h) + 300, kind: 'oldhouse', scale, focus: hqLayer?.id === 'renewal', hint: { title: `老宅延壽（${h.district}・${h.name}，示意）`, intro: I['老宅延壽'] ?? '' } });
   for (const p of hq.HQ_POCKETPARKS) out.push({ lat: p.lat, lng: p.lng, at: hqNearestAt(t0, p) + 300, kind: 'pocketpark', scale, hint: { title: `口袋公園（示意：${p.name}）`, intro: I['口袋公園'] ?? '' } });
   for (const d of hq.HQ_DETENTION) out.push({ lat: d.lat, lng: d.lng, at: hqNearestAt(t0, d) + 300, kind: 'detention', scale, hint: { title: `微型社區滯洪（${d.name}）`, intro: I['微型社區滯洪'] ?? '' } });
   // 水圳淨水：水路四成的地方（水注滿 3 秒後），照那一段水流的方向；大灣古河道那一點在光復南路上，往左上搬到 692 巷（v1.548 使用者說不要畫在大馬路上）
@@ -3811,6 +3816,11 @@ function hqBikes(t0: number): Array<{ path: Array<[number, number]>; start: numb
     { path: [...jog.path].reverse(), start: parkAt - jogLap / 3, lap: jogLap, kind: 'pet', loop: true, color: '#3a6fd8' },
     { path: main.path, start: parkAt - mainLap / 2, lap: mainLap, kind: 'pet', loop: true, color: '#f2b544' },
   );
+  // 騎車過自行車橋去內科上班（v1.550）：從橋的南端（民生社區這邊）過橋、騎到港墘、西湖站旁的運動驛站，一台接一台
+  for (const [i, h] of hq.HQ_WORK_HUBS.entries()) {
+    const lap = lapOf(340 + h.lengthM);
+    out.push({ path: [br.from, ...h.bike], start: bridgeAt + 3000 + i * 2500, lap });
+  }
   // 在地小農進校園（「教育・午餐」按鈕開著，v1.545）：小貨車從農地開到學校，開車的速度跟健身小巴一樣（每公尺 5 毫秒）
   if (hqLayer?.id === 'edu') for (const tk of hq.HQ_FARM_TRUCKS) out.push({ path: tk.path, start: hqLayer.at + 600, lap: Math.max(9000, tk.lengthM * FITBUS_MS_PER_M), kind: 'truck' });
   return out;
