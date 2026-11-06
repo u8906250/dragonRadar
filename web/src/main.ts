@@ -3858,8 +3858,8 @@ function hqScenes(t0: number): HqIcon[] {
   const north = hq.HQ_STARS.find((st) => st.big);
   if (north) {
     const nAt = hqNearestAt(t0, north) + 1400;
-    out.push({ lat: HQ_NORTH_CHARGE.lat, lng: HQ_NORTH_CHARGE.lng, at: nAt, kind: 'buscharge', scale, hint: { title: '北士科：無人公車充電站（雙站合一，示意）', intro: I['北士科充電站'] ?? '' } });
-    out.push({ lat: HQ_NORTH_LIBRARY.lat, lng: HQ_NORTH_LIBRARY.lng, at: nAt + 400, kind: 'library24', scale, hint: { title: '北士科：24 小時圖書館（數位圖書館，示意）', intro: I['北士科圖書館'] ?? '' } });
+    out.push({ lat: HQ_NORTH_CHARGE.lat, lng: HQ_NORTH_CHARGE.lng, at: nAt, kind: 'buscharge', scale, hint: { title: '北士科：無人公車充電站（雙站合一，示意）', intro: `${I['數位孿生說明'] ?? ''}\n${I['北士科充電站'] ?? ''}` } });
+    out.push({ lat: HQ_NORTH_LIBRARY.lat, lng: HQ_NORTH_LIBRARY.lng, at: nAt + 400, kind: 'library24', scale, hint: { title: '北士科：24 小時圖書館（數位圖書館，示意）', intro: `${I['數位孿生說明'] ?? ''}\n${I['北士科圖書館'] ?? ''}` } });
   }
   // 臺北市政府的 AI 支援小隊：洋流號到市政府後（v1.548 使用者說「台北市政府的 AI 小隊畫出來」）
   out.push({ lat: HQ_AI_TEAM.lat, lng: HQ_AI_TEAM.lng, at: t0 + HQ_SAIL_MS + 1200, kind: 'aiteam', scale, hint: { title: '臺北市政府：AI 支援小隊', intro: I['AI支援小隊'] ?? '' } });
@@ -4130,7 +4130,7 @@ function hqHits(t0: number): Array<{ lat: number; lng: number; at: number; title
       const p = hq.HQ_PLANTINGS.find((x) => x.lat === ic.lat && x.lng === ic.lng);
       if (!p) continue;
       const outlet = hqOutlet(p.source);
-      hits.push({ lat: ic.lat, lng: ic.lng, at: ic.grow ?? ic.at, title: p.hideName ? '南港的老樹' : p.name, intro: `${p.why}${outlet ? `（${outlet}報導）` : ''}。\n綠覆率：${I['綠覆率'] ?? ''}\n都市微森林：把樹種回來；移除路樹前，市府、居民、樹木專家、保險業者、都計或樹管委員至少五方一起討論。\n都市林治理：${I['都市林治理'] ?? ''}\n樹醫生、路樹數位雙生（拉近看得到：樹醫生來看診，旁邊淡藍色的分身樹和健康履歷卡跟著更新）：${I['樹醫生'] ?? ''}`, dy: 14, r: 16 });
+      hits.push({ lat: ic.lat, lng: ic.lng, at: ic.grow ?? ic.at, title: p.hideName ? '南港的老樹' : p.name, intro: `${p.why}${outlet ? `（${outlet}報導）` : ''}。\n綠覆率：${I['綠覆率'] ?? ''}\n都市微森林：把樹種回來；移除路樹前，市府、居民、樹木專家、保險業者、都計或樹管委員至少五方一起討論。\n都市林治理：${I['都市林治理'] ?? ''}\n${I['路樹數位雙生說明'] ?? ''}\n樹醫生：${I['樹醫生'] ?? ''}`, dy: 14, r: 16 });
     } else if (ic.kind === 'culture') {
       const c = hq.HQ_CULTURE.find((x) => x.lat === ic.lat && x.lng === ic.lng);
       if (!c) continue;
