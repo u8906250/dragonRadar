@@ -13,8 +13,8 @@ export const IDLE_CYCLE_MS = 5_040_000;
 export const idlePhase = (now: number, offsetMs: number): number => Math.round((now + offsetMs) % IDLE_CYCLE_MS);
 
 /** 會自己畫一個小場景的圖示 */
-export type SceneKind = 'sporthub' | 'workhub' | 'ridehub' | 'pocketpark' | 'detention' | 'cleanwater' | 'schoolwalk' | 'lunch' | 'piggy' | 'aiteam' | 'oldhouse' | 'streettree' | 'bikerack' | 'nightmayor' | 'buscharge' | 'library24' | 'lantern' | 'nightsky' | 'tpassgo' | 'tpasspark' | 'busterminal' | 'busturn';
-const SCENE_KINDS: readonly string[] = ['sporthub', 'workhub', 'ridehub', 'pocketpark', 'detention', 'cleanwater', 'schoolwalk', 'lunch', 'piggy', 'aiteam', 'oldhouse', 'streettree', 'bikerack', 'nightmayor', 'buscharge', 'library24', 'lantern', 'nightsky', 'tpassgo', 'tpasspark', 'busterminal', 'busturn'];
+export type SceneKind = 'sporthub' | 'workhub' | 'ridehub' | 'pocketpark' | 'detention' | 'cleanwater' | 'schoolwalk' | 'lunch' | 'piggy' | 'aiteam' | 'oldhouse' | 'streettree' | 'bikerack' | 'nightmayor' | 'buscharge' | 'library24' | 'lantern' | 'nightsky' | 'tpassgo' | 'tpasspark' | 'busterminal';
+const SCENE_KINDS: readonly string[] = ['sporthub', 'workhub', 'ridehub', 'pocketpark', 'detention', 'cleanwater', 'schoolwalk', 'lunch', 'piggy', 'aiteam', 'oldhouse', 'streettree', 'bikerack', 'nightmayor', 'buscharge', 'library24', 'lantern', 'nightsky', 'tpassgo', 'tpasspark', 'busterminal'];
 export const isSceneKind = (k: string): k is SceneKind => SCENE_KINDS.includes(k);
 
 /** 站著的小人（腳在 y = 0、往右走）：身體的 class 決定衣服顏色，extra 是帽子、領帶這些 */
@@ -259,7 +259,6 @@ const TPASS_PARK =
  * 公車安全改革（v1.555）：
  * 1. 市府轉運站（busterminal）：折返點休息納入班表——司機下車走進休息室，窗戶裡喝茶冒熱氣、牆上的時鐘轉一圈，休息好了冒愛心（直接補貼駕駛薪資）走回公車，
  *    公車頭上冒綠色打勾（準點出發、服務可靠度）；一輪 12 秒
- * 2. 忠孝東路五段與松仁路口（busturn）：駕駛座告警——公車左轉、前面有人走斑馬線，駕駛座的螢幕跳出黃色警示，公車停下來讓人先過，再轉過去；一輪 9 秒
  */
 const CITY_BUS =
   '<rect class="cb-body" x="-11" y="-11" width="22" height="13" rx="2"/><rect class="cb-stripe" x="-11" y="-2.8" width="22" height="1.6"/>' +
@@ -276,13 +275,6 @@ const BUS_TERMINAL =
   '<g class="cb-inside"><circle class="lb-reader" cx="19" cy="-2.6" r="1"/><rect class="cb-cup" x="20.4" y="-2.4" width="1.4" height="1.4" rx="0.2"/><path class="cb-steam" d="M21.1 -2.8q-0.6 -0.8 0 -1.6t0 -1.6"/></g>' +
   `<g transform="translate(-2 6)"><g class="cb-driver">${person('cb-uniform', '<path class="cb-cap" d="M-1.7 -9.8A1.7 1.7 0 0 1 1.7 -9.8H2.6Z"/>')}<g transform="translate(0 -12)"><path class="cb-heart" d="${HEART}"/></g></g></g>` +
   '<g transform="translate(-9 -12)"><g class="cb-ok"><circle r="2.1"/><path d="M-1 0L-0.2 0.8L1.2 -0.8"/></g></g>';
-const BUS_TURN =
-  '<rect class="sw-road" x="-22" y="-5" width="44" height="10"/><rect class="sw-road" x="-5" y="-22" width="10" height="44"/>' +
-  '<path class="sw-lane" d="M-22 0H-6M6 0H22M0 -22V-12M0 6V22"/>' +
-  '<path class="sw-zebra" d="M-4.2 -11H4.2M-4.2 -9H4.2M-4.2 -7H4.2" style="stroke-width:1.1"/>' +
-  '<g class="cb-turn"><rect class="cb-top" x="-6" y="-2.6" width="12" height="5.2" rx="1.2"/><rect class="cb-shield" x="3.6" y="-2.2" width="1.8" height="4.4" rx="0.5"/></g>' +
-  `<g transform="translate(-5 -7.6)"><g class="cb-ped">${person('wk-body')}</g></g>` +
-  '<g transform="translate(13 -15)"><g class="cb-screen"><rect class="cb-scr" x="-5" y="-3.4" width="10" height="6.8" rx="1"/><path class="cb-warn" d="M0 -2.2L2.4 1.8H-2.4Z"/><path class="cb-warn-mark" d="M0 -0.8V0.5M0 1.1V1.2"/></g></g>';
 
 /**
  * 10. 水圳淨水（「用植生過濾、濕地、礫間接觸等自然工法改善水質」）：水路上一叢蘆葦，水裡的小點從灰濁流過蘆葦變清澈的藍色；
@@ -335,8 +327,7 @@ export function sceneSvg(kind: SceneKind, deg: number): string {
       return TPASS_PARK;
     case 'busterminal':
       return BUS_TERMINAL;
-    case 'busturn':
-      return BUS_TURN;
+
     case 'oldhouse':
       return OLDHOUSE;
     case 'lunch':

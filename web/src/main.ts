@@ -3819,11 +3819,10 @@ function hqScenes(t0: number): HqIcon[] {
   const tpHint = (where: string): { title: string; intro: string } => ({ title: `TPASS 共享機車（${where}，示意）`, intro: I['TPASS共享機車'] ?? '' });
   out.push({ lat: tp.station.lat, lng: tp.station.lng, at: tpAt, kind: 'tpassgo', scale, hint: tpHint(`${tp.station.name}：刷卡騎走`) });
   out.push({ lat: tp.lot.lat, lng: tp.lot.lng, at: tpAt + 600, kind: 'tpasspark', scale, hint: tpHint(`${tp.lot.name}：停進共享機車格`) });
-  // 公車安全改革（v1.555）：市府轉運站（折返點休息、準點出發）、忠孝東路五段與松仁路口（轉彎時螢幕警示、讓行人），洋流號到市政府後
+  // 公車安全改革（v1.555）：市府轉運站（折返點休息、準點出發），洋流號到市政府後（v1.557 使用者說把十字路口拿掉）
   const bs = hq.HQ_BUS_SAFETY;
   const busHint = (where: string): { title: string; intro: string } => ({ title: `公車安全改革（${where}，示意）`, intro: I['公車安全改革'] ?? '' });
   out.push({ lat: bs.terminal.lat, lng: bs.terminal.lng, at: t0 + HQ_SAIL_MS + 1600, kind: 'busterminal', scale, hint: busHint(`${bs.terminal.name}：折返點休息、準點出發`) });
-  out.push({ lat: bs.turn.lat, lng: bs.turn.lng, at: t0 + HQ_SAIL_MS + 2000, kind: 'busturn', scale, hint: busHint(`${bs.turn.name}：轉彎時螢幕警示、讓行人先過`) });
   // 老宅延壽：萬華、大同各一棟老公寓，船離它最近時；按「都更」時也亮著
   for (const h of hq.HQ_OLD_HOUSES) out.push({ lat: h.lat, lng: h.lng, at: hqNearestAt(t0, h) + 300, kind: 'oldhouse', scale, focus: hqLayer?.id === 'renewal', hint: { title: `老宅延壽（${h.district}・${h.name}，示意）`, intro: I['老宅延壽'] ?? '' } });
   for (const p of hq.HQ_POCKETPARKS) out.push({ lat: p.lat, lng: p.lng, at: hqNearestAt(t0, p) + 300, kind: 'pocketpark', scale, hint: { title: `口袋公園（示意：${p.name}）`, intro: I['口袋公園'] ?? '' } });
