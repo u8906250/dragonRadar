@@ -4,6 +4,14 @@
  * 不動的時候只留場景（走路的人、硬幣、雨滴這些收起來），畫面不亂
  */
 
+/**
+ * 待機動畫的相位（CSS 的 --d，負的 animation-delay）照時鐘算：雷達航行中每一格、到站後每幾秒會整層重畫，固定的 delay 每次都從同一格重播，
+ * 看起來停住或一直被打斷（v1.546 使用者說「新加的電腦版動畫都沒出來」）。照 Date.now() 算，重畫後接著同一個進度播；
+ * 取餘數的長度是所有動畫週期（0.25～12 秒）的公倍數（84 分鐘），換一輪時不會跳
+ */
+export const IDLE_CYCLE_MS = 5_040_000;
+export const idlePhase = (now: number, offsetMs: number): number => Math.round((now + offsetMs) % IDLE_CYCLE_MS);
+
 /** 會自己畫一個小場景的圖示 */
 export type SceneKind = 'sporthub' | 'pocketpark' | 'detention' | 'cleanwater' | 'schoolwalk' | 'lunch' | 'piggy';
 const SCENE_KINDS: readonly string[] = ['sporthub', 'pocketpark', 'detention', 'cleanwater', 'schoolwalk', 'lunch', 'piggy'];

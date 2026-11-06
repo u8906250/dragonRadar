@@ -1,5 +1,5 @@
 import type * as Leaflet from 'leaflet';
-import { DOME_SVG, isSceneKind, sceneSvg, SOCCER_SVG, TRUCK_SVG, windSvg, type SceneKind } from './hq-scenes';
+import { DOME_SVG, idlePhase, isSceneKind, sceneSvg, SOCCER_SVG, TRUCK_SVG, windSvg, type SceneKind } from './hq-scenes';
 import { alongLine, BOAT_SVG, crackSvg, FITBUS_BODY, FITBUS_SVG, hqMotionZoom, HQ_LABEL_ZOOM, HQ_NET_LABEL_KM, BIKE_SVG, HIKER_SVG, PETWALK_SVG, FISH_SVG, WETLAND_BIRDS, MUSIC_NOTES, bikePhase, fitbusPhase, fitbusStopSvg, cultureSvg, regrowSvg, serviceSvg, stitchSvg, boatPhase, fireworksSvg, FIREWORKS_MS, flowOut, HQ_VOYAGE_MS, RAINBOW_FLOW_TOTAL, RAINBOW_STAGGER_MS, surge, SURGE_TOTAL, voyagePhase, voyageTimeOf } from './flow';
 import { haversineKm, type LatLng } from './geo';
 import type { EventKind, Phase } from './types';
@@ -348,6 +348,7 @@ export class MapView {
         // 拉遠了，一直動的停下來或收起來（hq-far）
         this.motionFar = map.getZoom() < hqMotionZoom();
         this.el.classList.toggle('hq-far', this.motionFar);
+        this.el.classList.toggle('hq-near', !this.motionFar);
         // 寶箱、橋下空間、大巨蛋、毛孩安心養的字拉遠（縮放 14 以下）不寫
         this.el.classList.toggle('label-far', map.getZoom() < HQ_LABEL_ZOOM);
         // 公園、運動中心、大型建築的字拉得更遠（縮放 13 以下，雷達 10 km）才不寫
@@ -1135,7 +1136,7 @@ export class MapView {
             : ic.kind === 'service'
               ? serviceSvg(ic.char ?? '', ic.color ?? '#555')
               : MAP_ICON_SVG[ic.kind] + (ic.kind === 'wetland' && ic.rot !== undefined ? windSvg(deg) : '');
-      const icon = L.divIcon({ className: `map-voyage-icon ${ic.kind}${ic.focus ? ' focus' : ''}`, html: `<svg viewBox="-20 -20 40 40" width="${40 * sc}" height="${40 * sc}" aria-hidden="true"><g class="boat-pop" style="animation-delay:${Math.round(ic.at - now)}ms"><g class="idle idle-${ic.kind}" style="--d:-${Math.round((((ic.at * 0.618) % 1) + 1) % 1 * 4000)}ms">${body}</g></g></svg>`, iconSize: [40 * sc, 40 * sc], iconAnchor: [20 * sc, 20 * sc] });
+      const icon = L.divIcon({ className: `map-voyage-icon ${ic.kind}${ic.focus ? ' focus' : ''}`, html: `<svg viewBox="-20 -20 40 40" width="${40 * sc}" height="${40 * sc}" aria-hidden="true"><g class="boat-pop" style="animation-delay:${Math.round(ic.at - now)}ms"><g class="idle idle-${ic.kind}" style="--d:-${idlePhase(now, ((((ic.at * 0.618) % 1) + 1) % 1) * 4000)}ms">${body}</g></g></svg>`, iconSize: [40 * sc, 40 * sc], iconAnchor: [20 * sc, 20 * sc] });
       layer.addLayer(L.marker([ic.lat, ic.lng], { icon, interactive: false, keyboard: false, zIndexOffset: 1300 }));
       if (ic.label && !ic.small) this.stayLabel([ic.lat, ic.lng], ic.label, (ic.grow ?? ic.at) + 500 - now, 20 * sc + 16, ic.hideKm ? farCls(ic.hideKm) : '');
     }

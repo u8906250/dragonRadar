@@ -1,5 +1,5 @@
 import type { BlipStyle, EventKind, Phase, SweepStyle } from './types';
-import { DOME_SVG, isSceneKind, sceneSvg, SOCCER_SVG, TRUCK_SVG, windSvg, type SceneKind } from './hq-scenes';
+import { DOME_SVG, idlePhase, isSceneKind, sceneSvg, SOCCER_SVG, TRUCK_SVG, windSvg, type SceneKind } from './hq-scenes';
 import { alongLine, BOAT_SVG, crackSvg, FITBUS_BODY, FITBUS_SVG, hqMotionKm, HQ_NET_LABEL_KM, BIKE_SVG, HIKER_SVG, PETWALK_SVG, FISH_SVG, WETLAND_BIRDS, MUSIC_NOTES, bikePhase, fitbusPhase, fitbusStopSvg, cultureSvg, regrowSvg, serviceSvg, stitchSvg, BOAT_TITLE, boatPhase, fireworksSvg, FIREWORKS_MS, flowOut, HQ_VOYAGE_MS, RAINBOW_FLOW_TOTAL, RAINBOW_STAGGER_MS, riverHalfWidth, surge, SURGE_TOTAL, voyagePhase, voyageTimeOf } from './flow';
 
 export interface RadarItem {
@@ -2058,6 +2058,8 @@ export class Radar {
     // 拉遠了，一直動的停下來或收起來（hq-far）
     this.motionFar = this.scaleKm > hqMotionKm();
     this.routeLayer.classList.toggle('hq-far', this.motionFar);
+    // 更貼近政策的小動畫（hq-scenes.ts）拉近就動，不用等到站（v1.546）
+    this.routeLayer.classList.toggle('hq-near', !this.motionFar);
     // 待機的小動作等洋流號到了、河淡掉才開始（航行中每一格都在重畫，再加會掉格，v1.527）
     this.routeLayer.classList.toggle('hq-idle', r.riverOut !== undefined && Date.now() > r.riverOut + 1000);
     const now = Date.now();
@@ -2301,7 +2303,7 @@ export class Radar {
               ? serviceSvg(ic.char ?? '', ic.color ?? '#555')
               : ICON_SVG[ic.kind] + (ic.kind === 'wetland' && ic.rot !== undefined ? windSvg(deg) : '');
       // 待機的小動作（v1.527 使用者說「其他地方也可以動起來，以不影響效能為主」）：包一層 idle，CSS 照種類動，相位照位置錯開
-      g.innerHTML = `<g class="boat-pop" style="animation-delay:${Math.round(ic.at - now)}ms"><g class="idle idle-${ic.kind}" style="--d:-${Math.round(hash(ic.at) * 4000)}ms">${body}</g></g>`;
+      g.innerHTML = `<g class="boat-pop" style="animation-delay:${Math.round(ic.at - now)}ms"><g class="idle idle-${ic.kind}" style="--d:-${idlePhase(now, hash(ic.at) * 4000)}ms">${body}</g></g>`;
       this.routeLayer.appendChild(g);
       // 字拉遠就不寫（hideKm：寶箱、橋下空間、大巨蛋、毛孩 5 km；公園、運動中心、大型建築 10 km）
       if (!ic.label || (ic.hideKm !== undefined && this.scaleKm >= ic.hideKm - 0.05)) continue;
