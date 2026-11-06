@@ -852,12 +852,10 @@ path.map-night-area { animation: night-in 2.4s ease-in-out both; }
 .ts-seat { fill: none; stroke: #3b3f47; stroke-width: 0.9; stroke-linecap: round; }
 .ts-bar { fill: none; stroke: #3b3f47; stroke-width: 0.8; stroke-linecap: round; }
 .ts-torso { fill: none; stroke: #3a6fd8; stroke-width: 2; stroke-linecap: round; }
+.ts-torso.red { stroke: #e05a5a; }
 .ts-arm, .ts-leg { fill: none; stroke: #4a3a2a; stroke-width: 1; stroke-linecap: round; }
 .ts-helmet { fill: #f7d117; stroke: #8a6d00; stroke-width: 0.3; }
-.ts-exit { fill: #e8eef3; stroke: #3a6fd8; stroke-width: 0.7; }
-.ts-exit-in { fill: #35546a; }
-.ts-m { fill: #3a6fd8; }
-.ts-mt { font-size: 2.6px; font-weight: 900; fill: #fff; }
+.ts-walkway { fill: none; stroke: #c9bba0; stroke-width: 0.7; stroke-dasharray: 2 1.6; stroke-linecap: round; }
 .ts-coat { fill: none; stroke: #e05a5a; stroke-width: 2.2; stroke-linecap: round; }
 .ts-card { fill: #3a6fd8; stroke: #1f3a7a; stroke-width: 0.3; }
 .ts-beep { fill: none; stroke: #2f9e6a; stroke-width: 0.6; opacity: 0; }
@@ -874,7 +872,7 @@ path.map-night-area { animation: night-in 2.4s ease-in-out both; }
 .ts-ok path { fill: none; stroke: #fff; stroke-width: 0.7; stroke-linecap: round; stroke-linejoin: round; }
 .ts-walker, .ts-go, .ts-timer, .ts-ok, .ts-who { opacity: 0; }
 .hq-near .ts-walker { animation: ts-walker 9s linear infinite; animation-delay: var(--d); }
-@keyframes ts-walker { 0% { transform: translateX(-13px); opacity: 0; } 5% { opacity: 1; } 28%, 34% { transform: none; opacity: 1; } 38%, 100% { transform: none; opacity: 0; } }
+@keyframes ts-walker { 0% { transform: translateX(-16px); opacity: 0; } 5% { opacity: 1; } 28%, 34% { transform: none; opacity: 1; } 38%, 100% { transform: none; opacity: 0; } }
 .hq-near .ts-beep { transform-box: fill-box; transform-origin: center; animation: ts-beep 9s ease-out infinite; animation-delay: var(--d); }
 @keyframes ts-beep { 0%, 29% { transform: scale(0.4); opacity: 0; } 31% { opacity: 1; } 38%, 100% { transform: scale(2.4); opacity: 0; } }
 .hq-near .ts-parked { animation: ts-parked 9s step-end infinite; animation-delay: var(--d); }

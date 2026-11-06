@@ -224,7 +224,8 @@ const LIBRARY24 =
 
 /**
  * TPASS 共享機車（v1.555）：共享電動機車（藍綠色車殼），騎的人戴安全帽
- * 1. 捷運站出口（tpassgo）：有人從捷運出口走到機車旁，拿記名 TPASS 嗶一下（波紋），車上冒出綠色的「10」分鐘計時圈，騎走；一輪 9 秒
+ * 1. 捷運站旁的路上（tpassgo）：有人沿著路走到機車旁，拿記名 TPASS 嗶一下（波紋），車上冒出綠色的「10」分鐘計時圈，騎走；一輪 9 秒
+ *    （v1.558 使用者說「不用人從建築走出來，走在路上就可以騎走」：拿掉捷運出口的建築）
  * 2. 合作停車場（tpasspark）：多層停車場（藍色 P）前面一排共享機車專用格，一台騎進空格停好、冒綠色打勾，人下車走開；一輪 9 秒
  */
 const scooterBody = (cls = ''): string =>
@@ -238,13 +239,13 @@ export const SCOOTER_SVG = `<g class="boat-flip"><ellipse class="bk-shadow" cx="
 const TPASS_TIMER =
   '<g class="ts-timer"><circle class="ts-ring-bg" r="3.2"/><circle class="ts-ring" r="3.2" pathLength="1" transform="rotate(-90)"/><text class="ts-ten" y="1.1" text-anchor="middle">10</text></g>';
 const TPASS_GO =
-  '<ellipse class="sc-shadow" cx="2" cy="6.6" rx="22" ry="1.2"/>' +
-  '<path class="ts-exit" d="M-20 6V-6Q-15.5 -10.4 -11 -6V6Z"/><rect class="ts-exit-in" x="-18" y="-4" width="5" height="10" rx="0.6"/><circle class="ts-m" cx="-15.5" cy="-9.4" r="2.2"/><text class="ts-mt" x="-15.5" y="-8.5" text-anchor="middle">M</text>' +
+  '<ellipse class="sc-shadow" cx="4" cy="6.6" rx="20" ry="1.2"/><path class="ts-walkway" d="M-18 6.6H24"/>' +
   `<g transform="translate(15 6)">${scooterBody()}</g>` +
   `<g transform="translate(5 6)">${scooterBody('ts-parked')}</g>` +
   `<g transform="translate(0 6)"><g class="ts-walker">${person('ts-coat', '<rect class="ts-card" x="1.4" y="-7.4" width="2.4" height="1.6" rx="0.3"/>')}</g></g>` +
   '<circle class="ts-beep" cx="4" cy="-4.4" r="1.6"/>' +
-  `<g transform="translate(5 6)"><g class="ts-go">${scooterBody()}${SCOOTER_RIDER}</g></g>` +
+  // 騎走的就是剛剛走過來的那個人（紅衣服）
+  `<g transform="translate(5 6)"><g class="ts-go">${scooterBody()}${SCOOTER_RIDER.replace('class="ts-torso"', 'class="ts-torso red"')}</g></g>` +
   `<g transform="translate(7 -12)">${TPASS_TIMER}</g>`;
 const TPASS_PARK =
   '<ellipse class="sc-shadow" cx="2" cy="6.6" rx="24" ry="1.2"/>' +
