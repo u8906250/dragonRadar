@@ -390,7 +390,7 @@ path.map-water-glint { animation: water-flow-map 1.1s linear infinite; }
 /* 寶箱拉近變大、拉遠變小（v1.536） */
 .map-voyage-icon.chest svg, .map-voyage-icon.chestlock svg { transform: scale(var(--zoom-scale, 1)); }
 /* 更貼近政策的小動畫（v1.545）也跟著縮放；通學區的斑馬線小一點，不要蓋到學校 */
-.map-voyage-icon.sporthub svg, .map-voyage-icon.pocketpark svg, .map-voyage-icon.detention svg, .map-voyage-icon.cleanwater svg { transform: scale(calc(var(--zoom-scale, 1) * 0.9)); }
+.map-voyage-icon.sporthub svg, .map-voyage-icon.pocketpark svg, .map-voyage-icon.detention svg, .map-voyage-icon.cleanwater svg, .map-voyage-icon.aiteam svg { transform: scale(calc(var(--zoom-scale, 1) * 0.9)); }
 .map-voyage-icon.lunch svg, .map-voyage-icon.piggy svg { transform: scale(var(--zoom-scale, 1)); }
 .map-voyage-icon.schoolwalk svg { transform: scale(calc(var(--zoom-scale, 1) * 0.45)); }
 #map.fit-dim .map-voyage-icon.fitbus-stop { display: none; }
@@ -658,6 +658,39 @@ path.map-water-glint { animation: water-flow-map 1.1s linear infinite; }
 @keyframes sc-net { 0%, 45% { transform: none; } 49% { transform: translateX(1.2px); } 58%, 100% { transform: none; } }
 .hq-near .sc-fan { animation: sc-wave 4s ease-in-out infinite; animation-delay: calc(var(--d) + var(--i) * 0.12s); }
 @keyframes sc-wave { 0%, 48% { transform: none; } 54% { transform: translateY(-2px); } 60%, 100% { transform: none; } }
+/* 臺北市政府的 AI 支援小隊（v1.548）：公文一張張飛進小機器人、另一台冒綠色打勾、公務員冒愛心 */
+.ai-desk { fill: #c98b4a; stroke: #6b4a2a; stroke-width: 0.5; }
+.ai-deskleg { fill: none; stroke: #6b4a2a; stroke-width: 0.9; }
+.ai-paper-stack, .ai-sheet { fill: #fff; stroke: #8a96a3; stroke-width: 0.4; }
+.ai-lines { fill: none; stroke: #b7c0c8; stroke-width: 0.4; }
+.ai-head, .ai-body { fill: #e3eef7; stroke: #35546a; stroke-width: 0.6; }
+.ai-eye { fill: #2f9e6a; }
+.ai-ant { fill: none; stroke: #35546a; stroke-width: 0.6; }
+.ai-led { fill: #ffd43b; stroke: #b5821f; stroke-width: 0.3; }
+.ai-arm { fill: none; stroke: #35546a; stroke-width: 0.8; stroke-linecap: round; }
+.ai-ok circle { fill: #2f9e6a; stroke: #fff; stroke-width: 0.5; }
+.ai-ok path { fill: none; stroke: #fff; stroke-width: 0.7; stroke-linecap: round; stroke-linejoin: round; }
+.ai-staff { fill: none; stroke: #3b3f47; stroke-width: 2.2; stroke-linecap: round; }
+.ai-cup { fill: #fff; stroke: #8a5a24; stroke-width: 0.4; }
+.ai-heart { fill: #ff6b8a; }
+.ai-fly, .ai-ok, .ai-heart { opacity: 0; }
+.hq-near .ai-fly { animation: ai-fly 3.6s ease-in-out infinite; animation-delay: var(--d); }
+.hq-near .ai-fly.f2 { animation-delay: calc(var(--d) + 1.2s); }
+.hq-near .ai-fly.f3 { animation-delay: calc(var(--d) + 2.4s); }
+@keyframes ai-fly { 0% { transform: translate(0, 0); opacity: 0; } 8% { opacity: 1; } 30% { transform: translate(5px, -6px) rotate(-12deg); } 45% { transform: translate(10px, -3px) scale(0.5); opacity: 1; } 50%, 100% { transform: translate(10px, -3px) scale(0.3); opacity: 0; } }
+.hq-near .ai-led { animation: ai-led 0.8s steps(2) infinite; animation-delay: var(--d); }
+@keyframes ai-led { 50% { fill: #fff6c2; } }
+.hq-near .ai-eyes { transform-box: fill-box; transform-origin: center; animation: ai-blink 3.2s ease-in-out infinite; animation-delay: var(--d); }
+@keyframes ai-blink { 0%, 90%, 100% { transform: none; } 94% { transform: scaleY(0.15); } }
+.hq-near .ai-bot { animation: idle-engine 0.6s ease-in-out infinite alternate; }
+.hq-near .ai-ok { animation: ai-ok 2.4s ease-out infinite; animation-delay: calc(var(--d) + 0.6s); }
+.hq-near .ai-ok.k2 { animation-delay: calc(var(--d) + 1.8s); }
+@keyframes ai-ok { 0% { transform: translate(0, 4px); opacity: 0; } 12% { opacity: 1; } 70% { transform: translate(3px, -3px); opacity: 1; } 85%, 100% { transform: translate(4px, -5px); opacity: 0; } }
+.hq-near .ai-ok-pop { transform-box: fill-box; transform-origin: center; animation: ai-pop 2.4s ease-out infinite; animation-delay: calc(var(--d) + 0.6s); }
+.hq-near .ai-ok.k2 .ai-ok-pop { animation-delay: calc(var(--d) + 1.8s); }
+@keyframes ai-pop { 0% { transform: scale(0.3); } 14% { transform: scale(1.2); } 22%, 100% { transform: scale(1); } }
+.hq-near .ai-heart { transform-box: fill-box; transform-origin: center; animation: ai-heart 4.8s ease-out infinite; animation-delay: calc(var(--d) + 2s); }
+@keyframes ai-heart { 0% { transform: scale(0); opacity: 0; } 8% { transform: scale(1.2); opacity: 1; } 14% { transform: scale(1); opacity: 1; } 34%, 100% { transform: translateY(-3px); opacity: 0; } }
 /* 15. 花博運動中心：無障礙坡道，坐輪椅的人推上去、進門 */
 .dm-door { fill: #35546a; }
 .dm-ramp { fill: #c9cdd2; stroke: #6a7480; stroke-width: 0.5; stroke-linejoin: round; }

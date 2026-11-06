@@ -13,8 +13,8 @@ export const IDLE_CYCLE_MS = 5_040_000;
 export const idlePhase = (now: number, offsetMs: number): number => Math.round((now + offsetMs) % IDLE_CYCLE_MS);
 
 /** 會自己畫一個小場景的圖示 */
-export type SceneKind = 'sporthub' | 'pocketpark' | 'detention' | 'cleanwater' | 'schoolwalk' | 'lunch' | 'piggy';
-const SCENE_KINDS: readonly string[] = ['sporthub', 'pocketpark', 'detention', 'cleanwater', 'schoolwalk', 'lunch', 'piggy'];
+export type SceneKind = 'sporthub' | 'pocketpark' | 'detention' | 'cleanwater' | 'schoolwalk' | 'lunch' | 'piggy' | 'aiteam';
+const SCENE_KINDS: readonly string[] = ['sporthub', 'pocketpark', 'detention', 'cleanwater', 'schoolwalk', 'lunch', 'piggy', 'aiteam'];
 export const isSceneKind = (k: string): k is SceneKind => SCENE_KINDS.includes(k);
 
 /** 站著的小人（腳在 y = 0、往右走）：身體的 class 決定衣服顏色，extra 是帽子、領帶這些 */
@@ -92,6 +92,25 @@ const PIGGY =
   '<g class="pg-coin c1"><circle class="pg-gold" cy="-6.2" r="2"/><path class="pg-mark" d="M0 -7.3V-5.1"/></g>' +
   '<g class="pg-coin c2"><circle class="pg-orange" cy="-6.2" r="2"/><path class="pg-mark" d="M0 -7.3V-5.1"/></g></g>';
 
+/** 小機器人（AI 支援小隊）：圓圓的頭、天線上一顆會閃的燈、兩個綠色的眼睛 */
+const robot = (x: number): string =>
+  `<g transform="translate(${x} 0)"><g class="ai-bot"><path class="ai-ant" d="M0 -12V-14.6"/><circle class="ai-led" cy="-15.3" r="0.9"/>` +
+  '<rect class="ai-head" x="-3.4" y="-12" width="6.8" height="5" rx="2"/><g class="ai-eyes"><circle class="ai-eye" cx="-1.3" cy="-9.5" r="0.75"/><circle class="ai-eye" cx="1.3" cy="-9.5" r="0.75"/></g>' +
+  '<rect class="ai-body" x="-2.8" y="-6.4" width="5.6" height="5" rx="1.2"/><path class="ai-arm" d="M-2.8 -4.6L-4.4 -2.8M2.8 -4.6L4.4 -2.8"/></g></g>';
+
+/**
+ * 臺北市政府的 AI 支援小隊（公務員政策「專業 AI 團隊進駐工作現場，把重複的填表、數據整理與基礎行政流程自動化」、AI 政策「市政 AI 支持」）：
+ * 桌上一疊公文一張張飛進小機器人，另一台冒出綠色打勾，旁邊的公務員輕鬆了、冒一顆愛心
+ */
+const AITEAM =
+  '<ellipse class="sc-shadow" cx="0" cy="6.6" rx="19" ry="1.3"/><rect class="ai-desk" x="-18" y="-1.4" width="27" height="2.4" rx="0.6"/><path class="ai-deskleg" d="M-16.4 1V6M7.4 1V6"/>' +
+  '<rect class="ai-paper-stack" x="-16.6" y="-4.6" width="6" height="3.2" rx="0.4"/><path class="ai-lines" d="M-15.6 -3.6H-11.6M-15.6 -2.4H-11.6"/>' +
+  [1, 2, 3].map((i) => `<g class="ai-fly f${i}"><rect class="ai-sheet" x="-15.4" y="-8" width="3.8" height="4.6" rx="0.3"/><path class="ai-lines" d="M-14.8 -6.8H-12.2M-14.8 -5.6H-12.2"/></g>`).join('') +
+  robot(-5) + robot(3) +
+  [1, 2].map((i) => `<g class="ai-ok k${i}" transform="translate(3 -15)"><g class="ai-ok-pop"><circle r="2"/><path d="M-1 0L-0.2 0.8L1.2 -0.8"/></g></g>`).join('') +
+  `<g transform="translate(14 6)">${person('ai-staff', '<path class="sh-tie" d="M0 -7.3V-5.4"/><path class="ai-cup" d="M1.4 -5.6H3.2V-3.6H1.4Z"/>')}</g>` +
+  `<g transform="translate(14 -10)"><path class="ai-heart" d="${'M0 -1.6C-1.2 -2.8 -2.8 -3.4 -2.8 -4.9C-2.8 -5.9 -2 -6.6 -1.2 -6.6C-0.6 -6.6 -0.2 -6.3 0 -5.8C0.2 -6.3 0.6 -6.6 1.2 -6.6C2 -6.6 2.8 -5.9 2.8 -4.9C2.8 -3.4 1.2 -2.8 0 -1.6Z'}"/></g>`;
+
 /**
  * 10. 水圳淨水（「用植生過濾、濕地、礫間接觸等自然工法改善水質」）：水路上一叢蘆葦，水裡的小點從灰濁流過蘆葦變清澈的藍色；
  * deg 是水流的方向（螢幕角度，0 往右）
@@ -127,6 +146,8 @@ export function sceneSvg(kind: SceneKind, deg: number): string {
       return DETENTION;
     case 'piggy':
       return PIGGY;
+    case 'aiteam':
+      return AITEAM;
     case 'cleanwater':
       return cleanSvg(deg);
   }
