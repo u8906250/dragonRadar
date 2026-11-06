@@ -3629,7 +3629,8 @@ function hqExtras(t0: number): { reveals: HqReveal[]; icons: HqIcon[]; seams: Hq
   const br = hq.HQ_BRIDGE;
   reveals.push({ path: [br.from, br.to], at: hqStopAt(t0, br.stop), kind: 'bridge', label: '自行車橋' });
   // 公園、運動中心、大型建築的字拉遠到 10 km 不寫（v1.531 使用者說「10km 拿掉公園、運動中心、大型建築文字」）
-  for (const v of hq.HQ_VENUES) icons.push({ lat: v.lat, lng: v.lng, at: hqStopAt(t0, v.stop) + 400, kind: v.kind, label: v.name, hideKm: 10, scale: 1.1 });
+  // 花博旗艦運動中心：按「親子」（運動中心）時跟著亮（v1.563）
+  for (const v of hq.HQ_VENUES) icons.push({ lat: v.lat, lng: v.lng, at: hqStopAt(t0, v.stop) + 400, kind: v.kind, label: v.name, hideKm: 10, scale: 1.1, focus: hqLayer?.id === 'family' && v.kind === 'dome' });
   for (const st of hq.HQ_STARS) {
     const at = hqNearestAt(t0, st);
     const pts = hqStarPoints(st);
@@ -3792,13 +3793,33 @@ const HQ_HUB_STATION: Record<string, string> = { 北劍潭: '劍潭', 東象山:
  * 更貼近政策的小動畫（v1.545 使用者選「1 3 4 7 8 9 10 11 13 14 15」，畫法在 hq-scenes.ts）：運動驛站、口袋公園、微型滯洪、水圳淨水沿路冒出來；
  * 通學區（小朋友過馬路）、教育・午餐（便當冒熱氣，小貨車在 hqBikes）、青年（小豬撲滿）按了政策按鈕才有。樹醫生、濕地的涼風、足球場、花博坡道畫在原本的圖示裡
  */
+/**
+ * 政策按鈕（右邊）對應的小場景：按了這些就跟著亮、不跟其他特效一起變淡（v1.563 使用者說「點選右邊政策按鈕的時候，相關的圖案以及動畫也跟著顯示」；
+ * 接著說「動畫還是照原本距離才呈現」：一樣拉近才畫、才動）。
+ * 照政見寫的關係：營養午餐的小農、親子同行卡的圖書館、青年基金的撲滿、都更和衛福都寫了「老宅延壽行動服務團」；健身小巴另外在 hqFitbuses 跟著衛福
+ */
+const HQ_LAYER_SCENES: Record<string, SceneKind[]> = {
+  edu: ['lunch'],
+  zone: ['schoolwalk'],
+  family: ['library24'],
+  youth: ['piggy'],
+  renewal: ['oldhouse'],
+  health: ['oldhouse'],
+};
+/**
+ * 小場景拉近（電腦版 3 km、手機 2 km 以內，跟開始動的距離一樣）才畫：場景是固定的螢幕大小，拉遠時地圖縮小、場景不縮，
+ * 房子、車子看起來變得很大（v1.555 使用者說「北士科那邊畫面一縮小，房子跟車子就變很大」）；地圖照 styles.css 的 #map.hq-far 藏起來。
+ * 政策按鈕開著時，那個政策的場景標成 focus（不變淡）
+ */
 function hqScenes(t0: number): HqIcon[] {
+  if (!hq || (view === 'radar' && scaleKm > hqMotionKm())) return [];
+  const rel: readonly string[] = hqLayer ? (HQ_LAYER_SCENES[hqLayer.id] ?? []) : [];
+  return hqScenesAll(t0).map((ic) => (rel.includes(ic.kind) ? { ...ic, focus: true } : ic));
+}
+function hqScenesAll(t0: number): HqIcon[] {
   if (!hq) return [];
   const I = hq.HQ_INTROS;
   const out: HqIcon[] = [];
-  // 這些小場景拉近（電腦版 3 km、手機 2 km 以內，跟開始動的距離一樣）才畫：場景是固定的螢幕大小，拉遠時地圖縮小、場景不縮，
-  // 房子、車子看起來變得很大（v1.555 使用者說「北士科那邊畫面一縮小，房子跟車子就變很大」）；地圖照 styles.css 的 #map.hq-far 藏起來
-  if (view === 'radar' && scaleKm > hqMotionKm()) return [];
   // 跟寶箱一樣拉近變大、拉遠變小（雷達照 hqZoomScale；地圖在 styles.css 照 --zoom-scale）；手機的畫面小，再小一號
   const zs = (view === 'radar' ? hqZoomScale() : 1) * (HQ_PHONE.matches ? 0.75 : 1);
   const scale = 0.9 * zs;
@@ -3843,7 +3864,7 @@ function hqScenes(t0: number): HqIcon[] {
   const busHint = (where: string): { title: string; intro: string } => ({ title: `公車安全改革（${where}，示意）`, intro: I['公車安全改革'] ?? '' });
   out.push({ lat: bs.terminal.lat, lng: bs.terminal.lng, at: t0 + HQ_SAIL_MS + 1600, kind: 'busterminal', scale, hint: busHint(`${bs.terminal.name}：折返點休息、準點出發`) });
   // 老宅延壽：萬華、大同各一棟老公寓，船離它最近時；按「都更」時也亮著
-  for (const h of hq.HQ_OLD_HOUSES) out.push({ lat: h.lat, lng: h.lng, at: hqNearestAt(t0, h) + 300, kind: 'oldhouse', scale, focus: hqLayer?.id === 'renewal', hint: { title: `老宅延壽（${h.district}・${h.name}，示意）`, intro: I['老宅延壽'] ?? '' } });
+  for (const h of hq.HQ_OLD_HOUSES) out.push({ lat: h.lat, lng: h.lng, at: hqNearestAt(t0, h) + 300, kind: 'oldhouse', scale, hint: { title: `老宅延壽（${h.district}・${h.name}，示意）`, intro: I['老宅延壽'] ?? '' } });
   for (const p of hq.HQ_POCKETPARKS) out.push({ lat: p.lat, lng: p.lng, at: hqNearestAt(t0, p) + 300, kind: 'pocketpark', scale, hint: { title: `口袋公園（示意：${p.name}）`, intro: I['口袋公園'] ?? '' } });
   for (const d of hq.HQ_DETENTION) out.push({ lat: d.lat, lng: d.lng, at: hqNearestAt(t0, d) + 300, kind: 'detention', scale, hint: { title: `微型社區滯洪（${d.name}）`, intro: I['微型社區滯洪'] ?? '' } });
   // 水圳淨水：水路四成的地方（水注滿 3 秒後），照那一段水流的方向；大灣古河道那一點在光復南路上，搬到往北一點、河道轉進的文昌街 280 巷
