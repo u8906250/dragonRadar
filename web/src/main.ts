@@ -1,6 +1,6 @@
 import './styles.css';
 import { FITBUS_MS_PER_M, hqDenseKm, hqMotionKm, HQ_NET_LABEL_KM, HQ_SAIL_MS, HQ_STAR_MS, HQ_VOYAGE_MS, RAINBOW_EVERY_MS, voyagePhase, voyageTimeOf } from './flow';
-import { addKeyword, collectLetter, deletePushSubscription, locateFeedbackPlace, sendFeedback, type FeedbackKind, fetchPushKey, savePushSubscription, confirmReport, editReport, locatePlace, rejectReport, supplementReport, deleteBottle, dropBottle, recycleBottle, fetchBottles, fetchEvents, fetchHealth, fetchKeywords, fetchMyBottles, fetchMyReports, fetchRoutes, pickBottle, reportBottle, reportEnded, submitLink, withdrawReport } from './api';
+import { addKeyword, collectLetter, deletePushSubscription, locateFeedbackPlace, sendFeedback, type FeedbackKind, fetchPushKey, savePushSubscription, confirmReport, editReport, locatePlace, rejectReport, supplementReport, deleteBottle, dropBottle, recycleBottle, fetchBottles, fetchEvents, fetchHealth, fetchKeywords, fetchMyBottles, fetchMyReports, fetchRoutes, pickBottle, reportBottle, submitLink, withdrawReport } from './api';
 import { compassSupported, startCompass } from './compass';
 import { bearingDeg, compassLabel, destination, formatKm, haversineKm, taiwanRadiusKm, type LatLng } from './geo';
 import { TAIWAN_RINGS } from './taiwan';
@@ -49,7 +49,6 @@ const LS_LIST_OFF = 'dr.listOff';
 const LS_BASE = 'dr.base';
 const BASES: BaseMap[] = ['nlsc', 'osm'];
 const LS_KEYWORDS = 'dr.keywords';
-const LS_ENDED = 'dr.endedReported';
 /** 這個瀏覽器回報過貼文：開頁面時才去拿「我的回報」，沒回報過的不用多一次請求 */
 const LS_REPORTED = 'dr.reported';
 const LS_SPOTS = 'dr.showSpots';
@@ -352,8 +351,6 @@ type TimeSetting = 'now' | '3h' | '24h' | '3d' | 'all';
 const TIME_SEC: Record<TimeSetting, number> = { now: 0, '3h': 3 * 3600, '24h': 24 * 3600, '3d': 3 * 86400, all: Infinity };
 // 時間範圍的按鈕先拿掉看看：固定「全部」，之前選過別的也不管（只看進行中用清單上的「進行中」）
 let timeSetting: TimeSetting = 'all';
-/** 這台裝置已經回報過「已發完」的事件 */
-const endedReported = new Set<number>(loadIdList(LS_ENDED));
 /** 用這個瀏覽器回報過的貼文（伺服器認裝置代碼）；詳細資料看到自己回報的可以刪除 */
 let myReports: MyReport[] = [];
 const myReportIds = new Set<string>();
@@ -1442,8 +1439,6 @@ function setSearch(q: string): void {
 }
 
 function render(): void {
-  // 洋流號暫停中：時間往後挪，畫出來的停在按暫停那一刻
-  hqCatchUp();
   // 拉遠超過全球（太空）「地圖」按鈕藏起來，拉回全球以內再出現
   viewBtn.hidden = view === 'radar' && noMapView();
   const now = nowSec();
@@ -2765,11 +2760,9 @@ function renderDetail(items: Item[], now: number): void {
         <a class="btn primary" href="https://www.google.com/maps/dir/?api=1&destination=${ev.lat},${ev.lng}&travelmode=walking" target="_blank" rel="noopener">${ev.approxArea ? '導航到約略位置' : '導航'}</a>
         ${ev.post.permalink ? `<a class="btn" href="${esc(ev.post.permalink)}" target="_blank" rel="noopener">${esc(sourceLinkText(ev))}</a>` : ''}
         <a class="btn" href="${googleMapsUrl(ev)}" target="_blank" rel="noopener">在 Google 地圖上看</a>
-        ${canReportEnded(ev, now) ? `<button type="button" class="btn" data-act="ended"${endedReported.has(ev.id) ? ' disabled' : ''}>${endedReported.has(ev.id) ? '已回報' : `回報${it.spot ? '今天' : ''}${endedWord(ev)}`}</button>` : ''}
         ${myReportIds.has(ev.post.id) && !routeOf(ev) ? '<button type="button" class="btn" data-act="withdraw">刪除我的回報</button>' : ''}
         <button type="button" class="btn" data-act="feedback">回報問題</button>
       </div>
-      ${ev.endedReports ? `<p class="muted ended-note">已有 ${ev.endedReports} 人回報${endedWord(ev)}${neededText()}</p>` : ''}
     </div>`, true);
   if (!replaced) return;
   lockStepHeight(stepBtns !== '');
@@ -2797,7 +2790,6 @@ function renderDetail(items: Item[], now: number): void {
       if (view === 'map' && to?.lat != null && to.lng != null) map.panIntoView({ lat: to.lat, lng: to.lng }, sheetCover());
     });
   }
-  detailEl.querySelector('[data-act="ended"]')?.addEventListener('click', (e) => void sendEnded(ev, e.currentTarget as HTMLButtonElement));
   detailEl.querySelector('[data-act="withdraw"]')?.addEventListener('click', () => void withdrawMine(ev.post.id));
   detailEl.querySelector('[data-act="feedback"]')?.addEventListener('click', () => openFeedback(ev));
   detailEl.querySelector('[data-act="route"]')?.addEventListener('click', () => {
@@ -2871,13 +2863,6 @@ function spotSchedule(it: Item): string {
   return `${spotHours(it.spot?.sessions ?? [it.ev])}，${range}`;
 }
 
-/** 官方行程以官網為準；還沒開始的也不能回報 */
-/** 「回報已發完」的說法：活動「已結束」、徵人「已徵到」、可照顧「已不提供」、求職「已找到工作」 */
-const endedWord = (ev: EventOut): string =>
-  ev.kind === 'food'
-    ? ({ vendor: '已收攤', recommend: '已歇業', meetup: '已揪滿' }[foodRole(ev) ?? 'recommend'] ?? '已結束')
-    : ev.kind === 'session' ? (isSeek(ev) ? '已找到' : '已額滿') : ev.kind === 'job' ? (isOffer(ev) ? jobWords().offerEnded : '已徵到') : ev.kind === 'activity' ? '已結束' : '已發完';
-
 /** 羽球臨打的詳細資料：招臨打寫時段、費用、程度、缺幾位、用球、球團；找臨打寫程度、可以打的時間、地區 */
 function sessionDetailHtml(it: Item, now: number): string {
   const { ev } = it;
@@ -2908,15 +2893,6 @@ function jobDetailHtml(it: Item, now: number): string {
   const period = jobPeriod(j);
   const who = offer ? (w.offerWho ? `提供者：${j.employer ? esc(j.employer) : '個人'}<br>` : '') : `雇主：${j.employer ? esc(j.employer) : '<span class="risk">沒寫</span>'}<br>`;
   return `${fraudBoxHtml(ev)}<p>類型：${offer ? w.offerType : w.hireType}<br>${j.pay ? `${offer ? w.offerPay : '薪資'}：${esc(j.pay)}<br>` : ''}${offer ? w.offerPeriod : '工作期間'}：${esc(offer && period === '沒寫工作期間' ? '時間可討論' : period)}<br>${who}${j.contact ? `${offer ? '聯絡方式' : '應徵方式'}：${esc(CONTACT_TEXT[j.contact] ?? j.contact)}<br>` : ''}${j.requirements ? `${offer ? w.offerNeeds : '內容'}：${esc(j.requirements)}<br>` : ''}地點：${esc(placeOf(ev))}${ev.approxArea ? `<br><span class="approx-note">約略位置：只知道在${esc(ev.approxArea)}</span>` : ''}<br>距離：${ev.approxArea ? '約 ' : ''}${stepDistance(it)}${ev.endOpen ? '' : ` · 刊登到 ${dateFmt.format(new Date((ev.endAt - 1) * 1000))}`}${now ? '' : ''}</p>`;
-}
-
-function canReportEnded(ev: EventOut, now: number): boolean {
-  return ev.post.source !== 'official' && ev.post.source !== 'site' && ev.startAt <= now;
-}
-
-function neededText(): string {
-  const n = keywordRules?.sources?.link?.endedReportsNeeded;
-  return n ? `，${n} 人回報就會下架` : '';
 }
 
 /** 正在回報問題的車掃（回報的）每一站；不是車掃是 null */
@@ -3107,27 +3083,6 @@ async function submitFeedback(): Promise<void> {
   showBanner(bannerEl, r.data.duplicate ? '你已經回報過這個問題了，謝謝' : locating ? '謝謝回報，管理者確認位置後就會放上雷達' : '謝謝回報，管理者會盡快處理', 3500);
 }
 
-async function sendEnded(ev: EventOut, btn: HTMLButtonElement): Promise<void> {
-  btn.disabled = true;
-  const r = await reportEnded(ev.id);
-  if (!r.ok) {
-    btn.disabled = false;
-    showBanner(bannerEl, r.message, 3500);
-    return;
-  }
-  endedReported.add(ev.id);
-  lsSet(LS_ENDED, JSON.stringify([...endedReported].slice(-200)));
-  if (r.data.ended) {
-    showBanner(bannerEl, `謝謝回報，「${titleOf(ev)}」已從雷達下架`, 3000);
-    selectedId = null;
-    await refresh();
-  } else {
-    ev.endedReports = r.data.count;
-    showBanner(bannerEl, `謝謝回報，再 ${r.data.needed - r.data.count} 人回報就會下架`, 3000);
-    render();
-  }
-}
-
 /** 雷達或地圖上疊在一起的一群，詳細資料會列出同一群的其他項目 */
 let selectedGroup: number[] = [];
 /** 點了疊在一起的一群、還沒選是哪一個 */
@@ -3162,11 +3117,9 @@ let hq: typeof import('./hq-voyage') | null = null;
 let hqVoyageAt: number | null = null;
 let hqVoyageTimers: number[] = [];
 /**
- * 洋流號的時間表（離出發多久做什麼）：暫停時把計時器清掉，繼續時照剩下的時間重排（v1.528 使用者說「關閉洋流號按鈕新增暫停、繼續功能」）
+ * 洋流號的時間表（離出發多久做什麼）：加速時照剩下的時間重排（v1.528 加過暫停、繼續，v1.570 使用者說「洋流號拿掉暫停功能」）
  */
 let hqEvents: Array<{ rel: number; fn: () => void; done: boolean }> = [];
-/** 暫停的時間（null 是沒暫停）：重畫、繼續時把洋流號的時間往後挪暫停了多久，畫出來的都停在按暫停那一刻 */
-let hqPausedAt: number | null = null;
 /** 這一趟的代號（出發時間，加速時 hqVoyageAt 一直往前挪，這個不變：地圖照它判斷要不要整個重畫） */
 let hqVoyageKey = 0;
 /** 加速（v1.565 使用者說「暫停旁邊多一個加速，兩倍／四倍」）：1、2、4 倍；每一格把出發時間往前挪 (倍數 − 1) × 經過的時間 */
@@ -3214,7 +3167,6 @@ function startHqVoyage(spinAt = Date.now()): void {
   for (const t of hqVoyageTimers) window.clearTimeout(t);
   window.clearInterval(hqFollowTimer);
   hqUserMoved = false;
-  hqSetPaused(false);
   let wait = 0;
   const started = Date.now();
   // 一開始：雷達外圈 HQ_START_KM、正中間在總部（本來就差不多就不動）；地圖拉到縮放 13、正中間在總部
@@ -3230,7 +3182,7 @@ function startHqVoyage(spinAt = Date.now()): void {
   hqSetSpeed(1);
   const t0 = hqVoyageAt;
   // 畫面不跟著船移動（v1.507 使用者說「畫面改成不要跟著洋流號移動」；以前船快出畫面就把畫面移到船那裡）
-  // 時間都是離出發多久（暫停、繼續時照剩下的時間重排）
+  // 時間都是離出發多久（加速時照剩下的時間重排）
   hqEvents = [
     // 星星轉完（出發前 0.2 秒）才開始畫
     { rel: -200, fn: () => render() },
@@ -3252,8 +3204,7 @@ function startHqVoyage(spinAt = Date.now()): void {
       fn: () => {
         hqNetBtn.hidden = false;
         hqLayersBox.hidden = false;
-        // 暫停、繼續只在洋流號跑的時候有，跑完收起來（v1.529 使用者說的）
-        hqPauseBtn.hidden = true;
+        // 加速只在洋流號跑的時候有，跑完收起來（v1.529 使用者說的）
         hqSpeedBtn.hidden = true;
         hqSetSpeed(1);
         mayorProgress('watched');
@@ -3281,18 +3232,17 @@ function startHqVoyage(spinAt = Date.now()): void {
   }
   hqLayersBox.classList.add('open');
   hqLayersLabel('');
-  hqPauseBtn.hidden = false;
   hqSpeedBtn.hidden = false;
   hqPanel.hidden = false;
   render();
   // 手機：下面的卡片收成只露出標題的一條，雷達多出半個畫面（v1.537 使用者說手機縮小後特別擠）
   if (HQ_PHONE.matches && !detailEl.hidden) setPeek(true);
 }
-/** 照洋流號的時間表排計時器（暫停中不排） */
+/** 照洋流號的時間表排計時器 */
 function hqScheduleEvents(): void {
   for (const t of hqVoyageTimers) window.clearTimeout(t);
   hqVoyageTimers = [];
-  if (hqVoyageAt === null || hqPausedAt !== null) return;
+  if (hqVoyageAt === null) return;
   const t0 = hqVoyageAt;
   for (const e of hqEvents) {
     if (e.done) continue;
@@ -3304,20 +3254,10 @@ function hqScheduleEvents(): void {
     );
   }
 }
-/** 暫停中：洋流號的時間（出發、文化網、政策圖層）往後挪暫停了多久，畫出來的就停在按暫停那一刻 */
-function hqCatchUp(): void {
-  if (hqPausedAt === null || hqVoyageAt === null) return;
-  const d = Date.now() - hqPausedAt;
-  if (d <= 0) return;
-  hqVoyageAt += d;
-  if (hqNetAt !== null) hqNetAt += d;
-  if (hqLayer) hqLayer = { ...hqLayer, at: hqLayer.at + d };
-  hqPausedAt += d;
-}
-/** 暫停、繼續：CSS 動畫停住（雷達、地圖加 hq-paused），船、河、小巴不再每一格擺位置，計時器清掉；繼續時接著播 */
+/** 加速中每一格：出發時間往前挪，雷達、地圖上的船、河跟著推，CSS 動畫、計時器每 0.2 秒推一次 */
 function hqSpeedLoop(): void {
   hqSpeedFrame = 0;
-  if (hqSpeed <= 1 || hqVoyageAt === null || hqPausedAt !== null) return;
+  if (hqSpeed <= 1 || hqVoyageAt === null) return;
   const now = performance.now();
   const dt = Math.min(100, now - hqSpeedLast);
   hqSpeedLast = now;
@@ -3342,36 +3282,14 @@ function hqSetSpeed(x: number): void {
   hqSpeedBtn.classList.toggle('on', x > 1);
   cancelAnimationFrame(hqSpeedFrame);
   hqSpeedFrame = 0;
-  if (x > 1 && hqPausedAt === null && hqVoyageAt !== null) {
+  if (x > 1 && hqVoyageAt !== null) {
     hqSpeedLast = hqSpeedCssAt = performance.now();
     hqSpeedFrame = requestAnimationFrame(hqSpeedLoop);
-  }
-}
-function hqSetPaused(on: boolean): void {
-  if (on === (hqPausedAt !== null)) return;
-  if (on) {
-    hqPausedAt = Date.now();
-    for (const t of hqVoyageTimers) window.clearTimeout(t);
-    hqVoyageTimers = [];
-  } else {
-    hqCatchUp();
-    hqPausedAt = null;
-  }
-  radar.setPaused(on);
-  map.setPaused(on);
-  hqPauseBtn.textContent = on ? '▶ 繼續' : '⏸ 暫停';
-  hqPauseBtn.classList.toggle('on', on);
-  // 暫停時加速也停，繼續時接著加速
-  hqSetSpeed(hqSpeed);
-  if (!on && hqVoyageAt !== null) {
-    hqScheduleEvents();
-    render();
   }
 }
 /** 關閉洋流號（按鈕、Esc）：特效收起來、星星彈回來 */
 function stopHqVoyage(): void {
   if (hqVoyageAt === null) return;
-  hqSetPaused(false);
   hqSetSpeed(1);
   for (const t of hqVoyageTimers) window.clearTimeout(t);
   window.clearInterval(hqFollowTimer);
@@ -3412,13 +3330,11 @@ function mayorProgress(step: string): void {
 const hqPanel = document.createElement('div');
 hqPanel.className = 'hq-panel';
 hqPanel.hidden = true;
-hqPanel.innerHTML = '<button type="button" class="chip hq-net" hidden></button><div class="hq-ctl"><button type="button" class="chip hq-pause">⏸ 暫停</button><button type="button" class="chip hq-speed">⏩ 加速</button><button type="button" class="chip hq-close">✕ 關閉洋流號</button></div>';
+hqPanel.innerHTML = '<button type="button" class="chip hq-net" hidden></button><div class="hq-ctl"><button type="button" class="chip hq-speed">⏩ 加速</button><button type="button" class="chip hq-close">✕ 關閉洋流號</button></div>';
 // 放在右上那排按鈕（定位、地圖／雷達切換）的下面，不蓋住按鈕；全螢幕時那排按鈕往下移，這裡跟著
 document.querySelector('#stage .overlay-tr')!.appendChild(hqPanel);
 const hqNetBtn = hqPanel.querySelector('.hq-net') as HTMLButtonElement;
 hqPanel.querySelector('.hq-close')!.addEventListener('click', stopHqVoyage);
-const hqPauseBtn = hqPanel.querySelector('.hq-pause') as HTMLButtonElement;
-hqPauseBtn.addEventListener('click', () => hqSetPaused(hqPausedAt === null));
 // 加速：按一下 2 倍、再按 4 倍、再按回原本的速度（v1.565）
 const hqSpeedBtn = hqPanel.querySelector('.hq-speed') as HTMLButtonElement;
 hqSpeedBtn.addEventListener('click', () => hqSetSpeed(hqSpeed === 1 ? 2 : hqSpeed === 2 ? 4 : 1));
@@ -3486,8 +3402,6 @@ function hqFlyTo(center: LatLng, km: number, mapZoom: number): void {
 }
 hqNetBtn.addEventListener('click', () => {
   if (hqVoyageAt === null) return;
-  // 暫停中按了就接著播（不然新的動畫也停在一開始）
-  hqSetPaused(false);
   const wasOn = hqNetAt !== null;
   hqShowOff();
   if (!wasOn) {
@@ -3513,7 +3427,6 @@ hqLayersBox.addEventListener('click', (e) => {
   if (!btn || hqVoyageAt === null || !hq) return;
   const ly = hq.HQ_POLICY_LAYERS.find((x) => x.id === btn.dataset.id);
   if (!ly) return;
-  hqSetPaused(false);
   // 手機：選好了按鈕照樣展開（v1.543 使用者要預設展開），「政策」那顆寫現在開的是哪一個
   const wasOn = hqLayer?.id === ly.id;
   hqShowOff();
@@ -5176,7 +5089,7 @@ function renderRules(): void {
       <li>到了結束時間自動消失。</li>
       <li>原作者回覆或再發文提到「${r.endedWords.slice(0, 6).map(esc).join('」「')}」等字眼，也會提早消失。</li>
       ${src?.link ? `<li>大家回報的貼文每 ${src.link.recheckMin} 分鐘重讀一次：原貼文刪除或改成「發完了」就下架，改了時間地點就重新判讀。</li>
-      <li>開始後，${src.link.endedReportsNeeded} 個人在詳細資料按「回報已發完」也會提早下架（官方行程除外）。</li>` : ''}
+` : ''}
     </ul>
     <h3>貼文範例</h3>
     <div class="example">${esc(`#${kw}\n明天 10/18 下午 3 點在捷運市政府站 2號出口發放${kw}，限量 100 份，發完為止！`)}</div>

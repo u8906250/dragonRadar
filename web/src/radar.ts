@@ -530,8 +530,6 @@ export class Radar {
   private riverTracks: Array<{ xs: Float64Array; ys: Float64Array; nx: Float64Array; ny: Float64Array; hw: Float64Array; cum: Float64Array; voyage: number; at: number; g: SVGGElement; tip: SVGPathElement[]; chunkStart: number; chunkEnd: number; riverOut?: number }> = [];
   private readonly boatLeft = new Map<string, boolean>();
   private boatFrame = 0;
-  /** 洋流號暫停：船、河、小巴不再每一格擺位置（重畫時擺一次），CSS 動畫停住 */
-  private paused = false;
   /** 拉遠了：一直動的停下來（健身小巴停在第一站） */
   private motionFar = false;
   /** 洋流總部滑鼠介紹的感應圈：還沒到時間的（armHits 照時間打開） */
@@ -2463,15 +2461,8 @@ export class Radar {
         else t.flip.removeAttribute('transform');
       }
     }
-    if (!this.paused) this.boatFrame = requestAnimationFrame(this.moveBoats);
+    this.boatFrame = requestAnimationFrame(this.moveBoats);
   };
-
-  /** 洋流號暫停、繼續（main.ts 暫停時把時間往後挪，重畫時照新的時間擺一次就是停住的樣子） */
-  setPaused(on: boolean): void {
-    this.paused = on;
-    this.routeLayer.classList.toggle('hq-paused', on);
-    if (!on) this.moveBoats();
-  }
 
   /**
    * 洋流號加速（v1.565 使用者說「暫停旁邊多一個加速，兩倍／四倍」）：時間往前推 d 毫秒——船、河、小巴、騎士的出發時間往前挪（main.ts 每一格叫）

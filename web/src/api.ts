@@ -1,5 +1,5 @@
 import type { LatLng } from './geo';
-import type { BottleOut, EditInput, EndedReportResult, EventOut, KeywordInfo, KeywordRules, LocateResult, MyBottles, MyReport, PickedBottle, RouteOut, SubmitResult } from './types';
+import type { BottleOut, EditInput, EventOut, KeywordInfo, KeywordRules, LocateResult, MyBottles, MyReport, PickedBottle, RouteOut, SubmitResult } from './types';
 
 /** 正式環境的 Worker 網址；本機開發打 localhost，VITE_API_BASE 可覆寫（空字串視為未設定，CI 沒設變數時會傳空字串） */
 const PROD_API_BASE = 'https://dragon-radar.happybadminton.workers.dev';
@@ -200,8 +200,6 @@ export const fetchMyReports = (): Promise<Result<{ reports: MyReport[] }>> => de
 /** 刪除自己的回報：雷達上這則的發放、活動一起拿掉 */
 export const withdrawReport = (postId: string): Promise<Result<{ ok: true; removed: number }>> =>
   deviceJson<{ ok: true; removed: number }>(`/api/reports/${encodeURIComponent(postId)}`, 'DELETE');
-
-export const reportEnded = (eventId: number): Promise<Result<EndedReportResult>> => postJson<EndedReportResult>(`/api/events/${eventId}/ended`, {});
 
 /** 中山公園的標記（管理者在 3D 公園裡標的路燈、長椅等）：種類、經緯度、面向（度，0 是北、順時針，長椅坐的人面向哪）、備註 */
 export type ParkMarkKind = 'lamp' | 'bench' | 'bin' | 'stele' | 'other';

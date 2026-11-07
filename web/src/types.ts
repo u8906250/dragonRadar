@@ -283,12 +283,6 @@ export interface SubmitResult {
   };
 }
 
-export interface EndedReportResult {
-  count: number;
-  needed: number;
-  ended: boolean;
-}
-
 /** 預覽上的一條車掃路線 */
 export interface RoutePreview {
   title: string;

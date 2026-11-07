@@ -1123,11 +1123,9 @@ path.map-seam-walkers { --p: 15px; }
 .hq-panel { position: absolute; top: calc(100% + 8px); right: 0; z-index: 900; display: flex; flex-direction: column; align-items: flex-end; gap: 6px; pointer-events: none; }
 .hq-panel[hidden], .hq-panel [hidden] { display: none; }
 .hq-panel > * { pointer-events: auto; }
-/* 暫停、關閉洋流號並排（v1.528） */
+/* 加速、關閉洋流號並排（v1.528 起；v1.570 拿掉暫停） */
 .hq-ctl { display: flex; gap: 6px; }
-.hq-ctl .chip.hq-pause.on, .hq-ctl .chip.hq-speed.on { background: #15171c; color: #fff; }
-/* 洋流號暫停：洋流總部特效裡的 CSS 動畫都停住（船、河、小巴是 JS 擺的，暫停時不擺） */
-.radar .routes.hq-paused, .radar .routes.hq-paused *, .hq-paused .leaflet-overlay-pane *, .hq-paused .leaflet-marker-pane * { animation-play-state: paused !important; }
+.hq-ctl .chip.hq-speed.on { background: #15171c; color: #fff; }
 /* 一塊地方（社子島）：淡淡的土色、虛線外框，淡入後留著 */
 .radar .voyage-area { pointer-events: none; animation: area-in 1.2s ease-out both; }
 .radar .area-fill { fill: none; stroke: #7d6a45; stroke-linejoin: round; }
@@ -1852,7 +1850,6 @@ path.map-seam-walkers { --p: 15px; }
 .preview-wrong textarea { font: inherit; font-size: 16px; color: var(--text); background: var(--card); resize: none; border: var(--border-w) solid var(--line); border-radius: var(--card-radius); padding: 10px 12px; }
 .report-tips { padding-left: 18px; }
 .report-tips li { margin-bottom: 4px; }
-.ended-note { font-size: 13px; margin: 8px 0 0; }
 
 /* 固定據點：菱形光點、休息中變淡 */
 .radar .blip.spot .dot { fill: var(--blip-spot); }
@@ -2206,6 +2203,11 @@ body.letters-open { overflow: hidden; }
 .tc-wish-row p { margin: 0; }
 .tc-wish-row b { margin-right: 6px; color: #f7c94e; font-size: 15px; }
 .tc-wish-row small { opacity: 0.8; }
+.tc-wish-row .tc-wish-eg { opacity: 0.85; font-size: 12.5px; }
+.tc-ideas { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-top: -4px; }
+.tc-ideas span { flex: 1 1 100%; opacity: 0.8; }
+.tc-idea { font: inherit; font-size: 13px; font-weight: 700; padding: 4px 11px; border-radius: 999px; border: 1px dashed rgba(247, 201, 78, 0.8); background: rgba(247, 201, 78, 0.12); color: #f7c94e; cursor: pointer; }
+.tc-idea:hover, .tc-idea:focus-visible { background: rgba(247, 201, 78, 0.24); outline: none; }
 .tc-wish-btns { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
 .tc-wish-btns .chip:disabled { opacity: 0.5; cursor: default; }
 .tc-wishform, .tc-mywish { background: rgba(10, 14, 20, 0.95); }

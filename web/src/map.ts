@@ -261,8 +261,6 @@ export class MapView {
   private riverTracks: Array<{ pts: Array<[number, number]>; cum: Float64Array; voyage: number; at: number; lines: Leaflet.Polyline[]; all: Leaflet.Polyline[]; chunkStart: number; chunkEnd: number; riverOut?: number }> = [];
   private readonly boatLeft = new Map<string, boolean>();
   private boatFrame = 0;
-  /** 洋流號暫停：船、河、小巴不再每一格擺位置（重畫時擺一次），CSS 動畫停住 */
-  private paused = false;
   /** 拉遠了：一直動的停下來（健身小巴停在第一站） */
   private motionFar = false;
   /** 洋流總部滑鼠介紹的感應圈：還沒到時間的（armHits 照時間打開） */
@@ -1388,15 +1386,8 @@ export class MapView {
         }
       }
     }
-    if (!this.paused) this.boatFrame = requestAnimationFrame(this.moveBoats);
+    this.boatFrame = requestAnimationFrame(this.moveBoats);
   };
-
-  /** 洋流號暫停、繼續：跟雷達一樣（地圖的容器加 hq-paused，CSS 動畫停住） */
-  setPaused(on: boolean): void {
-    this.paused = on;
-    this.el.classList.toggle('hq-paused', on);
-    if (!on) this.moveBoats();
-  }
 }
 
 /** 標位置用的小地圖：點地圖或拖標記改位置，每次改都呼叫 onPick */

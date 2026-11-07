@@ -528,6 +528,16 @@ const LS_WISHED = 'dr.wished';
 const LS_WISH_DRAFT = 'dr.wishDraft';
 const WISH_STATUS_TEXT: Record<WishStatus, string> = { pending: '審核中', approved: '已通過', building: '製作中', live: '已上線', rejected: '不通過', dropped: '做不出來', withdrawn: '已撤回' };
 const REFUNDED: readonly WishStatus[] = ['rejected', 'dropped', 'withdrawn'];
+/** 許願的靈感（表單上點一下帶進去，說明頁 help.html 也列了一樣的）：讓人知道可以許什麼願 */
+const WISH_IDEAS: Array<{ label: string; text: string }> = [
+  { label: '新卡片', text: '新增一張收集卡：小法在櫻花步道打噴嚏，櫻花季才找得到。' },
+  { label: '認領一塊地', text: '我想在汪星認領一小塊草地，種一棵寫著我家狗狗名字的樹。' },
+  { label: '3D 國館', text: '在 3D 國館的翠湖旁邊放一座許願池，丟順幣會泛起漣漪。' },
+  { label: '雷達小變化', text: '台北下雨的時候，雷達上也飄小雨，小法撐著傘。' },
+  { label: '帶朋友來玩', text: '把我家狗狗做成一隻小狗，在公園跟小法一起散步（照片放在下面的參考連結）。' },
+  { label: '新功能', text: '多一顆「今天去哪」按鈕，按一下隨機推薦附近一個活動。' },
+  { label: '一段 prompt', text: '「把汪星變成晚上，螢火蟲跟著手指飛。」' },
+];
 
 let wishState: MyWishes | null = null;
 const wishNews: Array<(unseen: number) => void> = [];
@@ -578,6 +588,7 @@ function wishRow(): string {
   const news = wishState?.unseen ?? 0;
   return `<section class="tc-wish-row">
       <p><b>許願</b>投 ${WISH_COST} 枚順幣，寫下你希望洋流雷達多什麼，審核通過就用 AI 做出來。</p>
+      <p class="tc-wish-eg">例如：3D 國館的翠湖旁放一座許願池、在汪星認領一塊草地種一棵樹、小法的新卡片、讓你家狗狗來公園散步……</p>
       <div class="tc-wish-btns">
         <button type="button" class="chip primary" data-open-wish${n < WISH_COST ? ' disabled' : ''}>投 ${WISH_COST} 枚順幣許願</button>
         ${ws.length ? `<button type="button" class="chip${news ? ' has-news' : ''}" data-my-wishes>我的願望（${ws.length}）</button>` : ''}
@@ -619,6 +630,7 @@ export function openWishForm(onDone?: () => void): void {
         <label class="tc-field"><span>你的想法</span>
           <textarea name="body" rows="8" maxlength="${WISH_MAX}" placeholder="想要洋流雷達多什麼？一句話、一段 prompt、一份完整企劃，或想認領一塊地，天馬行空都可以">${esc(d.body)}</textarea>
           <small class="tc-len"></small></label>
+        <div class="tc-ideas"><span>想不到嗎？點一個靈感：</span>${WISH_IDEAS.map((x, i) => `<button type="button" class="tc-idea" data-idea="${i}">${esc(x.label)}</button>`).join('')}</div>
         <label class="tc-field"><span>暱稱（選填）</span>
           <input name="nickname" maxlength="20" autocomplete="nickname" value="${esc(d.nickname)}">
           <small>上線時寫「點子來自 ○○」，不填就不署名</small></label>
@@ -653,6 +665,18 @@ export function openWishForm(onDone?: () => void): void {
   form.addEventListener('input', () => {
     len();
     saveDraft({ body: field('body').value, nickname: field('nickname').value, links: field('links').value });
+  });
+  // 靈感：空的（或還是別的靈感）就換成這個，自己寫了字的接在後面，接著自己改
+  form.querySelector('.tc-ideas')?.addEventListener('click', (e) => {
+    const b = (e.target as HTMLElement).closest<HTMLElement>('[data-idea]');
+    const idea = b ? WISH_IDEAS[Number(b.dataset.idea)] : undefined;
+    if (!idea) return;
+    const ta = field('body');
+    const cur = ta.value.trim();
+    ta.value = !cur || WISH_IDEAS.some((x) => x.text === cur) ? idea.text : `${cur}\n\n${idea.text}`;
+    ta.dispatchEvent(new Event('input', { bubbles: true }));
+    ta.focus();
+    ta.setSelectionRange(ta.value.length, ta.value.length);
   });
   form.addEventListener('submit', async (e) => {
     e.preventDefault();

@@ -16,7 +16,7 @@ import { addParkMark, deleteParkMark, listParkMarks, listPublicParkMarks, parseP
 import { adminLocate, applyFeedback, clearResolvedFeedback, deleteAdminSubscription, listFeedback, locateForFeedback, notifyAdmins, purgeFeedback, saveAdminSubscription, setFeedbackStatus, submitFeedback } from './feedback';
 import { moduleOf } from './modules';
 import { PUSH_RADIUS_KM, PushError, b64urlEncode, deleteSubscription, encryptPayload, purgeSubscriptions, pushStarted, saveSubscription, sendPush, vapidKeys } from './push';
-import { assertEventReportsOpen, confirmLink, editLink, ENDED_REPORTS_NEEDED, locateForEdit, MAX_LINK_AGE_SEC, ReportError, REPORTS_LOCKED, ipHash, myReports, purgeReports, recheckLinks, rejectLink, reportEnded, reportModules, submitLink, supplementLink, withdrawReport } from './reports';
+import { assertEventReportsOpen, confirmLink, editLink, ENDED_REPORTS_NEEDED, locateForEdit, MAX_LINK_AGE_SEC, ReportError, REPORTS_LOCKED, ipHash, myReports, purgeReports, recheckLinks, rejectLink, reportModules, submitLink, supplementLink, withdrawReport } from './reports';
 import { D1Meter, isTransient, withResilientDb } from './db';
 import { addressCacheKey, geocodeAddress, parseTwAddress } from './address';
 import { adminListBottles, adminSetBottle, BOTTLE_MAX_WEIGHT, BOTTLE_TTL_SEC, bottlesEnabled, collectLetter, deleteBottle, deviceId, DRIFT_EVERY_SEC, driftBottles, dropBottle, listBottles, myBottles, PER_DEVICE_PER_DAY, PICK_RADIUS_M, pickBottle, purgeBottles, recycleBottle, reportBottle } from './bottles';
@@ -329,10 +329,9 @@ async function handle(req: Request, env: Env, ctx: ExecutionContext): Promise<Re
     return jsonResponse({ requests: await spotRequestStatus(env, keys) });
   }
 
-  const endedMatch = /^\/api\/events\/(\d+)\/ended$/.exec(path);
-  if (req.method === 'POST' && endedMatch) {
-    await assertEventReportsOpen(env, Number(endedMatch[1]));
-    return jsonResponse(await reportEnded(env, Number(endedMatch[1]), await ipHash(env, req), now));
+  // 「回報已發完／已結束」按鈕拿掉了（v1.570）：舊版網頁還開著的人按了告訴他重新整理
+  if (req.method === 'POST' && /^\/api\/events\/\d+\/ended$/.test(path)) {
+    throw new HttpError(410, '「回報已結束」已經拿掉了，提早結束的請按「回報問題」選時間錯誤或其他。請重新整理頁面');
   }
 
   // 回報問題（地點錯誤、時間錯誤…）：{ kind, note }，推到管理者手機
