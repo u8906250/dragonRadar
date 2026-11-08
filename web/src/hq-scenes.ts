@@ -13,8 +13,8 @@ export const IDLE_CYCLE_MS = 5_040_000;
 export const idlePhase = (now: number, offsetMs: number): number => Math.round((now + offsetMs) % IDLE_CYCLE_MS);
 
 /** 會自己畫一個小場景的圖示 */
-export type SceneKind = 'sporthub' | 'workhub' | 'ridehub' | 'pocketpark' | 'detention' | 'cleanwater' | 'schoolwalk' | 'lunch' | 'piggy' | 'aiteam' | 'oldhouse' | 'streettree' | 'bikerack' | 'nightmayor' | 'buscharge' | 'library24' | 'lantern' | 'nightsky' | 'tpassgo' | 'tpasspark' | 'busterminal' | 'cyclerenew';
-const SCENE_KINDS: readonly string[] = ['sporthub', 'workhub', 'ridehub', 'pocketpark', 'detention', 'cleanwater', 'schoolwalk', 'lunch', 'piggy', 'aiteam', 'oldhouse', 'streettree', 'bikerack', 'nightmayor', 'buscharge', 'library24', 'lantern', 'nightsky', 'tpassgo', 'tpasspark', 'busterminal', 'cyclerenew'];
+export type SceneKind = 'sporthub' | 'workhub' | 'ridehub' | 'pocketpark' | 'detention' | 'cleanwater' | 'schoolwalk' | 'lunch' | 'piggy' | 'aiteam' | 'oldhouse' | 'streettree' | 'bikerack' | 'nightmayor' | 'buscharge' | 'library24' | 'lantern' | 'nightsky' | 'tpassgo' | 'tpasspark' | 'busterminal' | 'cyclerenew' | 'stagger';
+const SCENE_KINDS: readonly string[] = ['sporthub', 'workhub', 'ridehub', 'pocketpark', 'detention', 'cleanwater', 'schoolwalk', 'lunch', 'piggy', 'aiteam', 'oldhouse', 'streettree', 'bikerack', 'nightmayor', 'buscharge', 'library24', 'lantern', 'nightsky', 'tpassgo', 'tpasspark', 'busterminal', 'cyclerenew', 'stagger'];
 export const isSceneKind = (k: string): k is SceneKind => SCENE_KINDS.includes(k);
 
 /** 站著的小人（腳在 y = 0、往右走）：身體的 class 決定衣服顏色，extra 是帽子、領帶這些 */
@@ -340,6 +340,27 @@ export function windSvg(deg: number): string {
 }
 
 /** 這個場景的圖；deg 是水流方向的螢幕角度（只有水圳淨水用） */
+/**
+ * 內科智慧錯峰（v1.573；港湖政見開箱「內湖南港，交通順起來」：和內科企業談彈性工時，選 7–8 點或 8–9 點上班，選錯峰的拿點數換咖啡）：
+ * 玻璃帷幕的辦公大樓、樓頂一個大時鐘從 7 點走到 9 點，左邊兩個時段牌「7–8」「8–9」輪流亮——
+ * 第一批上班族在 7–8 點走進大樓，第二批在 8–9 點；走到門口冒「+1」點數，變成一杯熱咖啡；一輪 14 秒
+ */
+const STAGGER =
+  '<ellipse class="sc-shadow" cx="-5" cy="6.6" rx="21" ry="1.2"/><path class="ts-walkway" d="M-25 6.6H14"/>' +
+  '<rect class="sg-tower" x="-4" y="-22" width="16" height="28.4" rx="0.8"/><path class="sg-grid" d="M-4 -16H12M-4 -10H12M-4 -4H12M1.3 -22V0.6M6.7 -22V0.6"/>' +
+  '<rect class="sg-door" x="2" y="0.6" width="4" height="5.8" rx="0.4"/>' +
+  // 樓頂的時鐘：時針從 7 點（210 度）走到 9 點，分針一輪轉兩圈
+  '<g transform="translate(4 -26)"><circle class="sg-clock" r="3.6"/><path class="sg-tick" d="M0 -3V-2.3M3 0H2.3M0 3V2.3M-3 0H-2.3"/>' +
+  '<g transform="rotate(210)"><g class="sg-hour"><path d="M0 0V-1.8"/></g></g><g class="sg-min"><path d="M0 0V-2.7"/></g><circle class="sg-pin" r="0.45"/></g>' +
+  [['a', '7–8', -16], ['b', '8–9', -9.6]]
+    .map(([k, t, y]) => `<g transform="translate(-15 ${y})"><rect class="sg-chip ${k}" x="-6" y="-2.4" width="12" height="4.8" rx="2.4"/><text class="sg-ct" y="1.1" text-anchor="middle">${t}</text></g>`)
+    .join('') +
+  // 兩批上班族（西裝、公事包），一批兩個人
+  ['a', 'b'].map((k) => `<g transform="translate(-22 6.4)"><g class="sg-${k}">${dressed(SUIT)}<g transform="translate(-4.6 0)">${dressed(SUIT)}</g></g></g>`).join('') +
+  // 門口：冒「+1」點數，變成一杯熱咖啡
+  '<g transform="translate(4 -9)"><g class="sg-pt"><circle class="sg-coin" r="2.6"/><text class="sg-one" y="1" text-anchor="middle">+1</text></g>' +
+  '<g class="sg-cup"><path class="sg-mug" d="M-1.8 -1.6H1.8L1.4 2H-1.4Z"/><path class="sg-handle" d="M1.7 -0.8Q3 -0.6 1.6 0.9"/><path class="sg-steam" d="M-0.6 -2.2q-0.6 -0.8 0 -1.6t0 -1.6M0.8 -2.2q-0.6 -0.8 0 -1.6t0 -1.6"/></g></g>';
+
 export function sceneSvg(kind: SceneKind, deg: number): string {
   switch (kind) {
     case 'schoolwalk':
@@ -372,6 +393,8 @@ export function sceneSvg(kind: SceneKind, deg: number): string {
       return BUS_TERMINAL;
     case 'cyclerenew':
       return CYCLE_RENEW;
+    case 'stagger':
+      return STAGGER;
 
     case 'oldhouse':
       return OLDHOUSE;

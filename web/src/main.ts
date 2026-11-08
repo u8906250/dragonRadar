@@ -3827,6 +3827,9 @@ function hqScenesAll(t0: number): HqIcon[] {
   const tpHint = (where: string): { title: string; intro: string } => ({ title: `TPASS 共享機車（${where}，示意）`, intro: I['TPASS共享機車'] ?? '' });
   out.push({ lat: tp.station.lat, lng: tp.station.lng, at: tpAt, kind: 'tpassgo', scale, hint: tpHint(`${tp.station.name}：刷卡騎走`) });
   out.push({ lat: tp.lot.lat, lng: tp.lot.lng, at: tpAt + 600, kind: 'tpasspark', scale, hint: tpHint(`${tp.lot.name}：停進共享機車格`) });
+  // 內科智慧錯峰（v1.573，港湖政見開箱）：內科瑞光路的辦公大樓，船離它最近時
+  const sg = hq.HQ_STAGGER;
+  out.push({ lat: sg.lat, lng: sg.lng, at: hqNearestAt(t0, sg) + 300, kind: 'stagger', scale, hint: { title: `內科智慧錯峰：選 7–8 點或 8–9 點上班，拿點數換咖啡（${sg.name}，示意）`, intro: I['內科智慧錯峰'] ?? '' } });
   // 公車安全改革（v1.555）：市府轉運站（折返點休息、準點出發），洋流號到市政府後（v1.557 使用者說把十字路口拿掉）
   const bs = hq.HQ_BUS_SAFETY;
   const busHint = (where: string): { title: string; intro: string } => ({ title: `公車安全改革（${where}，示意）`, intro: I['公車安全改革'] ?? '' });

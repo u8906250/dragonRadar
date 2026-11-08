@@ -1,11 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import { cleanSvg, isSceneKind, sceneSvg, windSvg, type SceneKind } from '../src/hq-scenes';
-import { HQ_BIKE_HUBS, HQ_BRIDGE, HQ_COMMUTE, HQ_DETENTION, HQ_FARM_TRUCKS, HQ_POCKETPARKS, HQ_SERVICES, HQ_TIAOTONG } from '../src/hq-voyage';
+import { HQ_BIKE_HUBS, HQ_BRIDGE, HQ_COMMUTE, HQ_DETENTION, HQ_FARM_TRUCKS, HQ_POCKETPARKS, HQ_SERVICES, HQ_STAGGER, HQ_TIAOTONG } from '../src/hq-voyage';
 import { haversineKm } from '../src/geo';
 
 describe('更貼近政策的小動畫', () => {
   it('draws every scene kind', () => {
-    const kinds: SceneKind[] = ['sporthub', 'pocketpark', 'detention', 'cleanwater', 'schoolwalk', 'lunch', 'piggy', 'aiteam', 'workhub', 'ridehub', 'oldhouse', 'streettree', 'bikerack', 'nightmayor', 'buscharge', 'library24', 'lantern', 'nightsky', 'tpassgo', 'tpasspark', 'busterminal', 'cyclerenew'];
+    const kinds: SceneKind[] = ['sporthub', 'pocketpark', 'detention', 'cleanwater', 'schoolwalk', 'lunch', 'piggy', 'aiteam', 'workhub', 'ridehub', 'oldhouse', 'streettree', 'bikerack', 'nightmayor', 'buscharge', 'library24', 'lantern', 'nightsky', 'tpassgo', 'tpasspark', 'busterminal', 'cyclerenew', 'stagger'];
     for (const k of kinds) {
       expect(isSceneKind(k)).toBe(true);
       expect(sceneSvg(k, 0).length).toBeGreaterThan(100);
@@ -13,6 +13,17 @@ describe('更貼近政策的小動畫', () => {
     expect(isSceneKind('wetland')).toBe(false);
     expect(cleanSvg(30)).toContain('rotate(30.0)');
     expect(windSvg(-45)).toContain('rotate(-45.0)');
+  });
+
+  it('puts 內科智慧錯峰 in the Neihu science park, away from the 港墘 hub and the bike bridge', () => {
+    // 內湖科技園區（OpenStreetMap landuse 的範圍）
+    expect(HQ_STAGGER.lat).toBeGreaterThan(25.0684);
+    expect(HQ_STAGGER.lat).toBeLessThan(25.0838);
+    expect(HQ_STAGGER.lng).toBeGreaterThan(121.5615);
+    expect(HQ_STAGGER.lng).toBeLessThan(121.5841);
+    const hub = HQ_BIKE_HUBS.find((h) => h.mode === 'work')!;
+    for (const p of [hub, { lat: HQ_BRIDGE.to[0], lng: HQ_BRIDGE.to[1] }]) expect(haversineKm(HQ_STAGGER, p)).toBeGreaterThan(0.6);
+    expect(sceneSvg('stagger', 0)).toContain('7–8');
   });
 
   it('drives each farm truck from the farm to its school', () => {
