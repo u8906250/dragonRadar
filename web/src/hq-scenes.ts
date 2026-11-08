@@ -13,8 +13,8 @@ export const IDLE_CYCLE_MS = 5_040_000;
 export const idlePhase = (now: number, offsetMs: number): number => Math.round((now + offsetMs) % IDLE_CYCLE_MS);
 
 /** 會自己畫一個小場景的圖示 */
-export type SceneKind = 'sporthub' | 'workhub' | 'ridehub' | 'pocketpark' | 'detention' | 'cleanwater' | 'schoolwalk' | 'lunch' | 'piggy' | 'aiteam' | 'oldhouse' | 'streettree' | 'bikerack' | 'nightmayor' | 'buscharge' | 'library24' | 'lantern' | 'nightsky' | 'tpassgo' | 'tpasspark' | 'busterminal' | 'cyclerenew' | 'stagger';
-const SCENE_KINDS: readonly string[] = ['sporthub', 'workhub', 'ridehub', 'pocketpark', 'detention', 'cleanwater', 'schoolwalk', 'lunch', 'piggy', 'aiteam', 'oldhouse', 'streettree', 'bikerack', 'nightmayor', 'buscharge', 'library24', 'lantern', 'nightsky', 'tpassgo', 'tpasspark', 'busterminal', 'cyclerenew', 'stagger'];
+export type SceneKind = 'sporthub' | 'workhub' | 'ridehub' | 'pocketpark' | 'detention' | 'cleanwater' | 'schoolwalk' | 'lunch' | 'piggy' | 'aiteam' | 'oldhouse' | 'streettree' | 'bikerack' | 'nightmayor' | 'buscharge' | 'library24' | 'lantern' | 'nightsky' | 'tpassgo' | 'tpasspark' | 'busterminal' | 'cyclerenew' | 'stagger' | 'expo';
+const SCENE_KINDS: readonly string[] = ['sporthub', 'workhub', 'ridehub', 'pocketpark', 'detention', 'cleanwater', 'schoolwalk', 'lunch', 'piggy', 'aiteam', 'oldhouse', 'streettree', 'bikerack', 'nightmayor', 'buscharge', 'library24', 'lantern', 'nightsky', 'tpassgo', 'tpasspark', 'busterminal', 'cyclerenew', 'stagger', 'expo'];
 export const isSceneKind = (k: string): k is SceneKind => SCENE_KINDS.includes(k);
 
 /** 站著的小人（腳在 y = 0、往右走）：身體的 class 決定衣服顏色，extra 是帽子、領帶這些 */
@@ -361,6 +361,30 @@ const STAGGER =
   '<g transform="translate(4 -9)"><g class="sg-pt"><circle class="sg-coin" r="2.6"/><text class="sg-one" y="1" text-anchor="middle">+1</text></g>' +
   '<g class="sg-cup"><path class="sg-mug" d="M-1.8 -1.6H1.8L1.4 2H-1.4Z"/><path class="sg-handle" d="M1.7 -0.8Q3 -0.6 1.6 0.9"/><path class="sg-steam" d="M-0.6 -2.2q-0.6 -0.8 0 -1.6t0 -1.6M0.8 -2.2q-0.6 -0.8 0 -1.6t0 -1.6"/></g></g>';
 
+/**
+ * 南港展覽館散場（v1.574；港湖政見開箱「展覽散場也要錯峰，並想辦法讓人看完展覽後留下來」、縫合、商圈振興、山林徑結合跑步路徑）：
+ * 波浪屋頂的展覽館、屋頂上一個小時鐘；散場的人分兩批走出來——第一批沿著粉紅色的縫線（縫合，跟城市縫線同一個顏色）走到右邊的小商圈，
+ * 進門冒一個購物袋（留下來逛）；第二批往左走上山林步道，到山頂冒一顆小愛心；一輪 14 秒
+ */
+const EXPO =
+  '<ellipse class="sc-shadow" cx="-2" cy="6.6" rx="30" ry="1.2"/>' +
+  // 左邊的小山和步道（山林徑），畫在展覽館後面
+  '<path class="nx-hill" d="M-34 6.4Q-30 -11.6 -23.4 -12.2Q-17.4 -12 -14.6 6.4Z"/><path class="nx-trail" d="M-11 6.2H-16.6Q-19.6 2 -23.4 -9.6"/>' +
+  '<rect class="nx-hall" x="-14" y="-7" width="26" height="13.4" rx="0.8"/><path class="nx-roof" d="M-15.6 -7Q-8 -14 -1 -9.5Q6 -14 13.6 -7Z"/>' +
+  '<rect class="nx-glass" x="-12" y="-5" width="22" height="3.4" rx="0.4"/><rect class="nx-door" x="-12.6" y="0.4" width="5.2" height="6" rx="0.4"/>' +
+  '<rect class="nx-sign" x="2" y="0.4" width="7.4" height="4.6" rx="0.6"/><text class="nx-zhan" x="5.7" y="3.9" text-anchor="middle">展</text>' +
+  '<g transform="translate(-1 -12.4)"><circle class="sg-clock" r="2.2"/><g class="nx-hand"><path d="M0 0V-1.6"/></g><circle class="sg-pin" r="0.35"/></g>' +
+  // 縫線（縫合）：展覽館門口到小商圈
+  '<path class="nx-seam" d="M-7 6.2H16.6"/>' +
+  // 右邊的小商圈：條紋雨遮、櫥窗
+  '<rect class="nx-shop" x="15" y="-4" width="12" height="10.4" rx="0.5"/><path class="nx-awn" d="M14 -4L15.6 -7.6H26.4L28 -4Z"/><path class="nx-stripe" d="M17.8 -7.6L17.4 -4M21 -7.6V-4M24.2 -7.6L24.6 -4"/>' +
+  '<rect class="nx-shopdoor" x="16.4" y="0.4" width="3.2" height="6" rx="0.3"/><rect class="nx-win" x="20.6" y="-2.4" width="5" height="4" rx="0.4"/><path class="nx-goods" d="M21.8 0.6V-0.8M23.1 0.6V-1.4M24.4 0.6V-0.6"/>' +
+  // 第一批往右走到商圈、第二批往左上山（翻過來）
+  `<g transform="translate(-10 6.4)"><g class="nx-a">${person('nx-coat')}<g transform="translate(-4.4 0)">${person('nx-coat b')}</g></g></g>` +
+  `<g transform="translate(-10 6.4)"><g class="nx-b"><g transform="scale(-1 1)">${person('nx-coat c')}<g transform="translate(-4.4 0)">${person('nx-coat')}</g></g></g></g>` +
+  '<g transform="translate(18 -11)"><g class="nx-bag"><path class="nx-bagbody" d="M-1.9 -1H1.9L1.5 2.6H-1.5Z"/><path class="nx-baghandle" d="M-0.9 -1Q0 -3 0.9 -1"/></g></g>' +
+  `<g transform="translate(-23.4 -13)"><path class="nx-heart" d="${HEART}"/></g>`;
+
 export function sceneSvg(kind: SceneKind, deg: number): string {
   switch (kind) {
     case 'schoolwalk':
@@ -395,6 +419,8 @@ export function sceneSvg(kind: SceneKind, deg: number): string {
       return CYCLE_RENEW;
     case 'stagger':
       return STAGGER;
+    case 'expo':
+      return EXPO;
 
     case 'oldhouse':
       return OLDHOUSE;

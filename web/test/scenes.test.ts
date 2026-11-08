@@ -1,11 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import { cleanSvg, isSceneKind, sceneSvg, windSvg, type SceneKind } from '../src/hq-scenes';
-import { HQ_BIKE_HUBS, HQ_BRIDGE, HQ_COMMUTE, HQ_DETENTION, HQ_FARM_TRUCKS, HQ_POCKETPARKS, HQ_SERVICES, HQ_STAGGER, HQ_TIAOTONG } from '../src/hq-voyage';
+import { HQ_BIKE_HUBS, HQ_BRIDGE, HQ_COMMUTE, HQ_DETENTION, HQ_EXPO, HQ_FARM_TRUCKS, HQ_POCKETPARKS, HQ_SERVICES, HQ_STAGGER, HQ_TIAOTONG } from '../src/hq-voyage';
 import { haversineKm } from '../src/geo';
 
 describe('更貼近政策的小動畫', () => {
   it('draws every scene kind', () => {
-    const kinds: SceneKind[] = ['sporthub', 'pocketpark', 'detention', 'cleanwater', 'schoolwalk', 'lunch', 'piggy', 'aiteam', 'workhub', 'ridehub', 'oldhouse', 'streettree', 'bikerack', 'nightmayor', 'buscharge', 'library24', 'lantern', 'nightsky', 'tpassgo', 'tpasspark', 'busterminal', 'cyclerenew', 'stagger'];
+    const kinds: SceneKind[] = ['sporthub', 'pocketpark', 'detention', 'cleanwater', 'schoolwalk', 'lunch', 'piggy', 'aiteam', 'workhub', 'ridehub', 'oldhouse', 'streettree', 'bikerack', 'nightmayor', 'buscharge', 'library24', 'lantern', 'nightsky', 'tpassgo', 'tpasspark', 'busterminal', 'cyclerenew', 'stagger', 'expo'];
     for (const k of kinds) {
       expect(isSceneKind(k)).toBe(true);
       expect(sceneSvg(k, 0).length).toBeGreaterThan(100);
@@ -24,6 +24,16 @@ describe('更貼近政策的小動畫', () => {
     const hub = HQ_BIKE_HUBS.find((h) => h.mode === 'work')!;
     for (const p of [hub, { lat: HQ_BRIDGE.to[0], lng: HQ_BRIDGE.to[1] }]) expect(haversineKm(HQ_STAGGER, p)).toBeGreaterThan(0.6);
     expect(sceneSvg('stagger', 0)).toContain('7–8');
+  });
+
+  it('puts 南港展覽館散場 at hall 2, away from the tree already on the MRT station', () => {
+    // 展覽館二館（OpenStreetMap 建築的範圍）
+    expect(HQ_EXPO.lat).toBeGreaterThan(25.0555);
+    expect(HQ_EXPO.lat).toBeLessThan(25.0569);
+    expect(HQ_EXPO.lng).toBeGreaterThan(121.6144);
+    expect(HQ_EXPO.lng).toBeLessThan(121.6165);
+    expect(haversineKm(HQ_EXPO, { lat: 25.05538, lng: 121.6179 })).toBeGreaterThan(0.2);
+    expect(sceneSvg('expo', 0)).toContain('展');
   });
 
   it('drives each farm truck from the farm to its school', () => {

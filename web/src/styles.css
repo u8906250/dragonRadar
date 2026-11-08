@@ -396,10 +396,10 @@ path.map-water-glint { animation: water-flow-map 1.1s linear infinite; }
 /* 停著的小場景（通學區離畫面中間遠的學校，v1.568 效能）：不動，走路的小朋友收著 */
 .radar .voyage-icon.calm .idle *, .map-voyage-icon.calm .idle * { animation: none !important; }
 /* 小場景（hq-scenes.ts）拉近才畫：地圖縮放到 hq-far 就藏起來（雷達在 main.ts 照公里數不加；v1.555 使用者說拉遠時房子、車子變很大） */
-#map.hq-far .map-voyage-icon:is(.sporthub, .workhub, .ridehub, .pocketpark, .detention, .cleanwater, .schoolwalk, .lunch, .piggy, .aiteam, .oldhouse, .nightmayor, .buscharge, .library24, .tpassgo, .tpasspark, .busterminal, .cyclerenew, .stagger) { display: none; }
+#map.hq-far .map-voyage-icon:is(.sporthub, .workhub, .ridehub, .pocketpark, .detention, .cleanwater, .schoolwalk, .lunch, .piggy, .aiteam, .oldhouse, .nightmayor, .buscharge, .library24, .tpassgo, .tpasspark, .busterminal, .cyclerenew, .stagger, .expo) { display: none; }
 /* 條通的樹、車架、燈籠、夜色，通學區的斑馬線：很密，電腦版拉近到縮放 14.7 才畫（hq-dense-far；雷達在 main.ts 照 hqDenseKm 不加） */
 #map.hq-dense-far .map-voyage-icon.streettree, #map.hq-dense-far .map-voyage-icon.bikerack, #map.hq-dense-far .map-voyage-icon.lantern, #map.hq-dense-far .map-voyage-icon.nightsky, #map.hq-dense-far .map-voyage-icon.schoolwalk, #map.hq-dense-far path.map-night-area { display: none; }
-.map-voyage-icon.sporthub svg, .map-voyage-icon.pocketpark svg, .map-voyage-icon.detention svg, .map-voyage-icon.cleanwater svg, .map-voyage-icon.aiteam svg, .map-voyage-icon.workhub svg, .map-voyage-icon.ridehub svg, .map-voyage-icon.oldhouse svg, .map-voyage-icon.nightmayor svg, .map-voyage-icon.buscharge svg, .map-voyage-icon.library24 svg, .map-voyage-icon.tpassgo svg, .map-voyage-icon.tpasspark svg, .map-voyage-icon.busterminal svg, .map-voyage-icon.cyclerenew svg, .map-voyage-icon.stagger svg { transform: scale(calc(var(--zoom-scale, 1) * 0.9)); }
+.map-voyage-icon.sporthub svg, .map-voyage-icon.pocketpark svg, .map-voyage-icon.detention svg, .map-voyage-icon.cleanwater svg, .map-voyage-icon.aiteam svg, .map-voyage-icon.workhub svg, .map-voyage-icon.ridehub svg, .map-voyage-icon.oldhouse svg, .map-voyage-icon.nightmayor svg, .map-voyage-icon.buscharge svg, .map-voyage-icon.library24 svg, .map-voyage-icon.tpassgo svg, .map-voyage-icon.tpasspark svg, .map-voyage-icon.busterminal svg, .map-voyage-icon.cyclerenew svg, .map-voyage-icon.stagger svg, .map-voyage-icon.expo svg { transform: scale(calc(var(--zoom-scale, 1) * 0.9)); }
 .map-voyage-icon.lunch svg, .map-voyage-icon.piggy svg { transform: scale(var(--zoom-scale, 1)); }
 .map-voyage-icon.schoolwalk svg { transform: scale(calc(var(--zoom-scale, 1) * 0.45)); }
 #map.fit-dim .map-voyage-icon.fitbus-stop { display: none; }
@@ -1032,6 +1032,39 @@ path.map-night-area { animation: night-in 2.4s ease-in-out both; }
 .hq-near .sg-cup { transform-box: fill-box; transform-origin: center; animation: sg-cup 14s ease-out infinite; animation-delay: var(--d); }
 @keyframes sg-cup { 0%, 36% { transform: scale(0.3); opacity: 0; } 38% { transform: scale(1.2); opacity: 1; } 40%, 46% { transform: none; opacity: 1; } 48%, 86% { transform: scale(0.3); opacity: 0; } 88% { transform: scale(1.2); opacity: 1; } 90%, 96% { transform: none; opacity: 1; } 98%, 100% { transform: scale(0.3); opacity: 0; } }
 .hq-near .sg-steam { animation: ln-steam 1.4s ease-out infinite; animation-delay: var(--d); }
+/* 南港展覽館散場（v1.574）：散場的人分兩批，一批沿粉紅縫線走到小商圈（冒購物袋），一批走上山林步道（山頂冒小愛心）；一輪 14 秒 */
+.nx-hill { fill: #a8d58f; stroke: #5c9a4a; stroke-width: 0.5; }
+.nx-trail { fill: none; stroke: #c9a26a; stroke-width: 0.7; stroke-dasharray: 1.4 1; stroke-linecap: round; }
+.nx-hall { fill: #eef2f5; stroke: #35546a; stroke-width: 0.6; }
+.nx-roof { fill: #8fb8cc; stroke: #35546a; stroke-width: 0.5; stroke-linejoin: round; }
+.nx-glass { fill: #cfe8f3; stroke: #8fb8cc; stroke-width: 0.3; }
+.nx-door { fill: #35546a; }
+.nx-sign { fill: #f0812e; }
+.nx-zhan { font-size: 3.6px; font-weight: 900; fill: #fff; }
+.nx-hand path { fill: none; stroke: #f0812e; stroke-width: 0.5; stroke-linecap: round; }
+.nx-seam { fill: none; stroke: #f08a96; stroke-width: 0.9; stroke-dasharray: 2.2 1.8; stroke-linecap: round; }
+.nx-shop { fill: #fff4e0; stroke: #6b4a2a; stroke-width: 0.5; }
+.nx-awn { fill: #ff8fb1; stroke: #b04a6a; stroke-width: 0.4; stroke-linejoin: round; }
+.nx-stripe { fill: none; stroke: #fff; stroke-width: 1; }
+.nx-shopdoor { fill: #8a5a24; }
+.nx-win { fill: #ffe7a8; stroke: #6b4a2a; stroke-width: 0.3; }
+.nx-goods { fill: none; stroke: #e05a5a; stroke-width: 0.9; stroke-linecap: round; }
+.nx-coat { fill: none; stroke: #3a6fd8; stroke-width: 2.2; stroke-linecap: round; }
+.nx-coat.b { stroke: #2f9e6a; }
+.nx-coat.c { stroke: #e0a020; }
+.nx-bagbody { fill: #ff8fb1; stroke: #b04a6a; stroke-width: 0.4; }
+.nx-baghandle { fill: none; stroke: #b04a6a; stroke-width: 0.4; }
+.nx-heart { fill: #ff6f91; }
+.nx-a, .nx-b, .nx-bag, .nx-heart { opacity: 0; }
+.hq-near .nx-hand { animation: sg-turn-m 7s linear infinite; animation-delay: var(--d); }
+.hq-near .nx-a { animation: nx-a 14s linear infinite; animation-delay: var(--d); }
+@keyframes nx-a { 0% { transform: none; opacity: 0; } 3% { opacity: 1; } 30% { transform: translateX(28px); opacity: 1; } 33%, 100% { transform: translateX(28px); opacity: 0; } }
+.hq-near .nx-b { animation: nx-b 14s linear infinite; animation-delay: var(--d); }
+@keyframes nx-b { 0%, 50% { transform: none; opacity: 0; } 53% { opacity: 1; } 62% { transform: translateX(-6.6px); } 80% { transform: translate(-13.4px, -15px); opacity: 1; } 83%, 100% { transform: translate(-13.4px, -15px); opacity: 0; } }
+.hq-near .nx-bag { transform-box: fill-box; transform-origin: center; animation: nx-bag 14s ease-out infinite; animation-delay: var(--d); }
+@keyframes nx-bag { 0%, 30% { transform: scale(0.3); opacity: 0; } 32% { transform: scale(1.25); opacity: 1; } 34%, 44% { transform: none; opacity: 1; } 47%, 100% { transform: translateY(-2px); opacity: 0; } }
+.hq-near .nx-heart { transform-box: fill-box; transform-origin: center; animation: nx-heart 14s ease-out infinite; animation-delay: var(--d); }
+@keyframes nx-heart { 0%, 82% { transform: scale(0.3); opacity: 0; } 85% { transform: scale(1.2); opacity: 1; } 87%, 95% { transform: none; opacity: 1; } 98%, 100% { transform: translateY(-2px); opacity: 0; } }
 /* 15. 花博運動中心：無障礙坡道，坐輪椅的人推上去、進門 */
 .dm-door { fill: #35546a; }
 .dm-ramp { fill: #c9cdd2; stroke: #6a7480; stroke-width: 0.5; stroke-linejoin: round; }

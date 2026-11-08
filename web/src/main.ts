@@ -3830,6 +3830,9 @@ function hqScenesAll(t0: number): HqIcon[] {
   // 內科智慧錯峰（v1.573，港湖政見開箱）：內科瑞光路的辦公大樓，船離它最近時
   const sg = hq.HQ_STAGGER;
   out.push({ lat: sg.lat, lng: sg.lng, at: hqNearestAt(t0, sg) + 300, kind: 'stagger', scale, hint: { title: `內科智慧錯峰：選 7–8 點或 8–9 點上班，拿點數換咖啡（${sg.name}，示意）`, intro: I['內科智慧錯峰'] ?? '' } });
+  // 南港展覽館散場（v1.574，港湖政見開箱）：展覽館二館，船離它最近時
+  const ex = hq.HQ_EXPO;
+  out.push({ lat: ex.lat, lng: ex.lng, at: hqNearestAt(t0, ex) + 300, kind: 'expo', scale, hint: { title: '南港展覽館散場：錯峰離場、看完展還有地方去（示意）', intro: I['南港展覽館散場'] ?? '' } });
   // 公車安全改革（v1.555）：市府轉運站（折返點休息、準點出發），洋流號到市政府後（v1.557 使用者說把十字路口拿掉）
   const bs = hq.HQ_BUS_SAFETY;
   const busHint = (where: string): { title: string; intro: string } => ({ title: `公車安全改革（${where}，示意）`, intro: I['公車安全改革'] ?? '' });
