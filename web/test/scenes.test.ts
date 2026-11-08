@@ -26,7 +26,7 @@ describe('更貼近政策的小動畫', () => {
     expect(sceneSvg('stagger', 0)).toContain('7–8');
   });
 
-  it('puts 南港展覽館散場 at hall 2, away from the tree already on the MRT station', () => {
+  it('puts 南港展覽館散場 at hall 2 and walks people to the real LaLaport and 中南山 trail', () => {
     // 展覽館二館（OpenStreetMap 建築的範圍）
     expect(HQ_EXPO.lat).toBeGreaterThan(25.0555);
     expect(HQ_EXPO.lat).toBeLessThan(25.0569);
@@ -34,6 +34,15 @@ describe('更貼近政策的小動畫', () => {
     expect(HQ_EXPO.lng).toBeLessThan(121.6165);
     expect(haversineKm(HQ_EXPO, { lat: 25.05538, lng: 121.6179 })).toBeGreaterThan(0.2);
     expect(sceneSvg('expo', 0)).toContain('展');
+    // 連到真的地方（v1.575）：LaLaport 南港（OpenStreetMap 商場的範圍）、中南山登山步道的登山口、步道的另一頭
+    const near = (p: [number, number], q: [number, number], km: number): boolean => haversineKm({ lat: p[0], lng: p[1] }, { lat: q[0], lng: q[1] }) < km;
+    for (const w of [HQ_EXPO.mall, HQ_EXPO.trail]) expect(near(w.path[0], [HQ_EXPO.lat, HQ_EXPO.lng], 0.01)).toBe(true);
+    const mallEnd = HQ_EXPO.mall.path[HQ_EXPO.mall.path.length - 1];
+    expect(mallEnd[0]).toBeGreaterThan(25.0583);
+    expect(mallEnd[1]).toBeGreaterThan(121.6172);
+    expect(HQ_EXPO.trail.path.some((p) => near(p, HQ_EXPO.trail.head, 0.005))).toBe(true);
+    expect(near(HQ_EXPO.trail.path[HQ_EXPO.trail.path.length - 1], [25.05051, 121.61306], 0.005)).toBe(true);
+    expect(sceneSvg('expo', 0)).not.toContain('nx-shop');
   });
 
   it('drives each farm truck from the farm to its school', () => {

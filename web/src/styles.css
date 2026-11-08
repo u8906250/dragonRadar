@@ -1032,9 +1032,7 @@ path.map-night-area { animation: night-in 2.4s ease-in-out both; }
 .hq-near .sg-cup { transform-box: fill-box; transform-origin: center; animation: sg-cup 14s ease-out infinite; animation-delay: var(--d); }
 @keyframes sg-cup { 0%, 36% { transform: scale(0.3); opacity: 0; } 38% { transform: scale(1.2); opacity: 1; } 40%, 46% { transform: none; opacity: 1; } 48%, 86% { transform: scale(0.3); opacity: 0; } 88% { transform: scale(1.2); opacity: 1; } 90%, 96% { transform: none; opacity: 1; } 98%, 100% { transform: scale(0.3); opacity: 0; } }
 .hq-near .sg-steam { animation: ln-steam 1.4s ease-out infinite; animation-delay: var(--d); }
-/* 南港展覽館散場（v1.574）：散場的人分兩批，一批沿粉紅縫線走到小商圈（冒購物袋），一批走上山林步道（山頂冒小愛心）；一輪 14 秒 */
-.nx-hill { fill: #a8d58f; stroke: #5c9a4a; stroke-width: 0.5; }
-.nx-trail { fill: none; stroke: #c9a26a; stroke-width: 0.7; stroke-dasharray: 1.4 1; stroke-linecap: round; }
+/* 南港展覽館散場（v1.574；v1.575 去哪裡改成 main.ts 照真的路線畫）：散場的人分兩批走出展覽館，一批往右、一批往左；一輪 14 秒 */
 .nx-hall { fill: #eef2f5; stroke: #35546a; stroke-width: 0.6; }
 .nx-roof { fill: #8fb8cc; stroke: #35546a; stroke-width: 0.5; stroke-linejoin: round; }
 .nx-glass { fill: #cfe8f3; stroke: #8fb8cc; stroke-width: 0.3; }
@@ -1042,29 +1040,15 @@ path.map-night-area { animation: night-in 2.4s ease-in-out both; }
 .nx-sign { fill: #f0812e; }
 .nx-zhan { font-size: 3.6px; font-weight: 900; fill: #fff; }
 .nx-hand path { fill: none; stroke: #f0812e; stroke-width: 0.5; stroke-linecap: round; }
-.nx-seam { fill: none; stroke: #f08a96; stroke-width: 0.9; stroke-dasharray: 2.2 1.8; stroke-linecap: round; }
-.nx-shop { fill: #fff4e0; stroke: #6b4a2a; stroke-width: 0.5; }
-.nx-awn { fill: #ff8fb1; stroke: #b04a6a; stroke-width: 0.4; stroke-linejoin: round; }
-.nx-stripe { fill: none; stroke: #fff; stroke-width: 1; }
-.nx-shopdoor { fill: #8a5a24; }
-.nx-win { fill: #ffe7a8; stroke: #6b4a2a; stroke-width: 0.3; }
-.nx-goods { fill: none; stroke: #e05a5a; stroke-width: 0.9; stroke-linecap: round; }
 .nx-coat { fill: none; stroke: #3a6fd8; stroke-width: 2.2; stroke-linecap: round; }
 .nx-coat.b { stroke: #2f9e6a; }
 .nx-coat.c { stroke: #e0a020; }
-.nx-bagbody { fill: #ff8fb1; stroke: #b04a6a; stroke-width: 0.4; }
-.nx-baghandle { fill: none; stroke: #b04a6a; stroke-width: 0.4; }
-.nx-heart { fill: #ff6f91; }
-.nx-a, .nx-b, .nx-bag, .nx-heart { opacity: 0; }
+.nx-a, .nx-b { opacity: 0; }
 .hq-near .nx-hand { animation: sg-turn-m 7s linear infinite; animation-delay: var(--d); }
 .hq-near .nx-a { animation: nx-a 14s linear infinite; animation-delay: var(--d); }
-@keyframes nx-a { 0% { transform: none; opacity: 0; } 3% { opacity: 1; } 30% { transform: translateX(28px); opacity: 1; } 33%, 100% { transform: translateX(28px); opacity: 0; } }
+@keyframes nx-a { 0% { transform: none; opacity: 0; } 3% { opacity: 1; } 24% { transform: translateX(16px); opacity: 1; } 28%, 100% { transform: translateX(16px); opacity: 0; } }
 .hq-near .nx-b { animation: nx-b 14s linear infinite; animation-delay: var(--d); }
-@keyframes nx-b { 0%, 50% { transform: none; opacity: 0; } 53% { opacity: 1; } 62% { transform: translateX(-6.6px); } 80% { transform: translate(-13.4px, -15px); opacity: 1; } 83%, 100% { transform: translate(-13.4px, -15px); opacity: 0; } }
-.hq-near .nx-bag { transform-box: fill-box; transform-origin: center; animation: nx-bag 14s ease-out infinite; animation-delay: var(--d); }
-@keyframes nx-bag { 0%, 30% { transform: scale(0.3); opacity: 0; } 32% { transform: scale(1.25); opacity: 1; } 34%, 44% { transform: none; opacity: 1; } 47%, 100% { transform: translateY(-2px); opacity: 0; } }
-.hq-near .nx-heart { transform-box: fill-box; transform-origin: center; animation: nx-heart 14s ease-out infinite; animation-delay: var(--d); }
-@keyframes nx-heart { 0%, 82% { transform: scale(0.3); opacity: 0; } 85% { transform: scale(1.2); opacity: 1; } 87%, 95% { transform: none; opacity: 1; } 98%, 100% { transform: translateY(-2px); opacity: 0; } }
+@keyframes nx-b { 0%, 50% { transform: none; opacity: 0; } 53% { opacity: 1; } 70% { transform: translateX(-8px); opacity: 1; } 74%, 100% { transform: translateX(-8px); opacity: 0; } }
 /* 15. 花博運動中心：無障礙坡道，坐輪椅的人推上去、進門 */
 .dm-door { fill: #35546a; }
 .dm-ramp { fill: #c9cdd2; stroke: #6a7480; stroke-width: 0.5; stroke-linejoin: round; }

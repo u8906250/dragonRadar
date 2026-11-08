@@ -3594,6 +3594,11 @@ function hqExtras(t0: number): { reveals: HqReveal[]; icons: HqIcon[]; seams: Hq
   });
   const br = hq.HQ_BRIDGE;
   reveals.push({ path: [br.from, br.to], at: hqStopAt(t0, br.stop), kind: 'bridge', label: '自行車橋' });
+  // 南港展覽館散場（v1.575 使用者說連到真的地方）：展覽館二館 → LaLaport 南港（粉紅色，縫合的顏色）、→ 中南山登山步道（步道的土色）
+  const ex = hq.HQ_EXPO;
+  const exAt = hqNearestAt(t0, ex) + 600;
+  reveals.push({ path: ex.mall.path, at: exAt, kind: 'culture', color: '#f08a96', label: ex.mall.name, labelAt: 1, hideKm: 5 });
+  reveals.push({ path: ex.trail.path, at: exAt + 400, kind: 'trail', label: ex.trail.name, hideKm: 5 });
   // 公園、運動中心、大型建築的字拉遠到 10 km 不寫（v1.531 使用者說「10km 拿掉公園、運動中心、大型建築文字」）
   // 花博旗艦運動中心：按「親子」（運動中心）時跟著亮（v1.563）
   for (const v of hq.HQ_VENUES) icons.push({ lat: v.lat, lng: v.lng, at: hqStopAt(t0, v.stop) + 400, kind: v.kind, label: v.name, hideKm: 10, scale: 1.1, focus: hqLayer?.id === 'family' && v.kind === 'dome' });
@@ -3940,6 +3945,17 @@ function hqBikes(t0: number): Array<{ path: Array<[number, number]>; start: numb
     const lap = Math.max(14000, lenM(whole) * 36);
     out.push({ path: [...whole, ...[...whole].reverse()], start: tiaoAt + 400, lap: lap * 2, kind: 'patrol', loop: true });
   }
+  // 南港展覽館散場（v1.575）：看完展的人走到 LaLaport 南港、爬上中南山（線長完才出發，走得慢，每公尺 30 毫秒）
+  const ex = hq.HQ_EXPO;
+  const exAt = hqNearestAt(t0, ex) + 3200;
+  const mallLap = Math.max(12000, ex.mall.lengthM * 30);
+  const hikeLap = Math.max(14000, ex.trail.lengthM * 30);
+  out.push(
+    { path: ex.mall.path, start: exAt, lap: mallLap, kind: 'walker', color: '#3a6fd8' },
+    { path: ex.mall.path, start: exAt + mallLap / 2, lap: mallLap, kind: 'walker', color: '#2f9e6a' },
+    { path: ex.trail.path, start: exAt + 400, lap: hikeLap, kind: 'hiker' },
+    { path: ex.trail.path, start: exAt + 400 + hikeLap / 2, lap: hikeLap, kind: 'hiker' },
+  );
   // TPASS 共享機車（v1.555）：從捷運南京三民站騎到民生立體停車場（機車比腳踏車快，每公尺 6 毫秒）
   const tp = hq.HQ_TPASS;
   out.push({ path: tp.path, start: hqNearestAt(t0, tp.station) + 2400, lap: Math.max(7000, tp.lengthM * 6), kind: 'scooter' });
