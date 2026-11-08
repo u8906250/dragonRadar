@@ -5639,8 +5639,8 @@ function updatePinState(card: HTMLElement): void {
         ? pin.approxArea
           ? `只定位到${pin.approxArea}（約略位置），可以在地圖上標出正確位置`
           : name
-            ? `📍 查到：${name}。位置不對可以拖標記或點地圖`
-            : '已依地點定位，位置不對可以在地圖上標'
+            ? `📍 查到：${name}（不一定準確），位置不對可以拖標記或點地圖`
+            : '已依地點定位（不一定準確），位置不對可以在地圖上標'
         : missed
           ? '查不到這個地點。可以寫完整一點：台灣的寫縣市、路名、門牌；國外的寫門牌、街道、城市、州和國家（例如「12901 Alcosta Blvd, San Ramon, CA 94583, USA」），或在地圖上標'
           : '可以按「查地點」先在地圖上看位置；不查的話送出後依地點查';
@@ -5923,6 +5923,7 @@ function renderPreview(r: SubmitResult): void {
         </li>`,
       )
       .join('')}</ul>
+    ${items.some((p) => p.lat !== null && p.lng !== null) ? `<p class="muted sheet-note small">📍 位置是照地點文字查的，不一定準確，請按「在 Google 地圖上看」確認一下；不對的話按「補充資料」${mod.current ? '在地圖上標出正確的位置' : '補上完整地址'}。</p>` : ''}
     ${dups}${r.failures?.length ? `<p class="muted sheet-note">${r.failures.length > 1 ? `下面 ${r.failures.length} 場` : '下面這場'}不會放上雷達${canFixByNote(r.failures) ? '，知道的話可以按「補充資料」補上' : ''}：</p>${failuresHtml(r.failures)}` : ''}
     <div class="sheet-actions">
       <button type="button" class="btn primary" data-act="confirm">${items.length > 0 && items.every((p) => p.update?.mode === 'attach') ? '對，附在這個據點' : '對，放上雷達'}</button>

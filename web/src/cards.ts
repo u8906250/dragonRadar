@@ -530,12 +530,13 @@ const WISH_STATUS_TEXT: Record<WishStatus, string> = { pending: '審核中', app
 const REFUNDED: readonly WishStatus[] = ['rejected', 'dropped', 'withdrawn'];
 /** 許願的靈感（表單上點一下帶進去，說明頁 help.html 也列了一樣的）：讓人知道可以許什麼願 */
 const WISH_IDEAS: Array<{ label: string; text: string }> = [
-  { label: '新卡片', text: '新增一張收集卡：小法在櫻花步道打噴嚏，櫻花季才找得到。' },
+  { label: '一顆新星球', text: '除了汪星，再開一顆「喵星」：有自己的地形、居民和收集卡。' },
+  { label: '城市冒險', text: '沿著大稻埕、萬華的老街設計一場尋寶遊戲：每一站解一個謎，集滿拿一張隱藏卡。' },
+  { label: '留下回憶', text: '把我和狗狗以前散步的路線畫在汪星上，牠會一直在那條路上走（照片放在下面的參考連結）。' },
+  { label: '小博物館', text: '在 3D 國館旁邊蓋一間小館，放大家家裡的老照片和故事。' },
+  { label: '一起種樹', text: '全台北的人一起在雷達上種樹，種滿一區就開出一朵大花。' },
+  { label: '社區雷達', text: '做一個我們社區專屬的雷達：里民活動、二手交換、走失寵物都放上去。' },
   { label: '認領一塊地', text: '我想在汪星認領一小塊草地，種一棵寫著我家狗狗名字的樹。' },
-  { label: '3D 國館', text: '在 3D 國館的翠湖旁邊放一座許願池，丟順幣會泛起漣漪。' },
-  { label: '雷達小變化', text: '台北下雨的時候，雷達上也飄小雨，小法撐著傘。' },
-  { label: '帶朋友來玩', text: '把我家狗狗做成一隻小狗，在公園跟小法一起散步（照片放在下面的參考連結）。' },
-  { label: '新功能', text: '多一顆「今天去哪」按鈕，按一下隨機推薦附近一個活動。' },
   { label: '一段 prompt', text: '「把汪星變成晚上，螢火蟲跟著手指飛。」' },
 ];
 
@@ -587,8 +588,8 @@ function wishRow(): string {
   const ws = wishState?.wishes ?? [];
   const news = wishState?.unseen ?? 0;
   return `<section class="tc-wish-row">
-      <p><b>許願</b>投 ${WISH_COST} 枚順幣，寫下你希望洋流雷達多什麼，審核通過就用 AI 做出來。</p>
-      <p class="tc-wish-eg">例如：3D 國館的翠湖旁放一座許願池、在汪星認領一塊草地種一棵樹、小法的新卡片、讓你家狗狗來公園散步……</p>
+      <p><b>許願</b>投 ${WISH_COST} 枚順幣，寫下你希望留下什麼在洋流雷達，審核通過就用 AI 做出來。</p>
+      <p class="tc-wish-eg">例如：再開一顆喵星、一場老街尋寶冒險、把和狗狗散步的路線留在汪星、全台北一起種樹……</p>
       <div class="tc-wish-btns">
         <button type="button" class="chip primary" data-open-wish${n < WISH_COST ? ' disabled' : ''}>投 ${WISH_COST} 枚順幣許願</button>
         ${ws.length ? `<button type="button" class="chip${news ? ' has-news' : ''}" data-my-wishes>我的願望（${ws.length}）</button>` : ''}
@@ -628,7 +629,7 @@ export function openWishForm(onDone?: () => void): void {
       <div class="tc-head"><h2>許願</h2><button type="button" class="chip" data-close>關閉</button></div>
       <form class="tc-wish-form" novalidate>
         <label class="tc-field"><span>你的想法</span>
-          <textarea name="body" rows="8" maxlength="${WISH_MAX}" placeholder="想要洋流雷達多什麼？一句話、一段 prompt、一份完整企劃，或想認領一塊地，天馬行空都可以">${esc(d.body)}</textarea>
+          <textarea name="body" rows="8" maxlength="${WISH_MAX}" placeholder="你希望留下什麼在洋流雷達？小到一句話、一段 prompt，大到一份完整企劃、一整顆星球，天馬行空都可以">${esc(d.body)}</textarea>
           <small class="tc-len"></small></label>
         <div class="tc-ideas"><span>想不到嗎？點一個靈感：</span>${WISH_IDEAS.map((x, i) => `<button type="button" class="tc-idea" data-idea="${i}">${esc(x.label)}</button>`).join('')}</div>
         <label class="tc-field"><span>暱稱（選填）</span>
