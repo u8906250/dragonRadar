@@ -695,6 +695,8 @@ function labels(bodies: Body[]): string {
   return out;
 }
 
+/** Kepler-22b 的半徑：約地球的 2.1 倍（2023 年修正） */
+const KEPLER22B_KM = 13_380;
 /** 天體的真實半徑（公里）、拉遠時最小畫多大（SVG 單位），淡淡的顏色（線條跟雷達一樣，顏色只是讓人認得出來） */
 const LOOKS: Record<string, { km: number; min: number; tint: string }> = {
   sun: { km: 696_340, min: 6, tint: '' },
@@ -708,10 +710,12 @@ const LOOKS: Record<string, { km: number; min: number; tint: string }> = {
   saturn: { km: 58_232, min: 5, tint: '#ddc88e' },
   uranus: { km: 25_362, min: 4.2, tint: '#86cbd2' },
   neptune: { km: 24_622, min: 4.2, tint: '#5876d6' },
+  // Kepler-22b：表面什麼樣子沒有人知道，可能是海洋行星，淡藍色是示意
+  kepler22b: { km: KEPLER22B_KM, min: 3, tint: '#5fa8d8' },
 };
 
 /** 天體的真實半徑（公里）：中心換到這顆時，最多放大到剛好看得到整顆 */
-export const bodyRadiusKm = (key: string): number => LOOKS[key]?.km ?? 0;
+export const bodyRadiusKm = (key: string): number => LOOKS[key]?.km ?? deepRadiusKm(key);
 
 /** 從一顆星球看另一顆在太空那一層的哪個方向（從黃道北邊正上方看，順時針、0 是上，度）：火箭飛過去時頭朝這邊 */
 export function bodyBearing(from: string, to: string, when = new Date()): number {
@@ -945,8 +949,12 @@ function diskAxes(raH: number, decDeg: number, pa: number, incl: number): [Vec3,
   return [eqToEclVec(major), eqToEclVec(add3(scale3(minorSky, ci), scale3(los, si)))];
 }
 
-/** Kepler-22b：繞類太陽恆星 Kepler-22（天鵝座，赤經 19h16m52s、赤緯 +47°53′），離地球約 640 光年（Wikipedia） */
-export const KEPLER22 = { ra: 19 + 16 / 60 + 52.19 / 3600, dec: 47 + 53 / 60 + 3.9 / 3600, ly: 640 };
+/**
+ * Kepler-22b：繞類太陽恆星 Kepler-22（天鵝座，赤經 19h16m52s、赤緯 +47°53′），離地球約 640 光年（Wikipedia）。
+ * 軌道 0.849 AU、289.863876 天一圈，BJD 2454966.7001 從恆星前面經過（凌日，那時在恆星和地球中間）；半徑約地球 2.1 倍（2023 年修正），
+ * 恆星半徑 0.979 個太陽（Wikipedia、NASA 系外行星資料庫）
+ */
+export const KEPLER22 = { ra: 19 + 16 / 60 + 52.19 / 3600, dec: 47 + 53 / 60 + 3.9 / 3600, ly: 640, aAu: 0.849, periodDays: 289.863876, transitJd: 2454966.7001, planetKm: KEPLER22B_KM, starKm: 0.979 * 696_340 };
 /** 銀河系：中心（人馬座 A*，赤經 17h45m40s、赤緯 −29°00′）離我們約 26,670 光年，北銀極赤經 12h51m26s、赤緯 +27°07′42″，直徑約 10 萬光年 */
 const MILKY_WAY = { ra: 17 + 45 / 60 + 40.04 / 3600, dec: -(29 + 0 / 60 + 28.1 / 3600), ly: 26_670, poleRa: 12 + 51 / 60 + 26.28 / 3600, poleDec: 27 + 7 / 60 + 42 / 3600, r: 50_000 };
 /**
@@ -1001,11 +1009,84 @@ function milkyWay(): { center: Vec3; lines: ReturnType<typeof diskLines> } {
   return milkyWayCache;
 }
 
+/** 恆星 Kepler-22 的位置（公里，以地球為中心的黃道座標） */
+const kepler22Star = (): Vec3 => scale3(eclDir(KEPLER22.ra, KEPLER22.dec), KEPLER22.ly * LY_KM);
+/**
+ * Kepler-22b 的軌道：我們從側面看（傾角 89.76 度，所以看得到凌日），軌道面包含地球看過去的方向；
+ * 繞著這個方向還能轉多少看不出來（示意：取從黃道北邊看最開的那一面）。凌日那一刻行星在恆星往地球那一邊
+ */
+function keplerOrbit(): { star: Vec3; u: Vec3; w: Vec3 } {
+  const star = kepler22Star();
+  const los = eclDir(KEPLER22.ra, KEPLER22.dec);
+  const z: Vec3 = [0, 0, 1];
+  const w0 = cross3(z, los);
+  const n = Math.hypot(...w0);
+  return { star, u: scale3(los, -1), w: scale3(w0, 1 / n) };
+}
+/** Kepler-22b 這一刻的位置（公里）：照凌日的時間和週期算轉到哪（圓軌道） */
+export function keplerPlanet(when: Date): Vec3 {
+  const { star, u, w } = keplerOrbit();
+  const jd = when.getTime() / 86_400_000 + 2440587.5;
+  const t = (2 * Math.PI * (jd - KEPLER22.transitJd)) / KEPLER22.periodDays;
+  const a = KEPLER22.aAu * AU_KM;
+  return add3(star, add3(scale3(u, a * Math.cos(t)), scale3(w, a * Math.sin(t))));
+}
+
+/** 太陽系外面可以點、當中心的（第 2 號願望：Kepler-22b、星系也可以點，然後放大） */
+const DEEP_KEYS = new Set(['kepler22b', 'milkyway', ...GALAXIES.map((g) => g.key)]);
+export const isDeepBody = (key: string): boolean => DEEP_KEYS.has(key);
+/** 太陽系外面的東西的位置（公里）：Kepler-22b、星系的中心 */
+function deepPosition(key: string, when: Date): Vec3 | undefined {
+  if (key === 'kepler22b') return keplerPlanet(when);
+  if (key === 'milkyway') return milkyWay().center;
+  const g = GALAXIES.find((x) => x.key === key);
+  return g ? scale3(eclDir(g.ra, g.dec), g.ly * LY_KM) : undefined;
+}
+/** 太陽系外面的東西的半徑（公里）：中心換到這裡時最多放大到剛好看得到整個 */
+function deepRadiusKm(key: string): number {
+  if (key === 'kepler22b') return KEPLER22.planetKm;
+  if (key === 'milkyway') return MILKY_WAY.r * LY_KM;
+  const g = GALAXIES.find((x) => x.key === key);
+  return g ? g.r * LY_KM : 0;
+}
+
+/**
+ * 中心是 Kepler-22b、拉近到太陽系的大小以內：恆星 Kepler-22（像太陽一樣有光芒）、軌道（虛線）、行星照真實大小（太小就畫最小的大小，背對恆星那一半變暗）
+ */
+function keplerSystemMarkup(proj: (p: Vec3) => { x: number; y: number; d: number }, k: number, inView: (x: number, y: number, r?: number) => boolean, when: Date): string {
+  const { star, u, w } = keplerOrbit();
+  const a = KEPLER22.aAu * AU_KM;
+  let out = '';
+  if (a * k >= 6 && a * k <= INNER * 12) {
+    const pts = Array.from({ length: 128 }, (_, i) => {
+      const t = (i / 128) * 2 * Math.PI;
+      const q = proj(add3(star, add3(scale3(u, a * Math.cos(t)), scale3(w, a * Math.sin(t)))));
+      return `${f1(q.x)} ${f1(q.y)}`;
+    });
+    out += `<path class="region-outline open space-orbit" d="M${pts.join('L')}Z" />`;
+  }
+  const sq = proj(star);
+  const sr = Math.max(6, KEPLER22.starKm * k);
+  const pq = proj(keplerPlanet(when));
+  const pr = Math.max(3, KEPLER22.planetKm * k);
+  const named: Body[] = [];
+  const draw = [
+    { key: 'kepler22', q: sq, r: sr, svg: bodySvg('sun', sq.x, sq.y, sr, null), name: 'Kepler-22', lr: sr + 5 },
+    { key: 'kepler22b', q: pq, r: pr, svg: bodySvg('kepler22b', pq.x, pq.y, pr, sq), name: 'Kepler-22b', lr: pr },
+  ].sort((x, y) => x.q.d - y.q.d);
+  for (const b of draw) {
+    if (!inView(b.q.x, b.q.y, b.r)) continue;
+    out += b.key === 'kepler22b' ? `<g class="space-hit" data-body="kepler22b"><circle class="hit" cx="${f1(b.q.x)}" cy="${f1(b.q.y)}" r="${f1(Math.max(b.r + 3, 12))}" />${b.svg}</g>` : b.svg;
+    named.push({ x: b.q.x, y: b.q.y, r: b.lr, cls: b.key, name: b.name, force: b.key === 'kepler22b' });
+  }
+  return `${out}${labels(named)}`;
+}
+
 /**
  * 太陽系外面那幾層（雷達外圈超過 DEEP_FROM_KM）：太陽系縮成一個點（你在這裡），Kepler-22b、銀河系、本星系群的星系；
  * proj 跟太陽系一樣（看法、中心都一樣），太小的星系畫成一個點，離太陽系太近（疊在一起）的不畫
  */
-function deepMarkup(proj: (p: Vec3) => { x: number; y: number; d: number }, k: number, inView: (x: number, y: number, r?: number) => boolean, sunAt: { x: number; y: number }): { lines: string; bodies: string; named: Body[] } {
+function deepMarkup(proj: (p: Vec3) => { x: number; y: number; d: number }, k: number, inView: (x: number, y: number, r?: number) => boolean, sunAt: { x: number; y: number }, F: Vec3, focus: string | null, when: Date): { lines: string; bodies: string; named: Body[] } {
   let lines = '';
   let bodies = '';
   const named: Body[] = [];
@@ -1015,15 +1096,16 @@ function deepMarkup(proj: (p: Vec3) => { x: number; y: number; d: number }, k: n
     const q = proj(center);
     const rr = rKm * k;
     if (!inView(q.x, q.y, rr) || rr > INNER * 30) return;
-    // 銀河系（我們在裡面）照樣畫；別的星系疊在太陽系上、或遠到超過雷達範圍好幾倍（從正上方看會疊在附近，像是很近）就不畫
-    if (key !== 'milkyway' && (!apart(q, 8) || Math.hypot(...center) * k > INNER * 6)) return;
-    if (rr < 3) {
-      bodies += `<circle class="space-galaxy-dot" cx="${f1(q.x)}" cy="${f1(q.y)}" r="2.4" />`;
-    } else {
+    // 銀河系（我們在裡面）、中心那一個照樣畫；別的星系疊在太陽系上、或離中心遠到超過雷達範圍好幾倍（從正上方看會疊在附近，像是很近）就不畫
+    if (key !== 'milkyway' && key !== focus && (!apart(q, 8) || Math.hypot(...sub(center, F)) * k > INNER * 6)) return;
+    if (rr >= 3) {
       lines += `<path class="region-outline space-galaxy" d="${pathOf(d.rim, true)}" />`;
       if (rr >= 12) lines += `<path class="space-galaxy-core" d="${pathOf(d.core, true)}" />`;
       if (rr >= 18) lines += `<path class="region-outline open space-galaxy-arm" d="${d.arms.map((a) => pathOf(a, false)).join('')}" />`;
     }
+    // 點星系（核心那一塊）飛過去當中心（第 2 號願望）
+    const dot = rr < 3 ? `<circle class="space-galaxy-dot" cx="${f1(q.x)}" cy="${f1(q.y)}" r="2.4" />` : '';
+    bodies += `<g class="space-hit" data-body="${key}"><circle class="hit" cx="${f1(q.x)}" cy="${f1(q.y)}" r="${f1(Math.max(12, Math.min(rr * 0.4, 40)))}" />${dot}</g>`;
     named.push({ x: q.x, y: q.y, r: Math.min(rr, 4), cls: key, name });
   };
   // 銀河系小到只剩幾個單位（拉到幾百萬光年）：整個銀河系也縮成你在的那一點
@@ -1037,15 +1119,19 @@ function deepMarkup(proj: (p: Vec3) => { x: number; y: number; d: number }, k: n
     const c = scale3(eclDir(g.ra, g.dec), g.ly * LY_KM);
     disk(g.key, g.name, c, g.r * LY_KM, diskLines(c, u, v, g.r * LY_KM, g.arms, g.r * 0.2 * LY_KM, 0));
   }
-  // Kepler-22b（跟恆星 Kepler-22 只差 0.85 AU，這麼遠是同一個點）：離太陽系夠遠才畫（點子來自誰寫在說明頁的「實現的願望」，v1.583 使用者說不用寫在這裡）
-  const kp = proj(scale3(eclDir(KEPLER22.ra, KEPLER22.dec), KEPLER22.ly * LY_KM));
-  if (inView(kp.x, kp.y, 3) && apart(kp, 10)) {
-    bodies += `<circle class="space-planet space-exo" cx="${f1(kp.x)}" cy="${f1(kp.y)}" r="3" />`;
+  // Kepler-22b（跟恆星 Kepler-22 只差 0.85 AU，這麼遠是同一個點）：離太陽系夠遠才畫，中心是它就一定畫；點了飛過去（第 2 號願望）
+  // （點子來自誰寫在說明頁的「實現的願望」，v1.583 使用者說不用寫在這裡）
+  const kp = proj(keplerPlanet(when));
+  if (inView(kp.x, kp.y, 3) && (focus === 'kepler22b' || apart(kp, 10))) {
+    bodies += `<g class="space-hit" data-body="kepler22b"><circle class="hit" cx="${f1(kp.x)}" cy="${f1(kp.y)}" r="12" /><circle class="space-planet space-exo" cx="${f1(kp.x)}" cy="${f1(kp.y)}" r="3" /></g>`;
     named.push({ x: kp.x, y: kp.y, r: 3, cls: 'kepler22b', name: 'Kepler-22b' });
   }
   // 太陽系（你）：太陽、地球、行星都在這一點（銀河系也小成一點時寫銀河系）
   bodies += `<circle class="${tinyMw ? 'space-galaxy-dot' : 'space-sun'}" cx="${f1(sunAt.x)}" cy="${f1(sunAt.y)}" r="3.2" /><circle class="space-me" cx="${f1(sunAt.x)}" cy="${f1(sunAt.y)}" r="1.6" />`;
   named.unshift({ x: sunAt.x, y: sunAt.y, r: 4, cls: 'sun', name: tinyMw ? '銀河系（你）' : '太陽系（你）', force: true });
+  // 中心那一個的名字排在你後面
+  const at = named.findIndex((b) => b.cls === focus);
+  if (at > 1) named.splice(1, 0, ...named.splice(at, 1));
   return { lines, bodies, named };
 }
 
@@ -1059,7 +1145,8 @@ export function spaceMarkup(o: SpaceOpts): string {
   const view = o.view ?? { focus: null, yaw: 0, pitch: 0 };
   const topDown = view.yaw === 0 && view.pitch === 0;
   const pos = bodyPositions(o.when);
-  const F0 = (view.focus && pos.get(view.focus)) || ([0, 0, 0] as Vec3);
+  // 中心可以是太陽系外面的 Kepler-22b、星系（第 2 號願望）
+  const F0 = (view.focus && (pos.get(view.focus) ?? deepPosition(view.focus, o.when))) || ([0, 0, 0] as Vec3);
   // 鏡頭從中心那一顆往 toward 移了 u（火箭飛行）
   const T = view.toward ? pos.get(view.toward) : undefined;
   const u = T ? (view.u ?? 0) : 0;
@@ -1081,9 +1168,11 @@ export function spaceMarkup(o: SpaceOpts): string {
   const inView = (x: number, y: number, r = 0): boolean =>
     RADAR_VIEW.fill ? Math.abs(x - C) - r <= RADAR_VIEW.hx && Math.abs(y - C) - r <= RADAR_VIEW.hy : Math.hypot(x - C, y - C) - r <= INNER;
   const radius = (key: string): number => Math.max(LOOKS[key].min, LOOKS[key].km * k);
+  // 中心是 Kepler-22b、拉近到恆星系的大小：恆星、軌道、行星
+  if (view.focus === 'kepler22b' && o.scaleKm <= DEEP_FROM_KM) return keplerSystemMarkup(proj, k, inView, o.when);
   // 太陽系外面：太陽系縮成一個點，畫 Kepler-22b、銀河系和附近的星系
-  if (o.scaleKm > DEEP_FROM_KM) {
-    const deep = deepMarkup(proj, k, inView, proj(pos.get('sun')!));
+  if (o.scaleKm > DEEP_FROM_KM || (view.focus && isDeepBody(view.focus))) {
+    const deep = deepMarkup(proj, k, inView, proj(pos.get('sun')!), F, view.focus, o.when);
     return `${deep.lines}${deep.bodies}${labels(deep.named)}`;
   }
   const named: Body[] = [];

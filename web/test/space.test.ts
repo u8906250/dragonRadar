@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { DEEP_FROM_KM, fmtKm, globeFrac, LY_KM, RADAR_GEOM, RADAR_VIEW, SPACE_FROM_KM, viewReach, viewRect } from '../src/radar';
 import { PARK_MIN_KM } from '../src/park';
 import type { StreetLine } from '../src/streets';
-import { atPark, eclDir, focusMinKm, GALAXIES, KEPLER22, fromWoof, graticule, hemiPath, nearOf, WOOF_HILLS, WOOF_KM, landPath, moonPosition, nightPath, onWoofLand, ortho, planetPositions, spaceMarkup, subsolar, toWoof } from '../src/space';
+import { atPark, bodyRadiusKm, eclDir, focusMinKm, GALAXIES, isDeepBody, KEPLER22, keplerPlanet, fromWoof, graticule, hemiPath, nearOf, WOOF_HILLS, WOOF_KM, landPath, moonPosition, nightPath, onWoofLand, ortho, planetPositions, spaceMarkup, subsolar, toWoof } from '../src/space';
 import { TAIPEI_OUTLINE } from '../src/taipei';
 import { TAIPEI_HILLS } from '../src/taipei-hills';
 
@@ -160,6 +160,30 @@ describe('太陽系外面（第 1 號願望：Kepler-22b、其他星系）', () 
     // 銀河系也小成一點：中間那一點寫銀河系
     expect(lg).toContain('>銀河系（你）<');
     expect(lg).not.toContain('>太陽系（你）<');
+  });
+  it('lets you tap Kepler-22b and the galaxies, and zoom in to see the whole thing (wish #2)', () => {
+    expect(deep(1_000)).toContain('data-body="kepler22b"');
+    expect(deep(4e6, 0.9)).toContain('data-body="m31"');
+    for (const key of ['kepler22b', 'milkyway', 'm31', 'lmc']) expect(isDeepBody(key)).toBe(true);
+    expect(isDeepBody('mars')).toBe(false);
+    expect(focusMinKm('kepler22b')).toBeCloseTo(KEPLER22.planetKm * 1.3, 0);
+    expect(bodyRadiusKm('m31')).toBeCloseTo(76_000 * LY_KM, -10);
+  });
+  it('shows the star, the orbit and the planet when centred on Kepler-22b', () => {
+    const sys = spaceMarkup({ ...opts, scaleKm: 4e8, rg: 164 * globeFrac(4e8), view: { focus: 'kepler22b', yaw: 0, pitch: 0 } });
+    expect(sys).toContain('>Kepler-22<');
+    expect(sys).toContain('>Kepler-22b<');
+    expect(sys).toContain('space-orbit');
+    expect(sys).toContain('space-sun-ray');
+    expect(sys).not.toContain('>海王星<');
+    // 凌日那一刻在恆星往地球那一邊（離地球比恆星近 0.849 AU）
+    const at = keplerPlanet(new Date((KEPLER22.transitJd - 2440587.5) * 86_400_000));
+    expect(KEPLER22.ly * LY_KM - Math.hypot(...at)).toBeCloseTo(KEPLER22.aAu * 149_597_870.7, -3);
+  });
+  it('keeps a galaxy drawn when it is the centre', () => {
+    const m31 = spaceMarkup({ ...opts, scaleKm: 1e5 * LY_KM, rg: 0, view: { focus: 'm31', yaw: 0, pitch: 0 } });
+    expect(m31).toContain('>仙女座星系<');
+    expect(m31).toContain('space-galaxy-arm');
   });
 });
 
