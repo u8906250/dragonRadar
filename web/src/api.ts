@@ -180,7 +180,7 @@ export const locateFeedbackPlace = (eventId: number, place: string): Promise<Res
 export const reportBottle = (id: number): Promise<Result<{ hidden: boolean }>> => deviceJson<{ hidden: boolean }>(`/api/bottles/${id}/report`, 'POST', {});
 
 // 回報也帶裝置代碼：伺服器記下是哪個瀏覽器回報的，之後可以自己刪除
-/** 貼上 Threads 貼文連結，後端讀取並判讀，可能要十幾秒 */
+/** 貼上 Threads 貼文或活動通活動頁的連結，後端讀取並判讀，可能要十幾秒 */
 export const submitLink = (url: string, module = 'current'): Promise<Result<SubmitResult>> => deviceJson<SubmitResult>('/api/reports', 'POST', { url, module });
 /** 判讀結果對：放上雷達 */
 export const confirmReport = (c: { postId: string; token: string }): Promise<Result<SubmitResult>> => deviceJson<SubmitResult>('/api/reports/confirm', 'POST', c);

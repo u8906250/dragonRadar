@@ -238,7 +238,7 @@ async function handle(req: Request, env: Env, ctx: ExecutionContext): Promise<Re
     const dev = await deviceId(env, req);
     return jsonResponse({ reports: dev ? await myReports(env, dev) : [] });
   }
-  const mineDel = /^\/api\/reports\/((?:link|note)-[\w-]+)$/.exec(path);
+  const mineDel = /^\/api\/reports\/((?:link|note|acc)-[\w-]+)$/.exec(path);
   if (req.method === 'DELETE' && mineDel) {
     const dev = await deviceId(env, req);
     if (!dev) throw new HttpError(400, '缺少裝置代碼，請重新整理頁面');

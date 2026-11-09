@@ -7,7 +7,9 @@
 import type { Env } from './env';
 import { DEFAULT_MODULE, isModule, MODULE_IDS, moduleOf, type ModuleId } from './modules';
 import { ADDRESS_BUDGET_MS, atLocalTimes, commitPlan, detectEnded, getEvent, getPost, locateTypedPlace, MAX_FUTURE_SEC, planManual, planPost, processPost, savedTagsOf, storePost, tagsOf, topicOf, type EventOut, type FailedItem, type ManualActivity, type PlanItem, type PostRow } from './events';
-import { cleanTags, cleanTopic, type ActivityPart, type EventKind } from './extract';
+import { ACTIVITY_SPEC, cleanTags, cleanTopic, extractFromPost, MODULE_TAGS, postTags, type ActivityPart, type EventKind } from './extract';
+import { adoptedTags } from './learnedTags';
+import { accupassPermalink, accupassText, fetchAccupass, parseAccupassUrl, type AccupassEvent, type AccupassFetch, type AccupassLink } from './sources/accupass';
 import { fetchThreadsPost, resolveThreadsLink, shortcodeToUnix, withLocationTag } from './sources/link';
 import { sha1Hex } from './sources/text';
 import { creditReport, uncreditReport, type ReportReward } from './cards';
@@ -495,13 +497,11 @@ async function checkSubmitLimits(env: Env, ip: string, now: number, device: stri
 export const UNREADABLE_POST =
   'Threads 不讓外部讀取這則貼文，雷達讀不到內容。可能是貼文已刪除、帳號是私人帳號，或貼文限制只有登入的人才能看（例如酒類貼文限成年人觀看）。';
 
-/** 處理使用者貼上的連結：讀貼文、AI 判讀、定位，回傳結果 */
-export async function submitLink(env: Env, input: string, ip: string, now: number, device: string | null = null, module: ModuleId = DEFAULT_MODULE): Promise<SubmitResult> {
-  assertReportsOpen(env, module);
-  const link = await resolveThreadsLink(input);
-  if (!link) throw new ReportError(400, '找不到 Threads 貼文連結，請貼上像 https://www.threads.com/@帳號/post/... 的網址');
-  const postId = `link-${link.code}`;
-
+/**
+ * 之前有人貼過這一則：還沒確認（或說判讀錯了）的再給這個人看一次預覽、放上雷達的講現在雷達上有沒有（result）；
+ * 回報的人刪掉的、判讀規則改過、當時判讀失敗的要重新判讀（result 是 null）
+ */
+async function earlierReport(env: Env, postId: string, module: ModuleId, now: number): Promise<{ existing: PostRow | null; result: SubmitResult | null }> {
   const existing = await getPost(env, postId);
   // 之前有人貼過但還沒確認（或說判讀錯了）：再給這個人看一次預覽，讓他確認；回報的人刪掉的，重新判讀
   const waiting = existing && (existing.confirm_state === 'pending' || existing.confirm_state === 'rejected' || existing.confirm_state === 'withdrawn');
@@ -510,7 +510,7 @@ export async function submitLink(env: Env, input: string, ip: string, now: numbe
   if (moved) await env.DB.prepare('UPDATE posts SET module = ? WHERE id = ?').bind(module, postId).run();
   const stored = waiting && !moved ? readPlan(existing) : null;
   // 存的判讀結果是舊版規則的、或當時判讀失敗：重新判讀
-  if (existing && waiting && stored && stored.early !== 'extraction_failed' && stored.v === PLAN_VERSION) return previewResult(env, existing, stored, true, now);
+  if (existing && waiting && stored && stored.early !== 'extraction_failed' && stored.v === PLAN_VERSION) return { existing, result: await previewResult(env, existing, stored, true, now) };
   if (existing && !waiting) {
     const last = await env.DB.prepare("SELECT result FROM submissions WHERE post_id = ? AND result IS NOT NULL AND result != '\"supplement\"' ORDER BY id DESC LIMIT 1")
       .bind(postId)
@@ -519,8 +519,24 @@ export async function submitLink(env: Env, input: string, ip: string, now: numbe
     const parsed = last ? (JSON.parse(last.result) as unknown) : [];
     const reasons = Array.isArray(parsed) ? parsed.filter((x): x is string => typeof x === 'string') : [];
     const events = await eventsForResult(env, postId, reasons, now);
-    return { existed: true, outcome: existedOutcome(reasons, events.length), reasons, events, permalink: existing.permalink ?? '' };
+    return { existing, result: { existed: true, outcome: existedOutcome(reasons, events.length), reasons, events, permalink: existing.permalink ?? '' } };
   }
+  return { existing, result: null };
+}
+
+/** 處理使用者貼上的連結：讀貼文、AI 判讀、定位，回傳結果 */
+export async function submitLink(env: Env, input: string, ip: string, now: number, device: string | null = null, module: ModuleId = DEFAULT_MODULE): Promise<SubmitResult> {
+  assertReportsOpen(env, module);
+  // ACCUPASS 活動通的活動頁（v1.590）
+  const acc = parseAccupassUrl(input);
+  if (acc) return submitAccupass(env, acc, ip, now, device, module);
+  const link = await resolveThreadsLink(input);
+  if (!link) throw new ReportError(400, '找不到 Threads 貼文或活動通活動頁的連結，請貼上像 https://www.threads.com/@帳號/post/... 或 https://www.accupass.com/event/... 的網址');
+  const postId = `link-${link.code}`;
+
+  const earlier = await earlierReport(env, postId, module, now);
+  if (earlier.result) return earlier.result;
+  const existing = earlier.existing;
 
   const postedAt = shortcodeToUnix(link.code, now);
   if (postedAt === null) throw new ReportError(400, '這個連結看起來不是 Threads 貼文');
@@ -559,9 +575,96 @@ export async function submitLink(env: Env, input: string, ip: string, now: numbe
   return previewResult(env, { ...post, permalink }, plan, !!existing, now);
 }
 
+/** 活動通的活動頁讀不到時講原因 */
+function accupassError(f: Exclude<AccupassFetch, { status: 'ok' }>): ReportError {
+  if (f.status === 'gone') return new ReportError(404, '活動通上找不到這場活動，可能已經刪除或下架了');
+  console.warn(`accupass fetch failed: ${f.message}`);
+  return new ReportError(502, '暫時讀不到活動通的活動頁，請稍後再試');
+}
+
+/**
+ * 活動頁的時間地點 → 一場一場（跟回報的人直接修改的格式一樣）：3 天以內是一場；更長的（展覽、好幾天的市集）每天照開始、結束的時刻各一場，
+ * 從還沒結束的那天起最多 6 天；沒寫開始時間、地點的回傳原因
+ */
+export function accupassActivities(ev: AccupassEvent, now: number): ManualActivity[] | string {
+  const start = ev.startDate ? Math.floor(Date.parse(ev.startDate) / 1000) : NaN;
+  if (!Number.isFinite(start)) return '活動頁沒有寫開始時間';
+  const place = [...(ev.address ?? ev.venue ?? '').replace(/\s+/g, ' ').trim()].slice(0, 80).join('');
+  if (!place) return '活動頁沒有寫地點';
+  const end = ev.endDate ? Math.floor(Date.parse(ev.endDate) / 1000) : NaN;
+  const title = [...ev.name].slice(0, 60).join('');
+  const one = (startAt: number, endAt: number | null): ManualActivity => ({ title, startAt, endAt, place, lat: null, lng: null });
+  const endAt = Number.isFinite(end) && end > start ? end : null;
+  if (endAt === null || endAt - start <= MAX_EDIT_SPAN_SEC) return [one(start, endAt)];
+  const tod = (t: number): number => (((t + 8 * 3600) % 86400) + 86400) % 86400;
+  const [s0, e0] = [tod(start), tod(endAt)];
+  const out: ManualActivity[] = [];
+  let last: ManualActivity | null = null;
+  for (let day = start - s0; day <= endAt - e0 && out.length < 6; day += 86400) {
+    last = one(day + s0, e0 > s0 ? day + e0 : null);
+    if ((last.endAt ?? last.startAt + 7200) > now) out.push(last);
+  }
+  // 每一天都過了：照最後一天（會判成已經結束）
+  return out.length > 0 ? out : [last ?? one(start, endAt)];
+}
+
+/** 活動頁 → 預覽用的判讀結果：時間地點照活動頁、只有分類（主題）和關鍵字問 AI（問不到就照內文寫到的常見詞） */
+async function planAccupass(env: Env, ev: AccupassEvent, text: string, now: number): Promise<StoredPlan> {
+  const acts = accupassActivities(ev, now);
+  if (typeof acts === 'string') throw new ReportError(422, `${acts}，雷達放不上去`);
+  const common = [...MODULE_TAGS[DEFAULT_MODULE], ...(await adoptedTags(env, DEFAULT_MODULE))];
+  let topic: string | null = null;
+  let tags = postTags(null, text, common);
+  try {
+    const { extraction } = await extractFromPost(env, text, now, now, { spec: ACTIVITY_SPEC });
+    topic = cleanTopic((extraction?.events[0]?.extra as { topic?: unknown } | null | undefined)?.topic);
+    tags = postTags(extraction?.tags ?? null, text, common);
+  } catch (e) {
+    console.warn(`accupass topic failed: ${String(e)}`);
+  }
+  const items = await planManual(env, acts.map((a) => ({ ...a, topic, tags })), now, text, null, tags);
+  return { items, early: null, judgedTags: tags };
+}
+
+/**
+ * 回報活動通的活動頁（洋流的活動）：讀活動頁、照活動頁的時間地點排、定位，回傳預覽，回報的人確認才放上雷達（跟 Threads 一樣）；
+ * 線上活動、已經取消的不收。貼文 id 是 acc-活動編號、source 是 accupass、原文連結是活動頁
+ */
+async function submitAccupass(env: Env, link: AccupassLink, ip: string, now: number, device: string | null, module: ModuleId): Promise<SubmitResult> {
+  if (module !== DEFAULT_MODULE) throw new ReportError(400, '活動通的活動請切到「洋流雷達」再回報');
+  // 分享的短網址先讀一次才知道是哪一場
+  let fetched: AccupassFetch | null = null;
+  if ('go' in link) {
+    fetched = await fetchAccupass(link);
+    if (fetched.status !== 'ok') throw accupassError(fetched);
+  }
+  const id = fetched?.status === 'ok' ? fetched.event.id : (link as { id: string }).id;
+  const postId = `acc-${id}`;
+  const earlier = await earlierReport(env, postId, module, now);
+  if (earlier.result) return earlier.result;
+  await checkSubmitLimits(env, ip, now, device);
+  fetched ??= await fetchAccupass({ id });
+  if (fetched.status !== 'ok') throw accupassError(fetched);
+  const ev = fetched.event;
+  if (ev.online) throw new ReportError(422, '這是線上活動，沒有實體地點；雷達只收可以到場參加的活動');
+  if (ev.cancelled) throw new ReportError(422, '活動通上這場活動已經取消了');
+  const permalink = accupassPermalink(id);
+  const text = accupassText(ev);
+  await storePost(env, { id: postId, username: null, text, permalink, posted_at: now, keyword: null, source: 'accupass', module }, now);
+  await env.DB.batch([
+    env.DB.prepare("UPDATE posts SET checked_at = ?, text = ?, confirm_state = 'pending' WHERE id = ?").bind(now, text, postId),
+    env.DB.prepare('INSERT INTO submissions (post_id, ip_hash, device, created_at) VALUES (?, ?, ?, ?)').bind(postId, ip, device, now),
+  ]);
+  const post = await getPost(env, postId);
+  if (!post) throw new ReportError(500, 'post not stored');
+  const plan = await planAccupass(env, ev, text, now);
+  await env.DB.prepare('UPDATE posts SET confirm_plan = ? WHERE id = ?').bind(storePlan(plan), postId).run();
+  return previewResult(env, post, plan, !!earlier.existing, now);
+}
+
 async function checkConfirm(env: Env, body: { postId?: unknown; token?: unknown }): Promise<PostRow> {
   const postId = typeof body.postId === 'string' ? body.postId : '';
-  if (!/^(?:link|note)-[\w-]+$/.test(postId) || body.token !== (await confirmToken(env, postId))) throw new ReportError(400, '確認代碼不對，請重新貼一次連結');
+  if (!/^(?:link|note|acc)-[\w-]+$/.test(postId) || body.token !== (await confirmToken(env, postId))) throw new ReportError(400, '確認代碼不對，請重新貼一次連結');
   const post = await getPost(env, postId);
   if (!post) throw new ReportError(404, '找不到這則回報，請重新貼一次連結');
   assertReportsOpen(env, post.module);
@@ -828,7 +931,7 @@ export async function myReports(env: Env, device: string): Promise<MyReport[]> {
     `SELECT p.id, p.permalink, p.username, p.text, p.confirm_state, p.link_role, p.module, m.reported_at
        FROM (SELECT post_id, MAX(created_at) AS reported_at FROM submissions WHERE device = ? GROUP BY post_id) m
        CROSS JOIN posts p ON p.id = m.post_id
-      WHERE +p.source IN ('link', 'note') AND p.confirm_state = 'confirmed'
+      WHERE +p.source IN ('link', 'note', 'accupass') AND p.confirm_state = 'confirmed'
         AND (p.link_role = 'related' OR EXISTS (SELECT 1 FROM events e WHERE e.post_id = p.id))
       ORDER BY m.reported_at DESC LIMIT 30`,
   )
@@ -867,7 +970,7 @@ export async function withdrawReport(env: Env, postId: string, device: string, n
   const owned = await env.DB.prepare('SELECT 1 AS ok FROM submissions WHERE post_id = ? AND device = ? LIMIT 1').bind(postId, device).first<{ ok: number }>();
   if (!owned) throw new ReportError(403, '只能刪除自己回報的貼文，而且要用回報時的同一個瀏覽器（30 天內）');
   const post = await getPost(env, postId);
-  if (!post || (post.source !== 'link' && post.source !== 'note')) throw new ReportError(404, '找不到這則回報');
+  if (!post || !['link', 'note', 'accupass'].includes(post.source)) throw new ReportError(404, '找不到這則回報');
   if (post.confirm_state === 'withdrawn') return { ok: true, removed: 0 };
   const removed = (await env.DB.prepare("SELECT COUNT(*) AS n FROM events WHERE post_id = ? AND status IN ('upcoming', 'active')").bind(postId).first<{ n: number }>())?.n ?? 0;
   const { results: prev } = await env.DB.prepare("SELECT id FROM posts WHERE linked_to = ? AND link_role = 'previous' ORDER BY posted_at DESC").bind(postId).all<{ id: string }>();
@@ -937,7 +1040,7 @@ export interface RecheckLinksResult {
 export async function recheckLinks(env: Env, now: number): Promise<RecheckLinksResult> {
   const rows = await env.DB.prepare(
     `SELECT DISTINCT p.id, p.text FROM posts p JOIN events e ON e.post_id = p.id
-     WHERE p.source IN ('link', 'spot') AND e.status IN ('upcoming', 'active') AND (p.checked_at IS NULL OR p.checked_at <= ?)
+     WHERE p.source IN ('link', 'spot', 'accupass') AND e.status IN ('upcoming', 'active') AND (p.checked_at IS NULL OR p.checked_at <= ?)
      ORDER BY p.checked_at ASC LIMIT ?`,
   )
     .bind(now - RECHECK_LINK_SEC, RECHECK_LINK_BATCH)
@@ -950,6 +1053,10 @@ export async function recheckLinks(env: Env, now: number): Promise<RecheckLinksR
 
   for (const row of rows.results) {
     out.checked++;
+    if (row.id.startsWith('acc-')) {
+      await recheckAccupass(env, row, now, out, endAll);
+      continue;
+    }
     const r = await fetchThreadsPost(row.id.replace(/^(link|spot)-/, ''));
     await env.DB.prepare('UPDATE posts SET checked_at = ? WHERE id = ?').bind(now, row.id).run();
     // 存的內文可能接了地點標記（以前存的沒有），兩種都算沒改
@@ -983,6 +1090,43 @@ export async function recheckLinks(env: Env, now: number): Promise<RecheckLinksR
     }
   }
   return out;
+}
+
+/**
+ * 重讀活動通的活動頁：不見了就下架、標成取消就結束；時間、地點、名稱改了，照新的活動頁重排（活動頁就是主辦單位的公告，不用再問回報的人）
+ */
+async function recheckAccupass(env: Env, row: { id: string; text: string }, now: number, out: RecheckLinksResult, endAll: (postId: string, reason: string) => Promise<unknown>): Promise<void> {
+  const r = await fetchAccupass({ id: row.id.slice('acc-'.length) });
+  await env.DB.prepare('UPDATE posts SET checked_at = ? WHERE id = ?').bind(now, row.id).run();
+  if (r.status === 'gone') {
+    await endAll(row.id, 'deleted');
+    out.deleted++;
+    return;
+  }
+  if (r.status !== 'ok') return;
+  if (r.event.cancelled) {
+    await endAll(row.id, 'author');
+    out.ended++;
+    return;
+  }
+  const text = accupassText(r.event);
+  if (text === row.text) return;
+  out.edited++;
+  let plan: StoredPlan;
+  try {
+    plan = await planAccupass(env, r.event, text, now);
+  } catch (e) {
+    // 新的活動頁排不上（例如改成線上、拿掉時間）：舊的先下架
+    console.warn(`accupass replan failed for ${row.id}: ${String(e)}`);
+    await endAll(row.id, 'author');
+    return;
+  }
+  await env.DB.batch([
+    env.DB.prepare("DELETE FROM ended_reports WHERE event_id IN (SELECT id FROM events WHERE post_id = ? AND status IN ('upcoming', 'active', 'unlocated'))").bind(row.id),
+    env.DB.prepare("DELETE FROM events WHERE post_id = ? AND status IN ('upcoming', 'active', 'unlocated')").bind(row.id),
+    env.DB.prepare('UPDATE posts SET text = ? WHERE id = ?').bind(text, row.id),
+  ]);
+  await commitPlan(env, row.id, plan.items, now);
 }
 
 /** 隱私權政策承諾：回報紀錄（IP 雜湊）最多留 30 天 */
