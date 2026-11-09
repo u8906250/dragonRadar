@@ -185,7 +185,10 @@ function backHtml(d: CardDef, missing = false): string {
 }
 
 /** 蓋在畫面上的一層（3D 國館上面也看得到）：點外面、按 Esc、按「關閉」收起來；收起來後 onClose */
-function overlay(cls: string, html: string, onClose?: () => void): HTMLElement {
+/**
+ * sticky：只有按「關閉」才收起來，點旁邊、按 Esc 都不關（許願、調整要打字，v1.581 使用者說「點選旁邊不要關掉，避免不小心關掉」）
+ */
+function overlay(cls: string, html: string, onClose?: () => void, sticky = false): HTMLElement {
   const back = document.activeElement as HTMLElement | null;
   const el = document.createElement('div');
   el.className = `tc-overlay ${cls}`;
@@ -200,12 +203,12 @@ function overlay(cls: string, html: string, onClose?: () => void): HTMLElement {
   };
   // 疊了兩層（道具欄上面打開選獎勵）：Esc 只收最上面那層
   const onKey = (e: KeyboardEvent): void => {
-    if (e.key === 'Escape' && el === [...document.querySelectorAll('.tc-overlay')].pop()) close();
+    if (e.key === 'Escape' && !sticky && el === [...document.querySelectorAll('.tc-overlay')].pop()) close();
   };
   document.addEventListener('keydown', onKey);
   el.addEventListener('click', (e) => {
     const t = e.target as HTMLElement;
-    if (t === el || t.closest('[data-close]')) close();
+    if ((t === el && !sticky) || t.closest('[data-close]')) close();
   });
   document.body.append(el);
   el.querySelector<HTMLElement>('[data-close]')?.focus();
@@ -651,6 +654,7 @@ export function openWishForm(onDone?: () => void): void {
       </form>
     </div>`,
     onDone,
+    true,
   );
   const form = el.querySelector<HTMLFormElement>('.tc-wish-form')!;
   const field = (n: string): HTMLInputElement => form.elements.namedItem(n) as HTMLInputElement;
@@ -757,7 +761,8 @@ export function openMyWishes(onChange?: () => void): void {
       ${items.length ? `<ul class="tc-wishes">${items.join('')}</ul>` : '<p class="tc-items-empty">還沒有許過願</p>'}
       <p class="tc-move-msg" role="status"></p>`;
   };
-  const el = overlay('tc-mywish', `<div class="tc-box tc-form-box"><div class="tc-main">${list()}</div></div>`, onChange);
+  // 調整也要打字：一樣只有按「關閉」才收起來
+  const el = overlay('tc-mywish', `<div class="tc-box tc-form-box"><div class="tc-main">${list()}</div></div>`, onChange, true);
   const redraw = (): void => {
     const main = el.querySelector('.tc-main');
     if (main && el.isConnected) main.innerHTML = list();
