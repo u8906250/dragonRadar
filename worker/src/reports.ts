@@ -734,13 +734,33 @@ export async function editLink(env: Env, body: { postId?: unknown; token?: unkno
   // 自己填的（沒有連結）：內文就是填的資料，沒有「回報的人補充」
   const manual = post.note_kind === 'manual';
   const text = manual ? manualText(acts) : post.text;
-  const items = await planManual(env, acts, now, text, routeTitle, tags);
+  const items = await planManual(env, keepLocated(acts, stored?.items ?? []), now, text, routeTitle, tags);
   const tzs = items.map((it) => it.plan?.tz ?? it.fail?.tz ?? null);
   const note = manual ? null : (editSummary(stored ? editItemsOf(stored.items) : [], acts, items.map((it) => !!it.plan), items.some((it) => it.route) ? '站' : '場', tzs) ?? post.supplement ?? null);
   // 判讀出來的關鍵字：改過好幾次的，照第一次改之前的
   const plan: StoredPlan = { items, early: null, judgedTags: stored?.judgedTags ?? tags };
   await env.DB.prepare("UPDATE posts SET text = ?, supplement = ?, confirm_plan = ?, confirm_state = 'pending' WHERE id = ?").bind(text, note, storePlan(plan), post.id).run();
   return previewResult(env, { ...post, text, supplement: note }, plan, false, now);
+}
+
+/** 表單的地點欄：瀏覽器拿掉換行、送出時空白縮成一個、最多 80 字（跟 parseEditItems 一樣），用來比對地點有沒有改 */
+const placeKey = (s: string): string => [...s.replace(/[\r\n]/g, '').replace(/\s+/g, ' ').trim()].slice(0, 80).join('');
+
+/**
+ * 地點沒改、也沒在地圖上標的場次：沿用之前查到的位置（v1.587 使用者說「原本判讀有定位到地址，但補充資料更新預覽後卻定位不到」：
+ * 判讀時用 AI 整理的查詢字串、貼文寫的縣市一起查，表單只送地點的文字，再查一次可能查不到）。
+ * 只定位到鄉鎮區的約略位置不沿用（照填的再查一次）；沿用的位置不算回報的人標的（補充不寫「在地圖上標了位置」）
+ */
+export function keepLocated(acts: ManualActivity[], before: PlanItem[]): ManualActivity[] {
+  const known = new Map<string, { lat: number; lng: number }>();
+  for (const it of before) {
+    const p = it.plan;
+    if (p && p.lat !== null && p.lng !== null && !p.approx_area) known.set(placeKey(p.place_text), { lat: p.lat, lng: p.lng });
+  }
+  return acts.map((a) => {
+    const k = a.lat === null ? known.get(placeKey(a.place)) : undefined;
+    return k ? { ...a, ...k } : a;
+  });
 }
 
 /** 自己填的活動寫成內文（雷達詳細資料的摘錄）：一場一段，標題、時間、地點 */
