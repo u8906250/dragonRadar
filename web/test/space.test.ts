@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'vitest';
-import { fmtKm, globeFrac, RADAR_GEOM, RADAR_VIEW, SPACE_FROM_KM, viewReach, viewRect } from '../src/radar';
+import { DEEP_FROM_KM, fmtKm, globeFrac, LY_KM, RADAR_GEOM, RADAR_VIEW, SPACE_FROM_KM, viewReach, viewRect } from '../src/radar';
 import { PARK_MIN_KM } from '../src/park';
 import type { StreetLine } from '../src/streets';
-import { atPark, focusMinKm, fromWoof, graticule, hemiPath, nearOf, WOOF_HILLS, WOOF_KM, landPath, moonPosition, nightPath, onWoofLand, ortho, planetPositions, spaceMarkup, subsolar, toWoof } from '../src/space';
+import { atPark, eclDir, focusMinKm, GALAXIES, KEPLER22, fromWoof, graticule, hemiPath, nearOf, WOOF_HILLS, WOOF_KM, landPath, moonPosition, nightPath, onWoofLand, ortho, planetPositions, spaceMarkup, subsolar, toWoof } from '../src/space';
 import { TAIPEI_OUTLINE } from '../src/taipei';
 import { TAIPEI_HILLS } from '../src/taipei-hills';
 
@@ -118,6 +118,47 @@ describe('spaceMarkup', () => {
     const all = spaceMarkup({ ...opts, scaleKm: 5e9, rg: 164 * globeFrac(5e9) });
     expect(all).toContain('>海王星<');
     expect((all.match(/space-orbit/g) ?? []).length).toBeGreaterThanOrEqual(5);
+  });
+});
+
+describe('太陽系外面（第 1 號願望：Kepler-22b、其他星系）', () => {
+  const opts = { center: { lat: 25.04, lng: 121.52 }, land: [] as Array<Array<[number, number]>>, when: new Date('2026-11-09T08:00:00Z') };
+  const deep = (ly: number, pitch = 0): string => spaceMarkup({ ...opts, scaleKm: ly * LY_KM, rg: 164 * globeFrac(ly * LY_KM), view: { focus: null, yaw: 0, pitch } });
+  it('turns RA/Dec into ecliptic directions (vernal equinox on x, ecliptic north pole on z)', () => {
+    const x = eclDir(0, 0);
+    expect(x[0]).toBeCloseTo(1, 6);
+    const pole = eclDir(18, 66.5607);
+    expect(pole[2]).toBeCloseTo(1, 4);
+    // Kepler-22 在天鵝座，黃道北邊高緯度（約北緯 69 度）
+    const kp = eclDir(KEPLER22.ra, KEPLER22.dec);
+    expect((Math.asin(kp[2]) * 180) / Math.PI).toBeGreaterThan(65);
+    expect((Math.asin(kp[2]) * 180) / Math.PI).toBeLessThan(72);
+  });
+  it('writes light-years past the solar system', () => {
+    expect(fmtKm(640 * LY_KM)).toBe('640 光年');
+    expect(fmtKm(2.5 * LY_KM)).toBe('2.5 光年');
+    expect(fmtKm(16_000 * LY_KM)).toBe('1.6 萬光年');
+    expect(fmtKm(4e6 * LY_KM)).toBe('400 萬光年');
+    expect(fmtKm(5e9)).toBe('50 億 km');
+  });
+  it('shrinks the solar system to one dot and shows Kepler-22b with the wisher credited', () => {
+    expect(DEEP_FROM_KM).toBeGreaterThan(5e9);
+    const k = deep(1_000);
+    expect(k).toContain('>太陽系（你）<');
+    expect(k).toContain('Kepler-22b・點子來自 jy');
+    expect(k).not.toContain('>海王星<');
+    // 太遠了，Kepler-22b 跟太陽系疊在一起就不畫
+    expect(deep(100_000)).not.toContain('Kepler-22b');
+  });
+  it('draws the Milky Way around us and the Local Group galaxies further out', () => {
+    const mw = deep(150_000);
+    expect(mw).toContain('>銀河系<');
+    expect(mw).toContain('space-galaxy-arm');
+    const lg = deep(4e6, 0.9);
+    for (const g of GALAXIES.filter((x) => x.key === 'm31' || x.key === 'm33')) expect(lg).toContain(`>${g.name}<`);
+    // 銀河系也小成一點：中間那一點寫銀河系
+    expect(lg).toContain('>銀河系（你）<');
+    expect(lg).not.toContain('>太陽系（你）<');
   });
 });
 

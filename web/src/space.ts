@@ -4,7 +4,7 @@
  * - 再拉遠：月球的軌道和月球，太陽、行星和它們的軌道（以地球為中心，距離照真實比例，位置照今天推算）
  */
 import type { LatLng } from './geo';
-import { RADAR_GEOM, RADAR_VIEW, TINY_EARTH, viewReach, viewRect } from './radar';
+import { DEEP_FROM_KM, LY_KM, RADAR_GEOM, RADAR_VIEW, TINY_EARTH, viewReach, viewRect } from './radar';
 import type { StreetClass, StreetLine } from './streets';
 import { nearPark, PARK_MIN_KM, parkGeom, parkSvg, ringArea, scatter } from './park';
 import { TAIPEI_MAJOR_ROADS, TAIPEI_MINOR_ROADS, TAIPEI_OUTLINE } from './taipei';
@@ -906,6 +906,149 @@ function bodyPositions(when: Date): Map<string, Vec3> {
 
 const NAMES: Record<string, string> = { sun: '太陽', moon: '月球', ...Object.fromEntries(PLANETS.map((p) => [p.key, p.name])) };
 
+/*
+ * 太陽系外面（第 1 號願望，點子來自 jy：「能否產生 Kepler 22-b 這個星球；如果在其他星系，就讓雷達可以繼續縮小到可以看到其他星系」，v1.582）：
+ * Kepler-22b 在銀河系裡（天鵝座，約 640 光年），使用者說「可以多畫幾個星系，先不用飛過去看」，所以再畫銀河系和本星系群的幾個大星系。
+ * 位置照真實的赤經、赤緯、距離（換成跟行星一樣的黃道座標，以地球為中心；這麼遠以太陽為中心也一樣），大小照真實的直徑；
+ * 銀河系的旋臂、星系的樣子是示意（只畫外框、核心、兩條或四條旋臂），星系盤的傾斜照觀測的傾角、方位角
+ */
+/** 黃赤交角（J2000，度） */
+const OBLIQUITY = 23.4393;
+/** 赤道座標的方向 → 黃道座標（x 春分點、z 黃道北極，跟 planetPositions 一樣） */
+const eqToEclVec = (v: Vec3): Vec3 => {
+  const e = OBLIQUITY * RAD;
+  return [v[0], v[1] * Math.cos(e) + v[2] * Math.sin(e), -v[1] * Math.sin(e) + v[2] * Math.cos(e)];
+};
+/** 赤經（小時）、赤緯（度）的單位向量（赤道座標） */
+const eqDir = (raH: number, decDeg: number): Vec3 => {
+  const [a, d] = [raH * 15 * RAD, decDeg * RAD];
+  return [Math.cos(d) * Math.cos(a), Math.cos(d) * Math.sin(a), Math.sin(d)];
+};
+/** 赤經（小時）、赤緯（度）→ 黃道座標的單位向量 */
+export const eclDir = (raH: number, decDeg: number): Vec3 => eqToEclVec(eqDir(raH, decDeg));
+const scale3 = (v: Vec3, k: number): Vec3 => [v[0] * k, v[1] * k, v[2] * k];
+const add3 = (a: Vec3, b: Vec3): Vec3 => [a[0] + b[0], a[1] + b[1], a[2] + b[2]];
+const cross3 = (a: Vec3, b: Vec3): Vec3 => [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]];
+
+/**
+ * 星系盤的兩個方向（黃道座標的單位向量）：長軸在天空上的方位角 pa（從北往東量），盤面跟天空斜 incl 度；
+ * 照這兩個方向畫一圈，從地球看是長短軸比 cos(incl) 的橢圓
+ */
+function diskAxes(raH: number, decDeg: number, pa: number, incl: number): [Vec3, Vec3] {
+  const [a, d] = [raH * 15 * RAD, decDeg * RAD];
+  const los = eqDir(raH, decDeg);
+  const north: Vec3 = [-Math.sin(d) * Math.cos(a), -Math.sin(d) * Math.sin(a), Math.cos(d)];
+  const east: Vec3 = [-Math.sin(a), Math.cos(a), 0];
+  const [cp, sp, ci, si] = [Math.cos(pa * RAD), Math.sin(pa * RAD), Math.cos(incl * RAD), Math.sin(incl * RAD)];
+  const major = add3(scale3(north, cp), scale3(east, sp));
+  const minorSky = add3(scale3(north, -sp), scale3(east, cp));
+  return [eqToEclVec(major), eqToEclVec(add3(scale3(minorSky, ci), scale3(los, si)))];
+}
+
+/** Kepler-22b：繞類太陽恆星 Kepler-22（天鵝座，赤經 19h16m52s、赤緯 +47°53′），離地球約 640 光年（Wikipedia） */
+export const KEPLER22 = { ra: 19 + 16 / 60 + 52.19 / 3600, dec: 47 + 53 / 60 + 3.9 / 3600, ly: 640 };
+/** 銀河系：中心（人馬座 A*，赤經 17h45m40s、赤緯 −29°00′）離我們約 26,670 光年，北銀極赤經 12h51m26s、赤緯 +27°07′42″，直徑約 10 萬光年 */
+const MILKY_WAY = { ra: 17 + 45 / 60 + 40.04 / 3600, dec: -(29 + 0 / 60 + 28.1 / 3600), ly: 26_670, poleRa: 12 + 51 / 60 + 26.28 / 3600, poleDec: 27 + 7 / 60 + 42 / 3600, r: 50_000 };
+/**
+ * 本星系群的大星系（Wikipedia）：位置、距離、半徑（光年）、盤面的方位角和傾角（度）；麥哲倫雲是不規則星系，畫成橢圓（示意）
+ */
+export const GALAXIES: Array<{ key: string; name: string; ra: number; dec: number; ly: number; r: number; pa: number; incl: number; arms: number }> = [
+  { key: 'lmc', name: '大麥哲倫雲', ra: 5 + 23 / 60 + 34.5 / 3600, dec: -(69 + 45 / 60 + 22 / 3600), ly: 163_000, r: 16_100, pa: 170, incl: 35, arms: 0 },
+  { key: 'smc', name: '小麥哲倫雲', ra: 0 + 52 / 60 + 44.8 / 3600, dec: -(72 + 49 / 60 + 43 / 3600), ly: 203_000, r: 9_450, pa: 45, incl: 60, arms: 0 },
+  { key: 'm31', name: '仙女座星系', ra: 0 + 42 / 60 + 44.3 / 3600, dec: 41 + 16 / 60 + 9 / 3600, ly: 2_500_000, r: 76_000, pa: 38, incl: 77, arms: 2 },
+  { key: 'm33', name: '三角座星系', ra: 1 + 33 / 60 + 50.02 / 3600, dec: 30 + 39 / 60 + 36.7 / 3600, ly: 2_730_000, r: 30_550, pa: 23, incl: 54, arms: 2 },
+];
+/** 旋臂（示意）：對數螺線，傾角 12 度 */
+const ARM_B = Math.tan(12 * RAD);
+
+/**
+ * 盤面上的一圈、核心、旋臂（示意）：center 是盤的中心（公里），u、v 是盤面的兩個方向，r 是半徑（公里）；
+ * 旋臂從 r0 繞出去到外圈，arms 條平均分開，phase 是第一條的起點角度。照 v 轉的方向是 u 往 v（逆時針看 u × v 那一面）
+ */
+function diskLines(center: Vec3, u: Vec3, v: Vec3, r: number, arms: number, r0: number, phase: number): { rim: Vec3[]; core: Vec3[]; arms: Vec3[][] } {
+  const at = (rr: number, t: number): Vec3 => add3(center, add3(scale3(u, rr * Math.cos(t)), scale3(v, rr * Math.sin(t))));
+  const ring = (rr: number, n: number): Vec3[] => Array.from({ length: n }, (_, i) => at(rr, (i / n) * 2 * Math.PI));
+  const span = Math.log(r / r0) / ARM_B;
+  const out: Vec3[][] = [];
+  for (let j = 0; j < arms; j++) {
+    const t0 = phase + (j * 2 * Math.PI) / arms;
+    const pts: Vec3[] = [];
+    for (let i = 0; i <= 64; i++) {
+      const t = (i / 64) * span;
+      pts.push(at(r0 * Math.exp(ARM_B * t), t0 + t));
+    }
+    out.push(pts);
+  }
+  return { rim: ring(r, 96), core: ring(r0, 32), arms: out };
+}
+
+/**
+ * 銀河系：中心在人馬座 A* 的方向，盤面照北銀極；我們（太陽）在盤上離中心 26,670 光年。
+ * 四條旋臂（示意）：從棒的兩端（約 6,000 光年）往外繞，太陽夾在兩條中間（人馬臂、英仙臂之間的獵戶臂一帶），往後拖（銀河系從北銀極看順時針轉）
+ */
+let milkyWayCache: { center: Vec3; lines: ReturnType<typeof diskLines> } | null = null;
+function milkyWay(): { center: Vec3; lines: ReturnType<typeof diskLines> } {
+  if (milkyWayCache) return milkyWayCache;
+  const g1 = eclDir(MILKY_WAY.ra, MILKY_WAY.dec);
+  const pole = eclDir(MILKY_WAY.poleRa, MILKY_WAY.poleDec);
+  // 盤面的另一個方向（銀經 90 度，天鵝座那邊）
+  const g2 = cross3(pole, g1);
+  const center = scale3(g1, MILKY_WAY.ly * LY_KM);
+  const r0 = 6_000;
+  // 太陽在中心的反方向（角度 π）：讓那裡剛好在兩條旋臂中間
+  const phase = Math.PI - Math.log(MILKY_WAY.ly / r0) / ARM_B + Math.PI / 4;
+  milkyWayCache = { center, lines: diskLines(center, g1, g2, MILKY_WAY.r * LY_KM, 4, r0 * LY_KM, phase) };
+  return milkyWayCache;
+}
+
+/**
+ * 太陽系外面那幾層（雷達外圈超過 DEEP_FROM_KM）：太陽系縮成一個點（你在這裡），Kepler-22b、銀河系、本星系群的星系；
+ * proj 跟太陽系一樣（看法、中心都一樣），太小的星系畫成一個點，離太陽系太近（疊在一起）的不畫
+ */
+function deepMarkup(proj: (p: Vec3) => { x: number; y: number; d: number }, k: number, inView: (x: number, y: number, r?: number) => boolean, sunAt: { x: number; y: number }): { lines: string; bodies: string; named: Body[] } {
+  let lines = '';
+  let bodies = '';
+  const named: Body[] = [];
+  const pathOf = (pts: Vec3[], closed: boolean): string => `M${pts.map((p) => { const q = proj(p); return `${f1(q.x)} ${f1(q.y)}`; }).join('L')}${closed ? 'Z' : ''}`;
+  const apart = (q: { x: number; y: number }, min: number): boolean => Math.hypot(q.x - sunAt.x, q.y - sunAt.y) >= min;
+  const disk = (key: string, name: string, center: Vec3, rKm: number, d: ReturnType<typeof diskLines>): void => {
+    const q = proj(center);
+    const rr = rKm * k;
+    if (!inView(q.x, q.y, rr) || rr > INNER * 30) return;
+    // 銀河系（我們在裡面）照樣畫；別的星系疊在太陽系上、或遠到超過雷達範圍好幾倍（從正上方看會疊在附近，像是很近）就不畫
+    if (key !== 'milkyway' && (!apart(q, 8) || Math.hypot(...center) * k > INNER * 6)) return;
+    if (rr < 3) {
+      bodies += `<circle class="space-galaxy-dot" cx="${f1(q.x)}" cy="${f1(q.y)}" r="2.4" />`;
+    } else {
+      lines += `<path class="region-outline space-galaxy" d="${pathOf(d.rim, true)}" />`;
+      if (rr >= 12) lines += `<path class="space-galaxy-core" d="${pathOf(d.core, true)}" />`;
+      if (rr >= 18) lines += `<path class="region-outline open space-galaxy-arm" d="${d.arms.map((a) => pathOf(a, false)).join('')}" />`;
+    }
+    named.push({ x: q.x, y: q.y, r: Math.min(rr, 4), cls: key, name });
+  };
+  // 銀河系小到只剩幾個單位（拉到幾百萬光年）：整個銀河系也縮成你在的那一點
+  const tinyMw = MILKY_WAY.r * LY_KM * k < 6;
+  if (!tinyMw) {
+    const mw = milkyWay();
+    disk('milkyway', '銀河系', mw.center, MILKY_WAY.r * LY_KM, mw.lines);
+  }
+  for (const g of GALAXIES) {
+    const [u, v] = diskAxes(g.ra, g.dec, g.pa, g.incl);
+    const c = scale3(eclDir(g.ra, g.dec), g.ly * LY_KM);
+    disk(g.key, g.name, c, g.r * LY_KM, diskLines(c, u, v, g.r * LY_KM, g.arms, g.r * 0.2 * LY_KM, 0));
+  }
+  // Kepler-22b（跟恆星 Kepler-22 只差 0.85 AU，這麼遠是同一個點）：離太陽系夠遠才畫，名字寫點子來自誰
+  const kp = proj(scale3(eclDir(KEPLER22.ra, KEPLER22.dec), KEPLER22.ly * LY_KM));
+  if (inView(kp.x, kp.y, 3) && apart(kp, 10)) {
+    bodies += `<circle class="space-planet space-exo" cx="${f1(kp.x)}" cy="${f1(kp.y)}" r="3" />`;
+    named.push({ x: kp.x, y: kp.y, r: 3, cls: 'kepler22b', name: 'Kepler-22b・點子來自 jy' });
+  }
+  // 太陽系（你）：太陽、地球、行星都在這一點（銀河系也小成一點時寫銀河系）
+  bodies += `<circle class="${tinyMw ? 'space-galaxy-dot' : 'space-sun'}" cx="${f1(sunAt.x)}" cy="${f1(sunAt.y)}" r="3.2" /><circle class="space-me" cx="${f1(sunAt.x)}" cy="${f1(sunAt.y)}" r="1.6" />`;
+  named.unshift({ x: sunAt.x, y: sunAt.y, r: 4, cls: 'sun', name: tinyMw ? '銀河系（你）' : '太陽系（你）', force: true });
+  return { lines, bodies, named };
+}
+
 /**
  * 太空：地球（夠大、從正上方看你的時候畫海岸線、經緯線、晝夜），月球、太陽、行星照真實距離擺（黃道座標，春分點方向在右邊），
  * 軌道用虛線，星球照真實大小（太小就畫最小的大小）。view 是 3D 的看法：繞中心轉、傾斜，中心可以換成別的星球；
@@ -938,6 +1081,11 @@ export function spaceMarkup(o: SpaceOpts): string {
   const inView = (x: number, y: number, r = 0): boolean =>
     RADAR_VIEW.fill ? Math.abs(x - C) - r <= RADAR_VIEW.hx && Math.abs(y - C) - r <= RADAR_VIEW.hy : Math.hypot(x - C, y - C) - r <= INNER;
   const radius = (key: string): number => Math.max(LOOKS[key].min, LOOKS[key].km * k);
+  // 太陽系外面：太陽系縮成一個點，畫 Kepler-22b、銀河系和附近的星系
+  if (o.scaleKm > DEEP_FROM_KM) {
+    const deep = deepMarkup(proj, k, inView, proj(pos.get('sun')!));
+    return `${deep.lines}${deep.bodies}${labels(deep.named)}`;
+  }
   const named: Body[] = [];
   let lines = '';
   // 地球：中心是你、從正上方看、大到看得出形狀，就畫海岸線、經緯線、晝夜（跟光點的位置一致）

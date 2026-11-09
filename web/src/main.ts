@@ -12,7 +12,7 @@ import { shortAddress, splitPlace } from './place';
 import { crowdOf, MapView, pinPicker, type BaseMap, type MapRoute, type PinPicker } from './map';
 import { beep, ensureNotificationPermission, iosNeedsHomeScreen, notificationState, pushSubscription, pushSupported, registerServiceWorker, showBanner, systemNotify, unlockAudio, unsubscribePush } from './notify';
 import { checkWishNews, findCard, gotReward, myCards, onWishNews, openAlbum, openHelp, openItems } from './cards';
-import { Radar, SPACE_FROM_KM, type RadarRoute, type RadarStreets, type SpaceView } from './radar';
+import { DEEP_FROM_KM, LY_KM, Radar, SPACE_FROM_KM, type RadarRoute, type RadarStreets, type SpaceView } from './radar';
 import { DEFAULT_THEME_ID, getTheme, THEMES, type Theme } from './themes';
 import type { BottleOut, EventOut, Item, KeywordInfo, KeywordRules, MyBottles, MyReport, Origin, Phase, PickedBottle, RelatedPost, RouteOut, PreviewItem, RouteStop, RoutePreview, SubmitResult, FailedItem, EditItem, EditInput } from './types';
 
@@ -155,8 +155,11 @@ const DEFAULT_KM = 50;
 const isAutoScale = (s: ScaleSetting): boolean => s === 'taiwan' || s === 'world';
 /** 「全球」的範圍：半個地球（地球另一面最遠約 20,000 km） */
 const WORLD_KM = SPACE_FROM_KM;
-/** 太空最遠拉到哪：整個太陽系（海王星的軌道離地球最遠約 31 AU） */
-const SPACE_MAX_KM = 5e9;
+/**
+ * 太空最遠拉到哪：約 400 萬光年，看得到仙女座星系（250 萬光年）和三角座星系（273 萬光年）
+ * （第 1 號願望「Kepler-22b，拉遠看得到其他星系」，v1.582；以前只到整個太陽系，5e9 km）
+ */
+const SPACE_MAX_KM = 4e6 * LY_KM;
 const MIN_ZOOM_KM = 0.5;
 /**
  * 你在哪一顆：火箭在哪一邊你就在哪一邊（park.ts 存在 dr.rocket；搭火箭到汪星就在汪星，點別的星球只是看過去，坐火箭回來才回到地球）。
@@ -4692,8 +4695,8 @@ function zoomRadar(factor: number, done: boolean, gesture = false): void {
   // 自己縮放：「定位」飛到一半，位置直接到、範圍停在這裡；洋流總部的特效播放中就不再跟著船
   if (gesture && flight) landFlight();
   if (gesture && hqVoyageAt !== null) hqUserMoved = true;
-  // 太空（比全球再遠）一次縮放的幅度大一點：從全球到整個太陽系差了幾十萬倍
-  const f = gesture && (scaleKm > WORLD_KM || (scaleKm >= WORLD_KM && factor > 1)) ? factor ** 2 : factor;
+  // 太空（比全球再遠）一次縮放的幅度大一點：從全球到整個太陽系差了幾十萬倍；太陽系外面再大一點（到仙女座星系又差了上億倍）
+  const f = gesture && (scaleKm > WORLD_KM || (scaleKm >= WORLD_KM && factor > 1)) ? factor ** (scaleKm >= DEEP_FROM_KM ? 4 : 2) : factor;
   // 太空裡中心換到別的星球（月球、木星…）：最多放大到剛好看得到整顆，汪星可以放大到 1 km，中山公園附近到 0.5 公尺；
   // 地球上雷達正中間在中山公園附近也是 0.5 公尺（放大到比限制還近之後拖離公園：不再放大，可以拉遠）
   const focus = radar.spaceFocusKey;

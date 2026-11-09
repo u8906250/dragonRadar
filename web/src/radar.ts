@@ -290,6 +290,13 @@ export const viewRect = (m = 0): [number, number, number, number] =>
 const FILL_INSET = 12;
 /** 「全球」的範圍（半個地球）：再拉遠就是太空 */
 export const SPACE_FROM_KM = 20040;
+/** 一光年幾公里 */
+export const LY_KM = 9.4607e12;
+/**
+ * 比這個再遠是太陽系外面（第 1 號願望，v1.582）：整個太陽系縮成一個點，畫 Kepler-22b、銀河系和附近的星系（space.ts）；
+ * 海王星的軌道在這裡約剩 6 個單位
+ */
+export const DEEP_FROM_KM = 2e11;
 export const EARTH_KM = 6371;
 /** 地球表面離圓心超過這個（四分之一圈）就在另一面，看不到 */
 const HORIZON_KM = (Math.PI / 2) * EARTH_KM;
@@ -384,6 +391,12 @@ function radiusRatio(km: number, scaleKm: number): number {
 }
 
 export function fmtKm(km: number): string {
+  // 太陽系外面：光年、萬光年
+  if (km >= 1e12) {
+    const ly = km / LY_KM;
+    if (ly >= 1e4) return `${(ly / 1e4).toFixed(ly >= 1e5 ? 0 : 1)} 萬光年`;
+    return `${ly >= 10 ? Math.round(ly) : ly.toFixed(ly >= 1 ? 1 : 2)} 光年`;
+  }
   // 太空：幾萬、幾億公里
   if (km >= 1e8) return `${(km / 1e8).toFixed(km >= 1e9 ? 0 : 1)} 億 km`;
   if (km >= 1e5) return `${Math.round(km / 1e4)} 萬 km`;
@@ -1249,9 +1262,9 @@ export class Radar {
     this.draw();
   }
 
-  /** 刻度圈的半徑比例：中心換到別的星球時照比例（跟星球的畫法一樣），其他跟光點一樣 */
+  /** 刻度圈的半徑比例：中心換到別的星球時、太陽系外面（寫幾光年）照比例（跟星球的畫法一樣），其他跟光點一樣 */
   private ringRatio(km: number): number {
-    return this.spaceView.focus !== null ? km / this.scaleKm : this.ratio(km);
+    return this.spaceView.focus !== null || this.scaleKm > DEEP_FROM_KM ? km / this.scaleKm : this.ratio(km);
   }
 
   private addScaleLabel(km: number): void {
