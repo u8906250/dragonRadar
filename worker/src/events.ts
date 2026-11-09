@@ -31,8 +31,6 @@ export interface PostRow {
   confirm_state?: 'pending' | 'confirmed' | 'rejected' | 'withdrawn' | null;
   confirm_plan?: string | null;
   confirm_note?: string | null;
-  /** 沒有連結的回報：text 貼文字、image 截圖讀出來的字、manual 自己填 */
-  note_kind?: 'text' | 'image' | 'manual' | null;
   /** 哪個模組：current 洋流、dog 狗狗陪伴 */
   module?: string;
 }
@@ -173,7 +171,7 @@ export interface NewPost {
   permalink: string | null;
   posted_at: number;
   keyword: string | null;
-  source: 'threads' | 'manual' | 'news' | 'official' | 'link' | 'spot' | 'note';
+  source: 'threads' | 'manual' | 'news' | 'official' | 'link' | 'spot';
   /** 哪個模組，沒給就是洋流 */
   module?: ModuleId;
 }
@@ -746,10 +744,10 @@ async function planPostWith(env: Env, post: PostRow, now: number, profileHint: s
   const base = post.supplement ? `${post.text}\n\n【回報的人補充】${post.supplement}` : post.text;
   const text = profileHint ? `${base}\n\n【帳號簡介】${profileHint}` : base;
   const module = moduleOf(post.module);
-  // 使用者貼連結回報的（和沒有連結、貼文字或截圖的），主要模型說不是活動時再問備用模型（只多等一下，量不大）
+  // 使用者貼連結回報的，主要模型說不是活動時再問備用模型（只多等一下，量不大）
   // 洋流改版後只判斷活動（不再分發放、固定據點）
   const spec = moduleSpec(module);
-  const { extraction, raw, garbled } = await extractFromPost(env, text, post.posted_at, now, { secondOpinion: post.source === 'link' || post.source === 'note', spec });
+  const { extraction, raw, garbled } = await extractFromPost(env, text, post.posted_at, now, { secondOpinion: post.source === 'link', spec });
   await env.DB.prepare('UPDATE posts SET processed_at = ?, extraction = ? WHERE id = ?').bind(now, raw, post.id).run();
 
   if (garbled) return { items: [], early: 'garbled' };

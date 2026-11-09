@@ -1909,15 +1909,6 @@ path.map-seam-walkers { --p: 15px; }
 .preview-wrong textarea { font: inherit; font-size: 16px; color: var(--text); background: var(--card); resize: none; border: var(--border-w) solid var(--line); border-radius: var(--card-radius); padding: 10px 12px; }
 .report-tips { padding-left: 18px; }
 .report-tips li { margin-bottom: 4px; }
-/* 沒有連結的回報：「沒有連結？貼文字或截圖、自己填」、貼文字的表單和截圖縮圖 */
-.report-alt { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-top: 10px; font-size: 14px; }
-.report-alt[hidden] { display: none; }
-.report-note { display: flex; flex-direction: column; gap: 8px; margin-top: 10px; }
-.report-note[hidden] { display: none; }
-.report-note textarea { font: inherit; font-size: 16px; color: var(--text); background: var(--card); resize: vertical; border: var(--border-w) solid var(--line); border-radius: var(--card-radius); padding: 10px 12px; }
-.report-note-img { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
-.report-note-img img { max-width: 96px; max-height: 120px; object-fit: cover; object-position: top; border: var(--border-w) solid var(--line); border-radius: 8px; }
-.report-note-img img[hidden] { display: none; }
 
 /* 固定據點：菱形光點、休息中變淡 */
 .radar .blip.spot .dot { fill: var(--blip-spot); }

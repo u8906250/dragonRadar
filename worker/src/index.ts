@@ -16,7 +16,7 @@ import { addParkMark, deleteParkMark, listParkMarks, listPublicParkMarks, parseP
 import { adminLocate, applyFeedback, clearResolvedFeedback, deleteAdminSubscription, listFeedback, locateForFeedback, notifyAdmins, purgeFeedback, saveAdminSubscription, setFeedbackStatus, submitFeedback } from './feedback';
 import { moduleOf } from './modules';
 import { PUSH_RADIUS_KM, PushError, b64urlEncode, deleteSubscription, encryptPayload, purgeSubscriptions, pushStarted, saveSubscription, sendPush, vapidKeys } from './push';
-import { assertEventReportsOpen, confirmLink, editLink, ENDED_REPORTS_NEEDED, locateForEdit, MAX_LINK_AGE_SEC, ReportError, REPORTS_LOCKED, ipHash, myReports, purgeReports, recheckLinks, rejectLink, reportModules, startManual, submitLink, submitNote, supplementLink, withdrawReport } from './reports';
+import { assertEventReportsOpen, confirmLink, editLink, ENDED_REPORTS_NEEDED, locateForEdit, MAX_LINK_AGE_SEC, NOTES_CLOSED, ReportError, REPORTS_LOCKED, ipHash, myReports, purgeReports, recheckLinks, rejectLink, reportModules, submitLink, supplementLink, withdrawReport } from './reports';
 import { D1Meter, isTransient, withResilientDb } from './db';
 import { addressCacheKey, geocodeAddress, parseTwAddress } from './address';
 import { adminListBottles, adminSetBottle, BOTTLE_MAX_WEIGHT, BOTTLE_TTL_SEC, bottlesEnabled, collectLetter, deleteBottle, deviceId, DRIFT_EVERY_SEC, driftBottles, dropBottle, listBottles, myBottles, PER_DEVICE_PER_DAY, PICK_RADIUS_M, pickBottle, purgeBottles, recycleBottle, reportBottle } from './bottles';
@@ -217,7 +217,7 @@ async function handle(req: Request, env: Env, ctx: ExecutionContext): Promise<Re
 
   // 回報的人確認判讀沒錯就放上雷達：{ postId, token }；說判讀錯了：{ postId, token, note? }
   if (req.method === 'POST' && path === '/api/reports/confirm') {
-    const result = await confirmLink(env, await readJson<{ postId?: unknown; token?: unknown }>(req), now, await deviceId(env, req), await ipHash(env, req));
+    const result = await confirmLink(env, await readJson<{ postId?: unknown; token?: unknown }>(req), now, await deviceId(env, req));
     await mergeIntoOfficial(env, now).catch((e) => console.warn('merge failed', e));
     return jsonResponse(result);
   }
@@ -248,13 +248,8 @@ async function handle(req: Request, env: Env, ctx: ExecutionContext): Promise<Re
     return jsonResponse(await rejectLink(env, await readJson<{ postId?: unknown; token?: unknown; note?: unknown }>(req)));
   }
 
-  // 沒有連結的回報：貼文字或截圖 { text?, image? }（判讀好回傳預覽），自己填先開一則空的（表單用 /api/reports/edit 送）；確認後放上雷達（標明未查證）
-  if (req.method === 'POST' && path === '/api/reports/note') {
-    return jsonResponse(await submitNote(env, await readJson<{ text?: unknown; image?: unknown }>(req), await ipHash(env, req), now, await deviceId(env, req)));
-  }
-  if (req.method === 'POST' && path === '/api/reports/manual') {
-    return jsonResponse(await startManual(env, await ipHash(env, req), now, await deviceId(env, req)));
-  }
+  // 沒有連結的回報（貼文字、截圖、自己填）已經拿掉了：還開著舊網頁的人送出時告訴他
+  if (req.method === 'POST' && (path === '/api/reports/note' || path === '/api/reports/manual')) throw new HttpError(410, NOTES_CLOSED);
 
   // 使用者貼上 Threads 貼文連結：{ url }。判讀好先回傳預覽（outcome = 'preview'），確認了才上雷達
   if (req.method === 'POST' && path === '/api/reports') {

@@ -183,10 +183,6 @@ export const reportBottle = (id: number): Promise<Result<{ hidden: boolean }>> =
 /** 貼上 Threads 貼文連結，後端讀取並判讀，可能要十幾秒 */
 export const submitLink = (url: string, module = 'current'): Promise<Result<SubmitResult>> => deviceJson<SubmitResult>('/api/reports', 'POST', { url, module });
 /** 判讀結果對：放上雷達 */
-/** 沒有連結的回報：貼文字或截圖（data URI）判讀，回傳預覽 */
-export const submitNote = (body: { text: string; image: string | null }): Promise<Result<SubmitResult>> => deviceJson<SubmitResult>('/api/reports/note', 'POST', body);
-/** 自己填：先開一則空的回報，拿到代碼後照修改的流程送表單（editReport） */
-export const startManual = (): Promise<Result<{ confirm: { postId: string; token: string } }>> => deviceJson<{ confirm: { postId: string; token: string } }>('/api/reports/manual', 'POST', {});
 export const confirmReport = (c: { postId: string; token: string }): Promise<Result<SubmitResult>> => deviceJson<SubmitResult>('/api/reports/confirm', 'POST', c);
 /** 貼文沒寫地點或時間：補充後再判讀一次 */
 export const supplementReport = (c: { postId: string; token: string }, note: string): Promise<Result<SubmitResult>> =>

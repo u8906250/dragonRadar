@@ -7,7 +7,7 @@
 import type { Env } from './env';
 import { DEFAULT_MODULE, isModule, MODULE_IDS, moduleOf, type ModuleId } from './modules';
 import { ADDRESS_BUDGET_MS, atLocalTimes, commitPlan, detectEnded, getEvent, getPost, locateTypedPlace, MAX_FUTURE_SEC, planManual, planPost, processPost, savedTagsOf, storePost, tagsOf, topicOf, type EventOut, type FailedItem, type ManualActivity, type PlanItem, type PostRow } from './events';
-import { cleanTags, cleanTopic, responseContent, type ActivityPart, type EventKind } from './extract';
+import { cleanTags, cleanTopic, type ActivityPart, type EventKind } from './extract';
 import { fetchThreadsPost, resolveThreadsLink, shortcodeToUnix, withLocationTag } from './sources/link';
 import { sha1Hex } from './sources/text';
 import { creditReport, uncreditReport, type ReportReward } from './cards';
@@ -166,8 +166,6 @@ export interface SubmitResult {
   routes?: RoutePreview[];
   /** 確認後放上雷達了：回報的累計（滿 5 則拿到肉乾卡、每 5 則一包肉乾；今天算滿了 capped） */
   reward?: ReportReward;
-  /** 沒有連結的回報（貼文字、截圖、自己填）：放上雷達會標明沒有原貼文、未查證 */
-  noLink?: boolean;
 }
 
 /** 預覽上的一條車掃路線 */
@@ -408,7 +406,6 @@ async function previewResult(env: Env, post: PostRow, plan: StoredPlan, existed:
     confirm: { postId: post.id, token: await confirmToken(env, post.id) },
     supplement: post.supplement ?? null,
     ...edit,
-    ...(post.source === 'note' ? { noLink: true } : {}),
   };
   if (plan.early) return { ...base, outcome: summarize([plan.early]), reasons: [plan.early], events: [], ...(plan.note ? { note: plan.note } : {}) };
   const reasons = plan.items.filter((it) => !it.plan).map((it) => it.reason);
@@ -571,13 +568,14 @@ async function checkConfirm(env: Env, body: { postId?: unknown; token?: unknown 
   return post;
 }
 
-/** 還能補充、修改嗎：已經放上雷達的不行 */
+/** 還能補充、修改嗎：已經放上雷達的不行；沒有連結的回報（貼文字、截圖、自己填）已經停止收件 */
 function assertEditable(post: PostRow, what: string): void {
   if (post.confirm_state === 'confirmed') throw new ReportError(409, `這則已經放上雷達了，不能再${what}`);
+  if (post.source === 'note') throw new ReportError(410, NOTES_CLOSED);
 }
 
 /** 回報的人確認判讀沒錯：寫進雷達 */
-export async function confirmLink(env: Env, body: { postId?: unknown; token?: unknown }, now: number, device: string | null = null, ip: string | null = null): Promise<SubmitResult> {
+export async function confirmLink(env: Env, body: { postId?: unknown; token?: unknown }, now: number, device: string | null = null): Promise<SubmitResult> {
   const post = await checkConfirm(env, body);
   const permalink = post.permalink ?? '';
   if (post.confirm_state === 'confirmed') {
@@ -586,8 +584,7 @@ export async function confirmLink(env: Env, body: { postId?: unknown; token?: un
   }
   const plan = readPlan(post);
   if (!plan) throw new ReportError(409, '判讀結果不見了，請重新貼一次連結');
-  // 沒有連結的回報：一天最多放 NOTE_PER_DEVICE_PER_DAY 則（放上雷達才算）
-  if (post.source === 'note') await checkNoteDaily(env, post.id, now, device, ip);
+  if (post.source === 'note') throw new ReportError(410, NOTES_CLOSED);
   const result = await commitPlan(env, post.id, plan.items, now);
   await env.DB.batch([
     env.DB.prepare("UPDATE posts SET confirm_state = 'confirmed', confirm_plan = NULL WHERE id = ?").bind(post.id),
@@ -601,13 +598,12 @@ export async function confirmLink(env: Env, body: { postId?: unknown; token?: un
 }
 
 /**
- * 放上雷達了：算一則回報（收集卡、道具；算失敗不影響回報；沒有連結的不算）；
+ * 放上雷達了：算一則回報（收集卡、道具；算失敗不影響回報）；
  * 回報的人直接修改時手動加的關鍵字記成候選，管理者採用了之後的判讀才用（記失敗不影響回報）
  */
 async function afterListed(env: Env, post: PostRow, plan: StoredPlan, outcome: LinkOutcome, device: string | null, now: number): Promise<ReportReward | null> {
   if (outcome !== 'added') return null;
-  // 沒有連結的（未查證）不算進收集卡、順幣，免得為了獎勵亂填
-  const reward = post.source === 'note' ? null : await creditReport(env, device, post.id, now).catch((e) => (console.warn('credit failed', e), null));
+  const reward = await creditReport(env, device, post.id, now).catch((e) => (console.warn('credit failed', e), null));
   if (plan.judgedTags) {
     const module = moduleOf(post.module);
     const final = plan.items.flatMap((it) => (it.plan ? tagsOf(it.plan.extra) : []));
@@ -731,16 +727,13 @@ export async function editLink(env: Env, body: { postId?: unknown; token?: unkno
   const routeTitle = stored?.items.find((it) => it.route)?.route?.title ?? null;
   // 舊版網頁沒送關鍵字：沿用判讀出來的
   const tags = stored?.items.map((it) => (it.plan ? tagsOf(it.plan.extra) : (it.fail?.tags ?? []))).find((t) => t.length > 0) ?? [];
-  // 自己填的（沒有連結）：內文就是填的資料，沒有「回報的人補充」
-  const manual = post.note_kind === 'manual';
-  const text = manual ? manualText(acts) : post.text;
-  const items = await planManual(env, keepLocated(acts, stored?.items ?? []), now, text, routeTitle, tags);
+  const items = await planManual(env, keepLocated(acts, stored?.items ?? []), now, post.text, routeTitle, tags);
   const tzs = items.map((it) => it.plan?.tz ?? it.fail?.tz ?? null);
-  const note = manual ? null : (editSummary(stored ? editItemsOf(stored.items) : [], acts, items.map((it) => !!it.plan), items.some((it) => it.route) ? '站' : '場', tzs) ?? post.supplement ?? null);
+  const note = editSummary(stored ? editItemsOf(stored.items) : [], acts, items.map((it) => !!it.plan), items.some((it) => it.route) ? '站' : '場', tzs) ?? post.supplement ?? null;
   // 判讀出來的關鍵字：改過好幾次的，照第一次改之前的
   const plan: StoredPlan = { items, early: null, judgedTags: stored?.judgedTags ?? tags };
-  await env.DB.prepare("UPDATE posts SET text = ?, supplement = ?, confirm_plan = ?, confirm_state = 'pending' WHERE id = ?").bind(text, note, storePlan(plan), post.id).run();
-  return previewResult(env, { ...post, text, supplement: note }, plan, false, now);
+  await env.DB.prepare("UPDATE posts SET supplement = ?, confirm_plan = ?, confirm_state = 'pending' WHERE id = ?").bind(note, storePlan(plan), post.id).run();
+  return previewResult(env, { ...post, supplement: note }, plan, false, now);
 }
 
 /** 表單的地點欄：瀏覽器拿掉換行、送出時空白縮成一個、最多 80 字（跟 parseEditItems 一樣），用來比對地點有沒有改 */
@@ -761,16 +754,6 @@ export function keepLocated(acts: ManualActivity[], before: PlanItem[]): ManualA
     const k = a.lat === null ? known.get(placeKey(a.place)) : undefined;
     return k ? { ...a, ...k } : a;
   });
-}
-
-/** 自己填的活動寫成內文（雷達詳細資料的摘錄）：一場一段，標題、時間、地點 */
-export function manualText(acts: ManualActivity[]): string {
-  return acts
-    .map((a) => {
-      const end = a.endAt === null ? ' 開始' : `–${sameDay(a.startAt, a.endAt) ? whenText(a.endAt).split(' ')[1] : whenText(a.endAt)}`;
-      return [a.topic ? `【${a.topic}】${a.title}` : a.title, `時間：${whenText(a.startAt)}${end}`, `地點：${a.place}`].join('\n');
-    })
-    .join('\n\n');
 }
 
 /** 修改表單按「查地點」：一則最多查幾次（每次可能打好幾次 Nominatim） */
@@ -1013,133 +996,8 @@ export async function purgeReports(env: Env, cutoff: number): Promise<number> {
   return r.reduce((n, x) => n + (x.meta.changes ?? 0), 0);
 }
 
-/*
- * 沒有連結的回報（v1.578）：在 LINE 群組、IG、牆上海報看到的活動沒有 Threads 連結，可以貼文字、上傳截圖或自己填。
- * 跟貼連結一樣先判讀、預覽，回報的人確認後（confirmLink）放上雷達，標明沒有原貼文、未查證（v1.579 使用者說管理者也沒辦法判斷對不對，
- * 不審核了）。防亂報：一個瀏覽器一天最多放 NOTE_PER_DEVICE_PER_DAY 則、不算進收集卡和順幣；有人「回報問題」一樣給管理者處理（v1.580 使用者說不用兩人回報就拿掉的規則）。
- * 截圖只用來讀字，不存下來。
+/**
+ * 沒有連結的回報（v1.578–v1.587：貼文字、上傳截圖、自己填，posts.source = 'note'）已經拿掉了（v1.588 使用者說「文字貼圖跟自己填先拿掉」）：
+ * 不收新的、還沒確認的不能再確認或修改；已經放上雷達的照樣顯示（未查證），回報的人在「我的回報」還能刪除
  */
-
-/** 貼的文字最少、最多幾個字 */
-export const NOTE_MIN = 10;
-export const NOTE_MAX = 3000;
-/** 截圖的 data URI 最長幾個字：網頁先縮到長邊 1600 像素的 JPEG，通常 500 KB 以內 */
-export const NOTE_IMAGE_MAX = 3_000_000;
-/** 讀截圖的字用的模型（Workers AI 看得懂圖片的；圖片用 data URI 傳） */
-export const OCR_MODEL = '@cf/meta/llama-4-scout-17b-16e-instruct';
-const OCR_PROMPT =
-  '這是一張活動的貼文截圖或海報。請把圖片裡看得到的文字照原樣抄下來：保留原本的字（繁體中文照原字，不要改成簡體）、換行、日期、時間和數字，不要翻譯、不要摘要、不要加任何說明。圖片裡沒有文字的話，只回答「沒有文字」。';
-/** 沒有連結的回報：同一個瀏覽器、同一個網路 24 小時內最多放上雷達幾則 */
-export const NOTE_PER_DEVICE_PER_DAY = 3;
-const NOTE_PER_IP_PER_DAY = 10;
-
-/** 貼的文字：去掉控制字元，連續空行最多留一行 */
-export function cleanNoteText(v: unknown): string {
-  if (typeof v !== 'string') return '';
-  const t = v
-    .replace(/\r\n?/g, '\n')
-    .replace(/[\u0000-\u0008\u000b-\u001f\u007f​-‏‪-‮⁦-⁩]/g, '')
-    .replace(/[ \t]+\n/g, '\n')
-    .replace(/\n{3,}/g, '\n\n')
-    .trim();
-  return [...t].slice(0, NOTE_MAX).join('');
-}
-
-/** 截圖：只收 JPEG、PNG、WebP 的 data URI；不對回傳 null */
-export function parseNoteImage(v: unknown): string | null {
-  if (typeof v !== 'string' || v.length > NOTE_IMAGE_MAX) return null;
-  return /^data:image\/(?:jpeg|png|webp);base64,[A-Za-z0-9+/]+={0,2}$/.test(v) ? v : null;
-}
-
-/** 模型讀出來的字：「沒有文字」、空的當成沒有 */
-export function ocrText(raw: unknown): string {
-  const t = cleanNoteText(typeof raw === 'string' ? raw.replace(/^```[a-z]*\n?|\n?```$/g, '') : '');
-  return /^沒有文字[。.！!]?$/.test(t) ? '' : t;
-}
-
-async function readImageText(env: Env, image: string): Promise<string> {
-  const ai = env.AI as unknown as { run(model: string, inputs: unknown): Promise<unknown> };
-  const r = await ai.run(OCR_MODEL, {
-    messages: [{ role: 'user', content: [{ type: 'text', text: OCR_PROMPT }, { type: 'image_url', image_url: { url: image } }] }],
-    max_tokens: 2000,
-    temperature: 0,
-  });
-  return ocrText(responseContent(r));
-}
-
-const newNoteId = (): string => `note-${crypto.randomUUID().replace(/-/g, '').slice(0, 20)}`;
-
-/** 建一則沒有連結的回報（還沒判讀），算一次回報次數 */
-async function createNote(env: Env, kind: 'text' | 'image' | 'manual', text: string, ip: string, now: number, device: string | null): Promise<PostRow> {
-  const id = newNoteId();
-  await storePost(env, { id, username: null, text, permalink: null, posted_at: now, keyword: null, source: 'note', module: DEFAULT_MODULE }, now);
-  await env.DB.batch([
-    env.DB.prepare("UPDATE posts SET checked_at = ?, confirm_state = 'pending', note_kind = ? WHERE id = ?").bind(now, kind, id),
-    env.DB.prepare('INSERT INTO submissions (post_id, ip_hash, device, created_at) VALUES (?, ?, ?, ?)').bind(id, ip, device, now),
-  ]);
-  const post = await getPost(env, id);
-  if (!post) throw new ReportError(500, 'post not stored');
-  return post;
-}
-
-/** 貼文字或上傳截圖（洋流的活動）：讀字、判讀、定位，回傳預覽；確認後放上雷達（標明未查證） */
-export async function submitNote(env: Env, body: { text?: unknown; image?: unknown }, ip: string, now: number, device: string | null = null): Promise<SubmitResult> {
-  assertReportsOpen(env, DEFAULT_MODULE);
-  const hasImage = body.image !== undefined && body.image !== null && body.image !== '';
-  const image = hasImage ? parseNoteImage(body.image) : null;
-  if (hasImage && !image) throw new ReportError(400, '圖片太大或格式不對，請換一張截圖（JPEG、PNG）');
-  const typed = cleanNoteText(body.text);
-  if (!image && [...typed].length < NOTE_MIN) throw new ReportError(400, `請貼上活動的文字（至少 ${NOTE_MIN} 個字），或選一張截圖`);
-  // 今天已經放滿了：先講，不用判讀完才知道
-  await checkNoteDaily(env, '', now, device, ip);
-  await checkSubmitLimits(env, ip, now, device);
-  let text = typed;
-  if (image) {
-    let read: string;
-    try {
-      read = await readImageText(env, image);
-    } catch (e) {
-      console.warn(`ocr failed: ${String(e)}`);
-      throw new ReportError(503, '截圖暫時讀不出來，請稍後再試，或直接貼上文字');
-    }
-    if (!read) throw new ReportError(422, '這張圖片讀不到文字，請換一張清楚一點的截圖，或直接貼上文字');
-    text = [...(typed ? `${typed}\n\n${read}` : read)].slice(0, NOTE_MAX).join('');
-  }
-  const post = await createNote(env, image ? 'image' : 'text', text, ip, now, device);
-  let plan: StoredPlan;
-  try {
-    plan = await planPost(env, post, now);
-  } catch (e) {
-    console.warn(`plan failed for ${post.id}: ${String(e)}`);
-    return { existed: false, outcome: 'failed', reasons: ['extraction_failed'], events: [], permalink: '' };
-  }
-  await env.DB.prepare('UPDATE posts SET confirm_plan = ? WHERE id = ?').bind(storePlan(plan), post.id).run();
-  return previewResult(env, post, plan, false, now);
-}
-
-/** 自己填：先開一則空的回報，表單送出時照修改的流程（editLink）排、定位 */
-export async function startManual(env: Env, ip: string, now: number, device: string | null = null): Promise<{ confirm: { postId: string; token: string } }> {
-  assertReportsOpen(env, DEFAULT_MODULE);
-  await checkNoteDaily(env, '', now, device, ip);
-  await checkSubmitLimits(env, ip, now, device);
-  const post = await createNote(env, 'manual', '', ip, now, device);
-  return { confirm: { postId: post.id, token: await confirmToken(env, post.id) } };
-}
-
-/** 24 小時內放上雷達的沒有連結的回報（確認時記的結果有排上雷達的才算，跟雷達上重複的不算；不含這一則）到上限了：告訴他大約幾小時後可以再回報 */
-async function checkNoteDaily(env: Env, postId: string, now: number, device: string | null, ip: string | null = null): Promise<void> {
-  const count = async (column: 'device' | 'ip_hash', value: string): Promise<{ n: number; first: number | null }> =>
-    (await env.DB.prepare(
-      `SELECT COUNT(DISTINCT post_id) AS n, MIN(created_at) AS first FROM submissions
-        WHERE ${column} = ? AND created_at > ? AND post_id LIKE 'note-%' AND post_id != ? AND (result LIKE '%"upcoming"%' OR result LIKE '%"active"%')`,
-    )
-      .bind(value, now - 86400, postId)
-      .first<{ n: number; first: number | null }>()) ?? { n: 0, first: null };
-  for (const [column, value, max] of [['device', device, NOTE_PER_DEVICE_PER_DAY], ['ip_hash', ip, NOTE_PER_IP_PER_DAY]] as const) {
-    if (!value) continue;
-    const r = await count(column, value);
-    if (r.n < max) continue;
-    const wait = Math.max(1, Math.ceil(((r.first ?? now) + 86400 - now) / 3600));
-    throw new ReportError(429, `沒有連結的回報，${column === 'device' ? '同一個瀏覽器' : '同一個網路'}一天最多放 ${max} 則，約 ${wait} 小時後可以再回報`);
-  }
-}
+export const NOTES_CLOSED = '沒有連結的回報（貼文字、截圖、自己填）已經拿掉了，請貼 Threads 貼文的連結';

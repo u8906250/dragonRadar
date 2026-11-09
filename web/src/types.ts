@@ -281,8 +281,6 @@ export interface SubmitResult {
     picks?: number;
     capped?: boolean;
   };
-  /** 沒有連結的回報（貼文字、截圖、自己填）：放上雷達會標明沒有原貼文、未查證 */
-  noLink?: boolean;
 }
 
 /** 預覽上的一條車掃路線 */
