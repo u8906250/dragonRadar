@@ -16,3 +16,8 @@ a { color: var(--sea); font-weight: 700; }
 .en { margin-top: 36px; padding-top: 20px; border-top: 2px dashed var(--ink); }
 nav { margin: 0 0 16px; font-weight: 700; }
 nav a { color: var(--ink); margin-right: 14px; }
+/* 說明頁「實現的願望」：一個願望（含之後的調整）一筆，只顯示標題，點了展開 */
+details.wish-done { background: #fff; border: 2px solid var(--ink); border-radius: 12px; padding: 8px 14px; margin: 8px 0; }
+details.wish-done summary { cursor: pointer; font-size: 15px; font-weight: 700; }
+details.wish-done p { margin: 8px 0 0; }
+details.wish-done p:first-of-type { color: #5d5850; font-size: 13px; }
