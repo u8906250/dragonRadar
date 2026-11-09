@@ -9,7 +9,10 @@ import { DEFAULT_MODULE, isModule, MODULE_IDS, moduleOf, type ModuleId } from '.
 import { ADDRESS_BUDGET_MS, atLocalTimes, commitPlan, detectEnded, getEvent, getPost, locateTypedPlace, MAX_FUTURE_SEC, planManual, planPost, processPost, savedTagsOf, storePost, tagsOf, topicOf, type EventOut, type FailedItem, type ManualActivity, type PlanItem, type PostRow } from './events';
 import { ACTIVITY_SPEC, cleanTags, cleanTopic, extractFromPost, MODULE_TAGS, postTags, type ActivityPart, type EventKind } from './extract';
 import { adoptedTags } from './learnedTags';
-import { accupassPermalink, accupassText, fetchAccupass, parseAccupassUrl, type AccupassEvent, type AccupassFetch, type AccupassLink } from './sources/accupass';
+import { accupassPermalink, fetchAccupass, parseAccupassUrl, type AccupassLink } from './sources/accupass';
+import { eventPageText, pageTime, type EventPage, type PageFetch, type PageSession } from './sources/eventpage';
+import { fetchOpentix, opentixPermalink, parseOpentixUrl, type OpentixLink } from './sources/opentix';
+import { distKm } from './push';
 import { fetchThreadsPost, resolveThreadsLink, shortcodeToUnix, withLocationTag } from './sources/link';
 import { sha1Hex } from './sources/text';
 import { creditReport, uncreditReport, type ReportReward } from './cards';
@@ -527,11 +530,13 @@ async function earlierReport(env: Env, postId: string, module: ModuleId, now: nu
 /** 處理使用者貼上的連結：讀貼文、AI 判讀、定位，回傳結果 */
 export async function submitLink(env: Env, input: string, ip: string, now: number, device: string | null = null, module: ModuleId = DEFAULT_MODULE): Promise<SubmitResult> {
   assertReportsOpen(env, module);
-  // ACCUPASS 活動通的活動頁（v1.590）
+  // 活動頁：ACCUPASS 活動通（v1.590）、OPENTIX（v1.591）
   const acc = parseAccupassUrl(input);
-  if (acc) return submitAccupass(env, acc, ip, now, device, module);
+  if (acc) return submitEventPage(env, { site: 'accupass', link: acc }, ip, now, device, module);
+  const otx = parseOpentixUrl(input);
+  if (otx) return submitEventPage(env, { site: 'opentix', link: otx }, ip, now, device, module);
   const link = await resolveThreadsLink(input);
-  if (!link) throw new ReportError(400, '找不到 Threads 貼文或活動通活動頁的連結，請貼上像 https://www.threads.com/@帳號/post/... 或 https://www.accupass.com/event/... 的網址');
+  if (!link) throw new ReportError(400, '找不到 Threads 貼文或活動頁的連結，請貼上 Threads 貼文（https://www.threads.com/@帳號/post/...）、活動通（https://www.accupass.com/event/...）或 OPENTIX（https://www.opentix.life/event/...）的網址');
   const postId = `link-${link.code}`;
 
   const earlier = await earlierReport(env, postId, module, now);
@@ -575,31 +580,50 @@ export async function submitLink(env: Env, input: string, ip: string, now: numbe
   return previewResult(env, { ...post, permalink }, plan, !!existing, now);
 }
 
-/** 活動通的活動頁讀不到時講原因 */
-function accupassError(f: Exclude<AccupassFetch, { status: 'ok' }>): ReportError {
-  if (f.status === 'gone') return new ReportError(404, '活動通上找不到這場活動，可能已經刪除或下架了');
-  console.warn(`accupass fetch failed: ${f.message}`);
-  return new ReportError(502, '暫時讀不到活動通的活動頁，請稍後再試');
+/**
+ * 活動頁的網站（ACCUPASS 活動通、OPENTIX）：貼文 id 的開頭、source、顯示的名字、活動頁網址、怎麼讀
+ */
+type PageLink = { site: 'accupass'; link: AccupassLink } | { site: 'opentix'; link: OpentixLink };
+const PAGE_SITES = {
+  accupass: { prefix: 'acc', name: '活動通', permalink: accupassPermalink, fetch: (l: PageLink['link']) => fetchAccupass(l as AccupassLink) },
+  opentix: { prefix: 'otx', name: 'OPENTIX', permalink: opentixPermalink, fetch: (l: PageLink['link']) => fetchOpentix(l as OpentixLink) },
+} as const;
+type PageSite = keyof typeof PAGE_SITES;
+/** 貼文 id（acc-編號、otx-編號）→ 哪個網站、活動編號 */
+const pageOfPostId = (postId: string): { site: PageSite; id: string } | null => {
+  const m = /^(acc|otx)-(\d+)$/.exec(postId);
+  return m ? { site: m[1] === 'acc' ? 'accupass' : 'opentix', id: m[2] } : null;
+};
+
+/** 活動頁讀不到時講原因 */
+function pageError(site: PageSite, f: Exclude<PageFetch, { status: 'ok' }>): ReportError {
+  const name = PAGE_SITES[site].name;
+  if (f.status === 'gone') return new ReportError(404, `${name}上找不到這場活動，可能已經刪除或下架了`);
+  console.warn(`${site} fetch failed: ${f.message}`);
+  return new ReportError(502, `暫時讀不到${name}的活動頁，請稍後再試`);
 }
 
 /**
- * 活動頁的時間地點 → 一場一場（跟回報的人直接修改的格式一樣）：3 天以內是一場；更長的（展覽、好幾天的市集）每天照開始、結束的時刻各一場，
+ * 一場的時間地點 → 一場一場（跟回報的人直接修改的格式一樣）：3 天以內是一場；更長的（展覽、好幾天的市集）每天照開始、結束的時刻各一場，
  * 從還沒結束的那天起最多 6 天；沒寫開始時間、地點的回傳原因
  */
-export function accupassActivities(ev: AccupassEvent, now: number): ManualActivity[] | string {
-  const start = ev.startDate ? Math.floor(Date.parse(ev.startDate) / 1000) : NaN;
+/** 從活動頁排出來的一場：多記場地名稱（地址門牌查不到時用場地名稱查） */
+export type PageActivity = ManualActivity & { venue: string | null };
+
+export function sessionActivities(ev: PageSession, now: number): PageActivity[] | string {
+  const start = pageTime(ev.startDate);
   if (!Number.isFinite(start)) return '活動頁沒有寫開始時間';
   const place = [...(ev.address ?? ev.venue ?? '').replace(/\s+/g, ' ').trim()].slice(0, 80).join('');
   if (!place) return '活動頁沒有寫地點';
-  const end = ev.endDate ? Math.floor(Date.parse(ev.endDate) / 1000) : NaN;
+  const end = pageTime(ev.endDate);
   const title = [...ev.name].slice(0, 60).join('');
-  const one = (startAt: number, endAt: number | null): ManualActivity => ({ title, startAt, endAt, place, lat: null, lng: null });
+  const one = (startAt: number, endAt: number | null): PageActivity => ({ title, startAt, endAt, place, lat: null, lng: null, venue: ev.venue });
   const endAt = Number.isFinite(end) && end > start ? end : null;
   if (endAt === null || endAt - start <= MAX_EDIT_SPAN_SEC) return [one(start, endAt)];
   const tod = (t: number): number => (((t + 8 * 3600) % 86400) + 86400) % 86400;
   const [s0, e0] = [tod(start), tod(endAt)];
-  const out: ManualActivity[] = [];
-  let last: ManualActivity | null = null;
+  const out: PageActivity[] = [];
+  let last: PageActivity | null = null;
   for (let day = start - s0; day <= endAt - e0 && out.length < 6; day += 86400) {
     last = one(day + s0, e0 > s0 ? day + e0 : null);
     if ((last.endAt ?? last.startAt + 7200) > now) out.push(last);
@@ -608,10 +632,31 @@ export function accupassActivities(ev: AccupassEvent, now: number): ManualActivi
   return out.length > 0 ? out : [last ?? one(start, endAt)];
 }
 
+/**
+ * 整頁 → 一場一場：取消的、只有線上的場次不收（OPENTIX 的巡演每個地點各一場），最多 MAX_EDIT_ITEMS 場；一場都不能收時回傳原因
+ */
+export function pageActivities(page: EventPage, now: number): PageActivity[] | string {
+  const live = page.sessions.filter((s) => !s.cancelled);
+  if (live.length === 0) return '這場活動已經取消了';
+  const offline = live.filter((s) => !s.online);
+  if (offline.length === 0) return '這是線上活動，沒有實體地點；雷達只收可以到場參加的活動';
+  const acts: PageActivity[] = [];
+  let why = '';
+  for (const s of offline) {
+    const a = sessionActivities(s, now);
+    if (typeof a === 'string') why = a;
+    else acts.push(...a);
+  }
+  if (acts.length === 0) return `${why}，雷達放不上去`;
+  // 還沒結束的先，照時間排
+  const ended = (a: PageActivity): boolean => (a.endAt ?? a.startAt + 7200) <= now;
+  return acts.sort((a, b) => Number(ended(a)) - Number(ended(b)) || a.startAt - b.startAt).slice(0, MAX_EDIT_ITEMS);
+}
+
 /** 活動頁 → 預覽用的判讀結果：時間地點照活動頁、只有分類（主題）和關鍵字問 AI（問不到就照內文寫到的常見詞） */
-async function planAccupass(env: Env, ev: AccupassEvent, text: string, now: number): Promise<StoredPlan> {
-  const acts = accupassActivities(ev, now);
-  if (typeof acts === 'string') throw new ReportError(422, `${acts}，雷達放不上去`);
+async function planEventPage(env: Env, page: EventPage, text: string, now: number): Promise<StoredPlan> {
+  const acts = pageActivities(page, now);
+  if (typeof acts === 'string') throw new ReportError(422, acts);
   const common = [...MODULE_TAGS[DEFAULT_MODULE], ...(await adoptedTags(env, DEFAULT_MODULE))];
   let topic: string | null = null;
   let tags = postTags(null, text, common);
@@ -620,51 +665,88 @@ async function planAccupass(env: Env, ev: AccupassEvent, text: string, now: numb
     topic = cleanTopic((extraction?.events[0]?.extra as { topic?: unknown } | null | undefined)?.topic);
     tags = postTags(extraction?.tags ?? null, text, common);
   } catch (e) {
-    console.warn(`accupass topic failed: ${String(e)}`);
+    console.warn(`event page topic failed: ${String(e)}`);
   }
-  const items = await planManual(env, acts.map((a) => ({ ...a, topic, tags })), now, text, null, tags);
+  await pinByVenue(env, acts);
+  const items = await planManual(env, acts.map(({ venue: _venue, ...a }) => ({ ...a, topic, tags })), now, text, null, tags);
   return { items, early: null, judgedTags: tags };
 }
 
+/** 場地名稱最後的廳名（「桃園展演中心展演廳」→「桃園展演中心」）：地圖上通常只有整棟建築的名字 */
+export const venueBuilding = (venue: string): string => {
+  const b = venue.replace(/\s*(?:展演廳|演藝廳|音樂廳|演奏廳|大劇院|戲劇院|實驗劇場|小劇場|劇場|大廳|會議廳|演講廳|中正堂)$/, '').trim();
+  // 剩太短的（「國家音樂廳」→「國家」）就是整個名字
+  return [...b].length >= 4 ? b : venue;
+};
+
 /**
- * 回報活動通的活動頁（洋流的活動）：讀活動頁、照活動頁的時間地點排、定位，回傳預覽，回報的人確認才放上雷達（跟 Threads 一樣）；
- * 線上活動、已經取消的不收。貼文 id 是 acc-活動編號、source 是 accupass、原文連結是活動頁
+ * 地址的門牌查不到、只定位到鄉鎮區（OPENTIX 的「桃園市桃園區中正路1188號」只查到桃園區）：改用場地名稱查（先整個名稱、再去掉最後的廳名），
+ * 查到確切位置、而且離地址查到的鄉鎮區不到 15 km（免得對到別縣市同名的地方），就當成這一場的位置（地點欄照樣寫地址）。
+ * 同一個地址和場地只查一次；查過的有快取
  */
-async function submitAccupass(env: Env, link: AccupassLink, ip: string, now: number, device: string | null, module: ModuleId): Promise<SubmitResult> {
-  if (module !== DEFAULT_MODULE) throw new ReportError(400, '活動通的活動請切到「洋流雷達」再回報');
-  // 分享的短網址先讀一次才知道是哪一場
-  let fetched: AccupassFetch | null = null;
-  if ('go' in link) {
-    fetched = await fetchAccupass(link);
-    if (fetched.status !== 'ok') throw accupassError(fetched);
+async function pinByVenue(env: Env, acts: PageActivity[]): Promise<void> {
+  const deadline = Date.now() + ADDRESS_BUDGET_MS;
+  const done = new Map<string, { lat: number; lng: number } | null>();
+  for (const a of acts) {
+    if (!a.venue || a.venue === a.place || a.lat !== null) continue;
+    const key = `${a.place}|${a.venue}`;
+    if (!done.has(key)) {
+      let pin: { lat: number; lng: number } | null = null;
+      const byAddress = await locateTypedPlace(env, a.place, deadline);
+      if (!byAddress.point || byAddress.approxArea) {
+        for (const name of [...new Set([a.venue, venueBuilding(a.venue)])]) {
+          const byVenue = await locateTypedPlace(env, name, deadline);
+          const near = !byAddress.point || (byVenue.point && distKm(byVenue.point, byAddress.point) <= 15);
+          if (byVenue.point && !byVenue.approxArea && near) {
+            pin = { lat: byVenue.point.lat, lng: byVenue.point.lng };
+            break;
+          }
+        }
+      }
+      done.set(key, pin);
+    }
+    const pin = done.get(key);
+    if (pin) Object.assign(a, pin);
   }
-  const id = fetched?.status === 'ok' ? fetched.event.id : (link as { id: string }).id;
-  const postId = `acc-${id}`;
+}
+
+/**
+ * 回報活動頁（洋流的活動）：讀活動頁、照活動頁的時間地點排、定位，回傳預覽，回報的人確認才放上雷達（跟 Threads 一樣）；
+ * 線上活動、已經取消的不收。貼文 id 是 acc-、otx- 加活動編號，source 是網站（accupass、opentix），原文連結是活動頁
+ */
+async function submitEventPage(env: Env, p: PageLink, ip: string, now: number, device: string | null, module: ModuleId): Promise<SubmitResult> {
+  const site = PAGE_SITES[p.site];
+  if (module !== DEFAULT_MODULE) throw new ReportError(400, `${site.name}的活動請切到「洋流雷達」再回報`);
+  // 活動通分享的短網址先讀一次才知道是哪一場
+  let fetched: PageFetch | null = null;
+  if ('go' in p.link) {
+    fetched = await site.fetch(p.link);
+    if (fetched.status !== 'ok') throw pageError(p.site, fetched);
+  }
+  const id = fetched?.status === 'ok' ? fetched.page.id : (p.link as { id: string }).id;
+  const postId = `${site.prefix}-${id}`;
   const earlier = await earlierReport(env, postId, module, now);
   if (earlier.result) return earlier.result;
   await checkSubmitLimits(env, ip, now, device);
-  fetched ??= await fetchAccupass({ id });
-  if (fetched.status !== 'ok') throw accupassError(fetched);
-  const ev = fetched.event;
-  if (ev.online) throw new ReportError(422, '這是線上活動，沒有實體地點；雷達只收可以到場參加的活動');
-  if (ev.cancelled) throw new ReportError(422, '活動通上這場活動已經取消了');
-  const permalink = accupassPermalink(id);
-  const text = accupassText(ev);
-  await storePost(env, { id: postId, username: null, text, permalink, posted_at: now, keyword: null, source: 'accupass', module }, now);
+  fetched ??= await site.fetch({ id });
+  if (fetched.status !== 'ok') throw pageError(p.site, fetched);
+  const page = fetched.page;
+  const text = eventPageText(page);
+  // 先排得出場次才存（線上、取消、沒寫時間地點的直接講原因）
+  const plan = await planEventPage(env, page, text, now);
+  await storePost(env, { id: postId, username: null, text, permalink: site.permalink(id), posted_at: now, keyword: null, source: p.site, module }, now);
   await env.DB.batch([
-    env.DB.prepare("UPDATE posts SET checked_at = ?, text = ?, confirm_state = 'pending' WHERE id = ?").bind(now, text, postId),
+    env.DB.prepare("UPDATE posts SET checked_at = ?, text = ?, confirm_state = 'pending', confirm_plan = ? WHERE id = ?").bind(now, text, storePlan(plan), postId),
     env.DB.prepare('INSERT INTO submissions (post_id, ip_hash, device, created_at) VALUES (?, ?, ?, ?)').bind(postId, ip, device, now),
   ]);
   const post = await getPost(env, postId);
   if (!post) throw new ReportError(500, 'post not stored');
-  const plan = await planAccupass(env, ev, text, now);
-  await env.DB.prepare('UPDATE posts SET confirm_plan = ? WHERE id = ?').bind(storePlan(plan), postId).run();
   return previewResult(env, post, plan, !!earlier.existing, now);
 }
 
 async function checkConfirm(env: Env, body: { postId?: unknown; token?: unknown }): Promise<PostRow> {
   const postId = typeof body.postId === 'string' ? body.postId : '';
-  if (!/^(?:link|note|acc)-[\w-]+$/.test(postId) || body.token !== (await confirmToken(env, postId))) throw new ReportError(400, '確認代碼不對，請重新貼一次連結');
+  if (!/^(?:link|note|acc|otx)-[\w-]+$/.test(postId) || body.token !== (await confirmToken(env, postId))) throw new ReportError(400, '確認代碼不對，請重新貼一次連結');
   const post = await getPost(env, postId);
   if (!post) throw new ReportError(404, '找不到這則回報，請重新貼一次連結');
   assertReportsOpen(env, post.module);
@@ -931,7 +1013,7 @@ export async function myReports(env: Env, device: string): Promise<MyReport[]> {
     `SELECT p.id, p.permalink, p.username, p.text, p.confirm_state, p.link_role, p.module, m.reported_at
        FROM (SELECT post_id, MAX(created_at) AS reported_at FROM submissions WHERE device = ? GROUP BY post_id) m
        CROSS JOIN posts p ON p.id = m.post_id
-      WHERE +p.source IN ('link', 'note', 'accupass') AND p.confirm_state = 'confirmed'
+      WHERE +p.source IN ('link', 'note', 'accupass', 'opentix') AND p.confirm_state = 'confirmed'
         AND (p.link_role = 'related' OR EXISTS (SELECT 1 FROM events e WHERE e.post_id = p.id))
       ORDER BY m.reported_at DESC LIMIT 30`,
   )
@@ -970,7 +1052,7 @@ export async function withdrawReport(env: Env, postId: string, device: string, n
   const owned = await env.DB.prepare('SELECT 1 AS ok FROM submissions WHERE post_id = ? AND device = ? LIMIT 1').bind(postId, device).first<{ ok: number }>();
   if (!owned) throw new ReportError(403, '只能刪除自己回報的貼文，而且要用回報時的同一個瀏覽器（30 天內）');
   const post = await getPost(env, postId);
-  if (!post || !['link', 'note', 'accupass'].includes(post.source)) throw new ReportError(404, '找不到這則回報');
+  if (!post || !['link', 'note', 'accupass', 'opentix'].includes(post.source)) throw new ReportError(404, '找不到這則回報');
   if (post.confirm_state === 'withdrawn') return { ok: true, removed: 0 };
   const removed = (await env.DB.prepare("SELECT COUNT(*) AS n FROM events WHERE post_id = ? AND status IN ('upcoming', 'active')").bind(postId).first<{ n: number }>())?.n ?? 0;
   const { results: prev } = await env.DB.prepare("SELECT id FROM posts WHERE linked_to = ? AND link_role = 'previous' ORDER BY posted_at DESC").bind(postId).all<{ id: string }>();
@@ -1040,7 +1122,7 @@ export interface RecheckLinksResult {
 export async function recheckLinks(env: Env, now: number): Promise<RecheckLinksResult> {
   const rows = await env.DB.prepare(
     `SELECT DISTINCT p.id, p.text FROM posts p JOIN events e ON e.post_id = p.id
-     WHERE p.source IN ('link', 'spot', 'accupass') AND e.status IN ('upcoming', 'active') AND (p.checked_at IS NULL OR p.checked_at <= ?)
+     WHERE p.source IN ('link', 'spot', 'accupass', 'opentix') AND e.status IN ('upcoming', 'active') AND (p.checked_at IS NULL OR p.checked_at <= ?)
      ORDER BY p.checked_at ASC LIMIT ?`,
   )
     .bind(now - RECHECK_LINK_SEC, RECHECK_LINK_BATCH)
@@ -1053,8 +1135,9 @@ export async function recheckLinks(env: Env, now: number): Promise<RecheckLinksR
 
   for (const row of rows.results) {
     out.checked++;
-    if (row.id.startsWith('acc-')) {
-      await recheckAccupass(env, row, now, out, endAll);
+    const pg = pageOfPostId(row.id);
+    if (pg) {
+      await recheckEventPage(env, pg, row, now, out, endAll);
       continue;
     }
     const r = await fetchThreadsPost(row.id.replace(/^(link|spot)-/, ''));
@@ -1093,10 +1176,11 @@ export async function recheckLinks(env: Env, now: number): Promise<RecheckLinksR
 }
 
 /**
- * 重讀活動通的活動頁：不見了就下架、標成取消就結束；時間、地點、名稱改了，照新的活動頁重排（活動頁就是主辦單位的公告，不用再問回報的人）
+ * 重讀活動頁（活動通、OPENTIX）：不見了就下架、全部標成取消就結束；時間、地點、名稱、場次改了，照新的活動頁重排
+ * （活動頁就是主辦單位的公告，不用再問回報的人）
  */
-async function recheckAccupass(env: Env, row: { id: string; text: string }, now: number, out: RecheckLinksResult, endAll: (postId: string, reason: string) => Promise<unknown>): Promise<void> {
-  const r = await fetchAccupass({ id: row.id.slice('acc-'.length) });
+async function recheckEventPage(env: Env, pg: { site: PageSite; id: string }, row: { id: string; text: string }, now: number, out: RecheckLinksResult, endAll: (postId: string, reason: string) => Promise<unknown>): Promise<void> {
+  const r = await PAGE_SITES[pg.site].fetch({ id: pg.id });
   await env.DB.prepare('UPDATE posts SET checked_at = ? WHERE id = ?').bind(now, row.id).run();
   if (r.status === 'gone') {
     await endAll(row.id, 'deleted');
@@ -1104,20 +1188,20 @@ async function recheckAccupass(env: Env, row: { id: string; text: string }, now:
     return;
   }
   if (r.status !== 'ok') return;
-  if (r.event.cancelled) {
+  if (r.page.sessions.every((s) => s.cancelled)) {
     await endAll(row.id, 'author');
     out.ended++;
     return;
   }
-  const text = accupassText(r.event);
+  const text = eventPageText(r.page);
   if (text === row.text) return;
   out.edited++;
   let plan: StoredPlan;
   try {
-    plan = await planAccupass(env, r.event, text, now);
+    plan = await planEventPage(env, r.page, text, now);
   } catch (e) {
     // 新的活動頁排不上（例如改成線上、拿掉時間）：舊的先下架
-    console.warn(`accupass replan failed for ${row.id}: ${String(e)}`);
+    console.warn(`event page replan failed for ${row.id}: ${String(e)}`);
     await endAll(row.id, 'author');
     return;
   }

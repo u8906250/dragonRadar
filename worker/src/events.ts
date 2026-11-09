@@ -171,7 +171,7 @@ export interface NewPost {
   permalink: string | null;
   posted_at: number;
   keyword: string | null;
-  source: 'threads' | 'manual' | 'news' | 'official' | 'link' | 'spot' | 'accupass';
+  source: 'threads' | 'manual' | 'news' | 'official' | 'link' | 'spot' | 'accupass' | 'opentix';
   /** 哪個模組，沒給就是洋流 */
   module?: ModuleId;
 }
@@ -2237,7 +2237,7 @@ export async function listEvents(env: Env, q: ListQuery): Promise<EventOut[]> {
   const rows = snap.rows
     .filter((r) => r.end_at > q.now && r.start_at <= q.now + q.horizonSec)
     .filter((r) => !box || (Math.abs((r.lat ?? 0) - box.lat) <= box.dLat && inLngRange(r.lng ?? 0, box.lng, box.dLng)))
-    .filter((r) => !kws || r.source === 'link' || r.source === 'spot' || r.source === 'note' || r.source === 'accupass' || kws.some((k) => r.keyword?.toLowerCase() === k || r.text.toLowerCase().includes(k)))
+    .filter((r) => !kws || r.source === 'link' || r.source === 'spot' || r.source === 'note' || r.source === 'accupass' || r.source === 'opentix' || kws.some((k) => r.keyword?.toLowerCase() === k || r.text.toLowerCase().includes(k)))
     .slice(0, LIST_LIMIT);
   const out = rows.map((row) => toEventOut(row, q.now));
   for (const e of out) {
