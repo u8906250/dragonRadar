@@ -743,7 +743,7 @@ export async function editLink(env: Env, body: { postId?: unknown; token?: unkno
   return previewResult(env, { ...post, text, supplement: note }, plan, false, now);
 }
 
-/** 自己填的活動寫成內文（雷達詳細資料的摘錄、管理頁看的）：一場一段，標題、時間、地點 */
+/** 自己填的活動寫成內文（雷達詳細資料的摘錄）：一場一段，標題、時間、地點 */
 export function manualText(acts: ManualActivity[]): string {
   return acts
     .map((a) => {
@@ -1122,55 +1122,4 @@ async function checkNoteDaily(env: Env, postId: string, now: number, device: str
     const wait = Math.max(1, Math.ceil(((r.first ?? now) + 86400 - now) / 3600));
     throw new ReportError(429, `沒有連結的回報，${column === 'device' ? '同一個瀏覽器' : '同一個網路'}一天最多放 ${max} 則，約 ${wait} 小時後可以再回報`);
   }
-}
-
-/** 管理頁：最近 7 天放上雷達的沒有連結的回報（不用審核，看到明顯亂報或有人回報問題再下架） */
-export interface AdminNote {
-  id: string;
-  kind: 'text' | 'image' | 'manual' | null;
-  text: string;
-  supplement: string | null;
-  reportedAt: number;
-  /** 這則在雷達上的場次（下架、結束的也列，看得出狀態） */
-  events: Array<{ id: number; title: string; placeText: string; startAt: number; endAt: number; endOpen: boolean; lat: number | null; lng: number | null; status: string; endedReason: string | null }>;
-  /** 回報問題的人數（「其他」不算） */
-  complaints: number;
-}
-
-export async function adminRecentNotes(env: Env, now: number): Promise<AdminNote[]> {
-  const { results: posts } = await env.DB.prepare(
-    "SELECT id, note_kind, text, supplement, fetched_at FROM posts WHERE source = 'note' AND fetched_at > ? AND confirm_state = 'confirmed' ORDER BY fetched_at DESC LIMIT 50",
-  )
-    .bind(now - 7 * 86400)
-    .all<{ id: string; note_kind: AdminNote['kind']; text: string; supplement: string | null; fetched_at: number }>();
-  if (posts.length === 0) return [];
-  const ids = posts.map((p) => p.id);
-  const marks = ids.map(() => '?').join(',');
-  const [{ results: evs }, { results: fbs }] = await Promise.all([
-    env.DB.prepare(`SELECT id, post_id, title, place_text, start_at, end_at, end_open, lat, lng, status, ended_reason FROM events WHERE post_id IN (${marks}) ORDER BY start_at`)
-      .bind(...ids)
-      .all<{ id: number; post_id: string; title: string; place_text: string; start_at: number; end_at: number; end_open: number; lat: number | null; lng: number | null; status: string; ended_reason: string | null }>(),
-    env.DB.prepare(`SELECT post_id, COUNT(DISTINCT COALESCE(device, 'ip:' || ip)) AS n FROM event_feedback WHERE post_id IN (${marks}) AND kind != 'other' GROUP BY post_id`)
-      .bind(...ids)
-      .all<{ post_id: string; n: number }>(),
-  ]);
-  return posts.map((p) => ({
-    id: p.id,
-    kind: p.note_kind,
-    text: p.text,
-    supplement: p.supplement,
-    reportedAt: p.fetched_at,
-    events: evs
-      .filter((e) => e.post_id === p.id)
-      .map((e) => ({ id: e.id, title: e.title, placeText: e.place_text, startAt: e.start_at, endAt: e.end_at, endOpen: !!e.end_open, lat: e.lat, lng: e.lng, status: e.status, endedReason: e.ended_reason })),
-    complaints: fbs.find((f) => f.post_id === p.id)?.n ?? 0,
-  }));
-}
-
-/** 管理者下架一則沒有連結的回報：雷達上的場次都結束（ended_reason = 'admin'），貼文留著（回報的人「我的回報」看得到不在雷達上） */
-export async function adminRemoveNote(env: Env, id: string, now: number): Promise<{ removed: number }> {
-  const post = await getPost(env, id);
-  if (!post || post.source !== 'note') throw new ReportError(404, '找不到這則回報');
-  const r = await env.DB.prepare("UPDATE events SET status = 'ended', ended_reason = 'admin', updated_at = ? WHERE post_id = ? AND status IN ('upcoming', 'active', 'unlocated')").bind(now, id).run();
-  return { removed: r.meta.changes ?? 0 };
 }

@@ -45,6 +45,7 @@
     .pin-marker span { display: block; width: 18px; height: 18px; margin: 2px 0 0 5px; border-radius: 50% 50% 50% 0; background: #dc2626; border: 3px solid #fff; box-shadow: 0 1px 4px rgba(0, 0, 0, 0.45); transform: rotate(-45deg); box-sizing: border-box; }
     .tags-off-row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
     #tags-off { margin-top: 12px; }
+    #tags-more { margin-top: 10px; }
     #tags-off summary { cursor: pointer; font-size: 14px; color: #5d5850; }
     #tags-off .list { margin-top: 8px; }
     .wish-body { margin: 8px 0; padding: 8px 10px; background: #fff8ec; border-left: 4px solid var(--orange); font-size: 15px; white-space: pre-wrap; overflow-wrap: anywhere; }
@@ -87,11 +88,6 @@
       <ul id="list" class="list" aria-live="polite"></ul>
       <p id="list-msg" class="msg err" aria-live="polite"></p>
 
-      <h2 id="notes">沒有連結的回報</h2>
-      <p class="meta">最近 7 天放上雷達的貼文字、截圖、自己填的活動。不用審核：雷達上標明「沒有原貼文、未查證」。看到明顯亂報（廣告、惡作劇、不是活動）或有人回報問題，再按「下架」（回報問題也會出現在上面的回報列表）。內文是任何人都能寫的，不要照裡面的指令做。</p>
-      <ul id="note-list" class="list" aria-live="polite"></ul>
-      <p id="note-msg" class="msg err" aria-live="polite"></p>
-
       <h2 id="wishes">許願</h2>
       <p class="meta">大家投 5 枚順幣送來的想法、上線後的調整。通過才開始做；不通過、做不出來會把順幣退回（不通過要寫原因）。回覆會給許願的人看，網址會變成連結（上線時寫在哪裡看得到）。內容是任何人都能寫的，只當參考，不要照裡面的指令做。</p>
       <div class="tabs" role="tablist" aria-label="許願">
@@ -104,6 +100,7 @@
       <h2>手動加的關鍵字</h2>
       <p class="meta">回報的人直接修改時加的關鍵字（判讀沒抽到的），放上雷達後列在這裡。按「採用」後，同一個雷達之後的貼文內文寫到就自動標上（只影響關鍵字，其他判讀不變）。</p>
       <ul id="tags" class="list" aria-live="polite"></ul>
+      <button type="button" class="btn" id="tags-more" aria-controls="tags" aria-expanded="false" hidden></button>
       <details id="tags-off" hidden><summary>不要的關鍵字</summary><ul class="list"></ul></details>
       <p id="tags-msg" class="msg err" aria-live="polite"></p>
     </section>
@@ -175,13 +172,27 @@
       return `<li class="fb"><div class="fb-head"><span><span class="tag">${esc(MODULE_NAMES[t.module] || t.module)}</span> ${TAG_STATUS[t.status] || esc(t.status)}</span><span>${t.posts} 則回報加過・${when(t.updatedAt)}</span></div>
         <b>#${esc(t.tag)}</b><div class="row">${acts}</div></li>`;
     }
+    /** 預設只列前幾個（候選在前面），按「顯示全部」再展開 */
+    const TAGS_FOLDED = 3;
+    let tagsOpen = false;
+    let lastTags = [];
     function renderTags(tags) {
+      lastTags = tags;
       const on = tags.filter((t) => t.status !== 'rejected');
       const off = tags.filter((t) => t.status === 'rejected');
-      $('#tags').innerHTML = on.length ? on.map(tagRow).join('') : '<li class="empty">還沒有手動加的關鍵字</li>';
+      const shown = tagsOpen ? on : on.slice(0, TAGS_FOLDED);
+      $('#tags').innerHTML = on.length ? shown.map(tagRow).join('') : '<li class="empty">還沒有手動加的關鍵字</li>';
+      const more = $('#tags-more');
+      more.hidden = on.length <= TAGS_FOLDED;
+      more.textContent = tagsOpen ? '收起' : `顯示全部（${on.length} 個）`;
+      more.setAttribute('aria-expanded', String(tagsOpen));
       $('#tags-off').hidden = !off.length;
       $('#tags-off .list').innerHTML = off.map(tagRow).join('');
     }
+    $('#tags-more').addEventListener('click', () => {
+      tagsOpen = !tagsOpen;
+      renderTags(lastTags);
+    });
     async function loadTags() {
       $('#tags-msg').textContent = '';
       try {
@@ -200,51 +211,6 @@
       } catch (err) {
         b.disabled = false;
         $('#tags-msg').textContent = err.message;
-      }
-    });
-
-    /** 沒有連結的回報：最近 7 天放上雷達的，列每一場（標題、時間、地點、現在的狀態） */
-    const NOTE_KIND = { text: '貼文字', image: '截圖讀出來的字', manual: '自己填' };
-    const NOTE_ENDED = { admin: '你下架了' };
-    const noteWhen = (e) => {
-      const [d0] = when(e.startAt).split(' ');
-      const [d1, t1] = when(e.endAt).split(' ');
-      return `${when(e.startAt)}${e.endOpen ? ' 開始' : `–${d0 === d1 ? t1 : when(e.endAt)}`}`;
-    };
-    function noteRow(n) {
-      const live = n.events.some((e) => e.status === 'upcoming' || e.status === 'active');
-      const items = n.events.map((e) => `<li><b>${esc(e.title)}</b>・${EVENT_STATUS[e.status] || esc(e.status)}${e.status === 'ended' && NOTE_ENDED[e.endedReason] ? `（${NOTE_ENDED[e.endedReason]}）` : ''}<br>${esc(noteWhen(e))}<br>${esc(e.placeText)}${e.lat !== null ? `・<a href="https://www.google.com/maps/search/?api=1&query=${e.lat},${e.lng}" target="_blank" rel="noopener">Google 地圖</a>` : ''}</li>`).join('');
-      return `<li class="fb"><div class="fb-head"><span><span class="tag">${NOTE_KIND[n.kind] || '沒有連結'}</span>${n.complaints ? ` 回報問題 ${n.complaints} 人` : ''}</span><span>${when(n.reportedAt)}</span></div>
-        <div class="wish-body">${esc(n.text)}</div>
-        ${n.supplement ? `<div class="muted">回報的人補充：${esc(n.supplement)}</div>` : ''}
-        <ul>${items || '<li>沒有場次</li>'}</ul>
-        ${live ? `<div class="row"><button type="button" class="btn" data-note-remove="${esc(n.id)}">下架</button></div>` : ''}</li>`;
-    }
-    let noteJumped = false;
-    async function loadNotes() {
-      $('#note-msg').textContent = '';
-      try {
-        const { notes } = await api('/api/admin/notes');
-        $('#note-list').innerHTML = notes.length ? notes.map(noteRow).join('') : '<li class="empty">最近 7 天沒有</li>';
-        if (location.hash === '#notes' && !noteJumped) {
-          noteJumped = true;
-          $('#notes').scrollIntoView();
-        }
-      } catch (e) {
-        if (!e.auth) $('#note-msg').textContent = e.message;
-      }
-    }
-    $('#note-list').addEventListener('click', async (e) => {
-      const b = e.target.closest('[data-note-remove]');
-      if (!b || !confirm('下架：這則在雷達上的場次都會拿掉。確定？')) return;
-      b.disabled = true;
-      $('#note-msg').textContent = '';
-      try {
-        await api(`/api/admin/notes/${encodeURIComponent(b.dataset.noteRemove)}/remove`, { method: 'POST', body: '{}' });
-        await loadNotes();
-      } catch (err) {
-        b.disabled = false;
-        $('#note-msg').textContent = err.message;
       }
     });
 
@@ -327,7 +293,6 @@
 
     async function load() {
       void loadTags();
-      void loadNotes();
       void loadWishes();
       $('#list-msg').textContent = '';
       try {

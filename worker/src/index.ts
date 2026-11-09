@@ -16,7 +16,7 @@ import { addParkMark, deleteParkMark, listParkMarks, listPublicParkMarks, parseP
 import { adminLocate, applyFeedback, clearResolvedFeedback, deleteAdminSubscription, listFeedback, locateForFeedback, notifyAdmins, purgeFeedback, saveAdminSubscription, setFeedbackStatus, submitFeedback } from './feedback';
 import { moduleOf } from './modules';
 import { PUSH_RADIUS_KM, PushError, b64urlEncode, deleteSubscription, encryptPayload, purgeSubscriptions, pushStarted, saveSubscription, sendPush, vapidKeys } from './push';
-import { adminRecentNotes, adminRemoveNote, assertEventReportsOpen, confirmLink, editLink, ENDED_REPORTS_NEEDED, locateForEdit, MAX_LINK_AGE_SEC, ReportError, REPORTS_LOCKED, ipHash, myReports, purgeReports, recheckLinks, rejectLink, reportModules, startManual, submitLink, submitNote, supplementLink, withdrawReport } from './reports';
+import { assertEventReportsOpen, confirmLink, editLink, ENDED_REPORTS_NEEDED, locateForEdit, MAX_LINK_AGE_SEC, ReportError, REPORTS_LOCKED, ipHash, myReports, purgeReports, recheckLinks, rejectLink, reportModules, startManual, submitLink, submitNote, supplementLink, withdrawReport } from './reports';
 import { D1Meter, isTransient, withResilientDb } from './db';
 import { addressCacheKey, geocodeAddress, parseTwAddress } from './address';
 import { adminListBottles, adminSetBottle, BOTTLE_MAX_WEIGHT, BOTTLE_TTL_SEC, bottlesEnabled, collectLetter, deleteBottle, deviceId, DRIFT_EVERY_SEC, driftBottles, dropBottle, listBottles, myBottles, PER_DEVICE_PER_DAY, PICK_RADIUS_M, pickBottle, purgeBottles, recycleBottle, reportBottle } from './bottles';
@@ -743,11 +743,6 @@ async function handleAdmin(req: Request, env: Env, ctx: ExecutionContext, path: 
       : await env.DB.prepare('SELECT * FROM posts ORDER BY fetched_at DESC LIMIT 100').all();
     return jsonResponse({ posts: r.results.map((p) => ({ ...p, extraction: safeParse(p.extraction as string | null) })) });
   }
-
-  // 沒有連結的回報（貼文字、截圖、自己填）：最近 7 天放上雷達的，看到明顯亂報再下架
-  if (req.method === 'GET' && path === '/api/admin/notes') return jsonResponse({ notes: await adminRecentNotes(env, now) });
-  const adminNote = /^\/api\/admin\/notes\/(note-[\w-]+)\/remove$/.exec(path);
-  if (req.method === 'POST' && adminNote) return jsonResponse(await adminRemoveNote(env, adminNote[1], now));
 
   // 許願：列表（scope=open 待處理、done 結案的）、改進度和回覆（{ status?, reply? }，不通過、做不出來會退順幣）
   if (req.method === 'GET' && path === '/api/admin/wishes') return jsonResponse({ wishes: await adminListWishes(env, url.searchParams.get('scope')) });
