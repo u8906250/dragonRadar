@@ -180,6 +180,12 @@ describe('太陽系外面（第 1 號願望：Kepler-22b、其他星系）', () 
     const at = keplerPlanet(new Date((KEPLER22.transitJd - 2440587.5) * 86_400_000));
     expect(KEPLER22.ly * LY_KM - Math.hypot(...at)).toBeCloseTo(KEPLER22.aAu * 149_597_870.7, -3);
   });
+  it('lets you tap back home from another galaxy (the Milky Way dot, or your solar system)', () => {
+    const far = spaceMarkup({ ...opts, scaleKm: 4e6 * LY_KM, rg: 0, view: { focus: 'm31', yaw: 0, pitch: 0.9 } });
+    expect(far).toContain('data-body="milkyway"');
+    expect(far).toContain('>銀河系（你）<');
+    expect(deep(1_000)).toContain('data-body="earth"');
+  });
   it('keeps a galaxy drawn when it is the centre', () => {
     const m31 = spaceMarkup({ ...opts, scaleKm: 1e5 * LY_KM, rg: 0, view: { focus: 'm31', yaw: 0, pitch: 0 } });
     expect(m31).toContain('>仙女座星系<');

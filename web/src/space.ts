@@ -1126,8 +1126,9 @@ function deepMarkup(proj: (p: Vec3) => { x: number; y: number; d: number }, k: n
     bodies += `<g class="space-hit" data-body="kepler22b"><circle class="hit" cx="${f1(kp.x)}" cy="${f1(kp.y)}" r="12" /><circle class="space-planet space-exo" cx="${f1(kp.x)}" cy="${f1(kp.y)}" r="3" /></g>`;
     named.push({ x: kp.x, y: kp.y, r: 3, cls: 'kepler22b', name: 'Kepler-22b' });
   }
-  // 太陽系（你）：太陽、地球、行星都在這一點（銀河系也小成一點時寫銀河系）
-  bodies += `<circle class="${tinyMw ? 'space-galaxy-dot' : 'space-sun'}" cx="${f1(sunAt.x)}" cy="${f1(sunAt.y)}" r="3.2" /><circle class="space-me" cx="${f1(sunAt.x)}" cy="${f1(sunAt.y)}" r="1.6" />`;
+  // 太陽系（你）：太陽、地球、行星都在這一點（銀河系也小成一點時寫銀河系）。
+  // 可以點（v1.586 使用者說「到其他星系後，銀河系點不回去」）：銀河系小成一點時點了回到銀河系，不然回到你（跟點地球一樣）
+  bodies += `<g class="space-hit" data-body="${tinyMw ? 'milkyway' : 'earth'}"><circle class="hit" cx="${f1(sunAt.x)}" cy="${f1(sunAt.y)}" r="12" /><circle class="${tinyMw ? 'space-galaxy-dot' : 'space-sun'}" cx="${f1(sunAt.x)}" cy="${f1(sunAt.y)}" r="3.2" /><circle class="space-me" cx="${f1(sunAt.x)}" cy="${f1(sunAt.y)}" r="1.6" /></g>`;
   named.unshift({ x: sunAt.x, y: sunAt.y, r: 4, cls: 'sun', name: tinyMw ? '銀河系（你）' : '太陽系（你）', force: true });
   // 中心那一個的名字排在你後面
   const at = named.findIndex((b) => b.cls === focus);
