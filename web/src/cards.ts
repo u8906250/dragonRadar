@@ -637,7 +637,7 @@ export function openWishForm(onDone?: () => void): void {
         <div class="tc-ideas"><span>想不到嗎？點一個靈感：</span>${WISH_IDEAS.map((x, i) => `<button type="button" class="tc-idea" data-idea="${i}">${esc(x.label)}</button>`).join('')}</div>
         <label class="tc-field"><span>暱稱（選填）</span>
           <input name="nickname" maxlength="20" autocomplete="nickname" value="${esc(d.nickname)}">
-          <small>上線時寫「點子來自 ○○」，不填就不署名</small></label>
+          <small>上線後寫在說明的「實現的願望」：點子來自 ○○，不填就不署名</small></label>
         <label class="tc-field"><span>參考連結（選填）</span>
           <textarea name="links" rows="2" placeholder="一行一個，最多 3 個；要附圖請貼圖片的連結">${esc(d.links)}</textarea></label>
         <div class="tc-rules"><b>許願規範</b><ul>

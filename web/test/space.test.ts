@@ -141,11 +141,12 @@ describe('太陽系外面（第 1 號願望：Kepler-22b、其他星系）', () 
     expect(fmtKm(4e6 * LY_KM)).toBe('400 萬光年');
     expect(fmtKm(5e9)).toBe('50 億 km');
   });
-  it('shrinks the solar system to one dot and shows Kepler-22b with the wisher credited', () => {
+  it('shrinks the solar system to one dot and shows Kepler-22b', () => {
     expect(DEEP_FROM_KM).toBeGreaterThan(5e9);
     const k = deep(1_000);
     expect(k).toContain('>太陽系（你）<');
-    expect(k).toContain('Kepler-22b・點子來自 jy');
+    expect(k).toContain('>Kepler-22b<');
+    expect(k).not.toContain('點子來自');
     expect(k).not.toContain('>海王星<');
     // 太遠了，Kepler-22b 跟太陽系疊在一起就不畫
     expect(deep(100_000)).not.toContain('Kepler-22b');

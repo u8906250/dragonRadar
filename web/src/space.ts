@@ -1037,11 +1037,11 @@ function deepMarkup(proj: (p: Vec3) => { x: number; y: number; d: number }, k: n
     const c = scale3(eclDir(g.ra, g.dec), g.ly * LY_KM);
     disk(g.key, g.name, c, g.r * LY_KM, diskLines(c, u, v, g.r * LY_KM, g.arms, g.r * 0.2 * LY_KM, 0));
   }
-  // Kepler-22b（跟恆星 Kepler-22 只差 0.85 AU，這麼遠是同一個點）：離太陽系夠遠才畫，名字寫點子來自誰
+  // Kepler-22b（跟恆星 Kepler-22 只差 0.85 AU，這麼遠是同一個點）：離太陽系夠遠才畫（點子來自誰寫在說明頁的「實現的願望」，v1.583 使用者說不用寫在這裡）
   const kp = proj(scale3(eclDir(KEPLER22.ra, KEPLER22.dec), KEPLER22.ly * LY_KM));
   if (inView(kp.x, kp.y, 3) && apart(kp, 10)) {
     bodies += `<circle class="space-planet space-exo" cx="${f1(kp.x)}" cy="${f1(kp.y)}" r="3" />`;
-    named.push({ x: kp.x, y: kp.y, r: 3, cls: 'kepler22b', name: 'Kepler-22b・點子來自 jy' });
+    named.push({ x: kp.x, y: kp.y, r: 3, cls: 'kepler22b', name: 'Kepler-22b' });
   }
   // 太陽系（你）：太陽、地球、行星都在這一點（銀河系也小成一點時寫銀河系）
   bodies += `<circle class="${tinyMw ? 'space-galaxy-dot' : 'space-sun'}" cx="${f1(sunAt.x)}" cy="${f1(sunAt.y)}" r="3.2" /><circle class="space-me" cx="${f1(sunAt.x)}" cy="${f1(sunAt.y)}" r="1.6" />`;
