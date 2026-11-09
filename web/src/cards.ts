@@ -1,6 +1,6 @@
 /**
  * 收集卡（尋找小法）：卡冊、拿到卡時翻開的畫面；道具欄（選單裡的「道具」，跟卡冊分開，之後會有更多道具）；
- * 回報滿 5 則的獎勵自己選（一包肉乾或一枚順幣，openPick）；
+ * 回報滿 5 則給一枚順幣（v1.579 起；以前是自己選一包肉乾或一枚順幣，openPick 留著給還沒選完的）；
  * 選單的「說明」（使用說明、換裝置的引繼碼）；
  * 許願（v1.569，順幣的用途）：投 5 枚順幣送一個想法，管理者審核，通過才做；「我的願望」看進度、調整（openWishForm、openMyWishes）。
  * 卡片的內容寫在這裡（照片在 public/cards/），拿到的卡、道具存在伺服器（裝置代碼，worker/src/cards.ts），
@@ -258,7 +258,7 @@ const itemText = (it: ItemCount): string => {
 
 /**
  * 回報確認、放上雷達後（main.ts）：伺服器說拿到肉乾卡就翻開給你看，拿到道具寫在下面（沒有卡時另外跳一則訊息）；
- * 滿 5 則的獎勵（picks）接著跳出來選肉乾或順幣（有卡的話卡片按「選獎勵」後）。今天算滿了也跳訊息。notify 是 main.ts 的橫幅
+ * 滿 5 則的順幣寫在卡片下面（沒有卡時跳訊息）；舊的「選獎勵」（picks）伺服器已經不給了。今天算滿了也跳訊息。notify 是 main.ts 的橫幅
  */
 export async function gotReward(r: { card?: CardClaim; items: ItemCount[]; picks?: number; capped?: boolean } | undefined, notify: (msg: string) => void): Promise<void> {
   if (!r) return;

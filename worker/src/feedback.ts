@@ -28,6 +28,25 @@ export interface FeedbackResult {
   ok: true;
   /** 同一個人已經回報過這則的同一種問題 */
   duplicate: boolean;
+  /** 沒有原貼文的回報（未查證）回報問題的人夠多，自動下架了 */
+  removed?: boolean;
+}
+
+/** 沒有原貼文的回報（未查證）：幾個不同的人回報問題（「其他」不算）就自動下架，不等管理者 */
+export const NOTE_DELIST_REPORTS = 2;
+
+/** 回報問題後：是沒有原貼文的回報、不同的人夠多了，雷達上這則的場次都結束（ended_reason = 'feedback'）；有下架回傳 true */
+async function delistUnverified(env: Env, postId: string, now: number): Promise<boolean> {
+  const post = await env.DB.prepare('SELECT source FROM posts WHERE id = ?').bind(postId).first<{ source: string }>();
+  if (post?.source !== 'note') return false;
+  const n = await env.DB.prepare("SELECT COUNT(DISTINCT COALESCE(device, 'ip:' || ip)) AS n FROM event_feedback WHERE post_id = ? AND kind != 'other'")
+    .bind(postId)
+    .first<{ n: number }>();
+  if ((n?.n ?? 0) < NOTE_DELIST_REPORTS) return false;
+  const r = await env.DB.prepare("UPDATE events SET status = 'ended', ended_reason = 'feedback', updated_at = ? WHERE post_id = ? AND status IN ('upcoming', 'active', 'unlocated')")
+    .bind(now, postId)
+    .run();
+  return (r.meta.changes ?? 0) > 0;
 }
 
 const isKind = (v: unknown): v is FeedbackKind => typeof v === 'string' && Object.prototype.hasOwnProperty.call(FEEDBACK_KINDS, v);
@@ -136,7 +155,8 @@ export async function submitFeedback(
   )
     .bind(targetId, ev.post_id, stop?.title ?? ev.title, stop ? (stop.place ?? stop.name) : ev.place_text, b.kind, note, device, ip, now, stop?.title ?? null, stop?.at ?? null, pin?.lat ?? null, pin?.lng ?? null)
     .first<FeedbackRow>();
-  return { result: { ok: true, duplicate: false }, created: row };
+  const removed = b.kind !== 'other' && (await delistUnverified(env, ev.post_id, now));
+  return { result: { ok: true, duplicate: false, ...(removed ? { removed: true } : {}) }, created: row };
 }
 
 export interface FeedbackRow {

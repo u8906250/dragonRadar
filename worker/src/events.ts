@@ -27,17 +27,12 @@ export interface PostRow {
   extraction: string | null;
   /** 回報的人補充的地點或時間，判讀時接在貼文後面 */
   supplement?: string | null;
-  /**
-   * 使用者回報的確認狀態：null（排程搜尋到的、舊資料）、pending、confirmed、rejected、withdrawn（回報的人刪除了）；
-   * 沒有連結的回報（source = 'note'）確認後是 review 等管理者審核，沒通過是 refused
-   */
-  confirm_state?: 'pending' | 'confirmed' | 'rejected' | 'withdrawn' | 'review' | 'refused' | null;
+  /** 使用者回報的確認狀態：null（排程搜尋到的、舊資料）、pending、confirmed、rejected、withdrawn（回報的人刪除了） */
+  confirm_state?: 'pending' | 'confirmed' | 'rejected' | 'withdrawn' | null;
   confirm_plan?: string | null;
   confirm_note?: string | null;
   /** 沒有連結的回報：text 貼文字、image 截圖讀出來的字、manual 自己填 */
   note_kind?: 'text' | 'image' | 'manual' | null;
-  /** 管理者沒通過的原因 */
-  review_note?: string | null;
   /** 哪個模組：current 洋流、dog 狗狗陪伴 */
   module?: string;
 }

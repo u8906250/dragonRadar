@@ -2764,6 +2764,7 @@ function renderDetail(items: Item[], now: number): void {
       <blockquote class="post-excerpt" title="原文摘錄，完整內容請看原文">${esc(ev.post.source === 'news' ? ev.post.text.split('\n')[0] : ev.post.text)}</blockquote>
       ${ev.post.supplement ? `<p class="muted supplement-line">回報的人補充：${esc(ev.post.supplement)}</p>` : ''}
       <p class="muted source-line">來源：${esc(sourceLabel(ev))}</p>
+      ${ev.post.source === 'note' ? '<p class="muted sheet-note small preview-warn">⚠️ 沒有原貼文，是回報的人提供的，沒有查證過；出發前可以再確認一下。不對的話按「回報問題」，兩個人回報就會自動拿掉。</p>' : ''}
       ${routeOf(ev) ? '' : it.spot ? spotPostsHtml(ev.related ?? []) : relatedHtml(ev.related ?? [])}
       <div class="sheet-actions">
         <a class="btn primary" href="https://www.google.com/maps/dir/?api=1&destination=${ev.lat},${ev.lng}&travelmode=walking" target="_blank" rel="noopener">${ev.approxArea ? '導航到約略位置' : '導航'}</a>
@@ -3089,7 +3090,15 @@ async function submitFeedback(): Promise<void> {
   }
   feedbackSheet.hidden = true;
   feedbackEventId = null;
-  showBanner(bannerEl, r.data.duplicate ? '你已經回報過這個問題了，謝謝' : locating ? '謝謝回報，管理者確認位置後就會放上雷達' : '謝謝回報，管理者會盡快處理', 3500);
+  showBanner(
+    bannerEl,
+    r.data.duplicate ? '你已經回報過這個問題了，謝謝' : r.data.removed ? '謝謝回報，這則沒有原貼文、已經有兩個人說不對，先從雷達拿掉了' : locating ? '謝謝回報，管理者確認位置後就會放上雷達' : '謝謝回報，管理者會盡快處理',
+    3500,
+  );
+  if (r.data.removed) {
+    select(null);
+    void refresh();
+  }
 }
 
 /** 雷達或地圖上疊在一起的一群，詳細資料會列出同一群的其他項目 */
@@ -5143,7 +5152,7 @@ function sourceLabel(ev: EventOut): string {
   if (ev.post.source === 'site') return `${ev.post.username ?? '主辦單位'}（主辦單位公告）`;
   if (ev.post.source === 'news') return `新聞・${ev.post.username ?? ''}`;
   if (ev.post.source === 'official') return '台北大洋流官網「未來航線」';
-  if (ev.post.source === 'note') return '大家回報（沒有原貼文，管理者看過）';
+  if (ev.post.source === 'note') return '大家回報（沒有原貼文，未查證）';
   const who = `Threads${ev.post.username ? `・@${ev.post.username}` : ''}`;
   return ev.post.source === 'link' ? `${who}（大家回報）` : ev.post.source === 'spot' ? `${who}（大家回報・已審核）` : who;
 }
@@ -5372,10 +5381,10 @@ function renderReportTips(): void {
   }
   const tips = [
     share,
-    '放上雷達的回報，每 5 則可以選一包肉乾或一枚順幣；每天最多算 20 則，超過的一樣會放上雷達，只是不算進收集。',
+    '放上雷達的回報，滿 5 則拿到「古錐媽的肉乾」收集卡，每 5 則一枚順幣；每天最多算 20 則，超過的一樣會放上雷達，只是不算進收集。',
     `只收${l ? ` ${l.maxAgeDays} 天內` : ''}的公開貼文。每一場活動都要讀得到做什麼、在哪裡、哪天幾點開始，缺一個就不會放上雷達。`,
     '結束時間可以不寫：沒寫的只寫幾點開始，雷達上顯示到開始後兩小時。',
-    '沒有 Threads 連結的（LINE、IG、Facebook、海報）：按「貼文字或截圖」或「自己填」。沒有原貼文可以對照，確認後由管理者看過才放上雷達，也不會自動下架，活動取消要自己回來刪除。',
+    '沒有 Threads 連結的（LINE、IG、Facebook、海報）：按「貼文字或截圖」或「自己填」。雷達上會標明「沒有原貼文、未查證」，一個瀏覽器一天最多 3 則、不算進收集；不會自動下架，活動取消要自己回來刪除，兩個人回報問題也會自動拿掉。',
     '貼文寫了車掃、掃街、車隊，或騎車（順騎、單車）、健走，同一天又列了好幾站的，會合成一條路線：每一站從預計經過前 10 分鐘顯示到經過後 15 分鐘。各站沒寫時間、只寫出發時間的，照順序和距離推算（騎車時速 12 公里、健走 4 公里，每站停 10 分鐘），時間表寫「約」。只定位到鄉鎮區的站，要在地圖上標出位置才會放上雷達。',
     '貼文沒寫或判讀錯的，可以在判讀結果按「補充資料」直接改活動內容、時間、地點，位置不對可以在地圖上標。連續好幾天的活動每天各算一場（最多 6 場）。貼文最好寫出門牌地址，定位才準。',
     `原貼文刪除或改成「結束了」，雷達${l ? ` ${l.recheckMin} 分鐘內` : ''}會自動下架。`,
@@ -5392,7 +5401,6 @@ const OUTCOME_TEXT: Record<SubmitResult['outcome'], string> = {
   not_listed: '判讀不到完整的活動內容、地點、開始時間，或是已經結束、超過 21 天後才開始，所以沒有放上雷達。',
   not_event: '這則看起來不是活動。貼文要寫出做什麼、在哪裡、什麼時候舉辦，雷達才會收。',
   failed: '判讀暫時失敗，請稍後再貼一次。',
-  review: '已送出！沒有原貼文可以對照，管理者看過才會放上雷達，可以在下面「我的回報」看進度。活動取消或改時間的話，記得回來刪除。',
 };
 
 function setReportMsg(html: string): void {
@@ -5663,7 +5671,7 @@ function editFormHtml(items: EditItem[], hidden: boolean, manual = false): strin
       <div class="edit-items">${list.map(editCardHtml).join('')}</div>
       <button type="button" class="btn" data-act="add">再加一場</button>
       <div class="sheet-actions"><button type="submit" class="btn primary">用這些資料預覽</button>${hidden ? '<button type="button" class="btn" data-act="less">回上一步</button>' : ''}</div>
-      <p class="muted sheet-note small">${manual ? '送出前會先給你看一次；確認後由管理者看過才會放上雷達。' : '改過的地方放上雷達後會寫明是回報的人改的。'}請只填你確定的資訊。</p>
+      <p class="muted sheet-note small">${manual ? '送出前會先給你看一次；放上雷達會標明「沒有原貼文、未查證」。' : '改過的地方放上雷達後會寫明是回報的人改的。'}請只填你確定的資訊。</p>
     </form>`;
 }
 
@@ -5952,7 +5960,7 @@ function renderPreview(r: SubmitResult): void {
   const dups = r.events.length
     ? `<p class="muted sheet-note">雷達上已經有的：${r.events.map((ev) => esc(titleOf(ev))).join('、')}（不會重複放）</p>`
     : '';
-  setReportMsg(`<p class="msg">${OUTCOME_TEXT.preview}${r.review ? '對的話送給管理者，看過才會放上雷達。' : '對的話才會放上雷達。'}</p>
+  setReportMsg(`<p class="msg">${OUTCOME_TEXT.preview}${r.noLink ? '對的話就放上雷達，會標明「沒有原貼文、未查證」。' : '對的話才會放上雷達。'}</p>
     <ul class="report-preview">${(r.routes ?? []).map(routePreviewHtml).join('')}${items
       .map(
         (p) => `<li>
@@ -5971,7 +5979,7 @@ function renderPreview(r: SubmitResult): void {
     ${items.some((p) => p.lat !== null && p.lng !== null) ? `<p class="muted sheet-note small">📍 位置是照地點文字查的，不一定準確，請按「在 Google 地圖上看」確認一下；不對的話按「補充資料」${mod.current ? '在地圖上標出正確的位置' : '補上完整地址'}。</p>` : ''}
     ${dups}${r.failures?.length ? `<p class="muted sheet-note">${r.failures.length > 1 ? `下面 ${r.failures.length} 場` : '下面這場'}不會放上雷達${canFixByNote(r.failures) ? '，知道的話可以按「補充資料」補上' : ''}：</p>${failuresHtml(r.failures)}` : ''}
     <div class="sheet-actions">
-      <button type="button" class="btn primary" data-act="confirm">${r.review ? '對，送給管理者確認' : items.length > 0 && items.every((p) => p.update?.mode === 'attach') ? '對，附在這個據點' : '對，放上雷達'}</button>
+      <button type="button" class="btn primary" data-act="confirm">${items.length > 0 && items.every((p) => p.update?.mode === 'attach') ? '對，附在這個據點' : '對，放上雷達'}</button>
       <button type="button" class="btn" data-act="more">補充資料</button>
       <button type="button" class="btn" data-act="wrong">不對</button>
     </div>
@@ -5984,17 +5992,17 @@ function renderPreview(r: SubmitResult): void {
   const actions = reportResult.querySelector<HTMLElement>('.sheet-actions');
   reportResult.querySelector('[data-act="confirm"]')?.addEventListener('click', async (e) => {
     if (reportBusy) return;
-    setReportBusy(true, r.review ? '送出中…' : '放上雷達中…', e.currentTarget as Element);
+    setReportBusy(true, '放上雷達中…', e.currentTarget as Element);
     const res = await confirmReport(c).finally(() => setReportBusy(false));
     if (!res.ok) {
       showBanner(bannerEl, res.message, 3500);
       return;
     }
-    // 沒有連結的回報送出了：貼的文字、截圖清掉
-    if (res.data.outcome === 'review') resetNoteForm();
+    // 沒有連結的回報放上去了：貼的文字、截圖清掉
+    if (r.noLink) resetNoteForm();
     await showReportResult(res.data);
     void loadMyReports();
-    // 回報累計：滿 5 則拿到古錐媽的肉乾卡、每 5 則一份獎勵（選一包肉乾或一枚順幣）
+    // 回報累計：滿 5 則拿到古錐媽的肉乾卡、每 5 則一枚順幣
     void gotReward(res.data.reward, (msg) => showBanner(bannerEl, msg, 4500));
   });
   if (mod.current) wireEdit(c, r.edit ?? [], actions);
@@ -6300,8 +6308,6 @@ const MY_REPORT_STATE: Record<MyReport['state'], string> = {
   on_radar: '在雷達上',
   attached: '附在雷達上的據點',
   not_listed: '不在雷達上（已結束）',
-  review: '等管理者確認',
-  refused: '沒有通過',
 };
 
 /** 我的回報：30 天內用這個瀏覽器回報、已經放上雷達的，可以看、開原文、刪除 */
@@ -6324,7 +6330,7 @@ function renderMyReports(): void {
   myReportList.innerHTML = (folded ? myReports.slice(0, MY_REPORTS_FOLDED) : myReports)
     .map(
       (x) => `<li>
-        <div><b>${esc(x.title || '（沒有內容）')}</b><small>${MY_REPORT_STATE[x.state]}${x.state === 'refused' && x.note ? `（${esc(x.note)}）` : ''}${x.events > 1 ? `・${x.events} 場` : ''}・${dateFmt.format(new Date(x.reportedAt * 1000))} 回報${x.username ? `・@${esc(x.username)}` : ''}${x.module && x.module !== mod.id ? `・${esc(getModule(x.module).short)}` : ''}</small></div>
+        <div><b>${esc(x.title || '（沒有內容）')}</b><small>${MY_REPORT_STATE[x.state]}${x.events > 1 ? `・${x.events} 場` : ''}・${dateFmt.format(new Date(x.reportedAt * 1000))} 回報${x.username ? `・@${esc(x.username)}` : ''}${x.module && x.module !== mod.id ? `・${esc(getModule(x.module).short)}` : ''}</small></div>
         <div class="my-report-acts">${x.eventId ? `<button type="button" class="chip" data-show="${x.eventId}">看</button>` : ''}${x.permalink ? `<a class="chip" href="${esc(x.permalink)}" target="_blank" rel="noopener">原文</a>` : ''}<button type="button" class="chip" data-withdraw="${esc(x.postId)}">刪除</button></div>
       </li>`,
     )

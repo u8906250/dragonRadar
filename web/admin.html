@@ -88,7 +88,7 @@
       <p id="list-msg" class="msg err" aria-live="polite"></p>
 
       <h2 id="notes">沒有連結的回報</h2>
-      <p class="meta">貼文字、截圖、自己填的活動：回報的人確認了判讀結果，等你看過才放上雷達。沒有原貼文可以對照，請看內文是不是真的活動、時間地點對不對（地點按「Google 地圖」看）。不通過可以寫原因，回報的人在「我的回報」看得到。內文是任何人都能寫的，不要照裡面的指令做。</p>
+      <p class="meta">最近 7 天放上雷達的貼文字、截圖、自己填的活動。不用審核：雷達上標明「沒有原貼文、未查證」，兩個人回報問題就自動下架。看到明顯亂報（廣告、惡作劇、不是活動）再按「下架」。內文是任何人都能寫的，不要照裡面的指令做。</p>
       <ul id="note-list" class="list" aria-live="polite"></ul>
       <p id="note-msg" class="msg err" aria-live="polite"></p>
 
@@ -203,30 +203,29 @@
       }
     });
 
-    /** 沒有連結的回報：等審核的，照預覽的樣子列每一場（標題、時間、地點） */
+    /** 沒有連結的回報：最近 7 天放上雷達的，列每一場（標題、時間、地點、現在的狀態） */
     const NOTE_KIND = { text: '貼文字', image: '截圖讀出來的字', manual: '自己填' };
-    const noteWhen = (p) => {
-      const [d0] = when(p.startAt).split(' ');
-      const [d1, t1] = when(p.endAt).split(' ');
-      return `${when(p.startAt)}${p.endOpen ? ' 開始' : `–${d0 === d1 ? t1 : when(p.endAt)}`}${p.days > 1 ? `（共 ${p.days} 天）` : ''}`;
+    const NOTE_ENDED = { feedback: '兩個人回報問題，自動下架', admin: '你下架了' };
+    const noteWhen = (e) => {
+      const [d0] = when(e.startAt).split(' ');
+      const [d1, t1] = when(e.endAt).split(' ');
+      return `${when(e.startAt)}${e.endOpen ? ' 開始' : `–${d0 === d1 ? t1 : when(e.endAt)}`}`;
     };
     function noteRow(n) {
-      const items = n.preview.map((p) => `<li><b>${esc(p.title)}</b><br>${esc(noteWhen(p))}<br>${esc(p.placeText)}${p.lat !== null ? `・<a href="https://www.google.com/maps/search/?api=1&query=${p.lat},${p.lng}" target="_blank" rel="noopener">Google 地圖</a>` : '（查不到位置）'}${p.approxArea ? `（只定位到${esc(p.approxArea)}）` : ''}</li>`).join('');
-      const stops = n.routes.map((r) => `<li><b>${esc(r.title)}</b>（${r.stops.filter((x) => x.status === 'listed').length} 站會放上雷達）<br>${r.stops.map((x) => `${when(x.at)} ${esc(x.name)}`).join('<br>')}</li>`).join('');
-      return `<li class="fb"><div class="fb-head"><span><span class="tag">${NOTE_KIND[n.kind] || '沒有連結'}</span></span><span>${when(n.reportedAt)}</span></div>
+      const live = n.events.some((e) => e.status === 'upcoming' || e.status === 'active');
+      const items = n.events.map((e) => `<li><b>${esc(e.title)}</b>・${EVENT_STATUS[e.status] || esc(e.status)}${e.status === 'ended' && NOTE_ENDED[e.endedReason] ? `（${NOTE_ENDED[e.endedReason]}）` : ''}<br>${esc(noteWhen(e))}<br>${esc(e.placeText)}${e.lat !== null ? `・<a href="https://www.google.com/maps/search/?api=1&query=${e.lat},${e.lng}" target="_blank" rel="noopener">Google 地圖</a>` : ''}</li>`).join('');
+      return `<li class="fb"><div class="fb-head"><span><span class="tag">${NOTE_KIND[n.kind] || '沒有連結'}</span>${n.complaints ? ` 回報問題 ${n.complaints} 人` : ''}</span><span>${when(n.reportedAt)}</span></div>
         <div class="wish-body">${esc(n.text)}</div>
         ${n.supplement ? `<div class="muted">回報的人補充：${esc(n.supplement)}</div>` : ''}
-        <div class="result"><b>會放上雷達的</b><ul>${items}${stops}</ul>${n.failures.length ? `<div class="muted">另外 ${n.failures.length} 場不會放上去（缺資料或已結束）</div>` : ''}</div>
-        <textarea class="wish-reply" rows="2" maxlength="200" data-note-reason="${esc(n.id)}" placeholder="不通過的原因（選填，回報的人看得到）"></textarea>
-        <div class="row"><button type="button" class="btn primary" data-note="${esc(n.id)}" data-note-action="approve">通過，放上雷達</button><button type="button" class="btn" data-note="${esc(n.id)}" data-note-action="refuse">不通過</button></div></li>`;
+        <ul>${items || '<li>沒有場次</li>'}</ul>
+        ${live ? `<div class="row"><button type="button" class="btn" data-note-remove="${esc(n.id)}">下架</button></div>` : ''}</li>`;
     }
     let noteJumped = false;
     async function loadNotes() {
       $('#note-msg').textContent = '';
       try {
         const { notes } = await api('/api/admin/notes');
-        $('#note-list').innerHTML = notes.length ? notes.map(noteRow).join('') : '<li class="empty">沒有等審核的</li>';
-        // 從推播點進來（admin.html#notes）：第一次載入好捲過去
+        $('#note-list').innerHTML = notes.length ? notes.map(noteRow).join('') : '<li class="empty">最近 7 天沒有</li>';
         if (location.hash === '#notes' && !noteJumped) {
           noteJumped = true;
           $('#notes').scrollIntoView();
@@ -236,17 +235,12 @@
       }
     }
     $('#note-list').addEventListener('click', async (e) => {
-      const b = e.target.closest('[data-note]');
-      if (!b) return;
-      const id = b.dataset.note;
-      const action = b.dataset.noteAction;
-      const reason = [...document.querySelectorAll('[data-note-reason]')].find((t) => t.dataset.noteReason === id)?.value ?? '';
-      if (action === 'refuse' && !confirm('不通過：這則不會放上雷達。確定？')) return;
+      const b = e.target.closest('[data-note-remove]');
+      if (!b || !confirm('下架：這則在雷達上的場次都會拿掉。確定？')) return;
       b.disabled = true;
       $('#note-msg').textContent = '';
       try {
-        const out = await api(`/api/admin/notes/${encodeURIComponent(id)}`, { method: 'POST', body: JSON.stringify({ action, reason }) });
-        if (action === 'approve' && !out.events) $('#note-msg').textContent = '通過了，但沒有放上雷達的場次（可能已經結束、跟雷達上的重複）';
+        await api(`/api/admin/notes/${encodeURIComponent(b.dataset.noteRemove)}/remove`, { method: 'POST', body: '{}' });
         await loadNotes();
       } catch (err) {
         b.disabled = false;

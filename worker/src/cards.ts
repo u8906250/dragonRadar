@@ -84,7 +84,8 @@ export const jerkyMilestone = (n: number): number => Math.floor(n / REPORTS_PER_
 
 /**
  * 回報、確認、放上雷達了：記一則（同一則只記一次；這台今天已經記滿 CREDITS_PER_DAY 則就不記），
- * 累計滿 5 則拿到肉乾卡，每滿 5 則給一份獎勵讓他選（肉乾或順幣，pickReward）；同一個門檻只給一次：刪掉再貼回到同一個數字不會再給
+ * 累計滿 5 則拿到肉乾卡，每滿 5 則給一枚順幣（v1.542–v1.578 是一份獎勵讓他選肉乾或順幣，pickReward 留給舊網頁）；
+ * 同一個門檻只給一次：刪掉再貼回到同一個數字不會再給
  * （v1.541 以前直接給肉乾，原因一樣是 reports:5、reports:10…，所以照原因判斷、不管是哪個道具）
  */
 export async function creditReport(env: Env, device: string | null, postId: string, now: number): Promise<ReportReward | null> {
@@ -99,10 +100,12 @@ export async function creditReport(env: Env, device: string | null, postId: stri
   if (m === 0) return reward;
   const [card, item] = await env.DB.batch([
     env.DB.prepare("INSERT OR IGNORE INTO card_claims (card, device_id, place, created_at) VALUES ('jerky', ?, '回報', ?)").bind(device, now),
-    env.DB.prepare('INSERT OR IGNORE INTO item_grants (device_id, item, reason, created_at) SELECT ?, ?, ?, ? WHERE NOT EXISTS (SELECT 1 FROM item_grants WHERE device_id = ? AND reason = ?)').bind(device, PICK, `reports:${m}`, now, device, `reports:${m}`),
+    // 拿到肉乾卡之後獎勵不用選了，直接給一枚順幣（v1.579 使用者說「雞肉乾在拿到卡後，獎勵就不用再出現選擇」）：
+    // 卡在同一批先寫進去，所以滿 5 則的第一份起都是順幣；以前還沒選的（pick）在 migration 0051 改成順幣
+    env.DB.prepare("INSERT OR IGNORE INTO item_grants (device_id, item, reason, created_at) SELECT ?, 'coin', ?, ? WHERE NOT EXISTS (SELECT 1 FROM item_grants WHERE device_id = ? AND reason = ?)").bind(device, `reports:${m}`, now, device, `reports:${m}`),
   ]);
   if (card.meta.changes) reward.card = (await env.DB.prepare(`${SELECT} WHERE c.device_id = ? AND c.card = 'jerky'`).bind(device).first<CardClaim>()) ?? undefined;
-  if (item.meta.changes) reward.picks = item.meta.changes;
+  if (item.meta.changes) reward.items = [{ item: 'coin', count: item.meta.changes }];
   return reward;
 }
 

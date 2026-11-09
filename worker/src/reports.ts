@@ -8,7 +8,6 @@ import type { Env } from './env';
 import { DEFAULT_MODULE, isModule, MODULE_IDS, moduleOf, type ModuleId } from './modules';
 import { ADDRESS_BUDGET_MS, atLocalTimes, commitPlan, detectEnded, getEvent, getPost, locateTypedPlace, MAX_FUTURE_SEC, planManual, planPost, processPost, savedTagsOf, storePost, tagsOf, topicOf, type EventOut, type FailedItem, type ManualActivity, type PlanItem, type PostRow } from './events';
 import { cleanTags, cleanTopic, responseContent, type ActivityPart, type EventKind } from './extract';
-import { pushAdmins } from './push';
 import { fetchThreadsPost, resolveThreadsLink, shortcodeToUnix, withLocationTag } from './sources/link';
 import { sha1Hex } from './sources/text';
 import { creditReport, uncreditReport, type ReportReward } from './cards';
@@ -105,9 +104,7 @@ export type LinkOutcome =
   | 'not_listed'
   /** 不是發放或活動 */
   | 'not_event'
-  | 'failed'
-  /** 沒有連結的回報：確認了，等管理者審核才放上雷達 */
-  | 'review';
+  | 'failed';
 
 /** 預覽：一個地點或時段（固定據點的好幾天合成一筆） */
 export interface PreviewItem {
@@ -169,8 +166,8 @@ export interface SubmitResult {
   routes?: RoutePreview[];
   /** 確認後放上雷達了：回報的累計（滿 5 則拿到肉乾卡、每 5 則一包肉乾；今天算滿了 capped） */
   reward?: ReportReward;
-  /** 沒有連結的回報（貼文字、截圖、自己填）：確認後要等管理者審核才放上雷達 */
-  review?: boolean;
+  /** 沒有連結的回報（貼文字、截圖、自己填）：放上雷達會標明沒有原貼文、未查證 */
+  noLink?: boolean;
 }
 
 /** 預覽上的一條車掃路線 */
@@ -411,7 +408,7 @@ async function previewResult(env: Env, post: PostRow, plan: StoredPlan, existed:
     confirm: { postId: post.id, token: await confirmToken(env, post.id) },
     supplement: post.supplement ?? null,
     ...edit,
-    ...(post.source === 'note' ? { review: true } : {}),
+    ...(post.source === 'note' ? { noLink: true } : {}),
   };
   if (plan.early) return { ...base, outcome: summarize([plan.early]), reasons: [plan.early], events: [], ...(plan.note ? { note: plan.note } : {}) };
   const reasons = plan.items.filter((it) => !it.plan).map((it) => it.reason);
@@ -574,36 +571,23 @@ async function checkConfirm(env: Env, body: { postId?: unknown; token?: unknown 
   return post;
 }
 
-/** 還能補充、修改、說判讀錯了嗎：已經放上雷達、送去審核、審核沒通過的都不行 */
+/** 還能補充、修改嗎：已經放上雷達的不行 */
 function assertEditable(post: PostRow, what: string): void {
   if (post.confirm_state === 'confirmed') throw new ReportError(409, `這則已經放上雷達了，不能再${what}`);
-  if (post.confirm_state === 'review') throw new ReportError(409, `這則已經送給管理者確認了，不能再${what}；要改的話先在「我的回報」刪除，再重新送一次`);
-  if (post.confirm_state === 'refused') throw new ReportError(409, `這則沒有通過管理者確認，不能再${what}，請重新送一次`);
 }
 
 /** 回報的人確認判讀沒錯：寫進雷達 */
-export async function confirmLink(env: Env, body: { postId?: unknown; token?: unknown }, now: number, device: string | null = null): Promise<SubmitResult> {
+export async function confirmLink(env: Env, body: { postId?: unknown; token?: unknown }, now: number, device: string | null = null, ip: string | null = null): Promise<SubmitResult> {
   const post = await checkConfirm(env, body);
   const permalink = post.permalink ?? '';
   if (post.confirm_state === 'confirmed') {
     const events = await eventsForResult(env, post.id, [], now);
     return { existed: true, outcome: events.length > 0 ? 'added' : 'not_listed', reasons: [], events, permalink };
   }
-  // 沒有連結的回報：送給管理者審核（已經送過的再按一次一樣）
-  if (post.source === 'note' && (post.confirm_state === 'review' || post.confirm_state === 'refused')) {
-    if (post.confirm_state === 'refused') throw new ReportError(409, '這則沒有通過管理者確認，請重新送一次');
-    return { existed: true, outcome: 'review', reasons: [], events: [], permalink };
-  }
   const plan = readPlan(post);
   if (!plan) throw new ReportError(409, '判讀結果不見了，請重新貼一次連結');
-  if (post.source === 'note') {
-    if (!plan.items.some((it) => it.plan)) throw new ReportError(409, '沒有可以放上雷達的場次，請先補上活動內容、地點和開始時間');
-    await env.DB.batch([
-      env.DB.prepare("UPDATE posts SET confirm_state = 'review' WHERE id = ? AND confirm_state = 'pending'").bind(post.id),
-      env.DB.prepare(`UPDATE submissions SET device = COALESCE(device, ?) WHERE id = (SELECT MAX(id) FROM submissions WHERE post_id = ? AND ${NOT_SUPPLEMENT})`).bind(device, post.id),
-    ]);
-    return { existed: false, outcome: 'review', reasons: [], events: [], permalink };
-  }
+  // 沒有連結的回報：一天最多放 NOTE_PER_DEVICE_PER_DAY 則（放上雷達才算）
+  if (post.source === 'note') await checkNoteDaily(env, post.id, now, device, ip);
   const result = await commitPlan(env, post.id, plan.items, now);
   await env.DB.batch([
     env.DB.prepare("UPDATE posts SET confirm_state = 'confirmed', confirm_plan = NULL WHERE id = ?").bind(post.id),
@@ -617,12 +601,13 @@ export async function confirmLink(env: Env, body: { postId?: unknown; token?: un
 }
 
 /**
- * 放上雷達了：算一則回報（收集卡、道具；算失敗不影響回報）；
+ * 放上雷達了：算一則回報（收集卡、道具；算失敗不影響回報；沒有連結的不算）；
  * 回報的人直接修改時手動加的關鍵字記成候選，管理者採用了之後的判讀才用（記失敗不影響回報）
  */
 async function afterListed(env: Env, post: PostRow, plan: StoredPlan, outcome: LinkOutcome, device: string | null, now: number): Promise<ReportReward | null> {
   if (outcome !== 'added') return null;
-  const reward = await creditReport(env, device, post.id, now).catch((e) => (console.warn('credit failed', e), null));
+  // 沒有連結的（未查證）不算進收集卡、順幣，免得為了獎勵亂填
+  const reward = post.source === 'note' ? null : await creditReport(env, device, post.id, now).catch((e) => (console.warn('credit failed', e), null));
   if (plan.judgedTags) {
     const module = moduleOf(post.module);
     const final = plan.items.flatMap((it) => (it.plan ? tagsOf(it.plan.extra) : []));
@@ -808,24 +793,18 @@ export async function locateForEdit(env: Env, body: { postId?: unknown; token?: 
 export async function rejectLink(env: Env, body: { postId?: unknown; token?: unknown; note?: unknown }): Promise<{ ok: true }> {
   const post = await checkConfirm(env, body);
   if (post.confirm_state === 'confirmed') throw new ReportError(409, '這則已經有人確認放上雷達了；有錯可以在詳細資料回報');
-  assertEditable(post, '修改');
   const note = typeof body.note === 'string' ? body.note.trim().slice(0, 300) : '';
   await env.DB.prepare("UPDATE posts SET confirm_state = 'rejected', confirm_note = COALESCE(NULLIF(?, ''), confirm_note) WHERE id = ?").bind(note, post.id).run();
   return { ok: true };
 }
 
-/**
- * 我的回報（用同一個瀏覽器回報、確認放上雷達的）：on_radar 在雷達上、attached 附在別的據點、not_listed 已結束或沒放上；
- * 沒有連結的回報還有 review 等管理者確認、refused 沒有通過（note 是原因）
- */
+/** 我的回報（用同一個瀏覽器回報、確認放上雷達的，包括沒有連結的）：on_radar 在雷達上、attached 附在別的據點、not_listed 已結束或沒放上 */
 export interface MyReport {
   postId: string;
   permalink: string;
   username: string | null;
   title: string;
-  state: 'on_radar' | 'attached' | 'not_listed' | 'review' | 'refused';
-  /** 沒有通過的原因 */
-  note?: string | null;
+  state: 'on_radar' | 'attached' | 'not_listed';
   /** 雷達上還沒結束的場次 */
   events: number;
   /** 點了跳到雷達上的哪一場 */
@@ -843,17 +822,15 @@ export async function myReports(env: Env, device: string): Promise<MyReport[]> {
   // 先把這個裝置的回報照貼文合起來（同一則補充、修改會有好幾筆；idx_submissions_device_post 不用回表），每一則貼文只查一次 posts、events。
   // CROSS JOIN、+p.source：一定從這個裝置的回報找貼文（照 source 的索引會把所有回報的貼文讀一遍）
   const { results: posts } = await env.DB.prepare(
-    `SELECT p.id, p.permalink, p.username, p.text, p.confirm_state, p.link_role, p.module, p.review_note,
-            CASE WHEN p.confirm_state IN ('review', 'refused') THEN p.confirm_plan END AS plan, m.reported_at
+    `SELECT p.id, p.permalink, p.username, p.text, p.confirm_state, p.link_role, p.module, m.reported_at
        FROM (SELECT post_id, MAX(created_at) AS reported_at FROM submissions WHERE device = ? GROUP BY post_id) m
        CROSS JOIN posts p ON p.id = m.post_id
-      WHERE +p.source IN ('link', 'note')
-        AND ((p.confirm_state = 'confirmed' AND (p.link_role = 'related' OR EXISTS (SELECT 1 FROM events e WHERE e.post_id = p.id)))
-          OR p.confirm_state IN ('review', 'refused'))
+      WHERE +p.source IN ('link', 'note') AND p.confirm_state = 'confirmed'
+        AND (p.link_role = 'related' OR EXISTS (SELECT 1 FROM events e WHERE e.post_id = p.id))
       ORDER BY m.reported_at DESC LIMIT 30`,
   )
     .bind(device)
-    .all<{ id: string; permalink: string | null; username: string | null; text: string; confirm_state: string | null; link_role: string | null; module: string; review_note: string | null; plan: string | null; reported_at: number; }>();
+    .all<{ id: string; permalink: string | null; username: string | null; text: string; confirm_state: string | null; link_role: string | null; module: string; reported_at: number }>();
   if (posts.length === 0) return [];
   const { results: evs } = await env.DB.prepare(
     // +status：照 post_id 的索引找這幾則（用 status 的索引會把雷達上所有進行中、即將開始的都讀一遍）
@@ -863,18 +840,14 @@ export async function myReports(env: Env, device: string): Promise<MyReport[]> {
     .all<{ id: number; post_id: string; title: string }>();
   return posts.map((p) => {
     const mine = evs.filter((e) => e.post_id === p.id);
-    const waiting = p.confirm_state === 'review' || p.confirm_state === 'refused';
-    const state: MyReport['state'] = waiting ? (p.confirm_state as 'review' | 'refused') : mine.length > 0 ? 'on_radar' : p.link_role === 'related' ? 'attached' : 'not_listed';
+    const state: MyReport['state'] = mine.length > 0 ? 'on_radar' : p.link_role === 'related' ? 'attached' : 'not_listed';
     const firstLine = p.text.split('\n').map((x) => x.trim()).find(Boolean) ?? '';
-    // 等審核的：標題用判讀出來的第一場（截圖讀出來的字第一行常常不是標題）
-    const planned = waiting ? readPlan({ confirm_plan: p.plan } as PostRow)?.items.find((it) => it.plan)?.plan?.title : undefined;
     return {
       postId: p.id,
       permalink: p.permalink ?? '',
       username: p.username,
-      title: mine[0]?.title ?? planned ?? firstLine.slice(0, 40),
+      title: mine[0]?.title ?? firstLine.slice(0, 40),
       state,
-      ...(p.confirm_state === 'refused' ? { note: p.review_note } : {}),
       events: mine.length,
       eventId: mine[0]?.id ?? null,
       reportedAt: p.reported_at,
@@ -1022,8 +995,9 @@ export async function purgeReports(env: Env, cutoff: number): Promise<number> {
 
 /*
  * 沒有連結的回報（v1.578）：在 LINE 群組、IG、牆上海報看到的活動沒有 Threads 連結，可以貼文字、上傳截圖或自己填。
- * 跟貼連結一樣先判讀、預覽，回報的人確認後（confirmLink）不直接上雷達，等管理者在管理頁審核：
- * 沒有原貼文可以重讀，刪文、取消不會自動下架，所以要有人看過。截圖只用來讀字，不存下來。
+ * 跟貼連結一樣先判讀、預覽，回報的人確認後（confirmLink）放上雷達，標明沒有原貼文、未查證（v1.579 使用者說管理者也沒辦法判斷對不對，
+ * 不審核了）。防亂報：一個瀏覽器一天最多放 NOTE_PER_DEVICE_PER_DAY 則、不算進收集卡和順幣，兩個不同的人回報問題就自動下架（feedback.ts）。
+ * 截圖只用來讀字，不存下來。
  */
 
 /** 貼的文字最少、最多幾個字 */
@@ -1035,8 +1009,9 @@ export const NOTE_IMAGE_MAX = 3_000_000;
 export const OCR_MODEL = '@cf/meta/llama-4-scout-17b-16e-instruct';
 const OCR_PROMPT =
   '這是一張活動的貼文截圖或海報。請把圖片裡看得到的文字照原樣抄下來：保留原本的字（繁體中文照原字，不要改成簡體）、換行、日期、時間和數字，不要翻譯、不要摘要、不要加任何說明。圖片裡沒有文字的話，只回答「沒有文字」。';
-/** 管理者沒通過時寫的原因最多幾個字 */
-const REVIEW_NOTE_MAX = 200;
+/** 沒有連結的回報：同一個瀏覽器、同一個網路 24 小時內最多放上雷達幾則 */
+export const NOTE_PER_DEVICE_PER_DAY = 3;
+const NOTE_PER_IP_PER_DAY = 10;
 
 /** 貼的文字：去掉控制字元，連續空行最多留一行 */
 export function cleanNoteText(v: unknown): string {
@@ -1087,7 +1062,7 @@ async function createNote(env: Env, kind: 'text' | 'image' | 'manual', text: str
   return post;
 }
 
-/** 貼文字或上傳截圖（洋流的活動）：讀字、判讀、定位，回傳預覽；確認後等管理者審核 */
+/** 貼文字或上傳截圖（洋流的活動）：讀字、判讀、定位，回傳預覽；確認後放上雷達（標明未查證） */
 export async function submitNote(env: Env, body: { text?: unknown; image?: unknown }, ip: string, now: number, device: string | null = null): Promise<SubmitResult> {
   assertReportsOpen(env, DEFAULT_MODULE);
   const hasImage = body.image !== undefined && body.image !== null && body.image !== '';
@@ -1095,6 +1070,8 @@ export async function submitNote(env: Env, body: { text?: unknown; image?: unkno
   if (hasImage && !image) throw new ReportError(400, '圖片太大或格式不對，請換一張截圖（JPEG、PNG）');
   const typed = cleanNoteText(body.text);
   if (!image && [...typed].length < NOTE_MIN) throw new ReportError(400, `請貼上活動的文字（至少 ${NOTE_MIN} 個字），或選一張截圖`);
+  // 今天已經放滿了：先講，不用判讀完才知道
+  await checkNoteDaily(env, '', now, device, ip);
   await checkSubmitLimits(env, ip, now, device);
   let text = typed;
   if (image) {
@@ -1123,84 +1100,77 @@ export async function submitNote(env: Env, body: { text?: unknown; image?: unkno
 /** 自己填：先開一則空的回報，表單送出時照修改的流程（editLink）排、定位 */
 export async function startManual(env: Env, ip: string, now: number, device: string | null = null): Promise<{ confirm: { postId: string; token: string } }> {
   assertReportsOpen(env, DEFAULT_MODULE);
+  await checkNoteDaily(env, '', now, device, ip);
   await checkSubmitLimits(env, ip, now, device);
   const post = await createNote(env, 'manual', '', ip, now, device);
   return { confirm: { postId: post.id, token: await confirmToken(env, post.id) } };
 }
 
-/** 有沒有連結的回報送來審核：推到管理者的手機 */
-export async function notifyNote(env: Env, postId: string, now: number): Promise<number> {
-  const post = await getPost(env, postId);
-  const first = post ? readPlan(post)?.items.find((it) => it.plan)?.plan : undefined;
-  if (!post || !first) return 0;
-  const waiting = (await env.DB.prepare("SELECT COUNT(*) AS n FROM posts WHERE confirm_state = 'review'").first<{ n: number }>())?.n ?? 1;
-  return pushAdmins(env, {
-    title: `沒有連結的回報等你確認${waiting > 1 ? `（${waiting} 則）` : ''}`,
-    body: `${first.title}｜${whenText(first.start_at)}｜${first.place_text}`.slice(0, 100),
-    tag: 'note-review',
-    url: './admin.html#notes',
-    renotify: true,
-  }, now);
+/** 24 小時內放上雷達的沒有連結的回報（確認時記的結果有排上雷達的才算，跟雷達上重複的不算；不含這一則）到上限了：告訴他大約幾小時後可以再回報 */
+async function checkNoteDaily(env: Env, postId: string, now: number, device: string | null, ip: string | null = null): Promise<void> {
+  const count = async (column: 'device' | 'ip_hash', value: string): Promise<{ n: number; first: number | null }> =>
+    (await env.DB.prepare(
+      `SELECT COUNT(DISTINCT post_id) AS n, MIN(created_at) AS first FROM submissions
+        WHERE ${column} = ? AND created_at > ? AND post_id LIKE 'note-%' AND post_id != ? AND (result LIKE '%"upcoming"%' OR result LIKE '%"active"%')`,
+    )
+      .bind(value, now - 86400, postId)
+      .first<{ n: number; first: number | null }>()) ?? { n: 0, first: null };
+  for (const [column, value, max] of [['device', device, NOTE_PER_DEVICE_PER_DAY], ['ip_hash', ip, NOTE_PER_IP_PER_DAY]] as const) {
+    if (!value) continue;
+    const r = await count(column, value);
+    if (r.n < max) continue;
+    const wait = Math.max(1, Math.ceil(((r.first ?? now) + 86400 - now) / 3600));
+    throw new ReportError(429, `沒有連結的回報，${column === 'device' ? '同一個瀏覽器' : '同一個網路'}一天最多放 ${max} 則，約 ${wait} 小時後可以再回報`);
+  }
 }
 
-/** 管理頁：等審核的沒有連結的回報（判讀結果照預覽的樣子給，管理者看內文對不對） */
+/** 管理頁：最近 7 天放上雷達的沒有連結的回報（不用審核，看到明顯亂報再下架） */
 export interface AdminNote {
   id: string;
   kind: 'text' | 'image' | 'manual' | null;
   text: string;
   supplement: string | null;
   reportedAt: number;
-  preview: PreviewItem[];
-  routes: RoutePreview[];
-  failures: FailedItem[];
+  /** 這則在雷達上的場次（下架、結束的也列，看得出狀態） */
+  events: Array<{ id: number; title: string; placeText: string; startAt: number; endAt: number; endOpen: boolean; lat: number | null; lng: number | null; status: string; endedReason: string | null }>;
+  /** 回報問題的人數（「其他」不算） */
+  complaints: number;
 }
 
-export async function adminListNotes(env: Env, now: number): Promise<AdminNote[]> {
-  const { results } = await env.DB.prepare("SELECT * FROM posts WHERE confirm_state = 'review' ORDER BY fetched_at LIMIT 50").all<PostRow>();
-  return results.map((post) => {
-    const items = readPlan(post)?.items ?? [];
-    const single = items.filter((it) => !it.route);
-    return {
-      id: post.id,
-      kind: post.note_kind ?? null,
-      text: post.text,
-      supplement: post.supplement ?? null,
-      reportedAt: post.fetched_at,
-      preview: previewOf(single, now),
-      routes: routePreviews(items),
-      failures: single.flatMap((it) => (!it.plan && it.fail ? [it.fail] : [])),
-    };
-  });
+export async function adminRecentNotes(env: Env, now: number): Promise<AdminNote[]> {
+  const { results: posts } = await env.DB.prepare(
+    "SELECT id, note_kind, text, supplement, fetched_at FROM posts WHERE source = 'note' AND fetched_at > ? AND confirm_state = 'confirmed' ORDER BY fetched_at DESC LIMIT 50",
+  )
+    .bind(now - 7 * 86400)
+    .all<{ id: string; note_kind: AdminNote['kind']; text: string; supplement: string | null; fetched_at: number }>();
+  if (posts.length === 0) return [];
+  const ids = posts.map((p) => p.id);
+  const marks = ids.map(() => '?').join(',');
+  const [{ results: evs }, { results: fbs }] = await Promise.all([
+    env.DB.prepare(`SELECT id, post_id, title, place_text, start_at, end_at, end_open, lat, lng, status, ended_reason FROM events WHERE post_id IN (${marks}) ORDER BY start_at`)
+      .bind(...ids)
+      .all<{ id: number; post_id: string; title: string; place_text: string; start_at: number; end_at: number; end_open: number; lat: number | null; lng: number | null; status: string; ended_reason: string | null }>(),
+    env.DB.prepare(`SELECT post_id, COUNT(DISTINCT COALESCE(device, 'ip:' || ip)) AS n FROM event_feedback WHERE post_id IN (${marks}) AND kind != 'other' GROUP BY post_id`)
+      .bind(...ids)
+      .all<{ post_id: string; n: number }>(),
+  ]);
+  return posts.map((p) => ({
+    id: p.id,
+    kind: p.note_kind,
+    text: p.text,
+    supplement: p.supplement,
+    reportedAt: p.fetched_at,
+    events: evs
+      .filter((e) => e.post_id === p.id)
+      .map((e) => ({ id: e.id, title: e.title, placeText: e.place_text, startAt: e.start_at, endAt: e.end_at, endOpen: !!e.end_open, lat: e.lat, lng: e.lng, status: e.status, endedReason: e.ended_reason })),
+    complaints: fbs.find((f) => f.post_id === p.id)?.n ?? 0,
+  }));
 }
 
-/** 管理者審核：approve 放上雷達（算回報的人一則），refuse 不放（reason 給回報的人看） */
-export async function adminDecideNote(env: Env, id: string, body: unknown, now: number): Promise<{ outcome: LinkOutcome | 'refused'; events: number }> {
-  const b = (body && typeof body === 'object' ? body : {}) as { action?: unknown; reason?: unknown };
+/** 管理者下架一則沒有連結的回報：雷達上的場次都結束（ended_reason = 'admin'），貼文留著（回報的人「我的回報」看得到不在雷達上） */
+export async function adminRemoveNote(env: Env, id: string, now: number): Promise<{ removed: number }> {
   const post = await getPost(env, id);
   if (!post || post.source !== 'note') throw new ReportError(404, '找不到這則回報');
-  if (post.confirm_state !== 'review') throw new ReportError(409, '這則已經處理過了（或回報的人刪除了）');
-  if (b.action === 'refuse') {
-    const reason = typeof b.reason === 'string' ? [...b.reason.replace(/\s+/g, ' ').trim()].slice(0, REVIEW_NOTE_MAX).join('') : '';
-    const r = await env.DB.prepare("UPDATE posts SET confirm_state = 'refused', review_note = ?, reviewed_at = ? WHERE id = ? AND confirm_state = 'review'").bind(reason || null, now, id).run();
-    if (!r.meta.changes) throw new ReportError(409, '這則已經處理過了（或回報的人刪除了）');
-    return { outcome: 'refused', events: 0 };
-  }
-  if (b.action !== 'approve') throw new ReportError(400, 'action 要是 approve 或 refuse');
-  const plan = readPlan(post);
-  if (!plan) throw new ReportError(409, '判讀結果不見了');
-  // 先改狀態再寫進雷達：同時按兩次只會放一次
-  const lock = await env.DB.prepare("UPDATE posts SET confirm_state = 'confirmed', confirm_plan = NULL, reviewed_at = ? WHERE id = ? AND confirm_state = 'review'").bind(now, id).run();
-  if (!lock.meta.changes) throw new ReportError(409, '這則已經處理過了（或回報的人刪除了）');
-  let result: Awaited<ReturnType<typeof commitPlan>>;
-  try {
-    result = await commitPlan(env, id, plan.items, now);
-  } catch (e) {
-    await env.DB.prepare("UPDATE posts SET confirm_state = 'review', confirm_plan = ?, reviewed_at = NULL WHERE id = ?").bind(post.confirm_plan ?? null, id).run();
-    throw e;
-  }
-  const sub = await env.DB.prepare(`SELECT id, device FROM submissions WHERE post_id = ? AND ${NOT_SUPPLEMENT} ORDER BY id DESC LIMIT 1`).bind(id).first<{ id: number; device: string | null }>();
-  if (sub) await env.DB.prepare('UPDATE submissions SET result = ? WHERE id = ?').bind(JSON.stringify(result.reasons), sub.id).run();
-  const outcome = summarize(result.reasons);
-  await afterListed(env, post, plan, outcome, sub?.device ?? null, now);
-  return { outcome, events: result.events.length };
+  const r = await env.DB.prepare("UPDATE events SET status = 'ended', ended_reason = 'admin', updated_at = ? WHERE post_id = ? AND status IN ('upcoming', 'active', 'unlocated')").bind(now, id).run();
+  return { removed: r.meta.changes ?? 0 };
 }

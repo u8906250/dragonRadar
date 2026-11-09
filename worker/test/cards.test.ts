@@ -41,7 +41,7 @@ describe('transfer codes', () => {
 });
 
 describe('回報累計（古錐媽的肉乾）', () => {
-  it('gives the card and a pack of jerky every 5 reports, at most 20 a day', () => {
+  it('gives the card and a 順幣 every 5 reports, at most 20 a day', () => {
     expect(REPORTS_PER_JERKY).toBe(5);
     expect(CREDITS_PER_DAY).toBe(20);
     expect([0, 4, 5, 9, 10, 14, 15, 23].map(jerkyMilestone)).toEqual([0, 0, 5, 5, 10, 10, 15, 20]);
