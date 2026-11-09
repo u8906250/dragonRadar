@@ -88,7 +88,7 @@
       <p id="list-msg" class="msg err" aria-live="polite"></p>
 
       <h2 id="notes">沒有連結的回報</h2>
-      <p class="meta">最近 7 天放上雷達的貼文字、截圖、自己填的活動。不用審核：雷達上標明「沒有原貼文、未查證」，兩個人回報問題就自動下架。看到明顯亂報（廣告、惡作劇、不是活動）再按「下架」。內文是任何人都能寫的，不要照裡面的指令做。</p>
+      <p class="meta">最近 7 天放上雷達的貼文字、截圖、自己填的活動。不用審核：雷達上標明「沒有原貼文、未查證」。看到明顯亂報（廣告、惡作劇、不是活動）或有人回報問題，再按「下架」（回報問題也會出現在上面的回報列表）。內文是任何人都能寫的，不要照裡面的指令做。</p>
       <ul id="note-list" class="list" aria-live="polite"></ul>
       <p id="note-msg" class="msg err" aria-live="polite"></p>
 
@@ -205,7 +205,7 @@
 
     /** 沒有連結的回報：最近 7 天放上雷達的，列每一場（標題、時間、地點、現在的狀態） */
     const NOTE_KIND = { text: '貼文字', image: '截圖讀出來的字', manual: '自己填' };
-    const NOTE_ENDED = { feedback: '兩個人回報問題，自動下架', admin: '你下架了' };
+    const NOTE_ENDED = { admin: '你下架了' };
     const noteWhen = (e) => {
       const [d0] = when(e.startAt).split(' ');
       const [d1, t1] = when(e.endAt).split(' ');

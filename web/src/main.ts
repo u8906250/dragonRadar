@@ -2764,7 +2764,7 @@ function renderDetail(items: Item[], now: number): void {
       <blockquote class="post-excerpt" title="原文摘錄，完整內容請看原文">${esc(ev.post.source === 'news' ? ev.post.text.split('\n')[0] : ev.post.text)}</blockquote>
       ${ev.post.supplement ? `<p class="muted supplement-line">回報的人補充：${esc(ev.post.supplement)}</p>` : ''}
       <p class="muted source-line">來源：${esc(sourceLabel(ev))}</p>
-      ${ev.post.source === 'note' ? '<p class="muted sheet-note small preview-warn">⚠️ 沒有原貼文，是回報的人提供的，沒有查證過；出發前可以再確認一下。不對的話按「回報問題」，兩個人回報就會自動拿掉。</p>' : ''}
+      ${ev.post.source === 'note' ? '<p class="muted sheet-note small preview-warn">⚠️ 沒有原貼文，是回報的人提供的，沒有查證過；出發前可以再確認一下；不對的話按「回報問題」。</p>' : ''}
       ${routeOf(ev) ? '' : it.spot ? spotPostsHtml(ev.related ?? []) : relatedHtml(ev.related ?? [])}
       <div class="sheet-actions">
         <a class="btn primary" href="https://www.google.com/maps/dir/?api=1&destination=${ev.lat},${ev.lng}&travelmode=walking" target="_blank" rel="noopener">${ev.approxArea ? '導航到約略位置' : '導航'}</a>
@@ -3090,15 +3090,7 @@ async function submitFeedback(): Promise<void> {
   }
   feedbackSheet.hidden = true;
   feedbackEventId = null;
-  showBanner(
-    bannerEl,
-    r.data.duplicate ? '你已經回報過這個問題了，謝謝' : r.data.removed ? '謝謝回報，這則沒有原貼文、已經有兩個人說不對，先從雷達拿掉了' : locating ? '謝謝回報，管理者確認位置後就會放上雷達' : '謝謝回報，管理者會盡快處理',
-    3500,
-  );
-  if (r.data.removed) {
-    select(null);
-    void refresh();
-  }
+  showBanner(bannerEl, r.data.duplicate ? '你已經回報過這個問題了，謝謝' : locating ? '謝謝回報，管理者確認位置後就會放上雷達' : '謝謝回報，管理者會盡快處理', 3500);
 }
 
 /** 雷達或地圖上疊在一起的一群，詳細資料會列出同一群的其他項目 */
@@ -5384,7 +5376,7 @@ function renderReportTips(): void {
     '放上雷達的回報，滿 5 則拿到「古錐媽的肉乾」收集卡，每 5 則一枚順幣；每天最多算 20 則，超過的一樣會放上雷達，只是不算進收集。',
     `只收${l ? ` ${l.maxAgeDays} 天內` : ''}的公開貼文。每一場活動都要讀得到做什麼、在哪裡、哪天幾點開始，缺一個就不會放上雷達。`,
     '結束時間可以不寫：沒寫的只寫幾點開始，雷達上顯示到開始後兩小時。',
-    '沒有 Threads 連結的（LINE、IG、Facebook、海報）：按「貼文字或截圖」或「自己填」。雷達上會標明「沒有原貼文、未查證」，一個瀏覽器一天最多 3 則、不算進收集；不會自動下架，活動取消要自己回來刪除，兩個人回報問題也會自動拿掉。',
+    '沒有 Threads 連結的（LINE、IG、Facebook、海報）：按「貼文字或截圖」或「自己填」。雷達上會標明「沒有原貼文、未查證」，一個瀏覽器一天最多 3 則、不算進收集；不會自動下架，活動取消要自己回來刪除。',
     '貼文寫了車掃、掃街、車隊，或騎車（順騎、單車）、健走，同一天又列了好幾站的，會合成一條路線：每一站從預計經過前 10 分鐘顯示到經過後 15 分鐘。各站沒寫時間、只寫出發時間的，照順序和距離推算（騎車時速 12 公里、健走 4 公里，每站停 10 分鐘），時間表寫「約」。只定位到鄉鎮區的站，要在地圖上標出位置才會放上雷達。',
     '貼文沒寫或判讀錯的，可以在判讀結果按「補充資料」直接改活動內容、時間、地點，位置不對可以在地圖上標。連續好幾天的活動每天各算一場（最多 6 場）。貼文最好寫出門牌地址，定位才準。',
     `原貼文刪除或改成「結束了」，雷達${l ? ` ${l.recheckMin} 分鐘內` : ''}會自動下架。`,

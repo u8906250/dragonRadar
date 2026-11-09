@@ -996,7 +996,7 @@ export async function purgeReports(env: Env, cutoff: number): Promise<number> {
 /*
  * 沒有連結的回報（v1.578）：在 LINE 群組、IG、牆上海報看到的活動沒有 Threads 連結，可以貼文字、上傳截圖或自己填。
  * 跟貼連結一樣先判讀、預覽，回報的人確認後（confirmLink）放上雷達，標明沒有原貼文、未查證（v1.579 使用者說管理者也沒辦法判斷對不對，
- * 不審核了）。防亂報：一個瀏覽器一天最多放 NOTE_PER_DEVICE_PER_DAY 則、不算進收集卡和順幣，兩個不同的人回報問題就自動下架（feedback.ts）。
+ * 不審核了）。防亂報：一個瀏覽器一天最多放 NOTE_PER_DEVICE_PER_DAY 則、不算進收集卡和順幣；有人「回報問題」一樣給管理者處理（v1.580 使用者說不用兩人回報就拿掉的規則）。
  * 截圖只用來讀字，不存下來。
  */
 
@@ -1124,7 +1124,7 @@ async function checkNoteDaily(env: Env, postId: string, now: number, device: str
   }
 }
 
-/** 管理頁：最近 7 天放上雷達的沒有連結的回報（不用審核，看到明顯亂報再下架） */
+/** 管理頁：最近 7 天放上雷達的沒有連結的回報（不用審核，看到明顯亂報或有人回報問題再下架） */
 export interface AdminNote {
   id: string;
   kind: 'text' | 'image' | 'manual' | null;
