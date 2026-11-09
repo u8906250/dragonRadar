@@ -164,12 +164,29 @@
           <button type="button" class="btn" id="report-paste" hidden>貼上</button>
           <button type="submit" class="btn primary" id="report-submit">送出</button>
         </form>
+        <!-- 沒有連結的回報（洋流的活動）：貼文字或截圖、自己填；確認後由管理者看過才放上雷達 -->
+        <div class="report-alt" id="report-alt">
+          <span class="muted">沒有連結？</span>
+          <button type="button" class="chip" id="report-note-btn" aria-controls="report-note-form" aria-expanded="false">貼文字或截圖</button>
+          <button type="button" class="chip" id="report-manual-btn">自己填</button>
+        </div>
+        <form id="report-note-form" class="report-note" hidden novalidate>
+          <textarea id="report-note-text" rows="5" maxlength="3000" placeholder="貼上活動的文字（LINE、IG、Facebook、海報上的都可以），要寫出做什麼、在哪裡、哪天幾點開始" aria-label="活動的文字"></textarea>
+          <div class="report-note-img">
+            <label class="btn" for="report-note-file">選截圖</label>
+            <input type="file" id="report-note-file" accept="image/*" hidden />
+            <img id="report-note-thumb" alt="選的截圖" hidden />
+            <button type="button" class="chip small" id="report-note-clear" hidden>拿掉截圖</button>
+          </div>
+          <p class="muted sheet-note small">可以只貼文字、只選截圖，或兩個都給。截圖只用來讀出裡面的字，不會存下來。沒有原貼文可以對照，所以確認後由管理者看過才會放上雷達。</p>
+          <div class="sheet-actions"><button type="submit" class="btn primary" id="report-note-submit">判讀</button><button type="button" class="btn" id="report-note-cancel">取消</button></div>
+        </form>
         <div id="report-result" class="report-result" aria-live="polite"></div>
         <section id="my-reports" class="my-reports" hidden aria-label="我的回報">
           <h3>我的回報</h3>
           <ul id="my-report-list" class="my-report-list"></ul>
           <button type="button" class="chip small my-reports-more" id="my-reports-more" aria-controls="my-report-list" aria-expanded="false" hidden></button>
-          <p class="muted sheet-note small">只列出 30 天內用這個瀏覽器回報、已經放上雷達的。刪除後，雷達上這則的發放、活動會一起拿掉。</p>
+          <p class="muted sheet-note small">只列出 30 天內用這個瀏覽器回報、已經放上雷達或等管理者確認的。刪除後，雷達上這則的發放、活動會一起拿掉。</p>
         </section>
         <ul class="muted sheet-note small report-tips" id="report-tips"></ul>
         </div>

@@ -1,6 +1,6 @@
 import './styles.css';
 import { FITBUS_MS_PER_M, hqDenseKm, hqMotionKm, HQ_NET_LABEL_KM, HQ_SAIL_MS, HQ_STAR_MS, HQ_VOYAGE_MS, RAINBOW_EVERY_MS, voyagePhase, voyageTimeOf } from './flow';
-import { addKeyword, collectLetter, deletePushSubscription, locateFeedbackPlace, sendFeedback, type FeedbackKind, fetchPushKey, savePushSubscription, confirmReport, editReport, locatePlace, rejectReport, supplementReport, deleteBottle, dropBottle, recycleBottle, fetchBottles, fetchEvents, fetchHealth, fetchKeywords, fetchMyBottles, fetchMyReports, fetchRoutes, pickBottle, reportBottle, submitLink, withdrawReport } from './api';
+import { addKeyword, collectLetter, deletePushSubscription, locateFeedbackPlace, sendFeedback, type FeedbackKind, fetchPushKey, savePushSubscription, confirmReport, submitNote, startManual, editReport, locatePlace, rejectReport, supplementReport, deleteBottle, dropBottle, recycleBottle, fetchBottles, fetchEvents, fetchHealth, fetchKeywords, fetchMyBottles, fetchMyReports, fetchRoutes, pickBottle, reportBottle, submitLink, withdrawReport } from './api';
 import { compassSupported, startCompass } from './compass';
 import { bearingDeg, compassLabel, destination, formatKm, haversineKm, taiwanRadiusKm, type LatLng } from './geo';
 import { TAIWAN_RINGS } from './taiwan';
@@ -423,6 +423,15 @@ const reportSubmit = $<HTMLButtonElement>('#report-submit');
 const reportPaste = $<HTMLButtonElement>('#report-paste');
 const reportResult = $('#report-result');
 const reportTips = $('#report-tips');
+const reportAlt = $('#report-alt');
+const reportNoteBtn = $<HTMLButtonElement>('#report-note-btn');
+const reportManualBtn = $<HTMLButtonElement>('#report-manual-btn');
+const reportNoteForm = $<HTMLFormElement>('#report-note-form');
+const reportNoteText = $<HTMLTextAreaElement>('#report-note-text');
+const reportNoteFile = $<HTMLInputElement>('#report-note-file');
+const reportNoteThumb = $<HTMLImageElement>('#report-note-thumb');
+const reportNoteClear = $<HTMLButtonElement>('#report-note-clear');
+const reportNoteSubmit = $<HTMLButtonElement>('#report-note-submit');
 const myReportsEl = $('#my-reports');
 const myReportList = $<HTMLUListElement>('#my-report-list');
 const myReportsMore = $<HTMLButtonElement>('#my-reports-more');
@@ -4887,6 +4896,9 @@ function applyModule(): void {
   brandText.textContent = mod.current ? theme.name : mod.short;
   searchInput.placeholder = mod.searchPlaceholder;
   reportIntro.textContent = mod.current ? CURRENT_REPORT_INTRO : mod.reportIntro;
+  // 沒有連結的回報只有洋流的活動
+  reportAlt.hidden = !mod.current;
+  if (!mod.current) openNoteForm(false);
   map.setLandmarksVisible(mod.current);
   if (!mod.current) bottleBtn.hidden = true;
   applyReportsOpen();
@@ -5131,6 +5143,7 @@ function sourceLabel(ev: EventOut): string {
   if (ev.post.source === 'site') return `${ev.post.username ?? '主辦單位'}（主辦單位公告）`;
   if (ev.post.source === 'news') return `新聞・${ev.post.username ?? ''}`;
   if (ev.post.source === 'official') return '台北大洋流官網「未來航線」';
+  if (ev.post.source === 'note') return '大家回報（沒有原貼文，管理者看過）';
   const who = `Threads${ev.post.username ? `・@${ev.post.username}` : ''}`;
   return ev.post.source === 'link' ? `${who}（大家回報）` : ev.post.source === 'spot' ? `${who}（大家回報・已審核）` : who;
 }
@@ -5362,6 +5375,7 @@ function renderReportTips(): void {
     '放上雷達的回報，每 5 則可以選一包肉乾或一枚順幣；每天最多算 20 則，超過的一樣會放上雷達，只是不算進收集。',
     `只收${l ? ` ${l.maxAgeDays} 天內` : ''}的公開貼文。每一場活動都要讀得到做什麼、在哪裡、哪天幾點開始，缺一個就不會放上雷達。`,
     '結束時間可以不寫：沒寫的只寫幾點開始，雷達上顯示到開始後兩小時。',
+    '沒有 Threads 連結的（LINE、IG、Facebook、海報）：按「貼文字或截圖」或「自己填」。沒有原貼文可以對照，確認後由管理者看過才放上雷達，也不會自動下架，活動取消要自己回來刪除。',
     '貼文寫了車掃、掃街、車隊，或騎車（順騎、單車）、健走，同一天又列了好幾站的，會合成一條路線：每一站從預計經過前 10 分鐘顯示到經過後 15 分鐘。各站沒寫時間、只寫出發時間的，照順序和距離推算（騎車時速 12 公里、健走 4 公里，每站停 10 分鐘），時間表寫「約」。只定位到鄉鎮區的站，要在地圖上標出位置才會放上雷達。',
     '貼文沒寫或判讀錯的，可以在判讀結果按「補充資料」直接改活動內容、時間、地點，位置不對可以在地圖上標。連續好幾天的活動每天各算一場（最多 6 場）。貼文最好寫出門牌地址，定位才準。',
     `原貼文刪除或改成「結束了」，雷達${l ? ` ${l.recheckMin} 分鐘內` : ''}會自動下架。`,
@@ -5378,6 +5392,7 @@ const OUTCOME_TEXT: Record<SubmitResult['outcome'], string> = {
   not_listed: '判讀不到完整的活動內容、地點、開始時間，或是已經結束、超過 21 天後才開始，所以沒有放上雷達。',
   not_event: '這則看起來不是活動。貼文要寫出做什麼、在哪裡、什麼時候舉辦，雷達才會收。',
   failed: '判讀暫時失敗，請稍後再貼一次。',
+  review: '已送出！沒有原貼文可以對照，管理者看過才會放上雷達，可以在下面「我的回報」看進度。活動取消或改時間的話，記得回來刪除。',
 };
 
 function setReportMsg(html: string): void {
@@ -5396,13 +5411,15 @@ function setReportBusy(busy: boolean, label = '判讀中…', trigger?: Element 
   reportPaste.disabled = busy;
   reportSubmit.textContent = busy ? label : '送出';
   reportResult.classList.toggle('busy', busy);
+  // 沒有連結的回報（貼文字或截圖、自己填）一起鎖住
+  for (const b of [reportNoteBtn, reportManualBtn, reportNoteText, reportNoteClear, reportNoteSubmit]) b.disabled = busy;
   for (const b of reportResult.querySelectorAll<HTMLButtonElement | HTMLTextAreaElement | HTMLInputElement>('button, textarea, input')) b.disabled = busy;
   if (busy && trigger instanceof HTMLButtonElement) {
     trigger.dataset.idle = trigger.textContent ?? '';
     trigger.textContent = label;
   }
   if (!busy) {
-    for (const b of reportResult.querySelectorAll<HTMLButtonElement>('[data-idle]')) {
+    for (const b of reportSheet.querySelectorAll<HTMLButtonElement>('[data-idle]')) {
       b.textContent = b.dataset.idle ?? '';
       delete b.dataset.idle;
     }
@@ -5634,14 +5651,19 @@ function wireEditTags(card: HTMLElement, tags: string[]): void {
   });
 }
 
-function editFormHtml(items: EditItem[], hidden: boolean): string {
+/** manual：自己填（沒有連結），說明換成怎麼填、管理者看過才放上雷達 */
+function editFormHtml(items: EditItem[], hidden: boolean, manual = false): string {
   const list = items.length > 0 ? items.slice(0, MAX_EDIT_ITEMS) : [null];
   return `<form class="preview-more edit-form"${hidden ? ' hidden' : ''} novalidate>
-      <p class="muted sheet-note">直接改每一場的主題、活動內容、時間、地點、關鍵字；位置不對可以按「在地圖上標位置」，點地圖或拖標記。</p>
+      <p class="muted sheet-note">${
+        manual
+          ? '填活動內容、哪天幾點開始、地點（結束時間可以不填）；按「查地點」或「在地圖上標位置」，位置比較準。好幾場可以按「再加一場」。'
+          : '直接改每一場的主題、活動內容、時間、地點、關鍵字；位置不對可以按「在地圖上標位置」，點地圖或拖標記。'
+      }</p>
       <div class="edit-items">${list.map(editCardHtml).join('')}</div>
       <button type="button" class="btn" data-act="add">再加一場</button>
       <div class="sheet-actions"><button type="submit" class="btn primary">用這些資料預覽</button>${hidden ? '<button type="button" class="btn" data-act="less">回上一步</button>' : ''}</div>
-      <p class="muted sheet-note small">改過的地方放上雷達後會寫明是回報的人改的。請只填你確定的資訊。</p>
+      <p class="muted sheet-note small">${manual ? '送出前會先給你看一次；確認後由管理者看過才會放上雷達。' : '改過的地方放上雷達後會寫明是回報的人改的。'}請只填你確定的資訊。</p>
     </form>`;
 }
 
@@ -5930,7 +5952,7 @@ function renderPreview(r: SubmitResult): void {
   const dups = r.events.length
     ? `<p class="muted sheet-note">雷達上已經有的：${r.events.map((ev) => esc(titleOf(ev))).join('、')}（不會重複放）</p>`
     : '';
-  setReportMsg(`<p class="msg">${OUTCOME_TEXT.preview}對的話才會放上雷達。</p>
+  setReportMsg(`<p class="msg">${OUTCOME_TEXT.preview}${r.review ? '對的話送給管理者，看過才會放上雷達。' : '對的話才會放上雷達。'}</p>
     <ul class="report-preview">${(r.routes ?? []).map(routePreviewHtml).join('')}${items
       .map(
         (p) => `<li>
@@ -5949,7 +5971,7 @@ function renderPreview(r: SubmitResult): void {
     ${items.some((p) => p.lat !== null && p.lng !== null) ? `<p class="muted sheet-note small">📍 位置是照地點文字查的，不一定準確，請按「在 Google 地圖上看」確認一下；不對的話按「補充資料」${mod.current ? '在地圖上標出正確的位置' : '補上完整地址'}。</p>` : ''}
     ${dups}${r.failures?.length ? `<p class="muted sheet-note">${r.failures.length > 1 ? `下面 ${r.failures.length} 場` : '下面這場'}不會放上雷達${canFixByNote(r.failures) ? '，知道的話可以按「補充資料」補上' : ''}：</p>${failuresHtml(r.failures)}` : ''}
     <div class="sheet-actions">
-      <button type="button" class="btn primary" data-act="confirm">${items.length > 0 && items.every((p) => p.update?.mode === 'attach') ? '對，附在這個據點' : '對，放上雷達'}</button>
+      <button type="button" class="btn primary" data-act="confirm">${r.review ? '對，送給管理者確認' : items.length > 0 && items.every((p) => p.update?.mode === 'attach') ? '對，附在這個據點' : '對，放上雷達'}</button>
       <button type="button" class="btn" data-act="more">補充資料</button>
       <button type="button" class="btn" data-act="wrong">不對</button>
     </div>
@@ -5962,12 +5984,14 @@ function renderPreview(r: SubmitResult): void {
   const actions = reportResult.querySelector<HTMLElement>('.sheet-actions');
   reportResult.querySelector('[data-act="confirm"]')?.addEventListener('click', async (e) => {
     if (reportBusy) return;
-    setReportBusy(true, '放上雷達中…', e.currentTarget as Element);
+    setReportBusy(true, r.review ? '送出中…' : '放上雷達中…', e.currentTarget as Element);
     const res = await confirmReport(c).finally(() => setReportBusy(false));
     if (!res.ok) {
       showBanner(bannerEl, res.message, 3500);
       return;
     }
+    // 沒有連結的回報送出了：貼的文字、截圖清掉
+    if (res.data.outcome === 'review') resetNoteForm();
     await showReportResult(res.data);
     void loadMyReports();
     // 回報累計：滿 5 則拿到古錐媽的肉乾卡、每 5 則一份獎勵（選一包肉乾或一枚順幣）
@@ -5998,6 +6022,103 @@ function renderPreview(r: SubmitResult): void {
     );
     if (res.ok) reportInput.value = '';
   });
+}
+
+/** 選的截圖（縮好的 JPEG data URI） */
+let noteImage: string | null = null;
+/** 截圖縮成寬最多 1600 像素、總共約 320 萬像素以內（長截圖字還看得清楚），太大再降畫質 */
+const NOTE_IMAGE_WIDTH = 1600;
+const NOTE_IMAGE_PIXELS = 3_200_000;
+const NOTE_IMAGE_CHARS = 2_900_000;
+
+async function shrinkImage(file: File): Promise<string | null> {
+  try {
+    const bmp = await createImageBitmap(file);
+    let k = Math.min(1, NOTE_IMAGE_WIDTH / bmp.width, Math.sqrt(NOTE_IMAGE_PIXELS / (bmp.width * bmp.height)));
+    for (let tries = 0; tries < 4; tries++, k *= 0.8) {
+      const c = document.createElement('canvas');
+      c.width = Math.max(1, Math.round(bmp.width * k));
+      c.height = Math.max(1, Math.round(bmp.height * k));
+      const g = c.getContext('2d');
+      if (!g) break;
+      // 透明的 PNG 墊白底，JPEG 才不會變黑
+      g.fillStyle = '#fff';
+      g.fillRect(0, 0, c.width, c.height);
+      g.drawImage(bmp, 0, 0, c.width, c.height);
+      const src = c.toDataURL('image/jpeg', tries === 0 ? 0.85 : 0.75);
+      if (src.length <= NOTE_IMAGE_CHARS) {
+        bmp.close();
+        return src;
+      }
+    }
+    bmp.close();
+  } catch {
+    // 讀不了的格式（例如瀏覽器不支援的 HEIC）
+  }
+  return null;
+}
+
+function setNoteImage(src: string | null): void {
+  noteImage = src;
+  reportNoteThumb.hidden = !src;
+  if (src) reportNoteThumb.src = src;
+  else reportNoteThumb.removeAttribute('src');
+  reportNoteClear.hidden = !src;
+  reportNoteFile.value = '';
+}
+
+function openNoteForm(open: boolean): void {
+  reportNoteForm.hidden = !open;
+  reportNoteBtn.setAttribute('aria-expanded', String(open));
+  if (open) {
+    setReportMsg('');
+    reportNoteText.focus();
+  }
+}
+
+function resetNoteForm(): void {
+  reportNoteText.value = '';
+  setNoteImage(null);
+  openNoteForm(false);
+}
+
+/** 貼文字或截圖：判讀好給回報的人看預覽（跟貼連結一樣），確認後送給管理者 */
+async function submitNoteReport(): Promise<void> {
+  if (reportBusy || !reportsOpen) return;
+  const text = reportNoteText.value.trim();
+  if (!noteImage && [...text].length < 10) {
+    setReportMsg('<p class="msg error">請貼上活動的文字（至少 10 個字），或選一張截圖</p>');
+    return;
+  }
+  setReportBusy(true, '判讀中…', reportNoteSubmit);
+  setReportMsg(`<p class="msg busy">${noteImage ? '讀取截圖裡的字並判讀中，約需 20 秒' : '判讀中，約需 10 秒'}</p>`);
+  const r = await submitNote({ text, image: noteImage }).finally(() => setReportBusy(false));
+  if (!r.ok) {
+    setReportMsg(`<p class="msg error">${esc(r.message)}</p>`);
+    return;
+  }
+  lsSet(LS_REPORTED, '1');
+  // 表單收起來（內容留著，想改可以再按「貼文字或截圖」重新判讀）
+  reportNoteForm.hidden = true;
+  reportNoteBtn.setAttribute('aria-expanded', 'false');
+  if (r.data.outcome === 'preview') renderPreview(r.data);
+  else await showReportResult(r.data);
+}
+
+/** 自己填：先開一則空的回報，再用修改的表單填每一場 */
+async function startManualReport(): Promise<void> {
+  if (reportBusy || !reportsOpen) return;
+  openNoteForm(false);
+  setReportBusy(true, '準備中…');
+  const r = await startManual().finally(() => setReportBusy(false));
+  if (!r.ok) {
+    setReportMsg(`<p class="msg error">${esc(r.message)}</p>`);
+    return;
+  }
+  lsSet(LS_REPORTED, '1');
+  setReportMsg(`<p class="msg">自己填活動：</p>${editFormHtml([], false, true)}`);
+  wireEdit(r.data.confirm, [], null);
+  reportResult.querySelector<HTMLInputElement>('[name="title"]')?.focus();
 }
 
 async function submitReport(): Promise<void> {
@@ -6179,6 +6300,8 @@ const MY_REPORT_STATE: Record<MyReport['state'], string> = {
   on_radar: '在雷達上',
   attached: '附在雷達上的據點',
   not_listed: '不在雷達上（已結束）',
+  review: '等管理者確認',
+  refused: '沒有通過',
 };
 
 /** 我的回報：30 天內用這個瀏覽器回報、已經放上雷達的，可以看、開原文、刪除 */
@@ -6201,7 +6324,7 @@ function renderMyReports(): void {
   myReportList.innerHTML = (folded ? myReports.slice(0, MY_REPORTS_FOLDED) : myReports)
     .map(
       (x) => `<li>
-        <div><b>${esc(x.title || '（沒有內容）')}</b><small>${MY_REPORT_STATE[x.state]}${x.events > 1 ? `・${x.events} 場` : ''}・${dateFmt.format(new Date(x.reportedAt * 1000))} 回報${x.username ? `・@${esc(x.username)}` : ''}${x.module && x.module !== mod.id ? `・${esc(getModule(x.module).short)}` : ''}</small></div>
+        <div><b>${esc(x.title || '（沒有內容）')}</b><small>${MY_REPORT_STATE[x.state]}${x.state === 'refused' && x.note ? `（${esc(x.note)}）` : ''}${x.events > 1 ? `・${x.events} 場` : ''}・${dateFmt.format(new Date(x.reportedAt * 1000))} 回報${x.username ? `・@${esc(x.username)}` : ''}${x.module && x.module !== mod.id ? `・${esc(getModule(x.module).short)}` : ''}</small></div>
         <div class="my-report-acts">${x.eventId ? `<button type="button" class="chip" data-show="${x.eventId}">看</button>` : ''}${x.permalink ? `<a class="chip" href="${esc(x.permalink)}" target="_blank" rel="noopener">原文</a>` : ''}<button type="button" class="chip" data-withdraw="${esc(x.postId)}">刪除</button></div>
       </li>`,
     )
@@ -6237,6 +6360,12 @@ function showVersion(server: string | null): void {
 }
 
 /** 從 Threads App 分享過來（PWA share target）或網址帶 ?url= */
+/** 分享進來的文字（沒有 Threads 連結，例如 LINE 的訊息）：10 個字以上才算 */
+function sharedText(params: URLSearchParams): string | null {
+  const text = [params.get('title'), params.get('text'), params.get('url')].filter(Boolean).join('\n').trim();
+  return [...text].length >= 10 ? text : null;
+}
+
 function takeSharedLink(params: URLSearchParams): string | null {
   const text = [params.get('url'), params.get('text'), params.get('title')].filter(Boolean).join(' ');
   return /threads\.(com|net)\//i.test(text) ? text : null;
@@ -6672,6 +6801,21 @@ function wireControls(): void {
     e.preventDefault();
     void submitReport();
   });
+  reportNoteBtn.addEventListener('click', () => openNoteForm(reportNoteForm.hidden));
+  $('#report-note-cancel').addEventListener('click', () => openNoteForm(false));
+  reportNoteForm.addEventListener('submit', (e) => {
+    e.preventDefault();
+    void submitNoteReport();
+  });
+  reportNoteFile.addEventListener('change', async () => {
+    const file = reportNoteFile.files?.[0];
+    if (!file) return;
+    const src = await shrinkImage(file);
+    if (!src) showBanner(bannerEl, '這張圖片打不開或太大，請換一張 JPEG、PNG 截圖', 3500);
+    setNoteImage(src);
+  });
+  reportNoteClear.addEventListener('click', () => setNoteImage(null));
+  reportManualBtn.addEventListener('click', () => void startManualReport());
   bottleBtn.addEventListener('click', () => openBottleSheet(bottleSheet.hidden));
   bottleSheet.querySelector('[data-act="close"]')?.addEventListener('click', () => openBottleSheet(false));
   wireTapOutside();
@@ -6814,6 +6958,14 @@ async function boot(): Promise<void> {
     openReportSheet(true);
     reportInput.value = shared;
     void submitReport();
+  } else if (sharedText(params) && mod.current) {
+    // 分享進來的是沒有 Threads 連結的文字（LINE 等）：放進「貼文字或截圖」，看過再按判讀
+    history.replaceState(null, '', location.pathname);
+    openReportSheet(true);
+    if (!reportSheet.hidden) {
+      reportNoteText.value = sharedText(params) ?? '';
+      openNoteForm(true);
+    }
   }
   const baseParam = new URLSearchParams(location.search).get('base');
   if (baseParam && (BASES as string[]).includes(baseParam)) setBase(baseParam as BaseMap);

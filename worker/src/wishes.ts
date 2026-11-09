@@ -6,7 +6,7 @@
  * 一樣用裝置代碼（加鹽雜湊）認人、不用登入，換裝置的引繼碼一起搬
  */
 import type { Env } from './env';
-import { sendPush, type PushMessage } from './push';
+import { pushAdmins } from './push';
 import { ReportError } from './reports';
 
 /** 許願要幾枚順幣 */
@@ -376,21 +376,13 @@ export async function adminSetWish(env: Env, id: number, input: unknown, now: nu
 export async function notifyWish(env: Env, id: number, now: number): Promise<number> {
   const row = await env.DB.prepare('SELECT kind, parent_id, body FROM wishes WHERE id = ?').bind(id).first<{ kind: string; parent_id: number | null; body: string }>();
   if (!row) return 0;
-  const { results: subs } = await env.DB.prepare('SELECT endpoint, p256dh, auth FROM admin_push_subscriptions').all<{ endpoint: string; p256dh: string; auth: string }>();
-  if (!subs.length) return 0;
-  const msg: PushMessage = {
+  return pushAdmins(env, {
     title: row.kind === 'tweak' ? `新的調整（第 ${row.parent_id} 號願望）` : `新的許願（第 ${id} 號）`,
     body: row.body.replace(/\s+/g, ' ').slice(0, 80),
     tag: 'wish',
     url: './admin.html#wishes',
     renotify: true,
-  };
-  let sent = 0;
-  for (const sub of subs) {
-    const st = await sendPush(env, sub, msg, now, 'admin_push_subscriptions').catch(() => 0);
-    if (st >= 200 && st < 300) sent++;
-  }
-  return sent;
+  }, now);
 }
 
 /** IP 的雜湊 30 天後清掉；不通過、做不出來、撤回的 30 天後刪除（暫扣的順幣早就退了） */

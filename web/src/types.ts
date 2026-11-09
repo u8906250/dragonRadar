@@ -192,7 +192,8 @@ export interface KeywordInfo {
   pinned: boolean;
 }
 
-export type LinkOutcome = 'preview' | 'added' | 'duplicate' | 'attached' | 'no_place' | 'not_listed' | 'not_event' | 'failed';
+/** review：沒有連結的回報確認了，等管理者看過才放上雷達 */
+export type LinkOutcome = 'preview' | 'added' | 'duplicate' | 'attached' | 'no_place' | 'not_listed' | 'not_event' | 'failed' | 'review';
 
 /** 判讀結果的預覽：一個地點或時段（固定據點的好幾天合成一筆） */
 export interface PreviewItem {
@@ -227,13 +228,17 @@ export interface PreviewItem {
   slots?: Array<{ startAt: number; endAt: number; endOpen?: boolean }>;
 }
 
-/** 我的回報（用同一個瀏覽器回報、確認放上雷達、30 天內的）：on_radar 在雷達上、attached 附在別的據點、not_listed 已結束或沒放上 */
+/**
+ * 我的回報（用同一個瀏覽器回報、確認放上雷達、30 天內的）：on_radar 在雷達上、attached 附在別的據點、not_listed 已結束或沒放上；
+ * 沒有連結的回報還有 review 等管理者確認、refused 沒有通過（note 是原因）
+ */
 export interface MyReport {
   postId: string;
   permalink: string;
   username: string | null;
   title: string;
-  state: 'on_radar' | 'attached' | 'not_listed';
+  state: 'on_radar' | 'attached' | 'not_listed' | 'review' | 'refused';
+  note?: string | null;
   events: number;
   eventId: number | null;
   reportedAt: number;
@@ -281,6 +286,8 @@ export interface SubmitResult {
     picks?: number;
     capped?: boolean;
   };
+  /** 沒有連結的回報（貼文字、截圖、自己填）：確認後要等管理者看過才放上雷達 */
+  review?: boolean;
 }
 
 /** 預覽上的一條車掃路線 */

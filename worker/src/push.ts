@@ -372,3 +372,14 @@ export async function purgeSubscriptions(env: Env, cutoff: number): Promise<numb
   const r = await env.DB.prepare('DELETE FROM push_subscriptions WHERE updated_at < ?').bind(cutoff).run();
   return r.meta.changes ?? 0;
 }
+
+/** 推到管理者訂閱的手機（許願、沒有連結的回報）；回傳送成功幾台 */
+export async function pushAdmins(env: Env, msg: PushMessage, now: number): Promise<number> {
+  const { results: subs } = await env.DB.prepare('SELECT endpoint, p256dh, auth FROM admin_push_subscriptions').all<{ endpoint: string; p256dh: string; auth: string }>();
+  let sent = 0;
+  for (const sub of subs) {
+    const st = await sendPush(env, sub, msg, now, 'admin_push_subscriptions').catch(() => 0);
+    if (st >= 200 && st < 300) sent++;
+  }
+  return sent;
+}
