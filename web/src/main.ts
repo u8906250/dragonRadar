@@ -2163,13 +2163,25 @@ function nearestHint<V extends { b: BottleOut; distanceKm: number }>(views: V[])
   return best && best.distanceKm <= BOTTLE_HINT_MAX_KM ? best : null;
 }
 
-/** 按鈕上的數字：雷達範圍內還沒有人收藏、不是自己丟的瓶子（你在汪星就數汪星海上的） */
+/** 按鈕：附近有還沒人收藏、不是自己丟的瓶子走到 500 m 內了就發光（你在汪星就看汪星海上的）；數字是今天還能丟幾個 */
 function updateBottleBadge(views: Array<{ b: BottleOut; distanceKm: number }>): void {
   bottleBtn.hidden = !bottlesOn();
-  const others = youOn === 'woof' ? woofBottles.filter((b) => !b.mine && !b.picked && !b.taken) : views.filter((v) => !v.b.mine && !v.b.picked && !v.b.taken && v.distanceKm <= scaleKm).map((v) => v.b);
-  bottleBadge.hidden = others.length === 0;
-  bottleBadge.textContent = String(others.length);
+  const others = youOn === 'woof' ? woofBottles.filter((b) => !b.mine && !b.picked && !b.taken) : views.filter((v) => !v.b.mine && !v.b.picked && !v.b.taken).map((v) => v.b);
   bottleBtn.classList.toggle('glow', others.some((b) => bottleState(b) === 'pick'));
+  paintQuotaBadge();
+}
+
+/**
+ * 按鈕上的數字＝今天還能丟幾個（v1.605 使用者說的；以前是雷達範圍內的瓶子數）：讀過「我的瓶子」就照伺服器的額度，
+ * 還沒讀過（這個瀏覽器沒丟過）就是每天的上限；用完是 0（灰色）
+ */
+function paintQuotaBadge(): void {
+  const left = myBottlesData?.quota.left ?? bottleRules()?.perDay ?? 3;
+  bottleBadge.hidden = false;
+  bottleBadge.textContent = String(left);
+  bottleBadge.classList.toggle('empty', left === 0);
+  bottleBtn.title = `漂流瓶：今天還能丟 ${left} 個`;
+  bottleBtn.setAttribute('aria-label', `漂流瓶，今天還能丟 ${left} 個`);
 }
 
 /** 汪星海上的瓶子（space.ts 畫在汪星上）：每次畫汪星都重算，拖曳走路時走到附近了沒跟著變 */
@@ -2464,7 +2476,7 @@ function renderBottleDetail(id: number): boolean {
     } else {
       removeBottleMark(id);
       selectedBottle = null;
-      showBanner(bannerEl, '瓶子收回了，可以再丟一個', 2500);
+      showBanner(bannerEl, '瓶子收回了', 2000);
     }
     render();
   });
@@ -2556,6 +2568,8 @@ async function reloadMyBottles(): Promise<void> {
   myBottlesData = r.data;
   if (r.data.dropped.length > 0) lsSet(LS_BOTTLE_DROPPED, '1');
   if (!lettersPage.hidden) renderLettersPage();
+  paintQuotaBadge();
+  if (!bottleSheet.hidden) sceneQuota();
   updateBottleNews();
 }
 
@@ -2623,6 +2637,27 @@ function updateDropBtn(): void {
 function renderBottleSheet(): void {
   updateDropBtn();
   sceneDot.hidden = newlyPicked() === 0;
+  sceneQuota();
+}
+
+/**
+ * 今天丟完了：不顯示紙和瓶子（v1.605 使用者說超過額度不用顯示），只寫還要多久才能再丟；左上角的收藏頁照樣進得去。
+ * 丟瓶子動畫進行中（剛丟完最後一個）不動
+ */
+function sceneQuota(): void {
+  if (throwing) return;
+  const q = myBottlesData?.quota;
+  const out = !!q && q.left === 0;
+  bottleSheet.classList.toggle('no-quota', out);
+  if (!out) {
+    if (bottleResult.dataset.quota) bottleResult.textContent = '';
+    delete bottleResult.dataset.quota;
+    return;
+  }
+  const mins = q.nextAt ? Math.max(1, Math.ceil((q.nextAt - nowSec()) / 60)) : null;
+  const when = mins === null ? '明天' : mins < 60 ? `${mins} 分鐘後` : `${Math.round(mins / 60)} 小時後`;
+  bottleResult.textContent = `今天的 ${q.limit} 個瓶子都丟完了，${when}可以再丟一個`;
+  bottleResult.dataset.quota = '1';
 }
 
 /** 自己丟的瓶子收不收得回來：還沒被收藏的隨時可以，被收藏了的丟出去 24 小時內也可以（v1.603 使用者說的） */
@@ -2787,7 +2822,7 @@ async function onLettersClick(e: Event): Promise<void> {
       return;
     }
     removeBottleMark(id);
-    showBanner(bannerEl, '瓶子收回了，可以再丟一個', 2500);
+    showBanner(bannerEl, '瓶子收回了', 2000);
     await reloadMyBottles();
     render();
     return;
@@ -2860,12 +2895,11 @@ async function submitBottle(): Promise<void> {
 
 /**
  * 可愛的玻璃瓶（viewBox 0 0 100 200，瓶口在上；v1.599 使用者說瓶子畫可愛風）：圓滾滾的瓶身、粗粗的圓角外框、淡水藍色、
- * 兩道白白的反光、瓶底一點水色；裡面一捲綁著紅蝴蝶結的牛皮紙（.scroll）、瓶口的軟木塞（.cork）先藏著，丟的時候才出現
+ * 兩道白白的反光（v1.605 使用者說瓶子裡面不要有水）；裡面一捲綁著紅蝴蝶結的牛皮紙（.scroll）、瓶口的軟木塞（.cork）先藏著，丟的時候才出現
  */
-function bottleSvg(p: string): string {
+function bottleSvg(_p: string): string {
   const body = 'M37 24 L37 54 C37 70 12 74 12 100 L12 164 Q12 186 34 186 L66 186 Q88 186 88 164 L88 100 C88 74 63 70 63 54 L63 24 Z';
   return `<svg class="real-bottle" viewBox="0 0 100 200" aria-hidden="true">
-    <defs><clipPath id="${p}-in"><path d="${body}" /></clipPath></defs>
     <ellipse cx="50" cy="193" rx="34" ry="5" fill="#000" opacity=".18" />
     <path d="${body}" fill="#d4f4f8" fill-opacity=".9" />
     <g class="scroll">
@@ -2875,7 +2909,6 @@ function bottleSvg(p: string): string {
       <path d="M50 135 c-9 -9 -15 -2 -11 3 c3 3 8 0 11 -3 c3 3 8 6 11 3 c4 -5 -2 -12 -11 -3 z" fill="#ef6b5f" stroke="#b8392f" stroke-width="1.4" stroke-linejoin="round" />
       <circle cx="50" cy="135" r="2.4" fill="#c9443a" />
     </g>
-    <path d="M12 150 Q50 138 88 150 L88 186 L12 186 Z" fill="#9fe2ee" opacity=".55" clip-path="url(#${p}-in)" />
     <path d="${body}" fill="none" stroke="#2f6f7c" stroke-width="3.4" stroke-linejoin="round" />
     <rect x="32" y="14" width="36" height="13" rx="6.5" fill="#e6fbfd" stroke="#2f6f7c" stroke-width="3.2" />
     <path d="M22 140 L22 106 Q22 94 30 88" fill="none" stroke="#fff" stroke-width="6" stroke-linecap="round" opacity=".9" />

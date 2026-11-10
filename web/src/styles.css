@@ -2028,28 +2028,45 @@ path.map-seam-walkers { --p: 15px; }
 .radar .bottle .glass { fill: #8fdcec; stroke: #155868; stroke-width: 1.3; stroke-linejoin: round; }
 /* 範圍超過 10 km：淡藍色的小點 */
 .radar .bottle .dot { fill: #9fdcec; stroke: #155868; stroke-opacity: 0.35; stroke-width: 1.2; }
+/* 雷達上漂浮的瓶子（閃光層，radar.ts 的 floatBottles）：上下漂、左右晃，節拍錯開 */
+.radar-flash-square > .bottle-float { color: #43b8d4; }
+.bottle-float svg {
+  position: absolute; overflow: visible; width: calc(20 * var(--k) * var(--u)); height: calc(20 * var(--k) * var(--u));
+  left: calc(-10 * var(--k) * var(--u)); top: calc(-10 * var(--k) * var(--u));
+  animation: bottle-float 3.4s ease-in-out infinite; animation-delay: var(--d, 0s);
+}
+.bottle-float path { fill: #8fdcec; stroke: #155868; stroke-width: 1.3; stroke-linejoin: round; }
+.bottle-float.mine path { fill: rgba(255, 255, 255, 0.55); stroke: #2a9bb8; stroke-width: 1.8; }
+.bottle-float.picked { opacity: 0.5; }
+.bottle-float.selected path { stroke: var(--blip-selected); stroke-width: 2.4; }
+.bottle-float.still svg { animation: none; }
+@keyframes bottle-float { 0%, 100% { transform: translateY(0) rotate(-4deg); } 50% { transform: translateY(-16%) rotate(6deg); } }
+@media (prefers-reduced-motion: reduce) { .bottle-float svg, .map-bottle .float { animation: none; } }
 .radar .bottle.selected .dot { stroke: var(--blip-selected); stroke-opacity: 1; stroke-width: 2; }
 .radar .bottle.mine .glass { fill: transparent; stroke: #2a9bb8; stroke-width: 1.8; }
 .radar .bottle.picked { opacity: 0.5; }
-.radar .bottle .reach { fill: none; stroke: #43b8d4; stroke-width: 2; animation: reach 1.4s ease-out infinite; }
 .radar .bottle.selected .glass { stroke: var(--blip-selected); stroke-width: 2.4; }
 .radar .bottle-hint .glass { opacity: 0.85; }
 .radar .bottle-hint .hint-label { fill: #2a9bb8; font-size: 11px; font-weight: 700; paint-order: stroke; stroke: var(--label-halo); stroke-width: 3px; stroke-linejoin: round; pointer-events: none; }
-@keyframes reach { 0% { r: 8; opacity: 0.9; } 100% { r: 20; opacity: 0; } }
-@media (prefers-reduced-motion: reduce) { .radar .bottle .reach { animation: none; } }
 .map-bottle { position: relative; background: none; border: none; }
 /* 跟著縮放變大小；超過 10 km 只畫淡藍色的小點（v1.602） */
 .map-bottle svg { transform: scale(var(--bottle-k, 1)); transform-origin: 50% 50%; }
+/* 地圖上的瓶子漂浮：外面那一層上下漂、左右晃（只動 transform，不用重畫地圖） */
+.map-bottle .float { display: block; width: 24px; height: 24px; animation: bottle-float 3.4s ease-in-out infinite; animation-delay: var(--d, 0s); }
+/* 太多瓶子、只畫小點時不動（效能） */
+.bottles-still .map-bottle .float, .bottle-dots .map-bottle .float { animation: none; }
 .bottle-dots .map-bottle svg { display: none; }
 .bottle-dots .map-bottle::after { content: ''; position: absolute; left: 50%; top: 50%; width: 8px; height: 8px; margin: -4px 0 0 -4px; border-radius: 50%; background: #9fdcec; box-shadow: 0 0 0 1.5px rgba(21, 88, 104, 0.35); }
 .bottle-dots .map-bottle.picked::after { opacity: 0.55; }
 .map-bottle path { fill: #8fdcec; stroke: #155868; stroke-width: 1.3; stroke-linejoin: round; }
 .map-bottle.mine path { fill: #fff; stroke: #2a9bb8; stroke-width: 1.8; }
 .map-bottle.picked { opacity: 0.55; }
-.map-bottle.can-pick svg { filter: drop-shadow(0 0 5px #43b8d4); }
+
 
 /* 漂流瓶按鈕與面板 */
 .chip-badge { display: inline-block; min-width: 18px; margin-left: 5px; padding: 0 5px; border-radius: 999px; background: #43b8d4; color: #fff; font-size: 11px; font-weight: 800; line-height: 18px; text-align: center; }
+/* 漂流瓶今天丟完了：0 是灰色 */
+.chip-badge.empty { background: #9aa0a6; }
 #bottle-btn.glow { box-shadow: 0 0 0 3px rgba(67, 184, 212, 0.45), var(--chip-shadow, none); animation: bottle-glow 1.6s ease-in-out infinite; }
 @keyframes bottle-glow { 50% { box-shadow: 0 0 0 6px rgba(67, 184, 212, 0.15); } }
 @media (prefers-reduced-motion: reduce) { #bottle-btn.glow { animation: none; } }
@@ -2142,6 +2159,9 @@ body.bottle-open { overflow: hidden; }
 @keyframes bottle-busy { 50% { transform: translateY(-4px); } }
 .scene-msg { margin: 52px 0 0; max-width: min(86vw, 420px); padding: 6px 14px; font-size: 14px; line-height: 1.5; color: #fff; text-align: center; background: rgba(0, 0, 0, 0.5); border-radius: 14px; }
 .scene-msg:empty { display: none; }
+/* 今天丟完了：不顯示紙、瓶子、相機，只留訊息和收藏頁 */
+.bottle-scene.no-quota .scene-stage, .bottle-scene.no-quota #bottle-photo-btn { display: none; }
+.bottle-scene.no-quota .scene-msg { margin-top: 0; font-size: 16px; padding: 12px 18px; }
 @media (max-width: 480px) {
   .scene-stage { margin-right: 30px; }
   .kraft-sheet { width: min(70vw, 330px, calc(56vh * 148 / 210)); }
@@ -2224,10 +2244,7 @@ body.letters-open { overflow: hidden; }
 .bottle-fx-bottle { transform-origin: 50% 55%; }
 .bottle-fx-ripple { width: 70px; height: 70px; border-radius: 50%; border: 3px solid #43b8d4; transform: translate(-50%, -50%); opacity: 0; }
 
-/* 漂到汪星海上的瓶子：在水上輕輕晃 */
-.radar .woof-bottle .body { animation: woof-bob 2.8s ease-in-out infinite; }
-@keyframes woof-bob { 50% { transform: translateY(-1.5px) rotate(6deg); } }
-@media (prefers-reduced-motion: reduce) { .radar .woof-bottle .body { animation: none; } }
+/* 汪星海上的瓶子不動：它在雷達那張大 SVG 裡，動了每一格都要重畫整張（效能） */
 
 /* 清單最下面的版號 */
 .app-version { margin: 18px 0 8px; font-size: 11px; text-align: center; opacity: 0.8; }

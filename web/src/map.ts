@@ -670,11 +670,13 @@ export class MapView {
     const layer = this.bottleLayer;
     if (!L || !layer) return;
     layer.clearLayers();
+    // 太多瓶子就不漂（效能，跟雷達一樣最多 40 個在動）
+    this.el.classList.toggle('bottles-still', this.bottles.length > 40);
     for (const b of this.bottles) {
       const open = (): void => this.handlers.onBottle?.(b.id);
       const icon = L.divIcon({
         className: `map-bottle${b.state === 'pick' ? ' can-pick' : ''}${b.mine ? ' mine' : ''}${b.picked ? ' picked' : ''}`,
-        html: `<svg viewBox="-10 -10 20 20" width="24" height="24"><path d="${MAP_BOTTLE_PATH}" transform="rotate(-20)"/></svg>`,
+        html: `<span class="float" style="--d:${-((b.id * 0.73) % 3.4).toFixed(2)}s"><svg viewBox="-10 -10 20 20" width="24" height="24"><path d="${MAP_BOTTLE_PATH}" transform="rotate(-20)"/></svg></span>`,
         iconSize: [24, 24],
         iconAnchor: [12, 12],
       });

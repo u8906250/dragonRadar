@@ -390,13 +390,18 @@ export interface BottleQuota {
   limit: number;
   /** 還能丟幾個 */
   left: number;
+  /** 丟完了的話，什麼時候可以再丟一個（過去 24 小時最早丟的那個滿 24 小時）；還能丟是 null */
+  nextAt: number | null;
 }
 
-/** 今天的額度：過去 24 小時最多 3 個（收回的不算） */
+/** 今天的額度：過去 24 小時最多 3 個（收回的也算，v1.605 使用者說收回的瓶子不能再用） */
 export async function bottleQuota(env: Env, dev: string, now: number): Promise<BottleQuota> {
-  // 收回的瓶子不算（v1.604 使用者說收回後瓶子可以繼續用）；同 IP 每天、全站每小時的上限照樣算，擋一直丟一直收回
-  const used = await countSince(env, "SELECT COUNT(*) AS n FROM bottles WHERE device_id = ? AND created_at > ? AND status != 'deleted'", [dev, now - 86400]);
-  return { used, limit: PER_DEVICE_PER_DAY, left: Math.max(0, PER_DEVICE_PER_DAY - used) };
+  const r = await env.DB.prepare('SELECT COUNT(*) AS n, MIN(created_at) AS first FROM bottles WHERE device_id = ? AND created_at > ?')
+    .bind(dev, now - 86400)
+    .first<{ n: number; first: number | null }>();
+  const used = r?.n ?? 0;
+  const left = Math.max(0, PER_DEVICE_PER_DAY - used);
+  return { used, limit: PER_DEVICE_PER_DAY, left, nextAt: left === 0 && r?.first ? r.first + 86400 : null };
 }
 
 /** 瓶子證明：編號、丟的時間、內容的 SHA-256，加上伺服器的簽章（HMAC-SHA256，金鑰從加鹽的值來）；sig 只留前 32 個字 */

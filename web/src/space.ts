@@ -872,7 +872,7 @@ function woofGlobe(x: number, y: number, r: number, view: SpaceView, toSun: Vec3
       `<circle class="hit" r="14" />` +
       (bk === 0
         ? '<circle class="dot" r="3.4" />'
-        : `${b.state === 'pick' ? `<circle class="reach" r="${f1(9 * bk)}" />` : ''}<g class="body"><path class="glass" d="${BOTTLE_PATH}" transform="rotate(-20) scale(${bk.toFixed(3)})" /></g>`) +
+        : `<g class="body"><path class="glass" d="${BOTTLE_PATH}" transform="rotate(-20) scale(${bk.toFixed(3)})" /></g>`) +
       `<title>${b.mine ? '你丟的漂流瓶' : b.taken ? '漂流瓶（已經被收藏了）' : b.state === 'pick' ? '漂流瓶（走到附近了）' : '漂流瓶'}</title></g>`;
   }
   return `<g class="space-globe" transform="translate(${f1(ox)} ${f1(oy)})">${out}</g>`;

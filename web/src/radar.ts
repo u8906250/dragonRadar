@@ -218,6 +218,8 @@ export interface RadarBottle {
   hint?: string;
 }
 
+/** 雷達上漂浮的瓶子最多幾個（超過就不動，效能） */
+const FLOAT_MAX = 40;
 /** 瓶子的形狀（中心在原點，高約 16）；汪星海上的瓶子（space.ts）也用這個 */
 export const BOTTLE_PATH = 'M-1.8 -8 h3.6 v3 l2.4 3 v8.2 a1.6 1.6 0 0 1 -1.6 1.6 h-5.2 a1.6 1.6 0 0 1 -1.6 -1.6 v-8.2 l2.4 -3 z';
 
@@ -1536,6 +1538,7 @@ export class Radar {
     this.bottleLayer.replaceChildren();
     // 跟著縮放變大小，超過 10 km 只畫淡藍色的小點（bottleSize）
     const k = bottleSize(this.scaleKm);
+    const floats: Array<{ b: RadarBottle; p: { x: number; y: number } }> = [];
     for (const b of this.bottles) {
       const ratio = this.ratio(b.distanceKm);
       const angle = b.bearing - this.heading;
@@ -1557,19 +1560,32 @@ export class Radar {
       });
       g.dataset.id = String(b.id);
       g.appendChild(el('circle', { class: 'hit', r: 14 }));
-      if (k === 0) {
-        g.appendChild(el('circle', { class: 'dot', r: 3.4 }));
-      } else {
-        if (b.state === 'pick') this.fxTwin(g).appendChild(el('circle', { class: 'reach', r: (9 * k).toFixed(1) }));
-        const body = el('g', { class: 'body' });
-        body.appendChild(el('path', { class: 'glass', d: BOTTLE_PATH, transform: `rotate(-20) scale(${k.toFixed(3)})` }));
-        g.appendChild(body);
-        this.addFlash(g, angle, r, 7 * k);
-      }
+      // 外面不畫圈圈（走到附近的光圈、掃到時的亮環都拿掉，v1.605 使用者說的）
+      if (k === 0) g.appendChild(el('circle', { class: 'dot', r: 3.4 }));
+      else floats.push({ b, p });
       const title = el('title');
       title.textContent = b.mine ? '你丟的漂流瓶' : b.picked ? '漂流瓶（已經被收藏了）' : b.state === 'pick' ? '漂流瓶（走到附近了）' : '漂流瓶';
       g.appendChild(title);
       this.bottleLayer.appendChild(g);
+    }
+    this.floatBottles(floats, k);
+  }
+
+  /**
+   * 瓶子本身畫在閃光層（HTML，跟主圖層同一個座標），用 CSS 動畫上下漂、左右晃（v1.605 使用者說做漂浮的感覺、要考慮效能）：
+   * 只動 transform，瀏覽器在合成層做，不用每一格重畫整張雷達；主圖層只留點得到的範圍。
+   * 每個瓶子晃的節拍錯開；畫面上超過 FLOAT_MAX 個就不動（太多動畫手機會卡）
+   */
+  private floatBottles(list: Array<{ b: RadarBottle; p: { x: number; y: number } }>, k: number): void {
+    const still = list.length > FLOAT_MAX;
+    for (const { b, p } of list) {
+      const tw = document.createElement('div');
+      tw.className = `bottle-float${b.mine ? ' mine' : ''}${b.picked ? ' picked' : ''}${b.selected ? ' selected' : ''}${still ? ' still' : ''}`;
+      Object.assign(tw.style, { left: `calc(${p.x.toFixed(1)} * var(--u))`, top: `calc(${p.y.toFixed(1)} * var(--u))` });
+      tw.style.setProperty('--k', k.toFixed(3));
+      tw.style.setProperty('--d', `${-((b.id * 0.73) % 3.4).toFixed(2)}s`);
+      tw.innerHTML = `<svg viewBox="-10 -10 20 20" aria-hidden="true"><path d="${BOTTLE_PATH}" transform="rotate(-20)" /></svg>`;
+      this.flashSquare.appendChild(tw);
     }
   }
 
