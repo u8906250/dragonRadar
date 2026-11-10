@@ -394,14 +394,18 @@ export interface BottleQuota {
   nextAt: number | null;
 }
 
-/** 今天的額度：過去 24 小時最多 3 個（收回的也算，v1.605 使用者說收回的瓶子不能再用） */
+/** 台灣時間今天 00:00（unix 秒） */
+export const taipeiMidnight = (now: number): number => Math.floor((now + 8 * 3600) / 86400) * 86400 - 8 * 3600;
+
+/**
+ * 今天的額度：台灣時間每天 00:00 恢復成 3 個（v1.621 使用者說的；以前是過去 24 小時）；收回的也算（v1.605）。
+ * 丟完了 nextAt 是明天 00:00
+ */
 export async function bottleQuota(env: Env, dev: string, now: number): Promise<BottleQuota> {
-  const r = await env.DB.prepare('SELECT COUNT(*) AS n, MIN(created_at) AS first FROM bottles WHERE device_id = ? AND created_at > ?')
-    .bind(dev, now - 86400)
-    .first<{ n: number; first: number | null }>();
-  const used = r?.n ?? 0;
+  const today = taipeiMidnight(now);
+  const used = await countSince(env, 'SELECT COUNT(*) AS n FROM bottles WHERE device_id = ? AND created_at >= ?', [dev, today]);
   const left = Math.max(0, PER_DEVICE_PER_DAY - used);
-  return { used, limit: PER_DEVICE_PER_DAY, left, nextAt: left === 0 && r?.first ? r.first + 86400 : null };
+  return { used, limit: PER_DEVICE_PER_DAY, left, nextAt: left === 0 ? today + 86400 : null };
 }
 
 /** 瓶子證明：編號、丟的時間、內容的 SHA-256，加上伺服器的簽章（HMAC-SHA256，金鑰從加鹽的值來）；sig 只留前 32 個字 */
@@ -457,7 +461,7 @@ export async function dropBottle(env: Env, device: string | null, ip: string, bo
   if (photo && !env.BOTTLE_PHOTOS) throw new ReportError(503, '照片暫時不能放，先不放照片吧');
 
   const quota = await bottleQuota(env, dev, now);
-  if (quota.left <= 0) throw new ReportError(429, `每天最多丟 ${PER_DEVICE_PER_DAY} 個，明天再來`);
+  if (quota.left <= 0) throw new ReportError(429, `今天的 ${PER_DEVICE_PER_DAY} 個瓶子丟完了，00:00 會恢復成 ${PER_DEVICE_PER_DAY} 個`);
   if ((await countSince(env, 'SELECT COUNT(*) AS n FROM bottles WHERE ip_hash = ? AND created_at > ?', [ip, now - 86400])) >= PER_IP_PER_DAY)
     throw new ReportError(429, '這個網路今天丟太多瓶子了，明天再來');
   if ((await countSince(env, 'SELECT COUNT(*) AS n FROM bottles WHERE created_at > ?', [now - 3600])) >= GLOBAL_PER_HOUR)

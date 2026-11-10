@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { distM, driftStep, parsePhoto, ruleCheck, scatter, seaPoint, sha256Hex, stripJpegMeta, xLength } from '../src/bottles';
+import { distM, driftStep, parsePhoto, ruleCheck, scatter, seaPoint, sha256Hex, stripJpegMeta, taipeiMidnight, xLength } from '../src/bottles';
 import { WOOF_KM, WOOF_SEA } from '../src/woofsea';
 
 describe('ruleCheck', () => {
@@ -134,5 +134,16 @@ describe('photos', () => {
   it('accepts a small JPEG data URL', () => {
     const b64 = btoa(String.fromCharCode(...jpeg));
     expect(parsePhoto(`data:image/jpeg;base64,${b64}`)?.bytes.length).toBe(jpeg.length);
+  });
+});
+
+describe('taipeiMidnight', () => {
+  it('is 00:00 Taiwan time of the same Taiwan day', () => {
+    // 2026-11-10 23:30 台灣時間 → 2026-11-10 00:00 台灣時間
+    const late = Date.parse('2026-11-10T23:30:00+08:00') / 1000;
+    expect(taipeiMidnight(late)).toBe(Date.parse('2026-11-10T00:00:00+08:00') / 1000);
+    // 2026-11-11 00:05 台灣時間（UTC 還是 11/10）→ 2026-11-11 00:00
+    const early = Date.parse('2026-11-11T00:05:00+08:00') / 1000;
+    expect(taipeiMidnight(early)).toBe(Date.parse('2026-11-11T00:00:00+08:00') / 1000);
   });
 });

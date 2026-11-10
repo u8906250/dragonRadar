@@ -2756,9 +2756,10 @@ function sceneQuota(): void {
     delete bottleResult.dataset.quota;
     return;
   }
+  // 每天 00:00 恢復成 3 個（v1.621）：寫還有多久
   const mins = q.nextAt ? Math.max(1, Math.ceil((q.nextAt - nowSec()) / 60)) : null;
-  const when = mins === null ? '明天' : mins < 60 ? `${mins} 分鐘後` : `${Math.round(mins / 60)} 小時後`;
-  bottleResult.textContent = `今天的 ${q.limit} 個瓶子都丟完了，${when}可以再丟一個`;
+  const wait = mins === null ? '' : mins < 60 ? `（還有 ${mins} 分鐘）` : `（還有約 ${Math.round(mins / 60)} 小時）`;
+  bottleResult.textContent = `今天的 ${q.limit} 個瓶子都丟完了，00:00 會恢復成 ${q.limit} 個${wait}`;
   bottleResult.dataset.quota = '1';
 }
 
@@ -2965,7 +2966,7 @@ function confirmThrow(): Promise<boolean> {
     `${r?.seaHours ?? 24} 小時後漂到汪星的海上，${r?.woofDays ?? 30} 天後沉下去。`,
     `走到瓶子 ${r?.pickRadiusM ?? 500} m 內的人都看得到內容和照片；第一個按「收藏」的人會把它收進瓶中信收藏（收藏了別人照樣看得到）。`,
     `丟出去 24 小時內、你走回瓶子 ${r?.pickRadiusM ?? 500} m 內才收得回來；收回的也算今天的額度。`,
-    `每天最多丟 ${r?.perDay ?? 3} 個${left !== undefined ? `，丟了這個今天還剩 ${Math.max(0, left - 1)} 個` : ''}。`,
+    `每天可以丟 ${r?.perDay ?? 3} 個，00:00 恢復成 ${r?.perDay ?? 3} 個${left !== undefined ? `；丟了這個今天還剩 ${Math.max(0, left - 1)} 個` : ''}。`,
     '送出前會自動審核：辱罵或攻擊任何人（包括候選人、政黨）、謠言、廣告、連結、電話、帳號、個人資料都不會通過。',
   ];
   return new Promise((resolve) => {
