@@ -226,6 +226,9 @@ export interface MapBottle {
 }
 
 const MAP_BOTTLE_PATH = 'M-1.8 -8 h3.6 v3 l2.4 3 v8.2 a1.6 1.6 0 0 1 -1.6 1.6 h-5.2 a1.6 1.6 0 0 1 -1.6 -1.6 v-8.2 l2.4 -3 z';
+/** 瓶子旁邊的水流（跟 radar.ts 的 WAVE_BACK、WAVE_FRONT 一樣） */
+const WAVE_BACK = 'M-15 3.4 q2.5 -2.2 5 0 t5 0 t5 0 t5 0 t5 0';
+const WAVE_FRONT = 'M-11 8 q2.6 -2.3 5.2 0 t5.2 0 t5.2 0 t5.2 0';
 
 /** 拉遠就不寫的字：雷達的公里數對到地圖的哪一級（5 km → 縮放 14 以下、10 km → 13 以下、文化網 12 km → 12.5 以下；styles.css 的 #map.label-far*） */
 const farCls = (km: number): string => (km >= 12 ? 'far-label-12' : km >= 10 ? 'far-label-10' : 'far-label');
@@ -676,7 +679,11 @@ export class MapView {
       const open = (): void => this.handlers.onBottle?.(b.id);
       const icon = L.divIcon({
         className: `map-bottle${b.state === 'pick' ? ' can-pick' : ''}${b.mine ? ' mine' : ''}${b.picked ? ' picked' : ''}`,
-        html: `<span class="float" style="--d:${-((b.id * 0.73) % 3.4).toFixed(2)}s"><svg viewBox="-10 -10 20 20" width="24" height="24"><path d="${MAP_BOTTLE_PATH}" transform="rotate(-20)"/></svg></span>`,
+        // 跟雷達一樣：瓶子泡在水裡，前後兩道水流慢慢往一邊流
+        html:
+          `<span class="mflow back"><svg viewBox="-16 -10 32 20" width="40" height="25"><path d="${WAVE_BACK}"/></svg></span>` +
+          `<span class="float" style="--d:${-((b.id * 0.73) % 3.4).toFixed(2)}s"><svg viewBox="-10 -10 20 20" width="24" height="24"><path d="${MAP_BOTTLE_PATH}" transform="rotate(-20)"/></svg></span>` +
+          `<span class="mflow front"><svg viewBox="-16 -10 32 20" width="40" height="25"><path d="${WAVE_FRONT}"/></svg></span>`,
         iconSize: [24, 24],
         iconAnchor: [12, 12],
       });

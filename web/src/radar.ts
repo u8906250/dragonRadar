@@ -218,6 +218,9 @@ export interface RadarBottle {
   hint?: string;
 }
 
+/** 瓶子旁邊的水流（viewBox -16 -10 32 20，瓶子中心在原點、瓶底約在 y = 9）：後面一道、前面一道 */
+export const WAVE_BACK = 'M-15 3.4 q2.5 -2.2 5 0 t5 0 t5 0 t5 0 t5 0';
+export const WAVE_FRONT = 'M-11 8 q2.6 -2.3 5.2 0 t5.2 0 t5.2 0 t5.2 0';
 /** 雷達上漂浮的瓶子最多幾個（超過就不動，效能） */
 const FLOAT_MAX = 40;
 /** 瓶子的形狀（中心在原點，高約 16）；汪星海上的瓶子（space.ts）也用這個 */
@@ -1584,7 +1587,11 @@ export class Radar {
       Object.assign(tw.style, { left: `calc(${p.x.toFixed(1)} * var(--u))`, top: `calc(${p.y.toFixed(1)} * var(--u))` });
       tw.style.setProperty('--k', k.toFixed(3));
       tw.style.setProperty('--d', `${-((b.id * 0.73) % 3.4).toFixed(2)}s`);
-      tw.innerHTML = `<svg viewBox="-10 -10 20 20" aria-hidden="true"><path d="${BOTTLE_PATH}" transform="rotate(-20)" /></svg>`;
+      // 瓶子泡在水裡：後面一道淡淡的水波、前面一道蓋住瓶底，兩道都慢慢往一邊流（v1.606 使用者說感覺不出漂流，旁邊畫一點水流）
+      tw.innerHTML =
+        `<svg class="flow back" viewBox="-16 -10 32 20" aria-hidden="true"><path d="${WAVE_BACK}" /></svg>` +
+        `<svg class="bottle" viewBox="-10 -10 20 20" aria-hidden="true"><path d="${BOTTLE_PATH}" transform="rotate(-20)" /></svg>` +
+        `<svg class="flow front" viewBox="-16 -10 32 20" aria-hidden="true"><path d="${WAVE_FRONT}" /></svg>`;
       this.flashSquare.appendChild(tw);
     }
   }

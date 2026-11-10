@@ -2030,18 +2030,32 @@ path.map-seam-walkers { --p: 15px; }
 .radar .bottle .dot { fill: #9fdcec; stroke: #155868; stroke-opacity: 0.35; stroke-width: 1.2; }
 /* 雷達上漂浮的瓶子（閃光層，radar.ts 的 floatBottles）：上下漂、左右晃，節拍錯開 */
 .radar-flash-square > .bottle-float { color: #43b8d4; }
-.bottle-float svg {
-  position: absolute; overflow: visible; width: calc(20 * var(--k) * var(--u)); height: calc(20 * var(--k) * var(--u));
-  left: calc(-10 * var(--k) * var(--u)); top: calc(-10 * var(--k) * var(--u));
+.bottle-float svg { position: absolute; overflow: visible; }
+.bottle-float .bottle {
+  width: calc(20 * var(--k) * var(--u)); height: calc(20 * var(--k) * var(--u)); left: calc(-10 * var(--k) * var(--u)); top: calc(-10 * var(--k) * var(--u));
   animation: bottle-float 3.4s ease-in-out infinite; animation-delay: var(--d, 0s);
 }
-.bottle-float path { fill: #8fdcec; stroke: #155868; stroke-width: 1.3; stroke-linejoin: round; }
-.bottle-float.mine path { fill: rgba(255, 255, 255, 0.55); stroke: #2a9bb8; stroke-width: 1.8; }
+.bottle-float .bottle path { fill: #8fdcec; stroke: #155868; stroke-width: 1.3; stroke-linejoin: round; }
+.bottle-float.mine .bottle path { fill: rgba(255, 255, 255, 0.55); stroke: #2a9bb8; stroke-width: 1.8; }
 .bottle-float.picked { opacity: 0.5; }
-.bottle-float.selected path { stroke: var(--blip-selected); stroke-width: 2.4; }
-.bottle-float.still svg { animation: none; }
+.bottle-float.selected .bottle path { stroke: var(--blip-selected); stroke-width: 2.4; }
+/* 水流：後面淡、前面深一點，往右慢慢流、淡出再出現（兩道錯開） */
+.bottle-float .flow {
+  width: calc(32 * var(--k) * var(--u)); height: calc(20 * var(--k) * var(--u)); left: calc(-16 * var(--k) * var(--u)); top: calc(-10 * var(--k) * var(--u));
+  animation: bottle-flow 2.8s linear infinite; animation-delay: var(--d, 0s);
+}
+.bottle-float .flow path, .map-bottle .mflow path { fill: none; stroke-linecap: round; stroke-linejoin: round; }
+.bottle-float .flow.back path, .map-bottle .mflow.back path { stroke: #7fcde3; stroke-width: 1.7; }
+.bottle-float .flow.front path, .map-bottle .mflow.front path { stroke: #2f9fc2; stroke-width: 1.9; }
+.bottle-float .flow.front { animation-delay: calc(var(--d, 0s) - 1.4s); }
+.bottle-float.still .bottle, .bottle-float.still .flow { animation: none; }
 @keyframes bottle-float { 0%, 100% { transform: translateY(0) rotate(-4deg); } 50% { transform: translateY(-16%) rotate(6deg); } }
-@media (prefers-reduced-motion: reduce) { .bottle-float svg, .map-bottle .float { animation: none; } }
+@keyframes bottle-flow { 0% { transform: translateX(-22%); opacity: 0; } 25%, 70% { opacity: 1; } 100% { transform: translateX(22%); opacity: 0; } }
+@media (prefers-reduced-motion: reduce) { .bottle-float .bottle, .bottle-float .flow, .map-bottle .float, .map-bottle .mflow { animation: none; } }
+/* 汪星海上的瓶子：不動，旁邊一樣畫兩道水波 */
+.radar .woof-bottle .wave { fill: none; stroke-linecap: round; stroke-linejoin: round; }
+.radar .woof-bottle .wave.back { stroke: #7fcde3; stroke-width: 1.7; }
+.radar .woof-bottle .wave.front { stroke: #2f9fc2; stroke-width: 1.9; }
 .radar .bottle.selected .dot { stroke: var(--blip-selected); stroke-opacity: 1; stroke-width: 2; }
 .radar .bottle.mine .glass { fill: transparent; stroke: #2a9bb8; stroke-width: 1.8; }
 .radar .bottle.picked { opacity: 0.5; }
@@ -2052,7 +2066,11 @@ path.map-seam-walkers { --p: 15px; }
 /* 跟著縮放變大小；超過 10 km 只畫淡藍色的小點（v1.602） */
 .map-bottle svg { transform: scale(var(--bottle-k, 1)); transform-origin: 50% 50%; }
 /* 地圖上的瓶子漂浮：外面那一層上下漂、左右晃（只動 transform，不用重畫地圖） */
-.map-bottle .float { display: block; width: 24px; height: 24px; animation: bottle-float 3.4s ease-in-out infinite; animation-delay: var(--d, 0s); }
+.map-bottle .float { position: absolute; left: 0; top: 0; display: block; width: 24px; height: 24px; animation: bottle-float 3.4s ease-in-out infinite; animation-delay: var(--d, 0s); }
+.map-bottle .mflow { position: absolute; left: -8px; top: 0; display: block; width: 40px; height: 25px; animation: bottle-flow 2.8s linear infinite; }
+.map-bottle .mflow.front { animation-delay: -1.4s; }
+.bottles-still .map-bottle .mflow, .bottle-dots .map-bottle .mflow { animation: none; }
+.bottle-dots .map-bottle .mflow { display: none; }
 /* 太多瓶子、只畫小點時不動（效能） */
 .bottles-still .map-bottle .float, .bottle-dots .map-bottle .float { animation: none; }
 .bottle-dots .map-bottle svg { display: none; }
