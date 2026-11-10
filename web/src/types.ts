@@ -275,7 +275,7 @@ export interface SubmitResult {
   routes?: RoutePreview[];
   /** outcome = 'not_listed' 而且原因確定時：直接講是哪個原因 */
   why?: {
-    reason: 'already_over' | 'too_far_in_future' | 'no_start_time' | 'incomplete';
+    reason: 'already_over' | 'too_far_in_future' | 'no_start_time' | 'incomplete' | 'long_term';
     /** reason = 'incomplete'（洋流的活動）：缺了哪些 */
     missing?: Array<'content' | 'place' | 'start'>;
     startAt?: number;

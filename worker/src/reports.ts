@@ -263,7 +263,7 @@ export function editItemsOf(items: PlanItem[]): EditItem[] {
 }
 
 export interface NotListedWhy {
-  reason: 'already_over' | 'too_far_in_future' | 'no_start_time' | 'incomplete';
+  reason: 'already_over' | 'too_far_in_future' | 'no_start_time' | 'incomplete' | 'long_term';
   /** reason = 'incomplete'（洋流的活動）：缺了哪些，照 內容、地點、開始 的順序 */
   missing?: ActivityPart[];
   /** 那一場的時間（已經結束的取最晚的一場，太久以後的取最早的一場） */
@@ -291,7 +291,7 @@ export function notListedWhy(items: PlanItem[]): NotListedWhy | undefined {
   const reasons = new Set(failed.map((it) => it.reason));
   if (failed.length === 0 || reasons.size !== 1) return undefined;
   const reason = failed[0].reason;
-  if (reason === 'no_start_time') return { reason };
+  if (reason === 'no_start_time' || reason === 'long_term') return { reason };
   if (reason !== 'already_over' && reason !== 'too_far_in_future') return undefined;
   const timed = failed.filter((it): it is PlanItem & { start: number; end: number } => typeof it.start === 'number' && typeof it.end === 'number');
   // 固定據點的時段都過了：沒有單一時間，只說已經結束
@@ -313,7 +313,8 @@ export function notListedWhy(items: PlanItem[]): NotListedWhy | undefined {
 // 11：其他雷達（找工作…）也抽關鍵字（2026-11-03，之前回報、還沒確認的再貼一次要重新判讀才有）
 // 12：騎車（順騎、單車）、健走也算路線，各站沒寫時間的填出發時間、程式照距離推算（2026-11-05）
 // 13：連續幾天、每天幾點到幾點的活動（市集、祭典）拆成每天一場，不再一整段連到半夜（2026-11-06）
-export const PLAN_VERSION = 13;
+// 14：其他雷達也只收單次的：每週固定場、固定攤位、沒約時間的刊登、沒寫哪天或超過 7 天的職缺不放上雷達（2026-11-10）
+export const PLAN_VERSION = 14;
 
 /** 判讀好、還沒寫進雷達的資料，存在 posts.confirm_plan */
 interface StoredPlan {

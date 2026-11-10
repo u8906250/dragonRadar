@@ -764,11 +764,16 @@ async function planPostWith(env: Env, post: PostRow, now: number, profileHint: s
   }
   // 模型常把付款的 Line Pay 當成用 LINE 聯絡：貼文只有 Line Pay 的不算
   if (!/(?:line|賴)(?!\s*pay)/i.test(text)) for (const e of extraction.events) if (e.extra?.contact === 'line') e.extra.contact = null;
-  // 刊登（找臨打、網友推薦、揪團吃飯）不是場次：從發文起顯示一段時間；招臨打、出攤照場次排
+  // 其他雷達也只收單次的（v1.617 使用者說「其他雷達一樣只接受單次活動，不接受長期的放在雷達上」）：
+  // 每週固定場、固定攤位（spot），和沒約時間的刊登（找臨打、網友推薦的店、沒約時間的揪團）都不放上雷達
+  const longTerm = (e: ExtractedEvent): boolean => e.spot || (POSTING_DAYS[String(e.extra?.role)] !== undefined && !e.start_at);
+  const longItems: PlanItem[] = extraction.events.filter(longTerm).map((_, i) => ({ group: LONG_TERM_GROUP + i, plan: null, reason: 'long_term' }));
+  extraction.events = extraction.events.filter((e) => !longTerm(e));
+  // 刊登（約好時間的找臨打、揪團吃飯）不是場次：從發文起顯示到約的時段結束；招臨打、出攤照場次排
   const postings = extraction.events.filter((e) => POSTING_DAYS[String(e.extra?.role)] !== undefined);
   if (postings.length > 0) extraction.events = extraction.events.filter((e) => POSTING_DAYS[String(e.extra?.role)] === undefined);
 
-  const items: PlanItem[] = [];
+  const items: PlanItem[] = [...longItems];
   if (postings.length > 0) items.push(...(await planPostings(env, post, postings, now, extraction.events.length)));
   const deadline = Date.now() + ADDRESS_BUDGET_MS;
   // 「13:00｜10 個、15:00｜10 個」被合成一段的，拆回每個時間點各一筆
@@ -1703,6 +1708,10 @@ export async function takeDown(env: Env, eventId: number, scope: 'event' | 'post
 /** 職缺沒寫工作期間時，在雷達上留幾天；有寫也最多留到發文後幾天（貼文最多存 30 天） */
 /** 職缺沒寫工作期間時留幾天、最多留幾天：狗狗陪伴 14、30 天，找工作 30、60 天（使用者定的） */
 const JOB_DAYS: Record<'dog' | 'work', { default: number; max: number }> = { dog: { default: 14, max: 30 }, work: { default: 30, max: 60 } };
+/** 單次的職缺最多連續幾天（v1.617：其他雷達只收單次的，沒寫哪天、超過這麼多天的算長期，不放上雷達） */
+const ONE_OFF_DAYS = 7;
+/** 長期的不收：PlanItem 的 group 從這裡開始編（不跟判讀出來的那幾筆撞號） */
+const LONG_TERM_GROUP = 1000;
 
 /** 「2026-11-30」台北時間那天 00:00 */
 const taipeiDayOf = (d: string | null): number | null => (d && /^\d{4}-\d{2}-\d{2}$/.test(d) ? Date.parse(`${d}T00:00:00+08:00`) / 1000 : null);
@@ -1720,6 +1729,13 @@ async function planJobs(env: Env, post: PostRow, jobs: ExtractedEvent[], now: nu
       continue;
     }
     const job = ex.job ?? { role: 'hire' as const, work_from: null, work_to: null, slots: [], pay: null, employer: null, contact: null, requirements: null };
+    // 只收單次的（v1.617）：要寫哪天開始做，最多連續 ONE_OFF_DAYS 天；沒寫哪天（長期徵人、求職）、做好幾週的不收
+    const from = taipeiDayOf(job.work_from);
+    const to = taipeiDayOf(job.work_to);
+    if (from === null || (to !== null && to - from >= ONE_OFF_DAYS * DAY_SEC)) {
+      items.push({ group, plan: null, reason: 'long_term' });
+      continue;
+    }
     const start = Math.min(post.posted_at, now);
     const lastDay = taipeiDayOf(job.work_to) ?? taipeiDayOf(job.work_from);
     const end = Math.min(lastDay !== null ? lastDay + DAY_SEC : post.posted_at + days.default * DAY_SEC, post.posted_at + days.max * DAY_SEC);

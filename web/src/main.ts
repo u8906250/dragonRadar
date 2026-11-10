@@ -6764,6 +6764,8 @@ function notListedText(w: NonNullable<SubmitResult['why']>): string | null {
     return `判讀不到${missingText(w.missing)}，所以沒有放上雷達。活動要有內容、地點和開始時間才收；知道的話可以在下面補上。`;
   }
   if (w.reason === 'no_start_time') return '判讀不出時間（貼文沒寫哪天或幾點），所以沒有放上雷達。知道時間的話，可以在下面補充再判讀一次。';
+  // 其他雷達只收單次的（v1.617）
+  if (w.reason === 'long_term') return '這是每週固定、長期的，或沒寫哪天，雷達只收單次的（寫了哪天幾點），所以沒有放上雷達。知道是哪一天的話，可以在下面補充再判讀一次。';
   if (w.reason === 'already_over') {
     return w.startAt ? `這場是 ${fmtDateTz(w.startAt, tz)} ${fmtTimeTz(w.startAt, tz)}${local} 開始的，已經結束了，所以沒有放上雷達。` : '這則的時段都已經結束了，所以沒有放上雷達。';
   }
