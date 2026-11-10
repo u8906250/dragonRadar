@@ -792,13 +792,14 @@ function startsIn(startAt: number, now: number): string {
   return `還有 ${Math.floor(h / 24)} 天${h % 24 ? ` ${h % 24} 小時` : ''}`;
 }
 
-/** 雷達光點下方的短版：「25分」「5小時」「2天」 */
+/** 雷達光點下方的短版：「25分」「5小時」「2天(六)」；不是今天開始的後面寫星期幾（v1.612 使用者說的，今天的不寫） */
 function startsInShort(startAt: number, now: number): string {
   const mins = Math.max(0, Math.round((startAt - now) / 60));
-  if (mins < 60) return `${mins}分`;
   const h = Math.floor(mins / 60);
-  return h < 24 ? `${h}小時` : `${Math.floor(h / 24)}天`;
+  const left = mins < 60 ? `${mins}分` : h < 24 ? `${h}小時` : `${Math.floor(h / 24)}天`;
+  return taipeiDay(startAt) === taipeiDay(now) ? left : `${left}(${WEEKDAYS[new Date((startAt + 8 * 3600) * 1000).getUTCDay()]})`;
 }
+const WEEKDAYS = ['日', '一', '二', '三', '四', '五', '六'];
 
 /** 離開始越近越清楚：快開始是 1，到時間範圍的盡頭是 0（「全部」算一週；取對數，近的差別看得出來） */
 const FADE_FULL_SEC = 7 * 24 * 3600;
@@ -1412,16 +1413,38 @@ function stopText(stop: RouteStop, now: number): string {
 
 // ---- 搜尋：在目前抓到的發放、活動（含車掃、固定據點）裡找字 ----
 let searchTerms: string[] = [];
-/** 搜尋比對用：小寫、去空白、臺台不分 */
-const foldText = (s: string): string => s.toLowerCase().replace(/\s+/g, '').replace(/臺/g, '台');
-/** 每一則可以搜尋的文字（標題、地點、物品、帳號、關鍵字、原文摘錄、補充、類型、車掃名稱）；事件重抓才會換物件，跟著物件記 */
+/** 搜尋比對用：小寫、去空白、臺台不分、周週不分 */
+const foldText = (s: string): string => s.toLowerCase().replace(/\s+/g, '').replace(/臺/g, '台').replace(/周/g, '週');
+
+/**
+ * 這一則在星期幾（v1.612 使用者說搜尋也可以找星期幾）：開始到結束的每一天（最多一週），固定據點看每一個時段；
+ * 每一天寫成「週六 星期六 禮拜六」，星期日多寫「星期天 禮拜天」，六日再加「週末」
+ */
+function weekdayWords(it: Item): string {
+  const days = new Set<number>();
+  for (const ev of it.spot ? it.spot.sessions : [it.ev]) {
+    const last = taipeiDay(Math.max(ev.startAt, ev.endAt - 1));
+    // taipeiDay 是從 1970-01-01（星期四）算起的第幾天
+    for (let d = taipeiDay(ev.startAt); d <= last && days.size < 7; d++) days.add((d + 4) % 7);
+    if (days.size >= 7) break;
+  }
+  const words: string[] = [];
+  for (const w of days) {
+    const c = WEEKDAYS[w];
+    words.push(`週${c}`, `星期${c}`, `禮拜${c}`);
+    if (w === 0) words.push('星期天', '禮拜天');
+  }
+  if (days.has(0) || days.has(6)) words.push('週末');
+  return words.join(' ');
+}
+/** 每一則可以搜尋的文字（標題、地點、物品、帳號、關鍵字、原文摘錄、補充、類型、車掃名稱、星期幾）；事件重抓才會換物件，跟著物件記 */
 const searchText = new WeakMap<EventOut, string>();
 function searchable(it: Item): string {
   let t = searchText.get(it.ev);
   if (t === undefined) {
     const ev = it.ev;
     t = foldText(
-      [ev.title, titleOf(ev), ev.item, ev.placeText, ev.approxArea, ev.keyword, ev.post.username, ev.post.text, ev.post.supplement, kindLabel(ev), it.spot ? '固定據點' : '', routeOf(ev)?.title, tagsOf(ev).join(' ')]
+      [ev.title, titleOf(ev), ev.item, ev.placeText, ev.approxArea, ev.keyword, ev.post.username, ev.post.text, ev.post.supplement, kindLabel(ev), it.spot ? '固定據點' : '', routeOf(ev)?.title, tagsOf(ev).join(' '), weekdayWords(it)]
         .filter(Boolean)
         .join(' '),
     );

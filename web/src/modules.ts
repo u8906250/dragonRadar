@@ -42,7 +42,7 @@ export const MODULES: ModuleDef[] = [
     current: true,
     unit: '個',
     emptyText: '',
-    searchPlaceholder: '搜尋標題、地點、物品、帳號…',
+    searchPlaceholder: '搜尋標題、地點、物品、週六…',
     reportIntro: REPORT_INTRO,
     reportTips: [],
     notEventText: '這則看起來不是可以到場參加的活動。貼文要寫出做什麼、在哪裡、哪天幾點開始，雷達才會收。',
@@ -58,7 +58,7 @@ export const MODULES: ModuleDef[] = [
     current: false,
     unit: '個刊登',
     emptyText: '附近還沒有狗狗陪伴的刊登',
-    searchPlaceholder: '搜尋地點、薪資、免費、寄宿…',
+    searchPlaceholder: '搜尋地點、薪資、寄宿、週六…',
     reportIntro: '看到徵人照顧狗狗、或有人說可以幫忙照顧狗狗的 Threads 貼文？貼上連結，雷達會判讀地點、期間、時段、薪資或費用，標到地圖上。⚠️ 網路上常有假職缺，雷達會標出可疑的地方，但不保證是真的。',
     reportTips: [
       '收兩種：徵人（飼主、店家找人照顧、陪伴、遛狗）、可照顧（個人說可以幫忙照顧、寄宿、遛狗，免費或收費）。寵物旅館等店家廣告、領養、走失協尋不收。',
@@ -80,7 +80,7 @@ MODULES.push({
   current: false,
   unit: '場',
   emptyText: '附近還沒有羽球臨打',
-  searchPlaceholder: '搜尋球館、程度、費用…',
+  searchPlaceholder: '搜尋球館、程度、費用、週六…',
   reportIntro: '看到招臨打（球團開放名額）或找臨打（球友想找地方打）的 Threads 貼文？貼上連結，雷達會判讀球館、時段、費用、程度、缺幾位，標到地圖上。',
   reportTips: [
     '收兩種：招臨打（球團、場主開放臨打名額）、找臨打（球友想找球團、找人一起打）。賣球具、教練招生、比賽報名不收。',
@@ -101,7 +101,7 @@ MODULES.push({
   current: false,
   unit: '個',
   emptyText: '附近還沒有美食品味的資料',
-  searchPlaceholder: '搜尋店名、吃什麼、地點…',
+  searchPlaceholder: '搜尋店名、吃什麼、地點、週六…',
   reportIntro: '看到餐車、市集攤位出攤，網友推薦的店，或揪團吃飯的 Threads 貼文？貼上連結，雷達會判讀地點、時間、吃什麼、價位，標到地圖上。',
   reportTips: [
     '收三種：出攤（餐車、市集攤位公告哪天幾點在哪裡）、推薦（網友推薦某家店）、揪團（揪人一起吃飯）。店家自己的優惠、限量、新開幕廣告不收。',
@@ -122,7 +122,7 @@ MODULES.push({
   current: false,
   unit: '個刊登',
   emptyText: '附近還沒有找工作的刊登',
-  searchPlaceholder: '搜尋地點、工作內容、時薪…',
+  searchPlaceholder: '搜尋地點、工作內容、時薪、週六…',
   reportIntro: '看到徵短期、兼職、工讀，或有人想找這類工作的 Threads 貼文？貼上連結，雷達會判讀工作內容、地點、期間、時段、薪資、怎麼應徵，標到地圖上。⚠️ 網路上常有假職缺，雷達會標出可疑的地方，但不保證是真的。',
   reportTips: [
     '收兩種：徵人（選舉、活動、展場、店家的工讀、兼職、臨時工）、求職（個人想找短期、兼職、工讀）。正職、人力銀行或派遣的職缺廣告、沒有薪水的志工招募不收。',
