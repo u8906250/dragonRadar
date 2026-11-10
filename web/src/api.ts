@@ -1,5 +1,5 @@
 import type { LatLng } from './geo';
-import type { BottleOut, EditInput, EventOut, KeywordInfo, KeywordRules, LocateResult, MyBottles, MyReport, PickedBottle, RouteOut, SubmitResult } from './types';
+import type { BottleOut, BottleProof, EditInput, EventOut, KeywordInfo, KeywordRules, LocateResult, MyBottles, MyReport, PickedBottle, RouteOut, SubmitResult } from './types';
 
 /** 正式環境的 Worker 網址；本機開發打 localhost，VITE_API_BASE 可覆寫（空字串視為未設定，CI 沒設變數時會傳空字串） */
 const PROD_API_BASE = 'https://dragon-radar.happybadminton.workers.dev';
@@ -153,16 +153,24 @@ export async function fetchBottles(origin: LatLng, radiusKm: number): Promise<Bo
   const r = await deviceJson<{ bottles?: BottleOut[] }>(`/api/bottles?lat=${origin.lat.toFixed(5)}&lng=${origin.lng.toFixed(5)}&radius_km=${radiusKm}`);
   return r.ok ? (r.data.bottles ?? []) : [];
 }
+/** 漂到汪星海上的瓶子（全部）；失敗回傳空陣列 */
+export async function fetchWoofBottles(): Promise<BottleOut[]> {
+  const r = await deviceJson<{ bottles?: BottleOut[] }>('/api/bottles?world=woof');
+  return r.ok ? (r.data.bottles ?? []).filter((b) => b.world === 'woof') : [];
+}
 export const dropBottle = (text: string, at: LatLng): Promise<Result<PickedBottle>> => deviceJson<PickedBottle>('/api/bottles', 'POST', { text, lat: at.lat, lng: at.lng });
-export const pickBottle = (id: number, at: LatLng | null): Promise<Result<PickedBottle>> =>
-  deviceJson<PickedBottle>(`/api/bottles/${id}/pick`, 'POST', at ? { lat: at.lat, lng: at.lng } : {});
+/** 撿起來：at 是你的位置（地球的 GPS，或你在汪星的位置），world 是你在哪一顆；自己丟的、撿過的不用位置 */
+export const pickBottle = (id: number, at: LatLng | null, world: 'earth' | 'woof' = 'earth'): Promise<Result<PickedBottle>> =>
+  deviceJson<PickedBottle>(`/api/bottles/${id}/pick`, 'POST', at ? { lat: at.lat, lng: at.lng, world } : {});
+/** 分享出去的瓶子（沒有內容）：還在漂、被撿走了、不見了 */
+export const fetchBottleInfo = (id: number): Promise<Result<{ id: number; state: 'active' | 'picked' | 'gone'; bottle: BottleOut | null }>> => deviceJson(`/api/bottles/${id}`);
+/** 瓶子證明（丟的人、撿到的人才拿得到） */
+export const fetchBottleProof = (id: number): Promise<Result<BottleProof>> => deviceJson<BottleProof>(`/api/bottles/${id}/proof`);
+export const verifyBottleProof = (p: BottleProof): Promise<Result<{ valid: boolean }>> => deviceJson<{ valid: boolean }>('/api/bottles/verify', 'POST', p);
 export const fetchMyBottles = (): Promise<Result<MyBottles>> => deviceJson<MyBottles>('/api/bottles/mine');
 export const deleteBottle = (id: number): Promise<Result<{ ok: true }>> => deviceJson<{ ok: true }>(`/api/bottles/${id}`, 'DELETE');
-/** 回收撿到的瓶子：今天多一個額度；沒收藏的信回收後就看不到了 */
-export const recycleBottle = (id: number): Promise<Result<{ quota: MyBottles['quota'] }>> => deviceJson<{ quota: MyBottles['quota'] }>(`/api/bottles/${id}/recycle`, 'POST', {});
-/** 收藏撿到的信，或移出收藏 */
-export const collectLetter = (id: number, on: boolean): Promise<Result<{ collected: boolean }>> =>
-  deviceJson<{ collected: boolean }>(`/api/bottles/${id}/${on ? 'collect' : 'uncollect'}`, 'POST', {});
+/** 移出瓶中信收藏（之後就看不到這封信了） */
+export const uncollectLetter = (id: number): Promise<Result<{ collected: boolean }>> => deviceJson<{ collected: boolean }>(`/api/bottles/${id}/uncollect`, 'POST', {});
 /** 回報問題（地點錯誤、時間錯誤…），只有管理者看得到；車掃可以指定哪一站（那一站的標題、預計經過時間） */
 export type FeedbackKind = 'location' | 'time' | 'content' | 'not_event' | 'duplicate' | 'remove_stop' | 'other';
 /** pin：地點錯誤時在小地圖上標的正確位置 */

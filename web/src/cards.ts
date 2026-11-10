@@ -188,7 +188,7 @@ function backHtml(d: CardDef, missing = false): string {
 /**
  * sticky：只有按「關閉」才收起來，點旁邊、按 Esc 都不關（許願、調整要打字，v1.581 使用者說「點選旁邊不要關掉，避免不小心關掉」）
  */
-function overlay(cls: string, html: string, onClose?: () => void, sticky = false): HTMLElement {
+export function overlay(cls: string, html: string, onClose?: () => void, sticky = false): HTMLElement {
   const back = document.activeElement as HTMLElement | null;
   const el = document.createElement('div');
   el.className = `tc-overlay ${cls}`;

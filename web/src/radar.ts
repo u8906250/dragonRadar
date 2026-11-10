@@ -217,8 +217,8 @@ export interface RadarBottle {
   hint?: string;
 }
 
-/** 瓶子的形狀（中心在原點，高約 16） */
-const BOTTLE_PATH = 'M-1.8 -8 h3.6 v3 l2.4 3 v8.2 a1.6 1.6 0 0 1 -1.6 1.6 h-5.2 a1.6 1.6 0 0 1 -1.6 -1.6 v-8.2 l2.4 -3 z';
+/** 瓶子的形狀（中心在原點，高約 16）；汪星海上的瓶子（space.ts）也用這個 */
+export const BOTTLE_PATH = 'M-1.8 -8 h3.6 v3 l2.4 3 v8.2 a1.6 1.6 0 0 1 -1.6 1.6 h-5.2 a1.6 1.6 0 0 1 -1.6 -1.6 v-8.2 l2.4 -3 z';
 /** 遠的瓶子模糊成這麼大一團（公里），讓人只知道大概的方向和距離 */
 const BOTTLE_FOG_KM = 0.15;
 
@@ -698,6 +698,12 @@ export class Radar {
     // 太空：點星球飛過去（剛拖完放開的那一下不算）；汪星上的中山公園銅像、火箭
     this.spaceLayer.addEventListener('click', (e) => {
       if (parkTap(e, 'woof')) return;
+      // 漂到汪星海上的漂流瓶
+      const bottle = (e.target as Element).closest<SVGGElement>('.woof-bottle')?.dataset.id;
+      if (bottle && !this.justPanned) {
+        onBottle?.(Number(bottle));
+        return;
+      }
       const g = (e.target as Element).closest('.space-hit') as SVGGElement | null;
       if (g?.dataset.body && !this.justPanned) this.focusOn(g.dataset.body);
     });

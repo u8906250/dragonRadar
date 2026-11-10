@@ -108,9 +108,11 @@ export interface RouteOut {
   updatedAt: number;
 }
 
-/** 漂流瓶：撿起來之前看不到內容 */
+/** 漂流瓶：撿起來之前看不到內容。world：earth 在地球（丟的地方附近）、woof 漂到汪星的海上（lat、lng 是汪星的經緯度） */
 export interface BottleOut {
+  /** 也是瓶子的編號（No.000123） */
   id: number;
+  world: 'earth' | 'woof';
   lat: number;
   lng: number;
   createdAt: number;
@@ -129,14 +131,20 @@ export interface PickedBottle {
 }
 
 export interface MyBottles {
-  /** 今天的額度：基本幾個、撿到幾個多幾個 */
-  quota: { used: number; bonus: number; limit: number; left: number };
-  /** driftM：從丟下的地方漂了幾公尺 */
-  dropped: Array<{ id: number; text: string; createdAt: number; expiresAt: number; picks: number; pickedAt: number | null; status: 'active' | 'picked' | 'hidden' | 'deleted' | 'removed'; driftM: number }>;
-  /** 撿到、還沒回收的瓶子 */
-  picked: Array<{ id: number; text: string; createdAt: number; pickedAt: number; driftM: number; collected: boolean }>;
-  /** 收藏的信（瓶子回收了也還在） */
-  letters: Array<{ id: number; text: string; createdAt: number; pickedAt: number; collectedAt: number; driftM: number }>;
+  /** 今天的額度（過去 24 小時） */
+  quota: { used: number; limit: number; left: number };
+  /** driftM：在地球上從丟下的地方漂了幾公尺；seaAt：漂到汪星海上的時間 */
+  dropped: Array<{ id: number; text: string; world: 'earth' | 'woof'; createdAt: number; expiresAt: number; seaAt: number | null; picks: number; pickedAt: number | null; status: 'active' | 'picked' | 'hidden' | 'deleted' | 'removed'; driftM: number }>;
+  /** 瓶中信收藏：撿到就收進來；world 是在哪裡撿到的 */
+  letters: Array<{ id: number; text: string; world: 'earth' | 'woof'; createdAt: number; pickedAt: number; driftM: number }>;
+}
+
+/** 瓶子證明：編號、丟的時間、內容的 SHA-256、伺服器簽章 */
+export interface BottleProof {
+  no: number;
+  createdAt: number;
+  sha256: string;
+  sig: string;
 }
 
 export interface Origin {
@@ -174,7 +182,7 @@ export interface KeywordRules {
     news: { names: string[]; intervalMin: number };
     link?: { maxAgeDays: number; recheckMin: number; endedReportsNeeded: number };
     spot?: { maxAgeDays: number; autoReview?: boolean };
-    bottles?: { enabled: boolean; maxWeight?: number; maxChars: number; pickRadiusM: number; ttlDays: number; perDay?: number; driftHours?: number };
+    bottles?: { enabled: boolean; maxWeight?: number; maxChars: number; pickRadiusM: number; seaHours?: number; woofDays?: number; perDay?: number; driftHours?: number };
   };
   intervalMin: number;
   defaultDurationMin: number;

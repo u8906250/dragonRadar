@@ -676,3 +676,22 @@ describe('雷達看得到的範圍（全螢幕時地圖鋪滿長方形）', () =
     }
   });
 });
+
+describe('汪星的海（漂流瓶漂過去的地方，worker/src/woofsea.ts）', () => {
+  it('uses the same 汪星 size as the server', async () => {
+    const sea = await import('../../worker/src/woofsea');
+    expect(sea.WOOF_KM).toBeCloseTo(WOOF_KM, 4);
+  });
+  it('every sea point and 300 m around it is sea, and you can drag the middle of the radar there', async () => {
+    const { WOOF_SEA } = await import('../../worker/src/woofsea');
+    const perDeg = (WOOF_KM * 1000 * Math.PI) / 180;
+    for (const [lat, lng] of WOOF_SEA) {
+      expect(Math.abs(lat)).toBeLessThanOrEqual(75);
+      expect(onWoofLand(lat, lng)).toBe(false);
+      for (let k = 0; k < 8; k++) {
+        const a = (k * Math.PI) / 4;
+        expect(onWoofLand(lat + (300 * Math.cos(a)) / perDeg, lng + (300 * Math.sin(a)) / (perDeg * Math.cos((lat * Math.PI) / 180)))).toBe(false);
+      }
+    }
+  });
+});

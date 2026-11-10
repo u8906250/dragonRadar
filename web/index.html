@@ -82,7 +82,7 @@
         <div class="overlay overlay-tr">
           <button type="button" id="locate-btn" class="chip" title="回到我的位置（在汪星是回到發射口）">定位</button>
           <button type="button" id="compass-btn" class="chip" hidden title="雷達跟著手機方向轉">指北針</button>
-          <button type="button" id="bottle-btn" class="chip" title="漂流瓶（實驗功能）：在附近丟一句話，或撿別人的" hidden>漂流瓶<span id="bottle-badge" class="chip-badge" hidden></span></button>
+          <button type="button" id="bottle-btn" class="chip" title="漂流瓶：在牛皮紙上寫一段話丟在附近，或撿別人的" hidden>漂流瓶<span id="bottle-badge" class="chip-badge" hidden></span></button>
           <button type="button" id="view-btn" class="chip primary">地圖</button>
         </div>
       </main>
@@ -208,12 +208,14 @@
           <strong>漂流瓶</strong>
           <button type="button" class="chip" data-act="close" aria-label="關閉">關閉</button>
         </div>
-        <p class="muted sheet-note">在你現在的位置附近丟一句話：打氣、心情、今天看到的事都可以。路過的人要走到瓶子旁邊才撿得起來、看得到內容。</p>
+        <p class="muted sheet-note">在牛皮紙上寫一段話，捲起來裝進瓶子，丟在你現在的位置附近。路過的人要走到瓶子旁邊才撿得起來、看得到內容。</p>
         <form id="bottle-form" class="bottle-form" autocomplete="off">
-          <textarea id="bottle-text" rows="3" maxlength="280" placeholder="例如「台北一起加油！」「謝謝今天發飄帶的志工」" aria-label="漂流瓶內容"></textarea>
+          <div class="kraft">
+            <textarea id="bottle-text" rows="4" maxlength="280" placeholder="例如「台北一起加油！」「謝謝今天發飄帶的志工」" aria-label="漂流瓶內容（寫在牛皮紙上）"></textarea>
+          </div>
           <div class="bottle-form-row">
             <span class="muted"><span id="bottle-count">0 / 280</span><span id="bottle-quota"></span></span>
-            <button type="submit" class="btn primary" id="bottle-drop">丟出去</button>
+            <button type="submit" class="btn primary" id="bottle-drop">捲起來丟出去</button>
           </div>
         </form>
         <div id="bottle-result" class="report-result" aria-live="polite"></div>
@@ -227,9 +229,8 @@
           <h2 id="letters-title">瓶中信收藏</h2>
         </header>
         <div class="letters-body">
-          <div id="letters-picked"></div>
           <div id="letters-list"></div>
-          <p class="muted small letters-note">收藏記在這個瀏覽器裡（不用登入），清除瀏覽器資料就看不到了。信是陌生人匿名留下的，看到不適合的內容可以檢舉。</p>
+          <p class="muted small letters-note">撿到的瓶子都收在這裡。收藏記在這個瀏覽器裡（不用登入），清除瀏覽器資料就看不到了。信是陌生人匿名留下的，看到不適合的內容可以檢舉。</p>
         </div>
       </section>
       <div id="module-sheet" class="sheet" hidden>

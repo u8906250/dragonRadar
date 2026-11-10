@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { driftStep, ruleCheck, scatter, xLength } from '../src/bottles';
+import { distM, driftStep, ruleCheck, scatter, seaPoint, sha256Hex, xLength } from '../src/bottles';
+import { WOOF_KM, WOOF_SEA } from '../src/woofsea';
 
 describe('ruleCheck', () => {
   it('lets short cheering messages through', () => {
@@ -51,29 +52,53 @@ const meters = (a: { lat: number; lng: number }, b: { lat: number; lng: number }
   Math.hypot((b.lat - a.lat) * 111320, (b.lng - a.lng) * 111320 * Math.cos((a.lat * Math.PI) / 180));
 
 describe('driftStep', () => {
-  const hq = { lat: 25.0456, lng: 121.5263 };
-  it('moves at most about 300 m toward the nearest place within 3 km', () => {
-    const b = { id: 1, lat: 25.0456 + 1500 / 111320, lng: 121.5263 };
-    const to = driftStep(b, [hq, { lat: 25.2, lng: 121.6 }], () => 0.5);
-    expect(to).not.toBeNull();
-    expect(meters(b, to!)).toBeLessThanOrEqual(302);
-    expect(meters(to!, hq)).toBeLessThan(meters(b, hq) - 290);
+  const home = { lat: 25.0456, lng: 121.5263 };
+  it('wanders at most about 60 m a step', () => {
+    const b = { ...home, origin_lat: home.lat, origin_lng: home.lng };
+    for (const r of [0.1, 0.5, 0.9]) expect(meters(b, driftStep(b, () => r))).toBeLessThanOrEqual(61);
   });
-  it('stops 80–200 m short of the place and then stays', () => {
-    let b = { id: 7, lat: 25.0456 + 700 / 111320, lng: 121.5263 };
-    for (let i = 0; i < 10; i++) {
-      const to = driftStep(b, [hq], () => 0.5);
-      if (!to) break;
-      b = { ...b, ...to };
+  it('never strays more than about 200 m from where it was dropped', () => {
+    let b = { ...home, origin_lat: home.lat, origin_lng: home.lng };
+    let seed = 1;
+    const rand = (): number => ((seed = (seed * 16807) % 2147483647) / 2147483647);
+    for (let i = 0; i < 500; i++) {
+      b = { ...b, ...driftStep(b, rand) };
+      expect(meters(home, b)).toBeLessThanOrEqual(202);
     }
-    const d = meters(b, hq);
-    expect(d).toBeGreaterThanOrEqual(75);
-    expect(d).toBeLessThanOrEqual(225);
-    expect(driftStep(b, [hq], () => 0.5)).toBeNull();
   });
-  it('wanders a little when nothing is within reach', () => {
-    const b = { id: 3, lat: 23.5, lng: 120.5 };
-    const to = driftStep(b, [hq], () => 0.9)!;
-    expect(meters(b, to)).toBeLessThanOrEqual(81);
+  it('heads back when it is outside the range', () => {
+    const b = { lat: home.lat + 300 / 111320, lng: home.lng, origin_lat: home.lat, origin_lng: home.lng };
+    const to = driftStep(b, () => 0.99);
+    expect(meters(home, to)).toBeLessThan(meters(home, b) - 50);
+  });
+});
+
+describe('seaPoint', () => {
+  const woofM = WOOF_KM * 1000;
+  it('lands within 250 m of one of the sea points on 汪星', () => {
+    for (const from of [{ lat: 25.13, lng: 121.5 }, { lat: 24.15, lng: 120.67 }, null]) {
+      for (const r of [0, 0.3, 0.7, 0.99]) {
+        const p = seaPoint(from, () => r);
+        const d = Math.min(...WOOF_SEA.map(([lat, lng]) => distM({ lat, lng }, p, woofM)));
+        expect(d).toBeLessThanOrEqual(252);
+      }
+    }
+  });
+  it('goes to the coast in the same direction as where it was dropped (seen from the middle of Taipei)', () => {
+    // 北投（北邊）→ 方向接近北的海邊；台中（西南）→ 西南的海邊
+    const gap = (a: number, b: number): number => Math.abs((((a - b) % 360) + 540) % 360 - 180);
+    const near = (p: { lat: number; lng: number }): number => {
+      let best = WOOF_SEA[0];
+      for (const s of WOOF_SEA) if (distM({ lat: s[0], lng: s[1] }, p, woofM) < distM({ lat: best[0], lng: best[1] }, p, woofM)) best = s;
+      return best[2];
+    };
+    expect(gap(near(seaPoint({ lat: 25.2, lng: 121.56 }, () => 0)), 0)).toBeLessThan(40);
+    expect(gap(near(seaPoint({ lat: 24.15, lng: 120.67 }, () => 0)), 220)).toBeLessThan(40);
+  });
+});
+
+describe('sha256Hex', () => {
+  it('hashes the text like everyone else does', async () => {
+    expect(await sha256Hex('abc')).toBe('ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad');
   });
 });

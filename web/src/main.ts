@@ -1,6 +1,6 @@
 import './styles.css';
 import { FITBUS_MS_PER_M, hqDenseKm, hqMotionKm, HQ_NET_LABEL_KM, HQ_SAIL_MS, HQ_STAR_MS, HQ_VOYAGE_MS, RAINBOW_EVERY_MS, voyagePhase, voyageTimeOf } from './flow';
-import { addKeyword, collectLetter, deletePushSubscription, locateFeedbackPlace, sendFeedback, type FeedbackKind, fetchPushKey, savePushSubscription, confirmReport, editReport, locatePlace, rejectReport, supplementReport, deleteBottle, dropBottle, recycleBottle, fetchBottles, fetchEvents, fetchHealth, fetchKeywords, fetchMyBottles, fetchMyReports, fetchRoutes, pickBottle, reportBottle, submitLink, withdrawReport } from './api';
+import { addKeyword, deletePushSubscription, locateFeedbackPlace, sendFeedback, type FeedbackKind, fetchPushKey, savePushSubscription, confirmReport, editReport, locatePlace, rejectReport, supplementReport, deleteBottle, dropBottle, fetchBottleInfo, fetchBottleProof, fetchBottles, fetchWoofBottles, uncollectLetter, verifyBottleProof, fetchEvents, fetchHealth, fetchKeywords, fetchMyBottles, fetchMyReports, fetchRoutes, pickBottle, reportBottle, submitLink, withdrawReport } from './api';
 import { compassSupported, startCompass } from './compass';
 import { bearingDeg, compassLabel, destination, formatKm, haversineKm, taiwanRadiusKm, type LatLng } from './geo';
 import { TAIWAN_RINGS } from './taiwan';
@@ -11,9 +11,10 @@ import { X_MAX_WEIGHT, xLength } from './xcount';
 import { shortAddress, splitPlace } from './place';
 import { crowdOf, MapView, pinPicker, type BaseMap, type MapRoute, type PinPicker } from './map';
 import { beep, ensureNotificationPermission, iosNeedsHomeScreen, notificationState, pushSubscription, pushSupported, registerServiceWorker, showBanner, systemNotify, unlockAudio, unsubscribePush } from './notify';
-import { checkWishNews, findCard, gotReward, myCards, onWishNews, openAlbum, openHelp, openItems } from './cards';
+import { checkWishNews, findCard, gotReward, myCards, onWishNews, openAlbum, openHelp, openItems, overlay } from './cards';
 import { DEEP_FROM_KM, LY_KM, Radar, SPACE_FROM_KM, type RadarRoute, type RadarStreets, type SpaceView } from './radar';
 import { DEFAULT_THEME_ID, getTheme, THEMES, type Theme } from './themes';
+import type { WoofBottleMark } from './space';
 import type { BottleOut, EventOut, Item, KeywordInfo, KeywordRules, MyBottles, MyReport, Origin, Phase, PickedBottle, RelatedPost, RouteOut, PreviewItem, RouteStop, RoutePreview, SubmitResult, FailedItem, EditItem, EditInput } from './types';
 
 const DEFAULT_ORIGIN: Origin = { lat: 25.0478, lng: 121.517, source: 'default' }; // 台北車站
@@ -68,8 +69,6 @@ const LS_PUSH_HINT = 'dr.pushHint';
 /** 管理頁（admin.html）存的：管理 token、這支手機有沒有開回報通知 */
 const LS_ADMIN_TOKEN = 'dr.adminToken';
 const LS_ADMIN_PUSH = 'dr.adminPush';
-/** 實驗功能：漂流瓶預設不顯示，在說明頁「實驗功能」或網址 ?lab=bottles 打開（?lab=off 關掉） */
-const LS_LAB_BOTTLES = 'dr.lab.bottles';
 /** 固定據點休息中、下一段在這個時間內開始才畫淡光點 */
 const SPOT_SHOW_AHEAD_SEC = 24 * 3600;
 const KEYWORD_RE_INVALID = /[<>{}\\%_]/;
@@ -136,12 +135,14 @@ let selectedRoute: string | null = null;
 let selectedLandmark: string | null = null;
 /** 附近的漂流瓶（沒有內容），點了雷達上的哪一個 */
 let bottles: BottleOut[] = [];
+/** 漂到汪星海上的漂流瓶（你在汪星才抓） */
+let woofBottles: BottleOut[] = [];
 let selectedBottle: number | null = null;
 /** 撿起來（或自己丟）的瓶子內容 */
 const bottleTexts = new Map<number, PickedBottle>();
 /** 漂流瓶詳細資料上的訊息（撿不到的原因、檢舉結果） */
 let bottleMsg = '';
-/** 最近一次讀到的「我的瓶子」：丟的、撿到的、收藏的信 */
+/** 最近一次讀到的「我的瓶子」：丟的、收藏的信 */
 let myBottlesData: MyBottles | null = null;
 /** 這次打開網頁已經提示過「瓶子被撿走了」 */
 let bottleNewsShown = false;
@@ -447,7 +448,6 @@ const bottleNear = $('#bottle-near');
 const bottleMine = $('#bottle-mine');
 const bottleTips = $('#bottle-tips');
 const lettersPage = $('#letters-page');
-const lettersPicked = $('#letters-picked');
 const lettersList = $('#letters-list');
 const filterRow = $('#filter-row');
 const catGroup = $('#cat-group');
@@ -522,6 +522,7 @@ function foundDog(m: typeof import('./park'), id: string): void {
 }
 // 太陽系那幾層拖曳移開了視野、拉回地球：「地圖」按鈕跟著出現、消失；自己移動了就不再跟著狗
 radar.onSpaceMove = () => {
+  onWoofWalk();
   if (dogLocked || dogOffer) lockDog(null);
   updateViewBtn();
   saveSpaceView();
@@ -1093,9 +1094,10 @@ async function rocketTrip(m: typeof import('./park'), from: 'earth' | 'woof'): P
     radar.setSpaceView({ ...park, yaw: park.yaw * v, pitch: park.pitch * v }, !turned);
   });
   m.arriveRocket(to);
-  // 你到了那一邊
+  // 你到了那一邊：汪星海上的漂流瓶跟著抓（回地球清掉）
   youOn = to;
   radar.youOn = to;
+  void loadWoofBottles();
   saveSpaceView();
   updateScaleChips();
   updateViewBtn();
@@ -1119,6 +1121,7 @@ async function landIn3D(to: 'earth' | 'woof'): Promise<void> {
   lockDog(null);
   youOn = to;
   radar.youOn = to;
+  void loadWoofBottles();
   if (to === 'woof') radar.setSpaceView(await woofHomeView(), true);
   else {
     const [lat, lng] = m.HATCH_CENTER;
@@ -1171,7 +1174,7 @@ function updateSpace(): void {
     p.onDogMove(() => radar.redrawPark(), () => radar.headingDeg);
     p.loadSniffMarks();
   });
-  radar.setSpace((km, rg, view) => mod.spaceMarkup({ center, land, when, scaleKm: km, rg, view, streets: woofStreets, you, woofMap: map }), mod.bodyRadiusKm);
+  radar.setSpace((km, rg, view) => mod.spaceMarkup({ center, land, when, scaleKm: km, rg, view, streets: woofStreets, you, woofMap: map, bottles: map && bottlesOn() ? woofBottleMarks() : undefined }), mod.bodyRadiusKm);
 }
 
 /**
@@ -1576,6 +1579,7 @@ function render(): void {
   );
   map.setBottles(bottleViews.map((v) => ({ id: v.b.id, lat: v.b.lat, lng: v.b.lng, state: v.state, mine: v.b.mine, picked: v.b.picked })));
   updateBottleBadge(bottleViews);
+  syncWoofBottles();
   // 全螢幕鋪滿時你的 GPS 位置（像 Google 地圖的藍點）：拖曳移開了也畫在 GPS 的地方
   const fix = origin.source === 'gps' ? { at: origin, acc: gpsAccuracy } : lastGps ? { at: lastGps, acc: lastGpsAccuracy } : null;
   radar.setYou(fix ? { bearing: bearingDeg(origin, fix.at), distanceKm: haversineKm(origin, fix.at), accuracyKm: fix.acc ? fix.acc / 1000 : null } : null);
@@ -2104,18 +2108,45 @@ function renderLandmarkDetail(id: string): boolean {
 }
 
 // ---- 漂流瓶 ----
-/** 200 m 內看得到瓶子的樣子，更遠只是一團訊號 */
+/** 200 m 內看得到瓶子的樣子，更遠只是一團訊號（地球上；汪星海上的瓶子大家都看得到） */
 const BOTTLE_NEAR_M = 200;
-/** 伺服器沒關、而且這個瀏覽器打開了實驗功能 */
-const bottlesOn = (): boolean => mod.current && keywordRules?.sources?.bottles?.enabled !== false && lsGet(LS_LAB_BOTTLES) === '1';
-const pickRadiusM = (): number => keywordRules?.sources?.bottles?.pickRadiusM ?? 60;
-const bottleDistM = (b: BottleOut): number => haversineKm(origin, b) * 1000;
+/** 伺服器沒關（v1.593 起直接開放，不用再打開實驗功能） */
+const bottlesOn = (): boolean => mod.current && keywordRules?.sources?.bottles?.enabled !== false;
+const bottleRules = (): NonNullable<KeywordRules['sources']>['bottles'] => keywordRules?.sources?.bottles;
+const pickRadiusM = (): number => bottleRules()?.pickRadiusM ?? 60;
+/** 瓶子的編號：No.000123 */
+const bottleNo = (id: number): string => `No.${String(id).padStart(6, '0')}`;
+const findBottle = (id: number): BottleOut | undefined => bottles.find((b) => b.id === id) ?? woofBottles.find((b) => b.id === id);
+/** 雷達上拿掉這個瓶子（被撿走、收回、檢舉）；keepMine：自己丟的留著 */
+function removeBottleMark(id: number, keepMine = false): void {
+  const keep = (b: BottleOut): boolean => b.id !== id || (keepMine && b.mine);
+  bottles = bottles.filter(keep);
+  woofBottles = woofBottles.filter(keep);
+}
 
-/** 用 GPS 定位而且走到撿得起來的距離才算 pick；手動位置不能撿 */
+/** 你在汪星（搭火箭過去）、雷達正中間是汪星：正中間就是你在汪星的位置（汪星沒有 GPS，拖曳就是走路）；不然是 null */
+function woofHere(): LatLng | null {
+  if (youOn !== 'woof' || !spaceMod) return null;
+  const v = radar.spaceViewNow;
+  return v.focus === 'woof' ? spaceMod.woofCenter(v) : null;
+}
+/** 汪星上兩點的距離（公尺）：球面上的角度一樣，照汪星的半徑換算 */
+const woofDistM = (a: LatLng, b: LatLng): number => (haversineKm(a, b) / 6371) * (spaceMod?.WOOF_KM ?? 6.56) * 1000;
+
+/** 瓶子離你多遠（公尺）：地球上的照你的位置，汪星海上的照你在汪星的位置（不在汪星是 Infinity） */
+function bottleDistM(b: BottleOut): number {
+  if (b.world !== 'woof') return haversineKm(origin, b) * 1000;
+  const at = woofHere();
+  return at ? woofDistM(at, b) : Infinity;
+}
+/** 瓶子在你的哪個方向 */
+const bottleDir = (b: BottleOut): string => compassLabel(bearingDeg(b.world === 'woof' ? (woofHere() ?? origin) : origin, b));
+
+/** 走到撿得起來的距離才算 pick：地球上要用 GPS 定位（手動位置不能撿），汪星上照你在汪星的位置 */
 function bottleState(b: BottleOut): 'far' | 'near' | 'pick' {
   const d = bottleDistM(b);
-  if (origin.source === 'gps' && d <= pickRadiusM()) return 'pick';
-  return d <= BOTTLE_NEAR_M ? 'near' : 'far';
+  if (d <= pickRadiusM() && (b.world === 'woof' || origin.source === 'gps')) return 'pick';
+  return b.world === 'woof' || d <= BOTTLE_NEAR_M ? 'near' : 'far';
 }
 
 /** 方向提示最遠指到多遠的瓶子 */
@@ -2129,18 +2160,52 @@ function nearestHint<V extends { b: BottleOut; distanceKm: number }>(views: V[])
   return best && best.distanceKm <= BOTTLE_HINT_MAX_KM ? best : null;
 }
 
-/** 按鈕上的數字：雷達範圍內還沒撿過、不是自己丟的瓶子 */
-function updateBottleBadge(views: Array<{ b: BottleOut; distanceKm: number; state: string }>): void {
+/** 按鈕上的數字：雷達範圍內還沒撿過、不是自己丟的瓶子（你在汪星就數汪星海上的） */
+function updateBottleBadge(views: Array<{ b: BottleOut; distanceKm: number }>): void {
   bottleBtn.hidden = !bottlesOn();
-  const n = views.filter((v) => !v.b.mine && !v.b.picked && v.distanceKm <= scaleKm).length;
-  const canPick = views.some((v) => v.state === 'pick' && !v.b.mine && !v.b.picked);
-  bottleBadge.hidden = n === 0;
-  bottleBadge.textContent = String(n);
-  bottleBtn.classList.toggle('glow', canPick);
+  const others = youOn === 'woof' ? woofBottles.filter((b) => !b.mine && !b.picked) : views.filter((v) => !v.b.mine && !v.b.picked && v.distanceKm <= scaleKm).map((v) => v.b);
+  bottleBadge.hidden = others.length === 0;
+  bottleBadge.textContent = String(others.length);
+  bottleBtn.classList.toggle('glow', others.some((b) => bottleState(b) === 'pick'));
+}
+
+/** 汪星海上的瓶子（space.ts 畫在汪星上）：每次畫汪星都重算，拖曳走路時撿不撿得到跟著變 */
+function woofBottleMarks(): WoofBottleMark[] {
+  return woofBottles
+    .filter((b) => !b.picked)
+    .map((b) => ({ id: b.id, lat: b.lat, lng: b.lng, state: bottleState(b) === 'pick' ? 'pick' : 'near', mine: b.mine, selected: b.id === selectedBottle }));
+}
+let woofMarksKey = '';
+/** 汪星海上的瓶子、選取變了：重畫汪星 */
+function syncWoofBottles(): void {
+  const key = woofBottles.map((b) => `${b.id}${b.picked ? 'p' : ''}${b.id === selectedBottle ? 's' : ''}`).join(',');
+  if (key === woofMarksKey) return;
+  woofMarksKey = key;
+  radar.redrawSpace();
+}
+/** 你在汪星才抓汪星海上的瓶子（回地球就清掉） */
+async function loadWoofBottles(): Promise<void> {
+  if (!bottlesOn() || !woofMap()) {
+    if (woofBottles.length) {
+      woofBottles = [];
+      render();
+    }
+    return;
+  }
+  woofBottles = await fetchWoofBottles();
+  render();
+}
+/** 在汪星上拖曳（走路）：按鈕的光、選著的瓶子還差多遠跟著變 */
+function onWoofWalk(): void {
+  if (!woofBottles.length) return;
+  updateBottleBadge([]);
+  const b = selectedBottle !== null ? findBottle(selectedBottle) : undefined;
+  if (b?.world === 'woof' && !detailEl.hidden) renderBottleDetail(b.id);
 }
 
 const dayFmt = new Intl.DateTimeFormat('zh-TW', { timeZone: 'Asia/Taipei', month: 'numeric', day: 'numeric' });
 const fmtDay = (unix: number): string => dayFmt.format(new Date(unix * 1000));
+const stampFmt = new Intl.DateTimeFormat('zh-TW', { timeZone: 'Asia/Taipei', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false });
 /** 漂了多遠：50 m 以內算沒漂 */
 const driftText = (m: number): string => (m >= 50 ? formatKm(m / 1000) : '');
 
@@ -2148,6 +2213,11 @@ const daysLeft = (until: number): string => {
   const d = Math.ceil((until - nowSec()) / 86400);
   return d <= 1 ? '今天' : `${d} 天`;
 };
+/** 還有多久漂到汪星（丟下後 seaHours 小時） */
+function seaIn(createdAt: number): string {
+  const m = Math.max(0, Math.round((createdAt + (bottleRules()?.seaHours ?? 24) * 3600 - nowSec()) / 60));
+  return m < 60 ? `${Math.max(1, m)} 分鐘` : `${Math.round(m / 60)} 小時`;
+}
 
 function ago(unix: number): string {
   const m = Math.max(0, Math.round((nowSec() - unix) / 60));
@@ -2155,6 +2225,18 @@ function ago(unix: number): string {
   if (m < 24 * 60) return `${Math.floor(m / 60)} 小時前`;
   return `${Math.floor(m / 1440)} 天前`;
 }
+
+/** 分享到 Threads（打開 Threads 的發文畫面，不用串 API）：不帶內容，內容要撿到才看得到 */
+function threadsShareUrl(id: number, mine: boolean): string {
+  const link = new URL(location.pathname, location.origin);
+  link.searchParams.set('bottle', String(id));
+  const text = mine
+    ? `我丟了一個漂流瓶 ${bottleNo(id)} 🍾 在牛皮紙上寫了一段話、捲起來裝進瓶子，走到瓶子旁邊才撿得起來、看得到內容。24 小時沒人撿，就會漂到汪星的海上。`
+    : `我撿到漂流瓶 ${bottleNo(id)} 了 🍾`;
+  return `https://www.threads.com/intent/post?text=${encodeURIComponent(text)}&url=${encodeURIComponent(link.toString())}`;
+}
+const shareLink = (id: number, mine: boolean, cls = 'btn'): string =>
+  `<a class="${cls}" href="${esc(threadsShareUrl(id, mine))}" target="_blank" rel="noopener">分享到 Threads</a>`;
 
 function selectBottle(id: number | null): void {
   selectedBottle = selectedBottle === id ? null : id;
@@ -2170,56 +2252,74 @@ function selectBottle(id: number | null): void {
     reportSheet.hidden = true;
     bottleSheet.hidden = true;
     // 自己丟的、撿過的直接讀內容
-    const b = bottles.find((x) => x.id === selectedBottle);
-    if (b && (b.mine || b.picked) && !bottleTexts.has(b.id)) void loadBottle(b.id, null);
+    const b = findBottle(selectedBottle);
+    if (b && (b.mine || b.picked) && !bottleTexts.has(b.id)) void loadBottle(b.id);
   }
   render();
 }
 
-async function loadBottle(id: number, at: Origin | null): Promise<void> {
-  const r = await pickBottle(id, at);
+/** 打開瓶子：自己丟的、撿過的直接讀；pick 是要撿起來（帶你的位置：地球的 GPS，或你在汪星的位置） */
+async function loadBottle(id: number, pick = false): Promise<void> {
+  const b = findBottle(id);
+  const woof = b?.world === 'woof';
+  const r = await pickBottle(id, pick ? (woof ? woofHere() : origin) : null, woof ? 'woof' : 'earth');
   if (!r.ok) {
     bottleMsg = r.message;
-    // 被別人撿走了：雷達上也拿掉
-    if (/撿走|漂走/.test(r.message)) bottles = bottles.filter((b) => b.id !== id || b.mine);
+    // 被別人撿走了、沉下去了：雷達上也拿掉
+    if (/撿走|沉下去/.test(r.message)) removeBottleMark(id, true);
   } else {
     bottleTexts.set(id, r.data);
-    // 撿走的瓶子從雷達上消失（內容留在詳細資料和「我撿到的」）；自己丟的照樣留著
-    const fresh = !r.data.bottle.mine && bottles.some((b) => b.id === id && !b.picked);
-    bottles = bottles.filter((b) => b.id !== id || b.mine);
+    // 撿走的瓶子從雷達上消失（內容留在詳細資料和瓶中信收藏）；自己丟的照樣留著
+    const fresh = !r.data.bottle.mine && !!b && !b.picked;
+    removeBottleMark(id, true);
     bottleMsg = '';
-    if (fresh) showBanner(bannerEl, '撿到瓶子了！喜歡這封信可以收藏，回收瓶子就能多丟一個', 3500);
+    if (fresh) {
+      showBanner(bannerEl, '撿到瓶子了！這封信收進「瓶中信收藏」了', 3500);
+      void reloadMyBottles();
+    }
   }
   render();
 }
 
-/** 雷達或地圖上點了瓶子：距離、撿起來、內容、檢舉或收回 */
+/** 牛皮紙上的一段話 */
+const kraftNote = (text: string, no: number): string => `<div class="kraft-note"><span class="kraft-no">${bottleNo(no)}</span><p>${esc(text)}</p></div>`;
+
+/** 雷達或地圖上點了瓶子：距離、撿起來、內容、分享、證明、檢舉或收回 */
 function renderBottleDetail(id: number): boolean {
   const got = bottleTexts.get(id);
   // 撿走後雷達上已經沒有這個瓶子，詳細資料用撿到時拿到的資料
-  const b = bottles.find((x) => x.id === id) ?? got?.bottle;
+  const b = findBottle(id) ?? got?.bottle;
   if (!b) return false;
+  const woof = b.world === 'woof';
   const d = bottleDistM(b);
   const reach = pickRadiusM();
-  const where = `約 ${formatKm(d / 1000)} ${compassLabel(bearingDeg(origin, b))}`;
+  const where = woof ? `汪星的海上，約 ${formatKm(d / 1000)} ${bottleDir(b)}` : `約 ${formatKm(d / 1000)} ${bottleDir(b)}`;
   let body: string;
   if (got) {
-    body = `<blockquote class="bottle-note">${esc(got.text)}</blockquote>
-      <p class="muted">${b.mine ? `你${ago(b.createdAt)}丟的・還沒被撿走・${daysLeft(b.expiresAt)}後漂走` : `${ago(b.createdAt)}丟的・你撿到了，雷達上不會再出現。撿到的瓶子都在「瓶中信收藏」`}</p>`;
+    const status = b.mine
+      ? `你${ago(b.createdAt)}丟的・還沒被撿走・${woof ? `漂到汪星的海上了，${daysLeft(b.expiresAt)}後沉下去` : `在附近漂，${seaIn(b.createdAt)}後漂到汪星的海上`}`
+      : `${ago(b.createdAt)}丟的・你撿到了，收進「瓶中信收藏」`;
+    body = `${kraftNote(got.text, b.id)}<p class="muted">${esc(status)}</p>`;
   } else if (b.mine || b.picked) {
     body = '<p class="muted">打開瓶子中…</p>';
-  } else if (origin.source !== 'gps') {
+  } else if (woof && youOn !== 'woof') {
+    body = `<p>這個瓶子漂到汪星的海上了。點中山公園的銅像搭火箭到汪星，拖曳雷達走過去，${reach} m 內就能撿起來。</p>`;
+  } else if (woof && !woofHere()) {
+    body = '<p>這個瓶子在汪星的海上。把雷達的中心移回汪星（點汪星），拖曳走過去就能撿。</p>';
+  } else if (!woof && origin.source !== 'gps') {
     body = `<p>瓶子在${esc(where)}。按右上角「定位」用 GPS，走到 ${reach} m 內就能撿起來。</p>`;
   } else if (d > reach) {
-    body = `<p>瓶子在${esc(where)}，還差約 ${Math.round(d - reach)} m。走近一點就能撿起來，越近雷達上越清楚。</p>`;
+    body = `<p>瓶子在${esc(where)}，還差約 ${Math.round(d - reach)} m。${woof ? '拖曳雷達走過去' : '走近一點'}就能撿起來${woof ? '' : '，越近雷達上越清楚'}。</p>`;
   } else {
     body = '<p>瓶子就在你旁邊！</p>';
   }
-  const canPick = !got && !b.mine && !b.picked && origin.source === 'gps' && d <= reach;
+  const canPick = !got && !b.mine && !b.picked && bottleState(b) === 'pick';
   detailEl.hidden = false;
-  setDetailHtml(`bottle:${id}`, `
+  setDetailHtml(
+    `bottle:${id}`,
+    `
     <div class="sheet-head">
-      <strong>${b.mine ? '你丟的漂流瓶' : '漂流瓶'}</strong>
+      <strong>${b.mine ? '你丟的漂流瓶' : '漂流瓶'} <span class="bottle-no">${bottleNo(b.id)}</span></strong>
       <button type="button" class="chip" data-act="close" aria-label="關閉">關閉</button>
     </div>
     <div class="sheet-body">
@@ -2227,28 +2327,27 @@ function renderBottleDetail(id: number): boolean {
       ${bottleMsg ? `<p class="msg error">${esc(bottleMsg)}</p>` : ''}
       <div class="sheet-actions">
         ${canPick ? '<button type="button" class="btn primary" data-act="pick">撿起來</button>' : ''}
-        ${!got && !b.mine && !canPick ? `<a class="btn" href="https://www.google.com/maps/dir/?api=1&destination=${b.lat},${b.lng}&travelmode=walking" target="_blank" rel="noopener">走過去</a>` : ''}
-        ${got && !b.mine ? `<button type="button" class="btn primary" data-act="collect">${isCollected(id) ? '已收藏' : '收藏這封信'}</button><button type="button" class="btn" data-act="recycle">回收瓶子</button><button type="button" class="btn" data-act="report">檢舉</button>` : ''}
-        ${b.mine ? '<button type="button" class="btn" data-act="delete">收回</button>' : ''}
+        ${!got && !b.mine && !canPick && !woof ? `<a class="btn" href="https://www.google.com/maps/dir/?api=1&destination=${b.lat},${b.lng}&travelmode=walking" target="_blank" rel="noopener">走過去</a>` : ''}
+        ${got ? shareLink(b.id, b.mine) : ''}
+        ${got ? '<button type="button" class="btn" data-act="proof">瓶子證明</button>' : ''}
+        ${got && !b.mine ? '<button type="button" class="btn subtle" data-act="report">檢舉</button>' : ''}
+        ${b.mine ? '<button type="button" class="btn subtle" data-act="delete">收回</button>' : ''}
       </div>
-      <p class="muted sheet-note small">瓶子的位置在丟的時候就隨機漂開約 100 m，之後還會順著洋流漂，不是丟的人站的地方。</p>
-    </div>`);
+      <p class="muted sheet-note small">${
+        woof
+          ? '汪星沒有 GPS：搭火箭到汪星後，雷達正中間就是你的位置，拖曳就是走路。'
+          : '瓶子的位置在丟的時候就隨機漂開約 100 m，之後在附近 200 m 內漂，不是丟的人站的地方。'
+      }</p>
+    </div>`,
+    true,
+  );
   detailEl.querySelector('[data-act="close"]')?.addEventListener('click', () => selectBottle(null));
   detailEl.querySelector('[data-act="pick"]')?.addEventListener('click', (e) => {
     (e.currentTarget as HTMLButtonElement).disabled = true;
-    void loadBottle(id, origin);
+    void loadBottle(id, true);
   });
-  detailEl.querySelector('[data-act="collect"]')?.addEventListener('click', async (e) => {
-    const btn = e.currentTarget as HTMLButtonElement;
-    btn.disabled = true;
-    if (await toggleCollect(id, !isCollected(id))) render();
-    else btn.disabled = false;
-  });
-  detailEl.querySelector('[data-act="recycle"]')?.addEventListener('click', async (e) => {
-    if (!(await recycle(id))) return;
-    (e.currentTarget as HTMLButtonElement | null)?.setAttribute('disabled', '');
-    selectedBottle = null;
-    render();
+  detailEl.querySelector('[data-act="proof"]')?.addEventListener('click', () => {
+    if (got) void showProof(id, got.text);
   });
   detailEl.querySelector('[data-act="report"]')?.addEventListener('click', async (e) => {
     if (!window.confirm('這個瓶子有攻擊性內容、廣告或個人資料？檢舉後會交給管理者確認。')) return;
@@ -2259,8 +2358,10 @@ function renderBottleDetail(id: number): boolean {
     } else {
       showBanner(bannerEl, '謝謝檢舉，這個瓶子已經藏起來，會交給管理者確認', 3000);
       if (r.data.hidden) {
-        bottles = bottles.filter((x) => x.id !== id);
+        removeBottleMark(id);
+        bottleTexts.delete(id);
         selectedBottle = null;
+        void reloadMyBottles();
       }
     }
     render();
@@ -2272,7 +2373,7 @@ function renderBottleDetail(id: number): boolean {
     if (!r.ok) {
       bottleMsg = r.message;
     } else {
-      bottles = bottles.filter((x) => x.id !== id);
+      removeBottleMark(id);
       selectedBottle = null;
       showBanner(bannerEl, '瓶子收回了', 2000);
     }
@@ -2281,37 +2382,81 @@ function renderBottleDetail(id: number): boolean {
   return true;
 }
 
-const isCollected = (id: number): boolean => !!myBottlesData?.letters.some((l) => l.id === id);
-
-/** 收藏或移出收藏。成功回傳 true */
-async function toggleCollect(id: number, on: boolean): Promise<boolean> {
-  const inPicked = !!myBottlesData?.picked.some((p) => p.id === id) || bottleTexts.has(id);
-  if (!on && !inPicked && !window.confirm('這個瓶子已經回收了，移出收藏後就看不到這封信了。要移出嗎？')) return false;
-  const r = await collectLetter(id, on);
+/**
+ * 瓶子證明：編號、丟的時間、內容的指紋（SHA-256）、伺服器的簽章；按「驗證」先在這裡算一次內容的指紋，
+ * 再請伺服器核對簽章：對得上就是洋流雷達發出的瓶子、內容沒被改過（瓶子沉下去、刪掉了也驗得出來）
+ */
+async function showProof(id: number, text: string): Promise<void> {
+  const r = await fetchBottleProof(id);
   if (!r.ok) {
     showBanner(bannerEl, r.message, 3000);
-    return false;
+    return;
   }
-  showBanner(bannerEl, on ? '收藏好了！在「瓶中信收藏」可以看到' : '移出收藏了', 2500);
-  await reloadMyBottles();
-  return true;
+  const p = r.data;
+  const el = overlay(
+    'tc-proof',
+    `<div class="tc-box bottle-proof">
+      <h2 class="tc-title">瓶子證明</h2>
+      <dl>
+        <dt>編號</dt><dd>${bottleNo(p.no)}</dd>
+        <dt>丟的時間</dt><dd>${esc(stampFmt.format(new Date(p.createdAt * 1000)))}</dd>
+        <dt>內容的指紋（SHA-256）</dt><dd class="mono">${esc(p.sha256)}</dd>
+        <dt>簽章</dt><dd class="mono">${esc(p.sig)}</dd>
+      </dl>
+      <p class="tc-note">每個瓶子的編號都不一樣。內容只要改一個字，指紋就不一樣；簽章是伺服器用只有它知道的金鑰簽的，別人做不出來。</p>
+      <p class="proof-result" aria-live="polite"></p>
+      <div class="sheet-actions"><button type="button" class="chip primary" data-act="verify">驗證</button><button type="button" class="chip" data-close>關閉</button></div>
+    </div>`,
+  );
+  const out = el.querySelector<HTMLElement>('.proof-result')!;
+  el.querySelector<HTMLButtonElement>('[data-act="verify"]')?.addEventListener('click', async (e) => {
+    const btn = e.currentTarget as HTMLButtonElement;
+    btn.disabled = true;
+    out.textContent = '驗證中…';
+    const digest = [...new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(text)))].map((x) => x.toString(16).padStart(2, '0')).join('');
+    const v = digest === p.sha256 ? await verifyBottleProof(p) : null;
+    btn.disabled = false;
+    out.className = `proof-result ${v?.ok && v.data.valid ? 'ok' : 'bad'}`;
+    out.textContent =
+      digest !== p.sha256
+        ? '✗ 這封信的內容跟指紋對不上'
+        : !v?.ok
+          ? v?.message ?? '暫時沒辦法驗證，請稍後再試'
+          : v.data.valid
+            ? `✓ 是洋流雷達發出的瓶子 ${bottleNo(p.no)}，內容沒有被改過`
+            : '✗ 簽章對不上，這不是洋流雷達發出的瓶子';
+  });
 }
 
-/** 回收撿到的瓶子：今天多一個額度；沒收藏的信就看不到了。成功回傳 true */
-async function recycle(id: number): Promise<boolean> {
-  const ask = isCollected(id)
-    ? '回收瓶子，今天可以多丟一個；信還留在收藏裡。要回收嗎？'
-    : '回收後就看不到這封信了（想留著可以先按「收藏」）。今天可以多丟一個，要回收嗎？';
-  if (!window.confirm(ask)) return false;
-  const r = await recycleBottle(id);
+/** 打開分享出去的瓶子連結（?bottle=編號）：還在漂就選起來（看得到在哪、多遠），被撿走、沉下去了就說一聲 */
+async function openSharedBottle(id: number): Promise<void> {
+  const url = new URL(location.href);
+  url.searchParams.delete('bottle');
+  history.replaceState(history.state, '', url);
+  const r = await fetchBottleInfo(id);
+  if (!r.ok) return;
+  const b = r.data.bottle;
+  if (r.data.state !== 'active' || !b) {
+    showBanner(bannerEl, `漂流瓶 ${bottleNo(id)} ${r.data.state === 'picked' ? '已經被撿走了' : '已經沉下去或不見了'}`, 4000);
+    return;
+  }
+  if (b.world === 'woof') woofBottles = [b, ...woofBottles.filter((x) => x.id !== id)];
+  else bottles = [b, ...bottles.filter((x) => x.id !== id)];
+  selectedBottle = null;
+  selectBottle(id);
+}
+
+/** 移出收藏。成功回傳 true */
+async function removeLetter(id: number): Promise<boolean> {
+  if (!window.confirm('移出收藏後就看不到這封信了。要移出嗎？')) return false;
+  const r = await uncollectLetter(id);
   if (!r.ok) {
     showBanner(bannerEl, r.message, 3000);
     return false;
   }
   bottleTexts.delete(id);
-  showBanner(bannerEl, `回收了！今天還能丟 ${r.data.quota.left} 個`, 3000);
+  showBanner(bannerEl, '移出收藏了', 2000);
   await reloadMyBottles();
-  if (!bottleSheet.hidden) renderBottleSheet();
   return true;
 }
 
@@ -2364,7 +2509,7 @@ function openBottleSheet(open: boolean): void {
   void reloadMyBottles();
 }
 
-const bottleMaxWeight = (): number => keywordRules?.sources?.bottles?.maxWeight ?? X_MAX_WEIGHT;
+const bottleMaxWeight = (): number => bottleRules()?.maxWeight ?? X_MAX_WEIGHT;
 
 /** 字數（比照 X：中文算 2、英數算 1）；超過回傳 true */
 function updateBottleCount(): boolean {
@@ -2375,65 +2520,75 @@ function updateBottleCount(): boolean {
   return n > max;
 }
 
-/** 丟瓶子的表單（要 GPS）、附近的瓶子、使用規則 */
-function renderBottleSheet(): void {
-  const rules = keywordRules?.sources?.bottles;
-  bottleText.maxLength = bottleMaxWeight();
+/** 丟得出去嗎：要在地球上、用 GPS 定位，字數沒超過 */
+function updateDropBtn(): void {
   const over = updateBottleCount();
   const gps = origin.source === 'gps';
-  bottleDropBtn.disabled = !gps || over;
-  bottleDropBtn.textContent = gps ? '丟出去' : '要先定位';
+  bottleDropBtn.disabled = youOn === 'woof' || !gps || over || throwing;
+  bottleDropBtn.textContent = youOn === 'woof' ? '回地球才能丟' : gps ? '捲起來丟出去' : '要先定位';
+}
+
+/** 丟瓶子的牛皮紙（要 GPS）、附近的瓶子、使用規則 */
+function renderBottleSheet(): void {
+  const rules = bottleRules();
+  bottleText.maxLength = bottleMaxWeight();
+  updateDropBtn();
   bottleTips.innerHTML = [
     `字數比照 X：中文、全形字、表情符號算 2，英數算 1，最多 ${bottleMaxWeight()}（中文 ${bottleMaxWeight() / 2} 字）。`,
     '打氣、心情、抱怨、今天看到的事都可以。辱罵或攻擊任何人（包括其他候選人、政黨）、謠言、廣告、連結、電話、帳號、個人資料都不會通過，丟出去前會先自動審核。',
-    `瓶子會丟在你目前 GPS 位置附近，隨機漂開約 100 m。沒人撿的話，每 ${rules?.driftHours ?? 3} 小時會順著洋流往附近熱鬧的地方（發放、活動、據點、洋流總部）漂一段，${rules?.ttlDays ?? 7} 天後漂走。`,
-    `每天可以丟 ${rules?.perDay ?? 3} 個。撿到的瓶子在「瓶中信收藏」：喜歡的信可以收藏，回收瓶子就多一個額度；兩個都可以做。`,
-    `別人要走到 ${rules?.pickRadiusM ?? 60} m 內才撿得起來；遠的瓶子在雷達上只是一團模糊的訊號，走近才變清楚。每個瓶子只能被一個人撿走，撿走就從雷達上消失。`,
-    '撿到不適合的內容可以檢舉，檢舉後就藏起來交給管理者確認。不用登入：你丟的、撿到的瓶子記在這個瀏覽器裡，清除瀏覽器資料就看不到了。',
+    `瓶子丟在你目前 GPS 位置附近（隨機漂開約 100 m），${rules?.seaHours ?? 24} 小時內在附近 200 m 內漂；沒人撿就漂到汪星的海上（汪星的陸地是台北，會漂到跟丟的地方同一個方向的海邊），${rules?.woofDays ?? 30} 天後沉下去。`,
+    `每天最多丟 ${rules?.perDay ?? 3} 個。每個瓶子都有自己的編號，丟的人和撿到的人看得到「瓶子證明」，可以驗證是這裡發出的、內容沒被改過。`,
+    `別人要走到 ${rules?.pickRadiusM ?? 60} m 內才撿得起來；遠的瓶子在雷達上只是一團模糊的訊號，走近才變清楚。每個瓶子只能被一個人撿走，撿到就收進「瓶中信收藏」。汪星海上的瓶子：搭火箭到汪星，拖曳雷達走到瓶子旁邊就能撿。`,
+    '撿到不適合的內容可以檢舉，檢舉後就藏起來交給管理者確認。分享到 Threads 不會帶內容。不用登入：你丟的、撿到的瓶子記在這個瀏覽器裡，清除瀏覽器資料就看不到了。',
   ]
     .map((t) => `<li>${esc(t)}</li>`)
     .join('');
-  const near = bottles
+  // 你在汪星：列汪星海上的瓶子
+  const pool = youOn === 'woof' ? woofBottles : bottles;
+  const near = pool
     .filter((b) => !b.mine && !b.picked)
     .map((b) => ({ b, d: bottleDistM(b) }))
     .sort((a, c) => a.d - c.d)
     .slice(0, 8);
   bottleNear.innerHTML = near.length
-    ? `<h3 class="spot-mine-title">附近的瓶子</h3><ul class="report-events">${near
+    ? `<h3 class="spot-mine-title">${youOn === 'woof' ? '汪星海上的瓶子' : '附近的瓶子'}</h3><ul class="report-events">${near
         .map(({ b, d }) => {
-          const st = bottleState(b) === 'pick' ? '撿得到了！' : `還差約 ${formatKm(Math.max(0, d - pickRadiusM()) / 1000)}`;
-          return `<li><button type="button" data-bottle="${b.id}"><b>漂流瓶・約 ${esc(formatKm(d / 1000))} ${esc(compassLabel(bearingDeg(origin, b)))}</b><small>${esc(st)}・${ago(b.createdAt)}丟的</small></button></li>`;
+          const st = bottleState(b) === 'pick' ? '撿得到了！' : Number.isFinite(d) ? `還差約 ${formatKm(Math.max(0, d - pickRadiusM()) / 1000)}` : '把雷達的中心移回汪星';
+          const dist = Number.isFinite(d) ? `約 ${formatKm(d / 1000)} ${bottleDir(b)}` : '汪星的海上';
+          return `<li><button type="button" data-bottle="${b.id}"><b>${bottleNo(b.id)}・${esc(dist)}</b><small>${esc(st)}・${ago(b.createdAt)}丟的</small></button></li>`;
         })
         .join('')}</ul>`
-    : '<p class="muted sheet-note">還沒有別人的瓶子，丟第一個吧！</p>';
+    : `<p class="muted sheet-note">${youOn === 'woof' ? '汪星的海上還沒有瓶子。' : '附近還沒有別人的瓶子，丟第一個吧！'}</p>`;
 }
 
 /** 漂流瓶面板裡的額度、我丟的瓶子、收藏頁入口 */
 function paintMyBottles(): void {
   const data = myBottlesData;
   if (!data) return;
-  const { dropped, picked, letters, quota } = data;
-  bottleQuota.textContent = `・今天還能丟 ${quota.left} 個${quota.bonus > 0 ? `（回收 ${quota.bonus} 個，多 ${quota.bonus} 個）` : ''}`;
+  const { dropped, letters, quota } = data;
+  bottleQuota.textContent = `・今天還能丟 ${quota.left} 個`;
   const seen = Number(lsGet(LS_BOTTLE_SEEN) ?? 0);
   const statusText = (b: (typeof dropped)[number]): string => {
     const drift = driftText(b.driftM);
     return b.status === 'picked'
-      ? `被撿走了${b.pickedAt ? `（${ago(b.pickedAt)}）` : ''}${drift ? `・漂了 ${drift} 才被撿到` : ''}`
+      ? `被撿走了${b.pickedAt ? `（${ago(b.pickedAt)}）` : ''}${b.world === 'woof' ? '・在汪星的海上被撿到' : drift ? `・漂了 ${drift} 才被撿到` : ''}`
       : b.status === 'hidden'
         ? '被檢舉，暫時藏起來'
         : b.status === 'removed'
           ? '已被管理者移除'
           : b.status === 'deleted'
-            ? '沒人撿，已經漂走'
-            : `還沒被撿走${drift ? `・已經漂了 ${drift}` : ''}・${daysLeft(b.expiresAt)}後漂走`;
+            ? '沒人撿，沉下去了'
+            : b.world === 'woof'
+              ? `漂到汪星的海上了・${daysLeft(b.expiresAt)}後沉下去`
+              : `在附近漂${drift ? `（漂了 ${drift}）` : ''}・${seaIn(b.createdAt)}後漂到汪星的海上`;
   };
   bottleMine.innerHTML =
-    `<button type="button" class="btn letters-open" data-act="letters">瓶中信收藏<small>撿到 ${picked.length} 個・收藏 ${letters.length} 封</small></button>` +
+    `<button type="button" class="btn letters-open" data-act="letters">瓶中信收藏<small>收藏 ${letters.length} 封</small></button>` +
     (dropped.length
       ? `<h3 class="spot-mine-title">我丟的瓶子</h3><ul class="spot-mine">${dropped
           .map((b) => {
             const fresh = b.pickedAt !== null && b.pickedAt > seen;
-            return `<li><span class="spot-mine-body">「${esc(b.text)}」<small>${fresh ? '<b class="new-tag">新</b>' : ''}${ago(b.createdAt)}丟的・${esc(statusText(b))}</small></span>${
+            return `<li><span class="spot-mine-body"><b class="bottle-no">${bottleNo(b.id)}</b>「${esc(b.text)}」<small>${fresh ? '<b class="new-tag">新</b>' : ''}${ago(b.createdAt)}丟的・${esc(statusText(b))}</small></span>${
               b.status === 'active' || b.status === 'hidden' ? `<button type="button" class="chip spot-cancel" data-delete-bottle="${b.id}">收回</button>` : ''
             }</li>`;
           })
@@ -2470,59 +2625,52 @@ function openLettersPage(open: boolean): void {
   }
 }
 
+/** 收藏的信：一張張牛皮紙，寫著編號、什麼時候在哪裡撿到的 */
 function renderLettersPage(): void {
   const data = myBottlesData;
   if (!data) {
-    lettersPicked.innerHTML = '<p class="muted">讀取中…</p>';
-    lettersList.innerHTML = '';
+    lettersList.innerHTML = '<p class="muted">讀取中…</p>';
     return;
   }
-  const { picked, letters } = data;
-  const meta = (b: { createdAt: number; pickedAt: number; driftM: number }): string => {
+  const { letters } = data;
+  const meta = (b: MyBottles['letters'][number]): string => {
     const drift = driftText(b.driftM);
-    return `${fmtDay(b.pickedAt)} 撿到・${ago(b.createdAt)}丟的${drift ? `・漂了 ${drift} 才到你手上` : ''}`;
+    return `${fmtDay(b.pickedAt)} ${b.world === 'woof' ? '在汪星的海上' : ''}撿到・${ago(b.createdAt)}丟的${drift ? `・漂了 ${drift} 才到你手上` : ''}`;
   };
-  lettersPicked.innerHTML = picked.length
-    ? `<h3>撿到的瓶子（${picked.length}）</h3>
-      <p class="muted small">喜歡的信可以收藏；回收瓶子今天就能多丟一個。兩個都可以做，收藏的信回收後還在。</p>
-      <ul class="letter-cards">${picked
-        .map(
-          (b) => `<li class="letter-card">
-            <blockquote class="bottle-note">${esc(b.text)}</blockquote>
-            <small class="muted">${esc(meta(b))}</small>
-            <div class="sheet-actions">
-              <button type="button" class="btn${b.collected ? '' : ' primary'}" data-collect="${b.id}" data-on="${b.collected ? '0' : '1'}">${b.collected ? '已收藏' : '收藏這封信'}</button>
-              <button type="button" class="btn" data-recycle="${b.id}">回收瓶子</button>
-              <button type="button" class="btn subtle" data-report="${b.id}">檢舉</button>
-            </div>
-          </li>`,
-        )
-        .join('')}</ul>`
-    : '<h3>撿到的瓶子</h3><p class="muted">沒有還沒回收的瓶子。到雷達上找找看，走到瓶子旁邊就撿得起來。</p>';
   lettersList.innerHTML = letters.length
     ? `<h3>收藏的信（${letters.length}）</h3><ul class="letter-grid">${letters
         .map(
           (l) => `<li class="letter-paper">
+            <span class="kraft-no">${bottleNo(l.id)}</span>
             <p class="letter-text">${esc(l.text)}</p>
             <small class="muted">${esc(meta(l))}</small>
-            <button type="button" class="link-btn" data-collect="${l.id}" data-on="0">移出收藏</button>
+            <div class="letter-acts">
+              <button type="button" class="link-btn" data-proof="${l.id}">瓶子證明</button>
+              ${shareLink(l.id, false, 'link-btn')}
+              <button type="button" class="link-btn" data-report="${l.id}">檢舉</button>
+              <button type="button" class="link-btn" data-uncollect="${l.id}">移出收藏</button>
+            </div>
           </li>`,
         )
         .join('')}</ul>`
-    : '<h3>收藏的信</h3><p class="muted">還沒有收藏的信。撿到喜歡的瓶子，按「收藏這封信」就會留在這裡。</p>';
+    : '<h3>收藏的信</h3><p class="muted">還沒有收藏的信。到雷達上找找看，走到瓶子旁邊撿起來，信就會收進這裡。</p>';
 }
 
 async function onLettersClick(e: Event): Promise<void> {
   const t = e.target as Element;
-  const c = t.closest<HTMLButtonElement>('[data-collect]');
-  const r = t.closest<HTMLButtonElement>('[data-recycle]');
+  const proof = t.closest<HTMLButtonElement>('[data-proof]');
+  if (proof) {
+    const l = myBottlesData?.letters.find((x) => x.id === Number(proof.dataset.proof));
+    if (l) void showProof(l.id, l.text);
+    return;
+  }
+  const u = t.closest<HTMLButtonElement>('[data-uncollect]');
   const rp = t.closest<HTMLButtonElement>('[data-report]');
-  const btn = c ?? r ?? rp;
+  const btn = u ?? rp;
   if (!btn) return;
   btn.disabled = true;
   let ok = false;
-  if (c) ok = await toggleCollect(Number(c.dataset.collect), c.dataset.on === '1');
-  else if (r) ok = await recycle(Number(r.dataset.recycle));
+  if (u) ok = await removeLetter(Number(u.dataset.uncollect));
   else if (rp && window.confirm('這封信有攻擊性內容、廣告或個人資料？檢舉後會交給管理者確認。')) {
     const res = await reportBottle(Number(rp.dataset.report));
     showBanner(bannerEl, res.ok ? '謝謝檢舉，這封信已經藏起來，會交給管理者確認' : res.message, 3000);
@@ -2532,14 +2680,21 @@ async function onLettersClick(e: Event): Promise<void> {
   if (!ok) btn.disabled = false;
 }
 
+/** 丟瓶子的動畫進行中（不能再按一次） */
+let throwing = false;
+
 async function submitBottle(): Promise<void> {
   const text = bottleText.value.trim();
   if (!text) {
-    bottleResult.innerHTML = '<p class="msg error">寫一句話再丟吧</p>';
+    bottleResult.innerHTML = '<p class="msg error">寫一段話再丟吧</p>';
     return;
   }
   if (xLength(text) > bottleMaxWeight()) {
     bottleResult.innerHTML = '<p class="msg error">太長了：字數比照 X，中文最多 140 字、英文最多 280 字</p>';
+    return;
+  }
+  if (youOn === 'woof') {
+    bottleResult.innerHTML = '<p class="msg error">搭火箭回地球才能丟瓶子</p>';
     return;
   }
   if (origin.source !== 'gps') {
@@ -2549,19 +2704,129 @@ async function submitBottle(): Promise<void> {
   bottleDropBtn.disabled = true;
   bottleResult.innerHTML = '<p class="msg busy">審核內容中</p>';
   const r = await dropBottle(text, origin);
-  bottleDropBtn.disabled = false;
   if (!r.ok) {
+    updateDropBtn();
     bottleResult.innerHTML = `<p class="msg error">${esc(r.message)}</p>`;
     return;
   }
   bottleTexts.set(r.data.bottle.id, r.data);
-  bottles = [r.data.bottle, ...bottles.filter((b) => b.id !== r.data.bottle.id)];
-  bottleText.value = '';
   lsSet(LS_BOTTLE_DROPPED, '1');
-  bottleResult.innerHTML = `<p class="msg">丟出去了！瓶子會順著洋流漂 ${keywordRules?.sources?.bottles?.ttlDays ?? 7} 天，被撿走時這裡會通知你。</p>`;
-  renderBottleSheet();
+  bottleResult.innerHTML = '';
+  // 牛皮紙捲起來、裝進瓶子、塞上軟木塞，丟到雷達上；落水後打開這個瓶子（編號、分享）
+  throwing = true;
+  await throwBottleFx(text, bottleText.closest('.kraft') ?? bottleText, () => (bottleSheet.hidden = true));
+  throwing = false;
+  bottleText.value = '';
+  bottles = [r.data.bottle, ...bottles.filter((b) => b.id !== r.data.bottle.id)];
+  updateDropBtn();
   void reloadMyBottles();
-  render();
+  selectedBottle = null;
+  selectBottle(r.data.bottle.id);
+  showBanner(bannerEl, `丟出去了！${bottleNo(r.data.bottle.id)} 會在附近漂 ${bottleRules()?.seaHours ?? 24} 小時，被撿走時會通知你`, 3500);
+}
+
+/** 雷達（或地圖）正中間在畫面上的哪裡：瓶子丟到這裡 */
+function landingPoint(): { x: number; y: number } {
+  const el = view === 'map' ? document.querySelector('#map') : document.querySelector('#radar-view .me');
+  const r = el?.getBoundingClientRect();
+  return r && r.width + r.height > 0 ? { x: r.left + r.width / 2, y: r.top + r.height / 2 } : { x: innerWidth / 2, y: innerHeight / 3 };
+}
+
+/**
+ * 丟瓶子的動畫（約 3 秒，可愛不可怕）：牛皮紙從下往上捲成一捲 → 轉直、縮小放進玻璃瓶 → 軟木塞塞上 →
+ * 瓶子轉著圈拋到雷達正中間（你的位置）→ 落水，一圈圈水波，瓶子晃一晃。
+ * 開始拋的時候 hide() 收起面板（手機上面板蓋住雷達）；系統設定減少動態就直接跳過
+ */
+async function throwBottleFx(text: string, paperEl: Element, hide: () => void): Promise<void> {
+  if (matchMedia('(prefers-reduced-motion: reduce)').matches) {
+    hide();
+    return;
+  }
+  const from = paperEl.getBoundingClientRect();
+  const fx = document.createElement('div');
+  fx.className = 'bottle-fx';
+  fx.setAttribute('aria-hidden', 'true');
+  const paper = document.createElement('div');
+  paper.className = 'bottle-fx-paper';
+  paper.textContent = text;
+  Object.assign(paper.style, { left: `${from.left}px`, top: `${from.top}px`, width: `${from.width}px`, height: `${from.height}px` });
+  const roll = document.createElement('div');
+  roll.className = 'bottle-fx-roll';
+  Object.assign(roll.style, { left: `${from.left}px`, top: `${from.bottom - 9}px`, width: `${from.width}px` });
+  // 玻璃瓶：寬 44、高 92，瓶口在上面；裡面一捲紙、軟木塞另外動
+  const cx = from.left + from.width / 2;
+  const cy = from.top + from.height / 2;
+  const bottle = document.createElement('div');
+  bottle.className = 'bottle-fx-bottle';
+  Object.assign(bottle.style, { left: `${cx - 22}px`, top: `${cy - 46}px` });
+  bottle.innerHTML = `<svg viewBox="0 0 44 92" width="44" height="92">
+    <rect class="scroll" x="17" y="44" width="10" height="34" rx="4" />
+    <path class="glass" d="M16 14 h12 v10 c0 4 10 8 10 18 v40 a8 8 0 0 1 -8 8 h-16 a8 8 0 0 1 -8 -8 v-40 c0 -10 10 -14 10 -18 z" />
+    <path class="shine" d="M12 46 v30" />
+    <rect class="cork" x="15" y="2" width="14" height="14" rx="3" />
+  </svg>`;
+  fx.append(paper, roll, bottle);
+  document.body.append(fx);
+  // 原本那張紙先藏起來（捲起來的是蓋在上面的這張）
+  const real = paperEl as HTMLElement;
+  real.style.visibility = 'hidden';
+  const run = (el: Element, frames: Keyframe[], o: KeyframeAnimationOptions): Promise<unknown> => el.animate(frames, { fill: 'forwards', ...o }).finished;
+  const cork = bottle.querySelector('.cork')!;
+  const scroll = bottle.querySelector('.scroll')!;
+  try {
+    // 1. 牛皮紙從下往上捲起來（0.8 秒）
+    await Promise.all([
+      run(paper, [{ transform: 'scaleY(1)' }, { transform: 'scaleY(0.04)', opacity: 0.6 }], { duration: 800, easing: 'ease-in' }),
+      run(roll, [{ transform: 'translateY(0) scaleY(0.4)', opacity: 0 }, { transform: `translateY(${-from.height + 9}px) scaleY(1)`, opacity: 1 }], { duration: 800, easing: 'ease-in' }),
+    ]);
+    paper.remove();
+    // 2. 捲好的紙轉直、縮小，放進瓶子；瓶子同時出現（0.7 秒）
+    // 捲好的紙在最上面（中心在 from.top + 9），移到瓶子裡那捲紙的位置（中心 cy + 15）；位移都從一開始的位置（中心 from.bottom）算
+    await Promise.all([
+      run(roll, [{ transform: `translateY(${-from.height + 9}px)` }, { transform: `translate(0, ${cy + 15 - from.bottom}px) rotate(90deg) scaleX(${34 / from.width})`, opacity: 0.2 }], { duration: 700, easing: 'ease-in-out' }),
+      run(bottle, [{ opacity: 0, transform: 'scale(0.6)' }, { opacity: 1, transform: 'scale(1)' }], { duration: 500, easing: 'ease-out' }),
+      run(scroll, [{ opacity: 0 }, { opacity: 0, offset: 0.6 }, { opacity: 1 }], { duration: 700 }),
+    ]);
+    roll.remove();
+    // 3. 軟木塞塞上（0.35 秒，彈一下）
+    await run(cork, [{ transform: 'translateY(-26px)', opacity: 0 }, { transform: 'translateY(2px)', opacity: 1, offset: 0.75 }, { transform: 'translateY(0)', opacity: 1 }], { duration: 350, easing: 'ease-out' });
+    // 4. 收起面板，瓶子轉著圈拋到雷達正中間（1.1 秒，拋物線）
+    hide();
+    await new Promise((r) => requestAnimationFrame(() => r(null)));
+    const to = landingPoint();
+    const [dx, dy] = [to.x - cx, to.y - cy];
+    const arc = Math.min(220, 80 + Math.hypot(dx, dy) * 0.35);
+    const frames: Keyframe[] = [];
+    for (let i = 0; i <= 12; i++) {
+      const t = i / 12;
+      frames.push({ transform: `translate(${(dx * t).toFixed(1)}px, ${(dy * t - arc * 4 * t * (1 - t)).toFixed(1)}px) rotate(${Math.round(-20 + 560 * t)}deg) scale(${(1 - 0.55 * t).toFixed(3)})` });
+    }
+    await run(bottle, frames, { duration: 1100, easing: 'cubic-bezier(.3,.1,.5,1)' });
+    // 5. 落水：一圈圈水波，瓶子斜斜地晃一晃（0.9 秒）
+    for (const delay of [0, 220]) {
+      const ring = document.createElement('div');
+      ring.className = 'bottle-fx-ripple';
+      Object.assign(ring.style, { left: `${to.x}px`, top: `${to.y}px` });
+      fx.append(ring);
+      void run(ring, [{ transform: 'translate(-50%, -50%) scale(0.2)', opacity: 0.9 }, { transform: 'translate(-50%, -50%) scale(1.6)', opacity: 0 }], { duration: 800, delay, easing: 'ease-out' });
+    }
+    const end = `translate(${dx}px, ${dy}px)`;
+    await run(
+      bottle,
+      [
+        { transform: `${end} rotate(540deg) scale(0.45)` },
+        { transform: `${end} rotate(520deg) scale(0.45)`, offset: 0.35 },
+        { transform: `${end} rotate(555deg) scale(0.45)`, offset: 0.7 },
+        { transform: `${end} rotate(540deg) scale(0.4)`, opacity: 0 },
+      ],
+      { duration: 900, easing: 'ease-in-out' },
+    );
+  } catch {
+    hide();
+  } finally {
+    fx.remove();
+    real.style.visibility = '';
+  }
 }
 
 /** 活動卡片標題下面：「還有 4 小時・1.2 km」（進行中寫「進行中」；職缺、刊登沒有開始時間，只寫距離）；距離從打開卡片時雷達的中心算 */
@@ -4488,6 +4753,7 @@ async function refresh(): Promise<void> {
   const kws = forModule.current ? followed() : [];
   // 漂流瓶跟關鍵字無關，一起抓
   const bottleReq = bottlesOn() ? fetchBottles(origin, FETCH_RADIUS_KM) : Promise.resolve([] as BottleOut[]);
+  void loadWoofBottles();
   if (forModule.current && kws.length === 0) {
     events = [];
     bottles = await bottleReq;
@@ -4897,6 +5163,7 @@ function switchModule(id: ModuleId, fetch = true): void {
   events = [];
   routes = [];
   bottles = [];
+  woofBottles = [];
   selectedId = null;
   selectedRoute = null;
   selectedLandmark = null;
@@ -6675,10 +6942,7 @@ function wireControls(): void {
   bottleSheet.querySelector('[data-act="close"]')?.addEventListener('click', () => openBottleSheet(false));
   wireTapOutside();
   wireSheetDrag();
-  bottleText.addEventListener('input', () => {
-    const over = updateBottleCount();
-    bottleDropBtn.disabled = origin.source !== 'gps' || over;
-  });
+  bottleText.addEventListener('input', updateDropBtn);
   bottleForm.addEventListener('submit', (e) => {
     e.preventDefault();
     void submitBottle();
@@ -6697,7 +6961,7 @@ function wireControls(): void {
     b.disabled = true;
     const id = Number(b.dataset.deleteBottle);
     const r = await deleteBottle(id);
-    if (r.ok) bottles = bottles.filter((x) => x.id !== id);
+    if (r.ok) removeBottleMark(id);
     bottleResult.innerHTML = r.ok ? '<p class="msg">瓶子收回了。</p>' : `<p class="msg error">${esc(r.message)}</p>`;
     renderBottleSheet();
     void reloadMyBottles();
@@ -6751,9 +7015,8 @@ function wireControls(): void {
 }
 
 async function boot(): Promise<void> {
-  const lab = new URLSearchParams(location.search).get('lab');
-  if (lab === 'bottles') lsSet(LS_LAB_BOTTLES, '1');
-  if (lab === 'off') lsSet(LS_LAB_BOTTLES, null);
+  // 以前的實驗功能開關（v1.593 起漂流瓶直接開放）
+  lsSet('dr.lab.bottles', null);
   wireControls();
   wireFullScreen();
   updateNotifyBtn();
@@ -6795,6 +7058,9 @@ async function boot(): Promise<void> {
   await refresh();
   void checkBottleNews();
   if (location.hash === '#letters' && bottlesOn()) openLettersPage(true);
+  // 分享到 Threads 的漂流瓶連結：?bottle=編號
+  const sharedBottle = Number(new URLSearchParams(location.search).get('bottle'));
+  if (sharedBottle > 0 && bottlesOn()) void openSharedBottle(sharedBottle);
   const params = new URLSearchParams(location.search);
   const openParam = params.get('open');
   if (openParam === 'theme') openThemeSheet(true);

@@ -2048,14 +2048,36 @@ path.map-seam-walkers { --p: 15px; }
 @keyframes bottle-glow { 50% { box-shadow: 0 0 0 6px rgba(67, 184, 212, 0.15); } }
 @media (prefers-reduced-motion: reduce) { #bottle-btn.glow { animation: none; } }
 .bottle-form { display: flex; flex-direction: column; gap: 8px; }
-.bottle-form textarea {
-  font: inherit; font-size: 16px; color: var(--text); background: var(--card); resize: none;
-  border: var(--border-w) solid var(--line); border-radius: var(--card-radius); padding: 10px 12px;
+/* 牛皮紙（v1.593）：寫漂流瓶的紙、撿到的信、收藏的信都是這一張；紙是實物，深色主題也一樣是牛皮紙色 */
+.kraft, .kraft-note, .letter-paper {
+  --kraft-ink: #47321d;
+  color: var(--kraft-ink);
+  background-color: #d5b385;
+  background-image:
+    radial-gradient(rgba(110, 72, 34, 0.13) 0.8px, transparent 1.2px),
+    radial-gradient(rgba(255, 246, 225, 0.22) 0.8px, transparent 1.4px),
+    linear-gradient(160deg, rgba(255, 255, 255, 0.14), rgba(80, 50, 20, 0.08));
+  background-size: 7px 7px, 11px 11px, 100% 100%;
+  background-position: 0 0, 3px 5px, 0 0;
+  border: 1px solid #b38d5c; border-radius: 4px;
+  box-shadow: 2px 3px 0 rgba(0, 0, 0, 0.13);
 }
-.bottle-form textarea:focus { outline: 2px solid var(--highlight); outline-offset: 1px; }
+.kraft { padding: 8px 14px 6px; }
+.kraft:focus-within { outline: 2px solid var(--highlight); outline-offset: 2px; }
+.kraft textarea {
+  display: block; width: 100%; font: inherit; font-size: 17px; line-height: 28px; font-weight: 600; color: var(--kraft-ink);
+  background: repeating-linear-gradient(transparent 0 27px, rgba(92, 62, 30, 0.22) 27px 28px); background-attachment: local;
+  border: 0; outline: 0; resize: none; padding: 0;
+}
+.kraft textarea::placeholder { color: rgba(71, 50, 29, 0.5); }
+.kraft-note { position: relative; margin: 4px 0 10px; padding: 26px 16px 12px; }
+.kraft-note p { margin: 0; font-size: 18px; line-height: 1.6; font-weight: 700; white-space: pre-wrap; word-break: break-word; }
+/* 編號：像蓋在紙角的小章 */
+.kraft-no { position: absolute; top: 6px; right: 8px; padding: 0 5px; font: 700 11px/16px ui-monospace, 'SF Mono', Menlo, monospace; color: #7a5530; border: 1px dashed #9a7446; border-radius: 3px; transform: rotate(-3deg); }
+.bottle-no { font: 700 12px ui-monospace, 'SF Mono', Menlo, monospace; color: var(--muted); }
+.spot-mine-body .bottle-no { margin-right: 4px; }
 .bottle-form-row { display: flex; align-items: center; justify-content: space-between; }
 #bottle-count.over { color: #e5484d; font-weight: 700; }
-.sheet-body blockquote.bottle-note { margin: 4px 0 10px; padding: 14px 16px; font-size: 18px; line-height: 1.6; font-weight: 700; color: #1d3b44; background: linear-gradient(135deg, #e9f8fb, #c9eef6); border: 1.5px solid #8fdcec; border-radius: 14px; }
 
 /* 自己丟的瓶子被撿走了：按鈕右上角小紅點 */
 #bottle-btn { position: relative; }
@@ -2081,23 +2103,54 @@ body.letters-open { overflow: hidden; }
 .letters-body h3 { font-size: 16px; margin: 18px 0 6px; }
 .letters-body .small { font-size: 12px; line-height: 1.5; }
 .letters-body .muted { color: var(--muted); }
-.letter-cards { list-style: none; margin: 8px 0 0; padding: 0; display: flex; flex-direction: column; gap: 14px; }
-.letter-card { display: flex; flex-direction: column; gap: 8px; }
-.letter-card blockquote.bottle-note { margin: 0; padding: 14px 16px; font-size: 18px; line-height: 1.6; font-weight: 700; color: #1d3b44; background: linear-gradient(135deg, #e9f8fb, #c9eef6); border: 1.5px solid #8fdcec; border-radius: 14px; white-space: pre-wrap; }
-.letter-grid { list-style: none; margin: 8px 0 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 14px; }
-/* 收藏的信：泛黃的信紙 */
-.letter-paper {
-  position: relative; display: flex; flex-direction: column; gap: 8px; padding: 18px 16px 12px;
-  color: #3b2f1e; background: repeating-linear-gradient(#fdf6e3 0 27px, #eadfc4 27px 28px); border: 1px solid #d9c9a3; border-radius: 6px;
-  box-shadow: 2px 3px 0 rgba(0, 0, 0, 0.12); transform: rotate(var(--tilt, -0.6deg));
-}
+.letter-grid { list-style: none; margin: 8px 0 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 14px; }
+/* 收藏的信：丟的人寫的那張牛皮紙 */
+.letter-paper { position: relative; display: flex; flex-direction: column; gap: 8px; padding: 22px 16px 10px; transform: rotate(var(--tilt, -0.6deg)); }
 .letter-paper:nth-child(2n) { --tilt: 0.7deg; }
 .letter-paper:nth-child(3n) { --tilt: -0.3deg; }
 .letter-paper .letter-text { margin: 0; font-size: 17px; line-height: 28px; font-weight: 600; white-space: pre-wrap; word-break: break-word; }
-.letter-paper small.muted { color: #7a6a4f; font-size: 12px; }
-.letter-paper .link-btn { align-self: flex-end; color: #7a6a4f; font-size: 12px; }
+.letters-body .letter-paper small.muted { color: #6b4b2a; font-size: 12px; }
+.letter-acts { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 4px 12px; }
+.letter-acts .link-btn { color: #6b4b2a; font-size: 12px; }
 .letters-note { margin-top: 24px; }
 @media (prefers-reduced-motion: reduce) { .letter-paper { transform: none; } }
+
+/* 瓶子證明（蓋在畫面上的一層） */
+.bottle-proof { max-width: 420px; align-items: stretch; }
+.bottle-proof dl { margin: 0; color: #f3eee4; font-size: 13px; }
+.bottle-proof dt { color: #cfc4b2; font-size: 12px; margin-top: 8px; }
+.bottle-proof dd { margin: 2px 0 0; font-size: 15px; font-weight: 700; }
+.bottle-proof dd.mono { font: 600 12px/1.5 ui-monospace, 'SF Mono', Menlo, monospace; word-break: break-all; }
+.bottle-proof .tc-note { max-width: none; text-align: left; }
+.bottle-proof .sheet-actions { justify-content: center; }
+.proof-result { margin: 0; min-height: 1.4em; font-size: 14px; font-weight: 700; color: #f3eee4; text-align: center; }
+.proof-result.ok { color: #7ee2a8; }
+.proof-result.bad { color: #ffb3a7; }
+
+/* 丟瓶子的動畫：牛皮紙捲起來、裝進瓶子、丟到雷達上（main.ts 的 throwBottleFx） */
+.bottle-fx { position: fixed; inset: 0; z-index: 1100; pointer-events: none; }
+.bottle-fx > * { position: fixed; }
+.bottle-fx-paper {
+  overflow: hidden; padding: 8px 14px; font-size: 17px; line-height: 28px; font-weight: 600; white-space: pre-wrap; word-break: break-word;
+  color: #47321d; background: #d5b385 linear-gradient(160deg, rgba(255, 255, 255, 0.14), rgba(80, 50, 20, 0.08)); border: 1px solid #b38d5c; border-radius: 4px;
+  transform-origin: 50% 0;
+}
+.bottle-fx-roll {
+  height: 18px; border-radius: 9px;
+  background: linear-gradient(#e2c79f, #c39a64 45%, #a87d48 80%, #c9a26c); border: 1px solid #9a7446;
+}
+.bottle-fx-bottle { width: 44px; height: 92px; opacity: 0; transform-origin: 50% 55%; filter: drop-shadow(0 4px 6px rgba(0, 0, 0, 0.25)); }
+.bottle-fx-bottle svg { display: block; overflow: visible; }
+.bottle-fx-bottle .glass { fill: rgba(170, 228, 240, 0.55); stroke: #2a7f93; stroke-width: 2; stroke-linejoin: round; }
+.bottle-fx-bottle .shine { stroke: rgba(255, 255, 255, 0.85); stroke-width: 3; stroke-linecap: round; }
+.bottle-fx-bottle .scroll { fill: #d5b385; stroke: #9a7446; stroke-width: 1.2; opacity: 0; }
+.bottle-fx-bottle .cork { fill: #b98552; stroke: #7a5530; stroke-width: 1.2; opacity: 0; }
+.bottle-fx-ripple { width: 70px; height: 70px; border-radius: 50%; border: 3px solid #43b8d4; transform: translate(-50%, -50%); opacity: 0; }
+
+/* 漂到汪星海上的瓶子：在水上輕輕晃 */
+.radar .woof-bottle .body { animation: woof-bob 2.8s ease-in-out infinite; }
+@keyframes woof-bob { 50% { transform: translateY(-1.5px) rotate(6deg); } }
+@media (prefers-reduced-motion: reduce) { .radar .woof-bottle .body { animation: none; } }
 
 /* 清單最下面的版號 */
 .app-version { margin: 18px 0 8px; font-size: 11px; text-align: center; opacity: 0.8; }
