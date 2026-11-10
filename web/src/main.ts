@@ -2953,6 +2953,39 @@ async function onLettersClick(e: Event): Promise<void> {
   if (!ok) btn.disabled = false;
 }
 
+/**
+ * 丟出去之前的確認：把規則一條一條講清楚（v1.620 使用者說的），按「捲起來丟出去」才丟；「再想想」或點旁邊、Esc 就不丟。
+ * 規則照伺服器給的數字（漂多久、汪星留幾天、多近收藏得到、每天幾個）
+ */
+function confirmThrow(): Promise<boolean> {
+  const r = bottleRules();
+  const left = myBottlesData?.quota.left;
+  const rules = [
+    '瓶子會丟在你現在的位置附近（隨機漂開約 100 m，不會在你站的地方），之後在附近 200 m 內慢慢漂。',
+    `${r?.seaHours ?? 24} 小時後漂到汪星的海上，${r?.woofDays ?? 30} 天後沉下去。`,
+    `走到瓶子 ${r?.pickRadiusM ?? 500} m 內的人都看得到內容和照片；第一個按「收藏」的人會把它收進瓶中信收藏（收藏了別人照樣看得到）。`,
+    `丟出去 24 小時內、你走回瓶子 ${r?.pickRadiusM ?? 500} m 內才收得回來；收回的也算今天的額度。`,
+    `每天最多丟 ${r?.perDay ?? 3} 個${left !== undefined ? `，丟了這個今天還剩 ${Math.max(0, left - 1)} 個` : ''}。`,
+    '送出前會自動審核：辱罵或攻擊任何人（包括候選人、政黨）、謠言、廣告、連結、電話、帳號、個人資料都不會通過。',
+  ];
+  return new Promise((resolve) => {
+    let ok = false;
+    const el = overlay(
+      'tc-rules',
+      `<div class="tc-box bottle-rules">
+        <h2 class="tc-title">丟出去之前</h2>
+        <ul>${rules.map((t) => `<li>${esc(t)}</li>`).join('')}</ul>
+        <div class="sheet-actions"><button type="button" class="chip" data-close>再想想</button><button type="button" class="chip primary" data-act="throw">捲起來丟出去</button></div>
+      </div>`,
+      () => resolve(ok),
+    );
+    el.querySelector('[data-act="throw"]')?.addEventListener('click', () => {
+      ok = true;
+      el.querySelector<HTMLElement>('[data-close]')?.click();
+    });
+  });
+}
+
 /** 丟瓶子的動畫進行中（不能再按一次） */
 let throwing = false;
 
@@ -2971,8 +3004,8 @@ async function submitBottle(): Promise<void> {
   }
   if (youOn === 'woof') return say('搭火箭回地球才能丟瓶子');
   if (origin.source !== 'gps') return say('要先按右上角「定位」用 GPS，瓶子會丟在你現在的位置附近');
-  // 按瓶子、軟木塞先確認（v1.601 使用者說按軟木塞要再確認是否送出）
-  if (!window.confirm('要把這張紙捲起來，裝進瓶子送出去嗎？')) return;
+  // 按瓶子、軟木塞先確認，確認前把規則講清楚（v1.601 使用者說要再確認是否送出；v1.620 說丟出前把規則說清楚）
+  if (!(await confirmThrow())) return;
   const photo = bottlePhotoData;
   say('');
   bottleDropEl.classList.add('busy');

@@ -2250,7 +2250,12 @@ body.letters-open { overflow: hidden; }
 @media (prefers-reduced-motion: reduce) { .letter-paper { transform: none; } }
 
 /* 瓶子證明（蓋在畫面上的一層）：不用模糊背景（後面的雷達一直在動，每一格都要重新模糊，點開、關閉會卡），改成深一點的底 */
-.tc-overlay.tc-proof { backdrop-filter: none; -webkit-backdrop-filter: none; background: rgba(10, 14, 20, 0.9); }
+.tc-overlay.tc-proof, .tc-overlay.tc-rules { backdrop-filter: none; -webkit-backdrop-filter: none; background: rgba(10, 14, 20, 0.9); }
+/* 丟漂流瓶之前的規則（v1.620） */
+.bottle-rules { max-width: 440px; align-items: stretch; }
+.bottle-rules ul { margin: 0; padding-left: 20px; color: #f3eee4; font-size: 14px; line-height: 1.6; }
+.bottle-rules li + li { margin-top: 6px; }
+.bottle-rules .sheet-actions { justify-content: center; }
 .bottle-proof { max-width: 420px; align-items: stretch; }
 .bottle-proof dl { margin: 0; color: #f3eee4; font-size: 13px; }
 .bottle-proof dt { color: #cfc4b2; font-size: 12px; margin-top: 8px; }
