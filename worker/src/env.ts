@@ -17,6 +17,8 @@ export interface Env {
   SPOT_AUTO_REVIEW?: string;
   /** "false" 時關掉漂流瓶（有人亂丟時用） */
   BOTTLES_ENABLED?: string;
+  /** 漂流瓶的照片（R2，v1.594）；沒綁就不收照片 */
+  BOTTLE_PHOTOS?: R2Bucket;
   /** "false"：排程不自動抓資料（Threads 關鍵字搜尋、新聞、官方航線與合併），資料只從使用者回報來 */
   AUTO_SOURCES?: string;
   /** 使用者回報收哪些模組："true"（或沒設）全部、"false" 全部鎖住、或列出模組（"current,food"）；鎖住的不收貼連結回報、確認、補充、回報已發完、意見回饋 */

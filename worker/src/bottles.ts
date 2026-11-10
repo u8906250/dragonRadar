@@ -11,6 +11,8 @@
  *   汪星上的「你的位置」是雷達正中間（搭火箭過去，拖曳就是走路），一樣要 60 m 內才撿得到。
  * - 編號：瓶子的流水號就是編號（前端寫成 No.000123）；瓶子證明（bottleProof）＝編號、丟的時間、內容的 SHA-256，伺服器簽章，之後可以驗證。
  * - 每天最多丟 3 個（以前回收撿到的瓶子多一個，拿掉了）。
+ * - 照片（v1.594）：可以附一張。瀏覽器先縮小、重新存成 JPEG，伺服器再拿掉 JPEG 裡的 EXIF（GPS 等）、交給 AI 看圖審核，
+ *   存在 R2（BOTTLE_PHOTOS），只有丟的人和撿到的人拿得到；瓶子刪掉時一起刪。
  * - BOTTLES_ENABLED = "false" 可以整個關掉。
  */
 import type { Env } from './env';
@@ -84,6 +86,7 @@ interface BottleRow {
   drifted_at: number | null;
   world: BottleWorld;
   sea_at: number | null;
+  photo_key: string | null;
 }
 
 /** 雷達上的瓶子：沒撿起來前看不到內容 */
@@ -101,6 +104,97 @@ export interface BottleOut {
   picked: boolean;
   /** 被撿起來的次數 */
   picks: number;
+}
+
+// ---- 照片 ----
+/** 照片最大幾個位元組（瀏覽器縮到長邊 1280、JPEG 品質 0.8 約 150–400 KB） */
+export const PHOTO_MAX_BYTES = 700_000;
+const PHOTO_MODEL = '@cf/meta/llama-4-scout-17b-16e-instruct';
+export const photosEnabled = (env: Env): boolean => !!env.BOTTLE_PHOTOS;
+
+/** 送上來的照片：data:image/jpeg;base64,…；沒放是 null，格式不對、太大丟錯誤 */
+export function parsePhoto(v: unknown): { bytes: Uint8Array; dataUrl: string } | null {
+  if (v === undefined || v === null || v === '') return null;
+  const m = typeof v === 'string' ? /^data:image\/jpeg;base64,([A-Za-z0-9+/]+={0,2})$/.exec(v) : null;
+  if (!m) throw new ReportError(400, '照片格式不對，請重新選一張');
+  const bin = atob(m[1]);
+  if (bin.length > PHOTO_MAX_BYTES) throw new ReportError(413, '照片太大了，請換一張');
+  const bytes = Uint8Array.from(bin, (c) => c.charCodeAt(0));
+  if (bytes[0] !== 0xff || bytes[1] !== 0xd8 || bytes[2] !== 0xff) throw new ReportError(400, '照片格式不對，請重新選一張');
+  return { bytes, dataUrl: v as string };
+}
+
+/**
+ * 拿掉 JPEG 裡的中繼資料：APP1～APP15（EXIF 的 GPS、相機、拍攝時間，XMP…）和註解（COM），影像本身不動。
+ * 瀏覽器重新存檔時就沒有了，這裡再擋一次（不是從網頁送來的也一樣）。看不懂的格式丟錯誤
+ */
+export function stripJpegMeta(b: Uint8Array): Uint8Array {
+  const out: number[] = [0xff, 0xd8];
+  let i = 2;
+  while (i + 4 <= b.length) {
+    if (b[i] !== 0xff) throw new ReportError(400, '照片格式不對，請重新選一張');
+    const marker = b[i + 1];
+    // 填充用的 0xFF
+    if (marker === 0xff) {
+      i++;
+      continue;
+    }
+    const len = (b[i + 2] << 8) | b[i + 3];
+    if (len < 2 || i + 2 + len > b.length) throw new ReportError(400, '照片格式不對，請重新選一張');
+    // 開始掃描（SOS）：後面都是影像資料，整段照抄
+    if (marker === 0xda) {
+      for (let k = i; k < b.length; k++) out.push(b[k]);
+      return Uint8Array.from(out);
+    }
+    const drop = (marker >= 0xe1 && marker <= 0xef) || marker === 0xfe;
+    if (!drop) for (let k = i; k < i + 2 + len; k++) out.push(b[k]);
+    i += 2 + len;
+  }
+  throw new ReportError(400, '照片格式不對，請重新選一張');
+}
+
+const PHOTO_PROMPT = `你是「洋流雷達」漂流瓶照片的審核員。漂流瓶是使用者留給路過陌生人的一段話，可以附一張照片（台北大洋流競選活動的網站上）。
+風景、街景、食物、寵物、活動現場、自拍、合照都可以。
+
+只擋下這幾類：
+- 色情、裸露、性暗示
+- 暴力、血腥、自殘、令人不舒服的畫面
+- 個人資料：證件、文件、信封或螢幕上看得清楚的姓名、地址、電話、帳號；看得清楚的車牌、門牌號碼；QR code
+- 廣告、商品推銷、價目表
+- 攻擊、嘲諷、抹黑任何人或團體（包括候選人、政黨）的圖文
+
+只輸出 JSON：{"allowed": true 或 false, "reason": "不允許時用一句話說明是哪一類，給使用者看；允許時空字串"}`;
+
+/** AI 看圖審核；AI 失敗就不收（寧可不收） */
+async function moderatePhoto(env: Env, dataUrl: string): Promise<{ allowed: boolean; reason: string }> {
+  const ai = env.AI as unknown as { run(model: string, inputs: unknown): Promise<unknown> };
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      const res = await ai.run(PHOTO_MODEL, {
+        messages: [{ role: 'user', content: [{ type: 'text', text: PHOTO_PROMPT }, { type: 'image_url', image_url: { url: dataUrl } }] }],
+        max_tokens: 200,
+        temperature: 0,
+      });
+      const c = responseContent(res);
+      const o = (typeof c === 'string' ? JSON.parse(c.replace(/^[^{]*/, '').replace(/[^}]*$/, '')) : c) as { allowed?: unknown; reason?: unknown };
+      if (typeof o?.allowed === 'boolean') return { allowed: o.allowed, reason: typeof o.reason === 'string' ? o.reason.slice(0, 80) : '' };
+    } catch (e) {
+      console.warn(`bottle photo moderation failed: ${String(e)}`);
+    }
+  }
+  throw new ReportError(503, '照片暫時沒辦法審核，請稍後再丟，或先不放照片');
+}
+
+/** 看照片：丟的人、撿到的人才拿得到（看得到內容的人）；被檢舉藏起來、被移除的不給 */
+export async function bottlePhoto(env: Env, device: string | null, id: number): Promise<Response> {
+  const dev = needDevice(device);
+  const b = await env.DB.prepare("SELECT device_id, photo_key FROM bottles WHERE id = ? AND status IN ('active', 'picked')").bind(id).first<{ device_id: string; photo_key: string | null }>();
+  if (!b?.photo_key || !env.BOTTLE_PHOTOS) throw new ReportError(404, '這個瓶子沒有照片');
+  if (b.device_id !== dev && !(await env.DB.prepare('SELECT 1 AS x FROM bottle_picks WHERE bottle_id = ? AND device_id = ?').bind(id, dev).first()))
+    throw new ReportError(403, '撿到瓶子才看得到照片');
+  const obj = await env.BOTTLE_PHOTOS.get(b.photo_key);
+  if (!obj) throw new ReportError(404, '這個瓶子沒有照片');
+  return new Response(obj.body, { headers: { 'content-type': 'image/jpeg', 'cache-control': 'private, max-age=86400' } });
 }
 
 export const bottlesEnabled = (env: Env): boolean => env.BOTTLES_ENABLED !== 'false';
@@ -338,13 +432,15 @@ const validPoint = (lat: unknown, lng: unknown): { lat: number; lng: number } | 
   typeof lat === 'number' && typeof lng === 'number' && Math.abs(lat) <= 90 && Math.abs(lng) <= 180 ? { lat, lng } : null;
 
 /** 丟一個瓶子：在你現在的位置附近 */
-export async function dropBottle(env: Env, device: string | null, ip: string, body: { text?: unknown; lat?: unknown; lng?: unknown }, now: number): Promise<PickedBottle> {
+export async function dropBottle(env: Env, device: string | null, ip: string, body: { text?: unknown; lat?: unknown; lng?: unknown; photo?: unknown }, now: number): Promise<PickedBottle> {
   const dev = needDevice(device);
   const text = typeof body.text === 'string' ? body.text.replace(/\s+/g, ' ').trim() : '';
   const bad = ruleCheck(text);
   if (bad) throw new ReportError(400, bad);
   const at = validPoint(body.lat, body.lng);
   if (!at) throw new ReportError(400, '要先定位才能丟瓶子');
+  const photo = parsePhoto(body.photo);
+  if (photo && !env.BOTTLE_PHOTOS) throw new ReportError(503, '照片暫時不能放，先不放照片吧');
 
   const quota = await bottleQuota(env, dev, now);
   if (quota.left <= 0) throw new ReportError(429, `每天最多丟 ${PER_DEVICE_PER_DAY} 個，明天再來`);
@@ -355,21 +451,33 @@ export async function dropBottle(env: Env, device: string | null, ip: string, bo
 
   const verdict = await moderate(env, text);
   if (!verdict.allowed) throw new ReportError(422, `這句話不能丟${verdict.reason ? `：${verdict.reason}` : ''}`);
+  let key: string | null = null;
+  if (photo && env.BOTTLE_PHOTOS) {
+    const pv = await moderatePhoto(env, photo.dataUrl);
+    if (!pv.allowed) throw new ReportError(422, `這張照片不能放${pv.reason ? `：${pv.reason}` : ''}`);
+    key = `bottles/${now}-${crypto.randomUUID()}.jpg`;
+    await env.BOTTLE_PHOTOS.put(key, stripJpegMeta(photo.bytes), { httpMetadata: { contentType: 'image/jpeg' } });
+  }
 
   const p = scatter(at);
   const row = await env.DB.prepare(
-    "INSERT INTO bottles (device_id, text, lat, lng, origin_lat, origin_lng, status, world, ip_hash, created_at, expires_at) VALUES (?, ?, ?, ?, ?, ?, 'active', 'earth', ?, ?, ?) RETURNING *",
+    "INSERT INTO bottles (device_id, text, lat, lng, origin_lat, origin_lng, status, world, ip_hash, created_at, expires_at, photo_key) VALUES (?, ?, ?, ?, ?, ?, 'active', 'earth', ?, ?, ?, ?) RETURNING *",
   )
-    .bind(dev, text, p.lat, p.lng, p.lat, p.lng, ip, now, now + BOTTLE_TTL_SEC)
-    .first<BottleRow>();
+    .bind(dev, text, p.lat, p.lng, p.lat, p.lng, ip, now, now + BOTTLE_TTL_SEC, key)
+    .first<BottleRow>()
+    .catch(async (e) => {
+      if (key) await env.BOTTLE_PHOTOS?.delete(key);
+      throw e;
+    });
   if (!row) throw new ReportError(500, '存檔失敗，請稍後再試');
-  return { bottle: toOut(row, dev, false), text: row.text };
+  return { bottle: toOut(row, dev, false), text: row.text, photo: !!row.photo_key };
 }
 
-/** 撿起來（或自己的）瓶子：瓶子、內容 */
+/** 撿起來（或自己的）瓶子：瓶子、內容、有沒有照片（照片另外拿：bottlePhoto） */
 export interface PickedBottle {
   bottle: BottleOut;
   text: string;
+  photo: boolean;
 }
 
 function toOut(r: BottleRow, dev: string | null, picked: boolean): BottleOut {
@@ -423,9 +531,9 @@ export async function pickBottle(env: Env, device: string | null, id: number, bo
   const dev = needDevice(device);
   const b = await env.DB.prepare("SELECT * FROM bottles WHERE id = ? AND status IN ('active', 'picked')").bind(id).first<BottleRow>();
   if (!b) throw new ReportError(404, '這個瓶子已經沉下去了');
-  if (b.device_id === dev) return { bottle: toOut(b, dev, false), text: b.text };
+  if (b.device_id === dev) return { bottle: toOut(b, dev, false), text: b.text, photo: !!b.photo_key };
   const mine = await env.DB.prepare('SELECT 1 AS x FROM bottle_picks WHERE bottle_id = ? AND device_id = ?').bind(id, dev).first();
-  if (mine) return { bottle: toOut(b, dev, true), text: b.text };
+  if (mine) return { bottle: toOut(b, dev, true), text: b.text, photo: !!b.photo_key };
   if (b.status !== 'active' || b.expires_at <= now) throw new ReportError(410, '晚了一步，這個瓶子已經被撿走或沉下去了');
   const at = validPoint(body.lat, body.lng);
   const world: BottleWorld = body.world === 'woof' ? 'woof' : 'earth';
@@ -440,14 +548,14 @@ export async function pickBottle(env: Env, device: string | null, id: number, bo
   if (!won) throw new ReportError(410, '晚了一步，這個瓶子剛被別人撿走了');
   // 撿到就收進瓶中信收藏
   await env.DB.prepare('INSERT OR IGNORE INTO bottle_picks (bottle_id, device_id, created_at, collected_at) VALUES (?, ?, ?, ?)').bind(id, dev, now, now).run();
-  return { bottle: toOut(won, dev, true), text: won.text };
+  return { bottle: toOut(won, dev, true), text: won.text, photo: !!won.photo_key };
 }
 
 export interface MyBottles {
   quota: BottleQuota;
-  dropped: Array<{ id: number; text: string; world: BottleWorld; createdAt: number; expiresAt: number; seaAt: number | null; picks: number; pickedAt: number | null; status: BottleStatus; driftM: number }>;
+  dropped: Array<{ id: number; text: string; photo: boolean; world: BottleWorld; createdAt: number; expiresAt: number; seaAt: number | null; picks: number; pickedAt: number | null; status: BottleStatus; driftM: number }>;
   /** 瓶中信收藏：撿到就收進來；world 是在哪裡撿到的 */
-  letters: Array<{ id: number; text: string; world: BottleWorld; createdAt: number; pickedAt: number; driftM: number }>;
+  letters: Array<{ id: number; text: string; photo: boolean; world: BottleWorld; createdAt: number; pickedAt: number; driftM: number }>;
 }
 
 /** 我丟的、我的瓶中信收藏 */
@@ -461,18 +569,19 @@ export async function myBottles(env: Env, device: string | null, now: number): P
     .all<BottleRow & { picked_at: number | null }>();
   // 收藏的信；被檢舉藏起來、被管理者移除的不顯示
   const mine = await env.DB.prepare(
-    `SELECT b.id, b.text, b.world, b.lat, b.lng, b.origin_lat, b.origin_lng, b.created_at, p.created_at AS picked_at
+    `SELECT b.id, b.text, b.photo_key, b.world, b.lat, b.lng, b.origin_lat, b.origin_lng, b.created_at, p.created_at AS picked_at
        FROM bottle_picks p JOIN bottles b ON b.id = p.bottle_id
       WHERE p.device_id = ? AND p.collected_at IS NOT NULL AND b.status IN ('active', 'picked')
       ORDER BY p.created_at DESC LIMIT ${MAX_LETTERS}`,
   )
     .bind(dev)
-    .all<Pick<BottleRow, 'id' | 'text' | 'world' | 'lat' | 'lng' | 'origin_lat' | 'origin_lng' | 'created_at'> & { picked_at: number }>();
+    .all<Pick<BottleRow, 'id' | 'text' | 'photo_key' | 'world' | 'lat' | 'lng' | 'origin_lat' | 'origin_lng' | 'created_at'> & { picked_at: number }>();
   return {
     quota: await bottleQuota(env, dev, now),
     dropped: dropped.results.map((b) => ({
       id: b.id,
       text: b.text,
+      photo: !!b.photo_key,
       world: b.world,
       createdAt: b.created_at,
       expiresAt: b.expires_at,
@@ -482,7 +591,7 @@ export async function myBottles(env: Env, device: string | null, now: number): P
       status: b.expires_at <= now && b.status === 'active' ? ('deleted' as const) : b.status,
       driftM: driftOf(b),
     })),
-    letters: mine.results.map((p) => ({ id: p.id, text: p.text, world: p.world, createdAt: p.created_at, pickedAt: p.picked_at, driftM: driftOf(p) })),
+    letters: mine.results.map((p) => ({ id: p.id, text: p.text, photo: !!p.photo_key, world: p.world, createdAt: p.created_at, pickedAt: p.picked_at, driftM: driftOf(p) })),
   };
 }
 
@@ -547,6 +656,13 @@ export async function adminSetBottle(env: Env, id: number, status: 'active' | 'r
 export async function purgeBottles(env: Env, cutoff: number): Promise<number> {
   const old = 'SELECT id FROM bottles WHERE expires_at < ?';
   const kept = 'SELECT bottle_id FROM bottle_picks WHERE collected_at IS NOT NULL';
+  // 要刪的瓶子的照片先刪（R2）
+  if (env.BOTTLE_PHOTOS) {
+    const { results } = await env.DB.prepare(`SELECT photo_key FROM bottles WHERE expires_at < ? AND photo_key IS NOT NULL AND id NOT IN (${kept}) LIMIT 1000`)
+      .bind(cutoff)
+      .all<{ photo_key: string }>();
+    if (results.length) await env.BOTTLE_PHOTOS.delete(results.map((r) => r.photo_key));
+  }
   const r = await env.DB.batch([
     env.DB.prepare(`DELETE FROM bottle_picks WHERE collected_at IS NULL AND bottle_id IN (${old})`).bind(cutoff),
     env.DB.prepare(`DELETE FROM bottle_reports WHERE bottle_id IN (${old})`).bind(cutoff),

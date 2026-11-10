@@ -158,7 +158,27 @@ export async function fetchWoofBottles(): Promise<BottleOut[]> {
   const r = await deviceJson<{ bottles?: BottleOut[] }>('/api/bottles?world=woof');
   return r.ok ? (r.data.bottles ?? []).filter((b) => b.world === 'woof') : [];
 }
-export const dropBottle = (text: string, at: LatLng): Promise<Result<PickedBottle>> => deviceJson<PickedBottle>('/api/bottles', 'POST', { text, lat: at.lat, lng: at.lng });
+/** 丟瓶子；photo 是瀏覽器縮小、重新存好的 JPEG（data URL），沒放是 null */
+export const dropBottle = (text: string, at: LatLng, photo: string | null = null): Promise<Result<PickedBottle>> =>
+  deviceJson<PickedBottle>('/api/bottles', 'POST', { text, lat: at.lat, lng: at.lng, ...(photo ? { photo } : {}) });
+/** 瓶子的照片（丟的人、撿到的人才拿得到）：回傳可以放在 img 的網址，拿不到是 null；拿過的記起來 */
+const photoUrls = new Map<number, Promise<string | null>>();
+export function fetchBottlePhoto(id: number): Promise<string | null> {
+  let p = photoUrls.get(id);
+  if (!p) {
+    p = fetch(`${API_BASE}/api/bottles/${id}/photo`, { headers: { 'x-device': deviceCode() } })
+      .then(async (r) => (r.ok ? URL.createObjectURL(await r.blob()) : null))
+      .catch(() => null);
+    photoUrls.set(id, p);
+    // 拿不到的不記，下次再試
+    void p.then((u) => {
+      if (!u) photoUrls.delete(id);
+    });
+  }
+  return p;
+}
+/** 自己剛丟的瓶子：照片直接用手上的，不用再下載 */
+export const rememberBottlePhoto = (id: number, url: string): void => void photoUrls.set(id, Promise.resolve(url));
 /** 撿起來：at 是你的位置（地球的 GPS，或你在汪星的位置），world 是你在哪一顆；自己丟的、撿過的不用位置 */
 export const pickBottle = (id: number, at: LatLng | null, world: 'earth' | 'woof' = 'earth'): Promise<Result<PickedBottle>> =>
   deviceJson<PickedBottle>(`/api/bottles/${id}/pick`, 'POST', at ? { lat: at.lat, lng: at.lng, world } : {});

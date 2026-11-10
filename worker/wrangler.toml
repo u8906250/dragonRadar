@@ -22,6 +22,11 @@ database_name = "dragon-radar"
 database_id = "87666f00-bba8-41ba-be54-920fbf40e849"
 migrations_dir = "migrations"
 
+# 漂流瓶的照片（v1.594）：bucket 由自動部署開（.github/workflows/deploy-worker.yml）
+[[r2_buckets]]
+binding = "BOTTLE_PHOTOS"
+bucket_name = "dragon-radar-bottle-photos"
+
 [vars]
 # 允許的前端來源，逗號分隔。GitHub Pages 的網域加上本機開發
 ALLOWED_ORIGINS = "https://current-radar.pages.dev,https://u8906250.github.io,http://localhost:5173"

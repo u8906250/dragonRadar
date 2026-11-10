@@ -19,7 +19,7 @@ import { PUSH_RADIUS_KM, PushError, b64urlEncode, deleteSubscription, encryptPay
 import { assertEventReportsOpen, confirmLink, editLink, ENDED_REPORTS_NEEDED, locateForEdit, MAX_LINK_AGE_SEC, NOTES_CLOSED, ReportError, REPORTS_LOCKED, ipHash, myReports, purgeReports, recheckLinks, rejectLink, reportModules, submitLink, supplementLink, withdrawReport } from './reports';
 import { D1Meter, isTransient, withResilientDb } from './db';
 import { addressCacheKey, geocodeAddress, parseTwAddress } from './address';
-import { adminListBottles, adminSetBottle, BOTTLE_MAX_WEIGHT, bottleInfo, bottlesEnabled, deleteBottle, deviceId, DRIFT_EVERY_SEC, driftBottles, dropBottle, listBottles, myBottles, PER_DEVICE_PER_DAY, PICK_RADIUS_M, pickBottle, proofFor, purgeBottles, reportBottle, SEA_AFTER_SEC, uncollectLetter, verifyProof, WOOF_STAY_SEC } from './bottles';
+import { adminListBottles, adminSetBottle, BOTTLE_MAX_WEIGHT, bottleInfo, bottlePhoto, bottlesEnabled, photosEnabled, deleteBottle, deviceId, DRIFT_EVERY_SEC, driftBottles, dropBottle, listBottles, myBottles, PER_DEVICE_PER_DAY, PICK_RADIUS_M, pickBottle, proofFor, purgeBottles, reportBottle, SEA_AFTER_SEC, uncollectLetter, verifyProof, WOOF_STAY_SEC } from './bottles';
 import { approveSpotRequest, autoReview, cancelSpotRequest, listSpotRequests, locatePlace, rejectSpotRequest, SPOT_MAX_AGE_SEC, spotRequestStatus, type ApproveBody, type SpotRequestRow } from './spots';
 import { addUserKeyword, listActiveKeywords, listAllKeywords, MAX_ACTIVE_KEYWORDS, normalizeKeyword, parseKeywordList, toKeywordOut, touchKeywords } from './keywords';
 import { listLearnedTags, setLearnedTag } from './learnedTags';
@@ -183,7 +183,7 @@ async function handle(req: Request, env: Env, ctx: ExecutionContext): Promise<Re
           threads: env.THREADS_SEARCH_STATUS === 'approved' ? 'approved' : 'review',
           link: { maxAgeDays: MAX_LINK_AGE_SEC / 86400, recheckMin: 30, endedReportsNeeded: ENDED_REPORTS_NEEDED },
           spot: { maxAgeDays: SPOT_MAX_AGE_SEC / 86400, autoReview: env.SPOT_AUTO_REVIEW !== 'false' },
-          bottles: { enabled: bottlesEnabled(env), maxWeight: BOTTLE_MAX_WEIGHT, maxChars: BOTTLE_MAX_WEIGHT / 2, pickRadiusM: PICK_RADIUS_M, seaHours: SEA_AFTER_SEC / 3600, woofDays: WOOF_STAY_SEC / 86400, perDay: PER_DEVICE_PER_DAY, driftHours: DRIFT_EVERY_SEC / 3600 },
+          bottles: { enabled: bottlesEnabled(env), maxWeight: BOTTLE_MAX_WEIGHT, maxChars: BOTTLE_MAX_WEIGHT / 2, pickRadiusM: PICK_RADIUS_M, seaHours: SEA_AFTER_SEC / 3600, woofDays: WOOF_STAY_SEC / 86400, perDay: PER_DEVICE_PER_DAY, driftHours: DRIFT_EVERY_SEC / 3600, photos: photosEnabled(env) },
           official: { name: '台北大洋流「未來航線」', url: VOYAGE_PAGE, mapName: '大洋流車掃地圖', mapUrl: CURRENT_MAP_URL, intervalMin: 10 },
           news: { names: [...new Set(NEWS_FEEDS.map((f) => f.name))], intervalMin: 30 },
         },
@@ -305,13 +305,14 @@ async function handle(req: Request, env: Env, ctx: ExecutionContext): Promise<Re
     if (req.method === 'GET' && path === '/api/bottles/mine') return jsonResponse(await myBottles(env, dev, now));
     if (req.method === 'POST' && path === '/api/bottles/verify') return jsonResponse(await verifyProof(env, await readJson<Record<string, unknown>>(req)));
     if (req.method === 'POST' && path === '/api/bottles') {
-      return jsonResponse(await dropBottle(env, dev, await ipHash(env, req), await readJson<{ text?: unknown; lat?: unknown; lng?: unknown }>(req), now), 201);
+      return jsonResponse(await dropBottle(env, dev, await ipHash(env, req), await readJson<{ text?: unknown; lat?: unknown; lng?: unknown; photo?: unknown }>(req), now), 201);
     }
-    const one = /^\/api\/bottles\/(\d+)(?:\/(pick|report|uncollect|proof))?$/.exec(path);
+    const one = /^\/api\/bottles\/(\d+)(?:\/(pick|report|uncollect|proof|photo))?$/.exec(path);
     if (one) {
       const id = Number(one[1]);
       if (req.method === 'GET' && !one[2]) return jsonResponse(await bottleInfo(env, dev, id, now));
       if (req.method === 'GET' && one[2] === 'proof') return jsonResponse(await proofFor(env, dev, id));
+      if (req.method === 'GET' && one[2] === 'photo') return bottlePhoto(env, dev, id);
       if (req.method === 'POST' && one[2] === 'uncollect') return jsonResponse(await uncollectLetter(env, dev, id));
       if (req.method === 'POST' && one[2] === 'pick') return jsonResponse(await pickBottle(env, dev, id, await readJson<{ lat?: unknown; lng?: unknown; world?: unknown }>(req), now));
       if (req.method === 'POST' && one[2] === 'report') {

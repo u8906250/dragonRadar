@@ -1,6 +1,6 @@
 import './styles.css';
 import { FITBUS_MS_PER_M, hqDenseKm, hqMotionKm, HQ_NET_LABEL_KM, HQ_SAIL_MS, HQ_STAR_MS, HQ_VOYAGE_MS, RAINBOW_EVERY_MS, voyagePhase, voyageTimeOf } from './flow';
-import { addKeyword, deletePushSubscription, locateFeedbackPlace, sendFeedback, type FeedbackKind, fetchPushKey, savePushSubscription, confirmReport, editReport, locatePlace, rejectReport, supplementReport, deleteBottle, dropBottle, fetchBottleInfo, fetchBottleProof, fetchBottles, fetchWoofBottles, uncollectLetter, verifyBottleProof, fetchEvents, fetchHealth, fetchKeywords, fetchMyBottles, fetchMyReports, fetchRoutes, pickBottle, reportBottle, submitLink, withdrawReport } from './api';
+import { addKeyword, deletePushSubscription, locateFeedbackPlace, sendFeedback, type FeedbackKind, fetchPushKey, savePushSubscription, confirmReport, editReport, locatePlace, rejectReport, supplementReport, deleteBottle, dropBottle, fetchBottleInfo, fetchBottlePhoto, fetchBottleProof, fetchBottles, fetchWoofBottles, rememberBottlePhoto, uncollectLetter, verifyBottleProof, fetchEvents, fetchHealth, fetchKeywords, fetchMyBottles, fetchMyReports, fetchRoutes, pickBottle, reportBottle, submitLink, withdrawReport } from './api';
 import { compassSupported, startCompass } from './compass';
 import { bearingDeg, compassLabel, destination, formatKm, haversineKm, taiwanRadiusKm, type LatLng } from './geo';
 import { TAIWAN_RINGS } from './taiwan';
@@ -438,15 +438,19 @@ const feedbackNote = $<HTMLTextAreaElement>('#feedback-note');
 const feedbackSubmit = $<HTMLButtonElement>('#feedback-submit');
 /** 正在回報問題的事件 */
 let feedbackEventId: number | null = null;
-const bottleForm = $<HTMLFormElement>('#bottle-form');
 const bottleText = $<HTMLTextAreaElement>('#bottle-text');
 const bottleCount = $('#bottle-count');
-const bottleQuota = $('#bottle-quota');
-const bottleDropBtn = $<HTMLButtonElement>('#bottle-drop');
+/** 牛皮紙旁邊的空瓶子：點了就捲起來丟出去 */
+const bottleDropEl = $('#bottle-drop');
 const bottleResult = $('#bottle-result');
-const bottleNear = $('#bottle-near');
-const bottleMine = $('#bottle-mine');
-const bottleTips = $('#bottle-tips');
+/** 打開收藏頁的 📜 上的小紅點（自己丟的瓶子被撿走了） */
+const sceneDot = $('#bottle-sheet .scene-dot');
+const lettersMine = $('#letters-mine');
+const bottlePhotoFig = $('#bottle-photo');
+const bottlePhotoBtn = $('#bottle-photo-btn');
+const bottlePhotoInput = $<HTMLInputElement>('#bottle-photo-input');
+/** 要放進瓶子的照片（瀏覽器縮小、重新存好的 JPEG data URL） */
+let bottlePhotoData: string | null = null;
 const lettersPage = $('#letters-page');
 const lettersList = $('#letters-list');
 const filterRow = $('#filter-row');
@@ -2281,8 +2285,57 @@ async function loadBottle(id: number, pick = false): Promise<void> {
   render();
 }
 
-/** 牛皮紙上的一段話 */
-const kraftNote = (text: string, no: number): string => `<div class="kraft-note"><span class="kraft-no">${bottleNo(no)}</span><p>${esc(text)}</p></div>`;
+/** 貼在牛皮紙上的照片（還沒載入的，fillPhotos 去拿） */
+const tapedPhoto = (id: number): string => `<figure class="taped-photo"><img data-photo="${id}" alt="瓶子裡的照片（點了放大）" /></figure>`;
+/** 牛皮紙上的一段話（有照片的話貼在上面） */
+const kraftNote = (text: string, no: number, photo = false): string =>
+  `<div class="kraft-note"><span class="kraft-no">${bottleNo(no)}</span>${photo ? tapedPhoto(no) : ''}<p>${esc(text)}</p></div>`;
+
+/** 牛皮紙上的照片：還沒載入的去拿（丟的人、撿到的人才拿得到），拿不到就拿掉 */
+function fillPhotos(root: Element): void {
+  for (const img of root.querySelectorAll<HTMLImageElement>('img[data-photo]:not([src])')) {
+    void fetchBottlePhoto(Number(img.dataset.photo)).then((u) => {
+      if (u) img.src = u;
+      else img.closest('figure')?.remove();
+    });
+  }
+}
+
+/** 點了照片：放大看 */
+function showPhoto(src: string): void {
+  overlay('tc-photo', `<div class="tc-box photo-box"><img class="photo-big" src="${esc(src)}" alt="瓶子裡的照片" /><button type="button" class="chip" data-close>關閉</button></div>`);
+}
+
+/** 選好的照片在瀏覽器裡縮到長邊 1280、重新存成 JPEG（GPS、相機等資訊就沒了），太大再降品質；讀不出來丟錯誤 */
+async function shrinkPhoto(file: File): Promise<string> {
+  const bmp = await createImageBitmap(file, { imageOrientation: 'from-image' });
+  const k = Math.min(1, 1280 / Math.max(bmp.width, bmp.height));
+  const [w, h] = [Math.max(1, Math.round(bmp.width * k)), Math.max(1, Math.round(bmp.height * k))];
+  const c = document.createElement('canvas');
+  c.width = w;
+  c.height = h;
+  const ctx = c.getContext('2d');
+  if (!ctx) throw new Error('no canvas');
+  ctx.fillStyle = '#fff';
+  ctx.fillRect(0, 0, w, h);
+  ctx.drawImage(bmp, 0, 0, w, h);
+  bmp.close();
+  for (const q of [0.82, 0.7, 0.55, 0.4]) {
+    const url = c.toDataURL('image/jpeg', q);
+    if (url.length * 0.75 < 650_000) return url;
+  }
+  throw new Error('too big');
+}
+
+/** 牛皮紙上要放進瓶子的照片：有就貼上去，null 是拿掉 */
+function setBottlePhoto(url: string | null): void {
+  bottlePhotoData = url;
+  bottlePhotoFig.hidden = !url;
+  const img = bottlePhotoFig.querySelector('img')!;
+  if (url) img.src = url;
+  else img.removeAttribute('src');
+  bottlePhotoInput.value = '';
+}
 
 /** 雷達或地圖上點了瓶子：距離、撿起來、內容、分享、證明、檢舉或收回 */
 function renderBottleDetail(id: number): boolean {
@@ -2299,7 +2352,7 @@ function renderBottleDetail(id: number): boolean {
     const status = b.mine
       ? `你${ago(b.createdAt)}丟的・還沒被撿走・${woof ? `漂到汪星的海上了，${daysLeft(b.expiresAt)}後沉下去` : `在附近漂，${seaIn(b.createdAt)}後漂到汪星的海上`}`
       : `${ago(b.createdAt)}丟的・你撿到了，收進「瓶中信收藏」`;
-    body = `${kraftNote(got.text, b.id)}<p class="muted">${esc(status)}</p>`;
+    body = `${kraftNote(got.text, b.id, got.photo)}<p class="muted">${esc(status)}</p>`;
   } else if (b.mine || b.picked) {
     body = '<p class="muted">打開瓶子中…</p>';
   } else if (woof && youOn !== 'woof') {
@@ -2341,6 +2394,7 @@ function renderBottleDetail(id: number): boolean {
     </div>`,
     true,
   );
+  fillPhotos(detailEl);
   detailEl.querySelector('[data-act="close"]')?.addEventListener('click', () => selectBottle(null));
   detailEl.querySelector('[data-act="pick"]')?.addEventListener('click', (e) => {
     (e.currentTarget as HTMLButtonElement).disabled = true;
@@ -2466,7 +2520,6 @@ async function reloadMyBottles(): Promise<void> {
   if (!r.ok) return;
   myBottlesData = r.data;
   if (r.data.dropped.length > 0) lsSet(LS_BOTTLE_DROPPED, '1');
-  if (!bottleSheet.hidden) paintMyBottles();
   if (!lettersPage.hidden) renderLettersPage();
   updateBottleNews();
 }
@@ -2481,6 +2534,7 @@ function newlyPicked(): number {
 function updateBottleNews(): void {
   const n = newlyPicked();
   bottleBtn.classList.toggle('news', n > 0);
+  sceneDot.hidden = n === 0;
   if (n > 0 && !bottleNewsShown && bottleSheet.hidden) {
     bottleNewsShown = true;
     showBanner(bannerEl, `你丟的瓶子${n > 1 ? `有 ${n} 個` : ''}被撿走了！打開「漂流瓶」看看`, 4000);
@@ -2493,8 +2547,13 @@ async function checkBottleNews(): Promise<void> {
   await reloadMyBottles();
 }
 
+/**
+ * 打開漂流瓶（v1.594 使用者說：按下去畫面中間直接出現牛皮紙和瓶子、盡量仿真，不要輸入框、不要任何提示，說明放在說明頁）：
+ * 牛皮紙上直接寫，點瓶子就捲起來裝進去丟出去；左上 📜 是瓶中信收藏和我丟的瓶子、📷 貼一張照片
+ */
 function openBottleSheet(open: boolean): void {
   bottleSheet.hidden = !open;
+  document.body.classList.toggle('bottle-open', open);
   if (!open) return;
   themeSheet.hidden = true;
   kwSheet.hidden = true;
@@ -2504,69 +2563,36 @@ function openBottleSheet(open: boolean): void {
   selectedLandmark = null;
   selectedBottle = null;
   detailEl.hidden = true;
+  bottleResult.textContent = '';
   renderBottleSheet();
-  if (myBottlesData) paintMyBottles();
   void reloadMyBottles();
+  // 電腦上直接可以打字；手機等點了紙才跳出鍵盤（不然鍵盤蓋住瓶子）
+  if (matchMedia('(pointer: fine)').matches) bottleText.focus();
 }
 
 const bottleMaxWeight = (): number => bottleRules()?.maxWeight ?? X_MAX_WEIGHT;
 
-/** 字數（比照 X：中文算 2、英數算 1）；超過回傳 true */
-function updateBottleCount(): boolean {
+/** 字數超過才在紙角寫多了幾個字（比照 X：中文算 2）；寫了字、沒超過，瓶子輕輕晃（點得下去） */
+function updateDropBtn(): void {
   const max = bottleMaxWeight();
   const n = xLength(bottleText.value.trim());
-  bottleCount.textContent = `${n} / ${max}`;
-  bottleCount.classList.toggle('over', n > max);
-  return n > max;
+  const over = n > max;
+  bottleCount.hidden = !over;
+  bottleCount.textContent = over ? `多了 ${Math.ceil((n - max) / 2)} 字` : '';
+  bottleDropEl.classList.toggle('ready', n > 0 && !over && !throwing);
+  bottlePhotoBtn.hidden = !bottleRules()?.photos || youOn === 'woof';
 }
 
-/** 丟得出去嗎：要在地球上、用 GPS 定位，字數沒超過 */
-function updateDropBtn(): void {
-  const over = updateBottleCount();
-  const gps = origin.source === 'gps';
-  bottleDropBtn.disabled = youOn === 'woof' || !gps || over || throwing;
-  bottleDropBtn.textContent = youOn === 'woof' ? '回地球才能丟' : gps ? '捲起來丟出去' : '要先定位';
-}
-
-/** 丟瓶子的牛皮紙（要 GPS）、附近的瓶子、使用規則 */
 function renderBottleSheet(): void {
-  const rules = bottleRules();
-  bottleText.maxLength = bottleMaxWeight();
   updateDropBtn();
-  bottleTips.innerHTML = [
-    `字數比照 X：中文、全形字、表情符號算 2，英數算 1，最多 ${bottleMaxWeight()}（中文 ${bottleMaxWeight() / 2} 字）。`,
-    '打氣、心情、抱怨、今天看到的事都可以。辱罵或攻擊任何人（包括其他候選人、政黨）、謠言、廣告、連結、電話、帳號、個人資料都不會通過，丟出去前會先自動審核。',
-    `瓶子丟在你目前 GPS 位置附近（隨機漂開約 100 m），${rules?.seaHours ?? 24} 小時內在附近 200 m 內漂；沒人撿就漂到汪星的海上（汪星的陸地是台北，會漂到跟丟的地方同一個方向的海邊），${rules?.woofDays ?? 30} 天後沉下去。`,
-    `每天最多丟 ${rules?.perDay ?? 3} 個。每個瓶子都有自己的編號，丟的人和撿到的人看得到「瓶子證明」，可以驗證是這裡發出的、內容沒被改過。`,
-    `別人要走到 ${rules?.pickRadiusM ?? 60} m 內才撿得起來；遠的瓶子在雷達上只是一團模糊的訊號，走近才變清楚。每個瓶子只能被一個人撿走，撿到就收進「瓶中信收藏」。汪星海上的瓶子：搭火箭到汪星，拖曳雷達走到瓶子旁邊就能撿。`,
-    '撿到不適合的內容可以檢舉，檢舉後就藏起來交給管理者確認。分享到 Threads 不會帶內容。不用登入：你丟的、撿到的瓶子記在這個瀏覽器裡，清除瀏覽器資料就看不到了。',
-  ]
-    .map((t) => `<li>${esc(t)}</li>`)
-    .join('');
-  // 你在汪星：列汪星海上的瓶子
-  const pool = youOn === 'woof' ? woofBottles : bottles;
-  const near = pool
-    .filter((b) => !b.mine && !b.picked)
-    .map((b) => ({ b, d: bottleDistM(b) }))
-    .sort((a, c) => a.d - c.d)
-    .slice(0, 8);
-  bottleNear.innerHTML = near.length
-    ? `<h3 class="spot-mine-title">${youOn === 'woof' ? '汪星海上的瓶子' : '附近的瓶子'}</h3><ul class="report-events">${near
-        .map(({ b, d }) => {
-          const st = bottleState(b) === 'pick' ? '撿得到了！' : Number.isFinite(d) ? `還差約 ${formatKm(Math.max(0, d - pickRadiusM()) / 1000)}` : '把雷達的中心移回汪星';
-          const dist = Number.isFinite(d) ? `約 ${formatKm(d / 1000)} ${bottleDir(b)}` : '汪星的海上';
-          return `<li><button type="button" data-bottle="${b.id}"><b>${bottleNo(b.id)}・${esc(dist)}</b><small>${esc(st)}・${ago(b.createdAt)}丟的</small></button></li>`;
-        })
-        .join('')}</ul>`
-    : `<p class="muted sheet-note">${youOn === 'woof' ? '汪星的海上還沒有瓶子。' : '附近還沒有別人的瓶子，丟第一個吧！'}</p>`;
+  sceneDot.hidden = newlyPicked() === 0;
 }
 
-/** 漂流瓶面板裡的額度、我丟的瓶子、收藏頁入口 */
+/** 收藏頁下面「我丟的瓶子」：狀態、收回 */
 function paintMyBottles(): void {
   const data = myBottlesData;
   if (!data) return;
-  const { dropped, letters, quota } = data;
-  bottleQuota.textContent = `・今天還能丟 ${quota.left} 個`;
+  const { dropped, quota } = data;
   const seen = Number(lsGet(LS_BOTTLE_SEEN) ?? 0);
   const statusText = (b: (typeof dropped)[number]): string => {
     const drift = driftText(b.driftM);
@@ -2582,22 +2608,67 @@ function paintMyBottles(): void {
               ? `漂到汪星的海上了・${daysLeft(b.expiresAt)}後沉下去`
               : `在附近漂${drift ? `（漂了 ${drift}）` : ''}・${seaIn(b.createdAt)}後漂到汪星的海上`;
   };
-  bottleMine.innerHTML =
-    `<button type="button" class="btn letters-open" data-act="letters">瓶中信收藏<small>收藏 ${letters.length} 封</small></button>` +
-    (dropped.length
-      ? `<h3 class="spot-mine-title">我丟的瓶子</h3><ul class="spot-mine">${dropped
-          .map((b) => {
-            const fresh = b.pickedAt !== null && b.pickedAt > seen;
-            return `<li><span class="spot-mine-body"><b class="bottle-no">${bottleNo(b.id)}</b>「${esc(b.text)}」<small>${fresh ? '<b class="new-tag">新</b>' : ''}${ago(b.createdAt)}丟的・${esc(statusText(b))}</small></span>${
-              b.status === 'active' || b.status === 'hidden' ? `<button type="button" class="chip spot-cancel" data-delete-bottle="${b.id}">收回</button>` : ''
-            }</li>`;
-          })
-          .join('')}</ul>`
-      : '');
+  lettersMine.innerHTML = dropped.length
+    ? `<h3>我丟的瓶子<small class="muted">・今天還能丟 ${quota.left} 個</small></h3><ul class="spot-mine">${dropped
+        .map((b) => {
+          const fresh = b.pickedAt !== null && b.pickedAt > seen;
+          return `<li><span class="spot-mine-body"><b class="bottle-no">${bottleNo(b.id)}</b>${b.photo ? '📷' : ''}「${esc(b.text)}」<small>${fresh ? '<b class="new-tag">新</b>' : ''}${ago(b.createdAt)}丟的・${esc(statusText(b))}</small></span>${
+            b.status === 'active' || b.status === 'hidden' ? `<button type="button" class="chip spot-cancel" data-delete-bottle="${b.id}">收回</button>` : ''
+          }</li>`;
+        })
+        .join('')}</ul>`
+    : '';
   // 看過了：之後不再提示這些
   const latest = Math.max(0, ...dropped.map((b) => b.pickedAt ?? 0));
   if (latest > seen) lsSet(LS_BOTTLE_SEEN, String(latest));
   bottleBtn.classList.remove('news');
+  sceneDot.hidden = true;
+}
+
+/** 牛皮紙和瓶子那一頁：瓶子、軟木塞畫上去；點瓶子丟出去、📷 貼照片、📜 收藏頁、✕／Esc 收起來（寫的字留著） */
+function wireBottleScene(): void {
+  // 放到最外層，蓋過頂端列（清單面板自己是一層，裡面的東西蓋不過頂端列）
+  document.body.append(bottleSheet);
+  bottleDropEl.innerHTML = bottleSvg('scb') + corkSvg('scc');
+  bottleDropEl.addEventListener('click', () => void submitBottle());
+  bottleDropEl.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' || e.key === ' ') {
+      e.preventDefault();
+      void submitBottle();
+    }
+  });
+  bottleSheet.addEventListener('click', (e) => {
+    const t = e.target as Element;
+    if (t.closest('[data-act="close"]')) openBottleSheet(false);
+    else if (t.closest('[data-act="letters"]')) {
+      openBottleSheet(false);
+      openLettersPage(true);
+    }
+  });
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && !bottleSheet.hidden && !throwing && !document.querySelector('.tc-overlay')) openBottleSheet(false);
+  });
+  bottleText.addEventListener('input', () => {
+    bottleResult.textContent = '';
+    updateDropBtn();
+  });
+  bottlePhotoInput.addEventListener('change', async () => {
+    const file = bottlePhotoInput.files?.[0];
+    if (!file) return;
+    bottleResult.textContent = '';
+    try {
+      setBottlePhoto(await shrinkPhoto(file));
+    } catch {
+      setBottlePhoto(null);
+      bottleResult.textContent = '這張照片讀不出來，換一張試試';
+    }
+  });
+  bottlePhotoFig.querySelector('.photo-remove')?.addEventListener('click', () => setBottlePhoto(null));
+  // 撿到的信、收藏的信上的照片：點了放大
+  document.addEventListener('click', (e) => {
+    const img = (e.target as Element).closest<HTMLImageElement>('.kraft-note .taped-photo img[src], .letter-paper .taped-photo img[src]');
+    if (img) showPhoto(img.src);
+  });
 }
 
 // ---- 瓶中信收藏（獨立一頁，網址 #letters） ----
@@ -2642,6 +2713,7 @@ function renderLettersPage(): void {
         .map(
           (l) => `<li class="letter-paper">
             <span class="kraft-no">${bottleNo(l.id)}</span>
+            ${l.photo ? tapedPhoto(l.id) : ''}
             <p class="letter-text">${esc(l.text)}</p>
             <small class="muted">${esc(meta(l))}</small>
             <div class="letter-acts">
@@ -2654,10 +2726,29 @@ function renderLettersPage(): void {
         )
         .join('')}</ul>`
     : '<h3>收藏的信</h3><p class="muted">還沒有收藏的信。到雷達上找找看，走到瓶子旁邊撿起來，信就會收進這裡。</p>';
+  fillPhotos(lettersList);
+  paintMyBottles();
 }
 
 async function onLettersClick(e: Event): Promise<void> {
   const t = e.target as Element;
+  const del = t.closest<HTMLButtonElement>('[data-delete-bottle]');
+  if (del) {
+    if (!window.confirm('要收回這個瓶子嗎？收回後就沒有人撿得到了。')) return;
+    del.disabled = true;
+    const id = Number(del.dataset.deleteBottle);
+    const r = await deleteBottle(id);
+    if (!r.ok) {
+      del.disabled = false;
+      showBanner(bannerEl, r.message, 3000);
+      return;
+    }
+    removeBottleMark(id);
+    showBanner(bannerEl, '瓶子收回了', 2000);
+    await reloadMyBottles();
+    render();
+    return;
+  }
   const proof = t.closest<HTMLButtonElement>('[data-proof]');
   if (proof) {
     const l = myBottlesData?.letters.find((x) => x.id === Number(proof.dataset.proof));
@@ -2683,46 +2774,103 @@ async function onLettersClick(e: Event): Promise<void> {
 /** 丟瓶子的動畫進行中（不能再按一次） */
 let throwing = false;
 
+/** 點了瓶子：沒寫字、字太多就搖一搖（不寫提示）；錯誤（定位、審核、額度）寫在下面 */
 async function submitBottle(): Promise<void> {
+  if (throwing || bottleDropEl.classList.contains('busy')) return;
   const text = bottleText.value.trim();
-  if (!text) {
-    bottleResult.innerHTML = '<p class="msg error">寫一段話再丟吧</p>';
+  const say = (msg: string): void => {
+    bottleResult.textContent = msg;
+  };
+  if (!text || xLength(text) > bottleMaxWeight()) {
+    bottleDropEl.classList.remove('nope');
+    void bottleDropEl.offsetWidth;
+    bottleDropEl.classList.add('nope');
     return;
   }
-  if (xLength(text) > bottleMaxWeight()) {
-    bottleResult.innerHTML = '<p class="msg error">太長了：字數比照 X，中文最多 140 字、英文最多 280 字</p>';
-    return;
-  }
-  if (youOn === 'woof') {
-    bottleResult.innerHTML = '<p class="msg error">搭火箭回地球才能丟瓶子</p>';
-    return;
-  }
-  if (origin.source !== 'gps') {
-    bottleResult.innerHTML = '<p class="msg error">要先按右上角「定位」用 GPS，瓶子會丟在你現在的位置附近</p>';
-    return;
-  }
-  bottleDropBtn.disabled = true;
-  bottleResult.innerHTML = '<p class="msg busy">審核內容中</p>';
-  const r = await dropBottle(text, origin);
-  if (!r.ok) {
-    updateDropBtn();
-    bottleResult.innerHTML = `<p class="msg error">${esc(r.message)}</p>`;
-    return;
-  }
+  if (youOn === 'woof') return say('搭火箭回地球才能丟瓶子');
+  if (origin.source !== 'gps') return say('要先按右上角「定位」用 GPS，瓶子會丟在你現在的位置附近');
+  const photo = bottlePhotoData;
+  say('');
+  bottleDropEl.classList.add('busy');
+  const r = await dropBottle(text, origin, photo);
+  bottleDropEl.classList.remove('busy');
+  if (!r.ok) return say(r.message);
   bottleTexts.set(r.data.bottle.id, r.data);
+  if (photo && r.data.photo) rememberBottlePhoto(r.data.bottle.id, photo);
   lsSet(LS_BOTTLE_DROPPED, '1');
-  bottleResult.innerHTML = '';
-  // 牛皮紙捲起來、裝進瓶子、塞上軟木塞，丟到雷達上；落水後打開這個瓶子（編號、分享）
+  // 牛皮紙捲起來、放進瓶子、塞上軟木塞，丟到雷達上；落水後打開這個瓶子（編號、分享）
   throwing = true;
-  await throwBottleFx(text, bottleText.closest('.kraft') ?? bottleText, () => (bottleSheet.hidden = true));
+  updateDropBtn();
+  await throwBottleFx(text, photo, () => openBottleSheet(false));
   throwing = false;
   bottleText.value = '';
-  bottles = [r.data.bottle, ...bottles.filter((b) => b.id !== r.data.bottle.id)];
+  setBottlePhoto(null);
   updateDropBtn();
+  bottles = [r.data.bottle, ...bottles.filter((b) => b.id !== r.data.bottle.id)];
   void reloadMyBottles();
   selectedBottle = null;
   selectBottle(r.data.bottle.id);
   showBanner(bannerEl, `丟出去了！${bottleNo(r.data.bottle.id)} 會在附近漂 ${bottleRules()?.seaHours ?? 24} 小時，被撿走時會通知你`, 3500);
+}
+
+/**
+ * 仿真的玻璃瓶（viewBox 0 0 90 230，瓶口在上）：半透明的玻璃、厚厚的瓶底、瓶頸和瓶身的反光、底下的影子；
+ * 裡面一捲牛皮紙（.scroll）、瓶口的軟木塞（.cork）先藏著，丟的時候才出現。p 是漸層的 id 前綴（同一頁有好幾個）
+ */
+function bottleSvg(p: string): string {
+  return `<svg class="real-bottle" viewBox="0 0 90 230" aria-hidden="true">
+    <defs>
+      <linearGradient id="${p}-glass" x1="0" x2="1">
+        <stop offset="0" stop-color="#2f6f66" stop-opacity=".62" /><stop offset=".13" stop-color="#9fd3c9" stop-opacity=".38" />
+        <stop offset=".38" stop-color="#e6faf6" stop-opacity=".14" /><stop offset=".66" stop-color="#cdeee8" stop-opacity=".18" />
+        <stop offset=".88" stop-color="#78b6ab" stop-opacity=".4" /><stop offset="1" stop-color="#2a6259" stop-opacity=".66" />
+      </linearGradient>
+      <linearGradient id="${p}-depth" x1="0" y1="0" x2="0" y2="1">
+        <stop offset="0" stop-color="#ffffff" stop-opacity=".12" /><stop offset=".7" stop-color="#1f5a52" stop-opacity="0" /><stop offset="1" stop-color="#1f5a52" stop-opacity=".28" />
+      </linearGradient>
+      <linearGradient id="${p}-kraft" x1="0" x2="1">
+        <stop offset="0" stop-color="#8f6438" /><stop offset=".38" stop-color="#d9b588" /><stop offset=".7" stop-color="#c39866" /><stop offset="1" stop-color="#83592f" />
+      </linearGradient>
+      <linearGradient id="${p}-wood" x1="0" x2="1">
+        <stop offset="0" stop-color="#9c6a39" /><stop offset=".4" stop-color="#d6a46c" /><stop offset=".75" stop-color="#c08a52" /><stop offset="1" stop-color="#8a5a2c" />
+      </linearGradient>
+      <linearGradient id="${p}-shine" x1="0" y1="0" x2="0" y2="1">
+        <stop offset="0" stop-color="#fff" stop-opacity="0" /><stop offset=".2" stop-color="#fff" stop-opacity=".85" /><stop offset=".8" stop-color="#fff" stop-opacity=".7" /><stop offset="1" stop-color="#fff" stop-opacity="0" />
+      </linearGradient>
+      <filter id="${p}-blur" x="-20%" y="-200%" width="140%" height="500%"><feGaussianBlur stdDeviation="2.4" /></filter>
+    </defs>
+    <ellipse class="shadow" cx="50" cy="225" rx="36" ry="4.5" fill="#000" opacity=".32" filter="url(#${p}-blur)" />
+    <g class="scroll">
+      <rect x="31" y="118" width="28" height="92" rx="13" fill="url(#${p}-kraft)" stroke="#7a5230" stroke-width=".8" />
+      <ellipse cx="45" cy="121" rx="13" ry="4" fill="#e3c294" stroke="#7a5230" stroke-width=".8" />
+      <path d="M31 150 h28 M31 178 h28" stroke="#6e4a26" stroke-width="1.6" />
+    </g>
+    <path d="M36 18 L36 64 C36 84 11 92 11 116 L11 211 Q11 222 22 222 L68 222 Q79 222 79 211 L79 116 C79 92 54 84 54 64 L54 18 Z" fill="url(#${p}-glass)" stroke="#1d5a52" stroke-opacity=".55" stroke-width="1.2" />
+    <path d="M36 18 L36 64 C36 84 11 92 11 116 L11 211 Q11 222 22 222 L68 222 Q79 222 79 211 L79 116 C79 92 54 84 54 64 L54 18 Z" fill="url(#${p}-depth)" />
+    <ellipse cx="45" cy="214" rx="31" ry="6" fill="#3f8f84" opacity=".3" />
+    <path d="M20 214 Q45 220 70 214" stroke="#e8fffb" stroke-opacity=".55" stroke-width="1.4" fill="none" />
+    <path d="M19 118 L19 204" stroke="url(#${p}-shine)" stroke-width="4.5" stroke-linecap="round" />
+    <path d="M71 124 L71 172" stroke="url(#${p}-shine)" stroke-width="2" stroke-linecap="round" opacity=".55" />
+    <path d="M24 100 C30 90 37 86 39 72" stroke="#fff" stroke-opacity=".6" stroke-width="2.2" fill="none" stroke-linecap="round" />
+    <path d="M39 24 L39 62" stroke="url(#${p}-shine)" stroke-width="2.2" stroke-linecap="round" />
+    <rect x="33" y="8" width="24" height="11" rx="4" fill="url(#${p}-glass)" stroke="#1d5a52" stroke-opacity=".6" stroke-width="1.2" />
+    <path d="M36 11 h10" stroke="#fff" stroke-opacity=".75" stroke-width="1.6" stroke-linecap="round" />
+    <g class="cork">
+      <path d="M36.5 -4 L53.5 -4 L52 20 L38 20 Z" fill="url(#${p}-wood)" stroke="#6b4422" stroke-width=".9" />
+      <ellipse cx="45" cy="-4" rx="8.5" ry="2.6" fill="#e0b47e" stroke="#6b4422" stroke-width=".9" />
+      <circle cx="41" cy="4" r=".9" fill="#7a4f28" /><circle cx="48" cy="9" r=".8" fill="#7a4f28" /><circle cx="44" cy="14" r=".7" fill="#7a4f28" />
+    </g>
+  </svg>`;
+}
+
+/** 軟木塞（viewBox 0 0 20 26，躺在瓶子旁邊；丟的時候飛進瓶口） */
+function corkSvg(p: string): string {
+  return `<svg class="real-cork" viewBox="0 0 20 26" aria-hidden="true">
+    <defs><linearGradient id="${p}-cork" x1="0" x2="1"><stop offset="0" stop-color="#9c6a39" /><stop offset=".4" stop-color="#d6a46c" /><stop offset=".75" stop-color="#c08a52" /><stop offset="1" stop-color="#8a5a2c" /></linearGradient></defs>
+    <path d="M1.5 3 L18.5 3 L17 25 L3 25 Z" fill="url(#${p}-cork)" stroke="#6b4422" stroke-width=".9" />
+    <ellipse cx="10" cy="3" rx="8.5" ry="2.6" fill="#e0b47e" stroke="#6b4422" stroke-width=".9" />
+    <circle cx="6" cy="11" r=".9" fill="#7a4f28" /><circle cx="13" cy="16" r=".8" fill="#7a4f28" /><circle cx="9" cy="21" r=".7" fill="#7a4f28" />
+  </svg>`;
 }
 
 /** 雷達（或地圖）正中間在畫面上的哪裡：瓶子丟到這裡 */
@@ -2733,75 +2881,95 @@ function landingPoint(): { x: number; y: number } {
 }
 
 /**
- * 丟瓶子的動畫（約 3 秒，可愛不可怕）：牛皮紙從下往上捲成一捲 → 轉直、縮小放進玻璃瓶 → 軟木塞塞上 →
- * 瓶子轉著圈拋到雷達正中間（你的位置）→ 落水，一圈圈水波，瓶子晃一晃。
- * 開始拋的時候 hide() 收起面板（手機上面板蓋住雷達）；系統設定減少動態就直接跳過
+ * 丟瓶子的動畫（約 4 秒，可愛不可怕）：牛皮紙從下往上捲成一捲 → 捲好的紙移到瓶口、滑進瓶子 → 躺在旁邊的軟木塞跳起來塞進瓶口 →
+ * 收起畫面，瓶子轉著圈拋到雷達正中間（你的位置）→ 落水，一圈圈水波，瓶子晃一晃。
+ * 用蓋在上面的一份來動（原本的紙、瓶子先藏起來）；系統設定減少動態就直接跳過
  */
-async function throwBottleFx(text: string, paperEl: Element, hide: () => void): Promise<void> {
-  if (matchMedia('(prefers-reduced-motion: reduce)').matches) {
+async function throwBottleFx(text: string, photo: string | null, hide: () => void): Promise<void> {
+  const sheet = bottleSheet.querySelector<HTMLElement>('.kraft-sheet');
+  const realBottle = bottleDropEl.querySelector('.real-bottle');
+  const realCork = bottleDropEl.querySelector('.real-cork');
+  if (matchMedia('(prefers-reduced-motion: reduce)').matches || !sheet || !realBottle || !realCork) {
     hide();
     return;
   }
-  const from = paperEl.getBoundingClientRect();
+  const from = sheet.getBoundingClientRect();
+  const br = realBottle.getBoundingClientRect();
+  const cr = realCork.getBoundingClientRect();
+  const k = br.width / 90;
   const fx = document.createElement('div');
   fx.className = 'bottle-fx';
   fx.setAttribute('aria-hidden', 'true');
+  // 紙：跟原本一樣大、一樣的字和照片（轉正，捲起來比較好看）
   const paper = document.createElement('div');
   paper.className = 'bottle-fx-paper';
-  paper.textContent = text;
+  paper.innerHTML = `${photo ? `<figure class="taped-photo"><img src="${esc(photo)}" alt="" /></figure>` : ''}<p>${esc(text)}</p>`;
   Object.assign(paper.style, { left: `${from.left}px`, top: `${from.top}px`, width: `${from.width}px`, height: `${from.height}px` });
   const roll = document.createElement('div');
   roll.className = 'bottle-fx-roll';
   Object.assign(roll.style, { left: `${from.left}px`, top: `${from.bottom - 9}px`, width: `${from.width}px` });
-  // 玻璃瓶：寬 44、高 92，瓶口在上面；裡面一捲紙、軟木塞另外動
-  const cx = from.left + from.width / 2;
-  const cy = from.top + from.height / 2;
   const bottle = document.createElement('div');
   bottle.className = 'bottle-fx-bottle';
-  Object.assign(bottle.style, { left: `${cx - 22}px`, top: `${cy - 46}px` });
-  bottle.innerHTML = `<svg viewBox="0 0 44 92" width="44" height="92">
-    <rect class="scroll" x="17" y="44" width="10" height="34" rx="4" />
-    <path class="glass" d="M16 14 h12 v10 c0 4 10 8 10 18 v40 a8 8 0 0 1 -8 8 h-16 a8 8 0 0 1 -8 -8 v-40 c0 -10 10 -14 10 -18 z" />
-    <path class="shine" d="M12 46 v30" />
-    <rect class="cork" x="15" y="2" width="14" height="14" rx="3" />
-  </svg>`;
-  fx.append(paper, roll, bottle);
+  bottle.innerHTML = bottleSvg('fxb');
+  Object.assign(bottle.style, { left: `${br.left}px`, top: `${br.top}px`, width: `${br.width}px`, height: `${br.height}px` });
+  const cork = document.createElement('div');
+  cork.className = 'bottle-fx-cork';
+  cork.innerHTML = corkSvg('fxc');
+  Object.assign(cork.style, { left: `${cr.left}px`, top: `${cr.top}px`, width: `${cr.width}px`, height: `${cr.height}px` });
+  // 捲好的紙在玻璃後面（隔著玻璃看得到），軟木塞在最上面
+  fx.append(paper, roll, bottle, cork);
   document.body.append(fx);
-  // 原本那張紙先藏起來（捲起來的是蓋在上面的這張）
-  const real = paperEl as HTMLElement;
-  real.style.visibility = 'hidden';
+  sheet.style.visibility = 'hidden';
+  bottleDropEl.style.visibility = 'hidden';
   const run = (el: Element, frames: Keyframe[], o: KeyframeAnimationOptions): Promise<unknown> => el.animate(frames, { fill: 'forwards', ...o }).finished;
-  const cork = bottle.querySelector('.cork')!;
-  const scroll = bottle.querySelector('.scroll')!;
   try {
-    // 1. 牛皮紙從下往上捲起來（0.8 秒）
+    // 1. 牛皮紙從下往上捲起來（0.9 秒）
     await Promise.all([
-      run(paper, [{ transform: 'scaleY(1)' }, { transform: 'scaleY(0.04)', opacity: 0.6 }], { duration: 800, easing: 'ease-in' }),
-      run(roll, [{ transform: 'translateY(0) scaleY(0.4)', opacity: 0 }, { transform: `translateY(${-from.height + 9}px) scaleY(1)`, opacity: 1 }], { duration: 800, easing: 'ease-in' }),
+      run(paper, [{ transform: 'scaleY(1)' }, { transform: 'scaleY(0.03)', opacity: 0.7 }], { duration: 900, easing: 'ease-in' }),
+      run(roll, [{ transform: 'translateY(0) scaleY(0.4)', opacity: 0 }, { transform: `translateY(${-from.height + 9}px) scaleY(1)`, opacity: 1 }], { duration: 900, easing: 'ease-in' }),
     ]);
     paper.remove();
-    // 2. 捲好的紙轉直、縮小，放進瓶子；瓶子同時出現（0.7 秒）
-    // 捲好的紙在最上面（中心在 from.top + 9），移到瓶子裡那捲紙的位置（中心 cy + 15）；位移都從一開始的位置（中心 from.bottom）算
+    // 2. 捲好的紙轉直、縮成瓶子裡那一捲的大小，移到瓶口上面（0.6 秒），再滑進瓶子（0.45 秒）
+    //    位移從一開始的位置（中心 from.bottom）算；瓶口在 (45, 8)、瓶子裡那一捲的中心在 (45, 164)（瓶子的座標）
+    const [mx, cx0, cy0] = [br.left + 45 * k, from.left + from.width / 2, from.bottom];
+    const shape = `rotate(90deg) scaleX(${(92 * k) / from.width}) scaleY(${(28 * k) / 18})`;
+    const above = br.top + 8 * k - 46 * k - 4;
+    await run(roll, [{ transform: `translateY(${-from.height + 9}px)` }, { transform: `translate(${mx - cx0}px, ${above - cy0}px) ${shape}` }], { duration: 600, easing: 'ease-in-out' });
+    const scroll = bottle.querySelector('.scroll')!;
     await Promise.all([
-      run(roll, [{ transform: `translateY(${-from.height + 9}px)` }, { transform: `translate(0, ${cy + 15 - from.bottom}px) rotate(90deg) scaleX(${34 / from.width})`, opacity: 0.2 }], { duration: 700, easing: 'ease-in-out' }),
-      run(bottle, [{ opacity: 0, transform: 'scale(0.6)' }, { opacity: 1, transform: 'scale(1)' }], { duration: 500, easing: 'ease-out' }),
-      run(scroll, [{ opacity: 0 }, { opacity: 0, offset: 0.6 }, { opacity: 1 }], { duration: 700 }),
+      run(roll, [{ transform: `translate(${mx - cx0}px, ${above - cy0}px) ${shape}` }, { transform: `translate(${mx - cx0}px, ${br.top + 164 * k - cy0}px) ${shape}` }], { duration: 450, easing: 'ease-in' }),
+      run(scroll, [{ opacity: 0 }, { opacity: 0, offset: 0.7 }, { opacity: 1 }], { duration: 450 }),
     ]);
     roll.remove();
-    // 3. 軟木塞塞上（0.35 秒，彈一下）
-    await run(cork, [{ transform: 'translateY(-26px)', opacity: 0 }, { transform: 'translateY(2px)', opacity: 1, offset: 0.75 }, { transform: 'translateY(0)', opacity: 1 }], { duration: 350, easing: 'ease-out' });
-    // 4. 收起面板，瓶子轉著圈拋到雷達正中間（1.1 秒，拋物線）
+    // 3. 軟木塞跳起來、轉正，塞進瓶口（0.5 秒），換成瓶子上的那個
+    const cc = { x: cr.left + cr.width / 2, y: cr.top + cr.height / 2 };
+    const neck = { x: mx, y: br.top + 8 * k };
+    const [dx, dy] = [neck.x - cc.x, neck.y - cc.y];
+    await run(
+      cork,
+      [
+        { transform: 'translate(0, 0) rotate(-78deg)' },
+        { transform: `translate(${dx * 0.5}px, ${dy * 0.5 - 40}px) rotate(-200deg)`, offset: 0.55 },
+        { transform: `translate(${dx}px, ${dy - 6}px) rotate(-360deg) scale(${(17 * k) / cr.width})`, offset: 0.85 },
+        { transform: `translate(${dx}px, ${dy}px) rotate(-360deg) scale(${(17 * k) / cr.width})` },
+      ],
+      { duration: 520, easing: 'ease-out' },
+    );
+    cork.remove();
+    bottle.querySelector('.cork')?.setAttribute('style', 'opacity: 1');
+    // 4. 收起畫面，瓶子轉著圈拋到雷達正中間（1.2 秒，拋物線）
     hide();
     await new Promise((r) => requestAnimationFrame(() => r(null)));
     const to = landingPoint();
-    const [dx, dy] = [to.x - cx, to.y - cy];
-    const arc = Math.min(220, 80 + Math.hypot(dx, dy) * 0.35);
+    const [bx, by] = [to.x - (br.left + br.width / 2), to.y - (br.top + br.height / 2)];
+    const arc = Math.min(240, 90 + Math.hypot(bx, by) * 0.35);
+    const end = 18 / br.height;
     const frames: Keyframe[] = [];
     for (let i = 0; i <= 12; i++) {
       const t = i / 12;
-      frames.push({ transform: `translate(${(dx * t).toFixed(1)}px, ${(dy * t - arc * 4 * t * (1 - t)).toFixed(1)}px) rotate(${Math.round(-20 + 560 * t)}deg) scale(${(1 - 0.55 * t).toFixed(3)})` });
+      frames.push({ transform: `translate(${(bx * t).toFixed(1)}px, ${(by * t - arc * 4 * t * (1 - t)).toFixed(1)}px) rotate(${Math.round(540 * t)}deg) scale(${(1 - (1 - end * 2.2) * t).toFixed(3)})` });
     }
-    await run(bottle, frames, { duration: 1100, easing: 'cubic-bezier(.3,.1,.5,1)' });
+    await run(bottle, frames, { duration: 1200, easing: 'cubic-bezier(.3,.1,.5,1)' });
     // 5. 落水：一圈圈水波，瓶子斜斜地晃一晃（0.9 秒）
     for (const delay of [0, 220]) {
       const ring = document.createElement('div');
@@ -2810,14 +2978,15 @@ async function throwBottleFx(text: string, paperEl: Element, hide: () => void): 
       fx.append(ring);
       void run(ring, [{ transform: 'translate(-50%, -50%) scale(0.2)', opacity: 0.9 }, { transform: 'translate(-50%, -50%) scale(1.6)', opacity: 0 }], { duration: 800, delay, easing: 'ease-out' });
     }
-    const end = `translate(${dx}px, ${dy}px)`;
+    const at = `translate(${bx}px, ${by}px)`;
+    const sc = (end * 2.2).toFixed(3);
     await run(
       bottle,
       [
-        { transform: `${end} rotate(540deg) scale(0.45)` },
-        { transform: `${end} rotate(520deg) scale(0.45)`, offset: 0.35 },
-        { transform: `${end} rotate(555deg) scale(0.45)`, offset: 0.7 },
-        { transform: `${end} rotate(540deg) scale(0.4)`, opacity: 0 },
+        { transform: `${at} rotate(540deg) scale(${sc})` },
+        { transform: `${at} rotate(515deg) scale(${sc})`, offset: 0.35 },
+        { transform: `${at} rotate(560deg) scale(${sc})`, offset: 0.7 },
+        { transform: `${at} rotate(540deg) scale(${sc})`, opacity: 0 },
       ],
       { duration: 900, easing: 'ease-in-out' },
     );
@@ -2825,7 +2994,8 @@ async function throwBottleFx(text: string, paperEl: Element, hide: () => void): 
     hide();
   } finally {
     fx.remove();
-    real.style.visibility = '';
+    sheet.style.visibility = '';
+    bottleDropEl.style.visibility = '';
   }
 }
 
@@ -6939,34 +7109,9 @@ function wireControls(): void {
     void submitReport();
   });
   bottleBtn.addEventListener('click', () => openBottleSheet(bottleSheet.hidden));
-  bottleSheet.querySelector('[data-act="close"]')?.addEventListener('click', () => openBottleSheet(false));
   wireTapOutside();
   wireSheetDrag();
-  bottleText.addEventListener('input', updateDropBtn);
-  bottleForm.addEventListener('submit', (e) => {
-    e.preventDefault();
-    void submitBottle();
-  });
-  bottleNear.addEventListener('click', (e) => {
-    const b = (e.target as Element).closest<HTMLButtonElement>('[data-bottle]');
-    if (b?.dataset.bottle) selectBottle(Number(b.dataset.bottle));
-  });
-  bottleMine.addEventListener('click', async (e) => {
-    if ((e.target as Element).closest('[data-act="letters"]')) {
-      openLettersPage(true);
-      return;
-    }
-    const b = (e.target as Element).closest<HTMLButtonElement>('[data-delete-bottle]');
-    if (!b?.dataset.deleteBottle || !window.confirm('要收回這個瓶子嗎？收回後就沒有人撿得到了。')) return;
-    b.disabled = true;
-    const id = Number(b.dataset.deleteBottle);
-    const r = await deleteBottle(id);
-    if (r.ok) removeBottleMark(id);
-    bottleResult.innerHTML = r.ok ? '<p class="msg">瓶子收回了。</p>' : `<p class="msg error">${esc(r.message)}</p>`;
-    renderBottleSheet();
-    void reloadMyBottles();
-    render();
-  });
+  wireBottleScene();
   lettersPage.addEventListener('click', (e) => {
     if ((e.target as Element).closest('[data-act="back"]')) openLettersPage(false);
     else void onLettersClick(e);

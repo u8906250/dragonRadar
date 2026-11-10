@@ -203,26 +203,31 @@
         </form>
         <p class="muted sheet-note small">回報只有管理者看得到，會盡快處理。已經提早結束的，選「時間錯誤」或「其他」寫一下。</p>
       </div>
-      <div id="bottle-sheet" class="sheet" hidden>
-        <div class="sheet-head">
-          <strong>漂流瓶</strong>
-          <button type="button" class="chip" data-act="close" aria-label="關閉">關閉</button>
+      <!-- 漂流瓶（v1.594）：畫面中間一張牛皮紙、一個空瓶子，直接在紙上寫；點瓶子就捲起來裝進去丟出去（不放任何提示，說明在說明頁） -->
+      <section id="bottle-sheet" class="bottle-scene" hidden aria-label="漂流瓶">
+        <div class="scene-top">
+          <button type="button" class="scene-icon" data-act="letters" aria-label="瓶中信收藏、我丟的瓶子"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="5" width="18" height="14" rx="2" /><path d="M3.5 7l8.5 6 8.5-6" /></svg><span class="scene-dot" hidden></span></button>
+          <label class="scene-icon" id="bottle-photo-btn" aria-label="貼一張照片" hidden><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 8h3l2-2.5h6L17 8h3a1 1 0 0 1 1 1v9a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V9a1 1 0 0 1 1-1z" /><circle cx="12" cy="13" r="3.6" /></svg><input type="file" id="bottle-photo-input" accept="image/*" hidden /></label>
+          <button type="button" class="scene-icon" data-act="close" aria-label="關閉"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18" /></svg></button>
         </div>
-        <p class="muted sheet-note">在牛皮紙上寫一段話，捲起來裝進瓶子，丟在你現在的位置附近。路過的人要走到瓶子旁邊才撿得起來、看得到內容。</p>
-        <form id="bottle-form" class="bottle-form" autocomplete="off">
-          <div class="kraft">
-            <textarea id="bottle-text" rows="4" maxlength="280" placeholder="例如「台北一起加油！」「謝謝今天發飄帶的志工」" aria-label="漂流瓶內容（寫在牛皮紙上）"></textarea>
+        <div class="scene-stage">
+          <div class="kraft-sheet">
+            <div class="kraft-bg" aria-hidden="true"></div>
+            <figure id="bottle-photo" class="taped-photo" hidden><img alt="要放進瓶子的照片" /><button type="button" class="photo-remove" aria-label="拿掉照片">✕</button></figure>
+            <textarea id="bottle-text" aria-label="寫在牛皮紙上的話" spellcheck="false" autocomplete="off"></textarea>
+            <span id="bottle-count" class="kraft-count" hidden></span>
           </div>
-          <div class="bottle-form-row">
-            <span class="muted"><span id="bottle-count">0 / 280</span><span id="bottle-quota"></span></span>
-            <button type="submit" class="btn primary" id="bottle-drop">捲起來丟出去</button>
-          </div>
-        </form>
-        <div id="bottle-result" class="report-result" aria-live="polite"></div>
-        <div id="bottle-near"></div>
-        <div id="bottle-mine"></div>
-        <ul class="muted sheet-note small report-tips" id="bottle-tips"></ul>
-      </div>
+          <div id="bottle-drop" class="scene-bottle" role="button" tabindex="0" aria-label="捲起來裝進瓶子丟出去"></div>
+        </div>
+        <p id="bottle-result" class="scene-msg" aria-live="polite"></p>
+      </section>
+      <!-- 牛皮紙毛毛的紙邊（.kraft-bg 用） -->
+      <svg width="0" height="0" style="position: absolute" aria-hidden="true" focusable="false">
+        <filter id="kraft-edge" x="-4%" y="-4%" width="108%" height="108%">
+          <feTurbulence type="fractalNoise" baseFrequency="0.028" numOctaves="5" seed="7" result="n" />
+          <feDisplacementMap in="SourceGraphic" in2="n" scale="12" xChannelSelector="R" yChannelSelector="G" />
+        </filter>
+      </svg>
       <section id="letters-page" class="letters-page" hidden aria-labelledby="letters-title">
         <header class="letters-head">
           <button type="button" class="chip" data-act="back">← 回雷達</button>
@@ -230,6 +235,7 @@
         </header>
         <div class="letters-body">
           <div id="letters-list"></div>
+          <div id="letters-mine"></div>
           <p class="muted small letters-note">撿到的瓶子都收在這裡。收藏記在這個瀏覽器裡（不用登入），清除瀏覽器資料就看不到了。信是陌生人匿名留下的，看到不適合的內容可以檢舉。</p>
         </div>
       </section>

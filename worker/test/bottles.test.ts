@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { distM, driftStep, ruleCheck, scatter, seaPoint, sha256Hex, xLength } from '../src/bottles';
+import { distM, driftStep, parsePhoto, ruleCheck, scatter, seaPoint, sha256Hex, stripJpegMeta, xLength } from '../src/bottles';
 import { WOOF_KM, WOOF_SEA } from '../src/woofsea';
 
 describe('ruleCheck', () => {
@@ -100,5 +100,39 @@ describe('seaPoint', () => {
 describe('sha256Hex', () => {
   it('hashes the text like everyone else does', async () => {
     expect(await sha256Hex('abc')).toBe('ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad');
+  });
+});
+
+describe('photos', () => {
+  const seg = (marker: number, payload: number[]): number[] => [0xff, marker, (payload.length + 2) >> 8, (payload.length + 2) & 0xff, ...payload];
+  const jpeg = Uint8Array.from([
+    0xff, 0xd8,
+    ...seg(0xe0, [0x4a, 0x46, 0x49, 0x46, 0x00, 1, 1, 0, 0, 1, 0, 1, 0, 0]),
+    ...seg(0xe1, [0x45, 0x78, 0x69, 0x66, 0x00, 0x00, 9, 9, 9, 9]),
+    ...seg(0xfe, [0x68, 0x69]),
+    ...seg(0xdb, [0, 1, 2, 3]),
+    ...seg(0xda, [1, 2, 3, 4, 5, 6]),
+    0x11, 0x22, 0xff, 0x00, 0x33, 0xff, 0xd9,
+  ]);
+  it('drops EXIF (GPS, camera) and comments but keeps the picture', () => {
+    const out = [...stripJpegMeta(jpeg)];
+    const hex = out.map((b) => b.toString(16).padStart(2, '0')).join('');
+    expect(hex).not.toContain('ffe1');
+    expect(hex).not.toContain('fffe');
+    expect(hex).toContain('ffe0');
+    expect(hex).toContain('ffdb');
+    expect(hex.endsWith('1122ff0033ffd9')).toBe(true);
+    expect(out.length).toBe(jpeg.length - 14 - 6);
+  });
+  it('rejects things that are not a JPEG', () => {
+    expect(() => stripJpegMeta(Uint8Array.from([0xff, 0xd8, 0x00, 0x01, 0x02, 0x03]))).toThrow();
+    expect(() => parsePhoto('data:image/png;base64,AAAA')).toThrow();
+    expect(() => parsePhoto(`data:image/jpeg;base64,${btoa('hello')}`)).toThrow();
+    expect(parsePhoto(undefined)).toBeNull();
+    expect(parsePhoto('')).toBeNull();
+  });
+  it('accepts a small JPEG data URL', () => {
+    const b64 = btoa(String.fromCharCode(...jpeg));
+    expect(parsePhoto(`data:image/jpeg;base64,${b64}`)?.bytes.length).toBe(jpeg.length);
   });
 });
