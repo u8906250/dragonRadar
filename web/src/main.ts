@@ -395,7 +395,6 @@ function setPoll(sec: number): void {
 }
 const modeBadge = $('#mode-badge');
 const notifyBtn = $<HTMLButtonElement>('#notify-btn');
-const pickBtn = $<HTMLButtonElement>('#pick-origin');
 const viewBtn = $<HTMLButtonElement>('#view-btn');
 const compassBtn = $<HTMLButtonElement>('#compass-btn');
 const panelEl = $('#panel');
@@ -538,14 +537,6 @@ const map = new MapView(
     onBottle: (id) => selectBottle(id),
     onLandmark: (id) => {
       if (id === 'hq') startHqVoyage();
-    },
-    onPickOrigin: (p) => {
-      gpsAccuracy = null;
-      setOrigin({ ...p, source: 'manual' });
-      fitEarthZoom();
-      map.setPickMode(false);
-      pickBtn.classList.remove('on');
-      showBanner(bannerEl, '已設定為手動位置');
     },
   },
   baseMap,
@@ -1585,7 +1576,7 @@ function render(): void {
   );
   map.setBottles(bottleViews.map((v) => ({ id: v.b.id, lat: v.b.lat, lng: v.b.lng, state: v.state, mine: v.b.mine, picked: v.b.picked })));
   updateBottleBadge(bottleViews);
-  // 全螢幕鋪滿時你的 GPS 位置（像 Google 地圖的藍點）：拖曳、設定位置移開了也畫在 GPS 的地方
+  // 全螢幕鋪滿時你的 GPS 位置（像 Google 地圖的藍點）：拖曳移開了也畫在 GPS 的地方
   const fix = origin.source === 'gps' ? { at: origin, acc: gpsAccuracy } : lastGps ? { at: lastGps, acc: lastGpsAccuracy } : null;
   radar.setYou(fix ? { bearing: bearingDeg(origin, fix.at), distanceKm: haversineKm(origin, fix.at), accuracyKm: fix.acc ? fix.acc / 1000 : null } : null);
   radar.setLandmarks(
@@ -4541,7 +4532,6 @@ function switchView(v: 'radar' | 'map'): void {
   updateViewBtn();
   $('#stage').dataset.view = v;
   viewBtn.textContent = v === 'radar' ? '地圖' : '雷達';
-  pickBtn.hidden = v !== 'map';
   $('#scale-chips').hidden = v !== 'radar';
   baseChipsEl.hidden = v !== 'map';
   compassBtn.hidden = v !== 'radar' || !compassSupported();
@@ -4764,7 +4754,7 @@ function setScale(setting: ScaleSetting): void {
 function geoErrorText(e: GeolocationPositionError): string {
   if (e.code === e.PERMISSION_DENIED) return '定位權限被拒絕。請到瀏覽器的網站設定，允許這個網站使用位置，再按一次「定位」。';
   if (e.code === e.TIMEOUT) return '定位逾時，請到戶外或開啟 Wi-Fi 後再試一次。';
-  return '目前無法取得位置，請稍後再試，或切到地圖用「設定位置」手動選。';
+  return '目前無法取得位置，請稍後再試，或在雷達上拖曳到你的位置。';
 }
 
 /** 按「定位」，雷達、地圖的範圍拉到外圈幾公里（本來就比較近的維持原本的，不拉遠；min 是最近可以到多近） */
@@ -4795,7 +4785,7 @@ function locateMe(): void {
     }
   }
   if (!('geolocation' in navigator)) {
-    showBanner(bannerEl, '此瀏覽器不支援定位，可切到地圖用「設定位置」手動選。', 4000);
+    showBanner(bannerEl, '此瀏覽器不支援定位，可以在雷達上拖曳到你的位置。', 4000);
     return;
   }
   locateBtn.classList.add('on');
@@ -6270,7 +6260,7 @@ const PUSH_RESYNC_KM = 0.3;
 
 /**
  * 手機推播：訂閱（create）或確認還在，把約略位置送給伺服器。
- * 還沒有位置（預設的台北車站）不送，等 GPS 或手動設定位置後 setOrigin 會再送。
+ * 還沒有位置（預設的台北車站）不送，等 GPS 或在雷達上拖曳（手動位置）後 setOrigin 會再送。
  */
 async function syncPush(create: boolean): Promise<'ok' | 'unsupported' | 'no-location' | 'failed'> {
   if (!pushSupported() || Notification.permission !== 'granted') return 'unsupported';
@@ -6328,7 +6318,7 @@ async function toggleNotify(): Promise<void> {
     push === 'ok'
       ? '通知已開啟：附近 1 公里內開始發放、活動開始時，網頁關掉也會通知你（深夜 23:00–8:00 不通知）'
       : push === 'no-location'
-        ? '通知已開啟。開 GPS 或在地圖上設定位置後，網頁關掉也會通知你附近 1 公里內開始的發放、活動'
+        ? '通知已開啟。開 GPS 或在雷達上拖曳到你的位置後，網頁關掉也會通知你附近 1 公里內開始的發放、活動'
         : push === 'failed'
           ? '通知已開啟（網頁開著時提醒）；網頁關掉後的通知暫時開不了，晚點關掉「通知」再打開試試'
           : iosNeedsHomeScreen()
@@ -6735,12 +6725,6 @@ function wireControls(): void {
       }
     });
   }
-  pickBtn.addEventListener('click', () => {
-    const on = !pickBtn.classList.contains('on');
-    pickBtn.classList.toggle('on', on);
-    map.setPickMode(on);
-    if (on) showBanner(bannerEl, '點地圖任一處設定你的位置');
-  });
   useGpsBtn.addEventListener('click', () => {
     lsSet(LS_ORIGIN, null);
     setOrigin(DEFAULT_ORIGIN);

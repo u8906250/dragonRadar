@@ -288,13 +288,12 @@ export class MapView {
   private items: MapItem[] = [];
   private origin: LatLng;
   private accuracy: number | null = null;
-  private pickMode = false;
   private base: BaseMap;
 
   constructor(
     private readonly el: HTMLElement,
     origin: LatLng,
-    private readonly handlers: { onSelect: (id: number, group: number[]) => void; onPickOrigin: (p: LatLng) => void; onBottle?: (id: number) => void; onLandmark?: (id: string) => void },
+    private readonly handlers: { onSelect: (id: number, group: number[]) => void; onBottle?: (id: number) => void; onLandmark?: (id: string) => void },
     base: BaseMap = 'nlsc',
   ) {
     this.origin = origin;
@@ -350,9 +349,6 @@ export class MapView {
       })
         .bindTooltip('我的位置')
         .addTo(map);
-      map.on('click', (e: Leaflet.LeafletMouseEvent) => {
-        if (this.pickMode) this.handlers.onPickOrigin({ lat: e.latlng.lat, lng: e.latlng.lng });
-      });
       // 自己拖、滾輪、雙指縮放：記下時間（程式移動地圖不算）
       map.on('dragstart', () => (this.lastUserMove = Date.now()));
       // 縮放時要跟著變的大小、要收起來的東西：放在 CSS 變數和 class，不用整個重畫
@@ -581,11 +577,6 @@ export class MapView {
   kmPerPx(): number | null {
     if (!this.map) return null;
     return (40075.016686 * Math.cos((this.origin.lat * Math.PI) / 180)) / 2 ** (this.map.getZoom() + 8);
-  }
-
-  setPickMode(on: boolean): void {
-    this.pickMode = on;
-    if (this.map) this.map.getContainer().style.cursor = on ? 'crosshair' : '';
   }
 
   setBase(base: BaseMap): void {
