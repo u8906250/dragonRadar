@@ -1434,7 +1434,7 @@ function itemDays(it: Item): Set<number> {
 }
 
 // ---- 日期：選星期幾（可以好幾個）或直接點一天（v1.613 使用者建議多一個日期的按鈕） ----
-/** null 是不篩；weekdays 是星期幾（0 是星期日）；date 是哪一天（taipeiDay） */
+/** null 是不篩；weekdays 是星期幾（0 是星期日；一次一個，「週末」是六、日兩個）；date 是哪一天（taipeiDay） */
 let dayPick: { weekdays: Set<number> } | { date: number } | null = null;
 /** 最近一次畫面上抓到的全部（日期選單的月曆標哪幾天有東西） */
 let dayFetched: Item[] = [];
@@ -7331,17 +7331,12 @@ function wireControls(): void {
     const w = t.closest<HTMLButtonElement>('[data-wd]')?.dataset.wd;
     const day = t.closest<HTMLButtonElement>('[data-day]')?.dataset.day;
     if (w !== undefined) {
-      // 星期幾可以選好幾個；「週末」＝六、日（已經是六、日就取消）
-      const cur = new Set(dayPick && 'weekdays' in dayPick ? dayPick.weekdays : []);
-      if (w === 'weekend') {
-        const both = cur.size === 2 && cur.has(0) && cur.has(6);
-        setDayPick(both ? null : { weekdays: new Set([0, 6]) });
-      } else {
-        const n = Number(w);
-        if (cur.has(n)) cur.delete(n);
-        else cur.add(n);
-        setDayPick({ weekdays: cur });
-      }
+      // 星期幾一次選一個（v1.615 使用者說不用疊加）：點別天就換過去，再點同一個是取消；「週末」＝六、日；選好就收起來
+      const cur = dayPick && 'weekdays' in dayPick ? dayPick.weekdays : new Set<number>();
+      const want = w === 'weekend' ? [0, 6] : [Number(w)];
+      const same = cur.size === want.length && want.every((x) => cur.has(x));
+      setDayPick(same ? null : { weekdays: new Set(want) });
+      setDateOpen(false);
     } else if (day !== undefined) {
       // 直接點一天：選好就收起來（再點一次同一天是取消）
       const d = Number(day);
