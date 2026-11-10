@@ -5583,15 +5583,32 @@ function switchModule(id: ModuleId, fetch = true): void {
   if (fetch) void refresh();
 }
 
+/**
+ * 從 Threads 分享進來、還沒選要回報到哪個雷達的連結（v1.618 使用者說分享進來先選雷達再送出）：
+ * 有值時「切換雷達」那一頁改成「這則要回報到哪個雷達？」，只列收回報的雷達，選了就切過去、填好連結送出
+ */
+let pendingShare: string | null = null;
+
 function renderModuleList(): void {
   moduleList.replaceChildren();
+  const sharing = pendingShare !== null;
+  $('#module-title').textContent = sharing ? '這則要回報到哪個雷達？' : '切換雷達';
+  $('#module-note').textContent = sharing ? '選一個雷達，會切過去、用那個雷達的方式判讀這則貼文。' : '同一個雷達、地圖、清單、回報，換不同主題的資料。';
   for (const m of MODULES) {
+    // 分享進來選雷達：回報暫停的雷達不列
+    if (sharing && reportModules && !reportModules.includes(m.id)) continue;
     const li = document.createElement('li');
     const b = document.createElement('button');
     b.type = 'button';
     b.className = `theme-item module-item${m.id === mod.id ? ' on' : ''}`;
     b.innerHTML = `<span class="emoji" aria-hidden="true">${m.emoji}</span><span><b>${esc(m.name)}</b><small>${esc(m.tagline)}</small></span>${m.id === mod.id ? '<span class="check">✓</span>' : ''}`;
-    b.addEventListener('click', () => switchModule(m.id));
+    b.addEventListener('click', () => {
+      const link = pendingShare;
+      pendingShare = null;
+      switchModule(m.id);
+      moduleSheet.hidden = true;
+      if (link) sendSharedLink(link);
+    });
     li.appendChild(b);
     moduleList.appendChild(li);
   }
@@ -5599,7 +5616,11 @@ function renderModuleList(): void {
 
 function openModuleSheet(open: boolean): void {
   moduleSheet.hidden = !open;
-  if (!open) return;
+  // 分享進來沒選雷達就關掉：這則不送
+  if (!open) {
+    pendingShare = null;
+    return;
+  }
   themeSheet.hidden = true;
   kwSheet.hidden = true;
   reportSheet.hidden = true;
@@ -6908,6 +6929,13 @@ function showVersion(server: string | null): void {
 }
 
 /** 從 Threads App 分享過來（PWA share target）或網址帶 ?url= */
+/** 分享進來的連結：打開回報、填好、送出（判讀照現在的雷達） */
+function sendSharedLink(link: string): void {
+  openReportSheet(true);
+  reportInput.value = link;
+  void submitReport();
+}
+
 function takeSharedLink(params: URLSearchParams): string | null {
   const text = [params.get('url'), params.get('text'), params.get('title')].filter(Boolean).join(' ');
   return /threads\.(com|net)\/|accupass\.com\/(event|go)\/|opentix\.life\/event\//i.test(text) ? text : null;
@@ -7475,9 +7503,14 @@ async function boot(): Promise<void> {
   if (shared) {
     // 分享進來的網址用過就清掉，重新整理才不會再送一次
     history.replaceState(null, '', location.pathname);
-    openReportSheet(true);
-    reportInput.value = shared;
-    void submitReport();
+    // 活動通、OPENTIX 的活動頁只有洋流雷達收：直接切到洋流送出；Threads 貼文先選要回報到哪個雷達
+    if (/accupass\.com\/(event|go)\/|opentix\.life\/event\//i.test(shared) && !/threads\.(com|net)\//i.test(shared)) {
+      switchModule('current');
+      sendSharedLink(shared);
+    } else {
+      pendingShare = shared;
+      openModuleSheet(true);
+    }
   }
   const baseParam = new URLSearchParams(location.search).get('base');
   if (baseParam && (BASES as string[]).includes(baseParam)) setBase(baseParam as BaseMap);
