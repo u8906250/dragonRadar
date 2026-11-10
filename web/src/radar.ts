@@ -204,12 +204,12 @@ export interface RadarLandmark {
   selected: boolean;
 }
 
-/** 漂流瓶：far 遠的只是一團模糊訊號；near 200 m 內看得到瓶子；pick 走到撿得起來的距離 */
+/** 漂流瓶：near 看得到（遠近都直接畫出來，不模糊）；pick 走到撿得起來的距離 */
 export interface RadarBottle {
   id: number;
   bearing: number;
   distanceKm: number;
-  state: 'far' | 'near' | 'pick';
+  state: 'near' | 'pick';
   mine: boolean;
   picked: boolean;
   selected: boolean;
@@ -219,8 +219,6 @@ export interface RadarBottle {
 
 /** 瓶子的形狀（中心在原點，高約 16）；汪星海上的瓶子（space.ts）也用這個 */
 export const BOTTLE_PATH = 'M-1.8 -8 h3.6 v3 l2.4 3 v8.2 a1.6 1.6 0 0 1 -1.6 1.6 h-5.2 a1.6 1.6 0 0 1 -1.6 -1.6 v-8.2 l2.4 -3 z';
-/** 遠的瓶子模糊成這麼大一團（公里），讓人只知道大概的方向和距離 */
-const BOTTLE_FOG_KM = 0.15;
 
 /** 全螢幕鋪滿時你的 GPS 位置（像 Google 地圖的藍點）：手動移動了位置時不在正中間；accuracyKm 是 GPS 誤差 */
 export interface RadarYou {
@@ -632,7 +630,6 @@ export class Radar {
     this.svg.innerHTML = `
       <defs>
         <clipPath id="rg-clip"><circle cx="${C}" cy="${C}" r="${R}" /></clipPath>
-        <filter id="rg-fog" x="-100%" y="-100%" width="300%" height="300%"><feGaussianBlur stdDeviation="5" /></filter>
         <radialGradient id="rg-you-beam" gradientUnits="userSpaceOnUse" cx="0" cy="0" r="${YOU_BEAM_PX}">
           <stop offset="0" class="you-beam-stop-1" />
           <stop offset="1" class="you-beam-stop-2" />
@@ -1557,17 +1554,11 @@ export class Radar {
       });
       g.dataset.id = String(b.id);
       g.appendChild(el('circle', { class: 'hit', r: 14 }));
-      if (b.state === 'far') {
-        // 一團模糊的訊號：大小跟著比例，只看得出大概在哪
-        const fog = Math.max(7, Math.min(22, (BOTTLE_FOG_KM / this.scaleKm) * (R - 8)));
-        this.fxTwin(g).appendChild(el('circle', { class: 'fog', r: fog.toFixed(1), filter: 'url(#rg-fog)' }));
-      } else {
-        if (b.state === 'pick') this.fxTwin(g).appendChild(el('circle', { class: 'reach', r: 9 }));
-        const body = el('g', { class: 'body' });
-        body.appendChild(el('path', { class: 'glass', d: BOTTLE_PATH, transform: 'rotate(-20)' }));
-        g.appendChild(body);
-        this.addFlash(g, angle, r, 7);
-      }
+      if (b.state === 'pick') this.fxTwin(g).appendChild(el('circle', { class: 'reach', r: 9 }));
+      const body = el('g', { class: 'body' });
+      body.appendChild(el('path', { class: 'glass', d: BOTTLE_PATH, transform: 'rotate(-20)' }));
+      g.appendChild(body);
+      this.addFlash(g, angle, r, 7);
       const title = el('title');
       title.textContent = b.mine ? '你丟的漂流瓶' : b.state === 'pick' ? '漂流瓶（撿得到了）' : '漂流瓶';
       g.appendChild(title);

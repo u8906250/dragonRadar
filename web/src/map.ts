@@ -220,7 +220,7 @@ export interface MapBottle {
   id: number;
   lat: number;
   lng: number;
-  state: 'far' | 'near' | 'pick';
+  state: 'near' | 'pick';
   mine: boolean;
   picked: boolean;
 }
@@ -668,17 +668,13 @@ export class MapView {
     layer.clearLayers();
     for (const b of this.bottles) {
       const open = (): void => this.handlers.onBottle?.(b.id);
-      if (b.state === 'far') {
-        layer.addLayer(L.circle([b.lat, b.lng], { radius: 150, color: '#43b8d4', weight: 1, dashArray: '4 4', fillColor: '#43b8d4', fillOpacity: 0.18 }).on('click', open));
-      } else {
-        const icon = L.divIcon({
-          className: `map-bottle${b.state === 'pick' ? ' can-pick' : ''}${b.mine ? ' mine' : ''}${b.picked ? ' picked' : ''}`,
-          html: `<svg viewBox="-10 -10 20 20" width="24" height="24"><path d="${MAP_BOTTLE_PATH}" transform="rotate(-20)"/></svg>`,
-          iconSize: [24, 24],
-          iconAnchor: [12, 12],
-        });
-        layer.addLayer(L.marker([b.lat, b.lng], { icon, keyboard: false, title: b.mine ? '你丟的漂流瓶' : '漂流瓶' }).on('click', open));
-      }
+      const icon = L.divIcon({
+        className: `map-bottle${b.state === 'pick' ? ' can-pick' : ''}${b.mine ? ' mine' : ''}${b.picked ? ' picked' : ''}`,
+        html: `<svg viewBox="-10 -10 20 20" width="24" height="24"><path d="${MAP_BOTTLE_PATH}" transform="rotate(-20)"/></svg>`,
+        iconSize: [24, 24],
+        iconAnchor: [12, 12],
+      });
+      layer.addLayer(L.marker([b.lat, b.lng], { icon, keyboard: false, title: b.mine ? '你丟的漂流瓶' : '漂流瓶' }).on('click', open));
     }
   }
 

@@ -2112,8 +2112,6 @@ function renderLandmarkDetail(id: string): boolean {
 }
 
 // ---- 漂流瓶 ----
-/** 200 m 內看得到瓶子的樣子，更遠只是一團訊號（地球上；汪星海上的瓶子大家都看得到） */
-const BOTTLE_NEAR_M = 200;
 /** 伺服器沒關（v1.593 起直接開放，不用再打開實驗功能） */
 const bottlesOn = (): boolean => mod.current && keywordRules?.sources?.bottles?.enabled !== false;
 const bottleRules = (): NonNullable<KeywordRules['sources']>['bottles'] => keywordRules?.sources?.bottles;
@@ -2146,11 +2144,12 @@ function bottleDistM(b: BottleOut): number {
 /** 瓶子在你的哪個方向 */
 const bottleDir = (b: BottleOut): string => compassLabel(bearingDeg(b.world === 'woof' ? (woofHere() ?? origin) : origin, b));
 
-/** 走到撿得起來的距離才算 pick：地球上要用 GPS 定位（手動位置不能撿），汪星上照你在汪星的位置 */
-function bottleState(b: BottleOut): 'far' | 'near' | 'pick' {
-  const d = bottleDistM(b);
-  if (d <= pickRadiusM() && (b.world === 'woof' || origin.source === 'gps')) return 'pick';
-  return b.world === 'woof' || d <= BOTTLE_NEAR_M ? 'near' : 'far';
+/**
+ * 走到撿得起來的距離才算 pick：地球上要用 GPS 定位（手動位置不能撿），汪星上照你在汪星的位置。
+ * 瓶子遠近都直接畫出來（v1.598 使用者說不需要模糊；以前 200 m 外只是一團模糊的訊號）
+ */
+function bottleState(b: BottleOut): 'near' | 'pick' {
+  return bottleDistM(b) <= pickRadiusM() && (b.world === 'woof' || origin.source === 'gps') ? 'pick' : 'near';
 }
 
 /** 方向提示最遠指到多遠的瓶子 */
@@ -2362,7 +2361,7 @@ function renderBottleDetail(id: number): boolean {
   } else if (!woof && origin.source !== 'gps') {
     body = `<p>瓶子在${esc(where)}。按右上角「定位」用 GPS，走到 ${reach} m 內就能撿起來。</p>`;
   } else if (d > reach) {
-    body = `<p>瓶子在${esc(where)}，還差約 ${Math.round(d - reach)} m。${woof ? '拖曳雷達走過去' : '走近一點'}就能撿起來${woof ? '' : '，越近雷達上越清楚'}。</p>`;
+    body = `<p>瓶子在${esc(where)}，還差約 ${Math.round(d - reach)} m。${woof ? '拖曳雷達走過去' : '走近一點'}就能撿起來。</p>`;
   } else {
     body = '<p>瓶子就在你旁邊！</p>';
   }
