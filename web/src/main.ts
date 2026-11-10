@@ -1918,7 +1918,8 @@ function renderList(items: Item[], now: number): void {
     b.classList.toggle('on', on);
     b.setAttribute('aria-checked', String(on));
   }
-  filterRow.hidden = catGroup.hidden && onlyGroup.hidden && sortGroup.hidden;
+  // 「日期」每個雷達都有，這一排一直顯示
+  filterRow.hidden = false;
   // 每一段的標題寫上數量，跟上面的摘要對得起來
   for (const sec of sections) {
     if (sec.rows.length === 0) continue;
@@ -5344,7 +5345,7 @@ const DATE_SPAN = 21;
 /** 選了星期幾、日期：按鈕寫選了什麼、亮起來；時間範圍改成「全部」（不然選明天卻只看 3 小時內的會什麼都沒有） */
 function setDayPick(p: typeof dayPick): void {
   dayPick = p && 'weekdays' in p && p.weekdays.size === 0 ? null : p;
-  dateToggle.lastElementChild!.textContent = dayPick ? dayPickLabel() : '日期';
+  dateToggle.lastElementChild!.textContent = dayPick ? dayPickLabel() : '全部';
   dateToggle.classList.toggle('on', !!dayPick);
   dateToggle.setAttribute('aria-label', dayPick ? `日期：${dayPickLabel()}，點了換別天` : '選星期幾或日期');
   if (dayPick && timeSetting !== 'all') setTime('all');
@@ -5375,13 +5376,22 @@ function renderDatePanel(): void {
   datePanel.querySelector('.date-cal')!.innerHTML = cells;
 }
 
+/**
+ * 日期選單開關：選單放在最外層（清單面板會裁掉超出去的），打開時照「日期」按鈕的位置擺：
+ * 下面放得下就往下，放不下就往上（手機上清單在下半部），左右不超出畫面
+ */
 function setDateOpen(open: boolean): void {
   datePanel.hidden = !open;
   dateToggle.setAttribute('aria-expanded', String(open));
-  if (open) {
-    setTimeOpen(false);
-    renderDatePanel();
-  }
+  if (!open) return;
+  setTimeOpen(false);
+  renderDatePanel();
+  const r = dateToggle.getBoundingClientRect();
+  const w = datePanel.offsetWidth;
+  const h = datePanel.offsetHeight;
+  const left = Math.max(12, Math.min(r.left - 40, innerWidth - w - 12));
+  const top = r.bottom + 6 + h <= innerHeight - 8 ? r.bottom + 6 : Math.max(8, r.top - 6 - h);
+  Object.assign(datePanel.style, { left: `${left}px`, top: `${top}px` });
 }
 
 /** 時間範圍平常收起來（不太會用到）：只顯示現在選的那顆，點了展開五個，選好、點其他地方就收起來 */
@@ -7313,7 +7323,9 @@ function wireControls(): void {
     if (!timeChipsEl.hidden && !(e.target instanceof Element && e.target.closest('#time-chips'))) setTimeOpen(false);
     if (!datePanel.hidden && !(e.target instanceof Element && e.target.closest('#date-panel, #date-toggle'))) setDateOpen(false);
   }, true);
+  document.body.append(datePanel);
   dateToggle.addEventListener('click', () => setDateOpen(datePanel.hidden));
+  window.addEventListener('resize', () => setDateOpen(false));
   datePanel.addEventListener('click', (e) => {
     const t = e.target as Element;
     const w = t.closest<HTMLButtonElement>('[data-wd]')?.dataset.wd;

@@ -55,8 +55,6 @@
             <button type="button" class="chip" data-base="osm" role="radio" aria-checked="false">OSM</button>
           </div>
           <!-- 時間範圍平常收起來（不太會用到）：只顯示現在選的，點了展開，選好再收起來 -->
-          <!-- 時間範圍和日期（v1.613：選星期幾或直接點日期）排在同一排 -->
-          <div class="time-row">
           <button type="button" id="time-toggle" class="chip" aria-expanded="false" aria-controls="time-chips" title="時間範圍"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8.5"/><path d="M12 7.5V12l3 2"/></svg><span>全部</span></button>
           <div class="chips" id="time-chips" role="radiogroup" aria-label="時間範圍" hidden>
             <button type="button" class="chip" data-time="now" role="radio" aria-checked="false" title="只看現在進行中、開放中的">現在</button>
@@ -65,13 +63,7 @@
             <button type="button" class="chip" data-time="3d" role="radio" aria-checked="false" title="3 天內開始的">3 天</button>
             <button type="button" class="chip on" data-time="all" role="radio" aria-checked="true" title="21 天內所有的">全部</button>
           </div>
-          <button type="button" id="date-toggle" class="chip" aria-expanded="false" aria-controls="date-panel" title="選星期幾或日期"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3.5" y="5" width="17" height="15" rx="2.5"/><path d="M3.5 10h17M8 3v4M16 3v4"/></svg><span>日期</span></button>
-          <div id="date-panel" class="date-panel" role="dialog" aria-label="選星期幾或日期" hidden>
-            <div class="date-week" role="group" aria-label="星期幾（可以選好幾個）"></div>
-            <div class="date-cal" aria-label="日期（未來 21 天）"></div>
-            <div class="date-actions"><button type="button" class="chip" data-act="clear">清除</button><button type="button" class="chip primary" data-act="done">好</button></div>
-          </div>
-          </div>
+
           <div class="chips" id="scale-chips" role="radiogroup" aria-label="雷達範圍">
             <button type="button" class="chip" data-scale="1" role="radio" aria-checked="false">1 km</button>
             <button type="button" class="chip" data-scale="5" role="radio" aria-checked="false">5 km</button>
@@ -136,6 +128,16 @@
             <button type="button" class="chip small" data-sort="time" role="radio" aria-checked="true" title="照開始時間排（分進行中、即將開始、稍後開始）">時間</button>
             <button type="button" class="chip small" data-sort="distance" role="radio" aria-checked="false" title="不分進行中、還沒開始，全部由近到遠">距離</button>
           </span>
+          <!-- 日期（v1.613：選星期幾或直接點日期；v1.614 使用者說放到下面這排） -->
+          <span class="filter-group" id="date-group">
+            <span class="filter-label muted">日期</span>
+            <button type="button" id="date-toggle" class="chip small" aria-expanded="false" aria-controls="date-panel" title="選星期幾或日期"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3.5" y="5" width="17" height="15" rx="2.5"/><path d="M3.5 10h17M8 3v4M16 3v4"/></svg><span>全部</span></button>
+          </span>
+          <div id="date-panel" class="date-panel" role="dialog" aria-label="選星期幾或日期" hidden>
+            <div class="date-week" role="group" aria-label="星期幾（可以選好幾個）"></div>
+            <div class="date-cal" aria-label="日期（未來 21 天）"></div>
+            <div class="date-actions"><button type="button" class="chip" data-act="clear">清除</button><button type="button" class="chip primary" data-act="done">好</button></div>
+          </div>
         </div>
         <ul id="event-list" class="event-list"></ul>
         <p id="empty-hint" class="muted hint" hidden></p>
