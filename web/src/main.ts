@@ -2464,7 +2464,7 @@ function renderBottleDetail(id: number): boolean {
     } else {
       removeBottleMark(id);
       selectedBottle = null;
-      showBanner(bannerEl, '瓶子收回了', 2000);
+      showBanner(bannerEl, '瓶子收回了，可以再丟一個', 2500);
     }
     render();
   });
@@ -2787,7 +2787,7 @@ async function onLettersClick(e: Event): Promise<void> {
       return;
     }
     removeBottleMark(id);
-    showBanner(bannerEl, '瓶子收回了', 2000);
+    showBanner(bannerEl, '瓶子收回了，可以再丟一個', 2500);
     await reloadMyBottles();
     render();
     return;

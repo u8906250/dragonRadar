@@ -392,9 +392,10 @@ export interface BottleQuota {
   left: number;
 }
 
-/** 今天的額度：過去 24 小時最多 3 個 */
+/** 今天的額度：過去 24 小時最多 3 個（收回的不算） */
 export async function bottleQuota(env: Env, dev: string, now: number): Promise<BottleQuota> {
-  const used = await countSince(env, 'SELECT COUNT(*) AS n FROM bottles WHERE device_id = ? AND created_at > ?', [dev, now - 86400]);
+  // 收回的瓶子不算（v1.604 使用者說收回後瓶子可以繼續用）；同 IP 每天、全站每小時的上限照樣算，擋一直丟一直收回
+  const used = await countSince(env, "SELECT COUNT(*) AS n FROM bottles WHERE device_id = ? AND created_at > ? AND status != 'deleted'", [dev, now - 86400]);
   return { used, limit: PER_DEVICE_PER_DAY, left: Math.max(0, PER_DEVICE_PER_DAY - used) };
 }
 
