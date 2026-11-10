@@ -2085,8 +2085,6 @@ path.map-seam-walkers { --p: 15px; }
 
 /* 漂流瓶按鈕與面板 */
 .chip-badge { display: inline-block; min-width: 18px; margin-left: 5px; padding: 0 5px; border-radius: 999px; background: #43b8d4; color: #fff; font-size: 11px; font-weight: 800; line-height: 18px; text-align: center; }
-/* 漂流瓶今天丟完了：0 是灰色 */
-.chip-badge.empty { background: #9aa0a6; }
 #bottle-btn.glow { box-shadow: 0 0 0 3px rgba(67, 184, 212, 0.45), var(--chip-shadow, none); animation: bottle-glow 1.6s ease-in-out infinite; }
 @keyframes bottle-glow { 50% { box-shadow: 0 0 0 6px rgba(67, 184, 212, 0.15); } }
 @media (prefers-reduced-motion: reduce) { #bottle-btn.glow { animation: none; } }

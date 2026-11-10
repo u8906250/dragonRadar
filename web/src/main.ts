@@ -2172,16 +2172,17 @@ function updateBottleBadge(views: Array<{ b: BottleOut; distanceKm: number }>): 
 }
 
 /**
- * 按鈕上的數字＝今天還能丟幾個（v1.605 使用者說的；以前是雷達範圍內的瓶子數）：讀過「我的瓶子」就照伺服器的額度，
- * 還沒讀過（這個瀏覽器沒丟過）就是每天的上限；用完是 0（灰色）
+ * 按鈕上的數字＝今天還能丟幾個（v1.605 使用者說的；以前是雷達範圍內的瓶子數）：
+ * 這個瀏覽器丟過瓶子就等讀到伺服器的額度才顯示（v1.608：以前重整後先顯示 3 才跳成正確的數字），沒丟過就是每天的上限；
+ * 用完了（0）不顯示數字
  */
 function paintQuotaBadge(): void {
-  const left = myBottlesData?.quota.left ?? bottleRules()?.perDay ?? 3;
-  bottleBadge.hidden = false;
-  bottleBadge.textContent = String(left);
-  bottleBadge.classList.toggle('empty', left === 0);
-  bottleBtn.title = `漂流瓶：今天還能丟 ${left} 個`;
-  bottleBtn.setAttribute('aria-label', `漂流瓶，今天還能丟 ${left} 個`);
+  const left = myBottlesData ? myBottlesData.quota.left : lsGet(LS_BOTTLE_DROPPED) ? null : (bottleRules()?.perDay ?? 3);
+  bottleBadge.hidden = !left;
+  if (left) bottleBadge.textContent = String(left);
+  const say = left === null ? '漂流瓶' : left === 0 ? '漂流瓶：今天的瓶子丟完了' : `漂流瓶：今天還能丟 ${left} 個`;
+  bottleBtn.title = say;
+  bottleBtn.setAttribute('aria-label', say.replace('：', '，'));
 }
 
 /** 汪星海上的瓶子（space.ts 畫在汪星上）：每次畫汪星都重算，拖曳走路時走到附近了沒跟著變 */
