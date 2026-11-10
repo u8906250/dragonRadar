@@ -2115,7 +2115,7 @@ function renderLandmarkDetail(id: string): boolean {
 /** 伺服器沒關（v1.593 起直接開放，不用再打開實驗功能） */
 const bottlesOn = (): boolean => mod.current && keywordRules?.sources?.bottles?.enabled !== false;
 const bottleRules = (): NonNullable<KeywordRules['sources']>['bottles'] => keywordRules?.sources?.bottles;
-const pickRadiusM = (): number => bottleRules()?.pickRadiusM ?? 60;
+const pickRadiusM = (): number => bottleRules()?.pickRadiusM ?? 500;
 /** 瓶子的編號：No.000123 */
 const bottleNo = (id: number): string => `No.${String(id).padStart(6, '0')}`;
 const findBottle = (id: number): BottleOut | undefined => bottles.find((b) => b.id === id) ?? woofBottles.find((b) => b.id === id);
@@ -2813,62 +2813,42 @@ async function submitBottle(): Promise<void> {
 }
 
 /**
- * 仿真的玻璃瓶（viewBox 0 0 90 230，瓶口在上）：半透明的玻璃、厚厚的瓶底、瓶頸和瓶身的反光、底下的影子；
- * 裡面一捲牛皮紙（.scroll）、瓶口的軟木塞（.cork）先藏著，丟的時候才出現。p 是漸層的 id 前綴（同一頁有好幾個）
+ * 可愛的玻璃瓶（viewBox 0 0 100 200，瓶口在上；v1.599 使用者說瓶子畫可愛風）：圓滾滾的瓶身、粗粗的圓角外框、淡水藍色、
+ * 兩道白白的反光、瓶底一點水色；裡面一捲綁著紅蝴蝶結的牛皮紙（.scroll）、瓶口的軟木塞（.cork）先藏著，丟的時候才出現
  */
 function bottleSvg(p: string): string {
-  return `<svg class="real-bottle" viewBox="0 0 90 230" aria-hidden="true">
-    <defs>
-      <linearGradient id="${p}-glass" x1="0" x2="1">
-        <stop offset="0" stop-color="#2f6f66" stop-opacity=".62" /><stop offset=".13" stop-color="#9fd3c9" stop-opacity=".38" />
-        <stop offset=".38" stop-color="#e6faf6" stop-opacity=".14" /><stop offset=".66" stop-color="#cdeee8" stop-opacity=".18" />
-        <stop offset=".88" stop-color="#78b6ab" stop-opacity=".4" /><stop offset="1" stop-color="#2a6259" stop-opacity=".66" />
-      </linearGradient>
-      <linearGradient id="${p}-depth" x1="0" y1="0" x2="0" y2="1">
-        <stop offset="0" stop-color="#ffffff" stop-opacity=".12" /><stop offset=".7" stop-color="#1f5a52" stop-opacity="0" /><stop offset="1" stop-color="#1f5a52" stop-opacity=".28" />
-      </linearGradient>
-      <linearGradient id="${p}-kraft" x1="0" x2="1">
-        <stop offset="0" stop-color="#8f6438" /><stop offset=".38" stop-color="#d9b588" /><stop offset=".7" stop-color="#c39866" /><stop offset="1" stop-color="#83592f" />
-      </linearGradient>
-      <linearGradient id="${p}-wood" x1="0" x2="1">
-        <stop offset="0" stop-color="#9c6a39" /><stop offset=".4" stop-color="#d6a46c" /><stop offset=".75" stop-color="#c08a52" /><stop offset="1" stop-color="#8a5a2c" />
-      </linearGradient>
-      <linearGradient id="${p}-shine" x1="0" y1="0" x2="0" y2="1">
-        <stop offset="0" stop-color="#fff" stop-opacity="0" /><stop offset=".2" stop-color="#fff" stop-opacity=".85" /><stop offset=".8" stop-color="#fff" stop-opacity=".7" /><stop offset="1" stop-color="#fff" stop-opacity="0" />
-      </linearGradient>
-      <filter id="${p}-blur" x="-20%" y="-200%" width="140%" height="500%"><feGaussianBlur stdDeviation="2.4" /></filter>
-    </defs>
-    <ellipse class="shadow" cx="50" cy="225" rx="36" ry="4.5" fill="#000" opacity=".32" filter="url(#${p}-blur)" />
+  const body = 'M37 24 L37 54 C37 70 12 74 12 100 L12 164 Q12 186 34 186 L66 186 Q88 186 88 164 L88 100 C88 74 63 70 63 54 L63 24 Z';
+  return `<svg class="real-bottle" viewBox="0 0 100 200" aria-hidden="true">
+    <defs><clipPath id="${p}-in"><path d="${body}" /></clipPath></defs>
+    <ellipse cx="50" cy="193" rx="34" ry="5" fill="#000" opacity=".18" />
+    <path d="${body}" fill="#d4f4f8" fill-opacity=".9" />
     <g class="scroll">
-      <rect x="31" y="118" width="28" height="92" rx="13" fill="url(#${p}-kraft)" stroke="#7a5230" stroke-width=".8" />
-      <ellipse cx="45" cy="121" rx="13" ry="4" fill="#e3c294" stroke="#7a5230" stroke-width=".8" />
-      <path d="M31 150 h28 M31 178 h28" stroke="#6e4a26" stroke-width="1.6" />
+      <rect x="38" y="98" width="24" height="74" rx="12" fill="#d8ad74" stroke="#8a5a2c" stroke-width="2.2" />
+      <path d="M44 104 v62" stroke="#f0d3a4" stroke-width="3" stroke-linecap="round" />
+      <path d="M38 135 h24" stroke="#e05a4f" stroke-width="3.4" />
+      <path d="M50 135 c-9 -9 -15 -2 -11 3 c3 3 8 0 11 -3 c3 3 8 6 11 3 c4 -5 -2 -12 -11 -3 z" fill="#ef6b5f" stroke="#b8392f" stroke-width="1.4" stroke-linejoin="round" />
+      <circle cx="50" cy="135" r="2.4" fill="#c9443a" />
     </g>
-    <path d="M36 18 L36 64 C36 84 11 92 11 116 L11 211 Q11 222 22 222 L68 222 Q79 222 79 211 L79 116 C79 92 54 84 54 64 L54 18 Z" fill="url(#${p}-glass)" stroke="#1d5a52" stroke-opacity=".55" stroke-width="1.2" />
-    <path d="M36 18 L36 64 C36 84 11 92 11 116 L11 211 Q11 222 22 222 L68 222 Q79 222 79 211 L79 116 C79 92 54 84 54 64 L54 18 Z" fill="url(#${p}-depth)" />
-    <ellipse cx="45" cy="214" rx="31" ry="6" fill="#3f8f84" opacity=".3" />
-    <path d="M20 214 Q45 220 70 214" stroke="#e8fffb" stroke-opacity=".55" stroke-width="1.4" fill="none" />
-    <path d="M19 118 L19 204" stroke="url(#${p}-shine)" stroke-width="4.5" stroke-linecap="round" />
-    <path d="M71 124 L71 172" stroke="url(#${p}-shine)" stroke-width="2" stroke-linecap="round" opacity=".55" />
-    <path d="M24 100 C30 90 37 86 39 72" stroke="#fff" stroke-opacity=".6" stroke-width="2.2" fill="none" stroke-linecap="round" />
-    <path d="M39 24 L39 62" stroke="url(#${p}-shine)" stroke-width="2.2" stroke-linecap="round" />
-    <rect x="33" y="8" width="24" height="11" rx="4" fill="url(#${p}-glass)" stroke="#1d5a52" stroke-opacity=".6" stroke-width="1.2" />
-    <path d="M36 11 h10" stroke="#fff" stroke-opacity=".75" stroke-width="1.6" stroke-linecap="round" />
+    <path d="M12 150 Q50 138 88 150 L88 186 L12 186 Z" fill="#9fe2ee" opacity=".55" clip-path="url(#${p}-in)" />
+    <path d="${body}" fill="none" stroke="#2f6f7c" stroke-width="3.4" stroke-linejoin="round" />
+    <rect x="32" y="14" width="36" height="13" rx="6.5" fill="#e6fbfd" stroke="#2f6f7c" stroke-width="3.2" />
+    <path d="M22 140 L22 106 Q22 94 30 88" fill="none" stroke="#fff" stroke-width="6" stroke-linecap="round" opacity=".9" />
+    <circle cx="22" cy="153" r="3.2" fill="#fff" opacity=".9" />
+    <path d="M43 32 v14" stroke="#fff" stroke-width="4" stroke-linecap="round" opacity=".85" />
     <g class="cork">
-      <path d="M36.5 -4 L53.5 -4 L52 20 L38 20 Z" fill="url(#${p}-wood)" stroke="#6b4422" stroke-width=".9" />
-      <ellipse cx="45" cy="-4" rx="8.5" ry="2.6" fill="#e0b47e" stroke="#6b4422" stroke-width=".9" />
-      <circle cx="41" cy="4" r=".9" fill="#7a4f28" /><circle cx="48" cy="9" r=".8" fill="#7a4f28" /><circle cx="44" cy="14" r=".7" fill="#7a4f28" />
+      <rect x="37" y="1" width="26" height="24" rx="7" fill="#dca468" stroke="#7a4a22" stroke-width="2.8" />
+      <path d="M42 7 h12" stroke="#f3cf9c" stroke-width="2.6" stroke-linecap="round" />
+      <circle cx="44" cy="16" r="1.4" fill="#9a6232" /><circle cx="55" cy="13" r="1.2" fill="#9a6232" /><circle cx="51" cy="20" r="1.1" fill="#9a6232" />
     </g>
   </svg>`;
 }
 
-/** 軟木塞（viewBox 0 0 20 26，躺在瓶子旁邊；丟的時候飛進瓶口） */
-function corkSvg(p: string): string {
-  return `<svg class="real-cork" viewBox="0 0 20 26" aria-hidden="true">
-    <defs><linearGradient id="${p}-cork" x1="0" x2="1"><stop offset="0" stop-color="#9c6a39" /><stop offset=".4" stop-color="#d6a46c" /><stop offset=".75" stop-color="#c08a52" /><stop offset="1" stop-color="#8a5a2c" /></linearGradient></defs>
-    <path d="M1.5 3 L18.5 3 L17 25 L3 25 Z" fill="url(#${p}-cork)" stroke="#6b4422" stroke-width=".9" />
-    <ellipse cx="10" cy="3" rx="8.5" ry="2.6" fill="#e0b47e" stroke="#6b4422" stroke-width=".9" />
-    <circle cx="6" cy="11" r=".9" fill="#7a4f28" /><circle cx="13" cy="16" r=".8" fill="#7a4f28" /><circle cx="9" cy="21" r=".7" fill="#7a4f28" />
+/** 可愛的軟木塞（viewBox 0 0 30 28，躺在瓶子旁邊；丟的時候飛進瓶口） */
+function corkSvg(_p: string): string {
+  return `<svg class="real-cork" viewBox="0 0 30 28" aria-hidden="true">
+    <rect x="2" y="2" width="26" height="24" rx="7" fill="#dca468" stroke="#7a4a22" stroke-width="2.8" />
+    <path d="M7 8 h12" stroke="#f3cf9c" stroke-width="2.6" stroke-linecap="round" />
+    <circle cx="9" cy="17" r="1.4" fill="#9a6232" /><circle cx="20" cy="14" r="1.2" fill="#9a6232" /><circle cx="16" cy="21" r="1.1" fill="#9a6232" />
   </svg>`;
 }
 
@@ -2892,21 +2872,29 @@ async function throwBottleFx(text: string, photo: string | null, hide: () => voi
     hide();
     return;
   }
-  const from = sheet.getBoundingClientRect();
+  // 紙是斜的：用沒轉的大小、轉之前的位置（中心一樣），蓋上去的那一張也一樣斜
+  const box = sheet.getBoundingClientRect();
+  const [sw, sh] = [sheet.offsetWidth, sheet.offsetHeight];
+  const [scx, scy] = [box.left + box.width / 2, box.top + box.height / 2];
+  const from = { left: scx - sw / 2, top: scy - sh / 2, width: sw, height: sh, bottom: scy + sh / 2 };
+  const tilt = getComputedStyle(sheet).transform;
   const br = realBottle.getBoundingClientRect();
   const cr = realCork.getBoundingClientRect();
-  const k = br.width / 90;
+  const k = br.width / 100;
   const fx = document.createElement('div');
   fx.className = 'bottle-fx';
   fx.setAttribute('aria-hidden', 'true');
   // 紙：跟原本一樣大、一樣的字和照片（轉正，捲起來比較好看）
   const paper = document.createElement('div');
   paper.className = 'bottle-fx-paper';
-  paper.innerHTML = `${photo ? `<figure class="taped-photo"><img src="${esc(photo)}" alt="" /></figure>` : ''}<p>${esc(text)}</p>`;
-  Object.assign(paper.style, { left: `${from.left}px`, top: `${from.top}px`, width: `${from.width}px`, height: `${from.height}px` });
+  paper.innerHTML = `<div class="kraft-bg"></div>${photo ? `<figure class="taped-photo"><img src="${esc(photo)}" alt="" /></figure>` : ''}<p>${esc(text)}</p>`;
+  Object.assign(paper.style, { left: `${from.left}px`, top: `${from.top}px`, width: `${from.width}px`, height: `${from.height}px`, padding: getComputedStyle(sheet).padding, transform: tilt });
+  // 捲筒：一開始在紙的最下面，細細的（直徑 ROLL0），越捲越粗（ROLL1）
+  const [ROLL0, ROLL1] = [8, 24];
   const roll = document.createElement('div');
   roll.className = 'bottle-fx-roll';
-  Object.assign(roll.style, { left: `${from.left}px`, top: `${from.bottom - 9}px`, width: `${from.width}px` });
+  // 捲筒擺在捲完的位置（紙的最上面、粗 ROLL1），一開始用 transform 移到紙的最下面、壓細（跟紙的裁切一樣用 transform 類的動畫，才會一直貼著紙邊）
+  Object.assign(roll.style, { left: `${from.left}px`, top: `${from.top}px`, width: `${from.width}px`, height: `${ROLL1}px`, opacity: '0', transform: tilt });
   const bottle = document.createElement('div');
   bottle.className = 'bottle-fx-bottle';
   bottle.innerHTML = bottleSvg('fxb');
@@ -2922,35 +2910,37 @@ async function throwBottleFx(text: string, photo: string | null, hide: () => voi
   bottleDropEl.style.visibility = 'hidden';
   const run = (el: Element, frames: Keyframe[], o: KeyframeAnimationOptions): Promise<unknown> => el.animate(frames, { fill: 'forwards', ...o }).finished;
   try {
-    // 1. 牛皮紙從下往上捲起來（0.9 秒）
+    // 1. 牛皮紙從下往上捲起來（1.1 秒）：紙本身不壓扁，下面捲進去的部分不見（裁掉），捲筒沿著裁切的邊往上走、越捲越粗
+    const ease = 'cubic-bezier(.45,.05,.55,.95)';
     await Promise.all([
-      run(paper, [{ transform: 'scaleY(1)' }, { transform: 'scaleY(0.03)', opacity: 0.7 }], { duration: 900, easing: 'ease-in' }),
-      run(roll, [{ transform: 'translateY(0) scaleY(0.4)', opacity: 0 }, { transform: `translateY(${-from.height + 9}px) scaleY(1)`, opacity: 1 }], { duration: 900, easing: 'ease-in' }),
+      run(paper, [{ clipPath: 'inset(0 0 0 0)' }, { clipPath: `inset(0 0 ${from.height - ROLL1 / 2}px 0)` }], { duration: 1100, easing: ease }),
+      run(roll, [{ transform: `${tilt} translateY(${from.height - ROLL1 / 2}px) scaleY(${ROLL0 / ROLL1})` }, { transform: tilt }], { duration: 1100, easing: ease }),
+      run(roll, [{ opacity: 0 }, { opacity: 1, offset: 0.06 }, { opacity: 1 }], { duration: 1100 }),
     ]);
     paper.remove();
     // 2. 捲好的紙轉直、縮成瓶子裡那一捲的大小，移到瓶口上面（0.6 秒），再滑進瓶子（0.45 秒）
-    //    位移從一開始的位置（中心 from.bottom）算；瓶口在 (45, 8)、瓶子裡那一捲的中心在 (45, 164)（瓶子的座標）
-    const [mx, cx0, cy0] = [br.left + 45 * k, from.left + from.width / 2, from.bottom];
-    const shape = `rotate(90deg) scaleX(${(92 * k) / from.width}) scaleY(${(28 * k) / 18})`;
-    const above = br.top + 8 * k - 46 * k - 4;
-    await run(roll, [{ transform: `translateY(${-from.height + 9}px)` }, { transform: `translate(${mx - cx0}px, ${above - cy0}px) ${shape}` }], { duration: 600, easing: 'ease-in-out' });
+    //    位移從捲好的位置（中心 from.top + ROLL1 / 2）算；瓶口在 (50, 14)、瓶子裡那一捲的中心在 (50, 135)、長 74、粗 24（瓶子的座標）
+    const [mx, cx0, cy0] = [br.left + 50 * k, from.left + from.width / 2, from.top + ROLL1 / 2];
+    const shape = `rotate(90deg) scaleX(${(74 * k) / from.width}) scaleY(${(24 * k) / ROLL1})`;
+    const above = br.top + 14 * k - 37 * k - 4;
+    await run(roll, [{ transform: tilt }, { transform: `translate(${mx - cx0}px, ${above - cy0}px) ${shape}` }], { duration: 600, easing: 'ease-in-out' });
     const scroll = bottle.querySelector('.scroll')!;
     await Promise.all([
-      run(roll, [{ transform: `translate(${mx - cx0}px, ${above - cy0}px) ${shape}` }, { transform: `translate(${mx - cx0}px, ${br.top + 164 * k - cy0}px) ${shape}` }], { duration: 450, easing: 'ease-in' }),
+      run(roll, [{ transform: `translate(${mx - cx0}px, ${above - cy0}px) ${shape}` }, { transform: `translate(${mx - cx0}px, ${br.top + 135 * k - cy0}px) ${shape}` }], { duration: 450, easing: 'ease-in' }),
       run(scroll, [{ opacity: 0 }, { opacity: 0, offset: 0.7 }, { opacity: 1 }], { duration: 450 }),
     ]);
     roll.remove();
     // 3. 軟木塞跳起來、轉正，塞進瓶口（0.5 秒），換成瓶子上的那個
     const cc = { x: cr.left + cr.width / 2, y: cr.top + cr.height / 2 };
-    const neck = { x: mx, y: br.top + 8 * k };
+    const neck = { x: mx, y: br.top + 13 * k };
     const [dx, dy] = [neck.x - cc.x, neck.y - cc.y];
     await run(
       cork,
       [
         { transform: 'translate(0, 0) rotate(-78deg)' },
         { transform: `translate(${dx * 0.5}px, ${dy * 0.5 - 40}px) rotate(-200deg)`, offset: 0.55 },
-        { transform: `translate(${dx}px, ${dy - 6}px) rotate(-360deg) scale(${(17 * k) / cr.width})`, offset: 0.85 },
-        { transform: `translate(${dx}px, ${dy}px) rotate(-360deg) scale(${(17 * k) / cr.width})` },
+        { transform: `translate(${dx}px, ${dy - 6}px) rotate(-360deg) scale(${(26 * k) / cr.width})`, offset: 0.85 },
+        { transform: `translate(${dx}px, ${dy}px) rotate(-360deg) scale(${(26 * k) / cr.width})` },
       ],
       { duration: 520, easing: 'ease-out' },
     );

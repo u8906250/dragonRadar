@@ -2057,16 +2057,13 @@ path.map-seam-walkers { --p: 15px; }
   /* 四周燒過、變深的紙邊 */
   --kraft-burn: inset 0 0 26px rgba(74, 36, 6, 0.55), inset 0 0 6px rgba(52, 24, 4, 0.6);
   --kraft-tex:
-    radial-gradient(circle at 76% 24%, transparent 7.5%, rgba(112, 66, 22, 0.22) 8.3%, rgba(112, 66, 22, 0.08) 9.6%, transparent 10.5%),
-    radial-gradient(38% 26% at 24% 72%, rgba(118, 70, 24, 0.2), transparent 70%),
-    radial-gradient(22% 16% at 82% 80%, rgba(96, 54, 16, 0.18), transparent 70%),
-    radial-gradient(14% 10% at 14% 18%, rgba(130, 80, 28, 0.16), transparent 72%),
-    radial-gradient(ellipse at 50% 46%, transparent 52%, rgba(98, 54, 14, 0.32) 88%, rgba(66, 32, 6, 0.5) 100%),
-    linear-gradient(112deg, transparent 47.6%, rgba(255, 238, 205, 0.28) 49.4%, rgba(84, 52, 20, 0.16) 50.6%, transparent 52.6%),
-    radial-gradient(120% 80% at 18% 12%, rgba(255, 236, 200, 0.38), transparent 60%),
-    radial-gradient(90% 70% at 86% 92%, rgba(84, 50, 18, 0.26), transparent 65%),
+    radial-gradient(circle at 93% 7%, transparent 4.2%, rgba(112, 66, 22, 0.2) 4.8%, rgba(112, 66, 22, 0.07) 5.8%, transparent 6.4%),
+    radial-gradient(16% 10% at 6% 94%, rgba(110, 64, 20, 0.2), transparent 72%),
+    radial-gradient(12% 8% at 96% 90%, rgba(96, 54, 16, 0.18), transparent 70%),
+    radial-gradient(ellipse at 50% 48%, rgba(255, 240, 212, 0.34), transparent 58%),
+    radial-gradient(ellipse at 50% 48%, transparent 60%, rgba(98, 54, 14, 0.3) 90%, rgba(66, 32, 6, 0.5) 100%),
     url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='240' height='240'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='.9' numOctaves='3' stitchTiles='stitch'/><feColorMatrix values='0 0 0 0 .32  0 0 0 0 .2  0 0 0 0 .08  0 0 0 .5 0'/></filter><rect width='100%25' height='100%25' filter='url(%23n)'/></svg>"),
-    url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='320' height='320'><filter id='f'><feTurbulence type='fractalNoise' baseFrequency='.012 .45' numOctaves='2' seed='3' stitchTiles='stitch'/><feColorMatrix values='0 0 0 0 .98  0 0 0 0 .9  0 0 0 0 .75  0 0 0 -1.3 .5'/></filter><rect width='100%25' height='100%25' filter='url(%23f)'/></svg>");
+    url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='320' height='320'><filter id='f'><feTurbulence type='fractalNoise' baseFrequency='.012 .45' numOctaves='2' seed='3' stitchTiles='stitch'/><feColorMatrix values='0 0 0 0 .98  0 0 0 0 .9  0 0 0 0 .75  0 0 0 -1 .32'/></filter><rect width='100%25' height='100%25' filter='url(%23f)'/></svg>");
 }
 .kraft-note, .letter-paper {
   color: var(--kraft-ink);
@@ -2123,9 +2120,9 @@ body.bottle-open { overflow: hidden; }
 }
 .kraft-count { position: absolute; right: 18px; bottom: 8px; font-size: 13px; font-weight: 700; color: #a3241c; }
 /* 空瓶子站在紙的右下角，軟木塞躺在瓶子旁邊 */
-.scene-bottle { position: absolute; right: -58px; bottom: -34px; width: 104px; height: 184px; cursor: pointer; outline: none; -webkit-tap-highlight-color: transparent; }
-.scene-bottle .real-bottle { position: absolute; right: 0; bottom: 0; width: 72px; height: 184px; overflow: visible; transform-origin: 50% 96%; }
-.scene-bottle .real-cork { position: absolute; left: 6px; bottom: 2px; width: 16px; height: 21px; transform: rotate(-78deg); }
+.scene-bottle { position: absolute; right: -66px; bottom: -34px; width: 116px; height: 168px; cursor: pointer; outline: none; -webkit-tap-highlight-color: transparent; }
+.scene-bottle .real-bottle { position: absolute; right: 0; bottom: 0; width: 84px; height: 168px; overflow: visible; transform-origin: 50% 96%; }
+.scene-bottle .real-cork { position: absolute; left: 4px; bottom: 2px; width: 20px; height: 22px; transform: rotate(-78deg); }
 .real-bottle .scroll, .real-bottle .cork { opacity: 0; }
 .scene-bottle:focus-visible .real-bottle { filter: drop-shadow(0 0 4px #ffe08a); }
 /* 寫了字：瓶子輕輕晃（點得下去）；沒寫字就點：搖頭；送出審核中：慢慢呼吸 */
@@ -2140,7 +2137,7 @@ body.bottle-open { overflow: hidden; }
 @media (max-width: 480px) {
   .scene-stage { margin-right: 30px; }
   .kraft-sheet { width: min(70vw, 360px); padding: 26px 20px 26px 22px; }
-  .scene-bottle { right: -48px; bottom: -30px; transform: scale(0.86); transform-origin: 100% 100%; }
+  .scene-bottle { right: -54px; bottom: -30px; transform: scale(0.86); transform-origin: 100% 100%; }
 }
 @media (prefers-reduced-motion: reduce) { .scene-bottle .real-bottle { animation: none !important; } }
 
@@ -2195,18 +2192,26 @@ body.letters-open { overflow: hidden; }
 /* 丟瓶子的動畫：牛皮紙捲起來、裝進瓶子、丟到雷達上（main.ts 的 throwBottleFx） */
 .bottle-fx { position: fixed; inset: 0; z-index: 1100; pointer-events: none; }
 .bottle-fx > * { position: fixed; }
-.bottle-fx-paper {
-  display: flex; flex-direction: column; overflow: hidden; padding: 30px 26px 30px 28px; color: var(--kraft-ink);
-  background: var(--kraft-tex), var(--kraft-base); transform-origin: 50% 0; box-shadow: var(--kraft-burn), 0 10px 16px rgba(0, 0, 0, 0.35);
-}
+.bottle-fx-paper { display: flex; flex-direction: column; overflow: visible; color: var(--kraft-ink); filter: drop-shadow(0 10px 14px rgba(0, 0, 0, 0.4)); }
+.bottle-fx-paper > :not(.kraft-bg) { position: relative; }
 .bottle-fx-paper p { margin: 0; font-family: var(--hand); font-size: 21px; line-height: 1.75; font-weight: 600; white-space: pre-wrap; word-break: break-word; }
 .bottle-fx-paper .taped-photo { margin: 0 auto 10px; }
 .bottle-fx-paper .taped-photo img { max-height: min(16vh, 150px); }
-/* 捲起來的那一捲：圓柱的明暗 */
+/* 捲起來的那一捲：牛皮紙的圓柱（上亮下暗），兩端看得到一圈圈的紙卷 */
 .bottle-fx-roll {
-  height: 18px; border-radius: 9px;
-  background: linear-gradient(#e2c08c, #c39558 40%, #8f5f2c 80%, #b98a50); border: 1px solid #6e4318;
+  overflow: visible; border-radius: 3px;
+  background:
+    linear-gradient(rgba(255, 244, 222, 0.55), rgba(255, 244, 222, 0) 38%, rgba(70, 36, 8, 0) 60%, rgba(70, 36, 8, 0.5)),
+    var(--kraft-tex), var(--kraft-base);
+  box-shadow: 0 3px 5px rgba(0, 0, 0, 0.3);
 }
+.bottle-fx-roll::before, .bottle-fx-roll::after {
+  content: ''; position: absolute; top: 0; bottom: 0; width: 34%; max-width: 12px; border-radius: 50%;
+  background: repeating-radial-gradient(circle at 50% 50%, #e7c995 0 1.2px, #8c5a26 1.2px 2.1px, #c99b62 2.1px 3px);
+  border: 1px solid #6e4318;
+}
+.bottle-fx-roll::before { left: -5px; }
+.bottle-fx-roll::after { right: -5px; }
 .bottle-fx-bottle svg, .bottle-fx-cork svg { display: block; width: 100%; height: 100%; overflow: visible; }
 .bottle-fx-bottle { transform-origin: 50% 55%; }
 .bottle-fx-ripple { width: 70px; height: 70px; border-radius: 50%; border: 3px solid #43b8d4; transform: translate(-50%, -50%); opacity: 0; }
