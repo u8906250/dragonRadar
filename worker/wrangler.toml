@@ -22,12 +22,10 @@ database_name = "dragon-radar"
 database_id = "87666f00-bba8-41ba-be54-920fbf40e849"
 migrations_dir = "migrations"
 
-# 漂流瓶的照片（v1.594）要綁 R2：
-#   [[r2_buckets]]
-#   binding = "BOTTLE_PHOTOS"
-#   bucket_name = "dragon-radar-bottle-photos"
-# 2026-11-10 自動部署開不了這個 bucket（帳號還沒啟用 R2 或 token 沒有 R2 權限），綁了會部署失敗，先拿掉；
-# 沒綁時伺服器不收照片、網頁不顯示相機按鈕。開好 bucket 再把上面四行加回來
+# 漂流瓶的照片（v1.594）：bucket 是使用者在 Cloudflare 後台開的（2026-11-10）；沒綁時伺服器不收照片、網頁不顯示相機按鈕
+[[r2_buckets]]
+binding = "BOTTLE_PHOTOS"
+bucket_name = "dragon-radar-bottle-photos"
 
 [vars]
 # 允許的前端來源，逗號分隔。GitHub Pages 的網域加上本機開發
