@@ -3,7 +3,7 @@
  * - 地球：以你為中心、從太空看的地球（正射投影），海岸線、經緯線，夜晚的那一半照現在時間淡淡變暗
  * - 再拉遠：月球的軌道和月球，太陽、行星和它們的軌道（以地球為中心，距離照真實比例，位置照今天推算）
  */
-import type { LatLng } from './geo';
+import { bottleSize, type LatLng } from './geo';
 import { BOTTLE_PATH, DEEP_FROM_KM, LY_KM, RADAR_GEOM, RADAR_VIEW, TINY_EARTH, viewReach, viewRect } from './radar';
 import type { StreetClass, StreetLine } from './streets';
 import { nearPark, PARK_MIN_KM, parkGeom, parkSvg, ringArea, scatter } from './park';
@@ -796,7 +796,7 @@ const sub = (a: Vec3, b: Vec3): Vec3 => [a[0] - b[0], a[1] - b[1], a[2] - b[2]];
  * 正中間的經緯度跟著視角轉：左右拖轉經度、上下拖轉緯度。中心是汪星時可以放大到 100 公尺（focusMinKm），
  * 拉近到畫面上的台北半徑 2 km 內換成大街小巷（streets：跟雷達一樣的圖磚）；中山公園描繪出來（草地花圃草綠色、映池和翠湖水藍色，拉近長出一叢叢的草、一道道的水波），那裡可以放大到 0.5 公尺，看得到的那一小塊線切細
  */
-function woofGlobe(x: number, y: number, r: number, view: SpaceView, toSun: Vec3, streets?: WoofStreets, bottles?: WoofBottleMark[]): string {
+function woofGlobe(x: number, y: number, r: number, view: SpaceView, toSun: Vec3, streets?: WoofStreets, bottles?: WoofBottleMark[], scaleKm = 1): string {
   const center = woofCenter(view);
   const n = Math.hypot(...toSun) || 1;
   const near = view.focus === 'woof' ? nearOf(center, r) : null;
@@ -860,15 +860,20 @@ function woofGlobe(x: number, y: number, r: number, view: SpaceView, toSun: Vec3
     },
   });
   out += `<path class="space-night" d="${nightFrom([toSun[0] / n, toSun[1] / n, toSun[2] / n], r)}" />`;
-  // 漂到汪星海上的漂流瓶（v1.593）：畫在夜晚上面（晚上也看得到），朝著你的這一面才畫；大小不跟著縮放
+  // 漂到汪星海上的漂流瓶（v1.593）：畫在夜晚上面（晚上也看得到），朝著你的這一面才畫；
+  // 跟著縮放變大小，範圍超過 10 km（看整顆汪星）只畫淡藍色的小點（bottleSize，v1.602）
+  const bk = bottleSize(scaleKm);
   for (const b of bottles ?? []) {
     const [px, py, pz] = ortho(center, b.lat, b.lng);
     if (pz <= 0) continue;
     const cls = `bottle woof-bottle bottle-${b.state}${b.mine ? ' mine' : ''}${b.taken ? ' picked' : ''}${b.selected ? ' selected' : ''}`;
     out +=
       `<g class="${cls}" data-id="${b.id}" transform="translate(${f1(C + r * px)} ${f1(C - r * py)})" tabindex="0" role="button">` +
-      `<circle class="hit" r="14" />${b.state === 'pick' ? '<circle class="reach" r="9" />' : ''}` +
-      `<g class="body"><path class="glass" d="${BOTTLE_PATH}" transform="rotate(-20)" /></g><title>${b.mine ? '你丟的漂流瓶' : b.taken ? '漂流瓶（已經被收藏了）' : b.state === 'pick' ? '漂流瓶（走到附近了）' : '漂流瓶'}</title></g>`;
+      `<circle class="hit" r="14" />` +
+      (bk === 0
+        ? '<circle class="dot" r="3.4" />'
+        : `${b.state === 'pick' ? `<circle class="reach" r="${f1(9 * bk)}" />` : ''}<g class="body"><path class="glass" d="${BOTTLE_PATH}" transform="rotate(-20) scale(${bk.toFixed(3)})" /></g>`) +
+      `<title>${b.mine ? '你丟的漂流瓶' : b.taken ? '漂流瓶（已經被收藏了）' : b.state === 'pick' ? '漂流瓶（走到附近了）' : '漂流瓶'}</title></g>`;
   }
   return `<g class="space-globe" transform="translate(${f1(ox)} ${f1(oy)})">${out}</g>`;
 }
@@ -1233,7 +1238,7 @@ export function spaceMarkup(o: SpaceOpts): string {
   const you = o.you === 'woof' ? 'woof' : view.focus ? 'earth' : null;
   for (const b of list) {
     // 汪星大到看得出形狀：跟地球一樣畫成球（地圖要搭火箭飛過去才看得到，之前是普通的星球）
-    const look = b.key === 'woof' && b.r >= TINY_EARTH && o.woofMap !== false ? woofGlobe(b.x, b.y, b.r, view, rot(sub(sun, pos.get('woof')!)), o.streets, o.bottles) : bodySvg(b.key, b.x, b.y, b.r, b.key === 'sun' ? null : sunAt);
+    const look = b.key === 'woof' && b.r >= TINY_EARTH && o.woofMap !== false ? woofGlobe(b.x, b.y, b.r, view, rot(sub(sun, pos.get('woof')!)), o.streets, o.bottles, o.scaleKm) : bodySvg(b.key, b.x, b.y, b.r, b.key === 'sun' ? null : sunAt);
     // 點星球飛過去：點擊範圍至少半徑 12
     bodies += `<g class="space-hit" data-body="${b.key}"><circle class="hit" cx="${f1(b.x)}" cy="${f1(b.y)}" r="${f1(Math.max(b.r + 3, 12))}" />${look}</g>`;
     // 中心換到別的星球：雷達中間的圓點不是你，你畫在你在的那一顆（地球；在汪星上是汪星，汪星大到畫成球時不畫）

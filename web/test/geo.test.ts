@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { bearingDeg, compassLabel, formatKm, haversineKm, TAIWAN_EXTREMES, taiwanRadiusKm } from '../src/geo';
+import { bearingDeg, bottleSize, compassLabel, formatKm, haversineKm, TAIWAN_EXTREMES, taiwanRadiusKm } from '../src/geo';
 
 const TAIPEI_MAIN = { lat: 25.0478, lng: 121.517 };
 const TAIPEI_101 = { lat: 25.034, lng: 121.5645 };
@@ -61,5 +61,17 @@ describe('destination', () => {
   it('wraps longitude across the antimeridian', () => {
     const p = destination({ lat: 0, lng: 179.9 }, 90, 50);
     expect(p.lng).toBeLessThan(-179);
+  });
+});
+
+describe('bottleSize', () => {
+  it('full size within 1 km, half at 10 km, a light blue dot (0) beyond 10 km', () => {
+    expect(bottleSize(0.5)).toBe(1);
+    expect(bottleSize(1)).toBe(1);
+    expect(bottleSize(3)).toBeGreaterThan(0.5);
+    expect(bottleSize(3)).toBeLessThan(1);
+    expect(bottleSize(10)).toBeCloseTo(0.5);
+    expect(bottleSize(10.1)).toBe(0);
+    expect(bottleSize(50)).toBe(0);
   });
 });

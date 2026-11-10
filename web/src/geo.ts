@@ -68,3 +68,13 @@ export function regionRadiusKm(from: LatLng, points: LatLng[], step: number, min
 export function taiwanRadiusKm(from: LatLng): number {
   return regionRadiusKm(from, TAIWAN_EXTREMES, 50, 200);
 }
+
+/**
+ * 漂流瓶跟著縮放變大小（v1.602 使用者說地圖縮小後跟著縮小、超過 10 km 顯示淡藍色）：
+ * 外圈（範圍）1 km 內原本大小，到 10 km 慢慢縮到一半；超過 10 km 只畫淡藍色的小點（回傳 0）
+ */
+export function bottleSize(rangeKm: number): number {
+  if (rangeKm > 10) return 0;
+  if (rangeKm <= 1) return 1;
+  return 1 - 0.5 * Math.log10(rangeKm);
+}

@@ -1,4 +1,5 @@
 import type { BlipStyle, EventKind, Phase, SweepStyle } from './types';
+import { bottleSize } from './geo';
 import { DOME_SVG, idlePhase, isSceneKind, PATROL_SVG, sceneSvg, SCOOTER_SVG, SOCCER_SVG, TRUCK_SVG, WALKER_SVG, windSvg, type SceneKind } from './hq-scenes';
 import { alongLine, BOAT_SVG, crackSvg, FITBUS_BODY, FITBUS_SVG, hqMotionKm, HQ_NET_LABEL_KM, BIKE_SVG, HIKER_SVG, PETWALK_SVG, FISH_SVG, WETLAND_BIRDS, MUSIC_NOTES, bikePhase, fitbusPhase, fitbusStopSvg, cultureSvg, regrowSvg, serviceSvg, stitchSvg, BOAT_TITLE, boatPhase, fireworksSvg, FIREWORKS_MS, flowOut, HQ_VOYAGE_MS, RAINBOW_FLOW_TOTAL, RAINBOW_STAGGER_MS, riverHalfWidth, surge, SURGE_TOTAL, voyagePhase, voyageTimeOf } from './flow';
 
@@ -1533,6 +1534,8 @@ export class Radar {
 
   private drawBottles(): void {
     this.bottleLayer.replaceChildren();
+    // 跟著縮放變大小，超過 10 km 只畫淡藍色的小點（bottleSize）
+    const k = bottleSize(this.scaleKm);
     for (const b of this.bottles) {
       const ratio = this.ratio(b.distanceKm);
       const angle = b.bearing - this.heading;
@@ -1543,7 +1546,7 @@ export class Radar {
       const r = Math.min(ratio * (R - 8), lim);
       const p = polar(angle, r);
       if (beyond) {
-        this.bottleLayer.appendChild(this.bottleHint(b, p));
+        this.bottleLayer.appendChild(this.bottleHint(b, p, k));
         continue;
       }
       const g = el('g', {
@@ -1554,11 +1557,15 @@ export class Radar {
       });
       g.dataset.id = String(b.id);
       g.appendChild(el('circle', { class: 'hit', r: 14 }));
-      if (b.state === 'pick') this.fxTwin(g).appendChild(el('circle', { class: 'reach', r: 9 }));
-      const body = el('g', { class: 'body' });
-      body.appendChild(el('path', { class: 'glass', d: BOTTLE_PATH, transform: 'rotate(-20)' }));
-      g.appendChild(body);
-      this.addFlash(g, angle, r, 7);
+      if (k === 0) {
+        g.appendChild(el('circle', { class: 'dot', r: 3.4 }));
+      } else {
+        if (b.state === 'pick') this.fxTwin(g).appendChild(el('circle', { class: 'reach', r: (9 * k).toFixed(1) }));
+        const body = el('g', { class: 'body' });
+        body.appendChild(el('path', { class: 'glass', d: BOTTLE_PATH, transform: `rotate(-20) scale(${k.toFixed(3)})` }));
+        g.appendChild(body);
+        this.addFlash(g, angle, r, 7 * k);
+      }
       const title = el('title');
       title.textContent = b.mine ? '你丟的漂流瓶' : b.picked ? '漂流瓶（已經被收藏了）' : b.state === 'pick' ? '漂流瓶（走到附近了）' : '漂流瓶';
       g.appendChild(title);
@@ -1567,13 +1574,16 @@ export class Radar {
   }
 
   /** 外圈的方向提示：小瓶子加距離，點了一樣打開瓶子 */
-  private bottleHint(b: RadarBottle, p: { x: number; y: number }): SVGGElement {
+  private bottleHint(b: RadarBottle, p: { x: number; y: number }, k: number): SVGGElement {
     const g = el('g', { class: `bottle bottle-hint${b.selected ? ' selected' : ''}`, transform: `translate(${p.x.toFixed(1)} ${p.y.toFixed(1)})`, tabindex: 0, role: 'button' });
     g.dataset.id = String(b.id);
     g.appendChild(el('circle', { class: 'hit', r: 14 }));
-    const body = el('g', { class: 'body' });
-    body.appendChild(el('path', { class: 'glass', d: BOTTLE_PATH, transform: 'rotate(-20) scale(0.8)' }));
-    g.appendChild(body);
+    if (k === 0) g.appendChild(el('circle', { class: 'dot', r: 3.4 }));
+    else {
+      const body = el('g', { class: 'body' });
+      body.appendChild(el('path', { class: 'glass', d: BOTTLE_PATH, transform: `rotate(-20) scale(${(0.8 * k).toFixed(3)})` }));
+      g.appendChild(body);
+    }
     // 字寫在瓶子往圓心那一側，才不會跑出雷達
     const anchor = anchorAt(p.x);
     const inward = p.y > C ? -14 : 22;

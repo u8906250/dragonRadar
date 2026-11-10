@@ -1,7 +1,7 @@
 import type * as Leaflet from 'leaflet';
 import { DOME_SVG, idlePhase, isSceneKind, PATROL_SVG, sceneSvg, SCOOTER_SVG, SOCCER_SVG, TRUCK_SVG, WALKER_SVG, windSvg, type SceneKind } from './hq-scenes';
 import { alongLine, BOAT_SVG, crackSvg, FITBUS_BODY, FITBUS_SVG, hqDenseZoom, hqMotionZoom, HQ_LABEL_ZOOM, HQ_NET_LABEL_KM, BIKE_SVG, HIKER_SVG, PETWALK_SVG, FISH_SVG, WETLAND_BIRDS, MUSIC_NOTES, bikePhase, fitbusPhase, fitbusStopSvg, cultureSvg, regrowSvg, serviceSvg, stitchSvg, boatPhase, fireworksSvg, FIREWORKS_MS, flowOut, HQ_VOYAGE_MS, RAINBOW_FLOW_TOTAL, RAINBOW_STAGGER_MS, surge, SURGE_TOTAL, voyagePhase, voyageTimeOf } from './flow';
-import { haversineKm, type LatLng } from './geo';
+import { bottleSize, haversineKm, type LatLng } from './geo';
 import type { EventKind, Phase } from './types';
 import { LANDMARKS } from './landmarks';
 
@@ -359,6 +359,10 @@ export class MapView {
         this.el.style.setProperty('--stitch-scale', Math.min(1.1, Math.max(0.35, 0.7 * zs)).toFixed(3));
         // 寶箱、健身小巴也跟著縮放（v1.536 使用者說「寶箱、巴士也是拉近變大、拉遠變小」）：縮放 14 原來的大小，0.45～1.6 倍
         this.el.style.setProperty('--zoom-scale', Math.min(1.6, Math.max(0.45, zs)).toFixed(3));
+        // 漂流瓶跟著縮放變大小，超過 10 km（縮放 13，跟雷達 10 km 差不多）只畫淡藍色的小點（bottleSize，v1.602）
+        const bk = bottleSize(10 * 2 ** (13 - map.getZoom()));
+        this.el.style.setProperty('--bottle-k', bk.toFixed(3));
+        this.el.classList.toggle('bottle-dots', bk === 0);
         // 拉遠了，一直動的停下來或收起來（hq-far）
         this.motionFar = map.getZoom() < hqMotionZoom();
         this.el.classList.toggle('hq-far', this.motionFar);

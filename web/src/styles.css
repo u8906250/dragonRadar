@@ -2026,6 +2026,9 @@ path.map-seam-walkers { --p: 15px; }
 .radar .bottle { cursor: pointer; color: #43b8d4; }
 .radar .bottle .hit { fill: transparent; }
 .radar .bottle .glass { fill: #8fdcec; stroke: #155868; stroke-width: 1.3; stroke-linejoin: round; }
+/* 範圍超過 10 km：淡藍色的小點 */
+.radar .bottle .dot { fill: #9fdcec; stroke: #155868; stroke-opacity: 0.35; stroke-width: 1.2; }
+.radar .bottle.selected .dot { stroke: var(--blip-selected); stroke-opacity: 1; stroke-width: 2; }
 .radar .bottle.mine .glass { fill: transparent; stroke: #2a9bb8; stroke-width: 1.8; }
 .radar .bottle.picked { opacity: 0.5; }
 .radar .bottle .reach { fill: none; stroke: #43b8d4; stroke-width: 2; animation: reach 1.4s ease-out infinite; }
@@ -2034,7 +2037,12 @@ path.map-seam-walkers { --p: 15px; }
 .radar .bottle-hint .hint-label { fill: #2a9bb8; font-size: 11px; font-weight: 700; paint-order: stroke; stroke: var(--label-halo); stroke-width: 3px; stroke-linejoin: round; pointer-events: none; }
 @keyframes reach { 0% { r: 8; opacity: 0.9; } 100% { r: 20; opacity: 0; } }
 @media (prefers-reduced-motion: reduce) { .radar .bottle .reach { animation: none; } }
-.map-bottle { background: none; border: none; }
+.map-bottle { position: relative; background: none; border: none; }
+/* 跟著縮放變大小；超過 10 km 只畫淡藍色的小點（v1.602） */
+.map-bottle svg { transform: scale(var(--bottle-k, 1)); transform-origin: 50% 50%; }
+.bottle-dots .map-bottle svg { display: none; }
+.bottle-dots .map-bottle::after { content: ''; position: absolute; left: 50%; top: 50%; width: 8px; height: 8px; margin: -4px 0 0 -4px; border-radius: 50%; background: #9fdcec; box-shadow: 0 0 0 1.5px rgba(21, 88, 104, 0.35); }
+.bottle-dots .map-bottle.picked::after { opacity: 0.55; }
 .map-bottle path { fill: #8fdcec; stroke: #155868; stroke-width: 1.3; stroke-linejoin: round; }
 .map-bottle.mine path { fill: #fff; stroke: #2a9bb8; stroke-width: 1.8; }
 .map-bottle.picked { opacity: 0.55; }
