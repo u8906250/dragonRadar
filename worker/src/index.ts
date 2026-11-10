@@ -321,7 +321,7 @@ async function handle(req: Request, env: Env, ctx: ExecutionContext): Promise<Re
         const body = await readJson<{ reason?: unknown; lat?: unknown; lng?: unknown; world?: unknown }>(req);
         return jsonResponse(await reportBottle(env, dev, await ipHash(env, req), id, body, now));
       }
-      if (req.method === 'DELETE' && !one[2]) return jsonResponse(await deleteBottle(env, dev, id));
+      if (req.method === 'DELETE' && !one[2]) return jsonResponse(await deleteBottle(env, dev, id, now));
     }
     throw new HttpError(404, 'not found');
   }

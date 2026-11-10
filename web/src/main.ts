@@ -2419,7 +2419,7 @@ function renderBottleDetail(id: number): boolean {
         ${got ? shareLink(b.id, b.mine) : ''}
         ${got && (b.mine || b.picked) ? '<button type="button" class="btn" data-act="proof">瓶子證明</button>' : ''}
         ${got && !b.mine ? '<button type="button" class="btn subtle" data-act="report">檢舉</button>' : ''}
-        ${b.mine && !b.taken ? '<button type="button" class="btn subtle" data-act="delete">收回</button>' : ''}
+        ${b.mine && canWithdraw(b.taken ? 'picked' : 'active', b.createdAt) ? '<button type="button" class="btn subtle" data-act="delete">收回</button>' : ''}
       </div>
       <p class="muted sheet-note small">${
         woof
@@ -2456,7 +2456,7 @@ function renderBottleDetail(id: number): boolean {
     render();
   });
   detailEl.querySelector('[data-act="delete"]')?.addEventListener('click', async (e) => {
-    if (!window.confirm('要收回這個瓶子嗎？收回後就沒有人看得到了。')) return;
+    if (!window.confirm(withdrawAsk(!!b.taken))) return;
     (e.currentTarget as HTMLButtonElement).disabled = true;
     const r = await deleteBottle(id);
     if (!r.ok) {
@@ -2625,6 +2625,12 @@ function renderBottleSheet(): void {
   sceneDot.hidden = newlyPicked() === 0;
 }
 
+/** 自己丟的瓶子收不收得回來：還沒被收藏的隨時可以，被收藏了的丟出去 24 小時內也可以（v1.603 使用者說的） */
+const canWithdraw = (status: string, createdAt: number): boolean =>
+  status === 'active' || status === 'hidden' || (status === 'picked' && nowSec() - createdAt < 86400);
+const withdrawAsk = (taken: boolean): string =>
+  taken ? '這個瓶子已經被收藏了，收回後收藏的人也看不到了。要收回嗎？' : '要收回這個瓶子嗎？收回後就沒有人看得到了。';
+
 /** 收藏頁下面「我丟的瓶子」：狀態、收回 */
 function paintMyBottles(): void {
   const data = myBottlesData;
@@ -2650,7 +2656,7 @@ function paintMyBottles(): void {
         .map((b) => {
           const fresh = b.pickedAt !== null && b.pickedAt > seen;
           return `<li><span class="spot-mine-body"><b class="bottle-no">${bottleNo(b.id)}</b>${b.photo ? '📷' : ''}「${esc(b.text)}」<small>${fresh ? '<b class="new-tag">新</b>' : ''}${ago(b.createdAt)}丟的・${esc(statusText(b))}</small></span>${
-            b.status === 'active' || b.status === 'hidden' ? `<button type="button" class="chip spot-cancel" data-delete-bottle="${b.id}">收回</button>` : ''
+            canWithdraw(b.status, b.createdAt) ? `<button type="button" class="chip spot-cancel" data-delete-bottle="${b.id}" data-taken="${b.status === 'picked' ? 1 : 0}">收回</button>` : ''
           }</li>`;
         })
         .join('')}</ul>`
@@ -2771,7 +2777,7 @@ async function onLettersClick(e: Event): Promise<void> {
   const t = e.target as Element;
   const del = t.closest<HTMLButtonElement>('[data-delete-bottle]');
   if (del) {
-    if (!window.confirm('要收回這個瓶子嗎？收回後就沒有人看得到了。')) return;
+    if (!window.confirm(withdrawAsk(del.dataset.taken === '1'))) return;
     del.disabled = true;
     const id = Number(del.dataset.deleteBottle);
     const r = await deleteBottle(id);
