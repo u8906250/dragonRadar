@@ -5424,6 +5424,10 @@ function applyModule(): void {
   brandText.textContent = mod.current ? theme.name : mod.short;
   searchInput.placeholder = mod.searchPlaceholder;
   reportIntro.textContent = mod.current ? CURRENT_REPORT_INTRO : mod.reportIntro;
+  // 活動通、OPENTIX 的活動頁只有洋流雷達收；其他雷達只收 Threads 貼文
+  $('#report-title').textContent = mod.current ? '回報活動' : '回報貼文';
+  reportInput.placeholder = mod.current ? 'Threads、活動通或 OPENTIX 的連結' : 'Threads 貼文的連結';
+  reportInput.setAttribute('aria-label', mod.current ? 'Threads 貼文、活動通或 OPENTIX 活動頁的連結' : 'Threads 貼文的連結');
   map.setLandmarksVisible(mod.current);
   if (!mod.current) bottleBtn.hidden = true;
   applyReportsOpen();
