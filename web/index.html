@@ -221,13 +221,6 @@
         </div>
         <p id="bottle-result" class="scene-msg" aria-live="polite"></p>
       </section>
-      <!-- 牛皮紙毛毛的紙邊（.kraft-bg 用） -->
-      <svg width="0" height="0" style="position: absolute" aria-hidden="true" focusable="false">
-        <filter id="kraft-edge" x="-4%" y="-4%" width="108%" height="108%">
-          <feTurbulence type="fractalNoise" baseFrequency="0.028" numOctaves="5" seed="7" result="n" />
-          <feDisplacementMap in="SourceGraphic" in2="n" scale="12" xChannelSelector="R" yChannelSelector="G" />
-        </filter>
-      </svg>
       <section id="letters-page" class="letters-page" hidden aria-labelledby="letters-title">
         <header class="letters-head">
           <button type="button" class="chip" data-act="back">← 回雷達</button>

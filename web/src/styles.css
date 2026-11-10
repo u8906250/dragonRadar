@@ -2046,33 +2046,30 @@ path.map-seam-walkers { --p: 15px; }
 @keyframes bottle-glow { 50% { box-shadow: 0 0 0 6px rgba(67, 184, 212, 0.15); } }
 @media (prefers-reduced-motion: reduce) { #bottle-btn.glow { animation: none; } }
 /*
- * 牛皮紙（v1.593、v1.594 仿真、中古世紀的感覺）：泛黃的紙色、細細的纖維、顆粒、摺痕和光影，四周像燒過一樣變深，
- * 幾塊污漬和一圈水漬；寫漂流瓶的紙、撿到的信、收藏的信都是這一張。
- * 紙是實物，深色主題也一樣是牛皮紙色；字用楷體（毛筆的感覺，系統沒有就用明體），墨色深褐
+ * 牛皮紙（v1.600 使用者給了參考圖：標準規格的牛皮紙信紙）：均勻的牛皮紙色、很淡的顆粒、直直的紙邊、A5 比例，
+ * 一行一行淡淡的橫線，最上面一條深一點；寫漂流瓶的紙、撿到的信、收藏的信都是這一張。
+ * 紙是實物，深色主題也一樣是牛皮紙色；字用楷體（手寫的感覺，系統沒有就用明體），墨色深褐
  */
 :root {
   --hand: 'Kaiti TC', 'STKaiti', 'BiauKai', 'DFKai-SB', 'KaiTi', 'TW-Kai', 'Noto Serif TC', serif;
-  --kraft-ink: #2a1708;
-  --kraft-base: #cda46c;
-  /* 四周燒過、變深的紙邊 */
-  --kraft-burn: inset 0 0 26px rgba(74, 36, 6, 0.55), inset 0 0 6px rgba(52, 24, 4, 0.6);
+  --kraft-ink: #3b2a17;
+  --kraft-base: #d4aa6c;
+  --kraft-line: rgba(116, 76, 32, 0.4);
+  --kraft-head: rgba(98, 62, 24, 0.62);
   --kraft-tex:
-    radial-gradient(circle at 93% 7%, transparent 4.2%, rgba(112, 66, 22, 0.2) 4.8%, rgba(112, 66, 22, 0.07) 5.8%, transparent 6.4%),
-    radial-gradient(16% 10% at 6% 94%, rgba(110, 64, 20, 0.2), transparent 72%),
-    radial-gradient(12% 8% at 96% 90%, rgba(96, 54, 16, 0.18), transparent 70%),
-    radial-gradient(ellipse at 50% 48%, rgba(255, 240, 212, 0.34), transparent 58%),
-    radial-gradient(ellipse at 50% 48%, transparent 60%, rgba(98, 54, 14, 0.3) 90%, rgba(66, 32, 6, 0.5) 100%),
-    url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='240' height='240'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='.9' numOctaves='3' stitchTiles='stitch'/><feColorMatrix values='0 0 0 0 .32  0 0 0 0 .2  0 0 0 0 .08  0 0 0 .5 0'/></filter><rect width='100%25' height='100%25' filter='url(%23n)'/></svg>"),
-    url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='320' height='320'><filter id='f'><feTurbulence type='fractalNoise' baseFrequency='.012 .45' numOctaves='2' seed='3' stitchTiles='stitch'/><feColorMatrix values='0 0 0 0 .98  0 0 0 0 .9  0 0 0 0 .75  0 0 0 -1 .32'/></filter><rect width='100%25' height='100%25' filter='url(%23f)'/></svg>");
+    linear-gradient(165deg, rgba(255, 248, 230, 0.14), rgba(255, 248, 230, 0) 45%, rgba(110, 72, 28, 0.08)),
+    url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='240' height='240'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='.9' numOctaves='3' stitchTiles='stitch'/><feColorMatrix values='0 0 0 0 .4  0 0 0 0 .26  0 0 0 0 .1  0 0 0 .22 0'/></filter><rect width='100%25' height='100%25' filter='url(%23n)'/></svg>");
+  /* 一行 34px（撿到的信、收藏的信）的橫線 */
+  --kraft-rules: repeating-linear-gradient(transparent 0 33px, var(--kraft-line) 33px 34px);
 }
 .kraft-note, .letter-paper {
   color: var(--kraft-ink);
   background: var(--kraft-tex), var(--kraft-base);
   border-radius: 2px;
-  box-shadow: var(--kraft-burn), 0 1px 1px rgba(0, 0, 0, 0.12), 2px 4px 10px rgba(0, 0, 0, 0.22);
+  box-shadow: 0 1px 1px rgba(0, 0, 0, 0.12), 2px 3px 8px rgba(0, 0, 0, 0.2);
 }
 .kraft-note { position: relative; margin: 4px 0 10px; padding: 26px 16px 14px; }
-.kraft-note p { margin: 0; font-family: var(--hand); font-size: 20px; line-height: 1.7; font-weight: 600; white-space: pre-wrap; word-break: break-word; }
+.kraft-note p { margin: 0; font-family: var(--hand); font-size: 20px; line-height: 34px; font-weight: 600; white-space: pre-wrap; word-break: break-word; background: var(--kraft-rules); }
 /* 編號：像蓋在紙角的小章 */
 .kraft-no { position: absolute; top: 6px; right: 8px; padding: 0 5px; font: 700 11px/16px ui-monospace, 'SF Mono', Menlo, monospace; color: #6e4a26; border: 1px dashed #8a6238; border-radius: 3px; transform: rotate(-3deg); }
 .bottle-no { font: 700 12px ui-monospace, 'SF Mono', Menlo, monospace; color: var(--muted); }
@@ -2102,15 +2099,18 @@ body.bottle-open { overflow: hidden; }
 .scene-dot { position: absolute; top: 2px; right: 2px; width: 10px; height: 10px; border-radius: 50%; background: #e5484d; border: 2px solid #2a1f12; }
 .scene-stage { position: relative; margin-right: 40px; }
 .kraft-sheet {
-  position: relative; display: flex; flex-direction: column; width: min(72vw, 360px); height: min(56vh, 440px); padding: 30px 26px 30px 28px;
-  transform: rotate(-1.4deg); filter: drop-shadow(0 12px 16px rgba(0, 0, 0, 0.45));
+  position: relative; display: flex; flex-direction: column; width: min(72vw, 330px, calc(58vh * 148 / 210)); aspect-ratio: 148 / 210; padding: 34px 7% 26px;
+  filter: drop-shadow(0 10px 14px rgba(0, 0, 0, 0.4));
 }
-/* 紙本身（毛毛的紙邊用 SVG 濾鏡，字不跟著抖） */
-.kraft-bg { position: absolute; inset: 0; background: var(--kraft-tex), var(--kraft-base); box-shadow: var(--kraft-burn); filter: url(#kraft-edge); }
+/* 紙本身；最上面一條深一點的線 */
+.kraft-bg { position: absolute; inset: 0; background: var(--kraft-tex), var(--kraft-base); border-radius: 2px; }
+.kraft-sheet::before, .bottle-fx-paper::before { content: ''; position: absolute; z-index: 1; left: 7%; right: 7%; top: 22px; height: 2px; background: var(--kraft-head); }
+/* 直接寫在紙上：一行 36px，橫線跟著字捲動 */
 .kraft-sheet textarea {
   position: relative; flex: 1; min-height: 0; width: 100%; padding: 0; margin: 0;
-  font-family: var(--hand); font-size: 21px; line-height: 1.75; font-weight: 600; color: var(--kraft-ink); caret-color: var(--kraft-ink);
-  background: transparent; border: 0; outline: 0; resize: none; box-shadow: none; -webkit-appearance: none; appearance: none;
+  font-family: var(--hand); font-size: 20px; line-height: 36px; font-weight: 600; color: var(--kraft-ink); caret-color: var(--kraft-ink);
+  background: repeating-linear-gradient(transparent 0 35px, var(--kraft-line) 35px 36px); background-attachment: local;
+  border: 0; outline: 0; resize: none; box-shadow: none; -webkit-appearance: none; appearance: none;
 }
 .kraft-sheet .taped-photo { flex: none; margin: 0 auto 10px; max-height: 42%; }
 .kraft-sheet .taped-photo img { max-height: min(16vh, 150px); cursor: default; }
@@ -2136,7 +2136,7 @@ body.bottle-open { overflow: hidden; }
 .scene-msg:empty { display: none; }
 @media (max-width: 480px) {
   .scene-stage { margin-right: 30px; }
-  .kraft-sheet { width: min(70vw, 360px); padding: 26px 20px 26px 22px; }
+  .kraft-sheet { width: min(70vw, 330px, calc(56vh * 148 / 210)); }
   .scene-bottle { right: -54px; bottom: -30px; transform: scale(0.86); transform-origin: 100% 100%; }
 }
 @media (prefers-reduced-motion: reduce) { .scene-bottle .real-bottle { animation: none !important; } }
@@ -2170,7 +2170,7 @@ body.letters-open { overflow: hidden; }
 .letter-paper { position: relative; display: flex; flex-direction: column; gap: 8px; padding: 22px 16px 10px; transform: rotate(var(--tilt, -0.6deg)); }
 .letter-paper:nth-child(2n) { --tilt: 0.7deg; }
 .letter-paper:nth-child(3n) { --tilt: -0.3deg; }
-.letter-paper .letter-text { margin: 0; font-family: var(--hand); font-size: 19px; line-height: 1.65; font-weight: 600; white-space: pre-wrap; word-break: break-word; }
+.letter-paper .letter-text { margin: 0; font-family: var(--hand); font-size: 19px; line-height: 34px; font-weight: 600; white-space: pre-wrap; word-break: break-word; background: var(--kraft-rules); }
 .letters-body .letter-paper small.muted { color: #6b4b2a; font-size: 12px; }
 .letter-acts { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 4px 12px; }
 .letter-acts .link-btn { color: #6b4b2a; font-size: 12px; }
@@ -2194,7 +2194,7 @@ body.letters-open { overflow: hidden; }
 .bottle-fx > * { position: fixed; }
 .bottle-fx-paper { display: flex; flex-direction: column; overflow: visible; color: var(--kraft-ink); filter: drop-shadow(0 10px 14px rgba(0, 0, 0, 0.4)); }
 .bottle-fx-paper > :not(.kraft-bg) { position: relative; }
-.bottle-fx-paper p { margin: 0; font-family: var(--hand); font-size: 21px; line-height: 1.75; font-weight: 600; white-space: pre-wrap; word-break: break-word; }
+.bottle-fx-paper p { margin: 0; flex: 1; font-family: var(--hand); font-size: 20px; line-height: 36px; font-weight: 600; white-space: pre-wrap; word-break: break-word; background: repeating-linear-gradient(transparent 0 35px, var(--kraft-line) 35px 36px); }
 .bottle-fx-paper .taped-photo { margin: 0 auto 10px; }
 .bottle-fx-paper .taped-photo img { max-height: min(16vh, 150px); }
 /* 捲起來的那一捲：牛皮紙的圓柱（上亮下暗），兩端看得到一圈圈的紙卷 */

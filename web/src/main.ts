@@ -2257,6 +2257,8 @@ function selectBottle(id: number | null): void {
     // 自己丟的、撿過的直接讀內容
     const b = findBottle(selectedBottle);
     if (b && (b.mine || b.picked) && !bottleTexts.has(b.id)) void loadBottle(b.id);
+    // 別人丟在地球上的：還沒用 GPS 定位就先定位（撿要 GPS）
+    else if (b && !b.mine && !b.picked && b.world !== 'woof' && origin.source !== 'gps' && youOn === 'earth' && !tripping) locateMe();
   }
   render();
 }
@@ -2349,7 +2351,7 @@ function renderBottleDetail(id: number): boolean {
   let body: string;
   if (got) {
     const status = b.mine
-      ? `你${ago(b.createdAt)}丟的・還沒被撿走・${woof ? `漂到汪星的海上了，${daysLeft(b.expiresAt)}後沉下去` : `在附近漂，${seaIn(b.createdAt)}後漂到汪星的海上`}`
+      ? `你${ago(b.createdAt)}丟的・還沒被撿走（自己丟的不能撿，別人走到 ${pickRadiusM()} m 內才撿得起來）・${woof ? `漂到汪星的海上了，${daysLeft(b.expiresAt)}後沉下去` : `在附近漂，${seaIn(b.createdAt)}後漂到汪星的海上`}`
       : `${ago(b.createdAt)}丟的・你撿到了，收進「瓶中信收藏」`;
     body = `${kraftNote(got.text, b.id, got.photo)}<p class="muted">${esc(status)}</p>`;
   } else if (b.mine || b.picked) {
@@ -2563,6 +2565,8 @@ function openBottleSheet(open: boolean): void {
   selectedBottle = null;
   detailEl.hidden = true;
   bottleResult.textContent = '';
+  // 先直接定位（v1.600 使用者說按漂流瓶先定位）：丟瓶子、撿瓶子都要 GPS；在汪星不用（汪星上拖曳就是走路）
+  if (youOn === 'earth' && !tripping) locateMe();
   renderBottleSheet();
   void reloadMyBottles();
   // 電腦上直接可以打字；手機等點了紙才跳出鍵盤（不然鍵盤蓋住瓶子）
@@ -2862,22 +2866,24 @@ function landingPoint(): { x: number; y: number } {
 /**
  * 丟瓶子的動畫（約 4 秒，可愛不可怕）：牛皮紙從下往上捲成一捲 → 捲好的紙移到瓶口、滑進瓶子 → 躺在旁邊的軟木塞跳起來塞進瓶口 →
  * 收起畫面，瓶子轉著圈拋到雷達正中間（你的位置）→ 落水，一圈圈水波，瓶子晃一晃。
- * 用蓋在上面的一份來動（原本的紙、瓶子先藏起來）；系統設定減少動態就直接跳過
+ * 用蓋在上面的一份來動（原本的紙、瓶子先藏起來）。系統設定「減少動態效果」也照樣播（v1.600 使用者說電腦版沒有丟出去的動畫；
+ * 這是自己按下去才播的一小段，Windows 關掉動畫效果時瀏覽器會回報減少動態）
  */
 async function throwBottleFx(text: string, photo: string | null, hide: () => void): Promise<void> {
   const sheet = bottleSheet.querySelector<HTMLElement>('.kraft-sheet');
   const realBottle = bottleDropEl.querySelector('.real-bottle');
   const realCork = bottleDropEl.querySelector('.real-cork');
-  if (matchMedia('(prefers-reduced-motion: reduce)').matches || !sheet || !realBottle || !realCork) {
+  if (!sheet || !realBottle || !realCork) {
     hide();
     return;
   }
-  // 紙是斜的：用沒轉的大小、轉之前的位置（中心一樣），蓋上去的那一張也一樣斜
+  // 紙如果是斜的：用沒轉的大小、轉之前的位置（中心一樣），蓋上去的那一張也一樣斜
   const box = sheet.getBoundingClientRect();
   const [sw, sh] = [sheet.offsetWidth, sheet.offsetHeight];
   const [scx, scy] = [box.left + box.width / 2, box.top + box.height / 2];
   const from = { left: scx - sw / 2, top: scy - sh / 2, width: sw, height: sh, bottom: scy + sh / 2 };
-  const tilt = getComputedStyle(sheet).transform;
+  const t = getComputedStyle(sheet).transform;
+  const tilt = t === 'none' ? '' : t;
   const br = realBottle.getBoundingClientRect();
   const cr = realCork.getBoundingClientRect();
   const k = br.width / 100;
@@ -2888,13 +2894,13 @@ async function throwBottleFx(text: string, photo: string | null, hide: () => voi
   const paper = document.createElement('div');
   paper.className = 'bottle-fx-paper';
   paper.innerHTML = `<div class="kraft-bg"></div>${photo ? `<figure class="taped-photo"><img src="${esc(photo)}" alt="" /></figure>` : ''}<p>${esc(text)}</p>`;
-  Object.assign(paper.style, { left: `${from.left}px`, top: `${from.top}px`, width: `${from.width}px`, height: `${from.height}px`, padding: getComputedStyle(sheet).padding, transform: tilt });
+  Object.assign(paper.style, { left: `${from.left}px`, top: `${from.top}px`, width: `${from.width}px`, height: `${from.height}px`, padding: getComputedStyle(sheet).padding, transform: tilt || 'none' });
   // 捲筒：一開始在紙的最下面，細細的（直徑 ROLL0），越捲越粗（ROLL1）
   const [ROLL0, ROLL1] = [8, 24];
   const roll = document.createElement('div');
   roll.className = 'bottle-fx-roll';
   // 捲筒擺在捲完的位置（紙的最上面、粗 ROLL1），一開始用 transform 移到紙的最下面、壓細（跟紙的裁切一樣用 transform 類的動畫，才會一直貼著紙邊）
-  Object.assign(roll.style, { left: `${from.left}px`, top: `${from.top}px`, width: `${from.width}px`, height: `${ROLL1}px`, opacity: '0', transform: tilt });
+  Object.assign(roll.style, { left: `${from.left}px`, top: `${from.top}px`, width: `${from.width}px`, height: `${ROLL1}px`, opacity: '0', transform: tilt || 'none' });
   const bottle = document.createElement('div');
   bottle.className = 'bottle-fx-bottle';
   bottle.innerHTML = bottleSvg('fxb');
@@ -2914,7 +2920,7 @@ async function throwBottleFx(text: string, photo: string | null, hide: () => voi
     const ease = 'cubic-bezier(.45,.05,.55,.95)';
     await Promise.all([
       run(paper, [{ clipPath: 'inset(0 0 0 0)' }, { clipPath: `inset(0 0 ${from.height - ROLL1 / 2}px 0)` }], { duration: 1100, easing: ease }),
-      run(roll, [{ transform: `${tilt} translateY(${from.height - ROLL1 / 2}px) scaleY(${ROLL0 / ROLL1})` }, { transform: tilt }], { duration: 1100, easing: ease }),
+      run(roll, [{ transform: `${tilt} translateY(${from.height - ROLL1 / 2}px) scaleY(${ROLL0 / ROLL1})`.trim() }, { transform: tilt || 'none' }], { duration: 1100, easing: ease }),
       run(roll, [{ opacity: 0 }, { opacity: 1, offset: 0.06 }, { opacity: 1 }], { duration: 1100 }),
     ]);
     paper.remove();
@@ -2923,7 +2929,7 @@ async function throwBottleFx(text: string, photo: string | null, hide: () => voi
     const [mx, cx0, cy0] = [br.left + 50 * k, from.left + from.width / 2, from.top + ROLL1 / 2];
     const shape = `rotate(90deg) scaleX(${(74 * k) / from.width}) scaleY(${(24 * k) / ROLL1})`;
     const above = br.top + 14 * k - 37 * k - 4;
-    await run(roll, [{ transform: tilt }, { transform: `translate(${mx - cx0}px, ${above - cy0}px) ${shape}` }], { duration: 600, easing: 'ease-in-out' });
+    await run(roll, [{ transform: tilt || 'none' }, { transform: `translate(${mx - cx0}px, ${above - cy0}px) ${shape}` }], { duration: 600, easing: 'ease-in-out' });
     const scroll = bottle.querySelector('.scroll')!;
     await Promise.all([
       run(roll, [{ transform: `translate(${mx - cx0}px, ${above - cy0}px) ${shape}` }, { transform: `translate(${mx - cx0}px, ${br.top + 135 * k - cy0}px) ${shape}` }], { duration: 450, easing: 'ease-in' }),
@@ -2979,7 +2985,8 @@ async function throwBottleFx(text: string, photo: string | null, hide: () => voi
       ],
       { duration: 900, easing: 'ease-in-out' },
     );
-  } catch {
+  } catch (e) {
+    console.warn('bottle animation failed', e);
     hide();
   } finally {
     fx.remove();
