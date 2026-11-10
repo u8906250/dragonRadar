@@ -15,7 +15,7 @@ import { checkWishNews, findCard, gotReward, myCards, onWishNews, openAlbum, ope
 import { DEEP_FROM_KM, LY_KM, Radar, SPACE_FROM_KM, type RadarRoute, type RadarStreets, type SpaceView } from './radar';
 import { DEFAULT_THEME_ID, getTheme, THEMES, type Theme } from './themes';
 import type { WoofBottleMark } from './space';
-import type { BottleOut, EventOut, Item, KeywordInfo, KeywordRules, MyBottles, MyReport, Origin, Phase, PickedBottle, RelatedPost, RouteOut, PreviewItem, RouteStop, RoutePreview, SubmitResult, FailedItem, EditItem, EditInput } from './types';
+import type { BottleOut, BottleProof, EventOut, Item, KeywordInfo, KeywordRules, MyBottles, MyReport, Origin, Phase, PickedBottle, RelatedPost, RouteOut, PreviewItem, RouteStop, RoutePreview, SubmitResult, FailedItem, EditItem, EditInput } from './types';
 
 const DEFAULT_ORIGIN: Origin = { lat: 25.0478, lng: 121.517, source: 'default' }; // 台北車站
 const SOON_SEC = 30 * 60;
@@ -2499,46 +2499,65 @@ function renderBottleDetail(id: number): boolean {
  * 再請伺服器核對簽章：對得上就是洋流雷達發出的瓶子、內容沒被改過（瓶子沉下去、刪掉了也驗得出來）
  */
 async function showProof(id: number, text: string): Promise<void> {
-  const r = await fetchBottleProof(id);
-  if (!r.ok) {
-    showBanner(bannerEl, r.message, 3000);
-    return;
-  }
-  const p = r.data;
+  // 畫面馬上出來（v1.610 使用者說點開、關閉有點慢）：編號、丟的時間、內容的指紋這裡就有，簽章等伺服器回來再補；拿過的記起來
+  const createdAt = findBottle(id)?.createdAt ?? bottleTexts.get(id)?.bottle.createdAt ?? myBottlesData?.letters.find((l) => l.id === id)?.createdAt ?? null;
   const el = overlay(
     'tc-proof',
     `<div class="tc-box bottle-proof">
       <h2 class="tc-title">瓶子證明</h2>
       <dl>
-        <dt>編號</dt><dd>${bottleNo(p.no)}</dd>
-        <dt>丟的時間</dt><dd>${esc(stampFmt.format(new Date(p.createdAt * 1000)))}</dd>
-        <dt>內容的指紋（SHA-256）</dt><dd class="mono">${esc(p.sha256)}</dd>
-        <dt>簽章</dt><dd class="mono">${esc(p.sig)}</dd>
+        <dt>編號</dt><dd>${bottleNo(id)}</dd>
+        <dt>丟的時間</dt><dd data-f="time">${createdAt ? esc(stampFmt.format(new Date(createdAt * 1000))) : '讀取中…'}</dd>
+        <dt>內容的指紋（SHA-256）</dt><dd class="mono" data-f="sha">計算中…</dd>
+        <dt>簽章</dt><dd class="mono" data-f="sig">讀取中…</dd>
       </dl>
       <p class="tc-note">每個瓶子的編號都不一樣。內容只要改一個字，指紋就不一樣；簽章是伺服器用只有它知道的金鑰簽的，別人做不出來。</p>
       <p class="proof-result" aria-live="polite"></p>
-      <div class="sheet-actions"><button type="button" class="chip primary" data-act="verify">驗證</button><button type="button" class="chip" data-close>關閉</button></div>
+      <div class="sheet-actions"><button type="button" class="chip primary" data-act="verify" disabled>驗證</button><button type="button" class="chip" data-close>關閉</button></div>
     </div>`,
   );
+  const field = (f: string): HTMLElement => el.querySelector<HTMLElement>(`[data-f="${f}"]`)!;
   const out = el.querySelector<HTMLElement>('.proof-result')!;
-  el.querySelector<HTMLButtonElement>('[data-act="verify"]')?.addEventListener('click', async (e) => {
-    const btn = e.currentTarget as HTMLButtonElement;
-    btn.disabled = true;
+  const verifyBtn = el.querySelector<HTMLButtonElement>('[data-act="verify"]')!;
+  const digestP = crypto.subtle.digest('SHA-256', new TextEncoder().encode(text)).then((d) => [...new Uint8Array(d)].map((x) => x.toString(16).padStart(2, '0')).join(''));
+  void digestP.then((d) => (field('sha').textContent = d));
+  let p = proofCache.get(id);
+  if (!p) {
+    const r = await fetchBottleProof(id);
+    if (!r.ok) {
+      field('sig').textContent = '—';
+      out.className = 'proof-result bad';
+      out.textContent = r.message;
+      return;
+    }
+    p = r.data;
+    proofCache.set(id, p);
+  }
+  const proof = p;
+  field('time').textContent = stampFmt.format(new Date(proof.createdAt * 1000));
+  field('sig').textContent = proof.sig;
+  verifyBtn.disabled = false;
+  verifyBtn.addEventListener('click', async () => {
+    verifyBtn.disabled = true;
+    out.className = 'proof-result';
     out.textContent = '驗證中…';
-    const digest = [...new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(text)))].map((x) => x.toString(16).padStart(2, '0')).join('');
-    const v = digest === p.sha256 ? await verifyBottleProof(p) : null;
-    btn.disabled = false;
+    const digest = await digestP;
+    const v = digest === proof.sha256 ? await verifyBottleProof(proof) : null;
+    verifyBtn.disabled = false;
     out.className = `proof-result ${v?.ok && v.data.valid ? 'ok' : 'bad'}`;
     out.textContent =
-      digest !== p.sha256
+      digest !== proof.sha256
         ? '✗ 這封信的內容跟指紋對不上'
         : !v?.ok
           ? v?.message ?? '暫時沒辦法驗證，請稍後再試'
           : v.data.valid
-            ? `✓ 是洋流雷達發出的瓶子 ${bottleNo(p.no)}，內容沒有被改過`
+            ? `✓ 是洋流雷達發出的瓶子 ${bottleNo(proof.no)}，內容沒有被改過`
             : '✗ 簽章對不上，這不是洋流雷達發出的瓶子';
   });
 }
+
+/** 看過的瓶子證明（同一個瓶子不用再跟伺服器拿） */
+const proofCache = new Map<number, BottleProof>();
 
 /** 打開分享出去的瓶子連結（?bottle=編號）：瓶子還在（收藏了也還在）就選起來（看得到在哪、多遠），沉下去了就說一聲 */
 async function openSharedBottle(id: number): Promise<void> {
