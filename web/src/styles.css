@@ -2045,17 +2045,19 @@ path.map-seam-walkers { --p: 15px; }
   animation: bottle-flow 2.8s linear infinite; animation-delay: var(--d, 0s);
 }
 .bottle-float .flow path, .map-bottle .mflow path { fill: none; stroke-linecap: round; stroke-linejoin: round; }
-.bottle-float .flow.back path, .map-bottle .mflow.back path { stroke: #7fcde3; stroke-width: 1.7; }
-.bottle-float .flow.front path, .map-bottle .mflow.front path { stroke: #2f9fc2; stroke-width: 1.9; }
+.bottle-float .flow.back path, .map-bottle .mflow.back path { stroke: #a9dfee; stroke-width: 1.2; }
+.bottle-float .flow.front path, .map-bottle .mflow.front path { stroke: #7cc8de; stroke-width: 1.3; }
 .bottle-float .flow.front { animation-delay: calc(var(--d, 0s) - 1.4s); }
 .bottle-float.still .bottle, .bottle-float.still .flow { animation: none; }
 @keyframes bottle-float { 0%, 100% { transform: translateY(0) rotate(-4deg); } 50% { transform: translateY(-16%) rotate(6deg); } }
-@keyframes bottle-flow { 0% { transform: translateX(-22%); opacity: 0; } 25%, 70% { opacity: 1; } 100% { transform: translateX(22%); opacity: 0; } }
+/* 水波不用太明顯（v1.607 使用者說的）：最亮只到六成 */
+@keyframes bottle-flow { 0% { transform: translateX(-22%); opacity: 0; } 25%, 70% { opacity: 0.6; } 100% { transform: translateX(22%); opacity: 0; } }
 @media (prefers-reduced-motion: reduce) { .bottle-float .bottle, .bottle-float .flow, .map-bottle .float, .map-bottle .mflow { animation: none; } }
 /* 汪星海上的瓶子：不動，旁邊一樣畫兩道水波 */
 .radar .woof-bottle .wave { fill: none; stroke-linecap: round; stroke-linejoin: round; }
-.radar .woof-bottle .wave.back { stroke: #7fcde3; stroke-width: 1.7; }
-.radar .woof-bottle .wave.front { stroke: #2f9fc2; stroke-width: 1.9; }
+.radar .woof-bottle .wave { opacity: 0.6; }
+.radar .woof-bottle .wave.back { stroke: #a9dfee; stroke-width: 1.2; }
+.radar .woof-bottle .wave.front { stroke: #7cc8de; stroke-width: 1.3; }
 .radar .bottle.selected .dot { stroke: var(--blip-selected); stroke-opacity: 1; stroke-width: 2; }
 .radar .bottle.mine .glass { fill: transparent; stroke: #2a9bb8; stroke-width: 1.8; }
 .radar .bottle.picked { opacity: 0.5; }

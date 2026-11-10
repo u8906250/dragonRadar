@@ -2205,7 +2205,7 @@ async function loadWoofBottles(): Promise<void> {
     }
     return;
   }
-  woofBottles = await fetchWoofBottles();
+  woofBottles = withMine(await fetchWoofBottles());
   render();
 }
 /** 在汪星上拖曳（走路）：按鈕的光、選著的瓶子還差多遠跟著變 */
@@ -2302,16 +2302,26 @@ function markBottle(id: number, patch: Partial<BottleOut>): void {
   if (got) bottleTexts.set(id, { ...got, bottle: { ...got.bottle, ...patch } });
 }
 
+/** 這次打開網頁自己收藏的瓶子：之後重新抓到的瓶子（可能是收藏之前就開始抓的）照樣算你收藏的 */
+const collectedNow = new Set<number>();
+/** 收藏中的瓶子（按鈕重畫了也不會送兩次） */
+const collecting = new Set<number>();
+/** 重新抓到的瓶子：自己剛收藏的照樣標成你收藏的 */
+const withMine = (list: BottleOut[]): BottleOut[] => (collectedNow.size ? list.map((b) => (collectedNow.has(b.id) ? { ...b, picked: true, taken: true } : b)) : list);
+
 /** 收藏（v1.601 使用者說「撿起來」改成「收藏」、瓶子不用消失）：一個瓶子只有第一個人收藏得到，收藏後瓶子照樣留在雷達上 */
 async function collectBottle(id: number): Promise<void> {
   const b = findBottle(id);
-  if (!b) return;
-  const r = await pickBottle(id, hereFor(b));
+  if (!b || collecting.has(id)) return;
+  collecting.add(id);
+  const r = await pickBottle(id, hereFor(b)).finally(() => collecting.delete(id));
   if (!r.ok) {
     bottleMsg = r.message;
-    if (/沉下去/.test(r.message) && !/收藏/.test(r.message)) removeBottleMark(id, true);
-    else if (/收藏/.test(r.message)) markBottle(id, { taken: true });
+    // 真的被別人收藏了（「晚了一步」）才標成已收藏；走不夠近、還沒定位的訊息裡也有「收藏」兩個字，不算
+    if (/晚了一步/.test(r.message)) markBottle(id, { taken: true });
+    else if (/已經沉下去/.test(r.message)) removeBottleMark(id, true);
   } else {
+    collectedNow.add(id);
     bottleTexts.set(id, r.data);
     markBottle(id, { picked: true, taken: true, picks: 1 });
     bottleMsg = '';
@@ -2413,7 +2423,7 @@ function renderBottleDetail(id: number): boolean {
             ? `<p>瓶子在${esc(where)}，${taken}按右上角「定位」用 GPS，走到 ${reach} m 內就能打開來看${b.taken ? '' : '、收藏'}。</p>`
             : `<p>瓶子在${esc(where)}，${taken}還差約 ${Math.round(d - reach)} m。${woof ? '拖曳雷達走過去' : '走近一點'}就能打開來看${b.taken ? '' : '、收藏'}。</p>`;
   }
-  const canCollect = !!got && !b.mine && !b.picked && !b.taken && near;
+  const canCollect = !!got && !b.mine && !b.picked && !b.taken && near && !collecting.has(id);
   detailEl.hidden = false;
   setDetailHtml(
     `bottle:${id}`,
@@ -4997,7 +5007,7 @@ async function refresh(): Promise<void> {
   void loadWoofBottles();
   if (forModule.current && kws.length === 0) {
     events = [];
-    bottles = await bottleReq;
+    bottles = withMine(await bottleReq);
     lastFetchAt = nowSec();
     updatedLabel.textContent = `↻ 更新 ${fmtTime(lastFetchAt)}`;
     render();
@@ -5008,6 +5018,7 @@ async function refresh(): Promise<void> {
     const got = await Promise.all([fetchEvents(origin, radius, kws, forModule.id), forModule.current ? currentRoutes() : Promise.resolve([] as RouteOut[]), bottleReq]);
     if (seq !== fetchSeq) return;
     [events, routes, bottles] = got;
+    bottles = withMine(bottles);
     // 車掃剛放上雷達：路線還在快取裡沒有這條，每一站會各自畫出來；有這種點就馬上重抓路線（同一則只重抓一次）
     const missing = forModule.current ? [...new Set(events.filter((ev) => ev.route && !routes.some((r) => r.postId === ev.post.id)).map((ev) => ev.post.id))] : [];
     if (missing.some((id) => !routesRefetched.has(id))) {

@@ -577,11 +577,15 @@ export async function pickBottle(env: Env, device: string | null, id: number, bo
   assertNear(b, body, '收藏');
   const kept = await countSince(env, 'SELECT COUNT(*) AS n FROM bottle_picks WHERE device_id = ? AND collected_at > ?', [dev, 0]);
   if (kept >= MAX_LETTERS) throw new ReportError(429, `瓶中信收藏滿 ${MAX_LETTERS} 封了，先移出一些再收藏`);
-  // 兩個人同時撿：只有先改到狀態的那個人算數
-  const won = await env.DB.prepare("UPDATE bottles SET status = 'picked', picks = 1 WHERE id = ? AND status = 'active' RETURNING *").bind(id).first<BottleRow>();
-  if (!won) throw new ReportError(410, '晚了一步，這個瓶子剛被別人收藏了');
-  // 撿到就收進瓶中信收藏
-  await env.DB.prepare('INSERT OR IGNORE INTO bottle_picks (bottle_id, device_id, created_at, collected_at) VALUES (?, ?, ?, ?)').bind(id, dev, now, now).run();
+  // 兩個人同時收藏：只有先改到狀態的那個人算數。改狀態和記下是誰收藏的放在同一個交易（batch）裡，
+  // 中間不會被讀到「已經被收藏、但不知道是誰」（v1.607：收藏的人當下看到「被別人收藏了」）
+  const [upd] = await env.DB.batch([
+    env.DB.prepare("UPDATE bottles SET status = 'picked', picks = 1 WHERE id = ? AND status = 'active'").bind(id),
+    env.DB.prepare('INSERT OR IGNORE INTO bottle_picks (bottle_id, device_id, created_at, collected_at) SELECT ?, ?, ?, ? WHERE changes() > 0').bind(id, dev, now, now),
+  ]);
+  if ((upd.meta.changes ?? 0) === 0) throw new ReportError(410, '晚了一步，這個瓶子剛被別人收藏了');
+  const won = await env.DB.prepare('SELECT * FROM bottles WHERE id = ?').bind(id).first<BottleRow>();
+  if (!won) throw new ReportError(404, '這個瓶子已經沉下去了');
   return { bottle: toOut(won, dev, true), text: won.text, photo: !!won.photo_key };
 }
 
