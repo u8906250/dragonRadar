@@ -41,8 +41,8 @@ export function xLength(text: string): number {
 }
 /** 在丟的地方附近漂多久，之後漂到汪星的海上 */
 export const SEA_AFTER_SEC = 86400;
-/** 被收藏了的瓶子，丟出去多久內還能收回 */
-export const WITHDRAW_TAKEN_SEC = 86400;
+/** 丟出去多久內還能收回（還要走到瓶子附近） */
+export const WITHDRAW_SEC = 86400;
 /** 在汪星的海上留多久，沒人撿就沉下去 */
 export const WOOF_STAY_SEC = 30 * 86400;
 /** 瓶子整個的壽命：地球 1 天＋汪星 30 天 */
@@ -649,17 +649,17 @@ export async function uncollectLetter(env: Env, device: string | null, id: numbe
 }
 
 /**
- * 收回自己丟的瓶子：還沒被收藏的隨時可以；被收藏了的，丟出去 24 小時內也可以（v1.603 使用者說的），
- * 收回後雷達上不見、收藏的人的瓶中信收藏裡也看不到了
+ * 收回自己丟的瓶子（v1.619 使用者說的）：丟出去 24 小時內、人在瓶子 PICK_RADIUS_M 內（body 帶位置）才收得回來，
+ * 收藏了的也一樣；收回後雷達上不見、收藏的人的瓶中信收藏裡也看不到了
  */
-export async function deleteBottle(env: Env, device: string | null, id: number, now: number): Promise<{ ok: true }> {
+export async function deleteBottle(env: Env, device: string | null, id: number, body: { lat?: unknown; lng?: unknown; world?: unknown }, now: number): Promise<{ ok: true }> {
   const dev = needDevice(device);
-  const r = await env.DB.prepare(
-    "UPDATE bottles SET status = 'deleted' WHERE id = ? AND device_id = ? AND (status IN ('active', 'hidden') OR (status = 'picked' AND created_at > ?))",
-  )
-    .bind(id, dev, now - WITHDRAW_TAKEN_SEC)
-    .run();
-  if ((r.meta.changes ?? 0) === 0) throw new ReportError(404, '這個瓶子被收藏超過 24 小時了，或已經不見了，收不回來');
+  const b = await env.DB.prepare("SELECT * FROM bottles WHERE id = ? AND device_id = ? AND status IN ('active', 'hidden', 'picked')").bind(id, dev).first<BottleRow>();
+  if (!b) throw new ReportError(404, '這個瓶子已經不見了，收不回來');
+  if (b.created_at <= now - WITHDRAW_SEC) throw new ReportError(403, '丟出去超過 24 小時了，收不回來');
+  assertNear(b, body, '收回');
+  const r = await env.DB.prepare("UPDATE bottles SET status = 'deleted' WHERE id = ? AND device_id = ? AND status IN ('active', 'hidden', 'picked')").bind(id, dev).run();
+  if ((r.meta.changes ?? 0) === 0) throw new ReportError(404, '這個瓶子已經不見了，收不回來');
   return { ok: true };
 }
 

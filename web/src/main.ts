@@ -2548,7 +2548,7 @@ function renderBottleDetail(id: number): boolean {
   detailEl.querySelector('[data-act="delete"]')?.addEventListener('click', async (e) => {
     if (!window.confirm(withdrawAsk(!!b.taken))) return;
     (e.currentTarget as HTMLButtonElement).disabled = true;
-    const r = await deleteBottle(id);
+    const r = await deleteBottle(id, withdrawHere());
     if (!r.ok) {
       bottleMsg = r.message;
     } else {
@@ -2762,9 +2762,11 @@ function sceneQuota(): void {
   bottleResult.dataset.quota = '1';
 }
 
-/** 自己丟的瓶子收不收得回來：還沒被收藏的隨時可以，被收藏了的丟出去 24 小時內也可以（v1.603 使用者說的） */
+/** 自己丟的瓶子收不收得回來：丟出去 24 小時內（v1.619 使用者說的；收藏了的也一樣），還要走到瓶子 500 m 內（伺服器照位置確認） */
 const canWithdraw = (status: string, createdAt: number): boolean =>
-  status === 'active' || status === 'hidden' || (status === 'picked' && nowSec() - createdAt < 86400);
+  (status === 'active' || status === 'hidden' || status === 'picked') && nowSec() - createdAt < 86400;
+/** 收回時帶的位置：自己丟的都在地球上，用 GPS（手動位置不算；沒定位伺服器會說要先定位） */
+const withdrawHere = (): BottleHere => ({ at: origin.source === 'gps' ? origin : null, world: 'earth' });
 const withdrawAsk = (taken: boolean): string =>
   taken ? '這個瓶子已經被收藏了，收回後收藏的人也看不到了。要收回嗎？' : '要收回這個瓶子嗎？收回後就沒有人看得到了。';
 
@@ -2917,7 +2919,7 @@ async function onLettersClick(e: Event): Promise<void> {
     if (!window.confirm(withdrawAsk(del.dataset.taken === '1'))) return;
     del.disabled = true;
     const id = Number(del.dataset.deleteBottle);
-    const r = await deleteBottle(id);
+    const r = await deleteBottle(id, withdrawHere());
     if (!r.ok) {
       del.disabled = false;
       showBanner(bannerEl, r.message, 3000);

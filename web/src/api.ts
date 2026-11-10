@@ -196,7 +196,8 @@ export const fetchBottleInfo = (id: number): Promise<Result<{ id: number; state:
 export const fetchBottleProof = (id: number): Promise<Result<BottleProof>> => deviceJson<BottleProof>(`/api/bottles/${id}/proof`);
 export const verifyBottleProof = (p: BottleProof): Promise<Result<{ valid: boolean }>> => deviceJson<{ valid: boolean }>('/api/bottles/verify', 'POST', p);
 export const fetchMyBottles = (): Promise<Result<MyBottles>> => deviceJson<MyBottles>('/api/bottles/mine');
-export const deleteBottle = (id: number): Promise<Result<{ ok: true }>> => deviceJson<{ ok: true }>(`/api/bottles/${id}`, 'DELETE');
+/** 收回：丟出去 24 小時內、走到瓶子附近才收得回來（帶你的位置） */
+export const deleteBottle = (id: number, here?: BottleHere): Promise<Result<{ ok: true }>> => deviceJson<{ ok: true }>(`/api/bottles/${id}`, 'DELETE', hereBody(here));
 /** 移出瓶中信收藏（之後就看不到這封信了） */
 export const uncollectLetter = (id: number): Promise<Result<{ collected: boolean }>> => deviceJson<{ collected: boolean }>(`/api/bottles/${id}/uncollect`, 'POST', {});
 /** 回報問題（地點錯誤、時間錯誤…），只有管理者看得到；車掃可以指定哪一站（那一站的標題、預計經過時間） */
