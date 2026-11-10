@@ -2560,14 +2560,19 @@ async function openSharedBottle(id: number): Promise<void> {
 
 /** 移出收藏。成功回傳 true */
 async function removeLetter(id: number): Promise<boolean> {
-  if (!window.confirm('移出收藏後就看不到這封信了。要移出嗎？')) return false;
+  if (!window.confirm('移出收藏後，這個瓶子就變回還沒有人收藏，別人走到附近又可以收藏。要移出嗎？')) return false;
   const r = await uncollectLetter(id);
   if (!r.ok) {
     showBanner(bannerEl, r.message, 3000);
     return false;
   }
+  // 雷達上的這個瓶子也變回還沒有人收藏；內容要走到附近再打開
+  collectedNow.delete(id);
+  markBottle(id, { picked: false, taken: false, picks: 0 });
   bottleTexts.delete(id);
-  showBanner(bannerEl, '移出收藏了', 2000);
+  openTried.delete(id);
+  showBanner(bannerEl, '移出收藏了，這個瓶子又可以被收藏了', 2500);
+  render();
   await reloadMyBottles();
   return true;
 }

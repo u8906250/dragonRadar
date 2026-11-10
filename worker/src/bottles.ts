@@ -634,10 +634,17 @@ export async function myBottles(env: Env, device: string | null, now: number): P
 }
 
 /** 移出收藏（之後就看不到這封信了） */
+/**
+ * 移出收藏：瓶子恢復成還沒有人收藏、別人又可以收藏（v1.609 使用者說的）。刪掉收藏紀錄、瓶子改回漂流中放在同一個交易裡；
+ * 瓶子被檢舉藏起來、收回了就只刪收藏紀錄。移出後自己也可以再收藏
+ */
 export async function uncollectLetter(env: Env, device: string | null, id: number): Promise<{ collected: false }> {
   const dev = needDevice(device);
-  const r = await env.DB.prepare('UPDATE bottle_picks SET collected_at = NULL WHERE bottle_id = ? AND device_id = ? AND collected_at IS NOT NULL').bind(id, dev).run();
-  if ((r.meta.changes ?? 0) === 0) throw new ReportError(404, '找不到你收藏的這封信');
+  const [del] = await env.DB.batch([
+    env.DB.prepare('DELETE FROM bottle_picks WHERE bottle_id = ? AND device_id = ? AND collected_at IS NOT NULL').bind(id, dev),
+    env.DB.prepare("UPDATE bottles SET status = 'active', picks = 0 WHERE id = ? AND status = 'picked' AND changes() > 0").bind(id),
+  ]);
+  if ((del.meta.changes ?? 0) === 0) throw new ReportError(404, '找不到你收藏的這封信');
   return { collected: false };
 }
 
