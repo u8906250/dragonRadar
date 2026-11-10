@@ -141,7 +141,8 @@ button, select, a { touch-action: manipulation; }
 /* 點標題重新整理，點旁邊的箭頭切換雷達（模組）；箭頭很小，按的範圍往四周加大，看起來的位置不變 */
 .brand-btn { font: inherit; color: inherit; letter-spacing: inherit; background: transparent; border: 0; padding: 0; cursor: pointer; }
 .module-btn { display: inline-flex; align-items: center; font: inherit; color: inherit; background: transparent; border: 0; padding: 8px 8px 8px 2px; margin: -8px -8px -8px -6px; cursor: pointer; }
-.module-caret { font-size: 11px; opacity: 0.7; }
+/* 切換雷達的箭頭（v1.616 使用者說可以大一點） */
+.module-caret { font-size: 18px; line-height: 1; opacity: 0.85; }
 .module-item .emoji { flex: 0 0 auto; font-size: 26px; width: 36px; text-align: center; }
 /* 職缺的防詐提醒 */
 .fraud-box { margin: 0 0 12px; padding: 10px 12px; border-radius: var(--card-radius); background: #fff4e5; color: #4a2c00; border: 1.5px solid #f0a020; font-size: 13px; line-height: 1.6; }
