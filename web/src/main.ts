@@ -474,6 +474,8 @@ const onlyGroup = $('#only-group');
 const timeChips = Array.from(document.querySelectorAll<HTMLButtonElement>('#time-chips [data-time]'));
 const timeChipsEl = $('#time-chips');
 const timeToggle = $('#time-toggle') as HTMLButtonElement;
+const dateToggle = $<HTMLButtonElement>('#date-toggle');
+const datePanel = $('#date-panel');
 const baseChipsEl = $('#base-chips');
 const baseChips = Array.from(document.querySelectorAll<HTMLButtonElement>('#base-chips [data-base]'));
 let baseMap: BaseMap = (BASES as string[]).includes(lsGet(LS_BASE) ?? '') ? (lsGet(LS_BASE) as BaseMap) : 'nlsc';
@@ -644,7 +646,8 @@ function eventTimeText(ev: EventOut): string {
   const tz = localTz(ev);
   const span = (z: string | null): string => (ev.endOpen ? `${fmtTimeTz(ev.startAt, z)} 開始` : `${fmtTimeTz(ev.startAt, z)} – ${fmtTimeTz(ev.endAt, z)}`);
   const open = ev.endOpen && openEndText(ev) ? `，${openEndText(ev)}` : '';
-  if (!tz) return `${span(null)}${open}`;
+  // 不是今天的寫日期和星期幾
+  if (!tz) return `${taipeiDay(ev.startAt) === taipeiDay(nowSec()) ? '' : `${dateFmt.format(new Date(ev.startAt * 1000))} `}${span(null)}${open}`;
   return `${fmtDateTz(ev.startAt, tz)} ${span(tz)}${open}（當地時間；台灣時間 ${fmtDateTz(ev.startAt, null)} ${span(null)}）`;
 }
 
@@ -775,11 +778,11 @@ function timeLine(it: Item, now: number): string {
     const left = Math.max(0, Math.round((ev.endAt - now) / 60));
     return `進行中 · 約 ${left} 分鐘後結束`;
   }
-  const mins = Math.round((ev.startAt - now) / 60);
   // 國外的：一律寫當地日期（台灣的「今天」不一定是當地的今天）
   const tz = localTz(ev);
   if (tz) return `當地 ${fmtDateTz(ev.startAt, tz)} ${fmtTimeTz(ev.startAt, tz)} 開始 · ${startsIn(ev.startAt, now)}`;
-  const day = mins < 24 * 60 ? '' : `${new Date(ev.startAt * 1000).toLocaleDateString('zh-TW', { timeZone: 'Asia/Taipei', month: 'numeric', day: 'numeric' })} `;
+  // 不是今天開始的寫日期和星期幾（v1.613 使用者說卡片不是今天的也在時間旁邊寫星期幾；以前 24 小時內的連日期都不寫）
+  const day = taipeiDay(ev.startAt) === taipeiDay(now) ? '' : `${dateFmt.format(new Date(ev.startAt * 1000))} `;
   return `${day}${fmtTime(ev.startAt)} 開始 · ${startsIn(ev.startAt, now)}`;
 }
 
@@ -1413,6 +1416,47 @@ function stopText(stop: RouteStop, now: number): string {
 
 // ---- 搜尋：在目前抓到的發放、活動（含車掃、固定據點）裡找字 ----
 let searchTerms: string[] = [];
+/** taipeiDay（從 1970-01-01 星期四算起的第幾天）是星期幾：0 是星期日 */
+const weekdayOf = (day: number): number => (day + 4) % 7;
+/** 這一則在哪幾天（taipeiDay）：開始到結束的每一天，固定據點看每一個時段；最多算 31 天；事件重抓才會換物件，跟著物件記 */
+const daysOf = new WeakMap<EventOut, Set<number>>();
+function itemDays(it: Item): Set<number> {
+  let days = daysOf.get(it.ev);
+  if (!days) {
+    days = new Set<number>();
+    for (const ev of it.spot ? it.spot.sessions : [it.ev]) {
+      const last = taipeiDay(Math.max(ev.startAt, ev.endAt - 1));
+      for (let d = taipeiDay(ev.startAt); d <= last && days.size < 31; d++) days.add(d);
+    }
+    daysOf.set(it.ev, days);
+  }
+  return days;
+}
+
+// ---- 日期：選星期幾（可以好幾個）或直接點一天（v1.613 使用者建議多一個日期的按鈕） ----
+/** null 是不篩；weekdays 是星期幾（0 是星期日）；date 是哪一天（taipeiDay） */
+let dayPick: { weekdays: Set<number> } | { date: number } | null = null;
+/** 最近一次畫面上抓到的全部（日期選單的月曆標哪幾天有東西） */
+let dayFetched: Item[] = [];
+const matchesDay = (it: Item): boolean => {
+  if (!dayPick) return true;
+  const days = itemDays(it);
+  if ('date' in dayPick) return days.has(dayPick.date);
+  const wd = dayPick.weekdays;
+  return [...days].some((d) => wd.has(weekdayOf(d)));
+};
+/** 按鈕上、清單摘要寫的：「11/22(日)」「週六、日」「週末」 */
+function dayPickLabel(): string {
+  if (!dayPick) return '';
+  if ('date' in dayPick) {
+    const d = new Date(dayPick.date * 86400 * 1000);
+    return `${d.getUTCMonth() + 1}/${d.getUTCDate()}(${WEEKDAYS[weekdayOf(dayPick.date)]})`;
+  }
+  const wd = [...dayPick.weekdays].sort((a, b) => ((a + 6) % 7) - ((b + 6) % 7));
+  if (wd.length === 2 && dayPick.weekdays.has(0) && dayPick.weekdays.has(6)) return '週末';
+  return `週${wd.map((w) => WEEKDAYS[w]).join('、')}`;
+}
+
 /** 搜尋比對用：小寫、去空白、臺台不分、周週不分 */
 const foldText = (s: string): string => s.toLowerCase().replace(/\s+/g, '').replace(/臺/g, '台').replace(/周/g, '週');
 
@@ -1421,13 +1465,7 @@ const foldText = (s: string): string => s.toLowerCase().replace(/\s+/g, '').repl
  * 每一天寫成「週六 星期六 禮拜六」，星期日多寫「星期天 禮拜天」，六日再加「週末」
  */
 function weekdayWords(it: Item): string {
-  const days = new Set<number>();
-  for (const ev of it.spot ? it.spot.sessions : [it.ev]) {
-    const last = taipeiDay(Math.max(ev.startAt, ev.endAt - 1));
-    // taipeiDay 是從 1970-01-01（星期四）算起的第幾天
-    for (let d = taipeiDay(ev.startAt); d <= last && days.size < 7; d++) days.add((d + 4) % 7);
-    if (days.size >= 7) break;
-  }
+  const days = new Set([...itemDays(it)].map(weekdayOf));
   const words: string[] = [];
   for (const w of days) {
     const c = WEEKDAYS[w];
@@ -1469,7 +1507,10 @@ function render(): void {
   const fetched = computeItems(now);
   renderSearchTags(fetched);
   // 搜尋時雷達、地圖、清單、各類的數量都只算符合的
-  const all = searchTerms.length > 0 ? fetched.filter(matchesSearch) : fetched;
+  const searched = searchTerms.length > 0 ? fetched.filter(matchesSearch) : fetched;
+  // 選了星期幾、日期：只留那幾天有的（雷達、地圖、清單都是）
+  const all = dayPick ? searched.filter(matchesDay) : searched;
+  dayFetched = fetched;
   // 發放、活動、據點的開關是洋流的，其他模組不篩
   const byCategory = mod.current ? all.filter((it) => shown[categoryOf(it)]) : all;
   const items = onlyActive && mod.current ? byCategory.filter((it) => activeNow(it, now)) : byCategory;
@@ -1848,7 +1889,7 @@ function renderList(items: Item[], now: number): void {
   const outText = outRange.length > 0 ? `・範圍外 ${outRange.length} 個` : '';
   const spotText = spotsIn.length > 0 ? `・據點 ${spotsIn.length} 個` : '';
   const laterText = laterRows.length > 0 ? `・${timeSetting === 'now' ? '還沒開始' : laterLabel().replace('才開始', '')} ${laterRows.length} 個` : '';
-  const searching = searchTerms.length > 0 ? `搜尋「${searchInput.value.trim()}」・` : '';
+  const searching = (searchTerms.length > 0 ? `搜尋「${searchInput.value.trim()}」・` : '') + (dayPick ? `${dayPickLabel()}・` : '');
   countLabel.textContent = none
     ? '還沒追蹤關鍵字'
     : searching && rows.length === 0
@@ -1861,6 +1902,8 @@ function renderList(items: Item[], now: number): void {
   emptyEl.textContent =
     searchTerms.length > 0
       ? `目前的發放、活動裡沒有符合「${searchInput.value.trim()}」的。可以換個字，或按 ✕ 清除搜尋。`
+      : dayPick
+        ? `${dayPickLabel()}沒有發放、活動。可以換一天，或按「日期」清除。`
       : none
         ? '目前沒有搜尋中的關鍵字。'
         : `${emptyText()}。點清單上方的「↻ 更新」看有沒有新的，或在旁邊打開自動更新。`;
@@ -5295,6 +5338,52 @@ function setTime(setting: TimeSetting): void {
   render();
 }
 
+/** 日期選單：最多看 21 天（資料只到 21 天） */
+const DATE_SPAN = 21;
+
+/** 選了星期幾、日期：按鈕寫選了什麼、亮起來；時間範圍改成「全部」（不然選明天卻只看 3 小時內的會什麼都沒有） */
+function setDayPick(p: typeof dayPick): void {
+  dayPick = p && 'weekdays' in p && p.weekdays.size === 0 ? null : p;
+  dateToggle.lastElementChild!.textContent = dayPick ? dayPickLabel() : '日期';
+  dateToggle.classList.toggle('on', !!dayPick);
+  dateToggle.setAttribute('aria-label', dayPick ? `日期：${dayPickLabel()}，點了換別天` : '選星期幾或日期');
+  if (dayPick && timeSetting !== 'all') setTime('all');
+  if (!datePanel.hidden) renderDatePanel();
+  render();
+}
+
+/** 日期選單：一排星期幾（可以好幾個，加一顆「週末」），下面是未來 21 天的月曆（有東西的那天下面一個小點） */
+function renderDatePanel(): void {
+  const wd = dayPick && 'weekdays' in dayPick ? dayPick.weekdays : new Set<number>();
+  const order = [1, 2, 3, 4, 5, 6, 0];
+  datePanel.querySelector('.date-week')!.innerHTML =
+    order.map((w) => `<button type="button" class="chip${wd.has(w) ? ' on' : ''}" data-wd="${w}" aria-pressed="${wd.has(w)}">${WEEKDAYS[w]}</button>`).join('') +
+    `<button type="button" class="chip${wd.size === 2 && wd.has(0) && wd.has(6) ? ' on' : ''}" data-wd="weekend">週末</button>`;
+  const today = taipeiDay(nowSec());
+  const busy = new Set<number>();
+  for (const it of dayFetched) for (const d of itemDays(it)) busy.add(d);
+  const picked = dayPick && 'date' in dayPick ? dayPick.date : null;
+  // 星期一開頭；今天之前那幾格空著
+  const lead = (weekdayOf(today) + 6) % 7;
+  let cells = '<span class="date-head">一</span><span class="date-head">二</span><span class="date-head">三</span><span class="date-head">四</span><span class="date-head">五</span><span class="date-head">六</span><span class="date-head">日</span>';
+  cells += '<span></span>'.repeat(lead);
+  for (let d = today; d < today + DATE_SPAN; d++) {
+    const date = new Date(d * 86400 * 1000);
+    const md = date.getUTCDate() === 1 || d === today ? `${date.getUTCMonth() + 1}/${date.getUTCDate()}` : String(date.getUTCDate());
+    cells += `<button type="button" class="date-day${d === picked ? ' on' : ''}${busy.has(d) ? ' busy' : ''}${d === today ? ' today' : ''}" data-day="${d}" aria-pressed="${d === picked}" aria-label="${date.getUTCMonth() + 1} 月 ${date.getUTCDate()} 日（${WEEKDAYS[weekdayOf(d)]}）${d === today ? '，今天' : ''}${busy.has(d) ? '，有活動' : ''}">${md}</button>`;
+  }
+  datePanel.querySelector('.date-cal')!.innerHTML = cells;
+}
+
+function setDateOpen(open: boolean): void {
+  datePanel.hidden = !open;
+  dateToggle.setAttribute('aria-expanded', String(open));
+  if (open) {
+    setTimeOpen(false);
+    renderDatePanel();
+  }
+}
+
 /** 時間範圍平常收起來（不太會用到）：只顯示現在選的那顆，點了展開五個，選好、點其他地方就收起來 */
 function setTimeOpen(open: boolean): void {
   timeChipsEl.hidden = !open;
@@ -7222,7 +7311,35 @@ function wireControls(): void {
   });
   document.addEventListener('pointerdown', (e) => {
     if (!timeChipsEl.hidden && !(e.target instanceof Element && e.target.closest('#time-chips'))) setTimeOpen(false);
+    if (!datePanel.hidden && !(e.target instanceof Element && e.target.closest('#date-panel, #date-toggle'))) setDateOpen(false);
   }, true);
+  dateToggle.addEventListener('click', () => setDateOpen(datePanel.hidden));
+  datePanel.addEventListener('click', (e) => {
+    const t = e.target as Element;
+    const w = t.closest<HTMLButtonElement>('[data-wd]')?.dataset.wd;
+    const day = t.closest<HTMLButtonElement>('[data-day]')?.dataset.day;
+    if (w !== undefined) {
+      // 星期幾可以選好幾個；「週末」＝六、日（已經是六、日就取消）
+      const cur = new Set(dayPick && 'weekdays' in dayPick ? dayPick.weekdays : []);
+      if (w === 'weekend') {
+        const both = cur.size === 2 && cur.has(0) && cur.has(6);
+        setDayPick(both ? null : { weekdays: new Set([0, 6]) });
+      } else {
+        const n = Number(w);
+        if (cur.has(n)) cur.delete(n);
+        else cur.add(n);
+        setDayPick({ weekdays: cur });
+      }
+    } else if (day !== undefined) {
+      // 直接點一天：選好就收起來（再點一次同一天是取消）
+      const d = Number(day);
+      setDayPick(dayPick && 'date' in dayPick && dayPick.date === d ? null : { date: d });
+      setDateOpen(false);
+    } else if (t.closest('[data-act="clear"]')) {
+      setDayPick(null);
+      setDateOpen(false);
+    } else if (t.closest('[data-act="done"]')) setDateOpen(false);
+  });
   reportSheet.querySelector('[data-act="close"]')?.addEventListener('click', () => openReportSheet(false));
   myReportsMore.addEventListener('click', () => {
     myReportsExpanded = !myReportsExpanded;
