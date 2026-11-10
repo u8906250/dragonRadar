@@ -123,6 +123,8 @@ export interface BottleOut {
   picked: boolean;
   /** 被撿起來的次數 */
   picks: number;
+  /** 已經被收藏了（誰收藏的都算；收藏後瓶子照樣留在雷達上，走到附近的人還是看得到內容） */
+  taken?: boolean;
 }
 
 export interface PickedBottle {

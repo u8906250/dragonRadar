@@ -1560,7 +1560,7 @@ export class Radar {
       g.appendChild(body);
       this.addFlash(g, angle, r, 7);
       const title = el('title');
-      title.textContent = b.mine ? '你丟的漂流瓶' : b.state === 'pick' ? '漂流瓶（撿得到了）' : '漂流瓶';
+      title.textContent = b.mine ? '你丟的漂流瓶' : b.picked ? '漂流瓶（已經被收藏了）' : b.state === 'pick' ? '漂流瓶（走到附近了）' : '漂流瓶';
       g.appendChild(title);
       this.bottleLayer.appendChild(g);
     }

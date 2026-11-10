@@ -1,6 +1,6 @@
 import './styles.css';
 import { FITBUS_MS_PER_M, hqDenseKm, hqMotionKm, HQ_NET_LABEL_KM, HQ_SAIL_MS, HQ_STAR_MS, HQ_VOYAGE_MS, RAINBOW_EVERY_MS, voyagePhase, voyageTimeOf } from './flow';
-import { addKeyword, deletePushSubscription, locateFeedbackPlace, sendFeedback, type FeedbackKind, fetchPushKey, savePushSubscription, confirmReport, editReport, locatePlace, rejectReport, supplementReport, deleteBottle, dropBottle, fetchBottleInfo, fetchBottlePhoto, fetchBottleProof, fetchBottles, fetchWoofBottles, rememberBottlePhoto, uncollectLetter, verifyBottleProof, fetchEvents, fetchHealth, fetchKeywords, fetchMyBottles, fetchMyReports, fetchRoutes, pickBottle, reportBottle, submitLink, withdrawReport } from './api';
+import { addKeyword, deletePushSubscription, locateFeedbackPlace, sendFeedback, type FeedbackKind, fetchPushKey, savePushSubscription, confirmReport, editReport, locatePlace, rejectReport, supplementReport, deleteBottle, dropBottle, readBottle, type BottleHere, fetchBottleInfo, fetchBottlePhoto, fetchBottleProof, fetchBottles, fetchWoofBottles, rememberBottlePhoto, uncollectLetter, verifyBottleProof, fetchEvents, fetchHealth, fetchKeywords, fetchMyBottles, fetchMyReports, fetchRoutes, pickBottle, reportBottle, submitLink, withdrawReport } from './api';
 import { compassSupported, startCompass } from './compass';
 import { bearingDeg, compassLabel, destination, formatKm, haversineKm, taiwanRadiusKm, type LatLng } from './geo';
 import { TAIWAN_RINGS } from './taiwan';
@@ -57,7 +57,7 @@ const LS_GIVEAWAYS = 'dr.showGiveaways';
 const LS_ACTIVITIES = 'dr.showActivities';
 const LS_ONLY_ACTIVE = 'dr.onlyActive';
 const LS_TIME = 'dr.timeRange';
-/** 丟過瓶子（才需要去問有沒有被撿走）、看過的最後一次「被撿走」時間 */
+/** 丟過瓶子（才需要去問有沒有被收藏）、看過的最後一次「被收藏」時間 */
 const LS_BOTTLE_DROPPED = 'dr.bottleDropped';
 const LS_BOTTLE_SEEN = 'dr.bottleSeen';
 /** 開始提醒（音效、震動、橫幅、系統通知）的開關：on／off；沒設過時，瀏覽器已允許通知就算開 */
@@ -138,13 +138,13 @@ let bottles: BottleOut[] = [];
 /** 漂到汪星海上的漂流瓶（你在汪星才抓） */
 let woofBottles: BottleOut[] = [];
 let selectedBottle: number | null = null;
-/** 撿起來（或自己丟）的瓶子內容 */
+/** 打開來看過（自己丟的、收藏的、走到附近看的）瓶子內容 */
 const bottleTexts = new Map<number, PickedBottle>();
-/** 漂流瓶詳細資料上的訊息（撿不到的原因、檢舉結果） */
+/** 漂流瓶詳細資料上的訊息（看不到、收藏不到的原因、檢舉結果） */
 let bottleMsg = '';
 /** 最近一次讀到的「我的瓶子」：丟的、收藏的信 */
 let myBottlesData: MyBottles | null = null;
-/** 這次打開網頁已經提示過「瓶子被撿走了」 */
+/** 這次打開網頁已經提示過「瓶子被收藏了」 */
 let bottleNewsShown = false;
 type ScaleSetting = '1' | '5' | '20' | 'taiwan' | 'world' | 'custom';
 /**
@@ -443,7 +443,7 @@ const bottleCount = $('#bottle-count');
 /** 牛皮紙旁邊的空瓶子：點了就捲起來丟出去 */
 const bottleDropEl = $('#bottle-drop');
 const bottleResult = $('#bottle-result');
-/** 打開收藏頁的 📜 上的小紅點（自己丟的瓶子被撿走了） */
+/** 打開收藏頁的信封上的小紅點（自己丟的瓶子被收藏了） */
 const sceneDot = $('#bottle-sheet .scene-dot');
 const lettersMine = $('#letters-mine');
 const bottlePhotoFig = $('#bottle-photo');
@@ -1566,8 +1566,8 @@ function render(): void {
           ],
     ),
   );
-  // 撿走的瓶子不畫（伺服器也不會回傳，這裡再擋一次）
-  const bottleViews = bottles.filter((b) => !b.picked).map((b) => ({ b, distanceKm: haversineKm(origin, b), bearing: bearingDeg(origin, b), state: bottleState(b) }));
+  // 被收藏了的瓶子照樣畫（淡淡的，v1.601 使用者說瓶子不用消失）
+  const bottleViews = bottles.map((b) => ({ b, distanceKm: haversineKm(origin, b), bearing: bearingDeg(origin, b), state: bottleState(b) }));
   const hint = nearestHint(bottleViews);
   radar.setBottles(
     bottleViews.map((v) => ({
@@ -1576,12 +1576,12 @@ function render(): void {
       distanceKm: v.distanceKm,
       state: v.state,
       mine: v.b.mine,
-      picked: v.b.picked,
+      picked: v.b.picked || !!v.b.taken,
       selected: v.b.id === selectedBottle,
       hint: v === hint ? formatKm(v.distanceKm) : undefined,
     })),
   );
-  map.setBottles(bottleViews.map((v) => ({ id: v.b.id, lat: v.b.lat, lng: v.b.lng, state: v.state, mine: v.b.mine, picked: v.b.picked })));
+  map.setBottles(bottleViews.map((v) => ({ id: v.b.id, lat: v.b.lat, lng: v.b.lng, state: v.state, mine: v.b.mine, picked: v.b.picked || !!v.b.taken })));
   updateBottleBadge(bottleViews);
   syncWoofBottles();
   // 全螢幕鋪滿時你的 GPS 位置（像 Google 地圖的藍點）：拖曳移開了也畫在 GPS 的地方
@@ -2119,7 +2119,7 @@ const pickRadiusM = (): number => bottleRules()?.pickRadiusM ?? 500;
 /** 瓶子的編號：No.000123 */
 const bottleNo = (id: number): string => `No.${String(id).padStart(6, '0')}`;
 const findBottle = (id: number): BottleOut | undefined => bottles.find((b) => b.id === id) ?? woofBottles.find((b) => b.id === id);
-/** 雷達上拿掉這個瓶子（被撿走、收回、檢舉）；keepMine：自己丟的留著 */
+/** 雷達上拿掉這個瓶子（沉下去、收回、檢舉）；keepMine：自己丟的留著 */
 function removeBottleMark(id: number, keepMine = false): void {
   const keep = (b: BottleOut): boolean => b.id !== id || (keepMine && b.mine);
   bottles = bottles.filter(keep);
@@ -2145,7 +2145,7 @@ function bottleDistM(b: BottleOut): number {
 const bottleDir = (b: BottleOut): string => compassLabel(bearingDeg(b.world === 'woof' ? (woofHere() ?? origin) : origin, b));
 
 /**
- * 走到撿得起來的距離才算 pick：地球上要用 GPS 定位（手動位置不能撿），汪星上照你在汪星的位置。
+ * 走到 pickRadiusM 內才算 pick（打開來看、收藏）：地球上要用 GPS 定位（手動位置不算），汪星上照你在汪星的位置。
  * 瓶子遠近都直接畫出來（v1.598 使用者說不需要模糊；以前 200 m 外只是一團模糊的訊號）
  */
 function bottleState(b: BottleOut): 'near' | 'pick' {
@@ -2163,25 +2163,23 @@ function nearestHint<V extends { b: BottleOut; distanceKm: number }>(views: V[])
   return best && best.distanceKm <= BOTTLE_HINT_MAX_KM ? best : null;
 }
 
-/** 按鈕上的數字：雷達範圍內還沒撿過、不是自己丟的瓶子（你在汪星就數汪星海上的） */
+/** 按鈕上的數字：雷達範圍內還沒有人收藏、不是自己丟的瓶子（你在汪星就數汪星海上的） */
 function updateBottleBadge(views: Array<{ b: BottleOut; distanceKm: number }>): void {
   bottleBtn.hidden = !bottlesOn();
-  const others = youOn === 'woof' ? woofBottles.filter((b) => !b.mine && !b.picked) : views.filter((v) => !v.b.mine && !v.b.picked && v.distanceKm <= scaleKm).map((v) => v.b);
+  const others = youOn === 'woof' ? woofBottles.filter((b) => !b.mine && !b.picked && !b.taken) : views.filter((v) => !v.b.mine && !v.b.picked && !v.b.taken && v.distanceKm <= scaleKm).map((v) => v.b);
   bottleBadge.hidden = others.length === 0;
   bottleBadge.textContent = String(others.length);
   bottleBtn.classList.toggle('glow', others.some((b) => bottleState(b) === 'pick'));
 }
 
-/** 汪星海上的瓶子（space.ts 畫在汪星上）：每次畫汪星都重算，拖曳走路時撿不撿得到跟著變 */
+/** 汪星海上的瓶子（space.ts 畫在汪星上）：每次畫汪星都重算，拖曳走路時走到附近了沒跟著變 */
 function woofBottleMarks(): WoofBottleMark[] {
-  return woofBottles
-    .filter((b) => !b.picked)
-    .map((b) => ({ id: b.id, lat: b.lat, lng: b.lng, state: bottleState(b) === 'pick' ? 'pick' : 'near', mine: b.mine, selected: b.id === selectedBottle }));
+  return woofBottles.map((b) => ({ id: b.id, lat: b.lat, lng: b.lng, state: bottleState(b) === 'pick' ? 'pick' : 'near', mine: b.mine, selected: b.id === selectedBottle, taken: b.picked || !!b.taken }));
 }
 let woofMarksKey = '';
 /** 汪星海上的瓶子、選取變了：重畫汪星 */
 function syncWoofBottles(): void {
-  const key = woofBottles.map((b) => `${b.id}${b.picked ? 'p' : ''}${b.id === selectedBottle ? 's' : ''}`).join(',');
+  const key = woofBottles.map((b) => `${b.id}${b.picked || b.taken ? 'p' : ''}${b.id === selectedBottle ? 's' : ''}`).join(',');
   if (key === woofMarksKey) return;
   woofMarksKey = key;
   radar.redrawSpace();
@@ -2229,13 +2227,13 @@ function ago(unix: number): string {
   return `${Math.floor(m / 1440)} 天前`;
 }
 
-/** 分享到 Threads（打開 Threads 的發文畫面，不用串 API）：不帶內容，內容要撿到才看得到 */
+/** 分享到 Threads（打開 Threads 的發文畫面，不用串 API）：不帶內容，內容要走到瓶子附近才看得到 */
 function threadsShareUrl(id: number, mine: boolean): string {
   const link = new URL(location.pathname, location.origin);
   link.searchParams.set('bottle', String(id));
   const text = mine
-    ? `我丟了一個漂流瓶 ${bottleNo(id)} 🍾 在牛皮紙上寫了一段話、捲起來裝進瓶子，走到瓶子旁邊才撿得起來、看得到內容。24 小時沒人撿，就會漂到汪星的海上。`
-    : `我撿到漂流瓶 ${bottleNo(id)} 了 🍾`;
+    ? `我丟了一個漂流瓶 ${bottleNo(id)} 🍾 在牛皮紙上寫了一段話、捲起來裝進瓶子，走到瓶子附近才看得到內容、收藏得到。24 小時後就會漂到汪星的海上。`
+    : `我找到漂流瓶 ${bottleNo(id)} 了 🍾`;
   return `https://www.threads.com/intent/post?text=${encodeURIComponent(text)}&url=${encodeURIComponent(link.toString())}`;
 }
 const shareLink = (id: number, mine: boolean, cls = 'btn'): string =>
@@ -2244,6 +2242,7 @@ const shareLink = (id: number, mine: boolean, cls = 'btn'): string =>
 function selectBottle(id: number | null): void {
   selectedBottle = selectedBottle === id ? null : id;
   bottleMsg = '';
+  openTried.clear();
   selectedId = null;
   selectedRoute = null;
   selectedLandmark = null;
@@ -2254,34 +2253,58 @@ function selectBottle(id: number | null): void {
     kwSheet.hidden = true;
     reportSheet.hidden = true;
     bottleSheet.hidden = true;
-    // 自己丟的、撿過的直接讀內容
+    // 別人丟在地球上的：還沒用 GPS 定位就先定位（打開來看、收藏要 GPS）
     const b = findBottle(selectedBottle);
-    if (b && (b.mine || b.picked) && !bottleTexts.has(b.id)) void loadBottle(b.id);
-    // 別人丟在地球上的：還沒用 GPS 定位就先定位（撿要 GPS）
-    else if (b && !b.mine && !b.picked && b.world !== 'woof' && origin.source !== 'gps' && youOn === 'earth' && !tripping) locateMe();
+    if (b && !b.mine && !b.picked && b.world !== 'woof' && origin.source !== 'gps' && youOn === 'earth' && !tripping) locateMe();
   }
   render();
 }
 
-/** 打開瓶子：自己丟的、撿過的直接讀；pick 是要撿起來（帶你的位置：地球的 GPS，或你在汪星的位置） */
-async function loadBottle(id: number, pick = false): Promise<void> {
+/** 你在哪裡（打開來看、收藏、檢舉、看照片要帶）：地球上的瓶子是 GPS 位置（手動位置不算），汪星海上的是你在汪星的位置 */
+const hereFor = (b: BottleOut): BottleHere => (b.world === 'woof' ? { at: woofHere(), world: 'woof' } : { at: origin.source === 'gps' ? origin : null, world: 'earth' });
+
+/** 這次選取已經試著打開過的瓶子（打不開就不一直重試，換一個瓶子再說） */
+const openTried = new Set<number>();
+
+/** 打開來看（不收藏）：自己丟的、收藏過的隨時看得到；別人的走到 500 m 內就看得到，收藏了也一樣 */
+async function openBottle(id: number): Promise<void> {
   const b = findBottle(id);
-  const woof = b?.world === 'woof';
-  const r = await pickBottle(id, pick ? (woof ? woofHere() : origin) : null, woof ? 'woof' : 'earth');
+  if (!b) return;
+  const r = await readBottle(id, b.mine || b.picked ? undefined : hereFor(b));
   if (!r.ok) {
     bottleMsg = r.message;
-    // 被別人撿走了、沉下去了：雷達上也拿掉
-    if (/撿走|沉下去/.test(r.message)) removeBottleMark(id, true);
+    if (/沉下去/.test(r.message)) removeBottleMark(id, true);
   } else {
     bottleTexts.set(id, r.data);
-    // 撿走的瓶子從雷達上消失（內容留在詳細資料和瓶中信收藏）；自己丟的照樣留著
-    const fresh = !r.data.bottle.mine && !!b && !b.picked;
-    removeBottleMark(id, true);
     bottleMsg = '';
-    if (fresh) {
-      showBanner(bannerEl, '撿到瓶子了！這封信收進「瓶中信收藏」了', 3500);
-      void reloadMyBottles();
-    }
+  }
+  render();
+}
+
+/** 瓶子的狀態跟著改（雷達上、詳細資料都是） */
+function markBottle(id: number, patch: Partial<BottleOut>): void {
+  const up = (b: BottleOut): BottleOut => (b.id === id ? { ...b, ...patch } : b);
+  bottles = bottles.map(up);
+  woofBottles = woofBottles.map(up);
+  const got = bottleTexts.get(id);
+  if (got) bottleTexts.set(id, { ...got, bottle: { ...got.bottle, ...patch } });
+}
+
+/** 收藏（v1.601 使用者說「撿起來」改成「收藏」、瓶子不用消失）：一個瓶子只有第一個人收藏得到，收藏後瓶子照樣留在雷達上 */
+async function collectBottle(id: number): Promise<void> {
+  const b = findBottle(id);
+  if (!b) return;
+  const r = await pickBottle(id, hereFor(b));
+  if (!r.ok) {
+    bottleMsg = r.message;
+    if (/沉下去/.test(r.message) && !/收藏/.test(r.message)) removeBottleMark(id, true);
+    else if (/收藏/.test(r.message)) markBottle(id, { taken: true });
+  } else {
+    bottleTexts.set(id, r.data);
+    markBottle(id, { picked: true, taken: true, picks: 1 });
+    bottleMsg = '';
+    showBanner(bannerEl, '收藏了！這封信放進「瓶中信收藏」', 3000);
+    void reloadMyBottles();
   }
   render();
 }
@@ -2292,10 +2315,10 @@ const tapedPhoto = (id: number): string => `<figure class="taped-photo"><img dat
 const kraftNote = (text: string, no: number, photo = false): string =>
   `<div class="kraft-note"><span class="kraft-no">${bottleNo(no)}</span>${photo ? tapedPhoto(no) : ''}<p>${esc(text)}</p></div>`;
 
-/** 牛皮紙上的照片：還沒載入的去拿（丟的人、撿到的人才拿得到），拿不到就拿掉 */
-function fillPhotos(root: Element): void {
+/** 牛皮紙上的照片：還沒載入的去拿（看得到內容的人才拿得到；走到附近看的人帶位置 here），拿不到就拿掉 */
+function fillPhotos(root: Element, here?: BottleHere): void {
   for (const img of root.querySelectorAll<HTMLImageElement>('img[data-photo]:not([src])')) {
-    void fetchBottlePhoto(Number(img.dataset.photo)).then((u) => {
+    void fetchBottlePhoto(Number(img.dataset.photo), here).then((u) => {
       if (u) img.src = u;
       else img.closest('figure')?.remove();
     });
@@ -2338,36 +2361,47 @@ function setBottlePhoto(url: string | null): void {
   bottlePhotoInput.value = '';
 }
 
-/** 雷達或地圖上點了瓶子：距離、撿起來、內容、分享、證明、檢舉或收回 */
+/** 雷達或地圖上點了瓶子：距離；走到附近就打開來看（收藏了別人也看得到）；收藏、分享、證明、檢舉或收回 */
 function renderBottleDetail(id: number): boolean {
+  // b 先拿雷達上最新的（被收藏了沒）；從分享連結、收藏頁來的用打開時拿到的資料
   const got = bottleTexts.get(id);
-  // 撿走後雷達上已經沒有這個瓶子，詳細資料用撿到時拿到的資料
   const b = findBottle(id) ?? got?.bottle;
   if (!b) return false;
   const woof = b.world === 'woof';
   const d = bottleDistM(b);
   const reach = pickRadiusM();
+  const near = bottleState(b) === 'pick';
   const where = woof ? `汪星的海上，約 ${formatKm(d / 1000)} ${bottleDir(b)}` : `約 ${formatKm(d / 1000)} ${bottleDir(b)}`;
+  // 自己丟的、收藏過的、走到附近的：打開來看（每次選取只試一次）
+  if (!got && (b.mine || b.picked || near) && !openTried.has(id)) {
+    openTried.add(id);
+    void openBottle(id);
+  }
+  const lifecycle = woof ? `漂到汪星的海上了，${daysLeft(b.expiresAt)}後沉下去` : `在附近漂，${seaIn(b.createdAt)}後漂到汪星的海上`;
   let body: string;
   if (got) {
     const status = b.mine
-      ? `你${ago(b.createdAt)}丟的・還沒被撿走（自己丟的不能撿，別人走到 ${pickRadiusM()} m 內才撿得起來）・${woof ? `漂到汪星的海上了，${daysLeft(b.expiresAt)}後沉下去` : `在附近漂，${seaIn(b.createdAt)}後漂到汪星的海上`}`
-      : `${ago(b.createdAt)}丟的・你撿到了，收進「瓶中信收藏」`;
+      ? `你${ago(b.createdAt)}丟的・${b.taken ? '已經被收藏了' : `還沒有人收藏（自己丟的不能收藏，別人走到 ${reach} m 內就看得到、收藏得到）`}・${lifecycle}`
+      : b.picked
+        ? `${ago(b.createdAt)}丟的・你收藏了，放在「瓶中信收藏」`
+        : b.taken
+          ? `${ago(b.createdAt)}丟的・已經被別人收藏了，走到附近還是看得到`
+          : `${ago(b.createdAt)}丟的・還沒有人收藏・${lifecycle}`;
     body = `${kraftNote(got.text, b.id, got.photo)}<p class="muted">${esc(status)}</p>`;
-  } else if (b.mine || b.picked) {
+  } else if (b.mine || b.picked || near) {
     body = '<p class="muted">打開瓶子中…</p>';
-  } else if (woof && youOn !== 'woof') {
-    body = `<p>這個瓶子漂到汪星的海上了。點中山公園的銅像搭火箭到汪星，拖曳雷達走過去，${reach} m 內就能撿起來。</p>`;
-  } else if (woof && !woofHere()) {
-    body = '<p>這個瓶子在汪星的海上。把雷達的中心移回汪星（點汪星），拖曳走過去就能撿。</p>';
-  } else if (!woof && origin.source !== 'gps') {
-    body = `<p>瓶子在${esc(where)}。按右上角「定位」用 GPS，走到 ${reach} m 內就能撿起來。</p>`;
-  } else if (d > reach) {
-    body = `<p>瓶子在${esc(where)}，還差約 ${Math.round(d - reach)} m。${woof ? '拖曳雷達走過去' : '走近一點'}就能撿起來。</p>`;
   } else {
-    body = '<p>瓶子就在你旁邊！</p>';
+    const taken = b.taken ? '已經被收藏了，' : '';
+    body =
+      woof && youOn !== 'woof'
+        ? `<p>這個瓶子漂到汪星的海上了，${taken}點中山公園的銅像搭火箭到汪星，拖曳雷達走到 ${reach} m 內就能打開來看${b.taken ? '' : '、收藏'}。</p>`
+        : woof && !woofHere()
+          ? `<p>這個瓶子在汪星的海上，${taken}把雷達的中心移回汪星（點汪星），拖曳走過去就能打開來看。</p>`
+          : !woof && origin.source !== 'gps'
+            ? `<p>瓶子在${esc(where)}，${taken}按右上角「定位」用 GPS，走到 ${reach} m 內就能打開來看${b.taken ? '' : '、收藏'}。</p>`
+            : `<p>瓶子在${esc(where)}，${taken}還差約 ${Math.round(d - reach)} m。${woof ? '拖曳雷達走過去' : '走近一點'}就能打開來看${b.taken ? '' : '、收藏'}。</p>`;
   }
-  const canPick = !got && !b.mine && !b.picked && bottleState(b) === 'pick';
+  const canCollect = !!got && !b.mine && !b.picked && !b.taken && near;
   detailEl.hidden = false;
   setDetailHtml(
     `bottle:${id}`,
@@ -2380,12 +2414,12 @@ function renderBottleDetail(id: number): boolean {
       ${body}
       ${bottleMsg ? `<p class="msg error">${esc(bottleMsg)}</p>` : ''}
       <div class="sheet-actions">
-        ${canPick ? '<button type="button" class="btn primary" data-act="pick">撿起來</button>' : ''}
-        ${!got && !b.mine && !canPick && !woof ? `<a class="btn" href="https://www.google.com/maps/dir/?api=1&destination=${b.lat},${b.lng}&travelmode=walking" target="_blank" rel="noopener">走過去</a>` : ''}
+        ${canCollect ? '<button type="button" class="btn primary" data-act="pick">收藏</button>' : ''}
+        ${!got && !b.mine && !b.picked && !near && !woof ? `<a class="btn" href="https://www.google.com/maps/dir/?api=1&destination=${b.lat},${b.lng}&travelmode=walking" target="_blank" rel="noopener">走過去</a>` : ''}
         ${got ? shareLink(b.id, b.mine) : ''}
-        ${got ? '<button type="button" class="btn" data-act="proof">瓶子證明</button>' : ''}
+        ${got && (b.mine || b.picked) ? '<button type="button" class="btn" data-act="proof">瓶子證明</button>' : ''}
         ${got && !b.mine ? '<button type="button" class="btn subtle" data-act="report">檢舉</button>' : ''}
-        ${b.mine ? '<button type="button" class="btn subtle" data-act="delete">收回</button>' : ''}
+        ${b.mine && !b.taken ? '<button type="button" class="btn subtle" data-act="delete">收回</button>' : ''}
       </div>
       <p class="muted sheet-note small">${
         woof
@@ -2395,11 +2429,11 @@ function renderBottleDetail(id: number): boolean {
     </div>`,
     true,
   );
-  fillPhotos(detailEl);
+  fillPhotos(detailEl, b.mine || b.picked ? undefined : hereFor(b));
   detailEl.querySelector('[data-act="close"]')?.addEventListener('click', () => selectBottle(null));
   detailEl.querySelector('[data-act="pick"]')?.addEventListener('click', (e) => {
     (e.currentTarget as HTMLButtonElement).disabled = true;
-    void loadBottle(id, true);
+    void collectBottle(id);
   });
   detailEl.querySelector('[data-act="proof"]')?.addEventListener('click', () => {
     if (got) void showProof(id, got.text);
@@ -2407,7 +2441,7 @@ function renderBottleDetail(id: number): boolean {
   detailEl.querySelector('[data-act="report"]')?.addEventListener('click', async (e) => {
     if (!window.confirm('這個瓶子有攻擊性內容、廣告或個人資料？檢舉後會交給管理者確認。')) return;
     (e.currentTarget as HTMLButtonElement).disabled = true;
-    const r = await reportBottle(id);
+    const r = await reportBottle(id, b.picked ? undefined : hereFor(b));
     if (!r.ok) {
       bottleMsg = r.message;
     } else {
@@ -2422,7 +2456,7 @@ function renderBottleDetail(id: number): boolean {
     render();
   });
   detailEl.querySelector('[data-act="delete"]')?.addEventListener('click', async (e) => {
-    if (!window.confirm('要收回這個瓶子嗎？收回後就沒有人撿得到了。')) return;
+    if (!window.confirm('要收回這個瓶子嗎？收回後就沒有人看得到了。')) return;
     (e.currentTarget as HTMLButtonElement).disabled = true;
     const r = await deleteBottle(id);
     if (!r.ok) {
@@ -2483,7 +2517,7 @@ async function showProof(id: number, text: string): Promise<void> {
   });
 }
 
-/** 打開分享出去的瓶子連結（?bottle=編號）：還在漂就選起來（看得到在哪、多遠），被撿走、沉下去了就說一聲 */
+/** 打開分享出去的瓶子連結（?bottle=編號）：瓶子還在（收藏了也還在）就選起來（看得到在哪、多遠），沉下去了就說一聲 */
 async function openSharedBottle(id: number): Promise<void> {
   const url = new URL(location.href);
   url.searchParams.delete('bottle');
@@ -2491,8 +2525,8 @@ async function openSharedBottle(id: number): Promise<void> {
   const r = await fetchBottleInfo(id);
   if (!r.ok) return;
   const b = r.data.bottle;
-  if (r.data.state !== 'active' || !b) {
-    showBanner(bannerEl, `漂流瓶 ${bottleNo(id)} ${r.data.state === 'picked' ? '已經被撿走了' : '已經沉下去或不見了'}`, 4000);
+  if (r.data.state === 'gone' || !b) {
+    showBanner(bannerEl, `漂流瓶 ${bottleNo(id)} 已經沉下去或不見了`, 4000);
     return;
   }
   if (b.world === 'woof') woofBottles = [b, ...woofBottles.filter((x) => x.id !== id)];
@@ -2525,7 +2559,7 @@ async function reloadMyBottles(): Promise<void> {
   updateBottleNews();
 }
 
-/** 自己丟的瓶子有沒有新被撿走的（上次看「我丟的瓶子」之後） */
+/** 自己丟的瓶子有沒有新被收藏的（上次看「我丟的瓶子」之後） */
 function newlyPicked(): number {
   const seen = Number(lsGet(LS_BOTTLE_SEEN) ?? 0);
   return myBottlesData?.dropped.filter((b) => b.pickedAt !== null && b.pickedAt > seen).length ?? 0;
@@ -2538,7 +2572,7 @@ function updateBottleNews(): void {
   sceneDot.hidden = n === 0;
   if (n > 0 && !bottleNewsShown && bottleSheet.hidden) {
     bottleNewsShown = true;
-    showBanner(bannerEl, `你丟的瓶子${n > 1 ? `有 ${n} 個` : ''}被撿走了！打開「漂流瓶」看看`, 4000);
+    showBanner(bannerEl, `你丟的瓶子${n > 1 ? `有 ${n} 個` : ''}被收藏了！打開「漂流瓶」看看`, 4000);
   }
 }
 
@@ -2565,7 +2599,7 @@ function openBottleSheet(open: boolean): void {
   selectedBottle = null;
   detailEl.hidden = true;
   bottleResult.textContent = '';
-  // 先直接定位（v1.600 使用者說按漂流瓶先定位）：丟瓶子、撿瓶子都要 GPS；在汪星不用（汪星上拖曳就是走路）
+  // 先直接定位（v1.600 使用者說按漂流瓶先定位）：丟瓶子、看瓶子、收藏都要 GPS；在汪星不用（汪星上拖曳就是走路）
   if (youOn === 'earth' && !tripping) locateMe();
   renderBottleSheet();
   void reloadMyBottles();
@@ -2600,13 +2634,13 @@ function paintMyBottles(): void {
   const statusText = (b: (typeof dropped)[number]): string => {
     const drift = driftText(b.driftM);
     return b.status === 'picked'
-      ? `被撿走了${b.pickedAt ? `（${ago(b.pickedAt)}）` : ''}${b.world === 'woof' ? '・在汪星的海上被撿到' : drift ? `・漂了 ${drift} 才被撿到` : ''}`
+      ? `被收藏了${b.pickedAt ? `（${ago(b.pickedAt)}）` : ''}${b.world === 'woof' ? '・在汪星的海上被收藏' : drift ? `・漂了 ${drift} 才被收藏` : ''}`
       : b.status === 'hidden'
         ? '被檢舉，暫時藏起來'
         : b.status === 'removed'
           ? '已被管理者移除'
           : b.status === 'deleted'
-            ? '沒人撿，沉下去了'
+            ? '沒人收藏，沉下去了'
             : b.world === 'woof'
               ? `漂到汪星的海上了・${daysLeft(b.expiresAt)}後沉下去`
               : `在附近漂${drift ? `（漂了 ${drift}）` : ''}・${seaIn(b.createdAt)}後漂到汪星的海上`;
@@ -2667,7 +2701,7 @@ function wireBottleScene(): void {
     }
   });
   bottlePhotoFig.querySelector('.photo-remove')?.addEventListener('click', () => setBottlePhoto(null));
-  // 撿到的信、收藏的信上的照片：點了放大
+  // 打開來看的信、收藏的信上的照片：點了放大
   document.addEventListener('click', (e) => {
     const img = (e.target as Element).closest<HTMLImageElement>('.kraft-note .taped-photo img[src], .letter-paper .taped-photo img[src]');
     if (img) showPhoto(img.src);
@@ -2699,7 +2733,7 @@ function openLettersPage(open: boolean): void {
   }
 }
 
-/** 收藏的信：一張張牛皮紙，寫著編號、什麼時候在哪裡撿到的 */
+/** 收藏的信：一張張牛皮紙，寫著編號、什麼時候在哪裡收藏的 */
 function renderLettersPage(): void {
   const data = myBottlesData;
   if (!data) {
@@ -2709,7 +2743,7 @@ function renderLettersPage(): void {
   const { letters } = data;
   const meta = (b: MyBottles['letters'][number]): string => {
     const drift = driftText(b.driftM);
-    return `${fmtDay(b.pickedAt)} ${b.world === 'woof' ? '在汪星的海上' : ''}撿到・${ago(b.createdAt)}丟的${drift ? `・漂了 ${drift} 才到你手上` : ''}`;
+    return `${fmtDay(b.pickedAt)} ${b.world === 'woof' ? '在汪星的海上' : ''}收藏・${ago(b.createdAt)}丟的${drift ? `・漂了 ${drift} 才到你手上` : ''}`;
   };
   lettersList.innerHTML = letters.length
     ? `<h3>收藏的信（${letters.length}）</h3><ul class="letter-grid">${letters
@@ -2728,7 +2762,7 @@ function renderLettersPage(): void {
           </li>`,
         )
         .join('')}</ul>`
-    : '<h3>收藏的信</h3><p class="muted">還沒有收藏的信。到雷達上找找看，走到瓶子旁邊撿起來，信就會收進這裡。</p>';
+    : '<h3>收藏的信</h3><p class="muted">還沒有收藏的信。到雷達上找找看，走到瓶子附近按「收藏」，信就會收進這裡。</p>';
   fillPhotos(lettersList);
   paintMyBottles();
 }
@@ -2737,7 +2771,7 @@ async function onLettersClick(e: Event): Promise<void> {
   const t = e.target as Element;
   const del = t.closest<HTMLButtonElement>('[data-delete-bottle]');
   if (del) {
-    if (!window.confirm('要收回這個瓶子嗎？收回後就沒有人撿得到了。')) return;
+    if (!window.confirm('要收回這個瓶子嗎？收回後就沒有人看得到了。')) return;
     del.disabled = true;
     const id = Number(del.dataset.deleteBottle);
     const r = await deleteBottle(id);
@@ -2792,6 +2826,8 @@ async function submitBottle(): Promise<void> {
   }
   if (youOn === 'woof') return say('搭火箭回地球才能丟瓶子');
   if (origin.source !== 'gps') return say('要先按右上角「定位」用 GPS，瓶子會丟在你現在的位置附近');
+  // 按瓶子、軟木塞先確認（v1.601 使用者說按軟木塞要再確認是否送出）
+  if (!window.confirm('要把這張紙捲起來，裝進瓶子送出去嗎？')) return;
   const photo = bottlePhotoData;
   say('');
   bottleDropEl.classList.add('busy');
@@ -2813,7 +2849,7 @@ async function submitBottle(): Promise<void> {
   void reloadMyBottles();
   selectedBottle = null;
   selectBottle(r.data.bottle.id);
-  showBanner(bannerEl, `丟出去了！${bottleNo(r.data.bottle.id)} 會在附近漂 ${bottleRules()?.seaHours ?? 24} 小時，被撿走時會通知你`, 3500);
+  showBanner(bannerEl, `丟出去了！${bottleNo(r.data.bottle.id)} 會在附近漂 ${bottleRules()?.seaHours ?? 24} 小時，被收藏時會通知你`, 3500);
 }
 
 /**

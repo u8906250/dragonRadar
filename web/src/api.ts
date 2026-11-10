@@ -161,12 +161,13 @@ export async function fetchWoofBottles(): Promise<BottleOut[]> {
 /** 丟瓶子；photo 是瀏覽器縮小、重新存好的 JPEG（data URL），沒放是 null */
 export const dropBottle = (text: string, at: LatLng, photo: string | null = null): Promise<Result<PickedBottle>> =>
   deviceJson<PickedBottle>('/api/bottles', 'POST', { text, lat: at.lat, lng: at.lng, ...(photo ? { photo } : {}) });
-/** 瓶子的照片（丟的人、撿到的人才拿得到）：回傳可以放在 img 的網址，拿不到是 null；拿過的記起來 */
+/** 瓶子的照片（看得到內容的人才拿得到：丟的人、收藏的人、走到附近的人帶位置）：回傳可以放在 img 的網址，拿不到是 null；拿過的記起來 */
 const photoUrls = new Map<number, Promise<string | null>>();
-export function fetchBottlePhoto(id: number): Promise<string | null> {
+export function fetchBottlePhoto(id: number, here?: BottleHere): Promise<string | null> {
   let p = photoUrls.get(id);
   if (!p) {
-    p = fetch(`${API_BASE}/api/bottles/${id}/photo`, { headers: { 'x-device': deviceCode() } })
+    const q = here?.at ? `?lat=${here.at.lat.toFixed(6)}&lng=${here.at.lng.toFixed(6)}&world=${here.world}` : '';
+    p = fetch(`${API_BASE}/api/bottles/${id}/photo${q}`, { headers: { 'x-device': deviceCode() } })
       .then(async (r) => (r.ok ? URL.createObjectURL(await r.blob()) : null))
       .catch(() => null);
     photoUrls.set(id, p);
@@ -179,9 +180,16 @@ export function fetchBottlePhoto(id: number): Promise<string | null> {
 }
 /** 自己剛丟的瓶子：照片直接用手上的，不用再下載 */
 export const rememberBottlePhoto = (id: number, url: string): void => void photoUrls.set(id, Promise.resolve(url));
-/** 撿起來：at 是你的位置（地球的 GPS，或你在汪星的位置），world 是你在哪一顆；自己丟的、撿過的不用位置 */
-export const pickBottle = (id: number, at: LatLng | null, world: 'earth' | 'woof' = 'earth'): Promise<Result<PickedBottle>> =>
-  deviceJson<PickedBottle>(`/api/bottles/${id}/pick`, 'POST', at ? { lat: at.lat, lng: at.lng, world } : {});
+/** 你在哪裡（打開來看、收藏、檢舉、看照片要帶）：at 是地球的 GPS 或你在汪星的位置，world 是你在哪一顆 */
+export interface BottleHere {
+  at: LatLng | null;
+  world: 'earth' | 'woof';
+}
+const hereBody = (h?: BottleHere): Record<string, unknown> => (h?.at ? { lat: h.at.lat, lng: h.at.lng, world: h.world } : {});
+/** 收藏（一個瓶子只有第一個人收藏得到）；自己丟的、收藏過的不用位置 */
+export const pickBottle = (id: number, here?: BottleHere): Promise<Result<PickedBottle>> => deviceJson<PickedBottle>(`/api/bottles/${id}/pick`, 'POST', hereBody(here));
+/** 打開來看（不收藏）：自己丟的、收藏過的隨時看得到，別人的要走到附近 */
+export const readBottle = (id: number, here?: BottleHere): Promise<Result<PickedBottle>> => deviceJson<PickedBottle>(`/api/bottles/${id}/read`, 'POST', hereBody(here));
 /** 分享出去的瓶子（沒有內容）：還在漂、被撿走了、不見了 */
 export const fetchBottleInfo = (id: number): Promise<Result<{ id: number; state: 'active' | 'picked' | 'gone'; bottle: BottleOut | null }>> => deviceJson(`/api/bottles/${id}`);
 /** 瓶子證明（丟的人、撿到的人才拿得到） */
@@ -205,7 +213,8 @@ export const sendFeedback = (
 /** 回報地點錯誤的「查地點」：查到的標在表單的小地圖上 */
 export const locateFeedbackPlace = (eventId: number, place: string): Promise<Result<{ found: boolean; lat: number | null; lng: number | null; name: string | null; approxArea: string | null }>> =>
   deviceJson(`/api/events/${eventId}/locate`, 'POST', { place });
-export const reportBottle = (id: number): Promise<Result<{ hidden: boolean }>> => deviceJson<{ hidden: boolean }>(`/api/bottles/${id}/report`, 'POST', {});
+/** 檢舉：收藏的人不用位置，走到附近看的人帶位置 */
+export const reportBottle = (id: number, here?: BottleHere): Promise<Result<{ hidden: boolean }>> => deviceJson<{ hidden: boolean }>(`/api/bottles/${id}/report`, 'POST', hereBody(here));
 
 // 回報也帶裝置代碼：伺服器記下是哪個瀏覽器回報的，之後可以自己刪除
 /** 貼上 Threads 貼文，或活動通、OPENTIX 活動頁的連結，後端讀取並判讀，可能要十幾秒 */

@@ -864,11 +864,11 @@ function woofGlobe(x: number, y: number, r: number, view: SpaceView, toSun: Vec3
   for (const b of bottles ?? []) {
     const [px, py, pz] = ortho(center, b.lat, b.lng);
     if (pz <= 0) continue;
-    const cls = `bottle woof-bottle bottle-${b.state}${b.mine ? ' mine' : ''}${b.selected ? ' selected' : ''}`;
+    const cls = `bottle woof-bottle bottle-${b.state}${b.mine ? ' mine' : ''}${b.taken ? ' picked' : ''}${b.selected ? ' selected' : ''}`;
     out +=
       `<g class="${cls}" data-id="${b.id}" transform="translate(${f1(C + r * px)} ${f1(C - r * py)})" tabindex="0" role="button">` +
       `<circle class="hit" r="14" />${b.state === 'pick' ? '<circle class="reach" r="9" />' : ''}` +
-      `<g class="body"><path class="glass" d="${BOTTLE_PATH}" transform="rotate(-20)" /></g><title>${b.mine ? '你丟的漂流瓶' : b.state === 'pick' ? '漂流瓶（撿得到了）' : '漂流瓶'}</title></g>`;
+      `<g class="body"><path class="glass" d="${BOTTLE_PATH}" transform="rotate(-20)" /></g><title>${b.mine ? '你丟的漂流瓶' : b.taken ? '漂流瓶（已經被收藏了）' : b.state === 'pick' ? '漂流瓶（走到附近了）' : '漂流瓶'}</title></g>`;
   }
   return `<g class="space-globe" transform="translate(${f1(ox)} ${f1(oy)})">${out}</g>`;
 }
@@ -914,6 +914,8 @@ export interface WoofBottleMark {
   state: 'near' | 'pick';
   mine: boolean;
   selected: boolean;
+  /** 已經被收藏了（淡淡的） */
+  taken?: boolean;
 }
 
 /** 太陽系的天體在這一刻的位置（以地球為中心的黃道座標，公里） */
