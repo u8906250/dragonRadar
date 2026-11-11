@@ -1106,6 +1106,7 @@ async function rocketTrip(m: typeof import('./park'), from: 'earth' | 'woof'): P
   youOn = to;
   radar.youOn = to;
   void loadWoofBottles();
+  bottleWorldChanged();
   saveSpaceView();
   updateScaleChips();
   updateViewBtn();
@@ -1130,6 +1131,7 @@ async function landIn3D(to: 'earth' | 'woof'): Promise<void> {
   youOn = to;
   radar.youOn = to;
   void loadWoofBottles();
+  bottleWorldChanged();
   if (to === 'woof') radar.setSpaceView(await woofHomeView(), true);
   else {
     const [lat, lng] = m.HATCH_CENTER;
@@ -2257,6 +2259,13 @@ function updateBottleBadge(views: Array<{ b: BottleOut; distanceKm: number }>): 
  * 用完了（0）不顯示數字
  */
 function paintQuotaBadge(): void {
+  // 汪星上不能丟（v1.631）：不顯示還能丟幾個
+  if (youOn === 'woof') {
+    bottleBadge.hidden = true;
+    bottleBtn.title = '漂流瓶：汪星上不能丟，搭火箭回地球才能丟';
+    bottleBtn.setAttribute('aria-label', '漂流瓶，汪星上不能丟');
+    return;
+  }
   const left = myBottlesData ? myBottlesData.quota.left : lsGet(LS_BOTTLE_DROPPED) ? null : (bottleRules()?.perDay ?? 3);
   bottleBadge.hidden = !left;
   if (left) bottleBadge.textContent = String(left);
@@ -2781,18 +2790,32 @@ function renderBottleSheet(): void {
 function sceneQuota(): void {
   if (throwing) return;
   const q = myBottlesData?.quota;
-  const out = !!q && q.left === 0;
-  bottleSheet.classList.toggle('no-quota', out);
+  // 只有在地球才能丟，汪星不能丟（v1.631 使用者說的）：跟丟完了一樣不顯示紙和瓶子；汪星海上的瓶子照樣可以收藏
+  const onWoof = youOn === 'woof';
+  const out = onWoof || (!!q && q.left === 0);
+  bottleSheet.classList.toggle('no-throw', out);
   if (!out) {
     if (bottleResult.dataset.quota) bottleResult.textContent = '';
     delete bottleResult.dataset.quota;
     return;
   }
+  if (onWoof) {
+    bottleResult.textContent = '汪星上不能丟瓶子，搭火箭回地球才能丟';
+    bottleResult.dataset.quota = '1';
+    return;
+  }
+  if (!q) return;
   // 每天 00:00 恢復成 3 個（v1.621）：寫還有多久
   const mins = q.nextAt ? Math.max(1, Math.ceil((q.nextAt - nowSec()) / 60)) : null;
   const wait = mins === null ? '' : mins < 60 ? `（還有 ${mins} 分鐘）` : `（還有約 ${Math.round(mins / 60)} 小時）`;
   bottleResult.textContent = `今天的 ${q.limit} 個瓶子都丟完了，00:00 會恢復成 ${q.limit} 個${wait}`;
   bottleResult.dataset.quota = '1';
+}
+
+/** 換到地球、汪星：按鈕上的數字、開著的漂流瓶畫面跟著換（汪星不能丟） */
+function bottleWorldChanged(): void {
+  paintQuotaBadge();
+  if (!bottleSheet.hidden) renderBottleSheet();
 }
 
 /** 自己丟的瓶子收不收得回來：丟出去 24 小時內（v1.619 使用者說的；收藏了的也一樣），還要走到瓶子 1 km 內（伺服器照位置確認） */
@@ -2998,7 +3021,7 @@ function confirmThrow(): Promise<boolean> {
   const r = bottleRules();
   const left = myBottlesData?.quota.left;
   const rules = [
-    '瓶子會丟在你現在的位置附近（隨機漂開約 100 m，不會在你站的地方），之後在附近 200 m 內慢慢漂。',
+    '只有在地球上才能丟，瓶子會丟在你現在的位置附近（隨機漂開約 100 m，不會在你站的地方），之後在附近 200 m 內慢慢漂。',
     `${r?.seaHours ?? 24} 小時後漂到汪星的海上，${r?.woofDays ?? 30} 天後沉下去。`,
     `附近 ${r?.seeKm ?? 5} km 內的人看得到瓶子在哪裡；走到 ${reachText(r?.pickRadiusM)} 內才看得到內容和照片，第一個按「收藏」的人會把它收進瓶中信收藏（收藏了別人照樣看得到）。`,
     `丟出去 24 小時內、你走回瓶子 ${reachText(r?.pickRadiusM)} 內才收得回來；收回的也算今天的額度。`,

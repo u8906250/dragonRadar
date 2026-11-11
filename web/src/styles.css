@@ -2226,8 +2226,8 @@ body.bottle-open { overflow: hidden; }
 .scene-msg.judging-msg::after { content: ''; display: inline-block; width: 1.2em; text-align: left; animation: judge-dots 1.2s steps(1) infinite; }
 @keyframes judge-dots { 0% { content: ''; } 25% { content: '．'; } 50% { content: '．．'; } 75% { content: '．．．'; } }
 /* 今天丟完了：不顯示紙、瓶子、相機，只留訊息和收藏頁 */
-.bottle-scene.no-quota .scene-stage, .bottle-scene.no-quota #bottle-photo-btn { display: none; }
-.bottle-scene.no-quota .scene-msg { margin-top: 0; font-size: 16px; padding: 12px 18px; }
+.bottle-scene.no-throw .scene-stage, .bottle-scene.no-throw #bottle-photo-btn { display: none; }
+.bottle-scene.no-throw .scene-msg { margin-top: 0; font-size: 16px; padding: 12px 18px; }
 @media (max-width: 480px) {
   .scene-stage { margin-right: 30px; }
   .kraft-sheet { width: min(70vw, 330px, calc(56vh * 148 / 210)); }
