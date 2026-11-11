@@ -315,13 +315,13 @@ export function pickReward(item: string): Promise<Result<{ item: string; items: 
   return deviceJson('/api/cards/pick', 'POST', { item });
 }
 
-/** 引繼碼（換裝置）：舊裝置產生，24 小時內在新裝置輸入（卡、道具一起搬） */
+/** 引繼碼（換裝置）：舊裝置產生，24 小時內在新裝置輸入（卡、道具、瓶中信收藏一起搬） */
 export function makeTransferCode(): Promise<Result<{ code: string; expiresAt: number }>> {
   return deviceJson('/api/cards/transfer', 'POST', {});
 }
 
-/** 新裝置輸入引繼碼：舊裝置的卡、道具搬過來，回傳這台現在的卡、道具 */
-export function redeemTransferCode(code: string): Promise<Result<{ cards: CardClaim[]; items?: ItemCount[]; picks?: number; moved: number }>> {
+/** 新裝置輸入引繼碼：舊裝置的卡、道具、瓶中信收藏搬過來，回傳這台現在的卡、道具、收藏了幾封 */
+export function redeemTransferCode(code: string): Promise<Result<{ cards: CardClaim[]; items?: ItemCount[]; picks?: number; moved: number; letters?: number }>> {
   return deviceJson('/api/cards/redeem', 'POST', { code });
 }
 

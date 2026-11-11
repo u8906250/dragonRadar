@@ -7407,6 +7407,11 @@ function wireControls(): void {
     for (const id of ['#items-btn', '#more-btn']) $(id).classList.toggle('has-news', n > 0);
   });
   checkWishNews();
+  // 換裝置搬過來了（cards.ts）：瓶中信收藏、雷達上的瓶子（哪些是你收藏的）重新抓
+  window.addEventListener('dr:transferred', () => {
+    void reloadMyBottles();
+    void refresh();
+  });
   // 說明：使用說明（照目前的雷達）、換裝置（引繼碼）
   $('#help-btn').addEventListener('click', () => openHelp(mod.helpPage));
   // 3D 的中山公園（大家都進得來；存了管理 token 的才能標記路燈、長椅）
