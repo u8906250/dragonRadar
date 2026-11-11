@@ -226,11 +226,11 @@ export const WAVE_FRONT = 'M-11 8 q2.6 -2.3 5.2 0 t5.2 0 t5.2 0 t5.2 0';
 /** 雷達上漂浮的瓶子最多幾個（超過就不動，效能） */
 const FLOAT_MAX = 40;
 /**
- * 被收藏的瓶子裡面的信（v1.645 使用者說被收藏的要顯示把信放到瓶子裡）：牛皮紙卷、紅蝴蝶結，跟瓶子一樣斜 20 度；
- * 雷達、地圖、汪星海上的瓶子都用這個
+ * 被收藏的瓶子的標記（v1.646 使用者說地圖上只要標記被收藏，不用真的把信放進瓶子；24 小時後進到收藏才放進瓶子）：
+ * 瓶子右上角一顆小愛心。雷達、地圖、汪星海上的瓶子都用這個
  */
-export const LETTER_IN_BOTTLE =
-  '<g class="letter-in" transform="rotate(-20)"><rect x="-1.6" y="-1.6" width="3.2" height="7.6" rx="1.5" fill="#d8ad74" stroke="#8a5a2c" stroke-width="0.6" /><path d="M-1.6 2.2 h3.2" stroke="#e05a4f" stroke-width="1.2" /></g>';
+export const TAKEN_MARK =
+  '<path class="taken-mark" d="M5.6 -3.4 c-1.7 -1.2 -3.1 -2.3 -3.1 -3.7 a1.55 1.55 0 0 1 3.1 -0.45 a1.55 1.55 0 0 1 3.1 0.45 c0 1.4 -1.4 2.5 -3.1 3.7 z" fill="#ef6b5f" stroke="#b8392f" stroke-width="0.6" stroke-linejoin="round" />';
 /** 瓶子的形狀（中心在原點，高約 16）；汪星海上的瓶子（space.ts）也用這個 */
 export const BOTTLE_PATH = 'M-1.8 -8 h3.6 v3 l2.4 3 v8.2 a1.6 1.6 0 0 1 -1.6 1.6 h-5.2 a1.6 1.6 0 0 1 -1.6 -1.6 v-8.2 l2.4 -3 z';
 
@@ -1601,7 +1601,7 @@ export class Radar {
       if (k === 0) g.appendChild(el('circle', { class: 'dot', r: 3.4 }));
       else floats.push({ b, p });
       const title = el('title');
-      title.textContent = b.mine ? '你丟的漂流瓶' : b.picked ? '漂流瓶（已經被收藏了，信放在瓶子裡）' : b.state === 'pick' ? '漂流瓶（走到附近了）' : '漂流瓶';
+      title.textContent = b.mine ? '你丟的漂流瓶' : b.picked ? '漂流瓶（已經被收藏了）' : b.state === 'pick' ? '漂流瓶（走到附近了）' : '漂流瓶';
       g.appendChild(title);
       this.bottleLayer.appendChild(g);
     }
@@ -1624,7 +1624,7 @@ export class Radar {
       // 瓶子泡在水裡：後面一道淡淡的水波、前面一道蓋住瓶底，兩道都慢慢往一邊流（v1.606 使用者說感覺不出漂流，旁邊畫一點水流）
       tw.innerHTML =
         `<svg class="flow back" viewBox="-16 -10 32 20" aria-hidden="true"><path d="${WAVE_BACK}" /></svg>` +
-        `<svg class="bottle" viewBox="-10 -10 20 20" aria-hidden="true"><path d="${BOTTLE_PATH}" transform="rotate(-20)" />${b.picked ? LETTER_IN_BOTTLE : ''}</svg>` +
+        `<svg class="bottle" viewBox="-10 -10 20 20" aria-hidden="true"><path d="${BOTTLE_PATH}" transform="rotate(-20)" />${b.picked ? TAKEN_MARK : ''}</svg>` +
         `<svg class="flow front" viewBox="-16 -10 32 20" aria-hidden="true"><path d="${WAVE_FRONT}" /></svg>`;
       this.flashSquare.appendChild(tw);
     }

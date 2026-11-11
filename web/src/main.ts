@@ -2443,8 +2443,6 @@ function keepText(b: BottleOut): string {
   const m = Math.max(1, Math.round((b.takenAt + KEEP_TAKEN_H * 3600 - nowSec()) / 60));
   return `再 ${m < 60 ? `${m} 分鐘` : `${Math.round(m / 60)} 小時`}就收進收藏的人的瓶中信收藏，雷達上就看不到了`;
 }
-/** 剛收藏、信正放進瓶子裡（詳細資料播一次放進去的動畫） */
-const justSealed = new Set<number>();
 
 /** 還有多久漂到汪星（丟下後 seaHours 小時） */
 function seaIn(createdAt: number): string {
@@ -2542,14 +2540,10 @@ async function collectBottle(id: number): Promise<void> {
     else if (/已經沉下去/.test(r.message)) removeBottleMark(id, true);
   } else {
     collectedNow.add(id);
-    // 信放回瓶子裡（v1.645）：詳細資料換成塞好的瓶子、播一次放進去的動畫，按「打開來看」再看
-    bottleTexts.delete(id);
-    openTried.add(id);
-    justSealed.add(id);
-    window.setTimeout(() => justSealed.delete(id), 2000);
+    bottleTexts.set(id, r.data);
     markBottle(id, { picked: true, taken: true, picks: 1, takenAt: nowSec() });
     bottleMsg = '';
-    showBanner(bannerEl, '收藏了！信放進瓶子裡，也收進「瓶中信收藏」', 3000);
+    showBanner(bannerEl, `收藏了！瓶子在原地留 ${KEEP_TAKEN_H} 小時，之後收進選單的「收藏」`, 3000);
     void reloadMyBottles();
   }
   render();
@@ -2618,10 +2612,9 @@ function renderBottleDetail(id: number): boolean {
   const reach = pickRadiusM();
   const near = bottleState(b) === 'pick';
   const where = woof ? `汪星的海上，約 ${formatKm(d / 1000)} ${bottleDir(b)}` : `約 ${formatKm(d / 1000)} ${bottleDir(b)}`;
-  // 自己丟的、收藏過的、走到附近的：打開來看（每次選取只試一次）。
-  // 被收藏的不自動打開（v1.645 使用者說被收藏的信放在瓶子裡，點開才看得到）：按「打開來看」
+  // 自己丟的、收藏過的、走到附近的：打開來看（每次選取只試一次）；被收藏的也一樣（v1.646 使用者說地圖上只要標記被收藏）
   const canOpen = b.mine || b.picked || near;
-  if (!got && !b.taken && canOpen && !openTried.has(id)) {
+  if (!got && canOpen && !openTried.has(id)) {
     openTried.add(id);
     void openBottle(id);
   }
@@ -2636,10 +2629,6 @@ function renderBottleDetail(id: number): boolean {
           ? `${ago(b.createdAt)}丟的・已經被別人收藏了・${lifecycle}`
           : `${ago(b.createdAt)}丟的・還沒有人收藏・${lifecycle}`;
     body = `${kraftNote(got.text, b.id, got.photo)}<p class="muted">${esc(status)}</p>`;
-  } else if (b.taken && canOpen) {
-    // 信放在瓶子裡：一個塞好軟木塞的瓶子，按「打開來看」才看得到
-    const who = b.mine ? '你丟的瓶子被收藏了' : b.picked ? '你收藏了這封信' : '這個瓶子被收藏了';
-    body = `<div class="sealed-bottle${justSealed.has(id) ? ' just' : ''}">${bottleSvg('')}<p><b>${who}，信放進瓶子裡了</b><br><span class="muted">${esc(lifecycle)}</span></p></div>`;
   } else if (canOpen) {
     body = '<p class="muted">打開瓶子中…</p>';
   } else {
@@ -2667,7 +2656,6 @@ function renderBottleDetail(id: number): boolean {
       ${bottleMsg ? `<p class="msg error">${esc(bottleMsg)}</p>` : ''}
       <div class="sheet-actions">
         ${canCollect ? '<button type="button" class="btn primary" data-act="pick">收藏</button>' : ''}
-        ${!got && b.taken && canOpen ? '<button type="button" class="btn primary" data-act="open">打開來看</button>' : ''}
         ${!got && !b.mine && !b.picked && !near && !woof ? `<a class="btn" href="https://www.google.com/maps/dir/?api=1&destination=${b.lat},${b.lng}&travelmode=walking" target="_blank" rel="noopener">走過去</a>` : ''}
         ${got ? shareLink(b.id, b.mine) : ''}
         ${got && (b.mine || b.picked) ? '<button type="button" class="btn" data-act="proof">瓶子證明</button>' : ''}
@@ -2687,11 +2675,6 @@ function renderBottleDetail(id: number): boolean {
   detailEl.querySelector('[data-act="pick"]')?.addEventListener('click', (e) => {
     (e.currentTarget as HTMLButtonElement).disabled = true;
     void collectBottle(id);
-  });
-  detailEl.querySelector('[data-act="open"]')?.addEventListener('click', (e) => {
-    (e.currentTarget as HTMLButtonElement).disabled = true;
-    justSealed.delete(id);
-    void openBottle(id);
   });
   detailEl.querySelector('[data-act="proof"]')?.addEventListener('click', () => {
     if (got) void showProof(id, got.text);
@@ -3077,6 +3060,7 @@ function openLettersPage(open: boolean): void {
   } else {
     lettersPage.hidden = true;
     document.body.classList.remove('letters-open');
+    openedLetters.clear();
     if (location.hash !== '#letters') return;
     if (lettersPushed) history.back();
     else history.replaceState(null, '', location.pathname + location.search);
@@ -3084,7 +3068,13 @@ function openLettersPage(open: boolean): void {
   }
 }
 
-/** 收藏的信：一張張牛皮紙，寫著編號、什麼時候在哪裡收藏的 */
+/** 收藏頁這次打開來看的信（重新整理、離開收藏頁就放回瓶子裡） */
+const openedLetters = new Set<number>();
+
+/**
+ * 收藏的信：一張張牛皮紙，寫著編號、什麼時候在哪裡收藏的。
+ * 收藏滿 24 小時（瓶子從原地收進來了）的信裝在瓶子裡，點瓶子或「打開來看」才看得到（v1.646 使用者說的）；還沒滿的照舊攤開，寫還要多久收進瓶子
+ */
 function renderLettersPage(): void {
   const data = myBottlesData;
   if (!data) {
@@ -3096,22 +3086,29 @@ function renderLettersPage(): void {
     const drift = driftText(b.driftM);
     return `${fmtDay(b.pickedAt)} ${b.world === 'woof' ? '在汪星的海上' : ''}收藏・${ago(b.createdAt)}丟的${drift ? `・漂了 ${drift} 才到你手上` : ''}`;
   };
+  const keepLeft = (l: MyBottles['letters'][number]): number => l.pickedAt + KEEP_TAKEN_H * 3600 - nowSec();
   lettersList.innerHTML = letters.length
     ? `<h3>收藏的信（${letters.length}）</h3><ul class="letter-grid">${letters
-        .map(
-          (l) => `<li class="letter-paper">
+        .map((l) => {
+          const left = keepLeft(l);
+          const sealed = left <= 0 && !openedLetters.has(l.id);
+          const waiting = left > 0 ? `還在原地・再 ${left < 3600 ? `${Math.max(1, Math.round(left / 60))} 分鐘` : `${Math.round(left / 3600)} 小時`}收進瓶子` : '';
+          const content = sealed
+            ? `<button type="button" class="letter-bottle" data-open-letter="${l.id}" aria-label="打開瓶子看信">${bottleSvg('')}</button>`
+            : `${l.photo ? tapedPhoto(l.id) : ''}<p class="letter-text">${esc(l.text)}</p>`;
+          return `<li class="letter-paper${sealed ? ' letter-sealed' : ''}">
             <span class="kraft-no">${bottleNo(l.id)}</span>
-            ${l.photo ? tapedPhoto(l.id) : ''}
-            <p class="letter-text">${esc(l.text)}</p>
-            <small class="muted">${esc(meta(l))}</small>
+            ${content}
+            <small class="muted">${esc(meta(l))}${waiting ? `・${esc(waiting)}` : ''}</small>
             <div class="letter-acts">
+              ${sealed ? `<button type="button" class="link-btn" data-open-letter="${l.id}">打開來看</button>` : left <= 0 ? `<button type="button" class="link-btn" data-close-letter="${l.id}">放回瓶子</button>` : ''}
               <button type="button" class="link-btn" data-proof="${l.id}">瓶子證明</button>
               ${shareLink(l.id, false, 'link-btn')}
               <button type="button" class="link-btn" data-report="${l.id}">檢舉</button>
               <button type="button" class="link-btn" data-uncollect="${l.id}">移出收藏</button>
             </div>
-          </li>`,
-        )
+          </li>`;
+        })
         .join('')}</ul>`
     : '<h3>收藏的信</h3><p class="muted">還沒有收藏的信。到雷達上找找看，走到瓶子附近按「收藏」，信就會收進這裡。</p>';
   fillPhotos(lettersList);
@@ -3120,6 +3117,16 @@ function renderLettersPage(): void {
 
 async function onLettersClick(e: Event): Promise<void> {
   const t = e.target as Element;
+  // 收藏頁的瓶子：打開來看、放回瓶子
+  const openL = t.closest<HTMLElement>('[data-open-letter]');
+  const closeL = t.closest<HTMLElement>('[data-close-letter]');
+  if (openL || closeL) {
+    const id = Number(openL?.dataset.openLetter ?? closeL?.dataset.closeLetter);
+    if (openL) openedLetters.add(id);
+    else openedLetters.delete(id);
+    renderLettersPage();
+    return;
+  }
   const del = t.closest<HTMLButtonElement>('[data-delete-bottle]');
   if (del) {
     if (!window.confirm(withdrawAsk(del.dataset.taken === '1'))) return;
@@ -3170,7 +3177,7 @@ function confirmThrow(): Promise<boolean> {
   const left = myBottlesData?.quota.left;
   const rules = [
     '只有在地球上才能丟，瓶子會丟在你現在的位置附近（隨機漂開約 100 m，不會在你站的地方），之後在附近 200 m 內慢慢漂。',
-    `沒人收藏的 ${r?.seaHours ?? 24} 小時後漂到汪星的海上，${r?.woofDays ?? 30} 天後沉下去；被收藏的不會漂走，信放回瓶子裡在原地留 ${KEEP_TAKEN_H} 小時，之後只在收藏的人那裡。`,
+    `沒人收藏的 ${r?.seaHours ?? 24} 小時後漂到汪星的海上，${r?.woofDays ?? 30} 天後沉下去；被收藏的不會漂走，在原地標成已收藏 ${KEEP_TAKEN_H} 小時，之後收進收藏的人的「收藏」、裝進瓶子裡。`,
     `附近 ${r?.seeKm ?? 5} km 內的人看得到瓶子在哪裡；走到 ${reachText(r?.pickRadiusM)} 內才看得到內容和照片，第一個按「收藏」的人會把它收進瓶中信收藏（收藏了別人照樣看得到）。`,
     `丟出去 24 小時內、你走回瓶子 ${reachText(r?.pickRadiusM)} 內才收得回來；收回的也算今天的額度。`,
     `每天可以丟 ${r?.perDay ?? 3} 個，00:00 恢復成 ${r?.perDay ?? 3} 個${left !== undefined ? `；丟了這個今天還剩 ${Math.max(0, left - 1)} 個` : ''}。`,
