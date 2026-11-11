@@ -2285,7 +2285,7 @@ body.bottle-open { overflow: hidden; }
 .btn.letters-open small { color: var(--muted); font-weight: 500; font-size: 12px; }
 .btn.subtle { box-shadow: none; color: var(--muted); }
 
-/* 瓶中信收藏：蓋住整個畫面的一頁 */
+/* 漂流瓶收藏：蓋住整個畫面的一頁 */
 .letters-page {
   position: fixed; inset: 0; z-index: 1000; overflow: auto; overscroll-behavior: contain;
   background: var(--panel); color: var(--text);

@@ -6,11 +6,11 @@
  * - 隱私：丟的位置先打散到約 100 m 內再存，不存真正的位置（不會因為在家丟瓶子就洩漏住址）。
  * - 內容：先用規則擋掉連結、電話、帳號，再交給 AI 擋攻擊性內容、仇恨、個資（不要求一定正向；v1.631 起商家廣告也可以）；AI 失敗就不收。
  * - 一個瓶子只能被一個人收藏（v1.601 使用者說「撿起來」改成「收藏」、瓶子不用消失）：收藏後瓶子照樣留在雷達上（大家看得到已經被收藏了，
- *   使用者又說「被收藏，其他人還是看得到內容」：走到 1 km 內就能打開看（readBottle，收藏前後都一樣），收藏只是收進自己的「瓶中信收藏」）；
+ *   使用者又說「被收藏，其他人還是看得到內容」：走到 1 km 內就能打開看（readBottle，收藏前後都一樣），收藏只是收進自己的「漂流瓶收藏」）；
  *   看得到內容的人都可以檢舉，檢舉就藏起來等管理者確認。
  * - 漂流：丟下的 24 小時內，每 2 小時在丟的地方附近（200 m 內）晃一下；沒人撿就漂到汪星的海上（world = 'woof'，
  *   lat、lng 換成汪星的經緯度，woofsea.ts），跟丟的地方同一個方向的海邊；在汪星的海上留 30 天，沒人撿就沉下去。
- * - 被收藏的（v1.645 使用者說的）：不會漂到汪星。收藏後在原地留 24 小時（雷達上標成已收藏），之後就只在收藏的人的瓶中信收藏裡，雷達上看不到。
+ * - 被收藏的（v1.645 使用者說的）：不會漂到汪星。收藏後在原地留 24 小時（雷達上標成已收藏），之後就只在收藏的人的漂流瓶收藏裡，雷達上看不到。
  *   汪星上的「你的位置」是雷達正中間（搭火箭過去，拖曳就是走路），一樣要 1 km 內才收藏得到。
  * - 編號：瓶子的流水號就是編號（前端寫成 No.000123）；瓶子證明（bottleProof）＝編號、丟的時間、內容的 SHA-256，伺服器簽章，之後可以驗證。
  * - 每天最多丟 3 個（以前回收撿到的瓶子多一個，拿掉了）。
@@ -766,7 +766,7 @@ export async function readBottle(env: Env, device: string | null, id: number, bo
 
 /**
  * 收藏：要在 PICK_RADIUS_M 內。一個瓶子只能被一個人收藏，收藏後瓶子還在雷達上（大家看得到已經被收藏了），
- * 只有收藏的人（在瓶中信收藏）和丟的人看得到內容。自己丟的可以看，但不能收藏。
+ * 只有收藏的人（在漂流瓶收藏）和丟的人看得到內容。自己丟的可以看，但不能收藏。
  */
 export async function pickBottle(env: Env, device: string | null, id: number, body: { lat?: unknown; lng?: unknown; world?: unknown }, now: number): Promise<PickedBottle> {
   const dev = needDevice(device);
@@ -778,7 +778,7 @@ export async function pickBottle(env: Env, device: string | null, id: number, bo
   if (b.status !== 'active' || b.expires_at <= now) throw new ReportError(410, '晚了一步，這個瓶子已經被收藏或沉下去了');
   assertNear(b, body, '收藏');
   const kept = await countSince(env, 'SELECT COUNT(*) AS n FROM bottle_picks WHERE device_id = ? AND collected_at > ?', [dev, 0]);
-  if (kept >= MAX_LETTERS) throw new ReportError(429, `瓶中信收藏滿 ${MAX_LETTERS} 封了，先移出一些再收藏`);
+  if (kept >= MAX_LETTERS) throw new ReportError(429, `漂流瓶收藏滿 ${MAX_LETTERS} 個了，先移出一些再收藏`);
   // 兩個人同時收藏：只有先改到狀態的那個人算數。改狀態和記下是誰收藏的放在同一個交易（batch）裡，
   // 中間不會被讀到「已經被收藏、但不知道是誰」（v1.607：收藏的人當下看到「被別人收藏了」）
   const [upd] = await env.DB.batch([
@@ -794,11 +794,11 @@ export async function pickBottle(env: Env, device: string | null, id: number, bo
 export interface MyBottles {
   quota: BottleQuota;
   dropped: Array<{ id: number; text: string; photo: boolean; world: BottleWorld; createdAt: number; expiresAt: number; seaAt: number | null; picks: number; pickedAt: number | null; status: BottleStatus; driftM: number }>;
-  /** 瓶中信收藏：撿到就收進來；world 是在哪裡撿到的 */
+  /** 漂流瓶收藏：撿到就收進來；world 是在哪裡撿到的 */
   letters: Array<{ id: number; text: string; photo: boolean; world: BottleWorld; createdAt: number; pickedAt: number; driftM: number }>;
 }
 
-/** 我丟的、我的瓶中信收藏 */
+/** 我丟的、我的漂流瓶收藏 */
 export async function myBottles(env: Env, device: string | null, now: number): Promise<MyBottles> {
   const dev = needDevice(device);
   const dropped = await env.DB.prepare(
@@ -852,7 +852,7 @@ export async function uncollectLetter(env: Env, device: string | null, id: numbe
 
 /**
  * 收回自己丟的瓶子（v1.619 使用者說的）：丟出去 24 小時內、人在瓶子 PICK_RADIUS_M 內（body 帶位置）才收得回來，
- * 收藏了的也一樣；收回後雷達上不見、收藏的人的瓶中信收藏裡也看不到了
+ * 收藏了的也一樣；收回後雷達上不見、收藏的人的漂流瓶收藏裡也看不到了
  */
 export async function deleteBottle(env: Env, device: string | null, id: number, body: { lat?: unknown; lng?: unknown; world?: unknown }, now: number): Promise<{ ok: true }> {
   const dev = needDevice(device);

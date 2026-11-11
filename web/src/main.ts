@@ -444,7 +444,7 @@ const bottleCount = $('#bottle-count');
 const bottleDropEl = $('#bottle-drop');
 const bottleResult = $('#bottle-result');
 /** 打開收藏頁的信封上的小紅點（自己丟的瓶子被收藏了） */
-/** 選單的「收藏」（v1.645 使用者說漂流瓶畫面裡的收藏按鈕改放到選單）：瓶中信收藏、我丟的瓶子 */
+/** 選單的「收藏」（v1.645 使用者說漂流瓶畫面裡的收藏按鈕改放到選單）：漂流瓶收藏、我丟的瓶子 */
 const lettersBtn = $<HTMLButtonElement>('#letters-btn');
 /** 選單上的小紅點：許願有新進度、自己丟的瓶子被收藏了；收進「⋯」時「⋯」也亮 */
 const menuNews = { wish: false, letters: false };
@@ -2439,9 +2439,9 @@ const daysLeft = (until: number): string => {
 const KEEP_TAKEN_H = 24;
 /** 被收藏的瓶子還會在原地留多久：「收藏後在原地留 24 小時（還剩 5 小時）」 */
 function keepText(b: BottleOut): string {
-  if (!b.takenAt) return `收藏後在原地留 ${KEEP_TAKEN_H} 小時，之後只在收藏的人的瓶中信收藏裡`;
+  if (!b.takenAt) return `收藏後在原地留 ${KEEP_TAKEN_H} 小時，之後只在收藏的人的漂流瓶收藏裡`;
   const m = Math.max(1, Math.round((b.takenAt + KEEP_TAKEN_H * 3600 - nowSec()) / 60));
-  return `再 ${m < 60 ? `${m} 分鐘` : `${Math.round(m / 60)} 小時`}就收進收藏的人的瓶中信收藏，雷達上就看不到了`;
+  return `再 ${m < 60 ? `${m} 分鐘` : `${Math.round(m / 60)} 小時`}就收進收藏的人的漂流瓶收藏，雷達上就看不到了`;
 }
 
 /** 還有多久漂到汪星（丟下後 seaHours 小時） */
@@ -2624,7 +2624,7 @@ function renderBottleDetail(id: number): boolean {
     const status = b.mine
       ? `你${ago(b.createdAt)}丟的・${b.taken ? '已經被收藏了' : `還沒有人收藏（自己丟的不能收藏，別人走到 ${reachText(reach)} 內就看得到、收藏得到）`}・${lifecycle}`
       : b.picked
-        ? `${ago(b.createdAt)}丟的・你收藏了，放在「瓶中信收藏」`
+        ? `${ago(b.createdAt)}丟的・你收藏了，放在「漂流瓶收藏」`
         : b.taken
           ? `${ago(b.createdAt)}丟的・已經被別人收藏了・${lifecycle}`
           : `${ago(b.createdAt)}丟的・還沒有人收藏・${lifecycle}`;
@@ -2795,7 +2795,7 @@ async function openSharedBottle(id: number): Promise<void> {
   const b = r.data.bottle;
   // 收藏滿 24 小時，只在收藏的人那裡（v1.645）
   if (r.data.state === 'kept') {
-    showBanner(bannerEl, r.data.yours ? `漂流瓶 ${bottleNo(id)} 在你的「瓶中信收藏」裡` : `漂流瓶 ${bottleNo(id)} 已經被收藏走了`, 4000);
+    showBanner(bannerEl, r.data.yours ? `漂流瓶 ${bottleNo(id)} 在你的「漂流瓶收藏」裡` : `漂流瓶 ${bottleNo(id)} 已經被收藏走了`, 4000);
     return;
   }
   if (r.data.state === 'gone' || !b) {
@@ -2876,7 +2876,7 @@ async function checkBottleNews(): Promise<void> {
 
 /**
  * 打開漂流瓶（v1.594 使用者說：按下去畫面中間直接出現牛皮紙和瓶子、盡量仿真，不要輸入框、不要任何提示，說明放在說明頁）：
- * 牛皮紙上直接寫，點瓶子就捲起來裝進去丟出去；左上 📜 是瓶中信收藏和我丟的瓶子、📷 貼一張照片
+ * 牛皮紙上直接寫，點瓶子就捲起來裝進去丟出去；左上 📜 是漂流瓶收藏和我丟的瓶子、📷 貼一張照片
  */
 function openBottleSheet(open: boolean): void {
   bottleSheet.hidden = !open;
@@ -3042,7 +3042,7 @@ function wireBottleScene(): void {
   });
 }
 
-// ---- 瓶中信收藏（獨立一頁，網址 #letters） ----
+// ---- 漂流瓶收藏（獨立一頁，網址 #letters） ----
 /** 收藏頁是從網頁裡打開的（關掉時用上一頁回去）；直接開 #letters 網址進來的就只清掉網址 */
 let lettersPushed = false;
 
@@ -3178,7 +3178,7 @@ function confirmThrow(): Promise<boolean> {
   const rules = [
     '只有在地球上才能丟，瓶子會丟在你現在的位置附近（隨機漂開約 100 m，不會在你站的地方），之後在附近 200 m 內慢慢漂。',
     `沒人收藏的 ${r?.seaHours ?? 24} 小時後漂到汪星的海上，${r?.woofDays ?? 30} 天後沉下去；被收藏的不會漂走，在原地標成已收藏 ${KEEP_TAKEN_H} 小時，之後收進收藏的人的「收藏」、裝進瓶子裡。`,
-    `附近 ${r?.seeKm ?? 5} km 內的人看得到瓶子在哪裡；走到 ${reachText(r?.pickRadiusM)} 內才看得到內容和照片，第一個按「收藏」的人會把它收進瓶中信收藏（收藏了別人照樣看得到）。`,
+    `附近 ${r?.seeKm ?? 5} km 內的人看得到瓶子在哪裡；走到 ${reachText(r?.pickRadiusM)} 內才看得到內容和照片，第一個按「收藏」的人會把它收進漂流瓶收藏（收藏了別人照樣看得到）。`,
     `丟出去 24 小時內、你走回瓶子 ${reachText(r?.pickRadiusM)} 內才收得回來；收回的也算今天的額度。`,
     `每天可以丟 ${r?.perDay ?? 3} 個，00:00 恢復成 ${r?.perDay ?? 3} 個${left !== undefined ? `；丟了這個今天還剩 ${Math.max(0, left - 1)} 個` : ''}。`,
     '送出前會自動審核：辱罵或攻擊任何人（包括候選人、政黨）、謠言、連結、電話、帳號、個人資料都不會通過。',
@@ -7571,7 +7571,7 @@ function wireControls(): void {
   $('#items-btn').addEventListener('click', () => openItems());
   // 願望（v1.636 從道具欄獨立出來）：許願、我的願望
   $('#wishes-btn').addEventListener('click', () => openWishes());
-  // 收藏（v1.645 從漂流瓶畫面搬到選單）：瓶中信收藏、我丟的瓶子
+  // 收藏（v1.645 從漂流瓶畫面搬到選單）：漂流瓶收藏、我丟的瓶子
   lettersBtn.addEventListener('click', () => {
     openBottleSheet(false);
     openLettersPage(true);
@@ -7582,7 +7582,7 @@ function wireControls(): void {
     paintMenuNews();
   });
   checkWishNews();
-  // 換裝置搬過來了（cards.ts）：瓶中信收藏、雷達上的瓶子（哪些是你收藏的）重新抓
+  // 換裝置搬過來了（cards.ts）：漂流瓶收藏、雷達上的瓶子（哪些是你收藏的）重新抓
   window.addEventListener('dr:transferred', () => {
     void reloadMyBottles();
     void refresh();

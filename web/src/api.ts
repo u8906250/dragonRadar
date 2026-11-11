@@ -198,7 +198,7 @@ export const verifyBottleProof = (p: BottleProof): Promise<Result<{ valid: boole
 export const fetchMyBottles = (): Promise<Result<MyBottles>> => deviceJson<MyBottles>('/api/bottles/mine');
 /** 收回：丟出去 24 小時內、走到瓶子附近才收得回來（帶你的位置） */
 export const deleteBottle = (id: number, here?: BottleHere): Promise<Result<{ ok: true }>> => deviceJson<{ ok: true }>(`/api/bottles/${id}`, 'DELETE', hereBody(here));
-/** 移出瓶中信收藏（之後就看不到這封信了） */
+/** 移出漂流瓶收藏（之後就看不到這封信了） */
 export const uncollectLetter = (id: number): Promise<Result<{ collected: boolean }>> => deviceJson<{ collected: boolean }>(`/api/bottles/${id}/uncollect`, 'POST', {});
 /** 回報問題（地點錯誤、時間錯誤…），只有管理者看得到；車掃可以指定哪一站（那一站的標題、預計經過時間） */
 export type FeedbackKind = 'location' | 'time' | 'content' | 'not_event' | 'duplicate' | 'remove_stop' | 'other';
@@ -315,12 +315,12 @@ export function pickReward(item: string): Promise<Result<{ item: string; items: 
   return deviceJson('/api/cards/pick', 'POST', { item });
 }
 
-/** 引繼碼（換裝置）：舊裝置產生，24 小時內在新裝置輸入（卡、道具、瓶中信收藏一起搬） */
+/** 引繼碼（換裝置）：舊裝置產生，24 小時內在新裝置輸入（卡、道具、漂流瓶收藏一起搬） */
 export function makeTransferCode(): Promise<Result<{ code: string; expiresAt: number }>> {
   return deviceJson('/api/cards/transfer', 'POST', {});
 }
 
-/** 新裝置輸入引繼碼：舊裝置的卡、道具、瓶中信收藏搬過來，回傳這台現在的卡、道具、收藏了幾封 */
+/** 新裝置輸入引繼碼：舊裝置的卡、道具、漂流瓶收藏搬過來，回傳這台現在的卡、道具、收藏了幾封 */
 export function redeemTransferCode(code: string): Promise<Result<{ cards: CardClaim[]; items?: ItemCount[]; picks?: number; moved: number; letters?: number }>> {
   return deviceJson('/api/cards/redeem', 'POST', { code });
 }

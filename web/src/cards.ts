@@ -388,7 +388,7 @@ export function openAlbum(): void {
 }
 
 /**
- * 選單的「說明」：使用說明（照目前的雷達，helpPage）和「換裝置」（引繼碼，卡冊、道具、瓶中信收藏一起搬；v1.467 起從卡冊搬過來，原本叫「換手機」；v1.634 加瓶中信收藏）
+ * 選單的「說明」：使用說明（照目前的雷達，helpPage）和「換裝置」（引繼碼，卡冊、道具、漂流瓶收藏一起搬；v1.467 起從卡冊搬過來，原本叫「換手機」；v1.634 加漂流瓶收藏）
  */
 export function openHelp(helpPage: string): void {
   const el = overlay(
@@ -398,7 +398,7 @@ export function openHelp(helpPage: string): void {
       <div class="tc-help-row"><a class="chip" href="${esc(helpPage)}">使用說明</a><span>怎麼回報活動、卡冊的小趣味</span></div>
       <div class="tc-help-row"><button type="button" class="chip" data-move aria-expanded="false" aria-controls="tc-move-box">換裝置</button><span>可轉移卡冊、道具及收藏的漂流瓶</span></div>
       <div class="tc-move-box" id="tc-move-box" hidden>
-        <p><b>舊裝置</b>：產生引繼碼，24 小時內在新裝置輸入，卡冊、道具和瓶中信收藏（收藏的漂流瓶）會搬過去（這台就沒有了）。</p>
+        <p><b>舊裝置</b>：產生引繼碼，24 小時內在新裝置輸入，卡冊、道具和漂流瓶收藏會搬過去（這台就沒有了）。</p>
         <button type="button" class="chip" data-make>產生引繼碼</button>
         <div class="tc-code" hidden><span class="tc-code-text"></span><button type="button" class="chip" data-copy>複製</button><small class="tc-code-until"></small></div>
         <p><b>新裝置</b>：輸入舊裝置產生的引繼碼。</p>
@@ -458,9 +458,9 @@ export function openHelp(helpPage: string): void {
     if (r.data.picks !== undefined) savePicks(r.data.picks);
     input.value = '';
     const items = myItems().reduce((n, x) => n + x.count, 0);
-    // 瓶中信收藏在漂流瓶那邊（main.ts）：叫它重新抓
+    // 漂流瓶收藏在漂流瓶那邊（main.ts）：叫它重新抓
     window.dispatchEvent(new CustomEvent('dr:transferred'));
-    msg(`搬好了，這台現在有 ${cards.length} 張卡、${items} 個道具${r.data.letters !== undefined ? `、${r.data.letters} 封瓶中信` : ''}`);
+    msg(`搬好了，這台現在有 ${cards.length} 張卡、${items} 個道具${r.data.letters !== undefined ? `、${r.data.letters} 個漂流瓶` : ''}`);
   });
 }
 
