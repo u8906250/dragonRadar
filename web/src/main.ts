@@ -2579,6 +2579,8 @@ function renderBottleDetail(id: number): boolean {
  * 再請伺服器核對簽章：對得上就是洋流雷達發出的瓶子、內容沒被改過（瓶子沉下去、刪掉了也驗得出來）
  */
 async function showProof(id: number, text: string): Promise<void> {
+  // 已經開著就不再開一層（點兩下會疊兩層，按 ✕ 只關上面那層，看起來像卡住：v1.628 使用者說按 ✕ 有時候也卡住）
+  if (document.querySelector('.tc-overlay.tc-proof')) return;
   // 畫面馬上出來（v1.610 使用者說點開、關閉有點慢）：編號、丟的時間、內容的指紋這裡就有，簽章等伺服器回來再補；拿過的記起來
   const createdAt = findBottle(id)?.createdAt ?? bottleTexts.get(id)?.bottle.createdAt ?? myBottlesData?.letters.find((l) => l.id === id)?.createdAt ?? null;
   const el = overlay(
@@ -2991,6 +2993,8 @@ async function onLettersClick(e: Event): Promise<void> {
  * 規則照伺服器給的數字（漂多久、汪星留幾天、多近收藏得到、每天幾個）
  */
 function confirmThrow(): Promise<boolean> {
+  // 已經開著（連點瓶子兩下）就不再開一層
+  if (document.querySelector('.tc-overlay.tc-rules')) return Promise.resolve(false);
   const r = bottleRules();
   const left = myBottlesData?.quota.left;
   const rules = [

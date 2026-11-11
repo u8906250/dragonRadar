@@ -2280,7 +2280,7 @@ body.letters-open { overflow: hidden; }
 .bottle-rules .sheet-actions { justify-content: center; }
 .bottle-proof { position: relative; max-width: 420px; align-items: stretch; }
 /* 右上角的 ✕：讀取中也一眼看得到怎麼關 */
-.proof-x { position: absolute; top: -4px; right: -4px; width: 36px; height: 36px; padding: 0; font-size: 16px; line-height: 1; color: #fff; cursor: pointer; background: rgba(255, 255, 255, 0.14); border: 1px solid rgba(255, 255, 255, 0.3); border-radius: 50%; }
+.proof-x { position: absolute; z-index: 2; top: -8px; right: -8px; width: 44px; height: 44px; padding: 0; font-size: 16px; line-height: 1; color: #fff; cursor: pointer; background: rgba(255, 255, 255, 0.14); border: 1px solid rgba(255, 255, 255, 0.3); border-radius: 50%; }
 .bottle-proof dl { margin: 0; color: #f3eee4; font-size: 13px; }
 .bottle-proof dt { color: #cfc4b2; font-size: 12px; margin-top: 8px; }
 .bottle-proof dd { margin: 2px 0 0; font-size: 15px; font-weight: 700; }
