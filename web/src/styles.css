@@ -2165,8 +2165,15 @@ body.bottle-open { overflow: hidden; }
   background: rgba(255, 255, 255, 0.14); border: 1px solid rgba(255, 255, 255, 0.28); border-radius: 50%;
 }
 .scene-icon:focus-visible { outline: 2px solid #ffe08a; outline-offset: 2px; }
-/* 貼照片的按鈕：牛皮紙下面靠左（右邊是瓶子） */
-.scene-stage #bottle-photo-btn { position: absolute; left: 0; top: calc(100% + 14px); }
+/* 貼照片的按鈕：牛皮紙下面靠左（右邊是瓶子）；一小張斜放的牛皮紙卡，上面一台跟瓶子同色系的可愛相機（v1.624 使用者說參考牛皮紙和漂流瓶） */
+.scene-stage #bottle-photo-btn {
+  position: absolute; left: 4px; top: calc(100% + 14px); display: grid; place-items: center; width: 54px; height: 50px; cursor: pointer;
+  background: var(--kraft-tex), var(--kraft-base); border: 1px solid #b38d5c; border-radius: 4px;
+  box-shadow: 2px 3px 6px rgba(0, 0, 0, 0.3); transform: rotate(-5deg); transition: transform 0.15s;
+}
+.scene-stage #bottle-photo-btn[hidden] { display: none; }
+.scene-stage #bottle-photo-btn:hover, .scene-stage #bottle-photo-btn:focus-within { transform: rotate(-2deg) translateY(-2px); }
+.scene-stage #bottle-photo-btn:active { transform: rotate(-5deg) translateY(1px); }
 .scene-dot { position: absolute; top: 2px; right: 2px; width: 10px; height: 10px; border-radius: 50%; background: #e5484d; border: 2px solid #2a1f12; }
 .scene-stage { position: relative; margin-right: 40px; }
 .kraft-sheet {
