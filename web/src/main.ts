@@ -3267,7 +3267,7 @@ function bottleSvg(_p: string): string {
   const body = 'M37 24 L37 54 C37 70 12 74 12 100 L12 164 Q12 186 34 186 L66 186 Q88 186 88 164 L88 100 C88 74 63 70 63 54 L63 24 Z';
   return `<svg class="real-bottle" viewBox="0 0 100 200" aria-hidden="true">
     <ellipse cx="50" cy="193" rx="34" ry="5" fill="#000" opacity=".18" />
-    <path d="${body}" fill="#d4f4f8" fill-opacity=".9" />
+    <path d="${body}" fill="#e1f7fb" fill-opacity=".35" />
     <g class="scroll">
       <rect x="38" y="98" width="24" height="74" rx="12" fill="#d8ad74" stroke="#8a5a2c" stroke-width="2.2" />
       <path d="M44 104 v62" stroke="#f0d3a4" stroke-width="3" stroke-linecap="round" />

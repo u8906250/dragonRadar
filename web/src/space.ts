@@ -4,7 +4,7 @@
  * - 再拉遠：月球的軌道和月球，太陽、行星和它們的軌道（以地球為中心，距離照真實比例，位置照今天推算）
  */
 import { bottleSize, type LatLng } from './geo';
-import { BOTTLE_PATH, TAKEN_MARK, WAVE_BACK, WAVE_FRONT, DEEP_FROM_KM, LY_KM, RADAR_GEOM, RADAR_VIEW, TINY_EARTH, viewReach, viewRect } from './radar';
+import { BOTTLE_PATH, LETTER_SCROLL, TAKEN_MARK, WAVE_BACK, WAVE_FRONT, DEEP_FROM_KM, LY_KM, RADAR_GEOM, RADAR_VIEW, TINY_EARTH, viewReach, viewRect } from './radar';
 import type { StreetClass, StreetLine } from './streets';
 import { nearPark, PARK_MIN_KM, parkGeom, parkSvg, ringArea, scatter } from './park';
 import { TAIPEI_MAJOR_ROADS, TAIPEI_MINOR_ROADS, TAIPEI_OUTLINE } from './taipei';
@@ -874,7 +874,7 @@ function woofGlobe(x: number, y: number, r: number, view: SpaceView, toSun: Vec3
       `<circle class="hit" r="14" />` +
       (bk === 0
         ? '<circle class="dot" r="3.4" />'
-        : `<path class="wave back" d="${WAVE_BACK}" transform="scale(${bk.toFixed(3)})" /><g class="body"><path class="glass" d="${BOTTLE_PATH}" transform="rotate(-20) scale(${bk.toFixed(3)})" />${b.taken ? `<g transform="scale(${bk.toFixed(3)})">${TAKEN_MARK}</g>` : ''}</g><path class="wave front" d="${WAVE_FRONT}" transform="scale(${bk.toFixed(3)})" />`) +
+        : `<path class="wave back" d="${WAVE_BACK}" transform="scale(${bk.toFixed(3)})" /><g class="body"><path class="glass" d="${BOTTLE_PATH}" transform="rotate(-20) scale(${bk.toFixed(3)})" /><g transform="scale(${bk.toFixed(3)})">${LETTER_SCROLL}${b.taken ? TAKEN_MARK : ''}</g></g><path class="wave front" d="${WAVE_FRONT}" transform="scale(${bk.toFixed(3)})" />`) +
       `<title>${b.mine ? '你丟的漂流瓶' : b.taken ? '漂流瓶（已經被收藏了）' : b.state === 'pick' ? '漂流瓶（走到附近了）' : '漂流瓶'}</title></g>`;
   }
   return `<g class="space-globe" transform="translate(${f1(ox)} ${f1(oy)})">${out}</g>`;

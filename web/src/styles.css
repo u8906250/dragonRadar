@@ -2066,7 +2066,7 @@ path.map-seam-walkers { --p: 15px; }
 /* 漂流瓶：海玻璃色。遠的是一團模糊訊號，200 m 內看得到瓶子，撿得到時外面有一圈在呼吸 */
 .radar .bottle { cursor: pointer; color: #43b8d4; }
 .radar .bottle .hit { fill: transparent; }
-.radar .bottle .glass { fill: #8fdcec; stroke: #155868; stroke-width: 1.3; stroke-linejoin: round; }
+.radar .bottle .glass { fill: rgba(225, 247, 251, 0.35); stroke: #2f6f7c; stroke-width: 1.3; stroke-linejoin: round; }
 /* 範圍超過 10 km：淡藍色的小點 */
 .radar .bottle .dot { fill: #9fdcec; stroke: #155868; stroke-opacity: 0.35; stroke-width: 1.2; }
 /* 雷達上漂浮的瓶子（閃光層，radar.ts 的 floatBottles）：上下漂、左右晃，節拍錯開 */
@@ -2076,15 +2076,15 @@ path.map-seam-walkers { --p: 15px; }
   width: calc(20 * var(--k) * var(--u)); height: calc(20 * var(--k) * var(--u)); left: calc(-10 * var(--k) * var(--u)); top: calc(-10 * var(--k) * var(--u));
   animation: bottle-float 3.4s ease-in-out infinite; animation-delay: var(--d, 0s);
 }
-.bottle-float .bottle path { fill: #8fdcec; stroke: #155868; stroke-width: 1.3; stroke-linejoin: round; }
-.bottle-float.mine .bottle path { fill: rgba(255, 255, 255, 0.55); stroke: #2a9bb8; stroke-width: 1.8; }
+/* 瓶子統一是透明的玻璃，裡面一卷信（v1.647 使用者說的；自己丟的、別人的都一樣） */
+.bottle-float .bottle > path:not(.taken-mark) { fill: rgba(225, 247, 251, 0.35); stroke: #2f6f7c; stroke-width: 1.3; stroke-linejoin: round; }
 .bottle-float.picked { opacity: 0.85; }
 /* 收藏頁裡收藏滿 24 小時的信（v1.646）：裝在塞好軟木塞的瓶子裡，點瓶子打開（漂流瓶畫面裡的瓶子是空的，這裡信卷、軟木塞要看得到） */
 .letter-bottle { align-self: center; padding: 6px 0 2px; background: none; border: 0; cursor: pointer; }
 .letter-bottle .real-bottle { display: block; width: 52px; height: 104px; transition: transform 0.2s; }
 .letter-bottle .real-bottle .scroll, .letter-bottle .real-bottle .cork { opacity: 1; }
 .letter-bottle:hover .real-bottle, .letter-bottle:focus-visible .real-bottle { transform: rotate(-6deg) translateY(-2px); }
-.bottle-float.selected .bottle path { stroke: var(--blip-selected); stroke-width: 2.4; }
+.bottle-float.selected .bottle > path:not(.taken-mark) { stroke: var(--blip-selected); stroke-width: 2.4; }
 /* 水流：後面淡、前面深一點，往右慢慢流、淡出再出現（兩道錯開） */
 .bottle-float .flow {
   width: calc(32 * var(--k) * var(--u)); height: calc(20 * var(--k) * var(--u)); left: calc(-16 * var(--k) * var(--u)); top: calc(-10 * var(--k) * var(--u));
@@ -2105,8 +2105,7 @@ path.map-seam-walkers { --p: 15px; }
 .radar .woof-bottle .wave.back { stroke: #a9dfee; stroke-width: 1.2; }
 .radar .woof-bottle .wave.front { stroke: #7cc8de; stroke-width: 1.3; }
 .radar .bottle.selected .dot { stroke: var(--blip-selected); stroke-opacity: 1; stroke-width: 2; }
-.radar .bottle.mine .glass { fill: transparent; stroke: #2a9bb8; stroke-width: 1.8; }
-.radar .bottle.picked { opacity: 0.5; }
+.radar .bottle.picked { opacity: 0.85; }
 .radar .bottle.selected .glass { stroke: var(--blip-selected); stroke-width: 2.4; }
 .radar .bottle-hint .glass { opacity: 0.85; }
 .radar .bottle-hint .hint-label { fill: #2a9bb8; font-size: 11px; font-weight: 700; paint-order: stroke; stroke: var(--label-halo); stroke-width: 3px; stroke-linejoin: round; pointer-events: none; }
@@ -2124,9 +2123,8 @@ path.map-seam-walkers { --p: 15px; }
 .bottle-dots .map-bottle svg { display: none; }
 .bottle-dots .map-bottle::after { content: ''; position: absolute; left: 50%; top: 50%; width: 8px; height: 8px; margin: -4px 0 0 -4px; border-radius: 50%; background: #9fdcec; box-shadow: 0 0 0 1.5px rgba(21, 88, 104, 0.35); }
 .bottle-dots .map-bottle.picked::after { opacity: 0.55; }
-.map-bottle path { fill: #8fdcec; stroke: #155868; stroke-width: 1.3; stroke-linejoin: round; }
-.map-bottle.mine path { fill: #fff; stroke: #2a9bb8; stroke-width: 1.8; }
-.map-bottle.picked { opacity: 0.55; }
+.map-bottle svg > path:not(.taken-mark) { fill: rgba(225, 247, 251, 0.45); stroke: #2f6f7c; stroke-width: 1.3; stroke-linejoin: round; }
+.map-bottle.picked { opacity: 0.85; }
 
 
 /* 漂流瓶按鈕與面板 */

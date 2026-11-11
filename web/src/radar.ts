@@ -229,6 +229,9 @@ const FLOAT_MAX = 40;
  * 被收藏的瓶子的標記（v1.646 使用者說地圖上只要標記被收藏，不用真的把信放進瓶子；24 小時後進到收藏才放進瓶子）：
  * 瓶子右上角一顆小愛心。雷達、地圖、汪星海上的瓶子都用這個
  */
+/** 瓶子裡的信卷（v1.647 使用者說瓶子統一用透明色、裡面放信卷）：牛皮紙卷、紅色綁帶，跟瓶子一樣斜 20 度 */
+export const LETTER_SCROLL =
+  '<g class="letter-in" transform="rotate(-20)"><rect x="-1.6" y="-1.4" width="3.2" height="7.4" rx="1.5" fill="#d8ad74" stroke="#8a5a2c" stroke-width="0.6" /><path d="M-1.6 2.3 h3.2" stroke="#e05a4f" stroke-width="1.2" /></g>';
 export const TAKEN_MARK =
   '<path class="taken-mark" d="M5.6 -3.4 c-1.7 -1.2 -3.1 -2.3 -3.1 -3.7 a1.55 1.55 0 0 1 3.1 -0.45 a1.55 1.55 0 0 1 3.1 0.45 c0 1.4 -1.4 2.5 -3.1 3.7 z" fill="#ef6b5f" stroke="#b8392f" stroke-width="0.6" stroke-linejoin="round" />';
 /** 瓶子的形狀（中心在原點，高約 16）；汪星海上的瓶子（space.ts）也用這個 */
@@ -1624,7 +1627,7 @@ export class Radar {
       // 瓶子泡在水裡：後面一道淡淡的水波、前面一道蓋住瓶底，兩道都慢慢往一邊流（v1.606 使用者說感覺不出漂流，旁邊畫一點水流）
       tw.innerHTML =
         `<svg class="flow back" viewBox="-16 -10 32 20" aria-hidden="true"><path d="${WAVE_BACK}" /></svg>` +
-        `<svg class="bottle" viewBox="-10 -10 20 20" aria-hidden="true"><path d="${BOTTLE_PATH}" transform="rotate(-20)" />${b.picked ? TAKEN_MARK : ''}</svg>` +
+        `<svg class="bottle" viewBox="-10 -10 20 20" aria-hidden="true"><path d="${BOTTLE_PATH}" transform="rotate(-20)" />${LETTER_SCROLL}${b.picked ? TAKEN_MARK : ''}</svg>` +
         `<svg class="flow front" viewBox="-16 -10 32 20" aria-hidden="true"><path d="${WAVE_FRONT}" /></svg>`;
       this.flashSquare.appendChild(tw);
     }
@@ -1639,6 +1642,9 @@ export class Radar {
     else {
       const body = el('g', { class: 'body' });
       body.appendChild(el('path', { class: 'glass', d: BOTTLE_PATH, transform: `rotate(-20) scale(${(0.8 * k).toFixed(3)})` }));
+      const scroll = el('g', { transform: `scale(${(0.8 * k).toFixed(3)})` });
+      scroll.innerHTML = LETTER_SCROLL;
+      body.appendChild(scroll);
       g.appendChild(body);
     }
     // 字寫在瓶子往圓心那一側，才不會跑出雷達

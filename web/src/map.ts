@@ -1,5 +1,5 @@
 import type * as Leaflet from 'leaflet';
-import { TAKEN_MARK } from './radar';
+import { LETTER_SCROLL, TAKEN_MARK } from './radar';
 import { DOME_SVG, idlePhase, isSceneKind, PATROL_SVG, sceneSvg, SCOOTER_SVG, SOCCER_SVG, TRUCK_SVG, WALKER_SVG, windSvg, type SceneKind } from './hq-scenes';
 import { alongLine, BOAT_SVG, crackSvg, FITBUS_BODY, FITBUS_SVG, hqDenseZoom, hqMotionZoom, HQ_LABEL_ZOOM, HQ_NET_LABEL_KM, BIKE_SVG, HIKER_SVG, PETWALK_SVG, FISH_SVG, WETLAND_BIRDS, MUSIC_NOTES, bikePhase, fitbusPhase, fitbusStopSvg, cultureSvg, regrowSvg, serviceSvg, stitchSvg, boatPhase, fireworksSvg, FIREWORKS_MS, flowOut, HQ_VOYAGE_MS, RAINBOW_FLOW_TOTAL, RAINBOW_STAGGER_MS, surge, SURGE_TOTAL, voyagePhase, voyageTimeOf } from './flow';
 import { bottleSize, haversineKm, type LatLng } from './geo';
@@ -683,7 +683,7 @@ export class MapView {
         // 跟雷達一樣：瓶子泡在水裡，前後兩道水流慢慢往一邊流
         html:
           `<span class="mflow back"><svg viewBox="-16 -10 32 20" width="40" height="25"><path d="${WAVE_BACK}"/></svg></span>` +
-          `<span class="float" style="--d:${-((b.id * 0.73) % 3.4).toFixed(2)}s"><svg viewBox="-10 -10 20 20" width="24" height="24"><path d="${MAP_BOTTLE_PATH}" transform="rotate(-20)"/>${b.picked ? TAKEN_MARK : ''}</svg></span>` +
+          `<span class="float" style="--d:${-((b.id * 0.73) % 3.4).toFixed(2)}s"><svg viewBox="-10 -10 20 20" width="24" height="24"><path d="${MAP_BOTTLE_PATH}" transform="rotate(-20)"/>${LETTER_SCROLL}${b.picked ? TAKEN_MARK : ''}</svg></span>` +
           `<span class="mflow front"><svg viewBox="-16 -10 32 20" width="40" height="25"><path d="${WAVE_FRONT}"/></svg></span>`,
         iconSize: [24, 24],
         iconAnchor: [12, 12],
