@@ -165,30 +165,57 @@ export function stripJpegMeta(b: Uint8Array): Uint8Array {
 }
 
 const PHOTO_PROMPT = `你是「洋流雷達」漂流瓶照片的審核員。漂流瓶是使用者留給路過陌生人的一段話，可以附一張照片（台北大洋流競選活動的網站上）。
-風景、街景、食物、寵物、活動現場、自拍、合照，收到的賀卡、紀念品、明信片（看不清楚收件人姓名、地址的）都可以。
 
-只擋下這幾類：
-- 色情、裸露、性暗示
-- 暴力、血腥、自殘、令人不舒服的畫面
-- 個人資料：證件、文件、信封或螢幕上看得清楚的姓名、地址、電話、帳號；看得清楚的車牌、門牌號碼；QR code
-- 廣告、商品推銷、價目表
-- 攻擊、嘲諷、抹黑任何人或團體（包括候選人、政黨）的圖文
+大部分照片都應該允許，category 填 none：風景、街景、食物、寵物、自拍、合照、活動現場，
+包括競選活動、造勢晚會、掃街、遊行、市集、演唱會、廟會的現場照片（舞台、人群、旗子、布條、看板、背板、候選人，候選人或政黨的海報、宣傳品都可以），
+收到的賀卡、紀念品、明信片（看不清楚收件人姓名、地址的）。
 
-只輸出 JSON：{"allowed": true 或 false, "reason": "不允許時用一句話說明是哪一類，給使用者看；允許時空字串"}`;
+只有明確屬於下面幾類才擋下，category 填對應的代號：
+- sexual：色情、裸露、性暗示
+- violence：暴力、血腥、自殘、令人不舒服的畫面
+- privacy：證件、文件、信封或螢幕上看得清楚的姓名、地址、電話、帳號；看得清楚的車牌、門牌號碼；照片主要拍的是一個 QR code
+- ad：商店、商品、服務的廣告或推銷，價目表、菜單、優惠傳單（競選活動、政黨、候選人的看板和宣傳品不算廣告）
+- attack：攻擊、嘲諷、抹黑任何人或團體（包括候選人、政黨）的圖文
 
-/** AI 看圖審核；AI 失敗就不收（寧可不收） */
-async function moderatePhoto(env: Env, dataUrl: string): Promise<{ allowed: boolean; reason: string }> {
+拿不準就填 none。
+
+只輸出 JSON：{"category": "none" 或 "sexual" 或 "violence" 或 "privacy" 或 "ad" 或 "attack", "reason": "不是 none 時用一句話說明；none 時空字串"}`;
+
+/** 照片擋下的類別給使用者看的說法（模型自己寫的原因只記在紀錄裡：v1.629 前造勢活動的照片被判成「廣告、商品推銷、價目表」） */
+const PHOTO_LABEL: Record<string, string> = {
+  sexual: '色情或裸露',
+  violence: '暴力、血腥或令人不舒服的畫面',
+  privacy: '看得清楚的個資（證件、姓名地址、車牌、門牌、QR code）',
+  ad: '商店或商品的廣告、價目表',
+  attack: '攻擊、嘲諷或抹黑的圖文',
+};
+const PHOTO_CATEGORIES = ['none', 'sexual', 'violence', 'privacy', 'ad', 'attack'];
+
+/**
+ * AI 看圖審核：類別只能從 PHOTO_CATEGORIES 選（schema 限定，模型不能自己編理由）；讀不出來再試一次，都不行就不收（寧可不收）。
+ * 回傳是否通過、給使用者看的原因、模型寫的原因（記在紀錄裡）
+ */
+export async function moderatePhoto(env: Env, dataUrl: string): Promise<{ allowed: boolean; category: string; reason: string; note: string }> {
   const ai = env.AI as unknown as { run(model: string, inputs: unknown): Promise<unknown> };
+  const schema = {
+    type: 'object',
+    properties: { category: { type: 'string', enum: PHOTO_CATEGORIES }, reason: { type: 'string' } },
+    required: ['category', 'reason'],
+  };
   for (let attempt = 0; attempt < 2; attempt++) {
     try {
       const res = await ai.run(PHOTO_MODEL, {
         messages: [{ role: 'user', content: [{ type: 'text', text: PHOTO_PROMPT }, { type: 'image_url', image_url: { url: dataUrl } }] }],
+        response_format: { type: 'json_schema', json_schema: schema },
         max_tokens: 200,
         temperature: 0,
       });
       const c = responseContent(res);
-      const o = (typeof c === 'string' ? JSON.parse(c.replace(/^[^{]*/, '').replace(/[^}]*$/, '')) : c) as { allowed?: unknown; reason?: unknown };
-      if (typeof o?.allowed === 'boolean') return { allowed: o.allowed, reason: typeof o.reason === 'string' ? o.reason.slice(0, 80) : '' };
+      const o = (typeof c === 'string' ? JSON.parse(c.replace(/^[^{]*/, '').replace(/[^}]*$/, '')) : c) as { category?: unknown; reason?: unknown; allowed?: unknown };
+      const note = typeof o?.reason === 'string' ? o.reason.slice(0, 80) : '';
+      const category = typeof o?.category === 'string' && PHOTO_CATEGORIES.includes(o.category) ? o.category : typeof o?.allowed === 'boolean' ? (o.allowed ? 'none' : 'unknown') : null;
+      if (category === null) continue;
+      return { allowed: category === 'none', category, reason: category === 'none' ? '' : (PHOTO_LABEL[category] ?? '不適合放的照片'), note };
     } catch (e) {
       console.warn(`bottle photo moderation failed: ${String(e)}`);
     }
@@ -607,8 +634,8 @@ export async function dropBottle(env: Env, device: string | null, ip: string, bo
   if (photo && env.BOTTLE_PHOTOS) {
     const pv = await aiDown(moderatePhoto(env, photo.dataUrl));
     if (!pv.allowed) {
-      const msg = `這張照片不能放${pv.reason ? `：${pv.reason}` : ''}`;
-      await logReject(env, dev, ip, 'photo', msg, text, true, now);
+      const msg = `這張照片不能放：${pv.reason}`;
+      await logReject(env, dev, ip, 'photo', `${msg}｜${pv.category}${pv.note ? `（${pv.note}）` : ''}`, text, true, now);
       throw new ReportError(422, msg);
     }
     key = `bottles/${now}-${crypto.randomUUID()}.jpg`;
