@@ -712,6 +712,8 @@ const LOOKS: Record<string, { km: number; min: number; tint: string }> = {
   neptune: { km: 24_622, min: 4.2, tint: '#5876d6' },
   // Kepler-22b：表面什麼樣子沒有人知道，可能是海洋行星，淡藍色是示意
   kepler22b: { km: KEPLER22B_KM, min: 3, tint: '#5fa8d8' },
+  // 比鄰星、TRAPPIST-1 的行星（bodySvg 用顏色；當不了中心，不會拿來算半徑）
+  exo: { km: 6_371, min: 2.6, tint: '#5fa8d8' },
 };
 
 /** 天體的真實半徑（公里）：中心換到這顆時，最多放大到剛好看得到整顆 */
@@ -1079,13 +1081,72 @@ export function keplerPlanet(when: Date): Vec3 {
   return add3(star, add3(scale3(u, a * Math.cos(t)), scale3(w, a * Math.sin(t))));
 }
 
-/** 太陽系外面可以點、當中心的（第 2 號願望：Kepler-22b、星系也可以點，然後放大） */
-const DEEP_KEYS = new Set(['kepler22b', 'milkyway', ...GALAXIES.map((g) => g.key)]);
+/*
+ * 銀河系裡面（v1.638 使用者說「銀河系裡面還有其他的嗎」，挑了六個）：比鄰星、天狼星、TRAPPIST-1、參宿四、獵戶座大星雲、人馬座A*。
+ * 位置、距離、半徑照 Wikipedia（距離照視差換算）；行星照 NASA 系外行星資料庫：TRAPPIST-1 的週期、凌日時間照 Ducrot 等人 2020，
+ * 軌道大小、行星半徑照 Agol 等人 2021（凌日時間有變化，現在在哪是大約的）；比鄰星的行星不會從恆星前面經過，
+ * 軌道斜多少、現在轉到哪不知道（示意：跟 Kepler-22b 一樣的軌道面，從資料庫的參考時間算起），行星多大也不知道（畫最小的大小）
+ */
+const R_SUN_KM = 696_340;
+interface ExoPlanet { name: string; aAu: number; periodDays: number; t0Jd: number; rEarth: number | null }
+export interface StarInfo { key: string; name: string; ra: number; dec: number; ly: number; rSun: number; tint: string; planets: ExoPlanet[] }
+export const STARS: StarInfo[] = [
+  {
+    key: 'proxima', name: '比鄰星', ra: 14 + 29 / 60 + 42.946 / 3600, dec: -(62 + 40 / 60 + 46.16 / 3600), ly: 4.2465, rSun: 0.162, tint: '#e8735a',
+    planets: [
+      { name: '比鄰星 d', aAu: 0.02881, periodDays: 5.12338, t0Jd: 2460557.55, rEarth: null },
+      { name: '比鄰星 b', aAu: 0.04848, periodDays: 11.18465, t0Jd: 2460548.59, rEarth: null },
+    ],
+  },
+  { key: 'sirius', name: '天狼星', ra: 6 + 45 / 60 + 8.917 / 3600, dec: -(16 + 42 / 60 + 58.02 / 3600), ly: 8.608, rSun: 1.7144, tint: '#d6e6ff', planets: [] },
+  {
+    key: 'trappist1', name: 'TRAPPIST-1', ra: 23 + 6 / 60 + 29.368 / 3600, dec: -(5 + 2 / 60 + 29.04 / 3600), ly: 40.66, rSun: 0.1191, tint: '#d8604a',
+    planets: [
+      { name: 'b', aAu: 0.01154, periodDays: 1.51088432, t0Jd: 2457322.514193, rEarth: 1.116 },
+      { name: 'c', aAu: 0.0158, periodDays: 2.42179346, t0Jd: 2457282.8113871, rEarth: 1.097 },
+      { name: 'd', aAu: 0.02227, periodDays: 4.04978035, t0Jd: 2457670.1463014, rEarth: 0.788 },
+      { name: 'e', aAu: 0.02925, periodDays: 6.09956479, t0Jd: 2457660.3676621, rEarth: 0.92 },
+      { name: 'f', aAu: 0.03849, periodDays: 9.20659399, t0Jd: 2457671.3737299, rEarth: 1.045 },
+      { name: 'g', aAu: 0.04683, periodDays: 12.3535557, t0Jd: 2457665.3628439, rEarth: 1.129 },
+      { name: 'h', aAu: 0.06189, periodDays: 18.7672745, t0Jd: 2457662.5741486, rEarth: 0.755 },
+    ],
+  },
+  { key: 'betelgeuse', name: '參宿四', ra: 5 + 55 / 60 + 10.30536 / 3600, dec: 7 + 24 / 60 + 25.4304 / 3600, ly: 548, rSun: 764, tint: '#e8743c', planets: [] },
+];
+/** 獵戶座大星雲（M42）：約 1,267 光年，看起來 65 × 60 角分，直徑約 24 光年 */
+const ORION_NEBULA = { ra: 5 + 35 / 60 + 16.8 / 3600, dec: -(5 + 23 / 60 + 15 / 3600), ly: 1_267, r: 12 };
+/**
+ * 人馬座A*：銀河系中心的黑洞（就是銀河系畫的中心），約 430 萬個太陽重；事件視界（史瓦西半徑）約 1,270 萬 km，
+ * 黑洞的影子（事件視界望遠鏡拍到的暗的那一塊）約 2.6 倍大，外面一圈亮的環
+ */
+const SGRA_SHADOW_KM = 1.267e7 * 2.6;
+const starPos = (s: StarInfo): Vec3 => scale3(eclDir(s.ra, s.dec), s.ly * LY_KM);
+const nebulaPos = (): Vec3 => scale3(eclDir(ORION_NEBULA.ra, ORION_NEBULA.dec), ORION_NEBULA.ly * LY_KM);
+/** 恆星的行星軌道面：跟 Kepler-22b 一樣，包含地球看過去的方向（TRAPPIST-1 是真的從側面看；比鄰星是示意） */
+function starOrbit(s: StarInfo): { u: Vec3; w: Vec3 } {
+  const los = eclDir(s.ra, s.dec);
+  const w0 = cross3([0, 0, 1], los);
+  return { u: scale3(los, -1), w: scale3(w0, 1 / Math.hypot(...w0)) };
+}
+/** 行星這一刻的位置（公里）：照參考時間（TRAPPIST-1 是凌日）和週期算轉到哪（圓軌道） */
+function exoPlanetPos(s: StarInfo, p: ExoPlanet, when: Date): Vec3 {
+  const { u, w } = starOrbit(s);
+  const jd = when.getTime() / 86_400_000 + 2440587.5;
+  const t = (2 * Math.PI * (jd - p.t0Jd)) / p.periodDays;
+  const a = p.aAu * AU_KM;
+  return add3(starPos(s), add3(scale3(u, a * Math.cos(t)), scale3(w, a * Math.sin(t))));
+}
+
+/** 太陽系外面可以點、當中心的（第 2 號願望：Kepler-22b、星系也可以點，然後放大；v1.638 加銀河系裡面的六個） */
+const DEEP_KEYS = new Set(['kepler22b', 'milkyway', ...GALAXIES.map((g) => g.key), ...STARS.map((s) => s.key), 'm42', 'sgra']);
 export const isDeepBody = (key: string): boolean => DEEP_KEYS.has(key);
-/** 太陽系外面的東西的位置（公里）：Kepler-22b、星系的中心 */
+/** 太陽系外面的東西的位置（公里）：Kepler-22b、星系的中心、恆星、星雲、人馬座A* */
 function deepPosition(key: string, when: Date): Vec3 | undefined {
   if (key === 'kepler22b') return keplerPlanet(when);
-  if (key === 'milkyway') return milkyWay().center;
+  if (key === 'milkyway' || key === 'sgra') return milkyWay().center;
+  if (key === 'm42') return nebulaPos();
+  const s = STARS.find((x) => x.key === key);
+  if (s) return starPos(s);
   const g = GALAXIES.find((x) => x.key === key);
   return g ? scale3(eclDir(g.ra, g.dec), g.ly * LY_KM) : undefined;
 }
@@ -1093,8 +1154,56 @@ function deepPosition(key: string, when: Date): Vec3 | undefined {
 function deepRadiusKm(key: string): number {
   if (key === 'kepler22b') return KEPLER22.planetKm;
   if (key === 'milkyway') return MILKY_WAY.r * LY_KM;
+  if (key === 'sgra') return SGRA_SHADOW_KM * 1.3;
+  if (key === 'm42') return ORION_NEBULA.r * LY_KM;
+  const s = STARS.find((x) => x.key === key);
+  if (s) return s.rSun * R_SUN_KM;
   const g = GALAXIES.find((x) => x.key === key);
   return g ? g.r * LY_KM : 0;
+}
+
+/** 恆星：跟太陽一樣有光芒，顏色照恆星（紅矮星偏紅、天狼星白裡帶藍、參宿四橘紅） */
+const starSvg = (x: number, y: number, r: number, tint: string): string => bodySvg('sun', x, y, r, null).replace('class="space-sun"', `class="space-sun" style="fill:${tint}"`);
+
+/**
+ * 中心是比鄰星、天狼星、TRAPPIST-1、參宿四，拉近到太陽系的大小以內：恆星照真實大小（太小就畫最小的大小）、行星和軌道（虛線）；
+ * 行星的軌道比恆星還小（拉得不夠近，疊在恆星上）的先不畫
+ */
+function starSystemMarkup(s: StarInfo, proj: (p: Vec3) => { x: number; y: number; d: number }, k: number, inView: (x: number, y: number, r?: number) => boolean, when: Date): string {
+  const sq = proj(starPos(s));
+  const sr = Math.max(6, s.rSun * R_SUN_KM * k);
+  const { u, w } = starOrbit(s);
+  let out = '';
+  const draw: Array<{ d: number; svg: string; body: Body }> = [];
+  for (const p of s.planets) {
+    const a = p.aAu * AU_KM;
+    if (a * k < sr + 4) continue;
+    if (a * k <= INNER * 12) {
+      const pts = Array.from({ length: 128 }, (_, i) => {
+        const t = (i / 128) * 2 * Math.PI;
+        const q = proj(add3(starPos(s), add3(scale3(u, a * Math.cos(t)), scale3(w, a * Math.sin(t)))));
+        return `${f1(q.x)} ${f1(q.y)}`;
+      });
+      out += `<path class="region-outline open space-orbit" d="M${pts.join('L')}Z" />`;
+    }
+    const q = proj(exoPlanetPos(s, p, when));
+    const r = Math.max(LOOKS.exo.min, (p.rEarth ?? 1) * LOOKS.exo.km * k);
+    if (!inView(q.x, q.y, r)) continue;
+    draw.push({ d: q.d, svg: bodySvg('exo', q.x, q.y, r, sq), body: { x: q.x, y: q.y, r, cls: 'exo', name: p.name } });
+  }
+  draw.push({ d: sq.d, svg: starSvg(sq.x, sq.y, sr, s.tint), body: { x: sq.x, y: sq.y, r: sr + 5, cls: s.key, name: s.name, force: true } });
+  draw.sort((x, y) => x.d - y.d);
+  for (const b of draw) out += b.svg;
+  // 名字：恆星先排
+  const named = [draw.find((b) => b.body.cls === s.key)!.body, ...draw.filter((b) => b.body.cls !== s.key).map((b) => b.body)];
+  return `${out}${labels(named)}`;
+}
+
+/** 中心是人馬座A*、拉近到太陽系的大小以內：黑洞的影子（暗的一塊）和外面一圈亮的環（像事件視界望遠鏡的照片，淡淡的橘色） */
+function blackHoleMarkup(proj: (p: Vec3) => { x: number; y: number; d: number }, k: number): string {
+  const c = proj(milkyWay().center);
+  const r = Math.max(6, SGRA_SHADOW_KM * k);
+  return `<circle class="space-bh-ring" cx="${f1(c.x)}" cy="${f1(c.y)}" r="${f1(r * 1.15)}" style="stroke-width:${f1(Math.max(2, r * 0.3))}" /><circle class="space-bh" cx="${f1(c.x)}" cy="${f1(c.y)}" r="${f1(r)}" />${labels([{ x: c.x, y: c.y, r: r * 1.35 + 2, cls: 'sgra', name: '人馬座A*', force: true }])}`;
 }
 
 /**
@@ -1170,6 +1279,31 @@ function deepMarkup(proj: (p: Vec3) => { x: number; y: number; d: number }, k: n
     const c = scale3(eclDir(g.ra, g.dec), g.ly * LY_KM);
     disk(g.key, g.name, c, g.r * LY_KM, diskLines(c, u, v, g.r * LY_KM, g.arms, g.r * 0.2 * LY_KM, 0));
   }
+  // 銀河系裡面（v1.638）：獵戶座大星雲畫真實大小的一圈，恆星畫成一點（顏色照恆星）；離太陽系太近、跟別的疊在一起就不畫，中心是它就一定畫
+  const free = (key: string, q: { x: number; y: number }): boolean => key === focus || (apart(q, 10) && !placed.some((p) => Math.hypot(q.x - p.x, q.y - p.y) < 10));
+  const neb = proj(nebulaPos());
+  const nr = ORION_NEBULA.r * LY_KM * k;
+  if (inView(neb.x, neb.y, nr) && nr <= INNER * 30 && free('m42', neb)) {
+    placed.push(neb);
+    if (nr >= 3) lines += `<circle class="space-nebula" cx="${f1(neb.x)}" cy="${f1(neb.y)}" r="${f1(nr)}" />`;
+    bodies += `<g class="space-hit" data-body="m42"><circle class="hit" cx="${f1(neb.x)}" cy="${f1(neb.y)}" r="${f1(Math.max(12, Math.min(nr * 0.6, 40)))}" />${nr < 3 ? `<circle class="space-nebula-dot" cx="${f1(neb.x)}" cy="${f1(neb.y)}" r="2.4" />` : ''}</g>`;
+    named.push({ x: neb.x, y: neb.y, r: Math.min(nr, 4), cls: 'm42', name: '獵戶座大星雲' });
+  }
+  for (const s of STARS) {
+    const q = proj(starPos(s));
+    if (!inView(q.x, q.y, 3) || !free(s.key, q)) continue;
+    placed.push(q);
+    bodies += `<g class="space-hit" data-body="${s.key}"><circle class="hit" cx="${f1(q.x)}" cy="${f1(q.y)}" r="12" /><circle class="space-star" cx="${f1(q.x)}" cy="${f1(q.y)}" r="2.8" style="fill:${s.tint}" /></g>`;
+    named.push({ x: q.x, y: q.y, r: 3, cls: s.key, name: s.name });
+  }
+  // 人馬座A*（銀河系的中心）：銀河系畫得夠大、或中心是它才畫；畫在銀河系上面，點正中間是它，旁邊是銀河系
+  if (focus === 'sgra' || (!tinyMw && MILKY_WAY.r * LY_KM * k >= 60)) {
+    const c = proj(milkyWay().center);
+    if (inView(c.x, c.y, 3)) {
+      bodies += `<g class="space-hit" data-body="sgra"><circle class="hit" cx="${f1(c.x)}" cy="${f1(c.y)}" r="10" /><circle class="space-bh-ring" cx="${f1(c.x)}" cy="${f1(c.y)}" r="3.2" style="stroke-width:1.6" /><circle class="space-bh" cx="${f1(c.x)}" cy="${f1(c.y)}" r="2.4" /></g>`;
+      named.push({ x: c.x, y: c.y, r: 4, cls: 'sgra', name: '人馬座A*' });
+    }
+  }
   // Kepler-22b（跟恆星 Kepler-22 只差 0.85 AU，這麼遠是同一個點）：離太陽系夠遠才畫，中心是它就一定畫；點了飛過去（第 2 號願望）
   // （點子來自誰寫在說明頁的「實現的願望」，v1.583 使用者說不用寫在這裡）
   const kp = proj(keplerPlanet(when));
@@ -1222,6 +1356,10 @@ export function spaceMarkup(o: SpaceOpts): string {
   const radius = (key: string): number => Math.max(LOOKS[key].min, LOOKS[key].km * k);
   // 中心是 Kepler-22b、拉近到恆星系的大小：恆星、軌道、行星
   if (view.focus === 'kepler22b' && o.scaleKm <= DEEP_FROM_KM) return keplerSystemMarkup(proj, k, inView, o.when);
+  // 中心是銀河系裡面的恆星、人馬座A*，拉近到太陽系的大小（v1.638）
+  const star = STARS.find((s) => s.key === view.focus);
+  if (star && o.scaleKm <= DEEP_FROM_KM) return starSystemMarkup(star, proj, k, inView, o.when);
+  if (view.focus === 'sgra' && o.scaleKm <= DEEP_FROM_KM) return blackHoleMarkup(proj, k);
   // 太陽系外面：太陽系縮成一個點，畫 Kepler-22b、銀河系和附近的星系
   if (o.scaleKm > DEEP_FROM_KM || (view.focus && isDeepBody(view.focus))) {
     const deep = deepMarkup(proj, k, inView, proj(pos.get('sun')!), F, view.focus, o.when);

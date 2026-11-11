@@ -1610,6 +1610,12 @@ path.map-seam-walkers { --p: 15px; }
 .radar .region-outline.space-galaxy-arm { stroke-width: 1; stroke-opacity: 0.3; }
 .radar .space-galaxy-dot { fill: #8b7fd6; fill-opacity: 0.7; stroke: var(--radar-grid); stroke-opacity: 0.6; stroke-width: 0.6; }
 .radar .space-planet.space-exo { fill: #5fa8d8; }
+/* 銀河系裡面（v1.638）：恆星一點（顏色寫在 style）、獵戶座大星雲淡淡的粉紅一圈、人馬座A* 暗的影子外面一圈淡橘的環 */
+.radar .space-star { stroke: var(--radar-grid); stroke-opacity: 0.6; stroke-width: 0.6; }
+.radar .space-nebula { fill: #e98fb4; fill-opacity: 0.14; stroke: #e98fb4; stroke-opacity: 0.5; stroke-width: 1; }
+.radar .space-nebula-dot { fill: #e98fb4; fill-opacity: 0.75; stroke: var(--radar-grid); stroke-opacity: 0.6; stroke-width: 0.6; }
+.radar .space-bh { fill: #2e2b3d; fill-opacity: 0.9; stroke: none; }
+.radar .space-bh-ring { fill: none; stroke: #f0a64a; stroke-opacity: 0.7; }
 .radar .space-sun { fill: #f2b33d; stroke: var(--radar-grid); stroke-opacity: 0.6; stroke-width: 0.8; }
 .radar .space-sun-ray { fill: none; stroke: #e89a2c; stroke-width: 1.4; stroke-linecap: round; }
 /* 星球：線條跟雷達一樣，淡淡的顏色讓人認得出來；背對太陽的一半變暗 */

@@ -199,6 +199,23 @@ describe('太陽系外面（第 1 號願望：Kepler-22b、其他星系）', () 
     expect(m82).toContain('>波德星系<');
     for (const key of ['m32', 'm110', 'ngc6822', 'ic1613', 'm81', 'm82', 'cena', 'ngc253', 'm83', 'm101', 'm51', 'm104', 'm87']) expect(isDeepBody(key)).toBe(true);
   });
+  it('draws six things inside the Milky Way, and their close-ups (v1.638)', () => {
+    for (const key of ['proxima', 'sirius', 'trappist1', 'betelgeuse', 'm42', 'sgra']) expect(isDeepBody(key)).toBe(true);
+    expect(deep(12)).toContain('>比鄰星<');
+    expect(deep(12)).toContain('>天狼星<');
+    expect(deep(60)).toContain('>TRAPPIST-1<');
+    const orion = deep(2_000);
+    expect(orion).toContain('>參宿四<');
+    expect(orion).toContain('>獵戶座大星雲<');
+    expect(deep(40_000)).toContain('data-body="sgra"');
+    // 拉近 TRAPPIST-1：七顆行星和軌道
+    const t1 = spaceMarkup({ ...opts, scaleKm: 1.2e7, rg: 0, view: { focus: 'trappist1', yaw: 0, pitch: 0 } });
+    for (const n of ['b', 'c', 'd', 'e', 'f', 'g', 'h']) expect(t1).toContain(`>${n}<`);
+    expect(t1).toContain('space-orbit');
+    expect(spaceMarkup({ ...opts, scaleKm: 1e7, rg: 0, view: { focus: 'proxima', yaw: 0, pitch: 0 } })).toContain('>比鄰星 b<');
+    expect(spaceMarkup({ ...opts, scaleKm: 1e8, rg: 0, view: { focus: 'sgra', yaw: 0, pitch: 0 } })).toContain('space-bh');
+    expect(focusMinKm('betelgeuse')).toBeCloseTo(764 * 696_340 * 1.3, -3);
+  });
   it('keeps a galaxy drawn when it is the centre', () => {
     const m31 = spaceMarkup({ ...opts, scaleKm: 1e5 * LY_KM, rg: 0, view: { focus: 'm31', yaw: 0, pitch: 0 } });
     expect(m31).toContain('>仙女座星系<');
