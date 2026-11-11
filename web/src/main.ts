@@ -846,6 +846,41 @@ const COUNTY_MAX_KM = 1000;
 let worldLoaded = false;
 let worldLoading = false;
 const inTaiwanBox = (ring: Array<[number, number]>): boolean => ring.every(([lat, lng]) => lat > 21 && lat < 26.5 && lng > 118 && lng < 123);
+/** 世界的海岸線（world.ts，台灣那一塊換成 taiwan.ts）；雷達上東亞那一塊再換成 eastasia.ts 的 */
+let worldRings: Array<Array<[number, number]>> = [];
+
+/*
+ * 東亞（eastasia.ts，v1.642 使用者說日本、韓國也要修正，中國那邊不管放大到多近都不要顯示細節、最多畫到虛線）：
+ * 雷達附近碰到東亞那一塊才載入（約 40 KB）。拉遠時日本、韓國、中國沿海用 1:10m 的海岸線；
+ * 中國的範圍裡不畫路、不畫近距離的實線海岸，近距離（16 km 內）也畫虛線海岸
+ */
+let eaMod: typeof import('./eastasia') | null = null;
+let eaLoading = false;
+function loadEastAsia(): void {
+  if (eaMod || eaLoading) return;
+  eaLoading = true;
+  void import('./eastasia')
+    .then((m) => {
+      eaMod = m;
+      outlineFor = '';
+      streetsFor = '';
+      updateOutline();
+      updateStreets();
+    })
+    .finally(() => {
+      eaLoading = false;
+    });
+}
+/** 東亞那一塊（跟 eastasia.ts 的 EA_BOX 一樣；這裡先寫一份，載入前就判斷得了） */
+const EA_AREA = { s: 18, w: 108, n: 46, e: 146 };
+/** 雷達附近（正中間方圓 km）碰不碰到東亞那一塊 */
+function touchesEastAsia(km: number): boolean {
+  const dLat = km / 111;
+  const dLng = km / (111 * Math.max(0.1, Math.cos((origin.lat * Math.PI) / 180)));
+  return km >= 2500 || !(origin.lat + dLat < EA_AREA.s || origin.lat - dLat > EA_AREA.n || origin.lng + dLng < EA_AREA.w || origin.lng - dLng > EA_AREA.e);
+}
+/** 在台灣本島（含綠島、蘭嶼）：雷達會畫路的範圍裡碰不到中國，不用等東亞的資料 */
+const onTaiwanMain = (p: LatLng): boolean => p.lat > 21.8 && p.lat < 25.4 && p.lng > 120.0 && p.lng < 122.1;
 
 // ---- 道路：600 km 內都畫（台灣哪裡選「全台」都在這裡面；streets.ts，OpenFreeMap 的向量圖磚，第一次用到才載入；範圍越大畫的路越少） ----
 const ROADS_KM = 600;
@@ -922,9 +957,25 @@ function updateStreets(): void {
   }
   // 全螢幕鋪滿時抓到畫面的角（radar.reach 是範圍的幾倍，平常是 1）
   const reach = scaleKm * radar.reach * 1.05;
+  // 中國的範圍裡不畫路、不畫實線海岸（v1.642）：不在台灣本島、附近碰到東亞的，等東亞的資料載入才畫（不要先閃一下）
+  const mayChina = !onTaiwanMain(origin) && touchesEastAsia(reach * 1.25);
+  if (mayChina && !eaMod) {
+    loadEastAsia();
+    if (streetsFor) radar.setStreets(null);
+    streetsFor = '';
+    streetLines = null;
+    return;
+  }
+  const mask = mayChina ? eaMod!.chinaMask : null;
+  /** 一條線的中間那一點在中國的範圍裡 */
+  const hidden = (pts: Float64Array): boolean => {
+    if (!mask) return false;
+    const m = Math.floor(pts.length / 4) * 2;
+    return mask.contains(pts[m], pts[m + 1]);
+  };
   const ky = 110.574;
   // 拖曳中：範圍、圖磚沒變，正中間離錨點不到範圍的 1/4（換算時多留的那一圈）就只給位移
-  const key = `${scaleKm}|${streetTiles}|${radar.reach.toFixed(2)}`;
+  const key = `${scaleKm}|${streetTiles}|${radar.reach.toFixed(2)}|${!!mask}`;
   if (streetLines && streetAnchor && streetsFor === key) {
     if (!panFrom && origin.lat === streetAnchor.lat && origin.lng === streetAnchor.lng) return;
     if (panFrom && streetLoose) {
@@ -960,11 +1011,11 @@ function updateStreets(): void {
     return xy;
   };
   for (const l of lines) {
-    const xy = toXy(l);
+    const xy = hidden(l.pts) ? null : toXy(l);
     if (xy) out[l.cls].push(xy);
   }
   for (const l of coast) {
-    const xy = toXy(l);
+    const xy = hidden(l.pts) ? null : toXy(l);
     if (xy) coastXy.push(xy);
   }
   streetLines = out;
@@ -1215,7 +1266,8 @@ function updateOutline(): void {
     worldLoading = true;
     void Promise.all([import('./world'), import('./counties')])
       .then(([m, c]) => {
-        landRings = [...TAIWAN_RINGS, ...m.WORLD_RINGS.filter((r) => !inTaiwanBox(r))];
+        worldRings = m.WORLD_RINGS.filter((r) => !inTaiwanBox(r));
+        landRings = [...TAIWAN_RINGS, ...worldRings];
         countyLines = c.COUNTY_LINES;
         worldLoaded = true;
         outlineFor = '';
@@ -1226,25 +1278,43 @@ function updateOutline(): void {
         worldLoading = false;
       });
   }
-  const rings = kind === 'land' ? landRings : null;
-  const lines = kind === 'land' && scaleKm <= COUNTY_MAX_KM ? countyLines : [];
-  const mapRings = kind === 'land' && scaleKm > MAP_OUTLINE_KM ? landRings : null;
   // 範圍照 2 的次方分級：縮放跨級才重算（附近的範圍跟著變大）
   const tier = Math.ceil(Math.log2(Math.max(scaleKm, 1)));
-  const key = rings ? `${kind}|${worldLoaded}|${lines.length > 0}|${!!mapRings}|${tier}|${origin.lat},${origin.lng}` : '';
+  const reach = 2 ** tier * 2.5;
+  // 東亞：附近碰到就載入；載入了雷達用它的海岸線，world.ts 在東亞那一塊的點不畫
+  const nearEa = touchesEastAsia(reach);
+  if (nearEa) loadEastAsia();
+  const ea = nearEa ? eaMod : null;
+  const inEa = (lat: number, lng: number): boolean => lat > EA_AREA.s && lat < EA_AREA.n && lng > EA_AREA.w && lng < EA_AREA.e;
+  // 16 km 內只在中國的範圍畫虛線海岸（不在台灣本島時；其他地方用街道圖磚的實線海岸）
+  const china = kind === 'none' && !!ea && !onTaiwanMain(origin);
+  type Src = { ring: Array<[number, number]>; skip?: (lat: number, lng: number) => boolean };
+  const sources: Src[] | null =
+    kind === 'land'
+      ? [
+          ...TAIWAN_RINGS.map((ring) => ({ ring })),
+          ...(ea ? ea.eaCoast.map((ring) => ({ ring })) : []),
+          ...worldRings.map((ring) => ({ ring, skip: ea ? inEa : undefined })),
+        ]
+      : china
+        ? ea!.eaCoast.map((ring) => ({ ring, skip: (lat: number, lng: number) => !ea!.chinaMask.contains(lat, lng) }))
+        : null;
+  const lines = kind === 'land' && scaleKm <= COUNTY_MAX_KM ? countyLines : [];
+  const mapRings = kind === 'land' && scaleKm > MAP_OUTLINE_KM ? landRings : null;
+  const key = sources ? `${kind}|${worldLoaded}|${!!ea}|${china}|${lines.length > 0}|${!!mapRings}|${tier}|${origin.lat},${origin.lng}` : '';
   if (key === outlineFor) return;
   outlineFor = key;
   // 附近的範圍（經緯度的方框）：範圍的 2.5 倍（全螢幕鋪滿時角落比外圈遠）；太大、跨過換日線就全部換算
-  const reach = 2 ** tier * 2.5;
   const dLat = reach / 111;
   const dLng = reach / (111 * Math.max(0.1, Math.cos((origin.lat * Math.PI) / 180)));
   const box = reach < 2500 && Math.abs(origin.lng) + dLng < 180 ? [origin.lat - dLat, origin.lng - dLng, origin.lat + dLat, origin.lng + dLng] : null;
-  const toRadar = (ring: Array<[number, number]>): Array<{ bearing: number; distanceKm: number }> => {
+  const toRadar = (ring: Array<[number, number]>, skip?: (lat: number, lng: number) => boolean): Array<{ bearing: number; distanceKm: number }> => {
     const out: Array<{ bearing: number; distanceKm: number }> = [];
     let gap = false;
-    let skipped = false;
+    // 東亞的海岸線有些是切開的線（頭尾不同一點）：不要接成一圈
+    let skipped = ring.length > 1 && (ring[0][0] !== ring[ring.length - 1][0] || ring[0][1] !== ring[ring.length - 1][1]);
     for (const [lat, lng] of ring) {
-      if (box && (lat < box[0] || lat > box[2] || lng < box[1] || lng > box[3])) {
+      if ((box && (lat < box[0] || lat > box[2] || lng < box[1] || lng > box[3])) || skip?.(lat, lng)) {
         if (!gap && out.length > 0) out.push(FAR_POINT);
         gap = skipped = true;
         continue;
@@ -1256,8 +1326,8 @@ function updateOutline(): void {
     if (skipped && out.length > 0 && out[out.length - 1] !== FAR_POINT) out.push(FAR_POINT);
     return out;
   };
-  radarOutline = rings ? rings.map(toRadar).filter((r) => r.some((p) => p !== FAR_POINT)) : [];
-  radar.setOutline(radarOutline, lines.map(toRadar).filter((r) => r.length > 1));
+  radarOutline = sources ? sources.map((s) => toRadar(s.ring, s.skip)).filter((r) => r.some((p) => p !== FAR_POINT)) : [];
+  radar.setOutline(radarOutline, lines.map((l) => toRadar(l)).filter((r) => r.length > 1));
   map.setOutline(mapRings ?? []);
 }
 
