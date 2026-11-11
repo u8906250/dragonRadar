@@ -11,7 +11,7 @@ import { X_MAX_WEIGHT, xLength } from './xcount';
 import { shortAddress, splitPlace } from './place';
 import { crowdOf, MapView, pinPicker, type BaseMap, type MapRoute, type PinPicker } from './map';
 import { beep, ensureNotificationPermission, iosNeedsHomeScreen, notificationState, pushSubscription, pushSupported, registerServiceWorker, showBanner, systemNotify, unlockAudio, unsubscribePush } from './notify';
-import { checkWishNews, findCard, gotReward, myCards, onWishNews, openAlbum, openHelp, openItems, overlay } from './cards';
+import { checkWishNews, findCard, gotReward, myCards, onWishNews, openAlbum, openHelp, openItems, openWishes, overlay } from './cards';
 import { DEEP_FROM_KM, LY_KM, Radar, SPACE_FROM_KM, type RadarRoute, type RadarStreets, type SpaceView } from './radar';
 import { DEFAULT_THEME_ID, getTheme, THEMES, type Theme } from './themes';
 import type { WoofBottleMark } from './space';
@@ -7400,9 +7400,11 @@ function wireControls(): void {
   $('#cards-btn').addEventListener('click', () => openAlbum());
   // 道具欄：跟卡冊分開，也在選單裡（之後會有更多道具）
   $('#items-btn').addEventListener('click', () => openItems());
-  // 許願有新進度（管理者審核了、上線了）：道具按鈕亮小紅點，收進「⋯」時「⋯」也亮；許過願的瀏覽器開網頁時問一次
+  // 願望（v1.636 從道具欄獨立出來）：許願、我的願望
+  $('#wishes-btn').addEventListener('click', () => openWishes());
+  // 許願有新進度（管理者審核了、上線了）：「願望」按鈕亮小紅點，收進「⋯」時「⋯」也亮；許過願的瀏覽器開網頁時問一次
   onWishNews((n) => {
-    for (const id of ['#items-btn', '#more-btn']) $(id).classList.toggle('has-news', n > 0);
+    for (const id of ['#wishes-btn', '#more-btn']) $(id).classList.toggle('has-news', n > 0);
   });
   checkWishNews();
   // 換裝置搬過來了（cards.ts）：瓶中信收藏、雷達上的瓶子（哪些是你收藏的）重新抓

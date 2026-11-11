@@ -499,8 +499,7 @@ export function openItems(): void {
     });
     return `<div class="tc-head"><h2>道具</h2><button type="button" class="chip" data-close>關閉</button></div>
       ${pickRow}
-      ${cells.length ? `<ul class="tc-items">${cells.join('')}</ul>` : picks > 0 ? '' : '<p class="tc-items-empty">還沒有道具</p>'}
-      ${wishRow()}`;
+      ${cells.length ? `<ul class="tc-items">${cells.join('')}</ul>` : picks > 0 ? '' : '<p class="tc-items-empty">還沒有道具</p>'}`;
   };
   const el = overlay('tc-bag', `<div class="tc-box"><div class="tc-main">${list()}</div></div>`);
   const redraw = (): void => {
@@ -510,9 +509,27 @@ export function openItems(): void {
   el.addEventListener('click', (e) => {
     const t = e.target as HTMLElement;
     if (t.closest('[data-open-pick]')) openPick(false, redraw);
+  });
+  syncMine(el, redraw);
+}
+
+/**
+ * 選單的「願望」（v1.636 使用者說把願望獨立放到選單；以前在道具欄下面）：許願的說明、有幾枚順幣、投順幣許願、我的願望（有新進度亮小紅點）
+ */
+export function openWishes(): void {
+  const body = (): string => `<div class="tc-head"><h2>願望</h2><button type="button" class="chip" data-close>關閉</button></div>
+      ${wishRow()}`;
+  const el = overlay('tc-wishes', `<div class="tc-box"><div class="tc-main">${body()}</div></div>`);
+  const redraw = (): void => {
+    const main = el.querySelector('.tc-main');
+    if (main && el.isConnected) main.innerHTML = body();
+  };
+  el.addEventListener('click', (e) => {
+    const t = e.target as HTMLElement;
     if (t.closest('[data-open-wish]')) openWishForm(redraw);
     if (t.closest('[data-my-wishes]')) openMyWishes(redraw);
   });
+  // 順幣在道具裡：跟伺服器對一次；願望的進度也抓一次
   syncMine(el, redraw);
   void fetchMyWishes().then((r) => {
     if (!r.ok) return;
@@ -548,7 +565,7 @@ const WISH_IDEAS: Array<{ label: string; text: string }> = [
 let wishState: MyWishes | null = null;
 const wishNews: Array<(unseen: number) => void> = [];
 
-/** 有新進度還沒看（main.ts 用來在道具按鈕亮小紅點） */
+/** 有新進度還沒看（main.ts 用來在「願望」按鈕亮小紅點） */
 export function onWishNews(fn: (unseen: number) => void): void {
   wishNews.push(fn);
 }
@@ -572,7 +589,7 @@ function gotWishes(d: MyWishes): void {
     try {
       localStorage.setItem(LS_WISHED, '1');
     } catch {
-      // 不能存：下次開網頁不會亮小紅點，打開道具欄還是看得到
+      // 不能存：下次開網頁不會亮小紅點，打開「願望」還是看得到
     }
   }
   const unseen = d.unseen ?? 0;
@@ -587,13 +604,14 @@ function gotWishes(d: MyWishes): void {
 
 const coinsNow = (): number => myItems().find((x) => x.item === 'coin')?.count ?? 0;
 
-/** 道具欄下面的許願區：順幣夠才能按；許過的有「我的願望」（有新進度亮小紅點） */
+/** 「願望」裡的許願區：有幾枚順幣、順幣夠才能按；許過的有「我的願望」（有新進度亮小紅點） */
 function wishRow(): string {
   const n = coinsNow();
   const ws = wishState?.wishes ?? [];
   const news = wishState?.unseen ?? 0;
   return `<section class="tc-wish-row">
       <p><b>許願</b>投 ${WISH_COST} 枚順幣，寫下你希望留下什麼在洋流雷達，審核通過就用 AI 做出來。</p>
+      <p class="tc-wish-coins">你有 <b>${n}</b> 枚順幣</p>
       <p class="tc-wish-eg">例如：再開一顆喵星、一場老街尋寶冒險、把和狗狗散步的路線留在汪星、全台北一起種樹……</p>
       <div class="tc-wish-btns">
         <button type="button" class="chip primary" data-open-wish${n < WISH_COST ? ' disabled' : ''}>投 ${WISH_COST} 枚順幣許願</button>
@@ -625,7 +643,7 @@ function saveDraft(d: WishDraft | null): void {
   }
 }
 
-/** 許願的表單（疊在道具欄上面）：想法、暱稱、參考連結、規範；送出後順幣先暫扣 */
+/** 許願的表單（疊在「願望」上面）：想法、暱稱、參考連結、規範；送出後順幣先暫扣 */
 export function openWishForm(onDone?: () => void): void {
   const d = loadDraft();
   const el = overlay(
@@ -725,7 +743,7 @@ function entryHtml(w: WishTweak, label: string, tweak: boolean): string {
     ${note ? `<small class="tc-wish-coin">${note}</small>` : ''}`;
 }
 
-/** 我的願望（疊在道具欄上面）：每個願望的進度、回覆、調整；審核中的可以撤回，上線的可以調整 */
+/** 我的願望（疊在「願望」上面）：每個願望的進度、回覆、調整；審核中的可以撤回，上線的可以調整 */
 export function openMyWishes(onChange?: () => void): void {
   let tweakOpen: number | null = null;
   let busy = false;

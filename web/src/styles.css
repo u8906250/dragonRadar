@@ -1448,8 +1448,8 @@ path.map-seam-walkers { --p: 15px; }
 #app.full .controls-more { display: none; }
 #app.full .controls.open .controls-more { display: flex; flex-direction: column; align-items: stretch; gap: 6px; position: absolute; top: calc(100% + 6px); right: 0; }
 #app.full .controls.open .controls-more .chip { justify-content: center; }
-/* 窄的畫面（加了卡冊、道具排不下，名稱會被擠掉）：平常也把主題、通知、卡冊、道具、說明收進「⋯」 */
-@media (max-width: 640px) {
+/* 窄的畫面（加了卡冊、道具、願望排不下，名稱會被擠掉）：平常也把主題、通知、卡冊、道具、願望、說明收進「⋯」 */
+@media (max-width: 720px) {
   .controls #more-btn { display: inline-flex; }
   .controls { position: relative; }
   .controls-more { display: none; }
@@ -2436,7 +2436,7 @@ body.letters-open { overflow: hidden; }
 .tc-slot.missing .tc-face { filter: saturate(0.6); }
 /* 道具欄（選單裡的「道具」，openItems）：像背包一格一格排（一排三格，多了往下排），跟卡片（金邊、米色底）分開：深色的格子、右下角有幾個、下面名字 */
 .tc-head [data-close] { margin-left: auto; }
-.tc-bag .tc-main { align-self: stretch; display: flex; flex-direction: column; gap: 14px; }
+.tc-bag .tc-main, .tc-wishes .tc-main { align-self: stretch; display: flex; flex-direction: column; gap: 14px; }
 .tc-items { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px 12px; }
 .tc-item { display: flex; flex-direction: column; align-items: center; gap: 6px; color: #f3eee4; text-align: center; }
 .tc-item-icon { position: relative; display: block; width: 100%; aspect-ratio: 1; border-radius: 14px; overflow: hidden; background: #2a3038; border: 2px solid rgba(243, 238, 228, 0.35); box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.35); }
@@ -2484,6 +2484,7 @@ body.letters-open { overflow: hidden; }
 .tc-wish-row b { margin-right: 6px; color: #f7c94e; font-size: 15px; }
 .tc-wish-row small { opacity: 0.8; }
 .tc-wish-row .tc-wish-eg { opacity: 0.85; font-size: 12.5px; }
+.tc-wish-row .tc-wish-coins b { margin: 0 2px; }
 .tc-ideas { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-top: -4px; }
 .tc-ideas span { flex: 1 1 100%; opacity: 0.8; }
 .tc-idea { font: inherit; font-size: 13px; font-weight: 700; padding: 4px 11px; border-radius: 999px; border: 1px dashed rgba(247, 201, 78, 0.8); background: rgba(247, 201, 78, 0.12); color: #f7c94e; cursor: pointer; }
