@@ -2302,8 +2302,6 @@ body.letters-open { overflow: hidden; }
 .letters-body .small { font-size: 12px; line-height: 1.5; }
 .letters-body .muted { color: var(--muted); }
 .letter-grid { list-style: none; margin: 8px 0 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 14px; }
-/* 「還在原地的」那一區的說明（v1.653） */
-.letters-note { margin: 0 0 8px; font-size: 13px; }
 /* 收藏的信：丟的人寫的那張牛皮紙 */
 .letter-paper { position: relative; display: flex; flex-direction: column; gap: 8px; padding: 22px 16px 10px; transform: rotate(var(--tilt, -0.6deg)); }
 .letter-paper:nth-child(2n) { --tilt: 0.7deg; }
