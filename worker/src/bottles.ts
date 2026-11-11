@@ -4,7 +4,7 @@
  *
  * - 不用登入：前端第一次用時產生隨機的裝置代碼，放在 x-device 標頭；伺服器只存加鹽雜湊。
  * - 隱私：丟的位置先打散到約 100 m 內再存，不存真正的位置（不會因為在家丟瓶子就洩漏住址）。
- * - 內容：先用規則擋掉連結、電話、帳號，再交給 AI 擋攻擊性內容、廣告、個資（不要求一定正向）；AI 失敗就不收。
+ * - 內容：先用規則擋掉連結、電話、帳號，再交給 AI 擋攻擊性內容、仇恨、個資（不要求一定正向；v1.631 起商家廣告也可以）；AI 失敗就不收。
  * - 一個瓶子只能被一個人收藏（v1.601 使用者說「撿起來」改成「收藏」、瓶子不用消失）：收藏後瓶子照樣留在雷達上（大家看得到已經被收藏了，
  *   使用者又說「被收藏，其他人還是看得到內容」：走到 1 km 內就能打開看（readBottle，收藏前後都一樣），收藏只是收進自己的「瓶中信收藏」）；
  *   看得到內容的人都可以檢舉，檢舉就藏起來等管理者確認。
@@ -168,28 +168,28 @@ const PHOTO_PROMPT = `你是「洋流雷達」漂流瓶照片的審核員。漂�
 
 大部分照片都應該允許，category 填 none：風景、街景、食物、寵物、自拍、合照、活動現場，
 包括競選活動、造勢晚會、掃街、遊行、市集、演唱會、廟會的現場照片（舞台、人群、旗子、布條、看板、背板、候選人，候選人或政黨的海報、宣傳品都可以），
-收到的賀卡、紀念品、明信片（看不清楚收件人姓名、地址的）。
+收到的賀卡、紀念品、明信片（看不清楚收件人姓名、地址的），
+商店、商品、菜單、價目表、優惠傳單、廣告看板。
 
 只有明確屬於下面幾類才擋下，category 填對應的代號：
 - sexual：色情、裸露、性暗示
 - violence：暴力、血腥、自殘、令人不舒服的畫面
 - privacy：證件、文件、信封或螢幕上看得清楚的姓名、地址、電話、帳號；看得清楚的車牌、門牌號碼；照片主要拍的是一個 QR code
-- ad：商店、商品、服務的廣告或推銷，價目表、菜單、優惠傳單（競選活動、政黨、候選人的看板和宣傳品不算廣告）
 - attack：攻擊、嘲諷、抹黑任何人或團體（包括候選人、政黨）的圖文
 
 拿不準就填 none。
 
-只輸出 JSON：{"category": "none" 或 "sexual" 或 "violence" 或 "privacy" 或 "ad" 或 "attack", "reason": "不是 none 時用一句話說明；none 時空字串"}`;
+只輸出 JSON：{"category": "none" 或 "sexual" 或 "violence" 或 "privacy" 或 "attack", "reason": "不是 none 時用一句話說明；none 時空字串"}`;
 
 /** 照片擋下的類別給使用者看的說法（模型自己寫的原因只記在紀錄裡：v1.629 前造勢活動的照片被判成「廣告、商品推銷、價目表」） */
 const PHOTO_LABEL: Record<string, string> = {
   sexual: '色情或裸露',
   violence: '暴力、血腥或令人不舒服的畫面',
   privacy: '看得清楚的個資（證件、姓名地址、車牌、門牌、QR code）',
-  ad: '商店或商品的廣告、價目表',
   attack: '攻擊、嘲諷或抹黑的圖文',
 };
-const PHOTO_CATEGORIES = ['none', 'sexual', 'violence', 'privacy', 'ad', 'attack'];
+/** v1.631 起商家廣告不擋，拿掉 ad */
+const PHOTO_CATEGORIES = ['none', 'sexual', 'violence', 'privacy', 'attack'];
 
 /**
  * AI 看圖審核：類別只能從 PHOTO_CATEGORIES 選（schema 限定，模型不能自己編理由）；讀不出來再試一次，都不行就不收（寧可不收）。
@@ -375,13 +375,13 @@ const MODERATION_PROMPT = `你是「洋流雷達」漂流瓶的內容審核員�
 
 大部分內容都應該允許，category 填 none：打氣、感謝、心情、抱怨、日常小事、在地觀察、對城市的期待，
 分享自己收到、看到、拍到的東西（賀卡、紀念品、明信片、風景、活動現場），
-提到任何人名、地名、政府機關、政黨、候選人、節日或公開活動，只要沒有下面四類的內容，都是 none。
+商家的廣告、店家推薦、優惠、新品、活動招攬（店名、店的地址都可以），
+提到任何人名、地名、政府機關、政黨、候選人、節日或公開活動，只要沒有下面三類的內容，都是 none。
 
-只有明確屬於下面四類才擋下，category 填對應的代號：
+只有明確屬於下面三類才擋下，category 填對應的代號：
 - attack：辱罵、嘲諷、貶低、人身攻擊任何人或團體（包括候選人、政黨、政府、媒體、網友），抹黑、未經證實的指控或謠言
 - hate：仇恨、歧視、威脅、暴力、色情
-- ad：替店家、商品、服務宣傳或推銷，報價、拉客，叫人參加抽獎、團購、換贈品，或要別人做事換東西
-- privacy：電話、帳號、住址，或某個具體個人的私事、行蹤
+- privacy：個人的電話、帳號、住家地址，或某個具體個人的私事、行蹤
 
 拿不準就填 none。
 
@@ -390,20 +390,20 @@ const MODERATION_PROMPT = `你是「洋流雷達」漂流瓶的內容審核員�
 「謝謝今天發飄帶的志工」→ none
 「市政府把公園整理得好漂亮」→ none
 「今天在捷運上看到有人讓座，好感動」→ none
-「XX 咖啡第二杯半價，快來買」→ ad
+「XX 咖啡第二杯半價，快來買」→ none
 「某某某是騙子，大家小心」→ attack
 「我家住在 XX 路 XX 號」→ privacy
 
-只輸出 JSON：{"category": "none" 或 "attack" 或 "hate" 或 "ad" 或 "privacy", "reason": "不是 none 時用一句話說明；none 時空字串"}`;
+只輸出 JSON：{"category": "none" 或 "attack" 或 "hate" 或 "privacy", "reason": "不是 none 時用一句話說明；none 時空字串"}`;
 
 /** 擋下的類別給使用者看的說法（模型自己寫的原因只記在紀錄裡，不拿來當理由：v1.625 前模型自己編出「提到政府機關」） */
 export const MODERATION_LABEL: Record<string, string> = {
   attack: '攻擊、嘲諷或謠言',
   hate: '仇恨、歧視、威脅、暴力或色情',
-  ad: '廣告、推銷或抽獎',
   privacy: '電話、帳號、住址或個人隱私',
 };
-const MODERATION_CATEGORIES = ['none', 'attack', 'hate', 'ad', 'privacy'];
+/** v1.631 使用者說商家廣告也開放（有問題再調），拿掉 ad */
+const MODERATION_CATEGORIES = ['none', 'attack', 'hate', 'privacy'];
 
 export interface ModerationVerdict {
   allowed: boolean;
@@ -439,7 +439,7 @@ async function askModerator(env: Env, model: string, text: string): Promise<{ ca
 }
 
 /**
- * AI 判斷有沒有攻擊性、仇恨、廣告、個資（類別只能從這四類選，模型不能自己編理由）。
+ * AI 判斷有沒有攻擊性、仇恨、個資（類別只能從這三類選，模型不能自己編理由；v1.631 起廣告不擋）。
  * 主要模型說要擋時，再問備用模型一次，它說沒問題就放行（小模型常誤擋，v1.625：賀卡被判成廣告、又被判成「提到政府機關」）；
  * 兩個都失敗就當成不通過（寧可不收）
  */
@@ -584,6 +584,19 @@ export async function adminBottleRejects(env: Env, now: number): Promise<Array<{
     .bind(now - REJECT_KEEP_SEC)
     .all<{ id: number; created_at: number; device_id: string | null; stage: RejectStage; reason: string | null; text: string; has_photo: number }>();
   return results.map((r) => ({ id: r.id, createdAt: r.created_at, who: (r.device_id ?? '').slice(0, 6), stage: r.stage, reason: r.reason, text: r.text, photo: !!r.has_photo }));
+}
+
+/**
+ * 管理頁：看完、處理完的紀錄刪掉（v1.630 使用者說的）。id 刪一筆；upTo 刪這個 id 以前的全部（之後才進來的不刪）。
+ * 刪掉的也不算進「一直沒通過先擋」的次數。回傳刪了幾筆
+ */
+export async function deleteBottleRejects(env: Env, opts: { id?: number; upTo?: number }): Promise<number> {
+  const r = opts.id
+    ? await env.DB.prepare('DELETE FROM bottle_rejects WHERE id = ?').bind(opts.id).run()
+    : opts.upTo
+      ? await env.DB.prepare('DELETE FROM bottle_rejects WHERE id <= ?').bind(opts.upTo).run()
+      : null;
+  return r?.meta.changes ?? 0;
 }
 
 /** 排程：沒通過審核的紀錄留 7 天就刪 */

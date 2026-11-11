@@ -2542,7 +2542,7 @@ function renderBottleDetail(id: number): boolean {
     if (got) void showProof(id, got.text);
   });
   detailEl.querySelector('[data-act="report"]')?.addEventListener('click', async (e) => {
-    if (!window.confirm('這個瓶子有攻擊性內容、廣告或個人資料？檢舉後會交給管理者確認。')) return;
+    if (!window.confirm('這個瓶子有攻擊性內容或個人資料？檢舉後會交給管理者確認。')) return;
     (e.currentTarget as HTMLButtonElement).disabled = true;
     const r = await reportBottle(id, b.picked ? undefined : hereFor(b));
     if (!r.ok) {
@@ -2979,7 +2979,7 @@ async function onLettersClick(e: Event): Promise<void> {
   btn.disabled = true;
   let ok = false;
   if (u) ok = await removeLetter(Number(u.dataset.uncollect));
-  else if (rp && window.confirm('這封信有攻擊性內容、廣告或個人資料？檢舉後會交給管理者確認。')) {
+  else if (rp && window.confirm('這封信有攻擊性內容或個人資料？檢舉後會交給管理者確認。')) {
     const res = await reportBottle(Number(rp.dataset.report));
     showBanner(bannerEl, res.ok ? '謝謝檢舉，這封信已經藏起來，會交給管理者確認' : res.message, 3000);
     ok = res.ok;
@@ -3003,7 +3003,7 @@ function confirmThrow(): Promise<boolean> {
     `附近 ${r?.seeKm ?? 5} km 內的人看得到瓶子在哪裡；走到 ${reachText(r?.pickRadiusM)} 內才看得到內容和照片，第一個按「收藏」的人會把它收進瓶中信收藏（收藏了別人照樣看得到）。`,
     `丟出去 24 小時內、你走回瓶子 ${reachText(r?.pickRadiusM)} 內才收得回來；收回的也算今天的額度。`,
     `每天可以丟 ${r?.perDay ?? 3} 個，00:00 恢復成 ${r?.perDay ?? 3} 個${left !== undefined ? `；丟了這個今天還剩 ${Math.max(0, left - 1)} 個` : ''}。`,
-    '送出前會自動審核：辱罵或攻擊任何人（包括候選人、政黨）、謠言、廣告、連結、電話、帳號、個人資料都不會通過。',
+    '送出前會自動審核：辱罵或攻擊任何人（包括候選人、政黨）、謠言、連結、電話、帳號、個人資料都不會通過。',
   ];
   return new Promise((resolve) => {
     let ok = false;
