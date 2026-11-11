@@ -215,7 +215,7 @@
         </form>
         <p class="muted sheet-note small">回報只有管理者看得到，會盡快處理。已經提早結束的，選「時間錯誤」或「其他」寫一下。</p>
       </div>
-      <!-- 漂流瓶（v1.594）：畫面中間一張牛皮紙、一個空瓶子，直接在紙上寫；點瓶子就捲起來裝進去丟出去（不放任何提示，說明在說明頁） -->
+      <!-- 漂流瓶（v1.594）：畫面中間一張牛皮紙、一個空瓶子，直接在紙上寫；點軟木塞就捲起來裝進去丟出去（v1.657 點瓶子不送；不放任何提示，說明在說明頁） -->
       <section id="bottle-sheet" class="bottle-scene" hidden aria-label="漂流瓶">
         <div class="scene-top">
           <button type="button" class="scene-icon" data-act="close" aria-label="關閉"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18" /></svg></button>
@@ -231,7 +231,7 @@
           </div>
           <!-- 貼照片：放在牛皮紙下面（v1.623 使用者說的） -->
           <label class="photo-btn" id="bottle-photo-btn" aria-label="貼一張照片" hidden><svg viewBox="0 0 40 32" width="32" height="26" aria-hidden="true"><path d="M13 9 l3 -4.5 h8 l3 4.5" fill="#d4f4f8" stroke="#2f6f7c" stroke-width="2.6" stroke-linejoin="round"/><rect x="3" y="8.5" width="34" height="20.5" rx="6.5" fill="#d4f4f8" stroke="#2f6f7c" stroke-width="2.6"/><circle cx="20" cy="18.8" r="6.2" fill="#fff" stroke="#2f6f7c" stroke-width="2.6"/><circle cx="20" cy="18.8" r="2.5" fill="#2f6f7c"/><path d="M8.5 13.5 q1.5 -2 3.5 -2" stroke="#fff" stroke-width="2" fill="none" stroke-linecap="round"/><circle cx="31.5" cy="13.5" r="1.7" fill="#ef6b5f"/></svg><input type="file" id="bottle-photo-input" accept="image/*" hidden /></label>
-          <div id="bottle-drop" class="scene-bottle" role="button" tabindex="0" aria-label="捲起來裝進瓶子丟出去"></div>
+          <div id="bottle-drop" class="scene-bottle"></div>
         </div>
         <p id="bottle-result" class="scene-msg" aria-live="polite"></p>
       </section>

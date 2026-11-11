@@ -2488,7 +2488,7 @@ function selectBottle(id: number | null, thrown = false): void {
     bottleSheet.hidden = true;
     // 別人丟在地球上的：還沒用 GPS 定位就先定位（打開來看、收藏要 GPS）
     const b = findBottle(selectedBottle);
-    if (b && !b.mine && !b.picked && b.world !== 'woof' && origin.source !== 'gps' && youOn === 'earth' && !tripping) locateMe();
+    if (b && !b.mine && !b.picked && b.world !== 'woof' && origin.source !== 'gps' && youOn === 'earth' && !tripping) void locateMe();
   }
   render();
 }
@@ -2663,7 +2663,7 @@ function renderBottleDetail(id: number): boolean {
         ${got ? shareLink(b.id, b.mine) : ''}
         ${got && (b.mine || b.picked) ? '<button type="button" class="btn" data-act="proof">瓶子證明</button>' : ''}
         ${got && !b.mine ? '<button type="button" class="btn subtle" data-act="report">檢舉</button>' : ''}
-        ${b.mine && canWithdraw(b.taken ? 'picked' : 'active', b.createdAt) ? '<button type="button" class="btn subtle" data-act="delete">收回</button>' : ''}
+        ${b.mine && canWithdraw(b.taken ? 'picked' : 'active', b.createdAt) ? `<button type="button" class="btn subtle" data-act="delete"${withdrawing.has(b.id) ? ' disabled' : ''}>收回</button>` : ''}
       </div>
       <p class="muted sheet-note small">${
         woof
@@ -2700,9 +2700,18 @@ function renderBottleDetail(id: number): boolean {
     render();
   });
   detailEl.querySelector('[data-act="delete"]')?.addEventListener('click', async (e) => {
-    if (!window.confirm(withdrawAsk(!!b.taken))) return;
-    (e.currentTarget as HTMLButtonElement).disabled = true;
-    const r = await deleteBottle(id, withdrawHere());
+    if (withdrawing.has(id) || !window.confirm(withdrawAsk(!!b.taken))) return;
+    const btn = e.currentTarget as HTMLButtonElement;
+    btn.disabled = true;
+    withdrawing.add(id);
+    const here = await withdrawHere().catch(() => null);
+    const r = here ? await deleteBottle(id, here) : null;
+    withdrawing.delete(id);
+    if (!r) {
+      btn.disabled = false;
+      render();
+      return;
+    }
     if (!r.ok) {
       bottleMsg = r.message;
     } else {
@@ -2879,7 +2888,7 @@ async function checkBottleNews(): Promise<void> {
 
 /**
  * 打開漂流瓶（v1.594 使用者說：按下去畫面中間直接出現牛皮紙和瓶子、盡量仿真，不要輸入框、不要任何提示，說明放在說明頁）：
- * 牛皮紙上直接寫，點瓶子就捲起來裝進去丟出去；左上 📜 是漂流瓶收藏和我丟的瓶子、📷 貼一張照片
+ * 牛皮紙上直接寫，點軟木塞就捲起來裝進去丟出去；左上 📜 是漂流瓶收藏和我丟的瓶子、📷 貼一張照片
  */
 function openBottleSheet(open: boolean): void {
   bottleSheet.hidden = !open;
@@ -2895,7 +2904,7 @@ function openBottleSheet(open: boolean): void {
   detailEl.hidden = true;
   bottleResult.textContent = '';
   // 先直接定位（v1.600 使用者說按漂流瓶先定位）：丟瓶子、看瓶子、收藏都要 GPS；在汪星不用（汪星上拖曳就是走路）
-  if (youOn === 'earth' && !tripping) locateMe();
+  if (youOn === 'earth' && !tripping) void locateMe();
   renderBottleSheet();
   void reloadMyBottles();
   // 電腦上直接可以打字；手機等點了紙才跳出鍵盤（不然鍵盤蓋住瓶子）
@@ -2958,8 +2967,17 @@ function bottleWorldChanged(): void {
 /** 自己丟的瓶子收不收得回來：丟出去 24 小時內（v1.619 使用者說的；收藏了的也一樣），還要走到瓶子 1 km 內（伺服器照位置確認） */
 const canWithdraw = (status: string, createdAt: number): boolean =>
   (status === 'active' || status === 'hidden' || status === 'picked') && nowSec() - createdAt < 86400;
-/** 收回時帶的位置：自己丟的都在地球上，用 GPS（手動位置不算；沒定位伺服器會說要先定位） */
-const withdrawHere = (): BottleHere => ({ at: origin.source === 'gps' ? origin : null, world: 'earth' });
+/** 收回中的瓶子（定位、送出的時候畫面重畫了，再按也不會送兩次） */
+const withdrawing = new Set<number>();
+/**
+ * 收回時帶的位置：自己丟的都在地球上，用 GPS（手動位置不算）。還沒用 GPS 就先自動定位、等抓到再送（v1.657 使用者說收回也先定位，不然一直失敗）；
+ * 定位失敗回 null（定位已經說了原因，不送）
+ */
+async function withdrawHere(): Promise<BottleHere | null> {
+  if (origin.source === 'gps') return { at: origin, world: 'earth' };
+  if (tripping || youOn !== 'earth') return { at: null, world: 'earth' };
+  return (await locateMe()) && lastGps ? { at: lastGps, world: 'earth' } : null;
+}
 const withdrawAsk = (taken: boolean): string =>
   taken ? '這個瓶子已經被收藏了，收回後收藏的人也看不到了。要收回嗎？' : '要收回這個瓶子嗎？收回後就沒有人看得到了。';
 
@@ -3001,18 +3019,13 @@ function paintMyBottles(): void {
   paintMenuNews();
 }
 
-/** 牛皮紙和瓶子那一頁：瓶子、軟木塞畫上去；點瓶子丟出去、📷 貼照片、✕／Esc 收起來（寫的字留著）；收藏頁在選單的「收藏」 */
+/** 牛皮紙和瓶子那一頁：瓶子、軟木塞畫上去；點軟木塞丟出去（v1.657 使用者說點瓶子不用送出）、📷 貼照片、✕／Esc 收起來（寫的字留著）；收藏頁在選單的「收藏」 */
 function wireBottleScene(): void {
   // 放到最外層，蓋過頂端列（清單面板自己是一層，裡面的東西蓋不過頂端列）
   document.body.append(bottleSheet);
-  bottleDropEl.innerHTML = bottleSvg('scb') + corkSvg('scc');
-  bottleDropEl.addEventListener('click', () => void submitBottle());
-  bottleDropEl.addEventListener('keydown', (e) => {
-    if (e.key === 'Enter' || e.key === ' ') {
-      e.preventDefault();
-      void submitBottle();
-    }
-  });
+  // 軟木塞小小的：外面包一個 50 px 的按鈕（手機縮小後也有 43 px），手指好點
+  bottleDropEl.innerHTML = `${bottleSvg('scb')}<button type="button" class="cork-btn" aria-label="塞上軟木塞，捲起來裝進瓶子丟出去">${corkSvg('scc')}</button>`;
+  bottleDropEl.querySelector('.cork-btn')!.addEventListener('click', () => void submitBottle());
   bottleSheet.addEventListener('click', (e) => {
     const t = e.target as Element;
     // 審核中：關閉按不了（CSS 也擋，這裡再擋一次鍵盤）
@@ -3132,10 +3145,17 @@ async function onLettersClick(e: Event): Promise<void> {
   }
   const del = t.closest<HTMLButtonElement>('[data-delete-bottle]');
   if (del) {
-    if (!window.confirm(withdrawAsk(del.dataset.taken === '1'))) return;
-    del.disabled = true;
     const id = Number(del.dataset.deleteBottle);
-    const r = await deleteBottle(id, withdrawHere());
+    if (withdrawing.has(id) || !window.confirm(withdrawAsk(del.dataset.taken === '1'))) return;
+    del.disabled = true;
+    withdrawing.add(id);
+    const here = await withdrawHere().catch(() => null);
+    const r = here ? await deleteBottle(id, here) : null;
+    withdrawing.delete(id);
+    if (!r) {
+      del.disabled = false;
+      return;
+    }
     if (!r.ok) {
       del.disabled = false;
       showBanner(bannerEl, r.message, 3000);
@@ -3221,7 +3241,7 @@ function setJudging(on: boolean): void {
 /** 丟瓶子的動畫進行中（不能再按一次） */
 let throwing = false;
 
-/** 點了瓶子：沒寫字、字太多就搖一搖（不寫提示）；錯誤（定位、審核、額度）寫在下面 */
+/** 點了軟木塞：沒寫字、字太多就搖一搖（不寫提示）；錯誤（定位、審核、額度）寫在下面 */
 async function submitBottle(): Promise<void> {
   if (throwing || bottleDropEl.classList.contains('busy')) return;
   const text = bottleText.value.trim();
@@ -3236,7 +3256,7 @@ async function submitBottle(): Promise<void> {
   }
   if (youOn === 'woof') return say('搭火箭回地球才能丟瓶子');
   if (origin.source !== 'gps') return say('要先按右上角「定位」用 GPS，瓶子會丟在你現在的位置附近');
-  // 按瓶子、軟木塞先確認，確認前把規則講清楚（v1.601 使用者說要再確認是否送出；v1.620 說丟出前把規則說清楚）
+  // 按軟木塞先確認，確認前把規則講清楚（v1.601 使用者說要再確認是否送出；v1.620 說丟出前把規則說清楚）
   if (!(await confirmThrow())) return;
   const photo = bottlePhotoData;
   say('');
@@ -5270,7 +5290,7 @@ function locate(): void {
     });
     return;
   }
-  locateMe();
+  void locateMe();
 }
 
 // ---- 汪星的狗：點了出現「鎖定」，按了雷達正中間跟著牠（鏡頭慢慢追上），再按、自己拖曳、換星球、定位、搭火箭、切到地圖就解除 ----
@@ -5722,8 +5742,9 @@ const locateKm = (min: number): number => Math.max(min, Math.min(scaleKm, LOCATE
  * 「定位」按鈕：清掉手動位置，先馬上飛回我的位置（上次知道的 GPS 位置，不用等；沒有 GPS、移到了手動位置就回到移動之前的位置），範圍拉到外圈 LOCATE_KM（本來就比較近的不動）
  * （太空裡、轉過視角的先拉回地球）；再重新抓一次 GPS，抓到了移到新的位置（範圍不再動，等的時候自己縮放的照舊）。
  * 不知道上次的位置（電腦常常還沒有 GPS）：等抓到了才飛過去（移動、縮放一起，不會先縮放、再一下跳過去）
+ * 抓到 GPS 回 true（新的位置在 lastGps），抓不到、不支援回 false
  */
-function locateMe(): void {
+function locateMe(): Promise<boolean> {
   const known = lastGps ? { ...lastGps, accuracy: lastGpsAccuracy } : home?.source === 'gps' ? home : null;
   // 沒有 GPS 但移到了手動位置：先回到移動之前的位置（以前「回到我的位置」做的，例如電腦沒有 GPS 時的預設位置）
   const back = known ?? (origin.source === 'manual' ? home : null);
@@ -5743,11 +5764,11 @@ function locateMe(): void {
   }
   if (!('geolocation' in navigator)) {
     showBanner(bannerEl, '此瀏覽器不支援定位，可以在雷達上拖曳到你的位置。', 4000);
-    return;
+    return Promise.resolve(false);
   }
   locateBtn.classList.add('on');
   locateBtn.textContent = '定位中…';
-  navigator.geolocation.getCurrentPosition(
+  return new Promise((done) => navigator.geolocation.getCurrentPosition(
     (pos) => {
       locateBtn.classList.remove('on');
       locateBtn.textContent = '定位';
@@ -5771,14 +5792,16 @@ function locateMe(): void {
       showBanner(bannerEl, `已定位，誤差約 ${Math.round(pos.coords.accuracy)} 公尺`, 2000);
       // 照新的 GPS 位置重抓看得到的漂流瓶（v1.655）
       void reloadBottles();
+      done(true);
     },
     (e) => {
       locateBtn.classList.remove('on');
       locateBtn.textContent = '定位';
       showBanner(bannerEl, geoErrorText(e), 5000);
+      done(false);
     },
     { enableHighAccuracy: true, maximumAge: 0, timeout: 12_000 },
-  );
+  ));
 }
 
 function startGeolocation(): void {
