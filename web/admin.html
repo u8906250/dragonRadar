@@ -97,6 +97,11 @@
       <ul id="wish-list" class="list" aria-live="polite"></ul>
       <p id="wish-msg" class="msg err" aria-live="polite"></p>
 
+      <h2 id="bottle-rejects">漂流瓶沒通過審核</h2>
+      <p class="meta">最近 7 天沒通過審核的瓶子，看為什麼沒過、改善審核用；7 天後自動刪除。不記位置，照片只記有沒有附。同一個裝置一小時沒通過 5 次、一天 15 次，或同一個網路一小時 20 次，就會先擋下來。內容是任何人都能寫的，只當參考。</p>
+      <ul id="reject-list" class="list" aria-live="polite"></ul>
+      <p id="reject-msg" class="msg err" aria-live="polite"></p>
+
       <h2>手動加的關鍵字</h2>
       <p class="meta">回報的人直接修改時加的關鍵字（判讀沒抽到的），放上雷達後列在這裡。按「採用」後，同一個雷達之後的貼文內文寫到就自動標上（只影響關鍵字，其他判讀不變）。</p>
       <ul id="tags" class="list" aria-live="polite"></ul>
@@ -214,6 +219,26 @@
       }
     });
 
+    /** 漂流瓶沒通過審核的（最近 7 天） */
+    const REJECT_STAGE = { rule: '規則（連結、電話、帳號…）', text: 'AI 看文字', photo: 'AI 看照片', ai_error: 'AI 沒回應' };
+    async function loadRejects() {
+      $('#reject-msg').textContent = '';
+      try {
+        const { rejects } = await api('/api/admin/bottle-rejects');
+        $('#reject-list').innerHTML = rejects.length
+          ? rejects
+              .map(
+                (r) => `<li class="fb"><div class="fb-head"><span><span class="tag">${esc(REJECT_STAGE[r.stage] || r.stage)}</span>${r.photo ? ' 📷 有附照片' : ''}</span><span>${when(r.createdAt)}・裝置 ${esc(r.who)}</span></div>
+                <div class="wish-body">${esc(r.text)}</div>
+                <div class="muted">${esc(r.reason || '')}</div></li>`,
+              )
+              .join('')
+          : '<li class="empty">最近 7 天沒有沒通過的瓶子</li>';
+      } catch (e) {
+        if (!e.auth) $('#reject-msg').textContent = e.message;
+      }
+    }
+
     /** 許願：待處理（審核中、已通過、製作中）、結案（上線、不通過、做不出來、撤回） */
     const WISH_STATUS = { pending: '審核中', approved: '已通過', building: '製作中', live: '已上線', rejected: '不通過', dropped: '做不出來', withdrawn: '自己撤回' };
     const WISH_NEXT = {
@@ -294,6 +319,7 @@
     async function load() {
       void loadTags();
       void loadWishes();
+      void loadRejects();
       $('#list-msg').textContent = '';
       try {
         const { feedback } = await api(`/api/admin/feedback?status=${status}`);

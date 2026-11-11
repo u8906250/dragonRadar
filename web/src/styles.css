@@ -2165,6 +2165,8 @@ body.bottle-open { overflow: hidden; }
   background: rgba(255, 255, 255, 0.14); border: 1px solid rgba(255, 255, 255, 0.28); border-radius: 50%;
 }
 .scene-icon:focus-visible { outline: 2px solid #ffe08a; outline-offset: 2px; }
+/* 貼照片的按鈕：牛皮紙下面靠左（右邊是瓶子） */
+.scene-stage #bottle-photo-btn { position: absolute; left: 0; top: calc(100% + 14px); }
 .scene-dot { position: absolute; top: 2px; right: 2px; width: 10px; height: 10px; border-radius: 50%; background: #e5484d; border: 2px solid #2a1f12; }
 .scene-stage { position: relative; margin-right: 40px; }
 .kraft-sheet {

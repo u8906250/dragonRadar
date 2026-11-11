@@ -19,7 +19,7 @@ import { PUSH_RADIUS_KM, PushError, b64urlEncode, deleteSubscription, encryptPay
 import { assertEventReportsOpen, confirmLink, editLink, ENDED_REPORTS_NEEDED, locateForEdit, MAX_LINK_AGE_SEC, NOTES_CLOSED, ReportError, REPORTS_LOCKED, ipHash, myReports, purgeReports, recheckLinks, rejectLink, reportModules, submitLink, supplementLink, withdrawReport } from './reports';
 import { D1Meter, isTransient, withResilientDb } from './db';
 import { addressCacheKey, geocodeAddress, parseTwAddress } from './address';
-import { adminListBottles, adminSetBottle, BOTTLE_MAX_WEIGHT, bottleInfo, bottlePhoto, bottlesEnabled, photosEnabled, readBottle, SEE_RADIUS_KM, deleteBottle, deviceId, DRIFT_EVERY_SEC, driftBottles, dropBottle, listBottles, myBottles, PER_DEVICE_PER_DAY, PICK_RADIUS_M, pickBottle, proofFor, purgeBottles, reportBottle, SEA_AFTER_SEC, uncollectLetter, verifyProof, WOOF_STAY_SEC } from './bottles';
+import { adminBottleRejects, adminListBottles, adminSetBottle, purgeBottleRejects, BOTTLE_MAX_WEIGHT, bottleInfo, bottlePhoto, bottlesEnabled, photosEnabled, readBottle, SEE_RADIUS_KM, deleteBottle, deviceId, DRIFT_EVERY_SEC, driftBottles, dropBottle, listBottles, myBottles, PER_DEVICE_PER_DAY, PICK_RADIUS_M, pickBottle, proofFor, purgeBottles, reportBottle, SEA_AFTER_SEC, uncollectLetter, verifyProof, WOOF_STAY_SEC } from './bottles';
 import { approveSpotRequest, autoReview, cancelSpotRequest, listSpotRequests, locatePlace, rejectSpotRequest, SPOT_MAX_AGE_SEC, spotRequestStatus, type ApproveBody, type SpotRequestRow } from './spots';
 import { addUserKeyword, listActiveKeywords, listAllKeywords, MAX_ACTIVE_KEYWORDS, normalizeKeyword, parseKeywordList, toKeywordOut, touchKeywords } from './keywords';
 import { listLearnedTags, setLearnedTag } from './learnedTags';
@@ -660,6 +660,8 @@ async function handleAdmin(req: Request, env: Env, ctx: ExecutionContext, path: 
     return jsonResponse({ deleted_events: r[0].meta.changes ?? 0, deleted_posts: r[1].meta.changes ?? 0 });
   }
 
+  // 漂流瓶沒通過審核的（最近 7 天）
+  if (req.method === 'GET' && path === '/api/admin/bottle-rejects') return jsonResponse({ rejects: await adminBottleRejects(env, now) });
   // 漂流瓶：?status=active|hidden|deleted|removed
   if (req.method === 'GET' && path === '/api/admin/bottles') {
     return jsonResponse({ bottles: await adminListBottles(env, url.searchParams.get('status')) });
@@ -824,7 +826,7 @@ async function purgeOldData(env: Env, now: number): Promise<number> {
     // 手動改的地點、時間跟著貼文
     env.DB.prepare('DELETE FROM manual_fixes WHERE post_id NOT IN (SELECT id FROM posts)'),
   ]);
-  return r.reduce((n, x) => n + (x.meta.changes ?? 0), 0) + (await purgeReports(env, cutoff)) + (await purgeBottles(env, cutoff)) + (await purgeCards(env, cutoff)) + (await purgeWishes(env, cutoff)) + (await purgeSubscriptions(env, cutoff)) + (await purgeFeedback(env, cutoff));
+  return r.reduce((n, x) => n + (x.meta.changes ?? 0), 0) + (await purgeReports(env, cutoff)) + (await purgeBottles(env, cutoff)) + (await purgeBottleRejects(env, now)) + (await purgeCards(env, cutoff)) + (await purgeWishes(env, cutoff)) + (await purgeSubscriptions(env, cutoff)) + (await purgeFeedback(env, cutoff));
 }
 
 async function refreshTokenJob(env: Env): Promise<void> {

@@ -451,12 +451,76 @@ export async function verifyProof(env: Env, body: { no?: unknown; createdAt?: un
 const validPoint = (lat: unknown, lng: unknown): { lat: number; lng: number } | null =>
   typeof lat === 'number' && typeof lng === 'number' && Math.abs(lat) <= 90 && Math.abs(lng) <= 180 ? { lat, lng } : null;
 
+// ---- 沒通過審核的紀錄（v1.623 使用者說記 7 天）----
+/** 沒通過審核的紀錄留幾天 */
+export const REJECT_KEEP_SEC = 7 * 86400;
+/** 一個裝置每天最多記幾筆（有人一直亂丟也不會塞爆） */
+const REJECT_LOG_PER_DAY = 30;
+export type RejectStage = 'rule' | 'text' | 'photo' | 'ai_error';
+
+/** 記一筆沒通過審核的（不記位置、不存照片）；記不起來不影響回給使用者的訊息 */
+async function logReject(env: Env, dev: string, ip: string, stage: RejectStage, reason: string, text: string, hasPhoto: boolean, now: number): Promise<void> {
+  try {
+    if ((await countSince(env, 'SELECT COUNT(*) AS n FROM bottle_rejects WHERE device_id = ? AND created_at > ?', [dev, now - 86400])) >= REJECT_LOG_PER_DAY) return;
+    await env.DB.prepare('INSERT INTO bottle_rejects (created_at, device_id, ip_hash, stage, reason, text, has_photo) VALUES (?, ?, ?, ?, ?, ?, ?)')
+      .bind(now, dev, ip, stage, reason.slice(0, 200), text.slice(0, 600), hasPhoto ? 1 : 0)
+      .run();
+  } catch (e) {
+    console.warn('bottle reject log failed', e);
+  }
+}
+
+/**
+ * 一直送沒通過的瓶子先擋下來（v1.623 使用者說要有保護機制）：同一個裝置一小時內沒通過 REJECT_HOUR_MAX 次就停到滿一小時，
+ * 今天沒通過 REJECT_DAY_MAX 次就停到 00:00；同一個網路一小時內 REJECT_IP_HOUR_MAX 次也停。AI 沒回應的不算（不是送的人的問題）。
+ * 在 AI 審核之前擋，不會再花審核的錢
+ */
+const REJECT_HOUR_MAX = 5;
+const REJECT_DAY_MAX = 15;
+const REJECT_IP_HOUR_MAX = 20;
+async function assertNotSpamming(env: Env, dev: string, ip: string, now: number): Promise<void> {
+  const wait = (first: number | null | undefined): string => {
+    const mins = Math.max(1, Math.ceil(((first ?? now) + 3600 - now) / 60));
+    return mins >= 60 ? '一小時' : `${mins} 分鐘`;
+  };
+  const hour = await env.DB.prepare("SELECT COUNT(*) AS n, MIN(created_at) AS first FROM bottle_rejects WHERE device_id = ? AND created_at > ? AND stage != 'ai_error'")
+    .bind(dev, now - 3600)
+    .first<{ n: number; first: number | null }>();
+  if ((hour?.n ?? 0) >= REJECT_HOUR_MAX) throw new ReportError(429, `沒通過審核的次數太多了，${wait(hour?.first)}後再試`);
+  if ((await countSince(env, "SELECT COUNT(*) AS n FROM bottle_rejects WHERE device_id = ? AND created_at >= ? AND stage != 'ai_error'", [dev, taipeiMidnight(now)])) >= REJECT_DAY_MAX)
+    throw new ReportError(429, '今天沒通過審核的次數太多了，00:00 之後再試');
+  const ipHour = await env.DB.prepare("SELECT COUNT(*) AS n, MIN(created_at) AS first FROM bottle_rejects WHERE ip_hash = ? AND created_at > ? AND stage != 'ai_error'")
+    .bind(ip, now - 3600)
+    .first<{ n: number; first: number | null }>();
+  if ((ipHour?.n ?? 0) >= REJECT_IP_HOUR_MAX) throw new ReportError(429, `這個網路沒通過審核的次數太多了，${wait(ipHour?.first)}後再試`);
+}
+
+/** 管理頁：最近 7 天沒通過審核的（新的在前） */
+export async function adminBottleRejects(env: Env, now: number): Promise<Array<{ id: number; createdAt: number; who: string; stage: RejectStage; reason: string | null; text: string; photo: boolean }>> {
+  const { results } = await env.DB.prepare('SELECT * FROM bottle_rejects WHERE created_at > ? ORDER BY id DESC LIMIT 200')
+    .bind(now - REJECT_KEEP_SEC)
+    .all<{ id: number; created_at: number; device_id: string | null; stage: RejectStage; reason: string | null; text: string; has_photo: number }>();
+  return results.map((r) => ({ id: r.id, createdAt: r.created_at, who: (r.device_id ?? '').slice(0, 6), stage: r.stage, reason: r.reason, text: r.text, photo: !!r.has_photo }));
+}
+
+/** 排程：沒通過審核的紀錄留 7 天就刪 */
+export async function purgeBottleRejects(env: Env, now: number): Promise<number> {
+  const r = await env.DB.prepare('DELETE FROM bottle_rejects WHERE created_at < ?').bind(now - REJECT_KEEP_SEC).run();
+  return r.meta.changes ?? 0;
+}
+
 /** 丟一個瓶子：在你現在的位置附近 */
 export async function dropBottle(env: Env, device: string | null, ip: string, body: { text?: unknown; lat?: unknown; lng?: unknown; photo?: unknown }, now: number): Promise<PickedBottle> {
   const dev = needDevice(device);
   const text = typeof body.text === 'string' ? body.text.replace(/\s+/g, ' ').trim() : '';
+  // 一直送沒通過的：先擋下來（在規則、AI 審核之前）
+  await assertNotSpamming(env, dev, ip, now);
   const bad = ruleCheck(text);
-  if (bad) throw new ReportError(400, bad);
+  if (bad) {
+    // 空白的不用記
+    if (text) await logReject(env, dev, ip, 'rule', bad, text, !!body.photo, now);
+    throw new ReportError(400, bad);
+  }
   const at = validPoint(body.lat, body.lng);
   if (!at) throw new ReportError(400, '要先定位才能丟瓶子');
   const photo = parsePhoto(body.photo);
@@ -469,12 +533,26 @@ export async function dropBottle(env: Env, device: string | null, ip: string, bo
   if ((await countSince(env, 'SELECT COUNT(*) AS n FROM bottles WHERE created_at > ?', [now - 3600])) >= GLOBAL_PER_HOUR)
     throw new ReportError(429, '現在丟瓶子的人太多，請稍後再試');
 
-  const verdict = await moderate(env, text);
-  if (!verdict.allowed) throw new ReportError(422, `這句話不能丟${verdict.reason ? `：${verdict.reason}` : ''}`);
+  // AI 沒回應（審核不了）也記一筆
+  const aiDown = async <T>(p: Promise<T>): Promise<T> =>
+    p.catch(async (e: unknown) => {
+      if (e instanceof ReportError) await logReject(env, dev, ip, 'ai_error', e.message, text, !!photo, now);
+      throw e;
+    });
+  const verdict = await aiDown(moderate(env, text));
+  if (!verdict.allowed) {
+    const msg = `這句話不能丟${verdict.reason ? `：${verdict.reason}` : ''}`;
+    await logReject(env, dev, ip, 'text', msg, text, !!photo, now);
+    throw new ReportError(422, msg);
+  }
   let key: string | null = null;
   if (photo && env.BOTTLE_PHOTOS) {
-    const pv = await moderatePhoto(env, photo.dataUrl);
-    if (!pv.allowed) throw new ReportError(422, `這張照片不能放${pv.reason ? `：${pv.reason}` : ''}`);
+    const pv = await aiDown(moderatePhoto(env, photo.dataUrl));
+    if (!pv.allowed) {
+      const msg = `這張照片不能放${pv.reason ? `：${pv.reason}` : ''}`;
+      await logReject(env, dev, ip, 'photo', msg, text, true, now);
+      throw new ReportError(422, msg);
+    }
     key = `bottles/${now}-${crypto.randomUUID()}.jpg`;
     await env.BOTTLE_PHOTOS.put(key, stripJpegMeta(photo.bytes), { httpMetadata: { contentType: 'image/jpeg' } });
   }
