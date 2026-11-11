@@ -3087,16 +3087,14 @@ function renderLettersPage(): void {
     return `${fmtDay(b.pickedAt)} ${b.world === 'woof' ? '在汪星的海上' : ''}收藏・${ago(b.createdAt)}丟的${drift ? `・漂了 ${drift} 才到你手上` : ''}`;
   };
   const keepLeft = (l: MyBottles['letters'][number]): number => l.pickedAt + KEEP_TAKEN_H * 3600 - nowSec();
-  lettersList.innerHTML = letters.length
-    ? `<h3>收藏的漂流瓶（${letters.length}）</h3><ul class="letter-grid">${letters
-        .map((l) => {
-          const left = keepLeft(l);
-          const sealed = left <= 0 && !openedLetters.has(l.id);
-          const waiting = left > 0 ? `還在原地・再 ${left < 3600 ? `${Math.max(1, Math.round(left / 60))} 分鐘` : `${Math.round(left / 3600)} 小時`}收進瓶子` : '';
-          const content = sealed
-            ? `<button type="button" class="letter-bottle" data-open-letter="${l.id}" aria-label="打開瓶子看信">${bottleSvg('')}</button>`
-            : `${l.photo ? tapedPhoto(l.id) : ''}<p class="letter-text">${esc(l.text)}</p>`;
-          return `<li class="letter-paper${sealed ? ' letter-sealed' : ''}">
+  const card = (l: MyBottles['letters'][number]): string => {
+    const left = keepLeft(l);
+    const sealed = left <= 0 && !openedLetters.has(l.id);
+    const waiting = left > 0 ? `再 ${left < 3600 ? `${Math.max(1, Math.round(left / 60))} 分鐘` : `${Math.round(left / 3600)} 小時`}收進漂流瓶收藏` : '';
+    const content = sealed
+      ? `<button type="button" class="letter-bottle" data-open-letter="${l.id}" aria-label="打開瓶子看信">${bottleSvg('')}</button>`
+      : `${l.photo ? tapedPhoto(l.id) : ''}<p class="letter-text">${esc(l.text)}</p>`;
+    return `<li class="letter-paper${sealed ? ' letter-sealed' : ''}">
             <span class="kraft-no">${bottleNo(l.id)}</span>
             ${content}
             <small class="muted">${esc(meta(l))}${waiting ? `・${esc(waiting)}` : ''}</small>
@@ -3108,9 +3106,17 @@ function renderLettersPage(): void {
               <button type="button" class="link-btn" data-uncollect="${l.id}">移出收藏</button>
             </div>
           </li>`;
-        })
-        .join('')}</ul>`
-    : '<h3>收藏的漂流瓶</h3><p class="muted">還沒有收藏的漂流瓶。到雷達上找找看，走到瓶子附近按「收藏」，瓶子就會收進這裡。</p>';
+  };
+  // 收藏還沒滿 24 小時的瓶子還在原地，不算收進來（v1.653 使用者說還沒到時間的不要畫在收藏的漂流瓶裡）：另外列在下面
+  const kept = letters.filter((l) => keepLeft(l) <= 0);
+  const waiting = letters.filter((l) => keepLeft(l) > 0);
+  lettersList.innerHTML =
+    (kept.length
+      ? `<h3>收藏的漂流瓶（${kept.length}）</h3><ul class="letter-grid">${kept.map(card).join('')}</ul>`
+      : `<h3>收藏的漂流瓶</h3><p class="muted">${waiting.length ? `還沒有收進來的漂流瓶。收藏後瓶子在原地留 ${KEEP_TAKEN_H} 小時，時間到就收進這裡、裝進瓶子。` : '還沒有收藏的漂流瓶。到雷達上找找看，走到瓶子附近按「收藏」，瓶子在原地留 24 小時後就收進這裡。'}</p>`) +
+    (waiting.length
+      ? `<h3>還在原地的（${waiting.length}）</h3><p class="muted letters-note">收藏了，瓶子還在原地（雷達上有小愛心），${KEEP_TAKEN_H} 小時後收進漂流瓶收藏。</p><ul class="letter-grid">${waiting.map(card).join('')}</ul>`
+      : '');
   fillPhotos(lettersList);
   paintMyBottles();
 }
