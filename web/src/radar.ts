@@ -229,9 +229,19 @@ const FLOAT_MAX = 40;
  * 被收藏的瓶子的標記（v1.646 使用者說地圖上只要標記被收藏，不用真的把信放進瓶子；24 小時後進到收藏才放進瓶子）：
  * 瓶子右上角一顆小愛心。雷達、地圖、汪星海上的瓶子都用這個
  */
-/** 瓶子裡的信卷（v1.647 使用者說瓶子統一用透明色、裡面放信卷）：牛皮紙卷、紅色綁帶，跟瓶子一樣斜 20 度 */
+/**
+ * 瓶子裡的信卷（v1.647 使用者說瓶子統一用透明色、裡面放信卷；v1.648 畫得像一點、不綁紅帶）：
+ * 牛皮紙捲成的圓筒（右邊暗、左邊亮），上端看得到一圈圈捲起來的紙，外層的紙邊斜斜繞一圈；跟瓶子一樣斜 20 度
+ */
 export const LETTER_SCROLL =
-  '<g class="letter-in" transform="rotate(-20)"><rect x="-1.6" y="-1.4" width="3.2" height="7.4" rx="1.5" fill="#d8ad74" stroke="#8a5a2c" stroke-width="0.6" /><path d="M-1.6 2.3 h3.2" stroke="#e05a4f" stroke-width="1.2" /></g>';
+  '<g class="letter-in" transform="rotate(-20)">' +
+  '<rect x="-1.7" y="-1.3" width="3.4" height="7.3" rx="0.5" fill="#e2bb84" stroke="#8a5a2c" stroke-width="0.45" />' +
+  '<path d="M0.75 -1.1 v6.9" stroke="#c4955a" stroke-width="1" />' +
+  '<path d="M-1.05 -1 v6.7" stroke="#f3dcb2" stroke-width="0.5" />' +
+  '<path d="M-1.7 1.6 C-0.6 1.9 0.6 2.3 1.7 2.9" fill="none" stroke="#8a5a2c" stroke-width="0.35" />' +
+  '<ellipse cx="0" cy="-1.3" rx="1.7" ry="0.6" fill="#f1d7aa" stroke="#8a5a2c" stroke-width="0.4" />' +
+  '<path d="M-0.15 -1.3 a0.45 0.2 0 1 1 0.6 0.05 a0.85 0.36 0 1 1 -1.3 -0.05" fill="none" stroke="#a57240" stroke-width="0.25" />' +
+  '</g>';
 export const TAKEN_MARK =
   '<path class="taken-mark" d="M5.6 -3.4 c-1.7 -1.2 -3.1 -2.3 -3.1 -3.7 a1.55 1.55 0 0 1 3.1 -0.45 a1.55 1.55 0 0 1 3.1 0.45 c0 1.4 -1.4 2.5 -3.1 3.7 z" fill="#ef6b5f" stroke="#b8392f" stroke-width="0.6" stroke-linejoin="round" />';
 /** 瓶子的形狀（中心在原點，高約 16）；汪星海上的瓶子（space.ts）也用這個 */

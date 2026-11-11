@@ -3269,11 +3269,15 @@ function bottleSvg(_p: string): string {
     <ellipse cx="50" cy="193" rx="34" ry="5" fill="#000" opacity=".18" />
     <path d="${body}" fill="#e1f7fb" fill-opacity=".35" />
     <g class="scroll">
-      <rect x="38" y="98" width="24" height="74" rx="12" fill="#d8ad74" stroke="#8a5a2c" stroke-width="2.2" />
-      <path d="M44 104 v62" stroke="#f0d3a4" stroke-width="3" stroke-linecap="round" />
-      <path d="M38 135 h24" stroke="#e05a4f" stroke-width="3.4" />
-      <path d="M50 135 c-9 -9 -15 -2 -11 3 c3 3 8 0 11 -3 c3 3 8 6 11 3 c4 -5 -2 -12 -11 -3 z" fill="#ef6b5f" stroke="#b8392f" stroke-width="1.4" stroke-linejoin="round" />
-      <circle cx="50" cy="135" r="2.4" fill="#c9443a" />
+      <!-- 捲起來的牛皮紙（v1.648 使用者說畫像一點、不綁紅帶）：圓筒右邊暗、左邊亮，上端一圈圈的紙，外層紙邊斜斜繞過去、尾巴翹起一點 -->
+      <rect x="37" y="102" width="26" height="70" rx="4" fill="#e2bb84" stroke="#8a5a2c" stroke-width="2" />
+      <path d="M56 106 v62" stroke="#c4955a" stroke-width="7" />
+      <path d="M42.5 106 v62" stroke="#f3dcb2" stroke-width="3" stroke-linecap="round" />
+      <path d="M37 128 C45 131 55 134 63 139" fill="none" stroke="#8a5a2c" stroke-width="1.6" />
+      <path d="M63 139 l4 4 l-4 1 z" fill="#e8c592" stroke="#8a5a2c" stroke-width="1.4" stroke-linejoin="round" />
+      <path d="M41 150 q9 2 18 1" fill="none" stroke="#b98a52" stroke-width="1.2" opacity=".7" />
+      <ellipse cx="50" cy="102" rx="13" ry="4.6" fill="#f1d7aa" stroke="#8a5a2c" stroke-width="1.8" />
+      <path d="M49 102 a2.6 1.1 0 1 1 3.6 0.3 a5.4 2.1 0 1 1 -8.6 -0.3 a8.4 3.2 0 1 1 13.8 0.6" fill="none" stroke="#a57240" stroke-width="1.1" />
     </g>
     <path d="${body}" fill="none" stroke="#2f6f7c" stroke-width="3.4" stroke-linejoin="round" />
     <rect x="32" y="14" width="36" height="13" rx="6.5" fill="#e6fbfd" stroke="#2f6f7c" stroke-width="3.2" />
