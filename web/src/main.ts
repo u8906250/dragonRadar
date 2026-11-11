@@ -7465,25 +7465,30 @@ function wireControls(): void {
   document.body.append(datePanel);
   dateToggle.addEventListener('click', () => setDateOpen(datePanel.hidden));
   window.addEventListener('resize', () => setDateOpen(false));
+  /** 選好之後：電腦版不收起來，可以繼續點（v1.632 使用者說的；剛點的那顆重畫後還是有焦點）；手機選好就收起來（選單會蓋住清單） */
+  const datePicked = (sel: string): void => {
+    if (matchMedia('(pointer: coarse)').matches) return setDateOpen(false);
+    datePanel.querySelector<HTMLButtonElement>(sel)?.focus();
+  };
   datePanel.addEventListener('click', (e) => {
     const t = e.target as Element;
     const w = t.closest<HTMLButtonElement>('[data-wd]')?.dataset.wd;
     const day = t.closest<HTMLButtonElement>('[data-day]')?.dataset.day;
     if (w !== undefined) {
-      // 星期幾一次選一個（v1.615 使用者說不用疊加）：點別天就換過去，再點同一個是取消；「週末」＝六、日；選好就收起來
+      // 星期幾一次選一個（v1.615 使用者說不用疊加）：點別天就換過去，再點同一個是取消；「週末」＝六、日
       const cur = dayPick && 'weekdays' in dayPick ? dayPick.weekdays : new Set<number>();
       const want = w === 'weekend' ? [0, 6] : [Number(w)];
       const same = cur.size === want.length && want.every((x) => cur.has(x));
       setDayPick(same ? null : { weekdays: new Set(want) });
-      setDateOpen(false);
+      datePicked(`[data-wd="${w}"]`);
     } else if (day !== undefined) {
-      // 直接點一天：選好就收起來（再點一次同一天是取消）
+      // 直接點一天（再點一次同一天是取消）
       const d = Number(day);
       setDayPick(dayPick && 'date' in dayPick && dayPick.date === d ? null : { date: d });
-      setDateOpen(false);
+      datePicked(`[data-day="${day}"]`);
     } else if (t.closest('[data-act="clear"]')) {
       setDayPick(null);
-      setDateOpen(false);
+      datePicked('[data-act="clear"]');
     } else if (t.closest('[data-act="done"]')) setDateOpen(false);
   });
   reportSheet.querySelector('[data-act="close"]')?.addEventListener('click', () => openReportSheet(false));
