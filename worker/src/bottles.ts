@@ -345,43 +345,96 @@ export function ruleCheck(text: string): string | null {
 }
 
 const MODERATION_PROMPT = `你是「洋流雷達」漂流瓶的內容審核員。漂流瓶是使用者在街頭留給路過陌生人的一句話（台北大洋流競選活動的網站上）。
-內容不一定要正向：打氣、感謝、心情、抱怨、日常小事、在地觀察、對城市的期待都可以。
-分享自己收到、看到、拍到的東西（賀卡、紀念品、明信片、風景、活動現場），提到政府機關、公開活動、地名、節日，都是一般分享，不是廣告。
 
-只擋下這幾類：
-- 攻擊性內容：辱罵、嘲諷、貶低、人身攻擊任何人或團體（包括候選人、政黨、政府、媒體、網友），抹黑、未經證實的指控或謠言
-- 仇恨、歧視、威脅、暴力、色情
-- 廣告：替店家、商品、服務宣傳或推銷，報價、拉客，叫人參加抽獎、團購、換贈品，或要別人做事換東西（只是提到某個東西、某個單位不算）
-- 聯絡方式或個人資料：電話、帳號、住址、某個具體個人的私事或行蹤
+大部分內容都應該允許，category 填 none：打氣、感謝、心情、抱怨、日常小事、在地觀察、對城市的期待，
+分享自己收到、看到、拍到的東西（賀卡、紀念品、明信片、風景、活動現場），
+提到任何人名、地名、政府機關、政黨、候選人、節日或公開活動，只要沒有下面四類的內容，都是 none。
 
-拿不準是不是廣告時，沒有在賣東西、沒有要別人買或參加的，就是允許。
+只有明確屬於下面四類才擋下，category 填對應的代號：
+- attack：辱罵、嘲諷、貶低、人身攻擊任何人或團體（包括候選人、政黨、政府、媒體、網友），抹黑、未經證實的指控或謠言
+- hate：仇恨、歧視、威脅、暴力、色情
+- ad：替店家、商品、服務宣傳或推銷，報價、拉客，叫人參加抽獎、團購、換贈品，或要別人做事換東西
+- privacy：電話、帳號、住址，或某個具體個人的私事、行蹤
 
-只輸出 JSON：{"allowed": true 或 false, "reason": "不允許時用一句話說明是哪一類，給使用者看；允許時空字串"}`;
+拿不準就填 none。
 
-/** AI 判斷有沒有攻擊性、廣告、個資；AI 失敗就當成不通過（寧可不收） */
-async function moderate(env: Env, text: string): Promise<{ allowed: boolean; reason: string }> {
+例子：
+「2025來自總統府的賀卡!」→ none
+「謝謝今天發飄帶的志工」→ none
+「市政府把公園整理得好漂亮」→ none
+「今天在捷運上看到有人讓座，好感動」→ none
+「XX 咖啡第二杯半價，快來買」→ ad
+「某某某是騙子，大家小心」→ attack
+「我家住在 XX 路 XX 號」→ privacy
+
+只輸出 JSON：{"category": "none" 或 "attack" 或 "hate" 或 "ad" 或 "privacy", "reason": "不是 none 時用一句話說明；none 時空字串"}`;
+
+/** 擋下的類別給使用者看的說法（模型自己寫的原因只記在紀錄裡，不拿來當理由：v1.625 前模型自己編出「提到政府機關」） */
+export const MODERATION_LABEL: Record<string, string> = {
+  attack: '攻擊、嘲諷或謠言',
+  hate: '仇恨、歧視、威脅、暴力或色情',
+  ad: '廣告、推銷或抽獎',
+  privacy: '電話、帳號、住址或個人隱私',
+};
+const MODERATION_CATEGORIES = ['none', 'attack', 'hate', 'ad', 'privacy'];
+
+export interface ModerationVerdict {
+  allowed: boolean;
+  /** none 或擋下的類別 */
+  category: string;
+  /** 給使用者看的原因（類別的說法） */
+  reason: string;
+  /** 每個模型說了什麼（紀錄、管理頁的試審核看） */
+  trail: Array<{ model: string; category: string; reason: string }>;
+}
+
+/** 問一個模型：回傳類別和它寫的原因；讀不出來回 null */
+async function askModerator(env: Env, model: string, text: string): Promise<{ category: string; reason: string } | null> {
   const ai = env.AI as unknown as { run(model: string, inputs: unknown): Promise<unknown> };
   const messages = [
     { role: 'system', content: MODERATION_PROMPT },
-    { role: 'user', content: `漂流瓶內容：「${text}」${/qwen3/i.test(env.AI_MODEL) ? '\n/no_think' : ''}` },
+    { role: 'user', content: `漂流瓶內容：「${text}」${/qwen3/i.test(model) ? '\n/no_think' : ''}` },
   ];
   const schema = {
     type: 'object',
-    properties: { allowed: { type: 'boolean' }, reason: { type: 'string' } },
-    required: ['allowed', 'reason'],
+    properties: { category: { type: 'string', enum: MODERATION_CATEGORIES }, reason: { type: 'string' } },
+    required: ['category', 'reason'],
   };
-  for (const model of [env.AI_MODEL, env.AI_MODEL_FALLBACK].filter((m): m is string => !!m)) {
+  // 備用模型會先推理再回答，推理也算在 max_tokens 裡，給寬一點
+  const res = await ai.run(model, { messages, response_format: { type: 'json_schema', json_schema: schema }, max_tokens: 1000, temperature: 0 });
+  const c = responseContent(res);
+  const o = (typeof c === 'string' ? JSON.parse(c.replace(/^[^{]*/, '').replace(/[^}]*$/, '')) : c) as { category?: unknown; reason?: unknown; allowed?: unknown };
+  const reason = typeof o?.reason === 'string' ? o.reason.slice(0, 80) : '';
+  if (typeof o?.category === 'string' && MODERATION_CATEGORIES.includes(o.category)) return { category: o.category, reason };
+  // 舊格式（allowed）也接受；擋下但沒說哪一類的，當成拿不準
+  if (typeof o?.allowed === 'boolean') return { category: o.allowed ? 'none' : 'unknown', reason };
+  return null;
+}
+
+/**
+ * AI 判斷有沒有攻擊性、仇恨、廣告、個資（類別只能從這四類選，模型不能自己編理由）。
+ * 主要模型說要擋時，再問備用模型一次，它說沒問題就放行（小模型常誤擋，v1.625：賀卡被判成廣告、又被判成「提到政府機關」）；
+ * 兩個都失敗就當成不通過（寧可不收）
+ */
+export async function moderate(env: Env, text: string): Promise<ModerationVerdict> {
+  const models = [env.AI_MODEL, env.AI_MODEL_FALLBACK].filter((m): m is string => !!m);
+  const trail: ModerationVerdict['trail'] = [];
+  for (const model of models) {
     try {
-      // 備用模型會先推理再回答，推理也算在 max_tokens 裡，給寬一點
-      const res = await ai.run(model, { messages, response_format: { type: 'json_schema', json_schema: schema }, max_tokens: 1000, temperature: 0 });
-      const c = responseContent(res);
-      const o = (typeof c === 'string' ? JSON.parse(c.replace(/^[^{]*/, '').replace(/[^}]*$/, '')) : c) as { allowed?: unknown; reason?: unknown };
-      if (typeof o?.allowed === 'boolean') return { allowed: o.allowed, reason: typeof o.reason === 'string' ? o.reason.slice(0, 80) : '' };
+      const v = await askModerator(env, model, text);
+      if (!v) continue;
+      trail.push({ model, ...v });
+      if (v.category === 'none') return { allowed: true, category: 'none', reason: '', trail };
+      // 要擋：還有下一個模型就再問一次
     } catch (e) {
       console.warn(`bottle moderation with ${model} failed: ${String(e)}`);
     }
   }
-  throw new ReportError(503, '暫時沒辦法審核內容，請稍後再丟');
+  if (trail.length === 0) throw new ReportError(503, '暫時沒辦法審核內容，請稍後再丟');
+  // 每個問到的模型都說要擋：用最後一個（備用模型）的類別
+  const last = trail[trail.length - 1];
+  const label = MODERATION_LABEL[last.category];
+  return { allowed: false, category: last.category, reason: label ?? '內容不適合丟出去', trail };
 }
 
 async function countSince(env: Env, sql: string, binds: unknown[]): Promise<number> {
@@ -544,8 +597,10 @@ export async function dropBottle(env: Env, device: string | null, ip: string, bo
     });
   const verdict = await aiDown(moderate(env, text));
   if (!verdict.allowed) {
-    const msg = `這句話不能丟${verdict.reason ? `：${verdict.reason}` : ''}`;
-    await logReject(env, dev, ip, 'text', msg, text, !!photo, now);
+    const msg = `這句話不能丟：${verdict.reason}`;
+    // 紀錄裡多寫每個模型說了什麼（管理頁看為什麼被擋）
+    const detail = verdict.trail.map((t) => `${t.model.split('/').pop()}：${t.category}${t.reason ? `（${t.reason}）` : ''}`).join('；');
+    await logReject(env, dev, ip, 'text', `${msg}｜${detail}`, text, !!photo, now);
     throw new ReportError(422, msg);
   }
   let key: string | null = null;
