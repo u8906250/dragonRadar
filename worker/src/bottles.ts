@@ -10,6 +10,7 @@
  *   看得到內容的人都可以檢舉，檢舉就藏起來等管理者確認。
  * - 漂流：丟下的 24 小時內，每 2 小時在丟的地方附近（200 m 內）晃一下；沒人撿就漂到汪星的海上（world = 'woof'，
  *   lat、lng 換成汪星的經緯度，woofsea.ts），跟丟的地方同一個方向的海邊；在汪星的海上留 30 天，沒人撿就沉下去。
+ * - 被收藏的（v1.645 使用者說的）：不會漂到汪星。收藏後在原地留 24 小時（雷達上標成已收藏），之後就只在收藏的人的瓶中信收藏裡，雷達上看不到。
  *   汪星上的「你的位置」是雷達正中間（搭火箭過去，拖曳就是走路），一樣要 1 km 內才收藏得到。
  * - 編號：瓶子的流水號就是編號（前端寫成 No.000123）；瓶子證明（bottleProof）＝編號、丟的時間、內容的 SHA-256，伺服器簽章，之後可以驗證。
  * - 每天最多丟 3 個（以前回收撿到的瓶子多一個，拿掉了）。
@@ -47,8 +48,12 @@ export const WITHDRAW_SEC = 86400;
 export const WOOF_STAY_SEC = 30 * 86400;
 /** 瓶子整個的壽命：地球 1 天＋汪星 30 天 */
 export const BOTTLE_TTL_SEC = SEA_AFTER_SEC + WOOF_STAY_SEC;
-/** 雷達上看得到的瓶子：漂流中的、被收藏了的（收藏後不消失） */
-const SHOWN = "status IN ('active', 'picked')";
+/** 收藏後在原地（雷達上，標成已收藏）留多久，之後只在收藏的人那裡 */
+export const KEEP_TAKEN_SEC = 86400;
+/** 雷達上看得到的瓶子：漂流中的、收藏不到 KEEP_TAKEN_SEC 的（綁一個參數：now - KEEP_TAKEN_SEC） */
+const SHOWN = "(status = 'active' OR (status = 'picked' AND EXISTS (SELECT 1 FROM bottle_picks p WHERE p.bottle_id = bottles.id AND p.collected_at > ?)))";
+/** 收藏的時間（SELECT 裡多拿這一欄，toOut 用） */
+const TAKEN_AT = '(SELECT MIN(p.collected_at) FROM bottle_picks p WHERE p.bottle_id = bottles.id AND p.collected_at IS NOT NULL) AS taken_at';
 /** 走到這個距離內才撿得起來 */
 /** 只看得到這麼遠內的瓶子（v1.622 使用者說的；地球上照你的位置，伺服器也只回這個範圍內的） */
 export const SEE_RADIUS_KM = 5;
@@ -113,8 +118,10 @@ export interface BottleOut {
   picked: boolean;
   /** 被撿起來的次數 */
   picks: number;
-  /** 已經被收藏了（誰收藏的都算；收藏後瓶子照樣留在雷達上） */
+  /** 已經被收藏了（誰收藏的都算；收藏後瓶子在原地留 24 小時） */
   taken: boolean;
+  /** 什麼時候被收藏的（還沒被收藏是 null） */
+  takenAt: number | null;
 }
 
 // ---- 照片 ----
@@ -320,12 +327,12 @@ export function seaPoint(from: { lat: number; lng: number } | null, rand: () => 
 }
 
 /**
- * 排程每次跑：丟下滿 24 小時的漂到汪星的海上（被收藏了的瓶子也一起漂過去，收藏後不消失）；
+ * 排程每次跑：丟下滿 24 小時、還沒被收藏的漂到汪星的海上（被收藏的不漂過去，v1.645 使用者說的：收藏後在原地留 24 小時就收走）；
  * 其他還在地球上、還沒被收藏的，每 DRIFT_EVERY_SEC 在丟的地方附近晃一步。汪星上的瓶子不動。回傳漂了幾個
  */
 export async function driftBottles(env: Env, now: number, rand: () => number = Math.random): Promise<{ moved: number; toSea: number }> {
   const { results } = await env.DB.prepare(
-    "SELECT id, lat, lng, origin_lat, origin_lng, created_at FROM bottles WHERE world = 'earth' AND expires_at > ? AND ((status IN ('active', 'picked') AND created_at <= ?) OR (status = 'active' AND COALESCE(drifted_at, created_at) < ?)) LIMIT 300",
+    "SELECT id, lat, lng, origin_lat, origin_lng, created_at FROM bottles WHERE world = 'earth' AND expires_at > ? AND status = 'active' AND (created_at <= ? OR COALESCE(drifted_at, created_at) < ?) LIMIT 300",
   )
     .bind(now, now - SEA_AFTER_SEC, now - DRIFT_EVERY_SEC)
     .all<{ id: number; lat: number; lng: number; origin_lat: number | null; origin_lng: number | null; created_at: number }>();
@@ -335,8 +342,8 @@ export async function driftBottles(env: Env, now: number, rand: () => number = M
     if (b.created_at <= now - SEA_AFTER_SEC) {
       toSea++;
       const p = seaPoint(b.origin_lat === null || b.origin_lng === null ? b : { lat: b.origin_lat, lng: b.origin_lng }, rand);
-      // 被檢舉藏起來、收回的不動
-      return env.DB.prepare("UPDATE bottles SET world = 'woof', lat = ?, lng = ?, sea_at = ?, drifted_at = ? WHERE id = ? AND status IN ('active', 'picked') AND world = 'earth'").bind(
+      // 被收藏、被檢舉藏起來、收回的不動
+      return env.DB.prepare("UPDATE bottles SET world = 'woof', lat = ?, lng = ?, sea_at = ?, drifted_at = ? WHERE id = ? AND status = 'active' AND world = 'earth'").bind(
         p.lat,
         p.lng,
         now,
@@ -676,15 +683,18 @@ export interface PickedBottle {
   photo: boolean;
 }
 
-function toOut(r: BottleRow, dev: string | null, picked: boolean): BottleOut {
-  return { id: r.id, world: r.world, lat: r.lat, lng: r.lng, createdAt: r.created_at, expiresAt: r.expires_at, mine: r.device_id === dev, picked, picks: r.picks, taken: r.status === 'picked' };
+function toOut(r: BottleRow & { taken_at?: number | null }, dev: string | null, picked: boolean): BottleOut {
+  return { id: r.id, world: r.world, lat: r.lat, lng: r.lng, createdAt: r.created_at, expiresAt: r.expires_at, mine: r.device_id === dev, picked, picks: r.picks, taken: r.status === 'picked', takenAt: r.taken_at ?? null };
 }
+
+/** 收藏滿 KEEP_TAKEN_SEC 了（雷達上看不到，只在收藏的人那裡） */
+const keptAway = (r: BottleRow & { taken_at?: number | null }, now: number): boolean => r.status === 'picked' && !!r.taken_at && r.taken_at <= now - KEEP_TAKEN_SEC;
 
 /** 附近漂流中的瓶子（沒有內容）；world = 'woof' 是汪星海上的全部（汪星很小，不分附近） */
 export async function listBottles(env: Env, device: string | null, q: { lat?: number; lng?: number; radiusKm: number; world?: BottleWorld }, now: number): Promise<BottleOut[]> {
   const world = q.world ?? 'earth';
   const conds = [SHOWN, 'world = ?', 'expires_at > ?'];
-  const binds: unknown[] = [world, now];
+  const binds: unknown[] = [now - KEEP_TAKEN_SEC, world, now];
   // 有位置就從近到遠排，瓶子很多時也一定拿得到最近的那幾個（雷達外圈的方向提示要用）
   let order = 'created_at DESC';
   if (world === 'earth' && q.lat !== undefined && q.lng !== undefined) {
@@ -696,9 +706,9 @@ export async function listBottles(env: Env, device: string | null, q: { lat?: nu
     order = '(lat - ?) * (lat - ?) + (lng - ?) * (lng - ?) * ?';
     binds.push(q.lat, q.lat, q.lng, q.lng, k * k);
   }
-  const { results } = await env.DB.prepare(`SELECT * FROM bottles WHERE ${conds.join(' AND ')} ORDER BY ${order} LIMIT ${world === 'woof' ? WOOF_LIST_LIMIT : LIST_LIMIT}`)
+  const { results } = await env.DB.prepare(`SELECT *, ${TAKEN_AT} FROM bottles WHERE ${conds.join(' AND ')} ORDER BY ${order} LIMIT ${world === 'woof' ? WOOF_LIST_LIMIT : LIST_LIMIT}`)
     .bind(...binds)
-    .all<BottleRow>();
+    .all<BottleRow & { taken_at: number | null }>();
   const picked = new Set<number>();
   if (device && results.length > 0) {
     const r = await env.DB.prepare(`SELECT bottle_id FROM bottle_picks WHERE device_id = ? AND bottle_id IN (${results.map(() => '?').join(',')})`)
@@ -711,12 +721,17 @@ export async function listBottles(env: Env, device: string | null, q: { lat?: nu
   return results.filter((b) => !center || distM(center, b) <= q.radiusKm * 1000).map((b) => toOut(b, device, picked.has(b.id)));
 }
 
-/** 分享出去的連結打開時看的瓶子（沒有內容）：還在漂（地球上、汪星的海上）、被收藏了（瓶子還在）、不見了（沉下去、收回、被檢舉） */
-export async function bottleInfo(env: Env, device: string | null, id: number, now: number): Promise<{ id: number; state: 'active' | 'picked' | 'gone'; bottle: BottleOut | null }> {
-  const b = await env.DB.prepare('SELECT * FROM bottles WHERE id = ?').bind(id).first<BottleRow>();
+/**
+ * 分享出去的連結打開時看的瓶子（沒有內容）：還在漂（地球上、汪星的海上）、被收藏了（收藏後 24 小時內還在原地）、
+ * 收藏走了（kept：只在收藏的人那裡；yours 是你收藏的）、不見了（沉下去、收回、被檢舉）
+ */
+export async function bottleInfo(env: Env, device: string | null, id: number, now: number): Promise<{ id: number; state: 'active' | 'picked' | 'kept' | 'gone'; bottle: BottleOut | null; yours?: boolean }> {
+  const b = await env.DB.prepare(`SELECT *, ${TAKEN_AT} FROM bottles WHERE id = ?`).bind(id).first<BottleRow & { taken_at: number | null }>();
   if (!b) return { id, state: 'gone', bottle: null };
-  if ((b.status !== 'active' && b.status !== 'picked') || b.expires_at <= now) return { id, state: 'gone', bottle: null };
+  if (b.status !== 'active' && b.status !== 'picked') return { id, state: 'gone', bottle: null };
   const picked = device ? !!(await env.DB.prepare('SELECT 1 AS x FROM bottle_picks WHERE bottle_id = ? AND device_id = ?').bind(id, device).first()) : false;
+  if (keptAway(b, now)) return { id, state: 'kept', bottle: null, yours: picked };
+  if (b.expires_at <= now) return { id, state: 'gone', bottle: null };
   return { id, state: b.status === 'picked' ? 'picked' : 'active', bottle: toOut(b, device, picked) };
 }
 
@@ -739,9 +754,12 @@ function assertNear(b: BottleRow, body: { lat?: unknown; lng?: unknown; world?: 
  */
 export async function readBottle(env: Env, device: string | null, id: number, body: { lat?: unknown; lng?: unknown; world?: unknown }, now: number): Promise<PickedBottle> {
   const dev = needDevice(device);
-  const b = await env.DB.prepare("SELECT * FROM bottles WHERE id = ? AND status IN ('active', 'picked')").bind(id).first<BottleRow>();
-  if (!b || b.expires_at <= now) throw new ReportError(404, '這個瓶子已經沉下去了');
+  const b = await env.DB.prepare(`SELECT *, ${TAKEN_AT} FROM bottles WHERE id = ? AND status IN ('active', 'picked')`).bind(id).first<BottleRow & { taken_at: number | null }>();
+  if (!b) throw new ReportError(404, '這個瓶子已經沉下去了');
   const picked = b.device_id !== dev && (await hasPicked(env, id, dev));
+  // 收藏走了的只有丟的人、收藏的人看得到（收藏的人收的信不會過期）
+  if (keptAway(b, now) && b.device_id !== dev && !picked) throw new ReportError(410, '這個瓶子已經被收藏走了');
+  if (b.expires_at <= now && !picked && !keptAway(b, now)) throw new ReportError(404, '這個瓶子已經沉下去了');
   if (b.device_id !== dev && !picked) assertNear(b, body, '打開來看');
   return { bottle: toOut(b, dev, picked), text: b.text, photo: !!b.photo_key };
 }

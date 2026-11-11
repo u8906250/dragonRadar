@@ -191,7 +191,7 @@ export const pickBottle = (id: number, here?: BottleHere): Promise<Result<Picked
 /** 打開來看（不收藏）：自己丟的、收藏過的隨時看得到，別人的要走到附近 */
 export const readBottle = (id: number, here?: BottleHere): Promise<Result<PickedBottle>> => deviceJson<PickedBottle>(`/api/bottles/${id}/read`, 'POST', hereBody(here));
 /** 分享出去的瓶子（沒有內容）：還在漂、被撿走了、不見了 */
-export const fetchBottleInfo = (id: number): Promise<Result<{ id: number; state: 'active' | 'picked' | 'gone'; bottle: BottleOut | null }>> => deviceJson(`/api/bottles/${id}`);
+export const fetchBottleInfo = (id: number): Promise<Result<{ id: number; state: 'active' | 'picked' | 'kept' | 'gone'; bottle: BottleOut | null; yours?: boolean }>> => deviceJson(`/api/bottles/${id}`);
 /** 瓶子證明（丟的人、撿到的人才拿得到） */
 export const fetchBottleProof = (id: number): Promise<Result<BottleProof>> => deviceJson<BottleProof>(`/api/bottles/${id}/proof`);
 export const verifyBottleProof = (p: BottleProof): Promise<Result<{ valid: boolean }>> => deviceJson<{ valid: boolean }>('/api/bottles/verify', 'POST', p);

@@ -125,6 +125,8 @@ export interface BottleOut {
   picks: number;
   /** 已經被收藏了（誰收藏的都算；收藏後瓶子照樣留在雷達上，走到附近的人還是看得到內容） */
   taken?: boolean;
+  /** 什麼時候被收藏的（還沒被收藏是 null；舊伺服器沒有這一欄） */
+  takenAt?: number | null;
 }
 
 export interface PickedBottle {
