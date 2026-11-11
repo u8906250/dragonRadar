@@ -318,7 +318,7 @@ function foodDetailHtml(it: Item, now: number): string {
   const x = foodOf(ev);
   const role = foodRole(ev);
   const line = (k: string, v: string | null | undefined): string => (v ? `${k}：${esc(v)}<br>` : '');
-  const where = `地點：${esc(placeOf(ev))}${ev.approxArea ? `<br><span class="approx-note">約略位置：只知道在${esc(ev.approxArea)}</span>` : ''}<br>距離：${ev.approxArea ? '約 ' : ''}${stepDistance(it)}`;
+  const where = `地點：${esc(placeOf(ev))}${ev.approxArea ? `<br><span class="approx-note">約略位置：只知道在${esc(ev.approxArea)}</span>` : ''}`;
   if (role === 'meetup') {
     return `<div class="fraud-box"><b>⚠️ 跟網友吃飯前</b><ul>${MEETUP_SAFETY_TIPS.map((t) => `<li>${esc(t)}</li>`).join('')}</ul></div><p>類型：揪團吃飯<br>${line('吃什麼', x.food)}時間：${esc(seekWhen(ev))}<br>${line('缺幾人', x.slots)}${line('預算', x.price)}${line('報名方式', x.contact ? (CONTACT_TEXT[x.contact] ?? x.contact) : null)}${where}</p>`;
   }
@@ -3281,7 +3281,8 @@ async function throwBottleFx(text: string, photo: string | null, hide: () => voi
   }
 }
 
-/** 活動卡片標題下面：「還有 4 小時・1.2 km」（進行中寫「進行中」；職缺、刊登沒有開始時間，只寫距離）；距離從打開卡片時雷達的中心算 */
+/** 活動卡片標題下面：「還有 4 小時・1.2 km」（進行中寫「進行中」；職缺、刊登沒有開始時間，只寫距離）；距離從打開卡片時雷達的中心算。
+ * 詳細資料裡不再另外寫「距離」（v1.633 使用者說標題就有） */
 function headMeta(it: Item, now: number): string {
   const { ev } = it;
   const when = ev.kind === 'job' || postingRole(ev) ? '' : isUpcoming(it) ? startsIn(reportedStop(ev)?.at ?? ev.startAt, now) : it.phase === 'active' ? '進行中' : '';
@@ -3289,11 +3290,6 @@ function headMeta(it: Item, now: number): string {
   return [when, `${ev.approxArea ? '約 ' : ''}${formatKm(km)}`].filter(Boolean).join('・');
 }
 
-/** 詳細資料的「距離」：「1.2 km，北方」，跟標題下面一樣從打開卡片時雷達的中心算 */
-function stepDistance(it: Item): string {
-  const from = stepFrom ?? origin;
-  return `${formatKm(haversineKm(from, it.ev))}，${compassLabel(bearingDeg(from, it.ev))}方`;
-}
 
 /** 詳細資料上次畫的內容 */
 let detailHtml = '';
@@ -3461,7 +3457,7 @@ function renderDetail(items: Item[], now: number): void {
     <div class="sheet-body">
       ${nearbyHtml(it, items)}
       ${routeBoxHtml(ev, items, now)}
-      ${ev.kind === 'job' ? jobDetailHtml(it, now) : ev.kind === 'session' ? sessionDetailHtml(it, now) : ev.kind === 'food' ? foodDetailHtml(it, now) : `<p>類型：${it.spot ? `固定據點（${kindLabel(ev)}）` : kindLabel(ev)}<br>${ev.item ? `${ev.kind === 'activity' ? '物品' : '發放'}：${esc(ev.item)}<br>` : ''}${ev.keyword ? `關鍵字：#${esc(ev.keyword)}<br>` : ''}地點：${esc(placeOf(ev))}${ev.approxArea ? `<br><span class="approx-note">約略位置：只知道在${esc(ev.approxArea)}，地圖上是${esc(ev.approxArea)}的中心點，實際地點請看原文</span>` : ''}<br>時間：${it.spot ? esc(spotSchedule(it)) : ev.allDay ? `${dateFmt.format(new Date(ev.startAt * 1000))} ${allDayText(ev, false)}` : esc(eventTimeText(ev))}<br>距離：${ev.approxArea ? '約 ' : ''}${stepDistance(it)} · ${esc(timeLine(it, now))}</p>`}
+      ${ev.kind === 'job' ? jobDetailHtml(it, now) : ev.kind === 'session' ? sessionDetailHtml(it, now) : ev.kind === 'food' ? foodDetailHtml(it, now) : `<p>類型：${it.spot ? `固定據點（${kindLabel(ev)}）` : kindLabel(ev)}<br>${ev.item ? `${ev.kind === 'activity' ? '物品' : '發放'}：${esc(ev.item)}<br>` : ''}${ev.keyword ? `關鍵字：#${esc(ev.keyword)}<br>` : ''}地點：${esc(placeOf(ev))}${ev.approxArea ? `<br><span class="approx-note">約略位置：只知道在${esc(ev.approxArea)}，地圖上是${esc(ev.approxArea)}的中心點，實際地點請看原文</span>` : ''}<br>時間：${it.spot ? esc(spotSchedule(it)) : ev.allDay ? `${dateFmt.format(new Date(ev.startAt * 1000))} ${allDayText(ev, false)}` : esc(eventTimeText(ev))}</p>`}
       ${tagsOf(ev).length > 0 ? `<p class="detail-tags">${tagsHtml(tagsOf(ev), true)}</p>` : ''}
       <blockquote class="post-excerpt" title="原文摘錄，完整內容請看原文">${esc(ev.post.source === 'news' ? ev.post.text.split('\n')[0] : ev.post.text)}</blockquote>
       ${ev.post.supplement ? `<p class="muted supplement-line">回報的人補充：${esc(ev.post.supplement)}</p>` : ''}
@@ -3580,7 +3576,7 @@ function sessionDetailHtml(it: Item, now: number): string {
   const { ev } = it;
   const x = sessionOf(ev);
   const line = (k: string, v: string | null | undefined): string => (v ? `${k}：${esc(v)}<br>` : '');
-  const where = `地點：${esc(placeOf(ev))}${ev.approxArea ? `<br><span class="approx-note">約略位置：只知道在${esc(ev.approxArea)}</span>` : ''}<br>距離：${ev.approxArea ? '約 ' : ''}${stepDistance(it)}`;
+  const where = `地點：${esc(placeOf(ev))}${ev.approxArea ? `<br><span class="approx-note">約略位置：只知道在${esc(ev.approxArea)}</span>` : ''}`;
   const contact = x.contact ? (CONTACT_TEXT[x.contact] ?? x.contact) : null;
   if (isSeek(ev)) {
     return `<p>類型：找臨打（球友想找地方打）<br>${line('程度', x.level)}時間：${esc(seekWhen(ev))}<br>${line('聯絡方式', contact)}${where}</p>`;
@@ -3604,7 +3600,7 @@ function jobDetailHtml(it: Item, now: number): string {
   const w = jobWords();
   const period = jobPeriod(j);
   const who = offer ? (w.offerWho ? `提供者：${j.employer ? esc(j.employer) : '個人'}<br>` : '') : `雇主：${j.employer ? esc(j.employer) : '<span class="risk">沒寫</span>'}<br>`;
-  return `${fraudBoxHtml(ev)}<p>類型：${offer ? w.offerType : w.hireType}<br>${j.pay ? `${offer ? w.offerPay : '薪資'}：${esc(j.pay)}<br>` : ''}${offer ? w.offerPeriod : '工作期間'}：${esc(offer && period === '沒寫工作期間' ? '時間可討論' : period)}<br>${who}${j.contact ? `${offer ? '聯絡方式' : '應徵方式'}：${esc(CONTACT_TEXT[j.contact] ?? j.contact)}<br>` : ''}${j.requirements ? `${offer ? w.offerNeeds : '內容'}：${esc(j.requirements)}<br>` : ''}地點：${esc(placeOf(ev))}${ev.approxArea ? `<br><span class="approx-note">約略位置：只知道在${esc(ev.approxArea)}</span>` : ''}<br>距離：${ev.approxArea ? '約 ' : ''}${stepDistance(it)}${ev.endOpen ? '' : ` · 刊登到 ${dateFmt.format(new Date((ev.endAt - 1) * 1000))}`}${now ? '' : ''}</p>`;
+  return `${fraudBoxHtml(ev)}<p>類型：${offer ? w.offerType : w.hireType}<br>${j.pay ? `${offer ? w.offerPay : '薪資'}：${esc(j.pay)}<br>` : ''}${offer ? w.offerPeriod : '工作期間'}：${esc(offer && period === '沒寫工作期間' ? '時間可討論' : period)}<br>${who}${j.contact ? `${offer ? '聯絡方式' : '應徵方式'}：${esc(CONTACT_TEXT[j.contact] ?? j.contact)}<br>` : ''}${j.requirements ? `${offer ? w.offerNeeds : '內容'}：${esc(j.requirements)}<br>` : ''}地點：${esc(placeOf(ev))}${ev.approxArea ? `<br><span class="approx-note">約略位置：只知道在${esc(ev.approxArea)}</span>` : ''}${ev.endOpen ? '' : `<br>刊登到 ${dateFmt.format(new Date((ev.endAt - 1) * 1000))}`}</p>`;
 }
 
 /** 正在回報問題的車掃（回報的）每一站；不是車掃是 null */
