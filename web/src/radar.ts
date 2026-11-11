@@ -392,6 +392,32 @@ const GROUP_PX = 12;
 const LINE_PX = 14;
 
 /** 距離換成半徑比例（0 = 圓心，1 = 外圈，超出範圍會大於 1），全部照比例 */
+/** Douglas-Peucker：離頭尾連線不到 tol 的點拿掉（頭尾留著） */
+function simplifyPts(pts: Array<{ x: number; y: number }>, tol: number): Array<{ x: number; y: number }> {
+  const keep = new Uint8Array(pts.length);
+  keep[0] = keep[pts.length - 1] = 1;
+  const stack: Array<[number, number]> = [[0, pts.length - 1]];
+  while (stack.length > 0) {
+    const [a, b] = stack.pop()!;
+    const [ax, ay, bx, by] = [pts[a].x, pts[a].y, pts[b].x, pts[b].y];
+    const len = Math.hypot(bx - ax, by - ay);
+    let far = -1;
+    let best = tol;
+    for (let i = a + 1; i < b; i++) {
+      const d = len > 1e-9 ? Math.abs((bx - ax) * (ay - pts[i].y) - (ax - pts[i].x) * (by - ay)) / len : Math.hypot(pts[i].x - ax, pts[i].y - ay);
+      if (d > best) {
+        best = d;
+        far = i;
+      }
+    }
+    if (far >= 0) {
+      keep[far] = 1;
+      stack.push([a, far], [far, b]);
+    }
+  }
+  return pts.filter((_, i) => keep[i]);
+}
+
 function radiusRatio(km: number, scaleKm: number): number {
   return km / scaleKm;
 }
@@ -1829,22 +1855,44 @@ export class Radar {
    */
   private outlinePath(ring: Array<{ bearing: number; distanceKm: number }>, open = false): { d: string; closed: boolean } | null {
     const maxJump = (R - 8) * 0.3;
+    // 畫面上太細的彎折拉直、太小的島不畫（v1.643 使用者說拉遠時日韓、中國的虛線擠在一起，畫得有點奇怪）：
+    // 每一段連續的線用 Douglas-Peucker 簡化（偏差不到 4 像素的拉直），整圈不到 16 像素寬、高的不畫
+    const unit = this.squarePx > 0 ? SIZE / this.squarePx : 1;
+    const tol = 4 * unit;
+    const tiny = 16 * unit;
     let prev: { x: number; y: number } | null = null;
     let broken = false;
-    const parts: string[] = [];
+    const runs: Array<Array<{ x: number; y: number }>> = [];
+    let run: Array<{ x: number; y: number }> = [];
+    let [x0, y0, x1, y1] = [Infinity, Infinity, -Infinity, -Infinity];
+    const endRun = (): void => {
+      if (run.length > 0) runs.push(run);
+      run = [];
+    };
     for (const pt of ring) {
       const ratio = this.ratio(pt.distanceKm);
       // 鋪滿時畫到畫面外面一點（線才會接到邊上）
       if (ratio * (R - 8) > (this.fill ? this.edgeR(pt.bearing - this.heading, -40) : R - 8)) {
         prev = null;
         broken = true;
+        endRun();
         continue;
       }
       const p = polar(pt.bearing - this.heading, ratio * (R - 8));
-      const jump = prev !== null && Math.hypot(p.x - prev.x, p.y - prev.y) > maxJump;
-      if (jump) broken = true;
-      parts.push(`${prev === null || jump ? 'M' : 'L'}${p.x.toFixed(1)} ${p.y.toFixed(1)}`);
+      [x0, y0, x1, y1] = [Math.min(x0, p.x), Math.min(y0, p.y), Math.max(x1, p.x), Math.max(y1, p.y)];
+      if (prev !== null && Math.hypot(p.x - prev.x, p.y - prev.y) > maxJump) {
+        broken = true;
+        endRun();
+      }
+      run.push(p);
       prev = p;
+    }
+    endRun();
+    if (!open && x1 - x0 < tiny && y1 - y0 < tiny) return null;
+    const parts: string[] = [];
+    for (const r of runs) {
+      const pts = r.length > 2 ? simplifyPts(r, tol) : r;
+      pts.forEach((p, i) => parts.push(`${i === 0 ? 'M' : 'L'}${p.x.toFixed(1)} ${p.y.toFixed(1)}`));
     }
     if (parts.length < 2) return null;
     return broken || open ? { d: parts.join(' '), closed: false } : { d: `${parts.join(' ')} Z`, closed: true };
