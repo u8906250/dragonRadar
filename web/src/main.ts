@@ -366,7 +366,6 @@ const emptyEl = $('#empty-hint');
 const detailEl = $('#detail');
 const countLabel = $('#count-label');
 const originLabel = $('#origin-label');
-const useGpsBtn = $<HTMLButtonElement>('#use-gps');
 /** 汪星的狗：「鎖定」按鈕、點過可以鎖定的狗（10 秒沒按就收起來）、鎖定中的狗 */
 const dogLockBtn = $<HTMLButtonElement>('#dog-lock-btn');
 let dogOffer: string | null = null;
@@ -5179,7 +5178,6 @@ function setOrigin(o: Origin): void {
   if (o.source === 'manual') lsSet(LS_ORIGIN, JSON.stringify(o));
   map.setOrigin(o, moved, o.source === 'gps' ? gpsAccuracy : null);
   originLabel.textContent = o.source === 'gps' ? 'GPS 定位' : o.source === 'manual' ? '手動位置' : '預設：台北車站';
-  useGpsBtn.hidden = o.source !== 'manual';
   updateViewBtn();
   if (isAutoScale(scaleSetting) && scaleKmFor(scaleSetting) !== scaleKm) {
     scaleKm = scaleKmFor(scaleSetting);
@@ -7537,11 +7535,6 @@ function wireControls(): void {
       }
     });
   }
-  useGpsBtn.addEventListener('click', () => {
-    lsSet(LS_ORIGIN, null);
-    setOrigin(DEFAULT_ORIGIN);
-    startGeolocation();
-  });
   wirePanelDrag();
   // 手動更新、自動更新的間隔
   updatedLabel.addEventListener('click', () => {

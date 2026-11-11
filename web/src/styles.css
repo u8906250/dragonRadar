@@ -1424,7 +1424,7 @@ path.map-seam-walkers { --p: 15px; }
 /* 收合：只留橫條與「漂來幾個」那一行 */
 .panel.collapsed { max-height: calc(66px + env(safe-area-inset-bottom)); }
 .panel.collapsed .kw-bar, .panel.collapsed .filter-row, .panel.collapsed .event-list, .panel.collapsed .hint { visibility: hidden; }
-.panel.collapsed .panel-head .right, .panel.collapsed #origin-label, .panel.collapsed #use-gps { display: none; }
+.panel.collapsed .panel-head .right, .panel.collapsed #origin-label { display: none; }
 .panel.expanded .panel-handle span { opacity: 0.9; }
 /* ========== 全螢幕（像 Google 地圖）==========
  * 地圖、雷達鋪滿：標題列收成浮在上面的按鈕（左上「洋流雷達▾」、右上「⋯」和縮小），地圖外面的框和留白拿掉；
