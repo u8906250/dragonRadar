@@ -1,6 +1,13 @@
 import { describe, expect, it } from 'vitest';
-import { distM, driftStep, parsePhoto, ruleCheck, scatter, seaPoint, sha256Hex, stripJpegMeta, taipeiMidnight, xLength } from '../src/bottles';
+import { cleanBottleText, distM, driftStep, parsePhoto, ruleCheck, scatter, seaPoint, sha256Hex, stripJpegMeta, taipeiMidnight, xLength } from '../src/bottles';
 import { WOOF_KM, WOOF_SEA } from '../src/woofsea';
+
+describe('cleanBottleText', () => {
+  it('換行留著，其他空白縮成一格、空行最多一行', () => {
+    expect(cleanBottleText('  第一行  \r\n第二行\t\t還是第二行\n\n\n\n第三段  ')).toBe('第一行\n第二行 還是第二行\n\n第三段');
+    expect(cleanBottleText('\n\n 只有一行 \n')).toBe('只有一行');
+  });
+});
 
 describe('ruleCheck', () => {
   it('lets short cheering messages through', () => {

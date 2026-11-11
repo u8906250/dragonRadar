@@ -365,6 +365,17 @@ export function scatter(p: { lat: number; lng: number }, rand: () => number = Ma
   return offset(p, r * Math.sin(t), r * Math.cos(t));
 }
 
+/** 瓶子的內文：保留換行（v1.656 使用者說信的內容有換行要顯示出來），其他連續空白縮成一格、每行頭尾的空白去掉、空行最多連一行 */
+export function cleanBottleText(text: string): string {
+  return text
+    .replace(/\r\n?/g, '\n')
+    .split('\n')
+    .map((l) => l.replace(/\s+/g, ' ').trim())
+    .join('\n')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
+}
+
 /** 規則先擋：連結、電話、Email、LINE／IG 帳號、太長的數字、全是符號 */
 export function ruleCheck(text: string): string | null {
   const t = text.trim();
@@ -615,7 +626,7 @@ export async function purgeBottleRejects(env: Env, now: number): Promise<number>
 /** 丟一個瓶子：在你現在的位置附近 */
 export async function dropBottle(env: Env, device: string | null, ip: string, body: { text?: unknown; lat?: unknown; lng?: unknown; photo?: unknown }, now: number): Promise<PickedBottle> {
   const dev = needDevice(device);
-  const text = typeof body.text === 'string' ? body.text.replace(/\s+/g, ' ').trim() : '';
+  const text = typeof body.text === 'string' ? cleanBottleText(body.text) : '';
   // 一直送沒通過的：先擋下來（在規則、AI 審核之前）
   await assertNotSpamming(env, dev, ip, now);
   const bad = ruleCheck(text);

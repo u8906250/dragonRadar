@@ -138,6 +138,8 @@ let bottles: BottleOut[] = [];
 /** 漂到汪星海上的漂流瓶（你在汪星才抓） */
 let woofBottles: BottleOut[] = [];
 let selectedBottle: number | null = null;
+/** 剛丟出去、自動打開的瓶子：詳細資料不再顯示一次內容（v1.656 使用者說的；關掉再點瓶子才顯示） */
+let justThrown: number | null = null;
 /** 打開來看過（自己丟的、收藏的、走到附近看的）瓶子內容 */
 const bottleTexts = new Map<number, PickedBottle>();
 /** 漂流瓶詳細資料上的訊息（看不到、收藏不到的原因、檢舉結果） */
@@ -2469,8 +2471,9 @@ function threadsShareUrl(id: number, mine: boolean): string {
 const shareLink = (id: number, mine: boolean, cls = 'btn'): string =>
   `<a class="${cls}" href="${esc(threadsShareUrl(id, mine))}" target="_blank" rel="noopener">分享到 Threads</a>`;
 
-function selectBottle(id: number | null): void {
+function selectBottle(id: number | null, thrown = false): void {
   selectedBottle = selectedBottle === id ? null : id;
+  justThrown = thrown ? selectedBottle : null;
   bottleMsg = '';
   openTried.clear();
   selectedId = null;
@@ -2628,7 +2631,7 @@ function renderBottleDetail(id: number): boolean {
         : b.taken
           ? `${ago(b.createdAt)}丟的・已經被別人收藏了・${lifecycle}`
           : `${ago(b.createdAt)}丟的・還沒有人收藏・${lifecycle}`;
-    body = `${kraftNote(got.text, b.id, got.photo)}<p class="muted">${esc(status)}</p>`;
+    body = `${justThrown === id ? '' : kraftNote(got.text, b.id, got.photo)}<p class="muted">${esc(status)}</p>`;
   } else if (canOpen) {
     body = '<p class="muted">打開瓶子中…</p>';
   } else {
@@ -3244,7 +3247,7 @@ async function submitBottle(): Promise<void> {
   bottleTexts.set(r.data.bottle.id, r.data);
   if (photo && r.data.photo) rememberBottlePhoto(r.data.bottle.id, photo);
   lsSet(LS_BOTTLE_DROPPED, '1');
-  // 牛皮紙捲起來、放進瓶子、塞上軟木塞，丟到雷達上；落水後打開這個瓶子（編號、分享）
+  // 牛皮紙捲起來、放進瓶子、塞上軟木塞，丟到雷達上；落水後打開這個瓶子（編號、分享、收回，內容剛看過就不再顯示）
   throwing = true;
   updateDropBtn();
   await throwBottleFx(text, photo, () => openBottleSheet(false));
@@ -3255,7 +3258,7 @@ async function submitBottle(): Promise<void> {
   bottles = [r.data.bottle, ...bottles.filter((b) => b.id !== r.data.bottle.id)];
   void reloadMyBottles();
   selectedBottle = null;
-  selectBottle(r.data.bottle.id);
+  selectBottle(r.data.bottle.id, true);
   showBanner(bannerEl, `丟出去了！${bottleNo(r.data.bottle.id)} 會在附近漂 ${bottleRules()?.seaHours ?? 24} 小時，被收藏時會通知你`, 3500);
 }
 
