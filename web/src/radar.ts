@@ -121,6 +121,8 @@ export interface RadarRoute {
 export interface RadarStreets {
   major: Float64Array[];
   minor: Float64Array[];
+  /** 海岸線（16 km 內，從街道圖磚來；畫成跟遠的海岸線一樣的虛線） */
+  coast?: Float64Array[];
 }
 
 /**
@@ -1753,6 +1755,7 @@ export class Radar {
     this.streetLayer.replaceChildren();
     this.streetLayer.removeAttribute('transform');
     for (const [cls, lines] of [
+      ['region-outline open coast-line', s.coast ?? []],
       ['street-minor', s.minor],
       ['street-major', s.major],
     ] as const) {

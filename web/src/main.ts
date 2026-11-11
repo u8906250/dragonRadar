@@ -941,21 +941,31 @@ function updateStreets(): void {
   // 拖曳中多換算外面一圈，接下來拖一點都不用重算
   streetLoose = !!panFrom;
   const get = streetLoose ? reach * 1.25 : reach;
-  const lines = streetsMod.streetsAround(origin.lat, origin.lng, get, scaleKm, () => {
+  // 16 km 內多拿圖磚裡的海岸線（v1.640 使用者說「不管放大到什麼程度都要有邊界」；再大用 updateOutline 的海岸線）
+  const { lines, coast } = streetsMod.streetTiles(origin.lat, origin.lng, get, scaleKm, () => {
     streetTiles++;
     updateStreets();
   });
   const kx = 111.32 * Math.cos((origin.lat * Math.PI) / 180);
   const box = [origin.lat - get / ky, origin.lng - get / kx, origin.lat + get / ky, origin.lng + get / kx];
-  const out: RadarStreets = { major: [], minor: [] };
-  for (const l of lines) {
-    if (l.box[0] > box[2] || l.box[2] < box[0] || l.box[1] > box[3] || l.box[3] < box[1]) continue;
+  const coastXy: Float64Array[] = [];
+  const out: RadarStreets = { major: [], minor: [], coast: coastXy };
+  const toXy = (l: { pts: Float64Array; box: [number, number, number, number] }): Float64Array | null => {
+    if (l.box[0] > box[2] || l.box[2] < box[0] || l.box[1] > box[3] || l.box[3] < box[1]) return null;
     const xy = new Float64Array(l.pts.length);
     for (let i = 0; i < l.pts.length; i += 2) {
       xy[i] = (l.pts[i + 1] - origin.lng) * kx;
       xy[i + 1] = (l.pts[i] - origin.lat) * ky;
     }
-    out[l.cls].push(xy);
+    return xy;
+  };
+  for (const l of lines) {
+    const xy = toXy(l);
+    if (xy) out[l.cls].push(xy);
+  }
+  for (const l of coast) {
+    const xy = toXy(l);
+    if (xy) coastXy.push(xy);
   }
   streetLines = out;
   radar.setStreets(out, [0, 0], streetLoose);

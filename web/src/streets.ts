@@ -31,11 +31,11 @@ const HIGHWAYS: Classes = { motorway: 'major', trunk: 'major' };
  * 再大（到全台）都用 z7（z6 只剩國道、快速道路，東部的台 9 線沒有）：taiwan 只畫台灣（本島、離島）的路、
  * 只抓台灣那六張圖磚（共約 460 KB；全台的範圍對岸也在圈內）
  */
-export const STREET_TIERS: Array<{ maxKm: number; zoom: number; classes: Classes; taiwan?: boolean }> = [
-  { maxKm: 2, zoom: 13, classes: { motorway: 'major', trunk: 'major', primary: 'major', secondary: 'major', tertiary: 'minor', minor: 'minor' } },
+export const STREET_TIERS: Array<{ maxKm: number; zoom: number; classes: Classes; taiwan?: boolean; coast?: boolean }> = [
+  { maxKm: 2, zoom: 13, classes: { motorway: 'major', trunk: 'major', primary: 'major', secondary: 'major', tertiary: 'minor', minor: 'minor' }, coast: true },
   // 市區的幹道台北多半標 secondary，其他縣市很多標 tertiary（新竹 8 km 內 secondary 約 90 km、tertiary 約 400 km）：都畫，各地一樣細；
   // 16 km 內也是（z10 沒有 tertiary，所以用 z11，一張約 18 km 寬，最多九張）
-  { maxKm: 16, zoom: 11, classes: { ...HIGHWAYS, primary: 'minor', secondary: 'minor', tertiary: 'minor' } },
+  { maxKm: 16, zoom: 11, classes: { ...HIGHWAYS, primary: 'minor', secondary: 'minor', tertiary: 'minor' }, coast: true },
   { maxKm: 33, zoom: 9, classes: { ...HIGHWAYS, primary: 'minor' } },
   { maxKm: 65, zoom: 8, classes: { ...HIGHWAYS, primary: 'minor' } },
   { maxKm: Infinity, zoom: 7, classes: { ...HIGHWAYS, primary: 'minor' }, taiwan: true },
@@ -124,9 +124,42 @@ export class Pbf {
   }
 }
 
+/** 海岸線的一段：pts 是 [緯度, 經度, …]，box 跟 StreetLine 一樣 */
+export interface CoastLine {
+  pts: Float64Array;
+  box: [number, number, number, number];
+}
+
 /** 圖磚裡的 transportation 圖層 → 要畫的道路（classes 有列的種類；座標換成經緯度） */
 export function decodeStreets(buf: Uint8Array, x: number, y: number, z: number, classes: Classes = STREET_TIERS[0].classes): StreetLine[] {
+  return decodeTile(buf, x, y, z, classes, false).lines;
+}
+
+/** 一串經緯度 → 有外框的一段 */
+function withBox(line: number[]): { pts: Float64Array; box: [number, number, number, number] } {
+  const pts = Float64Array.from(line);
+  let minLat = Infinity;
+  let minLng = Infinity;
+  let maxLat = -Infinity;
+  let maxLng = -Infinity;
+  for (let i = 0; i < pts.length; i += 2) {
+    minLat = Math.min(minLat, pts[i]);
+    maxLat = Math.max(maxLat, pts[i]);
+    minLng = Math.min(minLng, pts[i + 1]);
+    maxLng = Math.max(maxLng, pts[i + 1]);
+  }
+  return { pts, box: [minLat, minLng, maxLat, maxLng] };
+}
+
+/**
+ * 圖磚 → 道路，coast 的話再加海岸線（v1.640 使用者說「不管放大到什麼程度都要有邊界」）：
+ * water 圖層 class=ocean 的多邊形邊就是海岸；多邊形在圖磚邊上被切開的那幾段（兩端都在圖磚外面）不是海岸，不畫
+ */
+export function decodeTile(buf: Uint8Array, x: number, y: number, z: number, classes: Classes, coast: boolean): { lines: StreetLine[]; coast: CoastLine[] } {
   const tile = new Pbf(buf);
+  const coastOut: CoastLine[] = [];
+  // 圖層照字母排（transportation 在 water 前面）：要海岸線就讀完整張
+  let linesOut: StreetLine[] = [];
   while (tile.more()) {
     const key = tile.varint();
     if (key >> 3 !== 3 || (key & 7) !== 2) {
@@ -158,9 +191,19 @@ export function decodeStreets(buf: Uint8Array, x: number, y: number, z: number, 
       } else if (field === 5) extent = layer.varint();
       else layer.skip(k & 7);
     }
+    const n = 2 ** z;
+    /** 圖磚裡的座標 → [緯度, 經度] */
+    const toLatLng = (cx: number, cy: number): [number, number] => {
+      const wx = (x + cx / extent) / n;
+      const wy = (y + cy / extent) / n;
+      return [(Math.atan(Math.sinh(Math.PI * (1 - 2 * wy))) * 180) / Math.PI, wx * 360 - 180];
+    };
+    if (name === 'water' && coast) {
+      coastOut.push(...oceanEdges(features, keys, values, extent, toLatLng));
+      continue;
+    }
     if (name !== 'transportation') continue;
     const out: StreetLine[] = [];
-    const n = 2 ** z;
     for (const f of features) {
       let tags: number[] = [];
       let type = 0;
@@ -191,20 +234,7 @@ export function decodeStreets(buf: Uint8Array, x: number, y: number, z: number, 
       let cy = 0;
       let line: number[] = [];
       const flush = (): void => {
-        if (line.length >= 4) {
-          const pts = Float64Array.from(line);
-          let minLat = Infinity;
-          let minLng = Infinity;
-          let maxLat = -Infinity;
-          let maxLng = -Infinity;
-          for (let i = 0; i < pts.length; i += 2) {
-            minLat = Math.min(minLat, pts[i]);
-            maxLat = Math.max(maxLat, pts[i]);
-            minLng = Math.min(minLng, pts[i + 1]);
-            maxLng = Math.max(maxLng, pts[i + 1]);
-          }
-          out.push({ cls: cls!, pts, box: [minLat, minLng, maxLat, maxLng], ...(bridge ? { bridge: true } : {}) });
-        }
+        if (line.length >= 4) out.push({ cls: cls!, ...withBox(line), ...(bridge ? { bridge: true } : {}) });
         line = [];
       };
       for (let i = 0; i < geom.length; ) {
@@ -216,16 +246,84 @@ export function decodeStreets(buf: Uint8Array, x: number, y: number, z: number, 
         for (let j = 0; j < count && i + 1 < geom.length; j++, i += 2) {
           cx += (geom[i] >> 1) ^ -(geom[i] & 1);
           cy += (geom[i + 1] >> 1) ^ -(geom[i + 1] & 1);
-          const wx = (x + cx / extent) / n;
-          const wy = (y + cy / extent) / n;
-          line.push((Math.atan(Math.sinh(Math.PI * (1 - 2 * wy))) * 180) / Math.PI, wx * 360 - 180);
+          line.push(...toLatLng(cx, cy));
         }
       }
       flush();
     }
-    return out;
+    linesOut = out;
+    if (!coast) break;
   }
-  return [];
+  return { lines: linesOut, coast: coastOut };
+}
+
+/**
+ * water 圖層裡 class=ocean 的多邊形 → 海岸線：每一圈的每一段，兩端都在圖磚同一邊的外面（含邊上）的，
+ * 是圖磚邊上切開的（或整段在旁邊那張的緩衝區裡），斷開；其他的畫（跨過圖磚邊的那一段兩張都畫，接得起來）
+ */
+function oceanEdges(features: Pbf[], keys: string[], values: Array<string | null>, extent: number, toLatLng: (cx: number, cy: number) => [number, number]): CoastLine[] {
+  const out: CoastLine[] = [];
+  const outSameSide = (a: [number, number], b: [number, number]): boolean =>
+    (a[0] <= 0 && b[0] <= 0) || (a[0] >= extent && b[0] >= extent) || (a[1] <= 0 && b[1] <= 0) || (a[1] >= extent && b[1] >= extent);
+  for (const f of features) {
+    let tags: number[] = [];
+    let type = 0;
+    let geom: number[] = [];
+    while (f.more()) {
+      const k = f.varint();
+      const field = k >> 3;
+      if (field === 2) tags = f.packed();
+      else if (field === 3) type = f.varint();
+      else if (field === 4) geom = f.packed();
+      else f.skip(k & 7);
+    }
+    if (type !== 3) continue;
+    let ocean = false;
+    for (let i = 0; i + 1 < tags.length; i += 2) if (keys[tags[i]] === 'class' && values[tags[i + 1]] === 'ocean') ocean = true;
+    if (!ocean) continue;
+    // 先拆成一圈一圈（圖磚座標），ClosePath 補回第一點
+    const rings: Array<Array<[number, number]>> = [];
+    let ring: Array<[number, number]> = [];
+    let cx = 0;
+    let cy = 0;
+    for (let i = 0; i < geom.length; ) {
+      const cmd = geom[i] & 7;
+      const count = geom[i] >> 3;
+      i++;
+      if (cmd === 7) {
+        if (ring.length > 1) ring.push(ring[0]);
+        continue;
+      }
+      if (cmd === 1) {
+        if (ring.length > 1) rings.push(ring);
+        ring = [];
+      }
+      for (let j = 0; j < count && i + 1 < geom.length; j++, i += 2) {
+        cx += (geom[i] >> 1) ^ -(geom[i] & 1);
+        cy += (geom[i + 1] >> 1) ^ -(geom[i + 1] & 1);
+        ring.push([cx, cy]);
+      }
+    }
+    if (ring.length > 1) rings.push(ring);
+    for (const r of rings) {
+      let line: number[] = [];
+      const flush = (): void => {
+        if (line.length >= 4) out.push(withBox(line));
+        line = [];
+      };
+      for (let i = 0; i + 1 < r.length; i++) {
+        const [a, b] = [r[i], r[i + 1]];
+        if (outSameSide(a, b)) {
+          flush();
+          continue;
+        }
+        if (line.length === 0) line.push(...toLatLng(a[0], a[1]));
+        line.push(...toLatLng(b[0], b[1]));
+      }
+      flush();
+    }
+  }
+  return out;
 }
 
 /** 經緯度 → 第幾張圖磚 */
@@ -252,7 +350,7 @@ function tileTemplate(): Promise<string | null> {
   return template;
 }
 
-const tiles = new Map<string, StreetLine[] | 'loading'>();
+const tiles = new Map<string, { lines: StreetLine[]; coast: CoastLine[] } | 'loading'>();
 
 /**
  * 涵蓋 (lat, lng) 方圓 km 的道路（範圍 rangeKm 決定用哪一級圖磚）：已經抓到的圖磚先畫，還沒抓的去抓，抓到了呼叫 onLoad 重畫。
@@ -262,17 +360,21 @@ export function streetsAround(lat: number, lng: number, km: number, rangeKm: num
   return streetTiles(lat, lng, km, rangeKm, onLoad).lines;
 }
 
-/** 跟 streetsAround 一樣，多回傳還有幾張圖磚沒抓到（汪星等全部抓到才換掉原本的道路） */
-export function streetTiles(lat: number, lng: number, km: number, rangeKm: number, onLoad: () => void): { lines: StreetLine[]; pending: number } {
-  const { zoom, classes, taiwan } = tierOf(rangeKm);
+/**
+ * 跟 streetsAround 一樣，多回傳還有幾張圖磚沒抓到（汪星等全部抓到才換掉原本的道路），
+ * 和海岸線（16 km 內那兩級才有；再大用 taiwan.ts、world.ts 的海岸線）
+ */
+export function streetTiles(lat: number, lng: number, km: number, rangeKm: number, onLoad: () => void): { lines: StreetLine[]; coast: CoastLine[]; pending: number } {
+  const { zoom, classes, taiwan, coast } = tierOf(rangeKm);
   const dLat = km / 110.574;
   const dLng = km / (111.32 * Math.cos((lat * Math.PI) / 180));
   let [s, w, n, e] = [lat - dLat, lng - dLng, lat + dLat, lng + dLng];
   if (taiwan) [s, w, n, e] = [Math.max(s, TAIWAN_BOX.s), Math.max(w, TAIWAN_BOX.w), Math.min(n, TAIWAN_BOX.n), Math.min(e, TAIWAN_BOX.e)];
-  if (s > n || w > e) return { lines: [], pending: 0 };
+  if (s > n || w > e) return { lines: [], coast: [], pending: 0 };
   const a = tileOf(n, w, zoom);
   const b = tileOf(s, e, zoom);
   const out: StreetLine[] = [];
+  const coastOut: CoastLine[] = [];
   let pending = 0;
   for (let x = a.x; x <= b.x; x++) {
     for (let y = a.y; y <= b.y; y++) {
@@ -286,7 +388,8 @@ export function streetTiles(lat: number, lng: number, km: number, rangeKm: numbe
         // 最近用到的放到最後，太多時從最前面刪
         tiles.delete(key);
         tiles.set(key, got);
-        out.push(...got);
+        out.push(...got.lines);
+        coastOut.push(...got.coast);
         continue;
       }
       tiles.set(key, 'loading');
@@ -296,13 +399,13 @@ export function streetTiles(lat: number, lng: number, km: number, rangeKm: numbe
         .then((r) => (r?.ok ? r.arrayBuffer() : null))
         .then((ab) => {
           if (!ab) throw new Error('no tile');
-          const got = decodeStreets(new Uint8Array(ab), x, y, zoom, classes);
-          tiles.set(key, taiwan ? got.filter(onTaiwan) : got);
+          const got = decodeTile(new Uint8Array(ab), x, y, zoom, classes, !!coast);
+          tiles.set(key, { lines: taiwan ? got.lines.filter(onTaiwan) : got.lines, coast: got.coast });
           while (tiles.size > MAX_TILES) tiles.delete(tiles.keys().next().value as string);
           onLoad();
         })
         .catch(() => tiles.delete(key));
     }
   }
-  return { lines: out, pending };
+  return { lines: out, coast: coastOut, pending };
 }

@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { decodeStreets, onTaiwan, STREET_TIERS, streetTiles, tileOf, type StreetLine } from '../src/streets';
+import { decodeStreets, decodeTile, onTaiwan, STREET_TIERS, streetTiles, tileOf, type StreetLine } from '../src/streets';
 
 /** 組一張只有 transportation 圖層的小圖磚（protobuf） */
 function varint(n: number): number[] {
@@ -62,6 +62,43 @@ describe('decodeStreets', () => {
   });
   it('ignores other layers', () => {
     expect(decodeStreets(tile([{ tags: [0, 0], type: 2, geom: [(1 << 3) | 1, 0, 0, (1 << 3) | 2, 2, 2] }], 'water'), 0, 0, 0)).toEqual([]);
+  });
+});
+
+describe('decodeTile coast', () => {
+  /** 一張只有 water 圖層的圖磚：tags [0, 0] 是 class=ocean，[0, 1] 是 class=lake */
+  function waterTile(features: Array<{ tags: number[]; geom: number[] }>): Uint8Array {
+    const layer = [
+      ...str(1, 'water'),
+      ...features.flatMap((f) => field(2, [...packed(2, f.tags), ...varint((3 << 3) | 0), ...varint(3), ...packed(4, f.geom)])),
+      ...str(3, 'class'),
+      ...field(4, str(1, 'ocean')),
+      ...field(4, str(1, 'lake')),
+      ...varint((5 << 3) | 0),
+      ...varint(4096),
+    ];
+    return new Uint8Array(field(3, layer));
+  }
+  /** 多邊形一圈（絕對座標）→ 幾何指令 */
+  const ringGeom = (pts: Array<[number, number]>): number[] => {
+    const out = [(1 << 3) | 1, zz(pts[0][0]), zz(pts[0][1]), ((pts.length - 1) << 3) | 2];
+    for (let i = 1; i < pts.length; i++) out.push(zz(pts[i][0] - pts[i - 1][0]), zz(pts[i][1] - pts[i - 1][1]));
+    out.push((1 << 3) | 7);
+    return out;
+  };
+  it('keeps the shore of the ocean and drops the edges cut by the tile', () => {
+    // 海在左半邊：圖磚外的緩衝區（-64）→ 往下 → 海岸（x = 2048，從上到下）→ 回到外面
+    const sea = ringGeom([[-64, -64], [2048, -64], [2048, 4160], [-64, 4160]]);
+    const { coast } = decodeTile(waterTile([{ tags: [0, 0], geom: sea }, { tags: [0, 1], geom: ringGeom([[100, 100], [200, 100], [200, 200]]) }]), 0, 0, 0, STREET_TIERS[0].classes, true);
+    // 只剩海岸那一段（從上緣外面到下緣外面，經度 0），湖不算
+    expect(coast).toHaveLength(1);
+    const lngs = [...coast[0].pts].filter((_, i) => i % 2 === 1);
+    for (const lng of lngs) expect(lng).toBeCloseTo(0, 6);
+  });
+  it('gives no coast unless asked (tiers above 16 km use the coarse outline)', () => {
+    const sea = ringGeom([[-64, -64], [2048, -64], [2048, 4160], [-64, 4160]]);
+    expect(decodeTile(waterTile([{ tags: [0, 0], geom: sea }]), 0, 0, 0, STREET_TIERS[0].classes, false).coast).toEqual([]);
+    expect(STREET_TIERS.filter((t) => t.coast).map((t) => t.maxKm)).toEqual([2, 16]);
   });
 });
 
