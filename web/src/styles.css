@@ -2111,7 +2111,7 @@ path.map-seam-walkers { --p: 15px; }
 .radar .bottle-hint .hint-label { fill: #2a9bb8; font-size: 11px; font-weight: 700; paint-order: stroke; stroke: var(--label-halo); stroke-width: 3px; stroke-linejoin: round; pointer-events: none; }
 .map-bottle { position: relative; background: none; border: none; }
 /* 跟著縮放變大小；超過 10 km 只畫淡藍色的小點（v1.602） */
-.map-bottle svg { transform: scale(var(--bottle-k, 1)); transform-origin: 50% 50%; }
+.map-bottle svg { transform: scale(var(--bottle-k, 1)); transform-origin: 50% 50%; overflow: visible; }
 /* 地圖上的瓶子漂浮：外面那一層上下漂、左右晃（只動 transform，不用重畫地圖） */
 .map-bottle .float { position: absolute; left: 0; top: 0; display: block; width: 24px; height: 24px; animation: bottle-float 3.4s ease-in-out infinite; animation-delay: var(--d, 0s); }
 .map-bottle .mflow { position: absolute; left: -8px; top: 0; display: block; width: 40px; height: 25px; animation: bottle-flow 2.8s linear infinite; }

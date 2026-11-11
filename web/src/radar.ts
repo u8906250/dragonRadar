@@ -242,6 +242,9 @@ export const LETTER_SCROLL =
   '<ellipse cx="0" cy="-1.3" rx="1.7" ry="0.6" fill="#f1d7aa" stroke="#8a5a2c" stroke-width="0.4" />' +
   '<path d="M-0.15 -1.3 a0.45 0.2 0 1 1 0.6 0.05 a0.85 0.36 0 1 1 -1.3 -0.05" fill="none" stroke="#a57240" stroke-width="0.25" />' +
   '</g>';
+/** 瓶口的軟木塞（v1.649 使用者說的）：塞在瓶頸上、露出一截，牛皮色、深褐框、一道亮面；跟瓶子一樣斜 20 度 */
+export const BOTTLE_CORK =
+  '<g class="cork" transform="rotate(-20)"><rect x="-1.55" y="-10" width="3.1" height="3" rx="0.7" fill="#dca468" stroke="#7a4a22" stroke-width="0.45" /><path d="M-0.9 -9.2 h1.4" stroke="#f3cf9c" stroke-width="0.45" stroke-linecap="round" /></g>';
 export const TAKEN_MARK =
   '<path class="taken-mark" d="M5.6 -3.4 c-1.7 -1.2 -3.1 -2.3 -3.1 -3.7 a1.55 1.55 0 0 1 3.1 -0.45 a1.55 1.55 0 0 1 3.1 0.45 c0 1.4 -1.4 2.5 -3.1 3.7 z" fill="#ef6b5f" stroke="#b8392f" stroke-width="0.6" stroke-linejoin="round" />';
 /** 瓶子的形狀（中心在原點，高約 16）；汪星海上的瓶子（space.ts）也用這個 */
@@ -1637,7 +1640,7 @@ export class Radar {
       // 瓶子泡在水裡：後面一道淡淡的水波、前面一道蓋住瓶底，兩道都慢慢往一邊流（v1.606 使用者說感覺不出漂流，旁邊畫一點水流）
       tw.innerHTML =
         `<svg class="flow back" viewBox="-16 -10 32 20" aria-hidden="true"><path d="${WAVE_BACK}" /></svg>` +
-        `<svg class="bottle" viewBox="-10 -10 20 20" aria-hidden="true"><path d="${BOTTLE_PATH}" transform="rotate(-20)" />${LETTER_SCROLL}${b.picked ? TAKEN_MARK : ''}</svg>` +
+        `<svg class="bottle" viewBox="-10 -10 20 20" aria-hidden="true"><path d="${BOTTLE_PATH}" transform="rotate(-20)" />${LETTER_SCROLL}${BOTTLE_CORK}${b.picked ? TAKEN_MARK : ''}</svg>` +
         `<svg class="flow front" viewBox="-16 -10 32 20" aria-hidden="true"><path d="${WAVE_FRONT}" /></svg>`;
       this.flashSquare.appendChild(tw);
     }
@@ -1653,7 +1656,7 @@ export class Radar {
       const body = el('g', { class: 'body' });
       body.appendChild(el('path', { class: 'glass', d: BOTTLE_PATH, transform: `rotate(-20) scale(${(0.8 * k).toFixed(3)})` }));
       const scroll = el('g', { transform: `scale(${(0.8 * k).toFixed(3)})` });
-      scroll.innerHTML = LETTER_SCROLL;
+      scroll.innerHTML = LETTER_SCROLL + BOTTLE_CORK;
       body.appendChild(scroll);
       g.appendChild(body);
     }
