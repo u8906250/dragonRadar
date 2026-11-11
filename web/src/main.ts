@@ -3072,7 +3072,7 @@ function openLettersPage(open: boolean): void {
 const openedLetters = new Set<number>();
 
 /**
- * 收藏的信：一張張牛皮紙，寫著編號、什麼時候在哪裡收藏的。
+ * 收藏的漂流瓶（v1.651 使用者說「收藏的信」改成「收藏的漂流瓶」）：一張張牛皮紙，寫著編號、什麼時候在哪裡收藏的。
  * 收藏滿 24 小時（瓶子從原地收進來了）的信裝在瓶子裡，點瓶子或「打開來看」才看得到（v1.646 使用者說的）；還沒滿的照舊攤開，寫還要多久收進瓶子
  */
 function renderLettersPage(): void {
@@ -3088,7 +3088,7 @@ function renderLettersPage(): void {
   };
   const keepLeft = (l: MyBottles['letters'][number]): number => l.pickedAt + KEEP_TAKEN_H * 3600 - nowSec();
   lettersList.innerHTML = letters.length
-    ? `<h3>收藏的信（${letters.length}）</h3><ul class="letter-grid">${letters
+    ? `<h3>收藏的漂流瓶（${letters.length}）</h3><ul class="letter-grid">${letters
         .map((l) => {
           const left = keepLeft(l);
           const sealed = left <= 0 && !openedLetters.has(l.id);
@@ -3110,7 +3110,7 @@ function renderLettersPage(): void {
           </li>`;
         })
         .join('')}</ul>`
-    : '<h3>收藏的信</h3><p class="muted">還沒有收藏的信。到雷達上找找看，走到瓶子附近按「收藏」，信就會收進這裡。</p>';
+    : '<h3>收藏的漂流瓶</h3><p class="muted">還沒有收藏的漂流瓶。到雷達上找找看，走到瓶子附近按「收藏」，瓶子就會收進這裡。</p>';
   fillPhotos(lettersList);
   paintMyBottles();
 }
