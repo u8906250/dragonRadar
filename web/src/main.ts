@@ -2594,7 +2594,7 @@ async function showProof(id: number, text: string): Promise<void> {
       </dl>
       <p class="tc-note">每個瓶子的編號都不一樣。內容只要改一個字，指紋就不一樣；簽章是伺服器用只有它知道的金鑰簽的，別人做不出來。</p>
       <p class="proof-result" aria-live="polite"></p>
-      <div class="sheet-actions"><button type="button" class="chip primary" data-act="verify" disabled>驗證</button><button type="button" class="chip" data-close>關閉</button></div>
+      <div class="sheet-actions"><button type="button" class="chip primary" data-act="verify" disabled>驗證</button></div>
     </div>`,
   );
   const field = (f: string): HTMLElement => el.querySelector<HTMLElement>(`[data-f="${f}"]`)!;
