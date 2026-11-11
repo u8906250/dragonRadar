@@ -50,6 +50,8 @@ export const BOTTLE_TTL_SEC = SEA_AFTER_SEC + WOOF_STAY_SEC;
 /** 雷達上看得到的瓶子：漂流中的、被收藏了的（收藏後不消失） */
 const SHOWN = "status IN ('active', 'picked')";
 /** 走到這個距離內才撿得起來 */
+/** 只看得到這麼遠內的瓶子（v1.622 使用者說的；地球上照你的位置，伺服器也只回這個範圍內的） */
+export const SEE_RADIUS_KM = 5;
 /** v1.599 使用者說改成 500 m 內可以撿（以前 60 m） */
 export const PICK_RADIUS_M = 500;
 /** 丟的位置打散的範圍 */
@@ -528,7 +530,9 @@ export async function listBottles(env: Env, device: string | null, q: { lat?: nu
       .all<{ bottle_id: number }>();
     for (const x of r.results) picked.add(x.bottle_id);
   }
-  return results.map((b) => toOut(b, device, picked.has(b.id)));
+  // 範圍是方框查的：再照真的距離篩掉方框角落（只看得到半徑內的）
+  const center = world === 'earth' && q.lat !== undefined && q.lng !== undefined ? { lat: q.lat, lng: q.lng } : null;
+  return results.filter((b) => !center || distM(center, b) <= q.radiusKm * 1000).map((b) => toOut(b, device, picked.has(b.id)));
 }
 
 /** 分享出去的連結打開時看的瓶子（沒有內容）：還在漂（地球上、汪星的海上）、被收藏了（瓶子還在）、不見了（沉下去、收回、被檢舉） */

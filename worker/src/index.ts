@@ -19,7 +19,7 @@ import { PUSH_RADIUS_KM, PushError, b64urlEncode, deleteSubscription, encryptPay
 import { assertEventReportsOpen, confirmLink, editLink, ENDED_REPORTS_NEEDED, locateForEdit, MAX_LINK_AGE_SEC, NOTES_CLOSED, ReportError, REPORTS_LOCKED, ipHash, myReports, purgeReports, recheckLinks, rejectLink, reportModules, submitLink, supplementLink, withdrawReport } from './reports';
 import { D1Meter, isTransient, withResilientDb } from './db';
 import { addressCacheKey, geocodeAddress, parseTwAddress } from './address';
-import { adminListBottles, adminSetBottle, BOTTLE_MAX_WEIGHT, bottleInfo, bottlePhoto, bottlesEnabled, photosEnabled, readBottle, deleteBottle, deviceId, DRIFT_EVERY_SEC, driftBottles, dropBottle, listBottles, myBottles, PER_DEVICE_PER_DAY, PICK_RADIUS_M, pickBottle, proofFor, purgeBottles, reportBottle, SEA_AFTER_SEC, uncollectLetter, verifyProof, WOOF_STAY_SEC } from './bottles';
+import { adminListBottles, adminSetBottle, BOTTLE_MAX_WEIGHT, bottleInfo, bottlePhoto, bottlesEnabled, photosEnabled, readBottle, SEE_RADIUS_KM, deleteBottle, deviceId, DRIFT_EVERY_SEC, driftBottles, dropBottle, listBottles, myBottles, PER_DEVICE_PER_DAY, PICK_RADIUS_M, pickBottle, proofFor, purgeBottles, reportBottle, SEA_AFTER_SEC, uncollectLetter, verifyProof, WOOF_STAY_SEC } from './bottles';
 import { approveSpotRequest, autoReview, cancelSpotRequest, listSpotRequests, locatePlace, rejectSpotRequest, SPOT_MAX_AGE_SEC, spotRequestStatus, type ApproveBody, type SpotRequestRow } from './spots';
 import { addUserKeyword, listActiveKeywords, listAllKeywords, MAX_ACTIVE_KEYWORDS, normalizeKeyword, parseKeywordList, toKeywordOut, touchKeywords } from './keywords';
 import { listLearnedTags, setLearnedTag } from './learnedTags';
@@ -183,7 +183,7 @@ async function handle(req: Request, env: Env, ctx: ExecutionContext): Promise<Re
           threads: env.THREADS_SEARCH_STATUS === 'approved' ? 'approved' : 'review',
           link: { maxAgeDays: MAX_LINK_AGE_SEC / 86400, recheckMin: 30, endedReportsNeeded: ENDED_REPORTS_NEEDED },
           spot: { maxAgeDays: SPOT_MAX_AGE_SEC / 86400, autoReview: env.SPOT_AUTO_REVIEW !== 'false' },
-          bottles: { enabled: bottlesEnabled(env), maxWeight: BOTTLE_MAX_WEIGHT, maxChars: BOTTLE_MAX_WEIGHT / 2, pickRadiusM: PICK_RADIUS_M, seaHours: SEA_AFTER_SEC / 3600, woofDays: WOOF_STAY_SEC / 86400, perDay: PER_DEVICE_PER_DAY, driftHours: DRIFT_EVERY_SEC / 3600, photos: photosEnabled(env) },
+          bottles: { enabled: bottlesEnabled(env), maxWeight: BOTTLE_MAX_WEIGHT, maxChars: BOTTLE_MAX_WEIGHT / 2, pickRadiusM: PICK_RADIUS_M, seaHours: SEA_AFTER_SEC / 3600, woofDays: WOOF_STAY_SEC / 86400, perDay: PER_DEVICE_PER_DAY, driftHours: DRIFT_EVERY_SEC / 3600, photos: photosEnabled(env), seeKm: SEE_RADIUS_KM },
           official: { name: '台北大洋流「未來航線」', url: VOYAGE_PAGE, mapName: '大洋流車掃地圖', mapUrl: CURRENT_MAP_URL, intervalMin: 10 },
           news: { names: [...new Set(NEWS_FEEDS.map((f) => f.name))], intervalMin: 30 },
         },
@@ -298,7 +298,8 @@ async function handle(req: Request, env: Env, ctx: ExecutionContext): Promise<Re
     if (!bottlesEnabled(env)) throw new HttpError(403, '漂流瓶暫時關閉');
     const dev = await deviceId(env, req);
     if (req.method === 'GET' && path === '/api/bottles') {
-      const radiusKm = Math.min(600, Math.max(0.1, num(url.searchParams.get('radius_km')) ?? 20));
+      // 只看得到 5 km 內的瓶子（SEE_RADIUS_KM）：要多遠都只給 5 km
+      const radiusKm = Math.min(SEE_RADIUS_KM, Math.max(0.1, num(url.searchParams.get('radius_km')) ?? SEE_RADIUS_KM));
       const world = url.searchParams.get('world') === 'woof' ? 'woof' : 'earth';
       return jsonResponse({ now, bottles: await listBottles(env, dev, { lat: num(url.searchParams.get('lat')), lng: num(url.searchParams.get('lng')), radiusKm, world }, now) });
     }

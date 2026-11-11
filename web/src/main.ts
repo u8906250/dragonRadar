@@ -1631,7 +1631,7 @@ function render(): void {
     ),
   );
   // 被收藏了的瓶子照樣畫（淡淡的，v1.601 使用者說瓶子不用消失）
-  const bottleViews = bottles.map((b) => ({ b, distanceKm: haversineKm(origin, b), bearing: bearingDeg(origin, b), state: bottleState(b) }));
+  const bottleViews = bottles.filter(bottleSeen).map((b) => ({ b, distanceKm: haversineKm(origin, b), bearing: bearingDeg(origin, b), state: bottleState(b) }));
   const hint = nearestHint(bottleViews);
   radar.setBottles(
     bottleViews.map((v) => ({
@@ -2220,7 +2220,18 @@ function bottleState(b: BottleOut): 'near' | 'pick' {
 }
 
 /** 方向提示最遠指到多遠的瓶子 */
-const BOTTLE_HINT_MAX_KM = 50;
+const BOTTLE_HINT_MAX_KM = 5;
+
+/** 漂流瓶只看得到 5 km 內的（v1.622 使用者說的） */
+const bottleSeeKm = (): number => bottleRules()?.seeKm ?? 5;
+/** 地球上從哪裡算 5 km：你的 GPS 位置（拖曳過雷達也一樣），沒有 GPS 就從雷達正中間 */
+const bottleCenter = (): LatLng => (origin.source === 'gps' ? origin : (lastGps ?? origin));
+/** 看不看得到這個瓶子：地球上離你 5 km 內；汪星海上的離你在汪星的位置 5 km 內 */
+function bottleSeen(b: BottleOut): boolean {
+  if (b.world !== 'woof') return haversineKm(bottleCenter(), b) <= bottleSeeKm();
+  const here = woofHere();
+  return !!here && woofDistM(here, b) <= bottleSeeKm() * 1000;
+}
 
 /** 雷達範圍內沒有別人的瓶子時，最近的那一個（貼在外圈指方向）；太遠就不指 */
 function nearestHint<V extends { b: BottleOut; distanceKm: number }>(views: V[]): V | null {
@@ -2233,7 +2244,7 @@ function nearestHint<V extends { b: BottleOut; distanceKm: number }>(views: V[])
 /** 按鈕：附近有還沒人收藏、不是自己丟的瓶子走到 500 m 內了就發光（你在汪星就看汪星海上的）；數字是今天還能丟幾個 */
 function updateBottleBadge(views: Array<{ b: BottleOut; distanceKm: number }>): void {
   bottleBtn.hidden = !bottlesOn();
-  const others = youOn === 'woof' ? woofBottles.filter((b) => !b.mine && !b.picked && !b.taken) : views.filter((v) => !v.b.mine && !v.b.picked && !v.b.taken).map((v) => v.b);
+  const others = youOn === 'woof' ? woofBottles.filter((b) => !b.mine && !b.picked && !b.taken && bottleSeen(b)) : views.filter((v) => !v.b.mine && !v.b.picked && !v.b.taken).map((v) => v.b);
   bottleBtn.classList.toggle('glow', others.some((b) => bottleState(b) === 'pick'));
   paintQuotaBadge();
 }
@@ -2254,7 +2265,7 @@ function paintQuotaBadge(): void {
 
 /** 汪星海上的瓶子（space.ts 畫在汪星上）：每次畫汪星都重算，拖曳走路時走到附近了沒跟著變 */
 function woofBottleMarks(): WoofBottleMark[] {
-  return woofBottles.map((b) => ({ id: b.id, lat: b.lat, lng: b.lng, state: bottleState(b) === 'pick' ? 'pick' : 'near', mine: b.mine, selected: b.id === selectedBottle, taken: b.picked || !!b.taken }));
+  return woofBottles.filter(bottleSeen).map((b) => ({ id: b.id, lat: b.lat, lng: b.lng, state: bottleState(b) === 'pick' ? 'pick' : 'near', mine: b.mine, selected: b.id === selectedBottle, taken: b.picked || !!b.taken }));
 }
 let woofMarksKey = '';
 /** 汪星海上的瓶子、選取變了：重畫汪星 */
@@ -2638,6 +2649,17 @@ async function openSharedBottle(id: number): Promise<void> {
     showBanner(bannerEl, `漂流瓶 ${bottleNo(id)} 已經沉下去或不見了`, 4000);
     return;
   }
+  // 只看得到 5 km 內的：太遠的只說在哪個方向大概多遠，不放上雷達
+  if (!bottleSeen(b)) {
+    showBanner(
+      bannerEl,
+      b.world === 'woof'
+        ? `漂流瓶 ${bottleNo(id)} 漂到汪星的海上了，搭火箭到汪星、走到 ${bottleSeeKm()} km 內才看得到`
+        : `漂流瓶 ${bottleNo(id)} 在你 ${bottleSeeKm()} km 外，走近一點才看得到`,
+      4000,
+    );
+    return;
+  }
   if (b.world === 'woof') woofBottles = [b, ...woofBottles.filter((x) => x.id !== id)];
   else bottles = [b, ...bottles.filter((x) => x.id !== id)];
   selectedBottle = null;
@@ -2964,7 +2986,7 @@ function confirmThrow(): Promise<boolean> {
   const rules = [
     '瓶子會丟在你現在的位置附近（隨機漂開約 100 m，不會在你站的地方），之後在附近 200 m 內慢慢漂。',
     `${r?.seaHours ?? 24} 小時後漂到汪星的海上，${r?.woofDays ?? 30} 天後沉下去。`,
-    `走到瓶子 ${r?.pickRadiusM ?? 500} m 內的人都看得到內容和照片；第一個按「收藏」的人會把它收進瓶中信收藏（收藏了別人照樣看得到）。`,
+    `附近 ${r?.seeKm ?? 5} km 內的人看得到瓶子在哪裡；走到 ${r?.pickRadiusM ?? 500} m 內才看得到內容和照片，第一個按「收藏」的人會把它收進瓶中信收藏（收藏了別人照樣看得到）。`,
     `丟出去 24 小時內、你走回瓶子 ${r?.pickRadiusM ?? 500} m 內才收得回來；收回的也算今天的額度。`,
     `每天可以丟 ${r?.perDay ?? 3} 個，00:00 恢復成 ${r?.perDay ?? 3} 個${left !== undefined ? `；丟了這個今天還剩 ${Math.max(0, left - 1)} 個` : ''}。`,
     '送出前會自動審核：辱罵或攻擊任何人（包括候選人、政黨）、謠言、廣告、連結、電話、帳號、個人資料都不會通過。',
@@ -5131,7 +5153,7 @@ async function refresh(): Promise<void> {
   // 搜尋關鍵字、車掃路線、漂流瓶都是洋流才有
   const kws = forModule.current ? followed() : [];
   // 漂流瓶跟關鍵字無關，一起抓
-  const bottleReq = bottlesOn() ? fetchBottles(origin, FETCH_RADIUS_KM) : Promise.resolve([] as BottleOut[]);
+  const bottleReq = bottlesOn() ? fetchBottles(bottleCenter(), bottleSeeKm()) : Promise.resolve([] as BottleOut[]);
   void loadWoofBottles();
   if (forModule.current && kws.length === 0) {
     events = [];
