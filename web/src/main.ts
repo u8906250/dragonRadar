@@ -2182,7 +2182,9 @@ function renderLandmarkDetail(id: string): boolean {
 /** 伺服器沒關（v1.593 起直接開放，不用再打開實驗功能） */
 const bottlesOn = (): boolean => mod.current && keywordRules?.sources?.bottles?.enabled !== false;
 const bottleRules = (): NonNullable<KeywordRules['sources']>['bottles'] => keywordRules?.sources?.bottles;
-const pickRadiusM = (): number => bottleRules()?.pickRadiusM ?? 500;
+const pickRadiusM = (): number => bottleRules()?.pickRadiusM ?? 1000;
+/** 看內容、收藏、收回的距離寫成字：1000 → 「1 km」、500 → 「500 m」 */
+const reachText = (m: number = pickRadiusM()): string => (m >= 1000 ? `${+(m / 1000).toFixed(1)} km` : `${m} m`);
 /** 瓶子的編號：No.000123 */
 const bottleNo = (id: number): string => `No.${String(id).padStart(6, '0')}`;
 const findBottle = (id: number): BottleOut | undefined => bottles.find((b) => b.id === id) ?? woofBottles.find((b) => b.id === id);
@@ -2241,7 +2243,7 @@ function nearestHint<V extends { b: BottleOut; distanceKm: number }>(views: V[])
   return best && best.distanceKm <= BOTTLE_HINT_MAX_KM ? best : null;
 }
 
-/** 按鈕：附近有還沒人收藏、不是自己丟的瓶子走到 500 m 內了就發光（你在汪星就看汪星海上的）；數字是今天還能丟幾個 */
+/** 按鈕：附近有還沒人收藏、不是自己丟的瓶子走到 1 km 內了就發光（你在汪星就看汪星海上的）；數字是今天還能丟幾個 */
 function updateBottleBadge(views: Array<{ b: BottleOut; distanceKm: number }>): void {
   bottleBtn.hidden = !bottlesOn();
   const others = youOn === 'woof' ? woofBottles.filter((b) => !b.mine && !b.picked && !b.taken && bottleSeen(b)) : views.filter((v) => !v.b.mine && !v.b.picked && !v.b.taken).map((v) => v.b);
@@ -2357,7 +2359,7 @@ const hereFor = (b: BottleOut): BottleHere => (b.world === 'woof' ? { at: woofHe
 /** 這次選取已經試著打開過的瓶子（打不開就不一直重試，換一個瓶子再說） */
 const openTried = new Set<number>();
 
-/** 打開來看（不收藏）：自己丟的、收藏過的隨時看得到；別人的走到 500 m 內就看得到，收藏了也一樣 */
+/** 打開來看（不收藏）：自己丟的、收藏過的隨時看得到；別人的走到 1 km 內就看得到，收藏了也一樣 */
 async function openBottle(id: number): Promise<void> {
   const b = findBottle(id);
   if (!b) return;
@@ -2482,7 +2484,7 @@ function renderBottleDetail(id: number): boolean {
   let body: string;
   if (got) {
     const status = b.mine
-      ? `你${ago(b.createdAt)}丟的・${b.taken ? '已經被收藏了' : `還沒有人收藏（自己丟的不能收藏，別人走到 ${reach} m 內就看得到、收藏得到）`}・${lifecycle}`
+      ? `你${ago(b.createdAt)}丟的・${b.taken ? '已經被收藏了' : `還沒有人收藏（自己丟的不能收藏，別人走到 ${reachText(reach)} 內就看得到、收藏得到）`}・${lifecycle}`
       : b.picked
         ? `${ago(b.createdAt)}丟的・你收藏了，放在「瓶中信收藏」`
         : b.taken
@@ -2495,11 +2497,11 @@ function renderBottleDetail(id: number): boolean {
     const taken = b.taken ? '已經被收藏了，' : '';
     body =
       woof && youOn !== 'woof'
-        ? `<p>這個瓶子漂到汪星的海上了，${taken}點中山公園的銅像搭火箭到汪星，拖曳雷達走到 ${reach} m 內就能打開來看${b.taken ? '' : '、收藏'}。</p>`
+        ? `<p>這個瓶子漂到汪星的海上了，${taken}點中山公園的銅像搭火箭到汪星，拖曳雷達走到 ${reachText(reach)} 內就能打開來看${b.taken ? '' : '、收藏'}。</p>`
         : woof && !woofHere()
           ? `<p>這個瓶子在汪星的海上，${taken}把雷達的中心移回汪星（點汪星），拖曳走過去就能打開來看。</p>`
           : !woof && origin.source !== 'gps'
-            ? `<p>瓶子在${esc(where)}，${taken}按右上角「定位」用 GPS，走到 ${reach} m 內就能打開來看${b.taken ? '' : '、收藏'}。</p>`
+            ? `<p>瓶子在${esc(where)}，${taken}按右上角「定位」用 GPS，走到 ${reachText(reach)} 內就能打開來看${b.taken ? '' : '、收藏'}。</p>`
             : `<p>瓶子在${esc(where)}，${taken}還差約 ${Math.round(d - reach)} m。${woof ? '拖曳雷達走過去' : '走近一點'}就能打開來看${b.taken ? '' : '、收藏'}。</p>`;
   }
   const canCollect = !!got && !b.mine && !b.picked && !b.taken && near && !collecting.has(id);
@@ -2582,6 +2584,7 @@ async function showProof(id: number, text: string): Promise<void> {
   const el = overlay(
     'tc-proof',
     `<div class="tc-box bottle-proof">
+      <button type="button" class="proof-x" data-close aria-label="關閉">✕</button>
       <h2 class="tc-title">瓶子證明</h2>
       <dl>
         <dt>編號</dt><dd>${bottleNo(id)}</dd>
@@ -2601,11 +2604,14 @@ async function showProof(id: number, text: string): Promise<void> {
   void digestP.then((d) => (field('sha').textContent = d));
   let p = proofCache.get(id);
   if (!p) {
-    const r = await fetchBottleProof(id);
-    if (!r.ok) {
+    // 讀太久（網路卡住）就不等了，說一聲；隨時都可以關（右上角 ✕、下面的「關閉」、點旁邊）（v1.626 使用者說讀取中也要能關，不然會卡住）
+    const slow = new Promise<null>((done) => window.setTimeout(() => done(null), PROOF_WAIT_MS));
+    const r = await Promise.race([fetchBottleProof(id), slow]);
+    if (!el.isConnected) return;
+    if (!r || !r.ok) {
       field('sig').textContent = '—';
       out.className = 'proof-result bad';
-      out.textContent = r.message;
+      out.textContent = r ? r.message : '簽章讀不到（網路可能太慢），可以先關掉，等一下再看';
       return;
     }
     p = r.data;
@@ -2634,6 +2640,8 @@ async function showProof(id: number, text: string): Promise<void> {
   });
 }
 
+/** 簽章最多等幾毫秒 */
+const PROOF_WAIT_MS = 8000;
 /** 看過的瓶子證明（同一個瓶子不用再跟伺服器拿） */
 const proofCache = new Map<number, BottleProof>();
 
@@ -2785,7 +2793,7 @@ function sceneQuota(): void {
   bottleResult.dataset.quota = '1';
 }
 
-/** 自己丟的瓶子收不收得回來：丟出去 24 小時內（v1.619 使用者說的；收藏了的也一樣），還要走到瓶子 500 m 內（伺服器照位置確認） */
+/** 自己丟的瓶子收不收得回來：丟出去 24 小時內（v1.619 使用者說的；收藏了的也一樣），還要走到瓶子 1 km 內（伺服器照位置確認） */
 const canWithdraw = (status: string, createdAt: number): boolean =>
   (status === 'active' || status === 'hidden' || status === 'picked') && nowSec() - createdAt < 86400;
 /** 收回時帶的位置：自己丟的都在地球上，用 GPS（手動位置不算；沒定位伺服器會說要先定位） */
@@ -2844,6 +2852,8 @@ function wireBottleScene(): void {
   });
   bottleSheet.addEventListener('click', (e) => {
     const t = e.target as Element;
+    // 審核中：關閉、收藏頁都按不了（CSS 也擋，這裡再擋一次鍵盤）
+    if (judging) return;
     if (t.closest('[data-act="close"]')) openBottleSheet(false);
     else if (t.closest('[data-act="letters"]')) {
       openBottleSheet(false);
@@ -2851,7 +2861,7 @@ function wireBottleScene(): void {
     }
   });
   document.addEventListener('keydown', (e) => {
-    if (e.key === 'Escape' && !bottleSheet.hidden && !throwing && !document.querySelector('.tc-overlay')) openBottleSheet(false);
+    if (e.key === 'Escape' && !bottleSheet.hidden && !throwing && !judging && !document.querySelector('.tc-overlay')) openBottleSheet(false);
   });
   bottleText.addEventListener('input', () => {
     bottleResult.textContent = '';
@@ -2986,8 +2996,8 @@ function confirmThrow(): Promise<boolean> {
   const rules = [
     '瓶子會丟在你現在的位置附近（隨機漂開約 100 m，不會在你站的地方），之後在附近 200 m 內慢慢漂。',
     `${r?.seaHours ?? 24} 小時後漂到汪星的海上，${r?.woofDays ?? 30} 天後沉下去。`,
-    `附近 ${r?.seeKm ?? 5} km 內的人看得到瓶子在哪裡；走到 ${r?.pickRadiusM ?? 500} m 內才看得到內容和照片，第一個按「收藏」的人會把它收進瓶中信收藏（收藏了別人照樣看得到）。`,
-    `丟出去 24 小時內、你走回瓶子 ${r?.pickRadiusM ?? 500} m 內才收得回來；收回的也算今天的額度。`,
+    `附近 ${r?.seeKm ?? 5} km 內的人看得到瓶子在哪裡；走到 ${reachText(r?.pickRadiusM)} 內才看得到內容和照片，第一個按「收藏」的人會把它收進瓶中信收藏（收藏了別人照樣看得到）。`,
+    `丟出去 24 小時內、你走回瓶子 ${reachText(r?.pickRadiusM)} 內才收得回來；收回的也算今天的額度。`,
     `每天可以丟 ${r?.perDay ?? 3} 個，00:00 恢復成 ${r?.perDay ?? 3} 個${left !== undefined ? `；丟了這個今天還剩 ${Math.max(0, left - 1)} 個` : ''}。`,
     '送出前會自動審核：辱罵或攻擊任何人（包括候選人、政黨）、謠言、廣告、連結、電話、帳號、個人資料都不會通過。',
   ];
@@ -3007,6 +3017,20 @@ function confirmThrow(): Promise<boolean> {
       el.querySelector<HTMLElement>('[data-close]')?.click();
     });
   });
+}
+
+/**
+ * 審核中（v1.626 使用者說等待審核時要鎖住畫面或做動畫）：紙不能改、關閉／收藏頁／相機都按不了、Esc 不關；
+ * 一支放大鏡在紙上來回讀，瓶子輕輕浮，下面寫「審核中…」
+ */
+let judging = false;
+function setJudging(on: boolean): void {
+  judging = on;
+  bottleSheet.classList.toggle('judging', on);
+  bottleDropEl.classList.toggle('busy', on);
+  bottleText.readOnly = on;
+  bottleResult.classList.toggle('judging-msg', on);
+  bottleResult.textContent = on ? '審核中' : '';
 }
 
 /** 丟瓶子的動畫進行中（不能再按一次） */
@@ -3031,9 +3055,9 @@ async function submitBottle(): Promise<void> {
   if (!(await confirmThrow())) return;
   const photo = bottlePhotoData;
   say('');
-  bottleDropEl.classList.add('busy');
+  setJudging(true);
   const r = await dropBottle(text, origin, photo);
-  bottleDropEl.classList.remove('busy');
+  setJudging(false);
   if (!r.ok) return say(r.message);
   bottleTexts.set(r.data.bottle.id, r.data);
   if (photo && r.data.photo) rememberBottlePhoto(r.data.bottle.id, photo);

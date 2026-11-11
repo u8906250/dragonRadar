@@ -226,6 +226,8 @@
             <figure id="bottle-photo" class="taped-photo" hidden><img alt="要放進瓶子的照片" /><button type="button" class="photo-remove" aria-label="拿掉照片">✕</button></figure>
             <textarea id="bottle-text" aria-label="寫在牛皮紙上的話" spellcheck="false" autocomplete="off"></textarea>
             <span id="bottle-count" class="kraft-count" hidden></span>
+            <!-- 審核中：放大鏡在紙上來回讀 -->
+            <div class="judge-fx" aria-hidden="true"><svg viewBox="0 0 48 48" width="46" height="46"><path d="M30 30 L42 42" stroke="#7a4a22" stroke-width="8" stroke-linecap="round"/><path d="M30 30 L42 42" stroke="#dca468" stroke-width="5" stroke-linecap="round"/><circle cx="20" cy="20" r="13" fill="#d4f4f8" fill-opacity=".55" stroke="#2f6f7c" stroke-width="3.2"/><path d="M12 16 q2 -5 7 -6" stroke="#fff" stroke-width="2.6" fill="none" stroke-linecap="round"/></svg></div>
           </div>
           <!-- 貼照片：放在牛皮紙下面（v1.623 使用者說的） -->
           <label class="photo-btn" id="bottle-photo-btn" aria-label="貼一張照片" hidden><svg viewBox="0 0 40 32" width="32" height="26" aria-hidden="true"><path d="M13 9 l3 -4.5 h8 l3 4.5" fill="#d4f4f8" stroke="#2f6f7c" stroke-width="2.6" stroke-linejoin="round"/><rect x="3" y="8.5" width="34" height="20.5" rx="6.5" fill="#d4f4f8" stroke="#2f6f7c" stroke-width="2.6"/><circle cx="20" cy="18.8" r="6.2" fill="#fff" stroke="#2f6f7c" stroke-width="2.6"/><circle cx="20" cy="18.8" r="2.5" fill="#2f6f7c"/><path d="M8.5 13.5 q1.5 -2 3.5 -2" stroke="#fff" stroke-width="2" fill="none" stroke-linecap="round"/><circle cx="31.5" cy="13.5" r="1.7" fill="#ef6b5f"/></svg><input type="file" id="bottle-photo-input" accept="image/*" hidden /></label>
