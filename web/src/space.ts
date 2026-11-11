@@ -987,13 +987,31 @@ export const KEPLER22 = { ra: 19 + 16 / 60 + 52.19 / 3600, dec: 47 + 53 / 60 + 3
 /** 銀河系：中心（人馬座 A*，赤經 17h45m40s、赤緯 −29°00′）離我們約 26,670 光年，北銀極赤經 12h51m26s、赤緯 +27°07′42″，直徑約 10 萬光年 */
 const MILKY_WAY = { ra: 17 + 45 / 60 + 40.04 / 3600, dec: -(29 + 0 / 60 + 28.1 / 3600), ly: 26_670, poleRa: 12 + 51 / 60 + 26.28 / 3600, poleDec: 27 + 7 / 60 + 42 / 3600, r: 50_000 };
 /**
- * 本星系群的大星系（Wikipedia）：位置、距離、半徑（光年）、盤面的方位角和傾角（度）；麥哲倫雲是不規則星系，畫成橢圓（示意）
+ * 星系（Wikipedia）：位置、距離、半徑（光年）、盤面的方位角和傾角（度）；麥哲倫雲、不規則星系、橢圓星系畫成橢圓（示意）。
+ * 第 3 號願望（第 1 號的調整：「還有哪些星系可以畫出來嗎？」）再加本星系群的 M32、M110、巴納德星系、IC 1613，
+ * 和本星系群外面有名的星系，最遠到 M87（5350 萬光年）：距離、直徑照 Wikipedia，位置、方位角、傾角照 HyperLEDA
+ * （橢圓星系 HyperLEDA 寫 90 度的，傾角照長短軸比換算；沒有方位角的幾乎是正面，寫 0）。大的寫在前面：小的跟前面畫好的疊在一起就不畫
  */
 export const GALAXIES: Array<{ key: string; name: string; ra: number; dec: number; ly: number; r: number; pa: number; incl: number; arms: number }> = [
   { key: 'lmc', name: '大麥哲倫雲', ra: 5 + 23 / 60 + 34.5 / 3600, dec: -(69 + 45 / 60 + 22 / 3600), ly: 163_000, r: 16_100, pa: 170, incl: 35, arms: 0 },
   { key: 'smc', name: '小麥哲倫雲', ra: 0 + 52 / 60 + 44.8 / 3600, dec: -(72 + 49 / 60 + 43 / 3600), ly: 203_000, r: 9_450, pa: 45, incl: 60, arms: 0 },
   { key: 'm31', name: '仙女座星系', ra: 0 + 42 / 60 + 44.3 / 3600, dec: 41 + 16 / 60 + 9 / 3600, ly: 2_500_000, r: 76_000, pa: 38, incl: 77, arms: 2 },
   { key: 'm33', name: '三角座星系', ra: 1 + 33 / 60 + 50.02 / 3600, dec: 30 + 39 / 60 + 36.7 / 3600, ly: 2_730_000, r: 30_550, pa: 23, incl: 54, arms: 2 },
+  // 本星系群（第 3 號願望）
+  { key: 'm110', name: 'M110', ra: 0.672805, dec: 41.6853283, ly: 2_690_000, r: 8_525, pa: 170, incl: 54, arms: 0 },
+  { key: 'm32', name: 'M32', ra: 0.7116069, dec: 40.8651653, ly: 2_490_000, r: 4_000, pa: 170, incl: 51, arms: 0 },
+  { key: 'ngc6822', name: '巴納德星系', ra: 19.7491622, dec: -14.8003417, ly: 1_630_000, r: 4_600, pa: 0, incl: 17, arms: 0 },
+  { key: 'ic1613', name: 'IC 1613', ra: 1.0799444, dec: 2.1177314, ly: 2_380_000, r: 6_340, pa: 0, incl: 23, arms: 0 },
+  // 本星系群外面（第 3 號願望）
+  { key: 'm81', name: '波德星系', ra: 9.9258771, dec: 69.0652757, ly: 11_990_000, r: 48_000, pa: 157, incl: 63, arms: 2 },
+  { key: 'm82', name: '雪茄星系', ra: 9.9312008, dec: 69.6797719, ly: 11_900_000, r: 20_400, pa: 66, incl: 77, arms: 0 },
+  { key: 'cena', name: '半人馬座A', ra: 13.424479, dec: -43.0181183, ly: 12_000_000, r: 61_500, pa: 32, incl: 45, arms: 0 },
+  { key: 'ngc253', name: '玉夫座星系', ra: 0.7925311, dec: -25.2884419, ly: 11_400_000, r: 60_300, pa: 52, incl: 76, arms: 2 },
+  { key: 'm83', name: '南風車星系', ra: 13.6169267, dec: -29.8656261, ly: 14_680_000, r: 59_100, pa: 0, incl: 15, arms: 2 },
+  { key: 'm101', name: '風車星系', ra: 14.0534912, dec: 54.349023, ly: 21_670_000, r: 126_000, pa: 0, incl: 16, arms: 2 },
+  { key: 'm51', name: '渦狀星系', ra: 13.4979698, dec: 47.195151, ly: 23_550_000, r: 38_450, pa: 163, incl: 33, arms: 2 },
+  { key: 'm104', name: '草帽星系', ra: 12.6665134, dec: -11.6230104, ly: 31_150_000, r: 52_700, pa: 89, incl: 59, arms: 0 },
+  { key: 'm87', name: 'M87', ra: 12.5137576, dec: 12.3905194, ly: 53_490_000, r: 66_100, pa: 0, incl: 26, arms: 0 },
 ];
 /** 旋臂（示意）：對數螺線，傾角 12 度 */
 const ARM_B = Math.tan(12 * RAD);
@@ -1121,12 +1139,16 @@ function deepMarkup(proj: (p: Vec3) => { x: number; y: number; d: number }, k: n
   const named: Body[] = [];
   const pathOf = (pts: Vec3[], closed: boolean): string => `M${pts.map((p) => { const q = proj(p); return `${f1(q.x)} ${f1(q.y)}`; }).join('L')}${closed ? 'Z' : ''}`;
   const apart = (q: { x: number; y: number }, min: number): boolean => Math.hypot(q.x - sunAt.x, q.y - sunAt.y) >= min;
+  /** 已經畫好的星系中心：小的（寫在後面的）疊在上面就不畫，拉近才分得開（第 3 號願望多了 M32、M82 這些伴星系） */
+  const placed: Array<{ x: number; y: number }> = [];
   const disk = (key: string, name: string, center: Vec3, rKm: number, d: ReturnType<typeof diskLines>): void => {
     const q = proj(center);
     const rr = rKm * k;
     if (!inView(q.x, q.y, rr) || rr > INNER * 30) return;
     // 銀河系（我們在裡面）、中心那一個照樣畫；別的星系疊在太陽系上、或離中心遠到超過雷達範圍好幾倍（從正上方看會疊在附近，像是很近）就不畫
     if (key !== 'milkyway' && key !== focus && (!apart(q, 8) || Math.hypot(...sub(center, F)) * k > INNER * 6)) return;
+    if (key !== 'milkyway' && key !== focus && placed.some((p) => Math.hypot(q.x - p.x, q.y - p.y) < 10)) return;
+    placed.push(q);
     if (rr >= 3) {
       lines += `<path class="region-outline space-galaxy" d="${pathOf(d.rim, true)}" />`;
       if (rr >= 12) lines += `<path class="space-galaxy-core" d="${pathOf(d.core, true)}" />`;

@@ -186,6 +186,19 @@ describe('太陽系外面（第 1 號願望：Kepler-22b、其他星系）', () 
     expect(far).toContain('>銀河系（你）<');
     expect(deep(1_000)).toContain('data-body="earth"');
   });
+  it('draws more galaxies out to M87, hiding small ones that sit on a bigger one (wish #3)', () => {
+    expect(fmtKm(6e7 * LY_KM)).toBe('6000 萬光年');
+    const far = deep(6e7, 0.9);
+    expect(far).toContain('>M87<');
+    // 拉到 6000 萬光年時，雪茄星系跟波德星系疊在一起：只畫波德星系
+    expect(far).toContain('data-body="m81"');
+    expect(far).not.toContain('data-body="m82"');
+    // 以雪茄星系為中心拉近就分得開
+    const m82 = spaceMarkup({ ...opts, scaleKm: 4e5 * LY_KM, rg: 0, view: { focus: 'm82', yaw: 0, pitch: 0 } });
+    expect(m82).toContain('>雪茄星系<');
+    expect(m82).toContain('>波德星系<');
+    for (const key of ['m32', 'm110', 'ngc6822', 'ic1613', 'm81', 'm82', 'cena', 'ngc253', 'm83', 'm101', 'm51', 'm104', 'm87']) expect(isDeepBody(key)).toBe(true);
+  });
   it('keeps a galaxy drawn when it is the centre', () => {
     const m31 = spaceMarkup({ ...opts, scaleKm: 1e5 * LY_KM, rg: 0, view: { focus: 'm31', yaw: 0, pitch: 0 } });
     expect(m31).toContain('>仙女座星系<');
