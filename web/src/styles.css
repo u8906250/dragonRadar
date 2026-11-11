@@ -1348,8 +1348,8 @@ path.map-seam-walkers { --p: 15px; }
 .radar .streets path { fill: none; stroke: var(--radar-grid); stroke-linejoin: round; stroke-linecap: round; pointer-events: none; }
 .radar .street-minor { stroke-width: 0.8; stroke-opacity: 0.2; }
 .radar .street-major { stroke-width: 2; stroke-opacity: 0.24; }
-/* 16 km 內的海岸線（從街道圖磚來，v1.640）：跟遠的海岸線一樣的虛線（.streets path 的顏色、圓頭蓋掉） */
-.radar .streets path.coast-line { fill: none; stroke: var(--accent); stroke-width: 1.5; stroke-opacity: 0.45; stroke-dasharray: 3 3; stroke-linecap: butt; }
+/* 16 km 內的海岸線（從街道圖磚來，v1.640）：實線（v1.641 使用者說近距離的邊界直接用實線）；顏色跟遠的海岸線一樣 */
+.radar .streets path.coast-line { fill: none; stroke: var(--accent); stroke-width: 1.5; stroke-opacity: 0.45; stroke-dasharray: none; }
 #radar-view { position: relative; }
 .radar-attrib { position: absolute; right: 2px; bottom: 0; font-size: 9px; color: var(--muted); opacity: 0.8; }
 .radar-attrib a { color: inherit; text-decoration: none; }
