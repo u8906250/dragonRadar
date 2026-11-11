@@ -249,7 +249,7 @@ export class MapView {
   /** 選到的那一則外面的亮環 */
   private selRing: Leaflet.CircleMarker | null = null;
   private routeLayer: Leaflet.LayerGroup | null = null;
-  /** 範圍比 50 km 大時的海岸線 */
+  /** 範圍比 50 km 大時的海岸線（雷達是 16 km） */
   private outline: Leaflet.Polygon | null = null;
   private outlineRings: Array<Array<[number, number]>> = [];
   /** 洋流的地標（★）：其他模組不顯示 */

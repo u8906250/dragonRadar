@@ -1503,7 +1503,7 @@ export class Radar {
     this.draw();
   }
 
-  /** 海岸線、縣市交界（範圍比 50 km 大時），畫成淡淡的虛線；空陣列就不畫 */
+  /** 海岸線、縣市交界（範圍比 16 km 大時），畫成淡淡的虛線；空陣列就不畫 */
   setOutline(rings: Array<Array<{ bearing: number; distanceKm: number }>>, lines: Array<Array<{ bearing: number; distanceKm: number }>> = []): void {
     this.outline = rings;
     this.outlineLines = lines;

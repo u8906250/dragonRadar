@@ -1598,6 +1598,13 @@ path.map-seam-walkers { --p: 15px; }
 .leaflet-popup-content { margin: 8px 12px; font-size: 13px; line-height: 1.5; }
 /* 深色主題：底圖反轉成深色調，標記與定位點不受影響 */
 .map-dark .leaflet-tile-pane { filter: invert(1) hue-rotate(180deg) brightness(0.85) contrast(0.9); }
+/*
+ * 圖磚之間的白線（v1.639 使用者要檢查澎湖時看到的）：縮放停在不是整數的級數時（zoomSnap: 0），圖磚縮小後邊上半透明，
+ * 兩張接起來的地方透出底色，海上特別明顯。邊上的半透明在圖磚那一層裡相加成不透明（plus-lighter；isolation 讓它只跟旁邊的圖磚相加，
+ * 不跟底色相加）；不支援的瀏覽器照舊
+ */
+.leaflet-tile-container { isolation: isolate; }
+.leaflet-tile-container .leaflet-tile { mix-blend-mode: plus-lighter; }
 .leaflet-bottom.leaflet-right { margin-bottom: 58px; }
 #base-chips .chip { padding: 8px 10px; font-size: 13px; }
 /* 太空（比全球再遠）：跟海岸線一樣用虛線（region-outline），經緯線、晝夜淡淡的；名字跟光點的標籤一樣 */

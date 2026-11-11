@@ -838,7 +838,7 @@ const inScope = (distanceKm: number): boolean => distanceKm <= scaleKm;
 let outlineFor = '';
 let radarOutline: Array<Array<{ bearing: number; distanceKm: number }>> = [];
 
-/** 範圍比 50 km 大時畫的海岸線：台灣用詳細的，加上全世界的（約 30 KB，第一次用到才載入；世界資料裡的台灣只有幾個點，換掉） */
+/** 範圍比 16 km 大時畫的海岸線：台灣用詳細的，加上全世界的（約 30 KB，第一次用到才載入；世界資料裡的台灣只有幾個點，換掉） */
 let landRings: Array<Array<[number, number]>> = TAIWAN_RINGS;
 /** 縣市在陸地上的交界（counties.ts，跟世界海岸線一起載入），範圍 1000 km 內才畫（「全球」時台灣只剩幾個像素） */
 let countyLines: Array<Array<[number, number]>> = [];
@@ -863,8 +863,15 @@ let streetLines: RadarStreets | null = null;
 let streetLoose = false;
 /** 拖曳開始時的位置（拖曳中才有，panRadar） */
 
-/** 比這個範圍大就畫海岸線、縣市界的虛線（道路照畫），台灣哪裡都一樣 */
-const OUTLINE_KM = 50;
+/**
+ * 比這個範圍大，雷達就畫海岸線、縣市界的虛線（道路照畫），台灣哪裡都一樣。
+ * v1.639 從 50 km 改成 16 km（使用者要檢查澎湖：澎湖的路都標次要道路，16～50 km 只畫幹道，整片空白；16 km 內大街小巷都畫）
+ */
+const OUTLINE_KM = 16;
+/** 地圖照舊比 50 km 大才畫海岸線（底圖本來就看得到海岸） */
+const MAP_OUTLINE_KM = 50;
+/** 換算時太遠的點換成這個（線在這裡斷開，不會跨過去接起來） */
+const FAR_POINT = { bearing: 0, distanceKm: 1e9 };
 
 /** streets.ts 第一次用到才載入：載好了重畫雷達的道路和汪星的街道 */
 function loadStreets(): void {
@@ -1188,8 +1195,9 @@ function updateSpace(): void {
 }
 
 /**
- * 範圍比 50 km 大（全台、全球、縮放到更遠）畫海岸線（台灣加上全世界），1000 km 內再畫縣市交界，
- * 比這個小的不畫（只有道路）；位置變了才重算
+ * 範圍比 16 km 大（全台、全球、縮放到更遠）畫海岸線（台灣加上全世界），1000 km 內再畫縣市交界，
+ * 比這個小的不畫（只有道路）；位置變了、範圍跨過 2 的次方才重算。
+ * 只換算雷達附近的點（v1.639）：範圍的 2.5 倍外面的點換成斷點，拖曳時不用每一格都算全部約 4,200 個點
  */
 function updateOutline(): void {
   const kind = scaleKm > OUTLINE_KM ? 'land' : 'none';
@@ -1210,14 +1218,37 @@ function updateOutline(): void {
   }
   const rings = kind === 'land' ? landRings : null;
   const lines = kind === 'land' && scaleKm <= COUNTY_MAX_KM ? countyLines : [];
-  const key = rings ? `${kind}|${worldLoaded}|${lines.length > 0}|${origin.lat},${origin.lng}` : '';
+  const mapRings = kind === 'land' && scaleKm > MAP_OUTLINE_KM ? landRings : null;
+  // 範圍照 2 的次方分級：縮放跨級才重算（附近的範圍跟著變大）
+  const tier = Math.ceil(Math.log2(Math.max(scaleKm, 1)));
+  const key = rings ? `${kind}|${worldLoaded}|${lines.length > 0}|${!!mapRings}|${tier}|${origin.lat},${origin.lng}` : '';
   if (key === outlineFor) return;
   outlineFor = key;
-  const toRadar = (ring: Array<[number, number]>): Array<{ bearing: number; distanceKm: number }> =>
-    ring.map(([lat, lng]) => ({ bearing: bearingDeg(origin, { lat, lng }), distanceKm: haversineKm(origin, { lat, lng }) }));
-  radarOutline = rings ? rings.map(toRadar) : [];
-  radar.setOutline(radarOutline, lines.map(toRadar));
-  map.setOutline(rings ?? []);
+  // 附近的範圍（經緯度的方框）：範圍的 2.5 倍（全螢幕鋪滿時角落比外圈遠）；太大、跨過換日線就全部換算
+  const reach = 2 ** tier * 2.5;
+  const dLat = reach / 111;
+  const dLng = reach / (111 * Math.max(0.1, Math.cos((origin.lat * Math.PI) / 180)));
+  const box = reach < 2500 && Math.abs(origin.lng) + dLng < 180 ? [origin.lat - dLat, origin.lng - dLng, origin.lat + dLat, origin.lng + dLng] : null;
+  const toRadar = (ring: Array<[number, number]>): Array<{ bearing: number; distanceKm: number }> => {
+    const out: Array<{ bearing: number; distanceKm: number }> = [];
+    let gap = false;
+    let skipped = false;
+    for (const [lat, lng] of ring) {
+      if (box && (lat < box[0] || lat > box[2] || lng < box[1] || lng > box[3])) {
+        if (!gap && out.length > 0) out.push(FAR_POINT);
+        gap = skipped = true;
+        continue;
+      }
+      gap = false;
+      out.push({ bearing: bearingDeg(origin, { lat, lng }), distanceKm: haversineKm(origin, { lat, lng }) });
+    }
+    // 有一段在外面（包括開頭）：最後也斷開，不要頭尾接成封閉的形狀
+    if (skipped && out.length > 0 && out[out.length - 1] !== FAR_POINT) out.push(FAR_POINT);
+    return out;
+  };
+  radarOutline = rings ? rings.map(toRadar).filter((r) => r.some((p) => p !== FAR_POINT)) : [];
+  radar.setOutline(radarOutline, lines.map(toRadar).filter((r) => r.length > 1));
+  map.setOutline(mapRings ?? []);
 }
 
 // ---- 車掃路線 ----
