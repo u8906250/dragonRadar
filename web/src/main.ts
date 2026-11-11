@@ -5091,8 +5091,9 @@ function select(id: number | null, group: number[] = []): void {
 /**
  * 從「我的回報」的「看」或剛回報完的結果點進來：被「顯示」「只看進行中」或時間範圍藏起來的，自動調整到看得到，再選取。
  * 剛放上雷達的可能還沒抓到，先重抓一次。固定據點用任一個時段的 id 都找得到那個據點。
+ * center：雷達中心飛到那一點，範圍不變（v1.644 使用者說回報後點「看」要把畫面移到那個點；推播通知點進來的照舊只選取）
  */
-async function reveal(id: number): Promise<void> {
+async function reveal(id: number, center = false): Promise<void> {
   const find = (now: number): Item | undefined => computeItems(now).find((x) => x.ev.id === id || x.spot?.sessions.some((s) => s.id === id));
   themeSheet.hidden = true;
   kwSheet.hidden = true;
@@ -5131,6 +5132,11 @@ async function reveal(id: number): Promise<void> {
   // select 再點同一個會取消選取，這裡一定要選上
   if (selectedId === target) render();
   else select(target);
+  const at = it?.ev;
+  if (center && at && at.lat != null && at.lng != null && !radar.spaceFocused) {
+    if (radar.spaceMoved) radar.resetSpace();
+    zoomToKm(scaleKm, { lat: at.lat, lng: at.lng, source: 'manual' });
+  }
 }
 
 function esc(s: string): string {
@@ -7073,7 +7079,7 @@ async function showReportResult(data: SubmitResult): Promise<void> {
       reportSheet.hidden = true;
       bottleSheet.hidden = true;
       selectedId = null;
-      void reveal(Number(b.dataset.id));
+      void reveal(Number(b.dataset.id), true);
     });
   }
   if (found.length > 0) {
@@ -7616,7 +7622,7 @@ function wireControls(): void {
       // 回報在別的模組：先切過去再看
       const x = myReports.find((r) => String(r.eventId) === b.dataset.show);
       if (x?.module && x.module !== mod.id) switchModule(x.module as ModuleId);
-      void reveal(Number(b.dataset.show));
+      void reveal(Number(b.dataset.show), true);
     }
   });
   reportForm.addEventListener('submit', (e) => {
