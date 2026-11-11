@@ -4641,7 +4641,7 @@ const HQ_HUB_STATION: Record<string, string> = { 北劍潭: '劍潭', 東象山:
 const HQ_LAYER_SCENES: Record<string, SceneKind[]> = {
   edu: ['lunch'],
   zone: ['schoolwalk'],
-  family: ['library24'],
+  family: ['library24', 'respite'],
   youth: ['piggy'],
   renewal: ['oldhouse', 'cyclerenew'],
   health: ['oldhouse'],
@@ -4709,6 +4709,9 @@ function hqScenesAll(t0: number): HqIcon[] {
   const bs = hq.HQ_BUS_SAFETY;
   const busHint = (where: string): { title: string; intro: string } => ({ title: `公車安全改革（${where}，示意）`, intro: I['公車安全改革'] ?? '' });
   out.push({ lat: bs.terminal.lat, lng: bs.terminal.lng, at: t0 + HQ_SAIL_MS + 1600, kind: 'busterminal', scale, hint: busHint(`${bs.terminal.name}：折返點休息、準點出發`) });
+  // 每週免費臨托（v1.650）：萬華親子館（親子館裡離航線最近、附近沒有別的小場景的），船離它最近時；按「親子」時跟著亮
+  const rs = hq.HQ_SERVICES.find((sv) => sv.name === '萬華親子館');
+  if (rs) out.push({ lat: rs.lat, lng: rs.lng, at: hqNearestAt(t0, rs) + 300, kind: 'respite', scale, hint: { title: '每週免費臨托：家長也能喘口氣（萬華親子館，示意）', intro: I['臨托'] ?? '' } });
   // 循環都更（v1.566）：萬華，船離它最近時；按「都更」時跟著亮
   const cr = hq.HQ_CYCLE_RENEW;
   out.push({ lat: cr.lat, lng: cr.lng, at: hqNearestAt(t0, cr) + 300, kind: 'cyclerenew', scale, hint: { title: `循環都更：先換屋、再都更（${cr.name}，示意）`, intro: I['循環都更'] ?? '' } });

@@ -1070,6 +1070,31 @@ path.map-night-area { animation: night-in 2.4s ease-in-out both; }
 .nx-coat.b { stroke: #2f9e6a; }
 .nx-coat.c { stroke: #e0a020; }
 .nx-a, .nx-b { opacity: 0; }
+/* 每週免費臨托（v1.650）：親子館粉紅色（跟「親」一樣），一輪 14 秒：來（0–24%）→ 喘口氣（30–70%）→ 接回來（76–100%） */
+.rs-wall { fill: #fbe3ec; stroke: #a14a73; stroke-width: 0.6; }
+.rs-roof { fill: #e0709f; stroke: #a14a73; stroke-width: 0.6; stroke-linejoin: round; }
+.rs-sign { fill: #fff; stroke: #a14a73; stroke-width: 0.5; }
+.rs-st { font-size: 2.6px; font-weight: 800; fill: #a14a73; }
+.rs-win { fill: #fff8e6; stroke: #a14a73; stroke-width: 0.5; }
+.rs-door { fill: #a14a73; }
+.rs-ball { fill: #ffb347; }
+.rs-coat { stroke: #e0709f; stroke-width: 2.2; stroke-linecap: round; }
+.rs-kid { stroke: #ffb347; stroke-width: 2.6; stroke-linecap: round; }
+.rs-heart { fill: #ef6b5f; stroke: #b8392f; stroke-width: 0.4; }
+.rs-come, .rs-rest, .rs-go, .rs-play { opacity: 0; }
+.hq-near .rs-come { animation: rs-come 14s linear infinite; animation-delay: var(--d); }
+@keyframes rs-come { 0% { transform: none; opacity: 0; } 2% { opacity: 1; } 22% { transform: translateX(20px); opacity: 1; } 25%, 100% { transform: translateX(20px); opacity: 0; } }
+.hq-near .rs-play { animation: rs-play 14s linear infinite; animation-delay: var(--d); }
+@keyframes rs-play { 0%, 24% { opacity: 0; } 27%, 74% { opacity: 1; } 77%, 100% { opacity: 0; } }
+.hq-near .rs-ball { transform-box: fill-box; animation: rs-ball 0.8s ease-in-out infinite alternate; }
+@keyframes rs-ball { to { transform: translateY(-1.4px); } }
+.hq-near .rs-rest { animation: rs-rest 14s linear infinite; animation-delay: var(--d); }
+@keyframes rs-rest { 0%, 28% { opacity: 0; } 32%, 70% { opacity: 1; } 73%, 100% { opacity: 0; } }
+.hq-near .rs-heart { transform-box: fill-box; transform-origin: center bottom; animation: rs-heart 14s ease-out infinite; animation-delay: var(--d); }
+@keyframes rs-heart { 0%, 40% { transform: scale(0); opacity: 0; } 44% { transform: scale(1.2); opacity: 1; } 47%, 66% { transform: none; opacity: 1; } 70%, 100% { transform: translateY(-2px); opacity: 0; } }
+.hq-near .rs-go { animation: rs-go 14s linear infinite; animation-delay: var(--d); }
+@keyframes rs-go { 0%, 75% { transform: none; opacity: 0; } 78% { opacity: 1; } 97% { transform: translateX(-20px); opacity: 1; } 100% { transform: translateX(-20px); opacity: 0; } }
+@media (prefers-reduced-motion: reduce) { .hq-near .rs-rest, .hq-near .rs-play { animation: none; opacity: 1; } .hq-near .rs-heart { animation: none; } }
 .hq-near .nx-hand { animation: sg-turn-m 7s linear infinite; animation-delay: var(--d); }
 .hq-near .nx-a { animation: nx-a 14s linear infinite; animation-delay: var(--d); }
 @keyframes nx-a { 0% { transform: none; opacity: 0; } 3% { opacity: 1; } 24% { transform: translateX(16px); opacity: 1; } 28%, 100% { transform: translateX(16px); opacity: 0; } }

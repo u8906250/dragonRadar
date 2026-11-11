@@ -13,8 +13,8 @@ export const IDLE_CYCLE_MS = 5_040_000;
 export const idlePhase = (now: number, offsetMs: number): number => Math.round((now + offsetMs) % IDLE_CYCLE_MS);
 
 /** 會自己畫一個小場景的圖示 */
-export type SceneKind = 'sporthub' | 'workhub' | 'ridehub' | 'pocketpark' | 'detention' | 'cleanwater' | 'schoolwalk' | 'lunch' | 'piggy' | 'aiteam' | 'oldhouse' | 'streettree' | 'bikerack' | 'nightmayor' | 'buscharge' | 'library24' | 'lantern' | 'nightsky' | 'tpassgo' | 'tpasspark' | 'busterminal' | 'cyclerenew' | 'stagger' | 'expo';
-const SCENE_KINDS: readonly string[] = ['sporthub', 'workhub', 'ridehub', 'pocketpark', 'detention', 'cleanwater', 'schoolwalk', 'lunch', 'piggy', 'aiteam', 'oldhouse', 'streettree', 'bikerack', 'nightmayor', 'buscharge', 'library24', 'lantern', 'nightsky', 'tpassgo', 'tpasspark', 'busterminal', 'cyclerenew', 'stagger', 'expo'];
+export type SceneKind = 'sporthub' | 'workhub' | 'ridehub' | 'pocketpark' | 'detention' | 'cleanwater' | 'schoolwalk' | 'lunch' | 'piggy' | 'aiteam' | 'oldhouse' | 'streettree' | 'bikerack' | 'nightmayor' | 'buscharge' | 'library24' | 'lantern' | 'nightsky' | 'tpassgo' | 'tpasspark' | 'busterminal' | 'cyclerenew' | 'stagger' | 'expo' | 'respite';
+const SCENE_KINDS: readonly string[] = ['sporthub', 'workhub', 'ridehub', 'pocketpark', 'detention', 'cleanwater', 'schoolwalk', 'lunch', 'piggy', 'aiteam', 'oldhouse', 'streettree', 'bikerack', 'nightmayor', 'buscharge', 'library24', 'lantern', 'nightsky', 'tpassgo', 'tpasspark', 'busterminal', 'cyclerenew', 'stagger', 'expo', 'respite'];
 export const isSceneKind = (k: string): k is SceneKind => SCENE_KINDS.includes(k);
 
 /** 站著的小人（腳在 y = 0、往右走）：身體的 class 決定衣服顏色，extra 是帽子、領帶這些 */
@@ -375,6 +375,30 @@ const EXPO =
   `<g transform="translate(-10 6.4)"><g class="nx-a">${person('nx-coat')}<g transform="translate(-4.4 0)">${person('nx-coat b')}</g></g></g>` +
   `<g transform="translate(-10 6.4)"><g class="nx-b"><g transform="scale(-1 1)">${person('nx-coat c')}<g transform="translate(-4.4 0)">${person('nx-coat')}</g></g></g></g>`;
 
+/**
+ * 每週免費臨托（v1.650 使用者說在洋流號政策加上提高臨托時數；家庭一站通「6 個月到學齡前每週最多 4 小時免費臨托」）：
+ * 粉紅色的親子館，招牌寫「臨托 4h」。家長牽著孩子走到門口，孩子進去（窗戶裡冒出孩子、球一跳一跳），
+ * 家長走到右邊的長椅坐下喝杯熱咖啡、冒一顆小愛心喘口氣，再走回門口，孩子出來，兩個人一起走；一輪 14 秒
+ */
+const RESPITE =
+  '<ellipse class="sc-shadow" cx="1" cy="6.6" rx="20" ry="1.2"/><path class="ts-walkway" d="M-22 6.6H20"/>' +
+  '<rect class="rs-wall" x="-9" y="-9" width="16" height="15.4" rx="1"/><path class="rs-roof" d="M-10.6 -9L-1 -15.4L8.6 -9Z"/>' +
+  '<rect class="rs-sign" x="-6.4" y="-7.8" width="10.8" height="4" rx="2"/><text class="rs-st" x="-1" y="-4.9" text-anchor="middle">臨托 4h</text>' +
+  '<rect class="rs-win" x="-7.4" y="-2.4" width="5.4" height="4.2" rx="0.6"/>' +
+  // 窗戶裡：孩子在玩（進去之後才出現）、球一跳一跳
+  '<g class="rs-play"><circle class="sc-head" cx="-5.6" cy="0.2" r="1.1"/><circle class="rs-ball" cx="-3.4" cy="0.9" r="0.7"/></g>' +
+  '<rect class="rs-door" x="0.6" y="0.6" width="4" height="5.8" rx="0.4"/>' +
+  // 右邊的長椅
+  '<path class="pp-wood" d="M11 3.6H18.6"/><path class="pp-leg" d="M11.6 3.6V6M18 3.6V6"/>' +
+  // 來：家長牽著孩子走到門口
+  `<g transform="translate(-20 6.4)"><g class="rs-come">${person('rs-coat')}<g transform="translate(2.4 0) scale(0.62)">${person('rs-kid')}</g></g></g>` +
+  // 喘口氣：家長坐在長椅上（屁股在椅面、腳往前垂下），手上一杯熱咖啡，冒一顆小愛心
+  '<g transform="translate(13.4 3.2)"><g class="rs-rest"><path class="sc-leg" d="M0 0H2.4V2.8"/><path class="rs-coat" d="M0 0V-4"/><circle class="sc-head" cy="-5.7" r="1.6"/>' +
+  '<g transform="translate(2.6 -3)"><path class="sg-mug" d="M-1.2 -1.1H1.2L0.9 1.3H-0.9Z"/><path class="sg-steam" d="M-0.3 -1.5q-0.5 -0.7 0 -1.3t0 -1.3"/></g>' +
+  '<path class="rs-heart" d="M0 -9c-1.4 -1 -2.6 -1.9 -2.6 -3.1a1.3 1.3 0 0 1 2.6 -0.4a1.3 1.3 0 0 1 2.6 0.4c0 1.2 -1.2 2.1 -2.6 3.1z"/></g></g>' +
+  // 接回來：從門口一起往左走
+  `<g transform="translate(2.6 6.4)"><g class="rs-go"><g transform="scale(-1 1)">${person('rs-coat')}<g transform="translate(2.4 0) scale(0.62)">${person('rs-kid')}</g></g></g></g>`;
+
 export function sceneSvg(kind: SceneKind, deg: number): string {
   switch (kind) {
     case 'schoolwalk':
@@ -411,6 +435,8 @@ export function sceneSvg(kind: SceneKind, deg: number): string {
       return STAGGER;
     case 'expo':
       return EXPO;
+    case 'respite':
+      return RESPITE;
 
     case 'oldhouse':
       return OLDHOUSE;
