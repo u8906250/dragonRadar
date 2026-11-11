@@ -55,8 +55,8 @@ const SHOWN = "(status = 'active' OR (status = 'picked' AND EXISTS (SELECT 1 FRO
 /** 收藏的時間（SELECT 裡多拿這一欄，toOut 用） */
 const TAKEN_AT = '(SELECT MIN(p.collected_at) FROM bottle_picks p WHERE p.bottle_id = bottles.id AND p.collected_at IS NOT NULL) AS taken_at';
 /** 走到這個距離內才撿得起來 */
-/** 只看得到這麼遠內的瓶子（v1.622 使用者說的；地球上照你的位置，伺服器也只回這個範圍內的） */
-export const SEE_RADIUS_KM = 5;
+/** 只看得到這麼遠內的瓶子（v1.622 使用者說 5 km；v1.655 說定位後超過 1 km 的還看得到，改成 1 km，跟打開、收藏的距離一樣；地球上照你的位置，伺服器也只回這個範圍內的） */
+export const SEE_RADIUS_KM = 1;
 /** 走到這麼近才能打開來看、收藏、收回（v1.627 使用者說改成 1 km；v1.599 是 500 m，以前 60 m） */
 export const PICK_RADIUS_M = 1000;
 /** 丟的位置打散的範圍 */

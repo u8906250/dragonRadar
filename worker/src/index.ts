@@ -298,7 +298,7 @@ async function handle(req: Request, env: Env, ctx: ExecutionContext): Promise<Re
     if (!bottlesEnabled(env)) throw new HttpError(403, '漂流瓶暫時關閉');
     const dev = await deviceId(env, req);
     if (req.method === 'GET' && path === '/api/bottles') {
-      // 只看得到 5 km 內的瓶子（SEE_RADIUS_KM）：要多遠都只給 5 km
+      // 只看得到 1 km 內的瓶子（SEE_RADIUS_KM）：要多遠都只給 1 km
       const radiusKm = Math.min(SEE_RADIUS_KM, Math.max(0.1, num(url.searchParams.get('radius_km')) ?? SEE_RADIUS_KM));
       const world = url.searchParams.get('world') === 'woof' ? 'woof' : 'earth';
       return jsonResponse({ now, bottles: await listBottles(env, dev, { lat: num(url.searchParams.get('lat')), lng: num(url.searchParams.get('lng')), radiusKm, world }, now) });

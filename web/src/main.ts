@@ -2343,10 +2343,10 @@ function bottleState(b: BottleOut): 'near' | 'pick' {
 }
 
 /** 方向提示最遠指到多遠的瓶子 */
-const BOTTLE_HINT_MAX_KM = 5;
+const BOTTLE_HINT_MAX_KM = 1;
 
 /** 漂流瓶只看得到 5 km 內的（v1.622 使用者說的） */
-const bottleSeeKm = (): number => bottleRules()?.seeKm ?? 5;
+const bottleSeeKm = (): number => bottleRules()?.seeKm ?? 1;
 /** 地球上從哪裡算 5 km：你的 GPS 位置（拖曳過雷達也一樣），沒有 GPS 就從雷達正中間 */
 const bottleCenter = (): LatLng => (origin.source === 'gps' ? origin : (lastGps ?? origin));
 /** 看不看得到這個瓶子：地球上離你 5 km 內；汪星海上的離你在汪星的位置 5 km 內 */
@@ -2807,8 +2807,8 @@ async function openSharedBottle(id: number): Promise<void> {
     showBanner(
       bannerEl,
       b.world === 'woof'
-        ? `漂流瓶 ${bottleNo(id)} 漂到汪星的海上了，搭火箭到汪星、走到 ${bottleSeeKm()} km 內才看得到`
-        : `漂流瓶 ${bottleNo(id)} 在你 ${bottleSeeKm()} km 外，走近一點才看得到`,
+        ? `漂流瓶 ${bottleNo(id)} 漂到汪星的海上了，搭火箭到汪星、走到 ${reachText(bottleSeeKm() * 1000)} 內才看得到`
+        : `漂流瓶 ${bottleNo(id)} 在你 ${reachText(bottleSeeKm() * 1000)} 外，走近一點才看得到`,
       4000,
     );
     return;
@@ -3178,7 +3178,7 @@ function confirmThrow(): Promise<boolean> {
   const rules = [
     '只有在地球上才能丟，瓶子會丟在你現在的位置附近（隨機漂開約 100 m，不會在你站的地方），之後在附近 200 m 內慢慢漂。',
     `沒人收藏的 ${r?.seaHours ?? 24} 小時後漂到汪星的海上，${r?.woofDays ?? 30} 天後沉下去；被收藏的不會漂走，在原地標成已收藏 ${KEEP_TAKEN_H} 小時，之後收進收藏的人的「收藏」、裝進瓶子裡。`,
-    `附近 ${r?.seeKm ?? 5} km 內的人看得到瓶子在哪裡；走到 ${reachText(r?.pickRadiusM)} 內才看得到內容和照片，第一個按「收藏」的人會把它收進漂流瓶收藏（收藏了別人照樣看得到）。`,
+    `走到瓶子 ${reachText((r?.seeKm ?? 1) * 1000)} 內才看得到瓶子、打開來看內容和照片，第一個按「收藏」的人會把它收進漂流瓶收藏（收藏了別人照樣看得到）。`,
     `丟出去 24 小時內、你走回瓶子 ${reachText(r?.pickRadiusM)} 內才收得回來；收回的也算今天的額度。`,
     `每天可以丟 ${r?.perDay ?? 3} 個，00:00 恢復成 ${r?.perDay ?? 3} 個${left !== undefined ? `；丟了這個今天還剩 ${Math.max(0, left - 1)} 個` : ''}。`,
     '送出前會自動審核：辱罵或攻擊任何人（包括候選人、政黨）、謠言、連結、電話、帳號、個人資料都不會通過。',
@@ -5361,6 +5361,20 @@ function setOrigin(o: Origin): void {
 /** 每次重抓加一；切換模組時，舊模組還沒回來的結果不要蓋掉新的 */
 let fetchSeq = 0;
 
+/**
+ * 只重抓看得到的漂流瓶（v1.655 使用者說定位後要重新整理看得到的漂流瓶）：照現在的 GPS 位置抓看得到範圍（1 km）內的；
+ * 「定位」成功後不管移動多少都抓一次（位置差不到 200 m 時 setOrigin 不會整個重抓）
+ */
+let bottleSeq = 0;
+async function reloadBottles(): Promise<void> {
+  if (!bottlesOn()) return;
+  const seq = ++bottleSeq;
+  const got = await fetchBottles(bottleCenter(), bottleSeeKm());
+  if (seq !== bottleSeq) return;
+  bottles = withMine(got);
+  render();
+}
+
 async function refresh(): Promise<void> {
   const seq = ++fetchSeq;
   const forModule = mod;
@@ -5368,10 +5382,13 @@ async function refresh(): Promise<void> {
   const kws = forModule.current ? followed() : [];
   // 漂流瓶跟關鍵字無關，一起抓
   const bottleReq = bottlesOn() ? fetchBottles(bottleCenter(), bottleSeeKm()) : Promise.resolve([] as BottleOut[]);
+  // 這次抓的時候之後又只重抓了漂流瓶（定位後）：瓶子用那一次的，不要被這次（舊位置）蓋掉
+  const bseq = bottleSeq;
+  const freshBottles = (got: BottleOut[]): BottleOut[] => (bottleSeq === bseq ? withMine(got) : bottles);
   void loadWoofBottles();
   if (forModule.current && kws.length === 0) {
     events = [];
-    bottles = withMine(await bottleReq);
+    bottles = freshBottles(await bottleReq);
     lastFetchAt = nowSec();
     updatedLabel.textContent = `↻ 更新 ${fmtTime(lastFetchAt)}`;
     render();
@@ -5381,8 +5398,8 @@ async function refresh(): Promise<void> {
     const radius = fetchRadiusKm(scaleKm);
     const got = await Promise.all([fetchEvents(origin, radius, kws, forModule.id), forModule.current ? currentRoutes() : Promise.resolve([] as RouteOut[]), bottleReq]);
     if (seq !== fetchSeq) return;
-    [events, routes, bottles] = got;
-    bottles = withMine(bottles);
+    [events, routes] = got;
+    bottles = freshBottles(got[2]);
     // 車掃剛放上雷達：路線還在快取裡沒有這條，每一站會各自畫出來；有這種點就馬上重抓路線（同一則只重抓一次）
     const missing = forModule.current ? [...new Set(events.filter((ev) => ev.route && !routes.some((r) => r.postId === ev.post.id)).map((ev) => ev.post.id))] : [];
     if (missing.some((id) => !routesRefetched.has(id))) {
@@ -5749,6 +5766,8 @@ function locateMe(): void {
         map.setOrigin(origin, true, gpsAccuracy);
       }
       showBanner(bannerEl, `已定位，誤差約 ${Math.round(pos.coords.accuracy)} 公尺`, 2000);
+      // 照新的 GPS 位置重抓看得到的漂流瓶（v1.655）
+      void reloadBottles();
     },
     (e) => {
       locateBtn.classList.remove('on');
