@@ -2105,10 +2105,6 @@ path.map-seam-walkers { --p: 15px; }
 .bottle-float .bottle > path:not(.taken-mark) { fill: rgba(225, 247, 251, 0.35); stroke: #2f6f7c; stroke-width: 1.3; stroke-linejoin: round; }
 .bottle-float.picked { opacity: 0.85; }
 /* 收藏頁裡收藏滿 24 小時的信（v1.646）：裝在塞好軟木塞的瓶子裡，點瓶子打開（漂流瓶畫面裡的瓶子是空的，這裡信卷、軟木塞要看得到） */
-.letter-bottle { align-self: center; padding: 6px 0 2px; background: none; border: 0; cursor: pointer; }
-.letter-bottle .real-bottle { display: block; width: 52px; height: 104px; transition: transform 0.2s; }
-.letter-bottle .real-bottle .scroll, .letter-bottle .real-bottle .cork { opacity: 1; }
-.letter-bottle:hover .real-bottle, .letter-bottle:focus-visible .real-bottle { transform: rotate(-6deg) translateY(-2px); }
 .bottle-float.selected .bottle > path:not(.taken-mark) { stroke: var(--blip-selected); stroke-width: 2.4; }
 /* 水流：後面淡、前面深一點，往右慢慢流、淡出再出現（兩道錯開） */
 .bottle-float .flow {
@@ -2302,17 +2298,45 @@ body.letters-open { overflow: hidden; }
 .letters-body h3 { font-size: 16px; margin: 18px 0 6px; }
 .letters-body .small { font-size: 12px; line-height: 1.5; }
 .letters-body .muted { color: var(--muted); }
-.letter-grid { list-style: none; margin: 8px 0 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 14px; }
+/*
+ * 收藏的漂流瓶（v1.662）：木頭櫃子，一層層擺著塞好軟木塞、裝著信的瓶子，層板前面貼編號。
+ * 一格一個瓶子（--row 高），層板用背景畫（每一層整排都有板子，最後一層沒放滿也一樣）
+ */
+.bottle-cabinet {
+  --row: 124px; --board: 22px;
+  list-style: none; margin: 8px 0 0; padding: 0 10px;
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(84px, 1fr)); grid-auto-rows: var(--row);
+  /* 至少兩層（瓶子少的時候還是像個櫃子，空的那層等著放） */
+  min-height: calc(var(--row) * 2 + 24px);
+  border: 10px solid #8a5a2c; border-top-width: 14px; border-radius: 6px 6px 4px 4px;
+  background:
+    repeating-linear-gradient(to bottom, transparent 0 calc(var(--row) - var(--board)), #c9935a calc(var(--row) - var(--board)) calc(var(--row) - var(--board) + 3px), #b07a43 calc(var(--row) - var(--board) + 3px) calc(var(--row) - 3px), #6e4420 calc(var(--row) - 3px) var(--row)),
+    linear-gradient(90deg, rgba(60, 34, 12, 0.28), transparent 10%, transparent 90%, rgba(60, 34, 12, 0.28)),
+    #ecd3a8;
+  box-shadow: inset 0 8px 10px -6px rgba(60, 34, 12, 0.55), 0 3px 0 #5a3615, 2px 6px 12px rgba(0, 0, 0, 0.25);
+}
+.bottle-cabinet > li { display: flex; align-items: flex-end; justify-content: center; min-width: 0; }
+.bottle-cabinet.empty { grid-template-columns: 1fr; }
+.cab-empty { align-items: center !important; padding-bottom: var(--board); color: #6b4b2a; font-size: 13px; }
+.cab-bottle { display: flex; flex-direction: column; align-items: center; gap: 3px; padding: 0 0 3px; background: none; border: 0; cursor: pointer; -webkit-tap-highlight-color: transparent; }
+.cab-bottle .real-bottle { display: block; width: 44px; height: 88px; transition: transform 0.2s; transform-origin: 50% 96%; }
+.cab-bottle .real-bottle .scroll, .cab-bottle .real-bottle .cork { opacity: 1; }
+.cab-bottle:hover .real-bottle, .cab-bottle:focus-visible .real-bottle { transform: rotate(-6deg) translateY(-3px); }
+.cab-bottle:focus-visible { outline: none; }
+.cab-bottle:focus-visible .cab-no { outline: 2px solid #ffe08a; }
+/* 層板前面的小標籤：只寫編號 */
+.cab-no { padding: 0 5px; font: 700 10.5px/16px ui-monospace, 'SF Mono', Menlo, monospace; color: #5a3a1a; background: #f6e8cc; border-radius: 2px; box-shadow: 0 1px 1px rgba(0, 0, 0, 0.35); white-space: nowrap; }
+/* 拿出來看的信：蓋在收藏頁上面，✕、點旁邊、Esc 放回瓶子 */
+.letter-modal { position: fixed; inset: 0; z-index: 5; display: flex; padding: 56px 16px 24px; overflow-y: auto; overscroll-behavior: contain; background: rgba(28, 18, 8, 0.62); }
+.letter-modal .letter-paper { margin: auto; width: min(100%, 440px); animation: letter-out 0.25s ease-out; }
+@keyframes letter-out { from { opacity: 0; transform: translateY(18px) scale(0.96); } }
+.letter-x { position: absolute; z-index: 2; top: -16px; left: -12px; width: 44px; height: 44px; padding: 0; font-size: 16px; line-height: 1; color: #fff; cursor: pointer; background: #6e4420; border: 2px solid #f6e8cc; border-radius: 50%; box-shadow: 0 2px 6px rgba(0, 0, 0, 0.35); }
 /* 收藏的信：丟的人寫的那張牛皮紙 */
-.letter-paper { position: relative; display: flex; flex-direction: column; gap: 8px; padding: 22px 16px 10px; transform: rotate(var(--tilt, -0.6deg)); }
-.letter-paper:nth-child(2n) { --tilt: 0.7deg; }
-.letter-paper:nth-child(3n) { --tilt: -0.3deg; }
+.letter-paper { position: relative; display: flex; flex-direction: column; gap: 8px; padding: 26px 16px 10px; }
 .letter-paper .letter-text { margin: 0; font-family: var(--hand); font-size: 19px; line-height: 34px; font-weight: 600; white-space: pre-wrap; word-break: break-word; background: var(--kraft-rules); }
-.letters-body .letter-paper small.muted { color: #6b4b2a; font-size: 12px; }
 .letter-acts { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 4px 12px; }
 .letter-acts .link-btn { color: #6b4b2a; font-size: 12px; }
-.letters-note { margin-top: 24px; }
-@media (prefers-reduced-motion: reduce) { .letter-paper { transform: none; } }
+@media (prefers-reduced-motion: reduce) { .letter-modal .letter-paper { animation: none; } }
 
 /* 瓶子證明（蓋在畫面上的一層）：不用模糊背景（後面的雷達一直在動，每一格都要重新模糊，點開、關閉會卡），改成深一點的底 */
 .tc-overlay.tc-proof, .tc-overlay.tc-rules { backdrop-filter: none; -webkit-backdrop-filter: none; background: rgba(10, 14, 20, 0.9); }

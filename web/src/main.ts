@@ -2450,8 +2450,6 @@ function onWoofWalk(): void {
   if (b?.world === 'woof' && !detailEl.hidden) renderBottleDetail(b.id);
 }
 
-const dayFmt = new Intl.DateTimeFormat('zh-TW', { timeZone: 'Asia/Taipei', month: 'numeric', day: 'numeric' });
-const fmtDay = (unix: number): string => dayFmt.format(new Date(unix * 1000));
 const stampFmt = new Intl.DateTimeFormat('zh-TW', { timeZone: 'Asia/Taipei', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false });
 /** 漂了多遠：50 m 以內算沒漂 */
 const driftText = (m: number): string => (m >= 50 ? formatKm(m / 1000) : '');
@@ -3066,7 +3064,10 @@ function wireBottleScene(): void {
     if (t.closest('[data-act="close"]')) openBottleSheet(false);
   });
   document.addEventListener('keydown', (e) => {
-    if (e.key === 'Escape' && !bottleSheet.hidden && !throwing && !judging && !document.querySelector('.tc-overlay')) openBottleSheet(false);
+    if (e.key !== 'Escape' || document.querySelector('.tc-overlay')) return;
+    if (!bottleSheet.hidden && !throwing && !judging) openBottleSheet(false);
+    // 收藏頁拿出來看的信：放回瓶子
+    else if (!lettersPage.hidden) closeLetter();
   });
   bottleText.addEventListener('input', () => {
     bottleResult.textContent = '';
@@ -3122,7 +3123,7 @@ function openLettersPage(open: boolean): void {
   } else {
     lettersPage.hidden = true;
     document.body.classList.remove('letters-open');
-    openedLetters.clear();
+    openLetter = null;
     if (location.hash !== '#letters') return;
     if (lettersPushed) history.back();
     else history.replaceState(null, '', location.pathname + location.search);
@@ -3130,12 +3131,13 @@ function openLettersPage(open: boolean): void {
   }
 }
 
-/** 收藏頁這次打開來看的信（重新整理、離開收藏頁就放回瓶子裡） */
-const openedLetters = new Set<number>();
+/** 收藏頁拿出來看的信（一次一封；重新整理、離開收藏頁就放回瓶子裡） */
+let openLetter: number | null = null;
 
 /**
- * 收藏的漂流瓶（v1.651 使用者說「收藏的信」改成「收藏的漂流瓶」）：一張張牛皮紙，寫著編號、什麼時候在哪裡收藏的。
- * 收藏滿 24 小時（瓶子從原地收進來了）的信裝在瓶子裡，點瓶子或「打開來看」才看得到（v1.646 使用者說的）；還沒滿的照舊攤開，寫還要多久收進瓶子
+ * 收藏的漂流瓶（v1.662 使用者說放一個櫃子、只顯示號碼、不用太多文字說明）：木頭櫃子一層層擺著塞好軟木塞、裝著信的瓶子，
+ * 瓶子下面的層板貼編號；點瓶子才把信拿出來看（蓋在收藏頁上面，✕、點旁邊、Esc 放回瓶子）。
+ * 收藏還沒滿 24 小時的瓶子還在原地，不放進櫃子（v1.653、v1.654 使用者說的）
  */
 function renderLettersPage(): void {
   const data = myBottlesData;
@@ -3144,49 +3146,53 @@ function renderLettersPage(): void {
     return;
   }
   const { letters } = data;
-  const meta = (b: MyBottles['letters'][number]): string => {
-    const drift = driftText(b.driftM);
-    return `${fmtDay(b.pickedAt)} ${b.world === 'woof' ? '在汪星的海上' : ''}收藏・${ago(b.createdAt)}丟的${drift ? `・漂了 ${drift} 才到你手上` : ''}`;
-  };
   const keepLeft = (l: MyBottles['letters'][number]): number => l.pickedAt + KEEP_TAKEN_H * 3600 - nowSec();
-  const card = (l: MyBottles['letters'][number]): string => {
-    const sealed = !openedLetters.has(l.id);
-    const content = sealed
-      ? `<button type="button" class="letter-bottle" data-open-letter="${l.id}" aria-label="打開瓶子看信">${bottleSvg('')}</button>`
-      : `${l.photo ? tapedPhoto(l.id) : ''}<p class="letter-text">${esc(l.text)}</p>`;
-    return `<li class="letter-paper${sealed ? ' letter-sealed' : ''}">
-            <span class="kraft-no">${bottleNo(l.id)}</span>
-            ${content}
-            <small class="muted">${esc(meta(l))}</small>
-            <div class="letter-acts">
-              ${sealed ? `<button type="button" class="link-btn" data-open-letter="${l.id}">打開來看</button>` : `<button type="button" class="link-btn" data-close-letter="${l.id}">放回瓶子</button>`}
-              <button type="button" class="link-btn" data-proof="${l.id}">瓶子證明</button>
-              ${shareLink(l.id, false, 'link-btn')}
-              <button type="button" class="link-btn" data-report="${l.id}">檢舉</button>
-              <button type="button" class="link-btn" data-uncollect="${l.id}">移出收藏</button>
-            </div>
-          </li>`;
-  };
-  // 收藏還沒滿 24 小時的瓶子還在原地，不算收進來，收藏頁不顯示（v1.653 使用者說還沒到時間的不要畫在收藏的漂流瓶裡；v1.654 說還在原地的也不用列）
   const kept = letters.filter((l) => keepLeft(l) <= 0);
-  const waiting = letters.length - kept.length;
-  lettersList.innerHTML = kept.length
-    ? `<h3>收藏的漂流瓶（${kept.length}）</h3><ul class="letter-grid">${kept.map(card).join('')}</ul>`
-    : `<h3>收藏的漂流瓶</h3><p class="muted">${waiting ? `還沒有收進來的漂流瓶。收藏後瓶子在原地留 ${KEEP_TAKEN_H} 小時，時間到就收進這裡、裝進瓶子。` : `還沒有收藏的漂流瓶。到雷達上找找看，走到瓶子附近按「收藏」，瓶子在原地留 ${KEEP_TAKEN_H} 小時後就收進這裡。`}</p>`;
+  const cell = (l: MyBottles['letters'][number]): string =>
+    `<li><button type="button" class="cab-bottle" data-open-letter="${l.id}" aria-label="${bottleNo(l.id)}，拿出來看">${bottleSvg('')}<span class="cab-no">${bottleNo(l.id)}</span></button></li>`;
+  const open = kept.find((l) => l.id === openLetter);
+  if (!open) openLetter = null;
+  lettersList.innerHTML =
+    `<h3>收藏的漂流瓶</h3><ul class="bottle-cabinet${kept.length ? '' : ' empty'}">${
+      kept.length ? kept.map(cell).join('') : `<li class="cab-empty">${letters.length ? `收藏的瓶子 ${KEEP_TAKEN_H} 小時後放進來` : '還沒有收藏的漂流瓶'}</li>`
+    }</ul>` +
+    (open
+      ? `<div class="letter-modal" data-letter-backdrop>
+          <div class="letter-paper" role="dialog" aria-modal="true" aria-label="${bottleNo(open.id)}">
+            <button type="button" class="letter-x" data-close-letter="${open.id}" aria-label="放回瓶子">✕</button>
+            <span class="kraft-no">${bottleNo(open.id)}</span>
+            ${open.photo ? tapedPhoto(open.id) : ''}<p class="letter-text">${esc(open.text)}</p>
+            <div class="letter-acts">
+              <button type="button" class="link-btn" data-proof="${open.id}">瓶子證明</button>
+              ${shareLink(open.id, false, 'link-btn')}
+              <button type="button" class="link-btn" data-report="${open.id}">檢舉</button>
+              <button type="button" class="link-btn" data-uncollect="${open.id}">移出收藏</button>
+            </div>
+          </div>
+        </div>`
+      : '');
   fillPhotos(lettersList);
   paintMyBottles();
 }
 
+/** 拿出來看的信放回瓶子 */
+function closeLetter(): void {
+  if (openLetter === null) return;
+  openLetter = null;
+  renderLettersPage();
+}
+
 async function onLettersClick(e: Event): Promise<void> {
   const t = e.target as Element;
-  // 收藏頁的瓶子：打開來看、放回瓶子
+  // 櫃子裡的瓶子：點了把信拿出來看；✕、點信紙旁邊放回瓶子
   const openL = t.closest<HTMLElement>('[data-open-letter]');
-  const closeL = t.closest<HTMLElement>('[data-close-letter]');
-  if (openL || closeL) {
-    const id = Number(openL?.dataset.openLetter ?? closeL?.dataset.closeLetter);
-    if (openL) openedLetters.add(id);
-    else openedLetters.delete(id);
+  if (openL) {
+    openLetter = Number(openL.dataset.openLetter);
     renderLettersPage();
+    return;
+  }
+  if (t.closest('[data-close-letter]') || t.matches('[data-letter-backdrop]')) {
+    closeLetter();
     return;
   }
   const del = t.closest<HTMLButtonElement>('[data-delete-bottle]');
