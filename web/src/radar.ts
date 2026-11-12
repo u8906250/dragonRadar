@@ -2917,13 +2917,17 @@ export class Radar {
           f.textContent = it.flag;
           body.appendChild(f);
         } else if (glyph) {
-          body.appendChild(el('circle', { class: 'dot topic', r: 10 }));
+          const dot = el('circle', { class: 'dot topic', r: 10 });
+          // 稍後開始的：模糊只加在圓點上，小圖示照樣清楚、看得出類型（v1.673 使用者說模糊但要看得出類型）
+          if (it.fade !== undefined && !it.selected) dot.setAttribute('style', `filter:blur(${((1 - it.fade) * 1.5).toFixed(2)}px)`);
+          body.appendChild(dot);
           const ink = el('g', { class: 'glyph', transform: 'scale(0.9)' });
           ink.innerHTML = glyphSvg(glyph, 'currentColor');
           body.appendChild(ink);
         } else this.appendMark(body, p.out, it.spot, it.office);
-        // 離開始越久越淡、越模糊；選取時看清楚
-        if (it.fade !== undefined && !it.selected) {
+        // 離開始越久越淡、越模糊；選取時看清楚（有小圖示的只淡一點、不整個模糊，圓點自己模糊）
+        if (glyph && it.fade !== undefined && !it.selected) body.setAttribute('style', `opacity:${(0.6 + 0.4 * it.fade).toFixed(2)}`);
+        else if (it.fade !== undefined && !it.selected) {
           const blur = ((1 - it.fade) * 1.5).toFixed(2);
           body.setAttribute('style', `opacity:${(0.35 + 0.65 * it.fade).toFixed(2)};filter:blur(${blur}px)`);
           body.dataset.blur = blur;

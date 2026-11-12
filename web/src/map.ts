@@ -513,12 +513,13 @@ export class MapView {
         });
       } else if (glyph) {
         const size = it.phase === 'active' || it.selected ? 28 : 24;
-        const svg = topicMarkerSvg(glyph, markerColor(it.kind, it.phase, it.spot), it.selected ? selectedStroke : stroke, it.selected ? 2.6 : 1.8, fillOpacity, !!it.spot || it.phase === 'later', size);
+        // 稍後開始的越久越淡，但底色、整個圖示都不淡到看不出類型（v1.673 使用者說模糊但要看得出類型）
+        const svg = topicMarkerSvg(glyph, markerColor(it.kind, it.phase, it.spot), it.selected ? selectedStroke : stroke, it.selected ? 2.6 : 1.8, Math.max(0.55, fillOpacity), !!it.spot || it.phase === 'later', size);
         if (this.iconKeys.get(it.id) !== svg) {
           m.setIcon(L.divIcon({ className: 'map-topic', html: svg, iconSize: [size, size], iconAnchor: [size / 2, size / 2] }));
           this.iconKeys.set(it.id, svg);
         }
-        m.setOpacity(opacity);
+        m.setOpacity(it.fade !== undefined && !it.selected ? 0.65 + 0.35 * it.fade : 1);
         m.setZIndexOffset(it.selected ? 500 : 50);
       } else if (it.flag) {
         const size = it.phase === 'active' || it.selected ? 30 : 26;
