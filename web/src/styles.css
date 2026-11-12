@@ -1466,6 +1466,17 @@ path.map-seam-walkers { --p: 15px; }
 .panel.collapsed .kw-bar, .panel.collapsed .filter-row, .panel.collapsed .event-list, .panel.collapsed .hint { visibility: hidden; }
 .panel.collapsed .panel-head .right, .panel.collapsed #origin-label { display: none; }
 .panel.expanded .panel-handle span { opacity: 0.9; }
+/* 手機點開活動：詳細資料直接放在清單這張卡片裡（main.ts 的 wirePanelDrag），清單的內容先藏起來；把手、往下拖收起來都用清單的 */
+.panel > #detail {
+  position: static; z-index: auto; flex: 1 1 auto; min-height: 0; max-height: none; overflow: auto;
+  background: transparent; border: 0; border-radius: 0; box-shadow: none; padding: 0 16px 12px; transform: none; transition: none;
+}
+.panel > #detail .sheet-grab { display: none; }
+.panel.detail-on > :not(.panel-handle):not(#detail) { display: none; }
+.panel.detail-on { max-height: 60dvh; }
+.panel.detail-on.expanded { max-height: 80dvh; }
+.panel.detail-on.expanded > #detail { height: auto !important; }
+.panel.detail-on.collapsed { max-height: calc(var(--detail-peek, 96px) + env(safe-area-inset-bottom)); }
 /* ========== 全螢幕（像 Google 地圖）==========
  * 地圖、雷達鋪滿：標題列收成浮在上面的按鈕（左上「洋流雷達▾」、右上「⋯」和縮小），地圖外面的框和留白拿掉；
  * 手機的清單照樣在下面可以拉上拉下，上緣的圓角疊在地圖上；電腦的清單在右邊，可以收起來（#app.list-off）

@@ -237,6 +237,9 @@ export interface MapPreview {
   glyph: string | null;
 }
 
+/** 手機的寬度（跟 styles.css 的 max-width: 899px 一樣） */
+const PHONE = window.matchMedia('(max-width: 899px)');
+
 /** Leaflet 地圖，第一次切到地圖時才載入 */
 export interface MapBottle {
   id: number;
@@ -510,7 +513,6 @@ export class MapView {
         const id = it.id;
         m = house ? L.marker([it.lat, it.lng], { keyboard: false }) : L.circleMarker([it.lat, it.lng]);
         m.on('click', () => this.handlers.onSelect(id, this.groupIds.get(id) ?? [id]));
-        m.bindPopup('', { closeButton: false });
         layer.addLayer(m);
         this.markers.set(it.id, m);
       }
@@ -558,6 +560,10 @@ export class MapView {
         m.setOpacity(opacity);
         m.setZIndexOffset(it.selected ? 500 : 0);
       }
+      // 手機：點了只在下面的卡片顯示（標題、地點、時間卡片上都有），地圖上不再跳出小卡片（v1.684 使用者說不需要再疊一個卡片上去）
+      if (PHONE.matches) {
+        if (m.getPopup()) m.unbindPopup();
+      } else if (!m.getPopup()) m.bindPopup('', { closeButton: false });
       m.setPopupContent(
         g.length > 1
           ? `<strong>這裡有 ${g.length} 個</strong><br>${g.map((x) => escapeHtml(x.title)).join('<br>')}`

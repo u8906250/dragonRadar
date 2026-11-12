@@ -3603,6 +3603,11 @@ const peekPx = (): number => {
   return head ? head.offsetTop + head.offsetHeight + 10 : 72;
 };
 function setPeek(on: boolean): void {
+  // 手機：卡片就是下面的清單，收起來＝清單收成只露出標題那一條（wirePanelDrag）
+  if (detailInPanel()) {
+    panelPeek(on);
+    return;
+  }
   if (on) {
     detailEl.scrollTop = 0;
     detailEl.style.setProperty('--peek', `${peekPx()}px`);
@@ -3616,6 +3621,8 @@ function wireSheetDrag(): void {
   let moved = false;
   detailEl.addEventListener('pointerdown', (e) => {
     const t = e.target instanceof Element ? e.target : null;
+    // 手機的卡片在清單裡：拖的是清單（wirePanelDrag）
+    if (detailInPanel()) return;
     if (!t || (e.pointerType === 'mouse' && e.button !== 0) || t.closest('button, a, input, select, textarea, label') || !t.closest('.sheet-grab, .sheet-head')) return;
     const peek = detailEl.classList.contains('peek');
     // 最低拖到收起來的位置再多一點點（放開彈回收起來的位置）
@@ -7565,6 +7572,10 @@ const PANEL_ORDER: PanelState[] = ['collapsed', 'default', 'expanded'];
  * 有縮回傳 true；已經收合、電腦版回傳 false（wirePanelDrag 接上）
  */
 let shrinkPanel = (): boolean => false;
+/** 手機的詳細資料收起來（只露出標題）或打開（wirePanelDrag 接上） */
+let panelPeek = (_on: boolean): void => {};
+/** 詳細資料放在下面清單那張卡片裡（手機） */
+const detailInPanel = (): boolean => detailEl.parentElement === panelEl;
 
 /**
  * 下方清單三段高度：collapsed 只留橫條與摘要、default 預設、expanded 展開。
@@ -7583,9 +7594,23 @@ function wirePanelDrag(): void {
   let dragging = false;
   let moved = false;
 
+  /** 詳細資料收起來時露出多高：把手＋標題那一列 */
+  const detailPeekPx = (): number => {
+    const head = detailEl.querySelector<HTMLElement>('.sheet-head');
+    const headBottom = head ? head.getBoundingClientRect().bottom - detailEl.getBoundingClientRect().top + detailEl.scrollTop : 60;
+    return Math.round(handle.offsetHeight + headBottom + 8);
+  };
   const heights = (): Record<PanelState, number> => {
     const vh = window.innerHeight;
     const pad = parseFloat(getComputedStyle(panelEl).paddingBottom) || 0;
+    if (panelEl.classList.contains('detail-on')) {
+      const locked = parseFloat(detailEl.style.height) || 0;
+      return {
+        collapsed: detailPeekPx() + pad,
+        default: Math.min(vh * 0.6, handle.offsetHeight + (locked || detailEl.scrollHeight) + pad),
+        expanded: vh * 0.8,
+      };
+    }
     return {
       collapsed: handle.offsetHeight + head.offsetHeight + pad + 4,
       default: vh * 0.36,
@@ -7594,13 +7619,20 @@ function wirePanelDrag(): void {
   };
 
   const setState = (s: PanelState): void => {
+    if (s === 'collapsed' && panelEl.classList.contains('detail-on')) {
+      detailEl.scrollTop = 0;
+      panelEl.style.setProperty('--detail-peek', `${detailPeekPx()}px`);
+    }
     state = s;
     panelEl.classList.toggle('expanded', s === 'expanded');
     panelEl.classList.toggle('collapsed', s === 'collapsed');
     handle.setAttribute('aria-label', s === 'collapsed' ? '展開清單' : s === 'expanded' ? '縮小清單' : '展開或收合清單');
   };
   shrinkPanel = (): boolean => {
-    if (desktop.matches || state === 'collapsed') return false;
+    if (desktop.matches) return false;
+    // 卡片就是清單：打開時換成詳細資料的高度，高度變好（雷達跟著變大小）才算縮放
+    if (detailInPanel()) return true;
+    if (state === 'collapsed') return false;
     setState(PANEL_ORDER[PANEL_ORDER.indexOf(state) - 1]);
     return true;
   };
@@ -7609,8 +7641,51 @@ function wirePanelDrag(): void {
     if (e.propertyName === 'max-height' && view === 'map') map.invalidate();
   });
 
+  /**
+   * 手機點開活動（詳細資料）直接用清單這張卡片，不另外疊一張上去（v1.684 使用者說的）：
+   * 打開時清單的內容先藏起來、卡片換成詳細資料（預設高度），關掉換回清單、高度和捲到哪都照打開前的
+   */
+  const phone = window.matchMedia('(max-width: 899px)');
+  const detailHome = { parent: detailEl.parentElement as HTMLElement, next: detailEl.nextSibling };
+  let listState: PanelState = 'default';
+  let listScroll = 0;
+  const syncDetail = (): void => {
+    const on = detailInPanel() && !detailEl.hidden;
+    if (on === panelEl.classList.contains('detail-on')) return;
+    if (on) {
+      listState = state;
+      listScroll = listEl.scrollTop;
+      panelEl.classList.add('detail-on');
+      setState('default');
+    } else {
+      panelEl.classList.remove('detail-on');
+      setState(listState);
+      listEl.scrollTop = listScroll;
+    }
+  };
+  const placeDetail = (): void => {
+    if (phone.matches) panelEl.insertBefore(detailEl, handle.nextSibling);
+    else detailHome.parent.insertBefore(detailEl, detailHome.next);
+    detailEl.classList.remove('peek');
+    syncDetail();
+  };
+  phone.addEventListener('change', placeDetail);
+  placeDetail();
+  new MutationObserver(syncDetail).observe(detailEl, { attributes: true, attributeFilter: ['hidden'] });
+  panelPeek = (on: boolean): void => {
+    syncDetail();
+    if (!panelEl.classList.contains('detail-on')) return;
+    if (on) setState('collapsed');
+    else if (state === 'collapsed') setState('default');
+  };
+
   const start = (e: PointerEvent): void => {
     if (desktop.matches || (e.pointerType === 'mouse' && e.button !== 0)) return;
+    // 詳細資料的標題那一列也拖得動（按鈕、連結不算）
+    if (e.currentTarget === detailEl) {
+      const t = e.target instanceof Element ? e.target : null;
+      if (!panelEl.classList.contains('detail-on') || !t?.closest('.sheet-head') || t.closest('button, a, input, select, textarea, label')) return;
+    }
     dragging = true;
     moved = false;
     startY = e.clientY;
@@ -7634,8 +7709,9 @@ function wirePanelDrag(): void {
     panelEl.style.maxHeight = '';
     const dy = e.clientY - startY;
     if (!moved) {
-      // 只有輕點橫條才切換，點標題列不切換（上面有其他按鈕）
+      // 只有輕點橫條才切換，點標題列不切換（上面有其他按鈕）；詳細資料收起來時點標題打開
       if (e.currentTarget === handle) setState(state === 'collapsed' ? 'default' : state === 'default' ? 'expanded' : 'default');
+      else if (e.currentTarget === detailEl && state === 'collapsed') setState('default');
       return;
     }
     const h = heights();
@@ -7647,7 +7723,7 @@ function wirePanelDrag(): void {
     }
     setState(target);
   };
-  for (const el of [handle, head]) {
+  for (const el of [handle, head, detailEl]) {
     el.addEventListener('pointerdown', start);
     el.addEventListener('pointermove', move);
     el.addEventListener('pointerup', end);
