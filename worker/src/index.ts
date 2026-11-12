@@ -524,6 +524,16 @@ async function handleAdmin(req: Request, env: Env, ctx: ExecutionContext, path: 
     return jsonResponse(await syncVoyage(env, now, { date: body.date!, map: m ?? null, force: body.force === true }));
   }
 
+  // 管理者改車掃路線的標題（使用者說士林北投車掃改成「台北大洋流航向士林 × 北投！」）：{ title }。
+  // 標題本來是車掃地圖頁面的名稱，管理者重送車掃地圖（POST /api/admin/voyage）會換回去，重送時把 map.name 也改掉
+  const routeTitleMatch = /^\/api\/admin\/routes\/([^/]+)\/title$/.exec(path);
+  if (req.method === 'POST' && routeTitleMatch) {
+    const title = ((await readJson<{ title?: string }>(req)).title ?? '').replace(/\s+/g, ' ').trim();
+    if (!title || [...title].length > 30) throw new HttpError(400, 'title must be 1-30 chars');
+    const r = await env.DB.prepare('UPDATE routes SET title = ?, updated_at = ? WHERE id = ?').bind(title, now, decodeURIComponent(routeTitleMatch[1])).run();
+    return jsonResponse({ changed: r.meta.changes ?? 0 });
+  }
+
   // 立刻同步官方航線與新聞
   if (req.method === 'POST' && path === '/api/admin/sources') {
     const voyage = await syncVoyage(env, now);
