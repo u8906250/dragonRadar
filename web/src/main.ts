@@ -2370,13 +2370,16 @@ function bottleState(b: BottleOut): 'near' | 'pick' {
 /** 方向提示最遠指到多遠的瓶子 */
 const BOTTLE_HINT_MAX_KM = 1;
 
-/** 漂流瓶只看得到 5 km 內的（v1.622 使用者說的） */
+/** 漂流瓶只看得到 1 km 內的（v1.622 使用者說 5 km，v1.655 改 1 km） */
 const bottleSeeKm = (): number => bottleRules()?.seeKm ?? 1;
-/** 地球上從哪裡算 5 km：你的 GPS 位置（拖曳過雷達也一樣），沒有 GPS 就從雷達正中間 */
+/** 地球上從哪裡算 1 km：你的 GPS 位置（拖曳過雷達也一樣），沒有 GPS 就從雷達正中間 */
 const bottleCenter = (): LatLng => (origin.source === 'gps' ? origin : (lastGps ?? origin));
-/** 看不看得到這個瓶子：地球上離你 5 km 內；汪星海上的離你在汪星的位置 5 km 內 */
+/**
+ * 看不看得到這個瓶子：地球上離你 1 km 內，而且離雷達正中間也 1 km 內（v1.665 使用者說超過 1 km 也看得到：
+ * 拖曳開雷達時，你附近的瓶子會畫在離中間超過 1 km 的地方）；汪星海上的離你在汪星的位置（就是雷達正中間）1 km 內
+ */
 function bottleSeen(b: BottleOut): boolean {
-  if (b.world !== 'woof') return haversineKm(bottleCenter(), b) <= bottleSeeKm();
+  if (b.world !== 'woof') return haversineKm(bottleCenter(), b) <= bottleSeeKm() && haversineKm(origin, b) <= bottleSeeKm();
   const here = woofHere();
   return !!here && woofDistM(here, b) <= bottleSeeKm() * 1000;
 }
