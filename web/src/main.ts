@@ -6223,6 +6223,10 @@ function sourceLinkText(ev: EventOut): string {
 function titleOf(ev: EventOut): string {
   // 管理者改過的標題照用
   if (ev.manualTitle) return ev.title;
+  // 官方車掃的起點：直接寫路線的標題（v1.680 使用者說點起點直接顯示「台北大洋流航向士林 × 北投！」），地點寫在下面那一行；
+  // 路線靠事件原本的標題對應各站，所以只換顯示的
+  const r = routeOf(ev);
+  if (r && !isReported(r) && stopOf(ev)?.kind === 'start') return r.title;
   const name = ev.spot ? splitPlace(ev.placeText).name : null;
   if (!name) return ev.title;
   const at = ev.title.indexOf(name);
