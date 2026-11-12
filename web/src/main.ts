@@ -1284,7 +1284,7 @@ function updateSpace(): void {
     p.onDogMove(() => radar.redrawPark(), () => radar.headingDeg);
     p.loadSniffMarks();
   });
-  radar.setSpace((km, rg, view) => mod.spaceMarkup({ center, land, when, scaleKm: km, rg, view, streets: woofStreets, you, woofMap: map, bottles: map && bottlesOn() ? woofBottleMarks() : undefined }), mod.bodyRadiusKm);
+  radar.setSpace((km, rg, view) => mod.spaceMarkup({ center, land, when, scaleKm: km, rg, view, streets: woofStreets, you, woofMap: map, bottles: map && bottlesOn() ? woofBottleMarks(km) : undefined }), mod.bodyRadiusKm);
 }
 
 /**
@@ -1776,7 +1776,7 @@ function render(): void {
     ),
   );
   // 被收藏了的瓶子照樣畫（淡淡的，v1.601 使用者說瓶子不用消失）
-  const bottleViews = bottles.filter(bottleSeen).map((b) => ({ b, distanceKm: haversineKm(origin, b), bearing: bearingDeg(origin, b), state: bottleState(b) }));
+  const bottleViews = bottles.filter((b) => bottleSeen(b)).map((b) => ({ b, distanceKm: haversineKm(origin, b), bearing: bearingDeg(origin, b), state: bottleState(b) }));
   const hint = nearestHint(bottleViews);
   radar.setBottles(
     bottleViews.map((v) => ({
@@ -2375,13 +2375,15 @@ const bottleSeeKm = (): number => bottleRules()?.seeKm ?? 1;
 /** 地球上從哪裡算 1 km：你的 GPS 位置（拖曳過雷達也一樣），沒有 GPS 就從雷達正中間 */
 const bottleCenter = (): LatLng => (origin.source === 'gps' ? origin : (lastGps ?? origin));
 /**
- * 看不看得到這個瓶子：地球上離你 1 km 內，而且離雷達正中間也 1 km 內（v1.665 使用者說超過 1 km 也看得到：
- * 拖曳開雷達時，你附近的瓶子會畫在離中間超過 1 km 的地方）；汪星海上的離你在汪星的位置（就是雷達正中間）1 km 內
+ * 汪星上雷達拉近到這個範圍以內才看得到、掃得到海上的瓶子（v1.666 使用者說汪星的 1 km 是雷達縮放的 1 km：
+ * 汪星沒有定位系統，不看位置）；範圍的標籤寫「1.0 km」的都算
  */
-function bottleSeen(b: BottleOut): boolean {
-  if (b.world !== 'woof') return haversineKm(bottleCenter(), b) <= bottleSeeKm() && haversineKm(origin, b) <= bottleSeeKm();
+const WOOF_SEE_KM = 1;
+/** 看不看得到這個瓶子：地球上離你（GPS）1 km 內；汪星海上的要雷達拉近到 1 km 以內，畫在雷達 1 km 內的（km 是雷達現在的範圍） */
+function bottleSeen(b: BottleOut, km = scaleKm): boolean {
+  if (b.world !== 'woof') return haversineKm(bottleCenter(), b) <= bottleSeeKm();
   const here = woofHere();
-  return !!here && woofDistM(here, b) <= bottleSeeKm() * 1000;
+  return !!here && km < WOOF_SEE_KM * 1.05 && woofDistM(here, b) <= WOOF_SEE_KM * 1000;
 }
 
 /** 雷達範圍內沒有別人的瓶子時，最近的那一個（貼在外圈指方向）；太遠就不指 */
@@ -2422,8 +2424,8 @@ function paintQuotaBadge(): void {
 }
 
 /** 汪星海上的瓶子（space.ts 畫在汪星上）：每次畫汪星都重算，拖曳走路時走到附近了沒跟著變 */
-function woofBottleMarks(): WoofBottleMark[] {
-  return woofBottles.filter(bottleSeen).map((b) => ({ id: b.id, lat: b.lat, lng: b.lng, state: bottleState(b) === 'pick' ? 'pick' : 'near', mine: b.mine, selected: b.id === selectedBottle, taken: b.picked || !!b.taken, read: readBottles.has(b.id) }));
+function woofBottleMarks(km = scaleKm): WoofBottleMark[] {
+  return woofBottles.filter((b) => bottleSeen(b, km)).map((b) => ({ id: b.id, lat: b.lat, lng: b.lng, state: bottleState(b) === 'pick' ? 'pick' : 'near', mine: b.mine, selected: b.id === selectedBottle, taken: b.picked || !!b.taken, read: readBottles.has(b.id) }));
 }
 let woofMarksKey = '';
 /** 汪星海上的瓶子、選取變了：重畫汪星 */
@@ -2844,12 +2846,12 @@ async function openSharedBottle(id: number): Promise<void> {
     showBanner(bannerEl, `漂流瓶 ${bottleNo(id)} 已經沉下去或不見了`, 4000);
     return;
   }
-  // 只看得到 5 km 內的：太遠的只說在哪個方向大概多遠，不放上雷達
+  // 只看得到 1 km 內的（汪星上要雷達拉近到 1 km）：看不到的只說一聲，不放上雷達
   if (!bottleSeen(b)) {
     showBanner(
       bannerEl,
       b.world === 'woof'
-        ? `漂流瓶 ${bottleNo(id)} 漂到汪星的海上了，搭火箭到汪星、走到 ${reachText(bottleSeeKm() * 1000)} 內才看得到`
+        ? `漂流瓶 ${bottleNo(id)} 漂到汪星的海上了，搭火箭到汪星、走到附近，雷達拉近到 ${reachText(WOOF_SEE_KM * 1000)} 才看得到`
         : `漂流瓶 ${bottleNo(id)} 在你 ${reachText(bottleSeeKm() * 1000)} 外，走近一點才看得到`,
       4000,
     );
