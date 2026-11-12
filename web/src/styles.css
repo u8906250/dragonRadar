@@ -2059,6 +2059,8 @@ path.map-seam-walkers { --p: 15px; }
 .radar .landmark.selected .star { stroke: var(--blip-selected); stroke-width: 2.5; }
 .radar .landmark .label { fill: var(--label); font-size: 11px; font-weight: 700; paint-order: stroke; stroke: var(--label-halo); stroke-width: 3px; stroke-linejoin: round; pointer-events: none; }
 .map-office { background: none; border: none; filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.35)); }
+/* 分得出主題的活動：圓點裡畫小圖示（v1.671） */
+.map-topic { background: none; border: none; filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.35)); }
 /* 車掃的起點 🚩、終點 🏁；選到時加一圈 */
 .map-flag { background: none; border: none; display: grid; place-items: center; line-height: 1; filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.35)); }
 .map-flag .selected { border-radius: 50%; box-shadow: 0 0 0 3px var(--blip-selected); }

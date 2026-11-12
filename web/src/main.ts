@@ -1864,6 +1864,8 @@ function render(): void {
       phase: it.phase,
       title: `${tagLabel(it)}｜${titleOf(it.ev)}`,
       flag: flagOf(it.ev),
+      // 地圖上的小圖示照活動的主題（發放的也算一類，v1.671）
+      topic: it.ev.kind === 'activity' ? topicOf(it.ev) : it.ev.kind === 'giveaway' ? '發放' : null,
       subtitle: `${placeLine(it.ev)} · ${timeLine(it, now)}`,
       selected: it.ev.id === selectedId,
       ...(isUpcoming(it) && it.phase === 'later' ? { fade: clarityOf(it.ev, now) } : {}),
