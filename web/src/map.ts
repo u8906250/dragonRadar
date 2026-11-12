@@ -229,12 +229,13 @@ function officeSvg(fill: string, stroke: string, strokeW: number, fillOpacity: n
 const escapeHtml = (s: string): string =>
   s.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c] as string);
 
-/** 回報判讀完、還沒確認的位置（跟 radar.ts 的 RadarPreview 一樣） */
+/** 回報判讀完、還沒確認的位置（跟 radar.ts 的 RadarPreview 一樣）；drag 可以拖到正確的位置（洋流的活動） */
 export interface MapPreview {
   lat: number;
   lng: number;
   label: string;
   glyph: string | null;
+  drag?: boolean;
 }
 
 /** 手機的寬度（跟 styles.css 的 max-width: 899px 一樣） */
@@ -325,7 +326,7 @@ export class MapView {
   constructor(
     private readonly el: HTMLElement,
     origin: LatLng,
-    private readonly handlers: { onSelect: (id: number, group: number[]) => void; onBottle?: (id: number) => void; onLandmark?: (id: string) => void },
+    private readonly handlers: { onSelect: (id: number, group: number[]) => void; onBottle?: (id: number) => void; onLandmark?: (id: string) => void; onPreviewMove?: (i: number, to: LatLng) => void },
     base: BaseMap = 'nlsc',
   ) {
     this.origin = origin;
@@ -765,16 +766,50 @@ export class MapView {
     const layer = this.previewLayer;
     if (!L || !layer) return;
     layer.clearLayers();
-    for (const pv of this.previews) {
+    this.previews.forEach((pv, i) => {
       const inner = pv.glyph ? `<g transform="scale(0.9)">${glyphSvg(pv.glyph, 'currentColor')}</g>` : '<circle class="core" r="3.5"/>';
       const icon = L.divIcon({
-        className: 'map-preview',
-        html: `<svg viewBox="-16 -16 32 32" width="32" height="32" aria-hidden="true"><circle class="pulse" r="11"/><circle class="ring" r="11"/>${inner}</svg><span>${escapeHtml(pv.label)}</span>`,
+        className: `map-preview${pv.drag ? ' drag' : ''}`,
+        html: `<svg viewBox="-16 -16 32 32" width="32" height="32" aria-hidden="true"><circle class="pulse" r="11"/><circle class="ring" r="11"/>${inner}</svg><span>${escapeHtml(pv.label)}${pv.drag ? '<small>拖到正確的位置</small>' : ''}</span>`,
         iconSize: [32, 32],
         iconAnchor: [16, 16],
       });
-      layer.addLayer(L.marker([pv.lat, pv.lng], { icon, keyboard: false, interactive: false, title: `還沒放上雷達：${pv.label}`, zIndexOffset: 900 }));
-    }
+      const m = L.marker([pv.lat, pv.lng], { icon, keyboard: false, interactive: !!pv.drag, draggable: !!pv.drag, title: `還沒放上雷達：${pv.label}`, zIndexOffset: 900 });
+      if (pv.drag) {
+        m.on('dragend', () => {
+          const p = m.getLatLng();
+          this.handlers.onPreviewMove?.(i, { lat: p.lat, lng: p.lng });
+        });
+      }
+      layer.addLayer(m);
+    });
+  }
+
+  /** 這些點都在看得到的地方（扣掉卡片蓋住的右邊、下面，留 40 px 邊），而且拉得夠近（縮放 15 以上） */
+  pinsInView(points: LatLng[], cover = { right: 0, bottom: 0 }): boolean {
+    const map = this.map;
+    if (!map || points.length === 0) return false;
+    map.invalidateSize();
+    if (map.getZoom() < 15) return false;
+    const size = map.getSize();
+    return points.every((p) => {
+      const q = map.latLngToContainerPoint([p.lat, p.lng]);
+      return q.x > 40 && q.y > 40 && q.x < size.x - 40 - cover.right && q.y < size.y - 40 - cover.bottom;
+    });
+  }
+
+  /** 回報判讀出來的位置：一個點拉近到看得清街道、房子（縮放 17），好幾個點全部框進來（卡片蓋住的地方不算） */
+  showPins(points: LatLng[], cover = { right: 0, bottom: 0 }): void {
+    void this.ensure().then(() => {
+      const L = this.L;
+      const map = this.map;
+      if (!L || !map || points.length === 0) return;
+      map.invalidateSize();
+      const size = map.getSize();
+      const right = Math.max(0, Math.min(cover.right, size.x - 160));
+      const bottom = Math.max(0, Math.min(cover.bottom, size.y - 160));
+      map.fitBounds(L.latLngBounds(points.map((p) => [p.lat, p.lng] as [number, number])), { paddingTopLeft: [50, 50], paddingBottomRight: [50 + right, 50 + bottom], maxZoom: 17, animate: true });
+    });
   }
 
   setRoutes(routes: MapRoute[]): void {

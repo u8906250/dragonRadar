@@ -2690,7 +2690,11 @@ path.map-canal-flow { --p: 14px; }
 .radar .preview-pin.out .pulse { display: none; }
 .map-preview { background: none; border: 0; }
 .map-preview svg { display: block; overflow: visible; }
-.map-preview span { position: absolute; top: 31px; left: 50%; transform: translateX(-50%); white-space: nowrap; font-size: 12px; font-weight: 700; color: #15171c; text-shadow: 0 0 3px #fff, 0 0 3px #fff, 0 0 3px #fff; }
+.map-preview span { position: absolute; top: 31px; left: 50%; transform: translateX(-50%); white-space: nowrap; font-size: 12px; font-weight: 700; color: #15171c; text-shadow: 0 0 3px #fff, 0 0 3px #fff, 0 0 3px #fff; text-align: center; pointer-events: none; }
+.map-preview span small { display: block; font-size: 11px; font-weight: 600; color: #b8471a; }
+/* 洋流的活動：拖到正確的位置（v1.686） */
+.map-preview.drag { pointer-events: auto; cursor: grab; }
+.map-preview.drag.leaflet-drag-target, .map-preview.drag:active { cursor: grabbing; }
 @keyframes preview-dash { to { stroke-dashoffset: -14; } }
 @keyframes preview-pulse { 0% { transform: scale(1); opacity: 0.7; } 100% { transform: scale(2); opacity: 0; } }
 @media (prefers-reduced-motion: reduce) { .radar .preview-pin .ring, .radar .preview-pin .pulse, .map-preview .ring, .map-preview .pulse { animation: none; } .radar .preview-pin .pulse, .map-preview .pulse { display: none; } }

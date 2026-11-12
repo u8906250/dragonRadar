@@ -578,6 +578,7 @@ const map = new MapView(
     onLandmark: (id) => {
       if (id === 'hq') startHqVoyage();
     },
+    onPreviewMove: (i, to) => void movePin(i, to),
   },
   baseMap,
 );
@@ -3767,9 +3768,13 @@ function renderDetail(items: Item[], now: number): void {
 
 /** 詳細資料卡片蓋住地圖的部分：手機蓋住下面、電腦蓋住右邊一點 */
 function sheetCover(): { right: number; bottom: number } {
-  if (detailEl.hidden) return { right: 0, bottom: 0 };
+  return coverOf(detailEl);
+}
+/** 浮在地圖上的卡片蓋住地圖右邊、下面幾 px（手機放在清單卡片裡的不蓋） */
+function coverOf(el: HTMLElement): { right: number; bottom: number } {
+  if (el.hidden) return { right: 0, bottom: 0 };
   const m = $('#map').getBoundingClientRect();
-  const d = detailEl.getBoundingClientRect();
+  const d = el.getBoundingClientRect();
   const w = Math.min(m.right, d.right) - Math.max(m.left, d.left);
   const h = Math.min(m.bottom, d.bottom) - Math.max(m.top, d.top);
   if (w <= 0 || h <= 0) return { right: 0, bottom: 0 };
@@ -6553,8 +6558,13 @@ interface ReportPin {
   lng: number;
   label: string;
   glyph: string | null;
+  /** 地圖上可以拖（補充資料表單有這個位置的那一場） */
+  drag?: boolean;
 }
 let reportPins: ReportPin[] = [];
+/** 畫著的判讀結果是哪一則（換了一則才切到地圖）、確認用的代碼（拖了位置重新預覽用） */
+let pinPost = '';
+let pinConfirm: { postId: string; token: string } | null = null;
 const shownReportPins = (): ReportPin[] => (reportSheet.hidden ? [] : reportPins);
 
 /** 判讀結果裡定位到的：每一場、車掃每一站（同一個位置只標一次，名稱寫第一場的） */
@@ -6583,13 +6593,21 @@ function flyToPins(pins: ReportPin[]): void {
   const spread = Math.max(...pins.map((p) => haversineKm(mid, p)));
   const one = spread < 0.8 || spread > 30;
   const to = spread > 30 ? pins[0] : mid;
+  // 地圖：只移地圖、拉近到看得清街道、房子（拖了位置重新預覽時，都還在畫面裡就不動）；你的位置（藍點）不動
+  if (view === 'map') {
+    const shown = spread > 30 ? [pins[0]] : pins;
+    const cover = coverOf(reportSheet);
+    if (!map.pinsInView(shown, cover)) map.showPins(shown, cover);
+    return;
+  }
   zoomToKm(one ? Math.min(Math.max(scaleKm, 1), 3) : spread * 1.35, { lat: to.lat, lng: to.lng, source: 'manual' });
 }
 
-/** 「在雷達上看」：移過去，回報畫面蓋住雷達正中間（手機）就收到只剩標題那一條，按「回到判讀結果」再打開 */
+/** 「在地圖上看」：切到地圖移過去，回報畫面蓋住地圖正中間（手機）就收到只剩標題那一條，按「回到判讀結果」再打開 */
 function lookAtPin(lat: number, lng: number): void {
+  if (view !== 'map') switchView('map');
   flyToPins([{ lat, lng, label: '', glyph: null }]);
-  // 手機的回報在清單那張卡片裡（雷達被擠小）：收成只露出標題那一條，雷達變大
+  // 手機的回報在清單那張卡片裡（地圖被擠小）：收成只露出標題那一條，地圖變大
   if (reportSheet.parentElement === panelEl) {
     reportSheet.classList.add('looking');
     setReportPeek(true);
@@ -6600,6 +6618,66 @@ function lookAtPin(lat: number, lng: number): void {
   const cx = box.left + box.width / 2;
   const cy = box.top + box.height / 2;
   if (cx > sheet.left && cx < sheet.right && cy + 40 > sheet.top) setReportPeek(true);
+}
+
+/** 補充資料表單裡位置是這個點的那幾場（同一個地方好幾天的一起） */
+function editCardsAt(p: { lat: number; lng: number }): HTMLElement[] {
+  const form = reportResult.querySelector<HTMLFormElement>('.edit-form');
+  if (!form) return [];
+  return [...form.querySelectorAll<HTMLElement>('.edit-item')].filter((card) => {
+    const pin = editPins.get(card);
+    const at = pin?.pinned ?? pin?.found;
+    return !!at && Math.abs(at.lat - p.lat) < 1e-5 && Math.abs(at.lng - p.lng) < 1e-5;
+  });
+}
+
+/**
+ * 在地圖上把判讀結果的位置拖到別的地方：補充資料表單那幾場改成標在這裡，直接重新預覽（跟按「用這些資料預覽」一樣，不問 AI）。
+ * 失敗、判讀中就放回原本的位置
+ */
+async function movePin(i: number, to: LatLng): Promise<void> {
+  const pin = reportPins[i];
+  const c = pinConfirm;
+  const form = reportResult.querySelector<HTMLFormElement>('.edit-form');
+  const cards = pin ? editCardsAt(pin) : [];
+  const putBack = (): void => {
+    map.setPreviews([]);
+    render();
+  };
+  if (!pin || !c || !form || cards.length === 0 || reportBusy) {
+    putBack();
+    return;
+  }
+  const before = cards.map((card) => editPins.get(card)?.pinned ?? null);
+  for (const card of cards) {
+    const ep = editPins.get(card);
+    if (ep) ep.pinned = { lat: to.lat, lng: to.lng };
+    updatePinState(card);
+  }
+  const read = readEditForm(form);
+  if (typeof read === 'string') {
+    cards.forEach((card, k) => {
+      const ep = editPins.get(card);
+      if (ep) ep.pinned = before[k];
+      updatePinState(card);
+    });
+    showBanner(bannerEl, read, 3000);
+    putBack();
+    return;
+  }
+  // 拖好的位置先留在那裡，等新的預覽回來
+  reportPins = reportPins.map((p, k) => (k === i ? { ...p, lat: to.lat, lng: to.lng } : p));
+  render();
+  const looking = reportSheet.classList.contains('looking');
+  setReportBusy(true, '更新位置中…');
+  const res = await editReport(c, read).finally(() => setReportBusy(false));
+  if (!res.ok) {
+    showBanner(bannerEl, res.message, 3500);
+    return;
+  }
+  if (res.data.outcome === 'preview') renderPreview(res.data);
+  else await showReportResult(res.data);
+  if (looking) reportSheet.classList.add('looking');
 }
 
 function setReportPeek(on: boolean): void {
@@ -6667,7 +6745,7 @@ function googleMapsUrl(p: LatLng): string {
 }
 
 /** 預覽上的定位：精確、約略（只到鄉鎮區）、找不到；有座標就附「在地圖上看」 */
-const lookBtn = (lat: number, lng: number): string => `<button type="button" class="link-btn" data-look="${lat},${lng}">在雷達上看</button>`;
+const lookBtn = (lat: number, lng: number): string => `<button type="button" class="link-btn" data-look="${lat},${lng}">在地圖上看</button>`;
 
 function previewWhere(p: PreviewItem): string {
   if (p.lat === null || p.lng === null) return '<span class="preview-warn">找不到地點，確認了也不會出現在雷達上</span>';
@@ -7177,7 +7255,7 @@ function renderPreview(r: SubmitResult): void {
         </li>`,
       )
       .join('')}</ul>
-    ${items.some((p) => p.lat !== null && p.lng !== null) ? `<p class="muted sheet-note small">📍 位置是照地點文字查的，不一定準確，已經先用虛線圈標在雷達上（還沒放上去），請看一下對不對；不對的話按「補充資料」${mod.current ? '在地圖上標出正確的位置' : '補上完整地址'}。</p>` : ''}
+    ${items.some((p) => p.lat !== null && p.lng !== null) ? `<p class="muted sheet-note small">📍 位置是照地點文字查的，不一定準確，已經先用虛線圈標在地圖上（還沒放上去），請看一下對不對；${mod.current ? '不對的話直接把虛線圈拖到正確的地方' : '不對的話按「補充資料」補上完整地址'}。</p>` : ''}
     ${dups}${r.failures?.length ? `<p class="muted sheet-note">${r.failures.length > 1 ? `下面 ${r.failures.length} 場` : '下面這場'}不會放上雷達${canFixByNote(r.failures) ? '，知道的話可以按「補充資料」補上' : ''}：</p>${failuresHtml(r.failures)}` : ''}
     <div class="sheet-actions">
       <button type="button" class="btn primary" data-act="confirm">${items.length > 0 && items.every((p) => p.update?.mode === 'attach') ? '對，附在這個據點' : '對，放上雷達'}</button>
@@ -7189,10 +7267,6 @@ function renderPreview(r: SubmitResult): void {
       <textarea rows="2" maxlength="300" placeholder="哪裡判斷錯了？（選填，例如「地點是文化路 140 號」「只有 10/21 一天」）" aria-label="哪裡判斷錯了"></textarea>
       <div class="sheet-actions"><button type="submit" class="btn primary">送出，不放上雷達</button><button type="button" class="btn" data-act="back">回上一步</button></div>
     </form>`);
-  // 定位到的直接標在雷達、地圖上，雷達移過去（手機被回報畫面蓋住，按「在雷達上看」收起來看）
-  reportPins = previewPins(items, r.routes ?? []);
-  render();
-  flyToPins(reportPins);
   for (const b of reportResult.querySelectorAll<HTMLButtonElement>('[data-look]')) {
     b.addEventListener('click', () => {
       const [lat, lng] = (b.dataset.look ?? '').split(',').map(Number);
@@ -7216,6 +7290,13 @@ function renderPreview(r: SubmitResult): void {
   });
   if (mod.current) wireEdit(c, r.edit ?? [], actions);
   else wireSupplement(c, actions);
+  // 定位到的直接標在雷達、地圖上（v1.683）；新的一則先切到地圖、拉近過去，洋流的活動可以直接在地圖上拖到正確的位置（v1.686 使用者說的）
+  reportPins = previewPins(items, r.routes ?? []).map((p) => ({ ...p, drag: editCardsAt(p).length > 0 }));
+  pinConfirm = c;
+  if (reportPins.length > 0 && c.postId !== pinPost && view !== 'map') switchView('map');
+  pinPost = c.postId;
+  render();
+  flyToPins(reportPins);
   reportResult.querySelector('[data-act="wrong"]')?.addEventListener('click', () => {
     if (!wrongForm || !actions) return;
     wrongForm.hidden = false;
