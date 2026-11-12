@@ -1776,7 +1776,9 @@ function render(): void {
     ),
   );
   // 被收藏了的瓶子照樣畫（淡淡的，v1.601 使用者說瓶子不用消失）
-  const bottleViews = bottles.filter((b) => bottleSeen(b)).map((b) => ({ b, distanceKm: haversineKm(origin, b), bearing: bearingDeg(origin, b), state: bottleState(b) }));
+  // 附近的瓶子：地圖、按鈕的光照這個；雷達另外要拉近到 1 km 才畫（v1.670）
+  const nearViews = bottles.filter((b) => bottleNear(b)).map((b) => ({ b, distanceKm: haversineKm(origin, b), bearing: bearingDeg(origin, b), state: bottleState(b) }));
+  const bottleViews = zoomSees() ? nearViews : [];
   const hint = nearestHint(bottleViews);
   radar.setBottles(
     bottleViews.map((v) => ({
@@ -1791,8 +1793,8 @@ function render(): void {
       hint: v === hint ? formatKm(v.distanceKm) : undefined,
     })),
   );
-  map.setBottles(bottleViews.map((v) => ({ id: v.b.id, lat: v.b.lat, lng: v.b.lng, state: v.state, mine: v.b.mine, picked: v.b.picked || !!v.b.taken, read: readBottles.has(v.b.id) })));
-  updateBottleBadge(bottleViews);
+  map.setBottles(nearViews.map((v) => ({ id: v.b.id, lat: v.b.lat, lng: v.b.lng, state: v.state, mine: v.b.mine, picked: v.b.picked || !!v.b.taken, read: readBottles.has(v.b.id) })));
+  updateBottleBadge(nearViews);
   syncWoofBottles();
   // 全螢幕鋪滿時你的 GPS 位置（像 Google 地圖的藍點）：拖曳移開了也畫在 GPS 的地方
   const fix = origin.source === 'gps' ? { at: origin, acc: gpsAccuracy } : lastGps ? { at: lastGps, acc: lastGpsAccuracy } : null;
@@ -2375,16 +2377,19 @@ const bottleSeeKm = (): number => bottleRules()?.seeKm ?? 1;
 /** 地球上從哪裡算 1 km：你的 GPS 位置（拖曳過雷達也一樣），沒有 GPS 就從雷達正中間 */
 const bottleCenter = (): LatLng => (origin.source === 'gps' ? origin : (lastGps ?? origin));
 /**
- * 汪星上雷達拉近到這個範圍以內才看得到海上的瓶子（v1.666 使用者說汪星的 1 km 是雷達縮放的 1 km：
- * 汪星沒有定位系統，不看位置；v1.667 掃過不用亮）；範圍的標籤寫「1.0 km」的都算
+ * 雷達拉近到這個範圍以內才畫瓶子：汪星（v1.666 使用者說汪星的 1 km 是雷達縮放的 1 km，汪星沒有定位系統）、
+ * 地球（v1.670 使用者說在 1 km 看到後拉遠也看得到）都一樣；範圍的標籤寫「1.0 km」的都算
  */
-const WOOF_SEE_KM = 1;
-/** 看不看得到這個瓶子：地球上離你（GPS）1 km 內；汪星海上的要雷達拉近到 1 km 以內，畫在雷達 1 km 內的（km 是雷達現在的範圍） */
-function bottleSeen(b: BottleOut, km = scaleKm): boolean {
+const SEE_ZOOM_KM = 1;
+const zoomSees = (km = scaleKm): boolean => km < SEE_ZOOM_KM * 1.05;
+/** 瓶子在不在附近：地球上離你（GPS）1 km 內；汪星海上的離你在汪星的位置（雷達正中間）1 km 內 */
+function bottleNear(b: BottleOut): boolean {
   if (b.world !== 'woof') return haversineKm(bottleCenter(), b) <= bottleSeeKm();
   const here = woofHere();
-  return !!here && km < WOOF_SEE_KM * 1.05 && woofDistM(here, b) <= WOOF_SEE_KM * 1000;
+  return !!here && woofDistM(here, b) <= SEE_ZOOM_KM * 1000;
 }
+/** 雷達上畫不畫這個瓶子：在附近，而且雷達拉近到 1 km 以內（km 是雷達現在的範圍）；地圖照地圖自己的縮放（map.ts 的 gateBottles） */
+const bottleSeen = (b: BottleOut, km = scaleKm): boolean => zoomSees(km) && bottleNear(b);
 
 /** 雷達範圍內沒有別人的瓶子時，最近的那一個（貼在外圈指方向）；太遠就不指 */
 function nearestHint<V extends { b: BottleOut; distanceKm: number }>(views: V[]): V | null {
@@ -2397,7 +2402,7 @@ function nearestHint<V extends { b: BottleOut; distanceKm: number }>(views: V[])
 /** 按鈕：附近有還沒人收藏、不是自己丟的瓶子走到 1 km 內了就發光（你在汪星就看汪星海上的）；數字是今天還能丟幾個 */
 function updateBottleBadge(views: Array<{ b: BottleOut; distanceKm: number }>): void {
   bottleBtn.hidden = !bottlesOn();
-  const others = youOn === 'woof' ? woofBottles.filter((b) => !b.mine && !b.picked && !b.taken && bottleSeen(b)) : views.filter((v) => !v.b.mine && !v.b.picked && !v.b.taken).map((v) => v.b);
+  const others = youOn === 'woof' ? woofBottles.filter((b) => !b.mine && !b.picked && !b.taken && bottleNear(b)) : views.filter((v) => !v.b.mine && !v.b.picked && !v.b.taken).map((v) => v.b);
   bottleBtn.classList.toggle('glow', others.some((b) => bottleState(b) === 'pick'));
   paintQuotaBadge();
 }
@@ -2851,16 +2856,18 @@ async function openSharedBottle(id: number): Promise<void> {
   if (woof) await loadWoofBottles();
   else await reloadBottles();
   const b = findBottle(id);
-  if (!b || !bottleSeen(b)) {
+  if (!b || !bottleNear(b)) {
     showBanner(
       bannerEl,
       woof
-        ? `漂流瓶 ${bottleNo(id)} 漂到汪星的海上了，搭火箭到汪星、走到附近，雷達拉近到 ${reachText(WOOF_SEE_KM * 1000)} 才看得到`
+        ? `漂流瓶 ${bottleNo(id)} 漂到汪星的海上了，搭火箭到汪星、走到附近，雷達拉近到 ${reachText(SEE_ZOOM_KM * 1000)} 才看得到`
         : `漂流瓶 ${bottleNo(id)} 在你 ${reachText(bottleSeeKm() * 1000)} 外，走近一點才看得到`,
       4000,
     );
     return;
   }
+  // 雷達拉近到 1 km 才畫得出來
+  if (!zoomSees()) zoomToKm(SEE_ZOOM_KM);
   selectedBottle = null;
   selectBottle(id);
 }
@@ -3248,7 +3255,7 @@ function confirmThrow(): Promise<boolean> {
   const rules = [
     '只有在地球上才能丟，瓶子會落在你現在的位置 1 km 內的隨機位置（不會在你站的地方），之後在這 1 km 內慢慢漂。',
     `沒人收藏的 ${r?.seaHours ?? 24} 小時後漂到汪星的海上，${r?.woofDays ?? 30} 天後沉下去；被收藏的不會漂走，在原地標成已收藏 ${KEEP_TAKEN_H} 小時，之後收進收藏的人的「收藏」、裝進瓶子裡。`,
-    `走到瓶子 ${reachText((r?.seeKm ?? 1) * 1000)} 內才看得到瓶子、打開來看內容和照片，第一個按「收藏」的人會把它收進漂流瓶收藏（收藏了別人照樣看得到）。`,
+    `走到瓶子 ${reachText((r?.seeKm ?? 1) * 1000)} 內、雷達拉近到 ${reachText(SEE_ZOOM_KM * 1000)} 才看得到瓶子，打開來看內容和照片，第一個按「收藏」的人會把它收進漂流瓶收藏（收藏了別人照樣看得到）。`,
     '內容和照片請當成公開的：位置是手機送出的，有心人可以假造，不要寫、拍不想讓陌生人看到的東西。',
     '不用走過去就能收回（選單「收藏」的「我丟的瓶子」，或點雷達上自己的瓶子），收回就銷毀、收藏的人也看不到了；收回的也算今天的額度。',
     `每天可以丟 ${r?.perDay ?? 3} 個，00:00 恢復成 ${r?.perDay ?? 3} 個${left !== undefined ? `；丟了這個今天還剩 ${Math.max(0, left - 1)} 個` : ''}。`,

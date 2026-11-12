@@ -388,6 +388,7 @@ export class MapView {
         farKey = key;
       };
       map.on('zoomend', fitScale);
+      map.on('zoomend resize', () => this.gateBottles());
       map.on('moveend', () => {
         const c = this.sceneCenter;
         if (c && map.distance(c, map.getCenter()) > 1500 && this.routes.some((r) => r.icons?.some((ic) => ic.kind === 'schoolwalk'))) this.pushRoutes();
@@ -663,9 +664,22 @@ export class MapView {
     this.outline.bringToBack();
   }
 
-  /** 漂流瓶：遠的畫成約 150 m 的淡圈（只知道大概在哪），近的畫成瓶子 */
+  /**
+   * 地圖拉遠到範圍（短邊的一半）超過 1 km 就不畫漂流瓶（v1.670 使用者說在 1 km 看到後拉遠也看得到；跟雷達一樣拉近到 1 km 才看得到）。
+   * 範圍跟 showRange 一樣算：Web Mercator 每像素的公尺數 × 短邊的一半
+   */
+  private gateBottles(): void {
+    const map = this.map;
+    if (!map) return;
+    const size = map.getSize();
+    const c = map.getCenter();
+    const mpp = (40075016.686 * Math.cos((c.lat * Math.PI) / 180)) / 2 ** (map.getZoom() + 8);
+    this.el.classList.toggle('bottles-far', (Math.min(size.x, size.y) / 2) * mpp > 1050);
+  }
+
+  /** 漂流瓶（離你 1 km 內的；地圖拉近到 1 km 才畫，gateBottles） */
   setBottles(list: MapBottle[]): void {
-    const sig = (bs: MapBottle[]): string => JSON.stringify(bs.map((b) => [b.id, b.state, b.mine, b.picked]));
+    const sig = (bs: MapBottle[]): string => JSON.stringify(bs.map((b) => [b.id, b.state, b.mine, b.picked, b.read]));
     if (sig(list) === sig(this.bottles)) return;
     this.bottles = list;
     this.pushBottles();
@@ -676,6 +690,7 @@ export class MapView {
     const layer = this.bottleLayer;
     if (!L || !layer) return;
     layer.clearLayers();
+    this.gateBottles();
     // 太多瓶子就不漂（效能，跟雷達一樣最多 40 個在動）
     this.el.classList.toggle('bottles-still', this.bottles.length > 40);
     for (const b of this.bottles) {
