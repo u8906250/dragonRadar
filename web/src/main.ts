@@ -1696,7 +1696,7 @@ function render(): void {
       phase: it.phase === 'later' ? (it.spot ? 'closed' : routeOf(it.ev) && !reportedStop(it.ev) ? 'soon' : 'later') : it.phase,
       label: titleOf(it.ev),
       flag: flagOf(it.ev),
-      // 全螢幕時圓點裡的小圖示照活動的主題（跟地圖一樣，v1.672）
+      // 圓點裡的小圖示照活動的主題（跟地圖一樣，v1.672 全螢幕、v1.674 一般雷達也有）
       topic: it.ev.kind === 'activity' ? topicOf(it.ev) : it.ev.kind === 'giveaway' ? '發放' : null,
       // 名稱只在選取時顯示，光點一多標題會蓋成一片
       showLabel: it.ev.id === selectedId,

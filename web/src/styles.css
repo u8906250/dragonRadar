@@ -1415,8 +1415,11 @@ path.map-seam-walkers { --p: 15px; }
 .radar .blip.phase-later.kind-activity .dot { stroke: var(--blip-activity); }
 .radar .blip.phase-later .mark { opacity: 0.45; stroke-dasharray: 3 2; }
 .radar .blip.phase-later .core, .radar .blip.phase-later .ping { display: none; }
-/* 全螢幕時分得出主題的活動：大一點的圓點裡畫白色小圖示（v1.672，跟地圖一樣）；淡黃底用深色 */
+/* 分得出主題的活動：大一點的圓點裡畫白色小圖示（v1.672 全螢幕、v1.674 一般雷達也有，跟地圖一樣）；淡黃底用深色 */
 .radar .blip .glyph { color: #ffffff; pointer-events: none; }
+/* 進行中的閃爍：有小圖示的圓點閃淺一點，白色圖示才一直看得清楚 */
+.radar.blink-on .blip.phase-active .dot.topic { opacity: 0.9; }
+.radar.blink-dim .blip.phase-active .dot.topic { opacity: 0.7; }
 .radar .blip.phase-soon:not(.kind-activity) .glyph { color: #4a3a00; }
 /* 車掃的起點 🚩、終點 🏁 */
 .radar .blip .flag { font-size: 18px; text-anchor: middle; dominant-baseline: central; pointer-events: none; }

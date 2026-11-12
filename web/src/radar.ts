@@ -24,7 +24,7 @@ export interface RadarItem {
   badge?: string;
   /** 車掃的起點、終點：畫成 🚩、🏁（不畫圓點） */
   flag?: string;
-  /** 活動的主題（「講座」「市集」）：全螢幕時圓點畫大一點、裡面畫這一類的小圖示（topic-icons.ts） */
+  /** 活動的主題（「講座」「市集」）：圓點畫大一點、裡面畫這一類的小圖示（topic-icons.ts） */
   topic?: string | null;
   label: string;
   showLabel: boolean;
@@ -2910,8 +2910,8 @@ export class Radar {
         // 選到的那一則：外面一圈亮環（慢慢一明一暗），一眼看得出是哪一個
         if (it.selected) node.appendChild(el('circle', { class: 'sel-ring', r: 13 }));
         const body = el('g', { class: 'body' });
-        // 全螢幕：分得出主題的活動畫大一點的圓點、裡面畫小圖示（v1.672 使用者說全螢幕也顯示地圖的新圖示）；範圍外的小點、據點、約略位置照舊
-        const glyph = this.fill && !p.out && !it.flag && !it.spot && !it.approx ? topicGlyph(it.topic) : null;
+        // 分得出主題的活動畫大一點的圓點、裡面畫小圖示（v1.672 使用者說全螢幕也顯示地圖的新圖示，v1.674 說雷達裡面也一樣）；範圍外的小點、據點、約略位置照舊
+        const glyph = !p.out && !it.flag && !it.spot && !it.approx ? topicGlyph(it.topic) : null;
         if (it.flag) {
           const f = el('text', { class: 'flag' });
           f.textContent = it.flag;
