@@ -3729,6 +3729,7 @@ function renderDetail(items: Item[], now: number): void {
         ${ev.post.permalink ? `<a class="btn" href="${esc(ev.post.permalink)}" target="_blank" rel="noopener">${esc(sourceLinkText(ev))}</a>` : ''}
         <a class="btn" href="${googleMapsUrl(ev)}" target="_blank" rel="noopener">在 Google 地圖上看</a>
         ${myReportIds.has(ev.post.id) && !routeOf(ev) ? '<button type="button" class="btn" data-act="withdraw">刪除我的回報</button>' : ''}
+        <button type="button" class="btn" data-act="share">分享</button>
         <button type="button" class="btn" data-act="feedback">回報問題</button>
       </div>
     </div>`, true);
@@ -3760,6 +3761,7 @@ function renderDetail(items: Item[], now: number): void {
   }
   detailEl.querySelector('[data-act="withdraw"]')?.addEventListener('click', () => void withdrawMine(ev.post.id));
   detailEl.querySelector('[data-act="feedback"]')?.addEventListener('click', () => openFeedback(ev));
+  detailEl.querySelector('[data-act="share"]')?.addEventListener('click', () => void shareEvent(ev));
   detailEl.querySelector('[data-act="route"]')?.addEventListener('click', () => {
     const r = routeOf(ev);
     if (r) selectRoute(r.id);
@@ -5256,7 +5258,8 @@ function select(id: number | null, group: number[] = []): void {
  * 剛放上雷達的可能還沒抓到，先重抓一次。固定據點用任一個時段的 id 都找得到那個據點。
  * center：雷達中心飛到那一點，範圍不變（v1.644 使用者說回報後點「看」要把畫面移到那個點；推播通知點進來的照舊只選取）
  */
-async function reveal(id: number, center = false): Promise<void> {
+/** 選到這一則（找不到：結束了、下架了、在別的模組也沒有，回傳 false） */
+async function reveal(id: number, center = false): Promise<boolean> {
   const find = (now: number): Item | undefined => computeItems(now).find((x) => x.ev.id === id || x.spot?.sessions.some((s) => s.id === id));
   themeSheet.hidden = true;
   kwSheet.hidden = true;
@@ -5299,6 +5302,34 @@ async function reveal(id: number, center = false): Promise<void> {
   if (center && at && at.lat != null && at.lng != null && !radar.spaceFocused) {
     if (radar.spaceMoved) radar.resetSpace();
     zoomToKm(scaleKm, { lat: at.lat, lng: at.lng, source: 'manual' });
+  }
+  return !!it;
+}
+
+/**
+ * 分享這一則（v1.688 使用者說的）：連結是 current-radar.pages.dev/e/編號（網站自己做 LINE、Threads 的預覽卡片，網址不出現後端的位址），
+ * 手機叫出系統的分享選單，電腦（或不支援分享的）複製連結
+ */
+const SHARE_ORIGIN = 'https://current-radar.pages.dev';
+async function shareEvent(ev: EventOut): Promise<void> {
+  const url = `${SHARE_ORIGIN}/e/${ev.id}`;
+  const title = titleOf(ev);
+  const text = `${title}\n${ev.allDay ? `${dateFmt.format(new Date(ev.startAt * 1000))} ${allDayText(ev, false)}` : eventTimeText(ev)}・${placeLine(ev)}`;
+  const phone = window.matchMedia('(pointer: coarse)').matches;
+  if (phone && typeof navigator.share === 'function') {
+    try {
+      await navigator.share({ title, text, url });
+      return;
+    } catch (e) {
+      // 自己按取消：不用再複製
+      if (e instanceof DOMException && e.name === 'AbortError') return;
+    }
+  }
+  try {
+    await navigator.clipboard.writeText(url);
+    showBanner(bannerEl, `已複製活動連結：${url}`, 4000);
+  } catch {
+    showBanner(bannerEl, `活動連結：${url}`, 10_000);
   }
 }
 
@@ -8282,11 +8313,13 @@ async function boot(): Promise<void> {
   const scaleParam = new URLSearchParams(location.search).get('scale');
   if (scaleParam && (SCALE_SETTINGS as string[]).includes(scaleParam)) setScale(scaleParam as ScaleSetting);
   if (lsGet(LS_REPORTED)) void loadMyReports();
-  // 點推播通知打開的：?event=123 選到那一則
+  // 點推播通知、分享的連結打開的：?event=123（其他雷達再帶 &module=）選到那一則、移過去；結束、下架了說一聲
   const eventParam = Number(params.get('event'));
   if (eventParam) {
     history.replaceState(null, '', location.pathname);
-    void reveal(eventParam);
+    void reveal(eventParam, true).then((found) => {
+      if (!found) showBanner(bannerEl, '這個活動已經結束或下架了', 5000);
+    });
   }
   // 開著手機推播：確認訂閱還在、更新位置（30 天沒打開，伺服器會刪掉訂閱）
   if (notifyOn() && pushOn()) void syncPush(true);

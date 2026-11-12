@@ -15,6 +15,7 @@ import { adminListWishes, adminSetWish, markWishesSeen, myWishes, notifyWish, pu
 import { addParkMark, deleteParkMark, listParkMarks, listPublicParkMarks, parseParkMark, updateParkMark } from './parkmarks';
 import { adminLocate, applyFeedback, clearResolvedFeedback, deleteAdminSubscription, listFeedback, locateForFeedback, notifyAdmins, purgeFeedback, saveAdminSubscription, setFeedbackStatus, submitFeedback } from './feedback';
 import { moduleOf } from './modules';
+import { shareInfo } from './share';
 import { PUSH_RADIUS_KM, PushError, b64urlEncode, deleteSubscription, encryptPayload, purgeSubscriptions, pushStarted, saveSubscription, sendPush, vapidKeys } from './push';
 import { assertEventReportsOpen, confirmLink, editLink, ENDED_REPORTS_NEEDED, locateForEdit, MAX_LINK_AGE_SEC, NOTES_CLOSED, ReportError, REPORTS_LOCKED, ipHash, myReports, purgeReports, recheckLinks, rejectLink, reportModules, submitLink, supplementLink, withdrawReport } from './reports';
 import { D1Meter, isTransient, withResilientDb } from './db';
@@ -159,6 +160,14 @@ async function handle(req: Request, env: Env, ctx: ExecutionContext): Promise<Re
   }
 
   // 今天的車掃路線（實際路徑、各站預計時間、各路段認領人數）
+  // 分享活動的連結：網站（Pages Functions）拿來做預覽卡片、打開時選哪一則
+  const shareMatch = req.method === 'GET' ? path.match(/^\/api\/share\/(\d{1,12})$/) : null;
+  if (shareMatch) {
+    const info = await shareInfo(env, Number(shareMatch[1]), now);
+    if (!info) return jsonResponse({ error: 'not_found' }, 404);
+    return new Response(JSON.stringify(info), { headers: { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'public, max-age=60' } });
+  }
+
   if (req.method === 'GET' && path === '/api/routes') {
     return jsonResponse({ now, routes: await listRoutes(env, now) });
   }
