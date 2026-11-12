@@ -3605,7 +3605,7 @@ const peekPx = (): number => {
 function setPeek(on: boolean): void {
   // 手機：卡片就是下面的清單，收起來＝清單收成只露出標題那一條（wirePanelDrag）
   if (detailInPanel()) {
-    panelPeek(on);
+    panelPeek(on, detailEl);
     return;
   }
   if (on) {
@@ -6536,6 +6536,7 @@ const OUTCOME_TEXT: Record<SubmitResult['outcome'], string> = {
 
 function setReportMsg(html: string): void {
   reportResult.innerHTML = html;
+  reportSheet.classList.remove('looking');
   // 換了訊息（確認了、不對、補充後重新判讀）：判讀結果的位置跟著拿掉，新的判讀結果再標
   if (reportPins.length > 0) {
     reportPins = [];
@@ -6588,6 +6589,12 @@ function flyToPins(pins: ReportPin[]): void {
 /** 「在雷達上看」：移過去，回報畫面蓋住雷達正中間（手機）就收到只剩標題那一條，按「回到判讀結果」再打開 */
 function lookAtPin(lat: number, lng: number): void {
   flyToPins([{ lat, lng, label: '', glyph: null }]);
+  // 手機的回報在清單那張卡片裡（雷達被擠小）：收成只露出標題那一條，雷達變大
+  if (reportSheet.parentElement === panelEl) {
+    reportSheet.classList.add('looking');
+    setReportPeek(true);
+    return;
+  }
   const box = (view === 'radar' ? $('#radar-view') : $('#map')).getBoundingClientRect();
   const sheet = reportSheet.getBoundingClientRect();
   const cx = box.left + box.width / 2;
@@ -6596,6 +6603,12 @@ function lookAtPin(lat: number, lng: number): void {
 }
 
 function setReportPeek(on: boolean): void {
+  if (!on) reportSheet.classList.remove('looking');
+  // 手機的回報在清單那張卡片裡：收起來＝清單收成只露出標題那一條
+  if (reportSheet.parentElement === panelEl) {
+    panelPeek(on, reportSheet);
+    return;
+  }
   if (on) reportSheet.scrollTop = 0;
   reportSheet.classList.toggle('peek', on);
 }
@@ -7572,8 +7585,8 @@ const PANEL_ORDER: PanelState[] = ['collapsed', 'default', 'expanded'];
  * 有縮回傳 true；已經收合、電腦版回傳 false（wirePanelDrag 接上）
  */
 let shrinkPanel = (): boolean => false;
-/** 手機的詳細資料收起來（只露出標題）或打開（wirePanelDrag 接上） */
-let panelPeek = (_on: boolean): void => {};
+/** 手機放在清單卡片裡的詳細資料、回報收起來（只露出標題）或打開（wirePanelDrag 接上） */
+let panelPeek = (_on: boolean, _of: HTMLElement): void => {};
 /** 詳細資料放在下面清單那張卡片裡（手機） */
 const detailInPanel = (): boolean => detailEl.parentElement === panelEl;
 
@@ -7594,20 +7607,34 @@ function wirePanelDrag(): void {
   let dragging = false;
   let moved = false;
 
-  /** 詳細資料收起來時露出多高：把手＋標題那一列 */
-  const detailPeekPx = (): number => {
-    const head = detailEl.querySelector<HTMLElement>('.sheet-head');
-    const headBottom = head ? head.getBoundingClientRect().bottom - detailEl.getBoundingClientRect().top + detailEl.scrollTop : 60;
+  /**
+   * 手機點開活動（詳細資料）、回報、回報問題直接用清單這張卡片，不另外疊一張上去（v1.684、v1.685 使用者說的）：
+   * 打開時清單的內容先藏起來、卡片換成那一個（預設高度），關掉換回清單、高度和捲到哪都照打開前的。
+   * 同時開著好幾個時照這個順序顯示前面的（回報問題是從活動卡片按的，關掉回到活動卡片）
+   */
+  const phone = window.matchMedia('(max-width: 899px)');
+  const cards = [feedbackSheet, reportSheet, detailEl];
+  const homes = cards.map((c) => ({ c, parent: c.parentElement as HTMLElement, next: c.nextSibling }));
+  /** 現在卡片裡顯示的那一個；null 是清單 */
+  let card: HTMLElement | null = null;
+  let listState: PanelState = 'default';
+  let listScroll = 0;
+
+  /** 卡片收起來時露出多高：把手＋標題那一列 */
+  const cardPeekPx = (): number => {
+    const c = card ?? detailEl;
+    const head = c.querySelector<HTMLElement>('.sheet-head');
+    const headBottom = head ? head.getBoundingClientRect().bottom - c.getBoundingClientRect().top + c.scrollTop : 60;
     return Math.round(handle.offsetHeight + headBottom + 8);
   };
   const heights = (): Record<PanelState, number> => {
     const vh = window.innerHeight;
     const pad = parseFloat(getComputedStyle(panelEl).paddingBottom) || 0;
-    if (panelEl.classList.contains('detail-on')) {
-      const locked = parseFloat(detailEl.style.height) || 0;
+    if (card) {
+      const locked = parseFloat(card.style.height) || 0;
       return {
-        collapsed: detailPeekPx() + pad,
-        default: Math.min(vh * 0.6, handle.offsetHeight + (locked || detailEl.scrollHeight) + pad),
+        collapsed: cardPeekPx() + pad,
+        default: Math.min(vh * 0.6, handle.offsetHeight + (locked || card.scrollHeight) + pad),
         expanded: vh * 0.8,
       };
     }
@@ -7619,9 +7646,9 @@ function wirePanelDrag(): void {
   };
 
   const setState = (s: PanelState): void => {
-    if (s === 'collapsed' && panelEl.classList.contains('detail-on')) {
-      detailEl.scrollTop = 0;
-      panelEl.style.setProperty('--detail-peek', `${detailPeekPx()}px`);
+    if (s === 'collapsed' && card) {
+      card.scrollTop = 0;
+      panelEl.style.setProperty('--card-peek', `${cardPeekPx()}px`);
     }
     state = s;
     panelEl.classList.toggle('expanded', s === 'expanded');
@@ -7641,50 +7668,50 @@ function wirePanelDrag(): void {
     if (e.propertyName === 'max-height' && view === 'map') map.invalidate();
   });
 
-  /**
-   * 手機點開活動（詳細資料）直接用清單這張卡片，不另外疊一張上去（v1.684 使用者說的）：
-   * 打開時清單的內容先藏起來、卡片換成詳細資料（預設高度），關掉換回清單、高度和捲到哪都照打開前的
-   */
-  const phone = window.matchMedia('(max-width: 899px)');
-  const detailHome = { parent: detailEl.parentElement as HTMLElement, next: detailEl.nextSibling };
-  let listState: PanelState = 'default';
-  let listScroll = 0;
-  const syncDetail = (): void => {
-    const on = detailInPanel() && !detailEl.hidden;
-    if (on === panelEl.classList.contains('detail-on')) return;
-    if (on) {
-      listState = state;
-      listScroll = listEl.scrollTop;
-      panelEl.classList.add('detail-on');
-      setState('default');
-    } else {
-      panelEl.classList.remove('detail-on');
+  const syncCard = (): void => {
+    const now = cards.find((c) => c.parentElement === panelEl && !c.hidden) ?? null;
+    if (now === card) return;
+    const was = card;
+    card = now;
+    panelEl.classList.toggle('card-on', !!now);
+    if (!now) {
       setState(listState);
       listEl.scrollTop = listScroll;
+      return;
     }
+    if (!was) {
+      listState = state;
+      listScroll = listEl.scrollTop;
+    }
+    setState('default');
   };
-  const placeDetail = (): void => {
-    if (phone.matches) panelEl.insertBefore(detailEl, handle.nextSibling);
-    else detailHome.parent.insertBefore(detailEl, detailHome.next);
-    detailEl.classList.remove('peek');
-    syncDetail();
+  // 照 cards 的順序排在把手後面（styles.css 只顯示第一個開著的）
+  const placeCards = (): void => {
+    for (const h of [...homes].reverse()) {
+      if (phone.matches) panelEl.insertBefore(h.c, handle.nextSibling);
+      else h.parent.insertBefore(h.c, h.next);
+      h.c.classList.remove('peek');
+    }
+    syncCard();
   };
-  phone.addEventListener('change', placeDetail);
-  placeDetail();
-  new MutationObserver(syncDetail).observe(detailEl, { attributes: true, attributeFilter: ['hidden'] });
-  panelPeek = (on: boolean): void => {
-    syncDetail();
-    if (!panelEl.classList.contains('detail-on')) return;
+  phone.addEventListener('change', placeCards);
+  placeCards();
+  const watch = new MutationObserver(syncCard);
+  for (const c of cards) watch.observe(c, { attributes: true, attributeFilter: ['hidden'] });
+  /** of：要收起來的是哪一張（卡片裡現在顯示的是別張就不動） */
+  panelPeek = (on: boolean, of: HTMLElement): void => {
+    syncCard();
+    if (card !== of) return;
     if (on) setState('collapsed');
     else if (state === 'collapsed') setState('default');
   };
 
   const start = (e: PointerEvent): void => {
     if (desktop.matches || (e.pointerType === 'mouse' && e.button !== 0)) return;
-    // 詳細資料的標題那一列也拖得動（按鈕、連結不算）
-    if (e.currentTarget === detailEl) {
+    // 卡片的標題那一列也拖得動（按鈕、連結不算）
+    if (cards.includes(e.currentTarget as HTMLElement)) {
       const t = e.target instanceof Element ? e.target : null;
-      if (!panelEl.classList.contains('detail-on') || !t?.closest('.sheet-head') || t.closest('button, a, input, select, textarea, label')) return;
+      if (e.currentTarget !== card || !t?.closest('.sheet-head') || t.closest('button, a, input, select, textarea, label')) return;
     }
     dragging = true;
     moved = false;
@@ -7709,9 +7736,9 @@ function wirePanelDrag(): void {
     panelEl.style.maxHeight = '';
     const dy = e.clientY - startY;
     if (!moved) {
-      // 只有輕點橫條才切換，點標題列不切換（上面有其他按鈕）；詳細資料收起來時點標題打開
+      // 只有輕點橫條才切換，點標題列不切換（上面有其他按鈕）；卡片收起來時點標題打開
       if (e.currentTarget === handle) setState(state === 'collapsed' ? 'default' : state === 'default' ? 'expanded' : 'default');
-      else if (e.currentTarget === detailEl && state === 'collapsed') setState('default');
+      else if (e.currentTarget === card && state === 'collapsed') setState('default');
       return;
     }
     const h = heights();
@@ -7723,7 +7750,7 @@ function wirePanelDrag(): void {
     }
     setState(target);
   };
-  for (const el of [handle, head, detailEl]) {
+  for (const el of [handle, head, ...cards]) {
     el.addEventListener('pointerdown', start);
     el.addEventListener('pointermove', move);
     el.addEventListener('pointerup', end);
@@ -8008,7 +8035,8 @@ function wireControls(): void {
   // 收起來時點標題那一條（或「回到判讀結果」）再打開
   reportSheet.addEventListener('click', (e) => {
     const t = e.target as Element;
-    if (!reportSheet.classList.contains('peek') || !t.closest('.sheet-head') || t.closest('[data-act="close"]')) return;
+    const peeked = reportSheet.classList.contains('peek') || (reportSheet.parentElement === panelEl && panelEl.classList.contains('collapsed'));
+    if (!peeked || !t.closest('.sheet-head') || t.closest('[data-act="close"]')) return;
     setReportPeek(false);
   });
   // 回報畫面關掉（各種地方都會關）：收起的狀態、雷達上判讀結果的位置跟著拿掉，再打開時判讀結果還在就再畫

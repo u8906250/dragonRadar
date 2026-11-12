@@ -1466,17 +1466,22 @@ path.map-seam-walkers { --p: 15px; }
 .panel.collapsed .kw-bar, .panel.collapsed .filter-row, .panel.collapsed .event-list, .panel.collapsed .hint { visibility: hidden; }
 .panel.collapsed .panel-head .right, .panel.collapsed #origin-label { display: none; }
 .panel.expanded .panel-handle span { opacity: 0.9; }
-/* 手機點開活動：詳細資料直接放在清單這張卡片裡（main.ts 的 wirePanelDrag），清單的內容先藏起來；把手、往下拖收起來都用清單的 */
-.panel > #detail {
+/*
+ * 手機點開活動、回報、回報問題：直接放在清單這張卡片裡（main.ts 的 wirePanelDrag），清單的內容先藏起來；把手、往下拖收起來都用清單的。
+ * 好幾個開著時只顯示排在前面的（回報問題 → 回報 → 活動）
+ */
+.panel > .sheet {
   position: static; z-index: auto; flex: 1 1 auto; min-height: 0; max-height: none; overflow: auto;
   background: transparent; border: 0; border-radius: 0; box-shadow: none; padding: 0 16px 12px; transform: none; transition: none;
 }
-.panel > #detail .sheet-grab { display: none; }
-.panel.detail-on > :not(.panel-handle):not(#detail) { display: none; }
-.panel.detail-on { max-height: 60dvh; }
-.panel.detail-on.expanded { max-height: 80dvh; }
-.panel.detail-on.expanded > #detail { height: auto !important; }
-.panel.detail-on.collapsed { max-height: calc(var(--detail-peek, 96px) + env(safe-area-inset-bottom)); }
+.panel > .sheet .sheet-grab { display: none; }
+.panel-handle { flex-shrink: 0; }
+.panel > .sheet:not([hidden]) ~ .sheet { display: none; }
+.panel.card-on > :not(.panel-handle):not(.sheet) { display: none; }
+.panel.card-on { max-height: 60dvh; }
+.panel.card-on.expanded { max-height: 80dvh; }
+.panel.card-on.expanded > .sheet { height: auto !important; }
+.panel.card-on.collapsed { max-height: calc(var(--card-peek, 96px) + env(safe-area-inset-bottom)); }
 /* ========== 全螢幕（像 Google 地圖）==========
  * 地圖、雷達鋪滿：標題列收成浮在上面的按鈕（左上「洋流雷達▾」、右上「⋯」和縮小），地圖外面的框和留白拿掉；
  * 手機的清單照樣在下面可以拉上拉下，上緣的圓角疊在地圖上；電腦的清單在右邊，可以收起來（#app.list-off）
@@ -1580,7 +1585,7 @@ path.map-seam-walkers { --p: 15px; }
 #report-sheet.peek { transform: translateY(calc(100% - 64px - env(safe-area-inset-bottom))); overflow: hidden; }
 #report-sheet.peek .sheet-head { cursor: pointer; }
 .report-unpeek { display: none; }
-#report-sheet.peek .report-unpeek { display: inline-flex; margin-left: auto; }
+#report-sheet.peek .report-unpeek, .panel.collapsed > #report-sheet.looking .report-unpeek { display: inline-flex; margin-left: auto; }
 @media (prefers-reduced-motion: reduce) { #report-sheet { transition: none; } }
 .sheet-body p { margin: 0 0 10px; line-height: 1.6; font-size: 15px; }
 .sheet-body blockquote { margin: 0 0 12px; padding: 8px 12px; border-left: 3px solid var(--accent); color: var(--muted); font-size: 13px; white-space: pre-wrap; }
