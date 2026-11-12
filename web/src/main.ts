@@ -15,6 +15,7 @@ import { checkWishNews, findCard, gotReward, myCards, onWishNews, openAlbum, ope
 import { DEEP_FROM_KM, LY_KM, Radar, SPACE_FROM_KM, type RadarRoute, type RadarStreets, type SpaceView } from './radar';
 import { DEFAULT_THEME_ID, getTheme, THEMES, type Theme } from './themes';
 import type { WoofBottleMark } from './space';
+import { topicChipSvg, topicGlyph, TOPIC_TYPES } from './topic-icons';
 import type { BottleOut, BottleProof, EventOut, Item, KeywordInfo, KeywordRules, MyBottles, MyReport, Origin, Phase, PickedBottle, RelatedPost, RouteOut, PreviewItem, RouteStop, RoutePreview, SubmitResult, FailedItem, EditItem, EditInput } from './types';
 
 const DEFAULT_ORIGIN: Origin = { lat: 25.0478, lng: 121.517, source: 'default' }; // 台北車站
@@ -1581,6 +1582,8 @@ function itemDays(it: Item): Set<number> {
 // ---- 日期：選星期幾（可以好幾個）或直接點一天（v1.613 使用者建議多一個日期的按鈕） ----
 /** null 是不篩；weekdays 是星期幾（0 是星期日；一次一個，「週末」是六、日兩個）；date 是哪一天（taipeiDay） */
 let dayPick: { weekdays: Set<number> } | { date: number } | null = null;
+/** 選了哪一類（搜尋框下面的類型按鈕，topic-icons.ts 的 key）：雷達、地圖、清單只留這一類（v1.676） */
+let typePick: string | null = null;
 /** 最近一次畫面上抓到的全部（日期選單的月曆標哪幾天有東西） */
 let dayFetched: Item[] = [];
 const matchesDay = (it: Item): boolean => {
@@ -1654,7 +1657,9 @@ function render(): void {
   // 搜尋時雷達、地圖、清單、各類的數量都只算符合的
   const searched = searchTerms.length > 0 ? fetched.filter(matchesSearch) : fetched;
   // 選了星期幾、日期：只留那幾天有的（雷達、地圖、清單都是）
-  const all = dayPick ? searched.filter(matchesDay) : searched;
+  const dayed = dayPick ? searched.filter(matchesDay) : searched;
+  // 選了類型：只留這一類
+  const all = typePick ? dayed.filter((it) => typeOf(it.ev) === typePick) : dayed;
   dayFetched = fetched;
   // 發放、活動、據點的開關是洋流的，其他模組不篩
   const byCategory = mod.current ? all.filter((it) => shown[categoryOf(it)]) : all;
@@ -1697,7 +1702,7 @@ function render(): void {
       label: titleOf(it.ev),
       flag: flagOf(it.ev),
       // 圓點裡的小圖示照活動的主題（跟地圖一樣，v1.672 全螢幕、v1.674 一般雷達也有）
-      topic: it.ev.kind === 'activity' ? topicOf(it.ev) : it.ev.kind === 'giveaway' ? '發放' : null,
+      topic: topicFor(it.ev),
       // 名稱只在選取時顯示，光點一多標題會蓋成一片
       showLabel: it.ev.id === selectedId,
       selected: it.ev.id === selectedId,
@@ -1867,7 +1872,7 @@ function render(): void {
       title: `${tagLabel(it)}｜${titleOf(it.ev)}`,
       flag: flagOf(it.ev),
       // 地圖上的小圖示照活動的主題（發放的也算一類，v1.671）
-      topic: it.ev.kind === 'activity' ? topicOf(it.ev) : it.ev.kind === 'giveaway' ? '發放' : null,
+      topic: topicFor(it.ev),
       subtitle: `${placeLine(it.ev)} · ${timeLine(it, now)}`,
       selected: it.ev.id === selectedId,
       ...(isUpcoming(it) && it.phase === 'later' ? { fade: clarityOf(it.ev, now) } : {}),
@@ -2041,7 +2046,7 @@ function renderList(items: Item[], now: number): void {
   const outText = outRange.length > 0 ? `・範圍外 ${outRange.length} 個` : '';
   const spotText = spotsIn.length > 0 ? `・據點 ${spotsIn.length} 個` : '';
   const laterText = laterRows.length > 0 ? `・${timeSetting === 'now' ? '還沒開始' : laterLabel().replace('才開始', '')} ${laterRows.length} 個` : '';
-  const searching = (searchTerms.length > 0 ? `搜尋「${searchInput.value.trim()}」・` : '') + (dayPick ? `${dayPickLabel()}・` : '');
+  const searching = (searchTerms.length > 0 ? `搜尋「${searchInput.value.trim()}」・` : '') + (typePick ? `${typeLabel(typePick)}・` : '') + (dayPick ? `${dayPickLabel()}・` : '');
   countLabel.textContent = none
     ? '還沒追蹤關鍵字'
     : searching && rows.length === 0
@@ -2054,6 +2059,8 @@ function renderList(items: Item[], now: number): void {
   emptyEl.textContent =
     searchTerms.length > 0
       ? `目前的發放、活動裡沒有符合「${searchInput.value.trim()}」的。可以換個字，或按 ✕ 清除搜尋。`
+      : typePick
+        ? `目前沒有「${typeLabel(typePick)}」的發放、活動。再按一次「${typeLabel(typePick)}」清除。`
       : dayPick
         ? `${dayPickLabel()}沒有發放、活動。可以換一天，或按「日期」清除。`
       : none
@@ -5954,6 +5961,7 @@ function switchModule(id: ModuleId, fetch = true): void {
   searchInput.value = '';
   searchClear.hidden = true;
   searchTerms = [];
+  typePick = null;
   applyModule();
   render();
   if (fetch) void refresh();
@@ -6282,19 +6290,45 @@ function searchTag(tag: string): void {
 let tagUse = new Map<string, number>();
 const commonRank = (t: string): number => (COMMON_TAGS.includes(t) ? COMMON_TAGS.indexOf(t) : COMMON_TAGS.length);
 const byTagUse = (a: string, b: string): number => (tagUse.get(b) ?? 0) - (tagUse.get(a) ?? 0) || commonRank(a) - commonRank(b);
-/** 搜尋框下面的關鍵字（每個雷達都有，例如找工作的 #發文宣）：目前抓到的刊登、活動裡實際用到的，用得多的在前面（最多 8 個）；都沒有就不顯示 */
+/**
+ * 活動是哪一類（topic-icons.ts：發放、造勢、講座…），雷達、地圖的小圖示和類型按鈕都照這個：活動照 AI 判讀的主題，發放的算「發放」
+ */
+function topicFor(ev: EventOut): string | null {
+  return ev.kind === 'activity' ? topicOf(ev) : ev.kind === 'giveaway' ? '發放' : null;
+}
+function typeOf(ev: EventOut): string | null {
+  return topicGlyph(topicFor(ev));
+}
+function typeLabel(key: string): string {
+  return TOPIC_TYPES.find((t) => t.key === key)?.label ?? key;
+}
+/** 點類型按鈕：只看這一類（雷達、地圖、清單），再點一次清掉 */
+function pickType(key: string): void {
+  typePick = typePick === key ? null : key;
+  render();
+}
+
+/**
+ * 搜尋框下面的關鍵字（每個雷達都有，例如找工作的 #發文宣）：目前抓到的刊登、活動裡實際用到的，用得多的在前面（最多 8 個）；
+ * 最前面是活動類型的按鈕（有小圖示，目前抓到的有這一類才放；v1.676 使用者說提供這些活動類型快速搜尋）；都沒有就不顯示
+ */
 function renderSearchTags(items: Item[]): void {
   const box = $<HTMLElement>('#search-tags');
   const count = new Map<string, number>();
   for (const it of items) for (const t of tagsOf(it.ev)) count.set(t, (count.get(t) ?? 0) + 1);
   tagUse = count;
   const top = [...count.keys()].sort(byTagUse).slice(0, 8);
-  if (top.length === 0) {
+  const has = new Set(items.map((it) => typeOf(it.ev)));
+  const types = TOPIC_TYPES.filter((t) => has.has(t.key) || t.key === typePick);
+  if (top.length === 0 && types.length === 0) {
     box.hidden = true;
     return;
   }
   const now = searchInput.value.trim();
-  const html = top.map((t) => `<button type="button" class="chip small${t === now ? ' on' : ''}" data-tag="${esc(t)}" aria-pressed="${t === now}">#${esc(t)}</button>`).join('');
+  const html =
+    types.map((t) => `<button type="button" class="chip small type-chip${t.key === typePick ? ' on' : ''}" data-type="${t.key}" aria-pressed="${t.key === typePick}">${topicChipSvg(t.key)}${t.label}</button>`).join('') +
+    (types.length && top.length ? '<span class="tags-sep" aria-hidden="true"></span>' : '') +
+    top.map((t) => `<button type="button" class="chip small${t === now ? ' on' : ''}" data-tag="${esc(t)}" aria-pressed="${t === now}">#${esc(t)}</button>`).join('');
   if (box.dataset.html !== html) {
     box.innerHTML = html;
     box.dataset.html = html;
@@ -7632,6 +7666,8 @@ function wireControls(): void {
   });
   // 常見關鍵字：點了搜尋（再點一次清掉）
   $('#search-tags').addEventListener('click', (e) => {
+    const ty = (e.target as Element).closest<HTMLButtonElement>('[data-type]');
+    if (ty) return pickType(ty.dataset.type ?? '');
     const b = (e.target as Element).closest<HTMLButtonElement>('[data-tag]');
     if (b) searchTag(b.dataset.tag ?? '');
   });

@@ -13,6 +13,18 @@ const TOPIC_GROUPS: Array<{ key: string; words: RegExp }> = [
   { key: 'exhibit', words: /展/ },
   { key: 'care', words: /淨灘|志工|清潔|捐|愛心/ },
 ];
+/** 每一類的名稱（搜尋框下面的類型按鈕，v1.676 使用者說提供這些活動類型快速搜尋），照 TOPIC_GROUPS 的順序 */
+export const TOPIC_TYPES: Array<{ key: string; label: string }> = [
+  { key: 'gift', label: '發放' },
+  { key: 'rally', label: '造勢' },
+  { key: 'talk', label: '講座' },
+  { key: 'music', label: '表演' },
+  { key: 'market', label: '市集' },
+  { key: 'craft', label: '工作坊' },
+  { key: 'parade', label: '遊行' },
+  { key: 'exhibit', label: '展覽' },
+  { key: 'care', label: '志工' },
+];
 export function topicGlyph(topic: string | null | undefined): string | null {
   if (!topic) return null;
   return TOPIC_GROUPS.find((g) => g.words.test(topic))?.key ?? null;
@@ -43,3 +55,7 @@ export function glyphSvg(key: string, c: string): string {
       return '';
   }
 }
+
+/** 類型按鈕上的小圖示：跟地圖、雷達一樣的圓點加白色圖示 */
+export const topicChipSvg = (key: string): string =>
+  `<svg class="type-ic" viewBox="-12 -12 24 24" aria-hidden="true"><circle r="11.5" fill="var(--blip-activity)"/>${glyphSvg(key, '#ffffff')}</svg>`;

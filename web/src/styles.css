@@ -2448,6 +2448,10 @@ body.letters-open { overflow: hidden; }
 .search-tags { display: flex; flex: none; gap: 6px; overflow-x: auto; overflow-y: hidden; min-height: 40px; padding: 6px 2px 4px; margin-bottom: 4px; scrollbar-width: none; -webkit-overflow-scrolling: touch; }
 .search-tags::-webkit-scrollbar { display: none; }
 .search-tags[hidden] { display: none; }
+/* 活動類型按鈕（v1.676）：前面一個跟地圖、雷達一樣的小圖示；跟後面的 #關鍵字 中間一條細線 */
+.search-tags .type-chip { display: inline-flex; align-items: center; gap: 4px; flex: none; }
+.search-tags .type-chip .type-ic { width: 18px; height: 18px; flex: none; }
+.search-tags .tags-sep { flex: none; width: 1px; margin: 6px 2px; background: currentColor; opacity: 0.2; }
 /* 電腦（滑鼠拉不動橫的捲動）：排不下就換行，全部看得到 */
 @media (hover: hover) and (pointer: fine) { .search-tags { flex-wrap: wrap; overflow: visible; margin-inline: 10px; } }
 .search-tags .chip { flex: none; min-height: 30px; padding: 4px 10px; font-size: 13px; box-shadow: none; }
