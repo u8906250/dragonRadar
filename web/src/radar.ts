@@ -216,6 +216,8 @@ export interface RadarBottle {
   mine: boolean;
   picked: boolean;
   selected: boolean;
+  /** 這台裝置看過內容了：畫成空瓶（裡面沒有信卷，v1.658 使用者說的） */
+  read?: boolean;
   /** 範圍內沒有瓶子時，最近那一個貼在外圈指方向，旁邊寫這段文字（例如「1.2 km」） */
   hint?: string;
 }
@@ -1640,7 +1642,7 @@ export class Radar {
       // 瓶子泡在水裡：後面一道淡淡的水波、前面一道蓋住瓶底，兩道都慢慢往一邊流（v1.606 使用者說感覺不出漂流，旁邊畫一點水流）
       tw.innerHTML =
         `<svg class="flow back" viewBox="-16 -10 32 20" aria-hidden="true"><path d="${WAVE_BACK}" /></svg>` +
-        `<svg class="bottle" viewBox="-10 -10 20 20" aria-hidden="true"><path d="${BOTTLE_PATH}" transform="rotate(-20)" />${LETTER_SCROLL}${BOTTLE_CORK}${b.picked ? TAKEN_MARK : ''}</svg>` +
+        `<svg class="bottle" viewBox="-10 -10 20 20" aria-hidden="true"><path d="${BOTTLE_PATH}" transform="rotate(-20)" />${b.read ? '' : LETTER_SCROLL}${BOTTLE_CORK}${b.picked ? TAKEN_MARK : ''}</svg>` +
         `<svg class="flow front" viewBox="-16 -10 32 20" aria-hidden="true"><path d="${WAVE_FRONT}" /></svg>`;
       this.flashSquare.appendChild(tw);
     }
@@ -1656,7 +1658,7 @@ export class Radar {
       const body = el('g', { class: 'body' });
       body.appendChild(el('path', { class: 'glass', d: BOTTLE_PATH, transform: `rotate(-20) scale(${(0.8 * k).toFixed(3)})` }));
       const scroll = el('g', { transform: `scale(${(0.8 * k).toFixed(3)})` });
-      scroll.innerHTML = LETTER_SCROLL + BOTTLE_CORK;
+      scroll.innerHTML = (b.read ? '' : LETTER_SCROLL) + BOTTLE_CORK;
       body.appendChild(scroll);
       g.appendChild(body);
     }

@@ -60,6 +60,8 @@ const LS_TIME = 'dr.timeRange';
 /** 丟過瓶子（才需要去問有沒有被收藏）、看過的最後一次「被收藏」時間 */
 const LS_BOTTLE_DROPPED = 'dr.bottleDropped';
 const LS_BOTTLE_SEEN = 'dr.bottleSeen';
+/** 這台裝置看過內容的瓶子（編號，最近 BOTTLE_READ_MAX 個） */
+const LS_BOTTLE_READ = 'dr.bottleRead';
 /** 開始提醒（音效、震動、橫幅、系統通知）的開關：on／off；沒設過時，瀏覽器已允許通知就算開 */
 const LS_NOTIFY = 'dr.notify';
 /** 手機推播（網頁關掉也收得到）開著：'on' */
@@ -142,6 +144,26 @@ let selectedBottle: number | null = null;
 let justThrown: number | null = null;
 /** 打開來看過（自己丟的、收藏的、走到附近看的）瓶子內容 */
 const bottleTexts = new Map<number, PickedBottle>();
+/**
+ * 看過內容的瓶子（v1.658 使用者說自己看過的漂流瓶顯示空瓶）：雷達、地圖、汪星海上畫成空瓶（沒有信卷）；
+ * 詳細資料裡真的顯示了內容才算（剛丟完自動打開、沒顯示內容的不算），記在這台裝置
+ */
+const BOTTLE_READ_MAX = 500;
+const readBottles = new Set<number>(
+  ((): number[] => {
+    try {
+      const v: unknown = JSON.parse(lsGet(LS_BOTTLE_READ) ?? '[]');
+      return Array.isArray(v) ? v.filter((x): x is number => Number.isInteger(x)) : [];
+    } catch {
+      return [];
+    }
+  })(),
+);
+function markBottleRead(id: number): void {
+  if (readBottles.has(id)) return;
+  readBottles.add(id);
+  lsSet(LS_BOTTLE_READ, JSON.stringify([...readBottles].slice(-BOTTLE_READ_MAX)));
+}
 /** 漂流瓶詳細資料上的訊息（看不到、收藏不到的原因、檢舉結果） */
 let bottleMsg = '';
 /** 最近一次讀到的「我的瓶子」：丟的、收藏的信 */
@@ -1764,11 +1786,12 @@ function render(): void {
       state: v.state,
       mine: v.b.mine,
       picked: v.b.picked || !!v.b.taken,
+      read: readBottles.has(v.b.id),
       selected: v.b.id === selectedBottle,
       hint: v === hint ? formatKm(v.distanceKm) : undefined,
     })),
   );
-  map.setBottles(bottleViews.map((v) => ({ id: v.b.id, lat: v.b.lat, lng: v.b.lng, state: v.state, mine: v.b.mine, picked: v.b.picked || !!v.b.taken })));
+  map.setBottles(bottleViews.map((v) => ({ id: v.b.id, lat: v.b.lat, lng: v.b.lng, state: v.state, mine: v.b.mine, picked: v.b.picked || !!v.b.taken, read: readBottles.has(v.b.id) })));
   updateBottleBadge(bottleViews);
   syncWoofBottles();
   // 全螢幕鋪滿時你的 GPS 位置（像 Google 地圖的藍點）：拖曳移開了也畫在 GPS 的地方
@@ -2397,12 +2420,12 @@ function paintQuotaBadge(): void {
 
 /** 汪星海上的瓶子（space.ts 畫在汪星上）：每次畫汪星都重算，拖曳走路時走到附近了沒跟著變 */
 function woofBottleMarks(): WoofBottleMark[] {
-  return woofBottles.filter(bottleSeen).map((b) => ({ id: b.id, lat: b.lat, lng: b.lng, state: bottleState(b) === 'pick' ? 'pick' : 'near', mine: b.mine, selected: b.id === selectedBottle, taken: b.picked || !!b.taken }));
+  return woofBottles.filter(bottleSeen).map((b) => ({ id: b.id, lat: b.lat, lng: b.lng, state: bottleState(b) === 'pick' ? 'pick' : 'near', mine: b.mine, selected: b.id === selectedBottle, taken: b.picked || !!b.taken, read: readBottles.has(b.id) }));
 }
 let woofMarksKey = '';
 /** 汪星海上的瓶子、選取變了：重畫汪星 */
 function syncWoofBottles(): void {
-  const key = woofBottles.map((b) => `${b.id}${b.picked || b.taken ? 'p' : ''}${b.id === selectedBottle ? 's' : ''}`).join(',');
+  const key = woofBottles.map((b) => `${b.id}${b.picked || b.taken ? 'p' : ''}${readBottles.has(b.id) ? 'r' : ''}${b.id === selectedBottle ? 's' : ''}`).join(',');
   if (key === woofMarksKey) return;
   woofMarksKey = key;
   radar.redrawSpace();
@@ -2631,7 +2654,13 @@ function renderBottleDetail(id: number): boolean {
         : b.taken
           ? `${ago(b.createdAt)}丟的・已經被別人收藏了・${lifecycle}`
           : `${ago(b.createdAt)}丟的・還沒有人收藏・${lifecycle}`;
-    body = `${justThrown === id ? '' : kraftNote(got.text, b.id, got.photo)}<p class="muted">${esc(status)}</p>`;
+    const showText = justThrown !== id;
+    body = `${showText ? kraftNote(got.text, b.id, got.photo) : ''}<p class="muted">${esc(status)}</p>`;
+    // 顯示了內容就算看過：雷達、地圖上的這個瓶子換成空瓶（這一輪已經畫好了，下一格再畫一次）
+    if (showText && !readBottles.has(id)) {
+      markBottleRead(id);
+      requestAnimationFrame(() => render());
+    }
   } else if (canOpen) {
     body = '<p class="muted">打開瓶子中…</p>';
   } else {

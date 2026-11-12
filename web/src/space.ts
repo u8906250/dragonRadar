@@ -874,7 +874,7 @@ function woofGlobe(x: number, y: number, r: number, view: SpaceView, toSun: Vec3
       `<circle class="hit" r="14" />` +
       (bk === 0
         ? '<circle class="dot" r="3.4" />'
-        : `<path class="wave back" d="${WAVE_BACK}" transform="scale(${bk.toFixed(3)})" /><g class="body"><path class="glass" d="${BOTTLE_PATH}" transform="rotate(-20) scale(${bk.toFixed(3)})" /><g transform="scale(${bk.toFixed(3)})">${LETTER_SCROLL}${BOTTLE_CORK}${b.taken ? TAKEN_MARK : ''}</g></g><path class="wave front" d="${WAVE_FRONT}" transform="scale(${bk.toFixed(3)})" />`) +
+        : `<path class="wave back" d="${WAVE_BACK}" transform="scale(${bk.toFixed(3)})" /><g class="body"><path class="glass" d="${BOTTLE_PATH}" transform="rotate(-20) scale(${bk.toFixed(3)})" /><g transform="scale(${bk.toFixed(3)})">${b.read ? '' : LETTER_SCROLL}${BOTTLE_CORK}${b.taken ? TAKEN_MARK : ''}</g></g><path class="wave front" d="${WAVE_FRONT}" transform="scale(${bk.toFixed(3)})" />`) +
       `<title>${b.mine ? '你丟的漂流瓶' : b.taken ? '漂流瓶（已經被收藏了）' : b.state === 'pick' ? '漂流瓶（走到附近了）' : '漂流瓶'}</title></g>`;
   }
   return `<g class="space-globe" transform="translate(${f1(ox)} ${f1(oy)})">${out}</g>`;
@@ -923,6 +923,8 @@ export interface WoofBottleMark {
   selected: boolean;
   /** 已經被收藏了（淡淡的） */
   taken?: boolean;
+  /** 這台裝置看過內容了：空瓶 */
+  read?: boolean;
 }
 
 /** 太陽系的天體在這一刻的位置（以地球為中心的黃道座標，公里） */
