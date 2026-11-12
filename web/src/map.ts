@@ -75,7 +75,7 @@ export interface MapRoute {
   /** 真的河（水域政策「親水」）：船沿河走時（at）水面亮成藍色、留著 */
   rivers?: Array<{ ring: Array<[number, number]>; at: number }>;
   /** 一條線從頭長到尾：trail 山林徑、bridge 自行車橋、stars 星座、culture 文化徑的線（color）；label 寫在尾端（文化徑寫在中間） */
-  reveals?: Array<{ path: Array<[number, number]>; at: number; kind: 'trail' | 'bridge' | 'stars' | 'culture'; label?: string; color?: string; labelAt?: number; hideKm?: number }>;
+  reveals?: Array<{ path: Array<[number, number]>; at: number; kind: 'trail' | 'bridge' | 'stars' | 'culture' | 'light'; label?: string; color?: string; labelAt?: number; hideKm?: number }>;
   /** 騎自行車的人：跟雷達一樣（經緯度） */
   bikes?: Array<{ path: Array<[number, number]>; start: number; lap: number; kind?: 'bike' | 'hiker' | 'pet' | 'truck' | 'walker' | 'patrol' | 'scooter'; loop?: boolean; color?: string }>;
   /** 健身小巴：跟雷達一樣（經緯度） */
@@ -101,7 +101,7 @@ export interface MapRoute {
   /** 文化網（點 —— 線 —— 面） */
   network?: { at: number; lines: Array<{ path: Array<[number, number]>; color: string }>; dots: Array<{ lat: number; lng: number; color: string }>; noFace?: boolean; faceR?: number };
   /** 一個東西冒出來：hut 登山中心、stadium 足球場、dome 運動中心、star 星星、regrow 樹樁（grow 時長回大樹）、culture 文化徑的點（small 的名字地圖上不寫，滑鼠移過去看介紹） */
-  icons?: Array<{ lat: number; lng: number; at: number; kind: 'hut' | 'stadium' | 'dome' | 'bigdome' | 'star' | 'regrow' | 'culture' | 'service' | 'wetland' | 'archbridge' | 'chest' | 'chestlock' | 'paw' | 'umusic' | 'uart' | 'uexhibit' | 'uyouth' | 'ushop' | 'fitbus' | SceneKind; label?: string; hideKm?: number; scale?: number; grow?: number; char?: string; color?: string; small?: boolean; focus?: boolean; rot?: number; calm?: boolean }>;
+  icons?: Array<{ lat: number; lng: number; at: number; kind: 'hut' | 'stadium' | 'dome' | 'bigdome' | 'star' | 'regrow' | 'culture' | 'service' | 'wetland' | 'archbridge' | 'chest' | 'chestlock' | 'paw' | 'umusic' | 'uart' | 'uexhibit' | 'uyouth' | 'ushop' | 'usport' | 'ukids' | 'uanime' | 'fitbus' | SceneKind; label?: string; hideKm?: number; scale?: number; grow?: number; char?: string; color?: string; small?: boolean; focus?: boolean; rot?: number; calm?: boolean }>;
   /** 政策圖層開著：其他特效變淡，只有 focus 的地方、通學區的圈清楚 */
   focus?: boolean;
   /** 都更的基地範圍（at 時淡入） */
@@ -143,7 +143,11 @@ const MAP_DRAGON_SVG =
     return `<path class="wb-paddle" d="M${x} -4.5L${x + 3} -9"/><circle class="wb-head" cx="${x}" cy="-1.2" r="1.6"/>`;
   }).join('');
 /** 冒出來的東西（跟 radar.ts 一樣的畫法，顏色在 styles.css） */
-const MAP_ICON_SVG: Record<'hut' | 'stadium' | 'dome' | 'bigdome' | 'star' | 'wetland' | 'archbridge' | 'chest' | 'chestlock' | 'paw' | 'umusic' | 'uart' | 'uexhibit' | 'uyouth' | 'ushop' | 'fitbus', string> = {
+const MAP_ICON_SVG: Record<'hut' | 'stadium' | 'dome' | 'bigdome' | 'star' | 'wetland' | 'archbridge' | 'chest' | 'chestlock' | 'paw' | 'umusic' | 'uart' | 'uexhibit' | 'uyouth' | 'ushop' | 'usport' | 'ukids' | 'uanime' | 'fitbus', string> = {
+  // 點亮市民大道（v1.682）：華山的運動驛站（啞鈴）、兒童遊戲場（溜滑梯）、動漫 IP 基地（有臉的小星星）
+  usport: '<circle class="ud-bg" r="9"/><path class="ud-ink" d="M-4 0H4"/><rect class="ud-dumb" x="-6.6" y="-3.6" width="2.8" height="7.2" rx="0.9"/><rect class="ud-dumb" x="3.8" y="-3.6" width="2.8" height="7.2" rx="0.9"/>',
+  ukids: '<circle class="ud-bg" r="9"/><path class="ud-ink" d="M-5.5 5.5V-4.5H-2.5V5.5M-5.5 -1H-2.5M-5.5 2.5H-2.5"/><path class="ud-slide" d="M-2.5 -4.5Q1.5 -3.5 2.6 0.6Q3.6 4.4 6.6 5.2"/>',
+  uanime: '<circle class="ud-bg" r="9"/><path class="ud-star" d="M0 -6.6L1.9 -2.3L6.5 -1.9L3 1.2L4.1 5.8L0 3.4L-4.1 5.8L-3 1.2L-6.5 -1.9L-1.9 -2.3Z"/><circle class="ud-fill" cx="-1.4" cy="0" r="0.75"/><circle class="ud-fill" cx="1.4" cy="0" r="0.75"/>',
   fitbus: `<g transform="translate(0 9)">${FITBUS_BODY}</g>`,
   // 音樂的圖示飄出小音符（v1.534）
   umusic: '<circle class="ud-bg" r="9"/><path class="ud-ink" d="M-1.5 4V-5.5L5 -7.5V2"/><ellipse class="ud-fill" cx="-3.6" cy="4.2" rx="2.6" ry="2"/><ellipse class="ud-fill" cx="2.9" cy="2.2" rx="2.6" ry="2"/>' + MUSIC_NOTES,
@@ -243,7 +247,7 @@ const WAVE_BACK = 'M-15 3.4 q2.5 -2.2 5 0 t5 0 t5 0 t5 0 t5 0';
 const WAVE_FRONT = 'M-11 8 q2.6 -2.3 5.2 0 t5.2 0 t5.2 0 t5.2 0';
 
 /** 拉遠就不寫的字：雷達的公里數對到地圖的哪一級（5 km → 縮放 14 以下、10 km → 13 以下、文化網 12 km → 12.5 以下；styles.css 的 #map.label-far*） */
-const farCls = (km: number): string => (km >= 12 ? 'far-label-12' : km >= 10 ? 'far-label-10' : 'far-label');
+const farCls = (km: number): string => (km >= 12 ? 'far-label-12' : km >= 10 ? 'far-label-10' : km <= 2 ? 'far-label-2' : 'far-label');
 
 export class MapView {
   private L: typeof Leaflet | null = null;
@@ -388,11 +392,13 @@ export class MapView {
         this.el.classList.toggle('label-far', map.getZoom() < HQ_LABEL_ZOOM);
         // 公園、運動中心、大型建築的字拉得更遠（縮放 13 以下，雷達 10 km）才不寫
         this.el.classList.toggle('label-far10', map.getZoom() < HQ_LABEL_ZOOM - 1);
+        // 點亮市民大道的陸橋、廊道、用途的字：拉近到雷達 2 km 左右（縮放 15.3）才寫（v1.682）
+        this.el.classList.toggle('label-far2', map.getZoom() < HQ_LABEL_ZOOM + 1.3);
         // 看整個文化網（縮放 12）時縫合、北士科星群、把樹種回來的字不寫（把水找回來跟文化徑有關，留著）
         this.el.classList.toggle('label-far12', map.getZoom() < 12.5);
         // 藏起來（display: none）的 CSS 動畫再出現時會從頭播、用畫的時候的 delay（例如還要等 70 秒），人流、腳踏車道、字就一直不出來、不動：
         // 跨過門檻時整層重畫一次，delay 照現在的時間重新算（v1.544 使用者說「電腦版的裂縫人流沒有在動」）
-        const key = ['hq-far', 'hq-dense-far', 'label-far', 'label-far10', 'label-far12'].map((c) => +this.el.classList.contains(c)).join('');
+        const key = ['hq-far', 'hq-dense-far', 'label-far', 'label-far10', 'label-far12', 'label-far2'].map((c) => +this.el.classList.contains(c)).join('');
         if (farKey && key !== farKey && this.routes.some((r) => r.voyage !== undefined)) this.pushRoutes();
         farKey = key;
       };
@@ -1198,6 +1204,8 @@ export class MapView {
         bridge: { color: '#5b6b7a', weight: 7 },
         stars: { color: '#f2b544', weight: 1.5 },
         culture: { color: rv.color ?? '#555', weight: 3, opacity: 0.9 },
+        // 點亮市民大道（v1.682）：那一段高架亮起來
+        light: { color: '#ffd24d', weight: 18, opacity: 0.7 },
       };
       const lines = rv.kind === 'bridge' ? [L.polyline(rv.path, { color: '#e8eef3', weight: 11, interactive: false }), L.polyline(rv.path, { ...style.bridge, interactive: false })] : [L.polyline(rv.path, { ...style[rv.kind], interactive: false })];
       for (const l of lines) {

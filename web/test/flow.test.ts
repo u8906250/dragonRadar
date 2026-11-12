@@ -134,7 +134,7 @@ describe('洋流總部的特效', () => {
     expect(fitbusPhase(o1 + FITBUS_STOP_MS + 500, HQ_FITBUS.stopAt, D).at).toBeGreaterThan(HQ_FITBUS.stopAt[1]);
     expect(fitbusPhase(o2 + 100, HQ_FITBUS.stopAt, D).at).toBeCloseTo(HQ_FITBUS.stopAt[2]);
     expect(fitbusPhase(-10, HQ_FITBUS.stopAt, D).alpha).toBe(0);
-    // 縫合市民大道：三個縫線都有介紹；人流小點真的跨過高架（SOGO 在南、微風在北）；北流在台北市裡
+    // 點亮市民大道（v1.682）：三個基地都有介紹；亮起來的範圍包住基地；懷生國小人行陸橋真的跨過高架；用途的圖示在基地 600 公尺內；北流在台北市裡
     const civic = HQ_VIADUCTS.find((v) => v.name.startsWith('市民'))!.pts;
     const civicLat = (lng: number): number => {
       for (let i = 1; i < civic.length; i++) {
@@ -146,9 +146,14 @@ describe('洋流總部的特效', () => {
     expect(HQ_SEAM.stitches.length).toBe(3);
     for (const st of HQ_SEAM.stitches) expect(HQ_INTROS[st.intro]?.length ?? 0, st.intro).toBeGreaterThan(20);
     expect(HQ_INTROS['縫合市民大道']?.length ?? 0).toBeGreaterThan(20);
-    const walk = HQ_SEAM.stitches.find((st) => st.walk)!.walk!;
-    expect(walk[0][0]).toBeLessThan(civicLat(walk[0][1]));
-    expect(walk[1][0]).toBeGreaterThan(civicLat(walk[1][1]));
+    expect(HQ_SEAM.stitches.map((st) => st.label)).toEqual(['華山', '市民八德', '市民敦化']);
+    for (const st of HQ_SEAM.stitches) {
+      expect(st.light[0] < st.near[1] && st.near[1] < st.light[1], st.label).toBe(true);
+      for (const u of st.uses) expect(Math.hypot((u.at[0] - st.near[0]) * 111, (u.at[1] - st.near[1]) * 101), `${st.label} ${u.label}`).toBeLessThan(0.6);
+    }
+    const huaisheng = HQ_SEAM.stitches.find((st) => st.bridge)!.bridge!.path;
+    expect(huaisheng[0][0]).toBeLessThan(civicLat(huaisheng[0][1]));
+    expect(huaisheng[1][0]).toBeGreaterThan(civicLat(huaisheng[1][1]));
     expect(inside(HQ_SEAM.beiliu.lat, HQ_SEAM.beiliu.lng)).toBe(true);
     // 明治橋：在台北市裡、離路線 2 公里內、有介紹
     expect(inside(HQ_MEIJI.lat, HQ_MEIJI.lng)).toBe(true);

@@ -478,6 +478,8 @@ path.map-water-glint { animation: water-flow-map 1.1s linear infinite; }
 .radar .voyage-reveal.bridge .reveal-line { stroke: #5b6b7a; }
 .radar .voyage-reveal.bridge .reveal-line.under { stroke: #e8eef3; }
 .radar .voyage-reveal.stars .reveal-line { stroke: #f2b544; stroke-opacity: 0.9; }
+/* 點亮市民大道（v1.682）：基地那一段高架亮起來，暖黃色、淡淡的 */
+.radar .voyage-reveal.light .reveal-line { stroke: #ffd24d; stroke-opacity: 0.7; }
 .radar .reveal-bikes, .map-reveal-bikes { fill: none; stroke: #15171c; stroke-linecap: round; stroke-dasharray: 3 12; opacity: 0; animation: reveal-bikes 1.6s linear infinite, voyage-stay 0.5s ease-out both; }
 @keyframes reveal-bikes { to { stroke-dashoffset: -15; } }
 /*
@@ -514,6 +516,7 @@ path.map-water-glint { animation: water-flow-map 1.1s linear infinite; }
 #map.label-far .far-label { display: none; }
 #map.label-far10 .far-label-10 { display: none; }
 #map.label-far12 .far-label-12 { display: none; }
+#map.label-far2 .far-label-2, #map.label-far .far-label-2 { display: none; }
 /* 划槳的規則寫在後面、一樣具體，拉遠停不下來：這裡寫得更具體（v1.531 使用者說「划船的動畫超過 5km 也要停止」） */
 .radar .routes.hq-far .voyage-boat .wb-paddle, #map.hq-far .map-voyage-boat .wb-paddle, .radar .routes.hq-far .walk-bob, #map.hq-far .walk-bob { animation: none; }
 .hq-far .pw-dog, .hq-far .pw-dtail { animation: none; }
@@ -1177,6 +1180,10 @@ path.map-seam-walkers { --p: 15px; }
 .ud-awn { fill: #e05a5a; stroke: #2a1a0e; stroke-width: 0.9; stroke-linejoin: round; }
 .ud-awn-s { fill: none; stroke: #fff; stroke-width: 0.9; }
 .ud-door { fill: #8a5a24; }
+/* 點亮市民大道（v1.682）：運動驛站的啞鈴、溜滑梯、動漫 IP 的小星星 */
+.ud-dumb { fill: #4c9be6; stroke: #2a1a0e; stroke-width: 0.8; }
+.ud-slide { fill: none; stroke: #e05a5a; stroke-width: 2; stroke-linecap: round; }
+.ud-star { fill: #ffd43b; stroke: #2a1a0e; stroke-width: 0.8; stroke-linejoin: round; }
 .ch-box, .ch-lid-o, .ch-lid-c { fill: #d5823a; stroke: #2a1a0e; stroke-width: 1.5; stroke-linejoin: round; }
 .ch-lid-in { fill: #7a3c12; stroke: #2a1a0e; stroke-width: 1; }
 .ch-dark { fill: #a95f22; }

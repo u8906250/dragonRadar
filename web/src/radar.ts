@@ -78,7 +78,7 @@ export interface RadarRoute {
    * 一條線從頭長到尾（at 開始、REVEAL_MS 長完）：trail 山林徑（土色）、bridge 自行車橋（粗的雙線，長完有腳踏車的點在上面跑）、stars 星座（金色細線）、
    * culture 文化徑的線（color）；label 寫在尾端（文化徑寫在中間）、留著
    */
-  reveals?: Array<{ points: Array<{ bearing: number; distanceKm: number }>; at: number; kind: 'trail' | 'bridge' | 'stars' | 'culture'; label?: string; color?: string; labelAt?: number; hideKm?: number }>;
+  reveals?: Array<{ points: Array<{ bearing: number; distanceKm: number }>; at: number; kind: 'trail' | 'bridge' | 'stars' | 'culture' | 'light'; label?: string; color?: string; labelAt?: number; hideKm?: number }>;
   /** 騎自行車的人：沿著 points 從頭騎到尾（start 開始、一趟 lap 毫秒），拉遠收起來 */
   bikes?: Array<{ points: Array<{ bearing: number; distanceKm: number }>; start: number; lap: number; kind?: 'bike' | 'hiker' | 'pet' | 'truck' | 'walker' | 'patrol' | 'scooter'; loop?: boolean; color?: string }>;
   /** 健身小巴：沿著 points 繞圈（start 出發、stopAt 是各站在路線上的位置），停站時那一站冒出運動的長輩；lineAt 路線畫出來；focus 是政策按鈕（衛福）亮著 */
@@ -107,7 +107,7 @@ export interface RadarRoute {
    * 一個東西冒出來（at）：hut 登山中心、stadium 足球場、dome 運動中心、star 星星、regrow 樹樁（grow 時長回大樹）、culture 文化徑的點（char、color）；
    * label 留著（small 是寫在下面的小字，跟別的小字重疊就不寫）
    */
-  icons?: Array<{ bearing: number; distanceKm: number; at: number; kind: 'hut' | 'stadium' | 'dome' | 'bigdome' | 'star' | 'regrow' | 'culture' | 'service' | 'wetland' | 'archbridge' | 'chest' | 'chestlock' | 'paw' | 'umusic' | 'uart' | 'uexhibit' | 'uyouth' | 'ushop' | 'fitbus' | SceneKind; label?: string; hideKm?: number; scale?: number; grow?: number; char?: string; color?: string; small?: boolean; focus?: boolean; rot?: number; calm?: boolean }>;
+  icons?: Array<{ bearing: number; distanceKm: number; at: number; kind: 'hut' | 'stadium' | 'dome' | 'bigdome' | 'star' | 'regrow' | 'culture' | 'service' | 'wetland' | 'archbridge' | 'chest' | 'chestlock' | 'paw' | 'umusic' | 'uart' | 'uexhibit' | 'uyouth' | 'ushop' | 'usport' | 'ukids' | 'uanime' | 'fitbus' | SceneKind; label?: string; hideKm?: number; scale?: number; grow?: number; char?: string; color?: string; small?: boolean; focus?: boolean; rot?: number; calm?: boolean }>;
   /** 政策圖層開著：其他特效變淡，只有 focus 的地方、通學區的圈清楚 */
   focus?: boolean;
   /** 都更的基地範圍（at 時淡入） */
@@ -151,7 +151,11 @@ const DRAGON_SVG =
     return `<path class="wb-paddle" d="M${x} -4.5L${x + 3} -9"/><circle class="wb-head" cx="${x}" cy="-1.2" r="1.6"/>`;
   }).join('');
 /** 冒出來的東西（螢幕像素，中心在 0,0；顏色在 styles.css）：登山中心是一間小屋、足球場是橢圓的場加草皮條紋、運動中心是圓頂、星星是五角星 */
-const ICON_SVG: Record<'hut' | 'stadium' | 'dome' | 'bigdome' | 'star' | 'wetland' | 'archbridge' | 'chest' | 'chestlock' | 'paw' | 'umusic' | 'uart' | 'uexhibit' | 'uyouth' | 'ushop' | 'fitbus', string> = {
+const ICON_SVG: Record<'hut' | 'stadium' | 'dome' | 'bigdome' | 'star' | 'wetland' | 'archbridge' | 'chest' | 'chestlock' | 'paw' | 'umusic' | 'uart' | 'uexhibit' | 'uyouth' | 'ushop' | 'usport' | 'ukids' | 'uanime' | 'fitbus', string> = {
+  // 點亮市民大道（v1.682）：華山的運動驛站（啞鈴）、兒童遊戲場（溜滑梯）、動漫 IP 基地（有臉的小星星）
+  usport: '<circle class="ud-bg" r="9"/><path class="ud-ink" d="M-4 0H4"/><rect class="ud-dumb" x="-6.6" y="-3.6" width="2.8" height="7.2" rx="0.9"/><rect class="ud-dumb" x="3.8" y="-3.6" width="2.8" height="7.2" rx="0.9"/>',
+  ukids: '<circle class="ud-bg" r="9"/><path class="ud-ink" d="M-5.5 5.5V-4.5H-2.5V5.5M-5.5 -1H-2.5M-5.5 2.5H-2.5"/><path class="ud-slide" d="M-2.5 -4.5Q1.5 -3.5 2.6 0.6Q3.6 4.4 6.6 5.2"/>',
+  uanime: '<circle class="ud-bg" r="9"/><path class="ud-star" d="M0 -6.6L1.9 -2.3L6.5 -1.9L3 1.2L4.1 5.8L0 3.4L-4.1 5.8L-3 1.2L-6.5 -1.9L-1.9 -2.3Z"/><circle class="ud-fill" cx="-1.4" cy="0" r="0.75"/><circle class="ud-fill" cx="1.4" cy="0" r="0.75"/>',
   // 健身小巴停著（河濱、山林徑）：車身往上移，圖案的中心在車子中間
   fitbus: `<g transform="translate(0 9)">${FITBUS_BODY}</g>`,
   // 音樂的圖示飄出小音符（v1.534）
@@ -2411,9 +2415,9 @@ export class Radar {
       if (rv.points.length < 2) continue;
       const d = this.pathOf(rv.points);
       const g = el('g', { class: `voyage-reveal ${rv.kind}` });
-      const widths: Record<string, number> = { trail: 3, bridge: 8, stars: 1, culture: 2.6 };
-      // 橋、步道下面墊一條淺色的邊，壓在樹、河上面才看得到
-      if (rv.kind !== 'stars') g.appendChild(el('path', { class: 'reveal-line under', d, pathLength: '1', style: `stroke-width:${(widths[rv.kind] * k + 2 * k).toFixed(2)};animation-delay:${Math.round(rv.at - now)}ms` }));
+      const widths: Record<string, number> = { trail: 3, bridge: 8, stars: 1, culture: 2.6, light: 18 };
+      // 橋、步道下面墊一條淺色的邊，壓在樹、河上面才看得到（點亮市民大道的光不用）
+      if (rv.kind !== 'stars' && rv.kind !== 'light') g.appendChild(el('path', { class: 'reveal-line under', d, pathLength: '1', style: `stroke-width:${(widths[rv.kind] * k + 2 * k).toFixed(2)};animation-delay:${Math.round(rv.at - now)}ms` }));
       g.appendChild(el('path', { class: 'reveal-line', d, pathLength: '1', style: `stroke-width:${(widths[rv.kind] * k).toFixed(2)};animation-delay:${Math.round(rv.at - now)}ms${rv.color ? `;stroke:${rv.color}` : ''}` }));
       // 自行車橋上的腳踏車改成騎自行車的人（bikes，v1.529），不畫小點
       this.routeLayer.appendChild(g);
