@@ -9,6 +9,11 @@ keep_vars = true
 [observability]
 enabled = true
 
+# 不留每個請求的紀錄（網址裡有使用者的 GPS 座標，v1.669 隱私評估）；程式自己寫的 console 紀錄照留
+[observability.logs]
+enabled = true
+invocation_logs = false
+
 # 每 10 分鐘抓 Threads 並更新事件狀態；每週一 03:00 UTC 更新 Threads token
 [triggers]
 crons = ["*/10 * * * *", "0 3 * * 1"]

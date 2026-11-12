@@ -2478,6 +2478,13 @@ function seaIn(createdAt: number): string {
   return m < 60 ? `${Math.max(1, m)} 分鐘` : `${Math.round(m / 60)} 小時`;
 }
 
+/** 別人的瓶子丟的時間只說到小時（伺服器只給整點，v1.669 隱私評估） */
+function agoCoarse(unix: number): string {
+  const h = Math.floor((nowSec() - unix) / 3600);
+  if (h < 1) return '1 小時內';
+  return h < 24 ? `約 ${h} 小時前` : `${Math.floor(h / 24)} 天前`;
+}
+
 function ago(unix: number): string {
   const m = Math.max(0, Math.round((nowSec() - unix) / 60));
   if (m < 60) return m <= 1 ? '剛剛' : `${m} 分鐘前`;
@@ -2654,10 +2661,10 @@ function renderBottleDetail(id: number): boolean {
     const status = b.mine
       ? `你${ago(b.createdAt)}丟的・${b.taken ? '已經被收藏了' : `還沒有人收藏（自己丟的不能收藏，別人走到 ${reachText(reach)} 內就看得到、收藏得到）`}・${lifecycle}`
       : b.picked
-        ? `${ago(b.createdAt)}丟的・你收藏了，放在「漂流瓶收藏」`
+        ? `${agoCoarse(b.createdAt)}丟的・你收藏了，放在「漂流瓶收藏」`
         : b.taken
-          ? `${ago(b.createdAt)}丟的・已經被別人收藏了・${lifecycle}`
-          : `${ago(b.createdAt)}丟的・還沒有人收藏・${lifecycle}`;
+          ? `${agoCoarse(b.createdAt)}丟的・已經被別人收藏了・${lifecycle}`
+          : `${agoCoarse(b.createdAt)}丟的・還沒有人收藏・${lifecycle}`;
     const showText = justThrown !== id;
     body = `${showText ? kraftNote(got.text, b.id, got.photo) : ''}<p class="muted">${esc(status)}</p>`;
     // 顯示了內容就算看過：雷達、地圖上的這個瓶子換成空瓶（這一輪已經畫好了，下一格再畫一次）
@@ -2695,7 +2702,7 @@ function renderBottleDetail(id: number): boolean {
         ${!got && !b.mine && !b.picked && !near && !woof ? `<a class="btn" href="https://www.google.com/maps/dir/?api=1&destination=${b.lat},${b.lng}&travelmode=walking" target="_blank" rel="noopener">走過去</a>` : ''}
         ${got && (b.mine || b.picked) ? '<button type="button" class="btn" data-act="proof">瓶子證明</button>' : ''}
         ${got && !b.mine ? '<button type="button" class="btn subtle" data-act="report">檢舉</button>' : ''}
-        ${b.mine && canWithdraw(b.taken ? 'picked' : 'active', b.createdAt) ? `<button type="button" class="btn subtle" data-act="delete"${withdrawing.has(b.id) ? ' disabled' : ''}>收回</button>` : ''}
+        ${b.mine && canWithdraw(b.taken ? 'picked' : 'active') ? `<button type="button" class="btn subtle" data-act="delete"${withdrawing.has(b.id) ? ' disabled' : ''}>收回</button>` : ''}
       </div>
       <p class="muted sheet-note small">${
         woof
@@ -2736,14 +2743,8 @@ function renderBottleDetail(id: number): boolean {
     const btn = e.currentTarget as HTMLButtonElement;
     btn.disabled = true;
     withdrawing.add(id);
-    const here = await withdrawHere().catch(() => null);
-    const r = here ? await deleteBottle(id, here) : null;
+    const r = await deleteBottle(id);
     withdrawing.delete(id);
-    if (!r) {
-      btn.disabled = false;
-      render();
-      return;
-    }
     if (!r.ok) {
       bottleMsg = r.message;
     } else {
@@ -2836,29 +2837,30 @@ async function openSharedBottle(id: number): Promise<void> {
   history.replaceState(history.state, '', url);
   const r = await fetchBottleInfo(id);
   if (!r.ok) return;
-  const b = r.data.bottle;
   // 收藏滿 24 小時，只在收藏的人那裡（v1.645）
   if (r.data.state === 'kept') {
     showBanner(bannerEl, r.data.yours ? `漂流瓶 ${bottleNo(id)} 在你的「漂流瓶收藏」裡` : `漂流瓶 ${bottleNo(id)} 已經被收藏走了`, 4000);
     return;
   }
-  if (r.data.state === 'gone' || !b) {
+  if (r.data.state === 'gone') {
     showBanner(bannerEl, `漂流瓶 ${bottleNo(id)} 已經沉下去或不見了`, 4000);
     return;
   }
-  // 只看得到 1 km 內的（汪星上要雷達拉近到 1 km）：看不到的只說一聲，不放上雷達
-  if (!bottleSeen(b)) {
+  // 伺服器不給編號查位置（v1.669 隱私評估）：重抓附近的瓶子，在裡面、看得到才選起來；看不到的只說一聲
+  const woof = r.data.world === 'woof';
+  if (woof) await loadWoofBottles();
+  else await reloadBottles();
+  const b = findBottle(id);
+  if (!b || !bottleSeen(b)) {
     showBanner(
       bannerEl,
-      b.world === 'woof'
+      woof
         ? `漂流瓶 ${bottleNo(id)} 漂到汪星的海上了，搭火箭到汪星、走到附近，雷達拉近到 ${reachText(WOOF_SEE_KM * 1000)} 才看得到`
         : `漂流瓶 ${bottleNo(id)} 在你 ${reachText(bottleSeeKm() * 1000)} 外，走近一點才看得到`,
       4000,
     );
     return;
   }
-  if (b.world === 'woof') woofBottles = [b, ...woofBottles.filter((x) => x.id !== id)];
-  else bottles = [b, ...bottles.filter((x) => x.id !== id)];
   selectedBottle = null;
   selectBottle(id);
 }
@@ -2999,20 +3001,13 @@ function bottleWorldChanged(): void {
   if (!bottleSheet.hidden) renderBottleSheet();
 }
 
-/** 自己丟的瓶子收不收得回來：丟出去 24 小時內（v1.619 使用者說的；收藏了的也一樣），還要走到瓶子 1 km 內（伺服器照位置確認） */
-const canWithdraw = (status: string, createdAt: number): boolean =>
-  (status === 'active' || status === 'hidden' || status === 'picked') && nowSec() - createdAt < 86400;
-/** 收回中的瓶子（定位、送出的時候畫面重畫了，再按也不會送兩次） */
-const withdrawing = new Set<number>();
 /**
- * 收回時帶的位置：自己丟的都在地球上，用 GPS（手動位置不算）。還沒用 GPS 就先自動定位、等抓到再送（v1.657 使用者說收回也先定位，不然一直失敗）；
- * 定位失敗回 null（定位已經說了原因，不送）
+ * 自己丟的瓶子收不收得回來：還在的都可以（收藏了的也一樣），隨時、不用走過去（v1.669 隱私評估：丟的人要能刪掉自己的內容；
+ * 以前是 24 小時內、走到瓶子 1 km 內，v1.657 收回前先自動定位也就不用了）
  */
-async function withdrawHere(): Promise<BottleHere | null> {
-  if (origin.source === 'gps') return { at: origin, world: 'earth' };
-  if (tripping || youOn !== 'earth') return { at: null, world: 'earth' };
-  return (await locateMe()) && lastGps ? { at: lastGps, world: 'earth' } : null;
-}
+const canWithdraw = (status: string): boolean => status === 'active' || status === 'hidden' || status === 'picked';
+/** 收回中的瓶子（送出的時候畫面重畫了，再按也不會送兩次） */
+const withdrawing = new Set<number>();
 const withdrawAsk = (taken: boolean): string =>
   taken ? '這個瓶子已經被收藏了，收回就銷毀，收藏的人也看不到了。要收回嗎？' : '要收回這個瓶子嗎？收回就銷毀，內容和照片都會刪掉。';
 
@@ -3042,7 +3037,7 @@ function paintMyBottles(): void {
         .map((b) => {
           const fresh = b.pickedAt !== null && b.pickedAt > seen;
           return `<li><span class="spot-mine-body"><b class="bottle-no">${bottleNo(b.id)}</b>${b.photo ? '📷' : ''}「${esc(b.text)}」<small>${fresh ? '<b class="new-tag">新</b>' : ''}${ago(b.createdAt)}丟的・${esc(statusText(b))}</small></span>${
-            canWithdraw(b.status, b.createdAt) ? `<button type="button" class="chip spot-cancel" data-delete-bottle="${b.id}" data-taken="${b.status === 'picked' ? 1 : 0}">收回</button>` : ''
+            canWithdraw(b.status) ? `<button type="button" class="chip spot-cancel" data-delete-bottle="${b.id}" data-taken="${b.status === 'picked' ? 1 : 0}">收回</button>` : ''
           }</li>`;
         })
         .join('')}</ul>`
@@ -3206,13 +3201,8 @@ async function onLettersClick(e: Event): Promise<void> {
     if (withdrawing.has(id) || !window.confirm(withdrawAsk(del.dataset.taken === '1'))) return;
     del.disabled = true;
     withdrawing.add(id);
-    const here = await withdrawHere().catch(() => null);
-    const r = here ? await deleteBottle(id, here) : null;
+    const r = await deleteBottle(id);
     withdrawing.delete(id);
-    if (!r) {
-      del.disabled = false;
-      return;
-    }
     if (!r.ok) {
       del.disabled = false;
       showBanner(bannerEl, r.message, 3000);
@@ -3259,7 +3249,8 @@ function confirmThrow(): Promise<boolean> {
     '只有在地球上才能丟，瓶子會落在你現在的位置 1 km 內的隨機位置（不會在你站的地方），之後在這 1 km 內慢慢漂。',
     `沒人收藏的 ${r?.seaHours ?? 24} 小時後漂到汪星的海上，${r?.woofDays ?? 30} 天後沉下去；被收藏的不會漂走，在原地標成已收藏 ${KEEP_TAKEN_H} 小時，之後收進收藏的人的「收藏」、裝進瓶子裡。`,
     `走到瓶子 ${reachText((r?.seeKm ?? 1) * 1000)} 內才看得到瓶子、打開來看內容和照片，第一個按「收藏」的人會把它收進漂流瓶收藏（收藏了別人照樣看得到）。`,
-    `丟出去 24 小時內、你走回瓶子 ${reachText(r?.pickRadiusM)} 內才收得回來；收回的也算今天的額度。`,
+    '內容和照片請當成公開的：位置是手機送出的，有心人可以假造，不要寫、拍不想讓陌生人看到的東西。',
+    '不用走過去就能收回（選單「收藏」的「我丟的瓶子」，或點雷達上自己的瓶子），收回就銷毀、收藏的人也看不到了；收回的也算今天的額度。',
     `每天可以丟 ${r?.perDay ?? 3} 個，00:00 恢復成 ${r?.perDay ?? 3} 個${left !== undefined ? `；丟了這個今天還剩 ${Math.max(0, left - 1)} 個` : ''}。`,
     '送出前會自動審核：辱罵或攻擊任何人（包括候選人、政黨）、謠言、連結、電話、帳號、個人資料都不會通過。',
   ];

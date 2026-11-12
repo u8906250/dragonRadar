@@ -19,7 +19,7 @@ import { PUSH_RADIUS_KM, PushError, b64urlEncode, deleteSubscription, encryptPay
 import { assertEventReportsOpen, confirmLink, editLink, ENDED_REPORTS_NEEDED, locateForEdit, MAX_LINK_AGE_SEC, NOTES_CLOSED, ReportError, REPORTS_LOCKED, ipHash, myReports, purgeReports, recheckLinks, rejectLink, reportModules, submitLink, supplementLink, withdrawReport } from './reports';
 import { D1Meter, isTransient, withResilientDb } from './db';
 import { addressCacheKey, geocodeAddress, parseTwAddress } from './address';
-import { adminBottleRejects, adminListBottles, adminSetBottle, deleteBottleRejects, moderate, moderatePhoto, purgeBottleRejects, BOTTLE_MAX_WEIGHT, bottleInfo, bottlePhoto, bottlesEnabled, photosEnabled, readBottle, SEE_RADIUS_KM, deleteBottle, deviceId, DRIFT_EVERY_SEC, driftBottles, dropBottle, listBottles, myBottles, PER_DEVICE_PER_DAY, PICK_RADIUS_M, pickBottle, proofFor, purgeBottles, reportBottle, SEA_AFTER_SEC, uncollectLetter, verifyProof, WOOF_STAY_SEC } from './bottles';
+import { adminBottleRejects, adminListBottles, adminSetBottle, deleteBottleRejects, moderate, moderatePhoto, purgeBottleReads, purgeBottleRejects, BOTTLE_MAX_WEIGHT, bottleInfo, bottlePhoto, bottlesEnabled, photosEnabled, readBottle, SEE_RADIUS_KM, deleteBottle, deviceId, DRIFT_EVERY_SEC, driftBottles, dropBottle, listBottles, myBottles, PER_DEVICE_PER_DAY, PICK_RADIUS_M, pickBottle, proofFor, purgeBottles, reportBottle, SEA_AFTER_SEC, uncollectLetter, verifyProof, WOOF_STAY_SEC } from './bottles';
 import { approveSpotRequest, autoReview, cancelSpotRequest, listSpotRequests, locatePlace, rejectSpotRequest, SPOT_MAX_AGE_SEC, spotRequestStatus, type ApproveBody, type SpotRequestRow } from './spots';
 import { addUserKeyword, listActiveKeywords, listAllKeywords, MAX_ACTIVE_KEYWORDS, normalizeKeyword, parseKeywordList, toKeywordOut, touchKeywords } from './keywords';
 import { listLearnedTags, setLearnedTag } from './learnedTags';
@@ -314,19 +314,16 @@ async function handle(req: Request, env: Env, ctx: ExecutionContext): Promise<Re
       if (req.method === 'GET' && !one[2]) return jsonResponse(await bottleInfo(env, dev, id, now));
       if (req.method === 'GET' && one[2] === 'proof') return jsonResponse(await proofFor(env, dev, id));
       if (req.method === 'GET' && one[2] === 'photo')
-        return bottlePhoto(env, dev, id, { lat: num(url.searchParams.get('lat')), lng: num(url.searchParams.get('lng')), world: url.searchParams.get('world') ?? undefined });
-      if (req.method === 'POST' && one[2] === 'read') return jsonResponse(await readBottle(env, dev, id, await readJson<{ lat?: unknown; lng?: unknown; world?: unknown }>(req), now));
+        return bottlePhoto(env, dev, await ipHash(env, req), id, { lat: num(url.searchParams.get('lat')), lng: num(url.searchParams.get('lng')), world: url.searchParams.get('world') ?? undefined }, now);
+      if (req.method === 'POST' && one[2] === 'read') return jsonResponse(await readBottle(env, dev, await ipHash(env, req), id, await readJson<{ lat?: unknown; lng?: unknown; world?: unknown }>(req), now));
       if (req.method === 'POST' && one[2] === 'uncollect') return jsonResponse(await uncollectLetter(env, dev, id));
       if (req.method === 'POST' && one[2] === 'pick') return jsonResponse(await pickBottle(env, dev, id, await readJson<{ lat?: unknown; lng?: unknown; world?: unknown }>(req), now));
       if (req.method === 'POST' && one[2] === 'report') {
         const body = await readJson<{ reason?: unknown; lat?: unknown; lng?: unknown; world?: unknown }>(req);
         return jsonResponse(await reportBottle(env, dev, await ipHash(env, req), id, body, now));
       }
-      if (req.method === 'DELETE' && !one[2]) {
-        // 收回要帶你的位置（舊版網頁沒帶 body 就當沒定位）
-        const body = (req.headers.get('content-type') ?? '').includes('json') ? await readJson<{ lat?: unknown; lng?: unknown; world?: unknown }>(req) : {};
-        return jsonResponse(await deleteBottle(env, dev, id, body, now));
-      }
+      // 收回：隨時都可以、不用帶位置（v1.669）
+      if (req.method === 'DELETE' && !one[2]) return jsonResponse(await deleteBottle(env, dev, id));
     }
     throw new HttpError(404, 'not found');
   }
@@ -842,7 +839,7 @@ async function purgeOldData(env: Env, now: number): Promise<number> {
     // 手動改的地點、時間跟著貼文
     env.DB.prepare('DELETE FROM manual_fixes WHERE post_id NOT IN (SELECT id FROM posts)'),
   ]);
-  return r.reduce((n, x) => n + (x.meta.changes ?? 0), 0) + (await purgeReports(env, cutoff)) + (await purgeBottles(env, cutoff)) + (await purgeBottleRejects(env, now)) + (await purgeCards(env, cutoff)) + (await purgeWishes(env, cutoff)) + (await purgeSubscriptions(env, cutoff)) + (await purgeFeedback(env, cutoff));
+  return r.reduce((n, x) => n + (x.meta.changes ?? 0), 0) + (await purgeReports(env, cutoff)) + (await purgeBottles(env, cutoff)) + (await purgeBottleRejects(env, now)) + (await purgeBottleReads(env, now)) + (await purgeCards(env, cutoff)) + (await purgeWishes(env, cutoff)) + (await purgeSubscriptions(env, cutoff)) + (await purgeFeedback(env, cutoff));
 }
 
 async function refreshTokenJob(env: Env): Promise<void> {

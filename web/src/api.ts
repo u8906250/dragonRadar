@@ -191,13 +191,14 @@ export const pickBottle = (id: number, here?: BottleHere): Promise<Result<Picked
 /** 打開來看（不收藏）：自己丟的、收藏過的隨時看得到，別人的要走到附近 */
 export const readBottle = (id: number, here?: BottleHere): Promise<Result<PickedBottle>> => deviceJson<PickedBottle>(`/api/bottles/${id}/read`, 'POST', hereBody(here));
 /** 分享出去的瓶子（沒有內容）：還在漂、被撿走了、不見了 */
-export const fetchBottleInfo = (id: number): Promise<Result<{ id: number; state: 'active' | 'picked' | 'kept' | 'gone'; bottle: BottleOut | null; yours?: boolean }>> => deviceJson(`/api/bottles/${id}`);
+/** 分享連結的瓶子還在不在（不給位置、時間，v1.669）：位置從附近的瓶子清單拿 */
+export const fetchBottleInfo = (id: number): Promise<Result<{ id: number; state: 'active' | 'picked' | 'kept' | 'gone'; world?: 'earth' | 'woof'; yours?: boolean }>> => deviceJson(`/api/bottles/${id}`);
 /** 瓶子證明（丟的人、撿到的人才拿得到） */
 export const fetchBottleProof = (id: number): Promise<Result<BottleProof>> => deviceJson<BottleProof>(`/api/bottles/${id}/proof`);
 export const verifyBottleProof = (p: BottleProof): Promise<Result<{ valid: boolean }>> => deviceJson<{ valid: boolean }>('/api/bottles/verify', 'POST', p);
 export const fetchMyBottles = (): Promise<Result<MyBottles>> => deviceJson<MyBottles>('/api/bottles/mine');
-/** 收回：丟出去 24 小時內、走到瓶子附近才收得回來（帶你的位置） */
-export const deleteBottle = (id: number, here?: BottleHere): Promise<Result<{ ok: true }>> => deviceJson<{ ok: true }>(`/api/bottles/${id}`, 'DELETE', hereBody(here));
+/** 收回（就銷毀）：隨時都可以、不用走過去（v1.669） */
+export const deleteBottle = (id: number): Promise<Result<{ ok: true }>> => deviceJson<{ ok: true }>(`/api/bottles/${id}`, 'DELETE', {});
 /** 移出漂流瓶收藏（之後就看不到這封信了） */
 export const uncollectLetter = (id: number): Promise<Result<{ collected: boolean }>> => deviceJson<{ collected: boolean }>(`/api/bottles/${id}/uncollect`, 'POST', {});
 /** 回報問題（地點錯誤、時間錯誤…），只有管理者看得到；車掃可以指定哪一站（那一站的標題、預計經過時間） */
