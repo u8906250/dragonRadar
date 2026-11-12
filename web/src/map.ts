@@ -732,7 +732,8 @@ export class MapView {
   setRoutes(routes: MapRoute[]): void {
     const sig = (rs: MapRoute[]): string =>
       // 洋流總部的特效：文化網、政策圖層（多出來的地方、通學區的圈）開關時也要重畫
-      JSON.stringify(rs.map((r) => [r.id, r.state, r.flowAt ?? null, r.segments.map((x) => [x.people, x.target, x.path.length, !!x.passed]), r.turns ?? [], !!r.boat, r.voyageKey ?? r.voyage ?? null, r.network?.at ?? null, r.icons?.length ?? 0, r.seams?.length ?? 0, r.fitbuses?.[0]?.focus ?? null, r.circles?.length ?? 0, r.sites?.length ?? 0, !!r.focus, r.riverOut !== undefined && Date.now() > r.riverOut + 1600]));
+      // 標題也算（點路線跳出的說明寫著標題，管理者改了標題要換；v1.679 使用者說滑鼠點擊顯示的標題也要改）
+      JSON.stringify(rs.map((r) => [r.id, r.title, r.state, r.flowAt ?? null, r.segments.map((x) => [x.people, x.target, x.path.length, !!x.passed]), r.turns ?? [], !!r.boat, r.voyageKey ?? r.voyage ?? null, r.network?.at ?? null, r.icons?.length ?? 0, r.seams?.length ?? 0, r.fitbuses?.[0]?.focus ?? null, r.circles?.length ?? 0, r.sites?.length ?? 0, !!r.focus, r.riverOut !== undefined && Date.now() > r.riverOut + 1600]));
     const same = sig(routes) === sig(this.routes);
     // 時間往前推（加速）時不重畫，但留著新的時間，之後重畫（縮放跨過門檻）才會照新的時間排
     this.routes = routes;
