@@ -12,6 +12,8 @@ const TOPIC_GROUPS: Array<{ key: string; words: RegExp }> = [
   { key: 'parade', words: /遊行|踩街|健走|路跑|騎/ },
   { key: 'exhibit', words: /展/ },
   { key: 'care', words: /淨灘|志工|清潔|捐|愛心/ },
+  // v1.677 使用者說加聯誼、用愛心（志工改成小樹苗）
+  { key: 'social', words: /聯誼|交友|相親|派對|聚會|約會/ },
 ];
 /** 每一類的名稱（搜尋框下面的類型按鈕，v1.676 使用者說提供這些活動類型快速搜尋），照 TOPIC_GROUPS 的順序 */
 export const TOPIC_TYPES: Array<{ key: string; label: string }> = [
@@ -24,6 +26,7 @@ export const TOPIC_TYPES: Array<{ key: string; label: string }> = [
   { key: 'parade', label: '遊行' },
   { key: 'exhibit', label: '展覽' },
   { key: 'care', label: '志工' },
+  { key: 'social', label: '聯誼' },
 ];
 export function topicGlyph(topic: string | null | undefined): string | null {
   if (!topic) return null;
@@ -49,7 +52,9 @@ export function glyphSvg(key: string, c: string): string {
       return `<path d="M-4.5 7 V-7" ${s} stroke-width="1.8"/><path d="M-4.5 -7 L6.5 -4 L-4.5 -1 Z" fill="${c}"/>`;
     case 'exhibit': // 畫框
       return `<rect x="-6.5" y="-6" width="13" height="12" rx="1" ${s} stroke-width="1.6"/><path d="M-4.5 3.8 l3 -4 l2 2.4 l1.6 -1.6 l2.4 3.2 z" fill="${c}"/><circle cx="2.6" cy="-2.6" r="1.3" fill="${c}"/>`;
-    case 'care': // 愛心
+    case 'care': // 小樹苗（志工、淨灘；v1.677 愛心給聯誼）
+      return `<path d="M0 7 V-1" ${s} stroke-width="1.8"/><path d="M0 0 C-0.8 -4.6 -5.6 -6 -7 -4.2 C-6.2 -0.9 -3 0.3 0 0 Z" fill="${c}"/><path d="M0 -1.8 C0.9 -6.6 5.8 -7.8 7 -5.8 C6 -2.6 3 -1.6 0 -1.8 Z" fill="${c}"/><path d="M-3.5 7 H3.5" ${s} stroke-width="1.6"/>`;
+    case 'social': // 愛心（聯誼）
       return `<path d="M0 6 C-4 3 -7 0.5 -7 -2.5 a3.4 3.4 0 0 1 7 -1.2 a3.4 3.4 0 0 1 7 1.2 C7 0.5 4 3 0 6 z" fill="${c}"/>`;
     default:
       return '';
