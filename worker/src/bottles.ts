@@ -535,7 +535,7 @@ export async function bottleProof(env: Env, b: { id: number; created_at: number;
 /** 丟的人、撿到的人才拿得到瓶子證明（看得到內容的人） */
 export async function proofFor(env: Env, device: string | null, id: number): Promise<BottleProof> {
   const dev = needDevice(device);
-  const b = await env.DB.prepare('SELECT id, created_at, text, device_id FROM bottles WHERE id = ?').bind(id).first<{ id: number; created_at: number; text: string; device_id: string }>();
+  const b = await env.DB.prepare("SELECT id, created_at, text, device_id FROM bottles WHERE id = ? AND status != 'deleted'").bind(id).first<{ id: number; created_at: number; text: string; device_id: string }>();
   if (!b) throw new ReportError(404, '找不到這個瓶子');
   if (b.device_id !== dev && !(await env.DB.prepare('SELECT 1 AS x FROM bottle_picks WHERE bottle_id = ? AND device_id = ?').bind(id, dev).first()))
     throw new ReportError(403, '丟的人和撿到的人才看得到瓶子證明');
@@ -809,14 +809,14 @@ export interface MyBottles {
   letters: Array<{ id: number; text: string; photo: boolean; world: BottleWorld; createdAt: number; pickedAt: number; driftM: number }>;
 }
 
-/** 我丟的、我的漂流瓶收藏 */
+/** 我丟的、我的漂流瓶收藏；我丟的只列 24 小時內丟的（v1.661 使用者說超過 24 小時不用顯示，跟收得回來的時間一樣） */
 export async function myBottles(env: Env, device: string | null, now: number): Promise<MyBottles> {
   const dev = needDevice(device);
   const dropped = await env.DB.prepare(
     `SELECT b.*, (SELECT MIN(created_at) FROM bottle_picks p WHERE p.bottle_id = b.id) AS picked_at FROM bottles b
       WHERE b.device_id = ? AND b.status != 'deleted' AND b.created_at > ? ORDER BY b.id DESC LIMIT 30`,
   )
-    .bind(dev, now - 31 * 86400)
+    .bind(dev, now - WITHDRAW_SEC)
     .all<BottleRow & { picked_at: number | null }>();
   // 收藏的信；被檢舉藏起來、被管理者移除的不顯示
   const mine = await env.DB.prepare(
@@ -863,7 +863,9 @@ export async function uncollectLetter(env: Env, device: string | null, id: numbe
 
 /**
  * 收回自己丟的瓶子（v1.619 使用者說的）：丟出去 24 小時內、人在瓶子 PICK_RADIUS_M 內（body 帶位置）才收得回來，
- * 收藏了的也一樣；收回後雷達上不見、收藏的人的漂流瓶收藏裡也看不到了
+ * 收藏了的也一樣；收回後雷達上不見、收藏的人的漂流瓶收藏裡也看不到了。
+ * 收回就銷毀（v1.661 使用者說的）：內容、位置、照片（R2）、收藏和檢舉紀錄馬上刪掉，只留一筆空的（編號、丟的時間、裝置雜湊），
+ * 今天的額度照算（收回的也算）、編號不會重複，跟著 30 天的清除刪掉
  */
 export async function deleteBottle(env: Env, device: string | null, id: number, body: { lat?: unknown; lng?: unknown; world?: unknown }, now: number): Promise<{ ok: true }> {
   const dev = needDevice(device);
@@ -871,8 +873,15 @@ export async function deleteBottle(env: Env, device: string | null, id: number, 
   if (!b) throw new ReportError(404, '這個瓶子已經不見了，收不回來');
   if (b.created_at <= now - WITHDRAW_SEC) throw new ReportError(403, '丟出去超過 24 小時了，收不回來');
   assertNear(b, body, '收回');
-  const r = await env.DB.prepare("UPDATE bottles SET status = 'deleted' WHERE id = ? AND device_id = ? AND status IN ('active', 'hidden', 'picked')").bind(id, dev).run();
+  const [r] = await env.DB.batch([
+    env.DB.prepare(
+      "UPDATE bottles SET status = 'deleted', text = '', photo_key = NULL, lat = 0, lng = 0, origin_lat = NULL, origin_lng = NULL, picks = 0, reports = 0 WHERE id = ? AND device_id = ? AND status IN ('active', 'hidden', 'picked')",
+    ).bind(id, dev),
+    env.DB.prepare("DELETE FROM bottle_picks WHERE bottle_id = ? AND EXISTS (SELECT 1 FROM bottles WHERE id = ? AND status = 'deleted')").bind(id, id),
+    env.DB.prepare("DELETE FROM bottle_reports WHERE bottle_id = ? AND EXISTS (SELECT 1 FROM bottles WHERE id = ? AND status = 'deleted')").bind(id, id),
+  ]);
   if ((r.meta.changes ?? 0) === 0) throw new ReportError(404, '這個瓶子已經不見了，收不回來');
+  if (b.photo_key && env.BOTTLE_PHOTOS) await env.BOTTLE_PHOTOS.delete(b.photo_key).catch(() => undefined);
   return { ok: true };
 }
 

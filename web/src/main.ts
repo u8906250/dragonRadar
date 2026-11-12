@@ -2746,7 +2746,7 @@ function renderBottleDetail(id: number): boolean {
     } else {
       removeBottleMark(id);
       selectedBottle = null;
-      showBanner(bannerEl, '瓶子收回了', 2000);
+      showBanner(bannerEl, '瓶子收回了，已經銷毀', 2000);
     }
     render();
   });
@@ -2891,10 +2891,13 @@ async function reloadMyBottles(): Promise<void> {
   updateBottleNews();
 }
 
+/** 「我丟的瓶子」只列 24 小時內丟的（v1.661 使用者說超過 24 小時不用顯示；伺服器也只回 24 小時內的，這裡擋網頁開很久的） */
+const recentDropped = (): NonNullable<typeof myBottlesData>['dropped'] => (myBottlesData?.dropped ?? []).filter((b) => nowSec() - b.createdAt < 86400);
+
 /** 自己丟的瓶子有沒有新被收藏的（上次看「我丟的瓶子」之後） */
 function newlyPicked(): number {
   const seen = Number(lsGet(LS_BOTTLE_SEEN) ?? 0);
-  return myBottlesData?.dropped.filter((b) => b.pickedAt !== null && b.pickedAt > seen).length ?? 0;
+  return recentDropped().filter((b) => b.pickedAt !== null && b.pickedAt > seen).length;
 }
 
 /** 按鈕上的小紅點；這次打開網頁第一次發現時跳一次提示 */
@@ -3008,13 +3011,14 @@ async function withdrawHere(): Promise<BottleHere | null> {
   return (await locateMe()) && lastGps ? { at: lastGps, world: 'earth' } : null;
 }
 const withdrawAsk = (taken: boolean): string =>
-  taken ? '這個瓶子已經被收藏了，收回後收藏的人也看不到了。要收回嗎？' : '要收回這個瓶子嗎？收回後就沒有人看得到了。';
+  taken ? '這個瓶子已經被收藏了，收回就銷毀，收藏的人也看不到了。要收回嗎？' : '要收回這個瓶子嗎？收回就銷毀，內容和照片都會刪掉。';
 
 /** 收藏頁下面「我丟的瓶子」：狀態、收回 */
 function paintMyBottles(): void {
   const data = myBottlesData;
   if (!data) return;
-  const { dropped, quota } = data;
+  const { quota } = data;
+  const dropped = recentDropped();
   const seen = Number(lsGet(LS_BOTTLE_SEEN) ?? 0);
   const statusText = (b: (typeof dropped)[number]): string => {
     const drift = driftText(b.driftM);
@@ -3204,7 +3208,7 @@ async function onLettersClick(e: Event): Promise<void> {
       return;
     }
     removeBottleMark(id);
-    showBanner(bannerEl, '瓶子收回了', 2000);
+    showBanner(bannerEl, '瓶子收回了，已經銷毀', 2000);
     await reloadMyBottles();
     render();
     return;
