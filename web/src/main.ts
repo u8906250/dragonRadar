@@ -2515,7 +2515,7 @@ async function openBottle(id: number): Promise<void> {
   const r = await readBottle(id, b.mine || b.picked ? undefined : hereFor(b));
   if (!r.ok) {
     bottleMsg = r.message;
-    if (/沉下去/.test(r.message)) removeBottleMark(id, true);
+    if (/沉下去|收藏走了/.test(r.message)) removeBottleMark(id, true);
   } else {
     bottleTexts.set(id, r.data);
     bottleMsg = '';
@@ -2548,8 +2548,21 @@ async function collectBottle(id: number): Promise<void> {
   if (!r.ok) {
     bottleMsg = r.message;
     // 真的被別人收藏了（「晚了一步」）才標成已收藏；走不夠近、還沒定位的訊息裡也有「收藏」兩個字，不算
-    if (/晚了一步/.test(r.message)) markBottle(id, { taken: true });
-    else if (/已經沉下去/.test(r.message)) removeBottleMark(id, true);
+    // 汪星海上的被收藏了就不在海上了
+    if (/晚了一步/.test(r.message)) {
+      if (b.world === 'woof') {
+        removeBottleMark(id);
+        showBanner(bannerEl, r.message, 3000);
+      } else markBottle(id, { taken: true });
+    } else if (/已經沉下去/.test(r.message)) removeBottleMark(id, true);
+  } else if (b.world === 'woof') {
+    // 汪星海上的：一收藏就從海上消失、直接放進收藏櫃（v1.664 使用者說的）
+    collectedNow.add(id);
+    removeBottleMark(id);
+    selectedBottle = null;
+    bottleMsg = '';
+    showBanner(bannerEl, '收藏了！瓶子放進選單「收藏」的櫃子裡了', 3000);
+    void reloadMyBottles();
   } else {
     collectedNow.add(id);
     bottleTexts.set(id, r.data);
@@ -3133,7 +3146,8 @@ function renderLettersPage(): void {
     return;
   }
   const { letters } = data;
-  const keepLeft = (l: MyBottles['letters'][number]): number => l.pickedAt + KEEP_TAKEN_H * 3600 - nowSec();
+  // 汪星海上收藏的一收藏就放進來（v1.664）；地球上的在原地留 24 小時
+  const keepLeft = (l: MyBottles['letters'][number]): number => (l.world === 'woof' ? 0 : l.pickedAt + KEEP_TAKEN_H * 3600 - nowSec());
   const kept = letters.filter((l) => keepLeft(l) <= 0);
   const cell = (l: MyBottles['letters'][number]): string =>
     `<li><button type="button" class="cab-bottle" data-open-letter="${l.id}" aria-label="${bottleNo(l.id)}，拿出來看">${bottleSvg('')}<span class="cab-no">${bottleNo(l.id)}</span></button></li>`;

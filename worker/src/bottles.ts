@@ -698,14 +698,19 @@ function toOut(r: BottleRow & { taken_at?: number | null }, dev: string | null, 
   return { id: r.id, world: r.world, lat: r.lat, lng: r.lng, createdAt: r.created_at, expiresAt: r.expires_at, mine: r.device_id === dev, picked, picks: r.picks, taken: r.status === 'picked', takenAt: r.taken_at ?? null };
 }
 
-/** 收藏滿 KEEP_TAKEN_SEC 了（雷達上看不到，只在收藏的人那裡） */
-const keptAway = (r: BottleRow & { taken_at?: number | null }, now: number): boolean => r.status === 'picked' && !!r.taken_at && r.taken_at <= now - KEEP_TAKEN_SEC;
+/**
+ * 收藏走了（雷達上看不到，只在收藏的人那裡）：地球上的收藏滿 KEEP_TAKEN_SEC；
+ * 汪星海上的一收藏就是（v1.664 使用者說汪星上按收藏直接從海上消失、進到收藏櫃）
+ */
+const keptAway = (r: BottleRow & { taken_at?: number | null }, now: number): boolean =>
+  r.status === 'picked' && !!r.taken_at && (r.world === 'woof' || r.taken_at <= now - KEEP_TAKEN_SEC);
 
 /** 附近漂流中的瓶子（沒有內容）；world = 'woof' 是汪星海上的全部（汪星很小，不分附近） */
 export async function listBottles(env: Env, device: string | null, q: { lat?: number; lng?: number; radiusKm: number; world?: BottleWorld }, now: number): Promise<BottleOut[]> {
   const world = q.world ?? 'earth';
-  const conds = [SHOWN, 'world = ?', 'expires_at > ?'];
-  const binds: unknown[] = [now - KEEP_TAKEN_SEC, world, now];
+  // 汪星海上被收藏的馬上不見（keptAway），只列還在漂的
+  const conds = [world === 'woof' ? "status = 'active'" : SHOWN, 'world = ?', 'expires_at > ?'];
+  const binds: unknown[] = [...(world === 'woof' ? [] : [now - KEEP_TAKEN_SEC]), world, now];
   // 有位置就從近到遠排，瓶子很多時也一定拿得到最近的那幾個（雷達外圈的方向提示要用）
   let order = 'created_at DESC';
   if (world === 'earth' && q.lat !== undefined && q.lng !== undefined) {
