@@ -3068,9 +3068,7 @@ function wireBottleScene(): void {
     bottleResult.textContent = '';
     updateDropBtn();
   });
-  bottlePhotoInput.addEventListener('change', async () => {
-    const file = bottlePhotoInput.files?.[0];
-    if (!file) return;
+  const attachPhoto = async (file: File): Promise<void> => {
     bottleResult.textContent = '';
     try {
       setBottlePhoto(await shrinkPhoto(file));
@@ -3078,6 +3076,21 @@ function wireBottleScene(): void {
       setBottlePhoto(null);
       bottleResult.textContent = '這張照片讀不出來，換一張試試';
     }
+  };
+  bottlePhotoInput.addEventListener('change', () => {
+    const file = bottlePhotoInput.files?.[0];
+    if (file) void attachPhoto(file);
+  });
+  // 直接貼上複製的圖片（v1.660 使用者說的）：跟 📷 選的一樣縮小、重新存檔、丟的時候審核；已經有照片就換掉。
+  // 剪貼簿裡也有文字的（Word、Excel 複製的字會順便帶一張圖）照樣貼字，不當成照片
+  document.addEventListener('paste', (e) => {
+    if (bottleSheet.hidden || bottlePhotoBtn.hidden || judging || throwing || document.querySelector('.tc-overlay')) return;
+    const cd = e.clipboardData;
+    if (!cd || cd.getData('text/plain').trim()) return;
+    const file = [...cd.items].find((it) => it.kind === 'file' && it.type.startsWith('image/'))?.getAsFile();
+    if (!file) return;
+    e.preventDefault();
+    void attachPhoto(file);
   });
   bottlePhotoFig.querySelector('.photo-remove')?.addEventListener('click', () => setBottlePhoto(null));
   // 打開來看的信、收藏的信上的照片：點了放大
