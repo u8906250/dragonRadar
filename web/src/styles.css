@@ -1625,6 +1625,9 @@ path.map-seam-walkers { --p: 15px; }
 .theme-item b { display: block; font-size: 15px; }
 .theme-item small { color: var(--muted); font-size: 12px; }
 .theme-item .check { margin-left: auto; font-weight: 800; color: var(--highlight); }
+/* 切換雷達：附近有幾筆（v1.681） */
+.module-item .mod-count { margin-left: auto; flex: none; padding: 2px 9px; border-radius: 999px; font-size: 12px; font-weight: 800; color: var(--accent); border: 1.5px solid currentColor; white-space: nowrap; }
+.module-item .mod-count + .check { margin-left: 8px; }
 
 .leaflet-container { font: inherit; }
 .leaflet-popup-content-wrapper, .leaflet-popup-tip { background: var(--panel); color: var(--text); }

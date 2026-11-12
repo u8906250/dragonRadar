@@ -5973,6 +5973,33 @@ function switchModule(id: ModuleId, fetch = true): void {
  */
 let pendingShare: string | null = null;
 
+/**
+ * 切換雷達那一頁：每個雷達附近有幾筆（還沒結束的；範圍、關鍵字跟抓資料一樣），有一筆以上才寫（v1.681 使用者說的）。
+ * 打開時才抓別的雷達的，同一個地方 2 分鐘內不重抓；現在這個雷達用已經抓到的
+ */
+let moduleCounts: { at: number; key: string; counts: Map<string, number> } | null = null;
+async function loadModuleCounts(): Promise<boolean> {
+  const radius = fetchRadiusKm(scaleKm);
+  const key = `${origin.lat.toFixed(3)},${origin.lng.toFixed(3)},${radius}`;
+  const now = nowSec();
+  if (moduleCounts && moduleCounts.key === key && now - moduleCounts.at < 120) return false;
+  const counts = new Map<string, number>();
+  const live = (evs: EventOut[]): number => new Set(evs.filter((ev) => ev.endAt > now).map((ev) => ev.id)).size;
+  await Promise.all(
+    MODULES.map(async (m) => {
+      const kws = m.current ? followed() : [];
+      if (m.current && kws.length === 0) return;
+      try {
+        counts.set(m.id, live(m.id === mod.id ? events : await fetchEvents(origin, radius, kws, m.id)));
+      } catch {
+        /* 抓不到就不寫 */
+      }
+    }),
+  );
+  moduleCounts = { at: now, key, counts };
+  return true;
+}
+
 function renderModuleList(): void {
   moduleList.replaceChildren();
   const sharing = pendingShare !== null;
@@ -5985,7 +6012,8 @@ function renderModuleList(): void {
     const b = document.createElement('button');
     b.type = 'button';
     b.className = `theme-item module-item${m.id === mod.id ? ' on' : ''}`;
-    b.innerHTML = `<span class="emoji" aria-hidden="true">${m.emoji}</span><span><b>${esc(m.name)}</b><small>${esc(m.tagline)}</small></span>${m.id === mod.id ? '<span class="check">✓</span>' : ''}`;
+    const n = moduleCounts?.counts.get(m.id) ?? 0;
+    b.innerHTML = `<span class="emoji" aria-hidden="true">${m.emoji}</span><span><b>${esc(m.name)}</b><small>${esc(m.tagline)}</small></span>${n > 0 ? `<span class="mod-count">${n} 筆</span>` : ''}${m.id === mod.id ? '<span class="check">✓</span>' : ''}`;
     b.addEventListener('click', () => {
       const link = pendingShare;
       pendingShare = null;
@@ -6011,6 +6039,10 @@ function openModuleSheet(open: boolean): void {
   bottleSheet.hidden = true;
   feedbackSheet.hidden = true;
   renderModuleList();
+  // 各雷達有幾筆：抓好再畫一次
+  void loadModuleCounts().then((changed) => {
+    if (changed && !moduleSheet.hidden) renderModuleList();
+  });
 }
 
 function applyTheme(t: Theme): void {
