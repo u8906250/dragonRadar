@@ -224,7 +224,7 @@ export interface MapBottle {
   state: 'near' | 'pick';
   mine: boolean;
   picked: boolean;
-  /** 這台裝置看過內容了：空瓶 */
+  /** 這台裝置看過內容了：空瓶（沒有信卷、軟木塞） */
   read?: boolean;
 }
 
@@ -685,7 +685,7 @@ export class MapView {
         // 跟雷達一樣：瓶子泡在水裡，前後兩道水流慢慢往一邊流
         html:
           `<span class="mflow back"><svg viewBox="-16 -10 32 20" width="40" height="25"><path d="${WAVE_BACK}"/></svg></span>` +
-          `<span class="float" style="--d:${-((b.id * 0.73) % 3.4).toFixed(2)}s"><svg viewBox="-10 -10 20 20" width="24" height="24"><path d="${MAP_BOTTLE_PATH}" transform="rotate(-20)"/>${b.read ? '' : LETTER_SCROLL}${BOTTLE_CORK}${b.picked ? TAKEN_MARK : ''}</svg></span>` +
+          `<span class="float" style="--d:${-((b.id * 0.73) % 3.4).toFixed(2)}s"><svg viewBox="-10 -10 20 20" width="24" height="24"><path d="${MAP_BOTTLE_PATH}" transform="rotate(-20)"/>${b.read ? '' : LETTER_SCROLL + BOTTLE_CORK}${b.picked ? TAKEN_MARK : ''}</svg></span>` +
           `<span class="mflow front"><svg viewBox="-16 -10 32 20" width="40" height="25"><path d="${WAVE_FRONT}"/></svg></span>`,
         iconSize: [24, 24],
         iconAnchor: [12, 12],
