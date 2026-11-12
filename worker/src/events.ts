@@ -1683,6 +1683,21 @@ export async function setManualTitle(env: Env, eventId: number, title: string, n
 }
 
 /**
+ * 管理者改活動的主題（同一則貼文、同一個地點還沒結束的一起改；v1.675 使用者說「政治主題 Open Mic」歸類到講座）：
+ * 存在 extra.topic，雷達、地圖的小圖示、清單的標籤照這個。重新判讀這則貼文會換回 AI 判的
+ */
+export async function setTopic(env: Env, eventId: number, topic: string, now: number): Promise<number> {
+  const ev = await env.DB.prepare('SELECT post_id, place_text FROM events WHERE id = ?').bind(eventId).first<{ post_id: string; place_text: string }>();
+  if (!ev) return 0;
+  const r = await env.DB.prepare(
+    "UPDATE events SET extra = json_set(COALESCE(NULLIF(extra, ''), '{}'), '$.topic', ?), updated_at = ? WHERE post_id = ? AND place_text = ? AND status IN ('upcoming', 'active', 'unlocated')",
+  )
+    .bind(topic, now, ev.post_id, ev.place_text)
+    .run();
+  return r.meta.changes ?? 0;
+}
+
+/**
  * 從雷達下架：scope = 'post' 整則貼文的；'event' 只有這一則（固定據點連同同一個地點的每天時段）。回傳下架幾筆
  */
 export async function takeDown(env: Env, eventId: number, scope: 'event' | 'post', reason: string, now: number): Promise<number> {

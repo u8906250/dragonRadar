@@ -1,8 +1,8 @@
 import { getAccessToken, makeClient, saveAccessToken } from './client';
 import type { Env } from './env';
 import { fetchThreadsProfile } from './sources/profile';
-import { DEFAULT_DURATION_SEC, ENDED_WORDS, MAX_FUTURE_SEC, MIN_CONFIDENCE, SPOT_MAX_DAYS, extendOpenSpots, getEvent, getPost, ingestAll, ingestKeyword, clearEventSnapshots, listEvents, locatePlaceForEvent, moduleSpec, processBacklog, processPost, relocateApprox, relocateRouteStops, planPost, reprocessPost, setManualTitle, storePost, updateLifecycle, type EventRow, type PostRow } from './events';
-import { normalizeExtraction, runModel } from './extract';
+import { DEFAULT_DURATION_SEC, ENDED_WORDS, MAX_FUTURE_SEC, MIN_CONFIDENCE, SPOT_MAX_DAYS, extendOpenSpots, getEvent, getPost, ingestAll, ingestKeyword, clearEventSnapshots, listEvents, locatePlaceForEvent, moduleSpec, processBacklog, processPost, relocateApprox, relocateRouteStops, planPost, reprocessPost, setManualTitle, setTopic, storePost, updateLifecycle, type EventRow, type PostRow } from './events';
+import { cleanTopic, normalizeExtraction, runModel } from './extract';
 import { geocode } from './geocode';
 import { ingestNews, NEWS_FEEDS } from './sources/news';
 import { listRoutes, syncVoyage, VOYAGE_PAGE } from './sources/voyage';
@@ -571,6 +571,14 @@ async function handleAdmin(req: Request, env: Env, ctx: ExecutionContext, path: 
     const title = (body.title ?? '').replace(/\s+/g, ' ').trim();
     if (!title || [...title].length > 30) throw new HttpError(400, 'title must be 1-30 chars');
     return jsonResponse({ changed: await setManualTitle(env, Number(titleMatch[1]), title, now) });
+  }
+
+  // 管理者改活動的主題（「講座」「市集」，雷達、地圖的小圖示照這個；同一則貼文、同一個地點還沒結束的一起改）：{ topic }
+  const topicMatch = /^\/api\/admin\/events\/(\d+)\/topic$/.exec(path);
+  if (req.method === 'POST' && topicMatch) {
+    const topic = cleanTopic((await readJson<{ topic?: unknown }>(req)).topic);
+    if (!topic) throw new HttpError(400, 'topic must be 1-6 chars');
+    return jsonResponse({ changed: await setTopic(env, Number(topicMatch[1]), topic, now) });
   }
 
   // 管理者改地點文字（同一則貼文、同一個地點還沒結束的一起改）：{ place_text }
