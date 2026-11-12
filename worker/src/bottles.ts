@@ -59,8 +59,6 @@ const TAKEN_AT = '(SELECT MIN(p.collected_at) FROM bottle_picks p WHERE p.bottle
 export const SEE_RADIUS_KM = 1;
 /** 走到這麼近才能打開來看、收藏、收回（v1.627 使用者說改成 1 km；v1.599 是 500 m，以前 60 m） */
 export const PICK_RADIUS_M = 1000;
-/** 丟的位置打散的範圍 */
-const SCATTER_M = 100;
 /** 每天最多丟幾個（過去 24 小時）；總量另外由同 IP 每天、全站每小時的上限擋 */
 export const PER_DEVICE_PER_DAY = 3;
 const PER_IP_PER_DAY = 20;
@@ -71,10 +69,14 @@ const WOOF_LIST_LIMIT = 500;
 /** 一個裝置最多收藏幾封信 */
 const MAX_LETTERS = 500;
 
-/** 在丟的地方附近漂：多久晃一次、一次最多晃多遠、離丟下的地方（已打散）最多多遠 */
+/**
+ * 在丟的地方附近漂：多久晃一次、一次最多晃多遠、離丟的地方最多多遠。
+ * v1.668 使用者說改在 1 km 裡面漂、不要分 100 m、200 m：一丟出去就落在丟的地方 DRIFT_RANGE_M 內的隨機位置（不會在丟的人站的地方），
+ * 之後也在這 1 km 內漂（以前是打散 100 m、再在 200 m 內漂）
+ */
 export const DRIFT_EVERY_SEC = 2 * 3600;
 const DRIFT_STEP_M = 60;
-const DRIFT_RANGE_M = 200;
+const DRIFT_RANGE_M = 1000;
 /** 漂到汪星的海上：在海邊那一點附近散開多遠（woofsea.ts 的點周圍 350 m 都是海） */
 const SEA_SCATTER_M = 250;
 
@@ -280,7 +282,7 @@ const driftOf = (b: { lat: number; lng: number; origin_lat: number | null; origi
   b.world !== 'earth' || b.origin_lat === null || b.origin_lng === null ? 0 : Math.round(distM({ lat: b.origin_lat, lng: b.origin_lng }, b));
 
 /**
- * 在丟的地方附近晃一步：隨機往一個方向晃 DRIFT_STEP_M 內；晃出丟下的地方（已打散）DRIFT_RANGE_M 外就改成往回漂一步。
+ * 在丟的地方附近晃一步：隨機往一個方向晃 DRIFT_STEP_M 內；晃出丟的地方 DRIFT_RANGE_M 外就改成往回漂一步。
  * 沒有起點（舊資料）就當作現在的位置是起點。
  */
 export function driftStep(
@@ -336,14 +338,19 @@ export async function driftBottles(env: Env, now: number, rand: () => number = M
   )
     .bind(now, now - SEA_AFTER_SEC, now - DRIFT_EVERY_SEC)
     .all<{ id: number; lat: number; lng: number; origin_lat: number | null; origin_lng: number | null; created_at: number }>();
-  if (results.length === 0) return { moved: 0, toSea: 0 };
+  // 丟的地方只留 24 小時（被收藏、藏起來的也一樣；還在漂的漂到汪星時清）
+  const forget = env.DB.prepare('UPDATE bottles SET origin_lat = NULL, origin_lng = NULL WHERE created_at <= ? AND origin_lat IS NOT NULL AND status != ?').bind(now - SEA_AFTER_SEC, 'active');
+  if (results.length === 0) {
+    await forget.run();
+    return { moved: 0, toSea: 0 };
+  }
   let toSea = 0;
   const stmts = results.map((b) => {
     if (b.created_at <= now - SEA_AFTER_SEC) {
       toSea++;
       const p = seaPoint(b.origin_lat === null || b.origin_lng === null ? b : { lat: b.origin_lat, lng: b.origin_lng }, rand);
-      // 被收藏、被檢舉藏起來、收回的不動
-      return env.DB.prepare("UPDATE bottles SET world = 'woof', lat = ?, lng = ?, sea_at = ?, drifted_at = ? WHERE id = ? AND status = 'active' AND world = 'earth'").bind(
+      // 被收藏、被檢舉藏起來、收回的不動；丟的地方用完就清掉
+      return env.DB.prepare("UPDATE bottles SET world = 'woof', lat = ?, lng = ?, origin_lat = NULL, origin_lng = NULL, sea_at = ?, drifted_at = ? WHERE id = ? AND status = 'active' AND world = 'earth'").bind(
         p.lat,
         p.lng,
         now,
@@ -354,13 +361,13 @@ export async function driftBottles(env: Env, now: number, rand: () => number = M
     const to = driftStep(b, rand);
     return env.DB.prepare("UPDATE bottles SET lat = ?, lng = ?, drifted_at = ? WHERE id = ? AND status = 'active' AND world = 'earth'").bind(to.lat, to.lng, now, b.id);
   });
-  await env.DB.batch(stmts);
+  await env.DB.batch([...stmts, forget]);
   return { moved: results.length - toSea, toSea };
 }
 
-/** 把位置隨機移到 SCATTER_M 內（均勻分布在圓內） */
+/** 丟出去落在哪裡：丟的地方 DRIFT_RANGE_M 內的隨機位置（均勻分布在圓內） */
 export function scatter(p: { lat: number; lng: number }, rand: () => number = Math.random): { lat: number; lng: number } {
-  const r = SCATTER_M * Math.sqrt(rand());
+  const r = DRIFT_RANGE_M * Math.sqrt(rand());
   const t = 2 * Math.PI * rand();
   return offset(p, r * Math.sin(t), r * Math.cos(t));
 }
@@ -673,11 +680,12 @@ export async function dropBottle(env: Env, device: string | null, ip: string, bo
     await env.BOTTLE_PHOTOS.put(key, stripJpegMeta(photo.bytes), { httpMetadata: { contentType: 'image/jpeg' } });
   }
 
+  // 起點記丟的地方（只用來讓瓶子不漂出 1 km，不給任何人看；24 小時後 driftBottles 清掉），瓶子落在 1 km 內的隨機位置
   const p = scatter(at);
   const row = await env.DB.prepare(
     "INSERT INTO bottles (device_id, text, lat, lng, origin_lat, origin_lng, status, world, ip_hash, created_at, expires_at, photo_key) VALUES (?, ?, ?, ?, ?, ?, 'active', 'earth', ?, ?, ?, ?) RETURNING *",
   )
-    .bind(dev, text, p.lat, p.lng, p.lat, p.lng, ip, now, now + BOTTLE_TTL_SEC, key)
+    .bind(dev, text, p.lat, p.lng, at.lat, at.lng, ip, now, now + BOTTLE_TTL_SEC, key)
     .first<BottleRow>()
     .catch(async (e) => {
       if (key) await env.BOTTLE_PHOTOS?.delete(key);
@@ -811,7 +819,7 @@ export interface MyBottles {
   quota: BottleQuota;
   dropped: Array<{ id: number; text: string; photo: boolean; world: BottleWorld; createdAt: number; expiresAt: number; seaAt: number | null; picks: number; pickedAt: number | null; status: BottleStatus; driftM: number }>;
   /** 漂流瓶收藏：撿到就收進來；world 是在哪裡撿到的 */
-  letters: Array<{ id: number; text: string; photo: boolean; world: BottleWorld; createdAt: number; pickedAt: number; driftM: number }>;
+  letters: Array<{ id: number; text: string; photo: boolean; world: BottleWorld; createdAt: number; pickedAt: number }>;
 }
 
 /** 我丟的、我的漂流瓶收藏；我丟的只列 24 小時內丟的（v1.661 使用者說超過 24 小時不用顯示，跟收得回來的時間一樣） */
@@ -825,13 +833,13 @@ export async function myBottles(env: Env, device: string | null, now: number): P
     .all<BottleRow & { picked_at: number | null }>();
   // 收藏的信；被檢舉藏起來、被管理者移除的不顯示
   const mine = await env.DB.prepare(
-    `SELECT b.id, b.text, b.photo_key, b.world, b.lat, b.lng, b.origin_lat, b.origin_lng, b.created_at, p.created_at AS picked_at
+    `SELECT b.id, b.text, b.photo_key, b.world, b.created_at, p.created_at AS picked_at
        FROM bottle_picks p JOIN bottles b ON b.id = p.bottle_id
       WHERE p.device_id = ? AND p.collected_at IS NOT NULL AND b.status IN ('active', 'picked')
       ORDER BY p.created_at DESC LIMIT ${MAX_LETTERS}`,
   )
     .bind(dev)
-    .all<Pick<BottleRow, 'id' | 'text' | 'photo_key' | 'world' | 'lat' | 'lng' | 'origin_lat' | 'origin_lng' | 'created_at'> & { picked_at: number }>();
+    .all<Pick<BottleRow, 'id' | 'text' | 'photo_key' | 'world' | 'created_at'> & { picked_at: number }>();
   return {
     quota: await bottleQuota(env, dev, now),
     dropped: dropped.results.map((b) => ({
@@ -847,7 +855,8 @@ export async function myBottles(env: Env, device: string | null, now: number): P
       status: b.expires_at <= now && b.status === 'active' ? ('deleted' as const) : b.status,
       driftM: driftOf(b),
     })),
-    letters: mine.results.map((p) => ({ id: p.id, text: p.text, photo: !!p.photo_key, world: p.world, createdAt: p.created_at, pickedAt: p.picked_at, driftM: driftOf(p) })),
+    // 收藏的人不給漂了多遠（從丟的地方算，會透露丟的人在哪附近）
+    letters: mine.results.map((p) => ({ id: p.id, text: p.text, photo: !!p.photo_key, world: p.world, createdAt: p.created_at, pickedAt: p.picked_at })),
   };
 }
 
@@ -915,11 +924,12 @@ export async function reportBottle(env: Env, device: string | null, ip: string, 
 
 // ---- 管理者 ----
 
-export async function adminListBottles(env: Env, status: string | null): Promise<Array<Omit<BottleRow, 'ip_hash' | 'device_id'>>> {
+/** 管理頁的瓶子列表：不給 IP 雜湊、裝置代碼和丟的地方（丟的地方不給任何人看，v1.668） */
+export async function adminListBottles(env: Env, status: string | null): Promise<Array<Omit<BottleRow, 'ip_hash' | 'device_id' | 'origin_lat' | 'origin_lng'>>> {
   const r = status
     ? await env.DB.prepare('SELECT * FROM bottles WHERE status = ? ORDER BY id DESC LIMIT 200').bind(status).all<BottleRow>()
     : await env.DB.prepare('SELECT * FROM bottles ORDER BY id DESC LIMIT 200').all<BottleRow>();
-  return r.results.map(({ ip_hash: _i, device_id: _d, ...rest }) => rest);
+  return r.results.map(({ ip_hash: _i, device_id: _d, origin_lat: _a, origin_lng: _b, ...rest }) => rest);
 }
 
 /** 移除，或恢復（被撿走的恢復成已撿走，還沒撿的恢復到雷達上） */

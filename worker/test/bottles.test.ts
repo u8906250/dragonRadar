@@ -44,13 +44,13 @@ describe('xLength', () => {
 });
 
 describe('scatter', () => {
-  it('moves the point but stays within about 100 m', () => {
+  it('lands somewhere within 1 km', () => {
     const p = { lat: 25.0478, lng: 121.517 };
     for (const r of [0, 0.25, 0.5, 0.99]) {
       const q = scatter(p, () => r);
       const dy = (q.lat - p.lat) * 111320;
       const dx = (q.lng - p.lng) * 111320 * Math.cos((p.lat * Math.PI) / 180);
-      expect(Math.hypot(dx, dy)).toBeLessThanOrEqual(101);
+      expect(Math.hypot(dx, dy)).toBeLessThanOrEqual(1001);
     }
   });
 });
@@ -64,17 +64,17 @@ describe('driftStep', () => {
     const b = { ...home, origin_lat: home.lat, origin_lng: home.lng };
     for (const r of [0.1, 0.5, 0.9]) expect(meters(b, driftStep(b, () => r))).toBeLessThanOrEqual(61);
   });
-  it('never strays more than about 200 m from where it was dropped', () => {
+  it('never strays more than about 1 km from where it was dropped', () => {
     let b = { ...home, origin_lat: home.lat, origin_lng: home.lng };
     let seed = 1;
     const rand = (): number => ((seed = (seed * 16807) % 2147483647) / 2147483647);
     for (let i = 0; i < 500; i++) {
       b = { ...b, ...driftStep(b, rand) };
-      expect(meters(home, b)).toBeLessThanOrEqual(202);
+      expect(meters(home, b)).toBeLessThanOrEqual(1002);
     }
   });
   it('heads back when it is outside the range', () => {
-    const b = { lat: home.lat + 300 / 111320, lng: home.lng, origin_lat: home.lat, origin_lng: home.lng };
+    const b = { lat: home.lat + 1100 / 111320, lng: home.lng, origin_lat: home.lat, origin_lng: home.lng };
     const to = driftStep(b, () => 0.99);
     expect(meters(home, to)).toBeLessThan(meters(home, b) - 50);
   });

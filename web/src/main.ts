@@ -2700,7 +2700,7 @@ function renderBottleDetail(id: number): boolean {
       <p class="muted sheet-note small">${
         woof
           ? '汪星沒有 GPS：搭火箭到汪星後，雷達正中間就是你的位置，拖曳就是走路。'
-          : '瓶子的位置在丟的時候就隨機漂開約 100 m，之後在附近 200 m 內漂，不是丟的人站的地方。'
+          : '瓶子一丟出去就落在丟的地方 1 km 內的隨機位置，之後在這 1 km 內漂，不是丟的人站的地方。'
       }</p>
     </div>`,
     true,
@@ -3026,7 +3026,7 @@ function paintMyBottles(): void {
   const statusText = (b: (typeof dropped)[number]): string => {
     const drift = driftText(b.driftM);
     return b.status === 'picked'
-      ? `被收藏了${b.pickedAt ? `（${ago(b.pickedAt)}）` : ''}${b.world === 'woof' ? '・在汪星的海上被收藏' : drift ? `・漂了 ${drift} 才被收藏` : ''}`
+      ? `被收藏了${b.pickedAt ? `（${ago(b.pickedAt)}）` : ''}${b.world === 'woof' ? '・在汪星的海上被收藏' : drift ? `・在離丟的地方 ${drift} 的地方被收藏` : ''}`
       : b.status === 'hidden'
         ? '被檢舉，暫時藏起來'
         : b.status === 'removed'
@@ -3035,7 +3035,7 @@ function paintMyBottles(): void {
             ? '沒人收藏，沉下去了'
             : b.world === 'woof'
               ? `漂到汪星的海上了・${daysLeft(b.expiresAt)}後沉下去`
-              : `在附近漂${drift ? `（漂了 ${drift}）` : ''}・${seaIn(b.createdAt)}後漂到汪星的海上`;
+              : `在附近漂${drift ? `（離丟的地方 ${drift}）` : ''}・${seaIn(b.createdAt)}後漂到汪星的海上`;
   };
   lettersMine.innerHTML = dropped.length
     ? `<h3>我丟的瓶子<small class="muted">・今天還能丟 ${quota.left} 個</small></h3><ul class="spot-mine">${dropped
@@ -3256,7 +3256,7 @@ function confirmThrow(): Promise<boolean> {
   const r = bottleRules();
   const left = myBottlesData?.quota.left;
   const rules = [
-    '只有在地球上才能丟，瓶子會丟在你現在的位置附近（隨機漂開約 100 m，不會在你站的地方），之後在附近 200 m 內慢慢漂。',
+    '只有在地球上才能丟，瓶子會落在你現在的位置 1 km 內的隨機位置（不會在你站的地方），之後在這 1 km 內慢慢漂。',
     `沒人收藏的 ${r?.seaHours ?? 24} 小時後漂到汪星的海上，${r?.woofDays ?? 30} 天後沉下去；被收藏的不會漂走，在原地標成已收藏 ${KEEP_TAKEN_H} 小時，之後收進收藏的人的「收藏」、裝進瓶子裡。`,
     `走到瓶子 ${reachText((r?.seeKm ?? 1) * 1000)} 內才看得到瓶子、打開來看內容和照片，第一個按「收藏」的人會把它收進漂流瓶收藏（收藏了別人照樣看得到）。`,
     `丟出去 24 小時內、你走回瓶子 ${reachText(r?.pickRadiusM)} 內才收得回來；收回的也算今天的額度。`,

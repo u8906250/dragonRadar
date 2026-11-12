@@ -142,7 +142,7 @@ export interface MyBottles {
   /** driftM：在地球上從丟下的地方漂了幾公尺；seaAt：漂到汪星海上的時間 */
   dropped: Array<{ id: number; text: string; photo: boolean; world: 'earth' | 'woof'; createdAt: number; expiresAt: number; seaAt: number | null; picks: number; pickedAt: number | null; status: 'active' | 'picked' | 'hidden' | 'deleted' | 'removed'; driftM: number }>;
   /** 漂流瓶收藏：撿到就收進來；world 是在哪裡撿到的 */
-  letters: Array<{ id: number; text: string; photo: boolean; world: 'earth' | 'woof'; createdAt: number; pickedAt: number; driftM: number }>;
+  letters: Array<{ id: number; text: string; photo: boolean; world: 'earth' | 'woof'; createdAt: number; pickedAt: number }>;
 }
 
 /** 瓶子證明：編號、丟的時間、內容的 SHA-256、伺服器簽章 */
