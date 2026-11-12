@@ -864,7 +864,7 @@ function woofGlobe(x: number, y: number, r: number, view: SpaceView, toSun: Vec3
   out += `<path class="space-night" d="${nightFrom([toSun[0] / n, toSun[1] / n, toSun[2] / n], r)}" />`;
   // 漂到汪星海上的漂流瓶（v1.593）：畫在夜晚上面（晚上也看得到），朝著你的這一面才畫；
   // 跟著縮放變大小，範圍超過 10 km（看整顆汪星）只畫淡藍色的小點（bottleSize，v1.602）；
-  // 雷達掃過時亮一下（sweep-lit，跟汪星的狗一樣，v1.664 使用者說 1 km 內看得到也掃得到；畫出來的就是 1 km 內的）
+  // 雷達拉近到 1 km 以內才畫（main.ts 的 WOOF_SEE_KM）；掃過不亮（v1.664 加過，v1.667 使用者說不用亮）
   const bk = bottleSize(scaleKm);
   for (const b of bottles ?? []) {
     const [px, py, pz] = ortho(center, b.lat, b.lng);
@@ -874,8 +874,8 @@ function woofGlobe(x: number, y: number, r: number, view: SpaceView, toSun: Vec3
       `<g class="${cls}" data-id="${b.id}" transform="translate(${f1(C + r * px)} ${f1(C - r * py)})" tabindex="0" role="button">` +
       `<circle class="hit" r="14" />` +
       (bk === 0
-        ? '<circle class="dot sweep-lit" data-glint="strong" r="3.4" />'
-        : `<path class="wave back" d="${WAVE_BACK}" transform="scale(${bk.toFixed(3)})" /><g class="body sweep-lit" data-glint="strong"><path class="glass" d="${BOTTLE_PATH}" transform="rotate(-20) scale(${bk.toFixed(3)})" /><g transform="scale(${bk.toFixed(3)})">${b.read ? '' : LETTER_SCROLL + BOTTLE_CORK}${b.taken ? TAKEN_MARK : ''}</g></g><path class="wave front" d="${WAVE_FRONT}" transform="scale(${bk.toFixed(3)})" />`) +
+        ? '<circle class="dot" r="3.4" />'
+        : `<path class="wave back" d="${WAVE_BACK}" transform="scale(${bk.toFixed(3)})" /><g class="body"><path class="glass" d="${BOTTLE_PATH}" transform="rotate(-20) scale(${bk.toFixed(3)})" /><g transform="scale(${bk.toFixed(3)})">${b.read ? '' : LETTER_SCROLL + BOTTLE_CORK}${b.taken ? TAKEN_MARK : ''}</g></g><path class="wave front" d="${WAVE_FRONT}" transform="scale(${bk.toFixed(3)})" />`) +
       `<title>${b.mine ? '你丟的漂流瓶' : b.taken ? '漂流瓶（已經被收藏了）' : b.state === 'pick' ? '漂流瓶（走到附近了）' : '漂流瓶'}</title></g>`;
   }
   return `<g class="space-globe" transform="translate(${f1(ox)} ${f1(oy)})">${out}</g>`;

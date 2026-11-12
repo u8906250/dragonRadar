@@ -2375,8 +2375,8 @@ const bottleSeeKm = (): number => bottleRules()?.seeKm ?? 1;
 /** 地球上從哪裡算 1 km：你的 GPS 位置（拖曳過雷達也一樣），沒有 GPS 就從雷達正中間 */
 const bottleCenter = (): LatLng => (origin.source === 'gps' ? origin : (lastGps ?? origin));
 /**
- * 汪星上雷達拉近到這個範圍以內才看得到、掃得到海上的瓶子（v1.666 使用者說汪星的 1 km 是雷達縮放的 1 km：
- * 汪星沒有定位系統，不看位置）；範圍的標籤寫「1.0 km」的都算
+ * 汪星上雷達拉近到這個範圍以內才看得到海上的瓶子（v1.666 使用者說汪星的 1 km 是雷達縮放的 1 km：
+ * 汪星沒有定位系統，不看位置；v1.667 掃過不用亮）；範圍的標籤寫「1.0 km」的都算
  */
 const WOOF_SEE_KM = 1;
 /** 看不看得到這個瓶子：地球上離你（GPS）1 km 內；汪星海上的要雷達拉近到 1 km 以內，畫在雷達 1 km 內的（km 是雷達現在的範圍） */
