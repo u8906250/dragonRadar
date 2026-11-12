@@ -7857,6 +7857,28 @@ function wirePanelDrag(): void {
     },
     { passive: true },
   );
+  // 卡片（活動、回報、回報問題）也一樣：捲到最上面還往下滑 → 往下一段（以前會變成瀏覽器的重新整理）；欄位、小地圖上滑不算，標題那一列是拖曳（上面接好了）
+  let cardStartY: number | null = null;
+  for (const c of cards) {
+    c.addEventListener(
+      'touchstart',
+      (e) => {
+        const t = e.target instanceof Element ? e.target : null;
+        cardStartY = c === card && state !== 'collapsed' && c.scrollTop <= 0 && !t?.closest('input, textarea, select, .leaflet-container, .sheet-head') ? e.touches[0].clientY : null;
+      },
+      { passive: true },
+    );
+    c.addEventListener(
+      'touchend',
+      (e) => {
+        if (cardStartY === null) return;
+        const dy = e.changedTouches[0].clientY - cardStartY;
+        cardStartY = null;
+        if (dy > 60 && c.scrollTop <= 0) setState(state === 'expanded' ? 'default' : 'collapsed');
+      },
+      { passive: true },
+    );
+  }
 }
 
 /**
