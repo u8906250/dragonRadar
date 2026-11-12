@@ -1,5 +1,6 @@
 import type { BlipStyle, EventKind, Phase, SweepStyle } from './types';
 import { bottleSize } from './geo';
+import { glyphSvg, topicGlyph } from './topic-icons';
 import { DOME_SVG, idlePhase, isSceneKind, PATROL_SVG, sceneSvg, SCOOTER_SVG, SOCCER_SVG, TRUCK_SVG, WALKER_SVG, windSvg, type SceneKind } from './hq-scenes';
 import { alongLine, BOAT_SVG, crackSvg, FITBUS_BODY, FITBUS_SVG, hqMotionKm, HQ_NET_LABEL_KM, BIKE_SVG, HIKER_SVG, PETWALK_SVG, FISH_SVG, WETLAND_BIRDS, MUSIC_NOTES, bikePhase, fitbusPhase, fitbusStopSvg, cultureSvg, regrowSvg, serviceSvg, stitchSvg, BOAT_TITLE, boatPhase, fireworksSvg, FIREWORKS_MS, flowOut, HQ_VOYAGE_MS, RAINBOW_FLOW_TOTAL, RAINBOW_STAGGER_MS, riverHalfWidth, surge, SURGE_TOTAL, voyagePhase, voyageTimeOf } from './flow';
 
@@ -23,6 +24,8 @@ export interface RadarItem {
   badge?: string;
   /** 車掃的起點、終點：畫成 🚩、🏁（不畫圓點） */
   flag?: string;
+  /** 活動的主題（「講座」「市集」）：全螢幕時圓點畫大一點、裡面畫這一類的小圖示（topic-icons.ts） */
+  topic?: string | null;
   label: string;
   showLabel: boolean;
   selected: boolean;
@@ -834,6 +837,8 @@ export class Radar {
     this.placeCompass();
     this.measureView();
     this.applyView();
+    // 光點換成（或換回）有小圖示的
+    this.draw();
   }
 
   /** 鋪滿了沒（main.ts：範圍外的光點照真的位置畫） */
@@ -2905,10 +2910,17 @@ export class Radar {
         // 選到的那一則：外面一圈亮環（慢慢一明一暗），一眼看得出是哪一個
         if (it.selected) node.appendChild(el('circle', { class: 'sel-ring', r: 13 }));
         const body = el('g', { class: 'body' });
+        // 全螢幕：分得出主題的活動畫大一點的圓點、裡面畫小圖示（v1.672 使用者說全螢幕也顯示地圖的新圖示）；範圍外的小點、據點、約略位置照舊
+        const glyph = this.fill && !p.out && !it.flag && !it.spot && !it.approx ? topicGlyph(it.topic) : null;
         if (it.flag) {
           const f = el('text', { class: 'flag' });
           f.textContent = it.flag;
           body.appendChild(f);
+        } else if (glyph) {
+          body.appendChild(el('circle', { class: 'dot topic', r: 10 }));
+          const ink = el('g', { class: 'glyph', transform: 'scale(0.9)' });
+          ink.innerHTML = glyphSvg(glyph, 'currentColor');
+          body.appendChild(ink);
         } else this.appendMark(body, p.out, it.spot, it.office);
         // 離開始越久越淡、越模糊；選取時看清楚
         if (it.fade !== undefined && !it.selected) {
