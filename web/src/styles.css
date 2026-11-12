@@ -1564,6 +1564,13 @@ path.map-seam-walkers { --p: 15px; }
 #detail.dragging { transition: none; cursor: grabbing; }
 #detail.peek { transform: translateY(calc(100% - var(--peek, 72px))); overflow: hidden; }
 @media (prefers-reduced-motion: reduce) { #detail { transition: none; } }
+/* 回報的判讀結果按「在雷達上看」：手機被蓋住時收到只剩標題那一條，點標題或「回到判讀結果」再打開 */
+#report-sheet { transition: transform 0.22s ease; }
+#report-sheet.peek { transform: translateY(calc(100% - 64px - env(safe-area-inset-bottom))); overflow: hidden; }
+#report-sheet.peek .sheet-head { cursor: pointer; }
+.report-unpeek { display: none; }
+#report-sheet.peek .report-unpeek { display: inline-flex; margin-left: auto; }
+@media (prefers-reduced-motion: reduce) { #report-sheet { transition: none; } }
 .sheet-body p { margin: 0 0 10px; line-height: 1.6; font-size: 15px; }
 .sheet-body blockquote { margin: 0 0 12px; padding: 8px 12px; border-left: 3px solid var(--accent); color: var(--muted); font-size: 13px; white-space: pre-wrap; }
 .sheet-actions { display: flex; flex-wrap: wrap; gap: 8px; }
@@ -1940,6 +1947,7 @@ path.map-seam-walkers { --p: 15px; }
 .report-preview li { font-size: 14px; background: var(--card); border: var(--border-w) solid var(--line); border-radius: var(--card-radius); padding: 10px 12px; }
 .report-preview small { display: block; color: var(--muted); margin-top: 3px; line-height: 1.5; }
 .report-preview .preview-warn { color: var(--highlight); font-weight: 700; }
+.report-preview .link-btn { padding: 0; font-size: inherit; }
 .preview-wrong, .preview-more { display: flex; flex-direction: column; gap: 8px; margin-top: 4px; }
 .preview-more[hidden], .preview-wrong[hidden] { display: none; }
 .preview-more textarea { font: inherit; font-size: 16px; color: var(--text); background: var(--card); resize: none; border: var(--border-w) solid var(--line); border-radius: var(--card-radius); padding: 10px 12px; }
@@ -2655,3 +2663,18 @@ path.map-canal-flow { --p: 14px; }
 @keyframes mn-float { 0% { opacity: 0; transform: translateY(2px); } 20% { opacity: 1; } 75% { opacity: 0.8; } 100% { opacity: 0; transform: translateY(-8px); } }
 .hq-far .voyage-canal-flow, .hq-far path.map-canal-flow { display: none; }
 .hq-far .cf-jump, .hq-far .cf-splash, .hq-far .mn-f, .hq-far .wl-bird, .hq-far .wl-bird .wl-wing { animation: none; }
+
+/* 回報判讀完、還沒確認的位置（v1.683 使用者說判讀到定位直接反映到雷達上）：虛線圈慢慢轉、外面一圈淡淡擴散，名稱一直寫 */
+.radar .preview-pin, .map-preview { pointer-events: none; color: var(--highlight); }
+.radar .preview-pin .ring, .map-preview .ring { fill: var(--panel); fill-opacity: 0.9; stroke: currentColor; stroke-width: 2.2; stroke-dasharray: 4 3; animation: preview-dash 1.6s linear infinite; }
+.radar .preview-pin .pulse, .map-preview .pulse { fill: none; stroke: currentColor; stroke-width: 1.6; transform-box: fill-box; transform-origin: center; animation: preview-pulse 1.8s ease-out infinite; }
+.radar .preview-pin .core, .map-preview .core { fill: currentColor; }
+.radar .preview-pin .label { fill: var(--label); font-size: 11px; font-weight: 700; paint-order: stroke; stroke: var(--label-halo); stroke-width: 3px; stroke-linejoin: round; }
+.radar .preview-pin.out { opacity: 0.75; }
+.radar .preview-pin.out .pulse { display: none; }
+.map-preview { background: none; border: 0; }
+.map-preview svg { display: block; overflow: visible; }
+.map-preview span { position: absolute; top: 31px; left: 50%; transform: translateX(-50%); white-space: nowrap; font-size: 12px; font-weight: 700; color: #15171c; text-shadow: 0 0 3px #fff, 0 0 3px #fff, 0 0 3px #fff; }
+@keyframes preview-dash { to { stroke-dashoffset: -14; } }
+@keyframes preview-pulse { 0% { transform: scale(1); opacity: 0.7; } 100% { transform: scale(2); opacity: 0; } }
+@media (prefers-reduced-motion: reduce) { .radar .preview-pin .ring, .radar .preview-pin .pulse, .map-preview .ring, .map-preview .pulse { animation: none; } .radar .preview-pin .pulse, .map-preview .pulse { display: none; } }

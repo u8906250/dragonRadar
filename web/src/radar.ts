@@ -214,6 +214,15 @@ export interface RadarLandmark {
   selected: boolean;
 }
 
+/** 回報判讀完、還沒確認放上雷達的位置（v1.683 使用者說判讀到定位直接反映到雷達上）：虛線圈＋名稱，確認後換成真的光點 */
+export interface RadarPreview {
+  bearing: number;
+  distanceKm: number;
+  label: string;
+  /** 主題的小圖示（topic-icons 的 key）；分不出來是 null，畫小圓點 */
+  glyph: string | null;
+}
+
 /** 漂流瓶：near 看得到（遠近都直接畫出來，不模糊）；pick 走到撿得起來的距離 */
 export interface RadarBottle {
   id: number;
@@ -589,6 +598,9 @@ export class Radar {
   private bottles: RadarBottle[] = [];
   private readonly bottleLayer: SVGGElement;
   private readonly landmarkLayer: SVGGElement;
+  private previews: RadarPreview[] = [];
+  private previewsKey = '';
+  private readonly previewLayer: SVGGElement;
   private scaleKm = 5;
   /** 太空（比全球再遠）的畫法；還沒載入是 null */
   private spaceDraw: SpaceDraw | null = null;
@@ -716,6 +728,7 @@ export class Radar {
       <circle class="me" cx="${C}" cy="${C}" r="5" />
       <g class="you"></g>
       <g class="blips"></g>
+      <g class="previews"></g>
       <!-- 地標（星星）放在光點上面，疊在一起時也點得到 -->
       <g class="landmarks"></g>
       <g class="trip"></g>
@@ -737,6 +750,7 @@ export class Radar {
     this.parkLayer = this.svg.querySelector('.park') as SVGGElement;
     this.tripLayer = this.svg.querySelector('.trip') as SVGGElement;
     this.landmarkLayer = this.svg.querySelector('.landmarks') as SVGGElement;
+    this.previewLayer = this.svg.querySelector('.previews') as SVGGElement;
     this.youLayer = this.svg.querySelector('.you') as SVGGElement;
     this.bottleLayer = this.svg.querySelector('.bottles') as SVGGElement;
     this.bottleLayer.addEventListener('click', (e) => {
@@ -1733,6 +1747,47 @@ export class Radar {
       title.textContent = lm.label;
       g.appendChild(title);
       this.landmarkLayer.appendChild(g);
+    }
+  }
+
+  /** 回報判讀完的位置（空陣列就不畫） */
+  setPreviews(list: RadarPreview[]): void {
+    const key = JSON.stringify(list);
+    if (key === this.previewsKey) return;
+    this.previewsKey = key;
+    this.previews = list;
+    this.draw();
+  }
+
+  /** 虛線圈慢慢往外擴、裡面是主題的小圖示，名稱一直寫在下面；範圍外的貼在外圈（不寫名稱），全螢幕鋪滿、太空裡畫面外的不畫 */
+  private drawPreviews(): void {
+    this.previewLayer.replaceChildren();
+    if (this.earthHidden) return;
+    for (const pv of this.previews) {
+      const angle = pv.bearing - this.heading;
+      const ratio = this.ratio(pv.distanceKm);
+      const lim = this.edgeR(angle);
+      const out = ratio * (R - 8) > lim;
+      if ((this.inSpace || this.fill) && out) continue;
+      const p = polar(angle, Math.min(ratio * (R - 8), lim));
+      const g = el('g', { class: `preview-pin${out ? ' out' : ''}`, transform: `translate(${p.x.toFixed(1)} ${p.y.toFixed(1)})` });
+      g.appendChild(el('circle', { class: 'pulse', r: 11 }));
+      g.appendChild(el('circle', { class: 'ring', r: out ? 7 : 11 }));
+      if (pv.glyph && !out) {
+        const ink = el('g', { class: 'glyph', transform: 'scale(0.9)' });
+        ink.innerHTML = glyphSvg(pv.glyph, 'currentColor');
+        g.appendChild(ink);
+      } else g.appendChild(el('circle', { class: 'core', r: out ? 2.5 : 3.5 }));
+      if (!out) {
+        const anchor = anchorAt(p.x);
+        const t = el('text', { class: 'label', 'text-anchor': anchor, x: anchor === 'end' ? 10 : anchor === 'start' ? -10 : 0, y: 27 });
+        t.textContent = pv.label;
+        g.appendChild(t);
+      }
+      const title = el('title');
+      title.textContent = `還沒放上雷達：${pv.label}`;
+      g.appendChild(title);
+      this.previewLayer.appendChild(g);
     }
   }
 
@@ -2838,6 +2893,7 @@ export class Radar {
     this.drawScaleBar();
     this.drawBottles();
     this.drawLandmarks();
+    this.drawPreviews();
     this.drawYou();
     this.blipLayer.replaceChildren();
     const pos = new Map<number, { x: number; y: number; out: boolean; angle: number; r: number }>();

@@ -1809,6 +1809,10 @@ function render(): void {
   radar.setLandmarks(
     (mod.current ? LANDMARKS : []).map((lm) => ({ id: lm.id, label: lm.name, bearing: bearingDeg(origin, lm), distanceKm: haversineKm(origin, lm), selected: lm.id === selectedLandmark })),
   );
+  // 回報判讀完、還沒確認的位置
+  const pins = shownReportPins();
+  radar.setPreviews(pins.map((p) => ({ bearing: bearingDeg(origin, p), distanceKm: haversineKm(origin, p), label: p.label, glyph: p.glyph })));
+  map.setPreviews(pins);
   map.setRoutes(
     drawnRoutes(onMap, now, focused).map((r): MapRoute => ({
       id: r.id,
@@ -6525,6 +6529,68 @@ const OUTCOME_TEXT: Record<SubmitResult['outcome'], string> = {
 
 function setReportMsg(html: string): void {
   reportResult.innerHTML = html;
+  // 換了訊息（確認了、不對、補充後重新判讀）：判讀結果的位置跟著拿掉，新的判讀結果再標
+  if (reportPins.length > 0) {
+    reportPins = [];
+    render();
+  }
+}
+
+/**
+ * 回報判讀完、還沒確認的位置：雷達、地圖上畫虛線圈＋名稱（v1.683 使用者說判讀到定位直接反映到雷達上）。
+ * 回報畫面開著才畫（關掉就不畫、再打開判讀結果還在就照樣畫）；確認了換成真的光點
+ */
+interface ReportPin {
+  lat: number;
+  lng: number;
+  label: string;
+  glyph: string | null;
+}
+let reportPins: ReportPin[] = [];
+const shownReportPins = (): ReportPin[] => (reportSheet.hidden ? [] : reportPins);
+
+/** 判讀結果裡定位到的：每一場、車掃每一站（同一個位置只標一次，名稱寫第一場的） */
+function previewPins(items: PreviewItem[], routes: RoutePreview[]): ReportPin[] {
+  const pins = new Map<string, ReportPin>();
+  const add = (lat: number | null, lng: number | null, label: string, glyph: string | null): void => {
+    if (lat === null || lng === null) return;
+    const k = `${lat.toFixed(5)},${lng.toFixed(5)}`;
+    if (!pins.has(k)) pins.set(k, { lat, lng, label: [...label].length > 16 ? `${[...label].slice(0, 15).join('')}…` : label, glyph });
+  };
+  for (const p of items) add(p.lat, p.lng, p.title, topicGlyph(p.kind === 'activity' ? topicOf(p) : p.kind === 'giveaway' ? '發放' : null));
+  for (const rt of routes) for (const st of rt.stops) if (st.status === 'listed') add(st.lat, st.lng, st.name, 'rally');
+  return [...pins.values()];
+}
+
+/**
+ * 雷達（地圖）移到判讀出來的位置：一個地方就照它當中間、拉近到 3 km 內（看得到街道）；
+ * 好幾個地方、30 km 內的全部框進來，更遠的只看第一個。太空、汪星上不動
+ */
+function flyToPins(pins: ReportPin[]): void {
+  if (pins.length === 0 || radar.spaceFocused) return;
+  if (radar.spaceMoved) radar.resetSpace();
+  const lats = pins.map((p) => p.lat);
+  const lngs = pins.map((p) => p.lng);
+  const mid = { lat: (Math.min(...lats) + Math.max(...lats)) / 2, lng: (Math.min(...lngs) + Math.max(...lngs)) / 2 };
+  const spread = Math.max(...pins.map((p) => haversineKm(mid, p)));
+  const one = spread < 0.8 || spread > 30;
+  const to = spread > 30 ? pins[0] : mid;
+  zoomToKm(one ? Math.min(Math.max(scaleKm, 1), 3) : spread * 1.35, { lat: to.lat, lng: to.lng, source: 'manual' });
+}
+
+/** 「在雷達上看」：移過去，回報畫面蓋住雷達正中間（手機）就收到只剩標題那一條，按「回到判讀結果」再打開 */
+function lookAtPin(lat: number, lng: number): void {
+  flyToPins([{ lat, lng, label: '', glyph: null }]);
+  const box = (view === 'radar' ? $('#radar-view') : $('#map')).getBoundingClientRect();
+  const sheet = reportSheet.getBoundingClientRect();
+  const cx = box.left + box.width / 2;
+  const cy = box.top + box.height / 2;
+  if (cx > sheet.left && cx < sheet.right && cy + 40 > sheet.top) setReportPeek(true);
+}
+
+function setReportPeek(on: boolean): void {
+  if (on) reportSheet.scrollTop = 0;
+  reportSheet.classList.toggle('peek', on);
 }
 
 /**
@@ -6581,9 +6647,11 @@ function googleMapsUrl(p: LatLng): string {
 }
 
 /** 預覽上的定位：精確、約略（只到鄉鎮區）、找不到；有座標就附「在地圖上看」 */
+const lookBtn = (lat: number, lng: number): string => `<button type="button" class="link-btn" data-look="${lat},${lng}">在雷達上看</button>`;
+
 function previewWhere(p: PreviewItem): string {
   if (p.lat === null || p.lng === null) return '<span class="preview-warn">找不到地點，確認了也不會出現在雷達上</span>';
-  const link = `<a href="${googleMapsUrl({ lat: p.lat, lng: p.lng })}" target="_blank" rel="noopener">在 Google 地圖上看</a>`;
+  const link = `${lookBtn(p.lat, p.lng)}・<a href="${googleMapsUrl({ lat: p.lat, lng: p.lng })}" target="_blank" rel="noopener">在 Google 地圖上看</a>`;
   return p.approxArea ? `<span class="preview-warn">只定位到${esc(p.approxArea)}（約略位置）</span>・${link}` : `已定位・${link}`;
 }
 
@@ -7045,7 +7113,7 @@ function routePreviewHtml(rt: RoutePreview): string {
       const status =
         st.status === 'listed'
           ? st.lat !== null && st.lng !== null
-            ? `已定位・<a href="${googleMapsUrl({ lat: st.lat, lng: st.lng })}" target="_blank" rel="noopener">在 Google 地圖上看</a>`
+            ? `已定位・${lookBtn(st.lat, st.lng)}・<a href="${googleMapsUrl({ lat: st.lat, lng: st.lng })}" target="_blank" rel="noopener">在 Google 地圖上看</a>`
             : '已定位'
           : st.status === 'approximate'
             ? `<span class="preview-warn">只定位到${esc(st.area ?? '鄉鎮區')}（約略位置），不會放上雷達；可以按「補充資料」在地圖上標出位置</span>`
@@ -7089,7 +7157,7 @@ function renderPreview(r: SubmitResult): void {
         </li>`,
       )
       .join('')}</ul>
-    ${items.some((p) => p.lat !== null && p.lng !== null) ? `<p class="muted sheet-note small">📍 位置是照地點文字查的，不一定準確，請按「在 Google 地圖上看」確認一下；不對的話按「補充資料」${mod.current ? '在地圖上標出正確的位置' : '補上完整地址'}。</p>` : ''}
+    ${items.some((p) => p.lat !== null && p.lng !== null) ? `<p class="muted sheet-note small">📍 位置是照地點文字查的，不一定準確，已經先用虛線圈標在雷達上（還沒放上去），請看一下對不對；不對的話按「補充資料」${mod.current ? '在地圖上標出正確的位置' : '補上完整地址'}。</p>` : ''}
     ${dups}${r.failures?.length ? `<p class="muted sheet-note">${r.failures.length > 1 ? `下面 ${r.failures.length} 場` : '下面這場'}不會放上雷達${canFixByNote(r.failures) ? '，知道的話可以按「補充資料」補上' : ''}：</p>${failuresHtml(r.failures)}` : ''}
     <div class="sheet-actions">
       <button type="button" class="btn primary" data-act="confirm">${items.length > 0 && items.every((p) => p.update?.mode === 'attach') ? '對，附在這個據點' : '對，放上雷達'}</button>
@@ -7101,6 +7169,16 @@ function renderPreview(r: SubmitResult): void {
       <textarea rows="2" maxlength="300" placeholder="哪裡判斷錯了？（選填，例如「地點是文化路 140 號」「只有 10/21 一天」）" aria-label="哪裡判斷錯了"></textarea>
       <div class="sheet-actions"><button type="submit" class="btn primary">送出，不放上雷達</button><button type="button" class="btn" data-act="back">回上一步</button></div>
     </form>`);
+  // 定位到的直接標在雷達、地圖上，雷達移過去（手機被回報畫面蓋住，按「在雷達上看」收起來看）
+  reportPins = previewPins(items, r.routes ?? []);
+  render();
+  flyToPins(reportPins);
+  for (const b of reportResult.querySelectorAll<HTMLButtonElement>('[data-look]')) {
+    b.addEventListener('click', () => {
+      const [lat, lng] = (b.dataset.look ?? '').split(',').map(Number);
+      if (Number.isFinite(lat) && Number.isFinite(lng)) lookAtPin(lat, lng);
+    });
+  }
   const wrongForm = reportResult.querySelector<HTMLFormElement>('.preview-wrong');
   const actions = reportResult.querySelector<HTMLElement>('.sheet-actions');
   reportResult.querySelector('[data-act="confirm"]')?.addEventListener('click', async (e) => {
@@ -7851,6 +7929,17 @@ function wireControls(): void {
     } else if (t.closest('[data-act="done"]')) setDateOpen(false);
   });
   reportSheet.querySelector('[data-act="close"]')?.addEventListener('click', () => openReportSheet(false));
+  // 收起來時點標題那一條（或「回到判讀結果」）再打開
+  reportSheet.addEventListener('click', (e) => {
+    const t = e.target as Element;
+    if (!reportSheet.classList.contains('peek') || !t.closest('.sheet-head') || t.closest('[data-act="close"]')) return;
+    setReportPeek(false);
+  });
+  // 回報畫面關掉（各種地方都會關）：收起的狀態、雷達上判讀結果的位置跟著拿掉，再打開時判讀結果還在就再畫
+  new MutationObserver(() => {
+    if (reportSheet.hidden) setReportPeek(false);
+    if (reportPins.length > 0) render();
+  }).observe(reportSheet, { attributes: true, attributeFilter: ['hidden'] });
   myReportsMore.addEventListener('click', () => {
     myReportsExpanded = !myReportsExpanded;
     renderMyReports();

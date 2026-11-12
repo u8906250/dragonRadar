@@ -229,6 +229,14 @@ function officeSvg(fill: string, stroke: string, strokeW: number, fillOpacity: n
 const escapeHtml = (s: string): string =>
   s.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c] as string);
 
+/** 回報判讀完、還沒確認的位置（跟 radar.ts 的 RadarPreview 一樣） */
+export interface MapPreview {
+  lat: number;
+  lng: number;
+  label: string;
+  glyph: string | null;
+}
+
 /** Leaflet 地圖，第一次切到地圖時才載入 */
 export interface MapBottle {
   id: number;
@@ -300,6 +308,8 @@ export class MapView {
   private sceneCenter: Leaflet.LatLng | null = null;
   private bottleLayer: Leaflet.LayerGroup | null = null;
   private bottles: MapBottle[] = [];
+  private previewLayer: Leaflet.LayerGroup | null = null;
+  private previews: MapPreview[] = [];
   /** 座標一樣合成一個點時，每個項目對應到畫出來的那個標記 */
   private readonly leaderOf = new Map<number, number>();
   /** 畫出來的標記代表哪些項目 */
@@ -341,6 +351,7 @@ export class MapView {
       this.routeLayer = L.layerGroup().addTo(map);
       this.bottleLayer = L.layerGroup().addTo(map);
       this.layer = L.layerGroup().addTo(map);
+      this.previewLayer = L.layerGroup().addTo(map);
       this.accuracyCircle = L.circle([this.origin.lat, this.origin.lng], {
         radius: 0,
         color: '#3b82f6',
@@ -440,6 +451,7 @@ export class MapView {
       this.pushRoutes();
       this.pushBottles();
       this.pushItems();
+      this.pushPreviews();
       // 地圖容器剛從 hidden 變成顯示，尺寸要再算一次
       requestAnimationFrame(() => map.invalidateSize());
     })();
@@ -732,6 +744,30 @@ export class MapView {
         iconAnchor: [12, 12],
       });
       layer.addLayer(L.marker([b.lat, b.lng], { icon, keyboard: false, title: b.mine ? '你丟的漂流瓶' : '漂流瓶' }).on('click', open));
+    }
+  }
+
+  /** 回報判讀完的位置：虛線圈＋名稱（空陣列就拿掉） */
+  setPreviews(list: MapPreview[]): void {
+    if (JSON.stringify(list) === JSON.stringify(this.previews)) return;
+    this.previews = list;
+    this.pushPreviews();
+  }
+
+  private pushPreviews(): void {
+    const L = this.L;
+    const layer = this.previewLayer;
+    if (!L || !layer) return;
+    layer.clearLayers();
+    for (const pv of this.previews) {
+      const inner = pv.glyph ? `<g transform="scale(0.9)">${glyphSvg(pv.glyph, 'currentColor')}</g>` : '<circle class="core" r="3.5"/>';
+      const icon = L.divIcon({
+        className: 'map-preview',
+        html: `<svg viewBox="-16 -16 32 32" width="32" height="32" aria-hidden="true"><circle class="pulse" r="11"/><circle class="ring" r="11"/>${inner}</svg><span>${escapeHtml(pv.label)}</span>`,
+        iconSize: [32, 32],
+        iconAnchor: [16, 16],
+      });
+      layer.addLayer(L.marker([pv.lat, pv.lng], { icon, keyboard: false, interactive: false, title: `還沒放上雷達：${pv.label}`, zIndexOffset: 900 }));
     }
   }
 
