@@ -2480,18 +2480,6 @@ function ago(unix: number): string {
   return `${Math.floor(m / 1440)} 天前`;
 }
 
-/** 分享到 Threads（打開 Threads 的發文畫面，不用串 API）：不帶內容，內容要走到瓶子附近才看得到 */
-function threadsShareUrl(id: number, mine: boolean): string {
-  const link = new URL(location.pathname, location.origin);
-  link.searchParams.set('bottle', String(id));
-  const text = mine
-    ? `我丟了一個漂流瓶 ${bottleNo(id)} 🍾 在牛皮紙上寫了一段話、捲起來裝進瓶子，走到瓶子附近才看得到內容、收藏得到。24 小時後就會漂到汪星的海上。`
-    : `我找到漂流瓶 ${bottleNo(id)} 了 🍾`;
-  return `https://www.threads.com/intent/post?text=${encodeURIComponent(text)}&url=${encodeURIComponent(link.toString())}`;
-}
-const shareLink = (id: number, mine: boolean, cls = 'btn'): string =>
-  `<a class="${cls}" href="${esc(threadsShareUrl(id, mine))}" target="_blank" rel="noopener">分享到 Threads</a>`;
-
 function selectBottle(id: number | null, thrown = false): void {
   selectedBottle = selectedBottle === id ? null : id;
   justThrown = thrown ? selectedBottle : null;
@@ -2687,7 +2675,6 @@ function renderBottleDetail(id: number): boolean {
       <div class="sheet-actions">
         ${canCollect ? '<button type="button" class="btn primary" data-act="pick">收藏</button>' : ''}
         ${!got && !b.mine && !b.picked && !near && !woof ? `<a class="btn" href="https://www.google.com/maps/dir/?api=1&destination=${b.lat},${b.lng}&travelmode=walking" target="_blank" rel="noopener">走過去</a>` : ''}
-        ${got ? shareLink(b.id, b.mine) : ''}
         ${got && (b.mine || b.picked) ? '<button type="button" class="btn" data-act="proof">瓶子證明</button>' : ''}
         ${got && !b.mine ? '<button type="button" class="btn subtle" data-act="report">檢舉</button>' : ''}
         ${b.mine && canWithdraw(b.taken ? 'picked' : 'active', b.createdAt) ? `<button type="button" class="btn subtle" data-act="delete"${withdrawing.has(b.id) ? ' disabled' : ''}>收回</button>` : ''}
@@ -3164,7 +3151,6 @@ function renderLettersPage(): void {
             ${open.photo ? tapedPhoto(open.id) : ''}<p class="letter-text">${esc(open.text)}</p>
             <div class="letter-acts">
               <button type="button" class="link-btn" data-proof="${open.id}">瓶子證明</button>
-              ${shareLink(open.id, false, 'link-btn')}
               <button type="button" class="link-btn" data-report="${open.id}">檢舉</button>
               <button type="button" class="link-btn" data-uncollect="${open.id}">移出收藏</button>
             </div>
@@ -3319,7 +3305,7 @@ async function submitBottle(): Promise<void> {
   bottleTexts.set(r.data.bottle.id, r.data);
   if (photo && r.data.photo) rememberBottlePhoto(r.data.bottle.id, photo);
   lsSet(LS_BOTTLE_DROPPED, '1');
-  // 牛皮紙捲起來、放進瓶子、塞上軟木塞，丟到雷達上；落水後打開這個瓶子（編號、分享、收回，內容剛看過就不再顯示）
+  // 牛皮紙捲起來、放進瓶子、塞上軟木塞，丟到雷達上；落水後打開這個瓶子（編號、瓶子證明、收回，內容剛看過就不再顯示；v1.663 分享到 Threads 拿掉了）
   throwing = true;
   updateDropBtn();
   await throwBottleFx(text, photo, () => openBottleSheet(false));
