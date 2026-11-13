@@ -1330,6 +1330,11 @@ export class Radar {
     }
     // 太空：轉動地球，手指拖過地球表面多遠就轉多少（照地球在雷達上的半徑換算）
     const km = this.inSpace ? (r / (globeFrac(this.scaleKm) * (R - 8))) * EARTH_KM : (r / (R - 8)) * this.scaleKm;
+    // 中山公園那層先跟著手指平移，停了才重畫（drawPark）
+    if (this.parkPan) {
+      this.parkPan.dx += dx;
+      this.parkPan.dy += dy;
+    }
     // 內容往畫面上的 screen 方向移動；指北針模式要加回手機朝向；中心往反方向
     const screen = (Math.atan2(dx, -dy) * 180) / Math.PI;
     this.onPan(((screen + this.heading + 180) % 360 + 360) % 360, km, false);
@@ -2081,15 +2086,30 @@ export class Radar {
   }
 
   /** 中山公園：北在上畫好，整層跟著指北針轉（跟太空一樣）；太空裡不畫 */
+  /**
+   * 拖曳、放開後還在滑的時候，中山公園那層整層平移，停了才重畫（v1.703 效能評估：畫一次樹冠、屋頂要好幾毫秒，
+   * 以前拖曳時每一格都重畫，佔了拖曳時間的四分之一）。平移的是裡面那一層，裁切的圓不跟著動（跟道路一樣）
+   */
+  private parkPan: { dx: number; dy: number } | null = null;
+  private parkBuilt: { draw: (scaleKm: number) => string; km: number; heading: number } | null = null;
   private drawPark(): void {
+    const moving = this.panning || this.panFling !== 0;
+    const b = this.parkBuilt;
+    const inner = this.parkLayer.firstElementChild;
+    const rot = this.heading ? ` rotate(${(-this.heading).toFixed(1)} ${C} ${C})` : '';
+    if (moving && b && inner && this.parkPan && !this.inSpace && b.draw === this.parkDraw && b.km === this.scaleKm && b.heading === this.heading) {
+      inner.setAttribute('transform', `translate(${this.parkPan.dx.toFixed(1)} ${this.parkPan.dy.toFixed(1)})${rot}`);
+      return;
+    }
     const svg = this.parkDraw && !this.inSpace ? this.parkDraw(this.scaleKm) : '';
-    if (!svg) {
+    this.parkPan = { dx: 0, dy: 0 };
+    if (!svg || !this.parkDraw) {
+      this.parkBuilt = null;
       if (this.parkLayer.firstChild) this.parkLayer.replaceChildren();
       return;
     }
-    this.parkLayer.innerHTML = svg;
-    if (this.heading) this.parkLayer.setAttribute('transform', `rotate(${(-this.heading).toFixed(1)} ${C} ${C})`);
-    else this.parkLayer.removeAttribute('transform');
+    this.parkBuilt = { draw: this.parkDraw, km: this.scaleKm, heading: this.heading };
+    this.parkLayer.innerHTML = `<g${rot ? ` transform="${rot.trim()}"` : ''}>${svg}</g>`;
     this.standUp(this.parkLayer);
   }
 
