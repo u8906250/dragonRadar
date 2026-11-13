@@ -7480,7 +7480,7 @@ function renderPreview(r: SubmitResult): void {
         </li>`,
       )
       .join('')}</ul>
-    ${items.some((p) => p.lat !== null && p.lng !== null) ? `<p class="muted sheet-note small">📍 位置是照地點文字查的，不一定準確，已經先用虛線圈標在雷達上（還沒放上去），請看一下對不對；${mod.current ? '不對的話直接把虛線圈拖到正確的地方' : '不對的話按「補充資料」補上完整地址'}。</p>` : ''}
+    ${items.some((p) => p.lat !== null && p.lng !== null) ? `<p class="muted sheet-note small">📍 位置可能不準，${mod.current ? '不對就把虛線圈拖到正確的地方' : '不對請按「補充資料」補上地址'}</p>` : ''}
     ${dups}${r.failures?.length ? `<p class="muted sheet-note">${r.failures.length > 1 ? `下面 ${r.failures.length} 場` : '下面這場'}不會放上雷達${canFixByNote(r.failures) ? '，知道的話可以按「補充資料」補上' : ''}：</p>${failuresHtml(r.failures)}` : ''}
     <div class="sheet-actions">
       <button type="button" class="btn primary" data-act="confirm">${items.length > 0 && items.every((p) => p.update?.mode === 'attach') ? '對，附在這個據點' : '對，放上雷達'}</button>
