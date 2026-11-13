@@ -1064,10 +1064,12 @@ function updateStreets(): void {
     const xy = hidden(l.pts) ? null : toXy(l);
     if (xy) coastXy.push(xy);
   }
-  // 公園綠地塗淡綠：只有全螢幕（v1.705 使用者說的），洋流總部特效播放時不塗（特效自己會把台北染淡綠）
-  if (radar.filling && hqVoyageAt === null && green.length > 0) {
+  // 公園綠地塗淡綠：只有全螢幕（v1.705 使用者說的），洋流總部特效播放時不塗（特效自己會把台北染淡綠）；
+  // 2 km 內再加自己整理的公園外框（v1.706：圖磚不收太小的，例如通化公園），這時才載入
+  const parkShapes = radar.filling && hqVoyageAt === null && scaleKm <= 2 ? parkAreas() : [];
+  if (radar.filling && hqVoyageAt === null && green.length + parkShapes.length > 0) {
     out.green = [];
-    for (const a of green) {
+    for (const a of [...green, ...parkShapes]) {
       if (a.box[0] > box[2] || a.box[2] < box[0] || a.box[1] > box[3] || a.box[3] < box[1]) continue;
       if (mask && mask.contains(a.rings[0][0], a.rings[0][1])) continue;
       out.green.push(
@@ -1100,6 +1102,65 @@ function updateStreets(): void {
  * 一般的公園（沒有 Wikidata）1 km 內都寫、2 km 內寫 1 公頃以上的（v1.701）。
  * 只有全螢幕寫（v1.692 使用者說一般的雷達不用顯示）；中國的範圍不寫（跟道路一樣）；洋流總部的特效播放時不寫
  */
+/**
+ * 公園外框（parks-tw.ts，壓縮後約 180 KB）：全螢幕拉近到 2 km 內才載入，載入好解開 polyline、算外框，重畫道路。
+ * 還沒載入回傳空的
+ */
+let parkShapesMod: Array<{ rings: Float64Array[]; box: [number, number, number, number] }> | null = null;
+let parkShapesLoading = false;
+function parkAreas(): Array<{ rings: Float64Array[]; box: [number, number, number, number] }> {
+  if (parkShapesMod) return parkShapesMod;
+  if (!parkShapesLoading) {
+    parkShapesLoading = true;
+    void import('./parks-tw')
+      .then((m) => {
+        parkShapesMod = m.TW_PARK_SHAPES.map((rings) => {
+          const rs = rings.map(decodePolyline);
+          let [s0, w0, n0, e0] = [Infinity, Infinity, -Infinity, -Infinity];
+          const o = rs[0];
+          for (let i = 0; i < o.length; i += 2) {
+            s0 = Math.min(s0, o[i]);
+            n0 = Math.max(n0, o[i]);
+            w0 = Math.min(w0, o[i + 1]);
+            e0 = Math.max(e0, o[i + 1]);
+          }
+          return { rings: rs, box: [s0, w0, n0, e0] as [number, number, number, number] };
+        });
+        streetsFor = '';
+        updateStreets();
+      })
+      .catch(() => {
+        parkShapesLoading = false;
+      });
+  }
+  return [];
+}
+
+/** Google polyline（精度小數 5 位）→ [緯度, 經度, …] */
+function decodePolyline(str: string): Float64Array {
+  const out: number[] = [];
+  let i = 0;
+  let lat = 0;
+  let lng = 0;
+  while (i < str.length) {
+    for (const which of [0, 1]) {
+      let shift = 0;
+      let result = 0;
+      let b: number;
+      do {
+        b = str.charCodeAt(i++) - 63;
+        result |= (b & 0x1f) << shift;
+        shift += 5;
+      } while (b >= 0x20);
+      const d = result & 1 ? ~(result >> 1) : result >> 1;
+      if (which === 0) lat += d;
+      else lng += d;
+    }
+    out.push(lat / 1e5, lng / 1e5);
+  }
+  return Float64Array.from(out);
+}
+
 /** 地標（pois-tw.ts，約 100 KB）：全螢幕拉近到 5 km 內才載入，載入好重畫道路和名稱 */
 let poisMod: typeof import('./pois-tw') | null = null;
 let poisLoading = false;
