@@ -55,6 +55,8 @@ export interface StatsOut {
   bottles: { thrown: number; picks: number };
   /** 開了手機通知的（全部，不限天數） */
   pushSubscribers: number;
+  /** 公開的雷達統計不列的帳號（作者要求的） */
+  hiddenAccounts: string[];
 }
 
 /** 回報來的貼文（官方航線、新聞、主辦單位公告不算） */
@@ -221,7 +223,37 @@ export async function adminStats(env: Env, now: number, days: number): Promise<S
     feedbackKinds: fbRows.map((r) => ({ name: FEEDBACK_KINDS[r.kind as keyof typeof FEEDBACK_KINDS] ?? r.kind, count: r.n })).sort((x, y) => y.count - x.count),
     bottles: { thrown: b?.thrown ?? 0, picks: b?.picks ?? 0 },
     pushSubscribers: (push.results[0] as { n: number } | undefined)?.n ?? 0,
+    hiddenAccounts: await hiddenAccounts(env),
   };
+}
+
+/**
+ * 公開的雷達統計不列的帳號（v1.695：作者要求不列就排除，見資料刪除說明）：存在 settings，小寫、不含 @。
+ * 改了就把公開統計的暫存清掉，下次打開重算
+ */
+const HIDE_KEY = 'stats:hide-accounts';
+export async function hiddenAccounts(env: Env): Promise<string[]> {
+  const r = await env.DB.prepare('SELECT value FROM settings WHERE key = ?').bind(HIDE_KEY).first<{ value: string }>();
+  try {
+    const v = r ? (JSON.parse(r.value) as unknown) : [];
+    return Array.isArray(v) ? v.filter((x): x is string => typeof x === 'string') : [];
+  } catch {
+    return [];
+  }
+}
+export const ACCOUNT_RE = /^[a-z0-9._]{1,40}$/;
+export async function setHiddenAccount(env: Env, username: string, hide: boolean, now: number): Promise<string[]> {
+  const name = username.trim().replace(/^@/, '').toLowerCase();
+  if (!ACCOUNT_RE.test(name)) throw new Error('bad username');
+  const list = new Set(await hiddenAccounts(env));
+  if (hide) list.add(name);
+  else list.delete(name);
+  const out = [...list].sort();
+  await env.DB.batch([
+    env.DB.prepare('INSERT INTO settings (key, value, updated_at) VALUES (?, ?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at').bind(HIDE_KEY, JSON.stringify(out), now),
+    env.DB.prepare("DELETE FROM settings WHERE key LIKE 'stats:public%'"),
+  ]);
+  return out;
 }
 
 /**
@@ -244,9 +276,17 @@ export interface PublicStatsOut {
   hours: number[];
   modules: Array<{ name: string; count: number }>;
   bottles: { thrown: number; picks: number };
+  /**
+   * 活動來源（v1.695 使用者說帳號排行可以公開，照我建議的 5 點）：放上雷達的活動來自哪些公開的 Threads 帳號。
+   * 只算確認放上雷達、作者沒刪掉的貼文；至少 2 則才列（只出現一次的一般民眾不列）、最多 20 個；作者要求不列的排除
+   */
+  accounts: Array<{ username: string; posts: number; events: number }>;
 }
 
-const PUBLIC_KEY = 'stats:public';
+/** 暫存的 key：欄位改了就換一個（v1.695 多了活動來源），新版上線不用等一小時 */
+const PUBLIC_KEY = 'stats:public:2';
+const PUBLIC_ACCOUNTS_MIN = 2;
+const PUBLIC_ACCOUNTS_MAX = 20;
 const PUBLIC_EVERY_SEC = 3600;
 
 export async function publicStats(env: Env, now: number): Promise<PublicStatsOut> {
@@ -260,7 +300,7 @@ export async function publicStats(env: Env, now: number): Promise<PublicStatsOut
   }
   const days = 30;
   const from = now - days * 86400;
-  const [events, posts, credits, bottles] = await env.DB.batch([
+  const [events, posts, credits, bottles, accounts] = await env.DB.batch([
     env.DB.prepare(
       `SELECT e.post_id, e.extra, e.start_at, e.tz, e.lat, e.lng, e.place_text, p.module FROM events e JOIN posts p ON p.id = e.post_id
         WHERE e.start_at >= ? AND e.start_at <= ? AND p.source IN ${REPORT_SOURCES} AND p.confirm_state = 'confirmed' AND e.merged_into IS NULL AND e.lat IS NOT NULL`,
@@ -268,7 +308,15 @@ export async function publicStats(env: Env, now: number): Promise<PublicStatsOut
     env.DB.prepare(`SELECT module FROM posts WHERE fetched_at >= ? AND source IN ${REPORT_SOURCES} AND confirm_state = 'confirmed'`).bind(from),
     env.DB.prepare('SELECT COUNT(DISTINCT device_id) AS n FROM report_credits WHERE created_at >= ?').bind(from),
     env.DB.prepare('SELECT COUNT(*) AS thrown, COALESCE(SUM(picks), 0) AS picks FROM bottles WHERE created_at >= ?').bind(from),
+    env.DB.prepare(
+      `SELECT p.username, COUNT(*) AS posts, COALESCE(SUM(ev.n), 0) AS events FROM posts p
+        LEFT JOIN (SELECT post_id, COUNT(*) AS n FROM events WHERE merged_into IS NULL GROUP BY post_id) ev ON ev.post_id = p.id
+        WHERE p.fetched_at >= ? AND p.source = 'link' AND p.confirm_state = 'confirmed' AND p.username IS NOT NULL
+          AND NOT EXISTS (SELECT 1 FROM events d WHERE d.post_id = p.id AND d.ended_reason = 'deleted')
+        GROUP BY p.username HAVING COUNT(*) >= ? ORDER BY posts DESC, events DESC LIMIT 60`,
+    ).bind(from, PUBLIC_ACCOUNTS_MIN),
   ]);
+  const hidden = new Set(await hiddenAccounts(env));
   type Ev = { post_id: string; extra: string | null; start_at: number; tz: string | null; lat: number; lng: number; place_text: string; module: string | null };
   const evRows = events.results as Ev[];
   const dayList = Array.from({ length: days }, (_, i) => taipeiDay(now - (days - 1 - i) * 86400));
@@ -323,6 +371,10 @@ export async function publicStats(env: Env, now: number): Promise<PublicStatsOut
     hours,
     modules: top(modules, 10),
     bottles: { thrown: b?.thrown ?? 0, picks: b?.picks ?? 0 },
+    accounts: (accounts.results as Array<{ username: string; posts: number; events: number }>)
+      .filter((a) => !hidden.has(a.username.toLowerCase()))
+      .slice(0, PUBLIC_ACCOUNTS_MAX)
+      .map((a) => ({ username: a.username, posts: a.posts, events: a.events })),
   };
   await env.DB.prepare('INSERT INTO settings (key, value, updated_at) VALUES (?, ?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at')
     .bind(PUBLIC_KEY, JSON.stringify(out), now)

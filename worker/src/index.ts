@@ -16,7 +16,7 @@ import { addParkMark, deleteParkMark, listParkMarks, listPublicParkMarks, parseP
 import { adminLocate, applyFeedback, clearResolvedFeedback, deleteAdminSubscription, listFeedback, locateForFeedback, notifyAdmins, purgeFeedback, saveAdminSubscription, setFeedbackStatus, submitFeedback } from './feedback';
 import { moduleOf } from './modules';
 import { shareInfo } from './share';
-import { adminStats, publicStats } from './stats';
+import { ACCOUNT_RE, adminStats, publicStats, setHiddenAccount } from './stats';
 import { PUSH_RADIUS_KM, PushError, b64urlEncode, deleteSubscription, encryptPayload, purgeSubscriptions, pushStarted, saveSubscription, sendPush, vapidKeys } from './push';
 import { assertEventReportsOpen, confirmLink, editLink, ENDED_REPORTS_NEEDED, locateForEdit, MAX_LINK_AGE_SEC, NOTES_CLOSED, ReportError, REPORTS_LOCKED, ipHash, myReports, purgeReports, recheckLinks, rejectLink, reportModules, submitLink, supplementLink, withdrawReport } from './reports';
 import { D1Meter, isTransient, withResilientDb } from './db';
@@ -787,6 +787,12 @@ async function handleAdmin(req: Request, env: Env, ctx: ExecutionContext, path: 
   if (req.method === 'GET' && path === '/api/admin/stats') {
     const days = Math.min(30, Math.max(1, Math.round(Number(url.searchParams.get('days')) || 30)));
     return jsonResponse(await adminStats(env, now, days));
+  }
+  // 公開的雷達統計不列哪些帳號（作者要求）：{ username, hide }
+  if (req.method === 'POST' && path === '/api/admin/stats/hide') {
+    const body = (await req.json().catch(() => ({}))) as { username?: unknown; hide?: unknown };
+    if (typeof body.username !== 'string' || !ACCOUNT_RE.test(body.username.trim().replace(/^@/, '').toLowerCase())) throw new HttpError(400, '帳號名稱不對');
+    return jsonResponse({ hidden: await setHiddenAccount(env, body.username, body.hide !== false, now) });
   }
 
   if (req.method === 'GET' && path === '/api/admin/usage') {

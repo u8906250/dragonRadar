@@ -24,6 +24,7 @@ interface Stats {
   feedbackKinds: Count[];
   bottles: { thrown: number; picks: number };
   pushSubscribers: number;
+  hiddenAccounts?: string[];
 }
 
 const PROD_API = 'https://dragon-radar.happybadminton.workers.dev';
@@ -50,13 +51,64 @@ const ls = {
 };
 const $ = <T extends HTMLElement = HTMLElement>(s: string): T => document.querySelector(s) as T;
 
-
-async function api(path: string): Promise<Stats> {
-  const r = await fetch(API + path, { headers: { authorization: `Bearer ${ls.get(LS_TOKEN) || ''}` } });
-  const j = (await r.json().catch(() => ({}))) as Stats & { error?: string };
+async function api<T = Stats>(path: string, body?: unknown): Promise<T> {
+  const r = await fetch(API + path, {
+    method: body ? 'POST' : 'GET',
+    headers: { authorization: `Bearer ${ls.get(LS_TOKEN) || ''}`, ...(body ? { 'content-type': 'application/json' } : {}) },
+    ...(body ? { body: JSON.stringify(body) } : {}),
+  });
+  const j = (await r.json().catch(() => ({}))) as T & { error?: string };
   if (r.status === 401) throw Object.assign(new Error('token 不對'), { auth: true });
   if (!r.ok) throw new Error(j.error || `錯誤 ${r.status}`);
   return j;
+}
+
+/**
+ * 公開的雷達統計不列哪些帳號（作者照資料刪除說明來要求的；v1.695）：輸入帳號加進去、按「移除」恢復列出。
+ * 改了會清掉公開統計的暫存，下次有人打開就照新的算
+ */
+function hideBox(list: string[]): HTMLElement {
+  const box = h('div');
+  box.append(h('h3', undefined, '公開統計不列的帳號'));
+  const form = h('form', 'row');
+  const input = h('input');
+  input.type = 'text';
+  input.placeholder = 'Threads 帳號（不用加 @）';
+  input.setAttribute('aria-label', '不列的 Threads 帳號');
+  input.style.cssText = 'font:inherit;font-size:16px;flex:1 1 180px;min-width:0;padding:6px 10px;border:2px solid var(--ink);border-radius:10px;background:#fff';
+  const add = h('button', 'btn', '不列');
+  add.type = 'submit';
+  form.append(input, add);
+  const msg = h('p', 'msg');
+  const change = async (username: string, hide: boolean): Promise<void> => {
+    try {
+      await api<{ hidden: string[] }>('/api/admin/stats/hide', { username, hide });
+      await load();
+    } catch (e) {
+      msg.textContent = (e as Error).message;
+      msg.classList.add('err');
+    }
+  };
+  form.addEventListener('submit', (e) => {
+    e.preventDefault();
+    if (input.value.trim()) void change(input.value.trim(), true);
+  });
+  box.append(form);
+  if (list.length === 0) box.append(h('p', 'empty', '沒有'));
+  else {
+    const ul = h('ul', 'hide-list');
+    for (const name of list) {
+      const li = h('li', 'row');
+      const b = h('button', 'btn', '移除');
+      b.type = 'button';
+      b.addEventListener('click', () => void change(name, false));
+      li.append(h('span', undefined, `@${name}`), b);
+      ul.append(li);
+    }
+    box.append(ul);
+  }
+  box.append(msg);
+  return box;
 }
 
 function render(s: Stats): void {
@@ -107,19 +159,21 @@ function render(s: Stats): void {
   root.append(out);
 
   // 帳號
-  const acc = card('Threads 帳號', '被回報最多的帳號（最多 30 個）：長條是回報幾則貼文，帳號下面寫放上雷達幾則、幾場活動。點帳號開 Threads。');
+  const hidden = new Set(s.hiddenAccounts ?? []);
+  const acc = card('Threads 帳號', '被回報最多的帳號（最多 30 個）：長條是回報幾則貼文，帳號下面寫放上雷達幾則、幾場活動。點帳號開 Threads。公開的雷達統計只列放上雷達 2 則以上、作者沒刪文的，下面不列的帳號排除。');
   acc.append(
     hbars(
       s.accounts.map((a) => ({
         name: `@${a.username}`,
         count: a.posts,
-        note: `放上雷達 ${a.confirmed} 則・${a.events} 場活動`,
+        note: `放上雷達 ${a.confirmed} 則・${a.events} 場活動${hidden.has(a.username.toLowerCase()) ? '・公開統計不列' : ''}`,
         href: `https://www.threads.com/@${encodeURIComponent(a.username)}`,
       })),
       '沒有資料',
       true,
     ),
   );
+  acc.append(hideBox(s.hiddenAccounts ?? []));
   root.append(acc);
 
   // 主題
