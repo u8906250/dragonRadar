@@ -143,11 +143,17 @@ export interface RadarLabel {
   y: number;
   text: string;
   kind: 'county' | 'town' | 'road' | 'station' | 'poi';
+  /** 認同一個名稱用的（同名不同地方的地標要分開）；沒有就用種類和名稱 */
+  key?: string;
 }
 /** 字的大小（螢幕像素：雷達多大字都一樣大，電腦全螢幕不會變成大字） */
 const PLACE_LABEL_PX: Record<RadarLabel['kind'], number> = { county: 13, town: 12, road: 10.5, station: 11, poi: 11 };
 /** 一個畫面最多幾個（只有全螢幕鋪滿時寫，v1.692） */
 const PLACE_LABEL_MAX = 18;
+/** 縮放、轉動停了多久才算停下來（被擋住的名稱這時才試別的位置） */
+const LABEL_SETTLE_MS = 300;
+/** 名稱淡出多久（跟 styles.css 的 .place-label 一樣） */
+const LABEL_FADE_MS = 250;
 
 /**
  * 水上活動的船（螢幕像素，中心在 0,0，船頭朝右）：SUP 是一塊板子、站著划槳的人；龍舟是長長的紅船身、黃色的條、龍頭、一排划槳的人
@@ -1332,14 +1338,10 @@ export class Radar {
     }
     // 太空：轉動地球，手指拖過地球表面多遠就轉多少（照地球在雷達上的半徑換算）
     const km = this.inSpace ? (r / (globeFrac(this.scaleKm) * (R - 8))) * EARTH_KM : (r / (R - 8)) * this.scaleKm;
-    // 中山公園那層、地名先跟著手指平移，停了才重畫（drawPark、drawPlaceLabels）
+    // 中山公園那層先跟著手指平移，停了才重畫（drawPark）
     if (this.parkPan) {
       this.parkPan.dx += dx;
       this.parkPan.dy += dy;
-    }
-    if (this.labelPan) {
-      this.labelPan.dx += dx;
-      this.labelPan.dy += dy;
     }
     // 內容往畫面上的 screen 方向移動；指北針模式要加回手機朝向；中心往反方向
     const screen = (Math.atan2(dx, -dy) * 180) / Math.PI;
@@ -2002,31 +2004,44 @@ export class Radar {
    * 以前跟道路一起排，活動還沒抓到時就排好了，光點後來蓋在字上）；指北針轉了一起重排，字一直是正的
    */
   /**
-   * 拖曳、放開後還在滑的時候，地名整層跟著手指平移、不重新排，停了才重排（v1.709 使用者說移動時地標、路名一直重畫：
-   * 以前每一格都重排，誰寫得下、寫在哪一直變，會一下有一下沒有、上下跳）
+   * 地名要像 Google 地圖那樣移動（v1.710 使用者說移動時文字一直改變位置，盡量不要變更畫面）：每一格都排，但寫出來的名稱一直留在原本的位置
+   * （跟著地圖走、挪過的照原本挪的），先排、只試原本的位置；被擋住或出了畫面就淡出，還在移動就記著，回得去就在原地淡入；
+   * 空出來的地方再照重要的順序補上新的（淡入）。停下來（拖完、縮放或轉動後 LABEL_SETTLE_MS）被擋住的才試別的位置。
+   * <text> 照「種類|名稱|位置」一直沿用，淡入淡出用 CSS（v1.709 拖曳時整層平移、停了才排，使用者說移動中就出現文字比較順）
    */
-  private labelPan: { dx: number; dy: number } | null = null;
-  private labelBuilt: { k: number; heading: number; unit: number } | null = null;
-  /** 上次寫出來的（種類|名稱 → 挪了多少）：同一個範圍重排時先排這些、先試原本挪的位置，停下來原本的名稱才不會被換掉或跳位置 */
   private labelShown = new Map<string, [number, number]>();
-  private labelShownKm = 0;
+  private labelHidden = new Map<string, [number, number]>();
+  private labelEls = new Map<string, SVGTextElement>();
+  /** 淡出中的（什麼時候開始淡出），淡完才拿掉 */
+  private labelOff = new Map<string, number>();
+  /** 上一格的比例、指北針角度和最後一次變的時間：變了 LABEL_SETTLE_MS 內算還在縮放、轉動 */
+  private labelLast = { k: 0, heading: 0, at: 0 };
+  private labelSettle = 0;
+  private labelArgs: [Array<{ x: number; y: number }>, Array<{ left: number; right: number; top: number; bottom: number }>] | null = null;
   private drawPlaceLabels(blips: Array<{ x: number; y: number }>, blipLabels: Array<{ left: number; right: number; top: number; bottom: number }>): void {
-    const k = (R - 8) / this.scaleKm;
-    // 一個螢幕像素是幾個 SVG 單位
-    const unit = this.squarePx > 0 ? SIZE / this.squarePx : 1;
-    const moving = this.panning || this.panFling !== 0;
-    const built = this.labelBuilt;
-    const g0 = this.placeLabelLayer.firstElementChild;
-    if (moving && built && g0 && this.labelPan && this.fill && !this.inSpace && built.k === k && built.heading === this.heading && built.unit === unit) {
-      g0.setAttribute('transform', `translate(${this.labelPan.dx.toFixed(1)} ${this.labelPan.dy.toFixed(1)})`);
-      return;
-    }
-    this.placeLabelLayer.replaceChildren();
-    this.labelPan = { dx: 0, dy: 0 };
-    this.labelBuilt = null;
+    this.labelArgs = [blips, blipLabels];
     const s = this.streets;
     const labels = s?.labels ?? [];
-    if (!this.fill || this.inSpace || labels.length === 0) return;
+    if (!this.fill || this.inSpace || labels.length === 0) {
+      this.placeLabelLayer.replaceChildren();
+      this.labelEls.clear();
+      this.labelOff.clear();
+      this.labelShown.clear();
+      this.labelHidden.clear();
+      return;
+    }
+    const k = (R - 8) / this.scaleKm;
+    const now = performance.now();
+    if (k !== this.labelLast.k || this.heading !== this.labelLast.heading) {
+      this.labelLast = { k, heading: this.heading, at: now };
+      // 縮放、轉動停了再排一次（被擋住的這時才試別的位置）
+      window.clearTimeout(this.labelSettle);
+      this.labelSettle = window.setTimeout(() => {
+        this.labelSettle = 0;
+        if (this.labelArgs) this.drawPlaceLabels(...this.labelArgs);
+      }, LABEL_SETTLE_MS + 20);
+    }
+    const moving = this.panning || this.panFling !== 0 || now - this.labelLast.at < LABEL_SETTLE_MS;
     const noLabel = s?.noLabel ?? [];
     const h0 = (this.heading * Math.PI) / 180;
     const cos = Math.cos(h0);
@@ -2046,12 +2061,7 @@ export class Radar {
       taken.push({ l: x - r, r: x + r, t: y - r, b: y + r });
     };
     block(C, C, 9);
-    // 刻度圈上寫的公里數
-    for (const t of this.scaleLabels.querySelectorAll('text')) {
-      const x = Number(t.getAttribute('x'));
-      const y = Number(t.getAttribute('y'));
-      taken.push({ l: x - 2, r: x + (t.textContent?.length ?? 4) * 7 + 2, t: y - 12, b: y + 3 });
-    }
+    // 刻度圈上寫的公里數不用讓：地名只有全螢幕寫，那時刻度圈藏起來了（v1.710：以前也讓，畫面上方中間有一塊看不到的地方寫不了，拖過去的名稱會閃一下）
     for (const it of this.landmarks) {
       const ratio = this.ratio(it.distanceKm);
       if (ratio > 1.1) continue;
@@ -2059,50 +2069,109 @@ export class Radar {
       block(p.x, p.y, 10);
     }
     const inView = (x: number, y: number): boolean => Math.hypot(x - C, y - C) <= this.edgeR((Math.atan2(x - C, C - y) * 180) / Math.PI) - 2;
-    const g = el('g', { class: 'place-labels', 'stroke-width': (2.5 * unit).toFixed(2) });
-    const max = PLACE_LABEL_MAX;
-    const keyOf = (lb: RadarLabel): string => `${lb.kind}|${lb.text}`;
-    const keep = this.labelShownKm === this.scaleKm ? this.labelShown : new Map<string, [number, number]>();
-    const order = keep.size > 0 ? [...labels.filter((lb) => keep.has(keyOf(lb))), ...labels.filter((lb) => !keep.has(keyOf(lb)))] : labels;
-    const shown = new Map<string, [number, number]>();
-    let n = 0;
-    for (const lb of order) {
-      if (n >= max) break;
+    // 一個螢幕像素是幾個 SVG 單位
+    const unit = this.squarePx > 0 ? SIZE / this.squarePx : 1;
+    let g = this.placeLabelLayer.firstElementChild as SVGGElement | null;
+    if (!g) {
+      g = el('g', { class: 'place-labels' }) as SVGGElement;
+      this.placeLabelLayer.appendChild(g);
+    }
+    g.setAttribute('stroke-width', (2.5 * unit).toFixed(2));
+    const keyOf = (lb: RadarLabel): string => lb.key ?? `${lb.kind}|${lb.text}`;
+    const byKey = new Map<string, RadarLabel>();
+    for (const lb of labels) if (!byKey.has(keyOf(lb))) byKey.set(keyOf(lb), lb);
+    // 已經寫出來的、移動中被擋住記著的先排，再來是新的（照重要的順序）
+    const queue: Array<[string, RadarLabel, [number, number] | null]> = [];
+    for (const m of [this.labelShown, this.labelHidden]) {
+      for (const [key, off] of m) {
+        const lb = byKey.get(key);
+        if (lb && !queue.some((q) => q[0] === key)) queue.push([key, lb, off]);
+      }
+    }
+    const queued = new Set(queue.map((q) => q[0]));
+    for (const [key, lb] of byKey) if (!queued.has(key)) queue.push([key, lb, null]);
+    /** 名稱中間在畫面上的位置（挪過的照挪的） */
+    const at = (lb: RadarLabel, [ox, oy]: [number, number]): [number, number] => {
       const dx = lb.x - sx;
       const dy = lb.y - sy;
-      const x = C + k * (dx * cos - dy * sin);
-      const y = C - k * (dy * cos + dx * sin);
+      return [C + k * (dx * cos - dy * sin) + ox, C - k * (dy * cos + dx * sin) + oy];
+    };
+    const place = (t: SVGTextElement, lb: RadarLabel, off: [number, number]): void => {
+      const [x, y] = at(lb, off);
+      t.setAttribute('x', x.toFixed(1));
+      t.setAttribute('y', y.toFixed(1));
+    };
+    const shown = new Map<string, [number, number]>();
+    const hidden = new Map<string, [number, number]>();
+    let n = 0;
+    for (const [key, lb, prev] of queue) {
+      if (n >= PLACE_LABEL_MAX) {
+        if (prev && moving) hidden.set(key, prev);
+        continue;
+      }
       const fs = PLACE_LABEL_PX[lb.kind] * unit;
       const w = [...lb.text].length * fs + 4;
       const h = fs + 4;
       // 縣市、鄉鎮市區、地標的點被蓋住（常常就是你所在的那一區、你旁邊的大巨蛋）：往上、往下挪一行，再往左右挪試試；路名、車站要寫在原地
       const area = lb.kind === 'county' || lb.kind === 'town' || lb.kind === 'poi';
-      const tries: Array<[number, number]> = area ? [[0, 0], [0, -(h + 4)], [0, h + 4], [-(w / 2 + 12), 0], [w / 2 + 12, 0]] : [[0, 0]];
-      // 上次寫過的先試原本挪的位置
-      const prev = keep.get(keyOf(lb));
-      if (prev) tries.unshift(prev);
-      let box: Box | null = null;
+      const base: Array<[number, number]> = area ? [[0, 0], [0, -(h + 4)], [0, h + 4], [-(w / 2 + 12), 0], [w / 2 + 12, 0]] : [[0, 0]];
+      // 寫過的：移動中只試原本的位置（不跳），停下來才試別的
+      const tries = prev ? (moving ? [prev] : [prev, ...base]) : base;
+      const [x, y] = at(lb, [0, 0]);
+      let got: [number, number] | null = null;
       for (const [ox, oy] of tries) {
         const bx = { l: x + ox - w / 2, r: x + ox + w / 2, t: y + oy - h / 2, b: y + oy + h / 2 };
         if (inView(bx.l, bx.t) && inView(bx.r, bx.t) && inView(bx.l, bx.b) && inView(bx.r, bx.b) && !taken.some((q) => q.l < bx.r && bx.l < q.r && q.t < bx.b && bx.t < q.b)) {
-          box = bx;
-          shown.set(keyOf(lb), [ox, oy]);
+          taken.push(bx);
+          got = [ox, oy];
           break;
         }
       }
-      if (!box) continue;
-      taken.push(box);
-      const t = el('text', { class: `place-label pl-${lb.kind}`, x: ((box.l + box.r) / 2).toFixed(1), y: ((box.t + box.b) / 2).toFixed(1), 'font-size': fs.toFixed(2) });
-      t.textContent = lb.text;
-      g.appendChild(t);
+      if (!got) {
+        if (prev && moving) hidden.set(key, prev);
+        continue;
+      }
+      shown.set(key, got);
       n++;
+      let t = this.labelEls.get(key);
+      if (!t) {
+        t = el('text', { class: `place-label pl-${lb.kind}` }) as SVGTextElement;
+        t.textContent = lb.text;
+        g.appendChild(t);
+        this.labelEls.set(key, t);
+      }
+      t.setAttribute('font-size', fs.toFixed(2));
+      place(t, lb, got);
+      if (this.labelOff.delete(key)) t.classList.remove('off');
+    }
+    // 沒寫出來的淡出（淡出時還跟著地圖走），淡完拿掉
+    for (const [key, t] of this.labelEls) {
+      if (shown.has(key)) continue;
+      const since = this.labelOff.get(key);
+      if (since === undefined) {
+        this.labelOff.set(key, now);
+        t.classList.add('off');
+      } else if (now - since > LABEL_FADE_MS) {
+        t.remove();
+        this.labelEls.delete(key);
+        this.labelOff.delete(key);
+        continue;
+      }
+      const lb = byKey.get(key);
+      const off = this.labelShown.get(key) ?? this.labelHidden.get(key);
+      if (lb && off) place(t, lb, off);
     }
     this.labelShown = shown;
-    this.labelShownKm = this.scaleKm;
-    if (n > 0) {
-      this.placeLabelLayer.appendChild(g);
-      this.labelBuilt = { k, heading: this.heading, unit };
-    }
+    this.labelHidden = moving ? hidden : new Map();
+  }
+
+  /** 離正中間（你的位置）東 x、北 y 公里的一點在不在畫面裡（全螢幕看長方形的邊，往內縮一成） */
+  onScreenKm(x: number, y: number): boolean {
+    const k = (R - 8) / this.scaleKm;
+    const h = (this.heading * Math.PI) / 180;
+    const px = k * (x * Math.cos(h) - y * Math.sin(h));
+    const py = -k * (y * Math.cos(h) + x * Math.sin(h));
+    return Math.hypot(px, py) <= this.edgeR((Math.atan2(px, -py) * 180) / Math.PI) * 0.9;
   }
 
   /** 一塊綠地：整塊都在範圍外面就不畫；畫面上離上一點不到 1.5 像素的省略 */

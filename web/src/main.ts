@@ -1223,14 +1223,16 @@ function placeLabels(
     const x = (lng - origin.lng) * kx;
     const y = (lat - origin.lat) * ky;
     if (Math.abs(x) > get || Math.abs(y) > get) return;
-    out.push({ x, y, text, kind, pri, d: Math.hypot(x, y) });
+    // 路名的位置會換（roadLabelAt），只用名稱認；其他的同名不同地方要分開
+    const key = kind === 'road' ? `road|${text}` : `${kind}|${text}|${lat.toFixed(4)},${lng.toFixed(4)}`;
+    out.push({ x, y, text, kind, key, pri, d: Math.hypot(x, y) });
   };
   if (km > 33) for (const [n, lat, lng] of sm.TW_COUNTIES) add(lat, lng, n, 'county', 100);
   else if (km > 1) for (const [n, lat, lng] of sm.TW_TOWNS) add(lat, lng, n, 'town', 90);
   if (km <= 5) {
     const pri: Record<string, number> = { motorway: 70, trunk: 68, primary: 62, secondary: 58, tertiary: 50, minor: 40 };
     const ok = (cls: string): boolean => (km > 2 ? cls === 'motorway' || cls === 'trunk' : km > 1 ? cls !== 'tertiary' && cls !== 'minor' : true);
-    // 同名的路只寫一次：寫在離正中間最近的那一點；上次寫的那一點還在畫面裡就照舊（v1.709：拖完停下來路名才不會沿著路跳）
+    // 同名的路只寫一次：寫在離正中間最近的那一點；上次寫的那一點還在畫面裡就照舊（v1.709：路名才不會沿著路跳）
     const best = new Map<string, { lat: number; lng: number; d: number; cls: string }>();
     for (const r of roads) {
       if (!ok(r.cls)) continue;
@@ -1242,7 +1244,7 @@ function placeLabels(
     }
     for (const [name, b] of best) {
       const was = roadLabelAt.get(name);
-      const at = was && Math.hypot((was.lng - origin.lng) * kx, (was.lat - origin.lat) * ky) <= km * 0.85 ? was : b;
+      const at = was && radar.onScreenKm((was.lng - origin.lng) * kx, (was.lat - origin.lat) * ky) ? was : b;
       roadLabelAt.set(name, { lat: at.lat, lng: at.lng });
       add(at.lat, at.lng, name, 'road', pri[b.cls] ?? 40);
     }
@@ -1278,7 +1280,7 @@ function placeLabels(
     }
   }
   out.sort((a, b) => b.pri - a.pri || a.d - b.d);
-  return out.slice(0, 80).map(({ x, y, text, kind }) => ({ x, y, text, kind }));
+  return out.slice(0, 80).map(({ x, y, text, kind, key }) => ({ x, y, text, kind, key }));
 }
 
 // ---- 中山公園（park.ts，跟汪星共用一份）：地球的雷達上第一次在公園附近才載入 ----
