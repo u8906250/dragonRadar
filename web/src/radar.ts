@@ -622,6 +622,7 @@ export class Radar {
   private previews: RadarPreview[] = [];
   private previewsKey = '';
   private readonly previewLayer: SVGGElement;
+  private readonly placeLabelLayer: SVGGElement;
   /** 拖回報的位置：放開時告訴外面拖到哪（第幾個、方位、距離） */
   onPreviewDrag: ((i: number, at: { bearing: number; distanceKm: number }) => void) | null = null;
   /** 點一下雷達的空白處（不是光點、星星、瓶子…）：哪個方位、多遠（補充資料標位置時用） */
@@ -748,6 +749,8 @@ export class Radar {
       <g class="park" clip-path="url(#rg-clip)"></g>
       <g class="scale-labels"></g>
       <g class="outline" clip-path="url(#rg-clip)"></g>
+      <!-- 地名、路名、地標（全螢幕）：光點、車掃下面；每次重畫都重新排，避開光點和它下面的字（v1.700） -->
+      <g class="place-labels"></g>
       <g class="space" clip-path="url(#rg-clip)"></g>
       <g class="routes" clip-path="url(#rg-clip)"></g>
       <g class="bottles"></g>
@@ -778,6 +781,7 @@ export class Radar {
     this.tripLayer = this.svg.querySelector('.trip') as SVGGElement;
     this.landmarkLayer = this.svg.querySelector('.landmarks') as SVGGElement;
     this.previewLayer = this.svg.querySelector('.previews') as SVGGElement;
+    this.placeLabelLayer = this.svg.querySelector('.place-labels') as SVGGElement;
     // 拖回報的位置：按在可以拖的標記上就不拖雷達（不往上傳），放開時換算成方位、距離
     this.previewLayer.addEventListener('pointerdown', (e) => {
       const g = (e.target as Element).closest<SVGGElement>('.preview-pin.drag');
@@ -1966,18 +1970,30 @@ export class Radar {
       for (const l of lines) d += this.streetPath(l, k, cos, sin, lim2, sx, sy);
       if (d) this.streetLayer.appendChild(el('path', { class: cls, d }));
     }
-    if (s.labels?.length) this.drawPlaceLabels(s.labels, k, cos, sin, sx, sy, s.noLabel ?? []);
     this.streetsBuilt = { s, k, heading: this.heading, lim, sx, sy, margin };
   }
 
   /**
-   * 地名照排好的順序一個一個放：整個字都在畫面裡、不跟已經放的字重疊、不壓在正中間（你的位置）、光點、星星上才寫，滿了就停。
-   * 跟道路同一層（拖曳時一起平移、指北針轉了一起重排，字一直是正的）
+   * 地名照排好的順序一個一個放：整個字都在畫面裡、不跟已經放的字重疊、不壓在正中間（你的位置）、光點和它下面的字（還有多久）、
+   * 選取的光點名稱、星星上才寫，滿了就停。每次重畫都重新排（v1.700 使用者說雷達上有東西時地標顯示不出來：
+   * 以前跟道路一起排，活動還沒抓到時就排好了，光點後來蓋在字上）；指北針轉了一起重排，字一直是正的
    */
-  private drawPlaceLabels(labels: RadarLabel[], k: number, cos: number, sin: number, sx: number, sy: number, noLabel: Array<[number, number, number, number]>): void {
-    if (!this.fill) return;
+  private drawPlaceLabels(blips: Array<{ x: number; y: number }>, blipLabels: Array<{ left: number; right: number; top: number; bottom: number }>): void {
+    this.placeLabelLayer.replaceChildren();
+    const s = this.streets;
+    const labels = s?.labels ?? [];
+    if (!this.fill || this.inSpace || labels.length === 0) return;
+    const noLabel = s?.noLabel ?? [];
+    const k = (R - 8) / this.scaleKm;
+    const h0 = (this.heading * Math.PI) / 180;
+    const cos = Math.cos(h0);
+    const sin = Math.sin(h0);
+    const [sx, sy] = this.streetShift;
     type Box = { l: number; r: number; t: number; b: number };
     const taken: Box[] = [];
+    // 光點和下面「還有多久」的字、選取的光點名稱
+    for (const p of blips) taken.push({ l: p.x - 18, r: p.x + 18, t: p.y - 11, b: p.y + 24 });
+    for (const q of blipLabels) taken.push({ l: q.left, r: q.right, t: q.top, b: q.bottom });
     // 不能寫的範圍：四個角轉成畫面座標，取外框
     for (const [w, so, e, n] of noLabel) {
       const pts = [[w, so], [e, so], [e, n], [w, n]].map(([x, y]) => ({ x: C + k * ((x - sx) * cos - (y - sy) * sin), y: C - k * ((y - sy) * cos + (x - sx) * sin) }));
@@ -1993,7 +2009,7 @@ export class Radar {
       const y = Number(t.getAttribute('y'));
       taken.push({ l: x - 2, r: x + (t.textContent?.length ?? 4) * 7 + 2, t: y - 12, b: y + 3 });
     }
-    for (const it of [...this.items, ...this.landmarks]) {
+    for (const it of this.landmarks) {
       const ratio = this.ratio(it.distanceKm);
       if (ratio > 1.1) continue;
       const p = polar(it.bearing - this.heading, ratio * (R - 8));
@@ -2027,7 +2043,7 @@ export class Radar {
       g.appendChild(t);
       n++;
     }
-    if (n > 0) this.streetLayer.appendChild(g);
+    if (n > 0) this.placeLabelLayer.appendChild(g);
   }
 
   /**
@@ -3099,6 +3115,7 @@ export class Radar {
         break;
       }
     }
+    this.drawPlaceLabels([...pos.values()], placed);
     for (const g of groups) {
       const lead = leaderOf(g);
       const ids = g.map((it) => it.id).join(',');
