@@ -44,10 +44,17 @@ jobs:
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-      # 在 web 底下跑：web/functions（分享連結 /e/編號 的預覽卡片）跟著網站一起部署
+      # 在 web 底下跑：web/functions（分享連結 /e/編號 的預覽卡片）跟著網站一起部署。
+      # Cloudflare 的 API 偶爾暫時出錯（2026-11-13 v1.710 連兩次失敗，那時 Cloudflare 公告 Workers API 5xx 變多）：失敗隔 30 秒再試，最多三次
       - name: Deploy
         working-directory: web
-        run: npx wrangler pages deploy dist --project-name "$PROJECT" --branch main --commit-dirty=true
+        run: |
+          for i in 1 2 3; do
+            npx wrangler pages deploy dist --project-name "$PROJECT" --branch main --commit-dirty=true && exit 0
+            echo "deploy failed ($i/3)"
+            [ "$i" -lt 3 ] && sleep 30
+          done
+          exit 1
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
