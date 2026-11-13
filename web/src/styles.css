@@ -1388,6 +1388,8 @@ path.map-seam-walkers { --p: 15px; }
 .radar .pl-town { font-weight: 600; opacity: 0.5; }
 .radar .pl-road { opacity: 0.55; }
 .radar .pl-station { font-weight: 600; opacity: 0.6; }
+/* 地標（大巨蛋、公園…，v1.698）：跟車站一樣粗、淡一點 */
+.radar .pl-poi { font-weight: 600; opacity: 0.55; }
 /* 16 km 內的海岸線（從街道圖磚來，v1.640）：實線（v1.641 使用者說近距離的邊界直接用實線）；顏色跟遠的海岸線一樣 */
 .radar .streets path.coast-line { fill: none; stroke: var(--accent); stroke-width: 1.5; stroke-opacity: 0.45; stroke-dasharray: none; }
 #radar-view { position: relative; }

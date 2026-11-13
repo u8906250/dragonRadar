@@ -1056,6 +1056,11 @@ function updateStreets(): void {
     if (xy) coastXy.push(xy);
   }
   out.labels = placeLabels(streetsMod, roads, stations, get, kx, ky, mask);
+  // 畫了樹冠、屋頂的中山公園上面不寫名稱（v1.698：大巨蛋的名字被擠到公園上）
+  if (out.labels.length > 0 && trees && parkMod) {
+    const [s0, w0, n0, e0] = parkMod.PARK_BOX;
+    out.noLabel = [[(w0 - origin.lng) * kx, (s0 - origin.lat) * ky, (e0 - origin.lng) * kx, (n0 - origin.lat) * ky]];
+  }
   streetLines = out;
   radar.setStreets(out, [0, 0], streetLoose);
 }
@@ -1063,9 +1068,27 @@ function updateStreets(): void {
 /**
  * 雷達上寫的地名（v1.691 使用者說適度放縣市、區、路、地標，但畫面不要太亂）：照範圍分層，由重要到不重要、同樣重要的離正中間近的先，
  * 雷達那邊放不下（重疊、壓到光點）的不寫、一個畫面最多十幾個。
- * 33 km 以上縣市；1～33 km 鄉鎮市區；5 km 內加國道、快速道路的名字，2 km 內加幹道，1 km 內大街小巷的路名和捷運、火車站（不寫鄉鎮市區）。
+ * 33 km 以上縣市；1～33 km 鄉鎮市區；5 km 內加國道、快速道路的名字，2 km 內加幹道，1 km 內大街小巷的路名和捷運、火車站（不寫鄉鎮市區）；
+ * 地標（v1.698 使用者說拉近可以放大巨蛋、公園等）：5 km 內寫大的（體育場、遊樂園、市政府、大公園），2 km 內都寫（pois-tw.ts，這時才載入）。
  * 只有全螢幕寫（v1.692 使用者說一般的雷達不用顯示）；中國的範圍不寫（跟道路一樣）；洋流總部的特效播放時不寫
  */
+/** 地標（pois-tw.ts，約 100 KB）：全螢幕拉近到 5 km 內才載入，載入好重畫道路和名稱 */
+let poisMod: typeof import('./pois-tw') | null = null;
+let poisLoading = false;
+function loadPois(): void {
+  if (poisMod || poisLoading) return;
+  poisLoading = true;
+  void import('./pois-tw')
+    .then((m) => {
+      poisMod = m;
+      streetsFor = '';
+      updateStreets();
+    })
+    .catch(() => {
+      poisLoading = false;
+    });
+}
+
 function placeLabels(
   sm: typeof import('./streets'),
   roads: import('./streets').RoadName[],
@@ -1101,6 +1124,18 @@ function placeLabels(
       }
     }
     for (const [name, b] of best) add(b.lat, b.lng, name, 'road', pri[b.cls] ?? 40);
+  }
+  if (km <= 5) {
+    if (!poisMod) loadPois();
+    else {
+      for (const [name, lat, lng, kind, ha] of poisMod.TW_POIS) {
+        const big = kind === 'stadium' || kind === 'fun' || kind === 'gov' || ha >= 10;
+        if (km > 2 && !big && ha < 20) continue;
+        // 圖書館的分館（「三興分館」）單獨寫看不懂、又很多：排後面
+        const branch = /(分館|圖書館|閱覽室)$/.test(name);
+        add(lat, lng, name, 'poi', big ? 70 : branch ? 48 : ha >= 1 || kind === 'culture' || kind === 'school' ? 60 : 52);
+      }
+    }
   }
   if (km <= 1) {
     // 同一站常有好幾筆（捷運、台鐵，「台北」「臺北車站」，大站的幾筆可以離好幾百公尺）：800 m 內名字一樣的只寫一次，名字補上「站」

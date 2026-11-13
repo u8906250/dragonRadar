@@ -128,6 +128,8 @@ export interface RadarStreets {
   coast?: Float64Array[];
   /** 寫在雷達上的地名、路名、車站：照重要的先排好，擠不下的不寫 */
   labels?: RadarLabel[];
+  /** 名稱不能寫在上面的範圍（[西, 南, 東, 北]，離錨點的公里）：例如畫了樹冠、屋頂的中山公園 */
+  noLabel?: Array<[number, number, number, number]>;
 }
 
 /**
@@ -138,10 +140,10 @@ export interface RadarLabel {
   x: number;
   y: number;
   text: string;
-  kind: 'county' | 'town' | 'road' | 'station';
+  kind: 'county' | 'town' | 'road' | 'station' | 'poi';
 }
 /** 字的大小（螢幕像素：雷達多大字都一樣大，電腦全螢幕不會變成大字） */
-const PLACE_LABEL_PX: Record<RadarLabel['kind'], number> = { county: 13, town: 12, road: 10.5, station: 11 };
+const PLACE_LABEL_PX: Record<RadarLabel['kind'], number> = { county: 13, town: 12, road: 10.5, station: 11, poi: 11 };
 /** 一個畫面最多幾個（只有全螢幕鋪滿時寫，v1.692） */
 const PLACE_LABEL_MAX = 18;
 
@@ -1897,7 +1899,7 @@ export class Radar {
       for (const l of lines) d += this.streetPath(l, k, cos, sin, lim2, sx, sy);
       if (d) this.streetLayer.appendChild(el('path', { class: cls, d }));
     }
-    if (s.labels?.length) this.drawPlaceLabels(s.labels, k, cos, sin, sx, sy);
+    if (s.labels?.length) this.drawPlaceLabels(s.labels, k, cos, sin, sx, sy, s.noLabel ?? []);
     this.streetsBuilt = { s, k, heading: this.heading, lim, sx, sy, margin };
   }
 
@@ -1905,10 +1907,15 @@ export class Radar {
    * 地名照排好的順序一個一個放：整個字都在畫面裡、不跟已經放的字重疊、不壓在正中間（你的位置）、光點、星星上才寫，滿了就停。
    * 跟道路同一層（拖曳時一起平移、指北針轉了一起重排，字一直是正的）
    */
-  private drawPlaceLabels(labels: RadarLabel[], k: number, cos: number, sin: number, sx: number, sy: number): void {
+  private drawPlaceLabels(labels: RadarLabel[], k: number, cos: number, sin: number, sx: number, sy: number, noLabel: Array<[number, number, number, number]>): void {
     if (!this.fill) return;
     type Box = { l: number; r: number; t: number; b: number };
     const taken: Box[] = [];
+    // 不能寫的範圍：四個角轉成畫面座標，取外框
+    for (const [w, so, e, n] of noLabel) {
+      const pts = [[w, so], [e, so], [e, n], [w, n]].map(([x, y]) => ({ x: C + k * ((x - sx) * cos - (y - sy) * sin), y: C - k * ((y - sy) * cos + (x - sx) * sin) }));
+      taken.push({ l: Math.min(...pts.map((p) => p.x)), r: Math.max(...pts.map((p) => p.x)), t: Math.min(...pts.map((p) => p.y)), b: Math.max(...pts.map((p) => p.y)) });
+    }
     const block = (x: number, y: number, r: number): void => {
       taken.push({ l: x - r, r: x + r, t: y - r, b: y + r });
     };
@@ -1940,8 +1947,8 @@ export class Radar {
       const fs = PLACE_LABEL_PX[lb.kind] * unit;
       const w = [...lb.text].length * fs + 4;
       const h = fs + 4;
-      // 縣市、鄉鎮市區的點被蓋住（常常就是你所在的那一區）：往上、往下挪一行，再往左右挪試試；路名、車站要寫在原地
-      const area = lb.kind === 'county' || lb.kind === 'town';
+      // 縣市、鄉鎮市區、地標的點被蓋住（常常就是你所在的那一區、你旁邊的大巨蛋）：往上、往下挪一行，再往左右挪試試；路名、車站要寫在原地
+      const area = lb.kind === 'county' || lb.kind === 'town' || lb.kind === 'poi';
       const tries: Array<[number, number]> = area ? [[0, 0], [0, -(h + 4)], [0, h + 4], [-(w / 2 + 12), 0], [w / 2 + 12, 0]] : [[0, 0]];
       const box = tries
         .map(([ox, oy]) => ({ l: x + ox - w / 2, r: x + ox + w / 2, t: y + oy - h / 2, b: y + oy + h / 2 }))

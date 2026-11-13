@@ -23,7 +23,7 @@ export const ringArea = (r: Pt[]): number => r.reduce((s, p, i) => s + p[1] * r[
 /** 中山公園附近可以放大到這麼近（雷達外圈，公里）：0.5 公尺 */
 export const PARK_MIN_KM = 0.0005;
 /** 中山公園附近（公園外面多留約 50 公尺）：台北的經緯度範圍 */
-const PARK_BOX = (() => {
+export const PARK_BOX = (() => {
   const o = ZHONGSHAN_PARK.outline;
   const m = 0.0005;
   return [Math.min(...o.map((p) => p[0])) - m, Math.min(...o.map((p) => p[1])) - m, Math.max(...o.map((p) => p[0])) + m, Math.max(...o.map((p) => p[1])) + m];
