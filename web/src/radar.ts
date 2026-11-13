@@ -142,9 +142,8 @@ export interface RadarLabel {
 }
 /** 字的大小（螢幕像素：雷達多大字都一樣大，電腦全螢幕不會變成大字） */
 const PLACE_LABEL_PX: Record<RadarLabel['kind'], number> = { county: 13, town: 12, road: 10.5, station: 11 };
-/** 一個畫面最多幾個（全螢幕鋪滿時多一點） */
-const PLACE_LABEL_MAX = 12;
-const PLACE_LABEL_MAX_FILL = 18;
+/** 一個畫面最多幾個（只有全螢幕鋪滿時寫，v1.692） */
+const PLACE_LABEL_MAX = 18;
 
 /**
  * 水上活動的船（螢幕像素，中心在 0,0，船頭朝右）：SUP 是一塊板子、站著划槳的人；龍舟是長長的紅船身、黃色的條、龍頭、一排划槳的人
@@ -1907,6 +1906,7 @@ export class Radar {
    * 跟道路同一層（拖曳時一起平移、指北針轉了一起重排，字一直是正的）
    */
   private drawPlaceLabels(labels: RadarLabel[], k: number, cos: number, sin: number, sx: number, sy: number): void {
+    if (!this.fill) return;
     type Box = { l: number; r: number; t: number; b: number };
     const taken: Box[] = [];
     const block = (x: number, y: number, r: number): void => {
@@ -1929,7 +1929,7 @@ export class Radar {
     // 一個螢幕像素是幾個 SVG 單位
     const unit = this.squarePx > 0 ? SIZE / this.squarePx : 1;
     const g = el('g', { class: 'place-labels', 'stroke-width': (2.5 * unit).toFixed(2) });
-    const max = this.fill ? PLACE_LABEL_MAX_FILL : PLACE_LABEL_MAX;
+    const max = PLACE_LABEL_MAX;
     let n = 0;
     for (const lb of labels) {
       if (n >= max) break;

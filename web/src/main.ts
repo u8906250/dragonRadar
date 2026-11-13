@@ -1009,7 +1009,7 @@ function updateStreets(): void {
   };
   const ky = 110.574;
   // 拖曳中：範圍、圖磚沒變，正中間離錨點不到範圍的 1/4（換算時多留的那一圈）就只給位移
-  const key = `${scaleKm}|${streetTiles}|${radar.reach.toFixed(2)}|${!!mask}|${hqVoyageAt !== null}`;
+  const key = `${scaleKm}|${streetTiles}|${radar.reach.toFixed(2)}|${!!mask}|${hqVoyageAt !== null}|${radar.filling}`;
   if (streetLines && streetAnchor && streetsFor === key) {
     if (!panFrom && origin.lat === streetAnchor.lat && origin.lng === streetAnchor.lng) return;
     if (panFrom && streetLoose) {
@@ -1061,7 +1061,7 @@ function updateStreets(): void {
  * 雷達上寫的地名（v1.691 使用者說適度放縣市、區、路、地標，但畫面不要太亂）：照範圍分層，由重要到不重要、同樣重要的離正中間近的先，
  * 雷達那邊放不下（重疊、壓到光點）的不寫、一個畫面最多十幾個。
  * 33 km 以上縣市；1～33 km 鄉鎮市區；5 km 內加國道、快速道路的名字，2 km 內加幹道，1 km 內大街小巷的路名和捷運、火車站（不寫鄉鎮市區）。
- * 中國的範圍不寫（跟道路一樣）；洋流總部的特效播放時不寫
+ * 只有全螢幕寫（v1.692 使用者說一般的雷達不用顯示）；中國的範圍不寫（跟道路一樣）；洋流總部的特效播放時不寫
  */
 function placeLabels(
   sm: typeof import('./streets'),
@@ -1072,7 +1072,7 @@ function placeLabels(
   ky: number,
   mask: { contains: (lat: number, lng: number) => boolean } | null,
 ): RadarLabel[] {
-  if (hqVoyageAt !== null) return [];
+  if (hqVoyageAt !== null || !radar.filling) return [];
   const km = scaleKm;
   const out: Array<RadarLabel & { pri: number; d: number }> = [];
   const add = (lat: number, lng: number, text: string, kind: RadarLabel['kind'], pri: number): void => {
