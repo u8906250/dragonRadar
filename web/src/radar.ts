@@ -1974,7 +1974,7 @@ export class Radar {
     this.streetLayer.replaceChildren();
     this.streetLayer.removeAttribute('transform');
     // 公園綠地：最底下、淡綠色塊（不透明，相鄰圖磚重疊的地方才不會變深），全螢幕才畫。
-    // 用 nonzero 填色：圖磚的外圈、挖空的圈方向相反，相鄰圖磚重疊的那一條才不會變成洞（v1.707：以前 evenodd，拉遠時一條一條白線）
+    // 用 nonzero 填色：外圈、挖空的圈方向相反（圖磚、公園外框都一樣），相鄰圖磚重疊的那一條才不會變成洞（v1.707：以前 evenodd，拉遠時一條一條白線）
     if (this.fill && s.green?.length) {
       let d = '';
       for (const poly of s.green) d += this.greenPath(poly, k, cos, sin, lim2, sx, sy);
@@ -2085,8 +2085,9 @@ export class Radar {
       minY = Math.min(minY, dy);
       maxY = Math.max(maxY, dy);
     }
-    // 很大的一塊把整個畫面包住（點都在外面）：中心在外框裡也要畫
-    if (!near && !(minX <= 0 && maxX >= 0 && minY <= 0 && maxY >= 0)) return '';
+    // 很大的一塊（點都在畫面外面）：外框跟畫面碰到就畫（v1.708：以前只看正中間在不在外框裡，蓋住半個畫面的大片樹林會整塊不見）
+    const L = Math.sqrt(lim2);
+    if (!near && (maxX < -L || minX > L || maxY < -L || minY > L)) return '';
     // 色塊不用像道路那麼細：離上一點不到 3 個單位的省略，整圈不到 4 個單位寬、高的不畫（拉遠時山上的樹林點很多，v1.705 實測 12 km 會卡）
     let d = '';
     for (const r of rings) {

@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { decodeStreets, decodeTile, onTaiwan, STREET_TIERS, streetTiles, tileOf, type StreetLine } from '../src/streets';
+import { decodeStreets, decodeTile, onTaiwan, ringArea, STREET_TIERS, streetTiles, tileOf, type StreetLine } from '../src/streets';
 
 /** 組一張只有 transportation 圖層的小圖磚（protobuf） */
 function varint(n: number): number[] {
@@ -210,21 +210,30 @@ describe('decodeTile green', () => {
       ...varint((5 << 3) | 0),
       ...varint(4096),
     ]);
-  // 正方形外圈加一個挖空的小方塊（MoveTo、LineTo×3、ClosePath）
+  // 正方形外圈（圖磚座標 y 往下，在地圖上順時針；MoveTo、LineTo×3、ClosePath），相對上一個游標位置
   const square = (x: number, y: number, s: number): number[] => [(1 << 3) | 1, zz(x), zz(y), (3 << 3) | 2, zz(s), zz(0), zz(0), zz(s), zz(-s), zz(0), (1 << 3) | 7];
+  // 挖空的小方塊（逆時針）
+  const hole = (x: number, y: number, s: number): number[] => [(1 << 3) | 1, zz(x), zz(y), (3 << 3) | 2, zz(0), zz(s), zz(s), zz(0), zz(0), zz(-s), (1 << 3) | 7];
   const buf = new Uint8Array(
     layer('landcover', ['class'], ['grass', 'farmland', 'wood'], [
-      { tags: [0, 0], type: 3, geom: [...square(100, 100, 1000), ...[(1 << 3) | 1, zz(-500), zz(-500), (3 << 3) | 2, zz(200), zz(0), zz(0), zz(200), zz(-200), zz(0), (1 << 3) | 7]] },
+      // 外圈（100,100）～（1100,1100）、挖空（300,300）～（500,500），同一個 feature 再一塊外圈（2100,1300）～（2300,1500）
+      { tags: [0, 0], type: 3, geom: [...square(100, 100, 1000), ...hole(200, -800, 200), ...square(1600, 1000, 200)] },
       // 農地不算
       { tags: [0, 1], type: 3, geom: square(2000, 2000, 500) },
       { tags: [0, 2], type: 3, geom: square(3000, 100, 500) },
     ]),
   );
-  it('reads park and wood polygons with holes when asked', () => {
+  it('reads park and wood polygons with holes when asked, one outer ring each', () => {
     const out = decodeTile(buf, 0, 0, 0, STREET_TIERS[0].classes, false, { green: true });
-    expect(out.green.length).toBe(2);
+    expect(out.green.length).toBe(3);
     expect(out.green[0].rings.length).toBe(2);
     expect(out.green[0].rings[0].length).toBe(8);
+    expect(out.green[1].rings.length).toBe(1);
+    // 外圈在地圖上順時針、挖空的逆時針
+    expect(ringArea(out.green[0].rings[0])).toBeLessThan(0);
+    expect(ringArea(out.green[0].rings[1])).toBeGreaterThan(0);
+    // 每一塊的外框只算自己的外圈
+    expect(out.green[1].box[1]).toBeGreaterThan(out.green[0].box[3]);
   });
   it('skips green when not asked', () => {
     expect(decodeTile(buf, 0, 0, 0, STREET_TIERS[0].classes, false).green).toEqual([]);

@@ -145,7 +145,8 @@ export interface StationName {
 }
 /**
  * 公園綠地（全螢幕雷達塗淡綠，v1.705 使用者說的；v1.707 拉遠到整個台灣也塗，那時主要是山上的樹林）：landcover 圖層的草地（公園、草地、高爾夫球場）、樹林；
- * rings 是外圈和挖空的圈（[緯度, 經度, …]），兩種圈方向相反，雷達用 nonzero 填色（v1.707）
+ * rings 是外圈和挖空的圈（[緯度, 經度, …]）：外圈在地圖上順時針、挖空的逆時針，雷達用 nonzero 填色（v1.707）；
+ * 一塊只有一個外圈（v1.708）
  */
 export interface GreenArea {
   rings: Float64Array[];
@@ -179,6 +180,13 @@ function geomParts(geom: number[], toLatLng: (cx: number, cy: number) => [number
   }
   if (line.length) parts.push(line);
   return parts;
+}
+
+/** 一圈（[緯度, 經度, …]）的面積，經度當 x、緯度當 y：在地圖上逆時針是正的、順時針是負的 */
+export function ringArea(r: ArrayLike<number>): number {
+  let a = 0;
+  for (let i = 0, j = r.length - 2; i < r.length; j = i, i += 2) a += r[j + 1] * r[i] - r[i + 1] * r[j];
+  return a / 2;
 }
 
 /** 一個 feature：tags、種類（1 點、2 線、3 面）、幾何 */
@@ -313,10 +321,29 @@ export function decodeTile(
         const { tags, type, geom } = readFeature(f);
         if (type !== 3) continue;
         if (!GREEN_CLASSES.has(tagsOf(tags).class)) continue;
-        const rings = geomParts(geom, toLatLng).filter((r) => r.length >= 6);
-        if (rings.length === 0) continue;
-        const all = withBox(rings.flat());
-        greenOut.push({ rings: rings.map((r) => Float64Array.from(r)), box: all.box });
+        // 同一張圖磚裡同一類的綠地合成一個 feature（例如福建和台灣的樹林），照圖磚的規格分成一塊一塊：外圈在地圖上順時針
+        // （ringArea 負的），後面跟著它挖空的圈（逆時針）。v1.708：以前整個 feature 當一塊，只用第一圈判斷在不在畫面、在不在中國，
+        // 拉遠時半邊沒畫、或畫到中國
+        let box: [number, number, number, number] | null = null;
+        let poly: Float64Array[] = [];
+        const flush = () => {
+          if (box) greenOut.push({ rings: poly, box });
+          box = null;
+          poly = [];
+        };
+        for (const r of geomParts(geom, toLatLng)) {
+          const a = ringArea(r);
+          if (a < 0) {
+            flush();
+            // 太小的外圈不收，它挖空的圈也一起不收
+            if (r.length >= 6) {
+              const w = withBox(r);
+              box = w.box;
+              poly = [w.pts];
+            }
+          } else if (a > 0 && box && r.length >= 6) poly.push(Float64Array.from(r));
+        }
+        flush();
       }
       continue;
     }

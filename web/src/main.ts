@@ -925,8 +925,20 @@ function touchesEastAsia(km: number): boolean {
   const dLng = km / (111 * Math.max(0.1, Math.cos((origin.lat * Math.PI) / 180)));
   return km >= 2500 || !(origin.lat + dLat < EA_AREA.s || origin.lat - dLat > EA_AREA.n || origin.lng + dLng < EA_AREA.w || origin.lng - dLng > EA_AREA.e);
 }
-/** 在台灣本島（含綠島、蘭嶼）：雷達會畫路的範圍裡碰不到中國，不用等東亞的資料 */
+/** 在台灣本島（含綠島、蘭嶼） */
 const onTaiwanMain = (p: LatLng): boolean => p.lat > 21.8 && p.lat < 25.4 && p.lng > 120.0 && p.lng < 122.1;
+/**
+ * 雷達附近 km 公里內可能碰到中國：不在台灣本島的，或範圍往西過東經 120 度、往北過北緯 25.9 度
+ * （照 eastasia.ts 的中國範圍量的：東經 120 度以東的最南到北緯 26.58 度，北緯 25.9 度以南的最東到東經 119.91 度）。
+ * v1.708：以前在台灣本島就當作碰不到，全螢幕拉遠時角落的綠地塗到福建
+ */
+function mayTouchChina(km: number): boolean {
+  if (!touchesEastAsia(km)) return false;
+  if (!onTaiwanMain(origin)) return true;
+  const dLat = km / 111;
+  const dLng = km / (111 * Math.cos((origin.lat * Math.PI) / 180));
+  return origin.lng - dLng < 120.0 || origin.lat + dLat > 25.9;
+}
 
 // ---- 道路：600 km 內都畫（台灣哪裡選「全台」都在這裡面；streets.ts，OpenFreeMap 的向量圖磚，第一次用到才載入；範圍越大畫的路越少） ----
 const ROADS_KM = 600;
@@ -1003,8 +1015,10 @@ function updateStreets(): void {
   }
   // 全螢幕鋪滿時抓到畫面的角（radar.reach 是範圍的幾倍，平常是 1）
   const reach = scaleKm * radar.reach * 1.05;
-  // 中國的範圍裡不畫路、不畫實線海岸（v1.642）：不在台灣本島、附近碰到東亞的，等東亞的資料載入才畫（不要先閃一下）
-  const mayChina = !onTaiwanMain(origin) && touchesEastAsia(reach * 1.25);
+  // 中國的範圍裡不畫路、不畫實線海岸、不塗綠地（v1.642）：可能碰到中國的，等東亞的資料載入才畫（不要先閃一下）；
+  // 在台灣本島拉遠時先載入，拉到碰得到的時候才不會整片空白一下
+  const mayChina = mayTouchChina(reach * 1.25);
+  if (!eaMod && mayTouchChina(reach * 2.5)) loadEastAsia();
   if (mayChina && !eaMod) {
     loadEastAsia();
     if (streetsFor) radar.setStreets(null);
@@ -1116,6 +1130,10 @@ function parkAreas(): Array<{ rings: Float64Array[]; box: [number, number, numbe
       .then((m) => {
         parkShapesMod = m.TW_PARK_SHAPES.map((rings) => {
           const rs = rings.map(decodePolyline);
+          // 方向跟圖磚的綠地一樣：外圈在地圖上順時針、挖空的逆時針（雷達用 nonzero 填色，反了的話跟圖磚重疊的地方會變成洞）
+          rs.forEach((r, i) => {
+            if (streetsMod!.ringArea(r) > 0 === (i === 0)) reversePairs(r);
+          });
           let [s0, w0, n0, e0] = [Infinity, Infinity, -Infinity, -Infinity];
           const o = rs[0];
           for (let i = 0; i < o.length; i += 2) {
@@ -1134,6 +1152,14 @@ function parkAreas(): Array<{ rings: Float64Array[]; box: [number, number, numbe
       });
   }
   return [];
+}
+
+/** [緯度, 經度, …] 前後倒過來（一圈換方向） */
+function reversePairs(r: Float64Array): void {
+  for (let i = 0, j = r.length - 2; i < j; i += 2, j -= 2) {
+    [r[i], r[j]] = [r[j], r[i]];
+    [r[i + 1], r[j + 1]] = [r[j + 1], r[i + 1]];
+  }
 }
 
 /** Google polyline（精度小數 5 位）→ [緯度, 經度, …] */
