@@ -3728,7 +3728,6 @@ function renderDetail(items: Item[], now: number): void {
         <a class="btn primary" href="https://www.google.com/maps/dir/?api=1&destination=${ev.lat},${ev.lng}&travelmode=walking" target="_blank" rel="noopener">${ev.approxArea ? '導航到約略位置' : '導航'}</a>
         <button type="button" class="btn" data-act="center">定位到活動</button>
         ${ev.post.permalink ? `<a class="btn" href="${esc(ev.post.permalink)}" target="_blank" rel="noopener">${esc(sourceLinkText(ev))}</a>` : ''}
-        <a class="btn" href="${googleMapsUrl(ev)}" target="_blank" rel="noopener">在 Google 地圖上看</a>
         ${myReportIds.has(ev.post.id) && !routeOf(ev) ? '<button type="button" class="btn" data-act="withdraw">刪除我的回報</button>' : ''}
         <button type="button" class="btn" data-act="share">分享</button>
         <button type="button" class="btn" data-act="feedback">回報問題</button>
