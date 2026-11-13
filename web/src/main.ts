@@ -528,6 +528,15 @@ const radar = new Radar(
 );
 // 點了車掃的中間點：打開那條車掃的時間表
 radar.onRoute = (id) => selectRoute(id);
+// 回報的位置直接在雷達上拖、點（v1.699 使用者說回報的定位直接用雷達的地圖，不用切到地圖）
+radar.onPreviewDrag = (i, at) => {
+  const p = destination(origin, at.bearing, at.distanceKm);
+  if (markCard) placeMark(p);
+  else void movePin(i, p);
+};
+radar.onEmptyTap = (at) => {
+  if (markCard && !reportSheet.hidden) placeMark(destination(origin, at.bearing, at.distanceKm));
+};
 // 點了中山公園的銅像（地球或汪星）：發射口打開、升起火箭、關上，火箭停在那邊；點火箭問要不要飛到另一邊（rocketTrip）
 // （火箭記得在哪一邊；不在這一邊、已經出來了就沒有反應）
 // 火箭停在草皮上時再點銅像：收回井裡
@@ -1908,7 +1917,7 @@ function render(): void {
   );
   // 回報判讀完、還沒確認的位置
   const pins = shownReportPins();
-  radar.setPreviews(pins.map((p) => ({ bearing: bearingDeg(origin, p), distanceKm: haversineKm(origin, p), label: p.label, glyph: p.glyph })));
+  radar.setPreviews(pins.map((p) => ({ bearing: bearingDeg(origin, p), distanceKm: haversineKm(origin, p), label: p.label, glyph: p.glyph, drag: p.drag })));
   map.setPreviews(pins);
   map.setRoutes(
     drawnRoutes(onMap, now, focused).map((r): MapRoute => ({
@@ -6665,7 +6674,7 @@ function renderReportTips(): void {
     `只收${l ? ` ${l.maxAgeDays} 天內` : ''}的公開貼文。每一場活動都要讀得到做什麼、在哪裡、哪天幾點開始，缺一個就不會放上雷達。`,
     '結束時間可以不寫：沒寫的只寫幾點開始，雷達上顯示到開始後兩小時。',
     'ACCUPASS 活動通、OPENTIX：貼活動頁的網址（accupass.com/event/…、opentix.life/event/…）就好，時間、地點照活動頁寫的；OPENTIX 的巡演每個地點各一場，好幾天的展覽每天各算一場（最多 6 天），線上、取消的場次不收。活動頁刪除或標成取消，雷達會自動下架。',
-    '貼文寫了車掃、掃街、車隊，或騎車（順騎、單車）、健走，同一天又列了好幾站的，會合成一條路線：每一站從預計經過前 10 分鐘顯示到經過後 15 分鐘。各站沒寫時間、只寫出發時間的，照順序和距離推算（騎車時速 12 公里、健走 4 公里，每站停 10 分鐘），時間表寫「約」。只定位到鄉鎮區的站，要在地圖上標出位置才會放上雷達。',
+    '貼文寫了車掃、掃街、車隊，或騎車（順騎、單車）、健走，同一天又列了好幾站的，會合成一條路線：每一站從預計經過前 10 分鐘顯示到經過後 15 分鐘。各站沒寫時間、只寫出發時間的，照順序和距離推算（騎車時速 12 公里、健走 4 公里，每站停 10 分鐘），時間表寫「約」。只定位到鄉鎮區的站，要在雷達上標出位置才會放上雷達。',
     '貼文沒寫或判讀錯的，可以在判讀結果按「補充資料」直接改活動內容、時間、地點，位置不對可以在地圖上標。連續好幾天的活動每天各算一場（最多 6 場）。貼文最好寫出門牌地址，定位才準。',
     `原貼文刪除或改成「結束了」，雷達${l ? ` ${l.recheckMin} 分鐘內` : ''}會自動下架。`,
   ];
@@ -6708,14 +6717,13 @@ interface ReportPin {
   drag?: boolean;
 }
 let reportPins: ReportPin[] = [];
-/** 畫著的判讀結果是哪一則（換了一則才切到地圖）、確認用的代碼（拖了位置重新預覽用） */
-let pinPost = '';
+/** 確認用的代碼（拖了位置重新預覽用） */
 let pinConfirm: { postId: string; token: string } | null = null;
 const shownReportPins = (): ReportPin[] => (reportSheet.hidden ? [] : markCard ? markPins(markCard) : reportPins);
 
 /**
- * 補充資料的「查地點」「在地圖上標位置」直接用主畫面的地圖（v1.697 使用者說的，以前是表單裡的小地圖）：
- * 標的是哪一場（markCard），地圖上只畫這一場的標記（可以拖、點地圖也會移過去），標好的位置記在那一場（送出「用這些資料預覽」才用）。
+ * 補充資料的「查地點」「在雷達上標位置」直接用主畫面（v1.697 使用者說的，以前是表單裡的小地圖；v1.699 起用雷達，不切到地圖）：
+ * 標的是哪一場（markCard），雷達、地圖上只畫這一場的標記（可以拖、點一下空白處也會移過去），標好的位置記在那一場（送出「用這些資料預覽」才用）。
  * 換了判讀結果、回上一步、刪掉這一場、關掉回報就不標了
  */
 let markCard: HTMLElement | null = null;
@@ -6744,15 +6752,17 @@ function placeMark(p: LatLng): void {
   updatePinState(card);
   render();
 }
-/** 開始在主畫面的地圖上標這一場：切到地圖、移過去；手機把回報收成一條（地圖變大），按「回到補充資料」回來 */
+/**
+ * 開始在雷達上標這一場（v1.699 使用者說直接用雷達的地圖，不用切到地圖；在地圖模式就標在地圖上）：移過去；
+ * 手機把回報收成一條（雷達變大），按「回到補充資料」回來
+ */
 function markOnMap(card: HTMLElement): void {
-  if (view !== 'map') switchView('map');
-  if (view !== 'map') {
-    showBanner(bannerEl, '回到地球才能在地圖上標位置', 3000);
+  if (view === 'radar' && radar.spaceFocused) {
+    showBanner(bannerEl, '回到地球才能在雷達上標位置', 3000);
     return;
   }
   markCard = card;
-  markStart = markAt(card) ? null : map.center() ?? { lat: origin.lat, lng: origin.lng };
+  markStart = markAt(card) ? null : view === 'map' ? (map.center() ?? { lat: origin.lat, lng: origin.lng }) : { lat: origin.lat, lng: origin.lng };
   updatePinState(card);
   render();
   const at = markAt(card);
@@ -6804,14 +6814,15 @@ function flyToPins(pins: ReportPin[]): void {
     if (!map.pinsInView(shown, cover)) map.showPins(shown, cover);
     return;
   }
+  // 雷達：已經拉近、位置都在畫面裡（拖了位置重新預覽）就不動，不然標記又跳回正中間
+  if (scaleKm <= 3 && pins.every((p) => haversineKm(origin, p) < scaleKm * 0.75)) return;
   zoomToKm(one ? Math.min(Math.max(scaleKm, 1), 3) : spread * 1.35, { lat: to.lat, lng: to.lng, source: 'manual' });
 }
 
-/** 「在地圖上看」：切到地圖移過去，回報畫面蓋住地圖正中間（手機）就收到只剩標題那一條，按「回到判讀結果」再打開 */
+/** 「在雷達上看」：移過去（雷達或地圖，看現在是哪個），回報畫面蓋住正中間（手機）就收到只剩標題那一條，按「回到判讀結果」再打開 */
 function lookAtPin(lat: number, lng: number): void {
-  if (view !== 'map') switchView('map');
   flyToPins([{ lat, lng, label: '', glyph: null }]);
-  // 手機的回報在清單那張卡片裡（地圖被擠小）：收成只露出標題那一條，地圖變大
+  // 手機的回報在清單那張卡片裡（雷達被擠小）：收成只露出標題那一條，雷達變大
   if (reportSheet.parentElement === panelEl) {
     reportSheet.classList.add('looking');
     setReportPeek(true);
@@ -6954,7 +6965,7 @@ function googleMapsUrl(p: LatLng): string {
 }
 
 /** 預覽上的定位：精確、約略（只到鄉鎮區）、找不到；有座標就附「在地圖上看」 */
-const lookBtn = (lat: number, lng: number): string => `<button type="button" class="link-btn" data-look="${lat},${lng}">在地圖上看</button>`;
+const lookBtn = (lat: number, lng: number): string => `<button type="button" class="link-btn" data-look="${lat},${lng}">在雷達上看</button>`;
 
 function previewWhere(p: PreviewItem): string {
   if (p.lat === null || p.lng === null) return '<span class="preview-warn">找不到地點，確認了也不會出現在雷達上</span>';
@@ -7065,7 +7076,7 @@ function editCardHtml(it: EditItem | null): string {
       </div>
       <small class="muted">結束可以不填：只寫幾點開始，雷達上顯示到開始後兩小時。國外的活動填當地時間。</small>
       <label>地點<input name="place" maxlength="80" value="${esc(it?.place ?? '')}" placeholder="店名或地址，例如：厝邊咖啡 台北市萬華區○○路○號"></label>
-      <div class="edit-pin"><small class="edit-pin-state"></small><button type="button" class="chip" data-act="locate">查地點</button><button type="button" class="chip" data-act="pin">在地圖上標位置</button><button type="button" class="chip" data-act="unpin" hidden>不用標的位置</button></div>
+      <div class="edit-pin"><small class="edit-pin-state"></small><button type="button" class="chip" data-act="locate">查地點</button><button type="button" class="chip" data-act="pin">在雷達上標位置</button><button type="button" class="chip" data-act="unpin" hidden>不用標的位置</button></div>
       <div class="edit-tags">
         <span class="edit-tags-label">關鍵字<small>（讓人搜尋得到，按 × 拿掉）</small></span>
         <div class="edit-tag-list"></div>
@@ -7153,7 +7164,7 @@ function wireEditTags(card: HTMLElement, tags: string[]): void {
 function editFormHtml(items: EditItem[], hidden: boolean): string {
   const list = items.length > 0 ? items.slice(0, MAX_EDIT_ITEMS) : [null];
   return `<form class="preview-more edit-form"${hidden ? ' hidden' : ''} novalidate>
-      <p class="muted sheet-note">直接改每一場的主題、活動內容、時間、地點、關鍵字；位置不對可以按「在地圖上標位置」，點地圖或拖標記。</p>
+      <p class="muted sheet-note">直接改每一場的主題、活動內容、時間、地點、關鍵字；位置不對可以按「在雷達上標位置」，在雷達上拖標記或點一下。</p>
       <div class="edit-items">${list.map(editCardHtml).join('')}</div>
       <button type="button" class="btn" data-act="add">再加一場</button>
       <div class="sheet-actions"><button type="submit" class="btn primary">用這些資料預覽</button>${hidden ? '<button type="button" class="btn" data-act="less">回上一步</button>' : ''}</div>
@@ -7173,14 +7184,14 @@ function updatePinState(card: HTMLElement): void {
   const state = card.querySelector<HTMLElement>('.edit-pin-state');
   if (state) {
     state.textContent = pin.pinned
-      ? '📍 用你在地圖上標的位置'
+      ? '📍 用你在雷達上標的位置'
       : markCard === card && !found
-        ? '在地圖上拖動標記，或點一下要的位置'
+        ? '在雷達上拖動標記，或點一下要的位置'
       : found
         ? pin.approxArea
-          ? `只定位到${pin.approxArea}（約略位置），可以在地圖上標出正確位置`
+          ? `只定位到${pin.approxArea}（約略位置），可以在雷達上標出正確位置`
           : name
-            ? `📍 查到：${name}（不一定準確），位置不對可以拖標記或點地圖`
+            ? `📍 查到：${name}（不一定準確），位置不對可以拖標記或點雷達`
             : '已依地點定位（不一定準確），位置不對可以在地圖上標'
         : missed
           ? '查不到這個地點。可以寫完整一點：台灣的寫縣市、路名、門牌；國外的寫門牌、街道、城市、州和國家（例如「12901 Alcosta Blvd, San Ramon, CA 94583, USA」），或在地圖上標'
@@ -7421,10 +7432,10 @@ function routePreviewHtml(rt: RoutePreview): string {
             ? `已定位・${lookBtn(st.lat, st.lng)}・<a href="${googleMapsUrl({ lat: st.lat, lng: st.lng })}" target="_blank" rel="noopener">在 Google 地圖上看</a>`
             : '已定位'
           : st.status === 'approximate'
-            ? `<span class="preview-warn">只定位到${esc(st.area ?? '鄉鎮區')}（約略位置），不會放上雷達；可以按「補充資料」在地圖上標出位置</span>`
+            ? `<span class="preview-warn">只定位到${esc(st.area ?? '鄉鎮區')}（約略位置），不會放上雷達；可以按「補充資料」在雷達上標出位置</span>`
             : st.status === 'unlocated'
               ? st.sameAs
-                ? `<span class="preview-warn">跟「${esc(st.sameAs)}」定位在同一個地方，可能查錯了，不會放上雷達；可以按「補充資料」在地圖上標出位置</span>`
+                ? `<span class="preview-warn">跟「${esc(st.sameAs)}」定位在同一個地方，可能查錯了，不會放上雷達；可以按「補充資料」在雷達上標出位置</span>`
                 : '<span class="preview-warn">地圖上查不到，不會放上雷達；可以按「補充資料」補上地址或在地圖上標</span>'
               : '車隊已經經過';
       return `<li class="stop stop-${st.kind}${st.status === 'passed' ? ' passed' : ''}"><div><span class="stop-time">${st.kind === 'start' ? '' : '約 '}${fmtTime(st.at)}</span><span class="stop-name"><b>${label[st.kind]}</b>${esc(st.name)}${st.place ? `<small class="stop-place">${esc(shortAddress(st.place))}</small>` : ''}<small>${status}</small></span></div></li>`;
@@ -7462,7 +7473,7 @@ function renderPreview(r: SubmitResult): void {
         </li>`,
       )
       .join('')}</ul>
-    ${items.some((p) => p.lat !== null && p.lng !== null) ? `<p class="muted sheet-note small">📍 位置是照地點文字查的，不一定準確，已經先用虛線圈標在地圖上（還沒放上去），請看一下對不對；${mod.current ? '不對的話直接把虛線圈拖到正確的地方' : '不對的話按「補充資料」補上完整地址'}。</p>` : ''}
+    ${items.some((p) => p.lat !== null && p.lng !== null) ? `<p class="muted sheet-note small">📍 位置是照地點文字查的，不一定準確，已經先用虛線圈標在雷達上（還沒放上去），請看一下對不對；${mod.current ? '不對的話直接把虛線圈拖到正確的地方' : '不對的話按「補充資料」補上完整地址'}。</p>` : ''}
     ${dups}${r.failures?.length ? `<p class="muted sheet-note">${r.failures.length > 1 ? `下面 ${r.failures.length} 場` : '下面這場'}不會放上雷達${canFixByNote(r.failures) ? '，知道的話可以按「補充資料」補上' : ''}：</p>${failuresHtml(r.failures)}` : ''}
     <div class="sheet-actions">
       <button type="button" class="btn primary" data-act="confirm">${items.length > 0 && items.every((p) => p.update?.mode === 'attach') ? '對，附在這個據點' : '對，放上雷達'}</button>
@@ -7497,11 +7508,9 @@ function renderPreview(r: SubmitResult): void {
   });
   if (mod.current) wireEdit(c, r.edit ?? [], actions);
   else wireSupplement(c, actions);
-  // 定位到的直接標在雷達、地圖上（v1.683）；新的一則先切到地圖、拉近過去，洋流的活動可以直接在地圖上拖到正確的位置（v1.686 使用者說的）
+  // 定位到的直接標在雷達、地圖上（v1.683），移過去；洋流的活動可以直接拖到正確的位置（v1.686；v1.699 起在雷達上拖，不切到地圖）
   reportPins = previewPins(items, r.routes ?? []).map((p) => ({ ...p, drag: editCardsAt(p).length > 0 }));
   pinConfirm = c;
-  if (reportPins.length > 0 && c.postId !== pinPost && view !== 'map') switchView('map');
-  pinPost = c.postId;
   render();
   flyToPins(reportPins);
   reportResult.querySelector('[data-act="wrong"]')?.addEventListener('click', () => {
@@ -7587,8 +7596,8 @@ function failureReason(f: FailedItem): string {
       )
       .join('；');
   }
-  if (f.reason === 'approximate') return `只定位到${f.area ?? '鄉鎮區'}（約略位置），請在地圖上標出位置`;
-  if (f.reason === 'unlocated') return `地點「${f.place ?? ''}」在地圖上查不到，請補上完整地址或店名，或在地圖上標出位置`;
+  if (f.reason === 'approximate') return `只定位到${f.area ?? '鄉鎮區'}（約略位置），請在雷達上標出位置`;
+  if (f.reason === 'unlocated') return `地點「${f.place ?? ''}」在地圖上查不到，請補上完整地址或店名，或在雷達上標出位置`;
   if (f.reason === 'already_over') {
     if (!f.startAt) return '時間已經過了';
     return f.endOpen

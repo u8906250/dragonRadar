@@ -240,6 +240,8 @@ export interface RadarPreview {
   label: string;
   /** 主題的小圖示（topic-icons 的 key）；分不出來是 null，畫小圓點 */
   glyph: string | null;
+  /** 可以拖到正確的位置（v1.699 使用者說回報的定位直接用雷達的地圖，不用切到地圖） */
+  drag?: boolean;
 }
 
 /** 漂流瓶：near 看得到（遠近都直接畫出來，不模糊）；pick 走到撿得起來的距離 */
@@ -620,6 +622,11 @@ export class Radar {
   private previews: RadarPreview[] = [];
   private previewsKey = '';
   private readonly previewLayer: SVGGElement;
+  /** 拖回報的位置：放開時告訴外面拖到哪（第幾個、方位、距離） */
+  onPreviewDrag: ((i: number, at: { bearing: number; distanceKm: number }) => void) | null = null;
+  /** 點一下雷達的空白處（不是光點、星星、瓶子…）：哪個方位、多遠（補充資料標位置時用） */
+  onEmptyTap: ((at: { bearing: number; distanceKm: number }) => void) | null = null;
+  private pinDrag: { id: number; i: number; g: SVGGElement; at: { x: number; y: number } | null } | null = null;
   private scaleKm = 5;
   /** 太空（比全球再遠）的畫法；還沒載入是 null */
   private spaceDraw: SpaceDraw | null = null;
@@ -747,9 +754,10 @@ export class Radar {
       <circle class="me" cx="${C}" cy="${C}" r="5" />
       <g class="you"></g>
       <g class="blips"></g>
-      <g class="previews"></g>
       <!-- 地標（星星）放在光點上面，疊在一起時也點得到 -->
       <g class="landmarks"></g>
+      <!-- 回報的位置在最上面（v1.699 可以拖：疊在星星、光點上也拖得到；不能拖的不擋點擊） -->
+      <g class="previews"></g>
       <g class="trip"></g>
       <g class="rose"></g>
     `;
@@ -770,6 +778,35 @@ export class Radar {
     this.tripLayer = this.svg.querySelector('.trip') as SVGGElement;
     this.landmarkLayer = this.svg.querySelector('.landmarks') as SVGGElement;
     this.previewLayer = this.svg.querySelector('.previews') as SVGGElement;
+    // 拖回報的位置：按在可以拖的標記上就不拖雷達（不往上傳），放開時換算成方位、距離
+    this.previewLayer.addEventListener('pointerdown', (e) => {
+      const g = (e.target as Element).closest<SVGGElement>('.preview-pin.drag');
+      if (!g || (e.pointerType === 'mouse' && e.button !== 0)) return;
+      e.stopPropagation();
+      e.preventDefault();
+      g.setPointerCapture(e.pointerId);
+      g.classList.add('dragging');
+      this.pinDrag = { id: e.pointerId, i: Number(g.dataset.i), g, at: null };
+    });
+    this.previewLayer.addEventListener('pointermove', (e) => {
+      const d = this.pinDrag;
+      if (!d || e.pointerId !== d.id) return;
+      const p = this.svgPoint(e.clientX, e.clientY);
+      if (!p) return;
+      d.at = p;
+      d.g.setAttribute('transform', `translate(${p.x.toFixed(1)} ${p.y.toFixed(1)})`);
+    });
+    const endPinDrag = (e: PointerEvent): void => {
+      const d = this.pinDrag;
+      if (!d || e.pointerId !== d.id) return;
+      this.pinDrag = null;
+      d.g.classList.remove('dragging');
+      const at = d.at && e.type === 'pointerup' ? this.geoOf(d.at) : null;
+      if (at) this.onPreviewDrag?.(d.i, at);
+      else this.draw();
+    };
+    this.previewLayer.addEventListener('pointerup', endPinDrag);
+    this.previewLayer.addEventListener('pointercancel', endPinDrag);
     this.youLayer = this.svg.querySelector('.you') as SVGGElement;
     this.bottleLayer = this.svg.querySelector('.bottles') as SVGGElement;
     this.bottleLayer.addEventListener('click', (e) => {
@@ -1072,6 +1109,10 @@ export class Radar {
         lastTap = null;
         return;
       }
+      // 點空白處：告訴外面點在哪（補充資料在雷達上標位置）
+      const at = this.svgPoint(e.clientX, e.clientY);
+      const geo = at ? this.geoOf(at) : null;
+      if (geo) this.onEmptyTap?.(geo);
       const prev = lastTap;
       lastTap = { t: e.timeStamp, x: e.clientX, y: e.clientY };
       if (prev && e.timeStamp - prev.t < DOUBLE_TAP_MS && Math.hypot(e.clientX - prev.x, e.clientY - prev.y) < DOUBLE_TAP_PX) {
@@ -1769,6 +1810,23 @@ export class Radar {
     }
   }
 
+  /** 螢幕上的一點 → SVG 座標 */
+  private svgPoint(clientX: number, clientY: number): { x: number; y: number } | null {
+    const m = this.svg.getScreenCTM();
+    if (!m) return null;
+    const p = new DOMPoint(clientX, clientY).matrixTransform(m.inverse());
+    return { x: p.x, y: p.y };
+  }
+
+  /** SVG 座標 → 離正中間的方位、距離（太空裡不算） */
+  private geoOf(p: { x: number; y: number }): { bearing: number; distanceKm: number } | null {
+    if (this.inSpace) return null;
+    const dx = p.x - C;
+    const dy = C - p.y;
+    const bearing = (((Math.atan2(dx, dy) * 180) / Math.PI + this.heading) % 360 + 360) % 360;
+    return { bearing, distanceKm: (Math.hypot(dx, dy) / (R - 8)) * this.scaleKm };
+  }
+
   /** 回報判讀完的位置（空陣列就不畫） */
   setPreviews(list: RadarPreview[]): void {
     const key = JSON.stringify(list);
@@ -1789,7 +1847,11 @@ export class Radar {
       const out = ratio * (R - 8) > lim;
       if ((this.inSpace || this.fill) && out) continue;
       const p = polar(angle, Math.min(ratio * (R - 8), lim));
-      const g = el('g', { class: `preview-pin${out ? ' out' : ''}`, transform: `translate(${p.x.toFixed(1)} ${p.y.toFixed(1)})` });
+      const drag = !!pv.drag && !out;
+      const g = el('g', { class: `preview-pin${out ? ' out' : ''}${drag ? ' drag' : ''}`, transform: `translate(${p.x.toFixed(1)} ${p.y.toFixed(1)})` });
+      g.dataset.i = String(this.previews.indexOf(pv));
+      // 手指比標記大：按得到的範圍大一點
+      if (drag) g.appendChild(el('circle', { class: 'hit', r: 20 }));
       g.appendChild(el('circle', { class: 'pulse', r: 11 }));
       g.appendChild(el('circle', { class: 'ring', r: out ? 7 : 11 }));
       if (pv.glyph && !out) {
@@ -1802,6 +1864,11 @@ export class Radar {
         const t = el('text', { class: 'label', 'text-anchor': anchor, x: anchor === 'end' ? 10 : anchor === 'start' ? -10 : 0, y: 27 });
         t.textContent = pv.label;
         g.appendChild(t);
+        if (drag) {
+          const hint = el('text', { class: 'label drag-hint', 'text-anchor': anchor, x: anchor === 'end' ? 10 : anchor === 'start' ? -10 : 0, y: 40 });
+          hint.textContent = '拖到正確的位置';
+          g.appendChild(hint);
+        }
       }
       const title = el('title');
       title.textContent = `還沒放上雷達：${pv.label}`;

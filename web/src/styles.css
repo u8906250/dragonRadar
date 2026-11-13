@@ -2700,6 +2700,12 @@ path.map-canal-flow { --p: 14px; }
 .radar .preview-pin .core, .map-preview .core { fill: currentColor; }
 .radar .preview-pin .label { fill: var(--label); font-size: 11px; font-weight: 700; paint-order: stroke; stroke: var(--label-halo); stroke-width: 3px; stroke-linejoin: round; }
 .radar .preview-pin.out { opacity: 0.75; }
+/* 可以拖的（v1.699 回報的位置在雷達上拖）：按得到、手指放開前跟著走 */
+.radar .preview-pin.drag { pointer-events: auto; cursor: grab; touch-action: none; }
+.radar .preview-pin.drag.dragging { cursor: grabbing; }
+.radar .preview-pin .hit { fill: transparent; }
+.radar .preview-pin .drag-hint { font-size: 10px; font-weight: 600; fill: #b8471a; }
+.radar .preview-pin.dragging .pulse { display: none; }
 .radar .preview-pin.out .pulse { display: none; }
 .map-preview { background: none; border: 0; }
 .map-preview svg { display: block; overflow: visible; }
