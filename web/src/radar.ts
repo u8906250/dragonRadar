@@ -1332,10 +1332,14 @@ export class Radar {
     }
     // 太空：轉動地球，手指拖過地球表面多遠就轉多少（照地球在雷達上的半徑換算）
     const km = this.inSpace ? (r / (globeFrac(this.scaleKm) * (R - 8))) * EARTH_KM : (r / (R - 8)) * this.scaleKm;
-    // 中山公園那層先跟著手指平移，停了才重畫（drawPark）
+    // 中山公園那層、地名先跟著手指平移，停了才重畫（drawPark、drawPlaceLabels）
     if (this.parkPan) {
       this.parkPan.dx += dx;
       this.parkPan.dy += dy;
+    }
+    if (this.labelPan) {
+      this.labelPan.dx += dx;
+      this.labelPan.dy += dy;
     }
     // 內容往畫面上的 screen 方向移動；指北針模式要加回手機朝向；中心往反方向
     const screen = (Math.atan2(dx, -dy) * 180) / Math.PI;
@@ -1997,13 +2001,33 @@ export class Radar {
    * 選取的光點名稱、星星上才寫，滿了就停。每次重畫都重新排（v1.700 使用者說雷達上有東西時地標顯示不出來：
    * 以前跟道路一起排，活動還沒抓到時就排好了，光點後來蓋在字上）；指北針轉了一起重排，字一直是正的
    */
+  /**
+   * 拖曳、放開後還在滑的時候，地名整層跟著手指平移、不重新排，停了才重排（v1.709 使用者說移動時地標、路名一直重畫：
+   * 以前每一格都重排，誰寫得下、寫在哪一直變，會一下有一下沒有、上下跳）
+   */
+  private labelPan: { dx: number; dy: number } | null = null;
+  private labelBuilt: { k: number; heading: number; unit: number } | null = null;
+  /** 上次寫出來的（種類|名稱 → 挪了多少）：同一個範圍重排時先排這些、先試原本挪的位置，停下來原本的名稱才不會被換掉或跳位置 */
+  private labelShown = new Map<string, [number, number]>();
+  private labelShownKm = 0;
   private drawPlaceLabels(blips: Array<{ x: number; y: number }>, blipLabels: Array<{ left: number; right: number; top: number; bottom: number }>): void {
+    const k = (R - 8) / this.scaleKm;
+    // 一個螢幕像素是幾個 SVG 單位
+    const unit = this.squarePx > 0 ? SIZE / this.squarePx : 1;
+    const moving = this.panning || this.panFling !== 0;
+    const built = this.labelBuilt;
+    const g0 = this.placeLabelLayer.firstElementChild;
+    if (moving && built && g0 && this.labelPan && this.fill && !this.inSpace && built.k === k && built.heading === this.heading && built.unit === unit) {
+      g0.setAttribute('transform', `translate(${this.labelPan.dx.toFixed(1)} ${this.labelPan.dy.toFixed(1)})`);
+      return;
+    }
     this.placeLabelLayer.replaceChildren();
+    this.labelPan = { dx: 0, dy: 0 };
+    this.labelBuilt = null;
     const s = this.streets;
     const labels = s?.labels ?? [];
     if (!this.fill || this.inSpace || labels.length === 0) return;
     const noLabel = s?.noLabel ?? [];
-    const k = (R - 8) / this.scaleKm;
     const h0 = (this.heading * Math.PI) / 180;
     const cos = Math.cos(h0);
     const sin = Math.sin(h0);
@@ -2035,12 +2059,14 @@ export class Radar {
       block(p.x, p.y, 10);
     }
     const inView = (x: number, y: number): boolean => Math.hypot(x - C, y - C) <= this.edgeR((Math.atan2(x - C, C - y) * 180) / Math.PI) - 2;
-    // 一個螢幕像素是幾個 SVG 單位
-    const unit = this.squarePx > 0 ? SIZE / this.squarePx : 1;
     const g = el('g', { class: 'place-labels', 'stroke-width': (2.5 * unit).toFixed(2) });
     const max = PLACE_LABEL_MAX;
+    const keyOf = (lb: RadarLabel): string => `${lb.kind}|${lb.text}`;
+    const keep = this.labelShownKm === this.scaleKm ? this.labelShown : new Map<string, [number, number]>();
+    const order = keep.size > 0 ? [...labels.filter((lb) => keep.has(keyOf(lb))), ...labels.filter((lb) => !keep.has(keyOf(lb)))] : labels;
+    const shown = new Map<string, [number, number]>();
     let n = 0;
-    for (const lb of labels) {
+    for (const lb of order) {
       if (n >= max) break;
       const dx = lb.x - sx;
       const dy = lb.y - sy;
@@ -2052,9 +2078,18 @@ export class Radar {
       // 縣市、鄉鎮市區、地標的點被蓋住（常常就是你所在的那一區、你旁邊的大巨蛋）：往上、往下挪一行，再往左右挪試試；路名、車站要寫在原地
       const area = lb.kind === 'county' || lb.kind === 'town' || lb.kind === 'poi';
       const tries: Array<[number, number]> = area ? [[0, 0], [0, -(h + 4)], [0, h + 4], [-(w / 2 + 12), 0], [w / 2 + 12, 0]] : [[0, 0]];
-      const box = tries
-        .map(([ox, oy]) => ({ l: x + ox - w / 2, r: x + ox + w / 2, t: y + oy - h / 2, b: y + oy + h / 2 }))
-        .find((bx) => inView(bx.l, bx.t) && inView(bx.r, bx.t) && inView(bx.l, bx.b) && inView(bx.r, bx.b) && !taken.some((q) => q.l < bx.r && bx.l < q.r && q.t < bx.b && bx.t < q.b));
+      // 上次寫過的先試原本挪的位置
+      const prev = keep.get(keyOf(lb));
+      if (prev) tries.unshift(prev);
+      let box: Box | null = null;
+      for (const [ox, oy] of tries) {
+        const bx = { l: x + ox - w / 2, r: x + ox + w / 2, t: y + oy - h / 2, b: y + oy + h / 2 };
+        if (inView(bx.l, bx.t) && inView(bx.r, bx.t) && inView(bx.l, bx.b) && inView(bx.r, bx.b) && !taken.some((q) => q.l < bx.r && bx.l < q.r && q.t < bx.b && bx.t < q.b)) {
+          box = bx;
+          shown.set(keyOf(lb), [ox, oy]);
+          break;
+        }
+      }
       if (!box) continue;
       taken.push(box);
       const t = el('text', { class: `place-label pl-${lb.kind}`, x: ((box.l + box.r) / 2).toFixed(1), y: ((box.t + box.b) / 2).toFixed(1), 'font-size': fs.toFixed(2) });
@@ -2062,7 +2097,12 @@ export class Radar {
       g.appendChild(t);
       n++;
     }
-    if (n > 0) this.placeLabelLayer.appendChild(g);
+    this.labelShown = shown;
+    this.labelShownKm = this.scaleKm;
+    if (n > 0) {
+      this.placeLabelLayer.appendChild(g);
+      this.labelBuilt = { k, heading: this.heading, unit };
+    }
   }
 
   /** 一塊綠地：整塊都在範圍外面就不畫；畫面上離上一點不到 1.5 像素的省略 */

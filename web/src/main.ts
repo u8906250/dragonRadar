@@ -1204,6 +1204,8 @@ function loadPois(): void {
     });
 }
 
+/** 路名上次寫在哪一點（名稱 → 位置） */
+const roadLabelAt = new Map<string, LatLng>();
 function placeLabels(
   sm: typeof import('./streets'),
   roads: import('./streets').RoadName[],
@@ -1228,7 +1230,7 @@ function placeLabels(
   if (km <= 5) {
     const pri: Record<string, number> = { motorway: 70, trunk: 68, primary: 62, secondary: 58, tertiary: 50, minor: 40 };
     const ok = (cls: string): boolean => (km > 2 ? cls === 'motorway' || cls === 'trunk' : km > 1 ? cls !== 'tertiary' && cls !== 'minor' : true);
-    // 同名的路只寫一次：寫在離正中間最近的那一點
+    // 同名的路只寫一次：寫在離正中間最近的那一點；上次寫的那一點還在畫面裡就照舊（v1.709：拖完停下來路名才不會沿著路跳）
     const best = new Map<string, { lat: number; lng: number; d: number; cls: string }>();
     for (const r of roads) {
       if (!ok(r.cls)) continue;
@@ -1238,7 +1240,13 @@ function placeLabels(
         if (!b || d < b.d) best.set(r.name, { lat: r.pts[i], lng: r.pts[i + 1], d, cls: r.cls });
       }
     }
-    for (const [name, b] of best) add(b.lat, b.lng, name, 'road', pri[b.cls] ?? 40);
+    for (const [name, b] of best) {
+      const was = roadLabelAt.get(name);
+      const at = was && Math.hypot((was.lng - origin.lng) * kx, (was.lat - origin.lat) * ky) <= km * 0.85 ? was : b;
+      roadLabelAt.set(name, { lat: at.lat, lng: at.lng });
+      add(at.lat, at.lng, name, 'road', pri[b.cls] ?? 40);
+    }
+    if (roadLabelAt.size > 2000) roadLabelAt.clear();
   }
   if (km <= 5) {
     if (!poisMod) loadPois();
