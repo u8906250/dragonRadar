@@ -1998,12 +1998,14 @@ path.map-seam-walkers { --p: 15px; }
 .edit-pin-state { flex: 1 1 100%; font-size: 13px; color: var(--muted); }
 .edit-pin-state.preview-warn { color: var(--highlight); font-weight: 700; }
 .edit-pin .chip { padding: 4px 12px; font-size: 13px; }
+/* 回報問題的小地圖（補充資料的位置改在主畫面的地圖上標，v1.697） */
 .edit-map { height: 220px; border-radius: var(--card-radius); border: var(--border-w) solid var(--line); overflow: hidden; }
+.edit-map[hidden] { display: none; }
 /* 回報地點錯誤的小地圖 */
 .feedback-pin { display: grid; gap: 6px; margin: 4px 0 8px; }
 .feedback-find { flex-wrap: nowrap; }
 .feedback-find input { flex: 1 1 auto; min-width: 0; font: inherit; font-size: 16px; color: var(--text); background: var(--card); border: var(--border-w) solid var(--line); border-radius: var(--card-radius); padding: 6px 10px; }
-.edit-map[hidden], .edit-item [hidden] { display: none; }
+.edit-item [hidden] { display: none; }
 .edit-tags { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
 .edit-tags-label { font-size: 13px; color: var(--muted); }
 .edit-tags-label small { font-size: 12px; }
@@ -2017,7 +2019,6 @@ path.map-seam-walkers { --p: 15px; }
 @media (hover: hover) and (pointer: fine) { .edit-tag-common { flex-wrap: wrap; overflow: visible; } }
 .edit-tag-common .chip { flex: none; min-height: 30px; padding: 3px 10px; font-size: 13px; font-weight: 400; box-shadow: none; }
 /* 送出中：標位置的小地圖也鎖住，表單變淡 */
-#report-result.busy .edit-map { pointer-events: none; }
 #report-result.busy .edit-items, #report-result.busy .preview-more textarea { opacity: 0.6; }
 .edit-form > .btn[data-act="add"] { align-self: flex-start; }
 .edit-form > .btn[hidden] { display: none; }

@@ -578,7 +578,10 @@ const map = new MapView(
     onLandmark: (id) => {
       if (id === 'hq') startHqVoyage();
     },
-    onPreviewMove: (i, to) => void movePin(i, to),
+    onPreviewMove: (i, to) => (markCard ? placeMark(to) : void movePin(i, to)),
+    onMapClick: (p) => {
+      if (markCard && !reportSheet.hidden) placeMark(p);
+    },
   },
   baseMap,
 );
@@ -6648,6 +6651,8 @@ const OUTCOME_TEXT: Record<SubmitResult['outcome'], string> = {
 function setReportMsg(html: string): void {
   reportResult.innerHTML = html;
   reportSheet.classList.remove('looking');
+  markCard = null;
+  markStart = null;
   // 換了訊息（確認了、不對、補充後重新判讀）：判讀結果的位置跟著拿掉，新的判讀結果再標
   if (reportPins.length > 0) {
     reportPins = [];
@@ -6671,7 +6676,65 @@ let reportPins: ReportPin[] = [];
 /** 畫著的判讀結果是哪一則（換了一則才切到地圖）、確認用的代碼（拖了位置重新預覽用） */
 let pinPost = '';
 let pinConfirm: { postId: string; token: string } | null = null;
-const shownReportPins = (): ReportPin[] => (reportSheet.hidden ? [] : reportPins);
+const shownReportPins = (): ReportPin[] => (reportSheet.hidden ? [] : markCard ? markPins(markCard) : reportPins);
+
+/**
+ * 補充資料的「查地點」「在地圖上標位置」直接用主畫面的地圖（v1.697 使用者說的，以前是表單裡的小地圖）：
+ * 標的是哪一場（markCard），地圖上只畫這一場的標記（可以拖、點地圖也會移過去），標好的位置記在那一場（送出「用這些資料預覽」才用）。
+ * 換了判讀結果、回上一步、刪掉這一場、關掉回報就不標了
+ */
+let markCard: HTMLElement | null = null;
+/** 這一場還沒有位置時，標記先放在哪（打開時地圖的正中間） */
+let markStart: LatLng | null = null;
+/** 這一場現在的位置：標的、依地點查到的（地點沒改）、都沒有就先放的地方 */
+function markAt(card: HTMLElement): LatLng | null {
+  const pin = editPins.get(card);
+  if (!pin) return null;
+  const place = card.querySelector<HTMLInputElement>('[name="place"]')?.value.trim() ?? '';
+  return pin.pinned ?? (pin.found && place === pin.foundPlace ? pin.found : null) ?? markStart;
+}
+function markPins(card: HTMLElement): ReportPin[] {
+  const at = markAt(card);
+  if (!at) return [];
+  const val = (n: string): string => card.querySelector<HTMLInputElement>(`[name="${n}"]`)?.value.trim() ?? '';
+  const label = val('title') || card.querySelector('.edit-no')?.textContent || '活動';
+  return [{ lat: at.lat, lng: at.lng, label: [...label].length > 16 ? `${[...label].slice(0, 15).join('')}…` : label, glyph: topicGlyph(val('topic') || null), drag: true }];
+}
+/** 拖到、點到的地方就是這一場的位置 */
+function placeMark(p: LatLng): void {
+  const card = markCard;
+  const pin = card ? editPins.get(card) : null;
+  if (!card || !pin) return;
+  pin.pinned = { lat: p.lat, lng: p.lng };
+  updatePinState(card);
+  render();
+}
+/** 開始在主畫面的地圖上標這一場：切到地圖、移過去；手機把回報收成一條（地圖變大），按「回到補充資料」回來 */
+function markOnMap(card: HTMLElement): void {
+  if (view !== 'map') switchView('map');
+  if (view !== 'map') {
+    showBanner(bannerEl, '回到地球才能在地圖上標位置', 3000);
+    return;
+  }
+  markCard = card;
+  markStart = markAt(card) ? null : map.center() ?? { lat: origin.lat, lng: origin.lng };
+  updatePinState(card);
+  render();
+  const at = markAt(card);
+  if (at) flyToPins([{ lat: at.lat, lng: at.lng, label: '', glyph: null }]);
+  if (reportSheet.parentElement === panelEl) {
+    reportSheet.classList.add('looking');
+    setReportPeek(true, '回到補充資料');
+  }
+}
+function stopMark(): void {
+  if (!markCard) return;
+  const card = markCard;
+  markCard = null;
+  markStart = null;
+  if (card.isConnected) updatePinState(card);
+  render();
+}
 
 /** 判讀結果裡定位到的：每一場、車掃每一站（同一個位置只標一次，名稱寫第一場的） */
 function previewPins(items: PreviewItem[], routes: RoutePreview[]): ReportPin[] {
@@ -6786,7 +6849,12 @@ async function movePin(i: number, to: LatLng): Promise<void> {
   if (looking) reportSheet.classList.add('looking');
 }
 
-function setReportPeek(on: boolean): void {
+/** label：收起來時標題列上按鈕寫什麼（「回到判讀結果」「回到補充資料」） */
+function setReportPeek(on: boolean, label = '回到判讀結果'): void {
+  if (on) {
+    const b = reportSheet.querySelector('.report-unpeek');
+    if (b) b.textContent = label;
+  }
   if (!on) reportSheet.classList.remove('looking');
   // 手機的回報在清單那張卡片裡：收起來＝清單收成只露出標題那一條
   if (reportSheet.parentElement === panelEl) {
@@ -6934,9 +7002,8 @@ interface EditPin {
   /** 按「查地點」查到的地名；查不到是 null（missed 是查不到的那段地點） */
   foundName: string | null;
   missed: string | null;
-  /** 回報的人在地圖上標的 */
+  /** 回報的人在地圖上標的（主畫面的地圖，v1.697） */
   pinned: LatLng | null;
-  picker: PinPicker | null;
 }
 const editPins = new Map<HTMLElement, EditPin>();
 
@@ -6964,7 +7031,6 @@ function editCardHtml(it: EditItem | null): string {
       <small class="muted">結束可以不填：只寫幾點開始，雷達上顯示到開始後兩小時。國外的活動填當地時間。</small>
       <label>地點<input name="place" maxlength="80" value="${esc(it?.place ?? '')}" placeholder="店名或地址，例如：厝邊咖啡 台北市萬華區○○路○號"></label>
       <div class="edit-pin"><small class="edit-pin-state"></small><button type="button" class="chip" data-act="locate">查地點</button><button type="button" class="chip" data-act="pin">在地圖上標位置</button><button type="button" class="chip" data-act="unpin" hidden>不用標的位置</button></div>
-      <div class="edit-map" hidden></div>
       <div class="edit-tags">
         <span class="edit-tags-label">關鍵字<small>（讓人搜尋得到，按 × 拿掉）</small></span>
         <div class="edit-tag-list"></div>
@@ -7073,6 +7139,8 @@ function updatePinState(card: HTMLElement): void {
   if (state) {
     state.textContent = pin.pinned
       ? '📍 用你在地圖上標的位置'
+      : markCard === card && !found
+        ? '在地圖上拖動標記，或點一下要的位置'
       : found
         ? pin.approxArea
           ? `只定位到${pin.approxArea}（約略位置），可以在地圖上標出正確位置`
@@ -7090,38 +7158,19 @@ function updatePinState(card: HTMLElement): void {
 
 function wireEditCard(c: { postId: string; token: string }, card: HTMLElement, it: EditItem | null, form: HTMLFormElement): void {
   const found = it && it.lat !== null && it.lng !== null ? { lat: it.lat, lng: it.lng } : null;
-  const pin: EditPin = { found, foundPlace: it?.place ?? '', approxArea: it?.approxArea ?? null, foundName: null, missed: null, pinned: null, picker: null };
+  const pin: EditPin = { found, foundPlace: it?.place ?? '', approxArea: it?.approxArea ?? null, foundName: null, missed: null, pinned: null };
   editPins.set(card, pin);
-  // 關鍵字：判讀出來的；再加一場的先帶第一場的
-  const first = form.querySelector<HTMLElement>('.edit-item');
-  wireEditTags(card, it ? (it.tags ?? []) : first && first !== card ? (editTags.get(first) ?? []) : []);
-  const mapEl = card.querySelector<HTMLElement>('.edit-map');
-  const pinBtn = card.querySelector<HTMLButtonElement>('[data-act="pin"]');
+  // 關鍵字：判讀出來的；再加一場的先帶上一場的
+  const prev = card.previousElementSibling instanceof HTMLElement && card.previousElementSibling.matches('.edit-item') ? card.previousElementSibling : null;
+  wireEditTags(card, it ? (it.tags ?? []) : prev ? (editTags.get(prev) ?? []) : []);
   const placeInput = card.querySelector<HTMLInputElement>('[name="place"]');
-  placeInput?.addEventListener('input', () => updatePinState(card));
-  // 打開小地圖（第一次才建）：從標的位置、查到的位置開始，都沒有就從使用者的位置
-  const openMap = async (): Promise<void> => {
-    if (!mapEl || !pinBtn) return;
-    mapEl.hidden = false;
-    pinBtn.textContent = '收起地圖';
-    if (pin.picker) return;
-    const place = placeInput?.value.trim() ?? '';
-    const start = pin.pinned ?? (pin.found && place === pin.foundPlace ? pin.found : null);
-    pin.picker = await pinPicker(mapEl, start, origin, baseMap, (p) => {
-      pin.pinned = p;
-      updatePinState(card);
-    });
-  };
-  pinBtn?.addEventListener('click', async () => {
-    if (!mapEl) return;
-    if (!mapEl.hidden) {
-      mapEl.hidden = true;
-      pinBtn.textContent = '在地圖上標位置';
-      return;
-    }
-    await openMap();
+  placeInput?.addEventListener('input', () => {
+    updatePinState(card);
+    if (markCard === card) render();
   });
-  // 查地點：查法跟送出後一樣，查到的標在小地圖上（之前在地圖上標的不算了），位置不對再拖
+  // 在主畫面的地圖上標（v1.697）：從標的位置、查到的位置開始，都沒有就從地圖現在的正中間
+  card.querySelector('[data-act="pin"]')?.addEventListener('click', () => markOnMap(card));
+  // 查地點：查法跟送出後一樣，查到的標在主畫面的地圖上（之前在地圖上標的不算了），位置不對再拖
   const locateBtn = card.querySelector<HTMLButtonElement>('[data-act="locate"]');
   locateBtn?.addEventListener('click', async () => {
     const place = placeInput?.value.trim() ?? '';
@@ -7151,17 +7200,15 @@ function wireEditCard(c: { postId: string; token: string }, card: HTMLElement, i
     pin.pinned = null;
     updatePinState(card);
     if (!hit) return;
-    await openMap();
-    pin.picker?.set(hit, r.approxArea ? 14 : 17);
+    markOnMap(card);
   });
   card.querySelector('[data-act="unpin"]')?.addEventListener('click', () => {
     pin.pinned = null;
-    const place = card.querySelector<HTMLInputElement>('[name="place"]')?.value.trim() ?? '';
-    pin.picker?.set(pin.found && place === pin.foundPlace ? pin.found : null);
     updatePinState(card);
+    if (markCard === card) render();
   });
   card.querySelector('[data-act="drop"]')?.addEventListener('click', () => {
-    pin.picker?.remove();
+    if (markCard === card) stopMark();
     editPins.delete(card);
     editTags.delete(card);
     card.remove();
@@ -7222,20 +7269,38 @@ function readEditForm(form: HTMLFormElement): EditInput[] | string {
 function wireEdit(c: { postId: string; token: string }, items: EditItem[], actions: HTMLElement | null): void {
   const form = reportResult.querySelector<HTMLFormElement>('.edit-form');
   if (!form) return;
-  // 換了一個表單：舊的小地圖拿掉
-  for (const pin of editPins.values()) pin.picker?.remove();
+  // 換了一個表單：之前那張表單在地圖上標的不再標
+  markCard = null;
+  markStart = null;
   editPins.clear();
   editTags.clear();
   const list = form.querySelector<HTMLElement>('.edit-items');
   [...form.querySelectorAll<HTMLElement>('.edit-item')].forEach((card, i) => wireEditCard(c, card, items[i] ?? null, form));
   renumberEdit(form);
+  // 再加一場：內容先複製上一場的（v1.697 使用者說的；常常只差日期），日期欄先選好，改不一樣的就好
   form.querySelector('[data-act="add"]')?.addEventListener('click', () => {
     if (!list) return;
+    const last = [...list.querySelectorAll<HTMLElement>('.edit-item')].at(-1) ?? null;
     list.insertAdjacentHTML('beforeend', editCardHtml(null));
     const card = list.lastElementChild as HTMLElement;
+    if (last) {
+      for (const name of ['topic', 'title', 'date', 'start', 'enddate', 'end', 'place']) {
+        const from = last.querySelector<HTMLInputElement>(`[name="${name}"]`);
+        const to = card.querySelector<HTMLInputElement>(`[name="${name}"]`);
+        if (from && to) to.value = from.value;
+      }
+    }
     wireEditCard(c, card, null, form);
+    // 位置也一樣（查到的、標的）
+    const lp = last ? editPins.get(last) : undefined;
+    const np = editPins.get(card);
+    if (lp && np) {
+      Object.assign(np, { found: lp.found, foundPlace: lp.foundPlace, approxArea: lp.approxArea, foundName: lp.foundName, missed: lp.missed, pinned: lp.pinned });
+      updatePinState(card);
+    }
     renumberEdit(form);
-    card.querySelector<HTMLInputElement>('[name="title"]')?.focus();
+    const date = card.querySelector<HTMLInputElement>('[name="date"]');
+    (last && date ? date : card.querySelector<HTMLInputElement>('[name="title"]'))?.focus();
   });
   reportResult.querySelector('[data-act="more"]')?.addEventListener('click', () => {
     form.hidden = false;
@@ -7245,6 +7310,7 @@ function wireEdit(c: { postId: string; token: string }, items: EditItem[], actio
   form.querySelector('[data-act="less"]')?.addEventListener('click', () => {
     form.hidden = true;
     if (actions) actions.hidden = false;
+    stopMark();
   });
   form.addEventListener('submit', async (e) => {
     e.preventDefault();

@@ -326,7 +326,7 @@ export class MapView {
   constructor(
     private readonly el: HTMLElement,
     origin: LatLng,
-    private readonly handlers: { onSelect: (id: number, group: number[]) => void; onBottle?: (id: number) => void; onLandmark?: (id: string) => void; onPreviewMove?: (i: number, to: LatLng) => void },
+    private readonly handlers: { onSelect: (id: number, group: number[]) => void; onBottle?: (id: number) => void; onLandmark?: (id: string) => void; onPreviewMove?: (i: number, to: LatLng) => void; onMapClick?: (p: LatLng) => void },
     base: BaseMap = 'nlsc',
   ) {
     this.origin = origin;
@@ -352,6 +352,8 @@ export class MapView {
       const map = L.map(this.el, { zoomControl: true, attributionControl: true, zoomSnap: 0 }).setView([this.origin.lat, this.origin.lng], 15);
       map.attributionControl.setPrefix(false);
       this.map = map;
+      // 點地圖的空白處（標記、路線自己處理的不算）：回報補充資料在地圖上標位置時，標記移到點的地方
+      map.on('click', (e: Leaflet.LeafletMouseEvent) => this.handlers.onMapClick?.({ lat: e.latlng.lat, lng: e.latlng.lng }));
       this.routeLayer = L.layerGroup().addTo(map);
       this.bottleLayer = L.layerGroup().addTo(map);
       this.layer = L.layerGroup().addTo(map);
@@ -783,6 +785,12 @@ export class MapView {
       }
       layer.addLayer(m);
     });
+  }
+
+  /** 地圖現在的正中間；地圖還沒載入是 null */
+  center(): LatLng | null {
+    const c = this.map?.getCenter();
+    return c ? { lat: c.lat, lng: c.lng } : null;
   }
 
   /** 這些點都在看得到的地方（扣掉卡片蓋住的右邊、下面，留 40 px 邊），而且拉得夠近（縮放 15 以上） */
