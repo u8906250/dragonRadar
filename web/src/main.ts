@@ -1078,7 +1078,8 @@ function updateStreets(): void {
  * 雷達上寫的地名（v1.691 使用者說適度放縣市、區、路、地標，但畫面不要太亂）：照範圍分層，由重要到不重要、同樣重要的離正中間近的先，
  * 雷達那邊放不下（重疊、壓到光點）的不寫、一個畫面最多十幾個。
  * 33 km 以上縣市；1～33 km 鄉鎮市區；5 km 內加國道、快速道路的名字，2 km 內加幹道，1 km 內大街小巷的路名和捷運、火車站（不寫鄉鎮市區）；
- * 地標（v1.698 使用者說拉近可以放大巨蛋、公園等）：5 km 內寫大的（體育場、遊樂園、市政府、大公園），2 km 內都寫（pois-tw.ts，這時才載入）。
+ * 地標（v1.698 使用者說拉近可以放大巨蛋、公園等）：5 km 內寫大的（體育場、遊樂園、市政府、大公園），2 km 內都寫（pois-tw.ts，這時才載入）；
+ * 一般的公園（沒有 Wikidata）1 km 內都寫、2 km 內寫 1 公頃以上的（v1.701）。
  * 只有全螢幕寫（v1.692 使用者說一般的雷達不用顯示）；中國的範圍不寫（跟道路一樣）；洋流總部的特效播放時不寫
  */
 /** 地標（pois-tw.ts，約 100 KB）：全螢幕拉近到 5 km 內才載入，載入好重畫道路和名稱 */
@@ -1138,6 +1139,12 @@ function placeLabels(
     if (!poisMod) loadPois();
     else {
       for (const [name, lat, lng, kind, ha] of poisMod.TW_POIS) {
+        // 沒有 Wikidata 的公園（萬芳四號公園這種，v1.701）：1 km 內都寫、2 km 內寫 1 公頃以上的、再遠只寫很大的；排在大部分路名後面
+        if (kind === 'lpark') {
+          if (km > 2 ? ha < 20 : km > 1 ? ha < 1 : false) continue;
+          add(lat, lng, name, 'poi', ha >= 10 ? 66 : ha >= 2 ? 55 : km > 1 ? 50 : 45);
+          continue;
+        }
         const big = kind === 'stadium' || kind === 'fun' || kind === 'gov' || ha >= 10;
         if (km > 2 && !big && ha < 20) continue;
         // 圖書館的分館（「三興分館」）單獨寫看不懂、又很多：排後面
