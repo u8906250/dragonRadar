@@ -31,11 +31,12 @@ export default defineConfig({
   build: {
     target: 'es2022',
     sourcemap: false,
-    // 管理頁也打包（用雷達的小地圖），網址照舊是 admin.html
+    // 管理頁也打包（用雷達的小地圖），網址照舊是 admin.html；統計頁 stats.html（v1.693）
     rolldownOptions: {
       input: {
         main: fileURLToPath(new URL('index.html', import.meta.url)),
         admin: fileURLToPath(new URL('admin.html', import.meta.url)),
+        stats: fileURLToPath(new URL('stats.html', import.meta.url)),
       },
     },
   },

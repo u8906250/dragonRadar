@@ -16,6 +16,7 @@ import { addParkMark, deleteParkMark, listParkMarks, listPublicParkMarks, parseP
 import { adminLocate, applyFeedback, clearResolvedFeedback, deleteAdminSubscription, listFeedback, locateForFeedback, notifyAdmins, purgeFeedback, saveAdminSubscription, setFeedbackStatus, submitFeedback } from './feedback';
 import { moduleOf } from './modules';
 import { shareInfo } from './share';
+import { adminStats } from './stats';
 import { PUSH_RADIUS_KM, PushError, b64urlEncode, deleteSubscription, encryptPayload, purgeSubscriptions, pushStarted, saveSubscription, sendPush, vapidKeys } from './push';
 import { assertEventReportsOpen, confirmLink, editLink, ENDED_REPORTS_NEEDED, locateForEdit, MAX_LINK_AGE_SEC, NOTES_CLOSED, ReportError, REPORTS_LOCKED, ipHash, myReports, purgeReports, recheckLinks, rejectLink, reportModules, submitLink, supplementLink, withdrawReport } from './reports';
 import { D1Meter, isTransient, withResilientDb } from './db';
@@ -777,6 +778,12 @@ async function handleAdmin(req: Request, env: Env, ctx: ExecutionContext, path: 
 
   // ?confirm=rejected 看回報的人說判讀錯的、pending 還沒確認的
   // D1 讀了幾列：?day=YYYY-MM-DD（UTC，預設今天），加上最近一次排程讀最多的查詢
+  // 統計頁（stats.html）：最近幾天（最多 30 天，資料只留 30 天）回報的帳號、主題、關鍵字…，只有數字
+  if (req.method === 'GET' && path === '/api/admin/stats') {
+    const days = Math.min(30, Math.max(1, Math.round(Number(url.searchParams.get('days')) || 30)));
+    return jsonResponse(await adminStats(env, now, days));
+  }
+
   if (req.method === 'GET' && path === '/api/admin/usage') {
     const day = url.searchParams.get('day') ?? new Date(now * 1000).toISOString().slice(0, 10);
     const r = await env.DB.prepare('SELECT label, calls, rows_read FROM d1_usage WHERE day = ? ORDER BY rows_read DESC').bind(day).all();

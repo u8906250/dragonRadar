@@ -1,0 +1,96 @@
+<!doctype html>
+<html lang="zh-Hant-TW">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="robots" content="noindex, nofollow" />
+  <title>統計｜洋流雷達</title>
+  <link rel="icon" href="icon.svg" type="image/svg+xml" />
+  <link rel="stylesheet" href="legal.css" />
+  <style>
+    /* 長條的顏色：一種顏色（每張圖都只有一組數字），驗證過在白底上看得清楚 */
+    :root { --bar: #00897b; --track: #eef3f2; --muted: #5d5850; --line: #d9d3c7; --blip-activity: #03615a; }
+    main { max-width: 860px; }
+    .row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+    .btn { font: inherit; font-size: 14px; font-weight: 700; color: var(--ink); background: #fff; border: 2px solid var(--ink); border-radius: 999px; box-shadow: 2px 2px 0 var(--ink); padding: 6px 14px; cursor: pointer; text-decoration: none; display: inline-flex; align-items: center; min-height: 36px; }
+    .btn.primary { background: #ffe08a; }
+    .btn[aria-pressed='true'] { background: var(--ink); color: var(--cream); }
+    input[type='password'] { font: inherit; font-size: 16px; flex: 1 1 200px; min-width: 0; padding: 8px 12px; border: 2px solid var(--ink); border-radius: 10px; background: #fff; }
+    .msg { font-size: 14px; color: var(--muted); margin: 8px 0 0; }
+    .msg.err { color: #b3261e; font-weight: 700; }
+    #stats { transition: opacity 0.2s; }
+    #stats.loading { opacity: 0.45; }
+    .tiles { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 10px; margin: 16px 0 8px; }
+    .tile { background: #fff; border: 2px solid var(--ink); border-radius: 12px; padding: 10px 12px; }
+    .tile .label { font-size: 13px; color: var(--muted); }
+    .tile .value { font-size: 28px; font-weight: 700; line-height: 1.2; }
+    .tile .sub { font-size: 12px; color: var(--muted); }
+    .card { background: #fff; border: 2px solid var(--ink); border-radius: 12px; padding: 12px 14px; margin: 14px 0; }
+    .card h2 { font-size: 17px; margin: 0 0 2px; }
+    .card .meta { font-size: 13px; color: var(--muted); margin: 0 0 10px; line-height: 1.5; }
+    .card h3 { font-size: 14px; margin: 14px 0 6px; color: var(--muted); }
+    .empty { color: var(--muted); font-size: 14px; padding: 8px 0; }
+    /* 橫的長條：名稱、長條（數字寫在尾端） */
+    .hbars { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
+    .hbars li { display: grid; grid-template-columns: minmax(84px, 34%) 1fr; gap: 10px; align-items: center; font-size: 14px; }
+    .hbars .name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; display: flex; align-items: center; gap: 6px; }
+    .hbars .name svg { flex: none; width: 18px; height: 18px; }
+    .hbars .name small { color: var(--muted); }
+    .hbars .name-cell { min-width: 0; display: flex; flex-direction: column; }
+    .hbars .note { font-size: 12px; color: var(--muted); line-height: 1.3; }
+    .hbars .bar { display: flex; align-items: center; gap: 6px; min-width: 0; }
+    .hbars .fill { flex: none; height: 14px; min-width: 2px; background: var(--bar); border-radius: 0 4px 4px 0; }
+    .hbars .num { flex: none; font-size: 13px; font-weight: 700; white-space: nowrap; }
+    @media (max-width: 560px) { .hbars.stack li { grid-template-columns: 1fr; gap: 2px; margin-bottom: 4px; } }
+    /* 直的長條（每天、星期幾、幾點） */
+    .cols { position: relative; height: 140px; display: flex; align-items: flex-end; gap: 2px; border-bottom: 1px solid var(--line); padding-top: 18px; }
+    .cols .col { flex: 1 1 0; max-width: 24px; height: 100%; display: flex; align-items: flex-end; justify-content: center; cursor: default; outline: none; }
+    .cols .col span { display: block; width: 100%; min-height: 0; background: var(--bar); border-radius: 4px 4px 0 0; }
+    .cols .col:hover span, .cols .col:focus-visible span { background: #006b60; }
+    .cols .max { position: absolute; top: 0; left: 0; font-size: 12px; color: var(--muted); }
+    .xlabels { display: flex; gap: 2px; font-size: 11px; color: var(--muted); margin-top: 4px; }
+    .xlabels span { flex: 1 1 0; max-width: 24px; text-align: center; white-space: nowrap; overflow: visible; }
+    .tip { position: fixed; z-index: 10; pointer-events: none; background: var(--ink); color: var(--cream); font-size: 13px; line-height: 1.45; padding: 6px 10px; border-radius: 8px; white-space: nowrap; }
+    .tip b { font-size: 15px; }
+    details.table { margin-top: 8px; font-size: 13px; }
+    details.table summary { cursor: pointer; color: var(--muted); }
+    details.table table { border-collapse: collapse; margin-top: 6px; }
+    details.table td, details.table th { border-bottom: 1px solid var(--line); padding: 2px 10px 2px 0; text-align: left; font-weight: 400; }
+    details.table td:last-child { text-align: right; }
+    .two { display: grid; grid-template-columns: 1fr; gap: 0 20px; }
+    @media (min-width: 720px) { .two { grid-template-columns: 1fr 1fr; } }
+    [hidden] { display: none !important; }
+  </style>
+</head>
+<body>
+<main>
+  <nav><a href="./">← 回雷達</a><a href="admin.html">回報管理</a></nav>
+  <article>
+    <h1>統計</h1>
+    <p class="meta">大家回報的貼文、放上雷達的活動，只算數字（不記是誰回報的）。資料只留 30 天。只有拿管理 token 的人看得到。</p>
+
+    <section id="login" hidden>
+      <form id="login-form" class="row" autocomplete="off">
+        <input id="token" type="password" placeholder="管理 token（ADMIN_TOKEN）" aria-label="管理 token" />
+        <button type="submit" class="btn primary">登入</button>
+      </form>
+      <p class="msg">token 只存在這個瀏覽器裡，跟回報管理頁共用。</p>
+      <p id="login-msg" class="msg err" aria-live="polite"></p>
+    </section>
+
+    <section id="panel" hidden>
+      <div class="row" role="group" aria-label="範圍">
+        <button type="button" class="btn" data-days="7" aria-pressed="false">7 天</button>
+        <button type="button" class="btn" data-days="14" aria-pressed="false">14 天</button>
+        <button type="button" class="btn" data-days="30" aria-pressed="true">30 天</button>
+        <button type="button" class="btn" id="reload">重新整理</button>
+      </div>
+      <p id="msg" class="msg err" aria-live="polite"></p>
+      <div id="stats"></div>
+    </section>
+  </article>
+</main>
+<div class="tip" id="tip" hidden></div>
+<script type="module" src="./src/stats-page.ts"></script>
+</body>
+</html>
