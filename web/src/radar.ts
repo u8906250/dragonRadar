@@ -1301,9 +1301,14 @@ export class Radar {
   /** 拖了（或放開後滑了）螢幕上 (px, py) 像素：移動你的位置，太空裡轉地球、轉視角 */
   private panBy(px: number, py: number): void {
     if (!this.onPan) return;
-    const rect = this.svg.getBoundingClientRect();
-    // 螢幕像素換成 SVG 座標（viewBox 是正方形，照短邊縮放）
-    const unit = SIZE / Math.max(1, Math.min(rect.width, rect.height));
+    // 螢幕像素換成 SVG 座標（viewBox 是正方形，照短邊縮放）：短邊用 ResizeObserver 記住的（v1.702：以前每拖一下都量一次，
+    // 逼瀏覽器馬上重排版，佔了拖曳時間的一成五）；還沒量到才當場量
+    let short = this.squarePx;
+    if (!(short > 0)) {
+      const rect = this.svg.getBoundingClientRect();
+      short = Math.min(rect.width, rect.height);
+    }
+    const unit = SIZE / Math.max(1, short);
     const dx = px * unit;
     const dy = py * unit;
     const r = Math.hypot(dx, dy);
