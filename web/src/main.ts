@@ -3726,6 +3726,7 @@ function renderDetail(items: Item[], now: number): void {
       ${routeOf(ev) ? '' : it.spot ? spotPostsHtml(ev.related ?? []) : relatedHtml(ev.related ?? [])}
       <div class="sheet-actions">
         <a class="btn primary" href="https://www.google.com/maps/dir/?api=1&destination=${ev.lat},${ev.lng}&travelmode=walking" target="_blank" rel="noopener">${ev.approxArea ? '導航到約略位置' : '導航'}</a>
+        <button type="button" class="btn" data-act="center">定位到活動</button>
         ${ev.post.permalink ? `<a class="btn" href="${esc(ev.post.permalink)}" target="_blank" rel="noopener">${esc(sourceLinkText(ev))}</a>` : ''}
         <a class="btn" href="${googleMapsUrl(ev)}" target="_blank" rel="noopener">在 Google 地圖上看</a>
         ${myReportIds.has(ev.post.id) && !routeOf(ev) ? '<button type="button" class="btn" data-act="withdraw">刪除我的回報</button>' : ''}
@@ -3762,6 +3763,7 @@ function renderDetail(items: Item[], now: number): void {
   detailEl.querySelector('[data-act="withdraw"]')?.addEventListener('click', () => void withdrawMine(ev.post.id));
   detailEl.querySelector('[data-act="feedback"]')?.addEventListener('click', () => openFeedback(ev));
   detailEl.querySelector('[data-act="share"]')?.addEventListener('click', () => void shareEvent(ev));
+  detailEl.querySelector('[data-act="center"]')?.addEventListener('click', () => centerOnEvent(ev));
   detailEl.querySelector('[data-act="route"]')?.addEventListener('click', () => {
     const r = routeOf(ev);
     if (r) selectRoute(r.id);
@@ -5258,6 +5260,22 @@ function select(id: number | null, group: number[] = []): void {
  * 剛放上雷達的可能還沒抓到，先重抓一次。固定據點用任一個時段的 id 都找得到那個據點。
  * center：雷達中心飛到那一點，範圍不變（v1.644 使用者說回報後點「看」要把畫面移到那個點；推播通知點進來的照舊只選取）
  */
+/**
+ * 活動卡片的「定位到活動」（v1.689 使用者說點了直接定位過去）：像「定位」一樣移過去當中間、範圍拉到外圈 2 km（本來就比較近的不動）。
+ * 雷達只能以你的位置為中心，所以你的位置移過去（跟拖曳雷達一樣變手動位置，按「定位」回來）；地圖只移地圖，藍點「我的位置」不動
+ */
+function centerOnEvent(ev: EventOut): void {
+  if (ev.lat == null || ev.lng == null) return;
+  const km = locateKm(earthMinKm());
+  if (view === 'map') {
+    map.focusOn({ lat: ev.lat, lng: ev.lng }, km, sheetCover());
+    return;
+  }
+  if (radar.spaceFocused) return;
+  if (radar.spaceMoved) radar.resetSpace();
+  zoomToKm(km, { lat: ev.lat, lng: ev.lng, source: 'manual' });
+}
+
 /** 選到這一則（找不到：結束了、下架了、在別的模組也沒有，回傳 false） */
 async function reveal(id: number, center = false): Promise<boolean> {
   const find = (now: number): Item | undefined => computeItems(now).find((x) => x.ev.id === id || x.spot?.sessions.some((s) => s.id === id));

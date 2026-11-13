@@ -798,6 +798,27 @@ export class MapView {
     });
   }
 
+  /**
+   * 移到這個點當中間（卡片蓋住的地方不算），範圍拉到 km（畫面短邊的一半；本來就比較近的不拉遠）。
+   * 活動卡片的「定位到活動」用：只移地圖，你的位置（藍點）不動
+   */
+  focusOn(p: LatLng, km: number, cover = { right: 0, bottom: 0 }): void {
+    void this.ensure().then(() => {
+      const L = this.L;
+      const map = this.map;
+      if (!L || !map) return;
+      map.invalidateSize();
+      const size = map.getSize();
+      const right = Math.max(0, Math.min(cover.right, size.x - 160));
+      const bottom = Math.max(0, Math.min(cover.bottom, size.y - 160));
+      const half = Math.min(size.x - right, size.y - bottom) / 2;
+      // Web Mercator：縮放 z 時每像素 = 40075016.686 × cos(緯度) ÷ 2^(z+8) 公尺（跟 showRange 一樣）
+      const z = half > 0 ? Math.log2((40075016.686 * Math.cos((p.lat * Math.PI) / 180) * half) / (km * 1000)) - 8 : map.getZoom();
+      const zoom = Math.min(map.getMaxZoom(), Math.max(map.getZoom(), z));
+      map.fitBounds(L.latLngBounds([[p.lat, p.lng], [p.lat, p.lng]]), { paddingTopLeft: [20, 20], paddingBottomRight: [20 + right, 20 + bottom], maxZoom: zoom, animate: true });
+    });
+  }
+
   /** 回報判讀出來的位置：一個點拉近到看得清街道、房子（縮放 17），好幾個點全部框進來（卡片蓋住的地方不算） */
   showPins(points: LatLng[], cover = { right: 0, bottom: 0 }): void {
     void this.ensure().then(() => {
