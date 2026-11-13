@@ -1039,7 +1039,7 @@ function updateStreets(): void {
   streetLoose = !!panFrom;
   const get = streetLoose ? reach * 1.25 : reach;
   // 16 km 內多拿圖磚裡的海岸線（v1.640 使用者說「不管放大到什麼程度都要有邊界」；再大用 updateOutline 的海岸線）
-  const { lines, coast, roads, stations } = streetsMod.streetTiles(origin.lat, origin.lng, get, scaleKm, () => {
+  const { lines, coast, roads, stations, green } = streetsMod.streetTiles(origin.lat, origin.lng, get, scaleKm, () => {
     streetTiles++;
     updateStreets();
   });
@@ -1063,6 +1063,24 @@ function updateStreets(): void {
   for (const l of coast) {
     const xy = hidden(l.pts) ? null : toXy(l);
     if (xy) coastXy.push(xy);
+  }
+  // 公園綠地塗淡綠：只有全螢幕（v1.705 使用者說的），洋流總部特效播放時不塗（特效自己會把台北染淡綠）
+  if (radar.filling && hqVoyageAt === null && green.length > 0) {
+    out.green = [];
+    for (const a of green) {
+      if (a.box[0] > box[2] || a.box[2] < box[0] || a.box[1] > box[3] || a.box[3] < box[1]) continue;
+      if (mask && mask.contains(a.rings[0][0], a.rings[0][1])) continue;
+      out.green.push(
+        a.rings.map((r) => {
+          const xy = new Float64Array(r.length);
+          for (let i = 0; i < r.length; i += 2) {
+            xy[i] = (r[i + 1] - origin.lng) * kx;
+            xy[i + 1] = (r[i] - origin.lat) * ky;
+          }
+          return xy;
+        }),
+      );
+    }
   }
   out.labels = placeLabels(streetsMod, roads, stations, get, kx, ky, mask);
   // 畫了樹冠、屋頂的中山公園上面不寫名稱（v1.698：大巨蛋的名字被擠到公園上）

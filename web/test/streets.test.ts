@@ -199,3 +199,34 @@ describe('decodeTile names', () => {
     expect(out.stations).toEqual([]);
   });
 });
+
+describe('decodeTile green', () => {
+  const layer = (name: string, keys: string[], values: string[], features: Array<{ tags: number[]; type: number; geom: number[] }>): number[] =>
+    field(3, [
+      ...str(1, name),
+      ...features.flatMap((f) => field(2, [...packed(2, f.tags), ...varint((3 << 3) | 0), ...varint(f.type), ...packed(4, f.geom)])),
+      ...keys.flatMap((k) => str(3, k)),
+      ...values.flatMap((v) => field(4, str(1, v))),
+      ...varint((5 << 3) | 0),
+      ...varint(4096),
+    ]);
+  // 正方形外圈加一個挖空的小方塊（MoveTo、LineTo×3、ClosePath）
+  const square = (x: number, y: number, s: number): number[] => [(1 << 3) | 1, zz(x), zz(y), (3 << 3) | 2, zz(s), zz(0), zz(0), zz(s), zz(-s), zz(0), (1 << 3) | 7];
+  const buf = new Uint8Array(
+    layer('landcover', ['class'], ['grass', 'farmland', 'wood'], [
+      { tags: [0, 0], type: 3, geom: [...square(100, 100, 1000), ...[(1 << 3) | 1, zz(-500), zz(-500), (3 << 3) | 2, zz(200), zz(0), zz(0), zz(200), zz(-200), zz(0), (1 << 3) | 7]] },
+      // 農地不算
+      { tags: [0, 1], type: 3, geom: square(2000, 2000, 500) },
+      { tags: [0, 2], type: 3, geom: square(3000, 100, 500) },
+    ]),
+  );
+  it('reads park and wood polygons with holes when asked', () => {
+    const out = decodeTile(buf, 0, 0, 0, STREET_TIERS[0].classes, false, { green: true });
+    expect(out.green.length).toBe(2);
+    expect(out.green[0].rings.length).toBe(2);
+    expect(out.green[0].rings[0].length).toBe(8);
+  });
+  it('skips green when not asked', () => {
+    expect(decodeTile(buf, 0, 0, 0, STREET_TIERS[0].classes, false).green).toEqual([]);
+  });
+});

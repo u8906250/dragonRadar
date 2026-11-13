@@ -126,6 +126,8 @@ export interface RadarStreets {
   minor: Float64Array[];
   /** 海岸線（16 km 內，從街道圖磚來；畫成跟遠的海岸線一樣的虛線） */
   coast?: Float64Array[];
+  /** 公園綠地（全螢幕才有）：每一塊是外圈和挖空的圈，跟道路一樣是離錨點的公里 */
+  green?: Float64Array[][];
   /** 寫在雷達上的地名、路名、車站：照重要的先排好，擠不下的不寫 */
   labels?: RadarLabel[];
   /** 名稱不能寫在上面的範圍（[西, 南, 東, 北]，離錨點的公里）：例如畫了樹冠、屋頂的中山公園 */
@@ -1971,6 +1973,12 @@ export class Radar {
     const lim2 = (lim + margin) ** 2;
     this.streetLayer.replaceChildren();
     this.streetLayer.removeAttribute('transform');
+    // 公園綠地：最底下、淡綠色塊（不透明，相鄰圖磚重疊的地方才不會變深），全螢幕才畫
+    if (this.fill && s.green?.length) {
+      let d = '';
+      for (const poly of s.green) d += this.greenPath(poly, k, cos, sin, lim2, sx, sy);
+      if (d) this.streetLayer.appendChild(el('path', { class: 'green-area', d, 'fill-rule': 'evenodd' }));
+    }
     for (const [cls, lines] of [
       ['region-outline open coast-line', s.coast ?? []],
       ['street-minor', s.minor],
@@ -2054,6 +2062,59 @@ export class Radar {
       n++;
     }
     if (n > 0) this.placeLabelLayer.appendChild(g);
+  }
+
+  /** 一塊綠地：整塊都在範圍外面就不畫；畫面上離上一點不到 1.5 像素的省略 */
+  private greenPath(rings: Float64Array[], k: number, cos: number, sin: number, lim2: number, sx: number, sy: number): string {
+    const outer = rings[0];
+    let near = false;
+    let minX = Infinity;
+    let maxX = -Infinity;
+    let minY = Infinity;
+    let maxY = -Infinity;
+    for (let i = 0; i < outer.length; i += 2) {
+      const dx = outer[i] - sx;
+      const dy = outer[i + 1] - sy;
+      if (dx * dx + dy * dy <= lim2) {
+        near = true;
+        break;
+      }
+      minX = Math.min(minX, dx);
+      maxX = Math.max(maxX, dx);
+      minY = Math.min(minY, dy);
+      maxY = Math.max(maxY, dy);
+    }
+    // 很大的一塊把整個畫面包住（點都在外面）：中心在外框裡也要畫
+    if (!near && !(minX <= 0 && maxX >= 0 && minY <= 0 && maxY >= 0)) return '';
+    // 色塊不用像道路那麼細：離上一點不到 3 個單位的省略，整圈不到 4 個單位寬、高的不畫（拉遠時山上的樹林點很多，v1.705 實測 12 km 會卡）
+    let d = '';
+    for (const r of rings) {
+      let px = Infinity;
+      let py = Infinity;
+      let part = '';
+      let n = 0;
+      let x0 = Infinity;
+      let x1 = -Infinity;
+      let y0 = Infinity;
+      let y1 = -Infinity;
+      for (let i = 0; i < r.length; i += 2) {
+        const dx = r[i] - sx;
+        const dy = r[i + 1] - sy;
+        const x = C + k * (dx * cos - dy * sin);
+        const y = C - k * (dy * cos + dx * sin);
+        if (n > 0 && i < r.length - 2 && Math.abs(x - px) + Math.abs(y - py) < 3) continue;
+        part += `${n === 0 ? 'M' : 'L'}${x.toFixed(1)} ${y.toFixed(1)}`;
+        n++;
+        px = x;
+        py = y;
+        x0 = Math.min(x0, x);
+        x1 = Math.max(x1, x);
+        y0 = Math.min(y0, y);
+        y1 = Math.max(y1, y);
+      }
+      if (n >= 3 && x1 - x0 >= 4 && y1 - y0 >= 4) d += `${part}Z`;
+    }
+    return d;
   }
 
   /**
@@ -3161,6 +3222,8 @@ export class Radar {
         const body = el('g', { class: 'body' });
         // 分得出主題的活動畫大一點的圓點、裡面畫小圖示（v1.672 使用者說全螢幕也顯示地圖的新圖示，v1.674 說雷達裡面也一樣）；範圍外的小點、據點、約略位置照舊
         const glyph = !p.out && !it.flag && !it.spot && !it.approx ? topicGlyph(it.topic) : null;
+        // 全螢幕：光點後面墊一圈底色（淺色主題白、深色主題底色），疊在綠地上也看得清楚（v1.705）
+        if (this.fill && !p.out && !it.flag) node.appendChild(el('circle', { class: 'halo', r: glyph ? 12.5 : 9 }));
         if (it.flag) {
           const f = el('text', { class: 'flag' });
           f.textContent = it.flag;
