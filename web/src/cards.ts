@@ -396,6 +396,7 @@ export function openHelp(helpPage: string): void {
     `<div class="tc-box">
       <div class="tc-head"><h2>說明</h2><button type="button" class="chip" data-close>關閉</button></div>
       <div class="tc-help-row"><a class="chip" href="${esc(helpPage)}">使用說明</a><span>怎麼回報活動、卡冊的小趣味</span></div>
+      <div class="tc-help-row"><a class="chip" href="numbers.html">雷達統計</a><span>最近 30 天有幾場活動、都在哪裡、什麼時候</span></div>
       <div class="tc-help-row"><button type="button" class="chip" data-move aria-expanded="false" aria-controls="tc-move-box">換裝置</button><span>可轉移卡冊、道具及收藏的漂流瓶</span></div>
       <div class="tc-move-box" id="tc-move-box" hidden>
         <p><b>舊裝置</b>：產生引繼碼，24 小時內在新裝置輸入，卡冊、道具和漂流瓶收藏會搬過去（這台就沒有了）。</p>

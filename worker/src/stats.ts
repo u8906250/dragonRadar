@@ -1,5 +1,7 @@
 import type { Env } from './env';
 import { FEEDBACK_KINDS } from './feedback';
+// 照位置算縣市、鄉鎮市區：跟網站共用同一份資料（web/src/places-tw.ts）
+import { whereOf } from '../../web/src/where';
 
 /**
  * 統計頁（stats.html，只有管理者看得到；v1.693 使用者說統計分享的 Threads 帳號、關鍵字、主題，其他我想）：
@@ -220,4 +222,110 @@ export async function adminStats(env: Env, now: number, days: number): Promise<S
     bottles: { thrown: b?.thrown ?? 0, picks: b?.picks ?? 0 },
     pushSubscribers: (push.results[0] as { n: number } | undefined)?.n ?? 0,
   };
+}
+
+/**
+ * 雷達統計（numbers.html，大家都看得到；v1.694 使用者問有沒有可以公開的統計）：最近 30 天大家回報、放上雷達的活動，
+ * 只有加總的數字：每天幾場、主題、縣市和鄉鎮市區、星期幾、幾點、各雷達、漂流瓶。不回帳號、關鍵字、座標、是誰回報的。
+ * 一小時算一次存在 settings（大家看同一份，不會每打開一次就讀一次資料庫）
+ */
+export interface PublicStatsOut {
+  days: number;
+  updatedAt: number;
+  totals: { events: number; posts: number; reporters: number };
+  /** 照活動那天（台灣時間），最近 30 天到今天 */
+  daily: Array<{ day: string; events: number }>;
+  /** AI 判讀的主題（一則貼文同一個主題算一次；網頁照地圖小圖示分類） */
+  topics: Array<{ name: string; count: number }>;
+  counties: Array<{ name: string; count: number }>;
+  towns: Array<{ name: string; count: number }>;
+  abroad: number;
+  weekdays: number[];
+  hours: number[];
+  modules: Array<{ name: string; count: number }>;
+  bottles: { thrown: number; picks: number };
+}
+
+const PUBLIC_KEY = 'stats:public';
+const PUBLIC_EVERY_SEC = 3600;
+
+export async function publicStats(env: Env, now: number): Promise<PublicStatsOut> {
+  const cached = await env.DB.prepare('SELECT value, updated_at FROM settings WHERE key = ?').bind(PUBLIC_KEY).first<{ value: string; updated_at: number }>();
+  if (cached && now - cached.updated_at < PUBLIC_EVERY_SEC) {
+    try {
+      return JSON.parse(cached.value) as PublicStatsOut;
+    } catch {
+      /* 壞掉的重算 */
+    }
+  }
+  const days = 30;
+  const from = now - days * 86400;
+  const [events, posts, credits, bottles] = await env.DB.batch([
+    env.DB.prepare(
+      `SELECT e.post_id, e.extra, e.start_at, e.tz, e.lat, e.lng, e.place_text, p.module FROM events e JOIN posts p ON p.id = e.post_id
+        WHERE e.start_at >= ? AND e.start_at <= ? AND p.source IN ${REPORT_SOURCES} AND p.confirm_state = 'confirmed' AND e.merged_into IS NULL AND e.lat IS NOT NULL`,
+    ).bind(from, now),
+    env.DB.prepare(`SELECT module FROM posts WHERE fetched_at >= ? AND source IN ${REPORT_SOURCES} AND confirm_state = 'confirmed'`).bind(from),
+    env.DB.prepare('SELECT COUNT(DISTINCT device_id) AS n FROM report_credits WHERE created_at >= ?').bind(from),
+    env.DB.prepare('SELECT COUNT(*) AS thrown, COALESCE(SUM(picks), 0) AS picks FROM bottles WHERE created_at >= ?').bind(from),
+  ]);
+  type Ev = { post_id: string; extra: string | null; start_at: number; tz: string | null; lat: number; lng: number; place_text: string; module: string | null };
+  const evRows = events.results as Ev[];
+  const dayList = Array.from({ length: days }, (_, i) => taipeiDay(now - (days - 1 - i) * 86400));
+  const daily = new Map(dayList.map((d) => [d, { day: d, events: 0 }]));
+  const topics = new Map<string, number>();
+  const counties = new Map<string, number>();
+  const towns = new Map<string, number>();
+  const seenTopic = new Set<string>();
+  const seenPlace = new Set<string>();
+  const weekdays = Array<number>(7).fill(0);
+  const hours = Array<number>(24).fill(0);
+  let abroad = 0;
+  for (const e of evRows) {
+    const d = daily.get(taipeiDay(e.start_at));
+    if (d) d.events++;
+    let extra: { topic?: unknown } = {};
+    try {
+      extra = e.extra ? (JSON.parse(e.extra) as typeof extra) : {};
+    } catch {
+      /* 壞掉的不算 */
+    }
+    if (typeof extra.topic === 'string' && extra.topic && !seenTopic.has(`${e.post_id}|${extra.topic}`)) {
+      seenTopic.add(`${e.post_id}|${extra.topic}`);
+      bump(topics, extra.topic);
+    }
+    const { wd, h } = localParts(e.start_at, e.tz);
+    if (wd >= 0) weekdays[wd]++;
+    hours[h]++;
+    if (seenPlace.has(`${e.post_id}|${e.place_text}`)) continue;
+    seenPlace.add(`${e.post_id}|${e.place_text}`);
+    const w = whereOf(e.lat, e.lng);
+    if (!w) {
+      abroad++;
+      continue;
+    }
+    bump(counties, w.county);
+    bump(towns, `${w.county}${w.town}`);
+  }
+  const modules = new Map<string, number>();
+  for (const p of posts.results as Array<{ module: string | null }>) bump(modules, MODULE_NAMES[p.module ?? 'current'] ?? '洋流雷達');
+  const b = bottles.results[0] as { thrown: number; picks: number } | undefined;
+  const out: PublicStatsOut = {
+    days,
+    updatedAt: now,
+    totals: { events: evRows.length, posts: posts.results.length, reporters: (credits.results[0] as { n: number } | undefined)?.n ?? 0 },
+    daily: [...daily.values()],
+    topics: top(topics, 30),
+    counties: top(counties, 22),
+    towns: top(towns, 10),
+    abroad,
+    weekdays,
+    hours,
+    modules: top(modules, 10),
+    bottles: { thrown: b?.thrown ?? 0, picks: b?.picks ?? 0 },
+  };
+  await env.DB.prepare('INSERT INTO settings (key, value, updated_at) VALUES (?, ?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at')
+    .bind(PUBLIC_KEY, JSON.stringify(out), now)
+    .run();
+  return out;
 }

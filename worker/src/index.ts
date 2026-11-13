@@ -16,7 +16,7 @@ import { addParkMark, deleteParkMark, listParkMarks, listPublicParkMarks, parseP
 import { adminLocate, applyFeedback, clearResolvedFeedback, deleteAdminSubscription, listFeedback, locateForFeedback, notifyAdmins, purgeFeedback, saveAdminSubscription, setFeedbackStatus, submitFeedback } from './feedback';
 import { moduleOf } from './modules';
 import { shareInfo } from './share';
-import { adminStats } from './stats';
+import { adminStats, publicStats } from './stats';
 import { PUSH_RADIUS_KM, PushError, b64urlEncode, deleteSubscription, encryptPayload, purgeSubscriptions, pushStarted, saveSubscription, sendPush, vapidKeys } from './push';
 import { assertEventReportsOpen, confirmLink, editLink, ENDED_REPORTS_NEEDED, locateForEdit, MAX_LINK_AGE_SEC, NOTES_CLOSED, ReportError, REPORTS_LOCKED, ipHash, myReports, purgeReports, recheckLinks, rejectLink, reportModules, submitLink, supplementLink, withdrawReport } from './reports';
 import { D1Meter, isTransient, withResilientDb } from './db';
@@ -167,6 +167,11 @@ async function handle(req: Request, env: Env, ctx: ExecutionContext): Promise<Re
     const info = await shareInfo(env, Number(shareMatch[1]), now);
     if (!info) return jsonResponse({ error: 'not_found' }, 404);
     return new Response(JSON.stringify(info), { headers: { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'public, max-age=60' } });
+  }
+
+  // 雷達統計（numbers.html，大家都看得到）：一小時算一次
+  if (req.method === 'GET' && path === '/api/stats') {
+    return jsonResponse(await publicStats(env, now), 200, { 'cache-control': 'public, max-age=600' });
   }
 
   if (req.method === 'GET' && path === '/api/routes') {

@@ -37,6 +37,8 @@ export default defineConfig({
         main: fileURLToPath(new URL('index.html', import.meta.url)),
         admin: fileURLToPath(new URL('admin.html', import.meta.url)),
         stats: fileURLToPath(new URL('stats.html', import.meta.url)),
+        // 雷達統計（大家都看得到，v1.694）
+        numbers: fileURLToPath(new URL('numbers.html', import.meta.url)),
       },
     },
   },

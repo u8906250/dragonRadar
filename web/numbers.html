@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="zh-Hant-TW">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>雷達統計｜洋流雷達</title>
+  <meta name="description" content="洋流雷達最近 30 天大家回報的活動：每天幾場、什麼樣的活動、在哪裡、什麼時候。" />
+  <link rel="icon" href="icon.svg" type="image/svg+xml" />
+  <link rel="stylesheet" href="legal.css" />
+  <link rel="stylesheet" href="stats.css" />
+  <style>
+    main { max-width: 860px; }
+    .msg { font-size: 14px; color: var(--muted); margin: 8px 0 0; }
+    .msg.err { color: #b3261e; font-weight: 700; }
+    [hidden] { display: none !important; }
+  </style>
+</head>
+<body>
+<main>
+  <nav><a href="./">← 回雷達</a></nav>
+  <article>
+    <h1>雷達統計</h1>
+    <p class="meta" id="intro">最近 30 天大家回報、放上雷達的活動。只算數字，不記是誰回報的；每小時更新一次。</p>
+    <p id="msg" class="msg" aria-live="polite">讀取中…</p>
+    <div id="stats"></div>
+  </article>
+</main>
+<div class="tip" id="tip" hidden></div>
+<script type="module" src="./src/numbers-page.ts"></script>
+</body>
+</html>
