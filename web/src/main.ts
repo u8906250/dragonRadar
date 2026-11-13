@@ -12,7 +12,7 @@ import { shortAddress, splitPlace } from './place';
 import { crowdOf, MapView, pinPicker, type BaseMap, type MapRoute, type PinPicker } from './map';
 import { beep, ensureNotificationPermission, iosNeedsHomeScreen, notificationState, pushSubscription, pushSupported, registerServiceWorker, showBanner, systemNotify, unlockAudio, unsubscribePush } from './notify';
 import { checkWishNews, findCard, gotReward, myCards, onWishNews, openAlbum, openHelp, openItems, openWishes, overlay } from './cards';
-import { DEEP_FROM_KM, LY_KM, Radar, SPACE_FROM_KM, type RadarRoute, type RadarStreets, type SpaceView } from './radar';
+import { DEEP_FROM_KM, LY_KM, Radar, SPACE_FROM_KM, type RadarLabel, type RadarRoute, type RadarStreets, type SpaceView } from './radar';
 import { DEFAULT_THEME_ID, getTheme, THEMES, type Theme } from './themes';
 import type { WoofBottleMark } from './space';
 import { topicChipSvg, topicGlyph, TOPIC_TYPES } from './topic-icons';
@@ -1009,7 +1009,7 @@ function updateStreets(): void {
   };
   const ky = 110.574;
   // 拖曳中：範圍、圖磚沒變，正中間離錨點不到範圍的 1/4（換算時多留的那一圈）就只給位移
-  const key = `${scaleKm}|${streetTiles}|${radar.reach.toFixed(2)}|${!!mask}`;
+  const key = `${scaleKm}|${streetTiles}|${radar.reach.toFixed(2)}|${!!mask}|${hqVoyageAt !== null}`;
   if (streetLines && streetAnchor && streetsFor === key) {
     if (!panFrom && origin.lat === streetAnchor.lat && origin.lng === streetAnchor.lng) return;
     if (panFrom && streetLoose) {
@@ -1027,7 +1027,7 @@ function updateStreets(): void {
   streetLoose = !!panFrom;
   const get = streetLoose ? reach * 1.25 : reach;
   // 16 km 內多拿圖磚裡的海岸線（v1.640 使用者說「不管放大到什麼程度都要有邊界」；再大用 updateOutline 的海岸線）
-  const { lines, coast } = streetsMod.streetTiles(origin.lat, origin.lng, get, scaleKm, () => {
+  const { lines, coast, roads, stations } = streetsMod.streetTiles(origin.lat, origin.lng, get, scaleKm, () => {
     streetTiles++;
     updateStreets();
   });
@@ -1052,8 +1052,66 @@ function updateStreets(): void {
     const xy = hidden(l.pts) ? null : toXy(l);
     if (xy) coastXy.push(xy);
   }
+  out.labels = placeLabels(streetsMod, roads, stations, get, kx, ky, mask);
   streetLines = out;
   radar.setStreets(out, [0, 0], streetLoose);
+}
+
+/**
+ * 雷達上寫的地名（v1.691 使用者說適度放縣市、區、路、地標，但畫面不要太亂）：照範圍分層，由重要到不重要、同樣重要的離正中間近的先，
+ * 雷達那邊放不下（重疊、壓到光點）的不寫、一個畫面最多十幾個。
+ * 33 km 以上縣市；1～33 km 鄉鎮市區；5 km 內加國道、快速道路的名字，2 km 內加幹道，1 km 內大街小巷的路名和捷運、火車站（不寫鄉鎮市區）。
+ * 中國的範圍不寫（跟道路一樣）；洋流總部的特效播放時不寫
+ */
+function placeLabels(
+  sm: typeof import('./streets'),
+  roads: import('./streets').RoadName[],
+  stations: import('./streets').StationName[],
+  get: number,
+  kx: number,
+  ky: number,
+  mask: { contains: (lat: number, lng: number) => boolean } | null,
+): RadarLabel[] {
+  if (hqVoyageAt !== null) return [];
+  const km = scaleKm;
+  const out: Array<RadarLabel & { pri: number; d: number }> = [];
+  const add = (lat: number, lng: number, text: string, kind: RadarLabel['kind'], pri: number): void => {
+    if (mask?.contains(lat, lng)) return;
+    const x = (lng - origin.lng) * kx;
+    const y = (lat - origin.lat) * ky;
+    if (Math.abs(x) > get || Math.abs(y) > get) return;
+    out.push({ x, y, text, kind, pri, d: Math.hypot(x, y) });
+  };
+  if (km > 33) for (const [n, lat, lng] of sm.TW_COUNTIES) add(lat, lng, n, 'county', 100);
+  else if (km > 1) for (const [n, lat, lng] of sm.TW_TOWNS) add(lat, lng, n, 'town', 90);
+  if (km <= 5) {
+    const pri: Record<string, number> = { motorway: 70, trunk: 68, primary: 62, secondary: 58, tertiary: 50, minor: 40 };
+    const ok = (cls: string): boolean => (km > 2 ? cls === 'motorway' || cls === 'trunk' : km > 1 ? cls !== 'tertiary' && cls !== 'minor' : true);
+    // 同名的路只寫一次：寫在離正中間最近的那一點
+    const best = new Map<string, { lat: number; lng: number; d: number; cls: string }>();
+    for (const r of roads) {
+      if (!ok(r.cls)) continue;
+      for (let i = 0; i < r.pts.length; i += 2) {
+        const d = Math.hypot((r.pts[i + 1] - origin.lng) * kx, (r.pts[i] - origin.lat) * ky);
+        const b = best.get(r.name);
+        if (!b || d < b.d) best.set(r.name, { lat: r.pts[i], lng: r.pts[i + 1], d, cls: r.cls });
+      }
+    }
+    for (const [name, b] of best) add(b.lat, b.lng, name, 'road', pri[b.cls] ?? 40);
+  }
+  if (km <= 1) {
+    // 同一站常有好幾筆（捷運、台鐵，「台北」「臺北車站」，大站的幾筆可以離好幾百公尺）：800 m 內名字一樣的只寫一次，名字補上「站」
+    const base = (n: string): string => n.replace(/台/g, '臺').replace(/(車站|站)$/, '');
+    const seen: Array<{ base: string; lat: number; lng: number }> = [];
+    for (const st of stations) {
+      const b = base(st.name);
+      if (seen.some((x) => x.base === b && haversineKm(x, st) < 0.8)) continue;
+      seen.push({ base: b, lat: st.lat, lng: st.lng });
+      add(st.lat, st.lng, /站$/.test(st.name) ? st.name : `${st.name}站`, 'station', 75);
+    }
+  }
+  out.sort((a, b) => b.pri - a.pri || a.d - b.d);
+  return out.slice(0, 80).map(({ x, y, text, kind }) => ({ x, y, text, kind }));
 }
 
 // ---- 中山公園（park.ts，跟汪星共用一份）：地球的雷達上第一次在公園附近才載入 ----

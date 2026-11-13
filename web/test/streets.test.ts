@@ -157,3 +157,45 @@ describe('tileOf', () => {
     expect(tileOf(25.0478, 121.517, 13)).toEqual({ x: 6861, y: 3506 });
   });
 });
+
+describe('decodeTile names', () => {
+  /** 一個圖層：keys、字串 values、features（tags 是 key、value 的索引） */
+  const layer = (name: string, keys: string[], values: string[], features: Array<{ tags: number[]; type: number; geom: number[] }>): number[] =>
+    field(3, [
+      ...str(1, name),
+      ...features.flatMap((f) => field(2, [...packed(2, f.tags), ...varint((3 << 3) | 0), ...varint(f.type), ...packed(4, f.geom)])),
+      ...keys.flatMap((k) => str(3, k)),
+      ...values.flatMap((v) => field(4, str(1, v))),
+      ...varint((5 << 3) | 0),
+      ...varint(4096),
+    ]);
+  const line = [(1 << 3) | 1, zz(0), zz(0), (1 << 3) | 2, zz(2048), zz(2048)];
+  const point = [(1 << 3) | 1, zz(2048), zz(2048)];
+  // 照字母排：poi、transportation_name
+  const buf = new Uint8Array([
+    ...layer('poi', ['name', 'class', 'subclass'], ['西門', 'railway', 'subway', '某某咖啡', 'cafe'], [
+      { tags: [0, 0, 1, 1, 2, 2], type: 1, geom: point },
+      { tags: [0, 3, 1, 4], type: 1, geom: point },
+    ]),
+    ...layer('transportation_name', ['name', 'class', 'subclass'], ['忠孝東路一段', 'primary', '忠孝東路出口', 'trunk', 'junction', '小巷', 'minor'], [
+      { tags: [0, 0, 1, 1], type: 2, geom: line },
+      // 出口（交流道）的名字不寫
+      { tags: [0, 2, 1, 3, 2, 4], type: 2, geom: line },
+      // 沒列的種類不寫
+      { tags: [0, 5, 1, 6], type: 2, geom: line },
+    ]),
+  ]);
+  it('reads named roads and stations when asked', () => {
+    const out = decodeTile(buf, 0, 0, 0, STREET_TIERS[0].classes, false, { roads: ['primary', 'trunk'], stations: true });
+    expect(out.roads.map((r) => [r.name, r.cls])).toEqual([['忠孝東路一段', 'primary']]);
+    expect(out.roads[0].pts.length).toBe(4);
+    expect(out.stations.map((s) => s.name)).toEqual(['西門']);
+    expect(out.stations[0].lng).toBeCloseTo(0);
+    expect(out.stations[0].lat).toBeCloseTo(0);
+  });
+  it('skips names when not asked', () => {
+    const out = decodeTile(buf, 0, 0, 0, STREET_TIERS[0].classes, false);
+    expect(out.roads).toEqual([]);
+    expect(out.stations).toEqual([]);
+  });
+});

@@ -126,7 +126,25 @@ export interface RadarStreets {
   minor: Float64Array[];
   /** 海岸線（16 km 內，從街道圖磚來；畫成跟遠的海岸線一樣的虛線） */
   coast?: Float64Array[];
+  /** 寫在雷達上的地名、路名、車站：照重要的先排好，擠不下的不寫 */
+  labels?: RadarLabel[];
 }
+
+/**
+ * 雷達上的地名（v1.691 使用者說適度放縣市、區、路、地標，不要太亂）：x、y 跟道路一樣是離錨點的公里（東、北）。
+ * 淡淡的小字、不壓在你的位置、光點、星星上，彼此不重疊，一個畫面最多 PLACE_LABEL_MAX 個
+ */
+export interface RadarLabel {
+  x: number;
+  y: number;
+  text: string;
+  kind: 'county' | 'town' | 'road' | 'station';
+}
+/** 字的大小（螢幕像素：雷達多大字都一樣大，電腦全螢幕不會變成大字） */
+const PLACE_LABEL_PX: Record<RadarLabel['kind'], number> = { county: 13, town: 12, road: 10.5, station: 11 };
+/** 一個畫面最多幾個（全螢幕鋪滿時多一點） */
+const PLACE_LABEL_MAX = 12;
+const PLACE_LABEL_MAX_FILL = 18;
 
 /**
  * 水上活動的船（螢幕像素，中心在 0,0，船頭朝右）：SUP 是一塊板子、站著划槳的人；龍舟是長長的紅船身、黃色的條、龍頭、一排划槳的人
@@ -1880,7 +1898,62 @@ export class Radar {
       for (const l of lines) d += this.streetPath(l, k, cos, sin, lim2, sx, sy);
       if (d) this.streetLayer.appendChild(el('path', { class: cls, d }));
     }
+    if (s.labels?.length) this.drawPlaceLabels(s.labels, k, cos, sin, sx, sy);
     this.streetsBuilt = { s, k, heading: this.heading, lim, sx, sy, margin };
+  }
+
+  /**
+   * 地名照排好的順序一個一個放：整個字都在畫面裡、不跟已經放的字重疊、不壓在正中間（你的位置）、光點、星星上才寫，滿了就停。
+   * 跟道路同一層（拖曳時一起平移、指北針轉了一起重排，字一直是正的）
+   */
+  private drawPlaceLabels(labels: RadarLabel[], k: number, cos: number, sin: number, sx: number, sy: number): void {
+    type Box = { l: number; r: number; t: number; b: number };
+    const taken: Box[] = [];
+    const block = (x: number, y: number, r: number): void => {
+      taken.push({ l: x - r, r: x + r, t: y - r, b: y + r });
+    };
+    block(C, C, 9);
+    // 刻度圈上寫的公里數
+    for (const t of this.scaleLabels.querySelectorAll('text')) {
+      const x = Number(t.getAttribute('x'));
+      const y = Number(t.getAttribute('y'));
+      taken.push({ l: x - 2, r: x + (t.textContent?.length ?? 4) * 7 + 2, t: y - 12, b: y + 3 });
+    }
+    for (const it of [...this.items, ...this.landmarks]) {
+      const ratio = this.ratio(it.distanceKm);
+      if (ratio > 1.1) continue;
+      const p = polar(it.bearing - this.heading, ratio * (R - 8));
+      block(p.x, p.y, 10);
+    }
+    const inView = (x: number, y: number): boolean => Math.hypot(x - C, y - C) <= this.edgeR((Math.atan2(x - C, C - y) * 180) / Math.PI) - 2;
+    // 一個螢幕像素是幾個 SVG 單位
+    const unit = this.squarePx > 0 ? SIZE / this.squarePx : 1;
+    const g = el('g', { class: 'place-labels', 'stroke-width': (2.5 * unit).toFixed(2) });
+    const max = this.fill ? PLACE_LABEL_MAX_FILL : PLACE_LABEL_MAX;
+    let n = 0;
+    for (const lb of labels) {
+      if (n >= max) break;
+      const dx = lb.x - sx;
+      const dy = lb.y - sy;
+      const x = C + k * (dx * cos - dy * sin);
+      const y = C - k * (dy * cos + dx * sin);
+      const fs = PLACE_LABEL_PX[lb.kind] * unit;
+      const w = [...lb.text].length * fs + 4;
+      const h = fs + 4;
+      // 縣市、鄉鎮市區的點被蓋住（常常就是你所在的那一區）：往上、往下挪一行，再往左右挪試試；路名、車站要寫在原地
+      const area = lb.kind === 'county' || lb.kind === 'town';
+      const tries: Array<[number, number]> = area ? [[0, 0], [0, -(h + 4)], [0, h + 4], [-(w / 2 + 12), 0], [w / 2 + 12, 0]] : [[0, 0]];
+      const box = tries
+        .map(([ox, oy]) => ({ l: x + ox - w / 2, r: x + ox + w / 2, t: y + oy - h / 2, b: y + oy + h / 2 }))
+        .find((bx) => inView(bx.l, bx.t) && inView(bx.r, bx.t) && inView(bx.l, bx.b) && inView(bx.r, bx.b) && !taken.some((q) => q.l < bx.r && bx.l < q.r && q.t < bx.b && bx.t < q.b));
+      if (!box) continue;
+      taken.push(box);
+      const t = el('text', { class: `place-label pl-${lb.kind}`, x: ((box.l + box.r) / 2).toFixed(1), y: ((box.t + box.b) / 2).toFixed(1), 'font-size': fs.toFixed(2) });
+      t.textContent = lb.text;
+      g.appendChild(t);
+      n++;
+    }
+    if (n > 0) this.streetLayer.appendChild(g);
   }
 
   /**

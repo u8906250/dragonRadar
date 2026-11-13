@@ -6,6 +6,8 @@
  */
 
 import { TAIWAN_RINGS } from './taiwan';
+// 雷達上寫的縣市、鄉鎮市區名稱跟著街道一起載入（v1.691）
+export { TW_COUNTIES, TW_TOWNS } from './places-tw';
 
 /** 粗線、細線 */
 export type StreetClass = 'major' | 'minor';
@@ -31,11 +33,13 @@ const HIGHWAYS: Classes = { motorway: 'major', trunk: 'major' };
  * 再大（到全台）都用 z7（z6 只剩國道、快速道路，東部的台 9 線沒有）：taiwan 只畫台灣（本島、離島）的路、
  * 只抓台灣那六張圖磚（共約 460 KB；全台的範圍對岸也在圈內）
  */
-export const STREET_TIERS: Array<{ maxKm: number; zoom: number; classes: Classes; taiwan?: boolean; coast?: boolean }> = [
-  { maxKm: 2, zoom: 13, classes: { motorway: 'major', trunk: 'major', primary: 'major', secondary: 'major', tertiary: 'minor', minor: 'minor' }, coast: true },
+export const STREET_TIERS: Array<{ maxKm: number; zoom: number; classes: Classes; taiwan?: boolean; coast?: boolean; names?: string[]; stations?: boolean }> = [
+  // names：雷達上寫路名的道路種類（transportation_name 圖層）；stations：寫車站名（poi 圖層，z13 才有）
+  { maxKm: 2, zoom: 13, classes: { motorway: 'major', trunk: 'major', primary: 'major', secondary: 'major', tertiary: 'minor', minor: 'minor' }, coast: true, names: ['motorway', 'trunk', 'primary', 'secondary', 'tertiary', 'minor'], stations: true },
   // 市區的幹道台北多半標 secondary，其他縣市很多標 tertiary（新竹 8 km 內 secondary 約 90 km、tertiary 約 400 km）：都畫，各地一樣細；
   // 16 km 內也是（z10 沒有 tertiary，所以用 z11，一張約 18 km 寬，最多九張）
-  { maxKm: 16, zoom: 11, classes: { ...HIGHWAYS, primary: 'minor', secondary: 'minor', tertiary: 'minor' }, coast: true },
+  // z11 的路名只有國道、快速道路
+  { maxKm: 16, zoom: 11, classes: { ...HIGHWAYS, primary: 'minor', secondary: 'minor', tertiary: 'minor' }, coast: true, names: ['motorway', 'trunk'] },
   { maxKm: 33, zoom: 9, classes: { ...HIGHWAYS, primary: 'minor' } },
   { maxKm: 65, zoom: 8, classes: { ...HIGHWAYS, primary: 'minor' } },
   { maxKm: Infinity, zoom: 7, classes: { ...HIGHWAYS, primary: 'minor' }, taiwan: true },
@@ -124,6 +128,65 @@ export class Pbf {
   }
 }
 
+/**
+ * 圖磚裡寫在雷達上的名稱（v1.691 使用者說在雷達上適度放路名、地標）：
+ * 有名字的路（transportation_name 圖層，同一條路常常切成好幾段）、車站（poi 圖層的捷運、火車站）
+ */
+export interface RoadName {
+  name: string;
+  cls: string;
+  /** [緯度, 經度, …] */
+  pts: Float64Array;
+}
+export interface StationName {
+  name: string;
+  lat: number;
+  lng: number;
+}
+/** 雷達上寫車站的 poi 種類（class=railway 的 subclass） */
+const STATION_KINDS = new Set(['subway', 'station', 'halt', 'light_rail']);
+
+/** 幾何指令：MoveTo(1)、LineTo(2) 後面跟 zigzag 編碼的位移；一個 feature 可以有好幾段線（點的話每一個 MoveTo 一點） */
+function geomParts(geom: number[], toLatLng: (cx: number, cy: number) => [number, number]): number[][] {
+  const parts: number[][] = [];
+  let cx = 0;
+  let cy = 0;
+  let line: number[] = [];
+  for (let i = 0; i < geom.length; ) {
+    const cmd = geom[i] & 7;
+    const count = geom[i] >> 3;
+    i++;
+    if (cmd === 7) continue;
+    for (let j = 0; j < count && i + 1 < geom.length; j++, i += 2) {
+      if (cmd === 1) {
+        if (line.length) parts.push(line);
+        line = [];
+      }
+      cx += (geom[i] >> 1) ^ -(geom[i] & 1);
+      cy += (geom[i + 1] >> 1) ^ -(geom[i + 1] & 1);
+      line.push(...toLatLng(cx, cy));
+    }
+  }
+  if (line.length) parts.push(line);
+  return parts;
+}
+
+/** 一個 feature：tags、種類（1 點、2 線、3 面）、幾何 */
+function readFeature(f: Pbf): { tags: number[]; type: number; geom: number[] } {
+  let tags: number[] = [];
+  let type = 0;
+  let geom: number[] = [];
+  while (f.more()) {
+    const k = f.varint();
+    const field = k >> 3;
+    if (field === 2) tags = f.packed();
+    else if (field === 3) type = f.varint();
+    else if (field === 4) geom = f.packed();
+    else f.skip(k & 7);
+  }
+  return { tags, type, geom };
+}
+
 /** 海岸線的一段：pts 是 [緯度, 經度, …]，box 跟 StreetLine 一樣 */
 export interface CoastLine {
   pts: Float64Array;
@@ -155,10 +218,22 @@ function withBox(line: number[]): { pts: Float64Array; box: [number, number, num
  * 圖磚 → 道路，coast 的話再加海岸線（v1.640 使用者說「不管放大到什麼程度都要有邊界」）：
  * water 圖層 class=ocean 的多邊形邊就是海岸；多邊形在圖磚邊上被切開的那幾段（兩端都在圖磚外面）不是海岸，不畫
  */
-export function decodeTile(buf: Uint8Array, x: number, y: number, z: number, classes: Classes, coast: boolean): { lines: StreetLine[]; coast: CoastLine[] } {
+export function decodeTile(
+  buf: Uint8Array,
+  x: number,
+  y: number,
+  z: number,
+  classes: Classes,
+  coast: boolean,
+  names: { roads?: string[]; stations?: boolean } = {},
+): { lines: StreetLine[]; coast: CoastLine[]; roads: RoadName[]; stations: StationName[] } {
   const tile = new Pbf(buf);
   const coastOut: CoastLine[] = [];
-  // 圖層照字母排（transportation 在 water 前面）：要海岸線就讀完整張
+  const roadsOut: RoadName[] = [];
+  const stationsOut: StationName[] = [];
+  const nameClasses = new Set(names.roads ?? []);
+  // 圖層照字母排（poi、transportation、transportation_name、water）：要名稱、海岸線就讀完整張
+  const whole = coast || nameClasses.size > 0 || !!names.stations;
   let linesOut: StreetLine[] = [];
   while (tile.more()) {
     const key = tile.varint();
@@ -200,6 +275,36 @@ export function decodeTile(buf: Uint8Array, x: number, y: number, z: number, cla
     };
     if (name === 'water' && coast) {
       coastOut.push(...oceanEdges(features, keys, values, extent, toLatLng));
+      continue;
+    }
+    /** 一個 feature 的字串標籤 */
+    const tagsOf = (tags: number[]): Record<string, string> => {
+      const o: Record<string, string> = {};
+      for (let i = 0; i + 1 < tags.length; i += 2) {
+        const v = values[tags[i + 1]];
+        if (v !== null && v !== undefined) o[keys[tags[i]]] = v;
+      }
+      return o;
+    };
+    if (name === 'transportation_name' && nameClasses.size > 0) {
+      for (const f of features) {
+        const { tags, type, geom } = readFeature(f);
+        if (type !== 2) continue;
+        const t = tagsOf(tags);
+        // 交流道、出口的名稱（subclass=junction）不寫
+        if (!t.name || !nameClasses.has(t.class) || t.subclass === 'junction') continue;
+        for (const part of geomParts(geom, toLatLng)) if (part.length >= 4) roadsOut.push({ name: t.name, cls: t.class, pts: Float64Array.from(part) });
+      }
+      continue;
+    }
+    if (name === 'poi' && names.stations) {
+      for (const f of features) {
+        const { tags, type, geom } = readFeature(f);
+        if (type !== 1) continue;
+        const t = tagsOf(tags);
+        if (!t.name || t.class !== 'railway' || !STATION_KINDS.has(t.subclass)) continue;
+        for (const part of geomParts(geom, toLatLng)) stationsOut.push({ name: t.name, lat: part[0], lng: part[1] });
+      }
       continue;
     }
     if (name !== 'transportation') continue;
@@ -252,9 +357,9 @@ export function decodeTile(buf: Uint8Array, x: number, y: number, z: number, cla
       flush();
     }
     linesOut = out;
-    if (!coast) break;
+    if (!whole) break;
   }
-  return { lines: linesOut, coast: coastOut };
+  return { lines: linesOut, coast: coastOut, roads: roadsOut, stations: stationsOut };
 }
 
 /**
@@ -350,7 +455,8 @@ function tileTemplate(): Promise<string | null> {
   return template;
 }
 
-const tiles = new Map<string, { lines: StreetLine[]; coast: CoastLine[] } | 'loading'>();
+type TileData = { lines: StreetLine[]; coast: CoastLine[]; roads: RoadName[]; stations: StationName[] };
+const tiles = new Map<string, TileData | 'loading'>();
 
 /**
  * 涵蓋 (lat, lng) 方圓 km 的道路（範圍 rangeKm 決定用哪一級圖磚）：已經抓到的圖磚先畫，還沒抓的去抓，抓到了呼叫 onLoad 重畫。
@@ -364,17 +470,19 @@ export function streetsAround(lat: number, lng: number, km: number, rangeKm: num
  * 跟 streetsAround 一樣，多回傳還有幾張圖磚沒抓到（汪星等全部抓到才換掉原本的道路），
  * 和海岸線（16 km 內那兩級才有；再大用 taiwan.ts、world.ts 的海岸線）
  */
-export function streetTiles(lat: number, lng: number, km: number, rangeKm: number, onLoad: () => void): { lines: StreetLine[]; coast: CoastLine[]; pending: number } {
-  const { zoom, classes, taiwan, coast } = tierOf(rangeKm);
+export function streetTiles(lat: number, lng: number, km: number, rangeKm: number, onLoad: () => void): { lines: StreetLine[]; coast: CoastLine[]; roads: RoadName[]; stations: StationName[]; pending: number } {
+  const { zoom, classes, taiwan, coast, names, stations } = tierOf(rangeKm);
   const dLat = km / 110.574;
   const dLng = km / (111.32 * Math.cos((lat * Math.PI) / 180));
   let [s, w, n, e] = [lat - dLat, lng - dLng, lat + dLat, lng + dLng];
   if (taiwan) [s, w, n, e] = [Math.max(s, TAIWAN_BOX.s), Math.max(w, TAIWAN_BOX.w), Math.min(n, TAIWAN_BOX.n), Math.min(e, TAIWAN_BOX.e)];
-  if (s > n || w > e) return { lines: [], coast: [], pending: 0 };
+  if (s > n || w > e) return { lines: [], coast: [], roads: [], stations: [], pending: 0 };
   const a = tileOf(n, w, zoom);
   const b = tileOf(s, e, zoom);
   const out: StreetLine[] = [];
   const coastOut: CoastLine[] = [];
+  const roadsOut: RoadName[] = [];
+  const stationsOut: StationName[] = [];
   let pending = 0;
   for (let x = a.x; x <= b.x; x++) {
     for (let y = a.y; y <= b.y; y++) {
@@ -390,6 +498,8 @@ export function streetTiles(lat: number, lng: number, km: number, rangeKm: numbe
         tiles.set(key, got);
         out.push(...got.lines);
         coastOut.push(...got.coast);
+        roadsOut.push(...got.roads);
+        stationsOut.push(...got.stations);
         continue;
       }
       tiles.set(key, 'loading');
@@ -399,13 +509,13 @@ export function streetTiles(lat: number, lng: number, km: number, rangeKm: numbe
         .then((r) => (r?.ok ? r.arrayBuffer() : null))
         .then((ab) => {
           if (!ab) throw new Error('no tile');
-          const got = decodeTile(new Uint8Array(ab), x, y, zoom, classes, !!coast);
-          tiles.set(key, { lines: taiwan ? got.lines.filter(onTaiwan) : got.lines, coast: got.coast });
+          const got = decodeTile(new Uint8Array(ab), x, y, zoom, classes, !!coast, { roads: names, stations });
+          tiles.set(key, { lines: taiwan ? got.lines.filter(onTaiwan) : got.lines, coast: got.coast, roads: got.roads, stations: got.stations });
           while (tiles.size > MAX_TILES) tiles.delete(tiles.keys().next().value as string);
           onLoad();
         })
         .catch(() => tiles.delete(key));
     }
   }
-  return { lines: out, coast: coastOut, pending };
+  return { lines: out, coast: coastOut, roads: roadsOut, stations: stationsOut, pending };
 }

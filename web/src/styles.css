@@ -1382,6 +1382,12 @@ path.map-seam-walkers { --p: 15px; }
 .radar .streets path { fill: none; stroke: var(--radar-grid); stroke-linejoin: round; stroke-linecap: round; pointer-events: none; }
 .radar .street-minor { stroke-width: 0.8; stroke-opacity: 0.2; }
 .radar .street-major { stroke-width: 2; stroke-opacity: 0.24; }
+/* 雷達上的地名（v1.691）：淡淡的小字，在光點、車掃下面；字的大小、外框粗細在 radar.ts 照螢幕像素算（PLACE_LABEL_PX） */
+.radar .place-label { fill: var(--label); text-anchor: middle; dominant-baseline: central; paint-order: stroke; stroke: var(--label-halo); stroke-linejoin: round; pointer-events: none; }
+.radar .pl-county { font-weight: 700; letter-spacing: 1px; opacity: 0.5; }
+.radar .pl-town { font-weight: 600; opacity: 0.5; }
+.radar .pl-road { opacity: 0.55; }
+.radar .pl-station { font-weight: 600; opacity: 0.6; }
 /* 16 km 內的海岸線（從街道圖磚來，v1.640）：實線（v1.641 使用者說近距離的邊界直接用實線）；顏色跟遠的海岸線一樣 */
 .radar .streets path.coast-line { fill: none; stroke: var(--accent); stroke-width: 1.5; stroke-opacity: 0.45; stroke-dasharray: none; }
 #radar-view { position: relative; }
