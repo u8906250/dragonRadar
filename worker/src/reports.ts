@@ -18,8 +18,8 @@ import { sha1Hex } from './sources/text';
 import { creditReport, uncreditReport, type ReportReward } from './cards';
 import { learnTags, manualTags } from './learnedTags';
 
-/** 只收這麼新的貼文，太舊的公告通常已經過期 */
-export const MAX_LINK_AGE_SEC = 7 * 86400;
+/** 只收這麼新的貼文，太舊的公告通常已經過期（v1.696 使用者說 7 天改成 30 天：大型活動常常一個月前就公告；資料也是留 30 天） */
+export const MAX_LINK_AGE_SEC = 30 * 86400;
 /** 同一個瀏覽器（裝置代碼）每小時最多回報幾則；補充資料不算 */
 const SUBMIT_PER_DEVICE_PER_HOUR = 20;
 /** 同一個 IP 每小時：手機網路、同一個 Wi-Fi 常很多人共用一個 IP，放寬，只用來擋清掉瀏覽器資料一直灌的 */
