@@ -1973,11 +1973,12 @@ export class Radar {
     const lim2 = (lim + margin) ** 2;
     this.streetLayer.replaceChildren();
     this.streetLayer.removeAttribute('transform');
-    // 公園綠地：最底下、淡綠色塊（不透明，相鄰圖磚重疊的地方才不會變深），全螢幕才畫
+    // 公園綠地：最底下、淡綠色塊（不透明，相鄰圖磚重疊的地方才不會變深），全螢幕才畫。
+    // 用 nonzero 填色：圖磚的外圈、挖空的圈方向相反，相鄰圖磚重疊的那一條才不會變成洞（v1.707：以前 evenodd，拉遠時一條一條白線）
     if (this.fill && s.green?.length) {
       let d = '';
       for (const poly of s.green) d += this.greenPath(poly, k, cos, sin, lim2, sx, sy);
-      if (d) this.streetLayer.appendChild(el('path', { class: 'green-area', d, 'fill-rule': 'evenodd' }));
+      if (d) this.streetLayer.appendChild(el('path', { class: 'green-area', d, 'fill-rule': 'nonzero' }));
     }
     for (const [cls, lines] of [
       ['region-outline open coast-line', s.coast ?? []],

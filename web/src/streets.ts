@@ -40,9 +40,9 @@ export const STREET_TIERS: Array<{ maxKm: number; zoom: number; classes: Classes
   // 16 km 內也是（z10 沒有 tertiary，所以用 z11，一張約 18 km 寬，最多九張）
   // z11 的路名只有國道、快速道路
   { maxKm: 16, zoom: 11, classes: { ...HIGHWAYS, primary: 'minor', secondary: 'minor', tertiary: 'minor' }, coast: true, names: ['motorway', 'trunk'], green: true },
-  { maxKm: 33, zoom: 9, classes: { ...HIGHWAYS, primary: 'minor' } },
-  { maxKm: 65, zoom: 8, classes: { ...HIGHWAYS, primary: 'minor' } },
-  { maxKm: Infinity, zoom: 7, classes: { ...HIGHWAYS, primary: 'minor' }, taiwan: true },
+  { maxKm: 33, zoom: 9, classes: { ...HIGHWAYS, primary: 'minor' }, green: true },
+  { maxKm: 65, zoom: 8, classes: { ...HIGHWAYS, primary: 'minor' }, green: true },
+  { maxKm: Infinity, zoom: 7, classes: { ...HIGHWAYS, primary: 'minor' }, taiwan: true, green: true },
 ];
 /** 台灣（含金門、馬祖、澎湖）的範圍：taiwan 那一級只抓這裡面的圖磚 */
 const TAIWAN_BOX = { s: 21.88, w: 118.2, n: 26.45, e: 122.1 };
@@ -144,8 +144,8 @@ export interface StationName {
   lng: number;
 }
 /**
- * 公園綠地（全螢幕雷達塗淡綠，v1.705 使用者說的）：landcover 圖層的草地（公園、草地、高爾夫球場）、樹林；
- * rings 是外圈和挖空的圈（[緯度, 經度, …]），用 evenodd 填色
+ * 公園綠地（全螢幕雷達塗淡綠，v1.705 使用者說的；v1.707 拉遠到整個台灣也塗，那時主要是山上的樹林）：landcover 圖層的草地（公園、草地、高爾夫球場）、樹林；
+ * rings 是外圈和挖空的圈（[緯度, 經度, …]），兩種圈方向相反，雷達用 nonzero 填色（v1.707）
  */
 export interface GreenArea {
   rings: Float64Array[];
