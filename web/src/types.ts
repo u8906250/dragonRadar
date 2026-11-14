@@ -333,6 +333,10 @@ export interface EditItem {
   approxArea?: string | null;
   /** 國外活動的當地時區：表單的時間照當地時間顯示 */
   tz?: string | null;
+  /** 判讀結果的第幾筆（洋流以外的雷達送回去，伺服器照那一筆的種類、費用、薪資這些欄位排） */
+  ref?: number;
+  /** 狗狗陪伴、找工作：時間是工作期間的第一天、最後一天（endAt 是最後一天，同一天是 null） */
+  days?: boolean;
 }
 
 /** 修改資料送出的一場：lat、lng 是在地圖上標的位置，沒標是 null（照地點查） */
@@ -347,6 +351,8 @@ export interface EditInput {
   place: string;
   lat: number | null;
   lng: number | null;
+  /** 判讀結果的第幾筆（EditItem.ref）；新加的是 null */
+  ref: number | null;
 }
 
 /** 修改表單按「查地點」的結果 */

@@ -2004,6 +2004,8 @@ path.map-seam-walkers { --p: 15px; }
 .edit-row { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 6px; }
 /* 主題窄窄的（2～4 字），活動內容寬 */
 .edit-what { display: grid; grid-template-columns: minmax(0, 6.5em) minmax(0, 1fr); gap: 6px; }
+/* 洋流以外的雷達沒有主題（v1.715）：內容佔整排 */
+.edit-what:has(> label:only-child) { grid-template-columns: minmax(0, 1fr); }
 .edit-row label:first-child { grid-column: 1 / -1; }
 /* 結束日期（跨好幾天才填）：一整行 */
 .edit-row .edit-enddate { grid-column: 1 / -1; }

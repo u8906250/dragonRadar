@@ -7100,17 +7100,30 @@ function previewWhere(p: PreviewItem): string {
 /** 補充資料的表單：貼文沒寫地點或時間時，回報的人補上再判讀一次 */
 function supplementFormHtml(current: string, hidden: boolean): string {
   const example = mod.current ? '例如「10/26 14:00–17:00」「地點：厝邊咖啡，台北市萬華區○○路○號」' : '例如「地點：厝邊咖啡，台北市萬華區○○路○號」「每週二、四 14:00–18:00」';
-  return `<form class="preview-more"${hidden ? ' hidden' : ''}>
+  return `<form class="preview-more supplement-form"${hidden ? ' hidden' : ''}>
       <textarea rows="2" maxlength="200" placeholder="${example}" aria-label="補充地點或時間">${esc(current)}</textarea>
       <div class="sheet-actions"><button type="submit" class="btn primary">補充後再判讀</button>${hidden ? '<button type="button" class="btn" data-act="less">回上一步</button>' : ''}</div>
       <p class="muted sheet-note small">補充的內容會跟原貼文一起判讀，放上雷達後會寫明「回報的人補充」。請只寫你確定的資訊。</p>
     </form>`;
 }
 
-function wireSupplement(c: { postId: string; token: string }, actions: HTMLElement | null): void {
-  const form = reportResult.querySelector<HTMLFormElement>('.preview-more');
+/**
+ * 洋流以外的雷達：直接修改的表單下面，費用、程度、薪資這些不對時用文字補充、再判讀一次（v1.715）。
+ * 跟著修改表單一起打開、收起
+ */
+function textSupplementHtml(current: string, hidden: boolean): string {
+  return `<div class="edit-text"${hidden ? ' hidden' : ''}>
+      <p class="muted sheet-note small">費用、程度、價位、薪資、聯絡方式這些不對，或要補充其他資料：寫在這裡，連同原貼文再判讀一次。</p>
+      ${current ? `<p class="muted sheet-note small">你補充的：${esc(current)}</p>` : ''}
+      ${supplementFormHtml(current, false)}
+    </div>`;
+}
+
+/** wireMore：「補充資料」按鈕打開這個表單（洋流以外的雷達有修改表單時，由修改表單打開） */
+function wireSupplement(c: { postId: string; token: string }, actions: HTMLElement | null, wireMore = true): void {
+  const form = reportResult.querySelector<HTMLFormElement>('.supplement-form');
   if (!form) return;
-  reportResult.querySelector('[data-act="more"]')?.addEventListener('click', () => {
+  if (wireMore) reportResult.querySelector('[data-act="more"]')?.addEventListener('click', () => {
     form.hidden = false;
     if (actions) actions.hidden = true;
     form.querySelector('textarea')?.focus();
@@ -7177,7 +7190,21 @@ interface EditPin {
 }
 const editPins = new Map<HTMLElement, EditPin>();
 
-/** 洋流的補充資料：每一場直接改標題、時間、地點，位置不對可以在地圖上標 */
+/**
+ * 補充資料用一筆一筆修改的表單：洋流一律用；其他雷達有判讀出來的資料才用（v1.715），
+ * 沒有的（貼文沒寫地點、查不到）照舊寫一段文字再判讀，不用從空白的表單填起
+ */
+const useEditForm = (edit: EditItem[] | undefined): boolean => mod.current || (edit?.length ?? 0) > 0;
+/** 狗狗陪伴、找工作：補充資料的時間是工作期間（只有日期） */
+const editDays = (): boolean => mod.id === 'dog' || mod.id === 'work';
+/** 補充資料的「一場」：洋流是活動，其他雷達叫「一筆」 */
+const editUnit = (): string => (mod.current ? '場' : '筆');
+const EDIT_TITLE_EG: Record<ModuleId, string> = { current: '景華公園表演同樂會', dog: '週末幫忙遛狗', badminton: '週六晚上羽球臨打', food: '週末市集餐車出攤', work: '活動工作人員' };
+
+/**
+ * 補充資料：每一場直接改標題、時間、地點，位置不對可以在雷達上標。洋流多一個主題；
+ * 其他雷達（v1.715 使用者說比照洋流）沒有主題，狗狗陪伴、找工作的時間是工作期間的第一天、最後一天
+ */
 function editCardHtml(it: EditItem | null): string {
   const tz = it ? localTz(it) : null;
   const start = it?.startAt ? wallInput(it.startAt, tz) : null;
@@ -7186,19 +7213,25 @@ function editCardHtml(it: EditItem | null): string {
   // 跨天的（兩天的市集、跨夜到隔天早上的）結束日期跟開始不同才填；同一天、只跨過午夜到隔天清晨的留空（照舊自動算隔天）
   const overnight = !!(it?.startAt && it.endAt && it.endAt - it.startAt < 86400 && endWall && start && endWall.time <= start.time);
   const endDate = endWall && start && endWall.date !== start.date && !overnight ? endWall.date : '';
-  return `<fieldset class="edit-item">
-      <legend><span class="edit-no"></span><button type="button" class="chip" data-act="drop">不要這場</button></legend>
-      <div class="edit-what">
-        <label>主題<input name="topic" maxlength="6" value="${esc(it?.topic ?? '')}" placeholder="例如：遊行"></label>
-        <label>活動內容<input name="title" maxlength="60" value="${esc(it?.title ?? '')}" placeholder="例如：景華公園表演同樂會"></label>
-      </div>
-      <div class="edit-row">
+  const when = editDays()
+    ? `<div class="edit-row">
+        <label>第一天<input type="date" name="date" value="${start?.date ?? ''}"></label>
+        <label class="edit-enddate">最後一天<small>（做好幾天才填，最多 7 天）</small><input type="date" name="enddate" value="${it?.endAt ? (endWall?.date ?? '') : ''}"></label>
+      </div>`
+    : `<div class="edit-row">
         <label>日期<input type="date" name="date" value="${start?.date ?? ''}"></label>
         <label>開始<input type="time" name="start" value="${it?.dateOnly ? '' : (start?.time ?? '')}"></label>
         <label>結束<input type="time" name="end" value="${end}"></label>
         <label class="edit-enddate">結束日期<small>（跨好幾天才填，最多 3 天）</small><input type="date" name="enddate" value="${endDate}"></label>
       </div>
-      <small class="muted">結束可以不填：只寫幾點開始，雷達上顯示到開始後兩小時。國外的活動填當地時間。</small>
+      <small class="muted">結束可以不填：只寫幾點開始，雷達上顯示到開始後兩小時。國外的${mod.current ? '活動' : ''}填當地時間。</small>`;
+  return `<fieldset class="edit-item"${it?.ref !== undefined ? ` data-ref="${it.ref}"` : ''}>
+      <legend><span class="edit-no"></span><button type="button" class="chip" data-act="drop">不要這${editUnit()}</button></legend>
+      <div class="edit-what">
+        ${mod.current ? `<label>主題<input name="topic" maxlength="6" value="${esc(it?.topic ?? '')}" placeholder="例如：遊行"></label>` : ''}
+        <label>${mod.current ? '活動內容' : '內容'}<input name="title" maxlength="60" value="${esc(it?.title ?? '')}" placeholder="例如：${EDIT_TITLE_EG[mod.id]}"></label>
+      </div>
+      ${when}
       <label>地點<input name="place" maxlength="80" value="${esc(it?.place ?? '')}" placeholder="店名或地址，例如：厝邊咖啡 台北市萬華區○○路○號"></label>
       <div class="edit-pin"><small class="edit-pin-state"></small><button type="button" class="chip" data-act="locate">查地點</button><button type="button" class="chip" data-act="pin">在雷達上標位置</button><button type="button" class="chip" data-act="unpin" hidden>不用標的位置</button></div>
       <div class="edit-tags">
@@ -7287,10 +7320,11 @@ function wireEditTags(card: HTMLElement, tags: string[]): void {
 
 function editFormHtml(items: EditItem[], hidden: boolean): string {
   const list = items.length > 0 ? items.slice(0, MAX_EDIT_ITEMS) : [null];
+  const what = mod.current ? '每一場的主題、活動內容、時間' : `每一筆的內容、${editDays() ? '工作日期' : '時間'}`;
   return `<form class="preview-more edit-form"${hidden ? ' hidden' : ''} novalidate>
-      <p class="muted sheet-note">直接改每一場的主題、活動內容、時間、地點、關鍵字；位置不對可以按「在雷達上標位置」，在雷達上拖標記或點一下。</p>
-      <div class="edit-items">${list.map(editCardHtml).join('')}</div>
-      <button type="button" class="btn" data-act="add">再加一場</button>
+      <p class="muted sheet-note">直接改${what}、地點、關鍵字；位置不對可以按「在雷達上標位置」，在雷達上拖標記或點一下。${mod.current ? '' : '其他資料照原本判讀的。'}</p>
+      <div class="edit-items">${list.map((it) => editCardHtml(it)).join('')}</div>
+      <button type="button" class="btn" data-act="add">再加一${editUnit()}</button>
       <div class="sheet-actions"><button type="submit" class="btn primary">用這些資料預覽</button>${hidden ? '<button type="button" class="btn" data-act="less">回上一步</button>' : ''}</div>
       <p class="muted sheet-note small">改過的地方放上雷達後會寫明是回報的人改的。請只填你確定的資訊。</p>
     </form>`;
@@ -7392,7 +7426,7 @@ function renumberEdit(form: HTMLFormElement): void {
   const cards = [...form.querySelectorAll<HTMLElement>('.edit-item')];
   cards.forEach((c, i) => {
     const no = c.querySelector('.edit-no');
-    if (no) no.textContent = cards.length > 1 ? `第 ${i + 1} 場` : '活動';
+    if (no) no.textContent = cards.length > 1 ? `第 ${i + 1} ${editUnit()}` : mod.current ? '活動' : '這一筆';
     const drop = c.querySelector<HTMLElement>('[data-act="drop"]');
     if (drop) drop.hidden = cards.length <= 1;
   });
@@ -7405,23 +7439,33 @@ function readEditForm(form: HTMLFormElement): EditInput[] | string {
   const cards = [...form.querySelectorAll<HTMLElement>('.edit-item')];
   const out: EditInput[] = [];
   for (const [i, card] of cards.entries()) {
-    const at = cards.length > 1 ? `第 ${i + 1} 場：` : '';
+    const at = cards.length > 1 ? `第 ${i + 1} ${editUnit()}：` : '';
     const val = (name: string): string => card.querySelector<HTMLInputElement>(`[name="${name}"]`)?.value.trim() ?? '';
     const title = val('title');
-    const topic = val('topic') || null;
+    const topic = mod.current ? val('topic') || null : null;
     const place = val('place');
-    if (!title) return `${at}請填活動內容`;
-    if (!val('date') || !val('start')) return `${at}請填哪天幾點開始`;
+    if (!title) return `${at}請填${mod.current ? '活動內容' : '內容'}`;
+    const days = editDays();
+    if (!val('date') || (!days && !val('start'))) return days ? `${at}請填第一天` : `${at}請填哪天幾點開始`;
     if (!place) return `${at}請填地點`;
-    const startAt = tpeUnix(val('date'), val('start'));
+    const startAt = tpeUnix(val('date'), days ? '00:00' : val('start'));
     if (startAt === null) return `${at}日期或時間看不懂，請重新選`;
     // 跨好幾天的（v1.567 使用者說「活動持續三天以內」都要收）：照填的結束日期；沒填結束日期、結束比開始早：跨過午夜，是隔天
     const endDate = val('enddate');
-    if (endDate && !val('end')) return `${at}填了結束日期，也請填幾點結束`;
-    let endAt = val('end') ? tpeUnix(endDate || val('date'), val('end')) : null;
-    if (endAt !== null && !endDate && endAt <= startAt) endAt += 86400;
-    if (endAt !== null && endAt <= startAt) return `${at}結束要在開始之後`;
-    if (endAt !== null && endAt - startAt > MAX_EDIT_SPAN_SEC) return `${at}一場活動最長 3 天，再長的請分成幾場`;
+    let endAt: number | null;
+    if (days) {
+      // 工作期間：最後一天（同一天不用填），最多連續 7 天（跟判讀一樣只收單次的）
+      endAt = endDate ? tpeUnix(endDate, '00:00') : null;
+      if (endAt !== null && endAt < startAt) return `${at}最後一天要在第一天之後`;
+      if (endAt === startAt) endAt = null;
+      if (endAt !== null && endAt - startAt >= 7 * 86400) return `${at}最多連續 7 天，再長的雷達不收`;
+    } else {
+      if (endDate && !val('end')) return `${at}填了結束日期，也請填幾點結束`;
+      endAt = val('end') ? tpeUnix(endDate || val('date'), val('end')) : null;
+      if (endAt !== null && !endDate && endAt <= startAt) endAt += 86400;
+      if (endAt !== null && endAt <= startAt) return `${at}結束要在開始之後`;
+      if (endAt !== null && endAt - startAt > MAX_EDIT_SPAN_SEC) return `${at}一場活動最長 3 天，再長的請分成幾場`;
+    }
     const pinned = editPins.get(card)?.pinned ?? null;
     // 關鍵字欄打了還沒按 Enter 的也算
     const typed = val('tag').split(/[\s,，、]+|(?=#)/).filter((p) => p.replace(/#/g, '') !== '');
@@ -7431,9 +7475,11 @@ function readEditForm(form: HTMLFormElement): EditInput[] | string {
       if (!t) return `${at}${BAD_TAG}`;
       if (!tags.includes(t) && tags.length < MAX_EDIT_TAGS) tags.push(t);
     }
-    out.push({ title, topic, tags, startAt, endAt, place, lat: pinned?.lat ?? null, lng: pinned?.lng ?? null });
+    // 判讀結果的第幾筆（新加的沒有）
+    const ref = card.dataset.ref ? Number(card.dataset.ref) : NaN;
+    out.push({ title, topic, tags, startAt, endAt, place, lat: pinned?.lat ?? null, lng: pinned?.lng ?? null, ref: Number.isSafeInteger(ref) ? ref : null });
   }
-  return out.length > 0 ? out : '至少要填一場活動';
+  return out.length > 0 ? out : `至少要填一${editUnit()}`;
 }
 
 function wireEdit(c: { postId: string; token: string }, items: EditItem[], actions: HTMLElement | null): void {
@@ -7453,6 +7499,8 @@ function wireEdit(c: { postId: string; token: string }, items: EditItem[], actio
     const last = [...list.querySelectorAll<HTMLElement>('.edit-item')].at(-1) ?? null;
     list.insertAdjacentHTML('beforeend', editCardHtml(null));
     const card = list.lastElementChild as HTMLElement;
+    // 其他雷達：費用、薪資這些照上一筆判讀出來的
+    if (last?.dataset.ref) card.dataset.ref = last.dataset.ref;
     if (last) {
       for (const name of ['topic', 'title', 'date', 'start', 'enddate', 'end', 'place']) {
         const from = last.querySelector<HTMLInputElement>(`[name="${name}"]`);
@@ -7472,13 +7520,18 @@ function wireEdit(c: { postId: string; token: string }, items: EditItem[], actio
     const date = card.querySelector<HTMLInputElement>('[name="date"]');
     (last && date ? date : card.querySelector<HTMLInputElement>('[name="title"]'))?.focus();
   });
+  // 洋流以外的雷達：下面的文字補充跟著一起打開、收起
+  const text = reportResult.querySelector<HTMLElement>('.edit-text');
+  if (text) wireSupplement(c, null, false);
   reportResult.querySelector('[data-act="more"]')?.addEventListener('click', () => {
     form.hidden = false;
+    if (text) text.hidden = false;
     if (actions) actions.hidden = true;
     form.querySelector<HTMLInputElement>('input')?.focus();
   });
   form.querySelector('[data-act="less"]')?.addEventListener('click', () => {
     form.hidden = true;
+    if (text) text.hidden = true;
     if (actions) actions.hidden = false;
     stopMark();
   });
@@ -7597,14 +7650,14 @@ function renderPreview(r: SubmitResult): void {
         </li>`,
       )
       .join('')}</ul>
-    ${items.some((p) => p.lat !== null && p.lng !== null) ? `<p class="muted sheet-note small">📍 位置可能不準，${mod.current ? '不對就把虛線圈拖到正確的地方' : '不對請按「補充資料」補上地址'}</p>` : ''}
+    ${items.some((p) => p.lat !== null && p.lng !== null) ? '<p class="muted sheet-note small">📍 位置可能不準，不對就把虛線圈拖到正確的地方</p>' : ''}
     ${dups}${r.failures?.length ? `<p class="muted sheet-note">${r.failures.length > 1 ? `下面 ${r.failures.length} 場` : '下面這場'}不會放上雷達${canFixByNote(r.failures) ? '，知道的話可以按「補充資料」補上' : ''}：</p>${failuresHtml(r.failures)}` : ''}
     <div class="sheet-actions">
       <button type="button" class="btn primary" data-act="confirm">${items.length > 0 && items.every((p) => p.update?.mode === 'attach') ? '對，附在這個據點' : '對，放上雷達'}</button>
       <button type="button" class="btn" data-act="more">補充資料</button>
       <button type="button" class="btn" data-act="wrong">不對</button>
     </div>
-    ${mod.current ? editFormHtml(r.edit ?? [], true) : supplementFormHtml(r.supplement ?? '', true)}
+    ${useEditForm(r.edit) ? `${editFormHtml(r.edit ?? [], true)}${mod.current ? '' : textSupplementHtml(r.supplement ?? '', true)}` : supplementFormHtml(r.supplement ?? '', true)}
     <form class="preview-wrong" hidden>
       <textarea rows="2" maxlength="300" placeholder="哪裡判斷錯了？（選填，例如「地點是文化路 140 號」「只有 10/21 一天」）" aria-label="哪裡判斷錯了"></textarea>
       <div class="sheet-actions"><button type="submit" class="btn primary">送出，不放上雷達</button><button type="button" class="btn" data-act="back">回上一步</button></div>
@@ -7630,9 +7683,9 @@ function renderPreview(r: SubmitResult): void {
     // 回報累計：滿 5 則拿到古錐媽的肉乾卡、每 5 則一枚順幣
     void gotReward(res.data.reward, (msg) => showBanner(bannerEl, msg, 4500));
   });
-  if (mod.current) wireEdit(c, r.edit ?? [], actions);
+  if (useEditForm(r.edit)) wireEdit(c, r.edit ?? [], actions);
   else wireSupplement(c, actions);
-  // 定位到的直接標在雷達、地圖上（v1.683），移過去；洋流的活動可以直接拖到正確的位置（v1.686；v1.699 起在雷達上拖，不切到地圖）
+  // 定位到的直接標在雷達、地圖上（v1.683），移過去；可以直接拖到正確的位置（v1.686；v1.699 起在雷達上拖，不切到地圖；v1.715 起每個雷達都可以）
   reportPins = previewPins(items, r.routes ?? []).map((p) => ({ ...p, drag: editCardsAt(p).length > 0 }));
   pinConfirm = c;
   render();
@@ -7816,13 +7869,13 @@ async function showReportResult(data: SubmitResult): Promise<void> {
     `<p class="msg">${esc(head)}</p>${list ? `<ul class="report-events">${list}</ul>` : ''}${failHtml}${noteHtml}${
       !canSupplement
         ? ''
-        : mod.current
-          ? editFormHtml(data.edit ?? [], false)
+        : useEditForm(data.edit)
+          ? `${editFormHtml(data.edit ?? [], false)}${mod.current ? '' : textSupplementHtml(data.supplement ?? '', false)}`
           : `${data.supplement ? `<p class="muted sheet-note">你補充的：${esc(data.supplement)}</p>` : ''}${supplementFormHtml(data.supplement ?? '', false)}`
     }`,
   );
   if (canSupplement && data.confirm) {
-    if (mod.current) wireEdit(data.confirm, data.edit ?? [], null);
+    if (useEditForm(data.edit)) wireEdit(data.confirm, data.edit ?? [], null);
     else wireSupplement(data.confirm, null);
   }
   for (const b of reportResult.querySelectorAll<HTMLButtonElement>('[data-id]')) {

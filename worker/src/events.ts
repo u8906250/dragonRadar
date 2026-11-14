@@ -1,7 +1,7 @@
 import type { Env } from './env';
 import { fetchThreadsProfile, profileCandidates, profileHintText, type ThreadsProfile } from './sources/profile';
 import { adoptedTags } from './learnedTags';
-import { ACTIVITY_SPEC, applySupplementDate, reconcileRouteStops, ROUTE_WORDS, closedWeekdays, slotWeekdays, dropBroughtItem, dropSelfPlace, extractFromPost, localizeTimes, missingActivityParts, openWeekdaysFromText, splitDropTimes, splitDailyActivity, splitMultiDay, splitWeekdayWeekend, spotHoursFromText, startNowForDeadline, guessedMidnight, localToUnix, MODULE_TAGS, postTags, regionTimeZone, timeZoneOf, topicExtra, untilInText, weekdaysInText, type ActivityPart, type EventKind, type ExtractedEvent, type ExtractSpec } from './extract';
+import { ACTIVITY_SPEC, applySupplementDate, reconcileRouteStops, ROUTE_WORDS, closedWeekdays, slotWeekdays, dropBroughtItem, dropSelfPlace, extractFromPost, localizeTimes, missingActivityParts, openWeekdaysFromText, splitDropTimes, splitDailyActivity, splitMultiDay, splitWeekdayWeekend, spotHoursFromText, startNowForDeadline, guessedMidnight, localToUnix, MODULE_TAGS, postTags, regionTimeZone, timeZoneOf, topicExtra, untilInText, weekdaysInText, str, type ActivityPart, type EventKind, type ExtractedEvent, type ExtractSpec, type JobInfo } from './extract';
 import { cityOfHouse, geocodeAddress, parseTwAddress, type TwAddress } from './address';
 import { SESSION_SPEC } from './badminton';
 import { FOOD_SPEC } from './food';
@@ -946,6 +946,8 @@ export interface ManualActivity {
   place: string;
   lat: number | null;
   lng: number | null;
+  /** 判讀結果的第幾筆（PlanItem 的索引）：洋流以外的雷達照那一筆的種類、費用、薪資這些欄位排；新加的是 null */
+  ref?: number | null;
 }
 
 /**
@@ -1030,6 +1032,80 @@ export async function planManual(env: Env, acts: ManualActivity[], now: number, 
   }
   // 車掃：回報的人填的標題照用，不改成「路線名稱・站名」
   return markRoutes(items, text, routeTitle, now, false);
+}
+
+/** 修改表單的地點欄比對用：瀏覽器拿掉換行、送出時空白縮成一個、最多 80 字，看地點有沒有改 */
+export const placeKey = (s: string): string => [...s.replace(/[\r\n]/g, '').replace(/\s+/g, ' ').trim()].slice(0, 80).join('');
+
+/** 修改表單、planJobs、planPostings 用的「已經知道的位置」（標的、地點沒改沿用的） */
+type Located = { point: GeoPoint | null; approxArea: string | null };
+
+/** 洋流以外的雷達：表單上新加、沒有對應判讀結果的那一場，照這個種類排 */
+const EDIT_BASE: Record<Exclude<ModuleId, 'current'>, { kind: EventKind; extra: Record<string, unknown> }> = {
+  dog: { kind: 'job', extra: { role: 'hire' } },
+  work: { kind: 'job', extra: { role: 'hire' } },
+  badminton: { kind: 'session', extra: { role: 'offer' } },
+  food: { kind: 'food', extra: { role: 'vendor' } },
+};
+
+/**
+ * 洋流以外的雷達，回報的人直接修改的（v1.715 使用者說其他雷達的補充資料也比照洋流）：不再問 AI。
+ * 內容、時間、地點、位置、關鍵字照填的；費用、程度、薪資、雇主、怎麼聯絡這些照判讀出來的那一筆（ref），表單上不改。
+ * 排法跟判讀時一樣：狗狗陪伴、找工作照工作日期（planJobs，時間是第一天、最後一天），約好時間的找臨打、揪團吃飯
+ * 從發文算到約的時段結束（planPostings），其他照場次（planEvent）。地點沒改、沒標的沿用判讀時的位置
+ */
+export async function planEdited(env: Env, post: PostRow, acts: ManualActivity[], before: PlanItem[], now: number): Promise<PlanItem[]> {
+  const module = moduleOf(post.module);
+  const deadline = Date.now() + ADDRESS_BUDGET_MS;
+  const iso = (t: number): string => new Date(t * 1000).toISOString();
+  const items: PlanItem[] = [];
+  for (const [group, a] of acts.entries()) {
+    const p = a.ref !== null && a.ref !== undefined ? (before[a.ref]?.plan ?? null) : null;
+    const base = module === 'current' ? null : EDIT_BASE[module];
+    const kind = p?.kind ?? base?.kind ?? 'activity';
+    // 約的時段、防詐提醒重新算
+    const { play_at: _at, play_end: _end, risks: _risks, ...extra } = parseExtra(p?.extra) ?? base?.extra ?? {};
+    const tags = a.tags ?? tagsOf(p?.extra ?? null);
+    const samePlace = !!p && placeKey(p.place_text) === placeKey(a.place);
+    const located: Located | undefined =
+      a.lat !== null && a.lng !== null
+        ? { point: { lat: a.lat, lng: a.lng, displayName: a.place }, approxArea: null }
+        : samePlace && p.lat !== null && p.lng !== null
+          ? { point: { lat: p.lat, lng: p.lng, displayName: p.place_text }, approxArea: p.approx_area }
+          : undefined;
+    const ex: ExtractedEvent = {
+      kind,
+      title: a.title,
+      item: p?.item ?? null,
+      start_at: iso(a.startAt),
+      end_at: a.endAt === null ? null : iso(a.endAt),
+      place_text: a.place,
+      place_query: samePlace ? p.place_query : a.place,
+      confidence: 1,
+      spot: false,
+      until: null,
+      extra: { ...extra, tags },
+    };
+    if (kind === 'job') {
+      const job: JobInfo = {
+        role: extra.role === 'offer' ? 'offer' : 'hire',
+        work_from: taipeiDate(a.startAt),
+        work_to: a.endAt === null ? null : taipeiDate(a.endAt),
+        slots: Array.isArray(extra.slots) ? extra.slots.filter((x): x is string => typeof x === 'string') : [],
+        pay: str(extra.pay),
+        employer: str(extra.employer),
+        contact: str(extra.contact),
+        requirements: str(extra.requirements),
+      };
+      const [it] = await planJobs(env, post, [{ ...ex, start_at: null, end_at: null, job, extra: { tags } }], now, JOB_DAYS[module === 'dog' ? 'dog' : 'work'], [located]);
+      items.push({ ...it, group });
+    } else if (POSTING_DAYS[String(extra.role)] !== undefined) {
+      items.push(...(await planPostings(env, post, [ex], now, group, [located])));
+    } else {
+      items.push({ group, ...(await planEvent(env, ex, now, deadline, undefined, located)) });
+    }
+  }
+  return items;
 }
 
 /** 車掃、掃街、車隊：貼文有這些字、同一天讀出好幾站的，合成一條路線 */
@@ -1729,13 +1805,13 @@ const ONE_OFF_DAYS = 7;
 const LONG_TERM_GROUP = 1000;
 
 /** 「2026-11-30」台北時間那天 00:00 */
-const taipeiDayOf = (d: string | null): number | null => (d && /^\d{4}-\d{2}-\d{2}$/.test(d) ? Date.parse(`${d}T00:00:00+08:00`) / 1000 : null);
+export const taipeiDayOf = (d: string | null | undefined): number | null => (d && /^\d{4}-\d{2}-\d{2}$/.test(d) ? Date.parse(`${d}T00:00:00+08:00`) / 1000 : null);
 
 /**
  * 狗狗陪伴、找工作：每個工作地點一筆。從發文開始就算「徵才中」，到工作期間最後一天結束（沒寫就留 days.default 天，最多 days.max 天），
  * 工作期間、每天時段、薪資、雇主、怎麼應徵、防詐提醒放在 extra
  */
-async function planJobs(env: Env, post: PostRow, jobs: ExtractedEvent[], now: number, days: { default: number; max: number }): Promise<PlanItem[]> {
+async function planJobs(env: Env, post: PostRow, jobs: ExtractedEvent[], now: number, days: { default: number; max: number }, located: Array<Located | undefined> = []): Promise<PlanItem[]> {
   const items: PlanItem[] = [];
   const deadline = Date.now() + ADDRESS_BUDGET_MS;
   for (const [group, ex] of jobs.entries()) {
@@ -1764,7 +1840,8 @@ async function planJobs(env: Env, post: PostRow, jobs: ExtractedEvent[], now: nu
       items.push({ group, plan: null, reason: 'no_place' });
       continue;
     }
-    const { point, approxArea } = await locateOrCity(env, placeQuery, placeText, ex.place_text, deadline);
+    // 修改表單：標了位置、地點沒改的照那個位置
+    const { point, approxArea } = located[group] ?? (await locateOrCity(env, placeQuery, placeText, ex.place_text, deadline));
     items.push({
       group,
       reason: 'planned',
@@ -1812,7 +1889,7 @@ const POSTING_DAYS: Record<string, number> = { seek: 7, recommend: 14, meetup: 3
  * 刊登（找臨打、網友推薦、揪團吃飯）：從發文開始就算刊登中；寫了約的時段（想打、約吃飯）就到那個時段結束，
  * 沒寫留 POSTING_DAYS 天。約的時段放在 extra 的 play_at、play_end
  */
-async function planPostings(env: Env, post: PostRow, list: ExtractedEvent[], now: number, groupFrom: number): Promise<PlanItem[]> {
+async function planPostings(env: Env, post: PostRow, list: ExtractedEvent[], now: number, groupFrom: number, located: Array<Located | undefined> = []): Promise<PlanItem[]> {
   const items: PlanItem[] = [];
   const deadline = Date.now() + ADDRESS_BUDGET_MS;
   for (const [i, ex] of list.entries()) {
@@ -1835,7 +1912,7 @@ async function planPostings(env: Env, post: PostRow, list: ExtractedEvent[], now
       items.push({ group, plan: null, reason: 'no_place' });
       continue;
     }
-    const { point, approxArea } = await locateOrCity(env, placeQuery, placeText, ex.place_text, deadline);
+    const { point, approxArea } = located[i] ?? (await locateOrCity(env, placeQuery, placeText, ex.place_text, deadline));
     items.push({
       group,
       reason: 'planned',
@@ -1883,7 +1960,7 @@ export function topicOf(extra: Record<string, unknown> | string | null | undefin
   return typeof o?.topic === 'string' && o.topic ? o.topic : null;
 }
 
-function parseExtra(v: string | null | undefined): Record<string, unknown> | null {
+export function parseExtra(v: string | null | undefined): Record<string, unknown> | null {
   if (!v) return null;
   try {
     const o = JSON.parse(v) as unknown;

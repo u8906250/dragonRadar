@@ -6,7 +6,7 @@
  */
 import type { Env } from './env';
 import { DEFAULT_MODULE, isModule, MODULE_IDS, moduleOf, type ModuleId } from './modules';
-import { ADDRESS_BUDGET_MS, atLocalTimes, commitPlan, detectEnded, getEvent, getPost, locateTypedPlace, MAX_FUTURE_SEC, planManual, planPost, processPost, savedTagsOf, storePost, tagsOf, topicOf, type EventOut, type FailedItem, type ManualActivity, type PlanItem, type PostRow } from './events';
+import { ADDRESS_BUDGET_MS, atLocalTimes, commitPlan, detectEnded, getEvent, getPost, locateTypedPlace, MAX_FUTURE_SEC, parseExtra, placeKey, planEdited, planManual, planPost, processPost, savedTagsOf, storePost, tagsOf, taipeiDayOf, topicOf, type EventOut, type FailedItem, type ManualActivity, type PlanItem, type PostRow } from './events';
 import { ACTIVITY_SPEC, cleanTags, cleanTopic, extractFromPost, MODULE_TAGS, postTags, type ActivityPart, type EventKind } from './extract';
 import { adoptedTags } from './learnedTags';
 import { accupassPermalink, fetchAccupass, parseAccupassUrl, type AccupassLink } from './sources/accupass';
@@ -226,10 +226,36 @@ export interface EditItem {
   approxArea?: string | null;
   /** 國外活動的當地時區：表單的時間照當地時間顯示 */
   tz?: string | null;
+  /** 判讀結果的第幾筆（送回來時照這一筆的種類、費用、薪資這些欄位排；洋流用不到） */
+  ref?: number;
+  /** 狗狗陪伴、找工作：時間是工作期間的第一天、最後一天（只有日期，endAt 是最後一天，同一天是 null） */
+  days?: boolean;
+}
+
+/**
+ * 洋流以外的雷達：判讀出來、有資料的每一筆（v1.715 比照洋流直接修改）。狗狗陪伴、找工作是工作日期；
+ * 約好時間的找臨打、揪團吃飯是約的時段（不是刊登的時間）
+ */
+function otherEditItems(items: PlanItem[]): EditItem[] {
+  return items.flatMap((it, ref): EditItem[] => {
+    const p = it.plan;
+    if (!p) return [];
+    const ex = parseExtra(p.extra) ?? {};
+    const saved = savedTagsOf(p.extra);
+    const common = { ref, title: p.title, ...(saved && saved.length > 0 ? { tags: saved } : {}), place: p.place_text, lat: p.lat, lng: p.lng, approxArea: p.approx_area };
+    if (p.kind === 'job') {
+      const from = taipeiDayOf(typeof ex.work_from === 'string' ? ex.work_from : null) ?? p.start_at;
+      const to = taipeiDayOf(typeof ex.work_to === 'string' ? ex.work_to : null);
+      return [{ ...common, startAt: from, endAt: to !== null && to > from ? to : null, days: true }];
+    }
+    if (typeof ex.play_at === 'number') return [{ ...common, startAt: ex.play_at, endAt: typeof ex.play_end === 'number' ? ex.play_end : null }];
+    return [{ ...common, startAt: p.start_at, endAt: p.end_open ? null : p.end_at, ...(p.tz ? { tz: p.tz } : {}) }];
+  });
 }
 
 /** 判讀結果換成表單的每一場；重複的（雷達上已經有）不列 */
-export function editItemsOf(items: PlanItem[]): EditItem[] {
+export function editItemsOf(items: PlanItem[], module: ModuleId = 'current'): EditItem[] {
+  if (module !== 'current') return otherEditItems(items);
   // 每一場自己記的關鍵字；沒記的（車掃的站、舊的判讀結果）用這則貼文的
   const own = (it: PlanItem): string[] | null => (it.plan ? savedTagsOf(it.plan.extra) : (it.fail?.tags ?? null));
   const common = items.map(own).find((t) => t && t.length > 0) ?? [];
@@ -404,8 +430,8 @@ const sameDay = (a: number, b: number): boolean => Math.floor((a + 8 * 3600) / 8
  * 兩種都附確認代碼：貼文沒寫地點或時間時，回報的人可以補充資料再判讀一次。
  */
 async function previewResult(env: Env, post: PostRow, plan: StoredPlan, existed: boolean, now: number): Promise<SubmitResult> {
-  // 洋流的活動：補充資料是一場一場的欄位（標題、時間、地點、地圖位置），先填好判讀出來的
-  const edit = moduleOf(post.module) === 'current' ? { edit: editItemsOf(plan.items) } : {};
+  // 補充資料是一場一場的欄位（標題、時間、地點、地圖位置），先填好判讀出來的（v1.715 起每個雷達都有）
+  const edit = { edit: editItemsOf(plan.items, moduleOf(post.module)) };
   const base = {
     existed,
     permalink: post.permalink ?? '',
@@ -836,7 +862,9 @@ const MAX_EDIT_ITEMS = 20;
 export const MAX_EDIT_SPAN_SEC = 3 * 86400;
 
 /** 表單送來的每一場：標題、地點、開始時間一定要有；結束可以不填；有標地圖位置才帶座標 */
-export function parseEditItems(raw: unknown): ManualActivity[] {
+export function parseEditItems(raw: unknown, module: ModuleId = 'current'): ManualActivity[] {
+  // 狗狗陪伴、找工作：時間是工作期間的第一天、最後一天，最多連續 7 天（跟判讀一樣只收單次的）
+  const days = module === 'dog' || module === 'work';
   if (!Array.isArray(raw) || raw.length === 0) throw new ReportError(400, '至少要填一場活動');
   if (raw.length > MAX_EDIT_ITEMS) throw new ReportError(400, `一則最多 ${MAX_EDIT_ITEMS} 場`);
   const text = (v: unknown, max: number): string => (typeof v === 'string' ? [...v.replace(/\s+/g, ' ').trim()].slice(0, max).join('') : '');
@@ -848,15 +876,17 @@ export function parseEditItems(raw: unknown): ManualActivity[] {
     const place = text(o.place, 80);
     if (!title) throw new ReportError(400, `${at}請填活動內容`);
     if (!place) throw new ReportError(400, `${at}請填地點`);
-    if (!Number.isSafeInteger(o.startAt)) throw new ReportError(400, `${at}請填哪天幾點開始`);
+    if (!Number.isSafeInteger(o.startAt)) throw new ReportError(400, days ? `${at}請填哪天開始做` : `${at}請填哪天幾點開始`);
     const startAt = o.startAt as number;
     const endAt = o.endAt === null || o.endAt === undefined ? null : Number.isSafeInteger(o.endAt) ? (o.endAt as number) : NaN;
-    if (endAt !== null && !(endAt > startAt && endAt - startAt <= MAX_EDIT_SPAN_SEC)) throw new ReportError(400, `${at}結束時間要在開始之後的 3 天內`);
+    if (days && endAt !== null && !(endAt > startAt && endAt - startAt < 7 * 86400)) throw new ReportError(400, `${at}最後一天要在第一天之後，最多連續 7 天`);
+    if (!days && endAt !== null && !(endAt > startAt && endAt - startAt <= MAX_EDIT_SPAN_SEC)) throw new ReportError(400, `${at}結束時間要在開始之後的 3 天內`);
     const lat = coord(o.lat, 90);
     const lng = coord(o.lng, 180);
     // 關鍵字：新版網頁一定送（全部拿掉是空的），舊版沒送就沿用判讀出來的
     const tags = Array.isArray(o.tags) ? { tags: cleanTags(o.tags.slice(0, 20)) } : {};
-    return { title, topic: cleanTopic(text(o.topic, 12)), ...tags, startAt, endAt, place, lat: lat !== null && lng !== null ? lat : null, lng: lat !== null && lng !== null ? lng : null };
+    const ref = Number.isSafeInteger(o.ref) && (o.ref as number) >= 0 && (o.ref as number) < 1000 ? (o.ref as number) : null;
+    return { title, topic: cleanTopic(text(o.topic, 12)), ...tags, startAt, endAt, place, lat: lat !== null && lng !== null ? lat : null, lng: lat !== null && lng !== null ? lng : null, ...(ref !== null ? { ref } : {}) };
   });
 }
 
@@ -871,7 +901,7 @@ function whenText(t: number, tz: string | null = null): string {
  * 回報的人改了哪些（跟判讀結果比），寫在雷達詳細資料的「回報的人補充」，看的人知道哪些不是原貼文寫的。
  * listed 是每一場有沒有排上雷達：沒排上的不寫；unit 是「場」，車掃的是「站」
  */
-export function editSummary(before: EditItem[], after: ManualActivity[], listed: boolean[] = after.map(() => true), unit = '場', tzs: Array<string | null> = []): string | null {
+export function editSummary(before: EditItem[], after: ManualActivity[], listed: boolean[] = after.map(() => true), unit = '場', tzs: Array<string | null> = [], days = false): string | null {
   const shown = after.filter((_, i) => listed[i]).length;
   let no = 0;
   const parts = after.flatMap((a, i) => {
@@ -883,7 +913,9 @@ export function editSummary(before: EditItem[], after: ManualActivity[], listed:
     if (!b || b.title !== a.title) changes.push(`內容「${a.title}」`);
     if (!b || b.dateOnly || b.startAt !== a.startAt || b.endAt !== a.endAt) {
       const tz = tzs[i] ?? null;
-      changes.push(`時間 ${whenText(a.startAt, tz)}${a.endAt === null ? ' 開始' : `–${whenText(a.endAt, tz).split(' ')[1]}`}${tz ? '（當地時間）' : ''}`);
+      // 狗狗陪伴、找工作：工作日期
+      if (days) changes.push(`工作日期 ${whenText(a.startAt).split(' ')[0]}${a.endAt === null ? '' : `–${whenText(a.endAt).split(' ')[0]}`}`);
+      else changes.push(`時間 ${whenText(a.startAt, tz)}${a.endAt === null ? ' 開始' : `–${whenText(a.endAt, tz).split(' ')[1]}`}${tz ? '（當地時間）' : ''}`);
     }
     if (!b || b.place !== a.place) changes.push(`地點「${a.place}」`);
     if (a.lat !== null) changes.push('在地圖上標了位置');
@@ -900,8 +932,8 @@ export function editSummary(before: EditItem[], after: ManualActivity[], listed:
 export async function editLink(env: Env, body: { postId?: unknown; token?: unknown; items?: unknown; localTimes?: unknown }, ip: string, now: number, device: string | null = null): Promise<SubmitResult> {
   const post = await checkConfirm(env, body);
   assertEditable(post, '修改');
-  if (moduleOf(post.module) !== 'current') throw new ReportError(400, '這個類別還不能直接修改，請用補充資料');
-  const parsed = parseEditItems(body.items);
+  const module = moduleOf(post.module);
+  const parsed = parseEditItems(body.items, module);
   // 新版網頁填的是活動當地的時間：國外的換成當地時間的時間點（舊版網頁一律是台北時間）
   const acts = body.localTimes === true ? await atLocalTimes(env, parsed) : parsed;
   const times = await countSince(env, "SELECT COUNT(*) AS n FROM submissions WHERE post_id = ? AND result = '\"supplement\"'", [post.id]);
@@ -913,17 +945,17 @@ export async function editLink(env: Env, body: { postId?: unknown; token?: unkno
   const routeTitle = stored?.items.find((it) => it.route)?.route?.title ?? null;
   // 舊版網頁沒送關鍵字：沿用判讀出來的
   const tags = stored?.items.map((it) => (it.plan ? tagsOf(it.plan.extra) : (it.fail?.tags ?? []))).find((t) => t.length > 0) ?? [];
-  const items = await planManual(env, keepLocated(acts, stored?.items ?? []), now, post.text, routeTitle, tags);
+  // 洋流以外的雷達：照判讀出來的那一筆的種類、欄位、排法（v1.715）
+  const items = module === 'current' ? await planManual(env, keepLocated(acts, stored?.items ?? []), now, post.text, routeTitle, tags) : await planEdited(env, post, acts, stored?.items ?? [], now);
   const tzs = items.map((it) => it.plan?.tz ?? it.fail?.tz ?? null);
-  const note = editSummary(stored ? editItemsOf(stored.items) : [], acts, items.map((it) => !!it.plan), items.some((it) => it.route) ? '站' : '場', tzs) ?? post.supplement ?? null;
+  const unit = items.some((it) => it.route) ? '站' : module === 'dog' || module === 'work' ? '筆' : '場';
+  const note = editSummary(stored ? editItemsOf(stored.items, module) : [], acts, items.map((it) => !!it.plan), unit, tzs, module === 'dog' || module === 'work') ?? post.supplement ?? null;
   // 判讀出來的關鍵字：改過好幾次的，照第一次改之前的
   const plan: StoredPlan = { items, early: null, judgedTags: stored?.judgedTags ?? tags };
   await env.DB.prepare("UPDATE posts SET supplement = ?, confirm_plan = ?, confirm_state = 'pending' WHERE id = ?").bind(note, storePlan(plan), post.id).run();
   return previewResult(env, { ...post, supplement: note }, plan, false, now);
 }
 
-/** 表單的地點欄：瀏覽器拿掉換行、送出時空白縮成一個、最多 80 字（跟 parseEditItems 一樣），用來比對地點有沒有改 */
-const placeKey = (s: string): string => [...s.replace(/[\r\n]/g, '').replace(/\s+/g, ' ').trim()].slice(0, 80).join('');
 
 /**
  * 地點沒改、也沒在地圖上標的場次：沿用之前查到的位置（v1.587 使用者說「原本判讀有定位到地址，但補充資料更新預覽後卻定位不到」：
@@ -964,7 +996,6 @@ export interface LocateResult {
 export async function locateForEdit(env: Env, body: { postId?: unknown; token?: unknown; place?: unknown }, now: number): Promise<LocateResult> {
   const post = await checkConfirm(env, body);
   assertEditable(post, '修改');
-  if (moduleOf(post.module) !== 'current') throw new ReportError(400, '這個類別還不能直接修改，請用補充資料');
   const place = typeof body.place === 'string' ? [...body.place.replace(/\s+/g, ' ').trim()].slice(0, 80).join('') : '';
   if (place.length < 2) throw new ReportError(400, '請先填地點');
   const key = `locate:${post.id}`;
