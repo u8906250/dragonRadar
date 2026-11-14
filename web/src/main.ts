@@ -1156,7 +1156,7 @@ function onStreetTile(): void {
  * 雷達那邊放不下（重疊、壓到光點）的不寫、一個畫面最多十幾個。
  * 33 km 以上縣市；1～33 km 鄉鎮市區；5 km 內加國道、快速道路的名字，2 km 內加幹道，1 km 內大街小巷的路名和捷運、火車站（不寫鄉鎮市區）；
  * 地標（v1.698 使用者說拉近可以放大巨蛋、公園等）：5 km 內寫大的（體育場、遊樂園、市政府、大公園），2 km 內都寫（pois-tw.ts，這時才載入）；
- * 一般的公園（沒有 Wikidata）1 km 內都寫、2 km 內寫 1 公頃以上的（v1.701）；國小、國中、高中職比例尺 20 m 以下才寫（v1.727）。
+ * 國小、國中、高中職、一般的公園（外框不到 10 公頃）比例尺 20 m 以下才寫（v1.727、v1.728），大公園照舊。
  * 只有全螢幕寫（v1.692 使用者說一般的雷達不用顯示）；中國的範圍不寫（跟道路一樣）；洋流總部的特效播放時不寫
  */
 /**
@@ -1546,8 +1546,10 @@ function roadSpot(
   return { lat, lng, pts: Float64Array.from(out), at };
 }
 
-/** 國小、國中、高中職等比例尺顯示這麼短（公里）才寫（v1.727 使用者說 20 m） */
+/** 國小、國中、高中職、一般的公園等比例尺顯示這麼短（公里）才寫（v1.727 使用者說 20 m；v1.728 公園也是） */
 const SCHOOL_BAR_KM = 0.02;
+/** 大公園（外框幾公頃以上）：名字照舊，拉遠也寫 */
+const BIG_PARK_HA = 10;
 
 /** 路名上次寫在哪一點（名稱 → 位置） */
 const roadLabelAt = new Map<string, LatLng>();
@@ -1628,16 +1630,21 @@ function placeLabels(
   if (km <= 5) {
     if (!poisMod) loadPois();
     else {
+      // 比例尺還沒短到 20 m：學校、一般的公園不寫
+      const small = radar.scaleBarKm() > SCHOOL_BAR_KM * 1.001;
       for (const [name, lat, lng, kind, ha] of poisMod.TW_POIS) {
         // 國小、國中、高中職（v1.724 使用者說學校都寫出來）：等左下角的比例尺顯示 20 m 以下才寫
         // （v1.725、v1.726 先改成 100 m，v1.727 使用者說改成 20 m；照比例尺，電腦、手機一樣：電腦全螢幕約範圍 230 m 內、手機約 110 m 內）；
         // 大學照下面的地標。比主要道路、車站低
         if (kind === 'es' || kind === 'jh' || kind === 'hs') {
-          if (radar.scaleBarKm() > SCHOOL_BAR_KM * 1.001) continue;
+          if (small) continue;
           // 高中職高過文化館、一公頃以上的公園（60；2 km 時才寫得出來）、低於主要幹道（62）；國中小高過小公園
           add(lat, lng, name, 'poi', kind === 'hs' ? 61 : kind === 'jh' ? 53 : 52);
           continue;
         }
+        // 一般的公園（外框不到 10 公頃，有沒有 Wikidata 都算）：跟學校一樣等比例尺顯示 20 m 以下才寫（v1.728 使用者說公園也是；
+        // 大公園照舊：大安森林公園、青年公園、二二八和平公園這種，拉遠也寫，當作認路的地標）
+        if ((kind === 'lpark' || kind === 'park') && ha < BIG_PARK_HA && small) continue;
         // 沒有 Wikidata 的公園（萬芳四號公園這種，v1.701）：1 km 內都寫、2 km 內寫 1 公頃以上的、再遠只寫很大的；排在大部分路名後面
         if (kind === 'lpark') {
           if (km > 2 ? ha < 20 : km > 1 ? ha < 1 : false) continue;
