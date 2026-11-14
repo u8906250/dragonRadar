@@ -187,7 +187,8 @@ const WORLD_KM = SPACE_FROM_KM;
  * 第 3 號願望「還有哪些星系可以畫出來」，v1.637 拉到 6000 萬光年）
  */
 const SPACE_MAX_KM = 6e7 * LY_KM;
-const MIN_ZOOM_KM = 0.5;
+/** 地球上雷達最近拉到多近（中山公園附近另外可以到 0.5 公尺）：v1.713 從 0.5 km 改成 50 m（使用者說依建議：更近地圖資料沒有更多東西、定位也不準） */
+const MIN_ZOOM_KM = 0.05;
 /**
  * 你在哪一顆：火箭在哪一邊你就在哪一邊（park.ts 存在 dr.rocket；搭火箭到汪星就在汪星，點別的星球只是看過去，坐火箭回來才回到地球）。
  * 在汪星時：太陽系寫「汪星（你）」、「定位」回到汪星的發射口、範圍按鈕是汪星的
@@ -1280,7 +1281,8 @@ function placeLabels(
     }
   }
   out.sort((a, b) => b.pri - a.pri || a.d - b.d);
-  return out.slice(0, 80).map(({ x, y, text, kind, key }) => ({ x, y, text, kind, key }));
+  // 候選多留一點（v1.713：以前 80 個，拖曳時抓大一圈的範圍，畫面裡的小公園被遠處比較重要的擠出候選，移動時名字就不見）
+  return out.slice(0, 400).map(({ x, y, text, kind, key, pri }) => ({ x, y, text, kind, key, pri }));
 }
 
 // ---- 中山公園（park.ts，跟汪星共用一份）：地球的雷達上第一次在公園附近才載入 ----

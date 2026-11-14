@@ -136,7 +136,7 @@ export interface RadarStreets {
 
 /**
  * 雷達上的地名（v1.691 使用者說適度放縣市、區、路、地標，不要太亂）：x、y 跟道路一樣是離錨點的公里（東、北）。
- * 淡淡的小字、不壓在你的位置、光點、星星上，彼此不重疊，一個畫面最多 PLACE_LABEL_MAX 個
+ * 淡淡的小字、不壓在你的位置、光點、星星上，彼此不重疊、中間留空（PLACE_LABEL_GAP），一個畫面最多 PLACE_LABEL_MAX 個
  */
 export interface RadarLabel {
   x: number;
@@ -145,11 +145,22 @@ export interface RadarLabel {
   kind: 'county' | 'town' | 'road' | 'station' | 'poi';
   /** 認同一個名稱用的（同名不同地方的地標要分開）；沒有就用種類和名稱 */
   key?: string;
+  /** 重要的程度（大的先排，可以擠掉已經寫出來、比較不重要的）；沒有算 0 */
+  pri?: number;
 }
 /** 字的大小（螢幕像素：雷達多大字都一樣大，電腦全螢幕不會變成大字） */
 const PLACE_LABEL_PX: Record<RadarLabel['kind'], number> = { county: 13, town: 12, road: 10.5, station: 11, poi: 11 };
-/** 一個畫面最多幾個（只有全螢幕鋪滿時寫，v1.692） */
-const PLACE_LABEL_MAX = 18;
+/**
+ * 一個畫面最多幾個（只有全螢幕鋪滿時寫，v1.692）：照看得到的面積，每 12000 平方像素一個，手機約 18 個（跟以前一樣）、電腦最多 30 個。
+ * v1.713 像 Google 地圖：主要靠名稱之間留空（PLACE_LABEL_GAP）、已經寫出來的多算重要程度（PLACE_LABEL_KEEP），
+ * 以前一律 18 個、滿了以後進來一個差不多重要的就拿掉一個，離得很遠的小公園名字移動時會消失
+ */
+const PLACE_LABEL_PER_PX2 = 12000;
+const PLACE_LABEL_MAX = [12, 30];
+/** 名稱之間至少留多少（字的大小的幾倍）：左右、上下 */
+const PLACE_LABEL_GAP = [2.5, 1.2];
+/** 已經寫出來的名稱多算多少重要程度：差不多重要的新名稱擠不掉它，明顯比較重要的（主要道路、車站）才擠得掉 */
+const PLACE_LABEL_KEEP = 10;
 /** 縮放、轉動停了多久才算停下來（被擋住的名稱這時才試別的位置） */
 const LABEL_SETTLE_MS = 300;
 /** 名稱淡出多久（跟 styles.css 的 .place-label 一樣） */
@@ -2080,16 +2091,13 @@ export class Radar {
     const keyOf = (lb: RadarLabel): string => lb.key ?? `${lb.kind}|${lb.text}`;
     const byKey = new Map<string, RadarLabel>();
     for (const lb of labels) if (!byKey.has(keyOf(lb))) byKey.set(keyOf(lb), lb);
-    // 已經寫出來的、移動中被擋住記著的先排，再來是新的（照重要的順序）
-    const queue: Array<[string, RadarLabel, [number, number] | null]> = [];
-    for (const m of [this.labelShown, this.labelHidden]) {
-      for (const [key, off] of m) {
-        const lb = byKey.get(key);
-        if (lb && !queue.some((q) => q[0] === key)) queue.push([key, lb, off]);
-      }
-    }
-    const queued = new Set(queue.map((q) => q[0]));
-    for (const [key, lb] of byKey) if (!queued.has(key)) queue.push([key, lb, null]);
+    // 照重要的順序排（明顯比較重要的可以擠掉已經寫出來的，像 Google 地圖；v1.713：以前已經寫出來的一律先排，
+    // 先載入的地標把後來才到的路名、車站擋在外面）；已經寫出來的多算 PLACE_LABEL_KEEP，一樣重要的已經寫出來的先、移動中被擋住記著的再來，最後才是新的
+    const rank = (key: string): number => (this.labelShown.has(key) ? 0 : this.labelHidden.has(key) ? 1 : 2);
+    const queue: Array<[string, RadarLabel, [number, number] | null]> = [...byKey]
+      .map(([key, lb], i) => ({ key, lb, i, r: rank(key), p: (lb.pri ?? 0) + (rank(key) < 2 ? PLACE_LABEL_KEEP : 0) }))
+      .sort((a, b) => b.p - a.p || a.r - b.r || a.i - b.i)
+      .map(({ key, lb }) => [key, lb, this.labelShown.get(key) ?? this.labelHidden.get(key) ?? null]);
     /** 名稱中間在畫面上的位置（挪過的照挪的） */
     const at = (lb: RadarLabel, [ox, oy]: [number, number]): [number, number] => {
       const dx = lb.x - sx;
@@ -2103,9 +2111,11 @@ export class Radar {
     };
     const shown = new Map<string, [number, number]>();
     const hidden = new Map<string, [number, number]>();
+    const areaPx = (4 * RADAR_VIEW.hx * RADAR_VIEW.hy) / (unit * unit);
+    const max = Math.max(PLACE_LABEL_MAX[0], Math.min(PLACE_LABEL_MAX[1], Math.round(areaPx / PLACE_LABEL_PER_PX2)));
     let n = 0;
     for (const [key, lb, prev] of queue) {
-      if (n >= PLACE_LABEL_MAX) {
+      if (n >= max) {
         if (prev && moving) hidden.set(key, prev);
         continue;
       }
@@ -2122,7 +2132,9 @@ export class Radar {
       for (const [ox, oy] of tries) {
         const bx = { l: x + ox - w / 2, r: x + ox + w / 2, t: y + oy - h / 2, b: y + oy + h / 2 };
         if (inView(bx.l, bx.t) && inView(bx.r, bx.t) && inView(bx.l, bx.b) && inView(bx.r, bx.b) && !taken.some((q) => q.l < bx.r && bx.l < q.r && q.t < bx.b && bx.t < q.b)) {
-          taken.push(bx);
+          // 別的名稱要離這個遠一點（光點、你的位置那些不用）
+          const [gx, gy] = [PLACE_LABEL_GAP[0] * fs, PLACE_LABEL_GAP[1] * fs];
+          taken.push({ l: bx.l - gx, r: bx.r + gx, t: bx.t - gy, b: bx.b + gy });
           got = [ox, oy];
           break;
         }
@@ -2234,21 +2246,43 @@ export class Radar {
    */
   private streetPath(l: Float64Array, k: number, cos: number, sin: number, lim2: number, sx: number, sy: number): string {
     const n = l.length / 2;
-    const near = (i: number): boolean => i >= 0 && i < n && (l[2 * i] - sx) ** 2 + (l[2 * i + 1] - sy) ** 2 <= lim2;
+    /**
+     * 第 i 段（第 i 點到第 i+1 點）碰到範圍（離中心 lim 內）：一端在裡面，或從中間經過
+     * （v1.713 拉近到 50 m：以前只看兩端，路口都在畫面外的一段整段不畫，畫面正中間的路會不見）
+     */
+    const segIn = (i: number): boolean => {
+      if (i < 0 || i >= n - 1) return false;
+      const ax = l[2 * i] - sx;
+      const ay = l[2 * i + 1] - sy;
+      const bx = l[2 * i + 2] - sx;
+      const by = l[2 * i + 3] - sy;
+      if (ax * ax + ay * ay <= lim2 || bx * bx + by * by <= lim2) return true;
+      const ex = bx - ax;
+      const ey = by - ay;
+      const len2 = ex * ex + ey * ey;
+      if (len2 === 0) return false;
+      const t = Math.max(0, Math.min(1, -(ax * ex + ay * ey) / len2));
+      const qx = ax + t * ex;
+      const qy = ay + t * ey;
+      return qx * qx + qy * qy <= lim2;
+    };
     let d = '';
     let pen = false;
     let px = 0;
     let py = 0;
+    let before = false;
     for (let i = 0; i < n; i++) {
-      if (!near(i) && !near(i - 1) && !near(i + 1)) {
-        pen = false;
-        continue;
-      }
+      const after = segIn(i);
+      const draw = before || after;
+      // 前一段沒畫：從這一點重新下筆
+      if (!before) pen = false;
+      before = after;
+      if (!draw) continue;
       const dx = l[2 * i] - sx;
       const dy = l[2 * i + 1] - sy;
       const x = C + k * (dx * cos - dy * sin);
       const y = C - k * (dy * cos + dx * sin);
-      if (pen && i < n - 1 && Math.abs(x - px) + Math.abs(y - py) < 1.5) continue;
+      if (pen && after && Math.abs(x - px) + Math.abs(y - py) < 1.5) continue;
       d += `${pen ? 'L' : 'M'}${x.toFixed(1)} ${y.toFixed(1)}`;
       pen = true;
       px = x;
