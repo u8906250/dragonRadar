@@ -1155,7 +1155,7 @@ function onStreetTile(): void {
  * 雷達那邊放不下（重疊、壓到光點）的不寫、一個畫面最多十幾個。
  * 33 km 以上縣市；1～33 km 鄉鎮市區；5 km 內加國道、快速道路的名字，2 km 內加幹道，1 km 內大街小巷的路名和捷運、火車站（不寫鄉鎮市區）；
  * 地標（v1.698 使用者說拉近可以放大巨蛋、公園等）：5 km 內寫大的（體育場、遊樂園、市政府、大公園），2 km 內都寫（pois-tw.ts，這時才載入）；
- * 一般的公園（沒有 Wikidata）1 km 內都寫、2 km 內寫 1 公頃以上的（v1.701）。
+ * 一般的公園（沒有 Wikidata）1 km 內都寫、2 km 內寫 1 公頃以上的（v1.701）；國小、國中 1 km 內、高中職 2 km 內寫（v1.724）。
  * 只有全螢幕寫（v1.692 使用者說一般的雷達不用顯示）；中國的範圍不寫（跟道路一樣）；洋流總部的特效播放時不寫
  */
 /**
@@ -1625,6 +1625,14 @@ function placeLabels(
     if (!poisMod) loadPois();
     else {
       for (const [name, lat, lng, kind, ha] of poisMod.TW_POIS) {
+        // 國小、國中、高中職（v1.724 使用者說學校都寫出來，分級）：1 km 內都寫、2 km 內寫高中職（大學照下面的地標）；
+        // 比主要道路、車站低
+        if (kind === 'es' || kind === 'jh' || kind === 'hs') {
+          if (km > (kind === 'hs' ? 2 : 1)) continue;
+          // 高中職高過文化館、一公頃以上的公園（60；2 km 時才寫得出來）、低於主要幹道（62）；國中小高過小公園
+          add(lat, lng, name, 'poi', kind === 'hs' ? 61 : kind === 'jh' ? 53 : 52);
+          continue;
+        }
         // 沒有 Wikidata 的公園（萬芳四號公園這種，v1.701）：1 km 內都寫、2 km 內寫 1 公頃以上的、再遠只寫很大的；排在大部分路名後面
         if (kind === 'lpark') {
           if (km > 2 ? ha < 20 : km > 1 ? ha < 1 : false) continue;
