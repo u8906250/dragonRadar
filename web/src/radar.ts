@@ -120,14 +120,26 @@ export interface RadarRoute {
   boats?: Array<{ bearing: number; distanceKm: number; at: number; kind: 'sup' | 'dragon'; heading: number }>;
 }
 
-/** 放大時畫的街道：每條線是 [往東 km, 往北 km, 往東 km, …]（相對於圓心）；major 大路、minor 其他街道 */
-export interface RadarStreets {
+/**
+ * 一張圖磚的道路（v1.720 使用者說快速拖遠時地圖跟不上：一張一張畫好留著，拖曳時整層平移，新進畫面的才畫）。
+ * 每條線是 [往東 km, 往北 km, …]，離 RadarStreets.frame 的錨點；box 是範圍 [西, 南, 東, 北]（同樣離錨點的公里）
+ */
+export interface RadarStreetTile {
+  key: string;
+  box: [number, number, number, number];
+  /** major 大路、minor 其他街道 */
   major: Float64Array[];
   minor: Float64Array[];
   /** 海岸線（16 km 內，從街道圖磚來；畫成跟遠的海岸線一樣的虛線） */
-  coast?: Float64Array[];
-  /** 公園綠地（全螢幕才有）：每一塊是外圈和挖空的圈，跟道路一樣是離錨點的公里 */
-  green?: Float64Array[][];
+  coast: Float64Array[];
+  /** 公園綠地（全螢幕才有）：每一塊是外圈和挖空的圈 */
+  green: Float64Array[][];
+}
+
+/** 放大時畫的街道：一張一張的圖磚，座標都是離錨點的公里（錨點換了 frame 就換，全部重畫） */
+export interface RadarStreets {
+  frame: number;
+  tiles: RadarStreetTile[];
   /** 寫在雷達上的地名、路名、車站：照重要的先排好，擠不下的不寫 */
   labels?: RadarLabel[];
   /** 名稱不能寫在上面的範圍（[西, 南, 東, 北]，離錨點的公里）：例如畫了樹冠、屋頂的中山公園 */
@@ -161,6 +173,95 @@ const PLACE_LABEL_MAX = [12, 30];
 const PLACE_LABEL_GAP = [2.5, 1.2];
 /** 已經寫出來的名稱多算多少重要程度：差不多重要的新名稱擠不掉它，明顯比較重要的（主要道路、車站）才擠得掉 */
 const PLACE_LABEL_KEEP = 10;
+/** 道路圖磚：縮放停了多久才照新的比例重畫；一格最多重畫幾張（新進畫面的不算） */
+const TILE_SETTLE_MS = 250;
+/** 圖磚的索引：每張分成幾乘幾的小方格 */
+const TILE_GRID = 16;
+interface TileIndex {
+  x0: number;
+  y0: number;
+  cw: number;
+  ch: number;
+  kinds: Array<{ boxes: Float64Array; buckets: number[][]; stamp: Uint32Array }>;
+}
+/**
+ * 線（[x, y, x, y, …]）切在長方形 [x0, y0, x1, y1] 裡面的幾段（Liang–Barsky，一段一段切，連著的接起來）
+ */
+export function clipLine(l: ArrayLike<number>, r: [number, number, number, number]): number[][] {
+  const out: number[][] = [];
+  let cur: number[] | null = null;
+  for (let q = 0; q + 3 < l.length; q += 2) {
+    const [ax, ay, bx, by] = [l[q], l[q + 1], l[q + 2], l[q + 3]];
+    const dx = bx - ax;
+    const dy = by - ay;
+    let t0 = 0;
+    let t1 = 1;
+    let ok = true;
+    for (const [p, v] of [
+      [-dx, ax - r[0]],
+      [dx, r[2] - ax],
+      [-dy, ay - r[1]],
+      [dy, r[3] - ay],
+    ]) {
+      if (p === 0) {
+        if (v < 0) ok = false;
+      } else {
+        const t = v / p;
+        if (p < 0) t0 = Math.max(t0, t);
+        else t1 = Math.min(t1, t);
+      }
+      if (!ok || t0 > t1) {
+        ok = false;
+        break;
+      }
+    }
+    if (!ok) {
+      cur = null;
+      continue;
+    }
+    if (!cur || t0 > 0) {
+      cur = [ax + t0 * dx, ay + t0 * dy];
+      out.push(cur);
+    }
+    cur.push(ax + t1 * dx, ay + t1 * dy);
+    if (t1 < 1) cur = null;
+  }
+  return out;
+}
+
+/** 一圈（[x, y, …]）切在長方形裡面（Sutherland–Hodgman，方向不變，nonzero 填色的外圈、挖空的圈照舊） */
+export function clipRing(ring: ArrayLike<number>, r: [number, number, number, number]): number[] {
+  let pts: number[] = Array.from(ring);
+  const edges: Array<[(x: number, y: number) => boolean, (ax: number, ay: number, bx: number, by: number) => [number, number]]> = [
+    [(x) => x >= r[0], (ax, ay, bx, by) => [r[0], ay + ((by - ay) * (r[0] - ax)) / (bx - ax)]],
+    [(x) => x <= r[2], (ax, ay, bx, by) => [r[2], ay + ((by - ay) * (r[2] - ax)) / (bx - ax)]],
+    [(_, y) => y >= r[1], (ax, ay, bx, by) => [ax + ((bx - ax) * (r[1] - ay)) / (by - ay), r[1]]],
+    [(_, y) => y <= r[3], (ax, ay, bx, by) => [ax + ((bx - ax) * (r[3] - ay)) / (by - ay), r[3]]],
+  ];
+  for (const [inside, cross] of edges) {
+    const out: number[] = [];
+    const n = pts.length / 2;
+    for (let q = 0; q < n; q++) {
+      const [ax, ay] = [pts[2 * q], pts[2 * q + 1]];
+      const [bx, by] = [pts[(2 * q + 2) % pts.length], pts[(2 * q + 3) % pts.length]];
+      const ia = inside(ax, ay);
+      const ib = inside(bx, by);
+      if (ia) out.push(ax, ay);
+      if (ia !== ib) out.push(...cross(ax, ay, bx, by));
+    }
+    pts = out;
+    if (pts.length < 6) return [];
+  }
+  return pts;
+}
+
+/** 道路的四層（由下往上）：綠地、海岸線、小路、大路 */
+const TILE_CLASSES: Array<[string, Record<string, string>]> = [
+  ['green-area', { 'fill-rule': 'nonzero' }],
+  ['region-outline open coast-line', {}],
+  ['street-minor', {}],
+  ['street-major', {}],
+];
 /** 全螢幕拖曳時光點那幾層整層平移：移動超過畫面短邊一半的幾成才重建一次；重建時畫面外多畫幾成（滑進來用） */
 const PAN_REBUILD = 0.3;
 const PAN_MARGIN = 0.4;
@@ -621,9 +722,7 @@ export class Radar {
   private streets: RadarStreets | null = null;
   /** 道路從算的那一點（main.ts 的錨點）到正中間的位移（公里，東、北）：拖曳時不重算道路，只移過去 */
   private streetShift: [number, number] = [0, 0];
-  private streetLoose = false;
   /** 上次建好的道路：拖曳時只位移了，平移整層就好，超出多畫的那一圈（margin，公里）才重建 */
-  private streetsBuilt: { s: RadarStreets; k: number; heading: number; lim: number; sx: number; sy: number; margin: number } | null = null;
   private readonly streetLayer: SVGGElement;
   /** 地球上的中山公園（park.ts，跟汪星共用）：照雷達外圈的公里數畫成 SVG（北在上）；不在附近是 null */
   private parkDraw: ((scaleKm: number) => string) | null = null;
@@ -1695,14 +1794,10 @@ export class Radar {
   /** 上次畫輪廓用的資料和比例：一樣的話只平移 */
   private outlineBuilt: { rings: unknown; lines: unknown; k: number; heading: number; unit: number; space: boolean } | null = null;
 
-  /**
-   * 放大時的街道；null 不畫。shift：道路的座標原點到正中間的位移（公里，東、北），拖曳時只改這個；
-   * loose：拖曳中，多畫外面一圈，接下來只平移
-   */
-  setStreets(s: RadarStreets | null, shift: [number, number] = [0, 0], loose = false): void {
+  /** 放大時的街道；null 不畫。shift：道路的錨點到正中間的位移（公里，東、北），拖曳時只改這個 */
+  setStreets(s: RadarStreets | null, shift: [number, number] = [0, 0]): void {
     this.streets = s;
     this.streetShift = shift;
-    this.streetLoose = loose;
     this.draw();
   }
 
@@ -1983,47 +2078,245 @@ export class Radar {
    * 街道：大路、其他街道各合成一條 path（線很多，一條一個元素太慢）。
    * 拖曳時（loose）多畫外面一圈（範圍的 1/4），之後只平移整層，移出那一圈才重建（16 km 內的街道很多，每一格重建手機會卡）
    */
+  /**
+   * 道路切成跟畫面差不多大的格子（v1.720：一張圖磚常常比畫面大很多，整張畫進去瀏覽器每一格要處理的線太多）：
+   * 格子是錨點座標裡邊長 cellKm 的正方形（畫面寬的四分之一到一半），每一格只放跟它重疊的那一段（線切在格子邊上，
+   * 綠地多重疊一點點才不會有縫），畫好留著；拖曳時整層平移，新進畫面的格子才畫、出了畫面的拿掉，已經畫好的完全不動。
+   * 縮放中不用格子：每一格只畫畫面裡的線（跟以前一樣），停了（TILE_SETTLE_MS）才照新的比例畫格子
+   */
+  private cells = new Map<string, { parts: Array<SVGPathElement | null>; src: string }>();
+  private cellKm = 0;
+  private cellK = 0;
+  private tileFrame: { frame: number; fill: boolean; unit: number } | null = null;
+  /** 綠地、海岸線、小路、大路四層（由下往上），每層裡面是格子那組、縮放中那一條 */
+  private tileLayers: Array<{ cellsG: SVGGElement; zoom: SVGPathElement }> = [];
+  private tileLastK = 0;
+  private tileKAt = 0;
+  private tileSettle = 0;
+  /** 圖磚資料的編號（換了資料，用到它的格子要重畫） */
+  private tileIds = new WeakMap<RadarStreetTile, number>();
+  private tileIdNext = 1;
+  /** 每張圖磚的線照位置分到 16×16 的小方格（只查附近的線） */
+  private tileIndex = new WeakMap<RadarStreetTile, TileIndex>();
+  private indexStamp = 0;
+
   private drawStreets(): void {
     const s = this.streets;
     if (!s || this.inSpace) {
       this.streetLayer.replaceChildren();
-      this.streetsBuilt = null;
+      this.streetLayer.removeAttribute('transform');
+      this.cells.clear();
+      this.tileFrame = null;
+      this.tileLayers = [];
       return;
     }
     const k = (R - 8) / this.scaleKm;
-    const h = (this.heading * Math.PI) / 180;
-    const cos = Math.cos(h);
-    const sin = Math.sin(h);
-    const lim = this.scaleKm * this.reach * 1.05;
+    const unit = this.squarePx > 0 ? SIZE / this.squarePx : 1;
+    const now = performance.now();
+    if (k !== this.tileLastK) {
+      if (this.tileLastK !== 0) {
+        this.tileKAt = now;
+        window.clearTimeout(this.tileSettle);
+        this.tileSettle = window.setTimeout(() => {
+          this.tileSettle = 0;
+          this.draw();
+        }, TILE_SETTLE_MS + 20);
+      }
+      this.tileLastK = k;
+    }
+    const zooming = now - this.tileKAt < TILE_SETTLE_MS;
+    const f = this.tileFrame;
+    if (!f || f.frame !== s.frame || f.fill !== this.fill || f.unit !== unit || this.tileLayers.length === 0) {
+      this.streetLayer.replaceChildren();
+      this.tileLayers = TILE_CLASSES.map(([cls, attrs]) => {
+        const g = el('g', { class: `tl-${cls.split(' ').at(-1)}` }) as SVGGElement;
+        const cellsG = el('g') as SVGGElement;
+        const zoom = el('path', { class: cls, d: '', ...attrs }) as SVGPathElement;
+        g.append(cellsG, zoom);
+        this.streetLayer.appendChild(g);
+        return { cellsG, zoom };
+      });
+      this.cells.clear();
+      this.cellK = 0;
+      this.tileFrame = { frame: s.frame, fill: this.fill, unit };
+    }
     const [sx, sy] = this.streetShift;
-    const b = this.streetsBuilt;
-    if (b && b.s === s && b.k === k && b.heading === this.heading && b.lim === lim && Math.hypot(sx - b.sx, sy - b.sy) <= b.margin) {
-      const [dx, dy] = [sx - b.sx, sy - b.sy];
-      if (dx === 0 && dy === 0) this.streetLayer.removeAttribute('transform');
-      else this.streetLayer.setAttribute('transform', `translate(${(-k * (dx * cos - dy * sin)).toFixed(1)} ${(k * (dy * cos + dx * sin)).toFixed(1)})`);
+    const half = this.scaleKm * this.reach * 1.05;
+    // 看得到的範圍（公里，往東、往北的一半）：全螢幕是畫面的長方形，平常是外圈；指北針轉了取轉過的外框
+    const [vx0, vy0] = this.fill ? [RADAR_VIEW.hx / k, RADAR_VIEW.hy / k] : [this.scaleKm, this.scaleKm];
+    const hr = (this.heading * Math.PI) / 180;
+    const [vx, vy] = [Math.abs(vx0 * Math.cos(hr)) + Math.abs(vy0 * Math.sin(hr)), Math.abs(vx0 * Math.sin(hr)) + Math.abs(vy0 * Math.cos(hr))];
+    this.streetLayer.setAttribute('transform', `translate(${C} ${C}) rotate(${(-this.heading).toFixed(2)}) translate(${(-k * sx).toFixed(2)} ${(k * sy).toFixed(2)})`);
+    if (zooming) {
+      // 縮放中：每一格只畫畫面裡的線（照現在的比例），格子先藏起來
+      const view: [number, number, number, number] = [sx - vx * 1.05, sy - vy * 1.05, sx + vx * 1.05, sy + vy * 1.05];
+      const ds = this.streetPaths(s.tiles, view, k, false);
+      this.tileLayers.forEach((l, n) => {
+        l.cellsG.setAttribute('display', 'none');
+        l.zoom.setAttribute('d', ds[n]);
+      });
       return;
     }
-    const margin = this.streetLoose ? lim / 4 : 0;
-    const lim2 = (lim + margin) ** 2;
-    this.streetLayer.replaceChildren();
-    this.streetLayer.removeAttribute('transform');
-    // 公園綠地：最底下、淡綠色塊（不透明，相鄰圖磚重疊的地方才不會變深），全螢幕才畫。
-    // 用 nonzero 填色：外圈、挖空的圈方向相反（圖磚、公園外框都一樣），相鄰圖磚重疊的那一條才不會變成洞（v1.707：以前 evenodd，拉遠時一條一條白線）
-    if (this.fill && s.green?.length) {
-      let d = '';
-      for (const poly of s.green) d += this.greenPath(poly, k, cos, sin, lim2, sx, sy);
-      if (d) this.streetLayer.appendChild(el('path', { class: 'green-area', d, 'fill-rule': 'nonzero' }));
+    // 停著、拖曳：格子。比例、格子大小變了全部重畫（縮放停了那一次）
+    const ideal = 2 ** Math.floor(Math.log2(half));
+    if (this.cellK !== k || this.cellKm !== ideal) {
+      for (const l of this.tileLayers) l.cellsG.replaceChildren();
+      this.cells.clear();
+      this.cellK = k;
+      this.cellKm = ideal;
     }
-    for (const [cls, lines] of [
-      ['region-outline open coast-line', s.coast ?? []],
-      ['street-minor', s.minor],
-      ['street-major', s.major],
-    ] as const) {
-      let d = '';
-      for (const l of lines) d += this.streetPath(l, k, cos, sin, lim2, sx, sy);
-      if (d) this.streetLayer.appendChild(el('path', { class: cls, d }));
+    for (const l of this.tileLayers) {
+      l.cellsG.removeAttribute('display');
+      if (l.zoom.getAttribute('d')) l.zoom.setAttribute('d', '');
     }
-    this.streetsBuilt = { s, k, heading: this.heading, lim, sx, sy, margin };
+    const c = this.cellKm;
+    // 畫面附近（多一成）的格子
+    const [mx, my] = [vx * 1.1, vy * 1.1];
+    const want = new Set<string>();
+    for (let i = Math.floor((sx - mx) / c); i <= Math.floor((sx + mx) / c); i++) {
+      for (let j = Math.floor((sy - my) / c); j <= Math.floor((sy + my) / c); j++) {
+        const key = `${i},${j}`;
+        want.add(key);
+        const rect: [number, number, number, number] = [i * c, j * c, (i + 1) * c, (j + 1) * c];
+        const tiles = s.tiles.filter((t) => !(t.box[2] < rect[0] || t.box[0] > rect[2] || t.box[3] < rect[1] || t.box[1] > rect[3]));
+        const src = tiles.map((t) => this.tileId(t)).join(',');
+        const cur = this.cells.get(key);
+        if (cur && cur.src === src) continue;
+        if (cur) for (const p of cur.parts) p?.remove();
+        const ds = this.streetPaths(tiles, rect, k, true);
+        const parts = ds.map((d, n) => (d ? (el('path', { class: TILE_CLASSES[n][0], d, ...TILE_CLASSES[n][1] }) as SVGPathElement) : null));
+        parts.forEach((p, n) => p && this.tileLayers[n].cellsG.appendChild(p));
+        this.cells.set(key, { parts, src });
+      }
+    }
+    for (const [key, cur] of this.cells) {
+      if (want.has(key)) continue;
+      for (const p of cur.parts) p?.remove();
+      this.cells.delete(key);
+    }
+  }
+
+  private tileId(t: RadarStreetTile): number {
+    let id = this.tileIds.get(t);
+    if (id === undefined) {
+      id = this.tileIdNext++;
+      this.tileIds.set(t, id);
+    }
+    return id;
+  }
+
+  /** 圖磚的索引（第一次用到才建）：綠地、海岸線、小路、大路各自照範圍分到 TILE_GRID×TILE_GRID 的小方格 */
+  private indexOf(t: RadarStreetTile): TileIndex {
+    let ix = this.tileIndex.get(t);
+    if (ix) return ix;
+    const [x0, y0, x1, y1] = t.box;
+    const cw = Math.max(1e-9, (x1 - x0) / TILE_GRID);
+    const ch = Math.max(1e-9, (y1 - y0) / TILE_GRID);
+    const kinds = [t.green.map((p) => p[0]), t.coast, t.minor, t.major].map((list) => {
+      const boxes = new Float64Array(list.length * 4);
+      const buckets: number[][] = Array.from({ length: TILE_GRID * TILE_GRID }, () => []);
+      list.forEach((l, n) => {
+        let [a, b, c, d] = [Infinity, Infinity, -Infinity, -Infinity];
+        for (let q = 0; q < l.length; q += 2) {
+          a = Math.min(a, l[q]);
+          c = Math.max(c, l[q]);
+          b = Math.min(b, l[q + 1]);
+          d = Math.max(d, l[q + 1]);
+        }
+        boxes.set([a, b, c, d], n * 4);
+        const clamp = (v: number): number => Math.max(0, Math.min(TILE_GRID - 1, v));
+        for (let gi = clamp(Math.floor((a - x0) / cw)); gi <= clamp(Math.floor((c - x0) / cw)); gi++) {
+          for (let gj = clamp(Math.floor((b - y0) / ch)); gj <= clamp(Math.floor((d - y0) / ch)); gj++) buckets[gi * TILE_GRID + gj].push(n);
+        }
+      });
+      return { boxes, buckets, stamp: new Uint32Array(list.length) };
+    });
+    ix = { x0, y0, cw, ch, kinds };
+    this.tileIndex.set(t, ix);
+    return ix;
+  }
+
+  /** 圖磚裡範圍跟 rect 碰到的第 kind 種的編號 */
+  private query(t: RadarStreetTile, kind: number, rect: [number, number, number, number]): number[] {
+    const ix = this.indexOf(t);
+    const kd = ix.kinds[kind];
+    const stamp = ++this.indexStamp;
+    const clamp = (v: number): number => Math.max(0, Math.min(TILE_GRID - 1, v));
+    const out: number[] = [];
+    for (let gi = clamp(Math.floor((rect[0] - ix.x0) / ix.cw)); gi <= clamp(Math.floor((rect[2] - ix.x0) / ix.cw)); gi++) {
+      for (let gj = clamp(Math.floor((rect[1] - ix.y0) / ix.ch)); gj <= clamp(Math.floor((rect[3] - ix.y0) / ix.ch)); gj++) {
+        for (const n of kd.buckets[gi * TILE_GRID + gj]) {
+          if (kd.stamp[n] === stamp) continue;
+          kd.stamp[n] = stamp;
+          const b = n * 4;
+          if (kd.boxes[b + 2] < rect[0] || kd.boxes[b] > rect[2] || kd.boxes[b + 3] < rect[1] || kd.boxes[b + 1] > rect[3]) continue;
+          out.push(n);
+        }
+      }
+    }
+    return out;
+  }
+
+  /**
+   * 長方形 rect（錨點的公里）裡的道路照比例 k 畫成四層的路徑字串（綠地、海岸線、小路、大路）：座標是 (k × 往東, −k × 往北)，北在上，
+   * 位移、指北針轉向在整層的 transform。clip（格子）：線切在 rect 邊上，綠地往外多切 2 個單位（相鄰格子重疊，不透明，看不出接縫），
+   * 整條在裡面的不用切；不 clip（縮放中只畫畫面這一次）：碰到 rect 的整條畫。畫面上離上一點太近的點省略（線 1.5、綠地 3 個單位），太小的綠地不畫
+   */
+  private streetPaths(tiles: RadarStreetTile[], rect: [number, number, number, number], k: number, clip: boolean): string[] {
+    const inside = (b: Float64Array, n: number, r: [number, number, number, number]): boolean => b[n * 4] >= r[0] && b[n * 4 + 1] >= r[1] && b[n * 4 + 2] <= r[2] && b[n * 4 + 3] <= r[3];
+    const pts = (xs: ArrayLike<number>, tol: number, close: boolean): string => {
+      let d = '';
+      let px = Infinity;
+      let py = Infinity;
+      const n = xs.length / 2;
+      for (let q = 0; q < n; q++) {
+        const x = k * xs[2 * q];
+        const y = -k * xs[2 * q + 1];
+        if (q > 0 && q < n - 1 && Math.abs(x - px) + Math.abs(y - py) < tol) continue;
+        d += `${q === 0 ? 'M' : 'L'}${x.toFixed(1)} ${y.toFixed(1)}`;
+        px = x;
+        py = y;
+      }
+      return d && close ? `${d}Z` : d;
+    };
+    const out = ['', '', '', ''];
+    const [w2, h2] = [(rect[2] - rect[0]) / 2, (rect[3] - rect[1]) / 2];
+    const wide: [number, number, number, number] = [rect[0] - w2, rect[1] - h2, rect[2] + w2, rect[3] + h2];
+    for (const t of tiles) {
+      for (const [kind, list] of [
+        [1, t.coast],
+        [2, t.minor],
+        [3, t.major],
+      ] as const) {
+        const boxes = this.indexOf(t).kinds[kind].boxes;
+        for (const n of this.query(t, kind, rect)) {
+          // 格子：切在邊上；縮放中：畫面外多一半裡面的整條畫，很長的才切（只畫畫面附近那段）
+          const r = clip ? rect : wide;
+          if (inside(boxes, n, r)) out[kind] += pts(list[n], 1.5, false);
+          else for (const piece of clipLine(list[n], r)) out[kind] += pts(piece, 1.5, false);
+        }
+      }
+      if (!this.fill) continue;
+      const e = 2 / k;
+      const gr: [number, number, number, number] = [rect[0] - e, rect[1] - e, rect[2] + e, rect[3] + e];
+      const gboxes = this.indexOf(t).kinds[0].boxes;
+      for (const n of this.query(t, 0, gr)) {
+        const whole = !clip || inside(gboxes, n, gr);
+        for (const r of t.green[n]) {
+          let [x0, x1, y0, y1] = [Infinity, -Infinity, Infinity, -Infinity];
+          for (let q = 0; q < r.length; q += 2) {
+            x0 = Math.min(x0, r[q]);
+            x1 = Math.max(x1, r[q]);
+            y0 = Math.min(y0, r[q + 1]);
+            y1 = Math.max(y1, r[q + 1]);
+          }
+          if ((x1 - x0) * k < 4 && (y1 - y0) * k < 4) continue;
+          const ring = whole ? r : clipRing(r, gr);
+          if (ring.length >= 6) out[0] += pts(ring, 3, true);
+        }
+      }
+    }
+    return out;
   }
 
   /**
@@ -2204,110 +2497,6 @@ export class Radar {
     return Math.hypot(px, py) <= this.edgeR((Math.atan2(px, -py) * 180) / Math.PI) * 0.9;
   }
 
-  /** 一塊綠地：整塊都在範圍外面就不畫；畫面上離上一點不到 1.5 像素的省略 */
-  private greenPath(rings: Float64Array[], k: number, cos: number, sin: number, lim2: number, sx: number, sy: number): string {
-    const outer = rings[0];
-    let near = false;
-    let minX = Infinity;
-    let maxX = -Infinity;
-    let minY = Infinity;
-    let maxY = -Infinity;
-    for (let i = 0; i < outer.length; i += 2) {
-      const dx = outer[i] - sx;
-      const dy = outer[i + 1] - sy;
-      if (dx * dx + dy * dy <= lim2) {
-        near = true;
-        break;
-      }
-      minX = Math.min(minX, dx);
-      maxX = Math.max(maxX, dx);
-      minY = Math.min(minY, dy);
-      maxY = Math.max(maxY, dy);
-    }
-    // 很大的一塊（點都在畫面外面）：外框跟畫面碰到就畫（v1.708：以前只看正中間在不在外框裡，蓋住半個畫面的大片樹林會整塊不見）
-    const L = Math.sqrt(lim2);
-    if (!near && (maxX < -L || minX > L || maxY < -L || minY > L)) return '';
-    // 色塊不用像道路那麼細：離上一點不到 3 個單位的省略，整圈不到 4 個單位寬、高的不畫（拉遠時山上的樹林點很多，v1.705 實測 12 km 會卡）
-    let d = '';
-    for (const r of rings) {
-      let px = Infinity;
-      let py = Infinity;
-      let part = '';
-      let n = 0;
-      let x0 = Infinity;
-      let x1 = -Infinity;
-      let y0 = Infinity;
-      let y1 = -Infinity;
-      for (let i = 0; i < r.length; i += 2) {
-        const dx = r[i] - sx;
-        const dy = r[i + 1] - sy;
-        const x = C + k * (dx * cos - dy * sin);
-        const y = C - k * (dy * cos + dx * sin);
-        if (n > 0 && i < r.length - 2 && Math.abs(x - px) + Math.abs(y - py) < 3) continue;
-        part += `${n === 0 ? 'M' : 'L'}${x.toFixed(1)} ${y.toFixed(1)}`;
-        n++;
-        px = x;
-        py = y;
-        x0 = Math.min(x0, x);
-        x1 = Math.max(x1, x);
-        y0 = Math.min(y0, y);
-        y1 = Math.max(y1, y);
-      }
-      if (n >= 3 && x1 - x0 >= 4 && y1 - y0 >= 4) d += `${part}Z`;
-    }
-    return d;
-  }
-
-  /**
-   * 一條街：外圈外面的點，前後一點在圈內的才留（線畫到外圈再被裁掉），都在外面的斷開；
-   * 畫面上離上一點不到 1.5 像素的省略。手機朝向轉了就跟著轉
-   */
-  private streetPath(l: Float64Array, k: number, cos: number, sin: number, lim2: number, sx: number, sy: number): string {
-    const n = l.length / 2;
-    /**
-     * 第 i 段（第 i 點到第 i+1 點）碰到範圍（離中心 lim 內）：一端在裡面，或從中間經過
-     * （v1.713 拉近到 50 m：以前只看兩端，路口都在畫面外的一段整段不畫，畫面正中間的路會不見）
-     */
-    const segIn = (i: number): boolean => {
-      if (i < 0 || i >= n - 1) return false;
-      const ax = l[2 * i] - sx;
-      const ay = l[2 * i + 1] - sy;
-      const bx = l[2 * i + 2] - sx;
-      const by = l[2 * i + 3] - sy;
-      if (ax * ax + ay * ay <= lim2 || bx * bx + by * by <= lim2) return true;
-      const ex = bx - ax;
-      const ey = by - ay;
-      const len2 = ex * ex + ey * ey;
-      if (len2 === 0) return false;
-      const t = Math.max(0, Math.min(1, -(ax * ex + ay * ey) / len2));
-      const qx = ax + t * ex;
-      const qy = ay + t * ey;
-      return qx * qx + qy * qy <= lim2;
-    };
-    let d = '';
-    let pen = false;
-    let px = 0;
-    let py = 0;
-    let before = false;
-    for (let i = 0; i < n; i++) {
-      const after = segIn(i);
-      const draw = before || after;
-      // 前一段沒畫：從這一點重新下筆
-      if (!before) pen = false;
-      before = after;
-      if (!draw) continue;
-      const dx = l[2 * i] - sx;
-      const dy = l[2 * i + 1] - sy;
-      const x = C + k * (dx * cos - dy * sin);
-      const y = C - k * (dy * cos + dx * sin);
-      if (pen && after && Math.abs(x - px) + Math.abs(y - py) < 1.5) continue;
-      d += `${pen ? 'L' : 'M'}${x.toFixed(1)} ${y.toFixed(1)}`;
-      pen = true;
-      px = x;
-      py = y;
-    }
-    return d;
-  }
 
   /** 中山公園：北在上畫好，整層跟著指北針轉（跟太空一樣）；太空裡不畫 */
   /**

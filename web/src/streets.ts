@@ -71,7 +71,7 @@ export function onTaiwan(l: StreetLine): boolean {
   }
   return false;
 }
-const tierOf = (km: number): (typeof STREET_TIERS)[number] => STREET_TIERS.find((t) => km <= t.maxKm) ?? STREET_TIERS[STREET_TIERS.length - 1];
+export const tierOf = (km: number): (typeof STREET_TIERS)[number] => STREET_TIERS.find((t) => km <= t.maxKm) ?? STREET_TIERS[STREET_TIERS.length - 1];
 const TILEJSON = 'https://tiles.openfreemap.org/planet';
 /** 最多記住幾張圖磚（拖來拖去不要一直重抓） */
 const MAX_TILES = 64;
@@ -520,13 +520,32 @@ export function streetsAround(lat: number, lng: number, km: number, rangeKm: num
  * 跟 streetsAround 一樣，多回傳還有幾張圖磚沒抓到（汪星等全部抓到才換掉原本的道路），
  * 和海岸線（16 km 內那兩級才有；再大用 taiwan.ts、world.ts 的海岸線）
  */
-export function streetTiles(lat: number, lng: number, km: number, rangeKm: number, onLoad: () => void): { lines: StreetLine[]; coast: CoastLine[]; roads: RoadName[]; stations: StationName[]; green: GreenArea[]; pending: number } {
+/** 抓到的一張圖磚（v1.720 雷達一張一張畫好留著）：key 是「z/x/y」，box 是範圍 [南, 西, 北, 東] */
+export interface LoadedTile extends TileData {
+  key: string;
+  box: [number, number, number, number];
+}
+
+/** 圖磚的經緯度範圍 [南, 西, 北, 東] */
+export function tileBounds(z: number, x: number, y: number): [number, number, number, number] {
+  const n = 2 ** z;
+  const lat = (yy: number): number => (Math.atan(Math.sinh(Math.PI * (1 - (2 * yy) / n))) * 180) / Math.PI;
+  return [lat(y + 1), (x / n) * 360 - 180, lat(y), ((x + 1) / n) * 360 - 180];
+}
+
+export function streetTiles(
+  lat: number,
+  lng: number,
+  km: number,
+  rangeKm: number,
+  onLoad: () => void,
+): { lines: StreetLine[]; coast: CoastLine[]; roads: RoadName[]; stations: StationName[]; green: GreenArea[]; pending: number; tiles: LoadedTile[] } {
   const { zoom, classes, taiwan, coast, names, stations, green } = tierOf(rangeKm);
   const dLat = km / 110.574;
   const dLng = km / (111.32 * Math.cos((lat * Math.PI) / 180));
   let [s, w, n, e] = [lat - dLat, lng - dLng, lat + dLat, lng + dLng];
   if (taiwan) [s, w, n, e] = [Math.max(s, TAIWAN_BOX.s), Math.max(w, TAIWAN_BOX.w), Math.min(n, TAIWAN_BOX.n), Math.min(e, TAIWAN_BOX.e)];
-  if (s > n || w > e) return { lines: [], coast: [], roads: [], stations: [], green: [], pending: 0 };
+  if (s > n || w > e) return { lines: [], coast: [], roads: [], stations: [], green: [], pending: 0, tiles: [] };
   const a = tileOf(n, w, zoom);
   const b = tileOf(s, e, zoom);
   const out: StreetLine[] = [];
@@ -534,6 +553,7 @@ export function streetTiles(lat: number, lng: number, km: number, rangeKm: numbe
   const roadsOut: RoadName[] = [];
   const stationsOut: StationName[] = [];
   const greenOut: GreenArea[] = [];
+  const tileList: LoadedTile[] = [];
   let pending = 0;
   for (let x = a.x; x <= b.x; x++) {
     for (let y = a.y; y <= b.y; y++) {
@@ -552,6 +572,7 @@ export function streetTiles(lat: number, lng: number, km: number, rangeKm: numbe
         roadsOut.push(...got.roads);
         stationsOut.push(...got.stations);
         greenOut.push(...got.green);
+        tileList.push({ ...got, key, box: tileBounds(zoom, x, y) });
         continue;
       }
       tiles.set(key, 'loading');
@@ -569,5 +590,5 @@ export function streetTiles(lat: number, lng: number, km: number, rangeKm: numbe
         .catch(() => tiles.delete(key));
     }
   }
-  return { lines: out, coast: coastOut, roads: roadsOut, stations: stationsOut, green: greenOut, pending };
+  return { lines: out, coast: coastOut, roads: roadsOut, stations: stationsOut, green: greenOut, pending, tiles: tileList };
 }

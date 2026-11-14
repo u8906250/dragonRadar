@@ -12,7 +12,7 @@ import { shortAddress, splitPlace } from './place';
 import { crowdOf, MapView, pinPicker, type BaseMap, type MapRoute, type PinPicker } from './map';
 import { beep, ensureNotificationPermission, iosNeedsHomeScreen, notificationState, pushSubscription, pushSupported, registerServiceWorker, showBanner, systemNotify, unlockAudio, unsubscribePush } from './notify';
 import { checkWishNews, findCard, gotReward, myCards, onWishNews, openAlbum, openHelp, openItems, openWishes, overlay } from './cards';
-import { DEEP_FROM_KM, LY_KM, Radar, SPACE_FROM_KM, type RadarLabel, type RadarRoute, type RadarStreets, type SpaceView } from './radar';
+import { DEEP_FROM_KM, LY_KM, Radar, SPACE_FROM_KM, type RadarLabel, type RadarRoute, type RadarStreets, type RadarStreetTile, type SpaceView } from './radar';
 import { DEFAULT_THEME_ID, getTheme, THEMES, type Theme } from './themes';
 import type { WoofBottleMark } from './space';
 import { topicChipSvg, topicGlyph, TOPIC_TYPES } from './topic-icons';
@@ -949,16 +949,21 @@ function mayTouchChina(km: number): boolean {
 const ROADS_KM = 600;
 let streetsMod: typeof import('./streets') | null = null;
 let streetsLoading = false;
-/** 上次畫的位置、範圍、抓到第幾張圖磚，沒變就不重算 */
+/** 有沒有在畫道路（空的是沒有） */
 let streetsFor = '';
+/** 抓到第幾張圖磚（圖磚到了就加一，地名要重新挑） */
 let streetTiles = 0;
 /**
- * 道路換成公里數時的原點（錨點）：拖曳時正中間離它不到範圍的 1/4 就不重算，只告訴雷達位移了多少
- * （streetLoose：換算時多留了外面一圈，拖曳中才這樣）
+ * 道路的錨點（v1.720 一張一張圖磚畫好留著）：圖磚換成離錨點的公里一次就記住，拖曳時只告訴雷達位移了多少。
+ * 一級圖磚一個，離太遠（範圍的 40 倍）、南北移動超過 0.3 度（經度換算公里的比例會變）才換，換了全部重算、重畫
  */
-let streetAnchor: LatLng | null = null;
+let streetFrame: { id: number; zoom: number; lat: number; lng: number; kx: number } | null = null;
+/** 換算好的圖磚（錨點、綠地、中國範圍、公園外框 | 圖磚）→ 雷達的一張圖磚 */
+const streetTileCache = new Map<string, RadarStreetTile>();
 let streetLines: RadarStreets | null = null;
-let streetLoose = false;
+/** 地名是照哪些條件、在哪一點挑的：移動超過範圍的 1/4 才重新挑 */
+let labelsFor = '';
+let labelsAt: LatLng | null = null;
 /** 拖曳開始時的位置（拖曳中才有，panRadar） */
 
 /**
@@ -1044,87 +1049,90 @@ function updateStreets(): void {
     return v;
   };
   const ky = 110.574;
-  // 拖曳中：範圍、圖磚沒變，正中間離錨點不到範圍的 1/4（換算時多留的那一圈）就只給位移
-  const key = `${scaleKm}|${streetTiles}|${radar.reach.toFixed(2)}|${!!mask}|${hqVoyageAt !== null}|${radar.filling}`;
-  if (streetLines && streetAnchor && streetsFor === key) {
-    if (!panFrom && origin.lat === streetAnchor.lat && origin.lng === streetAnchor.lng) return;
-    if (panFrom && streetLoose) {
-      const kx = 111.32 * Math.cos((streetAnchor.lat * Math.PI) / 180);
-      const shift: [number, number] = [(origin.lng - streetAnchor.lng) * kx, (origin.lat - streetAnchor.lat) * ky];
-      if (Math.hypot(...shift) <= reach / 4) {
-        radar.setStreets(streetLines, shift, true);
-        return;
-      }
-    }
+  const greenOn = radar.filling && hqVoyageAt === null;
+  const zoom = streetsMod.tierOf(scaleKm).zoom;
+  if (
+    !streetFrame ||
+    streetFrame.zoom !== zoom ||
+    Math.abs(origin.lat - streetFrame.lat) > 0.3 ||
+    Math.hypot((origin.lng - streetFrame.lng) * streetFrame.kx, (origin.lat - streetFrame.lat) * ky) > 40 * scaleKm
+  ) {
+    streetFrame = { id: (streetFrame?.id ?? 0) + 1, zoom, lat: origin.lat, lng: origin.lng, kx: 111.32 * Math.cos((origin.lat * Math.PI) / 180) };
+    streetTileCache.clear();
   }
-  streetsFor = key;
-  streetAnchor = { lat: origin.lat, lng: origin.lng };
-  // 拖曳中多換算外面一圈，接下來拖一點都不用重算
-  streetLoose = !!panFrom;
-  const get = streetLoose ? reach * 1.25 : reach;
+  const fr = streetFrame;
+  const shift: [number, number] = [(origin.lng - fr.lng) * fr.kx, (origin.lat - fr.lat) * ky];
+  // 拖曳中多抓外面一圈的圖磚（快拖時前面的先準備好）
+  const get = reach * (panFrom ? 1.6 : 1.25);
   // 16 km 內多拿圖磚裡的海岸線（v1.640 使用者說「不管放大到什麼程度都要有邊界」；再大用 updateOutline 的海岸線）
-  const { lines, coast, roads, stations, green } = streetsMod.streetTiles(origin.lat, origin.lng, get, scaleKm, () => {
-    streetTiles++;
-    // 拖曳中：等下一格跟光點一起畫（v1.717：圖磚到了馬上照最新的位置畫道路、地名，光點還在上一格，看起來會抖）
-    if (panFrom) {
-      if (!panFrame) {
-        panFrame = requestAnimationFrame(() => {
-          panFrame = 0;
-          render();
-          radar.flush();
-        });
-      }
-    } else updateStreets();
-  });
-  const kx = 111.32 * Math.cos((origin.lat * Math.PI) / 180);
-  const box = [origin.lat - get / ky, origin.lng - get / kx, origin.lat + get / ky, origin.lng + get / kx];
-  const coastXy: Float64Array[] = [];
-  const out: RadarStreets = { major: [], minor: [], coast: coastXy };
-  const toXy = (l: { pts: Float64Array; box: [number, number, number, number] }): Float64Array | null => {
-    if (l.box[0] > box[2] || l.box[2] < box[0] || l.box[1] > box[3] || l.box[3] < box[1]) return null;
-    const xy = new Float64Array(l.pts.length);
-    for (let i = 0; i < l.pts.length; i += 2) {
-      xy[i] = (l.pts[i + 1] - origin.lng) * kx;
-      xy[i + 1] = (l.pts[i] - origin.lat) * ky;
+  const { roads, stations, tiles } = streetsMod.streetTiles(origin.lat, origin.lng, get, scaleKm, onStreetTile);
+  // 公園綠地塗淡綠：只有全螢幕（v1.705 使用者說的），洋流總部特效播放時不塗（特效自己會把台北染淡綠）；
+  // 2 km 內再加自己整理的公園外框（v1.706：圖磚不收太小的，例如通化公園），這時才載入
+  const parkShapes = greenOn && scaleKm <= 2 ? parkAreas() : [];
+  const variant = `${fr.id}|${greenOn}|${!!mask}|${parkShapes.length}`;
+  const toXy = (pts: Float64Array): Float64Array => {
+    const xy = new Float64Array(pts.length);
+    for (let i = 0; i < pts.length; i += 2) {
+      xy[i] = (pts[i + 1] - fr.lng) * fr.kx;
+      xy[i + 1] = (pts[i] - fr.lat) * ky;
     }
     return xy;
   };
-  for (const l of lines) {
-    const xy = hidden(l.pts) ? null : toXy(l);
-    if (xy) out[l.cls].push(xy);
-  }
-  for (const l of coast) {
-    const xy = hidden(l.pts) ? null : toXy(l);
-    if (xy) coastXy.push(xy);
-  }
-  // 公園綠地塗淡綠：只有全螢幕（v1.705 使用者說的），洋流總部特效播放時不塗（特效自己會把台北染淡綠）；
-  // 2 km 內再加自己整理的公園外框（v1.706：圖磚不收太小的，例如通化公園），這時才載入
-  const parkShapes = radar.filling && hqVoyageAt === null && scaleKm <= 2 ? parkAreas() : [];
-  if (radar.filling && hqVoyageAt === null && green.length + parkShapes.length > 0) {
-    out.green = [];
-    for (const a of [...green, ...parkShapes]) {
-      if (a.box[0] > box[2] || a.box[2] < box[0] || a.box[1] > box[3] || a.box[3] < box[1]) continue;
-      if (mask && mask.contains(a.rings[0][0], a.rings[0][1])) continue;
-      out.green.push(
-        a.rings.map((r) => {
-          const xy = new Float64Array(r.length);
-          for (let i = 0; i < r.length; i += 2) {
-            xy[i] = (r[i + 1] - origin.lng) * kx;
-            xy[i + 1] = (r[i] - origin.lat) * ky;
-          }
-          return xy;
-        }),
-      );
+  const list = tiles.map((t): RadarStreetTile => {
+    const ck = `${variant}|${t.key}`;
+    const hit = streetTileCache.get(ck);
+    if (hit) return hit;
+    const [s0, w0, n0, e0] = t.box;
+    const rt: RadarStreetTile = { key: t.key, box: [(w0 - fr.lng) * fr.kx, (s0 - fr.lat) * ky, (e0 - fr.lng) * fr.kx, (n0 - fr.lat) * ky], major: [], minor: [], coast: [], green: [] };
+    for (const l of t.lines) if (!hidden(l.pts)) rt[l.cls].push(toXy(l.pts));
+    for (const l of t.coast) if (!hidden(l.pts)) rt.coast.push(toXy(l.pts));
+    if (greenOn) {
+      // 公園外框：跟這張圖磚碰到的（跨兩張的兩張都畫，一樣的顏色、不透明，看不出來）
+      const touching = parkShapes.filter((a) => !(a.box[0] > n0 || a.box[2] < s0 || a.box[1] > e0 || a.box[3] < w0));
+      for (const a of [...t.green, ...touching]) {
+        if (mask && mask.contains(a.rings[0][0], a.rings[0][1])) continue;
+        rt.green.push(a.rings.map(toXy));
+      }
+    }
+    streetTileCache.set(ck, rt);
+    while (streetTileCache.size > 300) streetTileCache.delete(streetTileCache.keys().next().value as string);
+    return rt;
+  });
+  // 地名：條件變了、圖磚到了、移動超過範圍的 1/4（停著時有移動就重挑）才重新挑；座標一樣是離錨點的公里
+  const labelKey = `${variant}|${streetTiles}|${scaleKm}|${radar.reach.toFixed(2)}|${trees}`;
+  const moved = labelsAt ? Math.hypot((origin.lng - labelsAt.lng) * fr.kx, (origin.lat - labelsAt.lat) * ky) : Infinity;
+  let labels = streetLines?.labels ?? [];
+  let noLabel = streetLines?.noLabel;
+  if (labelKey !== labelsFor || !streetLines || streetLines.frame !== fr.id || (panFrom ? moved > reach / 4 : moved > 0)) {
+    labelsFor = labelKey;
+    labelsAt = { lat: origin.lat, lng: origin.lng };
+    labels = placeLabels(streetsMod, roads, stations, get, fr.kx, ky, mask, shift);
+    noLabel = undefined;
+    // 畫了樹冠、屋頂的中山公園上面不寫名稱（v1.698：大巨蛋的名字被擠到公園上）
+    if (labels.length > 0 && trees && parkMod) {
+      const [s0, w0, n0, e0] = parkMod.PARK_BOX;
+      noLabel = [[(w0 - fr.lng) * fr.kx, (s0 - fr.lat) * ky, (e0 - fr.lng) * fr.kx, (n0 - fr.lat) * ky]];
     }
   }
-  out.labels = placeLabels(streetsMod, roads, stations, get, kx, ky, mask);
-  // 畫了樹冠、屋頂的中山公園上面不寫名稱（v1.698：大巨蛋的名字被擠到公園上）
-  if (out.labels.length > 0 && trees && parkMod) {
-    const [s0, w0, n0, e0] = parkMod.PARK_BOX;
-    out.noLabel = [[(w0 - origin.lng) * kx, (s0 - origin.lat) * ky, (e0 - origin.lng) * kx, (n0 - origin.lat) * ky]];
-  }
-  streetLines = out;
-  radar.setStreets(out, [0, 0], streetLoose);
+  // 圖磚、地名都沒變：沿用同一份，雷達只照位移平移
+  const same = !!streetLines && streetLines.frame === fr.id && streetLines.labels === labels && streetLines.tiles.length === list.length && streetLines.tiles.every((t, i) => t === list[i]);
+  if (!same) streetLines = { frame: fr.id, tiles: list, labels, ...(noLabel ? { noLabel } : {}) };
+  streetsFor = 'on';
+  radar.setStreets(streetLines, shift);
+}
+
+/** 圖磚到了：拖曳中等下一格跟光點一起畫（v1.717：圖磚到了馬上照最新的位置畫道路、地名，光點還在上一格，看起來會抖） */
+function onStreetTile(): void {
+  streetTiles++;
+  if (panFrom) {
+    if (!panFrame) {
+      panFrame = requestAnimationFrame(() => {
+        panFrame = 0;
+        render();
+        radar.flush();
+      });
+    }
+  } else updateStreets();
 }
 
 /**
@@ -1233,6 +1241,8 @@ function placeLabels(
   kx: number,
   ky: number,
   mask: { contains: (lat: number, lng: number) => boolean } | null,
+  /** 正中間離道路錨點的位移（公里）：寫進去的座標是離錨點的（跟道路一樣） */
+  off: [number, number] = [0, 0],
 ): RadarLabel[] {
   if (hqVoyageAt !== null || !radar.filling) return [];
   const km = scaleKm;
@@ -1245,7 +1255,7 @@ function placeLabels(
     if (mask?.contains(lat, lng)) return;
     // 路名的位置會換（roadLabelAt），只用名稱認；其他的同名不同地方要分開
     const key = kind === 'road' ? `road|${text}` : `${kind}|${text}|${lat.toFixed(4)},${lng.toFixed(4)}`;
-    out.push({ x, y, text, kind, key, pri, d: Math.hypot(x, y) });
+    out.push({ x: x + off[0], y: y + off[1], text, kind, key, pri, d: Math.hypot(x, y) });
   };
   if (km > 33) for (const [n, lat, lng] of sm.TW_COUNTIES) add(lat, lng, n, 'county', 100);
   else if (km > 1) for (const [n, lat, lng] of sm.TW_TOWNS) add(lat, lng, n, 'town', 90);

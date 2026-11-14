@@ -1405,6 +1405,11 @@ path.map-seam-walkers { --p: 15px; }
 .radar .pl-poi { font-weight: 600; opacity: 0.55; }
 /* 16 km 內的海岸線（從街道圖磚來，v1.640）：實線（v1.641 使用者說近距離的邊界直接用實線）；顏色跟遠的海岸線一樣 */
 .radar .streets path.coast-line { fill: none; stroke: var(--accent); stroke-width: 1.5; stroke-opacity: 0.45; stroke-dasharray: none; }
+/* 道路切成格子（v1.720）：半透明設在整層，每一段不透明；切開的兩段在格子邊上圓頭重疊的地方才不會變深 */
+.radar .streets .tl-street-minor { opacity: 0.2; }
+.radar .streets .tl-street-major { opacity: 0.24; }
+.radar .streets .tl-coast-line { opacity: 0.45; }
+.radar .streets .tl-street-minor path, .radar .streets .tl-street-major path, .radar .streets .tl-coast-line path { stroke-opacity: 1; }
 #radar-view { position: relative; }
 .radar-attrib { position: absolute; right: 2px; bottom: 0; font-size: 9px; color: var(--muted); opacity: 0.8; }
 .radar-attrib a { color: inherit; text-decoration: none; }
