@@ -3619,7 +3619,7 @@ async function submitBottle(): Promise<void> {
   // 牛皮紙捲起來、放進瓶子、塞上軟木塞，丟到雷達上；落水後打開這個瓶子（編號、瓶子證明、收回，內容剛看過就不再顯示；v1.663 分享到 Threads 拿掉了）
   throwing = true;
   updateDropBtn();
-  await throwBottleFx(text, photo, () => openBottleSheet(false));
+  await throwBottleFx(text, photo, () => openBottleSheet(false), { lat: r.data.bottle.lat, lng: r.data.bottle.lng });
   throwing = false;
   bottleText.value = '';
   setBottlePhoto(null);
@@ -3674,19 +3674,37 @@ function corkSvg(_p: string): string {
 }
 
 /** 雷達（或地圖）正中間在畫面上的哪裡：瓶子丟到這裡 */
-function landingPoint(): { x: number; y: number } {
+function landingPoint(at: LatLng | null = null): { x: number; y: number } {
+  // 瓶子實際落在哪（v1.721 使用者說丟出去要直接看到落點）：雷達、地圖上的那一點
+  const p = at ? (view === 'map' ? map.screenOf(at) : radar.screenOf(bearingDeg(origin, at), haversineKm(origin, at))) : null;
+  if (p) return p;
   const el = view === 'map' ? document.querySelector('#map') : document.querySelector('#radar-view .me');
   const r = el?.getBoundingClientRect();
   return r && r.width + r.height > 0 ? { x: r.left + r.width / 2, y: r.top + r.height / 2 } : { x: innerWidth / 2, y: innerHeight / 3 };
 }
 
 /**
+ * 拋出去之前：雷達拉近到畫得出瓶子的範圍（1 km，落點都在 1 km 內），地圖移到落點；拉近、移完才拋，
+ * 瓶子直接拋到落點、在那裡落水（v1.721 使用者說丟出去可以直接看到落點；以前拋到你的位置，雷達沒拉近就看不到落在哪）
+ */
+async function showLanding(at: LatLng): Promise<void> {
+  if (view === 'map') {
+    map.focusOn(at, SEE_ZOOM_KM, sheetCover());
+    await new Promise((r) => setTimeout(r, 450));
+    return;
+  }
+  if (zoomSees()) return;
+  zoomToKm(SEE_ZOOM_KM);
+  while (flight) await new Promise((r) => requestAnimationFrame(() => r(null)));
+}
+
+/**
  * 丟瓶子的動畫（約 4 秒，可愛不可怕）：牛皮紙從下往上捲成一捲 → 捲好的紙移到瓶口、滑進瓶子 → 躺在旁邊的軟木塞跳起來塞進瓶口 →
- * 收起畫面，瓶子轉著圈拋到雷達正中間（你的位置）→ 落水，一圈圈水波，瓶子晃一晃。
+ * 收起畫面（雷達拉近到看得到落點），瓶子轉著圈拋到落點（v1.721 以前是雷達正中間）→ 落水，一圈圈水波，瓶子晃一晃。
  * 用蓋在上面的一份來動（原本的紙、瓶子先藏起來）。系統設定「減少動態效果」也照樣播（v1.600 使用者說電腦版沒有丟出去的動畫；
  * 這是自己按下去才播的一小段，Windows 關掉動畫效果時瀏覽器會回報減少動態）
  */
-async function throwBottleFx(text: string, photo: string | null, hide: () => void): Promise<void> {
+async function throwBottleFx(text: string, photo: string | null, hide: () => void, land: LatLng | null = null): Promise<void> {
   const sheet = bottleSheet.querySelector<HTMLElement>('.kraft-sheet');
   const realBottle = bottleDropEl.querySelector('.real-bottle');
   const realCork = bottleDropEl.querySelector('.real-cork');
@@ -3769,10 +3787,11 @@ async function throwBottleFx(text: string, photo: string | null, hide: () => voi
     );
     cork.remove();
     bottle.querySelector('.cork')?.setAttribute('style', 'opacity: 1');
-    // 4. 收起畫面，瓶子轉著圈拋到雷達正中間（1.2 秒，拋物線）
+    // 4. 收起畫面（雷達拉近到看得到落點），瓶子轉著圈拋到落點（1.2 秒，拋物線）
     hide();
     await new Promise((r) => requestAnimationFrame(() => r(null)));
-    const to = landingPoint();
+    if (land) await showLanding(land);
+    const to = landingPoint(land);
     const [bx, by] = [to.x - (br.left + br.width / 2), to.y - (br.top + br.height / 2)];
     const arc = Math.min(240, 90 + Math.hypot(bx, by) * 0.35);
     const end = 18 / br.height;

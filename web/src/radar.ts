@@ -1556,6 +1556,15 @@ export class Radar {
     this.scaleLabels.appendChild(t);
   }
 
+  /** 離正中間這個方位、距離的一點在螢幕上的哪裡（像素）；太空裡、雷達沒顯示時是 null（丟漂流瓶拋到落點用） */
+  screenOf(bearing: number, distanceKm: number): { x: number; y: number } | null {
+    const m = this.svg.getScreenCTM();
+    if (this.inSpace || !m) return null;
+    const p = polar(bearing - this.heading, this.ratio(distanceKm) * (R - 8));
+    const q = new DOMPoint(p.x, p.y).matrixTransform(m);
+    return { x: q.x, y: q.y };
+  }
+
   /** 外圈（範圍）在螢幕上的半徑像素；雷達沒顯示時回傳 0 */
   /** 雷達正中間在畫面上的哪裡（像素） */
   screenCenter(): { x: number; y: number } {

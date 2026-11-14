@@ -793,6 +793,15 @@ export class MapView {
     return c ? { lat: c.lat, lng: c.lng } : null;
   }
 
+  /** 這一點在螢幕上的哪裡（像素）；地圖還沒建好是 null */
+  screenOf(p: LatLng): { x: number; y: number } | null {
+    const map = this.map;
+    if (!map) return null;
+    const q = map.latLngToContainerPoint([p.lat, p.lng]);
+    const r = map.getContainer().getBoundingClientRect();
+    return { x: r.left + q.x, y: r.top + q.y };
+  }
+
   /** 這些點都在看得到的地方（扣掉卡片蓋住的右邊、下面，留 40 px 邊），而且拉得夠近（縮放 15 以上） */
   pinsInView(points: LatLng[], cover = { right: 0, bottom: 0 }): boolean {
     const map = this.map;
