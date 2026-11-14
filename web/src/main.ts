@@ -949,6 +949,11 @@ function mayTouchChina(km: number): boolean {
 const ROADS_KM = 600;
 let streetsMod: typeof import('./streets') | null = null;
 let streetsLoading = false;
+/** 地名上次照哪個範圍挑、範圍什麼時候變的（縮放中不每一格都重挑） */
+let labelScaleKm = 0;
+let labelZoomAt = 0;
+let labelZoomTimer = 0;
+const LABEL_ZOOM_SETTLE_MS = 250;
 /** 有沒有在畫道路（空的是沒有） */
 let streetsFor = '';
 /** 抓到第幾張圖磚（圖磚到了就加一，地名要重新挑） */
@@ -1098,15 +1103,25 @@ function updateStreets(): void {
     while (streetTileCache.size > 300) streetTileCache.delete(streetTileCache.keys().next().value as string);
     return rt;
   });
-  // 地名：條件變了、圖磚到了、移動超過範圍的 1/4（停著時有移動就重挑）才重新挑；座標一樣是離錨點的公里
-  const labelKey = `${variant}|${streetTiles}|${scaleKm}|${radar.reach.toFixed(2)}|${trees}`;
+  // 地名：條件變了、圖磚到了、移動超過範圍的 1/4（停著時有移動就重挑）才重新挑；座標一樣是離錨點的公里。
+  // 縮放中範圍只看到半個 2 倍（v1.723 路名要照字的長度找兩個路口中間，每一格都重挑太慢），停了 LABEL_ZOOM_SETTLE_MS 再照實際的範圍挑一次
+  if (scaleKm !== labelScaleKm) {
+    labelScaleKm = scaleKm;
+    labelZoomAt = performance.now();
+    window.clearTimeout(labelZoomTimer);
+    labelZoomTimer = window.setTimeout(() => updateStreets(), LABEL_ZOOM_SETTLE_MS + 20);
+  }
+  const zoomingNow = performance.now() - labelZoomAt < LABEL_ZOOM_SETTLE_MS;
+  const scaleTag = zoomingNow ? `~${Math.round(Math.log2(scaleKm) * 2)}|${scaleKm > 1}|${scaleKm > 2}|${scaleKm > 5}|${scaleKm > 33}` : String(scaleKm);
+  const labelKey = `${variant}|${streetTiles}|${scaleTag}|${radar.reach.toFixed(2)}|${trees}`;
   const moved = labelsAt ? Math.hypot((origin.lng - labelsAt.lng) * fr.kx, (origin.lat - labelsAt.lat) * ky) : Infinity;
   let labels = streetLines?.labels ?? [];
   let noLabel = streetLines?.noLabel;
-  if (labelKey !== labelsFor || !streetLines || streetLines.frame !== fr.id || (panFrom ? moved > reach / 4 : moved > 0)) {
+  // 拖曳中移動超過範圍的 1/3 才重挑（地名抓了 1.6 倍範圍，夠用；v1.723 路名找位置比較花時間）
+  if (labelKey !== labelsFor || !streetLines || streetLines.frame !== fr.id || (panFrom ? moved > reach / 3 : moved > 0)) {
     labelsFor = labelKey;
     labelsAt = { lat: origin.lat, lng: origin.lng };
-    labels = placeLabels(streetsMod, roads, stations, get, fr.kx, ky, mask, shift);
+    labels = placeLabels(streetsMod, roads, stations, get, fr.kx, ky, mask, shift, tiles.map((t) => t.roads), `${zoom}|${tiles.map((t) => t.key).join(',')}`);
     noLabel = undefined;
     // 畫了樹冠、屋頂的中山公園上面不寫名稱（v1.698：大巨蛋的名字被擠到公園上）
     if (labels.length > 0 && trees && parkMod) {
@@ -1231,47 +1246,303 @@ function loadPois(): void {
     });
 }
 
-/**
- * 路名沿著路寫用的那一段路（v1.722）：從這一段往前後接同名、頭尾相接（約 1 m 內）的段，最多各接 8 段、400 個點。[緯度, 經度, …]
- */
-function roadChain(lines: Float64Array[], start: Float64Array, startAt: number, keepKm: number): { pts: Float64Array; at: number } {
-  const used = new Set<Float64Array>([start]);
-  let chain = Array.from(start);
-  /** 路名那一點在 chain 裡的位置（數字的索引，緯度那一個） */
-  let at = startAt;
-  const same = (a: number, b: number, c: number, d: number): boolean => Math.abs(a - c) < 1e-5 && Math.abs(b - d) < 1e-5;
-  const flip = (l: Float64Array): number[] => {
+/** 同名、頭尾相接（約 1 m 內）的段接成一條一條（[緯度, 經度, …]） */
+function roadChains(lines: Float64Array[]): number[][] {
+  const kOf = (a: number, b: number): string => `${Math.round(a * 1e5)},${Math.round(b * 1e5)}`;
+  const flip = (l: ArrayLike<number>): number[] => {
     const out: number[] = [];
     for (let i = l.length - 2; i >= 0; i -= 2) out.push(l[i], l[i + 1]);
     return out;
   };
-  for (const atEnd of [true, false]) {
-    for (let step = 0; step < 8 && chain.length < 800; step++) {
-      const [la, ln] = atEnd ? [chain[chain.length - 2], chain[chain.length - 1]] : [chain[0], chain[1]];
-      const next = lines.find((l) => !used.has(l) && (same(l[0], l[1], la, ln) || same(l[l.length - 2], l[l.length - 1], la, ln)));
-      if (!next) break;
-      used.add(next);
-      const fromStart = same(next[0], next[1], la, ln);
-      // 接在後面：頭接上的照順序、尾接上的反過來；接在前面相反
-      const pts = atEnd === fromStart ? Array.from(next) : flip(next);
-      if (!atEnd) at += pts.length - 2;
-      chain = atEnd ? [...chain, ...pts.slice(2)] : [...pts.slice(0, -2), ...chain];
+  // 端點 → 用到這個端點的段
+  const ends = new Map<string, Float64Array[]>();
+  for (const l of lines) {
+    for (const k of [kOf(l[0], l[1]), kOf(l[l.length - 2], l[l.length - 1])]) {
+      const e = ends.get(k);
+      if (e) e.push(l);
+      else ends.set(k, [l]);
     }
   }
-  // 只留路名那一點前後 keepKm 公里（每一格都要換算，太長的不用）
-  const ky = 110.574;
-  const kx = 111.32 * Math.cos((chain[at] * Math.PI) / 180);
-  const walk = (dir: 1 | -1): number => {
-    let q = at;
-    let d = 0;
-    while (q + dir * 2 >= 0 && q + dir * 2 < chain.length && d < keepKm) {
-      d += Math.hypot((chain[q + dir * 2 + 1] - chain[q + 1]) * kx, (chain[q + dir * 2] - chain[q]) * ky);
-      q += dir * 2;
+  const used = new Set<Float64Array>();
+  const chains: number[][] = [];
+  for (const first of lines) {
+    if (used.has(first)) continue;
+    used.add(first);
+    let chain = Array.from(first);
+    for (const atEnd of [true, false]) {
+      for (let step = 0; step < 60 && chain.length < 6000; step++) {
+        const [la, ln] = atEnd ? [chain[chain.length - 2], chain[chain.length - 1]] : [chain[0], chain[1]];
+        const k = kOf(la, ln);
+        const next = ends.get(k)?.find((l) => !used.has(l));
+        if (!next) break;
+        used.add(next);
+        const fromStart = kOf(next[0], next[1]) === k;
+        const pts = atEnd === fromStart ? Array.from(next) : flip(next);
+        chain = atEnd ? [...chain, ...pts.slice(2)] : [...pts.slice(0, -2), ...chain];
+      }
     }
-    return q;
+    chains.push(chain);
+  }
+  return chains;
+}
+
+/** 接起來的路照這組圖磚記住（名稱 → 接起來的路） */
+let chainCache: { key: string; byName: Map<string, number[][]> } = { key: '', byName: new Map() };
+function chainsOf(name: string, lines: Float64Array[], key: string): number[][] {
+  if (chainCache.key !== key) chainCache = { key, byName: new Map() };
+  let c = chainCache.byName.get(name);
+  if (!c) chainCache.byName.set(name, (c = roadChains(lines)));
+  return c;
+}
+
+/**
+ * 一張圖磚裡的路口：會寫名字的（ok）不同名的兩條路交叉、或一條接到另一條上（8 m 內）的點，[緯度, 經度, …]。
+ * 圖磚有多畫邊外一點，跨圖磚的路口也算得到；一張圖磚、一種範圍（band）算一次記住
+ */
+const tileJunctions = new WeakMap<object, Map<string, Float64Array>>();
+function junctionsIn(all: Array<{ name: string; cls: string; pts: Float64Array }>, ok: (cls: string) => boolean, band: string): Float64Array {
+  let byBand = tileJunctions.get(all);
+  if (!byBand) tileJunctions.set(all, (byBand = new Map()));
+  const hit = byBand.get(band);
+  if (hit) return hit;
+  const roads = all.filter((r) => ok(r.cls));
+  const ky = 110.574;
+  const lat0 = roads[0]?.pts[0] ?? 0;
+  const lng0 = roads[0]?.pts[1] ?? 0;
+  const kx = 111.32 * Math.cos((lat0 * Math.PI) / 180);
+  const cell = 0.08;
+  const ck = (i: number, j: number): number => (i + 32768) * 65536 + (j + 32768);
+  const seg: number[] = [];
+  const segName: number[] = [];
+  const names = new Map<string, number>();
+  const grid = new Map<number, number[]>();
+  for (const r of roads) {
+    let id = names.get(r.name);
+    if (id === undefined) names.set(r.name, (id = names.size));
+    for (let q = 0; q + 3 < r.pts.length; q += 2) {
+      const ax = (r.pts[q + 1] - lng0) * kx;
+      const ay = (r.pts[q] - lat0) * ky;
+      const bx = (r.pts[q + 3] - lng0) * kx;
+      const by = (r.pts[q + 2] - lat0) * ky;
+      const n = seg.length / 4;
+      seg.push(ax, ay, bx, by);
+      segName.push(id);
+      for (let i = Math.floor((Math.min(ax, bx) - 0.01) / cell); i <= Math.floor((Math.max(ax, bx) + 0.01) / cell); i++) {
+        for (let j = Math.floor((Math.min(ay, by) - 0.01) / cell); j <= Math.floor((Math.max(ay, by) + 0.01) / cell); j++) {
+          const k = ck(i, j);
+          const list = grid.get(k);
+          if (list) list.push(n);
+          else grid.set(k, [n]);
+        }
+      }
+    }
+  }
+  /** 點到線段的距離（公里） */
+  const dist = (px: number, py: number, n: number): number => {
+    const [ax, ay, bx, by] = [seg[4 * n], seg[4 * n + 1], seg[4 * n + 2], seg[4 * n + 3]];
+    const [ex, ey] = [bx - ax, by - ay];
+    const l2 = ex * ex + ey * ey;
+    const t = l2 > 0 ? Math.max(0, Math.min(1, ((px - ax) * ex + (py - ay) * ey) / l2)) : 0;
+    return Math.hypot(px - ax - t * ex, py - ay - t * ey);
   };
-  const [a, b] = [walk(-1), walk(1)];
-  return { pts: Float64Array.from(chain.slice(a, b + 2)), at: (at - a) / 2 };
+  const out: number[] = [];
+  const seen = new Set<number>();
+  const push = (x: number, y: number): void => {
+    // 20 m 內的算同一個路口
+    const k = ck(Math.round(x / 0.02), Math.round(y / 0.02));
+    if (seen.has(k)) return;
+    seen.add(k);
+    out.push(y / ky + lat0, x / kx + lng0);
+  };
+  for (const list of grid.values()) {
+    for (let a = 0; a < list.length; a++) {
+      const m = list[a];
+      const [ax, ay, bx, by] = [seg[4 * m], seg[4 * m + 1], seg[4 * m + 2], seg[4 * m + 3]];
+      for (let b = a + 1; b < list.length; b++) {
+        const n = list[b];
+        if (segName[m] === segName[n]) continue;
+        const [cx, cy, dx, dy] = [seg[4 * n], seg[4 * n + 1], seg[4 * n + 2], seg[4 * n + 3]];
+        // 外框沒碰到（多 8 m）的不用算
+        if (Math.max(ax, bx) + 0.008 < Math.min(cx, dx) || Math.max(cx, dx) + 0.008 < Math.min(ax, bx) || Math.max(ay, by) + 0.008 < Math.min(cy, dy) || Math.max(cy, dy) + 0.008 < Math.min(ay, by)) continue;
+        const den = (bx - ax) * (dy - cy) - (by - ay) * (dx - cx);
+        if (den !== 0) {
+          const t = ((cx - ax) * (dy - cy) - (cy - ay) * (dx - cx)) / den;
+          const u = ((cx - ax) * (by - ay) - (cy - ay) * (bx - ax)) / den;
+          if (t >= 0 && t <= 1 && u >= 0 && u <= 1) {
+            push(ax + t * (bx - ax), ay + t * (by - ay));
+            continue;
+          }
+        }
+        // 接上去的（T 字路口，端點在另一條上）
+        if (dist(ax, ay, n) < 0.008) push(ax, ay);
+        else if (dist(bx, by, n) < 0.008) push(bx, by);
+        else if (dist(cx, cy, m) < 0.008) push(cx, cy);
+        else if (dist(dx, dy, m) < 0.008) push(dx, dy);
+      }
+    }
+  }
+  const pts = Float64Array.from(out);
+  byBand.set(band, pts);
+  return pts;
+}
+
+/** 畫面附近幾張圖磚的路口合起來，分到格子裡（找附近的路口用）；圖磚沒換就不重算 */
+let junctionCache: { key: string; pts: Float64Array; cell: number; grid: Map<number, number[]>; lat0: number; lng0: number; kx: number } | null = null;
+function roadJunctions(tileRoads: Array<Array<{ name: string; cls: string; pts: Float64Array }>>, key: string, ok: (cls: string) => boolean, band: string): NonNullable<typeof junctionCache> {
+  if (junctionCache && junctionCache.key === key) return junctionCache;
+  const parts = tileRoads.map((r) => junctionsIn(r, ok, band));
+  const pts = new Float64Array(parts.reduce((a, p) => a + p.length, 0));
+  let o = 0;
+  for (const p of parts) {
+    pts.set(p, o);
+    o += p.length;
+  }
+  const lat0 = origin.lat;
+  const lng0 = origin.lng;
+  const kx = 111.32 * Math.cos((lat0 * Math.PI) / 180);
+  const cell = 0.08;
+  const grid = new Map<number, number[]>();
+  for (let q = 0; q < pts.length; q += 2) {
+    const k = (Math.floor(((pts[q + 1] - lng0) * kx) / cell) + 32768) * 65536 + (Math.floor(((pts[q] - lat0) * 110.574) / cell) + 32768);
+    const list = grid.get(k);
+    if (list) list.push(q);
+    else grid.set(k, [q]);
+  }
+  junctionCache = { key, pts, cell, grid, lat0, lng0, kx };
+  return junctionCache;
+}
+
+/**
+ * 一條路的路名寫在哪（v1.723）：每一條接起來的路，每隔一點點試一個位置，字的範圍（前後 half 公里）裡沒有路口（多留 margin）、
+ * 路夠直（偏離頭尾連線不到 0.2 個 half）的才算；畫面裡的先、上次寫的那一點還合適就照舊，其他離正中間近的先。
+ * 回傳那一點和前後各約 1.2 個範圍的路（[緯度, 經度, …]，那一點插在 at 的位置）；都不合適是 null（不寫）
+ */
+function roadSpot(
+  chains: number[][],
+  half: number,
+  margin: number,
+  jn: ReturnType<typeof roadJunctions>,
+  kx: number,
+  ky: number,
+  was: LatLng | null,
+  /** 找多遠（公里，跟地名一樣）：這麼遠以外的不試；給雷達的路前後各留 0.75 倍 */
+  reachKm: number,
+): { lat: number; lng: number; pts: Float64Array; at: number } | null {
+  if (!(half > 0)) return null;
+  const lng0 = jn.lng0;
+  const near = (x: number, y: number, r: number): boolean => {
+    // (x, y) 是離 origin 的公里；換成路口格子的座標
+    const lat = y / ky + origin.lat;
+    const lng = x / kx + origin.lng;
+    const gx = (lng - lng0) * jn.kx;
+    const gy = (lat - jn.lat0) * 110.574;
+    const c = jn.cell;
+    for (let i = Math.floor((gx - r) / c); i <= Math.floor((gx + r) / c); i++) {
+      for (let j = Math.floor((gy - r) / c); j <= Math.floor((gy + r) / c); j++) {
+        for (const q of jn.grid.get((i + 32768) * 65536 + (j + 32768)) ?? []) {
+          if (Math.hypot((jn.pts[q + 1] - lng) * jn.kx, (jn.pts[q] - lat) * 110.574) < r) return true;
+        }
+      }
+    }
+    return false;
+  };
+  type Cand = { chain: number[]; arc: number[]; s: number; x: number; y: number; d: number; on: boolean; keep: boolean; fits: (s: number) => boolean };
+  const cands: Cand[] = [];
+  const wx = was ? (was.lng - origin.lng) * kx : 0;
+  const wy = was ? (was.lat - origin.lat) * ky : 0;
+  const onScreen = radar.screenTest();
+  const keepOk = !!was && onScreen(wx, wy);
+  const lim = reachKm;
+  for (const chain of chains) {
+    let away = true;
+    for (let q = 0; q < chain.length && away; q += 2) if (Math.abs((chain[q + 1] - origin.lng) * kx) < lim && Math.abs((chain[q] - origin.lat) * ky) < lim) away = false;
+    if (away) continue;
+    const xy: number[] = [];
+    for (let q = 0; q < chain.length; q += 2) xy.push((chain[q + 1] - origin.lng) * kx, (chain[q] - origin.lat) * ky);
+    const arc = [0];
+    for (let q = 2; q < xy.length; q += 2) arc.push(arc[arc.length - 1] + Math.hypot(xy[q] - xy[q - 2], xy[q + 1] - xy[q - 1]));
+    const total = arc[arc.length - 1];
+    if (total < 2 * half) continue;
+    /** arc 裡最後一個不超過 s 的（二分搜尋） */
+    const segAt = (s: number): number => {
+      let [lo, hi] = [0, arc.length - 2];
+      while (lo < hi) {
+        const mid = (lo + hi + 1) >> 1;
+        if (arc[mid] <= s) lo = mid;
+        else hi = mid - 1;
+      }
+      return lo;
+    };
+    const pointAt = (s: number): [number, number] => {
+      const q = segAt(s);
+      const t = (s - arc[q]) / (arc[q + 1] - arc[q] || 1);
+      return [xy[2 * q] + t * (xy[2 * q + 2] - xy[2 * q]), xy[2 * q + 1] + t * (xy[2 * q + 3] - xy[2 * q + 1])];
+    };
+    const fits = (s: number): boolean => {
+      const [x, y] = pointAt(s);
+      if (near(x, y, half + margin)) return false;
+      // 夠直：範圍裡的點離頭尾連線不遠
+      const [ax, ay] = pointAt(s - half);
+      const [bx, by] = pointAt(s + half);
+      const len = Math.hypot(bx - ax, by - ay);
+      if (len < 1.6 * half) return false;
+      for (let q = segAt(s - half) + 1; q < arc.length && arc[q] < s + half; q++) {
+        const dev = Math.abs((bx - ax) * (xy[2 * q + 1] - ay) - (by - ay) * (xy[2 * q] - ax)) / len;
+        if (dev > 0.2 * half) return false;
+      }
+      return true;
+    };
+    const add = (sv: number, keep: boolean): void => {
+      const [x, y] = pointAt(sv);
+      if (Math.abs(x) > lim || Math.abs(y) > lim) return;
+      cands.push({ chain, arc, s: sv, x, y, d: x * x + y * y, on: onScreen(x, y), keep, fits });
+    };
+    // 只試畫面附近那一段（3 個範圍內），每隔字的長度的 1/3 一個
+    let [lo, hi] = [Infinity, -Infinity];
+    for (let q = 0; q < arc.length; q++) {
+      if (Math.abs(xy[2 * q]) < lim && Math.abs(xy[2 * q + 1]) < lim) {
+        lo = Math.min(lo, q > 0 ? arc[q - 1] : 0);
+        hi = Math.max(hi, q < arc.length - 1 ? arc[q + 1] : total);
+      }
+    }
+    for (let sv = Math.max(half, lo); sv <= Math.min(total - half, hi); sv += half / 3) add(sv, false);
+    // 上次那一點（30 m 內）也試
+    if (keepOk) {
+      for (let q = 0; q + 3 < xy.length; q += 2) {
+        const [ex, ey] = [xy[q + 2] - xy[q], xy[q + 3] - xy[q + 1]];
+        const l2 = ex * ex + ey * ey;
+        const t = l2 > 0 ? Math.max(0, Math.min(1, ((wx - xy[q]) * ex + (wy - xy[q + 1]) * ey) / l2)) : 0;
+        if (Math.hypot(wx - xy[q] - t * ex, wy - xy[q + 1] - t * ey) < 0.03) {
+          const sv = arc[q / 2] + t * Math.sqrt(l2);
+          if (sv >= half && sv <= total - half) add(sv, true);
+          break;
+        }
+      }
+    }
+  }
+  // 好的先試，第一個合適的就是：上次那一點、畫面裡的、離正中間近的
+  cands.sort((a, b) => Number(b.keep) - Number(a.keep) || Number(b.on) - Number(a.on) || a.d - b.d);
+  const best = cands.find((c) => c.fits(c.s)) ?? null;
+  if (!best) return null;
+  // 那一點前後各 1.2 個範圍的路（頭尾切在那裡：很直的路一段只有頭尾兩點，不切的話整段丟掉就太短了），那一點插進去
+  const { chain, arc, s } = best;
+  const keep = reachKm * 0.75;
+  const total = arc[arc.length - 1];
+  const [s0, s1] = [Math.max(0, s - keep), Math.min(total, s + keep)];
+  const geo = (sv: number): [number, number] => {
+    let q = 0;
+    while (q < arc.length - 2 && arc[q + 1] < sv) q++;
+    const t = (sv - arc[q]) / (arc[q + 1] - arc[q] || 1);
+    return [chain[2 * q] + t * (chain[2 * q + 2] - chain[2 * q]), chain[2 * q + 1] + t * (chain[2 * q + 3] - chain[2 * q + 1])];
+  };
+  const out: number[] = [...geo(s0)];
+  for (let q = 0; q < arc.length; q++) if (arc[q] > s0 && arc[q] < s) out.push(chain[2 * q], chain[2 * q + 1]);
+  const at = out.length / 2;
+  const [lat, lng] = geo(s);
+  out.push(lat, lng);
+  for (let q = 0; q < arc.length; q++) if (arc[q] > s && arc[q] < s1) out.push(chain[2 * q], chain[2 * q + 1]);
+  out.push(...geo(s1));
+  return { lat, lng, pts: Float64Array.from(out), at };
 }
 
 /** 路名上次寫在哪一點（名稱 → 位置） */
@@ -1286,6 +1557,10 @@ function placeLabels(
   mask: { contains: (lat: number, lng: number) => boolean } | null,
   /** 正中間離道路錨點的位移（公里）：寫進去的座標是離錨點的（跟道路一樣） */
   off: [number, number] = [0, 0],
+  /** 每張圖磚的路（路口一張一張算、記住） */
+  tileRoads: Array<Array<{ name: string; cls: string; pts: Float64Array }>> = [],
+  /** 這些路是哪幾張圖磚的（接起來的路、合起來的路口照這個記住） */
+  tilesKey = '',
 ): RadarLabel[] {
   if (hqVoyageAt !== null || !radar.filling) return [];
   const km = scaleKm;
@@ -1315,40 +1590,34 @@ function placeLabels(
   if (km <= 5) {
     const pri: Record<string, number> = { motorway: 70, trunk: 68, primary: 62, secondary: 58, tertiary: 50, minor: 40 };
     const ok = (cls: string): boolean => (km > 2 ? cls === 'motorway' || cls === 'trunk' : km > 1 ? cls !== 'tertiary' && cls !== 'minor' : true);
-    // 同名的路只寫一次：寫在離正中間最近的那一點；上次寫的那一點還在畫面裡就照舊（v1.709：路名才不會沿著路跳）。
-    // 那一點所在的那一段路（同名、頭尾接著的接起來）一起給雷達，沿著路寫（v1.722）
-    const byName = new Map<string, Array<{ pts: Float64Array; cls: string }>>();
+    // 同名的路只寫一次。寫在兩個路口中間、夠直的一段（v1.723 使用者說路名在交界處擠在一起：以前寫在離正中間最近的那一點，
+    // 大家都擠在中間的路口、字跨過路口轉彎）；畫面裡有合適的地方，離正中間近的先，上次寫的那一點還合適就照舊（路名才不會沿著路跳）；
+    // 都沒有就不寫。那一段路一起給雷達，沿著路寫（v1.722）
+    // 路口只算這個範圍會寫名字的路（小巷口沒有字，不會擠）
+    const band = km > 2 ? 'a' : km > 1 ? 'b' : 'c';
+    const junctions = roadJunctions(tileRoads, `${tilesKey}|${band}`, ok, band);
+    const ppk = radar.pxPerKm();
+    const byName = new Map<string, { lines: Float64Array[]; cls: string }>();
     for (const r of roads) {
       if (!ok(r.cls)) continue;
-      const list = byName.get(r.name);
-      if (list) list.push(r);
-      else byName.set(r.name, [r]);
+      const e = byName.get(r.name);
+      if (e) {
+        e.lines.push(r.pts);
+        if ((pri[r.cls] ?? 40) > (pri[e.cls] ?? 40)) e.cls = r.cls;
+      } else byName.set(r.name, { lines: [r.pts], cls: r.cls });
     }
-    for (const [name, list] of byName) {
-      let best: { line: Float64Array; i: number; d: number; cls: string } | null = null;
-      for (const r of list) {
-        for (let i = 0; i < r.pts.length; i += 2) {
-          const d = Math.hypot((r.pts[i + 1] - origin.lng) * kx, (r.pts[i] - origin.lat) * ky);
-          if (!best || d < best.d) best = { line: r.pts, i, d, cls: r.cls };
-        }
+    for (const [name, { lines, cls }] of byName) {
+      // 字一半的長度（公里）：字距 1.12 個字、頭尾多半個字
+      const fsPx = 10.5;
+      const half = ppk > 0 ? (([...name].length - 1) * 1.12 * fsPx) / 2 / ppk + (fsPx * 0.7) / ppk : 0;
+      // 跟路口至少隔一個多字（畫面上的距離，拉遠拉近看起來一樣）
+      const spot = roadSpot(chainsOf(name, lines, tilesKey), half, ppk > 0 ? (fsPx * 1.3) / ppk : 0.015, junctions, kx, ky, roadLabelAt.get(name) ?? null, get);
+      if (!spot) {
+        roadLabelAt.delete(name);
+        continue;
       }
-      if (!best) continue;
-      let at = best;
-      const was = roadLabelAt.get(name);
-      if (was && radar.onScreenKm((was.lng - origin.lng) * kx, (was.lat - origin.lat) * ky)) {
-        // 上次那一點在哪一段（30 m 內）
-        let near: typeof best | null = null;
-        for (const r of list) {
-          for (let i = 0; i < r.pts.length; i += 2) {
-            const d = Math.hypot((r.pts[i + 1] - was.lng) * kx, (r.pts[i] - was.lat) * ky);
-            if (d < 0.03 && (!near || d < near.d)) near = { line: r.pts, i, d, cls: r.cls };
-          }
-        }
-        if (near) at = near;
-      }
-      const [lat, lng] = [at.line[at.i], at.line[at.i + 1]];
-      roadLabelAt.set(name, { lat, lng });
-      add(lat, lng, name, 'road', pri[best.cls] ?? 40, roadChain(list.map((r) => r.pts), at.line, at.i, km * 1.2));
+      roadLabelAt.set(name, { lat: spot.lat, lng: spot.lng });
+      add(spot.lat, spot.lng, name, 'road', pri[cls] ?? 40, { pts: spot.pts, at: spot.at });
     }
     if (roadLabelAt.size > 2000) roadLabelAt.clear();
   }

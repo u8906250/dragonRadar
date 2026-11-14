@@ -1560,6 +1560,11 @@ export class Radar {
     this.scaleLabels.appendChild(t);
   }
 
+  /** 一公里在螢幕上幾個像素（雷達還沒量到大小是 0） */
+  pxPerKm(): number {
+    return this.squarePx > 0 ? ((R - 8) / this.scaleKm) * (this.squarePx / SIZE) : 0;
+  }
+
   /** 離正中間這個方位、距離的一點在螢幕上的哪裡（像素）；太空裡、雷達沒顯示時是 null（丟漂流瓶拋到落點用） */
   screenOf(bearing: number, distanceKm: number): { x: number; y: number } | null {
     const m = this.svg.getScreenCTM();
@@ -2569,11 +2574,23 @@ export class Radar {
 
   /** 離正中間（你的位置）東 x、北 y 公里的一點在不在畫面裡（全螢幕看長方形的邊，往內縮一成） */
   onScreenKm(x: number, y: number): boolean {
+    return this.screenTest()(x, y);
+  }
+
+  /** 跟 onScreenKm 一樣，先算好，一次判斷很多點用（路名找位置） */
+  screenTest(): (x: number, y: number) => boolean {
     const k = (R - 8) / this.scaleKm;
     const h = (this.heading * Math.PI) / 180;
-    const px = k * (x * Math.cos(h) - y * Math.sin(h));
-    const py = -k * (y * Math.cos(h) + x * Math.sin(h));
-    return Math.hypot(px, py) <= this.edgeR((Math.atan2(px, -py) * 180) / Math.PI) * 0.9;
+    const [cos, sin] = [Math.cos(h), Math.sin(h)];
+    // edgeR × 0.9：鋪滿時是長方形的邊往內縮，平常是圓
+    const fill = this.fill && !this.inSpace;
+    const [hx, hy] = [(RADAR_VIEW.hx - FILL_INSET) * 0.9, (RADAR_VIEW.hy - FILL_INSET) * 0.9];
+    const r2 = ((R - 8) * 0.9) ** 2;
+    return (x, y) => {
+      const px = k * (x * cos - y * sin);
+      const py = -k * (y * cos + x * sin);
+      return fill ? Math.abs(px) <= hx && Math.abs(py) <= hy : px * px + py * py <= r2;
+    };
   }
 
 
