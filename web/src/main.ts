@@ -1062,6 +1062,7 @@ function updateStreets(): void {
         panFrame = requestAnimationFrame(() => {
           panFrame = 0;
           render();
+          radar.flush();
         });
       }
     } else updateStreets();
@@ -5628,6 +5629,8 @@ function panRadar(bearing: number, km: number, done: boolean): void {
     panFrame = requestAnimationFrame(() => {
       panFrame = 0;
       render();
+      // 雷達在這一格就畫好（不排到下一格），手指移到哪就到哪
+      radar.flush();
     });
   }
 }

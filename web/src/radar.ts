@@ -3280,6 +3280,17 @@ export class Radar {
   }
 
   /**
+   * 排好的重畫現在就畫（拖曳時 main.ts 在畫面更新前算好位置，馬上畫在這一格，不再排到下一格；
+   * v1.718 使用者說拖動還是有一點延遲，跟 Google 地圖手指移到哪就到哪有差距）
+   */
+  flush(): void {
+    if (!this.drawFrame) return;
+    cancelAnimationFrame(this.drawFrame);
+    this.drawFrame = 0;
+    this.drawNow();
+  }
+
+  /**
    * 全螢幕拖曳、放開後還在滑的時候，光點、瓶子、地標和它們的閃光整層跟著手指平移、不重建（v1.716 使用者說滑動不順：
    * 以前每一格都整個重建，30 個光點每格幾百個元素，瀏覽器跟著重新排版）。移動超過畫面短邊一半的 PAN_REBUILD 才重建一次，
    * 重建時畫面外多畫 PAN_MARGIN 一圈，拖進來的是滑進來的，不會突然冒出來；停了照常重建
