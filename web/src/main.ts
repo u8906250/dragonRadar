@@ -1156,7 +1156,8 @@ function onStreetTile(): void {
  * 雷達那邊放不下（重疊、壓到光點）的不寫、一個畫面最多十幾個。
  * 33 km 以上縣市；1～33 km 鄉鎮市區；5 km 內加國道、快速道路的名字，2 km 內加幹道，1 km 內大街小巷的路名和捷運、火車站（不寫鄉鎮市區）；
  * 地標（v1.698 使用者說拉近可以放大巨蛋、公園等）：5 km 內寫大的（體育場、遊樂園、市政府、大公園），2 km 內都寫（pois-tw.ts，這時才載入）；
- * 國小、國中、高中職、一般的公園（外框不到 10 公頃）比例尺 20 m 以下才寫（v1.727、v1.728），大公園照舊；大學、學院比例尺 100 m 以下才寫（v1.729）。
+ * 國小、國中、高中職、一般的公園（外框不到 10 公頃）比例尺 20 m 以下才寫（v1.727、v1.728）；大學和其他地標比例尺 100 m 以下才寫（v1.729、v1.730）；
+ * 大公園（10 公頃以上）照舊，拉遠也寫。
  * 只有全螢幕寫（v1.692 使用者說一般的雷達不用顯示）；中國的範圍不寫（跟道路一樣）；洋流總部的特效播放時不寫
  */
 /**
@@ -1548,8 +1549,8 @@ function roadSpot(
 
 /** 國小、國中、高中職、一般的公園等比例尺顯示這麼短（公里）才寫（v1.727 使用者說 20 m；v1.728 公園也是） */
 const SCHOOL_BAR_KM = 0.02;
-/** 大學、學院等比例尺顯示這麼短（公里）才寫（v1.729 使用者說 100 m） */
-const UNIVERSITY_BAR_KM = 0.1;
+/** 大學、學院（v1.729）和其他地標（v1.730）等比例尺顯示這麼短（公里）才寫（使用者說 100 m）；大公園除外 */
+const LANDMARK_BAR_KM = 0.1;
 /** 大公園（外框幾公頃以上）：名字照舊，拉遠也寫 */
 const BIG_PARK_HA = 10;
 
@@ -1632,8 +1633,9 @@ function placeLabels(
   if (km <= 5) {
     if (!poisMod) loadPois();
     else {
-      // 比例尺還沒短到 20 m：學校、一般的公園不寫
+      // 比例尺還沒短到 20 m：學校、一般的公園不寫；還沒短到 100 m：大公園以外的地標不寫
       const small = radar.scaleBarKm() > SCHOOL_BAR_KM * 1.001;
+      const landmarkHidden = radar.scaleBarKm() > LANDMARK_BAR_KM * 1.001;
       for (const [name, lat, lng, kind, ha] of poisMod.TW_POIS) {
         // 國小、國中、高中職（v1.724 使用者說學校都寫出來）：等左下角的比例尺顯示 20 m 以下才寫
         // （v1.725、v1.726 先改成 100 m，v1.727 使用者說改成 20 m；照比例尺，電腦、手機一樣：電腦全螢幕約範圍 230 m 內、手機約 110 m 內）；
@@ -1653,8 +1655,9 @@ function placeLabels(
           add(lat, lng, name, 'poi', ha >= 10 ? 66 : ha >= 2 ? 55 : km > 1 ? 50 : 45);
           continue;
         }
-        // 大學、學院（v1.729 使用者說改成比例尺 100 m 以下才寫，不分大小）
-        if (kind === 'school' && radar.scaleBarKm() > UNIVERSITY_BAR_KM * 1.001) continue;
+        // 大學（v1.729）和其他地標（體育場、博物館美術館、市政府、遊樂園、古蹟、景點；v1.730 使用者說各大地標也是）：
+        // 比例尺 100 m 以下才寫，不分大小
+        if (landmarkHidden) continue;
         const big = kind === 'stadium' || kind === 'fun' || kind === 'gov' || ha >= 10;
         if (km > 2 && !big && ha < 20) continue;
         // 圖書館的分館（「三興分館」）單獨寫看不懂、又很多：排後面
