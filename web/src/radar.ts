@@ -2058,7 +2058,8 @@ export class Radar {
     const cos = Math.cos(h0);
     const sin = Math.sin(h0);
     const [sx, sy] = this.streetShift;
-    type Box = { l: number; r: number; t: number; b: number };
+    /** you：你的位置（畫在名稱上面）：已經寫出來的名稱不用讓（移動時經過中間不消失，v1.714 使用者說臺灣科技大學移動時會消失），新的才讓 */
+    type Box = { l: number; r: number; t: number; b: number; you?: boolean };
     const taken: Box[] = [];
     // 光點和下面「還有多久」的字、選取的光點名稱
     for (const p of blips) taken.push({ l: p.x - 18, r: p.x + 18, t: p.y - 11, b: p.y + 24 });
@@ -2071,7 +2072,7 @@ export class Radar {
     const block = (x: number, y: number, r: number): void => {
       taken.push({ l: x - r, r: x + r, t: y - r, b: y + r });
     };
-    block(C, C, 9);
+    taken.push({ l: C - 9, r: C + 9, t: C - 9, b: C + 9, you: true });
     // 刻度圈上寫的公里數不用讓：地名只有全螢幕寫，那時刻度圈藏起來了（v1.710：以前也讓，畫面上方中間有一塊看不到的地方寫不了，拖過去的名稱會閃一下）
     for (const it of this.landmarks) {
       const ratio = this.ratio(it.distanceKm);
@@ -2131,7 +2132,7 @@ export class Radar {
       let got: [number, number] | null = null;
       for (const [ox, oy] of tries) {
         const bx = { l: x + ox - w / 2, r: x + ox + w / 2, t: y + oy - h / 2, b: y + oy + h / 2 };
-        if (inView(bx.l, bx.t) && inView(bx.r, bx.t) && inView(bx.l, bx.b) && inView(bx.r, bx.b) && !taken.some((q) => q.l < bx.r && bx.l < q.r && q.t < bx.b && bx.t < q.b)) {
+        if (inView(bx.l, bx.t) && inView(bx.r, bx.t) && inView(bx.l, bx.b) && inView(bx.r, bx.b) && !taken.some((q) => !(prev && q.you) && q.l < bx.r && bx.l < q.r && q.t < bx.b && bx.t < q.b)) {
           // 別的名稱要離這個遠一點（光點、你的位置那些不用）
           const [gx, gy] = [PLACE_LABEL_GAP[0] * fs, PLACE_LABEL_GAP[1] * fs];
           taken.push({ l: bx.l - gx, r: bx.r + gx, t: bx.t - gy, b: bx.b + gy });
