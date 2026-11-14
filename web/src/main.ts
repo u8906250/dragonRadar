@@ -1231,6 +1231,49 @@ function loadPois(): void {
     });
 }
 
+/**
+ * 路名沿著路寫用的那一段路（v1.722）：從這一段往前後接同名、頭尾相接（約 1 m 內）的段，最多各接 8 段、400 個點。[緯度, 經度, …]
+ */
+function roadChain(lines: Float64Array[], start: Float64Array, startAt: number, keepKm: number): { pts: Float64Array; at: number } {
+  const used = new Set<Float64Array>([start]);
+  let chain = Array.from(start);
+  /** 路名那一點在 chain 裡的位置（數字的索引，緯度那一個） */
+  let at = startAt;
+  const same = (a: number, b: number, c: number, d: number): boolean => Math.abs(a - c) < 1e-5 && Math.abs(b - d) < 1e-5;
+  const flip = (l: Float64Array): number[] => {
+    const out: number[] = [];
+    for (let i = l.length - 2; i >= 0; i -= 2) out.push(l[i], l[i + 1]);
+    return out;
+  };
+  for (const atEnd of [true, false]) {
+    for (let step = 0; step < 8 && chain.length < 800; step++) {
+      const [la, ln] = atEnd ? [chain[chain.length - 2], chain[chain.length - 1]] : [chain[0], chain[1]];
+      const next = lines.find((l) => !used.has(l) && (same(l[0], l[1], la, ln) || same(l[l.length - 2], l[l.length - 1], la, ln)));
+      if (!next) break;
+      used.add(next);
+      const fromStart = same(next[0], next[1], la, ln);
+      // 接在後面：頭接上的照順序、尾接上的反過來；接在前面相反
+      const pts = atEnd === fromStart ? Array.from(next) : flip(next);
+      if (!atEnd) at += pts.length - 2;
+      chain = atEnd ? [...chain, ...pts.slice(2)] : [...pts.slice(0, -2), ...chain];
+    }
+  }
+  // 只留路名那一點前後 keepKm 公里（每一格都要換算，太長的不用）
+  const ky = 110.574;
+  const kx = 111.32 * Math.cos((chain[at] * Math.PI) / 180);
+  const walk = (dir: 1 | -1): number => {
+    let q = at;
+    let d = 0;
+    while (q + dir * 2 >= 0 && q + dir * 2 < chain.length && d < keepKm) {
+      d += Math.hypot((chain[q + dir * 2 + 1] - chain[q + 1]) * kx, (chain[q + dir * 2] - chain[q]) * ky);
+      q += dir * 2;
+    }
+    return q;
+  };
+  const [a, b] = [walk(-1), walk(1)];
+  return { pts: Float64Array.from(chain.slice(a, b + 2)), at: (at - a) / 2 };
+}
+
 /** 路名上次寫在哪一點（名稱 → 位置） */
 const roadLabelAt = new Map<string, LatLng>();
 function placeLabels(
@@ -1247,7 +1290,8 @@ function placeLabels(
   if (hqVoyageAt !== null || !radar.filling) return [];
   const km = scaleKm;
   const out: Array<RadarLabel & { pri: number; d: number }> = [];
-  const add = (lat: number, lng: number, text: string, kind: RadarLabel['kind'], pri: number): void => {
+  const add = (lat: number, lng: number, text: string, kind: RadarLabel['kind'], pri: number, road: { pts: Float64Array; at: number } | null = null): void => {
+    const line = road?.pts ?? null;
     const x = (lng - origin.lng) * kx;
     const y = (lat - origin.lat) * ky;
     if (Math.abs(x) > get || Math.abs(y) > get) return;
@@ -1255,28 +1299,56 @@ function placeLabels(
     if (mask?.contains(lat, lng)) return;
     // 路名的位置會換（roadLabelAt），只用名稱認；其他的同名不同地方要分開
     const key = kind === 'road' ? `road|${text}` : `${kind}|${text}|${lat.toFixed(4)},${lng.toFixed(4)}`;
-    out.push({ x: x + off[0], y: y + off[1], text, kind, key, pri, d: Math.hypot(x, y) });
+    // 路名沿著路寫：那一段路的形狀（[緯度, 經度, …] 換成跟座標一樣離錨點的公里）
+    let path: Float64Array | undefined;
+    if (line) {
+      path = new Float64Array(line.length);
+      for (let i = 0; i < line.length; i += 2) {
+        path[i] = (line[i + 1] - origin.lng) * kx + off[0];
+        path[i + 1] = (line[i] - origin.lat) * ky + off[1];
+      }
+    }
+    out.push({ x: x + off[0], y: y + off[1], text, kind, key, pri, d: Math.hypot(x, y), ...(path ? { path, pathAt: road!.at } : {}) });
   };
   if (km > 33) for (const [n, lat, lng] of sm.TW_COUNTIES) add(lat, lng, n, 'county', 100);
   else if (km > 1) for (const [n, lat, lng] of sm.TW_TOWNS) add(lat, lng, n, 'town', 90);
   if (km <= 5) {
     const pri: Record<string, number> = { motorway: 70, trunk: 68, primary: 62, secondary: 58, tertiary: 50, minor: 40 };
     const ok = (cls: string): boolean => (km > 2 ? cls === 'motorway' || cls === 'trunk' : km > 1 ? cls !== 'tertiary' && cls !== 'minor' : true);
-    // 同名的路只寫一次：寫在離正中間最近的那一點；上次寫的那一點還在畫面裡就照舊（v1.709：路名才不會沿著路跳）
-    const best = new Map<string, { lat: number; lng: number; d: number; cls: string }>();
+    // 同名的路只寫一次：寫在離正中間最近的那一點；上次寫的那一點還在畫面裡就照舊（v1.709：路名才不會沿著路跳）。
+    // 那一點所在的那一段路（同名、頭尾接著的接起來）一起給雷達，沿著路寫（v1.722）
+    const byName = new Map<string, Array<{ pts: Float64Array; cls: string }>>();
     for (const r of roads) {
       if (!ok(r.cls)) continue;
-      for (let i = 0; i < r.pts.length; i += 2) {
-        const d = Math.hypot((r.pts[i + 1] - origin.lng) * kx, (r.pts[i] - origin.lat) * ky);
-        const b = best.get(r.name);
-        if (!b || d < b.d) best.set(r.name, { lat: r.pts[i], lng: r.pts[i + 1], d, cls: r.cls });
-      }
+      const list = byName.get(r.name);
+      if (list) list.push(r);
+      else byName.set(r.name, [r]);
     }
-    for (const [name, b] of best) {
+    for (const [name, list] of byName) {
+      let best: { line: Float64Array; i: number; d: number; cls: string } | null = null;
+      for (const r of list) {
+        for (let i = 0; i < r.pts.length; i += 2) {
+          const d = Math.hypot((r.pts[i + 1] - origin.lng) * kx, (r.pts[i] - origin.lat) * ky);
+          if (!best || d < best.d) best = { line: r.pts, i, d, cls: r.cls };
+        }
+      }
+      if (!best) continue;
+      let at = best;
       const was = roadLabelAt.get(name);
-      const at = was && radar.onScreenKm((was.lng - origin.lng) * kx, (was.lat - origin.lat) * ky) ? was : b;
-      roadLabelAt.set(name, { lat: at.lat, lng: at.lng });
-      add(at.lat, at.lng, name, 'road', pri[b.cls] ?? 40);
+      if (was && radar.onScreenKm((was.lng - origin.lng) * kx, (was.lat - origin.lat) * ky)) {
+        // 上次那一點在哪一段（30 m 內）
+        let near: typeof best | null = null;
+        for (const r of list) {
+          for (let i = 0; i < r.pts.length; i += 2) {
+            const d = Math.hypot((r.pts[i + 1] - was.lng) * kx, (r.pts[i] - was.lat) * ky);
+            if (d < 0.03 && (!near || d < near.d)) near = { line: r.pts, i, d, cls: r.cls };
+          }
+        }
+        if (near) at = near;
+      }
+      const [lat, lng] = [at.line[at.i], at.line[at.i + 1]];
+      roadLabelAt.set(name, { lat, lng });
+      add(lat, lng, name, 'road', pri[best.cls] ?? 40, roadChain(list.map((r) => r.pts), at.line, at.i, km * 1.2));
     }
     if (roadLabelAt.size > 2000) roadLabelAt.clear();
   }
@@ -1311,7 +1383,7 @@ function placeLabels(
   }
   out.sort((a, b) => b.pri - a.pri || a.d - b.d);
   // 候選多留一點（v1.713：以前 80 個，拖曳時抓大一圈的範圍，畫面裡的小公園被遠處比較重要的擠出候選，移動時名字就不見）
-  return out.slice(0, 400).map(({ x, y, text, kind, key, pri }) => ({ x, y, text, kind, key, pri }));
+  return out.slice(0, 400).map(({ x, y, text, kind, key, pri, path, pathAt }) => ({ x, y, text, kind, key, pri, ...(path ? { path, pathAt } : {}) }));
 }
 
 // ---- 中山公園（park.ts，跟汪星共用一份）：地球的雷達上第一次在公園附近才載入 ----

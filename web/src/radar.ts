@@ -159,6 +159,10 @@ export interface RadarLabel {
   key?: string;
   /** 重要的程度（大的先排，可以擠掉已經寫出來、比較不重要的）；沒有算 0 */
   pri?: number;
+  /** 路名：那一段路的形狀（[往東, 往北, …]，跟 x、y 一樣離錨點的公里），沿著路一個字一個字寫，字保持正的（v1.722） */
+  path?: Float64Array;
+  /** 路名那一點是 path 的第幾個點 */
+  pathAt?: number;
 }
 /** 字的大小（螢幕像素：雷達多大字都一樣大，電腦全螢幕不會變成大字） */
 const PLACE_LABEL_PX: Record<RadarLabel['kind'], number> = { county: 13, town: 12, road: 10.5, station: 11, poi: 11 };
@@ -2424,7 +2428,61 @@ export class Radar {
       const dy = lb.y - sy;
       return [C + k * (dx * cos - dy * sin) + ox, C - k * (dy * cos + dx * sin) + oy];
     };
-    const place = (t: SVGTextElement, lb: RadarLabel, off: [number, number]): void => {
+    /**
+     * 路名沿著路寫（v1.722 使用者說路名沿著路寫）：每個字的中心，從路名那一點往兩邊沿著路排，字距一個字寬多一點，
+     * 字保持正的；橫的從左往右、直的從上往下讀。路在畫面上太短、彎得太急（字擠在一起）就是 null，照舊橫著寫在那一點
+     */
+    const alongMemo = new Map<RadarLabel, Array<[number, number]> | null>();
+    const along = (lb: RadarLabel, fs: number): Array<[number, number]> | null => {
+      if (alongMemo.has(lb)) return alongMemo.get(lb)!;
+      const pos = alongRoad(lb, fs);
+      alongMemo.set(lb, pos);
+      return pos;
+    };
+    const alongRoad = (lb: RadarLabel, fs: number): Array<[number, number]> | null => {
+      const path = lb.path;
+      const n = [...lb.text].length;
+      if (!path || path.length < 4 || n < 2) return null;
+      const P: number[] = [];
+      for (let q = 0; q < path.length; q += 2) {
+        const dx = path[q] - sx;
+        const dy = path[q + 1] - sy;
+        P.push(C + k * (dx * cos - dy * sin), C - k * (dy * cos + dx * sin));
+      }
+      const L = [0];
+      for (let q = 2; q < P.length; q += 2) L.push(L[L.length - 1] + Math.hypot(P[q] - P[q - 2], P[q + 1] - P[q - 1]));
+      const total = L[L.length - 1];
+      const sp = fs * 1.12;
+      const span = (n - 1) * sp;
+      if (total < span + fs * 0.5) return null;
+      let i0 = lb.pathAt ?? 0;
+      if (lb.pathAt === undefined) {
+        const [ax, ay] = at(lb, [0, 0]);
+        for (let q = 0; q < P.length; q += 2) if (Math.hypot(P[q] - ax, P[q + 1] - ay) < Math.hypot(P[2 * i0] - ax, P[2 * i0 + 1] - ay)) i0 = q / 2;
+      }
+      const s0 = Math.max(fs * 0.25, Math.min(total - span - fs * 0.25, L[i0] - span / 2));
+      const pos: Array<[number, number]> = [];
+      let seg = 0;
+      for (let j = 0; j < n; j++) {
+        const sj = s0 + j * sp;
+        while (seg < L.length - 2 && L[seg + 1] < sj) seg++;
+        const len = L[seg + 1] - L[seg] || 1;
+        const t = (sj - L[seg]) / len;
+        pos.push([P[2 * seg] + t * (P[2 * seg + 2] - P[2 * seg]), P[2 * seg + 1] + t * (P[2 * seg + 3] - P[2 * seg + 1])]);
+      }
+      for (let j = 1; j < n; j++) if (Math.hypot(pos[j][0] - pos[j - 1][0], pos[j][1] - pos[j - 1][1]) < sp * 0.75) return null;
+      const [dx, dy] = [pos[n - 1][0] - pos[0][0], pos[n - 1][1] - pos[0][1]];
+      if (Math.abs(dx) >= Math.abs(dy) ? dx < 0 : dy < 0) pos.reverse();
+      return pos;
+    };
+    // 位置直接寫在 x、y（沿著路的一個字一個）：試過 transform（樣式要重算）、一個字一個 <text>（元素太多），都比較慢
+    const place = (t: SVGTextElement, lb: RadarLabel, off: [number, number], fs: number): void => {
+      const pos = along(lb, fs);
+      if (pos) {
+        t.setAttribute('x', pos.map((p) => p[0].toFixed(1)).join(' '));
+        t.setAttribute('y', pos.map((p) => p[1].toFixed(1)).join(' '));
+        return;
+      }
       const [x, y] = at(lb, off);
       t.setAttribute('x', x.toFixed(1));
       t.setAttribute('y', y.toFixed(1));
@@ -2449,6 +2507,18 @@ export class Radar {
       const tries = prev ? (moving ? [prev] : [prev, ...base]) : base;
       const [x, y] = at(lb, [0, 0]);
       let got: [number, number] | null = null;
+      // 路名沿著路：一個字一個字看擋不擋（別的名稱離每個字遠一點就好）
+      const pos = along(lb, fs);
+      if (pos) {
+        const r = fs / 2 + 1;
+        const boxes = pos.map(([px, py]) => ({ l: px - r, r: px + r, t: py - r, b: py + r }));
+        if (boxes.every((bx) => inView(bx.l, bx.t) && inView(bx.r, bx.t) && inView(bx.l, bx.b) && inView(bx.r, bx.b) && !taken.some((q) => !(prev && q.you) && q.l < bx.r && bx.l < q.r && q.t < bx.b && bx.t < q.b))) {
+          const gap = fs * 0.6;
+          for (const bx of boxes) taken.push({ l: bx.l - gap, r: bx.r + gap, t: bx.t - gap, b: bx.b + gap });
+          got = [0, 0];
+        }
+        tries.length = 0;
+      }
       for (const [ox, oy] of tries) {
         const bx = { l: x + ox - w / 2, r: x + ox + w / 2, t: y + oy - h / 2, b: y + oy + h / 2 };
         if (inView(bx.l, bx.t) && inView(bx.r, bx.t) && inView(bx.l, bx.b) && inView(bx.r, bx.b) && !taken.some((q) => !(prev && q.you) && q.l < bx.r && bx.l < q.r && q.t < bx.b && bx.t < q.b)) {
@@ -2473,7 +2543,7 @@ export class Radar {
         this.labelEls.set(key, t);
       }
       t.setAttribute('font-size', fs.toFixed(2));
-      place(t, lb, got);
+      place(t, lb, got, fs);
       if (this.labelOff.delete(key)) t.classList.remove('off');
     }
     // 沒寫出來的淡出（淡出時還跟著地圖走），淡完拿掉
@@ -2491,7 +2561,7 @@ export class Radar {
       }
       const lb = byKey.get(key);
       const off = this.labelShown.get(key) ?? this.labelHidden.get(key);
-      if (lb && off) place(t, lb, off);
+      if (lb && off) place(t, lb, off, PLACE_LABEL_PX[lb.kind] * unit);
     }
     this.labelShown = shown;
     this.labelHidden = moving ? hidden : new Map();
