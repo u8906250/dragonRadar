@@ -1682,8 +1682,18 @@ export class Radar {
   setOutline(rings: Array<Array<{ bearing: number; distanceKm: number }>>, lines: Array<Array<{ bearing: number; distanceKm: number }>> = []): void {
     this.outline = rings;
     this.outlineLines = lines;
+    this.outlineShift = [0, 0];
     this.draw();
   }
+
+  /** 拖曳中：輪廓照算的那一點，正中間移了多少（公里，東、北），整層平移不重畫（main.ts 移太遠才重算） */
+  setOutlineShift(shift: [number, number]): void {
+    this.outlineShift = shift;
+    this.draw();
+  }
+  private outlineShift: [number, number] = [0, 0];
+  /** 上次畫輪廓用的資料和比例：一樣的話只平移 */
+  private outlineBuilt: { rings: unknown; lines: unknown; k: number; heading: number; unit: number; space: boolean } | null = null;
 
   /**
    * 放大時的街道；null 不畫。shift：道路的座標原點到正中間的位移（公里，東、北），拖曳時只改這個；
@@ -2328,18 +2338,36 @@ export class Radar {
   }
 
   private drawOutline(): void {
-    this.outlineLayer.replaceChildren();
-    // 太空：陸地畫在地球上（space.ts）
-    if (this.inSpace) return;
-    for (const ring of this.outline) {
-      if (ring.length < 3) continue;
-      const p = this.outlinePath(ring);
-      // 斷開的只畫線、不填色（填色會把斷開的兩端直接連起來）
-      if (p) this.outlineLayer.appendChild(el('path', { class: `region-outline${p.closed ? '' : ' open'}`, d: p.d }));
+    const k = (R - 8) / this.scaleKm;
+    const unit = this.squarePx > 0 ? SIZE / this.squarePx : 1;
+    const b = this.outlineBuilt;
+    // 資料、比例、方向都沒變（拖曳中只有位移）：不重畫，裡面那層平移（裁切的圓不動）
+    if (!(b && b.rings === this.outline && b.lines === this.outlineLines && b.k === k && b.heading === this.heading && b.unit === unit && b.space === this.inSpace)) {
+      this.outlineBuilt = { rings: this.outline, lines: this.outlineLines, k, heading: this.heading, unit, space: this.inSpace };
+      this.outlineLayer.replaceChildren();
+      // 太空：陸地畫在地球上（space.ts）
+      if (this.inSpace) return;
+      const inner = el('g');
+      for (const ring of this.outline) {
+        if (ring.length < 3) continue;
+        const p = this.outlinePath(ring);
+        // 斷開的只畫線、不填色（填色會把斷開的兩端直接連起來）
+        if (p) inner.appendChild(el('path', { class: `region-outline${p.closed ? '' : ' open'}`, d: p.d }));
+      }
+      // 縣市交界合成一條 path
+      const d = this.outlineLines.map((l) => this.outlinePath(l, true)?.d ?? '').join(' ');
+      if (d.trim()) inner.appendChild(el('path', { class: 'region-outline open county-line', d }));
+      this.outlineLayer.appendChild(inner);
     }
-    // 縣市交界合成一條 path
-    const d = this.outlineLines.map((l) => this.outlinePath(l, true)?.d ?? '').join(' ');
-    if (d.trim()) this.outlineLayer.appendChild(el('path', { class: 'region-outline open county-line', d }));
+    const inner = this.outlineLayer.firstElementChild;
+    if (!inner || this.inSpace) return;
+    const [sx, sy] = this.outlineShift;
+    if (sx === 0 && sy === 0) inner.removeAttribute('transform');
+    else {
+      const h = (this.heading * Math.PI) / 180;
+      const [cos, sin] = [Math.cos(h), Math.sin(h)];
+      inner.setAttribute('transform', `translate(${(-k * (sx * cos - sy * sin)).toFixed(2)} ${(k * (sy * cos + sx * sin)).toFixed(2)})`);
+    }
   }
 
   /**

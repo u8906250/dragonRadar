@@ -883,6 +883,10 @@ const laterLabel = (): string => (timeSetting === 'now' ? '還沒開始、休息
 const inScope = (distanceKm: number): boolean => distanceKm <= scaleKm;
 
 let outlineFor = '';
+/** 圖磚裡的每一條線在不在中國的範圍裡（updateStreets 的 hidden） */
+const chinaLine = new WeakMap<Float64Array, boolean>();
+/** 輪廓是照哪一點算的（拖曳中照這一點平移） */
+let outlineAt: LatLng | null = null;
 let radarOutline: Array<Array<{ bearing: number; distanceKm: number }>> = [];
 
 /** 範圍比 16 km 大時畫的海岸線：台灣用詳細的，加上全世界的（約 30 KB，第一次用到才載入；世界資料裡的台灣只有幾個點，換掉） */
@@ -1028,11 +1032,16 @@ function updateStreets(): void {
     return;
   }
   const mask = mayChina ? eaMod!.chinaMask : null;
-  /** 一條線的中間那一點在中國的範圍裡 */
+  /** 一條線的中間那一點在中國的範圍裡（同一條線記住，拖曳中重算道路時不用每次再查） */
   const hidden = (pts: Float64Array): boolean => {
     if (!mask) return false;
-    const m = Math.floor(pts.length / 4) * 2;
-    return mask.contains(pts[m], pts[m + 1]);
+    let v = chinaLine.get(pts);
+    if (v === undefined) {
+      const m = Math.floor(pts.length / 4) * 2;
+      v = mask.contains(pts[m], pts[m + 1]);
+      chinaLine.set(pts, v);
+    }
+    return v;
   };
   const ky = 110.574;
   // 拖曳中：範圍、圖磚沒變，正中間離錨點不到範圍的 1/4（換算時多留的那一圈）就只給位移
@@ -1229,10 +1238,11 @@ function placeLabels(
   const km = scaleKm;
   const out: Array<RadarLabel & { pri: number; d: number }> = [];
   const add = (lat: number, lng: number, text: string, kind: RadarLabel['kind'], pri: number): void => {
-    if (mask?.contains(lat, lng)) return;
     const x = (lng - origin.lng) * kx;
     const y = (lat - origin.lat) * ky;
     if (Math.abs(x) > get || Math.abs(y) > get) return;
+    // 範圍裡的才查在不在中國（地標幾千個，先查範圍省很多）
+    if (mask?.contains(lat, lng)) return;
     // 路名的位置會換（roadLabelAt），只用名稱認；其他的同名不同地方要分開
     const key = kind === 'road' ? `road|${text}` : `${kind}|${text}|${lat.toFixed(4)},${lng.toFixed(4)}`;
     out.push({ x, y, text, kind, key, pri, d: Math.hypot(x, y) });
@@ -1573,9 +1583,20 @@ function updateOutline(): void {
         : null;
   const lines = kind === 'land' && scaleKm <= COUNTY_MAX_KM ? countyLines : [];
   const mapRings = kind === 'land' && scaleKm > MAP_OUTLINE_KM ? landRings : null;
-  const key = sources ? `${kind}|${worldLoaded}|${!!ea}|${china}|${lines.length > 0}|${!!mapRings}|${tier}|${origin.lat},${origin.lng}` : '';
+  const base = sources ? `${kind}|${worldLoaded}|${!!ea}|${china}|${lines.length > 0}|${!!mapRings}|${tier}` : '';
+  // 拖曳中移動不到範圍的一半：不重算（每一點都要算方位、距離，拉遠時點很多），雷達照位移整層平移（v1.719 使用者說快速拖很遠時地圖跟不上、越縮小越明顯）
+  if (panFrom && outlineAt && base && outlineFor.startsWith(`${base}|`)) {
+    const kx = 111.32 * Math.cos((outlineAt.lat * Math.PI) / 180);
+    const shift: [number, number] = [(origin.lng - outlineAt.lng) * kx, (origin.lat - outlineAt.lat) * 110.574];
+    if (Math.hypot(...shift) < scaleKm * 0.5) {
+      radar.setOutlineShift(shift);
+      return;
+    }
+  }
+  const key = sources ? `${base}|${origin.lat},${origin.lng}` : '';
   if (key === outlineFor) return;
   outlineFor = key;
+  outlineAt = { lat: origin.lat, lng: origin.lng };
   // 附近的範圍（經緯度的方框）：範圍的 2.5 倍（全螢幕鋪滿時角落比外圈遠）；太大、跨過換日線就全部換算
   const dLat = reach / 111;
   const dLng = reach / (111 * Math.max(0.1, Math.cos((origin.lat * Math.PI) / 180)));
