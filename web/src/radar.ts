@@ -1117,10 +1117,8 @@ export class Radar {
     if (!bar) return;
     bar.hidden = !this.fill || !this.squarePx || (this.inSpace && this.spaceView.focus === null);
     if (bar.hidden) return;
-    const pxPerKm = ((R - 8) / this.scaleKm) * (this.squarePx / SIZE);
-    const want = 70 / pxPerKm;
-    const p = 10 ** Math.floor(Math.log10(want));
-    const km = [5, 2, 1].map((m) => m * p).find((v) => v <= want) ?? p;
+    const pxPerKm = this.pxPerKm();
+    const km = this.scaleBarKm();
     bar.style.width = `${(km * pxPerKm).toFixed(1)}px`;
     const label = bar.firstElementChild ?? bar.appendChild(document.createElement('span'));
     label.textContent = fmtKm(km);
@@ -1558,6 +1556,15 @@ export class Radar {
     const t = el('text', { x: C + 5, y: C - this.ringRatio(km) * R + 13, class: 'scale-label' });
     t.textContent = fmtKm(km);
     this.scaleLabels.appendChild(t);
+  }
+
+  /** 比例尺寫的距離（公里）：最長約 70 像素，取 1、2、5 開頭的整數距離；雷達還沒量到大小是 Infinity */
+  scaleBarKm(): number {
+    const ppk = this.pxPerKm();
+    if (!(ppk > 0)) return Infinity;
+    const want = 70 / ppk;
+    const p = 10 ** Math.floor(Math.log10(want));
+    return [5, 2, 1].map((m) => m * p).find((v) => v <= want) ?? p;
   }
 
   /** 一公里在螢幕上幾個像素（雷達還沒量到大小是 0） */
