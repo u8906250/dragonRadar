@@ -1883,7 +1883,10 @@ function render(): void {
   viewBtn.hidden = view === 'radar' && noMapView();
   const now = nowSec();
   const fetched = computeItems(now);
-  renderSearchTags(fetched);
+  // 拖曳雷達中（放開後還在滑也算）：清單、搜尋關鍵字、詳細資料、地圖頁的標記先不更新，停了再一起更新（panRadar → setOrigin → render）。
+  // v1.716 使用者說滑動不順：這些每一格都整個重建，瀏覽器跟著重新排版，佔了拖曳時間的一大半
+  const dragging = panFrom !== null;
+  if (!dragging) renderSearchTags(fetched);
   // 搜尋時雷達、地圖、清單、各類的數量都只算符合的
   const searched = searchTerms.length > 0 ? fetched.filter(matchesSearch) : fetched;
   // 選了星期幾、日期：只留那幾天有的（雷達、地圖、清單都是）
@@ -1905,8 +1908,10 @@ function render(): void {
   updateStreets();
   updatePark();
   updateSpace();
-  updateCategoryToggles(all);
-  updateActiveToggle(byCategory, now);
+  if (!dragging) {
+    updateCategoryToggles(all);
+    updateActiveToggle(byCategory, now);
+  }
 
   /** 經緯度 → 雷達上的方位、距離（洋流總部的特效用）；inView 是離正中間不到外圈的 1.5 倍（畫面附近才畫，不然幾千個元素每一格重畫會卡；畫面跟著船移動，進到畫面時已經長好的直接畫） */
   const toRadarAt = ([lat, lng]: [number, number]): { bearing: number; distanceKm: number } => ({ bearing: bearingDeg(origin, { lat, lng }), distanceKm: haversineKm(origin, { lat, lng }) });
@@ -2093,28 +2098,32 @@ function render(): void {
           ],
     ),
   );
-  map.render(
-    drawn.map((it) => ({
-      id: it.ev.id,
-      kind: it.ev.kind,
-      spot: !!it.spot,
-      office: !!it.spot && isOffice(it.ev),
-      approx: !!it.ev.approxArea,
-      lat: it.ev.lat,
-      lng: it.ev.lng,
-      phase: it.phase,
-      title: `${tagLabel(it)}｜${titleOf(it.ev)}`,
-      flag: flagOf(it.ev),
-      // 地圖上的小圖示照活動的主題（發放的也算一類，v1.671）
-      topic: topicFor(it.ev),
-      subtitle: `${placeLine(it.ev)} · ${timeLine(it, now)}`,
-      selected: it.ev.id === selectedId,
-      ...(isUpcoming(it) && it.phase === 'later' ? { fade: clarityOf(it.ev, now) } : {}),
-    })),
-  );
-  renderList(items, now);
-  renderDetail(items, now);
-  if (detailEl.hidden) setPeek(false);
+  if (!dragging) {
+    map.render(
+      drawn.map((it) => ({
+        id: it.ev.id,
+        kind: it.ev.kind,
+        spot: !!it.spot,
+        office: !!it.spot && isOffice(it.ev),
+        approx: !!it.ev.approxArea,
+        lat: it.ev.lat,
+        lng: it.ev.lng,
+        phase: it.phase,
+        title: `${tagLabel(it)}｜${titleOf(it.ev)}`,
+        flag: flagOf(it.ev),
+        // 地圖上的小圖示照活動的主題（發放的也算一類，v1.671）
+        topic: topicFor(it.ev),
+        subtitle: `${placeLine(it.ev)} · ${timeLine(it, now)}`,
+        selected: it.ev.id === selectedId,
+        ...(isUpcoming(it) && it.phase === 'later' ? { fade: clarityOf(it.ev, now) } : {}),
+      })),
+    );
+  }
+  if (!dragging) {
+    renderList(items, now);
+    renderDetail(items, now);
+    if (detailEl.hidden) setPeek(false);
+  }
 
   // 新變成進行中且在雷達範圍內的事件 → 嗶聲、震動、通知。第一次載入不吵。搜尋只影響畫面，通知照樣看全部
   const notifyPool = searchTerms.length > 0 ? fetched.filter((it) => shown[categoryOf(it)] && (!onlyActive || activeNow(it, now))) : items;

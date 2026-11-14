@@ -161,6 +161,9 @@ const PLACE_LABEL_MAX = [12, 30];
 const PLACE_LABEL_GAP = [2.5, 1.2];
 /** 已經寫出來的名稱多算多少重要程度：差不多重要的新名稱擠不掉它，明顯比較重要的（主要道路、車站）才擠得掉 */
 const PLACE_LABEL_KEEP = 10;
+/** 全螢幕拖曳時光點那幾層整層平移：移動超過畫面短邊一半的幾成才重建一次；重建時畫面外多畫幾成（滑進來用） */
+const PAN_REBUILD = 0.3;
+const PAN_MARGIN = 0.4;
 /** 縮放、轉動停了多久才算停下來（被擋住的名稱這時才試別的位置） */
 const LABEL_SETTLE_MS = 300;
 /** 名稱淡出多久（跟 styles.css 的 .place-label 一樣） */
@@ -1353,6 +1356,10 @@ export class Radar {
     if (this.parkPan) {
       this.parkPan.dx += dx;
       this.parkPan.dy += dy;
+    }
+    if (this.blipPan) {
+      this.blipPan.dx += dx;
+      this.blipPan.dy += dy;
     }
     // 內容往畫面上的 screen 方向移動；指北針模式要加回手機朝向；中心往反方向
     const screen = (Math.atan2(dx, -dy) * 180) / Math.PI;
@@ -3272,7 +3279,46 @@ export class Radar {
     });
   }
 
+  /**
+   * 全螢幕拖曳、放開後還在滑的時候，光點、瓶子、地標和它們的閃光整層跟著手指平移、不重建（v1.716 使用者說滑動不順：
+   * 以前每一格都整個重建，30 個光點每格幾百個元素，瀏覽器跟著重新排版）。移動超過畫面短邊一半的 PAN_REBUILD 才重建一次，
+   * 重建時畫面外多畫 PAN_MARGIN 一圈，拖進來的是滑進來的，不會突然冒出來；停了照常重建
+   */
+  private blipPan: { dx: number; dy: number } | null = null;
+  private blipBuilt: { k: number; heading: number; pos: Array<{ x: number; y: number }>; placed: Array<{ left: number; right: number; top: number; bottom: number }> } | null = null;
+
   private drawNow(): void {
+    const k = (R - 8) / this.scaleKm;
+    const moving = this.panning || this.panFling !== 0;
+    const built = this.blipBuilt;
+    const shift = this.blipPan;
+    const slide =
+      this.fill && !this.inSpace && moving && !!built && !!shift && built.k === k && built.heading === this.heading && Math.hypot(shift.dx, shift.dy) < PAN_REBUILD * Math.min(RADAR_VIEW.hx, RADAR_VIEW.hy);
+    const sliding = [this.blipLayer, this.fxLayer, this.bottleLayer, this.landmarkLayer];
+    if (slide && built && shift) {
+      this.drawStreets();
+      this.drawPark();
+      this.drawOutline();
+      this.drawRoutes();
+      this.drawScaleBar();
+      this.drawPreviews();
+      this.drawYou();
+      const t = `translate(${shift.dx.toFixed(1)} ${shift.dy.toFixed(1)})`;
+      for (const g of sliding) g.setAttribute('transform', t);
+      const px = this.squarePx / SIZE;
+      this.flashSquare.style.transform = `translate(${(shift.dx * px).toFixed(1)}px, ${(shift.dy * px).toFixed(1)}px)`;
+      const [dx, dy] = [shift.dx, shift.dy];
+      this.drawPlaceLabels(
+        built.pos.map((p) => ({ x: p.x + dx, y: p.y + dy })),
+        built.placed.map((b) => ({ left: b.left + dx, right: b.right + dx, top: b.top + dy, bottom: b.bottom + dy })),
+      );
+      return;
+    }
+    for (const g of sliding) g.removeAttribute('transform');
+    this.flashSquare.style.transform = '';
+    this.blipPan = { dx: 0, dy: 0 };
+    // 拖曳中重建：畫面外多畫一圈（滑進來用）
+    const margin = this.fill && moving ? PAN_MARGIN * Math.min(RADAR_VIEW.hx, RADAR_VIEW.hy) : 0;
     this.flashDirty = true;
     // 特效層、閃光層跟著主圖層整個重建（光點、瓶子、地標各自建它們的那一組）
     this.fxLayer.replaceChildren();
@@ -3300,9 +3346,10 @@ export class Radar {
       // 範圍外的貼在外圈；全螢幕鋪滿時畫面外的不畫（選取的也不畫：詳細資料寫了多遠、哪個方向）
       const lim = this.edgeR(angle);
       const beyond = ratio * (R - 8) > lim;
-      if (this.fill && beyond) continue;
-      const r = Math.min(ratio * (R - 8), lim);
-      pos.set(it.id, { ...polar(angle, r), out: beyond || !!it.outside, angle, r });
+      // 拖曳中畫面外一圈裡的照實際位置畫（在畫面外，滑進來）
+      if (this.fill && ratio * (R - 8) > lim + margin) continue;
+      const r = this.fill ? ratio * (R - 8) : Math.min(ratio * (R - 8), lim);
+      pos.set(it.id, { ...polar(angle, r), out: (beyond && !this.fill) || !!it.outside, angle, r });
     }
     const items = all.filter((it) => pos.has(it.id));
     // 疊在一起（12 px 內）的光點合成一群：選取的、要顯示標籤的優先當代表，標籤加「+N」，
@@ -3348,6 +3395,7 @@ export class Radar {
       }
     }
     this.drawPlaceLabels([...pos.values()], placed);
+    this.blipBuilt = { k, heading: this.heading, pos: [...pos.values()], placed };
     for (const g of groups) {
       const lead = leaderOf(g);
       const ids = g.map((it) => it.id).join(',');

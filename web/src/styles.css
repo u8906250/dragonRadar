@@ -1388,8 +1388,8 @@ path.map-seam-walkers { --p: 15px; }
 .radar .street-minor { stroke-width: 0.8; stroke-opacity: 0.2; }
 .radar .street-major { stroke-width: 2; stroke-opacity: 0.24; }
 /* 全螢幕雷達的公園綠地（v1.705）：淡淡的不透明色塊，在道路下面 */
-/* 外面一圈同顏色的細邊：蓋掉反鋸齒留下的細縫 */
-.radar .streets path.green-area { fill: var(--park-fill); stroke: var(--park-fill); stroke-width: 1; stroke-opacity: 1; stroke-linejoin: round; }
+/* 不描邊：v1.707 加過同色細邊蓋接縫，但 nonzero 填色後相鄰圖磚重疊的地方本來就塗滿；描邊在拖曳時佔了一半的重繪時間（v1.716） */
+.radar .streets path.green-area { fill: var(--park-fill); stroke: none; }
 .radar .blip .halo { fill: var(--blip-halo); opacity: 0.9; }
 /* 雷達上的地名（v1.691）：淡淡的小字，在光點、車掃下面；字的大小、外框粗細在 radar.ts 照螢幕像素算（PLACE_LABEL_PX） */
 .radar .place-label { fill: var(--label); text-anchor: middle; dominant-baseline: central; paint-order: stroke; stroke: var(--label-halo); stroke-linejoin: round; pointer-events: none; transition: opacity 0.25s; animation: place-label-in 0.25s ease-out; }
