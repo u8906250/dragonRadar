@@ -3285,15 +3285,38 @@ export class Radar {
    * 重建時畫面外多畫 PAN_MARGIN 一圈，拖進來的是滑進來的，不會突然冒出來；停了照常重建
    */
   private blipPan: { dx: number; dy: number } | null = null;
-  private blipBuilt: { k: number; heading: number; pos: Array<{ x: number; y: number }>; placed: Array<{ left: number; right: number; top: number; bottom: number }> } | null = null;
+  private blipBuilt: {
+    k: number;
+    heading: number;
+    pos: Array<{ x: number; y: number }>;
+    /** 建的時候每個光點的位置（id → 位置）：平移多少照現在的位置算 */
+    at: Map<number, { x: number; y: number }>;
+    placed: Array<{ left: number; right: number; top: number; bottom: number }>;
+  } | null = null;
+
+  /**
+   * 拖曳中光點那幾層要平移多少：照現在的光點位置（main.ts 照你的位置算好、跟道路同一格更新）比建的時候，
+   * 不照手指的移動量（v1.717 使用者說拖曳時活動會抖：手指的移動比道路早一格，手指快慢一變光點就前後晃，重建時再跳回去）。
+   * 沒有光點才照手指的
+   */
+  private slideShift(built: NonNullable<Radar['blipBuilt']>, fallback: { dx: number; dy: number }): [number, number] {
+    for (const it of this.items) {
+      const was = built.at.get(it.id);
+      if (!was) continue;
+      const p = polar(it.bearing - this.heading, this.ratio(it.distanceKm) * (R - 8));
+      return [p.x - was.x, p.y - was.y];
+    }
+    return [fallback.dx, fallback.dy];
+  }
 
   private drawNow(): void {
     const k = (R - 8) / this.scaleKm;
     const moving = this.panning || this.panFling !== 0;
     const built = this.blipBuilt;
     const shift = this.blipPan;
+    const [dx, dy] = built && shift ? this.slideShift(built, shift) : [0, 0];
     const slide =
-      this.fill && !this.inSpace && moving && !!built && !!shift && built.k === k && built.heading === this.heading && Math.hypot(shift.dx, shift.dy) < PAN_REBUILD * Math.min(RADAR_VIEW.hx, RADAR_VIEW.hy);
+      this.fill && !this.inSpace && moving && !!built && !!shift && built.k === k && built.heading === this.heading && Math.hypot(dx, dy) < PAN_REBUILD * Math.min(RADAR_VIEW.hx, RADAR_VIEW.hy);
     const sliding = [this.blipLayer, this.fxLayer, this.bottleLayer, this.landmarkLayer];
     if (slide && built && shift) {
       this.drawStreets();
@@ -3303,11 +3326,10 @@ export class Radar {
       this.drawScaleBar();
       this.drawPreviews();
       this.drawYou();
-      const t = `translate(${shift.dx.toFixed(1)} ${shift.dy.toFixed(1)})`;
+      const t = `translate(${dx.toFixed(2)} ${dy.toFixed(2)})`;
       for (const g of sliding) g.setAttribute('transform', t);
       const px = this.squarePx / SIZE;
-      this.flashSquare.style.transform = `translate(${(shift.dx * px).toFixed(1)}px, ${(shift.dy * px).toFixed(1)}px)`;
-      const [dx, dy] = [shift.dx, shift.dy];
+      this.flashSquare.style.transform = `translate(${(dx * px).toFixed(2)}px, ${(dy * px).toFixed(2)}px)`;
       this.drawPlaceLabels(
         built.pos.map((p) => ({ x: p.x + dx, y: p.y + dy })),
         built.placed.map((b) => ({ left: b.left + dx, right: b.right + dx, top: b.top + dy, bottom: b.bottom + dy })),
@@ -3395,7 +3417,7 @@ export class Radar {
       }
     }
     this.drawPlaceLabels([...pos.values()], placed);
-    this.blipBuilt = { k, heading: this.heading, pos: [...pos.values()], placed };
+    this.blipBuilt = { k, heading: this.heading, pos: [...pos.values()], at: new Map([...pos].map(([id, p]) => [id, { x: p.x, y: p.y }])), placed };
     for (const g of groups) {
       const lead = leaderOf(g);
       const ids = g.map((it) => it.id).join(',');

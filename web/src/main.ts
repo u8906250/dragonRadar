@@ -1056,7 +1056,15 @@ function updateStreets(): void {
   // 16 km 內多拿圖磚裡的海岸線（v1.640 使用者說「不管放大到什麼程度都要有邊界」；再大用 updateOutline 的海岸線）
   const { lines, coast, roads, stations, green } = streetsMod.streetTiles(origin.lat, origin.lng, get, scaleKm, () => {
     streetTiles++;
-    updateStreets();
+    // 拖曳中：等下一格跟光點一起畫（v1.717：圖磚到了馬上照最新的位置畫道路、地名，光點還在上一格，看起來會抖）
+    if (panFrom) {
+      if (!panFrame) {
+        panFrame = requestAnimationFrame(() => {
+          panFrame = 0;
+          render();
+        });
+      }
+    } else updateStreets();
   });
   const kx = 111.32 * Math.cos((origin.lat * Math.PI) / 180);
   const box = [origin.lat - get / ky, origin.lng - get / kx, origin.lat + get / ky, origin.lng + get / kx];
