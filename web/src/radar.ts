@@ -1192,6 +1192,12 @@ export class Radar {
     let lastTap: { t: number; x: number; y: number } | null = null;
     // 雙指縮放到現在縮了多少（ln），最近 FLING_SAMPLE_MS 的紀錄拿來算放開時的速度
     let pinchLog = 0;
+    // 兩根手指中間上一次在哪（螢幕像素）：兩根手指一起移動時地圖跟著走（v1.732 使用者說兩根手指縮放時也能移動）
+    let pinchMid: { x: number; y: number } | null = null;
+    const midOf = (): { x: number; y: number } => {
+      const [a, b] = [...this.pointers.values()];
+      return { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
+    };
     let pinchSamples: Array<{ t: number; z: number }> = [];
     const pinchSpeed = (t: number): number => {
       const first = pinchSamples[0];
@@ -1258,9 +1264,10 @@ export class Radar {
         multi = false;
       }
       if (this.pointers.size === 2) {
-        // 拖到一半放第二根手指：改成縮放
+        // 拖到一半放第二根手指：改成縮放（同時可以移動）
         this.endPan();
         this.pinchDist = dist();
+        pinchMid = midOf();
         multi = true;
         pinchLog = 0;
         pinchSamples = [{ t: e.timeStamp, z: 0 }];
@@ -1275,8 +1282,26 @@ export class Radar {
       }
       if (this.pointers.size !== 2) return;
       const d = dist();
+      const mid = midOf();
+      // 像 Google 地圖：兩根手指一起移動，地圖跟著走（跟一根手指拖曳一樣移動你的位置，放開才算拖完）
+      if (this.onPan && !this.panning) {
+        this.panning = true;
+        this.panTrail = [];
+        this.svg.classList.add('panning');
+      }
+      if (pinchMid) this.panBy(mid.x - pinchMid.x, mid.y - pinchMid.y);
+      pinchMid = mid;
       if (this.pinchDist > 0 && d > 0) {
+        const before = this.scaleKm;
         onZoom(this.pinchDist / d, false);
+        // 縮放時兩根手指中間那一點不動：以正中間縮放後，那一點離正中間的距離變成 1/f 倍，地圖往回拉（太空裡不用）
+        const f = this.scaleKm / before;
+        const c = this.svg.getScreenCTM();
+        if (f !== 1 && Number.isFinite(f) && c && !this.inSpace && !this.earthHidden) {
+          const center = new DOMPoint(C, C).matrixTransform(c);
+          const [vx, vy] = [mid.x - center.x, mid.y - center.y];
+          this.panBy((-vx * (1 - f)) / f, (-vy * (1 - f)) / f);
+        }
         pinchLog += Math.log(this.pinchDist / d);
         pinchSamples.push({ t: e.timeStamp, z: pinchLog });
         // 留一筆比 FLING_SAMPLE_MS 早的，速度才算得到整段
@@ -1291,12 +1316,17 @@ export class Radar {
       // 放開時手指還在快速移動：繼續滑（減少動態效果、用過兩根手指時不滑）
       if (this.pointers.size === 0) this.endPan(e.type === 'pointerup' && !multi && !this.calm?.matches ? this.panSpeed(e.timeStamp) : null);
       if (this.pointers.size === 1 && this.pinchDist > 0) {
+        // 兩根手指移動的部分到這裡算拖完（剩一根手指不接著拖）
+        this.endPan();
         // 放開第一根手指時還在快速捏合、張開：繼續滑（減少動態效果時不滑）
         const v = e.type === 'pointerup' ? pinchSpeed(e.timeStamp) : 0;
         if (Math.abs(v) >= FLING_MIN_SPEED && !this.calm?.matches) startFling(v);
         else onZoom(1, true);
       }
-      if (this.pointers.size < 2) this.pinchDist = 0;
+      if (this.pointers.size < 2) {
+        this.pinchDist = 0;
+        pinchMid = null;
+      }
       // 縮放完剩一根手指：不接著拖
       this.panStart = null;
       this.panLast = null;
