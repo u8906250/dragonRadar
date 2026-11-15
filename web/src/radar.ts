@@ -434,6 +434,8 @@ const TAP_ZOOM_MS = 500;
  */
 const FLING_SAMPLE_MS = 100;
 const FLING_MIN_SPEED = 0.0015;
+/** 兩根手指放開的時間差這麼短（毫秒）才算一起放開（縮放接著滑）；放開一根、另一根還按著是要拖 */
+const PINCH_BOTH_MS = 150;
 const FLING_IDLE_MS = 60;
 const FLING_TAU_MS = 150;
 const FLING_STOP_SPEED = 0.0001;
@@ -1189,6 +1191,10 @@ export class Radar {
     // 點兩下放大（像 Google 地圖；手機、滑鼠都可以）：這次按下的時間、有沒有用到兩根手指，上一次短短點一下在哪
     let downAt = 0;
     let multi = false;
+    // 兩根手指放開一根、剩下那根接著拖（v1.733 使用者說放掉一根就不能移動了）：放開時可以繼續滑
+    let resumed = false;
+    // 放開第一根手指時還在快速縮放：等第二根也很快放開（PINCH_BOTH_MS 內、沒怎麼動）才接著縮放滑行，不然剩下那根是要拖
+    let pinchFling: { v: number; t: number; x: number; y: number } | null = null;
     let lastTap: { t: number; x: number; y: number } | null = null;
     // 雙指縮放到現在縮了多少（ln），最近 FLING_SAMPLE_MS 的紀錄拿來算放開時的速度
     let pinchLog = 0;
@@ -1262,6 +1268,8 @@ export class Radar {
         this.panLast = this.panStart;
         downAt = e.timeStamp;
         multi = false;
+        resumed = false;
+        pinchFling = null;
       }
       if (this.pointers.size === 2) {
         // 拖到一半放第二根手指：改成縮放（同時可以移動）
@@ -1313,23 +1321,33 @@ export class Radar {
       if (!this.pointers.delete(e.pointerId)) return;
       // 短短點一下（沒拖、沒捏合）
       const tapped = e.type === 'pointerup' && this.pointers.size === 0 && !this.panning && !multi && e.timeStamp - downAt < DOUBLE_TAP_MS;
-      // 放開時手指還在快速移動：繼續滑（減少動態效果、用過兩根手指時不滑）
-      if (this.pointers.size === 0) this.endPan(e.type === 'pointerup' && !multi && !this.calm?.matches ? this.panSpeed(e.timeStamp) : null);
+      // 放開時手指還在快速移動：繼續滑（減少動態效果時不滑；用過兩根手指的，剩一根接著拖的才滑）
+      if (this.pointers.size === 0) this.endPan(e.type === 'pointerup' && (!multi || resumed) && !this.calm?.matches ? this.panSpeed(e.timeStamp) : null);
+      // 第二根也很快放開、沒怎麼動：接著縮放滑行
+      if (this.pointers.size === 0 && pinchFling) {
+        const pf = pinchFling;
+        pinchFling = null;
+        if (e.type === 'pointerup' && e.timeStamp - pf.t < PINCH_BOTH_MS && Math.hypot(e.clientX - pf.x, e.clientY - pf.y) < 12) startFling(pf.v);
+      }
       if (this.pointers.size === 1 && this.pinchDist > 0) {
-        // 兩根手指移動的部分到這裡算拖完（剩一根手指不接著拖）
-        this.endPan();
-        // 放開第一根手指時還在快速捏合、張開：繼續滑（減少動態效果時不滑）
+        // 放開第一根手指時還在快速捏合、張開：先記著（減少動態效果時不滑）
         const v = e.type === 'pointerup' ? pinchSpeed(e.timeStamp) : 0;
-        if (Math.abs(v) >= FLING_MIN_SPEED && !this.calm?.matches) startFling(v);
-        else onZoom(1, true);
+        onZoom(1, true);
+        // 剩下那根手指接著拖（像 Google 地圖）：從它現在的位置開始，拖曳沒有中斷，全部放開才算拖完
+        const [rest] = [...this.pointers.values()];
+        pinchFling = Math.abs(v) >= FLING_MIN_SPEED && !this.calm?.matches ? { v, t: e.timeStamp, x: rest.x, y: rest.y } : null;
+        this.panStart = { ...rest };
+        this.panLast = { ...rest };
+        this.panTrail = [];
+        resumed = true;
+      } else if (this.pointers.size !== 1 || !resumed) {
+        this.panStart = null;
+        this.panLast = null;
       }
       if (this.pointers.size < 2) {
         this.pinchDist = 0;
         pinchMid = null;
       }
-      // 縮放完剩一根手指：不接著拖
-      this.panStart = null;
-      this.panLast = null;
       if (tapped) tap(e);
     };
     // 剛拖完放開時的 click 不要選到光點、瓶子
