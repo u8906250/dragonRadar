@@ -30,7 +30,7 @@
   --radar-grid: #15171c; --radar-grid-op: 0.28; --radar-outer-op: 0.9;
   --grass: #3f8f2f; --water: #2f7fc0; --bronze: #8a5a24;
   /* 全螢幕雷達的公園綠地、光點後面的底圈（v1.705） */
-  --park-fill: #d5e8c8; --blip-halo: #ffffff;
+  --park-fill: #d5e8c8; --water-fill: #c4dff0; --water-line: #9cc8e3; --blip-halo: #ffffff;
   --radar-sweep: #03615a; --radar-sweep-op: 0.4;
   --radar-me: #15171c; --radar-text: #5d5850; --radar-rose: #15171c;
   --blip: #ea611d; --blip-stroke: #15171c; --blip-stroke-w: 2; --blip-core: #ffffff;
@@ -56,7 +56,7 @@
   --radar-face-1: #0f4a2d; --radar-face-2: #052016; --radar-face-stroke: #1f8a4c;
   --radar-grid: #3cff8a; --radar-grid-op: 0.28; --radar-outer-op: 0.6;
   --grass: #b4e86a; --water: #6fd0ff; --bronze: #e0b060;
-  --park-fill: #123620; --blip-halo: #07130c;
+  --park-fill: #123620; --water-fill: #0d2e3d; --water-line: #1b4f66; --blip-halo: #07130c;
   --radar-sweep: #3cff8a; --radar-sweep-op: 0.55;
   --radar-me: #3cff8a; --radar-text: #7fa58f; --radar-rose: #7fa58f;
   --blip: #ffd43b; --blip-stroke: #6b4e00; --blip-stroke-w: 1; --blip-core: #ffffff;
@@ -82,7 +82,7 @@
   --radar-face-1: #f3e7c9; --radar-face-2: #dfcb98; --radar-face-stroke: #5b3a1e;
   --radar-grid: #5b3a1e; --radar-grid-op: 0.35; --radar-outer-op: 0.8;
   --grass: #5f7f22; --water: #2f6f99; --bronze: #7a4a1a;
-  --park-fill: #c6cf98; --blip-halo: #f7eed9;
+  --park-fill: #c6cf98; --water-fill: #b7d2cc; --water-line: #92b8b4; --blip-halo: #f7eed9;
   --radar-sweep: #5b3a1e; --radar-sweep-op: 0.5;
   --radar-me: #b8322a; --radar-text: #7a5c3a; --radar-rose: #5b3a1e;
   --blip: #b8322a; --blip-stroke: #b8322a; --blip-stroke-w: 0; --blip-core: #f7eed9;
@@ -108,7 +108,7 @@
   --radar-face-1: #2a1245; --radar-face-2: #0b0612; --radar-face-stroke: #ff3fa4;
   --radar-grid: #2ef2ff; --radar-grid-op: 0.3; --radar-outer-op: 0.7;
   --grass: #7be36b; --water: #5ab4ff; --bronze: #f0b860;
-  --park-fill: #0f2a1a; --blip-halo: #0b0612;
+  --park-fill: #0f2a1a; --water-fill: #12203f; --water-line: #23386b; --blip-halo: #0b0612;
   --radar-sweep: #ff3fa4; --radar-sweep-op: 0.5;
   --radar-me: #2ef2ff; --radar-text: #a88fc4; --radar-rose: #a88fc4;
   --blip: #ff3fa4; --blip-stroke: #ffffff; --blip-stroke-w: 1; --blip-core: #ffffff;
@@ -1390,6 +1390,10 @@ path.map-seam-walkers { --p: 15px; }
 /* 全螢幕雷達的公園綠地（v1.705）：淡淡的不透明色塊，在道路下面 */
 /* 不描邊：v1.707 加過同色細邊蓋接縫，但 nonzero 填色後相鄰圖磚重疊的地方本來就塗滿；描邊在拖曳時佔了一半的重繪時間（v1.716） */
 .radar .streets path.green-area { fill: var(--park-fill); stroke: none; }
+/* 河面、湖、水庫（v1.734 使用者說河也上色）：淡藍、不透明，在綠地上面、道路下面；比較窄的河、溪畫線 */
+.radar .streets path.water-area { fill: var(--water-fill); stroke: none; }
+.radar .streets path.water-river { stroke: var(--water-line); stroke-width: 2.2; }
+.radar .streets path.water-stream { stroke: var(--water-line); stroke-width: 1; }
 .radar .blip .halo { fill: var(--blip-halo); opacity: 0.9; }
 /* 雷達上的地名（v1.691）：淡淡的小字，在光點、車掃下面；字的大小、外框粗細在 radar.ts 照螢幕像素算（PLACE_LABEL_PX） */
 .radar .place-label { fill: var(--label); text-anchor: middle; dominant-baseline: central; paint-order: stroke; stroke: var(--label-halo); stroke-linejoin: round; pointer-events: none; transition: opacity 0.25s; animation: place-label-in 0.25s ease-out; }

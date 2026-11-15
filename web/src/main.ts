@@ -1088,7 +1088,7 @@ function updateStreets(): void {
     const hit = streetTileCache.get(ck);
     if (hit) return hit;
     const [s0, w0, n0, e0] = t.box;
-    const rt: RadarStreetTile = { key: t.key, box: [(w0 - fr.lng) * fr.kx, (s0 - fr.lat) * ky, (e0 - fr.lng) * fr.kx, (n0 - fr.lat) * ky], major: [], minor: [], coast: [], green: [] };
+    const rt: RadarStreetTile = { key: t.key, box: [(w0 - fr.lng) * fr.kx, (s0 - fr.lat) * ky, (e0 - fr.lng) * fr.kx, (n0 - fr.lat) * ky], major: [], minor: [], coast: [], green: [], water: [], rivers: [], streams: [] };
     for (const l of t.lines) if (!hidden(l.pts)) rt[l.cls].push(toXy(l.pts));
     for (const l of t.coast) if (!hidden(l.pts)) rt.coast.push(toXy(l.pts));
     if (greenOn) {
@@ -1098,6 +1098,17 @@ function updateStreets(): void {
         if (mask && mask.contains(a.rings[0][0], a.rings[0][1])) continue;
         rt.green.push(a.rings.map(toXy));
       }
+      // 河面、湖、水庫、池塘塗淡藍，比較窄的河、溪畫線（v1.734 使用者說河也上色）；碰到中國範圍的不畫
+      // （取線上幾個點看：出海口的河中間那一點常在海上，只看一點會畫到廈門外海）
+      const touchesChina = (pts: Float64Array): boolean => {
+        if (!mask) return false;
+        const n = pts.length / 2;
+        const step = Math.max(1, Math.floor(n / 8));
+        for (let i = 0; i < n; i += step) if (mask.contains(pts[2 * i], pts[2 * i + 1])) return true;
+        return mask.contains(pts[pts.length - 2], pts[pts.length - 1]);
+      };
+      for (const a of t.water) if (!touchesChina(a.rings[0])) rt.water.push(a.rings.map(toXy));
+      for (const l of t.waterways) if (!touchesChina(l.pts)) (l.cls === 'river' ? rt.rivers : rt.streams).push(toXy(l.pts));
     }
     streetTileCache.set(ck, rt);
     while (streetTileCache.size > 300) streetTileCache.delete(streetTileCache.keys().next().value as string);

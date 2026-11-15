@@ -134,6 +134,11 @@ export interface RadarStreetTile {
   coast: Float64Array[];
   /** 公園綠地（全螢幕才有）：每一塊是外圈和挖空的圈 */
   green: Float64Array[][];
+  /** 河面、湖、水庫、池塘（全螢幕才有，v1.734）：跟綠地一樣一塊一塊 */
+  water: Float64Array[][];
+  /** 比較窄的河（沒有河面的）、溪的線 */
+  rivers: Float64Array[];
+  streams: Float64Array[];
 }
 
 /** 放大時畫的街道：一張一張的圖磚，座標都是離錨點的公里（錨點換了 frame 就換，全部重畫） */
@@ -259,12 +264,27 @@ export function clipRing(ring: ArrayLike<number>, r: [number, number, number, nu
   return pts;
 }
 
-/** 道路的四層（由下往上）：綠地、海岸線、小路、大路 */
+/** 道路的幾層（由下往上）：綠地、河面湖泊、河、溪、海岸線、小路、大路；前兩層是面（全螢幕才畫） */
 const TILE_CLASSES: Array<[string, Record<string, string>]> = [
   ['green-area', { 'fill-rule': 'nonzero' }],
+  ['water-area', { 'fill-rule': 'nonzero' }],
+  ['water-river', {}],
+  ['water-stream', {}],
   ['region-outline open coast-line', {}],
   ['street-minor', {}],
   ['street-major', {}],
+];
+/** 面的那幾層（照 TILE_CLASSES 的順序） */
+const TILE_AREAS = 2;
+/** 一張圖磚每一層的資料（照 TILE_CLASSES 的順序）：面是一塊一塊（外圈、挖空的圈），線是一條一條 */
+const tileKinds = (t: RadarStreetTile): [Float64Array[][], Float64Array[][], Float64Array[], Float64Array[], Float64Array[], Float64Array[], Float64Array[]] => [
+  t.green,
+  t.water,
+  t.rivers,
+  t.streams,
+  t.coast,
+  t.minor,
+  t.major,
 ];
 /** 全螢幕拖曳時光點那幾層整層平移：移動超過畫面短邊一半的幾成才重建一次；重建時畫面外多畫幾成（滑進來用） */
 const PAN_REBUILD = 0.3;
@@ -2285,7 +2305,7 @@ export class Radar {
     const [x0, y0, x1, y1] = t.box;
     const cw = Math.max(1e-9, (x1 - x0) / TILE_GRID);
     const ch = Math.max(1e-9, (y1 - y0) / TILE_GRID);
-    const kinds = [t.green.map((p) => p[0]), t.coast, t.minor, t.major].map((list) => {
+    const kinds = tileKinds(t).map((list, n) => (n < TILE_AREAS ? (list as Float64Array[][]).map((p) => p[0]) : (list as Float64Array[]))).map((list) => {
       const boxes = new Float64Array(list.length * 4);
       const buckets: number[][] = Array.from({ length: TILE_GRID * TILE_GRID }, () => []);
       list.forEach((l, n) => {
@@ -2352,15 +2372,14 @@ export class Radar {
       }
       return d && close ? `${d}Z` : d;
     };
-    const out = ['', '', '', ''];
+    const out = TILE_CLASSES.map(() => '');
     const [w2, h2] = [(rect[2] - rect[0]) / 2, (rect[3] - rect[1]) / 2];
     const wide: [number, number, number, number] = [rect[0] - w2, rect[1] - h2, rect[2] + w2, rect[3] + h2];
     for (const t of tiles) {
-      for (const [kind, list] of [
-        [1, t.coast],
-        [2, t.minor],
-        [3, t.major],
-      ] as const) {
+      const all = tileKinds(t);
+      for (let kind = TILE_AREAS; kind < all.length; kind++) {
+        const list = all[kind] as Float64Array[];
+        if (list.length === 0) continue;
         const boxes = this.indexOf(t).kinds[kind].boxes;
         for (const n of this.query(t, kind, rect)) {
           // 格子：切在邊上；縮放中：畫面外多一半裡面的整條畫，很長的才切（只畫畫面附近那段）
@@ -2372,20 +2391,24 @@ export class Radar {
       if (!this.fill) continue;
       const e = 2 / k;
       const gr: [number, number, number, number] = [rect[0] - e, rect[1] - e, rect[2] + e, rect[3] + e];
-      const gboxes = this.indexOf(t).kinds[0].boxes;
-      for (const n of this.query(t, 0, gr)) {
-        const whole = !clip || inside(gboxes, n, gr);
-        for (const r of t.green[n]) {
-          let [x0, x1, y0, y1] = [Infinity, -Infinity, Infinity, -Infinity];
-          for (let q = 0; q < r.length; q += 2) {
-            x0 = Math.min(x0, r[q]);
-            x1 = Math.max(x1, r[q]);
-            y0 = Math.min(y0, r[q + 1]);
-            y1 = Math.max(y1, r[q + 1]);
+      for (let kind = 0; kind < TILE_AREAS; kind++) {
+        const polys = all[kind] as Float64Array[][];
+        if (polys.length === 0) continue;
+        const gboxes = this.indexOf(t).kinds[kind].boxes;
+        for (const n of this.query(t, kind, gr)) {
+          const whole = !clip || inside(gboxes, n, gr);
+          for (const r of polys[n]) {
+            let [x0, x1, y0, y1] = [Infinity, -Infinity, Infinity, -Infinity];
+            for (let q = 0; q < r.length; q += 2) {
+              x0 = Math.min(x0, r[q]);
+              x1 = Math.max(x1, r[q]);
+              y0 = Math.min(y0, r[q + 1]);
+              y1 = Math.max(y1, r[q + 1]);
+            }
+            if ((x1 - x0) * k < 4 && (y1 - y0) * k < 4) continue;
+            const ring = whole ? r : clipRing(r, gr);
+            if (ring.length >= 6) out[kind] += pts(ring, 3, true);
           }
-          if ((x1 - x0) * k < 4 && (y1 - y0) * k < 4) continue;
-          const ring = whole ? r : clipRing(r, gr);
-          if (ring.length >= 6) out[0] += pts(ring, 3, true);
         }
       }
     }

@@ -153,6 +153,41 @@ export interface GreenArea {
   box: [number, number, number, number];
 }
 const GREEN_CLASSES = new Set(['grass', 'wood']);
+/** 塗淡藍的水域（water 圖層的 class）：海（ocean）、游泳池不塗 */
+const WATER_CLASSES = new Set(['river', 'lake', 'pond', 'reservoir', 'basin', 'dock']);
+/** 河、溪的線（waterway 圖層）：pts 是 [緯度, 經度, …]，box 跟 StreetLine 一樣；cls 是 river（河、運河）或 stream（溪） */
+export interface WaterLine {
+  pts: Float64Array;
+  box: [number, number, number, number];
+  cls: 'river' | 'stream';
+}
+
+/**
+ * 面的幾圈照圖磚的規格分成一塊一塊放進 out：外圈在地圖上順時針（ringArea 負的），後面跟著它挖空的圈（逆時針）。
+ * v1.708：同一張圖磚裡同一類的合成一個 feature（例如福建和台灣的樹林），整個當一塊的話拉遠時半邊沒畫、或畫到中國
+ */
+function polygonsOf(rings: number[][], out: GreenArea[]): void {
+  let box: [number, number, number, number] | null = null;
+  let poly: Float64Array[] = [];
+  const flush = (): void => {
+    if (box) out.push({ rings: poly, box });
+    box = null;
+    poly = [];
+  };
+  for (const r of rings) {
+    const a = ringArea(r);
+    if (a < 0) {
+      flush();
+      // 太小的外圈不收，它挖空的圈也一起不收
+      if (r.length >= 6) {
+        const w = withBox(r);
+        box = w.box;
+        poly = [w.pts];
+      }
+    } else if (a > 0 && box && r.length >= 6) poly.push(Float64Array.from(r));
+  }
+  flush();
+}
 
 /** 雷達上寫車站的 poi 種類（class=railway 的 subclass） */
 const STATION_KINDS = new Set(['subway', 'station', 'halt', 'light_rail']);
@@ -244,14 +279,16 @@ export function decodeTile(
   classes: Classes,
   coast: boolean,
   names: { roads?: string[]; stations?: boolean; green?: boolean } = {},
-): { lines: StreetLine[]; coast: CoastLine[]; roads: RoadName[]; stations: StationName[]; green: GreenArea[] } {
+): { lines: StreetLine[]; coast: CoastLine[]; roads: RoadName[]; stations: StationName[]; green: GreenArea[]; water: GreenArea[]; waterways: WaterLine[] } {
   const tile = new Pbf(buf);
   const coastOut: CoastLine[] = [];
   const roadsOut: RoadName[] = [];
   const stationsOut: StationName[] = [];
   const greenOut: GreenArea[] = [];
+  const waterOut: GreenArea[] = [];
+  const waterwaysOut: WaterLine[] = [];
   const nameClasses = new Set(names.roads ?? []);
-  // 圖層照字母排（landcover、poi、transportation、transportation_name、water）：要名稱、綠地、海岸線就讀完整張
+  // 圖層照字母排（landcover、poi、transportation、transportation_name、water、waterway）：要名稱、綠地（河、湖）、海岸線就讀完整張
   const whole = coast || nameClasses.size > 0 || !!names.stations || !!names.green;
   let linesOut: StreetLine[] = [];
   while (tile.more()) {
@@ -293,8 +330,11 @@ export function decodeTile(
       return [(Math.atan(Math.sinh(Math.PI * (1 - 2 * wy))) * 180) / Math.PI, wx * 360 - 180];
     };
     if (name === 'water' && coast) {
+      // 讀完海岸線回到開頭，下面再讀一次河、湖（v1.734）
+      const starts = features.map((f) => f.pos);
       coastOut.push(...oceanEdges(features, keys, values, extent, toLatLng));
-      continue;
+      features.forEach((f, i) => (f.pos = starts[i]));
+      if (!names.green) continue;
     }
     /** 一個 feature 的字串標籤 */
     const tagsOf = (tags: number[]): Record<string, string> => {
@@ -316,34 +356,35 @@ export function decodeTile(
       }
       continue;
     }
+    // 河、湖、水庫、池塘（v1.734 使用者說河也上色；跟綠地一起，全螢幕才畫）：海不塗、游泳池不算
+    if (name === 'water' && names.green) {
+      for (const f of features) {
+        const { tags, type, geom } = readFeature(f);
+        if (type !== 3) continue;
+        if (!WATER_CLASSES.has(tagsOf(tags).class)) continue;
+        polygonsOf(geomParts(geom, toLatLng), waterOut);
+      }
+      continue;
+    }
+    // 比較窄、沒有河面的河、溪（線）：河、運河都畫，溪流要 z13（拉近）才畫；地下的（tunnel）、排水溝不畫
+    if (name === 'waterway' && names.green) {
+      for (const f of features) {
+        const { tags, type, geom } = readFeature(f);
+        if (type !== 2) continue;
+        const t = tagsOf(tags);
+        if (t.brunnel === 'tunnel') continue;
+        const cls = t.class === 'river' || t.class === 'canal' ? 'river' : t.class === 'stream' && z >= 13 ? 'stream' : null;
+        if (!cls) continue;
+        for (const part of geomParts(geom, toLatLng)) if (part.length >= 4) waterwaysOut.push({ ...withBox(part), cls });
+      }
+      continue;
+    }
     if (name === 'landcover' && names.green) {
       for (const f of features) {
         const { tags, type, geom } = readFeature(f);
         if (type !== 3) continue;
         if (!GREEN_CLASSES.has(tagsOf(tags).class)) continue;
-        // 同一張圖磚裡同一類的綠地合成一個 feature（例如福建和台灣的樹林），照圖磚的規格分成一塊一塊：外圈在地圖上順時針
-        // （ringArea 負的），後面跟著它挖空的圈（逆時針）。v1.708：以前整個 feature 當一塊，只用第一圈判斷在不在畫面、在不在中國，
-        // 拉遠時半邊沒畫、或畫到中國
-        let box: [number, number, number, number] | null = null;
-        let poly: Float64Array[] = [];
-        const flush = () => {
-          if (box) greenOut.push({ rings: poly, box });
-          box = null;
-          poly = [];
-        };
-        for (const r of geomParts(geom, toLatLng)) {
-          const a = ringArea(r);
-          if (a < 0) {
-            flush();
-            // 太小的外圈不收，它挖空的圈也一起不收
-            if (r.length >= 6) {
-              const w = withBox(r);
-              box = w.box;
-              poly = [w.pts];
-            }
-          } else if (a > 0 && box && r.length >= 6) poly.push(Float64Array.from(r));
-        }
-        flush();
+        polygonsOf(geomParts(geom, toLatLng), greenOut);
       }
       continue;
     }
@@ -409,7 +450,7 @@ export function decodeTile(
     linesOut = out;
     if (!whole) break;
   }
-  return { lines: linesOut, coast: coastOut, roads: roadsOut, stations: stationsOut, green: greenOut };
+  return { lines: linesOut, coast: coastOut, roads: roadsOut, stations: stationsOut, green: greenOut, water: waterOut, waterways: waterwaysOut };
 }
 
 /**
@@ -505,7 +546,7 @@ function tileTemplate(): Promise<string | null> {
   return template;
 }
 
-type TileData = { lines: StreetLine[]; coast: CoastLine[]; roads: RoadName[]; stations: StationName[]; green: GreenArea[] };
+type TileData = { lines: StreetLine[]; coast: CoastLine[]; roads: RoadName[]; stations: StationName[]; green: GreenArea[]; water: GreenArea[]; waterways: WaterLine[] };
 const tiles = new Map<string, TileData | 'loading'>();
 
 /**
@@ -540,6 +581,7 @@ export function streetTiles(
   rangeKm: number,
   onLoad: () => void,
 ): { lines: StreetLine[]; coast: CoastLine[]; roads: RoadName[]; stations: StationName[]; green: GreenArea[]; pending: number; tiles: LoadedTile[] } {
+  // 河、湖跟綠地一起讀（green 那幾級）
   const { zoom, classes, taiwan, coast, names, stations, green } = tierOf(rangeKm);
   const dLat = km / 110.574;
   const dLng = km / (111.32 * Math.cos((lat * Math.PI) / 180));
@@ -583,7 +625,7 @@ export function streetTiles(
         .then((ab) => {
           if (!ab) throw new Error('no tile');
           const got = decodeTile(new Uint8Array(ab), x, y, zoom, classes, !!coast, { roads: names, stations, green });
-          tiles.set(key, { lines: taiwan ? got.lines.filter(onTaiwan) : got.lines, coast: got.coast, roads: got.roads, stations: got.stations, green: got.green });
+          tiles.set(key, { lines: taiwan ? got.lines.filter(onTaiwan) : got.lines, coast: got.coast, roads: got.roads, stations: got.stations, green: got.green, water: got.water, waterways: got.waterways });
           while (tiles.size > MAX_TILES) tiles.delete(tiles.keys().next().value as string);
           onLoad();
         })
