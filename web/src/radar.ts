@@ -2029,6 +2029,8 @@ export class Radar {
 
   private drawLandmarks(): void {
     this.landmarkLayer.replaceChildren();
+    // 跟活動圖示一樣固定螢幕大小（v1.738 使用者說總部的星星也比照）：星星外徑 10 個單位 → 寬約 22 px
+    const bs = this.blipScale();
     for (const lm of this.landmarks) {
       const ratio = this.ratio(lm.distanceKm);
       const lim = this.edgeR(lm.bearing - this.heading);
@@ -2037,7 +2039,7 @@ export class Radar {
       if ((this.inSpace || this.fill) && (out || this.earthHidden)) continue;
       const lr = Math.min(ratio * (R - 8), lim);
       const p = polar(lm.bearing - this.heading, lr);
-      const g = el('g', { class: `landmark${out ? ' out' : ''}${lm.selected ? ' selected' : ''}`, transform: `translate(${p.x.toFixed(1)} ${p.y.toFixed(1)})`, tabindex: 0, role: 'button' });
+      const g = el('g', { class: `landmark${out ? ' out' : ''}${lm.selected ? ' selected' : ''}`, transform: `translate(${p.x.toFixed(1)} ${p.y.toFixed(1)}) scale(${bs.toFixed(4)})`, tabindex: 0, role: 'button' });
       g.dataset.id = lm.id;
       // 點擊範圍比光點小一點，旁邊的光點還點得到
       g.appendChild(el('circle', { class: 'hit', r: 13 }));
@@ -2047,7 +2049,7 @@ export class Radar {
       if (this.starSpin?.id === lm.id) body.setAttribute('style', `animation:star-spin-away ${STAR_SPIN_MS}ms ease-in both;animation-delay:${Math.round(this.starSpin.at - Date.now())}ms`);
       else if (Date.now() - this.starBackAt < 600) body.setAttribute('style', `animation:star-back 0.5s ease-out both;animation-delay:${Math.round(this.starBackAt - Date.now())}ms`);
       g.appendChild(body);
-      this.addFlash(g, lm.bearing - this.heading, lr, out ? 6 : 9);
+      this.addFlash(g, lm.bearing - this.heading, lr, (out ? 6 : 9) * bs);
       // 平常不寫名稱，點了（選取中）才在星星下面顯示
       if (lm.selected) {
         const anchor = anchorAt(p.x);
@@ -2499,7 +2501,7 @@ export class Radar {
       const ratio = this.ratio(it.distanceKm);
       if (ratio > 1.1) continue;
       const p = polar(it.bearing - this.heading, ratio * (R - 8));
-      block(p.x, p.y, 10);
+      block(p.x, p.y, 10 * bs);
     }
     const inView = (x: number, y: number): boolean => Math.hypot(x - C, y - C) <= this.edgeR((Math.atan2(x - C, C - y) * 180) / Math.PI) - 2;
     // 一個螢幕像素是幾個 SVG 單位
