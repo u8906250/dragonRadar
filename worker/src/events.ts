@@ -1,7 +1,7 @@
 import type { Env } from './env';
 import { fetchThreadsProfile, profileCandidates, profileHintText, type ThreadsProfile } from './sources/profile';
 import { adoptedTags } from './learnedTags';
-import { ACTIVITY_SPEC, applySupplementDate, reconcileRouteStops, ROUTE_WORDS, closedWeekdays, slotWeekdays, dropBroughtItem, dropSelfPlace, extractFromPost, localizeTimes, missingActivityParts, openWeekdaysFromText, splitDropTimes, splitDailyActivity, splitMultiDay, splitWeekdayWeekend, spotHoursFromText, startNowForDeadline, guessedMidnight, localToUnix, MODULE_TAGS, postTags, regionTimeZone, timeZoneOf, topicExtra, untilInText, weekdaysInText, str, type ActivityPart, type EventKind, type ExtractedEvent, type ExtractSpec, type JobInfo } from './extract';
+import { ACTIVITY_SPEC, applySupplementDate, reconcileRouteStops, ROUTE_WORDS, closedWeekdays, slotWeekdays, dropBroughtItem, dropSelfPlace, extractFromPost, localizeTimes, missingActivityParts, openWeekdaysFromText, splitDropTimes, splitDailyActivity, splitMultiDay, splitWeeklyOpenDays, splitWeekdayWeekend, spotHoursFromText, startNowForDeadline, guessedMidnight, localToUnix, MODULE_TAGS, postTags, regionTimeZone, timeZoneOf, topicExtra, untilInText, weekdaysInText, str, type ActivityPart, type EventKind, type ExtractedEvent, type ExtractSpec, type JobInfo } from './extract';
 import { cityOfHouse, geocodeAddress, parseTwAddress, type TwAddress } from './address';
 import { SESSION_SPEC } from './badminton';
 import { FOOD_SPEC } from './food';
@@ -851,8 +851,8 @@ async function planActivities(env: Env, post: PostRow, extracted: ExtractedEvent
   // 管理者處理回報時手動改過的地點、時間（重新判讀不能蓋掉）
   const fixes = await manualFixesOf(env, post.id);
   // 車掃的站：照貼文一行一站的清單補上模型漏掉的、改正套錯的地名；連續幾天、每天同一個時段的拆成每天一場（v1.567）
-  const events = reconcileRouteStops(extracted, text).flatMap((ex) => splitDailyActivity(ex, text));
-  for (const ex of events) {
+  const daily = reconcileRouteStops(extracted, text).flatMap((ex) => splitDailyActivity(ex, text));
+  for (const ex of daily) {
     // 國外的：時間換成當地時區的時間點；台灣的貼文沒寫哪天、補充寫了，用補充的日期（模型有時會忽略補充）
     if (ex.country) localizeTimes(ex);
     else {
@@ -862,7 +862,10 @@ async function planActivities(env: Env, post: PostRow, extracted: ExtractedEvent
     }
   }
   // 整則都沒寫幾點開始：從發文的時間開始
-  startAtPostTime(events, text, post.posted_at);
+  startAtPostTime(daily, text, post.posted_at);
+  // 每週固定幾天開、每天同一個時段、沒寫到哪天為止的（「週一至週五 13:00 - 20:00」）：拆成接下來一週有開的每一天（v1.748）。
+  // 星期幾、時段要貼文或回報的人補充寫的，帳號簡介的營業時間不算
+  const events = splitWeeklyOpenDays(daily, post.supplement ? `${post.text}\n${post.supplement}` : post.text, post.posted_at);
   for (const [group, ex] of events.entries()) {
     // 只寫「本店」沒寫店名：當成沒寫地點（記下原本寫的，回報結果講「只寫了本店」）
     const rawPlace = ex.place_text ?? ex.place_query;

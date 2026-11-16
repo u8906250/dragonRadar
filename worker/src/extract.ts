@@ -664,6 +664,55 @@ export function splitDailyActivity(ex: ExtractedEvent, text: string): ExtractedE
   return Array.from({ length: days }, (_, i) => ({ ...ex, start_at: taipeiIso(start + i * DAY_SEC), end_at: taipeiIso(start + i * DAY_SEC + len) }));
 }
 
+/** 寫明只有那一天的（不拆成每週開的那幾天） */
+const ONE_DAY_RE = /只有今[天日]|僅此一天|限定一天|只限今[天日]|今[天日]限定|當日限定/;
+
+/**
+ * 每週固定幾天開、每天同一個時段、沒寫到哪天為止的（店家「週一至週五 13:00 - 20:00 歡迎來拿」，v1.748 使用者說工作天週一到週五要判讀出五天）：
+ * 模型照規則只給第一天（沒寫到哪天為止的只給第一天），這裡拆成接下來一週裡有開的每一天（7 天內，週一到週五就是五天；
+ * 第一天已經打烊或那天沒開的不算），第一天照模型的時間（可能從發文時間開始），之後每天照貼文寫的時段。
+ * own 是貼文加回報的人補充，不含帳號簡介：星期幾、時段都要寫在這裡（簡介的營業時間可能只是一次的發放，不拆）。
+ * 每天都開的（「每天」「週一到週日」）照舊只給第一天；寫了發文當天以外的日期、「只有今天」、車掃、國外的不拆；
+ * 好幾個時段（中午、晚上各一段）的每一段都拆
+ */
+export function splitWeeklyOpenDays(events: ExtractedEvent[], own: string, postedAt: number): ExtractedEvent[] {
+  const t = halfWidth(own);
+  if (events.length === 0 || ONE_DAY_RE.test(t) || ROUTE_WORDS.test(t)) return events;
+  const open = openWeekdaysFromText(t);
+  if (!open || open.length === 0 || open.length === 7) return events;
+  const slots = timeRanges(t);
+  const tod = (x: number): number => (x + 8 * 3600) % DAY_SEC;
+  const info = events.map((ex) => ({ ex, start: parseIsoToUnix(ex.start_at), end: parseIsoToUnix(ex.end_at) }));
+  // 每一場都要是同一天的一個時段，結束是貼文寫的某個時段的結束（照那個時段排之後每天）
+  const day0 = info[0].start === null ? null : taipeiDay(info[0].start);
+  if (day0 === null || info.some((x) => x.ex.country || x.start === null || x.end === null || x.end <= x.start || taipeiDay(x.start) !== day0 || taipeiDay(x.end - 1) !== day0)) return events;
+  // 貼文寫了別天的日期（「11/20 限定」）：照模型的
+  if ([...t.matchAll(DATE_RE)].some((m) => !postDayIs(Number(m[1]), Number(m[2]), postedAt))) return events;
+  const slotOf = info.map((x) => slots.find(([, b]) => b === tod(x.end!)) ?? null);
+  if (slotOf.some((sl) => sl === null)) return events;
+  const out: ExtractedEvent[] = [];
+  for (let i = 0; i < 7; i++) {
+    const day = day0 + i;
+    // 1 = 週一 … 7 = 週日（1970-01-01 是週四）
+    if (!open.includes(((day + 3) % 7) + 1)) continue;
+    info.forEach((x, k) => {
+      if (i === 0) {
+        if (x.end! > postedAt) out.push(x.ex);
+        return;
+      }
+      const [a, b] = slotOf[k]!;
+      out.push({ ...x.ex, start_at: taipeiIso(day * DAY_SEC - 8 * 3600 + a), end_at: taipeiIso(day * DAY_SEC - 8 * 3600 + b) });
+    });
+  }
+  return out.length > 0 ? out.slice(0, MAX_ACTIVITY_EVENTS) : events;
+}
+
+/** 「11/16」是不是發文那天（台北） */
+function postDayIs(month: number, date: number, postedAt: number): boolean {
+  const d = new Date((postedAt + 8 * 3600) * 1000);
+  return d.getUTCMonth() + 1 === month && d.getUTCDate() === date;
+}
+
 /**
  * 「10/24～10/26 12:00～18:30」被模型讀成從 10/24 12:00 一路到 10/26 18:30（半夜也算進行中）：
  * 跨了好幾天、每天幾點到幾點的，改成固定據點每天一個時段，最後一天要貼文有寫。改了回傳 true。

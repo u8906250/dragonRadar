@@ -343,7 +343,8 @@ export function notListedWhy(items: PlanItem[]): NotListedWhy | undefined {
 // 13：連續幾天、每天幾點到幾點的活動（市集、祭典）拆成每天一場，不再一整段連到半夜（2026-11-06）
 // 14：其他雷達也只收單次的：每週固定場、固定攤位、沒約時間的刊登、沒寫哪天或超過 7 天的職缺不放上雷達（2026-11-10）
 // 15：活動頁的地址最多 200 字（以前 80，國外的地址切掉國名就認不出國家、時區）（2026-11-16）
-export const PLAN_VERSION = 15;
+// 16：每週固定幾天開的（「週一至週五 13:00-20:00」）拆成接下來一週有開的每一天（2026-11-16）
+export const PLAN_VERSION = 16;
 
 /** 判讀好、還沒寫進雷達的資料，存在 posts.confirm_plan */
 interface StoredPlan {
@@ -1140,13 +1141,13 @@ export interface EndedReportResult {
   ended: boolean;
 }
 
-/** 回報已發完／已結束，不同的人回報到門檻就下架 */
+/** 回報已發完／已結束，不同的人回報到門檻就下架（發放的話同一則貼文、同一個地點之後的場次一起） */
 export async function reportEnded(env: Env, eventId: number, ip: string, now: number): Promise<EndedReportResult> {
   const ev = await env.DB.prepare(
-    "SELECT e.id, e.status, e.start_at, p.source FROM events e JOIN posts p ON p.id = e.post_id WHERE e.id = ? AND e.status IN ('upcoming', 'active')",
+    "SELECT e.id, e.status, e.start_at, e.post_id, e.place_text, e.extra, p.source FROM events e JOIN posts p ON p.id = e.post_id WHERE e.id = ? AND e.status IN ('upcoming', 'active')",
   )
     .bind(eventId)
-    .first<{ id: number; status: string; start_at: number; source: string }>();
+    .first<{ id: number; status: string; start_at: number; post_id: string; place_text: string; extra: string | null; source: string }>();
   if (!ev) throw new ReportError(404, '這個發放或活動已經下架了');
   if (ev.source === 'official') throw new ReportError(400, '官方行程不開放回報，以官網公布為準');
   if (ev.source === 'site') throw new ReportError(400, '主辦單位公告的活動不開放回報，以主辦單位公布為準');
@@ -1160,6 +1161,12 @@ export async function reportEnded(env: Env, eventId: number, ip: string, now: nu
   const ended = count >= ENDED_REPORTS_NEEDED;
   if (ended) {
     await env.DB.prepare("UPDATE events SET status = 'ended', ended_reason = 'reported', updated_at = ? WHERE id = ?").bind(now, eventId).run();
+    // 發放（v1.748）：東西是同一批，發完了同一則貼文、同一個地點之後的場次也一起下架（「週一至週五」拆成的五天）；其他活動只下架這一場
+    if (topicOf(parseExtra(ev.extra)) === '發放') {
+      await env.DB.prepare("UPDATE events SET status = 'ended', ended_reason = 'reported', updated_at = ? WHERE post_id = ? AND place_text = ? AND start_at > ? AND status IN ('upcoming', 'active')")
+        .bind(now, ev.post_id, ev.place_text, ev.start_at)
+        .run();
+    }
   }
   return { count, needed: ENDED_REPORTS_NEEDED, ended };
 }
