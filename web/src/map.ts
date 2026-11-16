@@ -535,7 +535,8 @@ export class MapView {
           dashArray: it.spot || it.approx || it.phase === 'later' ? '3 3' : '',
         });
       } else if (glyph) {
-        const size = it.phase === 'active' || it.selected ? 28 : 24;
+        // 一般 22、進行中 26 px（v1.737 使用者說圖示有點大，跟雷達一樣）
+        const size = it.phase === 'active' || it.selected ? 26 : 22;
         // 稍後開始的越久越淡，但底色、整個圖示都不淡到看不出類型（v1.673 使用者說模糊但要看得出類型）
         const svg = topicMarkerSvg(glyph, markerColor(it.kind, it.phase, it.spot), it.selected ? selectedStroke : stroke, it.selected ? 2.6 : 1.8, Math.max(0.55, fillOpacity), !!it.spot || it.phase === 'later', size);
         if (this.iconKeys.get(it.id) !== svg) {

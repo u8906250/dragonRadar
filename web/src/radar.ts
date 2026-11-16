@@ -598,6 +598,14 @@ const GLINT_MIN_PX = 2.5;
 
 /** 光點距離小於這個像素就合成一群 */
 const GROUP_PX = 12;
+/**
+ * 活動圖示在螢幕上多大（像素，圓點的直徑；v1.737 使用者說圖示有點大、選了 22 px）：一般 22、進行中 26，跟地圖頁一樣；
+ * 電腦、手機一樣大。光點整組（圓點、底色圈、點擊範圍、名稱、閃光）照這個換算，不跟著雷達畫面放大（以前電腦全螢幕有 40 px）
+ */
+const BLIP_PX = 22;
+const BLIP_ACTIVE_PX = 26;
+/** 圓點在雷達座標裡的直徑（dot 的 r = 10） */
+const BLIP_UNITS = 20;
 /** 標籤每行高度 */
 const LINE_PX = 14;
 
@@ -1635,6 +1643,12 @@ export class Radar {
     return [5, 2, 1].map((m) => m * p).find((v) => v <= want) ?? p;
   }
 
+  /** 光點整組要縮放幾倍，圓點在螢幕上才是 BLIP_PX（雷達座標一個單位在螢幕上的大小跟著畫面變） */
+  private blipScale(): number {
+    const unit = this.squarePx > 0 ? SIZE / this.squarePx : 1;
+    return (BLIP_PX * unit) / BLIP_UNITS;
+  }
+
   /** 一公里在螢幕上幾個像素（雷達還沒量到大小是 0） */
   pxPerKm(): number {
     return this.squarePx > 0 ? ((R - 8) / this.scaleKm) * (this.squarePx / SIZE) : 0;
@@ -2468,7 +2482,8 @@ export class Radar {
     type Box = { l: number; r: number; t: number; b: number; you?: boolean };
     const taken: Box[] = [];
     // 光點和下面「還有多久」的字、選取的光點名稱
-    for (const p of blips) taken.push({ l: p.x - 18, r: p.x + 18, t: p.y - 11, b: p.y + 24 });
+    const bs = this.blipScale();
+    for (const p of blips) taken.push({ l: p.x - 18 * bs, r: p.x + 18 * bs, t: p.y - 11 * bs, b: p.y + 24 * bs });
     for (const q of blipLabels) taken.push({ l: q.left, r: q.right, t: q.top, b: q.bottom });
     // 不能寫的範圍：四個角轉成畫面座標，取外框
     for (const [w, so, e, n] of noLabel) {
@@ -3779,11 +3794,13 @@ export class Radar {
     // 疊在一起（12 px 內）的光點合成一群：選取的、要顯示標籤的優先當代表，標籤加「+N」，
     // 點下去先列出同一群讓人選，不然被蓋住的點不到
     const groups: RadarItem[][] = [];
+    // 光點、名稱照固定的螢幕大小畫（BLIP_PX）：合成一群的距離、名稱的位置都照這個倍數
+    const bs = this.blipScale();
     for (const it of items) {
       const p = pos.get(it.id)!;
       const g = groups.find((gr) => {
         const q = pos.get(gr[0].id)!;
-        return Math.hypot(q.x - p.x, q.y - p.y) < GROUP_PX;
+        return Math.hypot(q.x - p.x, q.y - p.y) < GROUP_PX * bs;
       });
       if (g) g.push(it);
       else groups.push([it]);
@@ -3807,10 +3824,10 @@ export class Radar {
         { lines: one, below: true },
       ];
       for (const t of tries) {
-        const w = Math.max(...t.lines.map((x) => [...x].length * 12));
-        const h = t.lines.length * LINE_PX;
-        const left = anchor === 'end' ? p.x + 6 - w : anchor === 'start' ? p.x - 6 : p.x - w / 2;
-        const box = { left, right: left + w, top: t.below ? p.y + 8 : p.y - 13 - h + 4, bottom: t.below ? p.y + 8 + h : p.y - 9 };
+        const w = Math.max(...t.lines.map((x) => [...x].length * 12)) * bs;
+        const h = t.lines.length * LINE_PX * bs;
+        const left = anchor === 'end' ? p.x + 6 * bs - w : anchor === 'start' ? p.x - 6 * bs : p.x - w / 2;
+        const box = { left, right: left + w, top: t.below ? p.y + 8 * bs : p.y - 9 * bs - h, bottom: t.below ? p.y + 8 * bs + h : p.y - 9 * bs };
         if (box.top < labelTop || box.bottom > labelBottom) continue;
         if (placed.some((q) => q.left < box.right && box.left < q.right && q.top < box.bottom && box.top < q.bottom)) continue;
         placed.push(box);
@@ -3828,7 +3845,7 @@ export class Radar {
         const p = pos.get(it.id)!;
         const node = el('g', {
           class: `blip phase-${it.phase} kind-${it.kind}${it.spot ? ' spot' : ''}${it.approx ? ' approx' : ''}${p.out ? ' out' : ''}${it.selected ? ' selected' : ''}`,
-          transform: `translate(${p.x.toFixed(1)} ${p.y.toFixed(1)})`,
+          transform: `translate(${p.x.toFixed(1)} ${p.y.toFixed(1)}) scale(${bs.toFixed(4)})`,
           tabindex: 0,
           role: 'button',
         });
@@ -3862,10 +3879,17 @@ export class Radar {
           body.setAttribute('style', `opacity:${(0.35 + 0.65 * it.fade).toFixed(2)};filter:blur(${blur}px)`);
           body.dataset.blur = blur;
         }
+        // 進行中的大一點（BLIP_ACTIVE_PX，跟地圖頁一樣）
+        const big = it.phase === 'active' && !p.out ? BLIP_ACTIVE_PX / BLIP_PX : 1;
+        if (big !== 1) {
+          body.setAttribute('transform', `scale(${big.toFixed(3)})`);
+          const halo = node.querySelector('.halo');
+          if (halo) halo.setAttribute('r', String(Number(halo.getAttribute('r')) * big));
+        }
         node.appendChild(body);
-        this.addFlash(node, p.angle, p.r, p.out ? 5 : 7);
+        this.addFlash(node, p.angle, p.r, (p.out ? 5 : 7) * bs * big);
         // 進行中的擴散圈（從 6 放大到 22）：跟光暈同一組
-        this.flashOf.get(node)?.appendChild(this.fxSpan('ping', 22));
+        this.flashOf.get(node)?.appendChild(this.fxSpan('ping', 22 * bs));
         const lbl = it === lead ? labelLines.get(it.id) : undefined;
         // 還有多久開始：寫在光點正下方，不跟著變淡；有名稱標籤時不寫，免得疊在一起
         if (it === lead && it.badge && !lbl) {
