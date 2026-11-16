@@ -1674,6 +1674,10 @@ path.map-seam-walkers { --p: 15px; }
 .leaflet-tooltip.map-count::before { display: none; }
 .nearby { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin: 0 0 10px; font-size: 13px; }
 .nearby .chip.small { white-space: normal; text-align: left; line-height: 1.3; }
+/* 只有日期不同的好幾場合成一張卡片（v1.741）：卡片上一行列場次，詳細資料每一場一個按鈕 */
+.ev-session-line { font-size: 13px; color: var(--muted); margin-top: 3px; }
+.ev-sessions { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin: 0 0 10px; font-size: 13px; }
+.ev-sessions .chip.small.on { opacity: 1; background: var(--chip-primary-bg); border-color: var(--chip-primary-border); color: var(--chip-primary-text); cursor: default; }
 .legal-links { margin: 18px 0 0; font-size: 12px; color: var(--muted); }
 .legal-links a { color: var(--muted); }
 .ev-divider { list-style: none; display: flex; align-items: center; gap: 10px; margin: 6px 4px 0; font-size: 12px; font-weight: 700; color: var(--muted); }

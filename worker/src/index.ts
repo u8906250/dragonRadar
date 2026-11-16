@@ -1,7 +1,7 @@
 import { getAccessToken, makeClient, saveAccessToken } from './client';
 import type { Env } from './env';
 import { fetchThreadsProfile } from './sources/profile';
-import { DEFAULT_DURATION_SEC, ENDED_WORDS, MAX_FUTURE_SEC, MIN_CONFIDENCE, SPOT_MAX_DAYS, extendOpenSpots, getEvent, getPost, ingestAll, ingestKeyword, clearEventSnapshots, listEvents, locatePlaceForEvent, moduleSpec, processBacklog, processPost, relocateApprox, relocateRouteStops, planPost, reprocessPost, setManualTitle, setTopic, storePost, updateLifecycle, type EventRow, type PostRow } from './events';
+import { DEFAULT_DURATION_SEC, ENDED_WORDS, MAX_FUTURE_SEC, MIN_CONFIDENCE, SPOT_MAX_DAYS, extendOpenSpots, getEvent, getPost, ingestAll, ingestKeyword, clearEventSnapshots, listEvents, locatePlaceForEvent, moduleSpec, dropBacklogCopies, processBacklog, processPost, relocateApprox, relocateRouteStops, planPost, reprocessPost, setManualTitle, setTopic, storePost, updateLifecycle, type EventRow, type PostRow } from './events';
 import { cleanTopic, normalizeExtraction, runModel } from './extract';
 import { geocode } from './geocode';
 import { ingestNews, NEWS_FEEDS } from './sources/news';
@@ -915,6 +915,8 @@ async function runScheduled(env: Env, cron: string, meter: D1Meter): Promise<voi
   const auto = env.AUTO_SOURCES !== 'false';
   const ingest = auto ? await step('ingest', () => ingestAll(env, client, now)) : null;
   const backlog = await step('backlog', () => processBacklog(env, now));
+  // 活動頁的回報以前被補判讀多存的那幾筆（只做一次）
+  const copies = await step('copies', () => dropBacklogCopies(env, now)).catch((e) => ({ error: String(e) }));
   // 官方航線與車掃地圖每次都讀（路段認領人數會一直變），新聞每 30 分鐘（cron 每 10 分鐘跑一次）
   const minute = new Date(now * 1000).getUTCMinutes();
   const voyage = auto ? await step('voyage', () => syncVoyage(env, now)).catch((e) => ({ error: String(e) })) : null;
@@ -936,7 +938,7 @@ async function runScheduled(env: Env, cron: string, meter: D1Meter): Promise<voi
   const drift = bottlesEnabled(env) ? await step('drift', () => driftBottles(env, now)).catch((e) => ({ error: String(e) })) : null;
   const purged = hourly ? await step('purge', () => purgeOldData(env, now)) : null;
   meter.label = '';
-  console.log(JSON.stringify({ cron, mode: client.mode, ingest, backlog, voyage, news, lifecycle, pushed, extended, relocated, routeStops, links, merge, drift, purged, rowsRead: meter.rowsRead }));
+  console.log(JSON.stringify({ cron, mode: client.mode, ingest, backlog, copies, voyage, news, lifecycle, pushed, extended, relocated, routeStops, links, merge, drift, purged, rowsRead: meter.rowsRead }));
 }
 
 /** 這個 isolate 累積、還沒寫進 d1_usage 的 API 讀取量；最多每 2 分鐘寫一次 */

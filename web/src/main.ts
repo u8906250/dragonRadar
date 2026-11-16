@@ -630,6 +630,63 @@ function spotItem(key: string, sessions: EventOut[], me: LatLng, now: number): I
   return { ev, distanceKm: haversineKm(me, ev), bearing: bearingDeg(me, ev), phase, spot: { key, sessions } };
 }
 
+/**
+ * 同一則貼文（活動頁）、同一個名稱、同一個地點、只有日期不同的（例如連兩天的導覽、OPENTIX 好幾天的展覽每天一場）合成一張卡片
+ * （v1.741 使用者說連續兩天一樣的活動合併）：清單、雷達、地圖只放一場——選到的那一場，不然是最近的（進行中或下一場）；
+ * 用搜尋、日期篩過的話是符合的那一場。sessions 是還沒結束的全部場次（pool 是沒篩過的），卡片、詳細資料列出來。
+ * 固定據點（有自己的時段）、車掃的站不合併；存的資料不動，分享、回報問題照那一場
+ */
+const sessionKey = (it: Item): string | null => (it.spot || routeOf(it.ev) ? null : `${it.ev.post.id}|${it.ev.title}|${it.ev.placeText}`);
+function mergeSessions(list: Item[], pool: Item[]): Item[] {
+  const groups = new Map<string, EventOut[]>();
+  for (const it of pool) {
+    const k = sessionKey(it);
+    if (k) groups.set(k, [...(groups.get(k) ?? []), it.ev]);
+  }
+  const picked = new Map<string, Item>();
+  for (const it of list) {
+    const k = sessionKey(it);
+    if (k && (groups.get(k)?.length ?? 0) > 1 && (!picked.has(k) || it.ev.id === selectedId)) picked.set(k, it);
+  }
+  const out: Item[] = [];
+  for (const it of list) {
+    const k = sessionKey(it);
+    const lead = k ? picked.get(k) : undefined;
+    if (!k || !lead) out.push(it);
+    else if (lead === it) out.push({ ...it, sessions: [...groups.get(k)!].sort((a, b) => a.startAt - b.startAt) });
+  }
+  return out;
+}
+
+/** 卡片上的場次：「共 2 場：11/21（週六）、11/22（週日）15:00–17:00」；連續 3 天以上、時間都一樣寫「每天」 */
+function sessionsLine(it: Item, now: number): string {
+  const s = it.sessions ?? [];
+  const day = (t: number): string => (taipeiDay(t) === taipeiDay(now) ? '今天' : dateFmt.format(new Date(t * 1000)));
+  const hours = (ev: EventOut): string => (ev.allDay ? '' : ev.endOpen ? `${fmtTime(ev.startAt)} 開始` : `${fmtTime(ev.startAt)}–${fmtTime(ev.endAt)}`);
+  const same = s.every((ev) => hours(ev) === hours(s[0]));
+  const days = s.map((ev) => taipeiDay(ev.startAt));
+  const daily = same && s.length >= 3 && days.every((d, i) => i === 0 || d === days[i - 1] + 1);
+  if (daily) return `共 ${s.length} 場：${day(s[0].startAt)} 到 ${day(s.at(-1)!.startAt)}${hours(s[0]) ? `，每天 ${hours(s[0])}` : ''}`;
+  if (same) return `共 ${s.length} 場：${s.map((ev) => day(ev.startAt)).join('、')}${hours(s[0]) ? ` ${hours(s[0])}` : ''}`;
+  return `共 ${s.length} 場：${s.map((ev) => `${day(ev.startAt)}${hours(ev) ? ` ${hours(ev)}` : ''}`).join('、')}`;
+}
+
+/** 詳細資料的場次：每一場一個按鈕，按了換成那一場（看的這一場按不了） */
+function sessionsHtml(it: Item, now: number): string {
+  const s = it.sessions;
+  if (!s) return '';
+  const day = (t: number): string => (taipeiDay(t) === taipeiDay(now) ? '今天' : dateFmt.format(new Date(t * 1000)));
+  const btns = s
+    .map((ev) => {
+      const label = `${day(ev.startAt)}${ev.allDay ? '' : ` ${fmtTime(ev.startAt)}${ev.endOpen ? ' 開始' : `–${fmtTime(ev.endAt)}`}`}`;
+      return ev.id === it.ev.id
+        ? `<button type="button" class="chip small on" aria-pressed="true" disabled>${esc(label)}</button>`
+        : `<button type="button" class="chip small" data-select="${ev.id}">${esc(label)}</button>`;
+    })
+    .join('');
+  return `<div class="ev-sessions"><span class="muted">共 ${s.length} 場：</span>${btns}</div>`;
+}
+
 function computeItems(now: number): Item[] {
   const me: LatLng = { lat: origin.lat, lng: origin.lng };
   const items: Item[] = [];
@@ -2317,8 +2374,10 @@ function render(): void {
   const searched = searchTerms.length > 0 ? fetched.filter(matchesSearch) : fetched;
   // 選了星期幾、日期：只留那幾天有的（雷達、地圖、清單都是）
   const dayed = dayPick ? searched.filter(matchesDay) : searched;
+  // 只有日期不同的好幾場合成一張卡片（篩選完再合，符合的那一場當代表）
+  const merged = mergeSessions(dayed, fetched);
   // 選了類型：只留這一類
-  const all = typePick ? dayed.filter((it) => typeOf(it.ev) === typePick) : dayed;
+  const all = typePick ? merged.filter((it) => typeOf(it.ev) === typePick) : merged;
   dayFetched = fetched;
   // 發放、活動、據點的開關是洋流的，其他模組不篩
   const byCategory = mod.current ? all.filter((it) => shown[categoryOf(it)]) : all;
@@ -2780,7 +2839,7 @@ function itemCard(it: Item, now: number): HTMLLIElement {
   li.innerHTML = `
     <div class="ev-title"><span class="dot"></span><span class="kind-tag">${tagLabel(it)}</span>${esc(titleOf(it.ev))}${it.ev.item ? ` <span class="muted">· ${esc(it.ev.item)}</span>` : ''}${it.ev.kind === 'job' && jobRisky(it.ev) ? '<span class="risk-tag">⚠️ 注意</span>' : ''}${followed().length > 1 && it.ev.keyword ? `<span class="ev-kw">#${esc(it.ev.keyword)}</span>` : ''}</div>
     <div class="ev-meta">${esc(placeLine(it.ev))} · ${it.ev.approxArea ? '約 ' : ''}${formatKm(it.distanceKm)} ${compassLabel(it.bearing)}</div>
-    <div class="ev-time">${it.spot ? `${esc(spotHours(it.spot.sessions))}・` : ''}${timeLineHtml(it, now)}</div>${tagsOf(it.ev).length > 0 ? `<div class="ev-tagline">${tagsHtml(tagsOf(it.ev))}</div>` : ''}`;
+    <div class="ev-time">${it.spot ? `${esc(spotHours(it.spot.sessions))}・` : ''}${timeLineHtml(it, now)}</div>${it.sessions ? `<div class="ev-session-line">${esc(sessionsLine(it, now))}</div>` : ''}${tagsOf(it.ev).length > 0 ? `<div class="ev-tagline">${tagsHtml(tagsOf(it.ev))}</div>` : ''}`;
   li.addEventListener('click', () => {
     beginSteps();
     select(it.ev.id);
@@ -4486,6 +4545,7 @@ function renderDetail(items: Item[], now: number): void {
       ${nearbyHtml(it, items)}
       ${routeBoxHtml(ev, items, now)}
       ${ev.kind === 'job' ? jobDetailHtml(it, now) : ev.kind === 'session' ? sessionDetailHtml(it, now) : ev.kind === 'food' ? foodDetailHtml(it, now) : `<p>類型：${it.spot ? `固定據點（${kindLabel(ev)}）` : kindLabel(ev)}<br>${ev.item ? `${ev.kind === 'activity' ? '物品' : '發放'}：${esc(ev.item)}<br>` : ''}${ev.keyword ? `關鍵字：#${esc(ev.keyword)}<br>` : ''}地點：${esc(placeOf(ev))}${ev.approxArea ? `<br><span class="approx-note">約略位置：只知道在${esc(ev.approxArea)}，地圖上是${esc(ev.approxArea)}的中心點，實際地點請看原文</span>` : ''}<br>時間：${it.spot ? esc(spotSchedule(it)) : ev.allDay ? `${dateFmt.format(new Date(ev.startAt * 1000))} ${allDayText(ev, false)}` : esc(eventTimeText(ev))}</p>`}
+      ${sessionsHtml(it, now)}
       ${tagsOf(ev).length > 0 ? `<p class="detail-tags">${tagsHtml(tagsOf(ev), true)}</p>` : ''}
       <blockquote class="post-excerpt" title="原文摘錄，完整內容請看原文">${esc(ev.post.source === 'news' ? ev.post.text.split('\n')[0] : ev.post.text)}</blockquote>
       ${ev.post.supplement ? `<p class="muted supplement-line">回報的人補充：${esc(ev.post.supplement)}</p>` : ''}

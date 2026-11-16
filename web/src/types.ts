@@ -176,6 +176,8 @@ export interface Item {
   bearing: number;
   phase: Phase;
   spot?: SpotInfo;
+  /** 同一則貼文、同名、同地點、只有日期不同的好幾場（照開始時間排，含 ev）：合成一張卡片，ev 是最近（或選到、篩選符合）的那一場 */
+  sessions?: EventOut[];
 }
 
 export type { BlipStyle, SweepStyle } from './themes';

@@ -1724,6 +1724,8 @@ export async function reprocessPost(env: Env, id: string, now: number): Promise<
   if (post.source === 'official') throw new Error('官方航線由同步程式產生，不能重新判讀');
   // 新聞判讀後只留標題加摘要，重跑會因為內容不完整而判讀錯
   if (post.source === 'news') throw new Error('新聞只保存標題與摘要，不能重新判讀');
+  // 活動頁的回報照活動頁排（每 30 分鐘重讀），AI 判讀內文會多出名稱、地點寫法不一樣的同一場
+  if (['accupass', 'opentix', 'peatix', 'luma'].includes(post.source)) throw new Error('活動頁的回報照活動頁排，不能重新判讀');
   // 管理者改過的標題：重新判讀後，同一個地點的照樣用
   const { results: manual } = await env.DB.prepare(
     "SELECT DISTINCT place_text, title FROM events WHERE post_id = ? AND title_manual = 1 AND status IN ('upcoming', 'active', 'unlocated')",
@@ -2053,17 +2055,40 @@ export async function ingestKeyword(env: Env, client: ThreadsClient, kw: Keyword
   return result;
 }
 
+/** dropBacklogCopies 做過了（settings 的 key） */
+const BACKLOG_COPIES_DONE = 'cleanup:page-backlog-copies';
+
+/**
+ * 清掉活動頁的回報被補判讀多存的那幾筆（v1.741，只做一次）：補判讀那一刻存的（events.created_at = posts.processed_at）、還沒結束的拿掉，
+ * processed_at、extraction 清回 NULL。活動頁的回報只有補判讀會寫 processed_at，照活動頁排的那幾筆時間不一樣，不會被刪到
+ */
+export async function dropBacklogCopies(env: Env, now = nowSec()): Promise<number | null> {
+  if (await env.DB.prepare('SELECT 1 AS ok FROM settings WHERE key = ?').bind(BACKLOG_COPIES_DONE).first()) return null;
+  const copies = `SELECT e.id FROM events e JOIN posts p ON p.id = e.post_id WHERE p.source IN (${PAGE_SOURCES_SQL}) AND p.processed_at IS NOT NULL AND e.created_at = p.processed_at AND e.status IN ('upcoming', 'active', 'unlocated')`;
+  const r = await env.DB.batch([
+    env.DB.prepare(`DELETE FROM ended_reports WHERE event_id IN (${copies})`),
+    env.DB.prepare(`DELETE FROM events WHERE id IN (${copies})`),
+    env.DB.prepare(`UPDATE posts SET processed_at = NULL, extraction = NULL WHERE source IN (${PAGE_SOURCES_SQL}) AND processed_at IS NOT NULL`),
+    env.DB.prepare('INSERT INTO settings (key, value, updated_at) VALUES (?, ?, ?) ON CONFLICT(key) DO NOTHING').bind(BACKLOG_COPIES_DONE, String(now), now),
+  ]);
+  return r[1].meta.changes ?? 0;
+}
+
 export interface BacklogResult {
   processed: number;
   created: number;
   errors: string[];
 }
 
+/** 活動頁的回報（活動通、OPENTIX、Peatix、Luma）：時間地點照活動頁排、沒有 processed_at，不用 AI 判讀內文 */
+const PAGE_SOURCES_SQL = "'accupass', 'opentix', 'peatix', 'luma'";
+
 /** 重新處理之前沒成功抽取的貼文（例如 Workers AI 暫時出錯），只看最近 24 小時發的或收到的 */
 export async function processBacklog(env: Env, now = nowSec(), limit = 20): Promise<BacklogResult> {
-  // 使用者回報、還在等他確認的不自動判讀（他重貼一次就會再判讀）
+  // 使用者回報、還在等他確認的不自動判讀（他重貼一次就會再判讀）；
+  // 活動頁的回報不判讀（v1.741：以前確認後會被這裡用 AI 再判讀一次，AI 整理過的名稱跟活動頁不一樣，同一場就多一筆）
   const rows = await env.DB.prepare(
-    "SELECT * FROM posts WHERE processed_at IS NULL AND (confirm_state IS NULL OR confirm_state = 'confirmed') AND (posted_at > ? OR fetched_at > ?) ORDER BY posted_at ASC LIMIT ?",
+    `SELECT * FROM posts WHERE processed_at IS NULL AND (confirm_state IS NULL OR confirm_state = 'confirmed') AND source NOT IN (${PAGE_SOURCES_SQL}) AND (posted_at > ? OR fetched_at > ?) ORDER BY posted_at ASC LIMIT ?`,
   )
     .bind(now - LOOKBACK_SEC, now - LOOKBACK_SEC, limit)
     .all<PostRow>();
