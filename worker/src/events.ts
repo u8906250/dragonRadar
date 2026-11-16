@@ -1035,7 +1035,12 @@ export async function planManual(env: Env, acts: ManualActivity[], now: number, 
 }
 
 /** 修改表單的地點欄比對用：瀏覽器拿掉換行、送出時空白縮成一個、最多 80 字，看地點有沒有改 */
-export const placeKey = (s: string): string => [...s.replace(/[\r\n]/g, '').replace(/\s+/g, ' ').trim()].slice(0, 80).join('');
+/**
+ * 回報的人填的地點、活動頁的地址最多幾個字：店名加上國外的完整地址常超過 80（v1.744 以前是 80），
+ * 切掉最後的國名（「…, 1016 VM Amsterdam, 荷蘭」）就認不出是國外、照台灣的查法查不到
+ */
+export const PLACE_MAX = 200;
+export const placeKey = (s: string): string => [...s.replace(/[\r\n]/g, '').replace(/\s+/g, ' ').trim()].slice(0, PLACE_MAX).join('');
 
 /** 修改表單、planJobs、planPostings 用的「已經知道的位置」（標的、地點沒改沿用的） */
 type Located = { point: GeoPoint | null; approxArea: string | null };

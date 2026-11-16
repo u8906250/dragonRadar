@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { cleanTopic, guessedMidnight, missingActivityParts, normalizeActivities, reconcileRouteStops, routeStopLines, type ExtractedEvent } from '../src/extract';
-import { applyManualFixes, atLocalTimes, estimateStopTimes, markRoutes, startAtPostTime, profilePlanBetter, sortStops, stopNameOf, withoutStop, type ManualFix, type PlanItem } from '../src/events';
+import { applyManualFixes, atLocalTimes, estimateStopTimes, markRoutes, PLACE_MAX, startAtPostTime, profilePlanBetter, sortStops, stopNameOf, withoutStop, type ManualFix, type PlanItem } from '../src/events';
+import { countryOfPlace } from '../src/geocode';
 import { parseIsoToUnix } from '../src/util';
 import type { Env } from '../src/env';
 import { editItemsOf, editSummary, notListedWhy, parseEditItems, ReportError, reportModules, routePreviews } from '../src/reports';
@@ -150,6 +151,15 @@ describe('parseEditItems', () => {
     expect(() => parseEditItems([{ title: 'x', place: ' ', startAt: T18 }])).toThrow('請填地點');
     expect(() => parseEditItems([{ title: 'x', place: 'y' }, { title: 'x', place: 'y', startAt: 1.5 }])).toThrow('第 1 場：請填哪天幾點開始');
     expect(() => parseEditItems([])).toThrow(ReportError);
+  });
+  it('keeps a long foreign place whole, so the country at the end still counts', () => {
+    // 店名加國外的完整地址超過 80 字：以前切在 80，最後的「荷蘭」不見，認不出是國外
+    const place = 'Taiwanese Community Gathering @ De Looier Kunst- en Antiekcentrum, Eerste Looiersdwarsstraat 28, 1016 VM Amsterdam, 荷蘭';
+    expect([...place].length).toBeGreaterThan(80);
+    const [a] = parseEditItems([{ title: '聚會', place, startAt: T18 }]);
+    expect(a.place).toBe(place);
+    expect(countryOfPlace(a.place)).toBe('NL');
+    expect([...parseEditItems([{ title: '聚會', place: '路'.repeat(300), startAt: T18 }])[0].place].length).toBe(PLACE_MAX);
   });
 
   it('checks the end and keeps a pin only with both coordinates', () => {

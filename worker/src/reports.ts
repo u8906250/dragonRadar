@@ -6,7 +6,7 @@
  */
 import type { Env } from './env';
 import { DEFAULT_MODULE, isModule, MODULE_IDS, moduleOf, type ModuleId } from './modules';
-import { ADDRESS_BUDGET_MS, atLocalTimes, commitPlan, detectEnded, getEvent, getPost, locateTypedPlace, MAX_FUTURE_SEC, parseExtra, placeKey, planEdited, planManual, planPost, processPost, savedTagsOf, storePost, tagsOf, taipeiDayOf, topicOf, type EventOut, type FailedItem, type ManualActivity, type PlanItem, type PostRow } from './events';
+import { ADDRESS_BUDGET_MS, atLocalTimes, commitPlan, detectEnded, getEvent, getPost, locateTypedPlace, MAX_FUTURE_SEC, parseExtra, PLACE_MAX, placeKey, planEdited, planManual, planPost, processPost, savedTagsOf, storePost, tagsOf, taipeiDayOf, topicOf, type EventOut, type FailedItem, type ManualActivity, type PlanItem, type PostRow } from './events';
 import { ACTIVITY_SPEC, cleanTags, cleanTopic, extractFromPost, MODULE_TAGS, postTags, type ActivityPart, type EventKind } from './extract';
 import { adoptedTags } from './learnedTags';
 import { accupassPermalink, fetchAccupass, parseAccupassUrl, type AccupassLink } from './sources/accupass';
@@ -342,7 +342,8 @@ export function notListedWhy(items: PlanItem[]): NotListedWhy | undefined {
 // 12：騎車（順騎、單車）、健走也算路線，各站沒寫時間的填出發時間、程式照距離推算（2026-11-05）
 // 13：連續幾天、每天幾點到幾點的活動（市集、祭典）拆成每天一場，不再一整段連到半夜（2026-11-06）
 // 14：其他雷達也只收單次的：每週固定場、固定攤位、沒約時間的刊登、沒寫哪天或超過 7 天的職缺不放上雷達（2026-11-10）
-export const PLAN_VERSION = 14;
+// 15：活動頁的地址最多 200 字（以前 80，國外的地址切掉國名就認不出國家、時區）（2026-11-16）
+export const PLAN_VERSION = 15;
 
 /** 判讀好、還沒寫進雷達的資料，存在 posts.confirm_plan */
 interface StoredPlan {
@@ -658,7 +659,7 @@ export type PageActivity = ManualActivity & { venue: string | null };
 export function sessionActivities(ev: PageSession, now: number): PageActivity[] | string {
   const start = pageTime(ev.startDate);
   if (!Number.isFinite(start)) return '活動頁沒有寫開始時間';
-  const place = [...(ev.address ?? ev.venue ?? '').replace(/\s+/g, ' ').trim()].slice(0, 80).join('');
+  const place = [...(ev.address ?? ev.venue ?? '').replace(/\s+/g, ' ').trim()].slice(0, PLACE_MAX).join('');
   if (!place) return '活動頁沒有寫地點';
   const end = pageTime(ev.endDate);
   const title = [...ev.name].slice(0, 60).join('');
@@ -896,7 +897,7 @@ export function parseEditItems(raw: unknown, module: ModuleId = 'current'): Manu
     const o = (r && typeof r === 'object' ? r : {}) as Record<string, unknown>;
     const at = raw.length > 1 ? `第 ${i + 1} 場：` : '';
     const title = text(o.title, 60);
-    const place = text(o.place, 80);
+    const place = text(o.place, PLACE_MAX);
     if (!title) throw new ReportError(400, `${at}請填活動內容`);
     if (!place) throw new ReportError(400, `${at}請填地點`);
     if (!Number.isSafeInteger(o.startAt)) throw new ReportError(400, days ? `${at}請填哪天開始做` : `${at}請填哪天幾點開始`);
@@ -1019,7 +1020,7 @@ export interface LocateResult {
 export async function locateForEdit(env: Env, body: { postId?: unknown; token?: unknown; place?: unknown }, now: number): Promise<LocateResult> {
   const post = await checkConfirm(env, body);
   assertEditable(post, '修改');
-  const place = typeof body.place === 'string' ? [...body.place.replace(/\s+/g, ' ').trim()].slice(0, 80).join('') : '';
+  const place = typeof body.place === 'string' ? [...body.place.replace(/\s+/g, ' ').trim()].slice(0, PLACE_MAX).join('') : '';
   if (place.length < 2) throw new ReportError(400, '請先填地點');
   const key = `locate:${post.id}`;
   const row = await env.DB.prepare('SELECT value FROM settings WHERE key = ?').bind(key).first<{ value: string }>();

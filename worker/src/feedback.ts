@@ -3,7 +3,7 @@
  * 回報的內容只有管理者看得到；存裝置代碼與 IP 的加鹽雜湊（限制次數、同一個人同一則同一種問題只算一次），30 天後刪除。
  */
 import type { Env } from './env';
-import { ADDRESS_BUDGET_MS, findRouteStop, getPost, locateTypedPlace, MAX_FUTURE_SEC, OPEN_END_SEC, removeRouteStop, reprocessPost, ROUTE_KEEP_SEC, setEventPlace, setEventTime, setManualTitle, setRouteStopPlace, setRouteStopTime, takeDown } from './events';
+import { ADDRESS_BUDGET_MS, findRouteStop, getPost, locateTypedPlace, MAX_FUTURE_SEC, OPEN_END_SEC, PLACE_MAX, removeRouteStop, reprocessPost, ROUTE_KEEP_SEC, setEventPlace, setEventTime, setManualTitle, setRouteStopPlace, setRouteStopTime, takeDown } from './events';
 import { parseSubscription, PushError, sendPush, type PushMessage } from './push';
 
 export const FEEDBACK_KINDS = {
@@ -237,7 +237,7 @@ async function bump(env: Env, key: string, now: number): Promise<number> {
  */
 export async function locateForFeedback(env: Env, eventId: number, body: unknown, device: string | null, ip: string, now: number): Promise<{ found: boolean; lat: number | null; lng: number | null; name: string | null; approxArea: string | null }> {
   const place = cleanNote((body as { place?: unknown } | null)?.place);
-  if (!place || [...place].length < 2 || [...place].length > 80) throw new PushError(400, '請寫 2 到 80 個字的地址或店名');
+  if (!place || [...place].length < 2 || [...place].length > PLACE_MAX) throw new PushError(400, `請寫 2 到 ${PLACE_MAX} 個字的地址或店名`);
   const ev = await env.DB.prepare('SELECT id FROM events WHERE id = ?').bind(eventId).first<{ id: number }>();
   if (!ev) throw new PushError(404, '找不到這個發放或活動，可能已經下架了');
   const coord = parseLatLng(place);

@@ -7864,7 +7864,7 @@ function editCardHtml(it: EditItem | null): string {
         <label>${mod.current ? '活動內容' : '內容'}<input name="title" maxlength="60" value="${esc(it?.title ?? '')}" placeholder="例如：${EDIT_TITLE_EG[mod.id]}"></label>
       </div>
       ${when}
-      <label>地點<input name="place" maxlength="80" value="${esc(it?.place ?? '')}" placeholder="店名或地址，例如：厝邊咖啡 台北市萬華區○○路○號"></label>
+      <label>地點<input name="place" maxlength="200" value="${esc(it?.place ?? '')}" placeholder="店名或地址，例如：厝邊咖啡 台北市萬華區○○路○號"></label>
       <div class="edit-pin"><small class="edit-pin-state"></small><button type="button" class="chip" data-act="locate">查地點</button><button type="button" class="chip" data-act="pin">在雷達上標位置</button><button type="button" class="chip" data-act="unpin" hidden>不用標的位置</button></div>
       <div class="edit-tags">
         <span class="edit-tags-label">關鍵字<small>（讓人搜尋得到，按 × 拿掉）</small></span>
