@@ -532,11 +532,13 @@ radar.onRoute = (id) => selectRoute(id);
 // 回報的位置直接在雷達上拖、點（v1.699 使用者說回報的定位直接用雷達的地圖，不用切到地圖）
 radar.onPreviewDrag = (i, at) => {
   const p = destination(origin, at.bearing, at.distanceKm);
-  if (markCard) placeMark(p);
+  if (bottlePick) movePick(p);
+  else if (markCard) placeMark(p);
   else void movePin(i, p);
 };
 radar.onEmptyTap = (at) => {
-  if (markCard && !reportSheet.hidden) placeMark(destination(origin, at.bearing, at.distanceKm));
+  if (bottlePick) movePick(destination(origin, at.bearing, at.distanceKm));
+  else if (markCard && !reportSheet.hidden) placeMark(destination(origin, at.bearing, at.distanceKm));
 };
 // 點了中山公園的銅像（地球或汪星）：發射口打開、升起火箭、關上，火箭停在那邊；點火箭問要不要飛到另一邊（rocketTrip）
 // （火箭記得在哪一邊；不在這一邊、已經出來了就沒有反應）
@@ -588,9 +590,10 @@ const map = new MapView(
     onLandmark: (id) => {
       if (id === 'hq') startHqVoyage();
     },
-    onPreviewMove: (i, to) => (markCard ? placeMark(to) : void movePin(i, to)),
+    onPreviewMove: (i, to) => (bottlePick ? movePick(to) : markCard ? placeMark(to) : void movePin(i, to)),
     onMapClick: (p) => {
-      if (markCard && !reportSheet.hidden) placeMark(p);
+      if (bottlePick) movePick(p);
+      else if (markCard && !reportSheet.hidden) placeMark(p);
     },
   },
   baseMap,
@@ -2467,10 +2470,16 @@ function render(): void {
   radar.setLandmarks(
     (mod.current ? LANDMARKS : []).map((lm) => ({ id: lm.id, label: lm.name, bearing: bearingDeg(origin, lm), distanceKm: haversineKm(origin, lm), selected: lm.id === selectedLandmark })),
   );
-  // 回報判讀完、還沒確認的位置
-  const pins = shownReportPins();
-  radar.setPreviews(pins.map((p) => ({ bearing: bearingDeg(origin, p), distanceKm: haversineKm(origin, p), label: p.label, glyph: p.glyph, drag: p.drag })));
-  map.setPreviews(pins);
+  // 回報判讀完、還沒確認的位置；漂流瓶選落點時換成瓶子和丟的地方 1 km 的虛線圈
+  const pick = bottlePick;
+  const pins: Array<ReportPin & { bottle?: boolean; hint?: string }> = pick
+    ? [{ lat: pick.at.lat, lng: pick.at.lng, label: '瓶子落在這裡', glyph: null, drag: true, bottle: true, hint: '拖到想丟的地方' }]
+    : shownReportPins();
+  radar.setPreviews(
+    pins.map((p) => ({ bearing: bearingDeg(origin, p), distanceKm: haversineKm(origin, p), label: p.label, glyph: p.glyph, drag: p.drag, bottle: p.bottle, hint: p.hint })),
+    pick ? { bearing: bearingDeg(origin, pick.from), distanceKm: haversineKm(origin, pick.from), radiusKm: PICK_RANGE_KM } : null,
+  );
+  map.setPreviews(pins, pick ? { lat: pick.from.lat, lng: pick.from.lng, km: PICK_RANGE_KM } : null);
   map.setRoutes(
     drawnRoutes(onMap, now, focused).map((r): MapRoute => ({
       id: r.id,
@@ -3389,7 +3398,7 @@ function renderBottleDetail(id: number): boolean {
       <p class="muted sheet-note small">${
         woof
           ? '汪星沒有 GPS：搭火箭到汪星後，雷達正中間就是你的位置，拖曳就是走路。'
-          : '瓶子一丟出去就落在丟的地方 1 km 內的隨機位置，之後在這 1 km 內漂，不是丟的人站的地方。'
+          : '瓶子一丟出去就落在丟的地方 1 km 內（隨機的位置，或丟的人自己選的地方），之後在這 1 km 內漂。'
       }</p>
     </div>`,
     true,
@@ -3612,6 +3621,8 @@ async function checkBottleNews(): Promise<void> {
  * 牛皮紙上直接寫，點軟木塞就捲起來裝進去丟出去；左上 📜 是漂流瓶收藏和我丟的瓶子、📷 貼一張照片
  */
 function openBottleSheet(open: boolean): void {
+  // 選落點選到一半又按了漂流瓶、關掉：不選了
+  if (bottlePick) endPick(false);
   bottleSheet.hidden = !open;
   document.body.classList.toggle('bottle-open', open);
   if (!open) return;
@@ -3749,7 +3760,9 @@ function wireBottleScene(): void {
   });
   document.addEventListener('keydown', (e) => {
     if (e.key !== 'Escape' || document.querySelector('.tc-overlay')) return;
-    if (!bottleSheet.hidden && !throwing && !judging) openBottleSheet(false);
+    // 選落點中：不選了，回到紙
+    if (bottlePick) endPick(false);
+    else if (!bottleSheet.hidden && !throwing && !judging) openBottleSheet(false);
     // 收藏頁拿出來看的信：放回瓶子
     else if (!lettersPage.hidden) closeLetter();
   });
@@ -3924,13 +3937,13 @@ async function onLettersClick(e: Event): Promise<void> {
  * 丟出去之前的確認：把規則一條一條講清楚（v1.620 使用者說的），按「捲起來丟出去」才丟；「再想想」或點旁邊、Esc 就不丟。
  * 規則照伺服器給的數字（漂多久、汪星留幾天、多近收藏得到、每天幾個）
  */
-function confirmThrow(): Promise<boolean> {
+function confirmThrow(): Promise<'random' | 'pick' | null> {
   // 已經開著（連點瓶子兩下）就不再開一層
-  if (document.querySelector('.tc-overlay.tc-rules')) return Promise.resolve(false);
+  if (document.querySelector('.tc-overlay.tc-rules')) return Promise.resolve(null);
   const r = bottleRules();
   const left = myBottlesData?.quota.left;
   const rules = [
-    '只有在地球上才能丟，瓶子會落在你現在的位置 1 km 內的隨機位置（不會在你站的地方），之後在這 1 km 內慢慢漂。',
+    '只有在地球上才能丟，瓶子會落在你現在的位置 1 km 內的隨機位置（不會在你站的地方）；也可以按「自己選落點」在 1 km 內挑地方。之後在這 1 km 內慢慢漂。',
     `沒人收藏的 ${r?.seaHours ?? 24} 小時後漂到汪星的海上，${r?.woofDays ?? 30} 天後沉下去；被收藏的不會漂走，在原地標成已收藏 ${KEEP_TAKEN_H} 小時，之後收進收藏的人的「收藏」、裝進瓶子裡。`,
     `走到瓶子 ${reachText((r?.seeKm ?? 1) * 1000)} 內、雷達拉近到 ${reachText(SEE_ZOOM_KM * 1000)} 才看得到瓶子，打開來看內容和照片，第一個按「收藏」的人會把它收進漂流瓶收藏（收藏了別人照樣看得到）。`,
     '內容和照片請當成公開的：位置是手機送出的，有心人可以假造，不要寫、拍不想讓陌生人看到的東西。',
@@ -3939,21 +3952,91 @@ function confirmThrow(): Promise<boolean> {
     '送出前會自動審核：辱罵或攻擊任何人（包括候選人、政黨）、謠言、連結、電話、帳號、個人資料都不會通過。',
   ];
   return new Promise((resolve) => {
-    let ok = false;
+    let how: 'random' | 'pick' | null = null;
     const el = overlay(
       'tc-rules',
       `<div class="tc-box bottle-rules">
         <h2 class="tc-title">丟出去之前</h2>
         <ul>${rules.map((t) => `<li>${esc(t)}</li>`).join('')}</ul>
-        <div class="sheet-actions"><button type="button" class="chip" data-close>再想想</button><button type="button" class="chip primary" data-act="throw">捲起來丟出去</button></div>
+        <div class="sheet-actions"><button type="button" class="chip" data-close>再想想</button><button type="button" class="chip" data-act="pick">自己選落點</button><button type="button" class="chip primary" data-act="throw">捲起來丟出去</button></div>
       </div>`,
-      () => resolve(ok),
+      () => resolve(how),
     );
-    el.querySelector('[data-act="throw"]')?.addEventListener('click', () => {
-      ok = true;
-      el.querySelector<HTMLElement>('[data-close]')?.click();
-    });
+    for (const [act, h] of [['throw', 'random'], ['pick', 'pick']] as const) {
+      el.querySelector(`[data-act="${act}"]`)?.addEventListener('click', () => {
+        how = h;
+        el.querySelector<HTMLElement>('[data-close]')?.click();
+      });
+    }
   });
+}
+
+/**
+ * 自己選落點（v1.739 使用者說丟的時候可以自己選地圖上的點）：紙先收起來，雷達（或地圖）拉近，畫出丟的地方（GPS）1 km 的虛線圈和一個瓶子，
+ * 拖瓶子或點圈裡的地方決定落點（拖出圈外就停在圈邊上）；按「丟在這裡」回到紙、照常審核送出，「取消」回到紙。
+ * 之後跟隨機的一樣在丟的地方 1 km 內漂。伺服器只收丟的地方 1 km 內的落點
+ */
+interface BottlePick {
+  /** 丟的地方：開始選的時候的 GPS 位置（送出也用這個，選的時候拖了雷達也不變） */
+  from: LatLng;
+  at: LatLng;
+  bar: HTMLElement;
+  done: (at: LatLng | null) => void;
+}
+let bottlePick: BottlePick | null = null;
+/** 虛線圈多大（伺服器收的範圍） */
+const PICK_RANGE_KM = 1;
+/** 拖出圈外停在哪（比圈小一點，伺服器算距離的方式不一樣也收得到） */
+const PICK_MAX_KM = 0.98;
+/** 選的時候雷達拉到多大：1 km 的圈整個看得到 */
+const PICK_ZOOM_KM = 1.3;
+
+function pickLanding(from: LatLng): Promise<LatLng | null> {
+  // 瓶子一開始放在 300～700 m 外的隨機方向（不放在你站的地方）
+  const start = destination(from, Math.random() * 360, 0.3 + Math.random() * 0.4);
+  return new Promise((resolve) => {
+    const bar = document.createElement('div');
+    bar.className = 'bottle-pick';
+    bar.setAttribute('role', 'dialog');
+    bar.setAttribute('aria-label', '選瓶子的落點');
+    bar.innerHTML = `<p>拖瓶子，或點虛線圈裡的地方，選瓶子落在哪（你 1 km 內）。<small>選在你站的地方，別人就知道你丟的時候在哪。</small></p>
+      <div class="sheet-actions"><button type="button" class="chip" data-act="cancel">取消</button><button type="button" class="chip primary" data-act="ok">丟在這裡</button></div>`;
+    document.body.append(bar);
+    bottlePick = { from, at: start, bar, done: resolve };
+    bar.querySelector('[data-act="cancel"]')?.addEventListener('click', () => endPick(false));
+    bar.querySelector('[data-act="ok"]')?.addEventListener('click', () => endPick(true));
+    // 紙先收起來（寫的字、照片留著），雷達拉近到看得到整個圈
+    bottleSheet.hidden = true;
+    document.body.classList.remove('bottle-open');
+    if (view === 'map') {
+      // 地圖：整個圈框進來（下面的說明蓋住的地方不算）
+      const m = $('#map').getBoundingClientRect();
+      const top = bar.getBoundingClientRect().top;
+      map.fitCircle(from, PICK_RANGE_KM, top < m.bottom ? m.bottom - top : 0);
+    } else zoomToKm(PICK_ZOOM_KM);
+    render();
+    bar.querySelector<HTMLElement>('[data-act="ok"]')?.focus();
+  });
+}
+
+/** 選好了（ok）或取消：拿掉圈和瓶子，紙放回來 */
+function endPick(ok: boolean): void {
+  const pk = bottlePick;
+  if (!pk) return;
+  bottlePick = null;
+  pk.bar.remove();
+  bottleSheet.hidden = false;
+  document.body.classList.add('bottle-open');
+  render();
+  pk.done(ok ? pk.at : null);
+}
+
+/** 拖到、點到的地方：超出圈就停在圈邊上 */
+function movePick(p: LatLng): void {
+  const pk = bottlePick;
+  if (!pk) return;
+  pk.at = haversineKm(pk.from, p) > PICK_MAX_KM ? destination(pk.from, bearingDeg(pk.from, p), PICK_MAX_KM) : { lat: p.lat, lng: p.lng };
+  render();
 }
 
 /**
@@ -3989,11 +4072,16 @@ async function submitBottle(): Promise<void> {
   if (youOn === 'woof') return say('搭火箭回地球才能丟瓶子');
   if (origin.source !== 'gps') return say('要先按右上角「定位」用 GPS，瓶子會丟在你現在的位置附近');
   // 按軟木塞先確認，確認前把規則講清楚（v1.601 使用者說要再確認是否送出；v1.620 說丟出前把規則說清楚）
-  if (!(await confirmThrow())) return;
+  const how = await confirmThrow();
+  if (!how) return;
+  // 自己選落點（v1.739）：選好才送；丟的地方用開始選的時候的 GPS 位置
+  const from: LatLng = { lat: origin.lat, lng: origin.lng };
+  const land = how === 'pick' ? await pickLanding(from) : null;
+  if (how === 'pick' && !land) return;
   const photo = bottlePhotoData;
   say('');
   setJudging(true);
-  const r = await dropBottle(text, origin, photo);
+  const r = await dropBottle(text, from, photo, land);
   setJudging(false);
   if (!r.ok) return say(r.message);
   bottleTexts.set(r.data.bottle.id, r.data);

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { cleanBottleText, distM, driftStep, parsePhoto, ruleCheck, scatter, seaPoint, sha256Hex, stripJpegMeta, taipeiMidnight, xLength } from '../src/bottles';
+import { cleanBottleText, distM, driftStep, landingOf, parsePhoto, ruleCheck, scatter, seaPoint, sha256Hex, stripJpegMeta, taipeiMidnight, xLength } from '../src/bottles';
 import { WOOF_KM, WOOF_SEA } from '../src/woofsea';
 
 describe('cleanBottleText', () => {
@@ -52,6 +52,31 @@ describe('scatter', () => {
       const dx = (q.lng - p.lng) * 111320 * Math.cos((p.lat * Math.PI) / 180);
       expect(Math.hypot(dx, dy)).toBeLessThanOrEqual(1001);
     }
+  });
+});
+
+describe('landingOf', () => {
+  const at = { lat: 25.0478, lng: 121.517 };
+  it('scatters within 1 km when nothing was chosen', () => {
+    for (const land of [undefined, null]) {
+      const q = landingOf(at, land, () => 0.5);
+      expect(q).not.toBeNull();
+      expect(distM(at, q!)).toBeLessThanOrEqual(1001);
+    }
+  });
+  it('lands exactly where the thrower chose, within 1 km', () => {
+    const land = { lat: 25.0478 + 0.008, lng: 121.517 };
+    expect(distM(at, land)).toBeGreaterThan(800);
+    expect(landingOf(at, land)).toEqual(land);
+    expect(landingOf(at, { ...at })).toEqual(at);
+  });
+  it('refuses points farther than 1 km or not a point', () => {
+    expect(landingOf(at, { lat: 25.0478 + 0.0095, lng: 121.517 })).toBeNull();
+    expect(landingOf(at, { lat: 25.2, lng: 121.6 })).toBeNull();
+    expect(landingOf(at, { lat: 'x', lng: 121.517 })).toBeNull();
+    expect(landingOf(at, { lat: 95, lng: 121.517 })).toBeNull();
+    expect(landingOf(at, 'here')).toBeNull();
+    expect(landingOf(at, {})).toBeNull();
   });
 });
 

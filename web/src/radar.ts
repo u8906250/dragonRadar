@@ -389,6 +389,17 @@ export interface RadarPreview {
   glyph: string | null;
   /** 可以拖到正確的位置（v1.699 使用者說回報的定位直接用雷達的地圖，不用切到地圖） */
   drag?: boolean;
+  /** 漂流瓶自己選的落點：裡面畫瓶子（不畫主題圖示） */
+  bottle?: boolean;
+  /** 可以拖的時候名稱下面那一行（沒寫是「拖到正確的位置」） */
+  hint?: string;
+}
+
+/** 漂流瓶可以選的範圍：丟的地方（GPS）周圍的虛線圈 */
+export interface RadarPickRange {
+  bearing: number;
+  distanceKm: number;
+  radiusKm: number;
 }
 
 /** 漂流瓶：near 看得到（遠近都直接畫出來，不模糊）；pick 走到撿得起來的距離 */
@@ -775,6 +786,7 @@ export class Radar {
   private readonly bottleLayer: SVGGElement;
   private readonly landmarkLayer: SVGGElement;
   private previews: RadarPreview[] = [];
+  private pickRange: RadarPickRange | null = null;
   private previewsKey = '';
   private readonly previewLayer: SVGGElement;
   private readonly placeLabelLayer: SVGGElement;
@@ -953,7 +965,7 @@ export class Radar {
       const p = this.svgPoint(e.clientX, e.clientY);
       if (!p) return;
       d.at = p;
-      d.g.setAttribute('transform', `translate(${p.x.toFixed(1)} ${p.y.toFixed(1)})`);
+      d.g.setAttribute('transform', `translate(${p.x.toFixed(1)} ${p.y.toFixed(1)}) scale(${d.g.dataset.s ?? 1})`);
     });
     const endPinDrag = (e: PointerEvent): void => {
       const d = this.pinDrag;
@@ -2081,12 +2093,13 @@ export class Radar {
     return { bearing, distanceKm: (Math.hypot(dx, dy) / (R - 8)) * this.scaleKm };
   }
 
-  /** 回報判讀完的位置（空陣列就不畫） */
-  setPreviews(list: RadarPreview[]): void {
-    const key = JSON.stringify(list);
+  /** 回報判讀完的位置（空陣列就不畫）；range 是漂流瓶選落點時畫的虛線圈 */
+  setPreviews(list: RadarPreview[], range: RadarPickRange | null = null): void {
+    const key = JSON.stringify([list, range]);
     if (key === this.previewsKey) return;
     this.previewsKey = key;
     this.previews = list;
+    this.pickRange = range;
     this.draw();
   }
 
@@ -2094,6 +2107,14 @@ export class Radar {
   private drawPreviews(): void {
     this.previewLayer.replaceChildren();
     if (this.earthHidden) return;
+    // 漂流瓶選落點：丟的地方 1 km 的虛線圈（雷達的距離是等比例，圓還是圓）
+    const pr = this.pickRange;
+    if (pr && !this.inSpace) {
+      const c = polar(pr.bearing - this.heading, this.ratio(pr.distanceKm) * (R - 8));
+      this.previewLayer.appendChild(el('circle', { class: 'pick-range', cx: c.x.toFixed(1), cy: c.y.toFixed(1), r: (this.ratio(pr.radiusKm) * (R - 8)).toFixed(1) }));
+    }
+    // 跟活動圖示一樣固定螢幕大小（BLIP_PX）
+    const bs = this.blipScale();
     for (const pv of this.previews) {
       const angle = pv.bearing - this.heading;
       const ratio = this.ratio(pv.distanceKm);
@@ -2102,13 +2123,18 @@ export class Radar {
       if ((this.inSpace || this.fill) && out) continue;
       const p = polar(angle, Math.min(ratio * (R - 8), lim));
       const drag = !!pv.drag && !out;
-      const g = el('g', { class: `preview-pin${out ? ' out' : ''}${drag ? ' drag' : ''}`, transform: `translate(${p.x.toFixed(1)} ${p.y.toFixed(1)})` });
+      const g = el('g', { class: `preview-pin${out ? ' out' : ''}${drag ? ' drag' : ''}${pv.bottle ? ' bottle-pin' : ''}`, transform: `translate(${p.x.toFixed(1)} ${p.y.toFixed(1)}) scale(${bs.toFixed(4)})` });
       g.dataset.i = String(this.previews.indexOf(pv));
+      g.dataset.s = bs.toFixed(4);
       // 手指比標記大：按得到的範圍大一點
       if (drag) g.appendChild(el('circle', { class: 'hit', r: 20 }));
       g.appendChild(el('circle', { class: 'pulse', r: 11 }));
       g.appendChild(el('circle', { class: 'ring', r: out ? 7 : 11 }));
-      if (pv.glyph && !out) {
+      if (pv.bottle && !out) {
+        const ink = el('g', { class: 'pin-bottle' });
+        ink.innerHTML = `<path class="glass" d="${BOTTLE_PATH}" transform="rotate(-20)" />${LETTER_SCROLL}${BOTTLE_CORK}`;
+        g.appendChild(ink);
+      } else if (pv.glyph && !out) {
         const ink = el('g', { class: 'glyph', transform: 'scale(0.9)' });
         ink.innerHTML = glyphSvg(pv.glyph, 'currentColor');
         g.appendChild(ink);
@@ -2120,12 +2146,12 @@ export class Radar {
         g.appendChild(t);
         if (drag) {
           const hint = el('text', { class: 'label drag-hint', 'text-anchor': anchor, x: anchor === 'end' ? 10 : anchor === 'start' ? -10 : 0, y: 40 });
-          hint.textContent = '拖到正確的位置';
+          hint.textContent = pv.hint ?? '拖到正確的位置';
           g.appendChild(hint);
         }
       }
       const title = el('title');
-      title.textContent = `還沒放上雷達：${pv.label}`;
+      title.textContent = pv.bottle ? pv.label : `還沒放上雷達：${pv.label}`;
       g.appendChild(title);
       this.previewLayer.appendChild(g);
     }

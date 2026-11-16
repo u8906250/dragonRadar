@@ -321,7 +321,7 @@ async function handle(req: Request, env: Env, ctx: ExecutionContext): Promise<Re
     if (req.method === 'GET' && path === '/api/bottles/mine') return jsonResponse(await myBottles(env, dev, now));
     if (req.method === 'POST' && path === '/api/bottles/verify') return jsonResponse(await verifyProof(env, await readJson<Record<string, unknown>>(req)));
     if (req.method === 'POST' && path === '/api/bottles') {
-      return jsonResponse(await dropBottle(env, dev, await ipHash(env, req), await readJson<{ text?: unknown; lat?: unknown; lng?: unknown; photo?: unknown }>(req), now), 201);
+      return jsonResponse(await dropBottle(env, dev, await ipHash(env, req), await readJson<{ text?: unknown; lat?: unknown; lng?: unknown; land?: unknown; photo?: unknown }>(req), now), 201);
     }
     const one = /^\/api\/bottles\/(\d+)(?:\/(pick|read|report|uncollect|proof|photo))?$/.exec(path);
     if (one) {

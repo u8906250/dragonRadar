@@ -1,5 +1,5 @@
 import type * as Leaflet from 'leaflet';
-import { BOTTLE_CORK, LETTER_SCROLL, TAKEN_MARK } from './radar';
+import { BOTTLE_CORK, BOTTLE_PATH, LETTER_SCROLL, TAKEN_MARK } from './radar';
 import { glyphSvg, topicGlyph } from './topic-icons';
 import { DOME_SVG, idlePhase, isSceneKind, PATROL_SVG, sceneSvg, SCOOTER_SVG, SOCCER_SVG, TRUCK_SVG, WALKER_SVG, windSvg, type SceneKind } from './hq-scenes';
 import { alongLine, BOAT_SVG, crackSvg, FITBUS_BODY, FITBUS_SVG, hqDenseZoom, hqMotionZoom, HQ_LABEL_ZOOM, HQ_NET_LABEL_KM, BIKE_SVG, HIKER_SVG, PETWALK_SVG, FISH_SVG, WETLAND_BIRDS, MUSIC_NOTES, bikePhase, fitbusPhase, fitbusStopSvg, cultureSvg, regrowSvg, serviceSvg, stitchSvg, boatPhase, fireworksSvg, FIREWORKS_MS, flowOut, HQ_VOYAGE_MS, RAINBOW_FLOW_TOTAL, RAINBOW_STAGGER_MS, surge, SURGE_TOTAL, voyagePhase, voyageTimeOf } from './flow';
@@ -236,6 +236,17 @@ export interface MapPreview {
   label: string;
   glyph: string | null;
   drag?: boolean;
+  /** 漂流瓶自己選的落點：裡面畫瓶子 */
+  bottle?: boolean;
+  /** 可以拖的時候名稱下面那一行（沒寫是「拖到正確的位置」） */
+  hint?: string;
+}
+
+/** 漂流瓶可以選的範圍：丟的地方（GPS）周圍的虛線圈 */
+export interface MapPickRange {
+  lat: number;
+  lng: number;
+  km: number;
 }
 
 /** 手機的寬度（跟 styles.css 的 max-width: 899px 一樣） */
@@ -314,6 +325,7 @@ export class MapView {
   private bottles: MapBottle[] = [];
   private previewLayer: Leaflet.LayerGroup | null = null;
   private previews: MapPreview[] = [];
+  private pickRange: MapPickRange | null = null;
   /** 座標一樣合成一個點時，每個項目對應到畫出來的那個標記 */
   private readonly leaderOf = new Map<number, number>();
   /** 畫出來的標記代表哪些項目 */
@@ -757,10 +769,11 @@ export class MapView {
     }
   }
 
-  /** 回報判讀完的位置：虛線圈＋名稱（空陣列就拿掉） */
-  setPreviews(list: MapPreview[]): void {
-    if (JSON.stringify(list) === JSON.stringify(this.previews)) return;
+  /** 回報判讀完的位置：虛線圈＋名稱（空陣列就拿掉）；range 是漂流瓶選落點時畫的虛線圈 */
+  setPreviews(list: MapPreview[], range: MapPickRange | null = null): void {
+    if (JSON.stringify([list, range]) === JSON.stringify([this.previews, this.pickRange])) return;
     this.previews = list;
+    this.pickRange = range;
     this.pushPreviews();
   }
 
@@ -769,15 +782,22 @@ export class MapView {
     const layer = this.previewLayer;
     if (!L || !layer) return;
     layer.clearLayers();
+    // 漂流瓶選落點：丟的地方 1 km 的虛線圈（點圈裡的地方照樣算點在地圖上）
+    const pr = this.pickRange;
+    if (pr) layer.addLayer(L.circle([pr.lat, pr.lng], { radius: pr.km * 1000, className: 'pick-range', interactive: false }));
     this.previews.forEach((pv, i) => {
-      const inner = pv.glyph ? `<g transform="scale(0.9)">${glyphSvg(pv.glyph, 'currentColor')}</g>` : '<circle class="core" r="3.5"/>';
+      const inner = pv.bottle
+        ? `<g class="pin-bottle"><path class="glass" d="${BOTTLE_PATH}" transform="rotate(-20)"/>${LETTER_SCROLL}${BOTTLE_CORK}</g>`
+        : pv.glyph
+          ? `<g transform="scale(0.9)">${glyphSvg(pv.glyph, 'currentColor')}</g>`
+          : '<circle class="core" r="3.5"/>';
       const icon = L.divIcon({
-        className: `map-preview${pv.drag ? ' drag' : ''}`,
-        html: `<svg viewBox="-16 -16 32 32" width="32" height="32" aria-hidden="true"><circle class="pulse" r="11"/><circle class="ring" r="11"/>${inner}</svg><span>${escapeHtml(pv.label)}${pv.drag ? '<small>拖到正確的位置</small>' : ''}</span>`,
+        className: `map-preview${pv.drag ? ' drag' : ''}${pv.bottle ? ' bottle-pin' : ''}`,
+        html: `<svg viewBox="-16 -16 32 32" width="32" height="32" aria-hidden="true"><circle class="pulse" r="11"/><circle class="ring" r="11"/>${inner}</svg><span>${escapeHtml(pv.label)}${pv.drag ? `<small>${escapeHtml(pv.hint ?? '拖到正確的位置')}</small>` : ''}</span>`,
         iconSize: [32, 32],
         iconAnchor: [16, 16],
       });
-      const m = L.marker([pv.lat, pv.lng], { icon, keyboard: false, interactive: !!pv.drag, draggable: !!pv.drag, title: `還沒放上雷達：${pv.label}`, zIndexOffset: 900 });
+      const m = L.marker([pv.lat, pv.lng], { icon, keyboard: false, interactive: !!pv.drag, draggable: !!pv.drag, title: pv.bottle ? pv.label : `還沒放上雷達：${pv.label}`, zIndexOffset: 900 });
       if (pv.drag) {
         m.on('dragend', () => {
           const p = m.getLatLng();
@@ -834,6 +854,18 @@ export class MapView {
       const z = half > 0 ? Math.log2((40075016.686 * Math.cos((p.lat * Math.PI) / 180) * half) / (km * 1000)) - 8 : map.getZoom();
       const zoom = Math.min(map.getMaxZoom(), Math.max(map.getZoom(), z));
       map.fitBounds(L.latLngBounds([[p.lat, p.lng], [p.lat, p.lng]]), { paddingTopLeft: [20, 20], paddingBottomRight: [20 + right, 20 + bottom], maxZoom: zoom, animate: true });
+    });
+  }
+
+  /** 整個圈（中心、半徑）框進看得到的地方，需要就拉遠（漂流瓶選落點的 1 km 圈）；bottom 是下面被蓋住幾 px */
+  fitCircle(p: LatLng, km: number, bottom = 0): void {
+    void this.ensure().then(() => {
+      const L = this.L;
+      const map = this.map;
+      if (!L || !map) return;
+      map.invalidateSize();
+      const b = Math.max(0, Math.min(bottom, map.getSize().y - 160));
+      map.fitBounds(L.latLng(p.lat, p.lng).toBounds(km * 2000), { paddingTopLeft: [16, 16], paddingBottomRight: [16, 16 + b], animate: true });
     });
   }
 

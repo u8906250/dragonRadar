@@ -371,6 +371,17 @@ export async function driftBottles(env: Env, now: number, rand: () => number = M
   return { moved: results.length - toSea, toSea };
 }
 
+/**
+ * 丟的人自己選的落點（v1.739 使用者說丟的時候可以自己選地圖上的點）：沒選（undefined、null）照舊落在隨機位置（scatter）；
+ * 選了只收丟的地方 DRIFT_RANGE_M 內的點（超過、看不懂回傳 null）。之後一樣在丟的地方 1 km 內漂
+ */
+export function landingOf(at: { lat: number; lng: number }, land: unknown, rand: () => number = Math.random): { lat: number; lng: number } | null {
+  if (land === undefined || land === null) return scatter(at, rand);
+  const o = typeof land === 'object' ? (land as Record<string, unknown>) : {};
+  const p = validPoint(o.lat, o.lng);
+  return p && distM(at, p) <= DRIFT_RANGE_M ? p : null;
+}
+
 /** 丟出去落在哪裡：丟的地方 DRIFT_RANGE_M 內的隨機位置（均勻分布在圓內） */
 export function scatter(p: { lat: number; lng: number }, rand: () => number = Math.random): { lat: number; lng: number } {
   const r = DRIFT_RANGE_M * Math.sqrt(rand());
@@ -637,7 +648,7 @@ export async function purgeBottleRejects(env: Env, now: number): Promise<number>
 }
 
 /** 丟一個瓶子：在你現在的位置附近 */
-export async function dropBottle(env: Env, device: string | null, ip: string, body: { text?: unknown; lat?: unknown; lng?: unknown; photo?: unknown }, now: number): Promise<PickedBottle> {
+export async function dropBottle(env: Env, device: string | null, ip: string, body: { text?: unknown; lat?: unknown; lng?: unknown; land?: unknown; photo?: unknown }, now: number): Promise<PickedBottle> {
   const dev = needDevice(device);
   const text = typeof body.text === 'string' ? cleanBottleText(body.text) : '';
   // 一直送沒通過的：先擋下來（在規則、AI 審核之前）
@@ -650,6 +661,9 @@ export async function dropBottle(env: Env, device: string | null, ip: string, bo
   }
   const at = validPoint(body.lat, body.lng);
   if (!at) throw new ReportError(400, '要先定位才能丟瓶子');
+  // 落點：沒選是 1 km 內的隨機位置，自己選的要在你 1 km 內
+  const p = landingOf(at, body.land);
+  if (!p) throw new ReportError(400, '落點要選在你 1 km 內');
   const photo = parsePhoto(body.photo);
   if (photo && !env.BOTTLE_PHOTOS) throw new ReportError(503, '照片暫時不能放，先不放照片吧');
 
@@ -686,8 +700,7 @@ export async function dropBottle(env: Env, device: string | null, ip: string, bo
     await env.BOTTLE_PHOTOS.put(key, stripJpegMeta(photo.bytes), { httpMetadata: { contentType: 'image/jpeg' } });
   }
 
-  // 起點記丟的地方（只用來讓瓶子不漂出 1 km，不給任何人看；24 小時後 driftBottles 清掉），瓶子落在 1 km 內的隨機位置
-  const p = scatter(at);
+  // 起點記丟的地方（只用來讓瓶子不漂出 1 km，不給任何人看；24 小時後 driftBottles 清掉），瓶子落在上面算好的落點 p
   const row = await env.DB.prepare(
     "INSERT INTO bottles (device_id, text, lat, lng, origin_lat, origin_lng, status, world, ip_hash, created_at, expires_at, photo_key) VALUES (?, ?, ?, ?, ?, ?, 'active', 'earth', ?, ?, ?, ?) RETURNING *",
   )

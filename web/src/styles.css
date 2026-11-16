@@ -2426,6 +2426,19 @@ body.letters-open { overflow: hidden; }
 .bottle-rules ul { margin: 0; padding-left: 20px; color: #f3eee4; font-size: 14px; line-height: 1.6; }
 .bottle-rules li + li { margin-top: 6px; }
 .bottle-rules .sheet-actions { justify-content: center; }
+/* 漂流瓶自己選落點（v1.739）：下面一條說明和按鈕；雷達、地圖上丟的地方 1 km 的虛線圈、可以拖的瓶子 */
+.bottle-pick {
+  position: fixed; left: 50%; bottom: calc(16px + env(safe-area-inset-bottom)); transform: translateX(-50%); z-index: 1045;
+  width: min(420px, calc(100vw - 32px)); padding: 12px 14px; border-radius: 14px;
+  background: var(--card); color: var(--text); border: var(--border-w) solid var(--line); box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
+  font-size: 14px; line-height: 1.45;
+}
+.bottle-pick p { margin: 0 0 10px; }
+.bottle-pick small { display: block; margin-top: 4px; font-size: 12px; color: var(--muted); }
+.bottle-pick .sheet-actions { justify-content: flex-end; }
+.radar .pick-range, path.pick-range { fill: #7cc8de; fill-opacity: 0.1; stroke: #2f6f7c; stroke-width: 2; stroke-dasharray: 6 5; vector-effect: non-scaling-stroke; pointer-events: none; }
+.radar .preview-pin.bottle-pin, .map-preview.bottle-pin { color: #2f6f7c; }
+.preview-pin .pin-bottle .glass, .map-preview .pin-bottle .glass { fill: rgba(225, 247, 251, 0.7); stroke: #2f6f7c; stroke-width: 1.3; stroke-linejoin: round; }
 .bottle-proof { position: relative; max-width: 420px; align-items: stretch; }
 /* 右上角的 ✕：讀取中也一眼看得到怎麼關 */
 .proof-x { position: absolute; z-index: 2; top: -8px; right: -8px; width: 44px; height: 44px; padding: 0; font-size: 16px; line-height: 1; color: #fff; cursor: pointer; background: rgba(255, 255, 255, 0.14); border: 1px solid rgba(255, 255, 255, 0.3); border-radius: 50%; }

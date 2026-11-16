@@ -158,9 +158,9 @@ export async function fetchWoofBottles(): Promise<BottleOut[]> {
   const r = await deviceJson<{ bottles?: BottleOut[] }>('/api/bottles?world=woof');
   return r.ok ? (r.data.bottles ?? []).filter((b) => b.world === 'woof') : [];
 }
-/** 丟瓶子；photo 是瀏覽器縮小、重新存好的 JPEG（data URL），沒放是 null */
-export const dropBottle = (text: string, at: LatLng, photo: string | null = null): Promise<Result<PickedBottle>> =>
-  deviceJson<PickedBottle>('/api/bottles', 'POST', { text, lat: at.lat, lng: at.lng, ...(photo ? { photo } : {}) });
+/** 丟瓶子；photo 是瀏覽器縮小、重新存好的 JPEG（data URL），沒放是 null；land 是自己選的落點（at 的 1 km 內），沒選是 null（落在隨機位置） */
+export const dropBottle = (text: string, at: LatLng, photo: string | null = null, land: LatLng | null = null): Promise<Result<PickedBottle>> =>
+  deviceJson<PickedBottle>('/api/bottles', 'POST', { text, lat: at.lat, lng: at.lng, ...(land ? { land: { lat: land.lat, lng: land.lng } } : {}), ...(photo ? { photo } : {}) });
 /** 瓶子的照片（看得到內容的人才拿得到：丟的人、收藏的人、走到附近的人帶位置）：回傳可以放在 img 的網址，拿不到是 null；拿過的記起來 */
 const photoUrls = new Map<number, Promise<string | null>>();
 export function fetchBottlePhoto(id: number, here?: BottleHere): Promise<string | null> {
