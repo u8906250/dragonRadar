@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { nlCoast, nlLines, NL_BOX, NL_CITIES, NL_PROVINCES } from '../src/netherlands';
-import { NL_LAND, NL_LAND_BOX } from '../src/nl-land';
+import { NL_LAND } from '../src/nl-land';
 
 const inRing = (lat: number, lng: number, r: Array<[number, number]>): boolean => {
   let inside = false;
@@ -39,7 +39,8 @@ describe('netherlands', () => {
       ['北海', 52.6, 3.9],
       ['艾姆登', 53.37, 7.21],
     ] as const) expect(onLand(lat, lng), name).toBe(false);
-    expect(NL_LAND_BOX.s).toBeLessThan(50.8);
-    expect(NL_LAND_BOX.n).toBeGreaterThan(53.5);
+    const lats = NL_LAND.flat().map((p) => p[0]);
+    expect(Math.min(...lats)).toBeLessThan(50.8);
+    expect(Math.max(...lats)).toBeGreaterThan(53.5);
   });
 });

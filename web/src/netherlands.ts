@@ -8,7 +8,7 @@
  * 海岸線簡化到約 400 m、界線約 250 m，座標取到千分之一度；中文名照 Natural Earth 的中文名（轉成繁體）和常用譯名。
  * 產生的程式在 web/scripts/gen-netherlands.py。格式跟 eastasia.ts 一樣（decodeRings）
  */
-import { decodeRings } from './geo';
+import { decodeRings, type RegionMap } from './geo';
 
 /** 荷蘭那一塊的範圍（NL_COAST 涵蓋的地方；world.ts 在這裡面的點不畫） */
 export const NL_BOX = { s: 50.6, w: 2.9, n: 53.8, e: 7.6 };
@@ -50,3 +50,6 @@ export const NL_CITIES: Array<[string, number, number]> = [
 export const nlCoast: Array<Array<[number, number]>> = decodeRings(NL_COAST);
 /** 省界、國界 */
 export const nlLines: Array<Array<[number, number]>> = decodeRings(NL_LINES);
+
+/** 雷達加畫的（main.ts 的 REGION_SLOTS） */
+export const REGION_MAP: RegionMap = { coast: nlCoast, lines: nlLines, far: NL_PROVINCES, near: NL_CITIES };

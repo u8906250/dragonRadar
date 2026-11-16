@@ -2,7 +2,7 @@ import './styles.css';
 import { FITBUS_MS_PER_M, hqDenseKm, hqMotionKm, HQ_NET_LABEL_KM, HQ_SAIL_MS, HQ_STAR_MS, HQ_VOYAGE_MS, RAINBOW_EVERY_MS, voyagePhase, voyageTimeOf } from './flow';
 import { addKeyword, deletePushSubscription, locateFeedbackPlace, sendFeedback, type FeedbackKind, fetchPushKey, savePushSubscription, confirmReport, editReport, locatePlace, rejectReport, supplementReport, deleteBottle, dropBottle, readBottle, type BottleHere, fetchBottleInfo, fetchBottlePhoto, fetchBottleProof, fetchBottles, fetchWoofBottles, rememberBottlePhoto, uncollectLetter, verifyBottleProof, fetchEvents, fetchHealth, fetchKeywords, fetchMyBottles, fetchMyReports, fetchRoutes, pickBottle, reportBottle, submitLink, withdrawReport } from './api';
 import { compassSupported, startCompass } from './compass';
-import { bearingDeg, compassLabel, destination, formatKm, haversineKm, lookFrom, simplifyLatLng, taiwanRadiusKm, unitVectors, type LatLng } from './geo';
+import { bearingDeg, compassLabel, destination, formatKm, haversineKm, lookFrom, simplifyLatLng, taiwanRadiusKm, unitVectors, type LatLng, type RegionMap } from './geo';
 import { TAIWAN_RINGS } from './taiwan';
 import type { SceneKind } from './hq-scenes';
 import { LANDMARKS } from './landmarks';
@@ -994,29 +994,40 @@ function touchesArea(km: number, a: { s: number; w: number; n: number; e: number
 const touchesEastAsia = (km: number): boolean => touchesArea(km, EA_AREA);
 
 /*
- * 荷蘭（netherlands.ts，v1.745 使用者說荷蘭超過比例尺 20 km 的地圖畫出來）：雷達附近碰到荷蘭那一塊才載入（約 9 KB）。
- * 拉遠時用 1:10m 的海岸線和湖岸（艾瑟爾湖…），加省界、國界（跟台灣的縣市界一樣），全螢幕寫省名、城市名；
- * 拉遠的道路、綠地、河湖只畫荷蘭的（streets.ts 的 REGIONS）
+ * 其他地方拉遠的地圖（geo.ts 的 RegionMap）：雷達附近碰到那一塊才載入，加畫海岸線或湖岸、界線（跟台灣的縣市界一樣），
+ * 全螢幕寫大地名、城市名；拉遠的道路、綠地、河湖只畫那個地方的（streets.ts 的 REGIONS）
  */
-let nlMod: typeof import('./netherlands') | null = null;
-let nlLoading = false;
-function loadNetherlands(): void {
-  if (nlMod || nlLoading) return;
-  nlLoading = true;
-  void import('./netherlands')
+interface RegionSlot {
+  /** 那一塊的範圍（載入前就判斷得了） */
+  area: { s: number; w: number; n: number; e: number };
+  /** 海岸線也用它的（world.ts 在這一塊的點不畫）；false 是只補湖岸（海岸線已經有 eastasia.ts 的） */
+  ownCoast: boolean;
+  load: () => Promise<{ REGION_MAP: RegionMap }>;
+  map: RegionMap | null;
+  loading: boolean;
+}
+const REGION_SLOTS: RegionSlot[] = [
+  // 荷蘭（netherlands.ts，v1.745 使用者說荷蘭超過比例尺 20 km 的地圖畫出來）：1:10m 的海岸線和湖岸（艾瑟爾湖…）、省界、國界、省名、城市名
+  { area: { s: 50.6, w: 2.9, n: 53.8, e: 7.6 }, ownCoast: true, load: () => import('./netherlands'), map: null, loading: false },
+  // 日本（japan.ts，v1.746 使用者說日本也畫）：海岸線用 eastasia.ts 的，補琵琶湖岸、都道府縣界、縣名、城市名
+  { area: { s: 24.0, w: 122.9, n: 45.6, e: 146.0 }, ownCoast: false, load: () => import('./japan'), map: null, loading: false },
+];
+function loadRegion(r: RegionSlot): void {
+  if (r.map || r.loading) return;
+  r.loading = true;
+  void r
+    .load()
     .then((m) => {
-      nlMod = m;
+      r.map = m.REGION_MAP;
       outlineFor = '';
       streetsFor = '';
       updateOutline();
       updateStreets();
     })
     .finally(() => {
-      nlLoading = false;
+      r.loading = false;
     });
 }
-/** 荷蘭那一塊（跟 netherlands.ts 的 NL_BOX 一樣，載入前就判斷得了） */
-const NL_AREA = { s: 50.6, w: 2.9, n: 53.8, e: 7.6 };
 /** 在台灣本島（含綠島、蘭嶼） */
 const onTaiwanMain = (p: LatLng): boolean => p.lat > 21.8 && p.lat < 25.4 && p.lng > 120.0 && p.lng < 122.1;
 /**
@@ -1717,9 +1728,11 @@ function placeLabels(
   };
   if (km > 33) for (const [n, lat, lng] of sm.TW_COUNTIES) add(lat, lng, n, 'county', 100);
   else if (km > 1) for (const [n, lat, lng] of sm.TW_TOWNS) add(lat, lng, n, 'town', 90);
-  // 荷蘭：拉遠寫省名，近一點寫城市名（跟台灣的縣市、鄉鎮市區一樣）
-  if (nlMod && km > 33) for (const [n, lat, lng] of nlMod.NL_PROVINCES) add(lat, lng, n, 'county', 100);
-  else if (nlMod && km > 1) for (const [n, lat, lng] of nlMod.NL_CITIES) add(lat, lng, n, 'town', 90);
+  // 荷蘭、日本：拉遠寫省名、縣名，近一點寫城市名（跟台灣的縣市、鄉鎮市區一樣）
+  for (const { map } of REGION_SLOTS) {
+    if (map && km > 33) for (const [n, lat, lng] of map.far) add(lat, lng, n, 'county', 100);
+    else if (map && km > 1) for (const [n, lat, lng] of map.near) add(lat, lng, n, 'town', 90);
+  }
   if (km <= 5) {
     const pri: Record<string, number> = { motorway: 70, trunk: 68, primary: 62, secondary: 58, tertiary: 50, minor: 40 };
     const ok = (cls: string): boolean => (km > 2 ? cls === 'motorway' || cls === 'trunk' : km > 1 ? cls !== 'tertiary' && cls !== 'minor' : true);
@@ -2073,12 +2086,13 @@ function updateOutline(): void {
   if (nearEa) loadEastAsia();
   const ea = nearEa ? eaMod : null;
   const inEa = (lat: number, lng: number): boolean => lat > EA_AREA.s && lat < EA_AREA.n && lng > EA_AREA.w && lng < EA_AREA.e;
-  // 荷蘭：附近碰到就載入；載入了雷達用它的海岸線、湖岸，world.ts 在荷蘭那一塊的點不畫
-  const nearNl = touchesArea(reach, NL_AREA);
-  if (nearNl) loadNetherlands();
-  const nl = nearNl ? nlMod : null;
-  const inNl = (lat: number, lng: number): boolean => lat > NL_AREA.s && lat < NL_AREA.n && lng > NL_AREA.w && lng < NL_AREA.e;
-  const worldSkip = ea || nl ? (lat: number, lng: number): boolean => (!!ea && inEa(lat, lng)) || (!!nl && inNl(lat, lng)) : undefined;
+  // 荷蘭、日本：附近碰到就載入；載入了雷達加畫它的海岸線或湖岸、界線，荷蘭那一塊 world.ts 的點不畫
+  const near = REGION_SLOTS.filter((r) => touchesArea(reach, r.area));
+  near.forEach(loadRegion);
+  const regions = near.filter((r): r is RegionSlot & { map: RegionMap } => !!r.map);
+  const own = regions.filter((r) => r.ownCoast).map((r) => r.area);
+  const inOwn = (lat: number, lng: number): boolean => own.some((a) => lat > a.s && lat < a.n && lng > a.w && lng < a.e);
+  const worldSkip = ea || own.length > 0 ? (lat: number, lng: number): boolean => (!!ea && inEa(lat, lng)) || inOwn(lat, lng) : undefined;
   // 16 km 內只在中國的範圍畫虛線海岸（不在台灣本島時；其他地方用街道圖磚的實線海岸）
   const china = kind === 'none' && !!ea && !onTaiwanMain(origin);
   type Src = { ring: Array<[number, number]>; skip?: (lat: number, lng: number) => boolean };
@@ -2087,16 +2101,16 @@ function updateOutline(): void {
       ? [
           ...TAIWAN_RINGS.map((ring) => ({ ring })),
           ...(ea ? ea.eaCoast.map((ring) => ({ ring })) : []),
-          ...(nl ? nl.nlCoast.map((ring) => ({ ring })) : []),
+          ...regions.flatMap((r) => r.map.coast.map((ring) => ({ ring }))),
           ...worldRings.map((ring) => ({ ring, skip: worldSkip })),
         ]
       : china
         ? ea!.eaCoast.map((ring) => ({ ring, skip: (lat: number, lng: number) => !ea!.chinaMask.contains(lat, lng) }))
         : null;
-  // 縣市界（荷蘭加上省界、國界）
-  const lines = kind === 'land' && scaleKm <= COUNTY_MAX_KM ? (nl ? [...countyLines, ...nl.nlLines] : countyLines) : [];
+  // 縣市界（加上荷蘭的省界、國界，日本的都道府縣界）
+  const lines = kind === 'land' && scaleKm <= COUNTY_MAX_KM ? (regions.length > 0 ? [...countyLines, ...regions.flatMap((r) => r.map.lines)] : countyLines) : [];
   const mapRings = kind === 'land' && scaleKm > MAP_OUTLINE_KM ? landRings : null;
-  const base = sources ? `${kind}|${worldLoaded}|${!!ea}|${!!nl}|${china}|${lines.length > 0}|${!!mapRings}|${tier}` : '';
+  const base = sources ? `${kind}|${worldLoaded}|${!!ea}|${regions.length}|${china}|${lines.length > 0}|${!!mapRings}|${tier}` : '';
   // 拖曳中移動不到範圍的一半：不重算（每一點都要算方位、距離，拉遠時點很多），雷達照位移整層平移（v1.719 使用者說快速拖很遠時地圖跟不上、越縮小越明顯）。
   // 平移最多 FLAT_PAN_KM，再遠照新的位置重算：拉遠到幾千公里時平移跟真的差很多，光點照球面轉、海岸線只是平移（v1.743）
   if (panFrom && outlineAt && base && outlineFor.startsWith(`${base}|`)) {

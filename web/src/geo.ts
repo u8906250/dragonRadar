@@ -88,7 +88,18 @@ export function lookFrom(from: LatLng): (v: Float64Array, i: number) => { bearin
   };
 }
 
-/** 解開差值編碼的線（eastasia.ts、netherlands.ts）：「;」隔開每一段，每段 [緯度×1000, 經度×1000, 之後每一點跟前一點的差…] → 一串 [緯度, 經度] */
+/**
+ * 一個地方拉遠時的地圖（netherlands.ts、japan.ts）：雷達加畫的海岸線或湖岸（coast）、界線（lines，跟台灣的縣市界一樣畫），
+ * 全螢幕拉遠（33 km 以上）寫的大地名（far：省、都道府縣）和近一點寫的城市（near）
+ */
+export interface RegionMap {
+  coast: Array<Array<[number, number]>>;
+  lines: Array<Array<[number, number]>>;
+  far: Array<[string, number, number]>;
+  near: Array<[string, number, number]>;
+}
+
+/** 解開差值編碼的線（eastasia.ts、netherlands.ts、japan.ts、jp-land.ts）：「;」隔開每一段，每段 [緯度×1000, 經度×1000, 之後每一點跟前一點的差…] → 一串 [緯度, 經度] */
 export function decodeRings(s: string): Array<Array<[number, number]>> {
   return s.split(';').map((seg) => {
     const v = seg.split(',').map(Number);
