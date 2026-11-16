@@ -7753,6 +7753,8 @@ function wireSupplement(c: { postId: string; token: string }, actions: HTMLEleme
     }
     if (res.data.outcome === 'preview') renderPreview(res.data);
     else await showReportResult(res.data);
+    // 表單換成新的判讀結果：捲回最上面，從頭看
+    reportSheet.scrollTop = 0;
   });
 }
 
@@ -8157,6 +8159,8 @@ function wireEdit(c: { postId: string; token: string }, items: EditItem[], actio
     }
     if (res.data.outcome === 'preview') renderPreview(res.data);
     else await showReportResult(res.data);
+    // 表單換成新的預覽：捲回最上面，從頭看（使用者說的）
+    reportSheet.scrollTop = 0;
   });
 }
 
