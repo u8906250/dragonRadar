@@ -103,9 +103,9 @@ describe('decodeTile coast', () => {
 });
 
 describe('STREET_TIERS', () => {
-  it('draws only Taiwan roads beyond 65 km, with z7 tiles', () => {
+  it('draws only Taiwan (and Netherlands) roads beyond 65 km, with z7 tiles', () => {
     const last = STREET_TIERS[STREET_TIERS.length - 1];
-    expect(last).toMatchObject({ maxKm: Infinity, zoom: 7, taiwan: true });
+    expect(last).toMatchObject({ maxKm: Infinity, zoom: 7, regional: true });
     expect(last.classes).toMatchObject({ motorway: 'major', trunk: 'major', primary: 'minor' });
   });
   it('draws tertiary roads within 16 km, like secondary ones (other cities tag their arterials tertiary)', () => {

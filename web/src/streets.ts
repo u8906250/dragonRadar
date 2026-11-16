@@ -5,6 +5,7 @@
  * 圖磚是 Mapbox Vector Tile（protobuf），這裡只解讀用得到的欄位，不另外加函式庫。
  */
 
+import { NL_LAND, NL_LAND_BOX } from './nl-land';
 import { TAIWAN_RINGS } from './taiwan';
 // 雷達上寫的縣市、鄉鎮市區名稱跟著街道一起載入（v1.691）
 export { TW_COUNTIES, TW_TOWNS } from './places-tw';
@@ -30,10 +31,10 @@ const HIGHWAYS: Classes = { motorway: 'major', trunk: 'major' };
  * 雷達範圍（半徑）→ 用哪一級圖磚、畫哪些路。一張圖磚的寬度（台灣約緯度 25 度）要大於畫面直徑，最多才四張（16 km 那一級例外，最多九張）：
  * z13 約 4.4 km、z11 約 18 km、z10 約 35 km、z9 約 71 km、z8 約 142 km、z7 約 284 km。
  * 2 km 內大街小巷都畫（z14 多了建築、門牌、店家，市區一張壓縮後就六百多 KB，用不到）。
- * 再大（到全台）都用 z7（z6 只剩國道、快速道路，東部的台 9 線沒有）：taiwan 只畫台灣（本島、離島）的路、
- * 只抓台灣那六張圖磚（共約 460 KB；全台的範圍對岸也在圈內）
+ * 再大（到全台）都用 z7（z6 只剩國道、快速道路，東部的台 9 線沒有）：regional 只畫 REGIONS 那幾個地方的，
+ * 台灣只畫台灣（本島、離島）的路、只抓台灣那六張圖磚（共約 460 KB；全台的範圍對岸也在圈內）；荷蘭也是六張（約 1.2 MB）
  */
-export const STREET_TIERS: Array<{ maxKm: number; zoom: number; classes: Classes; taiwan?: boolean; coast?: boolean; names?: string[]; stations?: boolean; green?: boolean }> = [
+export const STREET_TIERS: Array<{ maxKm: number; zoom: number; classes: Classes; regional?: boolean; coast?: boolean; names?: string[]; stations?: boolean; green?: boolean }> = [
   // names：雷達上寫路名的道路種類（transportation_name 圖層）；stations：寫車站名（poi 圖層，z13 才有）
   { maxKm: 2, zoom: 13, classes: { motorway: 'major', trunk: 'major', primary: 'major', secondary: 'major', tertiary: 'minor', minor: 'minor' }, coast: true, names: ['motorway', 'trunk', 'primary', 'secondary', 'tertiary', 'minor'], stations: true, green: true },
   // 市區的幹道台北多半標 secondary，其他縣市很多標 tertiary（新竹 8 km 內 secondary 約 90 km、tertiary 約 400 km）：都畫，各地一樣細；
@@ -42,9 +43,9 @@ export const STREET_TIERS: Array<{ maxKm: number; zoom: number; classes: Classes
   { maxKm: 16, zoom: 11, classes: { ...HIGHWAYS, primary: 'minor', secondary: 'minor', tertiary: 'minor' }, coast: true, names: ['motorway', 'trunk'], green: true },
   { maxKm: 33, zoom: 9, classes: { ...HIGHWAYS, primary: 'minor' }, green: true },
   { maxKm: 65, zoom: 8, classes: { ...HIGHWAYS, primary: 'minor' }, green: true },
-  { maxKm: Infinity, zoom: 7, classes: { ...HIGHWAYS, primary: 'minor' }, taiwan: true, green: true },
+  { maxKm: Infinity, zoom: 7, classes: { ...HIGHWAYS, primary: 'minor' }, regional: true, green: true },
 ];
-/** 台灣（含金門、馬祖、澎湖）的範圍：taiwan 那一級只抓這裡面的圖磚 */
+/** 台灣（含金門、馬祖、澎湖）的範圍：regional 那一級在台灣只抓這裡面的圖磚 */
 const TAIWAN_BOX = { s: 21.88, w: 118.2, n: 26.45, e: 122.1 };
 /** 馬祖（TAIWAN_RINGS 沒有馬祖）：對岸的黃岐半島在東經 119.9 以西 */
 const MATSU_BOX = { s: 25.9, w: 119.9, n: 26.45, e: 120.55 };
@@ -71,6 +72,63 @@ export function onTaiwan(l: StreetLine): boolean {
   }
   return false;
 }
+/** 荷蘭的陸地（NL_LAND）：先看外框，再看在不在那一圈裡 */
+const NL_BOXES = NL_LAND.map((r) => ({
+  r,
+  s: Math.min(...r.map((p) => p[0])),
+  n: Math.max(...r.map((p) => p[0])),
+  w: Math.min(...r.map((p) => p[1])),
+  e: Math.max(...r.map((p) => p[1])),
+}));
+const inNetherlands = (lat: number, lng: number): boolean => NL_BOXES.some((b) => lat >= b.s && lat <= b.n && lng >= b.w && lng <= b.e && inRing(lat, lng, b.r));
+/**
+ * 一條線（路、河）切到荷蘭裡面：連續在荷蘭的幾點是一段，頭尾接到國界上（跨過國界的那一小段對半找 8 次，約差 1/256 段）；
+ * 不切的話路、河跨過國界整條畫，一路畫進德國、比利時
+ */
+function nlRuns(pts: Float64Array): Array<{ pts: Float64Array; box: [number, number, number, number] }> {
+  const n = pts.length / 2;
+  const inside = Array.from({ length: n }, (_, i) => inNetherlands(pts[i * 2], pts[i * 2 + 1]));
+  /** 從裡面的 a 點往外面的 b 點走，國界在哪 */
+  const edge = (a: number, b: number): [number, number] => {
+    let [lo, hi] = [0, 1];
+    for (let k = 0; k < 8; k++) {
+      const m = (lo + hi) / 2;
+      if (inNetherlands(pts[a * 2] + (pts[b * 2] - pts[a * 2]) * m, pts[a * 2 + 1] + (pts[b * 2 + 1] - pts[a * 2 + 1]) * m)) lo = m;
+      else hi = m;
+    }
+    return [pts[a * 2] + (pts[b * 2] - pts[a * 2]) * lo, pts[a * 2 + 1] + (pts[b * 2 + 1] - pts[a * 2 + 1]) * lo];
+  };
+  const out: Array<{ pts: Float64Array; box: [number, number, number, number] }> = [];
+  for (let i = 0; i < n; i++) {
+    if (!inside[i]) continue;
+    let j = i;
+    while (j + 1 < n && inside[j + 1]) j++;
+    const run = [...(i > 0 ? edge(i, i - 1) : []), ...pts.subarray(i * 2, j * 2 + 2), ...(j + 1 < n ? edge(j, j + 1) : [])];
+    if (run.length >= 4) out.push(withBox(run));
+    i = j;
+  }
+  return out;
+}
+/** 綠地、湖：外框的中心或第一點在荷蘭（一塊一塊每一點都查太慢） */
+const areaInNl = (a: GreenArea): boolean => inNetherlands((a.box[0] + a.box[2]) / 2, (a.box[1] + a.box[3]) / 2) || (a.rings[0]?.length > 1 && inNetherlands(a.rings[0][0], a.rings[0][1]));
+
+/**
+ * 拉遠（regional 那一級）只畫這幾個地方，只抓 box 裡面的圖磚：
+ * 台灣只畫台灣（本島、離島）的路（對岸不畫）；荷蘭（v1.745）的路、綠地、河湖都只畫荷蘭的，路、河切在國界上，不會被圖磚切成方的
+ */
+const REGIONS: Array<{ box: { s: number; w: number; n: number; e: number }; keep: (t: TileData) => TileData }> = [
+  { box: TAIWAN_BOX, keep: (t) => ({ ...t, lines: t.lines.filter(onTaiwan) }) },
+  {
+    box: NL_LAND_BOX,
+    keep: (t) => ({
+      ...t,
+      lines: t.lines.flatMap((l) => nlRuns(l.pts).map((r) => ({ ...l, ...r }))),
+      green: t.green.filter(areaInNl),
+      water: t.water.filter(areaInNl),
+      waterways: t.waterways.flatMap((l) => nlRuns(l.pts).map((r) => ({ ...l, ...r }))),
+    }),
+  },
+];
 export const tierOf = (km: number): (typeof STREET_TIERS)[number] => STREET_TIERS.find((t) => km <= t.maxKm) ?? STREET_TIERS[STREET_TIERS.length - 1];
 const TILEJSON = 'https://tiles.openfreemap.org/planet';
 /** 最多記住幾張圖磚（拖來拖去不要一直重抓） */
@@ -582,11 +640,14 @@ export function streetTiles(
   onLoad: () => void,
 ): { lines: StreetLine[]; coast: CoastLine[]; roads: RoadName[]; stations: StationName[]; green: GreenArea[]; pending: number; tiles: LoadedTile[] } {
   // 河、湖跟綠地一起讀（green 那幾級）
-  const { zoom, classes, taiwan, coast, names, stations, green } = tierOf(rangeKm);
+  const { zoom, classes, regional, coast, names, stations, green } = tierOf(rangeKm);
   const dLat = km / 110.574;
   const dLng = km / (111.32 * Math.cos((lat * Math.PI) / 180));
   let [s, w, n, e] = [lat - dLat, lng - dLng, lat + dLat, lng + dLng];
-  if (taiwan) [s, w, n, e] = [Math.max(s, TAIWAN_BOX.s), Math.max(w, TAIWAN_BOX.w), Math.min(n, TAIWAN_BOX.n), Math.min(e, TAIWAN_BOX.e)];
+  // 拉遠：畫面碰到的那個地方（台灣、荷蘭），只抓它範圍裡的圖磚；都沒碰到就不畫
+  const region = regional ? REGIONS.find((r) => !(n < r.box.s || s > r.box.n || e < r.box.w || w > r.box.e)) : undefined;
+  if (regional && !region) return { lines: [], coast: [], roads: [], stations: [], green: [], pending: 0, tiles: [] };
+  if (region) [s, w, n, e] = [Math.max(s, region.box.s), Math.max(w, region.box.w), Math.min(n, region.box.n), Math.min(e, region.box.e)];
   if (s > n || w > e) return { lines: [], coast: [], roads: [], stations: [], green: [], pending: 0, tiles: [] };
   const a = tileOf(n, w, zoom);
   const b = tileOf(s, e, zoom);
@@ -625,7 +686,8 @@ export function streetTiles(
         .then((ab) => {
           if (!ab) throw new Error('no tile');
           const got = decodeTile(new Uint8Array(ab), x, y, zoom, classes, !!coast, { roads: names, stations, green });
-          tiles.set(key, { lines: taiwan ? got.lines.filter(onTaiwan) : got.lines, coast: got.coast, roads: got.roads, stations: got.stations, green: got.green, water: got.water, waterways: got.waterways });
+          const data: TileData = { lines: got.lines, coast: got.coast, roads: got.roads, stations: got.stations, green: got.green, water: got.water, waterways: got.waterways };
+          tiles.set(key, region ? region.keep(data) : data);
           while (tiles.size > MAX_TILES) tiles.delete(tiles.keys().next().value as string);
           onLoad();
         })

@@ -88,6 +88,22 @@ export function lookFrom(from: LatLng): (v: Float64Array, i: number) => { bearin
   };
 }
 
+/** 解開差值編碼的線（eastasia.ts、netherlands.ts）：「;」隔開每一段，每段 [緯度×1000, 經度×1000, 之後每一點跟前一點的差…] → 一串 [緯度, 經度] */
+export function decodeRings(s: string): Array<Array<[number, number]>> {
+  return s.split(';').map((seg) => {
+    const v = seg.split(',').map(Number);
+    const out: Array<[number, number]> = [];
+    let lat = 0;
+    let lng = 0;
+    for (let i = 0; i + 1 < v.length; i += 2) {
+      lat += v[i];
+      lng += v[i + 1];
+      out.push([lat / 1000, lng / 1000]);
+    }
+    return out;
+  });
+}
+
 /** 從 from 往 bearing 方向（0 = 北，順時針）走 km 公里到的點（大圓） */
 export function destination(from: LatLng, bearing: number, km: number): LatLng {
   const d = km / EARTH_KM;
