@@ -23,6 +23,71 @@ export function bearingDeg(from: LatLng, to: LatLng): number {
   return ((Math.atan2(y, x) * 180) / Math.PI + 360) % 360;
 }
 
+/**
+ * 經緯度的線照地球表面簡化（Douglas-Peucker）：離頭尾那段大圓不到 tolKm 的點拿掉（頭尾留著，留下的都是原本的點）。
+ * 用三維的單位向量算、不經過投影，跨換日線、橫跨整個大陸的線也照實際距離
+ */
+export function simplifyLatLng(pts: Array<[number, number]>, tolKm: number): Array<[number, number]> {
+  const n = pts.length;
+  if (n < 3) return pts;
+  const v = unitVectors(pts);
+  const tol = tolKm / EARTH_KM;
+  const keep = new Uint8Array(n);
+  keep[0] = keep[n - 1] = 1;
+  const stack: Array<[number, number]> = [[0, n - 1]];
+  while (stack.length > 0) {
+    const [a, b] = stack.pop()!;
+    const [ax, ay, az, bx, by, bz] = [v[a * 3], v[a * 3 + 1], v[a * 3 + 2], v[b * 3], v[b * 3 + 1], v[b * 3 + 2]];
+    // 頭尾那段大圓的法向量（離大圓多遠＝跟法向量的內積）；頭尾同一點（整圈）照離那一點的距離
+    let [nx, ny, nz] = [ay * bz - az * by, az * bx - ax * bz, ax * by - ay * bx];
+    const len = Math.hypot(nx, ny, nz);
+    if (len > 1e-12) [nx, ny, nz] = [nx / len, ny / len, nz / len];
+    let far = -1;
+    let best = tol;
+    for (let i = a + 1; i < b; i++) {
+      const [x, y, z] = [v[i * 3], v[i * 3 + 1], v[i * 3 + 2]];
+      const d = len > 1e-12 ? Math.abs(x * nx + y * ny + z * nz) : Math.hypot(x - ax, y - ay, z - az);
+      if (d > best) {
+        best = d;
+        far = i;
+      }
+    }
+    if (far >= 0) {
+      keep[far] = 1;
+      stack.push([a, far], [far, b]);
+    }
+  }
+  return pts.filter((_, i) => keep[i] === 1);
+}
+
+/** 經緯度換成單位向量（x、y、z 一點三個數），同一條線算很多次方位、距離時先換好記住（lookFrom） */
+export function unitVectors(pts: Array<[number, number]>): Float64Array {
+  const v = new Float64Array(pts.length * 3);
+  pts.forEach(([lat, lng], i) => {
+    const [p, l] = [toRad(lat), toRad(lng)];
+    v[i * 3] = Math.cos(p) * Math.cos(l);
+    v[i * 3 + 1] = Math.cos(p) * Math.sin(l);
+    v[i * 3 + 2] = Math.sin(p);
+  });
+  return v;
+}
+
+/**
+ * 從 from 看 unitVectors 換好的點：方位（同 bearingDeg）、距離（同 haversineKm）。
+ * 先換成以 from 為中心的東、北、上，一點只要兩個 atan2（拖曳中每一格把整條海岸線重算一次用）
+ */
+export function lookFrom(from: LatLng): (v: Float64Array, i: number) => { bearing: number; distanceKm: number } {
+  const [p, l] = [toRad(from.lat), toRad(from.lng)];
+  const [sp, cp, sl, cl] = [Math.sin(p), Math.cos(p), Math.sin(l), Math.cos(l)];
+  return (v, i) => {
+    const [x, y, z] = [v[i * 3], v[i * 3 + 1], v[i * 3 + 2]];
+    const east = -sl * x + cl * y;
+    const north = -sp * cl * x - sp * sl * y + cp * z;
+    const up = cp * cl * x + cp * sl * y + sp * z;
+    return { bearing: ((Math.atan2(east, north) * 180) / Math.PI + 360) % 360, distanceKm: EARTH_KM * Math.atan2(Math.hypot(east, north), up) };
+  };
+}
+
 /** 從 from 往 bearing 方向（0 = 北，順時針）走 km 公里到的點（大圓） */
 export function destination(from: LatLng, bearing: number, km: number): LatLng {
   const d = km / EARTH_KM;

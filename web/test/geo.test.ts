@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { bearingDeg, bottleSize, compassLabel, formatKm, haversineKm, TAIWAN_EXTREMES, taiwanRadiusKm } from '../src/geo';
+import { bearingDeg, bottleSize, compassLabel, formatKm, haversineKm, lookFrom, simplifyLatLng, TAIWAN_EXTREMES, taiwanRadiusKm, unitVectors } from '../src/geo';
 
 const TAIPEI_MAIN = { lat: 25.0478, lng: 121.517 };
 const TAIPEI_101 = { lat: 25.034, lng: 121.5645 };
@@ -73,5 +73,53 @@ describe('bottleSize', () => {
     expect(bottleSize(10)).toBeCloseTo(0.5);
     expect(bottleSize(10.1)).toBe(0);
     expect(bottleSize(50)).toBe(0);
+  });
+});
+
+describe('lookFrom', () => {
+  it('matches bearingDeg and haversineKm from Taipei to near and far points', () => {
+    const pts: Array<[number, number]> = [
+      [TAIPEI_101.lat, TAIPEI_101.lng],
+      [25.0479, 121.5171],
+      [35.68, 139.69],
+      [-33.87, 151.21],
+      [51.5, -0.12],
+      [-25, -58.5],
+    ];
+    const look = lookFrom(TAIPEI_MAIN);
+    const v = unitVectors(pts);
+    pts.forEach(([lat, lng], i) => {
+      const r = look(v, i);
+      expect(r.distanceKm).toBeCloseTo(haversineKm(TAIPEI_MAIN, { lat, lng }), 6);
+      expect(r.bearing).toBeCloseTo(bearingDeg(TAIPEI_MAIN, { lat, lng }), 4);
+    });
+  });
+});
+
+describe('simplifyLatLng', () => {
+  // 北緯 60 度、跨換日線的一圈（經度 150 到 -170）
+  const ring: Array<[number, number]> = [];
+  for (let i = 0; i < 360; i++) {
+    const lng = 170 + 20 * Math.cos((i * Math.PI) / 180);
+    ring.push([60 + 5 * Math.sin((i * Math.PI) / 180), lng > 180 ? lng - 360 : lng]);
+  }
+  ring.push(ring[0]);
+  it('drops points closer than the tolerance and keeps the ring closed', () => {
+    const s = simplifyLatLng(ring, 5);
+    expect(s.length).toBeLessThan(60);
+    expect(s.length).toBeGreaterThan(8);
+    expect(s[0]).toBe(ring[0]);
+    expect(s[s.length - 1]).toBe(ring[ring.length - 1]);
+    // 留下的都是原本的點
+    for (const p of s) expect(ring).toContain(p);
+  });
+  it('keeps every point of a straight-ish short line under a tiny tolerance', () => {
+    const line: Array<[number, number]> = [
+      [25, 121],
+      [25.5, 121.9],
+      [25.2, 122.4],
+    ];
+    expect(simplifyLatLng(line, 0.01)).toEqual(line);
+    expect(simplifyLatLng(line, 500)).toEqual([line[0], line[2]]);
   });
 });

@@ -289,6 +289,12 @@ const tileKinds = (t: RadarStreetTile): [Float64Array[][], Float64Array[][], Flo
 /** 全螢幕拖曳時光點那幾層整層平移：移動超過畫面短邊一半的幾成才重建一次；重建時畫面外多畫幾成（滑進來用） */
 const PAN_REBUILD = 0.3;
 const PAN_MARGIN = 0.4;
+/**
+ * 拖曳中整層平移（光點、海岸線）最多移多遠（公里），再遠就照新的位置重畫：平移是把地面當平的，
+ * 往東西移時北邊的方向會跟著轉（緯度越高越多），每拖 1 km 畫面角落約差 0.1 px，跟範圍大小無關；
+ * 拉近時移不了多遠就重建，拉遠到幾千公里時一下就差幾百 px（v1.743 使用者說接近球體時移動只有活動會轉、地圖不會轉）
+ */
+export const FLAT_PAN_KM = 20;
 /** 縮放、轉動停了多久才算停下來（被擋住的名稱這時才試別的位置） */
 const LABEL_SETTLE_MS = 300;
 /** 名稱淡出多久（跟 styles.css 的 .place-label 一樣） */
@@ -3761,7 +3767,14 @@ export class Radar {
     const shift = this.blipPan;
     const [dx, dy] = built && shift ? this.slideShift(built, shift) : [0, 0];
     const slide =
-      this.fill && !this.inSpace && moving && !!built && !!shift && built.k === k && built.heading === this.heading && Math.hypot(dx, dy) < PAN_REBUILD * Math.min(RADAR_VIEW.hx, RADAR_VIEW.hy);
+      this.fill &&
+      !this.inSpace &&
+      moving &&
+      !!built &&
+      !!shift &&
+      built.k === k &&
+      built.heading === this.heading &&
+      Math.hypot(dx, dy) < Math.min(PAN_REBUILD * Math.min(RADAR_VIEW.hx, RADAR_VIEW.hy), FLAT_PAN_KM * k);
     const sliding = [this.blipLayer, this.fxLayer, this.bottleLayer, this.landmarkLayer];
     if (slide && built && shift) {
       this.drawStreets();

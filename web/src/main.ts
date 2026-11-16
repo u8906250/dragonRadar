@@ -2,7 +2,7 @@ import './styles.css';
 import { FITBUS_MS_PER_M, hqDenseKm, hqMotionKm, HQ_NET_LABEL_KM, HQ_SAIL_MS, HQ_STAR_MS, HQ_VOYAGE_MS, RAINBOW_EVERY_MS, voyagePhase, voyageTimeOf } from './flow';
 import { addKeyword, deletePushSubscription, locateFeedbackPlace, sendFeedback, type FeedbackKind, fetchPushKey, savePushSubscription, confirmReport, editReport, locatePlace, rejectReport, supplementReport, deleteBottle, dropBottle, readBottle, type BottleHere, fetchBottleInfo, fetchBottlePhoto, fetchBottleProof, fetchBottles, fetchWoofBottles, rememberBottlePhoto, uncollectLetter, verifyBottleProof, fetchEvents, fetchHealth, fetchKeywords, fetchMyBottles, fetchMyReports, fetchRoutes, pickBottle, reportBottle, submitLink, withdrawReport } from './api';
 import { compassSupported, startCompass } from './compass';
-import { bearingDeg, compassLabel, destination, formatKm, haversineKm, taiwanRadiusKm, type LatLng } from './geo';
+import { bearingDeg, compassLabel, destination, formatKm, haversineKm, lookFrom, simplifyLatLng, taiwanRadiusKm, unitVectors, type LatLng } from './geo';
 import { TAIWAN_RINGS } from './taiwan';
 import type { SceneKind } from './hq-scenes';
 import { LANDMARKS } from './landmarks';
@@ -12,7 +12,7 @@ import { shortAddress, splitPlace } from './place';
 import { crowdOf, MapView, pinPicker, type BaseMap, type MapRoute, type PinPicker } from './map';
 import { beep, ensureNotificationPermission, iosNeedsHomeScreen, notificationState, pushSubscription, pushSupported, registerServiceWorker, showBanner, systemNotify, unlockAudio, unsubscribePush } from './notify';
 import { checkWishNews, findCard, gotReward, myCards, onWishNews, openAlbum, openHelp, openItems, openWishes, overlay } from './cards';
-import { DEEP_FROM_KM, LY_KM, Radar, SPACE_FROM_KM, type RadarLabel, type RadarRoute, type RadarStreets, type RadarStreetTile, type SpaceView } from './radar';
+import { DEEP_FROM_KM, FLAT_PAN_KM, LY_KM, Radar, SPACE_FROM_KM, type RadarLabel, type RadarRoute, type RadarStreets, type RadarStreetTile, type SpaceView } from './radar';
 import { DEFAULT_THEME_ID, getTheme, THEMES, type Theme } from './themes';
 import type { WoofBottleMark } from './space';
 import { topicChipSvg, topicGlyph, TOPIC_TYPES } from './topic-icons';
@@ -1040,6 +1040,28 @@ const OUTLINE_KM = 16;
 const MAP_OUTLINE_KM = 50;
 /** 換算時太遠的點換成這個（線在這裡斷開，不會跨過去接起來） */
 const FAR_POINT = { bearing: 0, distanceKm: 1e9 };
+/**
+ * 拉遠時海岸線、縣市界先照那一級的比例簡化（偏差不到約一個像素的點拿掉），每條線、每一級算一次記住（v1.743）：
+ * 拖曳中照新的位置重算時每一點都要換算方位、距離，東亞的海岸線約 1.3 萬點；拉遠到幾千公里一個像素就幾十公里，多的點只是白算
+ */
+const coarseRings = new Map<number, WeakMap<Array<[number, number]>, Array<[number, number]>>>();
+function coarseRing(ring: Array<[number, number]>, tier: number): Array<[number, number]> {
+  // 外圈在畫面上約 400 px 時一個像素（2 ** tier 是範圍的 1～2 倍）；雷達畫的時候還會再簡化（4 px）
+  const tolKm = 2 ** tier / 400;
+  if (tolKm < 0.5 || ring.length < 4) return ring;
+  let done = coarseRings.get(tier);
+  if (!done) coarseRings.set(tier, (done = new WeakMap()));
+  let out = done.get(ring);
+  if (!out) done.set(ring, (out = simplifyLatLng(ring, tolKm)));
+  return out;
+}
+/** 每條線的單位向量（lookFrom 用），算一次記住 */
+const ringVecs = new WeakMap<Array<[number, number]>, Float64Array>();
+function ringVectors(ring: Array<[number, number]>): Float64Array {
+  let v = ringVecs.get(ring);
+  if (!v) ringVecs.set(ring, (v = unitVectors(ring)));
+  return v;
+}
 
 /** streets.ts 第一次用到才載入：載好了重畫雷達的道路和汪星的街道 */
 function loadStreets(): void {
@@ -2037,11 +2059,12 @@ function updateOutline(): void {
   const lines = kind === 'land' && scaleKm <= COUNTY_MAX_KM ? countyLines : [];
   const mapRings = kind === 'land' && scaleKm > MAP_OUTLINE_KM ? landRings : null;
   const base = sources ? `${kind}|${worldLoaded}|${!!ea}|${china}|${lines.length > 0}|${!!mapRings}|${tier}` : '';
-  // 拖曳中移動不到範圍的一半：不重算（每一點都要算方位、距離，拉遠時點很多），雷達照位移整層平移（v1.719 使用者說快速拖很遠時地圖跟不上、越縮小越明顯）
+  // 拖曳中移動不到範圍的一半：不重算（每一點都要算方位、距離，拉遠時點很多），雷達照位移整層平移（v1.719 使用者說快速拖很遠時地圖跟不上、越縮小越明顯）。
+  // 平移最多 FLAT_PAN_KM，再遠照新的位置重算：拉遠到幾千公里時平移跟真的差很多，光點照球面轉、海岸線只是平移（v1.743）
   if (panFrom && outlineAt && base && outlineFor.startsWith(`${base}|`)) {
     const kx = 111.32 * Math.cos((outlineAt.lat * Math.PI) / 180);
     const shift: [number, number] = [(origin.lng - outlineAt.lng) * kx, (origin.lat - outlineAt.lat) * 110.574];
-    if (Math.hypot(...shift) < scaleKm * 0.5) {
+    if (Math.hypot(...shift) < Math.min(scaleKm * 0.5, FLAT_PAN_KM)) {
       radar.setOutlineShift(shift);
       return;
     }
@@ -2054,26 +2077,28 @@ function updateOutline(): void {
   const dLat = reach / 111;
   const dLng = reach / (111 * Math.max(0.1, Math.cos((origin.lat * Math.PI) / 180)));
   const box = reach < 2500 && Math.abs(origin.lng) + dLng < 180 ? [origin.lat - dLat, origin.lng - dLng, origin.lat + dLat, origin.lng + dLng] : null;
+  const look = lookFrom(origin);
   const toRadar = (ring: Array<[number, number]>, skip?: (lat: number, lng: number) => boolean): Array<{ bearing: number; distanceKm: number }> => {
     const out: Array<{ bearing: number; distanceKm: number }> = [];
+    const vecs = ringVectors(ring);
     let gap = false;
     // 東亞的海岸線有些是切開的線（頭尾不同一點）：不要接成一圈
     let skipped = ring.length > 1 && (ring[0][0] !== ring[ring.length - 1][0] || ring[0][1] !== ring[ring.length - 1][1]);
-    for (const [lat, lng] of ring) {
+    ring.forEach(([lat, lng], i) => {
       if ((box && (lat < box[0] || lat > box[2] || lng < box[1] || lng > box[3])) || skip?.(lat, lng)) {
         if (!gap && out.length > 0) out.push(FAR_POINT);
         gap = skipped = true;
-        continue;
+        return;
       }
       gap = false;
-      out.push({ bearing: bearingDeg(origin, { lat, lng }), distanceKm: haversineKm(origin, { lat, lng }) });
-    }
+      out.push(look(vecs, i));
+    });
     // 有一段在外面（包括開頭）：最後也斷開，不要頭尾接成封閉的形狀
     if (skipped && out.length > 0 && out[out.length - 1] !== FAR_POINT) out.push(FAR_POINT);
     return out;
   };
-  radarOutline = sources ? sources.map((s) => toRadar(s.ring, s.skip)).filter((r) => r.some((p) => p !== FAR_POINT)) : [];
-  radar.setOutline(radarOutline, lines.map((l) => toRadar(l)).filter((r) => r.length > 1));
+  radarOutline = sources ? sources.map((s) => toRadar(coarseRing(s.ring, tier), s.skip)).filter((r) => r.some((p) => p !== FAR_POINT)) : [];
+  radar.setOutline(radarOutline, lines.map((l) => toRadar(coarseRing(l, tier))).filter((r) => r.length > 1));
   map.setOutline(mapRings ?? []);
 }
 
