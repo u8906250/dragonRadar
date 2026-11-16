@@ -176,48 +176,75 @@ export function stripJpegMeta(b: Uint8Array): Uint8Array {
   throw new ReportError(400, '照片格式不對，請重新選一張');
 }
 
-const PHOTO_PROMPT = `你是「洋流雷達」漂流瓶照片的審核員。漂流瓶是使用者留給路過陌生人的一段話，可以附一張照片（台北大洋流競選活動的網站上）。
+// ---- 投票日前的民調禁止期（v1.747 使用者說照建議做）----
+/** 2026 地方選舉的投票日（11/28 星期六 8:00～16:00，中選會 2026-08-20 公告） */
+const VOTE_DAY = '2026-11-28';
+/**
+ * 選罷法第 53 條：投票日前 10 日起至投票時間截止前，任何人不得以任何方式發布、報導、散布、評論或引述有關候選人或選舉的民調（非正式民調也算）。
+ * 從投票日前 10 天的 00:00（台北）到投票結束 16:00，漂流瓶的文字、照片都多審一類 poll；過了就跟平常一樣
+ */
+export const POLL_BAN = {
+  from: Date.parse(`${VOTE_DAY}T00:00:00+08:00`) / 1000 - 10 * 86400,
+  to: Date.parse(`${VOTE_DAY}T16:00:00+08:00`) / 1000,
+};
+export const inPollBan = (now: number): boolean => now >= POLL_BAN.from && now < POLL_BAN.to;
+const POLL_LABEL = '投票日前 10 天起到投票結束，不能發布、引述選舉民調（選罷法第 53 條）';
+/** 民調禁止期規則先擋：提到民調、支持度，又寫了百分比、幾趴、幾成（「別管民調」這種沒有數字的交給 AI 看） */
+const POLL_WORD_RE = /民調|民意調查|支持度|支持率|聲量調查|網路投票/;
+const POLL_NUMBER_RE = /\d+(?:\.\d+)?\s*(?:%|％|趴|成|個百分點)|[一二三四五六七八九十]+\s*(?:趴|成|個百分點)/;
+
+/** 照片的審核說明；poll 是投票日前的民調禁止期（多擋民調的圖） */
+function photoPrompt(poll: boolean): string {
+  const cats = ['none', ...photoCategories(poll).filter((c) => c !== 'none')].map((c) => `"${c}"`).join(' 或 ');
+  return `你是「洋流雷達」漂流瓶照片的審核員。漂流瓶是使用者留給路過陌生人的一段話，可以附一張照片（台北大洋流競選活動的網站上）。
 
 大部分照片都應該允許，category 填 none：風景、街景、食物、寵物、自拍、合照、活動現場，
 包括競選活動、造勢晚會、掃街、遊行、市集、演唱會、廟會的現場照片（舞台、人群、旗子、布條、看板、背板、候選人，候選人或政黨的海報、宣傳品都可以），
 收到的賀卡、紀念品、明信片（看不清楚收件人姓名、地址的），
-商店、商品、菜單、價目表、優惠傳單、廣告看板。
+商店、商品、菜單、價目表、優惠傳單、廣告看板，
+拍下城市裡的問題（破掉的人行道、壞掉的路燈、積水、違停）、陳情或抗議的標語，配上批評的文字也可以。
 
 只有明確屬於下面幾類才擋下，category 填對應的代號：
 - sexual：色情、裸露、性暗示
 - violence：暴力、血腥、自殘、令人不舒服的畫面
 - privacy：證件、文件、信封或螢幕上看得清楚的姓名、地址、電話、帳號；看得清楚的車牌、門牌號碼；照片主要拍的是一個 QR code
-- attack：攻擊、嘲諷、抹黑任何人或團體（包括候選人、政黨）的圖文
+- attack：醜化、惡搞、嘲諷人的圖（例如把人修成動物的梗圖），辱罵、抹黑任何人或團體（包括候選人、政黨），或沒有出處的指控的圖文${
+    poll ? '\n- poll：有關候選人或選舉的民意調查：民調結果的圖表、截圖、新聞畫面（現在是投票日前 10 天起到投票結束，依法不能發布、引述）' : ''
+  }
 
 拿不準就填 none。
 
-只輸出 JSON：{"category": "none" 或 "sexual" 或 "violence" 或 "privacy" 或 "attack", "reason": "不是 none 時用一句話說明；none 時空字串"}`;
+只輸出 JSON：{"category": ${cats}, "reason": "不是 none 時用一句話說明；none 時空字串"}`;
+}
 
 /** 照片擋下的類別給使用者看的說法（模型自己寫的原因只記在紀錄裡：v1.629 前造勢活動的照片被判成「廣告、商品推銷、價目表」） */
 const PHOTO_LABEL: Record<string, string> = {
   sexual: '色情或裸露',
   violence: '暴力、血腥或令人不舒服的畫面',
   privacy: '看得清楚的個資（證件、姓名地址、車牌、門牌、QR code）',
-  attack: '攻擊、嘲諷或抹黑的圖文',
+  attack: '醜化、嘲諷或抹黑的圖文',
+  poll: POLL_LABEL,
 };
-/** v1.631 起商家廣告不擋，拿掉 ad */
-const PHOTO_CATEGORIES = ['none', 'sexual', 'violence', 'privacy', 'attack'];
+/** v1.631 起商家廣告不擋，拿掉 ad；投票日前的民調禁止期多一類 poll */
+const photoCategories = (poll: boolean): string[] => ['none', 'sexual', 'violence', 'privacy', 'attack', ...(poll ? ['poll'] : [])];
 
 /**
  * AI 看圖審核：類別只能從 PHOTO_CATEGORIES 選（schema 限定，模型不能自己編理由）；讀不出來再試一次，都不行就不收（寧可不收）。
  * 回傳是否通過、給使用者看的原因、模型寫的原因（記在紀錄裡）
  */
-export async function moderatePhoto(env: Env, dataUrl: string): Promise<{ allowed: boolean; category: string; reason: string; note: string }> {
+export async function moderatePhoto(env: Env, dataUrl: string, now = Math.floor(Date.now() / 1000)): Promise<{ allowed: boolean; category: string; reason: string; note: string }> {
   const ai = env.AI as unknown as { run(model: string, inputs: unknown): Promise<unknown> };
+  const poll = inPollBan(now);
+  const categories = photoCategories(poll);
   const schema = {
     type: 'object',
-    properties: { category: { type: 'string', enum: PHOTO_CATEGORIES }, reason: { type: 'string' } },
+    properties: { category: { type: 'string', enum: categories }, reason: { type: 'string' } },
     required: ['category', 'reason'],
   };
   for (let attempt = 0; attempt < 2; attempt++) {
     try {
       const res = await ai.run(PHOTO_MODEL, {
-        messages: [{ role: 'user', content: [{ type: 'text', text: PHOTO_PROMPT }, { type: 'image_url', image_url: { url: dataUrl } }] }],
+        messages: [{ role: 'user', content: [{ type: 'text', text: photoPrompt(poll) }, { type: 'image_url', image_url: { url: dataUrl } }] }],
         response_format: { type: 'json_schema', json_schema: schema },
         max_tokens: 200,
         temperature: 0,
@@ -225,7 +252,7 @@ export async function moderatePhoto(env: Env, dataUrl: string): Promise<{ allowe
       const c = responseContent(res);
       const o = (typeof c === 'string' ? JSON.parse(c.replace(/^[^{]*/, '').replace(/[^}]*$/, '')) : c) as { category?: unknown; reason?: unknown; allowed?: unknown };
       const note = typeof o?.reason === 'string' ? o.reason.slice(0, 80) : '';
-      const category = typeof o?.category === 'string' && PHOTO_CATEGORIES.includes(o.category) ? o.category : typeof o?.allowed === 'boolean' ? (o.allowed ? 'none' : 'unknown') : null;
+      const category = typeof o?.category === 'string' && categories.includes(o.category) ? o.category : typeof o?.allowed === 'boolean' ? (o.allowed ? 'none' : 'unknown') : null;
       if (category === null) continue;
       return { allowed: category === 'none', category, reason: category === 'none' ? '' : (PHOTO_LABEL[category] ?? '不適合放的照片'), note };
     } catch (e) {
@@ -400,8 +427,8 @@ export function cleanBottleText(text: string): string {
     .trim();
 }
 
-/** 規則先擋：連結、電話、Email、LINE／IG 帳號、太長的數字、全是符號 */
-export function ruleCheck(text: string): string | null {
+/** 規則先擋：連結、電話、Email、LINE／IG 帳號、太長的數字、全是符號；民調禁止期寫了民調加百分比的 */
+export function ruleCheck(text: string, now = Math.floor(Date.now() / 1000)): string | null {
   const t = text.trim();
   if (!t) return '寫點什麼再丟吧';
   if (xLength(t) > BOTTLE_MAX_WEIGHT) return '太長了：字數比照 X，中文最多 140 字、英文最多 280 字';
@@ -410,20 +437,32 @@ export function ruleCheck(text: string): string | null {
   if (/(?:\d[\s-]?){7,}/.test(t)) return '不能放電話或一長串數字';
   if (/(line|ig|instagram|tg|telegram|wechat|微信)\s*(id)?\s*[:：@]/i.test(t) || /@[A-Za-z0-9_.]{3,}/.test(t)) return '不能放帳號';
   if (!/[\p{L}\p{N}]/u.test(t)) return '寫點文字再丟吧';
+  if (inPollBan(now) && POLL_WORD_RE.test(t) && POLL_NUMBER_RE.test(t)) return `不能丟：${POLL_LABEL}`;
   return null;
 }
 
-const MODERATION_PROMPT = `你是「洋流雷達」漂流瓶的內容審核員。漂流瓶是使用者在街頭留給路過陌生人的一句話（台北大洋流競選活動的網站上）。
+/** 文字的審核說明；poll 是投票日前的民調禁止期（多一類 poll） */
+function moderationPrompt(poll: boolean): string {
+  const cats = moderationCategories(poll).map((c) => `"${c}"`).join(' 或 ');
+  return `你是「洋流雷達」漂流瓶的內容審核員。漂流瓶是使用者在街頭留給路過陌生人的一句話（台北大洋流競選活動的網站上）。
 
 大部分內容都應該允許，category 填 none：打氣、感謝、心情、抱怨、日常小事、在地觀察、對城市的期待，
+對政策、市政、政府機關、候選人的政見或作為的具體批評和不滿（就事論事，語氣直接、很失望、很生氣都可以），
 分享自己收到、看到、拍到的東西（賀卡、紀念品、明信片、風景、活動現場），
 商家的廣告、店家推薦、優惠、新品、活動招攬（店名、店的地址都可以），
-提到任何人名、地名、政府機關、政黨、候選人、節日或公開活動，只要沒有下面三類的內容，都是 none。
+提到任何人名、地名、政府機關、政黨、候選人、節日或公開活動，只要沒有下面幾類的內容，都是 none。
 
-只有明確屬於下面三類才擋下，category 填對應的代號：
-- attack：辱罵、嘲諷、貶低、人身攻擊任何人或團體（包括候選人、政黨、政府、媒體、網友），抹黑、未經證實的指控或謠言
+只有明確屬於下面幾類才擋下，category 填對應的代號：
+- attack：辱罵任何人或團體（包括候選人、政黨、政府、媒體、網友），嘲諷或貶低人身（外貌、出身、家人、智力），
+  沒有出處的指控或謠言（說某個人或團體做了違法、不道德的事）。批評政策、作為、說過的話本身不算
 - hate：仇恨、歧視、威脅、暴力、色情
-- privacy：個人的電話、帳號、住家地址，或某個具體個人的私事、行蹤
+- privacy：個人的電話、帳號、住家地址，或某個具體個人的私事、行蹤${
+    poll
+      ? `
+- poll：有關候選人或選舉的民意調查：民調數字、支持度、誰領先或落後幾趴、網路投票或非正式民調的結果，發布、引述、評論都算
+  （現在是投票日前 10 天起到投票結束，依法不能發布、引述）。只說「出來投票」「別管民調」這種沒有提到民調內容的不算`
+      : ''
+  }
 
 拿不準就填 none。
 
@@ -431,21 +470,34 @@ const MODERATION_PROMPT = `你是「洋流雷達」漂流瓶的內容審核員�
 「2025來自總統府的賀卡!」→ none
 「謝謝今天發飄帶的志工」→ none
 「市政府把公園整理得好漂亮」→ none
+「捷運票價又漲了，市府都沒說明，很失望」→ none
+「這個候選人的社宅政見根本做不到，錢從哪來都沒講」→ none
 「今天在捷運上看到有人讓座，好感動」→ none
 「XX 咖啡第二杯半價，快來買」→ none
 「某某某是騙子，大家小心」→ attack
-「我家住在 XX 路 XX 號」→ privacy
+「XX 長那樣也敢出來選」→ attack
+「聽說 XX 收了建商的錢」→ attack
+「我家住在 XX 路 XX 號」→ privacy${
+    poll
+      ? `
+「最新民調 A 領先 B 五個百分點」→ poll
+「網路投票 A 贏很多，穩了」→ poll
+「記得 11/28 出來投票！」→ none`
+      : ''
+  }
 
-只輸出 JSON：{"category": "none" 或 "attack" 或 "hate" 或 "privacy", "reason": "不是 none 時用一句話說明；none 時空字串"}`;
+只輸出 JSON：{"category": ${cats}, "reason": "不是 none 時用一句話說明；none 時空字串"}`;
+}
 
 /** 擋下的類別給使用者看的說法（模型自己寫的原因只記在紀錄裡，不拿來當理由：v1.625 前模型自己編出「提到政府機關」） */
 export const MODERATION_LABEL: Record<string, string> = {
-  attack: '攻擊、嘲諷或謠言',
+  attack: '辱罵、嘲諷人身或沒有出處的指控',
   hate: '仇恨、歧視、威脅、暴力或色情',
   privacy: '電話、帳號、住址或個人隱私',
+  poll: POLL_LABEL,
 };
-/** v1.631 使用者說商家廣告也開放（有問題再調），拿掉 ad */
-const MODERATION_CATEGORIES = ['none', 'attack', 'hate', 'privacy'];
+/** v1.631 使用者說商家廣告也開放（有問題再調），拿掉 ad；投票日前的民調禁止期多一類 poll */
+export const moderationCategories = (poll: boolean): string[] => ['none', 'attack', 'hate', 'privacy', ...(poll ? ['poll'] : [])];
 
 export interface ModerationVerdict {
   allowed: boolean;
@@ -458,15 +510,16 @@ export interface ModerationVerdict {
 }
 
 /** 問一個模型：回傳類別和它寫的原因；讀不出來回 null */
-async function askModerator(env: Env, model: string, text: string): Promise<{ category: string; reason: string } | null> {
+async function askModerator(env: Env, model: string, text: string, poll: boolean): Promise<{ category: string; reason: string } | null> {
   const ai = env.AI as unknown as { run(model: string, inputs: unknown): Promise<unknown> };
+  const categories = moderationCategories(poll);
   const messages = [
-    { role: 'system', content: MODERATION_PROMPT },
+    { role: 'system', content: moderationPrompt(poll) },
     { role: 'user', content: `漂流瓶內容：「${text}」${/qwen3/i.test(model) ? '\n/no_think' : ''}` },
   ];
   const schema = {
     type: 'object',
-    properties: { category: { type: 'string', enum: MODERATION_CATEGORIES }, reason: { type: 'string' } },
+    properties: { category: { type: 'string', enum: categories }, reason: { type: 'string' } },
     required: ['category', 'reason'],
   };
   // 備用模型會先推理再回答，推理也算在 max_tokens 裡，給寬一點
@@ -474,23 +527,25 @@ async function askModerator(env: Env, model: string, text: string): Promise<{ ca
   const c = responseContent(res);
   const o = (typeof c === 'string' ? JSON.parse(c.replace(/^[^{]*/, '').replace(/[^}]*$/, '')) : c) as { category?: unknown; reason?: unknown; allowed?: unknown };
   const reason = typeof o?.reason === 'string' ? o.reason.slice(0, 80) : '';
-  if (typeof o?.category === 'string' && MODERATION_CATEGORIES.includes(o.category)) return { category: o.category, reason };
+  if (typeof o?.category === 'string' && categories.includes(o.category)) return { category: o.category, reason };
   // 舊格式（allowed）也接受；擋下但沒說哪一類的，當成拿不準
   if (typeof o?.allowed === 'boolean') return { category: o.allowed ? 'none' : 'unknown', reason };
   return null;
 }
 
 /**
- * AI 判斷有沒有攻擊性、仇恨、個資（類別只能從這三類選，模型不能自己編理由；v1.631 起廣告不擋）。
+ * AI 判斷有沒有攻擊性、仇恨、個資（類別只能從這三類選，模型不能自己編理由；v1.631 起廣告不擋；
+ * v1.747 起對政策、作為的具體批評不擋，只擋辱罵、嘲諷人身、沒有出處的指控；投票日前的民調禁止期多一類 poll）。
  * 主要模型說要擋時，再問備用模型一次，它說沒問題就放行（小模型常誤擋，v1.625：賀卡被判成廣告、又被判成「提到政府機關」）；
  * 兩個都失敗就當成不通過（寧可不收）
  */
-export async function moderate(env: Env, text: string): Promise<ModerationVerdict> {
+export async function moderate(env: Env, text: string, now = Math.floor(Date.now() / 1000)): Promise<ModerationVerdict> {
   const models = [env.AI_MODEL, env.AI_MODEL_FALLBACK].filter((m): m is string => !!m);
   const trail: ModerationVerdict['trail'] = [];
+  const poll = inPollBan(now);
   for (const model of models) {
     try {
-      const v = await askModerator(env, model, text);
+      const v = await askModerator(env, model, text, poll);
       if (!v) continue;
       trail.push({ model, ...v });
       if (v.category === 'none') return { allowed: true, category: 'none', reason: '', trail };
@@ -653,7 +708,7 @@ export async function dropBottle(env: Env, device: string | null, ip: string, bo
   const text = typeof body.text === 'string' ? cleanBottleText(body.text) : '';
   // 一直送沒通過的：先擋下來（在規則、AI 審核之前）
   await assertNotSpamming(env, dev, ip, now);
-  const bad = ruleCheck(text);
+  const bad = ruleCheck(text, now);
   if (bad) {
     // 空白的不用記
     if (text) await logReject(env, dev, ip, 'rule', bad, text, !!body.photo, now);
@@ -680,7 +735,7 @@ export async function dropBottle(env: Env, device: string | null, ip: string, bo
       if (e instanceof ReportError) await logReject(env, dev, ip, 'ai_error', e.message, text, !!photo, now);
       throw e;
     });
-  const verdict = await aiDown(moderate(env, text));
+  const verdict = await aiDown(moderate(env, text, now));
   if (!verdict.allowed) {
     const msg = `這句話不能丟：${verdict.reason}`;
     // 紀錄裡多寫每個模型說了什麼（管理頁看為什麼被擋）
@@ -690,7 +745,7 @@ export async function dropBottle(env: Env, device: string | null, ip: string, bo
   }
   let key: string | null = null;
   if (photo && env.BOTTLE_PHOTOS) {
-    const pv = await aiDown(moderatePhoto(env, photo.dataUrl));
+    const pv = await aiDown(moderatePhoto(env, photo.dataUrl, now));
     if (!pv.allowed) {
       const msg = `這張照片不能放：${pv.reason}`;
       await logReject(env, dev, ip, 'photo', `${msg}｜${pv.category}${pv.note ? `（${pv.note}）` : ''}`, text, true, now);

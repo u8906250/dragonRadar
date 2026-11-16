@@ -692,10 +692,12 @@ async function handleAdmin(req: Request, env: Env, ctx: ExecutionContext, path: 
 
   // 漂流瓶的試審核：不丟瓶子，看文字會不會通過、每個模型說了什麼（調審核說明用）
   if (req.method === 'POST' && path === '/api/admin/moderate') {
-    const body = await readJson<{ text?: unknown; image?: unknown }>(req);
+    const body = await readJson<{ text?: unknown; image?: unknown; at?: unknown }>(req);
+    // at：照那個時間審（unix 秒；試投票日前民調禁止期的審核說明用），沒給是現在
+    const at = typeof body.at === 'number' && Number.isSafeInteger(body.at) ? body.at : undefined;
     // 試審核照片：{ image: 'data:image/jpeg;base64,…' }
-    if (typeof body.image === 'string') return jsonResponse(await moderatePhoto(env, body.image));
-    return jsonResponse(await moderate(env, typeof body.text === 'string' ? body.text.slice(0, 600) : ''));
+    if (typeof body.image === 'string') return jsonResponse(await moderatePhoto(env, body.image, at));
+    return jsonResponse(await moderate(env, typeof body.text === 'string' ? body.text.slice(0, 600) : '', at));
   }
   // 漂流瓶沒通過審核的（最近 7 天）
   if (req.method === 'GET' && path === '/api/admin/bottle-rejects') return jsonResponse({ rejects: await adminBottleRejects(env, now) });

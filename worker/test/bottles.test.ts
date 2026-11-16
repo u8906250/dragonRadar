@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { cleanBottleText, distM, driftStep, landingOf, parsePhoto, ruleCheck, scatter, seaPoint, sha256Hex, stripJpegMeta, taipeiMidnight, xLength } from '../src/bottles';
+import { cleanBottleText, distM, driftStep, inPollBan, landingOf, moderationCategories, parsePhoto, POLL_BAN, ruleCheck, scatter, seaPoint, sha256Hex, stripJpegMeta, taipeiMidnight, xLength } from '../src/bottles';
 import { WOOF_KM, WOOF_SEA } from '../src/woofsea';
 
 describe('cleanBottleText', () => {
@@ -177,5 +177,30 @@ describe('taipeiMidnight', () => {
     // 2026-11-11 00:05 台灣時間（UTC 還是 11/10）→ 2026-11-11 00:00
     const early = Date.parse('2026-11-11T00:05:00+08:00') / 1000;
     expect(taipeiMidnight(early)).toBe(Date.parse('2026-11-11T00:00:00+08:00') / 1000);
+  });
+});
+
+describe('poll ban before voting day', () => {
+  const tpe = (s: string): number => Date.parse(`${s}+08:00`) / 1000;
+  it('runs from 11/18 00:00 until voting ends at 11/28 16:00 (Taipei)', () => {
+    expect(POLL_BAN.from).toBe(tpe('2026-11-18T00:00:00'));
+    expect(inPollBan(tpe('2026-11-17T23:59:59'))).toBe(false);
+    expect(inPollBan(tpe('2026-11-18T00:00:00'))).toBe(true);
+    expect(inPollBan(tpe('2026-11-28T15:59:59'))).toBe(true);
+    expect(inPollBan(tpe('2026-11-28T16:00:00'))).toBe(false);
+  });
+  it('adds the poll category only inside the window', () => {
+    expect(moderationCategories(false)).not.toContain('poll');
+    expect(moderationCategories(true)).toContain('poll');
+  });
+  it('blocks poll numbers by rule inside the window, not outside, and not words without numbers', () => {
+    const inside = tpe('2026-11-20T12:00:00');
+    const before = tpe('2026-11-16T12:00:00');
+    expect(ruleCheck('最新民調 A 領先 B 5%', inside)).toMatch(/民調/);
+    expect(ruleCheck('支持度差了三個百分點', inside)).toMatch(/民調/);
+    expect(ruleCheck('網路投票贏七成', inside)).toMatch(/民調/);
+    expect(ruleCheck('最新民調 A 領先 B 5%', before)).toBeNull();
+    expect(ruleCheck('別管民調，11/28 出來投票！', inside)).toBeNull();
+    expect(ruleCheck('這家店全品項 8 折，滿意度很高', inside)).toBeNull();
   });
 });
