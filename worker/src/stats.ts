@@ -60,8 +60,8 @@ export interface StatsOut {
 }
 
 /** 回報來的貼文（官方航線、新聞、主辦單位公告不算） */
-const REPORT_SOURCES = "('link', 'note', 'accupass', 'opentix')";
-const SOURCE_NAMES: Record<string, string> = { link: 'Threads', note: '沒有連結（已停用）', accupass: 'ACCUPASS 活動通', opentix: 'OPENTIX' };
+const REPORT_SOURCES = "('link', 'note', 'accupass', 'opentix', 'peatix')";
+const SOURCE_NAMES: Record<string, string> = { link: 'Threads', note: '沒有連結（已停用）', accupass: 'ACCUPASS 活動通', opentix: 'OPENTIX', peatix: 'Peatix' };
 const MODULE_NAMES: Record<string, string> = { current: '洋流雷達', dog: '狗狗陪伴', badminton: '羽球臨打', food: '美食品味', work: '找工作' };
 
 /** 台灣時間的日期「2026-11-13」 */

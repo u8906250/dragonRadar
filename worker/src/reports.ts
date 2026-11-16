@@ -12,6 +12,7 @@ import { adoptedTags } from './learnedTags';
 import { accupassPermalink, fetchAccupass, parseAccupassUrl, type AccupassLink } from './sources/accupass';
 import { eventPageText, pageTime, type EventPage, type PageFetch, type PageSession } from './sources/eventpage';
 import { fetchOpentix, opentixPermalink, parseOpentixUrl, type OpentixLink } from './sources/opentix';
+import { fetchPeatix, parsePeatixUrl, peatixPermalink, type PeatixLink } from './sources/peatix';
 import { distKm } from './push';
 import { fetchThreadsPost, resolveThreadsLink, shortcodeToUnix, withLocationTag } from './sources/link';
 import { sha1Hex } from './sources/text';
@@ -557,13 +558,15 @@ async function earlierReport(env: Env, postId: string, module: ModuleId, now: nu
 /** 處理使用者貼上的連結：讀貼文、AI 判讀、定位，回傳結果 */
 export async function submitLink(env: Env, input: string, ip: string, now: number, device: string | null = null, module: ModuleId = DEFAULT_MODULE): Promise<SubmitResult> {
   assertReportsOpen(env, module);
-  // 活動頁：ACCUPASS 活動通（v1.590）、OPENTIX（v1.591）
+  // 活動頁：ACCUPASS 活動通（v1.590）、OPENTIX（v1.591）、Peatix（v1.735）
   const acc = parseAccupassUrl(input);
   if (acc) return submitEventPage(env, { site: 'accupass', link: acc }, ip, now, device, module);
   const otx = parseOpentixUrl(input);
   if (otx) return submitEventPage(env, { site: 'opentix', link: otx }, ip, now, device, module);
+  const ptx = parsePeatixUrl(input);
+  if (ptx) return submitEventPage(env, { site: 'peatix', link: ptx }, ip, now, device, module);
   const link = await resolveThreadsLink(input);
-  if (!link) throw new ReportError(400, '找不到 Threads 貼文或活動頁的連結，請貼上 Threads 貼文（https://www.threads.com/@帳號/post/...）、活動通（https://www.accupass.com/event/...）或 OPENTIX（https://www.opentix.life/event/...）的網址');
+  if (!link) throw new ReportError(400, '找不到 Threads 貼文或活動頁的連結，請貼上 Threads 貼文（https://www.threads.com/@帳號/post/...）、活動通（https://www.accupass.com/event/...）、OPENTIX（https://www.opentix.life/event/...）或 Peatix（https://peatix.com/event/...）的網址');
   const postId = `link-${link.code}`;
 
   const earlier = await earlierReport(env, postId, module, now);
@@ -608,18 +611,21 @@ export async function submitLink(env: Env, input: string, ip: string, now: numbe
 }
 
 /**
- * 活動頁的網站（ACCUPASS 活動通、OPENTIX）：貼文 id 的開頭、source、顯示的名字、活動頁網址、怎麼讀
+ * 活動頁的網站（ACCUPASS 活動通、OPENTIX、Peatix）：貼文 id 的開頭、source、顯示的名字、活動頁網址、怎麼讀
  */
-type PageLink = { site: 'accupass'; link: AccupassLink } | { site: 'opentix'; link: OpentixLink };
+type PageLink = { site: 'accupass'; link: AccupassLink } | { site: 'opentix'; link: OpentixLink } | { site: 'peatix'; link: PeatixLink };
 const PAGE_SITES = {
   accupass: { prefix: 'acc', name: '活動通', permalink: accupassPermalink, fetch: (l: PageLink['link']) => fetchAccupass(l as AccupassLink) },
   opentix: { prefix: 'otx', name: 'OPENTIX', permalink: opentixPermalink, fetch: (l: PageLink['link']) => fetchOpentix(l as OpentixLink) },
+  peatix: { prefix: 'ptx', name: 'Peatix', permalink: peatixPermalink, fetch: (l: PageLink['link']) => fetchPeatix(l as PeatixLink) },
 } as const;
 type PageSite = keyof typeof PAGE_SITES;
-/** 貼文 id（acc-編號、otx-編號）→ 哪個網站、活動編號 */
+/** 貼文 id（acc-編號、otx-編號、ptx-編號）→ 哪個網站、活動編號 */
 const pageOfPostId = (postId: string): { site: PageSite; id: string } | null => {
-  const m = /^(acc|otx)-(\d+)$/.exec(postId);
-  return m ? { site: m[1] === 'acc' ? 'accupass' : 'opentix', id: m[2] } : null;
+  const m = /^(acc|otx|ptx)-(\d+)$/.exec(postId);
+  if (!m) return null;
+  const site = (Object.keys(PAGE_SITES) as PageSite[]).find((k) => PAGE_SITES[k].prefix === m[1])!;
+  return { site, id: m[2] };
 };
 
 /** 活動頁讀不到時講原因 */
@@ -644,7 +650,9 @@ export function sessionActivities(ev: PageSession, now: number): PageActivity[] 
   if (!place) return '活動頁沒有寫地點';
   const end = pageTime(ev.endDate);
   const title = [...ev.name].slice(0, 60).join('');
-  const one = (startAt: number, endAt: number | null): PageActivity => ({ title, startAt, endAt, place, lat: null, lng: null, venue: ev.venue });
+  // 活動頁附了經緯度（Peatix）：直接當位置
+  const pin = ev.lat !== undefined && ev.lng !== undefined ? { lat: ev.lat, lng: ev.lng } : { lat: null, lng: null };
+  const one = (startAt: number, endAt: number | null): PageActivity => ({ title, startAt, endAt, place, ...pin, venue: ev.venue });
   const endAt = Number.isFinite(end) && end > start ? end : null;
   if (endAt === null || endAt - start <= MAX_EDIT_SPAN_SEC) return [one(start, endAt)];
   const tod = (t: number): number => (((t + 8 * 3600) % 86400) + 86400) % 86400;
@@ -665,8 +673,11 @@ export function sessionActivities(ev: PageSession, now: number): PageActivity[] 
 export function pageActivities(page: EventPage, now: number): PageActivity[] | string {
   const live = page.sessions.filter((s) => !s.cancelled);
   if (live.length === 0) return '這場活動已經取消了';
-  const offline = live.filter((s) => !s.online);
-  if (offline.length === 0) return '這是線上活動，沒有實體地點；雷達只收可以到場參加的活動';
+  const inPerson = live.filter((s) => !s.online);
+  if (inPerson.length === 0) return '這是線上活動，沒有實體地點；雷達只收可以到場參加的活動';
+  // Peatix 的時間沒寫時區：只收在台灣的
+  const offline = inPerson.filter((s) => !s.abroad);
+  if (offline.length === 0) return '這場活動不在台灣（Peatix 的活動頁沒寫時區，雷達只收在台灣的場次）';
   const acts: PageActivity[] = [];
   let why = '';
   for (const s of offline) {
@@ -739,7 +750,7 @@ async function pinByVenue(env: Env, acts: PageActivity[]): Promise<void> {
 
 /**
  * 回報活動頁（洋流的活動）：讀活動頁、照活動頁的時間地點排、定位，回傳預覽，回報的人確認才放上雷達（跟 Threads 一樣）；
- * 線上活動、已經取消的不收。貼文 id 是 acc-、otx- 加活動編號，source 是網站（accupass、opentix），原文連結是活動頁
+ * 線上活動、已經取消的不收。貼文 id 是 acc-、otx-、ptx- 加活動編號，source 是網站（accupass、opentix、peatix），原文連結是活動頁
  */
 async function submitEventPage(env: Env, p: PageLink, ip: string, now: number, device: string | null, module: ModuleId): Promise<SubmitResult> {
   const site = PAGE_SITES[p.site];
@@ -773,7 +784,7 @@ async function submitEventPage(env: Env, p: PageLink, ip: string, now: number, d
 
 async function checkConfirm(env: Env, body: { postId?: unknown; token?: unknown }): Promise<PostRow> {
   const postId = typeof body.postId === 'string' ? body.postId : '';
-  if (!/^(?:link|note|acc|otx)-[\w-]+$/.test(postId) || body.token !== (await confirmToken(env, postId))) throw new ReportError(400, '確認代碼不對，請重新貼一次連結');
+  if (!/^(?:link|note|acc|otx|ptx)-[\w-]+$/.test(postId) || body.token !== (await confirmToken(env, postId))) throw new ReportError(400, '確認代碼不對，請重新貼一次連結');
   const post = await getPost(env, postId);
   if (!post) throw new ReportError(404, '找不到這則回報，請重新貼一次連結');
   assertReportsOpen(env, post.module);
@@ -1045,7 +1056,7 @@ export async function myReports(env: Env, device: string): Promise<MyReport[]> {
     `SELECT p.id, p.permalink, p.username, p.text, p.confirm_state, p.link_role, p.module, m.reported_at
        FROM (SELECT post_id, MAX(created_at) AS reported_at FROM submissions WHERE device = ? GROUP BY post_id) m
        CROSS JOIN posts p ON p.id = m.post_id
-      WHERE +p.source IN ('link', 'note', 'accupass', 'opentix') AND p.confirm_state = 'confirmed'
+      WHERE +p.source IN ('link', 'note', 'accupass', 'opentix', 'peatix') AND p.confirm_state = 'confirmed'
         AND (p.link_role = 'related' OR EXISTS (SELECT 1 FROM events e WHERE e.post_id = p.id))
       ORDER BY m.reported_at DESC LIMIT 30`,
   )
@@ -1084,7 +1095,7 @@ export async function withdrawReport(env: Env, postId: string, device: string, n
   const owned = await env.DB.prepare('SELECT 1 AS ok FROM submissions WHERE post_id = ? AND device = ? LIMIT 1').bind(postId, device).first<{ ok: number }>();
   if (!owned) throw new ReportError(403, '只能刪除自己回報的貼文，而且要用回報時的同一個瀏覽器（30 天內）');
   const post = await getPost(env, postId);
-  if (!post || !['link', 'note', 'accupass', 'opentix'].includes(post.source)) throw new ReportError(404, '找不到這則回報');
+  if (!post || !['link', 'note', 'accupass', 'opentix', 'peatix'].includes(post.source)) throw new ReportError(404, '找不到這則回報');
   if (post.confirm_state === 'withdrawn') return { ok: true, removed: 0 };
   const removed = (await env.DB.prepare("SELECT COUNT(*) AS n FROM events WHERE post_id = ? AND status IN ('upcoming', 'active')").bind(postId).first<{ n: number }>())?.n ?? 0;
   const { results: prev } = await env.DB.prepare("SELECT id FROM posts WHERE linked_to = ? AND link_role = 'previous' ORDER BY posted_at DESC").bind(postId).all<{ id: string }>();
@@ -1147,6 +1158,9 @@ export interface RecheckLinksResult {
   edited: number;
 }
 
+/** 連續讀 Peatix 活動頁的間隔（robots.txt 的 Crawl-delay 1 秒，多留一點） */
+const PEATIX_DELAY_MS = 1100;
+
 /**
  * 定時重讀使用者回報的貼文：刪文就下架、改成「發完了」就結束、內容改了就重新判讀。
  * 審核通過的固定據點（spot-）只看有沒有刪文：內容以審核時填的為準，貼文常寫「送完為止」不能當成發完。
@@ -1154,7 +1168,7 @@ export interface RecheckLinksResult {
 export async function recheckLinks(env: Env, now: number): Promise<RecheckLinksResult> {
   const rows = await env.DB.prepare(
     `SELECT DISTINCT p.id, p.text FROM posts p JOIN events e ON e.post_id = p.id
-     WHERE p.source IN ('link', 'spot', 'accupass', 'opentix') AND e.status IN ('upcoming', 'active') AND (p.checked_at IS NULL OR p.checked_at <= ?)
+     WHERE p.source IN ('link', 'spot', 'accupass', 'opentix', 'peatix') AND e.status IN ('upcoming', 'active') AND (p.checked_at IS NULL OR p.checked_at <= ?)
      ORDER BY p.checked_at ASC LIMIT ?`,
   )
     .bind(now - RECHECK_LINK_SEC, RECHECK_LINK_BATCH)
@@ -1165,10 +1179,17 @@ export async function recheckLinks(env: Env, now: number): Promise<RecheckLinksR
       .bind(reason, now, postId)
       .run();
 
+  // Peatix 的 robots.txt 要求每次讀隔 1 秒（Crawl-delay: 1）
+  let peatixAt = 0;
   for (const row of rows.results) {
     out.checked++;
     const pg = pageOfPostId(row.id);
     if (pg) {
+      if (pg.site === 'peatix') {
+        const wait = peatixAt + PEATIX_DELAY_MS - Date.now();
+        if (wait > 0) await new Promise((r) => setTimeout(r, wait));
+        peatixAt = Date.now();
+      }
       await recheckEventPage(env, pg, row, now, out, endAll);
       continue;
     }

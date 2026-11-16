@@ -18,6 +18,11 @@ export interface PageSession {
   /** 場地名稱、地址（地址前面的「台灣」拿掉） */
   venue: string | null;
   address: string | null;
+  /** 活動頁附的經緯度（Peatix 有）：有的話直接當這一場的位置，不用查地址 */
+  lat?: number;
+  lng?: number;
+  /** 在台灣以外、時間又沒寫時區（Peatix）：不收 */
+  abroad?: boolean;
 }
 
 export interface EventPage {
