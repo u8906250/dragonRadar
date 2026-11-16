@@ -1,5 +1,5 @@
 /**
- * 活動頁裡附的 schema.org Event 資料（ACCUPASS 活動通、OPENTIX 兩廳院售票共用，v1.591）：名稱、每一場的開始結束時間、
+ * 活動頁裡附的 schema.org Event 資料（ACCUPASS 活動通、OPENTIX 兩廳院售票、Luma 共用，v1.591）：名稱、每一場的開始結束時間、
  * 活動狀態（取消）、實體或線上、場地名稱和地址、主辦、介紹。時間地點照這份資料，不用 AI 猜
  */
 import { decodeEntities } from './text';
@@ -18,7 +18,7 @@ export interface PageSession {
   /** 場地名稱、地址（地址前面的「台灣」拿掉） */
   venue: string | null;
   address: string | null;
-  /** 活動頁附的經緯度（Peatix 有）：有的話直接當這一場的位置，不用查地址 */
+  /** 活動頁附的經緯度（Peatix、Luma 有）：有的話直接當這一場的位置，不用查地址 */
   lat?: number;
   lng?: number;
   /** 在台灣以外、時間又沒寫時區（Peatix）：不收 */
@@ -38,13 +38,26 @@ export type PageFetch = { status: 'ok'; page: EventPage } | { status: 'gone' } |
 
 const str = (v: unknown): string | null => (typeof v === 'string' && v.trim() ? decodeEntities(v).replace(/\s+/g, ' ').trim() : null);
 
-/** 地址可能是字串，也可能是 PostalAddress（縣市、區、街道分開） */
+/**
+ * 地址可能是字串，也可能是 PostalAddress（縣市、區、街道分開）：中文的照縣市、區、街道接起來；
+ * 全部是英文的（Luma：「Bar Root by -1」「Dunhuang Village」「Taipei City」）照英文的順序街道、區、縣市，用逗號隔開，一樣的只寫一次
+ */
 function addressOf(a: unknown): string | null {
   if (typeof a === 'string') return str(a);
   if (!a || typeof a !== 'object') return null;
   const o = a as Record<string, unknown>;
-  const parts = [o.addressRegion, o.addressLocality, o.streetAddress].map(str).filter(Boolean);
-  return parts.length ? parts.join('') : null;
+  const parts = [o.addressRegion, o.addressLocality, o.streetAddress].map(str).filter((p): p is string => !!p);
+  if (parts.length === 0) return null;
+  if (parts.some((p) => /[一-鿿]/.test(p))) return parts.join('');
+  return [...new Set(parts.reverse())].join(', ');
+}
+
+/** 場地的經緯度：geo（GeoCoordinates）或直接寫在 Place 上（Luma 兩種都有） */
+function geoOf(place: Record<string, unknown>): { lat: number; lng: number } | null {
+  const g = place.geo && typeof place.geo === 'object' ? (place.geo as Record<string, unknown>) : place;
+  const lat = Number(g.latitude);
+  const lng = Number(g.longitude);
+  return g.latitude !== undefined && Number.isFinite(lat) && Number.isFinite(lng) && Math.abs(lat) <= 90 && Math.abs(lng) <= 180 && (lat !== 0 || lng !== 0) ? { lat, lng } : null;
 }
 
 /** ISO 時間沒寫時區（「2026-11-22T14:30:00」）：台灣的售票網站，當成台灣時間 */
@@ -57,6 +70,7 @@ function sessionOf(ev: Record<string, unknown>): PageSession | null {
   if (!name) return null;
   const locs = (Array.isArray(ev.location) ? ev.location : [ev.location]).filter((l): l is Record<string, unknown> => !!l && typeof l === 'object');
   const place = locs.find((l) => l['@type'] !== 'VirtualLocation');
+  const geo = place ? geoOf(place) : null;
   return {
     name,
     startDate: str(ev.startDate),
@@ -65,6 +79,8 @@ function sessionOf(ev: Record<string, unknown>): PageSession | null {
     online: /OnlineEventAttendanceMode/i.test(String(ev.eventAttendanceMode ?? '')) || (!place && locs.length > 0),
     venue: place ? str(place.name) : null,
     address: place ? (addressOf(place.address)?.replace(/^(?:台灣|臺灣)\s*/, '') ?? null) : null,
+    // 活動頁附的經緯度（Luma）：直接當位置
+    ...(geo ?? {}),
   };
 }
 
@@ -83,7 +99,9 @@ export function parseEventPage(html: string, id: string, all: boolean): EventPag
   const sessions = (all ? events : events.slice(0, 1)).map(sessionOf).filter((s): s is PageSession => !!s);
   if (sessions.length === 0) return null;
   const first = events[0];
-  const org = first.organizer && typeof first.organizer === 'object' ? str((first.organizer as Record<string, unknown>).name) : null;
+  // 主辦可能是一個，也可能是好幾個人（Luma）：寫第一個
+  const orgs = (Array.isArray(first.organizer) ? first.organizer : [first.organizer]).filter((o): o is Record<string, unknown> => !!o && typeof o === 'object');
+  const org = orgs.length > 0 ? str(orgs[0].name) : null;
   return { id, name: sessions[0].name, organizer: org, description: (typeof first.description === 'string' ? decodeEntities(first.description) : '').trim().slice(0, 1500), sessions };
 }
 

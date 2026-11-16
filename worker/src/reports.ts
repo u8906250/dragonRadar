@@ -13,6 +13,7 @@ import { accupassPermalink, fetchAccupass, parseAccupassUrl, type AccupassLink }
 import { eventPageText, pageTime, type EventPage, type PageFetch, type PageSession } from './sources/eventpage';
 import { fetchOpentix, opentixPermalink, parseOpentixUrl, type OpentixLink } from './sources/opentix';
 import { fetchPeatix, parsePeatixUrl, peatixPermalink, type PeatixLink } from './sources/peatix';
+import { fetchLuma, lumaPermalink, parseLumaUrl, type LumaLink } from './sources/luma';
 import { distKm } from './push';
 import { fetchThreadsPost, resolveThreadsLink, shortcodeToUnix, withLocationTag } from './sources/link';
 import { sha1Hex } from './sources/text';
@@ -558,15 +559,17 @@ async function earlierReport(env: Env, postId: string, module: ModuleId, now: nu
 /** 處理使用者貼上的連結：讀貼文、AI 判讀、定位，回傳結果 */
 export async function submitLink(env: Env, input: string, ip: string, now: number, device: string | null = null, module: ModuleId = DEFAULT_MODULE): Promise<SubmitResult> {
   assertReportsOpen(env, module);
-  // 活動頁：ACCUPASS 活動通（v1.590）、OPENTIX（v1.591）、Peatix（v1.735）
+  // 活動頁：ACCUPASS 活動通（v1.590）、OPENTIX（v1.591）、Peatix（v1.735）、Luma（v1.736）
   const acc = parseAccupassUrl(input);
   if (acc) return submitEventPage(env, { site: 'accupass', link: acc }, ip, now, device, module);
   const otx = parseOpentixUrl(input);
   if (otx) return submitEventPage(env, { site: 'opentix', link: otx }, ip, now, device, module);
   const ptx = parsePeatixUrl(input);
   if (ptx) return submitEventPage(env, { site: 'peatix', link: ptx }, ip, now, device, module);
+  const lum = parseLumaUrl(input);
+  if (lum) return submitEventPage(env, { site: 'luma', link: lum }, ip, now, device, module);
   const link = await resolveThreadsLink(input);
-  if (!link) throw new ReportError(400, '找不到 Threads 貼文或活動頁的連結，請貼上 Threads 貼文（https://www.threads.com/@帳號/post/...）、活動通（https://www.accupass.com/event/...）、OPENTIX（https://www.opentix.life/event/...）或 Peatix（https://peatix.com/event/...）的網址');
+  if (!link) throw new ReportError(400, '找不到 Threads 貼文或活動頁的連結，請貼上 Threads 貼文（https://www.threads.com/@帳號/post/...）、活動通（https://www.accupass.com/event/...）、OPENTIX（https://www.opentix.life/event/...）、Peatix（https://peatix.com/event/...）或 Luma（https://luma.com/...）的網址');
   const postId = `link-${link.code}`;
 
   const earlier = await earlierReport(env, postId, module, now);
@@ -611,18 +614,26 @@ export async function submitLink(env: Env, input: string, ip: string, now: numbe
 }
 
 /**
- * 活動頁的網站（ACCUPASS 活動通、OPENTIX、Peatix）：貼文 id 的開頭、source、顯示的名字、活動頁網址、怎麼讀
+ * 活動頁的網站（ACCUPASS 活動通、OPENTIX、Peatix、Luma）：貼文 id 的開頭、source、顯示的名字、活動頁網址、怎麼讀
  */
-type PageLink = { site: 'accupass'; link: AccupassLink } | { site: 'opentix'; link: OpentixLink } | { site: 'peatix'; link: PeatixLink };
+type PageLink = { site: 'accupass'; link: AccupassLink } | { site: 'opentix'; link: OpentixLink } | { site: 'peatix'; link: PeatixLink } | { site: 'luma'; link: LumaLink };
 const PAGE_SITES = {
   accupass: { prefix: 'acc', name: '活動通', permalink: accupassPermalink, fetch: (l: PageLink['link']) => fetchAccupass(l as AccupassLink) },
   opentix: { prefix: 'otx', name: 'OPENTIX', permalink: opentixPermalink, fetch: (l: PageLink['link']) => fetchOpentix(l as OpentixLink) },
   peatix: { prefix: 'ptx', name: 'Peatix', permalink: peatixPermalink, fetch: (l: PageLink['link']) => fetchPeatix(l as PeatixLink) },
+  luma: {
+    prefix: 'lum',
+    name: 'Luma',
+    permalink: lumaPermalink,
+    fetch: (l: PageLink['link']) => fetchLuma(l as LumaLink),
+    // 主辦的日曆、城市頁也是 luma.com/名稱，讀不到單一活動
+    gone: 'Luma 上找不到這場活動：可能已經刪除，或貼的是日曆、活動列表的網址（請貼單一活動的網址）',
+  },
 } as const;
 type PageSite = keyof typeof PAGE_SITES;
-/** 貼文 id（acc-編號、otx-編號、ptx-編號）→ 哪個網站、活動編號 */
+/** 貼文 id（acc-編號、otx-編號、ptx-編號、lum-代碼）→ 哪個網站、活動編號 */
 const pageOfPostId = (postId: string): { site: PageSite; id: string } | null => {
-  const m = /^(acc|otx|ptx)-(\d+)$/.exec(postId);
+  const m = /^(acc|otx|ptx|lum)-([\w-]+)$/.exec(postId);
   if (!m) return null;
   const site = (Object.keys(PAGE_SITES) as PageSite[]).find((k) => PAGE_SITES[k].prefix === m[1])!;
   return { site, id: m[2] };
@@ -630,8 +641,9 @@ const pageOfPostId = (postId: string): { site: PageSite; id: string } | null => 
 
 /** 活動頁讀不到時講原因 */
 function pageError(site: PageSite, f: Exclude<PageFetch, { status: 'ok' }>): ReportError {
-  const name = PAGE_SITES[site].name;
-  if (f.status === 'gone') return new ReportError(404, `${name}上找不到這場活動，可能已經刪除或下架了`);
+  const s: { name: string; gone?: string } = PAGE_SITES[site];
+  const name = s.name;
+  if (f.status === 'gone') return new ReportError(404, s.gone ?? `${name}上找不到這場活動，可能已經刪除或下架了`);
   console.warn(`${site} fetch failed: ${f.message}`);
   return new ReportError(502, `暫時讀不到${name}的活動頁，請稍後再試`);
 }
@@ -750,12 +762,12 @@ async function pinByVenue(env: Env, acts: PageActivity[]): Promise<void> {
 
 /**
  * 回報活動頁（洋流的活動）：讀活動頁、照活動頁的時間地點排、定位，回傳預覽，回報的人確認才放上雷達（跟 Threads 一樣）；
- * 線上活動、已經取消的不收。貼文 id 是 acc-、otx-、ptx- 加活動編號，source 是網站（accupass、opentix、peatix），原文連結是活動頁
+ * 線上活動、已經取消的不收。貼文 id 是 acc-、otx-、ptx-、lum- 加活動編號，source 是網站（accupass、opentix、peatix、luma），原文連結是活動頁
  */
 async function submitEventPage(env: Env, p: PageLink, ip: string, now: number, device: string | null, module: ModuleId): Promise<SubmitResult> {
   const site = PAGE_SITES[p.site];
   if (module !== DEFAULT_MODULE) throw new ReportError(400, `${site.name}的活動請切到「洋流雷達」再回報`);
-  // 活動通分享的短網址先讀一次才知道是哪一場
+  // 活動通分享的短網址、Luma 的網址（可能是自訂網址）先讀一次才知道是哪一場
   let fetched: PageFetch | null = null;
   if ('go' in p.link) {
     fetched = await site.fetch(p.link);
@@ -784,7 +796,7 @@ async function submitEventPage(env: Env, p: PageLink, ip: string, now: number, d
 
 async function checkConfirm(env: Env, body: { postId?: unknown; token?: unknown }): Promise<PostRow> {
   const postId = typeof body.postId === 'string' ? body.postId : '';
-  if (!/^(?:link|note|acc|otx|ptx)-[\w-]+$/.test(postId) || body.token !== (await confirmToken(env, postId))) throw new ReportError(400, '確認代碼不對，請重新貼一次連結');
+  if (!/^(?:link|note|acc|otx|ptx|lum)-[\w-]+$/.test(postId) || body.token !== (await confirmToken(env, postId))) throw new ReportError(400, '確認代碼不對，請重新貼一次連結');
   const post = await getPost(env, postId);
   if (!post) throw new ReportError(404, '找不到這則回報，請重新貼一次連結');
   assertReportsOpen(env, post.module);
@@ -1056,7 +1068,7 @@ export async function myReports(env: Env, device: string): Promise<MyReport[]> {
     `SELECT p.id, p.permalink, p.username, p.text, p.confirm_state, p.link_role, p.module, m.reported_at
        FROM (SELECT post_id, MAX(created_at) AS reported_at FROM submissions WHERE device = ? GROUP BY post_id) m
        CROSS JOIN posts p ON p.id = m.post_id
-      WHERE +p.source IN ('link', 'note', 'accupass', 'opentix', 'peatix') AND p.confirm_state = 'confirmed'
+      WHERE +p.source IN ('link', 'note', 'accupass', 'opentix', 'peatix', 'luma') AND p.confirm_state = 'confirmed'
         AND (p.link_role = 'related' OR EXISTS (SELECT 1 FROM events e WHERE e.post_id = p.id))
       ORDER BY m.reported_at DESC LIMIT 30`,
   )
@@ -1095,7 +1107,7 @@ export async function withdrawReport(env: Env, postId: string, device: string, n
   const owned = await env.DB.prepare('SELECT 1 AS ok FROM submissions WHERE post_id = ? AND device = ? LIMIT 1').bind(postId, device).first<{ ok: number }>();
   if (!owned) throw new ReportError(403, '只能刪除自己回報的貼文，而且要用回報時的同一個瀏覽器（30 天內）');
   const post = await getPost(env, postId);
-  if (!post || !['link', 'note', 'accupass', 'opentix', 'peatix'].includes(post.source)) throw new ReportError(404, '找不到這則回報');
+  if (!post || !['link', 'note', 'accupass', 'opentix', 'peatix', 'luma'].includes(post.source)) throw new ReportError(404, '找不到這則回報');
   if (post.confirm_state === 'withdrawn') return { ok: true, removed: 0 };
   const removed = (await env.DB.prepare("SELECT COUNT(*) AS n FROM events WHERE post_id = ? AND status IN ('upcoming', 'active')").bind(postId).first<{ n: number }>())?.n ?? 0;
   const { results: prev } = await env.DB.prepare("SELECT id FROM posts WHERE linked_to = ? AND link_role = 'previous' ORDER BY posted_at DESC").bind(postId).all<{ id: string }>();
@@ -1168,7 +1180,7 @@ const PEATIX_DELAY_MS = 1100;
 export async function recheckLinks(env: Env, now: number): Promise<RecheckLinksResult> {
   const rows = await env.DB.prepare(
     `SELECT DISTINCT p.id, p.text FROM posts p JOIN events e ON e.post_id = p.id
-     WHERE p.source IN ('link', 'spot', 'accupass', 'opentix', 'peatix') AND e.status IN ('upcoming', 'active') AND (p.checked_at IS NULL OR p.checked_at <= ?)
+     WHERE p.source IN ('link', 'spot', 'accupass', 'opentix', 'peatix', 'luma') AND e.status IN ('upcoming', 'active') AND (p.checked_at IS NULL OR p.checked_at <= ?)
      ORDER BY p.checked_at ASC LIMIT ?`,
   )
     .bind(now - RECHECK_LINK_SEC, RECHECK_LINK_BATCH)
