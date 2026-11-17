@@ -611,7 +611,7 @@ function wishRow(): string {
   const ws = wishState?.wishes ?? [];
   const news = wishState?.unseen ?? 0;
   return `<section class="tc-wish-row">
-      <p><b>許願</b>投 ${WISH_COST} 枚順幣，寫下你希望留下什麼在洋流雷達，審核通過就用 AI 做出來。</p>
+      <p><b>許願</b>投 ${WISH_COST} 枚順幣，寫下你希望留下什麼在活動雷達，審核通過就用 AI 做出來。</p>
       <p class="tc-wish-coins">你有 <b>${n}</b> 枚順幣</p>
       <p class="tc-wish-eg">例如：再開一顆喵星、一場老街尋寶冒險、把和狗狗散步的路線留在汪星、全台北一起種樹……</p>
       <div class="tc-wish-btns">
@@ -653,7 +653,7 @@ export function openWishForm(onDone?: () => void): void {
       <div class="tc-head"><h2>許願</h2><button type="button" class="chip" data-close>關閉</button></div>
       <form class="tc-wish-form" novalidate>
         <label class="tc-field"><span>你的想法</span>
-          <textarea name="body" rows="8" maxlength="${WISH_MAX}" placeholder="你希望留下什麼在洋流雷達？小到一句話、一段 prompt，大到一份完整企劃、一整顆星球，天馬行空都可以">${esc(d.body)}</textarea>
+          <textarea name="body" rows="8" maxlength="${WISH_MAX}" placeholder="你希望留下什麼在活動雷達？小到一句話、一段 prompt，大到一份完整企劃、一整顆星球，天馬行空都可以">${esc(d.body)}</textarea>
           <small class="tc-len"></small></label>
         <div class="tc-ideas"><span>想不到嗎？點一個靈感：</span>${WISH_IDEAS.map((x, i) => `<button type="button" class="tc-idea" data-idea="${i}">${esc(x.label)}</button>`).join('')}</div>
         <label class="tc-field"><span>暱稱（選填）</span>

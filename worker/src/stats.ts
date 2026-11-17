@@ -62,7 +62,7 @@ export interface StatsOut {
 /** 回報來的貼文（官方航線、新聞、主辦單位公告不算） */
 const REPORT_SOURCES = "('link', 'note', 'accupass', 'opentix', 'peatix', 'luma')";
 const SOURCE_NAMES: Record<string, string> = { link: 'Threads', note: '沒有連結（已停用）', accupass: 'ACCUPASS 活動通', opentix: 'OPENTIX', peatix: 'Peatix', luma: 'Luma' };
-const MODULE_NAMES: Record<string, string> = { current: '洋流雷達', dog: '狗狗陪伴', badminton: '羽球臨打', food: '美食品味', work: '找工作' };
+const MODULE_NAMES: Record<string, string> = { current: '活動雷達', dog: '狗狗陪伴', badminton: '羽球臨打', food: '美食品味', work: '找工作' };
 
 /** 台灣時間的日期「2026-11-13」 */
 const taipeiDay = (t: number): string => new Date((t + 8 * 3600) * 1000).toISOString().slice(0, 10);
@@ -133,7 +133,7 @@ export async function adminStats(env: Env, now: number, days: number): Promise<S
   const outcomes = { confirmed: 0, rejected: 0, withdrawn: 0, open: 0 };
   const userOf = new Map<string, string>();
   for (const p of postRows) {
-    bump(modules, MODULE_NAMES[p.module ?? 'current'] ?? p.module ?? '洋流雷達');
+    bump(modules, MODULE_NAMES[p.module ?? 'current'] ?? p.module ?? '活動雷達');
     bump(sources, SOURCE_NAMES[p.source] ?? p.source);
     if (p.confirm_state === 'confirmed') outcomes.confirmed++;
     else if (p.confirm_state === 'rejected') outcomes.rejected++;
@@ -356,7 +356,7 @@ export async function publicStats(env: Env, now: number): Promise<PublicStatsOut
     bump(towns, `${w.county}${w.town}`);
   }
   const modules = new Map<string, number>();
-  for (const p of posts.results as Array<{ module: string | null }>) bump(modules, MODULE_NAMES[p.module ?? 'current'] ?? '洋流雷達');
+  for (const p of posts.results as Array<{ module: string | null }>) bump(modules, MODULE_NAMES[p.module ?? 'current'] ?? '活動雷達');
   const b = bottles.results[0] as { thrown: number; picks: number } | undefined;
   const out: PublicStatsOut = {
     days,

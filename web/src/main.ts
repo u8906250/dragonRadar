@@ -3586,7 +3586,7 @@ function renderBottleDetail(id: number): boolean {
 
 /**
  * 瓶子證明：編號、丟的時間、內容的指紋（SHA-256）、伺服器的簽章；按「驗證」先在這裡算一次內容的指紋，
- * 再請伺服器核對簽章：對得上就是洋流雷達發出的瓶子、內容沒被改過（瓶子沉下去、刪掉了也驗得出來）
+ * 再請伺服器核對簽章：對得上就是活動雷達發出的瓶子、內容沒被改過（瓶子沉下去、刪掉了也驗得出來）
  */
 async function showProof(id: number, text: string): Promise<void> {
   // 已經開著就不再開一層（點兩下會疊兩層，按 ✕ 只關上面那層，看起來像卡住：v1.628 使用者說按 ✕ 有時候也卡住）
@@ -3647,8 +3647,8 @@ async function showProof(id: number, text: string): Promise<void> {
         : !v?.ok
           ? v?.message ?? '暫時沒辦法驗證，請稍後再試'
           : v.data.valid
-            ? `✓ 是洋流雷達發出的瓶子 ${bottleNo(proof.no)}，內容沒有被改過`
-            : '✗ 簽章對不上，這不是洋流雷達發出的瓶子';
+            ? `✓ 是活動雷達發出的瓶子 ${bottleNo(proof.no)}，內容沒有被改過`
+            : '✗ 簽章對不上，這不是活動雷達發出的瓶子';
   });
 }
 
@@ -6900,14 +6900,20 @@ const moduleList = $('#module-list');
 const reportIntro = $('#report-intro');
 const CURRENT_REPORT_INTRO = reportIntro.textContent ?? '';
 
+/**
+ * 標題列、頁面標題：活動雷達用洋流主題寫「活動雷達」，換成龍珠雷達這些主題寫主題的名稱；其他雷達寫自己的
+ * （標題列放不下長名稱，用 4 個字的短名稱）
+ */
+const brandName = (short = false): string => (!mod.current ? (short ? mod.short : mod.name) : theme.id === 'current' ? mod.name : theme.name);
+
 /** 模組的文字、標題、只有洋流才有的東西（地標、車掃、漂流瓶、類型開關） */
 function applyModule(): void {
   document.documentElement.dataset.module = mod.id;
-  document.title = mod.current ? theme.name : mod.name;
-  brandText.textContent = mod.current ? theme.name : mod.short;
+  document.title = brandName();
+  brandText.textContent = brandName(true);
   searchInput.placeholder = mod.searchPlaceholder;
   reportIntro.textContent = mod.current ? CURRENT_REPORT_INTRO : mod.reportIntro;
-  // 活動通、OPENTIX、Peatix、Luma 的活動頁只有洋流雷達收；其他雷達只收 Threads 貼文
+  // 活動通、OPENTIX、Peatix、Luma 的活動頁只有活動雷達收；其他雷達只收 Threads 貼文
   $('#report-title').textContent = mod.current ? '回報活動' : '回報貼文';
   reportInput.placeholder = mod.current ? 'Threads、活動通、OPENTIX、Peatix 或 Luma 的連結' : 'Threads 貼文的連結';
   reportInput.setAttribute('aria-label', mod.current ? 'Threads 貼文、活動通、OPENTIX、Peatix 或 Luma 活動頁的連結' : 'Threads 貼文的連結');
@@ -7026,10 +7032,9 @@ function openModuleSheet(open: boolean): void {
 function applyTheme(t: Theme): void {
   theme = t;
   document.documentElement.dataset.theme = t.id;
-  document.title = mod.current ? t.name : mod.name;
+  document.title = brandName();
   map.setDark(t.id === 'dragon' || t.id === 'neon');
-  // 標題列放不下長名稱：其他模組用短名稱（跟「洋流雷達」一樣 4 個字）
-  brandText.textContent = mod.current ? t.name : mod.short;
+  brandText.textContent = brandName(true);
   document.querySelector('meta[name="theme-color"]')?.setAttribute('content', t.themeColor);
   radar.setStyle({ sweep: t.sweep, blip: t.blip, rose: t.rose });
   emptyEl.textContent = `${emptyText()}。點清單上方的「↻ 更新」看有沒有新的，或在旁邊打開自動更新。`;
@@ -7467,7 +7472,7 @@ function openReportSheet(open: boolean): void {
 
 function renderReportTips(): void {
   const l = keywordRules?.sources?.link;
-  const share = '在 Threads 貼文按「分享」→「複製連結」，再貼到上面。Android 把洋流雷達加到主畫面後，也可以直接分享到洋流雷達。';
+  const share = '在 Threads 貼文按「分享」→「複製連結」，再貼到上面。Android 把活動雷達加到主畫面後，也可以直接分享到活動雷達。';
   if (!mod.current) {
     reportTips.innerHTML = [share, ...mod.reportTips].map((t) => `<li>${esc(t)}</li>`).join('');
     return;
@@ -8636,7 +8641,7 @@ async function withdrawMine(postId: string): Promise<boolean> {
 function showVersion(server: string | null): void {
   const v = __APP_VERSION__;
   const web = `${v.version}${v.date ? `（${v.date}${v.sha ? `・${v.sha}` : ''}）` : ''}`;
-  $('#app-version').textContent = `洋流雷達 ${web}${server && server !== v.version ? `・伺服器 ${server}` : ''}`;
+  $('#app-version').textContent = `活動雷達 ${web}${server && server !== v.version ? `・伺服器 ${server}` : ''}`;
 }
 
 /** 從 Threads App 分享過來（PWA share target）或網址帶 ?url= */
@@ -9346,7 +9351,7 @@ async function boot(): Promise<void> {
   if (shared) {
     // 分享進來的網址用過就清掉，重新整理才不會再送一次
     history.replaceState(null, '', location.pathname);
-    // 活動通、OPENTIX、Peatix、Luma 的活動頁只有洋流雷達收：直接切到洋流送出；Threads 貼文先選要回報到哪個雷達
+    // 活動通、OPENTIX、Peatix、Luma 的活動頁只有活動雷達收：直接切到洋流送出；Threads 貼文先選要回報到哪個雷達
     if (/accupass\.com\/(event|go)\/|opentix\.life\/event\/|peatix\.com\/(?:[a-z]{2}\/)?event\/|(?:lu\.ma|luma\.com)\/(?!discover|user\/)[A-Za-z0-9_-]{3,}/i.test(shared) && !/threads\.(com|net)\//i.test(shared)) {
       switchModule('current');
       sendSharedLink(shared);

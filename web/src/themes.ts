@@ -14,7 +14,7 @@ export interface SummaryCounts {
 
 export interface Theme {
   id: string;
-  /** 顯示名稱，也會當作頁面標題 */
+  /** 主題選單上的名稱；也會當作活動雷達的標題列、頁面標題（洋流主題寫雷達本身的名稱「活動雷達」） */
   name: string;
   tagline: string;
   sweep: SweepStyle;
@@ -40,7 +40,7 @@ function parts(c: SummaryCounts, unit: string): string {
 export const THEMES: Theme[] = [
   {
     id: 'current',
-    name: '洋流雷達',
+    name: '洋流',
     tagline: '台北大洋流船艙裡的羅盤',
     sweep: 'ripple',
     blip: 'buoy',

@@ -1,5 +1,5 @@
 /*
- * 洋流雷達的 service worker：收手機推播、顯示通知，點通知打開雷達並選到那一則。
+ * 活動雷達的 service worker：收手機推播、顯示通知，點通知打開雷達並選到那一則。
  * 不快取網頁（沒有 fetch 處理），網頁更新照常。
  */
 self.addEventListener('install', () => self.skipWaiting());
@@ -13,7 +13,7 @@ self.addEventListener('push', (e) => {
     d = { body: e.data ? e.data.text() : '' };
   }
   e.waitUntil(
-    self.registration.showNotification(d.title || '洋流雷達', {
+    self.registration.showNotification(d.title || '活動雷達', {
       body: d.body || '',
       tag: d.tag || 'dragon-radar',
       renotify: !!d.renotify,

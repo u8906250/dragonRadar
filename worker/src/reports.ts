@@ -768,7 +768,7 @@ async function pinByVenue(env: Env, acts: PageActivity[]): Promise<void> {
  */
 async function submitEventPage(env: Env, p: PageLink, ip: string, now: number, device: string | null, module: ModuleId): Promise<SubmitResult> {
   const site = PAGE_SITES[p.site];
-  if (module !== DEFAULT_MODULE) throw new ReportError(400, `${site.name}的活動請切到「洋流雷達」再回報`);
+  if (module !== DEFAULT_MODULE) throw new ReportError(400, `${site.name}的活動請切到「活動雷達」再回報`);
   // 活動通分享的短網址、Luma 的網址（可能是自訂網址）先讀一次才知道是哪一場
   let fetched: PageFetch | null = null;
   if ('go' in p.link) {

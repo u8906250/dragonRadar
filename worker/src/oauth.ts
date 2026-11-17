@@ -103,7 +103,7 @@ export async function handleCallback(req: Request, env: Env): Promise<Response> 
   const days = Math.round((longJson.expires_in ?? 0) / 86400);
   return html(
     '已連線 Threads',
-    `<p>長效 token 已存好${days ? `，有效 ${days} 天，系統每週會自動續期` : ''}。</p><p>10 分鐘內雷達會開始用關鍵字搜尋 Threads。</p><p><a href="https://current-radar.pages.dev/">回到洋流雷達</a></p>`,
+    `<p>長效 token 已存好${days ? `，有效 ${days} 天，系統每週會自動續期` : ''}。</p><p>10 分鐘內雷達會開始用關鍵字搜尋 Threads。</p><p><a href="https://current-radar.pages.dev/">回到活動雷達</a></p>`,
   );
 }
 
@@ -164,5 +164,5 @@ export async function handleDelete(req: Request, env: Env): Promise<Response> {
 
 export function deletionStatus(req: Request): Response {
   const id = (new URL(req.url).searchParams.get('id') ?? '').replace(/[^a-f0-9]/g, '');
-  return html('資料刪除狀態', `<p>刪除要求 ${id ? `<code>${id}</code> ` : ''}已完成。洋流雷達不再保存你的 Threads 授權。</p>`);
+  return html('資料刪除狀態', `<p>刪除要求 ${id ? `<code>${id}</code> ` : ''}已完成。活動雷達不再保存你的 Threads 授權。</p>`);
 }

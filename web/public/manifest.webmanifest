@@ -1,6 +1,6 @@
 {
-  "name": "洋流雷達",
-  "short_name": "洋流雷達",
+  "name": "活動雷達",
+  "short_name": "活動雷達",
   "description": "找出附近的洋流飄帶發放與活動，用雷達顯示相對位置；也可以分享 Threads 貼文來回報",
   "start_url": "./",
   "scope": "./",

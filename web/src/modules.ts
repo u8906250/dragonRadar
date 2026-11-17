@@ -6,7 +6,7 @@ export type ModuleId = 'current' | 'dog' | 'badminton' | 'food' | 'work';
 
 export interface ModuleDef {
   id: ModuleId;
-  /** 完整名稱，也是頁面標題（洋流用主題的名稱） */
+  /** 完整名稱，也是頁面標題（活動雷達換成洋流以外的主題時用主題的名稱） */
   name: string;
   /** 標題列上的短名稱 */
   short: string;
@@ -35,10 +35,10 @@ const REPORT_INTRO = '看到活動的 Threads 貼文，或 ACCUPASS 活動通、
 export const MODULES: ModuleDef[] = [
   {
     id: 'current',
-    name: '洋流雷達',
-    short: '洋流',
+    name: '活動雷達',
+    short: '活動雷達',
     tagline: '附近可以參加的活動',
-    emoji: '🌊',
+    emoji: '🎪',
     current: true,
     unit: '個',
     emptyText: '',

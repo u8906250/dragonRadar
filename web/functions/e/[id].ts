@@ -19,7 +19,7 @@ interface ShareInfo {
 }
 
 const PROD_API = 'https://dragon-radar.happybadminton.workers.dev';
-const MODULE_NAMES: Record<string, string> = { current: '洋流雷達', dog: '狗狗陪伴', badminton: '羽球臨打', food: '美食品味', work: '找工作' };
+const MODULE_NAMES: Record<string, string> = { current: '活動雷達', dog: '狗狗陪伴', badminton: '羽球臨打', food: '美食品味', work: '找工作' };
 
 const esc = (s: string): string => s.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c] as string);
 
@@ -55,7 +55,7 @@ export async function onRequestGet(ctx: { params: Record<string, string | string
   const title = live ? live.title! : info ? '這個活動已經結束了' : '找不到這個活動';
   const desc = live
     ? [live.topic, live.spot ? '固定據點' : null, when(live), live.placeText].filter(Boolean).join('・')
-    : '打開洋流雷達，看看附近還有什麼活動';
+    : '打開活動雷達，看看附近還有什麼活動';
   const html = `<!doctype html>
 <html lang="zh-Hant">
 <head>

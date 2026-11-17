@@ -146,7 +146,7 @@ async function handle(req: Request, env: Env, ctx: ExecutionContext): Promise<Re
     // 第一次訂閱送一則確認通知，順便確認收得到
     if (r.created && body.subscription?.endpoint && body.subscription.keys?.p256dh && body.subscription.keys.auth) {
       const sub = { endpoint: body.subscription.endpoint, p256dh: body.subscription.keys.p256dh, auth: body.subscription.keys.auth, lat: 0, lng: 0 };
-      const msg = { title: '洋流雷達通知已開啟', body: `附近 ${PUSH_RADIUS_KM} 公里內開始發放、活動開始時會通知你（深夜 23:00–8:00 不通知）`, tag: 'welcome', url: './' };
+      const msg = { title: '活動雷達通知已開啟', body: `附近 ${PUSH_RADIUS_KM} 公里內開始發放、活動開始時會通知你（深夜 23:00–8:00 不通知）`, tag: 'welcome', url: './' };
       ctx.waitUntil(sendPush(env, sub, msg, now).catch((e) => console.warn('welcome push failed', e)));
     }
     return jsonResponse(r);

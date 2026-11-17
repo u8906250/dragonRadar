@@ -4,7 +4,7 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <meta name="robots" content="noindex, nofollow" />
-  <title>回報管理｜洋流雷達</title>
+  <title>回報管理｜活動雷達</title>
   <link rel="manifest" href="manifest.webmanifest" />
   <link rel="icon" href="icon.svg" type="image/svg+xml" />
   <link rel="stylesheet" href="legal.css" />
@@ -170,7 +170,7 @@
     }
 
     /** 手動加的關鍵字：候選（採用、不要）、採用的（拿掉）、不要的（收在下面，可以改回採用） */
-    const MODULE_NAMES = { current: '洋流雷達', dog: '狗狗陪伴', badminton: '羽球臨打', food: '美食品味', work: '找工作' };
+    const MODULE_NAMES = { current: '活動雷達', dog: '狗狗陪伴', badminton: '羽球臨打', food: '美食品味', work: '找工作' };
     const TAG_STATUS = { pending: '候選', adopted: '採用中', rejected: '不要' };
     function tagRow(t) {
       const btn = (to, label, primary = false) => `<button type="button" class="btn${primary ? ' primary' : ''}" data-tag-status="${to}" data-module="${esc(t.module)}" data-tag="${esc(t.tag)}">${label}</button>`;
@@ -344,7 +344,7 @@
       try {
         const { feedback } = await api(`/api/admin/feedback?status=${status}`);
         render(feedback);
-        if (status === 'open') document.title = feedback.length ? `(${feedback.length}) 回報管理｜洋流雷達` : '回報管理｜洋流雷達';
+        if (status === 'open') document.title = feedback.length ? `(${feedback.length}) 回報管理｜活動雷達` : '回報管理｜活動雷達';
       } catch (e) {
         if (e.auth) {
           ls.set(LS_TOKEN, null);
@@ -748,9 +748,9 @@
     async function startPush() {
       const r = await registration();
       if (!r || !('PushManager' in window)) {
-        throw new Error(ios && !standalone ? 'iPhone 要先在洋流雷達按「分享 → 加入主畫面」，從主畫面打開，再連點版本字樣 5 下進來這頁開通知' : '這個瀏覽器不支援推播');
+        throw new Error(ios && !standalone ? 'iPhone 要先在活動雷達按「分享 → 加入主畫面」，從主畫面打開，再連點版本字樣 5 下進來這頁開通知' : '這個瀏覽器不支援推播');
       }
-      if ((await Notification.requestPermission()) !== 'granted') throw new Error('沒有取得通知權限，請到瀏覽器設定允許洋流雷達的通知');
+      if ((await Notification.requestPermission()) !== 'granted') throw new Error('沒有取得通知權限，請到瀏覽器設定允許活動雷達的通知');
       const { key } = await (await fetch(`${API}/api/push/key`)).json();
       const want = b64(key);
       let sub = await r.pushManager.getSubscription();

@@ -1,5 +1,5 @@
 /* ========== 主題變數 ==========
-   預設是「洋流雷達」：台北大洋流的品牌橘、奶油紙、墨線、海綠，硬陰影的普普風。 */
+   預設是「洋流」主題：台北大洋流的品牌橘、奶油紙、墨線、海綠，硬陰影的普普風。 */
 :root,
 :root[data-theme='current'] {
   --font: 'PingFang TC', 'Noto Sans TC', system-ui, -apple-system, sans-serif;
@@ -179,7 +179,7 @@ button, select, a { touch-action: manipulation; }
 #app.full .ic-shrink { display: block; }
 /* 標題多了切換雷達的 ▾：400 寬以下就精簡，不然右上的按鈕會擠到邊 */
 @media (max-width: 400px) { .controls { gap: 4px; } .controls .chip { padding: 8px 10px; font-size: 13px; } .controls .chip.icon-chip { width: 36px; } :root[data-theme='current'] .brand-wave { display: none; } }
-/* 360 寬的手機：多了全螢幕按鈕，再擠一點，「洋流雷達」才不會變成「洋流…」 */
+/* 360 寬的手機：多了全螢幕按鈕，再擠一點，「活動雷達」才不會變成「活動…」 */
 @media (max-width: 380px) { .topbar { padding-left: 12px; padding-right: 10px; } .brand { font-size: 16px; } .controls .chip { padding: 8px 8px; } .controls .chip.icon-chip { width: 34px; } }
 
 .chip {
@@ -1517,7 +1517,7 @@ path.map-seam-walkers { --p: 15px; }
 .panel.card-on.expanded > .sheet { height: auto !important; }
 .panel.card-on.collapsed { max-height: calc(var(--card-peek, 96px) + env(safe-area-inset-bottom)); }
 /* ========== 全螢幕（像 Google 地圖）==========
- * 地圖、雷達鋪滿：標題列收成浮在上面的按鈕（左上「洋流雷達▾」、右上「⋯」和縮小），地圖外面的框和留白拿掉；
+ * 地圖、雷達鋪滿：標題列收成浮在上面的按鈕（左上「活動雷達▾」、右上「⋯」和縮小），地圖外面的框和留白拿掉；
  * 手機的清單照樣在下面可以拉上拉下，上緣的圓角疊在地圖上；電腦的清單在右邊，可以收起來（#app.list-off）
  */
 #app.full { position: relative; grid-template-rows: minmax(0, 1fr) auto; }
