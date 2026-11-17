@@ -38,7 +38,7 @@ export const MODULES: ModuleDef[] = [
     name: '活動雷達',
     short: '活動雷達',
     tagline: '附近可以參加的活動',
-    emoji: '🎪',
+    emoji: '🌊',
     current: true,
     unit: '個',
     emptyText: '',
