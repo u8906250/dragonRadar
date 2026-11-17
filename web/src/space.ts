@@ -898,6 +898,8 @@ export interface SpaceOpts {
   center: LatLng;
   /** 陸地（台灣加上全世界的海岸線） */
   land: Array<Array<[number, number]>>;
+  /** 塗淡淡底色的國家（有畫地圖的：台灣、荷蘭、日本、南韓、美國）；其他國家只畫海岸線 */
+  fill?: Array<Array<[number, number]>>;
   when: Date;
   /** 雷達外圈代表幾公里 */
   scaleKm: number;
@@ -1375,7 +1377,8 @@ export function spaceMarkup(o: SpaceOpts): string {
   if (globe) {
     lines += `<path class="space-night" d="${nightPath(o.center, subsolar(o.when), o.rg)}" />`;
     if (o.rg >= 30) lines += `<path class="space-grat" d="${graticule(o.center, o.rg)}" />`;
-    lines += `<path class="region-outline" d="${landPath(o.center, o.land, o.rg)}" />`;
+    if (o.fill?.length) lines += `<path class="country-fill" d="${landPath(o.center, o.fill, o.rg)}" />`;
+    lines += `<path class="region-outline coast" d="${landPath(o.center, o.land, o.rg)}" />`;
     lines += `<circle class="region-outline open space-limb" cx="${C}" cy="${C}" r="${f1(o.rg)}" />`;
   }
   // 軌道：月球繞地球、行星繞太陽；太小、太大（看起來是直線）的不畫

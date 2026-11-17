@@ -1381,7 +1381,9 @@ path.map-seam-walkers { --p: 15px; }
 .radar .route-planned { stroke-dasharray: 6 5; }
 /* 「雙北」範圍的縣市界輪廓 */
 .radar .region-outline { fill: var(--accent); fill-opacity: 0.05; stroke: var(--accent); stroke-width: 1.5; stroke-opacity: 0.45; stroke-dasharray: 3 3; pointer-events: none; }
-.radar .region-outline.open { fill: none; }
+.radar .region-outline.open, .radar .region-outline.coast { fill: none; }
+/* 拉遠時有畫地圖的國家（台灣、荷蘭、日本、南韓、美國）塗淡淡的底色，其他國家只畫海岸線（v1.756 使用者說的）；湖照 evenodd 挖成洞 */
+.radar .country-fill { fill: var(--accent); fill-opacity: 0.05; fill-rule: evenodd; stroke: none; pointer-events: none; }
 /* 縣市交界：比海岸線淡一點 */
 .radar .region-outline.county-line { stroke-width: 1; stroke-opacity: 0.35; }
 /* 放大到 2 km 內畫的街道：淡淡的細線，大路粗一點，不搶光點 */

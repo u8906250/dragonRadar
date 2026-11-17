@@ -291,6 +291,9 @@ export class MapView {
   /** 範圍比 50 km 大時的海岸線（雷達是 16 km） */
   private outline: Leaflet.Polygon | null = null;
   private outlineRings: Array<Array<[number, number]>> = [];
+  /** 塗底色的國家（拉遠時，有畫地圖的） */
+  private fillLayer: Leaflet.Polygon | null = null;
+  private fillRings: Array<Array<[number, number]>> = [];
   /** 洋流的地標（★）：其他模組不顯示 */
   private landmarkGroup: Leaflet.LayerGroup | null = null;
   /** 地標的星星標記（照 id），星星轉走的動畫要找得到 */
@@ -707,9 +710,11 @@ export class MapView {
   }
 
   /** 海岸線（範圍比 50 km 大時）；空陣列就不畫 */
-  setOutline(rings: Array<Array<[number, number]>>): void {
-    if (rings === this.outlineRings) return;
+  /** 拉遠時的海岸線（只畫線）；fill 是塗淡淡底色的國家（有畫地圖的），其他國家不塗 */
+  setOutline(rings: Array<Array<[number, number]>>, fill: Array<Array<[number, number]>> = []): void {
+    if (rings === this.outlineRings && fill === this.fillRings) return;
     this.outlineRings = rings;
+    this.fillRings = fill;
     this.pushOutline();
   }
 
@@ -719,9 +724,17 @@ export class MapView {
     if (!L || !map) return;
     this.outline?.remove();
     this.outline = null;
+    this.fillLayer?.remove();
+    this.fillLayer = null;
     if (this.outlineRings.length === 0) return;
-    this.outline = L.polygon(this.outlineRings, { color: '#03615a', weight: 3.5, opacity: 0.9, dashArray: '8 6', fillColor: '#03615a', fillOpacity: 0.08, interactive: false }).addTo(map);
+    // 有畫地圖的國家塗淡淡的底色（湖照 evenodd 挖成洞），海岸線只畫線（以前全世界的陸地都塗）
+    if (this.fillRings.length > 0) {
+      this.fillLayer = L.polygon(this.fillRings, { stroke: false, fillColor: '#03615a', fillOpacity: 0.08, fillRule: 'evenodd', interactive: false }).addTo(map);
+      this.fillLayer.bringToBack();
+    }
+    this.outline = L.polygon(this.outlineRings, { color: '#03615a', weight: 3.5, opacity: 0.9, dashArray: '8 6', fill: false, interactive: false }).addTo(map);
     this.outline.bringToBack();
+    this.fillLayer?.bringToBack();
   }
 
   /**

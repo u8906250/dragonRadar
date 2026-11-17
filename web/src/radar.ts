@@ -1926,10 +1926,15 @@ export class Radar {
     this.draw();
   }
 
-  /** 海岸線、縣市交界（範圍比 16 km 大時），畫成淡淡的虛線；空陣列就不畫 */
-  setOutline(rings: Array<Array<{ bearing: number; distanceKm: number }>>, lines: Array<Array<{ bearing: number; distanceKm: number }>> = []): void {
+  /** 海岸線、縣市交界（範圍比 16 km 大時），畫成淡淡的虛線；fills 是拉遠時塗淡淡底色的國家（有畫地圖的）；空陣列就不畫 */
+  setOutline(
+    rings: Array<Array<{ bearing: number; distanceKm: number }>>,
+    lines: Array<Array<{ bearing: number; distanceKm: number }>> = [],
+    fills: Array<Array<{ bearing: number; distanceKm: number }>> = [],
+  ): void {
     this.outline = rings;
     this.outlineLines = lines;
+    this.outlineFills = fills;
     this.outlineShift = [0, 0];
     this.draw();
   }
@@ -1940,8 +1945,9 @@ export class Radar {
     this.draw();
   }
   private outlineShift: [number, number] = [0, 0];
+  private outlineFills: Array<Array<{ bearing: number; distanceKm: number }>> = [];
   /** 上次畫輪廓用的資料和比例：一樣的話只平移 */
-  private outlineBuilt: { rings: unknown; lines: unknown; k: number; heading: number; unit: number; space: boolean } | null = null;
+  private outlineBuilt: { rings: unknown; lines: unknown; fills: unknown; k: number; heading: number; unit: number; space: boolean } | null = null;
 
   /** 放大時的街道；null 不畫。shift：道路的錨點到正中間的位移（公里，東、北），拖曳時只改這個 */
   setStreets(s: RadarStreets | null, shift: [number, number] = [0, 0]): void {
@@ -2778,17 +2784,20 @@ export class Radar {
     const unit = this.squarePx > 0 ? SIZE / this.squarePx : 1;
     const b = this.outlineBuilt;
     // 資料、比例、方向都沒變（拖曳中只有位移）：不重畫，裡面那層平移（裁切的圓不動）
-    if (!(b && b.rings === this.outline && b.lines === this.outlineLines && b.k === k && b.heading === this.heading && b.unit === unit && b.space === this.inSpace)) {
-      this.outlineBuilt = { rings: this.outline, lines: this.outlineLines, k, heading: this.heading, unit, space: this.inSpace };
+    if (!(b && b.rings === this.outline && b.lines === this.outlineLines && b.fills === this.outlineFills && b.k === k && b.heading === this.heading && b.unit === unit && b.space === this.inSpace)) {
+      this.outlineBuilt = { rings: this.outline, lines: this.outlineLines, fills: this.outlineFills, k, heading: this.heading, unit, space: this.inSpace };
       this.outlineLayer.replaceChildren();
       // 太空：陸地畫在地球上（space.ts）
       if (this.inSpace) return;
       const inner = el('g');
+      // 有畫地圖的國家塗淡淡的底色（整個形狀一起畫，畫面外的被裁掉；湖照 evenodd 挖成洞）
+      const fill = this.outlineFills.map((r) => this.fillPath(r)).join(' ');
+      if (fill) inner.appendChild(el('path', { class: 'country-fill', d: fill }));
       for (const ring of this.outline) {
         if (ring.length < 3) continue;
         const p = this.outlinePath(ring);
-        // 斷開的只畫線、不填色（填色會把斷開的兩端直接連起來）
-        if (p) inner.appendChild(el('path', { class: `region-outline${p.closed ? '' : ' open'}`, d: p.d }));
+        // 海岸線只畫線、不塗色（v1.756 以前整圈都畫到的島、大陸都塗，拉遠時每個國家都變淺綠）
+        if (p) inner.appendChild(el('path', { class: 'region-outline open', d: p.d }));
       }
       // 縣市交界合成一條 path
       const d = this.outlineLines.map((l) => this.outlinePath(l, true)?.d ?? '').join(' ');
@@ -2853,6 +2862,18 @@ export class Radar {
     }
     if (parts.length < 2) return null;
     return broken || open ? { d: parts.join(' '), closed: false } : { d: `${parts.join(' ')} Z`, closed: true };
+  }
+
+  /** 塗底色的一個形狀：每一點都換算（不斷開，畫面外的被裁掉），畫面上太細的彎折拉直 */
+  private fillPath(ring: Array<{ bearing: number; distanceKm: number }>): string {
+    if (ring.length < 3) return '';
+    const unit = this.squarePx > 0 ? SIZE / this.squarePx : 1;
+    const pts = simplifyPts(
+      ring.map((pt) => polar(pt.bearing - this.heading, this.ratio(pt.distanceKm) * (R - 8))),
+      2 * unit,
+    );
+    if (pts.length < 3) return '';
+    return `${pts.map((p, i) => `${i === 0 ? 'M' : 'L'}${p.x.toFixed(1)} ${p.y.toFixed(1)}`).join('')}Z`;
   }
 
   /** 路線畫在光點下面；超出範圍的部分被外圈裁掉 */

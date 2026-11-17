@@ -948,6 +948,28 @@ const chinaLine = new WeakMap<Float64Array, boolean>();
 /** 輪廓是照哪一點算的（拖曳中照這一點平移） */
 let outlineAt: LatLng | null = null;
 let radarOutline: Array<Array<{ bearing: number; distanceKm: number }>> = [];
+/** 拉遠到這裡以上，有畫地圖的國家（台灣、荷蘭、日本、南韓、美國）塗淡淡的底色，其他國家只畫海岸線（雷達、地圖頁；地球一直塗） */
+const FILL_KM = 200;
+/** 塗底色的形狀：台灣加上 country-fill.ts（第一次用到才載入），還沒載入是只有台灣 */
+let countryFill: Array<Array<[number, number]>> = TAIWAN_RINGS;
+let countryFillLoaded = false;
+let countryFillLoading = false;
+function loadCountryFill(): void {
+  if (countryFillLoaded || countryFillLoading) return;
+  countryFillLoading = true;
+  void import('./country-fill')
+    .then((m) => {
+      countryFill = [...TAIWAN_RINGS, ...m.COUNTRY_FILL];
+      countryFillLoaded = true;
+      outlineFor = '';
+      spaceFor = '';
+      updateOutline();
+      updateSpace();
+    })
+    .finally(() => {
+      countryFillLoading = false;
+    });
+}
 
 /** 範圍比 16 km 大時畫的海岸線：台灣用詳細的，加上全世界的（約 30 KB，第一次用到才載入；世界資料裡的台灣只有幾個點，換掉） */
 let landRings: Array<Array<[number, number]>> = TAIWAN_RINGS;
@@ -2047,12 +2069,15 @@ function updateSpace(): void {
   // 晝夜、月球、行星位置每 10 分鐘換一次
   const slot = Math.floor(Date.now() / 600_000);
   const map = woofMap();
-  const key = `${worldLoaded}|${origin.lat},${origin.lng}|${slot}|${youOn}|${map}`;
+  const key = `${worldLoaded}|${countryFillLoaded}|${origin.lat},${origin.lng}|${slot}|${youOn}|${map}`;
   if (key === spaceFor) return;
   spaceFor = key;
   const mod = spaceMod;
   const center = { lat: origin.lat, lng: origin.lng };
   const land = landRings;
+  // 地球上只有有畫地圖的國家塗底色
+  loadCountryFill();
+  const fill = countryFill;
   const when = new Date();
   const you = youOn;
   // 汪星的狗走完一段：重畫汪星（下一段）；每一格照指北針轉回來
@@ -2061,7 +2086,7 @@ function updateSpace(): void {
     p.onDogMove(() => radar.redrawPark(), () => radar.headingDeg);
     p.loadSniffMarks();
   });
-  radar.setSpace((km, rg, view) => mod.spaceMarkup({ center, land, when, scaleKm: km, rg, view, streets: woofStreets, you, woofMap: map, bottles: map && bottlesOn() ? woofBottleMarks(km) : undefined }), mod.bodyRadiusKm);
+  radar.setSpace((km, rg, view) => mod.spaceMarkup({ center, land, fill, when, scaleKm: km, rg, view, streets: woofStreets, you, woofMap: map, bottles: map && bottlesOn() ? woofBottleMarks(km) : undefined }), mod.bodyRadiusKm);
 }
 
 /**
@@ -2119,7 +2144,10 @@ function updateOutline(): void {
   // 縣市界（加上荷蘭的省界、國界，日本的都道府縣界）
   const lines = kind === 'land' && scaleKm <= COUNTY_MAX_KM ? (regions.length > 0 ? [...countyLines, ...regions.flatMap((r) => r.map.lines)] : countyLines) : [];
   const mapRings = kind === 'land' && scaleKm > MAP_OUTLINE_KM ? landRings : null;
-  const base = sources ? `${kind}|${worldLoaded}|${!!ea}|${regions.length}|${china}|${lines.length > 0}|${!!mapRings}|${tier}` : '';
+  // 拉遠：有畫地圖的國家塗底色（海岸線不塗：以前整圈都畫到的島、大陸都塗，拉遠時每個國家都變淺綠）
+  const filled = kind === 'land' && scaleKm >= FILL_KM;
+  if (filled) loadCountryFill();
+  const base = sources ? `${kind}|${worldLoaded}|${!!ea}|${regions.length}|${china}|${lines.length > 0}|${!!mapRings}|${tier}|${filled}|${countryFillLoaded}` : '';
   // 拖曳中移動不到範圍的一半：不重算（每一點都要算方位、距離，拉遠時點很多），雷達照位移整層平移（v1.719 使用者說快速拖很遠時地圖跟不上、越縮小越明顯）。
   // 平移最多 FLAT_PAN_KM，再遠照新的位置重算：拉遠到幾千公里時平移跟真的差很多，光點照球面轉、海岸線只是平移（v1.743）
   if (panFrom && outlineAt && base && outlineFor.startsWith(`${base}|`)) {
@@ -2159,8 +2187,17 @@ function updateOutline(): void {
     return out;
   };
   radarOutline = sources ? sources.map((s) => toRadar(coarseRing(s.ring, tier), s.skip)).filter((r) => r.some((p) => p !== FAR_POINT)) : [];
-  radar.setOutline(radarOutline, lines.map((l) => toRadar(coarseRing(l, tier))).filter((r) => r.length > 1));
-  map.setOutline(mapRings ?? []);
+  // 塗底色的形狀整圈都換算（畫面外的被裁掉）：整個在附近的範圍外、或有一點超過 12000 km（地球的另一面，形狀會扭曲）的不畫
+  const fills = filled
+    ? countryFill
+        .map((ring) => {
+          const vecs = ringVectors(ring);
+          return ring.map((_, i) => look(vecs, i));
+        })
+        .filter((r) => r.some((p) => p.distanceKm < reach) && r.every((p) => p.distanceKm < 12000))
+    : [];
+  radar.setOutline(radarOutline, lines.map((l) => toRadar(coarseRing(l, tier))).filter((r) => r.length > 1), fills);
+  map.setOutline(mapRings ?? [], mapRings && filled ? countryFill : []);
 }
 
 // ---- 車掃路線 ----
