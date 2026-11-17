@@ -151,6 +151,7 @@ button, select, a { touch-action: manipulation; }
 /* 切換雷達的箭頭（v1.616 使用者說可以大一點） */
 .module-caret { font-size: 18px; line-height: 1; opacity: 0.85; }
 .module-item .emoji { flex: 0 0 auto; font-size: 26px; width: 36px; text-align: center; }
+.module-item .emoji svg { display: block; margin: 0 auto; }
 /* 職缺的防詐提醒 */
 .fraud-box { margin: 0 0 12px; padding: 10px 12px; border-radius: var(--card-radius); background: #fff4e5; color: #4a2c00; border: 1.5px solid #f0a020; font-size: 13px; line-height: 1.6; }
 .fraud-box b { display: block; margin-bottom: 4px; font-size: 14px; }

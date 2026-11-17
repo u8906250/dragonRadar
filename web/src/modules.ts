@@ -13,6 +13,8 @@ export interface ModuleDef {
   /** 切換選單上的說明 */
   tagline: string;
   emoji: string;
+  /** 切換選單上的小圖（SVG），沒有就用 emoji */
+  icon?: string;
   /** 洋流才有：官方航線、車掃、漂流瓶、地標、搜尋關鍵字、開始時推播 */
   current: boolean;
   /** 清單上一個項目的量詞 */
@@ -28,6 +30,9 @@ export interface ModuleDef {
   /** 「說明」按鈕打開的頁面 */
   helpPage: string;
 }
+
+/** 紅貴賓（狗狗陪伴的小圖，v1.752 使用者說換紅貴賓）：捲捲的頭頂、垂下來的捲毛耳朵、淺一點的嘴巴，emoji 的貴賓狗是灰白的 */
+const RED_POODLE = '<svg viewBox="0 0 40 40" width="34" height="34" aria-hidden="true"><g fill="#b4532b"><circle cx="9" cy="17" r="5"/><circle cx="7.6" cy="23" r="5"/><circle cx="8.6" cy="29" r="4.6"/><circle cx="31" cy="17" r="5"/><circle cx="32.4" cy="23" r="5"/><circle cx="31.4" cy="29" r="4.6"/></g><g fill="#c8693a"><circle cx="13.5" cy="10" r="5.6"/><circle cx="20" cy="7" r="6.4"/><circle cx="26.5" cy="10" r="5.6"/><ellipse cx="20" cy="20" rx="10" ry="10.4"/></g><g fill="none" stroke="#8f3d1d" stroke-width="1.1" stroke-linecap="round"><path d="M6 21 q2 -2 4 0 M6.5 27 q2 -2 4 0 M29.5 21 q2 -2 4 0 M29.5 27 q2 -2 4 0 M16.5 6 q2 -2 4 0 M21 9 q2 -2 4 0 M11 11 q2 -2 4 0"/></g><ellipse cx="20" cy="25.6" rx="5.6" ry="4.6" fill="#e0925c"/><circle cx="15.6" cy="19.2" r="2" fill="#2b1810"/><circle cx="24.4" cy="19.2" r="2" fill="#2b1810"/><circle cx="16.2" cy="18.5" r="0.7" fill="#fff"/><circle cx="25" cy="18.5" r="0.7" fill="#fff"/><ellipse cx="20" cy="23.6" rx="2.1" ry="1.5" fill="#2b1810"/><path d="M20 25 v1.6 M17.6 27 q2.4 1.8 4.8 0" fill="none" stroke="#2b1810" stroke-width="1" stroke-linecap="round"/><path d="M19 27.9 q1 2.6 2 0 z" fill="#ef8a8a"/></svg>';
 
 /** 洋流的回報說明（改版後只判斷活動）；index.html 的 #report-intro 也是這段 */
 const REPORT_INTRO = '看到活動的 Threads 貼文，或 ACCUPASS 活動通、OPENTIX、Peatix、Luma 的活動頁？貼上連結，雷達會判斷是什麼活動（遊行、講座、市集、表演…），讀出活動內容、地點、開始時間，三個都讀到才會標到地圖上給大家看；沒寫幾點開始的從發文的時間算，結束時間可以不寫。';
@@ -55,6 +60,7 @@ export const MODULES: ModuleDef[] = [
     short: '狗狗陪伴',
     tagline: '附近徵人照顧狗狗的工作，和可以幫忙照顧狗狗的人（請注意安全）',
     emoji: '🐶',
+    icon: RED_POODLE,
     current: false,
     unit: '個刊登',
     emptyText: '附近還沒有狗狗陪伴的刊登',

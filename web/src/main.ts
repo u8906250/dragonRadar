@@ -6997,7 +6997,7 @@ function renderModuleList(): void {
     b.type = 'button';
     b.className = `theme-item module-item${m.id === mod.id ? ' on' : ''}`;
     const n = moduleCounts?.counts.get(m.id) ?? 0;
-    b.innerHTML = `<span class="emoji" aria-hidden="true">${m.emoji}</span><span><b>${esc(m.name)}</b><small>${esc(m.tagline)}</small></span>${n > 0 ? `<span class="mod-count">${n} 筆</span>` : ''}${m.id === mod.id ? '<span class="check">✓</span>' : ''}`;
+    b.innerHTML = `<span class="emoji" aria-hidden="true">${m.icon ?? m.emoji}</span><span><b>${esc(m.name)}</b><small>${esc(m.tagline)}</small></span>${n > 0 ? `<span class="mod-count">${n} 筆</span>` : ''}${m.id === mod.id ? '<span class="check">✓</span>' : ''}`;
     b.addEventListener('click', () => {
       const link = pendingShare;
       pendingShare = null;
