@@ -118,7 +118,7 @@ MODULES.push({
   name: '找工作',
   short: '找工作',
   tagline: '附近的短期、兼職、工讀，和想找這類工作的人（請注意安全）',
-  emoji: '💼',
+  emoji: '🐝',
   current: false,
   unit: '個刊登',
   emptyText: '附近還沒有找工作的刊登',
