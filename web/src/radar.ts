@@ -1302,7 +1302,8 @@ export class Radar {
       lastTap = { t: e.timeStamp, x: e.clientX, y: e.clientY };
       if (prev && e.timeStamp - prev.t < DOUBLE_TAP_MS && Math.hypot(e.clientX - prev.x, e.clientY - prev.y) < DOUBLE_TAP_PX) {
         lastTap = null;
-        this.zoomInStep(onZoom);
+        // 滑鼠點兩下：以點的地方為準放大（跟滾輪一樣）；手指點兩下照舊以正中間為準
+        this.zoomInStep(onZoom, e.pointerType === 'mouse' ? { x: e.clientX, y: e.clientY } : undefined);
       }
     };
     svg.addEventListener('pointerdown', (e) => {
@@ -1348,14 +1349,8 @@ export class Radar {
       if (this.pinchDist > 0 && d > 0) {
         const before = this.scaleKm;
         onZoom(this.pinchDist / d, false);
-        // 縮放時兩根手指中間那一點不動：以正中間縮放後，那一點離正中間的距離變成 1/f 倍，地圖往回拉（太空裡不用）
-        const f = this.scaleKm / before;
-        const c = this.svg.getScreenCTM();
-        if (f !== 1 && Number.isFinite(f) && c && !this.inSpace && !this.earthHidden) {
-          const center = new DOMPoint(C, C).matrixTransform(c);
-          const [vx, vy] = [mid.x - center.x, mid.y - center.y];
-          this.panBy((-vx * (1 - f)) / f, (-vy * (1 - f)) / f);
-        }
+        // 縮放時兩根手指中間那一點不動
+        this.keepPoint(mid.x, mid.y, this.scaleKm / before);
         pinchLog += Math.log(this.pinchDist / d);
         pinchSamples.push({ t: e.timeStamp, z: pinchLog });
         // 留一筆比 FLING_SAMPLE_MS 早的，速度才算得到整段
@@ -1411,14 +1406,22 @@ export class Radar {
     svg.addEventListener('pointerleave', end);
     // iOS Safari 的整頁縮放
     svg.addEventListener('gesturestart', (e) => e.preventDefault());
-    // 滾輪滑順：每次滾的量先疊到 wheelLeft（ln），每一格畫面走剩下的一部分；走完、停了 WHEEL_DONE_MS 算縮放結束
+    // 滾輪滑順：每次滾的量先疊到 wheelLeft（ln），每一格畫面走剩下的一部分；走完、停了 WHEEL_DONE_MS 算縮放結束。
+    // 以滑鼠的位置為準縮放（像 Google 地圖；使用者說桌面版要跟著滑鼠的位置放大縮小）：滑鼠底下那一點不動，中心跟著移動
     let wheelTimer = 0;
     let wheelLeft = 0;
     let wheelFrame = 0;
     let wheelLast = 0;
+    let wheelAt: { x: number; y: number } | null = null;
+    let wheelMoved = false;
+    const wheelEnd = (): void => {
+      onZoom(1, true);
+      if (wheelMoved) this.panDone();
+      wheelMoved = false;
+    };
     const wheelDone = (): void => {
       window.clearTimeout(wheelTimer);
-      wheelTimer = window.setTimeout(() => onZoom(1, true), WHEEL_DONE_MS);
+      wheelTimer = window.setTimeout(wheelEnd, WHEEL_DONE_MS);
     };
     const wheelStep = (now: number): void => {
       const dt = Math.min(50, Math.max(0, now - wheelLast));
@@ -1426,7 +1429,9 @@ export class Radar {
       let move = wheelLeft * (1 - Math.exp(-dt / WHEEL_TAU_MS));
       if (Math.abs(wheelLeft - move) < 0.002) move = wheelLeft;
       wheelLeft -= move;
+      const before = this.scaleKm;
       onZoom(Math.exp(move), false);
+      if (wheelAt && this.keepPoint(wheelAt.x, wheelAt.y, this.scaleKm / before)) wheelMoved = true;
       if (wheelLeft) {
         wheelFrame = requestAnimationFrame(wheelStep);
         return;
@@ -1440,7 +1445,7 @@ export class Radar {
       wheelFrame = 0;
       wheelLeft = 0;
       window.clearTimeout(wheelTimer);
-      onZoom(1, true);
+      wheelEnd();
     };
     document.addEventListener(
       'pointerdown',
@@ -1460,6 +1465,7 @@ export class Radar {
         // 一格滾輪約 100 像素；有的瀏覽器用「行」「頁」當單位
         const px = e.deltaY * (e.deltaMode === 1 ? 33 : e.deltaMode === 2 ? 800 : 1);
         const step = Math.max(-100, Math.min(100, px)) * 0.003;
+        wheelAt = { x: e.clientX, y: e.clientY };
         window.clearTimeout(wheelTimer);
         // 減少動態效果的電腦也照樣慢慢縮放（使用者要看得到縮放）
         wheelLeft = Math.max(-WHEEL_MAX, Math.min(WHEEL_MAX, wheelLeft + step));
@@ -1472,16 +1478,19 @@ export class Radar {
     );
   }
 
-  /** 點兩下放大：範圍縮成一半（以正中間為準，跟捏合、滾輪一樣），0.5 秒慢慢拉近（減少動態效果的也一樣） */
-  private zoomInStep(onZoom: (factor: number, done: boolean) => void): void {
+  /** 點兩下放大：範圍縮成一半，0.5 秒慢慢拉近（減少動態效果的也一樣）；at 是滑鼠點的地方（那一點不動），沒有是以正中間為準 */
+  private zoomInStep(onZoom: (factor: number, done: boolean) => void, at?: { x: number; y: number }): void {
     if (this.tapZoom) return;
     const total = Math.log(0.5);
     const t0 = performance.now();
     let done = 0;
+    let moved = false;
     const step = (now: number): void => {
       const k = Math.min(1, (now - t0) / TAP_ZOOM_MS);
       const eased = 1 - (1 - k) ** 3;
+      const before = this.scaleKm;
       onZoom(Math.exp(total * (eased - done)), false);
+      if (at && this.keepPoint(at.x, at.y, this.scaleKm / before)) moved = true;
       done = eased;
       if (k < 1) {
         this.tapZoom = requestAnimationFrame(step);
@@ -1489,8 +1498,23 @@ export class Radar {
       }
       this.tapZoom = 0;
       onZoom(1, true);
+      if (moved) this.panDone();
     };
     this.tapZoom = requestAnimationFrame(step);
+  }
+
+  /**
+   * 以正中間縮放了 f 倍（範圍變成 f 倍）之後，讓螢幕上 (x, y) 那一點不動（捏合的兩指中間、滑鼠的位置）：
+   * 那一點離正中間的距離變成 1/f 倍，地圖往回拉（移動中心）；太空裡不用。有移動回傳 true（縮放完要算拖完）
+   */
+  private keepPoint(x: number, y: number, f: number): boolean {
+    const c = this.svg.getScreenCTM();
+    if (f === 1 || !Number.isFinite(f) || !c || this.inSpace || this.earthHidden) return false;
+    const center = new DOMPoint(C, C).matrixTransform(c);
+    const [vx, vy] = [x - center.x, y - center.y];
+    if (Math.hypot(vx, vy) < 1) return false;
+    this.panBy((-vx * (1 - f)) / f, (-vy * (1 - f)) / f);
+    return true;
   }
 
   /** 單指拖曳：移動超過 8 像素才開始；畫面上往哪拖，內容就往哪移，中心（你的位置）往反方向 */
