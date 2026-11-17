@@ -4799,6 +4799,17 @@ function openFeedback(ev: EventOut, fromRoute?: RouteOut, fixStop?: number): voi
   }
   $('#feedback-stop-row').hidden = !route;
   $('#feedback-remove-stop').hidden = !route;
+  // 類型錯誤：只有活動雷達的活動有類型（車掃不算），選項跟搜尋框下面的類型按鈕一樣，現在的類型不能選
+  const typed = mod.current && ev.kind === 'activity' && !route;
+  $('#feedback-topic-kind').hidden = !typed;
+  const curType = typed ? typeOf(ev) : null;
+  $('#feedback-topic-list').innerHTML = typed
+    ? TOPIC_TYPES.map(
+        (t) =>
+          `<label${t.key === curType ? ' class="now"' : ''}><input type="radio" name="topic" value="${t.label}"${t.key === curType ? ' disabled' : ''} />${topicChipSvg(t.key)}${t.label}${t.key === curType ? '<small>現在</small>' : ''}</label>`,
+      ).join('')
+    : '';
+  $('#feedback-topics').hidden = true;
   const fix = route && fixStop !== undefined ? route.stops[fixStop] : undefined;
   if (fix) {
     select.value = String(fixStop);
@@ -4951,8 +4962,13 @@ async function submitFeedback(): Promise<void> {
     feedbackNote.focus();
     return;
   }
+  const topic = kind === 'topic' ? (feedbackForm.elements.namedItem('topic') as RadioNodeList | null)?.value || '' : '';
+  if (kind === 'topic' && !topic) {
+    showBanner(bannerEl, '請選正確的類型', 3000);
+    return;
+  }
   feedbackSubmit.disabled = true;
-  const r = await sendFeedback(feedbackEventId, kind, note, stop ? { title: stop.title, at: stop.at } : undefined, pin);
+  const r = await sendFeedback(feedbackEventId, kind, note, stop ? { title: stop.title, at: stop.at } : undefined, pin, topic || null);
   feedbackSubmit.disabled = false;
   if (!r.ok) {
     showBanner(bannerEl, r.message, 4000);
@@ -9090,10 +9106,11 @@ function wireControls(): void {
     e.preventDefault();
     void submitFeedback();
   });
-  // 換類型、換站：地點錯誤才顯示小地圖，換站重建
+  // 換類型、換站：地點錯誤才顯示小地圖，換站重建；類型錯誤才顯示選類型
   feedbackForm.addEventListener('change', (e) => {
     const t = e.target as HTMLElement;
     if (t.matches('input[name="kind"], #feedback-stop')) void syncFeedbackPin();
+    if (t.matches('input[name="kind"]')) $('#feedback-topics').hidden = (feedbackForm.elements.namedItem('kind') as RadioNodeList).value !== 'topic';
   });
   $('#feedback-unpin').addEventListener('click', () => {
     feedbackPicker?.set(null);

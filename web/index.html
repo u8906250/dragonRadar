@@ -200,10 +200,16 @@
             <label><input type="radio" name="kind" value="location" required /> 地點錯誤</label>
             <label><input type="radio" name="kind" value="time" /> 時間錯誤</label>
             <label><input type="radio" name="kind" value="content" /> 標題或內容錯誤</label>
+            <label id="feedback-topic-kind" hidden><input type="radio" name="kind" value="topic" /> 類型錯誤</label>
             <label><input type="radio" name="kind" value="not_event" /> 不是發放或活動</label>
             <label><input type="radio" name="kind" value="duplicate" /> 重複</label>
             <label id="feedback-remove-stop" hidden><input type="radio" name="kind" value="remove_stop" /> 刪除這一站（沒有這一站、取消了）</label>
             <label><input type="radio" name="kind" value="other" /> 其他</label>
+          </fieldset>
+          <!-- 類型錯誤：選正確的類型（跟搜尋框下面的類型按鈕一樣，管理者確認後才改） -->
+          <fieldset id="feedback-topics" class="feedback-kinds feedback-topics" hidden>
+            <legend>正確的類型是？</legend>
+            <div id="feedback-topic-list" class="feedback-topic-list"></div>
           </fieldset>
           <!-- 地點錯誤：在小地圖上標正確的位置（選填，管理者確認後才改） -->
           <div id="feedback-pin" class="feedback-pin" hidden>

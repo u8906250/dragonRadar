@@ -171,6 +171,8 @@
 
     /** 手動加的關鍵字：候選（採用、不要）、採用的（拿掉）、不要的（收在下面，可以改回採用） */
     const MODULE_NAMES = { current: '活動雷達', dog: '狗狗陪伴', badminton: '羽球臨打', food: '美食品味', work: '找工作' };
+    /** 回報「類型錯誤」可以改成的類型（跟網頁的類型按鈕、worker 的 FEEDBACK_TOPICS 一樣） */
+    const TOPICS = ['發放', '造勢', '講座', '表演', '市集', '工作坊', '遊行', '展覽', '志工', '聯誼'];
     const TAG_STATUS = { pending: '候選', adopted: '採用中', rejected: '不要' };
     function tagRow(t) {
       const btn = (to, label, primary = false) => `<button type="button" class="btn${primary ? ' primary' : ''}" data-tag-status="${to}" data-module="${esc(t.module)}" data-tag="${esc(t.tag)}">${label}</button>`;
@@ -385,6 +387,7 @@
             f.pin_lat != null
               ? `<div class="muted">回報的人在地圖上標了位置：<a href="https://www.google.com/maps/search/?api=1&query=${f.pin_lat},${f.pin_lng}" target="_blank" rel="noopener">${Number(f.pin_lat).toFixed(5)}, ${Number(f.pin_lng).toFixed(5)}</a></div>`
               : '';
+          const topicLine = f.topic ? `<div class="muted">回報的人選的類型：<strong>${esc(f.topic)}</strong>（現在：${esc(f.event_topic || '沒有類型')}）</div>` : '';
           // 改位置：車掃的站、地點錯誤、回報的人標了位置的
           const placeFix = f.stop || f.kind === 'location' || f.pin_lat != null;
           const links = [
@@ -421,6 +424,12 @@
                     : `<div class="row"><label class="time-input">開始<input type="datetime-local" data-start="${f.id}" value="${localInput(f.start_at)}" /></label><label class="time-input">結束<input type="datetime-local" data-end="${f.id}" value="${f.end_open ? '' : localInput(f.end_at)}" /></label><button type="button" class="btn primary" data-apply="event_time" data-id="${f.id}">修改時間</button></div>
               <p class="hint">直接改這一則的開始、結束（台灣時間），不經過 AI；結束空白是沒寫結束（雷達上排 2 小時）。之後重新判讀也會保留（補充改了時間、AI 讀出別的開始時間就照新的）。</p>`
               }
+              ${
+                f.kind === 'topic' && !f.stop
+                  ? `<div class="row"><select class="title-input" data-topic="${f.id}" aria-label="類型">${TOPICS.map((t) => `<option${t === f.topic ? ' selected' : ''}>${t}</option>`).join('')}</select><button type="button" class="btn primary" data-apply="topic" data-id="${f.id}">改類型</button></div>
+              <p class="hint">改這個地點的活動類型（雷達、地圖的小圖示和類型按鈕照這個；同一則貼文同一個地點還沒結束的一起改），不經過 AI，之後重新判讀也會保留。</p>`
+                  : ''
+              }
               <div class="row"><input type="text" class="title-input" data-title="${f.id}" maxlength="30" value="${esc(curTitle)}" aria-label="新標題" /><button type="button" class="btn primary" data-apply="title" data-id="${f.id}">改標題</button></div>
               <p class="hint">改標題：直接改這個地點的標題（固定據點的每天時段一起改），不經過 AI，之後重新判讀也會保留。</p>
               ${canReprocess ? `<textarea rows="2" maxlength="200" data-note="${f.id}" placeholder="要補充給 AI 的內容，例如：地點是○○路12號、時間是 15:00 開始">${esc(prefill)}</textarea>` : ''}
@@ -432,7 +441,7 @@
                     : `<button type="button" class="btn" data-apply="takedown" data-scope="${takedownScope}" data-id="${f.id}">${takedownScope === 'post' ? '整則從雷達下架' : '從雷達下架'}</button>`
                 }
               </div>
-              <p class="hint">${canReprocess ? '套用：把上面的內容加到這則貼文的補充，用現在的規則重新判讀（手動改過的地點、時間、標題會保留）。' : '官方行程、新聞不能重新判讀。'}${f.stop ? '刪除這一站：從車掃的時間表、路線、雷達拿掉這一站，其他站照舊。' : ''}套用或下架後自動標成已處理。</p>
+              <p class="hint">${canReprocess ? '套用：把上面的內容加到這則貼文的補充，用現在的規則重新判讀（手動改過的地點、時間、標題、類型會保留）。' : '官方行程、新聞不能重新判讀。'}${f.stop ? '刪除這一站：從車掃的時間表、路線、雷達拿掉這一站，其他站照舊。' : ''}套用或下架後自動標成已處理。</p>
             </div>`
               : '';
           return `<li class="fb">
@@ -440,6 +449,7 @@
             <b>${esc(f.title)}${renamed}</b>
             ${stopLine}
             ${pinLine}
+            ${topicLine}
             <div class="muted">地點：${esc(f.stop ? f.place_text || '' : f.event_place || f.place_text || '')}${!f.stop && f.approx_area ? `（約略位置：${esc(f.approx_area)}）` : ''}</div>
             <div class="muted">事件：#${f.event_id}・${esc(evState)}${f.start_at ? `・${when(f.start_at)} 開始` : ''}${f.username ? `・@${esc(f.username)}` : ''}</div>
             ${f.supplement ? `<div class="muted">補充：${esc(f.supplement)}</div>` : ''}
@@ -618,6 +628,8 @@
             return;
           }
           if (action === 'event_time') body.end = unixOf(document.querySelector(`input[data-end="${id}"]`)?.value);
+        } else if (action === 'topic') {
+          body.topic = document.querySelector(`select[data-topic="${id}"]`)?.value ?? '';
         } else if (action === 'remove_stop') {
           if (!confirm('確定刪除這一站？車掃的時間表、路線、雷達上的點都會拿掉這一站。')) return;
         } else {
@@ -625,7 +637,7 @@
           if (!confirm(body.scope === 'post' ? '確定把這則貼文的發放、活動都從雷達下架？' : '確定把這一則從雷達下架？')) return;
         }
         for (const x of a.closest('.apply').querySelectorAll('button, textarea, input')) x.disabled = true;
-        a.textContent = action === 'supplement' ? '重新判讀中…' : action === 'title' || action === 'stop_place' || action === 'event_place' || action === 'event_time' || action === 'stop_time' ? '修改中…' : action === 'remove_stop' ? '刪除中…' : '下架中…';
+        a.textContent = action === 'supplement' ? '重新判讀中…' : action === 'title' || action === 'topic' || action === 'stop_place' || action === 'event_place' || action === 'event_time' || action === 'stop_time' ? '修改中…' : action === 'remove_stop' ? '刪除中…' : '下架中…';
         try {
           const r = await api(`/api/admin/feedback/${id}/apply`, { method: 'POST', body: JSON.stringify(body) });
           forget(id);
@@ -634,6 +646,8 @@
           showResult(
             action === 'title'
               ? `已改標題（${r.changed ?? 0} 筆），標成已處理。現在雷達上這則貼文的：<ul>${list}</ul>`
+              : action === 'topic'
+              ? `已改類型（${r.changed ?? 0} 筆），標成已處理。現在雷達上這則貼文的：<ul>${list}</ul>`
               : action === 'supplement'
                 ? `已套用並重新判讀，標成已處理。現在雷達上的：${list ? `<ul>${list}</ul>` : '沒有（這次判讀沒有放上雷達，可以在「已處理」改回未處理再調整）'}${lost}`
                 : action === 'stop_place'

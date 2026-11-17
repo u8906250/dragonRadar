@@ -534,6 +534,24 @@ describe('applyManualFixes', () => {
     expect(both.end_at).toBeNull();
   });
 
+  it('uses the type the admin picked for the same place', () => {
+    const topicFix = (key: string, topic: string): ManualFix => ({ kind: 'topic', placeKey: key, atKey: 0, lat: null, lng: null, placeText: null, startAt: null, endAt: null, topic });
+    const e = { ...ex('莒光路'), extra: { topic: '開講', tags: ['洋流'] } };
+    expect(applyManualFixes(e, [topicFix('莒光路', '講座')])).toMatchObject({ point: null, timeFixed: false });
+    expect(e.extra).toEqual({ topic: '講座', tags: ['洋流'] });
+    // 判讀不出主題的也補上；別的地點不動
+    const none = ex('莒光路');
+    applyManualFixes(none, [topicFix('莒光路', '表演')]);
+    expect(none.extra).toEqual({ topic: '表演' });
+    const other = { ...ex('長泰街'), extra: { topic: '開講' } };
+    applyManualFixes(other, [topicFix('莒光路', '講座')]);
+    expect(other.extra).toEqual({ topic: '開講' });
+    // 先改地點名稱再改類型：類型記在新的名稱
+    const renamed = ex('莒光路');
+    applyManualFixes(renamed, [{ kind: 'place', placeKey: '莒光路', atKey: 0, lat: 25.01, lng: 121.46, placeText: '莒光路 1 號前', startAt: null, endAt: null }, topicFix('莒光路1號前', '市集')]);
+    expect(renamed.extra).toEqual({ topic: '市集' });
+  });
+
   it('keeps the stop name and skips the same-point check for a pinned stop on the route', () => {
     const at = (title: string, place: string, t: number, manualPlace?: PlanItem['manualPlace']): PlanItem => ({
       group: 0,

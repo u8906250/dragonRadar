@@ -202,16 +202,23 @@ export const deleteBottle = (id: number): Promise<Result<{ ok: true }>> => devic
 /** 移出漂流瓶收藏（之後就看不到這封信了） */
 export const uncollectLetter = (id: number): Promise<Result<{ collected: boolean }>> => deviceJson<{ collected: boolean }>(`/api/bottles/${id}/uncollect`, 'POST', {});
 /** 回報問題（地點錯誤、時間錯誤…），只有管理者看得到；車掃可以指定哪一站（那一站的標題、預計經過時間） */
-export type FeedbackKind = 'location' | 'time' | 'content' | 'not_event' | 'duplicate' | 'remove_stop' | 'other';
-/** pin：地點錯誤時在小地圖上標的正確位置 */
+export type FeedbackKind = 'location' | 'time' | 'content' | 'topic' | 'not_event' | 'duplicate' | 'remove_stop' | 'other';
+/** pin：地點錯誤時在小地圖上標的正確位置；topic：類型錯誤時選的正確類型（「講座」） */
 export const sendFeedback = (
   eventId: number,
   kind: FeedbackKind,
   note: string,
   stop?: { title: string; at: number | null },
   pin?: { lat: number; lng: number } | null,
+  topic?: string | null,
 ): Promise<Result<{ ok: true; duplicate: boolean }>> =>
-  deviceJson<{ ok: true; duplicate: boolean }>(`/api/events/${eventId}/feedback`, 'POST', { kind, note, ...(stop ? { stop: stop.title, stopAt: stop.at } : {}), ...(pin ? { lat: pin.lat, lng: pin.lng } : {}) });
+  deviceJson<{ ok: true; duplicate: boolean }>(`/api/events/${eventId}/feedback`, 'POST', {
+    kind,
+    note,
+    ...(stop ? { stop: stop.title, stopAt: stop.at } : {}),
+    ...(pin ? { lat: pin.lat, lng: pin.lng } : {}),
+    ...(topic ? { topic } : {}),
+  });
 /** 回報地點錯誤的「查地點」：查到的標在表單的小地圖上 */
 export const locateFeedbackPlace = (eventId: number, place: string): Promise<Result<{ found: boolean; lat: number | null; lng: number | null; name: string | null; approxArea: string | null }>> =>
   deviceJson(`/api/events/${eventId}/locate`, 'POST', { place });

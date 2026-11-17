@@ -2500,6 +2500,15 @@ body.letters-open { overflow: hidden; }
 .feedback-kinds label { display: inline-flex; align-items: center; gap: 6px; font-size: 14px; color: var(--text); background: var(--card); border: var(--border-w) solid var(--line); border-radius: var(--radius); padding: 8px 12px; min-height: 40px; cursor: pointer; }
 .feedback-kinds label:has(input:checked) { border-color: var(--accent); box-shadow: inset 0 0 0 1px var(--accent); }
 .feedback-kinds input { accent-color: var(--accent); margin: 0; }
+/* 類型錯誤：選正確的類型（跟搜尋框下面的類型按鈕一樣有小圖示），現在的類型淡淡的、不能選 */
+.feedback-topics[hidden] { display: none; }
+.feedback-topics { display: block; margin: 2px 0 8px; }
+.feedback-topics legend { font-size: 13px; color: var(--muted); margin-bottom: 6px; padding: 0; }
+.feedback-topic-list { display: flex; flex-wrap: wrap; gap: 6px; }
+.feedback-topics label { gap: 4px; padding: 6px 10px; min-height: 36px; }
+.feedback-topics .type-ic { width: 18px; height: 18px; flex: none; }
+.feedback-topics label.now { opacity: 0.55; cursor: default; }
+.feedback-topics label small { font-size: 11px; color: var(--muted); }
 .feedback-form textarea { font: inherit; font-size: 16px; color: var(--text); background: var(--card); resize: none; border: var(--border-w) solid var(--line); border-radius: var(--card-radius); padding: 10px 12px; }
 .admin-link { display: block; color: var(--muted); margin-top: -4px; }
 .admin-link[hidden] { display: none; }

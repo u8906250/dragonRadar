@@ -1488,9 +1488,9 @@ export async function setRouteStopTime(env: Env, postId: string, title: string, 
   return 1;
 }
 
-/** 管理者處理回報時手動改的地點、時間（manual_fixes）：重新判讀時套回去 */
+/** 管理者處理回報時手動改的地點、時間、類型（manual_fixes）：重新判讀時套回去 */
 export interface ManualFix {
-  kind: 'place' | 'time';
+  kind: 'place' | 'time' | 'topic';
   /** 判讀出來的地點文字（去掉空白） */
   placeKey: string;
   /** 改時間：判讀出來的開始時間（車掃的站是預計經過時間） */
@@ -1500,21 +1500,33 @@ export interface ManualFix {
   placeText: string | null;
   startAt: number | null;
   endAt: number | null;
+  /** 改類型：這個地點的活動類型（「講座」） */
+  topic?: string | null;
 }
 
 /** 比對地點文字用：去掉空白 */
 export const placeKeyOf = (s: string): string => s.replace(/\s+/g, '');
 
 async function manualFixesOf(env: Env, postId: string): Promise<ManualFix[]> {
-  const { results } = await env.DB.prepare('SELECT kind, place_key, at_key, lat, lng, place_text, start_at, end_at FROM manual_fixes WHERE post_id = ?')
+  const { results } = await env.DB.prepare('SELECT kind, place_key, at_key, lat, lng, place_text, start_at, end_at, topic FROM manual_fixes WHERE post_id = ?')
     .bind(postId)
-    .all<{ kind: string; place_key: string; at_key: number; lat: number | null; lng: number | null; place_text: string | null; start_at: number | null; end_at: number | null }>();
-  return results.map((r) => ({ kind: r.kind === 'time' ? 'time' : 'place', placeKey: r.place_key, atKey: r.at_key, lat: r.lat, lng: r.lng, placeText: r.place_text, startAt: r.start_at, endAt: r.end_at }));
+    .all<{ kind: string; place_key: string; at_key: number; lat: number | null; lng: number | null; place_text: string | null; start_at: number | null; end_at: number | null; topic: string | null }>();
+  return results.map((r) => ({
+    kind: r.kind === 'time' || r.kind === 'topic' ? r.kind : 'place',
+    placeKey: r.place_key,
+    atKey: r.at_key,
+    lat: r.lat,
+    lng: r.lng,
+    placeText: r.place_text,
+    startAt: r.start_at,
+    endAt: r.end_at,
+    topic: r.topic,
+  }));
 }
 
 /**
  * 判讀出來的一筆套用手動改過的：地點（地點文字或查詢文字一樣的）改成管理者標的位置，有改地點名稱就連名稱一起改；
- * 時間（同一個地點、開始時間一樣的）改成管理者給的。ex 直接改；回傳標的位置（沒改過是 null，照常查地圖）、
+ * 時間（同一個地點、開始時間一樣的）改成管理者給的；類型（同一個地點的）改成管理者選的。ex 直接改；回傳標的位置（沒改過是 null，照常查地圖）、
  * 地點名稱改了時原本判讀出來的地點文字、時間有沒有改
  */
 export function applyManualFixes(ex: ExtractedEvent, fixes: ManualFix[]): { point: GeoPoint | null; placeFrom: string | null; timeFixed: boolean } {
@@ -1534,6 +1546,8 @@ export function applyManualFixes(ex: ExtractedEvent, fixes: ManualFix[]): { poin
     ex.start_at = new Date(time.startAt * 1000).toISOString();
     ex.end_at = time.endAt !== null ? new Date(time.endAt * 1000).toISOString() : null;
   }
+  const topic = fixes.find((f) => f.kind === 'topic' && f.topic && keys.includes(f.placeKey));
+  if (topic?.topic) ex.extra = { ...(ex.extra ?? {}), topic: topic.topic };
   return {
     point: place && place.lat !== null && place.lng !== null ? { lat: place.lat, lng: place.lng, displayName: ex.place_text ?? '' } : null,
     placeFrom: place?.placeText && from && placeKeyOf(from) !== placeKeyOf(place.placeText) ? from : null,
@@ -1769,17 +1783,22 @@ export async function setManualTitle(env: Env, eventId: number, title: string, n
 }
 
 /**
- * 管理者改活動的主題（同一則貼文、同一個地點還沒結束的一起改；v1.675 使用者說「政治主題 Open Mic」歸類到講座）：
- * 存在 extra.topic，雷達、地圖的小圖示、清單的標籤照這個。重新判讀這則貼文會換回 AI 判的
+ * 管理者改活動的主題（同一則貼文、同一個地點還沒結束的一起改；v1.675 使用者說「政治主題 Open Mic」歸類到講座，
+ * v1.753 回報問題的「類型錯誤」也用這個）：存在 extra.topic，雷達、地圖的小圖示、清單的標籤、類型按鈕照這個。
+ * 記在 manual_fixes，重新判讀這則貼文照樣用
  */
 export async function setTopic(env: Env, eventId: number, topic: string, now: number): Promise<number> {
   const ev = await env.DB.prepare('SELECT post_id, place_text FROM events WHERE id = ?').bind(eventId).first<{ post_id: string; place_text: string }>();
   if (!ev) return 0;
-  const r = await env.DB.prepare(
-    "UPDATE events SET extra = json_set(COALESCE(NULLIF(extra, ''), '{}'), '$.topic', ?), updated_at = ? WHERE post_id = ? AND place_text = ? AND status IN ('upcoming', 'active', 'unlocated')",
-  )
-    .bind(topic, now, ev.post_id, ev.place_text)
-    .run();
+  const [r] = await env.DB.batch([
+    env.DB.prepare(
+      "UPDATE events SET extra = json_set(COALESCE(NULLIF(extra, ''), '{}'), '$.topic', ?), updated_at = ? WHERE post_id = ? AND place_text = ? AND status IN ('upcoming', 'active', 'unlocated')",
+    ).bind(topic, now, ev.post_id, ev.place_text),
+    env.DB.prepare(
+      `INSERT INTO manual_fixes (post_id, kind, place_key, at_key, topic, created_at) VALUES (?, 'topic', ?, 0, ?, ?)
+       ON CONFLICT(post_id, kind, place_key, at_key) DO UPDATE SET topic = excluded.topic, created_at = excluded.created_at`,
+    ).bind(ev.post_id, placeKeyOf(ev.place_text), topic, now),
+  ]);
   return r.meta.changes ?? 0;
 }
 

@@ -3,13 +3,15 @@
  * 回報的內容只有管理者看得到；存裝置代碼與 IP 的加鹽雜湊（限制次數、同一個人同一則同一種問題只算一次），30 天後刪除。
  */
 import type { Env } from './env';
-import { ADDRESS_BUDGET_MS, findRouteStop, getPost, locateTypedPlace, MAX_FUTURE_SEC, OPEN_END_SEC, PLACE_MAX, removeRouteStop, reprocessPost, ROUTE_KEEP_SEC, setEventPlace, setEventTime, setManualTitle, setRouteStopPlace, setRouteStopTime, takeDown } from './events';
+import { ADDRESS_BUDGET_MS, findRouteStop, getPost, locateTypedPlace, MAX_FUTURE_SEC, OPEN_END_SEC, PLACE_MAX, removeRouteStop, reprocessPost, ROUTE_KEEP_SEC, setEventPlace, setEventTime, setManualTitle, setRouteStopPlace, setRouteStopTime, setTopic, takeDown } from './events';
 import { parseSubscription, PushError, sendPush, type PushMessage } from './push';
 
 export const FEEDBACK_KINDS = {
   location: '地點錯誤',
   time: '時間錯誤',
   content: '標題或內容錯誤',
+  /** 活動的類型錯了（回報時要選正確的類型，FEEDBACK_TOPICS） */
+  topic: '類型錯誤',
   not_event: '不是發放或活動',
   duplicate: '重複',
   /** 車掃的一站沒有了、取消了（回報時要選哪一站） */
@@ -17,6 +19,10 @@ export const FEEDBACK_KINDS = {
   other: '其他',
 } as const;
 export type FeedbackKind = keyof typeof FEEDBACK_KINDS;
+
+/** 「類型錯誤」可以選的類型：跟網頁 topic-icons.ts 的 TOPIC_TYPES（類型按鈕、地圖小圖示）一樣 */
+export const FEEDBACK_TOPICS = ['發放', '造勢', '講座', '表演', '市集', '工作坊', '遊行', '展覽', '志工', '聯誼'] as const;
+const isTopic = (v: unknown): v is string => typeof v === 'string' && (FEEDBACK_TOPICS as readonly string[]).includes(v);
 
 const NOTE_MAX = 200;
 /** 每小時最多回報幾次：有裝置代碼的照裝置算，IP 寬一點（同一個網路很多人） */
@@ -79,7 +85,8 @@ async function countSince(env: Env, col: 'device' | 'ip', value: string, since: 
 }
 
 /**
- * 回報一則事件的問題：{ kind, note, stop?, stopAt? }；回傳要推給管理者的那一筆（重複的不推）。
+ * 回報一則事件的問題：{ kind, note, stop?, stopAt?, topic? }；回傳要推給管理者的那一筆（重複的不推）。
+ * 類型錯誤要選正確的類型（topic，只有活動有類型）。
  * 車掃可以指定哪一站（stop 是那一站的標題、stopAt 預計經過時間）：記在 stop、stop_at，
  * 標題、地點寫那一站的；那一站在雷達上有點就掛在那個點，沒有（只有約略位置、已經經過）就掛在回報的那一則
  */
@@ -91,14 +98,17 @@ export async function submitFeedback(
   ip: string,
   now: number,
 ): Promise<{ result: FeedbackResult; created: FeedbackRow | null }> {
-  const b = (body ?? {}) as { kind?: unknown; note?: unknown; stop?: unknown; stopAt?: unknown; lat?: unknown; lng?: unknown };
+  const b = (body ?? {}) as { kind?: unknown; note?: unknown; stop?: unknown; stopAt?: unknown; lat?: unknown; lng?: unknown; topic?: unknown };
   if (!isKind(b.kind)) throw new PushError(400, '請選擇問題類型');
   const note = cleanNote(b.note);
   if (b.kind === 'other' && !note) throw new PushError(400, '選「其他」請寫一下是什麼問題');
-  const ev = await env.DB.prepare('SELECT id, post_id, title, place_text FROM events WHERE id = ?')
+  if (b.kind === 'topic' && !isTopic(b.topic)) throw new PushError(400, '請選正確的類型');
+  const topic = b.kind === 'topic' && isTopic(b.topic) ? b.topic : null;
+  const ev = await env.DB.prepare('SELECT id, post_id, kind, title, place_text FROM events WHERE id = ?')
     .bind(eventId)
-    .first<{ id: number; post_id: string; title: string; place_text: string }>();
+    .first<{ id: number; post_id: string; kind: string; title: string; place_text: string }>();
   if (!ev) throw new PushError(404, '找不到這個發放或活動，可能已經下架了');
+  if (topic && ev.kind !== 'activity') throw new PushError(400, '這一則沒有活動類型');
   const stopTitle = typeof b.stop === 'string' ? [...b.stop.trim()].slice(0, 120).join('') : '';
   const stopAt = Number.isSafeInteger(b.stopAt) ? (b.stopAt as number) : null;
   const stop = stopTitle ? await findRouteStop(env, ev.post_id, stopTitle, stopAt) : null;
@@ -131,10 +141,10 @@ export async function submitFeedback(
   if (dup) return { result: { ok: true, duplicate: true }, created: null };
 
   const row = await env.DB.prepare(
-    `INSERT INTO event_feedback (event_id, post_id, title, place_text, kind, note, device, ip, status, created_at, stop, stop_at, pin_lat, pin_lng)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'open', ?, ?, ?, ?, ?) RETURNING id, event_id, post_id, title, place_text, kind, note, status, created_at, resolved_at, stop, stop_at, pin_lat, pin_lng`,
+    `INSERT INTO event_feedback (event_id, post_id, title, place_text, kind, note, device, ip, status, created_at, stop, stop_at, pin_lat, pin_lng, topic)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'open', ?, ?, ?, ?, ?, ?) RETURNING id, event_id, post_id, title, place_text, kind, note, status, created_at, resolved_at, stop, stop_at, pin_lat, pin_lng, topic`,
   )
-    .bind(targetId, ev.post_id, stop?.title ?? ev.title, stop ? (stop.place ?? stop.name) : ev.place_text, b.kind, note, device, ip, now, stop?.title ?? null, stop?.at ?? null, pin?.lat ?? null, pin?.lng ?? null)
+    .bind(targetId, ev.post_id, stop?.title ?? ev.title, stop ? (stop.place ?? stop.name) : ev.place_text, b.kind, note, device, ip, now, stop?.title ?? null, stop?.at ?? null, pin?.lat ?? null, pin?.lng ?? null, topic)
     .first<FeedbackRow>();
   return { result: { ok: true, duplicate: false }, created: row };
 }
@@ -156,14 +166,17 @@ export interface FeedbackRow {
   /** 地點錯誤時在小地圖上標的位置 */
   pin_lat?: number | null;
   pin_lng?: number | null;
+  /** 類型錯誤時選的正確類型 */
+  topic?: string | null;
 }
 
 /** 推給管理者的通知：同一個 tag，新的取代舊的，但會再響一次 */
-export function feedbackMessage(row: Pick<FeedbackRow, 'kind' | 'title' | 'note' | 'pin_lat'>, open: number): PushMessage {
+export function feedbackMessage(row: Pick<FeedbackRow, 'kind' | 'title' | 'note' | 'pin_lat' | 'topic'>, open: number): PushMessage {
   const pinned = row.pin_lat !== null && row.pin_lat !== undefined;
+  const topic = row.topic ? `應該是「${row.topic}」` : '';
   return {
     title: `新回報：${FEEDBACK_KINDS[row.kind]}${open > 1 ? `（未處理 ${open} 則）` : ''}`,
-    body: `${row.title}｜${[row.note ?? (pinned ? '' : '沒寫說明'), pinned ? '在地圖上標了位置' : ''].filter(Boolean).join('，')}`,
+    body: `${row.title}｜${[topic, row.note ?? (pinned || topic ? '' : '沒寫說明'), pinned ? '在地圖上標了位置' : ''].filter(Boolean).join('，')}`,
     tag: 'feedback',
     url: './admin.html',
     renotify: true,
@@ -191,7 +204,8 @@ export async function notifyAdmins(env: Env, row: FeedbackRow, now: number): Pro
 export async function listFeedback(env: Env, status: string | null): Promise<unknown[]> {
   const st = status === 'resolved' ? 'resolved' : 'open';
   const { results } = await env.DB.prepare(
-    `SELECT f.id, f.event_id, f.post_id, f.title, f.place_text, f.kind, f.note, f.status, f.created_at, f.resolved_at, f.stop, f.stop_at, f.pin_lat, f.pin_lng,
+    `SELECT f.id, f.event_id, f.post_id, f.title, f.place_text, f.kind, f.note, f.status, f.created_at, f.resolved_at, f.stop, f.stop_at, f.pin_lat, f.pin_lng, f.topic,
+            e.kind AS event_kind, CASE WHEN json_valid(e.extra) THEN json_extract(e.extra, '$.topic') END AS event_topic,
             e.status AS event_status, e.start_at, e.end_at, e.end_open, e.lat, e.lng, e.approx_area, e.title AS event_title, e.place_text AS event_place,
             p.permalink, p.username, p.supplement, p.source,
             -- 重新判讀後原本那一則會換成新的：同一則貼文現在雷達上的第一則
@@ -302,7 +316,8 @@ async function currentEvents(env: Env, postId: string): Promise<unknown[]> {
  * - { action: 'event_place', place, lat?, lng? }：不是車掃的，改回報那一則的位置（同一則貼文同一個地點還沒結束的一起改），位置的給法同上
  * - { action: 'event_time', start, end? }：不是車掃的，改回報那一則的開始、結束時間（unix 秒，沒有 end 是沒寫結束）
  * - { action: 'stop_time', start }：車掃指定的那一站改預計經過時間，時間表照時間重新排
- * 手動改的地點、時間記在 manual_fixes，之後重新判讀照樣用。套用完標成已處理，回傳現在雷達上這則貼文的事件
+ * - { action: 'topic', topic? }：不是車掃的，改回報那一則的活動類型（同一則貼文同一個地點還沒結束的一起改；沒給 topic 用回報的人選的）
+ * 手動改的地點、時間、類型記在 manual_fixes，之後重新判讀照樣用。套用完標成已處理，回傳現在雷達上這則貼文的事件
  */
 export async function applyFeedback(
   env: Env,
@@ -310,11 +325,11 @@ export async function applyFeedback(
   body: unknown,
   now: number,
 ): Promise<{ ok: true; action: string; removed?: number; removedStops?: number; changed?: number; lostPlaces?: string[]; events: unknown[] }> {
-  const fb = await env.DB.prepare('SELECT id, event_id, post_id, place_text, kind, note, stop, stop_at FROM event_feedback WHERE id = ?')
+  const fb = await env.DB.prepare('SELECT id, event_id, post_id, place_text, kind, note, stop, stop_at, topic FROM event_feedback WHERE id = ?')
     .bind(id)
-    .first<{ id: number; event_id: number; post_id: string | null; place_text: string | null; kind: FeedbackKind; note: string | null; stop: string | null; stop_at: number | null }>();
+    .first<{ id: number; event_id: number; post_id: string | null; place_text: string | null; kind: FeedbackKind; note: string | null; stop: string | null; stop_at: number | null; topic: string | null }>();
   if (!fb) throw new PushError(404, '找不到這筆回報');
-  const b = (body ?? {}) as { action?: unknown; note?: unknown; scope?: unknown; title?: unknown; place?: unknown; lat?: unknown; lng?: unknown; start?: unknown; end?: unknown };
+  const b = (body ?? {}) as { action?: unknown; note?: unknown; scope?: unknown; title?: unknown; place?: unknown; lat?: unknown; lng?: unknown; start?: unknown; end?: unknown; topic?: unknown };
   const postId = fb.post_id;
   if (!postId) throw new PushError(400, '這筆回報沒有對應的貼文');
   let removed: number | undefined;
@@ -370,6 +385,13 @@ export async function applyFeedback(
     const target = await liveId();
     if (target === null) throw new PushError(400, '這則已經不在雷達上了');
     changed = await setEventTime(env, target, t.start, t.end, now);
+  } else if (b.action === 'topic') {
+    if (fb.stop) throw new PushError(400, '車掃的站沒有分類型');
+    const topic = b.topic ?? fb.topic;
+    if (!isTopic(topic)) throw new PushError(400, `類型要是 ${FEEDBACK_TOPICS.join('、')} 其中一個`);
+    const target = await liveId();
+    if (target === null) throw new PushError(400, '這則已經不在雷達上了');
+    changed = await setTopic(env, target, topic, now);
   } else if (b.action === 'stop_time') {
     if (!fb.stop) throw new PushError(400, '這筆回報沒有指定哪一站');
     const t = newTimes(b.start, null, now, ROUTE_KEEP_SEC);
@@ -382,7 +404,7 @@ export async function applyFeedback(
     removed = r.events;
     removedStops = r.stops;
   } else {
-    throw new PushError(400, "action 要是 'title'、'supplement'、'takedown'、'remove_stop'、'stop_place'、'event_place'、'event_time' 或 'stop_time'");
+    throw new PushError(400, "action 要是 'title'、'supplement'、'takedown'、'remove_stop'、'stop_place'、'event_place'、'event_time'、'stop_time' 或 'topic'");
   }
   await env.DB.prepare("UPDATE event_feedback SET status = 'resolved', resolved_at = ? WHERE id = ?").bind(now, id).run();
   return {
