@@ -6,8 +6,10 @@
  */
 
 import { JP_LAND } from './jp-land';
+import { KR_LAND } from './kr-land';
 import { NL_LAND } from './nl-land';
 import { TAIWAN_RINGS } from './taiwan';
+import { US_LAND } from './us-land';
 // 雷達上寫的縣市、鄉鎮市區名稱跟著街道一起載入（v1.691）
 export { TW_COUNTIES, TW_TOWNS } from './places-tw';
 
@@ -128,17 +130,22 @@ function keepIn(inside: (lat: number, lng: number) => boolean): (t: TileData) =>
 }
 const NL = landOf(NL_LAND);
 const JP = landOf(JP_LAND);
+const KR = landOf(KR_LAND);
+const US = landOf(US_LAND);
 
 /**
  * 拉遠（regional 那一級）只畫這幾個地方，只抓 box 裡面的圖磚（同一張圖磚各地方留的不一樣，快取照 id 分開）：
- * 台灣只畫台灣（本島、離島）的路（對岸不畫）；荷蘭（v1.745）、日本（v1.746）的路、綠地、河湖都只畫它的，路、河切在國界、海岸上，
- * 不會被圖磚切成方的。land：只抓碰到陸地的圖磚（全是海的不抓）；far：超過 km 改用那一級的圖磚
- * （日本很大，z7 拉到 600 km 全螢幕要七、八十張，超過圖磚快取的 MAX_TILES 會一直重抓；z6 只剩國道、快速道路，拉那麼遠也只看得到這些）
+ * 台灣只畫台灣（本島、離島）的路（對岸不畫）；荷蘭（v1.745）、日本（v1.746）、南韓、美國（v1.754）的路、綠地、河湖都只畫它的，
+ * 路、河切在國界、海岸上，不會被圖磚切成方的。land：只抓碰到陸地的圖磚（全是海的不抓）；far：超過 km 改用那一級的圖磚
+ * （日本很大，z7 拉到 600 km 全螢幕要七、八十張，超過圖磚快取的 MAX_TILES 會一直重抓；z6 只剩國道、快速道路，拉那麼遠也只看得到這些；
+ * 美國的圖磚路多，400 km 以上再用 z5）。has：雷達中心在不在這個地方（日本的範圍包住南韓，中心在哪個地方的陸地上就用哪個）
  */
-const REGIONS: Array<{ id: string; box: Box; keep: (t: TileData) => TileData; land?: Box[]; far?: { km: number; zoom: number } }> = [
-  { id: 'tw', box: TAIWAN_BOX, keep: (t) => ({ ...t, lines: t.lines.filter(onTaiwan) }) },
-  { id: 'nl', box: NL.box, keep: keepIn(NL.inside), land: NL.boxes },
-  { id: 'jp', box: JP.box, keep: keepIn(JP.inside), land: JP.boxes, far: { km: 200, zoom: 6 } },
+const REGIONS: Array<{ id: string; box: Box; keep: (t: TileData) => TileData; land?: Box[]; far?: Array<{ km: number; zoom: number }>; has: (lat: number, lng: number) => boolean }> = [
+  { id: 'tw', box: TAIWAN_BOX, keep: (t) => ({ ...t, lines: t.lines.filter(onTaiwan) }), has: (lat, lng) => lat >= TAIWAN_BOX.s && lat <= TAIWAN_BOX.n && lng >= TAIWAN_BOX.w && lng <= TAIWAN_BOX.e },
+  { id: 'nl', box: NL.box, keep: keepIn(NL.inside), land: NL.boxes, has: NL.inside },
+  { id: 'kr', box: KR.box, keep: keepIn(KR.inside), land: KR.boxes, has: KR.inside },
+  { id: 'jp', box: JP.box, keep: keepIn(JP.inside), land: JP.boxes, far: [{ km: 200, zoom: 6 }], has: JP.inside },
+  { id: 'us', box: US.box, keep: keepIn(US.inside), land: US.boxes, far: [{ km: 200, zoom: 6 }, { km: 400, zoom: 5 }], has: US.inside },
 ];
 export const tierOf = (km: number): (typeof STREET_TIERS)[number] => STREET_TIERS.find((t) => km <= t.maxKm) ?? STREET_TIERS[STREET_TIERS.length - 1];
 const TILEJSON = 'https://tiles.openfreemap.org/planet';
@@ -656,11 +663,12 @@ export function streetTiles(
   const dLat = km / 110.574;
   const dLng = km / (111.32 * Math.cos((lat * Math.PI) / 180));
   let [s, w, n, e] = [lat - dLat, lng - dLng, lat + dLat, lng + dLng];
-  // 拉遠：畫面碰到的那個地方（台灣、荷蘭），只抓它範圍裡的圖磚；都沒碰到就不畫
-  const region = regional ? REGIONS.find((r) => !(n < r.box.s || s > r.box.n || e < r.box.w || w > r.box.e)) : undefined;
+  // 拉遠：畫面碰到的那個地方（台灣、荷蘭…），只抓它範圍裡的圖磚；碰到好幾個的用雷達中心所在的那個（都不在就用前面的）；都沒碰到就不畫
+  const hits = regional ? REGIONS.filter((r) => !(n < r.box.s || s > r.box.n || e < r.box.w || w > r.box.e)) : [];
+  const region = hits.find((r) => r.has(lat, lng)) ?? hits[0];
   if (regional && !region) return { lines: [], coast: [], roads: [], stations: [], green: [], pending: 0, tiles: [] };
   if (region) [s, w, n, e] = [Math.max(s, region.box.s), Math.max(w, region.box.w), Math.min(n, region.box.n), Math.min(e, region.box.e)];
-  const zoom = region?.far && rangeKm > region.far.km ? region.far.zoom : tier.zoom;
+  const zoom = region?.far?.filter((f) => rangeKm > f.km).pop()?.zoom ?? tier.zoom;
   if (s > n || w > e) return { lines: [], coast: [], roads: [], stations: [], green: [], pending: 0, tiles: [] };
   const a = tileOf(n, w, zoom);
   const b = tileOf(s, e, zoom);

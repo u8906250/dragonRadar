@@ -139,7 +139,7 @@ describe('onTaiwan', () => {
 });
 
 describe('streetTiles', () => {
-  it('fetches only the Taiwan (Netherlands, Japan) tiles when zoomed out', () => {
+  it('fetches only the Taiwan (Netherlands, Japan, South Korea, US) tiles when zoomed out', () => {
     vi.stubGlobal('fetch', () => new Promise(() => {}));
     try {
       // 台北選「全台」（約 400 km）：z7 只抓台灣那六張，對岸、海上的不抓
@@ -148,6 +148,14 @@ describe('streetTiles', () => {
       expect(streetTiles(52.37, 4.89, 420, 400, () => {}).pending).toBe(6);
       // 日本（東京 600 km）：200 km 以上用 z6，只抓碰到日本陸地的（全是海的不抓），在圖磚快取的 64 張以內
       expect(streetTiles(35.68, 139.77, 600, 600, () => {}).pending).toBe(12);
+      // 南韓（首爾 200 km）：日本的範圍包住南韓，照中心所在的南韓抓；福岡照日本
+      expect(streetTiles(37.57, 126.98, 210, 200, () => {}).pending).toBe(4);
+      expect(streetTiles(33.59, 130.4, 315, 300, () => {}).pending).toBe(4);
+      // 美國（紐約 600 km：400 km 以上用 z5；安克拉治 600 km）
+      expect(streetTiles(40.71, -74.0, 630, 600, () => {}).pending).toBe(6);
+      expect(streetTiles(61.22, -149.9, 630, 600, () => {}).pending).toBe(12);
+      // 沖繩 600 km 碰到台灣、日本：中心在日本，抓日本的（以前抓台灣的）
+      expect(streetTiles(26.21, 127.68, 630, 600, () => {}).pending).toBe(5);
       // 沒有拉遠地圖的地方（雪梨）：一張都不抓
       expect(streetTiles(-33.87, 151.21, 600, 600, () => {}).pending).toBe(0);
     } finally {

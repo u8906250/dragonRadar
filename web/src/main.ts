@@ -1011,6 +1011,14 @@ const REGION_SLOTS: RegionSlot[] = [
   { area: { s: 50.6, w: 2.9, n: 53.8, e: 7.6 }, ownCoast: true, load: () => import('./netherlands'), map: null, loading: false },
   // 日本（japan.ts，v1.746 使用者說日本也畫）：海岸線用 eastasia.ts 的，補琵琶湖岸、都道府縣界、縣名、城市名
   { area: { s: 24.0, w: 122.9, n: 45.6, e: 146.0 }, ownCoast: false, load: () => import('./japan'), map: null, loading: false },
+  // 南韓（korea.ts，v1.754 使用者說韓國也畫）：海岸線用 eastasia.ts 的，補道界、跟北韓的軍事分界線、道名、城市名
+  { area: { s: 33.0, w: 124.5, n: 38.7, e: 131.0 }, ownCoast: false, load: () => import('./korea'), map: null, loading: false },
+  // 美國（usa-*.ts，v1.754 使用者說美國也畫）：很大，分成本土西半、東半、阿拉斯加、夏威夷四塊，碰到哪塊載入哪塊；
+  // 1:10m 的海岸線、湖岸（五大湖…）取代世界海岸線，州界、國界、州名、城市名
+  { area: { s: 24.3, w: -125.0, n: 49.5, e: -100.0 }, ownCoast: true, load: () => import('./usa-west'), map: null, loading: false },
+  { area: { s: 24.3, w: -100.0, n: 49.5, e: -66.8 }, ownCoast: true, load: () => import('./usa-east'), map: null, loading: false },
+  { area: { s: 51.0, w: -180.0, n: 71.6, e: -129.9 }, ownCoast: true, load: () => import('./usa-alaska'), map: null, loading: false },
+  { area: { s: 18.8, w: -160.6, n: 22.4, e: -154.7 }, ownCoast: true, load: () => import('./usa-hawaii'), map: null, loading: false },
 ];
 function loadRegion(r: RegionSlot): void {
   if (r.map || r.loading) return;
@@ -1730,8 +1738,9 @@ function placeLabels(
   else if (km > 1) for (const [n, lat, lng] of sm.TW_TOWNS) add(lat, lng, n, 'town', 90);
   // 荷蘭、日本：拉遠寫省名、縣名，近一點寫城市名（跟台灣的縣市、鄉鎮市區一樣）
   for (const { map } of REGION_SLOTS) {
-    if (map && km > 33) for (const [n, lat, lng] of map.far) add(lat, lng, n, 'county', 100);
-    else if (map && km > 1) for (const [n, lat, lng] of map.near) add(lat, lng, n, 'town', 90);
+    if (!map) continue;
+    if (km > 33) for (const [n, lat, lng] of map.far) add(lat, lng, n, 'county', 100);
+    if (km > 1 && km <= (map.nearKm ?? 33)) for (const [n, lat, lng] of map.near) add(lat, lng, n, 'town', 90);
   }
   if (km <= 5) {
     const pri: Record<string, number> = { motorway: 70, trunk: 68, primary: 62, secondary: 58, tertiary: 50, minor: 40 };

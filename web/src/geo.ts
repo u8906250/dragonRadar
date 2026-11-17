@@ -95,12 +95,19 @@ export function lookFrom(from: LatLng): (v: Float64Array, i: number) => { bearin
 export interface RegionMap {
   coast: Array<Array<[number, number]>>;
   lines: Array<Array<[number, number]>>;
+  /** 拉遠（33 km 以上）寫的大地名（省、縣、州） */
   far: Array<[string, number, number]>;
+  /** 近一點寫的城市名：1 km 到 nearKm（沒寫是 33 km；美國的州很大，拉到 200 km 也寫城市，不然畫面上一個名字都沒有） */
   near: Array<[string, number, number]>;
+  nearKm?: number;
 }
 
-/** 解開差值編碼的線（eastasia.ts、netherlands.ts、japan.ts、jp-land.ts）：「;」隔開每一段，每段 [緯度×1000, 經度×1000, 之後每一點跟前一點的差…] → 一串 [緯度, 經度] */
+/**
+ * 解開差值編碼的線（eastasia.ts、netherlands.ts、japan.ts、korea.ts、usa-*.ts 和陸地範圍）：「;」隔開每一段，
+ * 每段 [緯度×1000, 經度×1000, 之後每一點跟前一點的差…] → 一串 [緯度, 經度]；空字串是沒有線（夏威夷沒有州界）
+ */
 export function decodeRings(s: string): Array<Array<[number, number]>> {
+  if (!s) return [];
   return s.split(';').map((seg) => {
     const v = seg.split(',').map(Number);
     const out: Array<[number, number]> = [];
