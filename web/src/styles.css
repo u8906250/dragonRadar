@@ -1544,8 +1544,8 @@ path.map-seam-walkers { --p: 15px; }
 #app.full .controls-more { display: none; }
 #app.full .controls.open .controls-more { display: flex; flex-direction: column; align-items: stretch; gap: 6px; position: absolute; top: calc(100% + 6px); right: 0; }
 #app.full .controls.open .controls-more .chip { justify-content: center; }
-/* 窄的畫面（加了卡冊、道具、收藏、願望排不下，名稱會被擠掉）：平常也把主題、通知、卡冊、道具、收藏、願望、說明收進「⋯」 */
-@media (max-width: 800px) {
+/* 窄的畫面（加了卡冊、道具、收藏、願望、帳號排不下，名稱會被擠掉）：平常也把主題、通知、卡冊、道具、收藏、願望、帳號、說明收進「⋯」（v1.765 加了帳號，800 改 860） */
+@media (max-width: 860px) {
   .controls #more-btn { display: inline-flex; }
   .controls { position: relative; }
   .controls-more { display: none; }
@@ -2676,7 +2676,7 @@ body.letters-open { overflow: hidden; }
 .tc-pick-row span { flex: 1; }
 .tc-pick-row b { color: #f7c94e; font-size: 15px; }
 /* 選單的「說明」（openHelp）：使用說明、換裝置（引繼碼），深色的底上用淺色的字 */
-.tc-help .tc-box { align-items: stretch; }
+.tc-help .tc-box, .tc-account .tc-box { align-items: stretch; }
 .tc-help-row { display: flex; align-items: center; gap: 10px; color: #f3eee4; font-size: 13px; }
 .tc-help-row .chip { flex: none; }
 .tc-move-box { align-self: stretch; display: flex; flex-direction: column; gap: 8px; padding: 12px; color: #f3eee4; background: rgba(18, 22, 28, 0.94); border: 1px solid rgba(243, 238, 228, 0.3); border-radius: var(--card-radius, 12px); font-size: 13px; line-height: 1.55; }
@@ -2815,3 +2815,8 @@ path.map-canal-flow { --p: 14px; }
 .tc-acct-note { color: #ffd88a; }
 .tc-acct-box a { color: #9fd8ff; }
 .tc-acct-box .tc-acct-danger { color: #b3261e; }
+.tc-acct-who { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.tc-acct-who > span { opacity: 0.8; }
+.tc-acct-nickname { font-size: 18px; }
+.tc-acct-nick { flex: 1 1 100%; display: flex; flex-wrap: wrap; gap: 6px; }
+.tc-acct-nick input { flex: 1 1 160px; min-width: 0; font: inherit; font-size: 16px; padding: 8px 10px; border-radius: var(--card-radius, 12px); border: 1px solid rgba(243, 238, 228, 0.5); background: rgba(255, 255, 255, 0.95); color: #222; }

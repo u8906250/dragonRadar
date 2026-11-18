@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { accountName, deviceLabel, RP_ID, rpFor } from '../src/account';
+import { accountName, deviceLabel, parseNickname, RP_ID, rpFor } from '../src/account';
 
 describe('passkey 網域', () => {
   const allowed = 'https://current-radar.pages.dev,http://localhost:5173';
@@ -37,5 +37,23 @@ describe('帳號、裝置的名字', () => {
     // AAEC… 是 0x00 0x01 0x02 開頭
     expect(accountName('AAECAwQFBgcICQoLDA0ODw')).toBe('活動雷達 #000102');
     expect(accountName('_-_-AAAAAAAAAAAAAAAAAA')).toMatch(/^活動雷達 #[0-9A-F]{6}$/);
+  });
+});
+
+describe('暱稱', () => {
+  it('trims, squeezes spaces and drops control characters', () => {
+    expect(parseNickname({ nickname: '  小法的 \n  朋友\u200b ' })).toEqual({ nickname: '小法的 朋友' });
+    expect(parseNickname({ nickname: '阿明🐶' })).toEqual({ nickname: '阿明🐶' });
+  });
+  it('clears with an empty value', () => {
+    expect(parseNickname({ nickname: '   ' })).toEqual({ nickname: null });
+    expect(parseNickname({ nickname: null })).toEqual({ nickname: null });
+    expect(parseNickname({})).toEqual({ nickname: null });
+  });
+  it('allows up to 20 characters (emoji count as one)', () => {
+    expect(parseNickname({ nickname: '一'.repeat(20) })).toEqual({ nickname: '一'.repeat(20) });
+    expect(parseNickname({ nickname: '🐶'.repeat(20) })).toEqual({ nickname: '🐶'.repeat(20) });
+    expect(parseNickname({ nickname: '一'.repeat(21) })).toBe('暱稱最多 20 字');
+    expect(parseNickname({ nickname: 12 })).toBe('暱稱要是文字');
   });
 });

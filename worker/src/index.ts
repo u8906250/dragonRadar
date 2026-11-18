@@ -10,7 +10,7 @@ import { CURRENT_MAP_URL, type CurrentMapRoute } from './sources/currentmap';
 import { mergeIntoOfficial } from './sources/merge';
 import { apifyTrial } from './sources/apify';
 import { fetchThreadsPost, resolveThreadsLink, shortcodeToUnix } from './sources/link';
-import { accountInfo, deleteAccount, deletePasskey, deviceId, loginOptions, loginVerify, logout, purgeAccounts, registerOptions, registerVerify, sessionOf } from './account';
+import { accountInfo, deleteAccount, deletePasskey, deviceId, loginOptions, loginVerify, logout, purgeAccounts, registerOptions, registerVerify, sessionOf, setNickname } from './account';
 import { claimCard, makeTransfer, myCards, pickReward, purgeCards, redeemTransfer } from './cards';
 import { adminListWishes, adminSetWish, markWishesSeen, myWishes, notifyWish, purgeWishes, submitTweak, submitWish, withdrawWish } from './wishes';
 import { addParkMark, deleteParkMark, listParkMarks, listPublicParkMarks, parseParkMark, updateParkMark } from './parkmarks';
@@ -302,6 +302,7 @@ async function handle(req: Request, env: Env, ctx: ExecutionContext): Promise<Re
   if (req.method === 'POST' && path === '/api/account/register/verify') return jsonResponse(await registerVerify(env, req, await readJson<unknown>(req), now));
   if (req.method === 'POST' && path === '/api/account/login/options') return jsonResponse(await loginOptions(env, req, now));
   if (req.method === 'POST' && path === '/api/account/login/verify') return jsonResponse(await loginVerify(env, req, await readJson<unknown>(req), now));
+  if (req.method === 'POST' && path === '/api/account/nickname') return jsonResponse(await setNickname(env, req, await readJson<unknown>(req)));
   if (req.method === 'POST' && path === '/api/account/logout') return jsonResponse(await logout(env, req, await readJson<unknown>(req)));
   if (req.method === 'POST' && path === '/api/account/delete') return jsonResponse(await deleteAccount(env, req, await readJson<unknown>(req), now));
   const keyDel = /^\/api\/account\/passkeys\/([A-Za-z0-9_-]{16,400})$/.exec(path);

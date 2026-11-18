@@ -22,6 +22,7 @@ import { b64urlDecode, b64urlEncode } from './push';
 import { hashSalt, ipHash, ReportError } from './reports';
 import { sha1Hex } from './sources/text';
 import { nowSec } from './util';
+import { cleanText, NICK_MAX } from './wishes';
 
 /** passkey 綁的網域 */
 export const RP_ID = 'current-radar.pages.dev';
@@ -98,6 +99,15 @@ export function deviceLabel(ua: string): string {
             ? 'Safari'
             : '';
   return [os, browser].filter(Boolean).join(' · ') || '瀏覽器';
+}
+
+/** 暱稱：拿掉控制字元、連續空白合成一個，最多 NICK_MAX 字（跟許願的暱稱一樣）；空的是 null（清掉）。不對回傳錯誤訊息 */
+export function parseNickname(body: unknown): { nickname: string | null } | string {
+  const raw = (body as { nickname?: unknown } | null)?.nickname;
+  if (raw !== null && raw !== undefined && typeof raw !== 'string') return '暱稱要是文字';
+  const nickname = cleanText(raw, 200).replace(/\s+/g, ' ');
+  if ([...nickname].length > NICK_MAX) return `暱稱最多 ${NICK_MAX} 字`;
+  return { nickname: nickname || null };
 }
 
 /** 帳號的名字（密碼管理員裡看到的）：「活動雷達 #A1B2C3」，照 user handle 的前 3 個位元組 */
@@ -204,6 +214,8 @@ async function takeChallenge(env: Env, flow: unknown, kind: 'register' | 'login'
 
 export interface AccountOut {
   name: string;
+  /** 自己設的暱稱（沒設是 null） */
+  nickname: string | null;
   createdAt: number;
   passkeys: Array<{ id: string; label: string; createdAt: number; lastUsedAt: number | null; synced: boolean }>;
   /** 登入中的裝置（current：這台） */
@@ -212,14 +224,15 @@ export interface AccountOut {
 
 async function accountOut(env: Env, s: Session): Promise<AccountOut | null> {
   const [acc, keys, devs] = await env.DB.batch([
-    env.DB.prepare('SELECT user_handle, created_at FROM accounts WHERE id = ?').bind(s.accountId),
+    env.DB.prepare('SELECT user_handle, nickname, created_at FROM accounts WHERE id = ?').bind(s.accountId),
     env.DB.prepare('SELECT id, label, created_at, last_used_at, backed_up FROM passkeys WHERE account_id = ? ORDER BY created_at').bind(s.accountId),
     env.DB.prepare('SELECT token_hash, label, created_at, last_used_at FROM account_sessions WHERE account_id = ? ORDER BY last_used_at DESC').bind(s.accountId),
   ]);
-  const a = (acc.results as Array<{ user_handle: string; created_at: number }>)[0];
+  const a = (acc.results as Array<{ user_handle: string; nickname: string | null; created_at: number }>)[0];
   if (!a) return null;
   return {
     name: accountName(a.user_handle),
+    nickname: a.nickname,
     createdAt: a.created_at,
     passkeys: (keys.results as Array<{ id: string; label: string | null; created_at: number; last_used_at: number | null; backed_up: number }>).map((k) => ({
       id: k.id,
@@ -397,6 +410,15 @@ export async function loginVerify(env: Env, req: Request, body: unknown, now: nu
     ...(device ? moveAll(env, device, accountId) : []),
   ]);
   return { token, account: await accountOut(env, session) };
+}
+
+/** 設定、改暱稱（空的是清掉） */
+export async function setNickname(env: Env, req: Request, body: unknown): Promise<{ account: AccountOut | null }> {
+  const s = await needSession(env, req);
+  const p = parseNickname(body);
+  if (typeof p === 'string') throw new ReportError(400, p);
+  await env.DB.prepare('UPDATE accounts SET nickname = ? WHERE id = ?').bind(p.nickname, s.accountId).run();
+  return { account: await accountOut(env, s) };
 }
 
 // ---- 登出、刪除 ----

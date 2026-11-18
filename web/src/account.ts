@@ -1,10 +1,12 @@
 /**
- * 帳號（選用，passkey 登入）：選單「說明」裡的「帳號」。不登入照樣能用；建立帳號、登入時這台的卡冊、道具、願望、漂流瓶、我的回報併進帳號，
+ * 帳號（選用，passkey 登入）：選單的「帳號」（v1.765 從「說明」裡獨立出來）。不登入照樣能用；建立帳號、登入時這台的卡冊、道具、願望、漂流瓶、我的回報併進帳號，
  * 登入同一個帳號的裝置看到同一份（伺服器 worker/src/account.ts）。passkey 用手機、電腦的指紋、臉或螢幕鎖確認，不用 email、密碼。
  * passkey 綁網域：只有 current-radar.pages.dev（和它的預覽網址）、本機能用。登入、登出後重新整理頁面，各處的資料重新抓
+ * （建立帳號不用：帳號裡的就是這台的東西）。建立帳號後接著請他取暱稱，之後在這裡改
  */
 import type { PublicKeyCredentialCreationOptionsJSON, PublicKeyCredentialRequestOptionsJSON } from '@simplewebauthn/browser';
-import { accountDelete, accountDeletePasskey, accountLoginOptions, accountLoginVerify, accountLogout, accountRegisterOptions, accountRegisterVerify, accountToken, fetchAccount, setAccountToken, type AccountInfo } from './api';
+import { accountDelete, accountDeletePasskey, accountLoginOptions, accountLoginVerify, accountLogout, accountRegisterOptions, accountRegisterVerify, accountSetNickname, accountToken, fetchAccount, setAccountToken, type AccountInfo } from './api';
+import { overlay, resyncMine } from './cards';
 
 /** passkey 綁的網域（跟 worker 的 RP_ID 一樣） */
 export const RP_HOST = 'current-radar.pages.dev';
@@ -16,6 +18,8 @@ const rpHere = (): string | null => {
 
 /** 登入後才有的「有沒有資料」記號：設起來，開頁面時才會去抓我的回報、漂流瓶、願望的進度（帳號裡可能有別台的） */
 const HAS_FLAGS = ['dr.reported', 'dr.bottleDropped', 'dr.wished'];
+/** 暱稱最多幾個字（跟伺服器、許願的暱稱一樣） */
+const NICK_MAX = 20;
 
 const esc = (s: string): string => s.replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
 function day(sec: number): string {
@@ -44,11 +48,32 @@ async function forget(rpID: string, ids: string[]): Promise<void> {
   }
 }
 
+/** 選單的「帳號」 */
+export function openAccount(): void {
+  const el = overlay(
+    'tc-account',
+    `<div class="tc-box">
+      <div class="tc-head"><h2>帳號</h2><button type="button" class="chip" data-close>關閉</button></div>
+      <div class="tc-move-box tc-acct-box"></div>
+    </div>`,
+  );
+  mountAccount(el.querySelector<HTMLElement>('.tc-acct-box')!);
+}
+
+/** 暱稱的表單；afterCreate：剛建立帳號（有「之後再說」），不然是改暱稱（有「取消」） */
+function nickForm(value: string, afterCreate: boolean): string {
+  return `<form class="tc-acct-nick" novalidate>
+      <input name="nickname" maxlength="${NICK_MAX * 2}" value="${esc(value)}" placeholder="例如 小法的朋友" autocomplete="nickname" enterkeyhint="done" aria-label="暱稱">
+      <button type="submit" class="chip primary">好了</button>
+      <button type="button" class="chip" ${afterCreate ? 'data-skip-nick>之後再說' : 'data-cancel-nick>取消'}</button>
+    </form>`;
+}
+
 /**
- * 在 box 裡畫帳號：沒登入（說明、建立帳號、登入）或登入了（帳號名稱、passkey、登入中的裝置、登出、刪除帳號）。
- * resync：登入、登出後重新整理頁面前，先把這個瀏覽器存的卡、道具照伺服器重存（cards.ts）
+ * 在 box 裡畫帳號：沒登入（說明、建立帳號、登入）、剛建立（取暱稱）或登入了（暱稱、passkey、登入中的裝置、登出、刪除帳號）。
+ * 登入、登出後重新整理頁面前，先把這個瀏覽器存的卡、道具照伺服器重存（cards.ts 的 resyncMine）
  */
-export function mountAccount(box: HTMLElement, resync: () => Promise<void>): void {
+function mountAccount(box: HTMLElement): void {
   const rpID = rpHere();
   if (!rpID) {
     box.innerHTML = `<p>帳號（passkey 登入）只能在 <a href="https://${RP_HOST}/">${RP_HOST}</a> 用。</p>`;
@@ -65,7 +90,7 @@ export function mountAccount(box: HTMLElement, resync: () => Promise<void>): voi
   const switched = async (loggedIn: boolean, text: string): Promise<void> => {
     msg(text);
     busy(true);
-    await resync().catch(() => undefined);
+    await resyncMine().catch(() => undefined);
     try {
       for (const k of HAS_FLAGS) {
         if (loggedIn) localStorage.setItem(k, '1');
@@ -95,7 +120,21 @@ export function mountAccount(box: HTMLElement, resync: () => Promise<void>): voi
       <p class="tc-move-msg" role="status"></p>`;
   };
 
+  /** 現在畫的帳號（取消改暱稱時重畫用） */
+  let current: AccountInfo | null = null;
+
+  /** 剛建立帳號：接著請他取暱稱 */
+  const created = (a: AccountInfo): void => {
+    current = a;
+    box.innerHTML = `<p><b>帳號建立好了！</b>這台的卡冊、道具、願望、漂流瓶和我的回報已經存進帳號，換手機、用電腦登入同一個帳號就看得到。</p>
+      <p>幫帳號取個暱稱吧（最多 ${NICK_MAX} 字，之後在「帳號」可以改；現在只有你自己看得到）。</p>
+      ${nickForm('', true)}
+      <p class="tc-move-msg" role="status"></p>`;
+    box.querySelector<HTMLInputElement>('.tc-acct-nick input')?.focus();
+  };
+
   const loggedIn = (a: AccountInfo): void => {
+    current = a;
     const keys = a.passkeys
       .map(
         (k) =>
@@ -105,7 +144,10 @@ export function mountAccount(box: HTMLElement, resync: () => Promise<void>): voi
       )
       .join('');
     const devs = a.devices.map((d) => `<li><span>${esc(d.label)}${d.current ? '（這台）' : ''}</span><small>${day(d.lastUsedAt)}</small></li>`).join('');
-    box.innerHTML = `<p>已登入 <b>${esc(a.name)}</b>（${day(a.createdAt)} 建立）。卡冊、道具、願望、漂流瓶和我的回報都存在帳號裡，登入同一個帳號的裝置看到同一份。</p>
+    box.innerHTML = `<div class="tc-acct-who">${
+      a.nickname ? `<b class="tc-acct-nickname">${esc(a.nickname)}</b><button type="button" class="chip" data-edit-nick>改暱稱</button>` : '<span>還沒有暱稱</span><button type="button" class="chip primary" data-edit-nick>取暱稱</button>'
+    }</div>
+      <p>已登入 ${esc(a.name)}（${day(a.createdAt)} 建立）。卡冊、道具、願望、漂流瓶和我的回報都存在帳號裡，登入同一個帳號的裝置看到同一份。</p>
       <h3>passkey</h3>
       <ul class="tc-acct-list">${keys}</ul>
       <div class="tc-acct-actions"><button type="button" class="chip" data-add-key>在這台加一把 passkey</button></div>
@@ -127,7 +169,7 @@ export function mountAccount(box: HTMLElement, resync: () => Promise<void>): voi
     if (r.data.account) return loggedIn(r.data.account);
     // 在別台按了「登出其他裝置」、帳號刪掉了、太久沒用：這台已經登出，存的卡、道具照伺服器重存
     setAccountToken(null);
-    await resync().catch(() => undefined);
+    await resyncMine().catch(() => undefined);
     loggedOut('這台已經登出了（可能在別的裝置登出了這台，或帳號刪除了）。');
   };
 
@@ -156,7 +198,9 @@ export function mountAccount(box: HTMLElement, resync: () => Promise<void>): voi
       return msg(v.message, true);
     }
     if (v.data.token) {
+      // 帳號裡的就是這台原本的東西，不用重新整理；接著取暱稱
       setAccountToken(v.data.token);
+      if (v.data.account) return created(v.data.account);
       return switched(true, '帳號建立好了，重新整理中…');
     }
     if (adding && v.data.account) {
@@ -190,10 +234,40 @@ export function mountAccount(box: HTMLElement, resync: () => Promise<void>): voi
     return v.data;
   };
 
+  // 暱稱：送出（剛建立的、改暱稱的都是這個表單）
+  box.addEventListener('submit', async (e) => {
+    const form = (e.target as HTMLElement).closest<HTMLFormElement>('.tc-acct-nick');
+    if (!form) return;
+    e.preventDefault();
+    const input = form.querySelector<HTMLInputElement>('input')!;
+    const value = input.value.replace(/\s+/g, ' ').trim();
+    if ([...value].length > NICK_MAX) return msg(`暱稱最多 ${NICK_MAX} 字`, true);
+    busy(true);
+    input.disabled = true;
+    const r = await accountSetNickname(value);
+    if (!r.ok) {
+      busy(false);
+      input.disabled = false;
+      return msg(r.message, true);
+    }
+    if (r.data.account) loggedIn(r.data.account);
+    msg(value ? `暱稱設好了：${value}` : '暱稱清掉了');
+  });
+
   box.addEventListener('click', async (e) => {
     const t = (e.target as HTMLElement).closest<HTMLButtonElement>('button');
     if (!t || t.disabled) return;
     if (t.matches('[data-reload]')) return void load();
+    if (t.matches('[data-skip-nick], [data-cancel-nick]')) return current ? loggedIn(current) : void load();
+    if (t.matches('[data-edit-nick]')) {
+      const who = box.querySelector<HTMLElement>('.tc-acct-who');
+      if (!who) return;
+      who.innerHTML = nickForm(current?.nickname ?? '', false);
+      const input = who.querySelector<HTMLInputElement>('input')!;
+      input.focus();
+      input.select();
+      return;
+    }
     if (t.matches('[data-create], [data-add-key]')) return void register();
     if (t.matches('[data-login]')) {
       busy(true);

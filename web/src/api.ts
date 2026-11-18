@@ -367,6 +367,8 @@ export function redeemTransferCode(code: string): Promise<Result<{ cards: CardCl
 // ---- 帳號（passkey）----
 export interface AccountInfo {
   name: string;
+  /** 自己設的暱稱（沒設是 null） */
+  nickname: string | null;
   createdAt: number;
   passkeys: Array<{ id: string; label: string; createdAt: number; lastUsedAt: number | null; synced: boolean }>;
   devices: Array<{ label: string; createdAt: number; lastUsedAt: number; current: boolean }>;
@@ -383,6 +385,7 @@ export const accountRegisterVerify = (flow: string, response: unknown): Promise<
 export const accountLoginOptions = <O>(): Promise<Result<PasskeyFlow<O>>> => deviceJson('/api/account/login/options', 'POST', {});
 export const accountLoginVerify = (flow: string, response: unknown): Promise<Result<{ token: string; account: AccountInfo | null }>> =>
   deviceJson('/api/account/login/verify', 'POST', { flow, response });
+export const accountSetNickname = (nickname: string): Promise<Result<{ account: AccountInfo | null }>> => deviceJson('/api/account/nickname', 'POST', { nickname });
 export const accountLogout = (others = false): Promise<Result<{ account: AccountInfo | null }>> => deviceJson('/api/account/logout', 'POST', others ? { others: true } : {});
 export const accountDeletePasskey = (id: string): Promise<Result<{ account: AccountInfo | null }>> => deviceJson(`/api/account/passkeys/${encodeURIComponent(id)}`, 'DELETE');
 export const accountDelete = (flow: string, response: unknown): Promise<Result<{ passkeys: string[]; rpID: string }>> => deviceJson('/api/account/delete', 'POST', { flow, response });

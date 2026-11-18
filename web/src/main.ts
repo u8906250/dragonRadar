@@ -9494,6 +9494,8 @@ function wireControls(): void {
   $('#items-btn').addEventListener('click', () => openItems());
   // 願望（v1.636 從道具欄獨立出來）：許願、我的願望
   $('#wishes-btn').addEventListener('click', () => openWishes());
+  // 帳號（選用，passkey 登入；account.ts 按了才載入）
+  $('#account-btn').addEventListener('click', () => void import('./account').then((m) => m.openAccount()));
   // 收藏（v1.645 從漂流瓶畫面搬到選單）：漂流瓶收藏、我丟的瓶子
   lettersBtn.addEventListener('click', () => {
     openBottleSheet(false);
