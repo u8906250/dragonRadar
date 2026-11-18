@@ -25,7 +25,7 @@ const versionJson = (): Plugin => ({
   },
 });
 
-// GitHub Pages 的專案頁面要掛在 /<repo>/ 底下，CI 會把 VITE_BASE 設成 /dragonRadar/
+// 網站掛在網域的根目錄（Cloudflare Pages）；以前 GitHub Pages 的備用網址掛在 /dragonRadar/ 底下（v1.764 關掉了）
 export default defineConfig({
   base: process.env.VITE_BASE ?? '/',
   build: {

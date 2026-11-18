@@ -4,15 +4,15 @@
 時間一到就在雷達畫面上顯示光點與相對位置，發完或過期就消失。
 預設主題「洋流」沿用 [台北大洋流](https://current.puma.taipei/) 船艙的視覺：品牌橘、奶油紙、墨線、海綠與硬陰影。
 
-- 網址：**https://current-radar.pages.dev**（Cloudflare Pages，主要）；備用 https://u8906250.github.io/dragonRadar/
+- 網址：**https://current-radar.pages.dev**（Cloudflare Pages）；以前的備用網址 GitHub Pages 已經關掉（v1.764）
 - 使用說明：https://current-radar.pages.dev/help.html（`web/public/help.html`）
-- 前端：Vite + TypeScript，自繪 SVG 雷達，Leaflet + OpenStreetMap 地圖，部署在 Cloudflare Pages 與 GitHub Pages
+- 前端：Vite + TypeScript，自繪 SVG 雷達，Leaflet + OpenStreetMap 地圖，部署在 Cloudflare Pages
 - 後端：Cloudflare Worker + D1 + Cron Trigger + Workers AI
 - 資料來源：Threads 官方 API 的 `keyword_search`（需要 `threads_keyword_search` 權限審核）、使用者貼上的 Threads 貼文連結、台北大洋流官方航線與[車掃地圖](https://current-map.puma.taipei/)、Yahoo 新聞 RSS
 - 地點轉座標：OpenStreetMap Nominatim（結果快取在 D1）
 
 ```
-web/      前端（GitHub Pages）
+web/      前端（Cloudflare Pages）
 worker/   Cloudflare Worker（API、排程、資料庫）
 ```
 
@@ -197,12 +197,11 @@ npm run db:migrate:remote
 npm run deploy
 ```
 
-`wrangler.toml` 的 `ALLOWED_ORIGINS` 要包含 GitHub Pages 的網域（預設已填 `https://u8906250.github.io`）。
+`wrangler.toml` 的 `ALLOWED_ORIGINS` 要包含網站的網域（預設已填 `https://current-radar.pages.dev`；它的預覽網址 `*.current-radar.pages.dev` 程式裡另外允許）。
 `NOMINATIM_USER_AGENT` 請改成可聯絡到你的資訊，這是 Nominatim 的使用條款要求。
 
 ### 2. GitHub
 
-- Settings → Pages → Source 選 **GitHub Actions**
 - Settings → Secrets and variables → Actions
   - Secrets：`CLOUDFLARE_API_TOKEN`（權限：Workers Scripts Edit、D1 Edit、Workers AI Read、Cloudflare Pages Edit）、`CLOUDFLARE_ACCOUNT_ID`
   - Variables：`API_BASE` 可選；不設就用 `web/src/api.ts` 裡寫死的正式 Worker 網址

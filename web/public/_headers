@@ -1,4 +1,4 @@
-# Cloudflare Pages 的回應標頭（GitHub Pages 不看這個檔）。
+# Cloudflare Pages 的回應標頭。
 # /assets/* 是 vite 產生的程式、樣式，檔名帶內容的雜湊（內容變了檔名就變），快取一年、不用每次打開都問伺服器有沒有變；
 # 網頁本身（index.html）、sw.js、version.json 照預設每次確認，才拿得到新版本
 /assets/*

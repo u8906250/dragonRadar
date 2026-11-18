@@ -11,7 +11,7 @@
   <nav><a href="./">← 活動雷達</a><a href="terms.html">服務條款</a><a href="data-deletion.html">資料刪除</a></nav>
   <article>
     <h1>隱私權政策</h1>
-    <p class="meta">最後更新：2026 年 11 月 18 日（多了選用的帳號：passkey 登入）</p>
+    <p class="meta">最後更新：2026 年 11 月 18 日（多了選用的帳號：passkey 登入；GitHub Pages 的備用網址關掉了）</p>
 
     <p>活動雷達（以下稱「本服務」）是一個網頁工具，從 Threads 的公開貼文中找出「某時某地的免費發放或可參加的活動」，在雷達畫面上顯示相對位置。本政策說明本服務處理哪些資料，以及如何處理。點標題可以切換的其他雷達（例如狗狗陪伴、羽球臨打、美食品味）是同一個服務，一樣適用本政策。</p>
 
@@ -29,7 +29,7 @@
       <li><b>收集卡（尋找小法）：</b>不需要登入。你在汪星點到小法拿到卡片時，伺服器會存：哪一張卡、拿到的時間、在公園哪一區找到（是小法當時在虛擬公園裡的位置，不是你的位置），以及裝置代碼的加鹽雜湊值（用來認出你拿過哪些卡、算出你是第幾位找到的）。卡片紀錄會保留，讓你隨時在卡冊看得到；IP 的加鹽雜湊值只用來限制頻率，30 天內刪除。清除瀏覽器資料後裝置代碼會換新，之前的卡就連不回來（有帳號的話再登入就回來）；換裝置前可以在選單「說明」按「換裝置」產生引繼碼，在新裝置輸入就能把卡片、道具、許願和漂流瓶收藏（收藏的漂流瓶）搬過去（自己丟的瓶子不搬）。引繼碼只存加鹽雜湊值，24 小時後失效、用過一次就失效，過期的在 30 天內刪除；產生、輸入引繼碼時 IP 的加鹽雜湊值只用來限制次數，30 天內刪除。</li>
       <li><b>許願（用順幣）：</b>不需要登入。你在「願望」投順幣許願或送出調整時，伺服器會存：你寫的想法、你填的暱稱與參考連結（選填）、送出時間、審核進度與管理者的回覆，以及裝置代碼與 IP 的加鹽雜湊值（裝置代碼用來讓你在「我的願望」看進度、退回順幣；IP 只用來限制送出次數，30 天內刪除）。內容只有管理者看得到，不會公開；通過後做出來的東西會放上網站，有填暱稱才會在說明頁的「實現的願望」寫「點子來自」你的暱稱。不通過、做不出來或你自己撤回的願望，30 天後刪除。</li>
       <li><b>帳號（選用）：</b>不建立帳號照樣能用。你在選單「說明」按「帳號」建立帳號時，不用填姓名、Email 或密碼，是用 passkey（手機、電腦的指紋、臉或螢幕鎖）登入：你的裝置產生一對金鑰，私鑰留在你的裝置或你的密碼管理員（例如 iCloud 鑰匙圈、Google 密碼管理員），伺服器只存公鑰；指紋、臉的資料不會離開你的裝置。伺服器會存：帳號的隨機代碼、每一把 passkey 的代碼與公鑰、建立與最後使用的時間、建立時的裝置類型（照瀏覽器寫成例如「iPhone · Safari」，讓你認出是哪一把）、有沒有同步到雲端；每一台登入中的裝置存一組登入代碼的雜湊值、裝置類型與最後使用的日期，一年沒用就刪除。建立帳號時 IP 的加鹽雜湊值只用來限制建立次數，30 天內刪除。建立帳號或登入時，這個瀏覽器的收集卡、道具、許願、漂流瓶（收藏、自己丟的、檢舉與沒通過審核的紀錄）、回報與回報問題的紀錄改掛在帳號下面（原本記裝置代碼雜湊的地方改記帳號代碼），登入同一個帳號的裝置都看得到，保存期限跟上面各項一樣。你可以隨時登出、登出其他裝置、刪掉其中一把 passkey，或刪除帳號：刪除帳號時，帳號、passkey 的公鑰與登入代碼馬上刪除，帳號裡的東西搬回你按刪除的那個瀏覽器（跟沒有帳號時一樣）。</li>
-      <li><b>服務紀錄：</b>本服務架設在 Cloudflare 與 GitHub Pages，這些平台可能依其政策保留一般連線紀錄（例如 IP 位址、瀏覽器類型），本服務不另外收集或使用這些資料；伺服器已關閉 Cloudflare Workers 的逐筆請求紀錄（請求網址裡可能有你的座標），只留程式自己寫的錯誤與排程紀錄。</li>
+      <li><b>服務紀錄：</b>本服務架設在 Cloudflare，這個平台可能依其政策保留一般連線紀錄（例如 IP 位址、瀏覽器類型），本服務不另外收集或使用這些資料；伺服器已關閉 Cloudflare Workers 的逐筆請求紀錄（請求網址裡可能有你的座標），只留程式自己寫的錯誤與排程紀錄。</li>
     </ul>
 
     <h2>二、來自 Threads 的資料</h2>
@@ -53,7 +53,6 @@
       <li>Cloudflare（Workers、D1、Workers AI、R2、Pages）：網站與伺服器、資料庫、文字判讀與漂流瓶照片審核、漂流瓶照片儲存。</li>
       <li>OpenStreetMap Nominatim：把地點文字轉成座標，只送出地點文字。</li>
       <li>OpenStreetMap 圖磚：地圖畫面，由你的瀏覽器直接向 OpenStreetMap 下載。</li>
-      <li>GitHub Pages：網站備用位址。</li>
     </ul>
 
     <h2>四、你的權利</h2>
@@ -76,7 +75,7 @@
       <p><b>Optional account.</b> An account is optional. It uses a passkey (your device's fingerprint, face or screen lock) instead of a name, email or password: the private key stays on your device or in your password manager, and the server stores only the public key, the credential ID, when it was created and last used, the device type taken from the browser (e.g. “iPhone · Safari”) and whether it is synced. Each signed-in device stores a hash of its sign-in token, the device type and the last-used date; unused sign-ins are deleted after a year. A salted IP hash is kept up to 30 days only to rate-limit account creation. When you create an account or sign in, the cards, items, wishes, drift bottles (collected, dropped, reported and rejected), submissions and issue reports of that browser are linked to the account instead of the browser's device hash, so every device signed in to the account sees them; retention is as described above. You can sign out, sign out other devices, remove a passkey or delete the account at any time; deleting it removes the account, its public keys and sign-ins immediately and moves its contents back to the browser you deleted it from.</p>
       <p><b>Threads data.</b> Using the Meta Threads API we search <i>public</i> posts for a fixed keyword. We process the post ID, text, timestamp, author's public username and permalink, solely to extract the time and location of giveaways and events and display them with a link to the original post. Our public statistics page (“雷達統計”) also lists which public Threads accounts the events shown on the radar came from in the last 30 days — only the username and how many posts and events, never the text; only posts that were confirmed onto the radar and not deleted by the author count, and an account is listed only with at least 2 posts (top 20). Authors can ask to be excluded via the data deletion instructions. Apart from this, we do not use the data for advertising, profiling, or sale, and we do not share it with third parties. Posts and extracted data are automatically deleted after 30 days. For post links submitted by users, we read that single post's public embed page to obtain its text and author's public username, process it the same way, and re-read it every 30 minutes to detect deletion or edits. The only access token stored is the operator's own Threads token used to call the API.</p>
       <p><b>Event pages.</b> When a user submits an ACCUPASS (accupass.com), OPENTIX (opentix.life), Peatix (peatix.com) or Luma (luma.com) event page link, we read that page's public event data (name, time, place, organizer, description) to put the event on the radar with a link back to the page, and re-read it every 30 minutes to take it down if the page is removed or the event is cancelled.</p>
-      <p><b>Processors.</b> Meta Threads API, public news RSS feeds (Yahoo News; only title, short excerpt and link are kept), the public route data of the official 台北大洋流 site, public ACCUPASS, OPENTIX, Peatix and Luma event pages submitted by users, Cloudflare (Workers, D1, Workers AI, R2, Pages), OpenStreetMap Nominatim and tiles, GitHub Pages.</p>
+      <p><b>Processors.</b> Meta Threads API, public news RSS feeds (Yahoo News; only title, short excerpt and link are kept), the public route data of the official 台北大洋流 site, public ACCUPASS, OPENTIX, Peatix and Luma event pages submitted by users, Cloudflare (Workers, D1, Workers AI, R2, Pages), OpenStreetMap Nominatim and tiles.</p>
       <p><b>Deletion and contact.</b> See the <a href="data-deletion.html">data deletion instructions</a>. Questions: <a href="https://github.com/u8906250/dragonRadar/issues">GitHub Issues</a>.</p>
     </section>
   </article>

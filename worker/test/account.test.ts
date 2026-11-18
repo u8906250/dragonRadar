@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { accountName, deviceLabel, RP_ID, rpFor } from '../src/account';
 
 describe('passkey 網域', () => {
-  const allowed = 'https://current-radar.pages.dev,https://u8906250.github.io,http://localhost:5173';
+  const allowed = 'https://current-radar.pages.dev,http://localhost:5173';
   it('uses current-radar.pages.dev for the site and its preview deployments', () => {
     expect(RP_ID).toBe('current-radar.pages.dev');
     expect(rpFor('https://current-radar.pages.dev', allowed)).toEqual({ rpID: RP_ID, origin: 'https://current-radar.pages.dev' });
@@ -12,7 +12,7 @@ describe('passkey 網域', () => {
     expect(rpFor('http://localhost:5173', allowed)).toEqual({ rpID: 'localhost', origin: 'http://localhost:5173' });
     expect(rpFor('http://localhost:5199', allowed)).toBeNull();
   });
-  it('refuses other sites (github.io is not kept), lookalikes and junk', () => {
+  it('refuses other sites (the old github.io one is closed), lookalikes and junk', () => {
     expect(rpFor('https://u8906250.github.io', allowed)).toBeNull();
     expect(rpFor('https://evilcurrent-radar.pages.dev', allowed)).toBeNull();
     expect(rpFor('https://current-radar.pages.dev.evil.com', allowed)).toBeNull();
