@@ -1851,6 +1851,8 @@ function placeLabels(
       }
     }
   }
+  // 九棚的國家發射場（v1.760）：畫出來的時候（外圈 3 km 內）寫名字，還沒蓋所以寫「規劃中」
+  if (nearLaunch()) add(LAUNCH_NEAR.lat, LAUNCH_NEAR.lng, '國家發射場（規劃中）', 'poi', 70);
   if (km <= 1) {
     // 同一站常有好幾筆（捷運、台鐵，「台北」「臺北車站」，大站的幾筆可以離好幾百公尺）：800 m 內名字一樣的只寫一次，名字補上「站」
     const base = (n: string): string => n.replace(/台/g, '臺').replace(/(車站|站)$/, '');
@@ -1885,16 +1887,26 @@ function fitEarthZoom(): void {
   if (!radar.spaceFocused && scaleKm < earthMinKm()) zoomRadar(earthMinKm() / scaleKm, true);
 }
 
-/** 照雷達正中間（拖曳時每一幀都變）畫 */
-const drawPark = (km: number): string => parkMod?.earthParkSvg(origin, km) ?? '';
+// ---- 九棚的國家發射場（launch-site.ts，v1.760 使用者說畫一個火箭發射場、放一個火箭，像國館那樣放大才看得到）：附近才載入 ----
+let launchMod: typeof import('./launch-site') | null = null;
+let launchLoading = false;
+/** 發射場大約在哪裡、外圈幾公里內才畫（跟 launch-site.ts 的 LAUNCH_DRAW_KM 一樣；這裡先寫一份，載入前就判斷得了） */
+const LAUNCH_NEAR = { lat: 22.1122, lng: 120.8848 };
+const LAUNCH_KM = 3;
+const nearLaunch = (): boolean => !radar.spaceFocused && scaleKm <= LAUNCH_KM && haversineKm(origin, LAUNCH_NEAR) < scaleKm * 2 + 1.5;
 
-/** 公園可能在雷達上（約 18 km 內才畫）才載入、才畫 */
+/** 照雷達正中間（拖曳時每一幀都變）畫：中山公園、國家發射場 */
+const drawPark = (km: number): string => (parkMod?.earthParkSvg(origin, km) ?? '') + (launchMod?.launchSiteSvg(origin, km) ?? '');
+
+/** 公園（約 18 km 內才畫）、發射場可能在雷達上才載入、才畫 */
 function updatePark(): void {
-  if (radar.spaceFocused || scaleKm > 20 || haversineKm(origin, PARK_NEAR) > scaleKm * 1.5 + 1) {
+  const park = !radar.spaceFocused && scaleKm <= 20 && haversineKm(origin, PARK_NEAR) <= scaleKm * 1.5 + 1;
+  const launch = nearLaunch();
+  if (!park && !launch) {
     radar.setPark(null);
     return;
   }
-  if (!parkMod) {
+  if (park && !parkMod) {
     if (!parkLoading) {
       parkLoading = true;
       void import('./park')
@@ -1906,7 +1918,21 @@ function updatePark(): void {
           parkLoading = false;
         });
     }
-    return;
+    if (!launch) return;
+  }
+  if (launch && !launchMod) {
+    if (!launchLoading) {
+      launchLoading = true;
+      void import('./launch-site')
+        .then((m) => {
+          launchMod = m;
+          updatePark();
+        })
+        .finally(() => {
+          launchLoading = false;
+        });
+    }
+    if (!park || !parkMod) return;
   }
   radar.setPark(drawPark);
 }

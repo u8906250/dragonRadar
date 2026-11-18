@@ -1849,6 +1849,20 @@ path.map-seam-walkers { --p: 15px; }
  * depart 1.6 秒：點火（火焰、白煙、抖一抖），1 秒後慢慢離地（之後小火箭接手，main.ts）；
  * arrive 5.5 秒：0～1.2 秒門打開，同時火箭從上面慢慢降下來（火焰，2.8 秒到地面、落地冒白煙），2.9～4.2 秒降進井裡，4.3～5.5 秒門關回來
  */
+/* 九棚的國家發射場（v1.760，規劃中，launch-site.ts）：開發範圍跟中山公園一樣淡淡填色、虛線的邊；水泥地、建築、池子、槽照示意圖的顏色 */
+.radar .launch-site { pointer-events: none; }
+.radar .launch-area { fill: var(--accent); fill-opacity: 0.06; stroke: var(--accent); stroke-width: 1.2; stroke-opacity: 0.6; stroke-dasharray: 2 2; }
+.radar .launch-paved { fill: #dcd9d2; stroke: #a9a49a; stroke-width: 0.5; stroke-linejoin: round; }
+.radar .launch-road { fill: none; stroke: #dcd9d2; stroke-linecap: round; stroke-linejoin: round; }
+.radar .launch-building { fill: #f3f1ec; stroke: #8f8a80; stroke-width: 0.6; stroke-linejoin: round; }
+.radar .launch-substation { fill: #c9c5bb; stroke: #8f8a80; stroke-width: 0.5; stroke-dasharray: 1 1; }
+.radar .launch-solar { fill: #3d5a80; fill-opacity: 0.85; stroke: none; }
+.radar .launch-pond { fill: var(--water-fill); stroke: var(--water-line); stroke-width: 0.5; }
+.radar .launch-tank { fill: #f6f5f1; stroke: #8f8a80; stroke-width: 0.6; }
+.radar .launch-pad-mark { fill: none; stroke: #fff; stroke-width: 0.8; stroke-opacity: 0.9; }
+.radar .launch-mast-dot { fill: #5f646c; }
+.radar .launch-mast .mast-body { fill: #b8bcc2; fill-opacity: 0.85; stroke: #5f646c; stroke-width: 0.5; stroke-linejoin: round; vector-effect: non-scaling-stroke; }
+.radar .launch-mast .mast-rod { fill: none; stroke: #5f646c; stroke-width: 0.6; vector-effect: non-scaling-stroke; }
 .radar .park-launch { pointer-events: none; }
 .radar .park-launch .rocket-hit { fill: transparent; pointer-events: all; cursor: pointer; }
 .radar .launch-shaft { fill: #121212; }
