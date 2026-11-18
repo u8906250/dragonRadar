@@ -627,6 +627,8 @@ const BLIP_UNITS = 20;
 const LINE_PX = 14;
 
 /** 距離換成半徑比例（0 = 圓心，1 = 外圈，超出範圍會大於 1），全部照比例 */
+/** 雷達在螢幕上的位置（getScreenCTM）最多記住多久（Radar.screenCTM） */
+const CTM_KEEP_MS = 1000;
 /** Douglas-Peucker：離頭尾連線不到 tol 的點拿掉（頭尾留著） */
 function simplifyPts(pts: Array<{ x: number; y: number }>, tol: number, fixed?: Uint8Array): Array<{ x: number; y: number }> {
   // fixed：一定要留的點（塗海時兩塊陸地接在一起的那條邊，兩邊留一樣的點才接得密）
@@ -1053,6 +1055,7 @@ export class Radar {
       }
       this.boxPx = { w, h };
       this.squarePx = size;
+      this.ctm = null;
       const [hx, hy] = [RADAR_VIEW.hx, RADAR_VIEW.hy];
       this.measureView();
       const moved = Math.abs(hx - RADAR_VIEW.hx) > 1 || Math.abs(hy - RADAR_VIEW.hy) > 1;
@@ -1460,12 +1463,19 @@ export class Radar {
     document.addEventListener(
       'pointerdown',
       () => {
+        this.ctm = null;
         stopFling();
         stopWheel();
         this.stopPanFling();
       },
       true,
     );
+    // 捲動、視窗大小變了：雷達在螢幕上的位置可能變了
+    const moved = (): void => {
+      this.ctm = null;
+    };
+    window.addEventListener('scroll', moved, { capture: true, passive: true });
+    window.addEventListener('resize', moved, { passive: true });
     svg.addEventListener(
       'wheel',
       (e) => {
@@ -1480,6 +1490,7 @@ export class Radar {
         // 減少動態效果的電腦也照樣慢慢縮放（使用者要看得到縮放）
         wheelLeft = Math.max(-WHEEL_MAX, Math.min(WHEEL_MAX, wheelLeft + step));
         if (!wheelFrame) {
+          this.ctm = null;
           wheelLast = performance.now();
           wheelFrame = requestAnimationFrame(wheelStep);
         }
@@ -1518,7 +1529,7 @@ export class Radar {
    * 那一點離正中間的距離變成 1/f 倍，地圖往回拉（移動中心）；太空裡不用。有移動回傳 true（縮放完要算拖完）
    */
   private keepPoint(x: number, y: number, f: number): boolean {
-    const c = this.svg.getScreenCTM();
+    const c = this.screenCTM();
     if (f === 1 || !Number.isFinite(f) || !c || this.inSpace || this.earthHidden) return false;
     const center = new DOMPoint(C, C).matrixTransform(c);
     const [vx, vy] = [x - center.x, y - center.y];
@@ -1708,7 +1719,7 @@ export class Radar {
 
   /** 離正中間這個方位、距離的一點在螢幕上的哪裡（像素）；太空裡、雷達沒顯示時是 null（丟漂流瓶拋到落點用） */
   screenOf(bearing: number, distanceKm: number): { x: number; y: number } | null {
-    const m = this.svg.getScreenCTM();
+    const m = this.screenCTM();
     if (this.inSpace || !m) return null;
     const p = polar(bearing - this.heading, this.ratio(distanceKm) * (R - 8));
     const q = new DOMPoint(p.x, p.y).matrixTransform(m);
@@ -1849,7 +1860,7 @@ export class Radar {
   rocketAt(): TripAt | null {
     const el = this.svg.querySelector('.park-launch .rocket-fly') as SVGGraphicsElement | null;
     const a = el?.getScreenCTM();
-    const b = this.svg.getScreenCTM();
+    const b = this.screenCTM();
     if (!a || !b) return null;
     const m = b.inverse().multiply(a);
     return { x: m.e, y: m.f, k: Math.hypot(m.a, m.b) };
@@ -2128,9 +2139,22 @@ export class Radar {
     }
   }
 
+  /**
+   * 雷達在螢幕上的位置（getScreenCTM）：量一次要瀏覽器先把排版算好，滾輪、捏合、點兩下放大每一格都量的話很慢（手機上明顯）。
+   * 記住最多 CTM_KEEP_MS；每次開始操作（按下、新的一輪滾輪）、捲動、視窗或雷達大小變了重量
+   */
+  private ctm: { m: DOMMatrix; at: number } | null = null;
+  private screenCTM(): DOMMatrix | null {
+    const now = performance.now();
+    if (this.ctm && now - this.ctm.at < CTM_KEEP_MS) return this.ctm.m;
+    const m = this.svg.getScreenCTM();
+    this.ctm = m ? { m, at: now } : null;
+    return m;
+  }
+
   /** 螢幕上的一點 → SVG 座標 */
   private svgPoint(clientX: number, clientY: number): { x: number; y: number } | null {
-    const m = this.svg.getScreenCTM();
+    const m = this.screenCTM();
     if (!m) return null;
     const p = new DOMPoint(clientX, clientY).matrixTransform(m.inverse());
     return { x: p.x, y: p.y };
