@@ -752,6 +752,17 @@ describe('Kepler-22b 的表面、九棚的火箭（第 4 號願望）', () => {
     expect(launchNow(t0 + 20_000 + ARRIVE_MS + 1)).toMatchObject({ where: 'kepler22b', phase: 'parked' });
     resetLaunch();
   });
+  it('marks Kepler-22b as where you are once you have flown there, and the solar system no longer', () => {
+    const deep = (you?: 'kepler22b') => spaceMarkup({ ...opts, scaleKm: 900 * LY_KM, rg: 0, view: { focus: 'kepler22b', yaw: 0, pitch: 0 }, ...(you ? { you } : {}) });
+    expect(deep('kepler22b')).toContain('>Kepler-22b（你）<');
+    expect(deep('kepler22b')).not.toContain('>太陽系（你）<');
+    expect(deep()).toContain('>太陽系（你）<');
+    expect(deep()).not.toContain('Kepler-22b（你）');
+    const sys = spaceMarkup({ ...opts, scaleKm: 4e8, rg: 164 * globeFrac(4e8), view: { focus: 'kepler22b', yaw: 0, pitch: 0 }, you: 'kepler22b' });
+    expect(sys).toContain('>Kepler-22b（你）<');
+    // 你在 Kepler-22b、鏡頭看地球：地球只是一顆星球（要搭回來才看得到地圖），可以拉近的只到整顆
+    expect(focusMinKm('earth')).toBeGreaterThan(6000);
+  });
   it('points the trip rocket and the camera at Kepler-22b, outside the solar system', () => {
     expect(Number.isFinite(bodyBearing('earth', 'kepler22b'))).toBe(true);
     // 鏡頭從地球移到 Kepler-22b 一半：兩邊都看得到

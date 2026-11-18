@@ -791,7 +791,7 @@ export class Radar {
   private readonly parkLayer: SVGGElement;
   private landmarks: RadarLandmark[] = [];
   /** 你在哪一顆（搭火箭到汪星就在汪星）：在汪星時點地球只是看過去（跟別的星球一樣），不會回到你在地球的位置 */
-  youOn: 'earth' | 'woof' = 'earth';
+  youOn: 'earth' | 'woof' | 'kepler22b' = 'earth';
   /** 點了中山公園的銅像、停著的火箭（地球或汪星，拉近到畫出來時才點得到）：哪個世界的 */
   onStatue: ((world: 'earth' | 'woof') => void) | null = null;
   onRocket: ((world: 'earth' | 'woof') => void) | null = null;

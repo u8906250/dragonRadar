@@ -54,12 +54,30 @@ export function tripSvg(): string {
 /**
  * 九棚的火箭（國家發射場，第 4 號願望：可以搭到 Kepler-22b）停在哪、這一段在做什麼：
  * parked 停著（點得到）、depart 點火離地（DEPART_MS，之後 away：小火箭接手飛）、land 從上面降下來（ARRIVE_MS，之後停著）。
- * 不存起來：重新整理回到九棚
+ * 火箭在哪你就在哪（跟國館的火箭、汪星一樣，v1.762 使用者說搭過去之後定位就要在那邊、要再搭回來才看得到地球）：
+ * 存在 dr.launch（出發就記成要去的那邊，飛到一半重新整理就在那邊）
  */
 export type LaunchWhere = 'jiupeng' | 'kepler22b';
 export type LaunchPhase = 'parked' | 'depart' | 'away' | 'land';
-let launch: { where: LaunchWhere; phase: LaunchPhase; at: number } = { where: 'jiupeng', phase: 'parked', at: 0 };
+const LS_LAUNCH = 'dr.launch';
+function loadLaunch(): LaunchWhere {
+  try {
+    return (JSON.parse(localStorage.getItem(LS_LAUNCH) ?? 'null') as { where?: string } | null)?.where === 'kepler22b' ? 'kepler22b' : 'jiupeng';
+  } catch {
+    return 'jiupeng';
+  }
+}
+function saveLaunch(where: LaunchWhere): void {
+  try {
+    if (where === 'kepler22b') localStorage.setItem(LS_LAUNCH, JSON.stringify({ where }));
+    else localStorage.removeItem(LS_LAUNCH);
+  } catch {
+    /* 存不了就算了（無痕視窗）：重新整理回到九棚 */
+  }
+}
+let launch: { where: LaunchWhere; phase: LaunchPhase; at: number } | null = null;
 export function launchNow(now = performance.now()): { where: LaunchWhere; phase: LaunchPhase; e: number } {
+  launch ??= { where: loadLaunch(), phase: 'parked', at: 0 };
   const e = now - launch.at;
   if (launch.phase === 'depart' && e >= DEPART_MS) return { where: launch.where, phase: 'away', e };
   if (launch.phase === 'land' && e >= ARRIVE_MS) return { where: launch.where, phase: 'parked', e };
@@ -70,15 +88,19 @@ export function departLaunch(now = performance.now()): LaunchWhere | null {
   const r = launchNow(now);
   if (r.phase !== 'parked') return null;
   launch = { where: r.where, phase: 'depart', at: now };
-  return r.where === 'jiupeng' ? 'kepler22b' : 'jiupeng';
+  const to: LaunchWhere = r.where === 'jiupeng' ? 'kepler22b' : 'jiupeng';
+  saveLaunch(to);
+  return to;
 }
 /** 飛到了：從上面降下來，停在那裡 */
 export function landLaunch(where: LaunchWhere, now = performance.now()): void {
   launch = { where, phase: 'land', at: now };
+  saveLaunch(where);
 }
 /** 回到九棚停著（測試用） */
 export function resetLaunch(): void {
   launch = { where: 'jiupeng', phase: 'parked', at: 0 };
+  saveLaunch('jiupeng');
 }
 /**
  * 站在地上的火箭（九棚、Kepler-22b）：底在 (x, y)、每公尺 ppm 個單位，照這一段畫（點火、降落的動畫用 CSS，--t 是已經過了多久）；

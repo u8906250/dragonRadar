@@ -191,21 +191,24 @@ const SPACE_MAX_KM = 6e7 * LY_KM;
 /** 地球上雷達最近拉到多近（中山公園附近另外可以到 0.5 公尺）：v1.713 從 0.5 km 改成 50 m（使用者說依建議：更近地圖資料沒有更多東西、定位也不準） */
 const MIN_ZOOM_KM = 0.05;
 /**
- * 你在哪一顆：火箭在哪一邊你就在哪一邊（park.ts 存在 dr.rocket；搭火箭到汪星就在汪星，點別的星球只是看過去，坐火箭回來才回到地球）。
- * 在汪星時：太陽系寫「汪星（你）」、「定位」回到汪星的發射口、範圍按鈕是汪星的
+ * 你在哪一顆：火箭在哪一邊你就在哪一邊（國館的火箭 park.ts 存在 dr.rocket：搭到汪星就在汪星；九棚的火箭 rocket-art.ts 存在 dr.launch：
+ * 搭到 Kepler-22b 就在 Kepler-22b，v1.762 使用者說跟汪星做法一樣）。點別的星球只是看過去，坐火箭回來才回到地球、看得到地球的地圖。
+ * 在汪星、Kepler-22b 時：寫「汪星（你）」「Kepler-22b（你）」、「定位」回到發射口（降落的地方）、範圍按鈕換成那一顆的
  */
-let youOn: 'earth' | 'woof' = ((): 'earth' | 'woof' => {
+type YouOn = 'earth' | 'woof' | 'kepler22b';
+let youOn: YouOn = ((): YouOn => {
   try {
-    return (JSON.parse(lsGet('dr.rocket') ?? 'null') as { world?: string } | null)?.world === 'woof' ? 'woof' : 'earth';
+    if ((JSON.parse(lsGet('dr.rocket') ?? 'null') as { world?: string } | null)?.world === 'woof') return 'woof';
   } catch {
-    return 'earth';
+    /* 讀不到當作在地球 */
   }
+  return launchNow().where === 'kepler22b' ? 'kepler22b' : 'earth';
 })();
-/** 你在汪星、上次鏡頭在汪星：重新整理也回到汪星（null 是在地球、其他星球；你在地球時不記，汪星的地圖要搭火箭過去才看得到） */
-const savedWoof = ((): SpaceView | null => {
+/** 你在汪星（Kepler-22b）、上次鏡頭在那一顆：重新整理也回到那裡（null 是在地球、其他星球；你在地球時不記） */
+const savedHome = ((): SpaceView | null => {
   try {
     const v = JSON.parse(lsGet(LS_SPACE) ?? 'null') as { focus?: string; yaw?: number; pitch?: number } | null;
-    return youOn === 'woof' && v?.focus === 'woof' && Number.isFinite(v.yaw) && Number.isFinite(v.pitch) ? { focus: 'woof', yaw: v.yaw!, pitch: v.pitch! } : null;
+    return youOn !== 'earth' && v?.focus === youOn && Number.isFinite(v.yaw) && Number.isFinite(v.pitch) ? { focus: youOn, yaw: v.yaw!, pitch: v.pitch! } : null;
   } catch {
     return null;
   }
@@ -1945,12 +1948,19 @@ function updatePark(): void {
   radar.setPark(drawPark);
 }
 
-/** 在汪星上就記住中心和轉的角度（重新整理回到汪星同一個地方），不在汪星就清掉 */
+/** 在汪星（Kepler-22b）上就記住中心和轉的角度（重新整理回到同一個地方），在地球就清掉 */
 function saveSpaceView(): void {
   const v = radar.spaceViewNow;
   // 你在地球：不記（重新整理回到地球）；你在汪星、鏡頭看別的星球：留著上次在汪星的看法（重新整理回到汪星）
-  if (youOn !== 'woof') lsSet(LS_SPACE, null);
-  else if (v.focus === 'woof') lsSet(LS_SPACE, JSON.stringify({ focus: 'woof', yaw: +v.yaw.toFixed(6), pitch: +v.pitch.toFixed(6) }));
+  if (youOn === 'earth') lsSet(LS_SPACE, null);
+  else if (v.focus === youOn) lsSet(LS_SPACE, JSON.stringify({ focus: youOn, yaw: +v.yaw.toFixed(6), pitch: +v.pitch.toFixed(6) }));
+}
+
+/** 你在汪星、Kepler-22b 時「你的位置」：汪星的中山公園發射口、Kepler-22b 的降落的小島（在地球是 null） */
+async function homeView(): Promise<SpaceView | null> {
+  if (youOn === 'woof') return woofHomeView();
+  if (youOn === 'kepler22b') return (spaceMod ?? (spaceMod = await import('./space'))).keplerSiteView();
+  return null;
 }
 
 /** 你在汪星時的「你的位置」：汪星轉到中山公園的發射口（火箭降落的地方） */
@@ -2122,6 +2132,11 @@ async function launchTrip(): Promise<void> {
     radar.setSpaceView({ ...site, yaw: site.yaw * v, pitch: site.pitch * v }, !turned);
   });
   landLaunch(to);
+  // 你到了那一邊（跟汪星一樣：定位回到這裡，要再搭回來才看得到地球）；漂流瓶跟著換（Kepler-22b 上沒有）
+  youOn = to === 'kepler22b' ? 'kepler22b' : 'earth';
+  radar.youOn = youOn;
+  bottleWorldChanged();
+  saveSpaceView();
   updateScaleChips();
   updateViewBtn();
   updateSpace();
@@ -3478,7 +3493,8 @@ function renderLandmarkDetail(id: string): boolean {
 
 // ---- 漂流瓶 ----
 /** 伺服器沒關（v1.593 起直接開放，不用再打開實驗功能） */
-const bottlesOn = (): boolean => mod.current && keywordRules?.sources?.bottles?.enabled !== false;
+// Kepler-22b 上沒有漂流瓶（不能丟、也沒有漂過去的）：按鈕、瓶子都不畫，回地球再抓
+const bottlesOn = (): boolean => mod.current && youOn !== 'kepler22b' && keywordRules?.sources?.bottles?.enabled !== false;
 const bottleRules = (): NonNullable<KeywordRules['sources']>['bottles'] => keywordRules?.sources?.bottles;
 const pickRadiusM = (): number => bottleRules()?.pickRadiusM ?? 1000;
 /** 看內容、收藏、收回的距離寫成字：1000 → 「1 km」、500 → 「500 m」 */
@@ -4533,7 +4549,7 @@ async function submitBottle(): Promise<void> {
     bottleDropEl.classList.add('nope');
     return;
   }
-  if (youOn === 'woof') return say('搭火箭回地球才能丟瓶子');
+  if (youOn !== 'earth') return say('搭火箭回地球才能丟瓶子');
   if (origin.source !== 'gps') return say('要先按右上角「定位」用 GPS，瓶子會丟在你現在的位置附近');
   // 按軟木塞先確認，確認前把規則講清楚（v1.601 使用者說要再確認是否送出；v1.620 說丟出前把規則說清楚）
   const how = await confirmThrow();
@@ -5374,7 +5390,7 @@ function hqBoatNow(t0: number): LatLng | null {
   return { lat: path[i - 1][0] + (path[i][0] - path[i - 1][0]) * w, lng: path[i - 1][1] + (path[i][1] - path[i - 1][1]) * w };
 }
 function startHqVoyage(spinAt = Date.now()): void {
-  if (youOn === 'woof' || tripping || !mod.current) return;
+  if (youOn !== 'earth' || tripping || !mod.current) return;
   // 星星先快速旋轉、縮小不見（使用者說的），洋流號才出來：點下去馬上轉，載入路線資料的時間也算在轉的時間裡
   radar.setStarSpin({ id: 'hq', at: spinAt });
   map.setStarSpin({ id: 'hq', at: spinAt });
@@ -6670,11 +6686,12 @@ let home: Home | null = loadHome();
 function locate(): void {
   if (tripping) return;
   lockDog(null);
-  // 你在汪星：回到汪星的發射口（點別的星球只是看過去，坐火箭回來才回到地球）
-  if (youOn === 'woof') {
-    void woofHomeView().then((v) => {
+  // 你在汪星、Kepler-22b：回到發射口、降落的小島（點別的星球只是看過去，坐火箭回來才回到地球）
+  if (youOn !== 'earth') {
+    void homeView().then((v) => {
+      if (!v) return;
       radar.setSpaceView(v);
-      zoomToKm(locateKm(0));
+      zoomToKm(youOn === 'kepler22b' ? LAUNCH_LAND_KM : locateKm(0));
     });
     return;
   }
@@ -6738,7 +6755,7 @@ function followDog(): void {
  * 或拉遠超過全球（太空：看整顆地球、太陽系，或中心換到別的星球）
  */
 function noMapView(): boolean {
-  return youOn === 'woof' || radar.spaceFocused || scaleKm > SPACE_FROM_KM;
+  return youOn !== 'earth' || radar.spaceFocused || scaleKm > SPACE_FROM_KM;
 }
 
 /** 在汪星上、超過全球「地圖」按鈕藏起來 */
@@ -6857,8 +6874,6 @@ function switchView(v: 'radar' | 'map'): void {
 /** 要抓多遠的：範圍超過 600 km 就抓全世界 */
 const fetchRadiusKm = (km: number): number => (km > FETCH_RADIUS_KM ? WORLD_KM : FETCH_RADIUS_KM);
 
-/** 你在汪星（搭火箭過去，坐火箭回來為止） */
-const onWoof = (): boolean => youOn === 'woof';
 /**
  * 汪星上的範圍按鈕：汪星半徑只有約 6.6 km、陸地（台北）幾乎包住整顆，地球的 20 km、全台、全球都比整顆大，
  * 換成 1、2、3、5 km 和全球（整顆汪星剛好填滿雷達）
@@ -6872,16 +6887,28 @@ const WOOF_CHIPS: Record<string, { km: number | 'all'; text: string; title: stri
 };
 /** 汪星的半徑（space.ts 的 WOOF_KM；還沒載入先用差不多的） */
 const woofKm = (): number => spaceMod?.WOOF_KM ?? 6.56;
+/** Kepler-22b 上的範圍按鈕（半徑 13,380 km，海洋行星）：1 km、10 km、100 km、1000 km 和全球（整顆剛好填滿雷達） */
+const KEPLER_CHIPS: typeof WOOF_CHIPS = {
+  '1': { km: 1, text: '1 km', title: '' },
+  '5': { km: 10, text: '10 km', title: '' },
+  '20': { km: 100, text: '100 km', title: '' },
+  taiwan: { km: 1000, text: '1000 km', title: '' },
+  world: { km: 'all', text: '全球', title: '整顆 Kepler-22b' },
+};
+/** 你在汪星、Kepler-22b 時的範圍按鈕（在地球是 null） */
+const homeChips = (): typeof WOOF_CHIPS | null => (youOn === 'woof' ? WOOF_CHIPS : youOn === 'kepler22b' ? KEPLER_CHIPS : null);
+/** 你在的那一顆的半徑（「全球」按鈕） */
+const homeKm = (): number => (youOn === 'kepler22b' ? (spaceMod?.KEPLER22.planetKm ?? 13_380) : woofKm());
 
-/** 進出汪星：範圍按鈕換成汪星的（或換回地球的）；換了而且不是剛開頁面，原本按著的按鈕不再亮（範圍不變） */
-let chipsOnWoof = false;
+/** 進出汪星、Kepler-22b：範圍按鈕換成那一顆的（或換回地球的）；換了而且不是剛開頁面，原本按著的按鈕不再亮（範圍不變） */
+let chipsOn: YouOn = 'earth';
 let booted = false;
 function updateScaleChips(): void {
-  const w = onWoof();
-  if (w === chipsOnWoof) return;
-  chipsOnWoof = w;
+  if (youOn === chipsOn) return;
+  chipsOn = youOn;
+  const chips = homeChips();
   for (const b of scaleChips) {
-    const t = w ? WOOF_CHIPS[b.dataset.scale ?? ''] : earthChips.get(b);
+    const t = chips ? chips[b.dataset.scale ?? ''] : earthChips.get(b);
     if (!t) continue;
     b.textContent = t.text;
     b.title = t.title;
@@ -6898,9 +6925,9 @@ function updateScaleChips(): void {
 }
 
 function scaleKmFor(setting: ScaleSetting): number {
-  // 汪星上的範圍按鈕
-  const wc = onWoof() ? WOOF_CHIPS[setting] : undefined;
-  if (wc) return wc.km === 'all' ? woofKm() : wc.km;
+  // 汪星、Kepler-22b 上的範圍按鈕
+  const wc = homeChips()?.[setting];
+  if (wc) return wc.km === 'all' ? homeKm() : wc.km;
   // 中心在別的星球（汪星）：範圍照存的，最近多少由 zoomRadar 照那顆星球管
   if (setting === 'custom') return Math.min(radar.spaceFocused ? customKm : Math.max(customKm, earthMinKm()), SPACE_MAX_KM);
   if (setting === 'taiwan') return taiwanRadiusKm(origin);
@@ -9370,18 +9397,18 @@ function wireFullScreen(): void {
 }
 
 function wireControls(): void {
-  // 按範圍按鈕：太空裡轉過的視角、換過的中心都回到你；你在汪星就回到汪星（鏡頭在汪星上就留在原地），用汪星的範圍
+  // 按範圍按鈕：太空裡轉過的視角、換過的中心都回到你；你在汪星（Kepler-22b）就回到那一顆（鏡頭在那一顆上就留在原地），用那一顆的範圍
   for (const b of scaleChips) {
     b.addEventListener('click', () => {
       if (tripping) return;
       const st = (b.dataset.scale as ScaleSetting) ?? 'custom';
-      if (!onWoof()) {
+      if (youOn === 'earth') {
         radar.resetSpace();
         setScale(st);
-      } else if (radar.spaceFocusKey === 'woof') setScale(st);
+      } else if (radar.spaceFocusKey === youOn) setScale(st);
       else
-        void woofHomeView().then((v) => {
-          radar.setSpaceView(v);
+        void homeView().then((v) => {
+          if (v) radar.setSpaceView(v);
           setScale(st);
         });
     });
@@ -9656,12 +9683,12 @@ async function boot(): Promise<void> {
   setTime(timeSetting);
   // 上次在汪星：先換到汪星再套範圍（太空的畫法 render 時才載入）；你在汪星但沒存看法：換到汪星的發射口
   updateScaleChips();
-  if (savedWoof) radar.setSpaceView(savedWoof);
+  if (savedHome) radar.setSpaceView(savedHome);
   setScale(scaleSetting);
   booted = true;
-  if (youOn === 'woof')
-    void woofHomeView().then((v) => {
-      if (!savedWoof && radar.spaceFocusKey !== 'woof') radar.setSpaceView(v);
+  if (youOn !== 'earth')
+    void homeView().then((v) => {
+      if (v && !savedHome && radar.spaceFocusKey !== youOn) radar.setSpaceView(v);
       updateViewBtn();
     });
   setOrigin(origin);
