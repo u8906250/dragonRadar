@@ -17,6 +17,7 @@
     "vitest": "^4.0.0"
   },
   "dependencies": {
+    "@simplewebauthn/browser": "^14.0.0",
     "leaflet": "^1.9.4",
     "three": "^0.187.0"
   }

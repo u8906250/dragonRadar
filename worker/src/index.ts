@@ -10,6 +10,7 @@ import { CURRENT_MAP_URL, type CurrentMapRoute } from './sources/currentmap';
 import { mergeIntoOfficial } from './sources/merge';
 import { apifyTrial } from './sources/apify';
 import { fetchThreadsPost, resolveThreadsLink, shortcodeToUnix } from './sources/link';
+import { accountInfo, deleteAccount, deletePasskey, deviceId, loginOptions, loginVerify, logout, purgeAccounts, registerOptions, registerVerify, sessionOf } from './account';
 import { claimCard, makeTransfer, myCards, pickReward, purgeCards, redeemTransfer } from './cards';
 import { adminListWishes, adminSetWish, markWishesSeen, myWishes, notifyWish, purgeWishes, submitTweak, submitWish, withdrawWish } from './wishes';
 import { addParkMark, deleteParkMark, listParkMarks, listPublicParkMarks, parseParkMark, updateParkMark } from './parkmarks';
@@ -21,7 +22,7 @@ import { PUSH_RADIUS_KM, PushError, b64urlEncode, deleteSubscription, encryptPay
 import { assertEventReportsOpen, confirmLink, editLink, ENDED_REPORTS_NEEDED, locateForEdit, MAX_LINK_AGE_SEC, NOTES_CLOSED, ReportError, REPORTS_LOCKED, ipHash, myReports, purgeReports, recheckLinks, rejectLink, reportModules, submitLink, supplementLink, withdrawReport } from './reports';
 import { D1Meter, isTransient, withResilientDb } from './db';
 import { addressCacheKey, geocodeAddress, parseTwAddress } from './address';
-import { adminBottleRejects, adminListBottles, adminSetBottle, deleteBottleRejects, moderate, moderatePhoto, purgeBottleReads, purgeBottleRejects, BOTTLE_MAX_WEIGHT, bottleInfo, bottlePhoto, bottlesEnabled, photosEnabled, readBottle, SEE_RADIUS_KM, deleteBottle, deviceId, DRIFT_EVERY_SEC, driftBottles, dropBottle, listBottles, myBottles, PER_DEVICE_PER_DAY, PICK_RADIUS_M, pickBottle, proofFor, purgeBottles, reportBottle, SEA_AFTER_SEC, uncollectLetter, verifyProof, WOOF_STAY_SEC } from './bottles';
+import { adminBottleRejects, adminListBottles, adminSetBottle, deleteBottleRejects, moderate, moderatePhoto, purgeBottleReads, purgeBottleRejects, BOTTLE_MAX_WEIGHT, bottleInfo, bottlePhoto, bottlesEnabled, photosEnabled, readBottle, SEE_RADIUS_KM, deleteBottle, DRIFT_EVERY_SEC, driftBottles, dropBottle, listBottles, myBottles, PER_DEVICE_PER_DAY, PICK_RADIUS_M, pickBottle, proofFor, purgeBottles, reportBottle, SEA_AFTER_SEC, uncollectLetter, verifyProof, WOOF_STAY_SEC } from './bottles';
 import { approveSpotRequest, autoReview, cancelSpotRequest, listSpotRequests, locatePlace, rejectSpotRequest, SPOT_MAX_AGE_SEC, spotRequestStatus, type ApproveBody, type SpotRequestRow } from './spots';
 import { addUserKeyword, listActiveKeywords, listAllKeywords, MAX_ACTIVE_KEYWORDS, normalizeKeyword, parseKeywordList, toKeywordOut, touchKeywords } from './keywords';
 import { listLearnedTags, setLearnedTag } from './learnedTags';
@@ -42,7 +43,7 @@ function corsHeaders(env: Env, origin: string | null): Record<string, string> {
   return {
     'access-control-allow-origin': allow,
     'access-control-allow-methods': 'GET,POST,DELETE,OPTIONS',
-    'access-control-allow-headers': 'content-type,authorization,x-device',
+    'access-control-allow-headers': 'content-type,authorization,x-device,x-account',
     'access-control-max-age': '86400',
     vary: 'origin',
   };
@@ -288,8 +289,23 @@ async function handle(req: Request, env: Env, ctx: ExecutionContext): Promise<Re
   // 回報滿 5 則的獎勵：選一包肉乾或一枚順幣
   if (req.method === 'POST' && path === '/api/cards/pick') return jsonResponse(await pickReward(env, await deviceId(env, req), await readJson<unknown>(req)));
   // 引繼碼（換裝置，選單的「說明」裡）：舊裝置產生、新裝置輸入，卡片、道具搬過去
-  if (req.method === 'POST' && path === '/api/cards/transfer') return jsonResponse(await makeTransfer(env, await deviceId(env, req), await ipHash(env, req), now));
+  if (req.method === 'POST' && path === '/api/cards/transfer') {
+    // 登入帳號的不用引繼碼（產生了會把帳號裡的東西搬到別台）
+    if (await sessionOf(env, req)) throw new HttpError(400, '已經登入帳號了：在新裝置登入同一個帳號就好，不用引繼碼');
+    return jsonResponse(await makeTransfer(env, await deviceId(env, req), await ipHash(env, req), now));
+  }
   if (req.method === 'POST' && path === '/api/cards/redeem') return jsonResponse(await redeemTransfer(env, await deviceId(env, req), await ipHash(env, req), await readJson<unknown>(req), now));
+
+  // ---- 帳號（選用，passkey 登入；登入的 token 放在 x-account 標頭，account.ts）----
+  if (req.method === 'GET' && path === '/api/account') return jsonResponse(await accountInfo(env, req));
+  if (req.method === 'POST' && path === '/api/account/register/options') return jsonResponse(await registerOptions(env, req, now));
+  if (req.method === 'POST' && path === '/api/account/register/verify') return jsonResponse(await registerVerify(env, req, await readJson<unknown>(req), now));
+  if (req.method === 'POST' && path === '/api/account/login/options') return jsonResponse(await loginOptions(env, req, now));
+  if (req.method === 'POST' && path === '/api/account/login/verify') return jsonResponse(await loginVerify(env, req, await readJson<unknown>(req), now));
+  if (req.method === 'POST' && path === '/api/account/logout') return jsonResponse(await logout(env, req, await readJson<unknown>(req)));
+  if (req.method === 'POST' && path === '/api/account/delete') return jsonResponse(await deleteAccount(env, req, await readJson<unknown>(req), now));
+  const keyDel = /^\/api\/account\/passkeys\/([A-Za-z0-9_-]{16,400})$/.exec(path);
+  if (req.method === 'DELETE' && keyDel) return jsonResponse(await deletePasskey(env, req, keyDel[1]));
 
   // ---- 許願（投順幣送想法，管理者審核，通過才做；裝置代碼放在 x-device 標頭）----
   if (req.method === 'GET' && path === '/api/wishes/mine') return jsonResponse(await myWishes(env, await deviceId(env, req)));
@@ -886,7 +902,7 @@ async function purgeOldData(env: Env, now: number): Promise<number> {
     // 手動改的地點、時間跟著貼文
     env.DB.prepare('DELETE FROM manual_fixes WHERE post_id NOT IN (SELECT id FROM posts)'),
   ]);
-  return r.reduce((n, x) => n + (x.meta.changes ?? 0), 0) + (await purgeReports(env, cutoff)) + (await purgeBottles(env, cutoff)) + (await purgeBottleRejects(env, now)) + (await purgeBottleReads(env, now)) + (await purgeCards(env, cutoff)) + (await purgeWishes(env, cutoff)) + (await purgeSubscriptions(env, cutoff)) + (await purgeFeedback(env, cutoff));
+  return r.reduce((n, x) => n + (x.meta.changes ?? 0), 0) + (await purgeReports(env, cutoff)) + (await purgeBottles(env, cutoff)) + (await purgeBottleRejects(env, now)) + (await purgeBottleReads(env, now)) + (await purgeCards(env, cutoff)) + (await purgeAccounts(env, now, cutoff)) + (await purgeWishes(env, cutoff)) + (await purgeSubscriptions(env, cutoff)) + (await purgeFeedback(env, cutoff));
 }
 
 async function refreshTokenJob(env: Env): Promise<void> {

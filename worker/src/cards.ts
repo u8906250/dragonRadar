@@ -213,6 +213,30 @@ export async function makeTransfer(env: Env, device: string | null, ip: string, 
 }
 
 /**
+ * 把 from 的卡、道具、回報的累計、許願、漂流瓶收藏搬到 to（引繼碼、登入帳號共用）。兩邊都有同一張卡的，留比較早拿到的那張（第幾位比較前面）；
+ * 道具、還沒選的獎勵兩邊的都留著（同一個原因兩邊都拿過的，from 那個的原因後面加 :moved:id；不管是哪個道具，之後選獎勵才不會撞到）。
+ * 第 3 句（index 2）的 changes 是搬過去幾張卡
+ */
+export function moveOwned(env: Env, from: string, to: string): D1PreparedStatement[] {
+  // 不要的那張不刪掉、改成不屬於任何裝置（merged:id）：還是算在「第幾位」裡，其他人的第幾位不會變
+  return [
+    // to 已經有、但 from 的比較早拿到：to 的那張不要
+    env.DB.prepare("UPDATE card_claims SET device_id = 'merged:' || id WHERE device_id = ? AND EXISTS (SELECT 1 FROM card_claims o WHERE o.device_id = ? AND o.card = card_claims.card AND o.id < card_claims.id)").bind(to, from),
+    // to 已經有（比較早拿到）的：from 的那張不要
+    env.DB.prepare("UPDATE card_claims SET device_id = 'merged:' || id WHERE device_id = ? AND card IN (SELECT card FROM card_claims WHERE device_id = ?)").bind(from, to),
+    env.DB.prepare('UPDATE card_claims SET device_id = ? WHERE device_id = ?').bind(to, from),
+    env.DB.prepare("UPDATE item_grants SET reason = reason || ':moved:' || id WHERE device_id = ? AND EXISTS (SELECT 1 FROM item_grants o WHERE o.device_id = ? AND o.reason = item_grants.reason)").bind(from, to),
+    env.DB.prepare('UPDATE item_grants SET device_id = ? WHERE device_id = ?').bind(to, from),
+    env.DB.prepare('UPDATE report_credits SET device_id = ? WHERE device_id = ?').bind(to, from),
+    // 許願（v1.569）：願望、調整一起搬（暫扣的順幣在 item_grants 跟著搬了）
+    env.DB.prepare('UPDATE wishes SET device_id = ? WHERE device_id = ?').bind(to, from),
+    // 漂流瓶收藏（v1.634 使用者說換裝置也搬收藏的漂流瓶）：同一個瓶子兩邊都有紀錄的留 to 的，from 剩下的清掉。自己丟的瓶子不搬（登入帳號另外搬，account.ts）
+    env.DB.prepare('UPDATE OR IGNORE bottle_picks SET device_id = ? WHERE device_id = ?').bind(to, from),
+    env.DB.prepare('DELETE FROM bottle_picks WHERE device_id = ?').bind(from),
+  ];
+}
+
+/**
  * 新裝置：輸入引繼碼，舊裝置的卡、道具、回報的累計、許願、漂流瓶收藏搬過來（舊裝置就沒有了）。兩台都有同一張卡的，留比較早拿到的那張（第幾位比較前面）；
  * 道具、還沒選的獎勵兩台的都留著（同一個原因兩台都拿過的，舊裝置那個的原因後面加 :moved:id；不管是哪個道具，之後選獎勵才不會撞到）
  */
@@ -229,22 +253,7 @@ export async function redeemTransfer(env: Env, device: string | null, ip: string
   const used = await env.DB.prepare('UPDATE card_transfers SET used_at = ? WHERE code_hash = ? AND used_at IS NULL').bind(now, hash).run();
   if (!used.meta.changes) throw new ReportError(400, '引繼碼已經用過了，請在舊裝置重新產生');
   const old = row.device_id;
-  // 不要的那張不刪掉、改成不屬於任何裝置（merged:id）：還是算在「第幾位」裡，其他人的第幾位不會變
-  const r = await env.DB.batch([
-    // 新裝置已經有、但舊裝置的比較早拿到：新裝置的那張不要
-    env.DB.prepare("UPDATE card_claims SET device_id = 'merged:' || id WHERE device_id = ? AND EXISTS (SELECT 1 FROM card_claims o WHERE o.device_id = ? AND o.card = card_claims.card AND o.id < card_claims.id)").bind(device, old),
-    // 新裝置已經有（比較早拿到）的：舊裝置的那張不要
-    env.DB.prepare("UPDATE card_claims SET device_id = 'merged:' || id WHERE device_id = ? AND card IN (SELECT card FROM card_claims WHERE device_id = ?)").bind(old, device),
-    env.DB.prepare('UPDATE card_claims SET device_id = ? WHERE device_id = ?').bind(device, old),
-    env.DB.prepare("UPDATE item_grants SET reason = reason || ':moved:' || id WHERE device_id = ? AND EXISTS (SELECT 1 FROM item_grants o WHERE o.device_id = ? AND o.reason = item_grants.reason)").bind(old, device),
-    env.DB.prepare('UPDATE item_grants SET device_id = ? WHERE device_id = ?').bind(device, old),
-    env.DB.prepare('UPDATE report_credits SET device_id = ? WHERE device_id = ?').bind(device, old),
-    // 許願（v1.569）：願望、調整一起搬（暫扣的順幣在 item_grants 跟著搬了）
-    env.DB.prepare('UPDATE wishes SET device_id = ? WHERE device_id = ?').bind(device, old),
-    // 漂流瓶收藏（v1.634 使用者說換裝置也搬收藏的漂流瓶）：同一個瓶子兩台都有紀錄的留新裝置的，舊裝置剩下的清掉。自己丟的瓶子不搬
-    env.DB.prepare('UPDATE OR IGNORE bottle_picks SET device_id = ? WHERE device_id = ?').bind(device, old),
-    env.DB.prepare('DELETE FROM bottle_picks WHERE device_id = ?').bind(old),
-  ]);
+  const r = await env.DB.batch(moveOwned(env, old, device));
   const mine = await myCards(env, device);
   const letters = await env.DB.prepare('SELECT COUNT(*) AS n FROM bottle_picks WHERE device_id = ? AND collected_at IS NOT NULL').bind(device).first<{ n: number }>();
   return { cards: mine.cards, items: mine.items, picks: mine.picks, moved: r[2].meta.changes ?? 0, letters: letters?.n ?? 0 };

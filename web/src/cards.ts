@@ -6,7 +6,8 @@
  * 卡片的內容寫在這裡（照片在 public/cards/），拿到的卡、道具存在伺服器（裝置代碼，worker/src/cards.ts），
  * 這個瀏覽器另外記一份（dr.cards、dr.items、dr.picks）：點小法時拿過的就不再問伺服器
  */
-import { claimCard, fetchMyCards, fetchMyWishes, makeTransferCode, markWishesSeen, pickReward, redeemTransferCode, sendTweak, sendWish, withdrawWish, type CardClaim, type ItemCount, type MyWishes, type Wish, type WishStatus, type WishTweak } from './api';
+import { mountAccount } from './account';
+import { accountToken, claimCard, fetchMyCards, fetchMyWishes, makeTransferCode, markWishesSeen, pickReward, redeemTransferCode, sendTweak, sendWish, withdrawWish, type CardClaim, type ItemCount, type MyWishes, type Wish, type WishStatus, type WishTweak } from './api';
 
 export interface CardDef {
   /** 跟伺服器的 CARDS 一樣 */
@@ -391,37 +392,54 @@ export function openAlbum(): void {
  * 選單的「說明」：使用說明（照目前的雷達，helpPage）和「換裝置」（引繼碼，卡冊、道具、漂流瓶收藏一起搬；v1.467 起從卡冊搬過來，原本叫「換手機」；v1.634 加漂流瓶收藏）
  */
 export function openHelp(helpPage: string): void {
+  const signedIn = !!accountToken();
   const el = overlay(
     'tc-help',
     `<div class="tc-box">
       <div class="tc-head"><h2>說明</h2><button type="button" class="chip" data-close>關閉</button></div>
       <div class="tc-help-row"><a class="chip" href="${esc(helpPage)}">使用說明</a><span>怎麼回報活動、卡冊的小趣味</span></div>
       <div class="tc-help-row"><a class="chip" href="numbers.html">雷達統計</a><span>最近 30 天有幾場活動、都在哪裡、什麼時候</span></div>
+      <div class="tc-help-row"><button type="button" class="chip" data-acct aria-expanded="false" aria-controls="tc-acct-box">帳號</button><span>${signedIn ? '已登入：手機、電腦看到同一份' : '用 passkey 登入，手機、電腦看到同一份（選用）'}</span></div>
+      <div class="tc-move-box tc-acct-box" id="tc-acct-box" hidden></div>
       <div class="tc-help-row"><button type="button" class="chip" data-move aria-expanded="false" aria-controls="tc-move-box">換裝置</button><span>可轉移卡冊、道具及收藏的漂流瓶</span></div>
       <div class="tc-move-box" id="tc-move-box" hidden>
-        <p><b>舊裝置</b>：產生引繼碼，24 小時內在新裝置輸入，卡冊、道具和漂流瓶收藏會搬過去（這台就沒有了）。</p>
+        ${
+          signedIn
+            ? '<p>已經登入帳號：在新裝置登入同一個帳號就好，不用引繼碼。</p>'
+            : `<p><b>舊裝置</b>：產生引繼碼，24 小時內在新裝置輸入，卡冊、道具和漂流瓶收藏會搬過去（這台就沒有了）。有帳號的話，在新裝置登入就好。</p>
         <button type="button" class="chip" data-make>產生引繼碼</button>
-        <div class="tc-code" hidden><span class="tc-code-text"></span><button type="button" class="chip" data-copy>複製</button><small class="tc-code-until"></small></div>
-        <p><b>新裝置</b>：輸入舊裝置產生的引繼碼。</p>
+        <div class="tc-code" hidden><span class="tc-code-text"></span><button type="button" class="chip" data-copy>複製</button><small class="tc-code-until"></small></div>`
+        }
+        <p><b>新裝置</b>：輸入舊裝置產生的引繼碼${signedIn ? '（搬進帳號）' : ''}。</p>
         <form class="tc-redeem" novalidate><input name="code" maxlength="12" placeholder="例如 KX7P-4M2Q" autocomplete="off" autocapitalize="characters" spellcheck="false" aria-label="引繼碼"><button type="submit" class="chip primary">搬過來</button></form>
         <p class="tc-move-msg" role="status"></p>
       </div>
     </div>`,
   );
   const msg = (text: string, bad = false): void => {
-    const m = el.querySelector<HTMLElement>('.tc-move-msg');
+    const m = el.querySelector<HTMLElement>('#tc-move-box .tc-move-msg');
     if (!m) return;
     m.textContent = text;
     m.classList.toggle('bad', bad);
   };
-  const box = el.querySelector<HTMLElement>('.tc-move-box')!;
+  const box = el.querySelector<HTMLElement>('#tc-move-box')!;
   el.querySelector<HTMLButtonElement>('[data-move]')?.addEventListener('click', (e) => {
     box.hidden = !box.hidden;
     (e.currentTarget as HTMLElement).setAttribute('aria-expanded', String(!box.hidden));
   });
-  // 舊裝置：產生引繼碼
-  const make = el.querySelector<HTMLButtonElement>('[data-make]')!;
-  make.addEventListener('click', async () => {
+  // 帳號（account.ts）：第一次打開才去問伺服器
+  const acct = el.querySelector<HTMLElement>('#tc-acct-box')!;
+  el.querySelector<HTMLButtonElement>('[data-acct]')?.addEventListener('click', (e) => {
+    acct.hidden = !acct.hidden;
+    (e.currentTarget as HTMLElement).setAttribute('aria-expanded', String(!acct.hidden));
+    if (!acct.hidden && !acct.dataset.mounted) {
+      acct.dataset.mounted = '1';
+      mountAccount(acct, resyncMine);
+    }
+  });
+  // 舊裝置：產生引繼碼（登入帳號的沒有）
+  el.querySelector<HTMLButtonElement>('[data-make]')?.addEventListener('click', async (e) => {
+    const make = e.currentTarget as HTMLButtonElement;
     make.disabled = true;
     msg('');
     const r = await makeTransferCode();
@@ -463,6 +481,20 @@ export function openHelp(helpPage: string): void {
     window.dispatchEvent(new CustomEvent('dr:transferred'));
     msg(`搬好了，這台現在有 ${cards.length} 張卡、${items} 個道具${r.data.letters !== undefined ? `、${r.data.letters} 個漂流瓶` : ''}`);
   });
+}
+
+/** 登入、登出帳號後（重新整理頁面前）：這個瀏覽器存的卡、道具、還沒選的獎勵照伺服器的重存；問不到就清掉，之後打開卡冊再對 */
+async function resyncMine(): Promise<void> {
+  const r = await fetchMyCards();
+  if (r.ok) {
+    saveCards(r.data.cards.filter(isClaim));
+    saveItems(r.data.items ?? []);
+    savePicks(r.data.picks ?? 0);
+    return;
+  }
+  saveCards([]);
+  saveItems([]);
+  savePicks(0);
 }
 
 /**

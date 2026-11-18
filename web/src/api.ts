@@ -63,7 +63,7 @@ export async function addKeyword(term: string): Promise<AddKeywordResult> {
   }
 }
 
-type Result<T> = { ok: true; data: T } | { ok: false; message: string };
+type Result<T> = { ok: true; data: T } | { ok: false; message: string; status?: number };
 
 async function postJson<T>(path: string, body: unknown): Promise<Result<T>> {
   try {
@@ -125,6 +125,37 @@ export function deviceCode(): string {
   }
 }
 
+// ---- 帳號（選用，passkey 登入）：登入的 token 存在這個瀏覽器，跟裝置代碼一起送（x-account 標頭）；伺服器就把收集卡、許願…認成帳號的 ----
+const LS_ACCOUNT = 'dr.account';
+let accountMem: string | null = null;
+
+/** 這個瀏覽器登入的帳號 token；沒登入是 null */
+export function accountToken(): string | null {
+  try {
+    return localStorage.getItem(LS_ACCOUNT) ?? accountMem;
+  } catch {
+    return accountMem;
+  }
+}
+
+/** 登入：存 token；登出：null */
+export function setAccountToken(token: string | null): void {
+  accountMem = token;
+  try {
+    if (token) localStorage.setItem(LS_ACCOUNT, token);
+    else localStorage.removeItem(LS_ACCOUNT);
+  } catch {
+    /* 不能存就這次開著的期間有效 */
+  }
+}
+
+function deviceHeaders(): Record<string, string> {
+  const h: Record<string, string> = { 'x-device': deviceCode() };
+  const t = accountToken();
+  if (t) h['x-account'] = t;
+  return h;
+}
+
 async function deviceJson<T>(path: string, method = 'GET', body?: unknown, retried = false): Promise<Result<T>> {
   // 讀取的請求碰到暫時失敗（503、連線中斷）自動再試一次；寫入的不重送，伺服器那邊已經重試過
   const again = async (): Promise<Result<T> | null> => {
@@ -133,7 +164,7 @@ async function deviceJson<T>(path: string, method = 'GET', body?: unknown, retri
     return deviceJson<T>(path, method, body, true);
   };
   try {
-    const headers: Record<string, string> = { 'x-device': deviceCode() };
+    const headers = deviceHeaders();
     if (body !== undefined) headers['content-type'] = 'application/json';
     const r = await fetch(`${API_BASE}${path}`, { method, headers, body: body === undefined ? undefined : JSON.stringify(body) });
     if (r.status === 503) {
@@ -141,7 +172,7 @@ async function deviceJson<T>(path: string, method = 'GET', body?: unknown, retri
       if (a) return a;
     }
     const j = (await r.json().catch(() => ({}))) as T & { error?: string };
-    if (!r.ok) return { ok: false, message: j.error ?? `暫時失敗，請再試一次（${r.status}）` };
+    if (!r.ok) return { ok: false, message: j.error ?? `暫時失敗，請再試一次（${r.status}）`, status: r.status };
     return { ok: true, data: j };
   } catch {
     return (await again()) ?? { ok: false, message: '連線失敗，請稍後再試' };
@@ -167,7 +198,7 @@ export function fetchBottlePhoto(id: number, here?: BottleHere): Promise<string 
   let p = photoUrls.get(id);
   if (!p) {
     const q = here?.at ? `?lat=${here.at.lat.toFixed(6)}&lng=${here.at.lng.toFixed(6)}&world=${here.world}` : '';
-    p = fetch(`${API_BASE}/api/bottles/${id}/photo${q}`, { headers: { 'x-device': deviceCode() } })
+    p = fetch(`${API_BASE}/api/bottles/${id}/photo${q}`, { headers: deviceHeaders() })
       .then(async (r) => (r.ok ? URL.createObjectURL(await r.blob()) : null))
       .catch(() => null);
     photoUrls.set(id, p);
@@ -332,6 +363,29 @@ export function makeTransferCode(): Promise<Result<{ code: string; expiresAt: nu
 export function redeemTransferCode(code: string): Promise<Result<{ cards: CardClaim[]; items?: ItemCount[]; picks?: number; moved: number; letters?: number }>> {
   return deviceJson('/api/cards/redeem', 'POST', { code });
 }
+
+// ---- 帳號（passkey）----
+export interface AccountInfo {
+  name: string;
+  createdAt: number;
+  passkeys: Array<{ id: string; label: string; createdAt: number; lastUsedAt: number | null; synced: boolean }>;
+  devices: Array<{ label: string; createdAt: number; lastUsedAt: number; current: boolean }>;
+}
+/** passkey 的設定（給 @simplewebauthn/browser）和這一輪的代號 */
+export interface PasskeyFlow<O> {
+  flow: string;
+  options: O;
+}
+export const fetchAccount = (): Promise<Result<{ account: AccountInfo | null }>> => deviceJson('/api/account');
+export const accountRegisterOptions = <O>(): Promise<Result<PasskeyFlow<O>>> => deviceJson('/api/account/register/options', 'POST', {});
+export const accountRegisterVerify = (flow: string, response: unknown): Promise<Result<{ token?: string; account: AccountInfo | null }>> =>
+  deviceJson('/api/account/register/verify', 'POST', { flow, response });
+export const accountLoginOptions = <O>(): Promise<Result<PasskeyFlow<O>>> => deviceJson('/api/account/login/options', 'POST', {});
+export const accountLoginVerify = (flow: string, response: unknown): Promise<Result<{ token: string; account: AccountInfo | null }>> =>
+  deviceJson('/api/account/login/verify', 'POST', { flow, response });
+export const accountLogout = (others = false): Promise<Result<{ account: AccountInfo | null }>> => deviceJson('/api/account/logout', 'POST', others ? { others: true } : {});
+export const accountDeletePasskey = (id: string): Promise<Result<{ account: AccountInfo | null }>> => deviceJson(`/api/account/passkeys/${encodeURIComponent(id)}`, 'DELETE');
+export const accountDelete = (flow: string, response: unknown): Promise<Result<{ passkeys: string[]; rpID: string }>> => deviceJson('/api/account/delete', 'POST', { flow, response });
 
 // ---- 許願（投順幣送想法，管理者審核，通過才做；一樣用裝置代碼認人）----
 export type WishStatus = 'pending' | 'approved' | 'building' | 'live' | 'rejected' | 'dropped' | 'withdrawn';

@@ -21,7 +21,6 @@
 import type { Env } from './env';
 import { responseContent } from './extract';
 import { hashSalt, ReportError } from './reports';
-import { sha1Hex } from './sources/text';
 import { TAIPEI_CENTER, WOOF_KM, WOOF_SEA } from './woofsea';
 
 /** 字數比照 X（Twitter）：上限 280，拉丁字母、數字、一般標點算 1，其他（中文、全形、表情）算 2 */
@@ -277,13 +276,6 @@ export async function bottlePhoto(env: Env, device: string | null, ip: string, i
 }
 
 export const bottlesEnabled = (env: Env): boolean => env.BOTTLES_ENABLED !== 'false';
-
-/** 裝置代碼（前端產生的隨機字串）換成雜湊；沒有或格式不對就是 null */
-export async function deviceId(env: Env, req: Request): Promise<string | null> {
-  const raw = req.headers.get('x-device') ?? '';
-  if (!/^[0-9a-f-]{36}$/i.test(raw)) return null;
-  return sha1Hex(`device|${raw}|${await hashSalt(env)}`, 24);
-}
 
 function needDevice(id: string | null): string {
   if (!id) throw new ReportError(400, '缺少裝置代碼，請重新整理頁面');

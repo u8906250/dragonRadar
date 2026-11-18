@@ -2802,3 +2802,16 @@ path.map-canal-flow { --p: 14px; }
 @keyframes preview-dash { to { stroke-dashoffset: -14; } }
 @keyframes preview-pulse { 0% { transform: scale(1); opacity: 0.7; } 100% { transform: scale(2); opacity: 0; } }
 @media (prefers-reduced-motion: reduce) { .radar .preview-pin .ring, .radar .preview-pin .pulse, .map-preview .ring, .map-preview .pulse { animation: none; } .radar .preview-pin .pulse, .map-preview .pulse { display: none; } }
+
+/* 帳號（選單「說明」裡，passkey 登入，account.ts） */
+.tc-acct-box h3 { margin: 4px 0 0; font-size: 13px; }
+.tc-acct-actions { display: flex; flex-wrap: wrap; gap: 6px; }
+.tc-acct-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.tc-acct-list li { display: flex; flex-wrap: wrap; align-items: center; gap: 2px 8px; padding: 6px 8px; border: 1px solid rgba(243, 238, 228, 0.18); border-radius: 8px; }
+.tc-acct-list li > span { font-weight: 700; }
+.tc-acct-list li > small { flex: 1 1 auto; opacity: 0.8; }
+.tc-acct-list li > .chip { margin-left: auto; }
+.tc-acct-small { opacity: 0.8; font-size: 12px; }
+.tc-acct-note { color: #ffd88a; }
+.tc-acct-box a { color: #9fd8ff; }
+.tc-acct-box .tc-acct-danger { color: #b3261e; }
