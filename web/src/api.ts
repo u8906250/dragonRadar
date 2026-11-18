@@ -138,14 +138,37 @@ export function accountToken(): string | null {
   }
 }
 
-/** 登入：存 token；登出：null */
+/** 登入：存 token；登出：null（暱稱也一起清掉） */
 export function setAccountToken(token: string | null): void {
   accountMem = token;
+  if (!token) cacheNickname(null);
   try {
     if (token) localStorage.setItem(LS_ACCOUNT, token);
     else localStorage.removeItem(LS_ACCOUNT);
   } catch {
     /* 不能存就這次開著的期間有效 */
+  }
+}
+
+/**
+ * 帳號的暱稱（這個瀏覽器存一份，卡片、許願、漂流瓶的署名直接拿來用；打開帳號、開網頁時跟伺服器對一次，account.ts）。
+ * 沒登入、沒取暱稱是 null
+ */
+const LS_NICKNAME = 'dr.nickname';
+export function cachedNickname(): string | null {
+  if (!accountToken()) return null;
+  try {
+    return localStorage.getItem(LS_NICKNAME) || null;
+  } catch {
+    return null;
+  }
+}
+export function cacheNickname(nickname: string | null): void {
+  try {
+    if (nickname) localStorage.setItem(LS_NICKNAME, nickname);
+    else localStorage.removeItem(LS_NICKNAME);
+  } catch {
+    /* 不能存就算了 */
   }
 }
 
@@ -189,9 +212,12 @@ export async function fetchWoofBottles(): Promise<BottleOut[]> {
   const r = await deviceJson<{ bottles?: BottleOut[] }>('/api/bottles?world=woof');
   return r.ok ? (r.data.bottles ?? []).filter((b) => b.world === 'woof') : [];
 }
-/** 丟瓶子；photo 是瀏覽器縮小、重新存好的 JPEG（data URL），沒放是 null；land 是自己選的落點（at 的 1 km 內），沒選是 null（落在隨機位置） */
-export const dropBottle = (text: string, at: LatLng, photo: string | null = null, land: LatLng | null = null): Promise<Result<PickedBottle>> =>
-  deviceJson<PickedBottle>('/api/bottles', 'POST', { text, lat: at.lat, lng: at.lng, ...(land ? { land: { lat: land.lat, lng: land.lng } } : {}), ...(photo ? { photo } : {}) });
+/**
+ * 丟瓶子；photo 是瀏覽器縮小、重新存好的 JPEG（data URL），沒放是 null；land 是自己選的落點（at 的 1 km 內），沒選是 null（落在隨機位置）；
+ * sign：署名（帳號的暱稱，伺服器自己查）
+ */
+export const dropBottle = (text: string, at: LatLng, photo: string | null = null, land: LatLng | null = null, sign = false): Promise<Result<PickedBottle>> =>
+  deviceJson<PickedBottle>('/api/bottles', 'POST', { text, lat: at.lat, lng: at.lng, ...(land ? { land: { lat: land.lat, lng: land.lng } } : {}), ...(photo ? { photo } : {}), ...(sign ? { sign: true } : {}) });
 /** 瓶子的照片（看得到內容的人才拿得到：丟的人、收藏的人、走到附近的人帶位置）：回傳可以放在 img 的網址，拿不到是 null；拿過的記起來 */
 const photoUrls = new Map<number, Promise<string | null>>();
 export function fetchBottlePhoto(id: number, here?: BottleHere): Promise<string | null> {

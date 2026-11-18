@@ -1,6 +1,6 @@
 import './styles.css';
 import { FITBUS_MS_PER_M, hqDenseKm, hqMotionKm, HQ_NET_LABEL_KM, HQ_SAIL_MS, HQ_STAR_MS, HQ_VOYAGE_MS, RAINBOW_EVERY_MS, voyagePhase, voyageTimeOf } from './flow';
-import { addKeyword, deletePushSubscription, locateFeedbackPlace, sendFeedback, type FeedbackKind, fetchPushKey, savePushSubscription, confirmReport, editReport, locatePlace, rejectReport, supplementReport, deleteBottle, dropBottle, readBottle, type BottleHere, fetchBottleInfo, fetchBottlePhoto, fetchBottleProof, fetchBottles, fetchWoofBottles, rememberBottlePhoto, uncollectLetter, verifyBottleProof, fetchEvents, fetchHealth, fetchKeywords, fetchMyBottles, fetchMyReports, fetchRoutes, pickBottle, reportBottle, submitLink, withdrawReport } from './api';
+import { accountToken, addKeyword, cachedNickname, deletePushSubscription, locateFeedbackPlace, sendFeedback, type FeedbackKind, fetchPushKey, savePushSubscription, confirmReport, editReport, locatePlace, rejectReport, supplementReport, deleteBottle, dropBottle, readBottle, type BottleHere, fetchBottleInfo, fetchBottlePhoto, fetchBottleProof, fetchBottles, fetchWoofBottles, rememberBottlePhoto, uncollectLetter, verifyBottleProof, fetchEvents, fetchHealth, fetchKeywords, fetchMyBottles, fetchMyReports, fetchRoutes, pickBottle, reportBottle, submitLink, withdrawReport } from './api';
 import { compassSupported, startCompass } from './compass';
 import { bearingDeg, compassLabel, cutAtBox, cutLines, destination, formatKm, haversineKm, lookFrom, outsideBox, ringBox, ringHas, splitAntimeridian, simplifyLatLng, taiwanRadiusKm, unitVectors, type GeoBox, type LatLng, type RegionMap } from './geo';
 import { TAIWAN_RINGS } from './taiwan';
@@ -470,6 +470,7 @@ const feedbackSubmit = $<HTMLButtonElement>('#feedback-submit');
 let feedbackEventId: number | null = null;
 const bottleText = $<HTMLTextAreaElement>('#bottle-text');
 const bottleCount = $('#bottle-count');
+const bottleSign = $<HTMLButtonElement>('#bottle-sign');
 /** 牛皮紙旁邊的空瓶子：點了就捲起來丟出去 */
 const bottleDropEl = $('#bottle-drop');
 const bottleResult = $('#bottle-result');
@@ -3759,9 +3760,9 @@ async function collectBottle(id: number): Promise<void> {
 
 /** 貼在牛皮紙上的照片（還沒載入的，fillPhotos 去拿） */
 const tapedPhoto = (id: number): string => `<figure class="taped-photo"><img data-photo="${id}" alt="瓶子裡的照片（點了放大）" /></figure>`;
-/** 牛皮紙上的一段話（有照片的話貼在上面） */
-const kraftNote = (text: string, no: number, photo = false): string =>
-  `<div class="kraft-note"><span class="kraft-no">${bottleNo(no)}</span>${photo ? tapedPhoto(no) : ''}<p>${esc(text)}</p></div>`;
+/** 牛皮紙上的一段話（有照片的話貼在上面；有署名的寫在最後） */
+const kraftNote = (text: string, no: number, photo = false, signed: string | null = null): string =>
+  `<div class="kraft-note"><span class="kraft-no">${bottleNo(no)}</span>${photo ? tapedPhoto(no) : ''}<p>${esc(text)}</p>${signed ? `<p class="kraft-signed">— ${esc(signed)}</p>` : ''}</div>`;
 
 /** 牛皮紙上的照片：還沒載入的去拿（看得到內容的人才拿得到；走到附近看的人帶位置 here），拿不到就拿掉 */
 function fillPhotos(root: Element, here?: BottleHere): void {
@@ -3837,7 +3838,7 @@ function renderBottleDetail(id: number): boolean {
           ? `${agoCoarse(b.createdAt)}丟的・已經被別人收藏了・${lifecycle}`
           : `${agoCoarse(b.createdAt)}丟的・還沒有人收藏・${lifecycle}`;
     const showText = justThrown !== id;
-    body = `${showText ? kraftNote(got.text, b.id, got.photo) : ''}<p class="muted">${esc(status)}</p>`;
+    body = `${showText ? kraftNote(got.text, b.id, got.photo, got.signed ?? null) : ''}<p class="muted">${esc(status)}</p>`;
     // 顯示了內容就算看過：雷達、地圖上的這個瓶子換成空瓶（這一輪已經畫好了，下一格再畫一次）
     if (showText && !readBottles.has(id)) {
       markBottleRead(id);
@@ -4138,7 +4139,22 @@ function updateDropBtn(): void {
 
 function renderBottleSheet(): void {
   updateDropBtn();
+  paintBottleSign();
   sceneQuota();
+}
+
+/** 署名（v1.766）：登入帳號、取了暱稱才有，紙的最下面寫「— 暱稱」；點一下之後都不署名（記在這個瀏覽器），再點一下又署名 */
+const LS_BOTTLE_SIGN = 'dr.bottleSign';
+const signing = (): boolean => !bottleSign.hidden && lsGet(LS_BOTTLE_SIGN) !== 'off';
+function paintBottleSign(): void {
+  const nick = cachedNickname();
+  bottleSign.hidden = !nick;
+  if (!nick) return;
+  const on = signing();
+  bottleSign.textContent = `— ${nick}`;
+  bottleSign.classList.toggle('off', !on);
+  bottleSign.setAttribute('aria-pressed', String(on));
+  bottleSign.title = on ? '署名（點一下不署名）' : '不署名（點一下署名）';
 }
 
 /**
@@ -4250,6 +4266,13 @@ function wireBottleScene(): void {
     bottleResult.textContent = '';
     updateDropBtn();
   });
+  bottleSign.addEventListener('click', () => {
+    if (judging || throwing) return;
+    lsSet(LS_BOTTLE_SIGN, signing() ? 'off' : null);
+    paintBottleSign();
+  });
+  // 在「帳號」改了暱稱：紙上的署名跟著換
+  window.addEventListener('dr:nickname', paintBottleSign);
   const attachPhoto = async (file: File): Promise<void> => {
     bottleResult.textContent = '';
     try {
@@ -4339,7 +4362,7 @@ function renderLettersPage(): void {
           <div class="letter-paper" role="dialog" aria-modal="true" aria-label="${bottleNo(open.id)}">
             <button type="button" class="letter-x" data-close-letter="${open.id}" aria-label="放回瓶子">✕</button>
             <span class="kraft-no">${bottleNo(open.id)}</span>
-            ${open.photo ? tapedPhoto(open.id) : ''}<p class="letter-text">${esc(open.text)}</p>
+            ${open.photo ? tapedPhoto(open.id) : ''}<p class="letter-text">${esc(open.text)}</p>${open.signed ? `<p class="letter-signed">— ${esc(open.signed)}</p>` : ''}
             <div class="letter-acts">
               <button type="button" class="link-btn" data-proof="${open.id}">瓶子證明</button>
               <button type="button" class="link-btn" data-report="${open.id}">檢舉</button>
@@ -4561,7 +4584,7 @@ async function submitBottle(): Promise<void> {
   const photo = bottlePhotoData;
   say('');
   setJudging(true);
-  const r = await dropBottle(text, from, photo, land);
+  const r = await dropBottle(text, from, photo, land, signing());
   setJudging(false);
   if (!r.ok) return say(r.message);
   bottleTexts.set(r.data.bottle.id, r.data);
@@ -9496,6 +9519,8 @@ function wireControls(): void {
   $('#wishes-btn').addEventListener('click', () => openWishes());
   // 帳號（選用，passkey 登入；account.ts 按了才載入）
   $('#account-btn').addEventListener('click', () => void import('./account').then((m) => m.openAccount()));
+  // 登入了：開網頁時跟伺服器對一次暱稱（卡片、許願、漂流瓶的署名用；別台改了、這台被登出了）
+  if (accountToken()) void import('./account').then((m) => m.checkAccount());
   // 收藏（v1.645 從漂流瓶畫面搬到選單）：漂流瓶收藏、我丟的瓶子
   lettersBtn.addEventListener('click', () => {
     openBottleSheet(false);

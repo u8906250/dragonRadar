@@ -5,7 +5,7 @@
  * （建立帳號不用：帳號裡的就是這台的東西）。建立帳號後接著請他取暱稱，之後在這裡改
  */
 import type { PublicKeyCredentialCreationOptionsJSON, PublicKeyCredentialRequestOptionsJSON } from '@simplewebauthn/browser';
-import { accountDelete, accountDeletePasskey, accountLoginOptions, accountLoginVerify, accountLogout, accountRegisterOptions, accountRegisterVerify, accountSetNickname, accountToken, fetchAccount, setAccountToken, type AccountInfo } from './api';
+import { accountDelete, accountDeletePasskey, accountLoginOptions, accountLoginVerify, accountLogout, accountRegisterOptions, accountRegisterVerify, accountSetNickname, accountToken, cacheNickname, fetchAccount, setAccountToken, type AccountInfo } from './api';
 import { overlay, resyncMine } from './cards';
 
 /** passkey 綁的網域（跟 worker 的 RP_ID 一樣） */
@@ -46,6 +46,17 @@ async function forget(rpID: string, ids: string[]): Promise<void> {
   } catch {
     /* 不支援 */
   }
+}
+
+/**
+ * 開網頁時（登入了才呼叫，main.ts）：跟伺服器對一次暱稱（別台改了）；這台已經被登出（別台按了登出其他裝置、帳號刪了）就清掉 token、卡和道具照伺服器重存
+ */
+export async function checkAccount(): Promise<void> {
+  const r = await fetchAccount();
+  if (!r.ok) return;
+  if (r.data.account) return cacheNickname(r.data.account.nickname);
+  setAccountToken(null);
+  await resyncMine().catch(() => undefined);
 }
 
 /** 選單的「帳號」 */
@@ -126,8 +137,9 @@ function mountAccount(box: HTMLElement): void {
   /** 剛建立帳號：接著請他取暱稱 */
   const created = (a: AccountInfo): void => {
     current = a;
+    cacheNickname(a.nickname);
     box.innerHTML = `<p><b>帳號建立好了！</b>這台的卡冊、道具、願望、漂流瓶和我的回報已經存進帳號，換手機、用電腦登入同一個帳號就看得到。</p>
-      <p>幫帳號取個暱稱吧（最多 ${NICK_MAX} 字，之後在「帳號」可以改；現在只有你自己看得到）。</p>
+      <p>幫帳號取個暱稱吧（最多 ${NICK_MAX} 字，之後在「帳號」可以改）。暱稱會寫在你的收集卡上、許願時先幫你填好，丟漂流瓶時可以署名（撿到的人看得到）。</p>
       ${nickForm('', true)}
       <p class="tc-move-msg" role="status"></p>`;
     box.querySelector<HTMLInputElement>('.tc-acct-nick input')?.focus();
@@ -135,6 +147,7 @@ function mountAccount(box: HTMLElement): void {
 
   const loggedIn = (a: AccountInfo): void => {
     current = a;
+    cacheNickname(a.nickname);
     const keys = a.passkeys
       .map(
         (k) =>
@@ -244,6 +257,7 @@ function mountAccount(box: HTMLElement): void {
     if ([...value].length > NICK_MAX) return msg(`暱稱最多 ${NICK_MAX} 字`, true);
     busy(true);
     input.disabled = true;
+    if (value) msg('審核暱稱中…');
     const r = await accountSetNickname(value);
     if (!r.ok) {
       busy(false);
@@ -252,6 +266,8 @@ function mountAccount(box: HTMLElement): void {
     }
     if (r.data.account) loggedIn(r.data.account);
     msg(value ? `暱稱設好了：${value}` : '暱稱清掉了');
+    // 卡冊、許願、漂流瓶的署名用這個瀏覽器存的暱稱（loggedIn 已經存了）；main.ts 的漂流瓶紙上署名跟著換
+    window.dispatchEvent(new CustomEvent('dr:nickname'));
   });
 
   box.addEventListener('click', async (e) => {
@@ -275,6 +291,7 @@ function mountAccount(box: HTMLElement): void {
       const d = await sign(accountLoginVerify);
       if (!d) return busy(false);
       setAccountToken(d.token);
+      cacheNickname(d.account?.nickname ?? null);
       return void switched(true, '登入了，重新整理中…');
     }
     if (t.matches('[data-del-key]')) {

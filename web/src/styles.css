@@ -2820,3 +2820,14 @@ path.map-canal-flow { --p: 14px; }
 .tc-acct-nickname { font-size: 18px; }
 .tc-acct-nick { flex: 1 1 100%; display: flex; flex-wrap: wrap; gap: 6px; }
 .tc-acct-nick input { flex: 1 1 160px; min-width: 0; font: inherit; font-size: 16px; padding: 8px 10px; border-radius: var(--card-radius, 12px); border: 1px solid rgba(243, 238, 228, 0.5); background: rgba(255, 255, 255, 0.95); color: #222; }
+
+/* 漂流瓶的署名（v1.766）：紙的最下面靠右（右下角站著瓶子，留位子給它），點一下不署名（淡淡的劃掉） */
+.kraft-sign {
+  position: relative; flex: none; align-self: flex-end; margin: 2px 46px 0 0; padding: 0 4px; max-width: 70%;
+  font-family: var(--hand); font-size: 18px; line-height: 28px; font-weight: 600; color: var(--kraft-ink);
+  background: none; border: 0; cursor: pointer; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.kraft-sign[hidden] { display: none; }
+.kraft-sign.off { opacity: 0.35; text-decoration: line-through; }
+.kraft-note p.kraft-signed, .letter-paper .letter-signed { margin: 2px 0 0; text-align: right; background: none; font-family: var(--hand); font-size: 18px; line-height: 30px; font-weight: 600; }
+.tc-owner { white-space: nowrap; }

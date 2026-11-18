@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { cleanBottleText, distM, driftStep, inPollBan, landingOf, moderationCategories, parsePhoto, POLL_BAN, ruleCheck, scatter, seaPoint, sha256Hex, stripJpegMeta, taipeiMidnight, xLength } from '../src/bottles';
+import { cleanBottleText, distM, driftStep, inPollBan, landingOf, moderateNickname, moderationCategories, nicknameRule, NICKNAME_LABEL, parsePhoto, POLL_BAN, ruleCheck, scatter, seaPoint, sha256Hex, stripJpegMeta, taipeiMidnight, xLength } from '../src/bottles';
 import { WOOF_KM, WOOF_SEA } from '../src/woofsea';
 
 describe('cleanBottleText', () => {
@@ -202,5 +202,65 @@ describe('poll ban before voting day', () => {
     expect(ruleCheck('最新民調 A 領先 B 5%', before)).toBeNull();
     expect(ruleCheck('別管民調，11/28 出來投票！', inside)).toBeNull();
     expect(ruleCheck('這家店全品項 8 折，滿意度很高', inside)).toBeNull();
+  });
+});
+
+describe('暱稱的規則（v1.766 起公開：漂流瓶署名）', () => {
+  it('lets ordinary nicknames through', () => {
+    for (const n of ['小法的朋友', '阿明🐶', 'Kevin', '大安區跑步的人', '洋流小粉絲', '1999'] ) expect(nicknameRule(n)).toBeNull();
+  });
+  it('blocks contact details', () => {
+    expect(nicknameRule('a@b.com')).toBe('暱稱不能放 Email');
+    expect(nicknameRule('看 abc.tw')).toBe('暱稱不能放連結');
+    expect(nicknameRule('0912 345 678')).toBe('暱稱不能放電話或一長串數字');
+    expect(nicknameRule('@ming_88')).toBe('暱稱不能放帳號');
+    expect(nicknameRule('LINE: ming')).toBe('暱稱不能放帳號');
+  });
+  it('blocks names that look like the site itself', () => {
+    for (const n of ['管理員', '活動雷達 官方', 'Admin', '站長小明', '洋 流 雷 達', 'OFFICIAL'])
+      expect(nicknameRule(n)).toBe('暱稱不能用「管理員」「官方」「活動雷達」這類字，免得被當成網站的人');
+  });
+  it('has a label for every category the model can pick', () => {
+    expect(Object.keys(NICKNAME_LABEL).sort()).toEqual(['attack', 'hate', 'impersonate']);
+  });
+});
+
+describe('暱稱的 AI 審核', () => {
+  /** 假的 Workers AI：照模型回答（字串是 JSON 回答，Error 是丟出錯誤）；記下問了誰、問了什麼 */
+  const fakeEnv = (answers: Record<string, string | Error>) => {
+    const asked: Array<{ model: string; user: string; system: string }> = [];
+    const env = {
+      AI_MODEL: 'main',
+      AI_MODEL_FALLBACK: 'backup',
+      AI: {
+        async run(model: string, inputs: { messages: Array<{ role: string; content: string }> }) {
+          asked.push({ model, system: inputs.messages[0].content, user: inputs.messages[1].content });
+          const a = answers[model];
+          if (a instanceof Error) throw a;
+          return { response: a };
+        },
+      },
+    } as unknown as Parameters<typeof moderateNickname>[0];
+    return { env, asked };
+  };
+  it('passes when the main model says none (asks only once)', async () => {
+    const { env, asked } = fakeEnv({ main: '{"category":"none","reason":""}' });
+    expect(await moderateNickname(env, '阿明')).toMatchObject({ allowed: true, category: 'none', reason: '' });
+    expect(asked.map((a) => a.model)).toEqual(['main']);
+    expect(asked[0].user).toBe('暱稱：「阿明」');
+    expect(asked[0].system).toContain('impersonate');
+  });
+  it('asks the backup model before blocking, and lets it overrule', async () => {
+    const { env, asked } = fakeEnv({ main: '{"category":"impersonate","reason":"x"}', backup: '{"category":"none","reason":""}' });
+    expect((await moderateNickname(env, '王小明')).allowed).toBe(true);
+    expect(asked.map((a) => a.model)).toEqual(['main', 'backup']);
+  });
+  it('blocks with the label of the last model', async () => {
+    const { env } = fakeEnv({ main: '{"category":"attack","reason":"x"}', backup: '{"category":"impersonate","reason":"y"}' });
+    expect(await moderateNickname(env, '某某')).toMatchObject({ allowed: false, category: 'impersonate', reason: NICKNAME_LABEL.impersonate });
+  });
+  it('fails closed with 503 when no model answers', async () => {
+    const { env } = fakeEnv({ main: new Error('down'), backup: 'not json' });
+    await expect(moderateNickname(env, '阿明')).rejects.toMatchObject({ status: 503 });
   });
 });

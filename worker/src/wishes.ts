@@ -86,7 +86,8 @@ export function parseWish(input: unknown): WishInput | string {
   if (body.length < BODY_MIN) return `想法至少寫 ${BODY_MIN} 個字`;
   if (o.agree !== true) return '請先看過並勾選許願規範';
   const nickname = cleanText(o.nickname, 200).replace(/\s+/g, ' ');
-  if (nickname.length > NICK_MAX) return `暱稱最多 ${NICK_MAX} 字`;
+  // emoji 算一個字（跟帳號的暱稱一樣，v1.766 起許願會先帶入帳號的暱稱）
+  if ([...nickname].length > NICK_MAX) return `暱稱最多 ${NICK_MAX} 字`;
   const links = parseLinks(o.links);
   if (typeof links === 'string') return links;
   return { body, nickname: nickname || null, links };

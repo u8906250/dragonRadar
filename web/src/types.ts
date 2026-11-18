@@ -134,15 +134,17 @@ export interface PickedBottle {
   text: string;
   /** 有附照片（照片另外拿：fetchBottlePhoto） */
   photo: boolean;
+  /** 署名：丟的人帳號的暱稱（v1.766；沒署名是 null，舊的伺服器沒有這欄） */
+  signed?: string | null;
 }
 
 export interface MyBottles {
   /** 今天的額度（過去 24 小時） */
   quota: { used: number; limit: number; left: number; nextAt?: number | null };
   /** driftM：在地球上從丟下的地方漂了幾公尺；seaAt：漂到汪星海上的時間 */
-  dropped: Array<{ id: number; text: string; photo: boolean; world: 'earth' | 'woof'; createdAt: number; expiresAt: number; seaAt: number | null; picks: number; pickedAt: number | null; status: 'active' | 'picked' | 'hidden' | 'deleted' | 'removed'; driftM: number }>;
+  dropped: Array<{ id: number; text: string; photo: boolean; signed?: string | null; world: 'earth' | 'woof'; createdAt: number; expiresAt: number; seaAt: number | null; picks: number; pickedAt: number | null; status: 'active' | 'picked' | 'hidden' | 'deleted' | 'removed'; driftM: number }>;
   /** 漂流瓶收藏：撿到就收進來；world 是在哪裡撿到的 */
-  letters: Array<{ id: number; text: string; photo: boolean; world: 'earth' | 'woof'; createdAt: number; pickedAt: number }>;
+  letters: Array<{ id: number; text: string; photo: boolean; signed?: string | null; world: 'earth' | 'woof'; createdAt: number; pickedAt: number }>;
 }
 
 /** 瓶子證明：編號、丟的時間、內容的 SHA-256、伺服器簽章 */

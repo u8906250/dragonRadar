@@ -105,6 +105,8 @@ interface BottleRow {
   world: BottleWorld;
   sea_at: number | null;
   photo_key: string | null;
+  /** 署名：丟的時候帳號的暱稱（v1.766，之後改暱稱不會變；沒署名是 null） */
+  signed: string | null;
 }
 
 /** 雷達上的瓶子：沒撿起來前看不到內容 */
@@ -501,13 +503,12 @@ export interface ModerationVerdict {
   trail: Array<{ model: string; category: string; reason: string }>;
 }
 
-/** 問一個模型：回傳類別和它寫的原因；讀不出來回 null */
-async function askModerator(env: Env, model: string, text: string, poll: boolean): Promise<{ category: string; reason: string } | null> {
+/** 問一個模型：回傳類別和它寫的原因；讀不出來回 null（漂流瓶內容、帳號暱稱共用） */
+async function askModerator(env: Env, model: string, system: string, user: string, categories: string[]): Promise<{ category: string; reason: string } | null> {
   const ai = env.AI as unknown as { run(model: string, inputs: unknown): Promise<unknown> };
-  const categories = moderationCategories(poll);
   const messages = [
-    { role: 'system', content: moderationPrompt(poll) },
-    { role: 'user', content: `漂流瓶內容：「${text}」${/qwen3/i.test(model) ? '\n/no_think' : ''}` },
+    { role: 'system', content: system },
+    { role: 'user', content: `${user}${/qwen3/i.test(model) ? '\n/no_think' : ''}` },
   ];
   const schema = {
     type: 'object',
@@ -532,25 +533,103 @@ async function askModerator(env: Env, model: string, text: string, poll: boolean
  * 兩個都失敗就當成不通過（寧可不收）
  */
 export async function moderate(env: Env, text: string, now = Math.floor(Date.now() / 1000)): Promise<ModerationVerdict> {
+  const poll = inPollBan(now);
+  const v = await classify(env, moderationPrompt(poll), `漂流瓶內容：「${text}」`, moderationCategories(poll));
+  if (!v) throw new ReportError(503, '暫時沒辦法審核內容，請稍後再丟');
+  return { ...v, reason: v.allowed ? '' : (MODERATION_LABEL[v.category] ?? '內容不適合丟出去') };
+}
+
+/**
+ * 主要模型說 none 就放行；說要擋時再問備用模型，它說 none 就放行。每個問到的模型都說要擋：用最後一個（備用模型）的類別。
+ * 一個都問不到回 null（呼叫的地方當成暫時不能審核）
+ */
+export async function classify(env: Env, system: string, user: string, categories: string[]): Promise<Omit<ModerationVerdict, 'reason'> | null> {
   const models = [env.AI_MODEL, env.AI_MODEL_FALLBACK].filter((m): m is string => !!m);
   const trail: ModerationVerdict['trail'] = [];
-  const poll = inPollBan(now);
   for (const model of models) {
     try {
-      const v = await askModerator(env, model, text, poll);
+      const v = await askModerator(env, model, system, user, categories);
       if (!v) continue;
       trail.push({ model, ...v });
-      if (v.category === 'none') return { allowed: true, category: 'none', reason: '', trail };
+      if (v.category === 'none') return { allowed: true, category: 'none', trail };
       // 要擋：還有下一個模型就再問一次
     } catch (e) {
-      console.warn(`bottle moderation with ${model} failed: ${String(e)}`);
+      console.warn(`moderation with ${model} failed: ${String(e)}`);
     }
   }
-  if (trail.length === 0) throw new ReportError(503, '暫時沒辦法審核內容，請稍後再丟');
-  // 每個問到的模型都說要擋：用最後一個（備用模型）的類別
-  const last = trail[trail.length - 1];
-  const label = MODERATION_LABEL[last.category];
-  return { allowed: false, category: last.category, reason: label ?? '內容不適合丟出去', trail };
+  if (trail.length === 0) return null;
+  return { allowed: false, category: trail[trail.length - 1].category, trail };
+}
+
+// ---- 帳號的暱稱（v1.766 起公開：漂流瓶的署名；設定時審核，account.ts） ----
+
+/** 暱稱先用規則擋：聯絡方式（Email、連結、電話、帳號），還有像網站的人的字（管理員、官方、活動雷達…） */
+export function nicknameRule(n: string): string | null {
+  if (/[\w.+-]+@[\w-]+\.\w+/.test(n)) return '暱稱不能放 Email';
+  if (/https?:\/\/|www\.|\.(com|net|tw|org|io|cc|me)\b/i.test(n)) return '暱稱不能放連結';
+  if (/(?:\d[\s-]?){7,}/.test(n)) return '暱稱不能放電話或一長串數字';
+  if (/(line|ig|instagram|tg|telegram|wechat|微信)\s*(id)?\s*[:：@]/i.test(n) || /@[A-Za-z0-9_.]{3,}/.test(n)) return '暱稱不能放帳號';
+  const flat = n.toLowerCase().replace(/[\s·・.,_\-－—~～!！?？()（）「」『』【】[\]]/g, '');
+  if (/管理員|管理者|站長|客服|官方|版主|活動雷達|洋流雷達|admin|moderator|official/.test(flat)) return '暱稱不能用「管理員」「官方」「活動雷達」這類字，免得被當成網站的人';
+  return null;
+}
+
+/** 暱稱的審核說明 */
+function nicknamePrompt(): string {
+  return `你是「洋流雷達」的暱稱審核員。使用者幫自己的帳號取暱稱，暱稱會公開顯示在他丟的漂流瓶上當署名（台北大洋流競選活動的網站上）。
+
+大部分暱稱都應該允許，category 填 none：一般的名字、綽號、英文名、可愛的詞、寵物的名字、emoji、地名、興趣、有趣的詞、對城市或候選人的支持。
+
+只有明確屬於下面幾類才擋下，category 填對應的代號：
+- attack：髒話、辱罵、嘲諷或貶低任何人或團體
+- hate：仇恨、歧視、威脅、暴力、色情或性暗示
+- impersonate：冒充真實的公眾人物（政治人物、候選人、名人）、政黨、政府機關、媒體、公司品牌，或冒充這個網站的管理者、官方。
+  只是普通的人名（看不出是哪個公眾人物）不算
+
+拿不準就填 none。
+
+例子：
+「小法的朋友」→ none
+「阿明🐶」→ none
+「大安區跑步的人」→ none
+「Kevin」→ none
+「王小明」→ none
+「支持社宅的台北人」→ none
+「沈伯洋」→ impersonate
+「蔣萬安」→ impersonate
+「台北市政府」→ impersonate
+「網站小幫手」→ impersonate
+「幹你娘」→ attack
+「XX黨都是垃圾」→ attack
+
+只輸出 JSON：{"category": "none" 或 "attack" 或 "hate" 或 "impersonate", "reason": "不是 none 時用一句話說明；none 時空字串"}`;
+}
+
+/** 暱稱擋下的類別給使用者看的說法 */
+export const NICKNAME_LABEL: Record<string, string> = {
+  attack: '髒話、辱罵或嘲諷別人',
+  hate: '仇恨、歧視、威脅、暴力或色情',
+  impersonate: '像在冒充真實的公眾人物、政黨、機關或網站的人',
+};
+
+/** AI 審核暱稱（主要模型說要擋時問備用模型，跟漂流瓶一樣）；兩個都問不到丟 503 */
+export async function moderateNickname(env: Env, nickname: string): Promise<ModerationVerdict> {
+  const v = await classify(env, nicknamePrompt(), `暱稱：「${nickname}」`, ['none', ...Object.keys(NICKNAME_LABEL)]);
+  if (!v) throw new ReportError(503, '暫時沒辦法審核暱稱，請稍後再試');
+  return { ...v, reason: v.allowed ? '' : (NICKNAME_LABEL[v.category] ?? '不適合當暱稱') };
+}
+
+/** 丟瓶子要署名：帳號的暱稱（不是帳號、沒有暱稱是 null）；還沒審核過的（v1.766 前設的）現在審核，沒通過就不讓丟 */
+async function signatureOf(env: Env, dev: string): Promise<string | null> {
+  const a = await env.DB.prepare('SELECT nickname, nickname_checked FROM accounts WHERE id = ?').bind(dev).first<{ nickname: string | null; nickname_checked: number }>();
+  if (!a?.nickname) return null;
+  if (!a.nickname_checked) {
+    const bad = nicknameRule(a.nickname);
+    const v = bad ? null : await moderateNickname(env, a.nickname);
+    if (bad || !v?.allowed) throw new ReportError(422, `暱稱「${a.nickname}」不能署名（${bad ?? v?.reason}），請到選單的「帳號」改暱稱，或這次不署名`);
+    await env.DB.prepare('UPDATE accounts SET nickname_checked = 1 WHERE id = ? AND nickname = ?').bind(dev, a.nickname).run();
+  }
+  return a.nickname;
 }
 
 async function countSince(env: Env, sql: string, binds: unknown[]): Promise<number> {
@@ -695,7 +774,7 @@ export async function purgeBottleRejects(env: Env, now: number): Promise<number>
 }
 
 /** 丟一個瓶子：在你現在的位置附近 */
-export async function dropBottle(env: Env, device: string | null, ip: string, body: { text?: unknown; lat?: unknown; lng?: unknown; land?: unknown; photo?: unknown }, now: number): Promise<PickedBottle> {
+export async function dropBottle(env: Env, device: string | null, ip: string, body: { text?: unknown; lat?: unknown; lng?: unknown; land?: unknown; photo?: unknown; sign?: unknown }, now: number): Promise<PickedBottle> {
   const dev = needDevice(device);
   const text = typeof body.text === 'string' ? cleanBottleText(body.text) : '';
   // 一直送沒通過的：先擋下來（在規則、AI 審核之前）
@@ -720,6 +799,9 @@ export async function dropBottle(env: Env, device: string | null, ip: string, bo
     throw new ReportError(429, '這個網路今天丟太多瓶子了，明天再來');
   if ((await countSince(env, 'SELECT COUNT(*) AS n FROM bottles WHERE created_at > ?', [now - 3600])) >= GLOBAL_PER_HOUR)
     throw new ReportError(429, '現在丟瓶子的人太多，請稍後再試');
+
+  // 署名（登入帳號、有暱稱、這次要署名的）：暱稱設定時審核過；沒審核過的（v1.766 前設的）現在審核
+  const signed = body.sign === true ? await signatureOf(env, dev) : null;
 
   // AI 沒回應（審核不了）也記一筆
   const aiDown = async <T>(p: Promise<T>): Promise<T> =>
@@ -749,24 +831,32 @@ export async function dropBottle(env: Env, device: string | null, ip: string, bo
 
   // 起點記丟的地方（只用來讓瓶子不漂出 1 km，不給任何人看；24 小時後 driftBottles 清掉），瓶子落在上面算好的落點 p
   const row = await env.DB.prepare(
-    "INSERT INTO bottles (device_id, text, lat, lng, origin_lat, origin_lng, status, world, ip_hash, created_at, expires_at, photo_key) VALUES (?, ?, ?, ?, ?, ?, 'active', 'earth', ?, ?, ?, ?) RETURNING *",
+    "INSERT INTO bottles (device_id, text, lat, lng, origin_lat, origin_lng, status, world, ip_hash, created_at, expires_at, photo_key, signed) VALUES (?, ?, ?, ?, ?, ?, 'active', 'earth', ?, ?, ?, ?, ?) RETURNING *",
   )
-    .bind(dev, text, p.lat, p.lng, at.lat, at.lng, ip, now, now + BOTTLE_TTL_SEC, key)
+    .bind(dev, text, p.lat, p.lng, at.lat, at.lng, ip, now, now + BOTTLE_TTL_SEC, key, signed)
     .first<BottleRow>()
     .catch(async (e) => {
       if (key) await env.BOTTLE_PHOTOS?.delete(key);
       throw e;
     });
   if (!row) throw new ReportError(500, '存檔失敗，請稍後再試');
-  return { bottle: toOut(row, dev, false), text: row.text, photo: !!row.photo_key };
+  return pickedOut(row, dev, false);
 }
 
-/** 撿起來（或自己的）瓶子：瓶子、內容、有沒有照片（照片另外拿：bottlePhoto） */
+/** 撿起來（或自己的）瓶子：瓶子、內容、有沒有照片（照片另外拿：bottlePhoto）、署名 */
 export interface PickedBottle {
   bottle: BottleOut;
   text: string;
   photo: boolean;
+  signed: string | null;
 }
+
+const pickedOut = (b: BottleRow & { taken_at?: number | null }, dev: string | null, picked: boolean): PickedBottle => ({
+  bottle: toOut(b, dev, picked),
+  text: b.text,
+  photo: !!b.photo_key,
+  signed: b.signed ?? null,
+});
 
 /**
  * 給網頁的瓶子。丟的時間、沉下去的時間、被收藏的時間：丟的人（收藏時間是收藏的人）才給準確的，
@@ -892,7 +982,7 @@ export async function readBottle(env: Env, device: string | null, ip: string, id
     assertNear(b, body, '打開來看');
     await countRead(env, dev, ip, now);
   }
-  return { bottle: toOut(b, dev, picked), text: b.text, photo: !!b.photo_key };
+  return pickedOut(b, dev, picked);
 }
 
 /**
@@ -903,9 +993,9 @@ export async function pickBottle(env: Env, device: string | null, id: number, bo
   const dev = needDevice(device);
   const b = await env.DB.prepare("SELECT * FROM bottles WHERE id = ? AND status IN ('active', 'picked')").bind(id).first<BottleRow>();
   if (!b) throw new ReportError(404, '這個瓶子已經沉下去了');
-  if (b.device_id === dev) return { bottle: toOut(b, dev, false), text: b.text, photo: !!b.photo_key };
+  if (b.device_id === dev) return pickedOut(b, dev, false);
   const mine = await env.DB.prepare('SELECT 1 AS x FROM bottle_picks WHERE bottle_id = ? AND device_id = ?').bind(id, dev).first();
-  if (mine) return { bottle: toOut(b, dev, true), text: b.text, photo: !!b.photo_key };
+  if (mine) return pickedOut(b, dev, true);
   if (b.status !== 'active' || b.expires_at <= now) throw new ReportError(410, '晚了一步，這個瓶子已經被收藏或沉下去了');
   assertNear(b, body, '收藏');
   const kept = await countSince(env, 'SELECT COUNT(*) AS n FROM bottle_picks WHERE device_id = ? AND collected_at > ?', [dev, 0]);
@@ -919,14 +1009,14 @@ export async function pickBottle(env: Env, device: string | null, id: number, bo
   if ((upd.meta.changes ?? 0) === 0) throw new ReportError(410, '晚了一步，這個瓶子剛被別人收藏了');
   const won = await env.DB.prepare('SELECT * FROM bottles WHERE id = ?').bind(id).first<BottleRow>();
   if (!won) throw new ReportError(404, '這個瓶子已經沉下去了');
-  return { bottle: toOut(won, dev, true), text: won.text, photo: !!won.photo_key };
+  return pickedOut(won, dev, true);
 }
 
 export interface MyBottles {
   quota: BottleQuota;
-  dropped: Array<{ id: number; text: string; photo: boolean; world: BottleWorld; createdAt: number; expiresAt: number; seaAt: number | null; picks: number; pickedAt: number | null; status: BottleStatus; driftM: number }>;
+  dropped: Array<{ id: number; text: string; photo: boolean; signed: string | null; world: BottleWorld; createdAt: number; expiresAt: number; seaAt: number | null; picks: number; pickedAt: number | null; status: BottleStatus; driftM: number }>;
   /** 漂流瓶收藏：撿到就收進來；world 是在哪裡撿到的 */
-  letters: Array<{ id: number; text: string; photo: boolean; world: BottleWorld; createdAt: number; pickedAt: number }>;
+  letters: Array<{ id: number; text: string; photo: boolean; signed: string | null; world: BottleWorld; createdAt: number; pickedAt: number }>;
 }
 
 /** 我丟的、我的漂流瓶收藏；我丟的只列 24 小時內丟的（v1.661 使用者說超過 24 小時不用顯示，跟收得回來的時間一樣） */
@@ -940,19 +1030,20 @@ export async function myBottles(env: Env, device: string | null, now: number): P
     .all<BottleRow & { picked_at: number | null }>();
   // 收藏的信；被檢舉藏起來、被管理者移除的不顯示
   const mine = await env.DB.prepare(
-    `SELECT b.id, b.text, b.photo_key, b.world, b.created_at, p.created_at AS picked_at
+    `SELECT b.id, b.text, b.photo_key, b.signed, b.world, b.created_at, p.created_at AS picked_at
        FROM bottle_picks p JOIN bottles b ON b.id = p.bottle_id
       WHERE p.device_id = ? AND p.collected_at IS NOT NULL AND b.status IN ('active', 'picked')
       ORDER BY p.created_at DESC LIMIT ${MAX_LETTERS}`,
   )
     .bind(dev)
-    .all<Pick<BottleRow, 'id' | 'text' | 'photo_key' | 'world' | 'created_at'> & { picked_at: number }>();
+    .all<Pick<BottleRow, 'id' | 'text' | 'photo_key' | 'signed' | 'world' | 'created_at'> & { picked_at: number }>();
   return {
     quota: await bottleQuota(env, dev, now),
     dropped: dropped.results.map((b) => ({
       id: b.id,
       text: b.text,
       photo: !!b.photo_key,
+      signed: b.signed ?? null,
       world: b.world,
       createdAt: b.created_at,
       expiresAt: b.expires_at,
@@ -963,7 +1054,7 @@ export async function myBottles(env: Env, device: string | null, now: number): P
       driftM: driftOf(b),
     })),
     // 收藏的人不給漂了多遠（從丟的地方算，會透露丟的人在哪附近）
-    letters: mine.results.map((p) => ({ id: p.id, text: p.text, photo: !!p.photo_key, world: p.world, createdAt: p.created_at, pickedAt: p.picked_at })),
+    letters: mine.results.map((p) => ({ id: p.id, text: p.text, photo: !!p.photo_key, signed: p.signed ?? null, world: p.world, createdAt: p.created_at, pickedAt: p.picked_at })),
   };
 }
 

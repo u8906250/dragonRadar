@@ -6,7 +6,7 @@
  * 卡片的內容寫在這裡（照片在 public/cards/），拿到的卡、道具存在伺服器（裝置代碼，worker/src/cards.ts），
  * 這個瀏覽器另外記一份（dr.cards、dr.items、dr.picks）：點小法時拿過的就不再問伺服器
  */
-import { accountToken, claimCard, fetchMyCards, fetchMyWishes, makeTransferCode, markWishesSeen, pickReward, redeemTransferCode, sendTweak, sendWish, withdrawWish, type CardClaim, type ItemCount, type MyWishes, type Wish, type WishStatus, type WishTweak } from './api';
+import { accountToken, cachedNickname, claimCard, fetchMyCards, fetchMyWishes, makeTransferCode, markWishesSeen, pickReward, redeemTransferCode, sendTweak, sendWish, withdrawWish, type CardClaim, type ItemCount, type MyWishes, type Wish, type WishStatus, type WishTweak } from './api';
 
 export interface CardDef {
   /** 跟伺服器的 CARDS 一樣 */
@@ -163,6 +163,8 @@ const PAW =
   '<svg viewBox="0 0 64 64" aria-hidden="true"><ellipse cx="32" cy="43" rx="14" ry="12"/><ellipse cx="13" cy="27" rx="6" ry="8" transform="rotate(-20 13 27)"/><ellipse cx="25" cy="15" rx="6" ry="8.5" transform="rotate(-6 25 15)"/><ellipse cx="39" cy="15" rx="6" ry="8.5" transform="rotate(6 39 15)"/><ellipse cx="51" cy="27" rx="6" ry="8" transform="rotate(20 51 27)"/></svg>';
 
 function frontHtml(d: CardDef, c: CardClaim): string {
+  // 登入帳號、取了暱稱的：「第 3 位找到小法的人：阿明」（v1.766）
+  const nick = cachedNickname();
   return `<div class="tc-face tc-front">
       <div class="tc-top"><span>${noText(d)}</span><span>${esc(d.series)}</span></div>
       <div class="tc-photo"><img src="${d.img}" alt="${esc(d.name)}的照片" draggable="false"></div>
@@ -170,7 +172,7 @@ function frontHtml(d: CardDef, c: CardClaim): string {
       <p class="tc-about">${esc(d.about)}</p>
       ${d.credit ? `<p class="tc-credit">${esc(d.credit)}</p>` : ''}
       <div class="tc-meta"><span>${esc(d.found(c))}</span><span>${dateText(c.at)}</span></div>
-      <div class="tc-serial">${esc(d.serial(c))}</div>
+      <div class="tc-serial">${esc(d.serial(c))}${nick ? `：<span class="tc-owner">${esc(nick)}</span>` : ''}</div>
     </div>`;
 }
 
@@ -666,6 +668,8 @@ function saveDraft(d: WishDraft | null): void {
 /** 許願的表單（疊在「願望」上面）：想法、暱稱、參考連結、規範；送出後順幣先暫扣 */
 export function openWishForm(onDone?: () => void): void {
   const d = loadDraft();
+  // 沒有草稿的話，暱稱先帶入帳號的暱稱（v1.766，可以改、可以清掉）
+  if (!d.body && !d.nickname && !d.links) d.nickname = cachedNickname() ?? '';
   const el = overlay(
     'tc-wishform',
     `<div class="tc-box tc-form-box">
@@ -676,7 +680,7 @@ export function openWishForm(onDone?: () => void): void {
           <small class="tc-len"></small></label>
         <div class="tc-ideas"><span>想不到嗎？點一個靈感：</span>${WISH_IDEAS.map((x, i) => `<button type="button" class="tc-idea" data-idea="${i}">${esc(x.label)}</button>`).join('')}</div>
         <label class="tc-field"><span>暱稱（選填）</span>
-          <input name="nickname" maxlength="20" autocomplete="nickname" value="${esc(d.nickname)}">
+          <input name="nickname" maxlength="40" autocomplete="nickname" value="${esc(d.nickname)}">
           <small>上線後寫在說明的「實現的願望」：點子來自 ○○，不填就不署名</small></label>
         <label class="tc-field"><span>參考連結（選填）</span>
           <textarea name="links" rows="2" placeholder="一行一個，最多 3 個；要附圖請貼圖片的連結">${esc(d.links)}</textarea></label>

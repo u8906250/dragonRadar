@@ -302,7 +302,7 @@ async function handle(req: Request, env: Env, ctx: ExecutionContext): Promise<Re
   if (req.method === 'POST' && path === '/api/account/register/verify') return jsonResponse(await registerVerify(env, req, await readJson<unknown>(req), now));
   if (req.method === 'POST' && path === '/api/account/login/options') return jsonResponse(await loginOptions(env, req, now));
   if (req.method === 'POST' && path === '/api/account/login/verify') return jsonResponse(await loginVerify(env, req, await readJson<unknown>(req), now));
-  if (req.method === 'POST' && path === '/api/account/nickname') return jsonResponse(await setNickname(env, req, await readJson<unknown>(req)));
+  if (req.method === 'POST' && path === '/api/account/nickname') return jsonResponse(await setNickname(env, req, await readJson<unknown>(req), now));
   if (req.method === 'POST' && path === '/api/account/logout') return jsonResponse(await logout(env, req, await readJson<unknown>(req)));
   if (req.method === 'POST' && path === '/api/account/delete') return jsonResponse(await deleteAccount(env, req, await readJson<unknown>(req), now));
   const keyDel = /^\/api\/account\/passkeys\/([A-Za-z0-9_-]{16,400})$/.exec(path);
@@ -338,7 +338,7 @@ async function handle(req: Request, env: Env, ctx: ExecutionContext): Promise<Re
     if (req.method === 'GET' && path === '/api/bottles/mine') return jsonResponse(await myBottles(env, dev, now));
     if (req.method === 'POST' && path === '/api/bottles/verify') return jsonResponse(await verifyProof(env, await readJson<Record<string, unknown>>(req)));
     if (req.method === 'POST' && path === '/api/bottles') {
-      return jsonResponse(await dropBottle(env, dev, await ipHash(env, req), await readJson<{ text?: unknown; lat?: unknown; lng?: unknown; land?: unknown; photo?: unknown }>(req), now), 201);
+      return jsonResponse(await dropBottle(env, dev, await ipHash(env, req), await readJson<{ text?: unknown; lat?: unknown; lng?: unknown; land?: unknown; photo?: unknown; sign?: unknown }>(req), now), 201);
     }
     const one = /^\/api\/bottles\/(\d+)(?:\/(pick|read|report|uncollect|proof|photo))?$/.exec(path);
     if (one) {

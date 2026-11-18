@@ -16,6 +16,7 @@ import {
   type PublicKeyCredentialRequestOptionsJSON,
   type RegistrationResponseJSON,
 } from '@simplewebauthn/server';
+import { moderateNickname, nicknameRule } from './bottles';
 import { moveOwned } from './cards';
 import type { Env } from './env';
 import { b64urlDecode, b64urlEncode } from './push';
@@ -34,6 +35,8 @@ export const SESSION_IDLE_SEC = 365 * 86400;
 /** 同一個網路一天最多建幾個帳號、一小時最多要幾次題目 */
 export const ACCOUNTS_PER_IP_DAY = 5;
 export const CHALLENGES_PER_IP_HOUR = 60;
+/** 一個帳號一天（台灣時間）最多審核幾次暱稱（AI 審核要錢） */
+export const NICK_TRIES_PER_DAY = 10;
 /** 一個帳號最多幾把 passkey */
 export const MAX_PASSKEYS = 10;
 /** passkey 跳出來等多久（毫秒） */
@@ -412,12 +415,31 @@ export async function loginVerify(env: Env, req: Request, body: unknown, now: nu
   return { token, account: await accountOut(env, session) };
 }
 
-/** 設定、改暱稱（空的是清掉） */
-export async function setNickname(env: Env, req: Request, body: unknown): Promise<{ account: AccountOut | null }> {
+/**
+ * 設定、改暱稱（空的是清掉）。v1.766 起暱稱公開（漂流瓶署名）：先用規則擋聯絡方式、像網站的人的字，再給 AI 審核
+ * （跟漂流瓶一樣兩個模型），通過才存；一天最多審核 NICK_TRIES_PER_DAY 次
+ */
+export async function setNickname(env: Env, req: Request, body: unknown, now: number): Promise<{ account: AccountOut | null }> {
   const s = await needSession(env, req);
   const p = parseNickname(body);
   if (typeof p === 'string') throw new ReportError(400, p);
-  await env.DB.prepare('UPDATE accounts SET nickname = ? WHERE id = ?').bind(p.nickname, s.accountId).run();
+  if (!p.nickname) {
+    await env.DB.prepare('UPDATE accounts SET nickname = NULL, nickname_checked = 0 WHERE id = ?').bind(s.accountId).run();
+    return { account: await accountOut(env, s) };
+  }
+  const bad = nicknameRule(p.nickname);
+  if (bad) throw new ReportError(400, bad);
+  const cur = await env.DB.prepare('SELECT nickname, nickname_checked FROM accounts WHERE id = ?').bind(s.accountId).first<{ nickname: string | null; nickname_checked: number }>();
+  // 沒改（審核過的）：不用再審
+  if (cur?.nickname === p.nickname && cur.nickname_checked) return { account: await accountOut(env, s) };
+  const day = Math.floor((now + 8 * 3600) / 86400);
+  const tries = await env.DB.prepare('UPDATE accounts SET nickname_tries = CASE WHEN nickname_day = ? THEN nickname_tries + 1 ELSE 1 END, nickname_day = ? WHERE id = ? RETURNING nickname_tries')
+    .bind(day, day, s.accountId)
+    .first<{ nickname_tries: number }>();
+  if ((tries?.nickname_tries ?? 0) > NICK_TRIES_PER_DAY) throw new ReportError(429, `今天改太多次暱稱了（一天 ${NICK_TRIES_PER_DAY} 次），明天再改`);
+  const v = await moderateNickname(env, p.nickname);
+  if (!v.allowed) throw new ReportError(422, `這個暱稱不能用：${v.reason}`);
+  await env.DB.prepare('UPDATE accounts SET nickname = ?, nickname_checked = 1 WHERE id = ?').bind(p.nickname, s.accountId).run();
   return { account: await accountOut(env, s) };
 }
 
