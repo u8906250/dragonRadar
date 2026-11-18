@@ -1090,7 +1090,12 @@ let streetTiles = 0;
  * 道路的錨點（v1.720 一張一張圖磚畫好留著）：圖磚換成離錨點的公里一次就記住，拖曳時只告訴雷達位移了多少。
  * 一級圖磚一個，離太遠（範圍的 40 倍）、南北移動超過 0.3 度（經度換算公里的比例會變）才換，換了全部重算、重畫
  */
-let streetFrame: { id: number; zoom: number; lat: number; lng: number; kx: number } | null = null;
+type StreetFrame = { id: number; zoom: number; lat: number; lng: number; kx: number; at: number };
+let streetFrame: StreetFrame | null = null;
+/** 雷達上現在畫的道路和它的錨點（換一級圖磚時新的還沒到齊，先照舊畫這一份） */
+let shownStreets: { lines: RadarStreets; fr: StreetFrame } | null = null;
+/** 換一級圖磚時最多等新的多久（之後到多少畫多少） */
+const STREET_SWAP_MS = 1500;
 /** 換算好的圖磚（錨點、綠地、中國範圍、公園外框 | 圖磚）→ 雷達的一張圖磚 */
 const streetTileCache = new Map<string, RadarStreetTile>();
 let streetLines: RadarStreets | null = null;
@@ -1171,7 +1176,7 @@ function updateStreets(): void {
   if (!show) {
     if (streetsFor) radar.setStreets(null);
     streetsFor = '';
-    streetLines = null;
+    streetLines = shownStreets = null;
     return;
   }
   if (!streetsMod) {
@@ -1188,7 +1193,7 @@ function updateStreets(): void {
     loadEastAsia();
     if (streetsFor) radar.setStreets(null);
     streetsFor = '';
-    streetLines = null;
+    streetLines = shownStreets = null;
     return;
   }
   const mask = mayChina ? eaMod!.chinaMask : null;
@@ -1212,7 +1217,7 @@ function updateStreets(): void {
     Math.abs(origin.lat - streetFrame.lat) > 0.3 ||
     Math.hypot((origin.lng - streetFrame.lng) * streetFrame.kx, (origin.lat - streetFrame.lat) * ky) > 40 * scaleKm
   ) {
-    streetFrame = { id: (streetFrame?.id ?? 0) + 1, zoom, lat: origin.lat, lng: origin.lng, kx: 111.32 * Math.cos((origin.lat * Math.PI) / 180) };
+    streetFrame = { id: (streetFrame?.id ?? 0) + 1, zoom, lat: origin.lat, lng: origin.lng, kx: 111.32 * Math.cos((origin.lat * Math.PI) / 180), at: performance.now() };
     streetTileCache.clear();
   }
   const fr = streetFrame;
@@ -1220,7 +1225,14 @@ function updateStreets(): void {
   // 拖曳中多抓外面一圈的圖磚（快拖時前面的先準備好）
   const get = reach * (panFrom ? 1.6 : 1.25);
   // 16 km 內多拿圖磚裡的海岸線（v1.640 使用者說「不管放大到什麼程度都要有邊界」；再大用 updateOutline 的海岸線）
-  const { roads, stations, tiles } = streetsMod.streetTiles(origin.lat, origin.lng, get, scaleKm, onStreetTile);
+  const { roads, stations, tiles, pending } = streetsMod.streetTiles(origin.lat, origin.lng, get, scaleKm, onStreetTile);
+  // 換了一級圖磚（縮放跨過 2、16、33、65 km）：新的還沒到齊先照舊畫上一級的（照上一級的錨點平移，雷達縮放中整層放大縮小；v1.759），
+  // 最多等 STREET_SWAP_MS；以前新的圖磚到之前整片空白一下
+  const old = shownStreets;
+  if (pending > 0 && old && old.fr.zoom !== fr.zoom && performance.now() - fr.at < STREET_SWAP_MS) {
+    radar.setStreets(old.lines, [(origin.lng - old.fr.lng) * old.fr.kx, (origin.lat - old.fr.lat) * ky]);
+    return;
+  }
   // 公園綠地塗淡綠：只有全螢幕（v1.705 使用者說的），洋流總部特效播放時不塗（特效自己會把台北染淡綠）；
   // 2 km 內再加自己整理的公園外框（v1.706：圖磚不收太小的，例如通化公園），這時才載入
   const parkShapes = greenOn && scaleKm <= 2 ? parkAreas() : [];
@@ -1297,6 +1309,7 @@ function updateStreets(): void {
   if (!same) streetLines = { frame: fr.id, tiles: list, labels, ...(noLabel ? { noLabel } : {}) };
   streetsFor = 'on';
   radar.setStreets(streetLines, shift);
+  if (streetLines) shownStreets = { lines: streetLines, fr };
 }
 
 /** 圖磚到了：拖曳中等下一格跟光點一起畫（v1.717：圖磚到了馬上照最新的位置畫道路、地名，光點還在上一格，看起來會抖） */

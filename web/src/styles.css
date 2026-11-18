@@ -1390,15 +1390,16 @@ path.map-seam-walkers { --p: 15px; }
 .radar .region-outline.county-line { stroke-width: 1; stroke-opacity: 0.35; }
 /* 放大到 2 km 內畫的街道：淡淡的細線，大路粗一點，不搶光點 */
 .radar .streets path { fill: none; stroke: var(--radar-grid); stroke-linejoin: round; stroke-linecap: round; pointer-events: none; }
-.radar .street-minor { stroke-width: 0.8; stroke-opacity: 0.2; }
-.radar .street-major { stroke-width: 2; stroke-opacity: 0.24; }
+/* --sw：縮放中道路整層放大縮小時抵銷線的粗細（radar.ts 的 drawStreets，v1.759），平常沒設是 1 */
+.radar .street-minor { stroke-width: calc(0.8 * var(--sw, 1)); stroke-opacity: 0.2; }
+.radar .street-major { stroke-width: calc(2 * var(--sw, 1)); stroke-opacity: 0.24; }
 /* 全螢幕雷達的公園綠地（v1.705）：淡淡的不透明色塊，在道路下面 */
 /* 不描邊：v1.707 加過同色細邊蓋接縫，但 nonzero 填色後相鄰圖磚重疊的地方本來就塗滿；描邊在拖曳時佔了一半的重繪時間（v1.716） */
 .radar .streets path.green-area { fill: var(--park-fill); stroke: none; }
 /* 河面、湖、水庫（v1.734 使用者說河也上色）：淡藍、不透明，在綠地上面、道路下面；比較窄的河、溪畫線 */
 .radar .streets path.water-area { fill: var(--water-fill); stroke: none; }
-.radar .streets path.water-river { stroke: var(--water-line); stroke-width: 2.2; }
-.radar .streets path.water-stream { stroke: var(--water-line); stroke-width: 1; }
+.radar .streets path.water-river { stroke: var(--water-line); stroke-width: calc(2.2 * var(--sw, 1)); }
+.radar .streets path.water-stream { stroke: var(--water-line); stroke-width: calc(1 * var(--sw, 1)); }
 .radar .blip .halo { fill: var(--blip-halo); opacity: 0.9; }
 /* 雷達上的地名（v1.691）：淡淡的小字，在光點、車掃下面；字的大小、外框粗細在 radar.ts 照螢幕像素算（PLACE_LABEL_PX） */
 .radar .place-label { fill: var(--label); text-anchor: middle; dominant-baseline: central; paint-order: stroke; stroke: var(--label-halo); stroke-linejoin: round; pointer-events: none; transition: opacity 0.25s; animation: place-label-in 0.25s ease-out; }
@@ -1413,7 +1414,7 @@ path.map-seam-walkers { --p: 15px; }
 /* 地標（大巨蛋、公園…，v1.698）：跟車站一樣粗、淡一點 */
 .radar .pl-poi { font-weight: 600; opacity: 0.55; }
 /* 16 km 內的海岸線（從街道圖磚來，v1.640）：實線（v1.641 使用者說近距離的邊界直接用實線）；顏色跟遠的海岸線一樣 */
-.radar .streets path.coast-line { fill: none; stroke: var(--accent); stroke-width: 1.5; stroke-opacity: 0.45; stroke-dasharray: none; }
+.radar .streets path.coast-line { fill: none; stroke: var(--accent); stroke-width: calc(1.5 * var(--sw, 1)); stroke-opacity: 0.45; stroke-dasharray: none; }
 /* 道路切成格子（v1.720）：半透明設在整層，每一段不透明；切開的兩段在格子邊上圓頭重疊的地方才不會變深 */
 .radar .streets .tl-street-minor { opacity: 0.2; }
 .radar .streets .tl-street-major { opacity: 0.24; }

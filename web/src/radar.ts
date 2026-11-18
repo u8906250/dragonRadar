@@ -184,6 +184,8 @@ const PLACE_LABEL_GAP = [2.5, 1.2];
 const PLACE_LABEL_KEEP = 10;
 /** 道路圖磚：縮放停了多久才照新的比例重畫；一格最多重畫幾張（新進畫面的不算） */
 const TILE_SETTLE_MS = 250;
+/** 縮放中整層放大縮小的道路格子，比畫的時候的比例大小超過幾倍就照現在的比例重畫（太小了線太密、太大了線太粗糙） */
+const CELL_ZOOM_MAX = 2;
 /** 圖磚的索引：每張分成幾乘幾的小方格 */
 const TILE_GRID = 16;
 interface TileIndex {
@@ -2292,15 +2294,16 @@ export class Radar {
   /**
    * 道路切成跟畫面差不多大的格子（v1.720：一張圖磚常常比畫面大很多，整張畫進去瀏覽器每一格要處理的線太多）：
    * 格子是錨點座標裡邊長 cellKm 的正方形（畫面寬的四分之一到一半），每一格只放跟它重疊的那一段（線切在格子邊上，
-   * 綠地多重疊一點點才不會有縫），畫好留著；拖曳時整層平移，新進畫面的格子才畫、出了畫面的拿掉，已經畫好的完全不動。
-   * 縮放中不用格子：每一格只畫畫面裡的線（跟以前一樣），停了（TILE_SETTLE_MS）才照新的比例畫格子
+   * 綠地多重疊一點點才不會有縫），照比例 cellK 畫好留著；拖曳時整層平移，新進畫面的格子才畫、出了畫面的拿掉，已經畫好的完全不動。
+   * 縮放中（v1.759）也用畫好的格子，整層放大縮小（以前每一格把畫面裡的線全部重畫，手機上拉近時很卡）：線的粗細用 --sw 抵銷縮放，
+   * 縮小時新露出來的地方照 cellK 補畫格子；縮放超過 2 倍（CELL_ZOOM_MAX）照現在的比例重畫一次，停了（TILE_SETTLE_MS）也照新的比例重畫
    */
   private cells = new Map<string, { parts: Array<SVGPathElement | null>; src: string }>();
   private cellKm = 0;
   private cellK = 0;
   private tileFrame: { frame: number; fill: boolean; unit: number } | null = null;
-  /** 綠地、海岸線、小路、大路四層（由下往上），每層裡面是格子那組、縮放中那一條 */
-  private tileLayers: Array<{ cellsG: SVGGElement; zoom: SVGPathElement }> = [];
+  /** 綠地、河湖、河、溪、海岸線、小路、大路幾層（由下往上），每層一組格子 */
+  private tileLayers: SVGGElement[] = [];
   private tileLastK = 0;
   private tileKAt = 0;
   private tileSettle = 0;
@@ -2339,14 +2342,7 @@ export class Radar {
     const f = this.tileFrame;
     if (!f || f.frame !== s.frame || f.fill !== this.fill || f.unit !== unit || this.tileLayers.length === 0) {
       this.streetLayer.replaceChildren();
-      this.tileLayers = TILE_CLASSES.map(([cls, attrs]) => {
-        const g = el('g', { class: `tl-${cls.split(' ').at(-1)}` }) as SVGGElement;
-        const cellsG = el('g') as SVGGElement;
-        const zoom = el('path', { class: cls, d: '', ...attrs }) as SVGPathElement;
-        g.append(cellsG, zoom);
-        this.streetLayer.appendChild(g);
-        return { cellsG, zoom };
-      });
+      this.tileLayers = TILE_CLASSES.map(([cls]) => this.streetLayer.appendChild(el('g', { class: `tl-${cls.split(' ').at(-1)}` })) as SVGGElement);
       this.cells.clear();
       this.cellK = 0;
       this.tileFrame = { frame: s.frame, fill: this.fill, unit };
@@ -2357,29 +2353,21 @@ export class Radar {
     const [vx0, vy0] = this.fill ? [RADAR_VIEW.hx / k, RADAR_VIEW.hy / k] : [this.scaleKm, this.scaleKm];
     const hr = (this.heading * Math.PI) / 180;
     const [vx, vy] = [Math.abs(vx0 * Math.cos(hr)) + Math.abs(vy0 * Math.sin(hr)), Math.abs(vx0 * Math.sin(hr)) + Math.abs(vy0 * Math.cos(hr))];
-    this.streetLayer.setAttribute('transform', `translate(${C} ${C}) rotate(${(-this.heading).toFixed(2)}) translate(${(-k * sx).toFixed(2)} ${(k * sy).toFixed(2)})`);
-    if (zooming) {
-      // 縮放中：每一格只畫畫面裡的線（照現在的比例），格子先藏起來
-      const view: [number, number, number, number] = [sx - vx * 1.05, sy - vy * 1.05, sx + vx * 1.05, sy + vy * 1.05];
-      const ds = this.streetPaths(s.tiles, view, k, false);
-      this.tileLayers.forEach((l, n) => {
-        l.cellsG.setAttribute('display', 'none');
-        l.zoom.setAttribute('d', ds[n]);
-      });
-      return;
-    }
-    // 停著、拖曳：格子。比例、格子大小變了全部重畫（縮放停了那一次）
+    // 格子照 cellK 畫：停著、拖曳時比例、格子大小變了全部重畫（縮放停了那一次）；縮放中比 cellK 大小超過 2 倍才重畫
     const ideal = 2 ** Math.floor(Math.log2(half));
-    if (this.cellK !== k || this.cellKm !== ideal) {
-      for (const l of this.tileLayers) l.cellsG.replaceChildren();
+    const zoom = this.cellK > 0 ? k / this.cellK : 0;
+    if (zooming ? !(zoom >= 1 / CELL_ZOOM_MAX && zoom <= CELL_ZOOM_MAX) : this.cellK !== k || this.cellKm !== ideal) {
+      for (const g of this.tileLayers) g.replaceChildren();
       this.cells.clear();
       this.cellK = k;
       this.cellKm = ideal;
     }
-    for (const l of this.tileLayers) {
-      l.cellsG.removeAttribute('display');
-      if (l.zoom.getAttribute('d')) l.zoom.setAttribute('d', '');
-    }
+    const ck = this.cellK;
+    const scale = ck === k ? '' : ` scale(${(k / ck).toFixed(5)})`;
+    this.streetLayer.setAttribute('transform', `translate(${C} ${C}) rotate(${(-this.heading).toFixed(2)})${scale} translate(${(-ck * sx).toFixed(2)} ${(ck * sy).toFixed(2)})`);
+    // 線的粗細不跟著縮放（styles.css 的 stroke-width 乘 --sw）
+    if (scale) this.streetLayer.style.setProperty('--sw', (ck / k).toFixed(4));
+    else this.streetLayer.style.removeProperty('--sw');
     const c = this.cellKm;
     // 畫面附近（多一成）的格子
     const [mx, my] = [vx * 1.1, vy * 1.1];
@@ -2394,12 +2382,14 @@ export class Radar {
         const cur = this.cells.get(key);
         if (cur && cur.src === src) continue;
         if (cur) for (const p of cur.parts) p?.remove();
-        const ds = this.streetPaths(tiles, rect, k, true);
+        const ds = this.streetPaths(tiles, rect, ck);
         const parts = ds.map((d, n) => (d ? (el('path', { class: TILE_CLASSES[n][0], d, ...TILE_CLASSES[n][1] }) as SVGPathElement) : null));
-        parts.forEach((p, n) => p && this.tileLayers[n].cellsG.appendChild(p));
+        parts.forEach((p, n) => p && this.tileLayers[n].appendChild(p));
         this.cells.set(key, { parts, src });
       }
     }
+    // 出了畫面的拿掉（縮放中拉近時留著：畫面外的格子不畫，等停了重畫一次就清掉）
+    if (zooming) return;
     for (const [key, cur] of this.cells) {
       if (want.has(key)) continue;
       for (const p of cur.parts) p?.remove();
@@ -2470,10 +2460,10 @@ export class Radar {
 
   /**
    * 長方形 rect（錨點的公里）裡的道路照比例 k 畫成四層的路徑字串（綠地、海岸線、小路、大路）：座標是 (k × 往東, −k × 往北)，北在上，
-   * 位移、指北針轉向在整層的 transform。clip（格子）：線切在 rect 邊上，綠地往外多切 2 個單位（相鄰格子重疊，不透明，看不出接縫），
-   * 整條在裡面的不用切；不 clip（縮放中只畫畫面這一次）：碰到 rect 的整條畫。畫面上離上一點太近的點省略（線 1.5、綠地 3 個單位），太小的綠地不畫
+   * 位移、指北針轉向在整層的 transform。線切在 rect（格子）邊上，綠地往外多切 2 個單位（相鄰格子重疊，不透明，看不出接縫），
+   * 整條在裡面的不用切。畫面上離上一點太近的點省略（線 1.5、綠地 3 個單位），太小的綠地不畫
    */
-  private streetPaths(tiles: RadarStreetTile[], rect: [number, number, number, number], k: number, clip: boolean): string[] {
+  private streetPaths(tiles: RadarStreetTile[], rect: [number, number, number, number], k: number): string[] {
     const inside = (b: Float64Array, n: number, r: [number, number, number, number]): boolean => b[n * 4] >= r[0] && b[n * 4 + 1] >= r[1] && b[n * 4 + 2] <= r[2] && b[n * 4 + 3] <= r[3];
     const pts = (xs: ArrayLike<number>, tol: number, close: boolean): string => {
       let d = '';
@@ -2491,8 +2481,6 @@ export class Radar {
       return d && close ? `${d}Z` : d;
     };
     const out = TILE_CLASSES.map(() => '');
-    const [w2, h2] = [(rect[2] - rect[0]) / 2, (rect[3] - rect[1]) / 2];
-    const wide: [number, number, number, number] = [rect[0] - w2, rect[1] - h2, rect[2] + w2, rect[3] + h2];
     for (const t of tiles) {
       const all = tileKinds(t);
       for (let kind = TILE_AREAS; kind < all.length; kind++) {
@@ -2500,10 +2488,8 @@ export class Radar {
         if (list.length === 0) continue;
         const boxes = this.indexOf(t).kinds[kind].boxes;
         for (const n of this.query(t, kind, rect)) {
-          // 格子：切在邊上；縮放中：畫面外多一半裡面的整條畫，很長的才切（只畫畫面附近那段）
-          const r = clip ? rect : wide;
-          if (inside(boxes, n, r)) out[kind] += pts(list[n], 1.5, false);
-          else for (const piece of clipLine(list[n], r)) out[kind] += pts(piece, 1.5, false);
+          if (inside(boxes, n, rect)) out[kind] += pts(list[n], 1.5, false);
+          else for (const piece of clipLine(list[n], rect)) out[kind] += pts(piece, 1.5, false);
         }
       }
       if (!this.fill) continue;
@@ -2514,7 +2500,7 @@ export class Radar {
         if (polys.length === 0) continue;
         const gboxes = this.indexOf(t).kinds[kind].boxes;
         for (const n of this.query(t, kind, gr)) {
-          const whole = !clip || inside(gboxes, n, gr);
+          const whole = inside(gboxes, n, gr);
           for (const r of polys[n]) {
             let [x0, x1, y0, y1] = [Infinity, -Infinity, Infinity, -Infinity];
             for (let q = 0; q < r.length; q += 2) {
