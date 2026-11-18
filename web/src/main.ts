@@ -2,7 +2,7 @@ import './styles.css';
 import { FITBUS_MS_PER_M, hqDenseKm, hqMotionKm, HQ_NET_LABEL_KM, HQ_SAIL_MS, HQ_STAR_MS, HQ_VOYAGE_MS, RAINBOW_EVERY_MS, voyagePhase, voyageTimeOf } from './flow';
 import { addKeyword, deletePushSubscription, locateFeedbackPlace, sendFeedback, type FeedbackKind, fetchPushKey, savePushSubscription, confirmReport, editReport, locatePlace, rejectReport, supplementReport, deleteBottle, dropBottle, readBottle, type BottleHere, fetchBottleInfo, fetchBottlePhoto, fetchBottleProof, fetchBottles, fetchWoofBottles, rememberBottlePhoto, uncollectLetter, verifyBottleProof, fetchEvents, fetchHealth, fetchKeywords, fetchMyBottles, fetchMyReports, fetchRoutes, pickBottle, reportBottle, submitLink, withdrawReport } from './api';
 import { compassSupported, startCompass } from './compass';
-import { bearingDeg, compassLabel, destination, formatKm, haversineKm, lookFrom, simplifyLatLng, taiwanRadiusKm, unitVectors, type LatLng, type RegionMap } from './geo';
+import { bearingDeg, compassLabel, cutAtBox, cutLines, destination, formatKm, haversineKm, lookFrom, outsideBox, ringBox, ringHas, splitAntimeridian, simplifyLatLng, taiwanRadiusKm, unitVectors, type GeoBox, type LatLng, type RegionMap } from './geo';
 import { TAIWAN_RINGS } from './taiwan';
 import type { SceneKind } from './hq-scenes';
 import { LANDMARKS } from './landmarks';
@@ -1022,7 +1022,7 @@ const touchesEastAsia = (km: number): boolean => touchesArea(km, EA_AREA);
 interface RegionSlot {
   /** 那一塊的範圍（載入前就判斷得了） */
   area: { s: number; w: number; n: number; e: number };
-  /** 海岸線也用它的（world.ts 在這一塊的點不畫）；false 是只補湖岸（海岸線已經有 eastasia.ts 的） */
+  /** 海岸線也用它的（世界的陸地扣掉這一塊）；false 是只補湖岸（海岸線已經有 eastasia.ts 的） */
   ownCoast: boolean;
   load: () => Promise<{ REGION_MAP: RegionMap }>;
   map: RegionMap | null;
@@ -1257,7 +1257,8 @@ function updateStreets(): void {
         for (let i = 0; i < n; i += step) if (mask.contains(pts[2 * i], pts[2 * i + 1])) return true;
         return mask.contains(pts[pts.length - 2], pts[pts.length - 1]);
       };
-      for (const a of t.water) if (!touchesChina(a.rings[0])) rt.water.push(a.rings.map(toXy));
+      // 海（16 km 內）：可能碰到中國時整片不塗（圖磚的海一格一格的，碰到對岸的那幾格不塗會變成方塊，而且海的邊就是對岸詳細的海岸線）
+      for (const a of t.water) if (!(a.sea && mask) && !touchesChina(a.rings[0])) rt.water.push(a.rings.map(toXy));
       for (const l of t.waterways) if (!touchesChina(l.pts)) (l.cls === 'river' ? rt.rivers : rt.streams).push(toXy(l.pts));
     }
     streetTileCache.set(ck, rt);
@@ -2089,6 +2090,170 @@ function updateSpace(): void {
   radar.setSpace((km, rg, view) => mod.spaceMarkup({ center, land, fill, when, scaleKm: km, rg, view, streets: woofStreets, you, woofMap: map, bottles: map && bottlesOn() ? woofBottleMarks(km) : undefined }), mod.bodyRadiusKm);
 }
 
+/** 切在那一塊邊上的陸地 → 海岸線（geo.ts 的 cutAtBox），每份資料算一次記住 */
+const coastLinesMemo = new WeakMap<Array<Array<[number, number]>>, Array<Array<[number, number]>>>();
+function coastLinesOf(rings: Array<Array<[number, number]>>, box: GeoBox): Array<Array<[number, number]>> {
+  let out = coastLinesMemo.get(rings);
+  if (!out) coastLinesMemo.set(rings, (out = cutAtBox(rings, box)));
+  return out;
+}
+/** 世界的陸地扣掉載入了自己資料的那幾塊（塗海用：那幾塊裡面用它們自己的陸地），照扣掉哪幾塊記住 */
+let worldLandFor = '';
+let worldLand: Array<Array<[number, number]>> = [];
+function worldLandOutside(boxes: GeoBox[]): Array<Array<[number, number]>> {
+  const key = `${worldRings.length}|${boxes.map((b) => `${b.s},${b.w}`).join('|')}`;
+  if (key !== worldLandFor) {
+    worldLandFor = key;
+    // 跨過換日線的先切成兩圈（經緯度當平面扣掉方框）
+    worldLand = boxes.reduce((rings, b) => rings.flatMap((r) => outsideBox(r, b)), worldRings.flatMap(splitAntimeridian));
+  }
+  return worldLand;
+}
+/** 世界的陸地（worldLandOutside）→ 海岸線：切開的地方（沿著方框的邊走）不畫 */
+function worldLinesOf(world: Array<Array<[number, number]>>): Array<Array<[number, number]>> {
+  let out = coastLinesMemo.get(world);
+  if (!out) coastLinesMemo.set(world, (out = cutLines(world, onCut)));
+  return out;
+}
+const ringBoxes = new WeakMap<Array<[number, number]>, [number, number, number, number]>();
+function boxOfRing(ring: Array<[number, number]>): [number, number, number, number] {
+  let b = ringBoxes.get(ring);
+  if (!b) ringBoxes.set(ring, (b = ringBox(ring)));
+  return b;
+}
+/** 切開的地方（東亞、有自己海岸線的那幾塊，方框的邊；跨過換日線切開的）在哪幾條緯線、經線上 */
+const CUT_AREAS = [EA_AREA, ...REGION_SLOTS.filter((r) => r.ownCoast).map((r) => r.area)];
+const CUT_LATS = new Set(CUT_AREAS.flatMap((a) => [a.s, a.n]));
+const CUT_LNGS = new Set([-180, 180, ...CUT_AREAS.flatMap((a) => [a.w, a.e])]);
+/** 這一段是不是切開的地方（沿著方框的邊走） */
+const onCut = (p: [number, number], q: [number, number]): boolean => (p[0] === q[0] && CUT_LATS.has(p[0])) || (p[1] === q[1] && CUT_LNGS.has(p[1]));
+/** 塗海用的一圈：點、哪幾點一定要留（fixed） */
+type SeaRing = { pts: Array<[number, number]>; fixed: Uint8Array };
+/**
+ * 塗海用的形狀，每一級、每條線算一次記住：
+ * - 先跟 coarseRing 一樣照那一級簡化，但切開的地方兩端留著、一段一段簡化（跟 cutAtBox 切出來的海岸線簡化得一樣）
+ * - 長的邊每 2 ** tier / 2 km（最多 400 km）補一點，兩端都在畫面外的邊才不會穿過畫面（拉回圓上的點沿著圓走，不是照原本的直線）
+ * - 切開的地方補在固定的格點上（每 2 ** tier / 8 km，最多 100 km）、這些點雷達簡化時留著：接在一起的兩塊陸地（東亞和世界、美國西半和東半）
+ *   那條邊兩邊的點幾乎一樣（中間各自多的點在畫面上偏不到零點幾個像素），塗起來才不會有一條細縫
+ */
+const seaRingMemo = new Map<number, WeakMap<Array<[number, number]>, SeaRing>>();
+function seaRing(ring0: Array<[number, number]>, tier: number): SeaRing {
+  let done = seaRingMemo.get(tier);
+  if (!done) seaRingMemo.set(tier, (done = new WeakMap()));
+  let got = done.get(ring0);
+  if (got) return got;
+  const tolKm = 2 ** tier / 400;
+  let ring = ring0;
+  if (tolKm >= 0.5 && ring0.length >= 4) {
+    ring = [];
+    for (let from = 0, i = 1; i < ring0.length; i++) {
+      if (i < ring0.length - 1 && !onCut(ring0[i - 1], ring0[i]) && !onCut(ring0[i], ring0[i + 1])) continue;
+      const part = simplifyLatLng(ring0.slice(from, i + 1), tolKm);
+      ring.push(...(ring.length > 0 ? part.slice(1) : part));
+      from = i;
+    }
+  }
+  // 拉到很遠時也不要太稀（地球另一面附近投影彎得很厲害，直線跟真的差很多）
+  const stepKm = Math.min(2 ** tier / 2, 400);
+  const grid = Math.min(2 ** tier / 8, 100) / 111;
+  const pts: Array<[number, number]> = [];
+  const fixed: number[] = [];
+  for (let i = 0; i < ring.length; i++) {
+    const [p, q] = [ring[i], ring[i + 1]];
+    const prev = ring[i - 1];
+    pts.push(p);
+    fixed.push((q && onCut(p, q)) || (prev && onCut(prev, p)) ? 1 : 0);
+    // 跨過換日線的一段（經度差超過 180 度）很短，不用補（世界的資料先切開了，以防萬一）
+    if (!q || (p[0] === q[0] && p[1] === q[1]) || Math.abs(q[1] - p[1]) > 180) continue;
+    if (onCut(p, q)) {
+      // 沿著緯線（k = 1，經度在變）或經線（k = 0）：格點是 grid 的整數倍
+      const k = p[0] === q[0] ? 1 : 0;
+      const [lo, hi] = [Math.floor(Math.min(p[k], q[k]) / grid) + 1, Math.ceil(Math.max(p[k], q[k]) / grid) - 1];
+      for (let j = 0; j <= hi - lo; j++) {
+        const v = (p[k] < q[k] ? lo + j : hi - j) * grid;
+        pts.push(k === 1 ? [p[0], v] : [v, p[1]]);
+        fixed.push(1);
+      }
+      continue;
+    }
+    const km = 111 * Math.hypot(q[0] - p[0], (q[1] - p[1]) * Math.cos((((p[0] + q[0]) / 2) * Math.PI) / 180));
+    const n = Math.ceil(km / stepKm);
+    for (let k = 1; k < n; k++) {
+      pts.push([p[0] + ((q[0] - p[0]) * k) / n, p[1] + ((q[1] - p[1]) * k) / n]);
+      fixed.push(0);
+    }
+  }
+  done.set(ring0, (got = { pts, fixed: Uint8Array.from(fixed) }));
+  return got;
+}
+/** 塗海的一點：方位、距離，fixed 是雷達簡化時要留的 */
+type SeaPt = { bearing: number; distanceKm: number; fixed?: boolean };
+/** 拉回圓上那幾點的距離上限：地球正對面（約 20,000 km）附近方位變得很快，留一點 */
+const SEA_MAX_KM = 19_800;
+/**
+ * 一圈換算好的點：離正中間超過 maxKm（畫面外）的拉回 maxKm 的圓上（方位不變），拉回去的相鄰幾點沿著圓走、每 3 度一點，
+ * 畫面外的細節不用畫；頭尾不同一點的接回去
+ */
+function pullIn(pts: SeaPt[], maxKm: number): SeaPt[] {
+  const out: SeaPt[] = [];
+  const all = pts.length > 0 && (pts[0].bearing !== pts[pts.length - 1].bearing || pts[0].distanceKm !== pts[pts.length - 1].distanceKm) ? [...pts, pts[0]] : pts;
+  /** 上一個放進去的圓上的點的方位（上一點在圓裡面是 null）、還沒放進去的最後一點 */
+  let lastB: number | null = null;
+  let pend: number | null = null;
+  for (const p of all) {
+    if (p.distanceKm <= maxKm) {
+      if (pend !== null) out.push({ bearing: pend, distanceKm: maxKm });
+      lastB = pend = null;
+      out.push(p);
+      continue;
+    }
+    if (lastB === null) {
+      out.push({ bearing: p.bearing, distanceKm: maxKm });
+      lastB = p.bearing;
+      pend = null;
+      continue;
+    }
+    const d = ((((p.bearing - lastB) % 360) + 540) % 360) - 180;
+    if (Math.abs(d) < 3) {
+      pend = lastB + d;
+      continue;
+    }
+    const steps = Math.ceil(Math.abs(d) / 3);
+    for (let k = 1; k <= steps; k++) out.push({ bearing: lastB + (d * k) / steps, distanceKm: maxKm });
+    lastB += d;
+    pend = null;
+  }
+  if (pend !== null) out.push({ bearing: pend, distanceKm: maxKm });
+  return out;
+}
+/**
+ * 全螢幕拉遠（16 km 以上）塗海（v1.757 使用者說把海的顏色畫出來）：陸地（跟海岸線同一份資料）整圈換算，
+ * 雷達用 evenodd 從一大塊圓（maxKm）裡挖掉陸地，剩下的塗淡藍（湖是陸地裡挖空的圈，一樣塗）。
+ * - 附近（reach 內）沒有點、也沒包住正中間的形狀整個在畫面外，不用；包住正中間的（在大陸裡面拉近）留著，換算後是整個圓
+ * - 包住地球正對面那一點的形狀（從台灣看南美洲）換算後圍住的是外面，數到單數個就不加那一大塊圓（整片翻回來）
+ */
+function seaShapes(land: Array<Array<[number, number]>>, tier: number, reach: number, box: number[] | null): SeaPt[][] {
+  const look = lookFrom(origin);
+  const maxKm = Math.min(reach, SEA_MAX_KM);
+  const anti = { lat: -origin.lat, lng: origin.lng > 0 ? origin.lng - 180 : origin.lng + 180 };
+  const out: SeaPt[][] = [];
+  let flip = false;
+  for (const ring0 of land) {
+    const [s, w, n, e] = boxOfRing(ring0);
+    const covers = (p: LatLng): boolean => p.lat >= s && p.lat <= n && p.lng >= w && p.lng <= e && ringHas(ring0, p.lat, p.lng);
+    const holds = covers(origin);
+    if (box && !holds && (n < box[0] || s > box[2] || e < box[1] || w > box[3])) continue;
+    const { pts: ring, fixed } = seaRing(ring0, tier);
+    const vecs = ringVectors(ring);
+    const pts = ring.map((_, i) => (fixed[i] ? { ...look(vecs, i), fixed: true } : look(vecs, i)));
+    if (!holds && !pts.some((p) => p.distanceKm < reach)) continue;
+    if (covers(anti)) flip = !flip;
+    out.push(pullIn(pts, maxKm));
+  }
+  if (!flip) out.unshift(Array.from({ length: 120 }, (_, i) => ({ bearing: i * 3, distanceKm: maxKm })));
+  return out;
+}
+
 /**
  * 範圍比 16 km 大（全台、全球、縮放到更遠）畫海岸線（台灣加上全世界），1000 km 內再畫縣市交界，
  * 比這個小的不畫（只有道路）；位置變了、範圍跨過 2 的次方才重算。
@@ -2115,18 +2280,17 @@ function updateOutline(): void {
   // 範圍照 2 的次方分級：縮放跨級才重算（附近的範圍跟著變大）
   const tier = Math.ceil(Math.log2(Math.max(scaleKm, 1)));
   const reach = 2 ** tier * 2.5;
-  // 東亞：附近碰到就載入；載入了雷達用它的海岸線，world.ts 在東亞那一塊的點不畫
+  // 東亞：附近碰到就載入；載入了雷達用它的海岸線，世界的陸地扣掉東亞那一塊
   const nearEa = touchesEastAsia(reach);
   if (nearEa) loadEastAsia();
   const ea = nearEa ? eaMod : null;
-  const inEa = (lat: number, lng: number): boolean => lat > EA_AREA.s && lat < EA_AREA.n && lng > EA_AREA.w && lng < EA_AREA.e;
-  // 荷蘭、日本：附近碰到就載入；載入了雷達加畫它的海岸線或湖岸、界線，荷蘭那一塊 world.ts 的點不畫
+  // 荷蘭、日本：附近碰到就載入；載入了雷達加畫它的海岸線或湖岸、界線，世界的陸地扣掉有自己海岸線的那幾塊（荷蘭、美國）
   const near = REGION_SLOTS.filter((r) => touchesArea(reach, r.area));
   near.forEach(loadRegion);
   const regions = near.filter((r): r is RegionSlot & { map: RegionMap } => !!r.map);
   const own = regions.filter((r) => r.ownCoast).map((r) => r.area);
-  const inOwn = (lat: number, lng: number): boolean => own.some((a) => lat > a.s && lat < a.n && lng > a.w && lng < a.e);
-  const worldSkip = ea || own.length > 0 ? (lat: number, lng: number): boolean => (!!ea && inEa(lat, lng)) || inOwn(lat, lng) : undefined;
+  // 世界的陸地扣掉東亞、有自己海岸線的那幾塊（那裡面用它們自己的），海岸線畫切開的地方以外的
+  const world = worldLandOutside([...(ea ? [EA_AREA] : []), ...own]);
   // 16 km 內只在中國的範圍畫虛線海岸（不在台灣本島時；其他地方用街道圖磚的實線海岸）
   const china = kind === 'none' && !!ea && !onTaiwanMain(origin);
   type Src = { ring: Array<[number, number]>; skip?: (lat: number, lng: number) => boolean };
@@ -2134,12 +2298,12 @@ function updateOutline(): void {
     kind === 'land'
       ? [
           ...TAIWAN_RINGS.map((ring) => ({ ring })),
-          ...(ea ? ea.eaCoast.map((ring) => ({ ring })) : []),
-          ...regions.flatMap((r) => r.map.coast.map((ring) => ({ ring }))),
-          ...worldRings.map((ring) => ({ ring, skip: worldSkip })),
+          ...(ea ? coastLinesOf(ea.eaCoast, EA_AREA).map((ring) => ({ ring })) : []),
+          ...regions.flatMap((r) => coastLinesOf(r.map.coast, r.area).map((ring) => ({ ring }))),
+          ...worldLinesOf(world).map((ring) => ({ ring })),
         ]
       : china
-        ? ea!.eaCoast.map((ring) => ({ ring, skip: (lat: number, lng: number) => !ea!.chinaMask.contains(lat, lng) }))
+        ? coastLinesOf(ea!.eaCoast, EA_AREA).map((ring) => ({ ring, skip: (lat: number, lng: number) => !ea!.chinaMask.contains(lat, lng) }))
         : null;
   // 縣市界（加上荷蘭的省界、國界，日本的都道府縣界）
   const lines = kind === 'land' && scaleKm <= COUNTY_MAX_KM ? (regions.length > 0 ? [...countyLines, ...regions.flatMap((r) => r.map.lines)] : countyLines) : [];
@@ -2147,7 +2311,9 @@ function updateOutline(): void {
   // 拉遠：有畫地圖的國家塗底色（海岸線不塗：以前整圈都畫到的島、大陸都塗，拉遠時每個國家都變淺綠）
   const filled = kind === 'land' && scaleKm >= FILL_KM;
   if (filled) loadCountryFill();
-  const base = sources ? `${kind}|${worldLoaded}|${!!ea}|${regions.length}|${china}|${lines.length > 0}|${!!mapRings}|${tier}|${filled}|${countryFillLoaded}` : '';
+  // 全螢幕塗海（16 km 內用圖磚裡的海，updateStreets）；洋流總部特效播放時跟綠地一樣不塗
+  const seaOn = kind === 'land' && radar.filling && hqVoyageAt === null;
+  const base = sources ? `${kind}|${worldLoaded}|${!!ea}|${regions.length}|${china}|${lines.length > 0}|${!!mapRings}|${tier}|${filled}|${countryFillLoaded}|${seaOn}` : '';
   // 拖曳中移動不到範圍的一半：不重算（每一點都要算方位、距離，拉遠時點很多），雷達照位移整層平移（v1.719 使用者說快速拖很遠時地圖跟不上、越縮小越明顯）。
   // 平移最多 FLAT_PAN_KM，再遠照新的位置重算：拉遠到幾千公里時平移跟真的差很多，光點照球面轉、海岸線只是平移（v1.743）
   if (panFrom && outlineAt && base && outlineFor.startsWith(`${base}|`)) {
@@ -2196,7 +2362,10 @@ function updateOutline(): void {
         })
         .filter((r) => r.some((p) => p.distanceKm < reach) && r.every((p) => p.distanceKm < 12000))
     : [];
-  radar.setOutline(radarOutline, lines.map((l) => toRadar(coarseRing(l, tier))).filter((r) => r.length > 1), fills);
+  // 海：陸地是台灣、東亞、有自己資料的地方（整圈，切開的地方沿著那一塊的邊走），其他地方用世界的（扣掉那幾塊）
+  const land = seaOn ? [...TAIWAN_RINGS, ...(ea ? ea.eaCoast : []), ...regions.flatMap((r) => r.map.coast), ...world] : [];
+  const sea = seaOn ? seaShapes(land, tier, reach, box) : [];
+  radar.setOutline(radarOutline, lines.map((l) => toRadar(coarseRing(l, tier))).filter((r) => r.length > 1), fills, sea);
   map.setOutline(mapRings ?? [], mapRings && filled ? countryFill : []);
 }
 

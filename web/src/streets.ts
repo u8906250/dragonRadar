@@ -227,9 +227,11 @@ export interface StationName {
 export interface GreenArea {
   rings: Float64Array[];
   box: [number, number, number, number];
+  /** 海（water 圖層 class=ocean，16 km 內才有） */
+  sea?: boolean;
 }
 const GREEN_CLASSES = new Set(['grass', 'wood']);
-/** 塗淡藍的水域（water 圖層的 class）：海（ocean）、游泳池不塗 */
+/** 塗淡藍的水域（water 圖層的 class）：游泳池不塗；海（ocean）只有拿海岸線的那幾級（16 km 內）塗 */
 const WATER_CLASSES = new Set(['river', 'lake', 'pond', 'reservoir', 'basin', 'dock']);
 /** 河、溪的線（waterway 圖層）：pts 是 [緯度, 經度, …]，box 跟 StreetLine 一樣；cls 是 river（河、運河）或 stream（溪） */
 export interface WaterLine {
@@ -432,13 +434,17 @@ export function decodeTile(
       }
       continue;
     }
-    // 河、湖、水庫、池塘（v1.734 使用者說河也上色；跟綠地一起，全螢幕才畫）：海不塗、游泳池不算
+    // 河、湖、水庫、池塘（v1.734 使用者說河也上色；跟綠地一起，全螢幕才畫）：游泳池不算；
+    // 海只有拿海岸線的那幾級（16 km 內）塗（v1.757 使用者說把海的顏色畫出來；再遠的海岸是虛線，海照 main.ts 的陸地挖出來）
     if (name === 'water' && names.green) {
       for (const f of features) {
         const { tags, type, geom } = readFeature(f);
         if (type !== 3) continue;
-        if (!WATER_CLASSES.has(tagsOf(tags).class)) continue;
+        const cls = tagsOf(tags).class;
+        if (!WATER_CLASSES.has(cls) && !(coast && cls === 'ocean')) continue;
+        const from = waterOut.length;
         polygonsOf(geomParts(geom, toLatLng), waterOut);
+        if (cls === 'ocean') for (let i = from; i < waterOut.length; i++) waterOut[i].sea = true;
       }
       continue;
     }

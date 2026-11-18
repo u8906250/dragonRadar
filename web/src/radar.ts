@@ -628,10 +628,16 @@ const LINE_PX = 14;
 
 /** 距離換成半徑比例（0 = 圓心，1 = 外圈，超出範圍會大於 1），全部照比例 */
 /** Douglas-Peucker：離頭尾連線不到 tol 的點拿掉（頭尾留著） */
-function simplifyPts(pts: Array<{ x: number; y: number }>, tol: number): Array<{ x: number; y: number }> {
-  const keep = new Uint8Array(pts.length);
+function simplifyPts(pts: Array<{ x: number; y: number }>, tol: number, fixed?: Uint8Array): Array<{ x: number; y: number }> {
+  // fixed：一定要留的點（塗海時兩塊陸地接在一起的那條邊，兩邊留一樣的點才接得密）
+  const keep = fixed ? Uint8Array.from(fixed) : new Uint8Array(pts.length);
   keep[0] = keep[pts.length - 1] = 1;
-  const stack: Array<[number, number]> = [[0, pts.length - 1]];
+  const stack: Array<[number, number]> = [];
+  for (let i = 1, prev = 0; i < pts.length; i++) {
+    if (!keep[i]) continue;
+    stack.push([prev, i]);
+    prev = i;
+  }
   while (stack.length > 0) {
     const [a, b] = stack.pop()!;
     const [ax, ay, bx, by] = [pts[a].x, pts[a].y, pts[b].x, pts[b].y];
@@ -770,6 +776,7 @@ export class Radar {
   /** 不封閉的線（縣市交界），只畫虛線、不填色 */
   private outlineLines: Array<Array<{ bearing: number; distanceKm: number }>> = [];
   private readonly outlineLayer: SVGGElement;
+  private readonly seaLayer: SVGGElement;
   private streets: RadarStreets | null = null;
   /** 道路從算的那一點（main.ts 的錨點）到正中間的位移（公里，東、北）：拖曳時不重算道路，只移過去 */
   private streetShift: [number, number] = [0, 0];
@@ -918,6 +925,8 @@ export class Radar {
         <line x1="${C}" y1="${C - R}" x2="${C}" y2="${C + R}" />
         <line x1="${C - R}" y1="${C}" x2="${C + R}" y2="${C}" />
       </g>
+      <!-- 全螢幕塗的海（v1.757）：在道路、河湖下面 -->
+      <g class="sea" clip-path="url(#rg-clip)"></g>
       <g class="streets" clip-path="url(#rg-clip)"><g></g></g>
       <g class="park" clip-path="url(#rg-clip)"></g>
       <g class="scale-labels"></g>
@@ -947,6 +956,7 @@ export class Radar {
       if (id) this.onRoute?.(id);
     });
     this.outlineLayer = this.svg.querySelector('.outline') as SVGGElement;
+    this.seaLayer = this.svg.querySelector('.sea') as SVGGElement;
     this.spaceLayer = this.svg.querySelector('.space') as SVGGElement;
     // 裡面再一層：拖曳時平移這一層，裁切的圓（外面那層）不跟著動
     this.streetLayer = this.svg.querySelector('.streets > g') as SVGGElement;
@@ -1926,15 +1936,20 @@ export class Radar {
     this.draw();
   }
 
-  /** 海岸線、縣市交界（範圍比 16 km 大時），畫成淡淡的虛線；fills 是拉遠時塗淡淡底色的國家（有畫地圖的）；空陣列就不畫 */
+  /**
+   * 海岸線、縣市交界（範圍比 16 km 大時），畫成淡淡的虛線；fills 是拉遠時塗淡淡底色的國家（有畫地圖的）；
+   * sea 是全螢幕塗海的形狀（一大塊圓和陸地，evenodd 挖掉陸地）；空陣列就不畫
+   */
   setOutline(
     rings: Array<Array<{ bearing: number; distanceKm: number }>>,
     lines: Array<Array<{ bearing: number; distanceKm: number }>> = [],
     fills: Array<Array<{ bearing: number; distanceKm: number }>> = [],
+    sea: Array<Array<{ bearing: number; distanceKm: number; fixed?: boolean }>> = [],
   ): void {
     this.outline = rings;
     this.outlineLines = lines;
     this.outlineFills = fills;
+    this.outlineSea = sea;
     this.outlineShift = [0, 0];
     this.draw();
   }
@@ -1946,6 +1961,7 @@ export class Radar {
   }
   private outlineShift: [number, number] = [0, 0];
   private outlineFills: Array<Array<{ bearing: number; distanceKm: number }>> = [];
+  private outlineSea: Array<Array<{ bearing: number; distanceKm: number; fixed?: boolean }>> = [];
   /** 上次畫輪廓用的資料和比例：一樣的話只平移 */
   private outlineBuilt: { rings: unknown; lines: unknown; fills: unknown; k: number; heading: number; unit: number; space: boolean } | null = null;
 
@@ -2782,6 +2798,7 @@ export class Radar {
   private drawOutline(): void {
     const k = (R - 8) / this.scaleKm;
     const unit = this.squarePx > 0 ? SIZE / this.squarePx : 1;
+    const seaK = this.drawSea(k, unit);
     const b = this.outlineBuilt;
     // 資料、比例、方向都沒變（拖曳中只有位移）：不重畫，裡面那層平移（裁切的圓不動）
     if (!(b && b.rings === this.outline && b.lines === this.outlineLines && b.fills === this.outlineFills && b.k === k && b.heading === this.heading && b.unit === unit && b.space === this.inSpace)) {
@@ -2804,15 +2821,52 @@ export class Radar {
       if (d.trim()) inner.appendChild(el('path', { class: 'region-outline open county-line', d }));
       this.outlineLayer.appendChild(inner);
     }
-    const inner = this.outlineLayer.firstElementChild;
-    if (!inner || this.inSpace) return;
+    if (this.inSpace) return;
     const [sx, sy] = this.outlineShift;
-    if (sx === 0 && sy === 0) inner.removeAttribute('transform');
-    else {
-      const h = (this.heading * Math.PI) / 180;
-      const [cos, sin] = [Math.cos(h), Math.sin(h)];
-      inner.setAttribute('transform', `translate(${(-k * (sx * cos - sy * sin)).toFixed(2)} ${(k * (sy * cos + sx * sin)).toFixed(2)})`);
+    const h = (this.heading * Math.PI) / 180;
+    const [cos, sin] = [Math.cos(h), Math.sin(h)];
+    const move = sx === 0 && sy === 0 ? '' : `translate(${(-k * (sx * cos - sy * sin)).toFixed(2)} ${(k * (sy * cos + sx * sin)).toFixed(2)})`;
+    const inner = this.outlineLayer.firstElementChild;
+    if (inner && move) inner.setAttribute('transform', move);
+    else inner?.removeAttribute('transform');
+    // 海是照 seaK 的比例畫的：縮放中整層放大縮小（以正中間為準），再平移
+    const seaInner = this.seaLayer.firstElementChild;
+    const zoom = seaK && seaK !== k ? `translate(${C} ${C}) scale(${(k / seaK).toFixed(5)}) translate(${-C} ${-C})` : '';
+    if (seaInner && (move || zoom)) seaInner.setAttribute('transform', `${move} ${zoom}`.trim());
+    else seaInner?.removeAttribute('transform');
+  }
+
+  /** 上次畫海用的資料、方向、像素大小、比例 */
+  private seaBuilt: { sea: unknown; heading: number; unit: number; k: number } | null = null;
+  private seaTimer = 0;
+  /**
+   * 海（全螢幕拉遠，v1.757）：整個合成一條 path（evenodd 挖掉陸地），簡化得跟海岸線一樣（4 像素），邊才對得上虛線。
+   * 縮放中每一格重算幾千點太慢：只有比例變的時候不重畫、整層縮放（drawOutline），停下來 0.2 秒再照新的比例重畫。回傳畫的時候的比例
+   */
+  private drawSea(k: number, unit: number): number {
+    const b = this.seaBuilt;
+    if (this.inSpace || this.outlineSea.length === 0) {
+      window.clearTimeout(this.seaTimer);
+      this.seaBuilt = null;
+      if (this.seaLayer.firstChild) this.seaLayer.replaceChildren();
+      return 0;
     }
+    if (b && b.sea === this.outlineSea && b.heading === this.heading && b.unit === unit) {
+      if (b.k !== k) {
+        window.clearTimeout(this.seaTimer);
+        this.seaTimer = window.setTimeout(() => {
+          this.seaBuilt = null;
+          this.drawOutline();
+        }, 200);
+      }
+      return b.k;
+    }
+    window.clearTimeout(this.seaTimer);
+    this.seaBuilt = { sea: this.outlineSea, heading: this.heading, unit, k };
+    this.seaLayer.replaceChildren();
+    const d = this.outlineSea.map((r) => this.fillPath(r, 4)).join('');
+    if (d) this.seaLayer.appendChild(el('g')).appendChild(el('path', { d }));
+    return k;
   }
 
   /**
@@ -2864,13 +2918,14 @@ export class Radar {
     return broken || open ? { d: parts.join(' '), closed: false } : { d: `${parts.join(' ')} Z`, closed: true };
   }
 
-  /** 塗底色的一個形狀：每一點都換算（不斷開，畫面外的被裁掉），畫面上太細的彎折拉直 */
-  private fillPath(ring: Array<{ bearing: number; distanceKm: number }>): string {
+  /** 塗底色的一個形狀：每一點都換算（不斷開，畫面外的被裁掉），畫面上偏差不到 tolPx 像素的彎折拉直（fixed 的點留著） */
+  private fillPath(ring: Array<{ bearing: number; distanceKm: number; fixed?: boolean }>, tolPx = 2): string {
     if (ring.length < 3) return '';
     const unit = this.squarePx > 0 ? SIZE / this.squarePx : 1;
     const pts = simplifyPts(
       ring.map((pt) => polar(pt.bearing - this.heading, this.ratio(pt.distanceKm) * (R - 8))),
-      2 * unit,
+      tolPx * unit,
+      ring.some((pt) => pt.fixed) ? Uint8Array.from(ring, (pt) => (pt.fixed ? 1 : 0)) : undefined,
     );
     if (pts.length < 3) return '';
     return `${pts.map((p, i) => `${i === 0 ? 'M' : 'L'}${p.x.toFixed(1)} ${p.y.toFixed(1)}`).join('')}Z`;

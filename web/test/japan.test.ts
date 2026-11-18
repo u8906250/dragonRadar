@@ -18,10 +18,10 @@ describe('japan', () => {
     expect(REGION_MAP.near.map(([n]) => n)).toEqual(expect.arrayContaining(['東京', '大阪', '橫濱', '札幌', '仙台', '那霸', '津市']));
     for (const [name, lat, lng] of [...REGION_MAP.far, ...REGION_MAP.near]) expect(onLand(lat, lng), name).toBe(true);
   });
-  it('draws the Lake Biwa shore as open lines and the prefecture borders', () => {
-    expect(REGION_MAP.coast).toHaveLength(2);
+  it('draws the Lake Biwa shore as one closed ring (water when the sea is painted) and the prefecture borders', () => {
+    expect(REGION_MAP.coast).toHaveLength(1);
     for (const line of REGION_MAP.coast) {
-      expect(line[0]).not.toEqual(line[line.length - 1]);
+      expect(line[0]).toEqual(line[line.length - 1]);
       for (const [lat, lng] of line) {
         expect(lat).toBeGreaterThan(34.9);
         expect(lat).toBeLessThan(35.6);

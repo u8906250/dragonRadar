@@ -9,6 +9,7 @@ import json, sys
 sys.path.insert(0, 'geo-lib')
 from shapely.geometry import Polygon, MultiPolygon, LineString, MultiLineString, Point, box, shape
 from shapely.ops import unary_union, linemerge, polylabel
+from shapely.validation import make_valid
 
 def topo(path):
     d = json.load(open(path))
@@ -63,29 +64,15 @@ for f in json.load(open('ne/ne_10m_lakes.geojson'))['features'] + json.load(open
 lake = unary_union(lakes)
 dry = land.difference(lake)
 
-# 海岸線、湖岸：約 1 km² 以下的小島不畫，簡化到約 400 m，切到那一塊裡面（外面的點斷開）
+# 海岸線、湖岸：約 1 km² 以下的小島不畫，簡化到約 400 m，切到那一塊裡面：封閉的形狀（切開的地方沿著那一塊的邊走，
+# 湖是挖空的圈；雷達塗海用，畫海岸線時邊上那幾段不畫）
 coast = []
 for p in parts(dry):
     if not p.intersects(AREA) or p.area < 1e-4: continue
-    q = p.simplify(0.0036, preserve_topology=False)
-    for poly in parts(q):
-        if poly.is_empty: continue
-        # 整圈的雷達會當成島塗淡淡的底色：湖岸（陸地裡的洞）和弗萊福蘭（圍海造的地，四周是湖；約 450 km² 以上的只有它）
-        # 分成兩半、不接成一圈，跟旁邊的陸地一樣不塗；瓦登群島這些真的島照舊
-        halves = lambda c: [c[:len(c) // 2 + 1], c[len(c) // 2:]]
-        ext = list(poly.exterior.coords)
-        rings = halves(ext) if poly.area > 0.06 else [ext]
-        for r in poly.interiors:
-            rings += halves(list(r.coords))
-        for r in rings:
-            cur = []
-            for (x, y) in r:
-                if W <= x <= E and S <= y <= N:
-                    cur.append((y, x))
-                else:
-                    if len(cur) >= 2: coast.append(cur)
-                    cur = []
-            if len(cur) >= 2: coast.append(cur)
+    for poly in parts(make_valid(p.simplify(0.0036, preserve_topology=False)).intersection(AREA)):
+        if poly.geom_type != 'Polygon' or poly.is_empty: continue
+        for r in [poly.exterior, *poly.interiors]:
+            coast.append([(y, x) for (x, y) in r.coords])
 print('coast lines', len(coast), 'points', sum(len(l) for l in coast))
 
 # 省界（陸地上的，水上的不畫）＋跟比利時、德國的國界；簡化到約 250 m

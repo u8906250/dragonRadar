@@ -1375,6 +1375,11 @@ export function spaceMarkup(o: SpaceOpts): string {
   // 地球：中心是你、從正上方看、大到看得出形狀，就畫海岸線、經緯線、晝夜（跟光點的位置一致）
   const globe = !view.focus && topDown && o.rg >= TINY_EARTH;
   if (globe) {
+    // 全螢幕塗海（v1.757 使用者說把海的顏色畫出來）：地球的圓挖掉陸地（evenodd），跟雷達拉遠時一樣的淡藍
+    if (RADAR_VIEW.fill) {
+      const r = o.rg;
+      lines += `<path class="earth-sea" d="M${f1(C - r)} ${f1(C)}A${f1(r)} ${f1(r)} 0 1 0 ${f1(C + r)} ${f1(C)}A${f1(r)} ${f1(r)} 0 1 0 ${f1(C - r)} ${f1(C)}Z${landPath(o.center, o.land, r)}" />`;
+    }
     lines += `<path class="space-night" d="${nightPath(o.center, subsolar(o.when), o.rg)}" />`;
     if (o.rg >= 30) lines += `<path class="space-grat" d="${graticule(o.center, o.rg)}" />`;
     if (o.fill?.length) lines += `<path class="country-fill" d="${landPath(o.center, o.fill, o.rg)}" />`;

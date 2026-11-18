@@ -10,6 +10,8 @@ import json, sys
 sys.path.insert(0, 'geo-lib')
 from shapely.geometry import Polygon, LineString, Point, box, shape
 from shapely.ops import unary_union, linemerge, polylabel
+from shapely.validation import make_valid
+from shapely.affinity import translate
 
 def topo(path):
     d = json.load(open(path))
@@ -27,6 +29,14 @@ def topo(path):
             pts = arcs[i] if i >= 0 else arcs[~i][::-1]
             out.extend(pts if not out else pts[1:])
         return out
+    def unwrap(r):
+        out = []; off = 0
+        for i, (x, y) in enumerate(r):
+            d = x - r[i - 1][0] if i else 0
+            if d > 180: off -= 360
+            elif d < -180: off += 360
+            out.append((x + off, y))
+        return out, off
     def geom(g):
         if g['type'] == 'Polygon': polys = [g['arcs']]
         elif g['type'] == 'MultiPolygon': polys = g['arcs']
@@ -34,7 +44,17 @@ def topo(path):
         ps = []
         for p in polys:
             rs = [ring(r) for r in p]
-            if len(rs[0]) >= 4: ps.append(Polygon(rs[0], [r for r in rs[1:] if len(r) >= 4]).buffer(0))
+            if len(rs[0]) < 4: continue
+            # 跨過換日線的（弗蘭格爾島、楚科奇：經度從 180 跳到 -180）攤平成連續的經度、再切回 -180～180，
+            # 不然當平面看是橫跨整個地球的長條（阿拉斯加北邊多一條假的海岸）；繞極地一圈的（南極洲）照舊
+            un = [unwrap(r) for r in rs]
+            if any(off for _, off in un):
+                ps.append(Polygon(rs[0], [r for r in rs[1:] if len(r) >= 4]).buffer(0))
+                continue
+            poly = Polygon(un[0][0], [r for r, _ in un[1:] if len(r) >= 4]).buffer(0)
+            if poly.bounds[0] < -180 or poly.bounds[2] > 180:
+                poly = unary_union([poly.intersection(box(-180, -90, 180, 90)), translate(poly.intersection(box(180, -90, 540, 90)), -360), translate(poly.intersection(box(-540, -90, -180, 90)), 360)])
+            ps.append(poly)
         return unary_union(ps)
     return d, geom
 
@@ -114,27 +134,15 @@ for key, ((S, W, N, E), tol, min_island) in BLOCKS.items():
     lakes = [(n, g) for n, g in all_lakes if g.intersects(AREA) and g.area > 0.032]
     lake = unary_union([g for _, g in lakes]) if lakes else None
     dry = land.difference(lake) if lake else land
-    # 海岸線、湖岸：小島不畫、簡化（照上面每一塊的設定），切到這一塊裡面（外面的點斷開）
+    # 海岸線、湖岸：小島不畫、簡化（照上面每一塊的設定），切到這一塊裡面：封閉的形狀（切開的地方沿著這一塊的邊走，
+    # 湖是挖空的圈；雷達塗海用，畫海岸線時邊上那幾段不畫）
     coast = []
     for p in parts(dry):
         if not p.intersects(AREA) or p.area < min_island: continue
-        for poly in parts(p.simplify(tol, preserve_topology=False)):
-            if poly.is_empty: continue
-            # 整圈的雷達會當成島塗淡淡的底色：大陸、湖岸（陸地裡的洞）分成兩半、不接成一圈；島照舊
-            halves = lambda c: [c[:len(c) // 2 + 1], c[len(c) // 2:]]
-            ext = list(poly.exterior.coords)
-            rings = halves(ext) if poly.area > 5 else [ext]
-            for r in poly.interiors:
-                rings += halves(list(r.coords))
-            for r in rings:
-                cur = []
-                for (x, y) in r:
-                    if W <= x <= E and S <= y <= N:
-                        cur.append((y, x))
-                    else:
-                        if len(cur) >= 2: coast.append(cur)
-                        cur = []
-                if len(cur) >= 2: coast.append(cur)
+        for poly in parts(make_valid(p.simplify(tol, preserve_topology=False)).intersection(AREA)):
+            if poly.geom_type != 'Polygon' or poly.is_empty: continue
+            for r in [poly.exterior, *poly.interiors]:
+                coast.append([(y, x) for (x, y) in r.coords])
     onland = dry.buffer(-0.002)
     lines = []
     for g in (inner_all, border_all):

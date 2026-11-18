@@ -49,13 +49,10 @@ jp = [gc(g) for g in dc['objects']['countries']['geometries'] if g.get('id') == 
 dl, gl = topo('ne/land-10m.json')
 land = unary_union([gl(g) for g in dl['objects']['land']['geometries']]).intersection(AREA.buffer(0.5))
 
-# 湖：Natural Earth 的陸地把湖算成陸地；日本在 1:10m 的湖只有琵琶湖（約 660 km²）。湖岸分成兩半（整圈的雷達會當成島塗底色）
+# 湖：Natural Earth 的陸地把湖算成陸地；日本在 1:10m 的湖只有琵琶湖（約 660 km²）。湖岸整圈（雷達塗海時當成水面）
 lakes = [shape(f['geometry']) for f in json.load(open('ne/ne_10m_lakes.geojson'))['features'] if f['properties'].get('name') == 'Biwa Ko']
 lake = unary_union(lakes)
-shores = []
-for p in parts(lake.simplify(0.0036, preserve_topology=False)):
-    c = [(y, x) for (x, y) in p.exterior.coords]
-    shores += [c[:len(c) // 2 + 1], c[len(c) // 2:]]
+shores = [[(y, x) for (x, y) in p.exterior.coords] for p in parts(lake.simplify(0.0036, preserve_topology=False))]
 print('lake shores', len(shores), 'points', sum(len(l) for l in shores))
 
 # 都道府縣界（陸地上的，海上、湖上的不畫）；簡化到約 250 m

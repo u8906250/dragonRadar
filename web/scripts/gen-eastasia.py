@@ -7,6 +7,7 @@ import json, sys
 sys.path.insert(0, 'geo-lib')
 from shapely.geometry import Polygon, MultiPolygon, LineString, Point, box
 from shapely.ops import unary_union
+from shapely.validation import make_valid
 
 def topo(path):
     d = json.load(open(path))
@@ -56,18 +57,12 @@ for p in parts:
     if p.area < 1e-4: continue  # 約 1 km² 以下的小島不畫
     q = p.simplify(0.0036, preserve_topology=False)
     if q.is_empty: continue
-    for poly in (q.geoms if hasattr(q, 'geoms') else [q]):
+    # 切到東亞範圍裡：封閉的形狀（切開的地方沿著範圍的邊走；雷達塗海用，畫海岸線時邊上那幾段不畫）
+    cut = make_valid(q).intersection(EA)
+    for poly in (cut.geoms if hasattr(cut, 'geoms') else [cut]):
+        if poly.geom_type != 'Polygon' or poly.is_empty: continue
         for r in [poly.exterior, *poly.interiors]:
-            c = list(r.coords)
-            # 切到東亞範圍裡：在範圍外的點斷開
-            cur = []
-            for (x, y) in c:
-                if W <= x <= E and S <= y <= N:
-                    cur.append((y, x))
-                else:
-                    if len(cur) >= 2: lines.append(cur)
-                    cur = []
-            if len(cur) >= 2: lines.append(cur)
+            lines.append([(y, x) for (x, y) in r.coords])
 for l in lines: npts += len(l)
 print('ea lines', len(lines), 'points', npts)
 

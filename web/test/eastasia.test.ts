@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { chinaMask, eaCoast, EA_BOX } from '../src/eastasia';
+import { cutAtBox } from '../src/geo';
 
 describe('chinaMask', () => {
   it('covers mainland China, coast included', () => {
@@ -30,6 +31,19 @@ describe('chinaMask', () => {
 });
 
 describe('eaCoast', () => {
+  it('is closed land shapes, cut along the box edge where the mainland leaves the box', () => {
+    for (const r of eaCoast) expect(r[0]).toEqual(r[r.length - 1]);
+    const cut = eaCoast.filter((r) => r.some(([lat, lng]) => lat === EA_BOX.s || lat === EA_BOX.n || lng === EA_BOX.w || lng === EA_BOX.e));
+    expect(cut.length).toBeGreaterThan(0);
+    // 畫海岸線時邊上那幾段不畫：切出來的線沒有一段沿著邊走
+    const lines = cutAtBox(eaCoast, EA_BOX);
+    expect(lines.length).toBeGreaterThan(eaCoast.length - cut.length);
+    for (const l of lines) for (let i = 0; i + 1 < l.length; i++) {
+      const [p, q] = [l[i], l[i + 1]];
+      expect(p[1] === EA_BOX.w && q[1] === EA_BOX.w).toBe(false);
+      expect(p[0] === EA_BOX.n && q[0] === EA_BOX.n).toBe(false);
+    }
+  });
   it('decodes into lines inside the East Asia box', () => {
     expect(eaCoast.length).toBeGreaterThan(100);
     for (const l of eaCoast) for (const [lat, lng] of l) {
