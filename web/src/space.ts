@@ -10,6 +10,7 @@ import { nearPark, PARK_MIN_KM, parkGeom, parkSvg, ringArea, scatter } from './p
 import { TAIPEI_MAJOR_ROADS, TAIPEI_MINOR_ROADS, TAIPEI_OUTLINE } from './taipei';
 import { TAIPEI_HILLS } from './taipei-hills';
 import { ZHONGSHAN_PARK } from './zhongshan';
+import { launchNow, standingRocket } from './rocket-art';
 
 const { c: C, inner: INNER, size: SIZE } = RADAR_GEOM;
 const RAD = Math.PI / 180;
@@ -722,15 +723,17 @@ export const bodyRadiusKm = (key: string): number => LOOKS[key]?.km ?? deepRadiu
 /** 從一顆星球看另一顆在太空那一層的哪個方向（從黃道北邊正上方看，順時針、0 是上，度）：火箭飛過去時頭朝這邊 */
 export function bodyBearing(from: string, to: string, when = new Date()): number {
   const pos = bodyPositions(when);
-  const [a, b] = [pos.get(from) ?? [0, 0, 0], pos.get(to) ?? [0, 0, 0]];
+  const [a, b] = [pos.get(from) ?? deepPosition(from, when) ?? [0, 0, 0], pos.get(to) ?? deepPosition(to, when) ?? [0, 0, 0]];
   return Math.atan2(b[0] - a[0], b[1] - a[1]) / RAD;
 }
 
 /**
- * 中心換到這顆時最多放大到多少（雷達外圈幾公里）：剛好看得到整顆；汪星可以放大到 100 公尺看地表（海上的水波），正中間在中山公園附近可以到 0.5 公尺
+ * 中心換到這顆時最多放大到多少（雷達外圈幾公里）：剛好看得到整顆；汪星可以放大到 100 公尺看地表（海上的水波），正中間在中山公園附近可以到 0.5 公尺；
+ * Kepler-22b 可以放大到 100 公尺（第 4 號願望：看得到降落的火箭）
  * （woofMap 是 false：還沒搭火箭過去、看不到地圖，跟別的星球一樣只到整顆）
  */
-export const focusMinKm = (key: string, view?: SpaceView, woofMap = true): number => (key === 'woof' && woofMap ? (view && atPark(view) ? PARK_MIN_KM : WOOF_MIN_KM) : bodyRadiusKm(key) * 1.3);
+export const focusMinKm = (key: string, view?: SpaceView, woofMap = true): number =>
+  key === 'woof' && woofMap ? (view && atPark(view) ? PARK_MIN_KM : WOOF_MIN_KM) : key === 'kepler22b' ? KEPLER_MIN_KM : bodyRadiusKm(key) * 1.3;
 /** 汪星（公園以外）最多拉近到多少：外圈 100 公尺（海上的水波外圈約 500 公尺內才長出來） */
 export const WOOF_MIN_KM = 0.1;
 
@@ -1211,10 +1214,163 @@ function blackHoleMarkup(proj: (p: Vec3) => { x: number; y: number; d: number },
   return `<circle class="space-bh-ring" cx="${f1(c.x)}" cy="${f1(c.y)}" r="${f1(r * 1.15)}" style="stroke-width:${f1(Math.max(2, r * 0.3))}" /><circle class="space-bh" cx="${f1(c.x)}" cy="${f1(c.y)}" r="${f1(r)}" />${labels([{ x: c.x, y: c.y, r: r * 1.35 + 2, cls: 'sgra', name: '人馬座A*', force: true }])}`;
 }
 
+/*
+ * Kepler-22b 的表面（第 4 號願望：根據網路搜尋畫出這個星球的表面，九棚的火箭可以搭過去）：
+ * 半徑約地球的 2.1 倍、質量不到地球的 9.1 倍，在恆星 Kepler-22 的適居帶，平衡溫度約 6°C（溫室效應跟地球差不多的話地表約 22°C）；
+ * 不太可能像地球一樣是岩石的，科學家猜是「水世界」（海洋行星）或小一點的海王星（Wikipedia）。
+ * 照海洋行星畫：整顆幾乎都是深藍的海，零星的火山島、一串串的群島（島邊淺淺的海），兩極小小的冰帽，一條條的雲，邊緣一圈大氣的光；
+ * 島、雲的形狀是固定種子的亂數長出來的（示意，不是真的觀測）。正中間的經緯度跟汪星一樣跟著視角轉（拖曳轉星球）
+ */
+/** 火箭降落的地方：最大的那個島東邊淺海裡的一個小島（約 600 公尺寬），降落時看得到海、沙灘 */
+export const KEPLER_SITE: LatLng = { lat: 11, lng: 24 };
+/** 中心是 Kepler-22b 時最多拉近到多少（雷達外圈幾公里）：看得到降落的火箭 */
+export const KEPLER_MIN_KM = 0.1;
+/** Kepler-22b 正中間的經緯度（跟 woofCenter 一樣跟著視角轉） */
+export const keplerCenter = (view: SpaceView): LatLng => ({ lat: Math.max(-80, Math.min(80, view.pitch / RAD)), lng: norm180(-view.yaw / RAD) });
+/** 讓降落的地方轉到正中間的視角 */
+export const keplerSiteView = (): SpaceView => ({ focus: 'kepler22b', yaw: -KEPLER_SITE.lng * RAD, pitch: KEPLER_SITE.lat * RAD });
+
+/** 固定種子的亂數（mulberry32）：每次長出一樣的島和雲 */
+function seeded(seed: number): () => number {
+  let a = seed >>> 0;
+  return () => {
+    a = (a + 0x6d2b79f5) >>> 0;
+    let t = a;
+    t = Math.imul(t ^ (t >>> 15), t | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+type Blob = { ring: Array<[number, number]>; box: [number, number, number, number] };
+/** 一塊不規則的形狀：中心 (lat, lng)，經度方向半徑 rx、緯度方向 ry（度），邊加幾個起伏；k 倍大的同一個形狀（島邊的淺海） */
+function blob(rand: () => number, lat: number, lng: number, rx: number, ry: number, rough: number, n = 64): (k?: number) => Blob {
+  const waves = [2, 3, 4, 5, 7, 9].map((f) => [f, ((rand() - 0.5) * 2 * rough) / Math.sqrt(f), rand() * 2 * Math.PI]);
+  return (k = 1) => {
+    const ring: Array<[number, number]> = [];
+    for (let i = 0; i <= n; i++) {
+      const t = (2 * Math.PI * (i % n)) / n;
+      const m = Math.max(0.35, 1 + waves.reduce((sum, [f, a, ph]) => sum + a * Math.sin(f * t + ph), 0));
+      ring.push([lat + ry * k * m * Math.sin(t), lng + (rx * k * m * Math.cos(t)) / Math.cos(lat * RAD)]);
+    }
+    const lats = ring.map(([a]) => a);
+    const lngs = ring.map(([, b]) => b);
+    return { ring, box: [Math.min(...lats), Math.min(...lngs), Math.max(...lats), Math.max(...lngs)] };
+  };
+}
+const KEPLER_SURFACE = (() => {
+  const rand = seeded(22);
+  const isles: Array<(k?: number) => Blob> = [];
+  const placed: Array<[number, number, number]> = [];
+  /** 兩個島的中心離多遠（度，球面） */
+  const apart = (a: [number, number], b: [number, number]): number =>
+    Math.acos(Math.min(1, Math.sin(a[0] * RAD) * Math.sin(b[0] * RAD) + Math.cos(a[0] * RAD) * Math.cos(b[0] * RAD) * Math.cos((a[1] - b[1]) * RAD))) / RAD;
+  const tryPlace = (lat: number, lng: number, r: number, rough: number): boolean => {
+    if (placed.some(([a, b, rr]) => apart([lat, lng], [a, b]) < r + rr + 0.6)) return false;
+    placed.push([lat, lng, r]);
+    isles.push(blob(rand, lat, lng, r, r, rough));
+    return true;
+  };
+  // 最大的島（約 1,400 km 寬），降落的小島在它東邊的淺海裡
+  tryPlace(KEPLER_SITE.lat, KEPLER_SITE.lng - 3.8, 3, 0.22);
+  isles.push(blob(rand, KEPLER_SITE.lat, KEPLER_SITE.lng, 0.0013, 0.0013, 0.25, 48));
+  placed.push([KEPLER_SITE.lat, KEPLER_SITE.lng, 0.3]);
+  // 幾個中型、很多小的火山島（緯度 ±58 度內，不跨過背面的接縫）
+  for (const [count, r0, r1] of [[3, 1.2, 2.2], [14, 0.35, 1]] as const) {
+    for (let made = 0, tries = 0; made < count && tries < 400; tries++) {
+      const lat = (rand() - 0.5) * 116;
+      const lng = (rand() - 0.5) * 340;
+      if (tryPlace(lat, lng, r0 + rand() * (r1 - r0), 0.3)) made++;
+    }
+  }
+  // 群島：一串小島沿著一條弧排
+  for (let arc = 0; arc < 4; arc++) {
+    let [lat, lng] = [(rand() - 0.5) * 100, (rand() - 0.5) * 320];
+    const dir = rand() * 2 * Math.PI;
+    const bend = (rand() - 0.5) * 0.3;
+    for (let i = 0, a = dir; i < 7; i++, a += bend) {
+      tryPlace(lat, lng, 0.12 + rand() * 0.22, 0.35);
+      lat += 0.9 * Math.sin(a);
+      lng += (0.9 * Math.cos(a)) / Math.cos(lat * RAD);
+    }
+  }
+  // 冰帽：繞著極點的一圈（經過極點接起來，平面上也包得住極點），北邊小一點
+  const cap = (north: boolean): Blob => {
+    const ring: Array<[number, number]> = [];
+    const ph = [rand(), rand(), rand()].map((v) => v * 2 * Math.PI);
+    for (let i = 0; i <= 72; i++) {
+      const lng = -180 + i * 5;
+      const wob = 2.2 * Math.sin(3 * lng * RAD + ph[0]) + 1.4 * Math.sin(5 * lng * RAD + ph[1]) + 0.8 * Math.sin(9 * lng * RAD + ph[2]);
+      ring.push([north ? 78 + wob : -75 + wob, lng]);
+    }
+    const pole = north ? 90 : -90;
+    ring.push([pole, 180], [pole, -180], ring[0]);
+    // hemiPath 要陸地（冰）在左手邊：北極往東走、冰在北邊（左手邊）；南極的冰在南邊，要反過來走
+    return { ring: north ? ring : ring.reverse(), box: north ? [70, -180, 90, 180] : [-90, -180, -70, 180] };
+  };
+  // 雲：一條條沿著緯度拉長的（海洋行星的雲多），兩個比較圓的大氣旋
+  const clouds: Blob[] = [];
+  for (let i = 0; i < 26; i++) {
+    const lat = (rand() - 0.5) * 140;
+    clouds.push(blob(rand, lat, (rand() - 0.5) * 320, 4 + rand() * 9, 0.8 + rand() * 1.8, 0.35, 40)());
+  }
+  for (let i = 0; i < 2; i++) clouds.push(blob(rand, (i ? -1 : 1) * (18 + rand() * 12), (rand() - 0.5) * 300, 4.5, 4.5, 0.25, 48)());
+  return { isles: isles.map((f) => ({ land: f(), shallow: f(1.45) })), ice: [cap(true), cap(false)], clouds };
+})();
+
+/**
+ * Kepler-22b 畫成球（中心是它、大到看得出形狀）：深藍的海、島邊的淺海、島、冰帽、雲、夜晚那一半、邊緣一圈大氣；
+ * 九棚的火箭飛過來了就站在降落的島上（拉近才看得到，太小的時候畫一個小圓點標出來）。x、y 是星球中心，r 是半徑，toStar 是恆星的方向（看的人的座標）
+ */
+function keplerGlobe(x: number, y: number, r: number, view: SpaceView, toStar: Vec3): string {
+  const center = keplerCenter(view);
+  const near = nearOf(center, r);
+  const [ox, oy] = [x - C, y - C];
+  const [bx0, by0, bx1, by1] = viewRect(20);
+  const box: [number, number, number, number] = [bx0 - ox, by0 - oy, bx1 - ox, by1 - oy];
+  const shows = (b: Blob): boolean => !near || (b.box[2] >= near.lat0 && b.box[0] <= near.lat1 && b.box[3] >= near.lng0 && b.box[1] <= near.lng1);
+  const fill = (list: Blob[]): string =>
+    list
+      .filter(shows)
+      .map((b) => hemiPath(center, b.ring, r, center.lat >= b.box[0] && center.lat <= b.box[2] && center.lng >= b.box[1] && center.lng <= b.box[3] && inRing(center.lat, center.lng, b.ring), near))
+      .join('');
+  // 海：放大很多時星球比畫面大上千倍，雷達整個在球上就用畫面的範圍（太大的圓瀏覽器畫不準）
+  const disc =
+    r - Math.hypot(ox, oy) > viewReach() + 40
+      ? `M${f1(box[0])} ${f1(box[1])}H${f1(box[2])}V${f1(box[3])}H${f1(box[0])}Z`
+      : `M${f1(C - r)} ${f1(C)}A${f1(r)} ${f1(r)} 0 1 0 ${f1(C + r)} ${f1(C)}A${f1(r)} ${f1(r)} 0 1 0 ${f1(C - r)} ${f1(C)}Z`;
+  let out = `<path class="kep-ocean" d="${disc}" />`;
+  const shallow = fill(KEPLER_SURFACE.isles.map((i) => i.shallow));
+  if (shallow) out += `<path class="kep-shallow" d="${shallow}" />`;
+  const land = fill(KEPLER_SURFACE.isles.map((i) => i.land));
+  if (land) out += `<path class="kep-land" d="${land}" />`;
+  const ice = fill(KEPLER_SURFACE.ice);
+  if (ice) out += `<path class="kep-ice" d="${ice}" />`;
+  // 降落的地方：一塊圓的水泥地（直徑 40 公尺）、火箭（約 20 公尺，跟九棚的一樣）
+  const ppm = r / (KEPLER22.planetKm * 1000);
+  const [sx, sy, sz] = ortho(center, KEPLER_SITE.lat, KEPLER_SITE.lng);
+  const rocket = launchNow();
+  if (sz > 0) {
+    const [px, py] = [C + r * sx, C - r * sy];
+    if (20 * ppm >= 0.6) out += `<ellipse class="kep-pad" cx="${f1(px)}" cy="${f1(py)}" rx="${f1(20 * ppm)}" ry="${f1(20 * ppm * sz)}" />`;
+    // 火箭在這裡：太小看不到時畫一個小圓點（拉近到這裡才看得到火箭）
+    if (rocket.where === 'kepler22b' && rocket.phase !== 'away') out += 20 * ppm >= 2 ? standingRocket(px, py, ppm, 20, rocket.phase, rocket.e) : `<circle class="kep-site" cx="${f1(px)}" cy="${f1(py)}" r="2.6" />`;
+  }
+  // 雲：拉近到雷達外圈約 50 km 內就不畫（在雲底下了，看得到火箭、小島）
+  if (r / KEPLER22.planetKm < 3) {
+    const clouds = fill(KEPLER_SURFACE.clouds);
+    if (clouds) out += `<path class="kep-cloud" d="${clouds}" />`;
+  }
+  const n = Math.hypot(...toStar) || 1;
+  out += `<path class="space-night" d="${nightFrom([toStar[0] / n, toStar[1] / n, toStar[2] / n], r)}" />`;
+  // 邊緣一圈大氣（整顆看得到時）
+  if (r < viewReach() * 3) out += `<circle class="kep-air" cx="${C}" cy="${C}" r="${f1(r)}" style="stroke-width:${f1(Math.max(1.5, r * 0.035))}" />`;
+  return `<g class="space-globe kep-globe" transform="translate(${f1(ox)} ${f1(oy)})">${out}</g>`;
+}
+
 /**
  * 中心是 Kepler-22b、拉近到太陽系的大小以內：恆星 Kepler-22（像太陽一樣有光芒）、軌道（虛線）、行星照真實大小（太小就畫最小的大小，背對恆星那一半變暗）
  */
-function keplerSystemMarkup(proj: (p: Vec3) => { x: number; y: number; d: number }, k: number, inView: (x: number, y: number, r?: number) => boolean, when: Date): string {
+function keplerSystemMarkup(proj: (p: Vec3) => { x: number; y: number; d: number }, k: number, inView: (x: number, y: number, r?: number) => boolean, when: Date, view: SpaceView): string {
   const { star, u, w } = keplerOrbit();
   const a = KEPLER22.aAu * AU_KM;
   let out = '';
@@ -1233,7 +1389,8 @@ function keplerSystemMarkup(proj: (p: Vec3) => { x: number; y: number; d: number
   const named: Body[] = [];
   const draw = [
     { key: 'kepler22', q: sq, r: sr, svg: bodySvg('sun', sq.x, sq.y, sr, null), name: 'Kepler-22', lr: sr + 5 },
-    { key: 'kepler22b', q: pq, r: pr, svg: bodySvg('kepler22b', pq.x, pq.y, pr, sq), name: 'Kepler-22b', lr: pr },
+    // 大到看得出形狀（半徑 12 個單位以上）就畫成球（第 4 號願望：島、雲、冰帽，火箭降落的地方）
+    { key: 'kepler22b', q: pq, r: pr, svg: pr >= 12 ? keplerGlobe(pq.x, pq.y, pr, view, [(sq.x - pq.x) / k, (pq.y - sq.y) / k, sq.d - pq.d]) : bodySvg('kepler22b', pq.x, pq.y, pr, sq), name: 'Kepler-22b', lr: pr },
   ].sort((x, y) => x.q.d - y.q.d);
   for (const b of draw) {
     if (!inView(b.q.x, b.q.y, b.r)) continue;
@@ -1339,7 +1496,7 @@ export function spaceMarkup(o: SpaceOpts): string {
   // 中心可以是太陽系外面的 Kepler-22b、星系（第 2 號願望）
   const F0 = (view.focus && (pos.get(view.focus) ?? deepPosition(view.focus, o.when))) || ([0, 0, 0] as Vec3);
   // 鏡頭從中心那一顆往 toward 移了 u（火箭飛行）
-  const T = view.toward ? pos.get(view.toward) : undefined;
+  const T = view.toward ? (pos.get(view.toward) ?? deepPosition(view.toward, o.when)) : undefined;
   const u = T ? (view.u ?? 0) : 0;
   const F: Vec3 = T ? [F0[0] + (T[0] - F0[0]) * u, F0[1] + (T[1] - F0[1]) * u, F0[2] + (T[2] - F0[2]) * u] : F0;
   const [cy, sy, cp, sp] = [Math.cos(view.yaw), Math.sin(view.yaw), Math.cos(view.pitch), Math.sin(view.pitch)];
@@ -1360,7 +1517,7 @@ export function spaceMarkup(o: SpaceOpts): string {
     RADAR_VIEW.fill ? Math.abs(x - C) - r <= RADAR_VIEW.hx && Math.abs(y - C) - r <= RADAR_VIEW.hy : Math.hypot(x - C, y - C) - r <= INNER;
   const radius = (key: string): number => Math.max(LOOKS[key].min, LOOKS[key].km * k);
   // 中心是 Kepler-22b、拉近到恆星系的大小：恆星、軌道、行星
-  if (view.focus === 'kepler22b' && o.scaleKm <= DEEP_FROM_KM) return keplerSystemMarkup(proj, k, inView, o.when);
+  if (view.focus === 'kepler22b' && o.scaleKm <= DEEP_FROM_KM) return keplerSystemMarkup(proj, k, inView, o.when, view);
   // 中心是銀河系裡面的恆星、人馬座A*，拉近到太陽系的大小（v1.638）
   const star = STARS.find((s) => s.key === view.focus);
   if (star && o.scaleKm <= DEEP_FROM_KM) return starSystemMarkup(star, proj, k, inView, o.when);

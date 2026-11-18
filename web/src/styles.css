@@ -1863,6 +1863,21 @@ path.map-seam-walkers { --p: 15px; }
 .radar .launch-mast-dot { fill: #5f646c; }
 .radar .launch-mast .mast-body { fill: #b8bcc2; fill-opacity: 0.85; stroke: #5f646c; stroke-width: 0.5; stroke-linejoin: round; vector-effect: non-scaling-stroke; }
 .radar .launch-mast .mast-rod { fill: none; stroke: #5f646c; stroke-width: 0.6; vector-effect: non-scaling-stroke; }
+/* 九棚的火箭（第 4 號願望：點了可以搭到 Kepler-22b，再點飛回來）：停著的點得到；降落（land）跟國館的火箭一樣從上面降下來，但不降進井裡 */
+.radar .launch-rocket { pointer-events: none; }
+.radar .launch-hit { fill: transparent; pointer-events: all; cursor: pointer; }
+.radar .land .rocket-fly { animation: arrive-fly 5.5s linear var(--t) both; }
+.radar .land .rocket-flame { animation: arrive-flame 5.5s linear var(--t) both; }
+.radar .land .rocket-smoke circle { animation: arrive-smoke 5.5s ease-out calc(var(--t) + var(--d, 0ms)) both; }
+/* Kepler-22b 的表面（第 4 號願望，space.ts 的 keplerGlobe）：海洋行星，深藍的海、島邊的淺海、火山島（岸邊一圈沙）、冰帽、雲、邊緣一圈大氣 */
+.radar .kep-ocean { fill: #1f5d99; stroke: none; }
+.radar .kep-shallow { fill: #3f9fc0; fill-opacity: 0.85; stroke: none; }
+.radar .kep-land { fill: #5f7f43; stroke: #d9c79a; stroke-width: 0.8; stroke-linejoin: round; }
+.radar .kep-ice { fill: #eef6fb; fill-opacity: 0.95; stroke: none; }
+.radar .kep-cloud { fill: #fff; fill-opacity: 0.55; stroke: none; }
+.radar .kep-air { fill: none; stroke: #9fd8ff; stroke-opacity: 0.45; }
+.radar .kep-pad { fill: #b8b4ab; stroke: #8f8a80; stroke-width: 0.5; }
+.radar .kep-site { fill: #d6303a; stroke: #fff; stroke-width: 0.8; }
 .radar .park-launch { pointer-events: none; }
 .radar .park-launch .rocket-hit { fill: transparent; pointer-events: all; cursor: pointer; }
 .radar .launch-shaft { fill: #121212; }

@@ -1,8 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import { DEEP_FROM_KM, fmtKm, globeFrac, LY_KM, RADAR_GEOM, RADAR_VIEW, SPACE_FROM_KM, viewReach, viewRect } from '../src/radar';
 import { PARK_MIN_KM } from '../src/park';
+import { departLaunch, landLaunch, launchNow, resetLaunch, ARRIVE_MS, DEPART_MS } from '../src/rocket-art';
 import type { StreetLine } from '../src/streets';
-import { atPark, bodyRadiusKm, eclDir, focusMinKm, GALAXIES, isDeepBody, KEPLER22, keplerPlanet, fromWoof, graticule, hemiPath, nearOf, WOOF_HILLS, WOOF_KM, landPath, moonPosition, nightPath, onWoofLand, ortho, planetPositions, spaceMarkup, subsolar, toWoof } from '../src/space';
+import { atPark, bodyBearing, bodyRadiusKm, eclDir, focusMinKm, GALAXIES, isDeepBody, KEPLER22, KEPLER_MIN_KM, KEPLER_SITE, keplerCenter, keplerPlanet, keplerSiteView, fromWoof, graticule, hemiPath, nearOf, WOOF_HILLS, WOOF_KM, landPath, moonPosition, nightPath, onWoofLand, ortho, planetPositions, spaceMarkup, subsolar, toWoof } from '../src/space';
 import { TAIPEI_OUTLINE } from '../src/taipei';
 import { TAIPEI_HILLS } from '../src/taipei-hills';
 
@@ -166,7 +167,8 @@ describe('太陽系外面（第 1 號願望：Kepler-22b、其他星系）', () 
     expect(deep(4e6, 0.9)).toContain('data-body="m31"');
     for (const key of ['kepler22b', 'milkyway', 'm31', 'lmc']) expect(isDeepBody(key)).toBe(true);
     expect(isDeepBody('mars')).toBe(false);
-    expect(focusMinKm('kepler22b')).toBeCloseTo(KEPLER22.planetKm * 1.3, 0);
+    // 第 4 號願望起 Kepler-22b 可以拉近到地表（看得到降落的火箭）
+    expect(focusMinKm('kepler22b')).toBe(KEPLER_MIN_KM);
     expect(bodyRadiusKm('m31')).toBeCloseTo(76_000 * LY_KM, -10);
   });
   it('shows the star, the orbit and the planet when centred on Kepler-22b', () => {
@@ -723,5 +725,37 @@ describe('汪星的海（漂流瓶漂過去的地方，worker/src/woofsea.ts）'
         expect(onWoofLand(lat + (300 * Math.cos(a)) / perDeg, lng + (300 * Math.sin(a)) / (perDeg * Math.cos((lat * Math.PI) / 180)))).toBe(false);
       }
     }
+  });
+});
+
+describe('Kepler-22b 的表面、九棚的火箭（第 4 號願望）', () => {
+  const opts = { center: { lat: 25.04, lng: 121.52 }, land: [] as Array<Array<[number, number]>>, when: new Date('2026-11-18T08:00:00Z') };
+  const at = (scaleKm: number, view = keplerSiteView()): string => spaceMarkup({ ...opts, scaleKm, rg: 164 * globeFrac(scaleKm), view });
+  it('draws an ocean world with islands, ice caps and clouds once it is big enough', () => {
+    const globe = at(40_000, { focus: 'kepler22b', yaw: 0, pitch: 0 });
+    for (const cls of ['kep-ocean', 'kep-shallow', 'kep-land', 'kep-cloud', 'kep-air', 'space-night']) expect(globe, cls).toContain(cls);
+    // 從北極上面看得到北邊的冰帽
+    expect(at(40_000, { focus: 'kepler22b', yaw: 0, pitch: 80 * (Math.PI / 180) })).toContain('kep-ice');
+    // 很遠的時候照舊是一個點
+    expect(at(4e8, { focus: 'kepler22b', yaw: 0, pitch: 0 })).not.toContain('kep-ocean');
+  });
+  it('turns the landing island to the centre and shows the rocket only after it flies there', () => {
+    expect(keplerCenter(keplerSiteView()).lat).toBeCloseTo(KEPLER_SITE.lat, 6);
+    expect(keplerCenter(keplerSiteView()).lng).toBeCloseTo(KEPLER_SITE.lng, 6);
+    resetLaunch();
+    expect(at(0.3)).toContain('kep-pad');
+    expect(at(0.3)).not.toContain('launch-rocket');
+    const t0 = 1_000_000;
+    expect(departLaunch(t0)).toBe('kepler22b');
+    expect(launchNow(t0 + DEPART_MS + 1).phase).toBe('away');
+    landLaunch('kepler22b', t0 + 20_000);
+    expect(launchNow(t0 + 20_000 + ARRIVE_MS + 1)).toMatchObject({ where: 'kepler22b', phase: 'parked' });
+    resetLaunch();
+  });
+  it('points the trip rocket and the camera at Kepler-22b, outside the solar system', () => {
+    expect(Number.isFinite(bodyBearing('earth', 'kepler22b'))).toBe(true);
+    // 鏡頭從地球移到 Kepler-22b 一半：兩邊都看得到
+    const mid = spaceMarkup({ ...opts, scaleKm: 900 * LY_KM, rg: 0, view: { focus: null, yaw: 0, pitch: 0, toward: 'kepler22b', u: 0.5 } });
+    expect(mid).toContain('data-body="kepler22b"');
   });
 });

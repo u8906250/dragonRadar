@@ -492,7 +492,7 @@ const WHEEL_TAU_MS = 60;
 const WHEEL_MAX = 1.5;
 const WHEEL_DONE_MS = 200;
 /** 點在這些東西上是點它（選光點、飛到星球…），不算點兩下放大 */
-const TAP_TARGETS = '.blip, .landmark, .bottle, .dog-hit, .rocket-hit, .park-statue, .space-hit, .route-mark-hit, [role="button"]';
+const TAP_TARGETS = '.blip, .landmark, .bottle, .dog-hit, .rocket-hit, .launch-hit, .park-statue, .space-hit, .route-mark-hit, [role="button"]';
 
 export interface RadarStyle {
   sweep: SweepStyle;
@@ -795,6 +795,8 @@ export class Radar {
   /** 點了中山公園的銅像、停著的火箭（地球或汪星，拉近到畫出來時才點得到）：哪個世界的 */
   onStatue: ((world: 'earth' | 'woof') => void) | null = null;
   onRocket: ((world: 'earth' | 'woof') => void) | null = null;
+  /** 點了九棚（或已經飛到 Kepler-22b）停著的火箭（第 4 號願望） */
+  onLaunch: (() => void) | null = null;
   /** 點了汪星的狗（拉近到畫出整隻時才點得到）：哪一隻（data-dog） */
   onDog: ((id: string) => void) | null = null;
   /** 火箭飛行中畫在正中間的那一層（不跟著指北針轉） */
@@ -1013,6 +1015,7 @@ export class Radar {
       const t = e.target as Element;
       const dog = t.closest('.dog-hit') ? (t.closest('.woof-dog') as SVGGElement | null)?.dataset.dog : undefined;
       if (dog) this.onDog?.(dog);
+      else if (t.closest('.launch-hit')) this.onLaunch?.();
       else if (t.closest('.rocket-hit')) this.onRocket?.(world);
       else if (t.closest('.park-statue')) this.onStatue?.(world);
       else return false;
@@ -1860,7 +1863,8 @@ export class Radar {
 
   /** 起飛中的火箭在雷達上的位置和大小（底、每公尺幾像素，SVG 座標）：小火箭從這裡接手；沒畫出來是 null */
   rocketAt(): TripAt | null {
-    const el = this.svg.querySelector('.park-launch .rocket-fly') as SVGGraphicsElement | null;
+    // 中山公園的、九棚（或 Kepler-22b 上）的火箭：正在點火的那一個
+    const el = this.svg.querySelector('.park-launch .rocket-fly, .launch-rocket.depart .rocket-fly') as SVGGraphicsElement | null;
     const a = el?.getScreenCTM();
     const b = this.screenCTM();
     if (!a || !b) return null;

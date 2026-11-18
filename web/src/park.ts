@@ -11,7 +11,8 @@ import { MIN_HALF, widthRing, withWidths } from './zhongshan-widths';
 import { MALTESE, dogHeight } from './dog';
 import { animateDogs, Dog, dogById, dogHeading, dogMarkup, isMoving, NATURE, wakeDogs, type DogNature, type DogYard } from './dogs';
 import { fetchPublicParkMarks, type ParkMark, type ParkMarkKind } from './api';
-import { ROCKET_H, rocketSvg } from './rocket-art';
+import { ARRIVE_MS, DEPART_MS, ROCKET_H, rocketSvg } from './rocket-art';
+export { ARRIVE_MS, DEPART_MS, TRIP_AT, arriveAt, tripSvg } from './rocket-art';
 export { onDogMove } from './dogs';
 
 const { c: C, inner: INNER } = RADAR_GEOM;
@@ -950,8 +951,6 @@ export type RocketWorld = 'earth' | 'woof';
 export type RocketPhase = 'stored' | 'summon' | 'parked' | 'stow' | 'depart' | 'away' | 'arrive';
 export const SUMMON_MS = 5000;
 export const STOW_MS = 5000;
-export const DEPART_MS = 1600;
-export const ARRIVE_MS = 5500;
 /** 發射口的正中間（台北的經緯度）：火箭站的地方，飛到汪星時汪星轉到這裡、回地球時雷達正中間換到這裡 */
 export const HATCH_CENTER: Pt = [ZHONGSHAN_PARK.hatch.reduce((s, p) => s + p[0], 0) / 4, ZHONGSHAN_PARK.hatch.reduce((s, p) => s + p[1], 0) / 4];
 const LS_ROCKET = 'dr.rocket';
@@ -1020,24 +1019,6 @@ export function resetRocket(): void {
 }
 
 const ROCKET_HIT = 20;
-
-/** 飛行中小火箭在雷達正中間（固定大小） */
-export const TRIP_AT: TripAt = { x: C, y: C + 12, k: 3.4 };
-/** 降落開始時地圖上的火箭在哪（雷達外圈 scaleKm、正中間是發射口）：小火箭最後移到這裡交回來 */
-export function arriveAt(scaleKm: number): TripAt {
-  const ppm = INNER / (scaleKm * 1000);
-  return { x: C, y: C - Math.min(45 * ppm, 0.35 * INNER), k: ppm };
-}
-
-/** 飛行中畫在雷達正中間的小火箭（火焰一直噴、左右晃，旁邊一道道往後的氣流）；rocket-tilt 繞火箭中間轉（頭朝要去的方向） */
-export function tripSvg(): string {
-  return (
-    `<g class="rocket-trip" transform="translate(${TRIP_AT.x} ${TRIP_AT.y}) scale(${TRIP_AT.k})">` +
-    `<g transform="translate(0 -4)"><g class="rocket-tilt"><g transform="translate(0 4)">` +
-    `<path class="trip-streak" d="M-3 -16L-3 8M3.2 -12L3.2 12M-5.5 -6L-5.5 14M5.8 -18L5.8 4" />` +
-    `<g class="rocket-wobble">${rocketSvg('')}</g></g></g></g></g>`
-  );
-}
 
 /** 火箭這一段（已經過了 e 毫秒）：發射口的井和兩片門（叫出來、收回去、降進去時）、火箭（站著，跟銅像一樣照 data-at 轉回來） */
 function rocketPart(g: ParkGeom, c: ParkCanvas, phase: RocketPhase, e: number): string {

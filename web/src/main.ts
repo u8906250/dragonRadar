@@ -4,6 +4,7 @@ import { addKeyword, deletePushSubscription, locateFeedbackPlace, sendFeedback, 
 import { compassSupported, startCompass } from './compass';
 import { bearingDeg, compassLabel, cutAtBox, cutLines, destination, formatKm, haversineKm, lookFrom, outsideBox, ringBox, ringHas, splitAntimeridian, simplifyLatLng, taiwanRadiusKm, unitVectors, type GeoBox, type LatLng, type RegionMap } from './geo';
 import { TAIWAN_RINGS } from './taiwan';
+import { ARRIVE_MS, DEPART_MS, TRIP_AT, arriveAt, departLaunch, landLaunch, launchNow, tripSvg } from './rocket-art';
 import type { SceneKind } from './hq-scenes';
 import { LANDMARKS } from './landmarks';
 import { getModule, JOB_RISK_TEXT, JOB_SAFETY_TIPS, MEETUP_SAFETY_TIPS, MODULES, OFFER_SAFETY_TIPS, SEEK_SAFETY_TIPS, type ModuleDef, type ModuleId } from './modules';
@@ -556,6 +557,13 @@ radar.onRocket = (world) => {
     if (m.rocketNow().phase !== 'parked' || !window.confirm(world === 'earth' ? '是否要到汪星球？' : '是否要回地球？')) return;
     void rocketTrip(m, world);
   });
+};
+// 點了九棚（或已經飛到 Kepler-22b）停著的火箭：問要不要飛過去（第 4 號願望）
+radar.onLaunch = () => {
+  const r = launchNow();
+  if (r.phase !== 'parked' || tripping) return;
+  if (!window.confirm(r.where === 'jiupeng' ? '是否要搭火箭到 Kepler-22b？（約 640 光年）' : '是否要回地球（九棚）？')) return;
+  void launchTrip();
 };
 // 點了汪星的狗：轉過來面向你坐下，左上角出現「鎖定」
 radar.onDog = (id) => {
@@ -2057,6 +2065,72 @@ async function rocketTrip(m: typeof import('./park'), from: 'earth' | 'woof'): P
   radar.setTrip('', false);
   tripping = false;
   tripTo = null;
+}
+
+/** 搭九棚的火箭飛到 Kepler-22b（或飛回九棚）時拉遠到多少：看得到太陽系和 Kepler-22（約 640 光年） */
+const KEPLER_TRIP_KM = 900 * LY_KM;
+/** 降落時拉近到多少：看得到站著的火箭（約 20 公尺） */
+const LAUNCH_LAND_KM = 0.3;
+
+/**
+ * 第 4 號願望（第 1 號的調整：九棚的火箭可以選擇到 Kepler-22b）：搭九棚的火箭飛到 Kepler-22b、再飛回九棚，飛行約 20 秒，跟國館的火箭一樣的做法：
+ * 點火離地（1.6 秒），小火箭接手、慢慢拉遠到看得到太陽系和 Kepler-22（6 秒）；頭轉向要去的那一邊（從 Kepler-22b 出發時視角同時轉回正上方，0.8 秒）、
+ * 鏡頭跟著火箭移過去（3.5 秒）；中心換到那一邊（Kepler-22b；回九棚時雷達正中間換到發射台，手動位置）、慢慢拉近（7 秒，Kepler-22b 前一半轉到降落的島），
+ * 最後 1 秒小火箭移到降落開始的地方交回去：火箭從上面降下來、停在那裡（點了再飛回去）。你一直在地球（不像汪星會換到那一邊），整趟不接受拖曳、縮放
+ */
+async function launchTrip(): Promise<void> {
+  if (tripping) return;
+  const from = launchNow().where;
+  const to = departLaunch();
+  if (!to) return;
+  tripping = true;
+  lockDog(null);
+  radar.setTrip('', true);
+  radar.redrawPark();
+  const sp = spaceMod ?? (await import('./space'));
+  spaceMod = sp;
+  await wait(Math.max(0, DEPART_MS - 30));
+  // 小火箭從地圖上的火箭接手（先量位置，再把地圖上的收掉）
+  radar.setTrip(tripSvg(), true, radar.rocketAt(), TRIP_AT);
+  await wait(30);
+  radar.redrawPark();
+  await animateScale(KEPLER_TRIP_KM, 6000);
+  const startView = radar.spaceViewNow;
+  const focus = from === 'kepler22b' ? 'kepler22b' : null;
+  const toward = to === 'kepler22b' ? 'kepler22b' : 'earth';
+  radar.tiltTrip(sp.bodyBearing(from === 'kepler22b' ? 'kepler22b' : 'earth', toward), 800);
+  await animate(800, (u) => {
+    if (focus) radar.setSpaceView({ focus, yaw: startView.yaw * (1 - easeInOut(u)), pitch: startView.pitch * (1 - easeInOut(u)) }, true);
+  });
+  // 鏡頭跟著火箭從這一邊移到那一邊
+  await animate(3500, (u) => radar.setSpaceView({ focus, yaw: 0, pitch: 0, toward, u: easeInOut(u) }, true));
+  if (to === 'kepler22b') radar.setSpaceView({ focus: 'kepler22b', yaw: 0, pitch: 0 }, true);
+  else {
+    const [lat, lng] = launchMod?.LAUNCH_ROCKET ?? [LAUNCH_NEAR.lat, LAUNCH_NEAR.lng];
+    setOrigin({ lat, lng, source: 'manual' });
+    radar.resetSpace();
+  }
+  radar.tiltTrip(null, 700);
+  // 拉近（Kepler-22b：前一半慢慢轉到降落的島）；最後 1 秒小火箭移到降落開始的地方
+  window.setTimeout(() => radar.moveTrip(arriveAt(LAUNCH_LAND_KM), 1000), 6000);
+  const site = sp.keplerSiteView();
+  let turned = to !== 'kepler22b';
+  await animateScale(LAUNCH_LAND_KM, 7000, (u) => {
+    if (turned) return;
+    const v = easeInOut(Math.min(1, u / 0.5));
+    turned = u >= 0.5;
+    radar.setSpaceView({ ...site, yaw: site.yaw * v, pitch: site.pitch * v }, !turned);
+  });
+  landLaunch(to);
+  updateScaleChips();
+  updateViewBtn();
+  updateSpace();
+  radar.redrawPark();
+  radar.setTrip('', true);
+  await wait(ARRIVE_MS + 50);
+  radar.redrawPark();
+  radar.setTrip('', false);
+  tripping = false;
 }
 
 /**

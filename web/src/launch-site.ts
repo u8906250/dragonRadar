@@ -5,11 +5,12 @@
  * - LAUNCH_AREAS：開發範圍三塊（發射核心區約 21.5 公頃，九棚路旁兩塊各約 2.2 公頃；合計 26.05 公頃，說明書 26.02），
  *   從「圖 4-3 本計畫基地現況圖」的紅線描下來，照圖框的 TWD97 座標換成經緯度（誤差約幾公尺）
  * - 發射台、燃料場、建築、池子、道路、避雷塔：照「圖 5.2.5-12 本計畫景觀示意圖（發射核心區）」對到範圍圖上的大概位置（誤差約幾十公尺）
- * - 火箭的大小還沒定案：照小型入軌火箭約 20 公尺畫，放在靠海的發射台（示意圖上有發射架、四支避雷塔的那一座）
+ * - 火箭的大小還沒定案：照小型入軌火箭約 20 公尺畫，放在靠海的發射台（示意圖上有發射架、四支避雷塔的那一座）；
+ *   點了可以搭到 Kepler-22b（第 4 號願望，main.ts 的 launchTrip）
  */
 import type { LatLng } from './geo';
 import { RADAR_GEOM, RADAR_VIEW } from './radar';
-import { ROCKET_H, rocketSvg } from './rocket-art';
+import { launchNow, standingRocket } from './rocket-art';
 
 const { c: C, inner: INNER } = RADAR_GEOM;
 type Pt = [number, number];
@@ -19,7 +20,7 @@ export const LAUNCH_DRAW_KM = 3;
 /** 寫名字的地方（發射核心區中間） */
 export const LAUNCH_LABEL_AT: LatLng = { lat: 22.1122, lng: 120.8848 };
 /** 火箭、避雷塔多高（公尺） */
-const ROCKET_M = 20;
+export const ROCKET_M = 20;
 const MAST_M = 35;
 /** 場內道路寬（公尺） */
 const ROAD_M = 8;
@@ -112,11 +113,11 @@ export function launchSiteSvg(origin: LatLng, scaleKm: number): string {
           `<path class="mast-body" d="M-1.2 0L-0.25 ${-MAST_M + 2}L0.25 ${-MAST_M + 2}L1.2 0Z" /><path class="mast-rod" d="M0 ${-MAST_M + 2}L0 ${-MAST_M}" /></g></g>`;
     standing.push([y, g]);
   }
-  {
+  // 火箭在九棚才畫（第 4 號願望：點了可以搭到 Kepler-22b，飛走後發射台空著）
+  const r = launchNow();
+  if (r.where === 'jiupeng') {
     const [x, y] = xy(LAUNCH_ROCKET);
-    const at = `${f1(x)} ${f1(y)}`;
-    const s = (ROCKET_M / ROCKET_H) * ppm;
-    standing.push([y, `<g class="launch-rocket parked" data-at="${at}"><g transform="translate(${at}) scale(${+s.toPrecision(4)})">${rocketSvg('')}</g></g>`]);
+    standing.push([y, standingRocket(x, y, ppm, ROCKET_M, r.phase, r.e)]);
   }
   out += standing
     .sort((a, b) => a[0] - b[0])
