@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { editItemsOf, editSummary, parseEditItems, reportModules } from '../src/reports';
-import { normalizeTaipai, storeExtra } from '../src/taipai';
+import { normalizeTaipai, storeExtra, TAIPAI_SPEC } from '../src/taipai';
 import { planEdited, type PlanItem } from '../src/events';
 
 /** 假的 D1：什麼都查不到 */
@@ -32,6 +32,10 @@ describe('normalizeTaipai', () => {
   it('keeps the reason when it is not a taipai store', () => {
     const r = normalizeTaipai({ is_event: false, reason: '沒寫這家店是台派', tags: ['咖啡'], events: [{ name: 'x', type: 'cafe', hours: null, place_text: 'x', place_query: null, confidence: 0.9 }] });
     expect(r).toMatchObject({ is_event: false, reason: '沒寫這家店是台派', events: [] });
+  });
+  it('counts a store handing out ribbons as taipai (v1.769)', () => {
+    expect(TAIPAI_SPEC.system).toMatch(/店家在店裡發飄帶（也寫成「漂帶」[^\n]*也算台派/);
+    expect(TAIPAI_SPEC.system).toContain('或寫了店裡發飄帶，也算台派');
   });
   it('unknown types become other', () => {
     expect(storeExtra('casino', null)).toEqual({ type: 'other', hours: null, open: null });
