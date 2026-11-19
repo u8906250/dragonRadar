@@ -356,7 +356,8 @@ export function notListedWhy(items: PlanItem[]): NotListedWhy | undefined {
 // 16：每週固定幾天開的（「週一至週五 13:00-20:00」）拆成接下來一週有開的每一天（2026-11-16）
 // 17：台派雷達參考店家帳號的簡介（台派、營業時間、地址），記下哪些是從簡介讀的（2026-11-19）
 // 18：台派雷達：店家在店裡發飄帶也算台派（2026-11-19）
-export const PLAN_VERSION = 18;
+// 19：「士林捷運站旁」查成永和的「捷運頂溪站」：修好車站名的查法，還沒確認的回報再貼一次重新判讀、重新定位（2026-11-19）
+export const PLAN_VERSION = 19;
 
 /** 判讀好、還沒寫進雷達的資料，存在 posts.confirm_plan */
 interface StoredPlan {

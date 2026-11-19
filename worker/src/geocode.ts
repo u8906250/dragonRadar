@@ -110,9 +110,10 @@ export function placeCandidates(query: string, placeText?: string | null): strin
       .replace(/\d+\s*號?\s*出口|出口\s*\d+|[A-Za-z]\d*\s*出口/g, ' ')
       .replace(/[東西南北][一二三四五六七八九十\d]+\s*門/g, ' ')
       .replace(/\d+\s*[樓Ff](?![a-z])/g, ' ')
-      .replace(/(門口|旁邊|附近|對面|前面|廣場前)/g, ' ');
+      .replace(/(門口|旁邊|附近|對面|前面|廣場前|站旁)/g, (w) => (w === '站旁' ? '站 ' : ' '));
 
-  const sources = [query, placeText ?? ''];
+  // 「士林捷運站」寫成「捷運士林站」（不然站名會變成「捷運士林捷運站」，對到別的車站）
+  const sources = [query, placeText ?? ''].map((s) => s.replace(/([\u4e00-\u9fff]{2,6}?)(捷運|台鐵|臺鐵|高鐵)站/g, '$2$1站'));
   const city = sources.map((s) => CITY_RE.exec(s)?.[0]).find(Boolean) ?? '';
   // 「近國父紀念館站/大巨蛋」這種只是車站線索，整串拿去查會對到別的地方，只用下面抽出來的站名
   const nearOnly = (s: string): boolean => /^(?:近|靠近|鄰近)/.test(s.trim());
@@ -168,7 +169,11 @@ interface CacheRow {
  */
 export function sharesName(query: string, displayName: string | null | undefined): boolean {
   const fold = (s: string): string => s.replace(/臺/g, '台').replace(/\s+/g, '');
-  const core = fold(query.replace(CITY_PREFIX_RE, '').replace(/[\u4e00-\u9fff]{1,2}[區鄉鎮](?=[\u4e00-\u9fff]{2,})/g, '')).replace(/[^\u4e00-\u9fff]/g, '');
+  const core = fold(query.replace(CITY_PREFIX_RE, '').replace(/[\u4e00-\u9fff]{1,2}[區鄉鎮](?=[\u4e00-\u9fff]{2,})/g, ''))
+    .replace(/[^\u4e00-\u9fff]/g, '')
+    // 「捷運」「高鐵」、站名最後的「站」每個車站都有，不算名字對得上（「捷運士林站」不能對到「捷運頂溪站」）
+    .replace(/捷運|台鐵|高鐵/g, '')
+    .replace(/站$/, '');
   if (core.length < 2) return true;
   const name = fold((displayName ?? '').split(',')[0] ?? '');
   for (let i = 0; i + 2 <= core.length; i++) if (name.includes(core.slice(i, i + 2))) return true;

@@ -121,6 +121,12 @@ describe('parseKeywordList', () => {
 });
 
 describe('placeCandidates', () => {
+  it('reads 「士林捷運站旁」 as the 士林 MRT station', () => {
+    const c = placeCandidates('士林捷運站旁', '士林捷運站旁');
+    expect(c).toContain('捷運士林站');
+    expect(c).not.toContain('捷運士林捷運站');
+    expect(placeCandidates('板橋高鐵站', null)).toContain('高鐵板橋站');
+  });
   it('falls back from exit-level detail to the station name', () => {
     const c = placeCandidates('台北市 捷運中山站 4號出口', '捷運中山站 4號出口');
     expect(c[0]).toBe('台北市 捷運中山站 4號出口');
@@ -866,6 +872,11 @@ describe('cityLevel', () => {
 describe('sharesName', () => {
   it('rejects a hit whose name has nothing to do with the query', () => {
     expect(sharesName('丞風羽球館', '玉勅鳳邑琉球城隍廟, 觀光港路, 琉球鄉, 屏東縣, 臺灣')).toBe(false);
+  });
+  it('does not match two stations just because both are MRT stations', () => {
+    expect(sharesName('捷運士林捷運站', '捷運頂溪站(中興街), 中興街 (韓國街), 永興里, 永和區, 溪洲, 新北市, 234016, 臺灣')).toBe(false);
+    expect(sharesName('捷運士林站', '捷運士林站(中正), 中正路, 舊佳里, 士林區, 臺北市, 臺灣')).toBe(true);
+    expect(sharesName('台北市 台北車站', '臺北車站, 北平西路, 中正區, 臺北市')).toBe(true);
   });
   it('accepts real matches', () => {
     expect(sharesName('台北市 捷運市政府站', '市政府, 信義路五段, 信義區, 臺北市, 臺灣')).toBe(true);
