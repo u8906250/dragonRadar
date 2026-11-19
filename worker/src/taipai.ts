@@ -42,9 +42,10 @@ const TAIPAI_PROMPT = `你是「台派雷達」的資料抽取器。你會收到
 events 每筆的欄位：
 - name: 店名，照貼文寫的（不要加地點）
 - type: 店家類型，只能選一個：eat（餐廳、小吃、便當、早餐店）、cafe（咖啡廳、甜點、麵包、早午餐）、drink（手搖飲、果汁、茶飲）、bar（酒吧、居酒屋、精釀啤酒）、book（書店、獨立書店）、shop（服飾、雜貨、文創、選物、花店、超市等賣東西的店）、beauty（美髮、美甲、美容、按摩）、stay（民宿、旅館、背包客棧）、clinic（診所、牙醫、藥局、動物醫院）、other（其他）
-- hours: 營業時間，照貼文寫的整理成一行，例如「週二至週日 11:00–20:00，週一公休」「平日 09:30–20:30，假日 10:00–18:00」；沒寫則 null，不要自己猜
+- hours: 營業時間，照貼文（或店家帳號的簡介）寫的整理成一行，例如「週二至週日 11:00–20:00，週一公休」「平日 09:30–20:30，假日 10:00–18:00」；沒寫則 null，不要自己猜
 - place_text: 貼文原文中的店址、地點
 - place_query: 給地圖搜尋用：有門牌就用門牌；貼文寫了縣市才加縣市，例如「台北市大安區復興南路一段 100 號」；沒寫門牌時用店名加路名或地標（例如「慢工咖啡 師大路」），不要只填路名；只寫店名就只填店名，不要自己猜縣市；沒寫則 null
+- from_profile: 這一家哪些資料是從【帳號簡介】讀的（貼文沒寫、簡介寫了）："taipai"（是台派）、"hours"（營業時間）、"place"（地點）；都是貼文寫的則空陣列
 - confidence: 0 到 1 的信心分數
 
 規則：
@@ -53,7 +54,11 @@ events 每筆的欄位：
 - 沒有實體店面的（網拍、外送、線上課程）不收；活動、市集擺攤不收。
 - 沒寫店名也沒寫地點的那一家不要列；只有店名的也可以列，confidence 低一點。
 - 不要編造貼文裡沒有的店名、地點、營業時間。
-- 貼文最後如果有「【帳號簡介】」，那是發文帳號或貼文標記的店家帳號的名稱、簡介：貼文沒寫地點時，可以用它找出店名或地址；貼文自己寫了以貼文為準。`;
+- 貼文最後如果有「【帳號簡介】」，那是發文帳號、貼文標記的帳號的名稱和簡介。帳號是這家店自己的（帳號名稱或簡介跟店名對得上）時：
+  - 簡介寫了這家店是台派、挺台灣，也算台派；
+  - 貼文沒寫的店名、地址、營業時間，可以用簡介寫的；
+  - 貼文自己寫了以貼文為準。
+  不是這家店自己的帳號（例如推薦的網友自己的帳號）：簡介寫台派也不算這家店是台派，簡介的地址、營業時間也不要用。`;
 
 const TAIPAI_SCHEMA = {
   type: 'object',
@@ -70,11 +75,12 @@ const TAIPAI_SCHEMA = {
           name: { type: 'string' },
           type: { type: 'string', enum: Object.keys(STORE_TYPES) },
           hours: { type: ['string', 'null'] },
+          from_profile: { type: 'array', items: { type: 'string', enum: ['taipai', 'hours', 'place'] } },
           place_text: { type: ['string', 'null'] },
           place_query: { type: ['string', 'null'] },
           confidence: { type: 'number' },
         },
-        required: ['name', 'type', 'hours', 'place_text', 'place_query', 'confidence'],
+        required: ['name', 'type', 'hours', 'place_text', 'place_query', 'from_profile', 'confidence'],
       },
     },
   },
@@ -91,6 +97,13 @@ export const cleanHours = (v: unknown): string | null => {
 /** 一家店存在 events.extra 的欄位：類型、營業時間（原文和讀出來的每週時段） */
 export function storeExtra(type: unknown, hours: string | null): Record<string, unknown> {
   return { type: isStoreType(type) ? type : 'other', hours, open: parseHours(hours) };
+}
+
+/** 從帳號簡介讀的是哪幾項（預覽、詳細資料寫明「店家帳號簡介寫的」）：沒有就不帶 */
+export const PROFILE_FIELDS = ['taipai', 'hours', 'place'] as const;
+function profileFields(v: unknown): { from_profile?: string[] } {
+  const list = Array.isArray(v) ? PROFILE_FIELDS.filter((f) => v.includes(f)) : [];
+  return list.length > 0 ? { from_profile: list } : {};
 }
 
 export function normalizeTaipai(raw: unknown): Extraction | null {
@@ -118,7 +131,7 @@ export function normalizeTaipai(raw: unknown): Extraction | null {
         confidence: conf(e.confidence),
         spot: false,
         until: null,
-        extra: storeExtra(type, cleanHours(e.hours)),
+        extra: { ...storeExtra(type, cleanHours(e.hours)), ...profileFields(e.from_profile) },
       },
     ];
   });

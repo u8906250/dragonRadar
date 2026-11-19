@@ -353,6 +353,9 @@ function moduleSummary(singles: Row[], spotsIn: Row[], postings: Map<string, Row
 interface StoreExtra {
   type?: string;
   hours?: string | null;
+  /** 貼文沒寫、從店家帳號的簡介讀的是哪幾項（taipai、hours、place），和是哪些帳號（「@slowcafe」） */
+  from_profile?: string[];
+  profile_from?: string;
   /** 每週的營業時段 [星期幾 1–7, 開始分鐘, 結束分鐘]（伺服器的 hours.ts 讀的，開到半夜以後超過 1440）；讀不出來是 null */
   open?: Array<[number, number, number]> | null;
 }
@@ -413,11 +416,16 @@ function storeLine(it: Item, now: number): string {
   const at = `${dayWord(ev.startAt, now) === '今天' ? '' : `${dayWord(ev.startAt, now)} `}${fmtTime(ev.startAt)}`;
   return it.phase === 'soon' ? `快開門了・${at} 開門` : `休息中・${at} 開門`;
 }
-/** 台派雷達的詳細資料：類型、營業時間（現在有沒有開）、地點 */
+/** 從帳號簡介讀的那幾項怎麼寫 */
+const PROFILE_WORD: Record<string, string> = { taipai: '台派', hours: '營業時間', place: '地點' };
+/** 「台派、營業時間」：貼文沒寫、從店家帳號的簡介讀的；沒有是空字串 */
+const profileWords = (x: StoreExtra): string => (x.from_profile ?? []).map((f) => PROFILE_WORD[f]).filter(Boolean).join('、');
+/** 台派雷達的詳細資料：類型、營業時間（現在有沒有開）、地點；從店家帳號簡介讀的寫出來 */
 function storeDetailHtml(it: Item, now: number): string {
   const { ev } = it;
   const x = storeOf(ev);
-  return `<p>類型：${esc(storeTypeLabel(ev))}<br>營業時間：${esc(x.hours ?? '沒寫')}${storeSlots(ev) ? `<br>現在：${esc(storeLine(it, now))}` : ''}<br>地點：${esc(placeOf(ev))}${ev.approxArea ? `<br><span class="approx-note">約略位置：只知道在${esc(ev.approxArea)}，實際地點請看原文</span>` : ''}</p><p class="muted small">營業時間照貼文寫的，可能有變動，出發前請先確認。</p>`;
+  const fromBio = profileWords(x) && x.profile_from ? `<p class="muted small">${esc(profileWords(x))}是 ${esc(x.profile_from)} 的帳號簡介寫的（貼文沒寫）。</p>` : '';
+  return `<p>類型：${esc(storeTypeLabel(ev))}<br>營業時間：${esc(x.hours ?? '沒寫')}${storeSlots(ev) ? `<br>現在：${esc(storeLine(it, now))}` : ''}<br>地點：${esc(placeOf(ev))}${ev.approxArea ? `<br><span class="approx-note">約略位置：只知道在${esc(ev.approxArea)}，實際地點請看原文</span>` : ''}</p>${fromBio}<p class="muted small">營業時間可能有變動，出發前請先確認。</p>`;
 }
 /** 雷達、地圖、清單的顏色：店家跟活動一樣 */
 const blipKind = (ev: { kind: EventKind }): EventKind => (ev.kind === 'store' ? 'activity' : ev.kind);
@@ -8845,7 +8853,7 @@ function renderPreview(r: SubmitResult): void {
           <small>${p.kind === 'store' ? '營業時間' : '時間'}：${esc(previewWhen(p))}</small>
           <small>地點：${esc(shortAddress(p.placeText.replace(/\s*\n\s*/g, ' ')))}</small>
           <small>${previewWhere(p)}</small>
-          ${p.profileHint ? `<small class="preview-warn">📍 貼文沒寫地點，這是從 ${esc(p.profileHint)} 的帳號名稱、簡介推的，請確認是不是這裡。</small>` : ''}
+          ${p.profileHint ? (p.kind === 'store' ? `<small class="preview-warn">貼文沒寫的${esc(profileWords(storeOf(p)) || '資料')}，是從 ${esc(p.profileHint)} 的帳號簡介讀的，請確認是不是這家店的帳號、寫得對不對。</small>` : `<small class="preview-warn">📍 貼文沒寫地點，這是從 ${esc(p.profileHint)} 的帳號名稱、簡介推的，請確認是不是這裡。</small>`) : ''}
           ${p.update ? `<small class="preview-warn">${esc(updateNote(p.update))}</small>` : ''}
         </li>`,
       )

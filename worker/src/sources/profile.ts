@@ -1,6 +1,7 @@
 /**
  * Threads 帳號的公開名稱和簡介：貼文找不到地點時，從發文的店家帳號、或貼文標記的店家帳號（「由 @luguocafe 代為發放」）
- * 找店名、地址，當成提示再判讀一次。只拿來判讀，不存下來、不顯示。
+ * 找店名、地址，當成提示再判讀一次。台派雷達另外用店家自己帳號的簡介補台派、營業時間（v1.768）。
+ * 簡介本身只拿來判讀，不存下來、不顯示；從簡介讀出來的地址、營業時間跟貼文讀的一樣存成那一筆的資料。
  */
 import { decodeEntities } from './text';
 
@@ -58,17 +59,18 @@ const SHOP_BEFORE_RE = /店|館|坊|咖啡|餐|攤|市集|代為|代發|在|到|
 const SHOP_AFTER_RE = /代為|代發|領取|索取|店|館|坊|咖啡|餐|攤/;
 
 /**
- * 要查哪些帳號：店家自己發的、發文的人自己在發的查發文帳號；標記的帳號旁邊寫了店家、發放、領取的也查。最多 max 個
+ * 要查哪些帳號：店家自己發的、發文的人自己在發的查發文帳號；標記的帳號旁邊寫了店家、發放、領取的也查。最多 max 個。
+ * loose（台派雷達）：發文帳號、標記的帳號都查（推薦文常只寫「推 @店家」）；是不是店家自己的帳號由判讀決定
  */
-export function profileCandidates(text: string, author: string | null, max = 2): string[] {
+export function profileCandidates(text: string, author: string | null, max = 2, loose = false): string[] {
   const out: string[] = [];
-  if (author && (OWN_SHOP_RE.test(text) || SELF_GIVE_RE.test(text))) out.push(author);
+  if (author && (loose || OWN_SHOP_RE.test(text) || SELF_GIVE_RE.test(text))) out.push(author);
   for (const m of text.matchAll(/@([A-Za-z0-9_.]{2,30})/g)) {
     const u = m[1].replace(/\.+$/, '');
     const at = m.index ?? 0;
     const before = text.slice(Math.max(0, at - 6), at);
     const after = text.slice(at + m[0].length, at + m[0].length + 10);
-    if ((SHOP_BEFORE_RE.test(before) || SHOP_AFTER_RE.test(after)) && !out.includes(u)) out.push(u);
+    if ((loose || SHOP_BEFORE_RE.test(before) || SHOP_AFTER_RE.test(after)) && !out.includes(u)) out.push(u);
   }
   return out.slice(0, max);
 }
