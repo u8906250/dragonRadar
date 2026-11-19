@@ -16,8 +16,8 @@ import { checkWishNews, findCard, gotReward, myCards, onWishNews, openAlbum, ope
 import { DEEP_FROM_KM, FLAT_PAN_KM, LY_KM, Radar, SPACE_FROM_KM, type RadarLabel, type RadarRoute, type RadarStreets, type RadarStreetTile, type SpaceView } from './radar';
 import { DEFAULT_THEME_ID, getTheme, THEMES, type Theme } from './themes';
 import type { WoofBottleMark } from './space';
-import { topicChipSvg, topicGlyph, TOPIC_TYPES } from './topic-icons';
-import type { BottleOut, BottleProof, EventOut, Item, KeywordInfo, KeywordRules, MyBottles, MyReport, Origin, Phase, PickedBottle, RelatedPost, RouteOut, PreviewItem, RouteStop, RoutePreview, SubmitResult, FailedItem, EditItem, EditInput } from './types';
+import { STORE_TYPES, topicChipSvg, topicGlyph, TOPIC_TYPES } from './topic-icons';
+import type { BottleOut, BottleProof, EventKind, EventOut, Item, KeywordInfo, KeywordRules, MyBottles, MyReport, Origin, Phase, PickedBottle, RelatedPost, RouteOut, PreviewItem, RouteStop, RoutePreview, SubmitResult, FailedItem, EditItem, EditInput } from './types';
 
 const DEFAULT_ORIGIN: Origin = { lat: 25.0478, lng: 121.517, source: 'default' }; // 台北車站
 const SOON_SEC = 30 * 60;
@@ -324,11 +324,13 @@ interface FoodExtra {
 const foodOf = (ev: { extra?: Record<string, unknown> | null }): FoodExtra => (ev.extra ?? {}) as FoodExtra;
 const foodRole = (ev: { kind: string; extra?: Record<string, unknown> | null }): FoodExtra['role'] | null => (ev.kind === 'food' ? (foodOf(ev).role ?? 'recommend') : null);
 
-/** 刊登的角色在清單上另外一段：找臨打、網友推薦、揪團吃飯 */
-const POSTING_SECTION: Record<string, string> = { seek: '找臨打', recommend: '網友推薦', meetup: '揪團吃飯' };
+/** 刊登的角色在清單上另外一段：找臨打、網友推薦、揪團吃飯；台派雷達沒寫營業時間的店家 */
+const POSTING_SECTION: Record<string, string> = { seek: '找臨打', recommend: '網友推薦', meetup: '揪團吃飯', nohours: '沒寫營業時間' };
 /** 每週固定的那一段叫什麼 */
 const SPOT_SECTION: Record<string, string> = { badminton: '每週固定場', food: '每週固定擺攤' };
 function postingRole(ev: { kind: string; extra?: Record<string, unknown> | null }): string | null {
+  // 店家有營業時間的照營業中、休息中分（phaseOf），沒寫的另外一段
+  if (ev.kind === 'store') return storeSlots(ev) ? null : 'nohours';
   if (ev.kind !== 'session' && ev.kind !== 'food') return null;
   const role = (ev.extra?.role as string | undefined) ?? (ev.kind === 'food' ? 'recommend' : null);
   return role && POSTING_SECTION[role] ? role : null;
@@ -340,8 +342,85 @@ function moduleSummary(singles: Row[], spotsIn: Row[], postings: Map<string, Row
   const join = (parts: Array<[number, string]>): string => parts.filter(([c]) => c > 0).map(([c, t]) => `${c} ${t}`).join('、');
   if (mod.id === 'badminton') return join([[singles.length + spotsIn.length, '場招臨打'], [n('seek'), '個找臨打']]);
   if (mod.id === 'food') return join([[singles.length + spotsIn.length, '個出攤'], [n('recommend'), '家推薦'], [n('meetup'), '個揪團']]);
+  if (mod.id === 'taipai') {
+    const open = singles.filter((r) => r.phase === 'active').length;
+    return join([[open, '家營業中'], [singles.length - open, '家休息中'], [n('nohours'), '家沒寫營業時間']]);
+  }
   return singles.length ? dogSummary(singles) : '';
 }
+
+// ---- 台派雷達：店家（名稱、地點、營業時間、類型），不是單次的：放上雷達後一直顯示，照營業時間標營業中、休息中 ----
+interface StoreExtra {
+  type?: string;
+  hours?: string | null;
+  /** 每週的營業時段 [星期幾 1–7, 開始分鐘, 結束分鐘]（伺服器的 hours.ts 讀的，開到半夜以後超過 1440）；讀不出來是 null */
+  open?: Array<[number, number, number]> | null;
+}
+const storeOf = (ev: { extra?: Record<string, unknown> | null }): StoreExtra => (ev.extra ?? {}) as StoreExtra;
+const storeTypeLabel = (ev: { extra?: Record<string, unknown> | null }): string => STORE_TYPES.find((t) => t.key === storeOf(ev).type)?.label ?? '其他';
+/** 讀出營業時段的店家才有；其他是 null（不知道現在有沒有開） */
+function storeSlots(ev: { kind: string; extra?: Record<string, unknown> | null }): Array<[number, number, number]> | null {
+  if (ev.kind !== 'store') return null;
+  const o = storeOf(ev).open;
+  return Array.isArray(o) && o.length > 0 ? o : null;
+}
+/** 台灣時間那一天的 0 點（unix）、星期幾（1 = 週一 … 7 = 週日） */
+const tpeDayStart = (t: number): number => Math.floor((t + 8 * 3600) / 86400) * 86400 - 8 * 3600;
+const tpeWeekday = (t: number): number => ((new Date((t + 8 * 3600) * 1000).getUTCDay() + 6) % 7) + 1;
+/** 店家現在開著的那一段（接著開的下一段併進來，24 小時營業的連成一段），沒開就是下一段；一週內都沒開是 null */
+function storeWindow(slots: Array<[number, number, number]>, now: number): { start: number; end: number } | null {
+  const wins: Array<{ start: number; end: number }> = [];
+  const today = tpeDayStart(now);
+  for (let off = -1; off <= 8; off++) {
+    const day = today + off * 86400;
+    const wd = tpeWeekday(day + 3600);
+    for (const [d, from, to] of slots) if (d === wd) wins.push({ start: day + from * 60, end: day + to * 60 });
+  }
+  wins.sort((a, b) => a.start - b.start);
+  const merged: Array<{ start: number; end: number }> = [];
+  for (const w of wins) {
+    const last = merged[merged.length - 1];
+    if (last && w.start <= last.end) last.end = Math.max(last.end, w.end);
+    else merged.push({ ...w });
+  }
+  return merged.find((w) => w.end > now) ?? null;
+}
+/** 店家照營業時段換成這一段的開始、結束（雷達、清單照這個算營業中、快開門、休息中）；同一段沿用同一個物件，搜尋、日期的快取才用得到 */
+const storeTimed = new WeakMap<EventOut, EventOut>();
+function storeNow(ev: EventOut, now: number): EventOut {
+  const slots = storeSlots(ev);
+  const w = slots ? storeWindow(slots, now) : null;
+  if (!w) return ev;
+  const end = Math.min(w.end, ev.endAt);
+  const cached = storeTimed.get(ev);
+  if (cached && cached.startAt === w.start && cached.endAt === end) return cached;
+  const timed: EventOut = { ...ev, startAt: w.start, endAt: end, endOpen: false };
+  storeTimed.set(ev, timed);
+  return timed;
+}
+/** 「今天」「明天」「11/22（六）」加時間；剛好半夜 12 點的寫前一天的 24:00 */
+function storeClock(t: number, now: number): string {
+  const midnight = t === tpeDayStart(t);
+  const day = dayWord(midnight ? t - 60 : t, now);
+  return `${day === '今天' ? '' : `${day} `}${midnight ? '24:00' : fmtTime(t)}`;
+}
+/** 店家的營業狀態：「營業中・開到 20:00」「休息中・明天 11:00 開門」；沒讀出營業時段的寫營業時間原文 */
+function storeLine(it: Item, now: number): string {
+  const { ev } = it;
+  const x = storeOf(ev);
+  if (!storeSlots(ev)) return x.hours ? `營業時間 ${x.hours}` : '沒寫營業時間';
+  if (it.phase === 'active') return ev.endAt - now > 3 * 86400 ? '營業中・24 小時' : `營業中・開到 ${storeClock(ev.endAt, now)}`;
+  const at = `${dayWord(ev.startAt, now) === '今天' ? '' : `${dayWord(ev.startAt, now)} `}${fmtTime(ev.startAt)}`;
+  return it.phase === 'soon' ? `快開門了・${at} 開門` : `休息中・${at} 開門`;
+}
+/** 台派雷達的詳細資料：類型、營業時間（現在有沒有開）、地點 */
+function storeDetailHtml(it: Item, now: number): string {
+  const { ev } = it;
+  const x = storeOf(ev);
+  return `<p>類型：${esc(storeTypeLabel(ev))}<br>營業時間：${esc(x.hours ?? '沒寫')}${storeSlots(ev) ? `<br>現在：${esc(storeLine(it, now))}` : ''}<br>地點：${esc(placeOf(ev))}${ev.approxArea ? `<br><span class="approx-note">約略位置：只知道在${esc(ev.approxArea)}，實際地點請看原文</span>` : ''}</p><p class="muted small">營業時間照貼文寫的，可能有變動，出發前請先確認。</p>`;
+}
+/** 雷達、地圖、清單的顏色：店家跟活動一樣 */
+const blipKind = (ev: { kind: EventKind }): EventKind => (ev.kind === 'store' ? 'activity' : ev.kind);
 
 /** 美食品味的詳細資料：出攤寫時間、攤名、賣什麼、價位；推薦寫店名、推薦什麼、營業時間；揪團寫時間、缺幾人、怎麼報名，加上安全提醒 */
 function foodDetailHtml(it: Item, now: number): string {
@@ -624,7 +703,8 @@ function phaseOf(ev: EventOut, now: number): Phase {
 function dedupeEvents(list: EventOut[]): EventOut[] {
   const kept: EventOut[] = [];
   for (const ev of list) {
-    const dup = kept.some((k) => Math.abs(k.startAt - ev.startAt) <= 1800 && haversineKm(k, ev) <= 0.15);
+    // 店家沒有時間（同一則貼文的好幾家開始時間一樣），伺服器已經照店名擋掉重複的
+    const dup = ev.kind !== 'store' && kept.some((k) => k.kind !== 'store' && Math.abs(k.startAt - ev.startAt) <= 1800 && haversineKm(k, ev) <= 0.15);
     if (!dup) kept.push(ev);
   }
   return kept;
@@ -709,7 +789,9 @@ function computeItems(now: number): Item[] {
       const k = spotKey(ev);
       spots.set(k, [...(spots.get(k) ?? []), ev]);
     } else {
-      items.push({ ev, distanceKm: haversineKm(me, ev), bearing: bearingDeg(me, ev), phase: phaseOf(ev, now) });
+      // 店家：照營業時段算營業中、快開門、休息中
+      const shown = ev.kind === 'store' ? storeNow(ev, now) : ev;
+      items.push({ ev: shown, distanceKm: haversineKm(me, ev), bearing: bearingDeg(me, ev), phase: phaseOf(shown, now) });
     }
   }
   for (const [k, sessions] of spots) items.push(spotItem(k, sessions, me, now));
@@ -861,6 +943,7 @@ function allDayText(ev: EventOut, today: boolean): string {
 }
 
 function timeLine(it: Item, now: number): string {
+  if (it.ev.kind === 'store') return storeLine(it, now);
   // 職缺：工作期間、每天時段（從刊登起都算刊登中）；可照顧的沒寫期間就是時間可討論
   if (isSeek(it.ev)) return seekWhen(it.ev);
   const fr = foodRole(it.ev);
@@ -2702,6 +2785,14 @@ const weekdayOf = (day: number): number => (day + 4) % 7;
 const daysOf = new WeakMap<EventOut, Set<number>>();
 function itemDays(it: Item): Set<number> {
   let days = daysOf.get(it.ev);
+  if (!days && it.ev.kind === 'store') {
+    // 店家：接下來兩週有開的每一天（沒寫營業時間的每一天都算）
+    days = new Set<number>();
+    const slots = storeSlots(it.ev);
+    const today = taipeiDay(nowSec());
+    for (let d = today; d < today + 14; d++) if (!slots || slots.some(([wd]) => wd === ((weekdayOf(d) + 6) % 7) + 1)) days.add(d);
+    daysOf.set(it.ev, days);
+  }
   if (!days) {
     days = new Set<number>();
     for (const ev of it.spot ? it.spot.sessions : [it.ev]) {
@@ -2830,7 +2921,7 @@ function render(): void {
   radar.render(
     drawn.map((it) => ({
       id: it.ev.id,
-      kind: it.ev.kind,
+      kind: blipKind(it.ev),
       spot: !!it.spot,
       office: !!it.spot && isOffice(it.ev),
       approx: !!it.ev.approxArea,
@@ -2839,7 +2930,8 @@ function render(): void {
       distanceKm: it.distanceKm,
       bearing: it.bearing,
       // 還沒出發的官方車掃路線點用「即將開始」的淡色畫；還沒開的據點跟休息中的一樣淡；其他稍後開始的（回報的車掃的站也是）畫虛線框
-      phase: it.phase === 'later' ? (it.spot ? 'closed' : routeOf(it.ev) && !reportedStop(it.ev) ? 'soon' : 'later') : it.phase,
+      // 休息中的店家跟休息中的據點一樣淡，不寫還有多久開門（光點多了很亂）
+      phase: it.ev.kind === 'store' && it.phase !== 'active' ? 'closed' : it.phase === 'later' ? (it.spot ? 'closed' : routeOf(it.ev) && !reportedStop(it.ev) ? 'soon' : 'later') : it.phase,
       label: titleOf(it.ev),
       flag: flagOf(it.ev),
       // 圓點裡的小圖示照活動的主題（跟地圖一樣，v1.672 全螢幕、v1.674 一般雷達也有）
@@ -2849,7 +2941,7 @@ function render(): void {
       selected: it.ev.id === selectedId,
       // 稍後開始的越久越淡；還沒開始的都在光點下寫還有多久
       // 回報的車掃：寫還有多久經過（不是前 10 分鐘的開始）
-      ...(isUpcoming(it)
+      ...(isUpcoming(it) && it.ev.kind !== 'store'
         ? { badge: startsInShort(reportedStop(it.ev)?.at ?? it.ev.startAt, now), ...(it.phase === 'later' ? { fade: clarityOf(it.ev, now) } : {}) }
         : officialStopAt(it.ev, now) !== null
           ? { badge: startsInShort(officialStopAt(it.ev, now)!, now) }
@@ -3014,20 +3106,20 @@ function render(): void {
     map.render(
       drawn.map((it) => ({
         id: it.ev.id,
-        kind: it.ev.kind,
+        kind: blipKind(it.ev),
         spot: !!it.spot,
         office: !!it.spot && isOffice(it.ev),
         approx: !!it.ev.approxArea,
         lat: it.ev.lat,
         lng: it.ev.lng,
-        phase: it.phase,
+        phase: it.ev.kind === 'store' && it.phase !== 'active' ? 'closed' : it.phase,
         title: `${tagLabel(it)}｜${titleOf(it.ev)}`,
         flag: flagOf(it.ev),
         // 地圖上的小圖示照活動的主題（發放的也算一類，v1.671）
         topic: topicFor(it.ev),
         subtitle: `${placeLine(it.ev)} · ${timeLine(it, now)}`,
         selected: it.ev.id === selectedId,
-        ...(isUpcoming(it) && it.phase === 'later' ? { fade: clarityOf(it.ev, now) } : {}),
+        ...(isUpcoming(it) && it.phase === 'later' && it.ev.kind !== 'store' ? { fade: clarityOf(it.ev, now) } : {}),
       })),
     );
   }
@@ -3045,7 +3137,8 @@ function render(): void {
     if (seenActive.has(seenKey)) continue;
     seenActive.add(seenKey);
     // 整天的沒有「開始」的時間點，不然半夜 12 點會一起響；固定據點每天都開，不主動提醒
-    if (!notifiedOnce || !notifyOn() || !inScope(it.distanceKm) || it.ev.allDay || it.spot) continue;
+    // 店家每天開門不提醒
+    if (!notifiedOnce || !notifyOn() || !inScope(it.distanceKm) || it.ev.allDay || it.spot || it.ev.kind === 'store') continue;
     beep(theme.sound);
     try {
       navigator.vibrate?.([120, 80, 160]);
@@ -3138,7 +3231,8 @@ function listRows(items: Item[], now: number): Row[] {
   for (const it of items) {
     const r = routeOf(it.ev);
     if (!r) {
-      rows.push({ it, phase: it.phase, distanceKm: it.distanceKm, inScope: inScope(it.distanceKm), inTime: inTime(it, now), spot: !!it.spot, sortAt: it.ev.startAt });
+      // 營業中的店家照距離排（開門時間不重要）
+      rows.push({ it, phase: it.phase, distanceKm: it.distanceKm, inScope: inScope(it.distanceKm), inTime: inTime(it, now), spot: !!it.spot, sortAt: it.ev.kind === 'store' && it.phase === 'active' ? 0 : it.ev.startAt });
       continue;
     }
     if (seen.has(r.id)) continue;
@@ -3150,6 +3244,7 @@ function listRows(items: Item[], now: number): Row[] {
 }
 
 const PHASE_TITLE: Partial<Record<Phase, string>> = { active: '進行中', soon: '即將開始', later: '稍後開始' };
+const STORE_PHASE_TITLE = { active: '營業中', soon: '快開門了', later: '休息中' };
 
 /** 清單上一則一則的順序（事件 id） */
 let listOrder: number[] = [];
@@ -3190,7 +3285,7 @@ function renderList(items: Item[], now: number): void {
     // 照距離：進行中、即將開始、稍後開始合在一起；職缺從刊登起都算「徵才中」
     ...(byDistance
       ? [{ title: '由近到遠', rows: sorted(singles) }]
-      : (['active', 'soon', 'later'] as const).map((ph) => ({ title: !mod.current && ph === 'active' ? '刊登中' : (PHASE_TITLE[ph] as string), rows: byPhase(ph) }))),
+      : (['active', 'soon', 'later'] as const).map((ph) => ({ title: mod.id === 'taipai' ? STORE_PHASE_TITLE[ph] : !mod.current && ph === 'active' ? '刊登中' : (PHASE_TITLE[ph] as string), rows: byPhase(ph) }))),
     { title: SPOT_SECTION[mod.id] ?? '固定據點', rows: sorted(spotsIn) },
     ...Object.entries(POSTING_SECTION).map(([role, title]) => ({ title, rows: sorted(postingRows.get(role) ?? []) })),
     { title: laterLabel(), rows: sorted(laterRows) },
@@ -3255,7 +3350,7 @@ function timeLineHtml(it: Item, now: number): string {
 
 function itemCard(it: Item, now: number): HTMLLIElement {
   const li = document.createElement('li');
-  li.className = `ev phase-${it.phase} kind-${it.ev.kind}${it.spot ? ' spot' : ''}${it.spot && isOffice(it.ev) ? ' office' : ''}${inScope(it.distanceKm) ? '' : ' out-of-range'}${it.ev.id === selectedId ? ' selected' : ''}`;
+  li.className = `ev phase-${it.phase} kind-${blipKind(it.ev)}${it.spot ? ' spot' : ''}${it.spot && isOffice(it.ev) ? ' office' : ''}${inScope(it.distanceKm) ? '' : ' out-of-range'}${it.ev.id === selectedId ? ' selected' : ''}`;
   li.dataset.id = String(it.ev.id);
   li.innerHTML = `
     <div class="ev-title"><span class="dot"></span><span class="kind-tag">${tagLabel(it)}</span>${esc(titleOf(it.ev))}${it.ev.item ? ` <span class="muted">· ${esc(it.ev.item)}</span>` : ''}${it.ev.kind === 'job' && jobRisky(it.ev) ? '<span class="risk-tag">⚠️ 注意</span>' : ''}${followed().length > 1 && it.ev.keyword ? `<span class="ev-kw">#${esc(it.ev.keyword)}</span>` : ''}</div>
@@ -4809,7 +4904,7 @@ async function throwBottleFx(text: string, photo: string | null, hide: () => voi
  * 詳細資料裡不再另外寫「距離」（v1.633 使用者說標題就有） */
 function headMeta(it: Item, now: number): string {
   const { ev } = it;
-  const when = ev.kind === 'job' || postingRole(ev) ? '' : isUpcoming(it) ? startsIn(reportedStop(ev)?.at ?? ev.startAt, now) : it.phase === 'active' ? '進行中' : '';
+  const when = ev.kind === 'store' ? (storeSlots(ev) ? (it.phase === 'active' ? '營業中' : '休息中') : '') : ev.kind === 'job' || postingRole(ev) ? '' : isUpcoming(it) ? startsIn(reportedStop(ev)?.at ?? ev.startAt, now) : it.phase === 'active' ? '進行中' : '';
   const km = haversineKm(stepFrom ?? origin, ev);
   return [when, `${ev.approxArea ? '約 ' : ''}${formatKm(km)}`].filter(Boolean).join('・');
 }
@@ -4988,7 +5083,7 @@ function renderDetail(items: Item[], now: number): void {
     <div class="sheet-body">
       ${nearbyHtml(it, items)}
       ${routeBoxHtml(ev, items, now)}
-      ${ev.kind === 'job' ? jobDetailHtml(it, now) : ev.kind === 'session' ? sessionDetailHtml(it, now) : ev.kind === 'food' ? foodDetailHtml(it, now) : `<p>類型：${it.spot ? `固定據點（${kindLabel(ev)}）` : kindLabel(ev)}<br>${ev.item ? `${ev.kind === 'activity' ? '物品' : '發放'}：${esc(ev.item)}<br>` : ''}${ev.keyword ? `關鍵字：#${esc(ev.keyword)}<br>` : ''}地點：${esc(placeOf(ev))}${ev.approxArea ? `<br><span class="approx-note">約略位置：只知道在${esc(ev.approxArea)}，地圖上是${esc(ev.approxArea)}的中心點，實際地點請看原文</span>` : ''}<br>時間：${it.spot ? esc(spotSchedule(it)) : ev.allDay ? `${dateFmt.format(new Date(ev.startAt * 1000))} ${allDayText(ev, false)}` : esc(eventTimeText(ev))}</p>`}
+      ${ev.kind === 'store' ? storeDetailHtml(it, now) : ev.kind === 'job' ? jobDetailHtml(it, now) : ev.kind === 'session' ? sessionDetailHtml(it, now) : ev.kind === 'food' ? foodDetailHtml(it, now) : `<p>類型：${it.spot ? `固定據點（${kindLabel(ev)}）` : kindLabel(ev)}<br>${ev.item ? `${ev.kind === 'activity' ? '物品' : '發放'}：${esc(ev.item)}<br>` : ''}${ev.keyword ? `關鍵字：#${esc(ev.keyword)}<br>` : ''}地點：${esc(placeOf(ev))}${ev.approxArea ? `<br><span class="approx-note">約略位置：只知道在${esc(ev.approxArea)}，地圖上是${esc(ev.approxArea)}的中心點，實際地點請看原文</span>` : ''}<br>時間：${it.spot ? esc(spotSchedule(it)) : ev.allDay ? `${dateFmt.format(new Date(ev.startAt * 1000))} ${allDayText(ev, false)}` : esc(eventTimeText(ev))}</p>`}
       ${sessionsHtml(it, now)}
       ${tagsOf(ev).length > 0 ? `<p class="detail-tags">${tagsHtml(tagsOf(ev), true)}</p>` : ''}
       <blockquote class="post-excerpt" title="原文摘錄，完整內容請看原文">${esc(ev.post.source === 'news' ? ev.post.text.split('\n')[0] : ev.post.text)}</blockquote>
@@ -5177,6 +5272,11 @@ function openFeedback(ev: EventOut, fromRoute?: RouteOut, fixStop?: number): voi
       ).join('')
     : '';
   $('#feedback-topics').hidden = true;
+  // 店家：時間錯誤是營業時間、不是活動是不是台派店家或歇業了
+  for (const el of document.querySelectorAll<HTMLElement>('#feedback-form .fb-label')) {
+    el.dataset.base ??= el.textContent ?? '';
+    el.textContent = ev.kind === 'store' ? (el.dataset.store ?? el.dataset.base) : el.dataset.base;
+  }
   const fix = route && fixStop !== undefined ? route.stops[fixStop] : undefined;
   if (fix) {
     select.value = String(fixStop);
@@ -5187,7 +5287,9 @@ function openFeedback(ev: EventOut, fromRoute?: RouteOut, fixStop?: number): voi
     ? `「${fix.name}」在哪裡？請寫地址或店名，也可以貼 Google 地圖的座標`
     : route
       ? '補充說明（選填）。某一站的地點錯了，請寫那一站正確的地址或店名'
-      : '補充說明（選填），例如：實際在 2 號出口、15:00 才開始';
+      : ev.kind === 'store'
+        ? '補充說明（選填），例如：營業時間改成 11:00–21:00、搬到隔壁巷子'
+        : '補充說明（選填），例如：實際在 2 號出口、15:00 才開始';
   $('#feedback-target').textContent = route ? `「${route.title}」哪裡有問題？` : `「${titleOf(ev)}」哪裡有問題？`;
   feedbackSheet.hidden = false;
   resetFeedbackPin();
@@ -7655,6 +7757,7 @@ function placeLine(ev: EventOut): string {
 }
 
 function kindLabel(ev: EventOut): string {
+  if (ev.kind === 'store') return storeTypeLabel(ev);
   if (ev.kind === 'session') return isSeek(ev) ? '找臨打' : '招臨打';
   if (ev.kind === 'food') return { vendor: '出攤', recommend: '推薦', meetup: '揪團' }[foodRole(ev) ?? 'recommend'] ?? '推薦';
   return ev.kind === 'job' ? (isOffer(ev) ? jobWords().offer : '徵人') : ev.kind === 'activity' ? (topicOf(ev) ?? '活動') : '發放';
@@ -7709,13 +7812,14 @@ const byTagUse = (a: string, b: string): number => (tagUse.get(b) ?? 0) - (tagUs
  * 活動是哪一類（topic-icons.ts：發放、造勢、講座…），雷達、地圖的小圖示和類型按鈕都照這個：活動照 AI 判讀的主題，發放的算「發放」
  */
 function topicFor(ev: EventOut): string | null {
-  return ev.kind === 'activity' ? topicOf(ev) : ev.kind === 'giveaway' ? '發放' : null;
+  // 店家照店家類型（STORE_TYPES 的 key）
+  return ev.kind === 'activity' ? topicOf(ev) : ev.kind === 'giveaway' ? '發放' : ev.kind === 'store' ? (storeOf(ev).type ?? 'other') : null;
 }
 function typeOf(ev: EventOut): string | null {
   return topicGlyph(topicFor(ev));
 }
 function typeLabel(key: string): string {
-  return TOPIC_TYPES.find((t) => t.key === key)?.label ?? key;
+  return [...TOPIC_TYPES, ...STORE_TYPES].find((t) => t.key === key)?.label ?? key;
 }
 /** 點類型按鈕：只看這一類（雷達、地圖、清單），再點一次清掉 */
 function pickType(key: string): void {
@@ -7734,7 +7838,7 @@ function renderSearchTags(items: Item[]): void {
   tagUse = count;
   const top = [...count.keys()].sort(byTagUse).slice(0, 8);
   const has = new Set(items.map((it) => typeOf(it.ev)));
-  const types = TOPIC_TYPES.filter((t) => has.has(t.key) || t.key === typePick);
+  const types = [...TOPIC_TYPES, ...STORE_TYPES].filter((t) => has.has(t.key) || t.key === typePick);
   if (top.length === 0 && types.length === 0) {
     box.hidden = true;
     return;
@@ -8146,6 +8250,7 @@ function previewWhen(p: PreviewItem): string {
   if (p.kind === 'job') return `${isOffer(p) ? jobWords().offer : '工作'} ${jobPeriod(jobOf(p))}`;
   if (isSeek(p) || foodRole(p) === 'meetup') return seekWhen(p);
   if (foodRole(p) === 'recommend') return `網友推薦${foodOf(p).hours ? `・營業 ${foodOf(p).hours}` : ''}`;
+  if (p.kind === 'store') return storeOf(p).hours ?? '沒寫（還是可以放上雷達）';
   const day = (t: number): string => dateFmt.format(new Date(t * 1000));
   // 一天好幾個時段：「12:00–13:30、18:00–20:30」；沒寫結束的只寫開始，最後寫「發完為止」（活動不寫）
   const open = openEndTail(p);
@@ -8281,8 +8386,8 @@ const useEditForm = (edit: EditItem[] | undefined): boolean => mod.current || (e
 /** 狗狗陪伴、找工作：補充資料的時間是工作期間（只有日期） */
 const editDays = (): boolean => mod.id === 'dog' || mod.id === 'work';
 /** 補充資料的「一場」：洋流是活動，其他雷達叫「一筆」 */
-const editUnit = (): string => (mod.current ? '場' : '筆');
-const EDIT_TITLE_EG: Record<ModuleId, string> = { current: '景華公園表演同樂會', dog: '週末幫忙遛狗', badminton: '週六晚上羽球臨打', food: '週末市集餐車出攤', work: '活動工作人員' };
+const editUnit = (): string => (mod.current ? '場' : mod.id === 'taipai' ? '家' : '筆');
+const EDIT_TITLE_EG: Record<ModuleId, string> = { current: '景華公園表演同樂會', dog: '週末幫忙遛狗', badminton: '週六晚上羽球臨打', food: '週末市集餐車出攤', work: '活動工作人員', taipai: '慢工咖啡' };
 
 /**
  * 補充資料：每一場直接改標題、時間、地點，位置不對可以在雷達上標。洋流多一個主題；
@@ -8296,7 +8401,12 @@ function editCardHtml(it: EditItem | null): string {
   // 跨天的（兩天的市集、跨夜到隔天早上的）結束日期跟開始不同才填；同一天、只跨過午夜到隔天清晨的留空（照舊自動算隔天）
   const overnight = !!(it?.startAt && it.endAt && it.endAt - it.startAt < 86400 && endWall && start && endWall.time <= start.time);
   const endDate = endWall && start && endWall.date !== start.date && !overnight ? endWall.date : '';
-  const when = editDays()
+  // 台派雷達的店家：類型、營業時間，沒有日期時間
+  const when = mod.id === 'taipai'
+    ? `<label>類型<select name="storeType">${STORE_TYPES.map((t) => `<option value="${t.key}"${t.key === (it?.storeType ?? 'other') ? ' selected' : ''}>${t.label}</option>`).join('')}</select></label>
+      <label>營業時間<input name="hours" maxlength="100" value="${esc(it?.hours ?? '')}" placeholder="例如：週二至週日 11:00–20:00，週一公休"></label>
+      <small class="muted">不知道可以留空。照上面的寫法，雷達會標現在有沒有開。</small>`
+    : editDays()
     ? `<div class="edit-row">
         <label>第一天<input type="date" name="date" value="${start?.date ?? ''}"></label>
         <label class="edit-enddate">最後一天<small>（做好幾天才填，最多 7 天）</small><input type="date" name="enddate" value="${it?.endAt ? (endWall?.date ?? '') : ''}"></label>
@@ -8312,7 +8422,7 @@ function editCardHtml(it: EditItem | null): string {
       <legend><span class="edit-no"></span><button type="button" class="chip" data-act="drop">不要這${editUnit()}</button></legend>
       <div class="edit-what">
         ${mod.current ? `<label>主題<input name="topic" maxlength="6" value="${esc(it?.topic ?? '')}" placeholder="例如：遊行"></label>` : ''}
-        <label>${mod.current ? '活動內容' : '內容'}<input name="title" maxlength="60" value="${esc(it?.title ?? '')}" placeholder="例如：${EDIT_TITLE_EG[mod.id]}"></label>
+        <label>${mod.current ? '活動內容' : mod.id === 'taipai' ? '店名' : '內容'}<input name="title" maxlength="${mod.id === 'taipai' ? 40 : 60}" value="${esc(it?.title ?? '')}" placeholder="例如：${EDIT_TITLE_EG[mod.id]}"></label>
       </div>
       ${when}
       <label>地點<input name="place" maxlength="200" value="${esc(it?.place ?? '')}" placeholder="店名或地址，例如：厝邊咖啡 台北市萬華區○○路○號"></label>
@@ -8403,7 +8513,7 @@ function wireEditTags(card: HTMLElement, tags: string[]): void {
 
 function editFormHtml(items: EditItem[], hidden: boolean): string {
   const list = items.length > 0 ? items.slice(0, MAX_EDIT_ITEMS) : [null];
-  const what = mod.current ? '每一場的主題、活動內容、時間' : `每一筆的內容、${editDays() ? '工作日期' : '時間'}`;
+  const what = mod.current ? '每一場的主題、活動內容、時間' : mod.id === 'taipai' ? '每一家的店名、類型、營業時間' : `每一筆的內容、${editDays() ? '工作日期' : '時間'}`;
   return `<form class="preview-more edit-form"${hidden ? ' hidden' : ''} novalidate>
       <p class="muted sheet-note">直接改${what}、地點、關鍵字；位置不對可以按「在雷達上標位置」，在雷達上拖標記或點一下。${mod.current ? '' : '其他資料照原本判讀的。'}</p>
       <div class="edit-items">${list.map((it) => editCardHtml(it)).join('')}</div>
@@ -8509,7 +8619,7 @@ function renumberEdit(form: HTMLFormElement): void {
   const cards = [...form.querySelectorAll<HTMLElement>('.edit-item')];
   cards.forEach((c, i) => {
     const no = c.querySelector('.edit-no');
-    if (no) no.textContent = cards.length > 1 ? `第 ${i + 1} ${editUnit()}` : mod.current ? '活動' : '這一筆';
+    if (no) no.textContent = cards.length > 1 ? `第 ${i + 1} ${editUnit()}` : mod.current ? '活動' : `這一${editUnit()}`;
     const drop = c.querySelector<HTMLElement>('[data-act="drop"]');
     if (drop) drop.hidden = cards.length <= 1;
   });
@@ -8527,16 +8637,20 @@ function readEditForm(form: HTMLFormElement): EditInput[] | string {
     const title = val('title');
     const topic = mod.current ? val('topic') || null : null;
     const place = val('place');
-    if (!title) return `${at}請填${mod.current ? '活動內容' : '內容'}`;
+    // 台派雷達的店家沒有時間
+    const store = mod.id === 'taipai';
+    if (!title) return `${at}請填${mod.current ? '活動內容' : store ? '店名' : '內容'}`;
     const days = editDays();
-    if (!val('date') || (!days && !val('start'))) return days ? `${at}請填第一天` : `${at}請填哪天幾點開始`;
+    if (!store && (!val('date') || (!days && !val('start')))) return days ? `${at}請填第一天` : `${at}請填哪天幾點開始`;
     if (!place) return `${at}請填地點`;
-    const startAt = tpeUnix(val('date'), days ? '00:00' : val('start'));
+    const startAt = store ? 0 : tpeUnix(val('date'), days ? '00:00' : val('start'));
     if (startAt === null) return `${at}日期或時間看不懂，請重新選`;
     // 跨好幾天的（v1.567 使用者說「活動持續三天以內」都要收）：照填的結束日期；沒填結束日期、結束比開始早：跨過午夜，是隔天
     const endDate = val('enddate');
-    let endAt: number | null;
-    if (days) {
+    let endAt: number | null = null;
+    if (store) {
+      // 店家沒有結束時間
+    } else if (days) {
       // 工作期間：最後一天（同一天不用填），最多連續 7 天（跟判讀一樣只收單次的）
       endAt = endDate ? tpeUnix(endDate, '00:00') : null;
       if (endAt !== null && endAt < startAt) return `${at}最後一天要在第一天之後`;
@@ -8560,7 +8674,8 @@ function readEditForm(form: HTMLFormElement): EditInput[] | string {
     }
     // 判讀結果的第幾筆（新加的沒有）
     const ref = card.dataset.ref ? Number(card.dataset.ref) : NaN;
-    out.push({ title, topic, tags, startAt, endAt, place, lat: pinned?.lat ?? null, lng: pinned?.lng ?? null, ref: Number.isSafeInteger(ref) ? ref : null });
+    const storeFields = store ? { hours: val('hours') || null, storeType: card.querySelector<HTMLSelectElement>('[name="storeType"]')?.value ?? 'other' } : {};
+    out.push({ title, topic, tags, startAt, endAt, place, lat: pinned?.lat ?? null, lng: pinned?.lng ?? null, ref: Number.isSafeInteger(ref) ? ref : null, ...storeFields });
   }
   return out.length > 0 ? out : `至少要填一${editUnit()}`;
 }
@@ -8723,11 +8838,11 @@ function renderPreview(r: SubmitResult): void {
     <ul class="report-preview">${(r.routes ?? []).map(routePreviewHtml).join('')}${items
       .map(
         (p) => `<li>
-          <b>${p.kind === 'food' ? ({ vendor: '出攤', recommend: '推薦', meetup: '揪團' }[foodRole(p) ?? 'recommend'] ?? '推薦') : p.kind === 'session' ? (isSeek(p) ? '找臨打' : '招臨打') : p.kind === 'job' ? (isOffer(p) ? jobWords().offer : '徵人') : p.kind === 'activity' ? esc(topicOf(p) ?? '活動') : '發放'}${p.spot ? (p.kind === 'session' ? '・每週固定場' : p.kind === 'food' ? '・每週固定擺攤' : '・固定據點') : ''}｜${esc(p.title)}</b>
+          <b>${p.kind === 'store' ? esc(storeTypeLabel(p)) : p.kind === 'food' ? ({ vendor: '出攤', recommend: '推薦', meetup: '揪團' }[foodRole(p) ?? 'recommend'] ?? '推薦') : p.kind === 'session' ? (isSeek(p) ? '找臨打' : '招臨打') : p.kind === 'job' ? (isOffer(p) ? jobWords().offer : '徵人') : p.kind === 'activity' ? esc(topicOf(p) ?? '活動') : '發放'}${p.spot ? (p.kind === 'session' ? '・每週固定場' : p.kind === 'food' ? '・每週固定擺攤' : '・固定據點') : ''}｜${esc(p.title)}</b>
           ${p.kind === 'job' && (jobOf(p).risks ?? []).some((r) => r !== 'no_employer') ? `<small class="preview-warn">⚠️ ${esc((jobOf(p).risks ?? []).map((r) => JOB_RISK_TEXT[r]).filter(Boolean).join('；'))}</small>` : ''}
           ${p.item ? `<small>${esc(p.item)}</small>` : ''}
           ${tagsOf(p).length > 0 ? `<small>關鍵字：${tagsHtml(tagsOf(p))}</small>` : ''}
-          <small>時間：${esc(previewWhen(p))}</small>
+          <small>${p.kind === 'store' ? '營業時間' : '時間'}：${esc(previewWhen(p))}</small>
           <small>地點：${esc(shortAddress(p.placeText.replace(/\s*\n\s*/g, ' ')))}</small>
           <small>${previewWhere(p)}</small>
           ${p.profileHint ? `<small class="preview-warn">📍 貼文沒寫地點，這是從 ${esc(p.profileHint)} 的帳號名稱、簡介推的，請確認是不是這裡。</small>` : ''}

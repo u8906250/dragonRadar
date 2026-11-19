@@ -6,6 +6,7 @@ import { cityOfHouse, geocodeAddress, parseTwAddress, type TwAddress } from './a
 import { SESSION_SPEC } from './badminton';
 import { FOOD_SPEC } from './food';
 import { JOB_SPEC, jobRisks, WORK_SPEC } from './jobs';
+import { STORE_DAYS, storeExtra, TAIPAI_SPEC } from './taipai';
 import { DEFAULT_MODULE, moduleOf, type ModuleId } from './modules';
 import { adminArea, cityLevel, cityOfDistrict, cityOfRoad, countryOfPlace, geocode, geocodeFirst, geocodeStreet, geocodeWorld, isAreaOnly, placeCandidates, regionOfPlace, type GeoPoint } from './geocode';
 import { listActiveKeywords, type KeywordRow } from './keywords';
@@ -653,7 +654,10 @@ export async function insertPlanned(env: Env, postId: string, p: PlannedEvent, n
             .first<{ id: number }>()
         )?.id ??
         null)
-      : await findDuplicate(env, p.kind, p.start_at, p.lat, p.lng);
+      : p.kind === 'store'
+        ? // 店家沒有時間：同一家店（附近、店名一樣）才算重複，同一棟樓的別家店不算
+          await findSameStore(env, p.title, p.lat, p.lng, postId)
+        : await findDuplicate(env, p.kind, p.start_at, p.lat, p.lng);
     if (dup !== null) return { event: null, reason: `duplicate_of_${dup}` };
   }
   // 車掃後來才放上去的站（重查到位置、改了時間）：主題跟同一則已經放上去的站一樣
@@ -737,7 +741,7 @@ export interface PlanResult {
 
 /** 每個模組用哪一套判讀（洋流改版後只判斷活動） */
 export function moduleSpec(module: ModuleId): ExtractSpec {
-  return module === 'dog' ? JOB_SPEC : module === 'work' ? WORK_SPEC : module === 'badminton' ? SESSION_SPEC : module === 'food' ? FOOD_SPEC : ACTIVITY_SPEC;
+  return module === 'dog' ? JOB_SPEC : module === 'work' ? WORK_SPEC : module === 'badminton' ? SESSION_SPEC : module === 'food' ? FOOD_SPEC : module === 'taipai' ? TAIPAI_SPEC : ACTIVITY_SPEC;
 }
 
 async function planPostWith(env: Env, post: PostRow, now: number, profileHint: string | null): Promise<PlanResult> {
@@ -759,6 +763,8 @@ async function planPostWith(env: Env, post: PostRow, now: number, profileHint: s
   const tags = postTags(extraction.tags, base, [...MODULE_TAGS[module], ...(await adoptedTags(env, module))]);
   if (tags.length > 0) for (const e of extraction.events) e.extra = { ...(e.extra ?? {}), tags };
   if (module === 'dog' || module === 'work') return { items: await planJobs(env, post, extraction.events, now, JOB_DAYS[module]), early: null };
+  // 台派雷達的店家不是單次的：放上雷達後一直顯示
+  if (module === 'taipai') return { items: await planStores(env, extraction.events, now, 0), early: null };
   if (module === 'current') {
     return { items: await planActivities(env, post, extraction.events, text, now, extraction.route_title ?? null), early: null };
   }
@@ -951,6 +957,9 @@ export interface ManualActivity {
   lng: number | null;
   /** 判讀結果的第幾筆（PlanItem 的索引）：洋流以外的雷達照那一筆的種類、費用、薪資這些欄位排；新加的是 null */
   ref?: number | null;
+  /** 台派雷達的店家：營業時間（沒寫是 null）、店家類型；startAt、endAt 用不到 */
+  hours?: string | null;
+  storeType?: string;
 }
 
 /**
@@ -1054,6 +1063,7 @@ const EDIT_BASE: Record<Exclude<ModuleId, 'current'>, { kind: EventKind; extra: 
   work: { kind: 'job', extra: { role: 'hire' } },
   badminton: { kind: 'session', extra: { role: 'offer' } },
   food: { kind: 'food', extra: { role: 'vendor' } },
+  taipai: { kind: 'store', extra: { type: 'other' } },
 };
 
 /**
@@ -1094,7 +1104,11 @@ export async function planEdited(env: Env, post: PostRow, acts: ManualActivity[]
       until: null,
       extra: { ...extra, tags },
     };
-    if (kind === 'job') {
+    if (kind === 'store') {
+      // 店家：名稱、地點、營業時間、類型照填的（營業時間重新讀成每週的時段）
+      const store = { ...ex, extra: { ...storeExtra(a.storeType ?? extra.type, a.hours !== undefined ? a.hours : str(extra.hours)), tags } };
+      items.push(...(await planStores(env, [store], now, group, [located])));
+    } else if (kind === 'job') {
       const job: JobInfo = {
         role: extra.role === 'offer' ? 'offer' : 'hire',
         work_from: taipeiDate(a.startAt),
@@ -1969,6 +1983,73 @@ async function planPostings(env: Env, post: PostRow, list: ExtractedEvent[], now
     });
   }
   return items;
+}
+
+/**
+ * 台派雷達的店家：從現在起顯示 STORE_DAYS 天（不是單次的，沒有開始、結束時間）；營業時間放在 extra（hours.ts 讀成每週的時段），
+ * 雷達照這個標營業中、休息中。查不到門牌退到鄉鎮區（約略位置），回報的人可以在雷達上標
+ */
+async function planStores(env: Env, list: ExtractedEvent[], now: number, groupFrom: number, located: Array<Located | undefined> = []): Promise<PlanItem[]> {
+  const items: PlanItem[] = [];
+  const deadline = Date.now() + ADDRESS_BUDGET_MS;
+  for (const [i, ex] of list.entries()) {
+    const group = groupFrom + i;
+    if (ex.confidence < MIN_CONFIDENCE) {
+      items.push({ group, plan: null, reason: 'low_confidence' });
+      continue;
+    }
+    const placeQuery = ex.place_query ?? ex.place_text;
+    const placeText = ex.place_text ?? ex.place_query;
+    if (!placeQuery || !placeText) {
+      items.push({ group, plan: null, reason: 'no_place' });
+      continue;
+    }
+    const { point, approxArea } = located[i] ?? (await locateOrCity(env, placeQuery, placeText, ex.place_text, deadline));
+    items.push({
+      group,
+      reason: 'planned',
+      plan: {
+        kind: 'store',
+        title: ex.title,
+        item: null,
+        start_at: now,
+        end_at: now + STORE_DAYS * DAY_SEC,
+        place_text: placeText,
+        place_query: placeQuery,
+        lat: point?.lat ?? null,
+        lng: point?.lng ?? null,
+        confidence: ex.confidence,
+        all_day: false,
+        spot: false,
+        approx_area: approxArea,
+        end_open: true,
+        until_open: false,
+        weekdays: null,
+        tz: null,
+        extra: JSON.stringify(ex.extra ?? {}),
+      },
+    });
+  }
+  return items;
+}
+
+/** 店名比對用：小寫、拿掉空白和符號、臺台不分 */
+const storeKey = (s: string): string => s.toLowerCase().replace(/[\s\p{P}\p{S}]/gu, '').replace(/臺/g, '台');
+
+/** 雷達上同一家店（約 150 m 內、店名一樣或一個包含另一個），不算這則貼文自己的 */
+async function findSameStore(env: Env, title: string, lat: number, lng: number, postId: string): Promise<number | null> {
+  const { results } = await env.DB.prepare(
+    `SELECT id, title FROM events WHERE status IN ('upcoming', 'active') AND kind = 'store'
+       AND lat BETWEEN ? AND ? AND lng BETWEEN ? AND ? AND post_id != ? LIMIT 50`,
+  )
+    .bind(lat - DUP_DEG, lat + DUP_DEG, lng - DUP_DEG, lng + DUP_DEG, postId)
+    .all<{ id: number; title: string }>();
+  const k = storeKey(title);
+  if (!k) return null;
+  return results.find((r) => {
+    const o = storeKey(r.title);
+    return !!o && (o.includes(k) || k.includes(o));
+  })?.id ?? null;
 }
 
 /** extra 欄位（JSON）讀出來；壞掉的當沒有 */

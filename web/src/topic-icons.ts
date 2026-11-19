@@ -28,8 +28,28 @@ export const TOPIC_TYPES: Array<{ key: string; label: string }> = [
   { key: 'care', label: '志工' },
   { key: 'social', label: '聯誼' },
 ];
+/**
+ * 台派雷達的店家類型（判讀時選一個，跟伺服器 worker/src/taipai.ts 的 STORE_TYPES 一樣）：雷達、地圖的小圖示和類型按鈕照這個分。
+ * 店家的 topic 直接是 key（topicFor），不用照字分
+ */
+export const STORE_TYPES: Array<{ key: string; label: string }> = [
+  { key: 'eat', label: '餐廳小吃' },
+  { key: 'cafe', label: '咖啡甜點' },
+  { key: 'drink', label: '飲料' },
+  { key: 'bar', label: '酒吧' },
+  { key: 'book', label: '書店' },
+  { key: 'shop', label: '選物雜貨' },
+  { key: 'beauty', label: '美髮美容' },
+  { key: 'stay', label: '住宿' },
+  { key: 'clinic', label: '醫療' },
+  { key: 'other', label: '其他' },
+];
+const STORE_KEYS = new Set(STORE_TYPES.map((t) => t.key));
+export const isStoreType = (v: unknown): v is string => typeof v === 'string' && STORE_KEYS.has(v);
+
 export function topicGlyph(topic: string | null | undefined): string | null {
   if (!topic) return null;
+  if (STORE_KEYS.has(topic)) return topic;
   return TOPIC_GROUPS.find((g) => g.words.test(topic))?.key ?? null;
 }
 /** 小圖示（viewBox -12 -12 24 24，圓點半徑約 10；c 是圖示的顏色，可以是 currentColor） */
@@ -56,6 +76,26 @@ export function glyphSvg(key: string, c: string): string {
       return `<path d="M0 7 V-1" ${s} stroke-width="1.8"/><path d="M0 0 C-0.8 -4.6 -5.6 -6 -7 -4.2 C-6.2 -0.9 -3 0.3 0 0 Z" fill="${c}"/><path d="M0 -1.8 C0.9 -6.6 5.8 -7.8 7 -5.8 C6 -2.6 3 -1.6 0 -1.8 Z" fill="${c}"/><path d="M-3.5 7 H3.5" ${s} stroke-width="1.6"/>`;
     case 'social': // 愛心（聯誼）
       return `<path d="M0 6 C-4 3 -7 0.5 -7 -2.5 a3.4 3.4 0 0 1 7 -1.2 a3.4 3.4 0 0 1 7 1.2 C7 0.5 4 3 0 6 z" fill="${c}"/>`;
+    case 'eat': // 碗和筷子
+      return `<path d="M-7 -1 h14 a7 6.5 0 0 1 -14 0 z" fill="${c}"/><path d="M-3.5 6.5 h7" ${s} stroke-width="1.6"/><path d="M1 -2.5 L5.5 -8 M3 -2.5 L7.5 -7" ${s} stroke-width="1.4"/>`;
+    case 'cafe': // 咖啡杯冒煙
+      return `<path d="M-6.5 -1.5 h10 v4 a5 5 0 0 1 -10 0 z" fill="${c}"/><path d="M3.5 0 h1.4 a2 2 0 0 1 0 4 h-1.6" ${s} stroke-width="1.5"/><path d="M-3.5 -4 q-1 -1.6 0 -3.2 M0 -4 q-1 -1.6 0 -3.2" ${s} stroke-width="1.3"/>`;
+    case 'drink': // 手搖杯和吸管
+      return `<path d="M-4.6 -3.5 h9.2 l-1.4 10.5 h-6.4 z" fill="${c}"/><path d="M-5.6 -3.5 h11.2" ${s} stroke-width="1.6"/><path d="M0.5 -3.5 L2.5 -8.5" ${s} stroke-width="1.5"/><circle cx="-1.6" cy="4.6" r="0.9" fill="#00000055"/><circle cx="1.4" cy="4.8" r="0.9" fill="#00000055"/>`;
+    case 'bar': // 雞尾酒杯
+      return `<path d="M-6.5 -6 h13 l-6.5 7 z" fill="${c}"/><path d="M0 1 V6.5 M-3.5 6.8 h7" ${s} stroke-width="1.6"/>`;
+    case 'book': // 打開的書
+      return `<path d="M0 -4.5 C-2.5 -6.5 -5.5 -6.5 -7 -5.5 V5.5 C-5.5 4.5 -2.5 4.5 0 6.5 Z" fill="${c}"/><path d="M0 -4.5 C2.5 -6.5 5.5 -6.5 7 -5.5 V5.5 C5.5 4.5 2.5 4.5 0 6.5 Z" fill="${c}"/><path d="M0 -4.5 V6.5" stroke="#00000055" stroke-width="1"/>`;
+    case 'shop': // 購物袋
+      return `<rect x="-5.5" y="-2.5" width="11" height="9" rx="1.2" fill="${c}"/><path d="M-2.6 -2.5 v-1.5 a2.6 2.6 0 0 1 5.2 0 v1.5" ${s} stroke-width="1.5"/>`;
+    case 'beauty': // 剪刀
+      return `<circle cx="-3.6" cy="4.2" r="2.3" ${s} stroke-width="1.5"/><circle cx="3.6" cy="4.2" r="2.3" ${s} stroke-width="1.5"/><path d="M-2.2 2.4 L4 -7 M2.2 2.4 L-4 -7" ${s} stroke-width="1.6"/>`;
+    case 'stay': // 床
+      return `<path d="M-7 5.5 V-5 M7 5.5 V1 M-7 1 H7" ${s} stroke-width="1.6"/><rect x="-6.5" y="-2.8" width="4.6" height="3.2" rx="1.2" fill="${c}"/><path d="M-1.4 1 V-2 h6.6 a1.8 1.8 0 0 1 1.8 1.8 V1 z" fill="${c}"/>`;
+    case 'clinic': // 十字
+      return `<path d="M-2.2 -7 h4.4 v4.8 h4.8 v4.4 h-4.8 v4.8 h-4.4 v-4.8 h-4.8 v-4.4 h4.8 z" fill="${c}"/>`;
+    case 'other': // 小店面（遮雨棚加門）
+      return `<path d="M-7 -2 L-5.5 -6.5 H5.5 L7 -2 Z" fill="${c}"/><rect x="-5.5" y="-1" width="11" height="7.5" fill="${c}"/><rect x="-1.6" y="1.8" width="3.2" height="4.7" fill="#00000055"/>`;
     default:
       return '';
   }

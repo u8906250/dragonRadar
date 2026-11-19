@@ -2,8 +2,8 @@ import type { Env } from './env';
 import { isAdminOnly } from './geocode';
 import { formatTaipei, parseIsoToUnix } from './util';
 
-/** giveaway 發放、activity 活動（洋流）；job 職缺（狗狗陪伴）；session 臨打（羽球臨打）；food 吃的（美食品味） */
-export type EventKind = 'giveaway' | 'activity' | 'job' | 'session' | 'food';
+/** giveaway 發放、activity 活動（洋流）；job 職缺（狗狗陪伴）；session 臨打（羽球臨打）；food 吃的（美食品味）；store 店家（台派雷達） */
+export type EventKind = 'giveaway' | 'activity' | 'job' | 'session' | 'food' | 'store';
 
 /** 職缺（狗狗陪伴模組）：工作期間、每天時段、薪資、雇主、怎麼應徵 */
 export interface JobInfo {
@@ -342,6 +342,7 @@ export const MODULE_TAGS: Record<string, string[]> = {
   dog: ['遛狗', '寄宿', '到府', '陪伴', '免費', '短期'],
   badminton: ['臨打', '新手', '雙打', '平日', '週末'],
   food: ['餐車', '市集', '咖啡', '甜點', '便當', '素食', '宵夜', '早午餐'],
+  taipai: ['咖啡', '甜點', '早午餐', '素食', '書店', '酒吧', '選物', '寵物友善'],
 };
 /** 判讀結果裡的關鍵字（各雷達的 schema 共用） */
 export const TAGS_SCHEMA = { type: 'array', maxItems: 8, items: { type: 'string' } };
@@ -439,6 +440,7 @@ export function normalizeKind(v: unknown): EventKind {
   if (k === 'job') return 'job';
   if (k === 'session') return 'session';
   if (k === 'food') return 'food';
+  if (k === 'store') return 'store';
   return k === 'activity' || k === 'event' || k === '活動' ? 'activity' : 'giveaway';
 }
 

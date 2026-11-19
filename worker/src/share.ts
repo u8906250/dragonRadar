@@ -1,5 +1,6 @@
 import type { Env } from './env';
 import { DEFAULT_MODULE } from './modules';
+import { STORE_TYPES } from './taipai';
 
 /**
  * 分享活動的連結（current-radar.pages.dev/e/編號，網站的 Pages Functions 拿這個做 LINE、Threads 的預覽卡片；v1.688 使用者說的）。
@@ -20,6 +21,8 @@ export interface ShareInfo {
   spot?: boolean;
   tz?: string | null;
   placeText?: string;
+  /** 台派雷達的店家：營業時間（沒寫是 null）；topic 是店家類型的名稱 */
+  hours?: string | null;
 }
 
 interface ShareRow {
@@ -56,6 +59,24 @@ const topicOf = (extra: string | null): string | null => {
   }
 };
 
+const extraOf = (extra: string | null): Record<string, unknown> => {
+  try {
+    const o = extra ? (JSON.parse(extra) as unknown) : null;
+    return o && typeof o === 'object' && !Array.isArray(o) ? (o as Record<string, unknown>) : {};
+  } catch {
+    return {};
+  }
+};
+/** 店家類型的名稱（「咖啡甜點」） */
+const storeTypeOf = (extra: string | null): string => {
+  const t = extraOf(extra).type;
+  return (typeof t === 'string' && STORE_TYPES[t]) || '其他';
+};
+const storeHoursOf = (extra: string | null): string | null => {
+  const h = extraOf(extra).hours;
+  return typeof h === 'string' && h ? h : null;
+};
+
 export async function shareInfo(env: Env, id: number, now: number): Promise<ShareInfo | null> {
   let r = await env.DB.prepare(`${SHARE_SELECT} WHERE e.id = ?`).bind(id).first<ShareRow>();
   if (!r) return null;
@@ -75,7 +96,8 @@ export async function shareInfo(env: Env, id: number, now: number): Promise<Shar
     ended: false,
     title: r.title,
     kind: r.kind ?? 'giveaway',
-    topic: topicOf(r.extra),
+    topic: r.kind === 'store' ? storeTypeOf(r.extra) : topicOf(r.extra),
+    ...(r.kind === 'store' ? { hours: storeHoursOf(r.extra) } : {}),
     startAt: r.start_at,
     endAt: r.end_at,
     allDay: r.all_day === 1,

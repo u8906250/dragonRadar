@@ -1,5 +1,5 @@
 /** giveaway 發放、activity 活動（洋流）；job 職缺（狗狗陪伴）；session 臨打（羽球臨打）；food 吃的（美食品味） */
-export type EventKind = 'giveaway' | 'activity' | 'job' | 'session' | 'food';
+export type EventKind = 'giveaway' | 'activity' | 'job' | 'session' | 'food' | 'store';
 
 export interface RelatedPost {
   id: string;
@@ -341,6 +341,9 @@ export interface EditItem {
   ref?: number;
   /** 狗狗陪伴、找工作：時間是工作期間的第一天、最後一天（endAt 是最後一天，同一天是 null） */
   days?: boolean;
+  /** 台派雷達的店家：營業時間（沒寫是 null）、店家類型（topic-icons.ts 的 STORE_TYPES）；沒有時間 */
+  hours?: string | null;
+  storeType?: string;
 }
 
 /** 修改資料送出的一場：lat、lng 是在地圖上標的位置，沒標是 null（照地點查） */
@@ -357,6 +360,9 @@ export interface EditInput {
   lng: number | null;
   /** 判讀結果的第幾筆（EditItem.ref）；新加的是 null */
   ref: number | null;
+  /** 台派雷達的店家：營業時間（沒填是 null）、店家類型 */
+  hours?: string | null;
+  storeType?: string;
 }
 
 /** 修改表單按「查地點」的結果 */

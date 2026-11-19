@@ -2,7 +2,7 @@
  * 模組：同一套雷達、地圖、清單、回報，換不同主題的資料（跟伺服器的 worker/src/modules.ts 對應）。
  * 洋流有自己的官方航線、車掃、漂流瓶、地標、搜尋關鍵字；其他模組只有大家回報的貼文。
  */
-export type ModuleId = 'current' | 'dog' | 'badminton' | 'food' | 'work';
+export type ModuleId = 'current' | 'dog' | 'badminton' | 'food' | 'work' | 'taipai';
 
 export interface ModuleDef {
   id: ModuleId;
@@ -33,6 +33,9 @@ export interface ModuleDef {
 
 /** 紅貴賓（狗狗陪伴的小圖，v1.752 使用者說換紅貴賓）：捲捲的頭頂、垂下來的捲毛耳朵、淺一點的嘴巴，emoji 的貴賓狗是灰白的 */
 const RED_POODLE = '<svg viewBox="0 0 40 40" width="34" height="34" aria-hidden="true"><g fill="#b4532b"><circle cx="9" cy="17" r="5"/><circle cx="7.6" cy="23" r="5"/><circle cx="8.6" cy="29" r="4.6"/><circle cx="31" cy="17" r="5"/><circle cx="32.4" cy="23" r="5"/><circle cx="31.4" cy="29" r="4.6"/></g><g fill="#c8693a"><circle cx="13.5" cy="10" r="5.6"/><circle cx="20" cy="7" r="6.4"/><circle cx="26.5" cy="10" r="5.6"/><ellipse cx="20" cy="20" rx="10" ry="10.4"/></g><g fill="none" stroke="#8f3d1d" stroke-width="1.1" stroke-linecap="round"><path d="M6 21 q2 -2 4 0 M6.5 27 q2 -2 4 0 M29.5 21 q2 -2 4 0 M29.5 27 q2 -2 4 0 M16.5 6 q2 -2 4 0 M21 9 q2 -2 4 0 M11 11 q2 -2 4 0"/></g><ellipse cx="20" cy="25.6" rx="5.6" ry="4.6" fill="#e0925c"/><circle cx="15.6" cy="19.2" r="2" fill="#2b1810"/><circle cx="24.4" cy="19.2" r="2" fill="#2b1810"/><circle cx="16.2" cy="18.5" r="0.7" fill="#fff"/><circle cx="25" cy="18.5" r="0.7" fill="#fff"/><ellipse cx="20" cy="23.6" rx="2.1" ry="1.5" fill="#2b1810"/><path d="M20 25 v1.6 M17.6 27 q2.4 1.8 4.8 0" fill="none" stroke="#2b1810" stroke-width="1" stroke-linecap="round"/><path d="M19 27.9 q1 2.6 2 0 z" fill="#ef8a8a"/></svg>';
+
+/** 台灣本島（台派雷達的小圖）：Natural Earth 的海岸線簡化，綠色、中間一顆小愛心 */
+const TAIWAN_HEART = '<svg viewBox="0 0 40 40" width="34" height="34" aria-hidden="true"><path d="M27.6 7.2 L26.7 8.8 L26.8 10.1 L27.4 10.5 L26.5 12.1 L26.4 13.2 L25 15.4 L25.2 16 L23.2 24.2 L21.3 27.7 L20 28.9 L19.3 30.1 L18.7 31.8 L18.3 36 L17.7 35.5 L17.3 35.7 L16.4 32.3 L13.5 29.6 L13.2 29 L12.3 25.8 L11.5 25.2 L11.9 24.7 L11.6 24.1 L12.4 22.6 L12.1 20.7 L12.7 18.3 L17.1 10.5 L18.2 9.9 L20.2 6.2 L23 5.2 L23.5 4.4 L24.8 4 L25.8 5.2 L27.6 5.7 L27.7 6.5 L28.5 6.7 Z" fill="#3f9b5f" stroke="#256b3e" stroke-width="1.2" stroke-linejoin="round"/><path d="M18.6 23.6 c-2.5 -1.7 -3.8 -3 -3.8 -4.6 a1.9 1.9 0 0 1 3.8 -0.6 a1.9 1.9 0 0 1 3.8 0.6 c0 1.6 -1.3 2.9 -3.8 4.6 z" fill="#fff"/></svg>';
 
 /** 洋流的回報說明（改版後只判斷活動）；index.html 的 #report-intro 也是這段 */
 const REPORT_INTRO = '看到活動的 Threads 貼文，或 ACCUPASS 活動通、OPENTIX、Peatix、Luma 的活動頁？貼上連結，雷達會判斷是什麼活動（遊行、講座、市集、表演…），讀出活動內容、地點、開始時間，三個都讀到才會標到地圖上給大家看；沒寫幾點開始的從發文的時間算，結束時間可以不寫。';
@@ -138,6 +141,28 @@ MODULES.push({
   notEventText: '這則看起來不是短期、兼職、工讀的徵人，也不是想找這類工作的貼文。要寫出在哪裡、做什麼，雷達才會收。',
   noPlaceText: '看得出是找工作的刊登，但貼文沒寫地點（或查不到），所以還沒放上雷達。知道在哪裡的話，可以在下面補充地點再判讀一次。',
   helpPage: 'help-work.html',
+});
+
+MODULES.push({
+  id: 'taipai',
+  name: '台派雷達',
+  short: '台派雷達',
+  tagline: '附近的台派店家：吃的、喝的、書店、選物…',
+  emoji: '🏪',
+  icon: TAIWAN_HEART,
+  current: false,
+  unit: '家',
+  emptyText: '附近還沒有台派店家',
+  searchPlaceholder: '搜尋店名、地點、咖啡、週一…',
+  reportIntro: '看到介紹台派店家的 Threads 貼文（店家自己表態，或網友推薦、整理的台派店家）？貼上連結，雷達會讀出每一家店的名稱、地點、營業時間和類型，標到地圖上。',
+  reportTips: [
+    '貼文要寫出這家店是台派（例如「台派店家」「挺台灣」）；沒寫的話，可以在「補充資料」說明。抵制、黑名單不收。',
+    '一則貼文可以有好幾家店（最多 10 家）。營業時間照貼文寫的，雷達會標現在有沒有開；沒寫營業時間也收。',
+    '確認前可以按「補充資料」直接改店名、地點、營業時間、類型，位置不對可以在雷達上標。放上雷達後一年內都會顯示，原貼文刪除會自動下架。',
+  ],
+  notEventText: '這則看起來不是在介紹台派店家。貼文要寫出店名或地點，也要寫出這家店是台派；沒寫的話可以按「補充資料」說明為什麼是台派。',
+  noPlaceText: '看得出是台派店家，但貼文沒寫地點（或查不到），所以還沒放上雷達。知道在哪裡的話，可以在下面補上地址或在地圖上標出位置。',
+  helpPage: 'help-taipai.html',
 });
 
 export const DEFAULT_MODULE: ModuleId = 'current';
