@@ -2,7 +2,9 @@
  * 模組：同一套雷達、地圖、清單、回報，換不同主題的資料（跟伺服器的 worker/src/modules.ts 對應）。
  * 洋流有自己的官方航線、車掃、漂流瓶、地標、搜尋關鍵字；其他模組只有大家回報的貼文。
  */
-export type ModuleId = 'current' | 'dog' | 'badminton' | 'food' | 'work' | 'taipai';
+import { BOOK_TYPES, STORE_TYPES } from './topic-icons';
+
+export type ModuleId = 'current' | 'dog' | 'badminton' | 'food' | 'work' | 'taipai' | 'books';
 
 export interface ModuleDef {
   id: ModuleId;
@@ -19,6 +21,8 @@ export interface ModuleDef {
   current: boolean;
   /** 清單上一個項目的量詞 */
   unit: string;
+  /** 收店家的雷達（台派雷達、書店雷達）才有：店家類型，補充資料的類型選單、類型按鈕照這個 */
+  storeTypes?: Array<{ key: string; label: string }>;
   emptyText: string;
   searchPlaceholder: string;
   /** 回報面板的說明 */
@@ -36,6 +40,9 @@ const RED_POODLE = '<svg viewBox="0 0 40 40" width="34" height="34" aria-hidden=
 
 /** 台灣本島（台派雷達的小圖）：Natural Earth 的海岸線簡化，綠色、中間一顆小愛心 */
 const TAIWAN_HEART = '<svg viewBox="0 0 40 40" width="34" height="34" aria-hidden="true"><path d="M27.6 7.2 L26.7 8.8 L26.8 10.1 L27.4 10.5 L26.5 12.1 L26.4 13.2 L25 15.4 L25.2 16 L23.2 24.2 L21.3 27.7 L20 28.9 L19.3 30.1 L18.7 31.8 L18.3 36 L17.7 35.5 L17.3 35.7 L16.4 32.3 L13.5 29.6 L13.2 29 L12.3 25.8 L11.5 25.2 L11.9 24.7 L11.6 24.1 L12.4 22.6 L12.1 20.7 L12.7 18.3 L17.1 10.5 L18.2 9.9 L20.2 6.2 L23 5.2 L23.5 4.4 L24.8 4 L25.8 5.2 L27.6 5.7 L27.7 6.5 L28.5 6.7 Z" fill="#3f9b5f" stroke="#256b3e" stroke-width="1.2" stroke-linejoin="round"/><path d="M18.6 23.6 c-2.5 -1.7 -3.8 -3 -3.8 -4.6 a1.9 1.9 0 0 1 3.8 -0.6 a1.9 1.9 0 0 1 3.8 0.6 c0 1.6 -1.3 2.9 -3.8 4.6 z" fill="#fff"/></svg>';
+
+/** 書架上的書（書店雷達的小圖）：三本站著、一本斜靠，暖色木頭書架 */
+const BOOK_SHELF = '<svg viewBox="0 0 40 40" width="34" height="34" aria-hidden="true"><rect x="6" y="10" width="7" height="24" rx="1.2" fill="#c8693a"/><rect x="13.5" y="6" width="6.5" height="28" rx="1.2" fill="#3f9b5f"/><rect x="20.5" y="11.5" width="6" height="22.5" rx="1.2" fill="#4a7bd0"/><rect x="27.5" y="11" width="5.6" height="23" rx="1.2" fill="#e0a530" transform="rotate(12 27.5 34)"/><path d="M6 14.5 h7 M6 29.5 h7 M13.5 10.5 h6.5 M13.5 29.5 h6.5 M20.5 15.5 h6 M20.5 30 h6" stroke="#ffffffa0" stroke-width="1.4"/><path d="M16.75 22.6 c-1.7 -1.1 -2.5 -2 -2.5 -3 a1.25 1.25 0 0 1 2.5 -0.4 a1.25 1.25 0 0 1 2.5 0.4 c0 1 -0.8 1.9 -2.5 3 z" fill="#fff"/><rect x="3.5" y="34" width="33" height="2.6" rx="1.1" fill="#8a5a3c"/></svg>';
 
 /** 洋流的回報說明（改版後只判斷活動）；index.html 的 #report-intro 也是這段 */
 const REPORT_INTRO = '看到活動的 Threads 貼文，或 ACCUPASS 活動通、OPENTIX、Peatix、Luma 的活動頁？貼上連結，雷達會判斷是什麼活動（遊行、講座、市集、表演…），讀出活動內容、地點、開始時間，三個都讀到才會標到地圖上給大家看；沒寫幾點開始的從發文的時間算，結束時間可以不寫。';
@@ -152,6 +159,7 @@ MODULES.push({
   icon: TAIWAN_HEART,
   current: false,
   unit: '家',
+  storeTypes: STORE_TYPES,
   emptyText: '附近還沒有台派店家',
   searchPlaceholder: '搜尋店名、地點、咖啡、週一…',
   reportIntro: '看到介紹台派店家的 Threads 貼文（店家自己表態，或網友推薦、整理的台派店家）？貼上連結，雷達會讀出每一家店的名稱、地點、營業時間和類型，標到地圖上。',
@@ -163,6 +171,29 @@ MODULES.push({
   notEventText: '這則看起來不是在介紹實體店家（抵制、黑名單、網拍外送、活動和市集不收）。貼文要寫出店名或地點；判斷錯了可以按「補充資料」說明。',
   noPlaceText: '看得出是台派店家，但貼文沒寫地點（或查不到），所以還沒放上雷達。知道在哪裡的話，可以在下面補上地址或在地圖上標出位置。',
   helpPage: 'help-taipai.html',
+});
+
+MODULES.push({
+  id: 'books',
+  name: '書店雷達',
+  short: '書店雷達',
+  tagline: '附近的獨立書店、二手書店',
+  emoji: '📚',
+  icon: BOOK_SHELF,
+  current: false,
+  unit: '家',
+  storeTypes: BOOK_TYPES,
+  emptyText: '附近還沒有書店',
+  searchPlaceholder: '搜尋店名、地點、繪本、週一…',
+  reportIntro: '看到介紹獨立書店、二手書店的 Threads 貼文（書店自己介紹，或網友推薦、整理的書店）？貼上連結，雷達會讀出每一家書店的名稱、地點、營業時間和類型，標到地圖上。',
+  reportTips: [
+    '收獨立書店和二手書店（社區書店、主題書店、書店兼咖啡都算）；連鎖書店、出版社、網路書店不收。主要在宣傳講座、讀書會的貼文請到活動雷達回報。',
+    '一則貼文可以有好幾家（最多 10 家）。營業時間照貼文寫的，貼文沒寫會看書店帳號的簡介，雷達會標現在有沒有開；都沒寫也收。',
+    '確認前可以按「補充資料」直接改店名、地點、營業時間、類型，位置不對可以在雷達上標。放上雷達後一年內都會顯示，原貼文刪除會自動下架。',
+  ],
+  notEventText: '這則看起來不是在介紹獨立書店或二手書店（連鎖書店、出版社、網路書店、書店的活動公告不收）。貼文要寫出店名或地點；判斷錯了可以按「補充資料」說明。',
+  noPlaceText: '看得出是書店，但貼文沒寫地點（或查不到），所以還沒放上雷達。知道在哪裡的話，可以在下面補上地址或在地圖上標出位置。',
+  helpPage: 'help-books.html',
 });
 
 export const DEFAULT_MODULE: ModuleId = 'current';

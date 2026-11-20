@@ -1,6 +1,6 @@
 import type { Env } from './env';
 import { DEFAULT_MODULE } from './modules';
-import { STORE_TYPES } from './taipai';
+import { STORE_TYPE_NAMES } from './stores';
 
 /**
  * 分享活動的連結（current-radar.pages.dev/e/編號，網站的 Pages Functions 拿這個做 LINE、Threads 的預覽卡片；v1.688 使用者說的）。
@@ -70,7 +70,7 @@ const extraOf = (extra: string | null): Record<string, unknown> => {
 /** 店家類型的名稱（「咖啡甜點」） */
 const storeTypeOf = (extra: string | null): string => {
   const t = extraOf(extra).type;
-  return (typeof t === 'string' && STORE_TYPES[t]) || '其他';
+  return (typeof t === 'string' && STORE_TYPE_NAMES[t]) || '其他';
 };
 const storeHoursOf = (extra: string | null): string | null => {
   const h = extraOf(extra).hours;

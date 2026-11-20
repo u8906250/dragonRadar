@@ -7,7 +7,9 @@ import { SESSION_SPEC } from './badminton';
 import { FOOD_SPEC } from './food';
 import { JOB_SPEC, jobRisks, WORK_SPEC } from './jobs';
 import { NOT_TAIPAI, STORE_DAYS, storeExtra, TAIPAI_SPEC } from './taipai';
-import { DEFAULT_MODULE, moduleOf, type ModuleId } from './modules';
+import { BOOKS_SPEC } from './books';
+import { storeTypesOf } from './stores';
+import { DEFAULT_MODULE, isStoreModule, moduleOf, type ModuleId } from './modules';
 import { adminArea, cityLevel, cityOfDistrict, cityOfRoad, countryOfPlace, geocode, geocodeFirst, geocodeStreet, geocodeWorld, isAreaOnly, placeCandidates, regionOfPlace, type GeoPoint } from './geocode';
 import { listActiveKeywords, type KeywordRow } from './keywords';
 import { parseThreadsTimestamp, type ThreadsClient } from './threads';
@@ -710,9 +712,9 @@ export async function planPost(env: Env, post: PostRow, now = nowSec()): Promise
   // 使用者貼連結回報的、找不到地點：看發文的店家帳號、標記的店家帳號的名稱和簡介，再判讀一次。
   // 店家貼文只寫「在櫃檯出示船員證」、沒寫地址時，模型常直接說不是活動，這種也試
   const noPlace = first.early ? first.early === 'not_event' || first.early === 'no_events' : lacksPlace(first.items);
-  // 台派雷達（v1.768 使用者說台派店家也參考帳號的資訊頁面）：有店家沒寫營業時間也看，發文、標記的帳號都看，
+  // 台派雷達（v1.768 使用者說台派店家也參考帳號的資訊頁面）、書店雷達：有店家沒寫營業時間也看，發文、標記的帳號都看，
   // 店家自己帳號的簡介寫了台派、營業時間、地址都可以用（判讀說明決定是不是店家自己的帳號）
-  const store = moduleOf(post.module) === 'taipai';
+  const store = isStoreModule(moduleOf(post.module));
   const noHours = store && !first.early && first.items.some((it) => it.plan && !storeHours(it.plan.extra));
   // 看不出是台派：店家自己帳號的簡介可能寫了
   const notTaipai = store && first.early === NOT_TAIPAI;
@@ -779,7 +781,7 @@ export interface PlanResult {
 
 /** 每個模組用哪一套判讀（洋流改版後只判斷活動） */
 export function moduleSpec(module: ModuleId): ExtractSpec {
-  return module === 'dog' ? JOB_SPEC : module === 'work' ? WORK_SPEC : module === 'badminton' ? SESSION_SPEC : module === 'food' ? FOOD_SPEC : module === 'taipai' ? TAIPAI_SPEC : ACTIVITY_SPEC;
+  return module === 'dog' ? JOB_SPEC : module === 'work' ? WORK_SPEC : module === 'badminton' ? SESSION_SPEC : module === 'food' ? FOOD_SPEC : module === 'taipai' ? TAIPAI_SPEC : module === 'books' ? BOOKS_SPEC : ACTIVITY_SPEC;
 }
 
 async function planPostWith(env: Env, post: PostRow, now: number, profileHint: string | null): Promise<PlanResult> {
@@ -801,8 +803,8 @@ async function planPostWith(env: Env, post: PostRow, now: number, profileHint: s
   const tags = postTags(extraction.tags, base, [...MODULE_TAGS[module], ...(await adoptedTags(env, module))]);
   if (tags.length > 0) for (const e of extraction.events) e.extra = { ...(e.extra ?? {}), tags };
   if (module === 'dog' || module === 'work') return { items: await planJobs(env, post, extraction.events, now, JOB_DAYS[module]), early: null };
-  // 台派雷達的店家不是單次的：放上雷達後一直顯示。沒給帳號簡介時，判讀說「從簡介讀的」不算
-  if (module === 'taipai') {
+  // 台派雷達、書店雷達的店家不是單次的：放上雷達後一直顯示。沒給帳號簡介時，判讀說「從簡介讀的」不算
+  if (isStoreModule(module)) {
     if (!profileHint) for (const e of extraction.events) delete e.extra?.from_profile;
     const items = await planStores(env, extraction.events, now, 0);
     // 是店家但看不出是台派：店家資料照樣排好、定位，回報的人可以送給管理者判斷
@@ -1107,6 +1109,7 @@ const EDIT_BASE: Record<Exclude<ModuleId, 'current'>, { kind: EventKind; extra: 
   badminton: { kind: 'session', extra: { role: 'offer' } },
   food: { kind: 'food', extra: { role: 'vendor' } },
   taipai: { kind: 'store', extra: { type: 'other' } },
+  books: { kind: 'store', extra: { type: 'other' } },
 };
 
 /**
@@ -1149,7 +1152,7 @@ export async function planEdited(env: Env, post: PostRow, acts: ManualActivity[]
     };
     if (kind === 'store') {
       // 店家：名稱、地點、營業時間、類型照填的（營業時間重新讀成每週的時段）
-      const store = { ...ex, extra: { ...storeExtra(a.storeType ?? extra.type, a.hours !== undefined ? a.hours : str(extra.hours)), tags } };
+      const store = { ...ex, extra: { ...storeExtra(a.storeType ?? extra.type, a.hours !== undefined ? a.hours : str(extra.hours), storeTypesOf(module)), tags } };
       items.push(...(await planStores(env, [store], now, group, [located])));
     } else if (kind === 'job') {
       const job: JobInfo = {
@@ -2029,7 +2032,7 @@ async function planPostings(env: Env, post: PostRow, list: ExtractedEvent[], now
 }
 
 /**
- * 台派雷達的店家：從現在起顯示 STORE_DAYS 天（不是單次的，沒有開始、結束時間）；營業時間放在 extra（hours.ts 讀成每週的時段），
+ * 台派雷達、書店雷達的店家：從現在起顯示 STORE_DAYS 天（不是單次的，沒有開始、結束時間）；營業時間放在 extra（hours.ts 讀成每週的時段），
  * 雷達照這個標營業中、休息中。查不到門牌退到鄉鎮區（約略位置），回報的人可以在雷達上標
  */
 async function planStores(env: Env, list: ExtractedEvent[], now: number, groupFrom: number, located: Array<Located | undefined> = []): Promise<PlanItem[]> {
@@ -2079,13 +2082,15 @@ async function planStores(env: Env, list: ExtractedEvent[], now: number, groupFr
 /** 店名比對用：小寫、拿掉空白和符號、臺台不分 */
 const storeKey = (s: string): string => s.toLowerCase().replace(/[\s\p{P}\p{S}]/gu, '').replace(/臺/g, '台');
 
-/** 雷達上同一家店（約 150 m 內、店名一樣或一個包含另一個），不算這則貼文自己的 */
+/** 同一個雷達上同一家店（約 150 m 內、店名一樣或一個包含另一個），不算這則貼文自己的；台派雷達、書店雷達各放各的 */
 async function findSameStore(env: Env, title: string, lat: number, lng: number, postId: string): Promise<number | null> {
   const { results } = await env.DB.prepare(
-    `SELECT id, title FROM events WHERE status IN ('upcoming', 'active') AND kind = 'store'
-       AND lat BETWEEN ? AND ? AND lng BETWEEN ? AND ? AND post_id != ? LIMIT 50`,
+    `SELECT e.id, e.title FROM events e JOIN posts p ON p.id = e.post_id
+     WHERE e.status IN ('upcoming', 'active') AND e.kind = 'store'
+       AND e.lat BETWEEN ? AND ? AND e.lng BETWEEN ? AND ? AND e.post_id != ?
+       AND p.module = (SELECT module FROM posts WHERE id = ?) LIMIT 50`,
   )
-    .bind(lat - DUP_DEG, lat + DUP_DEG, lng - DUP_DEG, lng + DUP_DEG, postId)
+    .bind(lat - DUP_DEG, lat + DUP_DEG, lng - DUP_DEG, lng + DUP_DEG, postId, postId)
     .all<{ id: number; title: string }>();
   const k = storeKey(title);
   if (!k) return null;

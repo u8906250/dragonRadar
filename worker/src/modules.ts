@@ -2,13 +2,18 @@
  * 模組：同一套雷達、地圖、清單、回報，換不同主題的資料。
  * current 洋流（發放、活動、固定據點，加上官方航線、新聞）；dog 狗狗陪伴（徵人照顧狗狗、可以幫忙照顧的人）；
  * badminton 羽球臨打（招臨打、找臨打）；food 美食品味（餐車、市集出攤，網友推薦的店，揪團吃飯）；
- * work 找工作（短期、兼職、工讀的徵人，和想找這類工作的人）；taipai 台派雷達（台派店家：名稱、地點、營業時間、店家類型）。
+ * work 找工作（短期、兼職、工讀的徵人，和想找這類工作的人）；taipai 台派雷達（台派店家：名稱、地點、營業時間、店家類型）；
+ * books 書店雷達（獨立書店、二手書店：跟台派雷達一樣是店家）。
  * 每則貼文記在一個模組（posts.module），事件跟著貼文；判讀說明照模組換。
  */
-export type ModuleId = 'current' | 'dog' | 'badminton' | 'food' | 'work' | 'taipai';
+export type ModuleId = 'current' | 'dog' | 'badminton' | 'food' | 'work' | 'taipai' | 'books';
 
-export const MODULE_IDS: readonly ModuleId[] = ['current', 'dog', 'badminton', 'food', 'work', 'taipai'];
+export const MODULE_IDS: readonly ModuleId[] = ['current', 'dog', 'badminton', 'food', 'work', 'taipai', 'books'];
 export const DEFAULT_MODULE: ModuleId = 'current';
 
 export const isModule = (v: unknown): v is ModuleId => typeof v === 'string' && (MODULE_IDS as readonly string[]).includes(v);
 export const moduleOf = (v: unknown): ModuleId => (isModule(v) ? v : DEFAULT_MODULE);
+
+/** 收店家的雷達：一家店一筆（名稱、地點、營業時間、類型），不是單次的，放上雷達後一年內都顯示 */
+export const STORE_MODULES: readonly ModuleId[] = ['taipai', 'books'];
+export const isStoreModule = (m: ModuleId): boolean => STORE_MODULES.includes(m);

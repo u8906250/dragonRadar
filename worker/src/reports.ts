@@ -6,7 +6,7 @@
  * 台派雷達看不出是台派的店家（outcome = 'needs_review'）：回報的人按「送給管理者判斷」（requestReview），管理者通過才寫進雷達。
  */
 import type { Env } from './env';
-import { DEFAULT_MODULE, isModule, MODULE_IDS, moduleOf, type ModuleId } from './modules';
+import { DEFAULT_MODULE, isModule, isStoreModule, MODULE_IDS, moduleOf, STORE_MODULES, type ModuleId } from './modules';
 import { ADDRESS_BUDGET_MS, atLocalTimes, commitPlan, detectEnded, getEvent, getPost, locateTypedPlace, MAX_FUTURE_SEC, parseExtra, PLACE_MAX, placeKey, planEdited, planManual, planPost, processPost, savedTagsOf, storePost, tagsOf, taipeiDayOf, topicOf, type EventOut, type FailedItem, type ManualActivity, type PlanItem, type PostRow } from './events';
 import { ACTIVITY_SPEC, cleanTags, cleanTopic, extractFromPost, MODULE_TAGS, postTags, type ActivityPart, type EventKind } from './extract';
 import { adoptedTags } from './learnedTags';
@@ -19,15 +19,16 @@ import { distKm } from './push';
 import { fetchThreadsPost, resolveThreadsLink, shortcodeToUnix, withLocationTag } from './sources/link';
 import { sha1Hex } from './sources/text';
 import { creditReport, uncreditReport, type ReportReward } from './cards';
-import { cleanHours, isStoreType, NOT_TAIPAI, STORE_TYPES } from './taipai';
+import { cleanHours, NOT_TAIPAI } from './taipai';
+import { isStoreTypeOf, STORE_TYPE_NAMES } from './stores';
 import { pushAdmins } from './push';
 import { learnTags, manualTags } from './learnedTags';
 
 /** 只收這麼新的貼文，太舊的公告通常已經過期（v1.696 使用者說 7 天改成 30 天：大型活動常常一個月前就公告；資料也是留 30 天） */
 export const MAX_LINK_AGE_SEC = 30 * 86400;
-/** 台派雷達的店家不是活動：一年內的貼文都收 */
+/** 台派雷達、書店雷達的店家不是活動：一年內的貼文都收 */
 export const STORE_LINK_AGE_SEC = 365 * 86400;
-const linkAgeOf = (module: ModuleId): number => (module === 'taipai' ? STORE_LINK_AGE_SEC : MAX_LINK_AGE_SEC);
+const linkAgeOf = (module: ModuleId): number => (isStoreModule(module) ? STORE_LINK_AGE_SEC : MAX_LINK_AGE_SEC);
 /** 同一個瀏覽器（裝置代碼）每小時最多回報幾則；補充資料不算 */
 const SUBMIT_PER_DEVICE_PER_HOUR = 20;
 /** 同一個 IP 每小時：手機網路、同一個 Wi-Fi 常很多人共用一個 IP，放寬，只用來擋清掉瀏覽器資料一直灌的 */
@@ -43,7 +44,7 @@ const ENDED_PER_IP_PER_HOUR = 20;
 export const ENDED_REPORTS_NEEDED = 2;
 const RECHECK_LINK_SEC = 30 * 60;
 const RECHECK_LINK_BATCH = 10;
-/** 台派雷達的店家放一年：原貼文一天看一次就好，不要擠掉活動的（活動 30 分鐘看一次） */
+/** 台派雷達、書店雷達的店家放一年：原貼文一天看一次就好，不要擠掉活動的（活動 30 分鐘看一次） */
 const RECHECK_STORE_SEC = 86400;
 
 export class ReportError extends Error {
@@ -257,14 +258,14 @@ export interface EditItem {
  * 洋流以外的雷達：判讀出來、有資料的每一筆（v1.715 比照洋流直接修改）。狗狗陪伴、找工作是工作日期；
  * 約好時間的找臨打、揪團吃飯是約的時段（不是刊登的時間）
  */
-function otherEditItems(items: PlanItem[]): EditItem[] {
+function otherEditItems(items: PlanItem[], module: ModuleId): EditItem[] {
   return items.flatMap((it, ref): EditItem[] => {
     const p = it.plan;
     if (!p) return [];
     const ex = parseExtra(p.extra) ?? {};
     const saved = savedTagsOf(p.extra);
     const common = { ref, title: p.title, ...(saved && saved.length > 0 ? { tags: saved } : {}), place: p.place_text, lat: p.lat, lng: p.lng, approxArea: p.approx_area };
-    if (p.kind === 'store') return [{ ...common, startAt: null, endAt: null, hours: typeof ex.hours === 'string' ? ex.hours : null, storeType: isStoreType(ex.type) ? ex.type : 'other' }];
+    if (p.kind === 'store') return [{ ...common, startAt: null, endAt: null, hours: typeof ex.hours === 'string' ? ex.hours : null, storeType: isStoreTypeOf(module, ex.type) ? ex.type : 'other' }];
     if (p.kind === 'job') {
       const from = taipeiDayOf(typeof ex.work_from === 'string' ? ex.work_from : null) ?? p.start_at;
       const to = taipeiDayOf(typeof ex.work_to === 'string' ? ex.work_to : null);
@@ -277,7 +278,7 @@ function otherEditItems(items: PlanItem[]): EditItem[] {
 
 /** 判讀結果換成表單的每一場；重複的（雷達上已經有）不列 */
 export function editItemsOf(items: PlanItem[], module: ModuleId = 'current'): EditItem[] {
-  if (module !== 'current') return otherEditItems(items);
+  if (module !== 'current') return otherEditItems(items, module);
   // 每一場自己記的關鍵字；沒記的（車掃的站、舊的判讀結果）用這則貼文的
   const own = (it: PlanItem): string[] | null => (it.plan ? savedTagsOf(it.plan.extra) : (it.fail?.tags ?? null));
   const common = items.map(own).find((t) => t && t.length > 0) ?? [];
@@ -594,9 +595,9 @@ async function earlierReport(env: Env, postId: string, module: ModuleId, now: nu
 /** 處理使用者貼上的連結：讀貼文、AI 判讀、定位，回傳結果 */
 export async function submitLink(env: Env, input: string, ip: string, now: number, device: string | null = null, module: ModuleId = DEFAULT_MODULE): Promise<SubmitResult> {
   assertReportsOpen(env, module);
-  // 台派雷達收的是店家，不收活動頁
-  if (module === 'taipai' && (parseAccupassUrl(input) || parseOpentixUrl(input) || parsePeatixUrl(input) || parseLumaUrl(input))) {
-    throw new ReportError(400, '台派雷達收的是店家，請貼介紹台派店家的 Threads 貼文連結');
+  // 台派雷達、書店雷達收的是店家，不收活動頁
+  if (isStoreModule(module) && (parseAccupassUrl(input) || parseOpentixUrl(input) || parsePeatixUrl(input) || parseLumaUrl(input))) {
+    throw new ReportError(400, module === 'books' ? '書店雷達收的是書店，請貼介紹書店的 Threads 貼文連結（書店的活動請到活動雷達回報）' : '台派雷達收的是店家，請貼介紹台派店家的 Threads 貼文連結');
   }
   // 活動頁：ACCUPASS 活動通（v1.590）、OPENTIX（v1.591）、Peatix（v1.735）、Luma（v1.736）
   const acc = parseAccupassUrl(input);
@@ -618,7 +619,7 @@ export async function submitLink(env: Env, input: string, ip: string, now: numbe
   const postedAt = shortcodeToUnix(link.code, now);
   if (postedAt === null) throw new ReportError(400, '這個連結看起來不是 Threads 貼文');
   if (now - postedAt > linkAgeOf(module)) {
-    throw new ReportError(400, module === 'taipai' ? `這則貼文發布超過 ${STORE_LINK_AGE_SEC / 86400} 天，請找最近的介紹（店家可能已經搬家或歇業）` : `這則貼文發布超過 ${MAX_LINK_AGE_SEC / 86400} 天，雷達只收最近的發放和活動`);
+    throw new ReportError(400, isStoreModule(module) ? `這則貼文發布超過 ${STORE_LINK_AGE_SEC / 86400} 天，請找最近的介紹（店家可能已經搬家或歇業）` : `這則貼文發布超過 ${MAX_LINK_AGE_SEC / 86400} 天，雷達只收最近的發放和活動`);
   }
 
   await checkSubmitLimits(env, ip, now, device);
@@ -935,8 +936,8 @@ export const MAX_EDIT_SPAN_SEC = 3 * 86400;
 export function parseEditItems(raw: unknown, module: ModuleId = 'current'): ManualActivity[] {
   // 狗狗陪伴、找工作：時間是工作期間的第一天、最後一天，最多連續 7 天（跟判讀一樣只收單次的）
   const days = module === 'dog' || module === 'work';
-  // 台派雷達：一家店一筆，填名稱、地點、營業時間、類型，沒有時間
-  const store = module === 'taipai';
+  // 台派雷達、書店雷達：一家店一筆，填名稱、地點、營業時間、類型，沒有時間
+  const store = isStoreModule(module);
   if (!Array.isArray(raw) || raw.length === 0) throw new ReportError(400, store ? '至少要填一家店' : '至少要填一場活動');
   if (raw.length > MAX_EDIT_ITEMS) throw new ReportError(400, `一則最多 ${MAX_EDIT_ITEMS} 場`);
   const text = (v: unknown, max: number): string => (typeof v === 'string' ? [...v.replace(/\s+/g, ' ').trim()].slice(0, max).join('') : '');
@@ -954,7 +955,7 @@ export function parseEditItems(raw: unknown, module: ModuleId = 'current'): Manu
     if (store) {
       const tags = Array.isArray(o.tags) ? { tags: cleanTags(o.tags.slice(0, 20)) } : {};
       const ref = Number.isSafeInteger(o.ref) && (o.ref as number) >= 0 && (o.ref as number) < 1000 ? (o.ref as number) : null;
-      return { title, ...tags, startAt: 0, endAt: null, place, lat: pinned ? lat0 : null, lng: pinned ? lng0 : null, hours: cleanHours(o.hours), storeType: isStoreType(o.storeType) ? o.storeType : 'other', ...(ref !== null ? { ref } : {}) };
+      return { title, ...tags, startAt: 0, endAt: null, place, lat: pinned ? lat0 : null, lng: pinned ? lng0 : null, hours: cleanHours(o.hours), storeType: isStoreTypeOf(module, o.storeType) ? o.storeType : 'other', ...(ref !== null ? { ref } : {}) };
     }
     if (!Number.isSafeInteger(o.startAt)) throw new ReportError(400, days ? `${at}請填哪天開始做` : `${at}請填哪天幾點開始`);
     const startAt = o.startAt as number;
@@ -993,7 +994,7 @@ export function editSummary(before: EditItem[], after: ManualActivity[], listed:
     const store = a.storeType !== undefined;
     if (!b || b.title !== a.title) changes.push(store ? `店名「${a.title}」` : `內容「${a.title}」`);
     if (store) {
-      if (!b || (b.storeType ?? 'other') !== a.storeType) changes.push(`類型「${STORE_TYPES[a.storeType ?? 'other'] ?? '其他'}」`);
+      if (!b || (b.storeType ?? 'other') !== a.storeType) changes.push(`類型「${STORE_TYPE_NAMES[a.storeType ?? 'other'] ?? '其他'}」`);
       if (!b || (b.hours ?? null) !== (a.hours ?? null)) changes.push(a.hours ? `營業時間「${a.hours}」` : '營業時間（拿掉）');
     } else if (!b || b.dateOnly || b.startAt !== a.startAt || b.endAt !== a.endAt) {
       const tz = tzs[i] ?? null;
@@ -1032,7 +1033,7 @@ export async function editLink(env: Env, body: { postId?: unknown; token?: unkno
   // 洋流以外的雷達：照判讀出來的那一筆的種類、欄位、排法（v1.715）
   const items = module === 'current' ? await planManual(env, keepLocated(acts, stored?.items ?? []), now, post.text, routeTitle, tags) : await planEdited(env, post, acts, stored?.items ?? [], now);
   const tzs = items.map((it) => it.plan?.tz ?? it.fail?.tz ?? null);
-  const unit = items.some((it) => it.route) ? '站' : module === 'dog' || module === 'work' ? '筆' : module === 'taipai' ? '家' : '場';
+  const unit = items.some((it) => it.route) ? '站' : module === 'dog' || module === 'work' ? '筆' : isStoreModule(module) ? '家' : '場';
   const note = editSummary(stored ? editItemsOf(stored.items, module) : [], acts, items.map((it) => !!it.plan), unit, tzs, module === 'dog' || module === 'work') ?? post.supplement ?? null;
   // 台派雷達：AI 沒判讀出台派店家的（看不出是台派、不是店家），自己填的也要管理者判斷才放上雷達
   const unsure = module === 'taipai' && (!stored || stored.early !== null);
@@ -1368,7 +1369,7 @@ export async function recheckLinks(env: Env, now: number): Promise<RecheckLinksR
   const rows = await env.DB.prepare(
     `SELECT DISTINCT p.id, p.text FROM posts p JOIN events e ON e.post_id = p.id
      WHERE p.source IN ('link', 'spot', 'accupass', 'opentix', 'peatix', 'luma') AND e.status IN ('upcoming', 'active')
-       AND (p.checked_at IS NULL OR p.checked_at <= CASE WHEN p.module = 'taipai' THEN ? ELSE ? END)
+       AND (p.checked_at IS NULL OR p.checked_at <= CASE WHEN p.module IN (${STORE_MODULES.map((m) => `'${m}'`).join(', ')}) THEN ? ELSE ? END)
      ORDER BY p.checked_at ASC LIMIT ?`,
   )
     .bind(now - RECHECK_STORE_SEC, now - RECHECK_LINK_SEC, RECHECK_LINK_BATCH)

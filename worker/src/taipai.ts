@@ -9,7 +9,7 @@ import { aiTags, conf, parseLoose, str, TAGS_SCHEMA, type ExtractedEvent, type E
 import { parseHours } from './hours';
 
 /** 一則貼文最多幾家（「台派店家推薦」這種清單） */
-const MAX_STORES = 10;
+export const MAX_STORES = 10;
 /** 放上雷達後顯示多久：一年後店家還在的話再回報一次 */
 export const STORE_DAYS = 365;
 /** 判讀結果的 early：是店家，但看不出是台派，要送給管理者判斷才放得上雷達 */
@@ -102,27 +102,25 @@ export const cleanHours = (v: unknown): string | null => {
   return t ? [...t].slice(0, HOURS_MAX).join('') : null;
 };
 
-/** 一家店存在 events.extra 的欄位：類型、營業時間（原文和讀出來的每週時段） */
-export function storeExtra(type: unknown, hours: string | null): Record<string, unknown> {
-  return { type: isStoreType(type) ? type : 'other', hours, open: parseHours(hours) };
+/** 一家店存在 events.extra 的欄位：類型（types 是這個雷達的店家類型）、營業時間（原文和讀出來的每週時段） */
+export function storeExtra(type: unknown, hours: string | null, types: Record<string, string> = STORE_TYPES): Record<string, unknown> {
+  return { type: typeof type === 'string' && Object.prototype.hasOwnProperty.call(types, type) ? type : 'other', hours, open: parseHours(hours) };
 }
 
 /** 從帳號簡介讀的是哪幾項（預覽、詳細資料寫明「店家帳號簡介寫的」）：沒有就不帶 */
 export const PROFILE_FIELDS = ['taipai', 'hours', 'place'] as const;
-function profileFields(v: unknown): { from_profile?: string[] } {
+export function profileFields(v: unknown): { from_profile?: string[] } {
   const list = Array.isArray(v) ? PROFILE_FIELDS.filter((f) => v.includes(f)) : [];
   return list.length > 0 ? { from_profile: list } : {};
 }
 
-export function normalizeTaipai(raw: unknown): Extraction | null {
-  const obj = parseLoose(raw);
-  if (!obj || typeof obj !== 'object' || Array.isArray(obj)) return null;
-  const o = obj as Record<string, unknown>;
-  const isEvent = o.is_event === true || o.is_event === 'true';
-  // 沒說是台派（漏了這一欄也算）：等管理者判斷
-  const taipai = o.taipai === true || o.taipai === 'true';
-  const list = Array.isArray(o.events) ? o.events.filter((e): e is Record<string, unknown> => !!e && typeof e === 'object' && !Array.isArray(e)).slice(0, MAX_STORES) : [];
-  const events: ExtractedEvent[] = list.flatMap((e): ExtractedEvent[] => {
+/**
+ * 判讀結果的每一家店（台派雷達、書店雷達共用）：沒寫店名也沒寫地點的不列，只有店名的拿店名去查；
+ * types 是這個雷達的店家類型，fallback 是沒寫店名時的名稱，fromProfile 是這一家哪些資料是從帳號簡介讀的
+ */
+export function storeEvents(raw: unknown, types: Record<string, string>, fallback: string, fromProfile: (e: Record<string, unknown>) => unknown): ExtractedEvent[] {
+  const list = Array.isArray(raw) ? raw.filter((e): e is Record<string, unknown> => !!e && typeof e === 'object' && !Array.isArray(e)).slice(0, MAX_STORES) : [];
+  return list.flatMap((e): ExtractedEvent[] => {
     const name = str(e.name);
     const placeText = str(e.place_text);
     const placeQuery = str(e.place_query);
@@ -131,7 +129,7 @@ export function normalizeTaipai(raw: unknown): Extraction | null {
     return [
       {
         kind: 'store',
-        title: [...(name ?? placeText ?? '台派店家')].slice(0, 40).join(''),
+        title: [...(name ?? placeText ?? fallback)].slice(0, 40).join(''),
         item: null,
         start_at: null,
         end_at: null,
@@ -141,11 +139,21 @@ export function normalizeTaipai(raw: unknown): Extraction | null {
         confidence: conf(e.confidence),
         spot: false,
         until: null,
-        // 看不出是台派：「台派是從簡介讀的」不成立
-        extra: { ...storeExtra(type, cleanHours(e.hours)), ...profileFields(taipai ? e.from_profile : Array.isArray(e.from_profile) ? e.from_profile.filter((f) => f !== 'taipai') : null) },
+        extra: { ...storeExtra(type, cleanHours(e.hours), types), ...profileFields(fromProfile(e)) },
       },
     ];
   });
+}
+
+export function normalizeTaipai(raw: unknown): Extraction | null {
+  const obj = parseLoose(raw);
+  if (!obj || typeof obj !== 'object' || Array.isArray(obj)) return null;
+  const o = obj as Record<string, unknown>;
+  const isEvent = o.is_event === true || o.is_event === 'true';
+  // 沒說是台派（漏了這一欄也算）：等管理者判斷
+  const taipai = o.taipai === true || o.taipai === 'true';
+  // 看不出是台派：「台派是從簡介讀的」不成立
+  const events = storeEvents(o.events, STORE_TYPES, '台派店家', (e) => (taipai ? e.from_profile : Array.isArray(e.from_profile) ? e.from_profile.filter((f) => f !== 'taipai') : null));
   const sure = isEvent && taipai;
   return {
     is_event: isEvent,

@@ -16,7 +16,7 @@ import { checkWishNews, findCard, gotReward, myCards, onWishNews, openAlbum, ope
 import { DEEP_FROM_KM, FLAT_PAN_KM, LY_KM, Radar, SPACE_FROM_KM, type RadarLabel, type RadarRoute, type RadarStreets, type RadarStreetTile, type SpaceView } from './radar';
 import { DEFAULT_THEME_ID, getTheme, THEMES, type Theme } from './themes';
 import type { WoofBottleMark } from './space';
-import { STORE_TYPES, topicChipSvg, topicGlyph, TOPIC_TYPES } from './topic-icons';
+import { ALL_STORE_TYPES, topicChipSvg, topicGlyph, TOPIC_TYPES } from './topic-icons';
 import type { BottleOut, BottleProof, EventKind, EventOut, Item, KeywordInfo, KeywordRules, MyBottles, MyReport, Origin, Phase, PickedBottle, RelatedPost, RouteOut, PreviewItem, RouteStop, RoutePreview, SubmitResult, FailedItem, EditItem, EditInput } from './types';
 
 const DEFAULT_ORIGIN: Origin = { lat: 25.0478, lng: 121.517, source: 'default' }; // 台北車站
@@ -342,7 +342,7 @@ function moduleSummary(singles: Row[], spotsIn: Row[], postings: Map<string, Row
   const join = (parts: Array<[number, string]>): string => parts.filter(([c]) => c > 0).map(([c, t]) => `${c} ${t}`).join('、');
   if (mod.id === 'badminton') return join([[singles.length + spotsIn.length, '場招臨打'], [n('seek'), '個找臨打']]);
   if (mod.id === 'food') return join([[singles.length + spotsIn.length, '個出攤'], [n('recommend'), '家推薦'], [n('meetup'), '個揪團']]);
-  if (mod.id === 'taipai') {
+  if (mod.storeTypes) {
     const open = singles.filter((r) => r.phase === 'active').length;
     return join([[open, '家營業中'], [singles.length - open, '家休息中'], [n('nohours'), '家沒寫營業時間']]);
   }
@@ -360,7 +360,7 @@ interface StoreExtra {
   open?: Array<[number, number, number]> | null;
 }
 const storeOf = (ev: { extra?: Record<string, unknown> | null }): StoreExtra => (ev.extra ?? {}) as StoreExtra;
-const storeTypeLabel = (ev: { extra?: Record<string, unknown> | null }): string => STORE_TYPES.find((t) => t.key === storeOf(ev).type)?.label ?? '其他';
+const storeTypeLabel = (ev: { extra?: Record<string, unknown> | null }): string => ALL_STORE_TYPES.find((t) => t.key === storeOf(ev).type)?.label ?? '其他';
 /** 讀出營業時段的店家才有；其他是 null（不知道現在有沒有開） */
 function storeSlots(ev: { kind: string; extra?: Record<string, unknown> | null }): Array<[number, number, number]> | null {
   if (ev.kind !== 'store') return null;
@@ -3293,7 +3293,7 @@ function renderList(items: Item[], now: number): void {
     // 照距離：進行中、即將開始、稍後開始合在一起；職缺從刊登起都算「徵才中」
     ...(byDistance
       ? [{ title: '由近到遠', rows: sorted(singles) }]
-      : (['active', 'soon', 'later'] as const).map((ph) => ({ title: mod.id === 'taipai' ? STORE_PHASE_TITLE[ph] : !mod.current && ph === 'active' ? '刊登中' : (PHASE_TITLE[ph] as string), rows: byPhase(ph) }))),
+      : (['active', 'soon', 'later'] as const).map((ph) => ({ title: mod.storeTypes ? STORE_PHASE_TITLE[ph] : !mod.current && ph === 'active' ? '刊登中' : (PHASE_TITLE[ph] as string), rows: byPhase(ph) }))),
     { title: SPOT_SECTION[mod.id] ?? '固定據點', rows: sorted(spotsIn) },
     ...Object.entries(POSTING_SECTION).map(([role, title]) => ({ title, rows: sorted(postingRows.get(role) ?? []) })),
     { title: laterLabel(), rows: sorted(laterRows) },
@@ -5280,10 +5280,10 @@ function openFeedback(ev: EventOut, fromRoute?: RouteOut, fixStop?: number): voi
       ).join('')
     : '';
   $('#feedback-topics').hidden = true;
-  // 店家：時間錯誤是營業時間、不是活動是不是台派店家或歇業了
+  // 店家：時間錯誤是營業時間、不是活動是不是台派店家（書店雷達：不是獨立書店）或歇業了
   for (const el of document.querySelectorAll<HTMLElement>('#feedback-form .fb-label')) {
     el.dataset.base ??= el.textContent ?? '';
-    el.textContent = ev.kind === 'store' ? (el.dataset.store ?? el.dataset.base) : el.dataset.base;
+    el.textContent = ev.kind === 'store' ? (el.dataset[mod.id] ?? el.dataset.store ?? el.dataset.base) : el.dataset.base;
   }
   const fix = route && fixStop !== undefined ? route.stops[fixStop] : undefined;
   if (fix) {
@@ -7827,7 +7827,7 @@ function typeOf(ev: EventOut): string | null {
   return topicGlyph(topicFor(ev));
 }
 function typeLabel(key: string): string {
-  return [...TOPIC_TYPES, ...STORE_TYPES].find((t) => t.key === key)?.label ?? key;
+  return [...TOPIC_TYPES, ...ALL_STORE_TYPES].find((t) => t.key === key)?.label ?? key;
 }
 /** 點類型按鈕：只看這一類（雷達、地圖、清單），再點一次清掉 */
 function pickType(key: string): void {
@@ -7846,7 +7846,8 @@ function renderSearchTags(items: Item[]): void {
   tagUse = count;
   const top = [...count.keys()].sort(byTagUse).slice(0, 8);
   const has = new Set(items.map((it) => typeOf(it.ev)));
-  const types = [...TOPIC_TYPES, ...STORE_TYPES].filter((t) => has.has(t.key) || t.key === typePick);
+  // 店家照這個雷達的類型順序（台派雷達、書店雷達各自的）
+  const types = [...TOPIC_TYPES, ...(mod.storeTypes ?? [])].filter((t) => has.has(t.key) || t.key === typePick);
   if (top.length === 0 && types.length === 0) {
     box.hidden = true;
     return;
@@ -8399,8 +8400,8 @@ const useEditForm = (edit: EditItem[] | undefined): boolean => mod.current || (e
 /** 狗狗陪伴、找工作：補充資料的時間是工作期間（只有日期） */
 const editDays = (): boolean => mod.id === 'dog' || mod.id === 'work';
 /** 補充資料的「一場」：洋流是活動，其他雷達叫「一筆」 */
-const editUnit = (): string => (mod.current ? '場' : mod.id === 'taipai' ? '家' : '筆');
-const EDIT_TITLE_EG: Record<ModuleId, string> = { current: '景華公園表演同樂會', dog: '週末幫忙遛狗', badminton: '週六晚上羽球臨打', food: '週末市集餐車出攤', work: '活動工作人員', taipai: '慢工咖啡' };
+const editUnit = (): string => (mod.current ? '場' : mod.storeTypes ? '家' : '筆');
+const EDIT_TITLE_EG: Record<ModuleId, string> = { current: '景華公園表演同樂會', dog: '週末幫忙遛狗', badminton: '週六晚上羽球臨打', food: '週末市集餐車出攤', work: '活動工作人員', taipai: '慢工咖啡', books: '巷口小書店' };
 
 /**
  * 補充資料：每一場直接改標題、時間、地點，位置不對可以在雷達上標。洋流多一個主題；
@@ -8414,9 +8415,9 @@ function editCardHtml(it: EditItem | null): string {
   // 跨天的（兩天的市集、跨夜到隔天早上的）結束日期跟開始不同才填；同一天、只跨過午夜到隔天清晨的留空（照舊自動算隔天）
   const overnight = !!(it?.startAt && it.endAt && it.endAt - it.startAt < 86400 && endWall && start && endWall.time <= start.time);
   const endDate = endWall && start && endWall.date !== start.date && !overnight ? endWall.date : '';
-  // 台派雷達的店家：類型、營業時間，沒有日期時間
-  const when = mod.id === 'taipai'
-    ? `<label>類型<select name="storeType">${STORE_TYPES.map((t) => `<option value="${t.key}"${t.key === (it?.storeType ?? 'other') ? ' selected' : ''}>${t.label}</option>`).join('')}</select></label>
+  // 台派雷達、書店雷達的店家：類型、營業時間，沒有日期時間
+  const when = mod.storeTypes
+    ? `<label>類型<select name="storeType">${mod.storeTypes.map((t) => `<option value="${t.key}"${t.key === (it?.storeType ?? 'other') ? ' selected' : ''}>${t.label}</option>`).join('')}</select></label>
       <label>營業時間<input name="hours" maxlength="100" value="${esc(it?.hours ?? '')}" placeholder="例如：週二至週日 11:00–20:00，週一公休"></label>
       <small class="muted">不知道可以留空。照上面的寫法，雷達會標現在有沒有開。</small>`
     : editDays()
@@ -8435,7 +8436,7 @@ function editCardHtml(it: EditItem | null): string {
       <legend><span class="edit-no"></span><button type="button" class="chip" data-act="drop">不要這${editUnit()}</button></legend>
       <div class="edit-what">
         ${mod.current ? `<label>主題<input name="topic" maxlength="6" value="${esc(it?.topic ?? '')}" placeholder="例如：遊行"></label>` : ''}
-        <label>${mod.current ? '活動內容' : mod.id === 'taipai' ? '店名' : '內容'}<input name="title" maxlength="${mod.id === 'taipai' ? 40 : 60}" value="${esc(it?.title ?? '')}" placeholder="例如：${EDIT_TITLE_EG[mod.id]}"></label>
+        <label>${mod.current ? '活動內容' : mod.storeTypes ? '店名' : '內容'}<input name="title" maxlength="${mod.storeTypes ? 40 : 60}" value="${esc(it?.title ?? '')}" placeholder="例如：${EDIT_TITLE_EG[mod.id]}"></label>
       </div>
       ${when}
       <label>地點<input name="place" maxlength="200" value="${esc(it?.place ?? '')}" placeholder="店名或地址，例如：厝邊咖啡 台北市萬華區○○路○號"></label>
@@ -8526,7 +8527,7 @@ function wireEditTags(card: HTMLElement, tags: string[]): void {
 
 function editFormHtml(items: EditItem[], hidden: boolean): string {
   const list = items.length > 0 ? items.slice(0, MAX_EDIT_ITEMS) : [null];
-  const what = mod.current ? '每一場的主題、活動內容、時間' : mod.id === 'taipai' ? '每一家的店名、類型、營業時間' : `每一筆的內容、${editDays() ? '工作日期' : '時間'}`;
+  const what = mod.current ? '每一場的主題、活動內容、時間' : mod.storeTypes ? '每一家的店名、類型、營業時間' : `每一筆的內容、${editDays() ? '工作日期' : '時間'}`;
   return `<form class="preview-more edit-form"${hidden ? ' hidden' : ''} novalidate>
       <p class="muted sheet-note">直接改${what}、地點、關鍵字；位置不對可以按「在雷達上標位置」，在雷達上拖標記或點一下。${mod.current ? '' : '其他資料照原本判讀的。'}</p>
       <div class="edit-items">${list.map((it) => editCardHtml(it)).join('')}</div>
@@ -8650,8 +8651,8 @@ function readEditForm(form: HTMLFormElement): EditInput[] | string {
     const title = val('title');
     const topic = mod.current ? val('topic') || null : null;
     const place = val('place');
-    // 台派雷達的店家沒有時間
-    const store = mod.id === 'taipai';
+    // 台派雷達、書店雷達的店家沒有時間
+    const store = !!mod.storeTypes;
     if (!title) return `${at}請填${mod.current ? '活動內容' : store ? '店名' : '內容'}`;
     const days = editDays();
     if (!store && (!val('date') || (!days && !val('start')))) return days ? `${at}請填第一天` : `${at}請填哪天幾點開始`;

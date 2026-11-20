@@ -44,7 +44,20 @@ export const STORE_TYPES: Array<{ key: string; label: string }> = [
   { key: 'clinic', label: '醫療' },
   { key: 'other', label: '其他' },
 ];
-const STORE_KEYS = new Set(STORE_TYPES.map((t) => t.key));
+/** 書店雷達的書店類型（跟伺服器 worker/src/books.ts 的 BOOK_TYPES 一樣）；key 不跟台派雷達的店家類型、活動主題重複，「其他」共用 */
+export const BOOK_TYPES: Array<{ key: string; label: string }> = [
+  { key: 'general', label: '人文綜合' },
+  { key: 'issue', label: '社會議題' },
+  { key: 'used', label: '二手書' },
+  { key: 'kids', label: '童書繪本' },
+  { key: 'lit', label: '文學詩集' },
+  { key: 'art', label: '藝術設計' },
+  { key: 'comic', label: '漫畫' },
+  { key: 'other', label: '其他' },
+];
+/** 所有雷達的店家類型（查名稱用） */
+export const ALL_STORE_TYPES = [...STORE_TYPES, ...BOOK_TYPES.filter((t) => t.key !== 'other')];
+const STORE_KEYS = new Set(ALL_STORE_TYPES.map((t) => t.key));
 export const isStoreType = (v: unknown): v is string => typeof v === 'string' && STORE_KEYS.has(v);
 
 export function topicGlyph(topic: string | null | undefined): string | null {
@@ -85,6 +98,7 @@ export function glyphSvg(key: string, c: string): string {
     case 'bar': // 雞尾酒杯
       return `<path d="M-6.5 -6 h13 l-6.5 7 z" fill="${c}"/><path d="M0 1 V6.5 M-3.5 6.8 h7" ${s} stroke-width="1.6"/>`;
     case 'book': // 打開的書
+    case 'general':
       return `<path d="M0 -4.5 C-2.5 -6.5 -5.5 -6.5 -7 -5.5 V5.5 C-5.5 4.5 -2.5 4.5 0 6.5 Z" fill="${c}"/><path d="M0 -4.5 C2.5 -6.5 5.5 -6.5 7 -5.5 V5.5 C5.5 4.5 2.5 4.5 0 6.5 Z" fill="${c}"/><path d="M0 -4.5 V6.5" stroke="#00000055" stroke-width="1"/>`;
     case 'shop': // 購物袋
       return `<rect x="-5.5" y="-2.5" width="11" height="9" rx="1.2" fill="${c}"/><path d="M-2.6 -2.5 v-1.5 a2.6 2.6 0 0 1 5.2 0 v1.5" ${s} stroke-width="1.5"/>`;
@@ -94,6 +108,18 @@ export function glyphSvg(key: string, c: string): string {
       return `<path d="M-7 5.5 V-5 M7 5.5 V1 M-7 1 H7" ${s} stroke-width="1.6"/><rect x="-6.5" y="-2.8" width="4.6" height="3.2" rx="1.2" fill="${c}"/><path d="M-1.4 1 V-2 h6.6 a1.8 1.8 0 0 1 1.8 1.8 V1 z" fill="${c}"/>`;
     case 'clinic': // 十字
       return `<path d="M-2.2 -7 h4.4 v4.8 h4.8 v4.4 h-4.8 v4.8 h-4.4 v-4.8 h-4.8 v-4.4 h4.8 z" fill="${c}"/>`;
+    case 'issue': // 封面有愛心的書（性別、人權、台灣這些社會議題）
+      return `<rect x="-5.5" y="-7" width="11" height="14" rx="1.2" fill="${c}"/><path d="M-3.6 -7 V7" stroke="#00000055" stroke-width="1.2"/><path d="M1 3.4 c-2.4 -1.6 -3.6 -2.8 -3.6 -4.3 a1.8 1.8 0 0 1 3.6 -0.5 a1.8 1.8 0 0 1 3.6 0.5 c0 1.5 -1.2 2.7 -3.6 4.3 z" fill="#00000055"/>`;
+    case 'used': // 疊起來的書（二手書）
+      return `<rect x="-6.5" y="2" width="13" height="4.6" rx="1" fill="${c}"/><rect x="-5.5" y="-2.8" width="11" height="4.2" rx="1" fill="${c}"/><rect x="-6" y="-7.4" width="11.5" height="4" rx="1" fill="${c}" transform="rotate(-6)"/><path d="M-4 4.3 h8 M-3 -0.7 h6" stroke="#00000055" stroke-width="1"/>`;
+    case 'kids': // 氣球（童書繪本）
+      return `<ellipse cx="0" cy="-2.2" rx="5" ry="5.8" fill="${c}"/><path d="M-1.1 3.5 h2.2 l-1.1 1.5 z" fill="${c}"/><path d="M0 5 q-2 1.6 0 3.2" ${s} stroke-width="1.2"/>`;
+    case 'lit': // 羽毛筆（文學詩集）
+      return `<path d="M6.5 -7.5 C0 -6.5 -4 -1.5 -4.8 4.8 C-1 3 4 -1.5 6.5 -7.5 Z" fill="${c}"/><path d="M-3.4 3.2 L3.2 -3.6" stroke="#00000055" stroke-width="1.1" stroke-linecap="round"/><path d="M-4.8 4.8 L-6.8 7.2" ${s} stroke-width="1.5"/>`;
+    case 'art': // 調色盤
+      return `<path d="M0 -7 C-5 -7 -7.5 -3.5 -7.5 0 C-7.5 4.5 -4 7 0 7 C1.8 7 2.2 5.6 1.2 4.4 C0.2 3.2 1 1.6 2.8 1.8 C5.5 2 7.5 0.5 7.5 -1.5 C7.5 -4.5 4.5 -7 0 -7 Z" fill="${c}"/><circle cx="-4" cy="-0.6" r="1.3" fill="#00000055"/><circle cx="-1.6" cy="-4.2" r="1.3" fill="#00000055"/><circle cx="2.6" cy="-4" r="1.3" fill="#00000055"/><circle cx="-3.2" cy="3.6" r="1.3" fill="#00000055"/>`;
+    case 'comic': // 對話框加驚嘆號（漫畫）
+      return `<path d="M-7 -5.5 a2 2 0 0 1 2 -2 h10 a2 2 0 0 1 2 2 v7 a2 2 0 0 1 -2 2 h-5 l-4.2 3.6 v-3.6 h-0.8 a2 2 0 0 1 -2 -2 z" fill="${c}"/><path d="M0 -5.2 v3.6" stroke="#00000055" stroke-width="1.8" stroke-linecap="round"/><circle cx="0" cy="0.9" r="1" fill="#00000055"/>`;
     case 'other': // 小店面（遮雨棚加門）
       return `<path d="M-7 -2 L-5.5 -6.5 H5.5 L7 -2 Z" fill="${c}"/><rect x="-5.5" y="-1" width="11" height="7.5" fill="${c}"/><rect x="-1.6" y="1.8" width="3.2" height="4.7" fill="#00000055"/>`;
     default:

@@ -21,7 +21,7 @@ interface ShareInfo {
 }
 
 const PROD_API = 'https://dragon-radar.happybadminton.workers.dev';
-const MODULE_NAMES: Record<string, string> = { current: '活動雷達', dog: '狗狗陪伴', badminton: '羽球臨打', food: '美食品味', work: '找工作', taipai: '台派雷達' };
+const MODULE_NAMES: Record<string, string> = { current: '活動雷達', dog: '狗狗陪伴', badminton: '羽球臨打', food: '美食品味', work: '找工作', taipai: '台派雷達', books: '書店雷達' };
 
 const esc = (s: string): string => s.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c] as string);
 
@@ -54,7 +54,7 @@ export async function onRequestGet(ctx: { params: Record<string, string | string
   const target = `/?event=${info?.id ?? id}${module !== 'current' ? `&module=${module}` : ''}`;
   const site = MODULE_NAMES[module];
   const live = info && !info.ended && info.title ? info : null;
-  const store = info?.kind === 'store' || module === 'taipai';
+  const store = info?.kind === 'store' || module === 'taipai' || module === 'books';
   const title = live ? live.title! : info ? (store ? '這家店已經不在雷達上了' : '這個活動已經結束了') : store ? '找不到這家店' : '找不到這個活動';
   const desc = live
     ? // 店家沒有開始時間，寫營業時間

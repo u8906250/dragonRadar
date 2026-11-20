@@ -199,11 +199,11 @@
           <fieldset class="feedback-kinds">
             <legend class="sr-only">問題類型</legend>
             <label><input type="radio" name="kind" value="location" required /> 地點錯誤</label>
-            <!-- 台派雷達的店家換成 data-store 的說法（openFeedback） -->
+            <!-- 台派雷達的店家換成 data-store 的說法、書店雷達有 data-books 的用那個（openFeedback） -->
             <label><input type="radio" name="kind" value="time" /> <span class="fb-label" data-store="營業時間錯誤">時間錯誤</span></label>
             <label><input type="radio" name="kind" value="content" /> <span class="fb-label" data-store="店名或類型錯誤">標題或內容錯誤</span></label>
             <label id="feedback-topic-kind" hidden><input type="radio" name="kind" value="topic" /> 類型錯誤</label>
-            <label><input type="radio" name="kind" value="not_event" /> <span class="fb-label" data-store="不是台派店家、已經歇業">不是發放或活動</span></label>
+            <label><input type="radio" name="kind" value="not_event" /> <span class="fb-label" data-store="不是台派店家、已經歇業" data-books="不是獨立書店、已經歇業">不是發放或活動</span></label>
             <label><input type="radio" name="kind" value="duplicate" /> 重複</label>
             <label id="feedback-remove-stop" hidden><input type="radio" name="kind" value="remove_stop" /> 刪除這一站（沒有這一站、取消了）</label>
             <label><input type="radio" name="kind" value="other" /> 其他</label>
