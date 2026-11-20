@@ -563,6 +563,21 @@ export const UNREADABLE_POST =
   'Threads 不讓外部讀取這則貼文，雷達讀不到內容。可能是貼文已刪除、帳號是私人帳號，或貼文限制只有登入的人才能看（例如酒類貼文限成年人觀看）。';
 
 /**
+ * Threads 貼文在這個雷達的貼文 id（v1.773 使用者說不同雷達同樣的 Threads 連結可以重複使用）：每個雷達各記一筆，各自判讀、確認、放上雷達。
+ * 第一個貼的雷達用 link-<代碼>（以前的都是這樣，不用搬）；別的雷達用 link-<代碼>.<雷達>（「.」不會出現在 Threads 的代碼裡）
+ */
+export async function linkPostId(env: Env, code: string, module: ModuleId): Promise<string> {
+  const first = `link-${code}`;
+  const own = `${first}.${module}`;
+  const { results } = await env.DB.prepare('SELECT id, module FROM posts WHERE id IN (?, ?)').bind(first, own).all<{ id: string; module: string | null }>();
+  if (results.some((r) => r.id === own)) return own;
+  const had = results.find((r) => r.id === first);
+  return !had || moduleOf(had.module) === module ? first : own;
+}
+/** 貼文 id 的 Threads 代碼：拿掉開頭的 link-、spot- 和最後的 .雷達 */
+export const threadsCodeOf = (postId: string): string => postId.replace(/^(?:link|spot)-/, '').replace(/\.[a-z]+$/, '');
+
+/**
  * 之前有人貼過這一則：還沒確認（或說判讀錯了）的再給這個人看一次預覽、放上雷達的講現在雷達上有沒有（result）；
  * 回報的人刪掉的、判讀規則改過、當時判讀失敗的要重新判讀（result 是 null）
  */
@@ -573,7 +588,8 @@ async function earlierReport(env: Env, postId: string, module: ModuleId, now: nu
   if (decided) return { existing, result: decided };
   // 之前有人貼過但還沒確認（或說判讀錯了）：再給這個人看一次預覽，讓他確認；回報的人刪掉的，重新判讀
   const waiting = existing && (existing.confirm_state === 'pending' || existing.confirm_state === 'rejected' || existing.confirm_state === 'withdrawn' || existing.confirm_state === 'refused');
-  // 還沒放上雷達、這次從別的模組貼（例如先在洋流貼了狗狗陪伴的徵人文）：改成這個模組重新判讀
+  // 還沒放上雷達、這次從別的模組貼（例如先在洋流貼了狗狗陪伴的徵人文）：改成這個模組重新判讀。
+  // 只有活動頁會這樣：Threads 連結每個雷達各記一筆（linkPostId），不用搬
   const moved = !!existing && !!waiting && moduleOf(existing.module) !== module;
   if (moved) await env.DB.prepare('UPDATE posts SET module = ? WHERE id = ?').bind(module, postId).run();
   const stored = waiting && !moved ? readPlan(existing) : null;
@@ -610,7 +626,7 @@ export async function submitLink(env: Env, input: string, ip: string, now: numbe
   if (lum) return submitEventPage(env, { site: 'luma', link: lum }, ip, now, device, module);
   const link = await resolveThreadsLink(input);
   if (!link) throw new ReportError(400, '找不到 Threads 貼文或活動頁的連結，請貼上 Threads 貼文（https://www.threads.com/@帳號/post/...）、活動通（https://www.accupass.com/event/...）、OPENTIX（https://www.opentix.life/event/...）、Peatix（https://peatix.com/event/...）或 Luma（https://luma.com/...）的網址');
-  const postId = `link-${link.code}`;
+  const postId = await linkPostId(env, link.code, module);
 
   const earlier = await earlierReport(env, postId, module, now);
   if (earlier.result) return earlier.result;
@@ -838,7 +854,7 @@ async function submitEventPage(env: Env, p: PageLink, ip: string, now: number, d
 
 async function checkConfirm(env: Env, body: { postId?: unknown; token?: unknown }): Promise<PostRow> {
   const postId = typeof body.postId === 'string' ? body.postId : '';
-  if (!/^(?:link|note|acc|otx|ptx|lum)-[\w-]+$/.test(postId) || body.token !== (await confirmToken(env, postId))) throw new ReportError(400, '確認代碼不對，請重新貼一次連結');
+  if (!/^(?:link|note|acc|otx|ptx|lum)-[\w-]+(?:\.[a-z]+)?$/.test(postId) || body.token !== (await confirmToken(env, postId))) throw new ReportError(400, '確認代碼不對，請重新貼一次連結');
   const post = await getPost(env, postId);
   if (!post) throw new ReportError(404, '找不到這則回報，請重新貼一次連結');
   assertReportsOpen(env, post.module);
@@ -1394,7 +1410,7 @@ export async function recheckLinks(env: Env, now: number): Promise<RecheckLinksR
       await recheckEventPage(env, pg, row, now, out, endAll);
       continue;
     }
-    const r = await fetchThreadsPost(row.id.replace(/^(link|spot)-/, ''));
+    const r = await fetchThreadsPost(threadsCodeOf(row.id));
     await env.DB.prepare('UPDATE posts SET checked_at = ? WHERE id = ?').bind(now, row.id).run();
     // 存的內文可能接了地點標記（以前存的沒有），兩種都算沒改
     const changed = r.status === 'ok' && r.text !== row.text && withLocationTag(r.text, r.location) !== row.text;

@@ -254,7 +254,7 @@ async function handle(req: Request, env: Env, ctx: ExecutionContext): Promise<Re
     const dev = await deviceId(env, req);
     return jsonResponse({ reports: dev ? await myReports(env, dev) : [] });
   }
-  const mineDel = /^\/api\/reports\/((?:link|note|acc|otx)-[\w-]+)$/.exec(path);
+  const mineDel = /^\/api\/reports\/((?:link|note|acc|otx)-[\w-]+(?:\.[a-z]+)?)$/.exec(path);
   if (req.method === 'DELETE' && mineDel) {
     const dev = await deviceId(env, req);
     if (!dev) throw new HttpError(400, '缺少裝置代碼，請重新整理頁面');
@@ -839,7 +839,7 @@ async function handleAdmin(req: Request, env: Env, ctx: ExecutionContext, path: 
   // 許願：列表（scope=open 待處理、done 結案的）、改進度和回覆（{ status?, reply? }，不通過、做不出來會退順幣）
   // 台派雷達：等判斷的店家、判斷 { action: 'approve' | 'refuse', reason? }
   if (req.method === 'GET' && path === '/api/admin/reviews') return jsonResponse({ reviews: await adminListReviews(env, now) });
-  const adminReview = /^\/api\/admin\/reviews\/(link-[\w-]+)$/.exec(path);
+  const adminReview = /^\/api\/admin\/reviews\/(link-[\w-]+(?:\.[a-z]+)?)$/.exec(path);
   if (req.method === 'POST' && adminReview) return jsonResponse(await adminDecideReview(env, adminReview[1], await readJson<unknown>(req), now));
   if (req.method === 'GET' && path === '/api/admin/wishes') return jsonResponse({ wishes: await adminListWishes(env, url.searchParams.get('scope')) });
   const adminWish = /^\/api\/admin\/wishes\/(\d+)$/.exec(path);
@@ -1001,7 +1001,7 @@ async function flushUsage(db: D1Database, force = false): Promise<void> {
 }
 
 /** API 的標籤：路徑裡的編號換成 :id */
-const usageLabel = (method: string, path: string): string => `${method} ${path.replace(/\/(?:link-[\w-]+|spot-[\w-]+|\d+)(?=\/|$)/g, '/:id')}`;
+const usageLabel = (method: string, path: string): string => `${method} ${path.replace(/\/(?:link-[\w.-]+|spot-[\w-]+|\d+)(?=\/|$)/g, '/:id')}`;
 
 export default {
   async fetch(req, rawEnv, ctx) {
