@@ -57,6 +57,8 @@ export interface Extraction {
   route_title?: string | null;
   /** 洋流的活動判讀：這則貼文的關鍵字（「洋流」「飄帶」「彩虹」「徽章」，不含 #，cleanTag 過） */
   tags?: string[] | null;
+  /** 台派雷達：是店家，但看不出是台派（reason 是 AI 說的理由），送給管理者判斷才放上雷達 */
+  not_taipai?: boolean;
 }
 
 const MAX_EVENTS_PER_POST = 6;

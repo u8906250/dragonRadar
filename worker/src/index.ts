@@ -19,7 +19,7 @@ import { moduleOf } from './modules';
 import { shareInfo } from './share';
 import { ACCOUNT_RE, adminStats, publicStats, setHiddenAccount } from './stats';
 import { PUSH_RADIUS_KM, PushError, b64urlEncode, deleteSubscription, encryptPayload, purgeSubscriptions, pushStarted, saveSubscription, sendPush, vapidKeys } from './push';
-import { assertEventReportsOpen, confirmLink, editLink, ENDED_REPORTS_NEEDED, locateForEdit, MAX_LINK_AGE_SEC, NOTES_CLOSED, ReportError, REPORTS_LOCKED, ipHash, myReports, purgeReports, recheckLinks, rejectLink, reportModules, submitLink, supplementLink, withdrawReport } from './reports';
+import { adminDecideReview, adminListReviews, assertEventReportsOpen, confirmLink, editLink, ENDED_REPORTS_NEEDED, locateForEdit, MAX_LINK_AGE_SEC, NOTES_CLOSED, ReportError, REPORTS_LOCKED, ipHash, myReports, notifyReview, purgeReports, recheckLinks, rejectLink, reportModules, requestReview, submitLink, supplementLink, withdrawReport } from './reports';
 import { D1Meter, isTransient, withResilientDb } from './db';
 import { addressCacheKey, geocodeAddress, parseTwAddress } from './address';
 import { adminBottleRejects, adminListBottles, adminSetBottle, deleteBottleRejects, moderate, moderatePhoto, purgeBottleReads, purgeBottleRejects, BOTTLE_MAX_WEIGHT, bottleInfo, bottlePhoto, bottlesEnabled, photosEnabled, readBottle, SEE_RADIUS_KM, deleteBottle, DRIFT_EVERY_SEC, driftBottles, dropBottle, listBottles, myBottles, PER_DEVICE_PER_DAY, PICK_RADIUS_M, pickBottle, proofFor, purgeBottles, reportBottle, SEA_AFTER_SEC, uncollectLetter, verifyProof, WOOF_STAY_SEC } from './bottles';
@@ -55,7 +55,7 @@ async function sha1Hex(s: string): Promise<string> {
 }
 
 /** 使用者回報會寫入的 API（管理者的不算） */
-const REPORT_WRITE_RE = /^\/api\/(?:reports(?:\/(?:confirm|supplement|edit|locate|reject))?|events\/\d+\/(?:ended|feedback|locate)|spot-requests)$/;
+const REPORT_WRITE_RE = /^\/api\/(?:reports(?:\/(?:confirm|supplement|edit|locate|reject|review))?|events\/\d+\/(?:ended|feedback|locate)|spot-requests)$/;
 
 function isAdmin(req: Request, env: Env): boolean {
   if (!env.ADMIN_TOKEN) return false;
@@ -262,6 +262,13 @@ async function handle(req: Request, env: Env, ctx: ExecutionContext): Promise<Re
   }
   if (req.method === 'POST' && path === '/api/reports/reject') {
     return jsonResponse(await rejectLink(env, await readJson<{ postId?: unknown; token?: unknown; note?: unknown }>(req)));
+  }
+  // 台派雷達看不出是台派的店家：送給管理者判斷 { postId, token, note? }，推播給管理者（再送一次的不再推）
+  if (req.method === 'POST' && path === '/api/reports/review') {
+    const body = await readJson<{ postId?: unknown; token?: unknown; note?: unknown }>(req);
+    const result = await requestReview(env, body, now);
+    if (!result.existed) ctx.waitUntil(notifyReview(env, String(body.postId), now).catch((e) => console.warn('notify review failed', e)));
+    return jsonResponse(result);
   }
 
   // 沒有連結的回報（貼文字、截圖、自己填）已經拿掉了：還開著舊網頁的人送出時告訴他
@@ -830,6 +837,10 @@ async function handleAdmin(req: Request, env: Env, ctx: ExecutionContext, path: 
   }
 
   // 許願：列表（scope=open 待處理、done 結案的）、改進度和回覆（{ status?, reply? }，不通過、做不出來會退順幣）
+  // 台派雷達：等判斷的店家、判斷 { action: 'approve' | 'refuse', reason? }
+  if (req.method === 'GET' && path === '/api/admin/reviews') return jsonResponse({ reviews: await adminListReviews(env, now) });
+  const adminReview = /^\/api\/admin\/reviews\/(link-[\w-]+)$/.exec(path);
+  if (req.method === 'POST' && adminReview) return jsonResponse(await adminDecideReview(env, adminReview[1], await readJson<unknown>(req), now));
   if (req.method === 'GET' && path === '/api/admin/wishes') return jsonResponse({ wishes: await adminListWishes(env, url.searchParams.get('scope')) });
   const adminWish = /^\/api\/admin\/wishes\/(\d+)$/.exec(path);
   if (req.method === 'POST' && adminWish) return jsonResponse({ wish: await adminSetWish(env, Number(adminWish[1]), await readJson<unknown>(req), now) });

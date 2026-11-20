@@ -13,6 +13,7 @@ describe('normalizeTaipai', () => {
   it('reads each store with its type and hours', () => {
     const r = normalizeTaipai({
       is_event: true,
+      taipai: true,
       reason: null,
       tags: ['咖啡', '手沖'],
       events: [
@@ -28,6 +29,21 @@ describe('normalizeTaipai', () => {
     // 只有店名：拿店名去查；類型大小寫不分，沒寫營業時間就不知道有沒有開
     expect(r?.events[1]).toMatchObject({ title: '島嶼書房', place_text: '島嶼書房', place_query: '島嶼書房', extra: { type: 'book', hours: null, open: null } });
     expect(r?.tags).toEqual(['咖啡', '手沖']);
+    expect(r).not.toHaveProperty('not_taipai');
+  });
+  it('still reads a store that is not shown to be taipai, for the admin to judge (v1.771)', () => {
+    const r = normalizeTaipai({
+      is_event: true,
+      taipai: false,
+      reason: '沒寫這家店是台派',
+      tags: ['咖啡'],
+      events: [{ name: '慢工咖啡', type: 'cafe', hours: '11:00-20:00', place_text: '師大路 100 號', place_query: null, from_profile: ['taipai', 'hours'], confidence: 0.9 }],
+    });
+    expect(r).toMatchObject({ is_event: true, not_taipai: true, reason: '沒寫這家店是台派' });
+    expect(r?.events[0]).toMatchObject({ title: '慢工咖啡', extra: { type: 'cafe', hours: '11:00-20:00', from_profile: ['hours'] } });
+    // 漏了 taipai 這一欄：當成看不出是台派
+    expect(normalizeTaipai({ is_event: true, reason: null, tags: [], events: [{ name: 'x', type: 'cafe', hours: null, place_text: 'y', place_query: null, confidence: 0.9 }] })).toMatchObject({ not_taipai: true });
+    expect(TAIPAI_SPEC.system).toContain('看不出是台派的店家（單純的美食心得、店家廣告、新開幕）照樣列出店家資料，taipai 填 false');
   });
   it('keeps the reason when it is not a taipai store', () => {
     const r = normalizeTaipai({ is_event: false, reason: '沒寫這家店是台派', tags: ['咖啡'], events: [{ name: 'x', type: 'cafe', hours: null, place_text: 'x', place_query: null, confidence: 0.9 }] });

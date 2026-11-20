@@ -2,6 +2,8 @@
  * 台派雷達：台派店家（店家自己表態、或網友推薦、整理的台派店家）。
  * 每家店只記名稱、地點、營業時間和店家類型；不是單次的活動，放上雷達後一直顯示（STORE_DAYS），
  * 原貼文刪除、回報問題由管理者下架才拿掉。營業時間讀成每週的時段（hours.ts），雷達照這個標營業中、休息中。
+ * 是店家但看不出是台派的（v1.771 使用者說「如果無法判斷為台派店家，可回報給管理員判斷」）：照樣讀出店家資料，
+ * 回報的人可以送給管理者判斷（NOT_TAIPAI），通過才放上雷達。
  */
 import { aiTags, conf, parseLoose, str, TAGS_SCHEMA, type ExtractedEvent, type Extraction, type ExtractSpec } from './extract';
 import { parseHours } from './hours';
@@ -10,6 +12,8 @@ import { parseHours } from './hours';
 const MAX_STORES = 10;
 /** 放上雷達後顯示多久：一年後店家還在的話再回報一次 */
 export const STORE_DAYS = 365;
+/** 判讀結果的 early：是店家，但看不出是台派，要送給管理者判斷才放得上雷達 */
+export const NOT_TAIPAI = 'not_taipai';
 
 /** 店家類型（雷達、地圖的小圖示和類型按鈕照這個分；跟網頁的 topic-icons.ts STORE_TYPES 一樣） */
 export const STORE_TYPES: Record<string, string> = {
@@ -26,16 +30,18 @@ export const STORE_TYPES: Record<string, string> = {
 };
 export const isStoreType = (v: unknown): v is string => typeof v === 'string' && Object.prototype.hasOwnProperty.call(STORE_TYPES, v);
 
-const TAIPAI_PROMPT = `你是「台派雷達」的資料抽取器。你會收到一則台灣 Threads 貼文，判斷它是不是在介紹台派店家，並抽出每一家店的資料。
+const TAIPAI_PROMPT = `你是「台派雷達」的資料抽取器。你會收到一則台灣 Threads 貼文，判斷它是不是在介紹實體店家、看不看得出是台派店家，並抽出每一家店的資料。
 
 台派店家：貼文寫出這家店是台派、挺台灣（例如「台派店家」「台派老闆」「挺台店家」「顧台灣」「台灣價值」「支持台灣主權、民主」），可以是店家自己表態，也可以是網友推薦、整理的台派店家清單。
 店家在店裡發飄帶（也寫成「漂帶」，例如「歡迎來拿飄帶」「店裡有飄帶可以索取」）也算台派；這種貼文收的是發飄帶的這家店本身（照店家的資料列），不是發放活動。
 【回報的人補充】寫了為什麼是台派的也算。
+看不出是台派的店家（單純的美食心得、店家廣告、新開幕）照樣列出店家資料，taipai 填 false，之後由管理者判斷。
 
 只輸出 JSON：
 {
-  "is_event": 是否在介紹台派店家（布林值）,
-  "reason": is_event 為 false 時，用一句話（20 字以內）說明為什麼不算，例如「沒寫這家店是台派」「是抵制名單」「沒寫店名」；true 則 null,
+  "is_event": 是否在介紹實體店家（布林值；看不出是台派的店家也是 true）,
+  "taipai": 看不看得出這些店家是台派（布林值）；is_event 為 false 時填 false,
+  "reason": is_event 或 taipai 為 false 時，用一句話（20 字以內）說明，例如「沒寫這家店是台派」「是抵制名單」「沒寫店名」；都是 true 則 null,
   "tags": 這則貼文的關鍵字 3～6 個，每個 2～4 字、不含 #，只寫貼文裡提到的，讓人搜尋得到，例如「咖啡」「早午餐」「寵物友善」「手作」；不要寫地名、店名、時間、人名，也不要寫「台派」,
   "events": [ 每家店一筆，最多 ${MAX_STORES} 筆 ]
 }
@@ -50,7 +56,7 @@ events 每筆的欄位：
 - confidence: 0 到 1 的信心分數
 
 規則：
-- 只收台派店家。單純的美食心得、店家廣告、新開幕，沒寫跟台派有關的，is_event 為 false。
+- 單純的美食心得、店家廣告、新開幕，沒寫跟台派有關的：is_event 為 true、taipai 為 false，照樣列出每一家店。
 - 抵制、黑名單、批評某家店（「不要去 xx」「xx 是紅色店家」）不收，is_event 為 false。
 - 沒有實體店面的（網拍、外送、線上課程）不收；活動、市集擺攤不收。
 - 沒寫店名也沒寫地點的那一家不要列；只有店名的也可以列，confidence 低一點。
@@ -65,6 +71,7 @@ const TAIPAI_SCHEMA = {
   type: 'object',
   properties: {
     is_event: { type: 'boolean' },
+    taipai: { type: 'boolean' },
     reason: { type: ['string', 'null'] },
     tags: TAGS_SCHEMA,
     events: {
@@ -85,7 +92,7 @@ const TAIPAI_SCHEMA = {
       },
     },
   },
-  required: ['is_event', 'reason', 'tags', 'events'],
+  required: ['is_event', 'taipai', 'reason', 'tags', 'events'],
 };
 
 /** 營業時間最多幾個字 */
@@ -112,6 +119,8 @@ export function normalizeTaipai(raw: unknown): Extraction | null {
   if (!obj || typeof obj !== 'object' || Array.isArray(obj)) return null;
   const o = obj as Record<string, unknown>;
   const isEvent = o.is_event === true || o.is_event === 'true';
+  // 沒說是台派（漏了這一欄也算）：等管理者判斷
+  const taipai = o.taipai === true || o.taipai === 'true';
   const list = Array.isArray(o.events) ? o.events.filter((e): e is Record<string, unknown> => !!e && typeof e === 'object' && !Array.isArray(e)).slice(0, MAX_STORES) : [];
   const events: ExtractedEvent[] = list.flatMap((e): ExtractedEvent[] => {
     const name = str(e.name);
@@ -132,11 +141,19 @@ export function normalizeTaipai(raw: unknown): Extraction | null {
         confidence: conf(e.confidence),
         spot: false,
         until: null,
-        extra: { ...storeExtra(type, cleanHours(e.hours)), ...profileFields(e.from_profile) },
+        // 看不出是台派：「台派是從簡介讀的」不成立
+        extra: { ...storeExtra(type, cleanHours(e.hours)), ...profileFields(taipai ? e.from_profile : Array.isArray(e.from_profile) ? e.from_profile.filter((f) => f !== 'taipai') : null) },
       },
     ];
   });
-  return { is_event: isEvent, reason: isEvent ? null : (str(o.reason)?.slice(0, 60) ?? null), events: isEvent ? events : [], tags: aiTags(o, isEvent) };
+  const sure = isEvent && taipai;
+  return {
+    is_event: isEvent,
+    ...(isEvent && !taipai ? { not_taipai: true } : {}),
+    reason: sure ? null : (str(o.reason)?.slice(0, 60) ?? null),
+    events: isEvent ? events : [],
+    tags: aiTags(o, isEvent),
+  };
 }
 
 /** 台派雷達的判讀 */

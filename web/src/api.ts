@@ -296,6 +296,8 @@ export const editReport = (c: { postId: string; token: string }, items: EditInpu
 /** 修改表單先查填的地點，在小地圖上標出來 */
 export const locatePlace = (c: { postId: string; token: string }, place: string): Promise<Result<LocateResult>> =>
   deviceJson<LocateResult>('/api/reports/locate', 'POST', { ...c, place });
+/** 台派雷達看不出是台派的店家：送給管理者判斷，note 寫為什麼是台派（選填） */
+export const reviewReport = (c: { postId: string; token: string }, note: string): Promise<Result<SubmitResult>> => deviceJson<SubmitResult>('/api/reports/review', 'POST', { ...c, note });
 /** 判讀錯了：不放，note 寫哪裡錯 */
 export const rejectReport = (c: { postId: string; token: string }, note: string): Promise<Result<{ ok: true }>> => deviceJson<{ ok: true }>('/api/reports/reject', 'POST', { ...c, note });
 /** 我的回報：30 天內用這個瀏覽器回報的 */

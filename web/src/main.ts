@@ -1,6 +1,6 @@
 import './styles.css';
 import { FITBUS_MS_PER_M, hqDenseKm, hqMotionKm, HQ_NET_LABEL_KM, HQ_SAIL_MS, HQ_STAR_MS, HQ_VOYAGE_MS, RAINBOW_EVERY_MS, voyagePhase, voyageTimeOf } from './flow';
-import { accountToken, addKeyword, cachedNickname, deletePushSubscription, locateFeedbackPlace, sendFeedback, type FeedbackKind, fetchPushKey, savePushSubscription, confirmReport, editReport, locatePlace, rejectReport, supplementReport, deleteBottle, dropBottle, readBottle, type BottleHere, fetchBottleInfo, fetchBottlePhoto, fetchBottleProof, fetchBottles, fetchWoofBottles, rememberBottlePhoto, uncollectLetter, verifyBottleProof, fetchEvents, fetchHealth, fetchKeywords, fetchMyBottles, fetchMyReports, fetchRoutes, pickBottle, reportBottle, submitLink, withdrawReport } from './api';
+import { accountToken, addKeyword, cachedNickname, deletePushSubscription, locateFeedbackPlace, sendFeedback, type FeedbackKind, fetchPushKey, savePushSubscription, confirmReport, editReport, locatePlace, rejectReport, reviewReport, supplementReport, deleteBottle, dropBottle, readBottle, type BottleHere, fetchBottleInfo, fetchBottlePhoto, fetchBottleProof, fetchBottles, fetchWoofBottles, rememberBottlePhoto, uncollectLetter, verifyBottleProof, fetchEvents, fetchHealth, fetchKeywords, fetchMyBottles, fetchMyReports, fetchRoutes, pickBottle, reportBottle, submitLink, withdrawReport } from './api';
 import { compassSupported, startCompass } from './compass';
 import { bearingDeg, compassLabel, cutAtBox, cutLines, destination, formatKm, haversineKm, lookFrom, outsideBox, ringBox, ringHas, splitAntimeridian, simplifyLatLng, taiwanRadiusKm, unitVectors, type GeoBox, type LatLng, type RegionMap } from './geo';
 import { TAIWAN_RINGS } from './taiwan';
@@ -8006,8 +8006,13 @@ const OUTCOME_TEXT: Record<SubmitResult['outcome'], string> = {
   no_place: '看得出是活動，但貼文沒寫具體地點（或查不到），所以還沒放上雷達。知道在哪裡的話，可以在下面補充地點再判讀一次。',
   not_listed: '判讀不到完整的活動內容、地點、開始時間，或是已經結束、超過 21 天後才開始，所以沒有放上雷達。',
   not_event: '這則看起來不是活動。貼文要寫出做什麼、在哪裡、什麼時候舉辦，雷達才會收。',
+  needs_review: '讀得出店家，但看不出是台派店家。覺得是的話，可以送給管理者判斷，通過才會放上雷達；也可以按「補充資料」寫為什麼是台派，讓雷達再判讀一次。',
+  in_review: '這則已經送給管理者判斷是不是台派店家，通過後會放上雷達。之後再貼一次這個連結可以看結果。',
+  refused: '管理者判斷這則不是台派店家，沒有放上雷達。',
   failed: '判讀暫時失敗，請稍後再貼一次。',
 };
+/** 有讀出來的資料、要給回報的人看一次的：一般的預覽、台派雷達看不出是台派的店家 */
+const hasPreview = (o: SubmitResult['outcome']): boolean => o === 'preview' || o === 'needs_review';
 
 function setReportMsg(html: string): void {
   reportResult.innerHTML = html;
@@ -8207,7 +8212,7 @@ async function movePin(i: number, to: LatLng): Promise<void> {
     showBanner(bannerEl, res.message, 3500);
     return;
   }
-  if (res.data.outcome === 'preview') renderPreview(res.data);
+  if (hasPreview(res.data.outcome)) renderPreview(res.data);
   else await showReportResult(res.data);
   if (looking) reportSheet.classList.add('looking');
 }
@@ -8340,7 +8345,7 @@ function wireSupplement(c: { postId: string; token: string }, actions: HTMLEleme
       showBanner(bannerEl, res.message, 3500);
       return;
     }
-    if (res.data.outcome === 'preview') renderPreview(res.data);
+    if (hasPreview(res.data.outcome)) renderPreview(res.data);
     else await showReportResult(res.data);
     // 表單換成新的判讀結果：捲回最上面，從頭看
     reportSheet.scrollTop = 0;
@@ -8756,7 +8761,7 @@ function wireEdit(c: { postId: string; token: string }, items: EditItem[], actio
       showBanner(bannerEl, res.message, 3500);
       return;
     }
-    if (res.data.outcome === 'preview') renderPreview(res.data);
+    if (hasPreview(res.data.outcome)) renderPreview(res.data);
     else await showReportResult(res.data);
     // 表單換成新的預覽：捲回最上面，從頭看（使用者說的）
     reportSheet.scrollTop = 0;
@@ -8842,7 +8847,18 @@ function renderPreview(r: SubmitResult): void {
   const dups = r.events.length
     ? `<p class="muted sheet-note">雷達上已經有的：${r.events.map((ev) => esc(titleOf(ev))).join('、')}（不會重複放）</p>`
     : '';
-  setReportMsg(`<p class="msg">${OUTCOME_TEXT.preview}對的話才會放上雷達。</p>
+  // 台派雷達看不出是台派：不能直接放上雷達，送給管理者判斷
+  const review = r.outcome === 'needs_review';
+  const head = review
+    ? `<p class="msg">${OUTCOME_TEXT.needs_review}</p>${r.note ? `<p class="muted sheet-note">AI 的判斷：${esc(r.note)}</p>` : ''}`
+    : `<p class="msg">${OUTCOME_TEXT.preview}對的話才會放上雷達。</p>`;
+  const buttons = review
+    ? `<button type="button" class="btn primary" data-act="review"${items.some((p) => p.lat !== null && p.lng !== null) ? '' : ' disabled'}>送給管理者判斷</button>
+      <button type="button" class="btn" data-act="more">補充資料</button>`
+    : `<button type="button" class="btn primary" data-act="confirm">${items.length > 0 && items.every((p) => p.update?.mode === 'attach') ? '對，附在這個據點' : '對，放上雷達'}</button>
+      <button type="button" class="btn" data-act="more">補充資料</button>
+      <button type="button" class="btn" data-act="wrong">不對</button>`;
+  setReportMsg(`${head}
     <ul class="report-preview">${(r.routes ?? []).map(routePreviewHtml).join('')}${items
       .map(
         (p) => `<li>
@@ -8860,15 +8876,14 @@ function renderPreview(r: SubmitResult): void {
       .join('')}</ul>
     ${items.some((p) => p.lat !== null && p.lng !== null) ? '<p class="muted sheet-note small">📍 位置可能不準，不對就把虛線圈拖到正確的地方</p>' : ''}
     ${dups}${r.failures?.length ? `<p class="muted sheet-note">${r.failures.length > 1 ? `下面 ${r.failures.length} 場` : '下面這場'}不會放上雷達${canFixByNote(r.failures) ? '，知道的話可以按「補充資料」補上' : ''}：</p>${failuresHtml(r.failures)}` : ''}
+    ${review && !items.some((p) => p.lat !== null && p.lng !== null) ? '<p class="muted sheet-note">店家還沒有位置，請先按「補充資料」補上地址或在雷達上標出位置，再送給管理者判斷。</p>' : ''}
     <div class="sheet-actions">
-      <button type="button" class="btn primary" data-act="confirm">${items.length > 0 && items.every((p) => p.update?.mode === 'attach') ? '對，附在這個據點' : '對，放上雷達'}</button>
-      <button type="button" class="btn" data-act="more">補充資料</button>
-      <button type="button" class="btn" data-act="wrong">不對</button>
+      ${buttons}
     </div>
     ${useEditForm(r.edit) ? `${editFormHtml(r.edit ?? [], true)}${mod.current ? '' : textSupplementHtml(r.supplement ?? '', true)}` : supplementFormHtml(r.supplement ?? '', true)}
     <form class="preview-wrong" hidden>
-      <textarea rows="2" maxlength="300" placeholder="哪裡判斷錯了？（選填，例如「地點是文化路 140 號」「只有 10/21 一天」）" aria-label="哪裡判斷錯了"></textarea>
-      <div class="sheet-actions"><button type="submit" class="btn primary">送出，不放上雷達</button><button type="button" class="btn" data-act="back">回上一步</button></div>
+      <textarea rows="2" maxlength="300" placeholder="${review ? '為什麼是台派店家？（選填，例如「老闆在店裡貼了支持台灣的貼紙」「店家有發飄帶」）' : '哪裡判斷錯了？（選填，例如「地點是文化路 140 號」「只有 10/21 一天」）'}" aria-label="${review ? '為什麼是台派店家' : '哪裡判斷錯了'}"></textarea>
+      <div class="sheet-actions"><button type="submit" class="btn primary">${review ? '送出' : '送出，不放上雷達'}</button><button type="button" class="btn" data-act="back">回上一步</button></div>
     </form>`);
   for (const b of reportResult.querySelectorAll<HTMLButtonElement>('[data-look]')) {
     b.addEventListener('click', () => {
@@ -8898,7 +8913,8 @@ function renderPreview(r: SubmitResult): void {
   pinConfirm = c;
   render();
   flyToPins(reportPins);
-  reportResult.querySelector('[data-act="wrong"]')?.addEventListener('click', () => {
+  // 「不對」、台派雷達的「送給管理者判斷」：先寫一句（選填）再送出
+  reportResult.querySelector('[data-act="wrong"], [data-act="review"]')?.addEventListener('click', () => {
     if (!wrongForm || !actions) return;
     wrongForm.hidden = false;
     actions.hidden = true;
@@ -8913,6 +8929,16 @@ function renderPreview(r: SubmitResult): void {
     if (reportBusy) return;
     const note = wrongForm.querySelector('textarea')?.value ?? '';
     setReportBusy(true, '送出中…', wrongForm.querySelector('[type="submit"]'));
+    if (review) {
+      const sent = await reviewReport(c, note).finally(() => setReportBusy(false));
+      if (!sent.ok) {
+        showBanner(bannerEl, sent.message, 3500);
+        return;
+      }
+      reportInput.value = '';
+      await showReportResult(sent.data);
+      return;
+    }
     const res = await rejectReport(c, note).finally(() => setReportBusy(false));
     setReportMsg(
       res.ok
@@ -8939,7 +8965,7 @@ async function submitReport(): Promise<void> {
   }
   lsSet(LS_REPORTED, '1');
   void loadMyReports();
-  if (r.data.outcome === 'preview') {
+  if (hasPreview(r.data.outcome)) {
     renderPreview(r.data);
     return;
   }
@@ -9053,11 +9079,13 @@ async function showReportResult(data: SubmitResult): Promise<void> {
           canFixByNote(fails) ? '<p class="muted sheet-note">活動要有內容、地點和開始時間才收（結束時間可以不寫）；知道的話可以在下面補上。</p>' : ''
         }`
       : '';
-  // 判讀成不是活動：附上 AI 的理由，判斷錯了可以補充
+  // 判讀成不是活動：附上 AI 的理由，判斷錯了可以補充；台派雷達管理者判斷不是台派的：附上管理者寫的原因
   const noteHtml =
     outcome === 'not_event' && data.note
-      ? `<p class="muted sheet-note">AI 的判斷：${esc(data.note)}。如果判斷錯了，可以在下面直接填活動內容、時間和地點。</p>`
-      : '';
+      ? `<p class="muted sheet-note">AI 的判斷：${esc(data.note)}。${mod.current ? '如果判斷錯了，可以在下面直接填活動內容、時間和地點。' : '如果判斷錯了，可以在下面補充說明，再判讀一次。'}</p>`
+      : outcome === 'refused' && data.reviewNote
+        ? `<p class="muted sheet-note">管理者寫的原因：${esc(data.reviewNote)}</p>`
+        : '';
   const list = (inMine ? [] : resultGroups(found))
     .map((g) => {
       const ev = g[0];

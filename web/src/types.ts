@@ -210,7 +210,10 @@ export interface KeywordInfo {
   pinned: boolean;
 }
 
-export type LinkOutcome = 'preview' | 'added' | 'duplicate' | 'attached' | 'no_place' | 'not_listed' | 'not_event' | 'failed';
+/**
+ * 台派雷達看不出是台派的店家：needs_review 可以送給管理者判斷（preview 是讀出來的店家）、in_review 送出了還沒處理、refused 管理者判斷不是台派
+ */
+export type LinkOutcome = 'preview' | 'added' | 'duplicate' | 'attached' | 'no_place' | 'not_listed' | 'not_event' | 'needs_review' | 'in_review' | 'refused' | 'failed';
 
 /** 判讀結果的預覽：一個地點或時段（固定據點的好幾天合成一筆） */
 export interface PreviewItem {
@@ -273,8 +276,10 @@ export interface SubmitResult {
   supplement?: string | null;
   /** 洋流的活動：沒放上雷達的每一場和原因 */
   failures?: FailedItem[];
-  /** 判讀成不是活動時，AI 說的理由 */
+  /** 判讀成不是活動（台派雷達：看不出是台派）時，AI 說的理由 */
   note?: string;
+  /** 管理者判斷不是台派店家的原因（沒寫就沒有） */
+  reviewNote?: string;
   /** 洋流的活動：補充資料表單預先填好的每一場，回報的人直接改 */
   edit?: EditItem[];
   /** 車掃、掃街、車隊合成的路線：每一站的時間、會不會放上雷達 */

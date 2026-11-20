@@ -6,7 +6,7 @@ import { cityOfHouse, geocodeAddress, parseTwAddress, type TwAddress } from './a
 import { SESSION_SPEC } from './badminton';
 import { FOOD_SPEC } from './food';
 import { JOB_SPEC, jobRisks, WORK_SPEC } from './jobs';
-import { STORE_DAYS, storeExtra, TAIPAI_SPEC } from './taipai';
+import { NOT_TAIPAI, STORE_DAYS, storeExtra, TAIPAI_SPEC } from './taipai';
 import { DEFAULT_MODULE, moduleOf, type ModuleId } from './modules';
 import { adminArea, cityLevel, cityOfDistrict, cityOfRoad, countryOfPlace, geocode, geocodeFirst, geocodeStreet, geocodeWorld, isAreaOnly, placeCandidates, regionOfPlace, type GeoPoint } from './geocode';
 import { listActiveKeywords, type KeywordRow } from './keywords';
@@ -28,10 +28,16 @@ export interface PostRow {
   extraction: string | null;
   /** 回報的人補充的地點或時間，判讀時接在貼文後面 */
   supplement?: string | null;
-  /** 使用者回報的確認狀態：null（排程搜尋到的、舊資料）、pending、confirmed、rejected、withdrawn（回報的人刪除了） */
-  confirm_state?: 'pending' | 'confirmed' | 'rejected' | 'withdrawn' | null;
+  /**
+   * 使用者回報的確認狀態：null（排程搜尋到的、舊資料）、pending、confirmed、rejected、withdrawn（回報的人刪除了）；
+   * 台派雷達看不出是台派的：review 送給管理者判斷、refused 管理者判斷不是台派（review_note 是原因）
+   */
+  confirm_state?: 'pending' | 'confirmed' | 'rejected' | 'withdrawn' | 'review' | 'refused' | null;
   confirm_plan?: string | null;
+  /** 回報的人說哪裡錯；送給管理者判斷時是回報的人寫的為什麼是台派 */
   confirm_note?: string | null;
+  review_note?: string | null;
+  reviewed_at?: number | null;
   /** 哪個模組：current 洋流、dog 狗狗陪伴 */
   module?: string;
 }
@@ -708,14 +714,16 @@ export async function planPost(env: Env, post: PostRow, now = nowSec()): Promise
   // 店家自己帳號的簡介寫了台派、營業時間、地址都可以用（判讀說明決定是不是店家自己的帳號）
   const store = moduleOf(post.module) === 'taipai';
   const noHours = store && !first.early && first.items.some((it) => it.plan && !storeHours(it.plan.extra));
-  if (post.source !== 'link' || !(noPlace || noHours)) return first;
+  // 看不出是台派：店家自己帳號的簡介可能寫了
+  const notTaipai = store && first.early === NOT_TAIPAI;
+  if (post.source !== 'link' || !(noPlace || noHours || notTaipai)) return first;
   const accounts = profileCandidates(post.text, post.username, store ? 3 : 2, store);
   if (accounts.length === 0) return first;
   const profiles = (await Promise.all(accounts.map((u) => fetchThreadsProfile(u)))).filter((p): p is ThreadsProfile => !!p);
   const hint = profileHintText(profiles);
   if (!hint) return first;
   const second = await planPostWith(env, post, now, hint);
-  if (!profilePlanBetter(first.items, second.items, store)) return first;
+  if (!(store ? storePlanBetter(first, second) : profilePlanBetter(first.items, second.items))) return first;
   const from = profiles.filter((p) => p.name || p.bio).map((p) => `@${p.username}`).join('、');
   if (store) return { ...second, items: second.items.map((it) => fromProfile(it, from)) };
   return { ...second, items: second.items.map((it) => (it.plan && it.plan.lat !== null ? { ...it, profileHint: from } : it)) };
@@ -746,6 +754,16 @@ export function profilePlanBetter(first: PlanItem[], second: PlanItem[], stores 
   const withHours = (items: PlanItem[]): number => items.filter((it) => it.plan && it.plan.lat !== null && storeHours(it.plan.extra)).length;
   return (located(second) - located(first) || withPlace(second) - withPlace(first) || (stores ? withHours(second) - withHours(first) : 0)) > 0;
 }
+/**
+ * 台派雷達：讀了帳號簡介看得出是台派、地點沒變少的比較好（看不出是台派要等管理者判斷）；
+ * 讀了簡介反而看不出是台派的不用；其他照 profilePlanBetter（地點、營業時間多的）
+ */
+export function storePlanBetter(first: PlanResult, second: PlanResult): boolean {
+  if (first.early === NOT_TAIPAI && second.early === null) return located(second.items) >= located(first.items) && second.items.length > 0;
+  if (first.early === null && second.early === NOT_TAIPAI) return false;
+  return profilePlanBetter(first.items, second.items, true);
+}
+
 /** 這一筆沒有地點：沒寫、或查不到（洋流的活動缺地點記成 incomplete:place…、查不到記成 unlocated） */
 const noPlaceReason = (reason: string): boolean => reason === 'no_place' || reason === 'unlocated' || /^incomplete:(?:.*,)?place\b/.test(reason);
 /** 判讀得出來，但地點都找不到（沒寫地點、或查不到） */
@@ -786,7 +804,9 @@ async function planPostWith(env: Env, post: PostRow, now: number, profileHint: s
   // 台派雷達的店家不是單次的：放上雷達後一直顯示。沒給帳號簡介時，判讀說「從簡介讀的」不算
   if (module === 'taipai') {
     if (!profileHint) for (const e of extraction.events) delete e.extra?.from_profile;
-    return { items: await planStores(env, extraction.events, now, 0), early: null };
+    const items = await planStores(env, extraction.events, now, 0);
+    // 是店家但看不出是台派：店家資料照樣排好、定位，回報的人可以送給管理者判斷
+    return extraction.not_taipai ? { items, early: NOT_TAIPAI, note: extraction.reason ?? null } : { items, early: null };
   }
   if (module === 'current') {
     return { items: await planActivities(env, post, extraction.events, text, now, extraction.route_title ?? null), early: null };

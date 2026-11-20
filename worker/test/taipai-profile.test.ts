@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { planPost, profilePlanBetter, type PlanItem } from '../src/events';
+import { planPost, profilePlanBetter, storePlanBetter, type PlanItem } from '../src/events';
 import { profileCandidates } from '../src/sources/profile';
 import { normalizeTaipai } from '../src/taipai';
 
@@ -13,6 +13,7 @@ describe('台派雷達參考店家帳號的簡介（v1.768）', () => {
   it('keeps which fields came from the bio', () => {
     const r = normalizeTaipai({
       is_event: true,
+      taipai: true,
       reason: null,
       tags: [],
       events: [
@@ -35,6 +36,24 @@ describe('台派雷達參考店家帳號的簡介（v1.768）', () => {
     expect(profilePlanBetter([store(null)], [store('11:00-20:00', null)], true)).toBe(false);
     expect(profilePlanBetter([store('10:00-18:00')], [store('11:00-20:00')], true)).toBe(false);
   });
+  it('prefers the bio result when it shows the store is taipai (v1.771)', () => {
+    const store = (lat: number | null = 25.02, hours: string | null = null): PlanItem => ({
+      group: 0,
+      reason: 'planned',
+      plan: { kind: 'store', title: '慢工咖啡', item: null, start_at: 1, end_at: 2, place_text: 'x', place_query: 'x', lat, lng: lat === null ? null : 121.5, confidence: 1, all_day: false, spot: false, approx_area: null, end_open: true, until_open: false, extra: JSON.stringify({ type: 'cafe', hours }) },
+    });
+    const unsure = (items: PlanItem[]) => ({ items, early: 'not_taipai' });
+    const sure = (items: PlanItem[]) => ({ items, early: null });
+    expect(storePlanBetter(unsure([store()]), sure([store()]))).toBe(true);
+    // 讀了簡介反而看不出是台派、或查不到地點了：不用
+    expect(storePlanBetter(sure([store()]), unsure([store(25.02, '11:00-20:00')]))).toBe(false);
+    expect(storePlanBetter(unsure([store()]), sure([store(null)]))).toBe(false);
+    // 一樣看不出是台派：補上營業時間的比較好
+    expect(storePlanBetter(unsure([store()]), unsure([store(25.02, '11:00-20:00')]))).toBe(true);
+    // 本來說不是店家，讀了簡介看得出店家（還是看不出是台派）
+    expect(storePlanBetter({ items: [], early: 'not_event' }, unsure([store()]))).toBe(true);
+    expect(storePlanBetter(unsure([store()]), { items: [], early: 'not_event' })).toBe(false);
+  });
 });
 
 describe('planPost reads the store account bio', () => {
@@ -47,7 +66,7 @@ describe('planPost reads the store account bio', () => {
       // 判讀說明本身也寫了「【帳號簡介】」，要看簡介的內容
       const bio = opts.messages.some((x) => x.content.includes('台派咖啡｜'));
       const store = { name: '慢工咖啡', type: 'cafe', hours: bio ? '週二至週日 11:00-20:00' : null, place_text: '師大路 100 號', place_query: '台北市大安區師大路 100 號', from_profile: bio ? ['taipai', 'hours'] : [], confidence: 0.8 };
-      return { response: { is_event: true, reason: null, tags: ['咖啡'], events: [store] } };
+      return { response: { is_event: true, taipai: true, reason: null, tags: ['咖啡'], events: [store] } };
     }),
   };
   it('fills the hours from the bio and remembers where they came from', async () => {
@@ -78,7 +97,7 @@ describe('planPost reads the store account bio', () => {
       return Response.json({ elements: [] });
     });
     vi.stubGlobal('fetch', fetch);
-    const run = vi.fn(async () => ({ response: { is_event: true, reason: null, tags: [], events: [{ name: '慢工咖啡', type: 'cafe', hours: '11:00-20:00', place_text: '師大路 100 號', place_query: '台北市大安區師大路 100 號', from_profile: ['hours'], confidence: 0.8 }] } }));
+    const run = vi.fn(async () => ({ response: { is_event: true, taipai: true, reason: null, tags: [], events: [{ name: '慢工咖啡', type: 'cafe', hours: '11:00-20:00', place_text: '師大路 100 號', place_query: '台北市大安區師大路 100 號', from_profile: ['hours'], confidence: 0.8 }] } }));
     const env = { DB: { prepare: () => stmt, batch: async () => [] }, AI: { run }, AI_MODEL: 'm' } as never;
     const post = { id: 'link-y', module: 'taipai', text: '台派咖啡 @slowcafe 師大路 100 號，11:00-20:00', posted_at: 1_800_000_000, source: 'link', username: 'someone', supplement: null } as never;
     const r = await planPost(env, post, 1_800_000_100);
@@ -86,5 +105,41 @@ describe('planPost reads the store account bio', () => {
     expect(fetch.mock.calls.some(([u]) => String(u).includes('threads.com'))).toBe(false);
     // 沒給簡介，判讀說「從簡介讀的」不算
     expect(JSON.parse(r.items[0].plan!.extra!)).not.toHaveProperty('from_profile');
+  }, 60_000);
+
+  /** 地圖查詢、帳號頁：bio 是帳號簡介（null 是讀不到帳號） */
+  const stubFetch = (bio: string | null) =>
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: string | URL | Request) => {
+        const url = String(input instanceof Request ? input.url : input);
+        if (url.startsWith('https://www.threads.com/@slowcafe')) return bio ? new Response(bio, { status: 200 }) : new Response('', { status: 404 });
+        if (url.includes('photon')) return Response.json({ type: 'FeatureCollection', features: [{ type: 'Feature', geometry: { type: 'Point', coordinates: [121.5288, 25.0251] }, properties: { type: 'house', street: '師大路', housenumber: '100', city: '臺北市', district: '大安區' } }] });
+        return Response.json({ elements: [] });
+      }),
+    );
+  /** 假的 AI：貼文沒寫台派；簡介寫了「台派咖啡」才算 */
+  const unsureAi = () => ({
+    run: vi.fn(async (_m: string, opts: { messages: Array<{ content: string }> }) => {
+      const bio = opts.messages.some((x) => x.content.includes('台派咖啡｜'));
+      const store = { name: '慢工咖啡', type: 'cafe', hours: '11:00-20:00', place_text: '師大路 100 號', place_query: '台北市大安區師大路 100 號', from_profile: bio ? ['taipai'] : [], confidence: 0.8 };
+      return { response: { is_event: true, taipai: bio, reason: bio ? null : '沒寫這家店是台派', tags: ['咖啡'], events: [store] } };
+    }),
+  });
+  const plainPost = { id: 'link-z', module: 'taipai', text: '慢工咖啡 @slowcafe 師大路 100 號，11:00-20:00，手沖很好喝', posted_at: 1_800_000_000, source: 'link', username: 'someone', supplement: null } as never;
+  it('reads the bio when the post does not say the store is taipai (v1.771)', async () => {
+    stubFetch(BIO);
+    const env = { DB: { prepare: () => stmt, batch: async () => [] }, AI: unsureAi(), AI_MODEL: 'm' } as never;
+    const r = await planPost(env, plainPost, 1_800_000_100);
+    expect(r.early).toBeNull();
+    expect(r.items[0].profileHint).toBe('@slowcafe');
+    expect(JSON.parse(r.items[0].plan!.extra!)).toMatchObject({ from_profile: ['taipai'], profile_from: '@slowcafe' });
+  }, 60_000);
+  it('keeps the store for the admin to judge when nothing shows it is taipai (v1.771)', async () => {
+    stubFetch(null);
+    const env = { DB: { prepare: () => stmt, batch: async () => [] }, AI: unsureAi(), AI_MODEL: 'm' } as never;
+    const r = await planPost(env, plainPost, 1_800_000_100);
+    expect(r).toMatchObject({ early: 'not_taipai', note: '沒寫這家店是台派' });
+    expect(r.items[0].plan).toMatchObject({ kind: 'store', title: '慢工咖啡', lat: 25.0251 });
   }, 60_000);
 });

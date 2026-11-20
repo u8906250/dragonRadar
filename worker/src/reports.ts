@@ -3,6 +3,7 @@
  * 不需要登入，用加鹽的 IP 雜湊限制頻率。
  * 貼連結的流程：判讀、定位完先回傳預覽（outcome = 'preview'），回報的人按「對」（confirmLink）才寫進雷達，
  * 按「不對」（rejectLink）就不放，留給管理者看。
+ * 台派雷達看不出是台派的店家（outcome = 'needs_review'）：回報的人按「送給管理者判斷」（requestReview），管理者通過才寫進雷達。
  */
 import type { Env } from './env';
 import { DEFAULT_MODULE, isModule, MODULE_IDS, moduleOf, type ModuleId } from './modules';
@@ -18,7 +19,8 @@ import { distKm } from './push';
 import { fetchThreadsPost, resolveThreadsLink, shortcodeToUnix, withLocationTag } from './sources/link';
 import { sha1Hex } from './sources/text';
 import { creditReport, uncreditReport, type ReportReward } from './cards';
-import { cleanHours, isStoreType, STORE_TYPES } from './taipai';
+import { cleanHours, isStoreType, NOT_TAIPAI, STORE_TYPES } from './taipai';
+import { pushAdmins } from './push';
 import { learnTags, manualTags } from './learnedTags';
 
 /** 只收這麼新的貼文，太舊的公告通常已經過期（v1.696 使用者說 7 天改成 30 天：大型活動常常一個月前就公告；資料也是留 30 天） */
@@ -117,6 +119,12 @@ export type LinkOutcome =
   | 'not_listed'
   /** 不是發放或活動 */
   | 'not_event'
+  /** 台派雷達：是店家，但看不出是台派；可以送給管理者判斷（preview 是讀出來的店家） */
+  | 'needs_review'
+  /** 台派雷達：已經送給管理者判斷，還沒處理 */
+  | 'in_review'
+  /** 台派雷達：管理者判斷不是台派店家（reviewNote 是原因） */
+  | 'refused'
   | 'failed';
 
 /** 預覽：一個地點或時段（固定據點的好幾天合成一筆） */
@@ -171,8 +179,10 @@ export interface SubmitResult {
   why?: NotListedWhy;
   /** 洋流的活動：沒放上雷達的每一場和原因 */
   failures?: FailedItem[];
-  /** 判讀成不是活動時，AI 說的理由 */
+  /** 判讀成不是活動（台派雷達：看不出是台派）時，AI 說的理由 */
   note?: string;
+  /** 管理者判斷不是台派店家的原因（沒寫就沒有） */
+  reviewNote?: string;
   /** 洋流的活動：補充資料表單預先填好的每一場（判讀出來的、沒放上雷達的），回報的人直接改 */
   edit?: EditItem[];
   /** 車掃、掃街、車隊：合成路線的（每一站的時間、會不會放上雷達），這些站不在 preview、failures 裡 */
@@ -357,7 +367,8 @@ export function notListedWhy(items: PlanItem[]): NotListedWhy | undefined {
 // 17：台派雷達參考店家帳號的簡介（台派、營業時間、地址），記下哪些是從簡介讀的（2026-11-19）
 // 18：台派雷達：店家在店裡發飄帶也算台派（2026-11-19）
 // 19：「士林捷運站旁」查成永和的「捷運頂溪站」：修好車站名的查法，還沒確認的回報再貼一次重新判讀、重新定位（2026-11-19）
-export const PLAN_VERSION = 19;
+// 20：台派雷達看不出是台派的店家照樣讀出資料，可以送給管理者判斷（2026-11-20）
+export const PLAN_VERSION = 20;
 
 /** 判讀好、還沒寫進雷達的資料，存在 posts.confirm_plan */
 interface StoredPlan {
@@ -456,7 +467,13 @@ async function previewResult(env: Env, post: PostRow, plan: StoredPlan, existed:
     supplement: post.supplement ?? null,
     ...edit,
   };
-  if (plan.early) return { ...base, outcome: summarize([plan.early]), reasons: [plan.early], events: [], ...(plan.note ? { note: plan.note } : {}) };
+  const note = plan.note ? { note: plan.note } : {};
+  // 台派雷達看不出是台派：讀出來的店家照預覽列出來，回報的人可以改、送給管理者判斷
+  if (plan.early === NOT_TAIPAI) {
+    const failures = plan.items.flatMap((it) => (!it.plan && it.fail ? [it.fail] : []));
+    return { ...base, outcome: 'needs_review', reasons: [NOT_TAIPAI], events: [], preview: previewOf(plan.items, now), ...(failures.length > 0 ? { failures } : {}), ...note };
+  }
+  if (plan.early) return { ...base, outcome: summarize([plan.early]), reasons: [plan.early], events: [], ...note };
   const reasons = plan.items.filter((it) => !it.plan).map((it) => it.reason);
   const events = await eventsForResult(env, post.id, reasons, now);
   // 車掃路線的站另外列（一條路線一塊），不在一般的預覽、沒放上雷達的清單裡
@@ -550,8 +567,11 @@ export const UNREADABLE_POST =
  */
 async function earlierReport(env: Env, postId: string, module: ModuleId, now: number): Promise<{ existing: PostRow | null; result: SubmitResult | null }> {
   const existing = await getPost(env, postId);
+  // 台派雷達送給管理者判斷的：講現在的狀態（管理者判斷不是台派的，從別的雷達貼可以重新判讀）
+  const decided = reviewResult(existing, module);
+  if (decided) return { existing, result: decided };
   // 之前有人貼過但還沒確認（或說判讀錯了）：再給這個人看一次預覽，讓他確認；回報的人刪掉的，重新判讀
-  const waiting = existing && (existing.confirm_state === 'pending' || existing.confirm_state === 'rejected' || existing.confirm_state === 'withdrawn');
+  const waiting = existing && (existing.confirm_state === 'pending' || existing.confirm_state === 'rejected' || existing.confirm_state === 'withdrawn' || existing.confirm_state === 'refused');
   // 還沒放上雷達、這次從別的模組貼（例如先在洋流貼了狗狗陪伴的徵人文）：改成這個模組重新判讀
   const moved = !!existing && !!waiting && moduleOf(existing.module) !== module;
   if (moved) await env.DB.prepare('UPDATE posts SET module = ? WHERE id = ?').bind(module, postId).run();
@@ -827,6 +847,8 @@ async function checkConfirm(env: Env, body: { postId?: unknown; token?: unknown 
 /** 還能補充、修改嗎：已經放上雷達的不行；沒有連結的回報（貼文字、截圖、自己填）已經停止收件 */
 function assertEditable(post: PostRow, what: string): void {
   if (post.confirm_state === 'confirmed') throw new ReportError(409, `這則已經放上雷達了，不能再${what}`);
+  if (post.confirm_state === 'review') throw new ReportError(409, `這則已經送給管理者判斷了，不能再${what}`);
+  if (post.confirm_state === 'refused') throw new ReportError(409, `管理者判斷這則不是台派店家，不能再${what}`);
   if (post.source === 'note') throw new ReportError(410, NOTES_CLOSED);
 }
 
@@ -838,9 +860,13 @@ export async function confirmLink(env: Env, body: { postId?: unknown; token?: un
     const events = await eventsForResult(env, post.id, [], now);
     return { existed: true, outcome: events.length > 0 ? 'added' : 'not_listed', reasons: [], events, permalink };
   }
+  const decided = reviewResult(post, moduleOf(post.module));
+  if (decided) return decided;
   const plan = readPlan(post);
   if (!plan) throw new ReportError(409, '判讀結果不見了，請重新貼一次連結');
   if (post.source === 'note') throw new ReportError(410, NOTES_CLOSED);
+  // 看不出是台派的只能送給管理者判斷
+  if (plan.early === NOT_TAIPAI) throw new ReportError(409, '看不出是台派店家，請按「送給管理者判斷」');
   const result = await commitPlan(env, post.id, plan.items, now);
   await env.DB.batch([
     env.DB.prepare("UPDATE posts SET confirm_state = 'confirmed', confirm_plan = NULL WHERE id = ?").bind(post.id),
@@ -1008,8 +1034,10 @@ export async function editLink(env: Env, body: { postId?: unknown; token?: unkno
   const tzs = items.map((it) => it.plan?.tz ?? it.fail?.tz ?? null);
   const unit = items.some((it) => it.route) ? '站' : module === 'dog' || module === 'work' ? '筆' : module === 'taipai' ? '家' : '場';
   const note = editSummary(stored ? editItemsOf(stored.items, module) : [], acts, items.map((it) => !!it.plan), unit, tzs, module === 'dog' || module === 'work') ?? post.supplement ?? null;
+  // 台派雷達：AI 沒判讀出台派店家的（看不出是台派、不是店家），自己填的也要管理者判斷才放上雷達
+  const unsure = module === 'taipai' && (!stored || stored.early !== null);
   // 判讀出來的關鍵字：改過好幾次的，照第一次改之前的
-  const plan: StoredPlan = { items, early: null, judgedTags: stored?.judgedTags ?? tags };
+  const plan: StoredPlan = { items, early: unsure ? NOT_TAIPAI : null, ...(unsure && stored?.note ? { note: stored.note } : {}), judgedTags: stored?.judgedTags ?? tags };
   await env.DB.prepare("UPDATE posts SET supplement = ?, confirm_plan = ?, confirm_state = 'pending' WHERE id = ?").bind(note, storePlan(plan), post.id).run();
   return previewResult(env, { ...post, supplement: note }, plan, false, now);
 }
@@ -1074,6 +1102,124 @@ export async function rejectLink(env: Env, body: { postId?: unknown; token?: unk
   const note = typeof body.note === 'string' ? body.note.trim().slice(0, 300) : '';
   await env.DB.prepare("UPDATE posts SET confirm_state = 'rejected', confirm_note = COALESCE(NULLIF(?, ''), confirm_note) WHERE id = ?").bind(note, post.id).run();
   return { ok: true };
+}
+
+/** 回報的人寫的「為什麼是台派」、管理者寫的「為什麼不是」最多幾個字 */
+const REVIEW_NOTE_MAX = 300;
+const reviewText = (v: unknown): string => (typeof v === 'string' ? [...v.replace(/\s+/g, ' ').trim()].slice(0, REVIEW_NOTE_MAX).join('') : '');
+
+/** 台派雷達送給管理者判斷的：還沒處理是 in_review，判斷不是台派是 refused（從別的雷達貼的不算，那邊重新判讀） */
+function reviewResult(post: PostRow | null, module: ModuleId): SubmitResult | null {
+  if (!post) return null;
+  const base = { existed: true, reasons: [], events: [], permalink: post.permalink ?? '' };
+  if (post.confirm_state === 'review') return { ...base, outcome: 'in_review' };
+  if (post.confirm_state === 'refused' && moduleOf(post.module) === module) return { ...base, outcome: 'refused', ...(post.review_note ? { reviewNote: post.review_note } : {}) };
+  return null;
+}
+
+/**
+ * 台派雷達：看不出是台派的店家，回報的人送給管理者判斷（note 是為什麼是台派，選填）。
+ * 要有放得上雷達的店家（查得到位置）；送過的再送一次只回現在的狀態
+ */
+export async function requestReview(env: Env, body: { postId?: unknown; token?: unknown; note?: unknown }, now: number): Promise<SubmitResult> {
+  const post = await checkConfirm(env, body);
+  const decided = reviewResult(post, moduleOf(post.module));
+  if (decided) return decided;
+  assertEditable(post, '送給管理者判斷');
+  const plan = readPlan(post);
+  if (moduleOf(post.module) !== 'taipai' || plan?.early !== NOT_TAIPAI) throw new ReportError(409, '這則不用送給管理者判斷，請重新貼一次連結');
+  if (!plan.items.some((it) => it.plan && it.plan.lat !== null)) throw new ReportError(400, '店家還沒有位置，請先在「補充資料」補上地址或在雷達上標出位置');
+  const note = reviewText(body.note);
+  // fetched_at 改成送出的時間：管理頁照這個排，貼文也從這時候起再留 30 天（沒放上雷達的貼文 30 天後刪）
+  const r = await env.DB.prepare("UPDATE posts SET confirm_state = 'review', confirm_note = ?, review_note = NULL, reviewed_at = NULL, fetched_at = ? WHERE id = ? AND confirm_state = 'pending'")
+    .bind(note || null, now, post.id)
+    .run();
+  if (!r.meta.changes) throw new ReportError(409, '這則的狀態改變了，請重新貼一次連結');
+  return { existed: false, outcome: 'in_review', reasons: [], events: [], permalink: post.permalink ?? '' };
+}
+
+/** 有台派店家送來判斷：推到管理者的手機（跟回報問題、許願同一組訂閱） */
+export async function notifyReview(env: Env, postId: string, now: number): Promise<number> {
+  const post = await getPost(env, postId);
+  const first = post ? readPlan(post)?.items.find((it) => it.plan)?.plan : undefined;
+  if (!post || !first) return 0;
+  const waiting = (await env.DB.prepare("SELECT COUNT(*) AS n FROM posts WHERE confirm_state = 'review'").first<{ n: number }>())?.n ?? 1;
+  return pushAdmins(env, {
+    title: `台派店家等你判斷${waiting > 1 ? `（${waiting} 家）` : ''}`,
+    body: `${first.title}｜${first.place_text}`.replace(/\s+/g, ' ').slice(0, 100),
+    tag: 'taipai-review',
+    url: './admin.html#taipai',
+    renotify: true,
+  }, now);
+}
+
+/** 管理頁：等判斷的台派店家（店家照預覽的樣子給；貼文、理由是任何人都能寫的，只當參考） */
+export interface AdminReview {
+  id: string;
+  permalink: string;
+  username: string | null;
+  text: string;
+  supplement: string | null;
+  /** 回報的人寫的為什麼是台派 */
+  reason: string | null;
+  /** AI 為什麼看不出是台派 */
+  aiNote: string | null;
+  requestedAt: number;
+  preview: PreviewItem[];
+}
+
+export async function adminListReviews(env: Env, now: number): Promise<AdminReview[]> {
+  const { results } = await env.DB.prepare("SELECT * FROM posts WHERE confirm_state = 'review' ORDER BY fetched_at LIMIT 50").all<PostRow>();
+  return results.map((post) => {
+    const plan = readPlan(post);
+    return {
+      id: post.id,
+      permalink: post.permalink ?? '',
+      username: post.username,
+      text: post.text,
+      supplement: post.supplement ?? null,
+      reason: post.confirm_note ?? null,
+      aiNote: plan?.note ?? null,
+      requestedAt: post.fetched_at,
+      preview: previewOf(plan?.items ?? [], now),
+    };
+  });
+}
+
+/**
+ * 管理者判斷：approve 是台派，放上雷達（算回報的人一則）；refuse 不是（reason 選填，再貼這個連結的人看得到）。
+ * 先改狀態再寫進雷達：同時按兩次只會放一次
+ */
+export async function adminDecideReview(env: Env, id: string, body: unknown, now: number): Promise<{ outcome: LinkOutcome; events: number }> {
+  const b = (body && typeof body === 'object' ? body : {}) as { action?: unknown; reason?: unknown };
+  const post = await getPost(env, id);
+  if (!post) throw new ReportError(404, '找不到這則回報');
+  const gone = '這則已經處理過了，請重新整理';
+  if (post.confirm_state !== 'review') throw new ReportError(409, gone);
+  if (b.action === 'refuse') {
+    const reason = reviewText(b.reason);
+    const r = await env.DB.prepare("UPDATE posts SET confirm_state = 'refused', review_note = ?, reviewed_at = ? WHERE id = ? AND confirm_state = 'review'").bind(reason || null, now, id).run();
+    if (!r.meta.changes) throw new ReportError(409, gone);
+    return { outcome: 'refused', events: 0 };
+  }
+  if (b.action !== 'approve') throw new ReportError(400, 'action 要是 approve 或 refuse');
+  const plan = readPlan(post);
+  if (!plan) throw new ReportError(409, '判讀結果不見了');
+  const lock = await env.DB.prepare("UPDATE posts SET confirm_state = 'confirmed', confirm_plan = NULL, reviewed_at = ? WHERE id = ? AND confirm_state = 'review'").bind(now, id).run();
+  if (!lock.meta.changes) throw new ReportError(409, gone);
+  let result: Awaited<ReturnType<typeof commitPlan>>;
+  try {
+    result = await commitPlan(env, id, plan.items, now);
+  } catch (e) {
+    await env.DB.prepare("UPDATE posts SET confirm_state = 'review', confirm_plan = ?, reviewed_at = NULL WHERE id = ?").bind(post.confirm_plan ?? null, id).run();
+    throw e;
+  }
+  // 算回報的人一則（收集卡、順幣）：記在這則最後一筆回報上
+  const sub = await env.DB.prepare(`SELECT id, device FROM submissions WHERE post_id = ? AND ${NOT_SUPPLEMENT} ORDER BY id DESC LIMIT 1`).bind(id).first<{ id: number; device: string | null }>();
+  if (sub) await env.DB.prepare('UPDATE submissions SET result = ? WHERE id = ?').bind(JSON.stringify(result.reasons), sub.id).run();
+  const outcome = summarize(result.reasons);
+  await afterListed(env, post, plan, outcome, sub?.device ?? null, now);
+  return { outcome, events: result.events.length };
 }
 
 /** 我的回報（用同一個瀏覽器回報、確認放上雷達的，包括沒有連結的）：on_radar 在雷達上、attached 附在別的據點、not_listed 已結束或沒放上 */
