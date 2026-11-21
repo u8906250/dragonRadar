@@ -1,6 +1,6 @@
 import type { BlipStyle, EventKind, Phase, SweepStyle } from './types';
 import { bottleSize } from './geo';
-import { glyphSvg, topicGlyph } from './topic-icons';
+import { glyphSvg, STORE_GLYPH_MIN_SCALE, storeColor, storeIconScale, topicGlyph } from './topic-icons';
 import { DOME_SVG, idlePhase, isSceneKind, PATROL_SVG, sceneSvg, SCOOTER_SVG, SOCCER_SVG, TRUCK_SVG, WALKER_SVG, windSvg, type SceneKind } from './hq-scenes';
 import { alongLine, BOAT_SVG, crackSvg, FITBUS_BODY, FITBUS_SVG, hqMotionKm, HQ_NET_LABEL_KM, BIKE_SVG, HIKER_SVG, PETWALK_SVG, FISH_SVG, WETLAND_BIRDS, MUSIC_NOTES, bikePhase, fitbusPhase, fitbusStopSvg, cultureSvg, regrowSvg, serviceSvg, stitchSvg, BOAT_TITLE, boatPhase, fireworksSvg, FIREWORKS_MS, flowOut, HQ_VOYAGE_MS, RAINBOW_FLOW_TOTAL, RAINBOW_STAGGER_MS, riverHalfWidth, surge, SURGE_TOTAL, voyagePhase, voyageTimeOf } from './flow';
 
@@ -4012,6 +4012,10 @@ export class Radar {
         const body = el('g', { class: 'body' });
         // 分得出主題的活動畫大一點的圓點、裡面畫小圖示（v1.672 使用者說全螢幕也顯示地圖的新圖示，v1.674 說雷達裡面也一樣）；範圍外的小點、據點、約略位置照舊
         const glyph = !p.out && !it.flag && !it.spot && !it.approx ? topicGlyph(it.topic) : null;
+        // 店家（光點的 kind 跟活動一樣，照小圖示是店家類型分）：照類型上色，範圍拉遠跟著縮小，太小只畫圓點
+        // （v1.776 使用者說台派店家的圖縮小後要跟著縮小、多一點顏色）
+        const tint = storeColor(glyph);
+        const shrink = tint ? storeIconScale(this.scaleKm) : 1;
         // 全螢幕：光點後面墊一圈底色（淺色主題白、深色主題底色），疊在綠地上也看得清楚（v1.705）
         if (this.fill && !p.out && !it.flag) node.appendChild(el('circle', { class: 'halo', r: glyph ? 12.5 : 9 }));
         if (it.flag) {
@@ -4021,11 +4025,14 @@ export class Radar {
         } else if (glyph) {
           const dot = el('circle', { class: 'dot topic', r: 10 });
           // 稍後開始的：模糊只加在圓點上，小圖示照樣清楚、看得出類型（v1.673 使用者說模糊但要看得出類型）
-          if (it.fade !== undefined && !it.selected) dot.setAttribute('style', `filter:blur(${((1 - it.fade) * 1.5).toFixed(2)}px)`);
+          const blur = it.fade !== undefined && !it.selected ? `filter:blur(${((1 - it.fade) * 1.5).toFixed(2)}px)` : '';
+          if (tint || blur) dot.setAttribute('style', [tint ? `fill:${tint}` : '', blur].filter(Boolean).join(';'));
           body.appendChild(dot);
-          const ink = el('g', { class: 'glyph', transform: 'scale(0.9)' });
-          ink.innerHTML = glyphSvg(glyph, 'currentColor');
-          body.appendChild(ink);
+          if (shrink >= STORE_GLYPH_MIN_SCALE) {
+            const ink = el('g', { class: 'glyph', transform: 'scale(0.9)' });
+            ink.innerHTML = glyphSvg(glyph, 'currentColor');
+            body.appendChild(ink);
+          }
         } else this.appendMark(body, p.out, it.spot, it.office);
         // 離開始越久越淡、越模糊；選取時看清楚（有小圖示的只淡一點、不整個模糊，圓點自己模糊）
         if (glyph && it.fade !== undefined && !it.selected) body.setAttribute('style', `opacity:${(0.6 + 0.4 * it.fade).toFixed(2)}`);
@@ -4035,7 +4042,7 @@ export class Radar {
           body.dataset.blur = blur;
         }
         // 進行中的大一點（BLIP_ACTIVE_PX，跟地圖頁一樣）
-        const big = it.phase === 'active' && !p.out ? BLIP_ACTIVE_PX / BLIP_PX : 1;
+        const big = (it.phase === 'active' && !p.out ? BLIP_ACTIVE_PX / BLIP_PX : 1) * shrink;
         if (big !== 1) {
           body.setAttribute('transform', `scale(${big.toFixed(3)})`);
           const halo = node.querySelector('.halo');

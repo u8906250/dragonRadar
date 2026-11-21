@@ -60,6 +60,45 @@ export const ALL_STORE_TYPES = [...STORE_TYPES, ...BOOK_TYPES.filter((t) => t.ke
 const STORE_KEYS = new Set(ALL_STORE_TYPES.map((t) => t.key));
 export const isStoreType = (v: unknown): v is string => typeof v === 'string' && STORE_KEYS.has(v);
 
+/**
+ * 店家類型的顏色（v1.776 使用者說台派店家的圖希望多一點顏色）：雷達、地圖的圓點和類型按鈕都用這個，
+ * 類型按鈕就是圖例；拉遠縮成小圓點、看不到小圖示時也分得出類型。上面畫白色小圖示，顏色不要太淡
+ */
+const STORE_COLORS: Record<string, string> = {
+  eat: '#ee7a1a',
+  cafe: '#9a6640',
+  drink: '#14a093',
+  bar: '#7a4fcf',
+  book: '#2f6fd6',
+  shop: '#e0458e',
+  beauty: '#b54bc4',
+  stay: '#3d9c46',
+  clinic: '#d93a48',
+  other: '#66788a',
+  general: '#2f6fd6',
+  issue: '#e0458e',
+  used: '#9a6640',
+  kids: '#e8891a',
+  lit: '#7a4fcf',
+  art: '#14a093',
+  comic: '#d93a48',
+};
+/** 店家類型的顏色；不是店家類型的（活動主題）是 null */
+export const storeColor = (key: string | null | undefined): string | null => (key && STORE_KEYS.has(key) ? (STORE_COLORS[key] ?? null) : null);
+
+/**
+ * 店家的圖示拉遠時跟著縮小（v1.776 使用者說台派店家的圖縮小後要跟著縮小）：雷達範圍 8 km 以內照原本的大小，
+ * 範圍每大一倍小兩成，最小一半（預設 50 km 是一半）；km 是雷達的範圍（地圖照縮放換算成一樣的範圍）
+ */
+export function storeIconScale(km: number): number {
+  if (!(km > STORE_FULL_KM)) return 1;
+  return Math.max(STORE_MIN_SCALE, 1 - 0.2 * Math.log2(km / STORE_FULL_KM));
+}
+const STORE_FULL_KM = 8;
+const STORE_MIN_SCALE = 0.5;
+/** 縮到這個倍數以下圖示太小看不清楚：只畫有顏色的圓點（雷達大約 25 km 以上） */
+export const STORE_GLYPH_MIN_SCALE = 0.65;
+
 export function topicGlyph(topic: string | null | undefined): string | null {
   if (!topic) return null;
   if (STORE_KEYS.has(topic)) return topic;
@@ -127,6 +166,6 @@ export function glyphSvg(key: string, c: string): string {
   }
 }
 
-/** 類型按鈕上的小圖示：跟地圖、雷達一樣的圓點加白色圖示 */
+/** 類型按鈕上的小圖示：跟地圖、雷達一樣的圓點加白色圖示（店家照類型的顏色） */
 export const topicChipSvg = (key: string): string =>
-  `<svg class="type-ic" viewBox="-12 -12 24 24" aria-hidden="true"><circle r="11.5" fill="var(--blip-activity)"/>${glyphSvg(key, '#ffffff')}</svg>`;
+  `<svg class="type-ic" viewBox="-12 -12 24 24" aria-hidden="true"><circle r="11.5" fill="${storeColor(key) ?? 'var(--blip-activity)'}"/>${glyphSvg(key, '#ffffff')}</svg>`;

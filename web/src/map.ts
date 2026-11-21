@@ -1,6 +1,6 @@
 import type * as Leaflet from 'leaflet';
 import { BOTTLE_CORK, BOTTLE_PATH, LETTER_SCROLL, TAKEN_MARK } from './radar';
-import { glyphSvg, topicGlyph } from './topic-icons';
+import { glyphSvg, STORE_GLYPH_MIN_SCALE, storeColor, storeIconScale, topicGlyph } from './topic-icons';
 import { DOME_SVG, idlePhase, isSceneKind, PATROL_SVG, sceneSvg, SCOOTER_SVG, SOCCER_SVG, TRUCK_SVG, WALKER_SVG, windSvg, type SceneKind } from './hq-scenes';
 import { alongLine, BOAT_SVG, crackSvg, FITBUS_BODY, FITBUS_SVG, hqDenseZoom, hqMotionZoom, HQ_LABEL_ZOOM, HQ_NET_LABEL_KM, BIKE_SVG, HIKER_SVG, PETWALK_SVG, FISH_SVG, WETLAND_BIRDS, MUSIC_NOTES, bikePhase, fitbusPhase, fitbusStopSvg, cultureSvg, regrowSvg, serviceSvg, stitchSvg, boatPhase, fireworksSvg, FIREWORKS_MS, flowOut, HQ_VOYAGE_MS, RAINBOW_FLOW_TOTAL, RAINBOW_STAGGER_MS, surge, SURGE_TOTAL, voyagePhase, voyageTimeOf } from './flow';
 import { bottleSize, haversineKm, type LatLng } from './geo';
@@ -215,10 +215,10 @@ function markerColor(kind: EventKind, phase: Phase, spot = false): string {
   return phase === 'soon' ? cssVar('--blip-soon', '#ffe08a') : cssVar('--blip', '#ea611d');
 }
 
-/** 有主題小圖示的活動：圓點（顏色、虛線框照一般的圓點）裡畫白色小圖示；淡黃色的底用深色圖示 */
-function topicMarkerSvg(key: string, fill: string, stroke: string, strokeW: number, fillOpacity: number, dashed: boolean, size: number): string {
+/** 有主題小圖示的活動：圓點（顏色、虛線框照一般的圓點）裡畫白色小圖示；淡黃色的底用深色圖示；key 是 null 只畫圓點（拉遠縮小的店家） */
+function topicMarkerSvg(key: string | null, fill: string, stroke: string, strokeW: number, fillOpacity: number, dashed: boolean, size: number): string {
   const ink = /^#?ffe08a$/i.test(fill.trim()) ? '#4a3a00' : '#ffffff';
-  return `<svg xmlns="http://www.w3.org/2000/svg" width="${size}" height="${size}" viewBox="-12 -12 24 24"><circle r="10.5" fill="${fill}" fill-opacity="${fillOpacity}" stroke="${stroke}" stroke-width="${strokeW}"${dashed ? ' stroke-dasharray="3 2"' : ''}/>${glyphSvg(key, ink)}</svg>`;
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="${size}" height="${size}" viewBox="-12 -12 24 24"><circle r="10.5" fill="${fill}" fill-opacity="${fillOpacity}" stroke="${stroke}" stroke-width="${strokeW}"${dashed ? ' stroke-dasharray="3 2"' : ''}/>${key ? glyphSvg(key, ink) : ''}</svg>`;
 }
 
 /** 服務處的房子圖示（SVG），外框虛線跟其他固定據點一樣 */
@@ -435,6 +435,10 @@ export class MapView {
         farKey = key;
       };
       map.on('zoomend', fitScale);
+      // 店家圖示跟著縮放變大小：縮放完重畫
+      map.on('zoomend', () => {
+        if (this.items.some((it) => storeColor(topicGlyph(it.topic)))) this.pushItems();
+      });
       map.on('zoomend resize', () => this.gateBottles());
       map.on('moveend', () => {
         const c = this.sceneCenter;
@@ -502,6 +506,8 @@ export class MapView {
     if (!L || !layer) return;
     const stroke = cssVar('--blip-stroke', '#15171c');
     const selectedStroke = cssVar('--blip-selected', '#ffffff');
+    // 店家圖示的大小：縮放換算成雷達的範圍（縮放 13 跟雷達 10 km 差不多）
+    const storeShrink = this.map ? storeIconScale(10 * 2 ** (13 - this.map.getZoom())) : 1;
     // 座標一樣（到小數點 5 位，約 1 公尺）的合成一個點，旁邊標「+N」，點下去再選；放大地圖也分不開
     const groups = new Map<string, MapItem[]>();
     for (const it of this.items) {
@@ -550,10 +556,14 @@ export class MapView {
           dashArray: it.spot || it.approx || it.phase === 'later' ? '3 3' : '',
         });
       } else if (glyph) {
+        // 店家（kind 跟活動一樣，照小圖示是店家類型分）：照類型上色，拉遠跟著縮小，太小只畫圓點
+        // （v1.776 使用者說台派店家的圖縮小後要跟著縮小、多一點顏色）
+        const tint = storeColor(glyph);
+        const shrink = tint ? storeShrink : 1;
         // 一般 22、進行中 26 px（v1.737 使用者說圖示有點大，跟雷達一樣）
-        const size = it.phase === 'active' || it.selected ? 26 : 22;
+        const size = Math.round((it.phase === 'active' || it.selected ? 26 : 22) * shrink);
         // 稍後開始的越久越淡，但底色、整個圖示都不淡到看不出類型（v1.673 使用者說模糊但要看得出類型）
-        const svg = topicMarkerSvg(glyph, markerColor(it.kind, it.phase, it.spot), it.selected ? selectedStroke : stroke, it.selected ? 2.6 : 1.8, Math.max(0.55, fillOpacity), !!it.spot || it.phase === 'later', size);
+        const svg = topicMarkerSvg(shrink < STORE_GLYPH_MIN_SCALE ? null : glyph, tint ?? markerColor(it.kind, it.phase, it.spot), it.selected ? selectedStroke : stroke, it.selected ? 2.6 : 1.8, Math.max(0.55, fillOpacity), !!it.spot || it.phase === 'later', size);
         if (this.iconKeys.get(it.id) !== svg) {
           m.setIcon(L.divIcon({ className: 'map-topic', html: svg, iconSize: [size, size], iconAnchor: [size / 2, size / 2] }));
           this.iconKeys.set(it.id, svg);
