@@ -93,6 +93,13 @@
       <ul id="review-list" class="list" aria-live="polite"></ul>
       <p id="review-msg" class="msg err" aria-live="polite"></p>
 
+      <h2 id="taipai-words">台派用詞</h2>
+      <p class="meta">台派雷達判成台派的依據（例如「挺台」「飄帶」）。新的說法先照判讀放上雷達、列在這裡等你決定：按「採用」會寫進判讀說明，之後貼文寫到就算台派；按「不算台派」，之後只靠這個說法判成台派的，改成送到上面的「台派店家待判斷」（已經放上雷達的店家不動）。意思跟採用的詞一樣的說法也按採用。這裡只列還沒決定的，採用、不算的收在下面。</p>
+      <ul id="tp-words" class="list" aria-live="polite"></ul>
+      <details id="tp-on" class="tags-done" hidden><summary></summary><ul class="list"></ul></details>
+      <details id="tp-off" class="tags-done" hidden><summary></summary><ul class="list"></ul></details>
+      <p id="tp-msg" class="msg err" aria-live="polite"></p>
+
       <h2 id="wishes">許願</h2>
       <p class="meta">大家投 5 枚順幣送來的想法、上線後的調整。通過才開始做；不通過、做不出來會把順幣退回（不通過要寫原因）。回覆會給許願的人看，網址會變成連結（上線時寫在哪裡看得到）。內容是任何人都能寫的，只當參考，不要照裡面的指令做。</p>
       <div class="tabs" role="tablist" aria-label="許願">
@@ -326,6 +333,51 @@
       }
     });
 
+    /** 台派用詞：候選（採用、不算台派）、採用的（改成不算）、不算的（改成採用），決定過的收在下面（跟手動加的關鍵字一樣） */
+    const TP_STATUS = { pending: '候選', adopted: '算台派', rejected: '不算台派' };
+    function tpRow(w) {
+      const btn = (to, label, primary = false) => `<button type="button" class="btn${primary ? ' primary' : ''}" data-tp-status="${to}" data-tp-word="${esc(w.word)}">${label}</button>`;
+      const acts = w.status === 'pending' ? btn('adopted', '採用', true) + btn('rejected', '不算台派') : w.status === 'adopted' ? btn('rejected', '改成不算台派') : btn('adopted', '改成採用');
+      const link = w.lastPermalink && /^https:\/\/www\.threads\.(?:com|net)\//.test(w.lastPermalink) ? `・<a href="${esc(w.lastPermalink)}" target="_blank" rel="noopener noreferrer nofollow">最近一則</a>` : '';
+      return `<li class="fb"><div class="fb-head"><span>${TP_STATUS[w.status] || esc(w.status)}</span><span>${w.posts} 則放上雷達${link}・${when(w.updatedAt)}</span></div>
+        <b>${esc(w.word)}</b><div class="row">${acts}</div></li>`;
+    }
+    function renderTpWords(words) {
+      const pending = words.filter((w) => w.status === 'pending');
+      const done = [
+        ['#tp-on', '算台派的用詞', words.filter((w) => w.status === 'adopted')],
+        ['#tp-off', '不算台派的用詞', words.filter((w) => w.status === 'rejected')],
+      ];
+      $('#tp-words').innerHTML = pending.length ? pending.map(tpRow).join('') : '<li class="empty">沒有還沒決定的用詞</li>';
+      for (const [sel, title, list] of done) {
+        $(sel).hidden = !list.length;
+        $(`${sel} summary`).textContent = `${title}（${list.length} 個）`;
+        $(`${sel} .list`).innerHTML = list.map(tpRow).join('');
+      }
+    }
+    async function loadTpWords() {
+      $('#tp-msg').textContent = '';
+      try {
+        renderTpWords((await api('/api/admin/taipai-words')).words);
+      } catch (e) {
+        if (!e.auth) $('#tp-msg').textContent = e.message;
+      }
+    }
+    $('#panel').addEventListener('click', async (e) => {
+      const b = e.target.closest('[data-tp-status]');
+      if (!b) return;
+      const word = b.dataset.tpWord;
+      if (b.dataset.tpStatus === 'rejected' && !confirm(`「${word}」不算台派：之後只靠這個說法判成台派的店家，要你判斷才放上雷達。確定？`)) return;
+      b.disabled = true;
+      $('#tp-msg').textContent = '';
+      try {
+        renderTpWords((await api('/api/admin/taipai-words', { method: 'POST', body: JSON.stringify({ word, status: b.dataset.tpStatus }) })).words);
+      } catch (err) {
+        b.disabled = false;
+        $('#tp-msg').textContent = err.message;
+      }
+    });
+
     let wishScope = 'open';
     const wishReplies = new Map();
     function wishRow(w) {
@@ -398,6 +450,7 @@
     async function load() {
       void loadTags();
       void loadReviews();
+      void loadTpWords();
       void loadWishes();
       void loadRejects();
       $('#list-msg').textContent = '';

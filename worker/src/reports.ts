@@ -23,6 +23,7 @@ import { cleanHours, NOT_TAIPAI } from './taipai';
 import { isStoreTypeOf, STORE_TYPE_NAMES } from './stores';
 import { pushAdmins } from './push';
 import { learnTags, manualTags } from './learnedTags';
+import { recordTaipaiWord } from './taipaiWords';
 
 /** 只收這麼新的貼文，太舊的公告通常已經過期（v1.696 使用者說 7 天改成 30 天：大型活動常常一個月前就公告；資料也是留 30 天） */
 export const MAX_LINK_AGE_SEC = 30 * 86400;
@@ -369,7 +370,8 @@ export function notListedWhy(items: PlanItem[]): NotListedWhy | undefined {
 // 18：台派雷達：店家在店裡發飄帶也算台派（2026-11-19）
 // 19：「士林捷運站旁」查成永和的「捷運頂溪站」：修好車站名的查法，還沒確認的回報再貼一次重新判讀、重新定位（2026-11-19）
 // 20：台派雷達看不出是台派的店家照樣讀出資料，可以送給管理者判斷（2026-11-20）
-export const PLAN_VERSION = 20;
+// 21：台派雷達記下判成台派的依據（台派用詞），算不算台派照管理者在管理頁決定的（2026-11-21）
+export const PLAN_VERSION = 21;
 
 /** 判讀好、還沒寫進雷達的資料，存在 posts.confirm_plan */
 interface StoredPlan {
@@ -381,6 +383,8 @@ interface StoredPlan {
   v?: number;
   /** 判讀出來的關鍵字（回報的人直接修改過才記）：放上雷達時跟最後的比，多出來的是手動加的（learnedTags.ts 記成候選） */
   judgedTags?: string[];
+  /** 台派雷達：判成台派的依據，放上雷達後記下來（taipaiWords.ts，管理者決定算不算台派） */
+  taipaiWord?: string;
 }
 
 /** 存進 posts.confirm_plan：記下判讀規則的版本 */
@@ -898,7 +902,8 @@ export async function confirmLink(env: Env, body: { postId?: unknown; token?: un
 
 /**
  * 放上雷達了：算一則回報（收集卡、道具；算失敗不影響回報）；
- * 回報的人直接修改時手動加的關鍵字記成候選，管理者採用了之後的判讀才用（記失敗不影響回報）
+ * 回報的人直接修改時手動加的關鍵字記成候選，管理者採用了之後的判讀才用（記失敗不影響回報）；
+ * 台派雷達判成台派的依據記下來，新的詞是候選，管理者決定算不算台派
  */
 async function afterListed(env: Env, post: PostRow, plan: StoredPlan, outcome: LinkOutcome, device: string | null, now: number): Promise<ReportReward | null> {
   if (outcome !== 'added') return null;
@@ -909,6 +914,7 @@ async function afterListed(env: Env, post: PostRow, plan: StoredPlan, outcome: L
     const added = manualTags(module, final, plan.judgedTags);
     if (added.length > 0) await learnTags(env, module, added, post.id, now).catch((e) => console.warn('learn tags failed', e));
   }
+  if (plan.taipaiWord && moduleOf(post.module) === 'taipai') await recordTaipaiWord(env, plan.taipaiWord, post.id, post.permalink, now).catch((e) => console.warn('taipai word failed', e));
   return reward;
 }
 
@@ -1054,7 +1060,13 @@ export async function editLink(env: Env, body: { postId?: unknown; token?: unkno
   // 台派雷達：AI 沒判讀出台派店家的（看不出是台派、不是店家），自己填的也要管理者判斷才放上雷達
   const unsure = module === 'taipai' && (!stored || stored.early !== null);
   // 判讀出來的關鍵字：改過好幾次的，照第一次改之前的
-  const plan: StoredPlan = { items, early: unsure ? NOT_TAIPAI : null, ...(unsure && stored?.note ? { note: stored.note } : {}), judgedTags: stored?.judgedTags ?? tags };
+  const plan: StoredPlan = {
+    items,
+    early: unsure ? NOT_TAIPAI : null,
+    ...(unsure && stored?.note ? { note: stored.note } : {}),
+    ...(!unsure && stored?.taipaiWord ? { taipaiWord: stored.taipaiWord } : {}),
+    judgedTags: stored?.judgedTags ?? tags,
+  };
   await env.DB.prepare("UPDATE posts SET supplement = ?, confirm_plan = ?, confirm_state = 'pending' WHERE id = ?").bind(note, storePlan(plan), post.id).run();
   return previewResult(env, { ...post, supplement: note }, plan, false, now);
 }

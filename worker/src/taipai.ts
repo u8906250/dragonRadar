@@ -7,6 +7,7 @@
  */
 import { aiTags, conf, parseLoose, str, TAGS_SCHEMA, type ExtractedEvent, type Extraction, type ExtractSpec } from './extract';
 import { parseHours } from './hours';
+import { cleanTaipaiWord, SEED_TAIPAI_WORDS, type TaipaiWordLists } from './taipaiWords';
 
 /** 一則貼文最多幾家（「台派店家推薦」這種清單） */
 export const MAX_STORES = 10;
@@ -30,10 +31,21 @@ export const STORE_TYPES: Record<string, string> = {
 };
 export const isStoreType = (v: unknown): v is string => typeof v === 'string' && Object.prototype.hasOwnProperty.call(STORE_TYPES, v);
 
-const TAIPAI_PROMPT = `你是「台派雷達」的資料抽取器。你會收到一則台灣 Threads 貼文，判斷它是不是在介紹實體店家、看不看得出是台派店家，並抽出每一家店的資料。
+const quoted = (words: string[]): string => words.map((w) => `「${w}」`).join('');
 
-台派店家：貼文寫出這家店是台派、挺台灣（例如「台派店家」「台派老闆」「挺台店家」「顧台灣」「台灣價值」「支持台灣主權、民主」），可以是店家自己表態，也可以是網友推薦、整理的台派店家清單。
-店家在店裡發飄帶（也寫成「漂帶」，例如「歡迎來拿飄帶」「店裡有飄帶可以索取」）也算台派；這種貼文收的是發飄帶的這家店本身（照店家的資料列），不是發放活動。
+/**
+ * 台派雷達的判讀說明：哪些說法算台派照管理者在管理頁決定的台派用詞（taipaiWords.ts）；
+ * 飄帶是 v1.769 使用者決定算的，管理者改成不算台派時，發飄帶的說明也拿掉
+ */
+export function taipaiPrompt(words: TaipaiWordLists): string {
+  const ribbon = !words.rejected.includes('飄帶');
+  return `你是「台派雷達」的資料抽取器。你會收到一則台灣 Threads 貼文，判斷它是不是在介紹實體店家、看不看得出是台派店家，並抽出每一家店的資料。
+
+台派店家：貼文寫出這家店是台派、挺台灣，可以是店家自己表態，也可以是網友推薦、整理的台派店家清單。${
+    words.adopted.length > 0 ? `\n【台派用詞】管理者採用的說法，貼文寫到這些（或意思一樣的說法）就算台派：${quoted(words.adopted)}` : ''
+  }${words.rejected.length > 0 ? `\n【不算台派的用詞】管理者決定不算台派的說法：${quoted(words.rejected)}；只靠這些說法（或意思一樣的說法）看不出是台派，taipai 填 false。` : ''}${
+    ribbon ? '\n店家在店裡發飄帶（也寫成「漂帶」，例如「歡迎來拿飄帶」「店裡有飄帶可以索取」）也算台派；這種貼文收的是發飄帶的這家店本身（照店家的資料列），不是發放活動。' : ''
+  }
 【回報的人補充】寫了為什麼是台派的也算。
 看不出是台派的店家（單純的美食心得、店家廣告、新開幕）照樣列出店家資料，taipai 填 false，之後由管理者判斷。
 
@@ -42,6 +54,7 @@ const TAIPAI_PROMPT = `你是「台派雷達」的資料抽取器。你會收到
   "is_event": 是否在介紹實體店家（布林值；看不出是台派的店家也是 true）,
   "taipai": 看不看得出這些店家是台派（布林值）；is_event 為 false 時填 false,
   "reason": is_event 或 taipai 為 false 時，用一句話（20 字以內）說明，例如「沒寫這家店是台派」「是抵制名單」「沒寫店名」；都是 true 則 null,
+  "taipai_by": taipai 為 true 時，判成台派的依據，一個 2～8 字的短詞：跟【台派用詞】意思一樣就照抄那個詞（例如「台派老闆」填「台派」、「歡迎來拿飄帶」填「飄帶」），都不像才照貼文的說法自己寫一個短詞；taipai 為 false 時填 null,
   "tags": 這則貼文的關鍵字 3～6 個，每個 2～4 字、不含 #，只寫貼文裡提到的，讓人搜尋得到，例如「咖啡」「早午餐」「寵物友善」「手作」；不要寫地名、店名、時間、人名，也不要寫「台派」,
   "events": [ 每家店一筆，最多 ${MAX_STORES} 筆 ]
 }
@@ -62,10 +75,11 @@ events 每筆的欄位：
 - 沒寫店名也沒寫地點的那一家不要列；只有店名的也可以列，confidence 低一點。
 - 不要編造貼文裡沒有的店名、地點、營業時間。
 - 貼文最後如果有「【帳號簡介】」，那是發文帳號、貼文標記的帳號的名稱和簡介。帳號是這家店自己的（帳號名稱或簡介跟店名對得上）時：
-  - 簡介寫了這家店是台派、挺台灣，或寫了店裡發飄帶，也算台派；
+  - 簡介寫了這家店是台派、挺台灣${ribbon ? '，或寫了店裡發飄帶' : ''}，也算台派；
   - 貼文沒寫的店名、地址、營業時間，可以用簡介寫的；
   - 貼文自己寫了以貼文為準。
   不是這家店自己的帳號（例如推薦的網友自己的帳號）：簡介寫台派也不算這家店是台派，簡介的地址、營業時間也不要用。`;
+}
 
 const TAIPAI_SCHEMA = {
   type: 'object',
@@ -73,6 +87,7 @@ const TAIPAI_SCHEMA = {
     is_event: { type: 'boolean' },
     taipai: { type: 'boolean' },
     reason: { type: ['string', 'null'] },
+    taipai_by: { type: ['string', 'null'] },
     tags: TAGS_SCHEMA,
     events: {
       type: 'array',
@@ -92,7 +107,7 @@ const TAIPAI_SCHEMA = {
       },
     },
   },
-  required: ['is_event', 'taipai', 'reason', 'tags', 'events'],
+  required: ['is_event', 'taipai', 'reason', 'taipai_by', 'tags', 'events'],
 };
 
 /** 營業時間最多幾個字 */
@@ -145,24 +160,31 @@ export function storeEvents(raw: unknown, types: Record<string, string>, fallbac
   });
 }
 
-export function normalizeTaipai(raw: unknown): Extraction | null {
+/** rejected 是管理者決定不算台派的用詞：只靠這些判成台派的當成看不出是台派（送管理者判斷） */
+export function normalizeTaipai(raw: unknown, rejected: string[] = []): Extraction | null {
   const obj = parseLoose(raw);
   if (!obj || typeof obj !== 'object' || Array.isArray(obj)) return null;
   const o = obj as Record<string, unknown>;
   const isEvent = o.is_event === true || o.is_event === 'true';
-  // 沒說是台派（漏了這一欄也算）：等管理者判斷
-  const taipai = o.taipai === true || o.taipai === 'true';
+  // 判成台派的依據（台派用詞）
+  const word = cleanTaipaiWord(o.taipai_by);
+  const refused = word !== null && rejected.includes(word);
+  // 沒說是台派（漏了這一欄也算）、依據是管理者決定不算的：等管理者判斷
+  const taipai = (o.taipai === true || o.taipai === 'true') && !refused;
   // 看不出是台派：「台派是從簡介讀的」不成立
   const events = storeEvents(o.events, STORE_TYPES, '台派店家', (e) => (taipai ? e.from_profile : Array.isArray(e.from_profile) ? e.from_profile.filter((f) => f !== 'taipai') : null));
   const sure = isEvent && taipai;
   return {
     is_event: isEvent,
     ...(isEvent && !taipai ? { not_taipai: true } : {}),
-    reason: sure ? null : (str(o.reason)?.slice(0, 60) ?? null),
+    reason: sure ? null : isEvent && refused ? `「${word}」管理者決定不算台派` : (str(o.reason)?.slice(0, 60) ?? null),
+    ...(sure && word ? { taipai_word: word } : {}),
     events: isEvent ? events : [],
     tags: aiTags(o, isEvent),
   };
 }
 
-/** 台派雷達的判讀 */
-export const TAIPAI_SPEC: ExtractSpec = { system: TAIPAI_PROMPT, schema: TAIPAI_SCHEMA, normalize: normalizeTaipai };
+/** 台派雷達的判讀：照管理者決定的台派用詞 */
+export const taipaiSpec = (words: TaipaiWordLists): ExtractSpec => ({ system: taipaiPrompt(words), schema: TAIPAI_SCHEMA, normalize: (raw) => normalizeTaipai(raw, words.rejected) });
+/** 台派雷達的判讀（原本的例子；實際判讀照資料庫裡的台派用詞） */
+export const TAIPAI_SPEC: ExtractSpec = taipaiSpec(SEED_TAIPAI_WORDS);
