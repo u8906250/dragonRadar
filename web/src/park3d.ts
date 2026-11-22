@@ -18,6 +18,7 @@ import { dogHairRoots, dogPartArea, dogParts } from './dog';
 import { dogPose, dogTurned, happyWag } from './dogs';
 import { arriveRocket, ARRIVE_MS, DEPART_MS, departRocket, HATCH_CENTER, moveDogs, PARK_DOGS, personOk, petDog, rocketNow, setSniffMarks, stowRocket, STOW_MS, summonRocket, SUMMON_MS } from './park';
 import { cloudLayer, puffTexture, rocketModel, ROCKET_H, ROCKET_WINDOW_Y, spaceScene, type SpaceTrip } from './rocket3d';
+import { altOf, azOf, type Enu, moonEnu, moonLit, skyLook, sunEnu } from './sky';
 import { toWoof } from './space';
 import { ZHONGSHAN_PARK as Z } from './zhongshan';
 import { MIN_HALF, widthSides, withWidths as alongWidths } from './zhongshan-widths';
@@ -462,11 +463,13 @@ export function openPark3D(o: Park3DOptions): () => void {
   scene.fog = new THREE.Fog(0xcfe0ea, 140, 700);
   const camera = new THREE.PerspectiveCamera(65, 1, 0.1, 1500);
   camera.rotation.order = 'YXZ';
-  // 天空光、地面反光（帶一點草地的綠）亮一點：樹蔭下的草還是綠的
-  scene.add(new THREE.HemisphereLight(0xeef6ff, 0x7f9a58, 1.7));
-  // 太陽從西南邊高高的地方照下來（台北的太陽在南邊；下午），影子往東北
+  // 天空光、地面反光（帶一點草地的綠）亮一點：樹蔭下的草還是綠的（顏色、強度照現在的天色，見下面的「天空」）
+  const hemi = new THREE.HemisphereLight(0xeef6ff, 0x7f9a58, 1.7);
+  scene.add(hemi);
+  // 太陽（晚上是月亮）照下來的方向照現在的時間（sky.ts），影子跟著變
   const sun = new THREE.DirectionalLight(0xfff6e6, 1.9);
-  const SUN_DIR = new THREE.Vector3(-0.5, 1.1, 0.6).normalize();
+  /** 光照下來的方向（updateSky 照太陽、月亮改） */
+  const lightDir = new THREE.Vector3(-0.5, 1.1, 0.6).normalize();
   sun.castShadow = true;
   sun.shadow.mapSize.set(touch ? 1024 : 2048, touch ? 1024 : 2048);
   const SH = 70;
@@ -478,7 +481,126 @@ export function openPark3D(o: Park3DOptions): () => void {
 
   scene.add(sun, sun.target);
 
-  const mat = (color: number | string, more: THREE.MeshLambertMaterialParameters = {}): THREE.MeshLambertMaterial => new THREE.MeshLambertMaterial({ color, ...more });
+  // ---- 天空（sky.ts，v1.777）：照現在的時間是白天、黃昏還是晚上，抬頭看得到太陽、月亮（真的位置、月相）；
+  // 汪星的中山公園也照台北的天空（汪星跟台北同一個時間）。一個跟著鏡頭的天空球（頭頂到地平線的顏色，地平線跟霧同色），
+  // 太陽、月亮放在球裡面（鏡頭看得到的距離內），樹、建築擋得住
+  const SKY_R = 1300;
+  const SKY_D = 1200;
+  /** 太陽、月亮畫多大（度）：真的約 0.5 度，手機上只剩幾個像素、看不出月相，畫成約 4 倍 */
+  const DISC_DEG = 2.2;
+  const skyGroup = new THREE.Group();
+  scene.add(skyGroup);
+  const dome = new THREE.Mesh(
+    new THREE.SphereGeometry(SKY_R, 32, 16),
+    new THREE.ShaderMaterial({
+      uniforms: { zenith: { value: new THREE.Color() }, horizon: { value: new THREE.Color() }, glow: { value: new THREE.Color() }, sunDir: { value: new THREE.Vector3(0, 1, 0) }, glowAmt: { value: 1 } },
+      vertexShader: 'varying vec3 vDir;\nvoid main() {\n  vDir = position;\n  gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);\n}',
+      // 地平線往頭頂變深；太陽旁邊一圈光暈（日出日落時地平線那一邊橘紅），地平線下面照地平線的顏色（遠的地面在霧裡也是這個顏色）
+      fragmentShader: [
+        'uniform vec3 zenith;',
+        'uniform vec3 horizon;',
+        'uniform vec3 glow;',
+        'uniform vec3 sunDir;',
+        'uniform float glowAmt;',
+        'varying vec3 vDir;',
+        'void main() {',
+        '  vec3 d = normalize(vDir);',
+        '  vec3 c = mix(horizon, zenith, pow(max(d.y, 0.0), 0.5));',
+        '  float s = max(dot(d, sunDir), 0.0);',
+        '  c += glow * glowAmt * (0.35 * pow(s, 8.0) * smoothstep(-0.02, 0.1, d.y) + 0.2 * pow(s, 64.0));',
+        '  gl_FragColor = vec4(c, 1.0);',
+        '  #include <colorspace_fragment>',
+        // 晚上深藍色的漸層會一圈一圈的（色階不夠），加一點點雜訊打散
+        "  gl_FragColor.rgb += (fract(sin(dot(gl_FragCoord.xy, vec2(12.9898, 78.233))) * 43758.5453) - 0.5) / 255.0;",
+        '}',
+      ].join('\n'),
+      side: THREE.BackSide,
+      depthWrite: false,
+    }),
+  );
+  // 最先畫，其他東西都蓋在上面
+  dome.renderOrder = -10;
+  skyGroup.add(dome);
+  const domeU = (dome.material as THREE.ShaderMaterial).uniforms;
+  // 太陽：白黃色的圓、外面一圈淡淡的光（中間那個圓是整張的 1/5）
+  const sunDisc = new THREE.Sprite(
+    new THREE.SpriteMaterial({
+      map: (() => {
+        const cv = document.createElement('canvas');
+        [cv.width, cv.height] = [128, 128];
+        const g = cv.getContext('2d')!;
+        const rg = g.createRadialGradient(64, 64, 0, 64, 64, 64);
+        rg.addColorStop(0, 'rgba(255,253,236,1)');
+        rg.addColorStop(0.18, 'rgba(255,246,206,1)');
+        rg.addColorStop(0.2, 'rgba(255,240,190,0.55)');
+        rg.addColorStop(0.45, 'rgba(255,228,170,0.16)');
+        rg.addColorStop(1, 'rgba(255,220,160,0)');
+        g.fillStyle = rg;
+        g.fillRect(0, 0, 128, 128);
+        const t = new THREE.CanvasTexture(cv);
+        t.colorSpace = THREE.SRGBColorSpace;
+        return t;
+      })(),
+      depthWrite: false,
+      fog: false,
+    }),
+  );
+  sunDisc.scale.setScalar(2 * SKY_D * Math.tan(((DISC_DEG * 5) / 2) * (Math.PI / 180)));
+  skyGroup.add(sunDisc);
+  // 月亮：一顆球，照太陽的方向亮一邊（月相、亮的那邊朝哪都是真的）；看不到的那半邊白天是天空的顏色、晚上淡淡的（地球照）；
+  // 月海是從地球看過去的樣子（北邊朝上：x 往右、y 往上，大概的位置、大小），球的北邊轉向天球的北極（晚上月亮會慢慢斜過去）
+  const moonBall = new THREE.Mesh(
+    new THREE.SphereGeometry(SKY_D * Math.tan((DISC_DEG / 2) * (Math.PI / 180)), 32, 24),
+    new THREE.ShaderMaterial({
+      uniforms: { sunDir: { value: new THREE.Vector3(0, 1, 0) }, day: { value: 0 } },
+      vertexShader: 'varying vec3 vN;\nvarying vec3 vO;\nvoid main() {\n  vO = normal;\n  vN = normalize(mat3(modelMatrix) * normal);\n  gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);\n}',
+      fragmentShader: [
+        'uniform vec3 sunDir;',
+        'uniform float day;',
+        'varying vec3 vN;',
+        'varying vec3 vO;',
+        'float spot(vec2 p, vec2 c, float r) { return 1.0 - smoothstep(r * 0.55, r, distance(p, c)); }',
+        'void main() {',
+        '  vec2 p = vO.xy;',
+        '  float m = 0.0;',
+        ...(
+          [
+            [-0.8, 0.31, 0.36], // 風暴洋
+            [-0.23, 0.54, 0.3], // 雨海
+            [0.26, 0.47, 0.19], // 澄海
+            [0.51, 0.14, 0.23], // 靜海
+            [0.82, 0.29, 0.11], // 危海
+            [0.77, -0.14, 0.14], // 豐富海
+            [0.54, -0.26, 0.1], // 酒海
+            [-0.27, -0.36, 0.17], // 雲海
+            [-0.57, -0.41, 0.1], // 濕海
+            [0.02, 0.82, 0.12], // 冷海
+          ] as const
+        ).map(([x, y, r]) => `  m = max(m, spot(p, vec2(${x.toFixed(2)}, ${y.toFixed(2)}), ${r.toFixed(2)}));`),
+        '  vec3 c = mix(vec3(0.92, 0.91, 0.86), vec3(0.6, 0.6, 0.6), 0.6 * m);',
+        '  float lit = smoothstep(-0.05, 0.1, dot(normalize(vN), sunDir));',
+        '  gl_FragColor = vec4(c, max(lit, 0.1 * (1.0 - day)) * mix(1.0, 0.8, day));',
+        '  #include <colorspace_fragment>',
+        '}',
+      ].join('\n'),
+      transparent: true,
+      depthWrite: false,
+    }),
+  );
+  skyGroup.add(moonBall);
+  /** 天球的北極（世界座標：x 往東、y 往上、-z 往北），月亮的北邊朝這裡 */
+  const POLE = new THREE.Vector3(0, Math.sin((O[0] * Math.PI) / 180), -Math.cos((O[0] * Math.PI) / 180));
+  /** 不照光的東西（簷下、小法）：晚上跟著變暗（乘上 nightTint） */
+  const unlit: Array<{ m: THREE.MeshBasicMaterial; base: THREE.Color }> = [];
+  const nightTint = new THREE.Color(1, 1, 1);
+  const unlitMat = (color: number | string, more: THREE.MeshBasicMaterialParameters = {}): THREE.MeshBasicMaterial => {
+    const m = new THREE.MeshBasicMaterial({ color, ...more });
+    unlit.push({ m, base: m.color.clone() });
+    m.color.multiply(nightTint);
+    return m;
+  };
+
+  const mat =(color: number | string, more: THREE.MeshLambertMaterialParameters = {}): THREE.MeshLambertMaterial => new THREE.MeshLambertMaterial({ color, ...more });
   const add = (g: THREE.BufferGeometry, m: THREE.Material | THREE.Material[], cast = false): THREE.Mesh => {
     const mesh = new THREE.Mesh(g, m);
     mesh.receiveShadow = true;
@@ -992,7 +1114,7 @@ export function openPark3D(o: Park3DOptions): () => void {
     };
     add(geo(top), mat(color, { side: THREE.DoubleSide }), true);
     // 簷下：從下面看只照得到草地反射的綠光（HemisphereLight 的地面色），照片上是白的，所以不照光、直接用淺灰白
-    add(geo(under), new THREE.MeshBasicMaterial({ color: 0xd8d6d0, side: THREE.DoubleSide }));
+    add(geo(under), unlitMat(0xd8d6d0, { side: THREE.DoubleSide }));
     add(geo(rim), mat(0x8f8b82, { side: THREE.DoubleSide }), true);
     // 正脊（兩頭一塊往上翹的）、四條垂脊（沿著屋面的斜角到翹起來的角）
     const ridge: THREE.BufferGeometry[] = [block(2 * (a - b) + 0.3, 0.24, 0.22, 0, 0, PAV_RIDGE - 0.04)];
@@ -1719,6 +1841,25 @@ export function openPark3D(o: Park3DOptions): () => void {
     bin: mat(0x3e6b4c),
     pin: mat(0xd2483b),
   };
+  // 晚上路燈亮：燈箱外面一圈光、地上一圈暖黃色的光（加上去的，不用真的燈光，路燈再多也不會變慢）；白天看不到
+  const glowTex = (inner: string, outer: string): THREE.CanvasTexture => {
+    const cv = document.createElement('canvas');
+    [cv.width, cv.height] = [64, 64];
+    const g = cv.getContext('2d')!;
+    const rg = g.createRadialGradient(32, 32, 0, 32, 32, 32);
+    rg.addColorStop(0, inner);
+    rg.addColorStop(0.35, outer);
+    rg.addColorStop(1, 'rgba(255,200,120,0)');
+    g.fillStyle = rg;
+    g.fillRect(0, 0, 64, 64);
+    const t = new THREE.CanvasTexture(cv);
+    t.colorSpace = THREE.SRGBColorSpace;
+    return t;
+  };
+  const lampGlow = {
+    halo: new THREE.SpriteMaterial({ map: glowTex('rgba(255,236,190,0.9)', 'rgba(255,214,150,0.35)'), blending: THREE.AdditiveBlending, depthWrite: false, opacity: 0, visible: false }),
+    pool: new THREE.MeshBasicMaterial({ map: glowTex('rgba(255,214,150,0.5)', 'rgba(255,200,130,0.22)'), blending: THREE.AdditiveBlending, transparent: true, depthWrite: false, opacity: 0, visible: false }),
+  };
   const ghostMat = new THREE.MeshLambertMaterial({ color: 0x3aa0ff, transparent: true, opacity: 0.55 });
   /** 一個標記的樣子（原點在地上，往北是 -z；長椅坐的人面向 -z） */
   function markModel(kind: ParkMarkKind, ghost: boolean): THREE.Group {
@@ -1742,6 +1883,16 @@ export function openPark3D(o: Park3DOptions): () => void {
       put(square(0.215, 0.215, 0.04), markMats.black, 0, H + 0.54, 0);
       put(new THREE.ConeGeometry(0.27, 0.2, 4).rotateY(Math.PI / 4), markMats.black, 0, H + 0.66, 0);
       put(new THREE.SphereGeometry(0.035, 10, 8), markMats.black, 0, H + 0.79, 0);
+      if (!ghost) {
+        const halo = new THREE.Sprite(lampGlow.halo);
+        halo.position.set(0, H + 0.35, 0);
+        halo.scale.setScalar(1.6);
+        const pool = new THREE.Mesh(new THREE.CircleGeometry(4.5, 32).rotateX(-Math.PI / 2), lampGlow.pool);
+        pool.position.y = 0.03;
+        // 光點不到（標記時點地上那一圈不會選到路燈）
+        halo.raycast = pool.raycast = () => {};
+        g.add(halo, pool);
+      }
     } else if (kind === 'bench') {
       // 一整塊花崗石：側面照 BENCH_PROFILE 圓圓的（曲線），沿著長邊拉長、兩頭邊緣磨圓；坐的人面向 -z
       const side = new THREE.Shape();
@@ -1842,6 +1993,12 @@ export function openPark3D(o: Park3DOptions): () => void {
   const dogMeshes = new Map<string, THREE.Mesh>();
   // 身體的底、眼睛鼻子：跟雷達上一樣是平平的顏色（亮暗看毛）
   const dogMats = new Map<string, THREE.MeshBasicMaterial>();
+  const dogMat = (fill: string): THREE.MeshBasicMaterial => {
+    let m = dogMats.get(fill);
+    // 晚上跟著變暗（unlitMat）
+    if (!m) dogMats.set(fill, (m = unlitMat(fill)));
+    return m;
+  };
   // 地上的影子：小法自己的座標是（往前、往左、往上），圓本來就躺在「前、左」那一面（不用轉；以前轉成直立的，影子立在身體正中間，
   // 站著被毛蓋住看不到，趴下來身體變矮就從背上露出來，像身上一塊黑黑的），前後長、左右窄，離地 3 公釐不跟地面搶
   const dogShadow = new THREE.Mesh(new THREE.CircleGeometry(1, 24), new THREE.MeshBasicMaterial({ color: 0x000000, transparent: true, opacity: 0.22, depthWrite: false }));
@@ -1858,7 +2015,7 @@ export function openPark3D(o: Park3DOptions): () => void {
   hairGeo.setIndex(new THREE.BufferAttribute(hairIdx, 1));
   hairGeo.setAttribute('position', new THREE.BufferAttribute(hairPos, 3).setUsage(THREE.DynamicDrawUsage));
   hairGeo.setAttribute('color', new THREE.BufferAttribute(hairCol, 3).setUsage(THREE.DynamicDrawUsage));
-  const hairMesh = new THREE.Mesh(hairGeo, new THREE.MeshBasicMaterial({ vertexColors: true, side: THREE.DoubleSide }));
+  const hairMesh = new THREE.Mesh(hairGeo, unlitMat(0xffffff, { vertexColors: true, side: THREE.DoubleSide }));
   hairMesh.frustumCulled = false;
   dogRoot.add(hairMesh);
   const dogInv = new THREE.Matrix4();
@@ -1983,18 +2140,12 @@ export function openPark3D(o: Park3DOptions): () => void {
     for (const part of all) {
       let mesh = dogMeshes.get(part.key);
       if (!mesh) {
-        let m = dogMats.get(part.fill);
-        if (!m) dogMats.set(part.fill, (m = new THREE.MeshBasicMaterial({ color: part.fill })));
-        mesh = new THREE.Mesh(dogBall, m);
+        mesh = new THREE.Mesh(dogBall, dogMat(part.fill));
         mesh.matrixAutoUpdate = false;
         dogMeshes.set(part.key, mesh);
         dogRoot.add(mesh);
       }
-      if ((mesh.material as THREE.MeshBasicMaterial).color.getHexString() !== part.fill.slice(1)) {
-        let m = dogMats.get(part.fill);
-        if (!m) dogMats.set(part.fill, (m = new THREE.MeshBasicMaterial({ color: part.fill })));
-        mesh.material = m;
-      }
+      if (mesh.material !== dogMat(part.fill)) mesh.material = dogMat(part.fill);
       used.add(part.key);
       let c = v3(part.c);
       let axes = part.a.map(v3);
@@ -2052,11 +2203,72 @@ export function openPark3D(o: Park3DOptions): () => void {
     if (snap[0] !== shadowAt[0] || snap[1] !== shadowAt[1]) {
       shadowAt = snap;
       sun.target.position.set(snap[0], 0, -snap[1]);
-      sun.position.copy(sun.target.position).addScaledVector(SUN_DIR, 150);
+      sun.position.copy(sun.target.position).addScaledVector(lightDir, 150);
       sun.target.updateMatrixWorld();
       renderer.shadowMap.needsUpdate = true;
     }
+    // 天空跟著鏡頭
+    skyGroup.position.copy(camera.position);
     return eyeFloor !== floor;
+  }
+  /** 天色、太陽、月亮、光線照現在的時間（每分鐘重算一次） */
+  let skyCheckedAt = -Infinity;
+  const toWorld = (d: Enu): THREE.Vector3 => new THREE.Vector3(d[0], d[2], -d[1]);
+  /** 光從哪個方向照下來：太低的話影子拉得太長、會閃，最低當作 LIGHT_MIN_ALT 度（太陽、月亮畫在真的位置） */
+  const LIGHT_MIN_ALT = 12;
+  const lightFrom = (d: Enu): THREE.Vector3 => {
+    const up = Math.max(d[2], Math.sin((LIGHT_MIN_ALT * Math.PI) / 180));
+    const k = Math.sqrt(1 - up * up) / (Math.hypot(d[0], d[1]) || 1);
+    return new THREE.Vector3(d[0] * k, up, -d[1] * k);
+  };
+  function updateSky(): void {
+    const at = new Date();
+    const [sd, md] = [sunEnu(at, O[0], O[1]), moonEnu(at, O[0], O[1])];
+    const [sAlt, mAlt, lit] = [altOf(sd), altOf(md), moonLit(sd, md)];
+    const look = skyLook(sAlt);
+    const [sw, mw] = [toWorld(sd), toWorld(md)];
+    domeU.zenith.value.setHex(look.zenith);
+    domeU.horizon.value.setHex(look.horizon);
+    domeU.glow.value.setHex(look.glow);
+    domeU.sunDir.value.copy(sw);
+    // 太陽旁邊的光暈：日出日落最明顯，白天淡一點（太陽的圓才看得出來），天黑透就沒有
+    domeU.glowAmt.value = Math.max(0, Math.min(1, (sAlt + 10) / 10)) * (1 - 0.5 * Math.max(0, Math.min(1, (sAlt - 4) / 8)));
+    scene.background = domeU.horizon.value.clone();
+    fog.color.copy(domeU.horizon.value);
+    SKY.copy(domeU.horizon.value);
+    // 太陽：沉到地平線下面就不畫；低的時候偏橘
+    sunDisc.visible = sAlt > -1;
+    sunDisc.position.copy(sw).multiplyScalar(SKY_D);
+    sunDisc.material.color.setHex(look.sunColor);
+    // 月亮：北邊朝天球的北極、亮的一邊朝太陽
+    moonBall.visible = mAlt > -1;
+    moonBall.position.copy(mw).multiplyScalar(SKY_D);
+    moonBall.quaternion.setFromRotationMatrix(new THREE.Matrix4().lookAt(new THREE.Vector3(), moonBall.position, POLE));
+    const moonU = (moonBall.material as THREE.ShaderMaterial).uniforms;
+    moonU.sunDir.value.copy(sw);
+    moonU.day.value = 1 - look.night;
+    hemi.color.setHex(look.hemiSky);
+    hemi.groundColor.setHex(look.hemiGround);
+    hemi.intensity = look.hemiI;
+    // 太陽下山了、月亮在天上：月光（淡淡的藍白，照月相）
+    const moonI = 0.4 * lit * Math.max(0, Math.min(1, mAlt / 8)) * look.night;
+    const byMoon = moonI > look.sunI;
+    sun.intensity = byMoon ? moonI : look.sunI;
+    sun.color.setHex(byMoon ? 0xc4d2ff : look.sunColor);
+    sun.shadow.intensity = byMoon ? 0.45 : 0.72;
+    lightDir.copy(lightFrom(byMoon ? md : sd));
+    // 影子重畫
+    shadowAt = [Infinity, Infinity];
+    // 晚上：不照光的東西變暗、路燈亮
+    nightTint.setRGB(1, 1, 1).lerp(new THREE.Color(0.36, 0.41, 0.58), look.night);
+    for (const u of unlit) u.m.color.copy(u.base).multiply(nightTint);
+    markMats.glass.emissiveIntensity = 0.45 + 1.3 * look.night;
+    for (const m of [lampGlow.halo, lampGlow.pool]) {
+      m.opacity = look.night;
+      m.visible = look.night > 0.02;
+    }
+    root.dataset.sky = `${sAlt.toFixed(1)},${azOf(sd).toFixed(1)};${mAlt.toFixed(1)},${azOf(md).toFixed(1)},${lit.toFixed(2)};${look.night.toFixed(2)}`;
+    dirty = true;
   }
   function move(dt: number): boolean {
     let f = 0;
@@ -2180,6 +2392,8 @@ export function openPark3D(o: Park3DOptions): () => void {
     const to: World = world === 'earth' ? 'woof' : 'earth';
     flight = { t0: performance.now(), to, space: spaceScene(world, parkAt(world), parkAt(to)), clouds: cloudLayer(bedC[0], -bedC[1], 850, 1250), departed: false, switched: false };
     scene.add(flight.clouds);
+    // 飛的時候天色照高度變（skyAt），天空球先收起來
+    skyGroup.visible = false;
     keys.clear();
     [stick.x, stick.y, stick.id] = [0, 0, -1];
     if (marking) {
@@ -2284,6 +2498,8 @@ export function openPark3D(o: Park3DOptions): () => void {
     arriveRocket(world, now);
     o.onWorld?.(world);
     skyAt(0);
+    skyGroup.visible = true;
+    skyCheckedAt = -Infinity;
     cockpit.hidden = true;
     root.classList.remove('p3d-flying');
     const run = PLAZA_STEPS * STEP_DEPTH + 4;
@@ -2390,7 +2606,8 @@ export function openPark3D(o: Park3DOptions): () => void {
     if (!drag.moved && Math.hypot(dx, dy) < 6) return;
     drag.moved = true;
     yaw -= dx * TURN_DRAG;
-    pitch = Math.max(-1.3, Math.min(1.2, pitch - dy * LOOK_DRAG));
+    // 可以抬頭看到快正上方（太陽、月亮在頭頂附近也看得到）
+    pitch = Math.max(-1.3, Math.min(1.45, pitch - dy * LOOK_DRAG));
     [drag.x, drag.y] = [e.clientX, e.clientY];
     dirty = true;
   };
@@ -2531,6 +2748,11 @@ export function openPark3D(o: Park3DOptions): () => void {
         renderer.render(sc, flightCam);
         return;
       }
+    }
+    // 天色每分鐘照現在的時間重算（太陽一分鐘只走 0.25 度）
+    if (now - skyCheckedAt > 60_000) {
+      skyCheckedAt = now;
+      updateSky();
     }
     // 走出火箭：畫面從黑慢慢亮起來
     if (fadeIn) {
