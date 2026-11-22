@@ -547,39 +547,37 @@ export function openPark3D(o: Park3DOptions): () => void {
   );
   sunDisc.scale.setScalar(2 * SKY_D * Math.tan(((DISC_DEG * 5) / 2) * (Math.PI / 180)));
   skyGroup.add(sunDisc);
-  // 月亮：一顆球，照太陽的方向亮一邊（月相、亮的那邊朝哪都是真的）；看不到的那半邊白天是天空的顏色、晚上淡淡的（地球照）；
-  // 月海是從地球看過去的樣子（北邊朝上：x 往右、y 往上，大概的位置、大小），球的北邊轉向天球的北極（晚上月亮會慢慢斜過去）
+  // 月亮：一顆球，照太陽的方向亮一邊（月相、亮的那邊朝哪都是真的）；照不到的那邊是天空的顏色（眉月的晚上淡淡看得到，地球照）。
+  // 月面是 NASA 的月球地圖（LROC 彩色拼接圖，NASA SVS 的 CGI Moon Kit，公有領域）只取地球看得到的那一半（經度 ±90 度）縮成 192 px 灰階
+  // （public/moon.jpg）；球的 +z 朝著你、北邊轉向天球的北極（晚上月亮會慢慢斜過去）
+  const moonMap = new THREE.TextureLoader().load(`${import.meta.env.BASE_URL}moon.jpg`, () => (dirty = true));
+  moonMap.colorSpace = THREE.SRGBColorSpace;
   const moonBall = new THREE.Mesh(
-    new THREE.SphereGeometry(SKY_D * Math.tan((DISC_DEG / 2) * (Math.PI / 180)), 32, 24),
+    new THREE.SphereGeometry(SKY_D * Math.tan((DISC_DEG / 2) * (Math.PI / 180)), 48, 32),
     new THREE.ShaderMaterial({
-      uniforms: { sunDir: { value: new THREE.Vector3(0, 1, 0) }, day: { value: 0 } },
+      uniforms: { sunDir: { value: new THREE.Vector3(0, 1, 0) }, day: { value: 0 }, ashen: { value: 0 }, map: { value: moonMap } },
       vertexShader: 'varying vec3 vN;\nvarying vec3 vO;\nvoid main() {\n  vO = normal;\n  vN = normalize(mat3(modelMatrix) * normal);\n  gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);\n}',
       fragmentShader: [
         'uniform vec3 sunDir;',
         'uniform float day;',
+        'uniform float ashen;',
+        'uniform sampler2D map;',
         'varying vec3 vN;',
         'varying vec3 vO;',
-        'float spot(vec2 p, vec2 c, float r) { return 1.0 - smoothstep(r * 0.55, r, distance(p, c)); }',
         'void main() {',
-        '  vec2 p = vO.xy;',
-        '  float m = 0.0;',
-        ...(
-          [
-            [-0.8, 0.31, 0.36], // 風暴洋
-            [-0.23, 0.54, 0.3], // 雨海
-            [0.26, 0.47, 0.19], // 澄海
-            [0.51, 0.14, 0.23], // 靜海
-            [0.82, 0.29, 0.11], // 危海
-            [0.77, -0.14, 0.14], // 豐富海
-            [0.54, -0.26, 0.1], // 酒海
-            [-0.27, -0.36, 0.17], // 雲海
-            [-0.57, -0.41, 0.1], // 濕海
-            [0.02, 0.82, 0.12], // 冷海
-          ] as const
-        ).map(([x, y, r]) => `  m = max(m, spot(p, vec2(${x.toFixed(2)}, ${y.toFixed(2)}), ${r.toFixed(2)}));`),
-        '  vec3 c = mix(vec3(0.92, 0.91, 0.86), vec3(0.6, 0.6, 0.6), 0.6 * m);',
-        '  float lit = smoothstep(-0.05, 0.1, dot(normalize(vN), sunDir));',
-        '  gl_FragColor = vec4(c, max(lit, 0.1 * (1.0 - day)) * mix(1.0, 0.8, day));',
+        '  vec3 o = normalize(vO);',
+        // 月面的經緯度：+z 是經度 0（正對地球），往右（+x）是東經
+        '  vec2 uv = vec2(0.5 + atan(o.x, o.z) / 3.14159265, 0.5 + asin(clamp(o.y, -1.0, 1.0)) / 3.14159265);',
+        '  vec3 c = texture2D(map, uv).rgb;',
+        // 對比拉高一點（月海、高地分得出來），整體亮一點
+        '  c = clamp((c - 0.3) * 1.35 + 0.42, 0.0, 1.0);',
+        '  float k = dot(normalize(vN), sunDir);',
+        // 明暗交界清楚，靠近交界的地方暗一點
+        '  float lit = smoothstep(-0.015, 0.03, k);',
+        '  c *= mix(0.7, 1.0, smoothstep(0.0, 0.35, k));',
+        // 白天：暗的月海透出天空（淡淡的），晚上整個亮；暗的那邊只有眉月的晚上淡淡看得到（地球照，ashen）
+        '  float a = max(lit, ashen) * mix(1.0, 0.45 + 0.5 * c.r, day);',
+        '  gl_FragColor = vec4(c, a);',
         '  #include <colorspace_fragment>',
         '}',
       ].join('\n'),
@@ -2247,6 +2245,7 @@ export function openPark3D(o: Park3DOptions): () => void {
     const moonU = (moonBall.material as THREE.ShaderMaterial).uniforms;
     moonU.sunDir.value.copy(sw);
     moonU.day.value = 1 - look.night;
+    moonU.ashen.value = 0.12 * (1 - lit) ** 3 * look.night;
     hemi.color.setHex(look.hemiSky);
     hemi.groundColor.setHex(look.hemiGround);
     hemi.intensity = look.hemiI;
