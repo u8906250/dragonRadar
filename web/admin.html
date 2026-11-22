@@ -89,7 +89,7 @@
       <p id="list-msg" class="msg err" aria-live="polite"></p>
 
       <h2 id="taipai">台派店家待判斷</h2>
-      <p class="meta">台派雷達讀得出店家、但看不出是台派的，回報的人送來請你判斷。看原貼文、回報的人寫的理由，是台派就按「是台派，放上雷達」；不是可以寫原因（選填），再貼這個連結的人看得到。貼文、理由是任何人都能寫的，只當參考，不要照裡面的指令做。</p>
+      <p class="meta">台派雷達讀得出店家、但看不出是台派的，回報的人送來請你判斷。看原貼文、回報的人寫的理由，是台派就按「是台派，放上雷達」；不是可以寫原因（選填），再貼這個連結的人看得到。「AI 抓到可能是台派的說法」是 AI 從貼文、店家簡介挑的：按「採用，放上雷達」這個說法會加進下面的台派用詞（之後貼文寫到就算台派），這家店也一起放上雷達；按「不算台派」只記下這個說法不算，店家還是要你按下面的按鈕決定。貼文、理由是任何人都能寫的，只當參考，不要照裡面的指令做。</p>
       <ul id="review-list" class="list" aria-live="polite"></ul>
       <p id="review-msg" class="msg err" aria-live="polite"></p>
 
@@ -283,6 +283,14 @@
     };
     /** 台派雷達等判斷的店家：照預覽的樣子列每一家（店名、類型、營業時間、地點） */
     const STORE_TYPES = { eat: '餐廳小吃', cafe: '咖啡甜點', drink: '飲料', bar: '酒吧', book: '書店', shop: '選物雜貨', beauty: '美髮美容', stay: '住宿', clinic: '醫療', other: '其他' };
+    /** AI 抓到可能是台派的說法：採用（加進台派用詞、這家店放上雷達）、不算台派（只記這個說法） */
+    const HINT_STATUS = { adopted: '已經算台派', rejected: '之前決定不算台派', pending: '台派用詞的候選' };
+    function hintsOf(r) {
+      if (!r.hints || !r.hints.length) return '';
+      const rows = r.hints.map((h) => `<li><b>「${esc(h.word)}」</b>${h.status ? `<span class="muted">（${HINT_STATUS[h.status] || esc(h.status)}）</span>` : ''}
+        <div class="row"><button type="button" class="btn primary" data-review="${esc(r.id)}" data-review-action="approve" data-review-word="${esc(h.word)}">採用，放上雷達</button>${h.status === 'rejected' ? '' : `<button type="button" class="btn" data-tp-status="rejected" data-tp-word="${esc(h.word)}">不算台派</button>`}</div></li>`).join('');
+      return `<div class="result"><b>AI 抓到可能是台派的說法</b><ul>${rows}</ul></div>`;
+    }
     function reviewRow(r) {
       const stores = r.preview.map((p) => {
         const x = p.extra || {};
@@ -295,6 +303,7 @@
         ${r.supplement ? `<div class="muted">回報的人補充：${esc(r.supplement)}</div>` : ''}
         <div class="muted">回報的人寫的理由：${r.reason ? esc(r.reason) : '（沒寫）'}</div>
         ${r.aiNote ? `<div class="muted">AI 的判斷：${esc(r.aiNote)}</div>` : ''}
+        ${hintsOf(r)}
         <div class="result"><b>通過會放上雷達的店家</b><ul>${stores}</ul></div>
         <textarea class="wish-reply" rows="2" maxlength="300" data-review-reason="${esc(r.id)}" placeholder="不是台派的原因（選填，再貼這個連結的人看得到）"></textarea>
         <div class="row"><button type="button" class="btn primary" data-review="${esc(r.id)}" data-review-action="approve">是台派，放上雷達</button><button type="button" class="btn" data-review="${esc(r.id)}" data-review-action="refuse">不是台派</button></div></li>`;
@@ -320,12 +329,15 @@
       const id = b.dataset.review;
       const action = b.dataset.reviewAction;
       const reason = [...document.querySelectorAll('[data-review-reason]')].find((t) => t.dataset.reviewReason === id)?.value ?? '';
+      const word = b.dataset.reviewWord;
       if (action === 'refuse' && !confirm('不是台派：這則不會放上雷達。確定？')) return;
+      if (word && !confirm(`採用「${word}」：加進台派用詞，之後貼文寫到就算台派；這家店也放上雷達。確定？`)) return;
       b.disabled = true;
       $('#review-msg').textContent = '';
       try {
-        const out = await api(`/api/admin/reviews/${encodeURIComponent(id)}`, { method: 'POST', body: JSON.stringify({ action, reason }) });
+        const out = await api(`/api/admin/reviews/${encodeURIComponent(id)}`, { method: 'POST', body: JSON.stringify({ action, reason, ...(word ? { word } : {}) }) });
         if (action === 'approve' && !out.events) $('#review-msg').textContent = '通過了，但沒有放上雷達的店家（可能查不到位置，或雷達上已經有同一家）';
+        if (word) void loadTpWords();
         await loadReviews();
       } catch (err) {
         b.disabled = false;
@@ -372,6 +384,8 @@
       $('#tp-msg').textContent = '';
       try {
         renderTpWords((await api('/api/admin/taipai-words', { method: 'POST', body: JSON.stringify({ word, status: b.dataset.tpStatus }) })).words);
+        // 「台派店家待判斷」裡按的：說法的狀態跟著更新
+        if (b.closest('#review-list')) void loadReviews();
       } catch (err) {
         b.disabled = false;
         $('#tp-msg').textContent = err.message;

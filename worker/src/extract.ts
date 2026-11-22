@@ -61,6 +61,8 @@ export interface Extraction {
   not_taipai?: boolean;
   /** 台派雷達：判成台派的依據（台派用詞，taipaiWords.ts），放上雷達後記下來給管理者決定算不算 */
   taipai_word?: string | null;
+  /** 台派雷達看不出是台派時，AI 抓的可能是台派的說法（管理者判斷時看） */
+  taipai_hints?: string[];
 }
 
 const MAX_EVENTS_PER_POST = 6;

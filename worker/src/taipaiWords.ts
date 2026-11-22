@@ -2,6 +2,7 @@
  * 台派用詞（migration 0061 的 taipai_words，v1.775 使用者說「台派店家也可以提供類似關鍵字審核讓我決定」）：
  * 台派雷達判讀時 AI 說判成台派的依據（taipai_by，一個短詞），放上雷達後記下來；新的詞先照判讀放上雷達、列成候選，
  * 管理者在管理頁決定：採用的寫進判讀說明（貼文寫到就算台派），不算台派的之後只靠這個詞判成台派的改送管理者判斷（已經放上雷達的不動）。
+ * 看不出是台派、送給管理者判斷的店家，AI 也抓幾個可能是台派的說法（taipai_hints，v1.780），管理者在「台派店家待判斷」直接採用或不算。
  */
 import type { Env } from './env';
 
@@ -62,8 +63,29 @@ export async function listTaipaiWords(env: Env): Promise<TaipaiWord[]> {
   return r.results.map((x) => ({ word: x.word, status: x.status, posts: x.posts, lastPermalink: x.last_permalink, createdAt: x.created_at, updatedAt: x.updated_at }));
 }
 
-/** 管理頁：採用、不算台派、改回候選；沒有這個詞回 false */
-export async function setTaipaiWord(env: Env, word: string, status: TaipaiWordStatus, now: number): Promise<boolean> {
-  const r = await env.DB.prepare('UPDATE taipai_words SET status = ?, updated_at = ? WHERE word = ?').bind(status, now, word).run();
-  return (r.meta.changes ?? 0) > 0;
+/** 管理頁：採用、不算台派、改回候選；還沒有的詞（「台派店家待判斷」AI 抓的說法）新增一個 */
+export async function setTaipaiWord(env: Env, word: string, status: TaipaiWordStatus, now: number): Promise<void> {
+  await env.DB.prepare(
+    'INSERT INTO taipai_words (word, status, posts, created_at, updated_at) VALUES (?, ?, 0, ?, ?) ON CONFLICT(word) DO UPDATE SET status = excluded.status, updated_at = excluded.updated_at',
+  )
+    .bind(word, status, now, now)
+    .run();
+}
+
+/** 管理者判斷台派店家時按了 AI 抓的說法「採用」：這個詞採用，這家店算一則 */
+export async function adoptTaipaiWord(env: Env, word: string, postId: string, permalink: string | null, now: number): Promise<void> {
+  await env.DB.prepare(
+    "INSERT INTO taipai_words (word, status, posts, last_post_id, last_permalink, created_at, updated_at) VALUES (?, 'adopted', 1, ?, ?, ?, ?) ON CONFLICT(word) DO UPDATE SET status = 'adopted', posts = posts + 1, last_post_id = excluded.last_post_id, last_permalink = excluded.last_permalink, updated_at = excluded.updated_at",
+  )
+    .bind(word, postId, permalink, now, now)
+    .run();
+}
+
+/** 這幾個詞現在的狀態（沒記過的不在裡面） */
+export async function taipaiWordStatuses(env: Env, words: string[]): Promise<Map<string, TaipaiWordStatus>> {
+  if (words.length === 0) return new Map();
+  const r = await env.DB.prepare(`SELECT word, status FROM taipai_words WHERE word IN (${words.map(() => '?').join(',')})`)
+    .bind(...words)
+    .all<{ word: string; status: TaipaiWordStatus }>();
+  return new Map(r.results.map((x) => [x.word, x.status]));
 }

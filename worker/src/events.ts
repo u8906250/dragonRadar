@@ -780,6 +780,8 @@ export interface PlanResult {
   note?: string | null;
   /** 台派雷達：判成台派的依據（台派用詞），放上雷達後記成候選 */
   taipaiWord?: string;
+  /** 台派雷達看不出是台派：AI 抓的可能是台派的說法，送給管理者判斷時列出來 */
+  taipaiHints?: string[];
 }
 
 /** 每個模組用哪一套判讀（洋流改版後只判斷活動） */
@@ -811,7 +813,8 @@ async function planPostWith(env: Env, post: PostRow, now: number, profileHint: s
     if (!profileHint) for (const e of extraction.events) delete e.extra?.from_profile;
     const items = await planStores(env, extraction.events, now, 0);
     // 是店家但看不出是台派：店家資料照樣排好、定位，回報的人可以送給管理者判斷
-    return extraction.not_taipai ? { items, early: NOT_TAIPAI, note: extraction.reason ?? null } : { items, early: null, ...(extraction.taipai_word ? { taipaiWord: extraction.taipai_word } : {}) };
+    if (extraction.not_taipai) return { items, early: NOT_TAIPAI, note: extraction.reason ?? null, ...(extraction.taipai_hints?.length ? { taipaiHints: extraction.taipai_hints } : {}) };
+    return { items, early: null, ...(extraction.taipai_word ? { taipaiWord: extraction.taipai_word } : {}) };
   }
   if (module === 'current') {
     return { items: await planActivities(env, post, extraction.events, text, now, extraction.route_title ?? null), early: null };

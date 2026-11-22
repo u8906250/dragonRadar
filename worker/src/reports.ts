@@ -23,7 +23,7 @@ import { cleanHours, NOT_TAIPAI } from './taipai';
 import { isStoreTypeOf, STORE_TYPE_NAMES } from './stores';
 import { pushAdmins } from './push';
 import { learnTags, manualTags } from './learnedTags';
-import { recordTaipaiWord } from './taipaiWords';
+import { adoptTaipaiWord, cleanTaipaiWord, recordTaipaiWord, taipaiWordStatuses, type TaipaiWordStatus } from './taipaiWords';
 
 /** 只收這麼新的貼文，太舊的公告通常已經過期（v1.696 使用者說 7 天改成 30 天：大型活動常常一個月前就公告；資料也是留 30 天） */
 export const MAX_LINK_AGE_SEC = 30 * 86400;
@@ -371,7 +371,8 @@ export function notListedWhy(items: PlanItem[]): NotListedWhy | undefined {
 // 19：「士林捷運站旁」查成永和的「捷運頂溪站」：修好車站名的查法，還沒確認的回報再貼一次重新判讀、重新定位（2026-11-19）
 // 20：台派雷達看不出是台派的店家照樣讀出資料，可以送給管理者判斷（2026-11-20）
 // 21：台派雷達記下判成台派的依據（台派用詞），算不算台派照管理者在管理頁決定的（2026-11-21）
-export const PLAN_VERSION = 21;
+// 22：台派雷達看不出是台派的，AI 抓可能是台派的說法給管理者判斷；店家自己帳號的表態貼文（回家投票、放小卡）也算介紹這家店（2026-11-22）
+export const PLAN_VERSION = 22;
 
 /** 判讀好、還沒寫進雷達的資料，存在 posts.confirm_plan */
 interface StoredPlan {
@@ -385,6 +386,8 @@ interface StoredPlan {
   judgedTags?: string[];
   /** 台派雷達：判成台派的依據，放上雷達後記下來（taipaiWords.ts，管理者決定算不算台派） */
   taipaiWord?: string;
+  /** 台派雷達看不出是台派：AI 抓的可能是台派的說法（管理者判斷時採用或不算） */
+  taipaiHints?: string[];
 }
 
 /** 存進 posts.confirm_plan：記下判讀規則的版本 */
@@ -1064,6 +1067,7 @@ export async function editLink(env: Env, body: { postId?: unknown; token?: unkno
     items,
     early: unsure ? NOT_TAIPAI : null,
     ...(unsure && stored?.note ? { note: stored.note } : {}),
+    ...(unsure && stored?.taipaiHints?.length ? { taipaiHints: stored.taipaiHints } : {}),
     ...(!unsure && stored?.taipaiWord ? { taipaiWord: stored.taipaiWord } : {}),
     judgedTags: stored?.judgedTags ?? tags,
   };
@@ -1193,14 +1197,18 @@ export interface AdminReview {
   reason: string | null;
   /** AI 為什麼看不出是台派 */
   aiNote: string | null;
+  /** AI 抓的可能是台派的說法，和現在台派用詞裡的狀態（沒記過是 null） */
+  hints: Array<{ word: string; status: TaipaiWordStatus | null }>;
   requestedAt: number;
   preview: PreviewItem[];
 }
 
 export async function adminListReviews(env: Env, now: number): Promise<AdminReview[]> {
   const { results } = await env.DB.prepare("SELECT * FROM posts WHERE confirm_state = 'review' ORDER BY fetched_at LIMIT 50").all<PostRow>();
-  return results.map((post) => {
-    const plan = readPlan(post);
+  const plans = results.map(readPlan);
+  const statuses = await taipaiWordStatuses(env, [...new Set(plans.flatMap((p) => p?.taipaiHints ?? []))]);
+  return results.map((post, i) => {
+    const plan = plans[i];
     return {
       id: post.id,
       permalink: post.permalink ?? '',
@@ -1209,6 +1217,7 @@ export async function adminListReviews(env: Env, now: number): Promise<AdminRevi
       supplement: post.supplement ?? null,
       reason: post.confirm_note ?? null,
       aiNote: plan?.note ?? null,
+      hints: (plan?.taipaiHints ?? []).map((word) => ({ word, status: statuses.get(word) ?? null })),
       requestedAt: post.fetched_at,
       preview: previewOf(plan?.items ?? [], now),
     };
@@ -1217,10 +1226,11 @@ export async function adminListReviews(env: Env, now: number): Promise<AdminRevi
 
 /**
  * 管理者判斷：approve 是台派，放上雷達（算回報的人一則）；refuse 不是（reason 選填，再貼這個連結的人看得到）。
+ * approve 帶 word（按了 AI 抓的說法「採用」）：這個詞也採用成台派用詞，之後貼文寫到就算台派。
  * 先改狀態再寫進雷達：同時按兩次只會放一次
  */
 export async function adminDecideReview(env: Env, id: string, body: unknown, now: number): Promise<{ outcome: LinkOutcome; events: number }> {
-  const b = (body && typeof body === 'object' ? body : {}) as { action?: unknown; reason?: unknown };
+  const b = (body && typeof body === 'object' ? body : {}) as { action?: unknown; reason?: unknown; word?: unknown };
   const post = await getPost(env, id);
   if (!post) throw new ReportError(404, '找不到這則回報');
   const gone = '這則已經處理過了，請重新整理';
@@ -1232,6 +1242,8 @@ export async function adminDecideReview(env: Env, id: string, body: unknown, now
     return { outcome: 'refused', events: 0 };
   }
   if (b.action !== 'approve') throw new ReportError(400, 'action 要是 approve 或 refuse');
+  const word = b.word === undefined ? null : cleanTaipaiWord(b.word);
+  if (b.word !== undefined && !word) throw new ReportError(400, '要採用的說法是空的');
   const plan = readPlan(post);
   if (!plan) throw new ReportError(409, '判讀結果不見了');
   const lock = await env.DB.prepare("UPDATE posts SET confirm_state = 'confirmed', confirm_plan = NULL, reviewed_at = ? WHERE id = ? AND confirm_state = 'review'").bind(now, id).run();
@@ -1248,6 +1260,7 @@ export async function adminDecideReview(env: Env, id: string, body: unknown, now
   if (sub) await env.DB.prepare('UPDATE submissions SET result = ? WHERE id = ?').bind(JSON.stringify(result.reasons), sub.id).run();
   const outcome = summarize(result.reasons);
   await afterListed(env, post, plan, outcome, sub?.device ?? null, now);
+  if (word) await adoptTaipaiWord(env, word, post.id, post.permalink, now);
   return { outcome, events: result.events.length };
 }
 

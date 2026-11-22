@@ -26,7 +26,7 @@ import { adminBottleRejects, adminListBottles, adminSetBottle, deleteBottleRejec
 import { approveSpotRequest, autoReview, cancelSpotRequest, listSpotRequests, locatePlace, rejectSpotRequest, SPOT_MAX_AGE_SEC, spotRequestStatus, type ApproveBody, type SpotRequestRow } from './spots';
 import { addUserKeyword, listActiveKeywords, listAllKeywords, MAX_ACTIVE_KEYWORDS, normalizeKeyword, parseKeywordList, toKeywordOut, touchKeywords } from './keywords';
 import { listLearnedTags, setLearnedTag } from './learnedTags';
-import { listTaipaiWords, setTaipaiWord } from './taipaiWords';
+import { cleanTaipaiWord, listTaipaiWords, setTaipaiWord } from './taipaiWords';
 import { CALLBACK_PATH, DELETE_PATH, DELETION_STATUS_PATH, UNINSTALL_PATH, deletionStatus, handleCallback, handleDelete, handleUninstall, startAuth } from './oauth';
 import { etagMatches, jsonResponse, nowSec, parseIsoToUnix } from './util';
 
@@ -862,8 +862,9 @@ async function handleAdmin(req: Request, env: Env, ctx: ExecutionContext, path: 
     if (req.method === 'POST') {
       const body = await readJson<{ word?: unknown; status?: unknown }>(req);
       const status = body.status === 'adopted' || body.status === 'rejected' || body.status === 'pending' ? body.status : null;
-      if (typeof body.word !== 'string' || !status) throw new HttpError(400, 'word, status (adopted / rejected / pending) are required');
-      if (!(await setTaipaiWord(env, body.word, status, now))) throw new HttpError(404, 'no such word');
+      const word = cleanTaipaiWord(body.word);
+      if (!word || !status) throw new HttpError(400, 'word, status (adopted / rejected / pending) are required');
+      await setTaipaiWord(env, word, status, now);
     } else if (req.method !== 'GET') throw new HttpError(405, 'method not allowed');
     return jsonResponse({ words: await listTaipaiWords(env) });
   }

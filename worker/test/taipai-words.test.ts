@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { normalizeTaipai, TAIPAI_SPEC, taipaiPrompt, taipaiSpec } from '../src/taipai';
-import { cleanTaipaiWord, SEED_TAIPAI_WORDS, taipaiWordLists } from '../src/taipaiWords';
+import { normalizeTaipai, TAIPAI_SPEC, taipaiHints, taipaiPrompt, taipaiSpec } from '../src/taipai';
+import { cleanTaipaiWord, SEED_TAIPAI_WORDS, taipaiWordLists, taipaiWordStatuses } from '../src/taipaiWords';
 
 const store = { name: '慢工咖啡', type: 'cafe', hours: null, place_text: '師大路 100 號', place_query: null, from_profile: ['taipai', 'hours'], confidence: 0.9 };
 
@@ -53,5 +53,30 @@ describe('台派用詞', () => {
     expect(await taipaiWordLists({ DB: { prepare: () => stmt } } as never)).toEqual({ adopted: ['台派', '飄帶'], rejected: ['民主'] });
     const broken = { DB: { prepare: () => ({ all: async () => Promise.reject(new Error('no such table')) }) } } as never;
     expect(await taipaiWordLists(broken)).toEqual(SEED_TAIPAI_WORDS);
+  });
+  it('picks words that might mean taipai for the admin (v1.780)', () => {
+    const p = taipaiPrompt({ adopted: ['台派'], rejected: [] });
+    expect(p).toContain('"taipai_hints": is_event 為 true、taipai 為 false 時');
+    expect(TAIPAI_SPEC.schema).toMatchObject({ required: expect.arrayContaining(['taipai_hints']) });
+    // 店家自己帳號的表態貼文（回家投票、放小卡）也算介紹這家店
+    expect(p).toContain('店家自己的帳號發的表態貼文（例如鼓勵回家投票、在店裡放小卡貼紙讓人索取），也算在介紹這家店');
+    // 看不出是台派：抓的說法整理好（去掉引號、重複、管理者決定不算的，最多 3 個）
+    const spec = taipaiSpec({ adopted: ['台派'], rejected: ['民主'] });
+    const r = spec.normalize({ is_event: true, taipai: false, reason: '沒寫是台派', taipai_by: null, taipai_hints: ['「回家投票」', '回家投票', '民主', '守護 台灣', '台灣加油', '龜山島'], tags: [], events: [store] });
+    expect(r).toMatchObject({ not_taipai: true, taipai_hints: ['回家投票', '守護台灣', '台灣加油'] });
+    // 判成台派的不用抓
+    expect(spec.normalize({ is_event: true, taipai: true, reason: null, taipai_by: '台派', taipai_hints: ['回家投票'], tags: [], events: [store] })).not.toHaveProperty('taipai_hints');
+    // 沒抓到（或舊的輸出沒有這一欄）就沒有
+    expect(spec.normalize({ is_event: true, taipai: false, reason: '沒寫是台派', taipai_by: null, tags: [], events: [store] })).not.toHaveProperty('taipai_hints');
+    expect(taipaiHints(['好', null, 3, '挺台'])).toEqual(['挺台']);
+  });
+  it('looks up what the admin decided about those words', async () => {
+    let asked: unknown[] = [];
+    const stmt = { bind: (...a: unknown[]) => ((asked = a), stmt), all: async () => ({ results: [{ word: '回家投票', status: 'rejected' }] }) };
+    const got = await taipaiWordStatuses({ DB: { prepare: () => stmt } } as never, ['回家投票', '守護台灣']);
+    expect(asked).toEqual(['回家投票', '守護台灣']);
+    expect(got.get('回家投票')).toBe('rejected');
+    expect(got.has('守護台灣')).toBe(false);
+    expect((await taipaiWordStatuses({ DB: { prepare: () => { throw new Error('no query'); } } } as never, [])).size).toBe(0);
   });
 });
