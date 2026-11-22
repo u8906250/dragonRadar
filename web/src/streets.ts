@@ -13,8 +13,8 @@ import { US_LAND } from './us-land';
 // 雷達上寫的縣市、鄉鎮市區名稱跟著街道一起載入（v1.691）
 export { TW_COUNTIES, TW_TOWNS } from './places-tw';
 
-/** 粗線、細線 */
-export type StreetClass = 'major' | 'minor';
+/** 粗線、細線；lane 巷弄、path 步道（2 km 內、全螢幕才畫，v1.781） */
+export type StreetClass = 'major' | 'minor' | 'lane' | 'path';
 
 /** 一條街：pts 是 [緯度, 經度, 緯度, 經度, …]；box 是 [最小緯度, 最小經度, 最大緯度, 最大經度] */
 export interface StreetLine {
@@ -39,7 +39,8 @@ const HIGHWAYS: Classes = { motorway: 'major', trunk: 'major' };
  */
 export const STREET_TIERS: Array<{ maxKm: number; zoom: number; classes: Classes; regional?: boolean; coast?: boolean; names?: string[]; stations?: boolean; green?: boolean }> = [
   // names：雷達上寫路名的道路種類（transportation_name 圖層）；stations：寫車站名（poi 圖層，z13 才有）
-  { maxKm: 2, zoom: 13, classes: { motorway: 'major', trunk: 'major', primary: 'major', secondary: 'major', tertiary: 'minor', minor: 'minor' }, coast: true, names: ['motorway', 'trunk', 'primary', 'secondary', 'tertiary', 'minor'], stations: true, green: true },
+  // 巷弄（service，只畫標成 alley 的）、步道（path：人行步道、自行車道、階梯）v1.781 使用者說 2 km 內加巷弄跟步道（全螢幕才畫，main.ts）
+  { maxKm: 2, zoom: 13, classes: { motorway: 'major', trunk: 'major', primary: 'major', secondary: 'major', tertiary: 'minor', minor: 'minor', service: 'lane', path: 'path' }, coast: true, names: ['motorway', 'trunk', 'primary', 'secondary', 'tertiary', 'minor'], stations: true, green: true },
   // 市區的幹道台北多半標 secondary，其他縣市很多標 tertiary（新竹 8 km 內 secondary 約 90 km、tertiary 約 400 km）：都畫，各地一樣細；
   // 16 km 內也是（z10 沒有 tertiary，所以用 z11，一張約 18 km 寬，最多九張）
   // z11 的路名只有國道、快速道路
@@ -388,12 +389,13 @@ export function decodeTile(
       else if (field === 2) features.push(layer.sub());
       else if (field === 3) keys.push(layer.string());
       else if (field === 4) {
-        // Value：只要字串（field 1），數字的用不到
+        // Value：字串（field 1）；整數（field 5、6，例如步道的 indoor=1）也記成字串，其他的用不到
         const v = layer.sub();
         let s: string | null = null;
         while (v.more()) {
           const vk = v.varint();
           if (vk >> 3 === 1) s = v.string();
+          else if ((vk >> 3 === 5 || vk >> 3 === 6) && (vk & 7) === 0) s = String(v.varint());
           else v.skip(vk & 7);
         }
         values.push(s);
@@ -498,15 +500,24 @@ export function decodeTile(
       let cls: StreetClass | undefined;
       let tunnel = false;
       let bridge = false;
+      let service: string | undefined;
+      let sub: string | undefined;
+      let indoor = false;
       for (let i = 0; i + 1 < tags.length; i += 2) {
         const tk = keys[tags[i]];
         const tv = values[tags[i + 1]];
         if (tk === 'class' && tv) cls = classes[tv];
         else if (tk === 'brunnel' && tv === 'tunnel') tunnel = true;
         else if (tk === 'brunnel' && tv === 'bridge') bridge = true;
+        else if (tk === 'service') service = tv ?? undefined;
+        else if (tk === 'subclass') sub = tv ?? undefined;
+        else if (tk === 'indoor' && tv === '1') indoor = true;
       }
       // 地下道、隧道在地面上看不到，不畫
       if (!cls || tunnel) continue;
+      // 巷弄只畫標成巷弄的（停車場、社區、私人車道不畫，畫了很亂）；步道不畫室內、月台
+      if (cls === 'lane' && service !== 'alley') continue;
+      if (cls === 'path' && (indoor || sub === 'platform' || sub === 'corridor')) continue;
       // 幾何指令：MoveTo(1)、LineTo(2) 後面跟 zigzag 編碼的位移；一個 feature 可以有好幾段線
       let cx = 0;
       let cy = 0;

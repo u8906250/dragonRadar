@@ -127,9 +127,11 @@ export interface RadarRoute {
 export interface RadarStreetTile {
   key: string;
   box: [number, number, number, number];
-  /** major 大路、minor 其他街道 */
+  /** major 大路、minor 其他街道；lane 巷弄、path 步道（2 km 內、全螢幕才有，v1.781） */
   major: Float64Array[];
   minor: Float64Array[];
+  lane: Float64Array[];
+  path: Float64Array[];
   /** 海岸線（16 km 內，從街道圖磚來；畫成跟遠的海岸線一樣的虛線） */
   coast: Float64Array[];
   /** 公園綠地（全螢幕才有）：每一塊是外圈和挖空的圈 */
@@ -273,18 +275,22 @@ const TILE_CLASSES: Array<[string, Record<string, string>]> = [
   ['water-river', {}],
   ['water-stream', {}],
   ['region-outline open coast-line', {}],
+  ['street-path', {}],
+  ['street-lane', {}],
   ['street-minor', {}],
   ['street-major', {}],
 ];
 /** 面的那幾層（照 TILE_CLASSES 的順序） */
 const TILE_AREAS = 2;
 /** 一張圖磚每一層的資料（照 TILE_CLASSES 的順序）：面是一塊一塊（外圈、挖空的圈），線是一條一條 */
-const tileKinds = (t: RadarStreetTile): [Float64Array[][], Float64Array[][], Float64Array[], Float64Array[], Float64Array[], Float64Array[], Float64Array[]] => [
+const tileKinds = (t: RadarStreetTile): [Float64Array[][], Float64Array[][], Float64Array[], Float64Array[], Float64Array[], Float64Array[], Float64Array[], Float64Array[], Float64Array[]] => [
   t.green,
   t.water,
   t.rivers,
   t.streams,
   t.coast,
+  t.path,
+  t.lane,
   t.minor,
   t.major,
 ];

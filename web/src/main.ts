@@ -1353,8 +1353,9 @@ function updateStreets(): void {
     const hit = streetTileCache.get(ck);
     if (hit) return hit;
     const [s0, w0, n0, e0] = t.box;
-    const rt: RadarStreetTile = { key: t.key, box: [(w0 - fr.lng) * fr.kx, (s0 - fr.lat) * ky, (e0 - fr.lng) * fr.kx, (n0 - fr.lat) * ky], major: [], minor: [], coast: [], green: [], water: [], rivers: [], streams: [] };
-    for (const l of t.lines) if (!hidden(l.pts)) rt[l.cls].push(toXy(l.pts));
+    const rt: RadarStreetTile = { key: t.key, box: [(w0 - fr.lng) * fr.kx, (s0 - fr.lat) * ky, (e0 - fr.lng) * fr.kx, (n0 - fr.lat) * ky], major: [], minor: [], lane: [], path: [], coast: [], green: [], water: [], rivers: [], streams: [] };
+    // 巷弄、步道（2 km 內的圖磚才有）只在全螢幕畫（v1.781），一般雷達太小、畫了很亂
+    for (const l of t.lines) if ((greenOn || l.cls === 'major' || l.cls === 'minor') && !hidden(l.pts)) rt[l.cls].push(toXy(l.pts));
     for (const l of t.coast) if (!hidden(l.pts)) rt.coast.push(toXy(l.pts));
     if (greenOn) {
       // 公園外框：跟這張圖磚碰到的（跨兩張的兩張都畫，一樣的顏色、不透明，看不出來）

@@ -1393,6 +1393,9 @@ path.map-seam-walkers { --p: 15px; }
 /* --sw：縮放中道路整層放大縮小時抵銷線的粗細（radar.ts 的 drawStreets，v1.759），平常沒設是 1 */
 .radar .street-minor { stroke-width: calc(0.8 * var(--sw, 1)); stroke-opacity: 0.2; }
 .radar .street-major { stroke-width: calc(2 * var(--sw, 1)); stroke-opacity: 0.24; }
+/* 巷弄（細一點）、步道（細的虛線），2 km 內、全螢幕才有（v1.781 使用者說 2 km 內加巷弄跟步道） */
+.radar .streets path.street-lane { stroke-width: calc(0.55 * var(--sw, 1)); }
+.radar .streets path.street-path { stroke-width: calc(0.6 * var(--sw, 1)); stroke-dasharray: calc(2 * var(--sw, 1)) calc(1.6 * var(--sw, 1)); stroke-linecap: butt; }
 /* 全螢幕雷達的公園綠地（v1.705）：淡淡的不透明色塊，在道路下面 */
 /* 不描邊：v1.707 加過同色細邊蓋接縫，但 nonzero 填色後相鄰圖磚重疊的地方本來就塗滿；描邊在拖曳時佔了一半的重繪時間（v1.716） */
 .radar .streets path.green-area { fill: var(--park-fill); stroke: none; }
@@ -1418,8 +1421,10 @@ path.map-seam-walkers { --p: 15px; }
 /* 道路切成格子（v1.720）：半透明設在整層，每一段不透明；切開的兩段在格子邊上圓頭重疊的地方才不會變深 */
 .radar .streets .tl-street-minor { opacity: 0.2; }
 .radar .streets .tl-street-major { opacity: 0.24; }
+.radar .streets .tl-street-lane { opacity: 0.16; }
+.radar .streets .tl-street-path { opacity: 0.22; }
 .radar .streets .tl-coast-line { opacity: 0.45; }
-.radar .streets .tl-street-minor path, .radar .streets .tl-street-major path, .radar .streets .tl-coast-line path { stroke-opacity: 1; }
+.radar .streets .tl-street-minor path, .radar .streets .tl-street-major path, .radar .streets .tl-street-lane path, .radar .streets .tl-street-path path, .radar .streets .tl-coast-line path { stroke-opacity: 1; }
 #radar-view { position: relative; }
 .radar-attrib { position: absolute; right: 2px; bottom: 0; font-size: 9px; color: var(--muted); opacity: 0.8; }
 .radar-attrib a { color: inherit; text-decoration: none; }

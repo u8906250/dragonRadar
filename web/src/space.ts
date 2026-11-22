@@ -557,11 +557,13 @@ function streetOnWoof(l: StreetLine): Array<Array<[number, number]>> {
   return got;
 }
 
+/** 汪星上畫的道路：大路、小路 */
+type WoofRoad = Extract<StreetClass, 'major' | 'minor'>;
 /**
  * 畫面上看得到的台北街道（粗線、細線）：畫面上的台北半徑超過 WOOF_STREET_KM、還沒載入、圖磚還沒全部抓到是 null（畫內建的道路）。
  * r 是汪星在雷達上的半徑：雷達外圈看得到的範圍決定畫多細，抓的範圍多留一點
  */
-function woofStreetLines(center: LatLng, r: number, streets: WoofStreets): Record<StreetClass, Array<Array<[number, number]>>> | null {
+function woofStreetLines(center: LatLng, r: number, streets: WoofStreets): Record<WoofRoad, Array<Array<[number, number]>>> | null {
   // 從球心看的角度（度）
   const a = Math.asin(Math.min(1, (viewReach() * 1.1) / r)) / RAD;
   const ring = Math.asin(Math.min(1, INNER / r)) / RAD;
@@ -579,8 +581,10 @@ function woofStreetLines(center: LatLng, r: number, streets: WoofStreets): Recor
   if (la1 < TP.lat0 || la0 > TP.lat1 || ln1 < TP.lng0 || ln0 > TP.lng1) return { major: [], minor: [] };
   const got = streets((la0 + la1) / 2, (ln0 + ln1) / 2, Math.max(hy, hx) * 1.05, rangeKm);
   if (!got || got.pending > 0) return null;
-  const out: Record<StreetClass, Array<Array<[number, number]>>> = { major: [], minor: [] };
+  const out: Record<WoofRoad, Array<Array<[number, number]>>> = { major: [], minor: [] };
   for (const l of got.lines) {
+    // 汪星只畫大路、小路（巷弄、步道不畫）
+    if (l.cls !== 'major' && l.cls !== 'minor') continue;
     if (l.box[0] > la1 || l.box[2] < la0 || l.box[1] > ln1 || l.box[3] < ln0) continue;
     out[l.cls].push(...streetOnWoof(l));
   }
