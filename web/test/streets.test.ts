@@ -22,10 +22,17 @@ function tile(features: Array<{ tags: number[]; type: number; geom: number[] }>,
     ...features.flatMap((f) => field(2, [...packed(2, f.tags), ...varint((3 << 3) | 0), ...varint(f.type), ...packed(4, f.geom)])),
     ...str(3, 'class'),
     ...str(3, 'brunnel'),
+    ...str(3, 'service'),
+    ...str(3, 'indoor'),
     ...field(4, str(1, 'primary')),
     ...field(4, str(1, 'minor')),
     ...field(4, str(1, 'tunnel')),
     ...field(4, str(1, 'path')),
+    ...field(4, str(1, 'service')),
+    ...field(4, str(1, 'alley')),
+    ...field(4, str(1, 'parking_aisle')),
+    // 整數的值（indoor=1）
+    ...field(4, [...varint((5 << 3) | 0), ...varint(1)]),
     ...varint((5 << 3) | 0),
     ...varint(4096),
   ];
@@ -43,14 +50,21 @@ describe('decodeStreets', () => {
         { tags: [0, 1], type: 2, geom: [(1 << 3) | 1, zz(2048), zz(2048), (1 << 3) | 2, zz(10), zz(0)] },
         // 隧道不畫
         { tags: [0, 0, 1, 2], type: 2, geom: line },
-        // 步道不畫
+        // 步道（v1.781 起 2 km 內畫）；室內的不畫
         { tags: [0, 3], type: 2, geom: line },
+        { tags: [0, 3, 3, 7], type: 2, geom: line },
+        // 巷弄：只畫標成 alley 的，停車場車道不畫
+        { tags: [0, 4, 2, 5], type: 2, geom: line },
+        { tags: [0, 4, 2, 6], type: 2, geom: line },
+        { tags: [0, 4], type: 2, geom: line },
       ]),
       0,
       0,
       0,
     );
-    expect(out.map((l) => l.cls)).toEqual(['major', 'minor']);
+    expect(out.map((l) => l.cls)).toEqual(['major', 'minor', 'path', 'lane']);
+    // 巷弄、步道只有 2 km 內那一級畫
+    expect(STREET_TIERS.slice(1).every((t) => !Object.values(t.classes).some((c) => c === 'lane' || c === 'path'))).toBe(true);
     const [lat0, lng0, lat1, lng1, lat2, lng2] = out[0].pts;
     expect(lng0).toBeCloseTo(-180);
     expect(lat0).toBeCloseTo(85.0511, 3);
