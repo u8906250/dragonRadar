@@ -7501,7 +7501,7 @@ function renderModuleList(): void {
     b.type = 'button';
     b.className = `theme-item module-item${m.id === mod.id ? ' on' : ''}`;
     const n = moduleCounts?.counts.get(m.id) ?? 0;
-    b.innerHTML = `<span class="emoji" aria-hidden="true">${m.icon ?? m.emoji}</span><span><b>${esc(m.name)}</b><small>${esc(m.tagline)}</small></span>${n > 0 ? `<span class="mod-count">${n} 筆</span>` : ''}${m.id === mod.id ? '<span class="check">✓</span>' : ''}`;
+    b.innerHTML = `<span class="emoji" aria-hidden="true">${m.icon ?? m.emoji}</span><span><b>${esc(m.name)}</b><small>${esc(m.tagline)}</small></span>${n > 0 ? `<span class="mod-count">${n} 筆</span>` : ''}`;
     b.addEventListener('click', () => {
       const link = pendingShare;
       pendingShare = null;
@@ -9599,8 +9599,8 @@ function wireControls(): void {
     openThemeSheet(themeSheet.hidden);
   });
   themeSheet.querySelector('[data-act="close"]')?.addEventListener('click', () => openThemeSheet(false));
-  // 點標題重新整理，點旁邊的箭頭才切換雷達
-  $('#brand-btn').addEventListener('click', () => location.reload());
+  // 點標題、旁邊的箭頭都是打開切換雷達的選單（v1.779 使用者說點標題原本是重新整理，改成直接出現下拉選單；目前的雷達有外框、不打勾）
+  $('#brand-btn').addEventListener('click', () => openModuleSheet(moduleSheet.hidden));
   $('#module-btn').addEventListener('click', () => openModuleSheet(moduleSheet.hidden));
   moduleSheet.querySelector('[data-act="close"]')?.addEventListener('click', () => openModuleSheet(false));
   // 搜尋：打字就篩（停一下再篩，免得每個字都重畫），清除鈕、Enter 收起鍵盤
