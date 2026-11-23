@@ -255,6 +255,31 @@ function stripGeo(lines: Pt[][], w: number, y: number): THREE.BufferGeometry {
   g.computeVertexNormals();
   return g;
 }
+/**
+ * 兩條一樣幾點的線之間的帶子（a 放在 ya 高、b 放在 yb 高；v 從 a 的 0 到 b 的 1，照 v 畫漸層）：
+ * a、b 是同一條線就是直立的（橋的側面），不同的兩條平移線、一樣高就是平放的（水面、橋面）
+ */
+function bandGeo(a: Pt[], b: Pt[], ya: number, yb: number): THREE.BufferGeometry {
+  const pos: number[] = [];
+  const uv: number[] = [];
+  for (let i = 1; i < a.length; i++) {
+    const q: Array<[Pt, number, number]> = [
+      [a[i - 1], ya, 0],
+      [a[i], ya, 0],
+      [b[i], yb, 1],
+      [b[i - 1], yb, 1],
+    ];
+    for (const k of [0, 1, 2, 0, 2, 3]) {
+      const [p, y, v] = q[k];
+      pos.push(p[0], y, -p[1]);
+      uv.push(0, v);
+    }
+  }
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+  g.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2));
+  return g;
+}
 /** 一條線往左（d > 0）或往右平移 d 公尺（轉角斜接） */
 function offsetLine(l: Pt[], d: number): Pt[] {
   const dir = (a: Pt, b: Pt): Pt => {
@@ -934,6 +959,8 @@ export function openPark3D(o: Park3DOptions): () => void {
   // ---- 橋（照使用者給的照片）：灰色水泥橋面、兩邊淺色的邊，白色方石柱頂上一顆石球（約每 BRIDGE_PANEL 公尺一根、轉角都有），
   // 柱子之間朱紅色的透空欄杆（最上面一道圓橫桿，下面是橫桿、直桿和中間方格「回」字的花紋，畫在圖上、透空的地方看得到水）；轉角底下一個橋墩
   const bridges = Z.bridges.map((l) => l.map(en));
+  /** 晚上才亮的東西（橋的燈光，v1.804）：updateSky 照天色調亮度（userData.k 是最亮時的透明度） */
+  const nightGlow: THREE.Material[] = [];
   {
     // 欄杆的花紋（一片從柱子到柱子、從橋邊到最上面的圓橫桿底下；u 往右、v 往上都是 0～1）
     const cv = document.createElement('canvas');
@@ -961,6 +988,36 @@ export function openPark3D(o: Park3DOptions): () => void {
     tex.colorSpace = THREE.SRGBColorSpace;
     tex.anisotropy = renderer.capabilities.getMaxAnisotropy();
     const [deckTop, deckSide] = [mat(0xa6a9ab), mat(0xc9c7c1)];
+    // 晚上的燈光（v1.804 使用者給照片：橋面兩邊外緣底下一整條暖橘色的燈條，把橋的側面照亮、水面照出一大片暖光和一條亮亮的倒影；
+    // 橋面上欄杆腳邊每一格一段暖黃色的燈）：加上去的發光面（不用真的燈光，不會變慢），天黑才亮
+    const grad = (stops: Array<[number, string]>): THREE.CanvasTexture => {
+      const cv2 = document.createElement('canvas');
+      [cv2.width, cv2.height] = [4, 64];
+      const g2 = cv2.getContext('2d')!;
+      // 貼圖的下面是 v = 0
+      const lg = g2.createLinearGradient(0, 64, 0, 0);
+      for (const [t, c] of stops) lg.addColorStop(t, c);
+      g2.fillStyle = lg;
+      g2.fillRect(0, 0, 4, 64);
+      const t2 = new THREE.CanvasTexture(cv2);
+      t2.colorSpace = THREE.SRGBColorSpace;
+      return t2;
+    };
+    const glow = (k: number, opts: { map?: THREE.Texture; color?: number; additive?: boolean }): THREE.MeshBasicMaterial => {
+      const m = new THREE.MeshBasicMaterial({ map: opts.map ?? null, color: opts.color ?? 0xffffff, transparent: true, depthWrite: false, side: THREE.DoubleSide, opacity: 0, visible: false, blending: opts.additive === false ? THREE.NormalBlending : THREE.AdditiveBlending });
+      m.userData.k = k;
+      nightGlow.push(m);
+      return m;
+    };
+    const glowMats = {
+      strip: glow(1, { color: 0xffc27a, additive: false }),
+      side: glow(1, { map: grad([[0, 'rgba(255,150,70,0.18)'], [0.65, 'rgba(255,170,90,0.45)'], [1, 'rgba(255,196,128,0.75)']]) }),
+      water: glow(1, { map: grad([[0, 'rgba(255,150,70,0.62)'], [0.3, 'rgba(255,140,60,0.3)'], [1, 'rgba(255,130,50,0)']]) }),
+      shine: glow(0.85, { map: grad([[0, 'rgba(255,214,150,0)'], [0.5, 'rgba(255,214,150,1)'], [1, 'rgba(255,214,150,0)']]) }),
+      step: glow(1, { color: 0xffd08a, additive: false }),
+      stepPool: glow(0.7, { map: grad([[0, 'rgba(255,200,120,0.45)'], [1, 'rgba(255,190,110,0)']]) }),
+    };
+    const glowGeos: Record<keyof typeof glowMats, THREE.BufferGeometry[]> = { strip: [], side: [], water: [], shine: [], step: [], stepPool: [] };
     const edgeGeos: THREE.BufferGeometry[] = [];
     const pierGeos: THREE.BufferGeometry[] = [];
     const postGeos: THREE.BufferGeometry[] = [];
@@ -976,6 +1033,14 @@ export function openPark3D(o: Park3DOptions): () => void {
       const half = BRIDGE_W / 2;
       add(prismGeo(band(l, half, -half), BRIDGE_TOP - BRIDGE_DECK_T, BRIDGE_DECK_T), [deckTop, deckSide], true);
       edgeGeos.push(prismGeo(band(l, half, half - BRIDGE_EDGE), BRIDGE_TOP, 0.04), prismGeo(band(l, -half + BRIDGE_EDGE, -half), BRIDGE_TOP, 0.04));
+      // 晚上的燈：兩邊外緣底下的燈條、照亮的側面、水面上的一片暖光和倒影
+      for (const side of [1, -1]) {
+        const out = (d: number): Pt[] => offsetLine(l, side * (half + d));
+        glowGeos.strip.push(bandGeo(out(0.012), out(0.012), BRIDGE_TOP - 0.06, BRIDGE_TOP - 0.025));
+        glowGeos.side.push(bandGeo(out(0.008), out(0.008), BRIDGE_TOP - BRIDGE_DECK_T, BRIDGE_TOP - 0.06));
+        glowGeos.water.push(bandGeo(out(0), out(2.4), LAKE_WATER + 0.012, LAKE_WATER + 0.012));
+        glowGeos.shine.push(bandGeo(out(0.18), out(0.3), LAKE_WATER + 0.014, LAKE_WATER + 0.014));
+      }
       // 轉角底下的橋墩
       for (let i = 1; i < l.length - 1; i++)
         pierGeos.push(new THREE.BoxGeometry(0.7, 1, 0.7 * BRIDGE_W).translate(0, -0.5, 0).applyMatrix4(turn(l[i - 1], l[i + 1], l[i], BRIDGE_TOP - BRIDGE_DECK_T)));
@@ -995,11 +1060,31 @@ export function openPark3D(o: Park3DOptions): () => void {
         }
         for (const [p, q] of posts) {
           const len = Math.hypot(q[0] - p[0], q[1] - p[1]);
+          // 欄杆腳邊的燈：柱子之間、往橋中間一點，一段暖黃色的燈，旁邊的橋面照亮一點
+          if (len > BRIDGE_POST_W + 0.3) {
+            const [ux, uy] = [(q[0] - p[0]) / len, (q[1] - p[1]) / len];
+            const [ix, iy] = [side * uy, -side * ux];
+            const gap = BRIDGE_POST_W / 2 + 0.12;
+            const seg = (d: number): Pt[] => [
+              [p[0] + ux * gap + ix * d, p[1] + uy * gap + iy * d],
+              [q[0] - ux * gap + ix * d, q[1] - uy * gap + iy * d],
+            ];
+            glowGeos.step.push(bandGeo(seg(0.14), seg(0.2), floor + 0.006, floor + 0.006));
+            glowGeos.stepPool.push(bandGeo(seg(0.2), seg(0.6), floor + 0.005, floor + 0.005));
+          }
           railGeos.push(new THREE.BoxGeometry(len, BRIDGE_RAIL_T, BRIDGE_RAIL_T).applyMatrix4(at(p, q, floor + BRIDGE_RAIL_H)));
           const h = BRIDGE_RAIL_H - BRIDGE_RAIL_T / 2;
           panelGeos.push(new THREE.PlaneGeometry(Math.max(0.1, len - BRIDGE_POST_W), h).translate(0, h / 2, 0).applyMatrix4(at(p, q, floor)));
         }
       }
+    }
+    for (const k of Object.keys(glowGeos) as Array<keyof typeof glowGeos>) {
+      if (!glowGeos[k].length) continue;
+      const m = new THREE.Mesh(mergeGeometries(glowGeos[k]), glowMats[k]);
+      // 水面、橋面之後才畫（疊在上面）；點不到（點地面走路不會點到光）
+      m.renderOrder = 3;
+      m.raycast = () => {};
+      scene.add(m);
     }
     if (edgeGeos.length) {
       add(mergeGeometries(edgeGeos), mat(0xd8d6d0), true);
@@ -2383,6 +2468,10 @@ export function openPark3D(o: Park3DOptions): () => void {
     markMats.glass.emissiveIntensity = 0.45 + 1.3 * look.night;
     for (const m of [lampGlow.halo, lampGlow.pool]) {
       m.opacity = look.night;
+      m.visible = look.night > 0.02;
+    }
+    for (const m of nightGlow) {
+      m.opacity = look.night * (m.userData.k as number);
       m.visible = look.night > 0.02;
     }
     // 獵戶座：天黑透才看得到（太陽在地平線下 2 度以下慢慢出來）
