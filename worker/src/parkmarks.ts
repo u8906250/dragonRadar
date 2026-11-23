@@ -6,6 +6,8 @@ import type { Env } from './env';
 export const PARK_MARK_KINDS = {
   lamp: '路燈',
   bench: '長椅',
+  // v1.803 使用者給照片說加這個椅子：平的石板座面、兩塊石板腳，沒有椅背
+  slab: '石板凳',
   bin: '垃圾桶',
   stele: '石碑',
   other: '其他',

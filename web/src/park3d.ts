@@ -146,6 +146,11 @@ const trunkR = (r: number): number => Math.max(0.1, Math.min(0.4, r * 0.06));
  */
 const LAMP_POLE_H = 3.3;
 const BENCH_LEN = 1.6;
+/**
+ * 石板凳（v1.803 使用者給的照片）：一塊平的淺灰色花崗石板（四個角稍微圓），底下兩塊石板當腳、離兩頭往內縮；沒有椅背，前後一樣。
+ * 照片裡沒有量得到大小的東西，照一般公園石凳估：長 1.8、深 0.45、板厚 0.1、座面高 0.45 公尺，腳厚 0.17、離兩頭 0.4 公尺
+ */
+const SLAB = { len: 1.8, depth: 0.45, thick: 0.1, seat: 0.45, legW: 0.17, legDepth: 0.36, legIn: 0.4 };
 /** 石椅的側面（往後、往上，公尺；前面是 -）：從腳的前面往後繞一圈 */
 const BENCH_PROFILE: Pt[] = [
   [-0.07, 0], [0.11, 0], [0.19, 0.14], [0.25, 0.34], [0.27, 0.55], [0.25, 0.71], [0.19, 0.79], [0.12, 0.79], [0.07, 0.73],
@@ -165,7 +170,7 @@ const FAST = 2.5;
 const STICK_RUN_S = 0.5;
 const TAP_MAX_M = 150;
 
-const KIND_NAME: Record<ParkMarkKind, string> = { lamp: '路燈', bench: '長椅', bin: '垃圾桶', stele: '石碑', other: '其他' };
+const KIND_NAME: Record<ParkMarkKind, string> = { lamp: '路燈', bench: '長椅', slab: '石板凳', bin: '垃圾桶', stele: '石碑', other: '其他' };
 const KINDS = Object.keys(KIND_NAME) as ParkMarkKind[];
 
 /** 一圈經緯度在不在裡面（公尺座標，射線法） */
@@ -1971,6 +1976,27 @@ export function openPark3D(o: Park3DOptions): () => void {
       geo.rotateY(-Math.PI / 2);
       geo.translate((BENCH_LEN - 0.06) / 2, 0, 0);
       put(geo, markMats.granite, 0, 0, 0);
+    } else if (kind === 'slab') {
+      // 石板凳：座面是四個角圓圓的長方形石板（邊緣磨一點），底下兩塊石板腳
+      const r = 0.04;
+      const [hw, hd] = [SLAB.len / 2, SLAB.depth / 2];
+      const top = new THREE.Shape();
+      top.moveTo(-hw + r, -hd);
+      top.lineTo(hw - r, -hd);
+      top.quadraticCurveTo(hw, -hd, hw, -hd + r);
+      top.lineTo(hw, hd - r);
+      top.quadraticCurveTo(hw, hd, hw - r, hd);
+      top.lineTo(-hw + r, hd);
+      top.quadraticCurveTo(-hw, hd, -hw, hd - r);
+      top.lineTo(-hw, -hd + r);
+      top.quadraticCurveTo(-hw, -hd, -hw + r, -hd);
+      const edge = 0.012;
+      const plate = new THREE.ExtrudeGeometry(top, { depth: SLAB.thick - 2 * edge, bevelEnabled: true, bevelThickness: edge, bevelSize: edge, bevelSegments: 2, curveSegments: 4 });
+      // 形狀畫在 x-y 平面、往 +z 拉長：轉成平放（y 朝上）
+      plate.rotateX(-Math.PI / 2);
+      put(plate, markMats.granite, 0, SLAB.seat - SLAB.thick + edge, 0);
+      const legH = SLAB.seat - SLAB.thick;
+      for (const s of [-1, 1]) put(new THREE.BoxGeometry(SLAB.legW, legH, SLAB.legDepth), markMats.granite, s * (hw - SLAB.legIn - SLAB.legW / 2), legH / 2, 0);
     } else if (kind === 'stele') {
       // 灰色的石碑：方形的底座、高高的碑身（照使用者給的照片，大小估的），刻字的那面朝 -z
       put(new THREE.BoxGeometry(0.95, 0.35, 0.75), markMats.granite, 0, 0.175, 0);
@@ -2025,7 +2051,7 @@ export function openPark3D(o: Park3DOptions): () => void {
     if (draft) {
       const p = en([draft.lat, draft.lng]);
       const d = Math.hypot(p[0] - pos[0], p[1] - pos[1]);
-      el.textContent = `${draft.id ? `改 #${draft.id} ` : '新的'}${KIND_NAME[draft.kind]}・離你 ${d.toFixed(1)} 公尺・${draft.lat.toFixed(7)}, ${draft.lng.toFixed(7)}${draft.kind === 'bench' || draft.kind === 'stele' ? `・面向 ${Math.round(draft.heading)}°` : ''}`;
+      el.textContent = `${draft.id ? `改 #${draft.id} ` : '新的'}${KIND_NAME[draft.kind]}・離你 ${d.toFixed(1)} 公尺・${draft.lat.toFixed(7)}, ${draft.lng.toFixed(7)}${draft.kind === 'bench' || draft.kind === 'slab' || draft.kind === 'stele' ? `・面向 ${Math.round(draft.heading)}°` : ''}`;
     } else el.textContent = `點地面放一個${KIND_NAME[kind]}，點已經標的可以改；已經標了 ${marks.length} 個`;
   };
   function panel(): void {

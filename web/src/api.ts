@@ -338,7 +338,7 @@ export const withdrawReport = (postId: string): Promise<Result<{ ok: true; remov
   deviceJson<{ ok: true; removed: number }>(`/api/reports/${encodeURIComponent(postId)}`, 'DELETE');
 
 /** 中山公園的標記（管理者在 3D 公園裡標的路燈、長椅等）：種類、經緯度、面向（度，0 是北、順時針，長椅坐的人面向哪）、備註 */
-export type ParkMarkKind = 'lamp' | 'bench' | 'bin' | 'stele' | 'other';
+export type ParkMarkKind = 'lamp' | 'bench' | 'slab' | 'bin' | 'stele' | 'other';
 export interface ParkMarkIn {
   kind: ParkMarkKind;
   lat: number;
