@@ -4142,8 +4142,9 @@ export class Radar {
         // 選到的那一則：外面一圈亮環（慢慢一明一暗），一眼看得出是哪一個
         if (it.selected) node.appendChild(el('circle', { class: 'sel-ring', r: 13 }));
         const body = el('g', { class: 'body' });
-        // 分得出主題的活動畫大一點的圓點、裡面畫小圖示（v1.672 使用者說全螢幕也顯示地圖的新圖示，v1.674 說雷達裡面也一樣）；範圍外的小點、據點、約略位置照舊
-        const glyph = !p.out && !it.flag && !it.spot && !it.approx ? topicGlyph(it.topic) : null;
+        // 分得出主題的活動畫大一點的圓點、裡面畫小圖示（v1.672 使用者說全螢幕也顯示地圖的新圖示，v1.674 說雷達裡面也一樣）；範圍外的小點、據點照舊。
+        // 約略位置也畫（v1.795 使用者說宜蘭的 M.Y.J.S 圖示沒畫出來），淡一點、虛線框
+        const glyph = !p.out && !it.flag && !it.spot ? topicGlyph(it.topic) : null;
         // 店家（光點的 kind 跟活動一樣，照小圖示是店家類型分）：照類型上色，範圍拉遠跟著縮小，太小只畫圓點
         // （v1.776 使用者說台派店家的圖縮小後要跟著縮小、多一點顏色）
         const tint = storeColor(glyph);

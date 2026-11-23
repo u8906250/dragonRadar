@@ -1619,7 +1619,8 @@ export function applyManualFixes(ex: ExtractedEvent, fixes: ManualFix[]): { poin
     ex.end_at = time.endAt !== null ? new Date(time.endAt * 1000).toISOString() : null;
   }
   const topic = fixes.find((f) => f.kind === 'topic' && f.topic && keys.includes(f.placeKey));
-  if (topic?.topic) ex.extra = { ...(ex.extra ?? {}), topic: topic.topic };
+  // 店家的類型存在 extra.type（v1.795 管理者改店家類型）
+  if (topic?.topic) ex.extra = { ...(ex.extra ?? {}), [ex.kind === 'store' ? 'type' : 'topic']: topic.topic };
   return {
     point: place && place.lat !== null && place.lng !== null ? { lat: place.lat, lng: place.lng, displayName: ex.place_text ?? '' } : null,
     placeFrom: place?.placeText && from && placeKeyOf(from) !== placeKeyOf(place.placeText) ? from : null,
@@ -1870,6 +1871,25 @@ export async function setTopic(env: Env, eventId: number, topic: string, now: nu
       `INSERT INTO manual_fixes (post_id, kind, place_key, at_key, topic, created_at) VALUES (?, 'topic', ?, 0, ?, ?)
        ON CONFLICT(post_id, kind, place_key, at_key) DO UPDATE SET topic = excluded.topic, created_at = excluded.created_at`,
     ).bind(ev.post_id, placeKeyOf(ev.place_text), topic, now),
+  ]);
+  return r.meta.changes ?? 0;
+}
+
+/**
+ * 管理者改店家類型（v1.795 使用者說樂樂桌遊休閒館改成桌遊、且未豆花改成咖啡甜點）：存在 extra.type（雷達、地圖的小圖示、類型按鈕照這個），
+ * 同一則貼文、同一個地點還沒下架的一起改；記在 manual_fixes（kind 'topic'，applyManualFixes 對店家改 type），重新判讀照樣用
+ */
+export async function setStoreType(env: Env, eventId: number, type: string, now: number): Promise<number> {
+  const ev = await env.DB.prepare('SELECT post_id, place_text, kind FROM events WHERE id = ?').bind(eventId).first<{ post_id: string; place_text: string; kind: string }>();
+  if (!ev || ev.kind !== 'store') return 0;
+  const [r] = await env.DB.batch([
+    env.DB.prepare(
+      "UPDATE events SET extra = json_set(COALESCE(NULLIF(extra, ''), '{}'), '$.type', ?), updated_at = ? WHERE post_id = ? AND place_text = ? AND status IN ('upcoming', 'active', 'unlocated')",
+    ).bind(type, now, ev.post_id, ev.place_text),
+    env.DB.prepare(
+      `INSERT INTO manual_fixes (post_id, kind, place_key, at_key, topic, created_at) VALUES (?, 'topic', ?, 0, ?, ?)
+       ON CONFLICT(post_id, kind, place_key, at_key) DO UPDATE SET topic = excluded.topic, created_at = excluded.created_at`,
+    ).bind(ev.post_id, placeKeyOf(ev.place_text), type, now),
   ]);
   return r.meta.changes ?? 0;
 }

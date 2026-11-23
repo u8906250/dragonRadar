@@ -2187,6 +2187,9 @@ path.map-seam-walkers { --p: 15px; }
 .radar .blip.approx.kind-activity .dot { stroke: var(--blip-activity); }
 .radar .blip.approx.spot .dot { stroke: var(--blip-spot); }
 .radar .blip.approx .core, .radar .blip.approx .ping { display: none; }
+/* 約略位置、分得出類型的（v1.795）：照樣塗底色、畫小圖示，跟稍後開始一樣淡一點、虛線框（店家的顏色寫在 style 上） */
+.radar .blip.approx .dot.topic { fill: var(--blip); fill-opacity: 0.6; stroke-width: 2; }
+.radar .blip.approx.kind-activity .dot.topic { fill: var(--blip-activity); }
 .approx-note { font-size: 13px; color: var(--muted); }
 
 /* 車掃路線：清單卡片、時間表、詳細資料裡的路線區塊 */

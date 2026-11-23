@@ -1,7 +1,7 @@
 import { getAccessToken, makeClient, saveAccessToken } from './client';
 import type { Env } from './env';
 import { fetchThreadsProfile } from './sources/profile';
-import { DEFAULT_DURATION_SEC, ENDED_WORDS, MAX_FUTURE_SEC, MIN_CONFIDENCE, SPOT_MAX_DAYS, extendOpenSpots, getEvent, getPost, ingestAll, ingestKeyword, clearEventSnapshots, listEvents, locatePlaceForEvent, moduleSpec, dropBacklogCopies, processBacklog, processPost, relocateApprox, relocateRouteStops, planPost, reprocessPost, setManualTitle, setTopic, storePost, updateLifecycle, type EventRow, type PostRow } from './events';
+import { DEFAULT_DURATION_SEC, ENDED_WORDS, MAX_FUTURE_SEC, MIN_CONFIDENCE, SPOT_MAX_DAYS, extendOpenSpots, getEvent, getPost, ingestAll, ingestKeyword, clearEventSnapshots, listEvents, locatePlaceForEvent, moduleSpec, dropBacklogCopies, processBacklog, processPost, relocateApprox, relocateRouteStops, planPost, reprocessPost, setManualTitle, setStoreType, setTopic, storePost, updateLifecycle, type EventRow, type PostRow } from './events';
 import { cleanTopic, normalizeExtraction, runModel } from './extract';
 import { geocode } from './geocode';
 import { ingestNews, NEWS_FEEDS } from './sources/news';
@@ -29,6 +29,8 @@ import { listLearnedTags, setLearnedTag } from './learnedTags';
 import { cleanTaipaiWord, listTaipaiWords, setTaipaiWord } from './taipaiWords';
 import { purgeGeoSearch, searchPlaces } from './geo-search';
 import { listUnmapped, setCountryDismissed } from './countries';
+import { isStoreType } from './taipai';
+import { BOOK_TYPES } from './books';
 import { CALLBACK_PATH, DELETE_PATH, DELETION_STATUS_PATH, UNINSTALL_PATH, deletionStatus, handleCallback, handleDelete, handleUninstall, startAuth } from './oauth';
 import { etagMatches, jsonResponse, nowSec, parseIsoToUnix } from './util';
 
@@ -636,6 +638,14 @@ async function handleAdmin(req: Request, env: Env, ctx: ExecutionContext, path: 
     const topic = cleanTopic((await readJson<{ topic?: unknown }>(req)).topic);
     if (!topic) throw new HttpError(400, 'topic must be 1-6 chars');
     return jsonResponse({ changed: await setTopic(env, Number(topicMatch[1]), topic, now) });
+  }
+
+  // 管理者改店家類型（台派雷達、書店雷達的 key，例如 cafe、game；同一則貼文、同一個地點的一起改）：{ type }
+  const storeTypeMatch = /^\/api\/admin\/events\/(\d+)\/store-type$/.exec(path);
+  if (req.method === 'POST' && storeTypeMatch) {
+    const type = (await readJson<{ type?: unknown }>(req)).type;
+    if (typeof type !== 'string' || !(isStoreType(type) || Object.prototype.hasOwnProperty.call(BOOK_TYPES, type))) throw new HttpError(400, 'type 要是店家類型的 key');
+    return jsonResponse({ changed: await setStoreType(env, Number(storeTypeMatch[1]), type, now) });
   }
 
   // 管理者改地點文字（同一則貼文、同一個地點還沒結束的一起改）：{ place_text }

@@ -524,7 +524,8 @@ export class MapView {
       const ids = g.map((x) => x.id);
       keep.add(it.id);
       // 服務處（位置精確的）畫房子圖示、車掃起終點畫 🚩🏁、分得出主題的活動畫圓點加小圖示，其他畫圓點；類型變了就換一個
-      const glyph = !it.approx && !it.flag && !it.office ? topicGlyph(it.topic) : null;
+      // 約略位置也畫小圖示（v1.795），淡一點、虛線框
+      const glyph = !it.flag && !it.office ? topicGlyph(it.topic) : null;
       const house = (!!it.office && !it.approx) || !!it.flag || !!glyph;
       let m = this.markers.get(it.id);
       if (m && ('setRadius' in m) === house) {
@@ -563,7 +564,7 @@ export class MapView {
         // 一般 22、進行中 26 px（v1.737 使用者說圖示有點大，跟雷達一樣）
         const size = Math.round((it.phase === 'active' || it.selected ? 26 : 22) * shrink);
         // 稍後開始的越久越淡，但底色、整個圖示都不淡到看不出類型（v1.673 使用者說模糊但要看得出類型）
-        const svg = topicMarkerSvg(shrink < STORE_GLYPH_MIN_SCALE ? null : glyph, tint ?? markerColor(it.kind, it.phase, it.spot), it.selected ? selectedStroke : stroke, it.selected ? 2.6 : 1.8, Math.max(0.55, fillOpacity), !!it.spot || it.phase === 'later', size);
+        const svg = topicMarkerSvg(shrink < STORE_GLYPH_MIN_SCALE ? null : glyph, tint ?? markerColor(it.kind, it.phase, it.spot), it.selected ? selectedStroke : stroke, it.selected ? 2.6 : 1.8, Math.max(0.55, fillOpacity), !!it.spot || it.phase === 'later' || !!it.approx, size);
         if (this.iconKeys.get(it.id) !== svg) {
           m.setIcon(L.divIcon({ className: 'map-topic', html: svg, iconSize: [size, size], iconAnchor: [size / 2, size / 2] }));
           this.iconKeys.set(it.id, svg);
