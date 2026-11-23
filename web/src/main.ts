@@ -7942,8 +7942,13 @@ const byTagUse = (a: string, b: string): number => (tagUse.get(b) ?? 0) - (tagUs
  * 活動是哪一類（topic-icons.ts：發放、造勢、講座…），雷達、地圖的小圖示和類型按鈕都照這個：活動照 AI 判讀的主題，發放的算「發放」
  */
 function topicFor(ev: EventOut): string | null {
+  if (ev.kind === 'activity') {
+    // 主題分不出類型（「快閃」、沒寫）就看標題（v1.788 使用者說「通化市場快閃發放小物」改成發放）
+    const t = topicOf(ev);
+    return topicGlyph(t) || !topicGlyph(ev.title) ? t : ev.title;
+  }
   // 店家照店家類型（STORE_TYPES 的 key）
-  return ev.kind === 'activity' ? topicOf(ev) : ev.kind === 'giveaway' ? '發放' : ev.kind === 'store' ? (storeOf(ev).type ?? 'other') : null;
+  return ev.kind === 'giveaway' ? '發放' : ev.kind === 'store' ? (storeOf(ev).type ?? 'other') : null;
 }
 function typeOf(ev: EventOut): string | null {
   return topicGlyph(topicFor(ev));
