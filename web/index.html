@@ -20,7 +20,7 @@
         <div class="brand">
           <span class="brand-dot"></span>
           <span class="brand-wave" aria-hidden="true">≋</span>
-          <button type="button" id="brand-btn" class="brand-btn" title="切換雷達"><span class="brand-text" id="brand-text">活動雷達</span></button><button type="button" id="module-btn" class="module-btn" aria-label="切換雷達" title="切換雷達（洋流、狗狗陪伴…）"><span class="module-caret" aria-hidden="true">▾</span></button>
+          <button type="button" id="brand-btn" class="brand-btn" title="切換雷達" aria-expanded="false" aria-controls="module-sheet"><span class="brand-text" id="brand-text">活動雷達</span></button><button type="button" id="module-btn" class="module-btn" aria-label="切換雷達" aria-expanded="false" aria-controls="module-sheet" title="切換雷達（洋流、狗狗陪伴…）"><span class="module-caret" aria-hidden="true">▾</span></button>
           <span class="brand-wave" aria-hidden="true">≋</span>
           <span id="mode-badge" class="badge" hidden></span>
         </div>
@@ -267,12 +267,12 @@
           <div id="letters-mine"></div>
         </div>
       </section>
-      <div id="module-sheet" class="sheet" hidden>
-        <div class="sheet-head">
-          <strong id="module-title">切換雷達</strong>
-          <button type="button" class="chip" data-act="close" aria-label="關閉">關閉</button>
+      <!-- 切換雷達：從標題下面展開的下拉選單（v1.786 使用者說直接從按的地方彈出來），位置照標題算（main.ts 的 placeModuleMenu） -->
+      <div id="module-sheet" class="module-menu" role="dialog" aria-label="切換雷達" hidden>
+        <div id="module-head" class="module-head" hidden>
+          <strong id="module-title">這則要回報到哪個雷達？</strong>
+          <p class="muted" id="module-note">選一個雷達，會切過去、用那個雷達的方式判讀這則貼文。</p>
         </div>
-        <p class="muted sheet-note" id="module-note">同一個雷達、地圖、清單、回報，換不同主題的資料。</p>
         <ul id="module-list" class="theme-list"></ul>
       </div>
       <div id="theme-sheet" class="sheet" hidden>

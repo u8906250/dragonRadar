@@ -7596,8 +7596,8 @@ async function loadModuleCounts(): Promise<boolean> {
 function renderModuleList(): void {
   moduleList.replaceChildren();
   const sharing = pendingShare !== null;
-  $('#module-title').textContent = sharing ? '這則要回報到哪個雷達？' : '切換雷達';
-  $('#module-note').textContent = sharing ? '選一個雷達，會切過去、用那個雷達的方式判讀這則貼文。' : '同一個雷達、地圖、清單、回報，換不同主題的資料。';
+  // 分享進來選雷達才寫標題、說明（平常只列雷達）
+  $('#module-head').hidden = !sharing;
   for (const m of MODULES) {
     // 分享進來選雷達：回報暫停的雷達不列
     if (sharing && reportModules && !reportModules.includes(m.id)) continue;
@@ -7619,8 +7619,19 @@ function renderModuleList(): void {
   }
 }
 
+/** 選單放在標題正下方、對齊標題左邊（不超出畫面），高度最多到畫面底 */
+function placeModuleMenu(): void {
+  const r = $('.brand').getBoundingClientRect();
+  const w = Math.min(340, window.innerWidth - 24);
+  moduleSheet.style.width = `${w}px`;
+  moduleSheet.style.left = `${Math.max(12, Math.min(r.left - 6, window.innerWidth - w - 12))}px`;
+  moduleSheet.style.top = `${r.bottom + 8}px`;
+  moduleSheet.style.maxHeight = `${Math.max(160, window.innerHeight - r.bottom - 20)}px`;
+}
+
 function openModuleSheet(open: boolean): void {
   moduleSheet.hidden = !open;
+  for (const id of ['#brand-btn', '#module-btn']) $(id).setAttribute('aria-expanded', String(open));
   // 分享進來沒選雷達就關掉：這則不送
   if (!open) {
     pendingShare = null;
@@ -7631,10 +7642,16 @@ function openModuleSheet(open: boolean): void {
   reportSheet.hidden = true;
   bottleSheet.hidden = true;
   feedbackSheet.hidden = true;
+  placeModuleMenu();
   renderModuleList();
+  moduleList.querySelector<HTMLButtonElement>('.module-item.on')?.focus({ preventScroll: true });
   // 各雷達有幾筆：抓好再畫一次
   void loadModuleCounts().then((changed) => {
-    if (changed && !moduleSheet.hidden) renderModuleList();
+    if (!changed || moduleSheet.hidden) return;
+    // 重畫會換掉按鈕：本來停在選單裡的，停回現在這個雷達
+    const focused = moduleSheet.contains(document.activeElement);
+    renderModuleList();
+    if (focused) moduleList.querySelector<HTMLButtonElement>('.module-item.on')?.focus({ preventScroll: true });
   });
 }
 
@@ -8880,7 +8897,7 @@ function wireEdit(c: { postId: string; token: string }, items: EditItem[], actio
  * 點的是按鈕、連結、欄位、雷達光點、地圖標記、清單的一列（會自己打開別的）或卡片裡面不關；
  * 拖動（移動雷達、地圖）不算點。回報、漂流瓶有打字的內容，不跟著關
  */
-const KEEP_OPEN = 'button, a, input, select, textarea, label, .sheet, .blip, .landmark, .bottle, .space-hit, .leaflet-marker-icon, .leaflet-interactive, .leaflet-popup, .leaflet-control, #event-list li';
+const KEEP_OPEN = 'button, a, input, select, textarea, label, .sheet, .module-menu, .blip, .landmark, .bottle, .space-hit, .leaflet-marker-icon, .leaflet-interactive, .leaflet-popup, .leaflet-control, #event-list li';
 function wireTapOutside(): void {
   let down: { x: number; y: number } | null = null;
   document.addEventListener('pointerdown', (e) => (down = { x: e.clientX, y: e.clientY }), true);
@@ -8893,7 +8910,7 @@ function wireTapOutside(): void {
       const t = e.target instanceof Element ? e.target : null;
       if (moved || !t || t.closest(KEEP_OPEN)) return;
       // 詳細資料跟按「關閉」一樣：收起來、取消選取（雷達、地圖、清單上不再標著）
-      for (const sheet of [detailEl, themeSheet, moduleSheet, kwSheet]) {
+      for (const sheet of [detailEl, themeSheet, kwSheet]) {
         if (!sheet.hidden) sheet.querySelector<HTMLButtonElement>('[data-act="close"]')?.click();
       }
       // 車掃出發前按「在地圖上看路線」畫出來的路線：點其他地方收起，回到只顯示起點
@@ -9707,7 +9724,21 @@ function wireControls(): void {
   // 點標題、旁邊的箭頭都是打開切換雷達的選單（v1.779 使用者說點標題原本是重新整理，改成直接出現下拉選單；目前的雷達有外框、不打勾）
   $('#brand-btn').addEventListener('click', () => openModuleSheet(moduleSheet.hidden));
   $('#module-btn').addEventListener('click', () => openModuleSheet(moduleSheet.hidden));
-  moduleSheet.querySelector('[data-act="close"]')?.addEventListener('click', () => openModuleSheet(false));
+  // 點選單外面（標題、箭頭自己會開關）、按 Esc 就收起來；換方向、改視窗大小跟著標題移
+  document.addEventListener(
+    'pointerdown',
+    (e) => {
+      const t = e.target instanceof Element ? e.target : null;
+      if (!moduleSheet.hidden && t && !t.closest('#module-sheet, #brand-btn, #module-btn')) openModuleSheet(false);
+    },
+    true,
+  );
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && !moduleSheet.hidden) openModuleSheet(false);
+  });
+  window.addEventListener('resize', () => {
+    if (!moduleSheet.hidden) placeModuleMenu();
+  });
   // 搜尋：打字就篩（停一下再篩，免得每個字都重畫），清除鈕、Enter 收起鍵盤
   let searchTimer = 0;
   searchInput.addEventListener('input', () => {
