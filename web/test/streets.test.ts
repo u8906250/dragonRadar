@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { decodeStreets, decodeTile, onTaiwan, ringArea, STREET_TIERS, streetTiles, tileOf, type StreetLine } from '../src/streets';
+import { decodeStreets, decodeTile, laneLabel, laneNames, onDrawnLines, onTaiwan, ringArea, STREET_TIERS, streetTiles, tileOf, type RoadName, type StreetLine } from '../src/streets';
 
 /** 組一張只有 transportation 圖層的小圖磚（protobuf） */
 function varint(n: number): number[] {
@@ -223,6 +223,43 @@ describe('decodeTile names', () => {
     const out = decodeTile(buf, 0, 0, 0, STREET_TIERS[0].classes, false);
     expect(out.roads).toEqual([]);
     expect(out.stations).toEqual([]);
+  });
+});
+
+describe('巷弄的名字（v1.782）', () => {
+  const road = (name: string, cls: string): RoadName => ({ name, cls, pts: new Float64Array(4) });
+  it('marks 巷 and 弄, keeps streets, drops driveways, ramps and parking exits', () => {
+    const out = laneNames([
+      road('大安路一段224巷', 'service'),
+      road('忠孝東路三段248巷18弄', 'path'),
+      road('四維路66巷', 'minor'),
+      road('泰順街', 'minor'),
+      road('仁愛路四段', 'secondary'),
+      road('兒童醫院車道', 'service'),
+      road('新生南路自行車道(東側)', 'path'),
+      road('竹林路119巷25弄 (雙號)', 'service'),
+      road('八德路入口匝道', 'trunk'),
+      road('停車場出口', 'minor'),
+    ]);
+    expect(out.map((r) => [r.name, r.cls])).toEqual([
+      ['大安路一段224巷', 'xiang'],
+      ['忠孝東路三段248巷18弄', 'nong'],
+      ['四維路66巷', 'xiang'],
+      ['泰順街', 'minor'],
+      ['仁愛路四段', 'secondary'],
+    ]);
+  });
+  it('keeps lane names only on lanes the radar draws', () => {
+    const at = (lat: number, lng: number, name: string, cls: string): RoadName => ({ name, cls, pts: Float64Array.from([lat, lng, lat, lng + 0.001]) });
+    const drawn: StreetLine[] = [{ cls: 'lane', pts: Float64Array.from([25.04, 121.5, 25.04, 121.501]), box: [25.04, 121.5, 25.04, 121.501] }];
+    const out = onDrawnLines([at(25.04, 121.5, '某路1巷', 'xiang'), at(25.041, 121.5, '某路3巷', 'xiang'), at(25.05, 121.5, '某街', 'minor')], drawn);
+    // 3巷離畫的線約 110 m：不寫；大街不管
+    expect(out.map((r) => r.name)).toEqual(['某路1巷', '某街']);
+  });
+  it('writes just the number of the lane', () => {
+    expect(laneLabel('大安路一段224巷')).toBe('224巷');
+    expect(laneLabel('忠孝東路三段248巷18弄')).toBe('18弄');
+    expect(laneLabel('泰順街')).toBe('泰順街');
   });
 });
 

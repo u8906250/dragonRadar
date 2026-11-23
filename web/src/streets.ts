@@ -153,6 +153,8 @@ const TILEJSON = 'https://tiles.openfreemap.org/planet';
 /** 最多記住幾張圖磚（拖來拖去不要一直重抓） */
 const MAX_TILES = 64;
 
+const utf8 = new TextDecoder();
+
 /** protobuf 讀取：只需要 varint 和長度前綴 */
 export class Pbf {
   pos = 0;
@@ -184,7 +186,7 @@ export class Pbf {
   }
   string(): string {
     const r = this.sub();
-    return new TextDecoder().decode(this.buf.subarray(r.pos, r.end));
+    return utf8.decode(this.buf.subarray(r.pos, r.end));
   }
   /** 打包的 varint 陣列 */
   packed(): number[] {
@@ -367,6 +369,10 @@ export function decodeTile(
   const waterOut: GreenArea[] = [];
   const waterwaysOut: WaterLine[] = [];
   const nameClasses = new Set(names.roads ?? []);
+  const anyClass = Object.keys(classes).length > 0;
+  /** 要讀的圖層：其他的（建築、門牌、店家…，z14 很大）連 keys、values 都不讀 */
+  const wanted = (n: string): boolean =>
+    n === 'transportation' ? anyClass : n === 'transportation_name' ? nameClasses.size > 0 : n === 'water' ? coast || !!names.green : n === 'waterway' || n === 'landcover' ? !!names.green : n === 'poi' && !!names.stations;
   // 圖層照字母排（landcover、poi、transportation、transportation_name、water、waterway）：要名稱、綠地（河、湖）、海岸線就讀完整張
   const whole = coast || nameClasses.size > 0 || !!names.stations || !!names.green;
   let linesOut: StreetLine[] = [];
@@ -385,8 +391,10 @@ export function decodeTile(
     while (layer.more()) {
       const k = layer.varint();
       const field = k >> 3;
-      if (field === 1) name = layer.string();
-      else if (field === 2) features.push(layer.sub());
+      if (field === 1) {
+        name = layer.string();
+        if (!wanted(name)) break;
+      } else if (field === 2) features.push(layer.sub());
       else if (field === 3) keys.push(layer.string());
       else if (field === 4) {
         // Value：字串（field 1）；整數（field 5、6，例如步道的 indoor=1）也記成字串，其他的用不到
@@ -482,7 +490,8 @@ export function decodeTile(
       }
       continue;
     }
-    if (name !== 'transportation') continue;
+    // 只要路名的（巷弄的 z14 圖磚）不讀路線
+    if (name !== 'transportation' || !anyClass) continue;
     const out: StreetLine[] = [];
     for (const f of features) {
       let tags: number[] = [];
@@ -738,4 +747,140 @@ export function streetTiles(
     }
   }
   return { lines: out, coast: coastOut, roads: roadsOut, stations: stationsOut, green: greenOut, pending, tiles: tileList };
+}
+
+/**
+ * 巷弄的名字（v1.782 使用者說想看到巷弄）：z13 的圖磚沒有「大安路一段224巷」這種名字（大街也少了不少），全螢幕拉近到 NAME_KM 內
+ * 另外抓 z14 的圖磚，只留路名（市區一張壓縮後 100～500 KB，只抓畫面碰到的）。這時路名都用 z14 的
+ */
+export const NAME_KM = 0.5;
+const NAME_ZOOM = 14;
+const NAME_CLASSES = ['motorway', 'trunk', 'primary', 'secondary', 'tertiary', 'minor', 'service', 'path', 'track'];
+/** 最多記住幾張（只有路名，不大） */
+const MAX_NAME_TILES = 16;
+const nameTiles = new Map<string, RoadName[] | 'loading'>();
+/** 巷、弄：號碼加「巷」「弄」結尾（「忠孝東路三段248巷18弄」） */
+const LANE_NAME = /\d+[巷弄]$/;
+
+/**
+ * z14 的路名整理成雷達寫的：巷、弄的 cls 改成 'xiang'、'nong'；服務道路、步道只留巷弄（車道、停車場通道、地下道、自行車道不寫），
+ * 匝道、停車場出入口不寫
+ */
+export function laneNames(roads: RoadName[]): RoadName[] {
+  const out: RoadName[] = [];
+  for (const r of roads) {
+    if (/(匝道|入口|出口|待確認)$/.test(r.name)) continue;
+    const lane = LANE_NAME.test(r.name);
+    if (!lane && (r.cls === 'service' || r.cls === 'path' || r.cls === 'track')) continue;
+    out.push(lane ? { ...r, cls: r.name.endsWith('弄') ? 'nong' : 'xiang' } : r);
+  }
+  return out;
+}
+
+/** 巷弄寫短的：「大安路一段224巷」寫「224巷」、「…248巷18弄」寫「18弄」（旁邊的大路寫著全名；巷子很短，全名寫不下） */
+export const laneLabel = (name: string): string => LANE_NAME.exec(name)?.[0] ?? name;
+
+/** (lat, lng) 方圓 km 的 z14 路名（一張一組）：抓到的先給，還沒抓的去抓，抓到了呼叫 onLoad */
+export function nameTilesAround(lat: number, lng: number, km: number, onLoad: () => void): { tiles: RoadName[][]; keys: string[]; pending: number } {
+  const dLat = km / 110.574;
+  const dLng = km / (111.32 * Math.cos((lat * Math.PI) / 180));
+  const a = tileOf(lat + dLat, lng - dLng, NAME_ZOOM);
+  const b = tileOf(lat - dLat, lng + dLng, NAME_ZOOM);
+  const out: RoadName[][] = [];
+  const keys: string[] = [];
+  let pending = 0;
+  for (let x = a.x; x <= b.x; x++) {
+    for (let y = a.y; y <= b.y; y++) {
+      const key = `${NAME_ZOOM}/${x}/${y}`;
+      const got = nameTiles.get(key);
+      if (got === 'loading') {
+        pending++;
+        continue;
+      }
+      if (got) {
+        nameTiles.delete(key);
+        nameTiles.set(key, got);
+        out.push(got);
+        keys.push(key);
+        continue;
+      }
+      nameTiles.set(key, 'loading');
+      pending++;
+      void tileTemplate()
+        .then((t) => (t ? fetch(t.replace('{z}', String(NAME_ZOOM)).replace('{x}', String(x)).replace('{y}', String(y))) : null))
+        .then((r) => (r?.ok ? r.arrayBuffer() : null))
+        .then((ab) => {
+          if (!ab) throw new Error('no tile');
+          nameTiles.set(key, laneNames(decodeTile(new Uint8Array(ab), x, y, NAME_ZOOM, {}, false, { roads: NAME_CLASSES }).roads));
+          while (nameTiles.size > MAX_NAME_TILES) nameTiles.delete(nameTiles.keys().next().value as string);
+          onLoad();
+        })
+        .catch(() => nameTiles.delete(key));
+    }
+  }
+  return { tiles: out, keys, pending };
+}
+
+/**
+ * 巷弄的名字只寫在雷達畫出來的巷子上：z14 有名字的巷子約 4% 是 z13 沒畫的（標成一般服務道路、不是 alley），
+ * 每一段中間那一點 12 m 內有畫的線（lines，z13 那張圖磚的）才留；大街都留
+ */
+export function onDrawnLines(names: RoadName[], lines: StreetLine[]): RoadName[] {
+  if (!names.some((r) => r.cls === 'xiang' || r.cls === 'nong')) return names;
+  const g = drawnGrid(lines);
+  const drawn = (lat: number, lng: number): boolean => {
+    const px = (lng - g.lng0) * g.kx;
+    const py = (lat - g.lat0) * 110.574;
+    for (const n of g.grid.get(cellKey(Math.floor(px / DRAWN_CELL), Math.floor(py / DRAWN_CELL))) ?? []) {
+      const [ax, ay, bx, by] = [g.seg[4 * n], g.seg[4 * n + 1], g.seg[4 * n + 2], g.seg[4 * n + 3]];
+      const [ex, ey] = [bx - ax, by - ay];
+      const l2 = ex * ex + ey * ey;
+      const t = l2 > 0 ? Math.max(0, Math.min(1, ((px - ax) * ex + (py - ay) * ey) / l2)) : 0;
+      if (Math.hypot(px - ax - t * ex, py - ay - t * ey) < DRAWN_KM) return true;
+    }
+    return false;
+  };
+  return names.filter((r) => {
+    if (r.cls !== 'xiang' && r.cls !== 'nong') return true;
+    // 中間那一點：線段中間（只有兩點的直路，點在頭尾）
+    const m = Math.floor(r.pts.length / 4) * 2;
+    const [lat, lng] = r.pts.length === 4 ? [(r.pts[0] + r.pts[2]) / 2, (r.pts[1] + r.pts[3]) / 2] : [r.pts[m], r.pts[m + 1]];
+    return drawn(lat, lng);
+  });
+}
+
+/** 離畫的線多近算在線上（公里）、格子多大 */
+const DRAWN_KM = 0.012;
+const DRAWN_CELL = 0.05;
+const cellKey = (i: number, j: number): number => (i + 32768) * 65536 + (j + 32768);
+/** 一張 z13 圖磚畫的線分到格子裡（下面四張 z14 共用，記住） */
+const drawnGrids = new WeakMap<StreetLine[], { lat0: number; lng0: number; kx: number; seg: Float64Array; grid: Map<number, number[]> }>();
+function drawnGrid(lines: StreetLine[]): { lat0: number; lng0: number; kx: number; seg: Float64Array; grid: Map<number, number[]> } {
+  const hit = drawnGrids.get(lines);
+  if (hit) return hit;
+  const lat0 = lines[0]?.pts[0] ?? 0;
+  const lng0 = lines[0]?.pts[1] ?? 0;
+  const kx = 111.32 * Math.cos((lat0 * Math.PI) / 180);
+  const seg: number[] = [];
+  const grid = new Map<number, number[]>();
+  for (const l of lines) {
+    for (let q = 0; q + 3 < l.pts.length; q += 2) {
+      const ax = (l.pts[q + 1] - lng0) * kx;
+      const ay = (l.pts[q] - lat0) * 110.574;
+      const bx = (l.pts[q + 3] - lng0) * kx;
+      const by = (l.pts[q + 2] - lat0) * 110.574;
+      const n = seg.length / 4;
+      seg.push(ax, ay, bx, by);
+      for (let i = Math.floor((Math.min(ax, bx) - DRAWN_KM) / DRAWN_CELL); i <= Math.floor((Math.max(ax, bx) + DRAWN_KM) / DRAWN_CELL); i++) {
+        for (let j = Math.floor((Math.min(ay, by) - DRAWN_KM) / DRAWN_CELL); j <= Math.floor((Math.max(ay, by) + DRAWN_KM) / DRAWN_CELL); j++) {
+          const list = grid.get(cellKey(i, j));
+          if (list) list.push(n);
+          else grid.set(cellKey(i, j), [n]);
+        }
+      }
+    }
+  }
+  const out = { lat0, lng0, kx, seg: Float64Array.from(seg), grid };
+  drawnGrids.set(lines, out);
+  return out;
 }

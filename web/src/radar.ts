@@ -161,7 +161,8 @@ export interface RadarLabel {
   x: number;
   y: number;
   text: string;
-  kind: 'county' | 'town' | 'road' | 'station' | 'poi';
+  /** lane：巷弄（v1.782，寫短的、字小一點） */
+  kind: 'county' | 'town' | 'road' | 'lane' | 'station' | 'poi';
   /** 認同一個名稱用的（同名不同地方的地標要分開）；沒有就用種類和名稱 */
   key?: string;
   /** 重要的程度（大的先排，可以擠掉已經寫出來、比較不重要的）；沒有算 0 */
@@ -171,8 +172,28 @@ export interface RadarLabel {
   /** 路名那一點是 path 的第幾個點 */
   pathAt?: number;
 }
+/** 名稱沿著路寫的一格一格：連在一起的數字算一格（「224巷」是「224」「巷」），直的路上數字也橫著擠在那一格（像直書的縱中橫，v1.782 巷弄） */
+const labelUnits = (text: string): string[] => text.match(/[0-9]+|./gsu) ?? [];
+/** 半形數字的寬度（字的大小的幾倍） */
+const DIGIT_EM = 0.58;
+/** 字距：一個字寬多一點 */
+const LABEL_STEP_EM = 1.12;
+/** 每一格沿著路的長度（字的大小的幾倍）：橫的路數字照數字寬，直的路一格一個字高 */
+const unitEms = (units: string[], flat: boolean): number[] => units.map((u) => (flat && /^[0-9]/.test(u) ? u.length * DIGIT_EM : 1));
+/** 每一格的中心離第一格的距離（字的大小的幾倍） */
+function unitOffsets(lens: number[]): number[] {
+  const out = [0];
+  for (let j = 1; j < lens.length; j++) out.push(out[j - 1] + lens[j - 1] / 2 + (LABEL_STEP_EM - 1) + lens[j] / 2);
+  return out;
+}
+/** 沿著路寫，頭尾兩格中心的距離（字的大小的幾倍；橫的、直的取長的）：路名要找多長的一段路用 */
+export function labelSpanEm(text: string): number {
+  const units = labelUnits(text);
+  if (units.length < 2) return 0;
+  return Math.max(...[true, false].map((flat) => unitOffsets(unitEms(units, flat)).pop()!));
+}
 /** 字的大小（螢幕像素：雷達多大字都一樣大，電腦全螢幕不會變成大字） */
-const PLACE_LABEL_PX: Record<RadarLabel['kind'], number> = { county: 13, town: 12, road: 10.5, station: 11, poi: 11 };
+const PLACE_LABEL_PX: Record<RadarLabel['kind'], number> = { county: 13, town: 12, road: 10.5, lane: 9.5, station: 11, poi: 11 };
 /**
  * 一個畫面最多幾個（只有全螢幕鋪滿時寫，v1.692）：照看得到的面積，每 12000 平方像素一個，手機約 18 個（跟以前一樣）、電腦最多 30 個。
  * v1.713 像 Google 地圖：主要靠名稱之間留空（PLACE_LABEL_GAP）、已經寫出來的多算重要程度（PLACE_LABEL_KEEP），
@@ -2639,7 +2660,8 @@ export class Radar {
     };
     const alongRoad = (lb: RadarLabel, fs: number): Array<[number, number]> | null => {
       const path = lb.path;
-      const n = [...lb.text].length;
+      const units = labelUnits(lb.text);
+      const n = units.length;
       if (!path || path.length < 4 || n < 2) return null;
       const P: number[] = [];
       for (let q = 0; q < path.length; q += 2) {
@@ -2650,27 +2672,45 @@ export class Radar {
       const L = [0];
       for (let q = 2; q < P.length; q += 2) L.push(L[L.length - 1] + Math.hypot(P[q] - P[q - 2], P[q + 1] - P[q - 1]));
       const total = L[L.length - 1];
-      const sp = fs * 1.12;
-      const span = (n - 1) * sp;
-      if (total < span + fs * 0.5) return null;
       let i0 = lb.pathAt ?? 0;
       if (lb.pathAt === undefined) {
         const [ax, ay] = at(lb, [0, 0]);
         for (let q = 0; q < P.length; q += 2) if (Math.hypot(P[q] - ax, P[q + 1] - ay) < Math.hypot(P[2 * i0] - ax, P[2 * i0 + 1] - ay)) i0 = q / 2;
       }
+      // 路在那一點橫的還是直的（數字那一格多長）
+      const [qa, qb] = [Math.max(0, i0 - 1), Math.min(P.length / 2 - 1, i0 + 1)];
+      const flat = Math.abs(P[2 * qb] - P[2 * qa]) >= Math.abs(P[2 * qb + 1] - P[2 * qa + 1]);
+      const offs = unitOffsets(unitEms(units, flat)).map((o) => o * fs);
+      const span = offs[n - 1];
+      if (total < span + fs * 0.5) return null;
       const s0 = Math.max(fs * 0.25, Math.min(total - span - fs * 0.25, L[i0] - span / 2));
+      const pointAt = (sv: number): [number, number] => {
+        let seg = 0;
+        while (seg < L.length - 2 && L[seg + 1] < sv) seg++;
+        const t = (sv - L[seg]) / (L[seg + 1] - L[seg] || 1);
+        return [P[2 * seg] + t * (P[2 * seg + 2] - P[2 * seg]), P[2 * seg + 1] + t * (P[2 * seg + 3] - P[2 * seg + 1])];
+      };
+      // 橫的從左往右、直的從上往下讀：反了的話第一格從另一頭開始
+      const [a0, a1] = [pointAt(s0), pointAt(s0 + span)];
+      const back = Math.abs(a1[0] - a0[0]) >= Math.abs(a1[1] - a0[1]) ? a1[0] < a0[0] : a1[1] < a0[1];
+      const centers = offs.map((o) => pointAt(back ? s0 + span - o : s0 + o));
+      for (let j = 1; j < n; j++) if (Math.hypot(centers[j][0] - centers[j - 1][0], centers[j][1] - centers[j - 1][1]) < (offs[j] - offs[j - 1]) * 0.75) return null;
+      // 一格展開成一個字一個：數字擠在那一格（橫的路順著路，直的路橫著）
       const pos: Array<[number, number]> = [];
-      let seg = 0;
       for (let j = 0; j < n; j++) {
-        const sj = s0 + j * sp;
-        while (seg < L.length - 2 && L[seg + 1] < sj) seg++;
-        const len = L[seg + 1] - L[seg] || 1;
-        const t = (sj - L[seg]) / len;
-        pos.push([P[2 * seg] + t * (P[2 * seg + 2] - P[2 * seg]), P[2 * seg + 1] + t * (P[2 * seg + 3] - P[2 * seg + 1])]);
+        const chars = [...units[j]];
+        const [cx, cy] = centers[j];
+        let [ux, uy] = [1, 0];
+        if (flat && chars.length > 1) {
+          const [pa, pb] = [centers[Math.max(0, j - 1)], centers[Math.min(n - 1, j + 1)]];
+          const l = Math.hypot(pb[0] - pa[0], pb[1] - pa[1]) || 1;
+          [ux, uy] = pb[0] >= pa[0] ? [(pb[0] - pa[0]) / l, (pb[1] - pa[1]) / l] : [(pa[0] - pb[0]) / l, (pa[1] - pb[1]) / l];
+        }
+        chars.forEach((_, i) => {
+          const o = (i - (chars.length - 1) / 2) * DIGIT_EM * fs;
+          pos.push([cx + o * ux, cy + o * uy]);
+        });
       }
-      for (let j = 1; j < n; j++) if (Math.hypot(pos[j][0] - pos[j - 1][0], pos[j][1] - pos[j - 1][1]) < sp * 0.75) return null;
-      const [dx, dy] = [pos[n - 1][0] - pos[0][0], pos[n - 1][1] - pos[0][1]];
-      if (Math.abs(dx) >= Math.abs(dy) ? dx < 0 : dy < 0) pos.reverse();
       return pos;
     };
     // 位置直接寫在 x、y（沿著路的一個字一個）：試過 transform（樣式要重算）、一個字一個 <text>（元素太多），都比較慢

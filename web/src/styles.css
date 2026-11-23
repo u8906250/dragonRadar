@@ -1413,6 +1413,7 @@ path.map-seam-walkers { --p: 15px; }
 .radar .pl-county { font-weight: 700; letter-spacing: 1px; opacity: 0.5; }
 .radar .pl-town { font-weight: 600; opacity: 0.5; }
 .radar .pl-road { opacity: 0.55; }
+.radar .pl-lane { opacity: 0.5; }
 .radar .pl-station { font-weight: 600; opacity: 0.6; }
 /* 地標（大巨蛋、公園…，v1.698）：跟車站一樣粗、淡一點 */
 .radar .pl-poi { font-weight: 600; opacity: 0.55; }

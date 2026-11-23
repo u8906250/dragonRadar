@@ -13,7 +13,7 @@ import { shortAddress, splitPlace } from './place';
 import { crowdOf, MapView, pinPicker, type BaseMap, type MapRoute, type PinPicker } from './map';
 import { beep, ensureNotificationPermission, iosNeedsHomeScreen, notificationState, pushSubscription, pushSupported, registerServiceWorker, showBanner, systemNotify, unlockAudio, unsubscribePush } from './notify';
 import { checkWishNews, findCard, gotReward, myCards, onWishNews, openAlbum, openHelp, openItems, openWishes, overlay } from './cards';
-import { DEEP_FROM_KM, FLAT_PAN_KM, LY_KM, Radar, SPACE_FROM_KM, type RadarLabel, type RadarRoute, type RadarStreets, type RadarStreetTile, type SpaceView } from './radar';
+import { DEEP_FROM_KM, FLAT_PAN_KM, labelSpanEm, LY_KM, Radar, SPACE_FROM_KM, type RadarLabel, type RadarRoute, type RadarStreets, type RadarStreetTile, type SpaceView } from './radar';
 import { DEFAULT_THEME_ID, getTheme, THEMES, type Theme } from './themes';
 import type { WoofBottleMark } from './space';
 import { ALL_STORE_TYPES, topicChipSvg, topicGlyph, TOPIC_TYPES } from './topic-icons';
@@ -1329,6 +1329,20 @@ function updateStreets(): void {
   const get = reach * (panFrom ? 1.6 : 1.25);
   // 16 km 內多拿圖磚裡的海岸線（v1.640 使用者說「不管放大到什麼程度都要有邊界」；再大用 updateOutline 的海岸線）
   const { roads, stations, tiles, pending } = streetsMod.streetTiles(origin.lat, origin.lng, get, scaleKm, onStreetTile);
+  // 巷弄的名字（v1.782 使用者說想看到巷弄）：全螢幕拉近到 NAME_KM 內另外抓 z14 的路名，一張不小，只抓畫面碰到的
+  const near = greenOn && scaleKm <= streetsMod.NAME_KM ? streetsMod.nameTilesAround(origin.lat, origin.lng, reach, onStreetTile) : null;
+  // 巷弄的名字只寫在畫出來的巷子上（z13 的上一層圖磚到了才寫巷弄，有名字的巷子約 4% 沒畫）
+  const fine = near && near.tiles.length > 0 ? { tiles: [] as import('./streets').RoadName[][], key: '' } : null;
+  if (near && fine) {
+    const keys: string[] = [];
+    near.tiles.forEach((names, i) => {
+      const [, x, y] = near.keys[i].split('/').map(Number);
+      const up = tiles.find((t) => t.key === `13/${x >> 1}/${y >> 1}`);
+      fine.tiles.push(up ? drawnLanes(names, up.lines) : names.filter((r) => r.cls !== 'xiang' && r.cls !== 'nong'));
+      keys.push(`${near.keys[i]}${up ? '' : '-'}`);
+    });
+    fine.key = keys.join(',');
+  }
   // 換了一級圖磚（縮放跨過 2、16、33、65 km）：新的還沒到齊先照舊畫上一級的（照上一級的錨點平移，雷達縮放中整層放大縮小；v1.759），
   // 最多等 STREET_SWAP_MS；以前新的圖磚到之前整片空白一下
   const old = shownStreets;
@@ -1400,7 +1414,7 @@ function updateStreets(): void {
   if (labelKey !== labelsFor || !streetLines || streetLines.frame !== fr.id || (panFrom ? moved > reach / 3 : moved > 0)) {
     labelsFor = labelKey;
     labelsAt = { lat: origin.lat, lng: origin.lng };
-    labels = placeLabels(streetsMod, roads, stations, get, fr.kx, ky, mask, shift, tiles.map((t) => t.roads), `${zoom}|${tiles.map((t) => t.key).join(',')}`);
+    labels = placeLabels(streetsMod, roads, stations, get, fr.kx, ky, mask, shift, tiles.map((t) => t.roads), `${zoom}|${tiles.map((t) => t.key).join(',')}`, fine);
     noLabel = undefined;
     // 畫了樹冠、屋頂的中山公園上面不寫名稱（v1.698：大巨蛋的名字被擠到公園上）
     if (labels.length > 0 && trees && parkMod) {
@@ -1578,10 +1592,16 @@ function chainsOf(name: string, lines: Float64Array[], key: string): number[][] 
 
 /**
  * 一張圖磚裡的路口：會寫名字的（ok）不同名的兩條路交叉、或一條接到另一條上（8 m 內）的點，[緯度, 經度, …]。
- * 圖磚有多畫邊外一點，跨圖磚的路口也算得到；一張圖磚、一種範圍（band）算一次記住
+ * 圖磚有多畫邊外一點，跨圖磚的路口也算得到；一張圖磚、一種範圍（band）算一次記住。
+ * lv：每個路口的層（巷弄 v1.782：兩條路的層 levelOf 大的那個；大街 0、巷 1、弄 2），20 m 內算同一個路口的取小的
  */
-const tileJunctions = new WeakMap<object, Map<string, Float64Array>>();
-function junctionsIn(all: Array<{ name: string; cls: string; pts: Float64Array }>, ok: (cls: string) => boolean, band: string): Float64Array {
+const tileJunctions = new WeakMap<object, Map<string, { pts: Float64Array; lv: Uint8Array }>>();
+function junctionsIn(
+  all: Array<{ name: string; cls: string; pts: Float64Array }>,
+  ok: (cls: string) => boolean,
+  band: string,
+  levelOf: (cls: string) => number = () => 0,
+): { pts: Float64Array; lv: Uint8Array } {
   let byBand = tileJunctions.get(all);
   if (!byBand) tileJunctions.set(all, (byBand = new Map()));
   const hit = byBand.get(band);
@@ -1595,6 +1615,7 @@ function junctionsIn(all: Array<{ name: string; cls: string; pts: Float64Array }
   const ck = (i: number, j: number): number => (i + 32768) * 65536 + (j + 32768);
   const seg: number[] = [];
   const segName: number[] = [];
+  const segLv: number[] = [];
   const names = new Map<string, number>();
   const grid = new Map<number, number[]>();
   for (const r of roads) {
@@ -1608,6 +1629,7 @@ function junctionsIn(all: Array<{ name: string; cls: string; pts: Float64Array }
       const n = seg.length / 4;
       seg.push(ax, ay, bx, by);
       segName.push(id);
+      segLv.push(levelOf(r.cls));
       for (let i = Math.floor((Math.min(ax, bx) - 0.01) / cell); i <= Math.floor((Math.max(ax, bx) + 0.01) / cell); i++) {
         for (let j = Math.floor((Math.min(ay, by) - 0.01) / cell); j <= Math.floor((Math.max(ay, by) + 0.01) / cell); j++) {
           const k = ck(i, j);
@@ -1627,13 +1649,20 @@ function junctionsIn(all: Array<{ name: string; cls: string; pts: Float64Array }
     return Math.hypot(px - ax - t * ex, py - ay - t * ey);
   };
   const out: number[] = [];
-  const seen = new Set<number>();
+  const lvs: number[] = [];
+  const seen = new Map<number, number>();
+  let lvNow = 0;
   const push = (x: number, y: number): void => {
     // 20 m 內的算同一個路口
     const k = ck(Math.round(x / 0.02), Math.round(y / 0.02));
-    if (seen.has(k)) return;
-    seen.add(k);
+    const i = seen.get(k);
+    if (i !== undefined) {
+      lvs[i] = Math.min(lvs[i], lvNow);
+      return;
+    }
+    seen.set(k, lvs.length);
     out.push(y / ky + lat0, x / kx + lng0);
+    lvs.push(lvNow);
   };
   for (const list of grid.values()) {
     for (let a = 0; a < list.length; a++) {
@@ -1642,6 +1671,7 @@ function junctionsIn(all: Array<{ name: string; cls: string; pts: Float64Array }
       for (let b = a + 1; b < list.length; b++) {
         const n = list[b];
         if (segName[m] === segName[n]) continue;
+        lvNow = Math.max(segLv[m], segLv[n]);
         const [cx, cy, dx, dy] = [seg[4 * n], seg[4 * n + 1], seg[4 * n + 2], seg[4 * n + 3]];
         // 外框沒碰到（多 8 m）的不用算
         if (Math.max(ax, bx) + 0.008 < Math.min(cx, dx) || Math.max(cx, dx) + 0.008 < Math.min(ax, bx) || Math.max(ay, by) + 0.008 < Math.min(cy, dy) || Math.max(cy, dy) + 0.008 < Math.min(ay, by)) continue;
@@ -1662,22 +1692,29 @@ function junctionsIn(all: Array<{ name: string; cls: string; pts: Float64Array }
       }
     }
   }
-  const pts = Float64Array.from(out);
-  byBand.set(band, pts);
-  return pts;
+  const got = { pts: Float64Array.from(out), lv: Uint8Array.from(lvs) };
+  byBand.set(band, got);
+  return got;
 }
 
-/** 畫面附近幾張圖磚的路口合起來，分到格子裡（找附近的路口用）；圖磚沒換就不重算 */
-let junctionCache: { key: string; pts: Float64Array; cell: number; grid: Map<number, number[]>; lat0: number; lng0: number; kx: number } | null = null;
-function roadJunctions(tileRoads: Array<Array<{ name: string; cls: string; pts: Float64Array }>>, key: string, ok: (cls: string) => boolean, band: string): NonNullable<typeof junctionCache> {
-  if (junctionCache && junctionCache.key === key) return junctionCache;
-  const parts = tileRoads.map((r) => junctionsIn(r, ok, band));
-  const pts = new Float64Array(parts.reduce((a, p) => a + p.length, 0));
-  let o = 0;
-  for (const p of parts) {
-    pts.set(p, o);
-    o += p.length;
-  }
+type Junctions = { key: string; pts: Float64Array; cell: number; grid: Map<number, number[]>; lat0: number; lng0: number; kx: number };
+/** 畫面附近幾張圖磚的路口合起來，分到格子裡（找附近的路口用）；圖磚沒換就不重算（巷弄的路口分三層，記住幾組） */
+const junctionCache = new Map<string, Junctions>();
+function roadJunctions(
+  tileRoads: Array<Array<{ name: string; cls: string; pts: Float64Array }>>,
+  key: string,
+  ok: (cls: string) => boolean,
+  band: string,
+  /** 巷弄：只要層 maxLv 以內的路口（levelOf 照 junctionsIn） */
+  maxLv = 0,
+  levelOf?: (cls: string) => number,
+): Junctions {
+  const hit = junctionCache.get(key);
+  if (hit) return hit;
+  const parts = tileRoads.map((r) => junctionsIn(r, ok, band, levelOf));
+  const keep: number[] = [];
+  for (const p of parts) for (let i = 0; i < p.lv.length; i++) if (p.lv[i] <= maxLv) keep.push(p.pts[2 * i], p.pts[2 * i + 1]);
+  const pts = Float64Array.from(keep);
   const lat0 = origin.lat;
   const lng0 = origin.lng;
   const kx = 111.32 * Math.cos((lat0 * Math.PI) / 180);
@@ -1689,8 +1726,10 @@ function roadJunctions(tileRoads: Array<Array<{ name: string; cls: string; pts: 
     if (list) list.push(q);
     else grid.set(k, [q]);
   }
-  junctionCache = { key, pts, cell, grid, lat0, lng0, kx };
-  return junctionCache;
+  const out: Junctions = { key, pts, cell, grid, lat0, lng0, kx };
+  junctionCache.set(key, out);
+  while (junctionCache.size > 6) junctionCache.delete(junctionCache.keys().next().value as string);
+  return out;
 }
 
 /**
@@ -1834,6 +1873,33 @@ const LANDMARK_BAR_KM = 0.1;
 const BIG_PARK_HA = 10;
 const BIG_PARK_BAR_KM = 0.5;
 
+/** z14 的路名只留畫出來的巷弄（一組路名、一張 z13 圖磚算一次記住） */
+const drawnCache = new WeakMap<object, { lines: object; out: import('./streets').RoadName[] }>();
+function drawnLanes(names: import('./streets').RoadName[], lines: import('./streets').StreetLine[]): import('./streets').RoadName[] {
+  const hit = drawnCache.get(names);
+  if (hit && hit.lines === lines) return hit.out;
+  const out = streetsMod!.onDrawnLines(names, lines);
+  drawnCache.set(names, { lines, out });
+  return out;
+}
+
+/** 一段路的範圍 [南, 西, 北, 東]（記住） */
+const roadBoxes = new WeakMap<Float64Array, [number, number, number, number]>();
+function roadBox(pts: Float64Array): [number, number, number, number] {
+  let b = roadBoxes.get(pts);
+  if (!b) {
+    b = [Infinity, Infinity, -Infinity, -Infinity];
+    for (let i = 0; i < pts.length; i += 2) {
+      b[0] = Math.min(b[0], pts[i]);
+      b[2] = Math.max(b[2], pts[i]);
+      b[1] = Math.min(b[1], pts[i + 1]);
+      b[3] = Math.max(b[3], pts[i + 1]);
+    }
+    roadBoxes.set(pts, b);
+  }
+  return b;
+}
+
 /** 路名上次寫在哪一點（名稱 → 位置） */
 const roadLabelAt = new Map<string, LatLng>();
 function placeLabels(
@@ -1850,11 +1916,13 @@ function placeLabels(
   tileRoads: Array<Array<{ name: string; cls: string; pts: Float64Array }>> = [],
   /** 這些路是哪幾張圖磚的（接起來的路、合起來的路口照這個記住） */
   tilesKey = '',
+  /** 巷弄（v1.782，NAME_KM 內）：z14 圖磚的路名（一張一組），有的話路名都用這個 */
+  fine: { tiles: import('./streets').RoadName[][]; key: string } | null = null,
 ): RadarLabel[] {
   if (hqVoyageAt !== null || !radar.filling) return [];
   const km = scaleKm;
   const out: Array<RadarLabel & { pri: number; d: number }> = [];
-  const add = (lat: number, lng: number, text: string, kind: RadarLabel['kind'], pri: number, road: { pts: Float64Array; at: number } | null = null): void => {
+  const add = (lat: number, lng: number, text: string, kind: RadarLabel['kind'], pri: number, road: { pts: Float64Array; at: number } | null = null, id = text): void => {
     const line = road?.pts ?? null;
     const x = (lng - origin.lng) * kx;
     const y = (lat - origin.lat) * ky;
@@ -1862,7 +1930,7 @@ function placeLabels(
     // 範圍裡的才查在不在中國（地標幾千個，先查範圍省很多）
     if (mask?.contains(lat, lng)) return;
     // 路名的位置會換（roadLabelAt），只用名稱認；其他的同名不同地方要分開
-    const key = kind === 'road' ? `road|${text}` : `${kind}|${text}|${lat.toFixed(4)},${lng.toFixed(4)}`;
+    const key = kind === 'road' || kind === 'lane' ? `${kind}|${id}` : `${kind}|${text}|${lat.toFixed(4)},${lng.toFixed(4)}`;
     // 路名沿著路寫：那一段路的形狀（[緯度, 經度, …] 換成跟座標一樣離錨點的公里）
     let path: Float64Array | undefined;
     if (line) {
@@ -1883,18 +1951,31 @@ function placeLabels(
     if (km > 1 && km <= (map.nearKm ?? 33)) for (const [n, lat, lng] of map.near) add(lat, lng, n, 'town', 90);
   }
   if (km <= 5) {
-    const pri: Record<string, number> = { motorway: 70, trunk: 68, primary: 62, secondary: 58, tertiary: 50, minor: 40 };
+    const pri: Record<string, number> = { motorway: 70, trunk: 68, primary: 62, secondary: 58, tertiary: 50, minor: 40, xiang: 36, nong: 32 };
     const ok = (cls: string): boolean => (km > 2 ? cls === 'motorway' || cls === 'trunk' : km > 1 ? cls !== 'tertiary' && cls !== 'minor' : true);
     // 同名的路只寫一次。寫在兩個路口中間、夠直的一段（v1.723 使用者說路名在交界處擠在一起：以前寫在離正中間最近的那一點，
     // 大家都擠在中間的路口、字跨過路口轉彎）；畫面裡有合適的地方，離正中間近的先，上次寫的那一點還合適就照舊（路名才不會沿著路跳）；
     // 都沒有就不寫。那一段路一起給雷達，沿著路寫（v1.722）
     // 路口只算這個範圍會寫名字的路（小巷口沒有字，不會擠）
     const band = km > 2 ? 'a' : km > 1 ? 'b' : 'c';
-    const junctions = roadJunctions(tileRoads, `${tilesKey}|${band}`, ok, band);
+    // 巷弄（v1.782）：拉近到 NAME_KM 內路名都用 z14 的（z13 沒有巷弄，大街也少了不少）。路口分三層：
+    // 大街只算大街之間的（巷口不擋大街的名字）、巷算到巷（弄口不擋）、弄全部都算
+    const [nameRoads, nameTiles, nameKey] = fine ? [fine.tiles.flat(), fine.tiles, `z14|${fine.key}`] : [roads, tileRoads, tilesKey];
+    const level = (cls: string): number => (cls === 'nong' ? 2 : cls === 'xiang' ? 1 : 0);
+    const jns: Array<Junctions | undefined> = [];
+    const junctionsAt = (lv: number): Junctions => (jns[lv] ??= roadJunctions(nameTiles, `${nameKey}|${band}${lv}`, ok, fine ? `${band}f` : band, lv, level));
     const ppk = radar.pxPerKm();
+    // 畫面附近有一段的路才找位置（z14 一張就幾百條巷子）：整條路照舊一起（接起來的路照名稱記住）
+    const [dLat, dLng] = [(get * 1.5) / ky, (get * 1.5) / kx];
+    const [bs, bw, bn, be] = [origin.lat - dLat, origin.lng - dLng, origin.lat + dLat, origin.lng + dLng];
+    const nearby = new Set<string>();
+    for (const r of nameRoads) {
+      const b = roadBox(r.pts);
+      if (!(b[0] > bn || b[2] < bs || b[1] > be || b[3] < bw)) nearby.add(r.name);
+    }
     const byName = new Map<string, { lines: Float64Array[]; cls: string }>();
-    for (const r of roads) {
-      if (!ok(r.cls)) continue;
+    for (const r of nameRoads) {
+      if (!ok(r.cls) || !nearby.has(r.name)) continue;
       const e = byName.get(r.name);
       if (e) {
         e.lines.push(r.pts);
@@ -1902,17 +1983,20 @@ function placeLabels(
       } else byName.set(r.name, { lines: [r.pts], cls: r.cls });
     }
     for (const [name, { lines, cls }] of byName) {
+      // 巷弄寫短的（「224巷」「18弄」）、字小一點
+      const lane = cls === 'xiang' || cls === 'nong';
+      const text = lane ? sm.laneLabel(name) : name;
       // 字一半的長度（公里）：字距 1.12 個字、頭尾多半個字
-      const fsPx = 10.5;
-      const half = ppk > 0 ? (([...name].length - 1) * 1.12 * fsPx) / 2 / ppk + (fsPx * 0.7) / ppk : 0;
+      const fsPx = lane ? 9.5 : 10.5;
+      const half = ppk > 0 ? (labelSpanEm(text) * fsPx) / 2 / ppk + (fsPx * 0.7) / ppk : 0;
       // 跟路口至少隔一個多字（畫面上的距離，拉遠拉近看起來一樣）
-      const spot = roadSpot(chainsOf(name, lines, tilesKey), half, ppk > 0 ? (fsPx * 1.3) / ppk : 0.015, junctions, kx, ky, roadLabelAt.get(name) ?? null, get);
+      const spot = roadSpot(chainsOf(name, lines, nameKey), half, ppk > 0 ? (fsPx * 1.3) / ppk : 0.015, junctionsAt(level(cls)), kx, ky, roadLabelAt.get(name) ?? null, get);
       if (!spot) {
         roadLabelAt.delete(name);
         continue;
       }
       roadLabelAt.set(name, { lat: spot.lat, lng: spot.lng });
-      add(spot.lat, spot.lng, name, 'road', pri[cls] ?? 40, { pts: spot.pts, at: spot.at });
+      add(spot.lat, spot.lng, text, lane ? 'lane' : 'road', pri[cls] ?? 40, { pts: spot.pts, at: spot.at }, name);
     }
     if (roadLabelAt.size > 2000) roadLabelAt.clear();
   }
