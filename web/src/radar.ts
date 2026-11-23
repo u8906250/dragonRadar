@@ -161,7 +161,7 @@ export interface RadarLabel {
   x: number;
   y: number;
   text: string;
-  /** lane：巷弄（v1.782，寫短的、字小一點） */
+  /** lane：巷弄（v1.783，寫短的、字小一點） */
   kind: 'county' | 'town' | 'road' | 'lane' | 'station' | 'poi';
   /** 認同一個名稱用的（同名不同地方的地標要分開）；沒有就用種類和名稱 */
   key?: string;
@@ -172,7 +172,7 @@ export interface RadarLabel {
   /** 路名那一點是 path 的第幾個點 */
   pathAt?: number;
 }
-/** 名稱沿著路寫的一格一格：連在一起的數字算一格（「224巷」是「224」「巷」），直的路上數字也橫著擠在那一格（像直書的縱中橫，v1.782 巷弄） */
+/** 名稱沿著路寫的一格一格：連在一起的數字算一格（「224巷」是「224」「巷」），直的路上數字也橫著擠在那一格（像直書的縱中橫，v1.783 巷弄） */
 const labelUnits = (text: string): string[] => text.match(/[0-9]+|./gsu) ?? [];
 /** 半形數字的寬度（字的大小的幾倍） */
 const DIGIT_EM = 0.58;

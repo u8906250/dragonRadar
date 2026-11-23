@@ -1329,7 +1329,7 @@ function updateStreets(): void {
   const get = reach * (panFrom ? 1.6 : 1.25);
   // 16 km 內多拿圖磚裡的海岸線（v1.640 使用者說「不管放大到什麼程度都要有邊界」；再大用 updateOutline 的海岸線）
   const { roads, stations, tiles, pending } = streetsMod.streetTiles(origin.lat, origin.lng, get, scaleKm, onStreetTile);
-  // 巷弄的名字（v1.782 使用者說想看到巷弄）：全螢幕拉近到 NAME_KM 內另外抓 z14 的路名，一張不小，只抓畫面碰到的
+  // 巷弄的名字（v1.783 使用者說想看到巷弄）：全螢幕拉近到 NAME_KM 內另外抓 z14 的路名，一張不小，只抓畫面碰到的
   const near = greenOn && scaleKm <= streetsMod.NAME_KM ? streetsMod.nameTilesAround(origin.lat, origin.lng, reach, onStreetTile) : null;
   // 巷弄的名字只寫在畫出來的巷子上（z13 的上一層圖磚到了才寫巷弄，有名字的巷子約 4% 沒畫）
   const fine = near && near.tiles.length > 0 ? { tiles: [] as import('./streets').RoadName[][], key: '' } : null;
@@ -1593,7 +1593,7 @@ function chainsOf(name: string, lines: Float64Array[], key: string): number[][] 
 /**
  * 一張圖磚裡的路口：會寫名字的（ok）不同名的兩條路交叉、或一條接到另一條上（8 m 內）的點，[緯度, 經度, …]。
  * 圖磚有多畫邊外一點，跨圖磚的路口也算得到；一張圖磚、一種範圍（band）算一次記住。
- * lv：每個路口的層（巷弄 v1.782：兩條路的層 levelOf 大的那個；大街 0、巷 1、弄 2），20 m 內算同一個路口的取小的
+ * lv：每個路口的層（巷弄 v1.783：兩條路的層 levelOf 大的那個；大街 0、巷 1、弄 2），20 m 內算同一個路口的取小的
  */
 const tileJunctions = new WeakMap<object, Map<string, { pts: Float64Array; lv: Uint8Array }>>();
 function junctionsIn(
@@ -1916,7 +1916,7 @@ function placeLabels(
   tileRoads: Array<Array<{ name: string; cls: string; pts: Float64Array }>> = [],
   /** 這些路是哪幾張圖磚的（接起來的路、合起來的路口照這個記住） */
   tilesKey = '',
-  /** 巷弄（v1.782，NAME_KM 內）：z14 圖磚的路名（一張一組），有的話路名都用這個 */
+  /** 巷弄（v1.783，NAME_KM 內）：z14 圖磚的路名（一張一組），有的話路名都用這個 */
   fine: { tiles: import('./streets').RoadName[][]; key: string } | null = null,
 ): RadarLabel[] {
   if (hqVoyageAt !== null || !radar.filling) return [];
@@ -1958,7 +1958,7 @@ function placeLabels(
     // 都沒有就不寫。那一段路一起給雷達，沿著路寫（v1.722）
     // 路口只算這個範圍會寫名字的路（小巷口沒有字，不會擠）
     const band = km > 2 ? 'a' : km > 1 ? 'b' : 'c';
-    // 巷弄（v1.782）：拉近到 NAME_KM 內路名都用 z14 的（z13 沒有巷弄，大街也少了不少）。路口分三層：
+    // 巷弄（v1.783）：拉近到 NAME_KM 內路名都用 z14 的（z13 沒有巷弄，大街也少了不少）。路口分三層：
     // 大街只算大街之間的（巷口不擋大街的名字）、巷算到巷（弄口不擋）、弄全部都算
     const [nameRoads, nameTiles, nameKey] = fine ? [fine.tiles.flat(), fine.tiles, `z14|${fine.key}`] : [roads, tileRoads, tilesKey];
     const level = (cls: string): number => (cls === 'nong' ? 2 : cls === 'xiang' ? 1 : 0);
