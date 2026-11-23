@@ -417,6 +417,8 @@ export function openPark3D(o: Park3DOptions): () => void {
       <span class="p3d-title">3D 國館</span>
       <button type="button" class="chip p3d-mark-toggle" aria-pressed="false">標記</button>
     </div>
+    <!-- 指北針（v1.800 使用者說 3D 國館放指北針）：紅色那頭指北，跟著轉頭轉；點一下轉回面向北 -->
+    <button type="button" class="p3d-compass" title="指北針：點一下轉回面向北" aria-label="指北針，點一下面向北"><svg viewBox="-20 -20 40 40" aria-hidden="true"><g class="p3d-needle"><path class="needle-n" d="M0 -13 L5 0 L-5 0 Z"/><path class="needle-s" d="M0 13 L5 0 L-5 0 Z"/><text class="needle-letter" y="-14.5" text-anchor="middle">N</text></g></svg></button>
     <div class="p3d-hint"></div>
     <div class="p3d-cross" hidden></div>
     <div class="p3d-stick" hidden><div class="p3d-knob"></div></div>
@@ -2170,6 +2172,12 @@ export function openPark3D(o: Park3DOptions): () => void {
   let pitch = -0.05;
   const lastSpot = loadSpot();
   if (lastSpot && canStand(en(lastSpot.at))) [pos, yaw, pitch] = [en(lastSpot.at), lastSpot.yaw, lastSpot.pitch];
+  /** 指北針的指針（面向東時北在左邊：轉 -面向的角度）；畫過的角度（差不到半度不重設） */
+  const needle = root.querySelector<SVGGElement>('.p3d-needle');
+  let needleDeg = NaN;
+  /** 點指北針：從哪個方向、哪時候開始轉回面向北（自己拖曳、按方向鍵就停） */
+  let toNorth: { from: number; to: number; t0: number } | null = null;
+  const TO_NORTH_MS = 600;
   let saved = '';
   const remember = (): void => {
     const key = `${pos[0].toFixed(2)},${pos[1].toFixed(2)},${yaw.toFixed(2)},${pitch.toFixed(2)}`;
@@ -2193,6 +2201,11 @@ export function openPark3D(o: Park3DOptions): () => void {
     eyeFloor = Number.isFinite(eyeFloor) && Math.abs(floor - eyeFloor) > 0.005 ? eyeFloor + (floor - eyeFloor) * Math.min(1, dt * 9) : floor;
     camera.position.set(pos[0], eyeFloor + EYE, -pos[1]);
     camera.rotation.set(pitch, -yaw, 0);
+    const deg = (yaw * 180) / Math.PI;
+    if (needle && !(Math.abs(deg - needleDeg) < 0.5)) {
+      needleDeg = deg;
+      needle.setAttribute('transform', `rotate(${(-deg).toFixed(1)})`);
+    }
     // 現在站哪、面向哪（測試看得到）
     const [lat, lng] = ll(pos[0], pos[1]);
     root.dataset.at = `${lat.toFixed(7)},${lng.toFixed(7)},${(((((yaw * 180) / Math.PI) % 360) + 360) % 360).toFixed(1)}`;
@@ -2279,7 +2292,10 @@ export function openPark3D(o: Park3DOptions): () => void {
     // 方向鍵左右轉頭（按下去慢慢加速）
     const turn = (keys.has('arrowright') ? 1 : 0) - (keys.has('arrowleft') ? 1 : 0);
     turnHeld = turn ? turnHeld + dt : 0;
-    if (turn) yaw += turn * dt * TURN_KEY * Math.min(1, 0.25 + turnHeld / TURN_RAMP_S);
+    if (turn) {
+      toNorth = null;
+      yaw += turn * dt * TURN_KEY * Math.min(1, 0.25 + turnHeld / TURN_RAMP_S);
+    }
     if (stick.id >= 0) {
       f += -stick.y;
       s += stick.x;
@@ -2604,6 +2620,7 @@ export function openPark3D(o: Park3DOptions): () => void {
     const [dx, dy] = [e.clientX - drag.x, e.clientY - drag.y];
     if (!drag.moved && Math.hypot(dx, dy) < 6) return;
     drag.moved = true;
+    toNorth = null;
     yaw -= dx * TURN_DRAG;
     // 可以抬頭看到快正上方（太陽、月亮在頭頂附近也看得到）
     pitch = Math.max(-1.3, Math.min(1.45, pitch - dy * LOOK_DRAG));
@@ -2682,6 +2699,11 @@ export function openPark3D(o: Park3DOptions): () => void {
   window.addEventListener('pagehide', onHide);
 
   $('.p3d-exit').addEventListener('click', () => close());
+  // 指北針：轉回面向北（轉最近的那一邊）
+  $('.p3d-compass').addEventListener('click', () => {
+    const full = Math.PI * 2;
+    toNorth = { from: yaw, to: Math.round(yaw / full) * full, t0: performance.now() };
+  });
   // 沒有管理 token：只看得到標好的，不能標
   $<HTMLElement>('.p3d-mark-toggle').hidden = !o.token;
   $('.p3d-mark-toggle').addEventListener('click', () => {
@@ -2761,6 +2783,14 @@ export function openPark3D(o: Park3DOptions): () => void {
       dirty = true;
     }
     if (updateRocket(now)) dirty = true;
+    // 點了指北針：頭尾慢、轉到面向北（自己操作的，減少動態效果也照樣轉）
+    if (toNorth) {
+      const k = Math.min(1, (now - toNorth.t0) / TO_NORTH_MS);
+      const e = k < 0.5 ? 2 * k * k : 1 - (-2 * k + 2) ** 2 / 2;
+      yaw = toNorth.from + (toNorth.to - toNorth.from) * e;
+      if (k >= 1) toNorth = null;
+      dirty = true;
+    }
     if (move(dt)) {
       dirty = true;
       if (draft) status();
