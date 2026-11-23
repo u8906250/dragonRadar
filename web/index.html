@@ -26,6 +26,8 @@
         </div>
         <div class="controls">
           <!-- 全螢幕時：主題、通知、卡冊、道具、收藏、願望、帳號、說明收進「⋯」，電腦多一個「清單」收起右邊的清單 -->
+          <!-- 全螢幕雷達才有：搜尋地址、地名（v1.785） -->
+          <button type="button" id="find-btn" class="chip icon-chip" hidden title="搜尋地址、地名" aria-label="搜尋地址、地名" aria-expanded="false" aria-controls="find-box"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6"/><path d="M15 15l5 5"/></svg></button>
           <button type="button" id="list-btn" class="chip" aria-pressed="true" title="收起清單">清單</button>
           <button type="button" id="more-btn" class="chip icon-chip" aria-expanded="false" aria-controls="controls-more" title="主題、通知、卡冊、道具、收藏、願望、帳號、說明" aria-label="主題、通知、卡冊、道具、收藏、願望、帳號、說明"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="5" cy="12" r="1.6"/><circle cx="12" cy="12" r="1.6"/><circle cx="19" cy="12" r="1.6"/></svg></button>
           <div class="controls-more" id="controls-more">
@@ -86,8 +88,17 @@
         <div class="overlay overlay-tr">
           <button type="button" id="locate-btn" class="chip" title="回到我的位置（在汪星是回到發射口、在 Kepler-22b 是回到火箭降落的地方）">定位</button>
           <button type="button" id="compass-btn" class="chip" hidden title="雷達跟著手機方向轉">指北針</button>
-          <button type="button" id="bottle-btn" class="chip" title="漂流瓶：在牛皮紙上寫一段話丟在附近，或撿別人的" hidden>漂流瓶<span id="bottle-badge" class="chip-badge" hidden></span></button>
+          <!-- 漂流瓶：畫一個瓶子（v1.785 使用者說改成瓶子比較不占空間），右下角的數字是今天還能丟幾個 -->
+          <button type="button" id="bottle-btn" class="chip icon-chip" title="漂流瓶：在牛皮紙上寫一段話丟在附近，或撿別人的" aria-label="漂流瓶" hidden><svg viewBox="0 0 24 24" aria-hidden="true"><g transform="rotate(-25 12 12)"><rect class="cork" x="10" y="2" width="4" height="3" rx="0.8"/><path d="M10 5h4v2.6l2.8 3.4v9a2 2 0 0 1-2 2H9.2a2 2 0 0 1-2-2v-9L10 7.6z"/><path class="scroll" d="M10.4 13.2h3.2M10.4 16.4h3.2"/></g></svg><span id="bottle-badge" class="chip-badge" hidden></span></button>
           <button type="button" id="view-btn" class="chip primary">地圖</button>
+        </div>
+        <div id="find-box" class="find-box" hidden>
+          <form id="find-form" class="find-form" role="search" autocomplete="off">
+            <input id="find-input" type="search" enterkeyhint="search" maxlength="60" placeholder="地址、地名、路名" aria-label="搜尋地址、地名、路名（只查台灣）" />
+            <button type="button" id="find-clear" class="search-clear" aria-label="清除" hidden>✕</button>
+          </form>
+          <p id="find-status" class="find-status" role="status" hidden></p>
+          <ul id="find-results" class="find-results"></ul>
         </div>
       </main>
 

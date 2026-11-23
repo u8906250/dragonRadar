@@ -9,6 +9,7 @@ import type { SceneKind } from './hq-scenes';
 import { LANDMARKS } from './landmarks';
 import { getModule, JOB_RISK_TEXT, JOB_SAFETY_TIPS, MEETUP_SAFETY_TIPS, MODULES, OFFER_SAFETY_TIPS, SEEK_SAFETY_TIPS, type ModuleDef, type ModuleId } from './modules';
 import { X_MAX_WEIGHT, xLength } from './xcount';
+import { wireFind, type FoundPlace } from './find';
 import { shortAddress, splitPlace } from './place';
 import { crowdOf, MapView, pinPicker, type BaseMap, type MapRoute, type PinPicker } from './map';
 import { beep, ensureNotificationPermission, iosNeedsHomeScreen, notificationState, pushSubscription, pushSupported, registerServiceWorker, showBanner, systemNotify, unlockAudio, unsubscribePush } from './notify';
@@ -535,6 +536,16 @@ const kwTitle = $('#kw-title');
 const kwIntro = $('#kw-intro');
 const kwShareNote = $('#kw-share-note');
 const locateBtn = $<HTMLButtonElement>('#locate-btn');
+const findBtn = $<HTMLButtonElement>('#find-btn');
+/** 全螢幕搜尋地址搜到、點了的地點（插一根針）；按「定位」、清掉搜尋就拿掉 */
+let found: FoundPlace | null = null;
+/** 放大鏡：地球上的全螢幕雷達才有（地圖、汪星、搭火箭時沒有；不是全螢幕時 CSS 藏起來） */
+function syncFindBtn(): void {
+  const off = youOn !== 'earth' || tripTo !== null || view !== 'radar';
+  if (findBtn.hidden === off) return;
+  findBtn.hidden = off;
+  appEl.classList.toggle('find-on', !off);
+}
 const reportBtn = $<HTMLButtonElement>('#report-btn');
 const reportSheet = $('#report-sheet');
 const reportForm = $<HTMLFormElement>('#report-form');
@@ -3132,6 +3143,9 @@ function render(): void {
   // 全螢幕鋪滿時你的 GPS 位置（像 Google 地圖的藍點）：拖曳移開了也畫在 GPS 的地方
   const fix = origin.source === 'gps' ? { at: origin, acc: gpsAccuracy } : lastGps ? { at: lastGps, acc: lastGpsAccuracy } : null;
   radar.setYou(fix ? { bearing: bearingDeg(origin, fix.at), distanceKm: haversineKm(origin, fix.at), accuracyKm: fix.acc ? fix.acc / 1000 : null } : null);
+  // 搜尋到的地點（v1.785）
+  radar.setFound(found ? { id: `${found.lat},${found.lng}`, bearing: bearingDeg(origin, found), distanceKm: haversineKm(origin, found), label: found.name } : null);
+  syncFindBtn();
   radar.setLandmarks(
     (mod.current ? LANDMARKS : []).map((lm) => ({ id: lm.id, label: lm.name, bearing: bearingDeg(origin, lm), distanceKm: haversineKm(origin, lm), selected: lm.id === selectedLandmark })),
   );
@@ -7076,6 +7090,7 @@ function switchView(v: 'radar' | 'map'): void {
   if (v !== 'radar') lockDog(null);
   updateViewBtn();
   $('#stage').dataset.view = v;
+  syncFindBtn();
   viewBtn.textContent = v === 'radar' ? '地圖' : '雷達';
   $('#scale-chips').hidden = v !== 'radar';
   baseChipsEl.hidden = v !== 'map';
@@ -7378,6 +7393,11 @@ const locateKm = (min: number): number => Math.max(min, Math.min(scaleKm, LOCATE
  * 抓到 GPS 回 true（新的位置在 lastGps），抓不到、不支援回 false
  */
 function locateMe(): Promise<boolean> {
+  // 搜尋到的地點的針拿掉（還沒有 GPS、等定位時也馬上拿掉）
+  if (found) {
+    found = null;
+    render();
+  }
   const known = lastGps ? { ...lastGps, accuracy: lastGpsAccuracy } : home?.source === 'gps' ? home : null;
   // 沒有 GPS 但移到了手動位置：先回到移動之前的位置（以前「回到我的位置」做的，例如電腦沒有 GPS 時的預設位置）
   const back = known ?? (origin.source === 'manual' ? home : null);
@@ -9936,6 +9956,20 @@ async function boot(): Promise<void> {
   lsSet('dr.lab.bottles', null);
   wireControls();
   wireFullScreen();
+  wireFind({
+    center: () => origin,
+    // 跟拖過去一樣變成手動位置（清單換成那附近的）；範圍拉到看得到整個地方，門牌、小地標本來就比較近的不拉遠
+    go: (p) => {
+      found = p;
+      if (radar.spaceMoved) radar.resetSpace();
+      const km = Math.max(earthMinKm(), p.km <= 0.3 ? Math.min(scaleKm, p.km) : p.km);
+      zoomToKm(km, { lat: p.lat, lng: p.lng, source: 'manual' });
+    },
+    clear: () => {
+      found = null;
+      render();
+    },
+  });
   updateNotifyBtn();
   // 點手機推播的通知、網頁已經開著：選到那一則
   await registerServiceWorker((id) => void reveal(id));

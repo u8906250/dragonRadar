@@ -27,6 +27,7 @@ import { approveSpotRequest, autoReview, cancelSpotRequest, listSpotRequests, lo
 import { addUserKeyword, listActiveKeywords, listAllKeywords, MAX_ACTIVE_KEYWORDS, normalizeKeyword, parseKeywordList, toKeywordOut, touchKeywords } from './keywords';
 import { listLearnedTags, setLearnedTag } from './learnedTags';
 import { cleanTaipaiWord, listTaipaiWords, setTaipaiWord } from './taipaiWords';
+import { purgeGeoSearch, searchPlaces } from './geo-search';
 import { CALLBACK_PATH, DELETE_PATH, DELETION_STATUS_PATH, UNINSTALL_PATH, deletionStatus, handleCallback, handleDelete, handleUninstall, startAuth } from './oauth';
 import { etagMatches, jsonResponse, nowSec, parseIsoToUnix } from './util';
 
@@ -155,6 +156,11 @@ async function handle(req: Request, env: Env, ctx: ExecutionContext): Promise<Re
   }
   if (req.method === 'POST' && path === '/api/push/unsubscribe') {
     return jsonResponse(await deleteSubscription(env, await readJson<{ endpoint?: string }>(req)));
+  }
+
+  // 全螢幕雷達的搜尋地址（只查台灣）：lat、lng 是畫面中心，只取 0.5 度的格子讓近的排前面
+  if (req.method === 'GET' && path === '/api/geo-search') {
+    return jsonResponse({ hits: await searchPlaces(env, url.searchParams.get('q') ?? '', num(url.searchParams.get('lat')), num(url.searchParams.get('lng')), await ipHash(env, req), now) });
   }
 
   // 3D 國館的標記（管理者標的路燈、長椅…）：大家都看得到，只有種類、位置、面向
@@ -927,7 +933,7 @@ async function purgeOldData(env: Env, now: number): Promise<number> {
     // 手動改的地點、時間跟著貼文
     env.DB.prepare('DELETE FROM manual_fixes WHERE post_id NOT IN (SELECT id FROM posts)'),
   ]);
-  return r.reduce((n, x) => n + (x.meta.changes ?? 0), 0) + (await purgeReports(env, cutoff)) + (await purgeBottles(env, cutoff)) + (await purgeBottleRejects(env, now)) + (await purgeBottleReads(env, now)) + (await purgeCards(env, cutoff)) + (await purgeAccounts(env, now, cutoff)) + (await purgeWishes(env, cutoff)) + (await purgeSubscriptions(env, cutoff)) + (await purgeFeedback(env, cutoff));
+  return r.reduce((n, x) => n + (x.meta.changes ?? 0), 0) + (await purgeReports(env, cutoff)) + (await purgeBottles(env, cutoff)) + (await purgeBottleRejects(env, now)) + (await purgeBottleReads(env, now)) + (await purgeCards(env, cutoff)) + (await purgeAccounts(env, now, cutoff)) + (await purgeWishes(env, cutoff)) + (await purgeSubscriptions(env, cutoff)) + (await purgeFeedback(env, cutoff)) + (await purgeGeoSearch(env, now));
 }
 
 async function refreshTokenJob(env: Env): Promise<void> {

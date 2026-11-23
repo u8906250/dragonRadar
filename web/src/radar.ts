@@ -489,6 +489,14 @@ export interface RadarYou {
   accuracyKm: number | null;
 }
 
+/** 搜尋到的地點（全螢幕的搜尋地址，v1.785）：id 換了才重新插一次針（針落下來的動畫） */
+export interface RadarFound {
+  id: string;
+  bearing: number;
+  distanceKm: number;
+  label: string;
+}
+
 /** 點兩下放大：兩下的間隔、相距多少內才算，放大的動畫多久 */
 const DOUBLE_TAP_MS = 300;
 const DOUBLE_TAP_PX = 30;
@@ -532,6 +540,10 @@ const C = SIZE / 2;
 const R = 172;
 /** 定位點多大（螢幕像素，跟 Google 地圖一樣不管螢幕多大都一樣大）：白邊、藍點、方向光束多長；光束張多開（度） */
 const YOU_RING_PX = 9;
+/** 搜尋到的地點的針（螢幕像素）：尖端在地點上，頭的中間在 FOUND_HEAD_Y */
+const FOUND_PIN = 'M0 0 C-1.6 -5 -9 -11 -9 -19 A9 9 0 1 1 9 -19 C9 -11 1.6 -5 0 0 Z';
+const FOUND_HEAD_Y = -19;
+const FOUND_LABEL_PX = 12;
 const YOU_DOT_PX = 6;
 const YOU_BEAM_PX = 42;
 const YOU_BEAM_DEG = 32;
@@ -880,6 +892,9 @@ export class Radar {
   private you: RadarYou | null = null;
   private youKey = '';
   private readonly youLayer: SVGGElement;
+  private found: RadarFound | null = null;
+  private foundKey = '';
+  private readonly foundLayer: SVGGElement;
   private heading = 0;
   private items: RadarItem[] = [];
   private style: RadarStyle = { sweep: 'wedge', blip: 'dot', rose: false };
@@ -976,6 +991,8 @@ export class Radar {
       <g class="landmarks"></g>
       <!-- 回報的位置在最上面（v1.699 可以拖：疊在星星、光點上也拖得到；不能拖的不擋點擊） -->
       <g class="previews"></g>
+      <!-- 搜尋到的地點（v1.785）：插一根針，在最上面 -->
+      <g class="found"></g>
       <g class="trip"></g>
       <g class="rose"></g>
     `;
@@ -1028,6 +1045,7 @@ export class Radar {
     this.previewLayer.addEventListener('pointerup', endPinDrag);
     this.previewLayer.addEventListener('pointercancel', endPinDrag);
     this.youLayer = this.svg.querySelector('.you') as SVGGElement;
+    this.foundLayer = this.svg.querySelector('.found') as SVGGElement;
     this.bottleLayer = this.svg.querySelector('.bottles') as SVGGElement;
     this.bottleLayer.addEventListener('click', (e) => {
       const g = (e.target as Element).closest('.bottle') as SVGGElement | null;
@@ -2308,6 +2326,63 @@ export class Radar {
     this.youLayer.appendChild(g);
   }
 
+  /** 搜尋到的地點（null 是拿掉針）：全螢幕鋪滿時才畫 */
+  setFound(found: RadarFound | null): void {
+    const key = JSON.stringify(found);
+    if (key === this.foundKey) return;
+    this.foundKey = key;
+    this.found = found;
+    this.drawFound();
+  }
+
+  /** 針的尖端在畫面上的位置；不畫（不是全螢幕、太空裡、畫面外）是 null */
+  private foundXY(): { x: number; y: number } | null {
+    const f = this.found;
+    if (!f || !this.fill || this.inSpace) return null;
+    const angle = f.bearing - this.heading;
+    const r = this.ratio(f.distanceKm) * (R - 8);
+    if (r > this.edgeR(angle, -10)) return null;
+    return r > 0 ? polar(angle, r) : { x: C, y: C };
+  }
+
+  /**
+   * 像 Google 地圖插一根紅色的針，名稱寫在下面；換了地點才重新插（針落下來、彈一下），拖曳、縮放只移位置。
+   * 跟你的位置一樣照螢幕像素畫，不跟著縮放變大變小
+   */
+  private drawFound(): void {
+    const f = this.found;
+    const p = this.foundXY();
+    let g = this.foundLayer.firstElementChild as SVGGElement | null;
+    if (!f) {
+      g?.remove();
+      return;
+    }
+    if (!g || g.dataset.id !== f.id) {
+      g?.remove();
+      g = el('g', { class: 'found-pin' }) as SVGGElement;
+      g.dataset.id = f.id;
+      const drop = el('g', { class: 'found-drop' });
+      drop.appendChild(el('ellipse', { class: 'found-shadow', cx: 0, cy: 0, rx: 5, ry: 2 }));
+      drop.appendChild(el('path', { class: 'found-body', d: FOUND_PIN }));
+      drop.appendChild(el('circle', { class: 'found-hole', cx: 0, cy: FOUND_HEAD_Y, r: 3.4 }));
+      g.appendChild(drop);
+      const t = el('text', { class: 'found-label', 'text-anchor': 'middle', y: 16 });
+      t.textContent = f.label;
+      g.appendChild(t);
+      const title = el('title');
+      title.textContent = `搜尋到的地點：${f.label}`;
+      g.appendChild(title);
+      this.foundLayer.appendChild(g);
+    }
+    if (!p) {
+      g.style.display = 'none';
+      return;
+    }
+    g.style.display = '';
+    const px = this.squarePx > 0 ? this.squarePx / SIZE : 1;
+    g.setAttribute('transform', `translate(${p.x.toFixed(1)} ${p.y.toFixed(1)}) scale(${(1 / px).toFixed(4)})`);
+  }
+
   private pathOf(points: Array<{ bearing: number; distanceKm: number }>, close = false): string {
     const d = points
       .map((pt, i) => {
@@ -2625,6 +2700,12 @@ export class Radar {
     const inView = (x: number, y: number): boolean => Math.hypot(x - C, y - C) <= this.edgeR((Math.atan2(x - C, C - y) * 180) / Math.PI) - 2;
     // 一個螢幕像素是幾個 SVG 單位
     const unit = this.squarePx > 0 ? SIZE / this.squarePx : 1;
+    // 搜尋到的地點的針和下面的名稱
+    const fp = this.foundXY();
+    if (fp && this.found) {
+      const half = Math.max(10, (this.found.label.length * FOUND_LABEL_PX) / 2 + 3) * unit;
+      taken.push({ l: fp.x - half, r: fp.x + half, t: fp.y - 30 * unit, b: fp.y + 21 * unit });
+    }
     let g = this.placeLabelLayer.firstElementChild as SVGGElement | null;
     if (!g) {
       g = el('g', { class: 'place-labels' }) as SVGGElement;
@@ -3944,6 +4025,7 @@ export class Radar {
       this.drawScaleBar();
       this.drawPreviews();
       this.drawYou();
+      this.drawFound();
       const t = `translate(${dx.toFixed(2)} ${dy.toFixed(2)})`;
       for (const g of sliding) g.setAttribute('transform', t);
       const px = this.squarePx / SIZE;
@@ -3976,6 +4058,7 @@ export class Radar {
     this.drawLandmarks();
     this.drawPreviews();
     this.drawYou();
+    this.drawFound();
     this.blipLayer.replaceChildren();
     const pos = new Map<number, { x: number; y: number; out: boolean; angle: number; r: number }>();
     // 太空：地球另一面的不畫；地球太小時都擠在一起，不畫

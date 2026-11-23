@@ -150,7 +150,7 @@ export function placeCandidates(query: string, placeText?: string | null): strin
   return out.slice(0, 8);
 }
 
-async function politeDelay(): Promise<void> {
+export async function politeDelay(): Promise<void> {
   const wait = lastCallAt + MIN_INTERVAL_MS - Date.now();
   if (wait > 0) await new Promise((r) => setTimeout(r, wait));
   lastCallAt = Date.now();

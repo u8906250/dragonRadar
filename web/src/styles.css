@@ -293,6 +293,15 @@ a.chip { display: inline-flex; align-items: center; text-decoration: none; }
 .radar .you-beam-stop-2 { stop-color: #1a73e8; stop-opacity: 0; }
 .radar .you-ring { fill: #ffffff; filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.4)); }
 .radar .you-dot { fill: #1a73e8; }
+/* 搜尋到的地點（v1.785）：紅色的針，換地點時落下來彈一下 */
+.radar .found { pointer-events: none; }
+.radar .found-body { fill: #ea4335; stroke: #a52714; stroke-width: 1; filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.35)); }
+.radar .found-hole { fill: #ffffff; }
+.radar .found-shadow { fill: rgba(0, 0, 0, 0.25); }
+.radar .found-label { fill: var(--label); font-size: 12px; font-weight: 700; paint-order: stroke; stroke: var(--label-halo); stroke-width: 3px; stroke-linejoin: round; }
+.radar .found-drop { animation: found-drop 0.5s cubic-bezier(0.3, 1.4, 0.5, 1) both; }
+@keyframes found-drop { from { transform: translateY(-22px); opacity: 0; } 40% { opacity: 1; } to { transform: none; opacity: 1; } }
+@media (prefers-reduced-motion: reduce) { .radar .found-drop { animation: none; } }
 /* 小指北針：右上角按鈕下面，圓圓的、跟按鈕一樣的底，紅色那頭指北 */
 .mini-compass {
   position: absolute; z-index: 20; right: 10px; top: calc(104px + env(safe-area-inset-top)); width: 40px; height: 40px; border-radius: 50%; pointer-events: none;
@@ -1567,6 +1576,33 @@ path.map-seam-walkers { --p: 15px; }
 /* 雷達也鋪滿（不留上面的空間給按鈕）：時間、範圍按鈕跟地圖一樣浮在左下 */
 #app.full #stage[data-view="radar"] #radar-view { padding-top: 0; }
 #app.full #stage[data-view="radar"] .overlay-bl { position: absolute; padding: 0; }
+/* 全螢幕雷達的搜尋地址（v1.785）：標題列的放大鏡（「⋯」旁邊），框從標題列下面展開；不是全螢幕、地圖時沒有（地圖、汪星的 main.ts 藏） */
+#find-btn { display: none; }
+#app.full #find-btn:not([hidden]) { display: inline-flex; }
+.find-box {
+  position: absolute; z-index: 24; top: calc(56px + env(safe-area-inset-top)); left: 10px; right: 10px; max-width: 400px; margin-left: auto;
+  padding: 8px; background: var(--panel); border: var(--border-w) solid var(--line); border-radius: var(--card-radius); box-shadow: var(--card-shadow);
+}
+.find-box[hidden], #app:not(.full) .find-box, #stage[data-view="map"] .find-box { display: none; }
+.find-form { position: relative; display: flex; align-items: center; }
+.find-form input {
+  flex: 1; min-width: 0; min-height: 44px; padding: 8px 36px 8px 12px; font: inherit; font-size: 16px; color: var(--text);
+  background: var(--card); border: var(--border-w) solid var(--line); border-radius: 10px; -webkit-appearance: none; appearance: none;
+}
+.find-form input::placeholder { color: var(--muted); font-size: 14px; }
+.find-form input::-webkit-search-cancel-button { display: none; }
+.find-form input:focus { outline: 2px solid var(--highlight); outline-offset: 1px; }
+.find-status { margin: 8px 4px 2px; font-size: 13px; line-height: 1.5; color: var(--muted); }
+.find-status[hidden] { display: none; }
+.find-results { list-style: none; margin: 0; padding: 0; max-height: min(320px, 45vh); overflow-y: auto; }
+.find-results:not(:empty) { margin-top: 6px; }
+.find-hit {
+  display: flex; flex-direction: column; align-items: flex-start; gap: 1px; width: 100%; min-height: 44px; padding: 7px 10px; border: 0; border-radius: 8px;
+  background: transparent; color: var(--text); font: inherit; text-align: left; cursor: pointer;
+}
+.find-hit:hover, .find-hit:focus-visible { background: var(--card); outline: none; }
+.find-hit b { font-size: 15px; }
+.find-hit span { font-size: 12.5px; color: var(--muted); }
 #app.full .panel { grid-row: 2; position: relative; z-index: 22; }
 #app.full .banner { top: calc(56px + env(safe-area-inset-top)); }
 @media (max-width: 899px) {
@@ -2012,6 +2048,9 @@ path.map-seam-walkers { --p: 15px; }
   #app.full #list-btn { display: inline-flex; align-items: center; }
   #app.full .panel { grid-row: 1; }
   #app.full .overlay-tr { top: calc(8px + env(safe-area-inset-top)); right: 196px; }
+  .find-box { top: calc(58px + env(safe-area-inset-top)); left: auto; width: 380px; }
+  /* 標題列多了放大鏡：右上那排再往左讓一個按鈕 */
+  #app.full.find-on .overlay-tr { right: 242px; }
   .mini-compass { top: calc(58px + env(safe-area-inset-top)); }
   #app.full.list-off { grid-template-columns: minmax(0, 1fr); }
   #app.full.list-off .panel { display: none; }
@@ -2401,6 +2440,11 @@ body.bottle-open { overflow: hidden; }
 
 /* 自己丟的瓶子被撿走了：按鈕右上角小紅點 */
 #bottle-btn { position: relative; }
+#bottle-btn.icon-chip { display: inline-flex; align-items: center; justify-content: center; width: 40px; padding: 0; }
+#bottle-btn svg { width: 23px; height: 23px; }
+#bottle-btn svg .cork { fill: currentColor; stroke: none; }
+#bottle-btn svg .scroll { stroke-width: 1.8; }
+#bottle-btn .chip-badge { position: absolute; right: -7px; bottom: -6px; min-width: 18px; margin: 0; padding: 0 4px; font-size: 10.5px; line-height: 15px; border: 2px solid var(--chip-bg); }
 #bottle-btn.news::after { content: ''; position: absolute; top: -3px; right: -3px; width: 10px; height: 10px; border-radius: 50%; background: #e5484d; border: 2px solid var(--chip-bg); }
 .new-tag { display: inline-block; margin-right: 4px; padding: 0 5px; border-radius: 6px; background: #e5484d; color: #fff; font-size: 11px; line-height: 16px; }
 .btn.letters-open { width: 100%; justify-content: space-between; gap: 8px; margin-top: 12px; }

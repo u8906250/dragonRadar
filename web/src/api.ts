@@ -76,6 +76,37 @@ async function postJson<T>(path: string, body: unknown): Promise<Result<T>> {
   }
 }
 
+// ---- 全螢幕雷達的搜尋地址（v1.785）----
+
+/** 伺服器查到的地點（worker/src/geo-search.ts 的 PlaceHit） */
+export interface PlaceHit {
+  name: string;
+  area: string;
+  kind: string;
+  lat: number;
+  lng: number;
+  /** 飛過去時雷達的範圍（外圈幾公里） */
+  km: number;
+}
+
+/** 查地址、地名、路名（只查台灣）；near 是畫面中心，只送 0.5 度的格子（約 50 公里）讓近的排前面 */
+export async function searchPlaces(q: string, near: LatLng | null): Promise<Result<PlaceHit[]>> {
+  try {
+    const u = new URL(`${API_BASE}/api/geo-search`);
+    u.searchParams.set('q', q);
+    if (near) {
+      u.searchParams.set('lat', String(Math.round(near.lat * 2) / 2));
+      u.searchParams.set('lng', String(Math.round(near.lng * 2) / 2));
+    }
+    const r = await fetch(u.toString());
+    const j = (await r.json().catch(() => ({}))) as { hits?: PlaceHit[]; error?: string };
+    if (!r.ok) return { ok: false, message: j.error ?? `查詢失敗（${r.status}）`, status: r.status };
+    return { ok: true, data: j.hits ?? [] };
+  } catch {
+    return { ok: false, message: '連線失敗，請稍後再試' };
+  }
+}
+
 // ---- 手機推播 ----
 
 /** 推播用的伺服器公鑰；拿不到就是 null（推播先不開） */
