@@ -91,3 +91,28 @@ describe('台派雷達的修改表單', () => {
     expect(reportModules('true')).toContain('taipai');
   });
 });
+
+describe('沒寫店名（v1.796）', () => {
+  it('marks stores without a name so the shop profile is read', async () => {
+    const { storeEvents, STORE_TYPES } = await import('../src/taipai');
+    const [noName, named] = storeEvents(
+      [
+        { name: null, type: 'cafe', hours: null, place_text: '宜蘭市自強路168號', place_query: '宜蘭市自強路168號', from_profile: [], confidence: 0.8 },
+        { name: '慢工咖啡', type: 'cafe', hours: null, place_text: '師大路', place_query: '慢工咖啡 師大路', from_profile: ['name'], confidence: 0.8 },
+      ],
+      STORE_TYPES,
+      '台派店家',
+      (e) => e.from_profile,
+    );
+    expect(noName.title).toBe('宜蘭市自強路168號');
+    expect(noName.extra).toMatchObject({ no_name: true });
+    expect(named.extra).not.toHaveProperty('no_name');
+    expect(named.extra).toMatchObject({ from_profile: ['name'] });
+  });
+  it('prefers the profile read when it found the name', async () => {
+    const { profilePlanBetter } = await import('../src/events');
+    const item = (extra: Record<string, unknown>) => ({ reason: 'planned', plan: { lat: 25, lng: 121, extra: JSON.stringify({ type: 'cafe', hours: '10:00-18:00', ...extra }) } }) as never;
+    expect(profilePlanBetter([item({ no_name: true })], [item({})], true)).toBe(true);
+    expect(profilePlanBetter([item({})], [item({ no_name: true })], true)).toBe(false);
+  });
+});

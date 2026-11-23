@@ -37,7 +37,7 @@ events 每筆的欄位：
 - hours: 營業時間，照貼文（或書店帳號的簡介）寫的整理成一行，例如「週二至週日 12:00–21:00，週一公休」「平日 13:00–20:00，假日 11:00–20:00」；沒寫則 null，不要自己猜
 - place_text: 貼文原文中的店址、地點
 - place_query: 給地圖搜尋用：有門牌就用門牌；貼文寫了縣市才加縣市，例如「桃園市中壢區中央西路二段 100 號」；沒寫門牌時用店名加路名或地標（例如「瑯嬛書屋 中壢」），不要只填路名；只寫店名就只填店名，不要自己猜縣市；沒寫則 null
-- from_profile: 這一家哪些資料是從【帳號簡介】讀的（貼文沒寫、簡介寫了）："hours"（營業時間）、"place"（地點）；都是貼文寫的則空陣列
+- from_profile: 這一家哪些資料是從【帳號簡介】讀的（貼文沒寫、簡介寫了）："name"（店名）、"hours"（營業時間）、"place"（地點）；都是貼文寫的則空陣列
 - confidence: 0 到 1 的信心分數
 
 規則：
@@ -64,7 +64,7 @@ const BOOKS_SCHEMA = {
           name: { type: 'string' },
           type: { type: 'string', enum: Object.keys(BOOK_TYPES) },
           hours: { type: ['string', 'null'] },
-          from_profile: { type: 'array', items: { type: 'string', enum: ['hours', 'place'] } },
+          from_profile: { type: 'array', items: { type: 'string', enum: ['name', 'hours', 'place'] } },
           place_text: { type: ['string', 'null'] },
           place_query: { type: ['string', 'null'] },
           confidence: { type: 'number' },

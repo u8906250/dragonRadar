@@ -372,7 +372,7 @@ export function notListedWhy(items: PlanItem[]): NotListedWhy | undefined {
 // 20：台派雷達看不出是台派的店家照樣讀出資料，可以送給管理者判斷（2026-11-20）
 // 21：台派雷達記下判成台派的依據（台派用詞），算不算台派照管理者在管理頁決定的（2026-11-21）
 // 22：台派雷達看不出是台派的，AI 抓可能是台派的說法給管理者判斷；店家自己帳號的表態貼文（回家投票、放小卡）也算介紹這家店（2026-11-22）
-export const PLAN_VERSION = 23;
+export const PLAN_VERSION = 24;
 
 /** 判讀好、還沒寫進雷達的資料，存在 posts.confirm_plan */
 interface StoredPlan {

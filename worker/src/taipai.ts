@@ -71,7 +71,7 @@ events 每筆的欄位：
 - hours: 營業時間，照貼文（或店家帳號的簡介）寫的整理成一行，例如「週二至週日 11:00–20:00，週一公休」「平日 09:30–20:30，假日 10:00–18:00」；沒寫則 null，不要自己猜
 - place_text: 貼文原文中的店址、地點
 - place_query: 給地圖搜尋用：有門牌就用門牌；貼文寫了縣市才加縣市，例如「台北市大安區復興南路一段 100 號」；沒寫門牌時用店名加路名或地標（例如「慢工咖啡 師大路」），不要只填路名；只寫店名就只填店名，不要自己猜縣市；沒寫則 null
-- from_profile: 這一家哪些資料是從【帳號簡介】讀的（貼文沒寫、簡介寫了）："taipai"（是台派）、"hours"（營業時間）、"place"（地點）；都是貼文寫的則空陣列
+- from_profile: 這一家哪些資料是從【帳號簡介】讀的（貼文沒寫、簡介寫了）："taipai"（是台派）、"name"（店名）、"hours"（營業時間）、"place"（地點）；都是貼文寫的則空陣列
 - confidence: 0 到 1 的信心分數
 
 規則：
@@ -105,7 +105,7 @@ const TAIPAI_SCHEMA = {
           name: { type: 'string' },
           type: { type: 'string', enum: Object.keys(STORE_TYPES) },
           hours: { type: ['string', 'null'] },
-          from_profile: { type: 'array', items: { type: 'string', enum: ['taipai', 'hours', 'place'] } },
+          from_profile: { type: 'array', items: { type: 'string', enum: ['taipai', 'name', 'hours', 'place'] } },
           place_text: { type: ['string', 'null'] },
           place_query: { type: ['string', 'null'] },
           confidence: { type: 'number' },
@@ -130,7 +130,7 @@ export function storeExtra(type: unknown, hours: string | null, types: Record<st
 }
 
 /** 從帳號簡介讀的是哪幾項（預覽、詳細資料寫明「店家帳號簡介寫的」）：沒有就不帶 */
-export const PROFILE_FIELDS = ['taipai', 'hours', 'place'] as const;
+export const PROFILE_FIELDS = ['taipai', 'name', 'hours', 'place'] as const;
 export function profileFields(v: unknown): { from_profile?: string[] } {
   const list = Array.isArray(v) ? PROFILE_FIELDS.filter((f) => v.includes(f)) : [];
   return list.length > 0 ? { from_profile: list } : {};
@@ -161,7 +161,8 @@ export function storeEvents(raw: unknown, types: Record<string, string>, fallbac
         confidence: conf(e.confidence),
         spot: false,
         until: null,
-        extra: { ...storeExtra(type, cleanHours(e.hours), types), ...profileFields(fromProfile(e)) },
+        // 沒寫店名（標題是地點或「台派店家」）：記著，回報的貼文會再去讀店家帳號的簡介找店名（v1.796 使用者說沒寫店名可以到簡介看）
+        extra: { ...storeExtra(type, cleanHours(e.hours), types), ...profileFields(fromProfile(e)), ...(name ? {} : { no_name: true }) },
       },
     ];
   });

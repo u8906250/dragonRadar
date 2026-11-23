@@ -418,7 +418,7 @@ function storeLine(it: Item, now: number): string {
   return it.phase === 'soon' ? `快開門了・${at} 開門` : `休息中・${at} 開門`;
 }
 /** 從帳號簡介讀的那幾項怎麼寫 */
-const PROFILE_WORD: Record<string, string> = { taipai: '台派', hours: '營業時間', place: '地點' };
+const PROFILE_WORD: Record<string, string> = { taipai: '台派', name: '店名', hours: '營業時間', place: '地點' };
 /** 「台派、營業時間」：貼文沒寫、從店家帳號的簡介讀的；沒有是空字串 */
 const profileWords = (x: StoreExtra): string => (x.from_profile ?? []).map((f) => PROFILE_WORD[f]).filter(Boolean).join('、');
 /** 台派雷達的詳細資料：類型、營業時間（現在有沒有開）、地點；從店家帳號簡介讀的寫出來 */

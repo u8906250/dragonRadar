@@ -725,7 +725,9 @@ export async function planPost(env: Env, post: PostRow, now = nowSec()): Promise
   const noHours = store && !first.early && first.items.some((it) => it.plan && !storeHours(it.plan.extra));
   // 看不出是台派：店家自己帳號的簡介可能寫了
   const notTaipai = store && first.early === NOT_TAIPAI;
-  if (post.source !== 'link' || !(noPlace || noHours || notTaipai)) return first;
+  // 貼文沒寫店名（v1.796 使用者說沒寫店名可以到簡介看）：店家自己帳號的名稱、簡介常寫了
+  const noName = store && !first.early && first.items.some((it) => it.plan && parseExtra(it.plan.extra)?.no_name === true);
+  if (post.source !== 'link' || !(noPlace || noHours || notTaipai || noName)) return first;
   const accounts = profileCandidates(post.text, post.username, store ? 3 : 2, store);
   if (accounts.length === 0) return first;
   const profiles = (await Promise.all(accounts.map((u) => fetchThreadsProfile(u)))).filter((p): p is ThreadsProfile => !!p);
@@ -757,11 +759,12 @@ const withPlace = (items: PlanItem[]): number => items.filter((it) => (it.plan ?
 /**
  * 讀了帳號簡介的判讀比較好才用：放得上雷達的多；一樣多時，有地點的多
  * （簡介寫了地址、貼文只缺時間：回報的人在表單補上時間就好，不要退回「不是活動」）；
- * 店家（台派雷達）再一樣多時，有營業時間的多
+ * 店家（台派雷達）再一樣多時，有營業時間的多，再一樣多時有店名的多（v1.796）
  */
 export function profilePlanBetter(first: PlanItem[], second: PlanItem[], stores = false): boolean {
   const withHours = (items: PlanItem[]): number => items.filter((it) => it.plan && it.plan.lat !== null && storeHours(it.plan.extra)).length;
-  return (located(second) - located(first) || withPlace(second) - withPlace(first) || (stores ? withHours(second) - withHours(first) : 0)) > 0;
+  const withName = (items: PlanItem[]): number => items.filter((it) => it.plan && it.plan.lat !== null && parseExtra(it.plan.extra)?.no_name !== true).length;
+  return (located(second) - located(first) || withPlace(second) - withPlace(first) || (stores ? withHours(second) - withHours(first) || withName(second) - withName(first) : 0)) > 0;
 }
 /**
  * 台派雷達：讀了帳號簡介看得出是台派、地點沒變少的比較好（看不出是台派要等管理者判斷）；
