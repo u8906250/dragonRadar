@@ -48,6 +48,52 @@ export function moonEnu(at: Date, lat: number, lng: number): Enu {
   return enuOf(Math.asin(zq) / RAD, norm180(ra - gmst), lat, lng, m.dist);
 }
 
+/** 恆星（赤經 ra 小時、赤緯 dec 度，J2000；到現在的歲差約 0.4 度，不算）從 lat、lng 看過去的方向 */
+export function starEnu(at: Date, ra: number, dec: number, lat: number, lng: number): Enu {
+  const gmst = 280.46061837 + 360.98564736629 * daysJ2000(at);
+  return enuOf(dec, norm180(ra * 15 - gmst), lat, lng);
+}
+
+/** 天上的一顆星：名字、赤經（小時）、赤緯（度）、視星等、顏色 */
+export interface SkyStar {
+  name: string;
+  ra: number;
+  dec: number;
+  mag: number;
+  color: string;
+}
+
+/**
+ * 獵戶座（v1.801 使用者說把獵戶座畫出來）：台北市區光害大，肉眼看得到的主要是這幾顆亮星。
+ * 座標是 J2000（SIMBAD），星等是視星等（參宿四是變星，0～1.6，取平常的 0.4）；中文名照傳統星名（參宿一～七、觜宿一、伐三）
+ */
+export const ORION_STARS: SkyStar[] = [
+  { name: '參宿四', ra: 5.919529, dec: 7.407064, mag: 0.42, color: '#ffb27a' },
+  { name: '參宿七', ra: 5.242298, dec: -8.201639, mag: 0.13, color: '#cddbff' },
+  { name: '參宿五', ra: 5.418851, dec: 6.349703, mag: 1.64, color: '#d8e2ff' },
+  { name: '參宿六', ra: 5.795941, dec: -9.669606, mag: 2.06, color: '#d6e0ff' },
+  { name: '參宿一', ra: 5.679313, dec: -1.942572, mag: 1.77, color: '#d6e0ff' },
+  { name: '參宿二', ra: 5.603559, dec: -1.201919, mag: 1.69, color: '#d6e0ff' },
+  { name: '參宿三', ra: 5.533445, dec: -0.299094, mag: 2.23, color: '#d6e0ff' },
+  { name: '觜宿一', ra: 5.585632, dec: 9.934156, mag: 3.39, color: '#dbe4ff' },
+  { name: '伐三', ra: 5.59055, dec: -5.9099, mag: 2.77, color: '#d6e0ff' },
+];
+/** 連成星座的線（ORION_STARS 的第幾顆）：頭連兩肩、肩連腰帶、腰帶三顆、腰帶連兩腳 */
+export const ORION_LINES: Array<[number, number]> = [
+  [7, 0],
+  [7, 2],
+  [0, 4],
+  [2, 6],
+  [4, 5],
+  [5, 6],
+  [4, 3],
+  [6, 1],
+];
+/** 獵戶座大星雲（M42）：劍上一小團霧，約 4 等 */
+export const ORION_NEBULA: SkyStar = { name: '獵戶座大星雲', ra: 5.588139, dec: -5.391111, mag: 4.0, color: '#c9d4ff' };
+/** 「獵戶座」三個字寫在哪：星座西邊（參宿五、參宿七中間外面一點） */
+export const ORION_LABEL = { ra: 5.02, dec: 1.2 };
+
 /** 高度（度，地平線 0、頭頂 90） */
 export const altOf = (d: Enu): number => Math.asin(Math.max(-1, Math.min(1, d[2]))) / RAD;
 /** 方位（度，北 0、東 90） */

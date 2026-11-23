@@ -18,7 +18,7 @@ import { dogHairRoots, dogPartArea, dogParts } from './dog';
 import { dogPose, dogTurned, happyWag } from './dogs';
 import { arriveRocket, ARRIVE_MS, DEPART_MS, departRocket, HATCH_CENTER, moveDogs, PARK_DOGS, personOk, petDog, rocketNow, setSniffMarks, stowRocket, STOW_MS, summonRocket, SUMMON_MS } from './park';
 import { cloudLayer, puffTexture, rocketModel, ROCKET_H, ROCKET_WINDOW_Y, spaceScene, type SpaceTrip } from './rocket3d';
-import { altOf, azOf, type Enu, moonEnu, moonLit, skyLook, sunEnu } from './sky';
+import { altOf, azOf, type Enu, moonEnu, moonLit, ORION_LABEL, ORION_LINES, ORION_NEBULA, ORION_STARS, skyLook, type SkyStar, starEnu, sunEnu } from './sky';
 import { toWoof } from './space';
 import { ZHONGSHAN_PARK as Z } from './zhongshan';
 import { MIN_HALF, widthSides, withWidths as alongWidths } from './zhongshan-widths';
@@ -588,6 +588,73 @@ export function openPark3D(o: Park3DOptions): () => void {
     }),
   );
   skyGroup.add(moonBall);
+  // 獵戶座（v1.801 使用者說把獵戶座畫出來）：照現在的時間從中山公園看出去的真實位置（11 月晚上 8 點左右從東邊升起、半夜在南邊、天亮前在西邊落下），
+  // 天黑才看得到，地平線附近被光害、霧擋掉慢慢變淡；亮星照星等畫大小、顏色照星的顏色（參宿四橘紅、參宿七藍白），
+  // 淡淡的線連成星座、旁邊寫「獵戶座」，劍上的大星雲畫一小團霧。樹、建築擋得住（照深度畫，不寫深度）
+  const STAR_D = SKY_D * 0.98;
+  const starTex = (soft: boolean): THREE.CanvasTexture => {
+    const cv = document.createElement('canvas');
+    [cv.width, cv.height] = [64, 64];
+    const g = cv.getContext('2d')!;
+    const rg = g.createRadialGradient(32, 32, 0, 32, 32, 32);
+    rg.addColorStop(0, 'rgba(255,255,255,1)');
+    rg.addColorStop(soft ? 0.1 : 0.22, `rgba(255,255,255,${soft ? 0.8 : 0.95})`);
+    rg.addColorStop(soft ? 0.45 : 0.38, `rgba(255,255,255,${soft ? 0.3 : 0.22})`);
+    rg.addColorStop(1, 'rgba(255,255,255,0)');
+    g.fillStyle = rg;
+    g.fillRect(0, 0, 64, 64);
+    const t = new THREE.CanvasTexture(cv);
+    t.colorSpace = THREE.SRGBColorSpace;
+    return t;
+  };
+  const orion = new THREE.Group();
+  skyGroup.add(orion);
+  const starDot = (s: SkyStar, soft: boolean): { s: SkyStar; p: THREE.Points; mat: THREE.PointsMaterial } => {
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute('position', new THREE.Float32BufferAttribute([0, 0, 0], 3));
+    const mat = new THREE.PointsMaterial({ size: 1, sizeAttenuation: false, map: starTex(soft), color: new THREE.Color(s.color), transparent: true, depthWrite: false, fog: false });
+    const p = new THREE.Points(geo, mat);
+    p.renderOrder = -8;
+    orion.add(p);
+    return { s, p, mat };
+  };
+  const orionStars = [...ORION_STARS.map((s) => starDot(s, false)), starDot(ORION_NEBULA, true)];
+  const orionLines = new THREE.LineSegments(
+    new THREE.BufferGeometry().setAttribute('position', new THREE.Float32BufferAttribute(new Float32Array(ORION_LINES.length * 6), 3)),
+    new THREE.LineBasicMaterial({ color: 0xaebdff, transparent: true, opacity: 0, depthWrite: false, fog: false }),
+  );
+  orionLines.renderOrder = -9;
+  orion.add(orionLines);
+  const orionLabel = new THREE.Sprite(
+    new THREE.SpriteMaterial({
+      map: (() => {
+        const cv = document.createElement('canvas');
+        [cv.width, cv.height] = [192, 64];
+        const g = cv.getContext('2d')!;
+        g.font = '600 40px "Noto Sans TC", "PingFang TC", "Microsoft JhengHei", sans-serif';
+        g.textAlign = 'center';
+        g.textBaseline = 'middle';
+        g.fillStyle = '#c9d4ff';
+        g.fillText('獵戶座', 96, 34);
+        const t = new THREE.CanvasTexture(cv);
+        t.colorSpace = THREE.SRGBColorSpace;
+        return t;
+      })(),
+      transparent: true,
+      depthWrite: false,
+      fog: false,
+    }),
+  );
+  // 字高約 2.6 度
+  const labelH = 2 * STAR_D * Math.tan((1.3 * Math.PI) / 180);
+  orionLabel.scale.set(labelH * 3, labelH, 1);
+  orionLabel.renderOrder = -8;
+  orion.add(orionLabel);
+  /** 星等 → 畫多大（CSS 像素，中間亮的那一點約三成）、多亮（暗的星在城市裡淡一點） */
+  const starPx = (mag: number): number => Math.max(6, 17.5 - 3 * mag);
+  const starAlpha = (mag: number): number => Math.max(0.5, Math.min(1, 1.15 - 0.17 * mag));
+  /** 天上的東西的高度：0～8 度慢慢變亮（地平線附近被光害、霧擋掉） */
+  const rise = (alt: number): number => Math.max(0, Math.min(1, alt / 8));
   /** 天球的北極（世界座標：x 往東、y 往上、-z 往北），月亮的北邊朝這裡 */
   const POLE = new THREE.Vector3(0, Math.sin((O[0] * Math.PI) / 180), -Math.cos((O[0] * Math.PI) / 180));
   /** 不照光的東西（簷下、小法）：晚上跟著變暗（乘上 nightTint） */
@@ -2279,6 +2346,33 @@ export function openPark3D(o: Park3DOptions): () => void {
       m.opacity = look.night;
       m.visible = look.night > 0.02;
     }
+    // 獵戶座：天黑透才看得到（太陽在地平線下 2 度以下慢慢出來）
+    const dark = Math.max(0, Math.min(1, (look.night - 0.2) / 0.6));
+    const px = renderer.getPixelRatio();
+    for (const st of orionStars) {
+      const d = starEnu(at, st.s.ra, st.s.dec, O[0], O[1]);
+      st.p.position.copy(toWorld(d)).multiplyScalar(STAR_D);
+      const a = dark * rise(altOf(d)) * (st.s === ORION_NEBULA ? 0.32 : starAlpha(st.s.mag));
+      st.mat.opacity = a;
+      st.mat.size = (st.s === ORION_NEBULA ? 16 : starPx(st.s.mag)) * px;
+      st.p.visible = a > 0.01;
+    }
+    const lp = orionLines.geometry.getAttribute('position') as THREE.BufferAttribute;
+    ORION_LINES.forEach(([i, j], k) => {
+      const [a, b] = [orionStars[i].p.position, orionStars[j].p.position];
+      lp.setXYZ(k * 2, a.x, a.y, a.z);
+      lp.setXYZ(k * 2 + 1, b.x, b.y, b.z);
+    });
+    lp.needsUpdate = true;
+    // 腰帶中間那顆（參宿二）的高度：線、字照它淡出
+    const belt = starEnu(at, ORION_STARS[5].ra, ORION_STARS[5].dec, O[0], O[1]);
+    const up = dark * rise(altOf(belt) - 4);
+    orionLines.material.opacity = 0.26 * up;
+    orionLines.visible = up > 0.01;
+    orionLabel.position.copy(toWorld(starEnu(at, ORION_LABEL.ra, ORION_LABEL.dec, O[0], O[1]))).multiplyScalar(STAR_D);
+    orionLabel.material.opacity = 0.7 * up;
+    orionLabel.visible = up > 0.01;
+    root.dataset.orion = `${altOf(belt).toFixed(1)},${azOf(belt).toFixed(1)}`;
     root.dataset.sky = `${sAlt.toFixed(1)},${azOf(sd).toFixed(1)};${mAlt.toFixed(1)},${azOf(md).toFixed(1)},${lit.toFixed(2)};${look.night.toFixed(2)}`;
     dirty = true;
   }

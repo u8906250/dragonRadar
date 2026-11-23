@@ -9135,7 +9135,7 @@ async function submitReport(): Promise<void> {
     return;
   }
   setReportBusy(true);
-  setReportMsg('<p class="msg busy">讀取貼文並判讀中，約需 10 秒</p>');
+  setReportMsg('<p class="msg busy">讀取貼文並請AI背景判讀中，約需 20 秒</p>');
   const r = await submitResumable(url).finally(() => setReportBusy(false));
   if (!r.ok) {
     setReportMsg(`<p class="msg error">${esc(r.message)}</p>`);
