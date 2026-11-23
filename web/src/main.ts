@@ -4063,7 +4063,7 @@ function renderBottleDetail(id: number): boolean {
         : woof && !woofHere()
           ? `<p>這個瓶子在汪星的海上，${taken}把雷達的中心移回汪星（點汪星），拖曳走過去就能打開來看。</p>`
           : !woof && origin.source !== 'gps'
-            ? `<p>瓶子在${esc(where)}，${taken}按右上角「定位」用 GPS，走到 ${reachText(reach)} 內就能打開來看${b.taken ? '' : '、收藏'}。</p>`
+            ? `<p>瓶子在${esc(where)}，${taken}按右上角的定位按鈕（準星圖示）用 GPS，走到 ${reachText(reach)} 內就能打開來看${b.taken ? '' : '、收藏'}。</p>`
             : `<p>瓶子在${esc(where)}，${taken}還差約 ${Math.round(d - reach)} m。${woof ? '拖曳雷達走過去' : '走近一點'}就能打開來看${b.taken ? '' : '、收藏'}。</p>`;
   }
   const canCollect = !!got && !b.mine && !b.picked && !b.taken && near && !collecting.has(id);
@@ -4782,7 +4782,7 @@ async function submitBottle(): Promise<void> {
     return;
   }
   if (youOn !== 'earth') return say('搭火箭回地球才能丟瓶子');
-  if (origin.source !== 'gps') return say('要先按右上角「定位」用 GPS，瓶子會丟在你現在的位置附近');
+  if (origin.source !== 'gps') return say('要先按右上角的定位按鈕（準星圖示）用 GPS，瓶子會丟在你現在的位置附近');
   // 按軟木塞先確認，確認前把規則講清楚（v1.601 使用者說要再確認是否送出；v1.620 說丟出前把規則說清楚）
   const how = await confirmThrow();
   if (!how) return;
@@ -7384,7 +7384,7 @@ function setScale(setting: ScaleSetting): void {
 }
 
 function geoErrorText(e: GeolocationPositionError): string {
-  if (e.code === e.PERMISSION_DENIED) return '定位權限被拒絕。請到瀏覽器的網站設定，允許這個網站使用位置，再按一次「定位」。';
+  if (e.code === e.PERMISSION_DENIED) return '定位權限被拒絕。請到瀏覽器的網站設定，允許這個網站使用位置，再按一次定位按鈕（準星圖示）。';
   if (e.code === e.TIMEOUT) return '定位逾時，請到戶外或開啟 Wi-Fi 後再試一次。';
   return '目前無法取得位置，請稍後再試，或在雷達上拖曳到你的位置。';
 }
@@ -7392,6 +7392,13 @@ function geoErrorText(e: GeolocationPositionError): string {
 /** 按「定位」，雷達、地圖的範圍拉到外圈幾公里（本來就比較近的維持原本的，不拉遠；min 是最近可以到多近） */
 const LOCATE_KM = 2;
 const locateKm = (min: number): number => Math.max(min, Math.min(scaleKm, LOCATE_KM));
+
+/** 定位按鈕（圖示，v1.792）：定位中亮起來、一閃一閃，說明改成「定位中」 */
+function setLocating(on: boolean): void {
+  locateBtn.classList.toggle('on', on);
+  locateBtn.classList.toggle('busy', on);
+  locateBtn.setAttribute('aria-label', on ? '定位中' : '定位');
+}
 
 /**
  * 「定位」按鈕：清掉手動位置，先馬上飛回我的位置（上次知道的 GPS 位置，不用等；沒有 GPS、移到了手動位置就回到移動之前的位置），範圍拉到外圈 LOCATE_KM（本來就比較近的不動）
@@ -7426,12 +7433,10 @@ function locateMe(): Promise<boolean> {
     showBanner(bannerEl, '此瀏覽器不支援定位，可以在雷達上拖曳到你的位置。', 4000);
     return Promise.resolve(false);
   }
-  locateBtn.classList.add('on');
-  locateBtn.textContent = '定位中…';
+  setLocating(true);
   return new Promise((done) => navigator.geolocation.getCurrentPosition(
     (pos) => {
-      locateBtn.classList.remove('on');
-      locateBtn.textContent = '定位';
+      setLocating(false);
       lsSet(LS_ORIGIN, null);
       gpsAccuracy = pos.coords.accuracy;
       lastGps = { lat: pos.coords.latitude, lng: pos.coords.longitude, source: 'gps' };
@@ -7455,8 +7460,7 @@ function locateMe(): Promise<boolean> {
       done(true);
     },
     (e) => {
-      locateBtn.classList.remove('on');
-      locateBtn.textContent = '定位';
+      setLocating(false);
       showBanner(bannerEl, geoErrorText(e), 5000);
       done(false);
     },
@@ -10041,9 +10045,10 @@ async function boot(): Promise<void> {
     reportsAll = h.reports !== false;
     reportModules = h.reportModules ?? null;
     applyReportsOpen();
-    modeBadge.textContent = h.mode === 'mock' ? '示範資料' : h.mode === 'unconfigured' ? '未連線 Threads' : '即時';
+    // 正常連線（live）不寫「即時」（v1.792 使用者說拿掉）；示範資料、沒連上 Threads、離線才寫
+    modeBadge.textContent = h.mode === 'mock' ? '示範資料' : h.mode === 'unconfigured' ? '未連線 Threads' : '';
     modeBadge.classList.toggle('mock', h.mode !== 'live');
-    modeBadge.hidden = false;
+    modeBadge.hidden = h.mode === 'live';
   } catch {
     modeBadge.textContent = '離線';
     modeBadge.hidden = false;

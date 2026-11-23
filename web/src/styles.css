@@ -2461,7 +2461,16 @@ body.bottle-open { overflow: hidden; }
 
 /* 自己丟的瓶子被撿走了：按鈕右上角小紅點 */
 #bottle-btn { position: relative; }
-#bottle-btn.icon-chip { display: inline-flex; align-items: center; justify-content: center; width: 40px; padding: 0; }
+#bottle-btn.icon-chip, #locate-btn.icon-chip, #compass-btn.icon-chip { display: inline-flex; align-items: center; justify-content: center; width: 40px; padding: 0; }
+/* 定位（v1.792）：中間的點塗滿；定位中一閃一閃 */
+#locate-btn svg .dot { fill: currentColor; stroke: none; }
+#locate-btn.busy svg { animation: locate-blink 0.9s ease-in-out infinite; }
+@keyframes locate-blink { 50% { opacity: 0.35; transform: scale(0.88); } }
+/* 指北針（v1.792）：北邊那半紅色 */
+#compass-btn svg { width: 22px; height: 22px; }
+#compass-btn svg .needle-n { fill: #e5484d; stroke: none; }
+#compass-btn svg .needle-s { fill: currentColor; stroke: none; opacity: 0.45; }
+@media (prefers-reduced-motion: reduce) { #locate-btn.busy svg { animation: none; } }
 #bottle-btn svg { width: 23px; height: 23px; }
 #bottle-btn svg .cork { fill: currentColor; stroke: none; }
 #bottle-btn svg .scroll { stroke-width: 1.8; }
