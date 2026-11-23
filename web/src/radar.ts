@@ -1425,8 +1425,10 @@ export class Radar {
       if (!this.pointers.delete(e.pointerId)) return;
       // 短短點一下（沒拖、沒捏合）
       const tapped = e.type === 'pointerup' && this.pointers.size === 0 && !this.panning && !multi && e.timeStamp - downAt < DOUBLE_TAP_MS;
-      // 放開時手指還在快速移動：繼續滑（減少動態效果時不滑；用過兩根手指的，剩一根接著拖的才滑）
-      if (this.pointers.size === 0) this.endPan(e.type === 'pointerup' && (!multi || resumed) && !this.calm?.matches ? this.panSpeed(e.timeStamp) : null);
+      // 放開時手指（滑鼠）還在快速移動：繼續滑（用過兩根手指的，剩一根接著拖的才滑）。
+      // 減少動態效果時也滑（v1.794 使用者說電腦版 Chrome 放開後沒有繼續滑：Windows 關掉動畫效果，瀏覽器就回報減少動態；
+      // 這是自己拖出來的，跟定位飛過去、丟瓶子的動畫一樣照樣做）
+      if (this.pointers.size === 0) this.endPan(e.type === 'pointerup' && (!multi || resumed) ? this.panSpeed(e.timeStamp) : null);
       // 第二根也很快放開、沒怎麼動：接著縮放滑行
       if (this.pointers.size === 0 && pinchFling) {
         const pf = pinchFling;
@@ -1434,12 +1436,13 @@ export class Radar {
         if (e.type === 'pointerup' && e.timeStamp - pf.t < PINCH_BOTH_MS && Math.hypot(e.clientX - pf.x, e.clientY - pf.y) < 12) startFling(pf.v);
       }
       if (this.pointers.size === 1 && this.pinchDist > 0) {
-        // 放開第一根手指時還在快速捏合、張開：先記著（減少動態效果時不滑）
+        // 放開第一根手指時還在快速捏合、張開：先記著
         const v = e.type === 'pointerup' ? pinchSpeed(e.timeStamp) : 0;
         onZoom(1, true);
         // 剩下那根手指接著拖（像 Google 地圖）：從它現在的位置開始，拖曳沒有中斷，全部放開才算拖完
         const [rest] = [...this.pointers.values()];
-        pinchFling = Math.abs(v) >= FLING_MIN_SPEED && !this.calm?.matches ? { v, t: e.timeStamp, x: rest.x, y: rest.y } : null;
+        // 減少動態效果時也滑（跟拖曳放開一樣，v1.794）
+        pinchFling = Math.abs(v) >= FLING_MIN_SPEED ? { v, t: e.timeStamp, x: rest.x, y: rest.y } : null;
         this.panStart = { ...rest };
         this.panLast = { ...rest };
         this.panTrail = [];
