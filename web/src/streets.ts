@@ -211,6 +211,22 @@ export class Pbf {
  * 圖磚裡寫在雷達上的名稱（v1.691 使用者說在雷達上適度放路名、地標）：
  * 有名字的路（transportation_name 圖層，同一條路常常切成好幾段）、車站（poi 圖層的捷運、火車站）
  */
+/**
+ * OpenStreetMap 上寫錯的路名（使用者說的、查證過的）：[錯的, 對的, 範圍 [南, 西, 北, 東]]。只改範圍裡的（別的地方可能真的有同名的路），
+ * 錯的開頭的也改（那條路的巷弄「龍水一路12巷」）；OSM 改好了就可以拿掉
+ */
+const ROAD_NAME_FIXES: Array<[string, string, [number, number, number, number]]> = [
+  // v1.790 使用者說龍水一路應該是龍水一街（高雄鼓山區）：門牌、實價登錄都是龍水一街，OSM 的門牌也有「龍水一街 50號」，way 39821527 寫成龍水一路
+  ['龍水一路', '龍水一街', [22.63, 120.27, 22.67, 120.3]],
+];
+/** 照 ROAD_NAME_FIXES 改路名；at 是路上的一點 */
+export function fixRoadName(name: string, lat: number, lng: number): string {
+  for (const [bad, good, [s, w, n, e]] of ROAD_NAME_FIXES) {
+    if (name.startsWith(bad) && lat >= s && lat <= n && lng >= w && lng <= e) return good + name.slice(bad.length);
+  }
+  return name;
+}
+
 export interface RoadName {
   name: string;
   cls: string;
@@ -440,7 +456,7 @@ export function decodeTile(
         const t = tagsOf(tags);
         // 交流道、出口的名稱（subclass=junction）不寫
         if (!t.name || !nameClasses.has(t.class) || t.subclass === 'junction') continue;
-        for (const part of geomParts(geom, toLatLng)) if (part.length >= 4) roadsOut.push({ name: t.name, cls: t.class, pts: Float64Array.from(part) });
+        for (const part of geomParts(geom, toLatLng)) if (part.length >= 4) roadsOut.push({ name: fixRoadName(t.name, part[0], part[1]), cls: t.class, pts: Float64Array.from(part) });
       }
       continue;
     }

@@ -302,3 +302,13 @@ describe('decodeTile green', () => {
     expect(decodeTile(buf, 0, 0, 0, STREET_TIERS[0].classes, false).green).toEqual([]);
   });
 });
+
+describe('OSM 寫錯的路名（v1.790）', () => {
+  it('fixes 龍水一路 in 鼓山區 and its lanes, nowhere else', async () => {
+    const { fixRoadName } = await import('../src/streets');
+    expect(fixRoadName('龍水一路', 22.6488, 120.2829)).toBe('龍水一街');
+    expect(fixRoadName('龍水一路12巷', 22.6488, 120.2829)).toBe('龍水一街12巷');
+    expect(fixRoadName('龍水二路', 22.6498, 120.2834)).toBe('龍水二路');
+    expect(fixRoadName('龍水一路', 25.04, 121.55)).toBe('龍水一路');
+  });
+});
