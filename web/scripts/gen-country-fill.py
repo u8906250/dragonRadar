@@ -1,5 +1,5 @@
 """
-產生 web/src/country-fill.ts 的資料：有畫地圖的國家（荷蘭、日本、南韓、美國；台灣用 taiwan.ts 的 TAIWAN_RINGS）的形狀，
+產生 web/src/country-fill.ts 的資料：有畫地圖的國家（荷蘭、日本、南韓、美國、澳洲；台灣用 taiwan.ts 的 TAIWAN_RINGS）的形狀，
 拉遠時只有這些國家塗淡淡的底色（雷達、地球、地圖頁），其他國家只畫海岸線。
 用法：在 ne/ 放 world-atlas@2 的 countries-10m.json 和 Natural Earth 的 ne_10m_lakes.geojson、ne_10m_lakes_europe.geojson，裝 shapely（pip install --target geo-lib shapely），
 然後 PYTHONPATH=geo-lib python3 gen-country-fill.py：印出檢查結果，寫出 country-fill.txt（貼進 country-fill.ts）
@@ -38,7 +38,9 @@ def parts(g):
     return list(g.geoms) if hasattr(g, 'geoms') else [g]
 
 dc, gc = topo('ne/countries-10m.json')
-c = {g.get('id'): gc(g) for g in dc['objects']['countries']['geometries'] if g.get('id') in ('528', '392', '410', '840')}
+# 同一個編號可能有好幾塊（澳洲的 036 還有珊瑚海群島、阿什莫爾和卡捷群島），合起來
+ids = ('528', '392', '410', '840', '036')
+c = {i: unary_union([gc(g) for g in dc['objects']['countries']['geometries'] if g.get('id') == i]) for i in ids}
 # 每個國家：只要哪一塊、簡化到多少度（拉遠到 200 km 以上才塗，約 2 km 只差幾個像素；阿拉斯加的海岸很曲折，約 4 km）；約 200 km² 以下的島不塗
 ALASKA = box(-180, 51, -129.9, 72)
 SHAPES = [
@@ -47,13 +49,18 @@ SHAPES = [
     ('南韓', c['410'], 0.02),
     ('美國本土、夏威夷', c['840'].difference(ALASKA).intersection(box(-180, 15, -60, 50)), 0.02),
     ('阿拉斯加', c['840'].intersection(ALASKA), 0.04),
+    # 澳洲（v1.791）：海岸很長，跟阿拉斯加一樣簡化到約 4 km；豪勳爵島、麥覺理島這些很遠的島不塗
+    ('澳洲', c['036'].intersection(box(110, -45, 155, -9)), 0.04),
 ]
 # 國界包含湖面（五大湖美國那一半、大鹽湖、琵琶湖、艾瑟爾湖）：約 300 km² 以上的湖扣掉，湖裡面的變成洞（另一圈，照 evenodd 塗）
-lakes = unary_union([g for g in (shape(f['geometry']).buffer(0) for f in json.load(open('ne/ne_10m_lakes.geojson'))['features'] + json.load(open('ne/ne_10m_lakes_europe.geojson'))['features']) if g.area > 0.032])
+lake_list = [g for g in (shape(f['geometry']).buffer(0) for f in json.load(open('ne/ne_10m_lakes.geojson'))['features'] + json.load(open('ne/ne_10m_lakes_europe.geojson'))['features']) if g.area > 0.032]
 rings = []
 for name, g, tol in SHAPES:
+    # 只扣跟這個國家重疊的湖（v1.791：全世界的湖合成一塊再扣，澳洲算錯成幾乎是空的）
+    near = [l for l in lake_list if l.intersects(g)]
+    dry = g.difference(unary_union(near)) if near else g
     rs = []
-    for p in parts(g.difference(lakes).simplify(tol)):
+    for p in parts(dry.simplify(tol)):
         if p.area <= 0.02: continue
         rs.append([(round(y, 3), round(x, 3)) for (x, y) in p.exterior.coords])
         rs += [[(round(y, 3), round(x, 3)) for (x, y) in h.coords] for h in p.interiors if Polygon(h).area > 0.02]

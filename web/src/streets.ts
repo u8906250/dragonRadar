@@ -5,6 +5,7 @@
  * 圖磚是 Mapbox Vector Tile（protobuf），這裡只解讀用得到的欄位，不另外加函式庫。
  */
 
+import { AU_LAND } from './au-land';
 import { JP_LAND } from './jp-land';
 import { KR_LAND } from './kr-land';
 import { NL_LAND } from './nl-land';
@@ -133,10 +134,11 @@ const NL = landOf(NL_LAND);
 const JP = landOf(JP_LAND);
 const KR = landOf(KR_LAND);
 const US = landOf(US_LAND);
+const AU = landOf(AU_LAND);
 
 /**
  * 拉遠（regional 那一級）只畫這幾個地方，只抓 box 裡面的圖磚（同一張圖磚各地方留的不一樣，快取照 id 分開）：
- * 台灣只畫台灣（本島、離島）的路（對岸不畫）；荷蘭（v1.745）、日本（v1.746）、南韓、美國（v1.754）的路、綠地、河湖都只畫它的，
+ * 台灣只畫台灣（本島、離島）的路（對岸不畫）；荷蘭（v1.745）、日本（v1.746）、南韓、美國（v1.754）、澳洲（v1.791）的路、綠地、河湖都只畫它的，
  * 路、河切在國界、海岸上，不會被圖磚切成方的。land：只抓碰到陸地的圖磚（全是海的不抓）；far：超過 km 改用那一級的圖磚
  * （日本很大，z7 拉到 600 km 全螢幕要七、八十張，超過圖磚快取的 MAX_TILES 會一直重抓；z6 只剩國道、快速道路，拉那麼遠也只看得到這些；
  * 美國的圖磚路多，400 km 以上再用 z5）。has：雷達中心在不在這個地方（日本的範圍包住南韓，中心在哪個地方的陸地上就用哪個）
@@ -147,6 +149,8 @@ const REGIONS: Array<{ id: string; box: Box; keep: (t: TileData) => TileData; la
   { id: 'kr', box: KR.box, keep: keepIn(KR.inside), land: KR.boxes, has: KR.inside },
   { id: 'jp', box: JP.box, keep: keepIn(JP.inside), land: JP.boxes, far: [{ km: 200, zoom: 6 }], has: JP.inside },
   { id: 'us', box: US.box, keep: keepIn(US.inside), land: US.boxes, far: [{ km: 200, zoom: 6 }, { km: 400, zoom: 5 }], has: US.inside },
+  // 澳洲跟美國一樣大，路比較少：一樣 200 km 以上用 z6、400 km 以上用 z5
+  { id: 'au', box: AU.box, keep: keepIn(AU.inside), land: AU.boxes, far: [{ km: 200, zoom: 6 }, { km: 400, zoom: 5 }], has: AU.inside },
 ];
 export const tierOf = (km: number): (typeof STREET_TIERS)[number] => STREET_TIERS.find((t) => km <= t.maxKm) ?? STREET_TIERS[STREET_TIERS.length - 1];
 const TILEJSON = 'https://tiles.openfreemap.org/planet';

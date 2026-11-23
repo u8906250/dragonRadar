@@ -153,7 +153,7 @@ describe('onTaiwan', () => {
 });
 
 describe('streetTiles', () => {
-  it('fetches only the Taiwan (Netherlands, Japan, South Korea, US) tiles when zoomed out', () => {
+  it('fetches only the Taiwan (Netherlands, Japan, South Korea, US, Australia) tiles when zoomed out', () => {
     vi.stubGlobal('fetch', () => new Promise(() => {}));
     try {
       // 台北選「全台」（約 400 km）：z7 只抓台灣那六張，對岸、海上的不抓
@@ -170,8 +170,10 @@ describe('streetTiles', () => {
       expect(streetTiles(61.22, -149.9, 630, 600, () => {}).pending).toBe(12);
       // 沖繩 600 km 碰到台灣、日本：中心在日本，抓日本的（以前抓台灣的）
       expect(streetTiles(26.21, 127.68, 630, 600, () => {}).pending).toBe(5);
-      // 沒有拉遠地圖的地方（雪梨）：一張都不抓
-      expect(streetTiles(-33.87, 151.21, 600, 600, () => {}).pending).toBe(0);
+      // 澳洲（v1.791，雪梨 600 km：400 km 以上用 z5，只抓碰到澳洲陸地的）
+      expect(streetTiles(-33.87, 151.21, 600, 600, () => {}).pending).toBeGreaterThan(0);
+      // 沒有拉遠地圖的地方（奧克蘭）：一張都不抓
+      expect(streetTiles(-36.85, 174.76, 600, 600, () => {}).pending).toBe(0);
     } finally {
       vi.unstubAllGlobals();
     }

@@ -1155,6 +1155,13 @@ const REGION_SLOTS: RegionSlot[] = [
   { area: { s: 24.3, w: -100.0, n: 49.5, e: -66.8 }, ownCoast: true, load: () => import('./usa-east'), map: null, loading: false },
   { area: { s: 51.0, w: -180.0, n: 71.6, e: -129.9 }, ownCoast: true, load: () => import('./usa-alaska'), map: null, loading: false },
   { area: { s: 18.8, w: -160.6, n: 22.4, e: -154.7 }, ownCoast: true, load: () => import('./usa-hawaii'), map: null, loading: false },
+  // 澳洲（australia-*.ts，v1.791 使用者說把澳洲畫出來）：很大，分成西澳、中部、昆士蘭、東南、塔斯馬尼亞五塊，碰到哪塊載入哪塊；
+  // 1:10m 的海岸線、湖岸（多半是乾的鹽湖）取代世界海岸線，州界、州名、城市名
+  { area: { s: -35.5, w: 112.5, n: -13.4, e: 129.0 }, ownCoast: true, load: () => import('./australia-west'), map: null, loading: false },
+  { area: { s: -38.2, w: 129.0, n: -10.8, e: 141.0 }, ownCoast: true, load: () => import('./australia-central'), map: null, loading: false },
+  { area: { s: -29.0, w: 141.0, n: -9.0, e: 154.0 }, ownCoast: true, load: () => import('./australia-north'), map: null, loading: false },
+  { area: { s: -39.2, w: 141.0, n: -29.0, e: 154.0 }, ownCoast: true, load: () => import('./australia-southeast'), map: null, loading: false },
+  { area: { s: -43.8, w: 143.5, n: -39.2, e: 149.0 }, ownCoast: true, load: () => import('./australia-tas'), map: null, loading: false },
 ];
 function loadRegion(r: RegionSlot): void {
   if (r.map || r.loading) return;

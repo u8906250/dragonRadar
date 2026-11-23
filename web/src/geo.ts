@@ -242,10 +242,19 @@ export function outsideBox(ring: Array<[number, number]>, b: GeoBox): Array<Arra
   if (n <= b.s || s >= b.n || e <= b.w || w >= b.e) return [ring];
   if (s >= b.s && n <= b.n && w >= b.w && e <= b.e) return [];
   const mid = (r: Array<[number, number]>): Array<[number, number]> => clipHalf(clipHalf(r, 1, b.w, false), 1, b.e, true);
-  // 頭尾接起來（跟原本的資料一樣）：最後一段常是沿著方框邊走的長邊，塗海時要補點
+  // 頭尾接起來（跟原本的資料一樣）：最後一段常是沿著方框邊走的長邊，塗海時要補點。
+  // 只剩沿著方框邊走的（面積是零，v1.791 澳洲分成好幾塊時，兩塊交界的經線上剩一條）不要：塗海時會變成伸到海上的細縫
   return [clipHalf(ring, 1, b.w, true), clipHalf(ring, 1, b.e, false), clipHalf(mid(ring), 0, b.s, true), clipHalf(mid(ring), 0, b.n, false)]
     .filter((r) => r.length >= 3)
-    .map((r) => (r[0][0] === r[r.length - 1][0] && r[0][1] === r[r.length - 1][1] ? r : [...r, r[0]]));
+    .map((r) => (r[0][0] === r[r.length - 1][0] && r[0][1] === r[r.length - 1][1] ? r : [...r, r[0]]))
+    .filter((r) => Math.abs(ringArea(r)) > 1e-9);
+}
+
+/** 一圈的面積（平方度，經緯度當平面；正負照方向） */
+function ringArea(r: Array<[number, number]>): number {
+  let a = 0;
+  for (let i = 0, j = r.length - 1; i < r.length; j = i++) a += (r[j][1] + r[i][1]) * (r[j][0] - r[i][0]);
+  return a / 2;
 }
 
 /** 從 from 往 bearing 方向（0 = 北，順時針）走 km 公里到的點（大圓） */
