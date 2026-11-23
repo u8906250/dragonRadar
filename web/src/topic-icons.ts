@@ -4,6 +4,9 @@
  */
 const TOPIC_GROUPS: Array<{ key: string; words: RegExp }> = [
   { key: 'gift', words: /發放|贈送|索取|抽獎|領取/ },
+  // v1.787 使用者說快閃、比賽也要圖示：排在表演、遊行、工作坊前面（「快閃表演」「舞蹈比賽」「路跑比賽」「繪畫比賽」算快閃、比賽）
+  { key: 'flash', words: /快閃/ },
+  { key: 'contest', words: /比賽|競賽|大賽|賽事|球賽|錦標|盃|決賽|初賽|選拔/ },
   { key: 'rally', words: /造勢|晚會|大會|誓師|成立|拜票|掃街|車掃|應援/ },
   { key: 'talk', words: /開講|講座|論壇|座談|分享|說明|演講|對談|讀書/ },
   { key: 'music', words: /音樂|演唱|表演|演出|戲劇|舞|電影|放映|晚會/ },
@@ -15,7 +18,7 @@ const TOPIC_GROUPS: Array<{ key: string; words: RegExp }> = [
   // v1.677 使用者說加聯誼、用愛心（志工改成小樹苗）
   { key: 'social', words: /聯誼|交友|相親|派對|聚會|約會/ },
 ];
-/** 每一類的名稱（搜尋框下面的類型按鈕，v1.676 使用者說提供這些活動類型快速搜尋），照 TOPIC_GROUPS 的順序 */
+/** 每一類的名稱（搜尋框下面的類型按鈕，v1.676 使用者說提供這些活動類型快速搜尋）；快閃、比賽是後來加的，按鈕排在最後 */
 export const TOPIC_TYPES: Array<{ key: string; label: string }> = [
   { key: 'gift', label: '發放' },
   { key: 'rally', label: '造勢' },
@@ -27,6 +30,8 @@ export const TOPIC_TYPES: Array<{ key: string; label: string }> = [
   { key: 'exhibit', label: '展覽' },
   { key: 'care', label: '志工' },
   { key: 'social', label: '聯誼' },
+  { key: 'flash', label: '快閃' },
+  { key: 'contest', label: '比賽' },
 ];
 /**
  * 台派雷達的店家類型（判讀時選一個，跟伺服器 worker/src/taipai.ts 的 STORE_TYPES 一樣）：雷達、地圖的小圖示和類型按鈕照這個分。
@@ -128,6 +133,10 @@ export function glyphSvg(key: string, c: string): string {
       return `<path d="M0 7 V-1" ${s} stroke-width="1.8"/><path d="M0 0 C-0.8 -4.6 -5.6 -6 -7 -4.2 C-6.2 -0.9 -3 0.3 0 0 Z" fill="${c}"/><path d="M0 -1.8 C0.9 -6.6 5.8 -7.8 7 -5.8 C6 -2.6 3 -1.6 0 -1.8 Z" fill="${c}"/><path d="M-3.5 7 H3.5" ${s} stroke-width="1.6"/>`;
     case 'social': // 愛心（聯誼）
       return `<path d="M0 6 C-4 3 -7 0.5 -7 -2.5 a3.4 3.4 0 0 1 7 -1.2 a3.4 3.4 0 0 1 7 1.2 C7 0.5 4 3 0 6 z" fill="${c}"/>`;
+    case 'flash': // 閃電（快閃）
+      return `<path d="M2 -8 L-5.2 1.2 H-0.6 L-2.2 8 L5.2 -1.6 H0.6 Z" fill="${c}"/>`;
+    case 'contest': // 獎盃（比賽）
+      return `<path d="M-4.6 -7 H4.6 V-3.2 A4.6 4.6 0 0 1 -4.6 -3.2 Z" fill="${c}"/><path d="M-4.6 -5.6 H-6.6 V-4.4 A2.6 2.6 0 0 0 -3.6 -1.6 M4.6 -5.6 H6.6 V-4.4 A2.6 2.6 0 0 1 3.6 -1.6" ${s} stroke-width="1.4"/><rect x="-1.1" y="1.2" width="2.2" height="3" fill="${c}"/><rect x="-4.2" y="4" width="8.4" height="3" rx="0.9" fill="${c}"/>`;
     case 'eat': // 碗和筷子
       return `<path d="M-7 -1 h14 a7 6.5 0 0 1 -14 0 z" fill="${c}"/><path d="M-3.5 6.5 h7" ${s} stroke-width="1.6"/><path d="M1 -2.5 L5.5 -8 M3 -2.5 L7.5 -7" ${s} stroke-width="1.4"/>`;
     case 'cafe': // 咖啡杯冒煙

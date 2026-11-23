@@ -21,7 +21,7 @@ export const FEEDBACK_KINDS = {
 export type FeedbackKind = keyof typeof FEEDBACK_KINDS;
 
 /** 「類型錯誤」可以選的類型：跟網頁 topic-icons.ts 的 TOPIC_TYPES（類型按鈕、地圖小圖示）一樣 */
-export const FEEDBACK_TOPICS = ['發放', '造勢', '講座', '表演', '市集', '工作坊', '遊行', '展覽', '志工', '聯誼'] as const;
+export const FEEDBACK_TOPICS = ['發放', '造勢', '講座', '表演', '市集', '工作坊', '遊行', '展覽', '志工', '聯誼', '快閃', '比賽'] as const;
 const isTopic = (v: unknown): v is string => typeof v === 'string' && (FEEDBACK_TOPICS as readonly string[]).includes(v);
 
 const NOTE_MAX = 200;
