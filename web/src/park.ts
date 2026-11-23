@@ -778,7 +778,7 @@ const SNIFF_GAP_M = 0.32;
 /** 走去聞：離這裡多遠（直線）以內的、照步道最多走幾公尺 */
 const SNIFF_NEAR_M = 20;
 const SNIFF_MAX_M = 32;
-const MARK_R: Record<ParkMarkKind, number> = { lamp: 0.12, bench: 0.3, slab: 0.3, bin: 0.25, stele: 0.4, other: 0.3 };
+const MARK_R: Record<ParkMarkKind, number> = { lamp: 0.12, bench: 0.3, slab: 0.3, vending: 0.5, bin: 0.25, stele: 0.4, other: 0.3 };
 let sniffTrees: SniffSpot[] | null = null;
 let sniffMarks: SniffSpot[] = [];
 let sniffAll: SniffSpot[] | null = null;
@@ -796,11 +796,12 @@ function sniffSpots(): SniffSpot[] {
 export function setSniffMarks(marks: ParkMark[]): void {
   sniffMarks = marks.map((m) => {
     const at = toM([m.lat, m.lng]);
-    if (m.kind !== 'bench' && m.kind !== 'slab') return { at, r: MARK_R[m.kind] ?? 0.3 };
-    // 長椅、石板凳：坐的人面向 heading（0 是北、順時針），站在前面或後面
+    if (m.kind !== 'bench' && m.kind !== 'slab' && m.kind !== 'vending') return { at, r: MARK_R[m.kind] ?? 0.3 };
+    // 長椅、石板凳：坐的人面向 heading（0 是北、順時針），站在前面或後面；販賣機正面朝 heading，站在前面或左右兩邊（後面常靠著東西）
     const h = ((m.heading ?? 0) * Math.PI) / 180;
     const front: Pt = [Math.sin(h), Math.cos(h)];
-    return { at, r: MARK_R[m.kind], sides: [front, [-front[0], -front[1]]] };
+    const sides: Pt[] = m.kind === 'vending' ? [front, [front[1], -front[0]], [-front[1], front[0]]] : [front, [-front[0], -front[1]]];
+    return { at, r: MARK_R[m.kind], sides };
   });
   sniffAll = null;
 }

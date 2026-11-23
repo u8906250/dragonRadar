@@ -151,6 +151,12 @@ const BENCH_LEN = 1.6;
  * 照片裡沒有量得到大小的東西，照一般公園石凳估：長 1.8、深 0.45、板厚 0.1、座面高 0.45 公尺，腳厚 0.17、離兩頭 0.4 公尺
  */
 const SLAB = { len: 1.8, depth: 0.45, thick: 0.1, seat: 0.45, legW: 0.17, legDepth: 0.36, legIn: 0.4 };
+/**
+ * 販賣機（v1.805 使用者給的照片：公園裡的飲料販賣機）：白色機身，上面一大片會亮的展示窗（最上面綠色橫條、三層飲料、每層底下一排藍色按鈕燈），
+ * 右邊付款的面板（小螢幕），下面紅色廣告板、出貨口，最底下深色的底座。大小照一般飲料販賣機：高 1.83、寬 1.03、深 0.72 公尺；
+ * 商標、文字不畫（只照顏色）；展示窗自己會亮，晚上前面地上一圈光
+ */
+const VEND = { w: 1.03, h: 1.83, d: 0.72, base: 0.42 };
 /** 石椅的側面（往後、往上，公尺；前面是 -）：從腳的前面往後繞一圈 */
 const BENCH_PROFILE: Pt[] = [
   [-0.07, 0], [0.11, 0], [0.19, 0.14], [0.25, 0.34], [0.27, 0.55], [0.25, 0.71], [0.19, 0.79], [0.12, 0.79], [0.07, 0.73],
@@ -170,7 +176,7 @@ const FAST = 2.5;
 const STICK_RUN_S = 0.5;
 const TAP_MAX_M = 150;
 
-const KIND_NAME: Record<ParkMarkKind, string> = { lamp: '路燈', bench: '長椅', slab: '石板凳', bin: '垃圾桶', stele: '石碑', other: '其他' };
+const KIND_NAME: Record<ParkMarkKind, string> = { lamp: '路燈', bench: '長椅', slab: '石板凳', vending: '販賣機', bin: '垃圾桶', stele: '石碑', other: '其他' };
 const KINDS = Object.keys(KIND_NAME) as ParkMarkKind[];
 
 /** 一圈經緯度在不在裡面（公尺座標，射線法） */
@@ -2018,6 +2024,63 @@ export function openPark3D(o: Park3DOptions): () => void {
     halo: new THREE.SpriteMaterial({ map: glowTex('rgba(255,236,190,0.9)', 'rgba(255,214,150,0.35)'), blending: THREE.AdditiveBlending, depthWrite: false, opacity: 0, visible: false }),
     pool: new THREE.MeshBasicMaterial({ map: glowTex('rgba(255,214,150,0.5)', 'rgba(255,200,130,0.22)'), blending: THREE.AdditiveBlending, transparent: true, depthWrite: false, opacity: 0, visible: false }),
   };
+  // 販賣機的展示窗：畫一張圖（綠色橫條、三層彩色的瓶罐、每層底下一排藍色按鈕燈），自己會亮（不照光）
+  const vendWindow = (() => {
+    const cv = document.createElement('canvas');
+    [cv.width, cv.height] = [384, 384];
+    const g = cv.getContext('2d')!;
+    g.fillStyle = '#eef5fa';
+    g.fillRect(0, 0, 384, 384);
+    g.fillStyle = '#2f9a4a';
+    g.fillRect(0, 0, 384, 44);
+    g.fillStyle = '#5fbf6f';
+    g.fillRect(0, 40, 384, 4);
+    const rows: Array<{ y: number; h: number; colors: string[] }> = [
+      { y: 60, h: 62, colors: ['#6b2f1f', '#6b2f1f', '#e0a020', '#e06a3a', '#efe26a', '#2b2b2b', '#2b2b2b', '#5a3a2a', '#3c8c3c', '#3c8c3c', '#7ab6e6', '#7ab6e6'] },
+      { y: 156, h: 80, colors: ['#3a7fd0', '#3a7fd0', '#3a7fd0', '#3a7fd0', '#a8cdee', '#a8cdee', '#a8cdee', '#a8cdee', '#5aaee6', '#5aaee6', '#5aaee6', '#5aaee6'] },
+      { y: 270, h: 80, colors: ['#dfe8f0', '#dfe8f0', '#dfe8f0', '#dfe8f0', '#3b8f4f', '#5a9f4f', '#d9a040', '#5a2c20', '#a8d27a', '#8f7fd0', '#e6e27a', '#6a3fa0'] },
+    ];
+    for (const r of rows) {
+      r.colors.forEach((c, i) => {
+        const x = 14 + i * 30;
+        g.fillStyle = c;
+        g.beginPath();
+        g.roundRect(x, r.y + (r.h > 70 ? 10 : 0), 24, r.h - (r.h > 70 ? 10 : 0), 5);
+        g.fill();
+        // 瓶子的瓶口
+        if (r.h > 70) g.fillRect(x + 8, r.y, 8, 12);
+        g.fillStyle = 'rgba(255,255,255,0.35)';
+        g.fillRect(x + 4, r.y + r.h * 0.35, 16, 8);
+      });
+      // 每層底下的軌道和一排藍色按鈕燈
+      g.fillStyle = '#4a4e56';
+      g.fillRect(6, r.y + r.h + 4, 372, 14);
+      g.fillStyle = '#3d6bff';
+      for (let i = 0; i < 12; i++) {
+        g.beginPath();
+        g.ellipse(26 + i * 30, r.y + r.h + 11, 9, 5, 0, 0, Math.PI * 2);
+        g.fill();
+      }
+    }
+    const t = new THREE.CanvasTexture(cv);
+    t.colorSpace = THREE.SRGBColorSpace;
+    return t;
+  })();
+  const vendMats = {
+    body: mat(0xe9e9e4),
+    base: mat(0x1f2a25),
+    ad: mat(0x8c2230),
+    dark: mat(0x2a2d31),
+    window: new THREE.MeshBasicMaterial({ map: vendWindow }),
+    screen: new THREE.MeshBasicMaterial({ color: 0x5aa0e6 }),
+    // 晚上前面地上一圈白白的光（跟路燈一樣是加上去的）
+    pool: (() => {
+      const m = new THREE.MeshBasicMaterial({ map: glowTex('rgba(225,238,255,0.55)', 'rgba(210,228,255,0.22)'), blending: THREE.AdditiveBlending, transparent: true, depthWrite: false, opacity: 0, visible: false });
+      m.userData.k = 0.9;
+      nightGlow.push(m);
+      return m;
+    })(),
+  };
   const ghostMat = new THREE.MeshLambertMaterial({ color: 0x3aa0ff, transparent: true, opacity: 0.55 });
   /** 一個標記的樣子（原點在地上，往北是 -z；長椅坐的人面向 -z） */
   function markModel(kind: ParkMarkKind, ghost: boolean): THREE.Group {
@@ -2082,6 +2145,29 @@ export function openPark3D(o: Park3DOptions): () => void {
       put(plate, markMats.granite, 0, SLAB.seat - SLAB.thick + edge, 0);
       const legH = SLAB.seat - SLAB.thick;
       for (const s of [-1, 1]) put(new THREE.BoxGeometry(SLAB.legW, legH, SLAB.legDepth), markMats.granite, s * (hw - SLAB.legIn - SLAB.legW / 2), legH / 2, 0);
+    } else if (kind === 'vending') {
+      // 販賣機：機身、底座，正面（-z）貼展示窗、付款面板、廣告板、出貨口
+      const { w, h, d, base } = VEND;
+      put(new THREE.BoxGeometry(w, h - base, d), vendMats.body, 0, base + (h - base) / 2, 0);
+      put(new THREE.BoxGeometry(w * 0.96, base, d * 0.96), vendMats.base, 0, base / 2, 0);
+      const front = -d / 2 - 0.004;
+      const face = (geo: THREE.BufferGeometry, m: THREE.Material, x: number, y: number): void => {
+        const mesh = new THREE.Mesh(geo.rotateY(Math.PI), ghost ? ghostMat : m);
+        mesh.position.set(x, y, front);
+        g.add(mesh);
+      };
+      // 正面朝 -z：從正面看，左邊是 +x（平面轉 180 度後貼上）
+      face(new THREE.PlaneGeometry(0.76, 0.76), vendMats.window, 0.1, 1.33);
+      face(new THREE.PlaneGeometry(0.1, 0.16), vendMats.screen, -0.38, 1.38);
+      face(new THREE.PlaneGeometry(0.3, 0.22), vendMats.ad, 0.24, 0.74);
+      face(new THREE.PlaneGeometry(0.06, 0.035), vendMats.screen, -0.05, 0.86);
+      face(new THREE.PlaneGeometry(0.56, 0.13), vendMats.dark, 0.06, 0.3);
+      if (!ghost) {
+        const pool = new THREE.Mesh(new THREE.CircleGeometry(1.5, 32).rotateX(-Math.PI / 2), vendMats.pool);
+        pool.position.set(0, 0.03, -d / 2 - 0.9);
+        pool.raycast = () => {};
+        g.add(pool);
+      }
     } else if (kind === 'stele') {
       // 灰色的石碑：方形的底座、高高的碑身（照使用者給的照片，大小估的），刻字的那面朝 -z
       put(new THREE.BoxGeometry(0.95, 0.35, 0.75), markMats.granite, 0, 0.175, 0);
@@ -2136,7 +2222,7 @@ export function openPark3D(o: Park3DOptions): () => void {
     if (draft) {
       const p = en([draft.lat, draft.lng]);
       const d = Math.hypot(p[0] - pos[0], p[1] - pos[1]);
-      el.textContent = `${draft.id ? `改 #${draft.id} ` : '新的'}${KIND_NAME[draft.kind]}・離你 ${d.toFixed(1)} 公尺・${draft.lat.toFixed(7)}, ${draft.lng.toFixed(7)}${draft.kind === 'bench' || draft.kind === 'slab' || draft.kind === 'stele' ? `・面向 ${Math.round(draft.heading)}°` : ''}`;
+      el.textContent = `${draft.id ? `改 #${draft.id} ` : '新的'}${KIND_NAME[draft.kind]}・離你 ${d.toFixed(1)} 公尺・${draft.lat.toFixed(7)}, ${draft.lng.toFixed(7)}${draft.kind === 'bench' || draft.kind === 'slab' || draft.kind === 'vending' || draft.kind === 'stele' ? `・面向 ${Math.round(draft.heading)}°` : ''}`;
     } else el.textContent = `點地面放一個${KIND_NAME[kind]}，點已經標的可以改；已經標了 ${marks.length} 個`;
   };
   function panel(): void {
