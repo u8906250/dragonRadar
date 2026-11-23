@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { linkPostId, youtubeIdOf } from '../src/reports';
+import { linkPostId, REPORT_POST_ID_RE, youtubeIdOf } from '../src/reports';
 import { cleanYoutubeText, parseYoutubePostHtml, parseYoutubePostUrl } from '../src/sources/youtube';
 // 2026-11-24 抓的 YouTube 社群貼文頁（沈伯洋Puma 的市民之夜），只留 JSON-LD（前面多放一個別的 JSON-LD）
 import post from './fixtures/youtube-post.html?raw';
@@ -55,5 +55,10 @@ describe('YouTube 貼文的貼文 id', () => {
     expect(await linkPostId(envWith([{ id: 'yt-Ugkx_abc-123', module: 'food' }]), 'Ugkx_abc-123', 'current', 'yt')).toBe('yt-Ugkx_abc-123.current');
     expect(youtubeIdOf('yt-Ugkx_abc-123.current')).toBe('Ugkx_abc-123');
     expect(youtubeIdOf('yt-UgkxZWKbAGFTcq7j2GLIF_4fZ6XIMJpQ2vjk')).toBe('UgkxZWKbAGFTcq7j2GLIF_4fZ6XIMJpQ2vjk');
+  });
+  it('is accepted when confirming, editing and deleting a report (v1.806 forgot yt-)', () => {
+    for (const id of ['yt-UgkxZWKbAGFTcq7j2GLIF_4fZ6XIMJpQ2vjk', 'yt-Ugkx_abc-123.current', 'link-Df9XWDpoAZF', 'link-Df9XWDpoAZF.books', 'acc-abc123', 'otx-123', 'ptx-4567', 'lum-q3ptes8j', 'note-1'])
+      expect(REPORT_POST_ID_RE.test(id)).toBe(true);
+    for (const id of ['spot-Df9XWDpoAZF', 'mine', 'confirm', 'yt-', 'yt-abc/def', 'dry-123']) expect(REPORT_POST_ID_RE.test(id)).toBe(false);
   });
 });

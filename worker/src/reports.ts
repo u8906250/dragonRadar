@@ -929,9 +929,15 @@ async function submitEventPage(env: Env, p: PageLink, ip: string, now: number, d
   return previewResult(env, post, plan, !!earlier.existing, now);
 }
 
+/**
+ * 使用者回報的貼文 id（確認、修改、補充、刪除我的回報都認這個）：Threads（link-）、沒有連結的（note-）、活動頁（acc-、otx-、ptx-、lum-）、
+ * YouTube 社群貼文（yt-，v1.806 漏加，確認時都說代碼不對），後面可能接 .雷達
+ */
+export const REPORT_POST_ID_RE = /^(?:link|note|acc|otx|ptx|lum|yt)-[\w-]+(?:\.[a-z]+)?$/;
+
 async function checkConfirm(env: Env, body: { postId?: unknown; token?: unknown }): Promise<PostRow> {
   const postId = typeof body.postId === 'string' ? body.postId : '';
-  if (!/^(?:link|note|acc|otx|ptx|lum)-[\w-]+(?:\.[a-z]+)?$/.test(postId) || body.token !== (await confirmToken(env, postId))) throw new ReportError(400, '確認代碼不對，請重新貼一次連結');
+  if (!REPORT_POST_ID_RE.test(postId) || body.token !== (await confirmToken(env, postId))) throw new ReportError(400, '確認代碼不對，請重新貼一次連結');
   const post = await getPost(env, postId);
   if (!post) throw new ReportError(404, '找不到這則回報，請重新貼一次連結');
   assertReportsOpen(env, post.module);

@@ -1684,7 +1684,7 @@ const ROUTE_RELOCATE_EVERY_SEC = 20 * 60;
  */
 export async function relocateRouteStops(env: Env, now: number): Promise<{ checked: number; located: number; restored: number }> {
   const { results } = await env.DB.prepare(
-    `SELECT id, post_id, stops FROM routes WHERE id LIKE 'link-%' AND show_until > ?
+    `SELECT id, post_id, stops FROM routes WHERE (id LIKE 'link-%' OR id LIKE 'yt-%') AND show_until > ?
        AND EXISTS (SELECT 1 FROM events e WHERE e.post_id = routes.post_id AND e.status IN ('upcoming', 'active'))`,
   )
     .bind(now)

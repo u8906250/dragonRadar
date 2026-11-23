@@ -20,7 +20,7 @@ import { moduleOf } from './modules';
 import { shareInfo } from './share';
 import { ACCOUNT_RE, adminStats, publicStats, setHiddenAccount } from './stats';
 import { PUSH_RADIUS_KM, PushError, b64urlEncode, deleteSubscription, encryptPayload, purgeSubscriptions, pushStarted, saveSubscription, sendPush, vapidKeys } from './push';
-import { adminDecideReview, adminListReviews, assertEventReportsOpen, confirmLink, editLink, ENDED_REPORTS_NEEDED, locateForEdit, MAX_LINK_AGE_SEC, NOTES_CLOSED, ReportError, REPORTS_LOCKED, ipHash, myReports, notifyReview, purgeReports, recheckLinks, rejectLink, reportModules, requestReview, submitLink, supplementLink, withdrawReport } from './reports';
+import { adminDecideReview, adminListReviews, assertEventReportsOpen, confirmLink, editLink, ENDED_REPORTS_NEEDED, locateForEdit, MAX_LINK_AGE_SEC, NOTES_CLOSED, ReportError, REPORTS_LOCKED, ipHash, myReports, notifyReview, purgeReports, recheckLinks, rejectLink, REPORT_POST_ID_RE, reportModules, requestReview, submitLink, supplementLink, withdrawReport } from './reports';
 import { D1Meter, isTransient, withResilientDb } from './db';
 import { addressCacheKey, geocodeAddress, parseTwAddress } from './address';
 import { adminBottleRejects, adminListBottles, adminSetBottle, deleteBottleRejects, moderate, moderatePhoto, purgeBottleReads, purgeBottleRejects, BOTTLE_MAX_WEIGHT, bottleInfo, bottlePhoto, bottlesEnabled, photosEnabled, readBottle, SEE_RADIUS_KM, deleteBottle, DRIFT_EVERY_SEC, driftBottles, dropBottle, listBottles, myBottles, PER_DEVICE_PER_DAY, PICK_RADIUS_M, pickBottle, proofFor, purgeBottles, reportBottle, SEA_AFTER_SEC, uncollectLetter, verifyProof, WOOF_STAY_SEC } from './bottles';
@@ -277,8 +277,9 @@ async function handle(req: Request, env: Env, ctx: ExecutionContext): Promise<Re
     const dev = await deviceId(env, req);
     return jsonResponse({ reports: dev ? await myReports(env, dev) : [] });
   }
-  const mineDel = /^\/api\/reports\/((?:link|note|acc|otx)-[\w-]+(?:\.[a-z]+)?)$/.exec(path);
-  if (req.method === 'DELETE' && mineDel) {
+  // 刪除我的回報（Peatix、Luma、YouTube 的以前漏了，v1.807 改用跟確認一樣的規則）
+  const mineDel = /^\/api\/reports\/([^/]+)$/.exec(path);
+  if (req.method === 'DELETE' && mineDel && REPORT_POST_ID_RE.test(mineDel[1])) {
     const dev = await deviceId(env, req);
     if (!dev) throw new HttpError(400, '缺少裝置代碼，請重新整理頁面');
     return jsonResponse(await withdrawReport(env, mineDel[1], dev, now));
