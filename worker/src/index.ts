@@ -10,6 +10,7 @@ import { CURRENT_MAP_URL, type CurrentMapRoute } from './sources/currentmap';
 import { mergeIntoOfficial } from './sources/merge';
 import { apifyTrial } from './sources/apify';
 import { fetchThreadsPost, resolveThreadsLink, shortcodeToUnix } from './sources/link';
+import { fetchYoutubePost, parseYoutubePostUrl } from './sources/youtube';
 import { accountInfo, deleteAccount, deletePasskey, deviceId, loginOptions, loginVerify, logout, purgeAccounts, registerOptions, registerVerify, sessionOf, setNickname } from './account';
 import { claimCard, makeTransfer, myCards, pickReward, purgeCards, redeemTransfer } from './cards';
 import { adminListWishes, adminSetWish, markWishesSeen, myWishes, notifyWish, purgeWishes, submitTweak, submitWish, withdrawWish } from './wishes';
@@ -546,8 +547,11 @@ async function handleAdmin(req: Request, env: Env, ctx: ExecutionContext, path: 
   // 只讀取貼文連結的內容、不判讀也不存檔，用來確認讀得到：{ url }
   if (req.method === 'POST' && path === '/api/admin/link-fetch') {
     const body = await readJson<{ url?: string }>(req);
+    // YouTube 社群貼文（v1.806）：確認 Cloudflare 讀得到（YouTube 有時要求登入確認不是機器人）
+    const yt = parseYoutubePostUrl(body.url ?? '');
+    if (yt) return jsonResponse({ link: yt, fetched: await fetchYoutubePost(yt.id) });
     const link = await resolveThreadsLink(body.url ?? '');
-    if (!link) throw new HttpError(400, 'not a Threads post URL');
+    if (!link) throw new HttpError(400, 'not a Threads or YouTube post URL');
     const postedAt = shortcodeToUnix(link.code, now);
     return jsonResponse({ link, postedAt, fetched: await fetchThreadsPost(link.code) });
   }

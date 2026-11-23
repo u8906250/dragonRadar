@@ -11,7 +11,7 @@ import { taipaiWordLists } from './taipaiWords';
 import { BOOKS_SPEC } from './books';
 import { storeTypesOf } from './stores';
 import { DEFAULT_MODULE, isStoreModule, moduleOf, type ModuleId } from './modules';
-import { adminArea, cityLevel, cityOfDistrict, cityOfRoad, countryOfPlace, geocode, geocodeFirst, geocodeStreet, geocodeWorld, isAreaOnly, placeCandidates, regionOfPlace, type GeoPoint } from './geocode';
+import { adminArea, cityLevel, cityOfDistrict, cityOfRoad, countryOfPlace, geocode, geocodeFirst, geocodeStreet, geocodeWorld, isAreaOnly, placeCandidates, placeCity, regionOfPlace, type GeoPoint } from './geocode';
 import { noteCountry } from './countries';
 import { listActiveKeywords, type KeywordRow } from './keywords';
 import { parseThreadsTimestamp, type ThreadsClient } from './threads';
@@ -182,7 +182,7 @@ export interface NewPost {
   permalink: string | null;
   posted_at: number;
   keyword: string | null;
-  source: 'threads' | 'manual' | 'news' | 'official' | 'link' | 'spot' | 'accupass' | 'opentix' | 'peatix' | 'luma';
+  source: 'threads' | 'manual' | 'news' | 'official' | 'link' | 'youtube' | 'spot' | 'accupass' | 'opentix' | 'peatix' | 'luma';
   /** 哪個模組，沒給就是洋流 */
   module?: ModuleId;
 }
@@ -400,7 +400,7 @@ export async function locatePlaceForEvent(
   }
   // 只寫了行政區（「中正萬華區」）不拿去查，不然會對到某個區的中心、看起來像精確地點
   const vague = isAreaOnly(placeQuery) && isAreaOnly(placeText ?? placeQuery);
-  let point = vague ? null : await geocodeFirst(env, placeCandidates(placeQuery, placeText));
+  let point = vague ? null : await geocodeFirst(env, placeCandidates(placeQuery, placeText), placeCity(placeQuery, placeText));
   // 精確地點查不到時退到鄉鎮區中心，標成約略位置
   const area = point ? null : adminArea(placeQuery, placeText);
   if (area) point = await geocode(env, area);
@@ -805,7 +805,7 @@ async function planPostWith(env: Env, post: PostRow, now: number, profileHint: s
   // 使用者貼連結回報的，主要模型說不是活動時再問備用模型（只多等一下，量不大）
   // 洋流改版後只判斷活動（不再分發放、固定據點）；台派雷達照管理者決定的台派用詞
   const spec = module === 'taipai' ? taipaiSpec(await taipaiWordLists(env)) : moduleSpec(module);
-  const { extraction, raw, garbled } = await extractFromPost(env, text, post.posted_at, now, { secondOpinion: post.source === 'link', spec });
+  const { extraction, raw, garbled } = await extractFromPost(env, text, post.posted_at, now, { secondOpinion: post.source === 'link' || post.source === 'youtube', spec });
   await env.DB.prepare('UPDATE posts SET processed_at = ?, extraction = ? WHERE id = ?').bind(now, raw, post.id).run();
 
   if (garbled) return { items: [], early: 'garbled' };
@@ -2561,7 +2561,7 @@ export async function listEvents(env: Env, q: ListQuery): Promise<EventOut[]> {
   const rows = snap.rows
     .filter((r) => r.end_at > q.now && r.start_at <= q.now + q.horizonSec)
     .filter((r) => !box || (Math.abs((r.lat ?? 0) - box.lat) <= box.dLat && inLngRange(r.lng ?? 0, box.lng, box.dLng)))
-    .filter((r) => !kws || r.source === 'link' || r.source === 'spot' || r.source === 'note' || r.source === 'accupass' || r.source === 'opentix' || r.source === 'peatix' || r.source === 'luma' || kws.some((k) => r.keyword?.toLowerCase() === k || r.text.toLowerCase().includes(k)))
+    .filter((r) => !kws || r.source === 'link' || r.source === 'youtube' || r.source === 'spot' || r.source === 'note' || r.source === 'accupass' || r.source === 'opentix' || r.source === 'peatix' || r.source === 'luma' || kws.some((k) => r.keyword?.toLowerCase() === k || r.text.toLowerCase().includes(k)))
     .slice(0, LIST_LIMIT);
   const out = rows.map((row) => toEventOut(row, q.now));
   for (const e of out) {

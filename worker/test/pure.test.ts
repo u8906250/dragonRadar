@@ -93,7 +93,7 @@ describe('buildMessages', () => {
   });
 });
 
-import { adminArea, citiesOfDistrict, citiesOfRoad, cityLevel, isRoadHit, cityMatches, sharesName, pickHit, placeCandidates, streetFallbacks, worldCandidates, cleanWorldAddress, countryOfPlace, regionOfPlace, splitHouse } from '../src/geocode';
+import { adminArea, citiesOfDistrict, citiesOfRoad, cityLevel, isRoadHit, cityMatches, sharesName, pickHit, placeCandidates, placeCity, streetFallbacks, worldCandidates, cleanWorldAddress, countryOfPlace, regionOfPlace, splitHouse } from '../src/geocode';
 import { normalizeKeyword, parseKeywordList } from '../src/keywords';
 
 describe('normalizeKeyword', () => {
@@ -150,6 +150,22 @@ describe('placeCandidates', () => {
     expect(c[0]).toBe('台北市 民權公園');
     expect(c).not.toContain('台北市');
     expect(placeCandidates('台北市 大安區', null)).toEqual([]);
+  });
+  it('also tries the landmark written in brackets (v1.806 仁愛路大道（國父紀念館側）)', () => {
+    const c = placeCandidates('台北市 仁愛路大道', '仁愛路大道（國父紀念館側）');
+    expect(c[0]).toBe('台北市 仁愛路大道');
+    expect(c).toContain('台北市 國父紀念館');
+    // 樓層、出口、車站不當地標（車站另外處理）
+    expect(placeCandidates('台北市 某某大樓（2F）', null)).not.toContain('台北市 2F');
+    expect(placeCandidates('台北市 捷運中山站', '捷運中山站（4號出口旁）').some((x) => x.includes('出口') && !x.includes('中山站'))).toBe(false);
+  });
+  it('knows which city the place names, only with 市 or 縣', () => {
+    expect(placeCity('台北市 仁愛路大道', '仁愛路大道（國父紀念館側）')).toBe('台北市');
+    expect(placeCity('仁愛路大道', '新北市板橋區 府中路')).toBe('新北市');
+    expect(placeCity('台北車站', '台北車站')).toBeNull();
+    // 桃園大溪的仁愛路不是台北市的
+    expect(cityMatches('台北市', '仁愛路, 大溪和平老街, 大嵙崁, 福仁里, 大溪區, 桃園市, 335021, 臺灣')).toBe(false);
+    expect(cityMatches('台北市', '國父紀念館, 仁愛路四段, 信義區, 臺北市, 110, 臺灣')).toBe(true);
   });
   it('uses the station, not the whole "near ... station" hint, and tries it as an MRT station first', () => {
     const c = placeCandidates('台北市 松菸文創大街', '近國父紀念館站/大巨蛋');

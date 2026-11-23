@@ -12,7 +12,7 @@ interface Stats {
   totals: { submits: number; supplements: number; posts: number; confirmed: number; events: number; reporters: number; accounts: number; feedback: number };
   daily: Array<{ day: string; submits: number; posts: number; confirmed: number }>;
   outcomes: { confirmed: number; rejected: number; withdrawn: number; open: number };
-  accounts: Array<{ username: string; posts: number; confirmed: number; events: number }>;
+  accounts: Array<{ username: string; site?: 'youtube'; posts: number; confirmed: number; events: number }>;
   topics: Count[];
   tags: Count[];
   modules: Count[];
@@ -122,7 +122,7 @@ function render(s: Stats): void {
     tile('回報的貼文', t.posts, `送出 ${nf.format(t.submits)} 次（補充再判讀 ${nf.format(t.supplements)} 次）`),
     tile('放上雷達', t.confirmed, `${nf.format(t.events)} 場活動`),
     tile('回報的人', t.reporters, '照裝置算'),
-    tile('Threads 帳號', t.accounts, '被回報的貼文來自幾個帳號'),
+    tile('帳號', t.accounts, '被回報的 Threads、YouTube 貼文來自幾個帳號'),
     tile('回報問題', t.feedback),
     tile('開了通知', s.pushSubscribers, '全部，不限天數'),
   );
@@ -160,14 +160,14 @@ function render(s: Stats): void {
 
   // 帳號
   const hidden = new Set(s.hiddenAccounts ?? []);
-  const acc = card('Threads 帳號', '被回報最多的帳號（最多 30 個）：長條是回報幾則貼文，帳號下面寫放上雷達幾則、幾場活動。點帳號開 Threads。公開的雷達統計只列放上雷達 2 則以上、作者沒刪文的，下面不列的帳號排除。');
+  const acc = card('Threads、YouTube 帳號', '被回報最多的帳號（最多 30 個）：長條是回報幾則貼文，帳號下面寫放上雷達幾則、幾場活動。點帳號開 Threads 或 YouTube（寫 YouTube 的）。公開的雷達統計只列放上雷達 2 則以上、作者沒刪文的，下面不列的帳號排除。');
   acc.append(
     hbars(
       s.accounts.map((a) => ({
-        name: `@${a.username}`,
+        name: a.site === 'youtube' ? `@${a.username}（YouTube）` : `@${a.username}`,
         count: a.posts,
         note: `放上雷達 ${a.confirmed} 則・${a.events} 場活動${hidden.has(a.username.toLowerCase()) ? '・公開統計不列' : ''}`,
-        href: `https://www.threads.com/@${encodeURIComponent(a.username)}`,
+        href: a.site === 'youtube' ? `https://www.youtube.com/@${encodeURIComponent(a.username)}` : `https://www.threads.com/@${encodeURIComponent(a.username)}`,
       })),
       '沒有資料',
       true,

@@ -18,7 +18,7 @@ interface PublicStats {
   modules: Count[];
   bottles: { thrown: number; picks: number };
   /** 活動來源（舊的暫存可能沒有） */
-  accounts?: Array<{ username: string; posts: number; events: number }>;
+  accounts?: Array<{ username: string; site?: 'youtube'; posts: number; events: number }>;
 }
 
 const PROD_API = 'https://dragon-radar.happybadminton.workers.dev';
@@ -59,14 +59,19 @@ function render(s: PublicStats): void {
   root.append(topic);
 
   // 活動來源：至少 2 則才列、作者刪掉的不算、作者要求不列的排除（後端算好）；隱私權政策、資料刪除說明有寫
-  const src = card('活動來源', '放上雷達的活動來自哪些公開的 Threads 帳號：數字是幾則貼文，下面是幾場活動。至少 2 則才列（最多 20 個），作者刪掉的貼文不算。');
+  const src = card('活動來源', '放上雷達的活動來自哪些公開的 Threads、YouTube 帳號：數字是幾則貼文，下面是幾場活動。至少 2 則才列（最多 20 個），作者刪掉的貼文不算。');
   const optOut = h('p', 'meta');
   const link = h('a', undefined, '資料刪除說明');
   link.href = 'data-deletion.html';
   optOut.append('不想出現在這裡的帳號，請看', link, '。');
   src.append(
     hbars(
-      (s.accounts ?? []).map((a) => ({ name: `@${a.username}`, count: a.posts, note: `${nf.format(a.events)} 場活動`, href: `https://www.threads.com/@${encodeURIComponent(a.username)}` })),
+      (s.accounts ?? []).map((a) => ({
+        name: a.site === 'youtube' ? `@${a.username}（YouTube）` : `@${a.username}`,
+        count: a.posts,
+        note: `${nf.format(a.events)} 場活動`,
+        href: a.site === 'youtube' ? `https://www.youtube.com/@${encodeURIComponent(a.username)}` : `https://www.threads.com/@${encodeURIComponent(a.username)}`,
+      })),
       '還沒有帳號超過 2 則',
       true,
     ),

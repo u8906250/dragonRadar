@@ -2870,7 +2870,7 @@ function spotPostsHtml(list: RelatedPost[]): string {
 /** 講同一場官方活動的新聞與貼文，已經併進來、不另外顯示 */
 function relatedHtml(list: RelatedPost[]): string {
   if (list.length === 0) return '';
-  const label = (r: RelatedPost): string => (r.source === 'news' ? '新聞' : r.source === 'accupass' ? '活動通' : r.source === 'opentix' ? 'OPENTIX' : r.source === 'peatix' ? 'Peatix' : r.source === 'luma' ? 'Luma' : 'Threads');
+  const label = (r: RelatedPost): string => (r.source === 'news' ? '新聞' : r.source === 'accupass' ? '活動通' : r.source === 'opentix' ? 'OPENTIX' : r.source === 'peatix' ? 'Peatix' : r.source === 'luma' ? 'Luma' : r.source === 'youtube' ? 'YouTube' : 'Threads');
   return `<details class="related"><summary>相關報導（${list.length}）</summary><ul>${list
     .map((r) => `<li><span class="kind-tag">${label(r)}</span>${r.url ? `<a href="${esc(r.url)}" target="_blank" rel="noopener">${esc(r.title)}</a>` : esc(r.title)}</li>`)
     .join('')}</ul><p class="muted">這些講的是同一場活動，時間地點以官方為準。</p></details>`;
@@ -7538,10 +7538,11 @@ function applyModule(): void {
   brandIcon.innerHTML = mod.icon ?? mod.emoji;
   searchInput.placeholder = mod.searchPlaceholder;
   reportIntro.textContent = mod.current ? CURRENT_REPORT_INTRO : mod.reportIntro;
-  // 活動通、OPENTIX、Peatix、Luma 的活動頁只有活動雷達收；其他雷達只收 Threads 貼文
+  // 活動通、OPENTIX、Peatix、Luma 的活動頁只有活動雷達收；其他雷達收 Threads、YouTube 社群貼文（v1.806），台派、書店雷達只收 Threads
   $('#report-title').textContent = mod.current ? '回報活動' : '回報貼文';
-  reportInput.placeholder = mod.current ? 'Threads、活動通、OPENTIX、Peatix 或 Luma 的連結' : 'Threads 貼文的連結';
-  reportInput.setAttribute('aria-label', mod.current ? 'Threads 貼文、活動通、OPENTIX、Peatix 或 Luma 活動頁的連結' : 'Threads 貼文的連結');
+  const posts = mod.storeTypes ? 'Threads 貼文的連結' : 'Threads 或 YouTube 社群貼文的連結';
+  reportInput.placeholder = mod.current ? 'Threads、YouTube、活動通、OPENTIX、Peatix 或 Luma 的連結' : posts;
+  reportInput.setAttribute('aria-label', mod.current ? 'Threads 貼文、YouTube 社群貼文、活動通、OPENTIX、Peatix 或 Luma 活動頁的連結' : posts);
   map.setLandmarksVisible(mod.current);
   if (!mod.current) bottleBtn.hidden = true;
   applyReportsOpen();
@@ -7862,6 +7863,7 @@ function sourceLabel(ev: EventOut): string {
   if (ev.post.source === 'opentix') return 'OPENTIX 兩廳院文化生活（大家回報）';
   if (ev.post.source === 'peatix') return 'Peatix（大家回報）';
   if (ev.post.source === 'luma') return 'Luma（大家回報）';
+  if (ev.post.source === 'youtube') return `YouTube${ev.post.username ? `・@${ev.post.username}` : ''}（大家回報）`;
   const who = `Threads${ev.post.username ? `・@${ev.post.username}` : ''}`;
   return ev.post.source === 'link' ? `${who}（大家回報）` : ev.post.source === 'spot' ? `${who}（大家回報・已審核）` : who;
 }
@@ -7871,6 +7873,7 @@ function sourceLinkText(ev: EventOut): string {
   if (ev.post.source === 'news') return '看新聞原文';
   if (ev.post.source === 'official') return '看官方航線';
   if (ev.post.source === 'accupass' || ev.post.source === 'opentix' || ev.post.source === 'peatix' || ev.post.source === 'luma') return '看活動頁';
+  if (ev.post.source === 'youtube') return '在 YouTube 查看';
   return '在 Threads 查看';
 }
 
@@ -8134,6 +8137,7 @@ function renderReportTips(): void {
     '結束時間可以不寫：沒寫的只寫幾點開始，雷達上顯示到開始後兩小時。',
     'ACCUPASS 活動通、OPENTIX：貼活動頁的網址（accupass.com/event/…、opentix.life/event/…）就好，時間、地點照活動頁寫的；OPENTIX 的巡演每個地點各一場，好幾天的展覽每天各算一場（最多 6 天），線上、取消的場次不收。活動頁刪除或標成取消，雷達會自動下架。',
     'Luma：貼活動頁的網址（luma.com/… 或 lu.ma/…，主辦自訂的網址也可以），開始、結束時間、地點、位置照活動頁寫的；線上、取消的不收，活動頁刪除或標成取消會自動下架。',
+    'YouTube 社群貼文：在貼文按「分享」複製連結（youtube.com/post/…）貼上，跟 Threads 貼文一樣判讀文字（圖片不讀）；只收社群貼文，影片不收。',
     'Peatix：貼活動頁的網址（peatix.com/event/…），開始時間、地點、位置照活動頁寫的；Peatix 的活動頁沒寫結束時間，雷達上顯示到開始後兩小時，需要的話按「補充資料」改。只收在台灣的實體活動（Peatix 的時間沒寫時區），線上的不收；活動頁刪除會自動下架。',
     '貼文寫了車掃、掃街、車隊，或騎車（順騎、單車）、健走，同一天又列了好幾站的，會合成一條路線：每一站從預計經過前 10 分鐘顯示到經過後 15 分鐘。各站沒寫時間、只寫出發時間的，照順序和距離推算（騎車時速 12 公里、健走 4 公里，每站停 10 分鐘），時間表寫「約」。只定位到鄉鎮區的站，要在雷達上標出位置才會放上雷達。',
     '貼文沒寫或判讀錯的，可以在判讀結果按「補充資料」直接改活動內容、時間、地點，位置不對可以在地圖上標。連續好幾天的活動每天各算一場（最多 6 場）。貼文最好寫出門牌地址，定位才準。',
@@ -9131,7 +9135,7 @@ async function submitReport(): Promise<void> {
   if (reportBusy || !reportsOpen) return;
   const url = reportInput.value.trim();
   if (!url) {
-    setReportMsg('<p class="msg error">請先貼上 Threads 貼文，或活動通、OPENTIX、Peatix、Luma 活動頁的連結</p>');
+    setReportMsg('<p class="msg error">請先貼上 Threads 貼文、YouTube 社群貼文，或活動通、OPENTIX、Peatix、Luma 活動頁的連結</p>');
     return;
   }
   setReportBusy(true);
@@ -9377,7 +9381,7 @@ function sendSharedLink(link: string): void {
 
 function takeSharedLink(params: URLSearchParams): string | null {
   const text = [params.get('url'), params.get('text'), params.get('title')].filter(Boolean).join(' ');
-  return /threads\.(com|net)\/|accupass\.com\/(event|go)\/|opentix\.life\/event\/|peatix\.com\/(?:[a-z]{2}\/)?event\/|(?:lu\.ma|luma\.com)\/(?!discover|user\/)[A-Za-z0-9_-]{3,}/i.test(text) ? text : null;
+  return /threads\.(com|net)\/|(?:www\.|m\.)?youtube\.com\/(?:post\/|[^\s?#]+\/(?:community|posts)\?[^\s#]*lb=)|accupass\.com\/(event|go)\/|opentix\.life\/event\/|peatix\.com\/(?:[a-z]{2}\/)?event\/|(?:lu\.ma|luma\.com)\/(?!discover|user\/)[A-Za-z0-9_-]{3,}/i.test(text) ? text : null;
 }
 
 function notifyOn(): boolean {

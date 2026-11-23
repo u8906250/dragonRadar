@@ -45,7 +45,7 @@ const TAIWAN_HEART = '<svg viewBox="0 0 40 40" width="34" height="34" aria-hidde
 const BOOK_SHELF = '<svg viewBox="0 0 40 40" width="34" height="34" aria-hidden="true"><rect x="6" y="10" width="7" height="24" rx="1.2" fill="#c8693a"/><rect x="13.5" y="6" width="6.5" height="28" rx="1.2" fill="#3f9b5f"/><rect x="20.5" y="11.5" width="6" height="22.5" rx="1.2" fill="#4a7bd0"/><rect x="27.5" y="11" width="5.6" height="23" rx="1.2" fill="#e0a530" transform="rotate(12 27.5 34)"/><path d="M6 14.5 h7 M6 29.5 h7 M13.5 10.5 h6.5 M13.5 29.5 h6.5 M20.5 15.5 h6 M20.5 30 h6" stroke="#ffffffa0" stroke-width="1.4"/><path d="M16.75 22.6 c-1.7 -1.1 -2.5 -2 -2.5 -3 a1.25 1.25 0 0 1 2.5 -0.4 a1.25 1.25 0 0 1 2.5 0.4 c0 1 -0.8 1.9 -2.5 3 z" fill="#fff"/><rect x="3.5" y="34" width="33" height="2.6" rx="1.1" fill="#8a5a3c"/></svg>';
 
 /** 洋流的回報說明（改版後只判斷活動）；index.html 的 #report-intro 也是這段 */
-const REPORT_INTRO = '看到活動的 Threads 貼文，或 ACCUPASS 活動通、OPENTIX、Peatix、Luma 的活動頁？貼上連結，雷達會判斷是什麼活動（遊行、講座、市集、表演…），讀出活動內容、地點、開始時間，三個都讀到才會標到地圖上給大家看；沒寫幾點開始的從發文的時間算，結束時間可以不寫。';
+const REPORT_INTRO = '看到活動的 Threads 貼文、YouTube 社群貼文，或 ACCUPASS 活動通、OPENTIX、Peatix、Luma 的活動頁？貼上連結，雷達會判斷是什麼活動（遊行、講座、市集、表演…），讀出活動內容、地點、開始時間，三個都讀到才會標到地圖上給大家看；沒寫幾點開始的從發文的時間算，結束時間可以不寫。';
 
 export const MODULES: ModuleDef[] = [
   {

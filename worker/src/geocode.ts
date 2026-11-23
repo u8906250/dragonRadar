@@ -147,7 +147,23 @@ export function placeCandidates(query: string, placeText?: string | null): strin
     if (city && st.trim() && !CITY_RE.test(st)) push(`${city} ${st}`);
     push(st);
   }
+  // 括號裡寫的地標（v1.806「仁愛路大道（國父紀念館側）」：路名查不到時用國父紀念館）；車站上面處理過，樓層、出口這種有數字的不算
+  for (const s of sources) {
+    for (const m of s.matchAll(/[（(]([^（()）]{2,20})[）)]/g)) {
+      const mark = m[1]
+        .replace(/^(?:近|靠近|鄰近|在)/, '')
+        .replace(/(?:側|旁邊|旁|前面|前|後面|後|對面|附近|一帶|周邊|門口)$/, '')
+        .trim();
+      if (mark.length < 2 || /站$/.test(mark) || /\d/.test(mark)) continue;
+      push(city ? `${city} ${mark}` : mark);
+    }
+  }
   return out.slice(0, 8);
+}
+
+/** 地點寫了哪個縣市（要有「市」「縣」，「台北車站」的台北不算）：查到別的縣市不收 */
+export function placeCity(query: string, placeText?: string | null): string | null {
+  return [query, placeText ?? ''].map((s) => CITY_STRICT_RE.exec(s)?.[0]).find(Boolean) ?? null;
 }
 
 export async function politeDelay(): Promise<void> {
@@ -532,11 +548,14 @@ export async function geocodeHouse(env: Env, city: string, addr: string): Promis
   return null;
 }
 
-/** 依序嘗試候選地點，回傳第一個查得到的 */
-export async function geocodeFirst(env: Env, candidates: string[]): Promise<GeoPoint | null> {
+/**
+ * 依序嘗試候選地點，回傳第一個查得到的。
+ * city：地點寫了縣市的話，查到別的縣市不算（v1.806 沒寫縣市的候選「仁愛路大道」對到桃園大溪的仁愛路，其實是台北市的）
+ */
+export async function geocodeFirst(env: Env, candidates: string[], city: string | null = null): Promise<GeoPoint | null> {
   for (const c of candidates) {
     const p = await geocode(env, c);
-    if (p) return p;
+    if (p && (!city || cityMatches(city, p.displayName))) return p;
   }
   return null;
 }

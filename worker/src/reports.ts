@@ -16,7 +16,8 @@ import { fetchOpentix, opentixPermalink, parseOpentixUrl, type OpentixLink } fro
 import { fetchPeatix, parsePeatixUrl, peatixPermalink, type PeatixLink } from './sources/peatix';
 import { fetchLuma, lumaPermalink, parseLumaUrl, type LumaLink } from './sources/luma';
 import { distKm } from './push';
-import { fetchThreadsPost, resolveThreadsLink, shortcodeToUnix, withLocationTag } from './sources/link';
+import { fetchThreadsPost, resolveThreadsLink, shortcodeToUnix, withLocationTag, type EmbedResult } from './sources/link';
+import { fetchYoutubePost, parseYoutubePostUrl, youtubePermalink, type YoutubeLink } from './sources/youtube';
 import { sha1Hex } from './sources/text';
 import { creditReport, uncreditReport, type ReportReward } from './cards';
 import { cleanHours, NOT_TAIPAI } from './taipai';
@@ -372,7 +373,8 @@ export function notListedWhy(items: PlanItem[]): NotListedWhy | undefined {
 // 20：台派雷達看不出是台派的店家照樣讀出資料，可以送給管理者判斷（2026-11-20）
 // 21：台派雷達記下判成台派的依據（台派用詞），算不算台派照管理者在管理頁決定的（2026-11-21）
 // 22：台派雷達看不出是台派的，AI 抓可能是台派的說法給管理者判斷；店家自己帳號的表態貼文（回家投票、放小卡）也算介紹這家店（2026-11-22）
-export const PLAN_VERSION = 25;
+// 26：寫了縣市卻查到別縣市同名的路（「台北市 仁愛路大道」對到桃園大溪）不收、括號裡的地標也拿來查：還沒確認的回報再貼一次重新定位（2026-11-24）
+export const PLAN_VERSION = 26;
 
 /** 判讀好、還沒寫進雷達的資料，存在 posts.confirm_plan */
 interface StoredPlan {
@@ -571,10 +573,11 @@ export const UNREADABLE_POST =
 
 /**
  * Threads 貼文在這個雷達的貼文 id（v1.773 使用者說不同雷達同樣的 Threads 連結可以重複使用）：每個雷達各記一筆，各自判讀、確認、放上雷達。
- * 第一個貼的雷達用 link-<代碼>（以前的都是這樣，不用搬）；別的雷達用 link-<代碼>.<雷達>（「.」不會出現在 Threads 的代碼裡）
+ * 第一個貼的雷達用 link-<代碼>（以前的都是這樣，不用搬）；別的雷達用 link-<代碼>.<雷達>（「.」不會出現在 Threads 的代碼裡）。
+ * YouTube 社群貼文（v1.806）一樣，開頭是 yt-
  */
-export async function linkPostId(env: Env, code: string, module: ModuleId): Promise<string> {
-  const first = `link-${code}`;
+export async function linkPostId(env: Env, code: string, module: ModuleId, prefix: 'link' | 'yt' = 'link'): Promise<string> {
+  const first = `${prefix}-${code}`;
   const own = `${first}.${module}`;
   const { results } = await env.DB.prepare('SELECT id, module FROM posts WHERE id IN (?, ?)').bind(first, own).all<{ id: string; module: string | null }>();
   if (results.some((r) => r.id === own)) return own;
@@ -583,6 +586,8 @@ export async function linkPostId(env: Env, code: string, module: ModuleId): Prom
 }
 /** 貼文 id 的 Threads 代碼：拿掉開頭的 link-、spot- 和最後的 .雷達 */
 export const threadsCodeOf = (postId: string): string => postId.replace(/^(?:link|spot)-/, '').replace(/\.[a-z]+$/, '');
+/** 貼文 id 的 YouTube 貼文代碼：拿掉開頭的 yt- 和最後的 .雷達 */
+export const youtubeIdOf = (postId: string): string => postId.replace(/^yt-/, '').replace(/\.[a-z]+$/, '');
 
 /**
  * 之前有人貼過這一則：還沒確認（或說判讀錯了）的再給這個人看一次預覽、放上雷達的講現在雷達上有沒有（result）；
@@ -642,6 +647,10 @@ export async function submitLink(env: Env, input: string, ip: string, now: numbe
   if (isStoreModule(module) && (parseAccupassUrl(input) || parseOpentixUrl(input) || parsePeatixUrl(input) || parseLumaUrl(input))) {
     throw new ReportError(400, module === 'books' ? '書店雷達收的是書店，請貼介紹書店的 Threads 貼文連結（書店的活動請到活動雷達回報）' : '台派雷達收的是店家，請貼介紹台派店家的 Threads 貼文連結');
   }
+  // YouTube 社群貼文（v1.806）：台派、書店雷達先不收（店家那套要讀 Threads 帳號的簡介）
+  const yt = parseYoutubePostUrl(input);
+  if (yt && isStoreModule(module)) throw new ReportError(400, `${module === 'books' ? '書店雷達' : '台派雷達'}目前只收 Threads 貼文的連結`);
+  if (yt) return submitYoutube(env, yt, ip, now, device, module);
   // 活動頁：ACCUPASS 活動通（v1.590）、OPENTIX（v1.591）、Peatix（v1.735）、Luma（v1.736）
   const acc = parseAccupassUrl(input);
   if (acc) return submitEventPage(env, { site: 'accupass', link: acc }, ip, now, device, module);
@@ -652,7 +661,7 @@ export async function submitLink(env: Env, input: string, ip: string, now: numbe
   const lum = parseLumaUrl(input);
   if (lum) return submitEventPage(env, { site: 'luma', link: lum }, ip, now, device, module);
   const link = await resolveThreadsLink(input);
-  if (!link) throw new ReportError(400, '找不到 Threads 貼文或活動頁的連結，請貼上 Threads 貼文（https://www.threads.com/@帳號/post/...）、活動通（https://www.accupass.com/event/...）、OPENTIX（https://www.opentix.life/event/...）、Peatix（https://peatix.com/event/...）或 Luma（https://luma.com/...）的網址');
+  if (!link) throw new ReportError(400, '找不到 Threads 貼文或活動頁的連結，請貼上 Threads 貼文（https://www.threads.com/@帳號/post/...）、YouTube 社群貼文（https://www.youtube.com/post/...）、活動通（https://www.accupass.com/event/...）、OPENTIX（https://www.opentix.life/event/...）、Peatix（https://peatix.com/event/...）或 Luma（https://luma.com/...）的網址');
   const postId = await linkPostId(env, link.code, module);
 
   await waitForJudging(env, postId);
@@ -680,7 +689,45 @@ export async function submitLink(env: Env, input: string, ip: string, now: numbe
   const username = fetched.username ?? link.username;
   const permalink = username ? `https://www.threads.com/@${username}/post/${link.code}` : `https://www.threads.com/t/${link.code}`;
   const text = withLocationTag(fetched.text, fetched.location);
-  await storePost(env, { id: postId, username, text, permalink, posted_at: postedAt, keyword: null, source: 'link', module }, now);
+  return judgeReported(env, { id: postId, username, text, permalink, postedAt, source: 'link' }, existing, ip, device, module, now);
+}
+
+/**
+ * YouTube 社群貼文（v1.806 使用者問 YouTube 的貼文能不能判讀）：跟 Threads 貼文一樣讀內文、AI 判讀、等回報的人確認；
+ * 發文時間照頁面寫的（代碼看不出時間，要先讀才知道有沒有太舊）
+ */
+async function submitYoutube(env: Env, yt: YoutubeLink, ip: string, now: number, device: string | null, module: ModuleId): Promise<SubmitResult> {
+  const postId = await linkPostId(env, yt.id, module, 'yt');
+  await waitForJudging(env, postId);
+  const earlier = await earlierReport(env, postId, module, now);
+  if (earlier.result) return earlier.result;
+
+  await checkSubmitLimits(env, ip, now, device);
+
+  const fetched = await fetchYoutubePost(yt.id);
+  if (fetched.status === 'gone') throw new ReportError(404, 'YouTube 上找不到這則貼文：可能已經刪除，或只有頻道會員看得到');
+  if (fetched.status === 'no_text') throw new ReportError(422, '這則貼文沒有文字，雷達只能判讀有寫時間地點的文字');
+  if (fetched.status === 'error') {
+    console.warn(`youtube fetch failed for ${yt.id}: ${fetched.message}`);
+    throw new ReportError(502, '暫時讀不到這則 YouTube 貼文，請稍後再試');
+  }
+  const postedAt = fetched.postedAt !== null && fetched.postedAt <= now + 3600 ? fetched.postedAt : now;
+  if (now - postedAt > linkAgeOf(module)) throw new ReportError(400, `這則貼文發布超過 ${MAX_LINK_AGE_SEC / 86400} 天，雷達只收最近的發放和活動`);
+  return judgeReported(env, { id: postId, username: fetched.username, text: fetched.text, permalink: youtubePermalink(yt.id), postedAt, source: 'youtube' }, earlier.existing, ip, device, module, now);
+}
+
+/** 讀到的 Threads、YouTube 貼文：存起來、AI 判讀，回傳預覽（等回報的人確認才放上雷達） */
+async function judgeReported(
+  env: Env,
+  p: { id: string; username: string | null; text: string; permalink: string; postedAt: number; source: 'link' | 'youtube' },
+  existing: PostRow | null,
+  ip: string,
+  device: string | null,
+  module: ModuleId,
+  now: number,
+): Promise<SubmitResult> {
+  const { id: postId, username, text, permalink, postedAt } = p;
+  await storePost(env, { id: postId, username, text, permalink, posted_at: postedAt, keyword: null, source: p.source, module }, now);
   // 等回報的人確認才放上雷達；排程也不會自己判讀
   // judging_at：判讀中（手機斷線、再送一次的那次等它做完）
   await env.DB.prepare("UPDATE posts SET checked_at = ?, text = ?, confirm_state = 'pending', judging_at = ? WHERE id = ?").bind(now, text, now, postId).run();
@@ -1314,7 +1361,7 @@ export async function myReports(env: Env, device: string): Promise<MyReport[]> {
     `SELECT p.id, p.permalink, p.username, p.text, p.confirm_state, p.link_role, p.module, m.reported_at
        FROM (SELECT post_id, MAX(created_at) AS reported_at FROM submissions WHERE device = ? GROUP BY post_id) m
        CROSS JOIN posts p ON p.id = m.post_id
-      WHERE +p.source IN ('link', 'note', 'accupass', 'opentix', 'peatix', 'luma') AND p.confirm_state = 'confirmed'
+      WHERE +p.source IN ('link', 'youtube', 'note', 'accupass', 'opentix', 'peatix', 'luma') AND p.confirm_state = 'confirmed'
         AND (p.link_role = 'related' OR EXISTS (SELECT 1 FROM events e WHERE e.post_id = p.id))
       ORDER BY m.reported_at DESC LIMIT 30`,
   )
@@ -1353,7 +1400,7 @@ export async function withdrawReport(env: Env, postId: string, device: string, n
   const owned = await env.DB.prepare('SELECT 1 AS ok FROM submissions WHERE post_id = ? AND device = ? LIMIT 1').bind(postId, device).first<{ ok: number }>();
   if (!owned) throw new ReportError(403, '只能刪除自己回報的貼文，而且要用回報時的同一個瀏覽器（30 天內）');
   const post = await getPost(env, postId);
-  if (!post || !['link', 'note', 'accupass', 'opentix', 'peatix', 'luma'].includes(post.source)) throw new ReportError(404, '找不到這則回報');
+  if (!post || !['link', 'youtube', 'note', 'accupass', 'opentix', 'peatix', 'luma'].includes(post.source)) throw new ReportError(404, '找不到這則回報');
   if (post.confirm_state === 'withdrawn') return { ok: true, removed: 0 };
   const removed = (await env.DB.prepare("SELECT COUNT(*) AS n FROM events WHERE post_id = ? AND status IN ('upcoming', 'active')").bind(postId).first<{ n: number }>())?.n ?? 0;
   const { results: prev } = await env.DB.prepare("SELECT id FROM posts WHERE linked_to = ? AND link_role = 'previous' ORDER BY posted_at DESC").bind(postId).all<{ id: string }>();
@@ -1432,7 +1479,7 @@ const PEATIX_DELAY_MS = 1100;
 export async function recheckLinks(env: Env, now: number): Promise<RecheckLinksResult> {
   const rows = await env.DB.prepare(
     `SELECT DISTINCT p.id, p.text FROM posts p JOIN events e ON e.post_id = p.id
-     WHERE p.source IN ('link', 'spot', 'accupass', 'opentix', 'peatix', 'luma') AND e.status IN ('upcoming', 'active')
+     WHERE p.source IN ('link', 'youtube', 'spot', 'accupass', 'opentix', 'peatix', 'luma') AND e.status IN ('upcoming', 'active')
        AND (p.checked_at IS NULL OR p.checked_at <= CASE WHEN p.module IN (${STORE_MODULES.map((m) => `'${m}'`).join(', ')}) THEN ? ELSE ? END)
      ORDER BY p.checked_at ASC LIMIT ?`,
   )
@@ -1458,7 +1505,8 @@ export async function recheckLinks(env: Env, now: number): Promise<RecheckLinksR
       await recheckEventPage(env, pg, row, now, out, endAll);
       continue;
     }
-    const r = await fetchThreadsPost(threadsCodeOf(row.id));
+    // YouTube 社群貼文（yt-）跟 Threads 貼文一樣：刪文下架、改成結束了就結束、改了內容重新判讀
+    const r: EmbedResult = row.id.startsWith('yt-') ? await fetchYoutubePost(youtubeIdOf(row.id)) : await fetchThreadsPost(threadsCodeOf(row.id));
     await env.DB.prepare('UPDATE posts SET checked_at = ? WHERE id = ?').bind(now, row.id).run();
     // 存的內文可能接了地點標記（以前存的沒有），兩種都算沒改
     const changed = r.status === 'ok' && r.text !== row.text && withLocationTag(r.text, r.location) !== row.text;

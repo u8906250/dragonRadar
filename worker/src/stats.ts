@@ -34,8 +34,8 @@ export interface StatsOut {
   daily: Array<{ day: string; submits: number; posts: number; confirmed: number }>;
   /** 回報的貼文後來怎麼了 */
   outcomes: { confirmed: number; rejected: number; withdrawn: number; open: number };
-  /** Threads 帳號：回報幾則、放上雷達幾則、幾場活動 */
-  accounts: Array<{ username: string; posts: number; confirmed: number; events: number }>;
+  /** Threads、YouTube（site: 'youtube'，v1.806）帳號：回報幾則、放上雷達幾則、幾場活動 */
+  accounts: Array<{ username: string; site?: 'youtube'; posts: number; confirmed: number; events: number }>;
   /** 主題（AI 判讀的原文，一則貼文同一個主題算一次） */
   topics: Array<{ name: string; count: number }>;
   /** 關鍵字（一則貼文同一個關鍵字算一次） */
@@ -60,8 +60,8 @@ export interface StatsOut {
 }
 
 /** 回報來的貼文（官方航線、新聞、主辦單位公告不算） */
-const REPORT_SOURCES = "('link', 'note', 'accupass', 'opentix', 'peatix', 'luma')";
-const SOURCE_NAMES: Record<string, string> = { link: 'Threads', note: '沒有連結（已停用）', accupass: 'ACCUPASS 活動通', opentix: 'OPENTIX', peatix: 'Peatix', luma: 'Luma' };
+const REPORT_SOURCES = "('link', 'youtube', 'note', 'accupass', 'opentix', 'peatix', 'luma')";
+const SOURCE_NAMES: Record<string, string> = { link: 'Threads', youtube: 'YouTube', note: '沒有連結（已停用）', accupass: 'ACCUPASS 活動通', opentix: 'OPENTIX', peatix: 'Peatix', luma: 'Luma' };
 const MODULE_NAMES: Record<string, string> = { current: '活動雷達', dog: '狗狗陪伴', badminton: '羽球臨打', food: '美食品味', work: '找工作', taipai: '台派雷達', books: '書店雷達' };
 
 /** 台灣時間的日期「2026-11-13」 */
@@ -127,7 +127,7 @@ export async function adminStats(env: Env, now: number, days: number): Promise<S
   }
 
   // 帳號、雷達、來源、結果
-  const acc = new Map<string, { username: string; posts: number; confirmed: number; events: number }>();
+  const acc = new Map<string, { username: string; site?: 'youtube'; posts: number; confirmed: number; events: number }>();
   const modules = new Map<string, number>();
   const sources = new Map<string, number>();
   const outcomes = { confirmed: 0, rejected: 0, withdrawn: 0, open: 0 };
@@ -139,12 +139,14 @@ export async function adminStats(env: Env, now: number, days: number): Promise<S
     else if (p.confirm_state === 'rejected') outcomes.rejected++;
     else if (p.confirm_state === 'withdrawn') outcomes.withdrawn++;
     else outcomes.open++;
-    if (p.source !== 'link' || !p.username) continue;
-    userOf.set(p.id, p.username);
-    const a = acc.get(p.username) ?? { username: p.username, posts: 0, confirmed: 0, events: 0 };
+    if ((p.source !== 'link' && p.source !== 'youtube') || !p.username) continue;
+    // 同一個名字在 Threads、YouTube 不一定是同一個人，分開算
+    const key = p.source === 'youtube' ? `yt:${p.username}` : p.username;
+    userOf.set(p.id, key);
+    const a = acc.get(key) ?? { username: p.username, ...(p.source === 'youtube' ? { site: 'youtube' as const } : {}), posts: 0, confirmed: 0, events: 0 };
     a.posts++;
     if (p.confirm_state === 'confirmed') a.confirmed++;
-    acc.set(p.username, a);
+    acc.set(key, a);
   }
 
   // 活動：主題、關鍵字、星期、時段、地點
@@ -280,7 +282,7 @@ export interface PublicStatsOut {
    * 活動來源（v1.695 使用者說帳號排行可以公開，照我建議的 5 點）：放上雷達的活動來自哪些公開的 Threads 帳號。
    * 只算確認放上雷達、作者沒刪掉的貼文；至少 2 則才列（只出現一次的一般民眾不列）、最多 20 個；作者要求不列的排除
    */
-  accounts: Array<{ username: string; posts: number; events: number }>;
+  accounts: Array<{ username: string; site?: 'youtube'; posts: number; events: number }>;
 }
 
 /** 暫存的 key：欄位改了就換一個（v1.695 多了活動來源），新版上線不用等一小時 */
@@ -309,11 +311,11 @@ export async function publicStats(env: Env, now: number): Promise<PublicStatsOut
     env.DB.prepare('SELECT COUNT(DISTINCT device_id) AS n FROM report_credits WHERE created_at >= ?').bind(from),
     env.DB.prepare('SELECT COUNT(*) AS thrown, COALESCE(SUM(picks), 0) AS picks FROM bottles WHERE created_at >= ?').bind(from),
     env.DB.prepare(
-      `SELECT p.username, COUNT(*) AS posts, COALESCE(SUM(ev.n), 0) AS events FROM posts p
+      `SELECT p.username, p.source, COUNT(*) AS posts, COALESCE(SUM(ev.n), 0) AS events FROM posts p
         LEFT JOIN (SELECT post_id, COUNT(*) AS n FROM events WHERE merged_into IS NULL GROUP BY post_id) ev ON ev.post_id = p.id
-        WHERE p.fetched_at >= ? AND p.source = 'link' AND p.confirm_state = 'confirmed' AND p.username IS NOT NULL
+        WHERE p.fetched_at >= ? AND p.source IN ('link', 'youtube') AND p.confirm_state = 'confirmed' AND p.username IS NOT NULL
           AND NOT EXISTS (SELECT 1 FROM events d WHERE d.post_id = p.id AND d.ended_reason = 'deleted')
-        GROUP BY p.username HAVING COUNT(*) >= ? ORDER BY posts DESC, events DESC LIMIT 60`,
+        GROUP BY p.source, p.username HAVING COUNT(*) >= ? ORDER BY posts DESC, events DESC LIMIT 60`,
     ).bind(from, PUBLIC_ACCOUNTS_MIN),
   ]);
   const hidden = new Set(await hiddenAccounts(env));
@@ -371,10 +373,10 @@ export async function publicStats(env: Env, now: number): Promise<PublicStatsOut
     hours,
     modules: top(modules, 10),
     bottles: { thrown: b?.thrown ?? 0, picks: b?.picks ?? 0 },
-    accounts: (accounts.results as Array<{ username: string; posts: number; events: number }>)
+    accounts: (accounts.results as Array<{ username: string; source: string; posts: number; events: number }>)
       .filter((a) => !hidden.has(a.username.toLowerCase()))
       .slice(0, PUBLIC_ACCOUNTS_MAX)
-      .map((a) => ({ username: a.username, posts: a.posts, events: a.events })),
+      .map((a) => ({ username: a.username, ...(a.source === 'youtube' ? { site: 'youtube' as const } : {}), posts: a.posts, events: a.events })),
   };
   await env.DB.prepare('INSERT INTO settings (key, value, updated_at) VALUES (?, ?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at')
     .bind(PUBLIC_KEY, JSON.stringify(out), now)
