@@ -522,6 +522,8 @@ const themeBtn = $<HTMLButtonElement>('#theme-btn');
 const themeSheet = $('#theme-sheet');
 const themeList = $<HTMLUListElement>('#theme-list');
 const brandText = $('#brand-text');
+/** 標題前面的圖示：現在這個雷達的（跟切換選單一樣，v1.793 使用者說左上的雷達也放圖示） */
+const brandIcon = $('#brand-icon');
 const searchInput = $<HTMLInputElement>('#search-input');
 const searchClear = $<HTMLButtonElement>('#search-clear');
 const kwSheet = $('#kw-sheet');
@@ -1155,6 +1157,7 @@ const REGION_SLOTS: RegionSlot[] = [
   { area: { s: 24.3, w: -100.0, n: 49.5, e: -66.8 }, ownCoast: true, load: () => import('./usa-east'), map: null, loading: false },
   { area: { s: 51.0, w: -180.0, n: 71.6, e: -129.9 }, ownCoast: true, load: () => import('./usa-alaska'), map: null, loading: false },
   { area: { s: 18.8, w: -160.6, n: 22.4, e: -154.7 }, ownCoast: true, load: () => import('./usa-hawaii'), map: null, loading: false },
+  // 再加國家也要加進 worker/src/countries.ts 的 MAPPED_COUNTRIES（v1.793：沒畫地圖的國家有活動會回報管理者）
   // 澳洲（australia-*.ts，v1.791 使用者說把澳洲畫出來）：很大，分成西澳、中部、昆士蘭、東南、塔斯馬尼亞五塊，碰到哪塊載入哪塊；
   // 1:10m 的海岸線、湖岸（多半是乾的鹽湖）取代世界海岸線，州界、州名、城市名
   { area: { s: -35.5, w: 112.5, n: -13.4, e: 129.0 }, ownCoast: true, load: () => import('./australia-west'), map: null, loading: false },
@@ -7531,6 +7534,8 @@ function applyModule(): void {
   document.documentElement.dataset.module = mod.id;
   document.title = brandName();
   brandText.textContent = brandName(true);
+  // 圖示是 modules.ts 寫死的 SVG 或 emoji
+  brandIcon.innerHTML = mod.icon ?? mod.emoji;
   searchInput.placeholder = mod.searchPlaceholder;
   reportIntro.textContent = mod.current ? CURRENT_REPORT_INTRO : mod.reportIntro;
   // 活動通、OPENTIX、Peatix、Luma 的活動頁只有活動雷達收；其他雷達只收 Threads 貼文

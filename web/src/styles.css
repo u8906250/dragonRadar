@@ -147,6 +147,9 @@ button, select, a { touch-action: manipulation; }
 .brand { display: flex; align-items: center; gap: 6px; font-weight: 800; letter-spacing: 0.04em; white-space: nowrap; font-size: 17px; }
 /* 點標題重新整理，點旁邊的箭頭切換雷達（模組）；箭頭很小，按的範圍往四周加大，看起來的位置不變 */
 .brand-btn { font: inherit; color: inherit; letter-spacing: inherit; background: transparent; border: 0; padding: 0; cursor: pointer; }
+/* 標題前面現在這個雷達的圖示（v1.793）：跟字差不多大 */
+.brand-icon { display: inline-block; margin-right: 5px; line-height: 1; vertical-align: -0.12em; letter-spacing: 0; }
+.brand-icon svg { display: block; width: 1.25em; height: 1.25em; }
 .module-btn { display: inline-flex; align-items: center; font: inherit; color: inherit; background: transparent; border: 0; padding: 8px 8px 8px 2px; margin: -8px -8px -8px -6px; cursor: pointer; }
 /* 切換雷達的箭頭（v1.616 使用者說可以大一點） */
 .module-caret { font-size: 18px; line-height: 1; opacity: 0.85; }
@@ -2384,6 +2387,15 @@ path.map-seam-walkers { --p: 15px; }
 body.bottle-open { overflow: hidden; }
 .scene-top { position: absolute; top: calc(12px + env(safe-area-inset-top)); left: 14px; right: 14px; display: flex; gap: 10px; }
 .scene-top [data-act="close"] { margin-left: auto; }
+/* 關閉在紙的右上角（v1.793 使用者說的）：一顆牛皮紙的小圓鈕，一半壓在紙角外面；今天丟完了（不顯示紙）才用畫面右上角那顆 */
+.bottle-scene:not(.no-throw) .scene-top [data-act="close"] { display: none; }
+.kraft-close {
+  position: absolute; z-index: 3; top: -15px; right: -15px; display: grid; place-items: center; width: 36px; height: 36px; padding: 0; cursor: pointer;
+  color: var(--kraft-ink); background: var(--kraft-tex), var(--kraft-base); border: 1px solid #b38d5c; border-radius: 50%; box-shadow: 1px 2px 5px rgba(0, 0, 0, 0.35);
+}
+.kraft-close::after { content: ''; position: absolute; inset: -5px; border-radius: 50%; }
+.kraft-close:focus-visible { outline: 2px solid #ffe08a; outline-offset: 2px; }
+.bottle-scene.judging .kraft-close { pointer-events: none; opacity: 0.45; }
 .scene-icon {
   position: relative; display: grid; place-items: center; width: 44px; height: 44px; padding: 0; font-size: 20px; line-height: 1; color: #fff; cursor: pointer;
   background: rgba(255, 255, 255, 0.14); border: 1px solid rgba(255, 255, 255, 0.28); border-radius: 50%;

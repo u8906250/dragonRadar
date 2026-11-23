@@ -109,6 +109,12 @@
       <ul id="wish-list" class="list" aria-live="polite"></ul>
       <p id="wish-msg" class="msg err" aria-live="polite"></p>
 
+      <h2 id="countries">有活動、還沒畫地圖的國家</h2>
+      <p class="meta">國外的活動放上雷達時，那個國家雷達拉遠還沒畫地圖（海岸線、州界、地名）就列在這裡，第一次出現的國家會推到開了回報通知的手機。要畫的話跟我說「幫我把 OO 畫出來」；不畫就按「知道了」，之後同一國的活動不再推。只記判讀時認得出國家的（貼文寫了國外地址）。</p>
+      <ul id="country-list" class="list" aria-live="polite"></ul>
+      <details id="country-off" class="tags-done" hidden><summary></summary><ul class="list"></ul></details>
+      <p id="country-msg" class="msg err" aria-live="polite"></p>
+
       <h2 id="bottle-rejects">漂流瓶沒通過審核</h2>
       <p class="meta">最近 7 天沒通過審核的瓶子，看為什麼沒過、改善審核用；7 天後自動刪除。不記位置，照片只記有沒有附。同一個裝置一小時沒通過 5 次、一天 15 次，或同一個網路一小時 20 次，就會先擋下來。內容是任何人都能寫的，只當參考。</p>
       <div class="row"><button type="button" class="btn" id="reject-clear" hidden>全部刪掉</button></div>
@@ -226,6 +232,46 @@
         $('#tags-msg').textContent = err.message;
       }
     });
+
+    /** 有活動、還沒畫地圖的國家（v1.793）：還沒處理的列出來，按了「知道了」的收在下面 */
+    let countryJumped = false;
+    function renderCountries(list) {
+      const row = (c) => `<li class="fb"><div class="fb-head"><span><b>${esc(c.name)}</b>（${esc(c.country)}）・${c.events} 則活動</span><span>最近 ${when(c.lastAt)}</span></div>
+        <div class="muted">${esc(c.lastTitle || '')}${c.lastPlace ? `（${esc(c.lastPlace)}）` : ''}</div>
+        <div class="row"><button type="button" class="btn" data-country="${esc(c.country)}" data-dismissed="${c.dismissed ? '0' : '1'}">${c.dismissed ? '放回來' : '知道了'}</button></div></li>`;
+      const open = list.filter((c) => !c.dismissed);
+      const off = list.filter((c) => c.dismissed);
+      $('#country-list').innerHTML = open.length ? open.map(row).join('') : '<li class="empty">目前沒有</li>';
+      $('#country-off').hidden = !off.length;
+      $('#country-off summary').textContent = `知道了、不畫的（${off.length}）`;
+      $('#country-off ul').innerHTML = off.map(row).join('');
+    }
+    async function loadCountries() {
+      $('#country-msg').textContent = '';
+      try {
+        renderCountries((await api('/api/admin/countries')).countries);
+        // 從推播點進來（admin.html#countries）：第一次載入好捲過去
+        if (location.hash === '#countries' && !countryJumped) {
+          countryJumped = true;
+          $('#countries').scrollIntoView();
+        }
+      } catch (e) {
+        if (!e.auth) $('#country-msg').textContent = e.message;
+      }
+    }
+    for (const sel of ['#country-list', '#country-off']) {
+      $(sel).addEventListener('click', async (e) => {
+        const b = e.target.closest('[data-country]');
+        if (!b) return;
+        b.disabled = true;
+        try {
+          renderCountries((await api('/api/admin/countries', { method: 'POST', body: JSON.stringify({ country: b.dataset.country, dismissed: b.dataset.dismissed === '1' }) })).countries);
+        } catch (err) {
+          b.disabled = false;
+          if (!err.auth) $('#country-msg').textContent = err.message;
+        }
+      });
+    }
 
     /** 漂流瓶沒通過審核的（最近 7 天） */
     const REJECT_STAGE = { rule: '規則（連結、電話、帳號…）', text: 'AI 看文字', photo: 'AI 看照片', ai_error: 'AI 沒回應' };
@@ -467,6 +513,7 @@
       void loadTpWords();
       void loadWishes();
       void loadRejects();
+      void loadCountries();
       $('#list-msg').textContent = '';
       try {
         const { feedback } = await api(`/api/admin/feedback?status=${status}`);

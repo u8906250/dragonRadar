@@ -28,6 +28,7 @@ import { addUserKeyword, listActiveKeywords, listAllKeywords, MAX_ACTIVE_KEYWORD
 import { listLearnedTags, setLearnedTag } from './learnedTags';
 import { cleanTaipaiWord, listTaipaiWords, setTaipaiWord } from './taipaiWords';
 import { purgeGeoSearch, searchPlaces } from './geo-search';
+import { listUnmapped, setCountryDismissed } from './countries';
 import { CALLBACK_PATH, DELETE_PATH, DELETION_STATUS_PATH, UNINSTALL_PATH, deletionStatus, handleCallback, handleDelete, handleUninstall, startAuth } from './oauth';
 import { etagMatches, jsonResponse, nowSec, parseIsoToUnix } from './util';
 
@@ -732,6 +733,9 @@ async function handleAdmin(req: Request, env: Env, ctx: ExecutionContext, path: 
   }
   // 漂流瓶沒通過審核的（最近 7 天）
   if (req.method === 'GET' && path === '/api/admin/bottle-rejects') return jsonResponse({ rejects: await adminBottleRejects(env, now) });
+  // 有活動、還沒畫地圖的國家（v1.793）：列出來；{ country, dismissed } 收起來（知道了）或放回來
+  if (req.method === 'GET' && path === '/api/admin/countries') return jsonResponse({ countries: await listUnmapped(env) });
+  if (req.method === 'POST' && path === '/api/admin/countries') return jsonResponse({ countries: await setCountryDismissed(env, await readJson(req)) });
   // 處理完的刪掉：/api/admin/bottle-rejects/123 刪一筆；/api/admin/bottle-rejects?upTo=123 刪 123 以前的全部
   const rejectDel = /^\/api\/admin\/bottle-rejects(?:\/(\d+))?$/.exec(path);
   if (req.method === 'DELETE' && rejectDel) {

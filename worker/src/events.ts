@@ -12,6 +12,7 @@ import { BOOKS_SPEC } from './books';
 import { storeTypesOf } from './stores';
 import { DEFAULT_MODULE, isStoreModule, moduleOf, type ModuleId } from './modules';
 import { adminArea, cityLevel, cityOfDistrict, cityOfRoad, countryOfPlace, geocode, geocodeFirst, geocodeStreet, geocodeWorld, isAreaOnly, placeCandidates, regionOfPlace, type GeoPoint } from './geocode';
+import { noteCountry } from './countries';
 import { listActiveKeywords, type KeywordRow } from './keywords';
 import { parseThreadsTimestamp, type ThreadsClient } from './threads';
 import { nowSec, parseIsoToUnix } from './util';
@@ -473,6 +474,8 @@ export interface PlannedEvent {
   weekdays?: number[] | null;
   /** 國外活動的當地時區（IANA）；台灣是 null */
   tz?: string | null;
+  /** 國外活動判讀出來的國家（ISO 兩碼）：放上雷達時那個國家沒畫地圖就回報管理者（countries.ts）；台灣、不知道是 null */
+  country?: string | null;
   /** 模組自己的欄位（JSON 字串） */
   extra?: string | null;
 }
@@ -642,6 +645,7 @@ async function planEvent(
       until_open: !!session?.untilOpen,
       weekdays: session ? (ex.weekdays ?? null) : null,
       tz: ex.country ? timeZoneOf(ex) : null,
+      country: ex.country ?? null,
       // 模組自己的欄位（臨打的費用、程度、缺幾位…）
       extra: ex.extra ? JSON.stringify(ex.extra) : null,
     },
@@ -704,6 +708,8 @@ export async function insertPlanned(env: Env, postId: string, p: PlannedEvent, n
       now,
     )
     .first<EventRow>();
+  // 國外的活動在還沒畫地圖的國家：回報管理者（v1.793；記不起來、推不出去都不影響放上雷達）
+  if (event && p.lat !== null) await noteCountry(env, p.country, event, now).catch((e) => console.warn('noteCountry', e instanceof Error ? e.message : String(e)));
   return { event, reason: status };
 }
 
