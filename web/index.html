@@ -231,10 +231,15 @@
             <div class="edit-pin"><span id="feedback-pin-state" class="edit-pin-state"></span><button type="button" class="chip" id="feedback-unpin" hidden>清除標記</button></div>
             <div id="feedback-map" class="edit-map"></div>
           </div>
+          <!-- 地點錯誤：自己回報的那則或管理者，直接在雷達上移（v1.808） -->
+          <div id="feedback-move" class="feedback-move" hidden>
+            <p id="feedback-move-why" class="muted small"></p>
+            <button type="button" class="btn primary" id="feedback-move-btn">在雷達上移動位置</button>
+          </div>
           <textarea id="feedback-note" rows="3" maxlength="200" placeholder="補充說明（選填），例如：實際在 2 號出口、15:00 才開始" aria-label="補充說明"></textarea>
           <div class="sheet-actions"><button type="submit" class="btn primary" id="feedback-submit">送出</button></div>
         </form>
-        <p class="muted sheet-note small">回報只有管理者看得到，會盡快處理。已經提早結束的，選「時間錯誤」或「其他」寫一下。</p>
+        <p class="muted sheet-note small" id="feedback-foot">回報只有管理者看得到，會盡快處理。已經提早結束的，選「時間錯誤」或「其他」寫一下。</p>
       </div>
       <!-- 漂流瓶（v1.594）：畫面中間一張牛皮紙、一個空瓶子，直接在紙上寫；點軟木塞就捲起來裝進去丟出去（v1.657 點瓶子不送；不放任何提示，說明在說明頁） -->
       <section id="bottle-sheet" class="bottle-scene" hidden aria-label="漂流瓶">

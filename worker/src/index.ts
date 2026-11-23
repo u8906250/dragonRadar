@@ -15,7 +15,7 @@ import { accountInfo, deleteAccount, deletePasskey, deviceId, loginOptions, logi
 import { claimCard, makeTransfer, myCards, pickReward, purgeCards, redeemTransfer } from './cards';
 import { adminListWishes, adminSetWish, markWishesSeen, myWishes, notifyWish, purgeWishes, submitTweak, submitWish, withdrawWish } from './wishes';
 import { addParkMark, deleteParkMark, listParkMarks, listPublicParkMarks, parseParkMark, updateParkMark } from './parkmarks';
-import { adminLocate, applyFeedback, clearResolvedFeedback, deleteAdminSubscription, listFeedback, locateForFeedback, notifyAdmins, purgeFeedback, saveAdminSubscription, setFeedbackStatus, submitFeedback } from './feedback';
+import { adminLocate, applyFeedback, clearResolvedFeedback, deleteAdminSubscription, listFeedback, locateForFeedback, moveEventPlace, notifyAdmins, purgeFeedback, saveAdminSubscription, setFeedbackStatus, submitFeedback } from './feedback';
 import { moduleOf } from './modules';
 import { shareInfo } from './share';
 import { ACCOUNT_RE, adminStats, publicStats, setHiddenAccount } from './stats';
@@ -61,7 +61,7 @@ async function sha1Hex(s: string): Promise<string> {
 }
 
 /** 使用者回報會寫入的 API（管理者的不算） */
-const REPORT_WRITE_RE = /^\/api\/(?:reports(?:\/(?:confirm|supplement|edit|locate|reject|review))?|events\/\d+\/(?:ended|feedback|locate)|spot-requests)$/;
+const REPORT_WRITE_RE = /^\/api\/(?:reports(?:\/(?:confirm|supplement|edit|locate|reject|review))?|events\/\d+\/(?:ended|feedback|locate|move)|spot-requests)$/;
 
 function isAdmin(req: Request, env: Env): boolean {
   if (!env.ADMIN_TOKEN) return false;
@@ -418,6 +418,14 @@ async function handle(req: Request, env: Env, ctx: ExecutionContext): Promise<Re
     const { result, created } = await submitFeedback(env, Number(fbMatch[1]), await readJson(req), await deviceId(env, req), await ipHash(env, req), now);
     if (created) ctx.waitUntil(notifyAdmins(env, created, now).catch((e) => console.warn('notify admins failed', e)));
     return jsonResponse(result);
+  }
+
+  // 地點錯誤直接移位置（v1.808）：{ lat, lng }，自己回報的那則或管理者才可以
+  const mvMatch = /^\/api\/events\/(\d+)\/move$/.exec(path);
+  if (req.method === 'POST' && mvMatch) {
+    const admin = isAdmin(req, env);
+    if (!admin) await assertEventReportsOpen(env, Number(mvMatch[1]));
+    return jsonResponse(await moveEventPlace(env, Number(mvMatch[1]), await readJson(req), admin, await deviceId(env, req), await ipHash(env, req), now));
   }
 
   // 回報地點錯誤的「查地點」：{ place }，查到的標在回報表單的小地圖上

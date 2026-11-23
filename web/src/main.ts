@@ -1,6 +1,6 @@
 import './styles.css';
 import { FITBUS_MS_PER_M, hqDenseKm, hqMotionKm, HQ_NET_LABEL_KM, HQ_SAIL_MS, HQ_STAR_MS, HQ_VOYAGE_MS, RAINBOW_EVERY_MS, voyagePhase, voyageTimeOf } from './flow';
-import { accountToken, addKeyword, cachedNickname, deletePushSubscription, locateFeedbackPlace, sendFeedback, type FeedbackKind, fetchPushKey, savePushSubscription, confirmReport, editReport, locatePlace, rejectReport, reviewReport, supplementReport, deleteBottle, dropBottle, readBottle, type BottleHere, fetchBottleInfo, fetchBottlePhoto, fetchBottleProof, fetchBottles, fetchWoofBottles, rememberBottlePhoto, uncollectLetter, verifyBottleProof, fetchEvents, fetchHealth, fetchKeywords, fetchMyBottles, fetchMyReports, fetchRoutes, pickBottle, reportBottle, submitLink, withdrawReport } from './api';
+import { accountToken, addKeyword, cachedNickname, deletePushSubscription, locateFeedbackPlace, moveEvent, sendFeedback, type FeedbackKind, fetchPushKey, savePushSubscription, confirmReport, editReport, locatePlace, rejectReport, reviewReport, supplementReport, deleteBottle, dropBottle, readBottle, type BottleHere, fetchBottleInfo, fetchBottlePhoto, fetchBottleProof, fetchBottles, fetchWoofBottles, rememberBottlePhoto, uncollectLetter, verifyBottleProof, fetchEvents, fetchHealth, fetchKeywords, fetchMyBottles, fetchMyReports, fetchRoutes, pickBottle, reportBottle, submitLink, withdrawReport } from './api';
 import { compassSupported, startCompass } from './compass';
 import { bearingDeg, compassLabel, cutAtBox, cutLines, destination, formatKm, haversineKm, lookFrom, outsideBox, ringBox, ringHas, splitAntimeridian, simplifyLatLng, taiwanRadiusKm, unitVectors, type GeoBox, type LatLng, type RegionMap } from './geo';
 import { TAIWAN_RINGS } from './taiwan';
@@ -638,11 +638,13 @@ radar.onRoute = (id) => selectRoute(id);
 radar.onPreviewDrag = (i, at) => {
   const p = destination(origin, at.bearing, at.distanceKm);
   if (bottlePick) movePick(p);
+  else if (evMove) moveEvPin(p);
   else if (markCard) placeMark(p);
   else void movePin(i, p);
 };
 radar.onEmptyTap = (at) => {
   if (bottlePick) movePick(destination(origin, at.bearing, at.distanceKm));
+  else if (evMove) moveEvPin(destination(origin, at.bearing, at.distanceKm));
   else if (markCard && !reportSheet.hidden) placeMark(destination(origin, at.bearing, at.distanceKm));
 };
 // 點了中山公園的銅像（地球或汪星）：發射口打開、升起火箭、關上，火箭停在那邊；點火箭問要不要飛到另一邊（rocketTrip）
@@ -702,9 +704,10 @@ const map = new MapView(
     onLandmark: (id) => {
       if (id === 'hq') startHqVoyage();
     },
-    onPreviewMove: (i, to) => (bottlePick ? movePick(to) : markCard ? placeMark(to) : void movePin(i, to)),
+    onPreviewMove: (i, to) => (bottlePick ? movePick(to) : evMove ? moveEvPin(to) : markCard ? placeMark(to) : void movePin(i, to)),
     onMapClick: (p) => {
       if (bottlePick) movePick(p);
+      else if (evMove) moveEvPin(p);
       else if (markCard && !reportSheet.hidden) placeMark(p);
     },
   },
@@ -3163,7 +3166,9 @@ function render(): void {
   const pick = bottlePick;
   const pins: Array<ReportPin & { bottle?: boolean; hint?: string }> = pick
     ? [{ lat: pick.at.lat, lng: pick.at.lng, label: '瓶子落在這裡', glyph: null, drag: true, bottle: true, hint: '拖到想丟的地方' }]
-    : shownReportPins();
+    : evMove
+      ? [{ lat: evMove.at.lat, lng: evMove.at.lng, label: shortLabel(titleOf(evMove.ev)), glyph: typeOf(evMove.ev), drag: true, hint: '拖到正確的位置' }]
+      : shownReportPins();
   radar.setPreviews(
     pins.map((p) => ({ bearing: bearingDeg(origin, p), distanceKm: haversineKm(origin, p), label: p.label, glyph: p.glyph, drag: p.drag, bottle: p.bottle, hint: p.hint })),
     pick ? { bearing: bearingDeg(origin, pick.from), distanceKm: haversineKm(origin, pick.from), radiusKm: PICK_RANGE_KM } : null,
@@ -5489,8 +5494,15 @@ async function findFeedbackPlace(): Promise<void> {
 /** 選了「地點錯誤」才顯示小地圖；換站時重建（灰點換成那一站，標過的清掉） */
 async function syncFeedbackPin(): Promise<void> {
   const kind = (feedbackForm.elements.namedItem('kind') as RadioNodeList).value;
+  // 自己回報的那則、管理者：不用小地圖送審，直接在雷達上移（補充說明、送出也收起來）
+  const direct = kind === 'location' && !!feedbackEv && !feedbackStops && canMoveDirect(feedbackEv);
+  $('#feedback-move').hidden = !direct;
+  if (direct) $('#feedback-move-why').textContent = myReportIds.has(feedbackEv!.post.id) ? '這則是你回報的，可以直接把位置移到正確的地方，不用等管理者確認。' : '你是管理者，可以直接把位置移到正確的地方。';
+  feedbackNote.hidden = direct;
+  feedbackSubmit.hidden = direct;
+  $('#feedback-foot').hidden = direct;
   const box = $('#feedback-pin');
-  box.hidden = kind !== 'location' || !feedbackEv;
+  box.hidden = kind !== 'location' || !feedbackEv || direct;
   if (box.hidden || !feedbackEv) return;
   feedbackPinState();
   const st = feedbackStop();
@@ -5563,6 +5575,85 @@ async function submitFeedback(): Promise<void> {
   feedbackSheet.hidden = true;
   feedbackEventId = null;
   showBanner(bannerEl, r.data.duplicate ? '你已經回報過這個問題了，謝謝' : locating ? '謝謝回報，管理者確認位置後就會放上雷達' : '謝謝回報，管理者會盡快處理', 3500);
+}
+
+/**
+ * 地點錯誤直接移位置（v1.808 使用者說回報地點錯誤可以直接移動位置，選「回報的人和管理者」）：
+ * 自己回報的那則（同一個瀏覽器或帳號，「我的回報」列得到的）或管理者；車掃的站牽涉時間表，照舊送管理者
+ */
+/** 雷達、地圖上標記的名字：太長的切掉 */
+const shortLabel = (s: string): string => ([...s].length > 16 ? `${[...s].slice(0, 15).join('')}…` : s);
+const canMoveDirect = (ev: EventOut): boolean => !routeOf(ev) && (myReportIds.has(ev.post.id) || !!lsGet(LS_ADMIN_TOKEN));
+
+/**
+ * 移位置中：回報問題收起來，雷達（或地圖）拉近到這一則，畫一個可以拖的標記（點空白的地方也會移過去），
+ * 下面一條說明和「取消」「移到這裡」（跟漂流瓶選落點一樣）；按「移到這裡」直接改，同一則同一個地點還沒結束的一起移
+ */
+interface EvMove {
+  ev: EventOut;
+  at: LatLng;
+  bar: HTMLElement;
+  busy: boolean;
+}
+let evMove: EvMove | null = null;
+
+function startEvMove(ev: EventOut): void {
+  if (view === 'radar' && radar.spaceFocused) {
+    showBanner(bannerEl, '回到地球才能在雷達上移動位置', 3000);
+    return;
+  }
+  endEvMove();
+  const at = ev.lat !== null && ev.lng !== null ? { lat: ev.lat, lng: ev.lng } : { lat: origin.lat, lng: origin.lng };
+  const bar = document.createElement('div');
+  bar.className = 'bottle-pick ev-move';
+  bar.setAttribute('role', 'dialog');
+  bar.setAttribute('aria-label', '移動位置');
+  bar.innerHTML = `<p>拖標記，或點雷達上的地方，移到「${esc(titleOf(ev))}」正確的位置。<small>同一則同一個地點還沒結束的場次會一起移。</small></p>
+    <div class="sheet-actions"><button type="button" class="chip" data-act="cancel">取消</button><button type="button" class="chip primary" data-act="ok">移到這裡</button></div>`;
+  document.body.append(bar);
+  evMove = { ev, at, bar, busy: false };
+  bar.querySelector('[data-act="cancel"]')?.addEventListener('click', () => endEvMove());
+  bar.querySelector('[data-act="ok"]')?.addEventListener('click', () => void finishEvMove());
+  feedbackSheet.hidden = true;
+  feedbackEventId = null;
+  resetFeedbackPin();
+  // 拉近到看得到巷弄
+  if (view === 'map') map.showPins([at], coverOf(bar));
+  else zoomToKm(0.6, { lat: at.lat, lng: at.lng, source: 'manual' });
+  render();
+  bar.querySelector<HTMLElement>('[data-act="ok"]')?.focus();
+}
+
+function moveEvPin(p: LatLng): void {
+  if (!evMove || evMove.busy) return;
+  evMove.at = { lat: p.lat, lng: p.lng };
+  render();
+}
+
+function endEvMove(): void {
+  const mv = evMove;
+  if (!mv) return;
+  evMove = null;
+  mv.bar.remove();
+  render();
+}
+
+async function finishEvMove(): Promise<void> {
+  const mv = evMove;
+  if (!mv || mv.busy) return;
+  mv.busy = true;
+  for (const b of mv.bar.querySelectorAll<HTMLButtonElement>('button')) b.disabled = true;
+  const r = await moveEvent(mv.ev.id, mv.at, lsGet(LS_ADMIN_TOKEN) ?? undefined);
+  if (evMove !== mv) return;
+  if (!r.ok) {
+    mv.busy = false;
+    for (const b of mv.bar.querySelectorAll<HTMLButtonElement>('button')) b.disabled = false;
+    showBanner(bannerEl, r.message, 4000);
+    return;
+  }
+  endEvMove();
+  showBanner(bannerEl, r.data.moved > 0 ? '位置改好了' : '這一則已經不在雷達上了', 3000);
+  await refresh();
 }
 
 /** 雷達或地圖上疊在一起的一群，詳細資料會列出同一群的其他項目 */
@@ -5937,6 +6028,7 @@ hqLayersBox.addEventListener('click', (e) => {
 });
 document.addEventListener('keydown', (e) => {
   if (e.key === 'Escape' && hqVoyageAt !== null) stopHqVoyage();
+  if (e.key === 'Escape' && evMove && !evMove.busy) endEvMove();
 });
 /**
  * 滑鼠移過去的介紹（使用者說「我想在一些地方滑鼠一過去可以介紹」）：有 data-intro 的東西（雷達上的感應圈），
@@ -7554,6 +7646,7 @@ function applyModule(): void {
 function switchModule(id: ModuleId, fetch = true): void {
   moduleSheet.hidden = true;
   if (id === mod.id) return;
+  endEvMove();
   mod = getModule(id);
   lsSet(LS_MODULE, mod.id);
   events = [];
@@ -9836,6 +9929,9 @@ function wireControls(): void {
     const t = e.target as HTMLElement;
     if (t.matches('input[name="kind"], #feedback-stop')) void syncFeedbackPin();
     if (t.matches('input[name="kind"]')) $('#feedback-topics').hidden = (feedbackForm.elements.namedItem('kind') as RadioNodeList).value !== 'topic';
+  });
+  $('#feedback-move-btn').addEventListener('click', () => {
+    if (feedbackEv) startEvMove(feedbackEv);
   });
   $('#feedback-unpin').addEventListener('click', () => {
     feedbackPicker?.set(null);

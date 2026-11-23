@@ -233,6 +233,20 @@ async function deviceJson<T>(path: string, method = 'GET', body?: unknown, retri
   }
 }
 
+/** 地點錯誤直接移位置（v1.808）：自己回報的那則，或管理者（帶管理 token） */
+export async function moveEvent(id: number, at: LatLng, adminToken?: string): Promise<Result<{ ok: true; moved: number }>> {
+  try {
+    const headers: Record<string, string> = { ...deviceHeaders(), 'content-type': 'application/json' };
+    if (adminToken) headers.authorization = `Bearer ${adminToken}`;
+    const r = await fetch(`${API_BASE}/api/events/${id}/move`, { method: 'POST', headers, body: JSON.stringify({ lat: at.lat, lng: at.lng }) });
+    const j = (await r.json().catch(() => ({}))) as { ok: true; moved: number; error?: string };
+    if (!r.ok) return { ok: false, message: j.error ?? `暫時失敗，請再試一次（${r.status}）`, status: r.status };
+    return { ok: true, data: j };
+  } catch {
+    return { ok: false, message: '連線失敗，請稍後再試' };
+  }
+}
+
 /** 附近漂流中的瓶子；失敗回傳空陣列 */
 export async function fetchBottles(origin: LatLng, radiusKm: number): Promise<BottleOut[]> {
   const r = await deviceJson<{ bottles?: BottleOut[] }>(`/api/bottles?lat=${origin.lat.toFixed(5)}&lng=${origin.lng.toFixed(5)}&radius_km=${radiusKm}`);

@@ -2136,6 +2136,9 @@ path.map-seam-walkers { --p: 15px; }
 .edit-map[hidden] { display: none; }
 /* 回報地點錯誤的小地圖 */
 .feedback-pin { display: grid; gap: 6px; margin: 4px 0 8px; }
+/* 地點錯誤：自己回報的那則、管理者直接在雷達上移（v1.808） */
+.feedback-move { margin: 4px 0 8px; }
+.feedback-move p { margin: 0 0 8px; }
 .feedback-find { flex-wrap: nowrap; }
 .feedback-find input { flex: 1 1 auto; min-width: 0; font: inherit; font-size: 16px; color: var(--text); background: var(--card); border: var(--border-w) solid var(--line); border-radius: var(--card-radius); padding: 6px 10px; }
 .edit-item [hidden] { display: none; }

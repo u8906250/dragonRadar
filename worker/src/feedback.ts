@@ -149,6 +149,46 @@ export async function submitFeedback(
   return { result: { ok: true, duplicate: false }, created: row };
 }
 
+/** 回報的人自己移位置：每小時最多幾次（同一個裝置或帳號） */
+const MOVES_PER_HOUR = 20;
+/** 回報的人自己移的位置記一筆已處理的地點錯誤（管理頁看得到誰移了、移到哪） */
+export const SELF_MOVE_NOTE = '回報的人直接在雷達上移了位置';
+
+/**
+ * 地點錯誤直接移位置（v1.808 使用者說回報地點錯誤可以直接移動位置，選「回報的人和管理者」）：
+ * 這則是自己回報的（同一個瀏覽器或帳號，回報紀錄 30 天內）或管理者，直接改到 { lat, lng }，同一則同一個地點還沒結束的一起改；
+ * 其他人照舊用「回報問題」送給管理者確認。車掃的站牽涉時間表、路線，照舊送管理者
+ */
+export async function moveEventPlace(env: Env, eventId: number, body: unknown, admin: boolean, device: string | null, ip: string, now: number): Promise<{ ok: true; moved: number }> {
+  const b = (body ?? {}) as { lat?: unknown; lng?: unknown };
+  const pin = pinOf(b.lat, b.lng);
+  if (!pin) throw new PushError(400, '請在雷達上標出正確的位置');
+  const ev = await env.DB.prepare('SELECT id, post_id, title, place_text, status FROM events WHERE id = ?')
+    .bind(eventId)
+    .first<{ id: number; post_id: string; title: string; place_text: string; status: string }>();
+  if (!ev) throw new PushError(404, '找不到這個發放或活動，可能已經下架了');
+  if (!['upcoming', 'active', 'unlocated'].includes(ev.status)) throw new PushError(409, '這一場已經結束或下架了');
+  const route = await env.DB.prepare('SELECT 1 AS ok FROM routes WHERE post_id = ? LIMIT 1').bind(ev.post_id).first<{ ok: number }>();
+  if (route) throw new PushError(400, '車掃路線的站請用「回報問題」選地點錯誤，送給管理者');
+  if (!admin) {
+    if (!device) throw new PushError(400, '缺少裝置代碼，請重新整理頁面');
+    const owned = await env.DB.prepare('SELECT 1 AS ok FROM submissions WHERE post_id = ? AND device = ? LIMIT 1').bind(ev.post_id, device).first<{ ok: number }>();
+    if (!owned) throw new PushError(403, '只有回報這則的人（同一個瀏覽器或帳號，30 天內）可以直接移動位置；請用「回報問題」送給管理者');
+    const moves = await env.DB.prepare('SELECT COUNT(*) AS n FROM event_feedback WHERE device = ? AND note = ? AND created_at > ?').bind(device, SELF_MOVE_NOTE, now - 3600).first<{ n: number }>();
+    if ((moves?.n ?? 0) >= MOVES_PER_HOUR) throw new PushError(429, '移動太多次了，請過一陣子再試');
+  }
+  const moved = await setEventPlace(env, ev.id, pin, null, now);
+  if (!admin && moved > 0) {
+    await env.DB.prepare(
+      `INSERT INTO event_feedback (event_id, post_id, title, place_text, kind, note, device, ip, status, created_at, resolved_at, pin_lat, pin_lng)
+       VALUES (?, ?, ?, ?, 'location', ?, ?, ?, 'resolved', ?, ?, ?, ?)`,
+    )
+      .bind(ev.id, ev.post_id, ev.title, ev.place_text, SELF_MOVE_NOTE, device, ip, now, now, pin.lat, pin.lng)
+      .run();
+  }
+  return { ok: true, moved };
+}
+
 export interface FeedbackRow {
   id: number;
   event_id: number;
