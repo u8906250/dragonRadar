@@ -615,6 +615,26 @@ async function earlierReport(env: Env, postId: string, module: ModuleId, now: nu
   return { existing, result: null };
 }
 
+/** 判讀中的貼文（posts.judging_at）超過這麼久還沒清掉：當成那次被中斷了，重新判讀 */
+const JUDGING_STALE_SEC = 90;
+/** 再送一次時，同一則還在判讀：最多等這麼久（毫秒），每 2 秒看一次 */
+const JUDGING_WAIT_MS = 40_000;
+
+/**
+ * 同一則還在判讀（v1.799 使用者說手機判讀中放到背景還能不能繼續：伺服器照樣做完，網頁回到畫面自動再送一次）：
+ * 等它做完再往下（之後 earlierReport 會拿到存好的結果）；等太久回 409，網頁過一下再送
+ */
+async function waitForJudging(env: Env, postId: string): Promise<void> {
+  const until = Date.now() + JUDGING_WAIT_MS;
+  for (;;) {
+    const row = await env.DB.prepare('SELECT judging_at FROM posts WHERE id = ?').bind(postId).first<{ judging_at: number | null }>();
+    const at = row?.judging_at ?? null;
+    if (at === null || Math.floor(Date.now() / 1000) - at > JUDGING_STALE_SEC) return;
+    if (Date.now() > until) throw new ReportError(409, '這則還在判讀中，請等一下');
+    await new Promise((r) => setTimeout(r, 2000));
+  }
+}
+
 /** 處理使用者貼上的連結：讀貼文、AI 判讀、定位，回傳結果 */
 export async function submitLink(env: Env, input: string, ip: string, now: number, device: string | null = null, module: ModuleId = DEFAULT_MODULE): Promise<SubmitResult> {
   assertReportsOpen(env, module);
@@ -635,6 +655,7 @@ export async function submitLink(env: Env, input: string, ip: string, now: numbe
   if (!link) throw new ReportError(400, '找不到 Threads 貼文或活動頁的連結，請貼上 Threads 貼文（https://www.threads.com/@帳號/post/...）、活動通（https://www.accupass.com/event/...）、OPENTIX（https://www.opentix.life/event/...）、Peatix（https://peatix.com/event/...）或 Luma（https://luma.com/...）的網址');
   const postId = await linkPostId(env, link.code, module);
 
+  await waitForJudging(env, postId);
   const earlier = await earlierReport(env, postId, module, now);
   if (earlier.result) return earlier.result;
   const existing = earlier.existing;
@@ -661,7 +682,8 @@ export async function submitLink(env: Env, input: string, ip: string, now: numbe
   const text = withLocationTag(fetched.text, fetched.location);
   await storePost(env, { id: postId, username, text, permalink, posted_at: postedAt, keyword: null, source: 'link', module }, now);
   // 等回報的人確認才放上雷達；排程也不會自己判讀
-  await env.DB.prepare("UPDATE posts SET checked_at = ?, text = ?, confirm_state = 'pending' WHERE id = ?").bind(now, text, postId).run();
+  // judging_at：判讀中（手機斷線、再送一次的那次等它做完）
+  await env.DB.prepare("UPDATE posts SET checked_at = ?, text = ?, confirm_state = 'pending', judging_at = ? WHERE id = ?").bind(now, text, now, postId).run();
   await env.DB.prepare('INSERT INTO submissions (post_id, ip_hash, device, created_at) VALUES (?, ?, ?, ?)').bind(postId, ip, device, now).run();
 
   const post = await getPost(env, postId);
@@ -672,9 +694,10 @@ export async function submitLink(env: Env, input: string, ip: string, now: numbe
   } catch (e) {
     // Workers AI 暫時出錯：貼文已存，回報的人再貼一次就會重新判讀
     console.warn(`plan failed for ${postId}: ${String(e)}`);
+    await env.DB.prepare('UPDATE posts SET judging_at = NULL WHERE id = ?').bind(postId).run();
     return { existed: false, outcome: 'failed', reasons: ['extraction_failed'], events: [], permalink };
   }
-  await env.DB.prepare('UPDATE posts SET confirm_plan = ? WHERE id = ?').bind(storePlan(plan), postId).run();
+  await env.DB.prepare('UPDATE posts SET confirm_plan = ?, judging_at = NULL WHERE id = ?').bind(storePlan(plan), postId).run();
   return previewResult(env, { ...post, permalink }, plan, !!existing, now);
 }
 

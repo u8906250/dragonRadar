@@ -9093,6 +9093,40 @@ function renderPreview(r: SubmitResult): void {
   });
 }
 
+/** 等到網頁回到畫面（本來就在畫面上馬上回） */
+function whenVisible(): Promise<void> {
+  return new Promise((ok) => {
+    if (!document.hidden) return ok();
+    const back = (): void => {
+      if (document.hidden) return;
+      document.removeEventListener('visibilitychange', back);
+      ok();
+    };
+    document.addEventListener('visibilitychange', back);
+  });
+}
+
+/**
+ * 送出回報（v1.799 使用者說手機判讀中放到背景，還有沒有辦法繼續判斷）：判讀中放到背景、連線斷了的，回到畫面自動再送一次同一個連結。
+ * 伺服器斷線後照樣做完、存好結果，再送就直接拿存好的；還在判讀的伺服器等它做完，等太久回 409，過幾秒再送。最多再送 3 次
+ */
+async function submitResumable(url: string): Promise<Awaited<ReturnType<typeof submitLink>>> {
+  for (let tries = 0; ; tries++) {
+    let away = document.hidden;
+    const mark = (): void => {
+      if (document.hidden) away = true;
+    };
+    document.addEventListener('visibilitychange', mark);
+    const r = await submitLink(url, mod.id).finally(() => document.removeEventListener('visibilitychange', mark));
+    const judging = !r.ok && r.status === 409;
+    const cut = !r.ok && r.status === undefined && away;
+    if (r.ok || tries >= 3 || !(judging || cut)) return r;
+    await whenVisible();
+    setReportMsg('<p class="msg busy">接著拿判讀結果，請稍等</p>');
+    if (judging) await new Promise((ok) => setTimeout(ok, 3000));
+  }
+}
+
 async function submitReport(): Promise<void> {
   if (reportBusy || !reportsOpen) return;
   const url = reportInput.value.trim();
@@ -9102,7 +9136,7 @@ async function submitReport(): Promise<void> {
   }
   setReportBusy(true);
   setReportMsg('<p class="msg busy">讀取貼文並判讀中，約需 10 秒</p>');
-  const r = await submitLink(url, mod.id).finally(() => setReportBusy(false));
+  const r = await submitResumable(url).finally(() => setReportBusy(false));
   if (!r.ok) {
     setReportMsg(`<p class="msg error">${esc(r.message)}</p>`);
     return;

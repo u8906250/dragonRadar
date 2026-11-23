@@ -92,6 +92,18 @@ class HttpError extends Error {
   }
 }
 
+/**
+ * 要判讀很久的（回報、補充、修改）：手機放到背景、連線斷了也照樣做完、把結果存起來（v1.799；Cloudflare 斷線後最多再給 30 秒），
+ * 網頁回到畫面再送一次就拿得到
+ */
+function finishEvenIfGone<T>(ctx: ExecutionContext, work: Promise<T>): Promise<T> {
+  ctx.waitUntil(work.then(
+    () => undefined,
+    () => undefined,
+  ));
+  return work;
+}
+
 async function handle(req: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
   const url = new URL(req.url);
   const path = url.pathname.replace(/\/+$/, '') || '/';
@@ -250,14 +262,14 @@ async function handle(req: Request, env: Env, ctx: ExecutionContext): Promise<Re
   // 貼文沒寫地點或時間：回報的人補充後再判讀一次 { postId, token, note }
   // 洋流的活動：回報的人直接改每一場的標題、時間、地點、地圖位置
   if (req.method === 'POST' && path === '/api/reports/edit') {
-    return jsonResponse(await editLink(env, await readJson<{ postId?: unknown; token?: unknown; items?: unknown; localTimes?: unknown }>(req), await ipHash(env, req), now, await deviceId(env, req)));
+    return jsonResponse(await finishEvenIfGone(ctx, editLink(env, await readJson<{ postId?: unknown; token?: unknown; items?: unknown; localTimes?: unknown }>(req), await ipHash(env, req), now, await deviceId(env, req))));
   }
   // 修改表單先查填的地點，在小地圖上標出來：{ postId, token, place }
   if (req.method === 'POST' && path === '/api/reports/locate') {
     return jsonResponse(await locateForEdit(env, await readJson<{ postId?: unknown; token?: unknown; place?: unknown }>(req), now));
   }
   if (req.method === 'POST' && path === '/api/reports/supplement') {
-    return jsonResponse(await supplementLink(env, await readJson<{ postId?: unknown; token?: unknown; note?: unknown }>(req), await ipHash(env, req), now, await deviceId(env, req)));
+    return jsonResponse(await finishEvenIfGone(ctx, supplementLink(env, await readJson<{ postId?: unknown; token?: unknown; note?: unknown }>(req), await ipHash(env, req), now, await deviceId(env, req))));
   }
   // 我的回報（裝置代碼放在 x-device 標頭）：列出、刪除自己回報的
   if (req.method === 'GET' && path === '/api/reports/mine') {
@@ -288,10 +300,13 @@ async function handle(req: Request, env: Env, ctx: ExecutionContext): Promise<Re
   if (req.method === 'POST' && path === '/api/reports') {
     const body = await readJson<{ url?: unknown; module?: unknown }>(req);
     if (typeof body.url !== 'string' || body.url.length > 2000) throw new HttpError(400, '請貼上 Threads 貼文連結');
-    const result = await submitLink(env, body.url, await ipHash(env, req), now, await deviceId(env, req), moduleOf(body.module));
-    // 回報的如果是官方車掃，馬上併進去，不用等排程
-    await mergeIntoOfficial(env, now).catch((e) => console.warn('merge failed', e));
-    return jsonResponse(result);
+    const work = (async () => {
+      const result = await submitLink(env, body.url as string, await ipHash(env, req), now, await deviceId(env, req), moduleOf(body.module));
+      // 回報的如果是官方車掃，馬上併進去，不用等排程
+      await mergeIntoOfficial(env, now).catch((e) => console.warn('merge failed', e));
+      return result;
+    })();
+    return jsonResponse(await finishEvenIfGone(ctx, work));
   }
 
   // 固定據點回報已經拿掉，統一用 /api/reports 判讀（AI 會自己判斷是不是固定據點）；
