@@ -18,6 +18,7 @@ import { dogHairRoots, dogPartArea, dogParts } from './dog';
 import { dogPose, dogTurned, happyWag } from './dogs';
 import { arriveRocket, ARRIVE_MS, DEPART_MS, departRocket, HATCH_CENTER, moveDogs, PARK_DOGS, personOk, petDog, rocketNow, setSniffMarks, stowRocket, STOW_MS, summonRocket, SUMMON_MS } from './park';
 import { cloudLayer, puffTexture, rocketModel, ROCKET_H, ROCKET_WINDOW_Y, spaceScene, type SpaceTrip } from './rocket3d';
+import { compassSupported, startOrientation } from './compass';
 import { altOf, azOf, type Enu, moonEnu, moonLit, ORION_LABEL, ORION_LINES, ORION_NEBULA, ORION_STARS, skyLook, type SkyStar, starEnu, sunEnu } from './sky';
 import { toWoof } from './space';
 import { ZHONGSHAN_PARK as Z } from './zhongshan';
@@ -2245,6 +2246,18 @@ export function openPark3D(o: Park3DOptions): () => void {
   /** 點指北針：從哪個方向、哪時候開始轉回面向北（自己拖曳、按方向鍵就停） */
   let toNorth: { from: number; to: number; t0: number } | null = null;
   const TO_NORTH_MS = 600;
+  /**
+   * 跟著手機轉（v1.802 使用者說指北針希望跟著手機移動）：手機背面朝哪就看哪、往上舉就往上看（抬頭看得到獵戶座），畫面慢慢跟上（不會抖）；
+   * 走路照舊用搖桿。手機上點指北針開關，拖曳畫面、按方向鍵就關掉
+   */
+  type Follow = { stop: () => void; yaw: number | null; pitch: number };
+  let follow: Follow | null = null;
+  const stopFollow = (): void => {
+    if (!follow) return;
+    follow.stop();
+    follow = null;
+    root.querySelector('.p3d-compass')?.classList.remove('on');
+  };
   let saved = '';
   const remember = (): void => {
     const key = `${pos[0].toFixed(2)},${pos[1].toFixed(2)},${yaw.toFixed(2)},${pitch.toFixed(2)}`;
@@ -2388,6 +2401,7 @@ export function openPark3D(o: Park3DOptions): () => void {
     turnHeld = turn ? turnHeld + dt : 0;
     if (turn) {
       toNorth = null;
+      stopFollow();
       yaw += turn * dt * TURN_KEY * Math.min(1, 0.25 + turnHeld / TURN_RAMP_S);
     }
     if (stick.id >= 0) {
@@ -2715,6 +2729,7 @@ export function openPark3D(o: Park3DOptions): () => void {
     if (!drag.moved && Math.hypot(dx, dy) < 6) return;
     drag.moved = true;
     toNorth = null;
+    stopFollow();
     yaw -= dx * TURN_DRAG;
     // 可以抬頭看到快正上方（太陽、月亮在頭頂附近也看得到）
     pitch = Math.max(-1.3, Math.min(1.45, pitch - dy * LOOK_DRAG));
@@ -2793,10 +2808,50 @@ export function openPark3D(o: Park3DOptions): () => void {
   window.addEventListener('pagehide', onHide);
 
   $('.p3d-exit').addEventListener('click', () => close());
-  // 指北針：轉回面向北（轉最近的那一邊）
-  $('.p3d-compass').addEventListener('click', () => {
-    const full = Math.PI * 2;
-    toNorth = { from: yaw, to: Math.round(yaw / full) * full, t0: performance.now() };
+  // 指北針：手機上點一下開關「跟著手機轉」（v1.802）；電腦沒有方向感測器，點一下轉回面向北（轉最近的那一邊）
+  const compassEl = $<HTMLButtonElement>('.p3d-compass');
+  const canFollow = touch && compassSupported();
+  if (canFollow) {
+    compassEl.title = '指北針：點一下畫面跟著手機轉，再點一下關掉';
+    compassEl.setAttribute('aria-label', '指北針，點一下畫面跟著手機轉');
+  }
+  compassEl.addEventListener('click', () => {
+    if (!canFollow) {
+      const full = Math.PI * 2;
+      toNorth = { from: yaw, to: Math.round(yaw / full) * full, t0: performance.now() };
+      return;
+    }
+    if (follow) {
+      stopFollow();
+      msg('不跟著手機轉了，拖曳畫面轉頭', 2500);
+      return;
+    }
+    toNorth = null;
+    const f: Follow = { stop: () => undefined, yaw: null, pitch };
+    follow = f;
+    compassEl.classList.add('on');
+    void startOrientation((heading, beta) => {
+      if (follow !== f) return;
+      f.yaw = (heading * Math.PI) / 180;
+      // 直立（beta 90）看正前方，往後仰抬頭、往前低頭；跟拖曳一樣的上下限
+      f.pitch = Math.max(-1.3, Math.min(1.45, ((beta - 90) * Math.PI) / 180));
+    }).then((stop) => {
+      if (follow !== f) return stop?.();
+      if (!stop) {
+        stopFollow();
+        msg('沒有取得方向感測權限，照舊拖曳畫面轉頭', 3000);
+        return;
+      }
+      f.stop = stop;
+      msg('拿著手機轉身、往上舉，畫面跟著轉（再點指北針關掉）', 3500);
+      // 一陣子都沒有感測器的資料（有的手機、瀏覽器沒有）：關掉
+      setTimeout(() => {
+        if (follow === f && f.yaw === null) {
+          stopFollow();
+          msg('這支手機讀不到方向，照舊拖曳畫面轉頭', 3000);
+        }
+      }, 2000);
+    });
   });
   // 沒有管理 token：只看得到標好的，不能標
   $<HTMLElement>('.p3d-mark-toggle').hidden = !o.token;
@@ -2878,6 +2933,17 @@ export function openPark3D(o: Park3DOptions): () => void {
     }
     if (updateRocket(now)) dirty = true;
     // 點了指北針：頭尾慢、轉到面向北（自己操作的，減少動態效果也照樣轉）
+    // 跟著手機轉：每一格往手機的方向靠近一點（轉最近的那一邊）
+    if (follow && follow.yaw !== null) {
+      const k = 1 - Math.exp(-dt * 10);
+      const full = Math.PI * 2;
+      const dy = ((((follow.yaw - yaw + Math.PI) % full) + full) % full) - Math.PI;
+      if (Math.abs(dy) > 1e-4 || Math.abs(follow.pitch - pitch) > 1e-4) {
+        yaw += dy * k;
+        pitch += (follow.pitch - pitch) * k;
+        dirty = true;
+      }
+    }
     if (toNorth) {
       const k = Math.min(1, (now - toNorth.t0) / TO_NORTH_MS);
       const e = k < 0.5 ? 2 * k * k : 1 - (-2 * k + 2) ** 2 / 2;
@@ -2911,6 +2977,7 @@ export function openPark3D(o: Park3DOptions): () => void {
     closed = true;
     cancelAnimationFrame(frame);
     clearTimeout(hintTimer);
+    stopFollow();
     ro.disconnect();
     window.removeEventListener('keydown', onKey, true);
     window.removeEventListener('keyup', onKey, true);

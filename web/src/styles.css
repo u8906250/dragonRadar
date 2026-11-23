@@ -2657,6 +2657,9 @@ body.letters-open { overflow: hidden; }
 .p3d-compass .needle-s { fill: #15171c; opacity: 0.35; }
 .p3d-compass .needle-letter { fill: #15171c; font-size: 7px; font-weight: 800; }
 .p3d.p3d-flying .p3d-compass { display: none; }
+/* 跟著手機轉（v1.802）：深色底，指針照樣是紅色指北 */
+.p3d-compass.on { background: #15171c; border-color: #f4efe6; }
+.p3d-compass.on .needle-s, .p3d-compass.on .needle-letter { fill: #f4efe6; }
 .p3d-title { margin: 0 auto; padding: 4px 12px; border-radius: 12px; background: rgba(244, 239, 230, 0.85); text-align: center; font-weight: 800; color: #15171c; pointer-events: none; }
 .p3d-mark-toggle[aria-pressed='true'] { background: var(--chip-on-bg); color: var(--chip-on-text); border-color: var(--chip-on-border); }
 .p3d-hint { position: absolute; left: 50%; top: calc(64px + env(safe-area-inset-top)); transform: translateX(-50%); padding: 6px 12px; border-radius: 999px; background: rgba(21, 23, 28, 0.72); color: #fff; font-size: 13px; white-space: nowrap; pointer-events: none; }
