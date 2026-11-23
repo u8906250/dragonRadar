@@ -48,6 +48,8 @@ export const STORE_TYPES: Array<{ key: string; label: string }> = [
   { key: 'beauty', label: '美容' },
   { key: 'stay', label: '住宿' },
   { key: 'clinic', label: '醫療' },
+  // v1.797 使用者說波力路器械皮拉提斯新增健身類型
+  { key: 'fitness', label: '健身' },
   // v1.795 使用者說樂樂桌遊休閒館新增桌遊類型
   { key: 'game', label: '桌遊' },
   { key: 'other', label: '其他' },
@@ -82,6 +84,7 @@ const STORE_COLORS: Record<string, string> = {
   beauty: '#b54bc4',
   stay: '#3d9c46',
   clinic: '#d93a48',
+  fitness: '#0b7fa3',
   game: '#c98a00',
   other: '#66788a',
   general: '#2f6fd6',
@@ -170,6 +173,8 @@ export function glyphSvg(key: string, c: string): string {
       return `<path d="M0 -7 C-5 -7 -7.5 -3.5 -7.5 0 C-7.5 4.5 -4 7 0 7 C1.8 7 2.2 5.6 1.2 4.4 C0.2 3.2 1 1.6 2.8 1.8 C5.5 2 7.5 0.5 7.5 -1.5 C7.5 -4.5 4.5 -7 0 -7 Z" fill="${c}"/><circle cx="-4" cy="-0.6" r="1.3" fill="#00000055"/><circle cx="-1.6" cy="-4.2" r="1.3" fill="#00000055"/><circle cx="2.6" cy="-4" r="1.3" fill="#00000055"/><circle cx="-3.2" cy="3.6" r="1.3" fill="#00000055"/>`;
     case 'comic': // 對話框加驚嘆號（漫畫）
       return `<path d="M-7 -5.5 a2 2 0 0 1 2 -2 h10 a2 2 0 0 1 2 2 v7 a2 2 0 0 1 -2 2 h-5 l-4.2 3.6 v-3.6 h-0.8 a2 2 0 0 1 -2 -2 z" fill="${c}"/><path d="M0 -5.2 v3.6" stroke="#00000055" stroke-width="1.8" stroke-linecap="round"/><circle cx="0" cy="0.9" r="1" fill="#00000055"/>`;
+    case 'fitness': // 啞鈴（健身）
+      return `<rect x="-4.2" y="-1.1" width="8.4" height="2.2" rx="0.8" fill="${c}"/><rect x="-6.6" y="-4.8" width="2.8" height="9.6" rx="1" fill="${c}"/><rect x="3.8" y="-4.8" width="2.8" height="9.6" rx="1" fill="${c}"/><rect x="-8.4" y="-2.9" width="1.9" height="5.8" rx="0.7" fill="${c}"/><rect x="6.5" y="-2.9" width="1.9" height="5.8" rx="0.7" fill="${c}"/>`;
     case 'game': // 骰子（桌遊）
       return `<rect x="-6.5" y="-6.5" width="13" height="13" rx="2.6" fill="${c}"/><circle cx="-3" cy="-3" r="1.35" fill="#00000066"/><circle cx="3" cy="-3" r="1.35" fill="#00000066"/><circle cx="0" cy="0" r="1.35" fill="#00000066"/><circle cx="-3" cy="3" r="1.35" fill="#00000066"/><circle cx="3" cy="3" r="1.35" fill="#00000066"/>`;
     case 'other': // 小店面（遮雨棚加門）

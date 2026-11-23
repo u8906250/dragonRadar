@@ -640,6 +640,8 @@ const GIVE_RE = /發放|贈送|免費送|送給|送出|送完|領取|索取|發�
  * 改成活動、拿掉物品，免得畫面寫「發放：洋流飄帶」。改了回傳 true。
  */
 export function dropBroughtItem(ex: Pick<ExtractedEvent, 'kind' | 'item'>, text: string): boolean {
+  // 只看活動雷達的發放、活動：其他雷達的 item 是費用、程度（v1.797：羽球臨打「請自備球拍」被清掉費用、變成活動）
+  if (ex.kind !== 'giveaway' && ex.kind !== 'activity') return false;
   if (!BRING_OWN_RE.test(text) || GIVE_RE.test(text)) return false;
   if (!ex.item && ex.kind === 'activity') return false;
   ex.item = null;

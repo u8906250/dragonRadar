@@ -591,6 +591,11 @@ describe('dropBroughtItem', () => {
     expect(dropBroughtItem(ex, '明天 15:00 市政府站發飄帶')).toBe(false);
     expect(ex.item).toBe('洋流飄帶');
   });
+  it('leaves other radars alone: a badminton fee stays when players bring their own rackets (v1.797)', () => {
+    const ex = { kind: 'session' as const, item: '230元（遲到早退均一價）' as string | null };
+    expect(dropBroughtItem(ex, '費用：230元（遲到早退均一價）\n1. 請自備球拍，穿著運動服、球鞋。')).toBe(false);
+    expect(ex).toEqual({ kind: 'session', item: '230元（遲到早退均一價）' });
+  });
 });
 
 describe('dropSelfPlace', () => {
