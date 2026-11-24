@@ -9864,20 +9864,12 @@ function wireFullScreen(): void {
   const listBtn = $<HTMLButtonElement>('#list-btn');
   const moreBtn = $<HTMLButtonElement>('#more-btn');
   const controls = moreBtn.parentElement as HTMLElement;
-  // 全螢幕時「道具」「雷達」搬到最上面那排（放大鏡、⋯ 那排，v1.836 使用者說的），離開全螢幕搬回原位
-  const itemsBtn = $<HTMLButtonElement>('#items-btn');
-  const homes = [itemsBtn, fullBtn].map((el) => ({ el, parent: el.parentElement as HTMLElement, next: el.nextElementSibling }));
-  const placeTopRow = (on: boolean): void => {
-    if (on) for (const el of [itemsBtn, fullBtn]) controls.insertBefore(el, listBtn);
-    else for (const h of homes) h.parent.insertBefore(h.el, h.next && h.next.parentElement === h.parent ? h.next : null);
-  };
   const setMore = (open: boolean): void => {
     controls.classList.toggle('open', open);
     moreBtn.setAttribute('aria-expanded', String(open));
   };
   const setFull = (on: boolean, initial = false): void => {
     appEl.classList.toggle('full', on);
-    placeTopRow(on);
     // 雷達的地圖也鋪滿整個長方形（不裁成圓）；重畫（道路抓到畫面的角，範圍外的光點照真的位置畫）。剛打開網頁時之後會載入、畫第一次
     radar.setFill(on);
     if (!initial) render();

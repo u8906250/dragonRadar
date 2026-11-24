@@ -25,16 +25,18 @@
           <span id="mode-badge" class="badge" hidden></span>
         </div>
         <div class="controls">
-          <!-- 全螢幕時：主題、通知、卡冊、道具、收藏、願望、帳號、說明收進「⋯」，電腦多一個「清單」收起右邊的清單 -->
+          <!-- 全螢幕、窄的畫面：主題、通知、卡冊、收藏、願望、帳號、說明收進「⋯」，電腦全螢幕多一個「清單」收起右邊的清單 -->
           <!-- 全螢幕雷達才有：搜尋地址、地名（v1.785） -->
           <button type="button" id="find-btn" class="chip icon-chip" hidden title="搜尋地址、地名" aria-label="搜尋地址、地名" aria-expanded="false" aria-controls="find-box"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6"/><path d="M15 15l5 5"/></svg></button>
+          <!-- 道具、全螢幕（全螢幕時寫「雷達」）一直在標題列（v1.836 全螢幕、v1.837 一般雷達也是；排列順序在 styles.css） -->
+          <button type="button" id="items-btn" class="chip" title="收集到的道具">道具</button>
+          <button type="button" id="view-btn" class="chip primary" aria-pressed="false" title="全螢幕">全螢幕</button>
           <button type="button" id="list-btn" class="chip" aria-pressed="true" title="收起清單">清單</button>
           <button type="button" id="more-btn" class="chip icon-chip" aria-expanded="false" aria-controls="controls-more" title="主題、通知、卡冊、道具、收藏、願望、帳號、說明" aria-label="主題、通知、卡冊、道具、收藏、願望、帳號、說明"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="5" cy="12" r="1.6"/><circle cx="12" cy="12" r="1.6"/><circle cx="19" cy="12" r="1.6"/></svg></button>
           <div class="controls-more" id="controls-more">
             <button type="button" id="theme-btn" class="chip" title="切換主題">主題</button>
             <button type="button" id="notify-btn" class="chip" title="開啟聲音與通知" aria-pressed="false">通知</button>
             <button type="button" id="cards-btn" class="chip" title="尋找小法：收集卡片">卡冊</button>
-            <button type="button" id="items-btn" class="chip" title="收集到的道具">道具</button>
             <button type="button" id="letters-btn" class="chip" title="漂流瓶收藏、我丟的瓶子">收藏</button>
             <button type="button" id="wishes-btn" class="chip" title="用順幣許願、我的願望">願望</button>
             <button type="button" id="account-btn" class="chip" title="帳號（選用，passkey 登入）：手機、電腦看到同一份">帳號</button>
@@ -85,8 +87,6 @@
           <button type="button" id="compass-btn" class="chip icon-chip" hidden title="指北針：雷達跟著手機方向轉" aria-label="指北針"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9.2"/><path class="needle-n" d="M12 4.6l3 7.4h-6z"/><path class="needle-s" d="M12 19.4l-3-7.4h6z"/></svg></button>
           <!-- 漂流瓶：畫一個瓶子（v1.785 使用者說改成瓶子比較不占空間），右下角的數字是今天還能丟幾個 -->
           <button type="button" id="bottle-btn" class="chip icon-chip" title="漂流瓶：在牛皮紙上寫一段話丟在附近，或撿別人的" aria-label="漂流瓶" hidden><svg viewBox="0 0 24 24" aria-hidden="true"><g transform="rotate(-25 12 12)"><rect class="cork" x="10" y="2" width="4" height="3" rx="0.8"/><path d="M10 5h4v2.6l2.8 3.4v9a2 2 0 0 1-2 2H9.2a2 2 0 0 1-2-2v-9L10 7.6z"/><path class="scroll" d="M10.4 13.2h3.2M10.4 16.4h3.2"/></g></svg><span id="bottle-badge" class="chip-badge" hidden></span></button>
-          <!-- 全螢幕開關（v1.834 使用者說原本的「地圖」改成雷達、全螢幕切換，地圖拿掉） -->
-          <button type="button" id="view-btn" class="chip primary" aria-pressed="false" title="全螢幕">全螢幕</button>
         </div>
         <div id="find-box" class="find-box" hidden>
           <form id="find-form" class="find-form" role="search" autocomplete="off">
