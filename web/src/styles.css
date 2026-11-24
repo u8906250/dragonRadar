@@ -2014,10 +2014,11 @@ path.map-seam-walkers { --p: 15px; }
   #app.full .topbar { right: 380px; }
   #app.full #list-btn { display: inline-flex; align-items: center; }
   #app.full .panel { grid-row: 1; }
-  #app.full .overlay-tr { top: calc(8px + env(safe-area-inset-top)); right: 196px; }
+  /* 定位、指北針跟標題列同一排，讓出標題列的道具、雷達、清單、⋯（v1.836 道具、雷達搬到標題列） */
+  #app.full .overlay-tr { top: calc(8px + env(safe-area-inset-top)); right: 256px; }
   .find-box { top: calc(58px + env(safe-area-inset-top)); left: auto; width: 380px; }
   /* 標題列多了放大鏡：右上那排再往左讓一個按鈕 */
-  #app.full.find-on .overlay-tr { right: 242px; }
+  #app.full.find-on .overlay-tr { right: 302px; }
   .mini-compass { top: calc(58px + env(safe-area-inset-top)); }
   #app.full.list-off { grid-template-columns: minmax(0, 1fr); }
   #app.full.list-off .panel { display: none; }
