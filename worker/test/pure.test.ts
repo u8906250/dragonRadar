@@ -935,6 +935,13 @@ describe('cityLevel', () => {
   });
 });
 
+describe('isRoadHit with comma-separated street queries (v1.846)', () => {
+  it('still checks the road name at the end', () => {
+    expect(isRoadHit('臺中市, 南屯區, 大墩十二街', '大墩十二街, 三和里, 南屯區, 田心, 臺中市, 408227, 臺灣')).toBe(true);
+    expect(isRoadHit('臺中市, 南屯區, 大墩十二街', '大墩路, 南屯區, 臺中市')).toBe(false);
+  });
+});
+
 describe('sharesName', () => {
   it('rejects a hit whose name has nothing to do with the query', () => {
     expect(sharesName('丞風羽球館', '玉勅鳳邑琉球城隍廟, 觀光港路, 琉球鄉, 屏東縣, 臺灣')).toBe(false);

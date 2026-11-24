@@ -544,8 +544,12 @@ export async function geocodeStreet(env: Env, city: string, district: string | n
   const norm = (x: string): string => x.replace(/台/g, '臺');
   for (const name of streetFallbacks(street)) {
     const area = `${city}${district ?? ''}${name}`;
-    const p = await geocode(env, area, 'road');
-    if (p && (!district || norm(p.displayName).includes(norm(district)))) return { point: p, area };
+    // 連在一起查不到時，用逗號分開再查一次（v1.846：「臺中市南屯區大墩十二街」Nominatim 只回街上的圖書館，「臺中市, 南屯區, 大墩十二街」才回道路）；
+    // 路名放最後，isRoadHit 才看得到要對的路名
+    for (const q of [area, [city, district, name].filter(Boolean).join(', ')]) {
+      const p = await geocode(env, q, 'road');
+      if (p && (!district || norm(p.displayName).includes(norm(district)))) return { point: p, area };
+    }
   }
   return null;
 }
