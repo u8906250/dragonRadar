@@ -1615,24 +1615,18 @@ export function buildWoofCity(o: WoofCityOptions): WoofCity {
       g.closePath();
     };
     const line = (l: Pt[]): void => l.forEach(([x, y], i) => (i ? g.lineTo(X(x), Y(y)) : g.moveTo(X(x), Y(y))));
-    // 海、陸地（草地星球）
+    // 國館外面不畫細節（v1.826 使用者說的）：只有海、陸地（草地星球）、大的河湖、大馬路，房子、綠地、小路都不畫
     g.fillStyle = '#9cc9d6';
     g.fillRect(0, 0, w, h);
     g.fillStyle = '#cfe2ae';
     g.beginPath();
     ring(outlineCity);
     g.fill();
-    const loaded = [...cellMap.values()].filter((st) => st.ready);
-    g.fillStyle = '#b6d58e';
-    g.beginPath();
-    for (const st of loaded) for (const [grid, a] of st.areas) if (grid === gGrid && seen(a.box)) a.rings.forEach(ring);
-    g.fill('evenodd');
     g.fillStyle = '#a6d2e4';
     g.beginPath();
     for (const wt of overWater) if (seen(wt.box)) wt.rings.forEach(ring);
-    for (const st of loaded) for (const [grid, a] of st.areas) if (grid === wGrid && seen(a.box)) a.rings.forEach(ring);
     g.fill('evenodd');
-    // 馬路：淡淡的柏油色，照路寬畫（太細的至少 1 像素）；拉遠只畫大馬路
+    // 大馬路：淡淡的柏油色，照路寬畫（太細的至少 1 像素）
     g.strokeStyle = '#efe9dc';
     g.lineCap = g.lineJoin = 'round';
     for (const r of overRoads) {
@@ -1641,24 +1635,6 @@ export function buildWoofCity(o: WoofCityOptions): WoofCity {
       g.beginPath();
       line(r.pts);
       g.stroke();
-    }
-    if (mpp < 4)
-      for (const ch of chunks.values())
-        for (const r of ch.roads) {
-          g.lineWidth = Math.max(1, r.w / mpp);
-          g.beginPath();
-          line(r.pts);
-          g.stroke();
-        }
-    // 房子（拉近才畫）
-    if (mpp < 6) {
-      g.fillStyle = '#bdb7ab';
-      g.strokeStyle = 'rgba(90, 86, 78, 0.55)';
-      g.lineWidth = mpp < 1.5 ? 1 : 0.5;
-      g.beginPath();
-      for (const st of loaded) for (const b of st.buildings) if (seen(b.box)) b.rings.forEach(ring);
-      g.fill('evenodd');
-      if (mpp < 4) g.stroke();
     }
     // 國館：地面、草地、水（小島挖回草地）、步道、樹、建築，外框一圈
     g.fillStyle = '#ece4d2';
