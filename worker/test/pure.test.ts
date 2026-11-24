@@ -335,11 +335,12 @@ describe('extractFromPost with Claude as the primary model', () => {
     expect(r.model).toBe('claude-haiku-4-5');
     expect(r.extraction?.is_event).toBe(false);
     expect(f.calls).toEqual([]);
-    // 說明放 system（標成可以快取）、貼文放 user，Haiku 用低溫度
+    // 說明放 system（標成可以快取）、貼文放 user，不送溫度（Claude 回 400）
     expect(sent[0].model).toBe('claude-haiku-4-5');
     expect((sent[0].system as Array<{ text: string; cache_control: unknown }>)[0].cache_control).toEqual({ type: 'ephemeral' });
     expect(JSON.stringify(sent[0].messages)).toContain('安西街19號');
-    expect(sent[0].temperature).toBe(0.1);
+    expect(sent[0]).not.toHaveProperty('temperature');
+    expect(sent[0]).not.toHaveProperty('output_config');
   });
 });
 

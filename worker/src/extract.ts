@@ -1030,7 +1030,7 @@ export const isClaude = (model: string): boolean => model.startsWith('claude-');
 /**
  * 用 Claude 判讀一次（官方 SDK，金鑰是 worker 的 secret ANTHROPIC_API_KEY）。提示跟 Workers AI 一樣（只輸出 JSON），不用 JSON schema
  * （各雷達的 schema 有 maxItems 這些 Claude 的結構化輸出不一定收）；說明很長、每則都一樣，標成可以快取（太短不夠快取的話不會快取，也不多收錢）。
- * Haiku 4.5 照舊低溫度；Sonnet、Opus 這些新模型不收溫度、預設會先想一想，努力程度設低（只是抽資料）
+ * Claude 不收溫度（Haiku 4.5 送了回 400）；Haiku 4.5 也不收努力程度，Sonnet、Opus 這些新模型預設會先想一想，努力程度設低（只是抽資料）
  */
 async function runClaude(env: Env, model: string, messages: Array<{ role: 'system' | 'user'; content: string }>): Promise<string> {
   if (!env.ANTHROPIC_API_KEY) throw new Error('ANTHROPIC_API_KEY not set');
@@ -1041,7 +1041,7 @@ async function runClaude(env: Env, model: string, messages: Array<{ role: 'syste
     max_tokens: 4000,
     system: [{ type: 'text', text: system, cache_control: { type: 'ephemeral' } }],
     messages: messages.filter((m) => m.role === 'user').map((m) => ({ role: 'user' as const, content: m.content })),
-    ...(model.startsWith('claude-haiku-') ? { temperature: 0.1 } : { output_config: { effort: 'low' as const } }),
+    ...(model.startsWith('claude-haiku-') ? {} : { output_config: { effort: 'low' as const } }),
   });
   if (res.stop_reason === 'refusal') throw new Error('refusal');
   return res.content.map((b) => (b.type === 'text' ? b.text : '')).join('');
