@@ -465,10 +465,10 @@ gl_Position = projectionMatrix * mvPosition;`;
 const BEND_EDGE_M = 8;
 /**
  * 把大三角形切小（最長的邊超過 max 就從那一邊的中點切成兩個，所有屬性跟著內插、法線重新算長度）；
- * 不用切（整個不到 max 大）、多種材質（groups）、有變形動畫的不處理，回傳 null
+ * 分組的（好幾塊形狀合在一份的草皮、上面側面不同材質的柱體）每一組各自切、組照樣留著。不用切（整個不到 max 大）、有變形動畫的不處理，回傳 null
  */
 function tessellate(geo: THREE.BufferGeometry, max: number): THREE.BufferGeometry | null {
-  if (geo.groups.length > 1 || Object.keys(geo.morphAttributes).length || !geo.getAttribute('position')) return null;
+  if (Object.keys(geo.morphAttributes).length || !geo.getAttribute('position')) return null;
   geo.computeBoundingBox();
   const bb = geo.boundingBox!;
   if (Math.max(bb.max.x - bb.min.x, bb.max.y - bb.min.y, bb.max.z - bb.min.z) <= max) return null;
@@ -492,33 +492,44 @@ function tessellate(geo: THREE.BufferGeometry, max: number): THREE.BufferGeometr
   const len2 = (a: V, b: V): number => (a[pi][0] - b[pi][0]) ** 2 + (a[pi][1] - b[pi][1]) ** 2 + (a[pi][2] - b[pi][2]) ** 2;
   let split = false;
   const stack: V[][] = [];
-  for (let i = 0; i + 2 < src.getAttribute('position').count; i += 3) {
-    stack.push([vtx(i), vtx(i + 1), vtx(i + 2)]);
-    while (stack.length) {
-      const [a, b, c] = stack.pop()!;
-      const [ab, bc, ca] = [len2(a, b), len2(b, c), len2(c, a)];
-      const m = Math.max(ab, bc, ca);
-      if (m <= max * max) {
-        for (const v of [a, b, c]) v.forEach((arr, k) => out[k].push(...arr));
-        continue;
-      }
-      split = true;
-      // 從最長的那一邊切開（順序不變，正反面不會翻）
-      if (m === ab) {
-        const d = mid(a, b);
-        stack.push([a, d, c], [d, b, c]);
-      } else if (m === bc) {
-        const d = mid(b, c);
-        stack.push([a, b, d], [a, d, c]);
-      } else {
-        const d = mid(c, a);
-        stack.push([a, b, d], [d, b, c]);
+  const total = src.getAttribute('position').count;
+  // 沒分組就當成一整組（toNonIndexed 之後組的 start、count 是頂點的位置）
+  const groups = src.groups.length ? src.groups : [{ start: 0, count: total, materialIndex: 0 }];
+  const outGroups: Array<{ start: number; count: number; materialIndex?: number }> = [];
+  const made = (): number => out[pi].length / 3;
+  for (const grp of groups) {
+    const from = made();
+    const end = Math.min(total, grp.start + grp.count);
+    for (let i = grp.start; i + 2 < end; i += 3) {
+      stack.push([vtx(i), vtx(i + 1), vtx(i + 2)]);
+      while (stack.length) {
+        const [a, b, c] = stack.pop()!;
+        const [ab, bc, ca] = [len2(a, b), len2(b, c), len2(c, a)];
+        const m = Math.max(ab, bc, ca);
+        if (m <= max * max) {
+          for (const v of [a, b, c]) v.forEach((arr, k) => out[k].push(...arr));
+          continue;
+        }
+        split = true;
+        // 從最長的那一邊切開（順序不變，正反面不會翻）
+        if (m === ab) {
+          const d = mid(a, b);
+          stack.push([a, d, c], [d, b, c]);
+        } else if (m === bc) {
+          const d = mid(b, c);
+          stack.push([a, b, d], [a, d, c]);
+        } else {
+          const d = mid(c, a);
+          stack.push([a, b, d], [d, b, c]);
+        }
       }
     }
+    outGroups.push({ start: from, count: made() - from, materialIndex: grp.materialIndex });
   }
   if (!split) return null;
   const g = new THREE.BufferGeometry();
   names.forEach((n, k) => g.setAttribute(n, new THREE.Float32BufferAttribute(out[k], attrs[k].itemSize, attrs[k].normalized)));
+  if (src.groups.length) for (const grp of outGroups) g.addGroup(grp.start, grp.count, grp.materialIndex);
   return g;
 }
 /** 汪星 3D 走到國館附近 2 公里的邊上：提示（電腦、手機都一樣） */
