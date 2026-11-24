@@ -26,8 +26,6 @@
         </div>
         <div class="controls">
           <!-- 全螢幕、窄的畫面：主題、通知、卡冊、收藏、願望、帳號、說明收進「⋯」，電腦全螢幕多一個「清單」收起右邊的清單 -->
-          <!-- 全螢幕雷達才有：搜尋地址、地名（v1.785） -->
-          <button type="button" id="find-btn" class="chip icon-chip" hidden title="搜尋地址、地名" aria-label="搜尋地址、地名" aria-expanded="false" aria-controls="find-box"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6"/><path d="M15 15l5 5"/></svg></button>
           <!-- 道具、全螢幕（全螢幕時寫「雷達」）一直在標題列（v1.836 全螢幕、v1.837 一般雷達也是；排列順序在 styles.css） -->
           <button type="button" id="items-btn" class="chip" title="收集到的道具">道具</button>
           <button type="button" id="view-btn" class="chip primary" aria-pressed="false" title="全螢幕">全螢幕</button>
@@ -83,6 +81,8 @@
         </div>
         <div class="overlay overlay-tr">
           <!-- 定位、指北針畫成圖示（v1.792 使用者說也換成圖示）：定位中圖示一閃一閃 -->
+          <!-- 全螢幕雷達才有：搜尋地址、地名（v1.785；v1.842 使用者說放在定位旁邊） -->
+          <button type="button" id="find-btn" class="chip icon-chip" hidden title="搜尋地址、地名" aria-label="搜尋地址、地名" aria-expanded="false" aria-controls="find-box"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6"/><path d="M15 15l5 5"/></svg></button>
           <button type="button" id="locate-btn" class="chip icon-chip" title="定位：回到我的位置（在汪星是回到上次在 3D 國館離開的地方、在 Kepler-22b 是回到火箭降落的地方）" aria-label="定位"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="6.5"/><circle class="dot" cx="12" cy="12" r="2.3"/><path d="M12 2.5v3M12 18.5v3M2.5 12h3M18.5 12h3"/></svg></button>
           <button type="button" id="compass-btn" class="chip icon-chip" hidden title="指北針：雷達跟著手機方向轉" aria-label="指北針"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9.2"/><path class="needle-n" d="M12 4.6l3 7.4h-6z"/><path class="needle-s" d="M12 19.4l-3-7.4h6z"/></svg></button>
           <!-- 漂流瓶：畫一個瓶子（v1.785 使用者說改成瓶子比較不占空間），右下角的數字是今天還能丟幾個 -->
