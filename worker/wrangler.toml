@@ -45,8 +45,11 @@ NOMINATIM_USER_AGENT = "dragonRadar/0.1 (https://github.com/u8906250/dragonRadar
 # 小模型常把要報名的晚會、店家「只限今日」的發放判成不是活動；比較慢、比較貴，只在這種時候跑。
 # 2026-11-23（v1.798）原本的主要模型 qwen3-30b-a3b-fp8 在 11/20 被 Cloudflare 停用，使用者同意：
 # 主要改用 gpt-oss-120b（停用後實際都是它在判讀），第二意見用 gpt-oss-20b（同一則羽球貼文費用、程度都抓得到，約 7 秒）
-AI_MODEL = "@cf/openai/gpt-oss-120b"
-AI_MODEL_FALLBACK = "@cf/openai/gpt-oss-20b"
+# 2026-11-24（v1.810）Workers AI 免費額度（每天 10,000 neurons）不夠用、判讀一直失敗，使用者選了換 Claude：
+# 主要改用 Claude Haiku 4.5（Anthropic API，金鑰放 secret ANTHROPIC_API_KEY），出錯時用 Workers AI 的 gpt-oss-120b；
+# 主要是 Claude 時不再跑第二意見（extract.ts 的 extractFromPost）
+AI_MODEL = "claude-haiku-4-5"
+AI_MODEL_FALLBACK = "@cf/openai/gpt-oss-120b"
 DEFAULT_RADIUS_KM = "80"
 # 是否開放一般使用者新增關鍵字。等帳號綁定做好再改成 "true"
 ALLOW_USER_KEYWORDS = "false"

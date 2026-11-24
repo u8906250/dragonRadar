@@ -18,6 +18,7 @@
     "wrangler": "^4.0.0"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "^1.13.0",
     "@simplewebauthn/server": "^14.1.0"
   }
 }

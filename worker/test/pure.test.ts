@@ -2,7 +2,7 @@ import type { ExtractedEvent } from '../src/extract';
 import { applySupplementDate, closedWeekdays, dropBroughtItem, dropSelfPlace, openWeekdaysFromText, splitDropTimes, splitDailyActivity, splitMultiDay, slotWeekdays, spotHoursFromText, splitWeekdayWeekend, startNowForDeadline, untilInText, weekdaysFromText, weekdaysInText } from '../src/extract';
 import { isAreaOnly } from '../src/geocode';
 import { existedOutcome, notListedWhy, previewOf } from '../src/reports';
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { approxRank, detectEnded, inLngRange, lngRange, postExcerpt, spotMergeMode, spotScope, spotSessions } from '../src/events';
 import { buildMessages, localizeTimes, localToUnix, normalizeCountry, normalizeExtraction, regionTimeZone, validTimeZone } from '../src/extract';
 import { parseThreadsTimestamp } from '../src/threads';
@@ -296,6 +296,50 @@ describe('extractFromPost second opinion', () => {
     const b = env({ primary: EVENT, fallback: NOT_EVENT });
     expect((await extractFromPost(b.env, text, 0, 0, { secondOpinion: true })).extraction?.is_event).toBe(true);
     expect(b.calls).toEqual(['primary']);
+  });
+});
+
+describe('extractFromPost with Claude as the primary model', () => {
+  const text = '珈琲無花果 📍台北市大同區安西街19號 各式貼紙請酌量自取';
+  const NOT_EVENT = '{"is_event":false,"events":[]}';
+  const EVENT = '{"is_event":true,"events":[{"title":"珈琲無花果發小物","place_text":"安西街19號","confidence":0.9}]}';
+  const fallbackAi = (answer: string) => {
+    const calls: string[] = [];
+    return { calls, ai: { run: async (model: string) => (calls.push(model), { response: answer }) } };
+  };
+  /** 假的 Anthropic API：回一段文字（Messages API 的格式），記下送出的內容 */
+  const stubClaude = (reply: string) => {
+    const sent: Array<Record<string, unknown>> = [];
+    vi.stubGlobal('fetch', async (_url: string, init: { body: string }) => {
+      sent.push(JSON.parse(init.body));
+      return new Response(
+        JSON.stringify({ id: 'msg_1', type: 'message', role: 'assistant', model: 'claude-haiku-4-5', content: [{ type: 'text', text: reply }], stop_reason: 'end_turn', stop_sequence: null, usage: { input_tokens: 10, output_tokens: 10 } }),
+        { status: 200, headers: { 'content-type': 'application/json' } },
+      );
+    });
+    return sent;
+  };
+  afterEach(() => vi.unstubAllGlobals());
+
+  it('falls back to Workers AI when the API key is missing', async () => {
+    const f = fallbackAi(EVENT);
+    const r = await extractFromPost({ AI: f.ai, AI_MODEL: 'claude-haiku-4-5', AI_MODEL_FALLBACK: 'fallback' } as unknown as Env, text, 0, 0, { secondOpinion: true });
+    expect(r.model).toBe('fallback');
+    expect(r.extraction?.is_event).toBe(true);
+    expect(f.calls).toEqual(['fallback']);
+  });
+  it('uses the Claude answer and skips the second opinion', async () => {
+    const sent = stubClaude('```json\n' + NOT_EVENT + '\n```');
+    const f = fallbackAi(EVENT);
+    const r = await extractFromPost({ AI: f.ai, AI_MODEL: 'claude-haiku-4-5', AI_MODEL_FALLBACK: 'fallback', ANTHROPIC_API_KEY: 'k' } as unknown as Env, text, 0, 0, { secondOpinion: true });
+    expect(r.model).toBe('claude-haiku-4-5');
+    expect(r.extraction?.is_event).toBe(false);
+    expect(f.calls).toEqual([]);
+    // 說明放 system（標成可以快取）、貼文放 user，Haiku 用低溫度
+    expect(sent[0].model).toBe('claude-haiku-4-5');
+    expect((sent[0].system as Array<{ text: string; cache_control: unknown }>)[0].cache_control).toEqual({ type: 'ephemeral' });
+    expect(JSON.stringify(sent[0].messages)).toContain('安西街19號');
+    expect(sent[0].temperature).toBe(0.1);
   });
 });
 

@@ -19,7 +19,7 @@
  * - BOTTLES_ENABLED = "false" 可以整個關掉。
  */
 import type { Env } from './env';
-import { responseContent } from './extract';
+import { isClaude, responseContent } from './extract';
 import { hashSalt, ReportError } from './reports';
 import { TAIPEI_CENTER, WOOF_KM, WOOF_SEA } from './woofsea';
 
@@ -539,12 +539,16 @@ export async function moderate(env: Env, text: string, now = Math.floor(Date.now
   return { ...v, reason: v.allowed ? '' : (MODERATION_LABEL[v.category] ?? '內容不適合丟出去') };
 }
 
+/** 判讀的主要模型換成 Claude 以後，審核的第二個 Workers AI 模型 */
+const MODERATION_BACKUP = '@cf/openai/gpt-oss-20b';
+
 /**
  * 主要模型說 none 就放行；說要擋時再問備用模型，它說 none 就放行。每個問到的模型都說要擋：用最後一個（備用模型）的類別。
  * 一個都問不到回 null（呼叫的地方當成暫時不能審核）
  */
 export async function classify(env: Env, system: string, user: string, categories: string[]): Promise<Omit<ModerationVerdict, 'reason'> | null> {
-  const models = [env.AI_MODEL, env.AI_MODEL_FALLBACK].filter((m): m is string => !!m);
+  // 審核（漂流瓶、暱稱）只用 Workers AI（v1.810 判讀改用 Claude 後，瓶子內容不送出去）：主要、備用照舊是 gpt-oss-120b、gpt-oss-20b
+  const models = [env.AI_MODEL, env.AI_MODEL_FALLBACK, MODERATION_BACKUP].filter((m, i, a): m is string => !!m && !isClaude(m) && a.indexOf(m) === i).slice(0, 2);
   const trail: ModerationVerdict['trail'] = [];
   for (const model of models) {
     try {

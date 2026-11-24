@@ -1,3 +1,4 @@
+import Anthropic from '@anthropic-ai/sdk';
 import type { Env } from './env';
 import { isAdminOnly } from './geocode';
 import { formatTaipei, parseIsoToUnix } from './util';
@@ -1023,10 +1024,46 @@ export interface ModelAttempt {
   error?: string;
 }
 
-/** 用指定模型判讀一次。先用 JSON schema，模型不支援就退回純提示 */
+/** Claude（Anthropic API）的模型：名字是 claude- 開頭（v1.810 使用者說可以用比較好的 AI、付少量費用） */
+export const isClaude = (model: string): boolean => model.startsWith('claude-');
+
+/**
+ * 用 Claude 判讀一次（官方 SDK，金鑰是 worker 的 secret ANTHROPIC_API_KEY）。提示跟 Workers AI 一樣（只輸出 JSON），不用 JSON schema
+ * （各雷達的 schema 有 maxItems 這些 Claude 的結構化輸出不一定收）；說明很長、每則都一樣，標成可以快取（太短不夠快取的話不會快取，也不多收錢）。
+ * Haiku 4.5 照舊低溫度；Sonnet、Opus 這些新模型不收溫度、預設會先想一想，努力程度設低（只是抽資料）
+ */
+async function runClaude(env: Env, model: string, messages: Array<{ role: 'system' | 'user'; content: string }>): Promise<string> {
+  if (!env.ANTHROPIC_API_KEY) throw new Error('ANTHROPIC_API_KEY not set');
+  const client = new Anthropic({ apiKey: env.ANTHROPIC_API_KEY, maxRetries: 1, timeout: 60_000 });
+  const system = messages.filter((m) => m.role === 'system').map((m) => m.content).join('\n\n');
+  const res = await client.messages.create({
+    model,
+    max_tokens: 4000,
+    system: [{ type: 'text', text: system, cache_control: { type: 'ephemeral' } }],
+    messages: messages.filter((m) => m.role === 'user').map((m) => ({ role: 'user' as const, content: m.content })),
+    ...(model.startsWith('claude-haiku-') ? { temperature: 0.1 } : { output_config: { effort: 'low' as const } }),
+  });
+  if (res.stop_reason === 'refusal') throw new Error('refusal');
+  return res.content.map((b) => (b.type === 'text' ? b.text : '')).join('');
+}
+
+/** 用指定模型判讀一次。Workers AI：先用 JSON schema，模型不支援就退回純提示；Claude 見 runClaude */
 export async function runModel(env: Env, model: string, text: string, postedAt: number, now: number, spec: ExtractSpec = EVENT_SPEC): Promise<ModelAttempt> {
   const ai = env.AI as unknown as AiRunner;
   const messages = buildMessages(text, postedAt, now, spec.system);
+  if (isClaude(model)) {
+    const t0 = Date.now();
+    let raw = '';
+    let error: string | undefined;
+    try {
+      raw = await runClaude(env, model, messages);
+    } catch (e) {
+      error = String(e);
+    }
+    const extraction = error ? null : spec.normalize(raw);
+    const fidelity = extraction ? placeFidelity(extraction, text) : 0;
+    return { model, ms: Date.now() - t0, extraction, raw, fidelity, ok: !!extraction && fidelity >= MIN_FIDELITY, error };
+  }
   // Qwen3 預設會先長篇推理，可能把 token 用完沒有輸出；這種抽取工作不需要推理
   if (/qwen3/i.test(model)) messages[messages.length - 1].content += '\n/no_think';
   const t0 = Date.now();
@@ -1069,6 +1106,8 @@ export async function extractFromPost(
   opts: { secondOpinion?: boolean; spec?: ExtractSpec } = {},
 ): Promise<{ extraction: Extraction | null; raw: string; model: string; garbled: boolean }> {
   const models = [env.AI_MODEL, env.AI_MODEL_FALLBACK].filter((m, i, a): m is string => !!m && a.indexOf(m) === i);
+  // 主要模型是 Claude：同一則判斷穩定，不再請備用模型看第二次（備用只在 Claude 出錯、亂碼時用，不會讓比較弱的模型改掉 Claude 的判斷）
+  const secondOpinion = !!opts.secondOpinion && !isClaude(models[0] ?? '');
   let last: ModelAttempt | null = null;
   for (const m of models) {
     const attempt = await runModel(env, m, text, postedAt, now, opts.spec);
@@ -1077,7 +1116,7 @@ export async function extractFromPost(
       break;
     }
     last = attempt;
-    if (last.ok && (last.extraction?.is_event || !opts.secondOpinion)) break;
+    if (last.ok && (last.extraction?.is_event || !secondOpinion)) break;
     if (!last.ok) console.warn(`extract with ${m} not usable: fidelity=${last.fidelity.toFixed(2)} error=${last.error ?? ''}`);
   }
   if (!last) return { extraction: null, raw: 'null', model: '', garbled: false };
