@@ -32,7 +32,7 @@ events 每筆的欄位：
 - end_at: 結束時間，同格式；沒寫則 null
 - place_text: 貼文原文中的店、攤位、市集、約的地點
 - place_query: 給地圖搜尋用：有門牌就用門牌；貼文寫了縣市才加縣市，例如「台北市 大安森林公園」「新北市板橋區府中路1號」；只寫店名就只填店名，不要自己猜縣市；推薦沒寫門牌時，用店名加路名或地標（例如「阿城鵝肉 吉林路」），不要只填路名；沒寫則 null
-- spot: vendor 每週固定時段在同一個地方擺攤（例如「每週六都在 xx 市集」）為 true；其他 false
+- spot: vendor 每週固定時段在同一個地方擺攤、沒寫是哪一天的（例如「每週六都在 xx 市集」）為 true；其他 false。貼文寫了這次是哪一天（例如「11/28（六）在 xx 市集」），就算另外說「每週六都在」，也是那一天的單場：spot 為 false、weekdays 為 null
 - weekdays: spot 為 true 時，每週哪幾天（1 = 週一 … 7 = 週日）；否則 null
 - until: 固定擺攤的最後一天 YYYY-MM-DD；沒寫則 null
 - slots: meetup 缺幾人，例如「缺 2 人」；其他 null
