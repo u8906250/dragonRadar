@@ -11,7 +11,6 @@ import { getModule, JOB_RISK_TEXT, JOB_SAFETY_TIPS, MEETUP_SAFETY_TIPS, MODULES,
 import { X_MAX_WEIGHT, xLength } from './xcount';
 import { wireFind, type FoundPlace } from './find';
 import { shortAddress, splitPlace } from './place';
-import { crowdOf, MapView, pinPicker, type BaseMap, type MapRoute, type PinPicker } from './map';
 import { beep, ensureNotificationPermission, iosNeedsHomeScreen, notificationState, pushSubscription, pushSupported, registerServiceWorker, showBanner, systemNotify, unlockAudio, unsubscribePush } from './notify';
 import { checkWishNews, findCard, gotReward, myCards, onWishNews, openAlbum, openHelp, openItems, openWishes, overlay, setTeleport, spendTeleportCoin, teleportFlash } from './cards';
 import { DEEP_FROM_KM, FLAT_PAN_KM, labelSpanEm, LY_KM, Radar, SPACE_FROM_KM, type RadarLabel, type RadarRoute, type RadarStreets, type RadarStreetTile, type SpaceView } from './radar';
@@ -50,8 +49,6 @@ const LS_THEME = 'dr.theme';
 /** 全螢幕（像 Google 地圖）：'1' 是開著；電腦全螢幕時收起清單：'1' */
 const LS_FULL = 'dr.full';
 const LS_LIST_OFF = 'dr.listOff';
-const LS_BASE = 'dr.base';
-const BASES: BaseMap[] = ['nlsc', 'osm'];
 const LS_KEYWORDS = 'dr.keywords';
 /** 這個瀏覽器回報過貼文：開頁面時才去拿「我的回報」，沒回報過的不用多一次請求 */
 const LS_REPORTED = 'dr.reported';
@@ -241,7 +238,6 @@ let customKm = Math.max(youOn === 'woof' ? 0.0005 : MIN_ZOOM_KM, (scaleKnown && 
 let scaleSetting: ScaleSetting = scaleKnown ? (savedScale as ScaleSetting) : 'custom';
 if (!scaleKnown) lsSet(LS_SCALE_KM, String(DEFAULT_KM));
 let scaleKm = 5;
-let view: 'radar' | 'map' = 'radar';
 let selectedId: number | null = null;
 let lastFetchAt = 0;
 let notifiedOnce = false;
@@ -538,7 +534,6 @@ function setPoll(sec: number): void {
 }
 const modeBadge = $('#mode-badge');
 const notifyBtn = $<HTMLButtonElement>('#notify-btn');
-const viewBtn = $<HTMLButtonElement>('#view-btn');
 const compassBtn = $<HTMLButtonElement>('#compass-btn');
 const panelEl = $('#panel');
 const appEl = $('#app');
@@ -565,9 +560,9 @@ const locateBtn = $<HTMLButtonElement>('#locate-btn');
 const findBtn = $<HTMLButtonElement>('#find-btn');
 /** 全螢幕搜尋地址搜到、點了的地點（插一根針）；按「定位」、清掉搜尋就拿掉 */
 let found: FoundPlace | null = null;
-/** 放大鏡：地球上的全螢幕雷達才有（地圖、汪星、搭火箭時沒有；不是全螢幕時 CSS 藏起來） */
+/** 放大鏡：地球上的全螢幕雷達才有（汪星、搭火箭時沒有；不是全螢幕時 CSS 藏起來） */
 function syncFindBtn(): void {
-  const off = youOn !== 'earth' || tripTo !== null || view !== 'radar';
+  const off = youOn !== 'earth' || tripTo !== null;
   if (findBtn.hidden === off) return;
   findBtn.hidden = off;
   appEl.classList.toggle('find-on', !off);
@@ -639,9 +634,6 @@ const timeChipsEl = $('#time-chips');
 const timeToggle = $('#time-toggle') as HTMLButtonElement;
 const dateToggle = $<HTMLButtonElement>('#date-toggle');
 const datePanel = $('#date-panel');
-const baseChipsEl = $('#base-chips');
-const baseChips = Array.from(document.querySelectorAll<HTMLButtonElement>('#base-chips [data-base]'));
-let baseMap: BaseMap = (BASES as string[]).includes(lsGet(LS_BASE) ?? '') ? (lsGet(LS_BASE) as BaseMap) : 'nlsc';
 /** 最近一次 GPS 的誤差（公尺），手動或預設位置時為 null */
 let gpsAccuracy: number | null = null;
 const scaleChips = Array.from(document.querySelectorAll<HTMLButtonElement>('#scale-chips [data-scale]'));
@@ -717,30 +709,11 @@ function foundDog(m: typeof import('./park'), id: string): void {
 radar.onSpaceMove = () => {
   onWoofWalk();
   if (dogLocked || dogOffer) lockDog(null);
-  updateViewBtn();
   saveSpaceView();
   updateScaleChips();
   // 從汪星的中山公園（可以放大到 1 公尺以內）回到地球：地球上不在中山公園附近就拉遠到雷達平常的最小範圍
   fitEarthZoom();
 };
-const map = new MapView(
-  $('#map'),
-  origin,
-  {
-    onSelect: select,
-    onBottle: (id) => selectBottle(id),
-    onLandmark: (id) => {
-      if (id === 'hq') startHqVoyage();
-    },
-    onPreviewMove: (i, to) => (bottlePick ? movePick(to) : evMove ? moveEvPin(to) : markCard ? placeMark(to) : void movePin(i, to)),
-    onMapClick: (p) => {
-      if (bottlePick) movePick(p);
-      else if (evMove) moveEvPin(p);
-      else if (markCard && !reportSheet.hidden) placeMark(p);
-    },
-  },
-  baseMap,
-);
 
 // ---- logic ----
 function phaseOf(ev: EventOut, now: number): Phase {
@@ -1264,8 +1237,6 @@ let labelsAt: LatLng | null = null;
  * v1.639 從 50 km 改成 16 km（使用者要檢查澎湖：澎湖的路都標次要道路，16～50 km 只畫幹道，整片空白；16 km 內大街小巷都畫）
  */
 const OUTLINE_KM = 16;
-/** 地圖照舊比 50 km 大才畫海岸線（底圖本來就看得到海岸） */
-const MAP_OUTLINE_KM = 50;
 /** 換算時太遠的點換成這個（線在這裡斷開，不會跨過去接起來） */
 const FAR_POINT = { bearing: 0, distanceKm: 1e9 };
 /**
@@ -2336,7 +2307,6 @@ async function rocketTrip(m: typeof import('./park'), from: 'earth' | 'woof'): P
   bottleWorldChanged();
   saveSpaceView();
   updateScaleChips();
-  updateViewBtn();
   updateSpace();
   updateStreets();
   radar.redrawPark();
@@ -2408,7 +2378,6 @@ async function launchTrip(): Promise<void> {
   bottleWorldChanged();
   saveSpaceView();
   updateScaleChips();
-  updateViewBtn();
   updateSpace();
   updateStreets();
   radar.redrawPark();
@@ -2438,7 +2407,6 @@ async function landIn3D(to: 'earth' | 'woof'): Promise<void> {
   }
   saveSpaceView();
   updateScaleChips();
-  updateViewBtn();
   updateSpace();
   updateStreets();
   radar.redrawPark();
@@ -2474,7 +2442,6 @@ async function teleport(to: YouOn): Promise<void> {
   }
   saveSpaceView();
   updateScaleChips();
-  updateViewBtn();
   updateSpace();
   updateStreets();
   radar.redrawPark();
@@ -2845,13 +2812,12 @@ function updateOutline(): void {
         : null;
   // 縣市界（加上荷蘭的省界、國界，日本的都道府縣界）
   const lines = kind === 'land' && scaleKm <= COUNTY_MAX_KM ? (regions.length > 0 ? [...countyLines, ...regions.flatMap((r) => r.map.lines)] : countyLines) : [];
-  const mapRings = kind === 'land' && scaleKm > MAP_OUTLINE_KM ? landRings : null;
   // 拉遠：有畫地圖的國家塗底色（海岸線不塗：以前整圈都畫到的島、大陸都塗，拉遠時每個國家都變淺綠）
   const filled = kind === 'land' && scaleKm >= FILL_KM;
   if (filled) loadCountryFill();
   // 全螢幕塗海（16 km 內用圖磚裡的海，updateStreets）；洋流總部特效播放時跟綠地一樣不塗
   const seaOn = kind === 'land' && radar.filling && hqVoyageAt === null;
-  const base = sources ? `${kind}|${worldLoaded}|${!!ea}|${regions.length}|${china}|${lines.length > 0}|${!!mapRings}|${tier}|${filled}|${countryFillLoaded}|${seaOn}` : '';
+  const base = sources ? `${kind}|${worldLoaded}|${!!ea}|${regions.length}|${china}|${lines.length > 0}|${tier}|${filled}|${countryFillLoaded}|${seaOn}` : '';
   // 拖曳中移動不到範圍的一半：不重算（每一點都要算方位、距離，拉遠時點很多），雷達照位移整層平移（v1.719 使用者說快速拖很遠時地圖跟不上、越縮小越明顯）。
   // 平移最多 FLAT_PAN_KM，再遠照新的位置重算：拉遠到幾千公里時平移跟真的差很多，光點照球面轉、海岸線只是平移（v1.743）
   if (panFrom && outlineAt && base && outlineFor.startsWith(`${base}|`)) {
@@ -2904,7 +2870,6 @@ function updateOutline(): void {
   const land = seaOn ? [...TAIWAN_RINGS, ...(ea ? ea.eaCoast : []), ...regions.flatMap((r) => r.map.coast), ...world] : [];
   const sea = seaOn ? seaShapes(land, tier, reach, box) : [];
   radar.setOutline(radarOutline, lines.map((l) => toRadar(coarseRing(l, tier))).filter((r) => r.length > 1), fills, sea);
-  map.setOutline(mapRings ?? [], mapRings && filled ? countryFill : []);
 }
 
 // ---- 車掃路線 ----
@@ -2939,19 +2904,18 @@ const isParade = (r: RouteOut): boolean => r.style === 'rainbow';
 const isOceanRoute = (r: RouteOut): boolean => !isParade(r) && r.source !== 'report';
 
 /** 遊行開始流出彩虹、洋流車掃湧浪的時間（Date.now() 的毫秒），雷達、地圖各記各的 */
-const rainbowFlowAt = { radar: new Map<string, number>(), map: new Map<string, number>() };
+const rainbowFlowAt = new Map<string, number>();
 const calmMotion = window.matchMedia?.('(prefers-reduced-motion: reduce)');
 /**
  * 遊行、洋流車掃出發了（還沒抵達）：在雷達、地圖上看到它（那個畫面開著、網頁在前景）就從出發的地方流出彩虹、湧出洋流的浪，之後每隔約 30 秒再流一次
  * （RAINBOW_EVERY_MS，雷達、地圖各算各的；從別的畫面切過來、回到網頁時已經超過 30 秒就馬上流）。
  * 出發時網頁開著就是出發那一刻（每 5 秒重算一次），出發後才打開的是一打開就流。減少動態效果時不流
  */
-function rainbowFlow(r: RouteOut, now: number, where: 'radar' | 'map'): number | undefined {
+function rainbowFlow(r: RouteOut, now: number): number | undefined {
   if (routeState(r, now) !== 'live' || calmMotion?.matches) return undefined;
-  const seen = rainbowFlowAt[where];
-  const last = seen.get(r.id);
-  if ((last === undefined || Date.now() - last >= RAINBOW_EVERY_MS) && view === where && !document.hidden) seen.set(r.id, Date.now());
-  return seen.get(r.id);
+  const last = rainbowFlowAt.get(r.id);
+  if ((last === undefined || Date.now() - last >= RAINBOW_EVERY_MS) && !document.hidden) rainbowFlowAt.set(r.id, Date.now());
+  return rainbowFlowAt.get(r.id);
 }
 const stopLabel = (r: RouteOut, kind: RouteStop['kind']): string => ({ start: '出發', cheer: isReported(r) ? '應援點' : '加油點', end: isParade(r) ? '回到' : '抵達' })[kind];
 /** 車掃的起點、終點像賽車一樣插旗；遊行插彩虹旗 */
@@ -3001,6 +2965,13 @@ const turnLabel = (t: RouteTurn): string => `${t.at ? `約 ${fmtTime(t.at)} ` : 
 /** 遊行的每一條路線：「北路線 3.6 km」 */
 const paradeWays = (r: RouteOut): string => r.segments.map((s) => `${s.from} ${(s.lengthM / 1000).toFixed(1)} km`).join('、');
 
+/** 車掃路段的人數（跟大洋流車掃地圖一樣）：沒人、缺人、快滿（6 成以上）、已滿 */
+function crowdOf(people: number, target: number): 'empty' | 'low' | 'mid' | 'full' {
+  if (people === 0) return 'empty';
+  const r = target > 0 ? people / target : 1;
+  return r >= 1 ? 'full' : r >= 0.6 ? 'mid' : 'low';
+}
+
 function routeState(r: RouteOut, now: number): RadarRoute['state'] {
   if (!r.departAt || now < r.departAt) return 'planned';
   // 回報的：最後一站經過後 15 分鐘（雷達上那一站拿掉）才算結束
@@ -3023,9 +2994,9 @@ const beforeDeparture = (it: Item, now: number, focused: string | null): boolean
 /** 雷達、地圖上要畫的路線：出發後才畫，出發前點了才畫 */
 const drawnRoutes = (items: Item[], now: number, focused: string | null): RouteOut[] =>
   shownRoutes(items).filter((r) => routeState(r, now) !== 'planned' || r.id === focused);
-/** 出發前按「在地圖上看路線」：這條路線先畫出來，點其他地方收起 */
+/** 出發前按「在雷達上看路線」：這條路線先畫出來，點其他地方收起 */
 let routeOnMap: string | null = null;
-/** 現在點開的車掃：時間表、選到的那一站、或按了「在地圖上看路線」的 */
+/** 現在點開的車掃：時間表、選到的那一站、或按了「在雷達上看路線」的 */
 function focusedRoute(items: Item[]): string | null {
   if (selectedRoute) return selectedRoute;
   if (routeOnMap) return routeOnMap;
@@ -3200,8 +3171,6 @@ function setSearch(q: string): void {
 }
 
 function render(): void {
-  // 拉遠超過全球（太空）「地圖」按鈕藏起來，拉回全球以內再出現
-  viewBtn.hidden = view === 'radar' && noMapView();
   const now = nowSec();
   const fetched = computeItems(now);
   // 拖曳雷達中（放開後還在滑也算）：清單、搜尋關鍵字、詳細資料、地圖頁的標記先不更新，停了再一起更新（panRadar → setOrigin → render）。
@@ -3279,10 +3248,10 @@ function render(): void {
         id: r.id,
         state: routeState(r, now),
         // 遊行：北、南兩條路線分開畫（同時從出發的地方流出彩虹）
-        ...(isParade(r) ? { rainbow: true, parts: r.segments.map((sg) => sg.path.map(toRadar)), flowAt: rainbowFlow(r, now, 'radar') } : {}),
+        ...(isParade(r) ? { rainbow: true, parts: r.segments.map((sg) => sg.path.map(toRadar)), flowAt: rainbowFlow(r, now) } : {}),
         // 洋流車掃：進行中畫洋流的特效；中間點、一直重複開的洋流號（減少動態效果時不開）
         ...(isOceanRoute(r)
-          ? { ocean: true, flowAt: rainbowFlow(r, now, 'radar'), marks: routeTurns(r).map((t) => ({ ...toRadar([t.lat, t.lng]), title: turnLabel(t) })), boat: !calmMotion?.matches }
+          ? { ocean: true, flowAt: rainbowFlow(r, now), marks: routeTurns(r).map((t) => ({ ...toRadar([t.lat, t.lng]), title: turnLabel(t) })), boat: !calmMotion?.matches }
           : {}),
         points: r.segments.flatMap((sg) => sg.path).map(toRadar),
       };
@@ -3359,7 +3328,6 @@ function render(): void {
       hint: v === hint ? formatKm(v.distanceKm) : undefined,
     })),
   );
-  map.setBottles(nearViews.map((v) => ({ id: v.b.id, lat: v.b.lat, lng: v.b.lng, state: v.state, mine: v.b.mine, picked: v.b.picked || !!v.b.taken, read: readBottles.has(v.b.id) })));
   updateBottleBadge(nearViews);
   syncWoofBottles();
   // 全螢幕鋪滿時你的 GPS 位置（像 Google 地圖的藍點）：拖曳移開了也畫在 GPS 的地方
@@ -3376,84 +3344,15 @@ function render(): void {
   const pins: Array<ReportPin & { bottle?: boolean; hint?: string }> = pick
     ? [{ lat: pick.at.lat, lng: pick.at.lng, label: '瓶子落在這裡', glyph: null, drag: true, bottle: true, hint: '拖到想丟的地方' }]
     : evMove
-      ? [{ lat: evMove.at.lat, lng: evMove.at.lng, label: shortLabel(titleOf(evMove.ev)), glyph: typeOf(evMove.ev), drag: true, hint: '拖到正確的位置' }]
-      : shownReportPins();
+      ? [{ lat: evMove.at.lat, lng: evMove.at.lng, label: evMove.mark?.label ?? shortLabel(titleOf(evMove.ev)), glyph: typeOf(evMove.ev), drag: true, hint: '拖到正確的位置' }]
+      : feedbackPin && !feedbackSheet.hidden
+        ? // 回報地點錯誤標好的位置（回報問題開著時畫出來，v1.834 小地圖拿掉後在雷達上看）
+          [{ lat: feedbackPin.lat, lng: feedbackPin.lng, label: '你標的位置', glyph: null, drag: false }]
+        : shownReportPins();
   radar.setPreviews(
     pins.map((p) => ({ bearing: bearingDeg(origin, p), distanceKm: haversineKm(origin, p), label: p.label, glyph: p.glyph, drag: p.drag, bottle: p.bottle, hint: p.hint })),
     pick ? { bearing: bearingDeg(origin, pick.from), distanceKm: haversineKm(origin, pick.from), radiusKm: PICK_RANGE_KM } : null,
   );
-  map.setPreviews(pins, pick ? { lat: pick.from.lat, lng: pick.from.lng, km: PICK_RANGE_KM } : null);
-  map.setRoutes(
-    drawnRoutes(onMap, now, focused).map((r): MapRoute => ({
-      id: r.id,
-      title: r.title,
-      state: routeState(r, now),
-      claimUrl: r.claimUrl,
-      source: r.source,
-      ...(isParade(r) ? { rainbow: true, flowAt: rainbowFlow(r, now, 'map') } : {}),
-      ...(isOceanRoute(r) ? { ocean: true, flowAt: rainbowFlow(r, now, 'map'), turns: routeTurns(r).map((t) => ({ lat: t.lat, lng: t.lng, label: turnLabel(t) })), boat: !calmMotion?.matches } : {}),
-      // 回報的車掃：已經經過的那段畫淡
-      segments: r.segments.map((sg) => ({ ...sg, passed: !!sg.toAt && sg.toAt <= now })),
-    })).concat(
-      hqVoyageAt === null || !hqDrawing() || !hq
-        ? []
-        : [
-            {
-              id: 'hq-voyage',
-              title: '洋流號',
-              state: 'live' as const,
-              claimUrl: null,
-              river: true,
-              voyage: hqVoyageAt,
-              voyageKey: hqVoyageKey,
-              // 到終點 0.6 秒後河淡掉，政策的東西才看得清楚（使用者說「到終點把洋流路徑拿掉」）
-              riverOut: hqVoyageAt + HQ_SAIL_MS + 600,
-              segments: [{ seq: 1, from: '洋流總部', to: '台北市政府', path: hq.HQ_VOYAGE, people: 0, target: 0 }],
-              stops: hqTourStops(hqVoyageAt),
-              outline: hq.CITY_HALL_OUTLINE,
-              canals: hq.HQ_CANALS.map((c) => ({ path: c.points, at: hqStopAt(hqVoyageAt!, c.stop), label: c.name })),
-              springs: hq.HQ_SPRINGS.map((sp) => ({ lat: sp.lat, lng: sp.lng, at: hqStopAt(hqVoyageAt!, sp.stop), label: sp.name })),
-              ponds: hq.HQ_PONDS.map((pd) => ({ ring: pd.ring, at: hqStopAt(hqVoyageAt!, pd.stop), label: pd.name })),
-              plantings: HQ_TREES ? hqPlantings(hqVoyageAt) : [],
-              blooms: (HQ_TREES ? hq.HQ_BLOOMS : []).map((bl) => ({ center: bl.center, at: hqVoyageAt! + voyageTimeOf(bl.frac), streets: bl.streets })),
-              rivers: hq.HQ_RIVERS.map((rv) => ({ ring: rv.ring, at: hqStopAt(hqVoyageAt!, rv.stop) })),
-              boats: hq.HQ_BOATS.map((b) => ({ lat: b.lat, lng: b.lng, at: hqNearestAt(hqVoyageAt!, b), kind: b.kind, heading: b.heading })),
-              ...hqEx,
-              fitbuses: hqFitbuses(hqVoyageAt),
-              bikes: hqBikes(hqVoyageAt),
-              hits: hqHits(hqVoyageAt),
-              green: { ring: hq.HQ_TAIPEI_RING, steps: hqGreenSteps(hqVoyageAt) },
-              areas: hqAreas(hqVoyageAt),
-              circles: hqCircles().map(({ lat, lng, radiusM, at }) => ({ lat, lng, radiusM, at })),
-              nights: hqNights(hqVoyageAt),
-              sites: hqSites().map(({ rings, at }) => ({ rings, at })),
-              focus: hqLayer !== null,
-              ...(hqNetNow ? { network: hqNetNow } : {}),
-            },
-          ],
-    ),
-  );
-  if (!dragging) {
-    map.render(
-      drawn.map((it) => ({
-        id: it.ev.id,
-        kind: blipKind(it.ev),
-        spot: !!it.spot,
-        office: !!it.spot && isOffice(it.ev),
-        approx: !!it.ev.approxArea,
-        lat: it.ev.lat,
-        lng: it.ev.lng,
-        phase: it.ev.kind === 'store' && it.phase !== 'active' ? 'closed' : it.phase,
-        title: `${tagLabel(it)}｜${titleOf(it.ev)}`,
-        flag: flagOf(it.ev),
-        // 地圖上的小圖示照活動的主題（發放的也算一類，v1.671）
-        topic: topicFor(it.ev),
-        subtitle: `${placeLine(it.ev)} · ${timeLine(it, now)}`,
-        selected: it.ev.id === selectedId,
-        ...(isUpcoming(it) && it.phase === 'later' && it.ev.kind !== 'store' ? { fade: clarityOf(it.ev, now) } : {}),
-      })),
-    );
-  }
   if (!dragging) {
     renderList(items, now);
     renderDetail(items, now);
@@ -3725,10 +3624,6 @@ const FIT_IN = 0.12;
 function goToItem(it: Item): void {
   const { lat, lng } = it.ev;
   if (lat == null || lng == null) return;
-  if (view === 'map') {
-    map.panIntoView({ lat, lng }, sheetCover());
-    return;
-  }
   if (radar.spaceFocused) return;
   if (radar.spaceMoved) radar.resetSpace();
   // 手機的卡片從下面蓋住雷達：照卡片上緣和這一則在哪個方向，算往這個方向最多到半徑的多少看得到（光點、亮環留 24 像素）；電腦的卡片在右邊，不蓋雷達
@@ -3825,20 +3720,20 @@ function renderRouteDetail(r: RouteOut, items: Item[], now: number): void {
             : `<p>${esc(routeTimeLine(r, items, now))}<br><span class="muted">全長 ${routeKm(r).toFixed(1)} km・沿線認領 ${people.toLocaleString()} / 目標 ${target.toLocaleString()} 人${needy > 0 ? `・還有 ${needy} 段缺人` : ''}（${fmtTime(r.updatedAt)} 更新）</span></p>`
       }
       <ol class="route-stops">${rows}</ol>
-      ${planned ? `<p class="muted sheet-note">還沒出發：平常雷達和地圖上只顯示起點，點開這個${isParade(r) ? '遊行' : '車掃'}時才畫出整條路線，出發後一直顯示。</p>` : ''}
+      ${planned ? `<p class="muted sheet-note">還沒出發：平常雷達上只顯示起點，點開這個${isParade(r) ? '遊行' : '車掃'}時才畫出整條路線，出發後一直顯示。</p>` : ''}
       <p class="muted sheet-note">${
         isParade(r)
-          ? '時間和路線是主辦單位公布的（回到市民廣場的時間是警方預估），以現場為準。雷達和地圖上的彩虹照公布的道路畫。'
+          ? '時間和路線是主辦單位公布的（回到市民廣場的時間是警方預估），以現場為準。雷達上的彩虹照公布的道路畫。'
           : isReported(r)
-          ? '時間是貼文寫的預計時間，僅供參考，以現場為準。雷達上每一站從預計經過前 10 分鐘顯示到經過後 15 分鐘；地圖上各站用直線連起來，不是實際走的路。'
-          : '中間點、加油點的時間是用路線長度平均推算的，實際以現場為準。雷達和地圖上跑的洋流號是動畫（約 24 秒開完一趟、重複播放），不是車隊的實際位置。官方提醒：不跟車，在沿線等車隊經過；不放鞭炮。'
+          ? '時間是貼文寫的預計時間，僅供參考，以現場為準。雷達上每一站從預計經過前 10 分鐘顯示到經過後 15 分鐘；各站之間用直線連起來，不是實際走的路。'
+          : '中間點、加油點的時間是用路線長度平均推算的，實際以現場為準。雷達上跑的洋流號是動畫（約 24 秒開完一趟、重複播放），不是車隊的實際位置。官方提醒：不跟車，在沿線等車隊經過；不放鞭炮。'
       }</p>
       ${isReported(r) && mine[0]?.ev.post.permalink ? `<p class="muted sheet-note">來源：<a href="${esc(mine[0].ev.post.permalink)}" target="_blank" rel="noopener">${esc(mine[0].ev.post.username ? `@${mine[0].ev.post.username} 的貼文` : '原貼文')}</a></p>` : ''}
       ${isParade(r) && mine[0]?.ev.post.permalink ? `<p class="muted sheet-note">來源：<a href="${esc(mine[0].ev.post.permalink)}" target="_blank" rel="noopener">${esc(mine[0].ev.post.username ?? '主辦單位')}官網</a></p>` : ''}
       ${relatedHtml(routeRelated(r, items))}
       <div class="sheet-actions">
         ${r.claimUrl ? `<a class="btn primary" href="${esc(r.claimUrl)}" target="_blank" rel="noopener">到車掃地圖認領路段</a>` : ''}
-        ${noMapView() ? '' : '<button type="button" class="btn" data-act="route-map">在地圖上看路線</button>'}
+        ${youOn !== 'earth' ? '' : '<button type="button" class="btn" data-act="route-map">在雷達上看路線</button>'}
         ${isReported(r) && mine[0] ? '<button type="button" class="btn" data-act="route-feedback">回報問題</button>' : ''}
         ${isReported(r) && myReportIds.has(r.postId) ? '<button type="button" class="btn" data-act="route-withdraw">刪除我的回報</button>' : ''}
       </div>
@@ -3860,12 +3755,11 @@ function renderRouteDetail(r: RouteOut, items: Item[], now: number): void {
     });
   }
   detailEl.querySelector('[data-act="route-map"]')?.addEventListener('click', () => {
-    // 收起時間表，不然整條路線被蓋住；還沒出發的路線照樣畫出來（點其他地方才收起）
+    // 收起時間表，不然整條路線被蓋住；還沒出發的路線照樣畫出來（點其他地方才收起）；雷達拉到看得到整條（v1.834 地圖拿掉了）
     selectedRoute = null;
     routeOnMap = planned ? r.id : null;
     render();
-    switchView('map');
-    map.focusRoute(r.id);
+    flyToPins(r.segments.flatMap((sg) => sg.path.map(([lat, lng]) => ({ lat, lng, label: '', glyph: null }))));
   });
 }
 
@@ -4939,12 +4833,7 @@ function pickLanding(from: LatLng): Promise<LatLng | null> {
     // 紙先收起來（寫的字、照片留著），雷達拉近到看得到整個圈
     bottleSheet.hidden = true;
     document.body.classList.remove('bottle-open');
-    if (view === 'map') {
-      // 地圖：整個圈框進來（下面的說明蓋住的地方不算）
-      const m = $('#map').getBoundingClientRect();
-      const top = bar.getBoundingClientRect().top;
-      map.fitCircle(from, PICK_RANGE_KM, top < m.bottom ? m.bottom - top : 0);
-    } else zoomToKm(PICK_ZOOM_KM);
+    zoomToKm(PICK_ZOOM_KM);
     render();
     bar.querySelector<HTMLElement>('[data-act="ok"]')?.focus();
   });
@@ -5075,12 +4964,12 @@ function corkSvg(_p: string): string {
   </svg>`;
 }
 
-/** 雷達（或地圖）正中間在畫面上的哪裡：瓶子丟到這裡 */
+/** 雷達正中間在畫面上的哪裡：瓶子丟到這裡 */
 function landingPoint(at: LatLng | null = null): { x: number; y: number } {
-  // 瓶子實際落在哪（v1.721 使用者說丟出去要直接看到落點）：雷達、地圖上的那一點
-  const p = at ? (view === 'map' ? map.screenOf(at) : radar.screenOf(bearingDeg(origin, at), haversineKm(origin, at))) : null;
+  // 瓶子實際落在哪（v1.721 使用者說丟出去要直接看到落點）：雷達上的那一點
+  const p = at ? radar.screenOf(bearingDeg(origin, at), haversineKm(origin, at)) : null;
   if (p) return p;
-  const el = view === 'map' ? document.querySelector('#map') : document.querySelector('#radar-view .me');
+  const el = document.querySelector('#radar-view .me');
   const r = el?.getBoundingClientRect();
   return r && r.width + r.height > 0 ? { x: r.left + r.width / 2, y: r.top + r.height / 2 } : { x: innerWidth / 2, y: innerHeight / 3 };
 }
@@ -5090,11 +4979,6 @@ function landingPoint(at: LatLng | null = null): { x: number; y: number } {
  * 瓶子直接拋到落點、在那裡落水（v1.721 使用者說丟出去可以直接看到落點；以前拋到你的位置，雷達沒拉近就看不到落在哪）
  */
 async function showLanding(at: LatLng): Promise<void> {
-  if (view === 'map') {
-    map.focusOn(at, SEE_ZOOM_KM, sheetCover());
-    await new Promise((r) => setTimeout(r, 450));
-    return;
-  }
   if (zoomSees()) return;
   zoomToKm(SEE_ZOOM_KM);
   while (flight) await new Promise((r) => requestAnimationFrame(() => r(null)));
@@ -5454,9 +5338,7 @@ function renderDetail(items: Item[], now: number): void {
   for (const b of detailEl.querySelectorAll<HTMLButtonElement>('[data-stop-go]')) {
     b.addEventListener('click', () => {
       const id = Number(b.dataset.stopGo);
-      const to = items.find((x) => x.ev.id === id)?.ev;
       select(id);
-      if (view === 'map' && to?.lat != null && to.lng != null) map.panIntoView({ lat: to.lat, lng: to.lng }, sheetCover());
     });
   }
   detailEl.querySelector('[data-act="withdraw"]')?.addEventListener('click', () => void withdrawMine(ev.post.id));
@@ -5469,20 +5351,6 @@ function renderDetail(items: Item[], now: number): void {
   });
 }
 
-/** 詳細資料卡片蓋住地圖的部分：手機蓋住下面、電腦蓋住右邊一點 */
-function sheetCover(): { right: number; bottom: number } {
-  return coverOf(detailEl);
-}
-/** 浮在地圖上的卡片蓋住地圖右邊、下面幾 px（手機放在清單卡片裡的不蓋） */
-function coverOf(el: HTMLElement): { right: number; bottom: number } {
-  if (el.hidden) return { right: 0, bottom: 0 };
-  const m = $('#map').getBoundingClientRect();
-  const d = el.getBoundingClientRect();
-  const w = Math.min(m.right, d.right) - Math.max(m.left, d.left);
-  const h = Math.min(m.bottom, d.bottom) - Math.max(m.top, d.top);
-  if (w <= 0 || h <= 0) return { right: 0, bottom: 0 };
-  return w >= m.width * 0.6 ? { right: 0, bottom: m.bottom - d.top } : { right: m.right - d.left, bottom: 0 };
-}
 
 /** 屬於車掃路線的事件：這一站的時間、切到上一站下一站，和回到整條路線時間表的按鈕 */
 function routeBoxHtml(ev: EventOut, items: Item[], now: number): string {
@@ -5632,17 +5500,14 @@ function openFeedback(ev: EventOut, fromRoute?: RouteOut, fixStop?: number): voi
   void syncFeedbackPin();
 }
 
-// ---- 回報地點錯誤：小地圖上標正確的位置（選填），灰點是現在的位置；管理者確認後才改 ----
+// ---- 回報地點錯誤：在雷達上標正確的位置（選填；v1.834 小地圖拿掉，跟直接移位置一樣在雷達上拖）；管理者確認後才改 ----
 let feedbackEv: EventOut | null = null;
 let feedbackPin: LatLng | null = null;
-let feedbackPicker: PinPicker | null = null;
-/** 小地圖是替哪一站（或這一則）建的：換站就重建，灰點跟著換 */
-let feedbackPickerFor = '';
+/** 標的是哪一站（或這一則）：換站就清掉標過的 */
+let feedbackPinFor = '';
 
 function resetFeedbackPin(): void {
-  feedbackPicker?.remove();
-  feedbackPicker = null;
-  feedbackPickerFor = '';
+  feedbackPinFor = '';
   feedbackPin = null;
   feedbackFound = '';
 }
@@ -5653,17 +5518,74 @@ const feedbackStop = (): RouteStop | undefined => {
   return feedbackStops && picked !== '' ? feedbackStops[Number(picked)] : undefined;
 };
 
-/** 查地點的結果（寫在小地圖上面）；換站、清除標記、自己點地圖就不顯示 */
+/** 查地點的結果；換站、清除標記、自己在雷達上標就不顯示 */
 let feedbackFound = '';
 
 function feedbackPinState(): void {
   const st = feedbackStop();
   $('#feedback-pin-state').textContent = feedbackFound || (feedbackPin
-    ? '標好了，送出後管理者確認就會改；不對可以拖紅色標記或再點一次地圖'
+    ? '標好了，送出後管理者確認就會改；不對可以按「在雷達上調整」'
     : st && st.lat === null
-      ? `點地圖標出「${st.name}」在哪裡，或在下面寫地址、店名`
-      : '寫地址、店名按「查地點」，或直接點地圖標出正確的位置（灰點是現在的位置）；也可以只寫說明');
+      ? `按「在雷達上標」標出「${st.name}」在哪裡，或在上面寫地址、店名`
+      : '寫地址、店名按「查地點」，或按「在雷達上標」標出正確的位置；也可以只寫說明');
+  $('#feedback-mark').textContent = feedbackPin ? '在雷達上調整' : '在雷達上標';
   $('#feedback-unpin').hidden = !feedbackPin;
+  // 雷達上標好的位置跟著畫
+  render();
+}
+
+/** 這一站（或這一則）現在的位置；沒有確切位置是 null */
+function feedbackNowAt(): LatLng | null {
+  const ev = feedbackEv;
+  if (!ev) return null;
+  const st = feedbackStop();
+  if (st) return st.lat !== null && st.lng !== null ? { lat: st.lat, lng: st.lng } : null;
+  return ev.lat !== null && ev.lng !== null && !ev.approxArea ? { lat: ev.lat, lng: ev.lng } : null;
+}
+
+/**
+ * 在雷達上標正確的位置：回報問題先收起來，雷達拉近，拖標記或點雷達上的地方，按「標好了」回到回報問題（送出後管理者確認才改）。
+ * 從標過的、查到的（start）、現在的位置開始；沒有確切位置的站從這則的位置（車掃的另一站）或你的位置開始
+ */
+function startFeedbackMark(start: LatLng | null = null): void {
+  const ev = feedbackEv;
+  if (!ev) return;
+  if (radar.spaceFocused) {
+    showBanner(bannerEl, '回到地球才能在雷達上標位置', 3000);
+    return;
+  }
+  endEvMove();
+  const st = feedbackStop();
+  const at = start ?? feedbackPin ?? feedbackNowAt() ?? (ev.lat !== null && ev.lng !== null ? { lat: ev.lat, lng: ev.lng } : { lat: origin.lat, lng: origin.lng });
+  const name = st ? st.name : titleOf(ev);
+  const bar = document.createElement('div');
+  bar.className = 'bottle-pick ev-move';
+  bar.setAttribute('role', 'dialog');
+  bar.setAttribute('aria-label', '標出正確的位置');
+  bar.innerHTML = `<p>拖標記，或點雷達上的地方，標出「${esc(name)}」正確的位置。<small>標好了回到回報問題，送出後管理者確認才會改。</small></p>
+    <div class="sheet-actions"><button type="button" class="chip" data-act="cancel">取消</button><button type="button" class="chip primary" data-act="ok">標好了</button></div>`;
+  document.body.append(bar);
+  evMove = { ev, at: { lat: at.lat, lng: at.lng }, bar, busy: false, mark: { label: shortLabel(name) } };
+  bar.querySelector('[data-act="cancel"]')?.addEventListener('click', () => endFeedbackMark(false));
+  bar.querySelector('[data-act="ok"]')?.addEventListener('click', () => endFeedbackMark(true));
+  feedbackSheet.hidden = true;
+  zoomToKm(0.6, { lat: at.lat, lng: at.lng, source: 'manual' });
+  render();
+  bar.querySelector<HTMLElement>('[data-act="ok"]')?.focus();
+}
+
+/** 標好了（ok）或取消：回到回報問題 */
+function endFeedbackMark(ok: boolean): void {
+  const mv = evMove;
+  if (!mv?.mark) return;
+  if (ok) {
+    feedbackPin = { lat: mv.at.lat, lng: mv.at.lng };
+    feedbackFound = '';
+  }
+  endEvMove();
+  if (feedbackEventId === null) return;
+  feedbackSheet.hidden = false;
+  feedbackPinState();
 }
 
 /** 查地點：查到確切位置就標上去（再拖可以改），只查到約略位置就移過去讓人自己點；說明沒寫就帶入查的地點，管理者看得到 */
@@ -5685,30 +5607,30 @@ async function findFeedbackPlace(): Promise<void> {
     showBanner(bannerEl, r.message, 3500);
     return;
   }
-  if (!feedbackPicker) {
-    showBanner(bannerEl, '地圖還在載入，請再按一次', 2500);
-    return;
-  }
   const { found, lat, lng, name, approxArea } = r.data;
+  if (!feedbackNote.value.trim()) feedbackNote.value = place;
   if (!found || lat === null || lng === null) {
-    feedbackFound = '查不到這個地點，請寫完整地址或店名，或直接在地圖上點';
+    feedbackFound = '查不到這個地點，請寫完整地址或店名，或按「在雷達上標」';
   } else if (approxArea) {
-    feedbackPicker.view({ lat, lng }, 15);
-    feedbackFound = `只查到約略位置（${approxArea}），請在地圖上點出正確的位置`;
+    // 只查到約略位置：直接到雷達上，從那裡開始標
+    feedbackFound = '';
+    feedbackPinState();
+    showBanner(bannerEl, `只查到約略位置（${approxArea}），請在雷達上標出正確的位置`, 3500);
+    startFeedbackMark({ lat, lng });
+    return;
   } else {
     feedbackPin = { lat, lng };
-    feedbackPicker.set(feedbackPin, 17);
+    flyToPins([{ lat, lng, label: '', glyph: null }]);
     // 查到的名稱是「台北車站, 49, 忠孝西路一段, 黎明里, …, 臺灣」：只寫前三段
-    feedbackFound = `查到${name ? `：${name.split(/,\s*/).slice(0, 3).join(' ')}` : ''}。不對可以拖紅色標記或點地圖`;
+    feedbackFound = `查到${name ? `：${name.split(/,\s*/).slice(0, 3).join(' ')}` : ''}。不對可以按「在雷達上調整」`;
   }
-  if (!feedbackNote.value.trim()) feedbackNote.value = place;
   feedbackPinState();
 }
 
-/** 選了「地點錯誤」才顯示小地圖；換站時重建（灰點換成那一站，標過的清掉） */
-async function syncFeedbackPin(): Promise<void> {
+/** 選了「地點錯誤」才顯示查地點、在雷達上標；換站時標過的清掉 */
+function syncFeedbackPin(): void {
   const kind = (feedbackForm.elements.namedItem('kind') as RadioNodeList).value;
-  // 自己回報的那則、管理者：不用小地圖送審，直接在雷達上移（補充說明、送出也收起來）
+  // 自己回報的那則、管理者：不用送審，直接在雷達上移（補充說明、送出也收起來）
   const direct = kind === 'location' && !!feedbackEv && !feedbackStops && canMoveDirect(feedbackEv);
   $('#feedback-move').hidden = !direct;
   if (direct) $('#feedback-move-why').textContent = myReportIds.has(feedbackEv!.post.id) ? '這則是你回報的，可以直接把位置移到正確的地方，不用等管理者確認。' : '你是管理者，可以直接把位置移到正確的地方。';
@@ -5721,29 +5643,10 @@ async function syncFeedbackPin(): Promise<void> {
   feedbackPinState();
   const st = feedbackStop();
   const key = `${feedbackEventId}|${st ? st.title : ''}|${st?.at ?? ''}`;
-  if (key === feedbackPickerFor) return;
+  if (key === feedbackPinFor) return;
   resetFeedbackPin();
-  feedbackPickerFor = key;
+  feedbackPinFor = key;
   feedbackPinState();
-  const ev = feedbackEv;
-  const cur = st ? (st.lat !== null && st.lng !== null ? { lat: st.lat, lng: st.lng } : null) : ev.lat !== null && ev.lng !== null && !ev.approxArea ? { lat: ev.lat, lng: ev.lng } : null;
-  // 沒有確切位置的站：從這則的位置（車掃的另一站）或你的位置開始
-  const center = cur ?? (ev.lat !== null && ev.lng !== null ? { lat: ev.lat, lng: ev.lng } : origin);
-  const picker = await pinPicker(
-    $('#feedback-map'),
-    null,
-    center,
-    baseMap,
-    (p) => {
-      feedbackPin = p;
-      feedbackFound = '';
-      feedbackPinState();
-    },
-    cur ? { at: cur, title: '現在的位置' } : undefined,
-  );
-  // 等地圖載入時又換了站、關掉了：這張不要了
-  if (feedbackPickerFor !== key) picker.remove();
-  else feedbackPicker = picker;
 }
 
 async function submitFeedback(): Promise<void> {
@@ -5766,11 +5669,11 @@ async function submitFeedback(): Promise<void> {
     $<HTMLSelectElement>('#feedback-stop').focus();
     return;
   }
-  // 沒有確切位置的站：沒寫在哪裡、也沒在地圖上標，管理者也沒辦法放上雷達
+  // 沒有確切位置的站：沒寫在哪裡、也沒在雷達上標，管理者也沒辦法放上雷達
   const locating = kind === 'location' && !!stop && stop.lat === null;
   const pin = kind === 'location' ? feedbackPin : null;
   if (locating && !note && !pin) {
-    showBanner(bannerEl, `請寫「${stop.name}」在哪裡（地址或店名），或在地圖上標出來`, 3000);
+    showBanner(bannerEl, `請寫「${stop.name}」在哪裡（地址或店名），或在雷達上標出來`, 3000);
     feedbackNote.focus();
     return;
   }
@@ -5808,11 +5711,13 @@ interface EvMove {
   at: LatLng;
   bar: HTMLElement;
   busy: boolean;
+  /** 回報地點錯誤時標位置（startFeedbackMark）：標好回到回報問題，不直接改；label 是標記上的名字（車掃是那一站） */
+  mark?: { label: string };
 }
 let evMove: EvMove | null = null;
 
 function startEvMove(ev: EventOut): void {
-  if (view === 'radar' && radar.spaceFocused) {
+  if (radar.spaceFocused) {
     showBanner(bannerEl, '回到地球才能在雷達上移動位置', 3000);
     return;
   }
@@ -5832,8 +5737,7 @@ function startEvMove(ev: EventOut): void {
   feedbackEventId = null;
   resetFeedbackPin();
   // 拉近到看得到巷弄
-  if (view === 'map') map.showPins([at], coverOf(bar));
-  else zoomToKm(0.6, { lat: at.lat, lng: at.lng, source: 'manual' });
+  zoomToKm(0.6, { lat: at.lat, lng: at.lng, source: 'manual' });
   render();
   bar.querySelector<HTMLElement>('[data-act="ok"]')?.focus();
 }
@@ -5940,7 +5844,6 @@ function startHqVoyage(spinAt = Date.now()): void {
   if (youOn !== 'earth' || tripping || !mod.current) return;
   // 星星先快速旋轉、縮小不見（使用者說的），洋流號才出來：點下去馬上轉，載入路線資料的時間也算在轉的時間裡
   radar.setStarSpin({ id: 'hq', at: spinAt });
-  map.setStarSpin({ id: 'hq', at: spinAt });
   if (!hq) {
     void import('./hq-voyage').then((m) => {
       hq = m;
@@ -5957,8 +5860,7 @@ function startHqVoyage(spinAt = Date.now()): void {
   let wait = 0;
   const started = Date.now();
   // 一開始：雷達外圈 HQ_START_KM、正中間在總部（本來就差不多就不動）；地圖拉到縮放 13、正中間在總部
-  if (view === 'map') map.flyToLatLng(start, 13);
-  else if (radar.spaceMoved || scaleKm > SPACE_FROM_KM || haversineKm(origin, start) > 0.3 || Math.abs(scaleKm / HQ_START_KM - 1) > 0.15) {
+  if (radar.spaceMoved || scaleKm > SPACE_FROM_KM || haversineKm(origin, start) > 0.3 || Math.abs(scaleKm / HQ_START_KM - 1) > 0.15) {
     if (radar.spaceMoved) radar.resetSpace();
     zoomToKm(HQ_START_KM, { lat: start.lat, lng: start.lng, source: 'manual' });
     wait = 1200;
@@ -5980,9 +5882,7 @@ function startHqVoyage(spinAt = Date.now()): void {
       rel: HQ_SAIL_MS,
       fn: () => {
         // 到了：拉近市政府（使用者自己動過就不拉）
-        if (view === 'map') {
-          if (map.userMovedAt < started + 300) map.flyToLatLng(cityHall, 17);
-        } else if (!hqUserMoved) zoomToKm(HQ_END_KM, { lat: cityHall.lat, lng: cityHall.lng, source: 'manual' });
+        if (!hqUserMoved) zoomToKm(HQ_END_KM, { lat: cityHall.lat, lng: cityHall.lng, source: 'manual' });
       },
     },
     // 到了、畫面停好：「看整個文化網」和政策圖層的按鈕出來（點、線都長完了）；也算「看完動畫」（中途關掉的不算，計時器被清掉了）
@@ -6052,12 +5952,10 @@ function hqSpeedLoop(): void {
   hqVoyageAt -= d;
   hqSpeedCss += d;
   radar.shiftClock(d);
-  map.shiftClock(d);
   // CSS 動畫、計時器每 0.2 秒推一次（每一格都推太吃效能）
   if (now - hqSpeedCssAt > 200) {
     hqSpeedCssAt = now;
     radar.shiftCss(hqSpeedCss);
-    map.shiftCss(hqSpeedCss);
     hqSpeedCss = 0;
     hqScheduleEvents();
   }
@@ -6085,7 +5983,6 @@ function stopHqVoyage(): void {
   hqPanel.hidden = true;
   introTip.hidden = true;
   radar.setStarSpin(null);
-  map.setStarSpin(null);
   render();
 }
 /**
@@ -6183,9 +6080,8 @@ function hqLayersLabel(name: string): void {
   if (tg) tg.textContent = name ? `政策：${name} ${arrow}` : `政策 ${arrow}`;
 }
 /** 拉到 km、正中間在 center（飛 1.2 秒，飛到了才開始亮） */
-function hqFlyTo(center: LatLng, km: number, mapZoom: number): void {
-  if (view === 'map') map.flyToLatLng(center, mapZoom);
-  else zoomToKm(km, { ...center, source: 'manual' });
+function hqFlyTo(center: LatLng, km: number): void {
+  zoomToKm(km, { ...center, source: 'manual' });
 }
 hqNetBtn.addEventListener('click', () => {
   if (hqVoyageAt === null) return;
@@ -6193,7 +6089,7 @@ hqNetBtn.addEventListener('click', () => {
   hqShowOff();
   if (!wasOn) {
     mayorProgress('net');
-    hqFlyTo(HQ_NET_CENTER, HQ_NET_KM, 12);
+    hqFlyTo(HQ_NET_CENTER, HQ_NET_KM);
     hqNetAt = Date.now() + 1300;
     hqNetBtn.textContent = '收起文化網';
     hqCaption.innerHTML = HQ_NET_CAPTION;
@@ -6242,7 +6138,10 @@ hqLayersBox.addEventListener('click', (e) => {
 });
 document.addEventListener('keydown', (e) => {
   if (e.key === 'Escape' && hqVoyageAt !== null) stopHqVoyage();
-  if (e.key === 'Escape' && evMove && !evMove.busy) endEvMove();
+  if (e.key === 'Escape' && evMove && !evMove.busy) {
+    if (evMove.mark) endFeedbackMark(false);
+    else endEvMove();
+  }
   if (e.key === 'Escape' && woofPick && !woofPick.busy) void endWoofPick(false);
 });
 /**
@@ -6440,7 +6339,7 @@ function hqExtras(t0: number): { reveals: HqReveal[]; icons: HqIcon[]; seams: Hq
   // 各區的政見開箱（使用者說不要寫「大秘寶」）：開箱地點放寶箱（開過的打開、還沒開的鎖著），船離它最近時冒出來；大巨蛋好鄰居計畫、毛孩安心養（大安森林公園寶箱旁的狗掌）
   const I = hq.HQ_INTROS;
   for (const ch of hq.HQ_CHESTS) {
-    icons.push({ lat: ch.lat, lng: ch.lng, at: hqNearestAt(t0, ch), kind: ch.opened ? 'chest' : 'chestlock', label: ch.opened ? `${ch.district}政見開箱` : `${ch.district}政見開箱（${ch.date}）`, hideKm: 5, scale: 0.8 * (view === 'radar' ? hqZoomScale() : 1), hint: { title: `${ch.district}政見開箱（${ch.date} ${ch.venue}${ch.opened ? '' : '，還沒開箱'}）`, intro: ch.intro } });
+    icons.push({ lat: ch.lat, lng: ch.lng, at: hqNearestAt(t0, ch), kind: ch.opened ? 'chest' : 'chestlock', label: ch.opened ? `${ch.district}政見開箱` : `${ch.district}政見開箱（${ch.date}）`, hideKm: 5, scale: 0.8 * hqZoomScale(), hint: { title: `${ch.district}政見開箱（${ch.date} ${ch.venue}${ch.opened ? '' : '，還沒開箱'}）`, intro: ch.intro } });
   }
   icons.push({ lat: hq.HQ_DOME.lat, lng: hq.HQ_DOME.lng, at: hqNearestAt(t0, hq.HQ_DOME), kind: 'bigdome', label: hq.HQ_DOME.name, hideKm: 5, scale: 1.35, hint: { title: hq.HQ_DOME.name, intro: I['大巨蛋好鄰居計畫'] ?? '' } });
   icons.push({ lat: hq.HQ_PAW.lat, lng: hq.HQ_PAW.lng, at: hqNearestAt(t0, hq.HQ_PAW) + 400, kind: 'paw', label: hq.HQ_PAW.name, hideKm: 5, scale: 0.9, hint: { title: hq.HQ_PAW.name, intro: I['毛孩安心養'] ?? '' } });
@@ -6488,7 +6387,7 @@ function hqExtras(t0: number): { reveals: HqReveal[]; icons: HqIcon[]; seams: Hq
   }
   icons.push(...hqScenes(t0));
   // 條通的巷子（v1.552）：淡淡的綠色線（步行者特區），樹沿著巷子種；拉近才畫（跟樹一樣，很密的東西電腦版 3 km）
-  if (view !== 'radar' || scaleKm <= hqDenseKm()) {
+  if (scaleKm <= hqDenseKm()) {
     const tiaoAt = hqNearestAt(t0, HQ_TIAO_CENTER);
     hq.HQ_TIAOTONG.forEach((ln, li) => ln.ways.forEach((w) => reveals.push({ path: w.pts, at: tiaoAt + li * 350, kind: 'culture', color: '#8cc47a', hideKm: hqDenseKm() + 0.05 })));
   }
@@ -6498,7 +6397,7 @@ function hqExtras(t0: number): { reveals: HqReveal[]; icons: HqIcon[]; seams: Hq
 const HQ_WIND_TO = { lat: 25.0478, lng: 121.517 };
 /** 條通的夜色（拉近才畫，跟樹、車架一樣）：船離條通最近時慢慢暗下來 */
 function hqNights(t0: number): Array<{ ring: Array<[number, number]>; at: number }> {
-  if (!hq || (view === 'radar' && scaleKm > hqDenseKm())) return [];
+  if (!hq || scaleKm > hqDenseKm()) return [];
   return [{ ring: hq.HQ_TIAO_NIGHT, at: hqNearestAt(t0, HQ_TIAO_CENTER) - 400 }];
 }
 /** 條通的中間（船離這裡最近時樹、車架冒出來）、夜市長協調的地方（七條通，中山北路一段 121 巷） */
@@ -6579,7 +6478,7 @@ const HQ_LAYER_SCENES: Record<string, SceneKind[]> = {
  * 政策按鈕開著時，那個政策的場景標成 focus（不變淡）
  */
 function hqScenes(t0: number): HqIcon[] {
-  if (!hq || (view === 'radar' && scaleKm > hqMotionKm())) return [];
+  if (!hq || scaleKm > hqMotionKm()) return [];
   const rel: readonly string[] = hqLayer ? (HQ_LAYER_SCENES[hqLayer.id] ?? []) : [];
   return hqScenesAll(t0).map((ic) => (rel.includes(ic.kind) ? { ...ic, focus: true } : ic));
 }
@@ -6588,7 +6487,7 @@ function hqScenesAll(t0: number): HqIcon[] {
   const I = hq.HQ_INTROS;
   const out: HqIcon[] = [];
   // 跟寶箱一樣拉近變大、拉遠變小（雷達照 hqZoomScale；地圖在 styles.css 照 --zoom-scale）；手機的畫面小，再小一號
-  const zs = (view === 'radar' ? hqZoomScale() : 1) * (HQ_PHONE.matches ? 0.75 : 1);
+  const zs = hqZoomScale() * (HQ_PHONE.matches ? 0.75 : 1);
   const scale = 0.9 * zs;
   for (const tr of hq.HQ_TRAILS) {
     const st = HQ_HUB_STATION[tr.name] ?? tr.name;
@@ -6604,7 +6503,7 @@ function hqScenesAll(t0: number): HqIcon[] {
   // 巷子南北只隔 40 公尺，太密會擠成一團）；林森北路交叉口（熱點）放腳踏車架；七條通的夜市長協調。樹、車架拉近（電腦版 3 km、手機 2 km 以內）才畫
   const tiaoAt = hqNearestAt(t0, HQ_TIAO_CENTER);
   const tiaoHint = { title: '條通：樹木與車架・步行者特區・夜市長（示意）', intro: I['條通'] ?? '' };
-  if (view !== 'radar' || scaleKm <= hqDenseKm()) {
+  if (scaleKm <= hqDenseKm()) {
     hq.HQ_TIAOTONG.forEach((ln, li) => {
       let j = 0;
       for (const w of ln.ways) for (const q of hqAlong(w.pts, 70, 15)) out.push({ lat: q[0], lng: q[1], at: tiaoAt + li * 350 + j++ * 120, kind: 'streettree', scale: 0.6 * zs });
@@ -6667,10 +6566,10 @@ function hqScenesAll(t0: number): HqIcon[] {
   const at0 = hqLayer.at;
   if (hqLayer.id === 'zone') {
     // 通學區：每所國小南邊 150 公尺（圈的邊上）畫斑馬線，示意；畫小一點，不要蓋到學校；很密，電腦版 3 km 以內才畫
-    if (view === 'radar' && scaleKm > hqDenseKm()) return out;
+    if (scaleKm > hqDenseKm()) return out;
     // 只有雷達正中間最近的 HQ_WALK_ANIMATED 所在動，其他的停著（v1.568 效能：畫面附近三十幾所同時在動很吃效能；地圖在 map.ts 照地圖正中間挑）
     const schools = hq.HQ_SERVICES.filter((sv) => sv.kind === '小');
-    const near = new Set(view === 'radar' ? [...schools].sort((a, b) => haversineKm(origin, a) - haversineKm(origin, b)).slice(0, HQ_WALK_ANIMATED) : schools);
+    const near = new Set([...schools].sort((a, b) => haversineKm(origin, a) - haversineKm(origin, b)).slice(0, HQ_WALK_ANIMATED));
     schools.forEach((sv, i) => {
       const q = destination(sv, 180, 0.15);
       out.push({ lat: q.lat, lng: q.lng, at: at0 + Math.min(i * 8, 1600) + 500, kind: 'schoolwalk', focus: true, scale: 0.4 * zs, ...(near.has(sv) ? {} : { calm: true }) });
@@ -7080,10 +6979,6 @@ function select(id: number | null, group: number[] = []): void {
 function centerOnEvent(ev: EventOut): void {
   if (ev.lat == null || ev.lng == null) return;
   const km = locateKm(earthMinKm());
-  if (view === 'map') {
-    map.focusOn({ lat: ev.lat, lng: ev.lng }, km, sheetCover());
-    return;
-  }
   if (radar.spaceFocused) return;
   if (radar.spaceMoved) radar.resetSpace();
   zoomToKm(km, { lat: ev.lat, lng: ev.lng, source: 'manual' });
@@ -7251,7 +7146,7 @@ function locate(): void {
 // ---- 汪星的狗：點了出現「鎖定」，按了雷達正中間跟著牠（鏡頭慢慢追上），再按、自己拖曳、換星球、定位、搭火箭、切到地圖就解除 ----
 
 function updateDogLockBtn(): void {
-  dogLockBtn.hidden = !(dogLocked || dogOffer) || view !== 'radar';
+  dogLockBtn.hidden = !(dogLocked || dogOffer);
   dogLockBtn.textContent = dogLocked ? '解除鎖定' : '鎖定';
   dogLockBtn.classList.toggle('on', !!dogLocked);
   dogLockBtn.setAttribute('aria-pressed', String(!!dogLocked));
@@ -7279,7 +7174,6 @@ function lockDog(id: string | null): void {
   if (id && !dogFollow) dogFollow = requestAnimationFrame(followDog);
   if (!id && was) {
     saveSpaceView();
-    updateViewBtn();
   }
 }
 
@@ -7300,19 +7194,6 @@ function followDog(): void {
   dogFollow = requestAnimationFrame(followDog);
 }
 
-/**
- * 雷達上不提供地圖（地圖是地球的）：在汪星上（你在汪星，或鏡頭轉到汪星），
- * 或拉遠超過全球（太空：看整顆地球、太陽系，或中心換到別的星球）
- */
-function noMapView(): boolean {
-  return youOn !== 'earth' || radar.spaceFocused || scaleKm > SPACE_FROM_KM;
-}
-
-/** 在汪星上、超過全球「地圖」按鈕藏起來 */
-function updateViewBtn(): void {
-  viewBtn.hidden = view === 'radar' && noMapView();
-}
-
 function setOrigin(o: Origin): void {
   const moved = haversineKm(origin, o) > 0.2;
   // 記住不是手動的位置：之後拖曳、在地圖上設定，「定位」可以直接回來
@@ -7323,9 +7204,7 @@ function setOrigin(o: Origin): void {
   }
   origin = o;
   if (o.source === 'manual') lsSet(LS_ORIGIN, JSON.stringify(o));
-  map.setOrigin(o, moved, o.source === 'gps' ? gpsAccuracy : null);
   originLabel.textContent = o.source === 'gps' ? 'GPS 定位' : o.source === 'manual' ? '手動位置' : '預設：台北車站';
-  updateViewBtn();
   if (isAutoScale(scaleSetting) && scaleKmFor(scaleSetting) !== scaleKm) {
     scaleKm = scaleKmFor(scaleSetting);
     radar.setScale(scaleKm);
@@ -7396,32 +7275,6 @@ async function refresh(): Promise<void> {
   render();
 }
 
-function switchView(v: 'radar' | 'map'): void {
-  // 在汪星上、超過全球（太空）不切到地圖
-  if (v === 'map' && noMapView()) return;
-  // 雷達藏起來前先量外圈多大，地圖照同樣的比例
-  const rangePx = radar.rangePx();
-  const from = view;
-  view = v;
-  $('#radar-view').hidden = v !== 'radar';
-  $('#map-view').hidden = v !== 'map';
-  if (v !== 'radar') lockDog(null);
-  updateViewBtn();
-  $('#stage').dataset.view = v;
-  syncFindBtn();
-  viewBtn.textContent = v === 'radar' ? '地圖' : '雷達';
-  $('#scale-chips').hidden = v !== 'radar';
-  baseChipsEl.hidden = v !== 'map';
-  compassBtn.hidden = v !== 'radar' || !compassSupported();
-  if (v === 'map') map.showRange(scaleKm, rangePx);
-  // 切回雷達：雷達範圍改成地圖目前的比例（接近某個按鈕的範圍就對齊那個按鈕）
-  const kmPerPx = map.kmPerPx();
-  const px = radar.rangePx();
-  if (v === 'radar' && from === 'map' && kmPerPx && px > 0) zoomRadar((kmPerPx * px) / scaleKm, true);
-  // 切到地圖：遊行進行中第一次在地圖上看到就流出彩虹（不用等下一次每 5 秒的重算）
-  if (v === 'map') render();
-}
-
 /** 要抓多遠的：範圍超過 600 km 就抓全世界 */
 const fetchRadiusKm = (km: number): number => (km > FETCH_RADIUS_KM ? WORLD_KM : FETCH_RADIUS_KM);
 
@@ -7486,23 +7339,12 @@ function scaleKmFor(setting: ScaleSetting): number {
   return Number(setting);
 }
 
-function setBase(b: BaseMap): void {
-  baseMap = b;
-  lsSet(LS_BASE, b);
-  map.setBase(b);
-  for (const c of baseChips) {
-    const on = c.dataset.base === b;
-    c.classList.toggle('on', on);
-    c.setAttribute('aria-checked', String(on));
-  }
-}
-
 let zoomFrame = 0;
 
 /**
  * 「定位」：範圍慢慢縮放到外圈 km 公里、中心同時慢慢移到 to（像 Google 地圖飛過去；頭尾慢，縮放照倍數取對數走、
  * 位置照經緯度內插，差越多、移越遠走越久，ZOOM_TO_MS 之間；移的時候只重畫，到了才 setOrigin：存下來、重抓一次）。
- * 不在雷達畫面（地圖）時直接換（減少動態效果的也照樣飛）；飛到一半自己捏合、滾滾輪、拖曳：位置直接到 to、範圍停在那裡；
+ * 減少動態效果的也照樣飛；飛到一半自己捏合、滾滾輪、拖曳：位置直接到 to、範圍停在那裡；
  * 飛的時候新的 GPS 位置來了就改飛到那裡（flight.to）
  */
 const ZOOM_TO_MS: [number, number] = [500, 1600];
@@ -7513,7 +7355,7 @@ function zoomToKm(km: number, to: Origin | null = null): void {
   const from = origin;
   const dist = to ? haversineKm(from, to) : 0;
   // 減少動態效果的電腦也照樣飛過去（使用者要看得到移動、縮放）
-  if (view !== 'radar' || (Math.abs(total) < 0.01 && dist < 0.001)) {
+  if (Math.abs(total) < 0.01 && dist < 0.001) {
     if (to) setOrigin(to);
     zoomRadar(km / scaleKm, true);
     return;
@@ -7735,10 +7577,6 @@ function locateMe(): Promise<boolean> {
   if (back) {
     const km = locateKm(earthMinKm());
     zoomToKm(km, { lat: back.lat, lng: back.lng, source: known ? 'gps' : back.source });
-    if (view === 'map') {
-      map.setOrigin(origin, true, gpsAccuracy);
-      map.showRange(km, 0);
-    }
   }
   if (!('geolocation' in navigator)) {
     showBanner(bannerEl, '此瀏覽器不支援定位，可以在雷達上拖曳到你的位置。', 4000);
@@ -7757,14 +7595,7 @@ function locateMe(): Promise<boolean> {
       else if (!known) {
         const km = locateKm(earthMinKm());
         zoomToKm(km, lastGps);
-        if (view === 'map') {
-          map.setOrigin(origin, true, gpsAccuracy);
-          map.showRange(km, 0);
-        }
-      } else {
-        setOrigin(lastGps);
-        map.setOrigin(origin, true, gpsAccuracy);
-      }
+      } else setOrigin(lastGps);
       showBanner(bannerEl, `已定位，誤差約 ${Math.round(pos.coords.accuracy)} 公尺`, 2000);
       // 照新的 GPS 位置重抓看得到的漂流瓶（v1.655）
       void reloadBottles();
@@ -7851,7 +7682,6 @@ function applyModule(): void {
   const posts = mod.storeTypes ? 'Threads 貼文的連結' : 'Threads 或 YouTube 社群貼文的連結';
   reportInput.placeholder = mod.current ? 'Threads、YouTube、活動通、OPENTIX、Peatix 或 Luma 的連結' : posts;
   reportInput.setAttribute('aria-label', mod.current ? 'Threads 貼文、YouTube 社群貼文、活動通、OPENTIX、Peatix 或 Luma 活動頁的連結' : posts);
-  map.setLandmarksVisible(mod.current);
   if (!mod.current) bottleBtn.hidden = true;
   applyReportsOpen();
   renderReportTips();
@@ -7985,7 +7815,6 @@ function applyTheme(t: Theme): void {
   theme = t;
   document.documentElement.dataset.theme = t.id;
   document.title = brandName();
-  map.setDark(t.id === 'dragon' || t.id === 'neon');
   brandText.textContent = brandName(true);
   document.querySelector('meta[name="theme-color"]')?.setAttribute('content', t.themeColor);
   radar.setStyle({ sweep: t.sweep, blip: t.blip, rose: t.rose });
@@ -8137,7 +7966,7 @@ function renderRules(): void {
       <li>時間可以寫 <span class="ex">10/18 15:00</span>、<span class="ex">今天下午三點</span>、<span class="ex">明晚 7 點</span>、<span class="ex">週六 14:00–16:00</span>。「今天、明天、週六」以發文時間換算，時區是台灣時間。</li>
       <li>沒寫結束時間，或寫「發完為止」：發放寫「發完為止」，活動只寫幾點開始，不猜幾點結束。為了不讓舊的一直留在雷達上，單次的開始 ${hours}後會自動下架；固定據點沒寫最後一天的寫「發完為止」，不預設哪天結束。</li>
       <li>一則貼文有多個地點或時段（例如行程表、車掃停靠點），會拆成多筆。</li>
-      <li>只查得到鄉鎮區、查不到確切地點的（例如新聞只寫「虎尾競選總部」），會定位在該鄉鎮區的中心並標成「約略位置」，雷達和地圖上是空心光點，請以原文為準。只知道縣市的不會放上雷達。</li>
+      <li>只查得到鄉鎮區、查不到確切地點的（例如新聞只寫「虎尾競選總部」），會定位在該鄉鎮區的中心並標成「約略位置」，雷達上是空心光點，請以原文為準。只知道縣市的不會放上雷達。</li>
       <li>地點寫越具體越好，例如 <span class="ex">捷運市政府站 2號出口</span>、<span class="ex">板橋車站北一門</span>、<span class="ex">松山文創園區</span>。找不到出口時會退到車站位置。</li>
       <li>只收 ${r.maxFutureDays} 天內的發放和活動；已經結束的不會出現。</li>
       <li>新聞報導、活動回顧、徵求、詢問、線上抽獎、直播、販售都不算，系統會略過。判讀信心低於 ${Math.round(r.minConfidence * 100)}% 的也會略過。</li>
@@ -8450,7 +8279,7 @@ function renderReportTips(): void {
     'YouTube 社群貼文：在貼文按「分享」複製連結（youtube.com/post/…）貼上，跟 Threads 貼文一樣判讀文字（圖片不讀）；只收社群貼文，影片不收。',
     'Peatix：貼活動頁的網址（peatix.com/event/…），開始時間、地點、位置照活動頁寫的；Peatix 的活動頁沒寫結束時間，雷達上顯示到開始後兩小時，需要的話按「補充資料」改。只收在台灣的實體活動（Peatix 的時間沒寫時區），線上的不收；活動頁刪除會自動下架。',
     '貼文寫了車掃、掃街、車隊，或騎車（順騎、單車）、健走，同一天又列了好幾站的，會合成一條路線：每一站從預計經過前 10 分鐘顯示到經過後 15 分鐘。各站沒寫時間、只寫出發時間的，照順序和距離推算（騎車時速 12 公里、健走 4 公里，每站停 10 分鐘），時間表寫「約」。只定位到鄉鎮區的站，要在雷達上標出位置才會放上雷達。',
-    '貼文沒寫或判讀錯的，可以在判讀結果按「補充資料」直接改活動內容、時間、地點，位置不對可以在地圖上標。連續好幾天的活動每天各算一場（最多 6 場）。貼文最好寫出門牌地址，定位才準。',
+    '貼文沒寫或判讀錯的，可以在判讀結果按「補充資料」直接改活動內容、時間、地點，位置不對可以在雷達上標。連續好幾天的活動每天各算一場（最多 6 場）。貼文最好寫出門牌地址，定位才準。',
     `原貼文刪除或改成「結束了」，雷達${l ? ` ${l.recheckMin} 分鐘內` : ''}會自動下架。`,
   ];
   reportTips.innerHTML = tips.map((t) => `<li>${esc(t)}</li>`).join('');
@@ -8537,12 +8366,12 @@ function placeMark(p: LatLng): void {
  * 手機把回報收成一條（雷達變大），按「回到補充資料」回來
  */
 function markOnMap(card: HTMLElement): void {
-  if (view === 'radar' && radar.spaceFocused) {
+  if (radar.spaceFocused) {
     showBanner(bannerEl, '回到地球才能在雷達上標位置', 3000);
     return;
   }
   markCard = card;
-  markStart = markAt(card) ? null : view === 'map' ? (map.center() ?? { lat: origin.lat, lng: origin.lng }) : { lat: origin.lat, lng: origin.lng };
+  markStart = markAt(card) ? null : { lat: origin.lat, lng: origin.lng };
   updatePinState(card);
   render();
   const at = markAt(card);
@@ -8587,13 +8416,6 @@ function flyToPins(pins: ReportPin[]): void {
   const spread = Math.max(...pins.map((p) => haversineKm(mid, p)));
   const one = spread < 0.8 || spread > 30;
   const to = spread > 30 ? pins[0] : mid;
-  // 地圖：只移地圖、拉近到看得清街道、房子（拖了位置重新預覽時，都還在畫面裡就不動）；你的位置（藍點）不動
-  if (view === 'map') {
-    const shown = spread > 30 ? [pins[0]] : pins;
-    const cover = coverOf(reportSheet);
-    if (!map.pinsInView(shown, cover)) map.showPins(shown, cover);
-    return;
-  }
   // 雷達：已經拉近、位置都在畫面裡（拖了位置重新預覽）就不動，不然標記又跳回正中間
   if (scaleKm <= 3 && pins.every((p) => haversineKm(origin, p) < scaleKm * 0.75)) return;
   zoomToKm(one ? Math.min(Math.max(scaleKm, 1), 3) : spread * 1.35, { lat: to.lat, lng: to.lng, source: 'manual' });
@@ -8608,7 +8430,7 @@ function lookAtPin(lat: number, lng: number): void {
     setReportPeek(true);
     return;
   }
-  const box = (view === 'radar' ? $('#radar-view') : $('#map')).getBoundingClientRect();
+  const box = $('#radar-view').getBoundingClientRect();
   const sheet = reportSheet.getBoundingClientRect();
   const cx = box.left + box.width / 2;
   const cy = box.top + box.height / 2;
@@ -8635,10 +8457,7 @@ async function movePin(i: number, to: LatLng): Promise<void> {
   const c = pinConfirm;
   const form = reportResult.querySelector<HTMLFormElement>('.edit-form');
   const cards = pin ? editCardsAt(pin) : [];
-  const putBack = (): void => {
-    map.setPreviews([]);
-    render();
-  };
+  const putBack = (): void => render();
   if (!pin || !c || !form || cards.length === 0 || reportBusy) {
     putBack();
     return;
@@ -8844,7 +8663,7 @@ interface EditPin {
   /** 按「查地點」查到的地名；查不到是 null（missed 是查不到的那段地點） */
   foundName: string | null;
   missed: string | null;
-  /** 回報的人在地圖上標的（主畫面的地圖，v1.697） */
+  /** 回報的人在雷達上標的（主畫面的地圖，v1.697） */
   pinned: LatLng | null;
 }
 const editPins = new Map<HTMLElement, EditPin>();
@@ -9014,10 +8833,10 @@ function updatePinState(card: HTMLElement): void {
           ? `只定位到${pin.approxArea}（約略位置），可以在雷達上標出正確位置`
           : name
             ? `📍 查到：${name}（不一定準確），位置不對可以拖標記或點雷達`
-            : '已依地點定位（不一定準確），位置不對可以在地圖上標'
+            : '已依地點定位（不一定準確），位置不對可以在雷達上標'
         : missed
-          ? '查不到這個地點。可以寫完整一點：台灣的寫縣市、路名、門牌；國外的寫門牌、街道、城市、州和國家（例如「12901 Alcosta Blvd, San Ramon, CA 94583, USA」），或在地圖上標'
-          : '可以按「查地點」先在地圖上看位置；不查的話送出後依地點查';
+          ? '查不到這個地點。可以寫完整一點：台灣的寫縣市、路名、門牌；國外的寫門牌、街道、城市、州和國家（例如「12901 Alcosta Blvd, San Ramon, CA 94583, USA」），或在雷達上標'
+          : '可以按「查地點」先在雷達上看位置；不查的話送出後依地點查';
     state.classList.toggle('preview-warn', !pin.pinned && ((!!found && !!pin.approxArea) || missed));
   }
   const unpin = card.querySelector<HTMLElement>('[data-act="unpin"]');
@@ -9038,7 +8857,7 @@ function wireEditCard(c: { postId: string; token: string }, card: HTMLElement, i
   });
   // 在主畫面的地圖上標（v1.697）：從標的位置、查到的位置開始，都沒有就從地圖現在的正中間
   card.querySelector('[data-act="pin"]')?.addEventListener('click', () => markOnMap(card));
-  // 查地點：查法跟送出後一樣，查到的標在主畫面的地圖上（之前在地圖上標的不算了），位置不對再拖
+  // 查地點：查法跟送出後一樣，查到的標在主畫面的地圖上（之前在雷達上標的不算了），位置不對再拖
   const locateBtn = card.querySelector<HTMLButtonElement>('[data-act="locate"]');
   locateBtn?.addEventListener('click', async () => {
     const place = placeInput?.value.trim() ?? '';
@@ -9064,7 +8883,7 @@ function wireEditCard(c: { postId: string; token: string }, card: HTMLElement, i
     pin.approxArea = hit ? r.approxArea : null;
     pin.foundName = hit ? r.name : null;
     pin.missed = hit ? null : place;
-    // 查了新的地點：之前在地圖上標的不算
+    // 查了新的地點：之前在雷達上標的不算
     pin.pinned = null;
     updatePinState(card);
     if (!hit) return;
@@ -9154,7 +8973,7 @@ function readEditForm(form: HTMLFormElement): EditInput[] | string {
 function wireEdit(c: { postId: string; token: string }, items: EditItem[], actions: HTMLElement | null): void {
   const form = reportResult.querySelector<HTMLFormElement>('.edit-form');
   if (!form) return;
-  // 換了一個表單：之前那張表單在地圖上標的不再標
+  // 換了一個表單：之前那張表單在雷達上標的不再標
   markCard = null;
   markStart = null;
   editPins.clear();
@@ -9232,7 +9051,7 @@ function wireEdit(c: { postId: string; token: string }, items: EditItem[], actio
  * 點的是按鈕、連結、欄位、雷達光點、地圖標記、清單的一列（會自己打開別的）或卡片裡面不關；
  * 拖動（移動雷達、地圖）不算點。回報、漂流瓶有打字的內容，不跟著關
  */
-const KEEP_OPEN = 'button, a, input, select, textarea, label, .sheet, .module-menu, .blip, .landmark, .bottle, .space-hit, .leaflet-marker-icon, .leaflet-interactive, .leaflet-popup, .leaflet-control, #event-list li';
+const KEEP_OPEN = 'button, a, input, select, textarea, label, .sheet, .module-menu, .blip, .landmark, .bottle, .space-hit, #event-list li';
 function wireTapOutside(): void {
   let down: { x: number; y: number } | null = null;
   document.addEventListener('pointerdown', (e) => (down = { x: e.clientX, y: e.clientY }), true);
@@ -9248,7 +9067,7 @@ function wireTapOutside(): void {
       for (const sheet of [detailEl, themeSheet, kwSheet]) {
         if (!sheet.hidden) sheet.querySelector<HTMLButtonElement>('[data-act="close"]')?.click();
       }
-      // 車掃出發前按「在地圖上看路線」畫出來的路線：點其他地方收起，回到只顯示起點
+      // 車掃出發前按「在雷達上看路線」畫出來的路線：點其他地方收起，回到只顯示起點
       if (routeOnMap) {
         routeOnMap = null;
         render();
@@ -9284,7 +9103,7 @@ function routePreviewHtml(rt: RoutePreview): string {
             : st.status === 'unlocated'
               ? st.sameAs
                 ? `<span class="preview-warn">跟「${esc(st.sameAs)}」定位在同一個地方，可能查錯了，不會放上雷達；可以按「補充資料」在雷達上標出位置</span>`
-                : '<span class="preview-warn">地圖上查不到，不會放上雷達；可以按「補充資料」補上地址或在地圖上標</span>'
+                : '<span class="preview-warn">地圖上查不到，不會放上雷達；可以按「補充資料」補上地址或在雷達上標</span>'
               : '車隊已經經過';
       return `<li class="stop stop-${st.kind}${st.status === 'passed' ? ' passed' : ''}"><div><span class="stop-time">${st.kind === 'start' ? '' : '約 '}${fmtTime(st.at)}</span><span class="stop-name"><b>${label[st.kind]}</b>${esc(st.name)}${st.place ? `<small class="stop-place">${esc(shortAddress(st.place))}</small>` : ''}<small>${status}</small></span></div></li>`;
     })
@@ -9293,7 +9112,7 @@ function routePreviewHtml(rt: RoutePreview): string {
       <b>車掃｜${esc(rt.title)}</b>
       <small>時間：${esc(dateFmt.format(new Date(first.at * 1000)))} ${fmtTime(first.at)} 出發，約 ${fmtTime(last.at)} 到最後一站・共 ${rt.stops.length} 站，${listed} 站會放上雷達</small>
       <ol class="route-stops">${rows}</ol>
-      <small>雷達上每一站從預計經過前 10 分鐘顯示到經過後 15 分鐘；地圖上各站用直線連起來，不是實際走的路。</small>
+      <small>雷達上每一站從預計經過前 10 分鐘顯示到經過後 15 分鐘；各站之間用直線連起來，不是實際走的路。</small>
     </li>`;
 }
 
@@ -9902,10 +9721,6 @@ function wirePanelDrag(): void {
     setState(PANEL_ORDER[PANEL_ORDER.indexOf(state) - 1]);
     return true;
   };
-  // 清單高度變了，地圖要重算尺寸（雷達是 SVG 會自己縮放）
-  panelEl.addEventListener('transitionend', (e) => {
-    if (e.propertyName === 'max-height' && view === 'map') map.invalidate();
-  });
 
   const syncCard = (): void => {
     const now = cards.find((c) => c.parentElement === panelEl && !c.hidden) ?? null;
@@ -10022,7 +9837,7 @@ function wirePanelDrag(): void {
       'touchstart',
       (e) => {
         const t = e.target instanceof Element ? e.target : null;
-        cardStartY = c === card && state !== 'collapsed' && c.scrollTop <= 0 && !t?.closest('input, textarea, select, .leaflet-container, .sheet-head') ? e.touches[0].clientY : null;
+        cardStartY = c === card && state !== 'collapsed' && c.scrollTop <= 0 && !t?.closest('input, textarea, select, .sheet-head') ? e.touches[0].clientY : null;
       },
       { passive: true },
     );
@@ -10040,12 +9855,12 @@ function wirePanelDrag(): void {
 }
 
 /**
- * 全螢幕（像 Google 地圖）：地圖、雷達鋪滿，標題列收成浮動按鈕；雷達的地圖也鋪滿整個長方形（不裁成圓、沒有外框，radar.setFill），
+ * 全螢幕（像 Google 地圖）：雷達鋪滿，標題列收成浮動按鈕；右上角的按鈕切換（v1.834 使用者說原本「地圖」按鈕改成雷達、全螢幕切換，地圖拿掉，標題列的全螢幕按鈕也拿掉）；雷達的地圖也鋪滿整個長方形（不裁成圓、沒有外框，radar.setFill），
  * 只留地圖和光點（距離圈、掃描線不畫，看比例尺）。再按一次回到原本的樣子；瀏覽器記住開著還是關著。
  * 電腦全螢幕時「清單」收起右邊的清單（也記住）。不是瀏覽器的全螢幕（網址列不會不見，重新整理也不能自己再開）
  */
 function wireFullScreen(): void {
-  const fullBtn = $<HTMLButtonElement>('#full-btn');
+  const fullBtn = $<HTMLButtonElement>('#view-btn');
   const listBtn = $<HTMLButtonElement>('#list-btn');
   const moreBtn = $<HTMLButtonElement>('#more-btn');
   const controls = moreBtn.parentElement as HTMLElement;
@@ -10053,28 +9868,20 @@ function wireFullScreen(): void {
     controls.classList.toggle('open', open);
     moreBtn.setAttribute('aria-expanded', String(open));
   };
-  // 版面變了：地圖重算尺寸（雷達、清單自己會跟著）
-  const relayout = (): void => {
-    requestAnimationFrame(() => {
-      if (view === 'map') map.invalidate();
-    });
-  };
   const setFull = (on: boolean, initial = false): void => {
     appEl.classList.toggle('full', on);
     // 雷達的地圖也鋪滿整個長方形（不裁成圓）；重畫（道路抓到畫面的角，範圍外的光點照真的位置畫）。剛打開網頁時之後會載入、畫第一次
     radar.setFill(on);
     if (!initial) render();
     fullBtn.setAttribute('aria-pressed', String(on));
+    fullBtn.textContent = on ? '縮小' : '全螢幕';
     fullBtn.title = on ? '離開全螢幕' : '全螢幕';
-    fullBtn.setAttribute('aria-label', fullBtn.title);
     setMore(false);
-    relayout();
   };
   const setListOff = (off: boolean): void => {
     appEl.classList.toggle('list-off', off);
     listBtn.setAttribute('aria-pressed', String(!off));
     listBtn.title = off ? '打開清單' : '收起清單';
-    relayout();
   };
   setFull(lsGet(LS_FULL) === '1', true);
   setListOff(lsGet(LS_LIST_OFF) === '1');
@@ -10116,10 +9923,8 @@ function wireControls(): void {
         });
     });
   }
-  viewBtn.addEventListener('click', () => switchView(view === 'radar' ? 'map' : 'radar'));
   locateBtn.addEventListener('click', locate);
   dogLockBtn.addEventListener('click', () => lockDog(dogLocked ? null : dogOffer));
-  for (const b of baseChips) b.addEventListener('click', () => setBase(b.dataset.base as BaseMap));
   compassBtn.addEventListener('click', () => void toggleCompass());
   notifyBtn.addEventListener('click', () => void toggleNotify());
   themeBtn.addEventListener('click', () => {
@@ -10187,8 +9992,8 @@ function wireControls(): void {
   $('#feedback-move-btn').addEventListener('click', () => {
     if (feedbackEv) startEvMove(feedbackEv);
   });
+  $('#feedback-mark').addEventListener('click', () => startFeedbackMark());
   $('#feedback-unpin').addEventListener('click', () => {
-    feedbackPicker?.set(null);
     feedbackPin = null;
     feedbackFound = '';
     feedbackPinState();
@@ -10333,6 +10138,8 @@ function wireControls(): void {
     if (reportSheet.hidden) setReportPeek(false);
     if (reportPins.length > 0) render();
   }).observe(reportSheet, { attributes: true, attributeFilter: ['hidden'] });
+  // 回報問題收起來、打開：雷達上標好的位置（feedbackPin）跟著拿掉、畫出來
+  new MutationObserver(() => render()).observe(feedbackSheet, { attributes: true, attributeFilter: ['hidden'] });
   myReportsMore.addEventListener('click', () => {
     myReportsExpanded = !myReportsExpanded;
     renderMyReports();
@@ -10422,8 +10229,8 @@ async function boot(): Promise<void> {
   lsSet(LS_MODULE, mod.id);
   applyTheme(theme);
   applyModule();
-  setBase(baseMap);
-  switchView('radar');
+  compassBtn.hidden = !compassSupported();
+  syncFindBtn();
   setTime(timeSetting);
   // 上次在汪星：先換到汪星再套範圍（太空的畫法 render 時才載入）；你在汪星但沒存看法：換到汪星的發射口
   updateScaleChips();
@@ -10433,7 +10240,6 @@ async function boot(): Promise<void> {
   if (youOn !== 'earth')
     void homeView().then((v) => {
       if (v && !savedHome && radar.spaceFocusKey !== youOn) radar.setSpaceView(v);
-      updateViewBtn();
     });
   setOrigin(origin);
   startGeolocation();
@@ -10477,9 +10283,6 @@ async function boot(): Promise<void> {
       openModuleSheet(true);
     }
   }
-  const baseParam = new URLSearchParams(location.search).get('base');
-  if (baseParam && (BASES as string[]).includes(baseParam)) setBase(baseParam as BaseMap);
-  if (new URLSearchParams(location.search).get('view') === 'map') switchView('map');
   const scaleParam = new URLSearchParams(location.search).get('scale');
   if (scaleParam && (SCALE_SETTINGS as string[]).includes(scaleParam)) setScale(scaleParam as ScaleSetting);
   if (lsGet(LS_REPORTED)) void loadMyReports();

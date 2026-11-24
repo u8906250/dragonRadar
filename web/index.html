@@ -40,7 +40,6 @@
             <button type="button" id="account-btn" class="chip" title="帳號（選用，passkey 登入）：手機、電腦看到同一份">帳號</button>
             <button type="button" id="help-btn" class="chip" title="使用說明、換裝置">說明</button>
           </div>
-          <button type="button" id="full-btn" class="chip icon-chip" aria-pressed="false" title="全螢幕" aria-label="全螢幕"><svg class="ic-expand" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 9V4h5M15 4h5v5M20 15v5h-5M9 20H4v-5"/></svg><svg class="ic-shrink" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 4v5H4M20 9h-5V4M15 20v-5h5M4 15h5v5"/></svg></button>
         </div>
       </header>
 
@@ -50,15 +49,10 @@
           <!-- 中山公園拉近時：樹冠、屋頂顏色、橋寬等是照國土測繪中心的正射影像判讀的 -->
           <small id="radar-attrib" class="radar-attrib" hidden><span id="street-attrib"><a href="https://openfreemap.org" target="_blank" rel="noopener">OpenFreeMap</a> © <a href="https://www.openmaptiles.org/" target="_blank" rel="noopener">OpenMapTiles</a> © <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a></span><span id="tree-attrib" hidden> 樹冠、屋頂、橋寬：<a href="https://www.nlsc.gov.tw/" target="_blank" rel="noopener">內政部國土測繪中心</a>正射影像判讀</span></small>
         </section>
-        <section id="map-view" class="view" hidden aria-label="地圖"><div id="map"></div></section>
 
         <div class="overlay overlay-bl">
           <!-- 全螢幕時雷達的比例尺（距離圈拿掉了） -->
           <div id="scale-bar" class="scale-bar" hidden><span></span></div>
-          <div class="chips" id="base-chips" role="radiogroup" aria-label="底圖" hidden>
-            <button type="button" class="chip" data-base="nlsc" role="radio" aria-checked="false" title="內政部國土測繪中心 台灣通用電子地圖">台灣電子地圖</button>
-            <button type="button" class="chip" data-base="osm" role="radio" aria-checked="false">OSM</button>
-          </div>
           <!-- 時間範圍平常收起來（不太會用到）：只顯示現在選的，點了展開，選好再收起來 -->
           <button type="button" id="time-toggle" class="chip" aria-expanded="false" aria-controls="time-chips" title="時間範圍"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8.5"/><path d="M12 7.5V12l3 2"/></svg><span>全部</span></button>
           <div class="chips" id="time-chips" role="radiogroup" aria-label="時間範圍" hidden>
@@ -91,7 +85,8 @@
           <button type="button" id="compass-btn" class="chip icon-chip" hidden title="指北針：雷達跟著手機方向轉" aria-label="指北針"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9.2"/><path class="needle-n" d="M12 4.6l3 7.4h-6z"/><path class="needle-s" d="M12 19.4l-3-7.4h6z"/></svg></button>
           <!-- 漂流瓶：畫一個瓶子（v1.785 使用者說改成瓶子比較不占空間），右下角的數字是今天還能丟幾個 -->
           <button type="button" id="bottle-btn" class="chip icon-chip" title="漂流瓶：在牛皮紙上寫一段話丟在附近，或撿別人的" aria-label="漂流瓶" hidden><svg viewBox="0 0 24 24" aria-hidden="true"><g transform="rotate(-25 12 12)"><rect class="cork" x="10" y="2" width="4" height="3" rx="0.8"/><path d="M10 5h4v2.6l2.8 3.4v9a2 2 0 0 1-2 2H9.2a2 2 0 0 1-2-2v-9L10 7.6z"/><path class="scroll" d="M10.4 13.2h3.2M10.4 16.4h3.2"/></g></svg><span id="bottle-badge" class="chip-badge" hidden></span></button>
-          <button type="button" id="view-btn" class="chip primary">地圖</button>
+          <!-- 全螢幕開關（v1.834 使用者說原本的「地圖」改成雷達、全螢幕切換，地圖拿掉） -->
+          <button type="button" id="view-btn" class="chip primary" aria-pressed="false" title="全螢幕">全螢幕</button>
         </div>
         <div id="find-box" class="find-box" hidden>
           <form id="find-form" class="find-form" role="search" autocomplete="off">
@@ -135,7 +130,7 @@
           </span>
           <span class="filter-group" id="only-group">
             <span class="filter-label muted">只看</span>
-            <button type="button" class="chip small" id="active-toggle" aria-pressed="false" title="只看現在進行中、開放中的（雷達、地圖、清單都是）">進行中</button>
+            <button type="button" class="chip small" id="active-toggle" aria-pressed="false" title="只看現在進行中、開放中的（雷達、清單都是）">進行中</button>
           </span>
           <span class="filter-group" id="sort-group" role="radiogroup" aria-label="清單排序" hidden>
             <span class="filter-label muted">排序</span>
@@ -183,7 +178,7 @@
           <button type="button" class="chip" data-act="close" aria-label="關閉">關閉</button>
         </div>
         <div id="report-event">
-        <p class="muted sheet-note" id="report-intro">看到活動的 Threads 貼文、YouTube 社群貼文，或 ACCUPASS 活動通、OPENTIX、Peatix、Luma 的活動頁？貼上連結，雷達會判斷是什麼活動（遊行、講座、市集、表演…），讀出活動內容、地點、開始時間，三個都讀到才會標到地圖上給大家看；沒寫幾點開始的從發文的時間算，結束時間可以不寫。</p>
+        <p class="muted sheet-note" id="report-intro">看到活動的 Threads 貼文、YouTube 社群貼文，或 ACCUPASS 活動通、OPENTIX、Peatix、Luma 的活動頁？貼上連結，雷達會判斷是什麼活動（遊行、講座、市集、表演…），讀出活動內容、地點、開始時間，三個都讀到才會標到雷達上給大家看；沒寫幾點開始的從發文的時間算，結束時間可以不寫。</p>
         <form id="report-form" class="kw-form" autocomplete="off">
           <input id="report-input" type="text" inputmode="url" enterkeyhint="send" placeholder="Threads、YouTube、活動通、OPENTIX、Peatix 或 Luma 的連結" aria-label="Threads 貼文、YouTube 社群貼文、活動通、OPENTIX、Peatix 或 Luma 活動頁的連結" />
           <button type="button" class="btn" id="report-paste" hidden>貼上</button>
@@ -225,11 +220,10 @@
             <legend>正確的類型是？</legend>
             <div id="feedback-topic-list" class="feedback-topic-list"></div>
           </fieldset>
-          <!-- 地點錯誤：在小地圖上標正確的位置（選填，管理者確認後才改） -->
+          <!-- 地點錯誤：在雷達上標正確的位置（選填，管理者確認後才改；v1.834 小地圖拿掉） -->
           <div id="feedback-pin" class="feedback-pin" hidden>
             <div class="edit-pin feedback-find"><input id="feedback-place" type="text" maxlength="200" placeholder="地址、店名" aria-label="正確的地點" enterkeyhint="search" /><button type="button" class="chip" id="feedback-locate">查地點</button></div>
-            <div class="edit-pin"><span id="feedback-pin-state" class="edit-pin-state"></span><button type="button" class="chip" id="feedback-unpin" hidden>清除標記</button></div>
-            <div id="feedback-map" class="edit-map"></div>
+            <div class="edit-pin"><span id="feedback-pin-state" class="edit-pin-state"></span><button type="button" class="chip" id="feedback-mark">在雷達上標</button><button type="button" class="chip" id="feedback-unpin" hidden>清除標記</button></div>
           </div>
           <!-- 地點錯誤：自己回報的那則或管理者，直接在雷達上移（v1.808） -->
           <div id="feedback-move" class="feedback-move" hidden>
