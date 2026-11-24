@@ -131,7 +131,11 @@ export function normalizeSessions(raw: unknown): Extraction | null {
       },
     };
   });
-  return { is_event: isEvent, events: isEvent ? events : [], tags: aiTags(o, isEvent) };
+  // 寫了哪一天的場次、又說「每週六固定」：模型常另外多給一筆每週固定場（v1.839）。同一個地點有單場的，固定場拿掉（固定場本來就不收，只會多列一行不放上雷達）
+  const placeKey = (e: ExtractedEvent): string => (e.place_query ?? e.place_text ?? '').replace(/\s+/g, '');
+  const dated = new Set(events.filter((e) => !e.spot && e.start_at && e.extra?.role !== 'seek').map(placeKey));
+  const kept = events.filter((e) => !(e.spot && dated.has(placeKey(e))));
+  return { is_event: isEvent, events: isEvent ? kept : [], tags: aiTags(o, isEvent) };
 }
 
 /** 羽球臨打的判讀 */

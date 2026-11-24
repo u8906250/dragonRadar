@@ -425,7 +425,7 @@ export function notListedWhy(items: PlanItem[]): NotListedWhy | undefined {
 // 21：台派雷達記下判成台派的依據（台派用詞），算不算台派照管理者在管理頁決定的（2026-11-21）
 // 22：台派雷達看不出是台派的，AI 抓可能是台派的說法給管理者判斷；店家自己帳號的表態貼文（回家投票、放小卡）也算介紹這家店（2026-11-22）
 // 26：寫了縣市卻查到別縣市同名的路（「台北市 仁愛路大道」對到桃園大溪）不收、括號裡的地標也拿來查：還沒確認的回報再貼一次重新定位（2026-11-24）
-export const PLAN_VERSION = 32;
+export const PLAN_VERSION = 33;
 
 /** 判讀好、還沒寫進雷達的資料，存在 posts.confirm_plan */
 interface StoredPlan {

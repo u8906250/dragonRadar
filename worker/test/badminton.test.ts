@@ -38,4 +38,15 @@ describe('detectEnded for drop-in games', () => {
     expect(e?.extra).toMatchObject({ role: 'transfer', fee: '$900/2hr', courts: '1 面', capacity: null, available: null });
     expect(normalizeSessions({ is_event: true, events: [{ role: 'transfer', title: null }] })?.events[0].title).toBe('羽球場地出讓');
   });
+  it('drops the weekly session when the same place has a dated one (v1.839)', () => {
+    const base = { role: 'offer', title: '三重運動中心五樓羽球臨打', place_text: '三重運動中心五樓', place_query: '新北市三重區集美街55號', until: null, fee: '200', level: null, slots: '缺 6 位', capacity: '15 人', courts: null, shuttle: '勝利比賽級', team: null, contact: 'dm', available: null, confidence: 0.9 };
+    const r = normalizeSessions({ is_event: true, events: [
+      { ...base, start_at: '2026-11-28T12:00:00+08:00', end_at: '2026-11-28T14:00:00+08:00', spot: true, weekdays: [6] },
+      { ...base, start_at: '2026-11-28T12:00:00+08:00', end_at: '2026-11-28T14:00:00+08:00', spot: false, weekdays: null },
+    ] });
+    expect(r?.events.map((e) => e.spot)).toEqual([false]);
+    // 只有固定場（沒有寫哪一天的單場）照舊留著
+    const only = normalizeSessions({ is_event: true, events: [{ ...base, start_at: '2026-11-28T12:00:00+08:00', end_at: '2026-11-28T14:00:00+08:00', spot: true, weekdays: [6] }] });
+    expect(only?.events.map((e) => e.spot)).toEqual([true]);
+  });
 });
