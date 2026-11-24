@@ -20,7 +20,7 @@ import { moduleOf } from './modules';
 import { shareInfo } from './share';
 import { ACCOUNT_RE, adminStats, publicStats, setHiddenAccount } from './stats';
 import { PUSH_RADIUS_KM, PushError, b64urlEncode, deleteSubscription, encryptPayload, purgeSubscriptions, pushStarted, saveSubscription, sendPush, vapidKeys } from './push';
-import { adminDecideReview, adminListReviews, assertEventReportsOpen, confirmLink, editLink, ENDED_REPORTS_NEEDED, locateForEdit, MAX_LINK_AGE_SEC, NOTES_CLOSED, ReportError, REPORTS_LOCKED, ipHash, myReports, notifyReview, purgeReports, recheckLinks, rejectLink, REPORT_POST_ID_RE, reportModules, requestReview, submitLink, supplementLink, withdrawReport } from './reports';
+import { adminDecideReview, adminListReviews, assertEventReportsOpen, confirmLink, editLink, ENDED_REPORTS_NEEDED, locateForEdit, MAX_LINK_AGE_SEC, NOTES_CLOSED, ReportError, REPORTS_LOCKED, ipHash, judgeEstimate, myReports, notifyReview, purgeReports, recheckLinks, rejectLink, REPORT_POST_ID_RE, reportModules, requestReview, submitLink, supplementLink, withdrawReport } from './reports';
 import { D1Meter, isTransient, withResilientDb } from './db';
 import { addressCacheKey, geocodeAddress, parseTwAddress } from './address';
 import { adminBottleRejects, adminListBottles, adminSetBottle, deleteBottleRejects, moderate, moderatePhoto, purgeBottleReads, purgeBottleRejects, BOTTLE_MAX_WEIGHT, bottleInfo, bottlePhoto, bottlesEnabled, photosEnabled, readBottle, SEE_RADIUS_KM, deleteBottle, DRIFT_EVERY_SEC, driftBottles, dropBottle, listBottles, myBottles, PER_DEVICE_PER_DAY, PICK_RADIUS_M, pickBottle, proofFor, purgeBottles, reportBottle, SEA_AFTER_SEC, uncollectLetter, verifyProof, WOOF_STAY_SEC } from './bottles';
@@ -271,6 +271,10 @@ async function handle(req: Request, env: Env, ctx: ExecutionContext): Promise<Re
   }
   if (req.method === 'POST' && path === '/api/reports/supplement') {
     return jsonResponse(await finishEvenIfGone(ctx, supplementLink(env, await readJson<{ postId?: unknown; token?: unknown; note?: unknown }>(req), await ipHash(env, req), now, await deviceId(env, req))));
+  }
+  // 判讀中的提示：現在用哪個模型、預估幾秒（v1.831）
+  if (req.method === 'GET' && path === '/api/reports/judge-info') {
+    return jsonResponse(await judgeEstimate(env, moduleOf(url.searchParams.get('module'))));
   }
   // 我的回報（裝置代碼放在 x-device 標頭）：列出、刪除自己回報的
   if (req.method === 'GET' && path === '/api/reports/mine') {

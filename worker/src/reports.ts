@@ -8,7 +8,7 @@
 import type { Env } from './env';
 import { DEFAULT_MODULE, isModule, isStoreModule, MODULE_IDS, moduleOf, STORE_MODULES, type ModuleId } from './modules';
 import { ADDRESS_BUDGET_MS, atLocalTimes, commitPlan, detectEnded, getEvent, getPost, locateTypedPlace, MAX_FUTURE_SEC, parseExtra, PLACE_MAX, placeKey, planEdited, planManual, planPost, processPost, savedTagsOf, storePost, tagsOf, taipeiDayOf, topicOf, type EventOut, type FailedItem, type ManualActivity, type PlanItem, type PostRow } from './events';
-import { ACTIVITY_SPEC, cleanTags, cleanTopic, extractFromPost, MODULE_TAGS, postTags, type ActivityPart, type EventKind } from './extract';
+import { ACTIVITY_SPEC, cleanTags, cleanTopic, extractFromPost, modelLabel, MODULE_TAGS, postTags, type ActivityPart, type EventKind } from './extract';
 import { adoptedTags } from './learnedTags';
 import { accupassPermalink, fetchAccupass, parseAccupassUrl, type AccupassLink } from './sources/accupass';
 import { eventPageText, pageTime, type EventPage, type PageFetch, type PageSession } from './sources/eventpage';
@@ -192,6 +192,55 @@ export interface SubmitResult {
   routes?: RoutePreview[];
   /** 確認後放上雷達了：回報的累計（滿 5 則拿到肉乾卡、每一則一枚順幣；今天算滿了 capped） */
   reward?: ReportReward;
+  /** 用哪個模型判讀、花了幾秒（v1.831；活動頁、舊的回報沒記的沒有） */
+  judge?: JudgeInfo;
+}
+
+export interface JudgeInfo {
+  /** 「Claude Haiku 4.5」 */
+  model: string;
+  /** 花了幾秒（沒記的是 null） */
+  seconds: number | null;
+}
+
+/** 這則用哪個模型判讀、花了幾秒：模型從存的判讀結果（posts.extraction 的 model）讀 */
+export function judgeOf(post: Pick<PostRow, 'extraction' | 'judge_ms'>): JudgeInfo | null {
+  let model: unknown = null;
+  try {
+    model = post.extraction ? (JSON.parse(post.extraction) as { model?: unknown }).model : null;
+  } catch {
+    return null;
+  }
+  if (typeof model !== 'string' || !model) return null;
+  return { model: modelLabel(model), seconds: typeof post.judge_ms === 'number' ? Math.max(1, Math.round(post.judge_ms / 1000)) : null };
+}
+
+/** 判讀中的提示預估幾秒：沒有紀錄時用這個；看最近幾次 */
+export const JUDGE_DEFAULT_SEC = 10;
+const JUDGE_SAMPLE = 30;
+const JUDGE_MIN_SAMPLE = 5;
+
+/** 中位數換成秒（無條件進位，至少 1 秒）；樣本太少回 null */
+export function estimateSeconds(ms: number[]): number | null {
+  if (ms.length < JUDGE_MIN_SAMPLE) return null;
+  const s = [...ms].sort((a, b) => a - b);
+  const mid = s.length % 2 ? s[(s.length - 1) / 2] : (s[s.length / 2 - 1] + s[s.length / 2]) / 2;
+  return Math.max(1, Math.ceil(mid / 1000));
+}
+
+/**
+ * 判讀中的提示（v1.831 使用者說寫上用哪個 AI 模型、預估秒數）：現在的主要模型，秒數照這個雷達最近 JUDGE_SAMPLE 次判讀的中位數
+ * （這個雷達還沒幾次就看全部的，再沒有就 JUDGE_DEFAULT_SEC）
+ */
+export async function judgeEstimate(env: Env, module: ModuleId): Promise<{ model: string; seconds: number }> {
+  const recent = async (mod: ModuleId | null): Promise<number[]> =>
+    (
+      await env.DB.prepare(`SELECT judge_ms FROM posts WHERE judge_ms IS NOT NULL${mod ? ' AND module = ?' : ''} ORDER BY checked_at DESC LIMIT ${JUDGE_SAMPLE}`)
+        .bind(...(mod ? [mod] : []))
+        .all<{ judge_ms: number }>()
+    ).results.map((r) => r.judge_ms);
+  const seconds = estimateSeconds(await recent(module)) ?? estimateSeconds(await recent(null)) ?? JUDGE_DEFAULT_SEC;
+  return { model: modelLabel(env.AI_MODEL ?? ''), seconds };
 }
 
 /** 預覽上的一條車掃路線 */
@@ -374,7 +423,7 @@ export function notListedWhy(items: PlanItem[]): NotListedWhy | undefined {
 // 21：台派雷達記下判成台派的依據（台派用詞），算不算台派照管理者在管理頁決定的（2026-11-21）
 // 22：台派雷達看不出是台派的，AI 抓可能是台派的說法給管理者判斷；店家自己帳號的表態貼文（回家投票、放小卡）也算介紹這家店（2026-11-22）
 // 26：寫了縣市卻查到別縣市同名的路（「台北市 仁愛路大道」對到桃園大溪）不收、括號裡的地標也拿來查：還沒確認的回報再貼一次重新定位（2026-11-24）
-export const PLAN_VERSION = 28;
+export const PLAN_VERSION = 29;
 
 /** 判讀好、還沒寫進雷達的資料，存在 posts.confirm_plan */
 interface StoredPlan {
@@ -470,12 +519,14 @@ const sameDay = (a: number, b: number): boolean => Math.floor((a + 8 * 3600) / 8
 async function previewResult(env: Env, post: PostRow, plan: StoredPlan, existed: boolean, now: number): Promise<SubmitResult> {
   // 補充資料是一場一場的欄位（標題、時間、地點、地圖位置），先填好判讀出來的（v1.715 起每個雷達都有）
   const edit = { edit: editItemsOf(plan.items, moduleOf(post.module)) };
+  const judge = judgeOf(post);
   const base = {
     existed,
     permalink: post.permalink ?? '',
     confirm: { postId: post.id, token: await confirmToken(env, post.id) },
     supplement: post.supplement ?? null,
     ...edit,
+    ...(judge ? { judge } : {}),
   };
   const note = plan.note ? { note: plan.note } : {};
   // 台派雷達看不出是台派：讀出來的店家照預覽列出來，回報的人可以改、送給管理者判斷
@@ -677,6 +728,7 @@ export async function submitLink(env: Env, input: string, ip: string, now: numbe
 
   await checkSubmitLimits(env, ip, now, device);
 
+  const t0 = Date.now();
   const fetched = await fetchThreadsPost(link.code);
   // Threads 對刪除、私人帳號、限制觀看的貼文都回同一個「無法顯示串文」頁面，分不出是哪一種
   if (fetched.status === 'gone') throw new ReportError(404, UNREADABLE_POST);
@@ -689,7 +741,7 @@ export async function submitLink(env: Env, input: string, ip: string, now: numbe
   const username = fetched.username ?? link.username;
   const permalink = username ? `https://www.threads.com/@${username}/post/${link.code}` : `https://www.threads.com/t/${link.code}`;
   const text = withLocationTag(fetched.text, fetched.location);
-  return judgeReported(env, { id: postId, username, text, permalink, postedAt, source: 'link' }, existing, ip, device, module, now);
+  return judgeReported(env, { id: postId, username, text, permalink, postedAt, source: 'link', t0 }, existing, ip, device, module, now);
 }
 
 /**
@@ -704,6 +756,7 @@ async function submitYoutube(env: Env, yt: YoutubeLink, ip: string, now: number,
 
   await checkSubmitLimits(env, ip, now, device);
 
+  const t0 = Date.now();
   const fetched = await fetchYoutubePost(yt.id);
   if (fetched.status === 'gone') throw new ReportError(404, 'YouTube 上找不到這則貼文：可能已經刪除，或只有頻道會員看得到');
   if (fetched.status === 'no_text') throw new ReportError(422, '這則貼文沒有文字，雷達只能判讀有寫時間地點的文字');
@@ -713,13 +766,14 @@ async function submitYoutube(env: Env, yt: YoutubeLink, ip: string, now: number,
   }
   const postedAt = fetched.postedAt !== null && fetched.postedAt <= now + 3600 ? fetched.postedAt : now;
   if (now - postedAt > linkAgeOf(module)) throw new ReportError(400, `這則貼文發布超過 ${MAX_LINK_AGE_SEC / 86400} 天，雷達只收最近的發放和活動`);
-  return judgeReported(env, { id: postId, username: fetched.username, text: fetched.text, permalink: youtubePermalink(yt.id), postedAt, source: 'youtube' }, earlier.existing, ip, device, module, now);
+  return judgeReported(env, { id: postId, username: fetched.username, text: fetched.text, permalink: youtubePermalink(yt.id), postedAt, source: 'youtube', t0 }, earlier.existing, ip, device, module, now);
 }
 
 /** 讀到的 Threads、YouTube 貼文：存起來、AI 判讀，回傳預覽（等回報的人確認才放上雷達） */
 async function judgeReported(
   env: Env,
-  p: { id: string; username: string | null; text: string; permalink: string; postedAt: number; source: 'link' | 'youtube' },
+  /** t0：開始讀貼文的時間（毫秒），記判讀花了多久 */
+  p: { id: string; username: string | null; text: string; permalink: string; postedAt: number; source: 'link' | 'youtube'; t0: number },
   existing: PostRow | null,
   ip: string,
   device: string | null,
@@ -744,8 +798,11 @@ async function judgeReported(
     await env.DB.prepare('UPDATE posts SET judging_at = NULL WHERE id = ?').bind(postId).run();
     return { existed: false, outcome: 'failed', reasons: ['extraction_failed'], events: [], permalink };
   }
-  await env.DB.prepare('UPDATE posts SET confirm_plan = ?, judging_at = NULL WHERE id = ?').bind(storePlan(plan), postId).run();
-  return previewResult(env, { ...post, permalink }, plan, !!existing, now);
+  const judgeMs = Date.now() - p.t0;
+  await env.DB.prepare('UPDATE posts SET confirm_plan = ?, judging_at = NULL, judge_ms = ? WHERE id = ?').bind(storePlan(plan), judgeMs, postId).run();
+  // 判讀結果（用哪個模型）planPost 剛存進去，重讀一次
+  const judged = (await getPost(env, postId)) ?? post;
+  return previewResult(env, { ...judged, judge_ms: judgeMs, permalink }, plan, !!existing, now);
 }
 
 /**

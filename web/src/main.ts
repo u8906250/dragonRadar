@@ -1,6 +1,6 @@
 import './styles.css';
 import { FITBUS_MS_PER_M, hqDenseKm, hqMotionKm, HQ_NET_LABEL_KM, HQ_SAIL_MS, HQ_STAR_MS, HQ_VOYAGE_MS, RAINBOW_EVERY_MS, voyagePhase, voyageTimeOf } from './flow';
-import { accountToken, addKeyword, cachedNickname, deletePushSubscription, locateFeedbackPlace, moveEvent, sendFeedback, type FeedbackKind, fetchPushKey, savePushSubscription, confirmReport, editReport, locatePlace, rejectReport, reviewReport, supplementReport, deleteBottle, dropBottle, readBottle, type BottleHere, fetchBottleInfo, fetchBottlePhoto, fetchBottleProof, fetchBottles, fetchWoofBottles, rememberBottlePhoto, uncollectLetter, verifyBottleProof, fetchEvents, fetchHealth, fetchKeywords, fetchMyBottles, fetchMyReports, fetchRoutes, pickBottle, reportBottle, submitLink, withdrawReport } from './api';
+import { accountToken, addKeyword, cachedNickname, deletePushSubscription, locateFeedbackPlace, moveEvent, sendFeedback, type FeedbackKind, fetchPushKey, savePushSubscription, confirmReport, editReport, locatePlace, rejectReport, reviewReport, supplementReport, deleteBottle, dropBottle, readBottle, type BottleHere, fetchBottleInfo, fetchBottlePhoto, fetchBottleProof, fetchBottles, fetchWoofBottles, rememberBottlePhoto, uncollectLetter, verifyBottleProof, fetchEvents, fetchHealth, fetchJudgeInfo, type JudgeInfo, fetchKeywords, fetchMyBottles, fetchMyReports, fetchRoutes, pickBottle, reportBottle, submitLink, withdrawReport } from './api';
 import { compassSupported, startCompass } from './compass';
 import { bearingDeg, compassLabel, cutAtBox, cutLines, destination, formatKm, haversineKm, lookFrom, outsideBox, ringBox, ringHas, splitAntimeridian, simplifyLatLng, taiwanRadiusKm, unitVectors, type GeoBox, type LatLng, type RegionMap } from './geo';
 import { TAIWAN_RINGS } from './taiwan';
@@ -309,6 +309,8 @@ interface SessionExtra {
   slots?: string | null;
   /** 人數上限（v1.830） */
   capacity?: string | null;
+  /** 幾面場（v1.831） */
+  courts?: string | null;
   shuttle?: string | null;
   team?: string | null;
   contact?: string | null;
@@ -5528,7 +5530,7 @@ function spotSchedule(it: Item): string {
   return `${spotHours(it.spot?.sessions ?? [it.ev])}，${range}`;
 }
 
-/** 羽球臨打的詳細資料：招臨打寫時段、費用、程度、缺幾位、人數上限、用球、球團；找臨打寫程度、可以打的時間、地區 */
+/** 羽球臨打的詳細資料：招臨打寫時段、費用、程度、缺幾位、人數上限、場地數、用球、球團；找臨打寫程度、可以打的時間、地區 */
 function sessionDetailHtml(it: Item, now: number): string {
   const { ev } = it;
   const x = sessionOf(ev);
@@ -5539,7 +5541,7 @@ function sessionDetailHtml(it: Item, now: number): string {
     return `<p>類型：找臨打（球友想找地方打）<br>${line('程度', x.level)}時間：${esc(seekWhen(ev))}<br>${line('聯絡方式', contact)}${where}</p>`;
   }
   const time = it.spot ? spotSchedule(it) : eventTimeText(ev);
-  return `<p>類型：${it.spot ? '招臨打・每週固定場' : '招臨打'}<br>時間：${esc(time)}<br>${line('費用', x.fee ?? ev.item)}${line('程度', x.level)}${line('缺幾位', x.slots)}${line('人數上限', x.capacity)}${line('用球', x.shuttle)}${line('球團', x.team)}${line('報名方式', contact)}${where} · ${esc(timeLine(it, now))}</p>`;
+  return `<p>類型：${it.spot ? '招臨打・每週固定場' : '招臨打'}<br>時間：${esc(time)}<br>${line('費用', x.fee ?? ev.item)}${line('程度', x.level)}${line('缺幾位', x.slots)}${line('人數上限', x.capacity)}${line('場地數', x.courts)}${line('用球', x.shuttle)}${line('球團', x.team)}${line('報名方式', contact)}${where} · ${esc(timeLine(it, now))}</p>`;
 }
 
 /** 狗狗陪伴、找工作的摘要：「2 個徵人、1 個可照顧」「2 個徵人、1 個求職」 */
@@ -8408,6 +8410,7 @@ function openReportSheet(open: boolean): void {
   // 每次打開都先收起來
   myReportsExpanded = false;
   void loadMyReports();
+  void loadJudgeInfo();
   themeSheet.hidden = true;
   kwSheet.hidden = true;
   bottleSheet.hidden = true;
@@ -9284,13 +9287,34 @@ function routePreviewHtml(rt: RoutePreview): string {
 }
 
 /** 判讀完先給回報的人看：對了才放上雷達，不對就不放並記下哪裡錯 */
-/** 判讀結果裡的招臨打：有寫的話列出用球、人數上限（v1.830 使用者說判定也要提供） */
+/** 判讀結果裡的招臨打：有寫的話列出用球、人數上限（v1.830 使用者說判定也要提供）、場地數（v1.831） */
 function sessionPreviewHtml(p: { kind: string; extra?: Record<string, unknown> | null }): string {
   if (p.kind !== 'session' || isSeek(p)) return '';
   const x = sessionOf(p);
-  const parts = [x.shuttle ? `用球：${esc(x.shuttle)}` : '', x.capacity ? `人數上限：${esc(x.capacity)}` : ''].filter(Boolean);
+  const parts = [x.shuttle ? `用球：${esc(x.shuttle)}` : '', x.capacity ? `人數上限：${esc(x.capacity)}` : '', x.courts ? `場地數：${esc(x.courts)}` : ''].filter(Boolean);
   return parts.length ? `<small>${parts.join('・')}</small>` : '';
 }
+
+/** 判讀結果最後寫用哪個模型判讀、花了幾秒（v1.831 使用者說的） */
+function judgeNoteHtml(r: SubmitResult): string {
+  const j = r.judge;
+  return j ? `<p class="muted sheet-note small">由 ${esc(j.model)} 判讀${j.seconds ? `，花了 ${j.seconds} 秒` : ''}</p>` : '';
+}
+
+/** 判讀中的提示寫的模型、預估秒數（v1.831）：打開回報畫面時先問，五分鐘內不再問 */
+let judgeInfo: { module: string; at: number; info: JudgeInfo } | null = null;
+const JUDGE_INFO_TTL_MS = 5 * 60_000;
+const freshJudgeInfo = (): JudgeInfo | null => (judgeInfo && judgeInfo.module === mod.id && Date.now() - judgeInfo.at < JUDGE_INFO_TTL_MS ? judgeInfo.info : null);
+async function loadJudgeInfo(): Promise<JudgeInfo | null> {
+  const have = freshJudgeInfo();
+  if (have) return have;
+  const module = mod.id;
+  const info = await fetchJudgeInfo(module);
+  if (info) judgeInfo = { module, at: Date.now(), info };
+  return info;
+}
+/** 「AI（Claude Haiku 4.5）背景判讀中，預估約 8 秒」；還沒問到就先寫 10 秒 */
+const judgingHtml = (j: JudgeInfo | null): string => `<p class="msg busy">AI${j ? `（${esc(j.model)}）` : ''}背景判讀中，預估約 ${j?.seconds ?? 10} 秒</p>`;
 
 function renderPreview(r: SubmitResult): void {
   const items = r.preview ?? [];
@@ -9328,6 +9352,7 @@ function renderPreview(r: SubmitResult): void {
       )
       .join('')}</ul>
     ${items.some((p) => p.lat !== null && p.lng !== null) ? '<p class="muted sheet-note small">📍 位置可能不準，不對就把虛線圈拖到正確的地方</p>' : ''}
+    ${judgeNoteHtml(r)}
     ${dups}${r.failures?.length ? `<p class="muted sheet-note">${r.failures.length > 1 ? `下面 ${r.failures.length} 場` : '下面這場'}不會放上雷達${canFixByNote(r.failures) ? '，知道的話可以按「補充資料」補上' : ''}：</p>${failuresHtml(r.failures)}` : ''}
     ${review && !items.some((p) => p.lat !== null && p.lng !== null) ? '<p class="muted sheet-note">店家還沒有位置，請先按「補充資料」補上地址或在雷達上標出位置，再送給管理者判斷。</p>' : ''}
     <div class="sheet-actions">
@@ -9444,7 +9469,13 @@ async function submitReport(): Promise<void> {
     return;
   }
   setReportBusy(true);
-  setReportMsg('<p class="msg busy">AI背景判讀中，約需 10 秒</p>');
+  const j = freshJudgeInfo();
+  setReportMsg(judgingHtml(j));
+  // 還沒問到模型、秒數：問到了換上去（還在判讀中才換）
+  if (!j)
+    void loadJudgeInfo().then((info) => {
+      if (info && reportBusy && reportResult.querySelector('.msg.busy')) reportResult.querySelector('.msg.busy')!.outerHTML = judgingHtml(info);
+    });
   const r = await submitResumable(url).finally(() => setReportBusy(false));
   if (!r.ok) {
     setReportMsg(`<p class="msg error">${esc(r.message)}</p>`);
@@ -9589,7 +9620,7 @@ async function showReportResult(data: SubmitResult): Promise<void> {
   // 還沒放上雷達（找不到地點、判讀不出時間）：可以補充資料再判讀一次
   const canSupplement = !!data.confirm && (outcome === 'no_place' || outcome === 'not_listed' || outcome === 'not_event');
   setReportMsg(
-    `<p class="msg">${esc(head)}</p>${list ? `<ul class="report-events">${list}</ul>` : ''}${failHtml}${noteHtml}${
+    `<p class="msg">${esc(head)}</p>${list ? `<ul class="report-events">${list}</ul>` : ''}${failHtml}${noteHtml}${judgeNoteHtml(data)}${
       !canSupplement
         ? ''
         : useEditForm(data.edit)

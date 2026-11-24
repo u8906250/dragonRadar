@@ -1027,6 +1027,13 @@ export interface ModelAttempt {
 /** Claude（Anthropic API）的模型：名字是 claude- 開頭（v1.810 使用者說可以用比較好的 AI、付少量費用） */
 export const isClaude = (model: string): boolean => model.startsWith('claude-');
 
+/** 給人看的模型名稱（v1.831 判讀中、判讀結果寫用哪個模型）：claude-haiku-4-5 → Claude Haiku 4.5，@cf/openai/gpt-oss-120b → gpt-oss-120b */
+export function modelLabel(model: string): string {
+  const m = /^claude-([a-z]+)-(\d+)(?:-(\d{1,2}))?(?:-\d{8})?$/.exec(model);
+  if (m) return `Claude ${m[1][0].toUpperCase()}${m[1].slice(1)} ${m[2]}${m[3] ? `.${m[3]}` : ''}`;
+  return model.split('/').pop() || model;
+}
+
 /**
  * 用 Claude 判讀一次（官方 SDK，金鑰是 worker 的 secret ANTHROPIC_API_KEY）。提示跟 Workers AI 一樣（只輸出 JSON），不用 JSON schema
  * （各雷達的 schema 有 maxItems 這些 Claude 的結構化輸出不一定收）；說明很長、每則都一樣，標成可以快取（太短不夠快取的話不會快取，也不多收錢）。

@@ -1,6 +1,6 @@
 /**
  * 羽球臨打模組：判讀兩種貼文
- * - offer 招臨打（提供）：球團、場主開放臨打名額，抽出球館、時段（每週固定的當成固定場）、費用、程度、缺幾位、人數上限（v1.830）、用球、球團、怎麼報名；
+ * - offer 招臨打（提供）：球團、場主開放臨打名額，抽出球館、時段（每週固定的當成固定場）、費用、程度、缺幾位、人數上限（v1.830）、幾面場（v1.831）、用球、球團、怎麼報名；
  *   場次照洋流的發放活動一樣排（開始、結束、每週固定時段）
  * - seek 找臨打（需求）：球友想找地方打，抽出程度、可以打的時間、地區、怎麼聯絡；當成刊登（events.ts 的 planPostings）
  * 臨打自己的欄位放在 extra。
@@ -34,6 +34,7 @@ events 每筆的欄位：
 - level: 程度，例如「新手友善」「中階」「B 級以上」；沒寫則 null
 - slots: 缺幾位，例如「缺 2 位」「男 1 女 2」；沒寫則 null
 - capacity: 人數上限（這個時段總共最多幾個人），例如「16 人」「每面場 6 人」「限 20 人」；沒寫則 null。跟 slots 不一樣：slots 是現在還缺幾位，capacity 是最多收幾人
+- courts: 用幾面場（場地數），例如「2 面」「3 面場」「A、B 兩面」；沒寫則 null
 - shuttle: 用球（球的廠牌、型號），例如「RSL 4 號」「勝利 Master」「YY AS-50」；沒寫則 null
 - team: 球團名稱；沒寫則 null
 - contact: 怎麼報名或聯絡：form（表單）、line（LINE）、dm（私訊、留言）、phone（電話）、email、other；沒寫則 null。付款方式（現金、Line Pay、轉帳）不是聯絡方式
@@ -73,13 +74,14 @@ const SESSION_SCHEMA = {
           level: { type: ['string', 'null'] },
           slots: { type: ['string', 'null'] },
           capacity: { type: ['string', 'null'] },
+          courts: { type: ['string', 'null'] },
           shuttle: { type: ['string', 'null'] },
           team: { type: ['string', 'null'] },
           contact: { type: ['string', 'null'] },
           available: { type: ['string', 'null'] },
           confidence: { type: 'number' },
         },
-        required: ['role', 'title', 'start_at', 'end_at', 'place_text', 'place_query', 'spot', 'until', 'fee', 'level', 'slots', 'capacity', 'shuttle', 'team', 'contact', 'confidence'],
+        required: ['role', 'title', 'start_at', 'end_at', 'place_text', 'place_query', 'spot', 'until', 'fee', 'level', 'slots', 'capacity', 'courts', 'shuttle', 'team', 'contact', 'confidence'],
       },
     },
   },
@@ -118,6 +120,7 @@ export function normalizeSessions(raw: unknown): Extraction | null {
         level: str(e.level),
         slots: str(e.slots),
         capacity: role === 'offer' ? str(e.capacity) : null,
+        courts: role === 'offer' ? str(e.courts) : null,
         shuttle: str(e.shuttle),
         team: str(e.team),
         contact: CONTACTS.has(contact) ? contact : null,

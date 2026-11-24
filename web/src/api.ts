@@ -38,6 +38,20 @@ export async function fetchHealth(): Promise<{ ok: boolean; mode: 'live' | 'mock
   return (await r.json()) as { ok: boolean; mode: 'live' | 'mock' | 'unconfigured'; version?: string; reports?: boolean; reportModules?: string[] };
 }
 
+/** 判讀中的提示：現在用哪個模型（「Claude Haiku 4.5」）、預估幾秒（v1.831） */
+export interface JudgeInfo {
+  model: string;
+  seconds: number;
+}
+export async function fetchJudgeInfo(module: string): Promise<JudgeInfo | null> {
+  try {
+    const r = await fetch(`${API_BASE}/api/reports/judge-info?module=${encodeURIComponent(module)}`);
+    return r.ok ? ((await r.json()) as JudgeInfo) : null;
+  } catch {
+    return null;
+  }
+}
+
 export async function fetchKeywords(): Promise<{ max: number; userAdd?: boolean; keywords: KeywordInfo[]; rules?: KeywordRules }> {
   const r = await fetch(`${API_BASE}/api/keywords`);
   if (!r.ok) throw new Error(`API ${r.status}`);

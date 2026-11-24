@@ -304,6 +304,8 @@ export interface SubmitResult {
     picks?: number;
     capped?: boolean;
   };
+  /** 用哪個模型判讀、花了幾秒（v1.831；活動頁、舊的回報沒有） */
+  judge?: { model: string; seconds: number | null };
 }
 
 /** 預覽上的一條車掃路線 */

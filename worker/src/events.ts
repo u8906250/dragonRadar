@@ -30,6 +30,8 @@ export interface PostRow {
   fetched_at: number;
   processed_at: number | null;
   extraction: string | null;
+  /** 回報的貼文判讀花了多久（毫秒，從讀貼文到判讀、定位好；v1.831） */
+  judge_ms?: number | null;
   /** 回報的人補充的地點或時間，判讀時接在貼文後面 */
   supplement?: string | null;
   /**
