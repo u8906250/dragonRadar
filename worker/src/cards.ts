@@ -129,11 +129,11 @@ export async function pickReward(env: Env, device: string | null, body: unknown)
 }
 
 /**
- * 瞬間移動（v1.816 使用者說點順幣可以選許願或瞬間移動）：花 TELEPORT_COST 枚順幣，現在可以去汪星、在汪星可以回地球（之後可以再加）。
+ * 瞬間移動（v1.816 使用者說點順幣可以選許願或瞬間移動）：花 TELEPORT_COST 枚順幣，地球、汪星、Kepler-22b（v1.817）之間都可以去（之後可以再加）。
  * 伺服器只扣順幣（記 used_for = teleport:地方），換到哪一顆是瀏覽器自己記的
  */
 export const TELEPORT_COST = 1;
-export const TELEPORT_TO = ['woof', 'earth'] as const;
+export const TELEPORT_TO = ['woof', 'earth', 'kepler22b'] as const;
 export type TeleportTo = (typeof TELEPORT_TO)[number];
 export function parseTeleport(body: unknown): TeleportTo | string {
   const to = (body as { to?: unknown } | null)?.to;

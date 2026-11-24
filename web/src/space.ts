@@ -470,10 +470,11 @@ export const WOOF_KM = (() => {
   return Math.sqrt(TAIPEI_KM2 / Math.abs(unit));
 })();
 /**
- * 骨頭月（v1.815 使用者說在汪星外面畫一顆類似月球的衛星；名字、大小、一天一圈、3D 看得到都是使用者選的）：汪星的衛星，
+ * 汪星的衛星（v1.815 使用者說在汪星外面畫一顆類似月球的衛星；大小、一天一圈、3D 看得到是使用者選的；原本叫「骨頭月」，
+ * v1.817 使用者說先不要取名字：雷達上不寫名字，程式裡還是叫 bonemoon）：
  * 半徑、離汪星多遠照月球對地球的比例（半徑 27%、約 60 個汪星半徑），一天繞一圈，軌道跟黃道斜 5 度（照月球）。
  * 逆行（從黃道北邊看順時針）：汪星 3D 的天空照台北的時間轉一天一圈，順行一天一圈會一直停在天上同一個地方，逆行一天升落兩次。
- * 表面照月球畫，多一個骨頭形狀的坑（名字是想像的）
+ * 表面照月球畫，多一個骨頭形狀的坑
  */
 const BONE_R = 1_737 / 6_371;
 const BONE_D = 384_400 / 6_371;
@@ -497,7 +498,7 @@ const WOOF_MINOR_ROADS = woofLines(TAIPEI_MINOR_ROADS);
 /** 中山公園（park.ts，跟地球的雷達共用）換到汪星上：台北的經緯度攤開成汪星的、每 2 度一點，草和水波的大小是汪星上的公尺 */
 const WOOF_PARK = parkGeom({ name: 'woof', to: toWoof, my: WOOF_KM * 1000 * RAD, mx: (lat) => WOOF_KM * 1000 * RAD * Math.cos(lat * RAD), densify });
 
-/** 汪星正中間的經緯度：跟著視角轉，左右拖轉經度、上下拖轉緯度（你在汪星時，這裡就是你的位置：撿漂流瓶照這裡算距離） */
+/** 汪星正中間的經緯度：跟著視角轉，左右拖轉經度、上下拖轉緯度（你在汪星時撿漂流瓶照這裡算距離；你的位置是 3D 裡的位置，v1.817 起畫藍點） */
 export const woofCenter = (view: SpaceView): LatLng => ({ lat: Math.max(-80, Math.min(80, view.pitch / RAD)), lng: norm180(-view.yaw / RAD) });
 
 /** 汪星的正中間在不在中山公園附近（可以放大到 PARK_MIN_KM） */
@@ -839,7 +840,7 @@ const sub = (a: Vec3, b: Vec3): Vec3 => [a[0] - b[0], a[1] - b[1], a[2] - b[2]];
  * 正中間的經緯度跟著視角轉：左右拖轉經度、上下拖轉緯度。中心是汪星時可以放大到 100 公尺（focusMinKm），
  * 拉近到畫面上的台北半徑 2 km 內換成大街小巷（streets：跟雷達一樣的圖磚）；中山公園描繪出來（草地花圃草綠色、映池和翠湖水藍色，拉近長出一叢叢的草、一道道的水波），那裡可以放大到 0.5 公尺，看得到的那一小塊線切細
  */
-function woofGlobe(x: number, y: number, r: number, view: SpaceView, toSun: Vec3, streets?: WoofStreets, bottles?: WoofBottleMark[], scaleKm = 1): string {
+function woofGlobe(x: number, y: number, r: number, view: SpaceView, toSun: Vec3, streets?: WoofStreets, bottles?: WoofBottleMark[], scaleKm = 1, you?: [number, number] | null): string {
   const center = woofCenter(view);
   const n = Math.hypot(...toSun) || 1;
   const near = view.focus === 'woof' ? nearOf(center, r) : null;
@@ -919,6 +920,12 @@ function woofGlobe(x: number, y: number, r: number, view: SpaceView, toSun: Vec3
         : `<path class="wave back" d="${WAVE_BACK}" transform="scale(${bk.toFixed(3)})" /><g class="body"><path class="glass" d="${BOTTLE_PATH}" transform="rotate(-20) scale(${bk.toFixed(3)})" /><g transform="scale(${bk.toFixed(3)})">${b.read ? '' : LETTER_SCROLL + BOTTLE_CORK}${b.taken ? TAKEN_MARK : ''}</g></g><path class="wave front" d="${WAVE_FRONT}" transform="scale(${bk.toFixed(3)})" />`) +
       `<title>${b.mine ? '你丟的漂流瓶' : b.taken ? '漂流瓶（已經被收藏了）' : b.state === 'pick' ? '漂流瓶（走到附近了）' : '漂流瓶'}</title></g>`;
   }
+  // 你的位置：跟地球的全螢幕一樣，白邊的藍點（拖雷達只是看別的地方，藍點不動；按定位回到這裡）
+  if (you) {
+    const [lat, lng] = toWoof(you);
+    const [px, py, pz] = ortho(center, lat, lng);
+    if (pz > 0) out += `<g class="woof-you" transform="translate(${f1(C + r * px)} ${f1(C - r * py)})"><circle class="you-ring" r="5.5" /><circle class="you-dot" r="3.6" /><title>你的位置</title></g>`;
+  }
   return `<g class="space-globe" transform="translate(${f1(ox)} ${f1(oy)})">${out}</g>`;
 }
 
@@ -955,6 +962,8 @@ export interface SpaceOpts {
   woofMap?: boolean;
   /** 漂到汪星海上的漂流瓶（汪星的地圖看得到時才畫） */
   bottles?: WoofBottleMark[];
+  /** 你在汪星的位置（台北的經緯度：3D 裡走到的地方，沒進過是發射口；v1.817 使用者說跟地球一樣標出位置）：汪星上畫藍點 */
+  woofYou?: [number, number] | null;
 }
 
 /** 汪星海上的漂流瓶：汪星的經緯度；pick 是你在汪星、走到撿得到的距離了 */
@@ -988,7 +997,7 @@ function bodyPositions(when: Date): Map<string, Vec3> {
   return out;
 }
 
-const NAMES: Record<string, string> = { sun: '太陽', moon: '月球', bonemoon: '骨頭月', ...Object.fromEntries(PLANETS.map((p) => [p.key, p.name])) };
+const NAMES: Record<string, string> = { sun: '太陽', moon: '月球', ...Object.fromEntries(PLANETS.map((p) => [p.key, p.name])) };
 
 /*
  * 太陽系外面（第 1 號願望，點子來自 jy：「能否產生 Kepler 22-b 這個星球；如果在其他星系，就讓雷達可以繼續縮小到可以看到其他星系」，v1.582）：
@@ -1621,12 +1630,14 @@ export function spaceMarkup(o: SpaceOpts): string {
   const you = o.you === 'woof' ? 'woof' : o.you === 'kepler22b' ? null : view.focus ? 'earth' : null;
   for (const b of list) {
     // 汪星大到看得出形狀：跟地球一樣畫成球（地圖要搭火箭飛過去才看得到，之前是普通的星球）
-    const look = b.key === 'woof' && b.r >= TINY_EARTH && o.woofMap !== false ? woofGlobe(b.x, b.y, b.r, view, rot(sub(sun, pos.get('woof')!)), o.streets, o.bottles, o.scaleKm) : bodySvg(b.key, b.x, b.y, b.r, b.key === 'sun' ? null : sunAt);
+    const look = b.key === 'woof' && b.r >= TINY_EARTH && o.woofMap !== false ? woofGlobe(b.x, b.y, b.r, view, rot(sub(sun, pos.get('woof')!)), o.streets, o.bottles, o.scaleKm, o.woofYou) : bodySvg(b.key, b.x, b.y, b.r, b.key === 'sun' ? null : sunAt);
     // 點星球飛過去：點擊範圍至少半徑 12
     bodies += `<g class="space-hit" data-body="${b.key}"><circle class="hit" cx="${f1(b.x)}" cy="${f1(b.y)}" r="${f1(Math.max(b.r + 3, 12))}" />${look}</g>`;
     // 中心換到別的星球：雷達中間的圓點不是你，你畫在你在的那一顆（地球；在汪星上是汪星，汪星大到畫成球時不畫）
     const here = b.key === you;
     if (here && b.r < TINY_EARTH) bodies += `<circle class="space-me" cx="${f1(b.x)}" cy="${f1(b.y)}" r="3" />`;
+    // 沒有名字的（汪星的衛星，v1.817 使用者說先不要取名字）不寫
+    if (b.key !== 'earth' && !NAMES[b.key]) continue;
     const name = `${b.key === 'earth' ? '地球' : NAMES[b.key]}${here ? '（你）' : ''}`;
     const r = b.key === 'saturn' ? b.r * 2.2 : b.key === 'sun' ? b.r + 5 : b.r;
     named.push({ x: b.x, y: b.y, r, cls: b.key, name, force: here });

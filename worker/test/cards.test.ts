@@ -67,11 +67,12 @@ describe('選獎勵（肉乾或順幣）', () => {
 });
 
 describe('瞬間移動（花一枚順幣）', () => {
-  it('only goes to 汪星 or back to 地球', () => {
+  it('goes to 汪星, 地球 or Kepler-22b only', () => {
     expect(TELEPORT_COST).toBe(1);
     expect(parseTeleport({ to: 'woof' })).toBe('woof');
     expect(parseTeleport({ to: 'earth' })).toBe('earth');
-    expect(parseTeleport({ to: 'kepler22b' })).toBe('不能瞬間移動到那裡');
+    expect(parseTeleport({ to: 'kepler22b' })).toBe('kepler22b');
+    expect(parseTeleport({ to: 'moon' })).toBe('不能瞬間移動到那裡');
     expect(parseTeleport({ to: 'toString' })).toBe('不能瞬間移動到那裡');
     expect(parseTeleport(null)).toBe('不能瞬間移動到那裡');
   });

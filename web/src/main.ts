@@ -203,9 +203,9 @@ type YouOn = 'earth' | 'woof' | 'kepler22b';
  */
 const LS_YOU = 'dr.you';
 let youOn: YouOn = ((): YouOn => {
-  if (launchNow().where === 'kepler22b') return 'kepler22b';
   const you = lsGet(LS_YOU);
-  if (you === 'woof' || you === 'earth') return you;
+  if (you === 'woof' || you === 'earth' || you === 'kepler22b') return you;
+  if (launchNow().where === 'kepler22b') return 'kepler22b';
   try {
     if ((JSON.parse(lsGet('dr.rocket') ?? 'null') as { world?: string } | null)?.world === 'woof') return 'woof';
   } catch {
@@ -213,11 +213,11 @@ let youOn: YouOn = ((): YouOn => {
   }
   return 'earth';
 })();
-/** 換到另一顆（搭火箭、瞬間移動）：記下來（Kepler-22b 照九棚的火箭，不另外記） */
+/** 換到另一顆（搭火箭、瞬間移動）：記下來（v1.817 瞬間移動也可以去 Kepler-22b，九棚的火箭留在原地，所以 Kepler-22b 也記） */
 function setYouOn(to: YouOn): void {
   youOn = to;
   radar.youOn = to;
-  if (to !== 'kepler22b') lsSet(LS_YOU, to);
+  lsSet(LS_YOU, to);
 }
 /** 你在汪星（Kepler-22b）、上次鏡頭在那一顆：重新整理也回到那裡（null 是在地球、其他星球；你在地球時不記） */
 const savedHome = ((): SpaceView | null => {
@@ -2215,6 +2215,10 @@ async function woofViewAt(at: [number, number]): Promise<void> {
  * （v1.814 使用者說定位照上次離開的位置；沒進過 3D 國館就回發射口）
  */
 const LS_PARK3D = 'dr.park3d';
+/** 你在汪星的位置（v1.817 使用者說跟地球一樣標出位置、跟 3D 同步）：3D 裡走到的地方，沒進過（或剛搭火箭降落）是發射口 */
+function woofYouAt(): [number, number] | null {
+  return youOn === 'woof' ? (lastPark3dSpot() ?? parkMod?.HATCH_CENTER ?? null) : null;
+}
 function lastPark3dSpot(): [number, number] | null {
   try {
     const v = JSON.parse(lsGet(LS_PARK3D) ?? 'null') as { lat?: unknown; lng?: unknown } | null;
@@ -2311,8 +2315,9 @@ async function rocketTrip(m: typeof import('./park'), from: 'earth' | 'woof'): P
     radar.setSpaceView({ ...park, yaw: park.yaw * v, pitch: park.pitch * v }, !turned);
   });
   m.arriveRocket(to);
-  // 你到了那一邊：汪星海上的漂流瓶跟著抓（回地球清掉）
+  // 你到了那一邊：汪星海上的漂流瓶跟著抓（回地球清掉）；搭火箭降落汪星，你在發射口（3D 上次的位置不算了，v1.817）
   setYouOn(to);
+  if (to === 'woof') lsSet(LS_PARK3D, null);
   void loadWoofBottles();
   bottleWorldChanged();
   saveSpaceView();
@@ -2430,7 +2435,7 @@ async function landIn3D(to: 'earth' | 'woof'): Promise<void> {
  * 落點跟「定位」一樣（汪星：上次在 3D 離開的地方，沒進過是發射口；地球：你現在的位置）；國館的火箭留在原地（使用者選的）。
  * 自己按的，減少動態照樣播
  */
-async function teleport(to: 'earth' | 'woof'): Promise<void> {
+async function teleport(to: YouOn): Promise<void> {
   if (tripping || youOn === to) return;
   const fx = document.createElement('div');
   fx.className = 'teleport-fx';
@@ -2443,10 +2448,10 @@ async function teleport(to: 'earth' | 'woof'): Promise<void> {
   setYouOn(to);
   void loadWoofBottles();
   bottleWorldChanged();
-  if (to === 'woof') {
+  if (to !== 'earth') {
     const v = await homeView();
     if (v) radar.setSpaceView(v, true);
-    zoomToKm(locateKm(0));
+    zoomToKm(to === 'kepler22b' ? LAUNCH_LAND_KM : locateKm(0));
   } else {
     radar.resetSpace();
   }
@@ -2457,7 +2462,7 @@ async function teleport(to: 'earth' | 'woof'): Promise<void> {
   updateStreets();
   radar.redrawPark();
   if (to === 'earth') void locateMe();
-  showBanner(bannerEl, to === 'woof' ? '瞬間移動到汪星了' : '瞬間移動回地球了');
+  showBanner(bannerEl, to === 'woof' ? '瞬間移動到汪星了' : to === 'kepler22b' ? '瞬間移動到 Kepler-22b 了' : '瞬間移動回地球了');
   window.setTimeout(() => fx.remove(), 1200);
 }
 setTeleport({ where: () => youOn, go: teleport });
@@ -2504,7 +2509,7 @@ function updateSpace(): void {
     p.onDogMove(() => radar.redrawPark(), () => radar.headingDeg);
     p.loadSniffMarks();
   });
-  radar.setSpace((km, rg, view) => mod.spaceMarkup({ center, land, fill, when, scaleKm: km, rg, view, streets: woofStreets, you, woofMap: map, bottles: map && bottlesOn() ? woofBottleMarks(km) : undefined }), mod.bodyRadiusKm);
+  radar.setSpace((km, rg, view) => mod.spaceMarkup({ center, land, fill, when, scaleKm: km, rg, view, streets: woofStreets, you, woofMap: map, bottles: map && bottlesOn() ? woofBottleMarks(km) : undefined, woofYou: map ? woofYouAt() : null }), mod.bodyRadiusKm);
 }
 
 /** 切在那一塊邊上的陸地 → 海岸線（geo.ts 的 cutAtBox），每份資料算一次記住 */

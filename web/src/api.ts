@@ -428,7 +428,7 @@ export function pickReward(item: string): Promise<Result<{ item: string; items: 
 }
 
 /** 瞬間移動（v1.816）：花一枚順幣，回傳去哪裡、這台現在的道具（換到哪一顆是瀏覽器自己記的） */
-export function spendTeleport(to: 'woof' | 'earth'): Promise<Result<{ to: string; items: ItemCount[] }>> {
+export function spendTeleport(to: 'woof' | 'earth' | 'kepler22b'): Promise<Result<{ to: string; items: ItemCount[] }>> {
   return deviceJson('/api/cards/teleport', 'POST', { to });
 }
 

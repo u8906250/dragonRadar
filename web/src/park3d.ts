@@ -2608,6 +2608,11 @@ export function openPark3D(o: Park3DOptions): () => void {
   let pitch = -0.05;
   const lastSpot = loadSpot();
   if (lastSpot && canStand(en(lastSpot.at))) [pos, yaw, pitch] = [en(lastSpot.at), lastSpot.yaw, lastSpot.pitch];
+  else if (!lastSpot && world === 'woof') {
+    // 汪星上沒有上次的位置（沒進過、剛搭火箭降落）：你在發射口，從碑林石階前面開始（跟在 3D 裡搭火箭到了一樣），面向石階
+    const front: Pt = [stepMid[0] + out[0] * (PLAZA_STEPS * STEP_DEPTH + 4), stepMid[1] + out[1] * (PLAZA_STEPS * STEP_DEPTH + 4)];
+    if (canStand(front)) [pos, yaw, pitch] = [front, Math.atan2(-out[0], -out[1]), 0];
+  }
   /** 一開始站的地方（還沒走過：pos 還是這一個） */
   const startPos = pos;
   /** 指北針的指針（面向東時北在左邊：轉 -面向的角度）；畫過的角度（差不到半度不重設） */

@@ -541,7 +541,7 @@ export function openItems(): void {
 /** 瞬間移動（main.ts 設定）：你現在在哪一顆、移過去（白光一閃，落點跟「定位」一樣） */
 export interface TeleportHook {
   where: () => 'earth' | 'woof' | 'kepler22b';
-  go: (to: 'earth' | 'woof') => Promise<void>;
+  go: (to: 'earth' | 'woof' | 'kepler22b') => Promise<void>;
 }
 let teleportHook: TeleportHook | null = null;
 export function setTeleport(h: TeleportHook): void {
@@ -549,19 +549,21 @@ export function setTeleport(h: TeleportHook): void {
 }
 /** 瞬間移動要幾枚順幣（跟伺服器的 TELEPORT_COST 一樣）、可以去哪裡（之後可以再加；不能去自己在的那一顆） */
 const TELEPORT_COST = 1;
-const TELEPORT_PLACES: Array<{ to: 'woof' | 'earth'; name: string }> = [
+const TELEPORT_PLACES: Array<{ to: 'woof' | 'earth' | 'kepler22b'; name: string }> = [
   { to: 'woof', name: '汪星' },
   { to: 'earth', name: '地球' },
+  // v1.817 使用者說也可以去 Kepler-22b（九棚的火箭一樣留在原地）
+  { to: 'kepler22b', name: 'Kepler-22b' },
 ];
 
 /**
- * 點順幣（v1.816 使用者說點順幣出現兩個選項）：許願（花 WISH_COST 枚，打開許願表單）、瞬間移動（花 TELEPORT_COST 枚，在地球可以去汪星、在汪星可以回地球）
+ * 點順幣（v1.816 使用者說點順幣出現兩個選項）：許願（花 WISH_COST 枚，打開許願表單）、瞬間移動（花 TELEPORT_COST 枚，去你不在的另外幾顆）
  */
 function openCoin(onDone?: () => void): void {
   const html = (msg = ''): string => {
     const n = coinsNow();
     const where = teleportHook?.where() ?? 'earth';
-    const places = where === 'kepler22b' ? [] : TELEPORT_PLACES.filter((p) => p.to !== where);
+    const places = TELEPORT_PLACES.filter((p) => p.to !== where);
     const short = (cost: number): string => (n < cost ? `（還差 ${cost - n} 枚）` : '');
     return `<div class="tc-head"><h2>順幣</h2><button type="button" class="chip" data-close>關閉</button></div>
       <p class="tc-wish-coins">你有 <b>${n}</b> 枚順幣</p>
@@ -570,7 +572,7 @@ function openCoin(onDone?: () => void): void {
         <button type="button" class="chip primary" data-coin-wish ${n < WISH_COST ? 'disabled' : ''}>許願</button>
       </div>
       <div class="tc-coin-opt">
-        <div class="tc-coin-what"><b>瞬間移動</b><small>花 ${TELEPORT_COST} 枚：一閃就到${short(TELEPORT_COST)}${where === 'kepler22b' ? '。在 Kepler-22b 上要先搭火箭回地球' : ''}</small></div>
+        <div class="tc-coin-what"><b>瞬間移動</b><small>花 ${TELEPORT_COST} 枚：一閃就到${short(TELEPORT_COST)}</small></div>
         <div class="tc-coin-places">${places.map((p) => `<button type="button" class="chip primary" data-teleport="${p.to}" ${n < TELEPORT_COST ? 'disabled' : ''}>${esc(p.name)}</button>`).join('')}</div>
       </div>
       <p class="tc-coin-msg" role="status">${esc(msg)}</p>`;
@@ -588,7 +590,7 @@ function openCoin(onDone?: () => void): void {
     }
     const btn = t.closest<HTMLButtonElement>('[data-teleport]');
     if (!btn || busy || !teleportHook) return;
-    const to = btn.dataset.teleport as 'woof' | 'earth';
+    const to = btn.dataset.teleport as 'woof' | 'earth' | 'kepler22b';
     const name = TELEPORT_PLACES.find((p) => p.to === to)?.name ?? '';
     if (!window.confirm(`花 ${TELEPORT_COST} 枚順幣瞬間移動到${name}？`)) return;
     busy = true;
