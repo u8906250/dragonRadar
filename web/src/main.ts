@@ -9433,7 +9433,7 @@ async function submitReport(): Promise<void> {
     return;
   }
   setReportBusy(true);
-  setReportMsg('<p class="msg busy">AI背景判讀中，約需 20 秒</p>');
+  setReportMsg('<p class="msg busy">AI背景判讀中，約需 10 秒</p>');
   const r = await submitResumable(url).finally(() => setReportBusy(false));
   if (!r.ok) {
     setReportMsg(`<p class="msg error">${esc(r.message)}</p>`);
