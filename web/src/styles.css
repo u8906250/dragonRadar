@@ -2738,6 +2738,8 @@ body.letters-open { overflow: hidden; }
 .p3d-gauge { position: absolute; left: 50%; bottom: calc(5vh + env(safe-area-inset-bottom)); transform: translateX(-50%); padding: 6px 16px; border-radius: 8px;
   background: #101317; border: 2px solid #3d434a; color: #7cf2b0; font: 600 15px/1.3 ui-monospace, 'SF Mono', Menlo, monospace; letter-spacing: 0.05em; white-space: nowrap; }
 .p3d-flash { position: absolute; inset: 0; pointer-events: none; opacity: 0; background: #000; }
+/* 畫面暗著的時候（汪星的街道載入中）字還看得到 */
+.p3d-msg { z-index: 2; }
 .p3d.p3d-flying .p3d-top, .p3d.p3d-flying .p3d-panel, .p3d.p3d-flying .p3d-stick, .p3d.p3d-flying .p3d-hint, .p3d.p3d-flying .p3d-cross, .p3d.p3d-flying .p3d-msg { display: none; }
 
 /* ---- 收集卡（尋找小法，cards.ts）：卡片是一張實體卡的樣子，不跟主題換顏色；蓋在 3D 國館上面也看得到 ---- */

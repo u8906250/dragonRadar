@@ -2642,7 +2642,10 @@ export function openPark3D(o: Park3DOptions): () => void {
   // 上次的位置（國館裡站不住的話找旁邊；國館外面等汪星的街道載入了再看）
   const lastAt = lastSpot ? (inside(en(lastSpot.at), outline) ? nearestStand(en(lastSpot.at)) : canStand(en(lastSpot.at)) ? en(lastSpot.at) : null) : null;
   if (lastSpot && lastAt) [pos, yaw, pitch] = [lastAt, lastSpot.yaw, lastSpot.pitch];
-  else if (!lastSpot && world === 'woof') {
+  else if (lastSpot && world === 'woof' && !inside(en(lastSpot.at), outline)) {
+    // 汪星的國館外面（v1.822 使用者說點進去會先看到國館才跳過去）：直接站在那裡，畫面先暗著，街道載入了再確認站不站得住、淡入
+    [pos, yaw, pitch] = [en(lastSpot.at), lastSpot.yaw, lastSpot.pitch];
+  } else if (!lastSpot && world === 'woof') {
     // 汪星上沒有上次的位置（沒進過、剛搭火箭降落）：你在發射口，從碑林石階前面開始（跟在 3D 裡搭火箭到了一樣），面向石階
     const front = stairsFront();
     if (canStand(front)) [pos, yaw, pitch] = [front, Math.atan2(-out[0], -out[1]), 0];
@@ -2915,6 +2918,15 @@ export function openPark3D(o: Park3DOptions): () => void {
   let pendingSpot = lastSpot && !inside(en(lastSpot.at), outline) ? lastSpot : null;
   let pendingFrom = startPos;
   let cityLoading = false;
+  /** 汪星的街道載入中、畫面暗著 */
+  let cityCover = false;
+  const uncoverCity = (): void => {
+    if (!cityCover) return;
+    cityCover = false;
+    msg('');
+    fadeIn = performance.now();
+    dirty = true;
+  };
 
   // ---- 汪星的小地圖（v1.818 使用者說 3D 裡可以打開小地圖；北朝上、箭頭跟著轉，點了放大看整個 2 公里，不標小法，都是使用者選的）
   const LS_MAP = 'dr.p3dMap';
@@ -3028,7 +3040,11 @@ export function openPark3D(o: Park3DOptions): () => void {
       const p = en(sp.at);
       const q = inside(p, outline) || (to === 'woof' && city) ? nearestStand(p) : null;
       if (q) [at, face] = [q, [sp.yaw, sp.pitch]];
-      else if (to === 'woof') pendingSpot = sp;
+      else if (to === 'woof') {
+        // 街道還沒載入：先站在那裡（畫面暗著），載入了再確認
+        [at, face] = [p, [sp.yaw, sp.pitch]];
+        pendingSpot = sp;
+      }
     }
     pos = at;
     pendingFrom = pos;
@@ -3100,6 +3116,10 @@ export function openPark3D(o: Park3DOptions): () => void {
     skyCheckedAt = -Infinity;
     dirty = true;
     if (!woof || city || cityLoading) return;
+    // 汪星的街道載入、身邊的房子蓋好之前畫面先暗著（不會先看到國館、空地再跳過去）
+    cityCover = true;
+    cover('black', 1);
+    msg('汪星的街道載入中…', 0);
     cityLoading = true;
     void import('./woof-city3d')
       .then((m) => {
@@ -3120,8 +3140,14 @@ export function openPark3D(o: Park3DOptions): () => void {
         const out0 = pendingSpot && pos === pendingFrom && world === 'woof' ? nearestStand(en(pendingSpot.at)) : null;
         if (pendingSpot && out0) [pos, yaw, pitch] = [out0, pendingSpot.yaw, pendingSpot.pitch];
         pendingSpot = null;
+        // 身邊的先蓋好（最多 150 毫秒），再淡入
+        city.prebuild(pos, 350, 150);
+        uncoverCity();
       })
-      .catch(() => msg('汪星的街道載入失敗，重新進來再試一次', 5000))
+      .catch(() => {
+        uncoverCity();
+        msg('汪星的街道載入失敗，重新進來再試一次', 5000);
+      })
       .finally(() => (cityLoading = false));
   }
   const cockpit = $<HTMLElement>('.p3d-cockpit');

@@ -193,6 +193,8 @@ export interface WoofCity {
   tooFar(p: Pt): boolean;
   /** 每一格：照鏡頭蓋附近的格子、顯示看得到的，蝴蝶、螢火蟲飛；回傳要不要重畫 */
   update(cam: THREE.Vector3, you: Pt, now: number, night: number): boolean;
+  /** 一進來先把 p 附近 radiusM 公尺內的格子蓋好（最多花 budgetMs 毫秒，近的先蓋），淡入時不會看到房子一棟棟冒出來 */
+  prebuild(p: Pt, radiusM: number, budgetMs: number): void;
   /**
    * 畫地圖（v1.818 使用者說 3D 裡可以打開小地圖）：北朝上，中間是 c（公尺），每像素 mpp 公尺，畫滿 w×h 的 g
    * （草地底、公園綠地、水、馬路、房子、國館、走得到的邊界）；你的箭頭 park3d.ts 畫
@@ -1365,6 +1367,17 @@ export function buildWoofCity(o: WoofCityOptions): WoofCity {
   return {
     group,
     walkM: CITY_WALK_M,
+    prebuild(p, radiusM, budgetMs) {
+      const t0 = performance.now();
+      const todo = list
+        .map((ch) => [Math.hypot(ch.c[0] - p[0], ch.c[1] - p[1]), ch] as const)
+        .filter(([d, ch]) => !ch.root && d < radiusM + CHUNK * 0.71)
+        .sort((a, b) => a[0] - b[0]);
+      for (const [, ch] of todo) {
+        build(ch);
+        if (performance.now() - t0 > budgetMs) break;
+      }
+    },
     tooFar,
     drawMap,
     canStand: (p) => !tooFar(p) && !inWater(p) && !inBuilding(p, BODY) && !hitTrunk(p),
