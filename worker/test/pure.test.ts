@@ -93,7 +93,7 @@ describe('buildMessages', () => {
   });
 });
 
-import { adminArea, citiesOfDistrict, citiesOfRoad, cityLevel, isRoadHit, cityMatches, sharesName, pickHit, placeCandidates, placeCity, streetFallbacks, worldCandidates, cleanWorldAddress, countryOfPlace, regionOfPlace, splitHouse } from '../src/geocode';
+import { adminArea, citiesOfDistrict, citiesOfRoad, cityLevel, isRoadHit, cityMatches, sharesName, pickHit, pickPhoton, placeCandidates, placeCity, streetFallbacks, worldCandidates, cleanWorldAddress, countryOfPlace, regionOfPlace, splitHouse } from '../src/geocode';
 import { normalizeKeyword, parseKeywordList } from '../src/keywords';
 
 describe('normalizeKeyword', () => {
@@ -953,6 +953,40 @@ describe('sharesName', () => {
   it('does not check queries that are only a city or district', () => {
     expect(sharesName('臺中市', '臺中市, 臺灣')).toBe(true);
     expect(sharesName('新北市 淡水區', '淡水區, 新北市')).toBe(true);
+  });
+  it('needs the venue\'s own name, not just words every venue has', () => {
+    expect(sharesName('鳳西羽球館', '鶯歌區休閒活動中心(羽球館), 中山路138巷, 西鶯里, 鶯歌區, 中湖, 新北市, 239, 臺灣')).toBe(false);
+    expect(sharesName('鳳西羽球館', '鳳西羽球館西北側, 鳳山區, 高雄市, 臺灣')).toBe(true);
+    expect(sharesName('鳳西羽球館', '鳳山羽球館, 鳳山區, 高雄市, 臺灣')).toBe(false);
+    expect(sharesName('台北市 大安運動中心', '臺北市信義運動中心, 松勤街, 信義區')).toBe(false);
+    expect(sharesName('台北市 大安運動中心', '臺北市大安運動中心, 辛亥路三段, 大安區')).toBe(true);
+    expect(sharesName('大安森林公園', '大安森林公園, 新生南路二段, 大安區, 臺北市')).toBe(true);
+    // 整個都是通用的字：照整串看
+    expect(sharesName('羽球館', '鶯歌區休閒活動中心(羽球館), 鶯歌區, 新北市')).toBe(true);
+  });
+});
+
+describe('pickPhoton', () => {
+  const f = (name: string, key: string, value: string, lng: number, lat: number, extra: Record<string, string> = {}) => ({ geometry: { coordinates: [lng, lat] as [number, number] }, properties: { name, osm_key: key, osm_value: value, type: 'house', ...extra } });
+  it('finds 鳳西羽球館 in Fengshan (Nominatim only had the one in Yingge)', () => {
+    const hit = pickPhoton('鳳西羽球館', [
+      f('鳳西羽球館西北側', 'amenity', 'bicycle_rental', 120.3522822, 22.623801, { district: '鳳山區', city: '高雄市' }),
+      f('鳳山羽球館', 'leisure', 'stadium', 120.3525126, 22.6233906, { district: '鳳山區', city: '高雄市' }),
+    ]);
+    expect(hit).toEqual({ lat: 22.623801, lng: 120.3522822, displayName: '鳳西羽球館西北側, 鳳山區, 高雄市, 臺灣' });
+  });
+  it('skips bus stops, admin areas, other cities and names that do not match', () => {
+    expect(pickPhoton('鳳西羽球館', [f('鳳西羽球館', 'highway', 'bus_stop', 120.35, 22.62, { city: '高雄市' })])).toBeNull();
+    expect(pickPhoton('鳳山區', [{ geometry: { coordinates: [120.35, 22.62] }, properties: { name: '鳳山區', osm_key: 'place', osm_value: 'city', type: 'district', city: '高雄市' } }])).toBeNull();
+    expect(pickPhoton('台中市 鳳西羽球館', [f('鳳西羽球館西北側', 'amenity', 'bicycle_rental', 120.35, 22.62, { district: '鳳山區', city: '高雄市' })])).toBeNull();
+    expect(pickPhoton('丞風羽球館', [f('鳳山羽球館', 'leisure', 'stadium', 120.35, 22.62, { city: '高雄市' })])).toBeNull();
+  });
+  it('prefers Taipei and New Taipei when no city is written, writing 臺 the same way', () => {
+    const hit = pickPhoton('信義國小', [
+      f('信義國小', 'amenity', 'school', 120.6, 24.1, { city: '台中市' }),
+      f('信義國小', 'amenity', 'school', 121.56, 25.03, { district: '信義區', city: '台北市' }),
+    ]);
+    expect(hit?.displayName).toBe('信義國小, 信義區, 臺北市, 臺灣');
   });
 });
 

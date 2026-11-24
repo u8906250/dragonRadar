@@ -180,7 +180,14 @@ interface CacheRow {
 }
 
 /**
- * 用地名查到的結果，名字要跟查的地名有兩個以上連續的字一樣（「丞風羽球館」不能對到「玉勅鳳邑琉球城隍廟」）。
+ * 每個場地都有的字：只有這些對上不算名字對得上，要專有的那幾個字對上
+ * （v1.829「鳳西羽球館」只靠「羽球」對到鶯歌的「鶯歌區休閒活動中心(羽球館)」，其實在高雄鳳山）
+ */
+const GENERIC_PLACE_RE = /羽毛球館|羽毛球場|羽毛球|羽球館|羽球場|羽球|球館|球場|體育館|體育場|運動中心|運動公園|運動園區|運動場|活動中心|休閒|中心|公園/g;
+
+/**
+ * 用地名查到的結果，名字要跟查的地名有兩個以上連續的字一樣（「丞風羽球館」不能對到「玉勅鳳邑琉球城隍廟」）；
+ * 地名有專有的字（「鳳西羽球館」的「鳳西」）就要那幾個字對上，只有「羽球館」「運動中心」這種通用的字一樣不算。
  * 查的只有縣市、行政區（拿掉後不到兩個字）就不檢查
  */
 export function sharesName(query: string, displayName: string | null | undefined): boolean {
@@ -192,7 +199,9 @@ export function sharesName(query: string, displayName: string | null | undefined
     .replace(/站$/, '');
   if (core.length < 2) return true;
   const name = fold((displayName ?? '').split(',')[0] ?? '');
-  for (let i = 0; i + 2 <= core.length; i++) if (name.includes(core.slice(i, i + 2))) return true;
+  // 拿掉通用的字切成幾段，每段各自看（不跨段湊字）；整個都是通用的字（「羽球館」）就照整串看
+  const own = core.split(GENERIC_PLACE_RE).filter((p) => p.length >= 2);
+  for (const k of own.length ? own : [core]) for (let i = 0; i + 2 <= k.length; i++) if (name.includes(k.slice(i, i + 2))) return true;
   return false;
 }
 
@@ -243,7 +252,53 @@ async function nominatim(env: Env, q: string, kind: GeoKind = 'any'): Promise<Ge
   return { lat, lng, displayName: hit.display_name ?? q };
 }
 
-/** 地點文字轉座標，結果（含查不到）都快取在 D1；只要道路的快取另外存（前面加「road:」） */
+const PHOTON_URL = 'https://photon.komoot.io/api/';
+/** 台灣（含金門、馬祖、澎湖、蘭嶼）：minLon,minLat,maxLon,maxLat */
+const TW_BBOX = '118.1,21.8,122.1,26.4';
+/** Photon 的結果不用：公車站、月台、出口、停車場這種同名很多、不是要找的（全螢幕搜尋地址 geo-search.ts 也用） */
+export const PHOTON_SKIP = /^(highway:bus_stop|railway:(stop|platform|subway_entrance|tram_stop)|public_transport:(platform|stop_position|stop_area)|emergency:|entrance:|amenity:(parking|parking_entrance|bicycle_parking|motorcycle_parking|parking_space)|highway:(traffic_signals|crossing|street_lamp))/;
+
+interface PhotonPlace {
+  geometry?: { coordinates?: [number, number] };
+  properties?: { type?: string; osm_key?: string; osm_value?: string; name?: string; district?: string; city?: string; county?: string };
+}
+
+/**
+ * Photon 的結果挑一個：名字要對得上（sharesName）、縣市照 pickHit；行政區（城市、區）不算，
+ * display_name 寫成「名字, 區, 縣市, 臺灣」，快取和縣市檢查跟 Nominatim 的一樣用
+ */
+export function pickPhoton(q: string, features: PhotonPlace[]): GeoPoint | null {
+  const hits: Array<GeoPoint & { display_name: string }> = [];
+  for (const f of features) {
+    const p = f.properties ?? {};
+    const c = f.geometry?.coordinates;
+    if (!p.name || !c || !Number.isFinite(c[0]) || !Number.isFinite(c[1])) continue;
+    if (PHOTON_SKIP.test(`${p.osm_key ?? ''}:${p.osm_value ?? ''}`) || /^(city|district|county|state|country|locality)$/.test(p.type ?? '')) continue;
+    const display = [p.name, p.district, p.county, p.city, '臺灣'].filter((s): s is string => !!s).map((s) => s.replace(/^台(北|中|南|東)/, '臺$1')).join(', ');
+    if (sharesName(q, display)) hits.push({ lat: c[1], lng: c[0], displayName: display, display_name: display });
+  }
+  const hit = pickHit(q, hits);
+  return hit ? { lat: hit.lat, lng: hit.lng, displayName: hit.displayName } : null;
+}
+
+/**
+ * Nominatim 沒有名字對得上的，再問 Photon（komoot 架的 OpenStreetMap 搜尋，中文地名常常找得到 Nominatim 找不到的；
+ * v1.829「鳳西羽球館」Nominatim 只回鶯歌的羽球館，Photon 有鳳山的）
+ */
+async function photonPlace(env: Env, q: string): Promise<GeoPoint | null> {
+  const u = new URL(PHOTON_URL);
+  u.searchParams.set('q', q);
+  u.searchParams.set('bbox', TW_BBOX);
+  u.searchParams.set('limit', '8');
+  const res = await fetch(u.toString(), { signal: AbortSignal.timeout(4000), headers: { 'user-agent': env.NOMINATIM_USER_AGENT, accept: 'application/json' } });
+  if (!res.ok) {
+    console.warn(`photon ${res.status} for ${q}`);
+    return null;
+  }
+  return pickPhoton(q, ((await res.json()) as { features?: PhotonPlace[] }).features ?? []);
+}
+
+/** 地點文字轉座標，結果（含查不到）都快取在 D1；只要道路的快取另外存（前面加「road:」）；地名 Nominatim 查不到再問 Photon */
 export async function geocode(env: Env, query: string, kind: GeoKind = 'any'): Promise<GeoPoint | null> {
   const q = query.trim().replace(/\s+/g, ' ');
   if (!q) return null;
@@ -259,7 +314,7 @@ export async function geocode(env: Env, query: string, kind: GeoKind = 'any'): P
     }
     if (cached.resolved_at > now - NEGATIVE_TTL_SEC) return null;
   }
-  const point = await nominatim(env, q, kind);
+  const point = (await nominatim(env, q, kind)) ?? (kind === 'any' ? await photonPlace(env, q).catch((e) => (console.warn('photon failed', e), null)) : null);
   await env.DB.prepare(
     'INSERT INTO geocode_cache (query, lat, lng, display_name, resolved_at) VALUES (?, ?, ?, ?, ?) ON CONFLICT(query) DO UPDATE SET lat = excluded.lat, lng = excluded.lng, display_name = excluded.display_name, resolved_at = excluded.resolved_at',
   )

@@ -7,7 +7,7 @@
  */
 import { geocodeAddress, parseTwAddress } from './address';
 import type { Env } from './env';
-import { politeDelay } from './geocode';
+import { PHOTON_SKIP, politeDelay } from './geocode';
 import { ReportError } from './reports';
 
 export interface PlaceHit {
@@ -89,8 +89,8 @@ const KIND_ZH: Record<string, string> = {
   boundary: '行政區',
 };
 
-/** 不列：公車站、月台、出口、停車場這種同名很多、不是要找的 */
-const SKIP = /^(highway:bus_stop|railway:(stop|platform|subway_entrance|tram_stop)|public_transport:(platform|stop_position|stop_area)|emergency:|entrance:|amenity:(parking|parking_entrance|bicycle_parking|motorcycle_parking|parking_space)|highway:(traffic_signals|crossing|street_lamp))/;
+/** 不列：公車站、月台、出口、停車場這種同名很多、不是要找的（跟回報定位的 Photon 備援一樣） */
+const SKIP = PHOTON_SKIP;
 
 const kindOf = (key: string, value: string): string => KIND_ZH[`${key}:${value}`] ?? KIND_ZH[key] ?? '';
 
