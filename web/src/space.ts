@@ -47,7 +47,7 @@ export function moonPosition(at: Date): { lon: number; lat: number; dist: number
   return { lon: norm360(L + 6.289 * Math.sin(M)), lat: 5.128 * Math.sin(F), dist: 385_001 - 20_905 * Math.cos(M) };
 }
 
-type Vec3 = [number, number, number];
+export type Vec3 = [number, number, number];
 
 /** 月球的軌道：繞地球一圈（平均距離），跟黃道面斜 5.1 度，升交點每天往回移一點 */
 function moonOrbit(at: Date): Vec3[] {
@@ -469,6 +469,26 @@ export const WOOF_KM = (() => {
   }
   return Math.sqrt(TAIPEI_KM2 / Math.abs(unit));
 })();
+/**
+ * 骨頭月（v1.815 使用者說在汪星外面畫一顆類似月球的衛星；名字、大小、一天一圈、3D 看得到都是使用者選的）：汪星的衛星，
+ * 半徑、離汪星多遠照月球對地球的比例（半徑 27%、約 60 個汪星半徑），一天繞一圈，軌道跟黃道斜 5 度（照月球）。
+ * 逆行（從黃道北邊看順時針）：汪星 3D 的天空照台北的時間轉一天一圈，順行一天一圈會一直停在天上同一個地方，逆行一天升落兩次。
+ * 表面照月球畫，多一個骨頭形狀的坑（名字是想像的）
+ */
+const BONE_R = 1_737 / 6_371;
+const BONE_D = 384_400 / 6_371;
+const BONE_DAY_MS = 86_400_000;
+const BONE_INC = 5 * RAD;
+const BONE_NODE = 40 * RAD;
+/** 骨頭月在軌道上轉到 u（弧度）的位置：離汪星的黃道座標（公里） */
+function boneAt(u: number): Vec3 {
+  const d = WOOF_KM * BONE_D;
+  const [x1, y1] = [d * Math.cos(u), d * Math.sin(u) * Math.cos(BONE_INC)];
+  return [x1 * Math.cos(BONE_NODE) - y1 * Math.sin(BONE_NODE), x1 * Math.sin(BONE_NODE) + y1 * Math.cos(BONE_NODE), d * Math.sin(u) * Math.sin(BONE_INC)];
+}
+/** 骨頭月這一刻離汪星的位置（黃道座標，公里；3D 的天空也照這個算方向） */
+export const boneMoonOffset = (at: Date): Vec3 => boneAt(-2 * Math.PI * ((at.getTime() / BONE_DAY_MS) % 1));
+
 const woofLines = (lines: Array<Array<[number, number]>>): Array<Array<[number, number]>> => lines.map((l) => densify(warpDense(l).map(toWoof)));
 
 const WOOF_MAJOR_ROADS = woofLines(TAIPEI_MAJOR_ROADS);
@@ -710,6 +730,7 @@ const LOOKS: Record<string, { km: number; min: number; tint: string }> = {
   earth: { km: 6_371, min: 3.6, tint: '#5b95d6' },
   moon: { km: 1_737, min: 2.2, tint: '#b3afa7' },
   woof: { km: WOOF_KM, min: 3.2, tint: '#6fa34f' },
+  bonemoon: { km: WOOF_KM * BONE_R, min: 2, tint: '#c4beb2' },
   mars: { km: 3_390, min: 3, tint: '#cf6c40' },
   jupiter: { km: 69_911, min: 6, tint: '#cfa77d' },
   saturn: { km: 58_232, min: 5, tint: '#ddc88e' },
@@ -774,15 +795,28 @@ function bodySvg(key: string, x: number, y: number, r: number, sun: { x: number;
   }
   if (key === 'neptune' && r >= 6) out += `<path class="space-detail" d="${chord(x, y, r, r * 0.2)}" /><ellipse class="space-spot" cx="${f1(x - r * 0.3)}" cy="${f1(y - r * 0.2)}" rx="${f1(r * 0.2)}" ry="${f1(r * 0.12)}" />`;
   if (key === 'mars' && r >= 5) out += `<ellipse class="space-cap" cx="${f1(x)}" cy="${f1(y - r * 0.82)}" rx="${f1(r * 0.4)}" ry="${f1(r * 0.16)}" />`;
-  if (key === 'moon' && r >= 4) {
-    // 放大看得清楚：暗暗的月海、更多坑
-    if (r >= 20) {
+  if ((key === 'moon' || key === 'bonemoon') && r >= 4) {
+    // 放大看得清楚：暗暗的月海、更多坑（骨頭月不畫月海、坑避開中間的骨頭，骨頭才看得清楚）
+    if (r >= 20 && key === 'moon') {
       for (const [mx, my, mrx, mry] of [[-0.25, -0.3, 0.32, 0.22], [0.2, -0.1, 0.22, 0.18], [-0.05, 0.25, 0.26, 0.14]]) {
         out += `<ellipse class="space-mare" cx="${f1(x + r * mx)}" cy="${f1(y + r * my)}" rx="${f1(r * mrx)}" ry="${f1(r * mry)}" />`;
       }
     }
-    const craters = r >= 20 ? [[-0.3, -0.2, 0.22], [0.35, 0.3, 0.15], [0.1, 0.6, 0.1], [0.55, -0.35, 0.09], [-0.6, 0.25, 0.12], [-0.1, -0.65, 0.07], [0.3, 0.05, 0.06]] : [[-0.3, -0.2, 0.22], [0.35, 0.3, 0.15]];
+    const craters =
+      key === 'bonemoon'
+        ? r >= 20
+          ? [[-0.38, -0.38, 0.18], [0.45, 0.5, 0.12], [-0.55, 0.42, 0.1], [0.5, -0.45, 0.1], [-0.02, -0.7, 0.07], [0.02, 0.68, 0.08]]
+          : [[-0.38, -0.38, 0.18], [0.45, 0.5, 0.12]]
+        : r >= 20
+          ? [[-0.3, -0.2, 0.22], [0.35, 0.3, 0.15], [0.1, 0.6, 0.1], [0.55, -0.35, 0.09], [-0.6, 0.25, 0.12], [-0.1, -0.65, 0.07], [0.3, 0.05, 0.06]]
+          : [[-0.3, -0.2, 0.22], [0.35, 0.3, 0.15]];
     for (const [cx, cy, cr] of craters) out += `<circle class="space-detail" cx="${f1(x + r * cx)}" cy="${f1(y + r * cy)}" r="${f1(r * cr)}" />`;
+  }
+  // 骨頭月：中間一個骨頭形狀的坑（一條、兩頭各兩顆圓），斜斜的
+  if (key === 'bonemoon' && r >= 6) {
+    const [bx, by, L, w] = [x + r * 0.08, y + r * 0.12, r * 0.36, r * 0.11];
+    const knobs = [-1, 1].flatMap((e) => [-1, 1].map((sd) => `<circle cx="${f1(e * L)}" cy="${f1(sd * w * 0.75)}" r="${f1(w * 0.95)}" />`)).join('');
+    out += `<g class="space-bone" transform="translate(${f1(bx)} ${f1(by)}) rotate(-28)"><rect x="${f1(-L)}" y="${f1(-w / 2)}" width="${f1(2 * L)}" height="${f1(w)}" />${knobs}</g>`;
   }
   // 背對太陽的那一半：從朝太陽的方向轉 90 度到 -90 度，經過背面那一邊
   if (sun && r >= 3) {
@@ -948,10 +982,13 @@ function bodyPositions(when: Date): Map<string, Vec3> {
   const m = moonPosition(when);
   const cl = Math.cos(m.lat * RAD);
   out.set('moon', [m.dist * cl * Math.cos(m.lon * RAD), m.dist * cl * Math.sin(m.lon * RAD), m.dist * Math.sin(m.lat * RAD)]);
+  const w = out.get('woof')!;
+  const b = boneMoonOffset(when);
+  out.set('bonemoon', [w[0] + b[0], w[1] + b[1], w[2] + b[2]]);
   return out;
 }
 
-const NAMES: Record<string, string> = { sun: '太陽', moon: '月球', ...Object.fromEntries(PLANETS.map((p) => [p.key, p.name])) };
+const NAMES: Record<string, string> = { sun: '太陽', moon: '月球', bonemoon: '骨頭月', ...Object.fromEntries(PLANETS.map((p) => [p.key, p.name])) };
 
 /*
  * 太陽系外面（第 1 號願望，點子來自 jy：「能否產生 Kepler 22-b 這個星球；如果在其他星系，就讓雷達可以繼續縮小到可以看到其他星系」，v1.582）：
@@ -1559,6 +1596,12 @@ export function spaceMarkup(o: SpaceOpts): string {
   if (MOON_KM * k >= 12 && MOON_KM * k <= INNER * 3) {
     const earth = pos.get('earth')!;
     lines += `<path class="region-outline open space-orbit" d="${pathOf(moonOrbit(o.when).map((p) => [p[0] + earth[0], p[1] + earth[1], p[2] + earth[2]] as Vec3))}" />`;
+  }
+  // 骨頭月繞汪星
+  if (WOOF_KM * BONE_D * k >= 12 && WOOF_KM * BONE_D * k <= INNER * 3) {
+    const woof = pos.get('woof')!;
+    const ring = Array.from({ length: 96 }, (_, i) => boneAt((i / 96) * 2 * Math.PI));
+    lines += `<path class="region-outline open space-orbit" d="${pathOf(ring.map((p) => [p[0] + woof[0], p[1] + woof[1], p[2] + woof[2]] as Vec3))}" />`;
   }
   const sun = pos.get('sun')!;
   for (const p of PLANETS) {

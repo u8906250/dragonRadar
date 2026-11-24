@@ -20,7 +20,7 @@ import { dogPose, dogTurned, happyWag } from './dogs';
 import { arriveRocket, ARRIVE_MS, DEPART_MS, departRocket, HATCH_CENTER, moveDogs, PARK_DOGS, personOk, petDog, rocketNow, setSniffMarks, stowRocket, STOW_MS, summonRocket, SUMMON_MS } from './park';
 import { cloudLayer, puffTexture, rocketModel, ROCKET_H, ROCKET_WINDOW_Y, spaceScene, type SpaceTrip } from './rocket3d';
 import { compassSupported, startOrientation } from './compass';
-import { altOf, azOf, type Enu, moonEnu, moonLit, ORION_LABEL, ORION_LINES, ORION_NEBULA, ORION_STARS, skyLook, type SkyStar, starEnu, sunEnu } from './sky';
+import { altOf, azOf, boneMoonEnu, type Enu, moonEnu, moonLit, ORION_LABEL, ORION_LINES, ORION_NEBULA, ORION_STARS, skyLook, type SkyStar, starEnu, sunEnu } from './sky';
 import { toWoof, WOOF_KM } from './space';
 import type { WoofCity } from './woof-city3d';
 import { ZHONGSHAN_PARK as Z } from './zhongshan';
@@ -683,6 +683,33 @@ export function openPark3D(o: Park3DOptions): () => void {
   // （public/moon.jpg）；球的 +z 朝著你、北邊轉向天球的北極（晚上月亮會慢慢斜過去）
   const moonMap = new THREE.TextureLoader().load(`${import.meta.env.BASE_URL}moon.jpg`, () => (dirty = true));
   moonMap.colorSpace = THREE.SRGBColorSpace;
+  // 汪星的天上是骨頭月（v1.815，space.ts）：同一張月面圖，中間加一個骨頭形狀的坑（一條、兩頭各兩顆圓，合成一個形狀塗一次）；圖畫好之前先用月面圖
+  const boneMap = new THREE.CanvasTexture(document.createElement('canvas'));
+  boneMap.colorSpace = THREE.SRGBColorSpace;
+  let boneReady = false;
+  const boneImg = new Image();
+  boneImg.onload = () => {
+    const cv = boneMap.image as HTMLCanvasElement;
+    [cv.width, cv.height] = [boneImg.width, boneImg.height];
+    const g = cv.getContext('2d')!;
+    g.drawImage(boneImg, 0, 0);
+    const [L, t] = [cv.width * 0.15, cv.height * 0.06];
+    g.translate(cv.width * 0.53, cv.height * 0.46);
+    g.rotate(-0.5);
+    g.beginPath();
+    g.rect(-L, -t / 2, 2 * L, t);
+    for (const e of [-1, 1])
+      for (const sd of [-1, 1]) {
+        g.moveTo(e * L + t * 0.95, sd * t * 0.75);
+        g.arc(e * L, sd * t * 0.75, t * 0.95, 0, Math.PI * 2);
+      }
+    g.fillStyle = 'rgba(62, 58, 52, 0.55)';
+    g.fill('nonzero');
+    boneMap.needsUpdate = true;
+    boneReady = true;
+    skyCheckedAt = -Infinity;
+  };
+  boneImg.src = `${import.meta.env.BASE_URL}moon.jpg`;
   const moonBall = new THREE.Mesh(
     new THREE.SphereGeometry(SKY_D * Math.tan((DISC_DEG / 2) * (Math.PI / 180)), 48, 32),
     new THREE.ShaderMaterial({
@@ -2659,7 +2686,8 @@ export function openPark3D(o: Park3DOptions): () => void {
   };
   function updateSky(): void {
     const at = new Date();
-    const [sd, md] = [sunEnu(at, O[0], O[1]), moonEnu(at, O[0], O[1])];
+    // 汪星的天上是骨頭月（台北的月亮只在地球）
+    const [sd, md] = [sunEnu(at, O[0], O[1]), world === 'woof' ? boneMoonEnu(at, O[0], O[1]) : moonEnu(at, O[0], O[1])];
     const [sAlt, mAlt, lit] = [altOf(sd), altOf(md), moonLit(sd, md)];
     const look = skyLook(sAlt);
     nightNow = look.night;
@@ -2682,6 +2710,7 @@ export function openPark3D(o: Park3DOptions): () => void {
     moonBall.position.copy(mw).multiplyScalar(SKY_D);
     moonBall.quaternion.setFromRotationMatrix(new THREE.Matrix4().lookAt(new THREE.Vector3(), moonBall.position, POLE));
     const moonU = (moonBall.material as THREE.ShaderMaterial).uniforms;
+    moonU.map.value = world === 'woof' && boneReady ? boneMap : moonMap;
     moonU.sunDir.value.copy(sw);
     moonU.day.value = 1 - look.night;
     moonU.ashen.value = 0.12 * (1 - lit) ** 3 * look.night;
@@ -2859,6 +2888,10 @@ export function openPark3D(o: Park3DOptions): () => void {
     // 汪星的街道載入了：地面換成街道那邊跟著你的草地（這一大片太大，彎了會整片斜下去）
     outsideMesh.visible = !(woof && city);
     attrib.hidden = !woof;
+    // 汪星的叫「3D」（v1.815 使用者說的），地球的照舊叫「3D 國館」
+    $<HTMLElement>('.p3d-title').textContent = woof ? '3D' : '3D 國館';
+    // 天上換成這一邊的月亮（汪星是骨頭月）
+    skyCheckedAt = -Infinity;
     dirty = true;
     if (!woof || city || cityLoading) return;
     cityLoading = true;

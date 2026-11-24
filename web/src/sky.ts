@@ -3,7 +3,7 @@
  * （高度、方位；space.ts 同一套簡化公式，誤差 1、2 度；月亮扣掉人站在地表的視差），月相是真的（照太陽的方向亮一邊）。
  * 天色、光線照太陽的高度慢慢變：白天、日出日落（地平線橘色）、天剛黑（藍紫）、晚上（深藍，城市的天空不會全黑）。
  */
-import { moonPosition, subsolar } from './space';
+import { boneMoonOffset, moonPosition, subsolar } from './space';
 
 const RAD = Math.PI / 180;
 const EARTH_KM = 6371;
@@ -46,6 +46,21 @@ export function moonEnu(at: Date, lat: number, lng: number): Enu {
   const ra = Math.atan2(yq, x) / RAD;
   const gmst = 280.46061837 + 360.98564736629 * n;
   return enuOf(Math.asin(zq) / RAD, norm180(ra - gmst), lat, lng, m.dist);
+}
+
+/**
+ * 從汪星看骨頭月的方向（v1.815 使用者說汪星 3D 也看得到骨頭月）：汪星的天空照台北的時間轉（跟太陽一樣），
+ * 骨頭月離汪星的位置（space.ts，黃道座標）換成赤道座標，再看現在轉到哪；離得近，人站在地表的視差不算
+ */
+export function boneMoonEnu(at: Date, lat: number, lng: number): Enu {
+  const [x, y, z] = boneMoonOffset(at);
+  const len = Math.hypot(x, y, z) || 1;
+  const n = daysJ2000(at);
+  const eps = (23.439 - 0.0000004 * n) * RAD;
+  const [yq, zq] = [(y * Math.cos(eps) - z * Math.sin(eps)) / len, (y * Math.sin(eps) + z * Math.cos(eps)) / len];
+  const ra = Math.atan2(yq, x / len) / RAD;
+  const gmst = 280.46061837 + 360.98564736629 * n;
+  return enuOf(Math.asin(Math.max(-1, Math.min(1, zq))) / RAD, norm180(ra - gmst), lat, lng);
 }
 
 /** 恆星（赤經 ra 小時、赤緯 dec 度，J2000；到現在的歲差約 0.4 度，不算）從 lat、lng 看過去的方向 */

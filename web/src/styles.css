@@ -1808,6 +1808,8 @@ path.map-seam-walkers { --p: 15px; }
 .radar .space-cap { fill: #ffffff; fill-opacity: 0.85; stroke: none; }
 .radar .space-shade { fill: #000000; fill-opacity: 0.32; stroke: none; }
 .radar .space-mare { fill: #6f6b64; fill-opacity: 0.35; stroke: none; }
+/* 骨頭月中間的骨頭形狀的坑（整個一起半透明，重疊的地方不會比較深） */
+.radar .space-bone { fill: #6f6b64; stroke: none; opacity: 0.45; }
 /* 汪星的地表（台北市）：大多鋪滿草地（主題的草綠色），道路跟雷達的街道一樣（粗細、深淺照 street-major、street-minor） */
 .radar .region-outline.woof-land { fill: var(--grass); fill-opacity: 0.42; stroke: none; }
 /* 汪星的山（space.ts 的 WOOF_HILLS）：一層一層疊上去，越高越深，最高的兩層偏土黃（山頂草少、露出土）；線條畫的，放大縮小都清楚 */

@@ -1299,8 +1299,13 @@ function updateStreets(): void {
   $('#radar-attrib').hidden = !show && !trees;
   $('#street-attrib').hidden = !show;
   $('#tree-attrib').hidden = !trees;
-  // 3D 國館：公園拉近時（地球、汪星），你在汪星就一直有（v1.814 使用者說一到汪星就顯示、隨時可以進去）
-  $('#park3d-btn').hidden = !trees && youOn !== 'woof';
+  // 3D 國館：公園拉近時（地球、汪星），你在汪星就一直有（v1.814 使用者說一到汪星就顯示、隨時可以進去）；
+  // 汪星的叫「3D」（v1.815 使用者說的：走得出國館了），地球的照舊叫「3D 國館」
+  const p3d = $<HTMLButtonElement>('#park3d-btn');
+  const woof3d = youOn === 'woof' || (radar.spaceFocused && radar.spaceFocusKey === 'woof');
+  p3d.hidden = !trees && youOn !== 'woof';
+  p3d.textContent = woof3d ? '3D' : '3D 國館';
+  p3d.title = woof3d ? '走進 3D 的汪星（國館和附近的街道）走走看' : '走進 3D 的國父紀念館（中山公園）走走看';
   if (!show) {
     if (streetsFor) radar.setStreets(null);
     streetsFor = '';
