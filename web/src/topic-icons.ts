@@ -111,9 +111,12 @@ const STORE_MIN_SCALE = 0.5;
 /** 縮到這個倍數以下圖示太小看不清楚：只畫有顏色的圓點（雷達大約 25 km 以上） */
 export const STORE_GLYPH_MIN_SCALE = 0.65;
 
+/** 直接用代碼的小圖示（不照字分）：羽球臨打的羽球、場地出讓的球場（v1.848） */
+const DIRECT_GLYPHS = new Set(['shuttle', 'court']);
+
 export function topicGlyph(topic: string | null | undefined): string | null {
   if (!topic) return null;
-  if (STORE_KEYS.has(topic)) return topic;
+  if (STORE_KEYS.has(topic) || DIRECT_GLYPHS.has(topic)) return topic;
   return TOPIC_GROUPS.find((g) => g.words.test(topic))?.key ?? null;
 }
 /** 小圖示（viewBox -12 -12 24 24，圓點半徑約 10；c 是圖示的顏色，可以是 currentColor） */
@@ -177,6 +180,10 @@ export function glyphSvg(key: string, c: string): string {
       return `<rect x="-4.2" y="-1.1" width="8.4" height="2.2" rx="0.8" fill="${c}"/><rect x="-6.6" y="-4.8" width="2.8" height="9.6" rx="1" fill="${c}"/><rect x="3.8" y="-4.8" width="2.8" height="9.6" rx="1" fill="${c}"/><rect x="-8.4" y="-2.9" width="1.9" height="5.8" rx="0.7" fill="${c}"/><rect x="6.5" y="-2.9" width="1.9" height="5.8" rx="0.7" fill="${c}"/>`;
     case 'game': // 骰子（桌遊）
       return `<rect x="-6.5" y="-6.5" width="13" height="13" rx="2.6" fill="${c}"/><circle cx="-3" cy="-3" r="1.35" fill="#00000066"/><circle cx="3" cy="-3" r="1.35" fill="#00000066"/><circle cx="0" cy="0" r="1.35" fill="#00000066"/><circle cx="-3" cy="3" r="1.35" fill="#00000066"/><circle cx="3" cy="3" r="1.35" fill="#00000066"/>`;
+    case 'shuttle': // 羽毛球（羽球臨打，v1.848 使用者說換成羽球的圖示）：下面圓圓的球頭，上面一圈羽毛，斜斜的
+      return `<g transform="translate(-1.6 1.6) rotate(30)"><path d="M-2.6 2.2 L-6 -7 Q0 -8.6 6 -7 L2.6 2.2 Z" fill="${c}"/><path d="M-1.3 1.8 L-3 -7.6 M1.3 1.8 L3 -7.6 M0 1.8 V-7.9 M-4.4 -2.6 Q0 -3.6 4.4 -2.6" stroke="#00000055" stroke-width="0.9" fill="none"/><path d="M-3 2 h6 v1 a3 3 0 0 1 -6 0 z" fill="${c}"/></g>`;
+    case 'court': // 羽球場（從上面看，場地出讓）：外框、中間的網、發球線
+      return `<rect x="-7.5" y="-5.5" width="15" height="11" rx="0.8" fill="${c}"/><path d="M0 -5.5 V5.5" stroke="#00000077" stroke-width="1.6"/><path d="M-2.6 -5.5 V5.5 M2.6 -5.5 V5.5 M-7.5 0 H-2.6 M2.6 0 H7.5 M-7.5 -4 H7.5 M-7.5 4 H7.5" stroke="#00000055" stroke-width="0.8" fill="none"/>`;
     case 'other': // 小店面（遮雨棚加門）
       return `<path d="M-7 -2 L-5.5 -6.5 H5.5 L7 -2 Z" fill="${c}"/><rect x="-5.5" y="-1" width="11" height="7.5" fill="${c}"/><rect x="-1.6" y="1.8" width="3.2" height="4.7" fill="#00000055"/>`;
     default:

@@ -8120,6 +8120,8 @@ function topicFor(ev: EventOut): string | null {
     const t = topicOf(ev);
     return topicGlyph(t) || !topicGlyph(ev.title) ? t : ev.title;
   }
+  // 羽球臨打：羽球的圖示，場地出讓用球場的圖示（v1.848 使用者說的）
+  if (ev.kind === 'session') return isTransfer(ev) ? 'court' : 'shuttle';
   // 店家照店家類型（STORE_TYPES 的 key）
   return ev.kind === 'giveaway' ? '發放' : ev.kind === 'store' ? (storeOf(ev).type ?? 'other') : null;
 }
