@@ -1,5 +1,5 @@
 /**
- * 許願（v1.569，順幣的用途）：投 5 枚順幣送一個想法（一段 prompt、一份企劃、想認領一塊地…不分類型），管理者審核，
+ * 許願（v1.569，順幣的用途）：投 10 枚順幣（v1.827 使用者說改成 10 枚，以前 5 枚）送一個想法（一段 prompt、一份企劃、想認領一塊地…不分類型），管理者審核，
  * 通過才由維護者用 AI 做出來、上線；上線後有 3 次免費調整，之後每次 1 枚順幣。取代原本到 GitHub 提案。
  * 許願的內容是任何人都能寫的：只存起來給管理者看，不會自動變成程式，也不公開（上線的東西有填暱稱才寫「點子來自 ○○」，維護者做的時候加）。
  * 送出時順幣先暫扣（item_grants.used_at、used_for = 'wish:<id>'），不通過、做不出來、自己撤回就全部退回。
@@ -10,7 +10,7 @@ import { pushAdmins } from './push';
 import { ReportError } from './reports';
 
 /** 許願要幾枚順幣 */
-export const WISH_COST = 5;
+export const WISH_COST = 10;
 /** 上線後免費調整幾次 */
 export const TWEAK_FREE = 3;
 /** 免費的用完後，每次調整幾枚順幣 */
@@ -230,7 +230,7 @@ async function insertHolding(env: Env, device: string, ip: string, now: number, 
   return (await env.DB.prepare('SELECT id FROM wishes WHERE token = ?').bind(token).first<{ id: number }>())?.id ?? null;
 }
 
-/** 許願：投 5 枚順幣（先暫扣），回傳這台現在的願望、順幣 */
+/** 許願：投 WISH_COST 枚順幣（先暫扣），回傳這台現在的願望、順幣 */
 export async function submitWish(env: Env, device: string | null, ip: string, input: unknown, now: number): Promise<{ id: number; wishes: WishOut[]; coins: number }> {
   const dev = needDevice(device);
   const p = parseWish(input);

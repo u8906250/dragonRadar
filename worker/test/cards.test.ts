@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { cleanCode, CREDITS_PER_DAY, jerkyMilestone, makeCode, parseClaim, parsePick, parseTeleport, REPORTS_PER_JERKY, spendTeleport, taipeiDayStart, TELEPORT_COST } from '../src/cards';
+import { cleanCode, CREDITS_PER_DAY, makeCode, parseClaim, parsePick, parseTeleport, REPORTS_PER_JERKY, spendTeleport, taipeiDayStart, TELEPORT_COST } from '../src/cards';
 
 describe('parseClaim', () => {
   it('takes a known card and one of its places', () => {
@@ -44,7 +44,6 @@ describe('回報累計（古錐媽的肉乾）', () => {
   it('gives the card and a 順幣 every 5 reports, at most 20 a day', () => {
     expect(REPORTS_PER_JERKY).toBe(5);
     expect(CREDITS_PER_DAY).toBe(20);
-    expect([0, 4, 5, 9, 10, 14, 15, 23].map(jerkyMilestone)).toEqual([0, 0, 5, 5, 10, 10, 15, 20]);
   });
   it('counts a day in Taiwan time (00:00 +08:00)', () => {
     // 2026-11-03 23:59:59 和 2026-11-04 00:00:00（台灣時間）

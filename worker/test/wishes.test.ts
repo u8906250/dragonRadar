@@ -3,7 +3,7 @@ import { cleanText, groupWishes, parseLinks, parseTweak, parseWish, TWEAK_COST, 
 
 describe('許願的規則', () => {
   it('costs 5 順幣, 3 free tweaks, then 1 each', () => {
-    expect(WISH_COST).toBe(5);
+    expect(WISH_COST).toBe(10);
     expect(TWEAK_FREE).toBe(3);
     expect(TWEAK_COST).toBe(1);
     expect([0, 1, 2, 3, 4, 9].map(tweakCost)).toEqual([0, 0, 0, 1, 1, 1]);

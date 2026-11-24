@@ -190,7 +190,7 @@ export interface SubmitResult {
   edit?: EditItem[];
   /** 車掃、掃街、車隊：合成路線的（每一站的時間、會不會放上雷達），這些站不在 preview、failures 裡 */
   routes?: RoutePreview[];
-  /** 確認後放上雷達了：回報的累計（滿 5 則拿到肉乾卡、每 5 則一包肉乾；今天算滿了 capped） */
+  /** 確認後放上雷達了：回報的累計（滿 5 則拿到肉乾卡、每一則一枚順幣；今天算滿了 capped） */
   reward?: ReportReward;
 }
 

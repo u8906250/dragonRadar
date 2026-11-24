@@ -1,6 +1,6 @@
 /**
  * 收集卡（尋找小法）：在汪星的 3D 國館點到小法就拿到 No.001（雷達上點到不算，前端決定）；
- * 回報、確認、放上雷達的活動累計滿 5 則拿到 No.002「古錐媽的肉乾」，每滿 5 則再給一份獎勵，自己選一包肉乾或一枚順幣（順幣拿來許願，wishes.ts）。
+ * 回報、確認、放上雷達的活動累計滿 5 則拿到 No.002「古錐媽的肉乾」，每一則給一枚順幣（v1.827；順幣拿來許願 wishes.ts、瞬間移動）。
  * 不用登入，用瀏覽器的裝置代碼（加鹽雜湊）認人；伺服器記哪張卡、什麼時候、在哪裡拿到，第幾位拿到照拿到的順序算（id 由小到大）
  */
 import type { Env } from './env';
@@ -13,14 +13,14 @@ export type CardId = keyof typeof CARDS;
 /** 點到就拿得到的卡（/api/cards/claim）；其他的照規則由伺服器給（肉乾：回報累計） */
 // 你的市長（No.003）：在瀏覽器裡看完洋流總部的動畫、點完五個政策按鈕才領（跟小法一樣是瀏覽器判斷的）
 const TAP_CARDS: readonly CardId[] = ['xiaofa', 'mayor'];
-/** 道具（順幣：順著洋流的金幣，v1.542 起每滿 5 則可以選肉乾或順幣） */
+/** 道具（順幣：順著洋流的金幣，v1.542 起每滿 5 則可以選肉乾或順幣，v1.579 每滿 5 則一枚，v1.827 每一則一枚） */
 export const ITEMS = { jerky: '古錐媽的肉乾', coin: '順幣' } as const;
 export type ItemId = keyof typeof ITEMS;
 /** 還沒選的獎勵：item_grants 先記成 pick，選了改成那個道具（同一個原因只有一筆，所以不會選兩次） */
 export const PICK = 'pick';
 /** 滿 5 則的獎勵可以選哪些 */
 export const PICKABLE: readonly ItemId[] = ['jerky', 'coin'];
-/** 回報累計幾則拿到肉乾卡、每幾則給一包肉乾；一台一天（台灣時間）最多算幾則 */
+/** 回報累計幾則拿到肉乾卡；一台一天（台灣時間）最多算幾則（一則一枚順幣，所以一天最多也拿這麼多枚） */
 export const REPORTS_PER_JERKY = 5;
 export const CREDITS_PER_DAY = 20;
 /** 同一個 IP 一小時最多拿幾張（一直清掉瀏覽器資料重拿，「第幾位」會被灌） */
@@ -79,14 +79,12 @@ export interface ReportReward {
 
 /** 台灣時間今天 0 點（秒） */
 export const taipeiDayStart = (now: number): number => Math.floor((now + 8 * 3600) / 86400) * 86400 - 8 * 3600;
-/** 累計 n 則時最近的一個門檻（5、10、15…；不到 5 是 0） */
-export const jerkyMilestone = (n: number): number => Math.floor(n / REPORTS_PER_JERKY) * REPORTS_PER_JERKY;
-
 /**
  * 回報、確認、放上雷達了：記一則（同一則只記一次；這台今天已經記滿 CREDITS_PER_DAY 則就不記），
- * 累計滿 5 則拿到肉乾卡，每滿 5 則給一枚順幣（v1.542–v1.578 是一份獎勵讓他選肉乾或順幣，pickReward 留給舊網頁）；
- * 同一個門檻只給一次：刪掉再貼回到同一個數字不會再給
- * （v1.541 以前直接給肉乾，原因一樣是 reports:5、reports:10…，所以照原因判斷、不管是哪個道具）
+ * 累計滿 5 則拿到肉乾卡；每一則給一枚順幣（v1.827 使用者說「一個活動就拿到一枚順幣」，以前是每滿 5 則一枚，
+ * v1.542–v1.578 是一份獎勵讓他選肉乾或順幣，pickReward 留給舊網頁）。
+ * 原因記累計到第幾則（reports:n），同一個數字只給一次：刪掉再貼回到同一個數字不會再給；改版前的 reports:5、reports:10… 照舊算，
+ * 以前沒給的（每 5 則中間那幾則）不補（v1.541 以前直接給肉乾，原因一樣是 reports:n，所以照原因判斷、不管是哪個道具）
  */
 export async function creditReport(env: Env, device: string | null, postId: string, now: number): Promise<ReportReward | null> {
   if (!device) return null;
@@ -96,15 +94,13 @@ export async function creditReport(env: Env, device: string | null, postId: stri
   await env.DB.prepare('INSERT OR IGNORE INTO report_credits (post_id, device_id, created_at) VALUES (?, ?, ?)').bind(postId, device, now).run();
   const credits = await total();
   const reward: ReportReward = { credits, items: [] };
-  const m = jerkyMilestone(credits);
-  if (m === 0) return reward;
-  const [card, item] = await env.DB.batch([
-    env.DB.prepare("INSERT OR IGNORE INTO card_claims (card, device_id, place, created_at) VALUES ('jerky', ?, '回報', ?)").bind(device, now),
-    // 拿到肉乾卡之後獎勵不用選了，直接給一枚順幣（v1.579 使用者說「雞肉乾在拿到卡後，獎勵就不用再出現選擇」）：
-    // 卡在同一批先寫進去，所以滿 5 則的第一份起都是順幣；以前還沒選的（pick）在 migration 0051 改成順幣
-    env.DB.prepare("INSERT OR IGNORE INTO item_grants (device_id, item, reason, created_at) SELECT ?, 'coin', ?, ? WHERE NOT EXISTS (SELECT 1 FROM item_grants WHERE device_id = ? AND reason = ?)").bind(device, `reports:${m}`, now, device, `reports:${m}`),
+  if (credits < 1) return reward;
+  const [item, card] = await env.DB.batch([
+    // 獎勵不用選，直接給一枚順幣（v1.579 使用者說「雞肉乾在拿到卡後，獎勵就不用再出現選擇」；以前還沒選的 pick 在 migration 0051 改成順幣）
+    env.DB.prepare("INSERT OR IGNORE INTO item_grants (device_id, item, reason, created_at) SELECT ?, 'coin', ?, ? WHERE NOT EXISTS (SELECT 1 FROM item_grants WHERE device_id = ? AND reason = ?)").bind(device, `reports:${credits}`, now, device, `reports:${credits}`),
+    ...(credits >= REPORTS_PER_JERKY ? [env.DB.prepare("INSERT OR IGNORE INTO card_claims (card, device_id, place, created_at) VALUES ('jerky', ?, '回報', ?)").bind(device, now)] : []),
   ]);
-  if (card.meta.changes) reward.card = (await env.DB.prepare(`${SELECT} WHERE c.device_id = ? AND c.card = 'jerky'`).bind(device).first<CardClaim>()) ?? undefined;
+  if (card?.meta.changes) reward.card = (await env.DB.prepare(`${SELECT} WHERE c.device_id = ? AND c.card = 'jerky'`).bind(device).first<CardClaim>()) ?? undefined;
   if (item.meta.changes) reward.items = [{ item: 'coin', count: item.meta.changes }];
   return reward;
 }

@@ -1,8 +1,8 @@
 /**
  * 收集卡（尋找小法）：卡冊、拿到卡時翻開的畫面；道具欄（選單裡的「道具」，跟卡冊分開，之後會有更多道具）；
- * 回報滿 5 則給一枚順幣（v1.579 起；以前是自己選一包肉乾或一枚順幣，openPick 留著給還沒選完的）；
+ * 回報一則放上雷達給一枚順幣（v1.827 起；v1.579 起每滿 5 則一枚，以前是自己選一包肉乾或一枚順幣，openPick 留著給還沒選完的）；
  * 選單的「說明」（使用說明、換裝置的引繼碼）；
- * 許願（v1.569，順幣的用途）：投 5 枚順幣送一個想法，管理者審核，通過才做；「我的願望」看進度、調整（openWishForm、openMyWishes）。
+ * 許願（v1.569，順幣的用途）：投 10 枚順幣（v1.827 起，以前 5 枚）送一個想法，管理者審核，通過才做；「我的願望」看進度、調整（openWishForm、openMyWishes）。
  * 卡片的內容寫在這裡（照片在 public/cards/），拿到的卡、道具存在伺服器（裝置代碼，worker/src/cards.ts），
  * 這個瀏覽器另外記一份（dr.cards、dr.items、dr.picks）：點小法時拿過的就不再問伺服器
  */
@@ -263,7 +263,7 @@ const itemText = (it: ItemCount): string => {
 
 /**
  * 回報確認、放上雷達後（main.ts）：伺服器說拿到肉乾卡就翻開給你看，拿到道具寫在下面（沒有卡時另外跳一則訊息）；
- * 滿 5 則的順幣寫在卡片下面（沒有卡時跳訊息）；舊的「選獎勵」（picks）伺服器已經不給了。今天算滿了也跳訊息。notify 是 main.ts 的橫幅
+ * 拿到的順幣寫在卡片下面（沒有卡時跳訊息）；舊的「選獎勵」（picks）伺服器已經不給了。今天算滿了也跳訊息。notify 是 main.ts 的橫幅
  */
 export async function gotReward(r: { card?: CardClaim; items: ItemCount[]; picks?: number; capped?: boolean } | undefined, notify: (msg: string) => void): Promise<void> {
   if (!r) return;
@@ -661,10 +661,10 @@ export function openWishes(): void {
   });
 }
 
-// ---- 許願（v1.569）：投 5 枚順幣送一個想法（不分類型），管理者審核，通過才由維護者用 AI 做出來；上線後 3 次免費調整，之後每次 1 枚 ----
+// ---- 許願（v1.569）：投 WISH_COST 枚順幣送一個想法（不分類型），管理者審核，通過才由維護者用 AI 做出來；上線後 3 次免費調整，之後每次 1 枚 ----
 
 /** 許願要幾枚順幣（跟伺服器的 WISH_COST 一樣） */
-const WISH_COST = 5;
+const WISH_COST = 10;
 const WISH_MAX = 5000;
 const TWEAK_MAX = 2000;
 /** 許過願的瀏覽器：開網頁時才問伺服器有沒有新進度（沒許過的不多打一次） */
@@ -740,7 +740,7 @@ function wishRow(): string {
         <button type="button" class="chip primary" data-open-wish${n < WISH_COST ? ' disabled' : ''}>投 ${WISH_COST} 枚順幣許願</button>
         ${ws.length ? `<button type="button" class="chip${news ? ' has-news' : ''}" data-my-wishes>我的願望（${ws.length}）</button>` : ''}
       </div>
-      ${n < WISH_COST ? `<small>還差 ${WISH_COST - n} 枚順幣。每回報 5 則活動放上雷達，可以選一枚順幣。</small>` : ''}
+      ${n < WISH_COST ? `<small>還差 ${WISH_COST - n} 枚順幣。每回報一則活動放上雷達，就拿到一枚順幣。</small>` : ''}
     </section>`;
 }
 

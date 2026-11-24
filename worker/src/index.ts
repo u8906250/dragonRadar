@@ -320,7 +320,7 @@ async function handle(req: Request, env: Env, ctx: ExecutionContext): Promise<Re
   // ---- 收集卡（尋找小法，裝置代碼放在 x-device 標頭）----
   if (req.method === 'GET' && path === '/api/cards/mine') return jsonResponse(await myCards(env, await deviceId(env, req)));
   if (req.method === 'POST' && path === '/api/cards/claim') return jsonResponse(await claimCard(env, await deviceId(env, req), await ipHash(env, req), await readJson<unknown>(req), now));
-  // 回報滿 5 則的獎勵：選一包肉乾或一枚順幣
+  // 回報滿 5 則的獎勵：選一包肉乾或一枚順幣（v1.579 起不用選了，留給舊網頁）
   if (req.method === 'POST' && path === '/api/cards/pick') return jsonResponse(await pickReward(env, await deviceId(env, req), await readJson<unknown>(req)));
   // 瞬間移動：花一枚順幣（換到哪一顆是瀏覽器記的）
   if (req.method === 'POST' && path === '/api/cards/teleport') return jsonResponse(await spendTeleport(env, await deviceId(env, req), await readJson<unknown>(req), now));

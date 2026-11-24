@@ -8426,7 +8426,7 @@ function renderReportTips(): void {
   }
   const tips = [
     share,
-    '放上雷達的回報，滿 5 則拿到「古錐媽的肉乾」收集卡，每 5 則一枚順幣；每天最多算 20 則，超過的一樣會放上雷達，只是不算進收集。',
+    '放上雷達的回報，每一則拿到一枚順幣，滿 5 則拿到「古錐媽的肉乾」收集卡；每天最多算 20 則，超過的一樣會放上雷達，只是不算進收集。',
     `只收${l ? ` ${l.maxAgeDays} 天內` : ''}的公開貼文。每一場活動都要讀得到做什麼、在哪裡、哪天幾點開始，缺一個就不會放上雷達。`,
     '結束時間可以不寫：沒寫的只寫幾點開始，雷達上顯示到開始後兩小時。',
     'ACCUPASS 活動通、OPENTIX：貼活動頁的網址（accupass.com/event/…、opentix.life/event/…）就好，時間、地點照活動頁寫的；OPENTIX 的巡演每個地點各一場，好幾天的展覽每天各算一場（最多 6 天），線上、取消的場次不收。活動頁刪除或標成取消，雷達會自動下架。',
@@ -9345,7 +9345,7 @@ function renderPreview(r: SubmitResult): void {
     }
     await showReportResult(res.data);
     void loadMyReports();
-    // 回報累計：滿 5 則拿到古錐媽的肉乾卡、每 5 則一枚順幣
+    // 回報累計：每一則一枚順幣、滿 5 則拿到古錐媽的肉乾卡
     void gotReward(res.data.reward, (msg) => showBanner(bannerEl, msg, 4500));
   });
   if (useEditForm(r.edit)) wireEdit(c, r.edit ?? [], actions);
