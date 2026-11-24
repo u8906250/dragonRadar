@@ -542,13 +542,33 @@ export function openItems(): void {
 export interface TeleportHook {
   where: () => 'earth' | 'woof' | 'kepler22b';
   go: (to: 'earth' | 'woof' | 'kepler22b') => Promise<void>;
+  /** 在雷達上的汪星選一點瞬間移動過去（v1.819；你在汪星才有） */
+  pick: () => void;
 }
 let teleportHook: TeleportHook | null = null;
 export function setTeleport(h: TeleportHook): void {
   teleportHook = h;
 }
 /** 瞬間移動要幾枚順幣（跟伺服器的 TELEPORT_COST 一樣）、可以去哪裡（之後可以再加；不能去自己在的那一顆） */
-const TELEPORT_COST = 1;
+export const TELEPORT_COST = 1;
+
+/** 花一枚順幣瞬間移動（道具欄、3D 的大地圖、雷達上選一點都用這個）：伺服器扣好了才回 ok，這台的道具跟著更新 */
+export async function spendTeleportCoin(to: 'woof' | 'earth' | 'kepler22b'): Promise<{ ok: true } | { ok: false; message: string }> {
+  const r = await spendTeleport(to);
+  if (!r.ok) return { ok: false, message: r.message };
+  saveItems(r.data.items);
+  return { ok: true };
+}
+
+/** 瞬間移動的樣子：白光一閃、小星星往外飛（約 1 秒，自己按的，減少動態照樣播） */
+export function teleportFlash(): void {
+  const fx = document.createElement('div');
+  fx.className = 'teleport-fx';
+  fx.setAttribute('aria-hidden', 'true');
+  fx.innerHTML = Array.from({ length: 10 }, (_, i) => `<i style="--a:${i * 36 + 12}deg;--d:${0.6 + (i % 3) * 0.25}"></i>`).join('');
+  document.body.append(fx);
+  window.setTimeout(() => fx.remove(), 1200);
+}
 const TELEPORT_PLACES: Array<{ to: 'woof' | 'earth' | 'kepler22b'; name: string }> = [
   { to: 'woof', name: '汪星' },
   { to: 'earth', name: '地球' },
@@ -573,7 +593,10 @@ function openCoin(onDone?: () => void): void {
       </div>
       <div class="tc-coin-opt">
         <div class="tc-coin-what"><b>瞬間移動</b><small>花 ${TELEPORT_COST} 枚：一閃就到${short(TELEPORT_COST)}</small></div>
-        <div class="tc-coin-places">${places.map((p) => `<button type="button" class="chip primary" data-teleport="${p.to}" ${n < TELEPORT_COST ? 'disabled' : ''}>${esc(p.name)}</button>`).join('')}</div>
+        <div class="tc-coin-places">${places.map((p) => `<button type="button" class="chip primary" data-teleport="${p.to}" ${n < TELEPORT_COST ? 'disabled' : ''}>${esc(p.name)}</button>`).join('')}${
+          // 在汪星：也可以在雷達上的汪星選一點（國館附近 2 公里內，v1.819）
+          where === 'woof' ? `<button type="button" class="chip primary" data-teleport-pick ${n < TELEPORT_COST ? 'disabled' : ''}>地圖上選一點</button>` : ''
+        }</div>
       </div>
       <p class="tc-coin-msg" role="status">${esc(msg)}</p>`;
   };
@@ -588,6 +611,11 @@ function openCoin(onDone?: () => void): void {
       });
       return;
     }
+    if (t.closest('[data-teleport-pick]') && teleportHook) {
+      for (const o of [...document.querySelectorAll<HTMLElement>('.tc-coin, .tc-bag')]) o.querySelector<HTMLElement>('[data-close]')?.click();
+      teleportHook.pick();
+      return;
+    }
     const btn = t.closest<HTMLButtonElement>('[data-teleport]');
     if (!btn || busy || !teleportHook) return;
     const to = btn.dataset.teleport as 'woof' | 'earth' | 'kepler22b';
@@ -595,13 +623,12 @@ function openCoin(onDone?: () => void): void {
     if (!window.confirm(`花 ${TELEPORT_COST} 枚順幣瞬間移動到${name}？`)) return;
     busy = true;
     el.querySelectorAll<HTMLButtonElement>('button[data-teleport], button[data-coin-wish]').forEach((b) => (b.disabled = true));
-    void spendTeleport(to).then(async (r) => {
+    void spendTeleportCoin(to).then(async (r) => {
       busy = false;
       if (!r.ok) {
         main.innerHTML = html(r.message);
         return;
       }
-      saveItems(r.data.items);
       // 收起順幣、道具欄，白光一閃換過去
       for (const o of [...document.querySelectorAll<HTMLElement>('.tc-coin, .tc-bag')]) o.querySelector<HTMLElement>('[data-close]')?.click();
       await teleportHook?.go(to);

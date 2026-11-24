@@ -953,6 +953,11 @@ export type RocketPhase = 'stored' | 'summon' | 'parked' | 'stow' | 'depart' | '
 export const SUMMON_MS = 5000;
 export const STOW_MS = 5000;
 /** 發射口的正中間（台北的經緯度）：火箭站的地方，飛到汪星時汪星轉到這裡、回地球時雷達正中間換到這裡 */
+/** 國館外框的正中間（3D 的 2 公里走得到的範圍從這裡算，跟 park3d.ts 的 parkMid 一樣） */
+export const PARK_MID: Pt = [
+  (Math.min(...ZHONGSHAN_PARK.outline.map((p) => p[0])) + Math.max(...ZHONGSHAN_PARK.outline.map((p) => p[0]))) / 2,
+  (Math.min(...ZHONGSHAN_PARK.outline.map((p) => p[1])) + Math.max(...ZHONGSHAN_PARK.outline.map((p) => p[1]))) / 2,
+];
 export const HATCH_CENTER: Pt = [ZHONGSHAN_PARK.hatch.reduce((s, p) => s + p[0], 0) / 4, ZHONGSHAN_PARK.hatch.reduce((s, p) => s + p[1], 0) / 4];
 const LS_ROCKET = 'dr.rocket';
 type Rocket = { world: RocketWorld; phase: RocketPhase; at: number };

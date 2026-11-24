@@ -296,6 +296,10 @@ a.chip { display: inline-flex; align-items: center; text-decoration: none; }
 .radar .you-beam-stop-2 { stop-color: #1a73e8; stop-opacity: 0; }
 .radar .you-ring { fill: #ffffff; filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.4)); }
 .radar .you-dot { fill: #1a73e8; }
+/* 汪星上選瞬間移動的地方（v1.819）：走得到的範圍（粉紅虛線）、選到的點（粉紅色的針） */
+.radar .woof-pick-range { fill: rgba(232, 120, 150, 0.08); stroke: #e87896; stroke-width: 1.6; stroke-dasharray: 5 4; }
+.radar .woof-pick-pin path { fill: #e8618c; stroke: #ffffff; stroke-width: 1.4; }
+.radar .woof-pick-pin circle { fill: #ffffff; }
 /* 搜尋到的地點（v1.785）：紅色的針，換地點時落下來彈一下 */
 .radar .found { pointer-events: none; }
 .radar .found-body { fill: #ea4335; stroke: #a52714; stroke-width: 1; filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.35)); }

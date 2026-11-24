@@ -852,6 +852,8 @@ export class Radar {
   onPreviewDrag: ((i: number, at: { bearing: number; distanceKm: number }) => void) | null = null;
   /** 點一下雷達的空白處（不是光點、星星、瓶子…）：哪個方位、多遠（補充資料標位置時用） */
   onEmptyTap: ((at: { bearing: number; distanceKm: number }) => void) | null = null;
+  /** 太空裡點空白的地方（點在正中間那顆星球上也算）：離雷達正中間的方位、距離（v1.819 在汪星上選瞬間移動的地方） */
+  onSpaceTap: ((at: { bearing: number; distanceKm: number }) => void) | null = null;
   private pinDrag: { id: number; i: number; g: SVGGElement; at: { x: number; y: number } | null } | null = null;
   private scaleKm = 5;
   /** 太空（比全球再遠）的畫法；還沒載入是 null */
@@ -1361,6 +1363,7 @@ export class Radar {
       const at = this.svgPoint(e.clientX, e.clientY);
       const geo = at ? this.geoOf(at) : null;
       if (geo) this.onEmptyTap?.(geo);
+      else if (at && this.inSpace) this.onSpaceTap?.(this.offsetOf(at));
       const prev = lastTap;
       lastTap = { t: e.timeStamp, x: e.clientX, y: e.clientY };
       if (prev && e.timeStamp - prev.t < DOUBLE_TAP_MS && Math.hypot(e.clientX - prev.x, e.clientY - prev.y) < DOUBLE_TAP_PX) {
@@ -2217,6 +2220,11 @@ export class Radar {
   /** SVG 座標 → 離正中間的方位、距離（太空裡不算） */
   private geoOf(p: { x: number; y: number }): { bearing: number; distanceKm: number } | null {
     if (this.inSpace) return null;
+    return this.offsetOf(p);
+  }
+
+  /** 畫面上一點離雷達正中間的方位（照指北針轉回來）、距離（照現在的範圍） */
+  private offsetOf(p: { x: number; y: number }): { bearing: number; distanceKm: number } {
     const dx = p.x - C;
     const dy = C - p.y;
     const bearing = (((Math.atan2(dx, dy) * 180) / Math.PI + this.heading) % 360 + 360) % 360;
