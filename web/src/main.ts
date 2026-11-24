@@ -565,7 +565,6 @@ function syncFindBtn(): void {
   const off = youOn !== 'earth' || tripTo !== null;
   if (findBtn.hidden === off) return;
   findBtn.hidden = off;
-  appEl.classList.toggle('find-on', !off);
 }
 const reportBtn = $<HTMLButtonElement>('#report-btn');
 const reportSheet = $('#report-sheet');
@@ -1479,7 +1478,7 @@ function onStreetTile(): void {
  * 33 km 以上縣市；1～33 km 鄉鎮市區；5 km 內加國道、快速道路的名字，2 km 內加幹道，1 km 內大街小巷的路名和捷運、火車站（不寫鄉鎮市區）；
  * 地標（v1.698 使用者說拉近可以放大巨蛋、公園等）：5 km 內寫大的（體育場、遊樂園、市政府、大公園），2 km 內都寫（pois-tw.ts，這時才載入）；
  * 國小、國中、高中職、一般的公園（外框不到 10 公頃）比例尺 20 m 以下才寫（v1.727、v1.728）；大學和其他地標比例尺 100 m 以下才寫（v1.729、v1.730）；
- * 大公園（10 公頃以上）比例尺 500 m 以下就寫（v1.731）。運動中心、體育館、羽球館（sport）外圈 5 km 內就寫（v1.841 使用者說的）。
+ * 大公園（10 公頃以上）比例尺 500 m 以下就寫（v1.731）。運動中心、體育館、羽球館（sport）外圈 2 km 內就寫（v1.841 使用者說的，v1.842 從 5 km 改成拉近一點）。
  * 只有全螢幕寫（v1.692 使用者說一般的雷達不用顯示）；中國的範圍不寫（跟道路一樣）；洋流總部的特效播放時不寫
  */
 /**
@@ -1555,6 +1554,8 @@ function decodePolyline(str: string): Float64Array {
 
 /** 地標（pois-tw.ts，約 100 KB）：全螢幕拉近到 5 km 內才載入，載入好重畫道路和名稱 */
 let poisMod: typeof import('./pois-tw') | null = null;
+/** 運動中心、體育館、羽球館：雷達外圈這麼近才寫（v1.842 使用者說拉近一點再顯示，原本 5 km） */
+const SPORT_KM = 2;
 let poisLoading = false;
 function loadPois(): void {
   if (poisMod || poisLoading) return;
@@ -2037,10 +2038,10 @@ function placeLabels(
       const landmarkHidden = radar.scaleBarKm() > LANDMARK_BAR_KM * 1.001;
       const bigParkHidden = radar.scaleBarKm() > BIG_PARK_BAR_KM * 1.001;
       for (const [name, lat, lng, kind, ha] of poisMod.TW_POIS) {
-        // 運動中心、體育館、羽球館（v1.841 使用者說拉近顯示運動中心，選了加上體育館、羽球館、5 km 內就寫）：不等比例尺；
-        // 運動中心排在幹道（62）之前，體育館、羽球館排在幹道後面
+        // 運動中心、體育館、羽球館（v1.841 使用者說拉近顯示運動中心，選了加上體育館、羽球館）：不等比例尺，外圈 2 km 內就寫
+        // （v1.841 是 5 km，v1.842 使用者說拉近一點再顯示）；運動中心排在幹道（62）之前，體育館、羽球館排在幹道後面
         if (kind === 'sport') {
-          add(lat, lng, name, 'poi', name.includes('運動中心') ? 64 : 58);
+          if (km <= SPORT_KM) add(lat, lng, name, 'poi', name.includes('運動中心') ? 64 : 58);
           continue;
         }
         // 國小、國中、高中職（v1.724 使用者說學校都寫出來）：等左下角的比例尺顯示 20 m 以下才寫
