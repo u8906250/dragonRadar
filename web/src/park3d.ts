@@ -543,10 +543,14 @@ export function openPark3D(o: Park3DOptions): () => void {
     <div class="p3d-top">
       <button type="button" class="chip p3d-exit">離開</button>
       <span class="p3d-title">3D 國館</span>
+      <button type="button" class="chip p3d-map-toggle" aria-pressed="false" hidden title="打開、收起小地圖">地圖</button>
       <button type="button" class="chip p3d-mark-toggle" aria-pressed="false">標記</button>
     </div>
     <!-- 指北針（v1.800 使用者說 3D 國館放指北針）：紅色那頭指北，跟著轉頭轉；點一下轉回面向北 -->
     <button type="button" class="p3d-compass" title="指北針：點一下轉回面向北" aria-label="指北針，點一下面向北"><svg viewBox="-20 -20 40 40" aria-hidden="true"><g class="p3d-needle"><path class="needle-n" d="M0 -13 L5 0 L-5 0 Z"/><path class="needle-s" d="M0 13 L5 0 L-5 0 Z"/><text class="needle-letter" y="-14.5" text-anchor="middle">N</text></g></svg></button>
+    <!-- 汪星的小地圖（v1.818 使用者說 3D 裡可以打開小地圖）：北朝上、你是中間的箭頭，點一下放大看整個 2 公里 -->
+    <canvas class="p3d-minimap" hidden role="button" aria-label="小地圖，點一下放大"></canvas>
+    <div class="p3d-bigmap" hidden role="button" aria-label="大地圖，點一下收起來"><canvas></canvas><small>點一下收起來</small></div>
     <div class="p3d-hint"></div>
     <div class="p3d-cross" hidden></div>
     <div class="p3d-stick" hidden><div class="p3d-knob"></div></div>
@@ -2880,6 +2884,96 @@ export function openPark3D(o: Park3DOptions): () => void {
   /** 上次走到國館外面：等街道載入了才知道站不站得住（還沒動就回到那裡） */
   const outsideSpot = lastSpot && !inside(en(lastSpot.at), outline) ? lastSpot : null;
   let cityLoading = false;
+
+  // ---- 汪星的小地圖（v1.818 使用者說 3D 裡可以打開小地圖；北朝上、箭頭跟著轉，點了放大看整個 2 公里，不標小法，都是使用者選的）
+  const LS_MAP = 'dr.p3dMap';
+  /** 小地圖畫你身邊多遠（半徑，公尺） */
+  const MINI_M = 150;
+  const mapBtn = $<HTMLButtonElement>('.p3d-map-toggle');
+  const miniMap = $<HTMLCanvasElement>('.p3d-minimap');
+  const bigMap = $<HTMLElement>('.p3d-bigmap');
+  const bigCv = bigMap.querySelector('canvas')!;
+  let mapOn = ((): boolean => {
+    try {
+      return localStorage.getItem(LS_MAP) === '1';
+    } catch {
+      return false;
+    }
+  })();
+  let miniAt = '';
+  let miniDrawnAt = 0;
+  /** 大地圖底下不會變的那一層（街道、房子、國館）：大小變了才重畫 */
+  let bigBase: HTMLCanvasElement | null = null;
+  /** 你：白邊的藍色箭頭，尖端朝你面向的方向（北朝上的地圖，順時針轉 yaw） */
+  const drawYouArrow = (g: CanvasRenderingContext2D, x: number, y: number, s: number): void => {
+    g.save();
+    g.translate(x, y);
+    g.rotate(yaw);
+    g.beginPath();
+    g.moveTo(0, -1.25 * s);
+    g.lineTo(0.85 * s, 0.9 * s);
+    g.lineTo(0, 0.45 * s);
+    g.lineTo(-0.85 * s, 0.9 * s);
+    g.closePath();
+    g.lineJoin = 'round';
+    g.lineWidth = 0.45 * s;
+    g.strokeStyle = '#ffffff';
+    g.stroke();
+    g.fillStyle = '#1a73e8';
+    g.fill();
+    g.restore();
+  };
+  /** 小地圖、大地圖照你現在站的地方、面向重畫（走路時一秒最多十次；force：馬上畫） */
+  function drawMaps(force = false): void {
+    const show = !!city && world === 'woof' && mapOn;
+    mapBtn.setAttribute('aria-pressed', String(mapOn));
+    miniMap.hidden = !show;
+    if (!city || world !== 'woof') return;
+    const key = `${pos[0].toFixed(1)},${pos[1].toFixed(1)},${yaw.toFixed(2)}`;
+    const now = performance.now();
+    if (!force && (key === miniAt || now - miniDrawnAt < 100)) return;
+    miniAt = key;
+    miniDrawnAt = now;
+    const dpr = Math.min(2, devicePixelRatio || 1);
+    if (show) {
+      const css = miniMap.clientWidth || 132;
+      const S = Math.round(css * dpr);
+      if (miniMap.width !== S) [miniMap.width, miniMap.height] = [S, S];
+      const g = miniMap.getContext('2d')!;
+      city.drawMap(g, pos, (2 * MINI_M) / S, S, S);
+      drawYouArrow(g, S / 2, S / 2, 7 * dpr);
+    }
+    if (!bigMap.hidden) {
+      const css = Math.round(Math.min(640, root.clientWidth * 0.92, root.clientHeight * 0.8));
+      const S = Math.round(css * dpr);
+      const mpp = (2 * (city.walkM + 150)) / S;
+      if (!bigBase || bigBase.width !== S) {
+        bigBase = document.createElement('canvas');
+        [bigBase.width, bigBase.height] = [S, S];
+        city.drawMap(bigBase.getContext('2d')!, parkMid, mpp, S, S);
+        [bigCv.width, bigCv.height] = [S, S];
+        bigCv.style.width = bigCv.style.height = `${css}px`;
+      }
+      const g = bigCv.getContext('2d')!;
+      g.drawImage(bigBase, 0, 0);
+      drawYouArrow(g, S / 2 + (pos[0] - parkMid[0]) / mpp, S / 2 - (pos[1] - parkMid[1]) / mpp, 8 * dpr);
+    }
+  }
+  mapBtn.addEventListener('click', () => {
+    mapOn = !mapOn;
+    try {
+      localStorage.setItem(LS_MAP, mapOn ? '1' : '0');
+    } catch {
+      /* 記不住就算了 */
+    }
+    if (!mapOn) bigMap.hidden = true;
+    drawMaps(true);
+  });
+  miniMap.addEventListener('click', () => {
+    bigMap.hidden = false;
+    drawMaps(true);
+  });
+  bigMap.addEventListener('click', () => (bigMap.hidden = true));
   /** 換到哪一邊（一開始、搭火箭到了）：汪星有荒廢的街道（第一次才載入）、整個畫面彎、霧比較遠、草地；地球照舊 */
   function applyWorld(): void {
     const woof = world === 'woof';
@@ -2893,6 +2987,10 @@ export function openPark3D(o: Park3DOptions): () => void {
     // 汪星的街道載入了：地面換成街道那邊跟著你的草地（這一大片太大，彎了會整片斜下去）
     outsideMesh.visible = !(woof && city);
     attrib.hidden = !woof;
+    // 小地圖：汪星的街道載入了才有
+    mapBtn.hidden = !(woof && city);
+    if (!woof) bigMap.hidden = true;
+    drawMaps(true);
     // 汪星的叫「3D」（v1.815 使用者說的），地球的照舊叫「3D 國館」
     $<HTMLElement>('.p3d-title').textContent = woof ? '3D' : '3D 國館';
     // 天上換成這一邊的月亮（汪星是骨頭月）
@@ -2903,7 +3001,15 @@ export function openPark3D(o: Park3DOptions): () => void {
     void import('./woof-city3d')
       .then((m) => {
         if (closed) return;
-        city = m.buildWoofCity({ outline, lakes: waters.map((w) => w.outer), center: parkMid, grass, radiusM: WOOF_KM * 1000, anisotropy: renderer.capabilities.getMaxAnisotropy() });
+        city = m.buildWoofCity({
+          outline,
+          lakes: waters.map((w) => w.outer),
+          center: parkMid,
+          grass,
+          radiusM: WOOF_KM * 1000,
+          anisotropy: renderer.capabilities.getMaxAnisotropy(),
+          parkMap: { lawns: Z.green.map(ringEN), water: waters, paths: Z.paths.map((l) => l.map(en)), buildings: Z.buildings.map(ringEN), trees: Z.trees.map(([la, ln, r]): [number, number, number] => [...en([la, ln]), r]) },
+        });
         city.group.userData.noCut = true;
         scene.add(city.group);
         applyWorld();
@@ -3217,7 +3323,8 @@ export function openPark3D(o: Park3DOptions): () => void {
     }
     const k = e.key.toLowerCase();
     if (e.type === 'keydown') {
-      if (k === 'escape' && draft) {
+      if (k === 'escape' && !bigMap.hidden) bigMap.hidden = true;
+      else if (k === 'escape' && draft) {
         draft = null;
         drawMarks();
         panel();
@@ -3400,6 +3507,7 @@ export function openPark3D(o: Park3DOptions): () => void {
     placeGrass();
     if (bendU.value) bendScene();
     renderer.render(scene, camera);
+    drawMaps();
   };
   applyWorld();
   frame = requestAnimationFrame(loop);

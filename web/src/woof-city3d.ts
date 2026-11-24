@@ -173,16 +173,25 @@ export interface WoofCityOptions {
   /** 汪星的半徑（公尺）：看得到多遠照這個算 */
   radiusM: number;
   anisotropy: number;
+  /** 地圖上畫的國館（公尺，東、北）：草地、水面（外圈、小島）、步道中線、建築、樹（中心、樹冠半徑） */
+  parkMap: { lawns: Pt[][]; water: Array<{ outer: Pt[]; islands: Pt[][] }>; paths: Pt[][]; buildings: Pt[][]; trees: Array<[number, number, number]> };
 }
 
 export interface WoofCity {
   group: THREE.Group;
+  /** 走得到多遠（公尺，離國館中間；大地圖照這個決定範圍） */
+  walkM: number;
   /** 國館外面這裡站不站得住（房子、水、樹幹、路燈、太遠） */
   canStand(p: Pt): boolean;
   /** 超過走得到的範圍 */
   tooFar(p: Pt): boolean;
   /** 每一格：照鏡頭蓋附近的格子、顯示看得到的，蝴蝶、螢火蟲飛；回傳要不要重畫 */
   update(cam: THREE.Vector3, you: Pt, now: number, night: number): boolean;
+  /**
+   * 畫地圖（v1.818 使用者說 3D 裡可以打開小地圖）：北朝上，中間是 c（公尺），每像素 mpp 公尺，畫滿 w×h 的 g
+   * （草地底、公園綠地、水、馬路、房子、國館、走得到的邊界）；你的箭頭 park3d.ts 畫
+   */
+  drawMap(g: CanvasRenderingContext2D, c: Pt, mpp: number, w: number, h: number): void;
 }
 
 /** 畫一張重複鋪的圖（S 像素見方，左右上下接得起來：畫在邊上的東西另一邊也畫一份） */
@@ -927,9 +936,111 @@ export function buildWoofCity(o: WoofCityOptions): WoofCity {
 
   const list = [...chunks.values()];
   const tooFar = (p: Pt): boolean => Math.hypot(p[0] - o.center[0], p[1] - o.center[1]) > CITY_WALK_M;
+
+  // ---- 地圖（小地圖、大地圖）：每一樣先記住範圍，畫的時候只畫看得到的
+  const mapRoads = list.flatMap((ch) => ch.roads).map((r) => ({ r, box: boxOf(r.pts) }));
+  const mapGreens: Array<{ rings: Pt[][]; box: Box }> = [];
+  for (const s of WOOF_GREEN ? WOOF_GREEN.split(';') : []) {
+    const rings = s.split('/').map(decode);
+    if (rings[0].length >= 3 && !inPark(rings[0][0])) mapGreens.push({ rings, box: boxOf(rings[0]) });
+  }
+  const pm = o.parkMap;
+  const parkLawns = pm.lawns.map((r) => ({ r, box: boxOf(r) }));
+  function drawMap(g: CanvasRenderingContext2D, c: Pt, mpp: number, w: number, h: number): void {
+    const view: Box = [c[0] - (w / 2) * mpp, c[1] - (h / 2) * mpp, c[0] + (w / 2) * mpp, c[1] + (h / 2) * mpp];
+    const seen = (b: Box, m = 0): boolean => b[0] - m <= view[2] && b[2] + m >= view[0] && b[1] - m <= view[3] && b[3] + m >= view[1];
+    const X = (x: number): number => w / 2 + (x - c[0]) / mpp;
+    const Y = (y: number): number => h / 2 - (y - c[1]) / mpp;
+    const ring = (r: Pt[]): void => {
+      r.forEach(([x, y], i) => (i ? g.lineTo(X(x), Y(y)) : g.moveTo(X(x), Y(y))));
+      g.closePath();
+    };
+    const line = (l: Pt[]): void => l.forEach(([x, y], i) => (i ? g.lineTo(X(x), Y(y)) : g.moveTo(X(x), Y(y))));
+    // 草地星球的底
+    g.fillStyle = '#cfe2ae';
+    g.fillRect(0, 0, w, h);
+    g.fillStyle = '#b6d58e';
+    g.beginPath();
+    for (const gr of mapGreens) if (seen(gr.box)) gr.rings.forEach(ring);
+    g.fill('evenodd');
+    g.fillStyle = '#a6d2e4';
+    g.beginPath();
+    for (const wt of water) if (seen(wt.box)) wt.rings.forEach(ring);
+    g.fill('evenodd');
+    // 馬路：淡淡的柏油色，照路寬畫（太細的至少 1 像素）
+    g.strokeStyle = '#efe9dc';
+    g.lineCap = g.lineJoin = 'round';
+    for (const { r, box } of mapRoads) {
+      if (!seen(box, r.w)) continue;
+      g.lineWidth = Math.max(1, r.w / mpp);
+      g.beginPath();
+      line(r.pts);
+      g.stroke();
+    }
+    // 房子
+    g.fillStyle = '#bdb7ab';
+    g.strokeStyle = 'rgba(90, 86, 78, 0.55)';
+    g.lineWidth = mpp < 1.5 ? 1 : 0.5;
+    g.beginPath();
+    for (const b of buildings) if (seen(b.box)) b.rings.forEach(ring);
+    g.fill('evenodd');
+    if (mpp < 4) g.stroke();
+    // 國館：地面、草地、水（小島挖回草地）、步道、樹、建築，外框一圈
+    g.fillStyle = '#ece4d2';
+    g.beginPath();
+    ring(o.outline);
+    g.fill();
+    g.fillStyle = '#a8cf7e';
+    g.beginPath();
+    for (const l of parkLawns) if (seen(l.box)) ring(l.r);
+    g.fill();
+    for (const wt of pm.water) {
+      g.fillStyle = '#9fcde0';
+      g.beginPath();
+      ring(wt.outer);
+      g.fill();
+      g.fillStyle = '#a8cf7e';
+      g.beginPath();
+      wt.islands.forEach(ring);
+      g.fill();
+    }
+    g.strokeStyle = '#f6f0e2';
+    g.lineWidth = Math.max(1, 2.5 / mpp);
+    g.beginPath();
+    pm.paths.forEach(line);
+    g.stroke();
+    if (mpp < 3) {
+      g.fillStyle = 'rgba(86, 140, 62, 0.45)';
+      g.beginPath();
+      for (const [x, y, r] of pm.trees) {
+        g.moveTo(X(x) + Math.max(1, r / mpp), Y(y));
+        g.arc(X(x), Y(y), Math.max(1, r / mpp), 0, Math.PI * 2);
+      }
+      g.fill();
+    }
+    g.fillStyle = '#c9a77c';
+    g.beginPath();
+    pm.buildings.forEach(ring);
+    g.fill();
+    g.strokeStyle = 'rgba(90, 86, 78, 0.6)';
+    g.lineWidth = 1;
+    g.beginPath();
+    ring(o.outline);
+    g.stroke();
+    // 走得到的邊界（2 公里）：粉紅色虛線
+    g.strokeStyle = 'rgba(232, 120, 150, 0.85)';
+    g.setLineDash([6, 5]);
+    g.lineWidth = 2;
+    g.beginPath();
+    g.arc(X(o.center[0]), Y(o.center[1]), CITY_WALK_M / mpp, 0, Math.PI * 2);
+    g.stroke();
+    g.setLineDash([]);
+  }
   return {
     group,
+    walkM: CITY_WALK_M,
     tooFar,
+    drawMap,
     canStand: (p) => !tooFar(p) && !inWater(p) && !inBuilding(p, BODY) && !hitTrunk(p),
     update(cam, you, now, night) {
       let changed = false;

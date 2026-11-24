@@ -2648,8 +2648,9 @@ body.letters-open { overflow: hidden; }
 
 /* 3D 的中山公園（park3d.ts，蓋在整個畫面上面） */
 .p3d { position: fixed; inset: 0; z-index: 1000; background: #bcd6ea; touch-action: none; user-select: none; -webkit-user-select: none; font-family: var(--font); }
-.p3d canvas { position: absolute; inset: 0; display: block; width: 100%; height: 100%; cursor: grab; }
-.p3d canvas:active { cursor: grabbing; }
+/* 3D 的畫布撐滿畫面（小地圖、大地圖的 canvas 不算） */
+.p3d > canvas:not(.p3d-minimap) { position: absolute; inset: 0; display: block; width: 100%; height: 100%; cursor: grab; }
+.p3d > canvas:not(.p3d-minimap):active { cursor: grabbing; }
 .p3d-top { position: absolute; left: 0; right: 0; top: 0; display: flex; align-items: center; gap: 8px; padding: calc(10px + env(safe-area-inset-top)) 12px 8px; pointer-events: none; }
 .p3d-top > * { pointer-events: auto; }
 /* 3D 國館的指北針（v1.800）：右上角，紅色那頭指北，點一下轉回面向北 */
@@ -2666,7 +2667,15 @@ body.letters-open { overflow: hidden; }
 .p3d-compass.on { background: #15171c; border-color: #f4efe6; }
 .p3d-compass.on .needle-s, .p3d-compass.on .needle-letter { fill: #f4efe6; }
 .p3d-title { margin: 0 auto; padding: 4px 12px; border-radius: 12px; background: rgba(244, 239, 230, 0.85); text-align: center; font-weight: 800; color: #15171c; pointer-events: none; }
-.p3d-mark-toggle[aria-pressed='true'] { background: var(--chip-on-bg); color: var(--chip-on-text); border-color: var(--chip-on-border); }
+.p3d-mark-toggle[aria-pressed='true'], .p3d-map-toggle[aria-pressed='true'] { background: var(--chip-on-bg); color: var(--chip-on-text); border-color: var(--chip-on-border); }
+/* 汪星 3D 的小地圖（v1.818）：指北針下面的圓，點了放大；大地圖蓋在畫面中間，點一下收起來 */
+.p3d-minimap { position: absolute; right: calc(12px + env(safe-area-inset-right)); top: calc(114px + env(safe-area-inset-top)); width: 132px; height: 132px; border-radius: 50%; border: 2px solid #15171c; box-shadow: 2px 2px 0 #15171c; background: #cfe2ae; cursor: pointer; }
+@media (pointer: coarse) { .p3d-minimap { width: 112px; height: 112px; } }
+.p3d-bigmap { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; background: rgba(10, 14, 20, 0.55); cursor: pointer; }
+.p3d-bigmap[hidden] { display: none; }
+.p3d-bigmap canvas { border-radius: 16px; border: 2px solid #15171c; box-shadow: 3px 3px 0 #15171c; background: #cfe2ae; }
+.p3d-bigmap small { color: #fff; font-size: 13px; }
+.p3d.p3d-flying .p3d-minimap, .p3d.p3d-flying .p3d-bigmap { display: none; }
 .p3d-hint { position: absolute; left: 50%; top: calc(64px + env(safe-area-inset-top)); transform: translateX(-50%); padding: 6px 12px; border-radius: 999px; background: rgba(21, 23, 28, 0.72); color: #fff; font-size: 13px; white-space: nowrap; pointer-events: none; }
 .p3d-cross { position: absolute; left: 50%; top: 50%; width: 18px; height: 18px; margin: -9px 0 0 -9px; pointer-events: none; background: linear-gradient(#fff, #fff) center / 2px 100% no-repeat, linear-gradient(#fff, #fff) center / 100% 2px no-repeat; filter: drop-shadow(0 0 1px #000); opacity: 0.75; }
 .p3d-stick { position: absolute; left: calc(20px + env(safe-area-inset-left)); bottom: calc(24px + env(safe-area-inset-bottom)); width: 120px; height: 120px; border-radius: 50%; background: rgba(255, 255, 255, 0.28); border: 2px solid rgba(21, 23, 28, 0.45); touch-action: none; }
