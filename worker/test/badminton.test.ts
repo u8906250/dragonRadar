@@ -26,6 +26,16 @@ describe('detectEnded for drop-in games', () => {
   it('sees a full or cancelled session', () => {
     expect(detectEnded('今晚臨打名額已滿，謝謝大家')).toBe(true);
     expect(detectEnded('下雨場地取消')).toBe(true);
+    expect(detectEnded('12/6 的場地已出讓，謝謝')).toBe(true);
     expect(detectEnded('缺 2 位，額滿為止')).toBe(false);
+  });
+  it('reads 場地出讓 as a single session (v1.832)', () => {
+    const r = normalizeSessions({ is_event: true, events: [{ role: 'transfer', title: '黃瓜羽球館場地出讓', start_at: '2026-12-06T10:00:00+08:00', end_at: '2026-12-06T12:00:00+08:00', place_text: '黃瓜羽球館 CCB badminton', place_query: '黃瓜羽球館', spot: true, weekdays: null, until: null, fee: '$900/2hr', level: null, slots: null, capacity: '12 人', courts: '1 面', shuttle: null, team: null, contact: 'dm', available: null, confidence: 0.85 }] });
+    const e = r?.events[0];
+    expect(e?.title).toBe('黃瓜羽球館場地出讓');
+    expect(e?.spot).toBe(false);
+    expect(e?.item).toBe('$900/2hr');
+    expect(e?.extra).toMatchObject({ role: 'transfer', fee: '$900/2hr', courts: '1 面', capacity: null, available: null });
+    expect(normalizeSessions({ is_event: true, events: [{ role: 'transfer', title: null }] })?.events[0].title).toBe('羽球場地出讓');
   });
 });

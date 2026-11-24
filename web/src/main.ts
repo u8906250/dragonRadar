@@ -302,7 +302,7 @@ const jobWords = (): JobWords => JOB_WORDS[mod.id === 'work' ? 'work' : 'dog'];
 
 // ---- 羽球臨打：招臨打（提供）照場次排，找臨打（需求）是刊登 ----
 interface SessionExtra {
-  role?: 'offer' | 'seek';
+  role?: 'offer' | 'seek' | 'transfer';
   available?: string | null;
   fee?: string | null;
   level?: string | null;
@@ -320,6 +320,9 @@ interface SessionExtra {
 }
 const sessionOf = (ev: { extra?: Record<string, unknown> | null }): SessionExtra => (ev.extra ?? {}) as SessionExtra;
 const isSeek = (ev: { kind: string; extra?: Record<string, unknown> | null }): boolean => ev.kind === 'session' && sessionOf(ev).role === 'seek';
+/** 場地出讓（v1.832）：訂了場地不能打、整個讓出去，跟招臨打一樣照場次排 */
+const isTransfer = (ev: { kind: string; extra?: Record<string, unknown> | null }): boolean => ev.kind === 'session' && sessionOf(ev).role === 'transfer';
+const sessionLabel = (ev: { kind: string; extra?: Record<string, unknown> | null }): string => (isSeek(ev) ? '找臨打' : isTransfer(ev) ? '場地出讓' : '招臨打');
 /** 找臨打、揪團的時間：「想打 10/25（六）14:00–17:00」「約 10/22（四）19:00」，沒寫就是「可以打 週末下午」「時間可討論」 */
 function seekWhen(ev: { kind: string; extra?: Record<string, unknown> | null }): string {
   const x = sessionOf(ev);
@@ -355,11 +358,14 @@ function postingRole(ev: { kind: string; extra?: Record<string, unknown> | null 
   return role && POSTING_SECTION[role] ? role : null;
 }
 
-/** 其他模組的摘要：「2 場招臨打、1 個找臨打」「1 個出攤、3 家推薦、1 個揪團」；狗狗陪伴是徵人、可照顧 */
+/** 其他模組的摘要：「2 場招臨打、1 個場地出讓、1 個找臨打」「1 個出攤、3 家推薦、1 個揪團」；狗狗陪伴是徵人、可照顧 */
 function moduleSummary(singles: Row[], spotsIn: Row[], postings: Map<string, Row[]>): string {
   const n = (role: string): number => postings.get(role)?.length ?? 0;
   const join = (parts: Array<[number, string]>): string => parts.filter(([c]) => c > 0).map(([c, t]) => `${c} ${t}`).join('、');
-  if (mod.id === 'badminton') return join([[singles.length + spotsIn.length, '場招臨打'], [n('seek'), '個找臨打']]);
+  if (mod.id === 'badminton') {
+    const transfers = [...singles, ...spotsIn].filter((r) => r.it && isTransfer(r.it.ev)).length;
+    return join([[singles.length + spotsIn.length - transfers, '場招臨打'], [transfers, '個場地出讓'], [n('seek'), '個找臨打']]);
+  }
   if (mod.id === 'food') return join([[singles.length + spotsIn.length, '個出攤'], [n('recommend'), '家推薦'], [n('meetup'), '個揪團']]);
   if (mod.storeTypes) {
     const open = singles.filter((r) => r.phase === 'active').length;
@@ -3477,7 +3483,9 @@ function render(): void {
         : it.ev.kind === 'session'
         ? isSeek(it.ev)
           ? '附近有人找臨打'
-          : '臨打開始'
+          : isTransfer(it.ev)
+            ? '場地出讓的時段開始'
+            : '臨打開始'
         : it.ev.kind === 'job'
           ? isOffer(it.ev)
             ? '附近有人可以幫忙照顧狗狗'
@@ -5530,7 +5538,7 @@ function spotSchedule(it: Item): string {
   return `${spotHours(it.spot?.sessions ?? [it.ev])}，${range}`;
 }
 
-/** 羽球臨打的詳細資料：招臨打寫時段、費用、程度、缺幾位、人數上限、場地數、用球、球團；找臨打寫程度、可以打的時間、地區 */
+/** 羽球臨打的詳細資料：招臨打寫時段、費用、程度、缺幾位、人數上限、場地數、用球、球團；找臨打寫程度、可以打的時間、地區；場地出讓寫時段、場地費、場地數 */
 function sessionDetailHtml(it: Item, now: number): string {
   const { ev } = it;
   const x = sessionOf(ev);
@@ -5541,6 +5549,9 @@ function sessionDetailHtml(it: Item, now: number): string {
     return `<p>類型：找臨打（球友想找地方打）<br>${line('程度', x.level)}時間：${esc(seekWhen(ev))}<br>${line('聯絡方式', contact)}${where}</p>`;
   }
   const time = it.spot ? spotSchedule(it) : eventTimeText(ev);
+  if (isTransfer(ev)) {
+    return `<p>類型：場地出讓（訂了場地不能打，整個讓出去）<br>時間：${esc(time)}<br>${line('場地費', x.fee ?? ev.item)}${line('場地數', x.courts)}${line('聯絡方式', contact)}${where} · ${esc(timeLine(it, now))}</p>`;
+  }
   return `<p>類型：${it.spot ? '招臨打・每週固定場' : '招臨打'}<br>時間：${esc(time)}<br>${line('費用', x.fee ?? ev.item)}${line('程度', x.level)}${line('缺幾位', x.slots)}${line('人數上限', x.capacity)}${line('場地數', x.courts)}${line('用球', x.shuttle)}${line('球團', x.team)}${line('報名方式', contact)}${where} · ${esc(timeLine(it, now))}</p>`;
 }
 
@@ -8205,7 +8216,7 @@ function placeLine(ev: EventOut): string {
 
 function kindLabel(ev: EventOut): string {
   if (ev.kind === 'store') return storeTypeLabel(ev);
-  if (ev.kind === 'session') return isSeek(ev) ? '找臨打' : '招臨打';
+  if (ev.kind === 'session') return sessionLabel(ev);
   if (ev.kind === 'food') return { vendor: '出攤', recommend: '推薦', meetup: '揪團' }[foodRole(ev) ?? 'recommend'] ?? '推薦';
   return ev.kind === 'job' ? (isOffer(ev) ? jobWords().offer : '徵人') : ev.kind === 'activity' ? (topicOf(ev) ?? '活動') : '發放';
 }
@@ -9338,7 +9349,7 @@ function renderPreview(r: SubmitResult): void {
     <ul class="report-preview">${(r.routes ?? []).map(routePreviewHtml).join('')}${items
       .map(
         (p) => `<li>
-          <b>${p.kind === 'store' ? esc(storeTypeLabel(p)) : p.kind === 'food' ? ({ vendor: '出攤', recommend: '推薦', meetup: '揪團' }[foodRole(p) ?? 'recommend'] ?? '推薦') : p.kind === 'session' ? (isSeek(p) ? '找臨打' : '招臨打') : p.kind === 'job' ? (isOffer(p) ? jobWords().offer : '徵人') : p.kind === 'activity' ? esc(topicOf(p) ?? '活動') : '發放'}${p.spot ? (p.kind === 'session' ? '・每週固定場' : p.kind === 'food' ? '・每週固定擺攤' : '・固定據點') : ''}｜${esc(p.title)}</b>
+          <b>${p.kind === 'store' ? esc(storeTypeLabel(p)) : p.kind === 'food' ? ({ vendor: '出攤', recommend: '推薦', meetup: '揪團' }[foodRole(p) ?? 'recommend'] ?? '推薦') : p.kind === 'session' ? sessionLabel(p) : p.kind === 'job' ? (isOffer(p) ? jobWords().offer : '徵人') : p.kind === 'activity' ? esc(topicOf(p) ?? '活動') : '發放'}${p.spot ? (p.kind === 'session' ? '・每週固定場' : p.kind === 'food' ? '・每週固定擺攤' : '・固定據點') : ''}｜${esc(p.title)}</b>
           ${p.kind === 'job' && (jobOf(p).risks ?? []).some((r) => r !== 'no_employer') ? `<small class="preview-warn">⚠️ ${esc((jobOf(p).risks ?? []).map((r) => JOB_RISK_TEXT[r]).filter(Boolean).join('；'))}</small>` : ''}
           ${p.item ? `<small>${esc(p.item)}</small>` : ''}
           ${sessionPreviewHtml(p)}
