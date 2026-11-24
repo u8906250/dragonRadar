@@ -7,6 +7,7 @@
  * （公園裡、不進建築、不下水，橋上可以），樹幹也擋。
  * 小法只在從汪星進來的時候在（地球的中山公園沒有）：跟汪星同一隻（PARK_DOGS，同一個時間在同一個地方做同一件事），
  * 照雷達上的畫法：dog.ts 同一組橢球照姿勢擺出來，表面長出一根根的毛（同一批位置）。
+ * 汪星的國館外面（v1.812）：從入口走出去是荒廢了幾萬年的街道（woof-city3d.ts，國館附近 2 公里），整個畫面照汪星的大小彎（地平線很近）。
  * 標記（右上「標記」打開）：選種類（路燈、長椅、垃圾桶、其他），點地面放一個，可以轉方向、寫備註，按「儲存」存到伺服器
  * （/api/admin/park-marks，只有管理 token 能讀寫）；點已經標的可以移動、轉向、改備註、刪除。
  * three.js 只在打開時才載入（main.ts 用 import()），平常的雷達不會變大
@@ -20,7 +21,8 @@ import { arriveRocket, ARRIVE_MS, DEPART_MS, departRocket, HATCH_CENTER, moveDog
 import { cloudLayer, puffTexture, rocketModel, ROCKET_H, ROCKET_WINDOW_Y, spaceScene, type SpaceTrip } from './rocket3d';
 import { compassSupported, startOrientation } from './compass';
 import { altOf, azOf, type Enu, moonEnu, moonLit, ORION_LABEL, ORION_LINES, ORION_NEBULA, ORION_STARS, skyLook, type SkyStar, starEnu, sunEnu } from './sky';
-import { toWoof } from './space';
+import { toWoof, WOOF_KM } from './space';
+import type { WoofCity } from './woof-city3d';
 import { ZHONGSHAN_PARK as Z } from './zhongshan';
 import { MIN_HALF, widthSides, withWidths as alongWidths } from './zhongshan-widths';
 
@@ -401,7 +403,8 @@ export interface Park3DOptions {
   onWorld?: (to: 'earth' | 'woof') => void;
   /** 點到小法（main.ts：還沒有小法卡就拿一張） */
   onPetDog?: (id: string) => void;
-  onExit: () => void;
+  /** 離開（at：最後站的台北經緯度、在哪一邊；main.ts 把雷達上的汪星轉到那裡） */
+  onExit: (at?: [number, number], world?: 'earth' | 'woof') => void;
 }
 
 /**
@@ -443,6 +446,83 @@ const DOG_HIT_M = 0.45;
 /** 小法的頭（眼睛）大概多高（抬頭看你時照這個算往上看幾度） */
 const DOG_HEAD_Y = 0.3;
 const wrap = (deg: number): number => ((((deg % 360) + 540) % 360) - 180);
+/**
+ * 汪星的弧度（openPark3D 的 bendMat）：照 three.js 的 project_vertex 算，只是先換到世界座標，照離鏡頭的水平距離 d 往下沉 d² × uBend（= 1/2R）
+ */
+const BEND_VERTEX = `vec4 mvPosition = vec4( transformed, 1.0 );
+#ifdef USE_BATCHING
+  mvPosition = batchingMatrix * mvPosition;
+#endif
+#ifdef USE_INSTANCING
+  mvPosition = instanceMatrix * mvPosition;
+#endif
+vec4 bendW = modelMatrix * mvPosition;
+vec2 bendD = bendW.xz - cameraPosition.xz;
+bendW.y -= dot( bendD, bendD ) * uBend;
+mvPosition = viewMatrix * bendW;
+gl_Position = projectionMatrix * mvPosition;`;
+/** 汪星彎的時候三角形最長的邊（公尺）：只有頂點會沉下去，大三角形中間會浮起來（8 公尺差不到 2 毫米） */
+const BEND_EDGE_M = 8;
+/**
+ * 把大三角形切小（最長的邊超過 max 就從那一邊的中點切成兩個，所有屬性跟著內插、法線重新算長度）；
+ * 不用切（整個不到 max 大）、多種材質（groups）、有變形動畫的不處理，回傳 null
+ */
+function tessellate(geo: THREE.BufferGeometry, max: number): THREE.BufferGeometry | null {
+  if (geo.groups.length > 1 || Object.keys(geo.morphAttributes).length || !geo.getAttribute('position')) return null;
+  geo.computeBoundingBox();
+  const bb = geo.boundingBox!;
+  if (Math.max(bb.max.x - bb.min.x, bb.max.y - bb.min.y, bb.max.z - bb.min.z) <= max) return null;
+  const src = geo.index ? geo.toNonIndexed() : geo;
+  const names = Object.keys(src.attributes);
+  const attrs = names.map((n) => src.getAttribute(n));
+  const pi = names.indexOf('position');
+  const ni = names.indexOf('normal');
+  const out: number[][] = names.map(() => []);
+  type V = number[][];
+  const vtx = (i: number): V => attrs.map((a) => Array.from({ length: a.itemSize }, (_, c) => a.getComponent(i, c)));
+  const mid = (a: V, b: V): V =>
+    a.map((arr, k) => {
+      const m = arr.map((x, c) => (x + b[k][c]) / 2);
+      if (k === ni) {
+        const l = Math.hypot(m[0], m[1], m[2]) || 1;
+        return m.map((x) => x / l);
+      }
+      return m;
+    });
+  const len2 = (a: V, b: V): number => (a[pi][0] - b[pi][0]) ** 2 + (a[pi][1] - b[pi][1]) ** 2 + (a[pi][2] - b[pi][2]) ** 2;
+  let split = false;
+  const stack: V[][] = [];
+  for (let i = 0; i + 2 < src.getAttribute('position').count; i += 3) {
+    stack.push([vtx(i), vtx(i + 1), vtx(i + 2)]);
+    while (stack.length) {
+      const [a, b, c] = stack.pop()!;
+      const [ab, bc, ca] = [len2(a, b), len2(b, c), len2(c, a)];
+      const m = Math.max(ab, bc, ca);
+      if (m <= max * max) {
+        for (const v of [a, b, c]) v.forEach((arr, k) => out[k].push(...arr));
+        continue;
+      }
+      split = true;
+      // 從最長的那一邊切開（順序不變，正反面不會翻）
+      if (m === ab) {
+        const d = mid(a, b);
+        stack.push([a, d, c], [d, b, c]);
+      } else if (m === bc) {
+        const d = mid(b, c);
+        stack.push([a, b, d], [a, d, c]);
+      } else {
+        const d = mid(c, a);
+        stack.push([a, b, d], [d, b, c]);
+      }
+    }
+  }
+  if (!split) return null;
+  const g = new THREE.BufferGeometry();
+  names.forEach((n, k) => g.setAttribute(n, new THREE.Float32BufferAttribute(out[k], attrs[k].itemSize, attrs[k].normalized)));
+  return g;
+}
+/** 汪星 3D 走到國館附近 2 公里的邊上：提示（電腦、手機都一樣） */
+const CITY_EDGE_MSG = '汪星 3D 目前只開放到國館附近 2 公里';
 
 /** 打開 3D 公園（蓋在整個畫面上面），回傳關掉的函式 */
 export function openPark3D(o: Park3DOptions): () => void {
@@ -468,6 +548,7 @@ export function openPark3D(o: Park3DOptions): () => void {
       <div class="p3d-status"></div>
     </div>
     <div class="p3d-msg" hidden></div>
+    <small class="p3d-attrib" hidden>街道、房子的位置：<a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">© OpenStreetMap</a></small>
     <div class="p3d-cockpit" hidden><div class="p3d-porthole"></div><div class="p3d-gauge"></div></div>
     <div class="p3d-flash"></div>`;
   document.body.appendChild(root);
@@ -713,13 +794,60 @@ export function openPark3D(o: Park3DOptions): () => void {
     return mesh;
   };
 
+  // ---- 汪星的國館外面（v1.812 使用者說汪星除了國館整個做成 3D、走出國館看到荒廢幾萬年的街道）：woof-city3d.ts，在汪星才載入（applyWorld）
+  let city: WoofCity | null = null;
+  /**
+   * 照汪星的大小彎（使用者選的）：汪星很小（半徑 WOOF_KM），每個東西照離鏡頭的水平距離 d 往下沉 d²/2R，站著看地平線約 150 公尺外，
+   * 遠的房子慢慢沉下去。改的是畫到畫面上的位置（頂點著色器），影子、點擊照原本的位置算（80 公尺內差不到半公尺）；
+   * 天空、太陽、月亮、星星不彎。在地球 bendU 是 0（地球的材質不改）
+   */
+  const bendU = { value: 0 };
+  const bent = new WeakSet<THREE.Material>();
+  /** 看過、切過的形狀（BEND_EDGE_M） */
+  const cut = new WeakSet<THREE.BufferGeometry>();
+  const bendMat = (m: THREE.Material): void => {
+    if (bent.has(m) || m instanceof THREE.ShaderMaterial || m instanceof THREE.SpriteMaterial) return;
+    bent.add(m);
+    const prev = m.onBeforeCompile;
+    // 同一種材質有沒有彎要分開編譯（原本有改著色器的，例如草，也照原本的分開）
+    const key = `${m.customProgramCacheKey()}|bend`;
+    m.onBeforeCompile = (sh, r) => {
+      prev.call(m, sh, r);
+      sh.uniforms.uBend = bendU;
+      sh.vertexShader = `uniform float uBend;\n${sh.vertexShader.replace('#include <project_vertex>', BEND_VERTEX)}`;
+    };
+    m.customProgramCacheKey = () => key;
+    m.needsUpdate = true;
+  };
+  /**
+   * 場景裡（天空以外）還沒彎的材質都彎（標記、火箭的煙這些後來才加的也會照到），大三角形切小
+   * （userData.noCut 的不切：汪星的街道自己切好了、公園外面那一大片地球的地面在汪星不畫）
+   */
+  const bendScene = (): void => {
+    const visit = (x: THREE.Object3D, noCut: boolean): void => {
+      const skip = noCut || !!x.userData.noCut;
+      const mm = (x as THREE.Mesh).material as THREE.Material | THREE.Material[] | undefined;
+      if (mm) for (const m of Array.isArray(mm) ? mm : [mm]) bendMat(m);
+      if (x instanceof THREE.Mesh && !(x instanceof THREE.InstancedMesh) && !skip && !cut.has(x.geometry)) {
+        const g = tessellate(x.geometry, BEND_EDGE_M);
+        if (g) {
+          x.geometry.dispose();
+          x.geometry = g;
+        }
+        cut.add(x.geometry);
+      }
+      for (const c of x.children) visit(c, skip);
+    };
+    for (const c of scene.children) if (c !== skyGroup) visit(c, false);
+  };
+
   // ---- 地面：公園外面、公園（廣場，挖掉水面）、草地、步道
   // 公園外面一大圈（挖掉公園，不然會蓋住比地面低的翠湖）
   const outline = ringEN(Z.outline);
   const far = Array.from({ length: 64 }, (_, i): Pt => [Math.cos((i / 64) * Math.PI * 2) * 5000, Math.sin((i / 64) * Math.PI * 2) * 5000]);
-  // 公園外面：從高處看像城市（一塊塊深淺不一的街廓、淺色的馬路，一張 400 公尺見方重複鋪）；
-  // 汪星的地面大多鋪滿草地（跟雷達一樣）：街廓換成深淺不一的草地，馬路照舊
-  const cityTex = (grassy: boolean): THREE.CanvasTexture => {
+  // 地球的公園外面：從高處看像城市（一塊塊深淺不一的街廓、淺色的馬路，一張 400 公尺見方重複鋪）；
+  // 汪星的地面鋪滿草地（跟雷達一樣，跟國館的草地同一張圖），上面蓋荒廢的街道（woof-city3d.ts）
+  const cityTex = (): THREE.CanvasTexture => {
     const cv = document.createElement('canvas');
     [cv.width, cv.height] = [512, 512];
     const g = cv.getContext('2d')!;
@@ -730,8 +858,7 @@ export function openPark3D(o: Park3DOptions): () => void {
         const [x, y] = [i * 85 + 8, j * 85 + 8];
         for (let k = 0; k < 6; k++) {
           const v = 150 + Math.floor(hash(i * 61 + j * 17 + k * 5 + 300) * 50);
-          if (grassy) g.fillStyle = `rgb(${v - 50}, ${v + 5}, ${v - 85})`;
-          else g.fillStyle = hash(i * 7 + j * 13 + k + 800) < 0.12 ? `rgb(${v - 40}, ${v - 5}, ${v - 50})` : `rgb(${v}, ${v - 3}, ${v - 8})`;
+          g.fillStyle = hash(i * 7 + j * 13 + k + 800) < 0.12 ? `rgb(${v - 40}, ${v - 5}, ${v - 50})` : `rgb(${v}, ${v - 3}, ${v - 8})`;
           g.fillRect(x + (k % 3) * 24 + 1, y + Math.floor(k / 3) * 36 + 1, 22, 34);
         }
       }
@@ -742,9 +869,11 @@ export function openPark3D(o: Park3DOptions): () => void {
     t.anisotropy = renderer.capabilities.getMaxAnisotropy();
     return t;
   };
-  const outside = { earth: cityTex(false), woof: cityTex(true) };
-  const outsideMat = mat(0xffffff, { map: outside[world] });
-  add(flatGeo([shapeOf(far, [outline])], -0.01), outsideMat);
+  // 汪星的（草地）等草地的圖畫好再換（下面的 outside）
+  const earthGround = cityTex();
+  const outsideMat = mat(0xffffff, { map: earthGround });
+  const outsideMesh = add(flatGeo([shapeOf(far, [outline])], -0.01), outsideMat);
+  outsideMesh.userData.noCut = true;
   const waters = Z.water.map(([outer, ...islands]) => ({ outer: ringEN(outer), islands: islands.map(ringEN) }));
   add(flatGeo([shapeOf(outline, waters.map((w) => w.outer))], 0), mat(0xe2dccf));
   // 草地：淡綠色上面一叢叢密密的草（畫在一張 GRASS_TILE 公尺見方、重複鋪的圖上，遠處也看得到草；近的還有立體的草）
@@ -795,6 +924,8 @@ export function openPark3D(o: Park3DOptions): () => void {
     return t;
   })();
   const grass = mat(0xffffff, { map: grassTex });
+  const outside: Record<'earth' | 'woof', THREE.Texture> = { earth: earthGround, woof: grassTex };
+  outsideMat.map = outside[world];
   // 草地（花台另外畫）
   const bedSet = new Set(Z.flowerBeds);
   // 銅像廣場平台上的草皮另外畫（在平台上面）
@@ -1989,7 +2120,9 @@ export function openPark3D(o: Park3DOptions): () => void {
         for (const k of trunkGrid.get(`${i},${j}`) ?? []) if (Math.hypot(p[0] - trees[k].at[0], p[1] - trees[k].at[1]) < trunkR(trees[k].r) + 0.25) return true;
     return false;
   };
-  const canStand = (p: Pt): boolean => personOk(ll(p[0], p[1])) && !hitTrunk(p) && !hitWall(p) && !hitPlaza(p);
+  // 汪星的國館外面照 woof-city3d.ts（房子、水、樹幹、路燈、2 公里），國館裡照舊
+  const canStand = (p: Pt): boolean =>
+    (city && world === 'woof' && !inside(p, outline) ? city.canStand(p) : personOk(ll(p[0], p[1]))) && !hitTrunk(p) && !hitWall(p) && !hitPlaza(p);
   /** 腳下多高：橋上是橋面、旗台上是旗台 */
   const floorAt = (p: Pt): number => (onBridge(p) ? BRIDGE_TOP : inside(p, flagBaseRing) ? FLAG_BASE_H : plazaFloor(p));
 
@@ -2437,6 +2570,8 @@ export function openPark3D(o: Park3DOptions): () => void {
   let pitch = -0.05;
   const lastSpot = loadSpot();
   if (lastSpot && canStand(en(lastSpot.at))) [pos, yaw, pitch] = [en(lastSpot.at), lastSpot.yaw, lastSpot.pitch];
+  /** 一開始站的地方（還沒走過：pos 還是這一個） */
+  const startPos = pos;
   /** 指北針的指針（面向東時北在左邊：轉 -面向的角度）；畫過的角度（差不到半度不重設） */
   const needle = root.querySelector<SVGGElement>('.p3d-needle');
   let needleDeg = NaN;
@@ -2470,6 +2605,8 @@ export function openPark3D(o: Park3DOptions): () => void {
   let stickHeld = 0;
   const stick = { x: 0, y: 0, id: -1 };
   let dirty = true;
+  /** 天黑了多少（0～1，updateSky 照現在的時間算）：汪星的螢火蟲、蝴蝶照這個 */
+  let nightNow = 0;
   let shadowAt: Pt = [Infinity, Infinity];
   /** 腳下的高度（眼睛跟著慢慢變：跳下碑林、上下石階不會一下子跳） */
   let eyeFloor = NaN;
@@ -2514,6 +2651,7 @@ export function openPark3D(o: Park3DOptions): () => void {
     const [sd, md] = [sunEnu(at, O[0], O[1]), moonEnu(at, O[0], O[1])];
     const [sAlt, mAlt, lit] = [altOf(sd), altOf(md), moonLit(sd, md)];
     const look = skyLook(sAlt);
+    nightNow = look.night;
     const [sw, mw] = [toWorld(sd), toWorld(md)];
     domeU.zenith.value.setHex(look.zenith);
     domeU.horizon.value.setHex(look.horizon);
@@ -2626,11 +2764,17 @@ export function openPark3D(o: Park3DOptions): () => void {
       const dh = floorAt(next) - floorAt(pos);
       if (canStand(next) && (Math.abs(dh) < 0.3 || (dh < 0 && plazaSideDrop(pos, next)))) {
         pos = next;
-        break;
+        return true;
       }
+    }
+    // 汪星走到 2 公里的邊上：提示一下（隔幾秒才再提示）
+    if (city && world === 'woof' && city.tooFar([pos[0] + d[0], pos[1] + d[1]]) && performance.now() - edgeMsgAt > 5000) {
+      edgeMsgAt = performance.now();
+      msg(CITY_EDGE_MSG);
     }
     return true;
   }
+  let edgeMsgAt = -Infinity;
 
   // ---- 點一下：標記模式下點地面放、點標記改
   const ray = new THREE.Raycaster();
@@ -2684,6 +2828,41 @@ export function openPark3D(o: Park3DOptions): () => void {
   const SKY = new THREE.Color(0xbcd6ea);
   const DARK = new THREE.Color(0x0b1a33);
   const fog = scene.fog as THREE.Fog;
+  /** 霧從多遠開始、多遠看不見：汪星的地平線很近、低的東西自己會沉下去，霧推遠一點（高樓遠遠的才看得到） */
+  let fogBase: [number, number] = [140, 700];
+  const attrib = $<HTMLElement>('.p3d-attrib');
+  const parkMid: Pt = [(Math.min(...outline.map((p) => p[0])) + Math.max(...outline.map((p) => p[0]))) / 2, (Math.min(...outline.map((p) => p[1])) + Math.max(...outline.map((p) => p[1]))) / 2];
+  /** 上次走到國館外面：等街道載入了才知道站不站得住（還沒動就回到那裡） */
+  const outsideSpot = lastSpot && !inside(en(lastSpot.at), outline) ? lastSpot : null;
+  let cityLoading = false;
+  /** 換到哪一邊（一開始、搭火箭到了）：汪星有荒廢的街道（第一次才載入）、整個畫面彎、霧比較遠、草地；地球照舊 */
+  function applyWorld(): void {
+    const woof = world === 'woof';
+    bendU.value = woof ? 1 / (2 * WOOF_KM * 1000) : 0;
+    if (city) city.group.visible = woof;
+    fogBase = woof && city ? [300, 1600] : [140, 700];
+    [fog.near, fog.far] = fogBase;
+    camera.far = woof ? 2500 : 1500;
+    camera.updateProjectionMatrix();
+    outsideMat.map = outside[world];
+    // 汪星的街道載入了：地面換成街道那邊跟著你的草地（這一大片太大，彎了會整片斜下去）
+    outsideMesh.visible = !(woof && city);
+    attrib.hidden = !woof;
+    dirty = true;
+    if (!woof || city || cityLoading) return;
+    cityLoading = true;
+    void import('./woof-city3d')
+      .then((m) => {
+        if (closed) return;
+        city = m.buildWoofCity({ outline, lakes: waters.map((w) => w.outer), center: parkMid, grass, radiusM: WOOF_KM * 1000, anisotropy: renderer.capabilities.getMaxAnisotropy() });
+        city.group.userData.noCut = true;
+        scene.add(city.group);
+        applyWorld();
+        if (outsideSpot && pos === startPos && world === 'woof' && canStand(en(outsideSpot.at))) [pos, yaw, pitch] = [en(outsideSpot.at), outsideSpot.yaw, outsideSpot.pitch];
+      })
+      .catch(() => msg('汪星的街道載入失敗，重新進來再試一次', 5000))
+      .finally(() => (cityLoading = false));
+  }
   const cockpit = $<HTMLElement>('.p3d-cockpit');
   const gauge = $<HTMLElement>('.p3d-gauge');
   const flash = $<HTMLElement>('.p3d-flash');
@@ -2743,8 +2922,8 @@ export function openPark3D(o: Park3DOptions): () => void {
     const a = Math.min(1, alt / F_TOP);
     (scene.background as THREE.Color).copy(SKY).lerp(DARK, a);
     fog.color.copy(scene.background as THREE.Color);
-    fog.near = 140 + alt * 1.5;
-    fog.far = 700 + alt * 4;
+    fog.near = fogBase[0] + alt * 1.5;
+    fog.far = fogBase[1] + alt * 4;
   };
   const altText = (alt: number): string => `高度 ${Math.round(alt).toLocaleString('zh-TW')} 公尺`;
   /** 搭火箭的這一格：鏡頭擺好，回傳要畫哪一個場景 */
@@ -2798,7 +2977,7 @@ export function openPark3D(o: Park3DOptions): () => void {
       // 到了另一邊的上空（汪星的中山公園有小法）
       f.switched = true;
       world = f.to;
-      outsideMat.map = outside[world];
+      applyWorld();
       for (const sp of smoke) sp.visible = false;
     }
     if (t < F_DOWN) {
@@ -3116,6 +3295,8 @@ export function openPark3D(o: Park3DOptions): () => void {
       const sc = flightStep(now);
       if (flight) {
         drawDog(now);
+        if (city?.group.visible) city.update(flightCam.position, pos, now, nightNow);
+        if (bendU.value) bendScene();
         renderer.render(sc, flightCam);
         return;
       }
@@ -3162,12 +3343,16 @@ export function openPark3D(o: Park3DOptions): () => void {
       rememberedAt = now;
       remember();
     }
+    // 汪星的街道：走近的蓋起來、看得到的才畫，蝴蝶、螢火蟲飛
+    if (city?.group.visible && city.update(camera.position, pos, now, nightNow)) dirty = true;
     if (!dirty) return;
     // 眼睛的高度還在跟上：下一格再畫
     dirty = updateCamera(dt);
     placeGrass();
+    if (bendU.value) bendScene();
     renderer.render(scene, camera);
   };
+  applyWorld();
   frame = requestAnimationFrame(loop);
   panel();
   void loadMarks();
@@ -3193,7 +3378,7 @@ export function openPark3D(o: Park3DOptions): () => void {
     });
     renderer.dispose();
     root.remove();
-    o.onExit();
+    o.onExit(ll(pos[0], pos[1]), world);
   }
   return close;
 }

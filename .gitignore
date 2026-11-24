@@ -6,3 +6,6 @@ dist/
 .env.*
 *.log
 .DS_Store
+
+# 汪星 3D 資料的圖磚快取（web/scripts/gen-woof-city.mjs）
+web/scripts/.tiles/

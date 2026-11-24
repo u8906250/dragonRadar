@@ -2174,6 +2174,14 @@ async function woofHomeView(): Promise<SpaceView> {
   return woofHome;
 }
 
+/** 雷達上的汪星轉到這個地方（台北的經緯度）：在 3D 國館走到哪，離開時雷達就停在哪（汪星的正中間就是你的位置） */
+async function woofViewAt(at: [number, number]): Promise<void> {
+  const sp = await import('./space');
+  const [la, ln] = sp.toWoof(at);
+  radar.setSpaceView({ focus: 'woof', yaw: (-ln * Math.PI) / 180, pitch: (la * Math.PI) / 180 }, true);
+  saveSpaceView();
+}
+
 /** 火箭飛行時拉遠到多遠（雷達外圈，公里）：約 2.7 AU，地球和汪星（離太陽 1.26 AU）一起看得到 */
 const TRIP_OUT_KM = 4e8;
 
@@ -9992,7 +10000,11 @@ function wireControls(): void {
         m.openPark3D({
           token,
           world: radar.spaceFocused && radar.spaceFocusKey === 'woof' ? 'woof' : 'earth',
-          onExit: () => (btn.disabled = false),
+          onExit: (at, w) => {
+            btn.disabled = false;
+            // 汪星：雷達上的汪星轉到你在 3D 裡走到的地方（v1.812 可以走出國館）
+            if (at && w === 'woof' && youOn === 'woof') void woofViewAt(at);
+          },
           onWorld: (to) => void landIn3D(to),
           onPetDog: (id) => void import('./park').then((p) => foundDog(p, id)),
         }),
