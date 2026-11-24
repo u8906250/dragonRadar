@@ -9874,8 +9874,8 @@ function wireFullScreen(): void {
     radar.setFill(on);
     if (!initial) render();
     fullBtn.setAttribute('aria-pressed', String(on));
-    fullBtn.textContent = on ? '縮小' : '全螢幕';
-    fullBtn.title = on ? '離開全螢幕' : '全螢幕';
+    fullBtn.textContent = on ? '雷達' : '全螢幕';
+    fullBtn.title = on ? '回到雷達（離開全螢幕）' : '全螢幕';
     setMore(false);
   };
   const setListOff = (off: boolean): void => {
