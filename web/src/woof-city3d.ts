@@ -5,7 +5,10 @@
  * - 房子：灰白色的水泥殼，窗戶只剩洞、沒有玻璃；上面幾層塌了、牆頂參差不齊，牆腳長青苔、牆上垂著藤蔓，屋頂長滿草、有的長出小樹。
  *   高度照 OSM 寫的高度、樓層數；沒寫的照大小估（ESTIMATE_H），塌掉多少是亂數（固定的，每次一樣）
  * - 馬路：柏油裂成一塊塊、縫裡和一片片長草，大一點的路中間有淡到快看不見的標線（路寬照種類估的，ROAD_W）；高架、隧道不畫
- * - 樹：從人行道、空地、馬路的裂縫長出來，OSM 的草地、樹林長得密；大馬路邊的路燈歪了、生鏽，不會亮；沒有招牌、文字、車
+ * - 樹：從人行道、空地、馬路的裂縫長出來，OSM 的草地、樹林長得密；大馬路邊的路燈歪了、生鏽，不會亮；沒有招牌、文字
+ * - v1.821 使用者說畫廢棄的車子、讓它更接近真實（選了四樣）：路邊褪色生鏽的汽車（輪胎扁了、車頂長青苔小花）、巷子邊一排排機車（有的倒了）、
+ *   面對馬路的一樓是生鏽的鐵捲門（有的半開）、大馬路路口歪掉不亮的紅綠燈、公車亭（沒有站名）、高樓旁邊塌下來的水泥碎塊；
+ *   擺在哪是照馬路、房子的位置用固定的亂數擺的（不是真的位置），汽車、紅綠燈、公車亭、碎石擋路
  * - 白天身邊有幾隻蝴蝶、地上有小花；晚上（照台北的時間）有螢火蟲
  * 分成 CHUNK 公尺一格：走近才蓋（每一格畫面只蓋一點點，不會卡），看得到才畫（汪星很小、地平線很近：照鏡頭和房子的高度算看不看得到）。
  * 人不能走進房子、水裡，樹幹、路燈擋路；離國館中間 CITY_WALK_M 公尺以外走不過去
@@ -155,6 +158,9 @@ interface Chunk {
   c: Pt;
   bs: Building[];
   roads: Road[];
+  /** 路口的紅綠燈、路邊的公車亭（v1.821）：站的地方、朝哪（繞 y 轉多少） */
+  lights: Array<{ p: Pt; yaw: number; k: number }>;
+  shelters: Array<{ p: Pt; yaw: number; k: number }>;
   maxH: number;
   root: THREE.Group | null;
   trees: THREE.Object3D[];
@@ -259,7 +265,7 @@ export function buildWoofCity(o: WoofCityOptions): WoofCity {
     const [i, j] = [Math.floor(p[0] / CHUNK), Math.floor(p[1] / CHUNK)];
     const key = `${i},${j}`;
     let ch = chunks.get(key);
-    if (!ch) chunks.set(key, (ch = { c: [(i + 0.5) * CHUNK, (j + 0.5) * CHUNK], bs: [], roads: [], maxH: 0, root: null, trees: [], flowers: null }));
+    if (!ch) chunks.set(key, (ch = { c: [(i + 0.5) * CHUNK, (j + 0.5) * CHUNK], bs: [], roads: [], lights: [], shelters: [], maxH: 0, root: null, trees: [], flowers: null }));
     return ch;
   };
   for (const b of buildings) {
@@ -268,11 +274,14 @@ export function buildWoofCity(o: WoofCityOptions): WoofCity {
     ch.maxH = Math.max(ch.maxH, b.h + FLOOR_H);
   }
   const rGrid = new Grid<{ a: Pt; b: Pt; hw: number }>(20);
+  /** 大馬路（畫標線的）整條留著：找路口放紅綠燈、每隔一段放公車亭（v1.821） */
+  const bigRoads: Road[] = [];
   for (const s of WOOF_ROADS.split(';')) {
     const i = s.indexOf(':');
     const cls = s.slice(0, i);
     const w = ROAD_W[cls] ?? 5;
     const pts = decode(s.slice(i + 1));
+    if (LINED.has(cls)) bigRoads.push({ cls, w, pts });
     let cur: Road | null = null;
     let curCh: Chunk | null = null;
     for (let k = 1; k < pts.length; k++) {
@@ -304,6 +313,61 @@ export function buildWoofCity(o: WoofCityOptions): WoofCity {
     gGrid.add(g.box, g);
   }
   const inGreen = (p: Pt): boolean => gGrid.at(p).some((g) => inBox(p, g.box) && inRing(p, g.rings[0]) && !g.rings.slice(1).some((h) => inRing(p, h)));
+  const inReach = (p: Pt): boolean => p[0] ** 2 + p[1] ** 2 < 2300 ** 2;
+
+  // ---- 路口的紅綠燈（v1.821）：三條以上大馬路接在同一點的是路口（雙向分開畫的大路路口會更多條），30 公尺內只放一支，放在一個路角、燈臂伸向路口
+  {
+    const ends = new Map<string, { p: Pt; ids: Set<number>; w: number; dir: Pt }>();
+    bigRoads.forEach((r, id) =>
+      r.pts.forEach((p, k) => {
+        const key = `${Math.round(p[0])},${Math.round(p[1])}`;
+        const e = ends.get(key) ?? { p, ids: new Set<number>(), w: 0, dir: [1, 0] as Pt };
+        if (!e.ids.size) {
+          const q = r.pts[k + 1] ?? r.pts[k - 1];
+          const len = Math.hypot(q[0] - p[0], q[1] - p[1]) || 1;
+          e.dir = [(q[0] - p[0]) / len, (q[1] - p[1]) / len];
+        }
+        e.ids.add(id);
+        e.w = Math.max(e.w, r.w);
+        ends.set(key, e);
+      }),
+    );
+    const placed: Pt[] = [];
+    for (const e of ends.values()) {
+      if (e.ids.size < 3 || placed.some((q) => Math.hypot(q[0] - e.p[0], q[1] - e.p[1]) < 30)) continue;
+      const k = hashAt(e.p[0], e.p[1], 31);
+      const [ux, uy] = e.dir;
+      const s = k < 0.5 ? 1 : -1;
+      const off = e.w / 2 + 2;
+      const p: Pt = [e.p[0] + ux * off - uy * off * s, e.p[1] + uy * off + ux * off * s];
+      if (!inReach(p) || nearPark(p, 6) || inBuilding(p, 1) || inWater(p)) continue;
+      placed.push(e.p);
+      chunkOf(p).lights.push({ p, yaw: Math.atan2(e.p[1] - p[1], e.p[0] - p[0]), k });
+    }
+  }
+  // ---- 公車亭（v1.821）：大馬路邊大約每 300 公尺一個（有的沒有），在路外面、開口朝馬路
+  for (const r of bigRoads) {
+    if (r.cls !== 'primary' && r.cls !== 'secondary' && r.cls !== 'trunk') continue;
+    let walked = 0;
+    for (let i = 1; i < r.pts.length; i++) {
+      const [a, b] = [r.pts[i - 1], r.pts[i]];
+      const len = Math.hypot(b[0] - a[0], b[1] - a[1]);
+      if (len < 1e-3) continue;
+      const [ux, uy] = [(b[0] - a[0]) / len, (b[1] - a[1]) / len];
+      for (let t = Math.ceil(walked / 300) * 300 - walked + 150; t <= len; t += 300) {
+        const k = hashAt(a[0] + ux * t, a[1] + uy * t, 41);
+        if (k > 0.6) continue;
+        const s = k < 0.3 ? 1 : -1;
+        const off = r.w / 2 + 2.4;
+        const p: Pt = [a[0] + ux * t - uy * off * s, a[1] + uy * t + ux * off * s];
+        if (!inReach(p) || nearPark(p, 5) || inBuilding(p, 2) || inWater(p) || onRoad(p, 1)) continue;
+        // 開口（形狀的 +z）朝馬路：往路的方向是 (uy·s, -ux·s)，繞 y 轉 θ 時 +z 變成 (sin θ, 0, cos θ)，世界的 z 是往南
+        const [tx, ty] = [uy * s, -ux * s];
+        chunkOf(p).shelters.push({ p, yaw: Math.atan2(tx, -ty), k });
+      }
+      walked += len;
+    }
+  }
   /** 樹幹、路燈（擋路） */
   const trunks = new Grid<[number, number, number]>(5);
   const hitTrunk = (p: Pt): boolean => trunks.at(p).some(([x, y, r]) => Math.hypot(p[0] - x, p[1] - y) < r + BODY);
@@ -492,6 +556,93 @@ export function buildWoofCity(o: WoofCityOptions): WoofCity {
     new THREE.OctahedronGeometry(0.05).translate(0.11, 0.14, 0.05),
     new THREE.OctahedronGeometry(0.055).translate(-0.08, 0.16, -0.09),
   ])!;
+  // ---- 廢棄的東西（v1.821）：一個形狀擺很多個，顏色畫在頂點上（照高度：底下生鏽、上面長青苔），汽車、機車再乘上褪色的烤漆顏色
+  const col = (h: string): THREE.Color => new THREE.Color(h);
+  const [WHITE, RUST, GLASS, TIRE, SEAT, METAL, MOSSY, CONCRETE] = ['#ffffff', '#b07c5c', '#3d4648', '#2e2e2c', '#4d4037', '#8d918c', '#7fa75a', '#c9c5bc'].map(col);
+  /** 形狀換成不共用頂點，照每個頂點的高度上色 */
+  const paint = (g: THREE.BufferGeometry, color: (y: number) => THREE.Color): THREE.BufferGeometry => {
+    const n = g.index ? g.toNonIndexed() : g;
+    const p = n.getAttribute('position');
+    const c: number[] = [];
+    for (let i = 0; i < p.count; i++) {
+      const k = color(p.getY(i));
+      c.push(k.r, k.g, k.b);
+    }
+    n.setAttribute('color', new THREE.Float32BufferAttribute(c, 3));
+    return n;
+  };
+  const box = (w: number, h: number, d: number, x: number, y: number, z: number): THREE.BufferGeometry => new THREE.BoxGeometry(w, h, d).translate(x, y, z);
+  const wheel = (r: number, w: number, x: number, y: number, z: number): THREE.BufferGeometry => new THREE.CylinderGeometry(r, r, w, 10).rotateX(Math.PI / 2).translate(x, y, z);
+  // 汽車（長 4.2 公尺，車頭朝 +x）：車身下緣生鏽、車窗暗暗的，輪胎扁了（車身低低的）
+  const carGeo = mergeGeometries([
+    paint(box(4.2, 0.72, 1.72, 0, 0.62, 0), (y) => (y < 0.4 ? RUST : WHITE)),
+    paint(box(2.2, 0.62, 1.56, -0.25, 1.29, 0), (y) => (y > 1.55 ? WHITE : GLASS)),
+    ...[-1.35, 1.35].flatMap((x) => [-0.8, 0.8].map((z) => paint(wheel(0.33, 0.22, x, 0.22, z), () => TIRE))),
+  ])!;
+  const carMossGeo = new THREE.SphereGeometry(1, 10, 5).scale(1.05, 0.14, 0.72).translate(-0.25, 1.6, 0);
+  // 機車（長 1.8 公尺，車頭朝 +x）
+  const scooterGeo = mergeGeometries([
+    paint(box(1.25, 0.3, 0.36, -0.05, 0.42, 0), (y) => (y < 0.33 ? RUST : WHITE)),
+    paint(box(0.75, 0.32, 0.38, -0.35, 0.72, 0), () => WHITE),
+    paint(box(0.7, 0.1, 0.32, -0.35, 0.93, 0), () => SEAT),
+    paint(box(0.16, 0.7, 0.3, 0.55, 0.75, 0), () => WHITE),
+    paint(box(0.08, 0.08, 0.62, 0.6, 1.12, 0), () => TIRE),
+    ...[-0.62, 0.62].map((x) => paint(wheel(0.24, 0.1, x, 0.2, 0), () => TIRE)),
+  ])!;
+  // 紅綠燈：燈臂朝 +x，燈頭三個暗暗的燈（不亮），柱子底下長青苔
+  const lightGeo = mergeGeometries([
+    paint(new THREE.CylinderGeometry(0.1, 0.13, 5.6, 8).translate(0, 2.8, 0), (y) => (y < 1.3 ? MOSSY : METAL)),
+    paint(box(3.4, 0.1, 0.1, 1.7, 5.3, 0), () => METAL),
+    paint(box(0.34, 0.95, 0.34, 3.25, 4.75, 0), () => col('#56635b')),
+    ...[0.3, 0, -0.3].map((dy) => paint(wheel(0.1, 0.05, 3.25, 4.75 + dy, 0.19), () => col('#2b302e'))),
+  ])!;
+  // 公車亭：開口朝 +z，頂上長青苔，沒有玻璃、沒有站名
+  const shelterGeo = mergeGeometries([
+    paint(box(3.8, 0.12, 1.7, 0, 2.45, 0), (y) => (y > 2.48 ? MOSSY : METAL)),
+    ...[-1.8, 1.8].flatMap((x) => [-0.75, 0.7].map((z) => paint(box(0.1, 2.4, 0.1, x, 1.2, z), (y) => (y < 0.6 ? RUST : METAL)))),
+    paint(box(3.6, 0.06, 0.06, 0, 2.0, -0.75), () => RUST),
+    paint(box(3.6, 0.06, 0.06, 0, 0.9, -0.75), () => RUST),
+    paint(box(2.4, 0.08, 0.42, 0, 0.46, -0.48), () => col('#9e9182')),
+    ...[-1.1, 1.1].map((x) => paint(box(0.08, 0.42, 0.3, x, 0.21, -0.48), () => METAL)),
+  ])!;
+  // 水泥碎塊：幾塊歪七扭八堆在一起，上面有的長青苔
+  const rubbleGeo = mergeGeometries(
+    Array.from({ length: 7 }, (_, i) => {
+      const [sx, sy, sz] = [0.35 + hash(i * 3 + 5000) * 0.6, 0.2 + hash(i * 3 + 5001) * 0.35, 0.3 + hash(i * 3 + 5002) * 0.6];
+      const [a, r] = [hash(i * 7 + 5100) * Math.PI * 2, hash(i * 7 + 5101) * 0.9];
+      const moss = hash(i + 5400) < 0.5;
+      return paint(new THREE.BoxGeometry(sx, sy, sz).rotateY(hash(i + 5200) * 3).rotateZ((hash(i + 5300) - 0.5) * 0.6).translate(Math.cos(a) * r, sy * 0.35, Math.sin(a) * r), (y) => (moss && y > 0.22 ? MOSSY : CONCRETE));
+    }),
+  )!;
+  const propMat = new THREE.MeshLambertMaterial({ vertexColors: true });
+  const mossMat = new THREE.MeshLambertMaterial({ color: 0xffffff });
+  /** 汽車、機車褪色的烤漆（乘在白色的地方） */
+  const CAR_PAINT = ['#d8c7b2', '#b9c6cb', '#d6aea0', '#dcd8c8', '#c1bd98', '#a9b9c8', '#c9b3c4'].map(col);
+  const MOSS_TONES = ['#7fa75a', '#8cb563', '#6f9a50'].map(col);
+  // 鐵捲門：一條條橫的波浪鋼板，下半部生鏽、最底下長青苔（再照頂點顏色上一點色）
+  const shutterTex = tileTex(128, o.anisotropy, (g) => {
+    g.fillStyle = '#cdd0cc';
+    g.fillRect(0, 0, 128, 128);
+    for (let y = 0; y < 128; y += 6) {
+      g.fillStyle = 'rgba(70, 76, 76, 0.35)';
+      g.fillRect(0, y, 128, 2);
+      g.fillStyle = 'rgba(255, 255, 255, 0.28)';
+      g.fillRect(0, y + 2, 128, 1);
+    }
+    for (let k = 0; k < 26; k++) {
+      const [x, y, r] = [hash(k * 3 + 6000) * 128, 50 + hash(k * 3 + 6001) * 78, 4 + hash(k * 3 + 6002) * 14];
+      g.fillStyle = `rgba(160, 100, 66, ${0.22 + hash(k + 6100) * 0.25})`;
+      g.beginPath();
+      g.ellipse(x, y, r, r * 1.6, 0, 0, Math.PI * 2);
+      g.fill();
+    }
+    g.fillStyle = 'rgba(122, 166, 80, 0.75)';
+    for (let x = 0; x < 128; x += 4) g.fillRect(x, 128 - 6 - hash(x + 6200) * 12, 4, 20);
+  });
+  const shutterMat = new THREE.MeshLambertMaterial({ map: shutterTex, vertexColors: true, polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -2 });
+  const SHUTTER_TINTS = ['#dfe2e0', '#cdd8c8', '#e3d6c2', '#c9cdd2'].map(col);
+  const DARK = col('#262a2b');
+
   const CROWNS = ['#7fb25a', '#8cbd62', '#6fa552', '#9cc66c', '#78ab57', '#88b85c'].map((c) => new THREE.Color(c));
   const FLOWERS = ['#ffffff', '#fff3a8', '#ffc4d6', '#dccbff', '#ffe08a'].map((c) => new THREE.Color(c));
   const TINTS = ['#f1eee8', '#e6dfd2', '#ecdfd5', '#dbe1e0', '#e6ddc8', '#dad4cc'].map((c) => new THREE.Color(c));
@@ -650,6 +801,180 @@ export function buildWoofCity(o: WoofCityOptions): WoofCity {
     };
     return { road: make(pos, uv), lines: make(lPos) };
   }
+  /**
+   * 一格裡廢棄的東西（v1.821）：路邊的汽車、巷子邊一排排機車、面對馬路的一樓鐵捲門、高樓旁的碎石、路口的紅綠燈、公車亭。
+   * 都用固定的亂數（同一個地方每次一樣），擋路的加進 trunks
+   */
+  function buildProps(ch: Chunk, root: THREE.Group): void {
+    const inst = (geo: THREE.BufferGeometry, mat: THREE.Material, list: Array<{ m: THREE.Matrix4; c?: THREE.Color }>): void => {
+      if (!list.length) return;
+      const im = new THREE.InstancedMesh(geo, mat, list.length);
+      list.forEach((x, i) => {
+        im.setMatrixAt(i, x.m);
+        if (x.c) im.setColorAt(i, x.c);
+      });
+      im.castShadow = im.receiveShadow = true;
+      im.computeBoundingSphere();
+      root.add(im);
+      ch.trees.push(im);
+    };
+    const mtx = (p: Pt, y: number, yaw: number, tiltX = 0, tiltZ = 0, s = 1): THREE.Matrix4 => {
+      tmpE.set(tiltX, yaw, tiltZ, 'YXZ');
+      return new THREE.Matrix4().compose(new THREE.Vector3(p[0], y, -p[1]), new THREE.Quaternion().setFromEuler(tmpE), new THREE.Vector3(s, s, s));
+    };
+    const block = (p: Pt, r: number): void => trunks.add([p[0] - r, p[1] - r, p[0] + r, p[1] + r], [p[0], p[1], r]);
+    const free = (p: Pt, m: number): boolean => inReach(p) && !nearPark(p, 3) && !inBuilding(p, m) && !inWater(p);
+    const pick = <T,>(list: T[], k: number): T => list[Math.floor(k * list.length) % list.length];
+
+    // 汽車（停在路邊，順著馬路，頭朝前朝後都有）、一排排機車（巷子邊，垂直馬路，有的倒了）
+    const cars: Array<{ m: THREE.Matrix4; c: THREE.Color }> = [];
+    const carMoss: Array<{ m: THREE.Matrix4; c: THREE.Color }> = [];
+    const carFlowers: Array<{ m: THREE.Matrix4; c: THREE.Color }> = [];
+    const scooters: Array<{ m: THREE.Matrix4; c: THREE.Color }> = [];
+    for (const r of ch.roads) {
+      const carP = r.cls === 'minor' ? 0.17 : r.cls === 'service' ? 0.1 : r.cls === 'pedestrian' || r.cls === 'motorway' ? 0 : 0.07;
+      const rowP = r.cls === 'minor' || r.cls === 'service' ? 0.12 : 0;
+      let walked = 0;
+      for (let i = 1; i < r.pts.length; i++) {
+        const [a, b] = [r.pts[i - 1], r.pts[i]];
+        const len = Math.hypot(b[0] - a[0], b[1] - a[1]);
+        if (len < 1e-3) continue;
+        const [ux, uy] = [(b[0] - a[0]) / len, (b[1] - a[1]) / len];
+        for (let t = Math.ceil(walked / 7) * 7 - walked; t <= len; t += 7) {
+          const c0: Pt = [a[0] + ux * t, a[1] + uy * t];
+          const k = hashAt(c0[0], c0[1], 21);
+          const side = hash(k * 977) < 0.5 ? 1 : -1;
+          if (k < carP) {
+            const off = Math.max(0.9, r.w / 2 - 1.15);
+            const p: Pt = [c0[0] - uy * off * side, c0[1] + ux * off * side];
+            if (!free(p, 1.2)) continue;
+            const yaw = Math.atan2(uy, ux) + (hash(k * 31) < 0.5 ? Math.PI : 0) + (hash(k * 37) - 0.5) * 0.25;
+            const m = mtx(p, 0, yaw, (hash(k * 41) - 0.5) * 0.06, (hash(k * 43) - 0.5) * 0.08);
+            cars.push({ m, c: pick(CAR_PAINT, hash(k * 47)) });
+            if (hash(k * 53) < 0.6) carMoss.push({ m, c: pick(MOSS_TONES, hash(k * 59)) });
+            if (hash(k * 61) < 0.35) carFlowers.push({ m: mtx(p, 1.62, yaw, 0, 0, 1.3), c: pick(FLOWERS, hash(k * 67)) });
+            for (const d of [-1.4, 0, 1.4]) block([p[0] + ux * d, p[1] + uy * d], 0.95);
+          } else if (k > 1 - rowP) {
+            const n = 3 + Math.floor(hash(k * 71) * 5);
+            const off = r.w / 2 + 0.8;
+            for (let j = 0; j < n; j++) {
+              const along = (j - (n - 1) / 2) * 0.8;
+              const p: Pt = [c0[0] + ux * along - uy * off * side, c0[1] + uy * along + ux * off * side];
+              if (!free(p, 0.6)) continue;
+              const kk = hash(k * 73 + j * 7);
+              const yaw = Math.atan2(ux * side, -uy * side) + (kk < 0.5 ? Math.PI : 0) + (hash(kk * 79) - 0.5) * 0.3;
+              scooters.push({ m: mtx(p, 0, yaw, hash(kk * 83) < 0.12 ? 1.35 : 0, (hash(kk * 89) - 0.5) * 0.06), c: pick(CAR_PAINT, hash(kk * 97)) });
+              block(p, 0.35);
+            }
+          }
+        }
+        walked += len;
+      }
+    }
+    inst(carGeo, propMat, cars);
+    inst(carMossGeo, mossMat, carMoss);
+    inst(flowerGeo, flowerMat, carFlowers);
+    inst(scooterGeo, propMat, scooters);
+
+    // 面對馬路的一樓：生鏽的鐵捲門（一間一片，有的半開、下面黑黑的，有的已經不見了）
+    const sPos: number[] = [];
+    const sNrm: number[] = [];
+    const sUv: number[] = [];
+    const sCol: number[] = [];
+    const quad = (pa: Pt, pc: Pt, y0: number, y1: number, n: Pt, w: number, c: THREE.Color): void => {
+      const vs: Array<[Pt, number, number]> = [
+        [pa, y0, 0],
+        [pc, y0, w],
+        [pc, y1, w],
+        [pa, y0, 0],
+        [pc, y1, w],
+        [pa, y1, 0],
+      ];
+      for (const [p, y, u] of vs) {
+        sPos.push(p[0] + n[0] * 0.06, y, -(p[1] + n[1] * 0.06));
+        sNrm.push(n[0], 0, -n[1]);
+        sUv.push(u / 2.5, y / 2.7);
+        sCol.push(c.r, c.g, c.b);
+      }
+    };
+    const rubble: Array<{ m: THREE.Matrix4 }> = [];
+    for (const b of ch.bs) {
+      const ring = b.rings[0];
+      if (b.h >= 3)
+        ring.forEach((a, i) => {
+          const c = ring[(i + 1) % ring.length];
+          const len = Math.hypot(c[0] - a[0], c[1] - a[1]);
+          if (len < 2.6) return;
+          const [ux, uy] = [(c[0] - a[0]) / len, (c[1] - a[1]) / len];
+          const n: Pt = [uy, -ux];
+          const mid: Pt = [(a[0] + c[0]) / 2, (a[1] + c[1]) / 2];
+          if (!onRoad([mid[0] + n[0] * 3, mid[1] + n[1] * 3], 3)) return;
+          const nb = Math.max(1, Math.round(len / 3.4));
+          const bw = len / nb;
+          const top = Math.min(2.7, b.h - 0.3);
+          for (let j = 0; j < nb; j++) {
+            const k = hash(b.k * 313 + i * 17 + j);
+            if (k < 0.15) continue;
+            const [s0, s1] = [j * bw + 0.2, (j + 1) * bw - 0.2];
+            if (s1 - s0 < 1) continue;
+            const pa: Pt = [a[0] + ux * s0, a[1] + uy * s0];
+            const pc: Pt = [a[0] + ux * s1, a[1] + uy * s1];
+            const tint = pick(SHUTTER_TINTS, hash(k * 37));
+            if (k < 0.4) {
+              quad(pa, pc, 0, 0.9, n, s1 - s0, DARK);
+              quad(pa, pc, 0.9, top, n, s1 - s0, tint);
+            } else quad(pa, pc, 0, top, n, s1 - s0, tint);
+          }
+        });
+      // 高樓旁邊塌下來的水泥碎塊
+      if (b.h > 12 && hash(b.k * 919) < 0.55) {
+        const i = Math.floor(hash(b.k * 929) * ring.length);
+        const [a, c] = [ring[i], ring[(i + 1) % ring.length]];
+        const len = Math.hypot(c[0] - a[0], c[1] - a[1]) || 1;
+        const n: Pt = [(c[1] - a[1]) / len, -(c[0] - a[0]) / len];
+        const d = 1.6 + hash(b.k * 937) * 1.2;
+        const p: Pt = [(a[0] + c[0]) / 2 + n[0] * d, (a[1] + c[1]) / 2 + n[1] * d];
+        if (free(p, 0.5)) {
+          const s = 0.8 + hash(b.k * 941) * 0.8;
+          rubble.push({ m: mtx(p, 0, hash(b.k * 947) * 6, 0, 0, s) });
+          block(p, 1.0 * s);
+        }
+      }
+    }
+    if (sPos.length) {
+      const g = new THREE.BufferGeometry();
+      g.setAttribute('position', new THREE.Float32BufferAttribute(sPos, 3));
+      g.setAttribute('normal', new THREE.Float32BufferAttribute(sNrm, 3));
+      g.setAttribute('uv', new THREE.Float32BufferAttribute(sUv, 2));
+      g.setAttribute('color', new THREE.Float32BufferAttribute(sCol, 3));
+      const m = new THREE.Mesh(g, shutterMat);
+      m.receiveShadow = true;
+      root.add(m);
+      ch.trees.push(m);
+    }
+    inst(rubbleGeo, propMat, rubble);
+
+    // 路口歪掉的紅綠燈、公車亭（位置在讀資料時就找好了）
+    inst(
+      lightGeo,
+      propMat,
+      ch.lights.map(({ p, yaw, k }) => {
+        block(p, 0.15);
+        return { m: mtx(p, 0, yaw, (hash(k * 7) - 0.5) * 0.25, (hash(k * 11) - 0.5) * 0.25) };
+      }),
+    );
+    inst(
+      shelterGeo,
+      propMat,
+      ch.shelters.map(({ p, yaw }) => {
+        // 柱子、後面的欄杆擋路（形狀的 x、z 換到東北：+x 是 (cos θ, sin θ)、+z 是 (sin θ, -cos θ)）
+        const at = (x: number, z: number): Pt => [p[0] + x * Math.cos(yaw) + z * Math.sin(yaw), p[1] + x * Math.sin(yaw) - z * Math.cos(yaw)];
+        for (const [x, z] of [[-1.8, -0.75], [-0.9, -0.75], [0, -0.75], [0.9, -0.75], [1.8, -0.75], [-1.8, 0.7], [1.8, 0.7]]) block(at(x, z), 0.3);
+        return { m: mtx(p, 0, yaw) };
+      }),
+    );
+  }
+
   function build(ch: Chunk): void {
     const root = new THREE.Group();
     ch.root = root;
@@ -744,6 +1069,7 @@ export function buildWoofCity(o: WoofCityOptions): WoofCity {
       root.add(lm);
       ch.trees.push(lm);
     }
+    buildProps(ch, root);
     // 小花：每 4 公尺看一次，草地上一叢叢的（馬路上少）
     const flowers: THREE.Matrix4[] = [];
     const fCol: THREE.Color[] = [];
