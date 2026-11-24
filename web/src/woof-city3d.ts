@@ -975,7 +975,8 @@ export function buildWoofCity(o: WoofCityOptions): WoofCity {
     const rubble: Array<{ m: THREE.Matrix4 }> = [];
     for (const b of ch.bs) {
       const ring = b.rings[0];
-      if (b.h >= 3)
+      // 鐵捲門少一點（v1.824 使用者說鐵捲門有點太多）：大約一半的房子一樓是店面，店面一間間大約三分之二有鐵捲門（以前面對馬路的幾乎每一間都有）
+      if (b.h >= 3 && hash(b.k * 307) < 0.45)
         ring.forEach((a, i) => {
           const c = ring[(i + 1) % ring.length];
           const len = Math.hypot(c[0] - a[0], c[1] - a[1]);
@@ -989,13 +990,13 @@ export function buildWoofCity(o: WoofCityOptions): WoofCity {
           const top = Math.min(2.7, b.h - 0.3);
           for (let j = 0; j < nb; j++) {
             const k = hash(b.k * 313 + i * 17 + j);
-            if (k < 0.15) continue;
+            if (k < 0.35) continue;
             const [s0, s1] = [j * bw + 0.2, (j + 1) * bw - 0.2];
             if (s1 - s0 < 1) continue;
             const pa: Pt = [a[0] + ux * s0, a[1] + uy * s0];
             const pc: Pt = [a[0] + ux * s1, a[1] + uy * s1];
             const tint = pick(SHUTTER_TINTS, hash(k * 37));
-            if (k < 0.4) {
+            if (k < 0.55) {
               quad(pa, pc, 0, 0.9, n, s1 - s0, DARK);
               quad(pa, pc, 0.9, top, n, s1 - s0, tint);
             } else quad(pa, pc, 0, top, n, s1 - s0, tint);
