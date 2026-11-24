@@ -1299,7 +1299,8 @@ function updateStreets(): void {
   $('#radar-attrib').hidden = !show && !trees;
   $('#street-attrib').hidden = !show;
   $('#tree-attrib').hidden = !trees;
-  $('#park3d-btn').hidden = !trees;
+  // 3D 國館：公園拉近時（地球、汪星），你在汪星就一直有（v1.814 使用者說一到汪星就顯示、隨時可以進去）
+  $('#park3d-btn').hidden = !trees && youOn !== 'woof';
   if (!show) {
     if (streetsFor) radar.setStreets(null);
     streetsFor = '';
@@ -2159,7 +2160,10 @@ function saveSpaceView(): void {
 
 /** 你在汪星、Kepler-22b 時「你的位置」：汪星的中山公園發射口、Kepler-22b 的降落的小島（在地球是 null） */
 async function homeView(): Promise<SpaceView | null> {
-  if (youOn === 'woof') return woofHomeView();
+  if (youOn === 'woof') {
+    const at = lastPark3dSpot();
+    return at ? woofViewOf(at) : woofHomeView();
+  }
   if (youOn === 'kepler22b') return (spaceMod ?? (spaceMod = await import('./space'))).keplerSiteView();
   return null;
 }
@@ -2174,12 +2178,32 @@ async function woofHomeView(): Promise<SpaceView> {
   return woofHome;
 }
 
-/** 雷達上的汪星轉到這個地方（台北的經緯度）：在 3D 國館走到哪，離開時雷達就停在哪（汪星的正中間就是你的位置） */
-async function woofViewAt(at: [number, number]): Promise<void> {
+/** 汪星轉到這個地方（台北的經緯度）的看法 */
+async function woofViewOf(at: [number, number]): Promise<SpaceView> {
   const sp = await import('./space');
   const [la, ln] = sp.toWoof(at);
-  radar.setSpaceView({ focus: 'woof', yaw: (-ln * Math.PI) / 180, pitch: (la * Math.PI) / 180 }, true);
+  return { focus: 'woof', yaw: (-ln * Math.PI) / 180, pitch: (la * Math.PI) / 180 };
+}
+
+/** 雷達上的汪星轉到這個地方（台北的經緯度）：在 3D 國館走到哪，離開時雷達就停在哪（汪星的正中間就是你的位置） */
+async function woofViewAt(at: [number, number]): Promise<void> {
+  radar.setSpaceView(await woofViewOf(at), true);
   saveSpaceView();
+}
+
+/**
+ * 上次在 3D 國館站的地方（park3d.ts 的 LS_SPOT，台北的經緯度）：你在汪星時按「定位」回到這裡
+ * （v1.814 使用者說定位照上次離開的位置；沒進過 3D 國館就回發射口）
+ */
+const LS_PARK3D = 'dr.park3d';
+function lastPark3dSpot(): [number, number] | null {
+  try {
+    const v = JSON.parse(lsGet(LS_PARK3D) ?? 'null') as { lat?: unknown; lng?: unknown } | null;
+    if (v && typeof v.lat === 'number' && typeof v.lng === 'number' && Number.isFinite(v.lat) && Number.isFinite(v.lng)) return [v.lat, v.lng];
+  } catch {
+    /* 讀不到就回發射口 */
+  }
+  return null;
 }
 
 /** 火箭飛行時拉遠到多遠（雷達外圈，公里）：約 2.7 AU，地球和汪星（離太陽 1.26 AU）一起看得到 */
@@ -2277,6 +2301,7 @@ async function rocketTrip(m: typeof import('./park'), from: 'earth' | 'woof'): P
   updateScaleChips();
   updateViewBtn();
   updateSpace();
+  updateStreets();
   radar.redrawPark();
   radar.setTrip('', true);
   await wait(m.ARRIVE_MS + 50);
@@ -2349,6 +2374,7 @@ async function launchTrip(): Promise<void> {
   updateScaleChips();
   updateViewBtn();
   updateSpace();
+  updateStreets();
   radar.redrawPark();
   radar.setTrip('', true);
   await wait(ARRIVE_MS + 50);
@@ -2379,6 +2405,7 @@ async function landIn3D(to: 'earth' | 'woof'): Promise<void> {
   updateScaleChips();
   updateViewBtn();
   updateSpace();
+  updateStreets();
   radar.redrawPark();
 }
 
@@ -7022,13 +7049,14 @@ function loadHome(): Home | null {
 let home: Home | null = loadHome();
 
 /**
- * 「定位」（v1.468 起「回到我的位置」拿掉，統一用「定位」）：你在汪星就回到汪星的發射口（範圍拉到外圈 LOCATE_KM，本來就比較近的不動）；
+ * 「定位」（v1.468 起「回到我的位置」拿掉，統一用「定位」）：你在汪星就回到上次在 3D 國館離開的地方（v1.814；沒進過回發射口，
+ * 範圍拉到外圈 LOCATE_KM，本來就比較近的不動）；
  * 在地球照 locateMe（先馬上飛回我的位置，再重新抓一次 GPS）。火箭飛行中沒有反應
  */
 function locate(): void {
   if (tripping) return;
   lockDog(null);
-  // 你在汪星、Kepler-22b：回到發射口、降落的小島（點別的星球只是看過去，坐火箭回來才回到地球）
+  // 你在汪星、Kepler-22b：回到上次在 3D 國館離開的地方（沒進過是發射口）、降落的小島（點別的星球只是看過去，坐火箭回來才回到地球）
   if (youOn !== 'earth') {
     void homeView().then((v) => {
       if (!v) return;
@@ -9999,7 +10027,8 @@ function wireControls(): void {
       .then((m) =>
         m.openPark3D({
           token,
-          world: radar.spaceFocused && radar.spaceFocusKey === 'woof' ? 'woof' : 'earth',
+          // 你在汪星（不管雷達正在看哪裡）或正在看汪星：進汪星的國館
+          world: youOn === 'woof' || (radar.spaceFocused && radar.spaceFocusKey === 'woof') ? 'woof' : 'earth',
           onExit: (at, w) => {
             btn.disabled = false;
             // 汪星：雷達上的汪星轉到你在 3D 裡走到的地方（v1.812 可以走出國館）
