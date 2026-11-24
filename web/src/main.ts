@@ -2439,9 +2439,15 @@ async function landIn3D(to: 'earth' | 'woof'): Promise<void> {
  * 落點跟「定位」一樣（汪星：上次在 3D 離開的地方，沒進過是發射口；地球：你現在的位置）；國館的火箭留在原地（使用者選的）。
  * 自己按的，減少動態照樣播
  */
+/** 3D（park3d.ts，打開過才載入）：在 3D 裡用順幣瞬間移動時，3D 跟著換到另一邊 */
+let p3dMod: typeof import('./park3d') | null = null;
+
 async function teleport(to: YouOn): Promise<void> {
   if (tripping || youOn === to) return;
   if (woofPick) await endWoofPick(false);
+  // 在 3D 裡（v1.820 使用者說 3D 裡也放道具）：去地球、汪星 3D 直接換過去；Kepler-22b 沒有 3D，先關掉
+  const in3d = p3dMod?.current3D() ?? null;
+  if (in3d && to === 'kepler22b') in3d.close();
   teleportFlash();
   // 最亮的時候換過去
   await wait(380);
@@ -2463,6 +2469,7 @@ async function teleport(to: YouOn): Promise<void> {
   updateStreets();
   radar.redrawPark();
   if (to === 'earth') void locateMe();
+  if (in3d && to !== 'kepler22b') in3d.setWorld(to);
   showBanner(bannerEl, to === 'woof' ? '瞬間移動到汪星了' : to === 'kepler22b' ? '瞬間移動到 Kepler-22b 了' : '瞬間移動回地球了');
 }
 
@@ -2483,6 +2490,8 @@ const WOOF_PICK_M = 1980;
 const WOOF_PICK_ZOOM_KM = 2.6;
 async function startWoofPick(): Promise<void> {
   if (youOn !== 'woof' || woofPick || tripping) return;
+  // 在汪星的 3D 裡：打開 3D 的大地圖點（雷達被 3D 蓋住）
+  if (p3dMod?.current3D()?.openBigMap()) return;
   const pk = parkMod ?? (parkMod = await import('./park'));
   lockDog(null);
   const bar = document.createElement('div');
@@ -10183,8 +10192,9 @@ function wireControls(): void {
     const btn = $<HTMLButtonElement>('#park3d-btn');
     btn.disabled = true;
     void import('./park3d')
-      .then((m) =>
-        m.openPark3D({
+      .then((m) => {
+        p3dMod = m;
+        return m.openPark3D({
           token,
           // 你在汪星（不管雷達正在看哪裡）或正在看汪星：進汪星的國館
           world: youOn === 'woof' || (radar.spaceFocused && radar.spaceFocusKey === 'woof') ? 'woof' : 'earth',
@@ -10195,8 +10205,8 @@ function wireControls(): void {
           },
           onWorld: (to) => void landIn3D(to),
           onPetDog: (id) => void import('./park').then((p) => foundDog(p, id)),
-        }),
-      )
+        });
+      })
       .catch(() => {
         btn.disabled = false;
         showBanner(bannerEl, '3D 國館載入失敗，請再試一次');

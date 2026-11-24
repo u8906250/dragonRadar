@@ -19,7 +19,7 @@ import { dogHairRoots, dogPartArea, dogParts } from './dog';
 import { dogPose, dogTurned, happyWag } from './dogs';
 import { arriveRocket, ARRIVE_MS, DEPART_MS, departRocket, HATCH_CENTER, moveDogs, PARK_DOGS, personOk, petDog, rocketNow, setSniffMarks, stowRocket, STOW_MS, summonRocket, SUMMON_MS } from './park';
 import { cloudLayer, puffTexture, rocketModel, ROCKET_H, ROCKET_WINDOW_Y, spaceScene, type SpaceTrip } from './rocket3d';
-import { spendTeleportCoin, teleportFlash } from './cards';
+import { openItems, spendTeleportCoin, teleportFlash } from './cards';
 import { compassSupported, startOrientation } from './compass';
 import { altOf, azOf, boneMoonEnu, type Enu, moonEnu, moonLit, ORION_LABEL, ORION_LINES, ORION_NEBULA, ORION_STARS, skyLook, type SkyStar, starEnu, sunEnu } from './sky';
 import { toWoof, WOOF_KM } from './space';
@@ -414,20 +414,24 @@ export interface Park3DOptions {
  */
 const START: Pt = [25.0381268, 121.5577984];
 const START_HEADING = 109;
-/** 上次在 3D 國館站哪、面向哪（localStorage 的 dr.park3d，只記在這個瀏覽器；每 2 秒有動就記一次、離開時記）；讀不到、現在站不到就從入口開始 */
-const LS_SPOT = 'dr.park3d';
-function loadSpot(): { at: Pt; yaw: number; pitch: number } | null {
+/**
+ * 上次在 3D 站哪、面向哪（只記在這個瀏覽器；每 2 秒有動就記一次、離開時記）；讀不到、現在站不到就從入口開始。
+ * 汪星的記在 dr.park3d（就是你在汪星的位置：雷達的藍點、定位、瞬間移動，main.ts 也讀這個），地球的記在 dr.park3dEarth
+ * （v1.820 起分開：3D 裡可以瞬間移動到另一邊，在地球走不會蓋掉你在汪星的位置）
+ */
+const LS_SPOT: Record<'earth' | 'woof', string> = { woof: 'dr.park3d', earth: 'dr.park3dEarth' };
+function loadSpot(w: 'earth' | 'woof'): { at: Pt; yaw: number; pitch: number } | null {
   try {
-    const v = JSON.parse(localStorage.getItem(LS_SPOT) ?? 'null') as { lat?: unknown; lng?: unknown; yaw?: unknown; pitch?: unknown } | null;
+    const v = JSON.parse(localStorage.getItem(LS_SPOT[w]) ?? 'null') as { lat?: unknown; lng?: unknown; yaw?: unknown; pitch?: unknown } | null;
     if (v && [v.lat, v.lng, v.yaw, v.pitch].every((x) => typeof x === 'number' && Number.isFinite(x))) return { at: [v.lat as number, v.lng as number], yaw: v.yaw as number, pitch: v.pitch as number };
   } catch {
     /* 沒有 localStorage（隱私模式）就從入口開始 */
   }
   return null;
 }
-function saveSpot(at: Pt, yaw: number, pitch: number): void {
+function saveSpot(w: 'earth' | 'woof', at: Pt, yaw: number, pitch: number): void {
   try {
-    localStorage.setItem(LS_SPOT, JSON.stringify({ lat: +at[0].toFixed(7), lng: +at[1].toFixed(7), yaw: +yaw.toFixed(3), pitch: +pitch.toFixed(3) }));
+    localStorage.setItem(LS_SPOT[w], JSON.stringify({ lat: +at[0].toFixed(7), lng: +at[1].toFixed(7), yaw: +yaw.toFixed(3), pitch: +pitch.toFixed(3) }));
   } catch {
     /* 存不了就算了 */
   }
@@ -536,6 +540,15 @@ function tessellate(geo: THREE.BufferGeometry, max: number): THREE.BufferGeometr
 /** 汪星 3D 走到國館附近 2 公里的邊上：提示（電腦、手機都一樣） */
 const CITY_EDGE_MSG = '汪星 3D 目前只開放到國館附近 2 公里';
 
+/** 正在開著的 3D（main.ts 在 3D 裡用順幣瞬間移動時用）：換到另一邊、打開大地圖、關掉 */
+export interface Park3DControl {
+  setWorld: (to: 'earth' | 'woof') => void;
+  openBigMap: () => boolean;
+  close: () => void;
+}
+let active3D: Park3DControl | null = null;
+export const current3D = (): Park3DControl | null => active3D;
+
 /** 打開 3D 公園（蓋在整個畫面上面），回傳關掉的函式 */
 export function openPark3D(o: Park3DOptions): () => void {
   const root = document.createElement('div');
@@ -544,6 +557,7 @@ export function openPark3D(o: Park3DOptions): () => void {
     <div class="p3d-top">
       <button type="button" class="chip p3d-exit">離開</button>
       <span class="p3d-title">3D 國館</span>
+      <button type="button" class="chip p3d-items" title="道具：點順幣可以許願、瞬間移動">道具</button>
       <button type="button" class="chip p3d-map-toggle" aria-pressed="false" hidden title="打開、收起小地圖">地圖</button>
       <button type="button" class="chip p3d-mark-toggle" aria-pressed="false">標記</button>
     </div>
@@ -2166,6 +2180,8 @@ export function openPark3D(o: Park3DOptions): () => void {
   // 汪星的國館外面照 woof-city3d.ts（房子、水、樹幹、路燈、2 公里），國館裡照舊
   const canStand = (p: Pt): boolean =>
     (city && world === 'woof' && !inside(p, outline) ? city.canStand(p) : personOk(ll(p[0], p[1]))) && !hitTrunk(p) && !hitWall(p) && !hitPlaza(p);
+  /** 碑林石階前面（火箭降落的發射口前面） */
+  const stairsFront = (): Pt => [stepMid[0] + out[0] * (PLAZA_STEPS * STEP_DEPTH + 4), stepMid[1] + out[1] * (PLAZA_STEPS * STEP_DEPTH + 4)];
   /** 離 p 最近、站得住的地方（40 公尺內一圈圈找；瞬間移動點到房子、水裡的，站在旁邊，v1.819） */
   const nearestStand = (p: Pt): Pt | null => {
     if (canStand(p)) return p;
@@ -2622,13 +2638,13 @@ export function openPark3D(o: Park3DOptions): () => void {
   let pos: Pt = en(START);
   let yaw = (START_HEADING * Math.PI) / 180;
   let pitch = -0.05;
-  const lastSpot = loadSpot();
+  const lastSpot = loadSpot(world);
   // 上次的位置（國館裡站不住的話找旁邊；國館外面等汪星的街道載入了再看）
   const lastAt = lastSpot ? (inside(en(lastSpot.at), outline) ? nearestStand(en(lastSpot.at)) : canStand(en(lastSpot.at)) ? en(lastSpot.at) : null) : null;
   if (lastSpot && lastAt) [pos, yaw, pitch] = [lastAt, lastSpot.yaw, lastSpot.pitch];
   else if (!lastSpot && world === 'woof') {
     // 汪星上沒有上次的位置（沒進過、剛搭火箭降落）：你在發射口，從碑林石階前面開始（跟在 3D 裡搭火箭到了一樣），面向石階
-    const front: Pt = [stepMid[0] + out[0] * (PLAZA_STEPS * STEP_DEPTH + 4), stepMid[1] + out[1] * (PLAZA_STEPS * STEP_DEPTH + 4)];
+    const front = stairsFront();
     if (canStand(front)) [pos, yaw, pitch] = [front, Math.atan2(-out[0], -out[1]), 0];
   }
   /** 一開始站的地方（還沒走過：pos 還是這一個） */
@@ -2653,10 +2669,10 @@ export function openPark3D(o: Park3DOptions): () => void {
   };
   let saved = '';
   const remember = (): void => {
-    const key = `${pos[0].toFixed(2)},${pos[1].toFixed(2)},${yaw.toFixed(2)},${pitch.toFixed(2)}`;
+    const key = `${world},${pos[0].toFixed(2)},${pos[1].toFixed(2)},${yaw.toFixed(2)},${pitch.toFixed(2)}`;
     if (key === saved) return;
     saved = key;
-    saveSpot(ll(pos[0], pos[1]), yaw, pitch);
+    saveSpot(world, ll(pos[0], pos[1]), yaw, pitch);
   };
   let rememberedAt = 0;
   const keys = new Set<string>();
@@ -2895,8 +2911,9 @@ export function openPark3D(o: Park3DOptions): () => void {
   let fogBase: [number, number] = [140, 700];
   const attrib = $<HTMLElement>('.p3d-attrib');
   const parkMid: Pt = [(Math.min(...outline.map((p) => p[0])) + Math.max(...outline.map((p) => p[0]))) / 2, (Math.min(...outline.map((p) => p[1])) + Math.max(...outline.map((p) => p[1]))) / 2];
-  /** 上次走到國館外面：等街道載入了才知道站不站得住（還沒動就回到那裡） */
-  const outsideSpot = lastSpot && !inside(en(lastSpot.at), outline) ? lastSpot : null;
+  /** 上次走到國館外面（或瞬間移動到汪星國館外面）：等街道載入了才知道站不站得住，還沒動（pos 還是 pendingFrom）就移過去 */
+  let pendingSpot = lastSpot && !inside(en(lastSpot.at), outline) ? lastSpot : null;
+  let pendingFrom = startPos;
   let cityLoading = false;
 
   // ---- 汪星的小地圖（v1.818 使用者說 3D 裡可以打開小地圖；北朝上、箭頭跟著轉，點了放大看整個 2 公里，不標小法，都是使用者選的）
@@ -2989,6 +3006,47 @@ export function openPark3D(o: Park3DOptions): () => void {
   });
   // 大地圖：點地圖上的點瞬間移動過去（v1.819，花一枚順幣），點旁邊收起來
   let teleporting = false;
+  // 道具（v1.820 使用者說 3D 裡也放道具，才能用順幣）：跟選單的「道具」一樣，點順幣許願、瞬間移動
+  $('.p3d-items').addEventListener('click', () => {
+    keys.clear();
+    openItems();
+  });
+  /**
+   * 在 3D 裡用順幣瞬間移動到另一邊（main.ts 扣好順幣、白光蓋著畫面時叫）：3D 直接換過去；汪星站在你在汪星的位置
+   * （國館外面的等街道載入了再站過去），沒有的話在發射口前面；地球站在上次在地球 3D 的地方，沒有的話從入口
+   */
+  function setWorld(to: World): void {
+    if (flight || world === to) return;
+    world = to;
+    applyWorld();
+    if (to === 'woof') moveDogs();
+    const sp = loadSpot(to);
+    let at: Pt = to === 'woof' ? stairsFront() : en(START);
+    let face: [number, number] = to === 'woof' ? [Math.atan2(-out[0], -out[1]), 0] : [(START_HEADING * Math.PI) / 180, -0.05];
+    pendingSpot = null;
+    if (sp) {
+      const p = en(sp.at);
+      const q = inside(p, outline) || (to === 'woof' && city) ? nearestStand(p) : null;
+      if (q) [at, face] = [q, [sp.yaw, sp.pitch]];
+      else if (to === 'woof') pendingSpot = sp;
+    }
+    pos = at;
+    pendingFrom = pos;
+    [yaw, pitch] = face;
+    eyeFloor = NaN;
+    grassAt = '';
+    bigMap.hidden = true;
+    dirty = true;
+    remember();
+    msg(to === 'woof' ? '瞬間移動到汪星了' : '瞬間移動回地球了');
+  }
+  /** 汪星的大地圖（在 3D 裡選「地圖上選一點」）：汪星的街道載入了才打得開 */
+  function openBigMap(): boolean {
+    if (!city || world !== 'woof' || flight) return false;
+    bigMap.hidden = false;
+    drawMaps(true);
+    return true;
+  }
   bigMap.addEventListener('click', (e) => {
     if (e.target !== bigCv || !city) {
       bigMap.hidden = true;
@@ -3059,8 +3117,9 @@ export function openPark3D(o: Park3DOptions): () => void {
         scene.add(city.group);
         applyWorld();
         // 上次在國館外面（或在雷達上選了瞬間移動的地方）：還沒動就回到那裡，站不住的話站在旁邊
-        const out0 = outsideSpot && pos === startPos && world === 'woof' ? nearestStand(en(outsideSpot.at)) : null;
-        if (outsideSpot && out0) [pos, yaw, pitch] = [out0, outsideSpot.yaw, outsideSpot.pitch];
+        const out0 = pendingSpot && pos === pendingFrom && world === 'woof' ? nearestStand(en(pendingSpot.at)) : null;
+        if (pendingSpot && out0) [pos, yaw, pitch] = [out0, pendingSpot.yaw, pendingSpot.pitch];
+        pendingSpot = null;
       })
       .catch(() => msg('汪星的街道載入失敗，重新進來再試一次', 5000))
       .finally(() => (cityLoading = false));
@@ -3562,9 +3621,11 @@ export function openPark3D(o: Park3DOptions): () => void {
   void loadMarks();
 
   let closed = false;
+  active3D = { setWorld, openBigMap, close };
   function close(): void {
     if (closed) return;
     closed = true;
+    active3D = null;
     cancelAnimationFrame(frame);
     clearTimeout(hintTimer);
     stopFollow();
