@@ -2475,7 +2475,7 @@ async function teleport(to: YouOn): Promise<void> {
 
 /**
  * 在雷達上的汪星選一點瞬間移動（v1.819 使用者說瞬間移動也可以點地圖上任一個點，雷達、3D 的大地圖都要）：你在汪星才有。
- * 汪星轉到國館、拉到看得到整個走得到的範圍（虛線圈），點圈裡的地方放一根針（點到圈外就停在圈邊上），按「移到這裡」花一枚順幣，
+ * 點汪星的陸地放一根針（v1.825 起整顆汪星都可以，以前只有國館附近 2 公里；點到海不算），按「移到這裡」花一枚順幣，
  * 你在汪星的位置（3D 的位置）換到那裡；點到房子、水裡的，進 3D 時站在旁邊站得住的地方
  */
 interface WoofPick {
@@ -2485,8 +2485,7 @@ interface WoofPick {
   busy: boolean;
 }
 let woofPick: WoofPick | null = null;
-/** 選的範圍（公尺，離國館中間；3D 走得到 2 公里，留一點）、選的時候雷達拉到多大 */
-const WOOF_PICK_M = 1980;
+/** 選的時候雷達拉到多大 */
 const WOOF_PICK_ZOOM_KM = 2.6;
 async function startWoofPick(): Promise<void> {
   if (youOn !== 'woof' || woofPick || tripping) return;
@@ -2498,13 +2497,13 @@ async function startWoofPick(): Promise<void> {
   bar.className = 'bottle-pick';
   bar.setAttribute('role', 'dialog');
   bar.setAttribute('aria-label', '選瞬間移動的地方');
-  bar.innerHTML = `<p>點汪星上國館附近 2 公里內（虛線圈裡）的一個地方，瞬間移動過去。<small>花 1 枚順幣；點到房子、水裡的，會站在旁邊。</small></p>
+  bar.innerHTML = `<p>點汪星陸地上的一個地方（可以拖、縮放雷達找），瞬間移動過去。<small>花 1 枚順幣；點到房子、水裡的，會站在旁邊。</small></p>
     <div class="sheet-actions"><button type="button" class="chip" data-act="cancel">取消</button><button type="button" class="chip primary" data-act="ok" disabled>移到這裡</button></div>`;
   document.body.append(bar);
   woofPick = { at: null, mid: pk.PARK_MID, bar, busy: false };
   bar.querySelector('[data-act="cancel"]')?.addEventListener('click', () => void endWoofPick(false));
   bar.querySelector('[data-act="ok"]')?.addEventListener('click', () => void endWoofPick(true));
-  radar.setSpaceView(await woofViewOf(pk.PARK_MID), true);
+  radar.setSpaceView(await woofViewOf(woofYouAt() ?? pk.PARK_MID), true);
   zoomToKm(WOOF_PICK_ZOOM_KM);
   radar.redrawSpace();
 }
@@ -2513,11 +2512,9 @@ function pickWoofAt(at: { bearing: number; distanceKm: number }): void {
   const pk = woofPick;
   if (!pk || pk.busy || !spaceMod) return;
   const p = spaceMod.woofTapToTaipei(radar.spaceViewNow, at.bearing, at.distanceKm);
-  if (!p) return;
-  const mid = { lat: pk.mid[0], lng: pk.mid[1] };
-  const ll = { lat: p[0], lng: p[1] };
-  const q = haversineKm(mid, ll) * 1000 > WOOF_PICK_M ? destination(mid, bearingDeg(mid, ll), WOOF_PICK_M / 1000) : ll;
-  pk.at = [q.lat, q.lng];
+  // 點到海（市界外面）不算
+  if (!p || !spaceMod.inTaipei(p[0], p[1])) return;
+  pk.at = p;
   pk.bar.querySelector<HTMLButtonElement>('[data-act="ok"]')!.disabled = false;
   radar.redrawSpace();
 }
@@ -2615,7 +2612,7 @@ function updateSpace(): void {
         woofMap: map,
         bottles: map && bottlesOn() ? woofBottleMarks(km) : undefined,
         woofYou: map ? woofYouAt() : null,
-        woofPick: woofPick ? { center: woofPick.mid, radiusM: WOOF_PICK_M, at: woofPick.at } : null,
+        woofPick: woofPick ? { center: woofPick.mid, radiusM: 0, at: woofPick.at } : null,
       }),
     mod.bodyRadiusKm,
   );

@@ -1,7 +1,7 @@
 /**
  * 汪星 3D：國館外面荒廢了幾萬年的街道（v1.812 使用者說「汪星除了國館整個做成 3D，走出國館看到的是荒廢幾萬年的街道」；
  * 範圍先做國館附近 2 公里、照汪星的大小彎、荒廢到還看得出街道，這三個是使用者選的）。park3d.ts 在汪星時才載入。
- * 街道、房子的位置和外框是真的（woof-city-data.ts：OpenStreetMap，經 OpenFreeMap 的圖磚，國館附近 2.3 公里），荒廢的樣子是想像的：
+ * 街道、房子的位置和外框是真的（OpenStreetMap，經 OpenFreeMap 的圖磚；v1.825 起整個台北市，web/public/woof3d），荒廢的樣子是想像的：
  * - 房子：灰白色的水泥殼，窗戶只剩洞、沒有玻璃；上面幾層塌了、牆頂參差不齊，牆腳長青苔、牆上垂著藤蔓，屋頂長滿草、有的長出小樹。
  *   高度照 OSM 寫的高度、樓層數；沒寫的照大小估（ESTIMATE_H），塌掉多少是亂數（固定的，每次一樣）
  * - 馬路：柏油裂成一塊塊、縫裡和一片片長草，大一點的路中間有淡到快看不見的標線（路寬照種類估的，ROAD_W）；高架、隧道不畫
@@ -10,17 +10,23 @@
  *   面對馬路的一樓是生鏽的鐵捲門（有的半開）、大馬路路口歪掉不亮的紅綠燈、公車亭（沒有站名）、高樓旁邊塌下來的水泥碎塊；
  *   擺在哪是照馬路、房子的位置用固定的亂數擺的（不是真的位置），汽車、紅綠燈、公車亭、碎石擋路
  * - 白天身邊有幾隻蝴蝶、地上有小花；晚上（照台北的時間）有螢火蟲
- * 分成 CHUNK 公尺一格：走近才蓋（每一格畫面只蓋一點點，不會卡），看得到才畫（汪星很小、地平線很近：照鏡頭和房子的高度算看不看得到）。
- * 人不能走進房子、水裡，樹幹、路燈擋路；離國館中間 CITY_WALK_M 公尺以外走不過去
+ * - v1.825 使用者說把整個汪星補完 3D、山要有真的地形：資料換成整個台北市（web/public/woof3d，gen-woof-world.mjs 產生），
+ *   1 公里一塊，走到哪載到哪（LOAD_M 內），遠的卸載（UNLOAD_M 外）；地面、馬路、房子、樹、車子照地形的高度擺（heightAt，國館維持平的、
+ *   旁邊慢慢接上），市界外面是汪星的海（海平面 seaY）
+ * 分成 CHUNK 公尺一格：走近才蓋（每一格畫面只蓋一點點，不會卡），看得到才畫（汪星很小、地平線很近：照鏡頭和房子的高度算看不看得到），遠的拆掉。
+ * 人不能走進房子、水裡、海裡，樹幹、路燈擋路
  */
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
-import { WOOF_BUILDINGS, WOOF_GREEN, WOOF_Q, WOOF_ROADS, WOOF_WATER } from './woof-city-data';
 
 type Pt = [number, number];
 
-/** 離國館中間多遠以內走得到（公尺；使用者選的「先做國館附近 2 公里」） */
-export const CITY_WALK_M = 2000;
+/** 一塊（1 公里）多近開始載入、多遠卸載（公尺，塊的邊算起）；一格（200 公尺）多遠拆掉 */
+const LOAD_M = 1800;
+const UNLOAD_M = 4000;
+const DISPOSE_M = 2000;
+/** 同時最多載幾塊 */
+const LOAD_PARALLEL = 4;
 /** 一格多大（公尺） */
 const CHUNK = 200;
 /** 一層樓多高、窗戶一個開間多寬（公尺，估的）；牆的圖一張是 4 間 × 4 層 */
@@ -71,16 +77,23 @@ const hash = (i: number): number => {
 /** 這個位置的亂數（公尺座標，固定的） */
 const hashAt = (x: number, y: number, k = 0): number => hash(Math.round(x * 4) * 1013 + Math.round(y * 4) * 7919 + k * 131);
 
-const decode = (s: string): Pt[] => {
+/** 解開差值編碼的線、圈（q：每公尺幾格） */
+const decodeQ = (s: string, q: number): Pt[] => {
   const v = s.split(',').map(Number);
   const out: Pt[] = [];
   let [x, y] = [0, 0];
   for (let i = 0; i + 1 < v.length; i += 2) {
     x += v[i];
     y += v[i + 1];
-    out.push([x / WOOF_Q, y / WOOF_Q]);
+    out.push([x / q, y / q]);
   }
   return out;
+};
+const b64Int16 = (s: string): Int16Array => {
+  const bin = atob(s);
+  const u8 = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) u8[i] = bin.charCodeAt(i);
+  return new Int16Array(u8.buffer);
 };
 const ringArea = (r: Pt[]): number => {
   let s = 0;
@@ -136,6 +149,17 @@ class Grid<T> {
   at(p: Pt): T[] {
     return this.cells.get(this.key(Math.floor(p[0] / this.cell), Math.floor(p[1] / this.cell))) ?? [];
   }
+  remove(b: Box, v: T): void {
+    for (let i = Math.floor(b[0] / this.cell); i <= Math.floor(b[2] / this.cell); i++)
+      for (let j = Math.floor(b[1] / this.cell); j <= Math.floor(b[3] / this.cell); j++) {
+        const k = this.key(i, j);
+        const list = this.cells.get(k);
+        if (!list) continue;
+        const left = list.filter((x) => x !== v);
+        if (left.length) this.cells.set(k, left);
+        else this.cells.delete(k);
+      }
+  }
 }
 
 interface Building {
@@ -143,9 +167,12 @@ interface Building {
   rings: Pt[][];
   box: Box;
   c: Pt;
-  /** 塌掉以後的高度（屋頂在這裡） */
+  /** 塌掉以後的高度（屋頂在這裡，從 base 算起） */
   h: number;
   area: number;
+  /** 蓋的時候算：地面的高度（中心）、牆要往下延伸多少（斜坡上低的那邊） */
+  base: number;
+  drop: number;
   /** 這一棟的亂數（顏色、牆頂） */
   k: number;
 }
@@ -156,6 +183,10 @@ interface Road {
 }
 interface Chunk {
   c: Pt;
+  /** 在哪一塊（1 公里） */
+  cell: string;
+  /** 蓋的時候加進擋路的（拆掉時拿掉） */
+  trunkList: Array<[Box, [number, number, number]]>;
   bs: Building[];
   roads: Road[];
   /** 路口的紅綠燈、路邊的公車亭（v1.821）：站的地方、朝哪（繞 y 轉多少） */
@@ -167,13 +198,32 @@ interface Chunk {
   flowers: THREE.Object3D | null;
 }
 
+/** 整顆汪星的總覽（woof3d/index.json，gen-woof-world.mjs 產生） */
+export interface WoofWorld {
+  v: number;
+  /** 形狀的座標每公尺幾格、一塊多大、地形幾公尺一點（一塊 tN×tN 點，邊上的點兩塊共用）、海的記號、國館那裡的海拔（公尺） */
+  q: number;
+  cell: number;
+  tStep: number;
+  tN: number;
+  sea: number;
+  ref: number;
+  /** 有陸地的塊 */
+  cells: string[];
+  /** 市界（公尺，差值編碼）、粗的地形（step 公尺一點）、大馬路、大的水面（地圖用，公尺） */
+  outline: string;
+  coarse: { x0: number; y0: number; step: number; nx: number; ny: number; data: string };
+  roads: string;
+  water: string;
+}
 export interface WoofCityOptions {
   /** 國館的外框（公尺，東、北）：裡面的房子、路、樹都不放（國館照舊） */
   outline: Pt[];
   /** 國館裡的水面（外圈，公尺）：地面不能蓋到（水面比地面低） */
   lakes: Pt[][];
-  /** 國館中間（公尺）：走得到的範圍從這裡算 */
-  center: Pt;
+  /** 整顆汪星的總覽、一塊的網址 */
+  world: WoofWorld;
+  cellUrl: (key: string) => string;
   /** 屋頂長滿草：用國館草地同一個材質（uv 是公尺） */
   grass: THREE.Material;
   /** 汪星的半徑（公尺）：看得到多遠照這個算 */
@@ -185,12 +235,18 @@ export interface WoofCityOptions {
 
 export interface WoofCity {
   group: THREE.Group;
-  /** 走得到多遠（公尺，離國館中間；大地圖照這個決定範圍） */
-  walkM: number;
-  /** 國館外面這裡站不站得住（房子、水、樹幹、路燈、太遠） */
+  /** 整顆汪星的範圍（公尺，大地圖用） */
+  bounds: Box;
+  /** 國館外面這裡站不站得住（房子、水、海、樹幹、路燈；還沒載入的也站不住） */
   canStand(p: Pt): boolean;
-  /** 超過走得到的範圍 */
-  tooFar(p: Pt): boolean;
+  /** 這裡是海（市界外面） */
+  isSea(p: Pt): boolean;
+  /** 地面多高（公尺，國館是 0） */
+  heightAt(p: Pt): number;
+  /** p 附近 radiusM 公尺內的塊都載入了 */
+  ready(p: Pt, radiusM: number): boolean;
+  /** 先載入 p 附近（瞬間移動過去之前） */
+  load(p: Pt): void;
   /** 每一格：照鏡頭蓋附近的格子、顯示看得到的，蝴蝶、螢火蟲飛；回傳要不要重畫 */
   update(cam: THREE.Vector3, you: Pt, now: number, night: number): boolean;
   /** 一進來先把 p 附近 radiusM 公尺內的格子蓋好（最多花 budgetMs 毫秒，近的先蓋），淡入時不會看到房子一棟棟冒出來 */
@@ -227,98 +283,257 @@ export function buildWoofCity(o: WoofCityOptions): WoofCity {
   const parkBox = boxOf(o.outline);
   const nearPark = (p: Pt, m: number): boolean => inBox(p, parkBox, m) && (inPark(p) || o.outline.some((a, i) => segDist(p, a, o.outline[(i + 1) % o.outline.length]) < m));
 
-  // ---- 資料
-  const buildings: Building[] = [];
-  const bGrid = new Grid<Building>(20);
-  for (const s of WOOF_BUILDINGS.split(';')) {
-    const i = s.indexOf(':');
-    const rings = s
-      .slice(i + 1)
-      .split('/')
-      .map(decode)
-      .filter((r) => r.length >= 3);
-    if (!rings.length) continue;
-    const outer = rings[0];
-    const c: Pt = [outer.reduce((a, p) => a + p[0], 0) / outer.length, outer.reduce((a, p) => a + p[1], 0) / outer.length];
-    if (inPark(c)) continue;
-    let area = ringArea(outer);
-    if (area < 0) {
-      outer.reverse();
-      area = -area;
+  // ---- 整顆汪星（v1.825）：地形、海、一塊塊的資料
+  const W = o.world;
+  const decode = (str: string): Pt[] => decodeQ(str, W.q);
+  const outlineCity = decodeQ(W.outline, 1);
+  const bounds = boxOf(outlineCity);
+  /** 海拔多少的地方算海底（市界外面那幾點，跟陸地之間接成斜坡） */
+  const SEA_FLOOR_M = -6;
+  /** 海平面（國館是 0） */
+  const seaY = -W.ref;
+  const terr = new Map<string, Int16Array>();
+  const coarse = b64Int16(W.coarse.data);
+  /** 某一格四個角的高度（公尺；海是 SEA_FLOOR_M）和陸地佔多少，雙線性內插 */
+  const sample = (t: Int16Array, n: number, c: number, r: number, nx: number, ny: number): [number, number] => {
+    const [c0, r0] = [Math.max(0, Math.min(nx - 2, Math.floor(c))), Math.max(0, Math.min(ny - 2, Math.floor(r)))];
+    const [fx, fy] = [Math.max(0, Math.min(1, c - c0)), Math.max(0, Math.min(1, r - r0))];
+    let [h, land] = [0, 0];
+    for (const [dc, dr, w] of [
+      [0, 0, (1 - fx) * (1 - fy)],
+      [1, 0, fx * (1 - fy)],
+      [0, 1, (1 - fx) * fy],
+      [1, 1, fx * fy],
+    ]) {
+      const v = t[(r0 + dr) * n + c0 + dc];
+      const isSea = v === W.sea;
+      h += (isSea ? SEA_FLOOR_M : v / 10) * w;
+      if (!isSea) land += w;
     }
-    if (area < 4) continue;
-    const holes = rings.slice(1).map((h) => (ringArea(h) > 0 ? h.reverse() : h));
-    const k = hashAt(c[0], c[1]);
-    const h = RUIN_H(Number(s.slice(0, i)) || ESTIMATE_H(area, k), hash(k * 977 + 1));
-    const b: Building = { rings: [outer, ...holes], box: boxOf(outer), c, h, area, k };
-    buildings.push(b);
-    bGrid.add(b.box, b);
-  }
+    return [h, land];
+  };
+  /** 海拔（公尺）和是不是陸地：那一塊載入了用細的（20 公尺一點），不然用粗的（100 公尺一點） */
+  const terrainAt = (x: number, y: number): [number, boolean] => {
+    const [i, j] = [Math.floor(x / W.cell), Math.floor(y / W.cell)];
+    const t = terr.get(`${i}_${j}`);
+    if (t) {
+      const [h, land] = sample(t, W.tN, (x - i * W.cell) / W.tStep, (y - j * W.cell) / W.tStep, W.tN, W.tN);
+      return [h, land >= 0.5];
+    }
+    const C0 = W.coarse;
+    const [c, r] = [(x - C0.x0) / C0.step, (y - C0.y0) / C0.step];
+    if (c < 0 || r < 0 || c > C0.nx - 1 || r > C0.ny - 1) return [SEA_FLOOR_M, false];
+    const [h, land] = sample(coarse, C0.nx, c, r, C0.nx, C0.ny);
+    return [h, land >= 0.5];
+  };
+  /** 地面多高（國館是 0：國館外框 10 公尺內平的，再 50 公尺慢慢接上真的地形） */
+  const heightAt = (p: Pt): number => {
+    const dx = Math.max(parkBox[0] - p[0], 0, p[0] - parkBox[2]);
+    const dy = Math.max(parkBox[1] - p[1], 0, p[1] - parkBox[3]);
+    const w = Math.max(0, Math.min(1, (Math.hypot(dx, dy) - 10) / 50));
+    return w ? (terrainAt(p[0], p[1])[0] - W.ref) * w : 0;
+  };
+  const isSea = (p: Pt): boolean => !inPark(p) && !terrainAt(p[0], p[1])[1];
+
+  const bGrid = new Grid<Building>(20);
   const inBuilding = (p: Pt, m: number): boolean =>
     bGrid.at(p).some(
       (b) =>
         inBox(p, b.box, m) &&
         ((inRing(p, b.rings[0]) && !b.rings.slice(1).some((h) => inRing(p, h))) || (m > 0 && b.rings.some((r) => r.some((a, i) => segDist(p, a, r[(i + 1) % r.length]) < m)))),
     );
-
-  // 馬路：每一段照中點分到格子裡，國館裡面的不要
   const chunks = new Map<string, Chunk>();
-  const chunkOf = (p: Pt): Chunk => {
+  const chunkOf = (p: Pt, cell: string): Chunk => {
     const [i, j] = [Math.floor(p[0] / CHUNK), Math.floor(p[1] / CHUNK)];
     const key = `${i},${j}`;
     let ch = chunks.get(key);
-    if (!ch) chunks.set(key, (ch = { c: [(i + 0.5) * CHUNK, (j + 0.5) * CHUNK], bs: [], roads: [], lights: [], shelters: [], maxH: 0, root: null, trees: [], flowers: null }));
+    if (!ch) chunks.set(key, (ch = { c: [(i + 0.5) * CHUNK, (j + 0.5) * CHUNK], cell, trunkList: [], bs: [], roads: [], lights: [], shelters: [], maxH: 0, root: null, trees: [], flowers: null }));
     return ch;
   };
-  for (const b of buildings) {
-    const ch = chunkOf(b.c);
-    ch.bs.push(b);
-    ch.maxH = Math.max(ch.maxH, b.h + FLOOR_H);
-  }
-  const rGrid = new Grid<{ a: Pt; b: Pt; hw: number }>(20);
-  /** 大馬路（畫標線的）整條留著：找路口放紅綠燈、每隔一段放公車亭（v1.821） */
-  const bigRoads: Road[] = [];
-  for (const s of WOOF_ROADS.split(';')) {
-    const i = s.indexOf(':');
-    const cls = s.slice(0, i);
-    const w = ROAD_W[cls] ?? 5;
-    const pts = decode(s.slice(i + 1));
-    if (LINED.has(cls)) bigRoads.push({ cls, w, pts });
-    let cur: Road | null = null;
-    let curCh: Chunk | null = null;
-    for (let k = 1; k < pts.length; k++) {
-      const [a, b] = [pts[k - 1], pts[k]];
-      const mid: Pt = [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2];
-      if (inPark(mid)) {
-        cur = null;
-        continue;
-      }
-      rGrid.add([Math.min(a[0], b[0]) - w / 2, Math.min(a[1], b[1]) - w / 2, Math.max(a[0], b[0]) + w / 2, Math.max(a[1], b[1]) + w / 2], { a, b, hw: w / 2 });
-      const ch = chunkOf(mid);
-      if (!cur || ch !== curCh) {
-        cur = { cls, w, pts: [a] };
-        curCh = ch;
-        ch.roads.push(cur);
-      }
-      cur.pts.push(b);
-    }
-  }
-  const onRoad = (p: Pt, m = 0): boolean => rGrid.at(p).some((s) => segDist(p, s.a, s.b) < s.hw + m);
-  const waters = WOOF_WATER ? WOOF_WATER.split(';').map((s) => s.split('/').map(decode)) : [];
-  const water = waters.filter((w) => w[0].length >= 3 && !inPark(w[0][0])).map((w) => ({ rings: w, box: boxOf(w[0]) }));
-  const inWater = (p: Pt): boolean => water.some((w) => inBox(p, w.box) && inRing(p, w.rings[0]) && !w.rings.slice(1).some((h) => inRing(p, h)));
-  const gGrid = new Grid<{ rings: Pt[][]; box: Box }>(50);
-  for (const s of WOOF_GREEN ? WOOF_GREEN.split(';') : []) {
-    const rings = s.split('/').map(decode);
-    if (rings[0].length < 3) continue;
-    const g = { rings, box: boxOf(rings[0]) };
-    gGrid.add(g.box, g);
-  }
-  const inGreen = (p: Pt): boolean => gGrid.at(p).some((g) => inBox(p, g.box) && inRing(p, g.rings[0]) && !g.rings.slice(1).some((h) => inRing(p, h)));
-  const inReach = (p: Pt): boolean => p[0] ** 2 + p[1] ** 2 < 2300 ** 2;
+  type Seg = { a: Pt; b: Pt; hw: number };
+  const rGrid = new Grid<Seg>(20);
+  const onRoad = (p: Pt, m = 0): boolean => rGrid.at(p).some((sg) => segDist(p, sg.a, sg.b) < sg.hw + m);
+  type Area = { rings: Pt[][]; box: Box };
+  const wGrid = new Grid<Area>(50);
+  const inArea = (grid: Grid<Area>, p: Pt): boolean => grid.at(p).some((g) => inBox(p, g.box) && inRing(p, g.rings[0]) && !g.rings.slice(1).some((h) => inRing(p, h)));
+  const inWater = (p: Pt): boolean => inArea(wGrid, p);
+  const gGrid = new Grid<Area>(50);
+  const inGreen = (p: Pt): boolean => inArea(gGrid, p);
+  /** 陸地上、汪星的範圍裡（以前是國館 2 公里內） */
+  const inReach = (p: Pt): boolean => !isSea(p);
 
-  // ---- 路口的紅綠燈（v1.821）：三條以上大馬路接在同一點的是路口（雙向分開畫的大路路口會更多條），30 公尺內只放一支，放在一個路角、燈臂伸向路口
-  {
+  /** 樹幹、路燈、車子（擋路）：蓋一格時加進去，記在那一格（拆掉時拿掉） */
+  const trunkGrid = new Grid<[number, number, number]>(5);
+  let building: Chunk | null = null;
+  const trunks = {
+    add(b: Box, v: [number, number, number]): void {
+      trunkGrid.add(b, v);
+      building?.trunkList.push([b, v]);
+    },
+    at: (p: Pt) => trunkGrid.at(p),
+  };
+  const hitTrunk = (p: Pt): boolean => trunks.at(p).some(([x, y, r]) => Math.hypot(p[0] - x, p[1] - y) < r + BODY);
+
+  /** 載入的一塊：讀進來的東西（卸載時從索引拿掉）、水面 */
+  interface CellState {
+    key: string;
+    ready: boolean;
+    buildings: Building[];
+    segs: Array<[Box, Seg]>;
+    areas: Array<[Grid<Area>, Area]>;
+    water: THREE.Mesh | null;
+  }
+  const cellSet = new Set(W.cells);
+  const cellMap = new Map<string, CellState>();
+  let inflight = 0;
+  /** 載入、卸載過（地面的高度要重算、畫面要重畫） */
+  let cellsChanged = 0;
+  const cellKeyOf = (x: number, y: number): string => `${Math.floor(x / W.cell)}_${Math.floor(y / W.cell)}`;
+  /** 這一塊可以用了：載入好了，或沒有陸地（海） */
+  const cellReady = (key: string): boolean => !cellSet.has(key) || !!cellMap.get(key)?.ready;
+  function requestCell(key: string): void {
+    if (!cellSet.has(key) || cellMap.has(key) || inflight >= LOAD_PARALLEL) return;
+    const st: CellState = { key, ready: false, buildings: [], segs: [], areas: [], water: null };
+    cellMap.set(key, st);
+    inflight++;
+    fetch(o.cellUrl(key))
+      .then((r) => (r.ok ? r.json() : Promise.reject(new Error(String(r.status)))))
+      .then((d: { b: string; r: string; w: string; g: string; t: string }) => {
+        if (cellMap.get(key) === st) addCell(st, d);
+      })
+      .catch(() => {
+        // 載不到：拿掉，等一下再試
+        if (cellMap.get(key) === st) cellMap.delete(key);
+      })
+      .finally(() => inflight--);
+  }
+  function addCell(st: CellState, d: { b: string; r: string; w: string; g: string; t: string }): void {
+    terr.set(st.key, b64Int16(d.t));
+    for (const str of d.b ? d.b.split(';') : []) {
+      const i = str.indexOf(':');
+      const rings = str
+        .slice(i + 1)
+        .split('/')
+        .map(decode)
+        .filter((r) => r.length >= 3);
+      if (!rings.length) continue;
+      const outer = rings[0];
+      const c: Pt = [outer.reduce((a, p) => a + p[0], 0) / outer.length, outer.reduce((a, p) => a + p[1], 0) / outer.length];
+      if (inPark(c)) continue;
+      let area = ringArea(outer);
+      if (area < 0) {
+        outer.reverse();
+        area = -area;
+      }
+      if (area < 4) continue;
+      const holes = rings.slice(1).map((h) => (ringArea(h) > 0 ? h.reverse() : h));
+      const k = hashAt(c[0], c[1]);
+      const h = RUIN_H(Number(str.slice(0, i)) || ESTIMATE_H(area, k), hash(k * 977 + 1));
+      const b: Building = { rings: [outer, ...holes], box: boxOf(outer), c, h, area, k, base: 0, drop: 0 };
+      st.buildings.push(b);
+      bGrid.add(b.box, b);
+      const ch = chunkOf(c, st.key);
+      ch.bs.push(b);
+      ch.maxH = Math.max(ch.maxH, b.h + FLOOR_H);
+    }
+    // 馬路：每一段照中點分到格子裡，國館裡面的不要；大馬路留著找路口、放公車亭
+    const bigRoads: Road[] = [];
+    for (const str of d.r ? d.r.split(';') : []) {
+      const i = str.indexOf(':');
+      const cls = str.slice(0, i);
+      const w = ROAD_W[cls] ?? 5;
+      const pts = decode(str.slice(i + 1));
+      if (LINED.has(cls)) bigRoads.push({ cls, w, pts });
+      let cur: Road | null = null;
+      let curCh: Chunk | null = null;
+      for (let k = 1; k < pts.length; k++) {
+        const [a, b] = [pts[k - 1], pts[k]];
+        const mid: Pt = [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2];
+        if (inPark(mid)) {
+          cur = null;
+          continue;
+        }
+        const box: Box = [Math.min(a[0], b[0]) - w / 2, Math.min(a[1], b[1]) - w / 2, Math.max(a[0], b[0]) + w / 2, Math.max(a[1], b[1]) + w / 2];
+        const sg: Seg = { a, b, hw: w / 2 };
+        rGrid.add(box, sg);
+        st.segs.push([box, sg]);
+        const ch = chunkOf(mid, st.key);
+        if (!cur || ch !== curCh) {
+          cur = { cls, w, pts: [a] };
+          curCh = ch;
+          ch.roads.push(cur);
+        }
+        cur.pts.push(b);
+      }
+    }
+    const waterGeos: THREE.BufferGeometry[] = [];
+    for (const [str, grid] of [
+      [d.w, wGrid],
+      [d.g, gGrid],
+    ] as const)
+      for (const one of str ? str.split(';') : []) {
+        const rings = one.split('/').map(decode);
+        if (rings[0].length < 3 || (grid === wGrid && inPark(rings[0][0]))) continue;
+        const a: Area = { rings, box: boxOf(rings[0]) };
+        grid.add(a.box, a);
+        st.areas.push([grid, a]);
+        if (grid === wGrid) {
+          const shape = new THREE.Shape(rings[0].map(([x, y]) => new THREE.Vector2(x, y)));
+          shape.holes = rings.slice(1).map((h) => new THREE.Path(h.map(([x, y]) => new THREE.Vector2(x, y))));
+          waterGeos.push(new THREE.ShapeGeometry(shape).rotateX(-Math.PI / 2));
+        }
+      }
+    // 水面照地形擺（河、湖比旁邊低一點；不會比海低）
+    if (waterGeos.length) {
+      const g = mergeGeometries(waterGeos)!;
+      const pos = g.getAttribute('position');
+      for (let v = 0; v < pos.count; v++) pos.setY(v, Math.max(seaY, heightAt([pos.getX(v), -pos.getZ(v)])) + 0.04);
+      const m = new THREE.Mesh(tessellateFlat(g), waterMat);
+      m.receiveShadow = true;
+      group.add(m);
+      st.water = m;
+    }
+    placeStreetFurniture(bigRoads, st.key);
+    // 沒有房子、馬路的格子也要（山上、空地要長樹）
+    const [ci, cj] = st.key.split('_').map(Number);
+    for (let a = 0; a < W.cell / CHUNK; a++) for (let b = 0; b < W.cell / CHUNK; b++) chunkOf([ci * W.cell + (a + 0.5) * CHUNK, cj * W.cell + (b + 0.5) * CHUNK], st.key);
+    st.ready = true;
+    cellsChanged++;
+  }
+  function unloadCell(st: CellState): void {
+    for (const [key, ch] of chunks)
+      if (ch.cell === st.key) {
+        disposeChunk(ch);
+        chunks.delete(key);
+      }
+    for (const b of st.buildings) bGrid.remove(b.box, b);
+    for (const [box, sg] of st.segs) rGrid.remove(box, sg);
+    for (const [grid, a] of st.areas) grid.remove(a.box, a);
+    if (st.water) {
+      group.remove(st.water);
+      st.water.geometry.dispose();
+    }
+    terr.delete(st.key);
+    cellMap.delete(st.key);
+    cellsChanged++;
+  }
+  function disposeChunk(ch: Chunk): void {
+    if (!ch.root) return;
+    group.remove(ch.root);
+    ch.root.traverse((x) => {
+      if (x instanceof THREE.InstancedMesh) x.dispose();
+      else if (x instanceof THREE.Mesh) x.geometry.dispose();
+    });
+    ch.root = null;
+    ch.trees = [];
+    ch.flowers = null;
+    for (const [b, v] of ch.trunkList) trunkGrid.remove(b, v);
+    ch.trunkList = [];
+  }
+
+  /** 路口的紅綠燈、公車亭（v1.821）：照這一塊的大馬路找 */
+  function placeStreetFurniture(bigRoads: Road[], cell: string): void {
+    // 路口：三條以上大馬路接在同一點的是路口（雙向分開畫的大路路口會更多條），30 公尺內只放一支，放在一個路角、燈臂伸向路口
     const ends = new Map<string, { p: Pt; ids: Set<number>; w: number; dir: Pt }>();
     bigRoads.forEach((r, id) =>
       r.pts.forEach((p, k) => {
@@ -344,35 +559,63 @@ export function buildWoofCity(o: WoofCityOptions): WoofCity {
       const p: Pt = [e.p[0] + ux * off - uy * off * s, e.p[1] + uy * off + ux * off * s];
       if (!inReach(p) || nearPark(p, 6) || inBuilding(p, 1) || inWater(p)) continue;
       placed.push(e.p);
-      chunkOf(p).lights.push({ p, yaw: Math.atan2(e.p[1] - p[1], e.p[0] - p[0]), k });
+      chunkOf(p, cell).lights.push({ p, yaw: Math.atan2(e.p[1] - p[1], e.p[0] - p[0]), k });
     }
-  }
-  // ---- 公車亭（v1.821）：大馬路邊大約每 300 公尺一個（有的沒有），在路外面、開口朝馬路
-  for (const r of bigRoads) {
-    if (r.cls !== 'primary' && r.cls !== 'secondary' && r.cls !== 'trunk') continue;
-    let walked = 0;
-    for (let i = 1; i < r.pts.length; i++) {
-      const [a, b] = [r.pts[i - 1], r.pts[i]];
-      const len = Math.hypot(b[0] - a[0], b[1] - a[1]);
-      if (len < 1e-3) continue;
-      const [ux, uy] = [(b[0] - a[0]) / len, (b[1] - a[1]) / len];
-      for (let t = Math.ceil(walked / 300) * 300 - walked + 150; t <= len; t += 300) {
-        const k = hashAt(a[0] + ux * t, a[1] + uy * t, 41);
-        if (k > 0.6) continue;
-        const s = k < 0.3 ? 1 : -1;
-        const off = r.w / 2 + 2.4;
-        const p: Pt = [a[0] + ux * t - uy * off * s, a[1] + uy * t + ux * off * s];
-        if (!inReach(p) || nearPark(p, 5) || inBuilding(p, 2) || inWater(p) || onRoad(p, 1)) continue;
-        // 開口（形狀的 +z）朝馬路：往路的方向是 (uy·s, -ux·s)，繞 y 轉 θ 時 +z 變成 (sin θ, 0, cos θ)，世界的 z 是往南
-        const [tx, ty] = [uy * s, -ux * s];
-        chunkOf(p).shelters.push({ p, yaw: Math.atan2(tx, -ty), k });
+    // 公車亭：大馬路邊大約每 300 公尺一個（有的沒有），在路外面、開口朝馬路
+    for (const r of bigRoads) {
+      if (r.cls !== 'primary' && r.cls !== 'secondary' && r.cls !== 'trunk') continue;
+      let walked = 0;
+      for (let i = 1; i < r.pts.length; i++) {
+        const [a, b] = [r.pts[i - 1], r.pts[i]];
+        const len = Math.hypot(b[0] - a[0], b[1] - a[1]);
+        if (len < 1e-3) continue;
+        const [ux, uy] = [(b[0] - a[0]) / len, (b[1] - a[1]) / len];
+        for (let t = Math.ceil(walked / 300) * 300 - walked + 150; t <= len; t += 300) {
+          const k = hashAt(a[0] + ux * t, a[1] + uy * t, 41);
+          if (k > 0.6) continue;
+          const s = k < 0.3 ? 1 : -1;
+          const off = r.w / 2 + 2.4;
+          const p: Pt = [a[0] + ux * t - uy * off * s, a[1] + uy * t + ux * off * s];
+          if (!inReach(p) || nearPark(p, 5) || inBuilding(p, 2) || inWater(p) || onRoad(p, 1)) continue;
+          // 開口（形狀的 +z）朝馬路：往路的方向是 (uy·s, -ux·s)，繞 y 轉 θ 時 +z 變成 (sin θ, 0, cos θ)，世界的 z 是往南
+          const [tx, ty] = [uy * s, -ux * s];
+          chunkOf(p, cell).shelters.push({ p, yaw: Math.atan2(tx, -ty), k });
+        }
+        walked += len;
       }
-      walked += len;
     }
   }
-  /** 樹幹、路燈（擋路） */
-  const trunks = new Grid<[number, number, number]>(5);
-  const hitTrunk = (p: Pt): boolean => trunks.at(p).some(([x, y, r]) => Math.hypot(p[0] - x, p[1] - y) < r + BODY);
+  /** 平的大三角形切小（彎的時候、照地形擺的時候中間才不會浮起來）：最長的邊超過 SPLIT_M 就從中點切 */
+  function tessellateFlat(g: THREE.BufferGeometry): THREE.BufferGeometry {
+    const src = g.index ? g.toNonIndexed() : g;
+    const p = src.getAttribute('position');
+    const out: number[] = [];
+    const stack: number[][] = [];
+    for (let i = 0; i + 2 < p.count; i += 3) {
+      stack.push([p.getX(i), p.getY(i), p.getZ(i), p.getX(i + 1), p.getY(i + 1), p.getZ(i + 1), p.getX(i + 2), p.getY(i + 2), p.getZ(i + 2)]);
+      while (stack.length) {
+        const t = stack.pop()!;
+        const d = (a: number, b: number): number => (t[a * 3] - t[b * 3]) ** 2 + (t[a * 3 + 2] - t[b * 3 + 2]) ** 2;
+        const [ab, bc, ca] = [d(0, 1), d(1, 2), d(2, 0)];
+        const m = Math.max(ab, bc, ca);
+        if (m <= SPLIT_M * SPLIT_M * 4) {
+          out.push(...t);
+          continue;
+        }
+        const mid = (a: number, b: number): number[] => [0, 1, 2].map((k) => (t[a * 3 + k] + t[b * 3 + k]) / 2);
+        const v = (a: number): number[] => t.slice(a * 3, a * 3 + 3);
+        if (m === ab) stack.push([...v(0), ...mid(0, 1), ...v(2)], [...mid(0, 1), ...v(1), ...v(2)]);
+        else if (m === bc) stack.push([...v(0), ...v(1), ...mid(1, 2)], [...v(0), ...mid(1, 2), ...v(2)]);
+        else stack.push([...v(0), ...v(1), ...mid(2, 0)], [...mid(2, 0), ...v(1), ...v(2)]);
+      }
+    }
+    // 切出來的點也照地形擺
+    for (let i = 0; i < out.length; i += 3) out[i + 1] = Math.max(seaY, heightAt([out[i], -out[i + 2]])) + 0.04;
+    const r = new THREE.BufferGeometry();
+    r.setAttribute('position', new THREE.Float32BufferAttribute(out, 3));
+    r.setAttribute('normal', new THREE.Float32BufferAttribute(out.map((_, i) => (i % 3 === 1 ? 1 : 0)), 3));
+    return r;
+  }
 
   // ---- 材質
   // 牆：灰白的水泥（每一棟照頂點顏色上一點色），一間一個只剩洞的窗戶（有的沒有窗、有的塌到地上），斑駁、雨水流下的痕跡，藤蔓從上面垂下來
@@ -690,18 +933,6 @@ export function buildWoofCity(o: WoofCityOptions): WoofCity {
   const TINTS = ['#f1eee8', '#e6dfd2', '#ecdfd5', '#dbe1e0', '#e6ddc8', '#dad4cc'].map((c) => new THREE.Color(c));
   const MOSS = new THREE.Color('#6d9450');
 
-  // ---- 水面（整片一次蓋好，沒幾塊）
-  if (water.length) {
-    const geos = water.map(({ rings }) => {
-      const shape = new THREE.Shape(rings[0].map(([x, y]) => new THREE.Vector2(x, y)));
-      shape.holes = rings.slice(1).map((h) => new THREE.Path(h.map(([x, y]) => new THREE.Vector2(x, y))));
-      return new THREE.ShapeGeometry(shape).rotateX(-Math.PI / 2).translate(0, 0.012, 0);
-    });
-    const m = new THREE.Mesh(mergeGeometries(geos)!, waterMat);
-    m.receiveShadow = true;
-    group.add(m);
-  }
-
   // ---- 蓋一格
   const tmpM = new THREE.Matrix4();
   const tmpQ = new THREE.Quaternion();
@@ -719,6 +950,9 @@ export function buildWoofCity(o: WoofCityOptions): WoofCity {
       const colorAt = (y: number, top: number): THREE.Color =>
         tmpC.copy(tint).lerp(MOSS, y <= MOSS_H ? 0.6 * (1 - y / MOSS_H) : (0.14 * (y - MOSS_H)) / Math.max(0.1, top - MOSS_H));
       const u0 = b.k * 11;
+      // 照地形：房子站在中心的地面高度，斜坡上低的那邊牆往下延伸到地面
+      b.base = heightAt(b.c);
+      b.drop = Math.max(0, ...b.rings[0].map((v) => b.base - heightAt(v))) + 0.3;
       let edge = 0;
       for (const r of b.rings) {
         let u = u0;
@@ -731,7 +965,7 @@ export function buildWoofCity(o: WoofCityOptions): WoofCity {
           const jag = hash(b.k * 1000 + edge++);
           const top = b.h + (jag < 0.45 ? 0 : jag * Math.min(FLOOR_H * 0.8, b.h * 0.3));
           const [nx, nz] = [dy / len, dx / len];
-          const bands: Array<[number, number]> = top > MOSS_H + 0.3 ? [[0, MOSS_H], [MOSS_H, top]] : [[0, top]];
+          const bands: Array<[number, number]> = top > MOSS_H + 0.3 ? [[-b.drop, MOSS_H], [MOSS_H, top]] : [[-b.drop, top]];
           for (const [y0, y1] of bands) {
             const u1 = u + len;
             const quad: Array<[Pt, number, number]> = [
@@ -743,10 +977,10 @@ export function buildWoofCity(o: WoofCityOptions): WoofCity {
               [a, y1, u],
             ];
             for (const [p, y, uu] of quad) {
-              pos.push(p[0], y, -p[1]);
+              pos.push(p[0], y + b.base, -p[1]);
               nrm.push(nx, 0, nz);
               uv.push(uu, y);
-              const cc = colorAt(y, top);
+              const cc = colorAt(Math.max(0, y), top);
               col.push(cc.r, cc.g, cc.b);
             }
           }
@@ -761,7 +995,7 @@ export function buildWoofCity(o: WoofCityOptions): WoofCity {
         // 朝上：(q - p) × (s - p) 在東北平面上是逆時針
         if ((q[0] - p[0]) * (s[1] - p[1]) - (q[1] - p[1]) * (s[0] - p[0]) < 0) [q, s] = [s, q];
         for (const v of [p, q, s]) {
-          rPos.push(v[0], b.h, -v[1]);
+          rPos.push(v[0], b.base + b.h, -v[1]);
           rUv.push(v[0], v[1]);
         }
       }
@@ -835,6 +1069,8 @@ export function buildWoofCity(o: WoofCityOptions): WoofCity {
     }
     const make = (p: number[], u?: number[]): THREE.BufferGeometry | null => {
       if (!p.length) return null;
+      // 貼著地形（每個點照那裡的地面高度往上抬）
+      for (let i = 0; i < p.length; i += 3) p[i + 1] += heightAt([p[i], -p[i + 2]]);
       const g = new THREE.BufferGeometry();
       g.setAttribute('position', new THREE.Float32BufferAttribute(p, 3));
       g.setAttribute('normal', new THREE.Float32BufferAttribute(p.map((_, i) => (i % 3 === 1 ? 1 : 0)), 3));
@@ -862,7 +1098,8 @@ export function buildWoofCity(o: WoofCityOptions): WoofCity {
     };
     const mtx = (p: Pt, y: number, yaw: number, tiltX = 0, tiltZ = 0, s = 1): THREE.Matrix4 => {
       tmpE.set(tiltX, yaw, tiltZ, 'YXZ');
-      return new THREE.Matrix4().compose(new THREE.Vector3(p[0], y, -p[1]), new THREE.Quaternion().setFromEuler(tmpE), new THREE.Vector3(s, s, s));
+      // 照地形：y 從那裡的地面算起
+      return new THREE.Matrix4().compose(new THREE.Vector3(p[0], y + heightAt(p), -p[1]), new THREE.Quaternion().setFromEuler(tmpE), new THREE.Vector3(s, s, s));
     };
     const block = (p: Pt, r: number): void => trunks.add([p[0] - r, p[1] - r, p[0] + r, p[1] + r], [p[0], p[1], r]);
     const free = (p: Pt, m: number): boolean => inReach(p) && !nearPark(p, 3) && !inBuilding(p, m) && !inWater(p);
@@ -966,15 +1203,18 @@ export function buildWoofCity(o: WoofCityOptions): WoofCity {
         [pa, y1, 0],
       ];
       for (const [p, y, u] of vs) {
-        sPos.push(p[0] + n[0] * 0.06, y, -(p[1] + n[1] * 0.06));
+        sPos.push(p[0] + n[0] * 0.06, y + shutterBase, -(p[1] + n[1] * 0.06));
         sNrm.push(n[0], 0, -n[1]);
         sUv.push(u / 2.5, y / 2.7);
         sCol.push(c.r, c.g, c.b);
       }
     };
     const rubble: Array<{ m: THREE.Matrix4 }> = [];
+    /** 鐵捲門從哪個高度算起（那一棟房子的地面） */
+    let shutterBase = 0;
     for (const b of ch.bs) {
       const ring = b.rings[0];
+      shutterBase = b.base;
       // 鐵捲門少一點（v1.824 使用者說鐵捲門有點太多）：大約一半的房子一樓是店面，店面一間間大約三分之二有鐵捲門（以前面對馬路的幾乎每一間都有）
       if (b.h >= 3 && hash(b.k * 307) < 0.45)
         ring.forEach((a, i) => {
@@ -1055,6 +1295,7 @@ export function buildWoofCity(o: WoofCityOptions): WoofCity {
     const root = new THREE.Group();
     ch.root = root;
     group.add(root);
+    building = ch;
     if (ch.bs.length) {
       const { walls, roofs } = wallsAndRoofs(ch.bs);
       const w = new THREE.Mesh(walls, wallMat);
@@ -1084,12 +1325,12 @@ export function buildWoofCity(o: WoofCityOptions): WoofCity {
           const side = Math.round((walked + t) / LAMP_EVERY) % 2 ? 1 : -1;
           const off = r.w / 2 + 0.7;
           const p: Pt = [a[0] + ux * t - uy * off * side, a[1] + uy * t + ux * off * side];
-          if (nearPark(p, 3) || inBuilding(p, 0.5) || p[0] ** 2 + p[1] ** 2 > 2300 ** 2) continue;
+          if (nearPark(p, 3) || inBuilding(p, 0.5) || !inReach(p)) continue;
           const k = hashAt(p[0], p[1], 9);
           // 燈臂（形狀的 +x）朝路中間：繞 y 轉 θ 時 +x 變成 (cos θ, 0, -sin θ)；往隨便一邊歪，最多約 14 度
           const toRoad = Math.atan2(-ux * side, uy * side);
           tmpE.set((hash(k * 31) - 0.5) * 0.5, toRoad, (hash(k * 37) - 0.5) * 0.5, 'YXZ');
-          lamps.push(new THREE.Matrix4().compose(new THREE.Vector3(p[0], 0, -p[1]), tmpQ.setFromEuler(tmpE), new THREE.Vector3(1, 1, 1)));
+          lamps.push(new THREE.Matrix4().compose(new THREE.Vector3(p[0], heightAt(p), -p[1]), tmpQ.setFromEuler(tmpE), new THREE.Vector3(1, 1, 1)));
           trunks.add([p[0] - 0.2, p[1] - 0.2, p[0] + 0.2, p[1] + 0.2], [p[0], p[1], 0.12]);
         }
         walked += len;
@@ -1101,21 +1342,21 @@ export function buildWoofCity(o: WoofCityOptions): WoofCity {
     for (let gx = x0 + 4; gx < x0 + CHUNK; gx += 8)
       for (let gy = y0 + 4; gy < y0 + CHUNK; gy += 8) {
         const p: Pt = [gx + (hashAt(gx, gy, 1) - 0.5) * 6, gy + (hashAt(gx, gy, 2) - 0.5) * 6];
-        if (p[0] ** 2 + p[1] ** 2 > 2300 ** 2 || nearPark(p, 4) || inWater(p) || inBuilding(p, 1.2)) continue;
+        if (!inReach(p) || nearPark(p, 4) || inWater(p) || inBuilding(p, 1.2)) continue;
         const k = hashAt(p[0], p[1], 3);
         const green = inGreen(p);
         const road = !green && onRoad(p);
         if (k > (green ? 0.6 : road ? 0.04 : 0.24)) continue;
         const s = hash(k * 501);
         const [h, r] = green ? [8 + s * 6, 3 + s * 2] : road ? [3 + s * 2, 1.2 + s * 0.8] : [5 + s * 4, 2 + s * 1.5];
-        trees.push({ p, y: 0, h, r, k });
+        trees.push({ p, y: heightAt(p), h, r, k });
         trunks.add([p[0] - 1, p[1] - 1, p[0] + 1, p[1] + 1], [p[0], p[1], 0.12 + r * 0.05]);
       }
     // 屋頂上長出來的小樹（大一點、不太高的房子）
     for (const b of ch.bs) {
       if (b.area < 120 || b.h > 40 || hash(b.k * 733) > 0.45 || !inRing(b.c, b.rings[0])) continue;
       const s = hash(b.k * 811);
-      trees.push({ p: b.c, y: b.h, h: 2 + s * 2.5, r: 1 + s * 0.9, k: b.k });
+      trees.push({ p: b.c, y: b.base + b.h, h: 2 + s * 2.5, r: 1 + s * 0.9, k: b.k });
     }
     if (trees.length) {
       const tr = new THREE.InstancedMesh(trunkGeo, trunkMat, trees.length);
@@ -1153,9 +1394,9 @@ export function buildWoofCity(o: WoofCityOptions): WoofCity {
       for (let gy = y0 + 2; gy < y0 + CHUNK; gy += 4) {
         const p: Pt = [gx + (hashAt(gx, gy, 6) - 0.5) * 3.5, gy + (hashAt(gx, gy, 7) - 0.5) * 3.5];
         const k = hashAt(p[0], p[1], 8);
-        if (k > 0.3 || nearPark(p, 1) || inBuilding(p, 0.3) || inWater(p) || (onRoad(p) && k > 0.04)) continue;
+        if (k > 0.3 || nearPark(p, 1) || !inReach(p) || inBuilding(p, 0.3) || inWater(p) || (onRoad(p) && k > 0.04)) continue;
         tmpQ.setFromAxisAngle(new THREE.Vector3(0, 1, 0), k * 40);
-        flowers.push(new THREE.Matrix4().compose(new THREE.Vector3(p[0], 0, -p[1]), tmpQ, new THREE.Vector3(1, 0.8 + k, 1)));
+        flowers.push(new THREE.Matrix4().compose(new THREE.Vector3(p[0], heightAt(p), -p[1]), tmpQ, new THREE.Vector3(1, 0.8 + k, 1)));
         fCol.push(FLOWERS[Math.floor(hash(k * 97) * FLOWERS.length)]);
       }
     if (flowers.length) {
@@ -1169,6 +1410,7 @@ export function buildWoofCity(o: WoofCityOptions): WoofCity {
       root.add(fm);
       ch.flowers = fm;
     }
+    building = null;
   }
 
   // ---- 地面：跟著你的一大片圓形草地（身邊密、遠的疏），國館裡面（國館自己有地面）、碰到國館的水的那幾格不鋪
@@ -1199,17 +1441,30 @@ export function buildWoofCity(o: WoofCityOptions): WoofCity {
   ground.receiveShadow = true;
   ground.frustumCulled = false;
   group.add(ground);
+  // 汪星的海（v1.825）：市界外面，跟地面一樣跟著你（點一樣密，彎的時候才準），在海平面；陸地比海高，蓋得住
+  const seaGeo = new THREE.BufferGeometry();
+  seaGeo.setAttribute('position', new THREE.Float32BufferAttribute(gPos.map((v, i) => (i % 3 === 1 ? 0 : v)), 3));
+  seaGeo.setAttribute('normal', new THREE.Float32BufferAttribute(gPos.map((_, i) => (i % 3 === 1 ? 1 : 0)), 3));
+  seaGeo.setIndex(gTris);
+  const sea = new THREE.Mesh(seaGeo, new THREE.MeshLambertMaterial({ color: 0x86bfd0 }));
+  sea.frustumCulled = false;
+  sea.receiveShadow = true;
+  group.add(sea);
   const lakeBoxes = o.lakes.map(boxOf);
   let groundAt = '';
-  /** 地面挪到 c（公尺）：三個角都在國館裡、或碰到國館的水的三角形不鋪 */
+  /** 地面挪到 c（公尺）：每個點照地形的高度（海是海底），三個角都在國館裡、或碰到國館的水的三角形不鋪 */
   function moveGround(c: Pt): void {
     ground.position.set(c[0], 0, -c[1]);
+    sea.position.set(c[0], seaY - 0.3, -c[1]);
     const nv = gPos.length / 3;
     const inP = new Uint8Array(nv);
+    const gp = groundGeo.getAttribute('position') as THREE.BufferAttribute;
     for (let v = 0; v < nv; v++) {
       const p: Pt = [c[0] + gPos[v * 3], c[1] - gPos[v * 3 + 2]];
       inP[v] = inBox(p, parkBox) && inPark(p) ? 1 : 0;
+      gp.setY(v, heightAt(p) - 0.02);
     }
+    gp.needsUpdate = true;
     const idx: number[] = [];
     for (let t = 0; t < gTris.length; t += 3) {
       const [a, b, d] = [gTris[t], gTris[t + 1], gTris[t + 2]];
@@ -1223,6 +1478,8 @@ export function buildWoofCity(o: WoofCityOptions): WoofCity {
       idx.push(a, b, d);
     }
     groundGeo.setIndex(idx);
+    // 照坡度打光
+    groundGeo.computeVertexNormals();
   }
 
   // ---- 蝴蝶（白天）、螢火蟲（晚上）：在你身邊飛（離太遠就換到你附近）
@@ -1293,7 +1550,7 @@ export function buildWoofCity(o: WoofCityOptions): WoofCity {
       const a = Math.random() * Math.PI * 2;
       const r = r0 + Math.random() * (r1 - r0);
       const p: Pt = [you[0] + Math.cos(a) * r, you[1] + Math.sin(a) * r];
-      if (!inBuilding(p, 1) && !inWater(p)) return p;
+      if (!inBuilding(p, 1) && !inWater(p) && !isSea(p)) return p;
     }
     return [you[0] + Math.cos(seed) * r0, you[1] + Math.sin(seed) * r0];
   };
@@ -1315,7 +1572,7 @@ export function buildWoofCity(o: WoofCityOptions): WoofCity {
         const y = b.home[1] + Math.cos(w * 0.4 + b.ph) * 3 + Math.cos(w * 1.1 + b.ph) * 0.6;
         const vx = Math.cos(w * 0.5 + b.ph) * 1.5 + Math.cos(w * 1.3 + b.ph * 2) * 0.78;
         const vy = -Math.sin(w * 0.4 + b.ph) * 1.2 - Math.sin(w * 1.1 + b.ph) * 0.66;
-        b.g.position.set(x, 0.7 + 0.5 * (1 + Math.sin(w * 0.8 + b.ph)) + 0.12 * Math.sin(w * 9 + b.ph), -y);
+        b.g.position.set(x, heightAt(b.home) + 0.7 + 0.5 * (1 + Math.sin(w * 0.8 + b.ph)) + 0.12 * Math.sin(w * 9 + b.ph), -y);
         b.g.rotation.y = Math.atan2(vx, -vy) + Math.PI;
         const flap = 0.2 + 0.95 * (0.5 + 0.5 * Math.sin(t * 20 * b.sp + b.ph));
         b.r.rotation.z = flap;
@@ -1327,7 +1584,7 @@ export function buildWoofCity(o: WoofCityOptions): WoofCity {
       ffs.forEach((f, i) => {
         if (Math.hypot(f.home[0] - you[0], f.home[1] - you[1]) > 28) f.home = reseed(you, 3, 22, f.ph);
         const w = t * f.sp * 0.3;
-        p.setXYZ(i, f.home[0] + Math.sin(w + f.ph) * 1.6, f.h + Math.sin(w * 1.7 + f.ph) * 0.35, -(f.home[1] + Math.cos(w * 0.8 + f.ph) * 1.6));
+        p.setXYZ(i, f.home[0] + Math.sin(w + f.ph) * 1.6, heightAt(f.home) + f.h + Math.sin(w * 1.7 + f.ph) * 0.35, -(f.home[1] + Math.cos(w * 0.8 + f.ph) * 1.6));
         const blink = Math.max(0, Math.sin(t * 1.2 * f.sp + f.ph)) ** 3 * Math.min(1, (night - 0.3) / 0.4);
         c.setXYZ(i, 0.8 * blink, 1 * blink, 0.42 * blink);
       });
@@ -1336,18 +1593,18 @@ export function buildWoofCity(o: WoofCityOptions): WoofCity {
     return changed || day || dark;
   }
 
-  const list = [...chunks.values()];
-  const tooFar = (p: Pt): boolean => Math.hypot(p[0] - o.center[0], p[1] - o.center[1]) > CITY_WALK_M;
-
-  // ---- 地圖（小地圖、大地圖）：每一樣先記住範圍，畫的時候只畫看得到的
-  const mapRoads = list.flatMap((ch) => ch.roads).map((r) => ({ r, box: boxOf(r.pts) }));
-  const mapGreens: Array<{ rings: Pt[][]; box: Box }> = [];
-  for (const s of WOOF_GREEN ? WOOF_GREEN.split(';') : []) {
-    const rings = s.split('/').map(decode);
-    if (rings[0].length >= 3 && !inPark(rings[0][0])) mapGreens.push({ rings, box: boxOf(rings[0]) });
-  }
+  // ---- 地圖（小地圖、大地圖）：整顆的總覽（市界、大馬路、大的水面）加上載入的那幾塊（房子、所有的路、綠地、水）
   const pm = o.parkMap;
   const parkLawns = pm.lawns.map((r) => ({ r, box: boxOf(r) }));
+  const overRoads = W.roads ? W.roads.split(';').map((str) => {
+    const i = str.indexOf(':');
+    const pts = decodeQ(str.slice(i + 1), 1);
+    return { w: ROAD_W[str.slice(0, i)] ?? 5, pts, box: boxOf(pts) };
+  }) : [];
+  const overWater = W.water ? W.water.split(';').map((str) => {
+    const rings = str.split('/').map((r) => decodeQ(r, 1));
+    return { rings, box: boxOf(rings[0]) };
+  }) : [];
   function drawMap(g: CanvasRenderingContext2D, c: Pt, mpp: number, w: number, h: number): void {
     const view: Box = [c[0] - (w / 2) * mpp, c[1] - (h / 2) * mpp, c[0] + (w / 2) * mpp, c[1] + (h / 2) * mpp];
     const seen = (b: Box, m = 0): boolean => b[0] - m <= view[2] && b[2] + m >= view[0] && b[1] - m <= view[3] && b[3] + m >= view[1];
@@ -1358,35 +1615,51 @@ export function buildWoofCity(o: WoofCityOptions): WoofCity {
       g.closePath();
     };
     const line = (l: Pt[]): void => l.forEach(([x, y], i) => (i ? g.lineTo(X(x), Y(y)) : g.moveTo(X(x), Y(y))));
-    // 草地星球的底
-    g.fillStyle = '#cfe2ae';
+    // 海、陸地（草地星球）
+    g.fillStyle = '#9cc9d6';
     g.fillRect(0, 0, w, h);
+    g.fillStyle = '#cfe2ae';
+    g.beginPath();
+    ring(outlineCity);
+    g.fill();
+    const loaded = [...cellMap.values()].filter((st) => st.ready);
     g.fillStyle = '#b6d58e';
     g.beginPath();
-    for (const gr of mapGreens) if (seen(gr.box)) gr.rings.forEach(ring);
+    for (const st of loaded) for (const [grid, a] of st.areas) if (grid === gGrid && seen(a.box)) a.rings.forEach(ring);
     g.fill('evenodd');
     g.fillStyle = '#a6d2e4';
     g.beginPath();
-    for (const wt of water) if (seen(wt.box)) wt.rings.forEach(ring);
+    for (const wt of overWater) if (seen(wt.box)) wt.rings.forEach(ring);
+    for (const st of loaded) for (const [grid, a] of st.areas) if (grid === wGrid && seen(a.box)) a.rings.forEach(ring);
     g.fill('evenodd');
-    // 馬路：淡淡的柏油色，照路寬畫（太細的至少 1 像素）
+    // 馬路：淡淡的柏油色，照路寬畫（太細的至少 1 像素）；拉遠只畫大馬路
     g.strokeStyle = '#efe9dc';
     g.lineCap = g.lineJoin = 'round';
-    for (const { r, box } of mapRoads) {
-      if (!seen(box, r.w)) continue;
+    for (const r of overRoads) {
+      if (!seen(r.box, r.w)) continue;
       g.lineWidth = Math.max(1, r.w / mpp);
       g.beginPath();
       line(r.pts);
       g.stroke();
     }
-    // 房子
-    g.fillStyle = '#bdb7ab';
-    g.strokeStyle = 'rgba(90, 86, 78, 0.55)';
-    g.lineWidth = mpp < 1.5 ? 1 : 0.5;
-    g.beginPath();
-    for (const b of buildings) if (seen(b.box)) b.rings.forEach(ring);
-    g.fill('evenodd');
-    if (mpp < 4) g.stroke();
+    if (mpp < 4)
+      for (const ch of chunks.values())
+        for (const r of ch.roads) {
+          g.lineWidth = Math.max(1, r.w / mpp);
+          g.beginPath();
+          line(r.pts);
+          g.stroke();
+        }
+    // 房子（拉近才畫）
+    if (mpp < 6) {
+      g.fillStyle = '#bdb7ab';
+      g.strokeStyle = 'rgba(90, 86, 78, 0.55)';
+      g.lineWidth = mpp < 1.5 ? 1 : 0.5;
+      g.beginPath();
+      for (const st of loaded) for (const b of st.buildings) if (seen(b.box)) b.rings.forEach(ring);
+      g.fill('evenodd');
+      if (mpp < 4) g.stroke();
+    }
     // 國館：地面、草地、水（小島挖回草地）、步道、樹、建築，外框一圈
     g.fillStyle = '#ece4d2';
     g.beginPath();
@@ -1429,47 +1702,89 @@ export function buildWoofCity(o: WoofCityOptions): WoofCity {
     g.beginPath();
     ring(o.outline);
     g.stroke();
-    // 走得到的邊界（2 公里）：粉紅色虛線
-    g.strokeStyle = 'rgba(232, 120, 150, 0.85)';
-    g.setLineDash([6, 5]);
-    g.lineWidth = 2;
+    // 市界（海岸）
+    g.strokeStyle = 'rgba(70, 110, 130, 0.7)';
+    g.lineWidth = 1.5;
     g.beginPath();
-    g.arc(X(o.center[0]), Y(o.center[1]), CITY_WALK_M / mpp, 0, Math.PI * 2);
+    ring(outlineCity);
     g.stroke();
-    g.setLineDash([]);
   }
+
+  /** p 附近 radiusM 內的塊（1 公里）：key、離 p 多遠（塊的邊算起） */
+  const cellsNear = (p: Pt, radiusM: number): Array<[string, number]> => {
+    const out: Array<[string, number]> = [];
+    const C = W.cell;
+    for (let i = Math.floor((p[0] - radiusM) / C); i <= Math.floor((p[0] + radiusM) / C); i++)
+      for (let j = Math.floor((p[1] - radiusM) / C); j <= Math.floor((p[1] + radiusM) / C); j++) {
+        const dx = Math.max(i * C - p[0], 0, p[0] - (i + 1) * C);
+        const dy = Math.max(j * C - p[1], 0, p[1] - (j + 1) * C);
+        const d = Math.hypot(dx, dy);
+        if (d <= radiusM) out.push([`${i}_${j}`, d]);
+      }
+    return out.sort((a, b) => a[1] - b[1]);
+  };
+  /** 這一格（200 公尺）可以蓋了：自己那一塊和旁邊八塊都載入了（邊上的房子、路才查得到） */
+  const chunkReady = (ch: Chunk): boolean => {
+    const [i, j] = ch.cell.split('_').map(Number);
+    for (let di = -1; di <= 1; di++) for (let dj = -1; dj <= 1; dj++) if (!cellReady(`${i + di}_${j + dj}`)) return false;
+    return true;
+  };
+  const loadAround = (p: Pt): void => {
+    for (const [key] of cellsNear(p, LOAD_M)) requestCell(key);
+  };
+  let groundCells = -1;
   return {
     group,
-    walkM: CITY_WALK_M,
+    bounds,
+    isSea,
+    heightAt,
+    ready: (p, radiusM) => cellsNear(p, radiusM + W.cell).every(([key, d]) => d > radiusM + W.cell * 0.5 || cellReady(key)),
+    load: loadAround,
     prebuild(p, radiusM, budgetMs) {
       const t0 = performance.now();
-      const todo = list
+      const todo = [...chunks.values()]
         .map((ch) => [Math.hypot(ch.c[0] - p[0], ch.c[1] - p[1]), ch] as const)
-        .filter(([d, ch]) => !ch.root && d < radiusM + CHUNK * 0.71)
+        .filter(([d, ch]) => !ch.root && d < radiusM + CHUNK * 0.71 && chunkReady(ch))
         .sort((a, b) => a[0] - b[0]);
       for (const [, ch] of todo) {
         build(ch);
         if (performance.now() - t0 > budgetMs) break;
       }
     },
-    tooFar,
     drawMap,
-    canStand: (p) => !tooFar(p) && !inWater(p) && !inBuilding(p, BODY) && !hitTrunk(p),
+    canStand: (p) => cellReady(cellKeyOf(p[0], p[1])) && !isSea(p) && !inWater(p) && !inBuilding(p, BODY) && !hitTrunk(p),
     update(cam, you, now, night) {
       let changed = false;
+      const here: Pt = [cam.x, -cam.z];
+      // 載入附近的塊、卸載遠的
+      loadAround(here);
+      for (const st of [...cellMap.values()]) {
+        if (!st.ready) continue;
+        const [i, j] = st.key.split('_').map(Number);
+        const dx = Math.max(i * W.cell - here[0], 0, here[0] - (i + 1) * W.cell);
+        const dy = Math.max(j * W.cell - here[1], 0, here[1] - (j + 1) * W.cell);
+        if (Math.hypot(dx, dy) > UNLOAD_M) unloadCell(st);
+      }
       const gc: Pt = [Math.round(cam.x / GROUND_SNAP) * GROUND_SNAP, Math.round(-cam.z / GROUND_SNAP) * GROUND_SNAP];
-      if (`${gc}` !== groundAt) {
+      if (`${gc}` !== groundAt || groundCells !== cellsChanged) {
         groundAt = `${gc}`;
+        groundCells = cellsChanged;
         moveGround(gc);
         changed = true;
       }
-      const hzEye = horizon(cam.y);
+      // 鏡頭的高度：離地面多高（山上看得比較遠）
+      const hzEye = horizon(Math.max(1.5, cam.y - heightAt(here)));
       const todo: Array<[number, Chunk]> = [];
-      for (const ch of list) {
+      for (const ch of chunks.values()) {
         const d = Math.max(0, Math.hypot(ch.c[0] - cam.x, ch.c[1] + cam.z) - CHUNK * 0.71);
         const want = d < FAR_M && d < hzEye + horizon(Math.max(ch.maxH, 15));
         if (!ch.root) {
-          if (want) todo.push([d, ch]);
+          if (want && chunkReady(ch)) todo.push([d, ch]);
+          continue;
+        }
+        if (d > DISPOSE_M) {
+          disposeChunk(ch);
+          changed = true;
           continue;
         }
         if (ch.root.visible !== want) {
@@ -1497,6 +1812,7 @@ export function buildWoofCity(o: WoofCityOptions): WoofCity {
         changed = true;
         if (performance.now() - t0 > BUILD_MS) break;
       }
+      if (inflight > 0) changed = true;
       if (animate(now, you, night)) changed = true;
       return changed;
     },

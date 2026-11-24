@@ -553,8 +553,8 @@ function bandEdges(): number[][] {
 }
 
 
-/** 台北市的經緯度在不在市界裡面 */
-function inTaipei(lat: number, lng: number): boolean {
+/** 台北市的經緯度在不在市界裡面（汪星的陸地；v1.825 瞬間移動在地圖上選一點也用） */
+export function inTaipei(lat: number, lng: number): boolean {
   if (lat < TP.lat0 || lat > TP.lat1 || lng < TP.lng0 || lng > TP.lng1) return false;
   let inside = false;
   const r = TAIPEI_OUTLINE;
@@ -938,7 +938,7 @@ function woofGlobe(x: number, y: number, r: number, view: SpaceView, toSun: Vec3
       `<title>${b.mine ? '你丟的漂流瓶' : b.taken ? '漂流瓶（已經被收藏了）' : b.state === 'pick' ? '漂流瓶（走到附近了）' : '漂流瓶'}</title></g>`;
   }
   // 選瞬間移動的地方：走得到的範圍（虛線圈，在台北的經緯度上畫一圈再換到汪星）、選到的點（粉紅色的針）
-  if (pick) {
+  if (pick && pick.radiusM > 0) {
     const [c0, c1] = pick.center;
     const [ky, kx] = [pick.radiusM / 110_574, pick.radiusM / (111_320 * Math.cos(c0 * RAD))];
     const pts: string[] = [];
@@ -949,6 +949,8 @@ function woofGlobe(x: number, y: number, r: number, view: SpaceView, toSun: Vec3
       if (pz > 0) pts.push(`${f1(C + r * px)} ${f1(C - r * py)}`);
     }
     if (pts.length > 1) out += `<path class="woof-pick-range" d="M${pts.join('L')}" />`;
+  }
+  if (pick) {
     if (pick.at) {
       const [lat, lng] = toWoof(pick.at);
       const [px, py, pz] = ortho(center, lat, lng);
