@@ -1035,17 +1035,19 @@ export class Radar {
       d.at = p;
       d.g.setAttribute('transform', `translate(${p.x.toFixed(1)} ${p.y.toFixed(1)}) scale(${d.g.dataset.s ?? 1})`);
     });
+    // 放開：換算成方位、距離交給 main.ts；pointercancel（瀏覽器收走了手勢）、捕捉不見了也照最後拖到的地方放（v1.844：以前放回原處，看起來像跳走）
     const endPinDrag = (e: PointerEvent): void => {
       const d = this.pinDrag;
       if (!d || e.pointerId !== d.id) return;
       this.pinDrag = null;
       d.g.classList.remove('dragging');
-      const at = d.at && e.type === 'pointerup' ? this.geoOf(d.at) : null;
+      const at = d.at ? this.geoOf(d.at) : null;
       if (at) this.onPreviewDrag?.(d.i, at);
       else this.draw();
     };
     this.previewLayer.addEventListener('pointerup', endPinDrag);
     this.previewLayer.addEventListener('pointercancel', endPinDrag);
+    this.previewLayer.addEventListener('lostpointercapture', endPinDrag);
     this.youLayer = this.svg.querySelector('.you') as SVGGElement;
     this.foundLayer = this.svg.querySelector('.found') as SVGGElement;
     this.bottleLayer = this.svg.querySelector('.bottles') as SVGGElement;
@@ -2243,6 +2245,8 @@ export class Radar {
 
   /** 虛線圈慢慢往外擴、裡面是主題的小圖示，名稱一直寫在下面；範圍外的貼在外圈（不寫名稱），全螢幕鋪滿、太空裡畫面外的不畫 */
   private drawPreviews(): void {
+    // 拖曳中不重畫（v1.844 使用者說拖虛線圈不順、很容易跳走）：重畫會換掉手上正在拖的標記，捕捉跟著不見，標記跳回原處
+    if (this.pinDrag) return;
     this.previewLayer.replaceChildren();
     if (this.earthHidden) return;
     // 漂流瓶選落點：丟的地方 1 km 的虛線圈（雷達的距離是等比例，圓還是圓）
@@ -2264,8 +2268,8 @@ export class Radar {
       const g = el('g', { class: `preview-pin${out ? ' out' : ''}${drag ? ' drag' : ''}${pv.bottle ? ' bottle-pin' : ''}`, transform: `translate(${p.x.toFixed(1)} ${p.y.toFixed(1)}) scale(${bs.toFixed(4)})` });
       g.dataset.i = String(this.previews.indexOf(pv));
       g.dataset.s = bs.toFixed(4);
-      // 手指比標記大：按得到的範圍大一點
-      if (drag) g.appendChild(el('circle', { class: 'hit', r: 20 }));
+      // 手指比標記大：按得到的範圍大一點（v1.844 20 → 26）
+      if (drag) g.appendChild(el('circle', { class: 'hit', r: 26 }));
       g.appendChild(el('circle', { class: 'pulse', r: 11 }));
       g.appendChild(el('circle', { class: 'ring', r: out ? 7 : 11 }));
       if (pv.bottle && !out) {

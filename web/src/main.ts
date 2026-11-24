@@ -8496,7 +8496,8 @@ async function movePin(i: number, to: LatLng): Promise<void> {
     showBanner(bannerEl, res.message, 3500);
     return;
   }
-  if (hasPreview(res.data.outcome)) renderPreview(res.data);
+  // 自己拖好的：雷達不要再飛到標記那裡（v1.844 使用者說拖虛線圈很容易跳走）
+  if (hasPreview(res.data.outcome)) renderPreview(res.data, false);
   else await showReportResult(res.data);
   if (looking) reportSheet.classList.add('looking');
 }
@@ -9153,7 +9154,8 @@ async function loadJudgeInfo(): Promise<JudgeInfo | null> {
 /** 「AI（Claude Haiku 4.5）背景判讀中，預估約 8 秒」；還沒問到就先寫 10 秒 */
 const judgingHtml = (j: JudgeInfo | null): string => `<p class="msg busy">AI${j ? `（${esc(j.model)}）` : ''}背景判讀中，預估約 ${j?.seconds ?? 10} 秒</p>`;
 
-function renderPreview(r: SubmitResult): void {
+/** fly：雷達移到判讀出來的位置（拖了標記重新預覽時不移） */
+function renderPreview(r: SubmitResult, fly = true): void {
   const items = r.preview ?? [];
   const c = r.confirm;
   if (!c) return;
@@ -9227,7 +9229,7 @@ function renderPreview(r: SubmitResult): void {
   reportPins = previewPins(items, r.routes ?? []).map((p) => ({ ...p, drag: editCardsAt(p).length > 0 }));
   pinConfirm = c;
   render();
-  flyToPins(reportPins);
+  if (fly) flyToPins(reportPins);
   // 「不對」、台派雷達的「送給管理者判斷」：先寫一句（選填）再送出
   reportResult.querySelector('[data-act="wrong"], [data-act="review"]')?.addEventListener('click', () => {
     if (!wrongForm || !actions) return;
