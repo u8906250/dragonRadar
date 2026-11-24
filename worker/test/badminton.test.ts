@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { normalizeSessions } from '../src/badminton';
 import { detectEnded } from '../src/events';
+import { datedSpotsToSingle, type ExtractedEvent } from '../src/extract';
 
 describe('normalizeSessions', () => {
   it('reads a weekly drop-in offer with its fee, level and slots', () => {
@@ -48,5 +49,31 @@ describe('detectEnded for drop-in games', () => {
     // 只有固定場（沒有寫哪一天的單場）照舊留著
     const only = normalizeSessions({ is_event: true, events: [{ ...base, start_at: '2026-11-28T12:00:00+08:00', end_at: '2026-11-28T14:00:00+08:00', spot: true, weekdays: [6] }] });
     expect(only?.events.map((e) => e.spot)).toEqual([true]);
+  });
+});
+
+describe('datedSpotsToSingle (v1.845)', () => {
+  const ev = (start: string, kind: 'session' | 'food' | 'activity' = 'session') => ({ kind, title: 't', item: null, start_at: start, end_at: null, place_text: 'p', place_query: 'p', confidence: 0.9, spot: true, until: '2026-12-31', weekdays: [4] }) as unknown as ExtractedEvent;
+  it('turns a weekly session into the dated one when the post names that date', () => {
+    const a = ev('2026-11-26T14:00:00+08:00');
+    datedSpotsToSingle([a], '日期：11/26(四）每週四開團喔！');
+    expect([a.spot, a.weekdays, a.until]).toEqual([false, null, null]);
+    const b = ev('2026-11-28T12:00:00+08:00');
+    datedSpotsToSingle([b], '時間：11／28（六） 12：00～14：00\n2.每週六固定徵零打');
+    expect(b.spot).toBe(false);
+    const c = ev('2026-12-05T10:00:00+08:00', 'food');
+    datedSpotsToSingle([c], '12月5日（六）在市集擺攤，每週六都在');
+    expect(c.spot).toBe(false);
+  });
+  it('keeps weekly sessions without a date, other dates, and other radars', () => {
+    const a = ev('2026-11-26T14:00:00+08:00');
+    datedSpotsToSingle([a], '每週四下午 2:00-4:30 固定開團');
+    expect(a.spot).toBe(true);
+    const b = ev('2026-11-26T14:00:00+08:00');
+    datedSpotsToSingle([b], '2026/11/12 開始，每週四固定 11/126');
+    expect(b.spot).toBe(true);
+    const c = ev('2026-11-26T14:00:00+08:00', 'activity');
+    datedSpotsToSingle([c], '11/26 起每週四');
+    expect(c.spot).toBe(true);
   });
 });

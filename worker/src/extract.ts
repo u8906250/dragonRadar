@@ -603,6 +603,24 @@ export function weekdaysInText(weekdays: number[] | null | undefined, text: stri
 }
 
 const halfWidth = (s: string): string => s.replace(/[０-９]/g, (c) => String.fromCharCode(c.charCodeAt(0) - 0xfee0));
+
+/**
+ * 招臨打、出攤寫了這次是哪一天、又說每週固定（「日期：11/26(四）每週四開團」「11／28（六）…每週六固定徵零打」）：
+ * 模型常判成每週固定場（spot），其他雷達只收單次的就不放上雷達了（v1.845 使用者給的兩則）。貼文寫到那一場的月／日，就改成那一天的單場
+ */
+export function datedSpotsToSingle(events: ExtractedEvent[], text: string): void {
+  const t = halfWidth(text);
+  for (const e of events) {
+    if (!e.spot || !e.start_at || (e.kind !== 'session' && e.kind !== 'food')) continue;
+    const m = /^\d{4}-(\d{2})-(\d{2})/.exec(e.start_at);
+    if (!m) continue;
+    const [mo, d] = [Number(m[1]), Number(m[2])];
+    if (!new RegExp(`(?<![\\d/])0?${mo}\\s*[/／.月]\\s*0?${d}(?!\\d)`).test(t)) continue;
+    e.spot = false;
+    e.weekdays = null;
+    e.until = null;
+  }
+}
 const DATE_RE = /(?<!\d)(\d{1,2})\s*(?:[/.]|月)\s*(\d{1,2})(?!\d)/g;
 /** 貼文自己有寫哪天（日期、今天明天、星期幾）：這時以貼文為準，不拿補充的日期改 */
 const POST_DAY_RE = /(?<!\d)\d{1,2}\s*(?:[/.]|月)\s*\d{1,2}(?!\d)|今天|今日|明天|明日|後天|本週|這週|週[一二三四五六日天]|周[一二三四五六日天]|星期[一二三四五六日天]|禮拜[一二三四五六日天]/;

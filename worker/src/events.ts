@@ -1,7 +1,7 @@
 import type { Env } from './env';
 import { fetchThreadsProfile, profileCandidates, profileHintText, type ThreadsProfile } from './sources/profile';
 import { adoptedTags } from './learnedTags';
-import { ACTIVITY_SPEC, applySupplementDate, reconcileRouteStops, ROUTE_WORDS, closedWeekdays, slotWeekdays, dropBroughtItem, dropSelfPlace, extractFromPost, localizeTimes, missingActivityParts, openWeekdaysFromText, splitDropTimes, splitDailyActivity, splitMultiDay, splitWeeklyOpenDays, splitWeekdayWeekend, spotHoursFromText, startNowForDeadline, guessedMidnight, localToUnix, MODULE_TAGS, postTags, regionTimeZone, timeZoneOf, topicExtra, untilInText, weekdaysInText, str, type ActivityPart, type EventKind, type ExtractedEvent, type ExtractSpec, type JobInfo } from './extract';
+import { ACTIVITY_SPEC, applySupplementDate, datedSpotsToSingle, reconcileRouteStops, ROUTE_WORDS, closedWeekdays, slotWeekdays, dropBroughtItem, dropSelfPlace, extractFromPost, localizeTimes, missingActivityParts, openWeekdaysFromText, splitDropTimes, splitDailyActivity, splitMultiDay, splitWeeklyOpenDays, splitWeekdayWeekend, spotHoursFromText, startNowForDeadline, guessedMidnight, localToUnix, MODULE_TAGS, postTags, regionTimeZone, timeZoneOf, topicExtra, untilInText, weekdaysInText, str, type ActivityPart, type EventKind, type ExtractedEvent, type ExtractSpec, type JobInfo } from './extract';
 import { cityOfHouse, geocodeAddress, parseTwAddress, type TwAddress } from './address';
 import { SESSION_SPEC } from './badminton';
 import { FOOD_SPEC } from './food';
@@ -836,6 +836,8 @@ async function planPostWith(env: Env, post: PostRow, now: number, profileHint: s
   if (!/(?:line|賴)(?!\s*pay)/i.test(text)) for (const e of extraction.events) if (e.extra?.contact === 'line') e.extra.contact = null;
   // 其他雷達也只收單次的（v1.617 使用者說「其他雷達一樣只接受單次活動，不接受長期的放在雷達上」）：
   // 每週固定場、固定攤位（spot），和沒約時間的刊登（找臨打、網友推薦的店、沒約時間的揪團）都不放上雷達
+  // 寫了這次是哪一天的「每週固定」：當成那一天的單場（v1.845）
+  datedSpotsToSingle(extraction.events, text);
   const longTerm = (e: ExtractedEvent): boolean => e.spot || (POSTING_DAYS[String(e.extra?.role)] !== undefined && !e.start_at);
   const longItems: PlanItem[] = extraction.events.filter(longTerm).map((_, i) => ({ group: LONG_TERM_GROUP + i, plan: null, reason: 'long_term' }));
   extraction.events = extraction.events.filter((e) => !longTerm(e));
