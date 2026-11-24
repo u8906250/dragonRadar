@@ -427,6 +427,11 @@ export function pickReward(item: string): Promise<Result<{ item: string; items: 
   return deviceJson('/api/cards/pick', 'POST', { item });
 }
 
+/** 瞬間移動（v1.816）：花一枚順幣，回傳去哪裡、這台現在的道具（換到哪一顆是瀏覽器自己記的） */
+export function spendTeleport(to: 'woof' | 'earth'): Promise<Result<{ to: string; items: ItemCount[] }>> {
+  return deviceJson('/api/cards/teleport', 'POST', { to });
+}
+
 /** 引繼碼（換裝置）：舊裝置產生，24 小時內在新裝置輸入（卡、道具、漂流瓶收藏一起搬） */
 export function makeTransferCode(): Promise<Result<{ code: string; expiresAt: number }>> {
   return deviceJson('/api/cards/transfer', 'POST', {});

@@ -12,7 +12,7 @@ import { apifyTrial } from './sources/apify';
 import { fetchThreadsPost, resolveThreadsLink, shortcodeToUnix } from './sources/link';
 import { fetchYoutubePost, parseYoutubePostUrl } from './sources/youtube';
 import { accountInfo, deleteAccount, deletePasskey, deviceId, loginOptions, loginVerify, logout, purgeAccounts, registerOptions, registerVerify, sessionOf, setNickname } from './account';
-import { claimCard, makeTransfer, myCards, pickReward, purgeCards, redeemTransfer } from './cards';
+import { claimCard, makeTransfer, myCards, pickReward, purgeCards, redeemTransfer, spendTeleport } from './cards';
 import { adminListWishes, adminSetWish, markWishesSeen, myWishes, notifyWish, purgeWishes, submitTweak, submitWish, withdrawWish } from './wishes';
 import { addParkMark, deleteParkMark, listParkMarks, listPublicParkMarks, parseParkMark, updateParkMark } from './parkmarks';
 import { adminLocate, applyFeedback, clearResolvedFeedback, deleteAdminSubscription, listFeedback, locateForFeedback, moveEventPlace, notifyAdmins, purgeFeedback, saveAdminSubscription, setFeedbackStatus, submitFeedback } from './feedback';
@@ -322,6 +322,8 @@ async function handle(req: Request, env: Env, ctx: ExecutionContext): Promise<Re
   if (req.method === 'POST' && path === '/api/cards/claim') return jsonResponse(await claimCard(env, await deviceId(env, req), await ipHash(env, req), await readJson<unknown>(req), now));
   // 回報滿 5 則的獎勵：選一包肉乾或一枚順幣
   if (req.method === 'POST' && path === '/api/cards/pick') return jsonResponse(await pickReward(env, await deviceId(env, req), await readJson<unknown>(req)));
+  // 瞬間移動：花一枚順幣（換到哪一顆是瀏覽器記的）
+  if (req.method === 'POST' && path === '/api/cards/teleport') return jsonResponse(await spendTeleport(env, await deviceId(env, req), await readJson<unknown>(req), now));
   // 引繼碼（換裝置，選單的「說明」裡）：舊裝置產生、新裝置輸入，卡片、道具搬過去
   if (req.method === 'POST' && path === '/api/cards/transfer') {
     // 登入帳號的不用引繼碼（產生了會把帳號裡的東西搬到別台）

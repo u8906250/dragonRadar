@@ -13,7 +13,7 @@ import { wireFind, type FoundPlace } from './find';
 import { shortAddress, splitPlace } from './place';
 import { crowdOf, MapView, pinPicker, type BaseMap, type MapRoute, type PinPicker } from './map';
 import { beep, ensureNotificationPermission, iosNeedsHomeScreen, notificationState, pushSubscription, pushSupported, registerServiceWorker, showBanner, systemNotify, unlockAudio, unsubscribePush } from './notify';
-import { checkWishNews, findCard, gotReward, myCards, onWishNews, openAlbum, openHelp, openItems, openWishes, overlay } from './cards';
+import { checkWishNews, findCard, gotReward, myCards, onWishNews, openAlbum, openHelp, openItems, openWishes, overlay, setTeleport } from './cards';
 import { DEEP_FROM_KM, FLAT_PAN_KM, labelSpanEm, LY_KM, Radar, SPACE_FROM_KM, type RadarLabel, type RadarRoute, type RadarStreets, type RadarStreetTile, type SpaceView } from './radar';
 import { DEFAULT_THEME_ID, getTheme, THEMES, type Theme } from './themes';
 import type { WoofBottleMark } from './space';
@@ -192,19 +192,33 @@ const SPACE_MAX_KM = 6e7 * LY_KM;
 /** 地球上雷達最近拉到多近（中山公園附近另外可以到 0.5 公尺）：v1.713 從 0.5 km 改成 50 m（使用者說依建議：更近地圖資料沒有更多東西、定位也不準） */
 const MIN_ZOOM_KM = 0.05;
 /**
- * 你在哪一顆：火箭在哪一邊你就在哪一邊（國館的火箭 park.ts 存在 dr.rocket：搭到汪星就在汪星；九棚的火箭 rocket-art.ts 存在 dr.launch：
+ * 你在哪一顆：搭火箭到哪一邊你就在哪一邊（國館的火箭 park.ts 存在 dr.rocket：搭到汪星就在汪星；v1.816 起瞬間移動火箭留在原地，所以另外記在 dr.you；九棚的火箭 rocket-art.ts 存在 dr.launch：
  * 搭到 Kepler-22b 就在 Kepler-22b，v1.762 使用者說跟汪星做法一樣）。點別的星球只是看過去，坐火箭回來才回到地球、看得到地球的地圖。
  * 在汪星、Kepler-22b 時：寫「汪星（你）」「Kepler-22b（你）」、「定位」回到發射口（降落的地方）、範圍按鈕換成那一顆的
  */
 type YouOn = 'earth' | 'woof' | 'kepler22b';
+/**
+ * 你在地球還是汪星（v1.816 瞬間移動：人過去、火箭留在原地，所以另外記）：搭國館的火箭、瞬間移動都會記；
+ * 沒記過的（以前的瀏覽器）照國館的火箭在哪一邊
+ */
+const LS_YOU = 'dr.you';
 let youOn: YouOn = ((): YouOn => {
+  if (launchNow().where === 'kepler22b') return 'kepler22b';
+  const you = lsGet(LS_YOU);
+  if (you === 'woof' || you === 'earth') return you;
   try {
     if ((JSON.parse(lsGet('dr.rocket') ?? 'null') as { world?: string } | null)?.world === 'woof') return 'woof';
   } catch {
     /* 讀不到當作在地球 */
   }
-  return launchNow().where === 'kepler22b' ? 'kepler22b' : 'earth';
+  return 'earth';
 })();
+/** 換到另一顆（搭火箭、瞬間移動）：記下來（Kepler-22b 照九棚的火箭，不另外記） */
+function setYouOn(to: YouOn): void {
+  youOn = to;
+  radar.youOn = to;
+  if (to !== 'kepler22b') lsSet(LS_YOU, to);
+}
 /** 你在汪星（Kepler-22b）、上次鏡頭在那一顆：重新整理也回到那裡（null 是在地球、其他星球；你在地球時不記） */
 const savedHome = ((): SpaceView | null => {
   try {
@@ -2298,8 +2312,7 @@ async function rocketTrip(m: typeof import('./park'), from: 'earth' | 'woof'): P
   });
   m.arriveRocket(to);
   // 你到了那一邊：汪星海上的漂流瓶跟著抓（回地球清掉）
-  youOn = to;
-  radar.youOn = to;
+  setYouOn(to);
   void loadWoofBottles();
   bottleWorldChanged();
   saveSpaceView();
@@ -2372,8 +2385,7 @@ async function launchTrip(): Promise<void> {
   });
   landLaunch(to);
   // 你到了那一邊（跟汪星一樣：定位回到這裡，要再搭回來才看得到地球）；漂流瓶跟著換（Kepler-22b 上沒有）
-  youOn = to === 'kepler22b' ? 'kepler22b' : 'earth';
-  radar.youOn = youOn;
+  setYouOn(to === 'kepler22b' ? 'kepler22b' : 'earth');
   bottleWorldChanged();
   saveSpaceView();
   updateScaleChips();
@@ -2396,8 +2408,7 @@ async function landIn3D(to: 'earth' | 'woof'): Promise<void> {
   const m = await import('./park');
   parkMod = m;
   lockDog(null);
-  youOn = to;
-  radar.youOn = to;
+  setYouOn(to);
   void loadWoofBottles();
   bottleWorldChanged();
   if (to === 'woof') radar.setSpaceView(await woofHomeView(), true);
@@ -2413,6 +2424,43 @@ async function landIn3D(to: 'earth' | 'woof'): Promise<void> {
   updateStreets();
   radar.redrawPark();
 }
+
+/**
+ * 瞬間移動（v1.816 使用者說點順幣可以花 1 枚瞬間移動；伺服器已經扣好順幣）：白光一閃、飛出小星星，換到那一顆，
+ * 落點跟「定位」一樣（汪星：上次在 3D 離開的地方，沒進過是發射口；地球：你現在的位置）；國館的火箭留在原地（使用者選的）。
+ * 自己按的，減少動態照樣播
+ */
+async function teleport(to: 'earth' | 'woof'): Promise<void> {
+  if (tripping || youOn === to) return;
+  const fx = document.createElement('div');
+  fx.className = 'teleport-fx';
+  fx.setAttribute('aria-hidden', 'true');
+  fx.innerHTML = Array.from({ length: 10 }, (_, i) => `<i style="--a:${i * 36 + 12}deg;--d:${0.6 + (i % 3) * 0.25}"></i>`).join('');
+  document.body.append(fx);
+  // 最亮的時候換過去
+  await wait(380);
+  lockDog(null);
+  setYouOn(to);
+  void loadWoofBottles();
+  bottleWorldChanged();
+  if (to === 'woof') {
+    const v = await homeView();
+    if (v) radar.setSpaceView(v, true);
+    zoomToKm(locateKm(0));
+  } else {
+    radar.resetSpace();
+  }
+  saveSpaceView();
+  updateScaleChips();
+  updateViewBtn();
+  updateSpace();
+  updateStreets();
+  radar.redrawPark();
+  if (to === 'earth') void locateMe();
+  showBanner(bannerEl, to === 'woof' ? '瞬間移動到汪星了' : '瞬間移動回地球了');
+  window.setTimeout(() => fx.remove(), 1200);
+}
+setTeleport({ where: () => youOn, go: teleport });
 
 // ---- 太空：比「全球」再拉遠，畫地球、月球、太陽、行星（space.ts，第一次用到才載入；陸地用全世界的海岸線） ----
 let spaceMod: typeof import('./space') | null = null;

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { cleanCode, CREDITS_PER_DAY, jerkyMilestone, makeCode, parseClaim, parsePick, REPORTS_PER_JERKY, taipeiDayStart } from '../src/cards';
+import { cleanCode, CREDITS_PER_DAY, jerkyMilestone, makeCode, parseClaim, parsePick, parseTeleport, REPORTS_PER_JERKY, spendTeleport, taipeiDayStart, TELEPORT_COST } from '../src/cards';
 
 describe('parseClaim', () => {
   it('takes a known card and one of its places', () => {
@@ -63,5 +63,40 @@ describe('選獎勵（肉乾或順幣）', () => {
     expect(parsePick({ item: 'pick' })).toBe('只能選古錐媽的肉乾或順幣');
     expect(parsePick({})).toBe('只能選古錐媽的肉乾或順幣');
     expect(parsePick(null)).toBe('只能選古錐媽的肉乾或順幣');
+  });
+});
+
+describe('瞬間移動（花一枚順幣）', () => {
+  it('only goes to 汪星 or back to 地球', () => {
+    expect(TELEPORT_COST).toBe(1);
+    expect(parseTeleport({ to: 'woof' })).toBe('woof');
+    expect(parseTeleport({ to: 'earth' })).toBe('earth');
+    expect(parseTeleport({ to: 'kepler22b' })).toBe('不能瞬間移動到那裡');
+    expect(parseTeleport({ to: 'toString' })).toBe('不能瞬間移動到那裡');
+    expect(parseTeleport(null)).toBe('不能瞬間移動到那裡');
+  });
+  /** 假的 D1：記下送出的 SQL；UPDATE 改到幾筆照 changes */
+  const fakeDb = (changes: number) => {
+    const sql: Array<{ q: string; binds: unknown[] }> = [];
+    const stmt = (q: string) => ({
+      bind: (...binds: unknown[]) => ({
+        run: async () => (sql.push({ q, binds }), { meta: { changes } }),
+        all: async () => ({ results: [] }),
+      }),
+    });
+    return { sql, env: { DB: { prepare: stmt, batch: async () => [{ results: [] }, { results: [{ item: 'coin', count: 2 }] }] } } as never };
+  };
+  it('spends one coin and says where to', async () => {
+    const db = fakeDb(1);
+    const r = await spendTeleport(db.env, 'dev', { to: 'woof' }, 100);
+    expect(r.to).toBe('woof');
+    expect(r.items).toEqual([{ item: 'coin', count: 2 }]);
+    expect(db.sql[0].q).toContain("item = 'coin' AND used_at IS NULL ORDER BY id LIMIT 1");
+    expect(db.sql[0].binds).toEqual([100, 'teleport:woof', 'dev']);
+  });
+  it('refuses without coins, a device or a known place', async () => {
+    await expect(spendTeleport(fakeDb(0).env, 'dev', { to: 'woof' }, 100)).rejects.toThrow('順幣不夠');
+    await expect(spendTeleport(fakeDb(1).env, null, { to: 'woof' }, 100)).rejects.toThrow('裝置代碼');
+    await expect(spendTeleport(fakeDb(1).env, 'dev', { to: 'mars' }, 100)).rejects.toThrow('不能瞬間移動');
   });
 });

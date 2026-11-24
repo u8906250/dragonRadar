@@ -6,7 +6,7 @@
  * 卡片的內容寫在這裡（照片在 public/cards/），拿到的卡、道具存在伺服器（裝置代碼，worker/src/cards.ts），
  * 這個瀏覽器另外記一份（dr.cards、dr.items、dr.picks）：點小法時拿過的就不再問伺服器
  */
-import { accountToken, cachedNickname, claimCard, fetchMyCards, fetchMyWishes, makeTransferCode, markWishesSeen, pickReward, redeemTransferCode, sendTweak, sendWish, withdrawWish, type CardClaim, type ItemCount, type MyWishes, type Wish, type WishStatus, type WishTweak } from './api';
+import { accountToken, cachedNickname, claimCard, fetchMyCards, fetchMyWishes, makeTransferCode, markWishesSeen, pickReward, redeemTransferCode, sendTweak, spendTeleport, sendWish, withdrawWish, type CardClaim, type ItemCount, type MyWishes, type Wish, type WishStatus, type WishTweak } from './api';
 
 export interface CardDef {
   /** 跟伺服器的 CARDS 一樣 */
@@ -517,7 +517,9 @@ export function openItems(): void {
     const have = myItems().filter((x) => ITEM_DEFS.some((d) => d.id === x.item));
     const cells = have.map((x) => {
       const d = ITEM_DEFS.find((y) => y.id === x.item)!;
-      return `<li class="tc-item"><span class="tc-item-icon"><img src="${d.img}" alt="" draggable="false"><span class="tc-item-count" aria-label="${x.count} ${esc(d.unit)}">×${x.count}</span></span><span class="tc-item-name">${esc(d.name)}</span></li>`;
+      const inner = `<span class="tc-item-icon"><img src="${d.img}" alt="" draggable="false"><span class="tc-item-count" aria-label="${x.count} ${esc(d.unit)}">×${x.count}</span></span><span class="tc-item-name">${esc(d.name)}</span>`;
+      // 順幣點了選許願或瞬間移動（v1.816）
+      return x.item === 'coin' ? `<li class="tc-item"><button type="button" class="tc-item-tap" data-coin title="許願或瞬間移動">${inner}</button></li>` : `<li class="tc-item">${inner}</li>`;
     });
     return `<div class="tc-head"><h2>道具</h2><button type="button" class="chip" data-close>關閉</button></div>
       ${pickRow}
@@ -531,8 +533,78 @@ export function openItems(): void {
   el.addEventListener('click', (e) => {
     const t = e.target as HTMLElement;
     if (t.closest('[data-open-pick]')) openPick(false, redraw);
+    if (t.closest('[data-coin]')) openCoin(redraw);
   });
   syncMine(el, redraw);
+}
+
+/** 瞬間移動（main.ts 設定）：你現在在哪一顆、移過去（白光一閃，落點跟「定位」一樣） */
+export interface TeleportHook {
+  where: () => 'earth' | 'woof' | 'kepler22b';
+  go: (to: 'earth' | 'woof') => Promise<void>;
+}
+let teleportHook: TeleportHook | null = null;
+export function setTeleport(h: TeleportHook): void {
+  teleportHook = h;
+}
+/** 瞬間移動要幾枚順幣（跟伺服器的 TELEPORT_COST 一樣）、可以去哪裡（之後可以再加；不能去自己在的那一顆） */
+const TELEPORT_COST = 1;
+const TELEPORT_PLACES: Array<{ to: 'woof' | 'earth'; name: string }> = [
+  { to: 'woof', name: '汪星' },
+  { to: 'earth', name: '地球' },
+];
+
+/**
+ * 點順幣（v1.816 使用者說點順幣出現兩個選項）：許願（花 WISH_COST 枚，打開許願表單）、瞬間移動（花 TELEPORT_COST 枚，在地球可以去汪星、在汪星可以回地球）
+ */
+function openCoin(onDone?: () => void): void {
+  const html = (msg = ''): string => {
+    const n = coinsNow();
+    const where = teleportHook?.where() ?? 'earth';
+    const places = where === 'kepler22b' ? [] : TELEPORT_PLACES.filter((p) => p.to !== where);
+    const short = (cost: number): string => (n < cost ? `（還差 ${cost - n} 枚）` : '');
+    return `<div class="tc-head"><h2>順幣</h2><button type="button" class="chip" data-close>關閉</button></div>
+      <p class="tc-wish-coins">你有 <b>${n}</b> 枚順幣</p>
+      <div class="tc-coin-opt">
+        <div class="tc-coin-what"><b>許願</b><small>花 ${WISH_COST} 枚：寫下你希望留下什麼在洋流雷達${short(WISH_COST)}</small></div>
+        <button type="button" class="chip primary" data-coin-wish ${n < WISH_COST ? 'disabled' : ''}>許願</button>
+      </div>
+      <div class="tc-coin-opt">
+        <div class="tc-coin-what"><b>瞬間移動</b><small>花 ${TELEPORT_COST} 枚：一閃就到${short(TELEPORT_COST)}${where === 'kepler22b' ? '。在 Kepler-22b 上要先搭火箭回地球' : ''}</small></div>
+        <div class="tc-coin-places">${places.map((p) => `<button type="button" class="chip primary" data-teleport="${p.to}" ${n < TELEPORT_COST ? 'disabled' : ''}>${esc(p.name)}</button>`).join('')}</div>
+      </div>
+      <p class="tc-coin-msg" role="status">${esc(msg)}</p>`;
+  };
+  const el = overlay('tc-coin', `<div class="tc-box"><div class="tc-main">${html()}</div></div>`, onDone);
+  const main = el.querySelector<HTMLElement>('.tc-main')!;
+  let busy = false;
+  el.addEventListener('click', (e) => {
+    const t = e.target as HTMLElement;
+    if (t.closest('[data-coin-wish]')) {
+      openWishForm(() => {
+        if (el.isConnected) main.innerHTML = html();
+      });
+      return;
+    }
+    const btn = t.closest<HTMLButtonElement>('[data-teleport]');
+    if (!btn || busy || !teleportHook) return;
+    const to = btn.dataset.teleport as 'woof' | 'earth';
+    const name = TELEPORT_PLACES.find((p) => p.to === to)?.name ?? '';
+    if (!window.confirm(`花 ${TELEPORT_COST} 枚順幣瞬間移動到${name}？`)) return;
+    busy = true;
+    el.querySelectorAll<HTMLButtonElement>('button[data-teleport], button[data-coin-wish]').forEach((b) => (b.disabled = true));
+    void spendTeleport(to).then(async (r) => {
+      busy = false;
+      if (!r.ok) {
+        main.innerHTML = html(r.message);
+        return;
+      }
+      saveItems(r.data.items);
+      // 收起順幣、道具欄，白光一閃換過去
+      for (const o of [...document.querySelectorAll<HTMLElement>('.tc-coin, .tc-bag')]) o.querySelector<HTMLElement>('[data-close]')?.click();
+      await teleportHook?.go(to);
+    });
+  });
 }
 
 /**

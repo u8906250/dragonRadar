@@ -128,6 +128,29 @@ export async function pickReward(env: Env, device: string | null, body: unknown)
   return { item: item as ItemId, items: mine.items, picks: mine.picks };
 }
 
+/**
+ * 瞬間移動（v1.816 使用者說點順幣可以選許願或瞬間移動）：花 TELEPORT_COST 枚順幣，現在可以去汪星、在汪星可以回地球（之後可以再加）。
+ * 伺服器只扣順幣（記 used_for = teleport:地方），換到哪一顆是瀏覽器自己記的
+ */
+export const TELEPORT_COST = 1;
+export const TELEPORT_TO = ['woof', 'earth'] as const;
+export type TeleportTo = (typeof TELEPORT_TO)[number];
+export function parseTeleport(body: unknown): TeleportTo | string {
+  const to = (body as { to?: unknown } | null)?.to;
+  return typeof to === 'string' && (TELEPORT_TO as readonly string[]).includes(to) ? (to as TeleportTo) : '不能瞬間移動到那裡';
+}
+export async function spendTeleport(env: Env, device: string | null, body: unknown, now: number): Promise<{ to: TeleportTo; items: ItemCount[] }> {
+  if (!device) throw new ReportError(400, '缺少裝置代碼，請重新整理頁面');
+  const to = parseTeleport(body);
+  if (!(TELEPORT_TO as readonly string[]).includes(to)) throw new ReportError(400, to);
+  // 一次扣一枚（一個 UPDATE，兩邊同時送不會扣到同一枚）
+  const r = await env.DB.prepare("UPDATE item_grants SET used_at = ?, used_for = ? WHERE id = (SELECT id FROM item_grants WHERE device_id = ? AND item = 'coin' AND used_at IS NULL ORDER BY id LIMIT 1) AND used_at IS NULL")
+    .bind(now, `teleport:${to}`, device)
+    .run();
+  if (!r.meta.changes) throw new ReportError(400, `順幣不夠：瞬間移動要 ${TELEPORT_COST} 枚`);
+  return { to: to as TeleportTo, items: (await myCards(env, device)).items };
+}
+
 /** 回報的人自己刪掉：這則不算了（已經給的卡、道具不收回） */
 export async function uncreditReport(env: Env, postId: string): Promise<void> {
   await env.DB.prepare('DELETE FROM report_credits WHERE post_id = ?').bind(postId).run();
