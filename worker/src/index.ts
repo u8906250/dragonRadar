@@ -307,7 +307,7 @@ async function handle(req: Request, env: Env, ctx: ExecutionContext): Promise<Re
     const body = await readJson<{ url?: unknown; module?: unknown }>(req);
     if (typeof body.url !== 'string' || body.url.length > 2000) throw new HttpError(400, '請貼上 Threads 貼文連結');
     const work = (async () => {
-      const result = await submitLink(env, body.url as string, await ipHash(env, req), now, await deviceId(env, req), moduleOf(body.module));
+      const result = await submitLink(env, body.url as string, await ipHash(env, req), now, await deviceId(env, req), moduleOf(body.module), isAdmin(req, env));
       // 回報的如果是官方車掃，馬上併進去，不用等排程
       await mergeIntoOfficial(env, now).catch((e) => console.warn('merge failed', e));
       return result;

@@ -9462,7 +9462,7 @@ async function submitResumable(url: string): Promise<Awaited<ReturnType<typeof s
       if (document.hidden) away = true;
     };
     document.addEventListener('visibilitychange', mark);
-    const r = await submitLink(url, mod.id).finally(() => document.removeEventListener('visibilitychange', mark));
+    const r = await submitLink(url, mod.id, lsGet(LS_ADMIN_TOKEN) ?? undefined).finally(() => document.removeEventListener('visibilitychange', mark));
     const judging = !r.ok && r.status === 409;
     const cut = !r.ok && r.status === undefined && away;
     if (r.ok || tries >= 3 || !(judging || cut)) return r;

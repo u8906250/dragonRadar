@@ -224,15 +224,15 @@ function deviceHeaders(): Record<string, string> {
   return h;
 }
 
-async function deviceJson<T>(path: string, method = 'GET', body?: unknown, retried = false): Promise<Result<T>> {
+async function deviceJson<T>(path: string, method = 'GET', body?: unknown, retried = false, extra: Record<string, string> = {}): Promise<Result<T>> {
   // 讀取的請求碰到暫時失敗（503、連線中斷）自動再試一次；寫入的不重送，伺服器那邊已經重試過
   const again = async (): Promise<Result<T> | null> => {
     if (method !== 'GET' || retried) return null;
     await new Promise((r) => setTimeout(r, 800));
-    return deviceJson<T>(path, method, body, true);
+    return deviceJson<T>(path, method, body, true, extra);
   };
   try {
-    const headers = deviceHeaders();
+    const headers = { ...deviceHeaders(), ...extra };
     if (body !== undefined) headers['content-type'] = 'application/json';
     const r = await fetch(`${API_BASE}${path}`, { method, headers, body: body === undefined ? undefined : JSON.stringify(body) });
     if (r.status === 503) {
@@ -343,7 +343,9 @@ export const reportBottle = (id: number, here?: BottleHere): Promise<Result<{ hi
 
 // 回報也帶裝置代碼：伺服器記下是哪個瀏覽器回報的，之後可以自己刪除
 /** 貼上 Threads 貼文，或活動通、OPENTIX、Peatix、Luma 活動頁的連結，後端讀取並判讀，可能要十幾秒 */
-export const submitLink = (url: string, module = 'current'): Promise<Result<SubmitResult>> => deviceJson<SubmitResult>('/api/reports', 'POST', { url, module });
+/** adminToken：管理者帶管理 token，每小時可以回報 50 則（一般 20 則；v1.833） */
+export const submitLink = (url: string, module = 'current', adminToken?: string): Promise<Result<SubmitResult>> =>
+  deviceJson<SubmitResult>('/api/reports', 'POST', { url, module }, false, adminToken ? { authorization: `Bearer ${adminToken}` } : {});
 /** 判讀結果對：放上雷達 */
 export const confirmReport = (c: { postId: string; token: string }): Promise<Result<SubmitResult>> => deviceJson<SubmitResult>('/api/reports/confirm', 'POST', c);
 /** 貼文沒寫地點或時間：補充後再判讀一次 */

@@ -33,6 +33,8 @@ export const STORE_LINK_AGE_SEC = 365 * 86400;
 const linkAgeOf = (module: ModuleId): number => (isStoreModule(module) ? STORE_LINK_AGE_SEC : MAX_LINK_AGE_SEC);
 /** 同一個瀏覽器（裝置代碼）每小時最多回報幾則；補充資料不算 */
 const SUBMIT_PER_DEVICE_PER_HOUR = 20;
+/** 管理者（回報時帶管理 token）每小時最多回報幾則（v1.833 使用者說管理員的回報上限調高到 50） */
+export const SUBMIT_ADMIN_PER_HOUR = 50;
 /** 同一個 IP 每小時：手機網路、同一個 Wi-Fi 常很多人共用一個 IP，放寬，只用來擋清掉瀏覽器資料一直灌的 */
 const SUBMIT_PER_IP_PER_HOUR = 60;
 /** 沒帶裝置代碼（舊版網頁）時照以前：同一個 IP 每小時 10 則 */
@@ -612,8 +614,8 @@ async function checkHourlyLimit(env: Env, column: 'device' | 'ip_hash', value: s
 }
 
 /** 回報次數：主要看同一個瀏覽器；IP 放寬（很多人共用一個 IP），只擋清掉瀏覽器資料一直灌的；全站也有上限 */
-async function checkSubmitLimits(env: Env, ip: string, now: number, device: string | null): Promise<void> {
-  if (device) await checkHourlyLimit(env, 'device', device, SUBMIT_PER_DEVICE_PER_HOUR, now, '同一個瀏覽器');
+export async function checkSubmitLimits(env: Env, ip: string, now: number, device: string | null, admin = false): Promise<void> {
+  if (device) await checkHourlyLimit(env, 'device', device, admin ? SUBMIT_ADMIN_PER_HOUR : SUBMIT_PER_DEVICE_PER_HOUR, now, '同一個瀏覽器');
   await checkHourlyLimit(env, 'ip_hash', ip, device ? SUBMIT_PER_IP_PER_HOUR : SUBMIT_PER_IP_NO_DEVICE, now, '同一個網路');
   const all = await countSince(env, `SELECT COUNT(*) AS n FROM submissions WHERE created_at > ? AND ${NOT_SUPPLEMENT}`, [now - 3600]);
   if (all >= SUBMIT_GLOBAL_PER_HOUR) throw new ReportError(429, '目前回報的人太多，請稍後再試');
@@ -692,7 +694,8 @@ async function waitForJudging(env: Env, postId: string): Promise<void> {
 }
 
 /** 處理使用者貼上的連結：讀貼文、AI 判讀、定位，回傳結果 */
-export async function submitLink(env: Env, input: string, ip: string, now: number, device: string | null = null, module: ModuleId = DEFAULT_MODULE): Promise<SubmitResult> {
+/** admin：帶了管理 token 的（每小時可以回報 SUBMIT_ADMIN_PER_HOUR 則） */
+export async function submitLink(env: Env, input: string, ip: string, now: number, device: string | null = null, module: ModuleId = DEFAULT_MODULE, admin = false): Promise<SubmitResult> {
   assertReportsOpen(env, module);
   // 台派雷達、書店雷達收的是店家，不收活動頁
   if (isStoreModule(module) && (parseAccupassUrl(input) || parseOpentixUrl(input) || parsePeatixUrl(input) || parseLumaUrl(input))) {
@@ -701,16 +704,16 @@ export async function submitLink(env: Env, input: string, ip: string, now: numbe
   // YouTube 社群貼文（v1.806）：台派、書店雷達先不收（店家那套要讀 Threads 帳號的簡介）
   const yt = parseYoutubePostUrl(input);
   if (yt && isStoreModule(module)) throw new ReportError(400, `${module === 'books' ? '書店雷達' : '台派雷達'}目前只收 Threads 貼文的連結`);
-  if (yt) return submitYoutube(env, yt, ip, now, device, module);
+  if (yt) return submitYoutube(env, yt, ip, now, device, module, admin);
   // 活動頁：ACCUPASS 活動通（v1.590）、OPENTIX（v1.591）、Peatix（v1.735）、Luma（v1.736）
   const acc = parseAccupassUrl(input);
-  if (acc) return submitEventPage(env, { site: 'accupass', link: acc }, ip, now, device, module);
+  if (acc) return submitEventPage(env, { site: 'accupass', link: acc }, ip, now, device, module, admin);
   const otx = parseOpentixUrl(input);
-  if (otx) return submitEventPage(env, { site: 'opentix', link: otx }, ip, now, device, module);
+  if (otx) return submitEventPage(env, { site: 'opentix', link: otx }, ip, now, device, module, admin);
   const ptx = parsePeatixUrl(input);
-  if (ptx) return submitEventPage(env, { site: 'peatix', link: ptx }, ip, now, device, module);
+  if (ptx) return submitEventPage(env, { site: 'peatix', link: ptx }, ip, now, device, module, admin);
   const lum = parseLumaUrl(input);
-  if (lum) return submitEventPage(env, { site: 'luma', link: lum }, ip, now, device, module);
+  if (lum) return submitEventPage(env, { site: 'luma', link: lum }, ip, now, device, module, admin);
   const link = await resolveThreadsLink(input);
   if (!link) throw new ReportError(400, '找不到 Threads 貼文或活動頁的連結，請貼上 Threads 貼文（https://www.threads.com/@帳號/post/...）、YouTube 社群貼文（https://www.youtube.com/post/...）、活動通（https://www.accupass.com/event/...）、OPENTIX（https://www.opentix.life/event/...）、Peatix（https://peatix.com/event/...）或 Luma（https://luma.com/...）的網址');
   const postId = await linkPostId(env, link.code, module);
@@ -726,7 +729,7 @@ export async function submitLink(env: Env, input: string, ip: string, now: numbe
     throw new ReportError(400, isStoreModule(module) ? `這則貼文發布超過 ${STORE_LINK_AGE_SEC / 86400} 天，請找最近的介紹（店家可能已經搬家或歇業）` : `這則貼文發布超過 ${MAX_LINK_AGE_SEC / 86400} 天，雷達只收最近的發放和活動`);
   }
 
-  await checkSubmitLimits(env, ip, now, device);
+  await checkSubmitLimits(env, ip, now, device, admin);
 
   const t0 = Date.now();
   const fetched = await fetchThreadsPost(link.code);
@@ -748,13 +751,13 @@ export async function submitLink(env: Env, input: string, ip: string, now: numbe
  * YouTube 社群貼文（v1.806 使用者問 YouTube 的貼文能不能判讀）：跟 Threads 貼文一樣讀內文、AI 判讀、等回報的人確認；
  * 發文時間照頁面寫的（代碼看不出時間，要先讀才知道有沒有太舊）
  */
-async function submitYoutube(env: Env, yt: YoutubeLink, ip: string, now: number, device: string | null, module: ModuleId): Promise<SubmitResult> {
+async function submitYoutube(env: Env, yt: YoutubeLink, ip: string, now: number, device: string | null, module: ModuleId, admin = false): Promise<SubmitResult> {
   const postId = await linkPostId(env, yt.id, module, 'yt');
   await waitForJudging(env, postId);
   const earlier = await earlierReport(env, postId, module, now);
   if (earlier.result) return earlier.result;
 
-  await checkSubmitLimits(env, ip, now, device);
+  await checkSubmitLimits(env, ip, now, device, admin);
 
   const t0 = Date.now();
   const fetched = await fetchYoutubePost(yt.id);
@@ -956,7 +959,7 @@ async function pinByVenue(env: Env, acts: PageActivity[]): Promise<void> {
  * 回報活動頁（洋流的活動）：讀活動頁、照活動頁的時間地點排、定位，回傳預覽，回報的人確認才放上雷達（跟 Threads 一樣）；
  * 線上活動、已經取消的不收。貼文 id 是 acc-、otx-、ptx-、lum- 加活動編號，source 是網站（accupass、opentix、peatix、luma），原文連結是活動頁
  */
-async function submitEventPage(env: Env, p: PageLink, ip: string, now: number, device: string | null, module: ModuleId): Promise<SubmitResult> {
+async function submitEventPage(env: Env, p: PageLink, ip: string, now: number, device: string | null, module: ModuleId, admin = false): Promise<SubmitResult> {
   const site = PAGE_SITES[p.site];
   if (module !== DEFAULT_MODULE) throw new ReportError(400, `${site.name}的活動請切到「活動雷達」再回報`);
   // 活動通分享的短網址、Luma 的網址（可能是自訂網址）先讀一次才知道是哪一場
@@ -969,7 +972,7 @@ async function submitEventPage(env: Env, p: PageLink, ip: string, now: number, d
   const postId = `${site.prefix}-${id}`;
   const earlier = await earlierReport(env, postId, module, now);
   if (earlier.result) return earlier.result;
-  await checkSubmitLimits(env, ip, now, device);
+  await checkSubmitLimits(env, ip, now, device, admin);
   fetched ??= await site.fetch({ id });
   if (fetched.status !== 'ok') throw pageError(p.site, fetched);
   const page = fetched.page;
