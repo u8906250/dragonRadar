@@ -307,6 +307,8 @@ interface SessionExtra {
   fee?: string | null;
   level?: string | null;
   slots?: string | null;
+  /** 人數上限（v1.830） */
+  capacity?: string | null;
   shuttle?: string | null;
   team?: string | null;
   contact?: string | null;
@@ -5526,7 +5528,7 @@ function spotSchedule(it: Item): string {
   return `${spotHours(it.spot?.sessions ?? [it.ev])}，${range}`;
 }
 
-/** 羽球臨打的詳細資料：招臨打寫時段、費用、程度、缺幾位、用球、球團；找臨打寫程度、可以打的時間、地區 */
+/** 羽球臨打的詳細資料：招臨打寫時段、費用、程度、缺幾位、人數上限、用球、球團；找臨打寫程度、可以打的時間、地區 */
 function sessionDetailHtml(it: Item, now: number): string {
   const { ev } = it;
   const x = sessionOf(ev);
@@ -5537,7 +5539,7 @@ function sessionDetailHtml(it: Item, now: number): string {
     return `<p>類型：找臨打（球友想找地方打）<br>${line('程度', x.level)}時間：${esc(seekWhen(ev))}<br>${line('聯絡方式', contact)}${where}</p>`;
   }
   const time = it.spot ? spotSchedule(it) : eventTimeText(ev);
-  return `<p>類型：${it.spot ? '招臨打・每週固定場' : '招臨打'}<br>時間：${esc(time)}<br>${line('費用', x.fee ?? ev.item)}${line('程度', x.level)}${line('缺幾位', x.slots)}${line('用球', x.shuttle)}${line('球團', x.team)}${line('報名方式', contact)}${where} · ${esc(timeLine(it, now))}</p>`;
+  return `<p>類型：${it.spot ? '招臨打・每週固定場' : '招臨打'}<br>時間：${esc(time)}<br>${line('費用', x.fee ?? ev.item)}${line('程度', x.level)}${line('缺幾位', x.slots)}${line('人數上限', x.capacity)}${line('用球', x.shuttle)}${line('球團', x.team)}${line('報名方式', contact)}${where} · ${esc(timeLine(it, now))}</p>`;
 }
 
 /** 狗狗陪伴、找工作的摘要：「2 個徵人、1 個可照顧」「2 個徵人、1 個求職」 */
@@ -9282,6 +9284,14 @@ function routePreviewHtml(rt: RoutePreview): string {
 }
 
 /** 判讀完先給回報的人看：對了才放上雷達，不對就不放並記下哪裡錯 */
+/** 判讀結果裡的招臨打：有寫的話列出用球、人數上限（v1.830 使用者說判定也要提供） */
+function sessionPreviewHtml(p: { kind: string; extra?: Record<string, unknown> | null }): string {
+  if (p.kind !== 'session' || isSeek(p)) return '';
+  const x = sessionOf(p);
+  const parts = [x.shuttle ? `用球：${esc(x.shuttle)}` : '', x.capacity ? `人數上限：${esc(x.capacity)}` : ''].filter(Boolean);
+  return parts.length ? `<small>${parts.join('・')}</small>` : '';
+}
+
 function renderPreview(r: SubmitResult): void {
   const items = r.preview ?? [];
   const c = r.confirm;
@@ -9307,6 +9317,7 @@ function renderPreview(r: SubmitResult): void {
           <b>${p.kind === 'store' ? esc(storeTypeLabel(p)) : p.kind === 'food' ? ({ vendor: '出攤', recommend: '推薦', meetup: '揪團' }[foodRole(p) ?? 'recommend'] ?? '推薦') : p.kind === 'session' ? (isSeek(p) ? '找臨打' : '招臨打') : p.kind === 'job' ? (isOffer(p) ? jobWords().offer : '徵人') : p.kind === 'activity' ? esc(topicOf(p) ?? '活動') : '發放'}${p.spot ? (p.kind === 'session' ? '・每週固定場' : p.kind === 'food' ? '・每週固定擺攤' : '・固定據點') : ''}｜${esc(p.title)}</b>
           ${p.kind === 'job' && (jobOf(p).risks ?? []).some((r) => r !== 'no_employer') ? `<small class="preview-warn">⚠️ ${esc((jobOf(p).risks ?? []).map((r) => JOB_RISK_TEXT[r]).filter(Boolean).join('；'))}</small>` : ''}
           ${p.item ? `<small>${esc(p.item)}</small>` : ''}
+          ${sessionPreviewHtml(p)}
           ${tagsOf(p).length > 0 ? `<small>關鍵字：${tagsHtml(tagsOf(p))}</small>` : ''}
           <small>${p.kind === 'store' ? '營業時間' : '時間'}：${esc(previewWhen(p))}</small>
           <small>地點：${esc(shortAddress(p.placeText.replace(/\s*\n\s*/g, ' ')))}</small>
