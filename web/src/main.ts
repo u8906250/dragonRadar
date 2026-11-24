@@ -3111,8 +3111,10 @@ function itemDays(it: Item): Set<number> {
 // ---- 日期：選星期幾（可以好幾個）或直接點一天（v1.613 使用者建議多一個日期的按鈕） ----
 /** null 是不篩；weekdays 是星期幾（0 是星期日；一次一個，「週末」是六、日兩個）；date 是哪一天（taipeiDay） */
 let dayPick: { weekdays: Set<number> } | { date: number } | null = null;
-/** 選了哪一類（搜尋框下面的類型按鈕，topic-icons.ts 的 key）：雷達、地圖、清單只留這一類（v1.676） */
-let typePick: string | null = null;
+/** 選了哪幾類（搜尋框下面的類型按鈕，topic-icons.ts 的 key）：雷達、清單只留這幾類（v1.676；v1.847 使用者說可以多選，符合其中一類就留） */
+const typePicks = new Set<string>();
+/** 選了的類型寫成「市集、講座」 */
+const typePickText = (): string => [...typePicks].map(typeLabel).join('、');
 /** 最近一次畫面上抓到的全部（日期選單的月曆標哪幾天有東西） */
 let dayFetched: Item[] = [];
 const matchesDay = (it: Item): boolean => {
@@ -3191,7 +3193,7 @@ function render(): void {
   // 只有日期不同的好幾場合成一張卡片（篩選完再合，符合的那一場當代表）
   const merged = mergeSessions(dayed, fetched);
   // 選了類型：只留這一類
-  const all = typePick ? merged.filter((it) => typeOf(it.ev) === typePick) : merged;
+  const all = typePicks.size > 0 ? merged.filter((it) => typePicks.has(typeOf(it.ev) ?? '')) : merged;
   dayFetched = fetched;
   // 發放、活動、據點的開關是洋流的，其他模組不篩
   const byCategory = mod.current ? all.filter((it) => shown[categoryOf(it)]) : all;
@@ -3535,7 +3537,7 @@ function renderList(items: Item[], now: number): void {
   const outText = outRange.length > 0 ? `・範圍外 ${outRange.length} 個` : '';
   const spotText = spotsIn.length > 0 ? `・據點 ${spotsIn.length} 個` : '';
   const laterText = laterRows.length > 0 ? `・${timeSetting === 'now' ? '還沒開始' : laterLabel().replace('才開始', '')} ${laterRows.length} 個` : '';
-  const searching = (searchTerms.length > 0 ? `搜尋「${searchInput.value.trim()}」・` : '') + (typePick ? `${typeLabel(typePick)}・` : '') + (dayPick ? `${dayPickLabel()}・` : '');
+  const searching = (searchTerms.length > 0 ? `搜尋「${searchInput.value.trim()}」・` : '') + (typePicks.size > 0 ? `${typePickText()}・` : '') + (dayPick ? `${dayPickLabel()}・` : '');
   countLabel.textContent = none
     ? '還沒追蹤關鍵字'
     : searching && rows.length === 0
@@ -3548,8 +3550,8 @@ function renderList(items: Item[], now: number): void {
   emptyEl.textContent =
     searchTerms.length > 0
       ? `目前的發放、活動裡沒有符合「${searchInput.value.trim()}」的。可以換個字，或按 ✕ 清除搜尋。`
-      : typePick
-        ? `目前沒有「${typeLabel(typePick)}」的發放、活動。再按一次「${typeLabel(typePick)}」清除。`
+      : typePicks.size > 0
+        ? `目前沒有「${typePickText()}」的發放、活動。再按一次選了的類型清除。`
       : dayPick
         ? `${dayPickLabel()}沒有發放、活動。可以換一天，或按「日期」清除。`
       : none
@@ -7717,7 +7719,7 @@ function switchModule(id: ModuleId, fetch = true): void {
   searchInput.value = '';
   searchClear.hidden = true;
   searchTerms = [];
-  typePick = null;
+  typePicks.clear();
   applyModule();
   render();
   if (fetch) void refresh();
@@ -8092,12 +8094,19 @@ function tagsOf(ev: { extra?: Record<string, unknown> | null; post?: { text: str
 const tagsHtml = (tags: string[], asButtons = false): string =>
   tags.length === 0 ? '' : `<span class="ev-tags">${tags.map((t) => (asButtons ? `<button type="button" class="tag" data-tag="${esc(t)}">#${esc(t)}</button>` : `<span class="tag">#${esc(t)}</span>`)).join('')}</span>`;
 /** 點關鍵字：搜尋它（同一個再點一次就清掉） */
+/**
+ * 點關鍵字：加進搜尋框（可以選好幾個，每個都要有才列出，跟搜尋框打好幾個字一樣；v1.847 使用者說標籤可以多選過濾），
+ * 已經在搜尋框裡的再點一次拿掉
+ */
 function searchTag(tag: string): void {
-  const same = searchInput.value.trim() === tag;
-  searchInput.value = same ? '' : tag;
+  const words = searchInput.value.trim().split(/\s+/).filter(Boolean);
+  const has = words.some((w) => foldText(w) === foldText(tag));
+  searchInput.value = (has ? words.filter((w) => foldText(w) !== foldText(tag)) : [...words, tag]).join(' ');
   searchClear.hidden = searchInput.value === '';
   setSearch(searchInput.value);
 }
+/** 搜尋框裡有這個關鍵字（關鍵字按鈕標成選了） */
+const tagPicked = (tag: string): boolean => searchInput.value.trim().split(/\s+/).some((w) => w && foldText(w) === foldText(tag));
 /** 目前抓到、還沒結束的發放、活動裡每個關鍵字用了幾次（renderSearchTags 算的）：搜尋框下面、補充資料的常見關鍵字照這個排，用得多的在前面 */
 let tagUse = new Map<string, number>();
 const commonRank = (t: string): number => (COMMON_TAGS.includes(t) ? COMMON_TAGS.indexOf(t) : COMMON_TAGS.length);
@@ -8120,9 +8129,10 @@ function typeOf(ev: EventOut): string | null {
 function typeLabel(key: string): string {
   return [...TOPIC_TYPES, ...ALL_STORE_TYPES].find((t) => t.key === key)?.label ?? key;
 }
-/** 點類型按鈕：只看這一類（雷達、地圖、清單），再點一次清掉 */
+/** 點類型按鈕：加進選了的類型（可以選好幾類，符合其中一類就留；v1.847），再點一次拿掉 */
 function pickType(key: string): void {
-  typePick = typePick === key ? null : key;
+  if (typePicks.has(key)) typePicks.delete(key);
+  else typePicks.add(key);
   render();
 }
 
@@ -8138,16 +8148,17 @@ function renderSearchTags(items: Item[]): void {
   const top = [...count.keys()].sort(byTagUse).slice(0, 8);
   const has = new Set(items.map((it) => typeOf(it.ev)));
   // 店家照這個雷達的類型順序（台派雷達、書店雷達各自的）
-  const types = [...TOPIC_TYPES, ...(mod.storeTypes ?? [])].filter((t) => has.has(t.key) || t.key === typePick);
-  if (top.length === 0 && types.length === 0) {
+  const types = [...TOPIC_TYPES, ...(mod.storeTypes ?? [])].filter((t) => has.has(t.key) || typePicks.has(t.key));
+  if (count.size === 0 && types.length === 0) {
     box.hidden = true;
     return;
   }
-  const now = searchInput.value.trim();
+  // 選了的關鍵字就算這一刻沒有排進前 8 個也留著（才拿得掉）
+  const picked = top.concat([...count.keys()].filter((t) => tagPicked(t) && !top.includes(t)));
   const html =
-    types.map((t) => `<button type="button" class="chip small type-chip${t.key === typePick ? ' on' : ''}" data-type="${t.key}" aria-pressed="${t.key === typePick}">${topicChipSvg(t.key)}${t.label}</button>`).join('') +
-    (types.length && top.length ? '<span class="tags-sep" aria-hidden="true"></span>' : '') +
-    top.map((t) => `<button type="button" class="chip small${t === now ? ' on' : ''}" data-tag="${esc(t)}" aria-pressed="${t === now}">#${esc(t)}</button>`).join('');
+    types.map((t) => `<button type="button" class="chip small type-chip${typePicks.has(t.key) ? ' on' : ''}" data-type="${t.key}" aria-pressed="${typePicks.has(t.key)}">${topicChipSvg(t.key)}${t.label}</button>`).join('') +
+    (types.length && picked.length ? '<span class="tags-sep" aria-hidden="true"></span>' : '') +
+    picked.map((t) => `<button type="button" class="chip small${tagPicked(t) ? ' on' : ''}" data-tag="${esc(t)}" aria-pressed="${tagPicked(t)}">#${esc(t)}</button>`).join('');
   if (box.dataset.html !== html) {
     box.innerHTML = html;
     box.dataset.html = html;
