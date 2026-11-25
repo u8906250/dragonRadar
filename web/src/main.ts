@@ -9881,6 +9881,29 @@ function wirePanelDrag(): void {
  * 只留地圖和光點（距離圈、掃描線不畫，看比例尺）。再按一次回到原本的樣子；瀏覽器記住開著還是關著。
  * 電腦全螢幕時「清單」收起右邊的清單（也記住）。不是瀏覽器的全螢幕（網址列不會不見，重新整理也不能自己再開）
  */
+/**
+ * 手機的定位、指北針放在雷達右下角、直的排，定位在下面（v1.850 使用者說的）；電腦照舊在右上那排（放大鏡、定位、指北針、漂流瓶）。
+ * 畫面寬度跨過 900px（電腦版面）時搬回去
+ */
+function placeLocateButtons(): void {
+  const wide = window.matchMedia('(min-width: 900px)');
+  const br = $('#overlay-br');
+  const tr = locateBtn.parentElement === br ? $('.overlay-tr') : (locateBtn.parentElement as HTMLElement);
+  const bottle = $('#bottle-btn');
+  const place = (): void => {
+    if (wide.matches) {
+      tr.insertBefore(locateBtn, bottle);
+      tr.insertBefore(compassBtn, bottle);
+      br.hidden = true;
+    } else {
+      br.append(compassBtn, locateBtn);
+      br.hidden = false;
+    }
+  };
+  place();
+  wide.addEventListener('change', place);
+}
+
 function wireFullScreen(): void {
   const fullBtn = $<HTMLButtonElement>('#view-btn');
   const listBtn = $<HTMLButtonElement>('#list-btn');
@@ -10231,6 +10254,7 @@ async function boot(): Promise<void> {
   lsSet('dr.lab.bottles', null);
   wireControls();
   wireFullScreen();
+  placeLocateButtons();
   wireFind({
     center: () => origin,
     // 跟拖過去一樣變成手動位置（清單換成那附近的）；範圍拉到看得到整個地方，門牌、小地標本來就比較近的不拉遠

@@ -88,6 +88,8 @@
           <!-- 漂流瓶：畫一個瓶子（v1.785 使用者說改成瓶子比較不占空間），右下角的數字是今天還能丟幾個 -->
           <button type="button" id="bottle-btn" class="chip icon-chip" title="漂流瓶：在牛皮紙上寫一段話丟在附近，或撿別人的" aria-label="漂流瓶" hidden><svg viewBox="0 0 24 24" aria-hidden="true"><g transform="rotate(-25 12 12)"><rect class="cork" x="10" y="2" width="4" height="3" rx="0.8"/><path d="M10 5h4v2.6l2.8 3.4v9a2 2 0 0 1-2 2H9.2a2 2 0 0 1-2-2v-9L10 7.6z"/><path class="scroll" d="M10.4 13.2h3.2M10.4 16.4h3.2"/></g></svg><span id="bottle-badge" class="chip-badge" hidden></span></button>
         </div>
+        <!-- 手機：定位、指北針在雷達右下角直的排，定位在下面（v1.850 使用者說的；main.ts placeLocateButtons 搬過來，電腦照舊在右上那排） -->
+        <div class="overlay overlay-br" id="overlay-br" hidden></div>
         <div id="find-box" class="find-box" hidden>
           <form id="find-form" class="find-form" role="search" autocomplete="off">
             <input id="find-input" type="search" enterkeyhint="search" maxlength="60" placeholder="地址、地名、路名" aria-label="搜尋地址、地名、路名（只查台灣）" />
