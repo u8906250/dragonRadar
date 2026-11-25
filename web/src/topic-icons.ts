@@ -99,6 +99,26 @@ const STORE_COLORS: Record<string, string> = {
 export const storeColor = (key: string | null | undefined): string | null => (key && STORE_KEYS.has(key) ? (STORE_COLORS[key] ?? null) : null);
 
 /**
+ * 活動類型的顏色（v1.849 使用者說活動這邊也用不同的顏色標示類型）：跟店家一樣，雷達的圓點、類型按鈕（圖例）都用這個，
+ * 上面畫白色小圖示。進行中、稍後照舊用大小、閃爍、模糊分，不靠顏色
+ */
+const TOPIC_COLORS: Record<string, string> = {
+  gift: '#e8891a',
+  rally: '#d93a48',
+  talk: '#2f6fd6',
+  music: '#7a4fcf',
+  market: '#c98a00',
+  craft: '#0b7fa3',
+  parade: '#14a093',
+  exhibit: '#9a6640',
+  care: '#3d9c46',
+  social: '#e0458e',
+  contest: '#b54bc4',
+};
+/** 類型的顏色：店家類型、活動類型；都不是（羽球、沒分類）是 null，照主題的顏色 */
+export const typeColor = (key: string | null | undefined): string | null => storeColor(key) ?? (key ? (TOPIC_COLORS[key] ?? null) : null);
+
+/**
  * 店家的圖示拉遠時跟著縮小（v1.776 使用者說台派店家的圖縮小後要跟著縮小）：雷達範圍 8 km 以內照原本的大小，
  * 範圍每大一倍小兩成，最小一半（預設 50 km 是一半）；km 是雷達的範圍（地圖照縮放換算成一樣的範圍）
  */
@@ -193,4 +213,4 @@ export function glyphSvg(key: string, c: string): string {
 
 /** 類型按鈕上的小圖示：跟地圖、雷達一樣的圓點加白色圖示（店家照類型的顏色） */
 export const topicChipSvg = (key: string): string =>
-  `<svg class="type-ic" viewBox="-12 -12 24 24" aria-hidden="true"><circle r="11.5" fill="${storeColor(key) ?? 'var(--blip-activity)'}"/>${glyphSvg(key, '#ffffff')}</svg>`;
+  `<svg class="type-ic" viewBox="-12 -12 24 24" aria-hidden="true"><circle r="11.5" fill="${typeColor(key) ?? 'var(--blip-activity)'}"/>${glyphSvg(key, '#ffffff')}</svg>`;

@@ -1,6 +1,6 @@
 import type { BlipStyle, EventKind, Phase, SweepStyle } from './types';
 import { bottleSize } from './geo';
-import { glyphSvg, STORE_GLYPH_MIN_SCALE, storeColor, storeIconScale, topicGlyph } from './topic-icons';
+import { glyphSvg, STORE_GLYPH_MIN_SCALE, storeColor, storeIconScale, topicGlyph, typeColor } from './topic-icons';
 import { DOME_SVG, idlePhase, isSceneKind, PATROL_SVG, sceneSvg, SCOOTER_SVG, SOCCER_SVG, TRUCK_SVG, WALKER_SVG, windSvg, type SceneKind } from './hq-scenes';
 import { alongLine, BOAT_SVG, crackSvg, FITBUS_BODY, FITBUS_SVG, hqMotionKm, HQ_NET_LABEL_KM, BIKE_SVG, HIKER_SVG, PETWALK_SVG, FISH_SVG, WETLAND_BIRDS, MUSIC_NOTES, bikePhase, fitbusPhase, fitbusStopSvg, cultureSvg, regrowSvg, serviceSvg, stitchSvg, BOAT_TITLE, boatPhase, fireworksSvg, FIREWORKS_MS, flowOut, HQ_VOYAGE_MS, RAINBOW_FLOW_TOTAL, RAINBOW_STAGGER_MS, riverHalfWidth, surge, SURGE_TOTAL, voyagePhase, voyageTimeOf } from './flow';
 
@@ -4158,9 +4158,9 @@ export class Radar {
         // 約略位置也畫（v1.795 使用者說宜蘭的 M.Y.J.S 圖示沒畫出來），淡一點、虛線框
         const glyph = !p.out && !it.flag && !it.spot ? topicGlyph(it.topic) : null;
         // 店家（光點的 kind 跟活動一樣，照小圖示是店家類型分）：照類型上色，範圍拉遠跟著縮小，太小只畫圓點
-        // （v1.776 使用者說台派店家的圖縮小後要跟著縮小、多一點顏色）
-        const tint = storeColor(glyph);
-        const shrink = tint ? storeIconScale(this.scaleKm) : 1;
+        // （v1.776 使用者說台派店家的圖縮小後要跟著縮小、多一點顏色）；活動也照類型上色（v1.849），大小照舊
+        const tint = typeColor(glyph);
+        const shrink = storeColor(glyph) ? storeIconScale(this.scaleKm) : 1;
         // 全螢幕：光點後面墊一圈底色（淺色主題白、深色主題底色），疊在綠地上也看得清楚（v1.705）
         if (this.fill && !p.out && !it.flag) node.appendChild(el('circle', { class: 'halo', r: glyph ? 12.5 : 9 }));
         if (it.flag) {
