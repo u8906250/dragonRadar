@@ -6,6 +6,9 @@ const PROD_API_BASE = 'https://dragon-radar.happybadminton.workers.dev';
 const isLocal = typeof location !== 'undefined' && /^(localhost|127\.0\.0\.1|\[::1\])$/.test(location.hostname);
 const API_BASE = ((import.meta.env.VITE_API_BASE as string | undefined) || (isLocal ? 'http://localhost:8787' : PROD_API_BASE)).replace(/\/$/, '');
 
+/** 收多久以後開始的（跟伺服器的 MAX_FUTURE_SEC 一樣；v1.851 21 → 60 天） */
+export const MAX_AHEAD_DAYS = 60;
+
 export async function fetchEvents(origin: LatLng, radiusKm: number, keywords: string[], module = 'current'): Promise<EventOut[]> {
   const u = new URL(`${API_BASE}/api/events`);
   if (module !== 'current') u.searchParams.set('module', module);
@@ -13,8 +16,8 @@ export async function fetchEvents(origin: LatLng, radiusKm: number, keywords: st
   u.searchParams.set('lng', origin.lng.toFixed(5));
   u.searchParams.set('radius_km', String(radiusKm));
   if (keywords.length > 0) u.searchParams.set('keywords', keywords.join(','));
-  // 官方行程常是幾天後的，清單列出 21 天內的（伺服器收 21 天內開始的），雷達只畫快開始的
-  u.searchParams.set('horizon_h', '504');
+  // 官方行程常是幾天後的，清單列出 60 天內的（伺服器收 60 天內開始的，v1.851 從 21 天改成 60 天），雷達只畫快開始的
+  u.searchParams.set('horizon_h', String(MAX_AHEAD_DAYS * 24));
   const r = await fetch(u.toString());
   if (!r.ok) throw new Error(`API ${r.status}`);
   const j = (await r.json()) as { events: EventOut[] };

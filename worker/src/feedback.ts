@@ -325,7 +325,7 @@ export function newTimes(start: unknown, end: unknown, now: number, keep: number
   if (Number.isNaN(e)) throw new PushError(400, '結束時間格式不對');
   if (e !== null && e <= s) throw new PushError(400, '結束時間要在開始之後');
   if ((e ?? s + keep) <= now) throw new PushError(400, '改的時間已經過了；要拿掉請用「從雷達下架」');
-  if (s > now + MAX_FUTURE_SEC) throw new PushError(400, '開始時間最多排到 21 天後');
+  if (s > now + MAX_FUTURE_SEC) throw new PushError(400, `開始時間最多排到 ${MAX_FUTURE_SEC / 86400} 天後`);
   return { start: s, end: e };
 }
 

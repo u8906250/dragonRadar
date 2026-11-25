@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { ALL_STORE_TYPES, STORE_GLYPH_MIN_SCALE, storeColor, storeIconScale, topicChipSvg, TOPIC_TYPES } from '../src/topic-icons';
+import { ALL_STORE_TYPES, STORE_GLYPH_MIN_SCALE, storeColor, storeIconScale, topicChipSvg, TOPIC_TYPES, typeColor } from '../src/topic-icons';
 
 describe('店家圖示（v1.776）', () => {
   it('gives every store type a colour and activities none', () => {
@@ -11,7 +11,12 @@ describe('店家圖示（v1.776）', () => {
     expect(new Set(taipai).size).toBe(taipai.length);
     // 類型按鈕照同樣的顏色（圖例）
     expect(topicChipSvg('cafe')).toContain(`fill="${storeColor('cafe')}"`);
-    expect(topicChipSvg('talk')).toContain('fill="var(--blip-activity)"');
+    // 活動類型也照類型上色（v1.849），每一類都不一樣；沒有類型顏色的（羽球）照主題的顏色
+    expect(topicChipSvg('talk')).toContain(`fill="${typeColor('talk')}"`);
+    const acts = TOPIC_TYPES.map((t) => typeColor(t.key));
+    expect(acts.every((c) => /^#[0-9a-f]{6}$/.test(c ?? ''))).toBe(true);
+    expect(new Set(acts).size).toBe(acts.length);
+    expect(topicChipSvg('shuttle')).toContain('fill="var(--blip-activity)"');
   });
   it('shrinks store icons as the radar zooms out', () => {
     expect(storeIconScale(2)).toBe(1);

@@ -58,6 +58,7 @@ describe('newTimes', () => {
     expect(() => newTimes(now + 600, 'x', now, 7200)).toThrow('格式');
     expect(() => newTimes(now - 3600, now - 60, now, 7200)).toThrow('已經過了');
     expect(() => newTimes(now - 1200, null, now, 900)).toThrow('已經過了');
-    expect(() => newTimes(now + 22 * 86400, null, now, 7200)).toThrow('21 天');
+    expect(() => newTimes(now + 61 * 86400, null, now, 7200)).toThrow('60 天');
+    expect(() => newTimes(now + 30 * 86400, null, now, 7200)).not.toThrow();
   });
 });

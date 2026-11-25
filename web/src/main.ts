@@ -1,6 +1,6 @@
 import './styles.css';
 import { FITBUS_MS_PER_M, hqDenseKm, hqMotionKm, HQ_NET_LABEL_KM, HQ_SAIL_MS, HQ_STAR_MS, HQ_VOYAGE_MS, RAINBOW_EVERY_MS, voyagePhase, voyageTimeOf } from './flow';
-import { accountToken, addKeyword, cachedNickname, deletePushSubscription, locateFeedbackPlace, moveEvent, sendFeedback, type FeedbackKind, fetchPushKey, savePushSubscription, confirmReport, editReport, locatePlace, rejectReport, reviewReport, supplementReport, deleteBottle, dropBottle, readBottle, type BottleHere, fetchBottleInfo, fetchBottlePhoto, fetchBottleProof, fetchBottles, fetchWoofBottles, rememberBottlePhoto, uncollectLetter, verifyBottleProof, fetchEvents, fetchHealth, fetchJudgeInfo, type JudgeInfo, fetchKeywords, fetchMyBottles, fetchMyReports, fetchRoutes, pickBottle, reportBottle, submitLink, withdrawReport } from './api';
+import { accountToken, addKeyword, cachedNickname, deletePushSubscription, locateFeedbackPlace, moveEvent, sendFeedback, type FeedbackKind, fetchPushKey, savePushSubscription, confirmReport, editReport, locatePlace, rejectReport, reviewReport, supplementReport, deleteBottle, dropBottle, readBottle, type BottleHere, fetchBottleInfo, fetchBottlePhoto, fetchBottleProof, fetchBottles, fetchWoofBottles, rememberBottlePhoto, uncollectLetter, verifyBottleProof, fetchEvents, MAX_AHEAD_DAYS, fetchHealth, fetchJudgeInfo, type JudgeInfo, fetchKeywords, fetchMyBottles, fetchMyReports, fetchRoutes, pickBottle, reportBottle, submitLink, withdrawReport } from './api';
 import { compassSupported, startCompass } from './compass';
 import { bearingDeg, compassLabel, cutAtBox, cutLines, destination, formatKm, haversineKm, lookFrom, outsideBox, ringBox, ringHas, splitAntimeridian, simplifyLatLng, taiwanRadiusKm, unitVectors, type GeoBox, type LatLng, type RegionMap } from './geo';
 import { TAIWAN_RINGS } from './taiwan';
@@ -7468,8 +7468,8 @@ function setTime(setting: TimeSetting): void {
   render();
 }
 
-/** 日期選單：最多看 21 天（資料只到 21 天） */
-const DATE_SPAN = 21;
+/** 日期選單：最多看 MAX_AHEAD_DAYS 天（資料只到這麼久，v1.851 21 → 60 天） */
+const DATE_SPAN = MAX_AHEAD_DAYS;
 
 /** 選了星期幾、日期：按鈕寫選了什麼、亮起來；時間範圍改成「全部」（不然選明天卻只看 3 小時內的會什麼都沒有） */
 function setDayPick(p: typeof dayPick): void {
@@ -7482,7 +7482,7 @@ function setDayPick(p: typeof dayPick): void {
   render();
 }
 
-/** 日期選單：一排星期幾（可以好幾個，加一顆「週末」），下面是未來 21 天的月曆（有東西的那天下面一個小點） */
+/** 日期選單：一排星期幾（可以好幾個，加一顆「週末」），下面是未來 MAX_AHEAD_DAYS 天的月曆（有東西的那天下面一個小點） */
 function renderDatePanel(): void {
   const wd = dayPick && 'weekdays' in dayPick ? dayPick.weekdays : new Set<number>();
   const order = [1, 2, 3, 4, 5, 6, 0];
@@ -8311,7 +8311,7 @@ const OUTCOME_TEXT: Record<SubmitResult['outcome'], string> = {
   duplicate: '雷達上已經有這一場了：',
   attached: '雷達上已經有這個據點，這則已附在它的詳細資料（相關貼文）：',
   no_place: '看得出是活動，但貼文沒寫具體地點（或查不到），所以還沒放上雷達。知道在哪裡的話，可以在下面補充地點再判讀一次。',
-  not_listed: '判讀不到完整的活動內容、地點、開始時間，或是已經結束、超過 21 天後才開始，所以沒有放上雷達。',
+  not_listed: `判讀不到完整的活動內容、地點、開始時間，或是已經結束、超過 ${MAX_AHEAD_DAYS} 天後才開始，所以沒有放上雷達。`,
   not_event: '這則看起來不是活動。貼文要寫出做什麼、在哪裡、什麼時候舉辦，雷達才會收。',
   needs_review: '讀得出店家，但看不出是台派店家。覺得是的話，可以送給管理者判斷，通過才會放上雷達；也可以按「補充資料」寫為什麼是台派，讓雷達再判讀一次。',
   in_review: '這則已經送給管理者判斷是不是台派店家，通過後會放上雷達。之後再貼一次這個連結可以看結果。',
@@ -9387,7 +9387,7 @@ function failureReason(f: FailedItem): string {
   }
   if (f.reason === 'too_far_in_future') {
     const from = f.reportFrom ? `，${dateFmt.format(new Date(f.reportFrom * 1000))} 之後再貼一次就能放上去` : '';
-    return `${f.startAt ? `${at(f.startAt)} 才開始` : '太久以後才開始'}，雷達只收 21 天內開始的${from}`;
+    return `${f.startAt ? `${at(f.startAt)} 才開始` : '太久以後才開始'}，雷達只收 ${MAX_AHEAD_DAYS} 天內開始的${from}`;
   }
   return 'AI 不太確定這是可以到場參加的活動，或是內容、時間、地點讀得不確定';
 }
@@ -9421,7 +9421,7 @@ function notListedText(w: NonNullable<SubmitResult['why']>): string | null {
   }
   if (w.reason === 'too_far_in_future' && w.startAt) {
     const from = w.reportFrom ? `，${dateFmt.format(new Date(w.reportFrom * 1000))} 之後再貼一次就能放上去` : '';
-    return `這場 ${fmtDateTz(w.startAt, tz)}${local} 才開始，雷達只收 21 天內開始的${from}。`;
+    return `這場 ${fmtDateTz(w.startAt, tz)}${local} 才開始，雷達只收 ${MAX_AHEAD_DAYS} 天內開始的${from}。`;
   }
   return null;
 }

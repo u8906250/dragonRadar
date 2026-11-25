@@ -910,8 +910,9 @@ describe('notListedWhy', () => {
   const day = 86400;
   it('names the reason when every item failed the same way', () => {
     expect(notListedWhy([{ group: 0, plan: null, reason: 'already_over', start: 1000, end: 8200, tz: null }, { group: 1, plan: null, reason: 'already_over', start: 5000, end: 9000, tz: null }])).toEqual({ reason: 'already_over', startAt: 5000, endAt: 9000, tz: null });
-    const far = notListedWhy([{ group: 0, plan: null, reason: 'too_far_in_future', start: 30 * day, end: 30 * day + 7200, tz: 'America/Los_Angeles' }]);
-    expect(far).toEqual({ reason: 'too_far_in_future', startAt: 30 * day, endAt: 30 * day + 7200, tz: 'America/Los_Angeles', reportFrom: 9 * day });
+    // 收 60 天內開始的（v1.851）：70 天後開始的，第 10 天之後再貼
+    const far = notListedWhy([{ group: 0, plan: null, reason: 'too_far_in_future', start: 70 * day, end: 70 * day + 7200, tz: 'America/Los_Angeles' }]);
+    expect(far).toEqual({ reason: 'too_far_in_future', startAt: 70 * day, endAt: 70 * day + 7200, tz: 'America/Los_Angeles', reportFrom: 10 * day });
     expect(notListedWhy([{ group: 0, plan: null, reason: 'no_start_time' }])).toEqual({ reason: 'no_start_time' });
     expect(notListedWhy([{ group: 0, plan: null, reason: 'already_over' }])).toEqual({ reason: 'already_over' });
   });

@@ -144,7 +144,8 @@ export interface RelatedPost {
 export const DEFAULT_DURATION_SEC = 2 * 3600;
 /** 洋流的活動：寫了哪天幾點開始、沒寫幾點結束的（畫面只寫幾點開始），雷達上從開始排這麼久 */
 export const OPEN_END_SEC = 2 * 3600;
-export const MAX_FUTURE_SEC = 21 * 86400;
+/** 收多久以後開始的（v1.851 使用者說從 21 天改成 60 天）；前端抓資料、日期選單也照這個 */
+export const MAX_FUTURE_SEC = 60 * 86400;
 const LOOKBACK_SEC = 24 * 3600;
 export const MIN_CONFIDENCE = 0.5;
 /**
@@ -2469,7 +2470,7 @@ export function postExcerpt(text: string, source: string): string {
 }
 
 /**
- * 一次最多回傳幾筆：固定據點每天一筆，20 個據點排 21 天就 400 多筆，200 筆時比較晚開始的活動會被擠掉。
+ * 一次最多回傳幾筆：固定據點每天一筆，20 個據點排 21 天就 400 多筆，200 筆時比較晚開始的活動會被擠掉（v1.851 起收 60 天內的，固定據點照舊最多排 14 天）。
  * 回應有壓縮，1000 筆大約 50 KB
  */
 const LIST_LIMIT = 1000;
