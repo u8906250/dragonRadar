@@ -170,6 +170,17 @@ export function wireFind(h: FindHooks): void {
     );
   };
   btn.addEventListener('click', () => setOpen(box.hidden));
+  // 點其他地方收起來（v1.852 使用者說的；找到的地點的針留著）
+  document.addEventListener(
+    'pointerdown',
+    (e) => {
+      if (box.hidden) return;
+      const t = e.target as Node;
+      if (box.contains(t) || btn.contains(t)) return;
+      setOpen(false);
+    },
+    true,
+  );
   input.addEventListener('input', () => {
     clearBtn.hidden = input.value === '';
   });

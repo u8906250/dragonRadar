@@ -9882,8 +9882,8 @@ function wirePanelDrag(): void {
  * 電腦全螢幕時「清單」收起右邊的清單（也記住）。不是瀏覽器的全螢幕（網址列不會不見，重新整理也不能自己再開）
  */
 /**
- * 手機的定位、指北針放在雷達右下角、直的排，定位在下面（v1.850 使用者說的）；電腦照舊在右上那排（放大鏡、定位、指北針、漂流瓶）。
- * 畫面寬度跨過 900px（電腦版面）時搬回去
+ * 手機的漂流瓶、指北針、定位放在雷達右下角、直的排，定位在最下面（v1.850 使用者說的，v1.852 漂流瓶也放下來）；
+ * 電腦照舊在右上那排（放大鏡、定位、指北針、漂流瓶）。畫面寬度跨過 900px（電腦版面）時搬回去
  */
 function placeLocateButtons(): void {
   const wide = window.matchMedia('(min-width: 900px)');
@@ -9892,11 +9892,10 @@ function placeLocateButtons(): void {
   const bottle = $('#bottle-btn');
   const place = (): void => {
     if (wide.matches) {
-      tr.insertBefore(locateBtn, bottle);
-      tr.insertBefore(compassBtn, bottle);
+      tr.append(locateBtn, compassBtn, bottle);
       br.hidden = true;
     } else {
-      br.append(compassBtn, locateBtn);
+      br.append(bottle, compassBtn, locateBtn);
       br.hidden = false;
     }
   };
