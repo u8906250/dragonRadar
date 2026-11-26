@@ -59,7 +59,9 @@ describe('台派用詞', () => {
     expect(p).toContain('"taipai_hints": is_event 為 true、taipai 為 false 時');
     expect(TAIPAI_SPEC.schema).toMatchObject({ required: expect.arrayContaining(['taipai_hints']) });
     // 店家自己帳號的表態貼文（回家投票、放小卡）也算介紹這家店
-    expect(p).toContain('店家自己的帳號發的表態貼文（例如鼓勵回家投票、在店裡放小卡貼紙讓人索取），也算在介紹這家店');
+    // 店家自己的帳號發的貼文不一定要介紹自己（表態、公告、在店裡辦的活動都算這家店，v1.853）
+    expect(p).toContain('店家自己的帳號發的貼文，內容不一定要介紹自己');
+    expect(p).toContain('在自己店裡辦的活動（例如放映、直播放送、講座、聚會）都算這家店');
     // 看不出是台派：抓的說法整理好（去掉引號、重複、管理者決定不算的，最多 3 個）
     const spec = taipaiSpec({ adopted: ['台派'], rejected: ['民主'] });
     const r = spec.normalize({ is_event: true, taipai: false, reason: '沒寫是台派', taipai_by: null, taipai_hints: ['「回家投票」', '回家投票', '民主', '守護 台灣', '台灣加油', '龜山島'], tags: [], events: [store] });

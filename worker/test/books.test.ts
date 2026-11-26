@@ -48,9 +48,11 @@ describe('normalizeBooks', () => {
     expect(isStoreTypeOf('books', 'cafe')).toBe(false);
     expect(isStoreTypeOf('taipai', 'used')).toBe(false);
   });
-  it('turns away chains and event announcements', () => {
+  it('turns away chains and other people\'s event announcements', () => {
     expect(BOOKS_SPEC.system).toContain('連鎖書店（誠品、金石堂');
-    expect(BOOKS_SPEC.system).toContain('主要在宣傳書店辦的活動（講座、讀書會、簽書會、市集、展覽）的不收');
+    // 書店自己帳號的公告、店裡辦的活動算這家書店；別人宣傳的活動不收（v1.853）
+    expect(BOOKS_SPEC.system).toContain('書店自己的帳號發的貼文，內容不一定要介紹自己');
+    expect(BOOKS_SPEC.system).toContain('別人（網友、主辦單位）宣傳在書店辦的活動、市集擺攤不收');
     expect(moduleSpec('books')).toBe(BOOKS_SPEC);
   });
 });
