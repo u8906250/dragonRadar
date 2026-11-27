@@ -8072,7 +8072,7 @@ function topicOf(ev: { extra?: Record<string, unknown> | null }): string | null 
  * 回報時抽的關鍵字（伺服器存在 extra.tags：貼文寫到的常見詞、AI 抽的、hashtag）；舊資料沒有的，照貼文找常見詞、hashtag。
  * 只收文字、數字，最多 8 個
  */
-const COMMON_TAGS = ['洋流', '飄帶', '彩虹', '徽章', '貼紙', '小物', '扇子', '手環', '旗子', '帽子', '車掃', '掃街', '開講', '市集', '遊行', '講座', '造勢', '應援', '同志', '淨灘', '志工', '發放'];
+const COMMON_TAGS = ['洋流', '飄帶', '彩虹', '徽章', '貼紙', '小物', '扇子', '手環', '旗子', '帽子', '車掃', '掃街', '開講', '市集', '遊行', '講座', '造勢', '應援', '同志', '淨灘', '志工', '發放', '市民之夜'];
 const tagCache = new WeakMap<object, string[]>();
 function tagsOf(ev: { extra?: Record<string, unknown> | null; post?: { text: string; supplement?: string | null } }): string[] {
   const had = tagCache.get(ev);
