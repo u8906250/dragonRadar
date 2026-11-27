@@ -2176,11 +2176,13 @@ export class Radar {
    */
   private nightStars: RadarNightStars | null = null;
   setNightStars(v: RadarNightStars | null): void {
-    const key = v ? JSON.stringify(v) : '';
+    this.nightStars = v;
+    // 只有地點、起飛時間、店名變了才排重畫；只是位置變了（拖曳、移動中心）不畫：拖曳中這一層整層平移（跟光點一樣），停了照常重建時用最新的位置
+    // （v1.859 使用者說移動地圖時水滴不順：以前每次都重建，跟整層平移疊在一起會跳，259 顆每格重建也慢）
+    const key = v ? v.stars.map((st) => `${st.id}|${st.at}|${st.label}|${st.office ? 1 : 0}`).join(',') : '';
     if (key === this.nightKey) return;
     this.nightKey = key;
-    this.nightStars = v;
-    this.drawLandmarks();
+    this.draw();
   }
   private nightKey = '';
   /** 市民之夜的直播派對開著時地圖換成暗色（使用者說的；styles.css 的 .radar-stack.night 換雷達裡的顏色變數） */
@@ -2208,12 +2210,15 @@ export class Radar {
       const upx = BLIP_PX / BLIP_UNITS;
       const px = this.squarePx > 0 ? this.squarePx / SIZE : 1;
       const from = polar(ns.from.bearing - this.heading, this.ratio(ns.from.distanceKm) * (R - 8));
+      const margin = this.fill ? PAN_MARGIN * Math.min(RADAR_VIEW.hx, RADAR_VIEW.hy) : 0;
       const ng = el('g', { class: 'night-stars' });
       ng.innerHTML = NIGHT_DEFS;
       const shown: Array<{ st: RadarNightStars['stars'][number]; p: { x: number; y: number }; g: SVGGElement }> = [];
       for (const st of ns.stars) {
         const ratio = this.ratio(st.distanceKm);
-        if (ratio * (R - 8) > this.edgeR(st.bearing - this.heading)) continue;
+        // 全螢幕時畫面外多畫一圈（拖曳時整層平移，拖進來的是滑進來的，不會突然冒出來）
+        const lim = this.edgeR(st.bearing - this.heading);
+        if (ratio * (R - 8) > lim + margin) continue;
         const p = polar(st.bearing - this.heading, ratio * (R - 8));
         const g = el('g', { class: `night-star${st.office ? ' office' : ''}`, transform: `translate(${p.x.toFixed(1)} ${p.y.toFixed(1)}) scale(${bs.toFixed(4)})`, 'data-title': st.title, 'data-intro': st.intro }) as SVGGElement;
         // 起飛前在總部那裡（相對這顆的位置，照縮放換算）
@@ -2224,7 +2229,8 @@ export class Radar {
         fly.appendChild(el('circle', { class: 'hit', cy: 1, r: 11 }));
         g.appendChild(fly);
         ng.appendChild(g);
-        shown.push({ st, p, g });
+        // 畫面外的不寫店名（寫了也看不到，還佔掉名額）
+        if (ratio * (R - 8) <= lim) shown.push({ st, p, g });
       }
       // 店名寫在水滴旁邊（使用者說的）：照順序（人數多的先）放，不跟寫好的字、其他水滴重疊（不重疊、不要太亂），右邊放不下改左邊；拉近就寫得下比較多家
       const boxes: Array<[number, number, number, number]> = shown.map(({ p }) => {
