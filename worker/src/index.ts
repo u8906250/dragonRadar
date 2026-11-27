@@ -14,6 +14,7 @@ import { fetchYoutubePost, parseYoutubePostUrl } from './sources/youtube';
 import { accountInfo, deleteAccount, deletePasskey, deviceId, loginOptions, loginVerify, logout, purgeAccounts, registerOptions, registerVerify, sessionOf, setNickname } from './account';
 import { claimCard, makeTransfer, myCards, pickReward, purgeCards, redeemTransfer, spendTeleport } from './cards';
 import { adminListWishes, adminSetWish, markWishesSeen, myWishes, notifyWish, purgeWishes, submitTweak, submitWish, withdrawWish } from './wishes';
+import { nightVenues, syncNightVenues } from './night';
 import { addParkMark, deleteParkMark, listParkMarks, listPublicParkMarks, parseParkMark, updateParkMark } from './parkmarks';
 import { adminLocate, applyFeedback, clearResolvedFeedback, deleteAdminSubscription, listFeedback, locateForFeedback, moveEventPlace, notifyAdmins, purgeFeedback, saveAdminSubscription, setFeedbackStatus, submitFeedback } from './feedback';
 import { moduleOf } from './modules';
@@ -271,6 +272,10 @@ async function handle(req: Request, env: Env, ctx: ExecutionContext): Promise<Re
   }
   if (req.method === 'POST' && path === '/api/reports/supplement') {
     return jsonResponse(await finishEvenIfGone(ctx, supplementLink(env, await readJson<{ postId?: unknown; token?: unknown; note?: unknown }>(req), await ipHash(env, req), now, await deviceId(env, req))));
+  }
+  // 市民之夜的直播派對地點（2026-11-27 只限今晚，night.ts）
+  if (req.method === 'GET' && path === '/api/night-venues') {
+    return jsonResponse(await nightVenues(env, now));
   }
   // 判讀中的提示：現在用哪個模型、預估幾秒（v1.831）
   if (req.method === 'GET' && path === '/api/reports/judge-info') {
@@ -1032,10 +1037,12 @@ async function runScheduled(env: Env, cron: string, meter: D1Meter): Promise<voi
   const links = hourly ? await step('links', () => recheckLinks(env, now)).catch((e) => ({ error: String(e) })) : null;
   // 新聞、貼文講的是官方車掃就併進去（不管誰先到，每 30 分鐘重新比對；回報確認時另外會比對）
   const merge = auto && minute % 30 < 10 ? await step('merge', () => mergeIntoOfficial(env, now)).catch((e) => ({ error: String(e) })) : null;
+  // 市民之夜的直播派對地點：到晚上 10 點前每 30 分鐘讀一次（night.ts）
+  const night = await step('night', () => syncNightVenues(env, now)).catch((e) => ({ error: String(e) }));
   const drift = bottlesEnabled(env) ? await step('drift', () => driftBottles(env, now)).catch((e) => ({ error: String(e) })) : null;
   const purged = hourly ? await step('purge', () => purgeOldData(env, now)) : null;
   meter.label = '';
-  console.log(JSON.stringify({ cron, mode: client.mode, ingest, backlog, copies, voyage, news, lifecycle, pushed, extended, relocated, routeStops, links, merge, drift, purged, rowsRead: meter.rowsRead }));
+  console.log(JSON.stringify({ cron, mode: client.mode, ingest, backlog, copies, voyage, news, lifecycle, pushed, extended, relocated, routeStops, links, merge, night, drift, purged, rowsRead: meter.rowsRead }));
 }
 
 /** 這個 isolate 累積、還沒寫進 d1_usage 的 API 讀取量；最多每 2 分鐘寫一次 */
