@@ -271,19 +271,27 @@ async function deviceJson<T>(path: string, method = 'GET', body?: unknown, retri
   }
 }
 
-/** 地點錯誤直接移位置（v1.808）：自己回報的那則，或管理者（帶管理 token） */
-export async function moveEvent(id: number, at: LatLng, adminToken?: string): Promise<Result<{ ok: true; moved: number }>> {
+/** 自己回報的那則或管理者（帶管理 token）直接改：移位置、改店家類型 */
+async function directFix<T>(path: string, body: unknown, adminToken?: string): Promise<Result<T>> {
   try {
     const headers: Record<string, string> = { ...deviceHeaders(), 'content-type': 'application/json' };
     if (adminToken) headers.authorization = `Bearer ${adminToken}`;
-    const r = await fetch(`${API_BASE}/api/events/${id}/move`, { method: 'POST', headers, body: JSON.stringify({ lat: at.lat, lng: at.lng }) });
-    const j = (await r.json().catch(() => ({}))) as { ok: true; moved: number; error?: string };
+    const r = await fetch(`${API_BASE}${path}`, { method: 'POST', headers, body: JSON.stringify(body) });
+    const j = (await r.json().catch(() => ({}))) as T & { error?: string };
     if (!r.ok) return { ok: false, message: j.error ?? `暫時失敗，請再試一次（${r.status}）`, status: r.status };
     return { ok: true, data: j };
   } catch {
     return { ok: false, message: '連線失敗，請稍後再試' };
   }
 }
+
+/** 地點錯誤直接移位置（v1.808）：自己回報的那則，或管理者（帶管理 token） */
+export const moveEvent = (id: number, at: LatLng, adminToken?: string): Promise<Result<{ ok: true; moved: number }>> =>
+  directFix(`/api/events/${id}/move`, { lat: at.lat, lng: at.lng }, adminToken);
+
+/** 店家類型錯誤直接改（type 是店家類型 key）：自己回報的那家，或管理者（帶管理 token） */
+export const fixStoreType = (id: number, type: string, adminToken?: string): Promise<Result<{ ok: true; changed: number }>> =>
+  directFix(`/api/events/${id}/store-type`, { type }, adminToken);
 
 /** 附近漂流中的瓶子；失敗回傳空陣列 */
 export async function fetchBottles(origin: LatLng, radiusKm: number): Promise<BottleOut[]> {

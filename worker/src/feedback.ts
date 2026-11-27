@@ -3,14 +3,16 @@
  * 回報的內容只有管理者看得到；存裝置代碼與 IP 的加鹽雜湊（限制次數、同一個人同一則同一種問題只算一次），30 天後刪除。
  */
 import type { Env } from './env';
-import { ADDRESS_BUDGET_MS, findRouteStop, getPost, locateTypedPlace, MAX_FUTURE_SEC, OPEN_END_SEC, PLACE_MAX, removeRouteStop, reprocessPost, ROUTE_KEEP_SEC, setEventPlace, setEventTime, setManualTitle, setRouteStopPlace, setRouteStopTime, setTopic, takeDown } from './events';
+import { ADDRESS_BUDGET_MS, findRouteStop, getPost, locateTypedPlace, MAX_FUTURE_SEC, OPEN_END_SEC, PLACE_MAX, removeRouteStop, reprocessPost, ROUTE_KEEP_SEC, setEventPlace, setEventTime, setManualTitle, setRouteStopPlace, setRouteStopTime, setStoreType, setTopic, takeDown } from './events';
+import { moduleOf } from './modules';
 import { parseSubscription, PushError, sendPush, type PushMessage } from './push';
+import { isStoreTypeOf, STORE_TYPE_NAMES, storeTypesOf } from './stores';
 
 export const FEEDBACK_KINDS = {
   location: '地點錯誤',
   time: '時間錯誤',
   content: '標題或內容錯誤',
-  /** 活動的類型錯了（回報時要選正確的類型，FEEDBACK_TOPICS） */
+  /** 活動、店家的類型錯了（回報時要選正確的類型：活動是 FEEDBACK_TOPICS，店家是那個雷達的店家類型 key） */
   topic: '類型錯誤',
   not_event: '不是發放或活動',
   duplicate: '重複',
@@ -86,7 +88,7 @@ async function countSince(env: Env, col: 'device' | 'ip', value: string, since: 
 
 /**
  * 回報一則事件的問題：{ kind, note, stop?, stopAt?, topic? }；回傳要推給管理者的那一筆（重複的不推）。
- * 類型錯誤要選正確的類型（topic，只有活動有類型）。
+ * 類型錯誤要選正確的類型（topic）：活動選活動類型，台派、書店雷達的店家選那個雷達的店家類型 key。
  * 車掃可以指定哪一站（stop 是那一站的標題、stopAt 預計經過時間）：記在 stop、stop_at，
  * 標題、地點寫那一站的；那一站在雷達上有點就掛在那個點，沒有（只有約略位置、已經經過）就掛在回報的那一則
  */
@@ -102,13 +104,16 @@ export async function submitFeedback(
   if (!isKind(b.kind)) throw new PushError(400, '請選擇問題類型');
   const note = cleanNote(b.note);
   if (b.kind === 'other' && !note) throw new PushError(400, '選「其他」請寫一下是什麼問題');
-  if (b.kind === 'topic' && !isTopic(b.topic)) throw new PushError(400, '請選正確的類型');
-  const topic = b.kind === 'topic' && isTopic(b.topic) ? b.topic : null;
-  const ev = await env.DB.prepare('SELECT id, post_id, kind, title, place_text FROM events WHERE id = ?')
+  if (b.kind === 'topic' && typeof b.topic !== 'string') throw new PushError(400, '請選正確的類型');
+  const ev = await env.DB.prepare('SELECT e.id, e.post_id, e.kind, e.title, e.place_text, p.module FROM events e LEFT JOIN posts p ON p.id = e.post_id WHERE e.id = ?')
     .bind(eventId)
-    .first<{ id: number; post_id: string; kind: string; title: string; place_text: string }>();
+    .first<{ id: number; post_id: string; kind: string; title: string; place_text: string; module: string | null }>();
   if (!ev) throw new PushError(404, '找不到這個發放或活動，可能已經下架了');
-  if (topic && ev.kind !== 'activity') throw new PushError(400, '這一則沒有活動類型');
+  const topic = b.kind === 'topic' ? (b.topic as string) : null;
+  if (topic !== null) {
+    if (ev.kind !== 'activity' && ev.kind !== 'store') throw new PushError(400, '這一則沒有類型');
+    if (ev.kind === 'store' ? !isStoreTypeOf(moduleOf(ev.module), topic) : !isTopic(topic)) throw new PushError(400, '請選正確的類型');
+  }
   const stopTitle = typeof b.stop === 'string' ? [...b.stop.trim()].slice(0, 120).join('') : '';
   const stopAt = Number.isSafeInteger(b.stopAt) ? (b.stopAt as number) : null;
   const stop = stopTitle ? await findRouteStop(env, ev.post_id, stopTitle, stopAt) : null;
@@ -149,10 +154,22 @@ export async function submitFeedback(
   return { result: { ok: true, duplicate: false }, created: row };
 }
 
-/** 回報的人自己移位置：每小時最多幾次（同一個裝置或帳號） */
+/** 回報的人自己移位置、改類型：每小時各最多幾次（同一個裝置或帳號） */
 const MOVES_PER_HOUR = 20;
 /** 回報的人自己移的位置記一筆已處理的地點錯誤（管理頁看得到誰移了、移到哪） */
 export const SELF_MOVE_NOTE = '回報的人直接在雷達上移了位置';
+/** 回報的人自己改的店家類型記一筆已處理的類型錯誤（管理頁看得到誰改了、改成什麼） */
+export const SELF_TYPE_NOTE = '回報的人直接改了類型';
+
+/** 這則貼文是這個裝置（或帳號）回報的（回報紀錄 30 天內） */
+async function reportedBy(env: Env, postId: string, device: string): Promise<boolean> {
+  return !!(await env.DB.prepare('SELECT 1 AS ok FROM submissions WHERE post_id = ? AND device = ? LIMIT 1').bind(postId, device).first<{ ok: number }>());
+}
+
+/** 這個裝置一小時內自己改了幾次（note 是 SELF_MOVE_NOTE 或 SELF_TYPE_NOTE） */
+async function selfFixes(env: Env, device: string, note: string, now: number): Promise<number> {
+  return (await env.DB.prepare('SELECT COUNT(*) AS n FROM event_feedback WHERE device = ? AND note = ? AND created_at > ?').bind(device, note, now - 3600).first<{ n: number }>())?.n ?? 0;
+}
 
 /**
  * 地點錯誤直接移位置（v1.808 使用者說回報地點錯誤可以直接移動位置，選「回報的人和管理者」）：
@@ -172,10 +189,8 @@ export async function moveEventPlace(env: Env, eventId: number, body: unknown, a
   if (route) throw new PushError(400, '車掃路線的站請用「回報問題」選地點錯誤，送給管理者');
   if (!admin) {
     if (!device) throw new PushError(400, '缺少裝置代碼，請重新整理頁面');
-    const owned = await env.DB.prepare('SELECT 1 AS ok FROM submissions WHERE post_id = ? AND device = ? LIMIT 1').bind(ev.post_id, device).first<{ ok: number }>();
-    if (!owned) throw new PushError(403, '只有回報這則的人（同一個瀏覽器或帳號，30 天內）可以直接移動位置；請用「回報問題」送給管理者');
-    const moves = await env.DB.prepare('SELECT COUNT(*) AS n FROM event_feedback WHERE device = ? AND note = ? AND created_at > ?').bind(device, SELF_MOVE_NOTE, now - 3600).first<{ n: number }>();
-    if ((moves?.n ?? 0) >= MOVES_PER_HOUR) throw new PushError(429, '移動太多次了，請過一陣子再試');
+    if (!(await reportedBy(env, ev.post_id, device))) throw new PushError(403, '只有回報這則的人（同一個瀏覽器或帳號，30 天內）可以直接移動位置；請用「回報問題」送給管理者');
+    if ((await selfFixes(env, device, SELF_MOVE_NOTE, now)) >= MOVES_PER_HOUR) throw new PushError(429, '移動太多次了，請過一陣子再試');
   }
   const moved = await setEventPlace(env, ev.id, pin, null, now);
   if (!admin && moved > 0) {
@@ -187,6 +202,37 @@ export async function moveEventPlace(env: Env, eventId: number, body: unknown, a
       .run();
   }
   return { ok: true, moved };
+}
+
+/**
+ * 店家類型錯誤直接改（2026-11-27 使用者說台派雷達回報類型錯誤可以直接更正，選「回報的人和管理者」，跟地點錯誤直接移位置一樣）：
+ * 這家是自己回報的（同一個瀏覽器或帳號，回報紀錄 30 天內）或管理者，直接改成 { type }（這個雷達的店家類型 key），
+ * 同一則同一個地點還沒下架的一起改、之後重新判讀照樣用；其他人照舊用「回報問題」送給管理者確認
+ */
+export async function setStoreTypeDirect(env: Env, eventId: number, body: unknown, admin: boolean, device: string | null, ip: string, now: number): Promise<{ ok: true; changed: number }> {
+  const type = ((body ?? {}) as { type?: unknown }).type;
+  const ev = await env.DB.prepare('SELECT e.id, e.post_id, e.kind, e.title, e.place_text, e.status, p.module FROM events e LEFT JOIN posts p ON p.id = e.post_id WHERE e.id = ?')
+    .bind(eventId)
+    .first<{ id: number; post_id: string; kind: string; title: string; place_text: string; status: string; module: string | null }>();
+  if (!ev) throw new PushError(404, '找不到這家店，可能已經下架了');
+  if (ev.kind !== 'store') throw new PushError(400, '只有店家可以直接改類型，活動請用「回報問題」送給管理者');
+  if (!isStoreTypeOf(moduleOf(ev.module), type)) throw new PushError(400, '請選正確的類型');
+  if (!['upcoming', 'active', 'unlocated'].includes(ev.status)) throw new PushError(409, '這家店已經下架了');
+  if (!admin) {
+    if (!device) throw new PushError(400, '缺少裝置代碼，請重新整理頁面');
+    if (!(await reportedBy(env, ev.post_id, device))) throw new PushError(403, '只有回報這家店的人（同一個瀏覽器或帳號，30 天內）可以直接改類型；請用「回報問題」送給管理者');
+    if ((await selfFixes(env, device, SELF_TYPE_NOTE, now)) >= MOVES_PER_HOUR) throw new PushError(429, '改太多次了，請過一陣子再試');
+  }
+  const changed = await setStoreType(env, ev.id, type, now);
+  if (!admin && changed > 0) {
+    await env.DB.prepare(
+      `INSERT INTO event_feedback (event_id, post_id, title, place_text, kind, note, device, ip, status, created_at, resolved_at, topic)
+       VALUES (?, ?, ?, ?, 'topic', ?, ?, ?, 'resolved', ?, ?, ?)`,
+    )
+      .bind(ev.id, ev.post_id, ev.title, ev.place_text, SELF_TYPE_NOTE, device, ip, now, now, type)
+      .run();
+  }
+  return { ok: true, changed };
 }
 
 export interface FeedbackRow {
@@ -213,7 +259,8 @@ export interface FeedbackRow {
 /** 推給管理者的通知：同一個 tag，新的取代舊的，但會再響一次 */
 export function feedbackMessage(row: Pick<FeedbackRow, 'kind' | 'title' | 'note' | 'pin_lat' | 'topic'>, open: number): PushMessage {
   const pinned = row.pin_lat !== null && row.pin_lat !== undefined;
-  const topic = row.topic ? `應該是「${row.topic}」` : '';
+  // 店家的類型存 key（cafe、venue…），寫名稱
+  const topic = row.topic ? `應該是「${STORE_TYPE_NAMES[row.topic] ?? row.topic}」` : '';
   return {
     title: `新回報：${FEEDBACK_KINDS[row.kind]}${open > 1 ? `（未處理 ${open} 則）` : ''}`,
     body: `${row.title}｜${[topic, row.note ?? (pinned || topic ? '' : '沒寫說明'), pinned ? '在地圖上標了位置' : ''].filter(Boolean).join('，')}`,
@@ -245,9 +292,9 @@ export async function listFeedback(env: Env, status: string | null): Promise<unk
   const st = status === 'resolved' ? 'resolved' : 'open';
   const { results } = await env.DB.prepare(
     `SELECT f.id, f.event_id, f.post_id, f.title, f.place_text, f.kind, f.note, f.status, f.created_at, f.resolved_at, f.stop, f.stop_at, f.pin_lat, f.pin_lng, f.topic,
-            e.kind AS event_kind, CASE WHEN json_valid(e.extra) THEN json_extract(e.extra, '$.topic') END AS event_topic,
+            e.kind AS event_kind, CASE WHEN json_valid(e.extra) THEN json_extract(e.extra, CASE e.kind WHEN 'store' THEN '$.type' ELSE '$.topic' END) END AS event_topic,
             e.status AS event_status, e.start_at, e.end_at, e.end_open, e.lat, e.lng, e.approx_area, e.title AS event_title, e.place_text AS event_place,
-            p.permalink, p.username, p.supplement, p.source,
+            p.permalink, p.username, p.supplement, p.source, p.module,
             -- 重新判讀後原本那一則會換成新的：同一則貼文現在雷達上的第一則
             (SELECT c.id FROM events c WHERE c.post_id = f.post_id AND c.status IN ('upcoming', 'active') ORDER BY c.start_at LIMIT 1) AS current_event_id
        FROM event_feedback f
@@ -356,7 +403,7 @@ async function currentEvents(env: Env, postId: string): Promise<unknown[]> {
  * - { action: 'event_place', place, lat?, lng? }：不是車掃的，改回報那一則的位置（同一則貼文同一個地點還沒結束的一起改），位置的給法同上
  * - { action: 'event_time', start, end? }：不是車掃的，改回報那一則的開始、結束時間（unix 秒，沒有 end 是沒寫結束）
  * - { action: 'stop_time', start }：車掃指定的那一站改預計經過時間，時間表照時間重新排
- * - { action: 'topic', topic? }：不是車掃的，改回報那一則的活動類型（同一則貼文同一個地點還沒結束的一起改；沒給 topic 用回報的人選的）
+ * - { action: 'topic', topic? }：不是車掃的，改回報那一則的活動類型、店家類型（店家是 key；同一則貼文同一個地點還沒結束的一起改；沒給 topic 用回報的人選的）
  * 手動改的地點、時間、類型記在 manual_fixes，之後重新判讀照樣用。套用完標成已處理，回傳現在雷達上這則貼文的事件
  */
 export async function applyFeedback(
@@ -428,10 +475,17 @@ export async function applyFeedback(
   } else if (b.action === 'topic') {
     if (fb.stop) throw new PushError(400, '車掃的站沒有分類型');
     const topic = b.topic ?? fb.topic;
-    if (!isTopic(topic)) throw new PushError(400, `類型要是 ${FEEDBACK_TOPICS.join('、')} 其中一個`);
     const target = await liveId();
     if (target === null) throw new PushError(400, '這則已經不在雷達上了');
-    changed = await setTopic(env, target, topic, now);
+    const ev = await env.DB.prepare('SELECT e.kind, p.module FROM events e LEFT JOIN posts p ON p.id = e.post_id WHERE e.id = ?').bind(target).first<{ kind: string; module: string | null }>();
+    if (ev?.kind === 'store') {
+      const types = storeTypesOf(moduleOf(ev.module));
+      if (!isStoreTypeOf(moduleOf(ev.module), topic)) throw new PushError(400, `類型要是 ${Object.values(types).join('、')} 其中一個`);
+      changed = await setStoreType(env, target, topic, now);
+    } else {
+      if (!isTopic(topic)) throw new PushError(400, `類型要是 ${FEEDBACK_TOPICS.join('、')} 其中一個`);
+      changed = await setTopic(env, target, topic, now);
+    }
   } else if (b.action === 'stop_time') {
     if (!fb.stop) throw new PushError(400, '這筆回報沒有指定哪一站');
     const t = newTimes(b.start, null, now, ROUTE_KEEP_SEC);

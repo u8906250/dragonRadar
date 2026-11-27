@@ -213,17 +213,18 @@
             <label><input type="radio" name="kind" value="location" required /> 地點錯誤</label>
             <!-- 台派雷達的店家換成 data-store 的說法、書店雷達有 data-books 的用那個（openFeedback） -->
             <label><input type="radio" name="kind" value="time" /> <span class="fb-label" data-store="營業時間錯誤">時間錯誤</span></label>
-            <label><input type="radio" name="kind" value="content" /> <span class="fb-label" data-store="店名或類型錯誤">標題或內容錯誤</span></label>
+            <label><input type="radio" name="kind" value="content" /> <span class="fb-label" data-store="店名錯誤">標題或內容錯誤</span></label>
             <label id="feedback-topic-kind" hidden><input type="radio" name="kind" value="topic" /> 類型錯誤</label>
             <label><input type="radio" name="kind" value="not_event" /> <span class="fb-label" data-store="不是台派店家、已經歇業" data-books="不是獨立書店、已經歇業">不是發放或活動</span></label>
             <label><input type="radio" name="kind" value="duplicate" /> 重複</label>
             <label id="feedback-remove-stop" hidden><input type="radio" name="kind" value="remove_stop" /> 刪除這一站（沒有這一站、取消了）</label>
             <label><input type="radio" name="kind" value="other" /> 其他</label>
           </fieldset>
-          <!-- 類型錯誤：選正確的類型（跟搜尋框下面的類型按鈕一樣，管理者確認後才改） -->
+          <!-- 類型錯誤：選正確的類型（跟搜尋框下面的類型按鈕一樣）；活動管理者確認後才改，店家是自己回報的、管理者直接改 -->
           <fieldset id="feedback-topics" class="feedback-kinds feedback-topics" hidden>
             <legend>正確的類型是？</legend>
             <div id="feedback-topic-list" class="feedback-topic-list"></div>
+            <p id="feedback-topic-why" class="muted small" hidden></p>
           </fieldset>
           <!-- 地點錯誤：在雷達上標正確的位置（選填，管理者確認後才改；v1.834 小地圖拿掉） -->
           <div id="feedback-pin" class="feedback-pin" hidden>

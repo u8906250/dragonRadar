@@ -1,6 +1,6 @@
 import './styles.css';
 import { FITBUS_MS_PER_M, hqDenseKm, hqMotionKm, HQ_NET_LABEL_KM, HQ_SAIL_MS, HQ_STAR_MS, HQ_VOYAGE_MS, RAINBOW_EVERY_MS, voyagePhase, voyageTimeOf } from './flow';
-import { accountToken, addKeyword, cachedNickname, deletePushSubscription, locateFeedbackPlace, moveEvent, sendFeedback, type FeedbackKind, fetchPushKey, savePushSubscription, confirmReport, editReport, locatePlace, rejectReport, reviewReport, supplementReport, deleteBottle, dropBottle, readBottle, type BottleHere, fetchBottleInfo, fetchBottlePhoto, fetchBottleProof, fetchBottles, fetchWoofBottles, rememberBottlePhoto, uncollectLetter, verifyBottleProof, fetchEvents, MAX_AHEAD_DAYS, fetchHealth, fetchJudgeInfo, type JudgeInfo, fetchNightVenues, type NightVenue, fetchKeywords, fetchMyBottles, fetchMyReports, fetchRoutes, pickBottle, reportBottle, submitLink, withdrawReport } from './api';
+import { accountToken, addKeyword, cachedNickname, deletePushSubscription, locateFeedbackPlace, moveEvent, fixStoreType, sendFeedback, type FeedbackKind, fetchPushKey, savePushSubscription, confirmReport, editReport, locatePlace, rejectReport, reviewReport, supplementReport, deleteBottle, dropBottle, readBottle, type BottleHere, fetchBottleInfo, fetchBottlePhoto, fetchBottleProof, fetchBottles, fetchWoofBottles, rememberBottlePhoto, uncollectLetter, verifyBottleProof, fetchEvents, MAX_AHEAD_DAYS, fetchHealth, fetchJudgeInfo, type JudgeInfo, fetchNightVenues, type NightVenue, fetchKeywords, fetchMyBottles, fetchMyReports, fetchRoutes, pickBottle, reportBottle, submitLink, withdrawReport } from './api';
 import { compassSupported, startCompass } from './compass';
 import { bearingDeg, compassLabel, cutAtBox, cutLines, destination, formatKm, haversineKm, lookFrom, outsideBox, ringBox, ringHas, splitAntimeridian, simplifyLatLng, taiwanRadiusKm, unitVectors, type GeoBox, type LatLng, type RegionMap } from './geo';
 import { TAIWAN_RINGS } from './taiwan';
@@ -5483,15 +5483,19 @@ function openFeedback(ev: EventOut, fromRoute?: RouteOut, fixStop?: number): voi
   }
   $('#feedback-stop-row').hidden = !route;
   $('#feedback-remove-stop').hidden = !route;
-  // 類型錯誤：只有活動雷達的活動有類型（車掃不算），選項跟搜尋框下面的類型按鈕一樣，現在的類型不能選
-  const typed = mod.current && ev.kind === 'activity' && !route;
-  $('#feedback-topic-kind').hidden = !typed;
-  const curType = typed ? typeOf(ev) : null;
-  $('#feedback-topic-list').innerHTML = typed
-    ? TOPIC_TYPES.map(
-        (t) =>
-          `<label${t.key === curType ? ' class="now"' : ''}><input type="radio" name="topic" value="${t.label}"${t.key === curType ? ' disabled' : ''} />${topicChipSvg(t.key)}${t.label}${t.key === curType ? '<small>現在</small>' : ''}</label>`,
-      ).join('')
+  // 類型錯誤：活動雷達的活動（車掃不算）選活動類型，台派、書店雷達的店家選這個雷達的店家類型（送 key）；
+  // 選項跟搜尋框下面的類型按鈕一樣，現在的類型不能選
+  const store = ev.kind === 'store' && !!mod.storeTypes;
+  const types = store ? mod.storeTypes! : mod.current && ev.kind === 'activity' && !route ? TOPIC_TYPES : null;
+  $('#feedback-topic-kind').hidden = !types;
+  const curType = !types ? null : store ? (storeOf(ev).type ?? 'other') : typeOf(ev);
+  $('#feedback-topic-list').innerHTML = types
+    ? types
+        .map(
+          (t) =>
+            `<label${t.key === curType ? ' class="now"' : ''}><input type="radio" name="topic" value="${store ? t.key : t.label}" data-label="${t.label}"${t.key === curType ? ' disabled' : ''} />${topicChipSvg(t.key)}${t.label}${t.key === curType ? '<small>現在</small>' : ''}</label>`,
+        )
+        .join('')
     : '';
   $('#feedback-topics').hidden = true;
   // 店家：時間錯誤是營業時間、不是活動是不是台派店家（書店雷達：不是獨立書店）或歇業了
@@ -5652,9 +5656,15 @@ function syncFeedbackPin(): void {
   const direct = kind === 'location' && !!feedbackEv && !feedbackStops && canMoveDirect(feedbackEv);
   $('#feedback-move').hidden = !direct;
   if (direct) $('#feedback-move-why').textContent = myReportIds.has(feedbackEv!.post.id) ? '這則是你回報的，可以直接把位置移到正確的地方，不用等管理者確認。' : '你是管理者，可以直接把位置移到正確的地方。';
-  feedbackNote.hidden = direct;
+  // 店家的類型錯誤也一樣：選了按「改類型」直接改（補充說明收起來）
+  const directType = kind === 'topic' && feedbackEv?.kind === 'store' && canMoveDirect(feedbackEv);
+  const why = $('#feedback-topic-why');
+  why.hidden = !directType;
+  if (directType) why.textContent = myReportIds.has(feedbackEv!.post.id) ? '這家店是你回報的，選了按「改類型」直接改，不用等管理者確認。' : '你是管理者，選了按「改類型」直接改。';
+  feedbackSubmit.textContent = directType ? '改類型' : '送出';
+  feedbackNote.hidden = direct || directType;
   feedbackSubmit.hidden = direct;
-  $('#feedback-foot').hidden = direct;
+  $('#feedback-foot').hidden = direct || directType;
   const box = $('#feedback-pin');
   box.hidden = kind !== 'location' || !feedbackEv || direct;
   if (box.hidden || !feedbackEv) return;
@@ -5698,6 +5708,22 @@ async function submitFeedback(): Promise<void> {
   const topic = kind === 'topic' ? (feedbackForm.elements.namedItem('topic') as RadioNodeList | null)?.value || '' : '';
   if (kind === 'topic' && !topic) {
     showBanner(bannerEl, '請選正確的類型', 3000);
+    return;
+  }
+  // 店家類型錯誤，自己回報的那家、管理者：直接改
+  if (kind === 'topic' && feedbackEv?.kind === 'store' && canMoveDirect(feedbackEv)) {
+    const label = feedbackForm.querySelector<HTMLInputElement>('input[name="topic"]:checked')?.dataset.label ?? '';
+    feedbackSubmit.disabled = true;
+    const r = await fixStoreType(feedbackEventId, topic, lsGet(LS_ADMIN_TOKEN) ?? undefined);
+    feedbackSubmit.disabled = false;
+    if (!r.ok) {
+      showBanner(bannerEl, r.message, 4000);
+      return;
+    }
+    feedbackSheet.hidden = true;
+    feedbackEventId = null;
+    showBanner(bannerEl, r.data.changed > 0 ? `類型改成「${label}」了` : '這家店已經不在雷達上了', 3000);
+    await refresh();
     return;
   }
   feedbackSubmit.disabled = true;

@@ -329,6 +329,10 @@
     };
     /** 台派雷達等判斷的店家：照預覽的樣子列每一家（店名、類型、營業時間、地點） */
     const STORE_TYPES = { eat: '餐廳小吃', cafe: '咖啡甜點', drink: '飲料', bar: '酒吧', book: '書店', shop: '選物雜貨', beauty: '美容', stay: '住宿', clinic: '醫療', fitness: '健身', game: '桌遊', venue: '場地租借', other: '其他' };
+    /** 書店雷達的書店類型（跟 worker/src/books.ts 一樣） */
+    const BOOK_TYPES = { general: '人文綜合', issue: '社會議題', used: '二手書', kids: '童書繪本', lit: '文學詩集', art: '藝術設計', comic: '漫畫', other: '其他' };
+    /** 回報問題的類型：店家存 key（cafe、venue…），寫名稱 */
+    const typeName = (f, t) => (f.event_kind === 'store' ? (f.module === 'books' ? BOOK_TYPES : STORE_TYPES)[t] || t : t);
     /** AI 抓到可能是台派的說法：採用（加進台派用詞、這家店放上雷達）、不算台派（只記這個說法） */
     const HINT_STATUS = { adopted: '已經算台派', rejected: '之前決定不算台派', pending: '台派用詞的候選' };
     function hintsOf(r) {
@@ -559,7 +563,11 @@
             f.pin_lat != null
               ? `<div class="muted">回報的人在地圖上標了位置：<a href="https://www.google.com/maps/search/?api=1&query=${f.pin_lat},${f.pin_lng}" target="_blank" rel="noopener">${Number(f.pin_lat).toFixed(5)}, ${Number(f.pin_lng).toFixed(5)}</a></div>`
               : '';
-          const topicLine = f.topic ? `<div class="muted">回報的人選的類型：<strong>${esc(f.topic)}</strong>（現在：${esc(f.event_topic || '沒有類型')}）</div>` : '';
+          const topicLine = f.topic ? `<div class="muted">回報的人選的類型：<strong>${esc(typeName(f, f.topic))}</strong>（現在：${esc(f.event_topic ? typeName(f, f.event_topic) : '沒有類型')}）</div>` : '';
+          // 改類型的選單：店家照那個雷達的店家類型（送 key），活動照活動類型
+          const typeOptions = f.event_kind === 'store'
+            ? Object.entries(f.module === 'books' ? BOOK_TYPES : STORE_TYPES).map(([k, v]) => `<option value="${k}"${k === f.topic ? ' selected' : ''}>${v}</option>`).join('')
+            : TOPICS.map((t) => `<option${t === f.topic ? ' selected' : ''}>${t}</option>`).join('');
           // 改位置：車掃的站、地點錯誤、回報的人標了位置的
           const placeFix = f.stop || f.kind === 'location' || f.pin_lat != null;
           const links = [
@@ -598,8 +606,8 @@
               }
               ${
                 f.kind === 'topic' && !f.stop
-                  ? `<div class="row"><select class="title-input" data-topic="${f.id}" aria-label="類型">${TOPICS.map((t) => `<option${t === f.topic ? ' selected' : ''}>${t}</option>`).join('')}</select><button type="button" class="btn primary" data-apply="topic" data-id="${f.id}">改類型</button></div>
-              <p class="hint">改這個地點的活動類型（雷達、地圖的小圖示和類型按鈕照這個；同一則貼文同一個地點還沒結束的一起改），不經過 AI，之後重新判讀也會保留。</p>`
+                  ? `<div class="row"><select class="title-input" data-topic="${f.id}" aria-label="類型">${typeOptions}</select><button type="button" class="btn primary" data-apply="topic" data-id="${f.id}">改類型</button></div>
+              <p class="hint">改這個地點的${f.event_kind === 'store' ? '店家' : '活動'}類型（雷達的小圖示和類型按鈕照這個；同一則貼文同一個地點還沒結束的一起改），不經過 AI，之後重新判讀也會保留。</p>`
                   : ''
               }
               <div class="row"><input type="text" class="title-input" data-title="${f.id}" maxlength="30" value="${esc(curTitle)}" aria-label="新標題" /><button type="button" class="btn primary" data-apply="title" data-id="${f.id}">改標題</button></div>
