@@ -386,6 +386,17 @@ const ZONE_STEP_MS = 450;
 /** 文化網：點亮之後多久線亮、多久暈開成面 */
 const NET_LINE_MS = 900;
 const NET_FACE_MS = 2100;
+/**
+ * 市民之夜的直播派對：發亮的小水滴（使用者說星星改成水滴、再大一點）：尖的在上、圓的在下，約 20 像素高；
+ * 飛多久（styles.css 的 night-fly 一樣）、店名字多大、最多寫幾家
+ */
+const NIGHT_DROP = 'M0 -10 C3 -5.5 6.5 -2 6.5 2 A6.5 6.5 0 0 1 -6.5 2 C-6.5 -2 -3 -5.5 0 -10 Z';
+const NIGHT_DEFS =
+  '<defs><radialGradient id="night-glow"><stop offset="0" stop-color="#8fe3ff" stop-opacity="0.75"/><stop offset="0.45" stop-color="#4cc3ff" stop-opacity="0.3"/><stop offset="1" stop-color="#4cc3ff" stop-opacity="0"/></radialGradient>' +
+  '<linearGradient id="night-drop" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#e6fbff"/><stop offset="0.55" stop-color="#6fd6ff"/><stop offset="1" stop-color="#1e9be6"/></linearGradient></defs>';
+const NIGHT_FLY_MS = 1300;
+const NIGHT_NAME_PX = 11;
+const NIGHT_MAX_NAMES = 80;
 /** 星星轉走要幾毫秒（flow.ts 的 HQ_STAR_MS 一樣） */
 const STAR_SPIN_MS = 1100;
 /** 0～1 的固定亂數（照編號，重畫一樣） */
@@ -410,7 +421,8 @@ const RIVER_GONE_MS = 1700;
 /** 市民之夜的直播派對地點（橘色小星星）：from 是洋流總部 */
 export interface RadarNightStars {
   from: { bearing: number; distanceKm: number };
-  stars: Array<{ id: string; bearing: number; distanceKm: number; at: number; title: string; intro: string; office: boolean }>;
+  /** label 是寫在地圖上的店名（短的），rank 越大越先寫（放不下的不寫） */
+  stars: Array<{ id: string; bearing: number; distanceKm: number; at: number; title: string; intro: string; office: boolean; label: string; rank: number }>;
 }
 
 export interface RadarLandmark {
@@ -2171,6 +2183,10 @@ export class Radar {
     this.drawLandmarks();
   }
   private nightKey = '';
+  /** 市民之夜的直播派對開著時地圖換成暗色（使用者說的；styles.css 的 .radar-stack.night 換雷達裡的顏色變數） */
+  setNight(on: boolean): void {
+    this.stack.classList.toggle('night', on);
+  }
 
   /** 固定地標（星星），畫在光點上面，超出範圍時貼在外圈 */
   setLandmarks(list: RadarLandmark[]): void {
@@ -2188,20 +2204,53 @@ export class Radar {
     if (this.nightStars && !this.inSpace && !this.earthHidden) {
       const ns = this.nightStars;
       const now = Date.now();
+      // 一個單位（水滴的座標）是幾個螢幕像素；SVG 座標換螢幕像素
+      const upx = BLIP_PX / BLIP_UNITS;
+      const px = this.squarePx > 0 ? this.squarePx / SIZE : 1;
       const from = polar(ns.from.bearing - this.heading, this.ratio(ns.from.distanceKm) * (R - 8));
       const ng = el('g', { class: 'night-stars' });
+      ng.innerHTML = NIGHT_DEFS;
+      const shown: Array<{ st: RadarNightStars['stars'][number]; p: { x: number; y: number }; g: SVGGElement }> = [];
       for (const st of ns.stars) {
         const ratio = this.ratio(st.distanceKm);
         if (ratio * (R - 8) > this.edgeR(st.bearing - this.heading)) continue;
         const p = polar(st.bearing - this.heading, ratio * (R - 8));
-        const g = el('g', { class: `night-star${st.office ? ' office' : ''}`, transform: `translate(${p.x.toFixed(1)} ${p.y.toFixed(1)}) scale(${bs.toFixed(4)})`, 'data-title': st.title, 'data-intro': st.intro });
+        const g = el('g', { class: `night-star${st.office ? ' office' : ''}`, transform: `translate(${p.x.toFixed(1)} ${p.y.toFixed(1)}) scale(${bs.toFixed(4)})`, 'data-title': st.title, 'data-intro': st.intro }) as SVGGElement;
         // 起飛前在總部那裡（相對這顆的位置，照縮放換算）
         const fly = el('g', { class: 'fly', style: `--dx:${((from.x - p.x) / bs).toFixed(1)}px;--dy:${((from.y - p.y) / bs).toFixed(1)}px;animation-delay:${Math.round(st.at - now)}ms` });
-        fly.appendChild(el('circle', { class: 'glow', r: 7 }));
-        fly.appendChild(el('path', { class: 'star', d: starPath(5) }));
-        fly.appendChild(el('circle', { class: 'hit', r: 10 }));
+        fly.appendChild(el('circle', { class: 'glow', cy: 1, r: 13 }));
+        fly.appendChild(el('path', { class: 'drop', d: NIGHT_DROP }));
+        fly.appendChild(el('ellipse', { class: 'shine', cx: -2.4, cy: 1.5, rx: 1.6, ry: 2.6 }));
+        fly.appendChild(el('circle', { class: 'hit', cy: 1, r: 11 }));
         g.appendChild(fly);
         ng.appendChild(g);
+        shown.push({ st, p, g });
+      }
+      // 店名寫在水滴旁邊（使用者說的）：照順序（人數多的先）放，不跟寫好的字、其他水滴重疊（不重疊、不要太亂），右邊放不下改左邊；拉近就寫得下比較多家
+      const boxes: Array<[number, number, number, number]> = shown.map(({ p }) => {
+        const x = p.x * px;
+        const y = p.y * px;
+        return [x - 6 * upx, y - 10 * upx, x + 6 * upx, y + 8 * upx];
+      });
+      const hitsAny = (b: [number, number, number, number], skip: number): boolean => boxes.some((o, i) => i !== skip && b[0] < o[2] && b[2] > o[0] && b[1] < o[3] && b[3] > o[1]);
+      const order = shown.map((_, i) => i).sort((a, b) => shown[b].st.rank - shown[a].st.rank);
+      let named = 0;
+      for (const i of order) {
+        if (named >= NIGHT_MAX_NAMES) break;
+        const { st, p, g } = shown[i];
+        const w = [...st.label].reduce((n, c) => n + (/[\u0000-\u024f]/.test(c) ? 0.58 : 1), 0) * NIGHT_NAME_PX;
+        const x = p.x * px;
+        const y = p.y * px + 1.5 * upx;
+        const h = NIGHT_NAME_PX * 1.25;
+        const right: [number, number, number, number] = [x + 8 * upx, y - h / 2, x + 8 * upx + w, y + h / 2];
+        const left: [number, number, number, number] = [x - 8 * upx - w, y - h / 2, x - 8 * upx, y + h / 2];
+        const side = !hitsAny(right, i) ? right : !hitsAny(left, i) ? left : null;
+        if (!side) continue;
+        boxes.push(side);
+        named++;
+        const t = el('text', { class: 'night-name', x: side === right ? 9 : -9, y: 2, 'text-anchor': side === right ? 'start' : 'end', style: `animation-delay:${Math.round(st.at + NIGHT_FLY_MS - now)}ms` });
+        t.textContent = st.label;
+        g.appendChild(t);
       }
       this.landmarkLayer.appendChild(ng);
     }

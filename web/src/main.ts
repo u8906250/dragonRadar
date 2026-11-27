@@ -3356,6 +3356,7 @@ function render(): void {
     (mod.current ? LANDMARKS : []).map((lm) => ({ id: lm.id, label: lm.name, bearing: bearingDeg(origin, lm), distanceKm: haversineKm(origin, lm), selected: lm.id === selectedLandmark })),
   );
   radar.setNightStars(nightRadar());
+  radar.setNight(nightAt !== null && youOn === 'earth' && mod.current);
   // 回報判讀完、還沒確認的位置；漂流瓶選落點時換成瓶子和丟的地方 1 km 的虛線圈
   const pick = bottlePick;
   const pins: Array<ReportPin & { bottle?: boolean; hint?: string }> = pick
@@ -5908,6 +5909,8 @@ function stopNightStars(): void {
   radar.setStarSpin(null);
   render();
 }
+/** 寫在地圖上的店名最多幾個字（太長的截掉） */
+const NIGHT_LABEL_MAX = 12;
 /** 可容納人數：只寫數字的補「人」 */
 const nightCap = (c: string): string => (/^\d+$/.test(c) ? `${c} 人` : c);
 function nightRadar(): RadarNightStars | null {
@@ -5922,6 +5925,9 @@ function nightRadar(): RadarNightStars | null {
       title: v.name,
       intro: [`${v.type === 'office' ? '議員服務處' : '直播派對'}${v.area ? `・${v.area}區` : ''}`, v.address, v.capacity ? `可容納 ${nightCap(v.capacity)}` : '', v.note].filter(Boolean).join('\n'),
       office: v.type === 'office',
+      label: [...v.name].length > NIGHT_LABEL_MAX ? `${[...v.name].slice(0, NIGHT_LABEL_MAX - 1).join('')}…` : v.name,
+      // 可容納人數多的店名先寫
+      rank: Number(/\d+/.exec(v.capacity)?.[0] ?? 0),
     })),
   };
 }

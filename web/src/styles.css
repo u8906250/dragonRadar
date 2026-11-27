@@ -2208,16 +2208,26 @@ path.map-seam-walkers { --p: 15px; }
 /* 車掃的起點 🚩、終點 🏁；選到時加一圈 */
 /* 洋流總部點下去：星星快速旋轉、縮小不見（洋流號才出來），動畫結束彈回來（radar.ts 的 setStarSpin 用 style 寫、地圖用 class） */
 .radar .landmark .body { transform-box: fill-box; transform-origin: center; }
-/* 市民之夜的直播派對（2026-11-27 只限今晚）：點洋流總部，橘色小星星從總部飛散到各個地點（--dx、--dy 是總部離這顆多遠），飛完留著 */
+/* 市民之夜的直播派對（2026-11-27 只限今晚）：點洋流總部，發亮的小水滴從總部飛散到各個地點（--dx、--dy 是總部離這顆多遠），飛完留著；店名寫在旁邊 */
 .radar .night-star { cursor: help; }
 .radar .night-star .fly { animation: night-fly 1300ms cubic-bezier(0.22, 0.7, 0.3, 1) both; }
-.radar .night-star .star { fill: #ff8a1f; stroke: #fff3df; stroke-width: 1.2; stroke-linejoin: round; }
-.radar .night-star .glow { fill: #ff9d3d; opacity: 0.3; }
+.radar .night-star .drop { fill: url(#night-drop); stroke: #e9fbff; stroke-width: 0.9; stroke-linejoin: round; }
+.radar .night-star .glow { fill: url(#night-glow); }
+.radar .night-star .shine { fill: #ffffff; opacity: 0.85; }
 .radar .night-star .hit { fill: transparent; pointer-events: visibleFill; }
+.radar .night-name { font-size: 10px; font-weight: 700; fill: #e8f7ff; dominant-baseline: central; paint-order: stroke; stroke: #071022; stroke-width: 3px; stroke-linejoin: round; pointer-events: none; animation: night-name-in 0.5s ease-out both; }
 @keyframes night-fly {
   from { transform: translate(var(--dx), var(--dy)) scale(0.35); opacity: 0; }
   12% { opacity: 1; }
   to { transform: translate(0, 0) scale(1); opacity: 1; }
+}
+@keyframes night-name-in { from { opacity: 0; } to { opacity: 1; } }
+/* 開著時雷達的地圖換成暗色（只換雷達裡的顏色，按鈕、清單照舊） */
+.radar-stack.night {
+  --radar-face-1: #15233b; --radar-face-2: #0a1324; --radar-face-stroke: #2b4469;
+  --radar-grid: #a9c2e6; --park-fill: #132a22; --water-fill: #0f2c45; --water-line: #24577f;
+  --label: #c9d8ee; --label-halo: #0a1324; --radar-text: #8ea4c4; --radar-rose: #8ea4c4; --radar-me: #ffffff;
+  --blip-halo: #0a1324; --accent: #4f8fc4;
 }
 .night-panel .night-info { display: flex; flex-direction: column; align-items: flex-end; gap: 2px; width: max-content; max-width: min(250px, calc(100vw - 110px)); padding: 6px 10px; background: var(--card); color: var(--text); border: 1.5px solid #15171c; border-radius: 10px; box-shadow: 2px 2px 0 #15171c; font-size: 12.5px; text-align: right; }
 .night-panel .night-info b { color: #e8700a; font-size: 13.5px; }
