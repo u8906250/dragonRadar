@@ -407,6 +407,12 @@ const CANAL_GHOST_MS = 1200;
 /** 河到終點後多久拿掉（淡出 1.5 秒，多留一點） */
 const RIVER_GONE_MS = 1700;
 /** 固定的地標（例如洋流總部），畫成星星 */
+/** 市民之夜的直播派對地點（橘色小星星）：from 是洋流總部 */
+export interface RadarNightStars {
+  from: { bearing: number; distanceKm: number };
+  stars: Array<{ id: string; bearing: number; distanceKm: number; at: number; title: string; intro: string; office: boolean }>;
+}
+
 export interface RadarLandmark {
   id: string;
   label: string;
@@ -2152,6 +2158,20 @@ export class Radar {
     this.drawLandmarks();
   }
 
+  /**
+   * 市民之夜的直播派對（2026-11-27 只限今晚，點洋流總部）：橘色小星星從總部（from）飛散到各個地點，at 是那顆起飛的時間（Date.now() 的毫秒）；
+   * 滑鼠移過去、手機點一下顯示 title、intro（main.ts 的介紹框）；範圍外的不畫
+   */
+  private nightStars: RadarNightStars | null = null;
+  setNightStars(v: RadarNightStars | null): void {
+    const key = v ? JSON.stringify(v) : '';
+    if (key === this.nightKey) return;
+    this.nightKey = key;
+    this.nightStars = v;
+    this.drawLandmarks();
+  }
+  private nightKey = '';
+
   /** 固定地標（星星），畫在光點上面，超出範圍時貼在外圈 */
   setLandmarks(list: RadarLandmark[]): void {
     const key = JSON.stringify(list);
@@ -2165,6 +2185,26 @@ export class Radar {
     this.landmarkLayer.replaceChildren();
     // 跟活動圖示一樣固定螢幕大小（v1.738 使用者說總部的星星也比照）：星星外徑 10 個單位 → 寬約 22 px
     const bs = this.blipScale();
+    if (this.nightStars && !this.inSpace && !this.earthHidden) {
+      const ns = this.nightStars;
+      const now = Date.now();
+      const from = polar(ns.from.bearing - this.heading, this.ratio(ns.from.distanceKm) * (R - 8));
+      const ng = el('g', { class: 'night-stars' });
+      for (const st of ns.stars) {
+        const ratio = this.ratio(st.distanceKm);
+        if (ratio * (R - 8) > this.edgeR(st.bearing - this.heading)) continue;
+        const p = polar(st.bearing - this.heading, ratio * (R - 8));
+        const g = el('g', { class: `night-star${st.office ? ' office' : ''}`, transform: `translate(${p.x.toFixed(1)} ${p.y.toFixed(1)}) scale(${bs.toFixed(4)})`, 'data-title': st.title, 'data-intro': st.intro });
+        // 起飛前在總部那裡（相對這顆的位置，照縮放換算）
+        const fly = el('g', { class: 'fly', style: `--dx:${((from.x - p.x) / bs).toFixed(1)}px;--dy:${((from.y - p.y) / bs).toFixed(1)}px;animation-delay:${Math.round(st.at - now)}ms` });
+        fly.appendChild(el('circle', { class: 'glow', r: 7 }));
+        fly.appendChild(el('path', { class: 'star', d: starPath(5) }));
+        fly.appendChild(el('circle', { class: 'hit', r: 10 }));
+        g.appendChild(fly);
+        ng.appendChild(g);
+      }
+      this.landmarkLayer.appendChild(ng);
+    }
     for (const lm of this.landmarks) {
       const ratio = this.ratio(lm.distanceKm);
       const lim = this.edgeR(lm.bearing - this.heading);

@@ -1,6 +1,6 @@
 import './styles.css';
 import { FITBUS_MS_PER_M, hqDenseKm, hqMotionKm, HQ_NET_LABEL_KM, HQ_SAIL_MS, HQ_STAR_MS, HQ_VOYAGE_MS, RAINBOW_EVERY_MS, voyagePhase, voyageTimeOf } from './flow';
-import { accountToken, addKeyword, cachedNickname, deletePushSubscription, locateFeedbackPlace, moveEvent, sendFeedback, type FeedbackKind, fetchPushKey, savePushSubscription, confirmReport, editReport, locatePlace, rejectReport, reviewReport, supplementReport, deleteBottle, dropBottle, readBottle, type BottleHere, fetchBottleInfo, fetchBottlePhoto, fetchBottleProof, fetchBottles, fetchWoofBottles, rememberBottlePhoto, uncollectLetter, verifyBottleProof, fetchEvents, MAX_AHEAD_DAYS, fetchHealth, fetchJudgeInfo, type JudgeInfo, fetchKeywords, fetchMyBottles, fetchMyReports, fetchRoutes, pickBottle, reportBottle, submitLink, withdrawReport } from './api';
+import { accountToken, addKeyword, cachedNickname, deletePushSubscription, locateFeedbackPlace, moveEvent, sendFeedback, type FeedbackKind, fetchPushKey, savePushSubscription, confirmReport, editReport, locatePlace, rejectReport, reviewReport, supplementReport, deleteBottle, dropBottle, readBottle, type BottleHere, fetchBottleInfo, fetchBottlePhoto, fetchBottleProof, fetchBottles, fetchWoofBottles, rememberBottlePhoto, uncollectLetter, verifyBottleProof, fetchEvents, MAX_AHEAD_DAYS, fetchHealth, fetchJudgeInfo, type JudgeInfo, fetchNightVenues, type NightVenue, fetchKeywords, fetchMyBottles, fetchMyReports, fetchRoutes, pickBottle, reportBottle, submitLink, withdrawReport } from './api';
 import { compassSupported, startCompass } from './compass';
 import { bearingDeg, compassLabel, cutAtBox, cutLines, destination, formatKm, haversineKm, lookFrom, outsideBox, ringBox, ringHas, splitAntimeridian, simplifyLatLng, taiwanRadiusKm, unitVectors, type GeoBox, type LatLng, type RegionMap } from './geo';
 import { TAIWAN_RINGS } from './taiwan';
@@ -13,7 +13,7 @@ import { wireFind, type FoundPlace } from './find';
 import { shortAddress, splitPlace } from './place';
 import { beep, ensureNotificationPermission, iosNeedsHomeScreen, notificationState, pushSubscription, pushSupported, registerServiceWorker, showBanner, systemNotify, unlockAudio, unsubscribePush } from './notify';
 import { checkWishNews, findCard, gotReward, myCards, onWishNews, openAlbum, openHelp, openItems, openWishes, overlay, setTeleport, spendTeleportCoin, teleportFlash } from './cards';
-import { DEEP_FROM_KM, FLAT_PAN_KM, labelSpanEm, LY_KM, Radar, SPACE_FROM_KM, type RadarLabel, type RadarRoute, type RadarStreets, type RadarStreetTile, type SpaceView } from './radar';
+import { DEEP_FROM_KM, FLAT_PAN_KM, labelSpanEm, LY_KM, Radar, SPACE_FROM_KM, type RadarLabel, type RadarNightStars, type RadarRoute, type RadarStreets, type RadarStreetTile, type SpaceView } from './radar';
 import { DEFAULT_THEME_ID, getTheme, THEMES, type Theme } from './themes';
 import type { WoofBottleMark } from './space';
 import { ALL_STORE_TYPES, topicChipSvg, topicGlyph, TOPIC_TYPES } from './topic-icons';
@@ -257,9 +257,16 @@ const CATEGORY_LS: Record<Category, string> = { giveaway: LS_GIVEAWAYS, activity
 const shown: Record<Category, boolean> = { giveaway: lsGet(LS_GIVEAWAYS) !== '0', activity: lsGet(LS_ACTIVITIES) !== '0', spot: lsGet(LS_SPOTS) !== '0', job: true };
 const categoryOf = (it: Item): Category => (it.ev.kind === 'job' ? 'job' : it.spot ? 'spot' : it.ev.kind === 'activity' ? 'activity' : 'giveaway');
 
+/**
+ * 市民之夜的直播派對（2026-11-27 只限今晚，使用者說的）：晚上 10 點前打開網頁直接進活動雷達的全螢幕、播點洋流總部的效果（startNightStars）。
+ * 網址指定了雷達（?module=）的照網址；10 點後回到平常（上次選的雷達、全螢幕照自己的設定）
+ */
+const NIGHT_END_MS = Date.parse('2026-11-27T22:00:00+08:00');
+const nightToday = (): boolean => Date.now() < NIGHT_END_MS;
+
 // ---- 模組：洋流、狗狗陪伴…（同一套雷達換資料），網址 ?module=dog 或上次選的 ----
 const LS_MODULE = 'dr.module';
-let mod: ModuleDef = getModule(new URLSearchParams(location.search).get('module') ?? lsGet(LS_MODULE));
+let mod: ModuleDef = getModule(new URLSearchParams(location.search).get('module') ?? (nightToday() ? 'current' : null) ?? lsGet(LS_MODULE));
 
 // ---- 職缺（狗狗陪伴、找工作）----
 interface JobExtra {
@@ -3348,6 +3355,7 @@ function render(): void {
   radar.setLandmarks(
     (mod.current ? LANDMARKS : []).map((lm) => ({ id: lm.id, label: lm.name, bearing: bearingDeg(origin, lm), distanceKm: haversineKm(origin, lm), selected: lm.id === selectedLandmark })),
   );
+  radar.setNightStars(nightRadar());
   // 回報判讀完、還沒確認的位置；漂流瓶選落點時換成瓶子和丟的地方 1 km 的虛線圈
   const pick = bottlePick;
   const pins: Array<ReportPin & { bottle?: boolean; hint?: string }> = pick
@@ -5792,7 +5800,10 @@ const sameGroup = (a: number[] | null, b: number[]): boolean => !!a && [...a].so
 
 function selectLandmark(id: string | null): void {
   selectedLandmark = selectedLandmark === id ? null : id;
-  if (selectedLandmark === 'hq') startHqVoyage();
+  if (selectedLandmark === 'hq') {
+    if (HQ_POLICIES) startHqVoyage();
+    else startNightStars();
+  }
   selectedBottle = null;
   selectedRoute = null;
   selectedId = null;
@@ -5807,6 +5818,113 @@ function selectLandmark(id: string | null): void {
   render();
 }
 
+/**
+ * 點洋流總部出現的政策（洋流號、政見動畫、政策按鈕）先拿掉：2026-11-27 使用者說「原本點選總部出現的政策就先拿掉」，
+ * 改成市民之夜的直播派對星星（startNightStars）。程式、資料都留著，改成 true 就回來
+ */
+const HQ_POLICIES = false;
+/**
+ * 市民之夜的直播派對（2026-11-27 只限今晚，使用者說的）：點洋流總部，總部的星星轉走、雷達拉到看得到整個台北市，
+ * 橘色小星星從總部飛散到每個直播派對地點（店家觀看點、議員服務處；選前之夜直播派對地圖的公開資料，伺服器每 30 分鐘讀一次）。
+ * 星星留著，滑鼠移過去、手機點一下看名稱、地址、可容納人數；按「關閉」、Esc 收起來。開著時每 10 分鐘重讀，新登記的從總部飛出來；晚上 10 點自動收起來
+ */
+/** 拉到外圈幾公里（正中間在總部：最北的北投、最南的文山都在 10 公里內） */
+const NIGHT_KM = 10.5;
+/** 星星飛多久（styles.css 的 night-fly）；離總部越遠越晚起飛，最遠的晚 NIGHT_SPREAD_MS */
+const NIGHT_SPREAD_MS = 1600;
+const NIGHT_RELOAD_MS = 10 * 60_000;
+/** 開始的時間（Date.now() 的毫秒），null 是沒開 */
+let nightAt: number | null = null;
+let nightVenues: NightVenue[] = [];
+/** 每個地點起飛的時間（重讀時新登記的才排新的） */
+const nightFlyAt = new Map<string, number>();
+let nightTimers: number[] = [];
+let nightLoad = 0;
+const nightPanel = document.createElement('div');
+nightPanel.className = 'hq-panel night-panel';
+nightPanel.hidden = true;
+nightPanel.innerHTML =
+  '<div class="night-info"><b>市民之夜直播派對</b><span class="night-n"></span><small>店家自行登記，出發前請先向店家確認・資料：<a href="https://storemap.puma.taipei/" target="_blank" rel="noopener">選前之夜直播派對地圖</a></small></div><div class="hq-ctl"><button type="button" class="chip hq-close">✕ 關閉</button></div>';
+document.querySelector('#stage .overlay-tr')!.appendChild(nightPanel);
+nightPanel.querySelector('.hq-close')!.addEventListener('click', stopNightStars);
+const nightHq = LANDMARKS.find((lm) => lm.id === 'hq')!;
+function startNightStars(spinAt = Date.now()): void {
+  if (youOn !== 'earth' || tripping || !mod.current) return;
+  if (spinAt >= NIGHT_END_MS) {
+    showBanner(bannerEl, '市民之夜的直播派對已經結束了', 3000);
+    return;
+  }
+  if (nightAt !== null) return;
+  radar.setStarSpin({ id: 'hq', at: spinAt });
+  let ready = spinAt + HQ_STAR_MS;
+  if (radar.spaceMoved || scaleKm > SPACE_FROM_KM || haversineKm(origin, nightHq) > 0.3 || Math.abs(scaleKm / NIGHT_KM - 1) > 0.15) {
+    if (radar.spaceMoved) radar.resetSpace();
+    zoomToKm(NIGHT_KM, { lat: nightHq.lat, lng: nightHq.lng, source: 'manual' });
+    ready = Math.max(ready, Date.now() + 1200);
+  }
+  nightAt = ready;
+  nightVenues = [];
+  nightFlyAt.clear();
+  nightPanel.hidden = false;
+  nightPanel.querySelector('.night-n')!.textContent = '讀取中…';
+  void loadNightVenues(ready);
+  nightTimers = [window.setInterval(() => void loadNightVenues(Date.now()), NIGHT_RELOAD_MS), window.setTimeout(stopNightStars, NIGHT_END_MS - Date.now())];
+  // 手機：下面的卡片收成只露出標題的一條（跟洋流號一樣）
+  if (HQ_PHONE.matches && !detailEl.hidden) setPeek(true);
+  render();
+}
+/** 讀直播派對地點：沒排過起飛時間的，從 base 開始照離總部的距離排（近的先飛） */
+async function loadNightVenues(base: number): Promise<void> {
+  const my = ++nightLoad;
+  const r = await fetchNightVenues();
+  if (my !== nightLoad || nightAt === null) return;
+  if (!r) {
+    if (nightVenues.length === 0) nightPanel.querySelector('.night-n')!.textContent = '暫時讀不到，等一下再試';
+    return;
+  }
+  nightVenues = r.venues;
+  const fresh = r.venues.filter((v) => !nightFlyAt.has(v.id));
+  const far = Math.max(1, ...fresh.map((v) => haversineKm(nightHq, v)));
+  const start = Math.max(base, Date.now() + 100);
+  for (const v of fresh) nightFlyAt.set(v.id, start + Math.round((haversineKm(nightHq, v) / far) * NIGHT_SPREAD_MS));
+  const shops = r.venues.filter((v) => v.type === 'shop').length;
+  const offices = r.venues.length - shops;
+  nightPanel.querySelector('.night-n')!.textContent = r.venues.length ? `${r.venues.length} 個地點（店家 ${shops}${offices ? `、服務處 ${offices}` : ''}）` : '目前還沒有地點';
+  render();
+}
+function stopNightStars(): void {
+  if (nightAt === null) return;
+  nightAt = null;
+  nightLoad++;
+  for (const t of nightTimers) {
+    window.clearInterval(t);
+    window.clearTimeout(t);
+  }
+  nightTimers = [];
+  nightVenues = [];
+  nightFlyAt.clear();
+  nightPanel.hidden = true;
+  introTip.hidden = true;
+  radar.setStarSpin(null);
+  render();
+}
+/** 可容納人數：只寫數字的補「人」 */
+const nightCap = (c: string): string => (/^\d+$/.test(c) ? `${c} 人` : c);
+function nightRadar(): RadarNightStars | null {
+  if (nightAt === null || youOn !== 'earth' || !mod.current || nightVenues.length === 0) return null;
+  return {
+    from: { bearing: bearingDeg(origin, nightHq), distanceKm: haversineKm(origin, nightHq) },
+    stars: nightVenues.map((v) => ({
+      id: v.id,
+      bearing: bearingDeg(origin, v),
+      distanceKm: haversineKm(origin, v),
+      at: nightFlyAt.get(v.id) ?? nightAt!,
+      title: v.name,
+      intro: [`${v.type === 'office' ? '議員服務處' : '直播派對'}${v.area ? `・${v.area}區` : ''}`, v.address, v.capacity ? `可容納 ${nightCap(v.capacity)}` : '', v.note].filter(Boolean).join('\n'),
+      office: v.type === 'office',
+    })),
+  };
+}
 /**
  * 點了洋流總部：洋流號從總部沿著真的路，像一條河流繞過整個台北市 12 個區、流到台北市政府（只開一趟；路線在 hq-voyage.ts，
  * 第一次點才載入），河跟著船長出來，經過每一區寫一下區名，終點的市政府用虛線畫出來；到了雷達（地圖）拉近市政府，放煙火（flow.ts 的 fireworksSvg）。
@@ -6147,6 +6265,7 @@ hqLayersBox.addEventListener('click', (e) => {
 });
 document.addEventListener('keydown', (e) => {
   if (e.key === 'Escape' && hqVoyageAt !== null) stopHqVoyage();
+  if (e.key === 'Escape' && nightAt !== null) stopNightStars();
   if (e.key === 'Escape' && evMove && !evMove.busy) {
     if (evMove.mark) endFeedbackMark(false);
     else endEvMove();
@@ -9927,7 +10046,8 @@ function wireFullScreen(): void {
     listBtn.setAttribute('aria-pressed', String(!off));
     listBtn.title = off ? '打開清單' : '收起清單';
   };
-  setFull(lsGet(LS_FULL) === '1', true);
+  // 市民之夜（2026-11-27 晚上 10 點前）打開網頁直接全螢幕（不記進設定）
+  setFull(lsGet(LS_FULL) === '1' || nightToday(), true);
   setListOff(lsGet(LS_LIST_OFF) === '1');
   fullBtn.addEventListener('click', () => {
     const on = !appEl.classList.contains('full');
@@ -10339,6 +10459,8 @@ async function boot(): Promise<void> {
       if (!found) showBanner(bannerEl, '這個活動已經結束或下架了', 5000);
     });
   }
+  // 市民之夜（2026-11-27 晚上 10 點前）：打開網頁直接播點洋流總部的效果；用連結打開特定東西（活動、漂流瓶、分享、回報）的不播
+  if (nightToday() && !eventParam && !shared && !(sharedBottle > 0) && !openParam && location.hash !== '#letters') startNightStars();
   // 開著手機推播：確認訂閱還在、更新位置（30 天沒打開，伺服器會刪掉訂閱）
   if (notifyOn() && pushOn()) void syncPush(true);
   // 之前就開了通知的人：提示一次現在網頁關掉也能收

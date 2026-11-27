@@ -55,6 +55,27 @@ export async function fetchJudgeInfo(module: string): Promise<JudgeInfo | null> 
   }
 }
 
+/** 市民之夜的直播派對地點（2026-11-27 只限今晚）：伺服器每 30 分鐘從選前之夜直播派對地圖讀一次 */
+export interface NightVenue {
+  id: string;
+  type: 'shop' | 'office';
+  name: string;
+  area: string;
+  address: string;
+  capacity: string;
+  note: string;
+  lat: number;
+  lng: number;
+}
+export async function fetchNightVenues(): Promise<{ venues: NightVenue[]; endAt: number; source: string } | null> {
+  try {
+    const r = await fetch(`${API_BASE}/api/night-venues`);
+    return r.ok ? ((await r.json()) as { venues: NightVenue[]; endAt: number; source: string }) : null;
+  } catch {
+    return null;
+  }
+}
+
 export async function fetchKeywords(): Promise<{ max: number; userAdd?: boolean; keywords: KeywordInfo[]; rules?: KeywordRules }> {
   const r = await fetch(`${API_BASE}/api/keywords`);
   if (!r.ok) throw new Error(`API ${r.status}`);
