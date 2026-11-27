@@ -65,16 +65,31 @@ export async function syncNightVenues(env: Env, now: number): Promise<number | n
   return venues.length;
 }
 
+/** 管理者從本機讀好送上來（伺服器讀不到時的備用）：POST /api/admin/night-venues { venues } */
+export async function storeNightVenues(env: Env, raw: unknown, now: number): Promise<number> {
+  if (now >= NIGHT_END) return 0;
+  const venues = cleanVenues(raw);
+  if (venues.length === 0) return 0;
+  await env.DB.prepare('INSERT INTO settings (key, value, updated_at) VALUES (?, ?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at')
+    .bind(NIGHT_KEY, JSON.stringify(venues), now)
+    .run();
+  return venues.length;
+}
+
 /** GET /api/night-venues：還沒讀過就先讀一次；10 點後回傳空的 */
-export async function nightVenues(env: Env, now: number): Promise<{ venues: NightVenue[]; fetchedAt: number | null; endAt: number; source: string }> {
+export async function nightVenues(env: Env, now: number): Promise<{ venues: NightVenue[]; fetchedAt: number | null; endAt: number; source: string; error?: string }> {
   const empty = { venues: [], fetchedAt: null, endAt: NIGHT_END, source: 'https://storemap.puma.taipei/' };
   if (now >= NIGHT_END) return empty;
   let row = await env.DB.prepare('SELECT value, updated_at FROM settings WHERE key = ?').bind(NIGHT_KEY).first<{ value: string; updated_at: number }>();
   if (!row) {
-    await syncNightVenues(env, now).catch((e) => console.warn('night venues failed', e));
+    // 還沒讀過：先讀一次（讀不到把原因帶回去，例如對方擋了）
+    const error = await syncNightVenues(env, now).then(
+      () => null,
+      (e) => String(e).slice(0, 200),
+    );
     row = await env.DB.prepare('SELECT value, updated_at FROM settings WHERE key = ?').bind(NIGHT_KEY).first<{ value: string; updated_at: number }>();
+    if (!row) return error ? { ...empty, error } : empty;
   }
-  if (!row) return empty;
   let venues: NightVenue[] = [];
   try {
     venues = cleanVenues({ venues: JSON.parse(row.value) });

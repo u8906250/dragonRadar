@@ -14,7 +14,7 @@ import { fetchYoutubePost, parseYoutubePostUrl } from './sources/youtube';
 import { accountInfo, deleteAccount, deletePasskey, deviceId, loginOptions, loginVerify, logout, purgeAccounts, registerOptions, registerVerify, sessionOf, setNickname } from './account';
 import { claimCard, makeTransfer, myCards, pickReward, purgeCards, redeemTransfer, spendTeleport } from './cards';
 import { adminListWishes, adminSetWish, markWishesSeen, myWishes, notifyWish, purgeWishes, submitTweak, submitWish, withdrawWish } from './wishes';
-import { nightVenues, syncNightVenues } from './night';
+import { nightVenues, storeNightVenues, syncNightVenues } from './night';
 import { addParkMark, deleteParkMark, listParkMarks, listPublicParkMarks, parseParkMark, updateParkMark } from './parkmarks';
 import { adminLocate, applyFeedback, clearResolvedFeedback, deleteAdminSubscription, listFeedback, locateForFeedback, moveEventPlace, notifyAdmins, purgeFeedback, saveAdminSubscription, setFeedbackStatus, submitFeedback } from './feedback';
 import { moduleOf } from './modules';
@@ -500,6 +500,10 @@ async function handleAdmin(req: Request, env: Env, ctx: ExecutionContext, path: 
     const postedAt = typeof body.posted_at === 'number' ? body.posted_at : parseIsoToUnix(body.posted_at) ?? now;
     const post: PostRow = { id: `dry-${crypto.randomUUID()}`, username: body.username ?? null, text: body.text, permalink: null, posted_at: postedAt, keyword: null, source: 'link', fetched_at: now, processed_at: null, extraction: null, supplement: body.supplement ?? null, module: moduleOf(body.module) };
     return jsonResponse(await planPost(env, post, now));
+  }
+  // 市民之夜的直播派對地點：伺服器讀不到時管理者從本機送上來 { venues }
+  if (req.method === 'POST' && path === '/api/admin/night-venues') {
+    return jsonResponse({ stored: await storeNightVenues(env, await readJson<unknown>(req), now) });
   }
   // 讀 Threads 帳號的公開名稱、簡介（確認伺服器抓得到）
   if (req.method === 'POST' && path === '/api/admin/profile') {
