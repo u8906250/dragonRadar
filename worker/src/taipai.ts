@@ -33,6 +33,8 @@ export const STORE_TYPES: Record<string, string> = {
   // v1.797 使用者說新增健身（波力路器械皮拉提斯）
   fitness: '健身',
   game: '桌遊',
+  // 2026-11-27 使用者說新增場地租借（場租空間、活動空間）
+  venue: '場地租借',
   other: '其他',
 };
 export const isStoreType = (v: unknown): v is string => typeof v === 'string' && Object.prototype.hasOwnProperty.call(STORE_TYPES, v);
@@ -69,7 +71,7 @@ export function taipaiPrompt(words: TaipaiWordLists): string {
 
 events 每筆的欄位：
 - name: 店名，照貼文寫的（不要加地點）
-- type: 店家類型，只能選一個：eat（餐廳、小吃、便當、早餐店）、cafe（咖啡廳、甜點、豆花、冰品、麵包、早午餐）、drink（手搖飲、果汁、茶飲）、bar（酒吧、居酒屋、精釀啤酒）、book（書店、獨立書店）、shop（服飾、雜貨、文創、選物、花店、超市等賣東西的店）、beauty（美髮、美甲、美容、按摩）、stay（民宿、旅館、背包客棧）、clinic（診所、牙醫、藥局、動物醫院）、fitness（健身房、瑜伽、皮拉提斯、拳擊、運動教室）、game（桌遊店、桌遊休閒館、桌遊咖啡）、other（其他）
+- type: 店家類型，只能選一個：eat（餐廳、小吃、便當、早餐店）、cafe（咖啡廳、甜點、豆花、冰品、麵包、早午餐）、drink（手搖飲、果汁、茶飲）、bar（酒吧、居酒屋、精釀啤酒）、book（書店、獨立書店）、shop（服飾、雜貨、文創、選物、花店、超市等賣東西的店）、beauty（美髮、美甲、美容、按摩）、stay（民宿、旅館、背包客棧）、clinic（診所、牙醫、藥局、動物醫院）、fitness（健身房、瑜伽、皮拉提斯、拳擊、運動教室）、game（桌遊店、桌遊休閒館、桌遊咖啡）、venue（場地租借：場租空間、活動空間、會議室、展演空間、攝影棚、派對空間）、other（其他）
 - hours: 營業時間，照貼文（或店家帳號的簡介）寫的整理成一行，例如「週二至週日 11:00–20:00，週一公休」「平日 09:30–20:30，假日 10:00–18:00」；沒寫則 null，不要自己猜
 - place_text: 貼文原文中的店址、地點
 - place_query: 給地圖搜尋用：有門牌就用門牌；貼文寫了縣市才加縣市，例如「台北市大安區復興南路一段 100 號」；沒寫門牌時用店名加路名或地標（例如「慢工咖啡 師大路」），不要只填路名；只寫店名就只填店名，不要自己猜縣市；沒寫則 null
