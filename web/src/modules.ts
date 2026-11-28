@@ -4,7 +4,7 @@
  */
 import { BOOK_TYPES, STORE_TYPES } from './topic-icons';
 
-export type ModuleId = 'current' | 'dog' | 'badminton' | 'food' | 'work' | 'taipai' | 'books';
+export type ModuleId = 'current' | 'dog' | 'badminton' | 'food' | 'work' | 'taipai' | 'books' | 'party';
 
 export interface ModuleDef {
   id: ModuleId;
@@ -21,6 +21,8 @@ export interface ModuleDef {
   current: boolean;
   /** 清單上一個項目的量詞 */
   unit: string;
+  /** 政黨雷達：不收回報、沒有光點，雷達塗各區的選舉結果（election.ts），清單列各縣市 */
+  election?: boolean;
   /** 收店家的雷達（台派雷達、書店雷達）才有：店家類型，補充資料的類型選單、類型按鈕照這個 */
   storeTypes?: Array<{ key: string; label: string }>;
   emptyText: string;
@@ -43,6 +45,9 @@ const TAIWAN_HEART = '<svg viewBox="0 0 40 40" width="34" height="34" aria-hidde
 
 /** 書架上的書（書店雷達的小圖）：三本站著、一本斜靠，暖色木頭書架 */
 const BOOK_SHELF = '<svg viewBox="0 0 40 40" width="34" height="34" aria-hidden="true"><rect x="6" y="10" width="7" height="24" rx="1.2" fill="#c8693a"/><rect x="13.5" y="6" width="6.5" height="28" rx="1.2" fill="#3f9b5f"/><rect x="20.5" y="11.5" width="6" height="22.5" rx="1.2" fill="#4a7bd0"/><rect x="27.5" y="11" width="5.6" height="23" rx="1.2" fill="#e0a530" transform="rotate(12 27.5 34)"/><path d="M6 14.5 h7 M6 29.5 h7 M13.5 10.5 h6.5 M13.5 29.5 h6.5 M20.5 15.5 h6 M20.5 30 h6" stroke="#ffffffa0" stroke-width="1.4"/><path d="M16.75 22.6 c-1.7 -1.1 -2.5 -2 -2.5 -3 a1.25 1.25 0 0 1 2.5 -0.4 a1.25 1.25 0 0 1 2.5 0.4 c0 1 -0.8 1.9 -2.5 3 z" fill="#fff"/><rect x="3.5" y="34" width="33" height="2.6" rx="1.1" fill="#8a5a3c"/></svg>';
+
+/** 投票箱（政黨雷達的小圖）：選票上蓋了紅色的圈選章，正要投進票箱 */
+const BALLOT_BOX = '<svg viewBox="0 0 40 40" width="34" height="34" aria-hidden="true"><rect x="13" y="3.5" width="14" height="17" rx="1.4" fill="#fff" stroke="#8a93a6" stroke-width="1.2" transform="rotate(-8 20 12)"/><circle cx="20.4" cy="11" r="4.2" fill="none" stroke="#d6312b" stroke-width="1.6"/><path d="M20.4 7.9 v6.2 M20.4 10.6 l2.4 1.4" stroke="#d6312b" stroke-width="1.5" stroke-linecap="round"/><rect x="5" y="17" width="30" height="18.5" rx="2.4" fill="#4a6fa5"/><rect x="5" y="17" width="30" height="4.6" rx="2" fill="#3b5d8f"/><rect x="12" y="18.4" width="16" height="1.8" rx="0.9" fill="#1f3354"/><path d="M14.5 27.5 c-1.7 -1.1 -2.5 -2 -2.5 -3 a1.25 1.25 0 0 1 2.5 -0.4 a1.25 1.25 0 0 1 2.5 0.4 c0 1 -0.8 1.9 -2.5 3 z" fill="#fff" transform="translate(5.5 1.5)"/></svg>';
 
 /** 洋流的回報說明（改版後只判斷活動）；index.html 的 #report-intro 也是這段 */
 const REPORT_INTRO = '看到活動的 Threads 貼文、YouTube 社群貼文，或 ACCUPASS 活動通、OPENTIX、Peatix、Luma 的活動頁？貼上連結，雷達會判斷是什麼活動（遊行、講座、市集、表演…），讀出活動內容、地點、開始時間，三個都讀到才會標到雷達上給大家看；沒寫幾點開始的從發文的時間算，結束時間可以不寫。';
@@ -110,6 +115,25 @@ MODULES.push({
   notEventText: '這則看起來不是在介紹獨立書店或二手書店（連鎖書店、出版社、網路書店、書店的活動公告不收）。貼文要寫出店名或地點；判斷錯了可以按「補充資料」說明。',
   noPlaceText: '看得出是書店，但貼文沒寫地點（或查不到），所以還沒放上雷達。知道在哪裡的話，可以在下面補上地址或在雷達上標出位置。',
   helpPage: 'help-books.html',
+});
+
+MODULES.push({
+  id: 'party',
+  name: '政黨雷達',
+  short: '政黨雷達',
+  tagline: '2026 縣市長選舉：各區得票最高的政黨',
+  emoji: '🗳️',
+  icon: BALLOT_BOX,
+  current: false,
+  election: true,
+  unit: '個縣市',
+  emptyText: '',
+  searchPlaceholder: '',
+  reportIntro: '',
+  reportTips: [],
+  notEventText: '',
+  noPlaceText: '',
+  helpPage: 'help-party.html',
 });
 
 MODULES.push({

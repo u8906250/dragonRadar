@@ -144,6 +144,14 @@ export interface RadarStreetTile {
 }
 
 /** 放大時畫的街道：一張一張的圖磚，座標都是離錨點的公里（錨點換了 frame 就換，全部重畫） */
+/** 政黨雷達的一區：形狀（方位、距離）、顏色、透明度 */
+export interface RadarRegion {
+  id: string;
+  color: string;
+  alpha: number;
+  rings: Array<Array<{ bearing: number; distanceKm: number }>>;
+}
+
 export interface RadarStreets {
   frame: number;
   tiles: RadarStreetTile[];
@@ -838,6 +846,7 @@ export class Radar {
   private outlineLines: Array<Array<{ bearing: number; distanceKm: number }>> = [];
   private readonly outlineLayer: SVGGElement;
   private readonly seaLayer: SVGGElement;
+  private readonly electionLayer: SVGGElement;
   private streets: RadarStreets | null = null;
   /** 道路從算的那一點（main.ts 的錨點）到正中間的位移（公里，東、北）：拖曳時不重算道路，只移過去 */
   private streetShift: [number, number] = [0, 0];
@@ -995,6 +1004,8 @@ export class Radar {
       </g>
       <!-- 全螢幕塗的海（v1.757）：在道路、河湖下面 -->
       <g class="sea" clip-path="url(#rg-clip)"></g>
+      <!-- 政黨雷達（v1.862）：各鄉鎮市區塗得票最高的政黨的顏色，在道路下面 -->
+      <g class="election" clip-path="url(#rg-clip)"></g>
       <g class="streets" clip-path="url(#rg-clip)"><g></g></g>
       <g class="park" clip-path="url(#rg-clip)"></g>
       <g class="scale-labels"></g>
@@ -1027,6 +1038,7 @@ export class Radar {
     });
     this.outlineLayer = this.svg.querySelector('.outline') as SVGGElement;
     this.seaLayer = this.svg.querySelector('.sea') as SVGGElement;
+    this.electionLayer = this.svg.querySelector('.election') as SVGGElement;
     this.spaceLayer = this.svg.querySelector('.space') as SVGGElement;
     // 裡面再一層：拖曳時平移這一層，裁切的圓（外面那層）不跟著動
     this.streetLayer = this.svg.querySelector('.streets > g') as SVGGElement;
@@ -2052,6 +2064,68 @@ export class Radar {
   private outlineSea: Array<Array<{ bearing: number; distanceKm: number; fixed?: boolean }>> = [];
   /** 上次畫輪廓用的資料和比例：一樣的話只平移 */
   private outlineBuilt: { rings: unknown; lines: unknown; fills: unknown; k: number; heading: number; unit: number; space: boolean } | null = null;
+
+  /**
+   * 政黨雷達：每一區一個形狀，塗 color、透明度 alpha（得票率越高越深）；pick 是點開的那一區（外框加粗）。
+   * 跟海岸線一樣：拖曳中只改 shift（換算那一點到正中間的位移，公里，東、北），整層平移不重畫
+   */
+  setElection(regions: RadarRegion[] | null, pick: string | null = null): void {
+    this.election = regions;
+    this.electionPick = pick;
+    this.electionShift = [0, 0];
+    this.draw();
+  }
+  setElectionShift(shift: [number, number]): void {
+    this.electionShift = shift;
+    this.draw();
+  }
+  private election: RadarRegion[] | null = null;
+  private electionPick: string | null = null;
+  private electionShift: [number, number] = [0, 0];
+  private electionBuilt: { regions: unknown; pick: string | null; k: number; heading: number; unit: number } | null = null;
+  private electionTimer = 0;
+
+  private drawElection(): void {
+    if (!this.election || this.inSpace) {
+      this.electionBuilt = null;
+      if (this.electionLayer.firstChild) this.electionLayer.replaceChildren();
+      return;
+    }
+    const k = (R - 8) / this.scaleKm;
+    const unit = this.squarePx > 0 ? SIZE / this.squarePx : 1;
+    const b = this.electionBuilt;
+    const same = !!b && b.regions === this.election && b.pick === this.electionPick && b.heading === this.heading && b.unit === unit;
+    // 縮放中只有比例變：整層放大縮小，停下來 0.2 秒再照新的比例重畫（每一格重畫幾百區太慢，跟海一樣）
+    if (same && b.k !== k) {
+      window.clearTimeout(this.electionTimer);
+      this.electionTimer = window.setTimeout(() => {
+        this.electionBuilt = null;
+        this.drawElection();
+      }, 200);
+    } else if (!same) {
+      window.clearTimeout(this.electionTimer);
+      this.electionBuilt = { regions: this.election, pick: this.electionPick, k, heading: this.heading, unit };
+      const g = el('g');
+      let picked = '';
+      for (const r of this.election) {
+        const d = r.rings.map((ring) => this.fillPath(ring, 1)).join('');
+        if (!d) continue;
+        g.appendChild(el('path', { d, fill: r.color, 'fill-opacity': r.alpha.toFixed(2) }));
+        if (r.id === this.electionPick) picked = d;
+      }
+      if (picked) g.appendChild(el('path', { class: 'pick', d: picked }));
+      this.electionLayer.replaceChildren(g);
+    }
+    const [sx, sy] = this.electionShift;
+    const h = (this.heading * Math.PI) / 180;
+    const [cos, sin] = [Math.cos(h), Math.sin(h)];
+    const move = sx === 0 && sy === 0 ? '' : `translate(${(-k * (sx * cos - sy * sin)).toFixed(2)} ${(k * (sy * cos + sx * sin)).toFixed(2)})`;
+    const builtK = this.electionBuilt?.k ?? k;
+    const zoom = builtK !== k ? `translate(${C} ${C}) scale(${(k / builtK).toFixed(5)}) translate(${-C} ${-C})` : '';
+    const inner = this.electionLayer.firstElementChild;
+    if (move || zoom) inner?.setAttribute('transform', `${move} ${zoom}`.trim());
+    else inner?.removeAttribute('transform');
+  }
 
   /** 放大時的街道；null 不畫。shift：道路的錨點到正中間的位移（公里，東、北），拖曳時只改這個 */
   setStreets(s: RadarStreets | null, shift: [number, number] = [0, 0]): void {
@@ -4131,6 +4205,7 @@ export class Radar {
       this.drawStreets();
       this.drawPark();
       this.drawOutline();
+      this.drawElection();
       this.drawRoutes();
       this.drawScaleBar();
       this.drawPreviews();
@@ -4161,6 +4236,7 @@ export class Radar {
     this.drawStreets();
     this.drawPark();
     this.drawOutline();
+    this.drawElection();
     this.drawSpace();
     this.drawRoutes();
     this.drawScaleBar();

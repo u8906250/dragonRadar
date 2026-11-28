@@ -13,7 +13,7 @@ import { wireFind, type FoundPlace } from './find';
 import { shortAddress, splitPlace } from './place';
 import { beep, ensureNotificationPermission, iosNeedsHomeScreen, notificationState, pushSubscription, pushSupported, registerServiceWorker, showBanner, systemNotify, unlockAudio, unsubscribePush } from './notify';
 import { checkWishNews, findCard, gotReward, myCards, onWishNews, openAlbum, openHelp, openItems, openWishes, overlay, setTeleport, spendTeleportCoin, teleportFlash } from './cards';
-import { DEEP_FROM_KM, FLAT_PAN_KM, labelSpanEm, LY_KM, Radar, SPACE_FROM_KM, type RadarLabel, type RadarNightStars, type RadarRoute, type RadarStreets, type RadarStreetTile, type SpaceView } from './radar';
+import { DEEP_FROM_KM, FLAT_PAN_KM, labelSpanEm, LY_KM, Radar, SPACE_FROM_KM, type RadarLabel, type RadarNightStars, type RadarRegion, type RadarRoute, type RadarStreets, type RadarStreetTile, type SpaceView } from './radar';
 import { DEFAULT_THEME_ID, getTheme, THEMES, type Theme } from './themes';
 import type { WoofBottleMark } from './space';
 import { ALL_STORE_TYPES, topicChipSvg, topicGlyph, TOPIC_TYPES } from './topic-icons';
@@ -669,7 +669,8 @@ radar.onSpaceTap = (at) => {
   if (woofPick) pickWoofAt(at);
 };
 radar.onEmptyTap = (at) => {
-  if (bottlePick) movePick(destination(origin, at.bearing, at.distanceKm));
+  if (mod.election && electionOn() && !bottlePick && !evMove) pickTown(destination(origin, at.bearing, at.distanceKm));
+  else if (bottlePick) movePick(destination(origin, at.bearing, at.distanceKm));
   else if (evMove) moveEvPin(destination(origin, at.bearing, at.distanceKm));
   else if (markCard && !reportSheet.hidden) placeMark(destination(origin, at.bearing, at.distanceKm));
 };
@@ -2886,6 +2887,177 @@ function updateOutline(): void {
   radar.setOutline(radarOutline, lines.map((l) => toRadar(coarseRing(l, tier))).filter((r) => r.length > 1), fills, sea);
 }
 
+// ---- 政黨雷達（v1.862 使用者說的）----
+/**
+ * 2026 縣市長選舉：各鄉鎮市區塗得票最高的政黨的顏色，得票率越高越深（election.ts）；點一區看那一區的票數和那個縣市的當選人。
+ * election.ts（含開票資料、形狀）第一次切到政黨雷達才載入
+ */
+let electionMod: typeof import('./election') | null = null;
+let electionLoading = false;
+/** 點開的那一區（鄉鎮市區代碼） */
+let electionPick: string | null = null;
+/** 上次換算各區形狀的級距、選的區、位置（拖曳中移不到範圍的一半只平移，跟海岸線一樣） */
+let electionFor = '';
+let electionAt: LatLng | null = null;
+function loadElection(): void {
+  if (electionMod || electionLoading) return;
+  electionLoading = true;
+  void import('./election')
+    .then((m) => {
+      electionMod = m;
+      electionFor = '';
+      render();
+    })
+    .catch(() => showBanner(bannerEl, '選舉資料載入失敗，請重新整理再試', 4000))
+    .finally(() => {
+      electionLoading = false;
+    });
+}
+const electionOn = (): boolean => !!mod.election && youOn === 'earth';
+
+function updateElection(): void {
+  const m = electionMod;
+  renderElectionPanel();
+  if (!electionOn() || !m) {
+    if (electionFor !== 'off') {
+      electionFor = 'off';
+      electionAt = null;
+      radar.setElection(null);
+    }
+    return;
+  }
+  const tier = Math.ceil(Math.log2(Math.max(scaleKm, 1)));
+  const reach = 2 ** tier * 2.5;
+  const base = `${tier}|${electionPick ?? ''}`;
+  if (panFrom && electionAt && electionFor.startsWith(`${base}|`)) {
+    const kx = 111.32 * Math.cos((electionAt.lat * Math.PI) / 180);
+    const shift: [number, number] = [(origin.lng - electionAt.lng) * kx, (origin.lat - electionAt.lat) * 110.574];
+    if (Math.hypot(...shift) < Math.min(scaleKm * 0.5, FLAT_PAN_KM)) {
+      radar.setElectionShift(shift);
+      return;
+    }
+  }
+  const key = `${base}|${origin.lat},${origin.lng}`;
+  if (key === electionFor) return;
+  electionFor = key;
+  electionAt = { lat: origin.lat, lng: origin.lng };
+  // 附近的範圍（範圍的 2.5 倍，全螢幕鋪滿時角落比外圈遠）碰到的區才換算
+  const dLat = reach / 111;
+  const dLng = reach / (111 * Math.max(0.1, Math.cos((origin.lat * Math.PI) / 180)));
+  const look = lookFrom(origin);
+  const regions: RadarRegion[] = [];
+  for (const t of m.TOWNS) {
+    if (t.lead < 0) continue;
+    if (t.box[2] < origin.lat - dLat || t.box[0] > origin.lat + dLat || t.box[3] < origin.lng - dLng || t.box[1] > origin.lng + dLng) continue;
+    regions.push({
+      id: t.code,
+      color: m.partyColor(t.county.cands[t.lead][2]),
+      alpha: m.shadeOf(t.share),
+      rings: t.rings.map((r) => {
+        const rr = coarseRing(r, tier);
+        const v = ringVectors(rr);
+        return rr.map((_, i) => look(v, i));
+      }),
+    });
+  }
+  radar.setElection(regions, electionPick);
+}
+
+/** 點雷達上的一區：選那一區（點到區外面取消） */
+function pickTown(at: LatLng): void {
+  const t = electionMod?.townAt(at.lat, at.lng) ?? null;
+  const code = t?.code ?? null;
+  if (code === electionPick) return;
+  electionPick = code;
+  electionFor = '';
+  updateElection();
+}
+
+/** 右上角的說明：沒選的時候是圖例，選了一區列那一區每位候選人的票數、那個縣市的當選人 */
+const electionPanel = document.createElement('div');
+electionPanel.className = 'hq-panel election-panel';
+electionPanel.hidden = true;
+document.querySelector('#stage .overlay-tr')!.appendChild(electionPanel);
+electionPanel.addEventListener('click', (e) => {
+  if (!(e.target as Element).closest('.hq-close')) return;
+  electionPick = null;
+  electionFor = '';
+  updateElection();
+});
+let electionPanelFor = '';
+const pctText = (n: number, total: number): string => (total > 0 ? `${((n / total) * 100).toFixed(1)}%` : '—');
+const hexAlpha = (hex: string, a: number): string => `${hex}${Math.round(a * 255).toString(16).padStart(2, '0')}`;
+function renderElectionPanel(): void {
+  const m = electionMod;
+  const on = electionOn();
+  const key = `${on}|${!!m}|${electionPick ?? ''}`;
+  if (key === electionPanelFor) return;
+  electionPanelFor = key;
+  electionPanel.hidden = !on;
+  if (!on) return;
+  if (!m) {
+    electionPanel.innerHTML = '<div class="election-info"><small>載入選舉資料中…</small></div>';
+    return;
+  }
+  const t = electionPick ? m.TOWNS.find((x) => x.code === electionPick) : undefined;
+  if (!t) {
+    // 圖例：有在哪一區得票最高的政黨，由淡到深
+    const parties = [...new Set(m.TOWNS.filter((x) => x.lead >= 0).map((x) => x.county.cands[x.lead][2]))];
+    const swatch = (party: string): string => {
+      const c = m.partyColor(party);
+      return `<span class="el-legend"><i style="background:linear-gradient(90deg,${hexAlpha(c, m.ALPHA_LO)},${hexAlpha(c, m.ALPHA_HI)})"></i>${esc(m.partyShort(party))}</span>`;
+    };
+    electionPanel.innerHTML = `<div class="election-info"><b>2026 縣市長選舉</b><span>每一區塗得票最高的政黨，越深得票率越高（${Math.round(m.SHARE_LO * 100)}% 以下最淡、${Math.round(m.SHARE_HI * 100)}% 以上最深）</span>${parties.map(swatch).join('')}<small>點雷達上的一區看票數・資料：中選會開票結果（${esc(m.ELECTION_UPDATED)}）</small></div>`;
+    return;
+  }
+  const c = t.county;
+  const lead = m.countyLead(c);
+  const winner = lead.index >= 0 ? c.cands[lead.index] : null;
+  const countyTotal = c.cands.reduce((a, x) => a + x[3], 0);
+  const rows = c.cands
+    .map((x, i) => ({ x, v: t.town.votes[i] ?? 0 }))
+    .sort((a, b) => b.v - a.v)
+    .map(({ x, v }) => `<li><i style="background:${m.partyColor(x[2])}"></i><span class="el-name">${esc(x[1])}<small>${esc(m.partyShort(x[2]))}</small></span><span class="el-num">${v.toLocaleString('zh-TW')}<small>${pctText(v, t.total)}</small></span></li>`)
+    .join('');
+  electionPanel.innerHTML = `<div class="election-info"><b>${esc(c.name)}${esc(t.town.name)}</b><small>${t.town.sent < t.town.total ? `開票中：${t.town.sent}/${t.town.total} 個投票所` : `${t.town.total} 個投票所開票完畢`}</small><ol class="el-cands">${rows}</ol>${
+    winner ? `<span class="el-winner">${lead.done ? '當選人' : '目前領先'}：<b style="color:${m.partyColor(winner[2])}">${esc(winner[1])}</b>（${esc(m.partyShort(winner[2]))}，${esc(c.name)}得票率 ${pctText(winner[3], countyTotal)}）</span>` : ''
+  }<small>中選會開票結果（${esc(m.ELECTION_UPDATED)}），正式結果以中選會公告為準</small></div><div class="hq-ctl"><button type="button" class="chip hq-close">✕ 關閉</button></div>`;
+}
+
+/** 清單：22 個縣市的當選人（照中選會的順序），點了把雷達拉到那個縣市 */
+function renderElectionList(): void {
+  const m = electionMod;
+  listEl.replaceChildren();
+  emptyEl.hidden = true;
+  sortGroup.hidden = true;
+  listOrder = [];
+  if (!m) {
+    countLabel.textContent = '載入選舉資料中…';
+    loadElection();
+    return;
+  }
+  countLabel.textContent = `2026 縣市長選舉・${m.COUNTIES.length} 個縣市`;
+  for (const c of m.COUNTIES) {
+    const lead = m.countyLead(c);
+    const w = lead.index >= 0 ? c.cands[lead.index] : null;
+    const total = c.cands.reduce((a, x) => a + x[3], 0);
+    const li = document.createElement('li');
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.className = 'election-county';
+    b.innerHTML = `<i style="background:${w ? m.partyColor(w[2]) : '#ccc'}"></i><span><b>${esc(c.name)}</b><small>${c.sent < c.total ? `開票中 ${c.sent}/${c.total}` : '開票完畢'}</small></span><span class="el-who">${w ? `${lead.done ? '' : '領先 '}${esc(w[1])}<small>${esc(m.partyShort(w[2]))}・${pctText(w[3], total)}</small>` : '—'}</span>`;
+    b.addEventListener('click', () => {
+      const box = m.countyBox(c.code);
+      if (!box) return;
+      const center = { lat: (box[0] + box[2]) / 2, lng: (box[1] + box[3]) / 2 };
+      const half = Math.max(((box[2] - box[0]) * 111) / 2, ((box[3] - box[1]) * 111 * Math.cos((center.lat * Math.PI) / 180)) / 2);
+      zoomToKm(Math.max(3, half * 1.15), { ...center, source: 'manual' });
+    });
+    li.appendChild(b);
+    listEl.appendChild(li);
+  }
+}
+
 // ---- 車掃路線 ----
 /** 回報的車掃貼文合成的路線（各站直線連起來、沒有認領人數）；官方航線的有實際路徑 */
 const isReported = (r: RouteOut): boolean => r.source === 'report';
@@ -3213,6 +3385,7 @@ function render(): void {
   const onMap = hqVoyageAt !== null ? [] : timed;
   const drawn = onMap.filter((it) => !beforeDeparture(it, now, focused));
   updateOutline();
+  updateElection();
   updateStreets();
   updatePark();
   updateSpace();
@@ -3510,6 +3683,7 @@ function beginSteps(): void {
   stepFrom = { lat: origin.lat, lng: origin.lng };
 }
 function renderList(items: Item[], now: number): void {
+  if (mod.election) return renderElectionList();
   // 摘要和清單用同一套「列」來算：車掃路線的起點、加油點、終點合成一張卡片，只算一個
   const rows = listRows(items, now);
   const inRange = rows.filter((r) => r.inScope && r.inTime);
@@ -7395,6 +7569,15 @@ async function reloadBottles(): Promise<void> {
 async function refresh(): Promise<void> {
   const seq = ++fetchSeq;
   const forModule = mod;
+  // 政黨雷達：沒有光點，資料在 election.ts
+  if (forModule.election) {
+    events = [];
+    routes = [];
+    loadElection();
+    lastFetchAt = nowSec();
+    render();
+    return;
+  }
   // 搜尋關鍵字、車掃路線、漂流瓶都是洋流才有
   const kws = forModule.current ? followed() : [];
   // 漂流瓶跟關鍵字無關，一起抓
@@ -7897,7 +8080,7 @@ async function loadModuleCounts(): Promise<boolean> {
   await Promise.all(
     MODULES.map(async (m) => {
       const kws = m.current ? followed() : [];
-      if (m.current && kws.length === 0) return;
+      if ((m.current && kws.length === 0) || m.election) return;
       try {
         counts.set(m.id, live(m.id === mod.id ? events : await fetchEvents(origin, radius, kws, m.id)));
       } catch {
@@ -8849,7 +9032,7 @@ const useEditForm = (edit: EditItem[] | undefined): boolean => mod.current || (e
 const editDays = (): boolean => mod.id === 'dog' || mod.id === 'work';
 /** 補充資料的「一場」：洋流是活動，其他雷達叫「一筆」 */
 const editUnit = (): string => (mod.current ? '場' : mod.storeTypes ? '家' : '筆');
-const EDIT_TITLE_EG: Record<ModuleId, string> = { current: '景華公園表演同樂會', dog: '週末幫忙遛狗', badminton: '週六晚上羽球臨打', food: '週末市集餐車出攤', work: '活動工作人員', taipai: '慢工咖啡', books: '巷口小書店' };
+const EDIT_TITLE_EG: Record<ModuleId, string> = { current: '景華公園表演同樂會', dog: '週末幫忙遛狗', badminton: '週六晚上羽球臨打', food: '週末市集餐車出攤', work: '活動工作人員', taipai: '慢工咖啡', books: '巷口小書店', party: '' };
 
 /**
  * 補充資料：每一場直接改標題、時間、地點，位置不對可以在雷達上標。洋流多一個主題；

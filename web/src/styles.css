@@ -1365,6 +1365,9 @@ path.map-seam-walkers { --p: 15px; }
 .radar .country-fill { fill: var(--accent); fill-opacity: 0.05; fill-rule: evenodd; stroke: none; pointer-events: none; }
 /* 全螢幕塗的海（v1.757）：跟河、湖同一個淡藍；一大塊挖掉陸地（evenodd） */
 .radar .sea path, .radar .earth-sea { fill: var(--water-fill); fill-rule: evenodd; stroke: none; pointer-events: none; }
+/* 政黨雷達（v1.862）：各區塗得票最高的政黨，越深得票率越高；區界是雷達底色的細線，點開的那一區外框加粗 */
+.radar .election path { fill-rule: evenodd; stroke: var(--radar-face-1); stroke-width: 0.8; stroke-linejoin: round; vector-effect: non-scaling-stroke; pointer-events: none; }
+.radar .election path.pick { fill: none; stroke: var(--text); stroke-width: 2.6; }
 /* 縣市交界：比海岸線淡一點 */
 .radar .region-outline.county-line { stroke-width: 1; stroke-opacity: 0.35; }
 /* 放大到 2 km 內畫的街道：淡淡的細線，大路粗一點，不搶光點 */
@@ -2923,3 +2926,29 @@ path.map-canal-flow { --p: 14px; }
 .kraft-sign.off { opacity: 0.35; text-decoration: line-through; }
 .kraft-note p.kraft-signed, .letter-paper .letter-signed { margin: 2px 0 0; text-align: right; background: none; font-family: var(--hand); font-size: 18px; line-height: 30px; font-weight: 600; }
 .tc-owner { white-space: nowrap; }
+
+/* 政黨雷達（v1.862）：不收回報、沒有搜尋和篩選；右上角圖例、點一區看票數；清單列 22 個縣市的當選人 */
+[data-module="party"] .kw-bar, [data-module="party"] #search-tags, [data-module="party"] #filter-row, [data-module="party"] .refresh-box { display: none !important; }
+.election-panel .election-info { display: flex; flex-direction: column; gap: 4px; width: max-content; max-width: min(270px, calc(100vw - 110px)); padding: 8px 11px; background: var(--card); color: var(--text); border: 1.5px solid #15171c; border-radius: 10px; box-shadow: 2px 2px 0 #15171c; font-size: 12.5px; line-height: 1.45; }
+.election-panel .election-info > b { font-size: 14px; }
+.election-panel .election-info small { font-size: 11px; color: var(--muted); }
+.election-panel .el-legend { display: flex; align-items: center; gap: 6px; }
+.election-panel .el-legend i { width: 44px; height: 10px; border-radius: 3px; flex: none; }
+.election-panel .el-cands { list-style: none; margin: 2px 0; padding: 0; display: flex; flex-direction: column; gap: 3px; }
+.election-panel .el-cands li { display: flex; align-items: center; gap: 6px; }
+.election-panel .el-cands i, .election-county i { width: 10px; height: 10px; border-radius: 50%; flex: none; }
+.election-panel .el-name { flex: 1; min-width: 0; }
+.election-panel .el-name small, .election-panel .el-num small { margin-left: 5px; }
+.election-panel .el-num { font-variant-numeric: tabular-nums; text-align: right; white-space: nowrap; }
+.election-panel .el-winner { padding-top: 3px; border-top: 1px dashed var(--muted); }
+.election-county { display: flex; align-items: center; gap: 10px; width: 100%; padding: 9px 4px; background: none; border: 0; border-bottom: 1px solid color-mix(in srgb, var(--muted) 30%, transparent); color: var(--text); font: inherit; text-align: left; cursor: pointer; }
+.election-county i { width: 14px; height: 14px; }
+.election-county > span { display: flex; flex-direction: column; }
+.election-county > span:first-of-type { flex: 1; }
+.election-county small { color: var(--muted); font-size: 12px; }
+.election-county .el-who { align-items: flex-end; text-align: right; }
+@media (max-width: 600px) {
+  .election-panel .election-info { padding: 6px 9px; font-size: 12px; gap: 3px; max-width: min(240px, calc(100vw - 100px)); }
+  .election-panel .election-info > b { font-size: 13px; }
+  .election-panel .el-cands { gap: 1px; }
+}
