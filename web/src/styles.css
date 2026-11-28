@@ -2928,7 +2928,14 @@ path.map-canal-flow { --p: 14px; }
 .tc-owner { white-space: nowrap; }
 
 /* 政黨雷達（v1.862）：不收回報、沒有搜尋和篩選；右上角圖例、點一區看票數；清單列 22 個縣市的當選人 */
-[data-module="party"] .kw-bar, [data-module="party"] #search-tags, [data-module="party"] #filter-row, [data-module="party"] .refresh-box { display: none !important; }
+[data-module="party"] .kw-bar, [data-module="party"] #search-tags, [data-module="party"] #filter-row, [data-module="party"] .refresh-box, [data-module="party"] #time-toggle, [data-module="party"] #time-chips { display: none !important; }
+/* 年份卷軸（v1.863）：左上角直的，由下往上 2018 → 2026，年份對齊卷軸的三格，點年份也可以換 */
+.election-years { display: flex; align-items: stretch; gap: 4px; padding: 8px 8px 8px 10px; background: var(--card); color: var(--text); border: 1.5px solid #15171c; border-radius: 10px; box-shadow: 2px 2px 0 #15171c; }
+.election-years[hidden] { display: none; }
+.election-years .ey-labels { display: flex; flex-direction: column; justify-content: space-between; height: 132px; }
+.election-years .ey-labels button { height: 18px; padding: 0; background: none; border: 0; color: var(--muted); font: inherit; font-size: 12.5px; font-variant-numeric: tabular-nums; line-height: 18px; cursor: pointer; }
+.election-years .ey-labels button.on { color: var(--text); font-weight: 700; }
+.election-years input[type="range"] { writing-mode: vertical-lr; direction: rtl; width: 24px; height: 132px; margin: 0; accent-color: var(--text); cursor: pointer; touch-action: none; }
 .election-panel .election-info { display: flex; flex-direction: column; gap: 4px; width: max-content; max-width: min(270px, calc(100vw - 110px)); padding: 8px 11px; background: var(--card); color: var(--text); border: 1.5px solid #15171c; border-radius: 10px; box-shadow: 2px 2px 0 #15171c; font-size: 12.5px; line-height: 1.45; }
 .election-panel .election-info > b { font-size: 14px; }
 .election-panel .election-info small { font-size: 11px; color: var(--muted); }

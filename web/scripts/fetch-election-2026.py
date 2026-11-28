@@ -1,6 +1,6 @@
 """
 抓中選會 2026 縣市長選舉（含直轄市長）各縣市、各鄉鎮市區的候選人得票數（vote.cec.gov.tw/2026-local 的開票頁），存成 JSON，
-給 gen-election-2026.py 產生 web/src/election-2026.ts。
+給 gen-election.py 產生 web/src/election-2026.ts。
 用法：python3 fetch-election-2026.py 輸出目錄（每秒最多一個請求；抓過的頁面存在 輸出目錄/html/，重跑只抓沒有的）
 """
 import html, json, os, re, sys, time, urllib.request

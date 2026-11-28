@@ -9,3 +9,6 @@ dist/
 
 # 汪星 3D 資料的圖磚快取（web/scripts/gen-woof-city.mjs）
 web/scripts/.tiles/
+
+# 政黨雷達的中選會開票資料快取（web/scripts/fetch-election.py）
+web/scripts/.election/
